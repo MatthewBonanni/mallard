@@ -1,19 +1,29 @@
 cmake_minimum_required(VERSION 3.12)
 
-add_library(MathFunctions
-    math/add.cpp
-)
+add_subdirectory(common)
+add_subdirectory(mesh)
 
-add_executable(FVCode
+add_executable(Mallard
     main.cpp
+    solver.cpp
 )
 
-target_include_directories(FVCode PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(FVCode MathFunctions)
-
-set_target_properties(FVCode PROPERTIES
+set_target_properties(Mallard PROPERTIES
     CXX_STANDARD 11
     CXX_STANDARD_REQUIRED YES
 )
 
-target_compile_options(FVCode PRIVATE -Wall -Wextra -pedantic)
+include(FetchContent)
+FetchContent_Declare(
+    tomlplusplus
+    GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git
+    GIT_TAG v3.4.0
+)
+FetchContent_MakeAvailable(tomlplusplus)
+
+target_include_directories(Mallard PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(Mallard tomlplusplus::tomlplusplus)
+target_link_libraries(Mallard MeshLib)
+target_link_libraries(Mallard CommonLib)
+
+target_compile_options(Mallard PRIVATE -Wall -Wextra -pedantic)

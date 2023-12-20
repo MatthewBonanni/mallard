@@ -1,21 +1,19 @@
 cmake_minimum_required(VERSION 3.12)
 
-add_executable(FVCodeTests
+add_executable(MallardTests
     test_main.cpp
-    add_test.cpp
 )
 
-target_include_directories(FVCodeTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(MallardTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-set_target_properties(FVCodeTests PROPERTIES
+set_target_properties(MallardTests PROPERTIES
     CXX_STANDARD 11
     CXX_STANDARD_REQUIRED YES
 )
 
 find_package(GTest REQUIRED)
-target_link_libraries(FVCodeTests PRIVATE GTest::GTest GTest::Main)
+target_link_libraries(MallardTests PRIVATE GTest::GTest GTest::Main)
 
-add_dependencies(FVCodeTests FVCode)
-target_link_libraries(FVCodeTests PRIVATE FVCodeLibrary)
+add_dependencies(MallardTests Mallard)
 
-target_compile_options(FVCodeTests PRIVATE -Wall -Wextra -pedantic)
+target_compile_options(MallardTests PRIVATE -Wall -Wextra -pedantic)

@@ -1,0 +1,44 @@
+/**
+ * @file solver.h
+ * @author Matthew Bonanni (mbonanni001@gmail.com)
+ * @brief Solver class declaration. 
+ * @version 0.1
+ * @date 2023-12-17
+ * 
+ * @copyright Copyright (c) 2023
+ * 
+ */
+
+#ifndef SOLVER_H
+#define SOLVER_H
+
+#include <string>
+
+#include <toml++/toml.h>
+
+class Solver {
+    public:
+        /**
+         * @brief Construct a new Solver object
+         * 
+         */
+        Solver();
+
+        /**
+         * @brief Destroy the Solver object
+         * 
+         */
+        ~Solver();
+
+        /**
+         * @brief Initialize the solver.
+         * @param inputFileName Name of the input file.
+         * @return Exit status.
+         */
+        int init(const std::string& inputFileName);
+    protected:
+    private:
+        toml::table input;
+};
+
+#endif // SOLVER_H
