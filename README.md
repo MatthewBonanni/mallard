@@ -1,2 +1,2 @@
-# FV-Solver
-Finite volume solver
+# Mallard
+Mallard is a finite volume solver.

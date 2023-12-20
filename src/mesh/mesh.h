@@ -12,7 +12,6 @@
 #ifndef MESH_H
 #define MESH_H
 
-#include <array>
 #include <vector>
 
 class Mesh {
@@ -123,6 +122,11 @@ class Mesh {
         void compute_cell_centroids();
 
         /**
+         * @brief Compute face centroids.
+         */
+        void compute_face_centroids();
+
+        /**
          * @brief Compute cell volumes.
          */
         void compute_cell_volumes();
@@ -151,6 +155,7 @@ class Mesh {
         int nx, ny;
         std::vector<std::array<double, 2>> m_node_coords;
         std::vector<std::array<double, 2>> m_cell_coords;
+        std::vector<std::array<double, 2>> m_face_coords;
         std::vector<double> m_cell_volume;
         std::vector<double> m_face_area;
         std::vector<std::array<double, 2>> m_face_normals;

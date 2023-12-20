@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.12)
 
 add_subdirectory(common)
 add_subdirectory(mesh)
+add_subdirectory(boundary)
 
 add_executable(Mallard
     main.cpp
@@ -23,7 +24,8 @@ FetchContent_MakeAvailable(tomlplusplus)
 
 target_include_directories(Mallard PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(Mallard tomlplusplus::tomlplusplus)
-target_link_libraries(Mallard MeshLib)
 target_link_libraries(Mallard CommonLib)
+target_link_libraries(Mallard MeshLib)
+target_link_libraries(Mallard BoundaryLib)
 
 target_compile_options(Mallard PRIVATE -Wall -Wextra -pedantic)

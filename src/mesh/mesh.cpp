@@ -84,6 +84,15 @@ void Mesh::compute_cell_centroids() {
     }
 }
 
+void Mesh::compute_face_centroids() {
+    for (int i_face = 0; i_face < n_faces(); ++i_face) {
+        m_face_coords[i_face][0] = 0.5 * (m_node_coords[m_nodes_of_face[i_face][0]][0] +
+                                          m_node_coords[m_nodes_of_face[i_face][1]][0]);
+        m_face_coords[i_face][1] = 0.5 * (m_node_coords[m_nodes_of_face[i_face][0]][1] +
+                                          m_node_coords[m_nodes_of_face[i_face][1]][1]);
+    }
+}
+
 void Mesh::compute_cell_volumes() {
     for (int i = 0; i < n_cells(); ++i) {
         int i_node0 = m_nodes_of_cell[i][0];
@@ -114,19 +123,31 @@ void Mesh::compute_face_areas() {
 
 void Mesh::compute_face_normals() {
     for (int i_face = 0; i_face < n_faces(); ++i_face) {
+        // Compute unit normal vector
         int i_node0 = m_nodes_of_face[i_face][0];
         int i_node1 = m_nodes_of_face[i_face][1];
         double x0 = m_node_coords[i_node0][0];
         double y0 = m_node_coords[i_node0][1];
         double x1 = m_node_coords[i_node1][0];
         double y1 = m_node_coords[i_node1][1];
-
-
         double dx = x1 - x0;
         double dy = y1 - y0;
         double mag = sqrt(dx * dx + dy * dy);
         m_face_normals[i_face][0] = dy / mag;
         m_face_normals[i_face][1] = -dx / mag;
+
+        // Flip normal if it points into the cell
+        int i_cell0 = m_cells_of_face[i_face][0];
+        double x_cell = m_cell_coords[i_cell0][0];
+        double y_cell = m_cell_coords[i_cell0][1];
+        double x_face = m_face_coords[i_face][0];
+        double y_face = m_face_coords[i_face][1];
+        double dot = (x_cell - x_face) * m_face_normals[i_face][0] +
+                     (y_cell - y_face) * m_face_normals[i_face][1];
+        if (dot < 0.0) {
+            m_face_normals[i_face][0] *= -1.0;
+            m_face_normals[i_face][1] *= -1.0;
+        }
     }
 }
 
