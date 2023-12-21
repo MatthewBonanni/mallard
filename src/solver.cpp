@@ -5,7 +5,7 @@
  * @version 0.1
  * @date 2023-12-17
  * 
- * @copyright Copyright (c) 2023
+ * @copyright Copyright (c) 2023 Matthew Bonanni
  * 
  */
 
@@ -14,6 +14,10 @@
 #include <iostream>
 
 #include "mesh/mesh.h"
+#include "boundary/boundary.h"
+#include "boundary/boundary_upt.h"
+#include "boundary/boundary_wall_adiabatic.h"
+#include "boundary/boundary_p_out.h"
 
 Solver::Solver() {
     // Empty
@@ -42,12 +46,26 @@ int Solver::init(const std::string& inputFileName) {
         double Lx = input["mesh"]["Lx"].value_or(1.0);
         double Ly = input["mesh"]["Ly"].value_or(1.0);
         mesh.init_wedge(Nx, Ny, Lx, Ly);
+
+        BoundaryUPT boundary_in;
+        boundary_in.set_zone(mesh.get_face_zone("left"));
+        boundaries.push_back(boundary_in);
+
+        BoundaryWallAdiabatic boundary_wall_top;
+        boundary_wall_top.set_zone(mesh.get_face_zone("top"));
+        boundaries.push_back(boundary_wall_top);
+
+        BoundaryWallAdiabatic boundary_wall_bottom;
+        boundary_wall_bottom.set_zone(mesh.get_face_zone("bottom"));
+        boundaries.push_back(boundary_wall_bottom);
+
+        BoundaryPOut boundary_out;
+        boundary_out.set_zone(mesh.get_face_zone("right"));
+        boundaries.push_back(boundary_out);
     } else {
         // Should never get here due to the enum class.
         throw std::runtime_error("Unknown mesh kind.");
     }
-
-    mesh.compute_face_normals();
 
     std::cout << "n_cells = " << mesh.n_cells() << std::endl;
 

@@ -5,7 +5,7 @@
  * @version 0.1
  * @date 2023-12-20
  * 
- * @copyright Copyright (c) 2023
+ * @copyright Copyright (c) 2023 Matthew Bonanni
  * 
  */
 
@@ -39,19 +39,18 @@ class Zone {
         ~Zone();
 
         /**
-         * @brief Get the index of the zone.
-         * @return Index of the zone.
-         */
-        int get_index() const;
-
-        /**
          * @brief Get the name of the zone.
          * @return Name of the zone.
          */
         std::string get_name() const;
+
+        /**
+         * @brief Set the name of the zone.
+         * @param name Name of the zone.
+         */
+        void set_name(const std::string& name);
     protected:
     private:
-        int index;
         std::string name;
 };
 
@@ -68,20 +67,26 @@ class FaceZone : public Zone {
         ~FaceZone();
 
         /**
-         * @brief Get the faces of the zone.
+         * @brief Get a pointer to the vector of faces of the zone.
          * @return Faces of the zone.
          */
-        std::vector<int> faces() const;
+        std::vector<int> * faces();
 
         /**
          * @brief Get the kind of the zone.
          * @return Kind of the zone.
          */
-        FaceZoneKind kind() const;
+        FaceZoneKind get_kind() const;
+
+        /**
+         * @brief Set the kind of the zone.
+         * @param kind Kind of the zone.
+         */
+        void set_kind(FaceZoneKind kind);
     protected:
     private:
         std::vector<int> m_faces;
-        FaceZoneKind m_kind;
+        FaceZoneKind kind;
 };
 
 class CellZone : public Zone {

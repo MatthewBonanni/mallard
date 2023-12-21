@@ -5,7 +5,7 @@
  * @version 0.1
  * @date 2023-12-17
  * 
- * @copyright Copyright (c) 2023
+ * @copyright Copyright (c) 2023 Matthew Bonanni
  * 
  */
 
@@ -72,6 +72,24 @@ class Mesh {
          * @return Number of faces.
          */
         int n_faces() const;
+
+        /**
+         * @brief Get the number of face zones.
+         * @return Number of face zones.
+         */
+        int n_face_zones() const;
+
+        /**
+         * @brief Get the face zones.
+         * @return Pointer to the vector of face zones.
+         */
+        std::vector<FaceZone> * face_zones();
+
+        /**
+         * @brief Get face zone by name.
+         * @return Pointer to the face zone.
+         */
+        FaceZone * get_face_zone(const std::string& name);
 
         /**
          * @brief Get the coordinates of a cell.

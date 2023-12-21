@@ -5,7 +5,7 @@
  * @version 0.1
  * @date 2023-12-17
  * 
- * @copyright Copyright (c) 2023
+ * @copyright Copyright (c) 2023 Matthew Bonanni
  * 
  */
 
@@ -15,6 +15,8 @@
 #include <string>
 
 #include <toml++/toml.h>
+
+#include "boundary/boundary.h"
 
 class Solver {
     public:
@@ -44,6 +46,7 @@ class Solver {
     protected:
     private:
         toml::table input;
+        std::vector<Boundary> boundaries;
 };
 
 #endif // SOLVER_H

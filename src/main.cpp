@@ -6,7 +6,7 @@
  * 
  * @mainpage Mallard
  * 
- * @copyright Copyright (c) 2023
+ * @copyright Copyright (c) 2023 Matthew Bonanni
  */
 
 #include <iostream>

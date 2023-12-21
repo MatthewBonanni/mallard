@@ -5,7 +5,7 @@
  * @version 0.1
  * @date 2023-12-17
  * 
- * @copyright Copyright (c) 2023
+ * @copyright Copyright (c) 2023 Matthew Bonanni
  * 
  */
 
@@ -14,6 +14,7 @@
 #include <cmath>
 
 #include "common/common.h"
+#include "boundary/boundary.h"
 
 Mesh::Mesh(MeshKind kind) {
     m_kind = kind;
@@ -33,6 +34,23 @@ int Mesh::n_nodes() const {
 
 int Mesh::n_faces() const {
     return 2 * n_cells() + nx + ny;
+}
+
+int Mesh::n_face_zones() const {
+    return m_face_zones.size();
+}
+
+std::vector<FaceZone> * Mesh::face_zones() {
+    return &m_face_zones;
+}
+
+FaceZone * Mesh::get_face_zone(const std::string& name) {
+    for (int i = 0; i < n_face_zones(); ++i) {
+        if (m_face_zones[i].get_name() == name) {
+            return &(m_face_zones[i]);
+        }
+    }
+    return nullptr;
 }
 
 std::array<double, 2> Mesh::cell_coords(int i_cell) const {
@@ -160,6 +178,7 @@ void Mesh::init_wedge(int nx, int ny, double Lx, double Ly) {
 
     m_node_coords.resize(n_nodes());
     m_cell_coords.resize(n_cells());
+    m_face_coords.resize(n_faces());
     m_nodes_of_cell.resize(n_cells());
     m_faces_of_cell.resize(n_cells());
     m_cell_volume.resize(n_cells());
@@ -225,15 +244,52 @@ void Mesh::init_wedge(int nx, int ny, double Lx, double Ly) {
         m_nodes_of_face[m_faces_of_cell[i_cell][3]][1] = m_nodes_of_cell[i_cell][3]; // Bottom face - bottom right node
     }
 
-    // Handle boundary faces - tag them with -1
-    for (int i = 0; i < nx + 1; ++i) {
-        int i_face = 2 * ny + 1 + i;
-        m_cells_of_face[i_face][1] = -1;
+    // Handle boundary faces
+    FaceZone zone_r = FaceZone();
+    FaceZone zone_t = FaceZone();
+    FaceZone zone_l = FaceZone();
+    FaceZone zone_b = FaceZone();
+    zone_r.set_name("right");
+    zone_t.set_name("top");
+    zone_l.set_name("left");
+    zone_b.set_name("bottom");
+    zone_r.set_kind(FaceZoneKind::BOUNDARY);
+    zone_t.set_kind(FaceZoneKind::BOUNDARY);
+    zone_l.set_kind(FaceZoneKind::BOUNDARY);
+    zone_b.set_kind(FaceZoneKind::BOUNDARY);
+    for (int i_cell = 0; i_cell < n_cells(); i_cell++) {
+        int ic = i_cell / ny;
+        int jc = i_cell % ny;
+
+        if (ic == nx - 1) {
+            m_cells_of_face[m_faces_of_cell[i_cell][0]][1] = -1;
+            zone_r.faces()->push_back(m_faces_of_cell[i_cell][0]);
+        }
+
+        if (jc == ny - 1) {
+            m_cells_of_face[m_faces_of_cell[i_cell][1]][1] = -1;
+            zone_t.faces()->push_back(m_faces_of_cell[i_cell][1]);
+        }
+
+        if (ic == 0) {
+            m_cells_of_face[m_faces_of_cell[i_cell][2]][1] = -1;
+            zone_l.faces()->push_back(m_faces_of_cell[i_cell][2]);
+        }
+
+        if (jc == 0) {
+            m_cells_of_face[m_faces_of_cell[i_cell][3]][1] = -1;
+            zone_b.faces()->push_back(m_faces_of_cell[i_cell][3]);
+        }
     }
+    m_face_zones.push_back(zone_r);
+    m_face_zones.push_back(zone_t);
+    m_face_zones.push_back(zone_l);
+    m_face_zones.push_back(zone_b);
 
     // Compute derived quantities
     compute_face_areas();
     compute_cell_volumes();
     compute_cell_centroids();
+    compute_face_centroids();
     compute_face_normals();
 }

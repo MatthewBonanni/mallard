@@ -5,7 +5,7 @@
  * @version 0.1
  * @date 2023-12-20
  * 
- * @copyright Copyright (c) 2023
+ * @copyright Copyright (c) 2023 Matthew Bonanni
  * 
  */
 
@@ -25,9 +25,15 @@ class Boundary {
          * @brief Destroy the Boundary object
          */
         ~Boundary();
+
+        /**
+         * @brief Set the zone.
+         * @param zone Pointer to the zone.
+         */
+        void set_zone(FaceZone * zone);
     protected:
     private:
-        FaceZone zone;
+        FaceZone * zone;
 };
 
 #endif // BOUNDARY_H

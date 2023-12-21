@@ -5,7 +5,7 @@
  * @version 0.1
  * @date 2023-12-19
  * 
- * @copyright Copyright (c) 2023
+ * @copyright Copyright (c) 2023 Matthew Bonanni
  * 
  */
 
