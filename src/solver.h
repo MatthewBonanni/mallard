@@ -36,6 +36,11 @@ class Solver {
          * @return Exit status.
          */
         int init(const std::string& inputFileName);
+
+        /**
+         * @brief Print the logo.
+         */
+        void print_logo() const;
     protected:
     private:
         toml::table input;

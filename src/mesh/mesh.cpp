@@ -15,8 +15,8 @@
 
 #include "common/common.h"
 
-Mesh::Mesh() {
-    // Empty
+Mesh::Mesh(MeshKind kind) {
+    m_kind = kind;
 }
 
 Mesh::~Mesh() {
@@ -123,7 +123,7 @@ void Mesh::compute_face_areas() {
 
 void Mesh::compute_face_normals() {
     for (int i_face = 0; i_face < n_faces(); ++i_face) {
-        // Compute unit normal vector
+        // Compute normal with area magnitude
         int i_node0 = m_nodes_of_face[i_face][0];
         int i_node1 = m_nodes_of_face[i_face][1];
         double x0 = m_node_coords[i_node0][0];
@@ -133,10 +133,10 @@ void Mesh::compute_face_normals() {
         double dx = x1 - x0;
         double dy = y1 - y0;
         double mag = sqrt(dx * dx + dy * dy);
-        m_face_normals[i_face][0] = dy / mag;
-        m_face_normals[i_face][1] = -dx / mag;
+        m_face_normals[i_face][0] =  dy / mag * face_area(i_face);
+        m_face_normals[i_face][1] = -dx / mag * face_area(i_face);
 
-        // Flip normal if it points into the cell
+        // Flip normal if it points into its left cell
         int i_cell0 = m_cells_of_face[i_face][0];
         double x_cell = m_cell_coords[i_cell0][0];
         double y_cell = m_cell_coords[i_cell0][1];
@@ -223,6 +223,12 @@ void Mesh::init_wedge(int nx, int ny, double Lx, double Ly) {
         m_nodes_of_face[m_faces_of_cell[i_cell][2]][1] = m_nodes_of_cell[i_cell][2]; // Left face - bottom left node
         m_nodes_of_face[m_faces_of_cell[i_cell][3]][0] = m_nodes_of_cell[i_cell][2]; // Bottom face - bottom left node
         m_nodes_of_face[m_faces_of_cell[i_cell][3]][1] = m_nodes_of_cell[i_cell][3]; // Bottom face - bottom right node
+    }
+
+    // Handle boundary faces - tag them with -1
+    for (int i = 0; i < nx + 1; ++i) {
+        int i_face = 2 * ny + 1 + i;
+        m_cells_of_face[i_face][1] = -1;
     }
 
     // Compute derived quantities

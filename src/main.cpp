@@ -39,12 +39,13 @@ int main(int argc, char* argv[]) {
         } else {
             std::cerr << "Error: Unknown flag " << argv[i] << std::endl;
         }
-    }
+    }                                      
 
     int status = 0;
 
     // Create solver object
     Solver solver;
+    solver.print_logo();
     status = solver.init(inputFileName);
 
     return status;

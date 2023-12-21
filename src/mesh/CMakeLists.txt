@@ -2,6 +2,7 @@
 set(LIB_NAME MeshLib)
 set(LIB_SRCS
     mesh.cpp
+    zone.cpp
 )
 
 # Add the library

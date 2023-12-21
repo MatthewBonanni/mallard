@@ -14,17 +14,46 @@
 
 #include <vector>
 
+#include "zone.h"
+
+enum class MeshKind {
+    UNKNOWN = -1,
+    FILE = 1,
+    CART = 2,
+    WEDGE = 3
+};
+
+static const std::unordered_map<std::string, MeshKind> MeshKindTypes = {
+    {"unknown", MeshKind::UNKNOWN},
+    {"file", MeshKind::FILE},
+    {"cart", MeshKind::CART},
+    {"wedge", MeshKind::WEDGE}
+};
+
+static const std::unordered_map<MeshKind, std::string> MeshKindNames = {
+    {MeshKind::UNKNOWN, "unknown"},
+    {MeshKind::FILE, "file"},
+    {MeshKind::CART, "cart"},
+    {MeshKind::WEDGE, "wedge"}
+};
+
+
 class Mesh {
     public:
         /**
          * @brief Construct a new Mesh object
          */
-        Mesh();
+        Mesh(MeshKind kind = MeshKind::UNKNOWN);
 
         /**
          * @brief Destroy the Mesh object
          */
         ~Mesh();
+
+        /**
+         * @brief Get the kind of mesh.
+         */
+        MeshKind kind() const;
 
         /**
          * @brief Get the number of cells.
@@ -153,6 +182,7 @@ class Mesh {
     protected:
     private:
         int nx, ny;
+        MeshKind m_kind;
         std::vector<std::array<double, 2>> m_node_coords;
         std::vector<std::array<double, 2>> m_cell_coords;
         std::vector<std::array<double, 2>> m_face_coords;
@@ -163,6 +193,8 @@ class Mesh {
         std::vector<std::array<int, 4>> m_faces_of_cell;
         std::vector<std::array<int, 2>> m_cells_of_face;
         std::vector<std::array<int, 2>> m_nodes_of_face;
+        std::vector<CellZone> m_cell_zones;
+        std::vector<FaceZone> m_face_zones;
 };
 
 #endif // MESH_H
