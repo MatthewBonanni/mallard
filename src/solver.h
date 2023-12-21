@@ -16,6 +16,7 @@
 
 #include <toml++/toml.h>
 
+#include "mesh/mesh.h"
 #include "boundary/boundary.h"
 
 class Solver {
@@ -40,12 +41,18 @@ class Solver {
         int init(const std::string& inputFileName);
 
         /**
+         * @brief Initialize the boundaries.
+         */
+        void init_boundaries();
+
+        /**
          * @brief Print the logo.
          */
         void print_logo() const;
     protected:
     private:
         toml::table input;
+        Mesh mesh;
         std::vector<Boundary> boundaries;
 };
 

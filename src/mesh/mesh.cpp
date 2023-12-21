@@ -16,12 +16,20 @@
 #include "common/common.h"
 #include "boundary/boundary.h"
 
-Mesh::Mesh(MeshKind kind) {
-    m_kind = kind;
+Mesh::Mesh(MeshType type) {
+    this->type = type;
 }
 
 Mesh::~Mesh() {
     // Empty
+}
+
+MeshType Mesh::get_type() const {
+    return type;
+}
+
+void Mesh::set_type(MeshType type) {
+    this->type = type;
 }
 
 int Mesh::n_cells() const {
@@ -253,10 +261,10 @@ void Mesh::init_wedge(int nx, int ny, double Lx, double Ly) {
     zone_t.set_name("top");
     zone_l.set_name("left");
     zone_b.set_name("bottom");
-    zone_r.set_kind(FaceZoneKind::BOUNDARY);
-    zone_t.set_kind(FaceZoneKind::BOUNDARY);
-    zone_l.set_kind(FaceZoneKind::BOUNDARY);
-    zone_b.set_kind(FaceZoneKind::BOUNDARY);
+    zone_r.set_type(FaceZoneType::BOUNDARY);
+    zone_t.set_type(FaceZoneType::BOUNDARY);
+    zone_l.set_type(FaceZoneType::BOUNDARY);
+    zone_b.set_type(FaceZoneType::BOUNDARY);
     for (int i_cell = 0; i_cell < n_cells(); i_cell++) {
         int ic = i_cell / ny;
         int jc = i_cell % ny;

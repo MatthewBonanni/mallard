@@ -39,12 +39,12 @@ std::vector<int> * FaceZone::faces() {
     return &m_faces;
 }
 
-FaceZoneKind FaceZone::get_kind() const {
-    return kind;
+FaceZoneType FaceZone::get_type() const {
+    return type;
 }
 
-void FaceZone::set_kind(FaceZoneKind kind) {
-    this->kind = kind;
+void FaceZone::set_type(FaceZoneType type) {
+    this->type = type;
 }
 
 CellZone::CellZone() {
@@ -59,6 +59,6 @@ std::vector<int> CellZone::cells() const {
     return m_cells;
 }
 
-CellZoneKind CellZone::kind() const {
-    return m_kind;
+CellZoneType CellZone::type() const {
+    return m_type;
 }

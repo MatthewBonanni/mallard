@@ -16,25 +16,25 @@
 
 #include "zone.h"
 
-enum class MeshKind {
+enum class MeshType {
     UNKNOWN = -1,
     FILE = 1,
     CART = 2,
     WEDGE = 3
 };
 
-static const std::unordered_map<std::string, MeshKind> MeshKindTypes = {
-    {"unknown", MeshKind::UNKNOWN},
-    {"file", MeshKind::FILE},
-    {"cart", MeshKind::CART},
-    {"wedge", MeshKind::WEDGE}
+static const std::unordered_map<std::string, MeshType> MESH_TYPES = {
+    {"unknown", MeshType::UNKNOWN},
+    {"file", MeshType::FILE},
+    {"cart", MeshType::CART},
+    {"wedge", MeshType::WEDGE}
 };
 
-static const std::unordered_map<MeshKind, std::string> MeshKindNames = {
-    {MeshKind::UNKNOWN, "unknown"},
-    {MeshKind::FILE, "file"},
-    {MeshKind::CART, "cart"},
-    {MeshKind::WEDGE, "wedge"}
+static const std::unordered_map<MeshType, std::string> MESH_NAMES = {
+    {MeshType::UNKNOWN, "unknown"},
+    {MeshType::FILE, "file"},
+    {MeshType::CART, "cart"},
+    {MeshType::WEDGE, "wedge"}
 };
 
 
@@ -43,7 +43,7 @@ class Mesh {
         /**
          * @brief Construct a new Mesh object
          */
-        Mesh(MeshKind kind = MeshKind::UNKNOWN);
+        Mesh(MeshType type = MeshType::UNKNOWN);
 
         /**
          * @brief Destroy the Mesh object
@@ -51,9 +51,14 @@ class Mesh {
         ~Mesh();
 
         /**
-         * @brief Get the kind of mesh.
+         * @brief Get the type of mesh.
          */
-        MeshKind kind() const;
+        MeshType get_type() const;
+
+        /**
+         * @brief Set the type of mesh.
+         */
+        void set_type(MeshType type);
 
         /**
          * @brief Get the number of cells.
@@ -200,7 +205,7 @@ class Mesh {
     protected:
     private:
         int nx, ny;
-        MeshKind m_kind;
+        MeshType type;
         std::vector<std::array<double, 2>> m_node_coords;
         std::vector<std::array<double, 2>> m_cell_coords;
         std::vector<std::array<double, 2>> m_face_coords;

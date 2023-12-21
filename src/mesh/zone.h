@@ -15,13 +15,13 @@
 #include <string>
 #include <vector>
 
-enum class FaceZoneKind {
+enum class FaceZoneType {
     UNKNOWN = -1,
     BOUNDARY = 1,
     INTERNAL = 2
 };
 
-enum class CellZoneKind {
+enum class CellZoneType {
     UNKNOWN = -1,
     FLUID = 1
 };
@@ -73,20 +73,20 @@ class FaceZone : public Zone {
         std::vector<int> * faces();
 
         /**
-         * @brief Get the kind of the zone.
-         * @return Kind of the zone.
+         * @brief Get the type of the zone.
+         * @return Type of the zone.
          */
-        FaceZoneKind get_kind() const;
+        FaceZoneType get_type() const;
 
         /**
-         * @brief Set the kind of the zone.
-         * @param kind Kind of the zone.
+         * @brief Set the type of the zone.
+         * @param type Type of the zone.
          */
-        void set_kind(FaceZoneKind kind);
+        void set_type(FaceZoneType type);
     protected:
     private:
         std::vector<int> m_faces;
-        FaceZoneKind kind;
+        FaceZoneType type;
 };
 
 class CellZone : public Zone {
@@ -108,14 +108,14 @@ class CellZone : public Zone {
         std::vector<int> cells() const;
 
         /**
-         * @brief Get the kind of the zone.
-         * @return Kind of the zone.
+         * @brief Get the type of the zone.
+         * @return Type of the zone.
          */
-        CellZoneKind kind() const;
+        CellZoneType type() const;
     protected:
     private:
         std::vector<int> m_cells;
-        CellZoneKind m_kind;
+        CellZoneType m_type;
 };
 
 #endif // ZONES_H
