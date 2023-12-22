@@ -12,6 +12,8 @@
 #ifndef BOUNDARY_H
 #define BOUNDARY_H
 
+#include <toml++/toml.h>
+
 #include "mesh/zone.h"
 
 enum class BoundaryType {
@@ -42,13 +44,19 @@ class Boundary {
         /**
          * @brief Destroy the Boundary object
          */
-        ~Boundary();
+        virtual ~Boundary();
 
         /**
          * @brief Set the zone.
          * @param zone Pointer to the zone.
          */
         void set_zone(FaceZone * zone);
+
+        /**
+         * @brief Initialize the boundary.
+         * @param input Pointer to the TOML input.
+         */
+        virtual void init(const toml::table& input);
     protected:
     private:
         FaceZone * zone;

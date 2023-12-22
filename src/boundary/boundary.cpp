@@ -22,3 +22,7 @@ Boundary::~Boundary() {
 void Boundary::set_zone(FaceZone * zone) {
     this->zone = zone;
 }
+
+void Boundary::init(const toml::table& input) {
+    throw std::runtime_error("Boundary::init() not implemented.");
+}

@@ -11,10 +11,16 @@
 
 #include "boundary_upt.h"
 
+#include <iostream>
+
 BoundaryUPT::BoundaryUPT() {
     // Empty
 }
 
 BoundaryUPT::~BoundaryUPT() {
     // Empty
+}
+
+void BoundaryUPT::init(const toml::table& input) {
+    std::cout << "HERE" << std::endl;
 }

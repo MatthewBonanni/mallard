@@ -13,6 +13,8 @@
 #define SOLVER_H
 
 #include <string>
+#include <vector>
+#include <memory>
 
 #include <toml++/toml.h>
 
@@ -53,7 +55,7 @@ class Solver {
     private:
         toml::table input;
         Mesh mesh;
-        std::vector<Boundary> boundaries;
+        std::vector<std::unique_ptr<Boundary>> boundaries;
 };
 
 #endif // SOLVER_H

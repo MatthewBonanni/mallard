@@ -25,8 +25,17 @@ class BoundaryUPT : public Boundary {
          * @brief Destroy the BoundaryUPT object
          */
         ~BoundaryUPT();
+
+        /**
+         * @brief Initialize the boundary.
+         * @param input Pointer to the TOML input.
+         */
+        void init(const toml::table& input) override;
     protected:
     private:
+        std::array<double, 2> u;
+        double p;
+        double T;
 };
 
 #endif // BOUNDARY_UPT_H

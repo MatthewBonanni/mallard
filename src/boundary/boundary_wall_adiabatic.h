@@ -25,6 +25,12 @@ class BoundaryWallAdiabatic : public Boundary {
          * @brief Destroy the BoundaryWallAdiabatic object
          */
         ~BoundaryWallAdiabatic();
+
+        /**
+         * @brief Initialize the boundary.
+         * @param input Pointer to the TOML input.
+         */
+        void init(const toml::table& input) override;
     protected:
     private:
 };

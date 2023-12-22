@@ -18,3 +18,7 @@ BoundaryWallAdiabatic::BoundaryWallAdiabatic() {
 BoundaryWallAdiabatic::~BoundaryWallAdiabatic() {
     // Empty
 }
+
+void BoundaryWallAdiabatic::init(const toml::table& input) {
+    // Empty
+}

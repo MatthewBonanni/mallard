@@ -91,21 +91,18 @@ void Solver::init_boundaries() {
         }
 
         if (btype == BoundaryType::WALL_ADIABATIC) {
-            BoundaryWallAdiabatic boundary;
-            boundary.set_zone(mesh.get_face_zone(*name));
-            boundaries.push_back(boundary);
+            boundaries.push_back(std::make_unique<BoundaryWallAdiabatic>());
         } else if (btype == BoundaryType::UPT) {
-            BoundaryUPT boundary;
-            boundary.set_zone(mesh.get_face_zone(*name));
-            boundaries.push_back(boundary);
+            boundaries.push_back(std::make_unique<BoundaryUPT>());
         } else if (btype == BoundaryType::P_OUT) {
-            BoundaryPOut boundary;
-            boundary.set_zone(mesh.get_face_zone(*name));
-            boundaries.push_back(boundary);
+            boundaries.push_back(std::make_unique<BoundaryPOut>());
         } else {
             // Should never get here due to the enum class.
             throw std::runtime_error("Unknown boundary type: " + *type + ".");
         }
+
+        boundaries.back()->set_zone(mesh.get_face_zone(*name));
+        boundaries.back()->init(input);
     }
 }
 
