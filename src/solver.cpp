@@ -13,6 +13,7 @@
 
 #include <iostream>
 
+#include "common/common.h"
 #include "mesh/mesh.h"
 #include "boundary/boundary.h"
 #include "boundary/boundary_upt.h"
@@ -28,9 +29,17 @@ Solver::~Solver() {
 }
 
 
-int Solver::init(const std::string& inputFileName) {
-    input = toml::parse_file(inputFileName);
+int Solver::init(const std::string& input_file_name) {
+    print_logo();
+    std::cout << LOG_SEPARATOR << std::endl;
+    std::cout << "Initializing solver..." << std::endl;
+    std::cout << "Parsing input file: " << input_file_name << std::endl;
+    std::cout << LOG_SEPARATOR << std::endl;
+
+    input = toml::parse_file(input_file_name);
     std::cout << input << std::endl;
+
+    std::cout << LOG_SEPARATOR << std::endl;
 
     std::string type_str = input["mesh"]["type"].value_or("file");
     MeshType type;
@@ -65,6 +74,8 @@ int Solver::init(const std::string& inputFileName) {
 }
 
 void Solver::init_boundaries() {
+    std::cout << "Initializing boundaries..." << std::endl;
+
     auto input_boundaries = input["boundaries"].as_array();
     for (const auto& input_boundary : *input_boundaries) {
         toml::table bound = *(input_boundary.as_table());
@@ -102,7 +113,7 @@ void Solver::init_boundaries() {
         }
 
         boundaries.back()->set_zone(mesh.get_face_zone(*name));
-        boundaries.back()->init(input);
+        boundaries.back()->init(bound);
     }
 }
 

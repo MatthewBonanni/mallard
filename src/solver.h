@@ -37,10 +37,10 @@ class Solver {
 
         /**
          * @brief Initialize the solver.
-         * @param inputFileName Name of the input file.
+         * @param input_file_name Name of the input file.
          * @return Exit status.
          */
-        int init(const std::string& inputFileName);
+        int init(const std::string& input_file_name);
 
         /**
          * @brief Initialize the boundaries.

@@ -25,8 +25,20 @@ class BoundaryPOut : public Boundary {
          * @brief Destroy the BoundaryPOut object
          */
         ~BoundaryPOut();
+
+        /**
+         * @brief Print the boundary.
+         */
+        void print() override;
+
+        /**
+         * @brief Initialize the boundary.
+         * @param input Pointer to the TOML input.
+         */
+        void init(const toml::table& input) override;
     protected:
     private:
+        double p;
 };
 
 #endif // BOUNDARY_P_OUT_H

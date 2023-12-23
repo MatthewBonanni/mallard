@@ -11,6 +11,10 @@
 
 #include "boundary.h"
 
+#include <iostream>
+
+#include "common/common.h"
+
 Boundary::Boundary() {
     // Empty
 }
@@ -21,6 +25,12 @@ Boundary::~Boundary() {
 
 void Boundary::set_zone(FaceZone * zone) {
     this->zone = zone;
+}
+
+void Boundary::print() {
+    std::cout << LOG_SEPARATOR << std::endl;
+    std::cout << "Boundary: " << zone->get_name() << std::endl;
+    std::cout << "Type: " << BOUNDARY_NAMES.at(type) << std::endl;
 }
 
 void Boundary::init(const toml::table& input) {

@@ -11,10 +11,36 @@
 
 #include "boundary_p_out.h"
 
+#include <iostream>
+
+#include <toml++/toml.h>
+
+#include "common/common.h"
+
 BoundaryPOut::BoundaryPOut() {
     // Empty
 }
 
 BoundaryPOut::~BoundaryPOut() {
     // Empty
+}
+
+void BoundaryPOut::print() {
+    Boundary::print();
+    std::cout << "> p: " << p << std::endl;
+    std::cout << LOG_SEPARATOR << std::endl;
+}
+
+void BoundaryPOut::init(const toml::table& input) {
+    type = BoundaryType::P_OUT;
+
+    std::optional<double> p_in = input["p"].value<double>();
+
+    if (!p_in.has_value()) {
+        throw std::runtime_error("Missing p for boundary: " + zone->get_name() + ".");
+    }
+
+    p = p_in.value();
+
+    print();
 }

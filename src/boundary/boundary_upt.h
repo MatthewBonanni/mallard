@@ -27,6 +27,11 @@ class BoundaryUPT : public Boundary {
         ~BoundaryUPT();
 
         /**
+         * @brief Print the boundary.
+         */
+        void print() override;
+
+        /**
          * @brief Initialize the boundary.
          * @param input Pointer to the TOML input.
          */

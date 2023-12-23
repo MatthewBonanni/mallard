@@ -45,7 +45,6 @@ int main(int argc, char* argv[]) {
 
     // Create solver object
     Solver solver;
-    solver.print_logo();
     status = solver.init(inputFileName);
 
     return status;

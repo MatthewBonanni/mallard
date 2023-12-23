@@ -53,13 +53,19 @@ class Boundary {
         void set_zone(FaceZone * zone);
 
         /**
+         * @brief Print the boundary.
+         */
+        virtual void print();
+
+        /**
          * @brief Initialize the boundary.
          * @param input Pointer to the TOML input.
          */
         virtual void init(const toml::table& input);
     protected:
-    private:
         FaceZone * zone;
+        BoundaryType type;
+    private:
 };
 
 #endif // BOUNDARY_H

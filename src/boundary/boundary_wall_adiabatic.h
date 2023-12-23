@@ -27,6 +27,11 @@ class BoundaryWallAdiabatic : public Boundary {
         ~BoundaryWallAdiabatic();
 
         /**
+         * @brief Print the boundary.
+         */
+        void print() override;
+
+        /**
          * @brief Initialize the boundary.
          * @param input Pointer to the TOML input.
          */
