@@ -18,7 +18,7 @@
 #include "common/common.h"
 
 BoundaryUPT::BoundaryUPT() {
-    // Empty
+    type = BoundaryType::UPT;
 }
 
 BoundaryUPT::~BoundaryUPT() {
@@ -34,8 +34,6 @@ void BoundaryUPT::print() {
 }
 
 void BoundaryUPT::init(const toml::table& input) {
-    type = BoundaryType::UPT;
-
     auto u_in = input["u"];
     const toml::array* arr = u_in.as_array();
     std::optional<double> p_in = input["p"].value<double>();

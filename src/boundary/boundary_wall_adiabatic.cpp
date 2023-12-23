@@ -16,7 +16,7 @@
 #include "common/common.h"
 
 BoundaryWallAdiabatic::BoundaryWallAdiabatic() {
-    // Empty
+    type = BoundaryType::WALL_ADIABATIC;
 }
 
 BoundaryWallAdiabatic::~BoundaryWallAdiabatic() {
@@ -29,5 +29,5 @@ void BoundaryWallAdiabatic::print() {
 }
 
 void BoundaryWallAdiabatic::init(const toml::table& input) {
-    type = BoundaryType::WALL_ADIABATIC;
+    // Empty
 }

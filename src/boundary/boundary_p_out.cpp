@@ -18,7 +18,7 @@
 #include "common/common.h"
 
 BoundaryPOut::BoundaryPOut() {
-    // Empty
+    type = BoundaryType::P_OUT;
 }
 
 BoundaryPOut::~BoundaryPOut() {
@@ -32,8 +32,6 @@ void BoundaryPOut::print() {
 }
 
 void BoundaryPOut::init(const toml::table& input) {
-    type = BoundaryType::P_OUT;
-
     std::optional<double> p_in = input["p"].value<double>();
 
     if (!p_in.has_value()) {

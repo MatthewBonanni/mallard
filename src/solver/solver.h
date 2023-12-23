@@ -18,8 +18,11 @@
 
 #include <toml++/toml.h>
 
+class Solver;
+
 #include "mesh/mesh.h"
 #include "boundary/boundary.h"
+#include "numerics/time_integrator.h"
 
 class Solver {
     public:
@@ -51,11 +54,19 @@ class Solver {
          * @brief Print the logo.
          */
         void print_logo() const;
+
+        /**
+         * @brief Take a single time step.
+         * @param dt Time step size.
+         */
+        void take_step(const double& dt);
+
     protected:
     private:
         toml::table input;
         Mesh mesh;
         std::vector<std::unique_ptr<Boundary>> boundaries;
+        std::unique_ptr<TimeIntegrator> time_integrator;
 };
 
 #endif // SOLVER_H

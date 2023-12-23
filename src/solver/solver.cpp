@@ -124,3 +124,7 @@ void Solver::print_logo() const {
               << R"( / /  / / /_/ / / / /_/ / /  / /_/ /  )" << std::endl
               << R"(/_/  /_/\__,_/_/_/\__,_/_/   \__,_/   )" << std::endl;
 }
+
+void Solver::take_step(const double& dt) {
+    // Empty
+}

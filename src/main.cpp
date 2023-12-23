@@ -11,7 +11,7 @@
 
 #include <iostream>
 
-#include "solver.h"
+#include "solver/solver.h"
 
 /**
  * @brief Entry point of the program.
