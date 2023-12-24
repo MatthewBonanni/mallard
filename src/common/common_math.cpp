@@ -26,3 +26,37 @@ double triangle_area_3(const std::array<double, 3>& v0,
                        const std::array<double, 3>& v2) {
     throw std::runtime_error("Not implemented.");
 }
+
+void linear_combination(const std::vector<std::vector<std::array<double, 4>> *> & vectors_in,
+                        std::vector<std::array<double, 4>> * const vector_out,
+                        const std::vector<double> & coefficients) {
+    if (vectors_in.size() != coefficients.size()) {
+        throw std::runtime_error("Number of vectors_in must equal number of coefficients.");
+    }
+
+    std::vector<double> _coefficients = coefficients;
+
+    // If the output vector is one of the input vectors, do not zero it out
+    // so that the input vector is not overwritten before it is used.
+    // Instead, set the coefficient of the corresponding input vector
+    // to 0.0 so that it is not added to itself.
+    bool zero_out = true;
+    for (int i = 0; i < vectors_in.size(); ++i) {
+        if (vectors_in[i] == vector_out) {
+            zero_out = false;
+            _coefficients[i] = 0.0;
+            break;
+        }
+    }
+    
+    for (int i = 0; i < vector_out->size(); ++i) {
+        for (int j = 0; j < (*vector_out)[i].size(); ++j) {
+            if (zero_out) {
+                (*vector_out)[i][j] = 0.0;
+            }
+            for (int k = 0; k < vectors_in.size(); ++k) {
+                (*vector_out)[i][j] += _coefficients[k] * (*vectors_in[k])[i][j];
+            }
+        }
+    }
+}

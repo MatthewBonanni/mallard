@@ -37,4 +37,15 @@ double triangle_area_3(const std::array<double, 3>& v0,
                        const std::array<double, 3>& v1,
                        const std::array<double, 3>& v2);
 
+/**
+ * @brief Compute the linear combination of a vector of vectors.
+ * 
+ * @param vectors_in
+ * @param vector_out
+ * @param coefficients
+ */
+void linear_combination(const std::vector<std::vector<std::array<double, 4>> *> & vectors_in,
+                        std::vector<std::array<double, 4>> * const vector_out,
+                        const std::vector<double> & coefficients);
+
 #endif // COMMON_MATH_H

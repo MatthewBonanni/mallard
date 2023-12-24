@@ -61,12 +61,21 @@ class Solver {
          */
         void take_step(const double& dt);
 
+        /**
+         * @brief Calculate the residual.
+         */
+        void calc_residual();
     protected:
     private:
         toml::table input;
         Mesh mesh;
         std::vector<std::unique_ptr<Boundary>> boundaries;
         std::unique_ptr<TimeIntegrator> time_integrator;
+        std::vector<std::array<double, 4>> residual;
+        std::vector<std::array<double, 4>> residual_temp_1;
+        std::vector<std::array<double, 4>> residual_temp_2;
+        std::vector<std::array<double, 4>> residual_temp_3;
+        std::vector<std::array<double, 4>> residual_temp_4;
 };
 
 #endif // SOLVER_H
