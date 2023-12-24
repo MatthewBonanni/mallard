@@ -18,8 +18,6 @@
 
 #include <toml++/toml.h>
 
-class Solver;
-
 #include "mesh/mesh.h"
 #include "boundary/boundary.h"
 #include "numerics/time_integrator.h"

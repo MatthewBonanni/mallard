@@ -12,9 +12,8 @@
 #ifndef TIME_INTEGRATOR_H
 #define TIME_INTEGRATOR_H
 
-class TimeIntegrator;
-
-#include "solver/solver.h"
+#include <array>
+#include <vector>
 
 class TimeIntegrator {
     public:
@@ -101,17 +100,17 @@ class RK4 : public TimeIntegrator {
         std::vector<double> coeffs;
 };
 
-class RK4LowMemory : public TimeIntegrator {
+class LSRK4 : public TimeIntegrator {
     public:
         /**
-         * @brief Construct a new RK4LowMemory object
+         * @brief Construct a new LSRK4 object
          */
-        RK4LowMemory();
+        LSRK4();
 
         /**
-         * @brief Destroy the RK4LowMemory object
+         * @brief Destroy the LSRK4 object
          */
-        ~RK4LowMemory();
+        ~LSRK4();
 
         /**
          * @brief Take a single time step.
@@ -158,17 +157,17 @@ class SSPRK3 : public TimeIntegrator {
         std::vector<double> coeffs;
 };
 
-class SSPRK3LowMemory : public TimeIntegrator {
+class LSSSPRK3 : public TimeIntegrator {
     public:
         /**
-         * @brief Construct a new SSPRK3LowMemory object
+         * @brief Construct a new LSSSPRK3 object
          */
-        SSPRK3LowMemory();
+        LSSSPRK3();
 
         /**
-         * @brief Destroy the SSPRK3LowMemory object
+         * @brief Destroy the LSSSPRK3 object
          */
-        ~SSPRK3LowMemory();
+        ~LSSSPRK3();
 
         /**
          * @brief Take a single time step.
