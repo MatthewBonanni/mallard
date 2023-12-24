@@ -62,6 +62,15 @@ class Boundary {
          * @param input Pointer to the TOML input.
          */
         virtual void init(const toml::table& input);
+
+        /**
+         * @brief Compute and apply the boundary flux.
+         * @param solution Pointer to the solution.
+         * @param rhs Pointer to the right hand side.
+         */
+        virtual void apply(std::vector<std::array<double, 4>> * solution,
+                           std::vector<std::array<double, 4>> * rhs);
+        
     protected:
         FaceZone * zone;
         BoundaryType type;

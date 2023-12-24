@@ -72,6 +72,39 @@ class Solver {
          */
         void calc_rhs(std::vector<std::array<double, 4>> * solution,
                       std::vector<std::array<double, 4>> * rhs);
+        
+        /**
+         * @brief Pre-RHS hook.
+         * @param solution Solution vector.
+         * @param rhs Right hand side vector.
+         */
+        void pre_rhs(std::vector<std::array<double, 4>> * solution,
+                     std::vector<std::array<double, 4>> * rhs);
+        
+        /**
+         * @brief Add the source term contributions to the right hand side.
+         * @param solution Solution vector.
+         * @param rhs Right hand side vector.
+         */
+        void calc_rhs_source(std::vector<std::array<double, 4>> * solution,
+                             std::vector<std::array<double, 4>> * rhs);
+        
+        /**
+         * @brief Add the interior flux contributions to the right hand side.
+         * @param solution Solution vector.
+         * @param rhs Right hand side vector.
+         */
+        void calc_rhs_interior(std::vector<std::array<double, 4>> * solution,
+                               std::vector<std::array<double, 4>> * rhs);
+        
+        /**
+         * @brief Add the boundary flux contributions to the right hand side.
+         * @param solution Solution vector.
+         * @param rhs Right hand side vector.
+         */
+        void calc_rhs_boundaries(std::vector<std::array<double, 4>> * solution,
+                                 std::vector<std::array<double, 4>> * rhs);
+            
     protected:
     private:
         toml::table input;

@@ -168,23 +168,42 @@ void Solver::take_step(const double& dt) {
 
 void Solver::calc_rhs(std::vector<std::array<double, 4>> * solution,
                       std::vector<std::array<double, 4>> * rhs) {
-    // for (int i = 0; i < mesh.get_n_cells(); i++) {
-    //     std::array<double, 4> U = (*solution)[i];
-    //     std::array<double, 4> F = mesh.get_face_zone(i)->get_flux(U);
-    //     std::array<double, 4> G = mesh.get_face_zone(i)->get_flux(U);
-    //     std::array<double, 4> dU = mesh.get_cell_zone(i)->get_dU(U, F, G);
-    //     (*rhs)[i] = dU;
-    // }
+    pre_rhs(solution, rhs);
+    calc_rhs_source(solution, rhs);
+    calc_rhs_interior(solution, rhs);
+    calc_rhs_boundaries(solution, rhs);
+}
 
-    // for (auto& boundary : boundaries) {
-    //     boundary->calc_rhs(solution, rhs);
-    // }
+void Solver::pre_rhs(std::vector<std::array<double, 4>> * solution,
+                     std::vector<std::array<double, 4>> * rhs) {
+    for (int i = 0; i < mesh.n_cells(); i++) {
+        (*rhs)[i][0] = 0.0;
+        (*rhs)[i][1] = 0.0;
+        (*rhs)[i][2] = 0.0;
+        (*rhs)[i][3] = 0.0;
+    }
+}
 
-    // for (int i = 0; i < mesh.get_n_cells(); i++) {
-    //     (*rhs)[i] /= mesh.get_cell_zone(i)->get_volume();
-    // }
+void Solver::calc_rhs_source(std::vector<std::array<double, 4>> * solution,
+                             std::vector<std::array<double, 4>> * rhs) {
+    // TODO - Sources not implemented yet.
+    for (int i = 0; i < mesh.n_cells(); i++) {
+        (*rhs)[i][0] += 0.0;
+        (*rhs)[i][1] += 0.0;
+        (*rhs)[i][2] += 0.0;
+        (*rhs)[i][3] += 0.0;
+    }
+}
 
-    // TODO ^ verify this is correct
+void Solver::calc_rhs_interior(std::vector<std::array<double, 4>> * solution,
+                               std::vector<std::array<double, 4>> * rhs) {
+    // TODO - Interior fluxes not implemented yet.
+    throw std::runtime_error("Interior fluxes not implemented yet.");
+}
 
-    throw std::runtime_error("Solver::calc_rhs not implemented.");
+void Solver::calc_rhs_boundaries(std::vector<std::array<double, 4>> * solution,
+                                 std::vector<std::array<double, 4>> * rhs) {
+    for (auto& boundary : boundaries) {
+        boundary->apply(solution, rhs);
+    }
 }
