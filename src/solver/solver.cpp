@@ -12,6 +12,7 @@
 #include "solver.h"
 
 #include <iostream>
+#include <functional>
 
 #include "common/common.h"
 #include "mesh/mesh.h"
@@ -69,6 +70,7 @@ int Solver::init(const std::string& input_file_name) {
     }
 
     init_boundaries();
+    init_numerics();
 
     return 0;
 }
@@ -117,6 +119,38 @@ void Solver::init_boundaries() {
     }
 }
 
+void Solver::init_numerics() {
+    std::cout << "Initializing numerics..." << std::endl;
+
+    std::string time_integrator_str = input["numerics"]["time_integrator"].value_or("LSSSPRK3");
+
+    TimeIntegratorType type;
+    typename std::unordered_map<std::string, TimeIntegratorType>::const_iterator it = TIME_INTEGRATOR_TYPES.find(time_integrator_str);
+    if (it == TIME_INTEGRATOR_TYPES.end()) {
+        throw std::runtime_error("Unknown time integrator type: " + time_integrator_str + ".");
+    } else {
+        type = it->second;
+    }
+
+    if (type == TimeIntegratorType::FE) {
+        time_integrator = std::make_unique<FE>();
+    } else if (type == TimeIntegratorType::RK4) {
+        time_integrator = std::make_unique<RK4>();
+    } else if (type == TimeIntegratorType::SSPRK3) {
+        time_integrator = std::make_unique<SSPRK3>();
+    } else if (type == TimeIntegratorType::LSRK4) {
+        time_integrator = std::make_unique<LSRK4>();
+    } else if (type == TimeIntegratorType::LSSSPRK3) {
+        time_integrator = std::make_unique<LSSSPRK3>();
+    } else {
+        // Should never get here due to the enum class.
+        throw std::runtime_error("Unknown time integrator type: " + time_integrator_str + ".");
+    }
+
+    rhs_func = std::bind(&Solver::calc_rhs, this, std::placeholders::_1, std::placeholders::_2);
+    time_integrator->init();
+}
+
 void Solver::print_logo() const {
     std::cout << R"(    __  ___      ____               __)" << std::endl
               << R"(   /  |/  /___ _/ / /___ __________/ /)" << std::endl
@@ -126,5 +160,31 @@ void Solver::print_logo() const {
 }
 
 void Solver::take_step(const double& dt) {
-    // Empty
+    time_integrator->take_step(dt,
+                               solution_pointers,
+                               rhs_pointers,
+                               &rhs_func);
+}
+
+void Solver::calc_rhs(std::vector<std::array<double, 4>> * solution,
+                      std::vector<std::array<double, 4>> * rhs) {
+    // for (int i = 0; i < mesh.get_n_cells(); i++) {
+    //     std::array<double, 4> U = (*solution)[i];
+    //     std::array<double, 4> F = mesh.get_face_zone(i)->get_flux(U);
+    //     std::array<double, 4> G = mesh.get_face_zone(i)->get_flux(U);
+    //     std::array<double, 4> dU = mesh.get_cell_zone(i)->get_dU(U, F, G);
+    //     (*rhs)[i] = dU;
+    // }
+
+    // for (auto& boundary : boundaries) {
+    //     boundary->calc_rhs(solution, rhs);
+    // }
+
+    // for (int i = 0; i < mesh.get_n_cells(); i++) {
+    //     (*rhs)[i] /= mesh.get_cell_zone(i)->get_volume();
+    // }
+
+    // TODO ^ verify this is correct
+
+    throw std::runtime_error("Solver::calc_rhs not implemented.");
 }

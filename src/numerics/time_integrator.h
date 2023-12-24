@@ -14,6 +14,32 @@
 
 #include <array>
 #include <vector>
+#include <string>
+#include <unordered_map>
+
+enum class TimeIntegratorType {
+    FE,
+    RK4,
+    LSRK4,
+    SSPRK3,
+    LSSSPRK3
+};
+
+static const std::unordered_map<std::string, TimeIntegratorType> TIME_INTEGRATOR_TYPES = {
+    {"FE", TimeIntegratorType::FE},
+    {"RK4", TimeIntegratorType::RK4},
+    {"LSRK4", TimeIntegratorType::LSRK4},
+    {"SSPRK3", TimeIntegratorType::SSPRK3},
+    {"LSSSPRK3", TimeIntegratorType::LSSSPRK3}
+};
+
+static const std::unordered_map<TimeIntegratorType, std::string> TIME_INTEGRATOR_NAMES = {
+    {TimeIntegratorType::FE, "FE"},
+    {TimeIntegratorType::RK4, "RK4"},
+    {TimeIntegratorType::LSRK4, "LSRK4"},
+    {TimeIntegratorType::SSPRK3, "SSPRK3"},
+    {TimeIntegratorType::LSSSPRK3, "LSSSPRK3"}
+};
 
 class TimeIntegrator {
     public:
@@ -28,6 +54,16 @@ class TimeIntegrator {
         virtual ~TimeIntegrator();
 
         /**
+         * @brief Initialize the time integrator.
+         */
+        virtual void init();
+
+        /**
+         * @brief Print the time integrator.
+         */
+        void print() const;
+
+        /**
          * @brief Take a single time step.
          * @param dt Time step size.
          * @param solution_pointers Pointers to solution vectors.
@@ -37,23 +73,24 @@ class TimeIntegrator {
         virtual void take_step(const double& dt,
                                std::vector<std::vector<std::array<double, 4>> *> & solution_pointers,
                                std::vector<std::vector<std::array<double, 4>> *> & rhs_pointers,
-                               void (*calc_rhs)(std::vector<std::array<double, 4>> * solution,
-                                                std::vector<std::array<double, 4>> * rhs));
+                               std::function<void(std::vector<std::array<double, 4>> * solution,
+                                                  std::vector<std::array<double, 4>> * rhs)> * calc_rhs) = 0;
     protected:
+        TimeIntegratorType type;
     private:
 };
 
-class ForwardEuler : public TimeIntegrator {
+class FE : public TimeIntegrator {
     public:
         /**
-         * @brief Construct a new ForwardEuler object
+         * @brief Construct a new FE object
          */
-        ForwardEuler();
+        FE();
 
         /**
-         * @brief Destroy the ForwardEuler object
+         * @brief Destroy the FE object
          */
-        ~ForwardEuler();
+        ~FE();
 
         /**
          * @brief Take a single time step.
@@ -65,8 +102,8 @@ class ForwardEuler : public TimeIntegrator {
         void take_step(const double& dt,
                        std::vector<std::vector<std::array<double, 4>> *> & solution_pointers,
                        std::vector<std::vector<std::array<double, 4>> *> & rhs_pointers,
-                       void (*calc_rhs)(std::vector<std::array<double, 4>> * solution,
-                                        std::vector<std::array<double, 4>> * rhs)) override;
+                       std::function<void(std::vector<std::array<double, 4>> * solution,
+                                          std::vector<std::array<double, 4>> * rhs)> * calc_rhs) override;
     protected:
     private:
 };
@@ -93,8 +130,8 @@ class RK4 : public TimeIntegrator {
         void take_step(const double& dt,
                        std::vector<std::vector<std::array<double, 4>> *> & solution_pointers,
                        std::vector<std::vector<std::array<double, 4>> *> & rhs_pointers,
-                       void (*calc_rhs)(std::vector<std::array<double, 4>> * solution,
-                                        std::vector<std::array<double, 4>> * rhs)) override;
+                       std::function<void(std::vector<std::array<double, 4>> * solution,
+                                          std::vector<std::array<double, 4>> * rhs)> * calc_rhs) override;
     protected:
     private:
         std::vector<double> coeffs;
@@ -122,8 +159,8 @@ class LSRK4 : public TimeIntegrator {
         void take_step(const double& dt,
                        std::vector<std::vector<std::array<double, 4>> *> & solution_pointers,
                        std::vector<std::vector<std::array<double, 4>> *> & rhs_pointers,
-                       void (*calc_rhs)(std::vector<std::array<double, 4>> * solution,
-                                        std::vector<std::array<double, 4>> * rhs)) override;
+                       std::function<void(std::vector<std::array<double, 4>> * solution,
+                                          std::vector<std::array<double, 4>> * rhs)> * calc_rhs) override;
     protected:
     private:
 };
@@ -150,8 +187,8 @@ class SSPRK3 : public TimeIntegrator {
         void take_step(const double& dt,
                        std::vector<std::vector<std::array<double, 4>> *> & solution_pointers,
                        std::vector<std::vector<std::array<double, 4>> *> & rhs_pointers,
-                       void (*calc_rhs)(std::vector<std::array<double, 4>> * solution,
-                                        std::vector<std::array<double, 4>> * rhs)) override;
+                       std::function<void(std::vector<std::array<double, 4>> * solution,
+                                          std::vector<std::array<double, 4>> * rhs)> * calc_rhs) override;
     protected:
     private:
         std::vector<double> coeffs;
@@ -179,8 +216,8 @@ class LSSSPRK3 : public TimeIntegrator {
         void take_step(const double& dt,
                        std::vector<std::vector<std::array<double, 4>> *> & solution_pointers,
                        std::vector<std::vector<std::array<double, 4>> *> & rhs_pointers,
-                       void (*calc_rhs)(std::vector<std::array<double, 4>> * solution,
-                                        std::vector<std::array<double, 4>> * rhs)) override;
+                       std::function<void(std::vector<std::array<double, 4>> * solution,
+                                          std::vector<std::array<double, 4>> * rhs)> * calc_rhs) override;
     protected:
     private:
 };

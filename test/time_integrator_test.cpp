@@ -24,16 +24,17 @@ void calc_rhs_test(std::vector<std::array<double, 4>> * solution,
     (*rhs)[1][3] = 0.0 * (*solution)[1][3] + 7.0;
 }
 
-TEST(TimeIntegratorTest, ForwardEuler) {
-    ForwardEuler forward_euler;
+TEST(TimeIntegratorTest, FE) {
+    FE fe;
     std::vector<std::vector<std::array<double, 4>> *> solution_pointers;
     std::vector<std::vector<std::array<double, 4>> *> rhs_pointers;
     std::vector<std::array<double, 4>> * solution;
-    std::vector<double> coefficients = {1.0, 2.0};
 
     solution_pointers.push_back(new std::vector<std::array<double, 4>>(2));
     rhs_pointers.push_back(new std::vector<std::array<double, 4>>(2));
     solution = solution_pointers[0];
+    std::function<void(std::vector<std::array<double, 4>> * solution,
+                       std::vector<std::array<double, 4>> * rhs)> rhs_func = calc_rhs_test;
 
     (*solution)[0][0] = 0.0;
     (*solution)[0][1] = 1.0;
@@ -44,7 +45,7 @@ TEST(TimeIntegratorTest, ForwardEuler) {
     (*solution)[1][2] = 6.0;
     (*solution)[1][3] = 7.0;
 
-    forward_euler.take_step(0.1, solution_pointers, rhs_pointers, calc_rhs_test);
+    fe.take_step(0.1, solution_pointers, rhs_pointers, &rhs_func);
 
     EXPECT_DOUBLE_EQ((*solution)[0][0], 0.0);
     EXPECT_DOUBLE_EQ((*solution)[0][1], 1.1);
@@ -61,7 +62,6 @@ TEST(TimeIntegratorTest, RK4) {
     std::vector<std::vector<std::array<double, 4>> *> solution_pointers;
     std::vector<std::vector<std::array<double, 4>> *> rhs_pointers;
     std::vector<std::array<double, 4>> * solution;
-    std::vector<double> coefficients = {1.0, 2.0};
 
     for (int i = 0; i < 2; i++) {
         solution_pointers.push_back(new std::vector<std::array<double, 4>>(2));
@@ -70,6 +70,8 @@ TEST(TimeIntegratorTest, RK4) {
         rhs_pointers.push_back(new std::vector<std::array<double, 4>>(2));
     }
     solution = solution_pointers[0];
+    std::function<void(std::vector<std::array<double, 4>> * solution,
+                       std::vector<std::array<double, 4>> * rhs)> rhs_func = calc_rhs_test;
 
     (*solution)[0][0] = 0.0;
     (*solution)[0][1] = 1.0;
@@ -80,7 +82,7 @@ TEST(TimeIntegratorTest, RK4) {
     (*solution)[1][2] = 6.0;
     (*solution)[1][3] = 7.0;
 
-    rk4.take_step(0.1, solution_pointers, rhs_pointers, calc_rhs_test);
+    rk4.take_step(0.1, solution_pointers, rhs_pointers, &rhs_func);
 
     EXPECT_DOUBLE_EQ((*solution)[0][0], 0.0);
     EXPECT_DOUBLE_EQ((*solution)[0][1], 1.1);
@@ -97,7 +99,6 @@ TEST(TimeIntegratorTest, SSPRK3) {
     std::vector<std::vector<std::array<double, 4>> *> solution_pointers;
     std::vector<std::vector<std::array<double, 4>> *> rhs_pointers;
     std::vector<std::array<double, 4>> * solution;
-    std::vector<double> coefficients = {1.0, 2.0};
 
     for (int i = 0; i < 2; i++) {
         solution_pointers.push_back(new std::vector<std::array<double, 4>>(2));
@@ -106,6 +107,8 @@ TEST(TimeIntegratorTest, SSPRK3) {
         rhs_pointers.push_back(new std::vector<std::array<double, 4>>(2));
     }
     solution = solution_pointers[0];
+    std::function<void(std::vector<std::array<double, 4>> * solution,
+                       std::vector<std::array<double, 4>> * rhs)> rhs_func = calc_rhs_test;
 
     (*solution)[0][0] = 0.0;
     (*solution)[0][1] = 1.0;
@@ -116,7 +119,7 @@ TEST(TimeIntegratorTest, SSPRK3) {
     (*solution)[1][2] = 6.0;
     (*solution)[1][3] = 7.0;
 
-    ssprk3.take_step(0.1, solution_pointers, rhs_pointers, calc_rhs_test);
+    ssprk3.take_step(0.1, solution_pointers, rhs_pointers, &rhs_func);
 
     EXPECT_DOUBLE_EQ((*solution)[0][0], 0.0);
     EXPECT_DOUBLE_EQ((*solution)[0][1], 1.1);

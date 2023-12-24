@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <functional>
 
 #include <toml++/toml.h>
 
@@ -49,6 +50,11 @@ class Solver {
         void init_boundaries();
 
         /**
+         * @brief Initialize the numerics options.
+         */
+        void init_numerics();
+
+        /**
          * @brief Print the logo.
          */
         void print_logo() const;
@@ -60,20 +66,24 @@ class Solver {
         void take_step(const double& dt);
 
         /**
-         * @brief Calculate the residual.
+         * @brief Calculate the right hand side.
+         * @param solution Solution vector.
+         * @param rhs Right hand side vector.
          */
-        void calc_residual();
+        void calc_rhs(std::vector<std::array<double, 4>> * solution,
+                      std::vector<std::array<double, 4>> * rhs);
     protected:
     private:
         toml::table input;
         Mesh mesh;
         std::vector<std::unique_ptr<Boundary>> boundaries;
         std::unique_ptr<TimeIntegrator> time_integrator;
-        std::vector<std::array<double, 4>> residual;
-        std::vector<std::array<double, 4>> residual_temp_1;
-        std::vector<std::array<double, 4>> residual_temp_2;
-        std::vector<std::array<double, 4>> residual_temp_3;
-        std::vector<std::array<double, 4>> residual_temp_4;
+        std::vector<std::array<double, 4>> primitives;
+        std::vector<std::array<double, 4>> rhs;
+        std::vector<std::vector<std::array<double, 4>> *> solution_pointers;
+        std::vector<std::vector<std::array<double, 4>> *> rhs_pointers;
+        std::function<void(std::vector<std::array<double, 4>>*,
+                           std::vector<std::array<double, 4>>*)> rhs_func;
 };
 
 #endif // SOLVER_H
