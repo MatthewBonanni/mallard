@@ -27,8 +27,8 @@ double triangle_area_3(const std::array<double, 3>& v0,
     throw std::runtime_error("Not implemented.");
 }
 
-void linear_combination(const std::vector<std::vector<std::array<double, 4>> *> & vectors_in,
-                        std::vector<std::array<double, 4>> * const vector_out,
+void linear_combination(const std::vector<StateVector *> & vectors_in,
+                        StateVector * const vector_out,
                         const std::vector<double> & coefficients) {
     if (vectors_in.size() != coefficients.size()) {
         throw std::runtime_error("Number of vectors_in must equal number of coefficients.");

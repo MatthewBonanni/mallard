@@ -12,8 +12,8 @@
 #include <gtest/gtest.h>
 #include "numerics/time_integrator.h"
 
-void calc_rhs_test(std::vector<std::array<double, 4>> * solution,
-                   std::vector<std::array<double, 4>> * rhs) {
+void calc_rhs_test(StateVector * solution,
+                   StateVector * rhs) {
     (*rhs)[0][0] = 0.0 * (*solution)[0][0] + 0.0;
     (*rhs)[0][1] = 0.0 * (*solution)[0][1] + 1.0;
     (*rhs)[0][2] = 0.0 * (*solution)[0][2] + 2.0;
@@ -26,19 +26,19 @@ void calc_rhs_test(std::vector<std::array<double, 4>> * solution,
 
 TEST(TimeIntegratorTest, FE) {
     FE fe;
-    std::vector<std::vector<std::array<double, 4>> *> solution_pointers;
-    std::vector<std::vector<std::array<double, 4>> *> rhs_pointers;
-    std::vector<std::array<double, 4>> * solution;
+    std::vector<StateVector *> solution_pointers;
+    std::vector<StateVector *> rhs_pointers;
+    StateVector * solution;
 
     for (int i = 0; i < fe.get_n_solution_vectors(); i++) {
-        solution_pointers.push_back(new std::vector<std::array<double, 4>>(2));
+        solution_pointers.push_back(new StateVector(2));
     }
     for (int i = 0; i < fe.get_n_rhs_vectors(); i++) {
-        rhs_pointers.push_back(new std::vector<std::array<double, 4>>(2));
+        rhs_pointers.push_back(new StateVector(2));
     }
     solution = solution_pointers[0];
-    std::function<void(std::vector<std::array<double, 4>> * solution,
-                       std::vector<std::array<double, 4>> * rhs)> rhs_func = calc_rhs_test;
+    std::function<void(StateVector * solution,
+                       StateVector * rhs)> rhs_func = calc_rhs_test;
 
     (*solution)[0][0] = 0.0;
     (*solution)[0][1] = 1.0;
@@ -63,19 +63,19 @@ TEST(TimeIntegratorTest, FE) {
 
 TEST(TimeIntegratorTest, RK4) {
     RK4 rk4;
-    std::vector<std::vector<std::array<double, 4>> *> solution_pointers;
-    std::vector<std::vector<std::array<double, 4>> *> rhs_pointers;
-    std::vector<std::array<double, 4>> * solution;
+    std::vector<StateVector *> solution_pointers;
+    std::vector<StateVector *> rhs_pointers;
+    StateVector * solution;
 
     for (int i = 0; i < rk4.get_n_solution_vectors(); i++) {
-        solution_pointers.push_back(new std::vector<std::array<double, 4>>(2));
+        solution_pointers.push_back(new StateVector(2));
     }
     for (int i = 0; i < rk4.get_n_rhs_vectors(); i++) {
-        rhs_pointers.push_back(new std::vector<std::array<double, 4>>(2));
+        rhs_pointers.push_back(new StateVector(2));
     }
     solution = solution_pointers[0];
-    std::function<void(std::vector<std::array<double, 4>> * solution,
-                       std::vector<std::array<double, 4>> * rhs)> rhs_func = calc_rhs_test;
+    std::function<void(StateVector * solution,
+                       StateVector * rhs)> rhs_func = calc_rhs_test;
 
     (*solution)[0][0] = 0.0;
     (*solution)[0][1] = 1.0;
@@ -100,19 +100,19 @@ TEST(TimeIntegratorTest, RK4) {
 
 TEST(TimeIntegratorTest, SSPRK3) {
     SSPRK3 ssprk3;
-    std::vector<std::vector<std::array<double, 4>> *> solution_pointers;
-    std::vector<std::vector<std::array<double, 4>> *> rhs_pointers;
-    std::vector<std::array<double, 4>> * solution;
+    std::vector<StateVector *> solution_pointers;
+    std::vector<StateVector *> rhs_pointers;
+    StateVector * solution;
 
     for (int i = 0; i < ssprk3.get_n_solution_vectors(); i++) {
-        solution_pointers.push_back(new std::vector<std::array<double, 4>>(2));
+        solution_pointers.push_back(new StateVector(2));
     }
     for (int i = 0; i < ssprk3.get_n_rhs_vectors(); i++) {
-        rhs_pointers.push_back(new std::vector<std::array<double, 4>>(2));
+        rhs_pointers.push_back(new StateVector(2));
     }
     solution = solution_pointers[0];
-    std::function<void(std::vector<std::array<double, 4>> * solution,
-                       std::vector<std::array<double, 4>> * rhs)> rhs_func = calc_rhs_test;
+    std::function<void(StateVector * solution,
+                       StateVector * rhs)> rhs_func = calc_rhs_test;
 
     (*solution)[0][0] = 0.0;
     (*solution)[0][1] = 1.0;

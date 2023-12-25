@@ -14,6 +14,7 @@
 
 #include <toml++/toml.h>
 
+#include "common/common.h"
 #include "mesh/zone.h"
 
 enum class BoundaryType {
@@ -68,8 +69,8 @@ class Boundary {
          * @param solution Pointer to the solution.
          * @param rhs Pointer to the right hand side.
          */
-        virtual void apply(std::vector<std::array<double, 4>> * solution,
-                           std::vector<std::array<double, 4>> * rhs);
+        virtual void apply(StateVector * solution,
+                           StateVector * rhs);
         
     protected:
         FaceZone * zone;

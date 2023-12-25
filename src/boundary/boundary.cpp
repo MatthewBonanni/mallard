@@ -37,7 +37,7 @@ void Boundary::init(const toml::table& input) {
     throw std::runtime_error("Boundary::init() not implemented.");
 }
 
-void Boundary::apply(std::vector<std::array<double, 4>> * solution,
-                     std::vector<std::array<double, 4>> * rhs) {
+void Boundary::apply(StateVector * solution,
+                     StateVector * rhs) {
     throw std::runtime_error("Boundary::apply() not implemented.");
 }

@@ -46,13 +46,13 @@ TEST(CommonMathTest, TriangleArea2ZeroArea) {
 }
 
 TEST(CommonMathTest, LinearCombination) {
-    std::vector<std::vector<std::array<double, 4>> *> vectors_in;
-    std::vector<std::array<double, 4>> * vector_out;
+    std::vector<StateVector *> vectors_in;
+    StateVector * vector_out;
     std::vector<double> coefficients = {1.0, 2.0};
 
-    vectors_in.push_back(new std::vector<std::array<double, 4>>(2));
-    vectors_in.push_back(new std::vector<std::array<double, 4>>(2));
-    vector_out = new std::vector<std::array<double, 4>>(2);
+    vectors_in.push_back(new StateVector(2));
+    vectors_in.push_back(new StateVector(2));
+    vector_out = new StateVector(2);
 
     (*vectors_in[0])[0][0] = 0.0;
     (*vectors_in[0])[0][1] = 1.0;
@@ -85,13 +85,13 @@ TEST(CommonMathTest, LinearCombination) {
 }
 
 TEST(CommonMathTest, LinearCombinationWrongNumberOfCoefficients) {
-    std::vector<std::vector<std::array<double, 4>> *> vectors_in;
-    std::vector<std::array<double, 4>> * vector_out;
+    std::vector<StateVector *> vectors_in;
+    StateVector * vector_out;
     std::vector<double> coefficients = {1.0, 2.0, 3.0};
 
-    vectors_in.push_back(new std::vector<std::array<double, 4>>(2));
-    vectors_in.push_back(new std::vector<std::array<double, 4>>(2));
-    vector_out = new std::vector<std::array<double, 4>>(2);
+    vectors_in.push_back(new StateVector(2));
+    vectors_in.push_back(new StateVector(2));
+    vector_out = new StateVector(2);
 
     (*vectors_in[0])[0][0] = 0.0;
     (*vectors_in[0])[0][1] = 1.0;
@@ -115,12 +115,12 @@ TEST(CommonMathTest, LinearCombinationWrongNumberOfCoefficients) {
 }
 
 TEST(CommonMathTest, LinearCombinationOutputVectorIsInputVector) {
-    std::vector<std::vector<std::array<double, 4>> *> vectors_in;
-    std::vector<std::array<double, 4>> * vector_out;
+    std::vector<StateVector *> vectors_in;
+    StateVector * vector_out;
     std::vector<double> coefficients = {1.0, 2.0};
 
-    vectors_in.push_back(new std::vector<std::array<double, 4>>(2));
-    vectors_in.push_back(new std::vector<std::array<double, 4>>(2));
+    vectors_in.push_back(new StateVector(2));
+    vectors_in.push_back(new StateVector(2));
     vector_out = vectors_in[0];
 
     (*vectors_in[0])[0][0] = 0.0;

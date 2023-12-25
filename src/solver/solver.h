@@ -80,40 +80,40 @@ class Solver {
          * @param solution Solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs(std::vector<std::array<double, 4>> * solution,
-                      std::vector<std::array<double, 4>> * rhs);
+        void calc_rhs(StateVector * solution,
+                      StateVector * rhs);
         
         /**
          * @brief Pre-RHS hook.
          * @param solution Solution vector.
          * @param rhs Right hand side vector.
          */
-        void pre_rhs(std::vector<std::array<double, 4>> * solution,
-                     std::vector<std::array<double, 4>> * rhs);
+        void pre_rhs(StateVector * solution,
+                     StateVector * rhs);
         
         /**
          * @brief Add the source term contributions to the right hand side.
          * @param solution Solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs_source(std::vector<std::array<double, 4>> * solution,
-                             std::vector<std::array<double, 4>> * rhs);
+        void calc_rhs_source(StateVector * solution,
+                             StateVector * rhs);
         
         /**
          * @brief Add the interior flux contributions to the right hand side.
          * @param solution Solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs_interior(std::vector<std::array<double, 4>> * solution,
-                               std::vector<std::array<double, 4>> * rhs);
+        void calc_rhs_interior(StateVector * solution,
+                               StateVector * rhs);
         
         /**
          * @brief Add the boundary flux contributions to the right hand side.
          * @param solution Solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs_boundaries(std::vector<std::array<double, 4>> * solution,
-                                 std::vector<std::array<double, 4>> * rhs);
+        void calc_rhs_boundaries(StateVector * solution,
+                                 StateVector * rhs);
             
     protected:
     private:
@@ -121,12 +121,15 @@ class Solver {
         Mesh mesh;
         std::vector<std::unique_ptr<Boundary>> boundaries;
         std::unique_ptr<TimeIntegrator> time_integrator;
-        std::vector<std::array<double, 4>> primitives;
-        std::vector<std::array<double, 4>> rhs;
-        std::vector<std::vector<std::array<double, 4>> *> solution_pointers;
-        std::vector<std::vector<std::array<double, 4>> *> rhs_pointers;
-        std::function<void(std::vector<std::array<double, 4>>*,
-                           std::vector<std::array<double, 4>>*)> rhs_func;
+        StateVector conservatives;
+        StateVector primitives;
+        StateVector rhs;
+        StateVector face_conservatives;
+        StateVector face_primitives;
+        std::vector<StateVector *> solution_pointers;
+        std::vector<StateVector *> rhs_pointers;
+        std::function<void(StateVector*,
+                           StateVector*)> rhs_func;
         // TODO - convert to shared_ptr
 };
 

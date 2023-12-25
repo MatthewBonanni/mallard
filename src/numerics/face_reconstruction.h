@@ -30,6 +30,7 @@ class FaceReconstruction {
         void calc_face_values();
     protected:
     private:
+        
 };
 
 class FirstOrder : public FaceReconstruction {

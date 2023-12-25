@@ -5,7 +5,7 @@
  * @version 0.1
  * @date 2023-12-22
  * 
- * @copyright Copyright (c) 2023
+ * @copyright Copyright (c) 2023 Matthew Bonanni
  * 
  */
 
@@ -16,6 +16,8 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+
+#include "common/common.h"
 
 enum class TimeIntegratorType {
     FE,
@@ -85,10 +87,10 @@ class TimeIntegrator {
          * @param calc_rhs Function to calculate rhs.
          */
         virtual void take_step(const double& dt,
-                               std::vector<std::vector<std::array<double, 4>> *> & solution_pointers,
-                               std::vector<std::vector<std::array<double, 4>> *> & rhs_pointers,
-                               std::function<void(std::vector<std::array<double, 4>> * solution,
-                                                  std::vector<std::array<double, 4>> * rhs)> * calc_rhs) = 0;
+                               std::vector<StateVector *> & solution_pointers,
+                               std::vector<StateVector *> & rhs_pointers,
+                               std::function<void(StateVector * solution,
+                                                  StateVector * rhs)> * calc_rhs) = 0;
     protected:
         TimeIntegratorType type;
         int n_solution_vectors;
@@ -116,10 +118,10 @@ class FE : public TimeIntegrator {
          * @param calc_rhs Function to calculate rhs.
          */
         void take_step(const double& dt,
-                       std::vector<std::vector<std::array<double, 4>> *> & solution_pointers,
-                       std::vector<std::vector<std::array<double, 4>> *> & rhs_pointers,
-                       std::function<void(std::vector<std::array<double, 4>> * solution,
-                                          std::vector<std::array<double, 4>> * rhs)> * calc_rhs) override;
+                       std::vector<StateVector *> & solution_pointers,
+                       std::vector<StateVector *> & rhs_pointers,
+                       std::function<void(StateVector * solution,
+                                          StateVector * rhs)> * calc_rhs) override;
     protected:
     private:
 };
@@ -144,10 +146,10 @@ class RK4 : public TimeIntegrator {
          * @param calc_rhs Function to calculate rhs.
          */
         void take_step(const double& dt,
-                       std::vector<std::vector<std::array<double, 4>> *> & solution_pointers,
-                       std::vector<std::vector<std::array<double, 4>> *> & rhs_pointers,
-                       std::function<void(std::vector<std::array<double, 4>> * solution,
-                                          std::vector<std::array<double, 4>> * rhs)> * calc_rhs) override;
+                       std::vector<StateVector *> & solution_pointers,
+                       std::vector<StateVector *> & rhs_pointers,
+                       std::function<void(StateVector * solution,
+                                          StateVector * rhs)> * calc_rhs) override;
     protected:
     private:
         std::vector<double> coeffs;
@@ -173,10 +175,10 @@ class LSRK4 : public TimeIntegrator {
          * @param calc_rhs Function to calculate rhs.
          */
         void take_step(const double& dt,
-                       std::vector<std::vector<std::array<double, 4>> *> & solution_pointers,
-                       std::vector<std::vector<std::array<double, 4>> *> & rhs_pointers,
-                       std::function<void(std::vector<std::array<double, 4>> * solution,
-                                          std::vector<std::array<double, 4>> * rhs)> * calc_rhs) override;
+                       std::vector<StateVector *> & solution_pointers,
+                       std::vector<StateVector *> & rhs_pointers,
+                       std::function<void(StateVector * solution,
+                                          StateVector * rhs)> * calc_rhs) override;
     protected:
     private:
 };
@@ -201,10 +203,10 @@ class SSPRK3 : public TimeIntegrator {
          * @param calc_rhs Function to calculate rhs.
          */
         void take_step(const double& dt,
-                       std::vector<std::vector<std::array<double, 4>> *> & solution_pointers,
-                       std::vector<std::vector<std::array<double, 4>> *> & rhs_pointers,
-                       std::function<void(std::vector<std::array<double, 4>> * solution,
-                                          std::vector<std::array<double, 4>> * rhs)> * calc_rhs) override;
+                       std::vector<StateVector *> & solution_pointers,
+                       std::vector<StateVector *> & rhs_pointers,
+                       std::function<void(StateVector * solution,
+                                          StateVector * rhs)> * calc_rhs) override;
     protected:
     private:
         std::vector<double> coeffs;
@@ -230,10 +232,10 @@ class LSSSPRK3 : public TimeIntegrator {
          * @param calc_rhs Function to calculate rhs.
          */
         void take_step(const double& dt,
-                       std::vector<std::vector<std::array<double, 4>> *> & solution_pointers,
-                       std::vector<std::vector<std::array<double, 4>> *> & rhs_pointers,
-                       std::function<void(std::vector<std::array<double, 4>> * solution,
-                                          std::vector<std::array<double, 4>> * rhs)> * calc_rhs) override;
+                       std::vector<StateVector *> & solution_pointers,
+                       std::vector<StateVector *> & rhs_pointers,
+                       std::function<void(StateVector * solution,
+                                          StateVector * rhs)> * calc_rhs) override;
     protected:
     private:
 };

@@ -161,15 +161,19 @@ void Solver::init_numerics() {
 void Solver::allocate_memory() {
     std::cout << "Allocating memory..." << std::endl;
 
+    conservatives.resize(mesh.n_cells());
     primitives.resize(mesh.n_cells());
     rhs.resize(mesh.n_cells());
+    face_conservatives.resize(mesh.n_faces());
+    face_primitives.resize(mesh.n_faces());
 
-    for (int i = 0; i < time_integrator->get_n_solution_vectors(); i++) {
-        solution_pointers.push_back(new std::vector<std::array<double, 4>>(mesh.n_cells()));
+    solution_pointers.push_back(&conservatives);
+    for (int i = 0; i < time_integrator->get_n_solution_vectors() - 1; i++) {
+        solution_pointers.push_back(new StateVector(mesh.n_cells()));
     }
 
     for (int i = 0; i < time_integrator->get_n_rhs_vectors(); i++) {
-        rhs_pointers.push_back(new std::vector<std::array<double, 4>>(mesh.n_cells()));
+        rhs_pointers.push_back(new StateVector(mesh.n_cells()));
     }
 }
 
@@ -188,16 +192,16 @@ void Solver::take_step(const double& dt) {
                                &rhs_func);
 }
 
-void Solver::calc_rhs(std::vector<std::array<double, 4>> * solution,
-                      std::vector<std::array<double, 4>> * rhs) {
+void Solver::calc_rhs(StateVector * solution,
+                      StateVector * rhs) {
     pre_rhs(solution, rhs);
     calc_rhs_source(solution, rhs);
     calc_rhs_interior(solution, rhs);
     calc_rhs_boundaries(solution, rhs);
 }
 
-void Solver::pre_rhs(std::vector<std::array<double, 4>> * solution,
-                     std::vector<std::array<double, 4>> * rhs) {
+void Solver::pre_rhs(StateVector * solution,
+                     StateVector * rhs) {
     for (int i = 0; i < mesh.n_cells(); i++) {
         (*rhs)[i][0] = 0.0;
         (*rhs)[i][1] = 0.0;
@@ -206,8 +210,8 @@ void Solver::pre_rhs(std::vector<std::array<double, 4>> * solution,
     }
 }
 
-void Solver::calc_rhs_source(std::vector<std::array<double, 4>> * solution,
-                             std::vector<std::array<double, 4>> * rhs) {
+void Solver::calc_rhs_source(StateVector * solution,
+                             StateVector * rhs) {
     // TODO - Sources not implemented yet.
     for (int i = 0; i < mesh.n_cells(); i++) {
         (*rhs)[i][0] += 0.0;
@@ -217,14 +221,14 @@ void Solver::calc_rhs_source(std::vector<std::array<double, 4>> * solution,
     }
 }
 
-void Solver::calc_rhs_interior(std::vector<std::array<double, 4>> * solution,
-                               std::vector<std::array<double, 4>> * rhs) {
+void Solver::calc_rhs_interior(StateVector * solution,
+                               StateVector * rhs) {
     // TODO - Interior fluxes not implemented yet.
     throw std::runtime_error("Interior fluxes not implemented yet.");
 }
 
-void Solver::calc_rhs_boundaries(std::vector<std::array<double, 4>> * solution,
-                                 std::vector<std::array<double, 4>> * rhs) {
+void Solver::calc_rhs_boundaries(StateVector * solution,
+                                 StateVector * rhs) {
     for (auto& boundary : boundaries) {
         boundary->apply(solution, rhs);
     }

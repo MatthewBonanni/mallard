@@ -5,7 +5,7 @@
  * @version 0.1
  * @date 2023-12-22
  * 
- * @copyright Copyright (c) 2023
+ * @copyright Copyright (c) 2023 Matthew Bonanni
  * 
  */
 
@@ -42,10 +42,10 @@ void TimeIntegrator::print() const {
 }
 
 void TimeIntegrator::take_step(const double& dt,
-                               std::vector<std::vector<std::array<double, 4>> *> & solution_pointers,
-                               std::vector<std::vector<std::array<double, 4>> *> & rhs_pointers,
-                               std::function<void(std::vector<std::array<double, 4>> * solution,
-                                                  std::vector<std::array<double, 4>> * rhs)> * calc_rhs) {
+                               std::vector<StateVector *> & solution_pointers,
+                               std::vector<StateVector *> & rhs_pointers,
+                               std::function<void(StateVector * solution,
+                                                  StateVector * rhs)> * calc_rhs) {
     // Empty
 }
 
@@ -60,17 +60,17 @@ FE::~FE() {
 }
 
 void FE::take_step(const double& dt,
-                             std::vector<std::vector<std::array<double, 4>> *> & solution_pointers,
-                             std::vector<std::vector<std::array<double, 4>> *> & rhs_pointers,
-                             std::function<void(std::vector<std::array<double, 4>> * solution,
-                                                std::vector<std::array<double, 4>> * rhs)> * calc_rhs) {
-    std::vector<std::array<double, 4>> * U = solution_pointers[0];
-    std::vector<std::array<double, 4>> * rhs = rhs_pointers[0];
+                             std::vector<StateVector *> & solution_pointers,
+                             std::vector<StateVector *> & rhs_pointers,
+                             std::function<void(StateVector * solution,
+                                                StateVector * rhs)> * calc_rhs) {
+    StateVector * U = solution_pointers[0];
+    StateVector * rhs = rhs_pointers[0];
 
     (*calc_rhs)(U, rhs);
 
     // Use linear_combination instead of update_solution
-    linear_combination(std::vector<std::vector<std::array<double, 4>> *>({U, rhs}),
+    linear_combination(std::vector<StateVector *>({U, rhs}),
                        U,
                        std::vector<double>({1.0, dt}));
 
@@ -92,38 +92,38 @@ RK4::~RK4() {
 }
 
 void RK4::take_step(const double& dt,
-                    std::vector<std::vector<std::array<double, 4>> *> & solution_pointers,
-                    std::vector<std::vector<std::array<double, 4>> *> & rhs_pointers,
-                    std::function<void(std::vector<std::array<double, 4>> * solution,
-                                       std::vector<std::array<double, 4>> * rhs)> * calc_rhs) {
-    std::vector<std::array<double, 4>> * U = solution_pointers[0];
-    std::vector<std::array<double, 4>> * U_temp = solution_pointers[1];
-    std::vector<std::array<double, 4>> * rhs1 = rhs_pointers[0];
-    std::vector<std::array<double, 4>> * rhs2 = rhs_pointers[1];
-    std::vector<std::array<double, 4>> * rhs3 = rhs_pointers[2];
-    std::vector<std::array<double, 4>> * rhs4 = rhs_pointers[3];
+                    std::vector<StateVector *> & solution_pointers,
+                    std::vector<StateVector *> & rhs_pointers,
+                    std::function<void(StateVector * solution,
+                                       StateVector * rhs)> * calc_rhs) {
+    StateVector * U = solution_pointers[0];
+    StateVector * U_temp = solution_pointers[1];
+    StateVector * rhs1 = rhs_pointers[0];
+    StateVector * rhs2 = rhs_pointers[1];
+    StateVector * rhs3 = rhs_pointers[2];
+    StateVector * rhs4 = rhs_pointers[3];
 
     // Calculate k1
     (*calc_rhs)(U, rhs1);
-    linear_combination(std::vector<std::vector<std::array<double, 4>> *>({U, rhs1}),
+    linear_combination(std::vector<StateVector *>({U, rhs1}),
                        U_temp,
                        std::vector<double>({1.0, dt / 2.0}));
 
     // Calculate k2
     (*calc_rhs)(U_temp, rhs2);
-    linear_combination(std::vector<std::vector<std::array<double, 4>> *>({U, rhs2}),
+    linear_combination(std::vector<StateVector *>({U, rhs2}),
                        U_temp,
                        std::vector<double>({1.0, dt / 2.0}));
 
     // Calculate k3
     (*calc_rhs)(U_temp, rhs3);
-    linear_combination(std::vector<std::vector<std::array<double, 4>> *>({U, rhs3}),
+    linear_combination(std::vector<StateVector *>({U, rhs3}),
                        U_temp,
                        std::vector<double>({1.0, dt}));
 
     // Calculate k4
     (*calc_rhs)(U_temp, rhs4);
-    linear_combination(std::vector<std::vector<std::array<double, 4>> *>({U, rhs1, rhs2, rhs3, rhs4}),
+    linear_combination(std::vector<StateVector *>({U, rhs1, rhs2, rhs3, rhs4}),
                        U,
                        std::vector<double>({1.0,
                                             dt * coeffs[0],
@@ -146,31 +146,31 @@ SSPRK3::~SSPRK3() {
 }
 
 void SSPRK3::take_step(const double& dt,
-                       std::vector<std::vector<std::array<double, 4>> *> & solution_pointers,
-                       std::vector<std::vector<std::array<double, 4>> *> & rhs_pointers,
-                       std::function<void(std::vector<std::array<double, 4>> * solution,
-                                          std::vector<std::array<double, 4>> * rhs)> * calc_rhs) {
-    std::vector<std::array<double, 4>> * U = solution_pointers[0];
-    std::vector<std::array<double, 4>> * U_temp = solution_pointers[1];
-    std::vector<std::array<double, 4>> * rhs1 = rhs_pointers[0];
-    std::vector<std::array<double, 4>> * rhs2 = rhs_pointers[1];
-    std::vector<std::array<double, 4>> * rhs3 = rhs_pointers[2];
+                       std::vector<StateVector *> & solution_pointers,
+                       std::vector<StateVector *> & rhs_pointers,
+                       std::function<void(StateVector * solution,
+                                          StateVector * rhs)> * calc_rhs) {
+    StateVector * U = solution_pointers[0];
+    StateVector * U_temp = solution_pointers[1];
+    StateVector * rhs1 = rhs_pointers[0];
+    StateVector * rhs2 = rhs_pointers[1];
+    StateVector * rhs3 = rhs_pointers[2];
 
     // Calculate k1
     (*calc_rhs)(U, rhs1);
-    linear_combination(std::vector<std::vector<std::array<double, 4>> *>({U, rhs1}),
+    linear_combination(std::vector<StateVector *>({U, rhs1}),
                        U_temp,
                        std::vector<double>({1.0, dt}));
 
     // Calculate k2
     (*calc_rhs)(U_temp, rhs2);
-    linear_combination(std::vector<std::vector<std::array<double, 4>> *>({U, rhs2}),
+    linear_combination(std::vector<StateVector *>({U, rhs2}),
                        U_temp,
                        std::vector<double>({3.0 / 4.0, dt / 4.0}));
 
     // Calculate k3
     (*calc_rhs)(U_temp, rhs3);
-    linear_combination(std::vector<std::vector<std::array<double, 4>> *>({U, rhs1, rhs2, rhs3}),
+    linear_combination(std::vector<StateVector *>({U, rhs1, rhs2, rhs3}),
                        U,
                        std::vector<double>({1.0,
                                             dt * coeffs[0],
@@ -190,10 +190,10 @@ LSRK4::~LSRK4() {
 }
 
 void LSRK4::take_step(const double& dt,
-                      std::vector<std::vector<std::array<double, 4>> *> & solution_pointers,
-                      std::vector<std::vector<std::array<double, 4>> *> & rhs_pointers,
-                      std::function<void(std::vector<std::array<double, 4>> * solution,
-                                         std::vector<std::array<double, 4>> * rhs)> * calc_rhs) {
+                      std::vector<StateVector *> & solution_pointers,
+                      std::vector<StateVector *> & rhs_pointers,
+                      std::function<void(StateVector * solution,
+                                         StateVector * rhs)> * calc_rhs) {
     throw std::runtime_error("LSRK4 not implemented.");
 }
 
@@ -209,9 +209,9 @@ LSSSPRK3::~LSSSPRK3() {
 }
 
 void LSSSPRK3::take_step(const double& dt,
-                         std::vector<std::vector<std::array<double, 4>> *> & solution_pointers,
-                         std::vector<std::vector<std::array<double, 4>> *> & rhs_pointers,
-                         std::function<void(std::vector<std::array<double, 4>> * solution,
-                                            std::vector<std::array<double, 4>> * rhs)> * calc_rhs) {
+                         std::vector<StateVector *> & solution_pointers,
+                         std::vector<StateVector *> & rhs_pointers,
+                         std::function<void(StateVector * solution,
+                                            StateVector * rhs)> * calc_rhs) {
     throw std::runtime_error("LSSSPRK3 not implemented.");
 }

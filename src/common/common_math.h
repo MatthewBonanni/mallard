@@ -14,6 +14,8 @@
 
 #include <array>
 
+#include "common_typedef.h"
+
 /**
  * @brief Compute the area of a triangle from vertices in R^2.
  * 
@@ -44,8 +46,8 @@ double triangle_area_3(const std::array<double, 3>& v0,
  * @param vector_out
  * @param coefficients
  */
-void linear_combination(const std::vector<std::vector<std::array<double, 4>> *> & vectors_in,
-                        std::vector<std::array<double, 4>> * const vector_out,
+void linear_combination(const std::vector<StateVector *> & vectors_in,
+                        StateVector * const vector_out,
                         const std::vector<double> & coefficients);
 
 #endif // COMMON_MATH_H
