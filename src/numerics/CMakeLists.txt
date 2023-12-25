@@ -2,6 +2,7 @@
 set(LIB_NAME NumericsLib)
 set(LIB_SRCS
     time_integrator.cpp
+    flux_reconstruction.cpp
 )
 
 # Add the library
