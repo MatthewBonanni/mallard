@@ -30,8 +30,12 @@ TEST(TimeIntegratorTest, FE) {
     std::vector<std::vector<std::array<double, 4>> *> rhs_pointers;
     std::vector<std::array<double, 4>> * solution;
 
-    solution_pointers.push_back(new std::vector<std::array<double, 4>>(2));
-    rhs_pointers.push_back(new std::vector<std::array<double, 4>>(2));
+    for (int i = 0; i < fe.get_n_solution_vectors(); i++) {
+        solution_pointers.push_back(new std::vector<std::array<double, 4>>(2));
+    }
+    for (int i = 0; i < fe.get_n_rhs_vectors(); i++) {
+        rhs_pointers.push_back(new std::vector<std::array<double, 4>>(2));
+    }
     solution = solution_pointers[0];
     std::function<void(std::vector<std::array<double, 4>> * solution,
                        std::vector<std::array<double, 4>> * rhs)> rhs_func = calc_rhs_test;
@@ -63,10 +67,10 @@ TEST(TimeIntegratorTest, RK4) {
     std::vector<std::vector<std::array<double, 4>> *> rhs_pointers;
     std::vector<std::array<double, 4>> * solution;
 
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < rk4.get_n_solution_vectors(); i++) {
         solution_pointers.push_back(new std::vector<std::array<double, 4>>(2));
     }
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < rk4.get_n_rhs_vectors(); i++) {
         rhs_pointers.push_back(new std::vector<std::array<double, 4>>(2));
     }
     solution = solution_pointers[0];
@@ -100,10 +104,10 @@ TEST(TimeIntegratorTest, SSPRK3) {
     std::vector<std::vector<std::array<double, 4>> *> rhs_pointers;
     std::vector<std::array<double, 4>> * solution;
 
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < ssprk3.get_n_solution_vectors(); i++) {
         solution_pointers.push_back(new std::vector<std::array<double, 4>>(2));
     }
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < ssprk3.get_n_rhs_vectors(); i++) {
         rhs_pointers.push_back(new std::vector<std::array<double, 4>>(2));
     }
     solution = solution_pointers[0];

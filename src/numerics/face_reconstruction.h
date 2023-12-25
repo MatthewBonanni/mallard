@@ -23,6 +23,26 @@ class FaceReconstruction {
          * @brief Destroy the Face Reconstruction object
          */
         ~FaceReconstruction();
+
+        /**
+         * @brief Reconstruct the face values.
+         */
+        void calc_face_values();
+    protected:
+    private:
+};
+
+class FirstOrder : public FaceReconstruction {
+    public:
+        /**
+         * @brief Construct a new First Order object
+         */
+        FirstOrder();
+
+        /**
+         * @brief Destroy the First Order object
+         */
+        ~FirstOrder();
     protected:
     private:
 };

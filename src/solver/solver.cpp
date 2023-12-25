@@ -42,6 +42,18 @@ int Solver::init(const std::string& input_file_name) {
 
     std::cout << LOG_SEPARATOR << std::endl;
 
+    init_mesh();
+    init_boundaries();
+    init_numerics();
+
+    allocate_memory();
+
+    return 0;
+}
+
+void Solver::init_mesh() {
+    std::cout << "Initializing mesh..." << std::endl;
+
     std::string type_str = input["mesh"]["type"].value_or("file");
     MeshType type;
     typename std::unordered_map<std::string, MeshType>::const_iterator it = MESH_TYPES.find(type_str);
@@ -68,11 +80,6 @@ int Solver::init(const std::string& input_file_name) {
         // Should never get here due to the enum class.
         throw std::runtime_error("Unknown mesh type.");
     }
-
-    init_boundaries();
-    init_numerics();
-
-    return 0;
 }
 
 void Solver::init_boundaries() {
@@ -149,6 +156,21 @@ void Solver::init_numerics() {
 
     rhs_func = std::bind(&Solver::calc_rhs, this, std::placeholders::_1, std::placeholders::_2);
     time_integrator->init();
+}
+
+void Solver::allocate_memory() {
+    std::cout << "Allocating memory..." << std::endl;
+
+    primitives.resize(mesh.n_cells());
+    rhs.resize(mesh.n_cells());
+
+    for (int i = 0; i < time_integrator->get_n_solution_vectors(); i++) {
+        solution_pointers.push_back(new std::vector<std::array<double, 4>>(mesh.n_cells()));
+    }
+
+    for (int i = 0; i < time_integrator->get_n_rhs_vectors(); i++) {
+        rhs_pointers.push_back(new std::vector<std::array<double, 4>>(mesh.n_cells()));
+    }
 }
 
 void Solver::print_logo() const {

@@ -27,6 +27,14 @@ void TimeIntegrator::init() {
     print();
 }
 
+int TimeIntegrator::get_n_solution_vectors() const {
+    return n_solution_vectors;
+}
+
+int TimeIntegrator::get_n_rhs_vectors() const {
+    return n_rhs_vectors;
+}
+
 void TimeIntegrator::print() const {
     std::cout << LOG_SEPARATOR << std::endl;
     std::cout << "Time integrator: " << TIME_INTEGRATOR_NAMES.at(type) << std::endl;
@@ -43,6 +51,8 @@ void TimeIntegrator::take_step(const double& dt,
 
 FE::FE() {
     type = TimeIntegratorType::FE;
+    n_solution_vectors = 1;
+    n_rhs_vectors = 1;
 }
 
 FE::~FE() {
@@ -69,6 +79,8 @@ void FE::take_step(const double& dt,
 
 RK4::RK4() {
     type = TimeIntegratorType::RK4;
+    n_solution_vectors = 2;
+    n_rhs_vectors = 4;
     coeffs = std::vector<double>({1.0 / 6.0,
                                   1.0 / 3.0,
                                   1.0 / 3.0,
@@ -122,6 +134,8 @@ void RK4::take_step(const double& dt,
 
 SSPRK3::SSPRK3() {
     type = TimeIntegratorType::SSPRK3;
+    n_solution_vectors = 2;
+    n_rhs_vectors = 3;
     coeffs = std::vector<double>({1.0 / 6.0,
                                   1.0 / 6.0,
                                   2.0 / 3.0});
@@ -166,6 +180,9 @@ void SSPRK3::take_step(const double& dt,
 
 LSRK4::LSRK4() {
     type = TimeIntegratorType::LSRK4;
+    n_solution_vectors = 2;
+    n_rhs_vectors = 4;
+    // TODO - check these
 }
 
 LSRK4::~LSRK4() {
@@ -182,6 +199,9 @@ void LSRK4::take_step(const double& dt,
 
 LSSSPRK3::LSSSPRK3() {
     type = TimeIntegratorType::LSSSPRK3;
+    n_solution_vectors = 2;
+    n_rhs_vectors = 3;
+    // TODO - check these
 }
 
 LSSSPRK3::~LSSSPRK3() {

@@ -59,6 +59,20 @@ class TimeIntegrator {
         virtual void init();
 
         /**
+         * @brief Get the number of solution vectors required by the method,
+         *        including the actual solution vector and any intermediate
+         *        vectors.
+         */
+        int get_n_solution_vectors() const;
+
+        /**
+         * @brief Get the number of rhs vectors required by the method,
+         *        including the actual rhs vector and any intermediate
+         *        vectors.
+         */
+        int get_n_rhs_vectors() const;
+
+        /**
          * @brief Print the time integrator.
          */
         void print() const;
@@ -77,6 +91,8 @@ class TimeIntegrator {
                                                   std::vector<std::array<double, 4>> * rhs)> * calc_rhs) = 0;
     protected:
         TimeIntegratorType type;
+        int n_solution_vectors;
+        int n_rhs_vectors;
     private:
 };
 

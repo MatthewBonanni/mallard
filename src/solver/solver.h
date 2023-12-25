@@ -45,6 +45,11 @@ class Solver {
         int init(const std::string& input_file_name);
 
         /**
+         * @brief Initialize the mesh.
+         */
+        void init_mesh();
+
+        /**
          * @brief Initialize the boundaries.
          */
         void init_boundaries();
@@ -53,6 +58,11 @@ class Solver {
          * @brief Initialize the numerics options.
          */
         void init_numerics();
+
+        /**
+         * @brief Allocate memory for the data vectors.
+         */
+        void allocate_memory();
 
         /**
          * @brief Print the logo.
@@ -117,6 +127,7 @@ class Solver {
         std::vector<std::vector<std::array<double, 4>> *> rhs_pointers;
         std::function<void(std::vector<std::array<double, 4>>*,
                            std::vector<std::array<double, 4>>*)> rhs_func;
+        // TODO - convert to shared_ptr
 };
 
 #endif // SOLVER_H
