@@ -45,6 +45,7 @@ int Solver::init(const std::string& input_file_name) {
     init_mesh();
     init_boundaries();
     init_numerics();
+    init_physics();
 
     allocate_memory();
 
@@ -156,6 +157,29 @@ void Solver::init_numerics() {
 
     rhs_func = std::bind(&Solver::calc_rhs, this, std::placeholders::_1, std::placeholders::_2);
     time_integrator->init();
+}
+
+void Solver::init_physics() {
+    std::cout << "Initializing physics..." << std::endl;
+
+    std::string physics_str = input["physics"]["type"].value_or("euler");
+
+    PhysicsType type;
+    typename std::unordered_map<std::string, PhysicsType>::const_iterator it = PHYSICS_TYPES.find(physics_str);
+    if (it == PHYSICS_TYPES.end()) {
+        throw std::runtime_error("Unknown physics type: " + physics_str + ".");
+    } else {
+        type = it->second;
+    }
+
+    if (type == PhysicsType::EULER) {
+        physics = std::make_unique<Euler>();
+    } else {
+        // Should never get here due to the enum class.
+        throw std::runtime_error("Unknown physics type: " + physics_str + ".");
+    }
+
+    physics->init();
 }
 
 void Solver::allocate_memory() {

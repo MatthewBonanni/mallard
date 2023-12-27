@@ -16,6 +16,8 @@
 #include <vector>
 
 #define State std::array<double, 4>
+#define FaceState std::array<State, 2>
 #define StateVector std::vector<State>
+#define FaceStateVector std::vector<FaceState>
 
 #endif // COMMON_TYPEDEF_H

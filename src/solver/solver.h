@@ -22,6 +22,7 @@
 #include "mesh/mesh.h"
 #include "boundary/boundary.h"
 #include "numerics/time_integrator.h"
+#include "physics/physics.h"
 
 class Solver {
     public:
@@ -43,7 +44,7 @@ class Solver {
          * @return Exit status.
          */
         int init(const std::string& input_file_name);
-
+    protected:
         /**
          * @brief Initialize the mesh.
          */
@@ -58,6 +59,11 @@ class Solver {
          * @brief Initialize the numerics options.
          */
         void init_numerics();
+
+        /**
+         * @brief Initialize the physics options.
+         */
+        void init_physics();
 
         /**
          * @brief Allocate memory for the data vectors.
@@ -114,22 +120,21 @@ class Solver {
          */
         void calc_rhs_boundaries(StateVector * solution,
                                  StateVector * rhs);
-            
-    protected:
     private:
         toml::table input;
         Mesh mesh;
         std::vector<std::unique_ptr<Boundary>> boundaries;
         std::unique_ptr<TimeIntegrator> time_integrator;
+        std::unique_ptr<Physics> physics;
         StateVector conservatives;
         StateVector primitives;
         StateVector rhs;
-        StateVector face_conservatives;
-        StateVector face_primitives;
+        FaceStateVector face_conservatives;
+        FaceStateVector face_primitives;
         std::vector<StateVector *> solution_pointers;
         std::vector<StateVector *> rhs_pointers;
-        std::function<void(StateVector*,
-                           StateVector*)> rhs_func;
+        std::function<void(StateVector *,
+                           StateVector *)> rhs_func;
         // TODO - convert to shared_ptr
 };
 

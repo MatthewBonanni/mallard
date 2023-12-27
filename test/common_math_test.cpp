@@ -12,6 +12,26 @@
 #include <gtest/gtest.h>
 #include "common/common_math.h"
 
+TEST(CommonMathTest, Dot) {
+    std::array<double, 2> v0 = {1.0, 2.0};
+    std::array<double, 2> v1 = {3.0, 4.0};
+
+    double expected_dot = 11.0;
+    double actual_dot = dot<double>(v0.data(), v1.data(), 2);
+
+    EXPECT_DOUBLE_EQ(expected_dot, actual_dot);
+}
+
+TEST(CommonMathTest, Dot3) {
+    std::vector<double> v0 = {1.0, 2.0, 3.0};
+    std::vector<double> v1 = {4.0, 5.0, 6.0};
+
+    double expected_dot = 32.0;
+    double actual_dot = dot(v0.data(), v1.data(), 3);
+
+    EXPECT_DOUBLE_EQ(expected_dot, actual_dot);
+}
+
 TEST(CommonMathTest, TriangleArea2) {
     std::array<double, 2> v0 = {0.0, 0.0};
     std::array<double, 2> v1 = {1.0, 0.0};

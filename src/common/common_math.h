@@ -17,6 +17,24 @@
 #include "common_typedef.h"
 
 /**
+ * @brief Compute the dot product of two arrays.
+ * 
+ * @param v0 First array.
+ * @param v1 Second array.
+ * @param n Length of the arrays.
+ * @tparam T Type of the arrays.
+ * @return Dot product.
+ */
+template <typename T>
+T dot(const T * const v0, const T * const v1, const int n) {
+    T dot = 0.0;
+    for (int i = 0; i < n; i++) {
+        dot += v0[i] * v1[i];
+    }
+    return dot;
+}
+
+/**
  * @brief Compute the area of a triangle from vertices in R^2.
  * 
  * @param v0 Coordinates of the first vertex.
