@@ -31,7 +31,7 @@ void BoundaryPOut::print() {
     std::cout << LOG_SEPARATOR << std::endl;
 }
 
-void BoundaryPOut::init(const toml::table& input) {
+void BoundaryPOut::init(const toml::table & input) {
     std::optional<double> p_in = input["p"].value<double>();
 
     if (!p_in.has_value()) {

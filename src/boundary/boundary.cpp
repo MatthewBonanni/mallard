@@ -33,7 +33,7 @@ void Boundary::print() {
     std::cout << "Type: " << BOUNDARY_NAMES.at(type) << std::endl;
 }
 
-void Boundary::init(const toml::table& input) {
+void Boundary::init(const toml::table & input) {
     throw std::runtime_error("Boundary::init() not implemented.");
 }
 

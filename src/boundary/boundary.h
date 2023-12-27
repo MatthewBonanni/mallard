@@ -62,7 +62,7 @@ class Boundary {
          * @brief Initialize the boundary.
          * @param input Pointer to the TOML input.
          */
-        virtual void init(const toml::table& input);
+        virtual void init(const toml::table & input);
 
         /**
          * @brief Compute and apply the boundary flux.

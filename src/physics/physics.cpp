@@ -23,14 +23,13 @@ Physics::~Physics() {
     // Empty
 }
 
-void Physics::init() {
+void Physics::init(const toml::table & input) {
     print();
 }
 
 void Physics::print() const {
     std::cout << LOG_SEPARATOR << std::endl;
     std::cout << "Physics: " << PHYSICS_NAMES.at(type) << std::endl;
-    std::cout << LOG_SEPARATOR << std::endl;
 }
 
 void Physics::calc_euler_flux(State & flux, const std::array<double, 2> & n_vec,
@@ -112,6 +111,24 @@ Euler::Euler() {
 
 Euler::~Euler() {
     // Empty
+}
+
+void Euler::init(const toml::table & input) {
+    std::optional<double> gamma_in = input["physics"]["gamma"].value<double>();
+
+    if (!gamma_in.has_value()) {
+        throw std::runtime_error("Missing gamma for physics: " + PHYSICS_NAMES.at(type) + ".");
+    }
+
+    gamma = gamma_in.value();
+
+    print();
+}
+
+void Euler::print() const {
+    Physics::print();
+    std::cout << "> gamma: " << gamma << std::endl;
+    std::cout << LOG_SEPARATOR << std::endl;
 }
 
 void Euler::calc_diffusive_flux(State & flux) {

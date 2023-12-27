@@ -33,7 +33,7 @@ void BoundaryUPT::print() {
     std::cout << LOG_SEPARATOR << std::endl;
 }
 
-void BoundaryUPT::init(const toml::table& input) {
+void BoundaryUPT::init(const toml::table & input) {
     auto u_in = input["u"];
     const toml::array* arr = u_in.as_array();
     std::optional<double> p_in = input["p"].value<double>();

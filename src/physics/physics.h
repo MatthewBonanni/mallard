@@ -17,6 +17,8 @@
 
 #include "common/common.h"
 
+#include <toml++/toml.h>
+
 enum class PhysicsType {
     EULER
 };
@@ -43,13 +45,20 @@ class Physics {
 
         /**
          * @brief Initialize the physics.
+         * @param input Input file.
          */
-        virtual void init();
+        virtual void init(const toml::table & input);
 
         /**
          * @brief Print the physics.
          */
-        void print() const;
+        virtual void print() const;
+
+        /**
+         * @brief Get gamma
+         * @return gamma
+         */
+        virtual double get_gamma() const = 0;
 
         /**
          * @brief Calculate the Euler flux
@@ -82,10 +91,28 @@ class Euler : public Physics {
         ~Euler();
 
         /**
+         * @brief Initialize the physics.
+         * @param input Input file.
+         */
+        void init(const toml::table & input) override;
+
+        /**
+         * @brief Print the physics.
+         */
+        void print() const override;
+
+        /**
+         * @brief Get gamma
+         * @return gamma
+         */
+        double get_gamma() const override { return gamma; }
+
+        /**
          * @brief Calculate the diffusive flux
          */
         void calc_diffusive_flux(State & flux) override;
     protected:
+        double gamma;
     private:
 };
 

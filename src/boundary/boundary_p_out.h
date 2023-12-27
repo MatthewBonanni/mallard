@@ -35,7 +35,7 @@ class BoundaryPOut : public Boundary {
          * @brief Initialize the boundary.
          * @param input Pointer to the TOML input.
          */
-        void init(const toml::table& input) override;
+        void init(const toml::table & input) override;
     protected:
     private:
         double p;

@@ -64,6 +64,7 @@ class TimeIntegrator {
          * @brief Get the number of solution vectors required by the method,
          *        including the actual solution vector and any intermediate
          *        vectors.
+         * @return int Number of solution vectors.
          */
         int get_n_solution_vectors() const;
 
@@ -71,6 +72,7 @@ class TimeIntegrator {
          * @brief Get the number of rhs vectors required by the method,
          *        including the actual rhs vector and any intermediate
          *        vectors.
+         * @return int Number of rhs vectors.
          */
         int get_n_rhs_vectors() const;
 
