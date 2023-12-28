@@ -68,6 +68,13 @@ class Physics {
         virtual double get_energy_from_temperature(const double & T) const = 0;
 
         /**
+         * @brief Get temperature from energy.
+         * @param e Energy
+         * @return Temperature
+         */
+        virtual double get_temperature_from_energy(const double & e) const = 0;
+
+        /**
          * @brief Get density from pressure and temperature.
          * @param p Pressure
          * @param T Temperature
@@ -75,6 +82,14 @@ class Physics {
          */
         virtual double get_density_from_pressure_temperature(const double & p,
                                                              const double & T) const = 0;
+        
+        /**
+         * @brief Get sound speed from pressure and density.
+         * @param p Pressure
+         * @param rho Density
+         */
+        virtual double get_sound_speed_from_pressure_density(const double & p,
+                                                             const double & rho) const = 0;
 
         /**
          * @brief Calculate the Euler flux
@@ -131,6 +146,13 @@ class Euler : public Physics {
         double get_energy_from_temperature(const double & T) const override;
 
         /**
+         * @brief Get temperature from energy.
+         * @param e Energy
+         * @return Temperature
+         */
+        double get_temperature_from_energy(const double & e) const override;
+
+        /**
          * @brief Get density from pressure and temperature.
          * @param p Pressure
          * @param T Temperature
@@ -138,6 +160,14 @@ class Euler : public Physics {
          */
         double get_density_from_pressure_temperature(const double & p,
                                                      const double & T) const override;
+        
+        /**
+         * @brief Get sound speed from pressure and density.
+         * @param p Pressure
+         * @param rho Density
+         */
+        double get_sound_speed_from_pressure_density(const double & p,
+                                                     const double & rho) const override;
 
         /**
          * @brief Calculate the diffusive flux

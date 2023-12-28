@@ -13,6 +13,23 @@
 
 #include <cmath>
 
+template <typename T>
+T dot(const T * const v0, const T * const v1, const int n) {
+    T dot = 0.0;
+    for (int i = 0; i < n; i++) {
+        dot += v0[i] * v1[i];
+    }
+    return dot;
+}
+
+double dot_self(const NVector& v) {
+    return dot(v.data(), v.data(), v.size());
+}
+
+double norm_2(const NVector& v) {
+    return std::sqrt(dot_self(v));
+}
+
 double triangle_area_2(const NVector& v0,
                        const NVector& v1,
                        const NVector& v2) {

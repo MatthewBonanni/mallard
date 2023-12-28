@@ -26,13 +26,20 @@
  * @return Dot product.
  */
 template <typename T>
-T dot(const T * const v0, const T * const v1, const int n) {
-    T dot = 0.0;
-    for (int i = 0; i < n; i++) {
-        dot += v0[i] * v1[i];
-    }
-    return dot;
-}
+T dot(const T * const v0, const T * const v1, const int n);
+
+/**
+ * @brief Compute the NVector dotted with itself.
+ * @param v Vector.
+ */
+double dot_self(const NVector& v);
+
+/**
+ * @brief Compute the 2-norm of an NVector.
+ * @param v Vector.
+ * @return Norm.
+ */
+double norm_2(const NVector& v);
 
 /**
  * @brief Compute the area of a triangle from vertices in R^2.

@@ -36,9 +36,17 @@ class BoundaryPOut : public Boundary {
          * @param input Pointer to the TOML input.
          */
         void init(const toml::table & input) override;
+
+        /**
+         * @brief Apply the boundary condition.
+         * @param solution Pointer to the solution vector.
+         * @param rhs Pointer to the right-hand side vector.
+         */
+        void apply(StateVector * solution,
+                   StateVector * rhs) override;
     protected:
     private:
-        double p;
+        double p_bc;
 };
 
 #endif // BOUNDARY_P_OUT_H

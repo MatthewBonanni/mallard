@@ -256,6 +256,7 @@ int Solver::run() {
     std::cout << "Running solver..." << std::endl;
 
     while (!done()) {
+        print_step_info();
         calc_dt();
         take_step();
         do_checks();
@@ -277,6 +278,15 @@ bool Solver::done() const {
     }
 
     return done_steps || done_t;
+}
+
+void Solver::print_step_info() const {
+    std::cout << LOG_SEPARATOR << std::endl;
+    std::cout << "Starting step: " << step
+              << " time: " << t
+              << " dt: " << dt
+              << std::endl;
+    std::cout << LOG_SEPARATOR << std::endl;
 }
 
 void Solver::do_checks() const {

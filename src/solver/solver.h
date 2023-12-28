@@ -109,6 +109,11 @@ class Solver {
         void take_step();
 
         /**
+         * @brief Print step info.
+         */
+        void print_step_info() const;
+
+        /**
          * @brief Do checks.
          */
         void do_checks() const;

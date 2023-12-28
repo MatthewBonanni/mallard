@@ -159,9 +159,18 @@ double Euler::get_energy_from_temperature(const double & T) const {
     return cv * T;
 }
 
+double Euler::get_temperature_from_energy(const double & e) const {
+    return e / cv;
+}
+
 double Euler::get_density_from_pressure_temperature(const double & p,
                                                     const double & T) const {
     return p / (T + R);
+}
+
+double Euler::get_sound_speed_from_pressure_density(const double & p,
+                                                    const double & rho) const {
+    return std::sqrt(gamma * p / rho);
 }
 
 void Euler::calc_diffusive_flux(State & flux) {

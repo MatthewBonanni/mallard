@@ -76,16 +76,14 @@ void BoundaryUPT::apply(StateVector * solution,
     NVector u_l, n_vec;
     for (int i = 0; i < zone->n_faces(); i++) {
         int i_face = (*zone->faces())[i];
-
         int i_cell_l = mesh->cells_of_face(i_face)[0];
-        int i_cell_r = mesh->cells_of_face(i_face)[1];
 
+        // Compute relevant primitive variables
         rho_l = (*solution)[i_cell_l][0];
         u_l[0] = (*solution)[i_cell_l][1] / rho_l;
         u_l[1] = (*solution)[i_cell_l][2] / rho_l;
         E_l = (*solution)[i_cell_l][3] / rho_l;
-        e_l = E_l - 0.5 * (u_l[0] * u_l[0] +
-                           u_l[1] * u_l[1]);
+        e_l = E_l - 0.5 * dot_self(u_l);
         gamma_l = physics->get_gamma();
         p_l = (gamma_l - 1.0) * rho_l * e_l;
         H_l = (E_l + p_l) / rho_l;
@@ -99,7 +97,6 @@ void BoundaryUPT::apply(StateVector * solution,
         // Add flux to RHS
         for (int j = 0; j < 4; j++) {
             (*rhs)[i_cell_l][j] -= mesh->face_area(i) * flux[j];
-            (*rhs)[i_cell_r][j] += mesh->face_area(i) * flux[j];
         }
     }
 }
