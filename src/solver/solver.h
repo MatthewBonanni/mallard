@@ -51,9 +51,9 @@ class Solver {
         void init_mesh();
 
         /**
-         * @brief Initialize the boundaries.
+         * @brief Initialize the physics options.
          */
-        void init_boundaries();
+        void init_physics();
 
         /**
          * @brief Initialize the numerics options.
@@ -61,9 +61,9 @@ class Solver {
         void init_numerics();
 
         /**
-         * @brief Initialize the physics options.
+         * @brief Initialize the boundaries.
          */
-        void init_physics();
+        void init_boundaries();
 
         /**
          * @brief Allocate memory for the data vectors.

@@ -44,9 +44,9 @@ int Solver::init(const std::string& input_file_name) {
     std::cout << LOG_SEPARATOR << std::endl;
 
     init_mesh();
-    init_boundaries();
-    init_numerics();
     init_physics();
+    init_numerics();
+    init_boundaries();
 
     allocate_memory();
 
@@ -83,6 +83,61 @@ void Solver::init_mesh() {
         // Should never get here due to the enum class.
         throw std::runtime_error("Unknown mesh type.");
     }
+}
+
+void Solver::init_physics() {
+    std::cout << "Initializing physics..." << std::endl;
+
+    std::string physics_str = input["physics"]["type"].value_or("euler");
+
+    PhysicsType type;
+    typename std::unordered_map<std::string, PhysicsType>::const_iterator it = PHYSICS_TYPES.find(physics_str);
+    if (it == PHYSICS_TYPES.end()) {
+        throw std::runtime_error("Unknown physics type: " + physics_str + ".");
+    } else {
+        type = it->second;
+    }
+
+    if (type == PhysicsType::EULER) {
+        physics = std::make_shared<Euler>();
+    } else {
+        // Should never get here due to the enum class.
+        throw std::runtime_error("Unknown physics type: " + physics_str + ".");
+    }
+
+    physics->init(input);
+}
+
+void Solver::init_numerics() {
+    std::cout << "Initializing numerics..." << std::endl;
+
+    std::string time_integrator_str = input["numerics"]["time_integrator"].value_or("LSSSPRK3");
+
+    TimeIntegratorType type;
+    typename std::unordered_map<std::string, TimeIntegratorType>::const_iterator it = TIME_INTEGRATOR_TYPES.find(time_integrator_str);
+    if (it == TIME_INTEGRATOR_TYPES.end()) {
+        throw std::runtime_error("Unknown time integrator type: " + time_integrator_str + ".");
+    } else {
+        type = it->second;
+    }
+
+    if (type == TimeIntegratorType::FE) {
+        time_integrator = std::make_unique<FE>();
+    } else if (type == TimeIntegratorType::RK4) {
+        time_integrator = std::make_unique<RK4>();
+    } else if (type == TimeIntegratorType::SSPRK3) {
+        time_integrator = std::make_unique<SSPRK3>();
+    } else if (type == TimeIntegratorType::LSRK4) {
+        time_integrator = std::make_unique<LSRK4>();
+    } else if (type == TimeIntegratorType::LSSSPRK3) {
+        time_integrator = std::make_unique<LSSSPRK3>();
+    } else {
+        // Should never get here due to the enum class.
+        throw std::runtime_error("Unknown time integrator type: " + time_integrator_str + ".");
+    }
+
+    rhs_func = std::bind(&Solver::calc_rhs, this, std::placeholders::_1, std::placeholders::_2);
+    time_integrator->init();
 }
 
 void Solver::init_boundaries() {
@@ -129,61 +184,6 @@ void Solver::init_boundaries() {
         boundaries.back()->set_physics(physics);
         boundaries.back()->init(bound);
     }
-}
-
-void Solver::init_numerics() {
-    std::cout << "Initializing numerics..." << std::endl;
-
-    std::string time_integrator_str = input["numerics"]["time_integrator"].value_or("LSSSPRK3");
-
-    TimeIntegratorType type;
-    typename std::unordered_map<std::string, TimeIntegratorType>::const_iterator it = TIME_INTEGRATOR_TYPES.find(time_integrator_str);
-    if (it == TIME_INTEGRATOR_TYPES.end()) {
-        throw std::runtime_error("Unknown time integrator type: " + time_integrator_str + ".");
-    } else {
-        type = it->second;
-    }
-
-    if (type == TimeIntegratorType::FE) {
-        time_integrator = std::make_unique<FE>();
-    } else if (type == TimeIntegratorType::RK4) {
-        time_integrator = std::make_unique<RK4>();
-    } else if (type == TimeIntegratorType::SSPRK3) {
-        time_integrator = std::make_unique<SSPRK3>();
-    } else if (type == TimeIntegratorType::LSRK4) {
-        time_integrator = std::make_unique<LSRK4>();
-    } else if (type == TimeIntegratorType::LSSSPRK3) {
-        time_integrator = std::make_unique<LSSSPRK3>();
-    } else {
-        // Should never get here due to the enum class.
-        throw std::runtime_error("Unknown time integrator type: " + time_integrator_str + ".");
-    }
-
-    rhs_func = std::bind(&Solver::calc_rhs, this, std::placeholders::_1, std::placeholders::_2);
-    time_integrator->init();
-}
-
-void Solver::init_physics() {
-    std::cout << "Initializing physics..." << std::endl;
-
-    std::string physics_str = input["physics"]["type"].value_or("euler");
-
-    PhysicsType type;
-    typename std::unordered_map<std::string, PhysicsType>::const_iterator it = PHYSICS_TYPES.find(physics_str);
-    if (it == PHYSICS_TYPES.end()) {
-        throw std::runtime_error("Unknown physics type: " + physics_str + ".");
-    } else {
-        type = it->second;
-    }
-
-    if (type == PhysicsType::EULER) {
-        physics = std::make_shared<Euler>();
-    } else {
-        // Should never get here due to the enum class.
-        throw std::runtime_error("Unknown physics type: " + physics_str + ".");
-    }
-
-    physics->init(input);
 }
 
 void Solver::allocate_memory() {
