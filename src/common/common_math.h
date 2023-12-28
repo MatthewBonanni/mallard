@@ -42,9 +42,9 @@ T dot(const T * const v0, const T * const v1, const int n) {
  * @param v2 Coordinates of the third vertex.
  * @return Area of the triangle.
  */
-double triangle_area_2(const std::array<double, 2>& v0,
-                       const std::array<double, 2>& v1,
-                       const std::array<double, 2>& v2);
+double triangle_area_2(const NVector& v0,
+                       const NVector& v1,
+                       const NVector& v2);
 
 /**
  * @brief Compute the area of a triangle from vertices in R^3.

@@ -32,10 +32,10 @@ void Physics::print() const {
     std::cout << "Physics: " << PHYSICS_NAMES.at(type) << std::endl;
 }
 
-void Physics::calc_euler_flux(State & flux, const std::array<double, 2> & n_vec,
-                              const double rho_l, const std::array<double, 2> & u_l,
+void Physics::calc_euler_flux(State & flux, const NVector & n_vec,
+                              const double rho_l, const NVector & u_l,
                               const double p_l, const double gamma_l, const double H_l,
-                              const double rho_r, const std::array<double, 2> & u_r,
+                              const double rho_r, const NVector & u_r,
                               const double p_r, const double gamma_r, const double H_r) {
     // HLLC flux
 
@@ -115,20 +115,53 @@ Euler::~Euler() {
 
 void Euler::init(const toml::table & input) {
     std::optional<double> gamma_in = input["physics"]["gamma"].value<double>();
+    std::optional<double> p_ref_in = input["physics"]["p_ref"].value<double>();
+    std::optional<double> T_ref_in = input["physics"]["T_ref"].value<double>();
+    std::optional<double> rho_ref_in = input["physics"]["rho_ref"].value<double>();
 
     if (!gamma_in.has_value()) {
         throw std::runtime_error("Missing gamma for physics: " + PHYSICS_NAMES.at(type) + ".");
     }
+    if (!p_ref_in.has_value()) {
+        throw std::runtime_error("Missing p_ref for physics: " + PHYSICS_NAMES.at(type) + ".");
+    }
+    if (!T_ref_in.has_value()) {
+        throw std::runtime_error("Missing T_ref for physics: " + PHYSICS_NAMES.at(type) + ".");
+    }
+    if (!rho_ref_in.has_value()) {
+        throw std::runtime_error("Missing rho_ref for physics: " + PHYSICS_NAMES.at(type) + ".");
+    }
 
     gamma = gamma_in.value();
+    p_ref = p_ref_in.value();
+    T_ref = T_ref_in.value();
+    rho_ref = rho_ref_in.value();
 
     print();
+}
+
+void Euler::set_R_cp_cv() {
+    R = p_ref / (T_ref * rho_ref);
+    cp = R * gamma / (gamma - 1.0);
+    cv = cp / gamma;
 }
 
 void Euler::print() const {
     Physics::print();
     std::cout << "> gamma: " << gamma << std::endl;
+    std::cout << "> p_ref: " << p_ref << std::endl;
+    std::cout << "> T_ref: " << T_ref << std::endl;
+    std::cout << "> rho_ref: " << rho_ref << std::endl;
     std::cout << LOG_SEPARATOR << std::endl;
+}
+
+double Euler::get_energy_from_temperature(const double & T) const {
+    return cv * T;
+}
+
+double Euler::get_density_from_pressure_temperature(const double & p,
+                                                    const double & T) const {
+    return p / (T + R);
 }
 
 void Euler::calc_diffusive_flux(State & flux) {

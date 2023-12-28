@@ -12,6 +12,7 @@
 #include "boundary.h"
 
 #include <iostream>
+#include <utility>
 
 #include "common/common.h"
 
@@ -20,11 +21,19 @@ Boundary::Boundary() {
 }
 
 Boundary::~Boundary() {
-    // Empty
+    std::cout << "Destroying boundary: " << zone->get_name() << std::endl;
 }
 
 void Boundary::set_zone(FaceZone * zone) {
     this->zone = zone;
+}
+
+void Boundary::set_mesh(std::shared_ptr<Mesh> mesh) {
+    this->mesh = mesh;
+}
+
+void Boundary::set_physics(std::shared_ptr<Physics> physics) {
+    this->physics = physics;
 }
 
 void Boundary::print() {

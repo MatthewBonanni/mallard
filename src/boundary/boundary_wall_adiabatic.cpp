@@ -31,3 +31,36 @@ void BoundaryWallAdiabatic::print() {
 void BoundaryWallAdiabatic::init(const toml::table & input) {
     // Empty
 }
+
+void BoundaryWallAdiabatic::apply(StateVector * solution,
+                                  StateVector * rhs) {
+    State flux;
+    double rho_l, E_l, e_l, gamma_l, p_l;
+    NVector u_l;
+    for (int i = 0; i < zone->n_faces(); i++) {
+        int i_face = (*zone->faces())[i];
+
+        int i_cell_l = mesh->cells_of_face(i_face)[0];
+        int i_cell_r = mesh->cells_of_face(i_face)[1];
+
+        rho_l = (*solution)[i_cell_l][0];
+        u_l[0] = (*solution)[i_cell_l][1] / rho_l;
+        u_l[1] = (*solution)[i_cell_l][2] / rho_l;
+        E_l = (*solution)[i_cell_l][3] / rho_l;
+        e_l = E_l - 0.5 * (u_l[0] * u_l[0] +
+                           u_l[1] * u_l[1]);
+        gamma_l = physics->get_gamma();
+        p_l = (gamma_l - 1.0) * rho_l * e_l;
+
+        flux[0] = 0.0;
+        flux[1] = -p_l * mesh->face_normal(i_face)[0];
+        flux[2] = -p_l * mesh->face_normal(i_face)[1];
+        flux[3] = 0.0;
+
+        // Add flux to RHS
+        for (int j = 0; j < 4; j++) {
+            (*rhs)[i_cell_l][j] -= mesh->face_area(i) * flux[j];
+            (*rhs)[i_cell_r][j] += mesh->face_area(i) * flux[j];
+        }
+    }
+}

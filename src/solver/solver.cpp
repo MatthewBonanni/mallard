@@ -13,6 +13,7 @@
 
 #include <iostream>
 #include <functional>
+#include <memory>
 
 #include "common/common.h"
 #include "mesh/mesh.h"
@@ -26,9 +27,9 @@ Solver::Solver() {
 }
 
 Solver::~Solver() {
-    // Empty
+    std::cout << "Destroying solver..." << std::endl;
+    deallocate_memory();
 }
-
 
 int Solver::init(const std::string& input_file_name) {
     print_logo();
@@ -64,7 +65,8 @@ void Solver::init_mesh() {
         type = it->second;
     }
 
-    mesh.set_type(type);
+    mesh = std::make_shared<Mesh>();
+    mesh->set_type(type);
 
     if (type == MeshType::FILE) {
         std::string filename = input["mesh"]["filename"].value_or("mesh.msh");
@@ -76,7 +78,7 @@ void Solver::init_mesh() {
         int Ny = input["mesh"]["Ny"].value_or(100);
         double Lx = input["mesh"]["Lx"].value_or(1.0);
         double Ly = input["mesh"]["Ly"].value_or(1.0);
-        mesh.init_wedge(Nx, Ny, Lx, Ly);
+        mesh->init_wedge(Nx, Ny, Lx, Ly);
     } else {
         // Should never get here due to the enum class.
         throw std::runtime_error("Unknown mesh type.");
@@ -107,7 +109,7 @@ void Solver::init_boundaries() {
             btype = it->second;
         }
 
-        if (mesh.get_face_zone(*name) == nullptr) {
+        if (mesh->get_face_zone(*name) == nullptr) {
             throw std::runtime_error("Boundary name " + *name + " not found in mesh.");
         }
 
@@ -122,7 +124,9 @@ void Solver::init_boundaries() {
             throw std::runtime_error("Unknown boundary type: " + *type + ".");
         }
 
-        boundaries.back()->set_zone(mesh.get_face_zone(*name));
+        boundaries.back()->set_zone(mesh->get_face_zone(*name));
+        boundaries.back()->set_mesh(mesh);
+        boundaries.back()->set_physics(physics);
         boundaries.back()->init(bound);
     }
 }
@@ -173,7 +177,7 @@ void Solver::init_physics() {
     }
 
     if (type == PhysicsType::EULER) {
-        physics = std::make_unique<Euler>();
+        physics = std::make_shared<Euler>();
     } else {
         // Should never get here due to the enum class.
         throw std::runtime_error("Unknown physics type: " + physics_str + ".");
@@ -185,19 +189,30 @@ void Solver::init_physics() {
 void Solver::allocate_memory() {
     std::cout << "Allocating memory..." << std::endl;
 
-    conservatives.resize(mesh.n_cells());
-    primitives.resize(mesh.n_cells());
-    rhs.resize(mesh.n_cells());
-    face_conservatives.resize(mesh.n_faces());
-    face_primitives.resize(mesh.n_faces());
+    conservatives.resize(mesh->n_cells());
+    primitives.resize(mesh->n_cells());
+    rhs.resize(mesh->n_cells());
+    face_conservatives.resize(mesh->n_faces());
+    face_primitives.resize(mesh->n_faces());
 
     solution_pointers.push_back(&conservatives);
     for (int i = 0; i < time_integrator->get_n_solution_vectors() - 1; i++) {
-        solution_pointers.push_back(new StateVector(mesh.n_cells()));
+        solution_pointers.push_back(new StateVector(mesh->n_cells()));
     }
 
     for (int i = 0; i < time_integrator->get_n_rhs_vectors(); i++) {
-        rhs_pointers.push_back(new StateVector(mesh.n_cells()));
+        rhs_pointers.push_back(new StateVector(mesh->n_cells()));
+    }
+}
+
+void Solver::deallocate_memory() {
+    std::cout << "Deallocating memory..." << std::endl;
+
+    for (auto& solution : solution_pointers) {
+        delete solution;
+    }
+    for (auto& rhs : rhs_pointers) {
+        delete rhs;
     }
 }
 
@@ -226,7 +241,7 @@ void Solver::calc_rhs(StateVector * solution,
 
 void Solver::pre_rhs(StateVector * solution,
                      StateVector * rhs) {
-    for (int i = 0; i < mesh.n_cells(); i++) {
+    for (int i = 0; i < mesh->n_cells(); i++) {
         (*rhs)[i][0] = 0.0;
         (*rhs)[i][1] = 0.0;
         (*rhs)[i][2] = 0.0;
@@ -237,7 +252,7 @@ void Solver::pre_rhs(StateVector * solution,
 void Solver::calc_rhs_source(StateVector * solution,
                              StateVector * rhs) {
     // TODO - Sources not implemented yet.
-    for (int i = 0; i < mesh.n_cells(); i++) {
+    for (int i = 0; i < mesh->n_cells(); i++) {
         (*rhs)[i][0] += 0.0;
         (*rhs)[i][1] += 0.0;
         (*rhs)[i][2] += 0.0;
@@ -249,23 +264,23 @@ void Solver::calc_rhs_interior(StateVector * solution,
                                StateVector * rhs) {
     State flux;
     double rho_l, rho_r;
-    std::array<double, 2> u_l, u_r;
+    NVector u_l, u_r;
     double E_l, E_r;
     double e_l, e_r;
     double p_l, p_r;
     double gamma_l, gamma_r;
     double H_l, H_r;
-    std::array<double, 2> n_vec;
+    NVector n_vec;
 
-    for (int i = 0; i < mesh.n_faces(); i++) {
+    for (int i = 0; i < mesh->n_faces(); i++) {
         // TODO - iterate only over interior faces to save time.
-        if (mesh.cells_of_face(i)[0] == -1) {
+        if (mesh->cells_of_face(i)[0] == -1) {
             // Boundary face
             continue;
         }
 
-        int i_cell_l = mesh.cells_of_face(i)[0];
-        int i_cell_r = mesh.cells_of_face(i)[1];
+        int i_cell_l = mesh->cells_of_face(i)[0];
+        int i_cell_r = mesh->cells_of_face(i)[1];
 
         // Compute relevant primitive variables
         rho_l = (*solution)[i_cell_l][0];
@@ -288,7 +303,7 @@ void Solver::calc_rhs_interior(StateVector * solution,
         H_r = (E_r + p_r) / rho_r;
 
         // Get face normal vector
-        n_vec = mesh.face_normal(i);
+        n_vec = mesh->face_normal(i);
 
         // Calculate flux
         physics->calc_euler_flux(flux, n_vec,
@@ -297,8 +312,8 @@ void Solver::calc_rhs_interior(StateVector * solution,
         
         // Add flux to RHS
         for (int j = 0; j < 4; j++) {
-            (*rhs)[i_cell_l][j] -= mesh.face_area(i) * flux[j];
-            (*rhs)[i_cell_r][j] += mesh.face_area(i) * flux[j];
+            (*rhs)[i_cell_l][j] -= mesh->face_area(i) * flux[j];
+            (*rhs)[i_cell_r][j] += mesh->face_area(i) * flux[j];
         }
     }
 }

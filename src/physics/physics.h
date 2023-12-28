@@ -34,18 +34,18 @@ static const std::unordered_map<PhysicsType, std::string> PHYSICS_NAMES = {
 class Physics {
     public:
         /**
-         * @brief Construct a new Physics object
+         * @brief Construct a new Physics object.
          */
         Physics();
 
         /**
-         * @brief Destroy the Physics object
+         * @brief Destroy the Physics object.
          */
         virtual ~Physics();
 
         /**
          * @brief Initialize the physics.
-         * @param input Input file.
+         * @param input Input file
          */
         virtual void init(const toml::table & input);
 
@@ -55,18 +55,34 @@ class Physics {
         virtual void print() const;
 
         /**
-         * @brief Get gamma
-         * @return gamma
+         * @brief Get gamma.
+         * @return Gamma
          */
         virtual double get_gamma() const = 0;
 
         /**
+         * @brief Get energy from temperature.
+         * @param T Temperature
+         * @return Energy
+         */
+        virtual double get_energy_from_temperature(const double & T) const = 0;
+
+        /**
+         * @brief Get density from pressure and temperature.
+         * @param p Pressure
+         * @param T Temperature
+         * @return Density
+         */
+        virtual double get_density_from_pressure_temperature(const double & p,
+                                                             const double & T) const = 0;
+
+        /**
          * @brief Calculate the Euler flux
          */
-        void calc_euler_flux(State & flux, const std::array<double, 2> & n_vec,
-                             const double rho_l, const std::array<double, 2> & u_l,
+        void calc_euler_flux(State & flux, const NVector & n_vec,
+                             const double rho_l, const NVector & u_l,
                              const double p_l, const double gamma_l, const double H_l,
-                             const double rho_r, const std::array<double, 2> & u_r,
+                             const double rho_r, const NVector & u_r,
                              const double p_r, const double gamma_r, const double H_r);
 
         /**
@@ -108,12 +124,32 @@ class Euler : public Physics {
         double get_gamma() const override { return gamma; }
 
         /**
+         * @brief Get energy from temperature.
+         * @param T Temperature
+         * @return Energy
+         */
+        double get_energy_from_temperature(const double & T) const override;
+
+        /**
+         * @brief Get density from pressure and temperature.
+         * @param p Pressure
+         * @param T Temperature
+         * @return Density
+         */
+        double get_density_from_pressure_temperature(const double & p,
+                                                     const double & T) const override;
+
+        /**
          * @brief Calculate the diffusive flux
          */
         void calc_diffusive_flux(State & flux) override;
     protected:
-        double gamma;
     private:
+        void set_R_cp_cv();
+
+        double gamma;
+        double p_ref, T_ref, rho_ref;
+        double R, cp, cv;
 };
 
 #endif // PHYSICS_H

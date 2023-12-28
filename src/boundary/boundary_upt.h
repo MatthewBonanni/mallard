@@ -36,11 +36,26 @@ class BoundaryUPT : public Boundary {
          * @param input Pointer to the TOML input.
          */
         void init(const toml::table & input) override;
+
+        /**
+         * @brief Apply the boundary condition.
+         * @param solution Pointer to the solution vector.
+         * @param rhs Pointer to the right-hand side vector.
+         */
+        void apply(StateVector * solution,
+                   StateVector * rhs) override;
     protected:
     private:
-        std::array<double, 2> u;
-        double p;
-        double T;
+        // Input
+        NVector u_bc;
+        double p_bc;
+        double T_bc;
+
+        // Dependent
+        double rho_bc;
+        double e_bc;
+        double E_bc;
+        double H_bc;
 };
 
 #endif // BOUNDARY_UPT_H

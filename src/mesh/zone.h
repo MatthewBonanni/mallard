@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+#include "common/common_typedef.h"
+
 enum class FaceZoneType {
     UNKNOWN = -1,
     BOUNDARY = 1,
@@ -67,6 +69,12 @@ class FaceZone : public Zone {
         ~FaceZone();
 
         /**
+         * @brief Get the number of faces in the zone.
+         * @return Number of faces in the zone.
+         */
+        int n_faces() const;
+
+        /**
          * @brief Get a pointer to the vector of faces of the zone.
          * @return Faces of the zone.
          */
@@ -100,6 +108,12 @@ class CellZone : public Zone {
          * @brief Destroy the CellZone object
          */
         ~CellZone();
+
+        /**
+         * @brief Get the number of cells in the zone.
+         * @return Number of cells in the zone.
+         */
+        int n_cells() const;
 
         /**
          * @brief Get the cells of the zone.

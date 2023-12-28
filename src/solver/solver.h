@@ -71,6 +71,11 @@ class Solver {
         void allocate_memory();
 
         /**
+         * @brief Deallocate memory for the data vectors.
+         */
+        void deallocate_memory();
+
+        /**
          * @brief Print the logo.
          */
         void print_logo() const;
@@ -122,10 +127,10 @@ class Solver {
                                  StateVector * rhs);
     private:
         toml::table input;
-        Mesh mesh;
+        std::shared_ptr<Mesh> mesh;
         std::vector<std::unique_ptr<Boundary>> boundaries;
         std::unique_ptr<TimeIntegrator> time_integrator;
-        std::unique_ptr<Physics> physics;
+        std::shared_ptr<Physics> physics;
         StateVector conservatives;
         StateVector primitives;
         StateVector rhs;

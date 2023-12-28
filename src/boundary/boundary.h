@@ -16,6 +16,8 @@
 
 #include "common/common.h"
 #include "mesh/zone.h"
+#include "mesh/mesh.h"
+#include "physics/physics.h"
 
 enum class BoundaryType {
     WALL_ADIABATIC = 1,
@@ -54,6 +56,18 @@ class Boundary {
         void set_zone(FaceZone * zone);
 
         /**
+         * @brief Set the mesh.
+         * @param mesh Pointer to the mesh.
+         */
+        void set_mesh(std::shared_ptr<Mesh> mesh);
+
+        /**
+         * @brief Set the physics.
+         * @param physics Pointer to the physics.
+         */
+        void set_physics(std::shared_ptr<Physics> physics);
+
+        /**
          * @brief Print the boundary.
          */
         virtual void print();
@@ -74,7 +88,9 @@ class Boundary {
         
     protected:
         FaceZone * zone;
+        std::shared_ptr<Mesh> mesh;
         BoundaryType type;
+        std::shared_ptr<Physics> physics;
     private:
 };
 

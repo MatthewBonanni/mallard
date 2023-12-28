@@ -61,11 +61,11 @@ FaceZone * Mesh::get_face_zone(const std::string& name) {
     return nullptr;
 }
 
-std::array<double, 2> Mesh::cell_coords(int i_cell) const {
+NVector Mesh::cell_coords(int i_cell) const {
     return m_cell_coords[i_cell];
 }
 
-std::array<double, 2> Mesh::node_coords(int i_node) const {
+NVector Mesh::node_coords(int i_node) const {
     return m_node_coords[i_node];
 }
 
@@ -77,7 +77,7 @@ double Mesh::face_area(int i_face) const {
     return m_face_area[i_face];
 }
 
-std::array<double, 2> Mesh::face_normal(int i_face) const {
+NVector Mesh::face_normal(int i_face) const {
     return m_face_normals[i_face];
 }
 
@@ -268,26 +268,28 @@ void Mesh::init_wedge(int nx, int ny, double Lx, double Ly) {
     for (int i_cell = 0; i_cell < n_cells(); i_cell++) {
         int ic = i_cell / ny;
         int jc = i_cell % ny;
+        int i_face;
+        FaceZone * zone;
 
         if (ic == nx - 1) {
-            m_cells_of_face[m_faces_of_cell[i_cell][0]][1] = -1;
-            zone_r.faces()->push_back(m_faces_of_cell[i_cell][0]);
+            i_face = m_faces_of_cell[i_cell][0];
+            zone = &zone_r;
         }
-
         if (jc == ny - 1) {
-            m_cells_of_face[m_faces_of_cell[i_cell][1]][1] = -1;
-            zone_t.faces()->push_back(m_faces_of_cell[i_cell][1]);
+            i_face = m_faces_of_cell[i_cell][1];
+            zone = &zone_t;
         }
-
         if (ic == 0) {
-            m_cells_of_face[m_faces_of_cell[i_cell][2]][1] = -1;
-            zone_l.faces()->push_back(m_faces_of_cell[i_cell][2]);
+            i_face = m_faces_of_cell[i_cell][2];
+            zone = &zone_l;
+        }
+        if (jc == 0) {
+            i_face = m_faces_of_cell[i_cell][3];
+            zone = &zone_b;
         }
 
-        if (jc == 0) {
-            m_cells_of_face[m_faces_of_cell[i_cell][3]][1] = -1;
-            zone_b.faces()->push_back(m_faces_of_cell[i_cell][3]);
-        }
+        m_cells_of_face[i_face][1] = -1;
+        zone->faces()->push_back(i_face);
     }
     m_face_zones.push_back(zone_r);
     m_face_zones.push_back(zone_t);

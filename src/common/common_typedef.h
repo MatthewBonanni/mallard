@@ -15,6 +15,7 @@
 #include <array>
 #include <vector>
 
+#define NVector std::array<double, 2>
 #define State std::array<double, 4>
 #define FaceState std::array<State, 2>
 #define StateVector std::vector<State>

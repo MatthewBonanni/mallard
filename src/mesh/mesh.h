@@ -102,7 +102,7 @@ class Mesh {
          * @param i_cell Index of the cell.
          * @return Coordinates of the cell.
          */
-        std::array<double, 2> cell_coords(int i_cell) const;
+        NVector cell_coords(int i_cell) const;
 
         /**
          * @brief Get the coordinates of a node.
@@ -110,7 +110,7 @@ class Mesh {
          * @param i_node Index of the node.
          * @return Coordinates of the node.
          */
-        std::array<double, 2> node_coords(int i_node) const;
+        NVector node_coords(int i_node) const;
 
         /**
          * @brief Get the volume of a cell.
@@ -134,7 +134,7 @@ class Mesh {
          * @param i_face Index of the face.
          * @return Unit vector normal to the face.
          */
-        std::array<double, 2> face_normal(int i_face) const;
+        NVector face_normal(int i_face) const;
 
         /**
          * @brief Get the nodes comprising a cell.
@@ -206,12 +206,12 @@ class Mesh {
     private:
         int nx, ny;
         MeshType type;
-        std::vector<std::array<double, 2>> m_node_coords;
-        std::vector<std::array<double, 2>> m_cell_coords;
-        std::vector<std::array<double, 2>> m_face_coords;
+        std::vector<NVector> m_node_coords;
+        std::vector<NVector> m_cell_coords;
+        std::vector<NVector> m_face_coords;
         std::vector<double> m_cell_volume;
         std::vector<double> m_face_area;
-        std::vector<std::array<double, 2>> m_face_normals;
+        std::vector<NVector> m_face_normals;
         std::vector<std::array<int, 4>> m_nodes_of_cell;
         std::vector<std::array<int, 4>> m_faces_of_cell;
         std::vector<std::array<int, 2>> m_cells_of_face;

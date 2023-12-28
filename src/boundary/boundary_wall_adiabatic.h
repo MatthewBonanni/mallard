@@ -36,6 +36,14 @@ class BoundaryWallAdiabatic : public Boundary {
          * @param input Pointer to the TOML input.
          */
         void init(const toml::table & input) override;
+
+        /**
+         * @brief Apply the boundary condition.
+         * @param solution Pointer to the solution vector.
+         * @param rhs Pointer to the right-hand side vector.
+         */
+        void apply(StateVector * solution,
+                   StateVector * rhs) override;
     protected:
     private:
 };

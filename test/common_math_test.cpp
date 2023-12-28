@@ -13,8 +13,8 @@
 #include "common/common_math.h"
 
 TEST(CommonMathTest, Dot) {
-    std::array<double, 2> v0 = {1.0, 2.0};
-    std::array<double, 2> v1 = {3.0, 4.0};
+    NVector v0 = {1.0, 2.0};
+    NVector v1 = {3.0, 4.0};
 
     double expected_dot = 11.0;
     double actual_dot = dot<double>(v0.data(), v1.data(), 2);
@@ -33,9 +33,9 @@ TEST(CommonMathTest, Dot3) {
 }
 
 TEST(CommonMathTest, TriangleArea2) {
-    std::array<double, 2> v0 = {0.0, 0.0};
-    std::array<double, 2> v1 = {1.0, 0.0};
-    std::array<double, 2> v2 = {0.0, 1.0};
+    NVector v0 = {0.0, 0.0};
+    NVector v1 = {1.0, 0.0};
+    NVector v2 = {0.0, 1.0};
 
     double expected_area = 0.5;
     double actual_area = triangle_area_2(v0, v1, v2);
@@ -44,9 +44,9 @@ TEST(CommonMathTest, TriangleArea2) {
 }
 
 TEST(CommonMathTest, TriangleArea2NegativeCoordinates) {
-    std::array<double, 2> v0 = {-1.0, -1.0};
-    std::array<double, 2> v1 = {1.0, -1.0};
-    std::array<double, 2> v2 = {-1.0, 1.0};
+    NVector v0 = {-1.0, -1.0};
+    NVector v1 = {1.0, -1.0};
+    NVector v2 = {-1.0, 1.0};
 
     double expected_area = 2.0;
     double actual_area = triangle_area_2(v0, v1, v2);
@@ -55,9 +55,9 @@ TEST(CommonMathTest, TriangleArea2NegativeCoordinates) {
 }
 
 TEST(CommonMathTest, TriangleArea2ZeroArea) {
-    std::array<double, 2> v0 = {0.0, 0.0};
-    std::array<double, 2> v1 = {0.0, 0.0};
-    std::array<double, 2> v2 = {0.0, 0.0};
+    NVector v0 = {0.0, 0.0};
+    NVector v1 = {0.0, 0.0};
+    NVector v2 = {0.0, 0.0};
 
     double expected_area = 0.0;
     double actual_area = triangle_area_2(v0, v1, v2);
