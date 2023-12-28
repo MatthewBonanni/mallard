@@ -69,7 +69,7 @@ void BoundaryPOut::apply(StateVector * solution,
         u_mag_l = norm_2(u_l);
         sos_l = physics->get_sound_speed_from_pressure_density(p_l, rho_l);
         if (u_mag_l < sos_l) {
-            // TODO - Implement case where p_bc < 0.0, use average pressure
+            // \todo Implement case where p_bc < 0.0, use average pressure
             p_out = p_bc; // Use the set boundary pressure
         } else {
             p_out = p_l; // Extrapolate pressure

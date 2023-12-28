@@ -43,7 +43,7 @@ int Solver::init(const std::string& input_file_name) {
 
     std::cout << LOG_SEPARATOR << std::endl;
 
-    // TODO - Implement restarts.
+    // \todo Implement restarts.
     t = 0.0;
     step = 0;
 
@@ -222,7 +222,7 @@ void Solver::init_run_parameters() {
         cfl = cfl_in.value();
     }
 
-    // TODO - Implement t_wall_stop
+    // \todo Implement t_wall_stop
     if (t_wall_stop_in.has_value()) {
         throw std::runtime_error("t_wall_stop not implemented.");
     }
@@ -290,7 +290,7 @@ void Solver::print_step_info() const {
 }
 
 void Solver::do_checks() const {
-    // TODO - Implement checks
+    // \todo Implement checks
 }
 
 void Solver::deallocate_memory() {
@@ -317,7 +317,7 @@ void Solver::take_step() {
 }
 
 double Solver::calc_dt() {
-    // TODO - Implement cfl
+    // \todo Implement cfl
     if (use_cfl) {
         throw std::runtime_error("cfl not implemented.");
     }
@@ -345,7 +345,7 @@ void Solver::pre_rhs(StateVector * solution,
 
 void Solver::calc_rhs_source(StateVector * solution,
                              StateVector * rhs) {
-    // TODO - Sources not implemented yet.
+    // \todo Sources not implemented yet.
     for (int i = 0; i < mesh->n_cells(); i++) {
         (*rhs)[i][0] += 0.0;
         (*rhs)[i][1] += 0.0;
@@ -367,7 +367,7 @@ void Solver::calc_rhs_interior(StateVector * solution,
     NVector n_vec;
 
     for (int i = 0; i < mesh->n_faces(); i++) {
-        // TODO - iterate only over interior faces to save time.
+        // \todo iterate only over interior faces to save time.
         if (mesh->cells_of_face(i)[0] == -1) {
             // Boundary face
             continue;

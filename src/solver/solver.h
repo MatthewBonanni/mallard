@@ -180,7 +180,7 @@ class Solver {
         std::vector<StateVector *> rhs_pointers;
         std::function<void(StateVector *,
                            StateVector *)> rhs_func;
-        // TODO - convert to shared_ptr
+        // \todo convert to shared_ptr
 };
 
 #endif // SOLVER_H
