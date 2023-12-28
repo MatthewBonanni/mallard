@@ -46,6 +46,17 @@ int main(int argc, char* argv[]) {
     // Create solver object
     Solver solver;
     status = solver.init(inputFileName);
+    if (status != 0) {
+        std::cerr << "Error: Solver initialization failed." << std::endl;
+        return status;
+    }
+
+    // Run solver
+    status = solver.run();
+    if (status != 0) {
+        std::cerr << "Error: Solver run failed." << std::endl;
+        return status;
+    }
 
     return status;
 }

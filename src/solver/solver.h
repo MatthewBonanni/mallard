@@ -44,6 +44,12 @@ class Solver {
          * @return Exit status.
          */
         int init(const std::string& input_file_name);
+
+        /**
+         * @brief Run the solver.
+         * @return Exit status.
+         */
+        int run();
     protected:
         /**
          * @brief Initialize the mesh.
@@ -66,9 +72,20 @@ class Solver {
         void init_boundaries();
 
         /**
+         * @brief Initialize the run parameters.
+         */
+        void init_run_parameters();
+
+        /**
          * @brief Allocate memory for the data vectors.
          */
         void allocate_memory();
+
+        /**
+         * @brief Determine whether the simulation should stop.
+         * @return Done flag.
+         */
+        bool done() const;
 
         /**
          * @brief Deallocate memory for the data vectors.
@@ -81,10 +98,20 @@ class Solver {
         void print_logo() const;
 
         /**
-         * @brief Take a single time step.
-         * @param dt Time step size.
+         * @brief Compute the time step size.
+         * @return Time step size.
          */
-        void take_step(const double& dt);
+        double calc_dt();
+
+        /**
+         * @brief Take a single time step.
+         */
+        void take_step();
+
+        /**
+         * @brief Do checks.
+         */
+        void do_checks() const;
 
         /**
          * @brief Calculate the right hand side.
@@ -127,6 +154,14 @@ class Solver {
                                  StateVector * rhs);
     private:
         toml::table input;
+        int n_steps;
+        double t_stop;
+        double t_wall_stop;
+        bool use_cfl;
+        double dt;
+        double cfl;
+        double t;
+        int step;
         std::shared_ptr<Mesh> mesh;
         std::vector<std::unique_ptr<Boundary>> boundaries;
         std::unique_ptr<TimeIntegrator> time_integrator;

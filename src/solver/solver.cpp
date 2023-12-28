@@ -43,10 +43,15 @@ int Solver::init(const std::string& input_file_name) {
 
     std::cout << LOG_SEPARATOR << std::endl;
 
+    // TODO - Implement restarts.
+    t = 0.0;
+    step = 0;
+
     init_mesh();
     init_physics();
     init_numerics();
     init_boundaries();
+    init_run_parameters();
 
     allocate_memory();
 
@@ -186,6 +191,47 @@ void Solver::init_boundaries() {
     }
 }
 
+void Solver::init_run_parameters() {
+    std::cout << "Initializing run parameters..." << std::endl;
+
+    std::optional<double> dt_in = input["run"]["dt"].value<double>();
+    std::optional<double> cfl_in = input["run"]["cfl"].value<double>();
+    std::optional<int> n_steps_in = input["run"]["n_steps"].value<int>();
+    std::optional<double> t_stop_in = input["run"]["t_stop"].value<int>();
+    std::optional<double> t_wall_stop_in = input["run"]["t_wall_stop"].value<int>();
+
+    if (!dt_in.has_value() && !cfl_in.has_value()) {
+        throw std::runtime_error("Either dt or cfl must be specified.");
+    } else if (dt_in.has_value() && cfl_in.has_value()) {
+        throw std::runtime_error("Only one of dt or cfl can be specified.");
+    }
+
+    if (!n_steps_in.has_value() &&
+        !t_stop_in.has_value() &&
+        !t_wall_stop_in.has_value()) {
+        throw std::runtime_error("Either n_steps, t_stop, or t_wall_stop must be specified.");
+    }
+
+    if (dt_in.has_value()) {
+        std::cout << "Using specified dt." << std::endl;
+        use_cfl = false;
+        dt = dt_in.value();
+    } else {
+        std::cout << "Using specified cfl." << std::endl;
+        use_cfl = true;
+        cfl = cfl_in.value();
+    }
+
+    // TODO - Implement t_wall_stop
+    if (t_wall_stop_in.has_value()) {
+        throw std::runtime_error("t_wall_stop not implemented.");
+    }
+
+    n_steps = n_steps_in.value_or(-1);
+    t_stop = t_stop_in.value_or(-1.0);
+    t_wall_stop = t_wall_stop_in.value_or(-1.0);
+}
+
 void Solver::allocate_memory() {
     std::cout << "Allocating memory..." << std::endl;
 
@@ -205,15 +251,42 @@ void Solver::allocate_memory() {
     }
 }
 
+int Solver::run() {
+    std::cout << LOG_SEPARATOR << std::endl;
+    std::cout << "Running solver..." << std::endl;
+
+    while (!done()) {
+        calc_dt();
+        take_step();
+        do_checks();
+    }
+
+    return 0;
+}
+
+bool Solver::done() const {
+    bool done_steps = 0;
+    bool done_t = 0;
+
+    if (step > 0) {
+        done_steps = (step >= n_steps);
+    }
+
+    if (done_t > 0) {
+        done_t = (t >= t_stop);
+    }
+
+    return done_steps || done_t;
+}
+
+void Solver::do_checks() const {
+    // TODO - Implement checks
+}
+
 void Solver::deallocate_memory() {
     std::cout << "Deallocating memory..." << std::endl;
 
-    for (auto& solution : solution_pointers) {
-        delete solution;
-    }
-    for (auto& rhs : rhs_pointers) {
-        delete rhs;
-    }
+    // Nothing to do here yet.
 }
 
 void Solver::print_logo() const {
@@ -224,11 +297,22 @@ void Solver::print_logo() const {
               << R"(/_/  /_/\__,_/_/_/\__,_/_/   \__,_/   )" << std::endl;
 }
 
-void Solver::take_step(const double& dt) {
+void Solver::take_step() {
     time_integrator->take_step(dt,
                                solution_pointers,
                                rhs_pointers,
                                &rhs_func);
+    step++;
+    t += dt;
+}
+
+double Solver::calc_dt() {
+    // TODO - Implement cfl
+    if (use_cfl) {
+        throw std::runtime_error("cfl not implemented.");
+    }
+
+    return dt;
 }
 
 void Solver::calc_rhs(StateVector * solution,
