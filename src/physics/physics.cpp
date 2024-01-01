@@ -173,6 +173,24 @@ double Euler::get_sound_speed_from_pressure_density(const double & p,
     return std::sqrt(gamma * p / rho);
 }
 
+void Euler::compute_primitives_from_conservatives(Primitives & primitives,
+                                                  const State & conservatives) const {
+    double rho = conservatives[0];
+    NVector u = {conservatives[1] / rho,
+                 conservatives[2] / rho};
+    double E = conservatives[3] / rho;
+    double e = E - 0.5 * dot_self(u);
+    double p = (gamma - 1.0) * rho * e;
+    double T = get_temperature_from_energy(e);
+    double h = e + p / rho;
+    double H = h + 0.5 * dot_self(u);
+    primitives[0] = u[0];
+    primitives[1] = u[1];
+    primitives[2] = p;
+    primitives[3] = T;
+    primitives[4] = H;
+}
+
 void Euler::calc_diffusive_flux(State & flux) {
     flux[0] = 0.0;
     flux[1] = 0.0;

@@ -77,6 +77,21 @@ class Solver {
         void init_run_parameters();
 
         /**
+         * @brief Initialize the solution vectors.
+         */
+        void init_solution();
+
+        /**
+         * @brief Initialize the solution to a constant value.
+         */
+        void init_constant();
+
+        /**
+         * @brief Initialize the solution based on an analytical expression.
+         */
+        void init_analytical();
+
+        /**
          * @brief Allocate memory for the data vectors.
          */
         void allocate_memory();
@@ -107,6 +122,11 @@ class Solver {
          * @brief Take a single time step.
          */
         void take_step();
+
+        /**
+         * @brief Update primitive variables.
+         */
+        void update_primitives();
 
         /**
          * @brief Print step info.
@@ -172,7 +192,7 @@ class Solver {
         std::unique_ptr<TimeIntegrator> time_integrator;
         std::shared_ptr<Physics> physics;
         StateVector conservatives;
-        StateVector primitives;
+        PrimitivesVector primitives;
         StateVector rhs;
         FaceStateVector face_conservatives;
         FaceStateVector face_primitives;

@@ -54,6 +54,7 @@ int Solver::init(const std::string& input_file_name) {
     init_run_parameters();
 
     allocate_memory();
+    init_solution();
 
     return 0;
 }
@@ -257,9 +258,9 @@ int Solver::run() {
 
     while (!done()) {
         print_step_info();
+        do_checks();
         calc_dt();
         take_step();
-        do_checks();
     }
 
     return 0;
@@ -289,8 +290,30 @@ void Solver::print_step_info() const {
     std::cout << LOG_SEPARATOR << std::endl;
 }
 
+void print_range(const std::string & name,
+                 const double & min,
+                 const double & max) {
+    std::cout << "> Scalar range: "
+              << name << " = ["
+              << min << ", "
+              << max << "]" << std::endl;
+}
+
 void Solver::do_checks() const {
-    // \todo Implement checks
+    State max_cons = max_array<4>(conservatives);
+    State min_cons = min_array<4>(conservatives);
+    Primitives max_prim = max_array<5>(primitives);
+    Primitives min_prim = min_array<5>(primitives);
+
+    std::cout << LOG_SEPARATOR << std::endl;
+    for (int i = 0; i < CONSERVATIVE_NAMES.size(); i++) {
+        print_range(CONSERVATIVE_NAMES[i], min_cons[i], max_cons[i]);
+    }
+
+    for (int i = 0; i < PRIMITIVE_NAMES.size(); i++) {
+        print_range(PRIMITIVE_NAMES[i], min_prim[i], max_prim[i]);
+    }
+    std::cout << LOG_SEPARATOR << std::endl;
 }
 
 void Solver::deallocate_memory() {
@@ -312,8 +335,16 @@ void Solver::take_step() {
                                solution_pointers,
                                rhs_pointers,
                                &rhs_func);
+    update_primitives();
     step++;
     t += dt;
+}
+
+void Solver::update_primitives() {
+    for (int i_cell = 0; i_cell < mesh->n_cells(); i_cell++) {
+        physics->compute_primitives_from_conservatives(primitives[i_cell],
+                                                       conservatives[i_cell]);
+    }
 }
 
 double Solver::calc_dt() {

@@ -90,6 +90,14 @@ class Physics {
          */
         virtual double get_sound_speed_from_pressure_density(const double & p,
                                                              const double & rho) const = 0;
+        
+        /**
+         * @brief Compute primitive variables from conservative variables.
+         * @param primitives Primitive variables
+         * @param conservatives Conservative variables
+         */
+        virtual void compute_primitives_from_conservatives(Primitives & primitives,
+                                                           const State & conservatives) const = 0;
 
         /**
          * @brief Calculate the Euler flux
@@ -168,6 +176,14 @@ class Euler : public Physics {
          */
         double get_sound_speed_from_pressure_density(const double & p,
                                                      const double & rho) const override;
+
+        /**
+         * @brief Compute primitive variables from conservative variables.
+         * @param primitives Primitive variables
+         * @param conservatives Conservative variables
+         */
+        void compute_primitives_from_conservatives(Primitives & primitives,
+                                                   const State & conservatives) const override;
 
         /**
          * @brief Calculate the diffusive flux

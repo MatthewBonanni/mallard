@@ -13,6 +13,7 @@
 #define COMMON_MATH_H
 
 #include <array>
+#include <vector>
 
 #include "common_typedef.h"
 
@@ -59,6 +60,7 @@ double triangle_area_2(const NVector& v0,
  * @param v0 Coordinates of the first vertex.
  * @param v1 Coordinates of the second vertex.
  * @param v2 Coordinates of the third vertex.
+ * @return Area of the triangle.
  */
 double triangle_area_3(const std::array<double, 3>& v0,
                        const std::array<double, 3>& v1,
@@ -74,5 +76,47 @@ double triangle_area_3(const std::array<double, 3>& v0,
 void linear_combination(const std::vector<StateVector *> & vectors_in,
                         StateVector * const vector_out,
                         const std::vector<double> & coefficients);
+
+/**
+ * @brief Compute the extremum of each element in a vector of arrays.
+ * 
+ * @param arrays
+ * @return std::array<double, N> Extremum of each element.
+ */
+template <int N, typename Compare>
+std::array<double, N> extrema_array(const std::vector<std::array<double, N>> &arrays, Compare comp) {
+    std::array<double, N> extrema;
+    for (int i = 0; i < N; ++i) {
+        extrema[i] = arrays[0][i];
+        for (int j = 1; j < arrays.size(); ++j) {
+            if (comp(arrays[j][i], extrema[i])) {
+                extrema[i] = arrays[j][i];
+            }
+        }
+    }
+    return extrema;
+}
+
+/**
+ * @brief Compute the maximum of each element in a vector of arrays.
+ * 
+ * @param arrays
+ * @return Maximum of each element.
+ */
+template <int N>
+std::array<double, N> max_array(const std::vector<std::array<double, N>> & arrays) {
+    return extrema_array<N>(arrays, std::greater<double>());
+}
+
+/**
+ * @brief Compute the minimum of each element in a vector of arrays.
+ * 
+ * @param arrays
+ * @return Minimum of each element.
+ */
+template <int N>
+std::array<double, N> min_array(const std::vector<std::array<double, N>> &arrays) {
+    return extrema_array<N>(arrays, std::less<double>());
+}
 
 #endif // COMMON_MATH_H
