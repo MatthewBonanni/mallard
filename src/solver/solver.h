@@ -84,12 +84,12 @@ class Solver {
         /**
          * @brief Initialize the solution to a constant value.
          */
-        void init_constant();
+        void init_solution_constant();
 
         /**
          * @brief Initialize the solution based on an analytical expression.
          */
-        void init_analytical();
+        void init_solution_analytical();
 
         /**
          * @brief Allocate memory for the data vectors.

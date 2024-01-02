@@ -46,16 +46,16 @@ void Solver::init_solution() {
     }
 
     if (type == InitType::CONSTANT) {
-        init_constant();
+        init_solution_constant();
     } else if (type == InitType::ANALYTICAL) {
-        init_analytical();
+        init_solution_analytical();
     } else {
         // Should never get here due to the enum class.
         throw std::runtime_error("Unknown initialization type: " + type_str + ".");
     }
 }
 
-void Solver::init_constant() {
+void Solver::init_solution_constant() {
     auto u_in = input["initialize"]["u"];
     const toml::array* arr = u_in.as_array();
     std::optional<double> p_in = input["initialize"]["p"].value<double>();
@@ -105,6 +105,6 @@ void Solver::init_constant() {
     }
 }
 
-void Solver::init_analytical() {
+void Solver::init_solution_analytical() {
     throw std::runtime_error("Analytical initialization not implemented.");
 }
