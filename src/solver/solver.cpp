@@ -367,10 +367,9 @@ void Solver::calc_rhs(StateVector * solution,
 void Solver::pre_rhs(StateVector * solution,
                      StateVector * rhs) {
     for (int i = 0; i < mesh->n_cells(); i++) {
-        (*rhs)[i][0] = 0.0;
-        (*rhs)[i][1] = 0.0;
-        (*rhs)[i][2] = 0.0;
-        (*rhs)[i][3] = 0.0;
+        for (int j = 0; j < 4; j++) {
+            (*rhs)[i][j] = 0.0;
+        }
     }
 }
 
@@ -399,7 +398,7 @@ void Solver::calc_rhs_interior(StateVector * solution,
 
     for (int i = 0; i < mesh->n_faces(); i++) {
         // \todo iterate only over interior faces to save time.
-        if (mesh->cells_of_face(i)[0] == -1) {
+        if (mesh->cells_of_face(i)[1] == -1) {
             // Boundary face
             continue;
         }

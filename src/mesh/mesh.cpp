@@ -220,14 +220,14 @@ void Mesh::init_wedge(int nx, int ny, double Lx, double Ly) {
         int ic = i_cell / ny;
         int jc = i_cell % ny;
         m_nodes_of_cell[i_cell][0] = (ic + 1) * (ny + 1) + jc + 1; // Top right
-        m_nodes_of_cell[i_cell][1] = ic * (ny + 1) + jc + 1;       // Top left
-        m_nodes_of_cell[i_cell][2] = ic * (ny + 1) + jc;           // Bottom left
+        m_nodes_of_cell[i_cell][1] = (ic)     * (ny + 1) + jc + 1; // Top left
+        m_nodes_of_cell[i_cell][2] = (ic)     * (ny + 1) + jc;     // Bottom left
         m_nodes_of_cell[i_cell][3] = (ic + 1) * (ny + 1) + jc;     // Bottom right
 
-        m_faces_of_cell[i_cell][0] = (2 * ny + 1) * (ic + 1);    // Right
-        m_faces_of_cell[i_cell][1] = (2 * ny + 1) * ic + ny + 1; // Top
-        m_faces_of_cell[i_cell][2] = (2 * ny + 1) * ic;          // Left
-        m_faces_of_cell[i_cell][3] = (2 * ny + 1) * ic + ny;     // Bottom
+        m_faces_of_cell[i_cell][0] = (2 * ny + 1) * (ic + 1) + jc;          // Right
+        m_faces_of_cell[i_cell][1] = (2 * ny + 1) * (ic)     + jc + ny + 1; // Top
+        m_faces_of_cell[i_cell][2] = (2 * ny + 1) * (ic)     + jc;          // Left
+        m_faces_of_cell[i_cell][3] = (2 * ny + 1) * (ic)     + jc + ny;     // Bottom
 
         // NOTE: m_cells_of_face and m_nodes_of_face will be overwritten
         // by future loop iterations, but this is okay because
@@ -269,27 +269,31 @@ void Mesh::init_wedge(int nx, int ny, double Lx, double Ly) {
         int ic = i_cell / ny;
         int jc = i_cell % ny;
         int i_face;
-        FaceZone * zone;
 
+        // Right boundary
         if (ic == nx - 1) {
             i_face = m_faces_of_cell[i_cell][0];
-            zone = &zone_r;
+            m_cells_of_face[i_face][1] = -1;
+            zone_r.faces()->push_back(i_face);
         }
+        // Top boundary
         if (jc == ny - 1) {
             i_face = m_faces_of_cell[i_cell][1];
-            zone = &zone_t;
+            m_cells_of_face[i_face][1] = -1;
+            zone_t.faces()->push_back(i_face);
         }
+        // Left boundary
         if (ic == 0) {
             i_face = m_faces_of_cell[i_cell][2];
-            zone = &zone_l;
+            m_cells_of_face[i_face][1] = -1;
+            zone_l.faces()->push_back(i_face);
         }
+        // Bottom boundary
         if (jc == 0) {
             i_face = m_faces_of_cell[i_cell][3];
-            zone = &zone_b;
+            m_cells_of_face[i_face][1] = -1;
+            zone_b.faces()->push_back(i_face);
         }
-
-        m_cells_of_face[i_face][1] = -1;
-        zone->faces()->push_back(i_face);
     }
     m_face_zones.push_back(zone_r);
     m_face_zones.push_back(zone_t);
