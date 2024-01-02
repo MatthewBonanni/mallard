@@ -85,7 +85,7 @@ void Solver::init_constant() {
     double rho = physics->get_density_from_pressure_temperature(p, T);
     double e = physics->get_energy_from_temperature(T);
     double E = e + 0.5 * (u_x * u_x +
-                         u_y * u_y);
+                          u_y * u_y);
     double H = E + p / rho;
     double rhou_x = rho * u_x;
     double rhou_y = rho * u_y;

@@ -423,8 +423,8 @@ void Solver::calc_rhs_interior(StateVector * solution,
         gamma_r = physics->get_gamma();
         p_l = (gamma_l - 1.0) * rho_l * e_l;
         p_r = (gamma_r - 1.0) * rho_r * e_r;
-        H_l = (E_l + p_l) / rho_l;
-        H_r = (E_r + p_r) / rho_r;
+        H_l = E_l + p_l / rho_l;
+        H_r = E_r + p_r / rho_r;
 
         // Get face normal vector
         n_vec = mesh->face_normal(i);

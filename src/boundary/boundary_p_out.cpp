@@ -62,7 +62,7 @@ void BoundaryPOut::apply(StateVector * solution,
         e_l = E_l - 0.5 * dot_self(u_l);
         gamma_l = physics->get_gamma();
         p_l = (gamma_l - 1.0) * rho_l * e_l;
-        H_l = (E_l + p_l) / rho_l;
+        H_l = E_l + p_l / rho_l;
         T_l = physics->get_temperature_from_energy(e_l);
 
         // Determine if subsonic or supersonic
@@ -82,7 +82,7 @@ void BoundaryPOut::apply(StateVector * solution,
         rho_bc = physics->get_density_from_pressure_temperature(p_out, T_bc);
         e_bc = physics->get_energy_from_temperature(T_bc);
         E_bc = e_bc + 0.5 * dot_self(u_bc);
-        H_bc = (E_bc + p_out) / rho_bc;
+        H_bc = E_bc + p_out / rho_bc;
 
         n_vec = mesh->face_normal(i_face);
 

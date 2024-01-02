@@ -137,6 +137,8 @@ void Euler::init(const toml::table & input) {
     T_ref = T_ref_in.value();
     rho_ref = rho_ref_in.value();
 
+    set_R_cp_cv();
+
     print();
 }
 

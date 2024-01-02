@@ -86,7 +86,7 @@ void BoundaryUPT::apply(StateVector * solution,
         e_l = E_l - 0.5 * dot_self(u_l);
         gamma_l = physics->get_gamma();
         p_l = (gamma_l - 1.0) * rho_l * e_l;
-        H_l = (E_l + p_l) / rho_l;
+        H_l = E_l + p_l / rho_l;
 
         n_vec = mesh->face_normal(i_face);
 
