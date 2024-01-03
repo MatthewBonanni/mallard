@@ -16,22 +16,26 @@
 #include <array>
 #include <vector>
 
+#define N_DIM 2
+#define N_CONSERVATIVE N_DIM + 2
+#define N_PRIMITIVE N_DIM + 3
+
 #define NVector std::array<double, 2>
-#define State std::array<double, 4>
-#define Primitives std::array<double, 5>
+#define State std::array<double, N_CONSERVATIVE>
+#define Primitives std::array<double, N_PRIMITIVE>
 #define FaceState std::array<State, 2>
 #define StateVector std::vector<State>
 #define FaceStateVector std::vector<FaceState>
 #define PrimitivesVector std::vector<Primitives>
 
-const std::array<std::string, 4> CONSERVATIVE_NAMES = {
+const std::array<std::string, N_CONSERVATIVE> CONSERVATIVE_NAMES = {
     "RHO",
     "RHOU_X",
     "RHOU_Y",
     "RHOE"
 };
 
-const std::array<std::string, 5> PRIMITIVE_NAMES = {
+const std::array<std::string, N_PRIMITIVE> PRIMITIVE_NAMES = {
     "U_X",
     "U_Y",
     "P",

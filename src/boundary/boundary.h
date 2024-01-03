@@ -74,7 +74,7 @@ class Boundary {
 
         /**
          * @brief Initialize the boundary.
-         * @param input Pointer to the TOML input.
+         * @param input TOML input parameter table.
          */
         virtual void init(const toml::table & input);
 

@@ -52,6 +52,7 @@ int Solver::init(const std::string& input_file_name) {
     init_numerics();
     init_boundaries();
     init_run_parameters();
+    init_data_writers();
 
     allocate_memory();
     init_solution();
@@ -150,7 +151,7 @@ void Solver::init_boundaries() {
     std::cout << "Initializing boundaries..." << std::endl;
 
     auto input_boundaries = input["boundaries"].as_array();
-    for (const auto& input_boundary : *input_boundaries) {
+    for (const auto & input_boundary : *input_boundaries) {
         toml::table bound = *(input_boundary.as_table());
         std::optional<std::string> name = bound["name"].value<std::string>();
         std::optional<std::string> type = bound["type"].value<std::string>();
@@ -233,6 +234,27 @@ void Solver::init_run_parameters() {
     t_wall_stop = t_wall_stop_in.value_or(-1.0);
 }
 
+Data * Solver::get_data(const std::string & name) {
+    for (auto & d : data) {
+        if (d.name() == name) {
+            return &d;
+        }
+    }
+    throw std::runtime_error("Data array " + name + " not found.");
+}
+
+void Solver::init_data_writers() {
+    std::cout << "Initializing data writers..." << std::endl;
+
+    auto outputs = input["output"].as_array();
+    for (const auto & output : *outputs) {
+        toml::table out = *(output.as_table());
+        data_writers.push_back(std::make_unique<DataWriter>());
+        data_writers.back()->init(out,
+                                  data);
+    }
+}
+
 void Solver::allocate_memory() {
     std::cout << "Allocating memory..." << std::endl;
 
@@ -252,16 +274,41 @@ void Solver::allocate_memory() {
     }
 }
 
+void Solver::register_data() {
+    std::cout << "Registering data..." << std::endl;
+
+    for (int i = 0; i < CONSERVATIVE_NAMES.size(); i++) {
+        data.push_back(Data(CONSERVATIVE_NAMES[i],
+                            &conservatives[0][i],
+                            N_CONSERVATIVE));
+    }
+
+    for (int i = 0; i < PRIMITIVE_NAMES.size(); i++) {
+        data.push_back(Data(PRIMITIVE_NAMES[i],
+                            &primitives[0][i],
+                            N_PRIMITIVE));
+    }
+}
+
 int Solver::run() {
     std::cout << LOG_SEPARATOR << std::endl;
     std::cout << "Running solver..." << std::endl;
+
+    write_data(true);
 
     while (!done()) {
         print_step_info();
         do_checks();
         calc_dt();
         take_step();
+        write_data();
     }
+
+    write_data(true);
+
+    std::cout << LOG_SEPARATOR << std::endl;
+    std::cout << "Solver finished." << std::endl;
+    std::cout << LOG_SEPARATOR << std::endl;
 
     return 0;
 }
@@ -314,6 +361,12 @@ void Solver::do_checks() const {
         print_range(PRIMITIVE_NAMES[i], min_prim[i], max_prim[i]);
     }
     std::cout << LOG_SEPARATOR << std::endl;
+}
+
+void Solver::write_data(bool force) const {
+    for (auto & writer : data_writers) {
+        writer->write(step, force);
+    }
 }
 
 void Solver::deallocate_memory() {

@@ -23,6 +23,8 @@
 #include "boundary/boundary.h"
 #include "numerics/time_integrator.h"
 #include "physics/physics.h"
+#include "data.h"
+#include "io/data_writer.h"
 
 class Solver {
     public:
@@ -50,6 +52,12 @@ class Solver {
          * @return Exit status.
          */
         int run();
+
+        /**
+         * @brief Get a pointer to a particular data array.
+         * @param name Name of data array.
+         */
+        Data * get_data(const std::string & name);
     protected:
         /**
          * @brief Initialize the mesh.
@@ -77,6 +85,11 @@ class Solver {
         void init_run_parameters();
 
         /**
+         * @brief Initialize the data writers.
+         */
+        void init_data_writers();
+
+        /**
          * @brief Initialize the solution vectors.
          */
         void init_solution();
@@ -95,6 +108,11 @@ class Solver {
          * @brief Allocate memory for the data vectors.
          */
         void allocate_memory();
+
+        /**
+         * @brief Register the data objects.
+         */
+        void register_data();
 
         /**
          * @brief Determine whether the simulation should stop.
@@ -137,6 +155,11 @@ class Solver {
          * @brief Do checks.
          */
         void do_checks() const;
+
+        /**
+         * @brief Write data.
+         */
+        void write_data(bool force = false) const;
 
         /**
          * @brief Calculate the right hand side.
@@ -200,6 +223,8 @@ class Solver {
         std::vector<StateVector *> rhs_pointers;
         std::function<void(StateVector *,
                            StateVector *)> rhs_func;
+        std::vector<Data> data;
+        std::vector<std::unique_ptr<DataWriter>> data_writers;
         // \todo convert to shared_ptr
 };
 
