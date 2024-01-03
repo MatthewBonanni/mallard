@@ -85,6 +85,11 @@ class Solver {
         void init_run_parameters();
 
         /**
+         * @brief Initialize various output options.
+         */
+        void init_output();
+
+        /**
          * @brief Initialize the data writers.
          */
         void init_data_writers();
@@ -223,6 +228,7 @@ class Solver {
         std::vector<StateVector *> rhs_pointers;
         std::function<void(StateVector *,
                            StateVector *)> rhs_func;
+        int check_interval;
         std::vector<Data> data;
         std::vector<std::unique_ptr<DataWriter>> data_writers;
         // \todo convert to shared_ptr

@@ -13,5 +13,6 @@
 #define COMMON_IO_H
 
 #define LOG_SEPARATOR "----------------------------------------------------------------------"
+#define LEN_STEP 6
 
 #endif // COMMON_IO_H

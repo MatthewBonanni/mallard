@@ -15,6 +15,7 @@
 #include <toml++/toml.h>
 
 #include "solver/data.h"
+#include "mesh/mesh.h"
 
 enum class DataFormat {
     VTU,
@@ -48,7 +49,8 @@ class DataWriter {
          * @param input TOML input parameter table.
          */
         void init(const toml::table & input,
-                  std::vector<Data> & data);
+                  std::vector<Data> & data,
+                  std::shared_ptr<Mesh> mesh);
 
         /**
          * @brief Write the data.
@@ -71,6 +73,7 @@ class DataWriter {
         int interval;
         DataFormat format;
         std::vector<const Data *> data_ptrs;
+        std::shared_ptr<Mesh> mesh;
     private:
 };
 

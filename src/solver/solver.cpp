@@ -52,9 +52,11 @@ int Solver::init(const std::string& input_file_name) {
     init_numerics();
     init_boundaries();
     init_run_parameters();
-    init_data_writers();
 
     allocate_memory();
+    register_data();
+    
+    init_output();
     init_solution();
 
     return 0;
@@ -243,15 +245,22 @@ Data * Solver::get_data(const std::string & name) {
     throw std::runtime_error("Data array " + name + " not found.");
 }
 
+void Solver::init_output() {
+    std::cout << "Initializing output..." << std::endl;
+
+    check_interval = input["output"]["check_interval"].value_or(1);
+
+    init_data_writers();
+}
+
 void Solver::init_data_writers() {
     std::cout << "Initializing data writers..." << std::endl;
 
-    auto outputs = input["output"].as_array();
+    auto outputs = input["write_data"].as_array();
     for (const auto & output : *outputs) {
         toml::table out = *(output.as_table());
         data_writers.push_back(std::make_unique<DataWriter>());
-        data_writers.back()->init(out,
-                                  data);
+        data_writers.back()->init(out, data, mesh);
     }
 }
 
@@ -297,7 +306,6 @@ int Solver::run() {
     write_data(true);
 
     while (!done()) {
-        print_step_info();
         do_checks();
         calc_dt();
         take_step();
@@ -347,6 +355,13 @@ void print_range(const std::string & name,
 }
 
 void Solver::do_checks() const {
+    bool check_now = (step % check_interval == 0);
+    if (!check_now) {
+        return;
+    }
+
+    print_step_info();
+
     State max_cons = max_array<4>(conservatives);
     State min_cons = min_array<4>(conservatives);
     Primitives max_prim = max_array<5>(primitives);

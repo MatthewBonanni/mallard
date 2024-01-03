@@ -12,7 +12,10 @@
 #include "data_writer.h"
 
 #include <string>
+#include <iomanip>
 #include <optional>
+
+#include "common/common_io.h"
 
 DataWriter::DataWriter() {
     // Empty
@@ -23,7 +26,8 @@ DataWriter::~DataWriter() {
 }
 
 void DataWriter::init(const toml::table & input,
-                      std::vector<Data> & data) {
+                      std::vector<Data> & data,
+                      std::shared_ptr<Mesh> mesh) {
     std::optional<std::string> prefix = input["prefix"].value<std::string>();
     std::optional<std::string> format_str = input["format"].value<std::string>();
     std::optional<int> interval = input["interval"].value<int>();
@@ -70,7 +74,12 @@ void DataWriter::init(const toml::table & input,
                 break;
             }
         }
+        if (!found) {
+            throw std::runtime_error("DataWriter: Unknown variable: " + var_str.value() + ".");
+        }
     }
+
+    this->mesh = mesh;
 }
 
 void DataWriter::write(int step, bool force) const {
@@ -89,9 +98,87 @@ void DataWriter::write(int step, bool force) const {
 }
 
 void DataWriter::write_vtu(int step) const {
-    std::string filename = prefix + "_" + std::to_string(step) + ".vtu";
+    std::string filename;
+    std::ostringstream stream;
+    stream << std::setw(LEN_STEP) << std::setfill('0') << step;
+    filename = prefix + "_" + stream.str() + ".vtu";
 
-    throw std::runtime_error("DataWriter::write_vtu not implemented.");
+    std::ofstream out(filename);
+    if (!out.is_open()) {
+        throw std::runtime_error("DataWriter::write_vtu: Could not open file: " + filename + ".");
+    }
+    if (!out.good()) {
+        throw std::runtime_error("DataWriter::write_vtu: Could not write to file: " + filename + ".");
+    }
+
+    // Write header
+    out << "<?xml version=\"1.0\"?>\n";
+    out << "<VTKFile type=\"UnstructuredGrid\" version=\"0.1\" byte_order=\"LittleEndian\">\n";
+    out << "  <UnstructuredGrid>\n";
+    out << "    <Piece NumberOfPoints=\"" << mesh->n_nodes() << "\" NumberOfCells=\"" << mesh->n_cells() << "\">\n";
+
+    // Write PointData
+    out << "      <PointData>\n";
+    out << "      </PointData>\n";
+
+    // Write CellData
+    out << "      <CellData>\n";
+    for (const auto & data_ptr : data_ptrs) {
+        out << "        <DataArray type=\"Float64\" Name=\"" << data_ptr->name() << "\" format=\"ascii\">\n";
+        for (int i = 0; i < mesh->n_cells(); i++) {
+            out << "          " << (*data_ptr)[i] << "\n";
+        }
+        out << "        </DataArray>\n";
+    }
+    out << "      </CellData>\n";
+
+    // Write Points
+    out << "      <Points>\n";
+    out << "        <DataArray type=\"Float64\" NumberOfComponents=\"" << 3 << "\" format=\"ascii\">\n";
+    for (int i = 0; i < mesh->n_nodes(); i++) {
+        out << "          ";
+        for (int j = 0; j < N_DIM; j++) {
+            out << mesh->node_coords(i)[j] << " ";
+        }
+        if (N_DIM == 2) {
+            out << "0.0";
+        }
+        out << "\n";
+    }
+    out << "        </DataArray>\n";
+    out << "      </Points>\n";
+
+    // Write Cells
+    out << "      <Cells>\n";
+    out << "        <DataArray type=\"Int32\" Name=\"connectivity\" format=\"ascii\">\n";
+    for (int i = 0; i < mesh->n_cells(); i++) {
+        out << "          ";
+        for (int j = 0; j < mesh->nodes_of_cell(i).size(); j++) {
+            out << mesh->nodes_of_cell(i)[j] << " ";
+        }
+        out << "\n";
+    }
+    out << "        </DataArray>\n";
+    out << "        <DataArray type=\"Int32\" Name=\"offsets\" format=\"ascii\">\n";
+    int offset = 0;
+    for (int i = 0; i < mesh->n_cells(); i++) {
+        offset += mesh->nodes_of_cell(i).size();
+        out << "          " << offset << "\n";
+    }
+    out << "        </DataArray>\n";
+    out << "        <DataArray type=\"Int32\" Name=\"types\" format=\"ascii\">\n";
+    for (int i = 0; i < mesh->n_cells(); i++) {
+        out << "          " << 7 << "\n";
+    }
+    out << "        </DataArray>\n";
+    out << "      </Cells>\n";
+
+    // Write footer
+    out << "    </Piece>\n";
+    out << "  </UnstructuredGrid>\n";
+    out << "</VTKFile>\n";
+
+    out.close();
 }
 
 void DataWriter::write_tecplot(int step) const {
