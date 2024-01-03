@@ -455,14 +455,9 @@ void Solver::calc_rhs_source(StateVector * solution,
 void Solver::calc_rhs_interior(StateVector * solution,
                                StateVector * rhs) {
     State flux;
-    double rho_l, rho_r;
-    NVector u_l, u_r;
-    double E_l, E_r;
-    double e_l, e_r;
-    double p_l, p_r;
-    double gamma_l, gamma_r;
-    double H_l, H_r;
     NVector n_vec;
+    Primitives primitives_l;
+    Primitives primitives_r;
 
     for (int i = 0; i < mesh->n_faces(); i++) {
         // \todo iterate only over interior faces to save time.
@@ -475,32 +470,19 @@ void Solver::calc_rhs_interior(StateVector * solution,
         int i_cell_r = mesh->cells_of_face(i)[1];
 
         // Compute relevant primitive variables
-        rho_l = (*solution)[i_cell_l][0];
-        rho_r = (*solution)[i_cell_r][0];
-        u_l[0] = (*solution)[i_cell_l][1] / rho_l;
-        u_l[1] = (*solution)[i_cell_l][2] / rho_l;
-        u_r[0] = (*solution)[i_cell_r][1] / rho_r;
-        u_r[1] = (*solution)[i_cell_r][2] / rho_r;
-        E_l = (*solution)[i_cell_l][3] / rho_l;
-        E_r = (*solution)[i_cell_r][3] / rho_r;
-        e_l = E_l - 0.5 * (u_l[0] * u_l[0] +
-                           u_l[1] * u_l[1]);
-        e_r = E_r - 0.5 * (u_r[0] * u_r[0] +
-                           u_r[1] * u_r[1]);
-        gamma_l = physics->get_gamma();
-        gamma_r = physics->get_gamma();
-        p_l = (gamma_l - 1.0) * rho_l * e_l;
-        p_r = (gamma_r - 1.0) * rho_r * e_r;
-        H_l = E_l + p_l / rho_l;
-        H_r = E_r + p_r / rho_r;
+        physics->compute_primitives_from_conservatives(primitives_l,
+                                                       (*solution)[i_cell_l]);
+        physics->compute_primitives_from_conservatives(primitives_r,
+                                                       (*solution)[i_cell_r]);
 
         // Get face normal vector
         n_vec = mesh->face_normal(i);
 
         // Calculate flux
         physics->calc_euler_flux(flux, n_vec,
-                                 rho_l, u_l, p_l, gamma_l, H_l,
-                                 rho_r, u_r, p_r, gamma_r, H_r);
+                                 (*solution)[i_cell_l][0],
+                                 (*solution)[i_cell_r][0],
+                                 primitives_l, primitives_r);
         
         // Add flux to RHS
         for (int j = 0; j < 4; j++) {

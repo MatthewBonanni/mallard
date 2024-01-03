@@ -47,6 +47,8 @@ class DataWriter {
         /**
          * @brief Initialize the DataWriter.
          * @param input TOML input parameter table.
+         * @param data Data objects.
+         * @param mesh pointer to the mesh.
          */
         void init(const toml::table & input,
                   std::vector<Data> & data,

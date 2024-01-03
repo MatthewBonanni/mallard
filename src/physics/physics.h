@@ -101,12 +101,38 @@ class Physics {
 
         /**
          * @brief Calculate the Euler flux
+         * @param flux Flux vector
+         * @param n_vec Normal vector
+         * @param rho_l Left density
+         * @param u_l Left velocity
+         * @param p_l Left pressure
+         * @param gamma_l Left gamma
+         * @param H_l Left enthalpy
+         * @param rho_r Right density
+         * @param u_r Right velocity
+         * @param p_r Right pressure
+         * @param gamma_r Right gamma
+         * @param H_r Right enthalpy
          */
         void calc_euler_flux(State & flux, const NVector & n_vec,
                              const double rho_l, const NVector & u_l,
                              const double p_l, const double gamma_l, const double H_l,
                              const double rho_r, const NVector & u_r,
                              const double p_r, const double gamma_r, const double H_r);
+
+        /**
+         * @brief Calculate the Euler flux (alias for above)
+         * @param flux Flux vector
+         * @param n_vec Normal vector
+         * @param rho_l Left density
+         * @param rho_r Right density
+         * @param primitives_l Left primitive variables
+         * @param primitives_r Right primitive variables
+         */
+        void calc_euler_flux(State & flux, const NVector & n_vec,
+                             const double rho_l, const double rho_r,
+                             const Primitives & primitives_l,
+                             const Primitives & primitives_r);
 
         /**
          * @brief Calculate the diffusive flux

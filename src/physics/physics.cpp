@@ -105,6 +105,18 @@ void Physics::calc_euler_flux(State & flux, const NVector & n_vec,
     }
 }
 
+void Physics::calc_euler_flux(State & flux, const NVector & n_vec,
+                              const double rho_l, const double rho_r,
+                              const Primitives & primitives_l,
+                              const Primitives & primitives_r) {
+    calc_euler_flux(flux, n_vec,
+                    rho_l, {primitives_l[0], primitives_l[1]},
+                    primitives_l[2], get_gamma(), primitives_l[4],
+                    rho_r, {primitives_r[0], primitives_r[1]},
+                    primitives_r[2], get_gamma(), primitives_r[4]);
+}
+                            
+
 Euler::Euler() {
     type = PhysicsType::EULER;
 }

@@ -144,6 +144,7 @@ void DataWriter::write_vtu(int step) const {
             out << "0.0";
         }
         out << "\n";
+        // \todo Add support for 3D meshes
     }
     out << "        </DataArray>\n";
     out << "      </Points>\n";
