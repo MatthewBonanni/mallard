@@ -18,8 +18,9 @@
 #include "common/common.h"
 #include "mesh/mesh.h"
 #include "boundary/boundary.h"
-#include "boundary/boundary_upt.h"
+#include "boundary/boundary_symmetry.h"
 #include "boundary/boundary_wall_adiabatic.h"
+#include "boundary/boundary_upt.h"
 #include "boundary/boundary_p_out.h"
 
 Solver::Solver() {
@@ -177,7 +178,9 @@ void Solver::init_boundaries() {
             throw std::runtime_error("Boundary name " + *name + " not found in mesh.");
         }
 
-        if (btype == BoundaryType::WALL_ADIABATIC) {
+        if (btype == BoundaryType::SYMMETRY) {
+            boundaries.push_back(std::make_unique<BoundarySymmetry>());
+        } else if (btype == BoundaryType::WALL_ADIABATIC) {
             boundaries.push_back(std::make_unique<BoundaryWallAdiabatic>());
         } else if (btype == BoundaryType::UPT) {
             boundaries.push_back(std::make_unique<BoundaryUPT>());
@@ -346,7 +349,6 @@ void Solver::print_step_info() const {
               << " time: " << t
               << " dt: " << dt
               << std::endl;
-    std::cout << LOG_SEPARATOR << std::endl;
 }
 
 void print_range(const std::string & name,
@@ -371,7 +373,6 @@ void Solver::do_checks() const {
     Primitives max_prim = max_array<5>(primitives);
     Primitives min_prim = min_array<5>(primitives);
 
-    std::cout << LOG_SEPARATOR << std::endl;
     for (int i = 0; i < CONSERVATIVE_NAMES.size(); i++) {
         print_range(CONSERVATIVE_NAMES[i], min_cons[i], max_cons[i]);
     }
@@ -442,7 +443,7 @@ double Solver::calc_spectral_radius() {
     double rho_l, rho_r, p_l, p_r, sos_l, sos_r, sos_f;
     NVector s, u_l, u_r, u_f;
     double dx_n, u_n;
-    NVector n_vec, n_unit;
+    NVector n_unit;
 
     for (int i_cell = 0; i_cell < mesh->n_cells(); i_cell++) {
         spectral_radius_convective = 0.0;
@@ -454,10 +455,7 @@ double Solver::calc_spectral_radius() {
             int i_cell_l = mesh->cells_of_face(i_face)[0];
             int i_cell_r = mesh->cells_of_face(i_face)[1];
 
-            n_vec = mesh->face_normal(i_face);
-            double n_mag = sqrt(dot_self(n_vec));
-            n_unit[0] = n_vec[0] / n_mag;
-            n_unit[1] = n_vec[1] / n_mag;
+            n_unit = unit(mesh->face_normal(i_face));
 
             if (i_cell_r == -1) {
                 // Boundary face, hack
@@ -542,10 +540,9 @@ void Solver::calc_rhs_source(StateVector * solution,
 void Solver::calc_rhs_interior(StateVector * solution,
                                StateVector * rhs) {
     State flux;
-    NVector n_vec;
+    NVector n_unit;
     Primitives primitives_l;
     Primitives primitives_r;
-
     for (int i = 0; i < mesh->n_faces(); i++) {
         // \todo iterate only over interior faces to save time.
         if (mesh->cells_of_face(i)[1] == -1) {
@@ -557,16 +554,14 @@ void Solver::calc_rhs_interior(StateVector * solution,
         int i_cell_r = mesh->cells_of_face(i)[1];
 
         // Compute relevant primitive variables
-        physics->compute_primitives_from_conservatives(primitives_l,
-                                                       (*solution)[i_cell_l]);
-        physics->compute_primitives_from_conservatives(primitives_r,
-                                                       (*solution)[i_cell_r]);
+        physics->compute_primitives_from_conservatives(primitives_l, (*solution)[i_cell_l]);
+        physics->compute_primitives_from_conservatives(primitives_r, (*solution)[i_cell_r]);
 
         // Get face normal vector
-        n_vec = mesh->face_normal(i);
+        n_unit = unit(mesh->face_normal(i));
 
         // Calculate flux
-        physics->calc_euler_flux(flux, n_vec,
+        physics->calc_euler_flux(flux, n_unit,
                                  (*solution)[i_cell_l][0],
                                  (*solution)[i_cell_r][0],
                                  primitives_l, primitives_r);

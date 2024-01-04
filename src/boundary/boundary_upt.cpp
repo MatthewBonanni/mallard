@@ -66,33 +66,35 @@ void BoundaryUPT::init(const toml::table & input) {
                          u_bc[1] * u_bc[1]);
     H_bc = E_bc + p_bc / rho_bc;
 
+    primitives_bc[0] = u_bc[0];
+    primitives_bc[1] = u_bc[1];
+    primitives_bc[2] = p_bc;
+    primitives_bc[3] = T_bc;
+    primitives_bc[4] = H_bc;
+
     print();
 }
 
 void BoundaryUPT::apply(StateVector * solution,
                         StateVector * rhs) {
     State flux;
-    double rho_l, E_l, e_l, gamma_l, p_l, H_l;
-    NVector u_l, n_vec;
+    Primitives primitives_l;
+    NVector n_unit;
     for (int i = 0; i < zone->n_faces(); i++) {
         int i_face = (*zone->faces())[i];
         int i_cell_l = mesh->cells_of_face(i_face)[0];
 
         // Compute relevant primitive variables
-        rho_l = (*solution)[i_cell_l][0];
-        u_l[0] = (*solution)[i_cell_l][1] / rho_l;
-        u_l[1] = (*solution)[i_cell_l][2] / rho_l;
-        E_l = (*solution)[i_cell_l][3] / rho_l;
-        e_l = E_l - 0.5 * dot_self(u_l);
-        gamma_l = physics->get_gamma();
-        p_l = (gamma_l - 1.0) * rho_l * e_l;
-        H_l = E_l + p_l / rho_l;
+        physics->compute_primitives_from_conservatives(primitives_l, (*solution)[i_cell_l]);
 
-        n_vec = mesh->face_normal(i_face);
+        // Get face normal vector
+        n_unit = unit(mesh->face_normal(i_face));
 
-        physics->calc_euler_flux(flux, n_vec,
-                                 rho_l, u_l, p_l, gamma_l, H_l,
-                                 rho_bc, u_bc, p_bc, gamma_l, H_bc);
+        // Compute flux
+        physics->calc_euler_flux(flux, n_unit,
+                                 (*solution)[i_cell_l][0],
+                                 rho_bc,
+                                 primitives_l, primitives_bc);
 
         // Add flux to RHS
         for (int j = 0; j < 4; j++) {

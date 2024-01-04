@@ -35,24 +35,22 @@ void BoundaryWallAdiabatic::init(const toml::table & input) {
 void BoundaryWallAdiabatic::apply(StateVector * solution,
                                   StateVector * rhs) {
     State flux;
-    double rho_l, E_l, e_l, gamma_l, p_l;
-    NVector u_l;
+    Primitives primitives_l;
+    NVector n_unit;
     for (int i = 0; i < zone->n_faces(); i++) {
         int i_face = (*zone->faces())[i];
         int i_cell_l = mesh->cells_of_face(i_face)[0];
 
         // Compute relevant primitive variables
-        rho_l = (*solution)[i_cell_l][0];
-        u_l[0] = (*solution)[i_cell_l][1] / rho_l;
-        u_l[1] = (*solution)[i_cell_l][2] / rho_l;
-        E_l = (*solution)[i_cell_l][3] / rho_l;
-        e_l = E_l - 0.5 * dot_self(u_l);
-        gamma_l = physics->get_gamma();
-        p_l = (gamma_l - 1.0) * rho_l * e_l;
+        physics->compute_primitives_from_conservatives(primitives_l, (*solution)[i_cell_l]);
 
+        // Get face normal vector
+        n_unit = unit(mesh->face_normal(i_face));
+
+        // Compute flux
         flux[0] = 0.0;
-        flux[1] = -p_l * mesh->face_normal(i_face)[0];
-        flux[2] = -p_l * mesh->face_normal(i_face)[1];
+        flux[1] = primitives_l[2] * n_unit[0];
+        flux[2] = primitives_l[2] * n_unit[1];
         flux[3] = 0.0;
 
         // Add flux to RHS

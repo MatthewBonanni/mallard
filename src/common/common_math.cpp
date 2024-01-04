@@ -30,6 +30,15 @@ double norm_2(const NVector& v) {
     return std::sqrt(dot_self(v));
 }
 
+NVector unit(const NVector & v) {
+    NVector _v = v;
+    double norm = norm_2(v);
+    for (int i = 0; i < v.size(); ++i) {
+        _v[i] /= norm;
+    }
+    return _v;
+}
+
 double triangle_area_2(const NVector& v0,
                        const NVector& v1,
                        const NVector& v2) {

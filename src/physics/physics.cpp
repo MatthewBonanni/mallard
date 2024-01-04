@@ -32,7 +32,7 @@ void Physics::print() const {
     std::cout << "Physics: " << PHYSICS_NAMES.at(type) << std::endl;
 }
 
-void Physics::calc_euler_flux(State & flux, const NVector & n_vec,
+void Physics::calc_euler_flux(State & flux, const NVector & n_unit,
                               const double rho_l, const NVector & u_l,
                               const double p_l, const double gamma_l, const double H_l,
                               const double rho_r, const NVector & u_r,
@@ -40,8 +40,8 @@ void Physics::calc_euler_flux(State & flux, const NVector & n_vec,
     // HLLC flux
 
     // Preliminary calculations
-    double u_l_n = dot<double>(u_l.data(), n_vec.data(), 2);
-    double u_r_n = dot<double>(u_r.data(), n_vec.data(), 2);
+    double u_l_n = dot<double>(u_l.data(), n_unit.data(), 2);
+    double u_r_n = dot<double>(u_r.data(), n_unit.data(), 2);
     double ul_dot_ul = dot<double>(u_l.data(), u_l.data(), 2);
     double ur_dot_ur = dot<double>(u_r.data(), u_r.data(), 2);
     double c_l = std::sqrt(gamma_l * p_l / rho_l);
@@ -63,8 +63,8 @@ void Physics::calc_euler_flux(State & flux, const NVector & n_vec,
     if (s_m >= 0.0) {
         if (s_l > 0.0) {
             flux[0] = rho_l * u_l_n;
-            flux[1] = rho_l * u_l[0] * u_l_n + p_l * n_vec[0];
-            flux[2] = rho_l * u_l[1] * u_l_n + p_l * n_vec[1];
+            flux[1] = rho_l * u_l[0] * u_l_n + p_l * n_unit[0];
+            flux[2] = rho_l * u_l[1] * u_l_n + p_l * n_unit[1];
             flux[3] = u_l_n * (e_l + p_l);
         } else {
             double inv_sl_minus_sm = 1.0 / (s_l - s_m);
@@ -72,13 +72,13 @@ void Physics::calc_euler_flux(State & flux, const NVector & n_vec,
             double rho_sl = rho_l * sl_minus_uln * inv_sl_minus_sm;
             double rhou_sl[2];
             for (int i = 0; i < 2; i++) {
-                rhou_sl[i] = (rho_l * u_l[i] * sl_minus_uln + (p_star - p_l) * n_vec[i]) * inv_sl_minus_sm;
+                rhou_sl[i] = (rho_l * u_l[i] * sl_minus_uln + (p_star - p_l) * n_unit[i]) * inv_sl_minus_sm;
             }
             double e_sl = (sl_minus_uln * e_l - p_l * u_l_n + p_star * s_m) * inv_sl_minus_sm;
 
             flux[0] = rho_sl * s_m;
-            flux[1] = rhou_sl[0] * s_m + p_star * n_vec[0];
-            flux[2] = rhou_sl[1] * s_m + p_star * n_vec[1];
+            flux[1] = rhou_sl[0] * s_m + p_star * n_unit[0];
+            flux[2] = rhou_sl[1] * s_m + p_star * n_unit[1];
             flux[3] = (e_sl + p_star) * s_m;
         }
     } else {
@@ -88,28 +88,28 @@ void Physics::calc_euler_flux(State & flux, const NVector & n_vec,
             double rho_sr = rho_r * sr_minus_urn * inv_sr_minus_sm;
             double rhou_sr[2];
             for (int i = 0; i < 2; i++) {
-                rhou_sr[i] = (rho_r * u_r[i] * sr_minus_urn + (p_star - p_r) * n_vec[i]) * inv_sr_minus_sm;
+                rhou_sr[i] = (rho_r * u_r[i] * sr_minus_urn + (p_star - p_r) * n_unit[i]) * inv_sr_minus_sm;
             }
             double e_sr = (sr_minus_urn * e_r - p_r * u_r_n + p_star * s_m) * inv_sr_minus_sm;
 
             flux[0] = rho_sr * s_m;
-            flux[1] = rhou_sr[0] * s_m + p_star * n_vec[0];
-            flux[2] = rhou_sr[1] * s_m + p_star * n_vec[1];
+            flux[1] = rhou_sr[0] * s_m + p_star * n_unit[0];
+            flux[2] = rhou_sr[1] * s_m + p_star * n_unit[1];
             flux[3] = (e_sr + p_star) * s_m;
         } else {
             flux[0] = rho_r * u_r_n;
-            flux[1] = rho_r * u_r[0] * u_r_n + p_r * n_vec[0];
-            flux[2] = rho_r * u_r[1] * u_r_n + p_r * n_vec[1];
+            flux[1] = rho_r * u_r[0] * u_r_n + p_r * n_unit[0];
+            flux[2] = rho_r * u_r[1] * u_r_n + p_r * n_unit[1];
             flux[3] = u_r_n * (e_r + p_r);
         }
     }
 }
 
-void Physics::calc_euler_flux(State & flux, const NVector & n_vec,
+void Physics::calc_euler_flux(State & flux, const NVector & n_unit,
                               const double rho_l, const double rho_r,
                               const Primitives & primitives_l,
                               const Primitives & primitives_r) {
-    calc_euler_flux(flux, n_vec,
+    calc_euler_flux(flux, n_unit,
                     rho_l, {primitives_l[0], primitives_l[1]},
                     primitives_l[2], get_gamma(), primitives_l[4],
                     rho_r, {primitives_r[0], primitives_r[1]},
@@ -179,7 +179,7 @@ double Euler::get_temperature_from_energy(const double & e) const {
 
 double Euler::get_density_from_pressure_temperature(const double & p,
                                                     const double & T) const {
-    return p / (T + R);
+    return p / (T * R);
 }
 
 double Euler::get_sound_speed_from_pressure_density(const double & p,

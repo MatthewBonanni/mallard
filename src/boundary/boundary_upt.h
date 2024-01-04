@@ -56,6 +56,7 @@ class BoundaryUPT : public Boundary {
         double e_bc;
         double E_bc;
         double H_bc;
+        Primitives primitives_bc;
 };
 
 #endif // BOUNDARY_UPT_H

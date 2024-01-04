@@ -102,7 +102,7 @@ class Physics {
         /**
          * @brief Calculate the Euler flux
          * @param flux Flux vector
-         * @param n_vec Normal vector
+         * @param n_unit Unit normal vector
          * @param rho_l Left density
          * @param u_l Left velocity
          * @param p_l Left pressure
@@ -114,7 +114,7 @@ class Physics {
          * @param gamma_r Right gamma
          * @param H_r Right enthalpy
          */
-        void calc_euler_flux(State & flux, const NVector & n_vec,
+        void calc_euler_flux(State & flux, const NVector & n_unit,
                              const double rho_l, const NVector & u_l,
                              const double p_l, const double gamma_l, const double H_l,
                              const double rho_r, const NVector & u_r,
@@ -123,13 +123,13 @@ class Physics {
         /**
          * @brief Calculate the Euler flux (alias for above)
          * @param flux Flux vector
-         * @param n_vec Normal vector
+         * @param n_unit Unit normal vector
          * @param rho_l Left density
          * @param rho_r Right density
          * @param primitives_l Left primitive variables
          * @param primitives_r Right primitive variables
          */
-        void calc_euler_flux(State & flux, const NVector & n_vec,
+        void calc_euler_flux(State & flux, const NVector & n_unit,
                              const double rho_l, const double rho_r,
                              const Primitives & primitives_l,
                              const Primitives & primitives_r);

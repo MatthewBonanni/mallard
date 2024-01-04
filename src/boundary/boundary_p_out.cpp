@@ -48,7 +48,7 @@ void BoundaryPOut::apply(StateVector * solution,
     State flux;
     double rho_l, E_l, e_l, gamma_l, p_l, H_l, T_l;
     double sos_l, u_mag_l;
-    NVector u_l, u_bc, n_vec;
+    NVector u_l, u_bc, n_unit;
     double rho_bc, E_bc, e_bc, p_out, H_bc, T_bc;
     for (int i = 0; i < zone->n_faces(); i++) {
         int i_face = (*zone->faces())[i];
@@ -84,9 +84,9 @@ void BoundaryPOut::apply(StateVector * solution,
         E_bc = e_bc + 0.5 * dot_self(u_bc);
         H_bc = E_bc + p_out / rho_bc;
 
-        n_vec = mesh->face_normal(i_face);
+        n_unit = unit(mesh->face_normal(i_face));
 
-        physics->calc_euler_flux(flux, n_vec,
+        physics->calc_euler_flux(flux, n_unit,
                                  rho_l, u_l, p_l, gamma_l, H_l,
                                  rho_bc, u_bc, p_out, gamma_l, H_bc);
 

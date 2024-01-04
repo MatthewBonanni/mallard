@@ -20,18 +20,21 @@
 #include "physics/physics.h"
 
 enum class BoundaryType {
-    WALL_ADIABATIC = 1,
-    UPT = 2,
-    P_OUT = 3
+    SYMMETRY = 1,
+    WALL_ADIABATIC = 2,
+    UPT = 3,
+    P_OUT = 4
 };
 
 static const std::unordered_map<std::string, BoundaryType> BOUNDARY_TYPES = {
+    {"symmetry", BoundaryType::SYMMETRY},
     {"wall_adiabatic", BoundaryType::WALL_ADIABATIC},
     {"upt", BoundaryType::UPT},
     {"p_out", BoundaryType::P_OUT}
 };
 
 static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
+    {BoundaryType::SYMMETRY, "symmetry"},
     {BoundaryType::WALL_ADIABATIC, "wall_adiabatic"},
     {BoundaryType::UPT, "upt"},
     {BoundaryType::P_OUT, "p_out"}

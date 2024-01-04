@@ -43,6 +43,13 @@ double dot_self(const NVector& v);
 double norm_2(const NVector& v);
 
 /**
+ * @brief Compute the unit vector of an NVector.
+ * @param v Vector.
+ * @return Unit vector.
+ */
+NVector unit(const NVector & v);
+
+/**
  * @brief Compute the area of a triangle from vertices in R^2.
  * 
  * @param v0 Coordinates of the first vertex.
