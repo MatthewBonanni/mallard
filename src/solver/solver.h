@@ -142,6 +142,12 @@ class Solver {
         double calc_dt();
 
         /**
+         * @brief Compute the spectral radius.
+         * @return maximum cell-wise spectral radius.
+         */
+        double calc_spectral_radius();
+
+        /**
          * @brief Take a single time step.
          */
         void take_step();
@@ -213,6 +219,7 @@ class Solver {
         bool use_cfl;
         double dt;
         double cfl;
+        std::vector<double> cfl_local;
         double t;
         int step;
         std::shared_ptr<Mesh> mesh;

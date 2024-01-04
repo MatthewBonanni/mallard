@@ -111,6 +111,8 @@ void DataWriter::write_vtu(int step) const {
         throw std::runtime_error("DataWriter::write_vtu: Could not write to file: " + filename + ".");
     }
 
+    // \todo binary format
+
     // Write header
     out << "<?xml version=\"1.0\"?>\n";
     out << "<VTKFile type=\"UnstructuredGrid\" version=\"0.1\" byte_order=\"LittleEndian\">\n";

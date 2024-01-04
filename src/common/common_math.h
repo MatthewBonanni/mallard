@@ -84,7 +84,8 @@ void linear_combination(const std::vector<StateVector *> & vectors_in,
  * @return std::array<double, N> Extremum of each element.
  */
 template <int N, typename Compare>
-std::array<double, N> extrema_array(const std::vector<std::array<double, N>> &arrays, Compare comp) {
+std::array<double, N> extrema_array(const std::vector<std::array<double, N>> &arrays,
+                                    Compare comp) {
     std::array<double, N> extrema;
     for (int i = 0; i < N; ++i) {
         extrema[i] = arrays[0][i];

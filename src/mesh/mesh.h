@@ -113,6 +113,14 @@ class Mesh {
         NVector node_coords(int i_node) const;
 
         /**
+         * @brief Get the coordinates of a face.
+         * 
+         * @param i_face Index of the face.
+         * @return Coordinates of the face.
+         */
+        NVector face_coords(int i_face) const;
+
+        /**
          * @brief Get the volume of a cell.
          * 
          * @param i_cell Index of the cell.

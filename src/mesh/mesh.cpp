@@ -69,6 +69,10 @@ NVector Mesh::node_coords(int i_node) const {
     return m_node_coords[i_node];
 }
 
+NVector Mesh::face_coords(int i_face) const {
+    return m_face_coords[i_face];
+}
+
 double Mesh::cell_volume(int i_cell) const {
     return m_cell_volume[i_cell];
 }

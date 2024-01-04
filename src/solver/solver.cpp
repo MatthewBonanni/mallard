@@ -281,6 +281,8 @@ void Solver::allocate_memory() {
     for (int i = 0; i < time_integrator->get_n_rhs_vectors(); i++) {
         rhs_pointers.push_back(new StateVector(mesh->n_cells()));
     }
+
+    cfl_local.resize(mesh->n_cells());
 }
 
 void Solver::register_data() {
@@ -297,6 +299,8 @@ void Solver::register_data() {
                             &primitives[0][i],
                             N_PRIMITIVE));
     }
+
+    data.push_back(Data("CFL", cfl_local.data()));
 }
 
 int Solver::run() {
@@ -306,8 +310,8 @@ int Solver::run() {
     write_data(true);
 
     while (!done()) {
-        do_checks();
         calc_dt();
+        do_checks();
         take_step();
         write_data();
     }
@@ -418,10 +422,93 @@ void Solver::update_primitives() {
 double Solver::calc_dt() {
     // \todo Implement cfl
     if (use_cfl) {
-        throw std::runtime_error("cfl not implemented.");
+        double max_spectral_radius = calc_spectral_radius();
+        dt = cfl / max_spectral_radius;
+        for (int i = 0; i < mesh->n_cells(); i++) {
+            cfl_local[i] *= dt;
+        }
     }
 
     return dt;
+}
+
+double Solver::calc_spectral_radius() {
+    double max_spectral_radius = -1.0;
+    double spectral_radius_convective;
+    double spectral_radius_acoustic;
+    double spectral_radius_viscous;
+    double spectral_radius_heat;
+    double spectral_radius_overall;
+    double rho_l, rho_r, p_l, p_r, sos_l, sos_r, sos_f;
+    NVector s, u_l, u_r, u_f;
+    double dx_n, u_n;
+    NVector n_vec, n_unit;
+
+    for (int i_cell = 0; i_cell < mesh->n_cells(); i_cell++) {
+        spectral_radius_convective = 0.0;
+        spectral_radius_acoustic = 0.0;
+        spectral_radius_viscous = 0.0;
+        spectral_radius_heat = 0.0;
+
+        for (int i_face = 0; i_face < mesh->faces_of_cell(i_cell).size(); i_face++) {
+            int i_cell_l = mesh->cells_of_face(i_face)[0];
+            int i_cell_r = mesh->cells_of_face(i_face)[1];
+
+            n_vec = mesh->face_normal(i_face);
+            double n_mag = sqrt(dot_self(n_vec));
+            n_unit[0] = n_vec[0] / n_mag;
+            n_unit[1] = n_vec[1] / n_mag;
+
+            if (i_cell_r == -1) {
+                // Boundary face, hack
+                s[0] = 2.0 * (mesh->face_coords(i_face)[0] - mesh->cell_coords(i_cell_l)[0]);
+                s[1] = 2.0 * (mesh->face_coords(i_face)[1] - mesh->cell_coords(i_cell_l)[1]);
+                s[2] = 2.0 * (mesh->face_coords(i_face)[2] - mesh->cell_coords(i_cell_l)[2]);
+
+                i_cell_r = i_cell_l;
+            } else {
+                s[0] = mesh->cell_coords(i_cell_r)[0] - mesh->cell_coords(i_cell_l)[0];
+                s[1] = mesh->cell_coords(i_cell_r)[1] - mesh->cell_coords(i_cell_l)[1];
+                s[2] = mesh->cell_coords(i_cell_r)[2] - mesh->cell_coords(i_cell_l)[2];
+            }
+
+            dx_n = fabs(dot(s.data(), n_unit.data(), N_DIM));
+
+            rho_l = conservatives[i_cell_l][0];
+            rho_r = conservatives[i_cell_r][1];
+            u_l[0] = primitives[i_cell_l][0];
+            u_l[1] = primitives[i_cell_l][1];
+            u_r[0] = primitives[i_cell_r][0];
+            u_r[1] = primitives[i_cell_r][1];
+            p_l = primitives[i_cell_l][2];
+            p_r = primitives[i_cell_r][2];
+            sos_l = physics->get_sound_speed_from_pressure_density(p_l, rho_l);
+            sos_r = physics->get_sound_speed_from_pressure_density(p_l, rho_l);
+            sos_f = 0.5 * (sos_l + sos_r);
+
+            u_f[0] = 0.5 * (u_l[0] + u_r[0]);
+            u_f[1] = 0.5 * (u_l[1] + u_r[1]);
+            u_n = fabs(dot(u_f.data(), n_unit.data(), N_DIM));
+
+            spectral_radius_convective += u_n / dx_n;
+            spectral_radius_acoustic += pow(sos_f / dx_n, 2.0);
+        }
+
+        // \todo Implement viscous and heat spectral radii
+        spectral_radius_overall = std::max(spectral_radius_convective,
+                                           spectral_radius_acoustic);
+
+
+        // Update max spectral radius
+        max_spectral_radius = std::max(max_spectral_radius,
+                                       spectral_radius_overall);
+
+        // Store spectral radius in cfl_local, will be used to compute local cfl
+        cfl_local[i_cell] = spectral_radius_overall;
+    }
+
+    return max_spectral_radius;
+
 }
 
 void Solver::calc_rhs(StateVector * solution,
