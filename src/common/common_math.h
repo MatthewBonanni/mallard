@@ -88,6 +88,7 @@ void linear_combination(const std::vector<StateVector *> & vectors_in,
  * @brief Compute the extremum of each element in a vector of arrays.
  * 
  * @param arrays
+ * @param comp Comparator.
  * @return std::array<double, N> Extremum of each element.
  */
 template <int N, typename Compare>

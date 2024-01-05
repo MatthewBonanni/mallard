@@ -515,6 +515,12 @@ void Solver::calc_rhs(StateVector * solution,
     calc_rhs_source(solution, rhs);
     calc_rhs_interior(solution, rhs);
     calc_rhs_boundaries(solution, rhs);
+
+    for (int i = 0; i < mesh->n_cells(); i++) {
+        for (int j = 0; j < 4; j++) {
+            (*rhs)[i][j] /= mesh->cell_volume(i);
+        }
+    }
 }
 
 void Solver::pre_rhs(StateVector * solution,
