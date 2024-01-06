@@ -208,8 +208,8 @@ void Mesh::init_wedge(int nx, int ny, double Lx, double Ly) {
             int i_node = i * (ny + 1) + j;
             double x = i * dx;
             double y;
-            if (x / Lx > wedge_x) {
-                double y_bottom = (x - wedge_x * Lx) * tan(wedge_theta);
+            if (x > wedge_x) {
+                double y_bottom = (x - wedge_x) * tan(wedge_theta);
                 y = j * (Ly - y_bottom) / ny + y_bottom;
             } else {
                 y = j * dy;

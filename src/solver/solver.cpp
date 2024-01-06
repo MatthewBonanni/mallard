@@ -500,8 +500,7 @@ double Solver::calc_spectral_radius() {
         spectral_radius_acoustic = 1.37 * sqrt(geom_factor * spectral_radius_acoustic);
 
         // \todo Implement viscous and heat spectral radii
-        spectral_radius_overall = std::max(spectral_radius_convective,
-                                           spectral_radius_acoustic);
+        spectral_radius_overall = spectral_radius_convective + spectral_radius_acoustic;
 
         // Update max spectral radius
         max_spectral_radius = std::max(max_spectral_radius,

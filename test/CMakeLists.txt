@@ -4,6 +4,7 @@ add_executable(MallardTests
     test_main.cpp
     common_math_test.cpp
     time_integrator_test.cpp
+    physics_test.cpp
 )
 
 target_include_directories(MallardTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

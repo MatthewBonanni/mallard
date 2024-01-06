@@ -46,8 +46,8 @@ void Physics::calc_euler_flux(State & flux, const NVector & n_unit,
     double ur_dot_ur = dot<double>(u_r.data(), u_r.data(), 2);
     double c_l = std::sqrt(gamma_l * p_l / rho_l);
     double c_r = std::sqrt(gamma_r * p_r / rho_r);
-    double e_l = h_l * rho_l - p_l; // NOTE: this is NOT internal energy. Bad notation.
-    double e_r = h_r * rho_r - p_r; // NOTE: this is NOT internal energy. Bad notation.
+    double rhoe_l = h_l * rho_l - p_l; // NOTE: this is NOT internal energy. Bad notation.
+    double rhoe_r = h_r * rho_r - p_r; // NOTE: this is NOT internal energy. Bad notation.
 
     // Wave speeds
     double s_l = u_l_n - c_l;
@@ -65,7 +65,7 @@ void Physics::calc_euler_flux(State & flux, const NVector & n_unit,
             flux[0] = rho_l * u_l_n;
             flux[1] = rho_l * u_l[0] * u_l_n + p_l * n_unit[0];
             flux[2] = rho_l * u_l[1] * u_l_n + p_l * n_unit[1];
-            flux[3] = u_l_n * (e_l + p_l);
+            flux[3] = u_l_n * (rhoe_l + p_l);
         } else {
             double inv_sl_minus_sm = 1.0 / (s_l - s_m);
             double sl_minus_uln = s_l - u_l_n;
@@ -74,7 +74,7 @@ void Physics::calc_euler_flux(State & flux, const NVector & n_unit,
             for (int i = 0; i < 2; i++) {
                 rhou_sl[i] = (rho_l * u_l[i] * sl_minus_uln + (p_star - p_l) * n_unit[i]) * inv_sl_minus_sm;
             }
-            double e_sl = (sl_minus_uln * e_l - p_l * u_l_n + p_star * s_m) * inv_sl_minus_sm;
+            double e_sl = (sl_minus_uln * rhoe_l - p_l * u_l_n + p_star * s_m) * inv_sl_minus_sm;
 
             flux[0] = rho_sl * s_m;
             flux[1] = rhou_sl[0] * s_m + p_star * n_unit[0];
@@ -90,7 +90,7 @@ void Physics::calc_euler_flux(State & flux, const NVector & n_unit,
             for (int i = 0; i < 2; i++) {
                 rhou_sr[i] = (rho_r * u_r[i] * sr_minus_urn + (p_star - p_r) * n_unit[i]) * inv_sr_minus_sm;
             }
-            double e_sr = (sr_minus_urn * e_r - p_r * u_r_n + p_star * s_m) * inv_sr_minus_sm;
+            double e_sr = (sr_minus_urn * rhoe_r - p_r * u_r_n + p_star * s_m) * inv_sr_minus_sm;
 
             flux[0] = rho_sr * s_m;
             flux[1] = rhou_sr[0] * s_m + p_star * n_unit[0];
@@ -100,10 +100,92 @@ void Physics::calc_euler_flux(State & flux, const NVector & n_unit,
             flux[0] = rho_r * u_r_n;
             flux[1] = rho_r * u_r[0] * u_r_n + p_r * n_unit[0];
             flux[2] = rho_r * u_r[1] * u_r_n + p_r * n_unit[1];
-            flux[3] = u_r_n * (e_r + p_r);
+            flux[3] = u_r_n * (rhoe_r + p_r);
         }
     }
 }
+
+// Reference implementation
+// void Physics::calc_euler_flux(State & flux, const NVector & n_unit,
+//                               const double rho_l, const NVector & u_l,
+//                               const double p_l, const double gamma_l, const double h_l,
+//                               const double rho_r, const NVector & u_r,
+//                               const double p_r, const double gamma_r, const double h_r) {
+
+//     // HLLC flux
+
+//     // Preliminary calculations
+//     double u_l_n = dot<double>(u_l.data(), n_unit.data(), 2);
+//     double u_r_n = dot<double>(u_r.data(), n_unit.data(), 2);
+//     double ul_dot_ul = dot<double>(u_l.data(), u_l.data(), 2);
+//     double ur_dot_ur = dot<double>(u_r.data(), u_r.data(), 2);
+//     double c_l = std::sqrt(gamma_l * p_l / rho_l);
+//     double c_r = std::sqrt(gamma_r * p_r / rho_r);
+//     double rhoe_l = h_l * rho_l - p_l; // NOTE: this is NOT internal energy. Bad notation.
+//     double rhoe_r = h_r * rho_r - p_r; // NOTE: this is NOT internal energy. Bad notation.
+
+//     // Pressure at star state
+//     double C_l = rho_l * c_l;
+//     double C_r = rho_r * c_r;
+//     double p_star = (C_l * p_r + C_r * p_l + C_l * C_r * (u_l_n - u_r_n)) / (C_l + C_r);
+
+//     // Wave speeds
+//     double q_l = (p_star <= p_l) ? 1.0 : std::sqrt(1.0 + (gamma_l + 1.0) / (2.0 * gamma_l) * (p_star / p_l - 1.0));
+//     double q_r = (p_star <= p_r) ? 1.0 : std::sqrt(1.0 + (gamma_r + 1.0) / (2.0 * gamma_r) * (p_star / p_r - 1.0));
+
+//     double s_l = u_l_n - c_l * q_l;
+//     double s_r = u_r_n + c_r * q_r;
+//     double s_star = (p_r - p_l + rho_l * u_l_n * (s_l - u_l_n) - rho_r * u_r_n * (s_r - u_r_n)) /
+//                     (rho_l * (s_l - u_l_n) - rho_r * (s_r - u_r_n));
+    
+//     double coeff;
+//     State u_star;
+//     if (0 <= s_l) {
+//         // Flux is computed from the left region
+//         flux[0] = rho_l * u_l_n;
+//         flux[1] = rho_l * u_l[0] * u_l_n + p_l * n_unit[0];
+//         flux[2] = rho_l * u_l[1] * u_l_n + p_l * n_unit[1];
+//         flux[3] = u_l_n * (rhoe_l + p_l);
+//     } else if ((s_l <= 0) && (0 <= s_star)) {
+//         // Flux is computed from the left star region
+//         flux[0] = rho_l * u_l_n;
+//         flux[1] = rho_l * u_l[0] * u_l_n + p_l * n_unit[0];
+//         flux[2] = rho_l * u_l[1] * u_l_n + p_l * n_unit[1];
+//         flux[3] = u_l_n * (rhoe_l + p_l);
+
+//         coeff = rho_l * (s_l - u_l_n) / (s_l - s_star);
+//         u_star = {coeff * 1.0,
+//                   coeff * (s_star * n_unit[0] + u_l[0] * fabs(n_unit[1])),
+//                   coeff * (s_star * n_unit[1] + u_l[1] * fabs(n_unit[0])),
+//                   coeff * (rhoe_l / rho_l + (s_star - u_l_n) * (s_star + p_l / (rho_l * (s_l - u_l_n))))};
+//         flux[0] += s_l * (u_star[0] - rho_l);
+//         flux[1] += s_l * (u_star[1] - rho_l * u_l[0]);
+//         flux[2] += s_l * (u_star[2] - rho_l * u_l[1]);
+//         flux[3] += s_l * (u_star[3] - rhoe_l);
+//     } else if ((s_star <= 0) && (0 <= s_r)) {
+//         // Flux is computed from the right star region
+//         flux[0] = rho_r * u_r_n;
+//         flux[1] = rho_r * u_r[0] * u_r_n + p_r * n_unit[0];
+//         flux[2] = rho_r * u_r[1] * u_r_n + p_r * n_unit[1];
+//         flux[3] = u_r_n * (rhoe_r + p_r);
+
+//         coeff = rho_r * (s_r - u_r_n) / (s_r - s_star);
+//         u_star = {coeff * 1.0,
+//                   coeff * (s_star * n_unit[0] + u_r[0] * fabs(n_unit[1])),
+//                   coeff * (s_star * n_unit[1] + u_r[1] * fabs(n_unit[0])),
+//                   coeff * (rhoe_r / rho_r + (s_star - u_r_n) * (s_star + p_r / (rho_r * (s_r - u_r_n))))};
+//         flux[0] += s_r * (u_star[0] - rho_r);
+//         flux[1] += s_r * (u_star[1] - rho_r * u_r[0]);
+//         flux[2] += s_r * (u_star[2] - rho_r * u_r[1]);
+//         flux[3] += s_r * (u_star[3] - rhoe_r);
+//     } else {
+//         // Flux is computed from the right region
+//         flux[0] = rho_r * u_r_n;
+//         flux[1] = rho_r * u_r[0] * u_r_n + p_r * n_unit[0];
+//         flux[2] = rho_r * u_r[1] * u_r_n + p_r * n_unit[1];
+//         flux[3] = u_r_n * (rhoe_r + p_r);
+//     }
+// }
 
 void Physics::calc_euler_flux(State & flux, const NVector & n_unit,
                               const double rho_l, const double rho_r,
@@ -152,6 +234,18 @@ void Euler::init(const toml::table & input) {
     set_R_cp_cv();
 
     print();
+}
+
+void Euler::init(const double & gamma_in,
+                 const double & p_ref_in,
+                 const double & T_ref_in,
+                 const double & rho_ref_in) {
+    gamma = gamma_in;
+    p_ref = p_ref_in;
+    T_ref = T_ref_in;
+    rho_ref = rho_ref_in;
+
+    set_R_cp_cv();
 }
 
 void Euler::set_R_cp_cv() {

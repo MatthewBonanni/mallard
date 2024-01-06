@@ -162,6 +162,18 @@ class Euler : public Physics {
         void init(const toml::table & input) override;
 
         /**
+         * @brief Initialize the physics manually.
+         * @param gamma Gamma
+         * @param p_ref Reference pressure
+         * @param T_ref Reference temperature
+         * @param rho_ref Reference density
+         */
+        void init(const double & gamma,
+                  const double & p_ref,
+                  const double & T_ref,
+                  const double & rho_ref);
+
+        /**
          * @brief Print the physics.
          */
         void print() const override;
