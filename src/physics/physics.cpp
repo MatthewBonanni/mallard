@@ -34,9 +34,9 @@ void Physics::print() const {
 
 void Physics::calc_euler_flux(State & flux, const NVector & n_unit,
                               const double rho_l, const NVector & u_l,
-                              const double p_l, const double gamma_l, const double H_l,
+                              const double p_l, const double gamma_l, const double h_l,
                               const double rho_r, const NVector & u_r,
-                              const double p_r, const double gamma_r, const double H_r) {
+                              const double p_r, const double gamma_r, const double h_r) {
     // HLLC flux
 
     // Preliminary calculations
@@ -46,8 +46,8 @@ void Physics::calc_euler_flux(State & flux, const NVector & n_unit,
     double ur_dot_ur = dot<double>(u_r.data(), u_r.data(), 2);
     double c_l = std::sqrt(gamma_l * p_l / rho_l);
     double c_r = std::sqrt(gamma_r * p_r / rho_r);
-    double e_l = H_l * rho_l - p_l; // NOTE: this is NOT internal energy. Bad notation.
-    double e_r = H_r * rho_r - p_r; // NOTE: this is NOT internal energy. Bad notation.
+    double e_l = h_l * rho_l - p_l; // NOTE: this is NOT internal energy. Bad notation.
+    double e_r = h_r * rho_r - p_r; // NOTE: this is NOT internal energy. Bad notation.
 
     // Wave speeds
     double s_l = u_l_n - c_l;
@@ -197,12 +197,11 @@ void Euler::compute_primitives_from_conservatives(Primitives & primitives,
     double p = (gamma - 1.0) * rho * e;
     double T = get_temperature_from_energy(e);
     double h = e + p / rho;
-    double H = h + 0.5 * dot_self(u);
     primitives[0] = u[0];
     primitives[1] = u[1];
     primitives[2] = p;
     primitives[3] = T;
-    primitives[4] = H;
+    primitives[4] = h;
 }
 
 void Euler::calc_diffusive_flux(State & flux) {

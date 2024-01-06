@@ -420,7 +420,7 @@ void Solver::update_primitives() {
     }
 }
 
-double Solver::calc_dt() {
+void Solver::calc_dt() {
     // \todo Implement cfl
     if (use_cfl) {
         double max_spectral_radius = calc_spectral_radius();
@@ -430,7 +430,9 @@ double Solver::calc_dt() {
         }
     }
 
-    return dt;
+    if (dt < 0.0) {
+        throw std::runtime_error("dt negative: " + std::to_string(dt) + ".");
+    }
 }
 
 double Solver::calc_spectral_radius() {
@@ -443,6 +445,7 @@ double Solver::calc_spectral_radius() {
     double rho_l, rho_r, p_l, p_r, sos_l, sos_r, sos_f;
     NVector s, u_l, u_r, u_f;
     double dx_n, u_n;
+    double geom_factor;
     NVector n_unit;
 
     for (int i_cell = 0; i_cell < mesh->n_cells(); i_cell++) {
@@ -492,10 +495,13 @@ double Solver::calc_spectral_radius() {
             spectral_radius_acoustic += pow(sos_f / dx_n, 2.0);
         }
 
+        geom_factor = 3.0 / mesh->faces_of_cell(i_cell).size();
+        spectral_radius_convective *= 1.37 * geom_factor;
+        spectral_radius_acoustic = 1.37 * sqrt(geom_factor * spectral_radius_acoustic);
+
         // \todo Implement viscous and heat spectral radii
         spectral_radius_overall = std::max(spectral_radius_convective,
                                            spectral_radius_acoustic);
-
 
         // Update max spectral radius
         max_spectral_radius = std::max(max_spectral_radius,

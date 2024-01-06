@@ -62,15 +62,13 @@ void BoundaryUPT::init(const toml::table & input) {
 
     rho_bc = physics->get_density_from_pressure_temperature(p_bc, T_bc);
     e_bc = physics->get_energy_from_temperature(T_bc);
-    E_bc = e_bc + 0.5 * (u_bc[0] * u_bc[0] +
-                         u_bc[1] * u_bc[1]);
-    H_bc = E_bc + p_bc / rho_bc;
+    h_bc = e_bc + p_bc / rho_bc;
 
     primitives_bc[0] = u_bc[0];
     primitives_bc[1] = u_bc[1];
     primitives_bc[2] = p_bc;
     primitives_bc[3] = T_bc;
-    primitives_bc[4] = H_bc;
+    primitives_bc[4] = h_bc;
 
     print();
 }

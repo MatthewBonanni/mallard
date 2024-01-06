@@ -137,9 +137,8 @@ class Solver {
 
         /**
          * @brief Compute the time step size.
-         * @return Time step size.
          */
-        double calc_dt();
+        void calc_dt();
 
         /**
          * @brief Compute the spectral radius.

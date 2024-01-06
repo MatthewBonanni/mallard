@@ -86,7 +86,7 @@ void Solver::init_solution_constant() {
     double e = physics->get_energy_from_temperature(T);
     double E = e + 0.5 * (u_x * u_x +
                           u_y * u_y);
-    double H = E + p / rho;
+    double h = e + p / rho;
     double rhou_x = rho * u_x;
     double rhou_y = rho * u_y;
     double rhoE = rho * E;
@@ -101,7 +101,7 @@ void Solver::init_solution_constant() {
         primitives[i][1] = u_y;
         primitives[i][2] = p;
         primitives[i][3] = T;
-        primitives[i][4] = H;
+        primitives[i][4] = h;
     }
 }
 

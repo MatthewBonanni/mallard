@@ -46,10 +46,10 @@ void BoundaryPOut::init(const toml::table & input) {
 void BoundaryPOut::apply(StateVector * solution,
                          StateVector * rhs) {
     State flux;
-    double rho_l, E_l, e_l, gamma_l, p_l, H_l, T_l;
+    double rho_l, E_l, e_l, gamma_l, p_l, h_l, T_l;
     double sos_l, u_mag_l;
     NVector u_l, u_bc, n_unit;
-    double rho_bc, E_bc, e_bc, p_out, H_bc, T_bc;
+    double rho_bc, E_bc, e_bc, p_out, h_bc, T_bc;
     for (int i = 0; i < zone->n_faces(); i++) {
         int i_face = (*zone->faces())[i];
         int i_cell_l = mesh->cells_of_face(i_face)[0];
@@ -62,7 +62,7 @@ void BoundaryPOut::apply(StateVector * solution,
         e_l = E_l - 0.5 * dot_self(u_l);
         gamma_l = physics->get_gamma();
         p_l = (gamma_l - 1.0) * rho_l * e_l;
-        H_l = E_l + p_l / rho_l;
+        h_l = e_l + p_l / rho_l;
         T_l = physics->get_temperature_from_energy(e_l);
 
         // Determine if subsonic or supersonic
@@ -81,14 +81,13 @@ void BoundaryPOut::apply(StateVector * solution,
         u_bc = u_l;
         rho_bc = physics->get_density_from_pressure_temperature(p_out, T_bc);
         e_bc = physics->get_energy_from_temperature(T_bc);
-        E_bc = e_bc + 0.5 * dot_self(u_bc);
-        H_bc = E_bc + p_out / rho_bc;
+        h_bc = e_bc + p_out / rho_bc;
 
         n_unit = unit(mesh->face_normal(i_face));
 
         physics->calc_euler_flux(flux, n_unit,
-                                 rho_l, u_l, p_l, gamma_l, H_l,
-                                 rho_bc, u_bc, p_out, gamma_l, H_bc);
+                                 rho_l, u_l, p_l, gamma_l, h_l,
+                                 rho_bc, u_bc, p_out, gamma_l, h_bc);
 
         // Add flux to RHS
         for (int j = 0; j < 4; j++) {

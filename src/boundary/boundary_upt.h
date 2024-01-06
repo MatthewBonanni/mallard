@@ -54,8 +54,7 @@ class BoundaryUPT : public Boundary {
         // Dependent
         double rho_bc;
         double e_bc;
-        double E_bc;
-        double H_bc;
+        double h_bc;
         Primitives primitives_bc;
 };
 

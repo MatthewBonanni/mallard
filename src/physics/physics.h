@@ -107,18 +107,18 @@ class Physics {
          * @param u_l Left velocity
          * @param p_l Left pressure
          * @param gamma_l Left gamma
-         * @param H_l Left enthalpy
+         * @param h_l Left enthalpy
          * @param rho_r Right density
          * @param u_r Right velocity
          * @param p_r Right pressure
          * @param gamma_r Right gamma
-         * @param H_r Right enthalpy
+         * @param h_r Right enthalpy
          */
         void calc_euler_flux(State & flux, const NVector & n_unit,
                              const double rho_l, const NVector & u_l,
-                             const double p_l, const double gamma_l, const double H_l,
+                             const double p_l, const double gamma_l, const double h_l,
                              const double rho_r, const NVector & u_r,
-                             const double p_r, const double gamma_r, const double H_r);
+                             const double p_r, const double gamma_r, const double h_r);
 
         /**
          * @brief Calculate the Euler flux (alias for above)
