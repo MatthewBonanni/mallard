@@ -20,7 +20,7 @@ Physics::Physics() {
 }
 
 Physics::~Physics() {
-    // Empty
+    std::cout << "Destroying physics: " << PHYSICS_NAMES.at(type) << std::endl;
 }
 
 void Physics::init(const toml::table & input) {

@@ -90,8 +90,10 @@ class TimeIntegrator {
          */
         virtual void take_step(const double& dt,
                                std::vector<StateVector *> & solution_pointers,
+                               FaceStateVector * face_solution,
                                std::vector<StateVector *> & rhs_pointers,
                                std::function<void(StateVector * solution,
+                                                  FaceStateVector * face_solution,
                                                   StateVector * rhs)> * calc_rhs) = 0;
     protected:
         TimeIntegratorType type;
@@ -121,8 +123,10 @@ class FE : public TimeIntegrator {
          */
         void take_step(const double& dt,
                        std::vector<StateVector *> & solution_pointers,
+                       FaceStateVector * face_solution,
                        std::vector<StateVector *> & rhs_pointers,
                        std::function<void(StateVector * solution,
+                                          FaceStateVector * face_solution,
                                           StateVector * rhs)> * calc_rhs) override;
     protected:
     private:
@@ -149,8 +153,10 @@ class RK4 : public TimeIntegrator {
          */
         void take_step(const double& dt,
                        std::vector<StateVector *> & solution_pointers,
+                       FaceStateVector * face_solution,
                        std::vector<StateVector *> & rhs_pointers,
                        std::function<void(StateVector * solution,
+                                          FaceStateVector * face_solution,
                                           StateVector * rhs)> * calc_rhs) override;
     protected:
     private:
@@ -178,8 +184,10 @@ class LSRK4 : public TimeIntegrator {
          */
         void take_step(const double& dt,
                        std::vector<StateVector *> & solution_pointers,
+                       FaceStateVector * face_solution,
                        std::vector<StateVector *> & rhs_pointers,
                        std::function<void(StateVector * solution,
+                                          FaceStateVector * face_solution,
                                           StateVector * rhs)> * calc_rhs) override;
     protected:
     private:
@@ -206,8 +214,10 @@ class SSPRK3 : public TimeIntegrator {
          */
         void take_step(const double& dt,
                        std::vector<StateVector *> & solution_pointers,
+                       FaceStateVector * face_solution,
                        std::vector<StateVector *> & rhs_pointers,
                        std::function<void(StateVector * solution,
+                                          FaceStateVector * face_solution,
                                           StateVector * rhs)> * calc_rhs) override;
     protected:
     private:
@@ -235,8 +245,10 @@ class LSSSPRK3 : public TimeIntegrator {
          */
         void take_step(const double& dt,
                        std::vector<StateVector *> & solution_pointers,
+                       FaceStateVector * face_solution,
                        std::vector<StateVector *> & rhs_pointers,
                        std::function<void(StateVector * solution,
+                                          FaceStateVector * face_solution,
                                           StateVector * rhs)> * calc_rhs) override;
     protected:
     private:

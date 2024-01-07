@@ -39,10 +39,10 @@ class BoundaryPOut : public Boundary {
 
         /**
          * @brief Apply the boundary condition.
-         * @param solution Pointer to the solution vector.
+         * @param face_solution Pointer to the face solution vector.
          * @param rhs Pointer to the right-hand side vector.
          */
-        void apply(StateVector * solution,
+        void apply(FaceStateVector * face_solution,
                    StateVector * rhs) override;
     protected:
     private:

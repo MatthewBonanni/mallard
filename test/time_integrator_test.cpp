@@ -13,6 +13,7 @@
 #include "numerics/time_integrator.h"
 
 void calc_rhs_test(StateVector * solution,
+                   FaceStateVector * face_solution,
                    StateVector * rhs) {
     (*rhs)[0][0] = 0.0 * (*solution)[0][0] + 0.0;
     (*rhs)[0][1] = 0.0 * (*solution)[0][1] + 1.0;
@@ -27,6 +28,7 @@ void calc_rhs_test(StateVector * solution,
 TEST(TimeIntegratorTest, FE) {
     FE fe;
     std::vector<StateVector *> solution_pointers;
+    FaceStateVector face_solution = FaceStateVector(2);
     std::vector<StateVector *> rhs_pointers;
     StateVector * solution;
 
@@ -38,6 +40,7 @@ TEST(TimeIntegratorTest, FE) {
     }
     solution = solution_pointers[0];
     std::function<void(StateVector * solution,
+                       FaceStateVector * face_solution,
                        StateVector * rhs)> rhs_func = calc_rhs_test;
 
     (*solution)[0][0] = 0.0;
@@ -49,7 +52,7 @@ TEST(TimeIntegratorTest, FE) {
     (*solution)[1][2] = 6.0;
     (*solution)[1][3] = 7.0;
 
-    fe.take_step(0.1, solution_pointers, rhs_pointers, &rhs_func);
+    fe.take_step(0.1, solution_pointers, &face_solution, rhs_pointers, &rhs_func);
 
     EXPECT_DOUBLE_EQ((*solution)[0][0], 0.0);
     EXPECT_DOUBLE_EQ((*solution)[0][1], 1.1);
@@ -64,6 +67,7 @@ TEST(TimeIntegratorTest, FE) {
 TEST(TimeIntegratorTest, RK4) {
     RK4 rk4;
     std::vector<StateVector *> solution_pointers;
+    FaceStateVector face_solution = FaceStateVector(2);
     std::vector<StateVector *> rhs_pointers;
     StateVector * solution;
 
@@ -75,6 +79,7 @@ TEST(TimeIntegratorTest, RK4) {
     }
     solution = solution_pointers[0];
     std::function<void(StateVector * solution,
+                       FaceStateVector * face_solution,
                        StateVector * rhs)> rhs_func = calc_rhs_test;
 
     (*solution)[0][0] = 0.0;
@@ -86,7 +91,7 @@ TEST(TimeIntegratorTest, RK4) {
     (*solution)[1][2] = 6.0;
     (*solution)[1][3] = 7.0;
 
-    rk4.take_step(0.1, solution_pointers, rhs_pointers, &rhs_func);
+    rk4.take_step(0.1, solution_pointers, &face_solution, rhs_pointers, &rhs_func);
 
     EXPECT_DOUBLE_EQ((*solution)[0][0], 0.0);
     EXPECT_DOUBLE_EQ((*solution)[0][1], 1.1);
@@ -101,6 +106,7 @@ TEST(TimeIntegratorTest, RK4) {
 TEST(TimeIntegratorTest, SSPRK3) {
     SSPRK3 ssprk3;
     std::vector<StateVector *> solution_pointers;
+    FaceStateVector face_solution = FaceStateVector(2);
     std::vector<StateVector *> rhs_pointers;
     StateVector * solution;
 
@@ -112,6 +118,7 @@ TEST(TimeIntegratorTest, SSPRK3) {
     }
     solution = solution_pointers[0];
     std::function<void(StateVector * solution,
+                       FaceStateVector * face_solution,
                        StateVector * rhs)> rhs_func = calc_rhs_test;
 
     (*solution)[0][0] = 0.0;
@@ -123,7 +130,7 @@ TEST(TimeIntegratorTest, SSPRK3) {
     (*solution)[1][2] = 6.0;
     (*solution)[1][3] = 7.0;
 
-    ssprk3.take_step(0.1, solution_pointers, rhs_pointers, &rhs_func);
+    ssprk3.take_step(0.1, solution_pointers, &face_solution, rhs_pointers, &rhs_func);
 
     EXPECT_DOUBLE_EQ((*solution)[0][0], 0.0);
     EXPECT_DOUBLE_EQ((*solution)[0][1], 1.1);

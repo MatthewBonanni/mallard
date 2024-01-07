@@ -11,6 +11,7 @@
 
 #include "mesh.h"
 
+#include <iostream>
 #include <cmath>
 
 #include "common/common.h"
@@ -21,7 +22,7 @@ Mesh::Mesh(MeshType type) {
 }
 
 Mesh::~Mesh() {
-    // Empty
+    std::cout << "Destroying mesh: " << MESH_NAMES.at(type) << std::endl;
 }
 
 MeshType Mesh::get_type() const {

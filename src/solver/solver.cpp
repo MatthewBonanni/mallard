@@ -121,32 +121,59 @@ void Solver::init_physics() {
 void Solver::init_numerics() {
     std::cout << "Initializing numerics..." << std::endl;
 
+    std::string face_reconstruction_str = input["numerics"]["face_reconstruction"].value_or("FO");
     std::string time_integrator_str = input["numerics"]["time_integrator"].value_or("LSSSPRK3");
 
-    TimeIntegratorType type;
-    typename std::unordered_map<std::string, TimeIntegratorType>::const_iterator it = TIME_INTEGRATOR_TYPES.find(time_integrator_str);
-    if (it == TIME_INTEGRATOR_TYPES.end()) {
-        throw std::runtime_error("Unknown time integrator type: " + time_integrator_str + ".");
+    FaceReconstructionType face_reconstruction_type;
+    typename std::unordered_map<std::string, FaceReconstructionType>::const_iterator it_face = FACE_RECONSTRUCTION_TYPES.find(face_reconstruction_str);
+    if (it_face == FACE_RECONSTRUCTION_TYPES.end()) {
+        throw std::runtime_error("Unknown face reconstruction type: " + face_reconstruction_str + ".");
     } else {
-        type = it->second;
+        face_reconstruction_type = it_face->second;
     }
 
-    if (type == TimeIntegratorType::FE) {
+
+    TimeIntegratorType time_integrator_type;
+    typename std::unordered_map<std::string, TimeIntegratorType>::const_iterator it_time = TIME_INTEGRATOR_TYPES.find(time_integrator_str);
+    if (it_time == TIME_INTEGRATOR_TYPES.end()) {
+        throw std::runtime_error("Unknown time integrator type: " + time_integrator_str + ".");
+    } else {
+        time_integrator_type = it_time->second;
+    }
+
+    if (face_reconstruction_type == FaceReconstructionType::FirstOrder) {
+        face_reconstruction = std::make_unique<FirstOrder>();
+    } else if (face_reconstruction_type == FaceReconstructionType::WENO) {
+        face_reconstruction = std::make_unique<WENO>();
+    } else {
+        // Should never get here due to the enum class.
+        throw std::runtime_error("Unknown face reconstruction type: " + face_reconstruction_str + ".");
+    }
+
+    if (time_integrator_type == TimeIntegratorType::FE) {
         time_integrator = std::make_unique<FE>();
-    } else if (type == TimeIntegratorType::RK4) {
+    } else if (time_integrator_type == TimeIntegratorType::RK4) {
         time_integrator = std::make_unique<RK4>();
-    } else if (type == TimeIntegratorType::SSPRK3) {
+    } else if (time_integrator_type == TimeIntegratorType::SSPRK3) {
         time_integrator = std::make_unique<SSPRK3>();
-    } else if (type == TimeIntegratorType::LSRK4) {
+    } else if (time_integrator_type == TimeIntegratorType::LSRK4) {
         time_integrator = std::make_unique<LSRK4>();
-    } else if (type == TimeIntegratorType::LSSSPRK3) {
+    } else if (time_integrator_type == TimeIntegratorType::LSSSPRK3) {
         time_integrator = std::make_unique<LSSSPRK3>();
     } else {
         // Should never get here due to the enum class.
         throw std::runtime_error("Unknown time integrator type: " + time_integrator_str + ".");
     }
 
-    rhs_func = std::bind(&Solver::calc_rhs, this, std::placeholders::_1, std::placeholders::_2);
+    face_reconstruction->set_mesh(mesh);
+    face_reconstruction->set_cell_conservatives(&conservatives);
+    face_reconstruction->set_face_conservatives(&face_conservatives);
+
+    rhs_func = std::bind(&Solver::calc_rhs,
+                         this,
+                         std::placeholders::_1,
+                         std::placeholders::_2,
+                         std::placeholders::_3);
     time_integrator->init();
 }
 
@@ -406,6 +433,7 @@ void Solver::print_logo() const {
 void Solver::take_step() {
     time_integrator->take_step(dt,
                                solution_pointers,
+                               &face_conservatives,
                                rhs_pointers,
                                &rhs_func);
     update_primitives();
@@ -464,13 +492,10 @@ double Solver::calc_spectral_radius() {
                 // Boundary face, hack
                 s[0] = 2.0 * (mesh->face_coords(i_face)[0] - mesh->cell_coords(i_cell_l)[0]);
                 s[1] = 2.0 * (mesh->face_coords(i_face)[1] - mesh->cell_coords(i_cell_l)[1]);
-                s[2] = 2.0 * (mesh->face_coords(i_face)[2] - mesh->cell_coords(i_cell_l)[2]);
-
                 i_cell_r = i_cell_l;
             } else {
                 s[0] = mesh->cell_coords(i_cell_r)[0] - mesh->cell_coords(i_cell_l)[0];
                 s[1] = mesh->cell_coords(i_cell_r)[1] - mesh->cell_coords(i_cell_l)[1];
-                s[2] = mesh->cell_coords(i_cell_r)[2] - mesh->cell_coords(i_cell_l)[2];
             }
 
             dx_n = fabs(dot(s.data(), n_unit.data(), N_DIM));
@@ -515,11 +540,12 @@ double Solver::calc_spectral_radius() {
 }
 
 void Solver::calc_rhs(StateVector * solution,
+                      FaceStateVector * face_solution,
                       StateVector * rhs) {
-    pre_rhs(solution, rhs);
+    pre_rhs(solution, face_solution, rhs);
     calc_rhs_source(solution, rhs);
-    calc_rhs_interior(solution, rhs);
-    calc_rhs_boundaries(solution, rhs);
+    calc_rhs_interior(face_solution, rhs);
+    calc_rhs_boundaries(face_solution, rhs);
 
     for (int i = 0; i < mesh->n_cells(); i++) {
         for (int j = 0; j < 4; j++) {
@@ -529,12 +555,15 @@ void Solver::calc_rhs(StateVector * solution,
 }
 
 void Solver::pre_rhs(StateVector * solution,
+                     FaceStateVector * face_solution,
                      StateVector * rhs) {
     for (int i = 0; i < mesh->n_cells(); i++) {
         for (int j = 0; j < 4; j++) {
             (*rhs)[i][j] = 0.0;
         }
     }
+
+    face_reconstruction->calc_face_values(solution, face_solution);
 }
 
 void Solver::calc_rhs_source(StateVector * solution,
@@ -548,46 +577,51 @@ void Solver::calc_rhs_source(StateVector * solution,
     }
 }
 
-void Solver::calc_rhs_interior(StateVector * solution,
+void Solver::calc_rhs_interior(FaceStateVector * face_solution,
                                StateVector * rhs) {
     State flux;
     NVector n_unit;
+    State * conservatives_l;
+    State * conservatives_r;
     Primitives primitives_l;
     Primitives primitives_r;
-    for (int i = 0; i < mesh->n_faces(); i++) {
+    for (int i_face = 0; i_face < mesh->n_faces(); i_face++) {
         // \todo iterate only over interior faces to save time.
-        if (mesh->cells_of_face(i)[1] == -1) {
+        if (mesh->cells_of_face(i_face)[1] == -1) {
             // Boundary face
             continue;
         }
 
-        int i_cell_l = mesh->cells_of_face(i)[0];
-        int i_cell_r = mesh->cells_of_face(i)[1];
+        int i_cell_l = mesh->cells_of_face(i_face)[0];
+        int i_cell_r = mesh->cells_of_face(i_face)[1];
+
+        // Get face conservatives
+        conservatives_l = &(*face_solution)[i_face][0];
+        conservatives_r = &(*face_solution)[i_face][1];
 
         // Compute relevant primitive variables
-        physics->compute_primitives_from_conservatives(primitives_l, (*solution)[i_cell_l]);
-        physics->compute_primitives_from_conservatives(primitives_r, (*solution)[i_cell_r]);
+        physics->compute_primitives_from_conservatives(primitives_l, *conservatives_l);
+        physics->compute_primitives_from_conservatives(primitives_r, *conservatives_r);
 
         // Get face normal vector
-        n_unit = unit(mesh->face_normal(i));
+        n_unit = unit(mesh->face_normal(i_face));
 
         // Calculate flux
         physics->calc_euler_flux(flux, n_unit,
-                                 (*solution)[i_cell_l][0],
-                                 (*solution)[i_cell_r][0],
+                                 (*conservatives_l)[0], (*conservatives_r)[0],
                                  primitives_l, primitives_r);
         
         // Add flux to RHS
         for (int j = 0; j < 4; j++) {
-            (*rhs)[i_cell_l][j] -= mesh->face_area(i) * flux[j];
-            (*rhs)[i_cell_r][j] += mesh->face_area(i) * flux[j];
+            (*rhs)[i_cell_l][j] -= mesh->face_area(i_face) * flux[j];
+            (*rhs)[i_cell_r][j] += mesh->face_area(i_face) * flux[j];
         }
     }
 }
 
-void Solver::calc_rhs_boundaries(StateVector * solution,
+void Solver::calc_rhs_boundaries(FaceStateVector * face_solution,
                                  StateVector * rhs) {
     for (auto& boundary : boundaries) {
-        boundary->apply(solution, rhs);
+        boundary->apply(face_solution, rhs);
     }
 }

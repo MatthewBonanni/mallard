@@ -83,10 +83,10 @@ class Boundary {
 
         /**
          * @brief Compute and apply the boundary flux.
-         * @param solution Pointer to the solution.
+         * @param face_solution Pointer to the face solution.
          * @param rhs Pointer to the right hand side.
          */
-        virtual void apply(StateVector * solution,
+        virtual void apply(FaceStateVector * face_solution,
                            StateVector * rhs);
         
     protected:

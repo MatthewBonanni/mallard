@@ -21,6 +21,7 @@
 
 #include "mesh/mesh.h"
 #include "boundary/boundary.h"
+#include "numerics/face_reconstruction.h"
 #include "numerics/time_integrator.h"
 #include "physics/physics.h"
 #include "data.h"
@@ -174,17 +175,21 @@ class Solver {
         /**
          * @brief Calculate the right hand side.
          * @param solution Solution vector.
+         * @param face_solution Face solution vector.
          * @param rhs Right hand side vector.
          */
         void calc_rhs(StateVector * solution,
+                      FaceStateVector * face_solution,
                       StateVector * rhs);
         
         /**
          * @brief Pre-RHS hook.
          * @param solution Solution vector.
+         * @param face_solution Face solution vector.
          * @param rhs Right hand side vector.
          */
         void pre_rhs(StateVector * solution,
+                     FaceStateVector * face_solution,
                      StateVector * rhs);
         
         /**
@@ -197,18 +202,18 @@ class Solver {
         
         /**
          * @brief Add the interior flux contributions to the right hand side.
-         * @param solution Solution vector.
+         * @param face_solution Face solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs_interior(StateVector * solution,
+        void calc_rhs_interior(FaceStateVector * face_solution,
                                StateVector * rhs);
         
         /**
          * @brief Add the boundary flux contributions to the right hand side.
-         * @param solution Solution vector.
+         * @param face_solution Face solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs_boundaries(StateVector * solution,
+        void calc_rhs_boundaries(FaceStateVector * face_solution,
                                  StateVector * rhs);
     private:
         toml::table input;
@@ -223,6 +228,7 @@ class Solver {
         int step;
         std::shared_ptr<Mesh> mesh;
         std::vector<std::unique_ptr<Boundary>> boundaries;
+        std::unique_ptr<FaceReconstruction> face_reconstruction;
         std::unique_ptr<TimeIntegrator> time_integrator;
         std::shared_ptr<Physics> physics;
         StateVector conservatives;
@@ -233,6 +239,7 @@ class Solver {
         std::vector<StateVector *> solution_pointers;
         std::vector<StateVector *> rhs_pointers;
         std::function<void(StateVector *,
+                           FaceStateVector *,
                            StateVector *)> rhs_func;
         int check_interval;
         std::vector<Data> data;

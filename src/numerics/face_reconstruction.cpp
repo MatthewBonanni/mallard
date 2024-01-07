@@ -11,12 +11,14 @@
 
 #include "face_reconstruction.h"
 
+#include <iostream>
+
 FaceReconstruction::FaceReconstruction() {
     // Empty
 }
 
 FaceReconstruction::~FaceReconstruction() {
-    // Empty
+    std::cout << "Destroying face reconstruction: " << FACE_RECONSTRUCTION_NAMES.at(type) << std::endl;
 }
 
 void FaceReconstruction::set_cell_conservatives(StateVector * cell_conservatives) {
@@ -27,28 +29,38 @@ void FaceReconstruction::set_face_conservatives(FaceStateVector * face_conservat
     this->face_conservatives = face_conservatives;
 }
 
-void FaceReconstruction::set_mesh(Mesh * mesh) {
+void FaceReconstruction::set_mesh(std::shared_ptr<Mesh> mesh) {
     this->mesh = mesh;
 }
 
-void FaceReconstruction::calc_face_values() {
-    throw std::runtime_error("FaceReconstruction::calc_face_values() not implemented.");
-}
-
 FirstOrder::FirstOrder() {
-    // Empty
+    type = FaceReconstructionType::FirstOrder;
 }
 
 FirstOrder::~FirstOrder() {
     // Empty
 }
 
-void FirstOrder::calc_face_values() {
+void FirstOrder::calc_face_values(StateVector * solution,
+                                  FaceStateVector * face_solution) {
     for (int i_face = 0; i_face < mesh->n_faces(); i_face++) {
-        int i_cell_0 = mesh->cells_of_face(i_face)[0];
-        int i_cell_1 = mesh->cells_of_face(i_face)[1];
+        int i_cell_l = mesh->cells_of_face(i_face)[0];
+        int i_cell_r = mesh->cells_of_face(i_face)[1];
 
-        (*face_conservatives)[i_face][0] = (*cell_conservatives)[i_cell_0];
-        (*face_conservatives)[i_face][1] = (*cell_conservatives)[i_cell_1];
+        (*face_solution)[i_face][0] = (*solution)[i_cell_l];
+        (*face_solution)[i_face][1] = (*solution)[i_cell_r];
     }
+}
+
+WENO::WENO() {
+    type = FaceReconstructionType::WENO;
+}
+
+WENO::~WENO() {
+    // Empty
+}
+
+void WENO::calc_face_values(StateVector * solution,
+                            FaceStateVector * face_solution) {
+    throw std::runtime_error("WENO::calc_face_values() not implemented.");
 }

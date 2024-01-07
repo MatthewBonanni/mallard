@@ -43,30 +43,36 @@ void BoundaryPOut::init(const toml::table & input) {
     print();
 }
 
-void BoundaryPOut::apply(StateVector * solution,
+void BoundaryPOut::apply(FaceStateVector * face_solution,
                          StateVector * rhs) {
+    int i_face, i_cell_l;
     State flux;
-    double rho_l, E_l, e_l, gamma_l, p_l, h_l, T_l;
+    State * conservatives_l;
+    Primitives primitives_l;
+    double rho_l, gamma_l, p_l, T_l, h_l;
     double sos_l, u_mag_l;
     NVector u_l, u_bc, n_unit;
     double rho_bc, E_bc, e_bc, p_out, h_bc, T_bc;
     for (int i_local = 0; i_local < zone->n_faces(); i_local++) {
-        int i_face = (*zone->faces())[i_local];
-        int i_cell_l = mesh->cells_of_face(i_face)[0];
+        i_face = (*zone->faces())[i_local];
+        i_cell_l = mesh->cells_of_face(i_face)[0];
+        n_unit = unit(mesh->face_normal(i_face));
+
+        // Get cell conservatives
+        conservatives_l = &(*face_solution)[i_face][0];
 
         // Compute relevant primitive variables
-        rho_l = (*solution)[i_cell_l][0];
-        u_l[0] = (*solution)[i_cell_l][1] / rho_l;
-        u_l[1] = (*solution)[i_cell_l][2] / rho_l;
-        E_l = (*solution)[i_cell_l][3] / rho_l;
-        e_l = E_l - 0.5 * dot_self(u_l);
-        gamma_l = physics->get_gamma();
-        p_l = (gamma_l - 1.0) * rho_l * e_l;
-        h_l = e_l + p_l / rho_l;
-        T_l = physics->get_temperature_from_energy(e_l);
+        physics->compute_primitives_from_conservatives(primitives_l, *conservatives_l);
 
         // Determine if subsonic or supersonic
+        rho_l = (*conservatives_l)[0];
+        u_l[0] = primitives_l[0];
+        u_l[1] = primitives_l[1];
+        p_l = primitives_l[2];
+        T_l = primitives_l[3];
+        h_l = primitives_l[4];
         u_mag_l = norm_2(u_l);
+        gamma_l = physics->get_gamma();
         sos_l = physics->get_sound_speed_from_pressure_density(p_l, rho_l);
         if (u_mag_l < sos_l) {
             // \todo Implement case where p_bc < 0.0, use average pressure
@@ -82,8 +88,6 @@ void BoundaryPOut::apply(StateVector * solution,
         rho_bc = physics->get_density_from_pressure_temperature(p_out, T_bc);
         e_bc = physics->get_energy_from_temperature(T_bc);
         h_bc = e_bc + p_out / rho_bc;
-
-        n_unit = unit(mesh->face_normal(i_face));
 
         physics->calc_euler_flux(flux, n_unit,
                                  rho_l, u_l, p_l, gamma_l, h_l,
