@@ -37,8 +37,8 @@ void BoundaryWallAdiabatic::apply(StateVector * solution,
     State flux;
     Primitives primitives_l;
     NVector n_unit;
-    for (int i = 0; i < zone->n_faces(); i++) {
-        int i_face = (*zone->faces())[i];
+    for (int i_local = 0; i_local < zone->n_faces(); i_local++) {
+        int i_face = (*zone->faces())[i_local];
         int i_cell_l = mesh->cells_of_face(i_face)[0];
 
         // Compute relevant primitive variables
@@ -55,7 +55,7 @@ void BoundaryWallAdiabatic::apply(StateVector * solution,
 
         // Add flux to RHS
         for (int j = 0; j < 4; j++) {
-            (*rhs)[i_cell_l][j] -= mesh->face_area(i) * flux[j];
+            (*rhs)[i_cell_l][j] -= mesh->face_area(i_face) * flux[j];
         }
     }
 }

@@ -38,12 +38,12 @@ void BoundarySymmetry::apply(StateVector * solution,
     Primitives primitives_l, primitives_r;
     double u_n;
     NVector u_l, u_r, n_unit;
-    for (int i = 0; i < zone->n_faces(); i++) {
-        int i_face = (*zone->faces())[i];
+    for (int i_local = 0; i_local < zone->n_faces(); i_local++) {
+        int i_face = (*zone->faces())[i_local];
         int i_cell_l = mesh->cells_of_face(i_face)[0];
         
         // Get face normal vector
-        n_unit = unit(mesh->face_normal(i));
+        n_unit = unit(mesh->face_normal(i_face));
 
         // Compute relevant primitive variables
         physics->compute_primitives_from_conservatives(primitives_l, (*solution)[i_cell_l]);
@@ -67,7 +67,7 @@ void BoundarySymmetry::apply(StateVector * solution,
 
         // Add flux to RHS
         for (int j = 0; j < 4; j++) {
-            (*rhs)[i_cell_l][j] -= mesh->face_area(i) * flux[j];
+            (*rhs)[i_cell_l][j] -= mesh->face_area(i_face) * flux[j];
         }
     }
 }

@@ -69,12 +69,9 @@ void FE::take_step(const double& dt,
 
     (*calc_rhs)(U, rhs);
 
-    // Use linear_combination instead of update_solution
     linear_combination(std::vector<StateVector *>({U, rhs}),
                        U,
                        std::vector<double>({1.0, dt}));
-
-    // update_solution(dt, U, U, rhs);
 }
 
 RK4::RK4() {

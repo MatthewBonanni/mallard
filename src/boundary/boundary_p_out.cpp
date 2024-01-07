@@ -50,8 +50,8 @@ void BoundaryPOut::apply(StateVector * solution,
     double sos_l, u_mag_l;
     NVector u_l, u_bc, n_unit;
     double rho_bc, E_bc, e_bc, p_out, h_bc, T_bc;
-    for (int i = 0; i < zone->n_faces(); i++) {
-        int i_face = (*zone->faces())[i];
+    for (int i_local = 0; i_local < zone->n_faces(); i_local++) {
+        int i_face = (*zone->faces())[i_local];
         int i_cell_l = mesh->cells_of_face(i_face)[0];
 
         // Compute relevant primitive variables
@@ -91,7 +91,7 @@ void BoundaryPOut::apply(StateVector * solution,
 
         // Add flux to RHS
         for (int j = 0; j < 4; j++) {
-            (*rhs)[i_cell_l][j] -= mesh->face_area(i) * flux[j];
+            (*rhs)[i_cell_l][j] -= mesh->face_area(i_face) * flux[j];
         }
     }
 }
