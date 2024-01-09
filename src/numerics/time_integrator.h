@@ -85,6 +85,7 @@ class TimeIntegrator {
          * @brief Take a single time step.
          * @param dt Time step size.
          * @param solution_pointers Pointers to solution vectors.
+         * @param face_solution Pointer to face solution vector.
          * @param rhs_pointers Pointers to rhs vectors.
          * @param calc_rhs Function to calculate rhs.
          */
@@ -118,6 +119,7 @@ class FE : public TimeIntegrator {
          * @brief Take a single time step.
          * @param dt Time step size.
          * @param solution_pointers Pointers to solution vectors.
+         * @param face_solution Pointer to face solution vector.
          * @param rhs_pointers Pointers to rhs vectors.
          * @param calc_rhs Function to calculate rhs.
          */
@@ -148,6 +150,7 @@ class RK4 : public TimeIntegrator {
          * @brief Take a single time step.
          * @param dt Time step size.
          * @param solution_pointers Pointers to solution vectors.
+         * @param face_solution Pointer to face solution vector.
          * @param rhs_pointers Pointers to rhs vectors.
          * @param calc_rhs Function to calculate rhs.
          */
@@ -179,6 +182,7 @@ class LSRK4 : public TimeIntegrator {
          * @brief Take a single time step.
          * @param dt Time step size.
          * @param solution_pointers Pointers to solution vectors.
+         * @param face_solution Pointer to face solution vector.
          * @param rhs_pointers Pointers to rhs vectors.
          * @param calc_rhs Function to calculate rhs.
          */
@@ -209,6 +213,7 @@ class SSPRK3 : public TimeIntegrator {
          * @brief Take a single time step.
          * @param dt Time step size.
          * @param solution_pointers Pointers to solution vectors.
+         * @param face_solution Pointer to face solution vector.
          * @param rhs_pointers Pointers to rhs vectors.
          * @param calc_rhs Function to calculate rhs.
          */
@@ -240,6 +245,7 @@ class LSSSPRK3 : public TimeIntegrator {
          * @brief Take a single time step.
          * @param dt Time step size.
          * @param solution_pointers Pointers to solution vectors.
+         * @param face_solution Pointer to face solution vector.
          * @param rhs_pointers Pointers to rhs vectors.
          * @param calc_rhs Function to calculate rhs.
          */

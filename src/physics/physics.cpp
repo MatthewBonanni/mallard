@@ -65,7 +65,7 @@ void Physics::calc_euler_flux(State & flux, const NVector & n_unit,
             flux[0] = rho_l * u_l_n;
             flux[1] = rho_l * u_l[0] * u_l_n + p_l * n_unit[0];
             flux[2] = rho_l * u_l[1] * u_l_n + p_l * n_unit[1];
-            flux[3] = u_l_n * (rhoe_l + p_l);
+            flux[3] = (rhoe_l + p_l) * u_l_n;
         } else {
             double inv_sl_minus_sm = 1.0 / (s_l - s_m);
             double sl_minus_uln = s_l - u_l_n;
@@ -100,7 +100,7 @@ void Physics::calc_euler_flux(State & flux, const NVector & n_unit,
             flux[0] = rho_r * u_r_n;
             flux[1] = rho_r * u_r[0] * u_r_n + p_r * n_unit[0];
             flux[2] = rho_r * u_r[1] * u_r_n + p_r * n_unit[1];
-            flux[3] = u_r_n * (rhoe_r + p_r);
+            flux[3] = (rhoe_r + p_r) * u_r_n;
         }
     }
 }
