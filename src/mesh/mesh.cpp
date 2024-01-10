@@ -166,19 +166,6 @@ void Mesh::compute_face_normals() {
         double mag = sqrt(dx * dx + dy * dy);
         m_face_normals[i_face][0] =  dy / mag * face_area(i_face);
         m_face_normals[i_face][1] = -dx / mag * face_area(i_face);
-
-        // Flip normal if it points into its left cell
-        // int i_cell0 = m_cells_of_face[i_face][0];
-        // double x_cell = m_cell_coords[i_cell0][0];
-        // double y_cell = m_cell_coords[i_cell0][1];
-        // double x_face = m_face_coords[i_face][0];
-        // double y_face = m_face_coords[i_face][1];
-        // double dot = (x_cell - x_face) * m_face_normals[i_face][0] +
-        //              (y_cell - y_face) * m_face_normals[i_face][1];
-        // if (dot < 0.0) {
-        //     m_face_normals[i_face][0] *= -1.0;
-        //     m_face_normals[i_face][1] *= -1.0;
-        // }
     }
 }
 
