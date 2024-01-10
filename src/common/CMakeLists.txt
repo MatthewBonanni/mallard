@@ -2,6 +2,7 @@
 set(LIB_NAME CommonLib)
 set(LIB_SRCS
     common_math.cpp
+    common_io.cpp
 )
 
 # Add the library

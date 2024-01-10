@@ -15,6 +15,10 @@
 void calc_rhs_test(StateVector * solution,
                    FaceStateVector * face_solution,
                    StateVector * rhs) {
+    
+    // Doesn't do anything, just addresses the compiler warning
+    (*face_solution)[0][0][0] = 0.0;
+
     (*rhs)[0][0] = 0.0 * (*solution)[0][0] + 0.0;
     (*rhs)[0][1] = 0.0 * (*solution)[0][1] + 1.0;
     (*rhs)[0][2] = 0.0 * (*solution)[0][2] + 2.0;

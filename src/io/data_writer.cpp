@@ -11,6 +11,7 @@
 
 #include "data_writer.h"
 
+#include <iostream>
 #include <string>
 #include <iomanip>
 #include <optional>
@@ -111,11 +112,15 @@ void DataWriter::write_vtu(int step) const {
         throw std::runtime_error("DataWriter::write_vtu: Could not write to file: " + filename + ".");
     }
 
-    // \todo binary format
+    std::cout << "Writing data to file: " << filename << std::endl;
 
+    int offset_data = 0;
+    int len_connectivity = 0;
+
+    // ---------------------------------------------------------------------------------------------
     // Write header
     out << "<?xml version=\"1.0\"?>\n";
-    out << "<VTKFile type=\"UnstructuredGrid\" version=\"0.1\" byte_order=\"LittleEndian\">\n";
+    out << "<VTKFile type=\"UnstructuredGrid\" version=\"0.1\" byte_order=\"" << endianness() << "\">\n";
     out << "  <UnstructuredGrid>\n";
     out << "    <Piece NumberOfPoints=\"" << mesh->n_nodes() << "\" NumberOfCells=\"" << mesh->n_cells() << "\">\n";
 
@@ -126,59 +131,115 @@ void DataWriter::write_vtu(int step) const {
     // Write CellData
     out << "      <CellData>\n";
     for (const auto & data_ptr : data_ptrs) {
-        out << "        <DataArray type=\"Float64\" Name=\"" << data_ptr->name() << "\" format=\"ascii\">\n";
-        for (int i = 0; i < mesh->n_cells(); i++) {
-            out << "          " << (*data_ptr)[i] << "\n";
-        }
+        out << "        <DataArray type=\"Float64\" Name=\"" << data_ptr->name() << "\" ";
+        out << "format=\"appended\" ";
+        out << "offset=\"" << offset_data << "\">\n";
         out << "        </DataArray>\n";
+        offset_data += sizeof(int) + mesh->n_cells() * sizeof(double);
     }
     out << "      </CellData>\n";
 
     // Write Points
     out << "      <Points>\n";
-    out << "        <DataArray type=\"Float64\" NumberOfComponents=\"" << 3 << "\" format=\"ascii\">\n";
-    for (int i = 0; i < mesh->n_nodes(); i++) {
-        out << "          ";
-        for (int j = 0; j < N_DIM; j++) {
-            out << mesh->node_coords(i)[j] << " ";
-        }
-        if (N_DIM == 2) {
-            out << "0.0";
-        }
-        out << "\n";
-        // \todo Add support for 3D meshes
-    }
+    out << "        <DataArray type=\"Float64\" NumberOfComponents=\"" << 3 << "\" ";
+    out << "format=\"appended\" ";
+    out << "offset=\"" << offset_data << "\">\n";
     out << "        </DataArray>\n";
+    offset_data += sizeof(int) + mesh->n_nodes() * 3 * sizeof(double);
     out << "      </Points>\n";
 
     // Write Cells
     out << "      <Cells>\n";
-    out << "        <DataArray type=\"Int32\" Name=\"connectivity\" format=\"ascii\">\n";
-    for (int i = 0; i < mesh->n_cells(); i++) {
-        out << "          ";
-        for (int j = 0; j < mesh->nodes_of_cell(i).size(); j++) {
-            out << mesh->nodes_of_cell(i)[j] << " ";
-        }
-        out << "\n";
-    }
+
+    // connectivity
+    out << "        <DataArray type=\"Int32\" Name=\"connectivity\" ";
+    out << "format=\"appended\" ";
+    out << "offset=\"" << offset_data << "\">\n";
     out << "        </DataArray>\n";
-    out << "        <DataArray type=\"Int32\" Name=\"offsets\" format=\"ascii\">\n";
+    for (int i = 0; i < mesh->n_cells(); i++) {
+        len_connectivity += mesh->nodes_of_cell(i).size();
+    }
+    offset_data += sizeof(int) + len_connectivity * sizeof(int);
+
+    // offsets
+    out << "        <DataArray type=\"Int32\" Name=\"offsets\" ";
+    out << "format=\"appended\" ";
+    out << "offset=\"" << offset_data << "\">\n";
+    out << "        </DataArray>\n";
+    offset_data += sizeof(int) + mesh->n_cells() * sizeof(int);
+
+    // types
+    out << "        <DataArray type=\"Int32\" Name=\"types\" ";
+    out << "format=\"appended\" ";
+    out << "offset=\"" << offset_data << "\">\n";
+    out << "        </DataArray>\n";
+    offset_data += sizeof(int) + mesh->n_cells() * sizeof(int);
+
+    out << "      </Cells>\n";
+    out << "    </Piece>\n";
+    out << "  </UnstructuredGrid>\n";
+
+    // ---------------------------------------------------------------------------------------------
+    // Write appended data
+    out << "<AppendedData encoding=\"raw\">\n_";
+
+    int n_bytes;
+
+    // Write PointData
+    // Do nothing, no point data
+
+    // Write CellData
+    for (const auto & data_ptr : data_ptrs) {
+        int bytes = sizeof(double) * mesh->n_cells();
+        out.write(reinterpret_cast<const char *>(&bytes), sizeof(int));
+        for (int i = 0; i < mesh->n_cells(); i++) {
+            out.write(reinterpret_cast<const char *>(&(*data_ptr)[i]), sizeof(double));
+        }
+    }
+
+    // Write Points
+    n_bytes = sizeof(double) * mesh->n_nodes() * 3;
+    out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
+    for (int i = 0; i < mesh->n_nodes(); i++) {
+        for (int j = 0; j < N_DIM; j++) {
+            out.write(reinterpret_cast<const char *>(&mesh->node_coords(i)[j]), sizeof(double));
+        }
+        if (N_DIM == 2) {
+            double zero = 0.0;
+            out.write(reinterpret_cast<const char *>(&zero), sizeof(double));
+        }
+    }
+
+    // Write Cells
+
+    // connectivity
+    n_bytes = sizeof(int) * len_connectivity;
+    out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
+    for (int i = 0; i < mesh->n_cells(); i++) {
+        for (int j = 0; j < mesh->nodes_of_cell(i).size(); j++) {
+            out.write(reinterpret_cast<const char *>(&mesh->nodes_of_cell(i)[j]), sizeof(int));
+        }
+    }
+
+    // // offsets
+    n_bytes = sizeof(int) * mesh->n_cells();
+    out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
     int offset = 0;
     for (int i = 0; i < mesh->n_cells(); i++) {
         offset += mesh->nodes_of_cell(i).size();
-        out << "          " << offset << "\n";
+        out.write(reinterpret_cast<const char *>(&offset), sizeof(int));
     }
-    out << "        </DataArray>\n";
-    out << "        <DataArray type=\"Int32\" Name=\"types\" format=\"ascii\">\n";
-    for (int i = 0; i < mesh->n_cells(); i++) {
-        out << "          " << 7 << "\n";
-    }
-    out << "        </DataArray>\n";
-    out << "      </Cells>\n";
 
-    // Write footer
-    out << "    </Piece>\n";
-    out << "  </UnstructuredGrid>\n";
+    // // types
+    n_bytes = sizeof(int) * mesh->n_cells();
+    out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
+    int cell_type = 7;
+    for (int i = 0; i < mesh->n_cells(); i++) {
+        out.write(reinterpret_cast<const char *>(&cell_type), sizeof(int));
+    }
+
+    out << "\n";
+    out << "</AppendedData>\n";
     out << "</VTKFile>\n";
 
     out.close();
