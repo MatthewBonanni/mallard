@@ -14,7 +14,7 @@
 
 #include <string>
 
-#include "common/common_typedef.h"
+#include "common_typedef.h"
 
 class Data {
     public:

@@ -13,7 +13,7 @@
 
 #include <iostream>
 
-#include "common/common.h"
+#include "common.h"
 
 Physics::Physics() {
     // Empty

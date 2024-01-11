@@ -15,7 +15,7 @@
 #include <string>
 #include <vector>
 
-#include "common/common_typedef.h"
+#include "common.h"
 
 enum class FaceZoneType {
     UNKNOWN = -1,

@@ -14,10 +14,10 @@
 
 #include <toml++/toml.h>
 
-#include "common/common.h"
-#include "mesh/zone.h"
-#include "mesh/mesh.h"
-#include "physics/physics.h"
+#include "common.h"
+#include "zone.h"
+#include "mesh.h"
+#include "physics.h"
 
 enum class BoundaryType {
     SYMMETRY = 1,

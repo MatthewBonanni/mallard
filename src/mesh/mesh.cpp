@@ -14,8 +14,8 @@
 #include <iostream>
 #include <cmath>
 
-#include "common/common.h"
-#include "boundary/boundary.h"
+#include "common.h"
+#include "boundary.h"
 
 Mesh::Mesh(MeshType type) {
     this->type = type;

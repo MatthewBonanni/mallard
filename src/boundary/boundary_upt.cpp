@@ -15,7 +15,7 @@
 
 #include <toml++/toml.h>
 
-#include "common/common.h"
+#include "common.h"
 
 BoundaryUPT::BoundaryUPT() {
     type = BoundaryType::UPT;

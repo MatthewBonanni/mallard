@@ -16,13 +16,13 @@
 #include <memory>
 #include <Kokkos_Core.hpp>
 
-#include "common/common.h"
-#include "mesh/mesh.h"
-#include "boundary/boundary.h"
-#include "boundary/boundary_symmetry.h"
-#include "boundary/boundary_wall_adiabatic.h"
-#include "boundary/boundary_upt.h"
-#include "boundary/boundary_p_out.h"
+#include "common.h"
+#include "mesh.h"
+#include "boundary.h"
+#include "boundary_symmetry.h"
+#include "boundary_wall_adiabatic.h"
+#include "boundary_upt.h"
+#include "boundary_p_out.h"
 
 Solver::Solver() {
     // Empty

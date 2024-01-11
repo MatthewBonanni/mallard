@@ -3,11 +3,6 @@ add_executable(Mallard
     main.cpp
 )
 
-set_target_properties(Mallard PROPERTIES
-    CXX_STANDARD 17
-    CXX_STANDARD_REQUIRED YES
-)
-
 set(Kokkos_ROOT "${CMAKE_SOURCE_DIR}/build/external/kokkos/install" CACHE PATH "Kokkos install directory")
 
 find_package(Kokkos REQUIRED)

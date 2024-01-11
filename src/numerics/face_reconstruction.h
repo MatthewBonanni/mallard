@@ -12,8 +12,8 @@
 #ifndef FACE_RECONSTRUCTION_H
 #define FACE_RECONSTRUCTION_H
 
-#include "common/common_typedef.h"
-#include "mesh/mesh.h"
+#include "common_typedef.h"
+#include "mesh.h"
 
 enum class FaceReconstructionType {
     FirstOrder,

@@ -19,13 +19,13 @@
 
 #include <toml++/toml.h>
 
-#include "mesh/mesh.h"
-#include "boundary/boundary.h"
-#include "numerics/face_reconstruction.h"
-#include "numerics/time_integrator.h"
-#include "physics/physics.h"
+#include "mesh.h"
+#include "boundary.h"
+#include "face_reconstruction.h"
+#include "time_integrator.h"
+#include "physics.h"
 #include "data.h"
-#include "io/data_writer.h"
+#include "data_writer.h"
 
 class Solver {
     public:

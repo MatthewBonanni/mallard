@@ -1,4 +1,4 @@
-# CMakeLists.txt for MeshLib
+# CMakeLists.txt for CommonLib
 set(LIB_NAME CommonLib)
 set(LIB_SRCS
     common_math.cpp

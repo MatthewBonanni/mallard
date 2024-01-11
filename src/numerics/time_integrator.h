@@ -17,7 +17,7 @@
 #include <string>
 #include <unordered_map>
 
-#include "common/common.h"
+#include "common.h"
 
 enum class TimeIntegratorType {
     FE,

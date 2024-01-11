@@ -18,7 +18,7 @@ find_package(GTest REQUIRED)
 target_link_libraries(MallardTest PRIVATE GTest::GTest GTest::Main)
 
 add_dependencies(MallardTest Mallard)
-target_link_libraries(MallardTest PUBLIC tomlplusplus::tomlplusplus)
+target_link_libraries(MallardTest PRIVATE tomlplusplus::tomlplusplus)
 target_link_libraries(MallardTest PRIVATE CommonLib)
 target_link_libraries(MallardTest PRIVATE SolverLib)
 target_link_libraries(MallardTest PRIVATE NumericsLib)

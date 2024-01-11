@@ -14,8 +14,8 @@
 
 #include <toml++/toml.h>
 
-#include "solver/data.h"
-#include "mesh/mesh.h"
+#include "data.h"
+#include "mesh.h"
 
 enum class DataFormat {
     VTU,

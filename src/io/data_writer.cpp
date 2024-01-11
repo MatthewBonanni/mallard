@@ -16,7 +16,7 @@
 #include <iomanip>
 #include <optional>
 
-#include "common/common_io.h"
+#include "common_io.h"
 
 DataWriter::DataWriter() {
     // Empty

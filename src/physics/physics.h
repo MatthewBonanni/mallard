@@ -15,7 +15,7 @@
 #include <unordered_map>
 #include <string>
 
-#include "common/common.h"
+#include "common.h"
 
 #include <toml++/toml.h>
 

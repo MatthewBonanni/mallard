@@ -15,7 +15,7 @@
 
 #include <toml++/toml.h>
 
-#include "common/common.h"
+#include "common.h"
 
 BoundaryPOut::BoundaryPOut() {
     type = BoundaryType::P_OUT;
