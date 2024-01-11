@@ -27,8 +27,13 @@ if(BUILD_DOCS)
     endif()
 endif()
 
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX /path/to/install/dir CACHE PATH "Default installation path" FORCE)
+endif()
+
 install(TARGETS Mallard
     DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
 )
 
 enable_testing()
+add_test(NAME MallardTest COMMAND MallardTest)

@@ -24,5 +24,3 @@ target_link_libraries(MallardTest PRIVATE SolverLib)
 target_link_libraries(MallardTest PRIVATE NumericsLib)
 
 target_compile_options(MallardTest PRIVATE -Wall -Wextra -pedantic)
-
-add_test(NAME MallardTest COMMAND MallardTest)

@@ -23,9 +23,9 @@
 #define NVector std::array<double, 2>
 #define State std::array<double, N_CONSERVATIVE>
 #define Primitives std::array<double, N_PRIMITIVE>
-#define FaceState std::array<State, 2>
+#define FaceStatePair std::array<State, 2>
 #define StateVector std::vector<State>
-#define FaceStateVector std::vector<FaceState>
+#define FaceStateVector std::vector<FaceStatePair>
 #define PrimitivesVector std::vector<Primitives>
 
 const std::array<std::string, N_CONSERVATIVE> CONSERVATIVE_NAMES = {
