@@ -14,6 +14,7 @@
 #include <iostream>
 #include <functional>
 #include <memory>
+#include <Kokkos_Core.hpp>
 
 #include "common/common.h"
 #include "mesh/mesh.h"

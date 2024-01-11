@@ -1,0 +1,3 @@
+[submodule "src/external/kokkos"]
+	path = src/external/kokkos
+	url = git@github.com:kokkos/kokkos.git
