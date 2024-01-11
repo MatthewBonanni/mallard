@@ -1,0 +1,60 @@
+[run]
+n_steps = 2000000
+# dt = 1.0e-5
+cfl = 0.001
+
+[mesh]
+type = "wedge"
+Nx = 60
+Ny = 20
+Lx = 4
+Ly = 1.5
+
+[initialize]
+type = "constant"
+u = [0.0, 0.0]
+p = 101325.0
+T = 300.0
+
+[[boundaries]]
+name = "left"
+type = "upt"
+u = [600.0, 0.0]
+p = 101325.0
+T = 300.0
+# type = "symmetry"
+
+[[boundaries]]
+name = "right"
+type = "p_out"
+p = 101325.0
+# type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[numerics]
+face_reconstruction = "FO"
+time_integrator = "SSPRK3"
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 101325.0
+T_ref = 298.15
+rho_ref = 1.225
+
+[output]
+check_interval = 1000
+
+[[write_data]]
+prefix = "./solut/all/wedge_all"
+format = "vtu"
+geometry = "all"
+interval = 100000
+variables = ["CFL", "RHO", "RHOU_X", "RHOU_Y", "RHOE", "U_X", "U_Y", "P", "T", "H"]
