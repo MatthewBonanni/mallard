@@ -15,6 +15,8 @@
 #include "common_typedef.h"
 #include "mesh.h"
 
+#include <memory>
+
 enum class FaceReconstructionType {
     FirstOrder,
     WENO,

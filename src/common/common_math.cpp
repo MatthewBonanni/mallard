@@ -12,6 +12,7 @@
 #include "common_math.h"
 
 #include <cmath>
+#include <stdexcept>
 
 double dot_self(const NVector& v) {
     return dot(v.data(), v.data(), v.size());
