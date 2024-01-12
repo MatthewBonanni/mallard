@@ -422,17 +422,37 @@ void Solver::check_fields() const {
     return;
 #endif
 
+    bool nan_found = false;
     for (int i = 0; i < mesh->n_cells(); i++) {
         for (int j = 0; j < N_CONSERVATIVE; j++) {
             if (std::isnan(conservatives[i][j])) {
-                throw std::runtime_error("NaN found in conservatives.");
+                nan_found = true;
             }
         }
 
         for (int j = 0; j < N_PRIMITIVE; j++) {
             if (std::isnan(primitives[i][j])) {
-                throw std::runtime_error("NaN found in primitives.");
+                nan_found = true;
             }
+        }
+
+        if (nan_found) {
+            std::string msg;
+            msg += "NaN found in solution.\n";
+            msg += "t: " + std::to_string(t) + "\n";
+            msg += "step: " + std::to_string(step) + "\n";
+            msg += "i_cell: " + std::to_string(i) + "\n";
+            msg += "> x: " + std::to_string(mesh->cell_coords(i)[0]) + "\n";
+            msg += "> y: " + std::to_string(mesh->cell_coords(i)[1]) + "\n";
+            msg += "conservatives:\n";
+            for (int j = 0; j < N_CONSERVATIVE; j++) {
+                msg += "> " + CONSERVATIVE_NAMES[j] + ": " + std::to_string(conservatives[i][j]) + "\n";
+            }
+            msg += "primitives:\n";
+            for (int j = 0; j < N_PRIMITIVE; j++) {
+                msg += "> " + PRIMITIVE_NAMES[j] + ": " + std::to_string(primitives[i][j]) + "\n";
+            }
+            throw std::runtime_error(msg);
         }
     }
 }
