@@ -3,6 +3,7 @@ set(LIB_NAME SolverLib)
 set(LIB_SRCS
     solver.cpp
     solver_initialize.cpp
+    solver_rhs.cpp
 )
 
 # Add the library

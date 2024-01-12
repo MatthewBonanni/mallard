@@ -29,7 +29,7 @@ void BoundaryWallAdiabatic::print() {
 }
 
 void BoundaryWallAdiabatic::init(const toml::table & input) {
-    // Empty
+    print();
 }
 
 void BoundaryWallAdiabatic::apply(FaceStateVector * face_solution,

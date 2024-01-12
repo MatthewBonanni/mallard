@@ -7,15 +7,16 @@ add_executable(MallardTest
 )
 
 target_include_directories(MallardTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_include_directories(MallardTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
 find_package(GTest REQUIRED)
 target_link_libraries(MallardTest PRIVATE GTest::GTest GTest::Main)
 
 add_dependencies(MallardTest Mallard)
 target_link_libraries(MallardTest PRIVATE tomlplusplus::tomlplusplus)
+target_link_libraries(MallardTest PRIVATE Kokkos::kokkos)
 target_link_libraries(MallardTest PRIVATE CommonLib)
 target_link_libraries(MallardTest PRIVATE SolverLib)
 target_link_libraries(MallardTest PRIVATE NumericsLib)
+target_link_libraries(MallardTest PRIVATE PhysicsLib)
 
 target_compile_options(MallardTest PRIVATE -Wall -Wextra -pedantic)

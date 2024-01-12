@@ -13,9 +13,14 @@ if (${PROJECT_NAME}_USE_DOUBLES)
     add_compile_definitions(${PROJECT_NAME}_USE_DOUBLES)
 endif()
 
+set(Kokkos_ROOT "${CMAKE_SOURCE_DIR}/build/external/kokkos/install" CACHE PATH "Kokkos install directory")
+
+find_package(Kokkos REQUIRED)
+
 add_subdirectory(src)
 add_subdirectory(test)
 
+# Documentation stuff
 option(BUILD_DOCS "Build documentation" ON)
 
 if(BUILD_DOCS)
@@ -33,6 +38,7 @@ if(BUILD_DOCS)
     endif()
 endif()
 
+# Installation stuff
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX /path/to/install/dir CACHE PATH "Default installation path" FORCE)
 endif()
@@ -41,5 +47,6 @@ install(TARGETS Mallard
     DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
 )
 
+# Testing stuff
 enable_testing()
 add_test(NAME MallardTest COMMAND MallardTest)

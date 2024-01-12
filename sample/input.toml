@@ -1,7 +1,7 @@
 [run]
-n_steps = 2000000
+n_steps = 10000
 # dt = 1.0e-5
-cfl = 0.001
+cfl = 1.0
 
 [mesh]
 type = "wedge"
@@ -50,11 +50,11 @@ T_ref = 298.15
 rho_ref = 1.225
 
 [output]
-check_interval = 1000
+check_interval = 100
 
 [[write_data]]
 prefix = "./solut/all/wedge_all"
 format = "vtu"
 geometry = "all"
-interval = 100000
+interval = 1000
 variables = ["CFL", "RHO", "RHOU_X", "RHOU_Y", "RHOE", "U_X", "U_Y", "P", "T", "H"]

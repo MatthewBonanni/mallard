@@ -11,7 +11,7 @@
 
 #include <gtest/gtest.h>
 #include "test_utils.h"
-#include "physics/physics.h"
+#include "physics.h"
 
 TEST(PhysicsTest, EulerFlux) {
     Euler physics;

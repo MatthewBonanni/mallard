@@ -29,7 +29,7 @@ void BoundarySymmetry::print() {
 }
 
 void BoundarySymmetry::init(const toml::table & input) {
-    // Empty
+    print();
 }
 
 void BoundarySymmetry::apply(FaceStateVector * face_solution,

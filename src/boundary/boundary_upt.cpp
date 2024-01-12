@@ -27,6 +27,7 @@ BoundaryUPT::~BoundaryUPT() {
 
 void BoundaryUPT::print() {
     Boundary::print();
+    std::cout << "Parameters:" << std::endl;
     std::cout << "> u: " << u_bc[0] << ", " << u_bc[1] << std::endl;
     std::cout << "> p: " << p_bc << std::endl;
     std::cout << "> T: " << T_bc << std::endl;

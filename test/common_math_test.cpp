@@ -11,7 +11,7 @@
 
 #include <gtest/gtest.h>
 #include "test_utils.h"
-#include "common/common_math.h"
+#include "common_math.h"
 
 TEST(CommonMathTest, Dot) {
     NVector v0 = {1.0, 2.0};

@@ -11,7 +11,7 @@
 
 #include <gtest/gtest.h>
 #include "test_utils.h"
-#include "numerics/time_integrator.h"
+#include "time_integrator.h"
 
 void calc_rhs_test(StateVector * solution,
                    FaceStateVector * face_solution,

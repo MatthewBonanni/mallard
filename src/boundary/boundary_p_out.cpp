@@ -27,6 +27,7 @@ BoundaryPOut::~BoundaryPOut() {
 
 void BoundaryPOut::print() {
     Boundary::print();
+    std::cout << "Parameters:" << std::endl;
     std::cout << "> p: " << p_bc << std::endl;
     std::cout << LOG_SEPARATOR << std::endl;
 }
