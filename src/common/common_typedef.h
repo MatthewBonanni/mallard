@@ -20,9 +20,15 @@
 #define N_CONSERVATIVE N_DIM + 2
 #define N_PRIMITIVE N_DIM + 3
 
-#define NVector std::array<double, 2>
-#define State std::array<double, N_CONSERVATIVE>
-#define Primitives std::array<double, N_PRIMITIVE>
+#ifdef Mallard_USE_DOUBLES
+    using rtype = double;
+#else
+    using rtype = float;
+#endif
+
+#define NVector std::array<rtype, 2>
+#define State std::array<rtype, N_CONSERVATIVE>
+#define Primitives std::array<rtype, N_PRIMITIVE>
 #define FaceStatePair std::array<State, 2>
 #define StateVector std::vector<State>
 #define FaceStateVector std::vector<FaceStatePair>

@@ -46,7 +46,7 @@ class BoundaryPOut : public Boundary {
                    StateVector * rhs) override;
     protected:
     private:
-        double p_bc;
+        rtype p_bc;
 };
 
 #endif // BOUNDARY_P_OUT_H

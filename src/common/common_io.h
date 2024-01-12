@@ -23,4 +23,10 @@
  */
 std::string endianness();
 
+/**
+ * @brief Return the VTK name for the floating point type.
+ * @return std::string 
+ */
+std::string vtk_float_type();
+
 #endif // COMMON_IO_H

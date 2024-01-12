@@ -10,6 +10,7 @@
  */
 
 #include <gtest/gtest.h>
+#include "test_utils.h"
 #include "numerics/time_integrator.h"
 
 void calc_rhs_test(StateVector * solution,
@@ -58,14 +59,14 @@ TEST(TimeIntegratorTest, FE) {
 
     fe.take_step(0.1, solution_pointers, &face_solution, rhs_pointers, &rhs_func);
 
-    EXPECT_DOUBLE_EQ((*solution)[0][0], 0.0);
-    EXPECT_DOUBLE_EQ((*solution)[0][1], 1.1);
-    EXPECT_DOUBLE_EQ((*solution)[0][2], 2.2);
-    EXPECT_DOUBLE_EQ((*solution)[0][3], 3.3);
-    EXPECT_DOUBLE_EQ((*solution)[1][0], 4.4);
-    EXPECT_DOUBLE_EQ((*solution)[1][1], 5.5);
-    EXPECT_DOUBLE_EQ((*solution)[1][2], 6.6);
-    EXPECT_DOUBLE_EQ((*solution)[1][3], 7.7);
+    EXPECT_RTYPE_EQ((*solution)[0][0], 0.0);
+    EXPECT_RTYPE_EQ((*solution)[0][1], 1.1);
+    EXPECT_RTYPE_EQ((*solution)[0][2], 2.2);
+    EXPECT_RTYPE_EQ((*solution)[0][3], 3.3);
+    EXPECT_RTYPE_EQ((*solution)[1][0], 4.4);
+    EXPECT_RTYPE_EQ((*solution)[1][1], 5.5);
+    EXPECT_RTYPE_EQ((*solution)[1][2], 6.6);
+    EXPECT_RTYPE_EQ((*solution)[1][3], 7.7);
 }
 
 TEST(TimeIntegratorTest, RK4) {
@@ -97,14 +98,14 @@ TEST(TimeIntegratorTest, RK4) {
 
     rk4.take_step(0.1, solution_pointers, &face_solution, rhs_pointers, &rhs_func);
 
-    EXPECT_DOUBLE_EQ((*solution)[0][0], 0.0);
-    EXPECT_DOUBLE_EQ((*solution)[0][1], 1.1);
-    EXPECT_DOUBLE_EQ((*solution)[0][2], 2.2);
-    EXPECT_DOUBLE_EQ((*solution)[0][3], 3.3);
-    EXPECT_DOUBLE_EQ((*solution)[1][0], 4.4);
-    EXPECT_DOUBLE_EQ((*solution)[1][1], 5.5);
-    EXPECT_DOUBLE_EQ((*solution)[1][2], 6.6);
-    EXPECT_DOUBLE_EQ((*solution)[1][3], 7.7);
+    EXPECT_RTYPE_EQ((*solution)[0][0], 0.0);
+    EXPECT_RTYPE_EQ((*solution)[0][1], 1.1);
+    EXPECT_RTYPE_EQ((*solution)[0][2], 2.2);
+    EXPECT_RTYPE_EQ((*solution)[0][3], 3.3);
+    EXPECT_RTYPE_EQ((*solution)[1][0], 4.4);
+    EXPECT_RTYPE_EQ((*solution)[1][1], 5.5);
+    EXPECT_RTYPE_EQ((*solution)[1][2], 6.6);
+    EXPECT_RTYPE_EQ((*solution)[1][3], 7.7);
 }
 
 TEST(TimeIntegratorTest, SSPRK3) {
@@ -136,12 +137,12 @@ TEST(TimeIntegratorTest, SSPRK3) {
 
     ssprk3.take_step(0.1, solution_pointers, &face_solution, rhs_pointers, &rhs_func);
 
-    EXPECT_DOUBLE_EQ((*solution)[0][0], 0.0);
-    EXPECT_DOUBLE_EQ((*solution)[0][1], 1.1);
-    EXPECT_DOUBLE_EQ((*solution)[0][2], 2.2);
-    EXPECT_DOUBLE_EQ((*solution)[0][3], 3.3);
-    EXPECT_DOUBLE_EQ((*solution)[1][0], 4.4);
-    EXPECT_DOUBLE_EQ((*solution)[1][1], 5.5);
-    EXPECT_DOUBLE_EQ((*solution)[1][2], 6.6);
-    EXPECT_DOUBLE_EQ((*solution)[1][3], 7.7);
+    EXPECT_RTYPE_EQ((*solution)[0][0], 0.0);
+    EXPECT_RTYPE_EQ((*solution)[0][1], 1.1);
+    EXPECT_RTYPE_EQ((*solution)[0][2], 2.2);
+    EXPECT_RTYPE_EQ((*solution)[0][3], 3.3);
+    EXPECT_RTYPE_EQ((*solution)[1][0], 4.4);
+    EXPECT_RTYPE_EQ((*solution)[1][1], 5.5);
+    EXPECT_RTYPE_EQ((*solution)[1][2], 6.6);
+    EXPECT_RTYPE_EQ((*solution)[1][3], 7.7);
 }

@@ -74,11 +74,11 @@ NVector Mesh::face_coords(int i_face) const {
     return m_face_coords[i_face];
 }
 
-double Mesh::cell_volume(int i_cell) const {
+rtype Mesh::cell_volume(int i_cell) const {
     return m_cell_volume[i_cell];
 }
 
-double Mesh::face_area(int i_face) const {
+rtype Mesh::face_area(int i_face) const {
     return m_face_area[i_face];
 }
 
@@ -131,10 +131,10 @@ void Mesh::compute_cell_volumes() {
         int i_node2 = m_nodes_of_cell[i][2];
         int i_node3 = m_nodes_of_cell[i][3];
 
-        double a1 = triangle_area_2(m_node_coords[i_node0],
+        rtype a1 = triangle_area_2(m_node_coords[i_node0],
                                     m_node_coords[i_node1],
                                     m_node_coords[i_node2]);
-        double a2 = triangle_area_2(m_node_coords[i_node0],
+        rtype a2 = triangle_area_2(m_node_coords[i_node0],
                                     m_node_coords[i_node2],
                                     m_node_coords[i_node3]);
         m_cell_volume[i] = a1 + a2;
@@ -157,21 +157,21 @@ void Mesh::compute_face_normals() {
         // Compute normal with area magnitude
         int i_node0 = m_nodes_of_face[i_face][0];
         int i_node1 = m_nodes_of_face[i_face][1];
-        double x0 = m_node_coords[i_node0][0];
-        double y0 = m_node_coords[i_node0][1];
-        double x1 = m_node_coords[i_node1][0];
-        double y1 = m_node_coords[i_node1][1];
-        double dx = x1 - x0;
-        double dy = y1 - y0;
-        double mag = sqrt(dx * dx + dy * dy);
+        rtype x0 = m_node_coords[i_node0][0];
+        rtype y0 = m_node_coords[i_node0][1];
+        rtype x1 = m_node_coords[i_node1][0];
+        rtype y1 = m_node_coords[i_node1][1];
+        rtype dx = x1 - x0;
+        rtype dy = y1 - y0;
+        rtype mag = sqrt(dx * dx + dy * dy);
         m_face_normals[i_face][0] =  dy / mag * face_area(i_face);
         m_face_normals[i_face][1] = -dx / mag * face_area(i_face);
     }
 }
 
-void Mesh::init_wedge(int nx, int ny, double Lx, double Ly) {
-    double wedge_theta = 8 * M_PI / 180.0;
-    double wedge_x = 0.5;
+void Mesh::init_wedge(int nx, int ny, rtype Lx, rtype Ly) {
+    rtype wedge_theta = 8 * M_PI / 180.0;
+    rtype wedge_x = 0.5;
 
     this->nx = nx;
     this->ny = ny;
@@ -188,16 +188,16 @@ void Mesh::init_wedge(int nx, int ny, double Lx, double Ly) {
     m_face_normals.resize(n_faces());
 
     // Compute node coordinates
-    double dx = Lx / nx;
-    double dy = Ly / ny;
+    rtype dx = Lx / nx;
+    rtype dy = Ly / ny;
 
     for (int i = 0; i < nx + 1; ++i) {
         for (int j = 0; j < ny + 1; ++j) {
             int i_node = i * (ny + 1) + j;
-            double x = i * dx;
-            double y;
+            rtype x = i * dx;
+            rtype y;
             if (x > wedge_x) {
-                double y_bottom = (x - wedge_x) * tan(wedge_theta);
+                rtype y_bottom = (x - wedge_x) * tan(wedge_theta);
                 y = j * (Ly - y_bottom) / ny + y_bottom;
             } else {
                 y = j * dy;

@@ -90,7 +90,7 @@ class TimeIntegrator {
          * @param rhs_pointers Pointers to rhs vectors.
          * @param calc_rhs Function to calculate rhs.
          */
-        virtual void take_step(const double& dt,
+        virtual void take_step(const rtype & dt,
                                std::vector<StateVector *> & solution_pointers,
                                FaceStateVector * face_solution,
                                std::vector<StateVector *> & rhs_pointers,
@@ -124,7 +124,7 @@ class FE : public TimeIntegrator {
          * @param rhs_pointers Pointers to rhs vectors.
          * @param calc_rhs Function to calculate rhs.
          */
-        void take_step(const double& dt,
+        void take_step(const rtype & dt,
                        std::vector<StateVector *> & solution_pointers,
                        FaceStateVector * face_solution,
                        std::vector<StateVector *> & rhs_pointers,
@@ -155,7 +155,7 @@ class RK4 : public TimeIntegrator {
          * @param rhs_pointers Pointers to rhs vectors.
          * @param calc_rhs Function to calculate rhs.
          */
-        void take_step(const double& dt,
+        void take_step(const rtype & dt,
                        std::vector<StateVector *> & solution_pointers,
                        FaceStateVector * face_solution,
                        std::vector<StateVector *> & rhs_pointers,
@@ -164,7 +164,7 @@ class RK4 : public TimeIntegrator {
                                           StateVector * rhs)> * calc_rhs) override;
     protected:
     private:
-        std::vector<double> coeffs;
+        std::vector<rtype> coeffs;
 };
 
 class LSRK4 : public TimeIntegrator {
@@ -187,7 +187,7 @@ class LSRK4 : public TimeIntegrator {
          * @param rhs_pointers Pointers to rhs vectors.
          * @param calc_rhs Function to calculate rhs.
          */
-        void take_step(const double& dt,
+        void take_step(const rtype & dt,
                        std::vector<StateVector *> & solution_pointers,
                        FaceStateVector * face_solution,
                        std::vector<StateVector *> & rhs_pointers,
@@ -218,7 +218,7 @@ class SSPRK3 : public TimeIntegrator {
          * @param rhs_pointers Pointers to rhs vectors.
          * @param calc_rhs Function to calculate rhs.
          */
-        void take_step(const double& dt,
+        void take_step(const rtype & dt,
                        std::vector<StateVector *> & solution_pointers,
                        FaceStateVector * face_solution,
                        std::vector<StateVector *> & rhs_pointers,
@@ -227,7 +227,7 @@ class SSPRK3 : public TimeIntegrator {
                                           StateVector * rhs)> * calc_rhs) override;
     protected:
     private:
-        std::vector<double> coeffs;
+        std::vector<rtype> coeffs;
 };
 
 class LSSSPRK3 : public TimeIntegrator {
@@ -250,7 +250,7 @@ class LSSSPRK3 : public TimeIntegrator {
          * @param rhs_pointers Pointers to rhs vectors.
          * @param calc_rhs Function to calculate rhs.
          */
-        void take_step(const double& dt,
+        void take_step(const rtype & dt,
                        std::vector<StateVector *> & solution_pointers,
                        FaceStateVector * face_solution,
                        std::vector<StateVector *> & rhs_pointers,

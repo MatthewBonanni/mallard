@@ -38,7 +38,7 @@ void BoundarySymmetry::apply(FaceStateVector * face_solution,
     State flux;
     State * conservatives_l;
     Primitives primitives_l, primitives_r;
-    double u_n;
+    rtype u_n;
     NVector u_l, u_r, n_unit;
     for (int i_local = 0; i_local < zone->n_faces(); i_local++) {
         i_face = (*zone->faces())[i_local];
@@ -55,7 +55,7 @@ void BoundarySymmetry::apply(FaceStateVector * face_solution,
         primitives_r = primitives_l;
         u_l[0] = primitives_l[0];
         u_l[1] = primitives_l[1];
-        u_n = dot<double>(u_l.data(), n_unit.data(), 2);
+        u_n = dot<rtype>(u_l.data(), n_unit.data(), 2);
         for (int j = 0; j < 2; j++) {
             u_r[j] = u_l[j] - 2.0 * u_n * n_unit[j];
         }

@@ -36,8 +36,8 @@ void BoundaryUPT::print() {
 void BoundaryUPT::init(const toml::table & input) {
     auto u_in = input["u"];
     const toml::array* arr = u_in.as_array();
-    std::optional<double> p_in = input["p"].value<double>();
-    std::optional<double> T_in = input["T"].value<double>();
+    std::optional<rtype> p_in = input["p"].value<rtype>();
+    std::optional<rtype> T_in = input["T"].value<rtype>();
 
     if (!u_in) {
         throw std::runtime_error("Missing u for boundary: " + zone->get_name() + ".");

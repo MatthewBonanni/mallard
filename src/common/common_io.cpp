@@ -20,3 +20,11 @@ std::string endianness() {
         return "BigEndian";
     }
 }
+
+std::string vtk_float_type() {
+#ifdef Mallard_USE_DOUBLES
+    return "Float64";
+#else
+    return "Float32";
+#endif
+}

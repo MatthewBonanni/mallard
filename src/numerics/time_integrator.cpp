@@ -41,7 +41,7 @@ void TimeIntegrator::print() const {
     std::cout << LOG_SEPARATOR << std::endl;
 }
 
-void TimeIntegrator::take_step(const double& dt,
+void TimeIntegrator::take_step(const rtype & dt,
                                std::vector<StateVector *> & solution_pointers,
                                FaceStateVector * face_solution,
                                std::vector<StateVector *> & rhs_pointers,
@@ -61,7 +61,7 @@ FE::~FE() {
     // Empty
 }
 
-void FE::take_step(const double& dt,
+void FE::take_step(const rtype& dt,
                    std::vector<StateVector *> & solution_pointers,
                    FaceStateVector * face_solution,
                    std::vector<StateVector *> & rhs_pointers,
@@ -75,24 +75,24 @@ void FE::take_step(const double& dt,
 
     linear_combination(std::vector<StateVector *>({U, rhs}),
                        U,
-                       std::vector<double>({1.0, dt}));
+                       std::vector<rtype>({1.0, dt}));
 }
 
 RK4::RK4() {
     type = TimeIntegratorType::RK4;
     n_solution_vectors = 2;
     n_rhs_vectors = 4;
-    coeffs = std::vector<double>({1.0 / 6.0,
-                                  1.0 / 3.0,
-                                  1.0 / 3.0,
-                                  1.0 / 6.0});
+    coeffs = std::vector<rtype>({1.0 / 6.0,
+                                 1.0 / 3.0,
+                                 1.0 / 3.0,
+                                 1.0 / 6.0});
 }
 
 RK4::~RK4() {
     // Empty
 }
 
-void RK4::take_step(const double& dt,
+void RK4::take_step(const rtype & dt,
                     std::vector<StateVector *> & solution_pointers,
                     FaceStateVector * face_solution,
                     std::vector<StateVector *> & rhs_pointers,
@@ -110,45 +110,45 @@ void RK4::take_step(const double& dt,
     (*calc_rhs)(U, face_solution, rhs1);
     linear_combination(std::vector<StateVector *>({U, rhs1}),
                        U_temp,
-                       std::vector<double>({1.0, dt / 2.0}));
+                       std::vector<rtype>({1.0, dt / static_cast<rtype>(2.0)}));
 
     // Calculate k2
     (*calc_rhs)(U_temp, face_solution, rhs2);
     linear_combination(std::vector<StateVector *>({U, rhs2}),
                        U_temp,
-                       std::vector<double>({1.0, dt / 2.0}));
+                       std::vector<rtype>({1.0, dt / static_cast<rtype>(2.0)}));
 
     // Calculate k3
     (*calc_rhs)(U_temp, face_solution, rhs3);
     linear_combination(std::vector<StateVector *>({U, rhs3}),
                        U_temp,
-                       std::vector<double>({1.0, dt}));
+                       std::vector<rtype>({1.0, dt}));
 
     // Calculate k4
     (*calc_rhs)(U_temp, face_solution, rhs4);
     linear_combination(std::vector<StateVector *>({U, rhs1, rhs2, rhs3, rhs4}),
                        U,
-                       std::vector<double>({1.0,
-                                            dt * coeffs[0],
-                                            dt * coeffs[1],
-                                            dt * coeffs[2],
-                                            dt * coeffs[3]}));
+                       std::vector<rtype>({1.0,
+                                           dt * coeffs[0],
+                                           dt * coeffs[1],
+                                           dt * coeffs[2],
+                                           dt * coeffs[3]}));
 }
 
 SSPRK3::SSPRK3() {
     type = TimeIntegratorType::SSPRK3;
     n_solution_vectors = 2;
     n_rhs_vectors = 3;
-    coeffs = std::vector<double>({1.0 / 6.0,
-                                  1.0 / 6.0,
-                                  2.0 / 3.0});
+    coeffs = std::vector<rtype>({1.0 / 6.0,
+                                 1.0 / 6.0,
+                                 2.0 / 3.0});
 }
 
 SSPRK3::~SSPRK3() {
     // Empty
 }
 
-void SSPRK3::take_step(const double& dt,
+void SSPRK3::take_step(const rtype & dt,
                        std::vector<StateVector *> & solution_pointers,
                        FaceStateVector * face_solution,
                        std::vector<StateVector *> & rhs_pointers,
@@ -165,22 +165,22 @@ void SSPRK3::take_step(const double& dt,
     (*calc_rhs)(U, face_solution, rhs1);
     linear_combination(std::vector<StateVector *>({U, rhs1}),
                        U_temp,
-                       std::vector<double>({1.0, dt}));
+                       std::vector<rtype>({1.0, dt}));
 
     // Calculate k2
     (*calc_rhs)(U_temp, face_solution, rhs2);
     linear_combination(std::vector<StateVector *>({U, rhs2}),
                        U_temp,
-                       std::vector<double>({3.0 / 4.0, dt / 4.0}));
+                       std::vector<rtype>({3.0 / 4.0, dt / static_cast<rtype>(4.0)}));
 
     // Calculate k3
     (*calc_rhs)(U_temp, face_solution, rhs3);
     linear_combination(std::vector<StateVector *>({U, rhs1, rhs2, rhs3}),
                        U,
-                       std::vector<double>({1.0,
-                                            dt * coeffs[0],
-                                            dt * coeffs[1],
-                                            dt * coeffs[2]}));
+                       std::vector<rtype>({1.0,
+                                           dt * coeffs[0],
+                                           dt * coeffs[1],
+                                           dt * coeffs[2]}));
 }
 
 LSRK4::LSRK4() {
@@ -194,7 +194,7 @@ LSRK4::~LSRK4() {
     // Empty
 }
 
-void LSRK4::take_step(const double& dt,
+void LSRK4::take_step(const rtype & dt,
                       std::vector<StateVector *> & solution_pointers,
                       FaceStateVector * face_solution,
                       std::vector<StateVector *> & rhs_pointers,
@@ -215,7 +215,7 @@ LSSSPRK3::~LSSSPRK3() {
     // Empty
 }
 
-void LSSSPRK3::take_step(const double& dt,
+void LSSSPRK3::take_step(const rtype & dt,
                          std::vector<StateVector *> & solution_pointers,
                          FaceStateVector * face_solution,
                          std::vector<StateVector *> & rhs_pointers,

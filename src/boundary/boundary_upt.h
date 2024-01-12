@@ -48,13 +48,13 @@ class BoundaryUPT : public Boundary {
     private:
         // Input
         NVector u_bc;
-        double p_bc;
-        double T_bc;
+        rtype p_bc;
+        rtype T_bc;
 
         // Dependent
-        double rho_bc;
-        double e_bc;
-        double h_bc;
+        rtype rho_bc;
+        rtype e_bc;
+        rtype h_bc;
         Primitives primitives_bc;
 };
 

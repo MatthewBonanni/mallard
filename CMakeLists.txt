@@ -7,6 +7,12 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
 endif()
 
+option(${PROJECT_NAME}_USE_DOUBLES "Use double precision" OFF)
+message(STATUS "Double precision: ${${PROJECT_NAME}_USE_DOUBLES}")
+if (${PROJECT_NAME}_USE_DOUBLES)
+    add_compile_definitions(${PROJECT_NAME}_USE_DOUBLES)
+endif()
+
 add_subdirectory(src)
 add_subdirectory(test)
 

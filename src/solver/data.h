@@ -24,7 +24,7 @@ class Data {
          * @param ptr Pointer to data array.
          * @param stride Stride, i.e. size of state array.
          */
-        Data(std::string name, double * ptr, int stride = 1) :
+        Data(std::string name, rtype * ptr, int stride = 1) :
             m_name(name), ptr(ptr), stride(stride) {
             // Empty
         }
@@ -41,7 +41,7 @@ class Data {
          * @param i Index of element to access.
          * @return Reference to element.
          */
-        double & operator[](int i) const {
+        rtype & operator[](int i) const {
             // Account for size of conservative state arrays
             return ptr[i * stride];
         }
@@ -55,7 +55,7 @@ class Data {
         }
     protected:
         std::string m_name;
-        double * ptr;
+        rtype * ptr;
         int stride;
     private:
 };

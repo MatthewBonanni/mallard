@@ -58,8 +58,8 @@ void Solver::init_solution() {
 void Solver::init_solution_constant() {
     auto u_in = input["initialize"]["u"];
     const toml::array* arr = u_in.as_array();
-    std::optional<double> p_in = input["initialize"]["p"].value<double>();
-    std::optional<double> T_in = input["initialize"]["T"].value<double>();
+    std::optional<rtype> p_in = input["initialize"]["p"].value<rtype>();
+    std::optional<rtype> T_in = input["initialize"]["T"].value<rtype>();
 
     if (!u_in) {
         throw std::runtime_error("Missing u for initialization: constant.");
@@ -77,19 +77,19 @@ void Solver::init_solution_constant() {
 
     auto u_x_in = arr->get_as<double>(0);
     auto u_y_in = arr->get_as<double>(1);
-    double u_x = u_x_in->as_floating_point()->get();
-    double u_y = u_y_in->as_floating_point()->get();
-    double p = p_in.value();
-    double T = T_in.value();
+    rtype u_x = u_x_in->as_floating_point()->get();
+    rtype u_y = u_y_in->as_floating_point()->get();
+    rtype p = p_in.value();
+    rtype T = T_in.value();
 
-    double rho = physics->get_density_from_pressure_temperature(p, T);
-    double e = physics->get_energy_from_temperature(T);
-    double E = e + 0.5 * (u_x * u_x +
+    rtype rho = physics->get_density_from_pressure_temperature(p, T);
+    rtype e = physics->get_energy_from_temperature(T);
+    rtype E = e + 0.5 * (u_x * u_x +
                           u_y * u_y);
-    double h = e + p / rho;
-    double rhou_x = rho * u_x;
-    double rhou_y = rho * u_y;
-    double rhoE = rho * E;
+    rtype h = e + p / rho;
+    rtype rhou_x = rho * u_x;
+    rtype rhou_y = rho * u_y;
+    rtype rhoE = rho * E;
 
     for (int i = 0; i < mesh->n_cells(); ++i) {
         conservatives[i][0] = rho;

@@ -131,21 +131,23 @@ void DataWriter::write_vtu(int step) const {
     // Write CellData
     out << "      <CellData>\n";
     for (const auto & data_ptr : data_ptrs) {
-        out << "        <DataArray type=\"Float64\" Name=\"" << data_ptr->name() << "\" ";
+        out << "        <DataArray type=\"" << vtk_float_type() << "\" ";
+        out << "Name=\"" << data_ptr->name() << "\" ";
         out << "format=\"appended\" ";
         out << "offset=\"" << offset_data << "\">\n";
         out << "        </DataArray>\n";
-        offset_data += sizeof(int) + mesh->n_cells() * sizeof(double);
+        offset_data += sizeof(int) + mesh->n_cells() * sizeof(rtype);
     }
     out << "      </CellData>\n";
 
     // Write Points
     out << "      <Points>\n";
-    out << "        <DataArray type=\"Float64\" NumberOfComponents=\"" << 3 << "\" ";
+    out << "        <DataArray type=\"" << vtk_float_type() << "\" ";
+    out << "NumberOfComponents=\"" << 3 << "\" ";
     out << "format=\"appended\" ";
     out << "offset=\"" << offset_data << "\">\n";
     out << "        </DataArray>\n";
-    offset_data += sizeof(int) + mesh->n_nodes() * 3 * sizeof(double);
+    offset_data += sizeof(int) + mesh->n_nodes() * 3 * sizeof(rtype);
     out << "      </Points>\n";
 
     // Write Cells
@@ -190,23 +192,23 @@ void DataWriter::write_vtu(int step) const {
 
     // Write CellData
     for (const auto & data_ptr : data_ptrs) {
-        int bytes = sizeof(double) * mesh->n_cells();
+        int bytes = sizeof(rtype) * mesh->n_cells();
         out.write(reinterpret_cast<const char *>(&bytes), sizeof(int));
         for (int i = 0; i < mesh->n_cells(); i++) {
-            out.write(reinterpret_cast<const char *>(&(*data_ptr)[i]), sizeof(double));
+            out.write(reinterpret_cast<const char *>(&(*data_ptr)[i]), sizeof(rtype));
         }
     }
 
     // Write Points
-    n_bytes = sizeof(double) * mesh->n_nodes() * 3;
+    n_bytes = sizeof(rtype) * mesh->n_nodes() * 3;
     out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
     for (int i = 0; i < mesh->n_nodes(); i++) {
         for (int j = 0; j < N_DIM; j++) {
-            out.write(reinterpret_cast<const char *>(&mesh->node_coords(i)[j]), sizeof(double));
+            out.write(reinterpret_cast<const char *>(&mesh->node_coords(i)[j]), sizeof(rtype));
         }
         if (N_DIM == 2) {
-            double zero = 0.0;
-            out.write(reinterpret_cast<const char *>(&zero), sizeof(double));
+            rtype zero = 0.0;
+            out.write(reinterpret_cast<const char *>(&zero), sizeof(rtype));
         }
     }
 

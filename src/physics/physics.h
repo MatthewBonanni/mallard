@@ -58,21 +58,21 @@ class Physics {
          * @brief Get gamma.
          * @return Gamma
          */
-        virtual double get_gamma() const = 0;
+        virtual rtype get_gamma() const = 0;
 
         /**
          * @brief Get energy from temperature.
          * @param T Temperature
          * @return Energy
          */
-        virtual double get_energy_from_temperature(const double & T) const = 0;
+        virtual rtype get_energy_from_temperature(const rtype & T) const = 0;
 
         /**
          * @brief Get temperature from energy.
          * @param e Energy
          * @return Temperature
          */
-        virtual double get_temperature_from_energy(const double & e) const = 0;
+        virtual rtype get_temperature_from_energy(const rtype & e) const = 0;
 
         /**
          * @brief Get density from pressure and temperature.
@@ -80,16 +80,16 @@ class Physics {
          * @param T Temperature
          * @return Density
          */
-        virtual double get_density_from_pressure_temperature(const double & p,
-                                                             const double & T) const = 0;
+        virtual rtype get_density_from_pressure_temperature(const rtype & p,
+                                                             const rtype & T) const = 0;
         
         /**
          * @brief Get sound speed from pressure and density.
          * @param p Pressure
          * @param rho Density
          */
-        virtual double get_sound_speed_from_pressure_density(const double & p,
-                                                             const double & rho) const = 0;
+        virtual rtype get_sound_speed_from_pressure_density(const rtype & p,
+                                                             const rtype & rho) const = 0;
         
         /**
          * @brief Compute primitive variables from conservative variables.
@@ -115,10 +115,10 @@ class Physics {
          * @param h_r Right enthalpy
          */
         void calc_euler_flux(State & flux, const NVector & n_unit,
-                             const double rho_l, const NVector & u_l,
-                             const double p_l, const double gamma_l, const double h_l,
-                             const double rho_r, const NVector & u_r,
-                             const double p_r, const double gamma_r, const double h_r);
+                             const rtype rho_l, const NVector & u_l,
+                             const rtype p_l, const rtype gamma_l, const rtype h_l,
+                             const rtype rho_r, const NVector & u_r,
+                             const rtype p_r, const rtype gamma_r, const rtype h_r);
 
         /**
          * @brief Calculate the Euler flux (alias for above)
@@ -130,7 +130,7 @@ class Physics {
          * @param primitives_r Right primitive variables
          */
         void calc_euler_flux(State & flux, const NVector & n_unit,
-                             const double rho_l, const double rho_r,
+                             const rtype rho_l, const rtype rho_r,
                              const Primitives & primitives_l,
                              const Primitives & primitives_r);
 
@@ -168,10 +168,10 @@ class Euler : public Physics {
          * @param T_ref Reference temperature
          * @param rho_ref Reference density
          */
-        void init(const double & gamma,
-                  const double & p_ref,
-                  const double & T_ref,
-                  const double & rho_ref);
+        void init(const rtype & gamma,
+                  const rtype & p_ref,
+                  const rtype & T_ref,
+                  const rtype & rho_ref);
 
         /**
          * @brief Print the physics.
@@ -182,21 +182,21 @@ class Euler : public Physics {
          * @brief Get gamma
          * @return gamma
          */
-        double get_gamma() const override { return gamma; }
+        rtype get_gamma() const override { return gamma; }
 
         /**
          * @brief Get energy from temperature.
          * @param T Temperature
          * @return Energy
          */
-        double get_energy_from_temperature(const double & T) const override;
+        rtype get_energy_from_temperature(const rtype & T) const override;
 
         /**
          * @brief Get temperature from energy.
          * @param e Energy
          * @return Temperature
          */
-        double get_temperature_from_energy(const double & e) const override;
+        rtype get_temperature_from_energy(const rtype & e) const override;
 
         /**
          * @brief Get density from pressure and temperature.
@@ -204,16 +204,16 @@ class Euler : public Physics {
          * @param T Temperature
          * @return Density
          */
-        double get_density_from_pressure_temperature(const double & p,
-                                                     const double & T) const override;
+        rtype get_density_from_pressure_temperature(const rtype & p,
+                                                     const rtype & T) const override;
         
         /**
          * @brief Get sound speed from pressure and density.
          * @param p Pressure
          * @param rho Density
          */
-        double get_sound_speed_from_pressure_density(const double & p,
-                                                     const double & rho) const override;
+        rtype get_sound_speed_from_pressure_density(const rtype & p,
+                                                     const rtype & rho) const override;
 
         /**
          * @brief Compute primitive variables from conservative variables.
@@ -231,9 +231,9 @@ class Euler : public Physics {
     private:
         void set_R_cp_cv();
 
-        double gamma;
-        double p_ref, T_ref, rho_ref;
-        double R, cp, cv;
+        rtype gamma;
+        rtype p_ref, T_ref, rho_ref;
+        rtype R, cp, cv;
 };
 
 #endif // PHYSICS_H

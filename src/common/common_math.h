@@ -39,14 +39,14 @@ T dot(const T * const v0, const T * const v1, const int n) {
  * @brief Compute the NVector dotted with itself.
  * @param v Vector.
  */
-double dot_self(const NVector& v);
+rtype dot_self(const NVector& v);
 
 /**
  * @brief Compute the 2-norm of an NVector.
  * @param v Vector.
  * @return Norm.
  */
-double norm_2(const NVector& v);
+rtype norm_2(const NVector& v);
 
 /**
  * @brief Compute the unit vector of an NVector.
@@ -63,7 +63,7 @@ NVector unit(const NVector & v);
  * @param v2 Coordinates of the third vertex.
  * @return Area of the triangle.
  */
-double triangle_area_2(const NVector& v0,
+rtype triangle_area_2(const NVector& v0,
                        const NVector& v1,
                        const NVector& v2);
 
@@ -75,9 +75,9 @@ double triangle_area_2(const NVector& v0,
  * @param v2 Coordinates of the third vertex.
  * @return Area of the triangle.
  */
-double triangle_area_3(const std::array<double, 3>& v0,
-                       const std::array<double, 3>& v1,
-                       const std::array<double, 3>& v2);
+rtype triangle_area_3(const std::array<rtype, 3>& v0,
+                       const std::array<rtype, 3>& v1,
+                       const std::array<rtype, 3>& v2);
 
 /**
  * @brief Compute the linear combination of a vector of vectors.
@@ -88,19 +88,19 @@ double triangle_area_3(const std::array<double, 3>& v0,
  */
 void linear_combination(const std::vector<StateVector *> & vectors_in,
                         StateVector * const vector_out,
-                        const std::vector<double> & coefficients);
+                        const std::vector<rtype> & coefficients);
 
 /**
  * @brief Compute the extremum of each element in a vector of arrays.
  * 
  * @param arrays
  * @param comp Comparator.
- * @return std::array<double, N> Extremum of each element.
+ * @return std::array<rtype, N> Extremum of each element.
  */
 template <int N, typename Compare>
-std::array<double, N> extrema_array(const std::vector<std::array<double, N>> &arrays,
+std::array<rtype, N> extrema_array(const std::vector<std::array<rtype, N>> &arrays,
                                     Compare comp) {
-    std::array<double, N> extrema;
+    std::array<rtype, N> extrema;
     for (int i = 0; i < N; ++i) {
         extrema[i] = arrays[0][i];
         for (int j = 1; j < arrays.size(); ++j) {
@@ -119,8 +119,8 @@ std::array<double, N> extrema_array(const std::vector<std::array<double, N>> &ar
  * @return Maximum of each element.
  */
 template <int N>
-std::array<double, N> max_array(const std::vector<std::array<double, N>> & arrays) {
-    return extrema_array<N>(arrays, std::greater<double>());
+std::array<rtype, N> max_array(const std::vector<std::array<rtype, N>> & arrays) {
+    return extrema_array<N>(arrays, std::greater<rtype>());
 }
 
 /**
@@ -130,8 +130,8 @@ std::array<double, N> max_array(const std::vector<std::array<double, N>> & array
  * @return Minimum of each element.
  */
 template <int N>
-std::array<double, N> min_array(const std::vector<std::array<double, N>> &arrays) {
-    return extrema_array<N>(arrays, std::less<double>());
+std::array<rtype, N> min_array(const std::vector<std::array<rtype, N>> &arrays) {
+    return extrema_array<N>(arrays, std::less<rtype>());
 }
 
 #endif // COMMON_MATH_H

@@ -145,7 +145,7 @@ class Solver {
          * @brief Compute the spectral radius.
          * @return maximum cell-wise spectral radius.
          */
-        double calc_spectral_radius();
+        rtype calc_spectral_radius();
 
         /**
          * @brief Take a single time step.
@@ -166,6 +166,11 @@ class Solver {
          * @brief Do checks.
          */
         void do_checks() const;
+
+        /**
+         * @brief Check fields for NaNs.
+         */
+        void check_fields() const;
 
         /**
          * @brief Write data.
@@ -218,13 +223,13 @@ class Solver {
     private:
         toml::table input;
         int n_steps;
-        double t_stop;
-        double t_wall_stop;
+        rtype t_stop;
+        rtype t_wall_stop;
         bool use_cfl;
-        double dt;
-        double cfl;
-        std::vector<double> cfl_local;
-        double t;
+        rtype dt;
+        rtype cfl;
+        std::vector<rtype> cfl_local;
+        rtype t;
         int step;
         std::shared_ptr<Mesh> mesh;
         std::vector<std::unique_ptr<Boundary>> boundaries;

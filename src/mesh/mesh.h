@@ -127,7 +127,7 @@ class Mesh {
          * @param i_cell Index of the cell.
          * @return Volume of the cell.
          */
-        double cell_volume(int i_cell) const;
+        rtype cell_volume(int i_cell) const;
 
         /**
          * @brief Get the area of a face.
@@ -135,7 +135,7 @@ class Mesh {
          * @param i_face Index of the face.
          * @return Area of the face.
          */
-        double face_area(int i_face) const;
+        rtype face_area(int i_face) const;
 
         /**
          * @brief Get the normal of a face.
@@ -210,7 +210,7 @@ class Mesh {
          * @param Lx Length of the domain in the x-direction.
          * @param Ly Length of the domain in the y-direction.
          */
-        void init_wedge(int nx, int ny, double Lx, double Ly);
+        void init_wedge(int nx, int ny, rtype Lx, rtype Ly);
     protected:
     private:
         int nx, ny;
@@ -218,8 +218,8 @@ class Mesh {
         std::vector<NVector> m_node_coords;
         std::vector<NVector> m_cell_coords;
         std::vector<NVector> m_face_coords;
-        std::vector<double> m_cell_volume;
-        std::vector<double> m_face_area;
+        std::vector<rtype> m_cell_volume;
+        std::vector<rtype> m_face_area;
         std::vector<NVector> m_face_normals;
         std::vector<std::array<int, 4>> m_nodes_of_cell;
         std::vector<std::array<int, 4>> m_faces_of_cell;

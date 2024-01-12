@@ -32,7 +32,7 @@ void BoundaryPOut::print() {
 }
 
 void BoundaryPOut::init(const toml::table & input) {
-    std::optional<double> p_in = input["p"].value<double>();
+    std::optional<rtype> p_in = input["p"].value<rtype>();
 
     if (!p_in.has_value()) {
         throw std::runtime_error("Missing p for boundary: " + zone->get_name() + ".");
@@ -49,10 +49,10 @@ void BoundaryPOut::apply(FaceStateVector * face_solution,
     State flux;
     State * conservatives_l;
     Primitives primitives_l;
-    double rho_l, gamma_l, p_l, T_l, h_l;
-    double sos_l, u_mag_l;
+    rtype rho_l, gamma_l, p_l, T_l, h_l;
+    rtype sos_l, u_mag_l;
     NVector u_l, u_bc, n_unit;
-    double rho_bc, E_bc, e_bc, p_out, h_bc, T_bc;
+    rtype rho_bc, E_bc, e_bc, p_out, h_bc, T_bc;
     for (int i_local = 0; i_local < zone->n_faces(); i_local++) {
         i_face = (*zone->faces())[i_local];
         i_cell_l = mesh->cells_of_face(i_face)[0];

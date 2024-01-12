@@ -37,6 +37,11 @@ int Solver::init(const std::string& input_file_name) {
     print_logo();
     std::cout << LOG_SEPARATOR << std::endl;
     std::cout << "Initializing solver..." << std::endl;
+#ifdef Mallard_USE_DOUBLES
+    std::cout << "Mallard has been compiled with DOUBLE precision." << std::endl;
+#else   
+    std::cout << "Mallard has been compiled with SINGLE precision." << std::endl;
+#endif
     std::cout << "Parsing input file: " << input_file_name << std::endl;
     std::cout << LOG_SEPARATOR << std::endl;
 
@@ -87,8 +92,8 @@ void Solver::init_mesh() {
     } else if (type == MeshType::WEDGE) {
         int Nx = input["mesh"]["Nx"].value_or(100);
         int Ny = input["mesh"]["Ny"].value_or(100);
-        double Lx = input["mesh"]["Lx"].value_or(1.0);
-        double Ly = input["mesh"]["Ly"].value_or(1.0);
+        rtype Lx = input["mesh"]["Lx"].value_or(1.0);
+        rtype Ly = input["mesh"]["Ly"].value_or(1.0);
         mesh->init_wedge(Nx, Ny, Lx, Ly);
     } else {
         // Should never get here due to the enum class.
@@ -229,11 +234,11 @@ void Solver::init_boundaries() {
 void Solver::init_run_parameters() {
     std::cout << "Initializing run parameters..." << std::endl;
 
-    std::optional<double> dt_in = input["run"]["dt"].value<double>();
-    std::optional<double> cfl_in = input["run"]["cfl"].value<double>();
+    std::optional<rtype> dt_in = input["run"]["dt"].value<rtype>();
+    std::optional<rtype> cfl_in = input["run"]["cfl"].value<rtype>();
     std::optional<int> n_steps_in = input["run"]["n_steps"].value<int>();
-    std::optional<double> t_stop_in = input["run"]["t_stop"].value<int>();
-    std::optional<double> t_wall_stop_in = input["run"]["t_wall_stop"].value<int>();
+    std::optional<rtype> t_stop_in = input["run"]["t_stop"].value<int>();
+    std::optional<rtype> t_wall_stop_in = input["run"]["t_wall_stop"].value<int>();
 
     if (!dt_in.has_value() && !cfl_in.has_value()) {
         throw std::runtime_error("Either dt or cfl must be specified.");
@@ -344,6 +349,7 @@ int Solver::run() {
         calc_dt();
         do_checks();
         take_step();
+        check_fields();
         write_data();
     }
 
@@ -380,8 +386,8 @@ void Solver::print_step_info() const {
 }
 
 void print_range(const std::string & name,
-                 const double & min,
-                 const double & max) {
+                 const rtype & min,
+                 const rtype & max) {
     std::cout << "> Scalar range: "
               << name << " = ["
               << min << ", "
@@ -409,6 +415,26 @@ void Solver::do_checks() const {
         print_range(PRIMITIVE_NAMES[i], min_prim[i], max_prim[i]);
     }
     std::cout << LOG_SEPARATOR << std::endl;
+}
+
+void Solver::check_fields() const {
+#ifndef Mallard_CHECK_NAN
+    return;
+#endif
+
+    for (int i = 0; i < mesh->n_cells(); i++) {
+        for (int j = 0; j < N_CONSERVATIVE; j++) {
+            if (std::isnan(conservatives[i][j])) {
+                throw std::runtime_error("NaN found in conservatives.");
+            }
+        }
+
+        for (int j = 0; j < N_PRIMITIVE; j++) {
+            if (std::isnan(primitives[i][j])) {
+                throw std::runtime_error("NaN found in primitives.");
+            }
+        }
+    }
 }
 
 void Solver::write_data(bool force) const {
@@ -452,7 +478,7 @@ void Solver::update_primitives() {
 void Solver::calc_dt() {
     // \todo Implement cfl
     if (use_cfl) {
-        double max_spectral_radius = calc_spectral_radius();
+        rtype max_spectral_radius = calc_spectral_radius();
         dt = cfl / max_spectral_radius;
         for (int i = 0; i < mesh->n_cells(); i++) {
             cfl_local[i] *= dt;
@@ -464,17 +490,17 @@ void Solver::calc_dt() {
     }
 }
 
-double Solver::calc_spectral_radius() {
-    double max_spectral_radius = -1.0;
-    double spectral_radius_convective;
-    double spectral_radius_acoustic;
-    double spectral_radius_viscous;
-    double spectral_radius_heat;
-    double spectral_radius_overall;
-    double rho_l, rho_r, p_l, p_r, sos_l, sos_r, sos_f;
+rtype Solver::calc_spectral_radius() {
+    rtype max_spectral_radius = -1.0;
+    rtype spectral_radius_convective;
+    rtype spectral_radius_acoustic;
+    rtype spectral_radius_viscous;
+    rtype spectral_radius_heat;
+    rtype spectral_radius_overall;
+    rtype rho_l, rho_r, p_l, p_r, sos_l, sos_r, sos_f;
     NVector s, u_l, u_r, u_f;
-    double dx_n, u_n;
-    double geom_factor;
+    rtype dx_n, u_n;
+    rtype geom_factor;
     NVector n_unit;
 
     for (int i_cell = 0; i_cell < mesh->n_cells(); i_cell++) {

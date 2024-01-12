@@ -33,32 +33,32 @@ void Physics::print() const {
 }
 
 void Physics::calc_euler_flux(State & flux, const NVector & n_unit,
-                              const double rho_l, const NVector & u_l,
-                              const double p_l, const double gamma_l, const double h_l,
-                              const double rho_r, const NVector & u_r,
-                              const double p_r, const double gamma_r, const double h_r) {
+                              const rtype rho_l, const NVector & u_l,
+                              const rtype p_l, const rtype gamma_l, const rtype h_l,
+                              const rtype rho_r, const NVector & u_r,
+                              const rtype p_r, const rtype gamma_r, const rtype h_r) {
     // HLLC flux
 
     // Preliminary calculations
-    double u_l_n = dot<double>(u_l.data(), n_unit.data(), 2);
-    double u_r_n = dot<double>(u_r.data(), n_unit.data(), 2);
-    double ul_dot_ul = dot<double>(u_l.data(), u_l.data(), 2);
-    double ur_dot_ur = dot<double>(u_r.data(), u_r.data(), 2);
-    double c_l = std::sqrt(gamma_l * p_l / rho_l);
-    double c_r = std::sqrt(gamma_r * p_r / rho_r);
-    double rhoe_l = h_l * rho_l - p_l;
-    double rhoe_r = h_r * rho_r - p_r;
+    rtype u_l_n = dot<rtype>(u_l.data(), n_unit.data(), 2);
+    rtype u_r_n = dot<rtype>(u_r.data(), n_unit.data(), 2);
+    rtype ul_dot_ul = dot<rtype>(u_l.data(), u_l.data(), 2);
+    rtype ur_dot_ur = dot<rtype>(u_r.data(), u_r.data(), 2);
+    rtype c_l = std::sqrt(gamma_l * p_l / rho_l);
+    rtype c_r = std::sqrt(gamma_r * p_r / rho_r);
+    rtype rhoe_l = h_l * rho_l - p_l;
+    rtype rhoe_r = h_r * rho_r - p_r;
 
     // Wave speeds
-    double s_l = u_l_n - c_l;
-    double s_r = u_r_n + c_r;
+    rtype s_l = u_l_n - c_l;
+    rtype s_r = u_r_n + c_r;
 
     // Contact surface speed
-    double s_m = (p_l - p_r - rho_l * u_l_n * (s_l - u_l_n) + rho_r * u_r_n * (s_r - u_r_n)) /
+    rtype s_m = (p_l - p_r - rho_l * u_l_n * (s_l - u_l_n) + rho_r * u_r_n * (s_r - u_r_n)) /
                  (rho_r * (s_r - u_r_n) - rho_l * (s_l - u_l_n));
     
     // Pressure at contact surface
-    double p_star = rho_r * (u_r_n - s_r) * (u_r_n - s_m) + p_r;
+    rtype p_star = rho_r * (u_r_n - s_r) * (u_r_n - s_m) + p_r;
 
     if (s_m >= 0.0) {
         if (s_l > 0.0) {
@@ -67,14 +67,14 @@ void Physics::calc_euler_flux(State & flux, const NVector & n_unit,
             flux[2] = rho_l * u_l[1] * u_l_n + p_l * n_unit[1];
             flux[3] = (rhoe_l + p_l) * u_l_n;
         } else {
-            double inv_sl_minus_sm = 1.0 / (s_l - s_m);
-            double sl_minus_uln = s_l - u_l_n;
-            double rho_sl = rho_l * sl_minus_uln * inv_sl_minus_sm;
-            double rhou_sl[2];
+            rtype inv_sl_minus_sm = 1.0 / (s_l - s_m);
+            rtype sl_minus_uln = s_l - u_l_n;
+            rtype rho_sl = rho_l * sl_minus_uln * inv_sl_minus_sm;
+            rtype rhou_sl[2];
             for (int i = 0; i < 2; i++) {
                 rhou_sl[i] = (rho_l * u_l[i] * sl_minus_uln + (p_star - p_l) * n_unit[i]) * inv_sl_minus_sm;
             }
-            double e_sl = (sl_minus_uln * rhoe_l - p_l * u_l_n + p_star * s_m) * inv_sl_minus_sm;
+            rtype e_sl = (sl_minus_uln * rhoe_l - p_l * u_l_n + p_star * s_m) * inv_sl_minus_sm;
 
             flux[0] = rho_sl * s_m;
             flux[1] = rhou_sl[0] * s_m + p_star * n_unit[0];
@@ -83,14 +83,14 @@ void Physics::calc_euler_flux(State & flux, const NVector & n_unit,
         }
     } else {
         if (s_r >= 0.0) {
-            double inv_sr_minus_sm = 1.0 / (s_r - s_m);
-            double sr_minus_urn = s_r - u_r_n;
-            double rho_sr = rho_r * sr_minus_urn * inv_sr_minus_sm;
-            double rhou_sr[2];
+            rtype inv_sr_minus_sm = 1.0 / (s_r - s_m);
+            rtype sr_minus_urn = s_r - u_r_n;
+            rtype rho_sr = rho_r * sr_minus_urn * inv_sr_minus_sm;
+            rtype rhou_sr[2];
             for (int i = 0; i < 2; i++) {
                 rhou_sr[i] = (rho_r * u_r[i] * sr_minus_urn + (p_star - p_r) * n_unit[i]) * inv_sr_minus_sm;
             }
-            double e_sr = (sr_minus_urn * rhoe_r - p_r * u_r_n + p_star * s_m) * inv_sr_minus_sm;
+            rtype e_sr = (sr_minus_urn * rhoe_r - p_r * u_r_n + p_star * s_m) * inv_sr_minus_sm;
 
             flux[0] = rho_sr * s_m;
             flux[1] = rhou_sr[0] * s_m + p_star * n_unit[0];
@@ -106,7 +106,7 @@ void Physics::calc_euler_flux(State & flux, const NVector & n_unit,
 }
 
 void Physics::calc_euler_flux(State & flux, const NVector & n_unit,
-                              const double rho_l, const double rho_r,
+                              const rtype rho_l, const rtype rho_r,
                               const Primitives & primitives_l,
                               const Primitives & primitives_r) {
     calc_euler_flux(flux, n_unit,
@@ -126,10 +126,10 @@ Euler::~Euler() {
 }
 
 void Euler::init(const toml::table & input) {
-    std::optional<double> gamma_in = input["physics"]["gamma"].value<double>();
-    std::optional<double> p_ref_in = input["physics"]["p_ref"].value<double>();
-    std::optional<double> T_ref_in = input["physics"]["T_ref"].value<double>();
-    std::optional<double> rho_ref_in = input["physics"]["rho_ref"].value<double>();
+    std::optional<rtype> gamma_in = input["physics"]["gamma"].value<rtype>();
+    std::optional<rtype> p_ref_in = input["physics"]["p_ref"].value<rtype>();
+    std::optional<rtype> T_ref_in = input["physics"]["T_ref"].value<rtype>();
+    std::optional<rtype> rho_ref_in = input["physics"]["rho_ref"].value<rtype>();
 
     if (!gamma_in.has_value()) {
         throw std::runtime_error("Missing gamma for physics: " + PHYSICS_NAMES.at(type) + ".");
@@ -154,10 +154,10 @@ void Euler::init(const toml::table & input) {
     print();
 }
 
-void Euler::init(const double & gamma_in,
-                 const double & p_ref_in,
-                 const double & T_ref_in,
-                 const double & rho_ref_in) {
+void Euler::init(const rtype & gamma_in,
+                 const rtype & p_ref_in,
+                 const rtype & T_ref_in,
+                 const rtype & rho_ref_in) {
     gamma = gamma_in;
     p_ref = p_ref_in;
     T_ref = T_ref_in;
@@ -181,34 +181,34 @@ void Euler::print() const {
     std::cout << LOG_SEPARATOR << std::endl;
 }
 
-double Euler::get_energy_from_temperature(const double & T) const {
+rtype Euler::get_energy_from_temperature(const rtype & T) const {
     return cv * T;
 }
 
-double Euler::get_temperature_from_energy(const double & e) const {
+rtype Euler::get_temperature_from_energy(const rtype & e) const {
     return e / cv;
 }
 
-double Euler::get_density_from_pressure_temperature(const double & p,
-                                                    const double & T) const {
+rtype Euler::get_density_from_pressure_temperature(const rtype & p,
+                                                    const rtype & T) const {
     return p / (T * R);
 }
 
-double Euler::get_sound_speed_from_pressure_density(const double & p,
-                                                    const double & rho) const {
+rtype Euler::get_sound_speed_from_pressure_density(const rtype & p,
+                                                    const rtype & rho) const {
     return std::sqrt(gamma * p / rho);
 }
 
 void Euler::compute_primitives_from_conservatives(Primitives & primitives,
                                                   const State & conservatives) const {
-    double rho = conservatives[0];
+    rtype rho = conservatives[0];
     NVector u = {conservatives[1] / rho,
                  conservatives[2] / rho};
-    double E = conservatives[3] / rho;
-    double e = E - 0.5 * dot_self(u);
-    double p = (gamma - 1.0) * rho * e;
-    double T = get_temperature_from_energy(e);
-    double h = e + p / rho;
+    rtype E = conservatives[3] / rho;
+    rtype e = E - 0.5 * dot_self(u);
+    rtype p = (gamma - 1.0) * rho * e;
+    rtype T = get_temperature_from_energy(e);
+    rtype h = e + p / rho;
     primitives[0] = u[0];
     primitives[1] = u[1];
     primitives[2] = p;
