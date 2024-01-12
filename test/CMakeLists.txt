@@ -9,11 +9,6 @@ add_executable(MallardTest
 target_include_directories(MallardTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(MallardTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
-set_target_properties(MallardTest PROPERTIES
-    CXX_STANDARD 11
-    CXX_STANDARD_REQUIRED YES
-)
-
 find_package(GTest REQUIRED)
 target_link_libraries(MallardTest PRIVATE GTest::GTest GTest::Main)
 

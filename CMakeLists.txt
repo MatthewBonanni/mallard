@@ -8,7 +8,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 option(${PROJECT_NAME}_USE_DOUBLES "Use double precision" OFF)
-message(STATUS "Double precision: ${${PROJECT_NAME}_USE_DOUBLES}")
+message(STATUS "Mallard: Double precision: ${${PROJECT_NAME}_USE_DOUBLES}")
 if (${PROJECT_NAME}_USE_DOUBLES)
     add_compile_definitions(${PROJECT_NAME}_USE_DOUBLES)
 endif()

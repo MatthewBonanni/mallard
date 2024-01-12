@@ -190,12 +190,12 @@ rtype Euler::get_temperature_from_energy(const rtype & e) const {
 }
 
 rtype Euler::get_density_from_pressure_temperature(const rtype & p,
-                                                    const rtype & T) const {
+                                                   const rtype & T) const {
     return p / (T * R);
 }
 
 rtype Euler::get_sound_speed_from_pressure_density(const rtype & p,
-                                                    const rtype & rho) const {
+                                                   const rtype & rho) const {
     return std::sqrt(gamma * p / rho);
 }
 

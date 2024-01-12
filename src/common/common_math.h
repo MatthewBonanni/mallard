@@ -64,8 +64,8 @@ NVector unit(const NVector & v);
  * @return Area of the triangle.
  */
 rtype triangle_area_2(const NVector& v0,
-                       const NVector& v1,
-                       const NVector& v2);
+                      const NVector& v1,
+                      const NVector& v2);
 
 /**
  * @brief Compute the area of a triangle from vertices in R^3.
@@ -76,8 +76,8 @@ rtype triangle_area_2(const NVector& v0,
  * @return Area of the triangle.
  */
 rtype triangle_area_3(const std::array<rtype, 3>& v0,
-                       const std::array<rtype, 3>& v1,
-                       const std::array<rtype, 3>& v2);
+                      const std::array<rtype, 3>& v1,
+                      const std::array<rtype, 3>& v2);
 
 /**
  * @brief Compute the linear combination of a vector of vectors.
@@ -99,7 +99,7 @@ void linear_combination(const std::vector<StateVector *> & vectors_in,
  */
 template <int N, typename Compare>
 std::array<rtype, N> extrema_array(const std::vector<std::array<rtype, N>> &arrays,
-                                    Compare comp) {
+                                   Compare comp) {
     std::array<rtype, N> extrema;
     for (int i = 0; i < N; ++i) {
         extrema[i] = arrays[0][i];

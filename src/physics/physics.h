@@ -81,7 +81,7 @@ class Physics {
          * @return Density
          */
         virtual rtype get_density_from_pressure_temperature(const rtype & p,
-                                                             const rtype & T) const = 0;
+                                                            const rtype & T) const = 0;
         
         /**
          * @brief Get sound speed from pressure and density.
@@ -89,7 +89,7 @@ class Physics {
          * @param rho Density
          */
         virtual rtype get_sound_speed_from_pressure_density(const rtype & p,
-                                                             const rtype & rho) const = 0;
+                                                            const rtype & rho) const = 0;
         
         /**
          * @brief Compute primitive variables from conservative variables.
@@ -205,7 +205,7 @@ class Euler : public Physics {
          * @return Density
          */
         rtype get_density_from_pressure_temperature(const rtype & p,
-                                                     const rtype & T) const override;
+                                                    const rtype & T) const override;
         
         /**
          * @brief Get sound speed from pressure and density.
@@ -213,7 +213,7 @@ class Euler : public Physics {
          * @param rho Density
          */
         rtype get_sound_speed_from_pressure_density(const rtype & p,
-                                                     const rtype & rho) const override;
+                                                    const rtype & rho) const override;
 
         /**
          * @brief Compute primitive variables from conservative variables.

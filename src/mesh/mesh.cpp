@@ -132,11 +132,11 @@ void Mesh::compute_cell_volumes() {
         int i_node3 = m_nodes_of_cell[i][3];
 
         rtype a1 = triangle_area_2(m_node_coords[i_node0],
-                                    m_node_coords[i_node1],
-                                    m_node_coords[i_node2]);
+                                   m_node_coords[i_node1],
+                                   m_node_coords[i_node2]);
         rtype a2 = triangle_area_2(m_node_coords[i_node0],
-                                    m_node_coords[i_node2],
-                                    m_node_coords[i_node3]);
+                                   m_node_coords[i_node2],
+                                   m_node_coords[i_node3]);
         m_cell_volume[i] = a1 + a2;
     }
 }
