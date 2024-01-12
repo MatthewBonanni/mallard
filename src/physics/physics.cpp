@@ -40,10 +40,10 @@ void Physics::calc_euler_flux(State & flux, const NVector & n_unit,
     // HLLC flux
 
     // Preliminary calculations
-    rtype u_l_n = dot<rtype>(u_l.data(), n_unit.data(), 2);
-    rtype u_r_n = dot<rtype>(u_r.data(), n_unit.data(), 2);
-    rtype ul_dot_ul = dot<rtype>(u_l.data(), u_l.data(), 2);
-    rtype ur_dot_ur = dot<rtype>(u_r.data(), u_r.data(), 2);
+    rtype u_l_n = dot<N_DIM>(u_l.data(), n_unit.data());
+    rtype u_r_n = dot<N_DIM>(u_r.data(), n_unit.data());
+    rtype ul_dot_ul = dot<N_DIM>(u_l.data(), u_l.data());
+    rtype ur_dot_ur = dot<N_DIM>(u_r.data(), u_r.data());
     rtype c_l = std::sqrt(gamma_l * p_l / rho_l);
     rtype c_r = std::sqrt(gamma_r * p_r / rho_r);
     rtype rhoe_l = h_l * rho_l - p_l;
@@ -205,7 +205,7 @@ void Euler::compute_primitives_from_conservatives(Primitives & primitives,
     NVector u = {conservatives[1] / rho,
                  conservatives[2] / rho};
     rtype E = conservatives[3] / rho;
-    rtype e = E - 0.5 * dot_self(u);
+    rtype e = E - 0.5 * dot<N_DIM>(u.data(), u.data());
     rtype p = (gamma - 1.0) * rho * e;
     rtype T = get_temperature_from_energy(e);
     rtype h = e + p / rho;

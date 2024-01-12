@@ -18,7 +18,7 @@ TEST(CommonMathTest, Dot) {
     NVector v1 = {3.0, 4.0};
 
     rtype expected_dot = 11.0;
-    rtype actual_dot = dot<rtype>(v0.data(), v1.data(), 2);
+    rtype actual_dot = dot<2>(v0.data(), v1.data());
 
     EXPECT_RTYPE_EQ(expected_dot, actual_dot);
 }
@@ -28,16 +28,7 @@ TEST(CommonMathTest, Dot3) {
     std::vector<rtype> v1 = {4.0, 5.0, 6.0};
 
     rtype expected_dot = 32.0;
-    rtype actual_dot = dot(v0.data(), v1.data(), 3);
-
-    EXPECT_RTYPE_EQ(expected_dot, actual_dot);
-}
-
-TEST(CommonMathTest, DotSelf) {
-    NVector v = {1.0, 2.0};
-
-    rtype expected_dot = 5.0;
-    rtype actual_dot = dot_self(v);
+    rtype actual_dot = dot<3>(v0.data(), v1.data());
 
     EXPECT_RTYPE_EQ(expected_dot, actual_dot);
 }

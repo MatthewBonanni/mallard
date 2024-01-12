@@ -15,9 +15,9 @@
 #include <unordered_map>
 #include <string>
 
-#include "common.h"
-
 #include <toml++/toml.h>
+
+#include "common.h"
 
 enum class PhysicsType {
     EULER

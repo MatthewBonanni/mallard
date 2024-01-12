@@ -12,10 +12,10 @@
 #ifndef FACE_RECONSTRUCTION_H
 #define FACE_RECONSTRUCTION_H
 
+#include <memory>
+
 #include "common_typedef.h"
 #include "mesh.h"
-
-#include <memory>
 
 enum class FaceReconstructionType {
     FirstOrder,

@@ -55,8 +55,8 @@ void BoundarySymmetry::apply(FaceStateVector * face_solution,
         primitives_r = primitives_l;
         u_l[0] = primitives_l[0];
         u_l[1] = primitives_l[1];
-        u_n = dot<rtype>(u_l.data(), n_unit.data(), 2);
-        for (int j = 0; j < 2; j++) {
+        u_n = dot<N_DIM>(u_l.data(), n_unit.data());
+        for (int j = 0; j < N_DIM; j++) {
             u_r[j] = u_l[j] - 2.0 * u_n * n_unit[j];
         }
         primitives_r[0] = u_r[0];

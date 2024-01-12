@@ -15,31 +15,41 @@
 #include <array>
 #include <vector>
 
+#include <Kokkos_Core.hpp>
+
 #include "common_typedef.h"
 
 /**
  * @brief Compute the dot product of two arrays.
  * 
- * @param v0 First array.
- * @param v1 Second array.
- * @param n Length of the arrays.
- * @tparam T Type of the arrays.
+ * @param a First array.
+ * @param b Second array.
+ * @tparam N Length of the arrays.
  * @return Dot product.
  */
-template <typename T>
-T dot(const T * const v0, const T * const v1, const int n) {
-    T dot = 0.0;
-    for (int i = 0; i < n; i++) {
-        dot += v0[i] * v1[i];
+template <unsigned int N> KOKKOS_INLINE_FUNCTION
+rtype dot(const rtype * a, const rtype * b) {
+    rtype dot = 0.0;
+    for (int i = 0; i < N; i++) {
+        dot += a[i] * b[i];
     }
     return dot;
 }
 
-/**
- * @brief Compute the NVector dotted with itself.
- * @param v Vector.
- */
-rtype dot_self(const NVector& v);
+// Explicit instantiation for N = 2
+template <> KOKKOS_INLINE_FUNCTION
+rtype dot<2>(const rtype * a, const rtype * b) {
+    return a[0] * b[0] +
+           a[1] * b[1];
+}
+
+// Explicit instantiation for N = 3
+template <> KOKKOS_INLINE_FUNCTION
+rtype dot<3>(const rtype * a, const rtype * b) {
+    return a[0] * b[0] +
+           a[1] * b[1] +
+           a[2] * b[2];
+}
 
 /**
  * @brief Compute the 2-norm of an NVector.

@@ -14,7 +14,6 @@
 #include <iostream>
 #include <functional>
 #include <memory>
-#include <Kokkos_Core.hpp>
 
 #include "common.h"
 #include "mesh.h"
@@ -544,7 +543,7 @@ rtype Solver::calc_spectral_radius() {
                 s[1] = mesh->cell_coords(i_cell_r)[1] - mesh->cell_coords(i_cell_l)[1];
             }
 
-            dx_n = fabs(dot(s.data(), n_unit.data(), N_DIM));
+            dx_n = fabs(dot<N_DIM>(s.data(), n_unit.data()));
 
             rho_l = conservatives[i_cell_l][0];
             rho_r = conservatives[i_cell_r][1];
@@ -560,7 +559,7 @@ rtype Solver::calc_spectral_radius() {
 
             u_f[0] = 0.5 * (u_l[0] + u_r[0]);
             u_f[1] = 0.5 * (u_l[1] + u_r[1]);
-            u_n = fabs(dot(u_f.data(), n_unit.data(), N_DIM));
+            u_n = fabs(dot<N_DIM>(u_f.data(), n_unit.data()));
 
             spectral_radius_convective += u_n / dx_n;
             spectral_radius_acoustic += pow(sos_f / dx_n, 2.0);

@@ -14,12 +14,8 @@
 #include <cmath>
 #include <stdexcept>
 
-rtype dot_self(const NVector& v) {
-    return dot(v.data(), v.data(), v.size());
-}
-
-rtype norm_2(const NVector& v) {
-    return std::sqrt(dot_self(v));
+rtype norm_2(const NVector & v) {
+    return std::sqrt(dot<N_DIM>(v.data(), v.data()));
 }
 
 NVector unit(const NVector & v) {
@@ -31,17 +27,17 @@ NVector unit(const NVector & v) {
     return _v;
 }
 
-rtype triangle_area_2(const NVector& v0,
-                      const NVector& v1,
-                      const NVector& v2) {
+rtype triangle_area_2(const NVector & v0,
+                      const NVector & v1,
+                      const NVector & v2) {
     return 0.5 * std::abs(v0[0] * (v1[1] - v2[1]) +
                           v1[0] * (v2[1] - v0[1]) +
                           v2[0] * (v0[1] - v1[1]));
 }
 
-rtype triangle_area_3(const std::array<rtype, 3>& v0,
-                      const std::array<rtype, 3>& v1,
-                      const std::array<rtype, 3>& v2) {
+rtype triangle_area_3(const std::array<rtype, 3> & v0,
+                      const std::array<rtype, 3> & v1,
+                      const std::array<rtype, 3> & v2) {
     throw std::runtime_error("Not implemented.");
 }
 
