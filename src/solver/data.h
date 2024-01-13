@@ -14,6 +14,8 @@
 
 #include <string>
 
+#include <Kokkos_Core.hpp>
+
 #include "common_typedef.h"
 
 class Data {
@@ -21,11 +23,10 @@ class Data {
         /**
          * @brief Construct a new Data object
          * @param name Name of data array.
-         * @param ptr Pointer to data array.
-         * @param stride Stride, i.e. size of state array.
+         * @param view Pointer to view of data array.
          */
-        Data(std::string name, rtype * ptr, int stride = 1) :
-            m_name(name), ptr(ptr), stride(stride) {
+        Data(std::string name, view_1d_ls view) :
+            m_name(name), m_view(view) {
             // Empty
         }
 
@@ -43,7 +44,7 @@ class Data {
          */
         rtype & operator[](int i) const {
             // Account for size of conservative state arrays
-            return ptr[i * stride];
+            return m_view(i);
         }
 
         /**
@@ -55,8 +56,7 @@ class Data {
         }
     protected:
         std::string m_name;
-        rtype * ptr;
-        int stride;
+        view_1d_ls m_view;
     private:
 };
 

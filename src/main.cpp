@@ -11,6 +11,8 @@
 
 #include <iostream>
 
+#include <Kokkos_Core.hpp>
+
 #include "solver/solver.h"
 
 /**
@@ -43,6 +45,10 @@ int main(int argc, char* argv[]) {
 
     int status = 0;
 
+    // Initialize Kokkos
+    Kokkos::initialize(argc, argv);
+    {
+
     // Create solver object
     Solver solver;
     status = solver.init(inputFileName);
@@ -57,6 +63,9 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error: Solver run failed." << std::endl;
         return status;
     }
+
+    }
+    Kokkos::finalize();
 
     return status;
 }

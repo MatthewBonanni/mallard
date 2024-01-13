@@ -26,16 +26,12 @@
 #include "boundary_p_out.h"
 
 Solver::Solver() {
-    // Initialize Kokkos
-    Kokkos::initialize();
+    // Empty
 }
 
 Solver::~Solver() {
     std::cout << "Destroying solver..." << std::endl;
     deallocate_memory();
-
-    // Finalize Kokkos
-    Kokkos::finalize();
 }
 
 int Solver::init(const std::string& input_file_name) {
@@ -277,15 +273,6 @@ void Solver::init_run_parameters() {
     t_wall_stop = t_wall_stop_in.value_or(-1.0);
 }
 
-Data * Solver::get_data(const std::string & name) {
-    for (auto & d : data) {
-        if (d.name() == name) {
-            return &d;
-        }
-    }
-    throw std::runtime_error("Data array " + name + " not found.");
-}
-
 void Solver::init_output() {
     std::cout << "Initializing output..." << std::endl;
 
@@ -326,27 +313,23 @@ void Solver::allocate_memory() {
         rhs_pointers.push_back(new view_2d("rhs", mesh->n_cells(), N_CONSERVATIVE));
     }
 
-    cfl_local.resize(mesh->n_cells());
+    Kokkos::resize(cfl_local, mesh->n_cells());
 }
 
 void Solver::register_data() {
     std::cout << "Registering data..." << std::endl;
 
-    // \todo Fix this
+    for (int i = 0; i < CONSERVATIVE_NAMES.size(); i++) {
+        auto subview = Kokkos::subview(conservatives, Kokkos::ALL(), i);
+        data.push_back(Data(CONSERVATIVE_NAMES[i], subview));
+    }
 
-    // for (int i = 0; i < CONSERVATIVE_NAMES.size(); i++) {
-    //     data.push_back(Data(CONSERVATIVE_NAMES[i],
-    //                         &conservatives[0][i],
-    //                         N_CONSERVATIVE));
-    // }
+    for (int i = 0; i < PRIMITIVE_NAMES.size(); i++) {
+        auto subview = Kokkos::subview(primitives, Kokkos::ALL(), i);
+        data.push_back(Data(PRIMITIVE_NAMES[i], subview));
+    }
 
-    // for (int i = 0; i < PRIMITIVE_NAMES.size(); i++) {
-    //     data.push_back(Data(PRIMITIVE_NAMES[i],
-    //                         &primitives[0][i],
-    //                         N_PRIMITIVE));
-    // }
-
-    data.push_back(Data("CFL", cfl_local.data()));
+    data.push_back(Data("CFL", cfl_local));
 }
 
 int Solver::run() {
@@ -515,12 +498,11 @@ void Solver::update_primitives() {
 }
 
 void Solver::calc_dt() {
-    // \todo Implement cfl
     if (use_cfl) {
         rtype max_spectral_radius = calc_spectral_radius();
         dt = cfl / max_spectral_radius;
         for (int i = 0; i < mesh->n_cells(); i++) {
-            cfl_local[i] *= dt;
+            cfl_local(i) *= dt;
         }
     }
 
@@ -598,7 +580,7 @@ rtype Solver::calc_spectral_radius() {
                                        spectral_radius_overall);
 
         // Store spectral radius in cfl_local, will be used to compute local cfl
-        cfl_local[i_cell] = spectral_radius_overall;
+        cfl_local(i_cell) = spectral_radius_overall;
     }
 
     return max_spectral_radius;

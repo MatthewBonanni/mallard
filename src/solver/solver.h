@@ -24,7 +24,6 @@
 #include "face_reconstruction.h"
 #include "time_integrator.h"
 #include "physics.h"
-#include "data.h"
 #include "data_writer.h"
 
 class Solver {
@@ -53,12 +52,6 @@ class Solver {
          * @return Exit status.
          */
         int run();
-
-        /**
-         * @brief Get a pointer to a particular data array.
-         * @param name Name of data array.
-         */
-        Data * get_data(const std::string & name);
     protected:
         /**
          * @brief Initialize the mesh.
@@ -228,7 +221,7 @@ class Solver {
         bool use_cfl;
         rtype dt;
         rtype cfl;
-        std::vector<rtype> cfl_local;
+        view_1d cfl_local;
         rtype t;
         int step;
         std::shared_ptr<Mesh> mesh;
