@@ -44,11 +44,11 @@ void BoundaryPOut::init(const toml::table & input) {
     print();
 }
 
-void BoundaryPOut::apply(FaceStateVector * face_solution,
-                         StateVector * rhs) {
+void BoundaryPOut::apply(view_3d * face_solution,
+                         view_2d * rhs) {
     int i_face, i_cell_l;
     State flux;
-    State * conservatives_l;
+    State conservatives_l;
     Primitives primitives_l;
     rtype rho_l, gamma_l, p_l, T_l, h_l;
     rtype sos_l, u_mag_l;
@@ -60,13 +60,15 @@ void BoundaryPOut::apply(FaceStateVector * face_solution,
         n_unit = unit(mesh->face_normal(i_face));
 
         // Get cell conservatives
-        conservatives_l = &(*face_solution)[i_face][0];
+        for (int j = 0; j < N_CONSERVATIVE; j++) {
+            conservatives_l[j] = (*face_solution)(i_face, 0, j);
+        }
 
         // Compute relevant primitive variables
-        physics->compute_primitives_from_conservatives(primitives_l, *conservatives_l);
+        physics->compute_primitives_from_conservatives(primitives_l, conservatives_l);
 
         // Determine if subsonic or supersonic
-        rho_l = (*conservatives_l)[0];
+        rho_l = conservatives_l[0];
         u_l[0] = primitives_l[0];
         u_l[1] = primitives_l[1];
         p_l = primitives_l[2];
@@ -96,7 +98,7 @@ void BoundaryPOut::apply(FaceStateVector * face_solution,
 
         // Add flux to RHS
         for (int j = 0; j < 4; j++) {
-            (*rhs)[i_cell_l][j] -= mesh->face_area(i_face) * flux[j];
+            (*rhs)(i_cell_l, j) -= mesh->face_area(i_face) * flux[j];
         }
     }
 }

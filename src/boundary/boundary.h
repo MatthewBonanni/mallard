@@ -86,8 +86,8 @@ class Boundary {
          * @param face_solution Pointer to the face solution.
          * @param rhs Pointer to the right hand side.
          */
-        virtual void apply(FaceStateVector * face_solution,
-                           StateVector * rhs);
+        virtual void apply(view_3d * face_solution,
+                           view_2d * rhs);
         
     protected:
         FaceZone * zone;

@@ -90,58 +90,104 @@ rtype triangle_area_3(const std::array<rtype, 3>& v0,
                       const std::array<rtype, 3>& v2);
 
 /**
- * @brief Compute the linear combination of a vector of vectors.
+ * @brief Compute cA + B, and store the result in B.
  * 
- * @param vectors_in
- * @param vector_out
- * @param coefficients
+ * @param nA Size of A.
+ * @param c Scalar.
+ * @param A Array.
+ * @param B Array.
  */
-void linear_combination(const std::vector<StateVector *> & vectors_in,
-                        StateVector * const vector_out,
-                        const std::vector<rtype> & coefficients);
+void cApB_to_B(const unsigned int nA,
+               const rtype c, const rtype * A,
+               rtype * B);
 
 /**
- * @brief Compute the extremum of each element in a vector of arrays.
+ * @brief Compute cA + B, and store the result in C.
  * 
- * @param arrays
- * @param comp Comparator.
- * @return std::array<rtype, N> Extremum of each element.
+ * @param nA Size of A.
+ * @param c Scalar.
+ * @param A Array.
+ * @param B Array.
+ * @param C Array.
  */
-template <int N, typename Compare>
-std::array<rtype, N> extrema_array(const std::vector<std::array<rtype, N>> &arrays,
-                                   Compare comp) {
-    std::array<rtype, N> extrema;
-    for (int i = 0; i < N; ++i) {
-        extrema[i] = arrays[0][i];
-        for (int j = 1; j < arrays.size(); ++j) {
-            if (comp(arrays[j][i], extrema[i])) {
-                extrema[i] = arrays[j][i];
-            }
-        }
-    }
-    return extrema;
-}
+void cApB_to_C(const unsigned int nA,
+               const rtype c, const rtype * A,
+               const rtype * B,
+               rtype * C);
 
 /**
- * @brief Compute the maximum of each element in a vector of arrays.
+ * @brief Compute aA + bB, and store the result in B.
  * 
- * @param arrays
+ * @param nA Size of A.
+ * @param a Scalar.
+ * @param A Array.
+ * @param b Scalar.
+ * @param B Array.
+ */
+void aApbB_to_B(const unsigned int nA,
+                const rtype a, const rtype * A,
+                const rtype b, rtype * B);
+
+/**
+ * @brief Compute aA + bB, and store the result in C.
+ * 
+ * @param nA Size of A.
+ * @param a Scalar.
+ * @param A Array.
+ * @param b Scalar.
+ * @param B Array.
+ * @param C Array.
+ */
+void aApbB_to_C(const unsigned int nA,
+                const rtype a, const rtype * A,
+                const rtype b, const rtype * B,
+                rtype * C);
+
+/**
+ * @brief Compute the maximum of each element along the first dimension of a.
+ * 
+ * @param a Array.
  * @return Maximum of each element.
  */
 template <int N>
-std::array<rtype, N> max_array(const std::vector<std::array<rtype, N>> & arrays) {
-    return extrema_array<N>(arrays, std::greater<rtype>());
+std::array<rtype, N> max_array(const Kokkos::View<rtype **, Kokkos::LayoutRight> & a) {
+    std::array<rtype, N> max;
+    for (int i = 0; i < N; ++i) {
+        rtype max_i = a(0, i);
+        Kokkos::parallel_reduce(a.extent(0),
+                                KOKKOS_LAMBDA(const int j, rtype & max_j) {
+            if (a(j, i) > max_j) {
+                max_j = a(j, i);
+            }
+        },
+        Kokkos::Max<rtype>(max_i));
+        max[i] = max_i;
+    }
+    return max;
 }
 
 /**
- * @brief Compute the minimum of each element in a vector of arrays.
+ * @brief Compute the minimum of each element along the first dimension of a.
  * 
- * @param arrays
+ * @param a Array.
  * @return Minimum of each element.
  */
 template <int N>
-std::array<rtype, N> min_array(const std::vector<std::array<rtype, N>> &arrays) {
-    return extrema_array<N>(arrays, std::less<rtype>());
+std::array<rtype, N> min_array(const Kokkos::View<rtype **, Kokkos::LayoutRight> & a) {
+    std::array<rtype, N> min;
+    for (int i = 0; i < N; ++i) {
+        rtype min_i = a(0, i);
+        Kokkos::parallel_reduce(a.extent(0),
+                                KOKKOS_LAMBDA(const int j, rtype & min_j) {
+            if (a(j, i) < min_j) {
+                min_j = a(j, i);
+            }
+        },
+        Kokkos::Min<rtype>(min_i));
+        min[i] = min_i;
+    }
+    return min;
 }
+
 
 #endif // COMMON_MATH_H

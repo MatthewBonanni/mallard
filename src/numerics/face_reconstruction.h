@@ -48,13 +48,13 @@ class FaceReconstruction {
          * @brief Set the cell conservatives.
          * @param cell_conservatives Pointer to the cell conservatives.
          */
-        void set_cell_conservatives(StateVector * cell_conservatives);
+        void set_cell_conservatives(view_2d * cell_conservatives);
 
         /**
          * @brief Set the face conservatives.
          * @param face_conservatives Pointer to the face conservatives.
          */
-        void set_face_conservatives(FaceStateVector * face_conservatives);
+        void set_face_conservatives(view_3d * face_conservatives);
 
         /**
          * @brief Set the mesh.
@@ -67,12 +67,12 @@ class FaceReconstruction {
          * @param solution Pointer to the solution.
          * @param face_solution Pointer to the face solution.
          */
-        virtual void calc_face_values(StateVector * solution,
-                                      FaceStateVector * face_solution) = 0;
+        virtual void calc_face_values(view_2d * solution,
+                                      view_3d * face_solution) = 0;
     protected:
         FaceReconstructionType type;
-        StateVector * cell_conservatives;
-        FaceStateVector * face_conservatives;
+        view_2d * cell_conservatives;
+        view_3d * face_conservatives;
         std::shared_ptr<Mesh> mesh;
     private:
 };
@@ -94,8 +94,8 @@ class FirstOrder : public FaceReconstruction {
          * @param solution Pointer to the solution.
          * @param face_solution Pointer to the face solution.
          */
-        void calc_face_values(StateVector * solution,
-                              FaceStateVector * face_solution) override;
+        void calc_face_values(view_2d * solution,
+                              view_3d * face_solution) override;
     protected:
     private:
 };
@@ -117,8 +117,8 @@ class WENO : public FaceReconstruction {
          * @param solution Pointer to the solution.
          * @param face_solution Pointer to the face solution.
          */
-        void calc_face_values(StateVector * solution,
-                              FaceStateVector * face_solution) override;
+        void calc_face_values(view_2d * solution,
+                              view_3d * face_solution) override;
     protected:
     private:
 };

@@ -32,11 +32,11 @@ void BoundaryWallAdiabatic::init(const toml::table & input) {
     print();
 }
 
-void BoundaryWallAdiabatic::apply(FaceStateVector * face_solution,
-                                  StateVector * rhs) {
+void BoundaryWallAdiabatic::apply(view_3d * face_solution,
+                                  view_2d * rhs) {
     int i_face, i_cell_l;
     State flux;
-    State * conservatives_l;
+    State conservatives_l;
     Primitives primitives_l;
     NVector n_unit;
     for (int i_local = 0; i_local < zone->n_faces(); i_local++) {
@@ -45,10 +45,12 @@ void BoundaryWallAdiabatic::apply(FaceStateVector * face_solution,
         n_unit = unit(mesh->face_normal(i_face));
 
         // Get cell conservatives
-        conservatives_l = &(*face_solution)[i_face][0];
+        for (int j = 0; j < N_CONSERVATIVE; j++) {
+            conservatives_l[j] = (*face_solution)(i_face, 0, j);
+        }
 
         // Compute relevant primitive variables
-        physics->compute_primitives_from_conservatives(primitives_l, *conservatives_l);
+        physics->compute_primitives_from_conservatives(primitives_l, conservatives_l);
 
         // Compute flux
         flux[0] = 0.0;
@@ -58,7 +60,7 @@ void BoundaryWallAdiabatic::apply(FaceStateVector * face_solution,
 
         // Add flux to RHS
         for (int j = 0; j < 4; j++) {
-            (*rhs)[i_cell_l][j] -= mesh->face_area(i_face) * flux[j];
+            (*rhs)(i_cell_l, j) -= mesh->face_area(i_face) * flux[j];
         }
     }
 }

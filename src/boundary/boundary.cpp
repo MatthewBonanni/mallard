@@ -46,7 +46,7 @@ void Boundary::init(const toml::table & input) {
     throw std::runtime_error("Boundary::init() not implemented.");
 }
 
-void Boundary::apply(FaceStateVector * face_solution,
-                     StateVector * rhs) {
+void Boundary::apply(view_3d * face_solution,
+                     view_2d * rhs) {
     throw std::runtime_error("Boundary::apply() not implemented.");
 }

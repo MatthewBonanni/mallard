@@ -21,11 +21,11 @@ FaceReconstruction::~FaceReconstruction() {
     std::cout << "Destroying face reconstruction: " << FACE_RECONSTRUCTION_NAMES.at(type) << std::endl;
 }
 
-void FaceReconstruction::set_cell_conservatives(StateVector * cell_conservatives) {
+void FaceReconstruction::set_cell_conservatives(view_2d * cell_conservatives) {
     this->cell_conservatives = cell_conservatives;
 }
 
-void FaceReconstruction::set_face_conservatives(FaceStateVector * face_conservatives) {
+void FaceReconstruction::set_face_conservatives(view_3d * face_conservatives) {
     this->face_conservatives = face_conservatives;
 }
 
@@ -41,14 +41,16 @@ FirstOrder::~FirstOrder() {
     // Empty
 }
 
-void FirstOrder::calc_face_values(StateVector * solution,
-                                  FaceStateVector * face_solution) {
+void FirstOrder::calc_face_values(view_2d * solution,
+                                  view_3d * face_solution) {
     for (int i_face = 0; i_face < mesh->n_faces(); i_face++) {
         int i_cell_l = mesh->cells_of_face(i_face)[0];
         int i_cell_r = mesh->cells_of_face(i_face)[1];
 
-        (*face_solution)[i_face][0] = (*solution)[i_cell_l];
-        (*face_solution)[i_face][1] = (*solution)[i_cell_r];
+        for (int j = 0; j < N_CONSERVATIVE; j++) {
+            (*face_solution)(i_face, 0, j) = (*solution)(i_cell_l, j);
+            (*face_solution)(i_face, 1, j) = (*solution)(i_cell_r, j);
+        }
     }
 }
 
@@ -60,7 +62,7 @@ WENO::~WENO() {
     // Empty
 }
 
-void WENO::calc_face_values(StateVector * solution,
-                            FaceStateVector * face_solution) {
+void WENO::calc_face_values(view_2d * solution,
+                            view_3d * face_solution) {
     throw std::runtime_error("WENO::calc_face_values() not implemented.");
 }

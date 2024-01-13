@@ -32,11 +32,11 @@ void BoundarySymmetry::init(const toml::table & input) {
     print();
 }
 
-void BoundarySymmetry::apply(FaceStateVector * face_solution,
-                             StateVector * rhs) {
+void BoundarySymmetry::apply(view_3d * face_solution,
+                             view_2d * rhs) {
     int i_face, i_cell_l;
     State flux;
-    State * conservatives_l;
+    State conservatives_l;
     Primitives primitives_l, primitives_r;
     rtype u_n;
     NVector u_l, u_r, n_unit;
@@ -46,10 +46,12 @@ void BoundarySymmetry::apply(FaceStateVector * face_solution,
         n_unit = unit(mesh->face_normal(i_face));
 
         // Get cell conservatives
-        conservatives_l = &(*face_solution)[i_face][0];
+        for (int j = 0; j < N_CONSERVATIVE; j++) {
+            conservatives_l[j] = (*face_solution)(i_face, 0, j);
+        }
 
         // Compute relevant primitive variables
-        physics->compute_primitives_from_conservatives(primitives_l, *conservatives_l);
+        physics->compute_primitives_from_conservatives(primitives_l, conservatives_l);
 
         // Right state = left state, but reflect velocity vector
         primitives_r = primitives_l;
@@ -64,13 +66,13 @@ void BoundarySymmetry::apply(FaceStateVector * face_solution,
 
         // Calculate flux
         physics->calc_euler_flux(flux, n_unit,
-                                 (*conservatives_l)[0],
-                                 (*conservatives_l)[0],
+                                 conservatives_l[0],
+                                 conservatives_l[0],
                                  primitives_l, primitives_r);
 
         // Add flux to RHS
         for (int j = 0; j < 4; j++) {
-            (*rhs)[i_cell_l][j] -= mesh->face_area(i_face) * flux[j];
+            (*rhs)(i_cell_l, j) -= mesh->face_area(i_face) * flux[j];
         }
     }
 }

@@ -42,12 +42,12 @@ void TimeIntegrator::print() const {
 }
 
 void TimeIntegrator::take_step(const rtype & dt,
-                               std::vector<StateVector *> & solution_pointers,
-                               FaceStateVector * face_solution,
-                               std::vector<StateVector *> & rhs_pointers,
-                               std::function<void(StateVector * solution,
-                                                  FaceStateVector * face_solution,
-                                                  StateVector * rhs)> * calc_rhs) {
+                               std::vector<view_2d *> & solution_pointers,
+                               view_3d * face_solution,
+                               std::vector<view_2d *> & rhs_pointers,
+                               std::function<void(view_2d * solution,
+                                                  view_3d * face_solution,
+                                                  view_2d * rhs)> * calc_rhs) {
     // Empty
 }
 
@@ -61,21 +61,19 @@ FE::~FE() {
     // Empty
 }
 
-void FE::take_step(const rtype& dt,
-                   std::vector<StateVector *> & solution_pointers,
-                   FaceStateVector * face_solution,
-                   std::vector<StateVector *> & rhs_pointers,
-                   std::function<void(StateVector * solution,
-                                      FaceStateVector * face_solution,
-                                      StateVector * rhs)> * calc_rhs) {
-    StateVector * U = solution_pointers[0];
-    StateVector * rhs = rhs_pointers[0];
+void FE::take_step(const rtype & dt,
+                   std::vector<view_2d *> & solution_pointers,
+                   view_3d * face_solution,
+                   std::vector<view_2d *> & rhs_pointers,
+                   std::function<void(view_2d * solution,
+                                      view_3d * face_solution,
+                                      view_2d * rhs)> * calc_rhs) {
+    view_2d * U = solution_pointers[0];
+    view_2d * rhs = rhs_pointers[0];
+    const unsigned int n_total = U->extent(0) * U->extent(1);
 
     (*calc_rhs)(U, face_solution, rhs);
-
-    linear_combination(std::vector<StateVector *>({U, rhs}),
-                       U,
-                       std::vector<rtype>({1.0, dt}));
+    cApB_to_B(n_total, dt, rhs->data(), U->data());
 }
 
 RK4::RK4() {
@@ -93,46 +91,38 @@ RK4::~RK4() {
 }
 
 void RK4::take_step(const rtype & dt,
-                    std::vector<StateVector *> & solution_pointers,
-                    FaceStateVector * face_solution,
-                    std::vector<StateVector *> & rhs_pointers,
-                    std::function<void(StateVector * solution,
-                                       FaceStateVector * face_solution,
-                                       StateVector * rhs)> * calc_rhs) {
-    StateVector * U = solution_pointers[0];
-    StateVector * U_temp = solution_pointers[1];
-    StateVector * rhs1 = rhs_pointers[0];
-    StateVector * rhs2 = rhs_pointers[1];
-    StateVector * rhs3 = rhs_pointers[2];
-    StateVector * rhs4 = rhs_pointers[3];
+                    std::vector<view_2d *> & solution_pointers,
+                    view_3d * face_solution,
+                    std::vector<view_2d *> & rhs_pointers,
+                    std::function<void(view_2d * solution,
+                                       view_3d * face_solution,
+                                       view_2d * rhs)> * calc_rhs) {
+    view_2d * U = solution_pointers[0];
+    view_2d * U_temp = solution_pointers[1];
+    view_2d * rhs1 = rhs_pointers[0];
+    view_2d * rhs2 = rhs_pointers[1];
+    view_2d * rhs3 = rhs_pointers[2];
+    view_2d * rhs4 = rhs_pointers[3];
+    const unsigned int n_total = U->extent(0) * U->extent(1);
 
     // Calculate k1
     (*calc_rhs)(U, face_solution, rhs1);
-    linear_combination(std::vector<StateVector *>({U, rhs1}),
-                       U_temp,
-                       std::vector<rtype>({1.0, dt / static_cast<rtype>(2.0)}));
+    cApB_to_C(n_total, dt / static_cast<rtype>(2.0), rhs1->data(), U->data(), U_temp->data());
 
     // Calculate k2
     (*calc_rhs)(U_temp, face_solution, rhs2);
-    linear_combination(std::vector<StateVector *>({U, rhs2}),
-                       U_temp,
-                       std::vector<rtype>({1.0, dt / static_cast<rtype>(2.0)}));
+    cApB_to_C(n_total, dt / static_cast<rtype>(2.0), rhs2->data(), U->data(), U_temp->data());
 
     // Calculate k3
     (*calc_rhs)(U_temp, face_solution, rhs3);
-    linear_combination(std::vector<StateVector *>({U, rhs3}),
-                       U_temp,
-                       std::vector<rtype>({1.0, dt}));
+    cApB_to_C(n_total, dt, rhs3->data(), U->data(), U_temp->data());
 
     // Calculate k4
     (*calc_rhs)(U_temp, face_solution, rhs4);
-    linear_combination(std::vector<StateVector *>({U, rhs1, rhs2, rhs3, rhs4}),
-                       U,
-                       std::vector<rtype>({1.0,
-                                           dt * coeffs[0],
-                                           dt * coeffs[1],
-                                           dt * coeffs[2],
-                                           dt * coeffs[3]}));
+    cApB_to_B(n_total, dt * coeffs[0], rhs1->data(), U->data());
+    cApB_to_B(n_total, dt * coeffs[1], rhs2->data(), U->data());
+    cApB_to_B(n_total, dt * coeffs[2], rhs3->data(), U->data());
+    cApB_to_B(n_total, dt * coeffs[3], rhs4->data(), U->data());
 }
 
 SSPRK3::SSPRK3() {
@@ -149,38 +139,32 @@ SSPRK3::~SSPRK3() {
 }
 
 void SSPRK3::take_step(const rtype & dt,
-                       std::vector<StateVector *> & solution_pointers,
-                       FaceStateVector * face_solution,
-                       std::vector<StateVector *> & rhs_pointers,
-                       std::function<void(StateVector * solution,
-                                          FaceStateVector * face_solution,
-                                          StateVector * rhs)> * calc_rhs) {
-    StateVector * U = solution_pointers[0];
-    StateVector * U_temp = solution_pointers[1];
-    StateVector * rhs1 = rhs_pointers[0];
-    StateVector * rhs2 = rhs_pointers[1];
-    StateVector * rhs3 = rhs_pointers[2];
+                       std::vector<view_2d *> & solution_pointers,
+                       view_3d * face_solution,
+                       std::vector<view_2d *> & rhs_pointers,
+                       std::function<void(view_2d * solution,
+                                          view_3d * face_solution,
+                                          view_2d * rhs)> * calc_rhs) {
+    view_2d * U = solution_pointers[0];
+    view_2d * U_temp = solution_pointers[1];
+    view_2d * rhs1 = rhs_pointers[0];
+    view_2d * rhs2 = rhs_pointers[1];
+    view_2d * rhs3 = rhs_pointers[2];
+    const unsigned int n_total = U->extent(0) * U->extent(1);
 
     // Calculate k1
     (*calc_rhs)(U, face_solution, rhs1);
-    linear_combination(std::vector<StateVector *>({U, rhs1}),
-                       U_temp,
-                       std::vector<rtype>({1.0, dt}));
+    cApB_to_C(n_total, dt, rhs1->data(), U->data(), U_temp->data());
 
     // Calculate k2
     (*calc_rhs)(U_temp, face_solution, rhs2);
-    linear_combination(std::vector<StateVector *>({U, rhs2}),
-                       U_temp,
-                       std::vector<rtype>({3.0 / 4.0, dt / static_cast<rtype>(4.0)}));
+    aApbB_to_C(n_total, 3.0 / 4.0, U->data(), dt / static_cast<rtype>(4.0), rhs2->data(), U_temp->data());
 
     // Calculate k3
     (*calc_rhs)(U_temp, face_solution, rhs3);
-    linear_combination(std::vector<StateVector *>({U, rhs1, rhs2, rhs3}),
-                       U,
-                       std::vector<rtype>({1.0,
-                                           dt * coeffs[0],
-                                           dt * coeffs[1],
-                                           dt * coeffs[2]}));
+    cApB_to_B(n_total, dt * coeffs[0], rhs1->data(), U->data());
+    cApB_to_B(n_total, dt * coeffs[1], rhs2->data(), U->data());
+    cApB_to_B(n_total, dt * coeffs[2], rhs3->data(), U->data());
 }
 
 LSRK4::LSRK4() {
@@ -195,12 +179,12 @@ LSRK4::~LSRK4() {
 }
 
 void LSRK4::take_step(const rtype & dt,
-                      std::vector<StateVector *> & solution_pointers,
-                      FaceStateVector * face_solution,
-                      std::vector<StateVector *> & rhs_pointers,
-                      std::function<void(StateVector * solution,
-                                         FaceStateVector * face_solution,
-                                         StateVector * rhs)> * calc_rhs) {
+                      std::vector<view_2d *> & solution_pointers,
+                      view_3d * face_solution,
+                      std::vector<view_2d *> & rhs_pointers,
+                      std::function<void(view_2d * solution,
+                                         view_3d * face_solution,
+                                         view_2d * rhs)> * calc_rhs) {
     throw std::runtime_error("LSRK4 not implemented.");
 }
 
@@ -216,11 +200,11 @@ LSSSPRK3::~LSSSPRK3() {
 }
 
 void LSSSPRK3::take_step(const rtype & dt,
-                         std::vector<StateVector *> & solution_pointers,
-                         FaceStateVector * face_solution,
-                         std::vector<StateVector *> & rhs_pointers,
-                         std::function<void(StateVector * solution,
-                                            FaceStateVector * face_solution,
-                                            StateVector * rhs)> * calc_rhs) {
+                         std::vector<view_2d *> & solution_pointers,
+                         view_3d * face_solution,
+                         std::vector<view_2d *> & rhs_pointers,
+                         std::function<void(view_2d * solution,
+                                            view_3d * face_solution,
+                                            view_2d * rhs)> * calc_rhs) {
     throw std::runtime_error("LSSSPRK3 not implemented.");
 }

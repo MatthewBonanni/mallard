@@ -42,8 +42,8 @@ class BoundaryWallAdiabatic : public Boundary {
          * @param face_solution Pointer to the face solution vector.
          * @param rhs Pointer to the right-hand side vector.
          */
-        void apply(FaceStateVector * face_solution,
-                   StateVector * rhs) override;
+        void apply(view_3d * face_solution,
+                   view_2d * rhs) override;
     protected:
     private:
 };

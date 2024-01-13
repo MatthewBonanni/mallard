@@ -91,12 +91,12 @@ class TimeIntegrator {
          * @param calc_rhs Function to calculate rhs.
          */
         virtual void take_step(const rtype & dt,
-                               std::vector<StateVector *> & solution_pointers,
-                               FaceStateVector * face_solution,
-                               std::vector<StateVector *> & rhs_pointers,
-                               std::function<void(StateVector * solution,
-                                                  FaceStateVector * face_solution,
-                                                  StateVector * rhs)> * calc_rhs) = 0;
+                               std::vector<view_2d *> & solution_pointers,
+                               view_3d * face_solution,
+                               std::vector<view_2d *> & rhs_pointers,
+                               std::function<void(view_2d * solution,
+                                                  view_3d * face_solution,
+                                                  view_2d * rhs)> * calc_rhs) = 0;
     protected:
         TimeIntegratorType type;
         int n_solution_vectors;
@@ -125,12 +125,12 @@ class FE : public TimeIntegrator {
          * @param calc_rhs Function to calculate rhs.
          */
         void take_step(const rtype & dt,
-                       std::vector<StateVector *> & solution_pointers,
-                       FaceStateVector * face_solution,
-                       std::vector<StateVector *> & rhs_pointers,
-                       std::function<void(StateVector * solution,
-                                          FaceStateVector * face_solution,
-                                          StateVector * rhs)> * calc_rhs) override;
+                       std::vector<view_2d *> & solution_pointers,
+                       view_3d * face_solution,
+                       std::vector<view_2d *> & rhs_pointers,
+                       std::function<void(view_2d * solution,
+                                          view_3d * face_solution,
+                                          view_2d * rhs)> * calc_rhs) override;
     protected:
     private:
 };
@@ -156,12 +156,12 @@ class RK4 : public TimeIntegrator {
          * @param calc_rhs Function to calculate rhs.
          */
         void take_step(const rtype & dt,
-                       std::vector<StateVector *> & solution_pointers,
-                       FaceStateVector * face_solution,
-                       std::vector<StateVector *> & rhs_pointers,
-                       std::function<void(StateVector * solution,
-                                          FaceStateVector * face_solution,
-                                          StateVector * rhs)> * calc_rhs) override;
+                       std::vector<view_2d *> & solution_pointers,
+                       view_3d * face_solution,
+                       std::vector<view_2d *> & rhs_pointers,
+                       std::function<void(view_2d * solution,
+                                          view_3d * face_solution,
+                                          view_2d * rhs)> * calc_rhs) override;
     protected:
     private:
         std::vector<rtype> coeffs;
@@ -188,12 +188,12 @@ class LSRK4 : public TimeIntegrator {
          * @param calc_rhs Function to calculate rhs.
          */
         void take_step(const rtype & dt,
-                       std::vector<StateVector *> & solution_pointers,
-                       FaceStateVector * face_solution,
-                       std::vector<StateVector *> & rhs_pointers,
-                       std::function<void(StateVector * solution,
-                                          FaceStateVector * face_solution,
-                                          StateVector * rhs)> * calc_rhs) override;
+                       std::vector<view_2d *> & solution_pointers,
+                       view_3d * face_solution,
+                       std::vector<view_2d *> & rhs_pointers,
+                       std::function<void(view_2d * solution,
+                                          view_3d * face_solution,
+                                          view_2d * rhs)> * calc_rhs) override;
     protected:
     private:
 };
@@ -219,12 +219,12 @@ class SSPRK3 : public TimeIntegrator {
          * @param calc_rhs Function to calculate rhs.
          */
         void take_step(const rtype & dt,
-                       std::vector<StateVector *> & solution_pointers,
-                       FaceStateVector * face_solution,
-                       std::vector<StateVector *> & rhs_pointers,
-                       std::function<void(StateVector * solution,
-                                          FaceStateVector * face_solution,
-                                          StateVector * rhs)> * calc_rhs) override;
+                       std::vector<view_2d *> & solution_pointers,
+                       view_3d * face_solution,
+                       std::vector<view_2d *> & rhs_pointers,
+                       std::function<void(view_2d * solution,
+                                          view_3d * face_solution,
+                                          view_2d * rhs)> * calc_rhs) override;
     protected:
     private:
         std::vector<rtype> coeffs;
@@ -251,12 +251,12 @@ class LSSSPRK3 : public TimeIntegrator {
          * @param calc_rhs Function to calculate rhs.
          */
         void take_step(const rtype & dt,
-                       std::vector<StateVector *> & solution_pointers,
-                       FaceStateVector * face_solution,
-                       std::vector<StateVector *> & rhs_pointers,
-                       std::function<void(StateVector * solution,
-                                          FaceStateVector * face_solution,
-                                          StateVector * rhs)> * calc_rhs) override;
+                       std::vector<view_2d *> & solution_pointers,
+                       view_3d * face_solution,
+                       std::vector<view_2d *> & rhs_pointers,
+                       std::function<void(view_2d * solution,
+                                          view_3d * face_solution,
+                                          view_2d * rhs)> * calc_rhs) override;
     protected:
     private:
 };

@@ -92,16 +92,16 @@ void Solver::init_solution_constant() {
     rtype rhoE = rho * E;
 
     for (int i = 0; i < mesh->n_cells(); ++i) {
-        conservatives[i][0] = rho;
-        conservatives[i][1] = rhou_x;
-        conservatives[i][2] = rhou_y;
-        conservatives[i][3] = rhoE;
+        conservatives(i, 0) = rho;
+        conservatives(i, 1) = rhou_x;
+        conservatives(i, 2) = rhou_y;
+        conservatives(i, 3) = rhoE;
 
-        primitives[i][0] = u_x;
-        primitives[i][1] = u_y;
-        primitives[i][2] = p;
-        primitives[i][3] = T;
-        primitives[i][4] = h;
+        primitives(i, 0) = u_x;
+        primitives(i, 1) = u_y;
+        primitives(i, 2) = p;
+        primitives(i, 3) = T;
+        primitives(i, 4) = h;
     }
 }
 

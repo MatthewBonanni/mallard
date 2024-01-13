@@ -15,6 +15,8 @@
 #include <functional>
 #include <memory>
 
+#include <Kokkos_Core.hpp>
+
 #include "common.h"
 #include "mesh.h"
 #include "boundary.h"
@@ -24,12 +26,16 @@
 #include "boundary_p_out.h"
 
 Solver::Solver() {
-    // Empty
+    // Initialize Kokkos
+    Kokkos::initialize();
 }
 
 Solver::~Solver() {
     std::cout << "Destroying solver..." << std::endl;
     deallocate_memory();
+
+    // Finalize Kokkos
+    Kokkos::finalize();
 }
 
 int Solver::init(const std::string& input_file_name) {
@@ -291,6 +297,10 @@ void Solver::init_output() {
 void Solver::init_data_writers() {
     std::cout << "Initializing data writers..." << std::endl;
 
+    if (!input.contains("write_data")) {
+        return;
+    }
+
     auto outputs = input["write_data"].as_array();
     for (const auto & output : *outputs) {
         toml::table out = *(output.as_table());
@@ -302,19 +312,18 @@ void Solver::init_data_writers() {
 void Solver::allocate_memory() {
     std::cout << "Allocating memory..." << std::endl;
 
-    conservatives.resize(mesh->n_cells());
-    primitives.resize(mesh->n_cells());
-    rhs.resize(mesh->n_cells());
-    face_conservatives.resize(mesh->n_faces());
-    face_primitives.resize(mesh->n_faces());
+    Kokkos::resize(conservatives, mesh->n_cells(), N_CONSERVATIVE);
+    Kokkos::resize(primitives, mesh->n_cells(), N_PRIMITIVE);
+    Kokkos::resize(face_conservatives, mesh->n_faces(), 2, N_CONSERVATIVE);
+    Kokkos::resize(face_primitives, mesh->n_faces(), 2, N_PRIMITIVE);
 
     solution_pointers.push_back(&conservatives);
     for (int i = 0; i < time_integrator->get_n_solution_vectors() - 1; i++) {
-        solution_pointers.push_back(new StateVector(mesh->n_cells()));
+        solution_pointers.push_back(new view_2d("solution", mesh->n_cells(), N_CONSERVATIVE));
     }
 
     for (int i = 0; i < time_integrator->get_n_rhs_vectors(); i++) {
-        rhs_pointers.push_back(new StateVector(mesh->n_cells()));
+        rhs_pointers.push_back(new view_2d("rhs", mesh->n_cells(), N_CONSERVATIVE));
     }
 
     cfl_local.resize(mesh->n_cells());
@@ -323,17 +332,19 @@ void Solver::allocate_memory() {
 void Solver::register_data() {
     std::cout << "Registering data..." << std::endl;
 
-    for (int i = 0; i < CONSERVATIVE_NAMES.size(); i++) {
-        data.push_back(Data(CONSERVATIVE_NAMES[i],
-                            &conservatives[0][i],
-                            N_CONSERVATIVE));
-    }
+    // \todo Fix this
 
-    for (int i = 0; i < PRIMITIVE_NAMES.size(); i++) {
-        data.push_back(Data(PRIMITIVE_NAMES[i],
-                            &primitives[0][i],
-                            N_PRIMITIVE));
-    }
+    // for (int i = 0; i < CONSERVATIVE_NAMES.size(); i++) {
+    //     data.push_back(Data(CONSERVATIVE_NAMES[i],
+    //                         &conservatives[0][i],
+    //                         N_CONSERVATIVE));
+    // }
+
+    // for (int i = 0; i < PRIMITIVE_NAMES.size(); i++) {
+    //     data.push_back(Data(PRIMITIVE_NAMES[i],
+    //                         &primitives[0][i],
+    //                         N_PRIMITIVE));
+    // }
 
     data.push_back(Data("CFL", cfl_local.data()));
 }
@@ -424,13 +435,13 @@ void Solver::check_fields() const {
     bool nan_found = false;
     for (int i = 0; i < mesh->n_cells(); i++) {
         for (int j = 0; j < N_CONSERVATIVE; j++) {
-            if (std::isnan(conservatives[i][j])) {
+            if (std::isnan(conservatives(i, j))) {
                 nan_found = true;
             }
         }
 
         for (int j = 0; j < N_PRIMITIVE; j++) {
-            if (std::isnan(primitives[i][j])) {
+            if (std::isnan(primitives(i, j))) {
                 nan_found = true;
             }
         }
@@ -445,11 +456,11 @@ void Solver::check_fields() const {
             msg += "> y: " + std::to_string(mesh->cell_coords(i)[1]) + "\n";
             msg += "conservatives:\n";
             for (int j = 0; j < N_CONSERVATIVE; j++) {
-                msg += "> " + CONSERVATIVE_NAMES[j] + ": " + std::to_string(conservatives[i][j]) + "\n";
+                msg += "> " + CONSERVATIVE_NAMES[j] + ": " + std::to_string(conservatives(i, j)) + "\n";
             }
             msg += "primitives:\n";
             for (int j = 0; j < N_PRIMITIVE; j++) {
-                msg += "> " + PRIMITIVE_NAMES[j] + ": " + std::to_string(primitives[i][j]) + "\n";
+                msg += "> " + PRIMITIVE_NAMES[j] + ": " + std::to_string(primitives(i, j)) + "\n";
             }
             throw std::runtime_error(msg);
         }
@@ -464,7 +475,9 @@ void Solver::write_data(bool force) const {
 
 void Solver::deallocate_memory() {
     std::cout << "Deallocating memory..." << std::endl;
-    // Nothing to do here yet.
+
+    // Make sure all Kokkos threads are done.
+    Kokkos::fence();
 }
 
 void Solver::print_logo() const {
@@ -487,9 +500,17 @@ void Solver::take_step() {
 }
 
 void Solver::update_primitives() {
+    State cell_conservatives;
+    Primitives cell_primitives;
     for (int i_cell = 0; i_cell < mesh->n_cells(); i_cell++) {
-        physics->compute_primitives_from_conservatives(primitives[i_cell],
-                                                       conservatives[i_cell]);
+        for (int i = 0; i < N_CONSERVATIVE; i++) {
+            cell_conservatives[i] = conservatives(i_cell, i);
+        }
+        physics->compute_primitives_from_conservatives(cell_primitives,
+                                                       cell_conservatives);
+        for (int i = 0; i < N_PRIMITIVE; i++) {
+            primitives(i_cell, i) = cell_primitives[i];
+        }
     }
 }
 
@@ -545,14 +566,14 @@ rtype Solver::calc_spectral_radius() {
 
             dx_n = fabs(dot<N_DIM>(s.data(), n_unit.data()));
 
-            rho_l = conservatives[i_cell_l][0];
-            rho_r = conservatives[i_cell_r][1];
-            u_l[0] = primitives[i_cell_l][0];
-            u_l[1] = primitives[i_cell_l][1];
-            u_r[0] = primitives[i_cell_r][0];
-            u_r[1] = primitives[i_cell_r][1];
-            p_l = primitives[i_cell_l][2];
-            p_r = primitives[i_cell_r][2];
+            rho_l = conservatives(i_cell_l, 0);
+            rho_r = conservatives(i_cell_r, 1);
+            u_l[0] = primitives(i_cell_l, 0);
+            u_l[1] = primitives(i_cell_l, 1);
+            u_r[0] = primitives(i_cell_r, 0);
+            u_r[1] = primitives(i_cell_r, 1);
+            p_l = primitives(i_cell_l, 2);
+            p_r = primitives(i_cell_r, 2);
             sos_l = physics->get_sound_speed_from_pressure_density(p_l, rho_l);
             sos_r = physics->get_sound_speed_from_pressure_density(p_l, rho_l);
             sos_f = 0.5 * (sos_l + sos_r);

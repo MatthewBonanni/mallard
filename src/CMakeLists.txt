@@ -28,6 +28,7 @@ add_subdirectory(io)
 target_include_directories(Mallard PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 target_link_libraries(Mallard Kokkos::kokkos)
+target_link_libraries(Mallard Kokkos::kokkoskernels)
 target_link_libraries(Mallard tomlplusplus::tomlplusplus)
 target_link_libraries(Mallard CommonLib)
 target_link_libraries(Mallard MeshLib)

@@ -10,6 +10,8 @@
  */
 
 #include <gtest/gtest.h>
+#include <Kokkos_Core.hpp>
+
 #include "test_utils.h"
 #include "common_math.h"
 
@@ -95,110 +97,95 @@ TEST(CommonMathTest, TriangleArea2ZeroArea) {
     EXPECT_RTYPE_EQ(expected_area, actual_area);
 }
 
-TEST(CommonMathTest, LinearCombination) {
-    std::vector<StateVector *> vectors_in;
-    StateVector * vector_out;
-    std::vector<rtype> coefficients = {1.0, 2.0};
+// TEST(CommonMathTest, TriangleArea3) {
+//     std::array<rtype, 3> v0 = {0.0, 0.0, 0.0};
+//     std::array<rtype, 3> v1 = {1.0, 0.0, 0.0};
+//     std::array<rtype, 3> v2 = {0.0, 1.0, 0.0};
 
-    vectors_in.push_back(new StateVector(2));
-    vectors_in.push_back(new StateVector(2));
-    vector_out = new StateVector(2);
+//     rtype expected_area = 0.5;
+//     rtype actual_area = triangle_area_3(v0, v1, v2);
 
-    (*vectors_in[0])[0][0] = 0.0;
-    (*vectors_in[0])[0][1] = 1.0;
-    (*vectors_in[0])[0][2] = 2.0;
-    (*vectors_in[0])[0][3] = 3.0;
-    (*vectors_in[0])[1][0] = 4.0;
-    (*vectors_in[0])[1][1] = 5.0;
-    (*vectors_in[0])[1][2] = 6.0;
-    (*vectors_in[0])[1][3] = 7.0;
+//     EXPECT_RTYPE_EQ(expected_area, actual_area);
+// }
 
-    (*vectors_in[1])[0][0] = 8.0;
-    (*vectors_in[1])[0][1] = 9.0;
-    (*vectors_in[1])[0][2] = 10.0;
-    (*vectors_in[1])[0][3] = 11.0;
-    (*vectors_in[1])[1][0] = 12.0;
-    (*vectors_in[1])[1][1] = 13.0;
-    (*vectors_in[1])[1][2] = 14.0;
-    (*vectors_in[1])[1][3] = 15.0;
+// TEST(CommonMathTest, TriangleArea3NegativeCoordinates) {
+//     std::array<rtype, 3> v0 = {-1.0, -1.0, -1.0};
+//     std::array<rtype, 3> v1 = {1.0, -1.0, -1.0};
+//     std::array<rtype, 3> v2 = {-1.0, 1.0, -1.0};
 
-    linear_combination(vectors_in, vector_out, coefficients);
+//     rtype expected_area = 2.0;
+//     rtype actual_area = triangle_area_3(v0, v1, v2);
 
-    EXPECT_RTYPE_EQ((*vector_out)[0][0], 16.0);
-    EXPECT_RTYPE_EQ((*vector_out)[0][1], 19.0);
-    EXPECT_RTYPE_EQ((*vector_out)[0][2], 22.0);
-    EXPECT_RTYPE_EQ((*vector_out)[0][3], 25.0);
-    EXPECT_RTYPE_EQ((*vector_out)[1][0], 28.0);
-    EXPECT_RTYPE_EQ((*vector_out)[1][1], 31.0);
-    EXPECT_RTYPE_EQ((*vector_out)[1][2], 34.0);
-    EXPECT_RTYPE_EQ((*vector_out)[1][3], 37.0);
+//     EXPECT_RTYPE_EQ(expected_area, actual_area);
+// }
+
+// TEST(CommonMathTest, TriangleArea3ZeroArea) {
+//     std::array<rtype, 3> v0 = {0.0, 0.0, 0.0};
+//     std::array<rtype, 3> v1 = {0.0, 0.0, 0.0};
+//     std::array<rtype, 3> v2 = {0.0, 0.0, 0.0};
+
+//     rtype expected_area = 0.0;
+//     rtype actual_area = triangle_area_3(v0, v1, v2);
+
+//     EXPECT_RTYPE_EQ(expected_area, actual_area);
+// }
+
+TEST(CommonMathTest, cApB_to_B) {
+    const unsigned int n = 4;
+    rtype c = 0.1;
+    rtype A[n] = {0.0, 1.0, 2.0, 3.0};
+    rtype B[n] = {4.0, 5.0, 6.0, 7.0};
+    rtype expected_B[n] = {4.0, 5.1, 6.2, 7.3};
+
+    cApB_to_B(n, c, A, B);
+
+    for (unsigned int i = 0; i < n; i++) {
+        EXPECT_RTYPE_EQ(expected_B[i], B[i]);
+    }
 }
 
-TEST(CommonMathTest, LinearCombinationWrongNumberOfCoefficients) {
-    std::vector<StateVector *> vectors_in;
-    StateVector * vector_out;
-    std::vector<rtype> coefficients = {1.0, 2.0, 3.0};
+TEST(CommonMathTest, cApB_to_C) {
+    const unsigned int n = 4;
+    rtype c = 0.1;
+    rtype A[n] = {0.0, 1.0, 2.0, 3.0};
+    rtype B[n] = {4.0, 5.0, 6.0, 7.0};
+    rtype expected_C[n] = {4.0, 5.1, 6.2, 7.3};
+    rtype actual_C[n];
 
-    vectors_in.push_back(new StateVector(2));
-    vectors_in.push_back(new StateVector(2));
-    vector_out = new StateVector(2);
+    cApB_to_C(n, c, A, B, actual_C);
 
-    (*vectors_in[0])[0][0] = 0.0;
-    (*vectors_in[0])[0][1] = 1.0;
-    (*vectors_in[0])[0][2] = 2.0;
-    (*vectors_in[0])[0][3] = 3.0;
-    (*vectors_in[0])[1][0] = 4.0;
-    (*vectors_in[0])[1][1] = 5.0;
-    (*vectors_in[0])[1][2] = 6.0;
-    (*vectors_in[0])[1][3] = 7.0;
-
-    (*vectors_in[1])[0][0] = 8.0;
-    (*vectors_in[1])[0][1] = 9.0;
-    (*vectors_in[1])[0][2] = 10.0;
-    (*vectors_in[1])[0][3] = 11.0;
-    (*vectors_in[1])[1][0] = 12.0;
-    (*vectors_in[1])[1][1] = 13.0;
-    (*vectors_in[1])[1][2] = 14.0;
-    (*vectors_in[1])[1][3] = 15.0;
-
-    EXPECT_THROW(linear_combination(vectors_in, vector_out, coefficients), std::runtime_error);
+    for (unsigned int i = 0; i < n; i++) {
+        EXPECT_RTYPE_EQ(expected_C[i], actual_C[i]);
+    }
 }
 
-TEST(CommonMathTest, LinearCombinationOutputVectorIsInputVector) {
-    std::vector<StateVector *> vectors_in;
-    StateVector * vector_out;
-    std::vector<rtype> coefficients = {1.0, 2.0};
+TEST(CommonMathTest, aApbB_to_B) {
+    const unsigned int n = 4;
+    rtype a = 0.1;
+    rtype A[n] = {0.0, 1.0, 2.0, 3.0};
+    rtype b = 0.2;
+    rtype B[n] = {4.0, 5.0, 6.0, 7.0};
+    rtype expected_B[n] = {0.8, 1.1, 1.4, 1.7};
 
-    vectors_in.push_back(new StateVector(2));
-    vectors_in.push_back(new StateVector(2));
-    vector_out = vectors_in[0];
+    aApbB_to_B(n, a, A, b, B);
 
-    (*vectors_in[0])[0][0] = 0.0;
-    (*vectors_in[0])[0][1] = 1.0;
-    (*vectors_in[0])[0][2] = 2.0;
-    (*vectors_in[0])[0][3] = 3.0;
-    (*vectors_in[0])[1][0] = 4.0;
-    (*vectors_in[0])[1][1] = 5.0;
-    (*vectors_in[0])[1][2] = 6.0;
-    (*vectors_in[0])[1][3] = 7.0;
+    for (unsigned int i = 0; i < n; i++) {
+        EXPECT_RTYPE_EQ(expected_B[i], B[i]);
+    }
+}
 
-    (*vectors_in[1])[0][0] = 8.0;
-    (*vectors_in[1])[0][1] = 9.0;
-    (*vectors_in[1])[0][2] = 10.0;
-    (*vectors_in[1])[0][3] = 11.0;
-    (*vectors_in[1])[1][0] = 12.0;
-    (*vectors_in[1])[1][1] = 13.0;
-    (*vectors_in[1])[1][2] = 14.0;
-    (*vectors_in[1])[1][3] = 15.0;
+TEST(CommonMathTest, aApbB_to_C) {
+    const unsigned int n = 4;
+    rtype a = 0.1;
+    rtype A[n] = {0.0, 1.0, 2.0, 3.0};
+    rtype b = 0.2;
+    rtype B[n] = {4.0, 5.0, 6.0, 7.0};
+    rtype expected_C[n] = {0.8, 1.1, 1.4, 1.7};
+    rtype actual_C[n];
 
-    linear_combination(vectors_in, vector_out, coefficients);
+    aApbB_to_C(n, a, A, b, B, actual_C);
 
-    EXPECT_RTYPE_EQ((*vector_out)[0][0], 16.0);
-    EXPECT_RTYPE_EQ((*vector_out)[0][1], 19.0);
-    EXPECT_RTYPE_EQ((*vector_out)[0][2], 22.0);
-    EXPECT_RTYPE_EQ((*vector_out)[0][3], 25.0);
-    EXPECT_RTYPE_EQ((*vector_out)[1][0], 28.0);
-    EXPECT_RTYPE_EQ((*vector_out)[1][1], 31.0);
-    EXPECT_RTYPE_EQ((*vector_out)[1][2], 34.0);
-    EXPECT_RTYPE_EQ((*vector_out)[1][3], 37.0);
+    for (unsigned int i = 0; i < n; i++) {
+        EXPECT_RTYPE_EQ(expected_C[i], actual_C[i]);
+    }
 }

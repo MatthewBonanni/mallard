@@ -183,9 +183,9 @@ class Solver {
          * @param face_solution Face solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs(StateVector * solution,
-                      FaceStateVector * face_solution,
-                      StateVector * rhs);
+        void calc_rhs(view_2d * solution,
+                      view_3d * face_solution,
+                      view_2d * rhs);
         
         /**
          * @brief Pre-RHS hook.
@@ -193,33 +193,33 @@ class Solver {
          * @param face_solution Face solution vector.
          * @param rhs Right hand side vector.
          */
-        void pre_rhs(StateVector * solution,
-                     FaceStateVector * face_solution,
-                     StateVector * rhs);
+        void pre_rhs(view_2d * solution,
+                     view_3d * face_solution,
+                     view_2d * rhs);
         
         /**
          * @brief Add the source term contributions to the right hand side.
          * @param solution Solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs_source(StateVector * solution,
-                             StateVector * rhs);
+        void calc_rhs_source(view_2d * solution,
+                             view_2d * rhs);
         
         /**
          * @brief Add the interior flux contributions to the right hand side.
          * @param face_solution Face solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs_interior(FaceStateVector * face_solution,
-                               StateVector * rhs);
+        void calc_rhs_interior(view_3d * face_solution,
+                               view_2d * rhs);
         
         /**
          * @brief Add the boundary flux contributions to the right hand side.
          * @param face_solution Face solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs_boundaries(FaceStateVector * face_solution,
-                                 StateVector * rhs);
+        void calc_rhs_boundaries(view_3d * face_solution,
+                                 view_2d * rhs);
     private:
         toml::table input;
         int n_steps;
@@ -236,16 +236,15 @@ class Solver {
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         std::unique_ptr<TimeIntegrator> time_integrator;
         std::shared_ptr<Physics> physics;
-        StateVector conservatives;
-        PrimitivesVector primitives;
-        StateVector rhs;
-        FaceStateVector face_conservatives;
-        FaceStateVector face_primitives;
-        std::vector<StateVector *> solution_pointers;
-        std::vector<StateVector *> rhs_pointers;
-        std::function<void(StateVector *,
-                           FaceStateVector *,
-                           StateVector *)> rhs_func;
+        view_2d conservatives;
+        view_2d primitives;
+        view_3d face_conservatives;
+        view_3d face_primitives;
+        std::vector<view_2d *> solution_pointers;
+        std::vector<view_2d *> rhs_pointers;
+        std::function<void(view_2d *,
+                           view_3d *,
+                           view_2d *)> rhs_func;
         int check_interval;
         std::vector<Data> data;
         std::vector<std::unique_ptr<DataWriter>> data_writers;
