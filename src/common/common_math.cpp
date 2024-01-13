@@ -14,6 +14,7 @@
 #include <cmath>
 #include <stdexcept>
 
+#include "KokkosBlas1_scal.hpp"
 #include "KokkosBlas1_axpby.hpp"
 #include "KokkosBlas1_update.hpp"
 
@@ -42,6 +43,12 @@ rtype triangle_area_3(const std::array<rtype, 3> & v0,
                       const std::array<rtype, 3> & v1,
                       const std::array<rtype, 3> & v2) {
     throw std::runtime_error("Not implemented.");
+}
+
+void cA_to_A(const unsigned int nA,
+             const rtype c, rtype * A) {
+    Kokkos::View<rtype *> AA(A, nA);
+    KokkosBlas::scal(AA, c, AA);
 }
 
 void cApB_to_B(const unsigned int nA,

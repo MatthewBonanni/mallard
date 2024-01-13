@@ -49,6 +49,15 @@ int main(int argc, char* argv[]) {
     Kokkos::initialize(argc, argv);
     {
 
+    std::cout << "The default execution space is: "
+              << typeid(Kokkos::DefaultExecutionSpace).name() << std::endl;
+    std::cout << "This space has concurrency: "
+              << Kokkos::DefaultExecutionSpace::concurrency() << std::endl;
+    std::cout << "The default host execution space is: "
+              << typeid(Kokkos::DefaultHostExecutionSpace).name() << std::endl;
+    std::cout << "This space has concurrency: "
+              << Kokkos::DefaultHostExecutionSpace::concurrency() << std::endl;
+
     // Create solver object
     Solver solver;
     status = solver.init(inputFileName);

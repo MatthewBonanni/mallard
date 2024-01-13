@@ -501,9 +501,7 @@ void Solver::calc_dt() {
     if (use_cfl) {
         rtype max_spectral_radius = calc_spectral_radius();
         dt = cfl / max_spectral_radius;
-        for (int i = 0; i < mesh->n_cells(); i++) {
-            cfl_local(i) *= dt;
-        }
+        cA_to_A(mesh->n_cells(), dt, cfl_local.data());
     }
 
     if (dt < 0.0) {

@@ -130,6 +130,19 @@ TEST(CommonMathTest, TriangleArea2ZeroArea) {
 //     EXPECT_RTYPE_EQ(expected_area, actual_area);
 // }
 
+TEST(CommonMathTest, cA_to_A) {
+    const unsigned int n = 4;
+    rtype c = 0.1;
+    rtype A[n] = {0.0, 1.0, 2.0, 3.0};
+    rtype expected_A[n] = {0.0, 0.1, 0.2, 0.3};
+
+    cA_to_A(n, c, A);
+
+    for (unsigned int i = 0; i < n; i++) {
+        EXPECT_RTYPE_EQ(expected_A[i], A[i]);
+    }
+}
+
 TEST(CommonMathTest, cApB_to_B) {
     const unsigned int n = 4;
     rtype c = 0.1;

@@ -90,6 +90,16 @@ rtype triangle_area_3(const std::array<rtype, 3>& v0,
                       const std::array<rtype, 3>& v2);
 
 /**
+ * @brief Compute cA and store the result in A.
+ * 
+ * @param nA Size of A.
+ * @param c Scalar.
+ * @param A Array.
+ */
+void cA_to_A(const unsigned int nA,
+             const rtype c, rtype * A);
+
+/**
  * @brief Compute cA + B, and store the result in B.
  * 
  * @param nA Size of A.
