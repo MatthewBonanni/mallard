@@ -34,15 +34,15 @@ void BoundarySymmetry::init(const toml::table & input) {
 
 void BoundarySymmetry::apply(view_3d * face_solution,
                              view_2d * rhs) {
-    int i_face, i_cell_l;
-    State flux;
-    State conservatives_l;
-    Primitives primitives_l, primitives_r;
-    rtype u_n;
-    NVector u_l, u_r, n_unit;
-    for (int i_local = 0; i_local < zone->n_faces(); i_local++) {
-        i_face = (*zone->faces())[i_local];
-        i_cell_l = mesh->cells_of_face(i_face)[0];
+    Kokkos::parallel_for(zone->n_faces(), KOKKOS_LAMBDA(const int i_local) {
+        State flux;
+        State conservatives_l;
+        Primitives primitives_l, primitives_r;
+        rtype u_n;
+        NVector u_l, u_r, n_unit;
+
+        int i_face = (*zone->faces())[i_local];
+        int i_cell_l = mesh->cells_of_face(i_face)[0];
         n_unit = unit(mesh->face_normal(i_face));
 
         // Get cell conservatives
@@ -72,7 +72,7 @@ void BoundarySymmetry::apply(view_3d * face_solution,
 
         // Add flux to RHS
         for (int j = 0; j < 4; j++) {
-            (*rhs)(i_cell_l, j) -= mesh->face_area(i_face) * flux[j];
+            Kokkos::atomic_add(&(*rhs)(i_cell_l, j), -mesh->face_area(i_face) * flux[j]);
         }
-    }
+    });
 }

@@ -34,7 +34,6 @@ using Primitives = std::array<rtype, N_PRIMITIVE>;
 using FaceStatePair = std::array<State, 2>;
 using StateVector = std::vector<State>;
 using FaceStateVector = std::vector<FaceStatePair>;
-using PrimitivesVector = std::vector<Primitives>;
 
 using view_1d = Kokkos::View<rtype *>;
 using view_2d = Kokkos::View<rtype *[N_CONSERVATIVE]>;

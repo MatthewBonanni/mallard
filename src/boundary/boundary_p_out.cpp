@@ -46,17 +46,17 @@ void BoundaryPOut::init(const toml::table & input) {
 
 void BoundaryPOut::apply(view_3d * face_solution,
                          view_2d * rhs) {
-    int i_face, i_cell_l;
-    State flux;
-    State conservatives_l;
-    Primitives primitives_l;
-    rtype rho_l, gamma_l, p_l, T_l, h_l;
-    rtype sos_l, u_mag_l;
-    NVector u_l, u_bc, n_unit;
-    rtype rho_bc, E_bc, e_bc, p_out, h_bc, T_bc;
-    for (int i_local = 0; i_local < zone->n_faces(); i_local++) {
-        i_face = (*zone->faces())[i_local];
-        i_cell_l = mesh->cells_of_face(i_face)[0];
+    Kokkos::parallel_for(zone->n_faces(), KOKKOS_LAMBDA(const int i_local) {
+        State flux;
+        State conservatives_l;
+        Primitives primitives_l;
+        rtype rho_l, gamma_l, p_l, T_l, h_l;
+        rtype sos_l, u_mag_l;
+        NVector u_l, u_bc, n_unit;
+        rtype rho_bc, E_bc, e_bc, p_out, h_bc, T_bc;
+        
+        int i_face = (*zone->faces())[i_local];
+        int i_cell_l = mesh->cells_of_face(i_face)[0];
         n_unit = unit(mesh->face_normal(i_face));
 
         // Get cell conservatives
@@ -98,7 +98,7 @@ void BoundaryPOut::apply(view_3d * face_solution,
 
         // Add flux to RHS
         for (int j = 0; j < 4; j++) {
-            (*rhs)(i_cell_l, j) -= mesh->face_area(i_face) * flux[j];
+            Kokkos::atomic_add(&(*rhs)(i_cell_l, j), -mesh->face_area(i_face) * flux[j]);
         }
-    }
+    });
 }

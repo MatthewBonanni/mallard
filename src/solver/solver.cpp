@@ -478,14 +478,15 @@ void Solver::take_step() {
                                rhs_pointers,
                                &rhs_func);
     update_primitives();
+    Kokkos::fence();
     step++;
     t += dt;
 }
 
 void Solver::update_primitives() {
-    State cell_conservatives;
-    Primitives cell_primitives;
-    for (int i_cell = 0; i_cell < mesh->n_cells(); i_cell++) {
+    Kokkos::parallel_for(mesh->n_cells(), KOKKOS_LAMBDA(const int i_cell) {
+        State cell_conservatives;
+        Primitives cell_primitives;
         for (int i = 0; i < N_CONSERVATIVE; i++) {
             cell_conservatives[i] = conservatives(i_cell, i);
         }
@@ -494,7 +495,7 @@ void Solver::update_primitives() {
         for (int i = 0; i < N_PRIMITIVE; i++) {
             primitives(i_cell, i) = cell_primitives[i];
         }
-    }
+    });
 }
 
 void Solver::calc_dt() {
