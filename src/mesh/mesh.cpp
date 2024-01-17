@@ -169,10 +169,7 @@ void Mesh::compute_face_normals() {
     }
 }
 
-void Mesh::init_wedge(int nx, int ny, rtype Lx, rtype Ly) {
-    rtype wedge_theta = 8 * M_PI / 180.0;
-    rtype wedge_x = 0.5;
-
+void Mesh::init_cart(int nx, int ny, rtype Lx, rtype Ly) {
     this->nx = nx;
     this->ny = ny;
 
@@ -194,16 +191,8 @@ void Mesh::init_wedge(int nx, int ny, rtype Lx, rtype Ly) {
     for (int i = 0; i < nx + 1; ++i) {
         for (int j = 0; j < ny + 1; ++j) {
             int i_node = i * (ny + 1) + j;
-            rtype x = i * dx;
-            rtype y;
-            if (x > wedge_x) {
-                rtype y_bottom = (x - wedge_x) * tan(wedge_theta);
-                y = j * (Ly - y_bottom) / ny + y_bottom;
-            } else {
-                y = j * dy;
-            }
-            m_node_coords[i_node][0] = x;
-            m_node_coords[i_node][1] = y;
+            m_node_coords[i_node][0] = i * dx;
+            m_node_coords[i_node][1] = j * dy;
         }
     }
 
@@ -293,6 +282,40 @@ void Mesh::init_wedge(int nx, int ny, rtype Lx, rtype Ly) {
     m_face_zones.push_back(zone_b);
 
     // Compute derived quantities
+    compute_face_areas();
+    compute_cell_volumes();
+    compute_cell_centroids();
+    compute_face_centroids();
+    compute_face_normals();
+}
+
+void Mesh::init_wedge(int nx, int ny, rtype Lx, rtype Ly) {
+    init_cart(nx, ny, Lx, Ly);
+
+    rtype wedge_theta = 8 * M_PI / 180.0;
+    rtype wedge_x = 0.5;
+
+    // Adjust node coordinates
+    rtype dx = Lx / nx;
+    rtype dy = Ly / ny;
+
+    for (int i = 0; i < nx + 1; ++i) {
+        for (int j = 0; j < ny + 1; ++j) {
+            int i_node = i * (ny + 1) + j;
+            rtype x = i * dx;
+            rtype y;
+            if (x > wedge_x) {
+                rtype y_bottom = (x - wedge_x) * tan(wedge_theta);
+                y = j * (Ly - y_bottom) / ny + y_bottom;
+            } else {
+                y = j * dy;
+            }
+            m_node_coords[i_node][0] = x;
+            m_node_coords[i_node][1] = y;
+        }
+    }
+
+    // Recompute derived quantities
     compute_face_areas();
     compute_cell_volumes();
     compute_cell_centroids();

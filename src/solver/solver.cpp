@@ -89,7 +89,11 @@ void Solver::init_mesh() {
         std::string filename = input["mesh"]["filename"].value_or("mesh.msh");
         throw std::runtime_error("MeshType::FILE not implemented.");
     } else if (type == MeshType::CART) {
-        throw std::runtime_error("MeshType::CART not implemented.");
+        int Nx = input["mesh"]["Nx"].value_or(100);
+        int Ny = input["mesh"]["Ny"].value_or(100);
+        rtype Lx = input["mesh"]["Lx"].value_or(1.0);
+        rtype Ly = input["mesh"]["Ly"].value_or(1.0);
+        mesh->init_cart(Nx, Ny, Lx, Ly);
     } else if (type == MeshType::WEDGE) {
         int Nx = input["mesh"]["Nx"].value_or(100);
         int Ny = input["mesh"]["Ny"].value_or(100);

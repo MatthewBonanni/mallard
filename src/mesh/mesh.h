@@ -203,6 +203,16 @@ class Mesh {
         void compute_face_normals();
 
         /**
+         * @brief Initialize the mesh as a cartesian grid.
+         * 
+         * @param nx Number of cells in the x-direction.
+         * @param ny Number of cells in the y-direction.
+         * @param Lx Length of the domain in the x-direction.
+         * @param Ly Length of the domain in the y-direction.
+         */
+        void init_cart(int nx, int ny, rtype Lx, rtype Ly);
+
+        /**
          * @brief Initialize the supersonic wedge mesh.
          * 
          * @param nx Number of cells in the x-direction.
