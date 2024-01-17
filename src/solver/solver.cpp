@@ -352,6 +352,8 @@ int Solver::run() {
         write_data();
     }
 
+    // \todo implement profiling
+
     write_data(true);
 
     std::cout << LOG_SEPARATOR << std::endl;
@@ -393,7 +395,7 @@ void print_range(const std::string & name,
               << max << "]" << std::endl;
 }
 
-void Solver::do_checks() const {
+void Solver::do_checks() {
     bool check_now = (step % check_interval == 0);
     if (!check_now) {
         return;
@@ -413,6 +415,23 @@ void Solver::do_checks() const {
     for (int i = 0; i < PRIMITIVE_NAMES.size(); i++) {
         print_range(PRIMITIVE_NAMES[i], min_prim[i], max_prim[i]);
     }
+
+    rtype t_wall = timer.seconds();
+    rtype dt_check = t - t_last_check;
+    rtype dt_wall_check = t_wall - t_wall_last_check;
+    std::cout << "Performance:" << std::endl;
+    std::cout << "> Time since last check: "
+              << dt_wall_check
+              << " s" << std::endl;
+    std::cout << "> Time / step / cell: "
+              << dt_wall_check / check_interval / mesh->n_cells()
+              << " s" << std::endl;
+    std::cout << "> Simulation time / wall time: "
+              << dt_check / dt_wall_check
+              << std::endl;
+    t_last_check = t;
+    t_wall_last_check = t_wall;
+
     std::cout << LOG_SEPARATOR << std::endl;
 }
 

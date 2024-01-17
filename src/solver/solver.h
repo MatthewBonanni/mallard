@@ -158,7 +158,7 @@ class Solver {
         /**
          * @brief Do checks.
          */
-        void do_checks() const;
+        void do_checks();
 
         /**
          * @brief Check fields for NaNs.
@@ -223,12 +223,20 @@ class Solver {
         rtype cfl;
         view_1d cfl_local;
         rtype t;
+        rtype t_last_check;
+        rtype t_wall_0;
+        rtype t_wall_last_check;
         int step;
+        Kokkos::Timer timer;
+
+        // Numerics and physics
         std::shared_ptr<Mesh> mesh;
         std::vector<std::unique_ptr<Boundary>> boundaries;
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         std::unique_ptr<TimeIntegrator> time_integrator;
         std::shared_ptr<Physics> physics;
+
+        // Data views
         view_2d conservatives;
         view_2d primitives;
         view_3d face_conservatives;
@@ -238,8 +246,12 @@ class Solver {
         std::function<void(view_2d *,
                            view_3d *,
                            view_2d *)> rhs_func;
+        
+        // Checks
         int check_interval;
         bool check_nan;
+
+        // Outputs
         std::vector<Data> data;
         std::vector<std::unique_ptr<DataWriter>> data_writers;
         // \todo convert to shared_ptr
