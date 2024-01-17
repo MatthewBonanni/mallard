@@ -85,7 +85,7 @@ void Solver::init_solution_constant() {
     rtype rho = physics->get_density_from_pressure_temperature(p, T);
     rtype e = physics->get_energy_from_temperature(T);
     rtype E = e + 0.5 * (u_x * u_x +
-                          u_y * u_y);
+                         u_y * u_y);
     rtype h = e + p / rho;
     rtype rhou_x = rho * u_x;
     rtype rhou_y = rho * u_y;

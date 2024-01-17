@@ -36,8 +36,8 @@ using StateVector = std::vector<State>;
 using FaceStateVector = std::vector<FaceStatePair>;
 
 using view_1d = Kokkos::View<rtype *>;
-using view_2d = Kokkos::View<rtype *[N_CONSERVATIVE]>;
-using view_3d = Kokkos::View<rtype *[2][N_CONSERVATIVE]>;
+using view_2d = Kokkos::View<rtype **>;
+using view_3d = Kokkos::View<rtype ***>;
 
 using view_1d_ls = Kokkos::View<rtype *, Kokkos::LayoutStride>;
 

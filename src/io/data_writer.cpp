@@ -191,9 +191,9 @@ void DataWriter::write_vtu(int step) const {
     // Do nothing, no point data
 
     // Write CellData
+    n_bytes = sizeof(rtype) * mesh->n_cells();
     for (const auto & data_ptr : data_ptrs) {
-        int bytes = sizeof(rtype) * mesh->n_cells();
-        out.write(reinterpret_cast<const char *>(&bytes), sizeof(int));
+        out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
         for (int i = 0; i < mesh->n_cells(); i++) {
             out.write(reinterpret_cast<const char *>(&(*data_ptr)[i]), sizeof(rtype));
         }
