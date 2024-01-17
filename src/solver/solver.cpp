@@ -518,18 +518,19 @@ void Solver::calc_dt() {
 
 rtype Solver::calc_spectral_radius() {
     rtype max_spectral_radius = -1.0;
-    rtype spectral_radius_convective;
-    rtype spectral_radius_acoustic;
-    rtype spectral_radius_viscous;
-    rtype spectral_radius_heat;
-    rtype spectral_radius_overall;
-    rtype rho_l, rho_r, p_l, p_r, sos_l, sos_r, sos_f;
-    NVector s, u_l, u_r, u_f;
-    rtype dx_n, u_n;
-    rtype geom_factor;
-    NVector n_unit;
+    Kokkos::parallel_reduce(mesh->n_cells(), 
+                            KOKKOS_LAMBDA(const int i_cell, rtype & max_spectral_radius_i) {
+        rtype spectral_radius_convective = 0.0;
+        rtype spectral_radius_acoustic = 0.0;
+        rtype spectral_radius_viscous = 0.0;
+        rtype spectral_radius_heat = 0.0;
+        rtype spectral_radius_overall;
+        rtype rho_l, rho_r, p_l, p_r, sos_l, sos_r, sos_f;
+        NVector s, u_l, u_r, u_f;
+        rtype dx_n, u_n;
+        rtype geom_factor;
+        NVector n_unit;
 
-    for (int i_cell = 0; i_cell < mesh->n_cells(); i_cell++) {
         spectral_radius_convective = 0.0;
         spectral_radius_acoustic = 0.0;
         spectral_radius_viscous = 0.0;
@@ -581,12 +582,12 @@ rtype Solver::calc_spectral_radius() {
         spectral_radius_overall = spectral_radius_convective + spectral_radius_acoustic;
 
         // Update max spectral radius
-        max_spectral_radius = std::max(max_spectral_radius,
-                                       spectral_radius_overall);
+        max_spectral_radius_i = std::max(max_spectral_radius_i,
+                                         spectral_radius_overall);
 
         // Store spectral radius in cfl_local, will be used to compute local cfl
         cfl_local(i_cell) = spectral_radius_overall;
-    }
+    }, Kokkos::Max<rtype>(max_spectral_radius));
 
     return max_spectral_radius;
 }
