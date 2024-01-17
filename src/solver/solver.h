@@ -239,6 +239,7 @@ class Solver {
                            view_3d *,
                            view_2d *)> rhs_func;
         int check_interval;
+        bool check_nan;
         std::vector<Data> data;
         std::vector<std::unique_ptr<DataWriter>> data_writers;
         // \todo convert to shared_ptr

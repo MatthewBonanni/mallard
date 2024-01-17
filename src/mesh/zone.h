@@ -20,7 +20,7 @@
 enum class FaceZoneType {
     UNKNOWN = -1,
     BOUNDARY = 1,
-    INTERNAL = 2
+    INTERIOR = 2
 };
 
 enum class CellZoneType {

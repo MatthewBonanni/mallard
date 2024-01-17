@@ -86,37 +86,3 @@ void aApbB_to_C(const unsigned int nA,
     Kokkos::View<rtype *> CC(C, nA);
     KokkosBlas::update(a, AA, b, BB, 0.0, CC);
 }
-
-// void linear_combination(const std::vector<StateVector *> & vectors_in,
-//                         StateVector * const vector_out,
-//                         const std::vector<rtype> & coefficients) {
-//     if (vectors_in.size() != coefficients.size()) {
-//         throw std::runtime_error("Number of vectors_in must equal number of coefficients.");
-//     }
-
-//     std::vector<rtype> _coefficients = coefficients;
-
-//     // If the output vector is one of the input vectors, do not zero it out
-//     // so that the input vector is not overwritten before it is used.
-//     // Instead, set the coefficient of the corresponding input vector
-//     // to 0.0 so that it is not added to itself.
-//     bool zero_out = true;
-//     for (int i = 0; i < vectors_in.size(); ++i) {
-//         if (vectors_in[i] == vector_out) {
-//             zero_out = false;
-//             _coefficients[i] = 0.0;
-//             break;
-//         }
-//     }
-    
-//     for (int i = 0; i < vector_out->size(); ++i) {
-//         for (int j = 0; j < (*vector_out)[i].size(); ++j) {
-//             if (zero_out) {
-//                 (*vector_out)[i][j] = 0.0;
-//             }
-//             for (int k = 0; k < vectors_in.size(); ++k) {
-//                 (*vector_out)[i][j] += _coefficients[k] * (*vectors_in[k])[i][j];
-//             }
-//         }
-//     }
-// }

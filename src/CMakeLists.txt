@@ -3,12 +3,6 @@ add_executable(Mallard
     main.cpp
 )
 
-option(${PROJECT_NAME}_CHECK_NAN "Check for NaNs in the solution after each step" OFF)
-message(STATUS "Mallard: Check NaNs: ${${PROJECT_NAME}_CHECK_NAN}")
-if(${PROJECT_NAME}_CHECK_NAN)
-    add_compile_definitions(${PROJECT_NAME}_CHECK_NAN)
-endif()
-
 include(FetchContent)
 FetchContent_Declare(
     tomlplusplus

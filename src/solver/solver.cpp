@@ -182,6 +182,8 @@ void Solver::init_numerics() {
                          std::placeholders::_2,
                          std::placeholders::_3);
     time_integrator->init();
+
+    check_nan = input["numerics"]["check_nan"].value_or(false);
 }
 
 void Solver::init_boundaries() {
@@ -411,9 +413,9 @@ void Solver::do_checks() const {
 }
 
 void Solver::check_fields() const {
-#ifndef Mallard_CHECK_NAN
-    return;
-#endif
+    if (!check_nan) {
+        return;
+    }
 
     bool nan_found = false;
     for (int i = 0; i < mesh->n_cells(); i++) {
