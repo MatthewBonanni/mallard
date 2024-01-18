@@ -78,7 +78,7 @@ void BoundaryPOut::apply(view_3d * face_solution,
         gamma_l = physics->get_gamma();
         sos_l = physics->get_sound_speed_from_pressure_density(p_l, rho_l);
         if (u_mag_l < sos_l) {
-            // \todo Implement case where p_bc < 0.0, use average pressure
+            /** \todo Implement case where p_bc < 0.0, use average pressure */
             p_out = p_bc; // Use the set boundary pressure
         } else {
             p_out = p_l; // Extrapolate pressure

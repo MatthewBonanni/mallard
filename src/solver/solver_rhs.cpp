@@ -42,7 +42,7 @@ void Solver::pre_rhs(view_2d * solution,
 
 void Solver::calc_rhs_source(view_2d * solution,
                              view_2d * rhs) {
-    // \todo Sources not implemented yet.
+    /** \todo Implement source terms. */
 }
 
 void Solver::calc_rhs_interior(view_3d * face_solution,
@@ -53,9 +53,9 @@ void Solver::calc_rhs_interior(view_3d * face_solution,
         State conservatives_r;
         Primitives primitives_l;
         Primitives primitives_r;
-        // \todo Don't reallocate these every time.
+        /** \todo Don't reallocate these every time. */
 
-        // \todo iterate only over interior faces to save time.
+        /** \todo Iterate only over interior faces to save time. */
         if (mesh->cells_of_face(i_face)[1] == -1) {
             // Boundary face
             return;

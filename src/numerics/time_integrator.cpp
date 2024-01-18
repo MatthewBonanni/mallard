@@ -185,7 +185,7 @@ void LSRK4::take_step(const rtype & dt,
                                          view_3d * face_solution,
                                          view_2d * rhs)> * calc_rhs) {
     throw std::runtime_error("LSRK4 not implemented.");
-    // \todo Implement LSRK4
+    /** \todo Implement LSRK4 */
 }
 
 LSSSPRK3::LSSSPRK3() {
@@ -206,5 +206,5 @@ void LSSSPRK3::take_step(const rtype & dt,
                                             view_3d * face_solution,
                                             view_2d * rhs)> * calc_rhs) {
     throw std::runtime_error("LSSSPRK3 not implemented.");
-    // \todo Implement LSSSPRK3
+    /** \todo Implement LSSSPRK3 */
 }

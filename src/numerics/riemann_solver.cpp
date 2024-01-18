@@ -51,7 +51,7 @@ void Roe::calc_flux(State & flux, const NVector & n_unit,
                     const rtype rho_r, const rtype * u_r,
                     const rtype p_r, const rtype gamma_r, const rtype h_r) {
     throw std::runtime_error("Roe Riemann solver not implemented.");
-    // \todo Implement Roe Riemann solver
+    /** \todo Implement Roe Riemann solver */
 }
 
 HLL::HLL() {
@@ -69,7 +69,7 @@ void HLL::calc_flux(State & flux, const NVector & n_unit,
                     const rtype rho_r, const rtype * u_r,
                     const rtype p_r, const rtype gamma_r, const rtype h_r) {
     throw std::runtime_error("HLL Riemann solver not implemented.");
-    // \todo Implement HLL Riemann solver
+    /** \todo Implement HLL Riemann solver */
 }
 
 HLLC::HLLC() {

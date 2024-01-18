@@ -51,7 +51,7 @@ int Solver::init(const std::string& input_file_name) {
 
     std::cout << LOG_SEPARATOR << std::endl;
 
-    // \todo Implement restarts.
+    /** \todo Implement restarts. */
     t = 0.0;
     step = 0;
     t_wall_0 = timer.seconds();
@@ -629,7 +629,7 @@ rtype Solver::calc_spectral_radius() {
         spectral_radius_convective *= 1.37 * geom_factor;
         spectral_radius_acoustic = 1.37 * sqrt(geom_factor * spectral_radius_acoustic);
 
-        // \todo Implement viscous and heat spectral radii
+        /** \todo Implement viscous and heat spectral radii */
         spectral_radius_overall = spectral_radius_convective + spectral_radius_acoustic;
 
         // Update max spectral radius

@@ -35,6 +35,8 @@ void DataWriter::init(const toml::table & input,
     auto variables = input["variables"];
     const toml::array* arr = variables.as_array();
 
+    // \todo Implement write geometries
+
     if (!prefix.has_value()) {
         throw std::runtime_error("DataWriter: prefix not specified.");
     }
