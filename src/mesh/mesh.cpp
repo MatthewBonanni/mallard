@@ -37,6 +37,14 @@ int Mesh::n_cells() const {
     return nx * ny;
 }
 
+int Mesh::n_cells_x() const {
+    return nx;
+}
+
+int Mesh::n_cells_y() const {
+    return ny;
+}
+
 int Mesh::n_nodes() const {
     return (nx + 1) * (ny + 1);
 }

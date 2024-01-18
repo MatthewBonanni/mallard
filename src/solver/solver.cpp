@@ -163,8 +163,8 @@ void Solver::init_numerics() {
 
     if (face_reconstruction_type == FaceReconstructionType::FirstOrder) {
         face_reconstruction = std::make_unique<FirstOrder>();
-    } else if (face_reconstruction_type == FaceReconstructionType::WENO) {
-        face_reconstruction = std::make_unique<WENO>();
+    } else if (face_reconstruction_type == FaceReconstructionType::WENO5_JS) {
+        face_reconstruction = std::make_unique<WENO5_JS>();
     } else {
         // Should never get here due to the enum class.
         throw std::runtime_error("Unknown face reconstruction type: " + face_reconstruction_str + ".");

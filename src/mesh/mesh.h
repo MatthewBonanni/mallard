@@ -68,6 +68,20 @@ class Mesh {
         int n_cells() const;
 
         /**
+         * @brief Get the number of cells in the x-direction.
+         * @return Number of cells in the x-direction.
+         * \todo This is a hack for WENO, remove this
+         */
+        int n_cells_x() const;
+
+        /**
+         * @brief Get the number of cells in the y-direction.
+         * @return Number of cells in the y-direction.
+         * \todo This is a hack for WENO, remove this
+         */
+        int n_cells_y() const;
+
+        /**
          * @brief Get the number of nodes.
          * @return Number of nodes.
          */
