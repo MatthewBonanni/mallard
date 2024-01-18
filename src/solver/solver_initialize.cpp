@@ -17,6 +17,8 @@
 #include <string>
 #include <unordered_map>
 
+#include "exprtk.hpp"
+
 enum class InitType {
     CONSTANT,
     ANALYTICAL
@@ -106,5 +108,83 @@ void Solver::init_solution_constant() {
 }
 
 void Solver::init_solution_analytical() {
-    throw std::runtime_error("Analytical initialization not implemented.");
+    auto u_in = input["initialize"]["u"];
+    std::optional<std::string> p_in = input["initialize"]["p"].value<std::string>();
+    std::optional<std::string> T_in = input["initialize"]["T"].value<std::string>();
+    const toml::array* arr = u_in.as_array();
+
+    if (!u_in) {
+        throw std::runtime_error("Missing u for initialization: analytical.");
+    } else if (arr->size() != 2) {
+        throw std::runtime_error("u must be a 2-element array for initialization: analytical.");
+    }
+
+    if (!p_in.has_value()) {
+        throw std::runtime_error("Missing p for initialization: analytical.");
+    }
+
+    if (!T_in.has_value()) {
+        throw std::runtime_error("Missing T for initialization: analytical.");
+    }
+
+    std::string u_x_str = arr->get_as<std::string>(0)->get();
+    std::string u_y_str = arr->get_as<std::string>(1)->get();
+    std::string p_str = p_in.value();
+    std::string T_str = T_in.value();
+
+    rtype x, y;
+
+    exprtk::symbol_table<rtype> symbol_table;
+    symbol_table.add_variable("x", x);
+    symbol_table.add_variable("y", y);
+    symbol_table.add_constants();
+
+    exprtk::expression<rtype> u_x_expr;
+    exprtk::expression<rtype> u_y_expr;
+    exprtk::expression<rtype> p_expr;
+    exprtk::expression<rtype> T_expr;
+
+    u_x_expr.register_symbol_table(symbol_table);
+    u_y_expr.register_symbol_table(symbol_table);
+    p_expr.register_symbol_table(symbol_table);
+    T_expr.register_symbol_table(symbol_table);
+
+    exprtk::parser<rtype> parser;
+    parser.compile(u_x_str, u_x_expr);
+    parser.compile(u_y_str, u_y_expr);
+    parser.compile(p_str, p_expr);
+    parser.compile(T_str, T_expr);
+
+    rtype u_x, u_y, p, T;
+    rtype rho, e, E, h, rhou_x, rhou_y, rhoE;
+
+    for (int i = 0; i < mesh->n_cells(); ++i) {
+        x = mesh->cell_coords(i)[0];
+        y = mesh->cell_coords(i)[1];
+
+        u_x = u_x_expr.value();
+        u_y = u_y_expr.value();
+        p = p_expr.value();
+        T = T_expr.value();
+
+        rho = physics->get_density_from_pressure_temperature(p, T);
+        e = physics->get_energy_from_temperature(T);
+        E = e + 0.5 * (u_x * u_x +
+                       u_y * u_y);
+        h = e + p / rho;
+        rhou_x = rho * u_x;
+        rhou_y = rho * u_y;
+        rhoE = rho * E;
+
+        conservatives(i, 0) = rho;
+        conservatives(i, 1) = rhou_x;
+        conservatives(i, 2) = rhou_y;
+        conservatives(i, 3) = rhoE;
+
+        primitives(i, 0) = u_x;
+        primitives(i, 1) = u_y;
+        primitives(i, 2) = p;
+        primitives(i, 3) = T;
+        primitives(i, 4) = h;
+    }
 }

@@ -20,21 +20,21 @@
 enum class MeshType {
     UNKNOWN = -1,
     FILE = 1,
-    CART = 2,
+    CARTESIAN = 2,
     WEDGE = 3
 };
 
 static const std::unordered_map<std::string, MeshType> MESH_TYPES = {
     {"unknown", MeshType::UNKNOWN},
     {"file", MeshType::FILE},
-    {"cart", MeshType::CART},
+    {"cartesian", MeshType::CARTESIAN},
     {"wedge", MeshType::WEDGE}
 };
 
 static const std::unordered_map<MeshType, std::string> MESH_NAMES = {
     {MeshType::UNKNOWN, "unknown"},
     {MeshType::FILE, "file"},
-    {MeshType::CART, "cart"},
+    {MeshType::CARTESIAN, "cart"},
     {MeshType::WEDGE, "wedge"}
 };
 

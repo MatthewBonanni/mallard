@@ -89,7 +89,7 @@ void Solver::init_mesh() {
     if (type == MeshType::FILE) {
         std::string filename = input["mesh"]["filename"].value_or("mesh.msh");
         throw std::runtime_error("MeshType::FILE not implemented.");
-    } else if (type == MeshType::CART) {
+    } else if (type == MeshType::CARTESIAN) {
         int Nx = input["mesh"]["Nx"].value_or(100);
         int Ny = input["mesh"]["Ny"].value_or(100);
         rtype Lx = input["mesh"]["Lx"].value_or(1.0);
