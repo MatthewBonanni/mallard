@@ -54,6 +54,7 @@ int Solver::init(const std::string& input_file_name) {
     // \todo Implement restarts.
     t = 0.0;
     step = 0;
+    t_wall_0 = timer.seconds();
 
     init_mesh();
     init_physics();
@@ -292,11 +293,6 @@ void Solver::init_run_parameters() {
         cfl = cfl_in.value();
     }
 
-    // \todo Implement t_wall_stop
-    if (t_wall_stop_in.has_value()) {
-        throw std::runtime_error("t_wall_stop not implemented.");
-    }
-
     n_steps = n_steps_in.value_or(-1);
     t_stop = t_stop_in.value_or(-1.0);
     t_wall_stop = t_wall_stop_in.value_or(-1.0);
@@ -375,8 +371,6 @@ int Solver::run() {
         write_data();
     }
 
-    // \todo implement profiling
-
     write_data(true);
 
     std::cout << LOG_SEPARATOR << std::endl;
@@ -389,16 +383,31 @@ int Solver::run() {
 bool Solver::done() const {
     bool done_steps = 0;
     bool done_t = 0;
+    bool done_t_wall = 0;
 
-    if (step > 0) {
+    if (n_steps > 0) {
         done_steps = (step >= n_steps);
+        if (done_steps) {
+            std::cout << "Stop condition reached: step = " << step << std::endl;
+        }
     }
 
-    if (done_t > 0) {
+    if (t_stop > 0) {
         done_t = (t >= t_stop);
+        if (done_t) {
+            std::cout << "Stop condition reached: t = " << t << std::endl;
+        }
     }
 
-    return done_steps || done_t;
+    rtype t_wall = timer.seconds() - t_wall_0;
+    if (t_wall_stop > 0) {
+        done_t_wall = (t_wall >= t_wall_stop);
+        if (done_t_wall) {
+            std::cout << "Stop condition reached: t_wall = " << t_wall << std::endl;
+        }
+    }
+
+    return done_steps || done_t || done_t_wall;
 }
 
 void Solver::print_step_info() const {

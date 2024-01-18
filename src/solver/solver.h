@@ -256,7 +256,6 @@ class Solver {
         // Outputs
         std::vector<Data> data;
         std::vector<std::unique_ptr<DataWriter>> data_writers;
-        // \todo convert to shared_ptr
 };
 
 #endif // SOLVER_H

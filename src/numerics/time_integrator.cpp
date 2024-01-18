@@ -171,7 +171,6 @@ LSRK4::LSRK4() {
     type = TimeIntegratorType::LSRK4;
     n_solution_vectors = 2;
     n_rhs_vectors = 4;
-    // \todo check these
 }
 
 LSRK4::~LSRK4() {
@@ -186,13 +185,13 @@ void LSRK4::take_step(const rtype & dt,
                                          view_3d * face_solution,
                                          view_2d * rhs)> * calc_rhs) {
     throw std::runtime_error("LSRK4 not implemented.");
+    // \todo Implement LSRK4
 }
 
 LSSSPRK3::LSSSPRK3() {
     type = TimeIntegratorType::LSSSPRK3;
     n_solution_vectors = 2;
     n_rhs_vectors = 3;
-    // \todo check these
 }
 
 LSSSPRK3::~LSSSPRK3() {
@@ -207,4 +206,5 @@ void LSSSPRK3::take_step(const rtype & dt,
                                             view_3d * face_solution,
                                             view_2d * rhs)> * calc_rhs) {
     throw std::runtime_error("LSSSPRK3 not implemented.");
+    // \todo Implement LSSSPRK3
 }
