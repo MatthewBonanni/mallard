@@ -22,6 +22,7 @@
 #include "mesh.h"
 #include "boundary.h"
 #include "face_reconstruction.h"
+#include "riemann_solver.h"
 #include "time_integrator.h"
 #include "physics.h"
 #include "data_writer.h"
@@ -233,6 +234,7 @@ class Solver {
         std::shared_ptr<Mesh> mesh;
         std::vector<std::unique_ptr<Boundary>> boundaries;
         std::unique_ptr<FaceReconstruction> face_reconstruction;
+        std::shared_ptr<RiemannSolver> riemann_solver;
         std::unique_ptr<TimeIntegrator> time_integrator;
         std::shared_ptr<Physics> physics;
 

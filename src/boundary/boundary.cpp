@@ -36,6 +36,10 @@ void Boundary::set_physics(std::shared_ptr<Physics> physics) {
     this->physics = physics;
 }
 
+void Boundary::set_riemann_solver(std::shared_ptr<RiemannSolver> riemann_solver) {
+    this->riemann_solver = riemann_solver;
+}
+
 void Boundary::print() {
     std::cout << LOG_SEPARATOR << std::endl;
     std::cout << "Boundary: " << zone->get_name() << std::endl;

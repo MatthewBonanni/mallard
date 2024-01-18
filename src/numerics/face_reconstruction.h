@@ -32,6 +32,9 @@ static const std::unordered_map<FaceReconstructionType, std::string> FACE_RECONS
     {FaceReconstructionType::WENO, "WENO"}
 };
 
+/**
+ * @brief Face reconstruction class.
+ */
 class FaceReconstruction {
     public:
         /**
@@ -43,6 +46,16 @@ class FaceReconstruction {
          * @brief Destroy the Face Reconstruction object
          */
         virtual ~FaceReconstruction();
+
+        /**
+         * @brief Initialize the face reconstruction.
+         */
+        virtual void init();
+
+        /**
+         * @brief Print the face reconstruction.
+         */
+        void print() const;
 
         /**
          * @brief Set the cell conservatives.

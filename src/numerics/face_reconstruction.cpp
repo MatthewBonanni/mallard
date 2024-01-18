@@ -21,6 +21,16 @@ FaceReconstruction::~FaceReconstruction() {
     std::cout << "Destroying face reconstruction: " << FACE_RECONSTRUCTION_NAMES.at(type) << std::endl;
 }
 
+void FaceReconstruction::init() {
+    print();
+}
+
+void FaceReconstruction::print() const {
+    std::cout << LOG_SEPARATOR << std::endl;
+    std::cout << "Face reconstruction: " << FACE_RECONSTRUCTION_NAMES.at(type) << std::endl;
+    std::cout << LOG_SEPARATOR << std::endl;
+}
+
 void FaceReconstruction::set_cell_conservatives(view_2d * cell_conservatives) {
     this->cell_conservatives = cell_conservatives;
 }

@@ -18,6 +18,7 @@
 #include "zone.h"
 #include "mesh.h"
 #include "physics.h"
+#include "riemann_solver.h"
 
 enum class BoundaryType {
     SYMMETRY = 1,
@@ -71,6 +72,12 @@ class Boundary {
         void set_physics(std::shared_ptr<Physics> physics);
 
         /**
+         * @brief Set the Riemann solver.
+         * @param riemann_solver Pointer to the Riemann solver.
+         */
+        void set_riemann_solver(std::shared_ptr<RiemannSolver> riemann_solver);
+
+        /**
          * @brief Print the boundary.
          */
         virtual void print();
@@ -94,6 +101,7 @@ class Boundary {
         std::shared_ptr<Mesh> mesh;
         BoundaryType type;
         std::shared_ptr<Physics> physics;
+        std::shared_ptr<RiemannSolver> riemann_solver;
     private:
 };
 

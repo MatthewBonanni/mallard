@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <string>
 
+#include <Kokkos_Core.hpp>
 #include <toml++/toml.h>
 
 #include "common.h"
@@ -58,6 +59,7 @@ class Physics {
          * @brief Get gamma.
          * @return Gamma
          */
+        KOKKOS_INLINE_FUNCTION
         virtual rtype get_gamma() const = 0;
 
         /**
@@ -65,6 +67,7 @@ class Physics {
          * @param T Temperature
          * @return Energy
          */
+        KOKKOS_INLINE_FUNCTION
         virtual rtype get_energy_from_temperature(const rtype & T) const = 0;
 
         /**
@@ -72,6 +75,7 @@ class Physics {
          * @param e Energy
          * @return Temperature
          */
+        KOKKOS_INLINE_FUNCTION
         virtual rtype get_temperature_from_energy(const rtype & e) const = 0;
 
         /**
@@ -80,6 +84,7 @@ class Physics {
          * @param T Temperature
          * @return Density
          */
+        KOKKOS_INLINE_FUNCTION
         virtual rtype get_density_from_pressure_temperature(const rtype & p,
                                                             const rtype & T) const = 0;
         
@@ -88,6 +93,7 @@ class Physics {
          * @param p Pressure
          * @param rho Density
          */
+        KOKKOS_INLINE_FUNCTION
         virtual rtype get_sound_speed_from_pressure_density(const rtype & p,
                                                             const rtype & rho) const = 0;
         
@@ -96,43 +102,9 @@ class Physics {
          * @param primitives Primitive variables
          * @param conservatives Conservative variables
          */
+        KOKKOS_INLINE_FUNCTION
         virtual void compute_primitives_from_conservatives(Primitives & primitives,
                                                            const State & conservatives) const = 0;
-
-        /**
-         * @brief Calculate the Euler flux
-         * @param flux Flux vector
-         * @param n_unit Unit normal vector
-         * @param rho_l Left density
-         * @param u_l Left velocity
-         * @param p_l Left pressure
-         * @param gamma_l Left gamma
-         * @param h_l Left enthalpy
-         * @param rho_r Right density
-         * @param u_r Right velocity
-         * @param p_r Right pressure
-         * @param gamma_r Right gamma
-         * @param h_r Right enthalpy
-         */
-        void calc_euler_flux(State & flux, const NVector & n_unit,
-                             const rtype rho_l, const NVector & u_l,
-                             const rtype p_l, const rtype gamma_l, const rtype h_l,
-                             const rtype rho_r, const NVector & u_r,
-                             const rtype p_r, const rtype gamma_r, const rtype h_r);
-
-        /**
-         * @brief Calculate the Euler flux (alias for above)
-         * @param flux Flux vector
-         * @param n_unit Unit normal vector
-         * @param rho_l Left density
-         * @param rho_r Right density
-         * @param primitives_l Left primitive variables
-         * @param primitives_r Right primitive variables
-         */
-        void calc_euler_flux(State & flux, const NVector & n_unit,
-                             const rtype rho_l, const rtype rho_r,
-                             const Primitives & primitives_l,
-                             const Primitives & primitives_r);
 
         /**
          * @brief Calculate the diffusive flux
@@ -182,6 +154,7 @@ class Euler : public Physics {
          * @brief Get gamma
          * @return gamma
          */
+        KOKKOS_INLINE_FUNCTION
         rtype get_gamma() const override { return gamma; }
 
         /**
@@ -189,6 +162,7 @@ class Euler : public Physics {
          * @param T Temperature
          * @return Energy
          */
+        KOKKOS_INLINE_FUNCTION
         rtype get_energy_from_temperature(const rtype & T) const override;
 
         /**
@@ -196,6 +170,7 @@ class Euler : public Physics {
          * @param e Energy
          * @return Temperature
          */
+        KOKKOS_INLINE_FUNCTION
         rtype get_temperature_from_energy(const rtype & e) const override;
 
         /**
@@ -204,6 +179,7 @@ class Euler : public Physics {
          * @param T Temperature
          * @return Density
          */
+        KOKKOS_INLINE_FUNCTION
         rtype get_density_from_pressure_temperature(const rtype & p,
                                                     const rtype & T) const override;
         
@@ -212,6 +188,7 @@ class Euler : public Physics {
          * @param p Pressure
          * @param rho Density
          */
+        KOKKOS_INLINE_FUNCTION
         rtype get_sound_speed_from_pressure_density(const rtype & p,
                                                     const rtype & rho) const override;
 
@@ -220,6 +197,7 @@ class Euler : public Physics {
          * @param primitives Primitive variables
          * @param conservatives Conservative variables
          */
+        KOKKOS_INLINE_FUNCTION
         void compute_primitives_from_conservatives(Primitives & primitives,
                                                    const State & conservatives) const override;
 

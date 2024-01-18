@@ -133,6 +133,7 @@ void Solver::init_numerics() {
     std::cout << "Initializing numerics..." << std::endl;
 
     std::string face_reconstruction_str = input["numerics"]["face_reconstruction"].value_or("FO");
+    std::string riemann_solver_str = input["numerics"]["riemann_solver"].value_or("HLLC");
     std::string time_integrator_str = input["numerics"]["time_integrator"].value_or("LSSSPRK3");
 
     FaceReconstructionType face_reconstruction_type;
@@ -143,6 +144,13 @@ void Solver::init_numerics() {
         face_reconstruction_type = it_face->second;
     }
 
+    RiemannSolverType riemann_solver_type;
+    typename std::unordered_map<std::string, RiemannSolverType>::const_iterator it_riemann = RIEMANN_SOLVER_TYPES.find(riemann_solver_str);
+    if (it_riemann == RIEMANN_SOLVER_TYPES.end()) {
+        throw std::runtime_error("Unknown Riemann solver type: " + riemann_solver_str + ".");
+    } else {
+        riemann_solver_type = it_riemann->second;
+    }
 
     TimeIntegratorType time_integrator_type;
     typename std::unordered_map<std::string, TimeIntegratorType>::const_iterator it_time = TIME_INTEGRATOR_TYPES.find(time_integrator_str);
@@ -159,6 +167,17 @@ void Solver::init_numerics() {
     } else {
         // Should never get here due to the enum class.
         throw std::runtime_error("Unknown face reconstruction type: " + face_reconstruction_str + ".");
+    }
+
+    if (riemann_solver_type == RiemannSolverType::Roe) {
+        riemann_solver = std::make_unique<Roe>();
+    } else if (riemann_solver_type == RiemannSolverType::HLL) {
+        riemann_solver = std::make_unique<HLL>();
+    } else if (riemann_solver_type == RiemannSolverType::HLLC) {
+        riemann_solver = std::make_unique<HLLC>();
+    } else {
+        // Should never get here due to the enum class.
+        throw std::runtime_error("Unknown Riemann solver type: " + face_reconstruction_str + ".");
     }
 
     if (time_integrator_type == TimeIntegratorType::FE) {
@@ -179,6 +198,9 @@ void Solver::init_numerics() {
     face_reconstruction->set_mesh(mesh);
     face_reconstruction->set_cell_conservatives(&conservatives);
     face_reconstruction->set_face_conservatives(&face_conservatives);
+    face_reconstruction->init();
+
+    riemann_solver->init();
 
     rhs_func = std::bind(&Solver::calc_rhs,
                          this,
@@ -234,6 +256,7 @@ void Solver::init_boundaries() {
         boundaries.back()->set_zone(mesh->get_face_zone(*name));
         boundaries.back()->set_mesh(mesh);
         boundaries.back()->set_physics(physics);
+        boundaries.back()->set_riemann_solver(riemann_solver);
         boundaries.back()->init(bound);
     }
 }

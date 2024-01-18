@@ -76,9 +76,11 @@ void Solver::calc_rhs_interior(view_3d * face_solution,
         physics->compute_primitives_from_conservatives(primitives_r, conservatives_r);
 
         // Calculate flux
-        physics->calc_euler_flux(flux, n_unit,
-                                 conservatives_l[0], conservatives_r[0],
-                                 primitives_l, primitives_r);
+        riemann_solver->calc_flux(flux, n_unit,
+                                  conservatives_l[0], primitives_l.data(),
+                                  primitives_l[2], physics->get_gamma(), primitives_l[4],
+                                  conservatives_r[0], primitives_r.data(),
+                                  primitives_r[2], physics->get_gamma(), primitives_r[4]);
         
         // Add flux to RHS
         for (int j = 0; j < 4; j++) {

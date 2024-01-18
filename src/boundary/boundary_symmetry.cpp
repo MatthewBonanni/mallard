@@ -65,10 +65,11 @@ void BoundarySymmetry::apply(view_3d * face_solution,
         primitives_r[1] = u_r[1];
 
         // Calculate flux
-        physics->calc_euler_flux(flux, n_unit,
-                                 conservatives_l[0],
-                                 conservatives_l[0],
-                                 primitives_l, primitives_r);
+        riemann_solver->calc_flux(flux, n_unit,
+                                  conservatives_l[0], primitives_l.data(),
+                                  primitives_l[2], physics->get_gamma(), primitives_l[4],
+                                  conservatives_l[0], primitives_r.data(),
+                                  primitives_r[2], physics->get_gamma(), primitives_r[4]);
 
         // Add flux to RHS
         for (int j = 0; j < 4; j++) {

@@ -2,6 +2,7 @@
 add_executable(MallardTest
     test_main.cpp
     common_math_test.cpp
+    riemann_solver_test.cpp
     time_integrator_test.cpp
     physics_test.cpp
 )

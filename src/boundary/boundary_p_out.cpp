@@ -92,9 +92,9 @@ void BoundaryPOut::apply(view_3d * face_solution,
         e_bc = physics->get_energy_from_temperature(T_bc);
         h_bc = e_bc + p_out / rho_bc;
 
-        physics->calc_euler_flux(flux, n_unit,
-                                 rho_l, u_l, p_l, gamma_l, h_l,
-                                 rho_bc, u_bc, p_out, gamma_l, h_bc);
+        riemann_solver->calc_flux(flux, n_unit,
+                                  rho_l, u_l.data(), p_l, gamma_l, h_l,
+                                  rho_bc, u_bc.data(), p_out, gamma_l, h_bc);
 
         // Add flux to RHS
         for (int j = 0; j < 4; j++) {

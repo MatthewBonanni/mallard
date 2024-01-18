@@ -3,6 +3,7 @@ set(LIB_NAME NumericsLib)
 set(LIB_SRCS
     time_integrator.cpp
     face_reconstruction.cpp
+    riemann_solver.cpp
 )
 
 # Add the library
