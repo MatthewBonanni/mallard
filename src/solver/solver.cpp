@@ -268,8 +268,8 @@ void Solver::init_run_parameters() {
     std::optional<rtype> dt_in = input["run"]["dt"].value<rtype>();
     std::optional<rtype> cfl_in = input["run"]["cfl"].value<rtype>();
     std::optional<int> n_steps_in = input["run"]["n_steps"].value<int>();
-    std::optional<rtype> t_stop_in = input["run"]["t_stop"].value<int>();
-    std::optional<rtype> t_wall_stop_in = input["run"]["t_wall_stop"].value<int>();
+    std::optional<rtype> t_stop_in = input["run"]["t_stop"].value<rtype>();
+    std::optional<rtype> t_wall_stop_in = input["run"]["t_wall_stop"].value<rtype>();
 
     if (!dt_in.has_value() && !cfl_in.has_value()) {
         throw std::runtime_error("Either dt or cfl must be specified.");

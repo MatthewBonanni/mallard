@@ -1,12 +1,14 @@
 [run]
-n_steps = 10000
+n_steps = 100000
+# t_stop = 1.0
+# t_wall_stop = 3.0
 # dt = 1.0e-5
-cfl = 1.0
+cfl = 0.1
 
 [mesh]
 type = "wedge"
-Nx = 60
-Ny = 20
+Nx = 150
+Ny = 50
 Lx = 4
 Ly = 1.5
 
@@ -40,7 +42,9 @@ type = "symmetry"
 
 [numerics]
 face_reconstruction = "FO"
+riemann_solver = "HLLC"
 time_integrator = "SSPRK3"
+check_nan = true
 
 [physics]
 type = "euler"
@@ -57,4 +61,4 @@ prefix = "./solut/all/wedge_all"
 format = "vtu"
 geometry = "all"
 interval = 1000
-variables = ["CFL", "RHO", "RHOU_X", "RHOU_Y", "RHOE", "U_X", "U_Y", "P", "T", "H"]
+variables = ["CFL", "RHO", "RHOU_X", "RHOU_Y", "RHOE", "U_X",  "U_Y", "P", "T", "H"]

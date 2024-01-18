@@ -109,6 +109,7 @@ void Solver::init_solution_constant() {
 
 void Solver::init_solution_analytical() {
     auto u_in = input["initialize"]["u"];
+    std::optional<std::string> rho_in = input["initialize"]["rho"].value<std::string>();
     std::optional<std::string> p_in = input["initialize"]["p"].value<std::string>();
     std::optional<std::string> T_in = input["initialize"]["T"].value<std::string>();
     const toml::array* arr = u_in.as_array();
@@ -119,18 +120,18 @@ void Solver::init_solution_analytical() {
         throw std::runtime_error("u must be a 2-element array for initialization: analytical.");
     }
 
-    if (!p_in.has_value()) {
-        throw std::runtime_error("Missing p for initialization: analytical.");
+    int n_specified = rho_in.has_value() + p_in.has_value() + T_in.has_value();
+
+    if (n_specified != 2) {
+        throw std::runtime_error("Exactly two of rho, p, and T must be specified for initialization: analytical.");
     }
 
-    if (!T_in.has_value()) {
-        throw std::runtime_error("Missing T for initialization: analytical.");
-    }
-
-    std::string u_x_str = arr->get_as<std::string>(0)->get();
-    std::string u_y_str = arr->get_as<std::string>(1)->get();
-    std::string p_str = p_in.value();
-    std::string T_str = T_in.value();
+    std::string u_x_str, u_y_str, rho_str, p_str, T_str;
+    u_x_str = arr->get_as<std::string>(0)->get();
+    u_y_str = arr->get_as<std::string>(1)->get();
+    if (rho_in.has_value()) rho_str = rho_in.value();
+    if (p_in.has_value()) p_str = p_in.value();
+    if (T_in.has_value()) T_str = T_in.value();
 
     rtype x, y;
 
@@ -139,21 +140,20 @@ void Solver::init_solution_analytical() {
     symbol_table.add_variable("y", y);
     symbol_table.add_constants();
 
-    exprtk::expression<rtype> u_x_expr;
-    exprtk::expression<rtype> u_y_expr;
-    exprtk::expression<rtype> p_expr;
-    exprtk::expression<rtype> T_expr;
+    exprtk::expression<rtype> u_x_expr, u_y_expr, rho_expr, p_expr, T_expr;
 
     u_x_expr.register_symbol_table(symbol_table);
     u_y_expr.register_symbol_table(symbol_table);
-    p_expr.register_symbol_table(symbol_table);
-    T_expr.register_symbol_table(symbol_table);
+    if (rho_in.has_value()) rho_expr.register_symbol_table(symbol_table);
+    if (p_in.has_value()) p_expr.register_symbol_table(symbol_table);
+    if (T_in.has_value()) T_expr.register_symbol_table(symbol_table);
 
     exprtk::parser<rtype> parser;
     parser.compile(u_x_str, u_x_expr);
     parser.compile(u_y_str, u_y_expr);
-    parser.compile(p_str, p_expr);
-    parser.compile(T_str, T_expr);
+    if (rho_in.has_value()) parser.compile(rho_str, rho_expr);
+    if (p_in.has_value()) parser.compile(p_str, p_expr);
+    if (T_in.has_value()) parser.compile(T_str, T_expr);
 
     rtype u_x, u_y, p, T;
     rtype rho, e, E, h, rhou_x, rhou_y, rhoE;
@@ -164,10 +164,20 @@ void Solver::init_solution_analytical() {
 
         u_x = u_x_expr.value();
         u_y = u_y_expr.value();
-        p = p_expr.value();
-        T = T_expr.value();
+        if (rho_in.has_value()) rho = rho_expr.value();
+        if (p_in.has_value()) p = p_expr.value();
+        if (T_in.has_value()) T = T_expr.value();
 
-        rho = physics->get_density_from_pressure_temperature(p, T);
+        if (rho_in.has_value() && p_in.has_value()) {
+            T = physics->get_temperature_from_density_pressure(rho, p);
+        } else if (rho_in.has_value() && T_in.has_value()) {
+            p = physics->get_pressure_from_density_temperature(rho, T);
+        } else if (p_in.has_value() && T_in.has_value()) {
+            rho = physics->get_density_from_pressure_temperature(p, T);
+        } else {
+            throw std::runtime_error("Exactly two of rho, p, and T must be specified for initialization: analytical.");
+        }
+
         e = physics->get_energy_from_temperature(T);
         E = e + 0.5 * (u_x * u_x +
                        u_y * u_y);

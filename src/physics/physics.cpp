@@ -113,6 +113,18 @@ rtype Euler::get_density_from_pressure_temperature(const rtype & p,
 }
 
 KOKKOS_INLINE_FUNCTION
+rtype Euler::get_temperature_from_density_pressure(const rtype & rho,
+                                                   const rtype & p) const {
+    return p / (rho * R);
+}
+
+KOKKOS_INLINE_FUNCTION
+rtype Euler::get_pressure_from_density_temperature(const rtype & rho,
+                                                   const rtype & T) const {
+    return rho * R * T;
+}
+
+KOKKOS_INLINE_FUNCTION
 rtype Euler::get_sound_speed_from_pressure_density(const rtype & p,
                                                    const rtype & rho) const {
     return std::sqrt(gamma * p / rho);

@@ -89,6 +89,26 @@ class Physics {
                                                             const rtype & T) const = 0;
         
         /**
+         * @brief Get temperature from density and pressure.
+         * @param rho Density
+         * @param p Pressure
+         * @return Temperature
+         */
+        KOKKOS_INLINE_FUNCTION
+        virtual rtype get_temperature_from_density_pressure(const rtype & rho,
+                                                            const rtype & p) const = 0;
+        
+        /**
+         * @brief Get pressure from density and temperature.
+         * @param rho Density
+         * @param T Temperature
+         * @return Pressure
+         */
+        KOKKOS_INLINE_FUNCTION
+        virtual rtype get_pressure_from_density_temperature(const rtype & rho,
+                                                            const rtype & T) const = 0;
+        
+        /**
          * @brief Get sound speed from pressure and density.
          * @param p Pressure
          * @param rho Density
@@ -181,6 +201,26 @@ class Euler : public Physics {
          */
         KOKKOS_INLINE_FUNCTION
         rtype get_density_from_pressure_temperature(const rtype & p,
+                                                    const rtype & T) const override;
+        
+        /**
+         * @brief Get temperature from density and pressure.
+         * @param rho Density
+         * @param p Pressure
+         * @return Temperature
+         */
+        KOKKOS_INLINE_FUNCTION
+        rtype get_temperature_from_density_pressure(const rtype & rho,
+                                                    const rtype & p) const override;
+        
+        /**
+         * @brief Get pressure from density and temperature.
+         * @param rho Density
+         * @param T Temperature
+         * @return Pressure
+         */
+        KOKKOS_INLINE_FUNCTION
+        rtype get_pressure_from_density_temperature(const rtype & rho,
                                                     const rtype & T) const override;
         
         /**
