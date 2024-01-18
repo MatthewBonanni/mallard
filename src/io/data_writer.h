@@ -1,7 +1,7 @@
 /**
  * @file data_writer.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief DatWriter class declaration.
+ * @brief DataWriter class declaration.
  * @version 0.1
  * @date 2024-01-01
  * 
