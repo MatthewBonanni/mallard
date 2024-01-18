@@ -13,6 +13,7 @@
 #define RIEMANN_SOLVER_H
 
 #include <Kokkos_Core.hpp>
+#include <toml++/toml.h>
 
 #include "common_typedef.h"
 
@@ -52,7 +53,7 @@ class RiemannSolver {
         /**
          * @brief Initialize the Riemann solver.
          */
-        virtual void init();
+        virtual void init(const toml::table & input);
 
         /**
          * @brief Print the Riemann solver.
@@ -82,6 +83,7 @@ class RiemannSolver {
                                const rtype p_r, const rtype gamma_r, const rtype h_r) = 0;
     protected:
         RiemannSolverType type;
+        bool check_nan;
     private:
 };
 

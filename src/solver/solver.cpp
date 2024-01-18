@@ -204,7 +204,7 @@ void Solver::init_numerics() {
     face_reconstruction->set_face_conservatives(&face_conservatives);
     face_reconstruction->init();
 
-    riemann_solver->init();
+    riemann_solver->init(input);
 
     rhs_func = std::bind(&Solver::calc_rhs,
                          this,
@@ -492,22 +492,22 @@ void Solver::check_fields() const {
         }
 
         if (nan_found) {
-            std::string msg;
-            msg += "NaN found in solution.\n";
-            msg += "t: " + std::to_string(t) + "\n";
-            msg += "step: " + std::to_string(step) + "\n";
-            msg += "i_cell: " + std::to_string(i) + "\n";
-            msg += "> x: " + std::to_string(mesh->cell_coords(i)[0]) + "\n";
-            msg += "> y: " + std::to_string(mesh->cell_coords(i)[1]) + "\n";
-            msg += "conservatives:\n";
+            std::stringstream msg;
+            msg << "NaN found in solution." << std::endl;
+            msg << "t: " << t << std::endl;
+            msg << "step: " << step << std::endl;
+            msg << "i_cell: " << i << std::endl;
+            msg << "> x: " << mesh->cell_coords(i)[0] << std::endl;
+            msg << "> y: " << mesh->cell_coords(i)[1] << std::endl;
+            msg << "conservatives:" << std::endl;
             for (int j = 0; j < N_CONSERVATIVE; j++) {
-                msg += "> " + CONSERVATIVE_NAMES[j] + ": " + std::to_string(conservatives(i, j)) + "\n";
+                msg << "> " << CONSERVATIVE_NAMES[j] << ": " << conservatives(i, j) << std::endl;
             }
-            msg += "primitives:\n";
+            msg << "primitives:" << std::endl;
             for (int j = 0; j < N_PRIMITIVE; j++) {
-                msg += "> " + PRIMITIVE_NAMES[j] + ": " + std::to_string(primitives(i, j)) + "\n";
+                msg << "> " << PRIMITIVE_NAMES[j] << ": " << primitives(i, j) << std::endl;
             }
-            throw std::runtime_error(msg);
+            throw std::runtime_error(msg.str());
         }
     }
 }

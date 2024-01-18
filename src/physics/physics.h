@@ -109,6 +109,16 @@ class Physics {
                                                             const rtype & T) const = 0;
         
         /**
+         * @brief Get pressure from density and energy.
+         * @param rho Density
+         * @param e Energy
+         * @return Pressure
+         */
+        KOKKOS_INLINE_FUNCTION
+        virtual rtype get_pressure_from_density_energy(const rtype & rho,
+                                                       const rtype & e) const = 0;
+        
+        /**
          * @brief Get sound speed from pressure and density.
          * @param p Pressure
          * @param rho Density
@@ -132,6 +142,7 @@ class Physics {
         virtual void calc_diffusive_flux(State & flux) = 0;
     protected:
         PhysicsType type;
+        std::array<rtype, 2> p_bounds;
     private:
 };
 
@@ -222,6 +233,16 @@ class Euler : public Physics {
         KOKKOS_INLINE_FUNCTION
         rtype get_pressure_from_density_temperature(const rtype & rho,
                                                     const rtype & T) const override;
+        
+        /**
+         * @brief Get pressure from density and energy.
+         * @param rho Density
+         * @param e Energy
+         * @return Pressure
+         */
+        KOKKOS_INLINE_FUNCTION
+        rtype get_pressure_from_density_energy(const rtype & rho,
+                                               const rtype & e) const override;
         
         /**
          * @brief Get sound speed from pressure and density.

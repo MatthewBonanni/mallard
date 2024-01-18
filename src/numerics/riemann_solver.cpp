@@ -26,13 +26,15 @@ RiemannSolver::~RiemannSolver() {
     std::cout << "Destroying Riemann solver: " << RIEMANN_SOLVER_NAMES.at(type) << std::endl;
 }
 
-void RiemannSolver::init() {
+void RiemannSolver::init(const toml::table & input) {
+    check_nan = input["numerics"]["check_nan_flux"].value_or(false);
     print();
 }
 
 void RiemannSolver::print() const {
     std::cout << LOG_SEPARATOR << std::endl;
     std::cout << "Riemann solver: " << RIEMANN_SOLVER_NAMES.at(type) << std::endl;
+    std::cout << "> Check for NaN flux: " << (check_nan ? "true" : "false") << std::endl;
     std::cout << LOG_SEPARATOR << std::endl;
 }
 
@@ -148,6 +150,40 @@ void HLLC::calc_flux(State & flux, const NVector & n_unit,
             flux[1] = rho_r * u_r[0] * u_r_n + p_r * n_unit[0];
             flux[2] = rho_r * u_r[1] * u_r_n + p_r * n_unit[1];
             flux[3] = (rhoe_r + p_r) * u_r_n;
+        }
+    }
+
+    if (check_nan) {
+        bool nan_detected = false;
+        for (int i = 0; i < N_CONSERVATIVE; i++) {
+            if (std::isnan(flux[i])) {
+                nan_detected = true;
+            }
+        }
+
+        if (nan_detected) {
+            std::stringstream msg;
+            msg << "HLLC::calc_flux(): NaN flux detected." << std::endl;
+            msg << "> n_unit: " << n_unit[0] << ", " << n_unit[1] << std::endl;
+            msg << "> rho_l: " << rho_l << std::endl;
+            msg << "> u_l: " << u_l[0] << ", " << u_l[1] << std::endl;
+            msg << "> p_l: " << p_l << std::endl;
+            msg << "> gamma_l: " << gamma_l << std::endl;
+            msg << "> h_l: " << h_l << std::endl;
+            msg << "> rho_r: " << rho_r << std::endl;
+            msg << "> u_r: " << u_r[0] << ", " << u_r[1] << std::endl;
+            msg << "> p_r: " << p_r << std::endl;
+            msg << "> gamma_r: " << gamma_r << std::endl;
+            msg << "> h_r: " << h_r << std::endl;
+            msg << "> s_l: " << s_l << std::endl;
+            msg << "> s_r: " << s_r << std::endl;
+            msg << "> s_m: " << s_m << std::endl;
+            msg << "> p_star: " << p_star << std::endl;
+            msg << "> flux: " << std::endl;
+            for (int i = 0; i < N_CONSERVATIVE; i++) {
+                msg << "> " << i << ": " << flux[i] << std::endl;
+            }
+            throw std::runtime_error(msg.str());
         }
     }
 }
