@@ -84,13 +84,6 @@ void WENO3_JS::calc_face_values(view_2d * solution,
         int i_cell_l = mesh->cells_of_face(i_face)[0];
         int i_cell_r = mesh->cells_of_face(i_face)[1];
 
-        // if (i_cell_l == 7 || i_cell_r == 7) {
-        //     std::cout << "--------------------------" << std::endl;
-        //     std::cout << "i_face = " << i_face << std::endl;
-        //     std::cout << "i_cell_l = " << i_cell_l << std::endl;
-        //     std::cout << "i_cell_r = " << i_cell_r << std::endl;
-        // }
-
         bool is_x_face = false;
         if (fabs(unit(mesh->face_normal(i_face))[0]) > 0.5) {
             is_x_face = true;

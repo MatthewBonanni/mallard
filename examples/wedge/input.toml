@@ -1,9 +1,9 @@
 [run]
-n_steps = 100000
-# t_stop = 1.0
+# n_steps = 100000
+t_stop = 0.1
 # t_wall_stop = 3.0
 # dt = 1.0e-5
-cfl = 0.1
+cfl = 1.0
 
 [mesh]
 type = "wedge"
@@ -44,7 +44,8 @@ type = "symmetry"
 face_reconstruction = "FO"
 riemann_solver = "HLLC"
 time_integrator = "SSPRK3"
-check_nan = true
+check_nan = false
+check_nan_flux = false
 
 [physics]
 type = "euler"
@@ -52,6 +53,8 @@ gamma = 1.4
 p_ref = 101325.0
 T_ref = 298.15
 rho_ref = 1.225
+p_min = 1.0e-6
+# p_max = 1e20
 
 [output]
 check_interval = 100
