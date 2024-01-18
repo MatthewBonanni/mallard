@@ -19,16 +19,19 @@
 
 enum class FaceReconstructionType {
     FirstOrder,
+    WENO3_JS,
     WENO5_JS,
 };
 
 static const std::unordered_map<std::string, FaceReconstructionType> FACE_RECONSTRUCTION_TYPES = {
     {"FO", FaceReconstructionType::FirstOrder},
+    {"WENO3_JS", FaceReconstructionType::WENO3_JS},
     {"WENO5_JS", FaceReconstructionType::WENO5_JS}
 };
 
 static const std::unordered_map<FaceReconstructionType, std::string> FACE_RECONSTRUCTION_NAMES = {
     {FaceReconstructionType::FirstOrder, "FO"},
+    {FaceReconstructionType::WENO3_JS, "WENO3_JS"},
     {FaceReconstructionType::WENO5_JS, "WENO5_JS"}
 };
 
@@ -101,6 +104,29 @@ class FirstOrder : public FaceReconstruction {
          * @brief Destroy the First Order object
          */
         ~FirstOrder();
+
+        /**
+         * @brief Reconstruct the face values.
+         * @param solution Pointer to the solution.
+         * @param face_solution Pointer to the face solution.
+         */
+        void calc_face_values(view_2d * solution,
+                              view_3d * face_solution) override;
+    protected:
+    private:
+};
+
+class WENO3_JS : public FaceReconstruction {
+    public:
+        /**
+         * @brief Construct a new WENO object
+         */
+        WENO3_JS();
+
+        /**
+         * @brief Destroy the WENO object
+         */
+        ~WENO3_JS();
 
         /**
          * @brief Reconstruct the face values.

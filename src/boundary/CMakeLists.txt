@@ -3,6 +3,7 @@ set(LIB_NAME BoundaryLib)
 set(LIB_SRCS
     boundary.cpp
     boundary_symmetry.cpp
+    boundary_extrapolation.cpp
     boundary_wall_adiabatic.cpp
     boundary_upt.cpp
     boundary_p_out.cpp

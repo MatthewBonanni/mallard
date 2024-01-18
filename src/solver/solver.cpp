@@ -21,6 +21,7 @@
 #include "mesh.h"
 #include "boundary.h"
 #include "boundary_symmetry.h"
+#include "boundary_extrapolation.h"
 #include "boundary_wall_adiabatic.h"
 #include "boundary_upt.h"
 #include "boundary_p_out.h"
@@ -163,6 +164,8 @@ void Solver::init_numerics() {
 
     if (face_reconstruction_type == FaceReconstructionType::FirstOrder) {
         face_reconstruction = std::make_unique<FirstOrder>();
+    } else if (face_reconstruction_type == FaceReconstructionType::WENO3_JS) {
+        face_reconstruction = std::make_unique<WENO3_JS>();
     } else if (face_reconstruction_type == FaceReconstructionType::WENO5_JS) {
         face_reconstruction = std::make_unique<WENO5_JS>();
     } else {
@@ -243,6 +246,8 @@ void Solver::init_boundaries() {
 
         if (btype == BoundaryType::SYMMETRY) {
             boundaries.push_back(std::make_unique<BoundarySymmetry>());
+        } else if (btype == BoundaryType::EXTRAPOLATION) {
+            boundaries.push_back(std::make_unique<BoundaryExtrapolation>());
         } else if (btype == BoundaryType::WALL_ADIABATIC) {
             boundaries.push_back(std::make_unique<BoundaryWallAdiabatic>());
         } else if (btype == BoundaryType::UPT) {

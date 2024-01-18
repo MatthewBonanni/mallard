@@ -21,14 +21,16 @@
 #include "riemann_solver.h"
 
 enum class BoundaryType {
-    SYMMETRY = 1,
-    WALL_ADIABATIC = 2,
-    UPT = 3,
-    P_OUT = 4
+    SYMMETRY,
+    EXTRAPOLATION,
+    WALL_ADIABATIC,
+    UPT,
+    P_OUT,
 };
 
 static const std::unordered_map<std::string, BoundaryType> BOUNDARY_TYPES = {
     {"symmetry", BoundaryType::SYMMETRY},
+    {"extrapolation", BoundaryType::EXTRAPOLATION},
     {"wall_adiabatic", BoundaryType::WALL_ADIABATIC},
     {"upt", BoundaryType::UPT},
     {"p_out", BoundaryType::P_OUT}
@@ -36,6 +38,7 @@ static const std::unordered_map<std::string, BoundaryType> BOUNDARY_TYPES = {
 
 static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
     {BoundaryType::SYMMETRY, "symmetry"},
+    {BoundaryType::EXTRAPOLATION, "extrapolation"},
     {BoundaryType::WALL_ADIABATIC, "wall_adiabatic"},
     {BoundaryType::UPT, "upt"},
     {BoundaryType::P_OUT, "p_out"}
