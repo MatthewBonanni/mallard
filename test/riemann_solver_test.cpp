@@ -69,8 +69,8 @@ TEST(RiemannSolverTest, HLLCFluxZero) {
                              rho_r, u_r.data(), p_r, gamma, h_r);
 
     rtype tol = 1e-1;
-    EXPECT_NEAR(flux[0], 0.000000000000000, tol);
-    EXPECT_NEAR(flux[1], 1.000000000000000, tol);
-    EXPECT_NEAR(flux[2], 0.000000000000000, tol);
-    EXPECT_NEAR(flux[3], 0.000000000000000, tol);
+    EXPECT_NEAR(flux[0], 0.0, tol);
+    EXPECT_NEAR(flux[1], 1.0, tol);
+    EXPECT_NEAR(flux[2], 0.0, tol);
+    EXPECT_NEAR(flux[3], 0.0, tol);
 }

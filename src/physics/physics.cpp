@@ -15,7 +15,7 @@
 
 #include "common.h"
 
-Physics::Physics() {
+Physics::Physics() : p_bounds({-1e20, 1e20}) {
     // Empty
 }
 

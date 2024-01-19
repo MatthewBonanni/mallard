@@ -72,7 +72,7 @@ void BoundarySymmetry::apply(view_3d * face_solution,
                                   primitives_r[2], physics->get_gamma(), primitives_r[4]);
 
         // Add flux to RHS
-        for (int j = 0; j < 4; j++) {
+        for (int j = 0; j < N_CONSERVATIVE; j++) {
             Kokkos::atomic_add(&(*rhs)(i_cell_l, j), -mesh->face_area(i_face) * flux[j]);
         }
     });
