@@ -18,18 +18,21 @@
 #include "common_typedef.h"
 
 enum class RiemannSolverType {
+    Rusanov,
     Roe,
     HLL,
     HLLC,
 };
 
 static const std::unordered_map<std::string, RiemannSolverType> RIEMANN_SOLVER_TYPES = {
+    {"Rusanov", RiemannSolverType::Rusanov},
     {"Roe", RiemannSolverType::Roe},
     {"HLL", RiemannSolverType::HLL},
     {"HLLC", RiemannSolverType::HLLC}
 };
 
 static const std::unordered_map<RiemannSolverType, std::string> RIEMANN_SOLVER_NAMES = {
+    {RiemannSolverType::Rusanov, "Rusanov"},
     {RiemannSolverType::Roe, "Roe"},
     {RiemannSolverType::HLL, "HLL"},
     {RiemannSolverType::HLLC, "HLLC"}
@@ -84,6 +87,43 @@ class RiemannSolver {
     protected:
         RiemannSolverType type;
         bool check_nan;
+    private:
+};
+
+class Rusanov : public RiemannSolver {
+    public:
+        /**
+         * @brief Construct a new Rusanov object
+         */
+        Rusanov();
+
+        /**
+         * @brief Destroy the Rusanov object
+         */
+        virtual ~Rusanov();
+
+        /**
+         * @brief Calculate the Rusanov flux.
+         * @param flux Rusanov flux.
+         * @param n_unit Unit normal vector.
+         * @param rho_l Left density.
+         * @param u_l Left velocity.
+         * @param p_l Left pressure.
+         * @param gamma_l Left gamma.
+         * @param h_l Left enthalpy.
+         * @param rho_r Right density.
+         * @param u_r Right velocity.
+         * @param p_r Right pressure.
+         * @param gamma_r Right gamma.
+         * @param h_r Right enthalpy.
+         */
+        KOKKOS_INLINE_FUNCTION
+        void calc_flux(State & flux, const NVector & n_unit,
+                       const rtype rho_l, const rtype * u_l,
+                       const rtype p_l, const rtype gamma_l, const rtype h_l,
+                       const rtype rho_r, const rtype * u_r,
+                       const rtype p_r, const rtype gamma_r, const rtype h_r) override;
+    protected:
     private:
 };
 

@@ -38,6 +38,63 @@ void RiemannSolver::print() const {
     std::cout << LOG_SEPARATOR << std::endl;
 }
 
+Rusanov::Rusanov() {
+    type = RiemannSolverType::Rusanov;
+}
+
+Rusanov::~Rusanov() {
+    // Empty
+}
+
+KOKKOS_INLINE_FUNCTION
+void Rusanov::calc_flux(State & flux, const NVector & n_unit,
+                        const rtype rho_l, const rtype * u_l,
+                        const rtype p_l, const rtype gamma_l, const rtype h_l,
+                        const rtype rho_r, const rtype * u_r,
+                        const rtype p_r, const rtype gamma_r, const rtype h_r) {
+    // Preliminary calculations
+    rtype u_l_n = dot<N_DIM>(u_l, n_unit.data());
+    rtype u_r_n = dot<N_DIM>(u_r, n_unit.data());
+    rtype c_l = std::sqrt(gamma_l * p_l / rho_l);
+    rtype c_r = std::sqrt(gamma_r * p_r / rho_r);
+    rtype rhoe_l = h_l * rho_l - p_l;
+    rtype rhoe_r = h_r * rho_r - p_r;
+
+    State q_l, q_r, flux_l, flux_r;
+    q_l[0] = rho_l;
+    q_l[1] = rho_l * u_l[0];
+    q_l[2] = rho_l * u_l[1];
+    q_l[3] = rhoe_l;
+
+    q_r[0] = rho_r;
+    q_r[1] = rho_r * u_r[0];
+    q_r[2] = rho_r * u_r[1];
+    q_r[3] = rhoe_r;
+
+    flux_l[0] = rho_l * u_l_n;
+    flux_l[1] = rho_l * u_l[0] * u_l_n + p_l * n_unit[0];
+    flux_l[2] = rho_l * u_l[1] * u_l_n + p_l * n_unit[1];
+    flux_l[3] = (rhoe_l + p_l) * u_l_n;
+
+    flux_r[0] = rho_r * u_r_n;
+    flux_r[1] = rho_r * u_r[0] * u_r_n + p_r * n_unit[0];
+    flux_r[2] = rho_r * u_r[1] * u_r_n + p_r * n_unit[1];
+    flux_r[3] = (rhoe_r + p_r) * u_r_n;
+
+    rtype s_max = fmax(fabs(u_l_n) + c_l, fabs(u_r_n) + c_r);
+
+    // Compute the Roe averages
+    // rtype rt = sqrt(rho_r / rho_l);
+    // rtype u = (u_l_n + rt * u_r_n) / (1.0 + rt);
+    // rtype h = (h_l + rt * h_r) / (1.0 + rt);
+    // rtype a = sqrt((gamma_l - 1.0) * (h));
+    // rtype s_max = fabs(u) + a;
+
+    for (int i = 0; i < N_CONSERVATIVE; i++) {
+        flux[i] = 0.5 * (flux_l[i] + flux_r[i] + s_max * (q_l[i] - q_r[i]));
+    }
+}
+
 Roe::Roe() {
     type = RiemannSolverType::Roe;
 }
@@ -98,16 +155,40 @@ void HLLC::calc_flux(State & flux, const NVector & n_unit,
     rtype rhoe_l = h_l * rho_l - p_l;
     rtype rhoe_r = h_r * rho_r - p_r;
 
-    // Wave speeds
-    rtype s_l = u_l_n - c_l;
-    rtype s_r = u_r_n + c_r;
+    // // Wave speeds
+    // rtype s_l = u_l_n - c_l;
+    // rtype s_r = u_r_n + c_r;
+
+    // // Contact surface speed
+    // rtype s_m = (p_l - p_r - rho_l * u_l_n * (s_l - u_l_n) + rho_r * u_r_n * (s_r - u_r_n)) /
+    //              (rho_r * (s_r - u_r_n) - rho_l * (s_l - u_l_n));
+    
+    // // Pressure at contact surface
+    // rtype p_star = rho_r * (u_r_n - s_r) * (u_r_n - s_m) + p_r;
+
+
+    // -------------------------------------
+    // Einfeldt signal speed estimates
+    rtype one_rho = 1.0 / (sqrt(rho_l) + sqrt(rho_r));
+    rtype eta_2 = 0.5 * sqrt(rho_l * rho_r) * pow(one_rho, 2.0);
+    rtype u_bar = (sqrt(rho_l) * u_l_n + sqrt(rho_r) * u_r_n) * one_rho;
+    rtype d_bar = sqrt((sqrt(rho_l) * pow(c_l, 2.0) +
+                        sqrt(rho_r) * pow(c_r, 2.0)) * one_rho +
+                       eta_2 * pow(u_r - u_l, 2.0));
+    rtype s_l = u_bar - d_bar;
+    rtype s_r = u_bar + d_bar;
 
     // Contact surface speed
-    rtype s_m = (p_l - p_r - rho_l * u_l_n * (s_l - u_l_n) + rho_r * u_r_n * (s_r - u_r_n)) /
-                 (rho_r * (s_r - u_r_n) - rho_l * (s_l - u_l_n));
+    rtype delta_u_l = s_l - u_l_n;
+    rtype delta_u_r = s_r - u_r_n;
+    rtype rho_delta_su = rho_l * delta_u_l - rho_r * delta_u_r;
+    rtype s_m = 1.0 / rho_delta_su * (p_r - p_l
+                                      + rho_l * u_l_n * delta_u_l
+                                      - rho_r * u_r_n * delta_u_r);
     
     // Pressure at contact surface
     rtype p_star = rho_r * (u_r_n - s_r) * (u_r_n - s_m) + p_r;
+    // -------------------------------------
 
     if (s_m >= 0.0) {
         if (s_l > 0.0) {

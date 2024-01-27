@@ -173,7 +173,9 @@ void Solver::init_numerics() {
         throw std::runtime_error("Unknown face reconstruction type: " + face_reconstruction_str + ".");
     }
 
-    if (riemann_solver_type == RiemannSolverType::Roe) {
+    if (riemann_solver_type == RiemannSolverType::Rusanov) {
+        riemann_solver = std::make_unique<Rusanov>();
+    } else if (riemann_solver_type == RiemannSolverType::Roe) {
         riemann_solver = std::make_unique<Roe>();
     } else if (riemann_solver_type == RiemannSolverType::HLL) {
         riemann_solver = std::make_unique<HLL>();
