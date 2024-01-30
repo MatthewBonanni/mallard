@@ -155,6 +155,8 @@ void HLLC::calc_flux(State & flux, const NVector & n_unit,
     rtype rhoe_l = h_l * rho_l - p_l;
     rtype rhoe_r = h_r * rho_r - p_r;
 
+    /** \todo Fix implementation! */
+
     // // Wave speeds
     // rtype s_l = u_l_n - c_l;
     // rtype s_r = u_r_n + c_r;
