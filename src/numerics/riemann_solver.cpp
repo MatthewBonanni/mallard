@@ -157,15 +157,54 @@ RiemannSolver::~RiemannSolver() {
 }
 
 void RiemannSolver::init(const toml::table & input) {
-    check_nan = input["numerics"]["check_nan_flux"].value_or(false);
+    check_nan_flag = input["numerics"]["check_nan_flux"].value_or(false);
     print();
 }
 
 void RiemannSolver::print() const {
     std::cout << LOG_SEPARATOR << std::endl;
     std::cout << "Riemann solver: " << RIEMANN_SOLVER_NAMES.at(type) << std::endl;
-    std::cout << "> Check for NaN flux: " << (check_nan ? "true" : "false") << std::endl;
+    std::cout << "> Check for NaN flux: " << (check_nan_flag ? "true" : "false") << std::endl;
     std::cout << LOG_SEPARATOR << std::endl;
+}
+
+void RiemannSolver::check_nan(const State & flux, const NVector & n_unit,
+                              const rtype rho_l, const rtype * u_l,
+                              const rtype p_l, const rtype gamma_l, const rtype h_l,
+                              const rtype rho_r, const rtype * u_r,
+                              const rtype p_r, const rtype gamma_r, const rtype h_r) const {
+    if (!check_nan_flag) {
+        return;
+    }
+
+    bool nan_detected = false;
+    for (int i = 0; i < N_CONSERVATIVE; i++) {
+        if (std::isnan(flux[i])) {
+            nan_detected = true;
+            break;
+        }
+    }
+
+    if (nan_detected) {
+        std::stringstream msg;
+        msg << RIEMANN_SOLVER_NAMES.at(type) << "::calc_flux(): NaN flux detected." << std::endl;
+        msg << "> n_unit: " << n_unit[0] << ", " << n_unit[1] << std::endl;
+        msg << "> rho_l: " << rho_l << std::endl;
+        msg << "> u_l: " << u_l[0] << ", " << u_l[1] << std::endl;
+        msg << "> p_l: " << p_l << std::endl;
+        msg << "> gamma_l: " << gamma_l << std::endl;
+        msg << "> h_l: " << h_l << std::endl;
+        msg << "> rho_r: " << rho_r << std::endl;
+        msg << "> u_r: " << u_r[0] << ", " << u_r[1] << std::endl;
+        msg << "> p_r: " << p_r << std::endl;
+        msg << "> gamma_r: " << gamma_r << std::endl;
+        msg << "> h_r: " << h_r << std::endl;
+        msg << "> flux: " << std::endl;
+        for (int i = 0; i < N_CONSERVATIVE; i++) {
+            msg << "> " << i << ": " << flux[i] << std::endl;
+        }
+        throw std::runtime_error(msg.str());
+    }
 }
 
 Rusanov::Rusanov() {
@@ -216,6 +255,8 @@ void Rusanov::calc_flux(State & flux, const NVector & n_unit,
     for (int i = 0; i < N_CONSERVATIVE; i++) {
         flux[i] = 0.5 * (flux_l[i] + flux_r[i] + S_max * (U_l[i] - U_r[i]));
     }
+
+    check_nan(flux, n_unit, rho_l, u_l, p_l, gamma_l, h_l, rho_r, u_r, p_r, gamma_r, h_r);
 }
 
 Roe::Roe() {
@@ -250,8 +291,76 @@ void HLL::calc_flux(State & flux, const NVector & n_unit,
                     const rtype p_l, const rtype gamma_l, const rtype h_l,
                     const rtype rho_r, const rtype * u_r,
                     const rtype p_r, const rtype gamma_r, const rtype h_r) {
-    throw std::runtime_error("HLL Riemann solver not implemented.");
-    /** \todo Implement HLL Riemann solver */
+    // Preliminary calculations
+    rtype u_l_n = dot<N_DIM>(u_l, n_unit.data());
+    rtype u_r_n = dot<N_DIM>(u_r, n_unit.data());
+    rtype ul_dot_ul = dot<N_DIM>(u_l, u_l);
+    rtype ur_dot_ur = dot<N_DIM>(u_r, u_r);
+    rtype a_l = std::sqrt(gamma_l * p_l / rho_l);
+    rtype a_r = std::sqrt(gamma_r * p_r / rho_r);
+    rtype rhoe_l = h_l * rho_l - p_l;
+    rtype rhoe_r = h_r * rho_r - p_r;
+
+    State U_l, U_r, flux_l, flux_r;
+    U_l[0] = rho_l;
+    U_l[1] = rho_l * u_l[0];
+    U_l[2] = rho_l * u_l[1];
+    U_l[3] = rhoe_l;
+
+    U_r[0] = rho_r;
+    U_r[1] = rho_r * u_r[0];
+    U_r[2] = rho_r * u_r[1];
+    U_r[3] = rhoe_r;
+
+    flux_l[0] = rho_l * u_l_n;
+    flux_l[1] = rho_l * u_l[0] * u_l_n + p_l * n_unit[0];
+    flux_l[2] = rho_l * u_l[1] * u_l_n + p_l * n_unit[1];
+    flux_l[3] = (rhoe_l + p_l) * u_l_n;
+
+    flux_r[0] = rho_r * u_r_n;
+    flux_r[1] = rho_r * u_r[0] * u_r_n + p_r * n_unit[0];
+    flux_r[2] = rho_r * u_r[1] * u_r_n + p_r * n_unit[1];
+    flux_r[3] = (rhoe_r + p_r) * u_r_n;
+
+    rtype * W_l = new rtype[4];
+    rtype * W_r = new rtype[4];
+
+    W_l[0] = rho_l;
+    W_l[1] = u_l_n;
+    W_l[2] = p_l;
+    W_l[3] = gamma_l;
+
+    W_r[0] = rho_r;
+    W_r[1] = u_r_n;
+    W_r[2] = p_r;
+    W_r[3] = gamma_r;
+
+    // Solve the pressure in the star region
+    rtype p_star, rho_l_star, rho_r_star;
+    ANRS(W_l, W_r, p_star, rho_l_star, rho_r_star);
+
+    // Estimate the wave speeds
+    rtype q_l = (p_star <= p_l) ? 1.0 : std::sqrt(1.0 + (gamma_l + 1.0) / (2.0 * gamma_l) * (p_star / p_l - 1.0));
+    rtype q_r = (p_star <= p_r) ? 1.0 : std::sqrt(1.0 + (gamma_r + 1.0) / (2.0 * gamma_r) * (p_star / p_r - 1.0));
+    rtype S_l = u_l_n - a_l * q_l;
+    rtype S_r = u_r_n + a_r * q_r;
+    
+    // Calculate the flux
+    if (0.0 <= S_l) {
+        for (int i = 0; i < N_CONSERVATIVE; i++) {
+            flux[i] = flux_l[i];
+        }
+    } else if (S_r <= 0.0) {
+        for (int i = 0; i < N_CONSERVATIVE; i++) {
+            flux[i] = flux_r[i];
+        }
+    } else {
+        for (int i = 0; i < N_CONSERVATIVE; i++) {
+            flux[i] = (S_r * flux_l[i] - S_l * flux_r[i] + S_l * S_r * (U_r[i] - U_l[i])) / (S_r - S_l);
+        }
+    }
+
+    check_nan(flux, n_unit, rho_l, u_l, p_l, gamma_l, h_l, rho_r, u_r, p_r, gamma_r, h_r);
 }
 
 HLLC::HLLC() {
@@ -351,37 +460,5 @@ void HLLC::calc_flux(State & flux, const NVector & n_unit,
         }
     }
 
-    if (check_nan) {
-        bool nan_detected = false;
-        for (int i = 0; i < N_CONSERVATIVE; i++) {
-            if (std::isnan(flux[i])) {
-                nan_detected = true;
-            }
-        }
-
-        if (nan_detected) {
-            std::stringstream msg;
-            msg << "HLLC::calc_flux(): NaN flux detected." << std::endl;
-            msg << "> n_unit: " << n_unit[0] << ", " << n_unit[1] << std::endl;
-            msg << "> rho_l: " << rho_l << std::endl;
-            msg << "> u_l: " << u_l[0] << ", " << u_l[1] << std::endl;
-            msg << "> p_l: " << p_l << std::endl;
-            msg << "> gamma_l: " << gamma_l << std::endl;
-            msg << "> h_l: " << h_l << std::endl;
-            msg << "> rho_r: " << rho_r << std::endl;
-            msg << "> u_r: " << u_r[0] << ", " << u_r[1] << std::endl;
-            msg << "> p_r: " << p_r << std::endl;
-            msg << "> gamma_r: " << gamma_r << std::endl;
-            msg << "> h_r: " << h_r << std::endl;
-            msg << "> S_l: " << S_l << std::endl;
-            msg << "> S_r: " << S_r << std::endl;
-            msg << "> S_star: " << S_star << std::endl;
-            msg << "> p_star: " << p_star << std::endl;
-            msg << "> flux: " << std::endl;
-            for (int i = 0; i < N_CONSERVATIVE; i++) {
-                msg << "> " << i << ": " << flux[i] << std::endl;
-            }
-            throw std::runtime_error(msg.str());
-        }
-    }
+    check_nan(flux, n_unit, rho_l, u_l, p_l, gamma_l, h_l, rho_r, u_r, p_r, gamma_r, h_r);
 }

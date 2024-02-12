@@ -85,8 +85,29 @@ class RiemannSolver {
                                const rtype rho_r, const rtype * u_r,
                                const rtype p_r, const rtype gamma_r, const rtype h_r) = 0;
     protected:
+        /**
+         * @brief Check for NaN values.
+         * @param flux Riemann flux.
+         * @param n_unit Unit normal vector.
+         * @param rho_l Left density.
+         * @param u_l Left velocity.
+         * @param p_l Left pressure.
+         * @param gamma_l Left gamma.
+         * @param h_l Left enthalpy.
+         * @param rho_r Right density.
+         * @param u_r Right velocity.
+         * @param p_r Right pressure.
+         * @param gamma_r Right gamma.
+         * @param h_r Right enthalpy.
+         */
+        virtual void check_nan(const State & flux, const NVector & n_unit,
+                               const rtype rho_l, const rtype * u_l,
+                               const rtype p_l, const rtype gamma_l, const rtype h_l,
+                               const rtype rho_r, const rtype * u_r,
+                               const rtype p_r, const rtype gamma_r, const rtype h_r) const;
+
         RiemannSolverType type;
-        bool check_nan;
+        bool check_nan_flag;
     private:
 };
 
