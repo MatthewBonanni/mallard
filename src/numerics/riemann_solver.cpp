@@ -18,6 +18,136 @@
 #include "common_io.h"
 #include "common_math.h"
 
+void PVRS(rtype * W_l, rtype * W_r,
+          rtype & p_star, rtype & rho_l_star, rtype & rho_r_star) {
+    rtype rho_l = W_l[0];
+    rtype u_l = W_l[1];
+    rtype p_l = W_l[2];
+    rtype gamma_l = W_l[3];
+
+    rtype rho_r = W_r[0];
+    rtype u_r = W_r[1];
+    rtype p_r = W_r[2];
+    rtype gamma_r = W_r[3];
+
+    rtype a_l = std::sqrt(gamma_l * p_l / rho_l);
+    rtype a_r = std::sqrt(gamma_r * p_r / rho_r);
+
+    bool charac_eqns = false;
+    if (charac_eqns) {
+        // Use characteristic equations
+        rtype c_l = rho_l * a_l;
+        rtype c_r = rho_r * a_r;
+
+        p_star = (1.0 / (c_l + c_r)) * (c_r * p_l + c_l * p_r + c_l * c_r * (u_l - u_r));
+        rho_l_star = rho_l + (p_star - p_l) / (a_l * a_l);
+        rho_r_star = rho_r + (p_star - p_r) / (a_r * a_r);
+    } else {
+        // Use averages
+        rtype rho_avg = 0.5 * (rho_l + rho_r);
+        rtype a_avg = 0.5 * (a_l + a_r);
+        rtype u_star = 0.5 * (u_l + u_r) + 0.5 * (p_l - p_r) / (rho_avg * a_avg);
+
+        p_star = 0.5 * (p_l + p_r) + 0.5 * (u_l - u_r) * rho_avg * a_avg;
+        rho_l_star = rho_l + (u_l - u_star) * rho_avg / a_avg;
+        rho_r_star = rho_r - (u_r - u_star) * rho_avg / a_avg;
+    }
+}
+
+void TRRS(rtype * W_l, rtype * W_r,
+          rtype & p_star, rtype & rho_l_star, rtype & rho_r_star) {
+    rtype rho_l = W_l[0];
+    rtype u_l = W_l[1];
+    rtype p_l = W_l[2];
+    rtype gamma_l = W_l[3];
+
+    rtype rho_r = W_r[0];
+    rtype u_r = W_r[1];
+    rtype p_r = W_r[2];
+    rtype gamma_r = W_r[3];
+
+    rtype a_l = std::sqrt(gamma_l * p_l / rho_l);
+    rtype a_r = std::sqrt(gamma_r * p_r / rho_r);
+
+    rtype z_l = (gamma_l - 1.0) / (2.0 * gamma_l);
+    rtype z_r = (gamma_r - 1.0) / (2.0 * gamma_r);
+
+    rtype P_lr = std::pow((p_l / p_r), z_l);
+    rtype u_star = (P_lr * u_l / a_l + u_r / a_r + 2.0 * (1.0 - P_lr) / (gamma_l - 1.0)) /
+                   (P_lr / a_l + 1.0 / a_r);
+
+    p_star = 0.5 * (p_l * std::pow((1.0 + (gamma_l - 1.0) / (2.0 * a_l) * (u_l - u_star)),
+                                   (1.0 / z_l)) +
+                    p_r * std::pow((1.0 + (gamma_r - 1.0) / (2.0 * a_r) * (u_star - u_r)),
+                                   (1.0 / z_r)));
+    rho_l_star = rho_l * std::pow(p_star / p_l, 1.0 / gamma_l);
+    rho_r_star = rho_r * std::pow(p_star / p_r, 1.0 / gamma_r);
+}
+
+void TSRS(rtype * W_l, rtype * W_r,
+          rtype & p_star, rtype & rho_l_star, rtype & rho_r_star) {
+    rtype rho_l = W_l[0];
+    rtype u_l = W_l[1];
+    rtype p_l = W_l[2];
+    rtype gamma_l = W_l[3];
+
+    rtype rho_r = W_r[0];
+    rtype u_r = W_r[1];
+    rtype p_r = W_r[2];
+    rtype gamma_r = W_r[3];
+
+    rtype gm1_gp1_l = (gamma_l - 1.0) / (gamma_l + 1.0);
+    rtype gm1_gp1_r = (gamma_r - 1.0) / (gamma_r + 1.0);
+
+    rtype A_l = 2.0 / (gamma_l + 1.0) / rho_l;
+    rtype B_l = gm1_gp1_l * p_l;
+
+    rtype A_r = 2.0 / (gamma_r + 1.0) / rho_r;
+    rtype B_r = gm1_gp1_r * p_r;
+
+    rtype p_0 = 0.0;
+    p_0 = p_star; // Assume p_star has already been set with PVRS by ANRS procedure!
+    // PVRS(W_l, W_r, p_0, rho_l_star, rho_r_star);
+    p_0 = std::fmax(0.0, p_0);
+
+    rtype g_l_p_0 = std::sqrt(A_l / (p_0 + B_l));
+    rtype g_r_p_0 = std::sqrt(A_r / (p_0 + B_r));
+
+    p_star = (g_l_p_0 * p_l + g_r_p_0 * p_r  - (u_r - u_l)) / (g_l_p_0 + g_r_p_0);
+    rho_l_star = rho_l * (p_star / p_l + gm1_gp1_l) / (gm1_gp1_l * p_star / p_l + 1.0);
+    rho_r_star = rho_r * (p_star / p_r + gm1_gp1_r) / (gm1_gp1_r * p_star / p_r + 1.0);
+}
+
+void ANRS(rtype * W_l, rtype * W_r,
+          rtype & p_star, rtype & rho_l_star, rtype & rho_r_star) {
+    rtype rho_l = W_l[0];
+    rtype u_l = W_l[1];
+    rtype p_l = W_l[2];
+    rtype gamma_l = W_l[3];
+
+    rtype rho_r = W_r[0];
+    rtype u_r = W_r[1];
+    rtype p_r = W_r[2];
+    rtype gamma_r = W_r[3];
+
+    rtype p_max = std::fmax(p_l, p_r);
+    rtype p_min = std::fmin(p_l, p_r);
+    rtype q_max = p_max / p_min;
+    rtype q_user = 2.0;
+
+    PVRS(W_l, W_r, p_star, rho_l_star, rho_r_star);
+
+    if ((q_max < q_user) && (p_min <= p_star) && (p_star <= p_max)) {
+        // Do nothing (use PVRS result)
+    } else {
+        if (p_star < p_min) {
+            TRRS(W_l, W_r, p_star, rho_l_star, rho_r_star);
+        } else {
+            TSRS(W_l, W_r, p_star, rho_l_star, rho_r_star);
+        }
+    }
+}
+
 RiemannSolver::RiemannSolver() {
     // Empty
 }
@@ -55,21 +185,21 @@ void Rusanov::calc_flux(State & flux, const NVector & n_unit,
     // Preliminary calculations
     rtype u_l_n = dot<N_DIM>(u_l, n_unit.data());
     rtype u_r_n = dot<N_DIM>(u_r, n_unit.data());
-    rtype c_l = std::sqrt(gamma_l * p_l / rho_l);
-    rtype c_r = std::sqrt(gamma_r * p_r / rho_r);
+    rtype a_l = std::sqrt(gamma_l * p_l / rho_l);
+    rtype a_r = std::sqrt(gamma_r * p_r / rho_r);
     rtype rhoe_l = h_l * rho_l - p_l;
     rtype rhoe_r = h_r * rho_r - p_r;
 
-    State q_l, q_r, flux_l, flux_r;
-    q_l[0] = rho_l;
-    q_l[1] = rho_l * u_l[0];
-    q_l[2] = rho_l * u_l[1];
-    q_l[3] = rhoe_l;
+    State U_l, U_r, flux_l, flux_r;
+    U_l[0] = rho_l;
+    U_l[1] = rho_l * u_l[0];
+    U_l[2] = rho_l * u_l[1];
+    U_l[3] = rhoe_l;
 
-    q_r[0] = rho_r;
-    q_r[1] = rho_r * u_r[0];
-    q_r[2] = rho_r * u_r[1];
-    q_r[3] = rhoe_r;
+    U_r[0] = rho_r;
+    U_r[1] = rho_r * u_r[0];
+    U_r[2] = rho_r * u_r[1];
+    U_r[3] = rhoe_r;
 
     flux_l[0] = rho_l * u_l_n;
     flux_l[1] = rho_l * u_l[0] * u_l_n + p_l * n_unit[0];
@@ -81,17 +211,10 @@ void Rusanov::calc_flux(State & flux, const NVector & n_unit,
     flux_r[2] = rho_r * u_r[1] * u_r_n + p_r * n_unit[1];
     flux_r[3] = (rhoe_r + p_r) * u_r_n;
 
-    rtype s_max = fmax(fabs(u_l_n) + c_l, fabs(u_r_n) + c_r);
-
-    // Compute the Roe averages
-    // rtype rt = sqrt(rho_r / rho_l);
-    // rtype u = (u_l_n + rt * u_r_n) / (1.0 + rt);
-    // rtype h = (h_l + rt * h_r) / (1.0 + rt);
-    // rtype a = sqrt((gamma_l - 1.0) * (h));
-    // rtype s_max = fabs(u) + a;
+    rtype S_max = std::fmax(std::fabs(u_l_n) + a_l, std::fabs(u_r_n) + a_r);
 
     for (int i = 0; i < N_CONSERVATIVE; i++) {
-        flux[i] = 0.5 * (flux_l[i] + flux_r[i] + s_max * (q_l[i] - q_r[i]));
+        flux[i] = 0.5 * (flux_l[i] + flux_r[i] + S_max * (U_l[i] - U_r[i]));
     }
 }
 
@@ -150,89 +273,81 @@ void HLLC::calc_flux(State & flux, const NVector & n_unit,
     rtype u_r_n = dot<N_DIM>(u_r, n_unit.data());
     rtype ul_dot_ul = dot<N_DIM>(u_l, u_l);
     rtype ur_dot_ur = dot<N_DIM>(u_r, u_r);
-    rtype c_l = std::sqrt(gamma_l * p_l / rho_l);
-    rtype c_r = std::sqrt(gamma_r * p_r / rho_r);
+    rtype a_l = std::sqrt(gamma_l * p_l / rho_l);
+    rtype a_r = std::sqrt(gamma_r * p_r / rho_r);
     rtype rhoe_l = h_l * rho_l - p_l;
     rtype rhoe_r = h_r * rho_r - p_r;
 
-    /** \todo Fix implementation! */
+    State U_l, U_r, flux_l, flux_r;
+    U_l[0] = rho_l;
+    U_l[1] = rho_l * u_l[0];
+    U_l[2] = rho_l * u_l[1];
+    U_l[3] = rhoe_l;
 
-    // // Wave speeds
-    // rtype s_l = u_l_n - c_l;
-    // rtype s_r = u_r_n + c_r;
+    U_r[0] = rho_r;
+    U_r[1] = rho_r * u_r[0];
+    U_r[2] = rho_r * u_r[1];
+    U_r[3] = rhoe_r;
 
-    // // Contact surface speed
-    // rtype s_m = (p_l - p_r - rho_l * u_l_n * (s_l - u_l_n) + rho_r * u_r_n * (s_r - u_r_n)) /
-    //              (rho_r * (s_r - u_r_n) - rho_l * (s_l - u_l_n));
+    flux_l[0] = rho_l * u_l_n;
+    flux_l[1] = rho_l * u_l[0] * u_l_n + p_l * n_unit[0];
+    flux_l[2] = rho_l * u_l[1] * u_l_n + p_l * n_unit[1];
+    flux_l[3] = (rhoe_l + p_l) * u_l_n;
+
+    flux_r[0] = rho_r * u_r_n;
+    flux_r[1] = rho_r * u_r[0] * u_r_n + p_r * n_unit[0];
+    flux_r[2] = rho_r * u_r[1] * u_r_n + p_r * n_unit[1];
+    flux_r[3] = (rhoe_r + p_r) * u_r_n;
+
+    rtype * W_l = new rtype[4];
+    rtype * W_r = new rtype[4];
+
+    W_l[0] = rho_l;
+    W_l[1] = u_l_n;
+    W_l[2] = p_l;
+    W_l[3] = gamma_l;
+
+    W_r[0] = rho_r;
+    W_r[1] = u_r_n;
+    W_r[2] = p_r;
+    W_r[3] = gamma_r;
+
+    // Solve the pressure in the star region
+    rtype p_star, rho_l_star, rho_r_star;
+    ANRS(W_l, W_r, p_star, rho_l_star, rho_r_star);
+
+    // Estimate the wave speeds
+    rtype q_l = (p_star <= p_l) ? 1.0 : std::sqrt(1.0 + (gamma_l + 1.0) / (2.0 * gamma_l) * (p_star / p_l - 1.0));
+    rtype q_r = (p_star <= p_r) ? 1.0 : std::sqrt(1.0 + (gamma_r + 1.0) / (2.0 * gamma_r) * (p_star / p_r - 1.0));
+    rtype S_l = u_l_n - a_l * q_l;
+    rtype S_r = u_r_n + a_r * q_r;
+    rtype S_star = (p_r - p_l + rho_l * u_l_n * (S_l - u_l_n) - rho_r * u_r_n * (S_r - u_r_n)) /
+                   (rho_l * (S_l - u_l_n) - rho_r * (S_r - u_r_n));
     
-    // // Pressure at contact surface
-    // rtype p_star = rho_r * (u_r_n - s_r) * (u_r_n - s_m) + p_r;
-
-
-    // -------------------------------------
-    // Einfeldt signal speed estimates
-    rtype one_rho = 1.0 / (sqrt(rho_l) + sqrt(rho_r));
-    rtype eta_2 = 0.5 * sqrt(rho_l * rho_r) * pow(one_rho, 2.0);
-    rtype u_bar = (sqrt(rho_l) * u_l_n + sqrt(rho_r) * u_r_n) * one_rho;
-    rtype d_bar = sqrt((sqrt(rho_l) * pow(c_l, 2.0) +
-                        sqrt(rho_r) * pow(c_r, 2.0)) * one_rho +
-                       eta_2 * pow(u_r - u_l, 2.0));
-    rtype s_l = u_bar - d_bar;
-    rtype s_r = u_bar + d_bar;
-
-    // Contact surface speed
-    rtype delta_u_l = s_l - u_l_n;
-    rtype delta_u_r = s_r - u_r_n;
-    rtype rho_delta_su = rho_l * delta_u_l - rho_r * delta_u_r;
-    rtype s_m = 1.0 / rho_delta_su * (p_r - p_l
-                                      + rho_l * u_l_n * delta_u_l
-                                      - rho_r * u_r_n * delta_u_r);
-    
-    // Pressure at contact surface
-    rtype p_star = rho_r * (u_r_n - s_r) * (u_r_n - s_m) + p_r;
-    // -------------------------------------
-
-    if (s_m >= 0.0) {
-        if (s_l > 0.0) {
-            flux[0] = rho_l * u_l_n;
-            flux[1] = rho_l * u_l[0] * u_l_n + p_l * n_unit[0];
-            flux[2] = rho_l * u_l[1] * u_l_n + p_l * n_unit[1];
-            flux[3] = (rhoe_l + p_l) * u_l_n;
-        } else {
-            rtype inv_sl_minus_sm = 1.0 / (s_l - s_m);
-            rtype sl_minus_uln = s_l - u_l_n;
-            rtype rho_sl = rho_l * sl_minus_uln * inv_sl_minus_sm;
-            rtype rhou_sl[2];
-            for (int i = 0; i < 2; i++) {
-                rhou_sl[i] = (rho_l * u_l[i] * sl_minus_uln + (p_star - p_l) * n_unit[i]) * inv_sl_minus_sm;
-            }
-            rtype e_sl = (sl_minus_uln * rhoe_l - p_l * u_l_n + p_star * s_m) * inv_sl_minus_sm;
-
-            flux[0] = rho_sl * s_m;
-            flux[1] = rhou_sl[0] * s_m + p_star * n_unit[0];
-            flux[2] = rhou_sl[1] * s_m + p_star * n_unit[1];
-            flux[3] = (e_sl + p_star) * s_m;
+    // Calculate the flux (variant 2)
+    if (0.0 <= S_l) {
+        for (int i = 0; i < N_CONSERVATIVE; i++) {
+            flux[i] = flux_l[i];
+        }
+    } else if (S_r <= 0.0) {
+        for (int i = 0; i < N_CONSERVATIVE; i++) {
+            flux[i] = flux_r[i];
         }
     } else {
-        if (s_r >= 0.0) {
-            rtype inv_sr_minus_sm = 1.0 / (s_r - s_m);
-            rtype sr_minus_urn = s_r - u_r_n;
-            rtype rho_sr = rho_r * sr_minus_urn * inv_sr_minus_sm;
-            rtype rhou_sr[2];
-            for (int i = 0; i < 2; i++) {
-                rhou_sr[i] = (rho_r * u_r[i] * sr_minus_urn + (p_star - p_r) * n_unit[i]) * inv_sr_minus_sm;
+        State D_star = {0.0, n_unit[0], n_unit[1], S_star};
+        rtype P_lr = 0.5 * (p_l + p_r +
+                            rho_l * (S_l - u_l_n) * (S_star - u_l_n) +
+                            rho_r * (S_r - u_r_n) * (S_star - u_r_n));
+        if (S_star >= 0.0) {
+            for (int i = 0; i < N_CONSERVATIVE; i++) {
+                flux[i] = (S_star * (S_l * U_l[i] - flux_l[i]) + S_l * P_lr * D_star[i]) /
+                          (S_l - S_star);
             }
-            rtype e_sr = (sr_minus_urn * rhoe_r - p_r * u_r_n + p_star * s_m) * inv_sr_minus_sm;
-
-            flux[0] = rho_sr * s_m;
-            flux[1] = rhou_sr[0] * s_m + p_star * n_unit[0];
-            flux[2] = rhou_sr[1] * s_m + p_star * n_unit[1];
-            flux[3] = (e_sr + p_star) * s_m;
         } else {
-            flux[0] = rho_r * u_r_n;
-            flux[1] = rho_r * u_r[0] * u_r_n + p_r * n_unit[0];
-            flux[2] = rho_r * u_r[1] * u_r_n + p_r * n_unit[1];
-            flux[3] = (rhoe_r + p_r) * u_r_n;
+            for (int i = 0; i < N_CONSERVATIVE; i++) {
+                flux[i] = (S_star * (S_r * U_r[i] - flux_r[i]) + S_r * P_lr * D_star[i]) /
+                          (S_r - S_star);
+            }
         }
     }
 
@@ -258,9 +373,9 @@ void HLLC::calc_flux(State & flux, const NVector & n_unit,
             msg << "> p_r: " << p_r << std::endl;
             msg << "> gamma_r: " << gamma_r << std::endl;
             msg << "> h_r: " << h_r << std::endl;
-            msg << "> s_l: " << s_l << std::endl;
-            msg << "> s_r: " << s_r << std::endl;
-            msg << "> s_m: " << s_m << std::endl;
+            msg << "> S_l: " << S_l << std::endl;
+            msg << "> S_r: " << S_r << std::endl;
+            msg << "> S_star: " << S_star << std::endl;
             msg << "> p_star: " << p_star << std::endl;
             msg << "> flux: " << std::endl;
             for (int i = 0; i < N_CONSERVATIVE; i++) {
