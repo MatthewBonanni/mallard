@@ -68,6 +68,7 @@ face_reconstruction = "FO"
 riemann_solver = "HLLC"
 time_integrator = "SSPRK3"
 check_nan = true
+check_nan_flux = true
 
 [physics]
 type = "euler"
