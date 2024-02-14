@@ -15,11 +15,13 @@
 
 TEST(PhysicsTest, EulerPrimitivesFromConservatives) {
     Euler physics;
+    rtype p_min = 0.0;
+    rtype p_max = 1e20;
     rtype gamma = 1.4;
     rtype p_ref = 101325.0;
     rtype T_ref = 298.15;
     rtype rho_ref = 1.225;
-    physics.init(gamma, p_ref, T_ref, rho_ref);
+    physics.init(p_min, p_max, gamma, p_ref, T_ref, rho_ref);
 
     NVector u = {10.0, 5.0};
     rtype p = 101325.0;
@@ -32,7 +34,7 @@ TEST(PhysicsTest, EulerPrimitivesFromConservatives) {
 
     State conservatives = {rho, rho * u[0], rho * u[1], rhoE};
     Primitives primitives;
-    physics.compute_primitives_from_conservatives(primitives, conservatives);
+    physics.compute_primitives_from_conservatives(primitives.data(), conservatives.data());
 
     EXPECT_RTYPE_EQ(primitives[0], u[0]);
     EXPECT_RTYPE_EQ(primitives[1], u[1]);

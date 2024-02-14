@@ -15,8 +15,9 @@
 
 #include "common.h"
 
-Physics::Physics() : p_bounds({-1e20, 1e20}) {
-    // Empty
+Physics::Physics() {
+    p_bounds = Kokkos::View<rtype[2]>("p_bounds");
+    h_p_bounds = Kokkos::create_mirror_view(p_bounds);
 }
 
 Physics::~Physics() {
@@ -24,16 +25,16 @@ Physics::~Physics() {
 }
 
 void Physics::init(const toml::table & input) {
-    rtype p_min = input["physics"]["p_min"].value_or(-1e20);
-    rtype p_max = input["physics"]["p_max"].value_or(1e20);
-    p_bounds = {p_min, p_max};
+    h_p_bounds(0) = input["physics"]["p_min"].value_or(-1e20);
+    h_p_bounds(1) = input["physics"]["p_max"].value_or(1e20);
+    Kokkos::deep_copy(p_bounds, h_p_bounds);
 }
 
 void Physics::print() const {
     std::cout << LOG_SEPARATOR << std::endl;
     std::cout << "Physics: " << PHYSICS_NAMES.at(type) << std::endl;
-    std::cout << "> p_min: " << p_bounds[0] << std::endl;
-    std::cout << "> p_max: " << p_bounds[1] << std::endl;
+    std::cout << "> p_min: " << h_p_bounds(0) << std::endl;
+    std::cout << "> p_max: " << h_p_bounds(1) << std::endl;
 }
 
 Euler::Euler() {
@@ -75,14 +76,17 @@ void Euler::init(const toml::table & input) {
     print();
 }
 
-void Euler::init(const rtype & gamma_in,
-                 const rtype & p_ref_in,
-                 const rtype & T_ref_in,
-                 const rtype & rho_ref_in) {
-    gamma = gamma_in;
-    p_ref = p_ref_in;
-    T_ref = T_ref_in;
-    rho_ref = rho_ref_in;
+
+// FOR TESTING PURPOSES ONLY
+void Euler::init(rtype p_min, rtype p_max, rtype gamma,
+                 rtype p_ref, rtype T_ref, rtype rho_ref) {
+    h_p_bounds(0) = p_min;
+    h_p_bounds(1) = p_max;
+    Kokkos::deep_copy(p_bounds, h_p_bounds);
+    this->gamma = gamma;
+    this->p_ref = p_ref;
+    this->T_ref = T_ref;
+    this->rho_ref = rho_ref;
 
     set_R_cp_cv();
 }
@@ -133,7 +137,7 @@ rtype Euler::get_pressure_from_density_temperature(const rtype & rho,
 KOKKOS_INLINE_FUNCTION
 rtype Euler::get_pressure_from_density_energy(const rtype & rho,
                                               const rtype & e) const {
-    return Kokkos::fmax(p_bounds[0], Kokkos::fmin(p_bounds[1], (gamma - 1.0) * rho * e));
+    return Kokkos::fmax(p_bounds(0), Kokkos::fmin(p_bounds(1), (gamma - 1.0) * rho * e));
 }
 
 KOKKOS_INLINE_FUNCTION
@@ -143,13 +147,13 @@ rtype Euler::get_sound_speed_from_pressure_density(const rtype & p,
 }
 
 KOKKOS_INLINE_FUNCTION
-void Euler::compute_primitives_from_conservatives(Primitives & primitives,
-                                                  const State & conservatives) const {
+void Euler::compute_primitives_from_conservatives(rtype * primitives,
+                                                  const rtype * conservatives) const {
     rtype rho = conservatives[0];
-    NVector u = {conservatives[1] / rho,
-                 conservatives[2] / rho};
+    rtype u[N_DIM] = {conservatives[1] / rho,
+                      conservatives[2] / rho};
     rtype E = conservatives[3] / rho;
-    rtype e = E - 0.5 * dot<N_DIM>(u.data(), u.data());
+    rtype e = E - 0.5 * dot<N_DIM>(u, u);
     rtype p = get_pressure_from_density_energy(rho, e);
     rtype T = get_temperature_from_energy(e);
     rtype h = e + p / rho;

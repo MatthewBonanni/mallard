@@ -129,12 +129,12 @@ class Physics {
         
         /**
          * @brief Compute primitive variables from conservative variables.
-         * @param primitives Primitive variables
-         * @param conservatives Conservative variables
+         * @param primitives Pointer to primitive variable array
+         * @param conservatives Pointer to conservative variable array
          */
         KOKKOS_INLINE_FUNCTION
-        virtual void compute_primitives_from_conservatives(Primitives & primitives,
-                                                           const State & conservatives) const = 0;
+        virtual void compute_primitives_from_conservatives(rtype * primitives,
+                                                           const rtype * conservatives) const = 0;
 
         /**
          * @brief Calculate the diffusive flux
@@ -142,7 +142,8 @@ class Physics {
         virtual void calc_diffusive_flux(State & flux) = 0;
     protected:
         PhysicsType type;
-        std::array<rtype, 2> p_bounds;
+        Kokkos::View<rtype [2]> p_bounds;
+        Kokkos::View<rtype [2]>::HostMirror h_p_bounds;
     private:
 };
 
@@ -166,15 +167,16 @@ class Euler : public Physics {
 
         /**
          * @brief Initialize the physics manually.
+         * FOR TESTING PURPOSES ONLY
+         * @param p_min Minimum pressure
+         * @param p_max Maximum pressure
          * @param gamma Gamma
          * @param p_ref Reference pressure
          * @param T_ref Reference temperature
          * @param rho_ref Reference density
          */
-        void init(const rtype & gamma,
-                  const rtype & p_ref,
-                  const rtype & T_ref,
-                  const rtype & rho_ref);
+        void init(rtype p_min, rtype p_max, rtype gamma,
+                  rtype p_ref, rtype T_ref, rtype rho_ref);
 
         /**
          * @brief Print the physics.
@@ -255,12 +257,12 @@ class Euler : public Physics {
 
         /**
          * @brief Compute primitive variables from conservative variables.
-         * @param primitives Primitive variables
-         * @param conservatives Conservative variables
+         * @param primitives Pointer to primitive variable array
+         * @param conservatives Pointer to conservative variable array
          */
         KOKKOS_INLINE_FUNCTION
-        void compute_primitives_from_conservatives(Primitives & primitives,
-                                                   const State & conservatives) const override;
+        void compute_primitives_from_conservatives(rtype * primitives,
+                                                   const rtype * conservatives) const override;
 
         /**
          * @brief Calculate the diffusive flux

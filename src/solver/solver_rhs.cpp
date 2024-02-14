@@ -72,8 +72,8 @@ void Solver::calc_rhs_interior(view_3d * face_solution,
         }
 
         // Compute relevant primitive variables
-        physics->compute_primitives_from_conservatives(primitives_l, conservatives_l);
-        physics->compute_primitives_from_conservatives(primitives_r, conservatives_r);
+        physics->compute_primitives_from_conservatives(primitives_l.data(), conservatives_l.data());
+        physics->compute_primitives_from_conservatives(primitives_r.data(), conservatives_r.data());
 
         // Calculate flux
         riemann_solver->calc_flux(flux, n_unit,

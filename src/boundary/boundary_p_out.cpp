@@ -65,7 +65,7 @@ void BoundaryPOut::apply(view_3d * face_solution,
         }
 
         // Compute relevant primitive variables
-        physics->compute_primitives_from_conservatives(primitives_l, conservatives_l);
+        physics->compute_primitives_from_conservatives(primitives_l.data(), conservatives_l.data());
 
         // Determine if subsonic or supersonic
         rho_l = conservatives_l[0];

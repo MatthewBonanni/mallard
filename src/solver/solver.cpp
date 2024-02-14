@@ -556,8 +556,8 @@ void Solver::update_primitives() {
         for (int i = 0; i < N_CONSERVATIVE; i++) {
             cell_conservatives[i] = conservatives(i_cell, i);
         }
-        physics->compute_primitives_from_conservatives(cell_primitives,
-                                                       cell_conservatives);
+        physics->compute_primitives_from_conservatives(cell_primitives.data(),
+                                                       cell_conservatives.data());
         for (int i = 0; i < N_PRIMITIVE; i++) {
             primitives(i_cell, i) = cell_primitives[i];
         }
