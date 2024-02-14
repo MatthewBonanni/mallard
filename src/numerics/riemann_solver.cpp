@@ -18,6 +18,7 @@
 #include "common_io.h"
 #include "common_math.h"
 
+KOKKOS_INLINE_FUNCTION
 void PVRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
           rtype & p_star, rtype & rho_l_star, rtype & rho_r_star) {
     rtype rho_l = W_l[0];
@@ -54,6 +55,7 @@ void PVRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
     }
 }
 
+KOKKOS_INLINE_FUNCTION
 void TRRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
           rtype & p_star, rtype & rho_l_star, rtype & rho_r_star) {
     rtype rho_l = W_l[0];
@@ -84,6 +86,7 @@ void TRRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
     rho_r_star = rho_r * std::pow(p_star / p_r, 1.0 / gamma_r);
 }
 
+KOKKOS_INLINE_FUNCTION
 void TSRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
           rtype & p_star, rtype & rho_l_star, rtype & rho_r_star) {
     rtype rho_l = W_l[0];
@@ -118,6 +121,7 @@ void TSRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
     rho_r_star = rho_r * (p_star / p_r + gm1_gp1_r) / (gm1_gp1_r * p_star / p_r + 1.0);
 }
 
+KOKKOS_INLINE_FUNCTION
 void ANRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
           rtype & p_star, rtype & rho_l_star, rtype & rho_r_star) {
     rtype rho_l = W_l[0];
