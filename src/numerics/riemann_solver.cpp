@@ -18,7 +18,7 @@
 #include "common_io.h"
 #include "common_math.h"
 
-void PVRS(rtype * W_l, rtype * W_r,
+void PVRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
           rtype & p_star, rtype & rho_l_star, rtype & rho_r_star) {
     rtype rho_l = W_l[0];
     rtype u_l = W_l[1];
@@ -54,7 +54,7 @@ void PVRS(rtype * W_l, rtype * W_r,
     }
 }
 
-void TRRS(rtype * W_l, rtype * W_r,
+void TRRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
           rtype & p_star, rtype & rho_l_star, rtype & rho_r_star) {
     rtype rho_l = W_l[0];
     rtype u_l = W_l[1];
@@ -84,7 +84,7 @@ void TRRS(rtype * W_l, rtype * W_r,
     rho_r_star = rho_r * std::pow(p_star / p_r, 1.0 / gamma_r);
 }
 
-void TSRS(rtype * W_l, rtype * W_r,
+void TSRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
           rtype & p_star, rtype & rho_l_star, rtype & rho_r_star) {
     rtype rho_l = W_l[0];
     rtype u_l = W_l[1];
@@ -118,7 +118,7 @@ void TSRS(rtype * W_l, rtype * W_r,
     rho_r_star = rho_r * (p_star / p_r + gm1_gp1_r) / (gm1_gp1_r * p_star / p_r + 1.0);
 }
 
-void ANRS(rtype * W_l, rtype * W_r,
+void ANRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
           rtype & p_star, rtype & rho_l_star, rtype & rho_r_star) {
     rtype rho_l = W_l[0];
     rtype u_l = W_l[1];
@@ -324,18 +324,8 @@ void HLL::calc_flux(State & flux, const NVector & n_unit,
     flux_r[2] = rho_r * u_r[1] * u_r_n + p_r * n_unit[1];
     flux_r[3] = (rhoE_r + p_r) * u_r_n;
 
-    rtype * W_l = new rtype[4];
-    rtype * W_r = new rtype[4];
-
-    W_l[0] = rho_l;
-    W_l[1] = u_l_n;
-    W_l[2] = p_l;
-    W_l[3] = gamma_l;
-
-    W_r[0] = rho_r;
-    W_r[1] = u_r_n;
-    W_r[2] = p_r;
-    W_r[3] = gamma_r;
+    std::vector<rtype> W_l = {rho_l, u_l_n, p_l, gamma_l};
+    std::vector<rtype> W_r = {rho_r, u_r_n, p_r, gamma_r};
 
     // Solve the pressure in the star region
     rtype p_star, rho_l_star, rho_r_star;
@@ -410,18 +400,8 @@ void HLLC::calc_flux(State & flux, const NVector & n_unit,
     flux_r[2] = rho_r * u_r[1] * u_r_n + p_r * n_unit[1];
     flux_r[3] = (rhoE_r + p_r) * u_r_n;
 
-    rtype * W_l = new rtype[4];
-    rtype * W_r = new rtype[4];
-
-    W_l[0] = rho_l;
-    W_l[1] = u_l_n;
-    W_l[2] = p_l;
-    W_l[3] = gamma_l;
-
-    W_r[0] = rho_r;
-    W_r[1] = u_r_n;
-    W_r[2] = p_r;
-    W_r[3] = gamma_r;
+    std::vector<rtype> W_l = {rho_l, u_l_n, p_l, gamma_l};
+    std::vector<rtype> W_r = {rho_r, u_r_n, p_r, gamma_r};
 
     // Solve the pressure in the star region
     rtype p_star, rho_l_star, rho_r_star;
