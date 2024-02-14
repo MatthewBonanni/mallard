@@ -224,31 +224,33 @@ void Rusanov::calc_flux(State & flux, const NVector & n_unit,
     // Preliminary calculations
     rtype u_l_n = dot<N_DIM>(u_l, n_unit.data());
     rtype u_r_n = dot<N_DIM>(u_r, n_unit.data());
+    rtype ul_dot_ul = dot<N_DIM>(u_l, u_l);
+    rtype ur_dot_ur = dot<N_DIM>(u_r, u_r);
     rtype a_l = std::sqrt(gamma_l * p_l / rho_l);
     rtype a_r = std::sqrt(gamma_r * p_r / rho_r);
-    rtype rhoe_l = h_l * rho_l - p_l;
-    rtype rhoe_r = h_r * rho_r - p_r;
+    rtype rhoE_l = (h_l + 0.5 * ul_dot_ul) * rho_l - p_l;
+    rtype rhoE_r = (h_r + 0.5 * ur_dot_ur) * rho_r - p_r;
 
     State U_l, U_r, flux_l, flux_r;
     U_l[0] = rho_l;
     U_l[1] = rho_l * u_l[0];
     U_l[2] = rho_l * u_l[1];
-    U_l[3] = rhoe_l;
+    U_l[3] = rhoE_l;
 
     U_r[0] = rho_r;
     U_r[1] = rho_r * u_r[0];
     U_r[2] = rho_r * u_r[1];
-    U_r[3] = rhoe_r;
+    U_r[3] = rhoE_r;
 
     flux_l[0] = rho_l * u_l_n;
     flux_l[1] = rho_l * u_l[0] * u_l_n + p_l * n_unit[0];
     flux_l[2] = rho_l * u_l[1] * u_l_n + p_l * n_unit[1];
-    flux_l[3] = (rhoe_l + p_l) * u_l_n;
+    flux_l[3] = (rhoE_l + p_l) * u_l_n;
 
     flux_r[0] = rho_r * u_r_n;
     flux_r[1] = rho_r * u_r[0] * u_r_n + p_r * n_unit[0];
     flux_r[2] = rho_r * u_r[1] * u_r_n + p_r * n_unit[1];
-    flux_r[3] = (rhoe_r + p_r) * u_r_n;
+    flux_r[3] = (rhoE_r + p_r) * u_r_n;
 
     rtype S_max = std::fmax(std::fabs(u_l_n) + a_l, std::fabs(u_r_n) + a_r);
 
@@ -298,29 +300,29 @@ void HLL::calc_flux(State & flux, const NVector & n_unit,
     rtype ur_dot_ur = dot<N_DIM>(u_r, u_r);
     rtype a_l = std::sqrt(gamma_l * p_l / rho_l);
     rtype a_r = std::sqrt(gamma_r * p_r / rho_r);
-    rtype rhoe_l = h_l * rho_l - p_l;
-    rtype rhoe_r = h_r * rho_r - p_r;
+    rtype rhoE_l = (h_l + 0.5 * ul_dot_ul) * rho_l - p_l;
+    rtype rhoE_r = (h_r + 0.5 * ur_dot_ur) * rho_r - p_r;
 
     State U_l, U_r, flux_l, flux_r;
     U_l[0] = rho_l;
     U_l[1] = rho_l * u_l[0];
     U_l[2] = rho_l * u_l[1];
-    U_l[3] = rhoe_l;
+    U_l[3] = rhoE_l;
 
     U_r[0] = rho_r;
     U_r[1] = rho_r * u_r[0];
     U_r[2] = rho_r * u_r[1];
-    U_r[3] = rhoe_r;
+    U_r[3] = rhoE_r;
 
     flux_l[0] = rho_l * u_l_n;
     flux_l[1] = rho_l * u_l[0] * u_l_n + p_l * n_unit[0];
     flux_l[2] = rho_l * u_l[1] * u_l_n + p_l * n_unit[1];
-    flux_l[3] = (rhoe_l + p_l) * u_l_n;
+    flux_l[3] = (rhoE_l + p_l) * u_l_n;
 
     flux_r[0] = rho_r * u_r_n;
     flux_r[1] = rho_r * u_r[0] * u_r_n + p_r * n_unit[0];
     flux_r[2] = rho_r * u_r[1] * u_r_n + p_r * n_unit[1];
-    flux_r[3] = (rhoe_r + p_r) * u_r_n;
+    flux_r[3] = (rhoE_r + p_r) * u_r_n;
 
     rtype * W_l = new rtype[4];
     rtype * W_r = new rtype[4];
@@ -384,29 +386,29 @@ void HLLC::calc_flux(State & flux, const NVector & n_unit,
     rtype ur_dot_ur = dot<N_DIM>(u_r, u_r);
     rtype a_l = std::sqrt(gamma_l * p_l / rho_l);
     rtype a_r = std::sqrt(gamma_r * p_r / rho_r);
-    rtype rhoe_l = h_l * rho_l - p_l;
-    rtype rhoe_r = h_r * rho_r - p_r;
+    rtype rhoE_l = (h_l + 0.5 * ul_dot_ul) * rho_l - p_l;
+    rtype rhoE_r = (h_r + 0.5 * ur_dot_ur) * rho_r - p_r;
 
     State U_l, U_r, flux_l, flux_r;
     U_l[0] = rho_l;
     U_l[1] = rho_l * u_l[0];
     U_l[2] = rho_l * u_l[1];
-    U_l[3] = rhoe_l;
+    U_l[3] = rhoE_l;
 
     U_r[0] = rho_r;
     U_r[1] = rho_r * u_r[0];
     U_r[2] = rho_r * u_r[1];
-    U_r[3] = rhoe_r;
+    U_r[3] = rhoE_r;
 
     flux_l[0] = rho_l * u_l_n;
     flux_l[1] = rho_l * u_l[0] * u_l_n + p_l * n_unit[0];
     flux_l[2] = rho_l * u_l[1] * u_l_n + p_l * n_unit[1];
-    flux_l[3] = (rhoe_l + p_l) * u_l_n;
+    flux_l[3] = (rhoE_l + p_l) * u_l_n;
 
     flux_r[0] = rho_r * u_r_n;
     flux_r[1] = rho_r * u_r[0] * u_r_n + p_r * n_unit[0];
     flux_r[2] = rho_r * u_r[1] * u_r_n + p_r * n_unit[1];
-    flux_r[3] = (rhoe_r + p_r) * u_r_n;
+    flux_r[3] = (rhoE_r + p_r) * u_r_n;
 
     rtype * W_l = new rtype[4];
     rtype * W_r = new rtype[4];
