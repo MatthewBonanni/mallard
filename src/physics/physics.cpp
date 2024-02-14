@@ -133,13 +133,13 @@ rtype Euler::get_pressure_from_density_temperature(const rtype & rho,
 KOKKOS_INLINE_FUNCTION
 rtype Euler::get_pressure_from_density_energy(const rtype & rho,
                                               const rtype & e) const {
-    return std::clamp((gamma - 1.0) * rho * e, p_bounds[0], p_bounds[1]);
+    return Kokkos::fmax(p_bounds[0], Kokkos::fmin(p_bounds[1], (gamma - 1.0) * rho * e));
 }
 
 KOKKOS_INLINE_FUNCTION
 rtype Euler::get_sound_speed_from_pressure_density(const rtype & p,
                                                    const rtype & rho) const {
-    return std::sqrt(gamma * p / rho);
+    return Kokkos::sqrt(gamma * p / rho);
 }
 
 KOKKOS_INLINE_FUNCTION

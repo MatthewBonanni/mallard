@@ -31,8 +31,8 @@ void PVRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
     rtype p_r = W_r[2];
     rtype gamma_r = W_r[3];
 
-    rtype a_l = std::sqrt(gamma_l * p_l / rho_l);
-    rtype a_r = std::sqrt(gamma_r * p_r / rho_r);
+    rtype a_l = Kokkos::sqrt(gamma_l * p_l / rho_l);
+    rtype a_r = Kokkos::sqrt(gamma_r * p_r / rho_r);
 
     bool charac_eqns = false;
     if (charac_eqns) {
@@ -68,8 +68,8 @@ void TRRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
     rtype p_r = W_r[2];
     rtype gamma_r = W_r[3];
 
-    rtype a_l = std::sqrt(gamma_l * p_l / rho_l);
-    rtype a_r = std::sqrt(gamma_r * p_r / rho_r);
+    rtype a_l = Kokkos::sqrt(gamma_l * p_l / rho_l);
+    rtype a_r = Kokkos::sqrt(gamma_r * p_r / rho_r);
 
     rtype z_l = (gamma_l - 1.0) / (2.0 * gamma_l);
     rtype z_r = (gamma_r - 1.0) / (2.0 * gamma_r);
@@ -111,10 +111,10 @@ void TSRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
     rtype p_0 = 0.0;
     p_0 = p_star; // Assume p_star has already been set with PVRS by ANRS procedure!
     // PVRS(W_l, W_r, p_0, rho_l_star, rho_r_star);
-    p_0 = std::fmax(0.0, p_0);
+    p_0 = Kokkos::fmax(0.0, p_0);
 
-    rtype g_l_p_0 = std::sqrt(A_l / (p_0 + B_l));
-    rtype g_r_p_0 = std::sqrt(A_r / (p_0 + B_r));
+    rtype g_l_p_0 = Kokkos::sqrt(A_l / (p_0 + B_l));
+    rtype g_r_p_0 = Kokkos::sqrt(A_r / (p_0 + B_r));
 
     p_star = (g_l_p_0 * p_l + g_r_p_0 * p_r  - (u_r - u_l)) / (g_l_p_0 + g_r_p_0);
     rho_l_star = rho_l * (p_star / p_l + gm1_gp1_l) / (gm1_gp1_l * p_star / p_l + 1.0);
@@ -134,8 +134,8 @@ void ANRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
     rtype p_r = W_r[2];
     rtype gamma_r = W_r[3];
 
-    rtype p_max = std::fmax(p_l, p_r);
-    rtype p_min = std::fmin(p_l, p_r);
+    rtype p_max = Kokkos::fmax(p_l, p_r);
+    rtype p_min = Kokkos::fmin(p_l, p_r);
     rtype q_max = p_max / p_min;
     rtype q_user = 2.0;
 
@@ -183,7 +183,7 @@ void RiemannSolver::check_nan(const State & flux, const NVector & n_unit,
 
     bool nan_detected = false;
     for (int i = 0; i < N_CONSERVATIVE; i++) {
-        if (std::isnan(flux[i])) {
+        if (Kokkos::isnan(flux[i])) {
             nan_detected = true;
             break;
         }
@@ -230,8 +230,8 @@ void Rusanov::calc_flux(State & flux, const NVector & n_unit,
     rtype u_r_n = dot<N_DIM>(u_r, n_unit.data());
     rtype ul_dot_ul = dot<N_DIM>(u_l, u_l);
     rtype ur_dot_ur = dot<N_DIM>(u_r, u_r);
-    rtype a_l = std::sqrt(gamma_l * p_l / rho_l);
-    rtype a_r = std::sqrt(gamma_r * p_r / rho_r);
+    rtype a_l = Kokkos::sqrt(gamma_l * p_l / rho_l);
+    rtype a_r = Kokkos::sqrt(gamma_r * p_r / rho_r);
     rtype rhoE_l = (h_l + 0.5 * ul_dot_ul) * rho_l - p_l;
     rtype rhoE_r = (h_r + 0.5 * ur_dot_ur) * rho_r - p_r;
 
@@ -256,7 +256,7 @@ void Rusanov::calc_flux(State & flux, const NVector & n_unit,
     flux_r[2] = rho_r * u_r[1] * u_r_n + p_r * n_unit[1];
     flux_r[3] = (rhoE_r + p_r) * u_r_n;
 
-    rtype S_max = std::fmax(std::fabs(u_l_n) + a_l, std::fabs(u_r_n) + a_r);
+    rtype S_max = Kokkos::fmax(Kokkos::fabs(u_l_n) + a_l, Kokkos::fabs(u_r_n) + a_r);
 
     for (int i = 0; i < N_CONSERVATIVE; i++) {
         flux[i] = 0.5 * (flux_l[i] + flux_r[i] + S_max * (U_l[i] - U_r[i]));
@@ -302,8 +302,8 @@ void HLL::calc_flux(State & flux, const NVector & n_unit,
     rtype u_r_n = dot<N_DIM>(u_r, n_unit.data());
     rtype ul_dot_ul = dot<N_DIM>(u_l, u_l);
     rtype ur_dot_ur = dot<N_DIM>(u_r, u_r);
-    rtype a_l = std::sqrt(gamma_l * p_l / rho_l);
-    rtype a_r = std::sqrt(gamma_r * p_r / rho_r);
+    rtype a_l = Kokkos::sqrt(gamma_l * p_l / rho_l);
+    rtype a_r = Kokkos::sqrt(gamma_r * p_r / rho_r);
     rtype rhoE_l = (h_l + 0.5 * ul_dot_ul) * rho_l - p_l;
     rtype rhoE_r = (h_r + 0.5 * ur_dot_ur) * rho_r - p_r;
 
@@ -336,8 +336,8 @@ void HLL::calc_flux(State & flux, const NVector & n_unit,
     ANRS(W_l, W_r, p_star, rho_l_star, rho_r_star);
 
     // Estimate the wave speeds
-    rtype q_l = (p_star <= p_l) ? 1.0 : std::sqrt(1.0 + (gamma_l + 1.0) / (2.0 * gamma_l) * (p_star / p_l - 1.0));
-    rtype q_r = (p_star <= p_r) ? 1.0 : std::sqrt(1.0 + (gamma_r + 1.0) / (2.0 * gamma_r) * (p_star / p_r - 1.0));
+    rtype q_l = (p_star <= p_l) ? 1.0 : Kokkos::sqrt(1.0 + (gamma_l + 1.0) / (2.0 * gamma_l) * (p_star / p_l - 1.0));
+    rtype q_r = (p_star <= p_r) ? 1.0 : Kokkos::sqrt(1.0 + (gamma_r + 1.0) / (2.0 * gamma_r) * (p_star / p_r - 1.0));
     rtype S_l = u_l_n - a_l * q_l;
     rtype S_r = u_r_n + a_r * q_r;
     
@@ -378,8 +378,8 @@ void HLLC::calc_flux(State & flux, const NVector & n_unit,
     rtype u_r_n = dot<N_DIM>(u_r, n_unit.data());
     rtype ul_dot_ul = dot<N_DIM>(u_l, u_l);
     rtype ur_dot_ur = dot<N_DIM>(u_r, u_r);
-    rtype a_l = std::sqrt(gamma_l * p_l / rho_l);
-    rtype a_r = std::sqrt(gamma_r * p_r / rho_r);
+    rtype a_l = Kokkos::sqrt(gamma_l * p_l / rho_l);
+    rtype a_r = Kokkos::sqrt(gamma_r * p_r / rho_r);
     rtype rhoE_l = (h_l + 0.5 * ul_dot_ul) * rho_l - p_l;
     rtype rhoE_r = (h_r + 0.5 * ur_dot_ur) * rho_r - p_r;
 
@@ -412,8 +412,8 @@ void HLLC::calc_flux(State & flux, const NVector & n_unit,
     ANRS(W_l, W_r, p_star, rho_l_star, rho_r_star);
 
     // Estimate the wave speeds
-    rtype q_l = (p_star <= p_l) ? 1.0 : std::sqrt(1.0 + (gamma_l + 1.0) / (2.0 * gamma_l) * (p_star / p_l - 1.0));
-    rtype q_r = (p_star <= p_r) ? 1.0 : std::sqrt(1.0 + (gamma_r + 1.0) / (2.0 * gamma_r) * (p_star / p_r - 1.0));
+    rtype q_l = (p_star <= p_l) ? 1.0 : Kokkos::sqrt(1.0 + (gamma_l + 1.0) / (2.0 * gamma_l) * (p_star / p_l - 1.0));
+    rtype q_r = (p_star <= p_r) ? 1.0 : Kokkos::sqrt(1.0 + (gamma_r + 1.0) / (2.0 * gamma_r) * (p_star / p_r - 1.0));
     rtype S_l = u_l_n - a_l * q_l;
     rtype S_r = u_r_n + a_r * q_r;
     rtype S_star = (p_r - p_l + rho_l * u_l_n * (S_l - u_l_n) - rho_r * u_r_n * (S_r - u_r_n)) /

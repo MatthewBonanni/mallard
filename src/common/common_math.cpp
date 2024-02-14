@@ -19,7 +19,7 @@
 #include "KokkosBlas1_update.hpp"
 
 rtype norm_2(const NVector & v) {
-    return std::sqrt(dot<N_DIM>(v.data(), v.data()));
+    return Kokkos::sqrt(dot<N_DIM>(v.data(), v.data()));
 }
 
 NVector unit(const NVector & v) {
@@ -34,9 +34,9 @@ NVector unit(const NVector & v) {
 rtype triangle_area_2(const NVector & v0,
                       const NVector & v1,
                       const NVector & v2) {
-    return 0.5 * std::abs(v0[0] * (v1[1] - v2[1]) +
-                          v1[0] * (v2[1] - v0[1]) +
-                          v2[0] * (v0[1] - v1[1]));
+    return 0.5 * Kokkos::fabs(v0[0] * (v1[1] - v2[1]) +
+                              v1[0] * (v2[1] - v0[1]) +
+                              v2[0] * (v0[1] - v1[1]));
 }
 
 rtype triangle_area_3(const std::array<rtype, 3> & v0,

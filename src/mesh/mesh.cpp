@@ -14,6 +14,8 @@
 #include <iostream>
 #include <cmath>
 
+#include <Kokkos_Core.hpp>
+
 #include "common.h"
 #include "boundary.h"
 
@@ -317,7 +319,7 @@ void Mesh::init_cart(int nx, int ny, rtype Lx, rtype Ly) {
 void Mesh::init_wedge(int nx, int ny, rtype Lx, rtype Ly) {
     init_cart(nx, ny, Lx, Ly);
 
-    rtype wedge_theta = 8 * M_PI / 180.0;
+    rtype wedge_theta = 8 * Kokkos::numbers::pi / 180.0;
     rtype wedge_x = 0.5;
 
     // Adjust node coordinates

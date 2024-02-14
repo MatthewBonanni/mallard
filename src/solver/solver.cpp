@@ -482,13 +482,13 @@ void Solver::check_fields() const {
     bool nan_found = false;
     for (int i = 0; i < mesh->n_cells(); i++) {
         for (int j = 0; j < N_CONSERVATIVE; j++) {
-            if (std::isnan(conservatives(i, j))) {
+            if (Kokkos::isnan(conservatives(i, j))) {
                 nan_found = true;
             }
         }
 
         for (int j = 0; j < N_PRIMITIVE; j++) {
-            if (std::isnan(primitives(i, j))) {
+            if (Kokkos::isnan(primitives(i, j))) {
                 nan_found = true;
             }
         }
@@ -536,6 +536,8 @@ void Solver::print_logo() const {
 }
 
 void Solver::take_step() {
+    /** \todo GPU compatibility - need to manage host and device views */
+    /** \todo MPI implementation */
     time_integrator->take_step(dt,
                                solution_pointers,
                                &face_conservatives,

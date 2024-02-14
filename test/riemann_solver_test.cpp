@@ -10,6 +10,8 @@
  */
 
 #include <gtest/gtest.h>
+#include <Kokkos_Core.hpp>
+
 #include "test_utils.h"
 #include "riemann_solver.h"
 
@@ -79,8 +81,8 @@ TEST(RiemannSolverTest, RusanovFluxXY) {
     rtype gamma = 1.4;
 
     State flux;
-    NVector n_unit = {1.0 / std::sqrt(2.0),
-                      1.0 / std::sqrt(2.0)};
+    NVector n_unit = {1.0 / Kokkos::sqrt(2.0),
+                      1.0 / Kokkos::sqrt(2.0)};
 
     rtype rho_l = 1.0;
     NVector u_l = {0.0, 0.0};
@@ -204,8 +206,8 @@ TEST(RiemannSolverTest, HLLCFluxXY) {
     rtype gamma = 1.4;
 
     State flux;
-    NVector n_unit = {1.0 / std::sqrt(2.0),
-                      1.0 / std::sqrt(2.0)};
+    NVector n_unit = {1.0 / Kokkos::sqrt(2.0),
+                      1.0 / Kokkos::sqrt(2.0)};
 
     rtype rho_l = 1.0;
     NVector u_l = {0.0, 0.0};
