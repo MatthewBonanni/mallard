@@ -25,7 +25,7 @@ rtype norm_2(const NVector & v) {
 NVector unit(const NVector & v) {
     NVector _v = v;
     rtype norm = norm_2(v);
-    for (int i = 0; i < v.size(); ++i) {
+    for (size_t i = 0; i < v.size(); ++i) {
         _v[i] /= norm;
     }
     return _v;
@@ -42,16 +42,19 @@ rtype triangle_area_2(const NVector & v0,
 rtype triangle_area_3(const std::array<rtype, 3> & v0,
                       const std::array<rtype, 3> & v1,
                       const std::array<rtype, 3> & v2) {
+    (void)(v0);
+    (void)(v1);
+    (void)(v2);
     throw std::runtime_error("Not implemented.");
 }
 
-void cA_to_A(const unsigned int nA,
+void cA_to_A(const u_int64_t nA,
              const rtype c, rtype * A) {
     Kokkos::View<rtype *> AA(A, nA);
     KokkosBlas::scal(AA, c, AA);
 }
 
-void cApB_to_B(const unsigned int nA,
+void cApB_to_B(const u_int64_t nA,
                const rtype c, const rtype * A,
                rtype * B) {
     Kokkos::View<const rtype *> AA(A, nA);
@@ -59,7 +62,7 @@ void cApB_to_B(const unsigned int nA,
     KokkosBlas::axpy(c, AA, BB);
 }
 
-void cApB_to_C(const unsigned int nA,
+void cApB_to_C(const u_int64_t nA,
                const rtype c, const rtype * A,
                const rtype * B,
                rtype * C) {
@@ -69,7 +72,7 @@ void cApB_to_C(const unsigned int nA,
     KokkosBlas::update(c, AA, 1.0, BB, 0.0, CC);
 }
 
-void aApbB_to_B(const unsigned int nA,
+void aApbB_to_B(const u_int64_t nA,
                 const rtype a, const rtype * A,
                 const rtype b, rtype * B) {
     Kokkos::View<const rtype *> AA(A, nA);
@@ -77,7 +80,7 @@ void aApbB_to_B(const unsigned int nA,
     KokkosBlas::axpby(a, AA, b, BB);
 }
 
-void aApbB_to_C(const unsigned int nA,
+void aApbB_to_C(const u_int64_t nA,
                 const rtype a, const rtype * A,
                 const rtype b, const rtype * B,
                 rtype * C) {

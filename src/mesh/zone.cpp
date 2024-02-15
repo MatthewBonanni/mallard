@@ -35,11 +35,11 @@ FaceZone::~FaceZone() {
     // Empty
 }
 
-int FaceZone::n_faces() const {
+u_int32_t FaceZone::n_faces() const {
     return m_faces.size();
 }
 
-std::vector<int> * FaceZone::faces() {
+std::vector<u_int32_t> * FaceZone::faces() {
     return &m_faces;
 }
 
@@ -59,11 +59,11 @@ CellZone::~CellZone() {
     // Empty
 }
 
-int CellZone::n_cells() const {
+u_int32_t CellZone::n_cells() const {
     return m_cells.size();
 }
 
-std::vector<int> CellZone::cells() const {
+std::vector<u_int32_t> CellZone::cells() const {
     return m_cells;
 }
 

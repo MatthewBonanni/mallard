@@ -135,11 +135,6 @@ class Physics {
         KOKKOS_INLINE_FUNCTION
         virtual void compute_primitives_from_conservatives(rtype * primitives,
                                                            const rtype * conservatives) const = 0;
-
-        /**
-         * @brief Calculate the diffusive flux
-         */
-        virtual void calc_diffusive_flux(State & flux) = 0;
     protected:
         PhysicsType type;
         Kokkos::View<rtype [2]> p_bounds;
@@ -263,11 +258,6 @@ class Euler : public Physics {
         KOKKOS_INLINE_FUNCTION
         void compute_primitives_from_conservatives(rtype * primitives,
                                                    const rtype * conservatives) const override;
-
-        /**
-         * @brief Calculate the diffusive flux
-         */
-        void calc_diffusive_flux(State & flux) override;
     protected:
     private:
         void set_R_cp_cv();
@@ -276,5 +266,63 @@ class Euler : public Physics {
         rtype p_ref, T_ref, rho_ref;
         rtype R, cp, cv;
 };
+
+KOKKOS_INLINE_FUNCTION
+rtype Euler::get_energy_from_temperature(const rtype & T) const {
+    return cv * T;
+}
+
+KOKKOS_INLINE_FUNCTION
+rtype Euler::get_temperature_from_energy(const rtype & e) const {
+    return e / cv;
+}
+
+KOKKOS_INLINE_FUNCTION
+rtype Euler::get_density_from_pressure_temperature(const rtype & p,
+                                                   const rtype & T) const {
+    return p / (T * R);
+}
+
+KOKKOS_INLINE_FUNCTION
+rtype Euler::get_temperature_from_density_pressure(const rtype & rho,
+                                                   const rtype & p) const {
+    return p / (rho * R);
+}
+
+KOKKOS_INLINE_FUNCTION
+rtype Euler::get_pressure_from_density_temperature(const rtype & rho,
+                                                   const rtype & T) const {
+    return rho * R * T;
+}
+
+KOKKOS_INLINE_FUNCTION
+rtype Euler::get_pressure_from_density_energy(const rtype & rho,
+                                              const rtype & e) const {
+    return Kokkos::fmax(p_bounds(0), Kokkos::fmin(p_bounds(1), (gamma - 1.0) * rho * e));
+}
+
+KOKKOS_INLINE_FUNCTION
+rtype Euler::get_sound_speed_from_pressure_density(const rtype & p,
+                                                   const rtype & rho) const {
+    return Kokkos::sqrt(gamma * p / rho);
+}
+
+KOKKOS_INLINE_FUNCTION
+void Euler::compute_primitives_from_conservatives(rtype * primitives,
+                                                  const rtype * conservatives) const {
+    rtype rho = conservatives[0];
+    rtype u[N_DIM] = {conservatives[1] / rho,
+                      conservatives[2] / rho};
+    rtype E = conservatives[3] / rho;
+    rtype e = E - 0.5 * dot<N_DIM>(u, u);
+    rtype p = get_pressure_from_density_energy(rho, e);
+    rtype T = get_temperature_from_energy(e);
+    rtype h = e + p / rho;
+    primitives[0] = u[0];
+    primitives[1] = u[1];
+    primitives[2] = p;
+    primitives[3] = T;
+    primitives[4] = h;
+}
 
 #endif // PHYSICS_H

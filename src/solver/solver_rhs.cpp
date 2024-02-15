@@ -20,8 +20,8 @@ void Solver::calc_rhs(view_2d * solution,
     calc_rhs_boundaries(face_solution, rhs);
 
     // Divide by cell volume
-    Kokkos::parallel_for(mesh->n_cells(), KOKKOS_LAMBDA(const int i) {
-        for (int j = 0; j < N_CONSERVATIVE; j++) {
+    Kokkos::parallel_for(mesh->n_cells(), KOKKOS_LAMBDA(const u_int32_t i) {
+        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
             (*rhs)(i, j) /= mesh->cell_volume(i);
         }
     });
@@ -31,8 +31,8 @@ void Solver::pre_rhs(view_2d * solution,
                      view_3d * face_solution,
                      view_2d * rhs) {
     // Zero out RHS
-    Kokkos::parallel_for(mesh->n_cells(), KOKKOS_LAMBDA(const int i) {
-        for (int j = 0; j < N_CONSERVATIVE; j++) {
+    Kokkos::parallel_for(mesh->n_cells(), KOKKOS_LAMBDA(const u_int32_t i) {
+        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
             (*rhs)(i, j) = 0.0;
         }
     });
@@ -42,12 +42,14 @@ void Solver::pre_rhs(view_2d * solution,
 
 void Solver::calc_rhs_source(view_2d * solution,
                              view_2d * rhs) {
+    (void)(solution);
+    (void)(rhs);
     /** \todo Implement source terms. */
 }
 
 void Solver::calc_rhs_interior(view_3d * face_solution,
                                view_2d * rhs) {
-    Kokkos::parallel_for(mesh->n_faces(), KOKKOS_LAMBDA(const int i_face) {
+    Kokkos::parallel_for(mesh->n_faces(), KOKKOS_LAMBDA(const u_int32_t i_face) {
         State flux;
         State conservatives_l;
         State conservatives_r;
@@ -61,12 +63,12 @@ void Solver::calc_rhs_interior(view_3d * face_solution,
             return;
         }
 
-        int i_cell_l = mesh->cells_of_face(i_face)[0];
-        int i_cell_r = mesh->cells_of_face(i_face)[1];
+        int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
+        int32_t i_cell_r = mesh->cells_of_face(i_face)[1];
         NVector n_unit = unit(mesh->face_normal(i_face));
 
         // Get face conservatives
-        for (int j = 0; j < N_CONSERVATIVE; j++) {
+        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
             conservatives_l[j] = (*face_solution)(i_face, 0, j);
             conservatives_r[j] = (*face_solution)(i_face, 1, j);
         }
@@ -83,7 +85,7 @@ void Solver::calc_rhs_interior(view_3d * face_solution,
                                   primitives_r[2], physics->get_gamma(), primitives_r[4]);
         
         // Add flux to RHS
-        for (int j = 0; j < N_CONSERVATIVE; j++) {
+        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
             Kokkos::atomic_add(&(*rhs)(i_cell_l, j), -mesh->face_area(i_face) * flux[j]);
             Kokkos::atomic_add(&(*rhs)(i_cell_r, j),  mesh->face_area(i_face) * flux[j]);
         }

@@ -76,17 +76,17 @@ void BoundaryUPT::init(const toml::table & input) {
 
 void BoundaryUPT::apply(view_3d * face_solution,
                         view_2d * rhs) {
-    Kokkos::parallel_for(zone->n_faces(), KOKKOS_LAMBDA(const int i_local) {
+    Kokkos::parallel_for(zone->n_faces(), KOKKOS_LAMBDA(const u_int32_t i_local) {
         State flux;
         State conservatives_l;
         Primitives primitives_l;
 
-        int i_face = (*zone->faces())[i_local];
-        int i_cell_l = mesh->cells_of_face(i_face)[0];
+        u_int32_t i_face = (*zone->faces())[i_local];
+        int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
         NVector n_unit = unit(mesh->face_normal(i_face));
 
         // Get cell conservatives
-        for (int j = 0; j < N_CONSERVATIVE; j++) {
+        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
             conservatives_l[j] = (*face_solution)(i_face, 0, j);
         }
 
@@ -101,7 +101,7 @@ void BoundaryUPT::apply(view_3d * face_solution,
                                   primitives_bc[2], physics->get_gamma(), primitives_bc[4]);
 
         // Add flux to RHS
-        for (int j = 0; j < N_CONSERVATIVE; j++) {
+        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
             Kokkos::atomic_add(&(*rhs)(i_cell_l, j), -mesh->face_area(i_face) * flux[j]);
         }
     });

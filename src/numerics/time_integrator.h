@@ -65,17 +65,17 @@ class TimeIntegrator {
          * @brief Get the number of solution vectors required by the method,
          *        including the actual solution vector and any intermediate
          *        vectors.
-         * @return int Number of solution vectors.
+         * @return u_int8_t Number of solution vectors.
          */
-        int get_n_solution_vectors() const;
+        u_int8_t get_n_solution_vectors() const;
 
         /**
          * @brief Get the number of rhs vectors required by the method,
          *        including the actual rhs vector and any intermediate
          *        vectors.
-         * @return int Number of rhs vectors.
+         * @return u_int8_t Number of rhs vectors.
          */
-        int get_n_rhs_vectors() const;
+        u_int8_t get_n_rhs_vectors() const;
 
         /**
          * @brief Print the time integrator.
@@ -99,8 +99,8 @@ class TimeIntegrator {
                                                   view_2d * rhs)> * calc_rhs) = 0;
     protected:
         TimeIntegratorType type;
-        int n_solution_vectors;
-        int n_rhs_vectors;
+        u_int8_t n_solution_vectors;
+        u_int8_t n_rhs_vectors;
     private:
 };
 

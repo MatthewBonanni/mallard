@@ -31,7 +31,7 @@ void DataWriter::init(const toml::table & input,
                       std::shared_ptr<Mesh> mesh) {
     std::optional<std::string> prefix = input["prefix"].value<std::string>();
     std::optional<std::string> format_str = input["format"].value<std::string>();
-    std::optional<int> interval = input["interval"].value<int>();
+    std::optional<u_int32_t> interval = input["interval"].value<u_int32_t>();
     auto variables = input["variables"];
     const toml::array* arr = variables.as_array();
 
@@ -55,7 +55,6 @@ void DataWriter::init(const toml::table & input,
     this->prefix = prefix.value();
     this->interval = interval.value();
 
-    DataFormat format;
     typename std::unordered_map<std::string, DataFormat>::const_iterator it = FORMAT_TYPES.find(*format_str);
     if (it == FORMAT_TYPES.end()) {
         throw std::runtime_error("DataWriter: Unknown format type: " + *format_str + ".");
@@ -85,7 +84,7 @@ void DataWriter::init(const toml::table & input,
     this->mesh = mesh;
 }
 
-void DataWriter::write(int step, bool force) const {
+void DataWriter::write(u_int32_t step, bool force) const {
     bool write_now = (step % interval == 0) || force;
     if (!write_now) {
         return;
@@ -100,7 +99,7 @@ void DataWriter::write(int step, bool force) const {
     }
 }
 
-void DataWriter::write_vtu(int step) const {
+void DataWriter::write_vtu(u_int32_t step) const {
     std::string filename;
     std::ostringstream stream;
     stream << std::setw(LEN_STEP) << std::setfill('0') << step;
@@ -116,8 +115,8 @@ void DataWriter::write_vtu(int step) const {
 
     std::cout << "Writing data to file: " << filename << std::endl;
 
-    int offset_data = 0;
-    int len_connectivity = 0;
+    u_int64_t offset_data = 0;
+    u_int64_t len_connectivity = 0;
 
     // ---------------------------------------------------------------------------------------------
     // Write header
@@ -160,7 +159,7 @@ void DataWriter::write_vtu(int step) const {
     out << "format=\"appended\" ";
     out << "offset=\"" << offset_data << "\">\n";
     out << "        </DataArray>\n";
-    for (int i = 0; i < mesh->n_cells(); i++) {
+    for (u_int32_t i = 0; i < mesh->n_cells(); i++) {
         len_connectivity += mesh->nodes_of_cell(i).size();
     }
     offset_data += sizeof(int) + len_connectivity * sizeof(int);
@@ -187,7 +186,7 @@ void DataWriter::write_vtu(int step) const {
     // Write appended data
     out << "<AppendedData encoding=\"raw\">\n_";
 
-    int n_bytes;
+    u_int64_t n_bytes;
 
     // Write PointData
     // Do nothing, no point data
@@ -196,7 +195,7 @@ void DataWriter::write_vtu(int step) const {
     n_bytes = sizeof(rtype) * mesh->n_cells();
     for (const auto & data_ptr : data_ptrs) {
         out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
-        for (int i = 0; i < mesh->n_cells(); i++) {
+        for (u_int32_t i = 0; i < mesh->n_cells(); i++) {
             out.write(reinterpret_cast<const char *>(&(*data_ptr)[i]), sizeof(rtype));
         }
     }
@@ -204,8 +203,8 @@ void DataWriter::write_vtu(int step) const {
     // Write Points
     n_bytes = sizeof(rtype) * mesh->n_nodes() * 3;
     out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
-    for (int i = 0; i < mesh->n_nodes(); i++) {
-        for (int j = 0; j < N_DIM; j++) {
+    for (u_int32_t i = 0; i < mesh->n_nodes(); i++) {
+        for (u_int8_t j = 0; j < N_DIM; j++) {
             out.write(reinterpret_cast<const char *>(&mesh->node_coords(i)[j]), sizeof(rtype));
         }
         if (N_DIM == 2) {
@@ -219,8 +218,8 @@ void DataWriter::write_vtu(int step) const {
     // connectivity
     n_bytes = sizeof(int) * len_connectivity;
     out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
-    for (int i = 0; i < mesh->n_cells(); i++) {
-        for (int j = 0; j < mesh->nodes_of_cell(i).size(); j++) {
+    for (u_int32_t i = 0; i < mesh->n_cells(); i++) {
+        for (u_int32_t j = 0; j < mesh->nodes_of_cell(i).size(); j++) {
             out.write(reinterpret_cast<const char *>(&mesh->nodes_of_cell(i)[j]), sizeof(int));
         }
     }
@@ -228,8 +227,8 @@ void DataWriter::write_vtu(int step) const {
     // // offsets
     n_bytes = sizeof(int) * mesh->n_cells();
     out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
-    int offset = 0;
-    for (int i = 0; i < mesh->n_cells(); i++) {
+    u_int64_t offset = 0;
+    for (u_int32_t i = 0; i < mesh->n_cells(); i++) {
         offset += mesh->nodes_of_cell(i).size();
         out.write(reinterpret_cast<const char *>(&offset), sizeof(int));
     }
@@ -237,8 +236,8 @@ void DataWriter::write_vtu(int step) const {
     // // types
     n_bytes = sizeof(int) * mesh->n_cells();
     out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
-    int cell_type = 7;
-    for (int i = 0; i < mesh->n_cells(); i++) {
+    u_int8_t cell_type = 7;
+    for (u_int32_t i = 0; i < mesh->n_cells(); i++) {
         out.write(reinterpret_cast<const char *>(&cell_type), sizeof(int));
     }
 
@@ -249,7 +248,7 @@ void DataWriter::write_vtu(int step) const {
     out.close();
 }
 
-void DataWriter::write_tecplot(int step) const {
+void DataWriter::write_tecplot(u_int32_t step) const {
     std::string filename = prefix + "_" + std::to_string(step) + ".dat";
 
     throw std::runtime_error("DataWriter::write_tecplot not implemented.");

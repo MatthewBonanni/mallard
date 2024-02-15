@@ -35,27 +35,27 @@ void Mesh::set_type(MeshType type) {
     this->type = type;
 }
 
-int Mesh::n_cells() const {
+u_int32_t Mesh::n_cells() const {
     return nx * ny;
 }
 
-int Mesh::n_cells_x() const {
+u_int32_t Mesh::n_cells_x() const {
     return nx;
 }
 
-int Mesh::n_cells_y() const {
+u_int32_t Mesh::n_cells_y() const {
     return ny;
 }
 
-int Mesh::n_nodes() const {
+u_int32_t Mesh::n_nodes() const {
     return (nx + 1) * (ny + 1);
 }
 
-int Mesh::n_faces() const {
+u_int32_t Mesh::n_faces() const {
     return 2 * n_cells() + nx + ny;
 }
 
-int Mesh::n_face_zones() const {
+u_int32_t Mesh::n_face_zones() const {
     return m_face_zones.size();
 }
 
@@ -64,7 +64,7 @@ std::vector<FaceZone> * Mesh::face_zones() {
 }
 
 FaceZone * Mesh::get_face_zone(const std::string& name) {
-    for (int i = 0; i < n_face_zones(); ++i) {
+    for (u_int32_t i = 0; i < n_face_zones(); ++i) {
         if (m_face_zones[i].get_name() == name) {
             return &(m_face_zones[i]);
         }
@@ -72,48 +72,48 @@ FaceZone * Mesh::get_face_zone(const std::string& name) {
     return nullptr;
 }
 
-NVector Mesh::cell_coords(int i_cell) const {
+NVector Mesh::cell_coords(int32_t i_cell) const {
     return m_cell_coords[i_cell];
 }
 
-NVector Mesh::node_coords(int i_node) const {
+NVector Mesh::node_coords(u_int32_t i_node) const {
     return m_node_coords[i_node];
 }
 
-NVector Mesh::face_coords(int i_face) const {
+NVector Mesh::face_coords(u_int32_t i_face) const {
     return m_face_coords[i_face];
 }
 
-rtype Mesh::cell_volume(int i_cell) const {
+rtype Mesh::cell_volume(int32_t i_cell) const {
     return m_cell_volume[i_cell];
 }
 
-rtype Mesh::face_area(int i_face) const {
+rtype Mesh::face_area(u_int32_t i_face) const {
     return m_face_area[i_face];
 }
 
-NVector Mesh::face_normal(int i_face) const {
+NVector Mesh::face_normal(u_int32_t i_face) const {
     return m_face_normals[i_face];
 }
 
-std::array<int, 4> Mesh::nodes_of_cell(int i_cell) const {
+std::array<u_int32_t, 4> Mesh::nodes_of_cell(int32_t i_cell) const {
     return m_nodes_of_cell[i_cell];
 }
 
-std::array<int, 4> Mesh::faces_of_cell(int i_cell) const {
+std::array<u_int32_t, 4> Mesh::faces_of_cell(int32_t i_cell) const {
     return m_faces_of_cell[i_cell];
 }
 
-std::array<int, 2> Mesh::cells_of_face(int i_face) const {
+std::array<int32_t, 2> Mesh::cells_of_face(u_int32_t i_face) const {
     return m_cells_of_face[i_face];
 }
 
-std::array<int, 2> Mesh::nodes_of_face(int i_face) const {
+std::array<u_int32_t, 2> Mesh::nodes_of_face(u_int32_t i_face) const {
     return m_nodes_of_face[i_face];
 }
 
 void Mesh::compute_cell_centroids() {
-    for (int i_cell = 0; i_cell < n_cells(); ++i_cell) {
+    for (u_int32_t i_cell = 0; i_cell < n_cells(); ++i_cell) {
         m_cell_coords[i_cell][0] = 0.25 * (m_node_coords[m_nodes_of_cell[i_cell][0]][0] +
                                            m_node_coords[m_nodes_of_cell[i_cell][1]][0] +
                                            m_node_coords[m_nodes_of_cell[i_cell][2]][0] +
@@ -126,7 +126,7 @@ void Mesh::compute_cell_centroids() {
 }
 
 void Mesh::compute_face_centroids() {
-    for (int i_face = 0; i_face < n_faces(); ++i_face) {
+    for (u_int32_t i_face = 0; i_face < n_faces(); ++i_face) {
         m_face_coords[i_face][0] = 0.5 * (m_node_coords[m_nodes_of_face[i_face][0]][0] +
                                           m_node_coords[m_nodes_of_face[i_face][1]][0]);
         m_face_coords[i_face][1] = 0.5 * (m_node_coords[m_nodes_of_face[i_face][0]][1] +
@@ -135,11 +135,11 @@ void Mesh::compute_face_centroids() {
 }
 
 void Mesh::compute_cell_volumes() {
-    for (int i = 0; i < n_cells(); ++i) {
-        int i_node_0 = m_nodes_of_cell[i][0];
-        int i_node_1 = m_nodes_of_cell[i][1];
-        int i_node_2 = m_nodes_of_cell[i][2];
-        int i_node_3 = m_nodes_of_cell[i][3];
+    for (u_int32_t i_cell = 0; i_cell < n_cells(); ++i_cell) {
+        u_int32_t i_node_0 = m_nodes_of_cell[i_cell][0];
+        u_int32_t i_node_1 = m_nodes_of_cell[i_cell][1];
+        u_int32_t i_node_2 = m_nodes_of_cell[i_cell][2];
+        u_int32_t i_node_3 = m_nodes_of_cell[i_cell][3];
 
         rtype a1 = triangle_area_2(m_node_coords[i_node_0],
                                    m_node_coords[i_node_1],
@@ -147,26 +147,26 @@ void Mesh::compute_cell_volumes() {
         rtype a2 = triangle_area_2(m_node_coords[i_node_0],
                                    m_node_coords[i_node_2],
                                    m_node_coords[i_node_3]);
-        m_cell_volume[i] = a1 + a2;
+        m_cell_volume[i_cell] = a1 + a2;
     }
 }
 
 void Mesh::compute_face_areas() {
-    for (int i = 0; i < n_faces(); ++i) {
-        int i_node_0 = m_nodes_of_face[i][0];
-        int i_node_1 = m_nodes_of_face[i][1];
-        m_face_area[i] = sqrt(pow(m_node_coords[i_node_1][0] -
-                                  m_node_coords[i_node_0][0], 2) +
-                              pow(m_node_coords[i_node_1][1] -
-                                  m_node_coords[i_node_0][1], 2));
+    for (u_int32_t i_face = 0; i_face < n_faces(); ++i_face) {
+        u_int32_t i_node_0 = m_nodes_of_face[i_face][0];
+        u_int32_t i_node_1 = m_nodes_of_face[i_face][1];
+        m_face_area[i_face] = sqrt(pow(m_node_coords[i_node_1][0] -
+                                       m_node_coords[i_node_0][0], 2) +
+                                   pow(m_node_coords[i_node_1][1] -
+                                       m_node_coords[i_node_0][1], 2));
     }
 }
 
 void Mesh::compute_face_normals() {
-    for (int i_face = 0; i_face < n_faces(); ++i_face) {
+    for (u_int32_t i_face = 0; i_face < n_faces(); ++i_face) {
         // Compute normal with area magnitude
-        int i_node_0 = m_nodes_of_face[i_face][0];
-        int i_node_1 = m_nodes_of_face[i_face][1];
+        u_int32_t i_node_0 = m_nodes_of_face[i_face][0];
+        u_int32_t i_node_1 = m_nodes_of_face[i_face][1];
         rtype x0 = m_node_coords[i_node_0][0];
         rtype y0 = m_node_coords[i_node_0][1];
         rtype x1 = m_node_coords[i_node_1][0];
@@ -180,7 +180,7 @@ void Mesh::compute_face_normals() {
         // Flip normal if it points into cell 0
         // (shouln't be necessary for meshes generated by this class,
         // but just in case, for example if the mesh is read from a file)
-        int i_cell_0 = m_cells_of_face[i_face][0];
+        int32_t i_cell_0 = m_cells_of_face[i_face][0];
         rtype x_cell_0 = cell_coords(i_cell_0)[0];
         rtype y_cell_0 = cell_coords(i_cell_0)[1];
         rtype x_face = face_coords(i_face)[0];
@@ -196,7 +196,8 @@ void Mesh::compute_face_normals() {
     }
 }
 
-void Mesh::init_cart(int nx, int ny, rtype Lx, rtype Ly) {
+void Mesh::init_cart(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly) {
+    /** \todo This is a hack for WENO, remove this */
     this->nx = nx;
     this->ny = ny;
 
@@ -215,18 +216,18 @@ void Mesh::init_cart(int nx, int ny, rtype Lx, rtype Ly) {
     rtype dx = Lx / nx;
     rtype dy = Ly / ny;
 
-    for (int i = 0; i < nx + 1; ++i) {
-        for (int j = 0; j < ny + 1; ++j) {
-            int i_node = i * (ny + 1) + j;
+    for (u_int32_t i = 0; i < nx + 1; ++i) {
+        for (u_int32_t j = 0; j < ny + 1; ++j) {
+            u_int32_t i_node = i * (ny + 1) + j;
             m_node_coords[i_node][0] = i * dx;
             m_node_coords[i_node][1] = j * dy;
         }
     }
 
     // Build associations between nodes, cells, and faces
-    for (int i_cell = 0; i_cell < n_cells(); ++i_cell) {
-        int ic = i_cell / ny;
-        int jc = i_cell % ny;
+    for (u_int32_t i_cell = 0; i_cell < n_cells(); ++i_cell) {
+        u_int32_t ic = i_cell / ny;
+        u_int32_t jc = i_cell % ny;
         m_nodes_of_cell[i_cell][0] = (ic + 1) * (ny + 1) + jc + 1; // Top right
         m_nodes_of_cell[i_cell][1] = (ic)     * (ny + 1) + jc + 1; // Top left
         m_nodes_of_cell[i_cell][2] = (ic)     * (ny + 1) + jc;     // Bottom left
@@ -273,10 +274,10 @@ void Mesh::init_cart(int nx, int ny, rtype Lx, rtype Ly) {
     zone_t.set_type(FaceZoneType::BOUNDARY);
     zone_l.set_type(FaceZoneType::BOUNDARY);
     zone_b.set_type(FaceZoneType::BOUNDARY);
-    for (int i_cell = 0; i_cell < n_cells(); i_cell++) {
-        int ic = i_cell / ny;
-        int jc = i_cell % ny;
-        int i_face;
+    for (u_int32_t i_cell = 0; i_cell < n_cells(); i_cell++) {
+        u_int32_t ic = i_cell / ny;
+        u_int32_t jc = i_cell % ny;
+        u_int32_t i_face;
 
         // Right boundary
         if (ic == nx - 1) {
@@ -316,7 +317,7 @@ void Mesh::init_cart(int nx, int ny, rtype Lx, rtype Ly) {
     compute_face_normals();
 }
 
-void Mesh::init_wedge(int nx, int ny, rtype Lx, rtype Ly) {
+void Mesh::init_wedge(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly) {
     init_cart(nx, ny, Lx, Ly);
 
     rtype wedge_theta = 8 * Kokkos::numbers::pi / 180.0;
@@ -326,9 +327,9 @@ void Mesh::init_wedge(int nx, int ny, rtype Lx, rtype Ly) {
     rtype dx = Lx / nx;
     rtype dy = Ly / ny;
 
-    for (int i = 0; i < nx + 1; ++i) {
-        for (int j = 0; j < ny + 1; ++j) {
-            int i_node = i * (ny + 1) + j;
+    for (u_int32_t i = 0; i < nx + 1; ++i) {
+        for (u_int32_t j = 0; j < ny + 1; ++j) {
+            u_int32_t i_node = i * (ny + 1) + j;
             rtype x = i * dx;
             rtype y;
             if (x > wedge_x) {

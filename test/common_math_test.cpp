@@ -131,20 +131,20 @@ TEST(CommonMathTest, TriangleArea2ZeroArea) {
 // }
 
 TEST(CommonMathTest, cA_to_A) {
-    const unsigned int n = 4;
+    const u_int8_t n = 4;
     rtype c = 0.1;
     rtype A[n] = {0.0, 1.0, 2.0, 3.0};
     rtype expected_A[n] = {0.0, 0.1, 0.2, 0.3};
 
     cA_to_A(n, c, A);
 
-    for (unsigned int i = 0; i < n; i++) {
+    for (u_int8_t i = 0; i < n; i++) {
         EXPECT_RTYPE_EQ(expected_A[i], A[i]);
     }
 }
 
 TEST(CommonMathTest, cApB_to_B) {
-    const unsigned int n = 4;
+    const u_int8_t n = 4;
     rtype c = 0.1;
     rtype A[n] = {0.0, 1.0, 2.0, 3.0};
     rtype B[n] = {4.0, 5.0, 6.0, 7.0};
@@ -152,13 +152,13 @@ TEST(CommonMathTest, cApB_to_B) {
 
     cApB_to_B(n, c, A, B);
 
-    for (unsigned int i = 0; i < n; i++) {
+    for (u_int8_t i = 0; i < n; i++) {
         EXPECT_RTYPE_EQ(expected_B[i], B[i]);
     }
 }
 
 TEST(CommonMathTest, cApB_to_C) {
-    const unsigned int n = 4;
+    const u_int8_t n = 4;
     rtype c = 0.1;
     rtype A[n] = {0.0, 1.0, 2.0, 3.0};
     rtype B[n] = {4.0, 5.0, 6.0, 7.0};
@@ -167,13 +167,13 @@ TEST(CommonMathTest, cApB_to_C) {
 
     cApB_to_C(n, c, A, B, actual_C);
 
-    for (unsigned int i = 0; i < n; i++) {
+    for (u_int8_t i = 0; i < n; i++) {
         EXPECT_RTYPE_EQ(expected_C[i], actual_C[i]);
     }
 }
 
 TEST(CommonMathTest, aApbB_to_B) {
-    const unsigned int n = 4;
+    const u_int8_t n = 4;
     rtype a = 0.1;
     rtype A[n] = {0.0, 1.0, 2.0, 3.0};
     rtype b = 0.2;
@@ -182,13 +182,13 @@ TEST(CommonMathTest, aApbB_to_B) {
 
     aApbB_to_B(n, a, A, b, B);
 
-    for (unsigned int i = 0; i < n; i++) {
+    for (u_int8_t i = 0; i < n; i++) {
         EXPECT_RTYPE_EQ(expected_B[i], B[i]);
     }
 }
 
 TEST(CommonMathTest, aApbB_to_C) {
-    const unsigned int n = 4;
+    const u_int8_t n = 4;
     rtype a = 0.1;
     rtype A[n] = {0.0, 1.0, 2.0, 3.0};
     rtype b = 0.2;
@@ -198,7 +198,7 @@ TEST(CommonMathTest, aApbB_to_C) {
 
     aApbB_to_C(n, a, A, b, B, actual_C);
 
-    for (unsigned int i = 0; i < n; i++) {
+    for (u_int8_t i = 0; i < n; i++) {
         EXPECT_RTYPE_EQ(expected_C[i], actual_C[i]);
     }
 }

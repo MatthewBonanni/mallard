@@ -42,7 +42,7 @@ class Data {
          * @param i Index of element to access.
          * @return Reference to element.
          */
-        rtype & operator[](int i) const {
+        rtype & operator[](size_t i) const {
             // Account for size of conservative state arrays
             return m_view(i);
         }

@@ -7,6 +7,10 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
 endif()
 
+# Build options
+add_compile_options(-Wall -Wextra -Wpedantic -Werror)
+
+# Compile-time options
 option(${PROJECT_NAME}_USE_DOUBLES "Use double precision" OFF)
 message(STATUS "Mallard: Double precision: ${${PROJECT_NAME}_USE_DOUBLES}")
 if (${PROJECT_NAME}_USE_DOUBLES)

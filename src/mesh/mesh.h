@@ -65,39 +65,39 @@ class Mesh {
          * @brief Get the number of cells.
          * @return Number of cells.
          */
-        int n_cells() const;
+        u_int32_t n_cells() const;
 
         /**
          * @brief Get the number of cells in the x-direction.
          * @return Number of cells in the x-direction.
          * \todo This is a hack for WENO, remove this
          */
-        int n_cells_x() const;
+        u_int32_t n_cells_x() const;
 
         /**
          * @brief Get the number of cells in the y-direction.
          * @return Number of cells in the y-direction.
          * \todo This is a hack for WENO, remove this
          */
-        int n_cells_y() const;
+        u_int32_t n_cells_y() const;
 
         /**
          * @brief Get the number of nodes.
          * @return Number of nodes.
          */
-        int n_nodes() const;
+        u_int32_t n_nodes() const;
 
         /**
          * @brief Get the number of faces.
          * @return Number of faces.
          */
-        int n_faces() const;
+        u_int32_t n_faces() const;
 
         /**
          * @brief Get the number of face zones.
          * @return Number of face zones.
          */
-        int n_face_zones() const;
+        u_int32_t n_face_zones() const;
 
         /**
          * @brief Get the face zones.
@@ -117,7 +117,7 @@ class Mesh {
          * @param i_cell Index of the cell.
          * @return Coordinates of the cell.
          */
-        NVector cell_coords(int i_cell) const;
+        NVector cell_coords(int32_t i_cell) const;
 
         /**
          * @brief Get the coordinates of a node.
@@ -125,7 +125,7 @@ class Mesh {
          * @param i_node Index of the node.
          * @return Coordinates of the node.
          */
-        NVector node_coords(int i_node) const;
+        NVector node_coords(u_int32_t i_node) const;
 
         /**
          * @brief Get the coordinates of a face.
@@ -133,7 +133,7 @@ class Mesh {
          * @param i_face Index of the face.
          * @return Coordinates of the face.
          */
-        NVector face_coords(int i_face) const;
+        NVector face_coords(u_int32_t i_face) const;
 
         /**
          * @brief Get the volume of a cell.
@@ -141,7 +141,7 @@ class Mesh {
          * @param i_cell Index of the cell.
          * @return Volume of the cell.
          */
-        rtype cell_volume(int i_cell) const;
+        rtype cell_volume(int32_t i_cell) const;
 
         /**
          * @brief Get the area of a face.
@@ -149,7 +149,7 @@ class Mesh {
          * @param i_face Index of the face.
          * @return Area of the face.
          */
-        rtype face_area(int i_face) const;
+        rtype face_area(u_int32_t i_face) const;
 
         /**
          * @brief Get the normal of a face.
@@ -157,7 +157,7 @@ class Mesh {
          * @param i_face Index of the face.
          * @return Unit vector normal to the face.
          */
-        NVector face_normal(int i_face) const;
+        NVector face_normal(u_int32_t i_face) const;
 
         /**
          * @brief Get the nodes comprising a cell.
@@ -165,7 +165,7 @@ class Mesh {
          * @param i_cell Index of the cell.
          * @return Array of node ids comprising the cell.
          */
-        std::array<int, 4> nodes_of_cell(int i_cell) const;
+        std::array<u_int32_t, 4> nodes_of_cell(int32_t i_cell) const;
 
         /**
          * @brief Get the faces comprising a cell.
@@ -173,7 +173,7 @@ class Mesh {
          * @param i_cell Index of the cell.
          * @return Array of face ids comprising the cell.
          */
-        std::array<int, 4> faces_of_cell(int i_cell) const;
+        std::array<u_int32_t, 4> faces_of_cell(int32_t i_cell) const;
 
         /**
          * @brief Get the cells bounding a face.
@@ -181,7 +181,7 @@ class Mesh {
          * @param i_face Index of the face.
          * @return Array of cell ids bounding the face.
          */
-        std::array<int, 2> cells_of_face(int i_face) const;
+        std::array<int32_t, 2> cells_of_face(u_int32_t i_face) const;
 
         /**
          * @brief Get the nodes comprising a face.
@@ -189,7 +189,7 @@ class Mesh {
          * @param i_face Index of the face.
          * @return Array of node ids comprising the face.
          */
-        std::array<int, 2> nodes_of_face(int i_face) const;
+        std::array<u_int32_t, 2> nodes_of_face(u_int32_t i_face) const;
 
         /**
          * @brief Compute cell centroids.
@@ -224,7 +224,7 @@ class Mesh {
          * @param Lx Length of the domain in the x-direction.
          * @param Ly Length of the domain in the y-direction.
          */
-        void init_cart(int nx, int ny, rtype Lx, rtype Ly);
+        void init_cart(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly);
 
         /**
          * @brief Initialize the supersonic wedge mesh.
@@ -234,10 +234,10 @@ class Mesh {
          * @param Lx Length of the domain in the x-direction.
          * @param Ly Length of the domain in the y-direction.
          */
-        void init_wedge(int nx, int ny, rtype Lx, rtype Ly);
+        void init_wedge(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly);
     protected:
     private:
-        int nx, ny;
+        u_int32_t nx, ny; /** \todo This is a hack for WENO, remove this */
         MeshType type;
         std::vector<NVector> m_node_coords;
         std::vector<NVector> m_cell_coords;
@@ -245,10 +245,10 @@ class Mesh {
         std::vector<rtype> m_cell_volume;
         std::vector<rtype> m_face_area;
         std::vector<NVector> m_face_normals;
-        std::vector<std::array<int, 4>> m_nodes_of_cell;
-        std::vector<std::array<int, 4>> m_faces_of_cell;
-        std::vector<std::array<int, 2>> m_cells_of_face;
-        std::vector<std::array<int, 2>> m_nodes_of_face;
+        std::vector<std::array<u_int32_t, 4>> m_nodes_of_cell;
+        std::vector<std::array<u_int32_t, 4>> m_faces_of_cell;
+        std::vector<std::array<int32_t, 2>> m_cells_of_face;
+        std::vector<std::array<u_int32_t, 2>> m_nodes_of_face;
         std::vector<CellZone> m_cell_zones;
         std::vector<FaceZone> m_face_zones;
 };

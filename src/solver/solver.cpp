@@ -91,14 +91,14 @@ void Solver::init_mesh() {
         std::string filename = input["mesh"]["filename"].value_or("mesh.msh");
         throw std::runtime_error("MeshType::FILE not implemented.");
     } else if (type == MeshType::CARTESIAN) {
-        int Nx = input["mesh"]["Nx"].value_or(100);
-        int Ny = input["mesh"]["Ny"].value_or(100);
+        u_int32_t Nx = input["mesh"]["Nx"].value_or(100);
+        u_int32_t Ny = input["mesh"]["Ny"].value_or(100);
         rtype Lx = input["mesh"]["Lx"].value_or(1.0);
         rtype Ly = input["mesh"]["Ly"].value_or(1.0);
         mesh->init_cart(Nx, Ny, Lx, Ly);
     } else if (type == MeshType::WEDGE) {
-        int Nx = input["mesh"]["Nx"].value_or(100);
-        int Ny = input["mesh"]["Ny"].value_or(100);
+        u_int32_t Nx = input["mesh"]["Nx"].value_or(100);
+        u_int32_t Ny = input["mesh"]["Ny"].value_or(100);
         rtype Lx = input["mesh"]["Lx"].value_or(1.0);
         rtype Ly = input["mesh"]["Ly"].value_or(1.0);
         mesh->init_wedge(Nx, Ny, Lx, Ly);
@@ -274,7 +274,7 @@ void Solver::init_run_parameters() {
 
     std::optional<rtype> dt_in = input["run"]["dt"].value<rtype>();
     std::optional<rtype> cfl_in = input["run"]["cfl"].value<rtype>();
-    std::optional<int> n_steps_in = input["run"]["n_steps"].value<int>();
+    std::optional<u_int32_t> n_steps_in = input["run"]["n_steps"].value<u_int32_t>();
     std::optional<rtype> t_stop_in = input["run"]["t_stop"].value<rtype>();
     std::optional<rtype> t_wall_stop_in = input["run"]["t_wall_stop"].value<rtype>();
 
@@ -337,11 +337,11 @@ void Solver::allocate_memory() {
     Kokkos::resize(face_primitives, mesh->n_faces(), 2, N_PRIMITIVE);
 
     solution_pointers.push_back(&conservatives);
-    for (int i = 0; i < time_integrator->get_n_solution_vectors() - 1; i++) {
+    for (u_int8_t i = 0; i < time_integrator->get_n_solution_vectors() - 1; i++) {
         solution_pointers.push_back(new view_2d("solution", mesh->n_cells(), N_CONSERVATIVE));
     }
 
-    for (int i = 0; i < time_integrator->get_n_rhs_vectors(); i++) {
+    for (u_int8_t i = 0; i < time_integrator->get_n_rhs_vectors(); i++) {
         rhs_pointers.push_back(new view_2d("rhs", mesh->n_cells(), N_CONSERVATIVE));
     }
 
@@ -351,12 +351,12 @@ void Solver::allocate_memory() {
 void Solver::register_data() {
     std::cout << "Registering data..." << std::endl;
 
-    for (int i = 0; i < CONSERVATIVE_NAMES.size(); i++) {
+    for (size_t i = 0; i < CONSERVATIVE_NAMES.size(); i++) {
         auto subview = Kokkos::subview(conservatives, Kokkos::ALL(), i);
         data.push_back(Data(CONSERVATIVE_NAMES[i], subview));
     }
 
-    for (int i = 0; i < PRIMITIVE_NAMES.size(); i++) {
+    for (size_t i = 0; i < PRIMITIVE_NAMES.size(); i++) {
         auto subview = Kokkos::subview(primitives, Kokkos::ALL(), i);
         data.push_back(Data(PRIMITIVE_NAMES[i], subview));
     }
@@ -447,11 +447,11 @@ void Solver::do_checks() {
     Primitives max_prim = max_array<5>(primitives);
     Primitives min_prim = min_array<5>(primitives);
 
-    for (int i = 0; i < CONSERVATIVE_NAMES.size(); i++) {
+    for (size_t i = 0; i < CONSERVATIVE_NAMES.size(); i++) {
         print_range(CONSERVATIVE_NAMES[i], min_cons[i], max_cons[i]);
     }
 
-    for (int i = 0; i < PRIMITIVE_NAMES.size(); i++) {
+    for (size_t i = 0; i < PRIMITIVE_NAMES.size(); i++) {
         print_range(PRIMITIVE_NAMES[i], min_prim[i], max_prim[i]);
     }
 
@@ -480,14 +480,14 @@ void Solver::check_fields() const {
     }
 
     bool nan_found = false;
-    for (int i = 0; i < mesh->n_cells(); i++) {
-        for (int j = 0; j < N_CONSERVATIVE; j++) {
+    for (u_int32_t i = 0; i < mesh->n_cells(); i++) {
+        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
             if (Kokkos::isnan(conservatives(i, j))) {
                 nan_found = true;
             }
         }
 
-        for (int j = 0; j < N_PRIMITIVE; j++) {
+        for (u_int16_t j = 0; j < N_PRIMITIVE; j++) {
             if (Kokkos::isnan(primitives(i, j))) {
                 nan_found = true;
             }
@@ -502,11 +502,11 @@ void Solver::check_fields() const {
             msg << "> x: " << mesh->cell_coords(i)[0] << std::endl;
             msg << "> y: " << mesh->cell_coords(i)[1] << std::endl;
             msg << "conservatives:" << std::endl;
-            for (int j = 0; j < N_CONSERVATIVE; j++) {
+            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
                 msg << "> " << CONSERVATIVE_NAMES[j] << ": " << conservatives(i, j) << std::endl;
             }
             msg << "primitives:" << std::endl;
-            for (int j = 0; j < N_PRIMITIVE; j++) {
+            for (u_int16_t j = 0; j < N_PRIMITIVE; j++) {
                 msg << "> " << PRIMITIVE_NAMES[j] << ": " << primitives(i, j) << std::endl;
             }
             throw std::runtime_error(msg.str());
@@ -550,15 +550,15 @@ void Solver::take_step() {
 }
 
 void Solver::update_primitives() {
-    Kokkos::parallel_for(mesh->n_cells(), KOKKOS_LAMBDA(const int i_cell) {
+    Kokkos::parallel_for(mesh->n_cells(), KOKKOS_LAMBDA(const u_int32_t i_cell) {
         State cell_conservatives;
         Primitives cell_primitives;
-        for (int i = 0; i < N_CONSERVATIVE; i++) {
+        for (u_int16_t i = 0; i < N_CONSERVATIVE; i++) {
             cell_conservatives[i] = conservatives(i_cell, i);
         }
         physics->compute_primitives_from_conservatives(cell_primitives.data(),
                                                        cell_conservatives.data());
-        for (int i = 0; i < N_PRIMITIVE; i++) {
+        for (u_int16_t i = 0; i < N_PRIMITIVE; i++) {
             primitives(i_cell, i) = cell_primitives[i];
         }
     });
@@ -579,11 +579,11 @@ void Solver::calc_dt() {
 rtype Solver::calc_spectral_radius() {
     rtype max_spectral_radius = -1.0;
     Kokkos::parallel_reduce(mesh->n_cells(), 
-                            KOKKOS_LAMBDA(const int i_cell, rtype & max_spectral_radius_i) {
-        rtype spectral_radius_convective = 0.0;
-        rtype spectral_radius_acoustic = 0.0;
-        rtype spectral_radius_viscous = 0.0;
-        rtype spectral_radius_heat = 0.0;
+                            KOKKOS_LAMBDA(const u_int32_t i_cell, rtype & max_spectral_radius_i) {
+        rtype spectral_radius_convective;
+        rtype spectral_radius_acoustic;
+        // rtype spectral_radius_viscous;
+        // rtype spectral_radius_heat;
         rtype spectral_radius_overall;
         rtype rho_l, rho_r, p_l, p_r, sos_l, sos_r, sos_f;
         NVector s, u_l, u_r, u_f;
@@ -593,12 +593,12 @@ rtype Solver::calc_spectral_radius() {
 
         spectral_radius_convective = 0.0;
         spectral_radius_acoustic = 0.0;
-        spectral_radius_viscous = 0.0;
-        spectral_radius_heat = 0.0;
+        // spectral_radius_viscous = 0.0;
+        // spectral_radius_heat = 0.0;
 
-        for (int i_face = 0; i_face < mesh->faces_of_cell(i_cell).size(); i_face++) {
-            int i_cell_l = mesh->cells_of_face(i_face)[0];
-            int i_cell_r = mesh->cells_of_face(i_face)[1];
+        for (u_int32_t i_face = 0; i_face < mesh->faces_of_cell(i_cell).size(); i_face++) {
+            int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
+            int32_t i_cell_r = mesh->cells_of_face(i_face)[1];
 
             n_unit = unit(mesh->face_normal(i_face));
 
@@ -623,7 +623,7 @@ rtype Solver::calc_spectral_radius() {
             p_l = primitives(i_cell_l, 2);
             p_r = primitives(i_cell_r, 2);
             sos_l = physics->get_sound_speed_from_pressure_density(p_l, rho_l);
-            sos_r = physics->get_sound_speed_from_pressure_density(p_l, rho_l);
+            sos_r = physics->get_sound_speed_from_pressure_density(p_r, rho_r);
             sos_f = 0.5 * (sos_l + sos_r);
 
             u_f[0] = 0.5 * (u_l[0] + u_r[0]);

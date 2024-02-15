@@ -40,11 +40,11 @@ TEST(TimeIntegratorTest, FE) {
     std::vector<view_2d *> rhs_pointers;
     view_2d * solution;
 
-    for (int i = 0; i < fe.get_n_solution_vectors(); i++) {
+    for (u_int8_t i = 0; i < fe.get_n_solution_vectors(); i++) {
         solution_pointers.push_back(new view_2d("solution", 2, N_CONSERVATIVE));
     }
     Kokkos::resize(face_solution, 2, 2, N_CONSERVATIVE);
-    for (int i = 0; i < fe.get_n_rhs_vectors(); i++) {
+    for (u_int8_t i = 0; i < fe.get_n_rhs_vectors(); i++) {
         rhs_pointers.push_back(new view_2d("rhs", 2, N_CONSERVATIVE));
     }
     solution = solution_pointers[0];
@@ -80,11 +80,11 @@ TEST(TimeIntegratorTest, RK4) {
     std::vector<view_2d *> rhs_pointers;
     view_2d * solution;
 
-    for (int i = 0; i < rk4.get_n_solution_vectors(); i++) {
+    for (u_int8_t i = 0; i < rk4.get_n_solution_vectors(); i++) {
         solution_pointers.push_back(new view_2d("solution", 2, N_CONSERVATIVE));
     }
     Kokkos::resize(face_solution, 2, 2, N_CONSERVATIVE);
-    for (int i = 0; i < rk4.get_n_rhs_vectors(); i++) {
+    for (u_int8_t i = 0; i < rk4.get_n_rhs_vectors(); i++) {
         rhs_pointers.push_back(new view_2d("rhs", 2, N_CONSERVATIVE));
     }
     solution = solution_pointers[0];
@@ -120,11 +120,11 @@ TEST(TimeIntegratorTest, SSPRK3) {
     std::vector<view_2d *> rhs_pointers;
     view_2d * solution;
 
-    for (int i = 0; i < ssprk3.get_n_solution_vectors(); i++) {
+    for (u_int8_t i = 0; i < ssprk3.get_n_solution_vectors(); i++) {
         solution_pointers.push_back(new view_2d("solution", 2, N_CONSERVATIVE));
     }
     Kokkos::resize(face_solution, 2, 2, N_CONSERVATIVE);
-    for (int i = 0; i < ssprk3.get_n_rhs_vectors(); i++) {
+    for (u_int8_t i = 0; i < ssprk3.get_n_rhs_vectors(); i++) {
         rhs_pointers.push_back(new view_2d("rhs", 2, N_CONSERVATIVE));
     }
     solution = solution_pointers[0];

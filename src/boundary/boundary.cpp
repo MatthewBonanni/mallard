@@ -47,10 +47,13 @@ void Boundary::print() {
 }
 
 void Boundary::init(const toml::table & input) {
+    (void)(input);
     throw std::runtime_error("Boundary::init() not implemented.");
 }
 
 void Boundary::apply(view_3d * face_solution,
                      view_2d * rhs) {
+    (void)(face_solution);
+    (void)(rhs);
     throw std::runtime_error("Boundary::apply() not implemented.");
 }

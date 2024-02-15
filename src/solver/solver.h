@@ -216,7 +216,7 @@ class Solver {
                                  view_2d * rhs);
     private:
         toml::table input;
-        int n_steps;
+        u_int32_t n_steps;
         rtype t_stop;
         rtype t_wall_stop;
         bool use_cfl;
@@ -227,7 +227,7 @@ class Solver {
         rtype t_last_check;
         rtype t_wall_0;
         rtype t_wall_last_check;
-        int step;
+        u_int32_t step;
         Kokkos::Timer timer;
 
         // Numerics and physics
@@ -250,7 +250,7 @@ class Solver {
                            view_2d *)> rhs_func;
         
         // Checks
-        int check_interval;
+        u_int32_t check_interval;
         bool check_nan;
 
         // Outputs

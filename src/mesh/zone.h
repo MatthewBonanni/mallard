@@ -72,13 +72,13 @@ class FaceZone : public Zone {
          * @brief Get the number of faces in the zone.
          * @return Number of faces in the zone.
          */
-        int n_faces() const;
+        u_int32_t n_faces() const;
 
         /**
          * @brief Get a pointer to the vector of faces of the zone.
          * @return Faces of the zone.
          */
-        std::vector<int> * faces();
+        std::vector<u_int32_t> * faces();
 
         /**
          * @brief Get the type of the zone.
@@ -93,7 +93,7 @@ class FaceZone : public Zone {
         void set_type(FaceZoneType type);
     protected:
     private:
-        std::vector<int> m_faces;
+        std::vector<u_int32_t> m_faces;
         FaceZoneType type;
 };
 
@@ -113,13 +113,13 @@ class CellZone : public Zone {
          * @brief Get the number of cells in the zone.
          * @return Number of cells in the zone.
          */
-        int n_cells() const;
+        u_int32_t n_cells() const;
 
         /**
          * @brief Get the cells of the zone.
          * @return Cells of the zone.
          */
-        std::vector<int> cells() const;
+        std::vector<u_int32_t> cells() const;
 
         /**
          * @brief Get the type of the zone.
@@ -128,7 +128,7 @@ class CellZone : public Zone {
         CellZoneType type() const;
     protected:
     private:
-        std::vector<int> m_cells;
+        std::vector<u_int32_t> m_cells;
         CellZoneType m_type;
 };
 

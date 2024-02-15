@@ -55,11 +55,11 @@ FirstOrder::~FirstOrder() {
 
 void FirstOrder::calc_face_values(view_2d * solution,
                                   view_3d * face_solution) {
-    Kokkos::parallel_for(mesh->n_faces(), KOKKOS_LAMBDA(const int i_face) {
-        int i_cell_l = mesh->cells_of_face(i_face)[0];
-        int i_cell_r = mesh->cells_of_face(i_face)[1];
+    Kokkos::parallel_for(mesh->n_faces(), KOKKOS_LAMBDA(const u_int32_t i_face) {
+        int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
+        int32_t i_cell_r = mesh->cells_of_face(i_face)[1];
 
-        for (int j = 0; j < N_CONSERVATIVE; j++) {
+        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
             (*face_solution)(i_face, 0, j) = (*solution)(i_cell_l, j);
             if (i_cell_r != -1) {
                 (*face_solution)(i_face, 1, j) = (*solution)(i_cell_r, j);
@@ -78,19 +78,19 @@ WENO3_JS::~WENO3_JS() {
 
 void WENO3_JS::calc_face_values(view_2d * solution,
                                 view_3d * face_solution) {
-    Kokkos::parallel_for(mesh->n_faces(), KOKKOS_LAMBDA(const int i_face) {
+    Kokkos::parallel_for(mesh->n_faces(), KOKKOS_LAMBDA(const u_int32_t i_face) {
         /** \todo This is super hacky, only valid for a 2d uniform cartesian mesh */
 
-        int i_cell_l = mesh->cells_of_face(i_face)[0];
-        int i_cell_r = mesh->cells_of_face(i_face)[1];
+        int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
+        int32_t i_cell_r = mesh->cells_of_face(i_face)[1];
 
         bool is_x_face = false;
         if (fabs(unit(mesh->face_normal(i_face))[0]) > 0.5) {
             is_x_face = true;
         }
 
-        int ic = i_cell_l / mesh->n_cells_y();
-        int jc = i_cell_l % mesh->n_cells_y();
+        u_int32_t ic = i_cell_l / mesh->n_cells_y();
+        u_int32_t jc = i_cell_l % mesh->n_cells_y();
 
         // Handle boundary conditions
         bool is_boundary = false;
@@ -100,14 +100,14 @@ void WENO3_JS::calc_face_values(view_2d * solution,
             is_boundary = (jc < 1 || jc > mesh->n_cells_y() - 2);
         }
         if (is_boundary) {
-            for (int j = 0; j < N_CONSERVATIVE; j++) {
+            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
                 (*face_solution)(i_face, 0, j) = (*solution)(i_cell_l, j);
                 (*face_solution)(i_face, 1, j) = (*solution)(i_cell_r, j);
             }
             return;
         }
 
-        int i_cell_im1, i_cell_i, i_cell_ip1;
+        int32_t i_cell_im1, i_cell_i, i_cell_ip1;
 
         // -------------------------------------------------
         // Left side of face
@@ -122,7 +122,7 @@ void WENO3_JS::calc_face_values(view_2d * solution,
             i_cell_ip1 = i_cell_l + 1;
         }
 
-        for (int j = 0; j < N_CONSERVATIVE; j++) {
+        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
             // Smoothness indicators
             rtype beta_0 = pow((*solution)(i_cell_i,   j) - (*solution)(i_cell_im1, j), 2.0);
             rtype beta_1 = pow((*solution)(i_cell_ip1, j) - (*solution)(i_cell_i,   j), 2.0);
@@ -154,7 +154,7 @@ void WENO3_JS::calc_face_values(view_2d * solution,
             i_cell_ip1 = i_cell_l + 2;
         }
 
-        for (int j = 0; j < N_CONSERVATIVE; j++) {
+        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
             // Smoothness indicators
             rtype beta_0 = pow((*solution)(i_cell_i,   j) - (*solution)(i_cell_im1, j), 2.0);
             rtype beta_1 = pow((*solution)(i_cell_ip1, j) - (*solution)(i_cell_i,   j), 2.0);
@@ -185,19 +185,19 @@ WENO5_JS::~WENO5_JS() {
 
 void WENO5_JS::calc_face_values(view_2d * solution,
                                 view_3d * face_solution) {
-    Kokkos::parallel_for(mesh->n_faces(), KOKKOS_LAMBDA(const int i_face) {
+    Kokkos::parallel_for(mesh->n_faces(), KOKKOS_LAMBDA(const u_int32_t i_face) {
         /** \todo This is super hacky, only valid for a 2d uniform cartesian mesh */
 
-        int i_cell_l = mesh->cells_of_face(i_face)[0];
-        int i_cell_r = mesh->cells_of_face(i_face)[1];
+        int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
+        int32_t i_cell_r = mesh->cells_of_face(i_face)[1];
 
         bool is_x_face = false;
         if (fabs(unit(mesh->face_normal(i_face))[0]) > 0.5) {
             is_x_face = true;
         }
 
-        int ic = i_cell_l / mesh->n_cells_y();
-        int jc = i_cell_l % mesh->n_cells_y();
+        u_int32_t ic = i_cell_l / mesh->n_cells_y();
+        u_int32_t jc = i_cell_l % mesh->n_cells_y();
 
         // Handle boundary conditions
         bool is_boundary = false;
@@ -207,14 +207,14 @@ void WENO5_JS::calc_face_values(view_2d * solution,
             is_boundary = (jc < 2 || jc > mesh->n_cells_y() - 3);
         }
         if (is_boundary) {
-            for (int j = 0; j < N_CONSERVATIVE; j++) {
+            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
                 (*face_solution)(i_face, 0, j) = (*solution)(i_cell_l, j);
                 (*face_solution)(i_face, 1, j) = (*solution)(i_cell_r, j);
             }
             return;
         }
 
-        int i_cell_im2, i_cell_im1, i_cell_i, i_cell_ip1, i_cell_ip2;
+        int32_t i_cell_im2, i_cell_im1, i_cell_i, i_cell_ip1, i_cell_ip2;
 
         // -------------------------------------------------
         // Left side of face
@@ -233,7 +233,7 @@ void WENO5_JS::calc_face_values(view_2d * solution,
             i_cell_ip2 = i_cell_l + 2;
         }
 
-        for (int j = 0; j < N_CONSERVATIVE; j++) {
+        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
             // Smoothness indicators
             rtype beta_0 = 13.0 / 12.0 * pow(        (*solution)(i_cell_im2, j)
                                              - 2.0 * (*solution)(i_cell_im1, j)
@@ -293,7 +293,7 @@ void WENO5_JS::calc_face_values(view_2d * solution,
             i_cell_ip2 = i_cell_l + 3;
         }
 
-        for (int j = 0; j < N_CONSERVATIVE; j++) {
+        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
             // Smoothness indicators
             rtype beta_0 = 13.0 / 12.0 * pow(        (*solution)(i_cell_im2, j)
                                              - 2.0 * (*solution)(i_cell_im1, j)

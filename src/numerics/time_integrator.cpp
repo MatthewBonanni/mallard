@@ -27,11 +27,11 @@ void TimeIntegrator::init() {
     print();
 }
 
-int TimeIntegrator::get_n_solution_vectors() const {
+u_int8_t TimeIntegrator::get_n_solution_vectors() const {
     return n_solution_vectors;
 }
 
-int TimeIntegrator::get_n_rhs_vectors() const {
+u_int8_t TimeIntegrator::get_n_rhs_vectors() const {
     return n_rhs_vectors;
 }
 
@@ -39,16 +39,6 @@ void TimeIntegrator::print() const {
     std::cout << LOG_SEPARATOR << std::endl;
     std::cout << "Time integrator: " << TIME_INTEGRATOR_NAMES.at(type) << std::endl;
     std::cout << LOG_SEPARATOR << std::endl;
-}
-
-void TimeIntegrator::take_step(const rtype & dt,
-                               std::vector<view_2d *> & solution_pointers,
-                               view_3d * face_solution,
-                               std::vector<view_2d *> & rhs_pointers,
-                               std::function<void(view_2d * solution,
-                                                  view_3d * face_solution,
-                                                  view_2d * rhs)> * calc_rhs) {
-    // Empty
 }
 
 FE::FE() {
@@ -70,7 +60,7 @@ void FE::take_step(const rtype & dt,
                                       view_2d * rhs)> * calc_rhs) {
     view_2d * U = solution_pointers[0];
     view_2d * rhs = rhs_pointers[0];
-    const unsigned int n_total = U->extent(0) * U->extent(1);
+    const u_int64_t n_total = U->extent(0) * U->extent(1);
 
     (*calc_rhs)(U, face_solution, rhs);
     cApB_to_B(n_total, dt, rhs->data(), U->data());
@@ -103,7 +93,7 @@ void RK4::take_step(const rtype & dt,
     view_2d * rhs2 = rhs_pointers[1];
     view_2d * rhs3 = rhs_pointers[2];
     view_2d * rhs4 = rhs_pointers[3];
-    const unsigned int n_total = U->extent(0) * U->extent(1);
+    const u_int64_t n_total = U->extent(0) * U->extent(1);
 
     // Calculate k1
     (*calc_rhs)(U, face_solution, rhs1);
@@ -150,7 +140,7 @@ void SSPRK3::take_step(const rtype & dt,
     view_2d * rhs1 = rhs_pointers[0];
     view_2d * rhs2 = rhs_pointers[1];
     view_2d * rhs3 = rhs_pointers[2];
-    const unsigned int n_total = U->extent(0) * U->extent(1);
+    const u_int64_t n_total = U->extent(0) * U->extent(1);
 
     // Calculate k1
     (*calc_rhs)(U, face_solution, rhs1);
@@ -184,6 +174,11 @@ void LSRK4::take_step(const rtype & dt,
                       std::function<void(view_2d * solution,
                                          view_3d * face_solution,
                                          view_2d * rhs)> * calc_rhs) {
+    (void)(dt);
+    (void)(solution_pointers);
+    (void)(face_solution);
+    (void)(rhs_pointers);
+    (void)(calc_rhs);
     throw std::runtime_error("LSRK4 not implemented.");
     /** \todo Implement LSRK4 */
 }
@@ -205,6 +200,11 @@ void LSSSPRK3::take_step(const rtype & dt,
                          std::function<void(view_2d * solution,
                                             view_3d * face_solution,
                                             view_2d * rhs)> * calc_rhs) {
+    (void)(dt);
+    (void)(solution_pointers);
+    (void)(face_solution);
+    (void)(rhs_pointers);
+    (void)(calc_rhs);
     throw std::runtime_error("LSSSPRK3 not implemented.");
     /** \todo Implement LSSSPRK3 */
 }

@@ -27,10 +27,10 @@
  * @tparam N Length of the arrays.
  * @return Dot product.
  */
-template <unsigned int N> KOKKOS_INLINE_FUNCTION
+template <u_int32_t N> KOKKOS_INLINE_FUNCTION
 rtype dot(const rtype * a, const rtype * b) {
     rtype dot = 0.0;
-    for (int i = 0; i < N; i++) {
+    for (u_int32_t i = 0; i < N; i++) {
         dot += a[i] * b[i];
     }
     return dot;
@@ -96,7 +96,7 @@ rtype triangle_area_3(const std::array<rtype, 3>& v0,
  * @param c Scalar.
  * @param A Array.
  */
-void cA_to_A(const unsigned int nA,
+void cA_to_A(const u_int64_t nA,
              const rtype c, rtype * A);
 
 /**
@@ -107,7 +107,7 @@ void cA_to_A(const unsigned int nA,
  * @param A Array.
  * @param B Array.
  */
-void cApB_to_B(const unsigned int nA,
+void cApB_to_B(const u_int64_t nA,
                const rtype c, const rtype * A,
                rtype * B);
 
@@ -120,7 +120,7 @@ void cApB_to_B(const unsigned int nA,
  * @param B Array.
  * @param C Array.
  */
-void cApB_to_C(const unsigned int nA,
+void cApB_to_C(const u_int64_t nA,
                const rtype c, const rtype * A,
                const rtype * B,
                rtype * C);
@@ -134,7 +134,7 @@ void cApB_to_C(const unsigned int nA,
  * @param b Scalar.
  * @param B Array.
  */
-void aApbB_to_B(const unsigned int nA,
+void aApbB_to_B(const u_int64_t nA,
                 const rtype a, const rtype * A,
                 const rtype b, rtype * B);
 
@@ -148,7 +148,7 @@ void aApbB_to_B(const unsigned int nA,
  * @param B Array.
  * @param C Array.
  */
-void aApbB_to_C(const unsigned int nA,
+void aApbB_to_C(const u_int64_t nA,
                 const rtype a, const rtype * A,
                 const rtype b, const rtype * B,
                 rtype * C);
@@ -159,13 +159,13 @@ void aApbB_to_C(const unsigned int nA,
  * @param a Array.
  * @return Maximum of each element.
  */
-template <int N>
+template <u_int32_t N>
 std::array<rtype, N> max_array(const Kokkos::View<rtype **, Kokkos::LayoutRight> & a) {
     std::array<rtype, N> max;
-    for (int i = 0; i < N; ++i) {
+    for (u_int32_t i = 0; i < N; ++i) {
         rtype max_i = a(0, i);
         Kokkos::parallel_reduce(a.extent(0),
-                                KOKKOS_LAMBDA(const int j, rtype & max_j) {
+                                KOKKOS_LAMBDA(const u_int32_t j, rtype & max_j) {
             if (a(j, i) > max_j) {
                 max_j = a(j, i);
             }
@@ -182,13 +182,13 @@ std::array<rtype, N> max_array(const Kokkos::View<rtype **, Kokkos::LayoutRight>
  * @param a Array.
  * @return Minimum of each element.
  */
-template <int N>
+template <u_int32_t N>
 std::array<rtype, N> min_array(const Kokkos::View<rtype **, Kokkos::LayoutRight> & a) {
     std::array<rtype, N> min;
-    for (int i = 0; i < N; ++i) {
+    for (u_int32_t i = 0; i < N; ++i) {
         rtype min_i = a(0, i);
         Kokkos::parallel_reduce(a.extent(0),
-                                KOKKOS_LAMBDA(const int j, rtype & min_j) {
+                                KOKKOS_LAMBDA(const u_int32_t j, rtype & min_j) {
             if (a(j, i) < min_j) {
                 min_j = a(j, i);
             }
