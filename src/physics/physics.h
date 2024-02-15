@@ -16,7 +16,7 @@
 #include <string>
 
 #include <Kokkos_Core.hpp>
-#include <toml++/toml.h>
+#include <toml++/toml.hpp>
 
 #include "common.h"
 

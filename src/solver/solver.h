@@ -17,7 +17,7 @@
 #include <memory>
 #include <functional>
 
-#include <toml++/toml.h>
+#include <toml++/toml.hpp>
 
 #include "mesh.h"
 #include "boundary.h"

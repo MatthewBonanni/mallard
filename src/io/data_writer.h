@@ -12,7 +12,7 @@
 #ifndef DATA_WRITER_H
 #define DATA_WRITER_H
 
-#include <toml++/toml.h>
+#include <toml++/toml.hpp>
 
 #include "data.h"
 #include "mesh.h"

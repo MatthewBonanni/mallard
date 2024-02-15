@@ -13,7 +13,7 @@
 #define RIEMANN_SOLVER_H
 
 #include <Kokkos_Core.hpp>
-#include <toml++/toml.h>
+#include <toml++/toml.hpp>
 
 #include "common_typedef.h"
 

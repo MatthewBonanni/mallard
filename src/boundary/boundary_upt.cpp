@@ -13,7 +13,7 @@
 
 #include <iostream>
 
-#include <toml++/toml.h>
+#include <toml++/toml.hpp>
 
 #include "common.h"
 

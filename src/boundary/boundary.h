@@ -12,7 +12,7 @@
 #ifndef BOUNDARY_H
 #define BOUNDARY_H
 
-#include <toml++/toml.h>
+#include <toml++/toml.hpp>
 
 #include "common.h"
 #include "zone.h"
