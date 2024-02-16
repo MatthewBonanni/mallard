@@ -9,8 +9,15 @@ add_executable(MallardTest
 
 target_include_directories(MallardTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-find_package(GTest REQUIRED)
-target_link_libraries(MallardTest PRIVATE GTest::GTest GTest::Main)
+include(FetchContent)
+FetchContent_Declare(
+  googletest
+  GIT_REPOSITORY https://github.com/google/googletest.git
+  GIT_TAG v1.14.0
+)
+FetchContent_MakeAvailable(googletest)
+
+target_link_libraries(MallardTest PRIVATE gtest_main)
 
 add_dependencies(MallardTest Mallard)
 target_link_libraries(MallardTest PRIVATE tomlplusplus::tomlplusplus)
