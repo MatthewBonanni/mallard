@@ -13,6 +13,23 @@
 #include "test_utils.h"
 #include "physics.h"
 
+TEST(PhysicsTest, SetRCpCv) {
+    Euler physics;
+    rtype p_min = 0.0;
+    rtype p_max = 1e20;
+    rtype gamma = 1.4;
+    rtype p_ref = 101325.0;
+    rtype T_ref = 298.15;
+    rtype rho_ref = 1.225;
+    physics.init(p_min, p_max, gamma, p_ref, T_ref, rho_ref);
+
+    rtype tol = 1e-6;
+    EXPECT_NEAR(physics.get_gamma(), gamma,              tol);
+    EXPECT_NEAR(physics.get_R(),     277.42507366857529, tol);
+    EXPECT_NEAR(physics.get_Cp(),    970.98775784001373, tol);
+    EXPECT_NEAR(physics.get_Cv(),    693.56268417143838, tol);
+}
+
 TEST(PhysicsTest, EulerPrimitivesFromConservatives) {
     Euler physics;
     rtype p_min = 0.0;

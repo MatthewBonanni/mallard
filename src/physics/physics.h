@@ -186,6 +186,27 @@ class Euler : public Physics {
         rtype get_gamma() const override { return gamma; }
 
         /**
+         * @brief Get R
+         * @return R
+         */
+        KOKKOS_INLINE_FUNCTION
+        rtype get_R() const { return R; }
+
+        /**
+         * @brief Get Cp
+         * @return Cp
+         */
+        KOKKOS_INLINE_FUNCTION
+        rtype get_Cp() const { return cp; }
+
+        /**
+         * @brief Get Cv
+         * @return Cv
+         */
+        KOKKOS_INLINE_FUNCTION
+        rtype get_Cv() const { return cv; }
+
+        /**
          * @brief Get energy from temperature.
          * @param T Temperature
          * @return Energy
