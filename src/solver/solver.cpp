@@ -334,6 +334,11 @@ void Solver::allocate_memory() {
     Kokkos::resize(face_conservatives, mesh->n_faces(), 2, N_CONSERVATIVE);
     Kokkos::resize(face_primitives, mesh->n_faces(), 2, N_PRIMITIVE);
 
+    h_conservatives = Kokkos::create_mirror_view(conservatives);
+    h_primitives = Kokkos::create_mirror_view(primitives);
+    h_face_conservatives = Kokkos::create_mirror_view(face_conservatives);
+    h_face_primitives = Kokkos::create_mirror_view(face_primitives);
+
     solution_pointers.push_back(&conservatives);
     for (u_int8_t i = 0; i < time_integrator->get_n_solution_vectors() - 1; i++) {
         solution_pointers.push_back(new view_2d("solution", mesh->n_cells(), N_CONSERVATIVE));
@@ -344,6 +349,20 @@ void Solver::allocate_memory() {
     }
 
     Kokkos::resize(cfl_local, mesh->n_cells());
+}
+
+void Solver::copy_host_to_device() {
+    Kokkos::deep_copy(conservatives, h_conservatives);
+    Kokkos::deep_copy(primitives, h_primitives);
+    Kokkos::deep_copy(face_conservatives, h_face_conservatives);
+    Kokkos::deep_copy(face_primitives, h_face_primitives);
+}
+
+void Solver::copy_device_to_host() {
+    Kokkos::deep_copy(h_conservatives, conservatives);
+    Kokkos::deep_copy(h_primitives, primitives);
+    Kokkos::deep_copy(h_face_conservatives, face_conservatives);
+    Kokkos::deep_copy(h_face_primitives, face_primitives);
 }
 
 void Solver::register_data() {

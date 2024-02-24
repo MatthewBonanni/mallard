@@ -110,6 +110,16 @@ class Solver {
         void allocate_memory();
 
         /**
+         * @brief Copy data from the host to the device.
+         */
+        void copy_host_to_device();
+
+        /**
+         * @brief Copy data from the device to the host.
+         */
+        void copy_device_to_host();
+
+        /**
          * @brief Register the data objects.
          */
         void register_data();
@@ -240,9 +250,13 @@ class Solver {
 
         // Data views
         view_2d conservatives;
+        host_view_2d h_conservatives;
         view_2d primitives;
+        host_view_2d h_primitives;
         view_3d face_conservatives;
+        host_view_3d h_face_conservatives;
         view_3d face_primitives;
+        host_view_3d h_face_primitives;
         std::vector<view_2d *> solution_pointers;
         std::vector<view_2d *> rhs_pointers;
         std::function<void(view_2d *,

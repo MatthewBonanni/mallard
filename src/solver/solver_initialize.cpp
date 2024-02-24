@@ -55,6 +55,8 @@ void Solver::init_solution() {
         // Should never get here due to the enum class.
         throw std::runtime_error("Unknown initialization type: " + type_str + ".");
     }
+
+    copy_host_to_device();
 }
 
 void Solver::init_solution_constant() {
@@ -91,16 +93,16 @@ void Solver::init_solution_constant() {
     rtype rhoE = rho * E;
 
     for (u_int32_t i = 0; i < mesh->n_cells(); ++i) {
-        conservatives(i, 0) = rho;
-        conservatives(i, 1) = rhou_x;
-        conservatives(i, 2) = rhou_y;
-        conservatives(i, 3) = rhoE;
+        h_conservatives(i, 0) = rho;
+        h_conservatives(i, 1) = rhou_x;
+        h_conservatives(i, 2) = rhou_y;
+        h_conservatives(i, 3) = rhoE;
 
-        primitives(i, 0) = u_x;
-        primitives(i, 1) = u_y;
-        primitives(i, 2) = p;
-        primitives(i, 3) = T;
-        primitives(i, 4) = h;
+        h_primitives(i, 0) = u_x;
+        h_primitives(i, 1) = u_y;
+        h_primitives(i, 2) = p;
+        h_primitives(i, 3) = T;
+        h_primitives(i, 4) = h;
     }
 }
 
@@ -182,15 +184,15 @@ void Solver::init_solution_analytical() {
         rhou_y = rho * u_y;
         rhoE = rho * E;
 
-        conservatives(i, 0) = rho;
-        conservatives(i, 1) = rhou_x;
-        conservatives(i, 2) = rhou_y;
-        conservatives(i, 3) = rhoE;
+        h_conservatives(i, 0) = rho;
+        h_conservatives(i, 1) = rhou_x;
+        h_conservatives(i, 2) = rhou_y;
+        h_conservatives(i, 3) = rhoE;
 
-        primitives(i, 0) = u_x;
-        primitives(i, 1) = u_y;
-        primitives(i, 2) = p;
-        primitives(i, 3) = T;
-        primitives(i, 4) = h;
+        h_primitives(i, 0) = u_x;
+        h_primitives(i, 1) = u_y;
+        h_primitives(i, 2) = p;
+        h_primitives(i, 3) = T;
+        h_primitives(i, 4) = h;
     }
 }
