@@ -460,10 +460,10 @@ void Solver::do_checks() {
 
     print_step_info();
 
-    State max_cons = max_array<4>(h_conservatives);
-    State min_cons = min_array<4>(h_conservatives);
-    Primitives max_prim = max_array<5>(h_primitives);
-    Primitives min_prim = min_array<5>(h_primitives);
+    State max_cons = max_array<4>(conservatives);
+    State min_cons = min_array<4>(conservatives);
+    Primitives max_prim = max_array<5>(primitives);
+    Primitives min_prim = min_array<5>(primitives);
 
     for (size_t i = 0; i < CONSERVATIVE_NAMES.size(); i++) {
         print_range(CONSERVATIVE_NAMES[i], min_cons[i], max_cons[i]);
