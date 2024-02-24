@@ -80,7 +80,8 @@ void BoundaryUPT::apply(view_3d * face_solution,
 
         u_int32_t i_face = (*zone->faces())[i_local];
         int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
-        NVector n_unit = unit(mesh->face_normal(i_face));
+        rtype n_unit[N_DIM];
+        unit<N_DIM>(mesh->face_normal(i_face).data(), n_unit);
 
         // Get cell conservatives
         for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
@@ -91,7 +92,7 @@ void BoundaryUPT::apply(view_3d * face_solution,
         physics->compute_primitives_from_conservatives(primitives_l.data(), conservatives_l.data());
 
         // Compute flux
-        riemann_solver->calc_flux(flux.data(), n_unit.data(),
+        riemann_solver->calc_flux(flux.data(), n_unit,
                                   conservatives_l[0], primitives_l.data(),
                                   primitives_l[2], physics->get_gamma(), primitives_l[4],
                                   rho_bc, primitives_bc.data(),

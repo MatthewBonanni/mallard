@@ -18,19 +18,6 @@
 #include "KokkosBlas1_axpby.hpp"
 #include "KokkosBlas1_update.hpp"
 
-rtype norm_2(const NVector & v) {
-    return Kokkos::sqrt(dot<N_DIM>(v.data(), v.data()));
-}
-
-NVector unit(const NVector & v) {
-    NVector _v = v;
-    rtype norm = norm_2(v);
-    for (size_t i = 0; i < v.size(); ++i) {
-        _v[i] /= norm;
-    }
-    return _v;
-}
-
 rtype triangle_area_2(const NVector & v0,
                       const NVector & v1,
                       const NVector & v2) {

@@ -85,7 +85,9 @@ void WENO3_JS::calc_face_values(view_2d * solution,
         int32_t i_cell_r = mesh->cells_of_face(i_face)[1];
 
         bool is_x_face = false;
-        if (fabs(unit(mesh->face_normal(i_face))[0]) > 0.5) {
+        rtype n_unit[N_DIM];
+        unit<N_DIM>(mesh->face_normal(i_face).data(), n_unit);
+        if (Kokkos::fabs(n_unit[0]) > 0.5) {
             is_x_face = true;
         }
 
@@ -192,7 +194,9 @@ void WENO5_JS::calc_face_values(view_2d * solution,
         int32_t i_cell_r = mesh->cells_of_face(i_face)[1];
 
         bool is_x_face = false;
-        if (fabs(unit(mesh->face_normal(i_face))[0]) > 0.5) {
+        rtype n_unit[N_DIM];
+        unit<N_DIM>(mesh->face_normal(i_face).data(), n_unit);
+        if (Kokkos::fabs(n_unit[0]) > 0.5) {
             is_x_face = true;
         }
 

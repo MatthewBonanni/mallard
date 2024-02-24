@@ -65,7 +65,8 @@ void Solver::calc_rhs_interior(view_3d * face_solution,
 
         int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
         int32_t i_cell_r = mesh->cells_of_face(i_face)[1];
-        NVector n_unit = unit(mesh->face_normal(i_face));
+        rtype n_unit[N_DIM];
+        unit<N_DIM>(mesh->face_normal(i_face).data(), n_unit);
 
         // Get face conservatives
         for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
@@ -78,7 +79,7 @@ void Solver::calc_rhs_interior(view_3d * face_solution,
         physics->compute_primitives_from_conservatives(primitives_r.data(), conservatives_r.data());
 
         // Calculate flux
-        riemann_solver->calc_flux(flux.data(), n_unit.data(),
+        riemann_solver->calc_flux(flux.data(), n_unit,
                                   conservatives_l[0], primitives_l.data(),
                                   primitives_l[2], physics->get_gamma(), primitives_l[4],
                                   conservatives_r[0], primitives_r.data(),

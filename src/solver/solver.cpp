@@ -391,6 +391,7 @@ int Solver::run() {
         calc_dt();
         do_checks();
         take_step();
+        copy_device_to_host();
         check_fields();
         write_data();
     }
@@ -459,10 +460,10 @@ void Solver::do_checks() {
 
     print_step_info();
 
-    State max_cons = max_array<4>(conservatives);
-    State min_cons = min_array<4>(conservatives);
-    Primitives max_prim = max_array<5>(primitives);
-    Primitives min_prim = min_array<5>(primitives);
+    State max_cons = max_array<4>(h_conservatives);
+    State min_cons = min_array<4>(h_conservatives);
+    Primitives max_prim = max_array<5>(h_primitives);
+    Primitives min_prim = min_array<5>(h_primitives);
 
     for (size_t i = 0; i < CONSERVATIVE_NAMES.size(); i++) {
         print_range(CONSERVATIVE_NAMES[i], min_cons[i], max_cons[i]);
@@ -499,13 +500,13 @@ void Solver::check_fields() const {
     bool nan_found = false;
     for (u_int32_t i = 0; i < mesh->n_cells(); i++) {
         for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-            if (Kokkos::isnan(conservatives(i, j))) {
+            if (Kokkos::isnan(h_conservatives(i, j))) {
                 nan_found = true;
             }
         }
 
         for (u_int16_t j = 0; j < N_PRIMITIVE; j++) {
-            if (Kokkos::isnan(primitives(i, j))) {
+            if (Kokkos::isnan(h_primitives(i, j))) {
                 nan_found = true;
             }
         }
@@ -520,11 +521,11 @@ void Solver::check_fields() const {
             msg << "> y: " << mesh->cell_coords(i)[1] << std::endl;
             msg << "conservatives:" << std::endl;
             for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-                msg << "> " << CONSERVATIVE_NAMES[j] << ": " << conservatives(i, j) << std::endl;
+                msg << "> " << CONSERVATIVE_NAMES[j] << ": " << h_conservatives(i, j) << std::endl;
             }
             msg << "primitives:" << std::endl;
             for (u_int16_t j = 0; j < N_PRIMITIVE; j++) {
-                msg << "> " << PRIMITIVE_NAMES[j] << ": " << primitives(i, j) << std::endl;
+                msg << "> " << PRIMITIVE_NAMES[j] << ": " << h_primitives(i, j) << std::endl;
             }
             throw std::runtime_error(msg.str());
         }
@@ -568,13 +569,13 @@ void Solver::take_step() {
 
 void Solver::update_primitives() {
     Kokkos::parallel_for(mesh->n_cells(), KOKKOS_LAMBDA(const u_int32_t i_cell) {
-        State cell_conservatives;
-        Primitives cell_primitives;
+        rtype cell_conservatives[N_CONSERVATIVE];
+        rtype cell_primitives[N_PRIMITIVE];
         for (u_int16_t i = 0; i < N_CONSERVATIVE; i++) {
             cell_conservatives[i] = conservatives(i_cell, i);
         }
-        physics->compute_primitives_from_conservatives(cell_primitives.data(),
-                                                       cell_conservatives.data());
+        physics->compute_primitives_from_conservatives(cell_primitives,
+                                                       cell_conservatives);
         for (u_int16_t i = 0; i < N_PRIMITIVE; i++) {
             primitives(i_cell, i) = cell_primitives[i];
         }
@@ -603,10 +604,10 @@ rtype Solver::calc_spectral_radius() {
         // rtype spectral_radius_heat;
         rtype spectral_radius_overall;
         rtype rho_l, rho_r, p_l, p_r, sos_l, sos_r, sos_f;
-        NVector s, u_l, u_r, u_f;
+        rtype s[N_DIM], u_l[N_DIM], u_r[N_DIM], u_f[N_DIM];
         rtype dx_n, u_n;
         rtype geom_factor;
-        NVector n_unit;
+        rtype n_unit[N_DIM];
 
         spectral_radius_convective = 0.0;
         spectral_radius_acoustic = 0.0;
@@ -617,7 +618,7 @@ rtype Solver::calc_spectral_radius() {
             int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
             int32_t i_cell_r = mesh->cells_of_face(i_face)[1];
 
-            n_unit = unit(mesh->face_normal(i_face));
+            unit<N_DIM>(mesh->face_normal(i_face).data(), n_unit);
 
             if (i_cell_r == -1) {
                 // Boundary face, hack
@@ -629,7 +630,7 @@ rtype Solver::calc_spectral_radius() {
                 s[1] = mesh->cell_coords(i_cell_r)[1] - mesh->cell_coords(i_cell_l)[1];
             }
 
-            dx_n = fabs(dot<N_DIM>(s.data(), n_unit.data()));
+            dx_n = Kokkos::fabs(dot<N_DIM>(s, n_unit));
 
             rho_l = conservatives(i_cell_l, 0);
             rho_r = conservatives(i_cell_r, 1);
@@ -645,7 +646,7 @@ rtype Solver::calc_spectral_radius() {
 
             u_f[0] = 0.5 * (u_l[0] + u_r[0]);
             u_f[1] = 0.5 * (u_l[1] + u_r[1]);
-            u_n = fabs(dot<N_DIM>(u_f.data(), n_unit.data()));
+            u_n = Kokkos::fabs(dot<N_DIM>(u_f, n_unit));
 
             spectral_radius_convective += u_n / dx_n;
             spectral_radius_acoustic += pow(sos_f / dx_n, 2.0);
@@ -653,14 +654,14 @@ rtype Solver::calc_spectral_radius() {
 
         geom_factor = 3.0 / mesh->faces_of_cell(i_cell).size();
         spectral_radius_convective *= 1.37 * geom_factor;
-        spectral_radius_acoustic = 1.37 * sqrt(geom_factor * spectral_radius_acoustic);
+        spectral_radius_acoustic = 1.37 * Kokkos::sqrt(geom_factor * spectral_radius_acoustic);
 
         /** \todo Implement viscous and heat spectral radii */
         spectral_radius_overall = spectral_radius_convective + spectral_radius_acoustic;
 
         // Update max spectral radius
-        max_spectral_radius_i = std::max(max_spectral_radius_i,
-                                         spectral_radius_overall);
+        max_spectral_radius_i = Kokkos::max(max_spectral_radius_i,
+                                            spectral_radius_overall);
 
         // Store spectral radius in cfl_local, will be used to compute local cfl
         cfl_local(i_cell) = spectral_radius_overall;

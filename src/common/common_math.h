@@ -52,18 +52,66 @@ rtype dot<3>(const rtype * a, const rtype * b) {
 }
 
 /**
- * @brief Compute the 2-norm of an NVector.
+ * @brief Compute the 2-norm of a vector.
  * @param v Vector.
+ * @tparam N Length of the vector.
  * @return Norm.
  */
-rtype norm_2(const NVector& v);
+template <u_int32_t N> KOKKOS_INLINE_FUNCTION
+rtype norm_2(const rtype * v) {
+    rtype norm = 0.0;
+    for (u_int64_t i = 0; i < N; ++i) {
+        norm += v[i] * v[i];
+    }
+    return Kokkos::sqrt(norm);
+}
+
+// Explicit instantiation for N = 2
+template <> KOKKOS_INLINE_FUNCTION
+rtype norm_2<2>(const rtype * v) {
+    return Kokkos::sqrt(v[0] * v[0] + v[1] * v[1]);
+}
+
+// Explicit instantiation for N = 3
+template <> KOKKOS_INLINE_FUNCTION
+rtype norm_2<3>(const rtype * v) {
+    return Kokkos::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+}
 
 /**
- * @brief Compute the unit vector of an NVector.
+ * @brief Compute the unit vector of a vector.
  * @param v Vector.
- * @return Unit vector.
+ * @param u Unit vector.
+ * @tparam N Length of the vector.
  */
-NVector unit(const NVector & v);
+template <u_int32_t N> KOKKOS_INLINE_FUNCTION
+void unit(const rtype * v, rtype * u) {
+    rtype norm = 0.0;
+    for (u_int64_t i = 0; i < N; ++i) {
+        norm += v[i] * v[i];
+    }
+    norm = Kokkos::sqrt(norm);
+    for (u_int64_t i = 0; i < N; ++i) {
+        u[i] = v[i] / norm;
+    }
+}
+
+// Explicit instantiation for N = 2
+template <> KOKKOS_INLINE_FUNCTION
+void unit<2>(const rtype * v, rtype * u) {
+    rtype norm = norm_2<2>(v);
+    u[0] = v[0] / norm;
+    u[1] = v[1] / norm;
+}
+
+// Explicit instantiation for N = 3
+template <> KOKKOS_INLINE_FUNCTION
+void unit<3>(const rtype * v, rtype * u) {
+    rtype norm = norm_2<3>(v);
+    u[0] = v[0] / norm;
+    u[1] = v[1] / norm;
+    u[2] = v[2] / norm;
+}
 
 /**
  * @brief Compute the area of a triangle from vertices in R^2.

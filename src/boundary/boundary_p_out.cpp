@@ -52,12 +52,12 @@ void BoundaryPOut::apply(view_3d * face_solution,
         Primitives primitives_l;
         rtype rho_l, gamma_l, p_l, T_l, h_l;
         rtype sos_l, u_mag_l;
-        NVector u_l, u_bc, n_unit;
+        rtype u_l[N_DIM], u_bc[N_DIM], n_unit[N_DIM];
         rtype rho_bc, e_bc, p_out, h_bc, T_bc;
         
         u_int32_t i_face = (*zone->faces())[i_local];
         int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
-        n_unit = unit(mesh->face_normal(i_face));
+        unit<N_DIM>(mesh->face_normal(i_face).data(), n_unit);
 
         // Get cell conservatives
         for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
@@ -74,7 +74,7 @@ void BoundaryPOut::apply(view_3d * face_solution,
         p_l = primitives_l[2];
         T_l = primitives_l[3];
         h_l = primitives_l[4];
-        u_mag_l = norm_2(u_l);
+        u_mag_l = norm_2<N_DIM>(u_l);
         gamma_l = physics->get_gamma();
         sos_l = physics->get_sound_speed_from_pressure_density(p_l, rho_l);
         if (u_mag_l < sos_l) {
@@ -87,14 +87,14 @@ void BoundaryPOut::apply(view_3d * face_solution,
         // Extrapolate temperature and velocity, use these to calculate
         // the remaining primitive variables
         T_bc = T_l;
-        u_bc = u_l;
+        FOR_I_DIM u_bc[i] = u_l[i];
         rho_bc = physics->get_density_from_pressure_temperature(p_out, T_bc);
         e_bc = physics->get_energy_from_temperature(T_bc);
         h_bc = e_bc + p_out / rho_bc;
 
-        riemann_solver->calc_flux(flux.data(), n_unit.data(),
-                                  rho_l, u_l.data(), p_l, gamma_l, h_l,
-                                  rho_bc, u_bc.data(), p_out, gamma_l, h_bc);
+        riemann_solver->calc_flux(flux.data(), n_unit,
+                                  rho_l, u_l, p_l, gamma_l, h_l,
+                                  rho_bc, u_bc, p_out, gamma_l, h_bc);
 
         // Add flux to RHS
         for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {

@@ -39,7 +39,7 @@ TEST(CommonMathTest, Norm2) {
     NVector v = {3.0, 4.0};
 
     rtype expected_norm = 5.0;
-    rtype actual_norm = norm_2(v);
+    rtype actual_norm = norm_2<2>(v.data());
 
     EXPECT_RTYPE_EQ(expected_norm, actual_norm);
 }
@@ -48,7 +48,8 @@ TEST(CommonMathTest, Unit) {
     NVector v = {3.0, 4.0};
 
     NVector expected_unit = {0.6, 0.8};
-    NVector actual_unit = unit(v);
+    NVector actual_unit;
+    unit<2>(v.data(), actual_unit.data());
 
     EXPECT_RTYPE_EQ(expected_unit[0], actual_unit[0]);
     EXPECT_RTYPE_EQ(expected_unit[1], actual_unit[1]);
@@ -58,7 +59,8 @@ TEST(CommonMathTest, UnitNegative) {
     NVector v = {-3.0, -4.0};
 
     NVector expected_unit = {-0.6, -0.8};
-    NVector actual_unit = unit(v);
+    NVector actual_unit;
+    unit<2>(v.data(), actual_unit.data());
 
     EXPECT_RTYPE_EQ(expected_unit[0], actual_unit[0]);
     EXPECT_RTYPE_EQ(expected_unit[1], actual_unit[1]);

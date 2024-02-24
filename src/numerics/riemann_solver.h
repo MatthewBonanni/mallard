@@ -292,16 +292,16 @@ void TRRS(const rtype * W_l, const rtype * W_r,
     rtype z_l = (gamma_l - 1.0) / (2.0 * gamma_l);
     rtype z_r = (gamma_r - 1.0) / (2.0 * gamma_r);
 
-    rtype P_lr = std::pow((p_l / p_r), z_l);
+    rtype P_lr = Kokkos::pow((p_l / p_r), z_l);
     rtype u_star = (P_lr * u_l / a_l + u_r / a_r + 2.0 * (1.0 - P_lr) / (gamma_l - 1.0)) /
                    (P_lr / a_l + 1.0 / a_r);
 
-    p_star = 0.5 * (p_l * std::pow((1.0 + (gamma_l - 1.0) / (2.0 * a_l) * (u_l - u_star)),
-                                   (1.0 / z_l)) +
-                    p_r * std::pow((1.0 + (gamma_r - 1.0) / (2.0 * a_r) * (u_star - u_r)),
-                                   (1.0 / z_r)));
-    rho_l_star = rho_l * std::pow(p_star / p_l, 1.0 / gamma_l);
-    rho_r_star = rho_r * std::pow(p_star / p_r, 1.0 / gamma_r);
+    p_star = 0.5 * (p_l * Kokkos::pow((1.0 + (gamma_l - 1.0) / (2.0 * a_l) * (u_l - u_star)),
+                                      (1.0 / z_l)) +
+                    p_r * Kokkos::pow((1.0 + (gamma_r - 1.0) / (2.0 * a_r) * (u_star - u_r)),
+                                      (1.0 / z_r)));
+    rho_l_star = rho_l * Kokkos::pow(p_star / p_l, 1.0 / gamma_l);
+    rho_r_star = rho_r * Kokkos::pow(p_star / p_r, 1.0 / gamma_r);
 }
 
 KOKKOS_INLINE_FUNCTION
@@ -428,7 +428,7 @@ void Roe::calc_flux(rtype * flux, const rtype * n_unit,
     (void)(p_r);
     (void)(gamma_r);
     (void)(h_r);
-    throw std::runtime_error("Roe Riemann solver not implemented.");
+    // throw std::runtime_error("Roe Riemann solver not implemented.");
     /** \todo Implement Roe Riemann solver */
 }
 
@@ -568,7 +568,7 @@ void HLLC::calc_flux(rtype * flux, const rtype * n_unit,
             flux[i] = flux_r[i];
         }
     } else {
-        State D_star = {0.0, n_unit[0], n_unit[1], S_star};
+        rtype D_star[N_CONSERVATIVE] = {0.0, n_unit[0], n_unit[1], S_star};
         rtype P_lr = 0.5 * (p_l + p_r +
                             rho_l * (S_l - u_l_n) * (S_star - u_l_n) +
                             rho_r * (S_r - u_r_n) * (S_star - u_r_n));

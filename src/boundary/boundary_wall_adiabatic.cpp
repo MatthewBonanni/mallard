@@ -42,7 +42,8 @@ void BoundaryWallAdiabatic::apply(view_3d * face_solution,
 
         u_int32_t i_face = (*zone->faces())[i_local];
         int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
-        NVector n_unit = unit(mesh->face_normal(i_face));
+        rtype n_unit[N_DIM];
+        unit<N_DIM>(mesh->face_normal(i_face).data(), n_unit);
 
         // Get cell conservatives
         for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {

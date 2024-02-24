@@ -40,11 +40,11 @@ void BoundarySymmetry::apply(view_3d * face_solution,
         State conservatives_l;
         Primitives primitives_l, primitives_r;
         rtype u_n;
-        NVector u_l, u_r, n_unit;
+        rtype u_l[N_DIM], u_r[N_DIM], n_unit[N_DIM];
 
         u_int32_t i_face = (*zone->faces())[i_local];
         int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
-        n_unit = unit(mesh->face_normal(i_face));
+        unit<N_DIM>(mesh->face_normal(i_face).data(), n_unit);
 
         // Get cell conservatives
         for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
@@ -58,7 +58,7 @@ void BoundarySymmetry::apply(view_3d * face_solution,
         primitives_r = primitives_l;
         u_l[0] = primitives_l[0];
         u_l[1] = primitives_l[1];
-        u_n = dot<N_DIM>(u_l.data(), n_unit.data());
+        u_n = dot<N_DIM>(u_l, n_unit);
         for (u_int8_t j = 0; j < N_DIM; j++) {
             u_r[j] = u_l[j] - 2.0 * u_n * n_unit[j];
         }
@@ -66,7 +66,7 @@ void BoundarySymmetry::apply(view_3d * face_solution,
         primitives_r[1] = u_r[1];
 
         // Calculate flux
-        riemann_solver->calc_flux(flux.data(), n_unit.data(),
+        riemann_solver->calc_flux(flux.data(), n_unit,
                                   conservatives_l[0], primitives_l.data(),
                                   primitives_l[2], physics->get_gamma(), primitives_l[4],
                                   conservatives_l[0], primitives_r.data(),
