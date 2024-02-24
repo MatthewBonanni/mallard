@@ -224,6 +224,15 @@ class Solver {
          */
         void calc_rhs_boundaries(view_3d * face_solution,
                                  view_2d * rhs);
+        
+        view_2d conservatives;
+        host_view_2d h_conservatives;
+        view_2d primitives;
+        host_view_2d h_primitives;
+        view_3d face_conservatives;
+        host_view_3d h_face_conservatives;
+        view_3d face_primitives;
+        host_view_3d h_face_primitives;
     private:
         toml::value input;
         u_int32_t n_steps;
@@ -249,14 +258,6 @@ class Solver {
         std::shared_ptr<Physics> physics;
 
         // Data views
-        view_2d conservatives;
-        host_view_2d h_conservatives;
-        view_2d primitives;
-        host_view_2d h_primitives;
-        view_3d face_conservatives;
-        host_view_3d h_face_conservatives;
-        view_3d face_primitives;
-        host_view_3d h_face_primitives;
         std::vector<view_2d *> solution_pointers;
         std::vector<view_2d *> rhs_pointers;
         std::function<void(view_2d *,
