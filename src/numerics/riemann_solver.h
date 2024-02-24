@@ -80,7 +80,7 @@ class RiemannSolver {
          * @param h_r Right enthalpy.
          */
         KOKKOS_INLINE_FUNCTION
-        virtual void calc_flux(State & flux, const NVector & n_unit,
+        virtual void calc_flux(rtype * flux, const rtype * n_unit,
                                const rtype rho_l, const rtype * u_l,
                                const rtype p_l, const rtype gamma_l, const rtype h_l,
                                const rtype rho_r, const rtype * u_r,
@@ -118,7 +118,7 @@ class Rusanov : public RiemannSolver {
          * @param h_r Right enthalpy.
          */
         KOKKOS_INLINE_FUNCTION
-        void calc_flux(State & flux, const NVector & n_unit,
+        void calc_flux(rtype * flux, const rtype * n_unit,
                        const rtype rho_l, const rtype * u_l,
                        const rtype p_l, const rtype gamma_l, const rtype h_l,
                        const rtype rho_r, const rtype * u_r,
@@ -155,7 +155,7 @@ class Roe : public RiemannSolver {
          * @param h_r Right enthalpy.
          */
         KOKKOS_INLINE_FUNCTION
-        void calc_flux(State & flux, const NVector & n_unit,
+        void calc_flux(rtype * flux, const rtype * n_unit,
                        const rtype rho_l, const rtype * u_l,
                        const rtype p_l, const rtype gamma_l, const rtype h_l,
                        const rtype rho_r, const rtype * u_r,
@@ -192,7 +192,7 @@ class HLL : public RiemannSolver {
          * @param h_r Right enthalpy.
          */
         KOKKOS_INLINE_FUNCTION
-        void calc_flux(State & flux, const NVector & n_unit,
+        void calc_flux(rtype * flux, const rtype * n_unit,
                        const rtype rho_l, const rtype * u_l,
                        const rtype p_l, const rtype gamma_l, const rtype h_l,
                        const rtype rho_r, const rtype * u_r,
@@ -227,7 +227,7 @@ class HLLC : public RiemannSolver {
          * @param h_r Right enthalpy.
          */
         KOKKOS_INLINE_FUNCTION
-        void calc_flux(State & flux, const NVector & n_unit,
+        void calc_flux(rtype * flux, const rtype * n_unit,
                        const rtype rho_l, const rtype * u_l,
                        const rtype p_l, const rtype gamma_l, const rtype h_l,
                        const rtype rho_r, const rtype * u_r,
@@ -237,7 +237,7 @@ class HLLC : public RiemannSolver {
 };
 
 KOKKOS_INLINE_FUNCTION
-void PVRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
+void PVRS(const rtype * W_l, const rtype * W_r,
           rtype & p_star, rtype & rho_l_star, rtype & rho_r_star) {
     rtype rho_l = W_l[0];
     rtype u_l = W_l[1];
@@ -274,7 +274,7 @@ void PVRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
 }
 
 KOKKOS_INLINE_FUNCTION
-void TRRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
+void TRRS(const rtype * W_l, const rtype * W_r,
           rtype & p_star, rtype & rho_l_star, rtype & rho_r_star) {
     rtype rho_l = W_l[0];
     rtype u_l = W_l[1];
@@ -305,7 +305,7 @@ void TRRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
 }
 
 KOKKOS_INLINE_FUNCTION
-void TSRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
+void TSRS(const rtype * W_l, const rtype * W_r,
           rtype & p_star, rtype & rho_l_star, rtype & rho_r_star) {
     rtype rho_l = W_l[0];
     rtype u_l = W_l[1];
@@ -340,7 +340,7 @@ void TSRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
 }
 
 KOKKOS_INLINE_FUNCTION
-void ANRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
+void ANRS(const rtype * W_l, const rtype * W_r,
           rtype & p_star, rtype & rho_l_star, rtype & rho_r_star) {
     rtype p_l = W_l[2];
     rtype p_r = W_r[2];
@@ -363,14 +363,14 @@ void ANRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
 }
 
 KOKKOS_INLINE_FUNCTION
-void Rusanov::calc_flux(State & flux, const NVector & n_unit,
+void Rusanov::calc_flux(rtype * flux, const rtype * n_unit,
                         const rtype rho_l, const rtype * u_l,
                         const rtype p_l, const rtype gamma_l, const rtype h_l,
                         const rtype rho_r, const rtype * u_r,
                         const rtype p_r, const rtype gamma_r, const rtype h_r) {
     // Preliminary calculations
-    rtype u_l_n = dot<N_DIM>(u_l, n_unit.data());
-    rtype u_r_n = dot<N_DIM>(u_r, n_unit.data());
+    rtype u_l_n = dot<N_DIM>(u_l, n_unit);
+    rtype u_r_n = dot<N_DIM>(u_r, n_unit);
     rtype ul_dot_ul = dot<N_DIM>(u_l, u_l);
     rtype ur_dot_ur = dot<N_DIM>(u_r, u_r);
     rtype a_l = Kokkos::sqrt(gamma_l * p_l / rho_l);
@@ -378,7 +378,11 @@ void Rusanov::calc_flux(State & flux, const NVector & n_unit,
     rtype rhoE_l = (h_l + 0.5 * ul_dot_ul) * rho_l - p_l;
     rtype rhoE_r = (h_r + 0.5 * ur_dot_ur) * rho_r - p_r;
 
-    State U_l, U_r, flux_l, flux_r;
+    rtype U_l[N_CONSERVATIVE];
+    rtype U_r[N_CONSERVATIVE];
+    rtype flux_l[N_CONSERVATIVE];
+    rtype flux_r[N_CONSERVATIVE];
+
     U_l[0] = rho_l;
     U_l[1] = rho_l * u_l[0];
     U_l[2] = rho_l * u_l[1];
@@ -407,7 +411,7 @@ void Rusanov::calc_flux(State & flux, const NVector & n_unit,
 }
 
 KOKKOS_INLINE_FUNCTION
-void Roe::calc_flux(State & flux, const NVector & n_unit,
+void Roe::calc_flux(rtype * flux, const rtype * n_unit,
                     const rtype rho_l, const rtype * u_l,
                     const rtype p_l, const rtype gamma_l, const rtype h_l,
                     const rtype rho_r, const rtype * u_r,
@@ -429,14 +433,14 @@ void Roe::calc_flux(State & flux, const NVector & n_unit,
 }
 
 KOKKOS_INLINE_FUNCTION
-void HLL::calc_flux(State & flux, const NVector & n_unit,
+void HLL::calc_flux(rtype * flux, const rtype * n_unit,
                     const rtype rho_l, const rtype * u_l,
                     const rtype p_l, const rtype gamma_l, const rtype h_l,
                     const rtype rho_r, const rtype * u_r,
                     const rtype p_r, const rtype gamma_r, const rtype h_r) {
     // Preliminary calculations
-    rtype u_l_n = dot<N_DIM>(u_l, n_unit.data());
-    rtype u_r_n = dot<N_DIM>(u_r, n_unit.data());
+    rtype u_l_n = dot<N_DIM>(u_l, n_unit);
+    rtype u_r_n = dot<N_DIM>(u_r, n_unit);
     rtype ul_dot_ul = dot<N_DIM>(u_l, u_l);
     rtype ur_dot_ur = dot<N_DIM>(u_r, u_r);
     rtype a_l = Kokkos::sqrt(gamma_l * p_l / rho_l);
@@ -444,7 +448,11 @@ void HLL::calc_flux(State & flux, const NVector & n_unit,
     rtype rhoE_l = (h_l + 0.5 * ul_dot_ul) * rho_l - p_l;
     rtype rhoE_r = (h_r + 0.5 * ur_dot_ur) * rho_r - p_r;
 
-    State U_l, U_r, flux_l, flux_r;
+    rtype U_l[N_CONSERVATIVE];
+    rtype U_r[N_CONSERVATIVE];
+    rtype flux_l[N_CONSERVATIVE];
+    rtype flux_r[N_CONSERVATIVE];
+
     U_l[0] = rho_l;
     U_l[1] = rho_l * u_l[0];
     U_l[2] = rho_l * u_l[1];
@@ -465,8 +473,8 @@ void HLL::calc_flux(State & flux, const NVector & n_unit,
     flux_r[2] = rho_r * u_r[1] * u_r_n + p_r * n_unit[1];
     flux_r[3] = (rhoE_r + p_r) * u_r_n;
 
-    std::vector<rtype> W_l = {rho_l, u_l_n, p_l, gamma_l};
-    std::vector<rtype> W_r = {rho_r, u_r_n, p_r, gamma_r};
+    rtype W_l[N_CONSERVATIVE] = {rho_l, u_l_n, p_l, gamma_l};
+    rtype W_r[N_CONSERVATIVE] = {rho_r, u_r_n, p_r, gamma_r};
 
     // Solve the pressure in the star region
     rtype p_star, rho_l_star, rho_r_star;
@@ -495,14 +503,14 @@ void HLL::calc_flux(State & flux, const NVector & n_unit,
 }
 
 KOKKOS_INLINE_FUNCTION
-void HLLC::calc_flux(State & flux, const NVector & n_unit,
+void HLLC::calc_flux(rtype * flux, const rtype * n_unit,
                      const rtype rho_l, const rtype * u_l,
                      const rtype p_l, const rtype gamma_l, const rtype h_l,
                      const rtype rho_r, const rtype * u_r,
                      const rtype p_r, const rtype gamma_r, const rtype h_r) {
     // Preliminary calculations
-    rtype u_l_n = dot<N_DIM>(u_l, n_unit.data());
-    rtype u_r_n = dot<N_DIM>(u_r, n_unit.data());
+    rtype u_l_n = dot<N_DIM>(u_l, n_unit);
+    rtype u_r_n = dot<N_DIM>(u_r, n_unit);
     rtype ul_dot_ul = dot<N_DIM>(u_l, u_l);
     rtype ur_dot_ur = dot<N_DIM>(u_r, u_r);
     rtype a_l = Kokkos::sqrt(gamma_l * p_l / rho_l);
@@ -510,7 +518,11 @@ void HLLC::calc_flux(State & flux, const NVector & n_unit,
     rtype rhoE_l = (h_l + 0.5 * ul_dot_ul) * rho_l - p_l;
     rtype rhoE_r = (h_r + 0.5 * ur_dot_ur) * rho_r - p_r;
 
-    State U_l, U_r, flux_l, flux_r;
+    rtype U_l[N_CONSERVATIVE];
+    rtype U_r[N_CONSERVATIVE];
+    rtype flux_l[N_CONSERVATIVE];
+    rtype flux_r[N_CONSERVATIVE];
+
     U_l[0] = rho_l;
     U_l[1] = rho_l * u_l[0];
     U_l[2] = rho_l * u_l[1];
@@ -531,8 +543,8 @@ void HLLC::calc_flux(State & flux, const NVector & n_unit,
     flux_r[2] = rho_r * u_r[1] * u_r_n + p_r * n_unit[1];
     flux_r[3] = (rhoE_r + p_r) * u_r_n;
 
-    std::vector<rtype> W_l = {rho_l, u_l_n, p_l, gamma_l};
-    std::vector<rtype> W_r = {rho_r, u_r_n, p_r, gamma_r};
+    rtype W_l[N_CONSERVATIVE] = {rho_l, u_l_n, p_l, gamma_l};
+    rtype W_r[N_CONSERVATIVE] = {rho_r, u_r_n, p_r, gamma_r};
 
     // Solve the pressure in the star region
     rtype p_star, rho_l_star, rho_r_star;

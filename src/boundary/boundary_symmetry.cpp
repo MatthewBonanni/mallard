@@ -66,7 +66,7 @@ void BoundarySymmetry::apply(view_3d * face_solution,
         primitives_r[1] = u_r[1];
 
         // Calculate flux
-        riemann_solver->calc_flux(flux, n_unit,
+        riemann_solver->calc_flux(flux.data(), n_unit.data(),
                                   conservatives_l[0], primitives_l.data(),
                                   primitives_l[2], physics->get_gamma(), primitives_l[4],
                                   conservatives_l[0], primitives_r.data(),

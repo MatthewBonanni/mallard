@@ -91,7 +91,7 @@ void BoundaryUPT::apply(view_3d * face_solution,
         physics->compute_primitives_from_conservatives(primitives_l.data(), conservatives_l.data());
 
         // Compute flux
-        riemann_solver->calc_flux(flux, n_unit,
+        riemann_solver->calc_flux(flux.data(), n_unit.data(),
                                   conservatives_l[0], primitives_l.data(),
                                   primitives_l[2], physics->get_gamma(), primitives_l[4],
                                   rho_bc, primitives_bc.data(),

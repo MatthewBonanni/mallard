@@ -35,7 +35,7 @@ TEST(RiemannSolverTest, RusanovFlux) {
     rtype h_r = e_r + p_r / rho_r;
 
     Rusanov riemann_solver;
-    riemann_solver.calc_flux(flux, n_unit,
+    riemann_solver.calc_flux(flux.data(), n_unit.data(),
                              rho_l, u_l.data(), p_l, gamma, h_l,
                              rho_r, u_r.data(), p_r, gamma, h_r);
 
@@ -66,7 +66,7 @@ TEST(RiemannSolverTest, RusanovFluxY) {
     rtype h_r = e_r + p_r / rho_r;
 
     Rusanov riemann_solver;
-    riemann_solver.calc_flux(flux, n_unit,
+    riemann_solver.calc_flux(flux.data(), n_unit.data(),
                              rho_l, u_l.data(), p_l, gamma, h_l,
                              rho_r, u_r.data(), p_r, gamma, h_r);
 
@@ -98,7 +98,7 @@ TEST(RiemannSolverTest, RusanovFluxXY) {
     rtype h_r = e_r + p_r / rho_r;
 
     Rusanov riemann_solver;
-    riemann_solver.calc_flux(flux, n_unit,
+    riemann_solver.calc_flux(flux.data(), n_unit.data(),
                              rho_l, u_l.data(), p_l, gamma, h_l,
                              rho_r, u_r.data(), p_r, gamma, h_r);
 
@@ -129,7 +129,7 @@ TEST(RiemannSolverTest, RusanovFluxZero) {
     rtype h_r = e_r + p_r / rho_r;
 
     Rusanov riemann_solver;
-    riemann_solver.calc_flux(flux, n_unit,
+    riemann_solver.calc_flux(flux.data(), n_unit.data(),
                              rho_l, u_l.data(), p_l, gamma, h_l,
                              rho_r, u_r.data(), p_r, gamma, h_r);
 
@@ -160,7 +160,7 @@ TEST(RiemannSolverTest, HLLCFlux) {
     rtype h_r = e_r + p_r / rho_r;
 
     HLLC riemann_solver;
-    riemann_solver.calc_flux(flux, n_unit,
+    riemann_solver.calc_flux(flux.data(), n_unit.data(),
                              rho_l, u_l.data(), p_l, gamma, h_l,
                              rho_r, u_r.data(), p_r, gamma, h_r);
 
@@ -191,7 +191,7 @@ TEST(RiemannSolverTest, HLLCFluxY) {
     rtype h_r = e_r + p_r / rho_r;
 
     HLLC riemann_solver;
-    riemann_solver.calc_flux(flux, n_unit,
+    riemann_solver.calc_flux(flux.data(), n_unit.data(),
                              rho_l, u_l.data(), p_l, gamma, h_l,
                              rho_r, u_r.data(), p_r, gamma, h_r);
 
@@ -223,7 +223,7 @@ TEST(RiemannSolverTest, HLLCFluxXY) {
     rtype h_r = e_r + p_r / rho_r;
 
     HLLC riemann_solver;
-    riemann_solver.calc_flux(flux, n_unit,
+    riemann_solver.calc_flux(flux.data(), n_unit.data(),
                              rho_l, u_l.data(), p_l, gamma, h_l,
                              rho_r, u_r.data(), p_r, gamma, h_r);
 
@@ -254,7 +254,7 @@ TEST(RiemannSolverTest, HLLCFluxZero) {
     rtype h_r = e_r + p_r / rho_r;
 
     HLLC riemann_solver;
-    riemann_solver.calc_flux(flux, n_unit,
+    riemann_solver.calc_flux(flux.data(), n_unit.data(),
                              rho_l, u_l.data(), p_l, gamma, h_l,
                              rho_r, u_r.data(), p_r, gamma, h_r);
 
