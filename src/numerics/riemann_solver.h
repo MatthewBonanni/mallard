@@ -86,30 +86,7 @@ class RiemannSolver {
                                const rtype rho_r, const rtype * u_r,
                                const rtype p_r, const rtype gamma_r, const rtype h_r) = 0;
     protected:
-        /**
-         * @brief Check for NaN values.
-         * @param flux Riemann flux.
-         * @param n_unit Unit normal vector.
-         * @param rho_l Left density.
-         * @param u_l Left velocity.
-         * @param p_l Left pressure.
-         * @param gamma_l Left gamma.
-         * @param h_l Left enthalpy.
-         * @param rho_r Right density.
-         * @param u_r Right velocity.
-         * @param p_r Right pressure.
-         * @param gamma_r Right gamma.
-         * @param h_r Right enthalpy.
-         */
-        KOKKOS_INLINE_FUNCTION
-        virtual void check_nan(const State & flux, const NVector & n_unit,
-                               const rtype rho_l, const rtype * u_l,
-                               const rtype p_l, const rtype gamma_l, const rtype h_l,
-                               const rtype rho_r, const rtype * u_r,
-                               const rtype p_r, const rtype gamma_r, const rtype h_r) const;
-
         RiemannSolverType type;
-        bool check_nan_flag;
     private:
 };
 
@@ -258,46 +235,6 @@ class HLLC : public RiemannSolver {
     protected:
     private:
 };
-
-KOKKOS_INLINE_FUNCTION
-void RiemannSolver::check_nan(const State & flux, const NVector & n_unit,
-                              const rtype rho_l, const rtype * u_l,
-                              const rtype p_l, const rtype gamma_l, const rtype h_l,
-                              const rtype rho_r, const rtype * u_r,
-                              const rtype p_r, const rtype gamma_r, const rtype h_r) const {
-    if (!check_nan_flag) {
-        return;
-    }
-
-    bool nan_detected = false;
-    for (u_int16_t i = 0; i < N_CONSERVATIVE; i++) {
-        if (Kokkos::isnan(flux[i])) {
-            nan_detected = true;
-            break;
-        }
-    }
-
-    if (nan_detected) {
-        std::stringstream msg;
-        msg << RIEMANN_SOLVER_NAMES.at(type) << "::calc_flux(): NaN flux detected." << std::endl;
-        msg << "> n_unit: " << n_unit[0] << ", " << n_unit[1] << std::endl;
-        msg << "> rho_l: " << rho_l << std::endl;
-        msg << "> u_l: " << u_l[0] << ", " << u_l[1] << std::endl;
-        msg << "> p_l: " << p_l << std::endl;
-        msg << "> gamma_l: " << gamma_l << std::endl;
-        msg << "> h_l: " << h_l << std::endl;
-        msg << "> rho_r: " << rho_r << std::endl;
-        msg << "> u_r: " << u_r[0] << ", " << u_r[1] << std::endl;
-        msg << "> p_r: " << p_r << std::endl;
-        msg << "> gamma_r: " << gamma_r << std::endl;
-        msg << "> h_r: " << h_r << std::endl;
-        msg << "> flux: " << std::endl;
-        for (u_int16_t i = 0; i < N_CONSERVATIVE; i++) {
-            msg << "> " << i << ": " << flux[i] << std::endl;
-        }
-        throw std::runtime_error(msg.str());
-    }
-}
 
 KOKKOS_INLINE_FUNCTION
 void PVRS(const std::vector<rtype> & W_l, const std::vector<rtype> & W_r,
@@ -467,8 +404,6 @@ void Rusanov::calc_flux(State & flux, const NVector & n_unit,
     for (u_int16_t i = 0; i < N_CONSERVATIVE; i++) {
         flux[i] = 0.5 * (flux_l[i] + flux_r[i] + S_max * (U_l[i] - U_r[i]));
     }
-
-    check_nan(flux, n_unit, rho_l, u_l, p_l, gamma_l, h_l, rho_r, u_r, p_r, gamma_r, h_r);
 }
 
 KOKKOS_INLINE_FUNCTION
@@ -557,8 +492,6 @@ void HLL::calc_flux(State & flux, const NVector & n_unit,
             flux[i] = (S_r * flux_l[i] - S_l * flux_r[i] + S_l * S_r * (U_r[i] - U_l[i])) / (S_r - S_l);
         }
     }
-
-    check_nan(flux, n_unit, rho_l, u_l, p_l, gamma_l, h_l, rho_r, u_r, p_r, gamma_r, h_r);
 }
 
 KOKKOS_INLINE_FUNCTION
@@ -639,8 +572,6 @@ void HLLC::calc_flux(State & flux, const NVector & n_unit,
             }
         }
     }
-
-    check_nan(flux, n_unit, rho_l, u_l, p_l, gamma_l, h_l, rho_r, u_r, p_r, gamma_r, h_r);
 }
 
 #endif // RIEMANN_SOLVER_H

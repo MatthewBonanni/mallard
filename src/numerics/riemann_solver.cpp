@@ -26,14 +26,12 @@ RiemannSolver::~RiemannSolver() {
 }
 
 void RiemannSolver::init(const toml::value & input) {
-    check_nan_flag = toml::find_or<bool>(input, "numerics", "check_nan_flux", false);
     print();
 }
 
 void RiemannSolver::print() const {
     std::cout << LOG_SEPARATOR << std::endl;
     std::cout << "Riemann solver: " << RIEMANN_SOLVER_NAMES.at(type) << std::endl;
-    std::cout << "> Check for NaN flux: " << (check_nan_flag ? "true" : "false") << std::endl;
     std::cout << LOG_SEPARATOR << std::endl;
 }
 
