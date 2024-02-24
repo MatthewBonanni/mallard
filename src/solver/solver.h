@@ -53,6 +53,17 @@ class Solver {
          * @return Exit status.
          */
         int run();
+
+        /**
+         * @brief Update primitive variables.
+         */
+        void update_primitives();
+
+        /**
+         * @brief Compute the spectral radius.
+         * @return maximum cell-wise spectral radius.
+         */
+        rtype calc_spectral_radius();
     protected:
         /**
          * @brief Initialize the mesh.
@@ -146,20 +157,9 @@ class Solver {
         void calc_dt();
 
         /**
-         * @brief Compute the spectral radius.
-         * @return maximum cell-wise spectral radius.
-         */
-        rtype calc_spectral_radius();
-
-        /**
          * @brief Take a single time step.
          */
         void take_step();
-
-        /**
-         * @brief Update primitive variables.
-         */
-        void update_primitives();
 
         /**
          * @brief Print step info.
