@@ -25,8 +25,8 @@ RiemannSolver::~RiemannSolver() {
     std::cout << "Destroying Riemann solver: " << RIEMANN_SOLVER_NAMES.at(type) << std::endl;
 }
 
-void RiemannSolver::init(const toml::table & input) {
-    check_nan_flag = input["numerics"]["check_nan_flux"].value_or(false);
+void RiemannSolver::init(const toml::value & input) {
+    check_nan_flag = toml::find_or<bool>(input, "numerics", "check_nan_flux", false);
     print();
 }
 

@@ -16,7 +16,7 @@
 #include <string>
 
 #include <Kokkos_Core.hpp>
-#include <toml++/toml.hpp>
+#include <toml.hpp>
 
 #include "common.h"
 
@@ -48,7 +48,7 @@ class Physics {
          * @brief Initialize the physics.
          * @param input Input file
          */
-        virtual void init(const toml::table & input);
+        virtual void init(const toml::value & input);
 
         /**
          * @brief Print the physics.
@@ -158,7 +158,7 @@ class Euler : public Physics {
          * @brief Initialize the physics.
          * @param input Input file.
          */
-        void init(const toml::table & input) override;
+        void init(const toml::value & input) override;
 
         /**
          * @brief Initialize the physics manually.

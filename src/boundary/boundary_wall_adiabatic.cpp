@@ -28,7 +28,7 @@ void BoundaryWallAdiabatic::print() {
     std::cout << LOG_SEPARATOR << std::endl;
 }
 
-void BoundaryWallAdiabatic::init(const toml::table & input) {
+void BoundaryWallAdiabatic::init(const toml::value & input) {
     (void)(input);
     print();
 }

@@ -12,7 +12,7 @@
 #ifndef BOUNDARY_H
 #define BOUNDARY_H
 
-#include <toml++/toml.hpp>
+#include <toml.hpp>
 
 #include "common.h"
 #include "zone.h"
@@ -89,7 +89,7 @@ class Boundary {
          * @brief Initialize the boundary.
          * @param input TOML input parameter table.
          */
-        virtual void init(const toml::table & input);
+        virtual void init(const toml::value & input);
 
         /**
          * @brief Compute and apply the boundary flux.

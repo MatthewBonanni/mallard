@@ -24,9 +24,9 @@ Physics::~Physics() {
     std::cout << "Destroying physics: " << PHYSICS_NAMES.at(type) << std::endl;
 }
 
-void Physics::init(const toml::table & input) {
-    h_p_bounds(0) = input["physics"]["p_min"].value_or(-1e20);
-    h_p_bounds(1) = input["physics"]["p_max"].value_or(1e20);
+void Physics::init(const toml::value & input) {
+    h_p_bounds(0) = toml::find_or<rtype>(input, "physics", "p_min", -1e20);
+    h_p_bounds(1) = toml::find_or<rtype>(input, "physics", "p_max", 1e20);
     Kokkos::deep_copy(p_bounds, h_p_bounds);
 }
 
@@ -45,13 +45,13 @@ Euler::~Euler() {
     // Empty
 }
 
-void Euler::init(const toml::table & input) {
+void Euler::init(const toml::value & input) {
     Physics::init(input);
 
-    std::optional<rtype> gamma_in = input["physics"]["gamma"].value<rtype>();
-    std::optional<rtype> p_ref_in = input["physics"]["p_ref"].value<rtype>();
-    std::optional<rtype> T_ref_in = input["physics"]["T_ref"].value<rtype>();
-    std::optional<rtype> rho_ref_in = input["physics"]["rho_ref"].value<rtype>();
+    std::optional<rtype> gamma_in = toml::find<rtype>(input, "physics", "gamma");
+    std::optional<rtype> p_ref_in = toml::find<rtype>(input, "physics", "p_ref");
+    std::optional<rtype> T_ref_in = toml::find<rtype>(input, "physics", "T_ref");
+    std::optional<rtype> rho_ref_in = toml::find<rtype>(input, "physics", "rho_ref");
 
     if (!gamma_in.has_value()) {
         throw std::runtime_error("Missing gamma for physics: " + PHYSICS_NAMES.at(type) + ".");

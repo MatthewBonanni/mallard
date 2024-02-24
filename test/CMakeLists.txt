@@ -20,7 +20,6 @@ FetchContent_MakeAvailable(googletest)
 target_link_libraries(MallardTest PRIVATE gtest_main)
 
 add_dependencies(MallardTest Mallard)
-target_link_libraries(MallardTest PRIVATE tomlplusplus::tomlplusplus)
 target_link_libraries(MallardTest PRIVATE Kokkos::kokkos)
 target_link_libraries(MallardTest PRIVATE CommonLib)
 target_link_libraries(MallardTest PRIVATE SolverLib)

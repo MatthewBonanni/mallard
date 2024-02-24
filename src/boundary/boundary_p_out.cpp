@@ -13,7 +13,7 @@
 
 #include <iostream>
 
-#include <toml++/toml.hpp>
+#include <toml.hpp>
 
 #include "common.h"
 
@@ -32,8 +32,8 @@ void BoundaryPOut::print() {
     std::cout << LOG_SEPARATOR << std::endl;
 }
 
-void BoundaryPOut::init(const toml::table & input) {
-    std::optional<rtype> p_in = input["p"].value<rtype>();
+void BoundaryPOut::init(const toml::value & input) {
+    std::optional<rtype> p_in = toml::find<rtype>(input, "initialize", "p");
 
     if (!p_in.has_value()) {
         throw std::runtime_error("Missing p for boundary: " + zone->get_name() + ".");

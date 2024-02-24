@@ -13,7 +13,7 @@
 #define RIEMANN_SOLVER_H
 
 #include <Kokkos_Core.hpp>
-#include <toml++/toml.hpp>
+#include <toml.hpp>
 
 #include "common_typedef.h"
 #include "common_math.h"
@@ -57,7 +57,7 @@ class RiemannSolver {
         /**
          * @brief Initialize the Riemann solver.
          */
-        virtual void init(const toml::table & input);
+        virtual void init(const toml::value & input);
 
         /**
          * @brief Print the Riemann solver.

@@ -37,7 +37,7 @@ static const std::unordered_map<InitType, std::string> INIT_NAMES = {
 void Solver::init_solution() {
     std::cout << "Initializing solution..." << std::endl;
 
-    std::string type_str = input["initialize"]["type"].value_or("constant");
+    std::string type_str = toml::find_or(input, "initialize", "type", "constant");
 
     InitType type;
     typename std::unordered_map<std::string, InitType>::const_iterator it = INIT_TYPES.find(type_str);
@@ -58,14 +58,13 @@ void Solver::init_solution() {
 }
 
 void Solver::init_solution_constant() {
-    auto u_in = input["initialize"]["u"];
-    const toml::array* arr = u_in.as_array();
-    std::optional<rtype> p_in = input["initialize"]["p"].value<rtype>();
-    std::optional<rtype> T_in = input["initialize"]["T"].value<rtype>();
+    std::optional<std::vector<rtype>> u_in = toml::find<std::vector<rtype>>(input, "initialize", "u");
+    std::optional<rtype> p_in = toml::find<rtype>(input, "initialize", "p");
+    std::optional<rtype> T_in = toml::find<rtype>(input, "initialize", "T");
 
-    if (!u_in) {
+    if (!u_in.has_value()) {
         throw std::runtime_error("Missing u for initialization: constant.");
-    } else if (arr->size() != 2) {
+    } else if (u_in.value().size() != 2) {
         throw std::runtime_error("u must be a 2-element array for initialization: constant.");
     }
 
@@ -77,10 +76,8 @@ void Solver::init_solution_constant() {
         throw std::runtime_error("Missing T for initialization: constant.");
     }
 
-    auto u_x_in = arr->get_as<double>(0);
-    auto u_y_in = arr->get_as<double>(1);
-    rtype u_x = u_x_in->as_floating_point()->get();
-    rtype u_y = u_y_in->as_floating_point()->get();
+    rtype u_x = u_in.value()[0];
+    rtype u_y = u_in.value()[1];
     rtype p = p_in.value();
     rtype T = T_in.value();
 
@@ -108,15 +105,14 @@ void Solver::init_solution_constant() {
 }
 
 void Solver::init_solution_analytical() {
-    auto u_in = input["initialize"]["u"];
-    std::optional<std::string> rho_in = input["initialize"]["rho"].value<std::string>();
-    std::optional<std::string> p_in = input["initialize"]["p"].value<std::string>();
-    std::optional<std::string> T_in = input["initialize"]["T"].value<std::string>();
-    const toml::array* arr = u_in.as_array();
+    std::optional<std::vector<std::string>> u_in = toml::find<std::vector<std::string>>(input, "initialize", "u");
+    std::optional<std::string> rho_in = toml::find<std::string>(input, "initialize", "rho");
+    std::optional<std::string> p_in = toml::find<std::string>(input, "initialize", "p");
+    std::optional<std::string> T_in = toml::find<std::string>(input, "initialize", "T");
 
-    if (!u_in) {
+    if (!u_in.has_value()) {
         throw std::runtime_error("Missing u for initialization: analytical.");
-    } else if (arr->size() != 2) {
+    } else if (u_in.value().size() != 2) {
         throw std::runtime_error("u must be a 2-element array for initialization: analytical.");
     }
 
@@ -127,8 +123,8 @@ void Solver::init_solution_analytical() {
     }
 
     std::string u_x_str, u_y_str, rho_str, p_str, T_str;
-    u_x_str = arr->get_as<std::string>(0)->get();
-    u_y_str = arr->get_as<std::string>(1)->get();
+    u_x_str = u_in.value()[0];
+    u_y_str = u_in.value()[1];
     if (rho_in.has_value()) rho_str = rho_in.value();
     if (p_in.has_value()) p_str = p_in.value();
     if (T_in.has_value()) T_str = T_in.value();

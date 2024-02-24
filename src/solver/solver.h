@@ -17,7 +17,7 @@
 #include <memory>
 #include <functional>
 
-#include <toml++/toml.hpp>
+#include <toml.hpp>
 
 #include "mesh.h"
 #include "boundary.h"
@@ -215,7 +215,7 @@ class Solver {
         void calc_rhs_boundaries(view_3d * face_solution,
                                  view_2d * rhs);
     private:
-        toml::table input;
+        toml::value input;
         u_int32_t n_steps;
         rtype t_stop;
         rtype t_wall_stop;

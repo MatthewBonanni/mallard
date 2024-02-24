@@ -8,7 +8,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # Build options
-add_compile_options(-Wall -Wextra -Wpedantic -Werror)
+add_compile_options(-Wall -Wextra -Wpedantic)
 
 # Compile-time options
 option(${PROJECT_NAME}_USE_DOUBLES "Use double precision" OFF)
@@ -25,6 +25,7 @@ find_package(Kokkos REQUIRED)
 find_package(KokkosKernels REQUIRED)
 
 include_directories("${CMAKE_SOURCE_DIR}/src/external/exprtk")
+include_directories("${CMAKE_SOURCE_DIR}/src/external/toml11")
 
 add_subdirectory(src)
 add_subdirectory(test)

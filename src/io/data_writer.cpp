@@ -26,14 +26,13 @@ DataWriter::~DataWriter() {
     // Empty
 }
 
-void DataWriter::init(const toml::table & input,
+void DataWriter::init(const toml::value & input,
                       std::vector<Data> & data,
                       std::shared_ptr<Mesh> mesh) {
-    std::optional<std::string> prefix = input["prefix"].value<std::string>();
-    std::optional<std::string> format_str = input["format"].value<std::string>();
-    std::optional<u_int32_t> interval = input["interval"].value<u_int32_t>();
-    auto variables = input["variables"];
-    const toml::array* arr = variables.as_array();
+    std::optional<std::string> prefix = toml::find<std::string>(input, "prefix");
+    std::optional<std::string> format_str = toml::find<std::string>(input, "format");
+    std::optional<u_int32_t> interval = toml::find<u_int32_t>(input, "interval");
+    std::optional<std::vector<std::string>> variables = toml::find<std::vector<std::string>>(input, "variables");
 
     // \todo Implement write geometries
 
@@ -46,9 +45,9 @@ void DataWriter::init(const toml::table & input,
     if (!interval.has_value()) {
         throw std::runtime_error("DataWriter: interval not specified.");
     }
-    if (!variables) {
+    if (!variables.has_value()) {
         throw std::runtime_error("DataWriter: variables not specified.");
-    } else if (arr->size() == 0) {
+    } else if (variables.value().empty()) {
         throw std::runtime_error("DataWriter: variables must be a non-empty array.");
     }
 
@@ -62,22 +61,17 @@ void DataWriter::init(const toml::table & input,
         format = it->second;
     }
 
-    for (const auto & var : *arr) {
-        std::optional<std::string> var_str = var.value<std::string>();
-        if (!var_str.has_value()) {
-            throw std::runtime_error("DataWriter: variable must be a string.");
-        }
-
+    for (const auto & var : variables.value()) {
         bool found = false;
         for (const auto & data_var : data) {
-            if (data_var.name() == var_str.value()) {
+            if (data_var.name() == var) {
                 data_ptrs.push_back(&data_var);
                 found = true;
                 break;
             }
         }
         if (!found) {
-            throw std::runtime_error("DataWriter: Unknown variable: " + var_str.value() + ".");
+            throw std::runtime_error("DataWriter: Unknown variable: " + var + ".");
         }
     }
 
