@@ -68,6 +68,8 @@ int Solver::init(const std::string& input_file_name) {
     
     init_output();
     init_solution();
+    
+    copy_host_to_device();
 
     return 0;
 }
@@ -633,7 +635,7 @@ rtype Solver::calc_spectral_radius() {
             dx_n = Kokkos::fabs(dot<N_DIM>(s, n_unit));
 
             rho_l = conservatives(i_cell_l, 0);
-            rho_r = conservatives(i_cell_r, 1);
+            rho_r = conservatives(i_cell_r, 0);
             u_l[0] = primitives(i_cell_l, 0);
             u_l[1] = primitives(i_cell_l, 1);
             u_r[0] = primitives(i_cell_r, 0);
