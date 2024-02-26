@@ -15,6 +15,9 @@
 #include <vector>
 #include <unordered_map>
 
+#include <Kokkos_Core.hpp>
+#include <toml.hpp>
+
 #include "zone.h"
 
 enum class MeshType {
@@ -50,6 +53,12 @@ class Mesh {
          * @brief Destroy the Mesh object
          */
         ~Mesh();
+
+        /**
+         * @brief Initialize the mesh.
+         * @param input TOML input data.
+         */
+        void init(const toml::value & input);
 
         /**
          * @brief Get the type of mesh.
@@ -169,6 +178,16 @@ class Mesh {
         void compute_face_normals();
 
         /**
+         * @brief Copy mesh data from host to device.
+         */
+        void copy_host_to_device();
+
+        /**
+         * @brief Copy mesh data from device to host.
+         */
+        void copy_device_to_host();
+
+        /**
          * @brief Initialize the mesh as a cartesian grid.
          * 
          * @param nx Number of cells in the x-direction.
@@ -188,29 +207,23 @@ class Mesh {
          */
         void init_wedge(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly);
 
-        Kokkos::View<rtype *[2]> node_coords;
-        Kokkos::View<rtype *[2]> cell_coords;
-        Kokkos::View<rtype *[2]> face_coords;
+        Kokkos::View<rtype *[N_DIM]> node_coords;
+        Kokkos::View<rtype *[N_DIM]> cell_coords;
+        Kokkos::View<rtype *[N_DIM]> face_coords;
         Kokkos::View<rtype *> cell_volume;
         Kokkos::View<rtype *> face_area;
-        Kokkos::View<rtype *[2]> face_normals;
+        Kokkos::View<rtype *[N_DIM]> face_normals;
 
-        Kokkos::View<rtype *[2]>::HostMirror h_node_coords;
-        Kokkos::View<rtype *[2]>::HostMirror h_cell_coords;
-        Kokkos::View<rtype *[2]>::HostMirror h_face_coords;
+        Kokkos::View<rtype *[N_DIM]>::HostMirror h_node_coords;
+        Kokkos::View<rtype *[N_DIM]>::HostMirror h_cell_coords;
+        Kokkos::View<rtype *[N_DIM]>::HostMirror h_face_coords;
         Kokkos::View<rtype *>::HostMirror h_cell_volume;
         Kokkos::View<rtype *>::HostMirror h_face_area;
-        Kokkos::View<rtype *[2]>::HostMirror h_face_normals;
+        Kokkos::View<rtype *[N_DIM]>::HostMirror h_face_normals;
     protected:
     private:
         u_int32_t nx, ny; /** \todo This is a hack for WENO, remove this */
         MeshType type;
-        std::vector<NVector> m_node_coords;
-        std::vector<NVector> m_cell_coords;
-        std::vector<NVector> m_face_coords;
-        std::vector<rtype> m_cell_volume;
-        std::vector<rtype> m_face_area;
-        std::vector<NVector> m_face_normals;
         std::vector<std::array<u_int32_t, 4>> m_nodes_of_cell;
         std::vector<std::array<u_int32_t, 4>> m_faces_of_cell;
         std::vector<std::array<int32_t, 2>> m_cells_of_face;

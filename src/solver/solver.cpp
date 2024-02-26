@@ -76,45 +76,14 @@ int Solver::init(const std::string& input_file_name) {
 
 void Solver::init_mesh() {
     std::cout << "Initializing mesh..." << std::endl;
-
-    std::string type_str = toml::find_or<std::string>(input, "mesh", "type", "file");
-    MeshType type;
-    typename std::unordered_map<std::string, MeshType>::const_iterator it = MESH_TYPES.find(type_str);
-    if (it == MESH_TYPES.end()) {
-        throw std::runtime_error("Unknown mesh type: " + type_str + ".");
-    } else {
-        type = it->second;
-    }
-
     mesh = std::make_shared<Mesh>();
-    mesh->set_type(type);
-
-    if (type == MeshType::FILE) {
-        std::string filename = toml::find_or<std::string>(input, "mesh", "filename", "mesh.msh");
-        throw std::runtime_error("MeshType::FILE not implemented.");
-    } else if (type == MeshType::CARTESIAN) {
-        u_int32_t Nx = toml::find_or<u_int32_t>(input, "mesh", "Nx", 100);
-        u_int32_t Ny = toml::find_or<u_int32_t>(input, "mesh", "Ny", 100);
-        rtype Lx = toml::find_or<rtype>(input, "mesh", "Lx", 1.0);
-        rtype Ly = toml::find_or<rtype>(input, "mesh", "Ly", 1.0);
-        mesh->init_cart(Nx, Ny, Lx, Ly);
-    } else if (type == MeshType::WEDGE) {
-        u_int32_t Nx = toml::find_or<u_int32_t>(input, "mesh", "Nx", 100);
-        u_int32_t Ny = toml::find_or<u_int32_t>(input, "mesh", "Ny", 100);
-        rtype Lx = toml::find_or<rtype>(input, "mesh", "Lx", 1.0);
-        rtype Ly = toml::find_or<rtype>(input, "mesh", "Ly", 1.0);
-        mesh->init_wedge(Nx, Ny, Lx, Ly);
-    } else {
-        // Should never get here due to the enum class.
-        throw std::runtime_error("Unknown mesh type.");
-    }
+    mesh->init(input);
 }
 
 void Solver::init_physics() {
     std::cout << "Initializing physics..." << std::endl;
 
     std::string physics_str = toml::find_or<std::string>(input, "physics", "type", "euler");
-
     PhysicsType type;
     typename std::unordered_map<std::string, PhysicsType>::const_iterator it = PHYSICS_TYPES.find(physics_str);
     if (it == PHYSICS_TYPES.end()) {
@@ -358,6 +327,9 @@ void Solver::copy_host_to_device() {
     Kokkos::deep_copy(primitives, h_primitives);
     Kokkos::deep_copy(face_conservatives, h_face_conservatives);
     Kokkos::deep_copy(face_primitives, h_face_primitives);
+
+    mesh->copy_host_to_device();
+    physics->copy_host_to_device();
 }
 
 void Solver::copy_device_to_host() {
@@ -365,6 +337,9 @@ void Solver::copy_device_to_host() {
     Kokkos::deep_copy(h_primitives, primitives);
     Kokkos::deep_copy(h_face_conservatives, face_conservatives);
     Kokkos::deep_copy(h_face_primitives, face_primitives);
+
+    mesh->copy_device_to_host();
+    physics->copy_device_to_host();
 }
 
 void Solver::register_data() {

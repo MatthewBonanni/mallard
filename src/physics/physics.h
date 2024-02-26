@@ -46,7 +46,7 @@ class Physics {
 
         /**
          * @brief Initialize the physics.
-         * @param input Input file
+         * @param input TOML input data.
          */
         virtual void init(const toml::value & input);
 
@@ -135,6 +135,16 @@ class Physics {
         KOKKOS_INLINE_FUNCTION
         virtual void compute_primitives_from_conservatives(rtype * primitives,
                                                            const rtype * conservatives) const = 0;
+        
+        /**
+         * @brief Copy data from host to device.
+         */
+        virtual void copy_host_to_device() = 0;
+
+        /**
+         * @brief Copy data from device to host.
+         */
+        virtual void copy_device_to_host() = 0;
     protected:
         PhysicsType type;
         Kokkos::View<rtype [2]> p_bounds;
@@ -156,7 +166,7 @@ class Euler : public Physics {
 
         /**
          * @brief Initialize the physics.
-         * @param input Input file.
+         * @param input TOML input data.
          */
         void init(const toml::value & input) override;
 
@@ -279,6 +289,16 @@ class Euler : public Physics {
         KOKKOS_INLINE_FUNCTION
         void compute_primitives_from_conservatives(rtype * primitives,
                                                    const rtype * conservatives) const override;
+        
+        /**
+         * @brief Copy data from host to device.
+         */
+        void copy_host_to_device() override;
+
+        /**
+         * @brief Copy data from device to host.
+         */
+        void copy_device_to_host() override;
     protected:
     private:
         void set_R_cp_cv();

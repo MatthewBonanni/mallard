@@ -27,6 +27,36 @@ Mesh::~Mesh() {
     std::cout << "Destroying mesh: " << MESH_NAMES.at(type) << std::endl;
 }
 
+void Mesh::init(const toml::value & input) {
+    std::string type_str = toml::find_or<std::string>(input, "mesh", "type", "file");
+    typename std::unordered_map<std::string, MeshType>::const_iterator it = MESH_TYPES.find(type_str);
+    if (it == MESH_TYPES.end()) {
+        throw std::runtime_error("Unknown mesh type: " + type_str + ".");
+    } else {
+        set_type(it->second);
+    }
+
+    if (get_type() == MeshType::FILE) {
+        std::string filename = toml::find_or<std::string>(input, "mesh", "filename", "mesh.msh");
+        throw std::runtime_error("MeshType::FILE not implemented.");
+    } else if (get_type() == MeshType::CARTESIAN) {
+        u_int32_t Nx = toml::find_or<u_int32_t>(input, "mesh", "Nx", 100);
+        u_int32_t Ny = toml::find_or<u_int32_t>(input, "mesh", "Ny", 100);
+        rtype Lx = toml::find_or<rtype>(input, "mesh", "Lx", 1.0);
+        rtype Ly = toml::find_or<rtype>(input, "mesh", "Ly", 1.0);
+        this->init_cart(Nx, Ny, Lx, Ly);
+    } else if (get_type() == MeshType::WEDGE) {
+        u_int32_t Nx = toml::find_or<u_int32_t>(input, "mesh", "Nx", 100);
+        u_int32_t Ny = toml::find_or<u_int32_t>(input, "mesh", "Ny", 100);
+        rtype Lx = toml::find_or<rtype>(input, "mesh", "Lx", 1.0);
+        rtype Ly = toml::find_or<rtype>(input, "mesh", "Ly", 1.0);
+        this->init_wedge(Nx, Ny, Lx, Ly);
+    } else {
+        // Should never get here due to the enum class.
+        throw std::runtime_error("Unknown mesh type.");
+    }
+}
+
 MeshType Mesh::get_type() const {
     return type;
 }
@@ -90,23 +120,23 @@ std::array<u_int32_t, 2> Mesh::nodes_of_face(u_int32_t i_face) const {
 
 void Mesh::compute_cell_centroids() {
     for (u_int32_t i_cell = 0; i_cell < n_cells(); ++i_cell) {
-        cell_coords(i_cell, 0) = 0.25 * (node_coords(m_nodes_of_cell[i_cell][0], 0) +
-                                         node_coords(m_nodes_of_cell[i_cell][1], 0) +
-                                         node_coords(m_nodes_of_cell[i_cell][2], 0) +
-                                         node_coords(m_nodes_of_cell[i_cell][3], 0));
-        cell_coords(i_cell, 1) = 0.25 * (node_coords(m_nodes_of_cell[i_cell][0], 1) +
-                                         node_coords(m_nodes_of_cell[i_cell][1], 1) +
-                                         node_coords(m_nodes_of_cell[i_cell][2], 1) +
-                                         node_coords(m_nodes_of_cell[i_cell][3], 1));
+        h_cell_coords(i_cell, 0) = 0.25 * (h_node_coords(m_nodes_of_cell[i_cell][0], 0) +
+                                           h_node_coords(m_nodes_of_cell[i_cell][1], 0) +
+                                           h_node_coords(m_nodes_of_cell[i_cell][2], 0) +
+                                           h_node_coords(m_nodes_of_cell[i_cell][3], 0));
+        h_cell_coords(i_cell, 1) = 0.25 * (h_node_coords(m_nodes_of_cell[i_cell][0], 1) +
+                                           h_node_coords(m_nodes_of_cell[i_cell][1], 1) +
+                                           h_node_coords(m_nodes_of_cell[i_cell][2], 1) +
+                                           h_node_coords(m_nodes_of_cell[i_cell][3], 1));
     }
 }
 
 void Mesh::compute_face_centroids() {
     for (u_int32_t i_face = 0; i_face < n_faces(); ++i_face) {
-        face_coords(i_face, 0) = 0.5 * (node_coords(m_nodes_of_face[i_face][0], 0) +
-                                        node_coords(m_nodes_of_face[i_face][1], 0));
-        face_coords(i_face, 1) = 0.5 * (node_coords(m_nodes_of_face[i_face][0], 1) +
-                                        node_coords(m_nodes_of_face[i_face][1], 1));
+        h_face_coords(i_face, 0) = 0.5 * (h_node_coords(m_nodes_of_face[i_face][0], 0) +
+                                          h_node_coords(m_nodes_of_face[i_face][1], 0));
+        h_face_coords(i_face, 1) = 0.5 * (h_node_coords(m_nodes_of_face[i_face][0], 1) +
+                                          h_node_coords(m_nodes_of_face[i_face][1], 1));
     }
 }
 
@@ -117,13 +147,14 @@ void Mesh::compute_cell_volumes() {
         u_int32_t i_node_2 = m_nodes_of_cell[i_cell][2];
         u_int32_t i_node_3 = m_nodes_of_cell[i_cell][3];
 
-        rtype a1 = triangle_area_2(m_node_coords[i_node_0],
-                                   m_node_coords[i_node_1],
-                                   m_node_coords[i_node_2]);
-        rtype a2 = triangle_area_2(m_node_coords[i_node_0],
-                                   m_node_coords[i_node_2],
-                                   m_node_coords[i_node_3]);
-        m_cell_volume[i_cell] = a1 + a2;
+        const NVector coords_0 = {h_node_coords(i_node_0, 0), h_node_coords(i_node_0, 1)};
+        const NVector coords_1 = {h_node_coords(i_node_1, 0), h_node_coords(i_node_1, 1)};
+        const NVector coords_2 = {h_node_coords(i_node_2, 0), h_node_coords(i_node_2, 1)};
+        const NVector coords_3 = {h_node_coords(i_node_3, 0), h_node_coords(i_node_3, 1)};
+
+        rtype a1 = triangle_area_2(coords_0, coords_1, coords_2);
+        rtype a2 = triangle_area_2(coords_0, coords_2, coords_3);
+        h_cell_volume(i_cell) = a1 + a2;
     }
 }
 
@@ -131,10 +162,10 @@ void Mesh::compute_face_areas() {
     for (u_int32_t i_face = 0; i_face < n_faces(); ++i_face) {
         u_int32_t i_node_0 = m_nodes_of_face[i_face][0];
         u_int32_t i_node_1 = m_nodes_of_face[i_face][1];
-        m_face_area[i_face] = sqrt(pow(m_node_coords[i_node_1][0] -
-                                       m_node_coords[i_node_0][0], 2) +
-                                   pow(m_node_coords[i_node_1][1] -
-                                       m_node_coords[i_node_0][1], 2));
+        h_face_area(i_face) = sqrt(pow(h_node_coords(i_node_1, 0) -
+                                       h_node_coords(i_node_0, 0), 2) +
+                                   pow(h_node_coords(i_node_1, 1) -
+                                       h_node_coords(i_node_0, 1), 2));
     }
 }
 
@@ -143,33 +174,51 @@ void Mesh::compute_face_normals() {
         // Compute normal with area magnitude
         u_int32_t i_node_0 = m_nodes_of_face[i_face][0];
         u_int32_t i_node_1 = m_nodes_of_face[i_face][1];
-        rtype x0 = m_node_coords[i_node_0][0];
-        rtype y0 = m_node_coords[i_node_0][1];
-        rtype x1 = m_node_coords[i_node_1][0];
-        rtype y1 = m_node_coords[i_node_1][1];
+        rtype x0 = h_node_coords(i_node_0, 0);
+        rtype y0 = h_node_coords(i_node_0, 1);
+        rtype x1 = h_node_coords(i_node_1, 0);
+        rtype y1 = h_node_coords(i_node_1, 1);
         rtype dx = x1 - x0;
         rtype dy = y1 - y0;
         rtype mag = sqrt(dx * dx + dy * dy);
-        m_face_normals[i_face][0] =  dy / mag * face_area(i_face);
-        m_face_normals[i_face][1] = -dx / mag * face_area(i_face);
+        h_face_normals(i_face, 0) =  dy / mag * face_area(i_face);
+        h_face_normals(i_face, 1) = -dx / mag * face_area(i_face);
 
         // Flip normal if it points into cell 0
         // (shouln't be necessary for meshes generated by this class,
         // but just in case, for example if the mesh is read from a file)
         int32_t i_cell_0 = m_cells_of_face[i_face][0];
-        rtype x_cell_0 = cell_coords(i_cell_0, 0);
-        rtype y_cell_0 = cell_coords(i_cell_0, 1);
-        rtype x_face = face_coords(i_face, 0);
-        rtype y_face = face_coords(i_face, 1);
+        rtype x_cell_0 = h_cell_coords(i_cell_0, 0);
+        rtype y_cell_0 = h_cell_coords(i_cell_0, 1);
+        rtype x_face = h_face_coords(i_face, 0);
+        rtype y_face = h_face_coords(i_face, 1);
         rtype dx_cell_0 = x_face - x_cell_0;
         rtype dy_cell_0 = y_face - y_cell_0;
-        rtype dot = dx_cell_0 * m_face_normals[i_face][0] +
-                    dy_cell_0 * m_face_normals[i_face][1];
+        rtype dot = dx_cell_0 * h_face_normals(i_face, 0) +
+                    dy_cell_0 * h_face_normals(i_face, 1);
         if (dot < 0) {
-            m_face_normals[i_face][0] *= -1;
-            m_face_normals[i_face][1] *= -1;
+            h_face_normals(i_face, 0) *= -1;
+            h_face_normals(i_face, 1) *= -1;
         }
     }
+}
+
+void Mesh::copy_host_to_device() {
+    Kokkos::deep_copy(node_coords, h_node_coords);
+    Kokkos::deep_copy(cell_coords, h_cell_coords);
+    Kokkos::deep_copy(face_coords, h_face_coords);
+    Kokkos::deep_copy(cell_volume, h_cell_volume);
+    Kokkos::deep_copy(face_area, h_face_area);
+    Kokkos::deep_copy(face_normals, h_face_normals);
+}
+
+void Mesh::copy_device_to_host() {
+    Kokkos::deep_copy(h_node_coords, node_coords);
+    Kokkos::deep_copy(h_cell_coords, cell_coords);
+    Kokkos::deep_copy(h_face_coords, face_coords);
+    Kokkos::deep_copy(h_cell_volume, cell_volume);
+    Kokkos::deep_copy(h_face_area, face_area);
+    Kokkos::deep_copy(h_face_normals, face_normals);
 }
 
 void Mesh::init_cart(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly) {
@@ -177,16 +226,24 @@ void Mesh::init_cart(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly) {
     this->nx = nx;
     this->ny = ny;
 
-    m_node_coords.resize(n_nodes());
-    m_cell_coords.resize(n_cells());
-    m_face_coords.resize(n_faces());
+    node_coords = Kokkos::View<rtype *[N_DIM]>("node_coords", n_nodes());
+    cell_coords = Kokkos::View<rtype *[N_DIM]>("cell_coords", n_cells());
+    face_coords = Kokkos::View<rtype *[N_DIM]>("face_coords", n_faces());
+    cell_volume = Kokkos::View<rtype *>("cell_volume", n_cells());
+    face_area = Kokkos::View<rtype *>("face_area", n_faces());
+    face_normals = Kokkos::View<rtype *[N_DIM]>("face_normals", n_faces());
+
+    h_node_coords = Kokkos::create_mirror_view(node_coords);
+    h_cell_coords = Kokkos::create_mirror_view(cell_coords);
+    h_face_coords = Kokkos::create_mirror_view(face_coords);
+    h_cell_volume = Kokkos::create_mirror_view(cell_volume);
+    h_face_area = Kokkos::create_mirror_view(face_area);
+    h_face_normals = Kokkos::create_mirror_view(face_normals);
+
     m_nodes_of_cell.resize(n_cells());
     m_faces_of_cell.resize(n_cells());
-    m_cell_volume.resize(n_cells());
     m_cells_of_face.resize(n_faces());
     m_nodes_of_face.resize(n_faces());
-    m_face_area.resize(n_faces());
-    m_face_normals.resize(n_faces());
 
     // Compute node coordinates
     rtype dx = Lx / nx;
@@ -195,8 +252,8 @@ void Mesh::init_cart(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly) {
     for (u_int32_t i = 0; i < nx + 1; ++i) {
         for (u_int32_t j = 0; j < ny + 1; ++j) {
             u_int32_t i_node = i * (ny + 1) + j;
-            m_node_coords[i_node][0] = i * dx;
-            m_node_coords[i_node][1] = j * dy;
+            h_node_coords(i_node, 0) = i * dx;
+            h_node_coords(i_node, 1) = j * dy;
         }
     }
 
@@ -314,8 +371,8 @@ void Mesh::init_wedge(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly) {
             } else {
                 y = j * dy;
             }
-            m_node_coords[i_node][0] = x;
-            m_node_coords[i_node][1] = y;
+            h_node_coords(i_node, 0) = x;
+            h_node_coords(i_node, 1) = y;
         }
     }
 

@@ -27,7 +27,6 @@ Physics::~Physics() {
 void Physics::init(const toml::value & input) {
     h_p_bounds(0) = toml::find_or<rtype>(input, "physics", "p_min", -1e20);
     h_p_bounds(1) = toml::find_or<rtype>(input, "physics", "p_max", 1e20);
-    Kokkos::deep_copy(p_bounds, h_p_bounds);
 }
 
 void Physics::print() const {
@@ -101,4 +100,12 @@ void Euler::print() const {
     std::cout << "> T_ref: " << T_ref << std::endl;
     std::cout << "> rho_ref: " << rho_ref << std::endl;
     std::cout << LOG_SEPARATOR << std::endl;
+}
+
+void Euler::copy_host_to_device() {
+    Kokkos::deep_copy(p_bounds, h_p_bounds);
+}
+
+void Euler::copy_device_to_host() {
+    Kokkos::deep_copy(h_p_bounds, p_bounds);
 }
