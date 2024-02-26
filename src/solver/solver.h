@@ -64,6 +64,50 @@ class Solver {
          * @return maximum cell-wise spectral radius.
          */
         rtype calc_spectral_radius();
+
+        /**
+         * @brief Calculate the right hand side.
+         * @param solution Solution vector.
+         * @param face_solution Face solution vector.
+         * @param rhs Right hand side vector.
+         */
+        void calc_rhs(view_2d * solution,
+                      view_3d * face_solution,
+                      view_2d * rhs);
+        
+        /**
+         * @brief Pre-RHS hook.
+         * @param solution Solution vector.
+         * @param face_solution Face solution vector.
+         * @param rhs Right hand side vector.
+         */
+        void pre_rhs(view_2d * solution,
+                     view_3d * face_solution,
+                     view_2d * rhs);
+        
+        /**
+         * @brief Add the source term contributions to the right hand side.
+         * @param solution Solution vector.
+         * @param rhs Right hand side vector.
+         */
+        void calc_rhs_source(view_2d * solution,
+                             view_2d * rhs);
+        
+        /**
+         * @brief Add the interior flux contributions to the right hand side.
+         * @param face_solution Face solution vector.
+         * @param rhs Right hand side vector.
+         */
+        void calc_rhs_interior(view_3d * face_solution,
+                               view_2d * rhs);
+        
+        /**
+         * @brief Add the boundary flux contributions to the right hand side.
+         * @param face_solution Face solution vector.
+         * @param rhs Right hand side vector.
+         */
+        void calc_rhs_boundaries(view_3d * face_solution,
+                                 view_2d * rhs);
     protected:
         /**
          * @brief Initialize the mesh.
@@ -180,50 +224,6 @@ class Solver {
          * @brief Write data.
          */
         void write_data(bool force = false) const;
-
-        /**
-         * @brief Calculate the right hand side.
-         * @param solution Solution vector.
-         * @param face_solution Face solution vector.
-         * @param rhs Right hand side vector.
-         */
-        void calc_rhs(view_2d * solution,
-                      view_3d * face_solution,
-                      view_2d * rhs);
-        
-        /**
-         * @brief Pre-RHS hook.
-         * @param solution Solution vector.
-         * @param face_solution Face solution vector.
-         * @param rhs Right hand side vector.
-         */
-        void pre_rhs(view_2d * solution,
-                     view_3d * face_solution,
-                     view_2d * rhs);
-        
-        /**
-         * @brief Add the source term contributions to the right hand side.
-         * @param solution Solution vector.
-         * @param rhs Right hand side vector.
-         */
-        void calc_rhs_source(view_2d * solution,
-                             view_2d * rhs);
-        
-        /**
-         * @brief Add the interior flux contributions to the right hand side.
-         * @param face_solution Face solution vector.
-         * @param rhs Right hand side vector.
-         */
-        void calc_rhs_interior(view_3d * face_solution,
-                               view_2d * rhs);
-        
-        /**
-         * @brief Add the boundary flux contributions to the right hand side.
-         * @param face_solution Face solution vector.
-         * @param rhs Right hand side vector.
-         */
-        void calc_rhs_boundaries(view_3d * face_solution,
-                                 view_2d * rhs);
         
         view_2d conservatives;
         host_view_2d h_conservatives;
