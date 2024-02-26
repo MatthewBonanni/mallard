@@ -112,54 +112,6 @@ class Mesh {
         FaceZone * get_face_zone(const std::string& name);
 
         /**
-         * @brief Get the coordinates of a cell.
-         * 
-         * @param i_cell Index of the cell.
-         * @return Coordinates of the cell.
-         */
-        NVector cell_coords(int32_t i_cell) const;
-
-        /**
-         * @brief Get the coordinates of a node.
-         * 
-         * @param i_node Index of the node.
-         * @return Coordinates of the node.
-         */
-        NVector node_coords(u_int32_t i_node) const;
-
-        /**
-         * @brief Get the coordinates of a face.
-         * 
-         * @param i_face Index of the face.
-         * @return Coordinates of the face.
-         */
-        NVector face_coords(u_int32_t i_face) const;
-
-        /**
-         * @brief Get the volume of a cell.
-         * 
-         * @param i_cell Index of the cell.
-         * @return Volume of the cell.
-         */
-        rtype cell_volume(int32_t i_cell) const;
-
-        /**
-         * @brief Get the area of a face.
-         * 
-         * @param i_face Index of the face.
-         * @return Area of the face.
-         */
-        rtype face_area(u_int32_t i_face) const;
-
-        /**
-         * @brief Get the normal of a face.
-         * 
-         * @param i_face Index of the face.
-         * @return Unit vector normal to the face.
-         */
-        NVector face_normal(u_int32_t i_face) const;
-
-        /**
          * @brief Get the nodes comprising a cell.
          * 
          * @param i_cell Index of the cell.
@@ -235,6 +187,20 @@ class Mesh {
          * @param Ly Length of the domain in the y-direction.
          */
         void init_wedge(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly);
+
+        Kokkos::View<rtype *[2]> node_coords;
+        Kokkos::View<rtype *[2]> cell_coords;
+        Kokkos::View<rtype *[2]> face_coords;
+        Kokkos::View<rtype *> cell_volume;
+        Kokkos::View<rtype *> face_area;
+        Kokkos::View<rtype *[2]> face_normals;
+
+        Kokkos::View<rtype *[2]>::HostMirror h_node_coords;
+        Kokkos::View<rtype *[2]>::HostMirror h_cell_coords;
+        Kokkos::View<rtype *[2]>::HostMirror h_face_coords;
+        Kokkos::View<rtype *>::HostMirror h_cell_volume;
+        Kokkos::View<rtype *>::HostMirror h_face_area;
+        Kokkos::View<rtype *[2]>::HostMirror h_face_normals;
     protected:
     private:
         u_int32_t nx, ny; /** \todo This is a hack for WENO, remove this */

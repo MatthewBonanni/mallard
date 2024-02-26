@@ -519,8 +519,8 @@ void Solver::check_fields() const {
             msg << "t: " << t << std::endl;
             msg << "step: " << step << std::endl;
             msg << "i_cell: " << i << std::endl;
-            msg << "> x: " << mesh->cell_coords(i)[0] << std::endl;
-            msg << "> y: " << mesh->cell_coords(i)[1] << std::endl;
+            msg << "> x: " << mesh->cell_coords(i, 0) << std::endl;
+            msg << "> y: " << mesh->cell_coords(i, 1) << std::endl;
             msg << "conservatives:" << std::endl;
             for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
                 msg << "> " << CONSERVATIVE_NAMES[j] << ": " << h_conservatives(i, j) << std::endl;
@@ -609,6 +609,7 @@ rtype Solver::calc_spectral_radius() {
         rtype s[N_DIM], u_l[N_DIM], u_r[N_DIM], u_f[N_DIM];
         rtype dx_n, u_n;
         rtype geom_factor;
+        rtype n_vec[N_DIM];
         rtype n_unit[N_DIM];
 
         spectral_radius_convective = 0.0;
@@ -619,17 +620,17 @@ rtype Solver::calc_spectral_radius() {
         for (u_int32_t i_face = 0; i_face < mesh->faces_of_cell(i_cell).size(); i_face++) {
             int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
             int32_t i_cell_r = mesh->cells_of_face(i_face)[1];
-
-            unit<N_DIM>(mesh->face_normal(i_face).data(), n_unit);
+            FOR_I_DIM n_vec[i] = mesh->face_normals(i_face, i);
+            unit<N_DIM>(n_vec, n_unit);
 
             if (i_cell_r == -1) {
                 // Boundary face, hack
-                s[0] = 2.0 * (mesh->face_coords(i_face)[0] - mesh->cell_coords(i_cell_l)[0]);
-                s[1] = 2.0 * (mesh->face_coords(i_face)[1] - mesh->cell_coords(i_cell_l)[1]);
+                s[0] = 2.0 * (mesh->face_coords(i_face, 0) - mesh->cell_coords(i_cell_l, 0));
+                s[1] = 2.0 * (mesh->face_coords(i_face, 1) - mesh->cell_coords(i_cell_l, 1));
                 i_cell_r = i_cell_l;
             } else {
-                s[0] = mesh->cell_coords(i_cell_r)[0] - mesh->cell_coords(i_cell_l)[0];
-                s[1] = mesh->cell_coords(i_cell_r)[1] - mesh->cell_coords(i_cell_l)[1];
+                s[0] = mesh->cell_coords(i_cell_r, 0) - mesh->cell_coords(i_cell_l, 0);
+                s[1] = mesh->cell_coords(i_cell_r, 1) - mesh->cell_coords(i_cell_l, 1);
             }
 
             dx_n = Kokkos::fabs(dot<N_DIM>(s, n_unit));

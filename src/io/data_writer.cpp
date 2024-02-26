@@ -198,7 +198,7 @@ void DataWriter::write_vtu(u_int32_t step) const {
     out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
     for (u_int32_t i = 0; i < mesh->n_nodes(); i++) {
         for (u_int8_t j = 0; j < N_DIM; j++) {
-            out.write(reinterpret_cast<const char *>(&mesh->node_coords(i)[j]), sizeof(rtype));
+            out.write(reinterpret_cast<const char *>(&mesh->node_coords(i, j)), sizeof(rtype));
         }
         if (N_DIM == 2) {
             rtype zero = 0.0;

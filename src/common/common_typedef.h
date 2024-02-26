@@ -23,6 +23,8 @@
 #define N_PRIMITIVE N_DIM + 3
 
 #define FOR_I_DIM for (u_int8_t i = 0; i < N_DIM; i++)
+#define FOR_I_CONSERVATIVE for (u_int8_t i = 0; i < N_CONSERVATIVE; i++)
+#define FOR_I_PRIMITIVE for (u_int8_t i = 0; i < N_PRIMITIVE; i++)
 
 #ifdef Mallard_USE_DOUBLES
     using rtype = double;

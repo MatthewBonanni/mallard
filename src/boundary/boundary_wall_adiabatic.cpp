@@ -36,14 +36,16 @@ void BoundaryWallAdiabatic::init(const toml::value & input) {
 void BoundaryWallAdiabatic::apply(view_3d * face_solution,
                                   view_2d * rhs) {
     Kokkos::parallel_for(zone->n_faces(), KOKKOS_LAMBDA(const u_int32_t i_local) {
-        State flux;
-        State conservatives_l;
-        Primitives primitives_l;
+        rtype flux[N_CONSERVATIVE];
+        rtype conservatives_l[N_CONSERVATIVE];
+        rtype primitives_l[N_PRIMITIVE];
 
         u_int32_t i_face = (*zone->faces())[i_local];
         int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
+        rtype n_vec[N_DIM];
         rtype n_unit[N_DIM];
-        unit<N_DIM>(mesh->face_normal(i_face).data(), n_unit);
+        FOR_I_DIM n_vec[i] = mesh->face_normals(i_face, i);
+        unit<N_DIM>(n_vec, n_unit);
 
         // Get cell conservatives
         for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
@@ -51,7 +53,7 @@ void BoundaryWallAdiabatic::apply(view_3d * face_solution,
         }
 
         // Compute relevant primitive variables
-        physics->compute_primitives_from_conservatives(primitives_l.data(), conservatives_l.data());
+        physics->compute_primitives_from_conservatives(primitives_l, conservatives_l);
 
         // Compute flux
         flux[0] = 0.0;

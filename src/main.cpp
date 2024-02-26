@@ -38,10 +38,8 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Error: Missing input file after -i flag." << std::endl;
                 return 1;
             }
-        } else {
-            std::cerr << "Error: Unknown flag " << argv[i] << std::endl;
         }
-    }                                      
+    }
 
     int status = 0;
 

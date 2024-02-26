@@ -55,7 +55,7 @@ class BoundaryUPT : public Boundary {
         rtype rho_bc;
         rtype e_bc;
         rtype h_bc;
-        Primitives primitives_bc;
+        rtype primitives_bc[N_PRIMITIVE];
 };
 
 #endif // BOUNDARY_UPT_H
