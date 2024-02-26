@@ -223,26 +223,26 @@ void Solver::init_boundaries() {
 
     std::vector<toml::value> input_boundaries = toml::find<std::vector<toml::value>>(input, "boundaries");
     for (const auto & bound : input_boundaries) {
-        std::optional<std::string> name = toml::find<std::string>(bound, "name");
-        std::optional<std::string> type = toml::find<std::string>(bound, "type");
-
-        if (!name.has_value()) {
+        if (!bound.contains("name")) {
             throw std::runtime_error("Boundary name not specified.");
         }
-        if (!type.has_value()) {
+        if (!bound.contains("type")) {
             throw std::runtime_error("Boundary type not specified.");
         }
 
+        std::string name = toml::find<std::string>(bound, "name");
+        std::string type = toml::find<std::string>(bound, "type");
+
         BoundaryType btype;
-        typename std::unordered_map<std::string, BoundaryType>::const_iterator it = BOUNDARY_TYPES.find(*type);
+        typename std::unordered_map<std::string, BoundaryType>::const_iterator it = BOUNDARY_TYPES.find(type);
         if (it == BOUNDARY_TYPES.end()) {
-            throw std::runtime_error("Unknown boundary type: " + *type + ".");
+            throw std::runtime_error("Unknown boundary type: " + type + ".");
         } else {
             btype = it->second;
         }
 
-        if (mesh->get_face_zone(*name) == nullptr) {
-            throw std::runtime_error("Boundary name " + *name + " not found in mesh.");
+        if (mesh->get_face_zone(name) == nullptr) {
+            throw std::runtime_error("Boundary name " + name + " not found in mesh.");
         }
 
         if (btype == BoundaryType::SYMMETRY) {
@@ -257,10 +257,10 @@ void Solver::init_boundaries() {
             boundaries.push_back(std::make_unique<BoundaryPOut>());
         } else {
             // Should never get here due to the enum class.
-            throw std::runtime_error("Unknown boundary type: " + *type + ".");
+            throw std::runtime_error("Unknown boundary type: " + type + ".");
         }
 
-        boundaries.back()->set_zone(mesh->get_face_zone(*name));
+        boundaries.back()->set_zone(mesh->get_face_zone(name));
         boundaries.back()->set_mesh(mesh);
         boundaries.back()->set_physics(physics);
         boundaries.back()->set_riemann_solver(riemann_solver);
@@ -271,37 +271,37 @@ void Solver::init_boundaries() {
 void Solver::init_run_parameters() {
     std::cout << "Initializing run parameters..." << std::endl;
 
-    std::optional<rtype> dt_in = toml::find<rtype>(input, "run", "dt");
-    std::optional<rtype> cfl_in = toml::find<rtype>(input, "run", "cfl");
-    std::optional<u_int32_t> n_steps_in = toml::find<u_int32_t>(input, "run", "n_steps");
-    std::optional<rtype> t_stop_in = toml::find<rtype>(input, "run", "t_stop");
-    std::optional<rtype> t_wall_stop_in = toml::find<rtype>(input, "run", "t_wall_stop");
-
-    if (!dt_in.has_value() && !cfl_in.has_value()) {
+    if (!input.contains("run")) {
+        throw std::runtime_error("Run parameters not specified.");
+    }
+    
+    if (!input["run"].contains("dt") &&
+        !input["run"].contains("cfl")) {
         throw std::runtime_error("Either dt or cfl must be specified.");
-    } else if (dt_in.has_value() && cfl_in.has_value()) {
+    } else if (input["run"].contains("dt") &&
+               input["run"].contains("cfl")) {
         throw std::runtime_error("Only one of dt or cfl can be specified.");
     }
 
-    if (!n_steps_in.has_value() &&
-        !t_stop_in.has_value() &&
-        !t_wall_stop_in.has_value()) {
+    if (!input["run"].contains("n_steps") &&
+        !input["run"].contains("t_stop") &&
+        !input["run"].contains("t_wall_stop")) {
         throw std::runtime_error("Either n_steps, t_stop, or t_wall_stop must be specified.");
     }
 
-    if (dt_in.has_value()) {
+    if (input["run"].contains("dt")) {
         std::cout << "Using specified dt." << std::endl;
         use_cfl = false;
-        dt = dt_in.value();
+        dt = toml::find<rtype>(input, "run", "dt");
     } else {
         std::cout << "Using specified cfl." << std::endl;
         use_cfl = true;
-        cfl = cfl_in.value();
+        cfl = toml::find<rtype>(input, "run", "cfl");
     }
 
-    n_steps = n_steps_in.value_or(-1);
-    t_stop = t_stop_in.value_or(-1.0);
-    t_wall_stop = t_wall_stop_in.value_or(-1.0);
+    n_steps = toml::find_or<u_int32_t>(input, "run", "n_steps", -1);
+    t_stop = toml::find_or<rtype>(input, "run", "t_stop", -1.0);
+    t_wall_stop = toml::find_or<rtype>(input, "run", "t_wall_stop", -1.0);
 }
 
 void Solver::init_output() {

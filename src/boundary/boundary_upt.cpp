@@ -35,28 +35,24 @@ void BoundaryUPT::print() {
 }
 
 void BoundaryUPT::init(const toml::value & input) {
-    std::optional<std::vector<rtype>> u_in = toml::find<std::vector<rtype>>(input, "initialize", "u");
-    std::optional<rtype> p_in = toml::find<rtype>(input, "initialize", "p");
-    std::optional<rtype> T_in = toml::find<rtype>(input, "initialize", "T");
-
-    if (!u_in.has_value()) {
-        throw std::runtime_error("Missing u for initialization: constant.");
-    } else if (u_in.value().size() != 2) {
-        throw std::runtime_error("u must be a 2-element array for initialization: constant.");
+    if (!input.contains("u_in")) {
+        throw std::runtime_error("Missing u for boundary: " + zone->get_name() + ".");
     }
-
-    if (!p_in.has_value()) {
+    if (!input.contains("p_in")) {
         throw std::runtime_error("Missing p for boundary: " + zone->get_name() + ".");
     }
-
-    if (!T_in.has_value()) {
+    if (!input.contains("T_in")) {
         throw std::runtime_error("Missing T for boundary: " + zone->get_name() + ".");
     }
 
-    u_bc[0] = u_in.value()[0];
-    u_bc[1] = u_in.value()[1];
-    p_bc = p_in.value();
-    T_bc = T_in.value();
+    std::vector<rtype> u_in = toml::find<std::vector<rtype>>(input, "u_in");
+    if (u_in.size() != N_DIM) {
+        throw std::runtime_error("Invalid u for boundary: " + zone->get_name() + ".");
+    }
+
+    FOR_I_DIM u_bc[i] = u_in[i];
+    p_bc = toml::find<rtype>(input, "p_in");
+    T_bc = toml::find<rtype>(input, "T_in");
 
     rho_bc = physics->get_density_from_pressure_temperature(p_bc, T_bc);
     e_bc = physics->get_energy_from_temperature(T_bc);

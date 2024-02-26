@@ -60,36 +60,30 @@ void Solver::init_solution() {
 }
 
 void Solver::init_solution_constant() {
-    std::optional<std::vector<rtype>> u_in = toml::find<std::vector<rtype>>(input, "initialize", "u");
-    std::optional<rtype> p_in = toml::find<rtype>(input, "initialize", "p");
-    std::optional<rtype> T_in = toml::find<rtype>(input, "initialize", "T");
-
-    if (!u_in.has_value()) {
+    if (!input["initialize"].contains("u")) {
         throw std::runtime_error("Missing u for initialization: constant.");
-    } else if (u_in.value().size() != 2) {
+    } else if (input["initialize"]["u"].size() != 2) {
         throw std::runtime_error("u must be a 2-element array for initialization: constant.");
     }
 
-    if (!p_in.has_value()) {
+    if (!input["initialize"].contains("p")) {
         throw std::runtime_error("Missing p for initialization: constant.");
     }
 
-    if (!T_in.has_value()) {
+    if (!input["initialize"].contains("T")) {
         throw std::runtime_error("Missing T for initialization: constant.");
     }
 
-    rtype u_x = u_in.value()[0];
-    rtype u_y = u_in.value()[1];
-    rtype p = p_in.value();
-    rtype T = T_in.value();
+    std::vector<rtype> u = toml::find<std::vector<rtype>>(input, "initialize", "u");
+    rtype p = toml::find<rtype>(input, "initialize", "p"); 
+    rtype T = toml::find<rtype>(input, "initialize", "T");
 
     rtype rho = physics->get_density_from_pressure_temperature(p, T);
     rtype e = physics->get_energy_from_temperature(T);
-    rtype E = e + 0.5 * (u_x * u_x +
-                         u_y * u_y);
+    rtype E = e + 0.5 * norm_2<N_DIM>(u.data());
     rtype h = e + p / rho;
-    rtype rhou_x = rho * u_x;
-    rtype rhou_y = rho * u_y;
+    rtype rhou_x = rho * u[0];
+    rtype rhou_y = rho * u[1];
     rtype rhoE = rho * E;
 
     for (u_int32_t i = 0; i < mesh->n_cells(); ++i) {
@@ -98,8 +92,8 @@ void Solver::init_solution_constant() {
         h_conservatives(i, 2) = rhou_y;
         h_conservatives(i, 3) = rhoE;
 
-        h_primitives(i, 0) = u_x;
-        h_primitives(i, 1) = u_y;
+        h_primitives(i, 0) = u[0];
+        h_primitives(i, 1) = u[1];
         h_primitives(i, 2) = p;
         h_primitives(i, 3) = T;
         h_primitives(i, 4) = h;
@@ -107,29 +101,26 @@ void Solver::init_solution_constant() {
 }
 
 void Solver::init_solution_analytical() {
-    std::optional<std::vector<std::string>> u_in = toml::find<std::vector<std::string>>(input, "initialize", "u");
-    std::optional<std::string> rho_in = toml::find<std::string>(input, "initialize", "rho");
-    std::optional<std::string> p_in = toml::find<std::string>(input, "initialize", "p");
-    std::optional<std::string> T_in = toml::find<std::string>(input, "initialize", "T");
-
-    if (!u_in.has_value()) {
+    if (!input["initialize"].contains("u")) {
         throw std::runtime_error("Missing u for initialization: analytical.");
-    } else if (u_in.value().size() != 2) {
+    } else if (input["initialize"]["u"].size() != 2) {
         throw std::runtime_error("u must be a 2-element array for initialization: analytical.");
     }
 
-    u_int8_t n_specified = rho_in.has_value() + p_in.has_value() + T_in.has_value();
-
+    bool rho_in = input["initialize"].contains("rho");
+    bool p_in = input["initialize"].contains("p");
+    bool T_in = input["initialize"].contains("T");
+    u_int8_t n_specified = rho_in + p_in + T_in;
     if (n_specified != 2) {
         throw std::runtime_error("Exactly two of rho, p, and T must be specified for initialization: analytical.");
     }
 
-    std::string u_x_str, u_y_str, rho_str, p_str, T_str;
-    u_x_str = u_in.value()[0];
-    u_y_str = u_in.value()[1];
-    if (rho_in.has_value()) rho_str = rho_in.value();
-    if (p_in.has_value()) p_str = p_in.value();
-    if (T_in.has_value()) T_str = T_in.value();
+    std::vector<std::string> u_str = toml::find<std::vector<std::string>>(input, "initialize", "u");
+    std::string u_x_str = u_str[0];
+    std::string u_y_str = u_str[1];
+    std::string rho_str = toml::find_or(input, "initialize", "rho", "");
+    std::string p_str = toml::find_or(input, "initialize", "p", "");
+    std::string T_str = toml::find_or(input, "initialize", "T", "");
 
     rtype x, y;
 
@@ -142,46 +133,46 @@ void Solver::init_solution_analytical() {
 
     u_x_expr.register_symbol_table(symbol_table);
     u_y_expr.register_symbol_table(symbol_table);
-    if (rho_in.has_value()) rho_expr.register_symbol_table(symbol_table);
-    if (p_in.has_value()) p_expr.register_symbol_table(symbol_table);
-    if (T_in.has_value()) T_expr.register_symbol_table(symbol_table);
+    if (rho_in) rho_expr.register_symbol_table(symbol_table);
+    if (p_in) p_expr.register_symbol_table(symbol_table);
+    if (T_in) T_expr.register_symbol_table(symbol_table);
 
     exprtk::parser<rtype> parser;
     parser.compile(u_x_str, u_x_expr);
     parser.compile(u_y_str, u_y_expr);
-    if (rho_in.has_value()) parser.compile(rho_str, rho_expr);
-    if (p_in.has_value()) parser.compile(p_str, p_expr);
-    if (T_in.has_value()) parser.compile(T_str, T_expr);
+    if (rho_in) parser.compile(rho_str, rho_expr);
+    if (p_in) parser.compile(p_str, p_expr);
+    if (T_in) parser.compile(T_str, T_expr);
 
-    rtype u_x, u_y, p, T;
+    NVector u;
+    rtype p, T;
     rtype rho, e, E, h, rhou_x, rhou_y, rhoE;
 
     for (u_int32_t i = 0; i < mesh->n_cells(); ++i) {
         x = mesh->cell_coords(i)[0];
         y = mesh->cell_coords(i)[1];
 
-        u_x = u_x_expr.value();
-        u_y = u_y_expr.value();
-        if (rho_in.has_value()) rho = rho_expr.value();
-        if (p_in.has_value()) p = p_expr.value();
-        if (T_in.has_value()) T = T_expr.value();
+        u[0] = u_x_expr.value();
+        u[1] = u_y_expr.value();
+        if (rho_in) rho = rho_expr.value();
+        if (p_in) p = p_expr.value();
+        if (T_in) T = T_expr.value();
 
-        if (rho_in.has_value() && p_in.has_value()) {
+        if (rho_in && p_in) {
             T = physics->get_temperature_from_density_pressure(rho, p);
-        } else if (rho_in.has_value() && T_in.has_value()) {
+        } else if (rho_in && T_in) {
             p = physics->get_pressure_from_density_temperature(rho, T);
-        } else if (p_in.has_value() && T_in.has_value()) {
+        } else if (p_in && T_in) {
             rho = physics->get_density_from_pressure_temperature(p, T);
         } else {
             throw std::runtime_error("Exactly two of rho, p, and T must be specified for initialization: analytical.");
         }
 
         e = physics->get_energy_from_temperature(T);
-        E = e + 0.5 * (u_x * u_x +
-                       u_y * u_y);
+        E = e + 0.5 * norm_2<N_DIM>(u.data());
         h = e + p / rho;
-        rhou_x = rho * u_x;
-        rhou_y = rho * u_y;
+        rhou_x = rho * u[0];
+        rhou_y = rho * u[1];
         rhoE = rho * E;
 
         h_conservatives(i, 0) = rho;
@@ -189,8 +180,8 @@ void Solver::init_solution_analytical() {
         h_conservatives(i, 2) = rhou_y;
         h_conservatives(i, 3) = rhoE;
 
-        h_primitives(i, 0) = u_x;
-        h_primitives(i, 1) = u_y;
+        h_primitives(i, 0) = u[0];
+        h_primitives(i, 1) = u[1];
         h_primitives(i, 2) = p;
         h_primitives(i, 3) = T;
         h_primitives(i, 4) = h;

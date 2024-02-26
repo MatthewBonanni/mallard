@@ -29,39 +29,38 @@ DataWriter::~DataWriter() {
 void DataWriter::init(const toml::value & input,
                       std::vector<Data> & data,
                       std::shared_ptr<Mesh> mesh) {
-    std::optional<std::string> prefix = toml::find<std::string>(input, "prefix");
-    std::optional<std::string> format_str = toml::find<std::string>(input, "format");
-    std::optional<u_int32_t> interval = toml::find<u_int32_t>(input, "interval");
-    std::optional<std::vector<std::string>> variables = toml::find<std::vector<std::string>>(input, "variables");
+    if (!input.contains("prefix")) {
+        throw std::runtime_error("DataWriter: prefix not specified.");
+    }
+    if (!input.contains("format")) {
+        throw std::runtime_error("DataWriter: format not specified.");
+    }
+    if (!input.contains("interval")) {
+        throw std::runtime_error("DataWriter: interval not specified.");
+    }
+    if (!input.contains("variables")) {
+        throw std::runtime_error("DataWriter: variables not specified.");
+    }
 
     // \todo Implement write geometries
 
-    if (!prefix.has_value()) {
-        throw std::runtime_error("DataWriter: prefix not specified.");
-    }
-    if (!format_str.has_value()) {
-        throw std::runtime_error("DataWriter: format not specified.");
-    }
-    if (!interval.has_value()) {
-        throw std::runtime_error("DataWriter: interval not specified.");
-    }
-    if (!variables.has_value()) {
-        throw std::runtime_error("DataWriter: variables not specified.");
-    } else if (variables.value().empty()) {
-        throw std::runtime_error("DataWriter: variables must be a non-empty array.");
+    this->prefix = toml::find<std::string>(input, "prefix");
+    this->interval = toml::find<u_int32_t>(input, "interval");
+    std::string format_str = toml::find<std::string>(input, "format");
+    std::vector<std::string> variables = toml::find<std::vector<std::string>>(input, "variables");
+
+    if (variables.empty()) {
+        throw std::runtime_error("DataWriter: No variables specified.");
     }
 
-    this->prefix = prefix.value();
-    this->interval = interval.value();
-
-    typename std::unordered_map<std::string, DataFormat>::const_iterator it = FORMAT_TYPES.find(*format_str);
+    typename std::unordered_map<std::string, DataFormat>::const_iterator it = FORMAT_TYPES.find(format_str);
     if (it == FORMAT_TYPES.end()) {
-        throw std::runtime_error("DataWriter: Unknown format type: " + *format_str + ".");
+        throw std::runtime_error("DataWriter: Unknown format type: " + format_str + ".");
     } else {
         format = it->second;
     }
 
-    for (const auto & var : variables.value()) {
+    for (const auto & var : variables) {
         bool found = false;
         for (const auto & data_var : data) {
             if (data_var.name() == var) {

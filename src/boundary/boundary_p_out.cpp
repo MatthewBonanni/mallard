@@ -33,13 +33,11 @@ void BoundaryPOut::print() {
 }
 
 void BoundaryPOut::init(const toml::value & input) {
-    std::optional<rtype> p_in = toml::find<rtype>(input, "initialize", "p");
-
-    if (!p_in.has_value()) {
+    if (!input.contains("p")) {
         throw std::runtime_error("Missing p for boundary: " + zone->get_name() + ".");
     }
-
-    p_bc = p_in.value();
+    
+    p_bc = toml::find<rtype>(input, "initialize", "p");
 
     print();
 }

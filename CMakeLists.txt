@@ -24,8 +24,8 @@ set(KokkosKernels_ROOT "${CMAKE_SOURCE_DIR}/build/external/kokkos-kernels" CACHE
 find_package(Kokkos REQUIRED)
 find_package(KokkosKernels REQUIRED)
 
-include_directories("${CMAKE_SOURCE_DIR}/src/external/exprtk")
-include_directories("${CMAKE_SOURCE_DIR}/src/external/toml11")
+include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/exprtk")
+include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/toml11")
 
 add_subdirectory(src)
 add_subdirectory(test)

@@ -48,28 +48,25 @@ Euler::~Euler() {
 void Euler::init(const toml::value & input) {
     Physics::init(input);
 
-    std::optional<rtype> gamma_in = toml::find<rtype>(input, "physics", "gamma");
-    std::optional<rtype> p_ref_in = toml::find<rtype>(input, "physics", "p_ref");
-    std::optional<rtype> T_ref_in = toml::find<rtype>(input, "physics", "T_ref");
-    std::optional<rtype> rho_ref_in = toml::find<rtype>(input, "physics", "rho_ref");
+    toml::value input_physics = toml::find(input, "physics");
 
-    if (!gamma_in.has_value()) {
+    if (!input_physics.contains("gamma")) {
         throw std::runtime_error("Missing gamma for physics: " + PHYSICS_NAMES.at(type) + ".");
     }
-    if (!p_ref_in.has_value()) {
+    if (!input_physics.contains("p_ref")) {
         throw std::runtime_error("Missing p_ref for physics: " + PHYSICS_NAMES.at(type) + ".");
     }
-    if (!T_ref_in.has_value()) {
+    if (!input_physics.contains("T_ref")) {
         throw std::runtime_error("Missing T_ref for physics: " + PHYSICS_NAMES.at(type) + ".");
     }
-    if (!rho_ref_in.has_value()) {
+    if (!input_physics.contains("rho_ref")) {
         throw std::runtime_error("Missing rho_ref for physics: " + PHYSICS_NAMES.at(type) + ".");
     }
 
-    gamma = gamma_in.value();
-    p_ref = p_ref_in.value();
-    T_ref = T_ref_in.value();
-    rho_ref = rho_ref_in.value();
+    gamma = toml::find<rtype>(input, "physics", "gamma");
+    p_ref = toml::find<rtype>(input, "physics", "p_ref");
+    T_ref = toml::find<rtype>(input, "physics", "T_ref");
+    rho_ref = toml::find<rtype>(input, "physics", "rho_ref");
 
     set_R_cp_cv();
 
