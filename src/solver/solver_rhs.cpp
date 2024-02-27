@@ -60,13 +60,13 @@ void Solver::calc_rhs_interior(view_3d * face_solution,
         /** \todo Don't reallocate these every time. */
 
         /** \todo Iterate only over interior faces to save time. */
-        if (mesh->cells_of_face(i_face)[1] == -1) {
+        if (mesh->cells_of_face(i_face, 1) == -1) {
             // Boundary face
             return;
         }
 
-        int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
-        int32_t i_cell_r = mesh->cells_of_face(i_face)[1];
+        int32_t i_cell_l = mesh->cells_of_face(i_face, 0);
+        int32_t i_cell_r = mesh->cells_of_face(i_face, 1);
         FOR_I_DIM n_vec[i] = mesh->face_normals(i_face, i);
         unit<N_DIM>(n_vec, n_unit);
 

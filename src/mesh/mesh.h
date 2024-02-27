@@ -121,36 +121,55 @@ class Mesh {
         FaceZone * get_face_zone(const std::string& name);
 
         /**
-         * @brief Get the nodes comprising a cell.
-         * 
+         * @brief Get the number of nodes comprising a cell.
          * @param i_cell Index of the cell.
-         * @return Array of node ids comprising the cell.
+         * @return Number of nodes comprising the cell.
          */
-        std::array<u_int32_t, 4> nodes_of_cell(int32_t i_cell) const;
+        KOKKOS_INLINE_FUNCTION
+        u_int32_t n_nodes_of_cell(u_int32_t i_cell) const;
 
         /**
-         * @brief Get the faces comprising a cell.
-         * 
+         * @brief Get the number of faces comprising a cell.
          * @param i_cell Index of the cell.
-         * @return Array of face ids comprising the cell.
+         * @return Number of faces comprising the cell.
          */
-        std::array<u_int32_t, 4> faces_of_cell(int32_t i_cell) const;
+        KOKKOS_INLINE_FUNCTION
+        u_int32_t n_faces_of_cell(u_int32_t i_cell) const;
 
         /**
-         * @brief Get the cells bounding a face.
-         * 
+         * @brief Get the number of nodes comprising a face.
          * @param i_face Index of the face.
-         * @return Array of cell ids bounding the face.
+         * @return Number of nodes comprising the face.
          */
-        std::array<int32_t, 2> cells_of_face(u_int32_t i_face) const;
+        KOKKOS_INLINE_FUNCTION
+        u_int32_t n_nodes_of_face(u_int32_t i_face) const;
 
         /**
-         * @brief Get the nodes comprising a face.
-         * 
-         * @param i_face Index of the face.
-         * @return Array of node ids comprising the face.
+         * @brief Get the id of the i-th node of a cell.
+         * @param i_cell Index of the cell.
+         * @param i_node_local Index of the node.
+         * @return Node id.
          */
-        std::array<u_int32_t, 2> nodes_of_face(u_int32_t i_face) const;
+        KOKKOS_INLINE_FUNCTION
+        u_int32_t node_of_cell(u_int32_t i_cell, u_int8_t i_node_local) const;
+
+        /**
+         * @brief Get the id of the i-th face of a cell.
+         * @param i_cell Index of the cell.
+         * @param i_face_local Index of the face.
+         * @return Face id.
+         */
+        KOKKOS_INLINE_FUNCTION
+        u_int32_t face_of_cell(u_int32_t i_cell, u_int8_t i_face_local) const;
+
+        /**
+         * @brief Get the id of the i-th node of a face.
+         * @param i_face Index of the face.
+         * @param i_node_local Index of the node.
+         * @return Node id.
+         */
+        KOKKOS_INLINE_FUNCTION
+        u_int32_t node_of_face(u_int32_t i_face, u_int8_t i_node_local) const;
 
         /**
          * @brief Compute cell centroids.
@@ -213,6 +232,13 @@ class Mesh {
         Kokkos::View<rtype *> cell_volume;
         Kokkos::View<rtype *> face_area;
         Kokkos::View<rtype *[N_DIM]> face_normals;
+        Kokkos::View<u_int32_t *> nodes_of_cell;
+        Kokkos::View<u_int32_t *> offsets_nodes_of_cell;
+        Kokkos::View<u_int32_t *> faces_of_cell;
+        Kokkos::View<u_int32_t *> offsets_faces_of_cell;
+        Kokkos::View<u_int32_t *> nodes_of_face;
+        Kokkos::View<u_int32_t *> offsets_nodes_of_face;
+        Kokkos::View<int32_t *[2]> cells_of_face;
 
         Kokkos::View<rtype *[N_DIM]>::HostMirror h_node_coords;
         Kokkos::View<rtype *[N_DIM]>::HostMirror h_cell_coords;
@@ -220,16 +246,43 @@ class Mesh {
         Kokkos::View<rtype *>::HostMirror h_cell_volume;
         Kokkos::View<rtype *>::HostMirror h_face_area;
         Kokkos::View<rtype *[N_DIM]>::HostMirror h_face_normals;
+        Kokkos::View<u_int32_t *>::HostMirror h_nodes_of_cell;
+        Kokkos::View<u_int32_t *>::HostMirror h_offsets_nodes_of_cell;
+        Kokkos::View<u_int32_t *>::HostMirror h_faces_of_cell;
+        Kokkos::View<u_int32_t *>::HostMirror h_offsets_faces_of_cell;
+        Kokkos::View<u_int32_t *>::HostMirror h_nodes_of_face;
+        Kokkos::View<u_int32_t *>::HostMirror h_offsets_nodes_of_face;
+        Kokkos::View<int32_t *[2]>::HostMirror h_cells_of_face;
     protected:
     private:
         u_int32_t nx, ny; /** \todo This is a hack for WENO, remove this */
         MeshType type;
-        std::vector<std::array<u_int32_t, 4>> m_nodes_of_cell;
-        std::vector<std::array<u_int32_t, 4>> m_faces_of_cell;
-        std::vector<std::array<int32_t, 2>> m_cells_of_face;
-        std::vector<std::array<u_int32_t, 2>> m_nodes_of_face;
         std::vector<CellZone> m_cell_zones;
         std::vector<FaceZone> m_face_zones;
 };
+
+u_int32_t Mesh::n_nodes_of_cell(u_int32_t i_cell) const {
+    return offsets_nodes_of_cell(i_cell + 1) - offsets_nodes_of_cell(i_cell);
+}
+
+u_int32_t Mesh::n_faces_of_cell(u_int32_t i_cell) const {
+    return offsets_faces_of_cell(i_cell + 1) - offsets_faces_of_cell(i_cell);
+}
+
+u_int32_t Mesh::n_nodes_of_face(u_int32_t i_face) const {
+    return offsets_nodes_of_face(i_face + 1) - offsets_nodes_of_face(i_face);
+}
+
+u_int32_t Mesh::node_of_cell(u_int32_t i_cell, u_int8_t i_node_local) const {
+    return nodes_of_cell(offsets_nodes_of_cell(i_cell) + i_node_local);
+}
+
+u_int32_t Mesh::face_of_cell(u_int32_t i_cell, u_int8_t i_face_local) const {
+    return faces_of_cell(offsets_faces_of_cell(i_cell) + i_face_local);
+}
+
+u_int32_t Mesh::node_of_face(u_int32_t i_face, u_int8_t i_node_local) const {
+    return nodes_of_face(offsets_nodes_of_face(i_face) + i_node_local);
+}
 
 #endif // MESH_H

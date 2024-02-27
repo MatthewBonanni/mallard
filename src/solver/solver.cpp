@@ -549,12 +549,12 @@ void Solver::update_primitives() {
         rtype cell_conservatives[N_CONSERVATIVE];
         rtype cell_primitives[N_PRIMITIVE];
         for (u_int16_t i = 0; i < N_CONSERVATIVE; i++) {
-            cell_conservatives[i] = conservatives(i_cell, i);
+            cell_conservatives[i] = this->conservatives(i_cell, i);
         }
         physics->compute_primitives_from_conservatives(cell_primitives,
                                                        cell_conservatives);
         for (u_int16_t i = 0; i < N_PRIMITIVE; i++) {
-            primitives(i_cell, i) = cell_primitives[i];
+            this->primitives(i_cell, i) = cell_primitives[i];
         }
     });
 }
@@ -592,9 +592,9 @@ rtype Solver::calc_spectral_radius() {
         // spectral_radius_viscous = 0.0;
         // spectral_radius_heat = 0.0;
 
-        for (u_int32_t i_face = 0; i_face < mesh->faces_of_cell(i_cell).size(); i_face++) {
-            int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
-            int32_t i_cell_r = mesh->cells_of_face(i_face)[1];
+        for (u_int32_t i_face = 0; i_face < mesh->n_faces_of_cell(i_cell); i_face++) {
+            int32_t i_cell_l = mesh->cells_of_face(i_face, 0);
+            int32_t i_cell_r = mesh->cells_of_face(i_face, 1);
             FOR_I_DIM n_vec[i] = mesh->face_normals(i_face, i);
             unit<N_DIM>(n_vec, n_unit);
 
@@ -630,7 +630,7 @@ rtype Solver::calc_spectral_radius() {
             spectral_radius_acoustic += pow(sos_f / dx_n, 2.0);
         }
 
-        geom_factor = 3.0 / mesh->faces_of_cell(i_cell).size();
+        geom_factor = 3.0 / mesh->n_faces_of_cell(i_cell);
         spectral_radius_convective *= 1.37 * geom_factor;
         spectral_radius_acoustic = 1.37 * Kokkos::sqrt(geom_factor * spectral_radius_acoustic);
 

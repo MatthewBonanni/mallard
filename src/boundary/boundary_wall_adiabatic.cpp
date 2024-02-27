@@ -41,7 +41,7 @@ void BoundaryWallAdiabatic::apply(view_3d * face_solution,
         rtype primitives_l[N_PRIMITIVE];
 
         u_int32_t i_face = (*zone->faces())[i_local];
-        int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
+        int32_t i_cell_l = mesh->cells_of_face(i_face, 0);
         rtype n_vec[N_DIM];
         rtype n_unit[N_DIM];
         FOR_I_DIM n_vec[i] = mesh->face_normals(i_face, i);

@@ -153,7 +153,7 @@ void DataWriter::write_vtu(u_int32_t step) const {
     out << "offset=\"" << offset_data << "\">\n";
     out << "        </DataArray>\n";
     for (u_int32_t i = 0; i < mesh->n_cells(); i++) {
-        len_connectivity += mesh->nodes_of_cell(i).size();
+        len_connectivity += mesh->n_nodes_of_cell(i);
     }
     offset_data += sizeof(int) + len_connectivity * sizeof(int);
 
@@ -196,9 +196,11 @@ void DataWriter::write_vtu(u_int32_t step) const {
     // Write Points
     n_bytes = sizeof(rtype) * mesh->n_nodes() * 3;
     out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
+    rtype coord;
     for (u_int32_t i = 0; i < mesh->n_nodes(); i++) {
         for (u_int8_t j = 0; j < N_DIM; j++) {
-            out.write(reinterpret_cast<const char *>(&mesh->node_coords(i, j)), sizeof(rtype));
+            coord = mesh->node_coords(i, j);
+            out.write(reinterpret_cast<const char *>(&coord), sizeof(rtype));
         }
         if (N_DIM == 2) {
             rtype zero = 0.0;
@@ -211,22 +213,24 @@ void DataWriter::write_vtu(u_int32_t step) const {
     // connectivity
     n_bytes = sizeof(int) * len_connectivity;
     out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
+    u_int32_t i_node;
     for (u_int32_t i = 0; i < mesh->n_cells(); i++) {
-        for (u_int32_t j = 0; j < mesh->nodes_of_cell(i).size(); j++) {
-            out.write(reinterpret_cast<const char *>(&mesh->nodes_of_cell(i)[j]), sizeof(int));
+        for (u_int32_t j = 0; j < mesh->n_nodes_of_cell(i); j++) {
+            i_node = mesh->node_of_cell(i, j);
+            out.write(reinterpret_cast<const char *>(&i_node), sizeof(int));
         }
     }
 
-    // // offsets
+    // offsets
     n_bytes = sizeof(int) * mesh->n_cells();
     out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
     u_int64_t offset = 0;
     for (u_int32_t i = 0; i < mesh->n_cells(); i++) {
-        offset += mesh->nodes_of_cell(i).size();
+        offset += mesh->n_nodes_of_cell(i);
         out.write(reinterpret_cast<const char *>(&offset), sizeof(int));
     }
 
-    // // types
+    // types
     n_bytes = sizeof(int) * mesh->n_cells();
     out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
     u_int8_t cell_type = 7;

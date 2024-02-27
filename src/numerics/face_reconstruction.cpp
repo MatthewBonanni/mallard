@@ -56,8 +56,8 @@ FirstOrder::~FirstOrder() {
 void FirstOrder::calc_face_values(view_2d * solution,
                                   view_3d * face_solution) {
     Kokkos::parallel_for(mesh->n_faces(), KOKKOS_LAMBDA(const u_int32_t i_face) {
-        int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
-        int32_t i_cell_r = mesh->cells_of_face(i_face)[1];
+        int32_t i_cell_l = mesh->cells_of_face(i_face, 0);
+        int32_t i_cell_r = mesh->cells_of_face(i_face, 1);
 
         for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
             (*face_solution)(i_face, 0, j) = (*solution)(i_cell_l, j);
@@ -81,8 +81,8 @@ void WENO3_JS::calc_face_values(view_2d * solution,
     Kokkos::parallel_for(mesh->n_faces(), KOKKOS_LAMBDA(const u_int32_t i_face) {
         /** \todo This is super hacky, only valid for a 2d uniform cartesian mesh */
 
-        int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
-        int32_t i_cell_r = mesh->cells_of_face(i_face)[1];
+        int32_t i_cell_l = mesh->cells_of_face(i_face, 0);
+        int32_t i_cell_r = mesh->cells_of_face(i_face, 1);
 
         bool is_x_face = false;
         rtype n_vec[N_DIM];
@@ -192,8 +192,8 @@ void WENO5_JS::calc_face_values(view_2d * solution,
     Kokkos::parallel_for(mesh->n_faces(), KOKKOS_LAMBDA(const u_int32_t i_face) {
         /** \todo This is super hacky, only valid for a 2d uniform cartesian mesh */
 
-        int32_t i_cell_l = mesh->cells_of_face(i_face)[0];
-        int32_t i_cell_r = mesh->cells_of_face(i_face)[1];
+        int32_t i_cell_l = mesh->cells_of_face(i_face, 0);
+        int32_t i_cell_r = mesh->cells_of_face(i_face, 1);
 
         bool is_x_face = false;
         rtype n_vec[N_DIM];
