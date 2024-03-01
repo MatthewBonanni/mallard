@@ -36,56 +36,6 @@ void Physics::print() const {
     std::cout << "> p_max: " << h_p_bounds(1) << std::endl;
 }
 
-rtype Physics::get_gamma() const {
-    throw std::runtime_error("Physics::get_gamma() not implemented.");
-}
-
-rtype Physics::get_energy_from_temperature(const rtype & T) const {
-    (void)(T);
-    throw std::runtime_error("Physics::get_energy_from_temperature() not implemented.");
-}
-
-rtype Physics::get_temperature_from_energy(const rtype & e) const {
-    (void)(e);
-    throw std::runtime_error("Physics::get_temperature_from_energy() not implemented.");
-}
-
-rtype Physics::get_density_from_pressure_temperature(const rtype & p, const rtype & T) const {
-    (void)(p);
-    (void)(T);
-    throw std::runtime_error("Physics::get_density_from_pressure_temperature() not implemented.");
-}
-
-rtype Physics::get_temperature_from_density_pressure(const rtype & rho, const rtype & p) const {
-    (void)(rho);
-    (void)(p);
-    throw std::runtime_error("Physics::get_temperature_from_density_pressure() not implemented.");
-}
-
-rtype Physics::get_pressure_from_density_temperature(const rtype & rho, const rtype & T) const {
-    (void)(rho);
-    (void)(T);
-    throw std::runtime_error("Physics::get_pressure_from_density_temperature() not implemented.");
-}
-
-rtype Physics::get_pressure_from_density_energy(const rtype & rho, const rtype & e) const {
-    (void)(rho);
-    (void)(e);
-    throw std::runtime_error("Physics::get_pressure_from_density_energy() not implemented.");
-}
-
-rtype Physics::get_sound_speed_from_pressure_density(const rtype & p, const rtype & rho) const {
-    (void)(p);
-    (void)(rho);
-    throw std::runtime_error("Physics::get_sound_speed_from_pressure_density() not implemented.");
-}
-
-void Physics::compute_primitives_from_conservatives(rtype * primitives, const rtype * conservatives) const {
-    (void)(primitives);
-    (void)(conservatives);
-    throw std::runtime_error("Physics::compute_primitives_from_conservatives() not implemented.");
-}
-
 void Physics::copy_host_to_device() {
     Kokkos::deep_copy(p_bounds, h_p_bounds);
 }

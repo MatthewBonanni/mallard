@@ -379,7 +379,7 @@ void RiemannSolver::calc_flux(rtype * flux, const rtype * n_unit,
     (void)(p_r);
     (void)(gamma_r);
     (void)(h_r);
-    throw std::runtime_error("RiemannSolver::calc_flux() not implemented.");
+    // throw std::runtime_error("RiemannSolver::calc_flux() not implemented.");
 }
 
 KOKKOS_INLINE_FUNCTION
