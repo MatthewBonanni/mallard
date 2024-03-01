@@ -9,7 +9,6 @@
  * 
  */
 
-/** \todo IMPLEMENT EMPTY PHYSICS BASE CLASS METHODS */
 struct FluxFunctor {
     public:
         /**

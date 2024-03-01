@@ -12,6 +12,34 @@
 #include "solver.h"
 #include "flux_functor.h"
 
+struct DivideVolumeFunctor {
+    public:
+        /**
+         * @brief Construct a new DivideVolumeFunctor object
+         * @param cell_volume Cell volume.
+         * @param rhs RHS.
+         */
+        DivideVolumeFunctor(Kokkos::View<rtype *> cell_volume,
+                            Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) :
+                                cell_volume(cell_volume),
+                                rhs(rhs) {}
+        
+        /**
+         * @brief Overloaded operator for functor.
+         * @param i_cell Cell index.
+         */
+        KOKKOS_INLINE_FUNCTION
+        void operator()(const u_int32_t i_cell) const {
+            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
+                rhs(i_cell, j) /= cell_volume(i_cell);
+            }
+        }
+
+    private:
+        Kokkos::View<rtype *> cell_volume;
+        Kokkos::View<rtype *[N_CONSERVATIVE]> rhs;
+};
+
 void Solver::calc_rhs(view_2d * solution,
                       view_3d * face_solution,
                       view_2d * rhs) {
@@ -21,11 +49,8 @@ void Solver::calc_rhs(view_2d * solution,
     calc_rhs_boundaries(face_solution, rhs);
 
     // Divide by cell volume
-    Kokkos::parallel_for(mesh->n_cells(), KOKKOS_LAMBDA(const u_int32_t i) {
-        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-            (*rhs)(i, j) /= mesh->cell_volume(i);
-        }
-    });
+    DivideVolumeFunctor divide_volume_functor(mesh->cell_volume, *rhs);
+    Kokkos::parallel_for(mesh->n_cells(), divide_volume_functor);
 }
 
 void Solver::pre_rhs(view_2d * solution,
