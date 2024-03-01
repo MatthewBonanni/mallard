@@ -10,6 +10,7 @@
  */
 
 #include "solver.h"
+#include "solver_rhs.h"
 
 #include <iostream>
 #include <functional>
@@ -70,6 +71,7 @@ int Solver::init(const std::string& input_file_name) {
     init_solution();
     
     copy_host_to_device();
+    /** \todo Don't copy mesh and physics in here too. Copy in their own inits*/
 
     return 0;
 }
@@ -549,12 +551,12 @@ void Solver::update_primitives() {
         rtype cell_conservatives[N_CONSERVATIVE];
         rtype cell_primitives[N_PRIMITIVE];
         for (u_int16_t i = 0; i < N_CONSERVATIVE; i++) {
-            cell_conservatives[i] = this->conservatives(i_cell, i);
+            cell_conservatives[i] = conservatives(i_cell, i);
         }
         physics->compute_primitives_from_conservatives(cell_primitives,
                                                        cell_conservatives);
         for (u_int16_t i = 0; i < N_PRIMITIVE; i++) {
-            this->primitives(i_cell, i) = cell_primitives[i];
+            primitives(i_cell, i) = cell_primitives[i];
         }
     });
 }

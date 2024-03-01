@@ -60,7 +60,7 @@ class Physics {
          * @return Gamma
          */
         KOKKOS_INLINE_FUNCTION
-        virtual rtype get_gamma() const = 0;
+        virtual rtype get_gamma() const;
 
         /**
          * @brief Get energy from temperature.
@@ -68,7 +68,7 @@ class Physics {
          * @return Energy
          */
         KOKKOS_INLINE_FUNCTION
-        virtual rtype get_energy_from_temperature(const rtype & T) const = 0;
+        virtual rtype get_energy_from_temperature(const rtype & T) const;
 
         /**
          * @brief Get temperature from energy.
@@ -76,7 +76,7 @@ class Physics {
          * @return Temperature
          */
         KOKKOS_INLINE_FUNCTION
-        virtual rtype get_temperature_from_energy(const rtype & e) const = 0;
+        virtual rtype get_temperature_from_energy(const rtype & e) const;
 
         /**
          * @brief Get density from pressure and temperature.
@@ -86,7 +86,7 @@ class Physics {
          */
         KOKKOS_INLINE_FUNCTION
         virtual rtype get_density_from_pressure_temperature(const rtype & p,
-                                                            const rtype & T) const = 0;
+                                                            const rtype & T) const;
         
         /**
          * @brief Get temperature from density and pressure.
@@ -96,7 +96,7 @@ class Physics {
          */
         KOKKOS_INLINE_FUNCTION
         virtual rtype get_temperature_from_density_pressure(const rtype & rho,
-                                                            const rtype & p) const = 0;
+                                                            const rtype & p) const;
         
         /**
          * @brief Get pressure from density and temperature.
@@ -106,7 +106,7 @@ class Physics {
          */
         KOKKOS_INLINE_FUNCTION
         virtual rtype get_pressure_from_density_temperature(const rtype & rho,
-                                                            const rtype & T) const = 0;
+                                                            const rtype & T) const;
         
         /**
          * @brief Get pressure from density and energy.
@@ -116,7 +116,7 @@ class Physics {
          */
         KOKKOS_INLINE_FUNCTION
         virtual rtype get_pressure_from_density_energy(const rtype & rho,
-                                                       const rtype & e) const = 0;
+                                                       const rtype & e) const;
         
         /**
          * @brief Get sound speed from pressure and density.
@@ -125,7 +125,7 @@ class Physics {
          */
         KOKKOS_INLINE_FUNCTION
         virtual rtype get_sound_speed_from_pressure_density(const rtype & p,
-                                                            const rtype & rho) const = 0;
+                                                            const rtype & rho) const;
         
         /**
          * @brief Compute primitive variables from conservative variables.
@@ -134,17 +134,17 @@ class Physics {
          */
         KOKKOS_INLINE_FUNCTION
         virtual void compute_primitives_from_conservatives(rtype * primitives,
-                                                           const rtype * conservatives) const = 0;
+                                                           const rtype * conservatives) const;
         
         /**
          * @brief Copy data from host to device.
          */
-        virtual void copy_host_to_device() = 0;
+        virtual void copy_host_to_device();
 
         /**
          * @brief Copy data from device to host.
          */
-        virtual void copy_device_to_host() = 0;
+        virtual void copy_device_to_host();
     protected:
         PhysicsType type;
         Kokkos::View<rtype [2]> p_bounds;
@@ -289,16 +289,6 @@ class Euler : public Physics {
         KOKKOS_INLINE_FUNCTION
         void compute_primitives_from_conservatives(rtype * primitives,
                                                    const rtype * conservatives) const override;
-        
-        /**
-         * @brief Copy data from host to device.
-         */
-        void copy_host_to_device() override;
-
-        /**
-         * @brief Copy data from device to host.
-         */
-        void copy_device_to_host() override;
     protected:
     private:
         void set_R_cp_cv();

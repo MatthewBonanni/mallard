@@ -84,7 +84,7 @@ class RiemannSolver {
                                const rtype rho_l, const rtype * u_l,
                                const rtype p_l, const rtype gamma_l, const rtype h_l,
                                const rtype rho_r, const rtype * u_r,
-                               const rtype p_r, const rtype gamma_r, const rtype h_r) = 0;
+                               const rtype p_r, const rtype gamma_r, const rtype h_r) const;
     protected:
         RiemannSolverType type;
     private:
@@ -122,7 +122,7 @@ class Rusanov : public RiemannSolver {
                        const rtype rho_l, const rtype * u_l,
                        const rtype p_l, const rtype gamma_l, const rtype h_l,
                        const rtype rho_r, const rtype * u_r,
-                       const rtype p_r, const rtype gamma_r, const rtype h_r) override;
+                       const rtype p_r, const rtype gamma_r, const rtype h_r) const override;
     protected:
     private:
 };
@@ -159,7 +159,7 @@ class Roe : public RiemannSolver {
                        const rtype rho_l, const rtype * u_l,
                        const rtype p_l, const rtype gamma_l, const rtype h_l,
                        const rtype rho_r, const rtype * u_r,
-                       const rtype p_r, const rtype gamma_r, const rtype h_r) override;
+                       const rtype p_r, const rtype gamma_r, const rtype h_r) const override;
     protected:
     private:
 };
@@ -196,7 +196,7 @@ class HLL : public RiemannSolver {
                        const rtype rho_l, const rtype * u_l,
                        const rtype p_l, const rtype gamma_l, const rtype h_l,
                        const rtype rho_r, const rtype * u_r,
-                       const rtype p_r, const rtype gamma_r, const rtype h_r) override;
+                       const rtype p_r, const rtype gamma_r, const rtype h_r) const override;
 };
 
 class HLLC : public RiemannSolver {
@@ -231,7 +231,7 @@ class HLLC : public RiemannSolver {
                        const rtype rho_l, const rtype * u_l,
                        const rtype p_l, const rtype gamma_l, const rtype h_l,
                        const rtype rho_r, const rtype * u_r,
-                       const rtype p_r, const rtype gamma_r, const rtype h_r) override;
+                       const rtype p_r, const rtype gamma_r, const rtype h_r) const override;
     protected:
     private:
 };
@@ -362,12 +362,32 @@ void ANRS(const rtype * W_l, const rtype * W_r,
     }
 }
 
+void RiemannSolver::calc_flux(rtype * flux, const rtype * n_unit,
+                              const rtype rho_l, const rtype * u_l,
+                              const rtype p_l, const rtype gamma_l, const rtype h_l,
+                              const rtype rho_r, const rtype * u_r,
+                              const rtype p_r, const rtype gamma_r, const rtype h_r) const {
+    (void)(flux);
+    (void)(n_unit);
+    (void)(rho_l);
+    (void)(u_l);
+    (void)(p_l);
+    (void)(gamma_l);
+    (void)(h_l);
+    (void)(rho_r);
+    (void)(u_r);
+    (void)(p_r);
+    (void)(gamma_r);
+    (void)(h_r);
+    throw std::runtime_error("RiemannSolver::calc_flux() not implemented.");
+}
+
 KOKKOS_INLINE_FUNCTION
 void Rusanov::calc_flux(rtype * flux, const rtype * n_unit,
                         const rtype rho_l, const rtype * u_l,
                         const rtype p_l, const rtype gamma_l, const rtype h_l,
                         const rtype rho_r, const rtype * u_r,
-                        const rtype p_r, const rtype gamma_r, const rtype h_r) {
+                        const rtype p_r, const rtype gamma_r, const rtype h_r) const {
     // Preliminary calculations
     rtype u_l_n = dot<N_DIM>(u_l, n_unit);
     rtype u_r_n = dot<N_DIM>(u_r, n_unit);
@@ -415,7 +435,7 @@ void Roe::calc_flux(rtype * flux, const rtype * n_unit,
                     const rtype rho_l, const rtype * u_l,
                     const rtype p_l, const rtype gamma_l, const rtype h_l,
                     const rtype rho_r, const rtype * u_r,
-                    const rtype p_r, const rtype gamma_r, const rtype h_r) {
+                    const rtype p_r, const rtype gamma_r, const rtype h_r) const {
     (void)(flux);
     (void)(n_unit);
     (void)(rho_l);
@@ -437,7 +457,7 @@ void HLL::calc_flux(rtype * flux, const rtype * n_unit,
                     const rtype rho_l, const rtype * u_l,
                     const rtype p_l, const rtype gamma_l, const rtype h_l,
                     const rtype rho_r, const rtype * u_r,
-                    const rtype p_r, const rtype gamma_r, const rtype h_r) {
+                    const rtype p_r, const rtype gamma_r, const rtype h_r) const {
     // Preliminary calculations
     rtype u_l_n = dot<N_DIM>(u_l, n_unit);
     rtype u_r_n = dot<N_DIM>(u_r, n_unit);
@@ -507,7 +527,7 @@ void HLLC::calc_flux(rtype * flux, const rtype * n_unit,
                      const rtype rho_l, const rtype * u_l,
                      const rtype p_l, const rtype gamma_l, const rtype h_l,
                      const rtype rho_r, const rtype * u_r,
-                     const rtype p_r, const rtype gamma_r, const rtype h_r) {
+                     const rtype p_r, const rtype gamma_r, const rtype h_r) const {
     // Preliminary calculations
     rtype u_l_n = dot<N_DIM>(u_l, n_unit);
     rtype u_r_n = dot<N_DIM>(u_r, n_unit);
