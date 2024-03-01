@@ -12,6 +12,9 @@
 #include "solver.h"
 #include "solver_functors.h"
 
+#ifndef SOLVER_RHS_H
+#define SOLVER_RHS_H
+
 void Solver::calc_rhs(view_2d * solution,
                       view_3d * face_solution,
                       view_2d * rhs) {
@@ -105,3 +108,5 @@ void Solver::calc_rhs_boundaries(view_3d * face_solution,
         boundary->apply(face_solution, rhs);
     }
 }
+
+#endif // SOLVER_RHS_H

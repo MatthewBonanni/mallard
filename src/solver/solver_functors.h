@@ -9,6 +9,9 @@
  * 
  */
 
+#ifndef SOLVER_FUNCTORS_H
+#define SOLVER_FUNCTORS_H
+
 template <typename T_physics, typename T_riemann_solver>
 struct FluxFunctor {
     public:
@@ -287,3 +290,5 @@ struct SpectralRadiusFunctor {
         Kokkos::View<rtype *[N_PRIMITIVE]> primitives;
         Kokkos::View<rtype *> cfl_local;
 };
+
+#endif // SOLVER_FUNCTORS_H
