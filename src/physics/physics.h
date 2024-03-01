@@ -56,11 +56,18 @@ class Physics {
         virtual void print() const;
 
         /**
+         * @brief Get the physics type.
+         * @return Physics type
+         */
+        KOKKOS_INLINE_FUNCTION
+        PhysicsType get_type() const { return type; }
+
+        /**
          * @brief Get gamma.
          * @return Gamma
          */
         KOKKOS_INLINE_FUNCTION
-        virtual rtype get_gamma() const;
+        virtual rtype get_gamma() const = 0;
 
         /**
          * @brief Get energy from temperature.
@@ -68,7 +75,7 @@ class Physics {
          * @return Energy
          */
         KOKKOS_INLINE_FUNCTION
-        virtual rtype get_energy_from_temperature(const rtype & T) const;
+        virtual rtype get_energy_from_temperature(const rtype & T) const = 0;
 
         /**
          * @brief Get temperature from energy.
@@ -76,7 +83,7 @@ class Physics {
          * @return Temperature
          */
         KOKKOS_INLINE_FUNCTION
-        virtual rtype get_temperature_from_energy(const rtype & e) const;
+        virtual rtype get_temperature_from_energy(const rtype & e) const = 0;
 
         /**
          * @brief Get density from pressure and temperature.
@@ -86,7 +93,7 @@ class Physics {
          */
         KOKKOS_INLINE_FUNCTION
         virtual rtype get_density_from_pressure_temperature(const rtype & p,
-                                                            const rtype & T) const;
+                                                            const rtype & T) const = 0;
         
         /**
          * @brief Get temperature from density and pressure.
@@ -96,7 +103,7 @@ class Physics {
          */
         KOKKOS_INLINE_FUNCTION
         virtual rtype get_temperature_from_density_pressure(const rtype & rho,
-                                                            const rtype & p) const;
+                                                            const rtype & p) const = 0;
         
         /**
          * @brief Get pressure from density and temperature.
@@ -106,7 +113,7 @@ class Physics {
          */
         KOKKOS_INLINE_FUNCTION
         virtual rtype get_pressure_from_density_temperature(const rtype & rho,
-                                                            const rtype & T) const;
+                                                            const rtype & T) const = 0;
         
         /**
          * @brief Get pressure from density and energy.
@@ -116,7 +123,7 @@ class Physics {
          */
         KOKKOS_INLINE_FUNCTION
         virtual rtype get_pressure_from_density_energy(const rtype & rho,
-                                                       const rtype & e) const;
+                                                       const rtype & e) const = 0;
         
         /**
          * @brief Get sound speed from pressure and density.
@@ -125,7 +132,7 @@ class Physics {
          */
         KOKKOS_INLINE_FUNCTION
         virtual rtype get_sound_speed_from_pressure_density(const rtype & p,
-                                                            const rtype & rho) const;
+                                                            const rtype & rho) const = 0;
         
         /**
          * @brief Compute primitive variables from conservative variables.
@@ -134,7 +141,7 @@ class Physics {
          */
         KOKKOS_INLINE_FUNCTION
         virtual void compute_primitives_from_conservatives(rtype * primitives,
-                                                           const rtype * conservatives) const;
+                                                           const rtype * conservatives) const = 0;
         
         /**
          * @brief Copy data from host to device.
@@ -297,56 +304,6 @@ class Euler : public Physics {
         rtype p_ref, T_ref, rho_ref;
         rtype R, cp, cv;
 };
-
-rtype Physics::get_gamma() const {
-    // throw std::runtime_error("Physics::get_gamma() not implemented.");
-}
-
-rtype Physics::get_energy_from_temperature(const rtype & T) const {
-    (void)(T);
-    // throw std::runtime_error("Physics::get_energy_from_temperature() not implemented.");
-}
-
-rtype Physics::get_temperature_from_energy(const rtype & e) const {
-    (void)(e);
-    // throw std::runtime_error("Physics::get_temperature_from_energy() not implemented.");
-}
-
-rtype Physics::get_density_from_pressure_temperature(const rtype & p, const rtype & T) const {
-    (void)(p);
-    (void)(T);
-    // throw std::runtime_error("Physics::get_density_from_pressure_temperature() not implemented.");
-}
-
-rtype Physics::get_temperature_from_density_pressure(const rtype & rho, const rtype & p) const {
-    (void)(rho);
-    (void)(p);
-    // throw std::runtime_error("Physics::get_temperature_from_density_pressure() not implemented.");
-}
-
-rtype Physics::get_pressure_from_density_temperature(const rtype & rho, const rtype & T) const {
-    (void)(rho);
-    (void)(T);
-    // throw std::runtime_error("Physics::get_pressure_from_density_temperature() not implemented.");
-}
-
-rtype Physics::get_pressure_from_density_energy(const rtype & rho, const rtype & e) const {
-    (void)(rho);
-    (void)(e);
-    // throw std::runtime_error("Physics::get_pressure_from_density_energy() not implemented.");
-}
-
-rtype Physics::get_sound_speed_from_pressure_density(const rtype & p, const rtype & rho) const {
-    (void)(p);
-    (void)(rho);
-    // throw std::runtime_error("Physics::get_sound_speed_from_pressure_density() not implemented.");
-}
-
-void Physics::compute_primitives_from_conservatives(rtype * primitives, const rtype * conservatives) const {
-    (void)(primitives);
-    (void)(conservatives);
-    // throw std::runtime_error("Physics::compute_primitives_from_conservatives() not implemented.");
-}
 
 rtype Euler::get_energy_from_temperature(const rtype & T) const {
     return cv * T;

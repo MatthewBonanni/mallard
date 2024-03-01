@@ -22,7 +22,7 @@ RiemannSolver::RiemannSolver() {
 }
 
 RiemannSolver::~RiemannSolver() {
-    std::cout << "Destroying Riemann solver: " << RIEMANN_SOLVER_NAMES.at(type) << std::endl;
+    // Empty
 }
 
 void RiemannSolver::init(const toml::value & input) {

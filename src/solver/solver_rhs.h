@@ -47,15 +47,56 @@ void Solver::calc_rhs_source(view_2d * solution,
 
 void Solver::calc_rhs_interior(view_3d * face_solution,
                                view_2d * rhs) {
-
-    FluxFunctor flux_functor(mesh->face_normals,
-                             mesh->face_area,
-                             mesh->cells_of_face,
-                             *face_solution,
-                             *rhs,
-                             *riemann_solver,
-                             *physics);
-    Kokkos::parallel_for(mesh->n_faces(), flux_functor);
+    /** \todo Figure out a way to clean this up... */
+    if (physics->get_type() == PhysicsType::EULER) {
+        if (riemann_solver->get_type() == RiemannSolverType::Rusanov) {
+            // Rusanov Riemann solver
+            FluxFunctor<Euler, Rusanov> flux_functor(mesh->face_normals,
+                                                     mesh->face_area,
+                                                     mesh->cells_of_face,
+                                                     *face_solution,
+                                                     *rhs,
+                                                     dynamic_cast<Rusanov &>(*riemann_solver),
+                                                     dynamic_cast<Euler &>(*physics));
+            Kokkos::parallel_for(mesh->n_faces(), flux_functor);
+        } else if (riemann_solver->get_type() == RiemannSolverType::Roe) {
+            // Roe Riemann solver
+            FluxFunctor<Euler, Roe> flux_functor(mesh->face_normals,
+                                                 mesh->face_area,
+                                                 mesh->cells_of_face,
+                                                 *face_solution,
+                                                 *rhs,
+                                                 dynamic_cast<Roe &>(*riemann_solver),
+                                                 dynamic_cast<Euler &>(*physics));
+            Kokkos::parallel_for(mesh->n_faces(), flux_functor);
+        } else if (riemann_solver->get_type() == RiemannSolverType::HLL) {
+            // HLL Riemann solver
+            FluxFunctor<Euler, HLL> flux_functor(mesh->face_normals,
+                                                 mesh->face_area,
+                                                 mesh->cells_of_face,
+                                                 *face_solution,
+                                                 *rhs,
+                                                 dynamic_cast<HLL &>(*riemann_solver),
+                                                 dynamic_cast<Euler &>(*physics));
+            Kokkos::parallel_for(mesh->n_faces(), flux_functor);
+        } else if (riemann_solver->get_type() == RiemannSolverType::HLLC) {
+            // HLLC Riemann solver
+            FluxFunctor<Euler, HLLC> flux_functor(mesh->face_normals,
+                                                  mesh->face_area,
+                                                  mesh->cells_of_face,
+                                                  *face_solution,
+                                                  *rhs,
+                                                  dynamic_cast<HLLC &>(*riemann_solver),
+                                                  dynamic_cast<Euler &>(*physics));
+            Kokkos::parallel_for(mesh->n_faces(), flux_functor);
+        } else {
+            // Should never get here due to the enum class.
+            throw std::runtime_error("Unknown Riemann solver type.");
+        }
+    } else {
+        // Should never get here due to the enum class.
+        throw std::runtime_error("Unknown physics type.");
+    }
 }
 
 void Solver::calc_rhs_boundaries(view_3d * face_solution,

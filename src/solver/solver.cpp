@@ -71,7 +71,8 @@ int Solver::init(const std::string& input_file_name) {
     init_solution();
     
     copy_host_to_device();
-    /** \todo Don't copy mesh and physics in here too. Copy in their own inits*/
+    mesh->copy_host_to_device();
+    physics->copy_host_to_device();
 
     return 0;
 }
@@ -329,9 +330,6 @@ void Solver::copy_host_to_device() {
     Kokkos::deep_copy(primitives, h_primitives);
     Kokkos::deep_copy(face_conservatives, h_face_conservatives);
     Kokkos::deep_copy(face_primitives, h_face_primitives);
-
-    mesh->copy_host_to_device();
-    physics->copy_host_to_device();
 }
 
 void Solver::copy_device_to_host() {
@@ -339,9 +337,6 @@ void Solver::copy_device_to_host() {
     Kokkos::deep_copy(h_primitives, primitives);
     Kokkos::deep_copy(h_face_conservatives, face_conservatives);
     Kokkos::deep_copy(h_face_primitives, face_primitives);
-
-    mesh->copy_device_to_host();
-    physics->copy_device_to_host();
 }
 
 void Solver::register_data() {
@@ -370,7 +365,6 @@ int Solver::run() {
         calc_dt();
         do_checks();
         take_step();
-        copy_device_to_host();
         check_fields();
         write_data();
     }
@@ -533,7 +527,6 @@ void Solver::print_logo() const {
 }
 
 void Solver::take_step() {
-    /** \todo GPU compatibility - need to manage host and device views */
     /** \todo MPI implementation */
     time_integrator->take_step(dt,
                                solution_pointers,
@@ -542,15 +535,21 @@ void Solver::take_step() {
                                &rhs_func);
     update_primitives();
     Kokkos::fence();
+    copy_device_to_host();
     step++;
     t += dt;
 }
 
 void Solver::update_primitives() {
-    UpdatePrimitivesFunctor update_primitives_functor(physics.get(),
-                                                      conservatives,
-                                                      primitives);
-    Kokkos::parallel_for(mesh->n_cells(), update_primitives_functor);
+    if (physics->get_type() == PhysicsType::EULER) {
+        UpdatePrimitivesFunctor<Euler> update_primitives_functor(dynamic_cast<Euler &>(*physics),
+                                                                 conservatives,
+                                                                 primitives);
+        Kokkos::parallel_for(mesh->n_cells(), update_primitives_functor);
+    } else {
+        // Should never get here due to the enum class.
+        throw std::runtime_error("Unknown physics type.");
+    }
 }
 
 void Solver::calc_dt() {
@@ -567,77 +566,22 @@ void Solver::calc_dt() {
 
 rtype Solver::calc_spectral_radius() {
     rtype max_spectral_radius = -1.0;
-    Kokkos::parallel_reduce(mesh->n_cells(), 
-                            KOKKOS_LAMBDA(const u_int32_t i_cell, rtype & max_spectral_radius_i) {
-        rtype spectral_radius_convective;
-        rtype spectral_radius_acoustic;
-        // rtype spectral_radius_viscous;
-        // rtype spectral_radius_heat;
-        rtype spectral_radius_overall;
-        rtype rho_l, rho_r, p_l, p_r, sos_l, sos_r, sos_f;
-        rtype s[N_DIM], u_l[N_DIM], u_r[N_DIM], u_f[N_DIM];
-        rtype dx_n, u_n;
-        rtype geom_factor;
-        rtype n_vec[N_DIM];
-        rtype n_unit[N_DIM];
-
-        spectral_radius_convective = 0.0;
-        spectral_radius_acoustic = 0.0;
-        // spectral_radius_viscous = 0.0;
-        // spectral_radius_heat = 0.0;
-
-        for (u_int32_t i_face = 0; i_face < mesh->n_faces_of_cell(i_cell); i_face++) {
-            int32_t i_cell_l = mesh->cells_of_face(i_face, 0);
-            int32_t i_cell_r = mesh->cells_of_face(i_face, 1);
-            FOR_I_DIM n_vec[i] = mesh->face_normals(i_face, i);
-            unit<N_DIM>(n_vec, n_unit);
-
-            if (i_cell_r == -1) {
-                // Boundary face, hack
-                s[0] = 2.0 * (mesh->face_coords(i_face, 0) - mesh->cell_coords(i_cell_l, 0));
-                s[1] = 2.0 * (mesh->face_coords(i_face, 1) - mesh->cell_coords(i_cell_l, 1));
-                i_cell_r = i_cell_l;
-            } else {
-                s[0] = mesh->cell_coords(i_cell_r, 0) - mesh->cell_coords(i_cell_l, 0);
-                s[1] = mesh->cell_coords(i_cell_r, 1) - mesh->cell_coords(i_cell_l, 1);
-            }
-
-            dx_n = Kokkos::fabs(dot<N_DIM>(s, n_unit));
-
-            rho_l = conservatives(i_cell_l, 0);
-            rho_r = conservatives(i_cell_r, 0);
-            u_l[0] = primitives(i_cell_l, 0);
-            u_l[1] = primitives(i_cell_l, 1);
-            u_r[0] = primitives(i_cell_r, 0);
-            u_r[1] = primitives(i_cell_r, 1);
-            p_l = primitives(i_cell_l, 2);
-            p_r = primitives(i_cell_r, 2);
-            sos_l = physics->get_sound_speed_from_pressure_density(p_l, rho_l);
-            sos_r = physics->get_sound_speed_from_pressure_density(p_r, rho_r);
-            sos_f = 0.5 * (sos_l + sos_r);
-
-            u_f[0] = 0.5 * (u_l[0] + u_r[0]);
-            u_f[1] = 0.5 * (u_l[1] + u_r[1]);
-            u_n = Kokkos::fabs(dot<N_DIM>(u_f, n_unit));
-
-            spectral_radius_convective += u_n / dx_n;
-            spectral_radius_acoustic += pow(sos_f / dx_n, 2.0);
-        }
-
-        geom_factor = 3.0 / mesh->n_faces_of_cell(i_cell);
-        spectral_radius_convective *= 1.37 * geom_factor;
-        spectral_radius_acoustic = 1.37 * Kokkos::sqrt(geom_factor * spectral_radius_acoustic);
-
-        /** \todo Implement viscous and heat spectral radii */
-        spectral_radius_overall = spectral_radius_convective + spectral_radius_acoustic;
-
-        // Update max spectral radius
-        max_spectral_radius_i = Kokkos::max(max_spectral_radius_i,
-                                            spectral_radius_overall);
-
-        // Store spectral radius in cfl_local, will be used to compute local cfl
-        cfl_local(i_cell) = spectral_radius_overall;
-    }, Kokkos::Max<rtype>(max_spectral_radius));
-
+    if (physics->get_type() == PhysicsType::EULER) {
+        SpectralRadiusFunctor<Euler> spectral_radius_functor(mesh->offsets_faces_of_cell,
+                                                             mesh->cells_of_face,
+                                                             mesh->face_normals,
+                                                             mesh->face_coords,
+                                                             mesh->cell_coords,
+                                                             dynamic_cast<Euler &>(*physics),
+                                                             conservatives,
+                                                             primitives,
+                                                             cfl_local);
+        Kokkos::parallel_reduce(mesh->n_cells(),
+                                spectral_radius_functor,
+                                Kokkos::Max<rtype>(max_spectral_radius));
+    } else {
+        // Should never get here due to the enum class.
+        throw std::runtime_error("Unknown physics type.");
+    }
     return max_spectral_radius;
 }
