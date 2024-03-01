@@ -1,7 +1,7 @@
 /**
- * @file flux_functor.h
+ * @file solver_functors.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Flux functor class implementation.
+ * @brief Functors for the Solver class.
  * @version 0.1
  * @date 2024-02-29
  * 
@@ -92,4 +92,71 @@ struct FluxFunctor {
         Kokkos::View<rtype *[N_CONSERVATIVE]> rhs;
         const RiemannSolver riemann_solver;
         const Physics physics;
+};
+
+struct DivideVolumeFunctor {
+    public:
+        /**
+         * @brief Construct a new DivideVolumeFunctor object
+         * @param cell_volume Cell volume.
+         * @param rhs RHS.
+         */
+        DivideVolumeFunctor(Kokkos::View<rtype *> cell_volume,
+                            Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) :
+                                cell_volume(cell_volume),
+                                rhs(rhs) {}
+        
+        /**
+         * @brief Overloaded operator for functor.
+         * @param i_cell Cell index.
+         */
+        KOKKOS_INLINE_FUNCTION
+        void operator()(const u_int32_t i_cell) const {
+            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
+                rhs(i_cell, j) /= cell_volume(i_cell);
+            }
+        }
+
+    private:
+        Kokkos::View<rtype *> cell_volume;
+        Kokkos::View<rtype *[N_CONSERVATIVE]> rhs;
+};
+
+struct UpdatePrimitivesFunctor {
+    public:
+        /**
+         * @brief Construct a new UpdatePrimitivesFunctor object
+         * @param physics Physics.
+         * @param conservatives Conservatives.
+         * @param primitives Primitives.
+         */
+        UpdatePrimitivesFunctor(Physics * physics,
+                                Kokkos::View<rtype *[N_CONSERVATIVE]> conservatives,
+                                Kokkos::View<rtype *[N_PRIMITIVE]> primitives) :
+                                    physics(physics),
+                                    conservatives(conservatives),
+                                    primitives(primitives) {}
+        
+        /**
+         * @brief Overloaded operator for functor.
+         * @param i_cell Cell index.
+         */
+        KOKKOS_INLINE_FUNCTION
+        void operator()(const u_int32_t i_cell) const {
+            rtype cell_conservatives[N_CONSERVATIVE];
+            rtype cell_primitives[N_PRIMITIVE];
+            for (u_int16_t i = 0; i < N_CONSERVATIVE; i++) {
+                cell_conservatives[i] = conservatives(i_cell, i);
+            }
+            physics->compute_primitives_from_conservatives(cell_primitives,
+                                                           cell_conservatives);
+            for (u_int16_t i = 0; i < N_PRIMITIVE; i++) {
+                primitives(i_cell, i) = cell_primitives[i];
+            }
+        }
+    
+    private:
+        Physics * physics;
+        Kokkos::View<rtype *[N_CONSERVATIVE]> conservatives;
+        Kokkos::View<rtype *[N_PRIMITIVE]> primitives;
 };

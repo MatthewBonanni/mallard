@@ -10,35 +10,7 @@
  */
 
 #include "solver.h"
-#include "flux_functor.h"
-
-struct DivideVolumeFunctor {
-    public:
-        /**
-         * @brief Construct a new DivideVolumeFunctor object
-         * @param cell_volume Cell volume.
-         * @param rhs RHS.
-         */
-        DivideVolumeFunctor(Kokkos::View<rtype *> cell_volume,
-                            Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) :
-                                cell_volume(cell_volume),
-                                rhs(rhs) {}
-        
-        /**
-         * @brief Overloaded operator for functor.
-         * @param i_cell Cell index.
-         */
-        KOKKOS_INLINE_FUNCTION
-        void operator()(const u_int32_t i_cell) const {
-            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-                rhs(i_cell, j) /= cell_volume(i_cell);
-            }
-        }
-
-    private:
-        Kokkos::View<rtype *> cell_volume;
-        Kokkos::View<rtype *[N_CONSERVATIVE]> rhs;
-};
+#include "solver_functors.h"
 
 void Solver::calc_rhs(view_2d * solution,
                       view_3d * face_solution,
@@ -83,7 +55,6 @@ void Solver::calc_rhs_interior(view_3d * face_solution,
                              *rhs,
                              *riemann_solver,
                              *physics);
-    
     Kokkos::parallel_for(mesh->n_faces(), flux_functor);
 }
 

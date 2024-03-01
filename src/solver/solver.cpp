@@ -547,18 +547,10 @@ void Solver::take_step() {
 }
 
 void Solver::update_primitives() {
-    Kokkos::parallel_for(mesh->n_cells(), KOKKOS_LAMBDA(const u_int32_t i_cell) {
-        rtype cell_conservatives[N_CONSERVATIVE];
-        rtype cell_primitives[N_PRIMITIVE];
-        for (u_int16_t i = 0; i < N_CONSERVATIVE; i++) {
-            cell_conservatives[i] = conservatives(i_cell, i);
-        }
-        physics->compute_primitives_from_conservatives(cell_primitives,
-                                                       cell_conservatives);
-        for (u_int16_t i = 0; i < N_PRIMITIVE; i++) {
-            primitives(i_cell, i) = cell_primitives[i];
-        }
-    });
+    UpdatePrimitivesFunctor update_primitives_functor(physics.get(),
+                                                      conservatives,
+                                                      primitives);
+    Kokkos::parallel_for(mesh->n_cells(), update_primitives_functor);
 }
 
 void Solver::calc_dt() {
