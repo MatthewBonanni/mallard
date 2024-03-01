@@ -23,25 +23,19 @@
 enum class TimeIntegratorType {
     FE,
     RK4,
-    LSRK4,
     SSPRK3,
-    LSSSPRK3
 };
 
 static const std::unordered_map<std::string, TimeIntegratorType> TIME_INTEGRATOR_TYPES = {
     {"FE", TimeIntegratorType::FE},
     {"RK4", TimeIntegratorType::RK4},
-    {"LSRK4", TimeIntegratorType::LSRK4},
     {"SSPRK3", TimeIntegratorType::SSPRK3},
-    {"LSSSPRK3", TimeIntegratorType::LSSSPRK3}
 };
 
 static const std::unordered_map<TimeIntegratorType, std::string> TIME_INTEGRATOR_NAMES = {
     {TimeIntegratorType::FE, "FE"},
     {TimeIntegratorType::RK4, "RK4"},
-    {TimeIntegratorType::LSRK4, "LSRK4"},
     {TimeIntegratorType::SSPRK3, "SSPRK3"},
-    {TimeIntegratorType::LSSSPRK3, "LSSSPRK3"}
 };
 
 class TimeIntegrator {
@@ -167,37 +161,6 @@ class RK4 : public TimeIntegrator {
         std::vector<rtype> coeffs;
 };
 
-class LSRK4 : public TimeIntegrator {
-    public:
-        /**
-         * @brief Construct a new LSRK4 object
-         */
-        LSRK4();
-
-        /**
-         * @brief Destroy the LSRK4 object
-         */
-        ~LSRK4();
-
-        /**
-         * @brief Take a single time step.
-         * @param dt Time step size.
-         * @param solution_pointers Pointers to solution vectors.
-         * @param face_solution Pointer to face solution vector.
-         * @param rhs_pointers Pointers to rhs vectors.
-         * @param calc_rhs Function to calculate rhs.
-         */
-        void take_step(const rtype & dt,
-                       std::vector<view_2d *> & solution_pointers,
-                       view_3d * face_solution,
-                       std::vector<view_2d *> & rhs_pointers,
-                       std::function<void(view_2d * solution,
-                                          view_3d * face_solution,
-                                          view_2d * rhs)> * calc_rhs) override;
-    protected:
-    private:
-};
-
 class SSPRK3 : public TimeIntegrator {
     public:
         /**
@@ -228,37 +191,6 @@ class SSPRK3 : public TimeIntegrator {
     protected:
     private:
         std::vector<rtype> coeffs;
-};
-
-class LSSSPRK3 : public TimeIntegrator {
-    public:
-        /**
-         * @brief Construct a new LSSSPRK3 object
-         */
-        LSSSPRK3();
-
-        /**
-         * @brief Destroy the LSSSPRK3 object
-         */
-        ~LSSSPRK3();
-
-        /**
-         * @brief Take a single time step.
-         * @param dt Time step size.
-         * @param solution_pointers Pointers to solution vectors.
-         * @param face_solution Pointer to face solution vector.
-         * @param rhs_pointers Pointers to rhs vectors.
-         * @param calc_rhs Function to calculate rhs.
-         */
-        void take_step(const rtype & dt,
-                       std::vector<view_2d *> & solution_pointers,
-                       view_3d * face_solution,
-                       std::vector<view_2d *> & rhs_pointers,
-                       std::function<void(view_2d * solution,
-                                          view_3d * face_solution,
-                                          view_2d * rhs)> * calc_rhs) override;
-    protected:
-    private:
 };
 
 #endif // TIME_INTEGRATOR_H

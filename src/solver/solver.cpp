@@ -166,10 +166,6 @@ void Solver::init_numerics() {
         time_integrator = std::make_unique<RK4>();
     } else if (time_integrator_type == TimeIntegratorType::SSPRK3) {
         time_integrator = std::make_unique<SSPRK3>();
-    } else if (time_integrator_type == TimeIntegratorType::LSRK4) {
-        time_integrator = std::make_unique<LSRK4>();
-    } else if (time_integrator_type == TimeIntegratorType::LSSSPRK3) {
-        time_integrator = std::make_unique<LSSSPRK3>();
     } else {
         // Should never get here due to the enum class.
         throw std::runtime_error("Unknown time integrator type: " + time_integrator_str + ".");
