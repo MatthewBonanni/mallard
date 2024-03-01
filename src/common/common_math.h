@@ -208,7 +208,7 @@ void aApbB_to_C(const u_int64_t nA,
  * @return Maximum of each element.
  */
 template <u_int32_t N>
-std::array<rtype, N> max_array(const Kokkos::View<rtype **, Kokkos::LayoutRight> & a) {
+std::array<rtype, N> max_array(const Kokkos::View<rtype **> & a) {
     std::array<rtype, N> max;
     for (u_int32_t i = 0; i < N; ++i) {
         rtype max_i = a(0, i);
@@ -231,7 +231,7 @@ std::array<rtype, N> max_array(const Kokkos::View<rtype **, Kokkos::LayoutRight>
  * @return Minimum of each element.
  */
 template <u_int32_t N>
-std::array<rtype, N> min_array(const Kokkos::View<rtype **, Kokkos::LayoutRight> & a) {
+std::array<rtype, N> min_array(const Kokkos::View<rtype **> & a) {
     std::array<rtype, N> min;
     for (u_int32_t i = 0; i < N; ++i) {
         rtype min_i = a(0, i);
