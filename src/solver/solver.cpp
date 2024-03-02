@@ -538,9 +538,9 @@ void Solver::take_step() {
 
 void Solver::update_primitives() {
     if (physics->get_type() == PhysicsType::EULER) {
-        UpdatePrimitivesFunctor<Euler> update_primitives_functor(dynamic_cast<Euler &>(*physics),
-                                                                 conservatives,
-                                                                 primitives);
+        SolverFunctors::UpdatePrimitivesFunctor<Euler> update_primitives_functor(dynamic_cast<Euler &>(*physics),
+                                                                                 conservatives,
+                                                                                 primitives);
         Kokkos::parallel_for(mesh->n_cells(), update_primitives_functor);
     } else {
         // Should never get here due to the enum class.
@@ -563,15 +563,15 @@ void Solver::calc_dt() {
 rtype Solver::calc_spectral_radius() {
     rtype max_spectral_radius = -1.0;
     if (physics->get_type() == PhysicsType::EULER) {
-        SpectralRadiusFunctor<Euler> spectral_radius_functor(mesh->offsets_faces_of_cell,
-                                                             mesh->cells_of_face,
-                                                             mesh->face_normals,
-                                                             mesh->face_coords,
-                                                             mesh->cell_coords,
-                                                             dynamic_cast<Euler &>(*physics),
-                                                             conservatives,
-                                                             primitives,
-                                                             cfl_local);
+        SolverFunctors::SpectralRadiusFunctor<Euler> spectral_radius_functor(mesh->offsets_faces_of_cell,
+                                                                             mesh->cells_of_face,
+                                                                             mesh->face_normals,
+                                                                             mesh->face_coords,
+                                                                             mesh->cell_coords,
+                                                                             dynamic_cast<Euler &>(*physics),
+                                                                             conservatives,
+                                                                             primitives,
+                                                                             cfl_local);
         Kokkos::parallel_reduce(mesh->n_cells(),
                                 spectral_radius_functor,
                                 Kokkos::Max<rtype>(max_spectral_radius));
