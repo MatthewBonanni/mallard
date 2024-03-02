@@ -36,11 +36,7 @@ FaceZone::~FaceZone() {
 }
 
 u_int32_t FaceZone::n_faces() const {
-    return m_faces.size();
-}
-
-std::vector<u_int32_t> * FaceZone::faces() {
-    return &m_faces;
+    return faces.extent(0);
 }
 
 FaceZoneType FaceZone::get_type() const {
@@ -60,11 +56,7 @@ CellZone::~CellZone() {
 }
 
 u_int32_t CellZone::n_cells() const {
-    return m_cells.size();
-}
-
-std::vector<u_int32_t> CellZone::cells() const {
-    return m_cells;
+    return cells.extent(0);
 }
 
 CellZoneType CellZone::type() const {

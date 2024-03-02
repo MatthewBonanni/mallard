@@ -44,7 +44,7 @@ void BoundaryExtrapolation::apply(view_3d * face_solution,
         rtype n_vec[N_DIM];
         rtype n_unit[N_DIM];
 
-        u_int32_t i_face = (*zone->faces())[i_local];
+        u_int32_t i_face = zone->faces(i_local);
         int32_t i_cell_l = mesh->cells_of_face(i_face, 0);
         FOR_I_DIM n_vec[i] = mesh->face_normals(i_face, i);
         unit<N_DIM>(n_vec, n_unit);

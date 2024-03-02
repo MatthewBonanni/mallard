@@ -10,7 +10,6 @@
  */
 
 #include "solver.h"
-#include "solver_rhs.h"
 
 #include <iostream>
 #include <functional>
@@ -536,9 +535,49 @@ void Solver::take_step() {
     t += dt;
 }
 
+template <typename T>
+struct UpdatePrimitivesFunctor {
+    public:
+        /**
+         * @brief Construct a new UpdatePrimitivesFunctor object
+         * @param physics Physics.
+         * @param conservatives Conservatives.
+         * @param primitives Primitives.
+         */
+        UpdatePrimitivesFunctor(const T physics,
+                                Kokkos::View<rtype *[N_CONSERVATIVE]> conservatives,
+                                Kokkos::View<rtype *[N_PRIMITIVE]> primitives) :
+                                    physics(physics),
+                                    conservatives(conservatives),
+                                    primitives(primitives) {}
+        
+        /**
+         * @brief Overloaded operator for functor.
+         * @param i_cell Cell index.
+         */
+        KOKKOS_INLINE_FUNCTION
+        void operator()(const u_int32_t i_cell) const {
+            rtype cell_conservatives[N_CONSERVATIVE];
+            rtype cell_primitives[N_PRIMITIVE];
+            for (u_int16_t i = 0; i < N_CONSERVATIVE; i++) {
+                cell_conservatives[i] = conservatives(i_cell, i);
+            }
+            physics.compute_primitives_from_conservatives(cell_primitives,
+                                                          cell_conservatives);
+            for (u_int16_t i = 0; i < N_PRIMITIVE; i++) {
+                primitives(i_cell, i) = cell_primitives[i];
+            }
+        }
+    
+    private:
+        const T physics;
+        Kokkos::View<rtype *[N_CONSERVATIVE]> conservatives;
+        Kokkos::View<rtype *[N_PRIMITIVE]> primitives;
+};
+
 void Solver::update_primitives() {
     if (physics->get_type() == PhysicsType::EULER) {
-        SolverFunctors::UpdatePrimitivesFunctor<Euler> update_primitives_functor(dynamic_cast<Euler &>(*physics),
+        UpdatePrimitivesFunctor<Euler> update_primitives_functor(dynamic_cast<Euler &>(*physics),
                                                                                  conservatives,
                                                                                  primitives);
         Kokkos::parallel_for(mesh->n_cells(), update_primitives_functor);
@@ -560,18 +599,143 @@ void Solver::calc_dt() {
     }
 }
 
+template <typename T>
+struct SpectralRadiusFunctor {
+    public:
+        /**
+         * @brief Construct a new SpectralRadiusFunctor object
+         * @param offsets_faces_of_cell Offsets of faces of cell.
+         * @param cells_of_face Cells of face.
+         * @param face_normals Face normals.
+         * @param face_coords Face coordinates.
+         * @param cell_coords Cell coordinates.
+         * @param physics Physics.
+         * @param conservatives Conservatives.
+         * @param primitives Primitives.
+         * @param cfl_local Local CFL.
+         */
+        SpectralRadiusFunctor(Kokkos::View<u_int32_t *> offsets_faces_of_cell,
+                              Kokkos::View<int32_t *[2]> cells_of_face,
+                              Kokkos::View<rtype *[N_DIM]> face_normals,
+                              Kokkos::View<rtype *[N_DIM]> face_coords,
+                              Kokkos::View<rtype *[N_DIM]> cell_coords,
+                              const T physics,
+                              Kokkos::View<rtype *[N_CONSERVATIVE]> conservatives,
+                              Kokkos::View<rtype *[N_PRIMITIVE]> primitives,
+                              Kokkos::View<rtype *> cfl_local) :
+                                  offsets_faces_of_cell(offsets_faces_of_cell),
+                                  cells_of_face(cells_of_face),
+                                  face_normals(face_normals),
+                                  face_coords(face_coords),
+                                  cell_coords(cell_coords),
+                                  physics(physics),
+                                  conservatives(conservatives),
+                                  primitives(primitives),
+                                  cfl_local(cfl_local) {}
+        
+        /**
+         * @brief Overloaded operator for functor.
+         * @param i_cell Cell index.
+         * @param max_spectral_radius_i Max spectral radius for cell i_cell.
+         */
+        KOKKOS_INLINE_FUNCTION
+        void operator()(const u_int32_t i_cell, rtype & max_spectral_radius_i) const {
+            rtype spectral_radius_convective;
+            rtype spectral_radius_acoustic;
+            // rtype spectral_radius_viscous;
+            // rtype spectral_radius_heat;
+            rtype spectral_radius_overall;
+            rtype rho_l, rho_r, p_l, p_r, sos_l, sos_r, sos_f;
+            rtype s[N_DIM], u_l[N_DIM], u_r[N_DIM], u_f[N_DIM];
+            rtype dx_n, u_n;
+            rtype geom_factor;
+            rtype n_vec[N_DIM];
+            rtype n_unit[N_DIM];
+
+            spectral_radius_convective = 0.0;
+            spectral_radius_acoustic = 0.0;
+            // spectral_radius_viscous = 0.0;
+            // spectral_radius_heat = 0.0;
+
+            u_int32_t n_faces = offsets_faces_of_cell(i_cell + 1) - offsets_faces_of_cell(i_cell);
+
+            for (u_int32_t i_face = 0; i_face < n_faces; i_face++) {
+                int32_t i_cell_l = cells_of_face(i_face, 0);
+                int32_t i_cell_r = cells_of_face(i_face, 1);
+                FOR_I_DIM n_vec[i] = face_normals(i_face, i);
+                unit<N_DIM>(n_vec, n_unit);
+
+                if (i_cell_r == -1) {
+                    // Boundary face, hack
+                    s[0] = 2.0 * (face_coords(i_face, 0) - cell_coords(i_cell_l, 0));
+                    s[1] = 2.0 * (face_coords(i_face, 1) - cell_coords(i_cell_l, 1));
+                    i_cell_r = i_cell_l;
+                } else {
+                    s[0] = cell_coords(i_cell_r, 0) - cell_coords(i_cell_l, 0);
+                    s[1] = cell_coords(i_cell_r, 1) - cell_coords(i_cell_l, 1);
+                }
+
+                dx_n = Kokkos::fabs(dot<N_DIM>(s, n_unit));
+
+                rho_l = conservatives(i_cell_l, 0);
+                rho_r = conservatives(i_cell_r, 0);
+                u_l[0] = primitives(i_cell_l, 0);
+                u_l[1] = primitives(i_cell_l, 1);
+                u_r[0] = primitives(i_cell_r, 0);
+                u_r[1] = primitives(i_cell_r, 1);
+                p_l = primitives(i_cell_l, 2);
+                p_r = primitives(i_cell_r, 2);
+                sos_l = physics.get_sound_speed_from_pressure_density(p_l, rho_l);
+                sos_r = physics.get_sound_speed_from_pressure_density(p_r, rho_r);
+                sos_f = 0.5 * (sos_l + sos_r);
+
+                u_f[0] = 0.5 * (u_l[0] + u_r[0]);
+                u_f[1] = 0.5 * (u_l[1] + u_r[1]);
+                u_n = Kokkos::fabs(dot<N_DIM>(u_f, n_unit));
+
+                spectral_radius_convective += u_n / dx_n;
+                spectral_radius_acoustic += Kokkos::pow(sos_f / dx_n, 2.0);
+            }
+
+            geom_factor = 3.0 / n_faces;
+            spectral_radius_convective *= 1.37 * geom_factor;
+            spectral_radius_acoustic = 1.37 * Kokkos::sqrt(geom_factor * spectral_radius_acoustic);
+
+            /** \todo Implement viscous and heat spectral radii */
+            spectral_radius_overall = spectral_radius_convective + spectral_radius_acoustic;
+
+            // Update max spectral radius
+            max_spectral_radius_i = Kokkos::max(max_spectral_radius_i,
+                                                spectral_radius_overall);
+
+            // Store spectral radius in cfl_local, will be used to compute local cfl
+            cfl_local(i_cell) = spectral_radius_overall;
+        }
+    
+    private:
+        Kokkos::View<u_int32_t *> offsets_faces_of_cell;
+        Kokkos::View<int32_t *[2]> cells_of_face;
+        Kokkos::View<rtype *[N_DIM]> face_normals;
+        Kokkos::View<rtype *[N_DIM]> face_coords;
+        Kokkos::View<rtype *[N_DIM]> cell_coords;
+        const T physics;
+        Kokkos::View<rtype *[N_CONSERVATIVE]> conservatives;
+        Kokkos::View<rtype *[N_PRIMITIVE]> primitives;
+        Kokkos::View<rtype *> cfl_local;
+};
+
 rtype Solver::calc_spectral_radius() {
     rtype max_spectral_radius = -1.0;
     if (physics->get_type() == PhysicsType::EULER) {
-        SolverFunctors::SpectralRadiusFunctor<Euler> spectral_radius_functor(mesh->offsets_faces_of_cell,
-                                                                             mesh->cells_of_face,
-                                                                             mesh->face_normals,
-                                                                             mesh->face_coords,
-                                                                             mesh->cell_coords,
-                                                                             dynamic_cast<Euler &>(*physics),
-                                                                             conservatives,
-                                                                             primitives,
-                                                                             cfl_local);
+        SpectralRadiusFunctor<Euler> spectral_radius_functor(mesh->offsets_faces_of_cell,
+                                                             mesh->cells_of_face,
+                                                             mesh->face_normals,
+                                                             mesh->face_coords,
+                                                             mesh->cell_coords,
+                                                             dynamic_cast<Euler &>(*physics),
+                                                             conservatives,
+                                                             primitives,
+                                                             cfl_local);
         Kokkos::parallel_reduce(mesh->n_cells(),
                                 spectral_radius_functor,
                                 Kokkos::Max<rtype>(max_spectral_radius));

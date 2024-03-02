@@ -33,37 +33,90 @@ void BoundaryWallAdiabatic::init(const toml::value & input) {
     print();
 }
 
+template <typename T>
+struct BoundaryWallAdiabaticFluxFunctor {
+    public:
+        /**
+         * @brief Construct a new BoundaryWallAdiabaticFluxFunctor object
+         * @param faces Faces of the boundary.
+         * @param cells_of_face Cells of the faces.
+         * @param normals Face normals.
+         * @param face_area Face area.
+         * @param face_solution Face solution.
+         * @param rhs RHS.
+         * @param physics Physics.
+         */
+        BoundaryWallAdiabaticFluxFunctor(Kokkos::View<u_int32_t *> faces,
+                                         Kokkos::View<int32_t *[2]> cells_of_face,
+                                         Kokkos::View<rtype *[N_DIM]> normals,
+                                         Kokkos::View<rtype *> face_area,
+                                         Kokkos::View<rtype **[N_CONSERVATIVE]> face_solution,
+                                         Kokkos::View<rtype *[N_CONSERVATIVE]> rhs,
+                                         const T physics) :
+                                             faces(faces),
+                                             cells_of_face(cells_of_face),
+                                             normals(normals),
+                                             face_area(face_area),
+                                             face_solution(face_solution),
+                                             rhs(rhs),
+                                             physics(physics) {}
+        
+        /**
+         * @brief Overloaded operator for functor.
+         * @param i_local Local face index.
+         */
+        void operator()(const u_int32_t i_local) const {
+            rtype flux[N_CONSERVATIVE];
+            rtype conservatives_l[N_CONSERVATIVE];
+            rtype primitives_l[N_PRIMITIVE];
+
+            u_int32_t i_face = faces(i_local);
+            int32_t i_cell_l = cells_of_face(i_face, 0);
+            rtype n_vec[N_DIM];
+            rtype n_unit[N_DIM];
+            FOR_I_DIM n_vec[i] = normals(i_face, i);
+            unit<N_DIM>(n_vec, n_unit);
+
+            // Get cell conservatives
+            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
+                conservatives_l[j] = face_solution(i_face, 0, j);
+            }
+
+            // Compute relevant primitive variables
+            physics.compute_primitives_from_conservatives(primitives_l, conservatives_l);
+
+            // Compute flux
+            flux[0] = 0.0;
+            flux[1] = primitives_l[2] * n_unit[0];
+            flux[2] = primitives_l[2] * n_unit[1];
+            flux[3] = 0.0;
+
+            // Add flux to RHS
+            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
+                Kokkos::atomic_add(&rhs(i_cell_l, j), -face_area(i_face) * flux[j]);
+            }
+        }
+    
+    private:
+        Kokkos::View<u_int32_t *> faces;
+        Kokkos::View<int32_t *[2]> cells_of_face;
+        Kokkos::View<rtype *[N_DIM]> normals;
+        Kokkos::View<rtype *> face_area;
+        Kokkos::View<rtype **[N_CONSERVATIVE]> face_solution;
+        Kokkos::View<rtype *[N_CONSERVATIVE]> rhs;
+        const T physics;
+};
+
 void BoundaryWallAdiabatic::apply(view_3d * face_solution,
                                   view_2d * rhs) {
-    Kokkos::parallel_for(zone->n_faces(), KOKKOS_LAMBDA(const u_int32_t i_local) {
-        rtype flux[N_CONSERVATIVE];
-        rtype conservatives_l[N_CONSERVATIVE];
-        rtype primitives_l[N_PRIMITIVE];
-
-        u_int32_t i_face = (*zone->faces())[i_local];
-        int32_t i_cell_l = mesh->cells_of_face(i_face, 0);
-        rtype n_vec[N_DIM];
-        rtype n_unit[N_DIM];
-        FOR_I_DIM n_vec[i] = mesh->face_normals(i_face, i);
-        unit<N_DIM>(n_vec, n_unit);
-
-        // Get cell conservatives
-        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-            conservatives_l[j] = (*face_solution)(i_face, 0, j);
-        }
-
-        // Compute relevant primitive variables
-        physics->compute_primitives_from_conservatives(primitives_l, conservatives_l);
-
-        // Compute flux
-        flux[0] = 0.0;
-        flux[1] = primitives_l[2] * n_unit[0];
-        flux[2] = primitives_l[2] * n_unit[1];
-        flux[3] = 0.0;
-
-        // Add flux to RHS
-        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-            Kokkos::atomic_add(&(*rhs)(i_cell_l, j), -mesh->face_area(i_face) * flux[j]);
-        }
-    });
+    if (physics->get_type() == PhysicsType::EULER) {
+        BoundaryWallAdiabaticFluxFunctor<Euler> flux_functor(zone->faces,
+                                                             mesh->cells_of_face,
+                                                             mesh->face_normals,
+                                                             mesh->face_area,
+                                                             *face_solution,
+                                                             *rhs,
+                                                             dynamic_cast<Euler &>(*physics));
+        Kokkos::parallel_for(zone->n_faces(), flux_functor);
+    }
 }

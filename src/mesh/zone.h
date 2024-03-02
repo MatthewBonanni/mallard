@@ -75,12 +75,6 @@ class FaceZone : public Zone {
         u_int32_t n_faces() const;
 
         /**
-         * @brief Get a pointer to the vector of faces of the zone.
-         * @return Faces of the zone.
-         */
-        std::vector<u_int32_t> * faces();
-
-        /**
          * @brief Get the type of the zone.
          * @return Type of the zone.
          */
@@ -91,9 +85,11 @@ class FaceZone : public Zone {
          * @param type Type of the zone.
          */
         void set_type(FaceZoneType type);
+
+        Kokkos::View<u_int32_t *> faces;
+        Kokkos::View<u_int32_t *>::HostMirror h_faces;
     protected:
     private:
-        std::vector<u_int32_t> m_faces;
         FaceZoneType type;
 };
 
@@ -116,19 +112,15 @@ class CellZone : public Zone {
         u_int32_t n_cells() const;
 
         /**
-         * @brief Get the cells of the zone.
-         * @return Cells of the zone.
-         */
-        std::vector<u_int32_t> cells() const;
-
-        /**
          * @brief Get the type of the zone.
          * @return Type of the zone.
          */
         CellZoneType type() const;
+
+        Kokkos::View<u_int32_t *> cells;
+        Kokkos::View<u_int32_t *>::HostMirror h_cells;
     protected:
     private:
-        std::vector<u_int32_t> m_cells;
         CellZoneType m_type;
 };
 
