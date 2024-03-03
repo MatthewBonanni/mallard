@@ -68,6 +68,7 @@ struct FluxFunctor {
          * @brief Overloaded operator for functor.
          * @param i_local Local face index.
          */
+        KOKKOS_INLINE_FUNCTION
         void operator()(const u_int32_t i_local) const {
             rtype flux[N_CONSERVATIVE];
             rtype conservatives_l[N_CONSERVATIVE];
