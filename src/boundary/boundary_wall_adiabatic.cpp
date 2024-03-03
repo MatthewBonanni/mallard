@@ -13,6 +13,8 @@
 
 #include <iostream>
 
+#include <Kokkos_Core.hpp>
+
 #include "common.h"
 
 BoundaryWallAdiabatic::BoundaryWallAdiabatic() {
@@ -33,11 +35,12 @@ void BoundaryWallAdiabatic::init(const toml::value & input) {
     print();
 }
 
+namespace {
 template <typename T>
-struct BoundaryWallAdiabaticFluxFunctor {
+struct FluxFunctor {
     public:
         /**
-         * @brief Construct a new BoundaryWallAdiabaticFluxFunctor object
+         * @brief Construct a new FluxFunctor object
          * @param faces Faces of the boundary.
          * @param cells_of_face Cells of the faces.
          * @param normals Face normals.
@@ -46,20 +49,20 @@ struct BoundaryWallAdiabaticFluxFunctor {
          * @param rhs RHS.
          * @param physics Physics.
          */
-        BoundaryWallAdiabaticFluxFunctor(Kokkos::View<u_int32_t *> faces,
-                                         Kokkos::View<int32_t *[2]> cells_of_face,
-                                         Kokkos::View<rtype *[N_DIM]> normals,
-                                         Kokkos::View<rtype *> face_area,
-                                         Kokkos::View<rtype **[N_CONSERVATIVE]> face_solution,
-                                         Kokkos::View<rtype *[N_CONSERVATIVE]> rhs,
-                                         const T physics) :
-                                             faces(faces),
-                                             cells_of_face(cells_of_face),
-                                             normals(normals),
-                                             face_area(face_area),
-                                             face_solution(face_solution),
-                                             rhs(rhs),
-                                             physics(physics) {}
+        FluxFunctor(Kokkos::View<u_int32_t *> faces,
+                    Kokkos::View<int32_t *[2]> cells_of_face,
+                    Kokkos::View<rtype *[N_DIM]> normals,
+                    Kokkos::View<rtype *> face_area,
+                    Kokkos::View<rtype **[N_CONSERVATIVE]> face_solution,
+                    Kokkos::View<rtype *[N_CONSERVATIVE]> rhs,
+                    const T physics) :
+                        faces(faces),
+                        cells_of_face(cells_of_face),
+                        normals(normals),
+                        face_area(face_area),
+                        face_solution(face_solution),
+                        rhs(rhs),
+                        physics(physics) {}
         
         /**
          * @brief Overloaded operator for functor.
@@ -69,11 +72,11 @@ struct BoundaryWallAdiabaticFluxFunctor {
             rtype flux[N_CONSERVATIVE];
             rtype conservatives_l[N_CONSERVATIVE];
             rtype primitives_l[N_PRIMITIVE];
+            rtype n_vec[N_DIM];
+            rtype n_unit[N_DIM];
 
             u_int32_t i_face = faces(i_local);
             int32_t i_cell_l = cells_of_face(i_face, 0);
-            rtype n_vec[N_DIM];
-            rtype n_unit[N_DIM];
             FOR_I_DIM n_vec[i] = normals(i_face, i);
             unit<N_DIM>(n_vec, n_unit);
 
@@ -106,17 +109,18 @@ struct BoundaryWallAdiabaticFluxFunctor {
         Kokkos::View<rtype *[N_CONSERVATIVE]> rhs;
         const T physics;
 };
+}
 
 void BoundaryWallAdiabatic::apply(view_3d * face_solution,
                                   view_2d * rhs) {
     if (physics->get_type() == PhysicsType::EULER) {
-        BoundaryWallAdiabaticFluxFunctor<Euler> flux_functor(zone->faces,
-                                                             mesh->cells_of_face,
-                                                             mesh->face_normals,
-                                                             mesh->face_area,
-                                                             *face_solution,
-                                                             *rhs,
-                                                             dynamic_cast<Euler &>(*physics));
+        FluxFunctor<Euler> flux_functor(zone->faces,
+                                        mesh->cells_of_face,
+                                        mesh->face_normals,
+                                        mesh->face_area,
+                                        *face_solution,
+                                        *rhs,
+                                        dynamic_cast<Euler &>(*physics));
         Kokkos::parallel_for(zone->n_faces(), flux_functor);
     }
 }

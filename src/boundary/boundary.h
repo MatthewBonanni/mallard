@@ -92,6 +92,16 @@ class Boundary {
         virtual void init(const toml::value & input);
 
         /**
+         * @brief Copy data from the host to the device.
+         */
+        virtual void copy_host_to_device();
+
+        /**
+         * @brief Copy data from the device to the host.
+         */
+        virtual void copy_device_to_host();
+
+        /**
          * @brief Compute and apply the boundary flux.
          * @param face_solution Pointer to the face solution.
          * @param rhs Pointer to the right hand side.

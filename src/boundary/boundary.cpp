@@ -51,6 +51,14 @@ void Boundary::init(const toml::value & input) {
     throw std::runtime_error("Boundary::init() not implemented.");
 }
 
+void Boundary::copy_host_to_device() {
+    // Empty
+}
+
+void Boundary::copy_device_to_host() {
+    // Empty
+}
+
 void Boundary::apply(view_3d * face_solution,
                      view_2d * rhs) {
     (void)(face_solution);

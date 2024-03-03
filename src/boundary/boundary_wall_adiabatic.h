@@ -14,6 +14,8 @@
 
 #include "boundary.h"
 
+#include <Kokkos_Core.hpp>
+
 class BoundaryWallAdiabatic : public Boundary {
     public:
         /**

@@ -163,7 +163,6 @@ void Solver::calc_rhs_interior(view_3d * face_solution,
     /** \todo Figure out a way to clean this up... */
     if (physics->get_type() == PhysicsType::EULER) {
         if (riemann_solver->get_type() == RiemannSolverType::Rusanov) {
-            // Rusanov Riemann solver
             FluxFunctor<Euler, Rusanov> flux_functor(mesh->face_normals,
                                                      mesh->face_area,
                                                      mesh->cells_of_face,
@@ -173,7 +172,6 @@ void Solver::calc_rhs_interior(view_3d * face_solution,
                                                      dynamic_cast<Euler &>(*physics));
             Kokkos::parallel_for(mesh->n_faces(), flux_functor);
         } else if (riemann_solver->get_type() == RiemannSolverType::Roe) {
-            // Roe Riemann solver
             FluxFunctor<Euler, Roe> flux_functor(mesh->face_normals,
                                                  mesh->face_area,
                                                  mesh->cells_of_face,
@@ -183,7 +181,6 @@ void Solver::calc_rhs_interior(view_3d * face_solution,
                                                  dynamic_cast<Euler &>(*physics));
             Kokkos::parallel_for(mesh->n_faces(), flux_functor);
         } else if (riemann_solver->get_type() == RiemannSolverType::HLL) {
-            // HLL Riemann solver
             FluxFunctor<Euler, HLL> flux_functor(mesh->face_normals,
                                                  mesh->face_area,
                                                  mesh->cells_of_face,
@@ -193,7 +190,6 @@ void Solver::calc_rhs_interior(view_3d * face_solution,
                                                  dynamic_cast<Euler &>(*physics));
             Kokkos::parallel_for(mesh->n_faces(), flux_functor);
         } else if (riemann_solver->get_type() == RiemannSolverType::HLLC) {
-            // HLLC Riemann solver
             FluxFunctor<Euler, HLLC> flux_functor(mesh->face_normals,
                                                   mesh->face_area,
                                                   mesh->cells_of_face,

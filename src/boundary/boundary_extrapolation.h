@@ -14,6 +14,8 @@
 
 #include "boundary.h"
 
+#include <Kokkos_Core.hpp>
+
 class BoundaryExtrapolation : public Boundary {
     public:
         /**

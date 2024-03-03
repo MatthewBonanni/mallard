@@ -86,6 +86,16 @@ class FaceZone : public Zone {
          */
         void set_type(FaceZoneType type);
 
+        /**
+         * @brief Copy the faces from the host to the device.
+         */
+        void copy_host_to_device();
+
+        /**
+         * @brief Copy the faces from the device to the host.
+         */
+        void copy_device_to_host();
+
         Kokkos::View<u_int32_t *> faces;
         Kokkos::View<u_int32_t *>::HostMirror h_faces;
     protected:
@@ -116,6 +126,16 @@ class CellZone : public Zone {
          * @return Type of the zone.
          */
         CellZoneType type() const;
+
+        /**
+         * @brief Copy the cells from the host to the device.
+         */
+        void copy_host_to_device();
+
+        /**
+         * @brief Copy the cells from the device to the host.
+         */
+        void copy_device_to_host();
 
         Kokkos::View<u_int32_t *> cells;
         Kokkos::View<u_int32_t *>::HostMirror h_cells;

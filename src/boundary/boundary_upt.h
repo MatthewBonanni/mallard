@@ -14,6 +14,8 @@
 
 #include "boundary.h"
 
+#include <Kokkos_Core.hpp>
+
 class BoundaryUPT : public Boundary {
     public:
         /**
@@ -38,6 +40,16 @@ class BoundaryUPT : public Boundary {
         void init(const toml::value & input) override;
 
         /**
+         * @brief Copy the boundary data from the host to the device.
+         */
+        void copy_host_to_device() override;
+
+        /**
+         * @brief Copy the boundary data from the device to the host.
+         */
+        void copy_device_to_host() override;
+
+        /**
          * @brief Apply the boundary condition.
          * @param face_solution Pointer to the face solution vector.
          * @param rhs Pointer to the right-hand side vector.
@@ -52,10 +64,8 @@ class BoundaryUPT : public Boundary {
         rtype T_bc;
 
         // Dependent
-        rtype rho_bc;
-        rtype e_bc;
-        rtype h_bc;
-        rtype primitives_bc[N_PRIMITIVE];
+        Kokkos::View<rtype [N_PRIMITIVE+1]> data_bc;
+        Kokkos::View<rtype [N_PRIMITIVE+1]>::HostMirror h_data_bc;
 };
 
 #endif // BOUNDARY_UPT_H

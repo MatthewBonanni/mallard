@@ -201,6 +201,12 @@ void Mesh::copy_host_to_device() {
     Kokkos::deep_copy(nodes_of_face, h_nodes_of_face);
     Kokkos::deep_copy(offsets_nodes_of_face, h_offsets_nodes_of_face);
     Kokkos::deep_copy(cells_of_face, h_cells_of_face);
+    for (auto & zone : m_face_zones) {
+        zone.copy_host_to_device();
+    }
+    for (auto & zone : m_cell_zones) {
+        zone.copy_host_to_device();
+    }
 }
 
 void Mesh::copy_device_to_host() {
@@ -217,6 +223,12 @@ void Mesh::copy_device_to_host() {
     Kokkos::deep_copy(h_nodes_of_face, nodes_of_face);
     Kokkos::deep_copy(h_offsets_nodes_of_face, offsets_nodes_of_face);
     Kokkos::deep_copy(h_cells_of_face, cells_of_face);
+    for (auto & zone : m_face_zones) {
+        zone.copy_device_to_host();
+    }
+    for (auto & zone : m_cell_zones) {
+        zone.copy_device_to_host();
+    }
 }
 
 void Mesh::init_cart(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly) {

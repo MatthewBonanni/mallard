@@ -71,6 +71,9 @@ int Solver::init(const std::string& input_file_name) {
     
     copy_host_to_device();
     mesh->copy_host_to_device();
+    for (auto & boundary : boundaries) {
+        boundary->copy_host_to_device();
+    }
     physics->copy_host_to_device();
 
     return 0;
