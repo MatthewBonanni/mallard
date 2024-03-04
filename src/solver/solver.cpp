@@ -360,8 +360,8 @@ int Solver::run() {
     write_data(true);
 
     while (!done()) {
-        calc_dt();
         do_checks();
+        calc_dt();
         take_step();
         check_fields();
         write_data();
@@ -424,6 +424,8 @@ void print_range(const std::string & name,
 }
 
 void Solver::do_checks() {
+    copy_device_to_host();
+
     bool check_now = (step % check_interval == 0);
     if (!check_now) {
         return;
@@ -533,7 +535,6 @@ void Solver::take_step() {
                                &rhs_func);
     update_primitives();
     Kokkos::fence();
-    copy_device_to_host();
     step++;
     t += dt;
 }
