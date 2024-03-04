@@ -18,7 +18,7 @@
 TEST(RiemannSolverTest, RusanovFlux) {
     rtype gamma = 1.4;
 
-    State flux;
+    rtype flux[N_CONSERVATIVE];
     NVector n_unit = {1.0, 0.0};
 
     rtype rho_l = 1.0;
@@ -35,7 +35,7 @@ TEST(RiemannSolverTest, RusanovFlux) {
     rtype h_r = e_r + p_r / rho_r;
 
     Rusanov riemann_solver;
-    riemann_solver.calc_flux(flux.data(), n_unit.data(),
+    riemann_solver.calc_flux(flux, n_unit.data(),
                              rho_l, u_l.data(), p_l, gamma, h_l,
                              rho_r, u_r.data(), p_r, gamma, h_r);
 
@@ -49,7 +49,7 @@ TEST(RiemannSolverTest, RusanovFlux) {
 TEST(RiemannSolverTest, RusanovFluxY) {
     rtype gamma = 1.4;
 
-    State flux;
+    rtype flux[N_CONSERVATIVE];
     NVector n_unit = {0.0, 1.0};
 
     rtype rho_l = 1.0;
@@ -66,7 +66,7 @@ TEST(RiemannSolverTest, RusanovFluxY) {
     rtype h_r = e_r + p_r / rho_r;
 
     Rusanov riemann_solver;
-    riemann_solver.calc_flux(flux.data(), n_unit.data(),
+    riemann_solver.calc_flux(flux, n_unit.data(),
                              rho_l, u_l.data(), p_l, gamma, h_l,
                              rho_r, u_r.data(), p_r, gamma, h_r);
 
@@ -80,7 +80,7 @@ TEST(RiemannSolverTest, RusanovFluxY) {
 TEST(RiemannSolverTest, RusanovFluxXY) {
     rtype gamma = 1.4;
 
-    State flux;
+    rtype flux[N_CONSERVATIVE];
     NVector n_unit = {1.0 / Kokkos::sqrt(2.0),
                       1.0 / Kokkos::sqrt(2.0)};
 
@@ -98,7 +98,7 @@ TEST(RiemannSolverTest, RusanovFluxXY) {
     rtype h_r = e_r + p_r / rho_r;
 
     Rusanov riemann_solver;
-    riemann_solver.calc_flux(flux.data(), n_unit.data(),
+    riemann_solver.calc_flux(flux, n_unit.data(),
                              rho_l, u_l.data(), p_l, gamma, h_l,
                              rho_r, u_r.data(), p_r, gamma, h_r);
 
@@ -112,7 +112,7 @@ TEST(RiemannSolverTest, RusanovFluxXY) {
 TEST(RiemannSolverTest, RusanovFluxZero) {
     rtype gamma = 1.4;
 
-    State flux;
+    rtype flux[N_CONSERVATIVE];
     NVector n_unit = {1.0, 0.0};
 
     rtype rho_l = 1.0;
@@ -129,7 +129,7 @@ TEST(RiemannSolverTest, RusanovFluxZero) {
     rtype h_r = e_r + p_r / rho_r;
 
     Rusanov riemann_solver;
-    riemann_solver.calc_flux(flux.data(), n_unit.data(),
+    riemann_solver.calc_flux(flux, n_unit.data(),
                              rho_l, u_l.data(), p_l, gamma, h_l,
                              rho_r, u_r.data(), p_r, gamma, h_r);
 
@@ -143,7 +143,7 @@ TEST(RiemannSolverTest, RusanovFluxZero) {
 TEST(RiemannSolverTest, HLLCFlux) {
     rtype gamma = 1.4;
 
-    State flux;
+    rtype flux[N_CONSERVATIVE];
     NVector n_unit = {1.0, 0.0};
 
     rtype rho_l = 1.0;
@@ -160,7 +160,7 @@ TEST(RiemannSolverTest, HLLCFlux) {
     rtype h_r = e_r + p_r / rho_r;
 
     HLLC riemann_solver;
-    riemann_solver.calc_flux(flux.data(), n_unit.data(),
+    riemann_solver.calc_flux(flux, n_unit.data(),
                              rho_l, u_l.data(), p_l, gamma, h_l,
                              rho_r, u_r.data(), p_r, gamma, h_r);
 
@@ -174,7 +174,7 @@ TEST(RiemannSolverTest, HLLCFlux) {
 TEST(RiemannSolverTest, HLLCFluxY) {
     rtype gamma = 1.4;
 
-    State flux;
+    rtype flux[N_CONSERVATIVE];
     NVector n_unit = {0.0, 1.0};
 
     rtype rho_l = 1.0;
@@ -191,7 +191,7 @@ TEST(RiemannSolverTest, HLLCFluxY) {
     rtype h_r = e_r + p_r / rho_r;
 
     HLLC riemann_solver;
-    riemann_solver.calc_flux(flux.data(), n_unit.data(),
+    riemann_solver.calc_flux(flux, n_unit.data(),
                              rho_l, u_l.data(), p_l, gamma, h_l,
                              rho_r, u_r.data(), p_r, gamma, h_r);
 
@@ -205,7 +205,7 @@ TEST(RiemannSolverTest, HLLCFluxY) {
 TEST(RiemannSolverTest, HLLCFluxXY) {
     rtype gamma = 1.4;
 
-    State flux;
+    rtype flux[N_CONSERVATIVE];
     NVector n_unit = {1.0 / Kokkos::sqrt(2.0),
                       1.0 / Kokkos::sqrt(2.0)};
 
@@ -223,7 +223,7 @@ TEST(RiemannSolverTest, HLLCFluxXY) {
     rtype h_r = e_r + p_r / rho_r;
 
     HLLC riemann_solver;
-    riemann_solver.calc_flux(flux.data(), n_unit.data(),
+    riemann_solver.calc_flux(flux, n_unit.data(),
                              rho_l, u_l.data(), p_l, gamma, h_l,
                              rho_r, u_r.data(), p_r, gamma, h_r);
 
@@ -237,7 +237,7 @@ TEST(RiemannSolverTest, HLLCFluxXY) {
 TEST(RiemannSolverTest, HLLCFluxZero) {
     rtype gamma = 1.4;
 
-    State flux;
+    rtype flux[N_CONSERVATIVE];
     NVector n_unit = {1.0, 0.0};
 
     rtype rho_l = 1.0;
@@ -254,7 +254,7 @@ TEST(RiemannSolverTest, HLLCFluxZero) {
     rtype h_r = e_r + p_r / rho_r;
 
     HLLC riemann_solver;
-    riemann_solver.calc_flux(flux.data(), n_unit.data(),
+    riemann_solver.calc_flux(flux, n_unit.data(),
                              rho_l, u_l.data(), p_l, gamma, h_l,
                              rho_r, u_r.data(), p_r, gamma, h_r);
 

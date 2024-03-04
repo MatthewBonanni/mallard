@@ -49,9 +49,9 @@ TEST(PhysicsTest, EulerPrimitivesFromConservatives) {
     rtype E = e + 0.5 * (u[0] * u[0] + u[1] * u[1]);
     rtype rhoE = rho * E;
 
-    State conservatives = {rho, rho * u[0], rho * u[1], rhoE};
-    Primitives primitives;
-    physics.compute_primitives_from_conservatives(primitives.data(), conservatives.data());
+    rtype conservatives[N_CONSERVATIVE] = {rho, rho * u[0], rho * u[1], rhoE};
+    rtype primitives[N_PRIMITIVE];
+    physics.compute_primitives_from_conservatives(primitives, conservatives);
 
     EXPECT_RTYPE_EQ(primitives[0], u[0]);
     EXPECT_RTYPE_EQ(primitives[1], u[1]);

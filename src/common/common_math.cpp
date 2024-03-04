@@ -14,10 +14,6 @@
 #include <cmath>
 #include <stdexcept>
 
-#include "KokkosBlas1_scal.hpp"
-#include "KokkosBlas1_axpby.hpp"
-#include "KokkosBlas1_update.hpp"
-
 rtype triangle_area_2(const NVector & v0,
                       const NVector & v1,
                       const NVector & v2) {
@@ -33,46 +29,4 @@ rtype triangle_area_3(const std::array<rtype, 3> & v0,
     (void)(v1);
     (void)(v2);
     throw std::runtime_error("Not implemented.");
-}
-
-void cA_to_A(const u_int64_t nA,
-             const rtype c, rtype * A) {
-    Kokkos::View<rtype *> AA(A, nA);
-    KokkosBlas::scal(AA, c, AA);
-}
-
-void cApB_to_B(const u_int64_t nA,
-               const rtype c, const rtype * A,
-               rtype * B) {
-    Kokkos::View<const rtype *> AA(A, nA);
-    Kokkos::View<rtype *> BB(B, nA);
-    KokkosBlas::axpy(c, AA, BB);
-}
-
-void cApB_to_C(const u_int64_t nA,
-               const rtype c, const rtype * A,
-               const rtype * B,
-               rtype * C) {
-    Kokkos::View<const rtype*> AA(A, nA);
-    Kokkos::View<const rtype*> BB(B, nA);
-    Kokkos::View<rtype *> CC(C, nA);
-    KokkosBlas::update(c, AA, 1.0, BB, 0.0, CC);
-}
-
-void aApbB_to_B(const u_int64_t nA,
-                const rtype a, const rtype * A,
-                const rtype b, rtype * B) {
-    Kokkos::View<const rtype *> AA(A, nA);
-    Kokkos::View<rtype *> BB(B, nA);
-    KokkosBlas::axpby(a, AA, b, BB);
-}
-
-void aApbB_to_C(const u_int64_t nA,
-                const rtype a, const rtype * A,
-                const rtype b, const rtype * B,
-                rtype * C) {
-    Kokkos::View<const rtype *> AA(A, nA);
-    Kokkos::View<const rtype *> BB(B, nA);
-    Kokkos::View<rtype *> CC(C, nA);
-    KokkosBlas::update(a, AA, b, BB, 0.0, CC);
 }

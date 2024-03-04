@@ -16,6 +16,7 @@
 #include <memory>
 
 #include <Kokkos_Core.hpp>
+#include <KokkosBlas1_scal.hpp>
 
 #include "common.h"
 #include "mesh.h"
@@ -433,10 +434,10 @@ void Solver::do_checks() {
 
     print_step_info();
 
-    State max_cons = max_array<4>(conservatives);
-    State min_cons = min_array<4>(conservatives);
-    Primitives max_prim = max_array<5>(primitives);
-    Primitives min_prim = min_array<5>(primitives);
+    std::array<rtype, N_CONSERVATIVE> max_cons = max_array<N_CONSERVATIVE>(conservatives);
+    std::array<rtype, N_CONSERVATIVE> min_cons = min_array<N_CONSERVATIVE>(conservatives);
+    std::array<rtype, N_PRIMITIVE> max_prim = max_array<N_PRIMITIVE>(primitives);
+    std::array<rtype, N_PRIMITIVE> min_prim = min_array<N_PRIMITIVE>(primitives);
 
     for (size_t i = 0; i < CONSERVATIVE_NAMES.size(); i++) {
         print_range(CONSERVATIVE_NAMES[i], min_cons[i], max_cons[i]);
@@ -595,7 +596,7 @@ void Solver::calc_dt() {
     if (use_cfl) {
         rtype max_spectral_radius = calc_spectral_radius();
         dt = cfl / max_spectral_radius;
-        cA_to_A(mesh->n_cells(), dt, cfl_local.data());
+        KokkosBlas::scal(cfl_local, dt, cfl_local);
     }
 
     if (dt < 0.0) {

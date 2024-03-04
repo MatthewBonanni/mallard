@@ -16,6 +16,7 @@ add_library(${LIB_NAME} STATIC ${LIB_SRCS})
 target_include_directories(${LIB_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Link libraries
+target_link_libraries(${LIB_NAME} PRIVATE Kokkos::kokkos)
 target_link_libraries(${LIB_NAME} PRIVATE CommonLib)
 target_link_libraries(${LIB_NAME} PRIVATE SolverLib)
 target_link_libraries(${LIB_NAME} PRIVATE MeshLib)

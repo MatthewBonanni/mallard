@@ -32,12 +32,7 @@
     using rtype = float;
 #endif
 
-using NVector = std::array<rtype, 2>;
-using State = std::array<rtype, N_CONSERVATIVE>;
-using Primitives = std::array<rtype, N_PRIMITIVE>;
-using FaceStatePair = std::array<State, 2>;
-using StateVector = std::vector<State>;
-using FaceStateVector = std::vector<FaceStatePair>;
+using NVector = std::array<rtype, N_DIM>;
 
 using view_1d = Kokkos::View<rtype *>;
 using view_2d = Kokkos::View<rtype **>;
