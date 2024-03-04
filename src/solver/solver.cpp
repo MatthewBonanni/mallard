@@ -302,10 +302,10 @@ void Solver::init_data_writers() {
 void Solver::allocate_memory() {
     std::cout << "Allocating memory..." << std::endl;
 
-    Kokkos::resize(conservatives, mesh->n_cells(), N_CONSERVATIVE);
-    Kokkos::resize(primitives, mesh->n_cells(), N_PRIMITIVE);
-    Kokkos::resize(face_conservatives, mesh->n_faces(), 2, N_CONSERVATIVE);
-    Kokkos::resize(face_primitives, mesh->n_faces(), 2, N_PRIMITIVE);
+    Kokkos::resize(conservatives, mesh->n_cells());
+    Kokkos::resize(primitives, mesh->n_cells());
+    Kokkos::resize(face_conservatives, mesh->n_faces());
+    Kokkos::resize(face_primitives, mesh->n_faces());
 
     h_conservatives = Kokkos::create_mirror_view(conservatives);
     h_primitives = Kokkos::create_mirror_view(primitives);
@@ -314,11 +314,11 @@ void Solver::allocate_memory() {
 
     solution_pointers.push_back(&conservatives);
     for (u_int8_t i = 0; i < time_integrator->get_n_solution_vectors() - 1; i++) {
-        solution_pointers.push_back(new view_2d("solution", mesh->n_cells(), N_CONSERVATIVE));
+        solution_pointers.push_back(new Kokkos::View<rtype *[N_CONSERVATIVE]>("solution", mesh->n_cells()));
     }
 
     for (u_int8_t i = 0; i < time_integrator->get_n_rhs_vectors(); i++) {
-        rhs_pointers.push_back(new view_2d("rhs", mesh->n_cells(), N_CONSERVATIVE));
+        rhs_pointers.push_back(new Kokkos::View<rtype *[N_CONSERVATIVE]>("rhs", mesh->n_cells()));
     }
 
     Kokkos::resize(cfl_local, mesh->n_cells());

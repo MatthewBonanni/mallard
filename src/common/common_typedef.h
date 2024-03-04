@@ -16,8 +16,6 @@
 #include <array>
 #include <vector>
 
-#include <Kokkos_Core.hpp>
-
 #define N_DIM 2
 #define N_CONSERVATIVE N_DIM + 2
 #define N_PRIMITIVE N_DIM + 3
@@ -33,20 +31,6 @@
 #endif
 
 using NVector = std::array<rtype, N_DIM>;
-
-using view_1d = Kokkos::View<rtype *>;
-using view_2d = Kokkos::View<rtype **>;
-using view_3d = Kokkos::View<rtype ***>;
-
-using view_1d_ls = Kokkos::View<rtype *, Kokkos::LayoutStride>;
-
-using host_view_1d = view_1d::HostMirror;
-using host_view_2d = view_2d::HostMirror;
-using host_view_3d = view_3d::HostMirror;
-
-using host_view_1d_ls = Kokkos::View<rtype *, Kokkos::LayoutStride>::HostMirror;
-using host_view_2d_ls = Kokkos::View<rtype **, Kokkos::LayoutStride>::HostMirror;
-using host_view_3d_ls = Kokkos::View<rtype ***, Kokkos::LayoutStride>::HostMirror;
 
 const std::array<std::string, N_CONSERVATIVE> CONSERVATIVE_NAMES = {
     "RHO",

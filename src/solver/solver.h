@@ -71,9 +71,9 @@ class Solver {
          * @param face_solution Face solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs(view_2d * solution,
-                      view_3d * face_solution,
-                      view_2d * rhs);
+        void calc_rhs(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
+                      Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                      Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs);
         
         /**
          * @brief Pre-RHS hook.
@@ -81,33 +81,33 @@ class Solver {
          * @param face_solution Face solution vector.
          * @param rhs Right hand side vector.
          */
-        void pre_rhs(view_2d * solution,
-                     view_3d * face_solution,
-                     view_2d * rhs);
+        void pre_rhs(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
+                     Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                     Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs);
         
         /**
          * @brief Add the source term contributions to the right hand side.
          * @param solution Solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs_source(view_2d * solution,
-                             view_2d * rhs);
+        void calc_rhs_source(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
+                             Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs);
         
         /**
          * @brief Add the interior flux contributions to the right hand side.
          * @param face_solution Face solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs_interior(view_3d * face_solution,
-                               view_2d * rhs);
+        void calc_rhs_interior(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                               Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs);
         
         /**
          * @brief Add the boundary flux contributions to the right hand side.
          * @param face_solution Face solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs_boundaries(view_3d * face_solution,
-                                 view_2d * rhs);
+        void calc_rhs_boundaries(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                                 Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs);
     protected:
         /**
          * @brief Initialize the mesh.
@@ -225,14 +225,15 @@ class Solver {
          */
         void write_data(bool force = false) const;
         
-        view_2d conservatives;
-        host_view_2d h_conservatives;
-        view_2d primitives;
-        host_view_2d h_primitives;
-        view_3d face_conservatives;
-        host_view_3d h_face_conservatives;
-        view_3d face_primitives;
-        host_view_3d h_face_primitives;
+        Kokkos::View<rtype *[N_CONSERVATIVE]> conservatives;
+        Kokkos::View<rtype *[   N_PRIMITIVE]> primitives;
+        Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_conservatives;
+        Kokkos::View<rtype *[2][   N_PRIMITIVE]> face_primitives;
+
+        Kokkos::View<rtype *[N_CONSERVATIVE]>::HostMirror h_conservatives;
+        Kokkos::View<rtype *[   N_PRIMITIVE]>::HostMirror h_primitives;
+        Kokkos::View<rtype *[2][N_CONSERVATIVE]>::HostMirror h_face_conservatives;
+        Kokkos::View<rtype *[2][   N_PRIMITIVE]>::HostMirror h_face_primitives;
     private:
         toml::value input;
         u_int32_t n_steps;
@@ -241,7 +242,7 @@ class Solver {
         bool use_cfl;
         rtype dt;
         rtype cfl;
-        view_1d cfl_local;
+        Kokkos::View<rtype *> cfl_local;
         rtype t;
         rtype t_last_check;
         rtype t_wall_0;
@@ -258,11 +259,11 @@ class Solver {
         std::shared_ptr<Physics> physics;
 
         // Data views
-        std::vector<view_2d *> solution_pointers;
-        std::vector<view_2d *> rhs_pointers;
-        std::function<void(view_2d *,
-                           view_3d *,
-                           view_2d *)> rhs_func;
+        std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> solution_pointers;
+        std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> rhs_pointers;
+        std::function<void(Kokkos::View<rtype    *[N_CONSERVATIVE]> *,
+                           Kokkos::View<rtype *[2][N_CONSERVATIVE]> *,
+                           Kokkos::View<rtype    *[N_CONSERVATIVE]> *)> rhs_func;
         
         // Checks
         u_int32_t check_interval;

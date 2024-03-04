@@ -33,11 +33,11 @@ void FaceReconstruction::print() const {
     std::cout << LOG_SEPARATOR << std::endl;
 }
 
-void FaceReconstruction::set_cell_conservatives(view_2d * cell_conservatives) {
+void FaceReconstruction::set_cell_conservatives(Kokkos::View<rtype *[N_CONSERVATIVE]> * cell_conservatives) {
     this->cell_conservatives = cell_conservatives;
 }
 
-void FaceReconstruction::set_face_conservatives(view_3d * face_conservatives) {
+void FaceReconstruction::set_face_conservatives(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_conservatives) {
     this->face_conservatives = face_conservatives;
 }
 
@@ -62,7 +62,7 @@ struct FirstOrderFunctor {
          * @param solution Cell solution.
          */
         FirstOrderFunctor(Kokkos::View<int32_t *[2]> cells_of_face,
-                          Kokkos::View<rtype **[N_CONSERVATIVE]> face_solution,
+                          Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
                           Kokkos::View<rtype *[N_CONSERVATIVE]> solution) :
                               cells_of_face(cells_of_face),
                               face_solution(face_solution),
@@ -87,12 +87,12 @@ struct FirstOrderFunctor {
 
     private:
         Kokkos::View<int32_t *[2]> cells_of_face;
-        Kokkos::View<rtype **[N_CONSERVATIVE]> face_solution;
+        Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution;
         Kokkos::View<rtype *[N_CONSERVATIVE]> solution;
 };
 
-void FirstOrder::calc_face_values(view_2d * solution,
-                                  view_3d * face_solution) {
+void FirstOrder::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
+                                  Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution) {
     FirstOrderFunctor flux_functor(mesh->cells_of_face, *face_solution, *solution);
     Kokkos::parallel_for(mesh->n_faces(), flux_functor);
 }
@@ -120,7 +120,7 @@ struct WENO3_JSFunctor {
                         Kokkos::View<rtype *[2]> face_normals,
                         u_int32_t n_cells_x,
                         u_int32_t n_cells_y,
-                        Kokkos::View<rtype **[N_CONSERVATIVE]> face_solution,
+                        Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
                         Kokkos::View<rtype *[N_CONSERVATIVE]> solution) :
                             cells_of_face(cells_of_face),
                             face_normals(face_normals),
@@ -238,12 +238,12 @@ struct WENO3_JSFunctor {
         Kokkos::View<rtype *[2]> face_normals;
         u_int32_t n_cells_x;
         u_int32_t n_cells_y;
-        Kokkos::View<rtype **[N_CONSERVATIVE]> face_solution;
+        Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution;
         Kokkos::View<rtype *[N_CONSERVATIVE]> solution;
 };
 
-void WENO3_JS::calc_face_values(view_2d * solution,
-                                view_3d * face_solution) {
+void WENO3_JS::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
+                                Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution) {
     WENO3_JSFunctor flux_functor(mesh->cells_of_face,
                                  mesh->face_normals,
                                  mesh->n_cells_x(),
@@ -276,7 +276,7 @@ struct WENO5_JSFunctor {
                         Kokkos::View<rtype *[2]> face_normals,
                         u_int32_t n_cells_x,
                         u_int32_t n_cells_y,
-                        Kokkos::View<rtype **[N_CONSERVATIVE]> face_solution,
+                        Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
                         Kokkos::View<rtype *[N_CONSERVATIVE]> solution) :
                             cells_of_face(cells_of_face),
                             face_normals(face_normals),
@@ -450,12 +450,12 @@ struct WENO5_JSFunctor {
         Kokkos::View<rtype *[2]> face_normals;
         u_int32_t n_cells_x;
         u_int32_t n_cells_y;
-        Kokkos::View<rtype **[N_CONSERVATIVE]> face_solution;
+        Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution;
         Kokkos::View<rtype *[N_CONSERVATIVE]> solution;
 };
 
-void WENO5_JS::calc_face_values(view_2d * solution,
-                                view_3d * face_solution) {
+void WENO5_JS::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
+                                Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution) {
     WENO5_JSFunctor flux_functor(mesh->cells_of_face,
                                  mesh->face_normals,
                                  mesh->n_cells_x(),

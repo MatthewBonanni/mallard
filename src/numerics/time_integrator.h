@@ -85,12 +85,12 @@ class TimeIntegrator {
          * @param calc_rhs Function to calculate rhs.
          */
         virtual void take_step(const rtype & dt,
-                               std::vector<view_2d *> & solution_pointers,
-                               view_3d * face_solution,
-                               std::vector<view_2d *> & rhs_pointers,
-                               std::function<void(view_2d * solution,
-                                                  view_3d * face_solution,
-                                                  view_2d * rhs)> * calc_rhs) = 0;
+                               std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & solution_pointers,
+                               Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                               std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & rhs_pointers,
+                               std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
+                                                  Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                                                  Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs)> * calc_rhs) = 0;
     protected:
         TimeIntegratorType type;
         u_int8_t n_solution_vectors;
@@ -119,12 +119,12 @@ class FE : public TimeIntegrator {
          * @param calc_rhs Function to calculate rhs.
          */
         void take_step(const rtype & dt,
-                       std::vector<view_2d *> & solution_pointers,
-                       view_3d * face_solution,
-                       std::vector<view_2d *> & rhs_pointers,
-                       std::function<void(view_2d * solution,
-                                          view_3d * face_solution,
-                                          view_2d * rhs)> * calc_rhs) override;
+                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & solution_pointers,
+                       Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & rhs_pointers,
+                       std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
+                                          Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                                          Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs)> * calc_rhs) override;
     protected:
     private:
 };
@@ -150,12 +150,12 @@ class RK4 : public TimeIntegrator {
          * @param calc_rhs Function to calculate rhs.
          */
         void take_step(const rtype & dt,
-                       std::vector<view_2d *> & solution_pointers,
-                       view_3d * face_solution,
-                       std::vector<view_2d *> & rhs_pointers,
-                       std::function<void(view_2d * solution,
-                                          view_3d * face_solution,
-                                          view_2d * rhs)> * calc_rhs) override;
+                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & solution_pointers,
+                       Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & rhs_pointers,
+                       std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
+                                          Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                                          Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs)> * calc_rhs) override;
     protected:
     private:
         std::vector<rtype> coeffs;
@@ -182,12 +182,12 @@ class SSPRK3 : public TimeIntegrator {
          * @param calc_rhs Function to calculate rhs.
          */
         void take_step(const rtype & dt,
-                       std::vector<view_2d *> & solution_pointers,
-                       view_3d * face_solution,
-                       std::vector<view_2d *> & rhs_pointers,
-                       std::function<void(view_2d * solution,
-                                          view_3d * face_solution,
-                                          view_2d * rhs)> * calc_rhs) override;
+                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & solution_pointers,
+                       Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & rhs_pointers,
+                       std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
+                                          Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                                          Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs)> * calc_rhs) override;
     protected:
     private:
         std::vector<rtype> coeffs;

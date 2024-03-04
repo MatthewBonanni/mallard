@@ -55,14 +55,14 @@ FE::~FE() {
 }
 
 void FE::take_step(const rtype & dt,
-                   std::vector<view_2d *> & solution_pointers,
-                   view_3d * face_solution,
-                   std::vector<view_2d *> & rhs_pointers,
-                   std::function<void(view_2d * solution,
-                                      view_3d * face_solution,
-                                      view_2d * rhs)> * calc_rhs) {
-    view_2d * U = solution_pointers[0];
-    view_2d * rhs = rhs_pointers[0];
+                   std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & solution_pointers,
+                   Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                   std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & rhs_pointers,
+                   std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
+                                      Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                                      Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs)> * calc_rhs) {
+    Kokkos::View<rtype *[N_CONSERVATIVE]> * U = solution_pointers[0];
+    Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs = rhs_pointers[0];
 
     (*calc_rhs)(U, face_solution, rhs);
     KokkosBlas::axpy(dt, *rhs, *U);
@@ -83,18 +83,18 @@ RK4::~RK4() {
 }
 
 void RK4::take_step(const rtype & dt,
-                    std::vector<view_2d *> & solution_pointers,
-                    view_3d * face_solution,
-                    std::vector<view_2d *> & rhs_pointers,
-                    std::function<void(view_2d * solution,
-                                       view_3d * face_solution,
-                                       view_2d * rhs)> * calc_rhs) {
-    view_2d * U = solution_pointers[0];
-    view_2d * U_temp = solution_pointers[1];
-    view_2d * rhs1 = rhs_pointers[0];
-    view_2d * rhs2 = rhs_pointers[1];
-    view_2d * rhs3 = rhs_pointers[2];
-    view_2d * rhs4 = rhs_pointers[3];
+                    std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & solution_pointers,
+                    Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                    std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & rhs_pointers,
+                    std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
+                                       Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                                       Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs)> * calc_rhs) {
+    Kokkos::View<rtype *[N_CONSERVATIVE]> * U = solution_pointers[0];
+    Kokkos::View<rtype *[N_CONSERVATIVE]> * U_temp = solution_pointers[1];
+    Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs1 = rhs_pointers[0];
+    Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs2 = rhs_pointers[1];
+    Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs3 = rhs_pointers[2];
+    Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs4 = rhs_pointers[3];
 
     // Calculate k1
     (*calc_rhs)(U, face_solution, rhs1);
@@ -133,17 +133,17 @@ SSPRK3::~SSPRK3() {
 }
 
 void SSPRK3::take_step(const rtype & dt,
-                       std::vector<view_2d *> & solution_pointers,
-                       view_3d * face_solution,
-                       std::vector<view_2d *> & rhs_pointers,
-                       std::function<void(view_2d * solution,
-                                          view_3d * face_solution,
-                                          view_2d * rhs)> * calc_rhs) {
-    view_2d * U = solution_pointers[0];
-    view_2d * U_temp = solution_pointers[1];
-    view_2d * rhs1 = rhs_pointers[0];
-    view_2d * rhs2 = rhs_pointers[1];
-    view_2d * rhs3 = rhs_pointers[2];
+                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & solution_pointers,
+                       Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & rhs_pointers,
+                       std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
+                                          Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                                          Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs)> * calc_rhs) {
+    Kokkos::View<rtype *[N_CONSERVATIVE]> * U = solution_pointers[0];
+    Kokkos::View<rtype *[N_CONSERVATIVE]> * U_temp = solution_pointers[1];
+    Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs1 = rhs_pointers[0];
+    Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs2 = rhs_pointers[1];
+    Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs3 = rhs_pointers[2];
 
     // Calculate k1
     (*calc_rhs)(U, face_solution, rhs1);

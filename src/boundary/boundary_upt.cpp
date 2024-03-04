@@ -100,7 +100,7 @@ struct FluxFunctor {
                     Kokkos::View<int32_t *[2]> cells_of_face,
                     Kokkos::View<rtype *[N_DIM]> normals,
                     Kokkos::View<rtype *> face_area,
-                    Kokkos::View<rtype **[N_CONSERVATIVE]> face_solution,
+                    Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
                     Kokkos::View<rtype [N_PRIMITIVE+1]> data_bc,
                     Kokkos::View<rtype *[N_CONSERVATIVE]> rhs,
                     const T_physics physics,
@@ -162,7 +162,7 @@ struct FluxFunctor {
         Kokkos::View<int32_t *[2]> cells_of_face;
         Kokkos::View<rtype *[N_DIM]> normals;
         Kokkos::View<rtype *> face_area;
-        Kokkos::View<rtype **[N_CONSERVATIVE]> face_solution;
+        Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution;
         Kokkos::View<rtype [N_PRIMITIVE+1]> data_bc;
         Kokkos::View<rtype *[N_CONSERVATIVE]> rhs;
         const T_physics physics;
@@ -170,8 +170,8 @@ struct FluxFunctor {
 };
 }
 
-void BoundaryUPT::apply(view_3d * face_solution,
-                        view_2d * rhs) {
+void BoundaryUPT::apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                        Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs) {
     if (physics->get_type() == PhysicsType::EULER) {
         if (riemann_solver->get_type() == RiemannSolverType::Rusanov) {
             FluxFunctor<Euler, Rusanov> flux_functor(zone->faces,

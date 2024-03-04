@@ -54,8 +54,8 @@ class BoundaryPOut : public Boundary {
          * @param face_solution Pointer to the face solution vector.
          * @param rhs Pointer to the right-hand side vector.
          */
-        void apply(view_3d * face_solution,
-                   view_2d * rhs) override;
+        void apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
+                   Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs) override;
     protected:
     private:
         Kokkos::View<rtype [1]> data_bc;
