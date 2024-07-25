@@ -434,7 +434,7 @@ void Roe::calc_flux(rtype * flux, const rtype * n_unit,
     (void)(p_r);
     (void)(gamma_r);
     (void)(h_r);
-    // throw std::runtime_error("Roe Riemann solver not implemented.");
+    Kokkos::abort("Roe Riemann solver not implemented.");
     /** \todo Implement Roe Riemann solver */
 }
 
