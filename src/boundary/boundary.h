@@ -106,8 +106,8 @@ class Boundary {
          * @param face_solution Pointer to the face solution.
          * @param rhs Pointer to the right hand side.
          */
-        virtual void apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                           Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs);
+        virtual void apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                           Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
         
     protected:
         FaceZone * zone;
