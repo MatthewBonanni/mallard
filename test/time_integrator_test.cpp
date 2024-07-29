@@ -21,7 +21,8 @@ void calc_rhs_test(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                    Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
     Kokkos::parallel_for(2, KOKKOS_LAMBDA(const u_int32_t i) {
         for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-            rhs(i, j) = 0.0 * solution(i, j) + i*N_CONSERVATIVE + j;
+            rhs(i, j) = i;
+            // rhs(i, j) = (0.0 * solution(i, j)) + (i * N_CONSERVATIVE) + j;
         }
     });
 }
@@ -33,7 +34,7 @@ TEST(TimeIntegratorTest, FE) {
     Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution;
     Kokkos::View<rtype *[2][N_CONSERVATIVE]>::HostMirror h_face_solution;
     std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> rhs_vec;
-    std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]::HostMirror> h_rhs_vec;
+    std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>::HostMirror> h_rhs_vec;
 
     for (u_int8_t i = 0; i < integrator.get_n_solution_vectors(); i++) {
         Kokkos::View<rtype *[N_CONSERVATIVE]> solution("solution", 2);
