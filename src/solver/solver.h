@@ -71,9 +71,9 @@ class Solver {
          * @param face_solution Face solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
-                      Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                      Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs);
+        void calc_rhs(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                      Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                      Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
         
         /**
          * @brief Pre-RHS hook.
@@ -81,33 +81,33 @@ class Solver {
          * @param face_solution Face solution vector.
          * @param rhs Right hand side vector.
          */
-        void pre_rhs(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
-                     Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                     Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs);
+        void pre_rhs(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                     Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                     Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
         
         /**
          * @brief Add the source term contributions to the right hand side.
          * @param solution Solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs_source(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
-                             Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs);
+        void calc_rhs_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                             Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
         
         /**
          * @brief Add the interior flux contributions to the right hand side.
          * @param face_solution Face solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs_interior(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                               Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs);
+        void calc_rhs_interior(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                               Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
         
         /**
          * @brief Add the boundary flux contributions to the right hand side.
          * @param face_solution Face solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs_boundaries(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                                 Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs);
+        void calc_rhs_boundaries(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                                 Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
     protected:
         /**
          * @brief Initialize the mesh.
