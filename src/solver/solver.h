@@ -259,11 +259,11 @@ class Solver {
         std::shared_ptr<Physics> physics;
 
         // Data views
-        std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> solution_pointers;
-        std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> rhs_pointers;
-        std::function<void(Kokkos::View<rtype    *[N_CONSERVATIVE]> *,
-                           Kokkos::View<rtype *[2][N_CONSERVATIVE]> *,
-                           Kokkos::View<rtype    *[N_CONSERVATIVE]> *)> rhs_func;
+        std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> solution_vec;
+        std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> rhs_vec;
+        std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]>,
+                           Kokkos::View<rtype *[2][N_CONSERVATIVE]>,
+                           Kokkos::View<rtype *[N_CONSERVATIVE]>)> rhs_func;
         
         // Checks
         u_int32_t check_interval;

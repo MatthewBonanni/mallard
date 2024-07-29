@@ -312,13 +312,15 @@ void Solver::allocate_memory() {
     h_face_conservatives = Kokkos::create_mirror_view(face_conservatives);
     h_face_primitives = Kokkos::create_mirror_view(face_primitives);
 
-    solution_pointers.push_back(&conservatives);
+    solution_vec.push_back(conservatives);
     for (u_int8_t i = 0; i < time_integrator->get_n_solution_vectors() - 1; i++) {
-        solution_pointers.push_back(new Kokkos::View<rtype *[N_CONSERVATIVE]>("solution", mesh->n_cells()));
+        Kokkos::View<rtype *[N_CONSERVATIVE]> solution("solution", mesh->n_cells());
+        solution_vec.push_back(solution);
     }
 
     for (u_int8_t i = 0; i < time_integrator->get_n_rhs_vectors(); i++) {
-        rhs_pointers.push_back(new Kokkos::View<rtype *[N_CONSERVATIVE]>("rhs", mesh->n_cells()));
+        Kokkos::View<rtype *[N_CONSERVATIVE]> rhs("rhs", mesh->n_cells());
+        rhs_vec.push_back(rhs);
     }
 
     Kokkos::resize(cfl_local, mesh->n_cells());
@@ -530,9 +532,9 @@ void Solver::print_logo() const {
 void Solver::take_step() {
     /** \todo MPI implementation */
     time_integrator->take_step(dt,
-                               solution_pointers,
-                               &face_conservatives,
-                               rhs_pointers,
+                               solution_vec,
+                               face_conservatives,
+                               rhs_vec,
                                &rhs_func);
     update_primitives();
     Kokkos::fence();

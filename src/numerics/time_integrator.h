@@ -79,18 +79,18 @@ class TimeIntegrator {
         /**
          * @brief Take a single time step.
          * @param dt Time step size.
-         * @param solution_pointers Pointers to solution vectors.
-         * @param face_solution Pointer to face solution vector.
-         * @param rhs_pointers Pointers to rhs vectors.
+         * @param solution_vec Vector of views of solution vectors.
+         * @param face_solution View of face solution vector.
+         * @param rhs_vec Vector of views of rhs vectors.
          * @param calc_rhs Function to calculate rhs.
          */
         virtual void take_step(const rtype & dt,
-                               std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & solution_pointers,
-                               Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                               std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & rhs_pointers,
-                               std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
-                                                  Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                                                  Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs)> * calc_rhs) = 0;
+                               std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & solution_vec,
+                               Kokkos::View<rtype *[2][N_CONSERVATIVE]> & face_solution,
+                               std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & rhs_vec,
+                               std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                                  Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                                                  Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> * calc_rhs) = 0;
     protected:
         TimeIntegratorType type;
         u_int8_t n_solution_vectors;
@@ -113,18 +113,18 @@ class FE : public TimeIntegrator {
         /**
          * @brief Take a single time step.
          * @param dt Time step size.
-         * @param solution_pointers Pointers to solution vectors.
-         * @param face_solution Pointer to face solution vector.
-         * @param rhs_pointers Pointers to rhs vectors.
+         * @param solution_vec Vector of views of solution vectors.
+         * @param face_solution View of face solution vector.
+         * @param rhs_vec Vector of views of rhs vectors.
          * @param calc_rhs Function to calculate rhs.
          */
         void take_step(const rtype & dt,
-                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & solution_pointers,
-                       Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & rhs_pointers,
-                       std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
-                                          Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                                          Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs)> * calc_rhs) override;
+                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & solution_vec,
+                       Kokkos::View<rtype *[2][N_CONSERVATIVE]> & face_solution,
+                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & rhs_vec,
+                       std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                          Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                                          Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> * calc_rhs) override;
     protected:
     private:
 };
@@ -144,18 +144,18 @@ class RK4 : public TimeIntegrator {
         /**
          * @brief Take a single time step.
          * @param dt Time step size.
-         * @param solution_pointers Pointers to solution vectors.
-         * @param face_solution Pointer to face solution vector.
-         * @param rhs_pointers Pointers to rhs vectors.
+         * @param solution_vec Vector of views of solution vectors.
+         * @param face_solution View of face solution vector.
+         * @param rhs_vec Vector of views of rhs vectors.
          * @param calc_rhs Function to calculate rhs.
          */
         void take_step(const rtype & dt,
-                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & solution_pointers,
-                       Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & rhs_pointers,
-                       std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
-                                          Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                                          Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs)> * calc_rhs) override;
+                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & solution_vec,
+                       Kokkos::View<rtype *[2][N_CONSERVATIVE]> & face_solution,
+                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & rhs_vec,
+                       std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                          Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                                          Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> * calc_rhs) override;
     protected:
     private:
         std::vector<rtype> coeffs;
@@ -176,18 +176,18 @@ class SSPRK3 : public TimeIntegrator {
         /**
          * @brief Take a single time step.
          * @param dt Time step size.
-         * @param solution_pointers Pointers to solution vectors.
-         * @param face_solution Pointer to face solution vector.
-         * @param rhs_pointers Pointers to rhs vectors.
+         * @param solution_vec Vector of views of solution vectors.
+         * @param face_solution View of face solution vector.
+         * @param rhs_vec Vector of views of rhs vectors.
          * @param calc_rhs Function to calculate rhs.
          */
         void take_step(const rtype & dt,
-                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & solution_pointers,
-                       Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & rhs_pointers,
-                       std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
-                                          Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                                          Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs)> * calc_rhs) override;
+                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & solution_vec,
+                       Kokkos::View<rtype *[2][N_CONSERVATIVE]> & face_solution,
+                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & rhs_vec,
+                       std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                          Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                                          Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> * calc_rhs) override;
     protected:
     private:
         std::vector<rtype> coeffs;
