@@ -91,9 +91,9 @@ struct FirstOrderFunctor {
         Kokkos::View<rtype *[N_CONSERVATIVE]> solution;
 };
 
-void FirstOrder::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
-                                  Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution) {
-    FirstOrderFunctor flux_functor(mesh->cells_of_face, *face_solution, *solution);
+void FirstOrder::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                  Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) {
+    FirstOrderFunctor flux_functor(mesh->cells_of_face, face_solution, solution);
     Kokkos::parallel_for(mesh->n_faces(), flux_functor);
 }
 
@@ -242,14 +242,14 @@ struct WENO3_JSFunctor {
         Kokkos::View<rtype *[N_CONSERVATIVE]> solution;
 };
 
-void WENO3_JS::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
-                                Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution) {
+void WENO3_JS::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) {
     WENO3_JSFunctor flux_functor(mesh->cells_of_face,
                                  mesh->face_normals,
                                  mesh->n_cells_x(),
                                  mesh->n_cells_y(),
-                                 *face_solution,
-                                 *solution);
+                                 face_solution,
+                                 solution);
     Kokkos::parallel_for(mesh->n_faces(), flux_functor);
 }
 
@@ -454,13 +454,13 @@ struct WENO5_JSFunctor {
         Kokkos::View<rtype *[N_CONSERVATIVE]> solution;
 };
 
-void WENO5_JS::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
-                                Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution) {
+void WENO5_JS::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) {
     WENO5_JSFunctor flux_functor(mesh->cells_of_face,
                                  mesh->face_normals,
                                  mesh->n_cells_x(),
                                  mesh->n_cells_y(),
-                                 *face_solution,
-                                 *solution);
+                                 face_solution,
+                                 solution);
     Kokkos::parallel_for(mesh->n_faces(), flux_functor);
 }

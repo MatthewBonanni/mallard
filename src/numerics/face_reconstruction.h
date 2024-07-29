@@ -80,11 +80,11 @@ class FaceReconstruction {
 
         /**
          * @brief Reconstruct the face values.
-         * @param solution Pointer to the solution.
-         * @param face_solution Pointer to the face solution.
+         * @param solution View of the solution.
+         * @param face_solution View of the face solution.
          */
-        virtual void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
-                                      Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution) = 0;
+        virtual void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                      Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) = 0;
     protected:
         FaceReconstructionType type;
         Kokkos::View<rtype *[N_CONSERVATIVE]> * cell_conservatives;
@@ -107,11 +107,11 @@ class FirstOrder : public FaceReconstruction {
 
         /**
          * @brief Reconstruct the face values.
-         * @param solution Pointer to the solution.
-         * @param face_solution Pointer to the face solution.
+         * @param solution View of the solution.
+         * @param face_solution View of the face solution.
          */
-        void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
-                              Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution) override;
+        void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                              Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) override;
     protected:
     private:
 };
@@ -130,11 +130,11 @@ class WENO3_JS : public FaceReconstruction {
 
         /**
          * @brief Reconstruct the face values.
-         * @param solution Pointer to the solution.
-         * @param face_solution Pointer to the face solution.
+         * @param solution View of the solution.
+         * @param face_solution View of the face solution.
          */
-        void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
-                              Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution) override;
+        void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                              Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) override;
     protected:
     private:
 };
@@ -153,11 +153,11 @@ class WENO5_JS : public FaceReconstruction {
 
         /**
          * @brief Reconstruct the face values.
-         * @param solution Pointer to the solution.
-         * @param face_solution Pointer to the face solution.
+         * @param solution View of the solution.
+         * @param face_solution View of the face solution.
          */
-        void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
-                              Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution) override;
+        void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                              Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) override;
     protected:
     private:
 };
