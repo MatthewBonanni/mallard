@@ -146,10 +146,10 @@ void Mesh::compute_face_areas() {
     for (u_int32_t i_face = 0; i_face < n_faces(); ++i_face) {
         u_int32_t i_node_0 = node_of_face(i_face, 0);
         u_int32_t i_node_1 = node_of_face(i_face, 1);
-        h_face_area(i_face) = sqrt(pow(h_node_coords(i_node_1, 0) -
-                                       h_node_coords(i_node_0, 0), 2) +
-                                   pow(h_node_coords(i_node_1, 1) -
-                                       h_node_coords(i_node_0, 1), 2));
+        h_face_area(i_face) = std::sqrt(std::pow(h_node_coords(i_node_1, 0) -
+                                                 h_node_coords(i_node_0, 0), 2) +
+                                        std::pow(h_node_coords(i_node_1, 1) -
+                                                 h_node_coords(i_node_0, 1), 2));
     }
 }
 
@@ -164,7 +164,7 @@ void Mesh::compute_face_normals() {
         rtype y1 = h_node_coords(i_node_1, 1);
         rtype dx = x1 - x0;
         rtype dy = y1 - y0;
-        rtype mag = sqrt(dx * dx + dy * dy);
+        rtype mag = std::sqrt(dx * dx + dy * dy);
         h_face_normals(i_face, 0) =  dy / mag * face_area(i_face);
         h_face_normals(i_face, 1) = -dx / mag * face_area(i_face);
 

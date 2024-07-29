@@ -343,28 +343,28 @@ struct WENO5_JSFunctor {
 
             for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
                 // Smoothness indicators
-                rtype beta_0 = 13.0 / 12.0 * pow(        solution(i_cell_im2, j)
-                                                 - 2.0 * solution(i_cell_im1, j)
-                                                 +       solution(i_cell_i,   j), 2.0) +
-                                      0.25 * pow(        solution(i_cell_im2, j)
-                                                 - 4.0 * solution(i_cell_im1, j)
-                                                 + 3.0 * solution(i_cell_i,   j), 2.0);
-                rtype beta_1 = 13.0 / 12.0 * pow(        solution(i_cell_im1, j)
-                                                 - 2.0 * solution(i_cell_i,   j)
-                                                 +       solution(i_cell_ip1, j), 2.0) +
-                                      0.25 * pow(        solution(i_cell_im1, j)
-                                                 -       solution(i_cell_ip1, j), 2.0);
-                rtype beta_2 = 13.0 / 12.0 * pow(        solution(i_cell_i,   j)
-                                                 - 2.0 * solution(i_cell_ip1, j)
-                                                 +       solution(i_cell_ip2, j), 2.0) +
-                                      0.25 * pow(  3.0 * solution(i_cell_i,   j)
-                                                 - 4.0 * solution(i_cell_ip1, j)
-                                                 +       solution(i_cell_ip2, j), 2.0);
+                rtype beta_0 = 13.0 / 12.0 * Kokkos::pow(        solution(i_cell_im2, j)
+                                                         - 2.0 * solution(i_cell_im1, j)
+                                                         +       solution(i_cell_i,   j), 2.0) +
+                                      0.25 * Kokkos::pow(        solution(i_cell_im2, j)
+                                                         - 4.0 * solution(i_cell_im1, j)
+                                                         + 3.0 * solution(i_cell_i,   j), 2.0);
+                rtype beta_1 = 13.0 / 12.0 * Kokkos::pow(        solution(i_cell_im1, j)
+                                                         - 2.0 * solution(i_cell_i,   j)
+                                                         +       solution(i_cell_ip1, j), 2.0) +
+                                      0.25 * Kokkos::pow(        solution(i_cell_im1, j)
+                                                         -       solution(i_cell_ip1, j), 2.0);
+                rtype beta_2 = 13.0 / 12.0 * Kokkos::pow(        solution(i_cell_i,   j)
+                                                         - 2.0 * solution(i_cell_ip1, j)
+                                                         +       solution(i_cell_ip2, j), 2.0) +
+                                      0.25 * Kokkos::pow(  3.0 * solution(i_cell_i,   j)
+                                                         - 4.0 * solution(i_cell_ip1, j)
+                                                         +       solution(i_cell_ip2, j), 2.0);
 
                 rtype epsilon = 1e-6;
-                rtype alpha_0 = 0.1 / pow(epsilon + beta_0, 2.0);
-                rtype alpha_1 = 0.6 / pow(epsilon + beta_1, 2.0);
-                rtype alpha_2 = 0.3 / pow(epsilon + beta_2, 2.0);
+                rtype alpha_0 = 0.1 / Kokkos::pow(epsilon + beta_0, 2.0);
+                rtype alpha_1 = 0.6 / Kokkos::pow(epsilon + beta_1, 2.0);
+                rtype alpha_2 = 0.3 / Kokkos::pow(epsilon + beta_2, 2.0);
 
                 rtype one_alpha = 1 / (alpha_0 + alpha_1 + alpha_2);
                 rtype w_0 = alpha_0 * one_alpha;
@@ -403,28 +403,28 @@ struct WENO5_JSFunctor {
 
             for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
                 // Smoothness indicators
-                rtype beta_0 = 13.0 / 12.0 * pow(        solution(i_cell_im2, j)
-                                                 - 2.0 * solution(i_cell_im1, j)
-                                                 +       solution(i_cell_i,   j), 2.0) +
-                                      0.25 * pow(        solution(i_cell_im2, j)
-                                                 - 4.0 * solution(i_cell_im1, j)
-                                                 + 3.0 * solution(i_cell_i,   j), 2.0);
-                rtype beta_1 = 13.0 / 12.0 * pow(        solution(i_cell_im1, j)
-                                                 - 2.0 * solution(i_cell_i,   j)
-                                                 +       solution(i_cell_ip1, j), 2.0) +
-                                      0.25 * pow(        solution(i_cell_im1, j)
-                                                 -       solution(i_cell_ip1, j), 2.0);
-                rtype beta_2 = 13.0 / 12.0 * pow(        solution(i_cell_i,   j)
-                                                 - 2.0 * solution(i_cell_ip1, j)
-                                                 +       solution(i_cell_ip2, j), 2.0) +
-                                      0.25 * pow(  3.0 * solution(i_cell_i,   j)
-                                                 - 4.0 * solution(i_cell_ip1, j)
-                                                 +       solution(i_cell_ip2, j), 2.0);
+                rtype beta_0 = 13.0 / 12.0 * Kokkos::pow(        solution(i_cell_im2, j)
+                                                         - 2.0 * solution(i_cell_im1, j)
+                                                         +       solution(i_cell_i,   j), 2.0) +
+                                      0.25 * Kokkos::pow(        solution(i_cell_im2, j)
+                                                         - 4.0 * solution(i_cell_im1, j)
+                                                         + 3.0 * solution(i_cell_i,   j), 2.0);
+                rtype beta_1 = 13.0 / 12.0 * Kokkos::pow(        solution(i_cell_im1, j)
+                                                         - 2.0 * solution(i_cell_i,   j)
+                                                         +       solution(i_cell_ip1, j), 2.0) +
+                                      0.25 * Kokkos::pow(        solution(i_cell_im1, j)
+                                                         -       solution(i_cell_ip1, j), 2.0);
+                rtype beta_2 = 13.0 / 12.0 * Kokkos::pow(        solution(i_cell_i,   j)
+                                                         - 2.0 * solution(i_cell_ip1, j)
+                                                         +       solution(i_cell_ip2, j), 2.0) +
+                                      0.25 * Kokkos::pow(  3.0 * solution(i_cell_i,   j)
+                                                         - 4.0 * solution(i_cell_ip1, j)
+                                                         +       solution(i_cell_ip2, j), 2.0);
 
                 rtype epsilon = 1e-6;
-                rtype alpha_0 = 0.3 / pow(epsilon + beta_0, 2.0);
-                rtype alpha_1 = 0.6 / pow(epsilon + beta_1, 2.0);
-                rtype alpha_2 = 0.1 / pow(epsilon + beta_2, 2.0);
+                rtype alpha_0 = 0.3 / Kokkos::pow(epsilon + beta_0, 2.0);
+                rtype alpha_1 = 0.6 / Kokkos::pow(epsilon + beta_1, 2.0);
+                rtype alpha_2 = 0.1 / Kokkos::pow(epsilon + beta_2, 2.0);
 
                 rtype one_alpha = 1 / (alpha_0 + alpha_1 + alpha_2);
                 rtype w_0 = alpha_0 * one_alpha;
