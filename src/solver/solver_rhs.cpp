@@ -39,34 +39,34 @@ struct DivideVolumeFunctor {
         Kokkos::View<rtype *[N_CONSERVATIVE]> rhs;
 };
 
-void Solver::calc_rhs(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
-                      Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                      Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs) {
+void Solver::calc_rhs(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                      Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                      Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
     pre_rhs(solution, face_solution, rhs);
     calc_rhs_source(solution, rhs);
     calc_rhs_interior(face_solution, rhs);
     calc_rhs_boundaries(face_solution, rhs);
 
     // Divide by cell volume
-    DivideVolumeFunctor divide_volume_functor(mesh->cell_volume, *rhs);
+    DivideVolumeFunctor divide_volume_functor(mesh->cell_volume, rhs);
     Kokkos::parallel_for(mesh->n_cells(), divide_volume_functor);
 }
 
-void Solver::pre_rhs(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
-                     Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                     Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs) {
+void Solver::pre_rhs(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                     Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                     Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
     // Zero out RHS
     Kokkos::parallel_for(mesh->n_cells(), KOKKOS_LAMBDA(const u_int32_t i) {
         for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-            (*rhs)(i, j) = 0.0;
+            rhs(i, j) = 0.0;
         }
     });
 
     face_reconstruction->calc_face_values(solution, face_solution);
 }
 
-void Solver::calc_rhs_source(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
-                             Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs) {
+void Solver::calc_rhs_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                             Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
     (void)(solution);
     (void)(rhs);
     /** \todo Implement source terms. */
@@ -158,16 +158,16 @@ struct FluxFunctor {
         const T_physics physics;
 };
 
-void Solver::calc_rhs_interior(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                               Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs) {
+void Solver::calc_rhs_interior(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                               Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
     /** \todo Figure out a way to clean this up... */
     if (physics->get_type() == PhysicsType::EULER) {
         if (riemann_solver->get_type() == RiemannSolverType::Rusanov) {
             FluxFunctor<Euler, Rusanov> flux_functor(mesh->face_normals,
                                                      mesh->face_area,
                                                      mesh->cells_of_face,
-                                                     *face_solution,
-                                                     *rhs,
+                                                     face_solution,
+                                                     rhs,
                                                      dynamic_cast<Rusanov &>(*riemann_solver),
                                                      dynamic_cast<Euler &>(*physics));
             Kokkos::parallel_for(mesh->n_faces(), flux_functor);
@@ -175,8 +175,8 @@ void Solver::calc_rhs_interior(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_s
             FluxFunctor<Euler, Roe> flux_functor(mesh->face_normals,
                                                  mesh->face_area,
                                                  mesh->cells_of_face,
-                                                 *face_solution,
-                                                 *rhs,
+                                                 face_solution,
+                                                 rhs,
                                                  dynamic_cast<Roe &>(*riemann_solver),
                                                  dynamic_cast<Euler &>(*physics));
             Kokkos::parallel_for(mesh->n_faces(), flux_functor);
@@ -184,8 +184,8 @@ void Solver::calc_rhs_interior(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_s
             FluxFunctor<Euler, HLL> flux_functor(mesh->face_normals,
                                                  mesh->face_area,
                                                  mesh->cells_of_face,
-                                                 *face_solution,
-                                                 *rhs,
+                                                 face_solution,
+                                                 rhs,
                                                  dynamic_cast<HLL &>(*riemann_solver),
                                                  dynamic_cast<Euler &>(*physics));
             Kokkos::parallel_for(mesh->n_faces(), flux_functor);
@@ -193,8 +193,8 @@ void Solver::calc_rhs_interior(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_s
             FluxFunctor<Euler, HLLC> flux_functor(mesh->face_normals,
                                                   mesh->face_area,
                                                   mesh->cells_of_face,
-                                                  *face_solution,
-                                                  *rhs,
+                                                  face_solution,
+                                                  rhs,
                                                   dynamic_cast<HLLC &>(*riemann_solver),
                                                   dynamic_cast<Euler &>(*physics));
             Kokkos::parallel_for(mesh->n_faces(), flux_functor);
@@ -208,8 +208,8 @@ void Solver::calc_rhs_interior(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_s
     }
 }
 
-void Solver::calc_rhs_boundaries(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                                 Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs) {
+void Solver::calc_rhs_boundaries(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                                 Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
     for (auto& boundary : boundaries) {
         boundary->apply(face_solution, rhs);
     }

@@ -112,15 +112,15 @@ struct FluxFunctor {
 };
 }
 
-void BoundaryWallAdiabatic::apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                                  Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs) {
+void BoundaryWallAdiabatic::apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                                  Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
     if (physics->get_type() == PhysicsType::EULER) {
         FluxFunctor<Euler> flux_functor(zone->faces,
                                         mesh->cells_of_face,
                                         mesh->face_normals,
                                         mesh->face_area,
-                                        *face_solution,
-                                        *rhs,
+                                        face_solution,
+                                        rhs,
                                         dynamic_cast<Euler &>(*physics));
         Kokkos::parallel_for(zone->n_faces(), flux_functor);
     }

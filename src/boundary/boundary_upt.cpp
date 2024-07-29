@@ -170,17 +170,17 @@ struct FluxFunctor {
 };
 }
 
-void BoundaryUPT::apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                        Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs) {
+void BoundaryUPT::apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                        Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
     if (physics->get_type() == PhysicsType::EULER) {
         if (riemann_solver->get_type() == RiemannSolverType::Rusanov) {
             FluxFunctor<Euler, Rusanov> flux_functor(zone->faces,
                                                      mesh->cells_of_face,
                                                      mesh->face_normals,
                                                      mesh->face_area,
-                                                     *face_solution,
+                                                     face_solution,
                                                      data_bc,
-                                                     *rhs,
+                                                     rhs,
                                                      dynamic_cast<Euler &>(*physics),
                                                      dynamic_cast<Rusanov &>(*riemann_solver));
             Kokkos::parallel_for(zone->n_faces(), flux_functor);
@@ -189,9 +189,9 @@ void BoundaryUPT::apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution
                                                  mesh->cells_of_face,
                                                  mesh->face_normals,
                                                  mesh->face_area,
-                                                 *face_solution,
+                                                 face_solution,
                                                  data_bc,
-                                                 *rhs,
+                                                 rhs,
                                                  dynamic_cast<Euler &>(*physics),
                                                  dynamic_cast<Roe &>(*riemann_solver));
             Kokkos::parallel_for(zone->n_faces(), flux_functor);
@@ -200,9 +200,9 @@ void BoundaryUPT::apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution
                                                  mesh->cells_of_face,
                                                  mesh->face_normals,
                                                  mesh->face_area,
-                                                 *face_solution,
+                                                 face_solution,
                                                  data_bc,
-                                                 *rhs,
+                                                 rhs,
                                                  dynamic_cast<Euler &>(*physics),
                                                  dynamic_cast<HLL &>(*riemann_solver));
             Kokkos::parallel_for(zone->n_faces(), flux_functor);
@@ -211,9 +211,9 @@ void BoundaryUPT::apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution
                                                   mesh->cells_of_face,
                                                   mesh->face_normals,
                                                   mesh->face_area,
-                                                  *face_solution,
+                                                  face_solution,
                                                   data_bc,
-                                                  *rhs,
+                                                  rhs,
                                                   dynamic_cast<Euler &>(*physics),
                                                   dynamic_cast<HLLC &>(*riemann_solver));
             Kokkos::parallel_for(zone->n_faces(), flux_functor);
