@@ -55,17 +55,17 @@ FE::~FE() {
 }
 
 void FE::take_step(const rtype & dt,
-                   std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & solution_pointers,
-                   Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                   std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> & rhs_pointers,
-                   std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
-                                      Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                                      Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs)> * calc_rhs) {
-    Kokkos::View<rtype *[N_CONSERVATIVE]> * U = solution_pointers[0];
-    Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs = rhs_pointers[0];
+                   std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & solution_vec,
+                   Kokkos::View<rtype *[2][N_CONSERVATIVE]> & face_solution,
+                   std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & rhs_vec,
+                   std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                      Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                                      Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> * calc_rhs) {
+    Kokkos::View<rtype *[N_CONSERVATIVE]> U = solution_vec[0];
+    Kokkos::View<rtype *[N_CONSERVATIVE]> rhs = rhs_vec[0];
 
     (*calc_rhs)(U, face_solution, rhs);
-    KokkosBlas::axpy(dt, *rhs, *U);
+    KokkosBlas::axpy(dt, rhs, U);
 }
 
 RK4::RK4() {

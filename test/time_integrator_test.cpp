@@ -16,74 +16,66 @@
 
 #include "common_typedef.h"
 
-void calc_rhs_test(Kokkos::View<rtype  *[N_CONSERVATIVE]> * solution,
-                   Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                   Kokkos::View<rtype  *[N_CONSERVATIVE]> * rhs) {
-    
-    // Doesn't do anything, just addresses the compiler warning about unused variables
-    (*face_solution)(0, 0, 0) = 0.0;
-
-    (*rhs)(0, 0) = 0.0 * (*solution)(0, 0) + 0.0;
-    (*rhs)(0, 1) = 0.0 * (*solution)(0, 1) + 1.0;
-    (*rhs)(0, 2) = 0.0 * (*solution)(0, 2) + 2.0;
-    (*rhs)(0, 3) = 0.0 * (*solution)(0, 3) + 3.0;
-    (*rhs)(1, 0) = 0.0 * (*solution)(1, 0) + 4.0;
-    (*rhs)(1, 1) = 0.0 * (*solution)(1, 1) + 5.0;
-    (*rhs)(1, 2) = 0.0 * (*solution)(1, 2) + 6.0;
-    (*rhs)(1, 3) = 0.0 * (*solution)(1, 3) + 7.0;
+void calc_rhs_test(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                   Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                   Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
+    Kokkos::parallel_for(2, KOKKOS_LAMBDA(const u_int32_t i) {
+        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
+            rhs(i, j) = 0.0 * solution(i, j) + i*N_CONSERVATIVE + j;
+        }
+    });
 }
 
 TEST(TimeIntegratorTest, FE) {
     FE fe;
-    std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> solution_pointers;
-    std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>::HostMirror *> h_solution_pointers;
+    std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> solution_vec;
+    std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>::HostMirror> h_solution_vec;
     Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution;
     Kokkos::View<rtype *[2][N_CONSERVATIVE]>::HostMirror h_face_solution;
-    std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]> *> rhs_pointers;
-    std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>::HostMirror *> h_rhs_pointers;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> * solution;
-    Kokkos::View<rtype *[N_CONSERVATIVE]>::HostMirror * h_solution;
+    std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> rhs_vec;
 
     for (u_int8_t i = 0; i < fe.get_n_solution_vectors(); i++) {
-        solution_pointers.push_back(new Kokkos::View<rtype *[N_CONSERVATIVE]>("solution", 2));
-        h_solution_pointers.push_back(Kokkos::create_mirror_view(*solution_pointers[i]));
+        Kokkos::View<rtype *[N_CONSERVATIVE]> solution("solution", 2);
+        solution_vec.push_back(solution);
+        h_solution_vec.push_back(Kokkos::create_mirror_view(solution));
     }
     Kokkos::resize(face_solution, 2);
     for (u_int8_t i = 0; i < fe.get_n_rhs_vectors(); i++) {
-        rhs_pointers.push_back(new Kokkos::View<rtype *[N_CONSERVATIVE]>("rhs", 2));
-        h_rhs_pointers.push_back(Kokkos::create_mirror_view(*rhs_pointers[i]));
+        Kokkos::View<rtype *[N_CONSERVATIVE]> rhs("rhs", 2);
+        rhs_vec.push_back(rhs);
     }
 
-    solution = solution_pointers[0];
-    *h_solution = Kokkos::create_mirror_view(*solution);
+    std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                       Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                       Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> rhs_func = calc_rhs_test;
 
-    std::function<void(Kokkos::View<rtype  *[N_CONSERVATIVE]> * solution,
-                       Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                       Kokkos::View<rtype  *[N_CONSERVATIVE]> * rhs)> rhs_func = calc_rhs_test;
+    h_solution_vec[0](0, 0) = 0.0;
+    h_solution_vec[0](0, 1) = 1.0;
+    h_solution_vec[0](0, 2) = 2.0;
+    h_solution_vec[0](0, 3) = 3.0;
+    h_solution_vec[0](1, 0) = 4.0;
+    h_solution_vec[0](1, 1) = 5.0;
+    h_solution_vec[0](1, 2) = 6.0;
+    h_solution_vec[0](1, 3) = 7.0;
 
-    (*h_solution)(0, 0) = 0.0;
-    (*h_solution)(0, 1) = 1.0;
-    (*h_solution)(0, 2) = 2.0;
-    (*h_solution)(0, 3) = 3.0;
-    (*h_solution)(1, 0) = 4.0;
-    (*h_solution)(1, 1) = 5.0;
-    (*h_solution)(1, 2) = 6.0;
-    (*h_solution)(1, 3) = 7.0;
+    for (u_int8_t i = 0; i < fe.get_n_rhs_vectors(); i++){
+        Kokkos::deep_copy(solution_vec[i], h_solution_vec[i]);
+    }
 
-    Kokkos::deep_copy(*solution, *h_solution);
+    fe.take_step(0.1, solution_vec, face_solution, rhs_vec, &rhs_func);
 
-    fe.take_step(0.1, solution_pointers, &face_solution, rhs_pointers, &rhs_func);
+    for (u_int8_t i = 0; i < fe.get_n_rhs_vectors(); i++){
+        Kokkos::deep_copy(h_solution[i], solution_vec[i]);
+    }
 
-    Kokkos::deep_copy(*h_solution, *solution);
-
-    EXPECT_RTYPE_EQ((*h_solution)(0, 0), 0.0);
-    EXPECT_RTYPE_EQ((*h_solution)(0, 1), 1.1);
-    EXPECT_RTYPE_EQ((*h_solution)(0, 2), 2.2);
-    EXPECT_RTYPE_EQ((*h_solution)(0, 3), 3.3);
-    EXPECT_RTYPE_EQ((*h_solution)(1, 0), 4.4);
-    EXPECT_RTYPE_EQ((*h_solution)(1, 1), 5.5);
-    EXPECT_RTYPE_EQ((*h_solution)(1, 2), 6.6);
-    EXPECT_RTYPE_EQ((*h_solution)(1, 3), 7.7);
+    EXPECT_RTYPE_EQ(h_solution_vec[0](0, 0), 0.0);
+    EXPECT_RTYPE_EQ(h_solution_vec[0](0, 1), 1.1);
+    EXPECT_RTYPE_EQ(h_solution_vec[0](0, 2), 2.2);
+    EXPECT_RTYPE_EQ(h_solution_vec[0](0, 3), 3.3);
+    EXPECT_RTYPE_EQ(h_solution_vec[0](1, 0), 4.4);
+    EXPECT_RTYPE_EQ(h_solution_vec[0](1, 1), 5.5);
+    EXPECT_RTYPE_EQ(h_solution_vec[0](1, 2), 6.6);
+    EXPECT_RTYPE_EQ(h_solution_vec[0](1, 3), 7.7);
 }
 
 TEST(TimeIntegratorTest, RK4) {
@@ -101,9 +93,9 @@ TEST(TimeIntegratorTest, RK4) {
         rhs_pointers.push_back(new Kokkos::View<rtype *[N_CONSERVATIVE]>("rhs", 2));
     }
     solution = solution_pointers[0];
-    std::function<void(Kokkos::View<rtype  *[N_CONSERVATIVE]> * solution,
+    std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
                        Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                       Kokkos::View<rtype  *[N_CONSERVATIVE]> * rhs)> rhs_func = calc_rhs_test;
+                       Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs)> rhs_func = calc_rhs_test;
 
     (*solution)(0, 0) = 0.0;
     (*solution)(0, 1) = 1.0;
@@ -141,9 +133,9 @@ TEST(TimeIntegratorTest, SSPRK3) {
         rhs_pointers.push_back(new Kokkos::View<rtype *[N_CONSERVATIVE]>("rhs", 2));
     }
     solution = solution_pointers[0];
-    std::function<void(Kokkos::View<rtype  *[N_CONSERVATIVE]> * solution,
+    std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> * solution,
                        Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_solution,
-                       Kokkos::View<rtype  *[N_CONSERVATIVE]> * rhs)> rhs_func = calc_rhs_test;
+                       Kokkos::View<rtype *[N_CONSERVATIVE]> * rhs)> rhs_func = calc_rhs_test;
 
     (*solution)(0, 0) = 0.0;
     (*solution)(0, 1) = 1.0;
