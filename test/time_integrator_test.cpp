@@ -33,6 +33,7 @@ TEST(TimeIntegratorTest, FE) {
     Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution;
     Kokkos::View<rtype *[2][N_CONSERVATIVE]>::HostMirror h_face_solution;
     std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> rhs_vec;
+    std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]::HostMirror> h_rhs_vec;
 
     for (u_int8_t i = 0; i < integrator.get_n_solution_vectors(); i++) {
         Kokkos::View<rtype *[N_CONSERVATIVE]> solution("solution", 2);
@@ -43,6 +44,7 @@ TEST(TimeIntegratorTest, FE) {
     for (u_int8_t i = 0; i < integrator.get_n_rhs_vectors(); i++) {
         Kokkos::View<rtype *[N_CONSERVATIVE]> rhs("rhs", 2);
         rhs_vec.push_back(rhs);
+        h_rhs_vec.push_back(Kokkos::create_mirror_view(rhs));
     }
 
     std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
@@ -65,8 +67,18 @@ TEST(TimeIntegratorTest, FE) {
     integrator.take_step(0.1, solution_vec, face_solution, rhs_vec, &rhs_func);
 
     for (u_int8_t i = 0; i < integrator.get_n_rhs_vectors(); i++){
+        Kokkos::deep_copy(h_rhs_vec[i], rhs_vec[i]);
         Kokkos::deep_copy(h_solution_vec[i], solution_vec[i]);
     }
+
+    EXPECT_RTYPE_EQ(h_rhs_vec[0](0, 0), 0.0);
+    EXPECT_RTYPE_EQ(h_rhs_vec[0](0, 1), 1.0);
+    EXPECT_RTYPE_EQ(h_rhs_vec[0](0, 2), 2.0);
+    EXPECT_RTYPE_EQ(h_rhs_vec[0](0, 3), 3.0);
+    EXPECT_RTYPE_EQ(h_rhs_vec[0](1, 0), 4.0);
+    EXPECT_RTYPE_EQ(h_rhs_vec[0](1, 1), 5.0);
+    EXPECT_RTYPE_EQ(h_rhs_vec[0](1, 2), 6.0);
+    EXPECT_RTYPE_EQ(h_rhs_vec[0](1, 3), 7.0);
 
     EXPECT_RTYPE_EQ(h_solution_vec[0](0, 0), 0.0);
     EXPECT_RTYPE_EQ(h_solution_vec[0](0, 1), 1.1);
