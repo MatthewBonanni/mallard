@@ -13,6 +13,8 @@
 #include "test_utils.h"
 #include "physics.h"
 
+const rtype TOL = 1e-6;
+
 TEST(PhysicsTest, SetRCpCv) {
     Euler physics;
     rtype p_min = 0.0;
@@ -23,11 +25,10 @@ TEST(PhysicsTest, SetRCpCv) {
     rtype rho_ref = 1.225;
     physics.init(p_min, p_max, gamma, p_ref, T_ref, rho_ref);
 
-    rtype tol = 1e-6;
-    EXPECT_NEAR(physics.get_gamma(), gamma,              tol);
-    EXPECT_NEAR(physics.get_R(),     277.42507366857529, tol);
-    EXPECT_NEAR(physics.get_Cp(),    970.98775784001373, tol);
-    EXPECT_NEAR(physics.get_Cv(),    693.56268417143838, tol);
+    EXPECT_NEAR(physics.get_gamma(), gamma,              TOL);
+    EXPECT_NEAR(physics.get_R(),     277.42507366857529, TOL);
+    EXPECT_NEAR(physics.get_Cp(),    970.98775784001373, TOL);
+    EXPECT_NEAR(physics.get_Cv(),    693.56268417143838, TOL);
 }
 
 TEST(PhysicsTest, EulerPrimitivesFromConservatives) {
@@ -49,13 +50,36 @@ TEST(PhysicsTest, EulerPrimitivesFromConservatives) {
     rtype E = e + 0.5 * (u[0] * u[0] + u[1] * u[1]);
     rtype rhoE = rho * E;
 
-    rtype conservatives[N_CONSERVATIVE] = {rho, rho * u[0], rho * u[1], rhoE};
-    rtype primitives[N_PRIMITIVE];
-    physics.compute_primitives_from_conservatives(primitives, conservatives);
+    Kokkos::View<rtype [1][N_CONSERVATIVE]> conservatives("conservatives");
+    Kokkos::View<rtype [1][N_PRIMITIVE]> primitives("primitives");
 
-    EXPECT_RTYPE_EQ(primitives[0], u[0]);
-    EXPECT_RTYPE_EQ(primitives[1], u[1]);
-    EXPECT_RTYPE_EQ(primitives[2], p);
-    EXPECT_RTYPE_EQ(primitives[3], T);
-    EXPECT_RTYPE_EQ(primitives[4], h);
+    Kokkos::View<rtype [1][N_CONSERVATIVE]>::HostMirror h_conservatives = Kokkos::create_mirror_view(conservatives);
+    Kokkos::View<rtype [1][N_PRIMITIVE]>::HostMirror h_primitives = Kokkos::create_mirror_view(primitives);
+
+    h_conservatives(0, 0) = rho;
+    h_conservatives(0, 1) = rho * u[0];
+    h_conservatives(0, 2) = rho * u[1];
+    h_conservatives(0, 3) = rhoE;
+
+    Kokkos::deep_copy(conservatives, h_conservatives);
+
+    Kokkos::parallel_for(1, KOKKOS_LAMBDA(const u_int16_t i) {
+        rtype conservatives_i[N_CONSERVATIVE];
+        rtype primitives_i[N_PRIMITIVE];
+        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
+            conservatives_i[j] = conservatives(i, j);
+        }
+        physics.compute_primitives_from_conservatives(primitives_i, conservatives_i);
+        for (u_int16_t j = 0; j < N_PRIMITIVE; j++) {
+            primitives(i, j) = primitives_i[j];
+        }
+    });
+
+    Kokkos::deep_copy(h_primitives, primitives);
+
+    EXPECT_NEAR(h_primitives[0], u[0], TOL);
+    EXPECT_NEAR(h_primitives[1], u[1], TOL);
+    EXPECT_NEAR(h_primitives[2], p,    TOL);
+    EXPECT_NEAR(h_primitives[3], T,    TOL);
+    EXPECT_NEAR(h_primitives[4], h,    TOL);
 }

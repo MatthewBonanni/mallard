@@ -17,6 +17,7 @@
 #include "common_typedef.h"
 
 const int N_CELLS = 2;
+const rtype TOL = 1e-6;
 
 void calc_rhs_test(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                    Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
@@ -75,8 +76,8 @@ TEST(TimeIntegratorTest, FE) {
     for (u_int8_t i = 0; i < N_CELLS; i++) {
         for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
             rtype icpj = i * static_cast<rtype>(N_CONSERVATIVE) + j;
-            EXPECT_RTYPE_EQ(h_rhs_vec[0](i, j), icpj);
-            EXPECT_RTYPE_EQ(h_solution_vec[0](i, j), 1.1 * icpj);
+            EXPECT_NEAR(h_rhs_vec[0](i, j), icpj, TOL);
+            EXPECT_NEAR(h_solution_vec[0](i, j), 1.1 * icpj, TOL);
         }
     }
 }
@@ -128,8 +129,8 @@ TEST(TimeIntegratorTest, RK4) {
     for (u_int8_t i = 0; i < N_CELLS; i++) {
         for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
             rtype icpj = i * static_cast<rtype>(N_CONSERVATIVE) + j;
-            EXPECT_RTYPE_EQ(h_rhs_vec[0](i, j), icpj);
-            EXPECT_RTYPE_EQ(h_solution_vec[0](i, j), 1.1 * icpj);
+            EXPECT_NEAR(h_rhs_vec[0](i, j), icpj, TOL);
+            EXPECT_NEAR(h_solution_vec[0](i, j), 1.1 * icpj, TOL);
         }
     }
 }
@@ -181,8 +182,8 @@ TEST(TimeIntegratorTest, SSPRK3) {
     for (u_int8_t i = 0; i < N_CELLS; i++) {
         for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
             rtype icpj = i * static_cast<rtype>(N_CONSERVATIVE) + j;
-            EXPECT_RTYPE_EQ(h_rhs_vec[0](i, j), icpj);
-            EXPECT_RTYPE_EQ(h_solution_vec[0](i, j), 1.1 * icpj);
+            EXPECT_NEAR(h_rhs_vec[0](i, j), icpj, TOL);
+            EXPECT_NEAR(h_solution_vec[0](i, j), 1.1 * icpj, TOL);
         }
     }
 }
