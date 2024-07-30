@@ -31,6 +31,35 @@ TEST(PhysicsTest, SetRCpCv) {
     EXPECT_NEAR(physics.get_Cv(),    693.56268417143838, TOL);
 }
 
+template <typename T_physics>
+struct ConversionFunctor {
+    public:
+        ConversionFunctor(Kokkos::View<rtype [1][N_CONSERVATIVE]> conservatives,
+                          Kokkos::View<rtype [1][N_PRIMITIVE]> primitives,
+                          T_physics physics) : 
+                            conservatives(conservatives),
+                            primitives(primitives),
+                            physics(physics) {}
+
+        KOKKOS_INLINE_FUNCTION
+        void operator()(const u_int32_t i) const {
+            rtype conservatives_i[N_CONSERVATIVE];
+            rtype primitives_i[N_PRIMITIVE];
+            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
+                conservatives_i[j] = conservatives(i, j);
+            }
+            physics.compute_primitives_from_conservatives(primitives_i, conservatives_i);
+            for (u_int16_t j = 0; j < N_PRIMITIVE; j++) {
+                primitives(i, j) = primitives_i[j];
+            }
+        }
+
+    private:
+        Kokkos::View<rtype [1][N_CONSERVATIVE]> conservatives;
+        Kokkos::View<rtype [1][N_PRIMITIVE]> primitives;
+        const T_physics physics;
+};
+
 TEST(PhysicsTest, EulerPrimitivesFromConservatives) {
     Euler physics;
     rtype p_min = 0.0;
@@ -63,23 +92,14 @@ TEST(PhysicsTest, EulerPrimitivesFromConservatives) {
 
     Kokkos::deep_copy(conservatives, h_conservatives);
 
-    Kokkos::parallel_for(1, KOKKOS_LAMBDA(const u_int16_t i) {
-        rtype conservatives_i[N_CONSERVATIVE];
-        rtype primitives_i[N_PRIMITIVE];
-        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-            conservatives_i[j] = conservatives(i, j);
-        }
-        physics.compute_primitives_from_conservatives(primitives_i, conservatives_i);
-        for (u_int16_t j = 0; j < N_PRIMITIVE; j++) {
-            primitives(i, j) = primitives_i[j];
-        }
-    });
+    ConversionFunctor<Euler> conversion_functor(conservatives, primitives, physics);
+    Kokkos::parallel_for(1, conversion_functor);
 
     Kokkos::deep_copy(h_primitives, primitives);
 
-    EXPECT_NEAR(h_primitives[0], u[0], TOL);
-    EXPECT_NEAR(h_primitives[1], u[1], TOL);
-    EXPECT_NEAR(h_primitives[2], p,    TOL);
-    EXPECT_NEAR(h_primitives[3], T,    TOL);
-    EXPECT_NEAR(h_primitives[4], h,    TOL);
+    EXPECT_NEAR(h_primitives(0, 0), u[0], TOL);
+    EXPECT_NEAR(h_primitives(0, 1), u[1], TOL);
+    EXPECT_NEAR(h_primitives(0, 2), p,    TOL);
+    EXPECT_NEAR(h_primitives(0, 3), T,    TOL);
+    EXPECT_NEAR(h_primitives(0, 4), h,    TOL);
 }
