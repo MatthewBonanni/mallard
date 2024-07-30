@@ -200,28 +200,52 @@ class Euler : public Physics {
          * @return gamma
          */
         KOKKOS_INLINE_FUNCTION
-        rtype get_gamma() const override { return gamma; }
+        rtype get_gamma() const override { return gamma(); }
+
+        /**
+         * @brief Get gamma - host version
+         * @return gamma
+         */
+        rtype get_h_gamma() const { return h_gamma(); }
 
         /**
          * @brief Get R
          * @return R
          */
         KOKKOS_INLINE_FUNCTION
-        rtype get_R() const { return R; }
+        rtype get_R() const { return R(); }
+
+        /**
+         * @brief Get R - host version
+         * @return R
+         */
+        rtype get_h_R() const { return h_R(); }
 
         /**
          * @brief Get Cp
          * @return Cp
          */
         KOKKOS_INLINE_FUNCTION
-        rtype get_Cp() const { return cp; }
+        rtype get_Cp() const { return cp(); }
+
+        /**
+         * @brief Get Cp - host version
+         * @return Cp
+         */
+        rtype get_h_Cp() const { return h_cp(); }
 
         /**
          * @brief Get Cv
          * @return Cv
          */
         KOKKOS_INLINE_FUNCTION
-        rtype get_Cv() const { return cv; }
+        rtype get_Cv() const { return cv(); }
+
+        /**
+         * @brief Get Cv - host version
+         * @return Cv
+         */
+        rtype get_h_Cv() const { return h_cv(); }
 
         /**
          * @brief Get energy from temperature.
@@ -230,6 +254,15 @@ class Euler : public Physics {
          */
         KOKKOS_INLINE_FUNCTION
         rtype get_energy_from_temperature(const rtype & T) const override;
+
+        /**
+         * @brief Get energy from temperature - host version.
+         * @param T Temperature
+         * @return Energy
+         */
+        rtype h_get_energy_from_temperature(const rtype & T) const {
+            return h_cv() * T;
+        }
 
         /**
          * @brief Get temperature from energy.
@@ -248,6 +281,17 @@ class Euler : public Physics {
         KOKKOS_INLINE_FUNCTION
         rtype get_density_from_pressure_temperature(const rtype & p,
                                                     const rtype & T) const override;
+        
+        /**
+         * @brief Get density from pressure and temperature - host version.
+         * @param p Pressure
+         * @param T Temperature
+         * @return Density
+         */
+        rtype h_get_density_from_pressure_temperature(const rtype & p,
+                                                      const rtype & T) const {
+            return p / (T * h_R());
+        }
         
         /**
          * @brief Get temperature from density and pressure.
@@ -296,46 +340,68 @@ class Euler : public Physics {
         KOKKOS_INLINE_FUNCTION
         void compute_primitives_from_conservatives(rtype * primitives,
                                                    const rtype * conservatives) const override;
+        
+        /**
+         * @brief Copy data from host to device.
+         */
+        void copy_host_to_device() override;
+
+        /**
+         * @brief Copy data from device to host.
+         */
+        void copy_device_to_host() override;
     protected:
     private:
         void set_R_cp_cv();
 
-        rtype gamma;
-        rtype p_ref, T_ref, rho_ref;
-        rtype R, cp, cv;
+        Kokkos::View<rtype> gamma;
+        Kokkos::View<rtype> p_ref;
+        Kokkos::View<rtype> T_ref;
+        Kokkos::View<rtype> rho_ref;
+        Kokkos::View<rtype> R;
+        Kokkos::View<rtype> cp;
+        Kokkos::View<rtype> cv;
+
+        Kokkos::View<rtype>::HostMirror h_gamma;
+        Kokkos::View<rtype>::HostMirror h_p_ref;
+        Kokkos::View<rtype>::HostMirror h_T_ref;
+        Kokkos::View<rtype>::HostMirror h_rho_ref;
+        Kokkos::View<rtype>::HostMirror h_R;
+        Kokkos::View<rtype>::HostMirror h_cp;
+        Kokkos::View<rtype>::HostMirror h_cv;
 };
 
 rtype Euler::get_energy_from_temperature(const rtype & T) const {
-    return cv * T;
+    return cv() * T;
 }
 
 rtype Euler::get_temperature_from_energy(const rtype & e) const {
-    return e / cv;
+    return e / cv();
 }
 
 rtype Euler::get_density_from_pressure_temperature(const rtype & p,
                                                    const rtype & T) const {
-    return p / (T * R);
+    return p / (T * R());
 }
 
 rtype Euler::get_temperature_from_density_pressure(const rtype & rho,
                                                    const rtype & p) const {
-    return p / (rho * R);
+    return p / (rho * R());
 }
 
 rtype Euler::get_pressure_from_density_temperature(const rtype & rho,
                                                    const rtype & T) const {
-    return rho * R * T;
+    return rho * R() * T;
 }
 
 rtype Euler::get_pressure_from_density_energy(const rtype & rho,
                                               const rtype & e) const {
-    return Kokkos::fmax(p_bounds(0), Kokkos::fmin(p_bounds(1), (gamma - 1.0) * rho * e));
+    return Kokkos::fmax(p_bounds(0), Kokkos::fmin(p_bounds(1), (gamma() - 1.0) * rho * e));
 }
 
 rtype Euler::get_sound_speed_from_pressure_density(const rtype & p,
                                                    const rtype & rho) const {
-    return Kokkos::sqrt(gamma * p / rho);
+    return Kokkos::sqrt(gamma() * p / rho);
 }
 
 void Euler::compute_primitives_from_conservatives(rtype * primitives,

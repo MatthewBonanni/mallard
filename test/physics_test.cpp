@@ -24,18 +24,19 @@ TEST(PhysicsTest, SetRCpCv) {
     rtype T_ref = 298.15;
     rtype rho_ref = 1.225;
     physics.init(p_min, p_max, gamma, p_ref, T_ref, rho_ref);
+    physics.copy_host_to_device();
 
-    EXPECT_NEAR(physics.get_gamma(), gamma,              TOL);
-    EXPECT_NEAR(physics.get_R(),     277.42507366857529, TOL);
-    EXPECT_NEAR(physics.get_Cp(),    970.98775784001373, TOL);
-    EXPECT_NEAR(physics.get_Cv(),    693.56268417143838, TOL);
+    EXPECT_NEAR(physics.get_h_gamma(), gamma,              TOL);
+    EXPECT_NEAR(physics.get_h_R(),     277.42507366857529, TOL);
+    EXPECT_NEAR(physics.get_h_Cp(),    970.98775784001373, TOL);
+    EXPECT_NEAR(physics.get_h_Cv(),    693.56268417143838, TOL);
 }
 
 template <typename T_physics>
 struct ConversionFunctor {
     public:
-        ConversionFunctor(Kokkos::View<rtype [1][N_CONSERVATIVE]> conservatives,
-                          Kokkos::View<rtype [1][N_PRIMITIVE]> primitives,
+        ConversionFunctor(Kokkos::View<rtype *[N_CONSERVATIVE]> conservatives,
+                          Kokkos::View<rtype *[N_PRIMITIVE]> primitives,
                           T_physics physics) : 
                             conservatives(conservatives),
                             primitives(primitives),
@@ -55,8 +56,8 @@ struct ConversionFunctor {
         }
 
     private:
-        Kokkos::View<rtype [1][N_CONSERVATIVE]> conservatives;
-        Kokkos::View<rtype [1][N_PRIMITIVE]> primitives;
+        Kokkos::View<rtype *[N_CONSERVATIVE]> conservatives;
+        Kokkos::View<rtype *[N_PRIMITIVE]> primitives;
         const T_physics physics;
 };
 
@@ -69,12 +70,13 @@ TEST(PhysicsTest, EulerPrimitivesFromConservatives) {
     rtype T_ref = 298.15;
     rtype rho_ref = 1.225;
     physics.init(p_min, p_max, gamma, p_ref, T_ref, rho_ref);
+    physics.copy_host_to_device();
 
     NVector u = {10.0, 5.0};
     rtype p = 101325.0;
     rtype T = 298.15;
-    rtype rho = physics.get_density_from_pressure_temperature(p, T);
-    rtype e = physics.get_energy_from_temperature(T);
+    rtype rho = physics.h_get_density_from_pressure_temperature(p, T);
+    rtype e = physics.h_get_energy_from_temperature(T);
     rtype h = e + p / rho;
     rtype E = e + 0.5 * (u[0] * u[0] + u[1] * u[1]);
     rtype rhoE = rho * E;
