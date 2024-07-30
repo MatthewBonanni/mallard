@@ -47,21 +47,8 @@ void Physics::copy_device_to_host() {
 Euler::Euler() {
     type = PhysicsType::EULER;
 
-    gamma = Kokkos::View<rtype>("gamma");
-    p_ref = Kokkos::View<rtype>("p_ref");
-    T_ref = Kokkos::View<rtype>("T_ref");
-    rho_ref = Kokkos::View<rtype>("rho_ref");
-    R = Kokkos::View<rtype>("R");
-    cp = Kokkos::View<rtype>("cp");
-    cv = Kokkos::View<rtype>("cv");
-
-    h_gamma = Kokkos::create_mirror_view(gamma);
-    h_p_ref = Kokkos::create_mirror_view(p_ref);
-    h_T_ref = Kokkos::create_mirror_view(T_ref);
-    h_rho_ref = Kokkos::create_mirror_view(rho_ref);
-    h_R = Kokkos::create_mirror_view(R);
-    h_cp = Kokkos::create_mirror_view(cp);
-    h_cv = Kokkos::create_mirror_view(cv);
+    constants = Kokkos::View<rtype [7]>("constants");
+    h_constants = Kokkos::create_mirror_view(constants);
 }
 
 Euler::~Euler() {
@@ -86,10 +73,10 @@ void Euler::init(const toml::value & input) {
         throw std::runtime_error("Missing rho_ref for physics: " + PHYSICS_NAMES.at(type) + ".");
     }
 
-    h_gamma() = toml::find<rtype>(input, "physics", "gamma");
-    h_p_ref() = toml::find<rtype>(input, "physics", "p_ref");
-    h_T_ref() = toml::find<rtype>(input, "physics", "T_ref");
-    h_rho_ref() = toml::find<rtype>(input, "physics", "rho_ref");
+    h_constants(i_gamma) = toml::find<rtype>(input, "physics", "gamma");
+    h_constants(i_p_ref) = toml::find<rtype>(input, "physics", "p_ref");
+    h_constants(i_T_ref) = toml::find<rtype>(input, "physics", "T_ref");
+    h_constants(i_rho_ref) = toml::find<rtype>(input, "physics", "rho_ref");
 
     set_R_cp_cv();
 
@@ -102,49 +89,37 @@ void Euler::init(rtype p_min, rtype p_max, rtype gamma,
                  rtype p_ref, rtype T_ref, rtype rho_ref) {
     h_p_bounds(0) = p_min;
     h_p_bounds(1) = p_max;
-    h_gamma() = gamma;
-    h_p_ref() = p_ref;
-    h_T_ref() = T_ref;
-    h_rho_ref() = rho_ref;
+    h_constants(i_gamma) = gamma;
+    h_constants(i_p_ref) = p_ref;
+    h_constants(i_T_ref) = T_ref;
+    h_constants(i_rho_ref) = rho_ref;
 
     set_R_cp_cv();
 }
 
 void Euler::set_R_cp_cv() {
-    h_R() = h_p_ref() / (h_T_ref() * h_rho_ref());
-    h_cp() = h_R() * h_gamma() / (h_gamma() - 1.0);
-    h_cv() = h_cp() / h_gamma();
+    h_constants(i_R) = h_constants(i_p_ref) / (h_constants(i_T_ref) * h_constants(i_rho_ref));
+    h_constants(i_cp) = h_constants(i_R) * h_constants(i_gamma) / (h_constants(i_gamma) - 1.0);
+    h_constants(i_cv) = h_constants(i_cp) / h_constants(i_gamma);
 }
 
 void Euler::print() const {
     Physics::print();
-    std::cout << "> gamma: " << h_gamma() << std::endl;
-    std::cout << "> p_ref: " << h_p_ref() << std::endl;
-    std::cout << "> T_ref: " << h_T_ref() << std::endl;
-    std::cout << "> rho_ref: " << h_rho_ref() << std::endl;
+    std::cout << "> gamma: " << h_constants(i_gamma) << std::endl;
+    std::cout << "> p_ref: " << h_constants(i_p_ref) << std::endl;
+    std::cout << "> T_ref: " << h_constants(i_T_ref) << std::endl;
+    std::cout << "> rho_ref: " << h_constants(i_rho_ref) << std::endl;
     std::cout << LOG_SEPARATOR << std::endl;
 }
 
 void Euler::copy_host_to_device() {
     Physics::copy_host_to_device();
 
-    Kokkos::deep_copy(gamma, h_gamma);
-    Kokkos::deep_copy(p_ref, h_p_ref);
-    Kokkos::deep_copy(T_ref, h_T_ref);
-    Kokkos::deep_copy(rho_ref, h_rho_ref);
-    Kokkos::deep_copy(R, h_R);
-    Kokkos::deep_copy(cp, h_cp);
-    Kokkos::deep_copy(cv, h_cv);
+    Kokkos::deep_copy(constants, h_constants);
 }
 
 void Euler::copy_device_to_host() {
     Physics::copy_device_to_host();
 
-    Kokkos::deep_copy(h_gamma, gamma);
-    Kokkos::deep_copy(h_p_ref, p_ref);
-    Kokkos::deep_copy(h_T_ref, T_ref);
-    Kokkos::deep_copy(h_rho_ref, rho_ref);
-    Kokkos::deep_copy(h_R, R);
-    Kokkos::deep_copy(h_cp, cp);
-    Kokkos::deep_copy(h_cv, cv);
+    Kokkos::deep_copy(h_constants, constants);
 }

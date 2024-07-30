@@ -81,21 +81,25 @@ TEST(PhysicsTest, EulerPrimitivesFromConservatives) {
     rtype E = e + 0.5 * (u[0] * u[0] + u[1] * u[1]);
     rtype rhoE = rho * E;
 
-    Kokkos::View<rtype [1][N_CONSERVATIVE]> conservatives("conservatives");
-    Kokkos::View<rtype [1][N_PRIMITIVE]> primitives("primitives");
+    Kokkos::View<rtype [2][N_CONSERVATIVE]> conservatives("conservatives");
+    Kokkos::View<rtype [2][N_PRIMITIVE]> primitives("primitives");
 
-    Kokkos::View<rtype [1][N_CONSERVATIVE]>::HostMirror h_conservatives = Kokkos::create_mirror_view(conservatives);
-    Kokkos::View<rtype [1][N_PRIMITIVE]>::HostMirror h_primitives = Kokkos::create_mirror_view(primitives);
+    Kokkos::View<rtype [2][N_CONSERVATIVE]>::HostMirror h_conservatives = Kokkos::create_mirror_view(conservatives);
+    Kokkos::View<rtype [2][N_PRIMITIVE]>::HostMirror h_primitives = Kokkos::create_mirror_view(primitives);
 
     h_conservatives(0, 0) = rho;
     h_conservatives(0, 1) = rho * u[0];
     h_conservatives(0, 2) = rho * u[1];
     h_conservatives(0, 3) = rhoE;
+    h_conservatives(1, 0) = rho;
+    h_conservatives(1, 1) = rho * u[0];
+    h_conservatives(1, 2) = rho * u[1];
+    h_conservatives(1, 3) = rhoE;
 
     Kokkos::deep_copy(conservatives, h_conservatives);
 
     ConversionFunctor<Euler> conversion_functor(conservatives, primitives, physics);
-    Kokkos::parallel_for(1, conversion_functor);
+    Kokkos::parallel_for(2, conversion_functor);
 
     Kokkos::deep_copy(h_primitives, primitives);
 
@@ -104,4 +108,9 @@ TEST(PhysicsTest, EulerPrimitivesFromConservatives) {
     EXPECT_NEAR(h_primitives(0, 2), p,    TOL);
     EXPECT_NEAR(h_primitives(0, 3), T,    TOL);
     EXPECT_NEAR(h_primitives(0, 4), h,    TOL);
+    EXPECT_NEAR(h_primitives(1, 0), u[0], TOL);
+    EXPECT_NEAR(h_primitives(1, 1), u[1], TOL);
+    EXPECT_NEAR(h_primitives(1, 2), p,    TOL);
+    EXPECT_NEAR(h_primitives(1, 3), T,    TOL);
+    EXPECT_NEAR(h_primitives(1, 4), h,    TOL);
 }

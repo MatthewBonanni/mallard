@@ -585,8 +585,8 @@ struct UpdatePrimitivesFunctor {
 void Solver::update_primitives() {
     if (physics->get_type() == PhysicsType::EULER) {
         UpdatePrimitivesFunctor<Euler> update_primitives_functor(dynamic_cast<Euler &>(*physics),
-                                                                                 conservatives,
-                                                                                 primitives);
+                                                                 conservatives,
+                                                                 primitives);
         Kokkos::parallel_for(mesh->n_cells(), update_primitives_functor);
     } else {
         // Should never get here due to the enum class.
