@@ -72,7 +72,7 @@ class Boundary {
          * @brief Set the physics.
          * @param physics Pointer to the physics.
          */
-        void set_physics(std::shared_ptr<Physics> physics);
+        void set_physics(std::shared_ptr<void> physics);
 
         /**
          * @brief Set the Riemann solver.
@@ -113,7 +113,7 @@ class Boundary {
         FaceZone * zone;
         std::shared_ptr<Mesh> mesh;
         BoundaryType type;
-        std::shared_ptr<Physics> physics;
+        std::shared_ptr<void> physics;
         std::shared_ptr<RiemannSolver> riemann_solver;
     private:
 };

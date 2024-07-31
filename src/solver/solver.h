@@ -256,7 +256,7 @@ class Solver {
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         std::shared_ptr<RiemannSolver> riemann_solver;
         std::unique_ptr<TimeIntegrator> time_integrator;
-        std::shared_ptr<Physics> physics;
+        std::shared_ptr<void> physics;
 
         // Data views
         std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> solution_vec;

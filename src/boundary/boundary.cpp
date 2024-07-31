@@ -32,7 +32,7 @@ void Boundary::set_mesh(std::shared_ptr<Mesh> mesh) {
     this->mesh = mesh;
 }
 
-void Boundary::set_physics(std::shared_ptr<Physics> physics) {
+void Boundary::set_physics(std::shared_ptr<void> physics) {
     this->physics = physics;
 }
 
