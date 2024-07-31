@@ -99,7 +99,7 @@ void Solver::init_physics() {
     }
 
     if (type == PhysicsType::EULER) {
-        physics = std::make_shared<Euler>();
+        physics = std::make_shared<PhysicsWrapper>(Euler());
     } else {
         // Should never get here due to the enum class.
         throw std::runtime_error("Unknown physics type: " + physics_str + ".");

@@ -14,8 +14,6 @@
 
 #include <unordered_map>
 #include <string>
-#include <concepts>
-#include <type_traits>
 
 #include <Kokkos_Core.hpp>
 #include <toml.hpp>
@@ -34,33 +32,45 @@ static const std::unordered_map<PhysicsType, std::string> PHYSICS_NAMES = {
     {PhysicsType::EULER, "euler"}
 };
 
-template<typename T>
-concept PhysicsConcept = requires(T t, const T ct, rtype r) {
-    { ct.get_type() } -> std::convertible_to<PhysicsType>;
-    { ct.get_gamma() } -> std::convertible_to<rtype>;
-    { ct.get_energy_from_temperature(r) } -> std::convertible_to<rtype>;
-    { ct.get_temperature_from_energy(r) } -> std::convertible_to<rtype>;
-    { ct.get_density_from_pressure_temperature(r, r) } -> std::convertible_to<rtype>;
-    { ct.get_temperature_from_density_pressure(r, r) } -> std::convertible_to<rtype>;
-    { ct.get_pressure_from_density_temperature(r, r) } -> std::convertible_to<rtype>;
-    { ct.get_pressure_from_density_energy(r, r) } -> std::convertible_to<rtype>;
-    { ct.get_sound_speed_from_pressure_density(r, r) } -> std::convertible_to<rtype>;
-    { ct.compute_primitives_from_conservatives(std::declval<rtype*>(), std::declval<const rtype*>()) };
+// Common non-template base class
+class PhysicsBase {
+public:
+    virtual ~PhysicsBase() = default;
+    virtual void init(const toml::value & input) = 0;
+    virtual void print() const = 0;
+    virtual PhysicsType get_type() const = 0;
+    virtual rtype get_gamma() const = 0;
+    virtual rtype get_energy_from_temperature(const rtype & T) const = 0;
+    virtual rtype get_temperature_from_energy(const rtype & e) const = 0;
+    virtual rtype get_density_from_pressure_temperature(const rtype & p,
+                                                        const rtype & T) const = 0;
+    virtual rtype get_temperature_from_density_pressure(const rtype & rho,
+                                                        const rtype & p) const = 0;
+    virtual rtype get_pressure_from_density_temperature(const rtype & rho,
+                                                        const rtype & T) const = 0;
+    virtual rtype get_pressure_from_density_energy(const rtype & rho,
+                                                   const rtype & e) const = 0;
+    virtual rtype get_sound_speed_from_pressure_density(const rtype & p,
+                                                        const rtype & rho) const = 0;
+    virtual void compute_primitives_from_conservatives(rtype * primitives,
+                                                       const rtype * conservatives) const = 0;
+    virtual void copy_host_to_device() = 0;
+    virtual void copy_device_to_host() = 0;
 };
 
-// Base class template for Physics (optional, for common functionality)
+// CRTP base class
 template<typename Derived>
-class PhysicsBase {
+class Physics {
     public:
         /**
          * @brief Construct a new Physics Base object.
          */
-        PhysicsBase() {}
+        Physics() {}
 
         /**
          * @brief Destroy the Physics Base object.
          */
-        virtual ~PhysicsBase() {}
+        virtual ~Physics() {}
 
         /**
          * @brief Initialize the physics.
@@ -194,7 +204,8 @@ class PhysicsBase {
     private:
 };
 
-class Euler : public PhysicsBase<Euler> {
+// Euler physics class
+class Euler : public Physics<Euler> {
     public:
         /**
          * @brief Construct a new Euler object.
@@ -249,12 +260,28 @@ class Euler : public PhysicsBase<Euler> {
         }
 
         /**
+         * @brief Get gamma - host version.
+         * @return Gamma
+         */
+        rtype get_h_gamma() const {
+            return h_constants(i_gamma);
+        }
+
+        /**
          * @brief Get R.
          * @return R
          */
         KOKKOS_INLINE_FUNCTION
         rtype get_R() const {
             return constants(i_R);
+        }
+
+        /**
+         * @brief Get R - host version.
+         * @return R
+         */
+        rtype get_h_R() const {
+            return h_constants(i_R);
         }
 
         /**
@@ -267,12 +294,28 @@ class Euler : public PhysicsBase<Euler> {
         }
 
         /**
+         * @brief Get Cp - host version.
+         * @return Cp
+         */
+        rtype get_h_Cp() const {
+            return h_constants(i_cp);
+        }
+
+        /**
          * @brief Get Cv.
          * @return Cv
          */
         KOKKOS_INLINE_FUNCTION
         rtype get_Cv() const {
             return constants(i_cv);
+        }
+
+        /**
+         * @brief Get Cv - host version.
+         * @return Cv
+         */
+        rtype get_h_Cv() const {
+            return h_constants(i_cv);
         }
 
         /**
@@ -394,6 +437,149 @@ class Euler : public PhysicsBase<Euler> {
         u_int8_t i_p_max = 8;
 };
 
+// Type-erased wrapper
+class PhysicsWrapper : public PhysicsBase {
+private:
+    struct Concept {
+        virtual ~Concept() = default;
+        virtual void init(const toml::value & input) = 0;
+        virtual void print() const = 0;
+        virtual PhysicsType get_type() const = 0;
+        virtual rtype get_gamma() const = 0;
+        virtual rtype get_energy_from_temperature(const rtype & T) const = 0;
+        virtual rtype get_temperature_from_energy(const rtype & e) const = 0;
+        virtual rtype get_density_from_pressure_temperature(const rtype & p,
+                                                            const rtype & T) const = 0;
+        virtual rtype get_temperature_from_density_pressure(const rtype & rho,
+                                                            const rtype & p) const = 0;
+        virtual rtype get_pressure_from_density_temperature(const rtype & rho,
+                                                            const rtype & T) const = 0;
+        virtual rtype get_pressure_from_density_energy(const rtype & rho,
+                                                       const rtype & e) const = 0;
+        virtual rtype get_sound_speed_from_pressure_density(const rtype & p,
+                                                            const rtype & rho) const = 0;
+        virtual void compute_primitives_from_conservatives(rtype * primitives,
+                                                           const rtype * conservatives) const = 0;
+        virtual void copy_host_to_device() = 0;
+        virtual void copy_device_to_host() = 0;
+    };
+
+    template<typename T_physics>
+    struct Model : Concept {
+        T_physics physics;
+        Model(T_physics p) : physics(std::move(p)) {}
+        void init(const toml::value & input) override {
+            physics.init(input);
+        }
+        void print() const override {
+            physics.print();
+        }
+        PhysicsType get_type() const override {
+            return physics.get_type();
+        }
+        rtype get_gamma() const override {
+            return physics.get_gamma();
+        }
+        rtype get_energy_from_temperature(const rtype & T) const override {
+            return physics.get_energy_from_temperature(T);
+        }
+        rtype get_temperature_from_energy(const rtype & e) const override {
+            return physics.get_temperature_from_energy(e);
+        }
+        rtype get_density_from_pressure_temperature(const rtype & p,
+                                                    const rtype & T) const override {
+            return physics.get_density_from_pressure_temperature(p, T);
+        }
+        rtype get_temperature_from_density_pressure(const rtype & rho,
+                                                    const rtype & p) const override {
+            return physics.get_temperature_from_density_pressure(rho, p);
+        }
+        rtype get_pressure_from_density_temperature(const rtype & rho,
+                                                    const rtype & T) const override {
+            return physics.get_pressure_from_density_temperature(rho, T);
+        }
+        rtype get_pressure_from_density_energy(const rtype & rho,
+                                               const rtype & e) const override {
+            return physics.get_pressure_from_density_energy(rho, e);
+        }
+        rtype get_sound_speed_from_pressure_density(const rtype & p,
+                                                    const rtype & rho) const override {
+            return physics.get_sound_speed_from_pressure_density(p, rho);
+        }
+        void compute_primitives_from_conservatives(rtype * primitives,
+                                                   const rtype * conservatives) const override {
+            physics.compute_primitives_from_conservatives(primitives, conservatives);
+        }
+        void copy_host_to_device() override {
+            physics.copy_host_to_device();
+        }
+        void copy_device_to_host() override {
+            physics.copy_device_to_host();
+        }
+    };
+
+    std::unique_ptr<Concept> pimpl;
+
+public:
+    template<typename T>
+    PhysicsWrapper(T physics) : pimpl(std::make_unique<Model<T>>(std::move(physics))) {}
+
+    void init(const toml::value & input) override {
+        pimpl->init(input);
+    }
+    void print() const override {
+        pimpl->print();
+    }
+    PhysicsType get_type() const override {
+        return pimpl->get_type();
+    }
+    rtype get_gamma() const override {
+        return pimpl->get_gamma();
+    }
+    rtype get_energy_from_temperature(const rtype & T) const override {
+        return pimpl->get_energy_from_temperature(T);
+    }
+    rtype get_temperature_from_energy(const rtype & e) const override {
+        return pimpl->get_temperature_from_energy(e);
+    }
+    rtype get_density_from_pressure_temperature(const rtype & p,
+                                                const rtype & T) const override {
+        return pimpl->get_density_from_pressure_temperature(p, T);
+    }
+    rtype get_temperature_from_density_pressure(const rtype & rho,
+                                                const rtype & p) const override {
+        return pimpl->get_temperature_from_density_pressure(rho, p);
+    }
+    rtype get_pressure_from_density_temperature(const rtype & rho,
+                                                const rtype & T) const override {
+        return pimpl->get_pressure_from_density_temperature(rho, T);
+    }
+    rtype get_pressure_from_density_energy(const rtype & rho,
+                                           const rtype & e) const override {
+        return pimpl->get_pressure_from_density_energy(rho, e);
+    }
+    rtype get_sound_speed_from_pressure_density(const rtype & p,
+                                                const rtype & rho) const override {
+        return pimpl->get_sound_speed_from_pressure_density(p, rho);
+    }
+    void compute_primitives_from_conservatives(rtype * primitives,
+                                               const rtype * conservatives) const override {
+        pimpl->compute_primitives_from_conservatives(primitives, conservatives);
+    }
+    void copy_host_to_device() override {
+        pimpl->copy_host_to_device();
+    }
+    void copy_device_to_host() override {
+        pimpl->copy_device_to_host();
+    }
+
+    template<typename T>
+    T* get_as() {
+        auto model = dynamic_cast<Model<T>*>(pimpl.get());
+        return model ? &model->physics : nullptr;
+    }
+};
+
 rtype Euler::get_energy_from_temperature_impl(const rtype & T) const {
     return get_Cv() * T;
 }
@@ -404,7 +590,7 @@ rtype Euler::get_temperature_from_energy_impl(const rtype & e) const {
 
 rtype Euler::get_density_from_pressure_temperature_impl(const rtype & p,
                                                         const rtype & T) const {
-    return p / (T * get_R());
+    return p / (get_R() * T);
 }
 
 rtype Euler::get_temperature_from_density_pressure_impl(const rtype & rho,
@@ -419,7 +605,7 @@ rtype Euler::get_pressure_from_density_temperature_impl(const rtype & rho,
 
 rtype Euler::get_pressure_from_density_energy_impl(const rtype & rho,
                                                    const rtype & e) const {
-    return Kokkos::fmax(get_p_max(), Kokkos::fmin(get_p_min(), (get_gamma() - 1.0) * rho * e));
+    return Kokkos::fmax(get_p_min(), Kokkos::fmin(get_p_max(), (get_gamma() - 1.0) * rho * e));
 }
 
 rtype Euler::get_sound_speed_from_pressure_density_impl(const rtype & p,

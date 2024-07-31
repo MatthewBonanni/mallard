@@ -75,8 +75,8 @@ TEST(PhysicsTest, EulerPrimitivesFromConservatives) {
     NVector u = {10.0, 5.0};
     rtype p = 101325.0;
     rtype T = 298.15;
-    rtype rho = physics.h_get_density_from_pressure_temperature(p, T);
-    rtype e = physics.h_get_energy_from_temperature(T);
+    rtype rho = p / (physics.get_h_R() * T);
+    rtype e = physics.get_h_Cv() * T;
     rtype h = e + p / rho;
     rtype E = e + 0.5 * (u[0] * u[0] + u[1] * u[1]);
     rtype rhoE = rho * E;
