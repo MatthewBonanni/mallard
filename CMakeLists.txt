@@ -11,7 +11,7 @@ endif()
 add_compile_options(-Wall -Wextra -Wpedantic)
 
 # Compile-time options
-option(${PROJECT_NAME}_USE_DOUBLES "Use double precision" OFF)
+option(${PROJECT_NAME}_USE_DOUBLES "Use double precision" ON)
 message(STATUS "Mallard: Double precision: ${${PROJECT_NAME}_USE_DOUBLES}")
 if (${PROJECT_NAME}_USE_DOUBLES)
     add_compile_definitions(${PROJECT_NAME}_USE_DOUBLES)
@@ -25,7 +25,7 @@ find_package(Kokkos REQUIRED)
 find_package(KokkosKernels REQUIRED)
 
 include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/exprtk")
-include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/toml11")
+include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/toml11/single_include")
 
 add_subdirectory(src)
 add_subdirectory(test)

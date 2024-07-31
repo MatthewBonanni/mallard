@@ -121,7 +121,7 @@ void BoundaryWallAdiabatic::apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_
                                         mesh->face_area,
                                         face_solution,
                                         rhs,
-                                        dynamic_cast<Euler &>(*physics));
+                                        *physics->get_as<Euler>());
         Kokkos::parallel_for(zone->n_faces(), flux_functor);
     }
 }

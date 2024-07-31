@@ -178,7 +178,7 @@ void BoundaryPOut::apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
                                                      face_solution,
                                                      data_bc,
                                                      rhs,
-                                                     dynamic_cast<Euler &>(*physics),
+                                                     *physics->get_as<Euler>(),
                                                      dynamic_cast<Rusanov &>(*riemann_solver));
             Kokkos::parallel_for(zone->n_faces(), flux_functor);
         } else if (riemann_solver->get_type() == RiemannSolverType::Roe) {
@@ -189,7 +189,7 @@ void BoundaryPOut::apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
                                                  face_solution,
                                                  data_bc,
                                                  rhs,
-                                                 dynamic_cast<Euler &>(*physics),
+                                                 *physics->get_as<Euler>(),
                                                  dynamic_cast<Roe &>(*riemann_solver));
             Kokkos::parallel_for(zone->n_faces(), flux_functor);
         } else if (riemann_solver->get_type() == RiemannSolverType::HLL) {
@@ -200,7 +200,7 @@ void BoundaryPOut::apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
                                                  face_solution,
                                                  data_bc,
                                                  rhs,
-                                                 dynamic_cast<Euler &>(*physics),
+                                                 *physics->get_as<Euler>(),
                                                  dynamic_cast<HLL &>(*riemann_solver));
             Kokkos::parallel_for(zone->n_faces(), flux_functor);
         } else if (riemann_solver->get_type() == RiemannSolverType::HLLC) {
@@ -211,7 +211,7 @@ void BoundaryPOut::apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
                                                   face_solution,
                                                   data_bc,
                                                   rhs,
-                                                  dynamic_cast<Euler &>(*physics),
+                                                  *physics->get_as<Euler>(),
                                                   dynamic_cast<HLLC &>(*riemann_solver));
             Kokkos::parallel_for(zone->n_faces(), flux_functor);
         } else {

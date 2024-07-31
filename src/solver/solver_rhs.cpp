@@ -169,7 +169,7 @@ void Solver::calc_rhs_interior(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_sol
                                                      face_solution,
                                                      rhs,
                                                      dynamic_cast<Rusanov &>(*riemann_solver),
-                                                     dynamic_cast<Euler &>(*physics));
+                                                     *physics->get_as<Euler>());
             Kokkos::parallel_for(mesh->n_faces(), flux_functor);
         } else if (riemann_solver->get_type() == RiemannSolverType::Roe) {
             FluxFunctor<Euler, Roe> flux_functor(mesh->face_normals,
@@ -178,7 +178,7 @@ void Solver::calc_rhs_interior(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_sol
                                                  face_solution,
                                                  rhs,
                                                  dynamic_cast<Roe &>(*riemann_solver),
-                                                 dynamic_cast<Euler &>(*physics));
+                                                 *physics->get_as<Euler>());
             Kokkos::parallel_for(mesh->n_faces(), flux_functor);
         } else if (riemann_solver->get_type() == RiemannSolverType::HLL) {
             FluxFunctor<Euler, HLL> flux_functor(mesh->face_normals,
@@ -187,7 +187,7 @@ void Solver::calc_rhs_interior(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_sol
                                                  face_solution,
                                                  rhs,
                                                  dynamic_cast<HLL &>(*riemann_solver),
-                                                 dynamic_cast<Euler &>(*physics));
+                                                 *physics->get_as<Euler>());
             Kokkos::parallel_for(mesh->n_faces(), flux_functor);
         } else if (riemann_solver->get_type() == RiemannSolverType::HLLC) {
             FluxFunctor<Euler, HLLC> flux_functor(mesh->face_normals,
@@ -196,7 +196,7 @@ void Solver::calc_rhs_interior(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_sol
                                                   face_solution,
                                                   rhs,
                                                   dynamic_cast<HLLC &>(*riemann_solver),
-                                                  dynamic_cast<Euler &>(*physics));
+                                                  *physics->get_as<Euler>());
             Kokkos::parallel_for(mesh->n_faces(), flux_functor);
         } else {
             // Should never get here due to the enum class.

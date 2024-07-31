@@ -584,7 +584,7 @@ struct UpdatePrimitivesFunctor {
 
 void Solver::update_primitives() {
     if (physics->get_type() == PhysicsType::EULER) {
-        UpdatePrimitivesFunctor<Euler> update_primitives_functor(dynamic_cast<Euler &>(*physics),
+        UpdatePrimitivesFunctor<Euler> update_primitives_functor(*physics->get_as<Euler>(),
                                                                  conservatives,
                                                                  primitives);
         Kokkos::parallel_for(mesh->n_cells(), update_primitives_functor);
@@ -739,7 +739,7 @@ rtype Solver::calc_spectral_radius() {
                                                              mesh->face_normals,
                                                              mesh->face_coords,
                                                              mesh->cell_coords,
-                                                             dynamic_cast<Euler &>(*physics),
+                                                             *physics->get_as<Euler>(),
                                                              conservatives,
                                                              primitives,
                                                              cfl_local);
