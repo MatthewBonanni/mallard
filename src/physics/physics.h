@@ -32,9 +32,33 @@ static const std::unordered_map<PhysicsType, std::string> PHYSICS_NAMES = {
     {PhysicsType::EULER, "euler"}
 };
 
-// Physics base class
-// Uses the Curiously Recurring Template Pattern (CRTP)
-// for compile-time polymorphism
+// Common non-template base class
+class PhysicsBase {
+public:
+    virtual ~PhysicsBase() = default;
+    virtual void init(const toml::value & input) = 0;
+    virtual void print() const = 0;
+    virtual PhysicsType get_type() const = 0;
+    virtual rtype get_gamma() const = 0;
+    virtual rtype get_energy_from_temperature(const rtype & T) const = 0;
+    virtual rtype get_temperature_from_energy(const rtype & e) const = 0;
+    virtual rtype get_density_from_pressure_temperature(const rtype & p,
+                                                        const rtype & T) const = 0;
+    virtual rtype get_temperature_from_density_pressure(const rtype & rho,
+                                                        const rtype & p) const = 0;
+    virtual rtype get_pressure_from_density_temperature(const rtype & rho,
+                                                        const rtype & T) const = 0;
+    virtual rtype get_pressure_from_density_energy(const rtype & rho,
+                                                   const rtype & e) const = 0;
+    virtual rtype get_sound_speed_from_pressure_density(const rtype & p,
+                                                        const rtype & rho) const = 0;
+    virtual void compute_primitives_from_conservatives(rtype * primitives,
+                                                       const rtype * conservatives) const = 0;
+    virtual void copy_host_to_device() = 0;
+    virtual void copy_device_to_host() = 0;
+};
+
+// CRTP base class
 template<typename Derived>
 class Physics {
     public:
@@ -52,7 +76,7 @@ class Physics {
          * @brief Initialize the physics.
          * @param input TOML input data.
          */
-        virtual void init(const toml::table & input) = 0;
+        virtual void init(const toml::value & input) = 0;
 
         /**
          * @brief Print the physics.
@@ -197,7 +221,7 @@ class Euler : public Physics<Euler> {
          * @brief Initialize the physics.
          * @param input TOML input data.
          */
-        void init(const toml::table & input) override;
+        void init(const toml::value & input) override;
 
         /**
          * @brief Initialize the physics manually.
@@ -413,11 +437,12 @@ class Euler : public Physics<Euler> {
         u_int8_t i_p_max = 8;
 };
 
-// Common non-template base class
-class PhysicsBase {
-    public:
-        virtual ~PhysicsBase() = default;
-        virtual void init(const toml::table & input) = 0;
+// Type-erased wrapper
+class PhysicsWrapper : public PhysicsBase {
+private:
+    struct Concept {
+        virtual ~Concept() = default;
+        virtual void init(const toml::value & input) = 0;
         virtual void print() const = 0;
         virtual PhysicsType get_type() const = 0;
         virtual rtype get_gamma() const = 0;
@@ -430,156 +455,129 @@ class PhysicsBase {
         virtual rtype get_pressure_from_density_temperature(const rtype & rho,
                                                             const rtype & T) const = 0;
         virtual rtype get_pressure_from_density_energy(const rtype & rho,
-                                                    const rtype & e) const = 0;
+                                                       const rtype & e) const = 0;
         virtual rtype get_sound_speed_from_pressure_density(const rtype & p,
                                                             const rtype & rho) const = 0;
         virtual void compute_primitives_from_conservatives(rtype * primitives,
-                                                        const rtype * conservatives) const = 0;
+                                                           const rtype * conservatives) const = 0;
         virtual void copy_host_to_device() = 0;
         virtual void copy_device_to_host() = 0;
-};
+    };
 
-// Type-erased wrapper to allow for host-side polymorphism
-class PhysicsWrapper : public PhysicsBase {
-    private:
-        struct Concept {
-            virtual ~Concept() = default;
-            virtual void init(const toml::table & input) = 0;
-            virtual void print() const = 0;
-            virtual PhysicsType get_type() const = 0;
-            virtual rtype get_gamma() const = 0;
-            virtual rtype get_energy_from_temperature(const rtype & T) const = 0;
-            virtual rtype get_temperature_from_energy(const rtype & e) const = 0;
-            virtual rtype get_density_from_pressure_temperature(const rtype & p,
-                                                                const rtype & T) const = 0;
-            virtual rtype get_temperature_from_density_pressure(const rtype & rho,
-                                                                const rtype & p) const = 0;
-            virtual rtype get_pressure_from_density_temperature(const rtype & rho,
-                                                                const rtype & T) const = 0;
-            virtual rtype get_pressure_from_density_energy(const rtype & rho,
-                                                        const rtype & e) const = 0;
-            virtual rtype get_sound_speed_from_pressure_density(const rtype & p,
-                                                                const rtype & rho) const = 0;
-            virtual void compute_primitives_from_conservatives(rtype * primitives,
-                                                            const rtype * conservatives) const = 0;
-            virtual void copy_host_to_device() = 0;
-            virtual void copy_device_to_host() = 0;
-        };
-
-        template<typename T_physics>
-        struct Model : Concept {
-            T_physics physics;
-            Model(T_physics p) : physics(std::move(p)) {}
-            void init(const toml::table & input) override {
-                physics.init(input);
-            }
-            void print() const override {
-                physics.print();
-            }
-            PhysicsType get_type() const override {
-                return physics.get_type();
-            }
-            rtype get_gamma() const override {
-                return physics.get_gamma();
-            }
-            rtype get_energy_from_temperature(const rtype & T) const override {
-                return physics.get_energy_from_temperature(T);
-            }
-            rtype get_temperature_from_energy(const rtype & e) const override {
-                return physics.get_temperature_from_energy(e);
-            }
-            rtype get_density_from_pressure_temperature(const rtype & p,
-                                                        const rtype & T) const override {
-                return physics.get_density_from_pressure_temperature(p, T);
-            }
-            rtype get_temperature_from_density_pressure(const rtype & rho,
-                                                        const rtype & p) const override {
-                return physics.get_temperature_from_density_pressure(rho, p);
-            }
-            rtype get_pressure_from_density_temperature(const rtype & rho,
-                                                        const rtype & T) const override {
-                return physics.get_pressure_from_density_temperature(rho, T);
-            }
-            rtype get_pressure_from_density_energy(const rtype & rho,
-                                                const rtype & e) const override {
-                return physics.get_pressure_from_density_energy(rho, e);
-            }
-            rtype get_sound_speed_from_pressure_density(const rtype & p,
-                                                        const rtype & rho) const override {
-                return physics.get_sound_speed_from_pressure_density(p, rho);
-            }
-            void compute_primitives_from_conservatives(rtype * primitives,
-                                                    const rtype * conservatives) const override {
-                physics.compute_primitives_from_conservatives(primitives, conservatives);
-            }
-            void copy_host_to_device() override {
-                physics.copy_host_to_device();
-            }
-            void copy_device_to_host() override {
-                physics.copy_device_to_host();
-            }
-        };
-
-        std::unique_ptr<Concept> pimpl;
-
-    public:
-        template<typename T>
-        PhysicsWrapper(T physics) : pimpl(std::make_unique<Model<T>>(std::move(physics))) {}
-
-        void init(const toml::table & input) override {
-            pimpl->init(input);
+    template<typename T_physics>
+    struct Model : Concept {
+        T_physics physics;
+        Model(T_physics p) : physics(std::move(p)) {}
+        void init(const toml::value & input) override {
+            physics.init(input);
         }
         void print() const override {
-            pimpl->print();
+            physics.print();
         }
         PhysicsType get_type() const override {
-            return pimpl->get_type();
+            return physics.get_type();
         }
         rtype get_gamma() const override {
-            return pimpl->get_gamma();
+            return physics.get_gamma();
         }
         rtype get_energy_from_temperature(const rtype & T) const override {
-            return pimpl->get_energy_from_temperature(T);
+            return physics.get_energy_from_temperature(T);
         }
         rtype get_temperature_from_energy(const rtype & e) const override {
-            return pimpl->get_temperature_from_energy(e);
+            return physics.get_temperature_from_energy(e);
         }
         rtype get_density_from_pressure_temperature(const rtype & p,
                                                     const rtype & T) const override {
-            return pimpl->get_density_from_pressure_temperature(p, T);
+            return physics.get_density_from_pressure_temperature(p, T);
         }
         rtype get_temperature_from_density_pressure(const rtype & rho,
                                                     const rtype & p) const override {
-            return pimpl->get_temperature_from_density_pressure(rho, p);
+            return physics.get_temperature_from_density_pressure(rho, p);
         }
         rtype get_pressure_from_density_temperature(const rtype & rho,
                                                     const rtype & T) const override {
-            return pimpl->get_pressure_from_density_temperature(rho, T);
+            return physics.get_pressure_from_density_temperature(rho, T);
         }
         rtype get_pressure_from_density_energy(const rtype & rho,
-                                            const rtype & e) const override {
-            return pimpl->get_pressure_from_density_energy(rho, e);
+                                               const rtype & e) const override {
+            return physics.get_pressure_from_density_energy(rho, e);
         }
         rtype get_sound_speed_from_pressure_density(const rtype & p,
                                                     const rtype & rho) const override {
-            return pimpl->get_sound_speed_from_pressure_density(p, rho);
+            return physics.get_sound_speed_from_pressure_density(p, rho);
         }
         void compute_primitives_from_conservatives(rtype * primitives,
-                                                const rtype * conservatives) const override {
-            pimpl->compute_primitives_from_conservatives(primitives, conservatives);
+                                                   const rtype * conservatives) const override {
+            physics.compute_primitives_from_conservatives(primitives, conservatives);
         }
         void copy_host_to_device() override {
-            pimpl->copy_host_to_device();
+            physics.copy_host_to_device();
         }
         void copy_device_to_host() override {
-            pimpl->copy_device_to_host();
+            physics.copy_device_to_host();
         }
+    };
 
-        template<typename T>
-        T* get_as() {
-            auto model = dynamic_cast<Model<T>*>(pimpl.get());
-            return model ? &model->physics : nullptr;
-        }
+    std::unique_ptr<Concept> pimpl;
+
+public:
+    template<typename T>
+    PhysicsWrapper(T physics) : pimpl(std::make_unique<Model<T>>(std::move(physics))) {}
+
+    void init(const toml::value & input) override {
+        pimpl->init(input);
+    }
+    void print() const override {
+        pimpl->print();
+    }
+    PhysicsType get_type() const override {
+        return pimpl->get_type();
+    }
+    rtype get_gamma() const override {
+        return pimpl->get_gamma();
+    }
+    rtype get_energy_from_temperature(const rtype & T) const override {
+        return pimpl->get_energy_from_temperature(T);
+    }
+    rtype get_temperature_from_energy(const rtype & e) const override {
+        return pimpl->get_temperature_from_energy(e);
+    }
+    rtype get_density_from_pressure_temperature(const rtype & p,
+                                                const rtype & T) const override {
+        return pimpl->get_density_from_pressure_temperature(p, T);
+    }
+    rtype get_temperature_from_density_pressure(const rtype & rho,
+                                                const rtype & p) const override {
+        return pimpl->get_temperature_from_density_pressure(rho, p);
+    }
+    rtype get_pressure_from_density_temperature(const rtype & rho,
+                                                const rtype & T) const override {
+        return pimpl->get_pressure_from_density_temperature(rho, T);
+    }
+    rtype get_pressure_from_density_energy(const rtype & rho,
+                                           const rtype & e) const override {
+        return pimpl->get_pressure_from_density_energy(rho, e);
+    }
+    rtype get_sound_speed_from_pressure_density(const rtype & p,
+                                                const rtype & rho) const override {
+        return pimpl->get_sound_speed_from_pressure_density(p, rho);
+    }
+    void compute_primitives_from_conservatives(rtype * primitives,
+                                               const rtype * conservatives) const override {
+        pimpl->compute_primitives_from_conservatives(primitives, conservatives);
+    }
+    void copy_host_to_device() override {
+        pimpl->copy_host_to_device();
+    }
+    void copy_device_to_host() override {
+        pimpl->copy_device_to_host();
+    }
+
+    template<typename T>
+    T* get_as() {
+        auto model = dynamic_cast<Model<T>*>(pimpl.get());
+        return model ? &model->physics : nullptr;
+    }
 };
 
 rtype Euler::get_energy_from_temperature_impl(const rtype & T) const {

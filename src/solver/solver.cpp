@@ -48,7 +48,7 @@ int Solver::init(const std::string& input_file_name) {
     std::cout << "Parsing input file: " << input_file_name << std::endl;
     std::cout << LOG_SEPARATOR << std::endl;
 
-    input = toml::parse_file(input_file_name);
+    input = toml::parse(input_file_name);
     std::cout << input << std::endl;
 
     std::cout << LOG_SEPARATOR << std::endl;
@@ -89,7 +89,7 @@ void Solver::init_mesh() {
 void Solver::init_physics() {
     std::cout << "Initializing physics..." << std::endl;
 
-    std::string physics_str = input["physics"]["type"].value_or("euler");
+    std::string physics_str = toml::find_or<std::string>(input, "physics", "type", "euler");
     PhysicsType type;
     typename std::unordered_map<std::string, PhysicsType>::const_iterator it = PHYSICS_TYPES.find(physics_str);
     if (it == PHYSICS_TYPES.end()) {
@@ -111,9 +111,9 @@ void Solver::init_physics() {
 void Solver::init_numerics() {
     std::cout << "Initializing numerics..." << std::endl;
 
-    std::string face_reconstruction_str = input["numerics"]["face_reconstruction"].value_or("FO");
-    std::string riemann_solver_str = input["numerics"]["riemann_solver"].value_or("HLLC");
-    std::string time_integrator_str = input["numerics"]["time_integrator"].value_or("LSSSPRK3");
+    std::string face_reconstruction_str = toml::find_or<std::string>(input, "numerics", "face_reconstruction", "FO");
+    std::string riemann_solver_str = toml::find_or<std::string>(input, "numerics", "riemann_solver", "HLLC");
+    std::string time_integrator_str = toml::find_or<std::string>(input, "numerics", "time_integrator", "LSSSPRK3");
 
     FaceReconstructionType face_reconstruction_type;
     typename std::unordered_map<std::string, FaceReconstructionType>::const_iterator it_face = FACE_RECONSTRUCTION_TYPES.find(face_reconstruction_str);
@@ -188,36 +188,23 @@ void Solver::init_numerics() {
                          std::placeholders::_3);
     time_integrator->init();
 
-    check_nan = input["numerics"]["check_nan"].value_or(false);
+    check_nan = toml::find_or<bool>(input, "numerics", "check_nan", false);
 }
 
 void Solver::init_boundaries() {
     std::cout << "Initializing boundaries..." << std::endl;
 
-    if (!input.contains("boundaries")) {
-        throw std::runtime_error("Boundaries not specified.");
-    } else if (!input["boundaries"].is_array()) {
-        throw std::runtime_error("Boundaries must be an array.");
-    }
-
-    const toml::array * input_boundaries = input["boundaries"].as_array();
-    u_int8_t n_boundaries = input_boundaries->size();
-
-    for (u_int8_t i = 0; i < n_boundaries; i++) {
-        const toml::table * input_boundary = input_boundaries->at(i).as_table();
-
-        std::optional<std::string> _name = (*input_boundary)["name"].value<std::string>();
-        std::optional<std::string> _type = (*input_boundary)["type"].value<std::string>();
-
-        if (!_name.has_value()) {
+    std::vector<toml::value> input_boundaries = toml::find<std::vector<toml::value>>(input, "boundaries");
+    for (const auto & bound : input_boundaries) {
+        if (!bound.contains("name")) {
             throw std::runtime_error("Boundary name not specified.");
         }
-        if (!_type.has_value()) {
+        if (!bound.contains("type")) {
             throw std::runtime_error("Boundary type not specified.");
         }
 
-        std::string name = _name.value();
-        std::string type = _type.value();
+        std::string name = toml::find<std::string>(bound, "name");
+        std::string type = toml::find<std::string>(bound, "type");
 
         BoundaryType btype;
         typename std::unordered_map<std::string, BoundaryType>::const_iterator it = BOUNDARY_TYPES.find(type);
@@ -250,58 +237,50 @@ void Solver::init_boundaries() {
         boundaries.back()->set_mesh(mesh);
         boundaries.back()->set_physics(physics);
         boundaries.back()->set_riemann_solver(riemann_solver);
-        boundaries.back()->init(*input_boundary);
+        boundaries.back()->init(bound);
     }
 }
 
 void Solver::init_run_parameters() {
     std::cout << "Initializing run parameters..." << std::endl;
 
-    if (!input["run"]) {
+    if (!input.contains("run")) {
         throw std::runtime_error("Run parameters not specified.");
     }
-
-    if (!input["run"]["dt"] &&
-        !input["run"]["cfl"]) {
+    
+    if (!input["run"].contains("dt") &&
+        !input["run"].contains("cfl")) {
         throw std::runtime_error("Either dt or cfl must be specified.");
-    } else if (input["run"]["dt"] &&
-               input["run"]["cfl"]) {
+    } else if (input["run"].contains("dt") &&
+               input["run"].contains("cfl")) {
         throw std::runtime_error("Only one of dt or cfl can be specified.");
     }
 
-    if (!input["run"]["n_steps"] &&
-        !input["run"]["t_stop"] &&
-        !input["run"]["t_wall_stop"]) {
+    if (!input["run"].contains("n_steps") &&
+        !input["run"].contains("t_stop") &&
+        !input["run"].contains("t_wall_stop")) {
         throw std::runtime_error("Either n_steps, t_stop, or t_wall_stop must be specified.");
     }
 
-    if (input["run"]["dt"]) {
+    if (input["run"].contains("dt")) {
         std::cout << "Using specified dt." << std::endl;
         use_cfl = false;
-        std::optional<rtype> _dt = input["run"]["dt"].value<rtype>();
-        if (!_dt.has_value()) {
-            throw std::runtime_error("Invalid dt specified.");
-        }
-        dt = _dt.value();
+        dt = toml::find<rtype>(input, "run", "dt");
     } else {
         std::cout << "Using specified cfl." << std::endl;
         use_cfl = true;
-        std::optional<rtype> _cfl = input["run"]["cfl"].value<rtype>();
-        if (!_cfl.has_value()) {
-            throw std::runtime_error("Invalid cfl specified.");
-        }
-        cfl = _cfl.value();
+        cfl = toml::find<rtype>(input, "run", "cfl");
     }
 
-    n_steps = input["run"]["n_steps"].value_or(-1);
-    t_stop = input["run"]["t_stop"].value_or(-1.0);
-    t_wall_stop = input["run"]["t_wall_stop"].value_or(-1.0);
+    n_steps = toml::find_or<u_int32_t>(input, "run", "n_steps", -1);
+    t_stop = toml::find_or<rtype>(input, "run", "t_stop", -1.0);
+    t_wall_stop = toml::find_or<rtype>(input, "run", "t_wall_stop", -1.0);
 }
 
 void Solver::init_output() {
     std::cout << "Initializing output..." << std::endl;
 
-    check_interval = input["output"]["check_interval"].value_or(1);
+    check_interval = toml::find_or<u_int32_t>(input, "output", "check_interval", 1);
 
     init_data_writers();
 }
@@ -309,20 +288,14 @@ void Solver::init_output() {
 void Solver::init_data_writers() {
     std::cout << "Initializing data writers..." << std::endl;
 
-    if (!input["write_data"]) {
+    if (!input.contains("write_data")) {
         return;
-    } else if (!input["write_data"].is_array()) {
-        throw std::runtime_error("write_data must be an array.");
     }
 
-    toml::array * input_outputs = input["write_data"].as_array();
-    u_int16_t n_outputs = input_outputs->size();
-
-    for (u_int16_t i = 0; i < n_outputs; i++) {
-        const toml::table * input_output = input_outputs->at(i).as_table();
-
+    std::vector<toml::value> outputs = toml::find<std::vector<toml::value>>(input, "write_data");
+    for (const auto & output : outputs) {
         data_writers.push_back(std::make_unique<DataWriter>());
-        data_writers.back()->init(*input_output, data, mesh);
+        data_writers.back()->init(output, data, mesh);
     }
 }
 

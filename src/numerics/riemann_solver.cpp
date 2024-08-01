@@ -25,7 +25,7 @@ RiemannSolver::~RiemannSolver() {
     // Empty
 }
 
-void RiemannSolver::init(const toml::table & input) {
+void RiemannSolver::init(const toml::value & input) {
     (void)(input);
     print();
 }

@@ -50,7 +50,7 @@ class DataWriter {
          * @param data Data objects.
          * @param mesh pointer to the mesh.
          */
-        void init(const toml::table & input,
+        void init(const toml::value & input,
                   std::vector<Data> & data,
                   std::shared_ptr<Mesh> mesh);
 

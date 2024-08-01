@@ -24,34 +24,28 @@ Euler::~Euler() {
     // Empty
 }
 
-void Euler::init(const toml::table & input) {
-    const toml::table * input_physics = input["physics"].as_table();
+void Euler::init(const toml::value & input) {
+    toml::value input_physics = toml::find(input, "physics");
 
-    std::optional<rtype> _gamma = (*input_physics)["gamma"].value<rtype>();
-    std::optional<rtype> _p_ref = (*input_physics)["p_ref"].value<rtype>();
-    std::optional<rtype> _T_ref = (*input_physics)["T_ref"].value<rtype>();
-    std::optional<rtype> _rho_ref = (*input_physics)["rho_ref"].value<rtype>();
-
-    if (!_gamma.has_value()) {
+    if (!input_physics.contains("gamma")) {
         throw std::runtime_error("Missing gamma for physics: " + PHYSICS_NAMES.at(get_type()) + ".");
     }
-    if (!_p_ref.has_value()) {
+    if (!input_physics.contains("p_ref")) {
         throw std::runtime_error("Missing p_ref for physics: " + PHYSICS_NAMES.at(get_type()) + ".");
     }
-    if (!_T_ref.has_value()) {
+    if (!input_physics.contains("T_ref")) {
         throw std::runtime_error("Missing T_ref for physics: " + PHYSICS_NAMES.at(get_type()) + ".");
     }
-    if (!_rho_ref.has_value()) {
+    if (!input_physics.contains("rho_ref")) {
         throw std::runtime_error("Missing rho_ref for physics: " + PHYSICS_NAMES.at(get_type()) + ".");
     }
 
-    h_constants(i_gamma) = _gamma.value();
-    h_constants(i_p_ref) = _p_ref.value();
-    h_constants(i_T_ref) = _T_ref.value();
-    h_constants(i_rho_ref) = _rho_ref.value();
-
-    h_constants(i_p_min) = (*input_physics)["p_min"].value_or(-1e20);
-    h_constants(i_p_max) = (*input_physics)["p_max"].value_or(1e20);
+    h_constants(i_gamma) = toml::find<rtype>(input, "physics", "gamma");
+    h_constants(i_p_ref) = toml::find<rtype>(input, "physics", "p_ref");
+    h_constants(i_T_ref) = toml::find<rtype>(input, "physics", "T_ref");
+    h_constants(i_rho_ref) = toml::find<rtype>(input, "physics", "rho_ref");
+    h_constants(i_p_min) = toml::find_or<rtype>(input, "physics", "p_min", -1e20);
+    h_constants(i_p_max) = toml::find_or<rtype>(input, "physics", "p_max", 1e20);
 
     set_R_cp_cv();
 

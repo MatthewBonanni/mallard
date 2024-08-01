@@ -89,7 +89,7 @@ class Boundary {
          * @brief Initialize the boundary.
          * @param input TOML input parameter table.
          */
-        virtual void init(const toml::table & input);
+        virtual void init(const toml::value & input);
 
         /**
          * @brief Copy data from the host to the device.

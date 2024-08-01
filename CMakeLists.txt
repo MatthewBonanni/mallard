@@ -25,8 +25,7 @@ find_package(Kokkos REQUIRED)
 find_package(KokkosKernels REQUIRED)
 
 include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/exprtk")
-# include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/toml11/single_include")
-include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/tomlplusplus/include/toml++")
+include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/toml11/single_include")
 
 add_subdirectory(src)
 add_subdirectory(test)

@@ -16,8 +16,6 @@
 #include <iomanip>
 #include <optional>
 
-#include <toml.hpp>
-
 #include "common_io.h"
 
 DataWriter::DataWriter() {
@@ -28,39 +26,32 @@ DataWriter::~DataWriter() {
     // Empty
 }
 
-void DataWriter::init(const toml::table & input,
+void DataWriter::init(const toml::value & input,
                       std::vector<Data> & data,
                       std::shared_ptr<Mesh> mesh) {
-    std::optional<std::string> _prefix = input["prefix"].value<std::string>();
-    std::optional<std::string> _format = input["format"].value<std::string>();
-    std::optional<u_int32_t> _interval = input["interval"].value<u_int32_t>();
-
-    if (!_prefix.has_value()) {
+    if (!input.contains("prefix")) {
         throw std::runtime_error("DataWriter: prefix not specified.");
     }
-    if (!_format.has_value()) {
+    if (!input.contains("format")) {
         throw std::runtime_error("DataWriter: format not specified.");
     }
-    if (!_interval.has_value()) {
+    if (!input.contains("interval")) {
         throw std::runtime_error("DataWriter: interval not specified.");
     }
-    if (!input["variables"]) {
+    if (!input.contains("variables")) {
         throw std::runtime_error("DataWriter: variables not specified.");
-    } else if (!input["variables"].is_array()) {
-        throw std::runtime_error("DataWriter: variables must be an array.");
-    }
-
-    this->prefix = _prefix.value();
-    this->interval = _interval.value();
-    std::string format_str = _format.value();
-    const toml::array * variables = input["variables"].as_array();
-
-    u_int16_t n_vars = variables->size();
-    if (n_vars == 0) {
-        throw std::runtime_error("DataWriter: No variables specified.");
     }
 
     // \todo Implement write geometries
+
+    this->prefix = toml::find<std::string>(input, "prefix");
+    this->interval = toml::find<u_int32_t>(input, "interval");
+    std::string format_str = toml::find<std::string>(input, "format");
+    std::vector<std::string> variables = toml::find<std::vector<std::string>>(input, "variables");
+
+    if (variables.empty()) {
+        throw std::runtime_error("DataWriter: No variables specified.");
+    }
 
     typename std::unordered_map<std::string, DataFormat>::const_iterator it = FORMAT_TYPES.find(format_str);
     if (it == FORMAT_TYPES.end()) {
@@ -69,13 +60,7 @@ void DataWriter::init(const toml::table & input,
         format = it->second;
     }
 
-    for (u_int16_t i = 0; i < n_vars; i++) {
-        std::optional<std::string> _var = (*variables)[i].value<std::string>();
-        if (!_var.has_value()) {
-            throw std::runtime_error("DataWriter: Invalid variable.");
-        }
-        std::string var = _var.value();
-
+    for (const auto & var : variables) {
         bool found = false;
         for (const auto & data_var : data) {
             if (data_var.name() == var) {
