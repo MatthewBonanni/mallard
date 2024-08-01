@@ -149,8 +149,8 @@ void Solver::init_solution_analytical() {
     rtype rho, e, E, h, rhou_x, rhou_y, rhoE;
 
     for (u_int32_t i = 0; i < mesh->n_cells(); ++i) {
-        x = mesh->cell_coords(i, 0);
-        y = mesh->cell_coords(i, 1);
+        x = mesh->h_cell_coords(i, 0);
+        y = mesh->h_cell_coords(i, 1);
 
         u[0] = u_x_expr.value();
         u[1] = u_y_expr.value();
