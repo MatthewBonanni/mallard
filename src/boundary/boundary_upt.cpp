@@ -55,8 +55,8 @@ void BoundaryUPT::init(const toml::value & input) {
     p_bc = toml::find<rtype>(input, "p_in");
     T_bc = toml::find<rtype>(input, "T_in");
 
-    rtype rho_bc = physics->get_density_from_pressure_temperature(p_bc, T_bc);
-    rtype e_bc = physics->get_energy_from_temperature(T_bc);
+    rtype rho_bc = physics->h_get_density_from_pressure_temperature(p_bc, T_bc);
+    rtype e_bc = physics->h_get_energy_from_temperature(T_bc);
     rtype h_bc = e_bc + p_bc / rho_bc;
 
     data_bc = Kokkos::View<rtype [N_PRIMITIVE+1]>("data_bc");

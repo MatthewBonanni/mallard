@@ -84,6 +84,56 @@ void Euler::print() const {
     std::cout << LOG_SEPARATOR << std::endl;
 }
 
+rtype Euler::h_get_energy_from_temperature_impl(const rtype & T) const {
+    return get_h_Cv() * T;
+}
+
+rtype Euler::h_get_temperature_from_energy_impl(const rtype & e) const {
+    return e / get_h_Cv();
+}
+
+rtype Euler::h_get_density_from_pressure_temperature_impl(const rtype & p,
+                                                          const rtype & T) const {
+    return p / (get_h_R() * T);
+}
+
+rtype Euler::h_get_temperature_from_density_pressure_impl(const rtype & rho,
+                                                          const rtype & p) const {
+    return p / (rho * get_h_R());
+}
+
+rtype Euler::h_get_pressure_from_density_temperature_impl(const rtype & rho,
+                                                          const rtype & T) const {
+    return rho * get_h_R() * T;
+}
+
+rtype Euler::h_get_pressure_from_density_energy_impl(const rtype & rho,
+                                                     const rtype & e) const {
+    return Kokkos::fmax(get_p_min(), Kokkos::fmin(get_p_max(), (get_h_gamma() - 1.0) * rho * e));
+}
+
+rtype Euler::h_get_sound_speed_from_pressure_density_impl(const rtype & p,
+                                                          const rtype & rho) const {
+    return Kokkos::sqrt(get_h_gamma() * p / rho);
+}
+
+void Euler::h_compute_primitives_from_conservatives_impl(rtype * primitives,
+                                                         const rtype * conservatives) const {
+    rtype rho = conservatives[0];
+    rtype u[N_DIM] = {conservatives[1] / rho,
+                      conservatives[2] / rho};
+    rtype E = conservatives[3] / rho;
+    rtype e = E - 0.5 * dot<N_DIM>(u, u);
+    rtype p = h_get_pressure_from_density_energy(rho, e);
+    rtype T = h_get_temperature_from_energy(e);
+    rtype h = e + p / rho;
+    primitives[0] = u[0];
+    primitives[1] = u[1];
+    primitives[2] = p;
+    primitives[3] = T;
+    primitives[4] = h;
+}
+
 void Euler::copy_host_to_device() {
     Kokkos::deep_copy(constants, h_constants);
 }

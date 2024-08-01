@@ -78,8 +78,8 @@ void Solver::init_solution_constant() {
     rtype p = toml::find<rtype>(input, "initialize", "p"); 
     rtype T = toml::find<rtype>(input, "initialize", "T");
 
-    rtype rho = physics->get_density_from_pressure_temperature(p, T);
-    rtype e = physics->get_energy_from_temperature(T);
+    rtype rho = physics->h_get_density_from_pressure_temperature(p, T);
+    rtype e = physics->h_get_energy_from_temperature(T);
     rtype E = e + 0.5 * norm_2<N_DIM>(u.data());
     rtype h = e + p / rho;
     rtype rhou_x = rho * u[0];
@@ -159,16 +159,16 @@ void Solver::init_solution_analytical() {
         if (T_in) T = T_expr.value();
 
         if (rho_in && p_in) {
-            T = physics->get_temperature_from_density_pressure(rho, p);
+            T = physics->h_get_temperature_from_density_pressure(rho, p);
         } else if (rho_in && T_in) {
-            p = physics->get_pressure_from_density_temperature(rho, T);
+            p = physics->h_get_pressure_from_density_temperature(rho, T);
         } else if (p_in && T_in) {
-            rho = physics->get_density_from_pressure_temperature(p, T);
+            rho = physics->h_get_density_from_pressure_temperature(p, T);
         } else {
             throw std::runtime_error("Exactly two of rho, p, and T must be specified for initialization: analytical.");
         }
 
-        e = physics->get_energy_from_temperature(T);
+        e = physics->h_get_energy_from_temperature(T);
         E = e + 0.5 * norm_2<N_DIM>(u.data());
         h = e + p / rho;
         rhou_x = rho * u[0];
