@@ -17,7 +17,7 @@
 #include <string>
 #include <unordered_map>
 
-#include "exprtk.hpp"
+#include <exprtk.hpp>
 
 enum class InitType {
     CONSTANT,

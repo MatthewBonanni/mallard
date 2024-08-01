@@ -129,6 +129,13 @@ class Mesh {
         u_int32_t n_nodes_of_cell(u_int32_t i_cell) const;
 
         /**
+         * @brief Get the number of nodes comprising a cell - host version.
+         * @param i_cell Index of the cell.
+         * @return Number of nodes comprising the cell.
+         */
+        u_int32_t h_n_nodes_of_cell(u_int32_t i_cell) const;
+
+        /**
          * @brief Get the number of faces comprising a cell.
          * @param i_cell Index of the cell.
          * @return Number of faces comprising the cell.
@@ -137,12 +144,26 @@ class Mesh {
         u_int32_t n_faces_of_cell(u_int32_t i_cell) const;
 
         /**
+         * @brief Get the number of faces comprising a cell - host version.
+         * @param i_cell Index of the cell.
+         * @return Number of faces comprising the cell.
+         */
+        u_int32_t h_n_faces_of_cell(u_int32_t i_cell) const;
+
+        /**
          * @brief Get the number of nodes comprising a face.
          * @param i_face Index of the face.
          * @return Number of nodes comprising the face.
          */
         KOKKOS_INLINE_FUNCTION
         u_int32_t n_nodes_of_face(u_int32_t i_face) const;
+
+        /**
+         * @brief Get the number of nodes comprising a face - host version.
+         * @param i_face Index of the face.
+         * @return Number of nodes comprising the face.
+         */
+        u_int32_t h_n_nodes_of_face(u_int32_t i_face) const;
 
         /**
          * @brief Get the id of the i-th node of a cell.
@@ -154,6 +175,14 @@ class Mesh {
         u_int32_t node_of_cell(u_int32_t i_cell, u_int8_t i_node_local) const;
 
         /**
+         * @brief Get the id of the i-th node of a cell - host version.
+         * @param i_cell Index of the cell.
+         * @param i_node_local Index of the node.
+         * @return Node id.
+         */
+        u_int32_t h_node_of_cell(u_int32_t i_cell, u_int8_t i_node_local) const;
+
+        /**
          * @brief Get the id of the i-th face of a cell.
          * @param i_cell Index of the cell.
          * @param i_face_local Index of the face.
@@ -163,6 +192,14 @@ class Mesh {
         u_int32_t face_of_cell(u_int32_t i_cell, u_int8_t i_face_local) const;
 
         /**
+         * @brief Get the id of the i-th face of a cell - host version.
+         * @param i_cell Index of the cell.
+         * @param i_face_local Index of the face.
+         * @return Face id.
+         */
+        u_int32_t h_face_of_cell(u_int32_t i_cell, u_int8_t i_face_local) const;
+
+        /**
          * @brief Get the id of the i-th node of a face.
          * @param i_face Index of the face.
          * @param i_node_local Index of the node.
@@ -170,6 +207,14 @@ class Mesh {
          */
         KOKKOS_INLINE_FUNCTION
         u_int32_t node_of_face(u_int32_t i_face, u_int8_t i_node_local) const;
+
+        /**
+         * @brief Get the id of the i-th node of a face - host version.
+         * @param i_face Index of the face.
+         * @param i_node_local Index of the node.
+         * @return Node id.
+         */
+        u_int32_t h_node_of_face(u_int32_t i_face, u_int8_t i_node_local) const;
 
         /**
          * @brief Compute cell centroids.
@@ -265,24 +310,48 @@ u_int32_t Mesh::n_nodes_of_cell(u_int32_t i_cell) const {
     return offsets_nodes_of_cell(i_cell + 1) - offsets_nodes_of_cell(i_cell);
 }
 
+u_int32_t Mesh::h_n_nodes_of_cell(u_int32_t i_cell) const {
+    return h_offsets_nodes_of_cell(i_cell + 1) - h_offsets_nodes_of_cell(i_cell);
+}
+
 u_int32_t Mesh::n_faces_of_cell(u_int32_t i_cell) const {
     return offsets_faces_of_cell(i_cell + 1) - offsets_faces_of_cell(i_cell);
+}
+
+u_int32_t Mesh::h_n_faces_of_cell(u_int32_t i_cell) const {
+    return h_offsets_faces_of_cell(i_cell + 1) - h_offsets_faces_of_cell(i_cell);
 }
 
 u_int32_t Mesh::n_nodes_of_face(u_int32_t i_face) const {
     return offsets_nodes_of_face(i_face + 1) - offsets_nodes_of_face(i_face);
 }
 
+u_int32_t Mesh::h_n_nodes_of_face(u_int32_t i_face) const {
+    return h_offsets_nodes_of_face(i_face + 1) - h_offsets_nodes_of_face(i_face);
+}
+
 u_int32_t Mesh::node_of_cell(u_int32_t i_cell, u_int8_t i_node_local) const {
     return nodes_of_cell(offsets_nodes_of_cell(i_cell) + i_node_local);
+}
+
+u_int32_t Mesh::h_node_of_cell(u_int32_t i_cell, u_int8_t i_node_local) const {
+    return h_nodes_of_cell(h_offsets_nodes_of_cell(i_cell) + i_node_local);
 }
 
 u_int32_t Mesh::face_of_cell(u_int32_t i_cell, u_int8_t i_face_local) const {
     return faces_of_cell(offsets_faces_of_cell(i_cell) + i_face_local);
 }
 
+u_int32_t Mesh::h_face_of_cell(u_int32_t i_cell, u_int8_t i_face_local) const {
+    return h_faces_of_cell(h_offsets_faces_of_cell(i_cell) + i_face_local);
+}
+
 u_int32_t Mesh::node_of_face(u_int32_t i_face, u_int8_t i_node_local) const {
     return nodes_of_face(offsets_nodes_of_face(i_face) + i_node_local);
+}
+
+u_int32_t Mesh::h_node_of_face(u_int32_t i_face, u_int8_t i_node_local) const {
+    return h_nodes_of_face(h_offsets_nodes_of_face(i_face) + i_node_local);
 }
 
 #endif // MESH_H

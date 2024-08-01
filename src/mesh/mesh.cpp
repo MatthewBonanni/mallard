@@ -104,32 +104,32 @@ FaceZone * Mesh::get_face_zone(const std::string& name) {
 
 void Mesh::compute_cell_centroids() {
     for (u_int32_t i_cell = 0; i_cell < n_cells(); ++i_cell) {
-        h_cell_coords(i_cell, 0) = 0.25 * (h_node_coords(node_of_cell(i_cell, 0), 0) +
-                                           h_node_coords(node_of_cell(i_cell, 1), 0) +
-                                           h_node_coords(node_of_cell(i_cell, 2), 0) +
-                                           h_node_coords(node_of_cell(i_cell, 3), 0));
-        h_cell_coords(i_cell, 1) = 0.25 * (h_node_coords(node_of_cell(i_cell, 0), 1) +
-                                           h_node_coords(node_of_cell(i_cell, 1), 1) +
-                                           h_node_coords(node_of_cell(i_cell, 2), 1) +
-                                           h_node_coords(node_of_cell(i_cell, 3), 1));
+        h_cell_coords(i_cell, 0) = 0.25 * (h_node_coords(h_node_of_cell(i_cell, 0), 0) +
+                                           h_node_coords(h_node_of_cell(i_cell, 1), 0) +
+                                           h_node_coords(h_node_of_cell(i_cell, 2), 0) +
+                                           h_node_coords(h_node_of_cell(i_cell, 3), 0));
+        h_cell_coords(i_cell, 1) = 0.25 * (h_node_coords(h_node_of_cell(i_cell, 0), 1) +
+                                           h_node_coords(h_node_of_cell(i_cell, 1), 1) +
+                                           h_node_coords(h_node_of_cell(i_cell, 2), 1) +
+                                           h_node_coords(h_node_of_cell(i_cell, 3), 1));
     }
 }
 
 void Mesh::compute_face_centroids() {
     for (u_int32_t i_face = 0; i_face < n_faces(); ++i_face) {
-        h_face_coords(i_face, 0) = 0.5 * (h_node_coords(node_of_face(i_face, 0), 0) +
-                                          h_node_coords(node_of_face(i_face, 1), 0));
-        h_face_coords(i_face, 1) = 0.5 * (h_node_coords(node_of_face(i_face, 0), 1) +
-                                          h_node_coords(node_of_face(i_face, 1), 1));
+        h_face_coords(i_face, 0) = 0.5 * (h_node_coords(h_node_of_face(i_face, 0), 0) +
+                                          h_node_coords(h_node_of_face(i_face, 1), 0));
+        h_face_coords(i_face, 1) = 0.5 * (h_node_coords(h_node_of_face(i_face, 0), 1) +
+                                          h_node_coords(h_node_of_face(i_face, 1), 1));
     }
 }
 
 void Mesh::compute_cell_volumes() {
     for (u_int32_t i_cell = 0; i_cell < n_cells(); ++i_cell) {
-        u_int32_t i_node_0 = node_of_cell(i_cell, 0);
-        u_int32_t i_node_1 = node_of_cell(i_cell, 1);
-        u_int32_t i_node_2 = node_of_cell(i_cell, 2);
-        u_int32_t i_node_3 = node_of_cell(i_cell, 3);
+        u_int32_t i_node_0 = h_node_of_cell(i_cell, 0);
+        u_int32_t i_node_1 = h_node_of_cell(i_cell, 1);
+        u_int32_t i_node_2 = h_node_of_cell(i_cell, 2);
+        u_int32_t i_node_3 = h_node_of_cell(i_cell, 3);
 
         const NVector coords_0 = {h_node_coords(i_node_0, 0), h_node_coords(i_node_0, 1)};
         const NVector coords_1 = {h_node_coords(i_node_1, 0), h_node_coords(i_node_1, 1)};
@@ -144,8 +144,8 @@ void Mesh::compute_cell_volumes() {
 
 void Mesh::compute_face_areas() {
     for (u_int32_t i_face = 0; i_face < n_faces(); ++i_face) {
-        u_int32_t i_node_0 = node_of_face(i_face, 0);
-        u_int32_t i_node_1 = node_of_face(i_face, 1);
+        u_int32_t i_node_0 = h_node_of_face(i_face, 0);
+        u_int32_t i_node_1 = h_node_of_face(i_face, 1);
         h_face_area(i_face) = std::sqrt(std::pow(h_node_coords(i_node_1, 0) -
                                                  h_node_coords(i_node_0, 0), 2) +
                                         std::pow(h_node_coords(i_node_1, 1) -
@@ -156,8 +156,8 @@ void Mesh::compute_face_areas() {
 void Mesh::compute_face_normals() {
     for (u_int32_t i_face = 0; i_face < n_faces(); ++i_face) {
         // Compute normal with area magnitude
-        u_int32_t i_node_0 = node_of_face(i_face, 0);
-        u_int32_t i_node_1 = node_of_face(i_face, 1);
+        u_int32_t i_node_0 = h_node_of_face(i_face, 0);
+        u_int32_t i_node_1 = h_node_of_face(i_face, 1);
         rtype x0 = h_node_coords(i_node_0, 0);
         rtype y0 = h_node_coords(i_node_0, 1);
         rtype x1 = h_node_coords(i_node_1, 0);
