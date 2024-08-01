@@ -102,6 +102,30 @@ FaceZone * Mesh::get_face_zone(const std::string& name) {
     return nullptr;
 }
 
+u_int32_t Mesh::h_n_nodes_of_cell(u_int32_t i_cell) const {
+    return h_offsets_nodes_of_cell(i_cell + 1) - h_offsets_nodes_of_cell(i_cell);
+}
+
+u_int32_t Mesh::h_n_faces_of_cell(u_int32_t i_cell) const {
+    return h_offsets_faces_of_cell(i_cell + 1) - h_offsets_faces_of_cell(i_cell);
+}
+
+u_int32_t Mesh::h_n_nodes_of_face(u_int32_t i_face) const {
+    return h_offsets_nodes_of_face(i_face + 1) - h_offsets_nodes_of_face(i_face);
+}
+
+u_int32_t Mesh::h_node_of_cell(u_int32_t i_cell, u_int8_t i_node_local) const {
+    return h_nodes_of_cell(h_offsets_nodes_of_cell(i_cell) + i_node_local);
+}
+
+u_int32_t Mesh::h_face_of_cell(u_int32_t i_cell, u_int8_t i_face_local) const {
+    return h_faces_of_cell(h_offsets_faces_of_cell(i_cell) + i_face_local);
+}
+
+u_int32_t Mesh::h_node_of_face(u_int32_t i_face, u_int8_t i_node_local) const {
+    return h_nodes_of_face(h_offsets_nodes_of_face(i_face) + i_node_local);
+}
+
 void Mesh::compute_cell_centroids() {
     for (u_int32_t i_cell = 0; i_cell < n_cells(); ++i_cell) {
         h_cell_coords(i_cell, 0) = 0.25 * (h_node_coords(h_node_of_cell(i_cell, 0), 0) +

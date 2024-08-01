@@ -310,48 +310,24 @@ u_int32_t Mesh::n_nodes_of_cell(u_int32_t i_cell) const {
     return offsets_nodes_of_cell(i_cell + 1) - offsets_nodes_of_cell(i_cell);
 }
 
-u_int32_t Mesh::h_n_nodes_of_cell(u_int32_t i_cell) const {
-    return h_offsets_nodes_of_cell(i_cell + 1) - h_offsets_nodes_of_cell(i_cell);
-}
-
 u_int32_t Mesh::n_faces_of_cell(u_int32_t i_cell) const {
     return offsets_faces_of_cell(i_cell + 1) - offsets_faces_of_cell(i_cell);
-}
-
-u_int32_t Mesh::h_n_faces_of_cell(u_int32_t i_cell) const {
-    return h_offsets_faces_of_cell(i_cell + 1) - h_offsets_faces_of_cell(i_cell);
 }
 
 u_int32_t Mesh::n_nodes_of_face(u_int32_t i_face) const {
     return offsets_nodes_of_face(i_face + 1) - offsets_nodes_of_face(i_face);
 }
 
-u_int32_t Mesh::h_n_nodes_of_face(u_int32_t i_face) const {
-    return h_offsets_nodes_of_face(i_face + 1) - h_offsets_nodes_of_face(i_face);
-}
-
 u_int32_t Mesh::node_of_cell(u_int32_t i_cell, u_int8_t i_node_local) const {
     return nodes_of_cell(offsets_nodes_of_cell(i_cell) + i_node_local);
-}
-
-u_int32_t Mesh::h_node_of_cell(u_int32_t i_cell, u_int8_t i_node_local) const {
-    return h_nodes_of_cell(h_offsets_nodes_of_cell(i_cell) + i_node_local);
 }
 
 u_int32_t Mesh::face_of_cell(u_int32_t i_cell, u_int8_t i_face_local) const {
     return faces_of_cell(offsets_faces_of_cell(i_cell) + i_face_local);
 }
 
-u_int32_t Mesh::h_face_of_cell(u_int32_t i_cell, u_int8_t i_face_local) const {
-    return h_faces_of_cell(h_offsets_faces_of_cell(i_cell) + i_face_local);
-}
-
 u_int32_t Mesh::node_of_face(u_int32_t i_face, u_int8_t i_node_local) const {
     return nodes_of_face(offsets_nodes_of_face(i_face) + i_node_local);
-}
-
-u_int32_t Mesh::h_node_of_face(u_int32_t i_face, u_int8_t i_node_local) const {
-    return h_nodes_of_face(h_offsets_nodes_of_face(i_face) + i_node_local);
 }
 
 #endif // MESH_H
