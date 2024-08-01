@@ -153,7 +153,7 @@ void DataWriter::write_vtu(u_int32_t step) const {
     out << "offset=\"" << offset_data << "\">\n";
     out << "        </DataArray>\n";
     for (u_int32_t i = 0; i < mesh->n_cells(); i++) {
-        len_connectivity += mesh->n_nodes_of_cell(i);
+        len_connectivity += mesh->h_n_nodes_of_cell(i);
     }
     offset_data += sizeof(int) + len_connectivity * sizeof(int);
 
@@ -199,7 +199,7 @@ void DataWriter::write_vtu(u_int32_t step) const {
     rtype coord;
     for (u_int32_t i = 0; i < mesh->n_nodes(); i++) {
         for (u_int8_t j = 0; j < N_DIM; j++) {
-            coord = mesh->node_coords(i, j);
+            coord = mesh->h_node_coords(i, j);
             out.write(reinterpret_cast<const char *>(&coord), sizeof(rtype));
         }
         if (N_DIM == 2) {
@@ -215,8 +215,8 @@ void DataWriter::write_vtu(u_int32_t step) const {
     out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
     u_int32_t i_node;
     for (u_int32_t i = 0; i < mesh->n_cells(); i++) {
-        for (u_int32_t j = 0; j < mesh->n_nodes_of_cell(i); j++) {
-            i_node = mesh->node_of_cell(i, j);
+        for (u_int32_t j = 0; j < mesh->h_n_nodes_of_cell(i); j++) {
+            i_node = mesh->h_node_of_cell(i, j);
             out.write(reinterpret_cast<const char *>(&i_node), sizeof(int));
         }
     }
@@ -226,7 +226,7 @@ void DataWriter::write_vtu(u_int32_t step) const {
     out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
     u_int64_t offset = 0;
     for (u_int32_t i = 0; i < mesh->n_cells(); i++) {
-        offset += mesh->n_nodes_of_cell(i);
+        offset += mesh->h_n_nodes_of_cell(i);
         out.write(reinterpret_cast<const char *>(&offset), sizeof(int));
     }
 
