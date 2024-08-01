@@ -33,15 +33,17 @@ void BoundaryPOut::print() {
     std::cout << LOG_SEPARATOR << std::endl;
 }
 
-void BoundaryPOut::init(const toml::value & input) {
-    if (!input.contains("p")) {
-        throw std::runtime_error("Missing p for boundary: " + zone->get_name() + ".");
-    }
-
+void BoundaryPOut::init(const toml::table & input) {
     data_bc = Kokkos::View<rtype [1]>("data_bc");
     h_data_bc = Kokkos::create_mirror_view(data_bc);
+
+    std::optional<rtype> _p = input["initialize"]["p"].value<rtype>();
+
+    if (!_p.has_value()) {
+        throw std::runtime_error("Missing p for boundary: " + zone->get_name() + ".");
+    }
     
-    h_data_bc(0) = toml::find<rtype>(input, "initialize", "p");
+    h_data_bc(0) = _p.value();
 
     print();
 }

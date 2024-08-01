@@ -37,7 +37,7 @@ class BoundaryWallAdiabatic : public Boundary {
          * @brief Initialize the boundary.
          * @param input Pointer to the TOML input.
          */
-        void init(const toml::value & input) override;
+        void init(const toml::table & input) override;
 
         /**
          * @brief Apply the boundary condition.

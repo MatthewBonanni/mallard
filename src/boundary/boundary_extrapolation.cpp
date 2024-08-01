@@ -30,7 +30,7 @@ void BoundaryExtrapolation::print() {
     std::cout << LOG_SEPARATOR << std::endl;
 }
 
-void BoundaryExtrapolation::init(const toml::value & input) {
+void BoundaryExtrapolation::init(const toml::table & input) {
     (void)(input);
     print();
 }

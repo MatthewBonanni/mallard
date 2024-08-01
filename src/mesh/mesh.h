@@ -58,7 +58,7 @@ class Mesh {
          * @brief Initialize the mesh.
          * @param input TOML input data.
          */
-        void init(const toml::value & input);
+        void init(const toml::table & input);
 
         /**
          * @brief Get the type of mesh.

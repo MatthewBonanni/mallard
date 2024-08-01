@@ -35,25 +35,30 @@ void BoundaryUPT::print() {
     std::cout << LOG_SEPARATOR << std::endl;
 }
 
-void BoundaryUPT::init(const toml::value & input) {
-    if (!input.contains("u_in")) {
+void BoundaryUPT::init(const toml::table & input) {
+    if (!input["u_in"]) {
         throw std::runtime_error("Missing u for boundary: " + zone->get_name() + ".");
     }
-    if (!input.contains("p_in")) {
+    if (!input["p_in"]) {
         throw std::runtime_error("Missing p for boundary: " + zone->get_name() + ".");
     }
-    if (!input.contains("T_in")) {
+    if (!input["T_in"]) {
         throw std::runtime_error("Missing T for boundary: " + zone->get_name() + ".");
     }
 
-    std::vector<rtype> u_in = toml::find<std::vector<rtype>>(input, "u_in");
-    if (u_in.size() != N_DIM) {
+    std::optional<rtype> _u_x_in = input["u_in"][0].value<rtype>();
+    std::optional<rtype> _u_y_in = input["u_in"][1].value<rtype>();
+    std::optional<rtype> _p_in = input["p_in"].value<rtype>();
+    std::optional<rtype> _T_in = input["T_in"].value<rtype>();
+
+    if (!_u_x_in.has_value() || !_u_y_in.has_value()) {
         throw std::runtime_error("Invalid u for boundary: " + zone->get_name() + ".");
     }
 
-    FOR_I_DIM u_bc[i] = u_in[i];
-    p_bc = toml::find<rtype>(input, "p_in");
-    T_bc = toml::find<rtype>(input, "T_in");
+    u_bc[0] = _u_x_in.value();
+    u_bc[1] = _u_y_in.value();
+    p_bc = _p_in.value();
+    T_bc = _T_in.value();
 
     rtype rho_bc = physics->get_density_from_pressure_temperature(p_bc, T_bc);
     rtype e_bc = physics->get_energy_from_temperature(T_bc);

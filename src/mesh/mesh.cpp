@@ -27,8 +27,8 @@ Mesh::~Mesh() {
     std::cout << "Destroying mesh: " << MESH_NAMES.at(type) << std::endl;
 }
 
-void Mesh::init(const toml::value & input) {
-    std::string type_str = toml::find_or<std::string>(input, "mesh", "type", "file");
+void Mesh::init(const toml::table & input) {
+    std::string type_str = input["mesh"]["type"].value_or("file");
     typename std::unordered_map<std::string, MeshType>::const_iterator it = MESH_TYPES.find(type_str);
     if (it == MESH_TYPES.end()) {
         throw std::runtime_error("Unknown mesh type: " + type_str + ".");
@@ -37,19 +37,19 @@ void Mesh::init(const toml::value & input) {
     }
 
     if (get_type() == MeshType::FILE) {
-        std::string filename = toml::find_or<std::string>(input, "mesh", "filename", "mesh.msh");
+        std::string filename = input["mesh"]["filename"].value_or("mesh.msh");
         throw std::runtime_error("MeshType::FILE not implemented.");
     } else if (get_type() == MeshType::CARTESIAN) {
-        u_int32_t Nx = toml::find_or<u_int32_t>(input, "mesh", "Nx", 100);
-        u_int32_t Ny = toml::find_or<u_int32_t>(input, "mesh", "Ny", 100);
-        rtype Lx = toml::find_or<rtype>(input, "mesh", "Lx", 1.0);
-        rtype Ly = toml::find_or<rtype>(input, "mesh", "Ly", 1.0);
+        u_int32_t Nx = input["mesh"]["Nx"].value_or(100);
+        u_int32_t Ny = input["mesh"]["Ny"].value_or(100);
+        rtype Lx = input["mesh"]["Lx"].value_or(1.0);
+        rtype Ly = input["mesh"]["Ly"].value_or(1.0);
         this->init_cart(Nx, Ny, Lx, Ly);
     } else if (get_type() == MeshType::WEDGE) {
-        u_int32_t Nx = toml::find_or<u_int32_t>(input, "mesh", "Nx", 100);
-        u_int32_t Ny = toml::find_or<u_int32_t>(input, "mesh", "Ny", 100);
-        rtype Lx = toml::find_or<rtype>(input, "mesh", "Lx", 1.0);
-        rtype Ly = toml::find_or<rtype>(input, "mesh", "Ly", 1.0);
+        u_int32_t Nx = input["mesh"]["Nx"].value_or(100);
+        u_int32_t Ny = input["mesh"]["Ny"].value_or(100);
+        rtype Lx = input["mesh"]["Lx"].value_or(1.0);
+        rtype Ly = input["mesh"]["Ly"].value_or(1.0);
         this->init_wedge(Nx, Ny, Lx, Ly);
     } else {
         // Should never get here due to the enum class.

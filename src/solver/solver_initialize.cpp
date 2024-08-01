@@ -17,7 +17,8 @@
 #include <string>
 #include <unordered_map>
 
-#include "exprtk.hpp"
+#include <toml.hpp>
+#include <exprtk.hpp>
 
 enum class InitType {
     CONSTANT,
@@ -37,7 +38,7 @@ static const std::unordered_map<InitType, std::string> INIT_NAMES = {
 void Solver::init_solution() {
     std::cout << "Initializing solution..." << std::endl;
 
-    std::string type_str = toml::find_or(input, "initialize", "type", "constant");
+    std::string type_str = input["initialize"]["type"].value_or("constant");
 
     InitType type;
     typename std::unordered_map<std::string, InitType>::const_iterator it = INIT_TYPES.find(type_str);
@@ -60,23 +61,31 @@ void Solver::init_solution() {
 }
 
 void Solver::init_solution_constant() {
-    if (!input["initialize"].contains("u")) {
+    if (!input["initialize"]["u"]) {
         throw std::runtime_error("Missing u for initialization: constant.");
-    } else if (input["initialize"]["u"].size() != 2) {
+    } else if (input["initialize"]["u"].is_array() &&
+               input["initialize"]["u"].as_array()->size() != 2) {
         throw std::runtime_error("u must be a 2-element array for initialization: constant.");
     }
-
-    if (!input["initialize"].contains("p")) {
+    if (!input["initialize"]["p"]) {
         throw std::runtime_error("Missing p for initialization: constant.");
     }
-
-    if (!input["initialize"].contains("T")) {
+    if (!input["initialize"]["T"]) {
         throw std::runtime_error("Missing T for initialization: constant.");
     }
 
-    std::vector<rtype> u = toml::find<std::vector<rtype>>(input, "initialize", "u");
-    rtype p = toml::find<rtype>(input, "initialize", "p"); 
-    rtype T = toml::find<rtype>(input, "initialize", "T");
+    std::optional<rtype> _u_x = input["initialize"]["u"][0].value<rtype>();
+    std::optional<rtype> _u_y = input["initialize"]["u"][1].value<rtype>();
+    std::optional<rtype> _p = input["initialize"]["p"].value<rtype>();
+    std::optional<rtype> _T = input["initialize"]["T"].value<rtype>();
+
+    if (!_u_x.has_value() || !_u_y.has_value() || !_p.has_value() || !_T.has_value()) {
+        throw std::runtime_error("Invalid values for initialization: constant.");
+    }
+
+    std::vector<rtype> u = {_u_x.value(), _u_y.value()};
+    rtype p = _p.value();
+    rtype T = _T.value();
 
     rtype rho = physics->get_density_from_pressure_temperature(p, T);
     rtype e = physics->get_energy_from_temperature(T);
@@ -101,26 +110,32 @@ void Solver::init_solution_constant() {
 }
 
 void Solver::init_solution_analytical() {
-    if (!input["initialize"].contains("u")) {
+    if (!input["initialize"]["u"]) {
         throw std::runtime_error("Missing u for initialization: analytical.");
-    } else if (input["initialize"]["u"].size() != 2) {
+    } else if (input["initialize"]["u"].is_array() &&
+               input["initialize"]["u"].as_array()->size() != 2) {
         throw std::runtime_error("u must be a 2-element array for initialization: analytical.");
     }
 
-    bool rho_in = input["initialize"].contains("rho");
-    bool p_in = input["initialize"].contains("p");
-    bool T_in = input["initialize"].contains("T");
+    bool rho_in = (input["initialize"]["rho"]) ? true : false;
+    bool p_in = (input["initialize"]["p"]) ? true : false;
+    bool T_in = (input["initialize"]["T"]) ? true : false;
     u_int8_t n_specified = rho_in + p_in + T_in;
     if (n_specified != 2) {
         throw std::runtime_error("Exactly two of rho, p, and T must be specified for initialization: analytical.");
     }
 
-    std::vector<std::string> u_str = toml::find<std::vector<std::string>>(input, "initialize", "u");
-    std::string u_x_str = u_str[0];
-    std::string u_y_str = u_str[1];
-    std::string rho_str = toml::find_or(input, "initialize", "rho", "");
-    std::string p_str = toml::find_or(input, "initialize", "p", "");
-    std::string T_str = toml::find_or(input, "initialize", "T", "");
+    std::optional<std::string> _u_x_str = input["initialize"]["u"][0].value<std::string>();
+    std::optional<std::string> _u_y_str = input["initialize"]["u"][1].value<std::string>();
+    if (!_u_x_str.has_value() || !_u_y_str.has_value()) {
+        throw std::runtime_error("Invalid values for u initialization: analytical.");
+    }
+    std::string u_x_str = _u_x_str.value();
+    std::string u_y_str = _u_y_str.value();
+
+    std::string rho_str = input["initialize"]["rho"].value_or("");
+    std::string p_str = input["initialize"]["p"].value_or("");
+    std::string T_str = input["initialize"]["T"].value_or("");
 
     rtype x, y;
 

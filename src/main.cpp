@@ -28,11 +28,11 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::string inputFileName;
+    std::string input_file_name;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-i") == 0) {
             if (i + 1 < argc) {
-                inputFileName = argv[i + 1];
+                input_file_name = argv[i + 1];
                 ++i;
             } else {
                 std::cerr << "Error: Missing input file after -i flag." << std::endl;
@@ -58,7 +58,7 @@ int main(int argc, char* argv[]) {
 
     // Create solver object
     Solver solver;
-    status = solver.init(inputFileName);
+    status = solver.init(input_file_name);
     if (status != 0) {
         std::cerr << "Error: Solver initialization failed." << std::endl;
         return status;

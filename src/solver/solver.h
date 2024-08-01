@@ -235,7 +235,7 @@ class Solver {
         Kokkos::View<rtype *[2][N_CONSERVATIVE]>::HostMirror h_face_conservatives;
         Kokkos::View<rtype *[2][   N_PRIMITIVE]>::HostMirror h_face_primitives;
     private:
-        toml::value input;
+        toml::table input;
         u_int32_t n_steps;
         rtype t_stop;
         rtype t_wall_stop;

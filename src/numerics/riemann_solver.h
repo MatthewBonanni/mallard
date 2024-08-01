@@ -57,7 +57,7 @@ class RiemannSolver {
         /**
          * @brief Initialize the Riemann solver.
          */
-        virtual void init(const toml::value & input);
+        virtual void init(const toml::table & input);
 
         /**
          * @brief Print the Riemann solver.
