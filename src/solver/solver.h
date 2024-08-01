@@ -243,6 +243,7 @@ class Solver {
         rtype dt;
         rtype cfl;
         Kokkos::View<rtype *> cfl_local;
+        Kokkos::View<rtype *>::HostMirror h_cfl_local;
         rtype t;
         rtype t_last_check;
         rtype t_wall_0;

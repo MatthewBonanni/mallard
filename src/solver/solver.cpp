@@ -306,11 +306,13 @@ void Solver::allocate_memory() {
     Kokkos::resize(primitives, mesh->n_cells());
     Kokkos::resize(face_conservatives, mesh->n_faces());
     Kokkos::resize(face_primitives, mesh->n_faces());
+    Kokkos::resize(cfl_local, mesh->n_cells());
 
     h_conservatives = Kokkos::create_mirror_view(conservatives);
     h_primitives = Kokkos::create_mirror_view(primitives);
     h_face_conservatives = Kokkos::create_mirror_view(face_conservatives);
     h_face_primitives = Kokkos::create_mirror_view(face_primitives);
+    h_cfl_local = Kokkos::create_mirror_view(cfl_local);
 
     solution_vec.push_back(conservatives);
     for (u_int8_t i = 0; i < time_integrator->get_n_solution_vectors() - 1; i++) {
@@ -322,8 +324,6 @@ void Solver::allocate_memory() {
         Kokkos::View<rtype *[N_CONSERVATIVE]> rhs("rhs", mesh->n_cells());
         rhs_vec.push_back(rhs);
     }
-
-    Kokkos::resize(cfl_local, mesh->n_cells());
 }
 
 void Solver::copy_host_to_device() {
@@ -331,6 +331,7 @@ void Solver::copy_host_to_device() {
     Kokkos::deep_copy(primitives, h_primitives);
     Kokkos::deep_copy(face_conservatives, h_face_conservatives);
     Kokkos::deep_copy(face_primitives, h_face_primitives);
+    Kokkos::deep_copy(cfl_local, h_cfl_local);
 }
 
 void Solver::copy_device_to_host() {
@@ -338,22 +339,23 @@ void Solver::copy_device_to_host() {
     Kokkos::deep_copy(h_primitives, primitives);
     Kokkos::deep_copy(h_face_conservatives, face_conservatives);
     Kokkos::deep_copy(h_face_primitives, face_primitives);
+    Kokkos::deep_copy(h_cfl_local, cfl_local);
 }
 
 void Solver::register_data() {
     std::cout << "Registering data..." << std::endl;
 
     for (size_t i = 0; i < CONSERVATIVE_NAMES.size(); i++) {
-        auto subview = Kokkos::subview(conservatives, Kokkos::ALL(), i);
+        auto subview = Kokkos::subview(h_conservatives, Kokkos::ALL(), i);
         data.push_back(Data(CONSERVATIVE_NAMES[i], subview));
     }
 
     for (size_t i = 0; i < PRIMITIVE_NAMES.size(); i++) {
-        auto subview = Kokkos::subview(primitives, Kokkos::ALL(), i);
+        auto subview = Kokkos::subview(h_primitives, Kokkos::ALL(), i);
         data.push_back(Data(PRIMITIVE_NAMES[i], subview));
     }
 
-    data.push_back(Data("CFL", cfl_local));
+    data.push_back(Data("CFL", h_cfl_local));
 }
 
 int Solver::run() {

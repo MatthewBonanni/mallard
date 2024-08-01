@@ -25,7 +25,7 @@ class Data {
          * @param name Name of data array.
          * @param view Pointer to view of data array.
          */
-        Data(std::string name, Kokkos::View<rtype *, Kokkos::LayoutStride> view) :
+        Data(std::string name, Kokkos::View<rtype *, Kokkos::LayoutStride>::HostMirror view) :
             m_name(name), m_view(view) {
             // Empty
         }
@@ -56,7 +56,7 @@ class Data {
         }
     protected:
         std::string m_name;
-        Kokkos::View<rtype *, Kokkos::LayoutStride> m_view;
+        Kokkos::View<rtype *, Kokkos::LayoutStride>::HostMirror m_view;
     private:
 };
 
