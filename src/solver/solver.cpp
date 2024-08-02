@@ -495,8 +495,8 @@ void Solver::check_fields() const {
             msg << "t: " << t << std::endl;
             msg << "step: " << step << std::endl;
             msg << "i_cell: " << i << std::endl;
-            msg << "> x: " << mesh->cell_coords(i, 0) << std::endl;
-            msg << "> y: " << mesh->cell_coords(i, 1) << std::endl;
+            msg << "> x: " << mesh->h_cell_coords(i, 0) << std::endl;
+            msg << "> y: " << mesh->h_cell_coords(i, 1) << std::endl;
             msg << "conservatives:" << std::endl;
             for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
                 msg << "> " << CONSERVATIVE_NAMES[j] << ": " << h_conservatives(i, j) << std::endl;
