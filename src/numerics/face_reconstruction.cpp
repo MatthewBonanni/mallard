@@ -79,9 +79,7 @@ struct FirstOrderFunctor {
 
             for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
                 face_solution(i_face, 0, j) = solution(i_cell_l, j);
-                if (i_cell_r != -1) {
-                    face_solution(i_face, 1, j) = solution(i_cell_r, j);
-                }
+                face_solution(i_face, 1, j) = solution(i_cell_r, j);
             }
         }
 
@@ -148,6 +146,14 @@ struct WENO3_JSFunctor {
                 is_x_face = true;
             }
 
+            // Check if we need to flip our cell indices
+            bool flip;
+            if (is_x_face) {
+                flip = (n_unit[0] < 0);
+            } else {
+                flip = (n_unit[1] < 0);
+            }
+
             u_int32_t ic = i_cell_l / n_cells_y;
             u_int32_t jc = i_cell_l % n_cells_y;
 
@@ -161,25 +167,20 @@ struct WENO3_JSFunctor {
             if (is_boundary) {
                 for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
                     face_solution(i_face, 0, j) = solution(i_cell_l, j);
-                    face_solution(i_face, 1, j) = solution(i_cell_r, j);
+                    face_solution(i_face, 1, j) = solution(i_cell_l, j); // This will be ignored
                 }
                 return;
             }
 
             int32_t i_cell_im1, i_cell_i, i_cell_ip1;
+            int8_t stride = (is_x_face) ? n_cells_y : 1;
 
             // -------------------------------------------------
             // Left side of face
 
-            if (is_x_face) {
-                i_cell_im1 = i_cell_l - n_cells_y;
-                i_cell_i   = i_cell_l;
-                i_cell_ip1 = i_cell_l + n_cells_y;
-            } else {
-                i_cell_im1 = i_cell_l - 1;
-                i_cell_i   = i_cell_l;
-                i_cell_ip1 = i_cell_l + 1;
-            }
+            i_cell_im1 = i_cell_l - 1 * stride;
+            i_cell_i   = i_cell_l + 0 * stride;
+            i_cell_ip1 = i_cell_l + 1 * stride;
 
             for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
                 // Smoothness indicators
@@ -203,14 +204,14 @@ struct WENO3_JSFunctor {
             // -------------------------------------------------
             // Right side of face
 
-            if (is_x_face) {
-                i_cell_im1 = i_cell_l;
-                i_cell_i   = i_cell_l + n_cells_y;
-                i_cell_ip1 = i_cell_l + 2 * n_cells_y;
+            if (!flip) {
+                i_cell_im1 = i_cell_l + 0 * stride;
+                i_cell_i   = i_cell_l + 1 * stride;
+                i_cell_ip1 = i_cell_l + 2 * stride;
             } else {
-                i_cell_im1 = i_cell_l;
-                i_cell_i   = i_cell_l + 1;
-                i_cell_ip1 = i_cell_l + 2;
+                i_cell_im1 = i_cell_l - 2 * stride;
+                i_cell_i   = i_cell_l - 1 * stride;
+                i_cell_ip1 = i_cell_l + 0 * stride;
             }
 
             for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
@@ -304,6 +305,14 @@ struct WENO5_JSFunctor {
                 is_x_face = true;
             }
 
+            // Check if we need to flip our cell indices
+            bool flip;
+            if (is_x_face) {
+                flip = (n_unit[0] < 0);
+            } else {
+                flip = (n_unit[1] < 0);
+            }
+
             u_int32_t ic = i_cell_l / n_cells_y;
             u_int32_t jc = i_cell_l % n_cells_y;
 
@@ -317,29 +326,22 @@ struct WENO5_JSFunctor {
             if (is_boundary) {
                 for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
                     face_solution(i_face, 0, j) = solution(i_cell_l, j);
-                    face_solution(i_face, 1, j) = solution(i_cell_r, j);
+                    face_solution(i_face, 1, j) = solution(i_cell_l, j); // This will be ignored
                 }
                 return;
             }
 
             int32_t i_cell_im2, i_cell_im1, i_cell_i, i_cell_ip1, i_cell_ip2;
+            int8_t stride = (is_x_face) ? n_cells_y : 1;
 
             // -------------------------------------------------
             // Left side of face
 
-            if (is_x_face) {
-                i_cell_im2 = i_cell_l - 2 * n_cells_y;
-                i_cell_im1 = i_cell_l -     n_cells_y;
-                i_cell_i   = i_cell_l                        ;
-                i_cell_ip1 = i_cell_l +     n_cells_y;
-                i_cell_ip2 = i_cell_l + 2 * n_cells_y;
-            } else {
-                i_cell_im2 = i_cell_l - 2;
-                i_cell_im1 = i_cell_l - 1;
-                i_cell_i   = i_cell_l    ;
-                i_cell_ip1 = i_cell_l + 1;
-                i_cell_ip2 = i_cell_l + 2;
-            }
+            i_cell_im2 = i_cell_l - 2 * stride;
+            i_cell_im1 = i_cell_l - 1 * stride;
+            i_cell_i   = i_cell_l + 0 * stride;
+            i_cell_ip1 = i_cell_l + 1 * stride;
+            i_cell_ip2 = i_cell_l + 2 * stride;
 
             for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
                 // Smoothness indicators
@@ -387,18 +389,18 @@ struct WENO5_JSFunctor {
             // -------------------------------------------------
             // Right side of face
 
-            if (is_x_face) {
-                i_cell_im2 = i_cell_l -     n_cells_y;
-                i_cell_im1 = i_cell_l                        ;
-                i_cell_i   = i_cell_l +     n_cells_y;
-                i_cell_ip1 = i_cell_l + 2 * n_cells_y;
-                i_cell_ip2 = i_cell_l + 3 * n_cells_y;
+            if (!flip) {
+                i_cell_im2 = i_cell_l - 1 * stride;
+                i_cell_im1 = i_cell_l + 0 * stride;
+                i_cell_i   = i_cell_l + 1 * stride;
+                i_cell_ip1 = i_cell_l + 2 * stride;
+                i_cell_ip2 = i_cell_l + 3 * stride;
             } else {
-                i_cell_im2 = i_cell_l - 1;
-                i_cell_im1 = i_cell_l    ;
-                i_cell_i   = i_cell_l + 1;
-                i_cell_ip1 = i_cell_l + 2;
-                i_cell_ip2 = i_cell_l + 3;
+                i_cell_im2 = i_cell_l - 3 * stride;
+                i_cell_im1 = i_cell_l - 2 * stride;
+                i_cell_i   = i_cell_l - 1 * stride;
+                i_cell_ip1 = i_cell_l + 0 * stride;
+                i_cell_ip2 = i_cell_l + 1 * stride;
             }
 
             for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
