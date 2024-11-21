@@ -158,52 +158,39 @@ struct FluxFunctor {
         const T_physics physics;
 };
 
+template <typename T_physics, typename T_riemann_solver>
+void Solver::launch_flux_functor(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                                 Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
+    FluxFunctor<T_physics, T_riemann_solver> flux_functor(mesh->face_normals,
+                                                          mesh->face_area,
+                                                          mesh->cells_of_face,
+                                                          face_solution,
+                                                          rhs,
+                                                          dynamic_cast<T_riemann_solver &>(*riemann_solver),
+                                                          *physics->get_as<T_physics>());
+    Kokkos::parallel_for(mesh->n_faces(), flux_functor);
+}
+
 void Solver::calc_rhs_interior(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
                                Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
-    /** \todo Figure out a way to clean this up... */
     if (physics->get_type() == PhysicsType::EULER) {
-        if (riemann_solver->get_type() == RiemannSolverType::Rusanov) {
-            FluxFunctor<Euler, Rusanov> flux_functor(mesh->face_normals,
-                                                     mesh->face_area,
-                                                     mesh->cells_of_face,
-                                                     face_solution,
-                                                     rhs,
-                                                     dynamic_cast<Rusanov &>(*riemann_solver),
-                                                     *physics->get_as<Euler>());
-            Kokkos::parallel_for(mesh->n_faces(), flux_functor);
-        } else if (riemann_solver->get_type() == RiemannSolverType::Roe) {
-            FluxFunctor<Euler, Roe> flux_functor(mesh->face_normals,
-                                                 mesh->face_area,
-                                                 mesh->cells_of_face,
-                                                 face_solution,
-                                                 rhs,
-                                                 dynamic_cast<Roe &>(*riemann_solver),
-                                                 *physics->get_as<Euler>());
-            Kokkos::parallel_for(mesh->n_faces(), flux_functor);
-        } else if (riemann_solver->get_type() == RiemannSolverType::HLL) {
-            FluxFunctor<Euler, HLL> flux_functor(mesh->face_normals,
-                                                 mesh->face_area,
-                                                 mesh->cells_of_face,
-                                                 face_solution,
-                                                 rhs,
-                                                 dynamic_cast<HLL &>(*riemann_solver),
-                                                 *physics->get_as<Euler>());
-            Kokkos::parallel_for(mesh->n_faces(), flux_functor);
-        } else if (riemann_solver->get_type() == RiemannSolverType::HLLC) {
-            FluxFunctor<Euler, HLLC> flux_functor(mesh->face_normals,
-                                                  mesh->face_area,
-                                                  mesh->cells_of_face,
-                                                  face_solution,
-                                                  rhs,
-                                                  dynamic_cast<HLLC &>(*riemann_solver),
-                                                  *physics->get_as<Euler>());
-            Kokkos::parallel_for(mesh->n_faces(), flux_functor);
-        } else {
-            // Should never get here due to the enum class.
-            throw std::runtime_error("Unknown Riemann solver type.");
+        switch (riemann_solver->get_type()) {
+            case RiemannSolverType::Rusanov:
+                launch_flux_functor<Euler, Rusanov>(face_solution, rhs);
+                break;
+            case RiemannSolverType::Roe:
+                launch_flux_functor<Euler, Roe>(face_solution, rhs);
+                break;
+            case RiemannSolverType::HLL:
+                launch_flux_functor<Euler, HLL>(face_solution, rhs);
+                break;
+            case RiemannSolverType::HLLC:
+                launch_flux_functor<Euler, HLLC>(face_solution, rhs);
+                break;
+            default:
+                throw std::runtime_error("Unknown Riemann solver type.");
         }
     } else {
-        // Should never get here due to the enum class.
         throw std::runtime_error("Unknown physics type.");
     }
 }

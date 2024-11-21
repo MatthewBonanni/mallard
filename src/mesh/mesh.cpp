@@ -4,14 +4,15 @@
  * @brief Mesh class implementation.
  * @version 0.1
  * @date 2023-12-17
- * 
+ *
  * @copyright Copyright (c) 2023 Matthew Bonanni
- * 
+ *
  */
 
 #include "mesh.h"
 
 #include <iostream>
+#include <string>
 #include <cmath>
 
 #include <Kokkos_Core.hpp>
@@ -19,8 +20,8 @@
 #include "common.h"
 #include "boundary.h"
 
-Mesh::Mesh(MeshType type) {
-    this->type = type;
+Mesh::Mesh() {
+    // Empty
 }
 
 Mesh::~Mesh() {
@@ -102,6 +103,16 @@ FaceZone * Mesh::get_face_zone(const std::string& name) {
     return nullptr;
 }
 
+CellType Mesh::h_cell_type(u_int32_t i_cell) const {
+    if (h_n_nodes_of_cell(i_cell) == 4) {
+        return CellType::QUAD;
+    } else if (h_n_nodes_of_cell(i_cell) == 3) {
+        return CellType::TRIANGLE;
+    } else {
+        throw std::runtime_error("Unknown cell type.");
+    }
+}
+
 u_int32_t Mesh::h_n_nodes_of_cell(u_int32_t i_cell) const {
     return h_offsets_nodes_of_cell(i_cell + 1) - h_offsets_nodes_of_cell(i_cell);
 }
@@ -128,14 +139,13 @@ u_int32_t Mesh::h_node_of_face(u_int32_t i_face, u_int8_t i_node_local) const {
 
 void Mesh::compute_cell_centroids() {
     for (u_int32_t i_cell = 0; i_cell < n_cells(); ++i_cell) {
-        h_cell_coords(i_cell, 0) = 0.25 * (h_node_coords(h_node_of_cell(i_cell, 0), 0) +
-                                           h_node_coords(h_node_of_cell(i_cell, 1), 0) +
-                                           h_node_coords(h_node_of_cell(i_cell, 2), 0) +
-                                           h_node_coords(h_node_of_cell(i_cell, 3), 0));
-        h_cell_coords(i_cell, 1) = 0.25 * (h_node_coords(h_node_of_cell(i_cell, 0), 1) +
-                                           h_node_coords(h_node_of_cell(i_cell, 1), 1) +
-                                           h_node_coords(h_node_of_cell(i_cell, 2), 1) +
-                                           h_node_coords(h_node_of_cell(i_cell, 3), 1));
+        u_int8_t n_nodes = h_n_nodes_of_cell(i_cell);
+        for (u_int8_t i_node = 0; i_node < n_nodes; ++i_node) {
+            h_cell_coords(i_cell, 0) += h_node_coords(h_node_of_cell(i_cell, i_node), 0);
+            h_cell_coords(i_cell, 1) += h_node_coords(h_node_of_cell(i_cell, i_node), 1);
+        }
+        h_cell_coords(i_cell, 0) /= n_nodes;
+        h_cell_coords(i_cell, 1) /= n_nodes;
     }
 }
 
@@ -150,19 +160,38 @@ void Mesh::compute_face_centroids() {
 
 void Mesh::compute_cell_volumes() {
     for (u_int32_t i_cell = 0; i_cell < n_cells(); ++i_cell) {
-        u_int32_t i_node_0 = h_node_of_cell(i_cell, 0);
-        u_int32_t i_node_1 = h_node_of_cell(i_cell, 1);
-        u_int32_t i_node_2 = h_node_of_cell(i_cell, 2);
-        u_int32_t i_node_3 = h_node_of_cell(i_cell, 3);
+        switch (h_cell_type(i_cell)) {
+            case CellType::TRIANGLE: {
+                u_int32_t i_node_0 = h_node_of_cell(i_cell, 0);
+                u_int32_t i_node_1 = h_node_of_cell(i_cell, 1);
+                u_int32_t i_node_2 = h_node_of_cell(i_cell, 2);
 
-        const NVector coords_0 = {h_node_coords(i_node_0, 0), h_node_coords(i_node_0, 1)};
-        const NVector coords_1 = {h_node_coords(i_node_1, 0), h_node_coords(i_node_1, 1)};
-        const NVector coords_2 = {h_node_coords(i_node_2, 0), h_node_coords(i_node_2, 1)};
-        const NVector coords_3 = {h_node_coords(i_node_3, 0), h_node_coords(i_node_3, 1)};
+                const NVector coords_0 = {h_node_coords(i_node_0, 0), h_node_coords(i_node_0, 1)};
+                const NVector coords_1 = {h_node_coords(i_node_1, 0), h_node_coords(i_node_1, 1)};
+                const NVector coords_2 = {h_node_coords(i_node_2, 0), h_node_coords(i_node_2, 1)};
 
-        rtype a1 = triangle_area_2(coords_0, coords_1, coords_2);
-        rtype a2 = triangle_area_2(coords_0, coords_2, coords_3);
-        h_cell_volume(i_cell) = a1 + a2;
+                h_cell_volume(i_cell) = triangle_area_2(coords_0, coords_1, coords_2);
+                break;
+            }
+            case CellType::QUAD: {
+                u_int32_t i_node_0 = h_node_of_cell(i_cell, 0);
+                u_int32_t i_node_1 = h_node_of_cell(i_cell, 1);
+                u_int32_t i_node_2 = h_node_of_cell(i_cell, 2);
+                u_int32_t i_node_3 = h_node_of_cell(i_cell, 3);
+
+                const NVector coords_0 = {h_node_coords(i_node_0, 0), h_node_coords(i_node_0, 1)};
+                const NVector coords_1 = {h_node_coords(i_node_1, 0), h_node_coords(i_node_1, 1)};
+                const NVector coords_2 = {h_node_coords(i_node_2, 0), h_node_coords(i_node_2, 1)};
+                const NVector coords_3 = {h_node_coords(i_node_3, 0), h_node_coords(i_node_3, 1)};
+
+                rtype a1 = triangle_area_2(coords_0, coords_1, coords_2);
+                rtype a2 = triangle_area_2(coords_0, coords_2, coords_3);
+                h_cell_volume(i_cell) = a1 + a2;
+                break;
+            }
+            default:
+                throw std::runtime_error("Unknown cell type.");
+        }
     }
 }
 

@@ -18,13 +18,11 @@
 #include "common.h"
 
 enum class FaceZoneType {
-    UNKNOWN = -1,
     BOUNDARY = 1,
     INTERIOR = 2
 };
 
 enum class CellZoneType {
-    UNKNOWN = -1,
     FLUID = 1
 };
 

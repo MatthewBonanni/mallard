@@ -21,24 +21,36 @@
 #include "zone.h"
 
 enum class MeshType {
-    UNKNOWN = -1,
     FILE = 1,
     CARTESIAN = 2,
     WEDGE = 3
 };
 
 static const std::unordered_map<std::string, MeshType> MESH_TYPES = {
-    {"unknown", MeshType::UNKNOWN},
     {"file", MeshType::FILE},
     {"cartesian", MeshType::CARTESIAN},
     {"wedge", MeshType::WEDGE}
 };
 
 static const std::unordered_map<MeshType, std::string> MESH_NAMES = {
-    {MeshType::UNKNOWN, "unknown"},
     {MeshType::FILE, "file"},
     {MeshType::CARTESIAN, "cart"},
     {MeshType::WEDGE, "wedge"}
+};
+
+enum class CellType {
+    TRIANGLE = 1,
+    QUAD = 2
+};
+
+static const std::unordered_map<std::string, CellType> CELL_TYPES = {
+    {"triangle", CellType::TRIANGLE},
+    {"quad", CellType::QUAD}
+};
+
+static const std::unordered_map<CellType, std::string> CELL_NAMES = {
+    {CellType::TRIANGLE, "triangle"},
+    {CellType::QUAD, "quad"}
 };
 
 
@@ -47,7 +59,7 @@ class Mesh {
         /**
          * @brief Construct a new Mesh object
          */
-        Mesh(MeshType type = MeshType::UNKNOWN);
+        Mesh();
 
         /**
          * @brief Destroy the Mesh object
@@ -215,6 +227,12 @@ class Mesh {
          * @return Node id.
          */
         u_int32_t h_node_of_face(u_int32_t i_face, u_int8_t i_node_local) const;
+
+        /**
+         * @brief Get the type of a cell.
+         * @param i_cell Index of the cell.
+         */
+        CellType h_cell_type(u_int32_t i_cell) const;
 
         /**
          * @brief Compute cell centroids.

@@ -31,13 +31,11 @@ class Solver {
     public:
         /**
          * @brief Construct a new Solver object
-         * 
          */
         Solver();
 
         /**
          * @brief Destroy the Solver object
-         * 
          */
         ~Solver();
 
@@ -235,6 +233,13 @@ class Solver {
         Kokkos::View<rtype *[2][N_CONSERVATIVE]>::HostMirror h_face_conservatives;
         Kokkos::View<rtype *[2][   N_PRIMITIVE]>::HostMirror h_face_primitives;
     private:
+        /**
+         * @brief Launch the flux functor.
+         */
+        template <typename T_physics, typename T_riemann_solver>
+        void launch_flux_functor(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                                 Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
+
         toml::value input;
         u_int32_t n_steps;
         rtype t_stop;
