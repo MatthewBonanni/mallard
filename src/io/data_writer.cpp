@@ -116,7 +116,7 @@ void DataWriter::write_vtu(u_int32_t step) const {
     out << "<?xml version=\"1.0\"?>\n";
     out << "<VTKFile type=\"UnstructuredGrid\" version=\"0.1\" byte_order=\"" << endianness() << "\">\n";
     out << "  <UnstructuredGrid>\n";
-    out << "    <Piece NumberOfPoints=\"" << mesh->n_nodes() << "\" NumberOfCells=\"" << mesh->n_cells() << "\">\n";
+    out << "    <Piece NumberOfPoints=\"" << mesh->n_nodes << "\" NumberOfCells=\"" << mesh->n_cells << "\">\n";
 
     // Write PointData
     out << "      <PointData>\n";
@@ -130,7 +130,7 @@ void DataWriter::write_vtu(u_int32_t step) const {
         out << "format=\"appended\" ";
         out << "offset=\"" << offset_data << "\">\n";
         out << "        </DataArray>\n";
-        offset_data += sizeof(int) + mesh->n_cells() * sizeof(rtype);
+        offset_data += sizeof(int) + mesh->n_cells * sizeof(rtype);
     }
     out << "      </CellData>\n";
 
@@ -141,7 +141,7 @@ void DataWriter::write_vtu(u_int32_t step) const {
     out << "format=\"appended\" ";
     out << "offset=\"" << offset_data << "\">\n";
     out << "        </DataArray>\n";
-    offset_data += sizeof(int) + mesh->n_nodes() * 3 * sizeof(rtype);
+    offset_data += sizeof(int) + mesh->n_nodes * 3 * sizeof(rtype);
     out << "      </Points>\n";
 
     // Write Cells
@@ -152,7 +152,7 @@ void DataWriter::write_vtu(u_int32_t step) const {
     out << "format=\"appended\" ";
     out << "offset=\"" << offset_data << "\">\n";
     out << "        </DataArray>\n";
-    for (u_int32_t i = 0; i < mesh->n_cells(); i++) {
+    for (u_int32_t i = 0; i < mesh->n_cells; i++) {
         len_connectivity += mesh->h_n_nodes_of_cell(i);
     }
     offset_data += sizeof(int) + len_connectivity * sizeof(int);
@@ -162,14 +162,14 @@ void DataWriter::write_vtu(u_int32_t step) const {
     out << "format=\"appended\" ";
     out << "offset=\"" << offset_data << "\">\n";
     out << "        </DataArray>\n";
-    offset_data += sizeof(int) + mesh->n_cells() * sizeof(int);
+    offset_data += sizeof(int) + mesh->n_cells * sizeof(int);
 
     // types
     out << "        <DataArray type=\"Int32\" Name=\"types\" ";
     out << "format=\"appended\" ";
     out << "offset=\"" << offset_data << "\">\n";
     out << "        </DataArray>\n";
-    offset_data += sizeof(int) + mesh->n_cells() * sizeof(int);
+    offset_data += sizeof(int) + mesh->n_cells * sizeof(int);
 
     out << "      </Cells>\n";
     out << "    </Piece>\n";
@@ -185,19 +185,19 @@ void DataWriter::write_vtu(u_int32_t step) const {
     // Do nothing, no point data
 
     // Write CellData
-    n_bytes = sizeof(rtype) * mesh->n_cells();
+    n_bytes = sizeof(rtype) * mesh->n_cells;
     for (const auto & data_ptr : data_ptrs) {
         out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
-        for (u_int32_t i = 0; i < mesh->n_cells(); i++) {
+        for (u_int32_t i = 0; i < mesh->n_cells; i++) {
             out.write(reinterpret_cast<const char *>(&(*data_ptr)[i]), sizeof(rtype));
         }
     }
 
     // Write Points
-    n_bytes = sizeof(rtype) * mesh->n_nodes() * 3;
+    n_bytes = sizeof(rtype) * mesh->n_nodes * 3;
     out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
     rtype coord;
-    for (u_int32_t i = 0; i < mesh->n_nodes(); i++) {
+    for (u_int32_t i = 0; i < mesh->n_nodes; i++) {
         for (u_int8_t j = 0; j < N_DIM; j++) {
             coord = mesh->h_node_coords(i, j);
             out.write(reinterpret_cast<const char *>(&coord), sizeof(rtype));
@@ -214,7 +214,7 @@ void DataWriter::write_vtu(u_int32_t step) const {
     n_bytes = sizeof(int) * len_connectivity;
     out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
     u_int32_t i_node;
-    for (u_int32_t i = 0; i < mesh->n_cells(); i++) {
+    for (u_int32_t i = 0; i < mesh->n_cells; i++) {
         for (u_int32_t j = 0; j < mesh->h_n_nodes_of_cell(i); j++) {
             i_node = mesh->h_node_of_cell(i, j);
             out.write(reinterpret_cast<const char *>(&i_node), sizeof(int));
@@ -222,19 +222,19 @@ void DataWriter::write_vtu(u_int32_t step) const {
     }
 
     // offsets
-    n_bytes = sizeof(int) * mesh->n_cells();
+    n_bytes = sizeof(int) * mesh->n_cells;
     out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
     u_int64_t offset = 0;
-    for (u_int32_t i = 0; i < mesh->n_cells(); i++) {
+    for (u_int32_t i = 0; i < mesh->n_cells; i++) {
         offset += mesh->h_n_nodes_of_cell(i);
         out.write(reinterpret_cast<const char *>(&offset), sizeof(int));
     }
 
     // types
-    n_bytes = sizeof(int) * mesh->n_cells();
+    n_bytes = sizeof(int) * mesh->n_cells;
     out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
     u_int8_t cell_type = 7;
-    for (u_int32_t i = 0; i < mesh->n_cells(); i++) {
+    for (u_int32_t i = 0; i < mesh->n_cells; i++) {
         out.write(reinterpret_cast<const char *>(&cell_type), sizeof(int));
     }
 

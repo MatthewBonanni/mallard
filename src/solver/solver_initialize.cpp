@@ -86,7 +86,7 @@ void Solver::init_solution_constant() {
     rtype rhou_y = rho * u[1];
     rtype rhoE = rho * E;
 
-    for (u_int32_t i = 0; i < mesh->n_cells(); ++i) {
+    for (u_int32_t i = 0; i < mesh->n_cells; ++i) {
         h_conservatives(i, 0) = rho;
         h_conservatives(i, 1) = rhou_x;
         h_conservatives(i, 2) = rhou_y;
@@ -148,7 +148,7 @@ void Solver::init_solution_analytical() {
     rtype p, T;
     rtype rho, e, E, h, rhou_x, rhou_y, rhoE;
 
-    for (u_int32_t i = 0; i < mesh->n_cells(); ++i) {
+    for (u_int32_t i = 0; i < mesh->n_cells; ++i) {
         x = mesh->h_cell_coords(i, 0);
         y = mesh->h_cell_coords(i, 1);
 

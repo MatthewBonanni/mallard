@@ -13,26 +13,26 @@
 #define FACE_RECONSTRUCTION_H
 
 #include <memory>
+#include <unordered_map>
 
 #include "common_typedef.h"
 #include "mesh.h"
 
+#define MAX_N_STENCIL_PER_CELL 5
+
 enum class FaceReconstructionType {
     FirstOrder,
-    WENO3_JS,
-    WENO5_JS,
+    WENO,
 };
 
 static const std::unordered_map<std::string, FaceReconstructionType> FACE_RECONSTRUCTION_TYPES = {
     {"FO", FaceReconstructionType::FirstOrder},
-    {"WENO3_JS", FaceReconstructionType::WENO3_JS},
-    {"WENO5_JS", FaceReconstructionType::WENO5_JS}
+    {"WENO", FaceReconstructionType::WENO},
 };
 
 static const std::unordered_map<FaceReconstructionType, std::string> FACE_RECONSTRUCTION_NAMES = {
     {FaceReconstructionType::FirstOrder, "FO"},
-    {FaceReconstructionType::WENO3_JS, "WENO3_JS"},
-    {FaceReconstructionType::WENO5_JS, "WENO5_JS"}
+    {FaceReconstructionType::WENO, "WENO"},
 };
 
 /**
@@ -116,17 +116,17 @@ class FirstOrder : public FaceReconstruction {
     private:
 };
 
-class WENO3_JS : public FaceReconstruction {
+class WENO : public FaceReconstruction {
     public:
         /**
          * @brief Construct a new WENO object
          */
-        WENO3_JS();
+        WENO(u_int8_t poly_order);
 
         /**
          * @brief Destroy the WENO object
          */
-        ~WENO3_JS();
+        ~WENO();
 
         /**
          * @brief Reconstruct the face values.
@@ -137,29 +137,29 @@ class WENO3_JS : public FaceReconstruction {
                               Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) override;
     protected:
     private:
-};
+        std::vector<u_int32_t> compute_stencil_of_cell_centered(u_int32_t i_cell);
+        std::vector<std::vector<u_int32_t>> compute_stencils_of_cell_directional(u_int32_t i_cell);
+        void compute_stencils_of_cell(u_int32_t i_cell,
+                                      std::vector<u_int32_t> & v_offsets_stencils_of_cell,
+                                      std::vector<u_int32_t> & v_stencils_of_cell,
+                                      std::vector<u_int32_t> & v_stencils);
+        void compute_stencils();
 
-class WENO5_JS : public FaceReconstruction {
-    public:
-        /**
-         * @brief Construct a new WENO object
-         */
-        WENO5_JS();
-
-        /**
-         * @brief Destroy the WENO object
-         */
-        ~WENO5_JS();
-
-        /**
-         * @brief Reconstruct the face values.
-         * @param solution View of the solution.
-         * @param face_solution View of the face solution.
-         */
-        void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                              Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) override;
-    protected:
-    private:
+        u_int8_t poly_order;
+        u_int16_t n_dof;
+        u_int16_t max_cells_per_stencil;
+        Kokkos::View<u_int32_t *> offsets_stencils_of_cell;
+        Kokkos::View<u_int32_t *>::HostMirror h_offsets_stencils_of_cell;
+        // ^ vector of offsets into stencils_of_cell, to get the group of stencils for the target
+        // cell. The difference between two entries is the number of stencils
+        // for the target cell
+        Kokkos::View<u_int32_t *> stencils_of_cell;
+        Kokkos::View<u_int32_t *>::HostMirror h_stencils_of_cell;
+        // ^ vector of offsets into stencils, to get a particular stencil from the group.
+        // The difference between two offsets is the number of cells in a given stencil
+        Kokkos::View<u_int32_t *> stencils;
+        Kokkos::View<u_int32_t *>::HostMirror h_stencils;
+        // ^ vector of cell indices that are part of each stencil.
 };
 
 #endif // FACE_RECONSTRUCTION_H

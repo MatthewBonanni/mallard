@@ -92,377 +92,208 @@ struct FirstOrderFunctor {
 void FirstOrder::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                   Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) {
     FirstOrderFunctor flux_functor(mesh->cells_of_face, face_solution, solution);
-    Kokkos::parallel_for(mesh->n_faces(), flux_functor);
+    Kokkos::parallel_for(mesh->n_faces, flux_functor);
 }
 
-WENO3_JS::WENO3_JS() {
-    type = FaceReconstructionType::WENO3_JS;
+WENO::WENO(u_int8_t poly_order) :
+        poly_order(poly_order) {
+    type = FaceReconstructionType::WENO;
+    switch (N_DIM) {
+        case 2 : {
+            n_dof = (poly_order + 1) * (poly_order + 2) / 2 - 1;
+            break;
+        }
+        case 3 : {
+            n_dof = (poly_order + 1) * (poly_order + 2) * (poly_order + 3) / 6 - 1;
+            break;
+        }
+        default : {
+            throw std::runtime_error("WENO has not been implemented for N_DIM = " + std::to_string(N_DIM) + ".");
+        }
+    }
+    max_cells_per_stencil = 2 * n_dof;
+    compute_stencils();
 }
 
-WENO3_JS::~WENO3_JS() {
+WENO::~WENO() {
     // Empty
 }
 
-struct WENO3_JSFunctor {
+std::vector<u_int32_t> WENO::compute_stencil_of_cell_centered(u_int32_t i_cell) {
+    // Naive Cell Based (NCB) algorithm
+    // Just fill up to max_cells_per_stencil for now
+    /** \todo Condition number optimization */
+    bool done = false;
+    std::vector<std::vector<u_int32_t>> neighbor_rings;
+    neighbor_rings.push_back({i_cell});
+    u_int16_t stencil_size = 1;
+    while (!done) {
+        // Get the next ring of neighbors
+        std::vector<u_int32_t> next_ring;
+        for (auto i_cell : neighbor_rings.back()) {
+            std::vector<u_int32_t> neighbors;
+            mesh->neighbors_of_cell(i_cell, 1, neighbors);
+            for (auto neighbor : neighbors) {
+                if (std::find(neighbor_rings.back().begin(), neighbor_rings.back().end(), neighbor) == neighbor_rings.back().end()) {
+                    next_ring.push_back(neighbor);
+                }
+            }
+        }
+
+        // Check if adding the next ring would exceed the maximum size
+        u_int16_t next_size = stencil_size + next_ring.size();
+        if (next_size < max_cells_per_stencil) {
+            // Add the ring and continue
+            neighbor_rings.push_back(next_ring);
+            stencil_size = next_size;
+        } else if (next_size == max_cells_per_stencil) {
+            // Add the ring and stop
+            neighbor_rings.push_back(next_ring);
+            stencil_size = next_size;
+            done = true;
+        } else {
+            // Adding the ring would exceed the maximum size,
+            // so we sort the neighbors by distance to the target cell,
+            // and add the closest neighbors until we reach the maximum size
+            std::vector<std::pair<u_int32_t, rtype>> distances;
+            for (auto i_cell : next_ring) {
+                rtype distance = 0.0;
+                for (u_int8_t i_dim = 0; i_dim < N_DIM; ++i_dim) {
+                    distance += std::pow(mesh->cell_coords(i_cell, i_dim) - mesh->cell_coords(i_cell, i_dim), 2);
+                }
+                distances.push_back(std::make_pair(i_cell, distance));
+            }
+            std::sort(distances.begin(),
+                      distances.end(),
+                      [](auto & left, auto & right) {
+                          return left.second < right.second;
+                      });
+            for (u_int16_t i = 0; i < max_cells_per_stencil - stencil_size; ++i) {
+                next_ring.push_back(distances[i].first);
+            }
+            done = true;
+        }
+    }
+
+    // The stencil is obtained by flattening the neighbor_rings vector
+    std::vector<u_int32_t> stencil;
+    for (auto ring : neighbor_rings) {
+        for (auto i_cell : ring) {
+            stencil.push_back(i_cell);
+        }
+    }
+    return stencil;
+}
+
+std::vector<std::vector<u_int32_t>> WENO::compute_stencils_of_cell_directional(u_int32_t i_cell) {
+    std::vector<std::vector<u_int32_t>> stencils;
+    return stencils;
+}
+
+void WENO::compute_stencils_of_cell(u_int32_t i_cell,
+                                    std::vector<u_int32_t> & v_offsets_stencils_of_cell,
+                                    std::vector<u_int32_t> & v_stencils_of_cell,
+                                    std::vector<u_int32_t> & v_stencils) {
+    std::vector<std::vector<u_int32_t>> stencils;
+
+    // Compute the centered stencil
+    std::vector<u_int32_t> stencil_centered = compute_stencil_of_cell_centered(i_cell);
+    stencils.push_back(stencil_centered);
+
+    // Compute the directional stencils
+    std::vector<std::vector<u_int32_t>> stencils_directional = compute_stencils_of_cell_directional(i_cell);
+    for (auto stencil : stencils_directional) {
+        stencils.push_back(stencil);
+    }
+
+    // Update the global arrays
+    for (auto stencil : stencils) {
+        for (auto i_cell : stencil) {
+            v_stencils.push_back(i_cell);
+        }
+        v_stencils_of_cell.push_back(v_stencils.size());
+    }
+    v_offsets_stencils_of_cell.push_back(v_stencils_of_cell.size());
+}
+
+void WENO::compute_stencils() {
+    std::vector<u_int32_t> v_offsets_stencils_of_cell;
+    std::vector<u_int32_t> v_stencils_of_cell;
+    std::vector<u_int32_t> v_stencils;
+
+    for (u_int32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
+        compute_stencils_of_cell(i_cell,
+                                 v_offsets_stencils_of_cell,
+                                 v_stencils_of_cell,
+                                 v_stencils);
+    }
+
+    // Allocate device arrays
+    offsets_stencils_of_cell = Kokkos::View<u_int32_t *>("offsets_stencils_of_cell", v_offsets_stencils_of_cell.size());
+    stencils_of_cell = Kokkos::View<u_int32_t *>("stencils_of_cell", v_stencils.size());
+    stencils = Kokkos::View<u_int32_t *>("stencils", v_stencils.size());
+
+    // Set up host mirrors
+    h_offsets_stencils_of_cell = Kokkos::create_mirror_view(offsets_stencils_of_cell);
+    h_stencils_of_cell = Kokkos::create_mirror_view(stencils_of_cell);
+    h_stencils = Kokkos::create_mirror_view(stencils);
+
+    // Fill host mirrors
+    for (u_int32_t i = 0; i < v_offsets_stencils_of_cell.size(); ++i) {
+        h_offsets_stencils_of_cell(i) = v_offsets_stencils_of_cell[i];
+    }
+    for (u_int32_t i = 0; i < v_stencils_of_cell.size(); ++i) {
+        h_stencils_of_cell(i) = v_stencils_of_cell[i];
+    }
+    for (u_int32_t i = 0; i < v_stencils.size(); ++i) {
+        h_stencils(i) = v_stencils[i];
+    }
+
+    // Copy from host to device
+    Kokkos::deep_copy(offsets_stencils_of_cell, h_offsets_stencils_of_cell);
+    Kokkos::deep_copy(stencils_of_cell, h_stencils_of_cell);
+    Kokkos::deep_copy(stencils, h_stencils);
+}
+
+struct WENOFunctor {
     public:
         /**
-         * @brief Construct a new WENO3_JSFunctor object
+         * @brief Construct a new WENOFunctor object
          * @param cells_of_face Cells of face.
          * @param face_normals Face normals.
-         * @param n_cells_x Number of cells in the x-direction.
-         * @param n_cells_y Number of cells in the y-direction.
          * @param face_solution Face solution.
          * @param solution Cell solution.
          */
-        WENO3_JSFunctor(Kokkos::View<int32_t *[2]> cells_of_face,
-                        Kokkos::View<rtype *[2]> face_normals,
-                        u_int32_t n_cells_x,
-                        u_int32_t n_cells_y,
-                        Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
-                        Kokkos::View<rtype *[N_CONSERVATIVE]> solution) :
-                            cells_of_face(cells_of_face),
-                            face_normals(face_normals),
-                            n_cells_x(n_cells_x),
-                            n_cells_y(n_cells_y),
-                            face_solution(face_solution),
-                            solution(solution) {}
+        WENOFunctor(Kokkos::View<int32_t *[2]> cells_of_face,
+                    Kokkos::View<rtype *[2]> face_normals,
+                    Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                    Kokkos::View<rtype *[N_CONSERVATIVE]> solution) :
+                        cells_of_face(cells_of_face),
+                        face_normals(face_normals),
+                        face_solution(face_solution),
+                        solution(solution) {}
         
         /**
-         * @brief Overloaded operator for WENO3_JS face reconstruction.
+         * @brief Overloaded operator for WENO face reconstruction.
          * @param i_face Face index.
          */
         KOKKOS_INLINE_FUNCTION
         void operator()(const u_int32_t i_face) const {
-            /** \todo This is super hacky, only valid for a 2d uniform cartesian mesh */
-            int32_t i_cell_l = cells_of_face(i_face, 0);
-            int32_t i_cell_r = cells_of_face(i_face, 1);
-
-            bool is_x_face = false;
-            rtype n_vec[N_DIM];
-            rtype n_unit[N_DIM];
-            FOR_I_DIM n_vec[i] = face_normals(i_face, i);
-            unit<N_DIM>(n_vec, n_unit);
-            if (Kokkos::fabs(n_unit[0]) > 0.5) {
-                is_x_face = true;
-            }
-
-            // Check if we need to flip our cell indices
-            bool flip;
-            if (is_x_face) {
-                flip = (n_unit[0] < 0);
-            } else {
-                flip = (n_unit[1] < 0);
-            }
-
-            u_int32_t ic = i_cell_l / n_cells_y;
-            u_int32_t jc = i_cell_l % n_cells_y;
-
-            // Handle boundary conditions
-            bool is_boundary = false;
-            if (is_x_face) {
-                is_boundary = (ic < 1 || ic > n_cells_x - 2);
-            } else {
-                is_boundary = (jc < 1 || jc > n_cells_y - 2);
-            }
-            if (is_boundary) {
-                for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-                    face_solution(i_face, 0, j) = solution(i_cell_l, j);
-                    face_solution(i_face, 1, j) = solution(i_cell_l, j); // This will be ignored
-                }
-                return;
-            }
-
-            int32_t i_cell_im1, i_cell_i, i_cell_ip1;
-            int8_t stride = (is_x_face) ? n_cells_y : 1;
-
-            // -------------------------------------------------
-            // Left side of face
-
-            i_cell_im1 = i_cell_l - 1 * stride;
-            i_cell_i   = i_cell_l + 0 * stride;
-            i_cell_ip1 = i_cell_l + 1 * stride;
-
-            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-                // Smoothness indicators
-                rtype beta_0 = Kokkos::pow(solution(i_cell_i,   j) - solution(i_cell_im1, j), 2.0);
-                rtype beta_1 = Kokkos::pow(solution(i_cell_ip1, j) - solution(i_cell_i,   j), 2.0);
-
-                rtype epsilon = 1e-6;
-                rtype alpha_0 = (1.0 / 3.0) / Kokkos::pow(epsilon + beta_0, 2.0);
-                rtype alpha_1 = (2.0 / 3.0) / Kokkos::pow(epsilon + beta_1, 2.0);
-
-                rtype one_alpha = 1 / (alpha_0 + alpha_1);
-                rtype w_0 = alpha_0 * one_alpha;
-                rtype w_1 = alpha_1 * one_alpha;
-
-                rtype p_0 = -0.5 * solution(i_cell_im1, j) + 1.5 * solution(i_cell_i,   j);
-                rtype p_1 =  0.5 * solution(i_cell_i,   j) + 0.5 * solution(i_cell_ip1, j);
-
-                face_solution(i_face, 0, j) = w_0 * p_0 + w_1 * p_1;
-            }
-
-            // -------------------------------------------------
-            // Right side of face
-
-            if (!flip) {
-                i_cell_im1 = i_cell_l + 0 * stride;
-                i_cell_i   = i_cell_l + 1 * stride;
-                i_cell_ip1 = i_cell_l + 2 * stride;
-            } else {
-                i_cell_im1 = i_cell_l - 2 * stride;
-                i_cell_i   = i_cell_l - 1 * stride;
-                i_cell_ip1 = i_cell_l + 0 * stride;
-            }
-
-            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-                // Smoothness indicators
-                rtype beta_0 = Kokkos::pow(solution(i_cell_i,   j) - solution(i_cell_im1, j), 2.0);
-                rtype beta_1 = Kokkos::pow(solution(i_cell_ip1, j) - solution(i_cell_i,   j), 2.0);
-
-                rtype epsilon = 1e-6;
-                rtype alpha_0 = (2.0 / 3.0) / Kokkos::pow(epsilon + beta_0, 2.0);
-                rtype alpha_1 = (1.0 / 3.0) / Kokkos::pow(epsilon + beta_1, 2.0);
-
-                rtype one_alpha = 1 / (alpha_0 + alpha_1);
-                rtype w_0 = alpha_0 * one_alpha;
-                rtype w_1 = alpha_1 * one_alpha;
-
-                rtype p_0 = 0.5 * solution(i_cell_im1, j) + 0.5 * solution(i_cell_i,   j);
-                rtype p_1 = 1.5 * solution(i_cell_i,   j) - 0.5 * solution(i_cell_ip1, j);
-
-                face_solution(i_face, 1, j) = w_0 * p_0 + w_1 * p_1;
-            }
+            // Empty
         }
     
     private:
         Kokkos::View<int32_t *[2]> cells_of_face;
         Kokkos::View<rtype *[2]> face_normals;
-        u_int32_t n_cells_x;
-        u_int32_t n_cells_y;
         Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution;
         Kokkos::View<rtype *[N_CONSERVATIVE]> solution;
 };
 
-void WENO3_JS::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+void WENO::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                 Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) {
-    WENO3_JSFunctor flux_functor(mesh->cells_of_face,
-                                 mesh->face_normals,
-                                 mesh->n_cells_x(),
-                                 mesh->n_cells_y(),
-                                 face_solution,
-                                 solution);
-    Kokkos::parallel_for(mesh->n_faces(), flux_functor);
-}
-
-WENO5_JS::WENO5_JS() {
-    type = FaceReconstructionType::WENO5_JS;
-}
-
-WENO5_JS::~WENO5_JS() {
-    // Empty
-}
-
-struct WENO5_JSFunctor {
-    public:
-        /**
-         * @brief Construct a new WENO5_JSFunctor object
-         * @param cells_of_face Cells of face.
-         * @param face_normals Face normals.
-         * @param n_cells_x Number of cells in the x-direction.
-         * @param n_cells_y Number of cells in the y-direction.
-         * @param face_solution Face solution.
-         * @param solution Cell solution.
-         */
-        WENO5_JSFunctor(Kokkos::View<int32_t *[2]> cells_of_face,
-                        Kokkos::View<rtype *[2]> face_normals,
-                        u_int32_t n_cells_x,
-                        u_int32_t n_cells_y,
-                        Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
-                        Kokkos::View<rtype *[N_CONSERVATIVE]> solution) :
-                            cells_of_face(cells_of_face),
-                            face_normals(face_normals),
-                            n_cells_x(n_cells_x),
-                            n_cells_y(n_cells_y),
-                            face_solution(face_solution),
-                            solution(solution) {}
-        
-        /**
-         * @brief Overloaded operator for WENO5_JS face reconstruction.
-         * @param i_face Face index.
-         */
-        KOKKOS_INLINE_FUNCTION
-        void operator()(const u_int32_t i_face) const {
-            /** \todo This is super hacky, only valid for a 2d uniform cartesian mesh */
-            int32_t i_cell_l = cells_of_face(i_face, 0);
-            int32_t i_cell_r = cells_of_face(i_face, 1);
-
-            bool is_x_face = false;
-            rtype n_vec[N_DIM];
-            rtype n_unit[N_DIM];
-            FOR_I_DIM n_vec[i] = face_normals(i_face, i);
-            unit<N_DIM>(n_vec, n_unit);
-            if (Kokkos::fabs(n_unit[0]) > 0.5) {
-                is_x_face = true;
-            }
-
-            // Check if we need to flip our cell indices
-            bool flip;
-            if (is_x_face) {
-                flip = (n_unit[0] < 0);
-            } else {
-                flip = (n_unit[1] < 0);
-            }
-
-            u_int32_t ic = i_cell_l / n_cells_y;
-            u_int32_t jc = i_cell_l % n_cells_y;
-
-            // Handle boundary conditions
-            bool is_boundary = false;
-            if (is_x_face) {
-                is_boundary = (ic < 2 || ic > n_cells_x - 3);
-            } else {
-                is_boundary = (jc < 2 || jc > n_cells_y - 3);
-            }
-            if (is_boundary) {
-                for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-                    face_solution(i_face, 0, j) = solution(i_cell_l, j);
-                    face_solution(i_face, 1, j) = solution(i_cell_l, j); // This will be ignored
-                }
-                return;
-            }
-
-            int32_t i_cell_im2, i_cell_im1, i_cell_i, i_cell_ip1, i_cell_ip2;
-            int8_t stride = (is_x_face) ? n_cells_y : 1;
-
-            // -------------------------------------------------
-            // Left side of face
-
-            i_cell_im2 = i_cell_l - 2 * stride;
-            i_cell_im1 = i_cell_l - 1 * stride;
-            i_cell_i   = i_cell_l + 0 * stride;
-            i_cell_ip1 = i_cell_l + 1 * stride;
-            i_cell_ip2 = i_cell_l + 2 * stride;
-
-            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-                // Smoothness indicators
-                rtype beta_0 = 13.0 / 12.0 * Kokkos::pow(        solution(i_cell_im2, j)
-                                                         - 2.0 * solution(i_cell_im1, j)
-                                                         +       solution(i_cell_i,   j), 2.0) +
-                                      0.25 * Kokkos::pow(        solution(i_cell_im2, j)
-                                                         - 4.0 * solution(i_cell_im1, j)
-                                                         + 3.0 * solution(i_cell_i,   j), 2.0);
-                rtype beta_1 = 13.0 / 12.0 * Kokkos::pow(        solution(i_cell_im1, j)
-                                                         - 2.0 * solution(i_cell_i,   j)
-                                                         +       solution(i_cell_ip1, j), 2.0) +
-                                      0.25 * Kokkos::pow(        solution(i_cell_im1, j)
-                                                         -       solution(i_cell_ip1, j), 2.0);
-                rtype beta_2 = 13.0 / 12.0 * Kokkos::pow(        solution(i_cell_i,   j)
-                                                         - 2.0 * solution(i_cell_ip1, j)
-                                                         +       solution(i_cell_ip2, j), 2.0) +
-                                      0.25 * Kokkos::pow(  3.0 * solution(i_cell_i,   j)
-                                                         - 4.0 * solution(i_cell_ip1, j)
-                                                         +       solution(i_cell_ip2, j), 2.0);
-
-                rtype epsilon = 1e-6;
-                rtype alpha_0 = 0.1 / Kokkos::pow(epsilon + beta_0, 2.0);
-                rtype alpha_1 = 0.6 / Kokkos::pow(epsilon + beta_1, 2.0);
-                rtype alpha_2 = 0.3 / Kokkos::pow(epsilon + beta_2, 2.0);
-
-                rtype one_alpha = 1 / (alpha_0 + alpha_1 + alpha_2);
-                rtype w_0 = alpha_0 * one_alpha;
-                rtype w_1 = alpha_1 * one_alpha;
-                rtype w_2 = alpha_2 * one_alpha;
-
-                rtype p_0 =   ( 1.0 / 3.0) * solution(i_cell_im2, j)
-                            - ( 7.0 / 6.0) * solution(i_cell_im1, j)
-                            + (11.0 / 6.0) * solution(i_cell_i,   j);
-                rtype p_1 = - ( 1.0 / 6.0) * solution(i_cell_im1, j)
-                            + ( 5.0 / 6.0) * solution(i_cell_i,   j)
-                            + ( 1.0 / 3.0) * solution(i_cell_ip1, j);
-                rtype p_2 =   ( 1.0 / 3.0) * solution(i_cell_i,   j)
-                            + ( 5.0 / 6.0) * solution(i_cell_ip1, j)
-                            - ( 1.0 / 6.0) * solution(i_cell_ip2, j);
-
-                face_solution(i_face, 0, j) = w_0 * p_0 + w_1 * p_1 + w_2 * p_2;
-            }
-
-            // -------------------------------------------------
-            // Right side of face
-
-            if (!flip) {
-                i_cell_im2 = i_cell_l - 1 * stride;
-                i_cell_im1 = i_cell_l + 0 * stride;
-                i_cell_i   = i_cell_l + 1 * stride;
-                i_cell_ip1 = i_cell_l + 2 * stride;
-                i_cell_ip2 = i_cell_l + 3 * stride;
-            } else {
-                i_cell_im2 = i_cell_l - 3 * stride;
-                i_cell_im1 = i_cell_l - 2 * stride;
-                i_cell_i   = i_cell_l - 1 * stride;
-                i_cell_ip1 = i_cell_l + 0 * stride;
-                i_cell_ip2 = i_cell_l + 1 * stride;
-            }
-
-            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-                // Smoothness indicators
-                rtype beta_0 = 13.0 / 12.0 * Kokkos::pow(        solution(i_cell_im2, j)
-                                                         - 2.0 * solution(i_cell_im1, j)
-                                                         +       solution(i_cell_i,   j), 2.0) +
-                                      0.25 * Kokkos::pow(        solution(i_cell_im2, j)
-                                                         - 4.0 * solution(i_cell_im1, j)
-                                                         + 3.0 * solution(i_cell_i,   j), 2.0);
-                rtype beta_1 = 13.0 / 12.0 * Kokkos::pow(        solution(i_cell_im1, j)
-                                                         - 2.0 * solution(i_cell_i,   j)
-                                                         +       solution(i_cell_ip1, j), 2.0) +
-                                      0.25 * Kokkos::pow(        solution(i_cell_im1, j)
-                                                         -       solution(i_cell_ip1, j), 2.0);
-                rtype beta_2 = 13.0 / 12.0 * Kokkos::pow(        solution(i_cell_i,   j)
-                                                         - 2.0 * solution(i_cell_ip1, j)
-                                                         +       solution(i_cell_ip2, j), 2.0) +
-                                      0.25 * Kokkos::pow(  3.0 * solution(i_cell_i,   j)
-                                                         - 4.0 * solution(i_cell_ip1, j)
-                                                         +       solution(i_cell_ip2, j), 2.0);
-
-                rtype epsilon = 1e-6;
-                rtype alpha_0 = 0.3 / Kokkos::pow(epsilon + beta_0, 2.0);
-                rtype alpha_1 = 0.6 / Kokkos::pow(epsilon + beta_1, 2.0);
-                rtype alpha_2 = 0.1 / Kokkos::pow(epsilon + beta_2, 2.0);
-
-                rtype one_alpha = 1 / (alpha_0 + alpha_1 + alpha_2);
-                rtype w_0 = alpha_0 * one_alpha;
-                rtype w_1 = alpha_1 * one_alpha;
-                rtype w_2 = alpha_2 * one_alpha;
-
-                rtype p_0 = - ( 1.0 / 6.0) * solution(i_cell_im1, j)
-                            + ( 5.0 / 6.0) * solution(i_cell_i,   j)
-                            + ( 1.0 / 3.0) * solution(i_cell_ip1, j);
-                rtype p_1 =   ( 1.0 / 3.0) * solution(i_cell_i,   j)
-                            + ( 5.0 / 6.0) * solution(i_cell_ip1, j)
-                            - ( 1.0 / 6.0) * solution(i_cell_ip2, j);
-                rtype p_2 =   (11.0 / 6.0) * solution(i_cell_i,   j)
-                            - ( 7.0 / 6.0) * solution(i_cell_ip1, j)
-                            + ( 1.0 / 3.0) * solution(i_cell_ip2, j);
-
-                face_solution(i_face, 1, j) = w_0 * p_0 + w_1 * p_1 + w_2 * p_2;
-            }
-        }
-    
-    private:
-        Kokkos::View<int32_t *[2]> cells_of_face;
-        Kokkos::View<rtype *[2]> face_normals;
-        u_int32_t n_cells_x;
-        u_int32_t n_cells_y;
-        Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution;
-        Kokkos::View<rtype *[N_CONSERVATIVE]> solution;
-};
-
-void WENO5_JS::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                                Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) {
-    WENO5_JSFunctor flux_functor(mesh->cells_of_face,
-                                 mesh->face_normals,
-                                 mesh->n_cells_x(),
-                                 mesh->n_cells_y(),
-                                 face_solution,
-                                 solution);
-    Kokkos::parallel_for(mesh->n_faces(), flux_functor);
+    WENOFunctor flux_functor(mesh->cells_of_face,
+                             mesh->face_normals,
+                             face_solution,
+                             solution);
+    Kokkos::parallel_for(mesh->n_faces, flux_functor);
 }

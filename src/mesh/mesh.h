@@ -27,15 +27,15 @@ enum class MeshType {
 };
 
 static const std::unordered_map<std::string, MeshType> MESH_TYPES = {
-    {"file", MeshType::FILE},
-    {"cartesian", MeshType::CARTESIAN},
-    {"wedge", MeshType::WEDGE}
+    {"FILE", MeshType::FILE},
+    {"CARTESIAN", MeshType::CARTESIAN},
+    {"WEDGE", MeshType::WEDGE}
 };
 
 static const std::unordered_map<MeshType, std::string> MESH_NAMES = {
-    {MeshType::FILE, "file"},
-    {MeshType::CARTESIAN, "cart"},
-    {MeshType::WEDGE, "wedge"}
+    {MeshType::FILE, "FILE"},
+    {MeshType::CARTESIAN, "CARTESIAN"},
+    {MeshType::WEDGE, "WEDGE"}
 };
 
 enum class CellType {
@@ -44,13 +44,13 @@ enum class CellType {
 };
 
 static const std::unordered_map<std::string, CellType> CELL_TYPES = {
-    {"triangle", CellType::TRIANGLE},
-    {"quad", CellType::QUAD}
+    {"TRIANGLE", CellType::TRIANGLE},
+    {"QUAD", CellType::QUAD}
 };
 
 static const std::unordered_map<CellType, std::string> CELL_NAMES = {
-    {CellType::TRIANGLE, "triangle"},
-    {CellType::QUAD, "quad"}
+    {CellType::TRIANGLE, "TRIANGLE"},
+    {CellType::QUAD, "QUAD"}
 };
 
 
@@ -81,38 +81,6 @@ class Mesh {
          * @brief Set the type of mesh.
          */
         void set_type(MeshType type);
-
-        /**
-         * @brief Get the number of cells.
-         * @return Number of cells.
-         */
-        u_int32_t n_cells() const;
-
-        /**
-         * @brief Get the number of cells in the x-direction.
-         * @return Number of cells in the x-direction.
-         * \todo This is a hack for WENO, remove this
-         */
-        u_int32_t n_cells_x() const;
-
-        /**
-         * @brief Get the number of cells in the y-direction.
-         * @return Number of cells in the y-direction.
-         * \todo This is a hack for WENO, remove this
-         */
-        u_int32_t n_cells_y() const;
-
-        /**
-         * @brief Get the number of nodes.
-         * @return Number of nodes.
-         */
-        u_int32_t n_nodes() const;
-
-        /**
-         * @brief Get the number of faces.
-         * @return Number of faces.
-         */
-        u_int32_t n_faces() const;
 
         /**
          * @brief Get the number of face zones.
@@ -235,6 +203,16 @@ class Mesh {
         CellType h_cell_type(u_int32_t i_cell) const;
 
         /**
+         * @brief Get neighbors of a cell up to n_order graph distance.
+         * @param i_cell Index of the cell.
+         * @param n_order Maximum graph distance.
+         * @param neighbors Vector to store the neighbors.
+         */
+        void neighbors_of_cell(u_int32_t i_cell,
+                               u_int8_t n_order,
+                               std::vector<u_int32_t> & neighbors) const;
+
+        /**
          * @brief Compute cell centroids.
          */
         void compute_cell_centroids();
@@ -289,6 +267,7 @@ class Mesh {
          */
         void init_wedge(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly);
 
+        u_int32_t n_cells, n_nodes, n_faces;
         Kokkos::View<rtype *[N_DIM]> node_coords;
         Kokkos::View<rtype *[N_DIM]> cell_coords;
         Kokkos::View<rtype *[N_DIM]> face_coords;
@@ -318,7 +297,10 @@ class Mesh {
         Kokkos::View<int32_t *[2]>::HostMirror h_cells_of_face;
     protected:
     private:
-        u_int32_t nx, ny; /** \todo This is a hack for WENO, remove this */
+        void neighbors_of_cell_helper(u_int32_t i_cell,
+                                      u_int8_t n_order,
+                                      std::vector<u_int32_t> & neighbors) const;
+
         MeshType type;
         std::vector<CellZone> m_cell_zones;
         std::vector<FaceZone> m_face_zones;

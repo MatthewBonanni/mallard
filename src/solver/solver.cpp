@@ -141,10 +141,10 @@ void Solver::init_numerics() {
 
     if (face_reconstruction_type == FaceReconstructionType::FirstOrder) {
         face_reconstruction = std::make_unique<FirstOrder>();
-    } else if (face_reconstruction_type == FaceReconstructionType::WENO3_JS) {
-        face_reconstruction = std::make_unique<WENO3_JS>();
-    } else if (face_reconstruction_type == FaceReconstructionType::WENO5_JS) {
-        face_reconstruction = std::make_unique<WENO5_JS>();
+    } else if (face_reconstruction_type == FaceReconstructionType::WENO) {
+        /** \todo Make this an input file option */
+        int poly_order = 5;
+        face_reconstruction = std::make_unique<WENO>(poly_order);
     } else {
         // Should never get here due to the enum class.
         throw std::runtime_error("Unknown face reconstruction type: " + face_reconstruction_str + ".");
@@ -302,11 +302,11 @@ void Solver::init_data_writers() {
 void Solver::allocate_memory() {
     std::cout << "Allocating memory..." << std::endl;
 
-    Kokkos::resize(conservatives, mesh->n_cells());
-    Kokkos::resize(primitives, mesh->n_cells());
-    Kokkos::resize(face_conservatives, mesh->n_faces());
-    Kokkos::resize(face_primitives, mesh->n_faces());
-    Kokkos::resize(cfl_local, mesh->n_cells());
+    Kokkos::resize(conservatives, mesh->n_cells);
+    Kokkos::resize(primitives, mesh->n_cells);
+    Kokkos::resize(face_conservatives, mesh->n_faces);
+    Kokkos::resize(face_primitives, mesh->n_faces);
+    Kokkos::resize(cfl_local, mesh->n_cells);
 
     h_conservatives = Kokkos::create_mirror_view(conservatives);
     h_primitives = Kokkos::create_mirror_view(primitives);
@@ -316,12 +316,12 @@ void Solver::allocate_memory() {
 
     solution_vec.push_back(conservatives);
     for (u_int8_t i = 0; i < time_integrator->get_n_solution_vectors() - 1; i++) {
-        Kokkos::View<rtype *[N_CONSERVATIVE]> solution("solution", mesh->n_cells());
+        Kokkos::View<rtype *[N_CONSERVATIVE]> solution("solution", mesh->n_cells);
         solution_vec.push_back(solution);
     }
 
     for (u_int8_t i = 0; i < time_integrator->get_n_rhs_vectors(); i++) {
-        Kokkos::View<rtype *[N_CONSERVATIVE]> rhs("rhs", mesh->n_cells());
+        Kokkos::View<rtype *[N_CONSERVATIVE]> rhs("rhs", mesh->n_cells);
         rhs_vec.push_back(rhs);
     }
 }
@@ -459,7 +459,7 @@ void Solver::do_checks() {
               << dt_wall_check
               << " s" << std::endl;
     std::cout << "> Time / step / cell: "
-              << dt_wall_check / check_interval / mesh->n_cells()
+              << dt_wall_check / check_interval / mesh->n_cells
               << " s" << std::endl;
     std::cout << "> Simulation time / wall time: "
               << dt_check / dt_wall_check
@@ -476,7 +476,7 @@ void Solver::check_fields() const {
     }
 
     bool nan_found = false;
-    for (u_int32_t i = 0; i < mesh->n_cells(); i++) {
+    for (u_int32_t i = 0; i < mesh->n_cells; i++) {
         for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
             if (Kokkos::isnan(h_conservatives(i, j))) {
                 nan_found = true;
@@ -589,7 +589,7 @@ void Solver::update_primitives() {
         UpdatePrimitivesFunctor<Euler> update_primitives_functor(*physics->get_as<Euler>(),
                                                                  conservatives,
                                                                  primitives);
-        Kokkos::parallel_for(mesh->n_cells(), update_primitives_functor);
+        Kokkos::parallel_for(mesh->n_cells, update_primitives_functor);
     } else {
         // Should never get here due to the enum class.
         throw std::runtime_error("Unknown physics type.");
@@ -745,7 +745,7 @@ rtype Solver::calc_spectral_radius() {
                                                              conservatives,
                                                              primitives,
                                                              cfl_local);
-        Kokkos::parallel_reduce(mesh->n_cells(),
+        Kokkos::parallel_reduce(mesh->n_cells,
                                 spectral_radius_functor,
                                 Kokkos::Max<rtype>(max_spectral_radius));
     } else {

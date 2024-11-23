@@ -49,14 +49,14 @@ void Solver::calc_rhs(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
 
     // Divide by cell volume
     DivideVolumeFunctor divide_volume_functor(mesh->cell_volume, rhs);
-    Kokkos::parallel_for(mesh->n_cells(), divide_volume_functor);
+    Kokkos::parallel_for(mesh->n_cells, divide_volume_functor);
 }
 
 void Solver::pre_rhs(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                      Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
                      Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
     // Zero out RHS
-    Kokkos::parallel_for(mesh->n_cells(), KOKKOS_LAMBDA(const u_int32_t i) {
+    Kokkos::parallel_for(mesh->n_cells, KOKKOS_LAMBDA(const u_int32_t i) {
         for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
             rhs(i, j) = 0.0;
         }
@@ -168,7 +168,7 @@ void Solver::launch_flux_functor(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_s
                                                           rhs,
                                                           dynamic_cast<T_riemann_solver &>(*riemann_solver),
                                                           *physics->get_as<T_physics>());
-    Kokkos::parallel_for(mesh->n_faces(), flux_functor);
+    Kokkos::parallel_for(mesh->n_faces, flux_functor);
 }
 
 void Solver::calc_rhs_interior(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
