@@ -22,10 +22,8 @@ const rtype TOL = 1e-6;
 void calc_rhs_test(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                    Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
                    Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
-    Kokkos::parallel_for(N_CELLS, KOKKOS_LAMBDA(const u_int8_t i) {
-        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-            rhs(i, j) = i * static_cast<rtype>(N_CONSERVATIVE) + j;
-        }
+    Kokkos::parallel_for(N_CELLS, KOKKOS_LAMBDA(const u_int8_t i_cell) {
+        FOR_I_CONSERVATIVE rhs(i_cell, i) = i_cell * static_cast<rtype>(N_CONSERVATIVE) + i;
     });
 }
 
@@ -54,10 +52,8 @@ TEST(TimeIntegratorTest, FE) {
                        Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
                        Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> rhs_func = calc_rhs_test;
 
-    for (u_int8_t i = 0; i < N_CELLS; i++) {
-        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-            h_solution_vec[0](i, j) = i * static_cast<rtype>(N_CONSERVATIVE) + j;
-        }
+    for (u_int8_t i_cell = 0; i_cell < N_CELLS; i_cell++) {
+        FOR_I_CONSERVATIVE h_solution_vec[0](i_cell, i) = i_cell * static_cast<rtype>(N_CONSERVATIVE) + i;
     }
 
     for (u_int8_t i = 0; i < integrator.get_n_solution_vectors(); i++){
@@ -73,11 +69,11 @@ TEST(TimeIntegratorTest, FE) {
         Kokkos::deep_copy(h_rhs_vec[i], rhs_vec[i]);
     }
 
-    for (u_int8_t i = 0; i < N_CELLS; i++) {
-        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-            rtype icpj = i * static_cast<rtype>(N_CONSERVATIVE) + j;
-            EXPECT_NEAR(h_rhs_vec[0](i, j), icpj, TOL);
-            EXPECT_NEAR(h_solution_vec[0](i, j), 1.1 * icpj, TOL);
+    for (u_int8_t i_cell = 0; i_cell < N_CELLS; i_cell++) {
+        FOR_I_CONSERVATIVE {
+            rtype icpi = i_cell * static_cast<rtype>(N_CONSERVATIVE) + i;
+            EXPECT_NEAR(h_rhs_vec[0](i_cell, i), icpi, TOL);
+            EXPECT_NEAR(h_solution_vec[0](i_cell, i), 1.1 * icpi, TOL);
         }
     }
 }
@@ -107,10 +103,8 @@ TEST(TimeIntegratorTest, RK4) {
                        Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
                        Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> rhs_func = calc_rhs_test;
 
-    for (u_int8_t i = 0; i < N_CELLS; i++) {
-        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-            h_solution_vec[0](i, j) = i * static_cast<rtype>(N_CONSERVATIVE) + j;
-        }
+    for (u_int8_t i_cell = 0; i_cell < N_CELLS; i_cell++) {
+        FOR_I_CONSERVATIVE h_solution_vec[0](i_cell, i) = i_cell * static_cast<rtype>(N_CONSERVATIVE) + i;
     }
 
     for (u_int8_t i = 0; i < integrator.get_n_solution_vectors(); i++){
@@ -126,11 +120,11 @@ TEST(TimeIntegratorTest, RK4) {
         Kokkos::deep_copy(h_rhs_vec[i], rhs_vec[i]);
     }
 
-    for (u_int8_t i = 0; i < N_CELLS; i++) {
-        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-            rtype icpj = i * static_cast<rtype>(N_CONSERVATIVE) + j;
-            EXPECT_NEAR(h_rhs_vec[0](i, j), icpj, TOL);
-            EXPECT_NEAR(h_solution_vec[0](i, j), 1.1 * icpj, TOL);
+    for (u_int8_t i_cell = 0; i_cell < N_CELLS; i_cell++) {
+        FOR_I_CONSERVATIVE {
+            rtype icpi = i_cell * static_cast<rtype>(N_CONSERVATIVE) + i;
+            EXPECT_NEAR(h_rhs_vec[0](i_cell, i), icpi, TOL);
+            EXPECT_NEAR(h_solution_vec[0](i_cell, i), 1.1 * icpi, TOL);
         }
     }
 }
@@ -160,10 +154,8 @@ TEST(TimeIntegratorTest, SSPRK3) {
                        Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
                        Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> rhs_func = calc_rhs_test;
 
-    for (u_int8_t i = 0; i < N_CELLS; i++) {
-        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-            h_solution_vec[0](i, j) = i * static_cast<rtype>(N_CONSERVATIVE) + j;
-        }
+    for (u_int8_t i_cell = 0; i_cell < N_CELLS; i_cell++) {
+        FOR_I_CONSERVATIVE h_solution_vec[0](i_cell, i) = i_cell * static_cast<rtype>(N_CONSERVATIVE) + i;
     }
 
     for (u_int8_t i = 0; i < integrator.get_n_solution_vectors(); i++){
@@ -179,11 +171,11 @@ TEST(TimeIntegratorTest, SSPRK3) {
         Kokkos::deep_copy(h_rhs_vec[i], rhs_vec[i]);
     }
 
-    for (u_int8_t i = 0; i < N_CELLS; i++) {
-        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-            rtype icpj = i * static_cast<rtype>(N_CONSERVATIVE) + j;
-            EXPECT_NEAR(h_rhs_vec[0](i, j), icpj, TOL);
-            EXPECT_NEAR(h_solution_vec[0](i, j), 1.1 * icpj, TOL);
+    for (u_int8_t i_cell = 0; i_cell < N_CELLS; i_cell++) {
+        FOR_I_CONSERVATIVE {
+            rtype icpi = i_cell * static_cast<rtype>(N_CONSERVATIVE) + i;
+            EXPECT_NEAR(h_rhs_vec[0](i_cell, i), icpi, TOL);
+            EXPECT_NEAR(h_solution_vec[0](i_cell, i), 1.1 * icpi, TOL);
         }
     }
 }

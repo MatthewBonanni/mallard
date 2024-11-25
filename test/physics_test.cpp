@@ -43,16 +43,12 @@ struct ConversionFunctor {
                             physics(physics) {}
 
         KOKKOS_INLINE_FUNCTION
-        void operator()(const u_int32_t i) const {
+        void operator()(const u_int32_t i_cell) const {
             rtype conservatives_i[N_CONSERVATIVE];
             rtype primitives_i[N_PRIMITIVE];
-            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-                conservatives_i[j] = conservatives(i, j);
-            }
+            FOR_I_CONSERVATIVE conservatives_i[i] = conservatives(i_cell, i);
             physics.compute_primitives_from_conservatives(primitives_i, conservatives_i);
-            for (u_int16_t j = 0; j < N_PRIMITIVE; j++) {
-                primitives(i, j) = primitives_i[j];
-            }
+            FOR_I_PRIMITIVE primitives(i_cell, i) = primitives_i[i];
         }
 
     private:

@@ -208,9 +208,9 @@ class Mesh {
          * @param n_order Maximum graph distance.
          * @param neighbors Vector to store the neighbors.
          */
-        void neighbors_of_cell(u_int32_t i_cell,
-                               u_int8_t n_order,
-                               std::vector<u_int32_t> & neighbors) const;
+        void h_neighbors_of_cell(u_int32_t i_cell,
+                                 u_int8_t n_order,
+                                 std::vector<u_int32_t> & neighbors) const;
 
         /**
          * @brief Compute cell centroids.
@@ -297,9 +297,9 @@ class Mesh {
         Kokkos::View<int32_t *[2]>::HostMirror h_cells_of_face;
     protected:
     private:
-        void neighbors_of_cell_helper(u_int32_t i_cell,
-                                      u_int8_t n_order,
-                                      std::vector<u_int32_t> & neighbors) const;
+        void h_neighbors_of_cell_helper(u_int32_t i_cell,
+                                        u_int8_t n_order,
+                                        std::vector<u_int32_t> & neighbors) const;
 
         MeshType type;
         std::vector<CellZone> m_cell_zones;

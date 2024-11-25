@@ -31,6 +31,7 @@
 #endif
 
 using NVector = std::array<rtype, N_DIM>;
+using NMatrix = std::array<std::array<rtype, N_DIM>, N_DIM>;
 
 const std::array<std::string, N_CONSERVATIVE> CONSERVATIVE_NAMES = {
     "RHO",

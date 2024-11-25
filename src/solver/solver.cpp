@@ -476,15 +476,15 @@ void Solver::check_fields() const {
     }
 
     bool nan_found = false;
-    for (u_int32_t i = 0; i < mesh->n_cells; i++) {
-        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-            if (Kokkos::isnan(h_conservatives(i, j))) {
+    for (u_int32_t i_cell = 0; i_cell < mesh->n_cells; i_cell++) {
+        FOR_I_CONSERVATIVE {
+            if (Kokkos::isnan(h_conservatives(i_cell, i))) {
                 nan_found = true;
             }
         }
 
-        for (u_int16_t j = 0; j < N_PRIMITIVE; j++) {
-            if (Kokkos::isnan(h_primitives(i, j))) {
+        FOR_I_PRIMITIVE {
+            if (Kokkos::isnan(h_primitives(i_cell, i))) {
                 nan_found = true;
             }
         }
@@ -494,17 +494,13 @@ void Solver::check_fields() const {
             msg << "NaN found in solution." << std::endl;
             msg << "t: " << t << std::endl;
             msg << "step: " << step << std::endl;
-            msg << "i_cell: " << i << std::endl;
-            msg << "> x: " << mesh->h_cell_coords(i, 0) << std::endl;
-            msg << "> y: " << mesh->h_cell_coords(i, 1) << std::endl;
+            msg << "i_cell: " << i_cell << std::endl;
+            msg << "> x: " << mesh->h_cell_coords(i_cell, 0) << std::endl;
+            msg << "> y: " << mesh->h_cell_coords(i_cell, 1) << std::endl;
             msg << "conservatives:" << std::endl;
-            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-                msg << "> " << CONSERVATIVE_NAMES[j] << ": " << h_conservatives(i, j) << std::endl;
-            }
+            FOR_I_CONSERVATIVE msg << "> " << CONSERVATIVE_NAMES[i] << ": " << h_conservatives(i_cell, i) << std::endl;
             msg << "primitives:" << std::endl;
-            for (u_int16_t j = 0; j < N_PRIMITIVE; j++) {
-                msg << "> " << PRIMITIVE_NAMES[j] << ": " << h_primitives(i, j) << std::endl;
-            }
+            FOR_I_PRIMITIVE msg << "> " << PRIMITIVE_NAMES[i] << ": " << h_primitives(i_cell, i) << std::endl;
             throw std::runtime_error(msg.str());
         }
     }
@@ -568,14 +564,9 @@ struct UpdatePrimitivesFunctor {
         void operator()(const u_int32_t i_cell) const {
             rtype cell_conservatives[N_CONSERVATIVE];
             rtype cell_primitives[N_PRIMITIVE];
-            for (u_int16_t i = 0; i < N_CONSERVATIVE; i++) {
-                cell_conservatives[i] = conservatives(i_cell, i);
-            }
-            physics.compute_primitives_from_conservatives(cell_primitives,
-                                                          cell_conservatives);
-            for (u_int16_t i = 0; i < N_PRIMITIVE; i++) {
-                primitives(i_cell, i) = cell_primitives[i];
-            }
+            FOR_I_CONSERVATIVE cell_conservatives[i] = conservatives(i_cell, i);
+            physics.compute_primitives_from_conservatives(cell_primitives, cell_conservatives);
+            FOR_I_PRIMITIVE primitives(i_cell, i) = cell_primitives[i];
         }
     
     private:

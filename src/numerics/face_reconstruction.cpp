@@ -13,6 +13,8 @@
 
 #include <iostream>
 
+#include <Kokkos_Core.hpp>
+
 #include "common_math.h"
 
 FaceReconstruction::FaceReconstruction() {
@@ -77,9 +79,9 @@ struct FirstOrderFunctor {
             int32_t i_cell_l = cells_of_face(i_face, 0);
             int32_t i_cell_r = cells_of_face(i_face, 1);
 
-            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-                face_solution(i_face, 0, j) = solution(i_cell_l, j);
-                face_solution(i_face, 1, j) = solution(i_cell_r, j);
+            FOR_I_CONSERVATIVE {
+                face_solution(i_face, 0, i) = solution(i_cell_l, i);
+                face_solution(i_face, 1, i) = solution(i_cell_r, i);
             }
         }
 
@@ -120,7 +122,7 @@ WENO::~WENO() {
 }
 
 std::vector<u_int32_t> WENO::compute_stencil_of_cell_centered(u_int32_t i_cell) {
-    // Naive Cell Based (NCB) algorithm
+    // Naive Cell Based (NCB) algorithm (Tsoutsanis 2023)
     // Just fill up to max_cells_per_stencil for now
     /** \todo Condition number optimization */
     bool done = false;
@@ -130,11 +132,14 @@ std::vector<u_int32_t> WENO::compute_stencil_of_cell_centered(u_int32_t i_cell) 
     while (!done) {
         // Get the next ring of neighbors
         std::vector<u_int32_t> next_ring;
-        for (auto i_cell : neighbor_rings.back()) {
+        for (auto i_neighbor_cell : neighbor_rings.back()) {
             std::vector<u_int32_t> neighbors;
-            mesh->neighbors_of_cell(i_cell, 1, neighbors);
+            mesh->h_neighbors_of_cell(i_neighbor_cell, 1, neighbors);
             for (auto neighbor : neighbors) {
-                if (std::find(neighbor_rings.back().begin(), neighbor_rings.back().end(), neighbor) == neighbor_rings.back().end()) {
+                // Check if this neighbor is already in the current ring
+                if (std::find(neighbor_rings.back().begin(),
+                              neighbor_rings.back().end(),
+                              neighbor) == neighbor_rings.back().end()) {
                     next_ring.push_back(neighbor);
                 }
             }
@@ -153,13 +158,14 @@ std::vector<u_int32_t> WENO::compute_stencil_of_cell_centered(u_int32_t i_cell) 
             done = true;
         } else {
             // Adding the ring would exceed the maximum size,
-            // so we sort the neighbors by distance to the target cell,
+            // so we sort the ring by distance to the target cell,
             // and add the closest neighbors until we reach the maximum size
             std::vector<std::pair<u_int32_t, rtype>> distances;
-            for (auto i_cell : next_ring) {
+            for (auto i_neighbor_cell : next_ring) {
                 rtype distance = 0.0;
-                for (u_int8_t i_dim = 0; i_dim < N_DIM; ++i_dim) {
-                    distance += std::pow(mesh->cell_coords(i_cell, i_dim) - mesh->cell_coords(i_cell, i_dim), 2);
+                FOR_I_DIM {
+                    distance += std::pow(mesh->cell_coords(i_neighbor_cell, i) -
+                                         mesh->cell_coords(i_cell,          i), 2);
                 }
                 distances.push_back(std::make_pair(i_cell, distance));
             }
@@ -168,9 +174,9 @@ std::vector<u_int32_t> WENO::compute_stencil_of_cell_centered(u_int32_t i_cell) 
                       [](auto & left, auto & right) {
                           return left.second < right.second;
                       });
-            for (u_int16_t i = 0; i < max_cells_per_stencil - stencil_size; ++i) {
-                next_ring.push_back(distances[i].first);
-            }
+            // Drop the farthest neighbors
+            next_ring.resize(max_cells_per_stencil - stencil_size);
+            neighbor_rings.push_back(next_ring);
             done = true;
         }
     }
@@ -186,7 +192,110 @@ std::vector<u_int32_t> WENO::compute_stencil_of_cell_centered(u_int32_t i_cell) 
 }
 
 std::vector<std::vector<u_int32_t>> WENO::compute_stencils_of_cell_directional(u_int32_t i_cell) {
-    std::vector<std::vector<u_int32_t>> stencils;
+    //  Type 4 algorithm (Tsoutsanis 2023)
+    u_int8_t n_stencils = mesh->n_faces_of_cell(i_cell);
+    std::vector<std::vector<u_int32_t>> stencils(n_stencils);
+    bool all_done = false;
+
+    // First, compute the transformation matrices for the target cell
+    std::vector<std::vector<rtype>> J_matrices;
+    std::vector<std::vector<rtype>> J_inverses;
+    for (u_int8_t i_stencil = 0; i_stencil < n_stencils; ++i_stencil) {
+        u_int32_t i_face = mesh->h_face_of_cell(i_cell, i_stencil); // Take i_face_local = i_stencil
+        u_int32_t i_node_0 = mesh->h_node_of_face(i_face, 0);
+        u_int32_t i_node_1 = mesh->h_node_of_face(i_face, 1);
+
+        std::vector<rtype> v0(N_DIM);
+        std::vector<rtype> v1(N_DIM);
+        std::vector<rtype> v2(N_DIM);
+
+        FOR_I_DIM {
+            v0[i] = mesh->h_cell_coords(i_cell,   i);
+            v1[i] = mesh->h_node_coords(i_node_0, i);
+            v2[i] = mesh->h_node_coords(i_node_1, i);
+        }
+
+        std::vector<rtype> J(4);
+        std::vector<rtype> J_inv(4);
+        triangle_J_Jinv(v0.data(), v1.data(), v2.data(), J.data(), J_inv.data());
+        J_matrices.push_back(J);
+        J_inverses.push_back(J_inv);
+    }
+
+    // Add the target cell to the stencils
+    for (auto & stencil : stencils) {
+        stencil.push_back(i_cell);
+    }
+
+    std::vector<std::vector<u_int32_t>> neighbor_rings;
+    neighbor_rings.push_back({i_cell});
+    while (!all_done) {
+        // Get the next ring of neighbors
+        std::vector<u_int32_t> next_ring;
+        for (auto i_neighbor_cell : neighbor_rings.back()) {
+            std::vector<u_int32_t> neighbors;
+            mesh->h_neighbors_of_cell(i_neighbor_cell, 1, neighbors);
+            for (auto neighbor : neighbors) {
+                // Check if this neighbor is already in the current ring
+                if (std::find(neighbor_rings.back().begin(), neighbor_rings.back().end(), neighbor) == neighbor_rings.back().end()) {
+                    next_ring.push_back(neighbor);
+                }
+            }
+            // Sort the ring by distance to the target cell
+            std::vector<std::pair<u_int32_t, rtype>> distances;
+            for (auto i_neighbor_cell : next_ring) {
+                rtype distance = 0.0;
+                FOR_I_DIM {
+                    distance += std::pow(mesh->cell_coords(i_neighbor_cell, i) -
+                                         mesh->cell_coords(i_cell,          i), 2);
+                }
+                distances.push_back(std::make_pair(i_cell, distance));
+            }
+            std::sort(distances.begin(),
+                      distances.end(),
+                      [](auto & left, auto & right) {
+                          return left.second < right.second;
+                      });
+            next_ring.clear();
+            for (auto distance : distances) {
+                next_ring.push_back(distance.first);
+            }
+        }
+
+        // Add the neighbors to the stencils as needed
+        for (u_int8_t i_stencil = 0; i_stencil < n_stencils; ++i_stencil) {
+            for (auto i_neighbor_cell : next_ring) {
+                // Check if the stencil is full
+                if (stencils[i_stencil].size() == max_cells_per_stencil) {
+                    break;
+                }
+
+                // Get the transformed coordinates of the neighbor cell
+                NVector dx;
+                FOR_I_DIM dx[i] = mesh->h_cell_coords(i_neighbor_cell, i) -
+                                  mesh->h_cell_coords(i_cell,          i);
+                NVector dx_transformed;
+                gemv<N_DIM>(J_inverses[i_stencil].data(), dx.data(), dx_transformed.data());
+
+                // Check if the neighbor cell is in the stencil region, and if it is, add it
+                bool in_region = true;
+                FOR_I_DIM if (dx_transformed[i] < 0.0) in_region = false;
+                if (in_region) {
+                    stencils[i_stencil].push_back(i_neighbor_cell);
+                }
+            }
+        }
+
+        // Check if all stencils are done
+        all_done = true;
+        for (auto stencil : stencils) {
+            if (stencil.size() < max_cells_per_stencil) {
+                all_done = false;
+                break;
+            }
+        }
+    }
+
     return stencils;
 }
 

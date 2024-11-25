@@ -29,9 +29,7 @@ struct DivideVolumeFunctor {
          */
         KOKKOS_INLINE_FUNCTION
         void operator()(const u_int32_t i_cell) const {
-            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-                rhs(i_cell, j) /= cell_volume(i_cell);
-            }
+            FOR_I_CONSERVATIVE rhs(i_cell, i) /= cell_volume(i_cell);
         }
 
     private:
@@ -56,10 +54,8 @@ void Solver::pre_rhs(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                      Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
                      Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
     // Zero out RHS
-    Kokkos::parallel_for(mesh->n_cells, KOKKOS_LAMBDA(const u_int32_t i) {
-        for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-            rhs(i, j) = 0.0;
-        }
+    Kokkos::parallel_for(mesh->n_cells, KOKKOS_LAMBDA(const u_int32_t i_cell) {
+        FOR_I_CONSERVATIVE rhs(i_cell, i) = 0.0;
     });
 
     face_reconstruction->calc_face_values(solution, face_solution);
@@ -125,9 +121,9 @@ struct FluxFunctor {
             unit<N_DIM>(n_vec, n_unit);
 
             // Get face conservatives
-            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-                conservatives_l[j] = face_solution(i_face, 0, j);
-                conservatives_r[j] = face_solution(i_face, 1, j);
+            FOR_I_CONSERVATIVE {
+                conservatives_r[i] = face_solution(i_face, 1, i);
+                conservatives_l[i] = face_solution(i_face, 0, i);
             }
 
             // Compute relevant primitive variables
@@ -142,9 +138,9 @@ struct FluxFunctor {
                                      primitives_r[2], physics.get_gamma(), primitives_r[4]);
             
             // Add flux to RHS
-            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-                Kokkos::atomic_add(&rhs(i_cell_l, j), -face_area(i_face) * flux[j]);
-                Kokkos::atomic_add(&rhs(i_cell_r, j),  face_area(i_face) * flux[j]);
+            FOR_I_CONSERVATIVE {
+                Kokkos::atomic_add(&rhs(i_cell_l, i), -face_area(i_face) * flux[i]);
+                Kokkos::atomic_add(&rhs(i_cell_r, i),  face_area(i_face) * flux[i]);
             }
         }
 

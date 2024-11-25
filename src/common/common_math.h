@@ -100,43 +100,185 @@ void unit(const rtype * v, rtype * u) {
 // Explicit instantiation for N = 2
 template <> KOKKOS_INLINE_FUNCTION
 void unit<2>(const rtype * v, rtype * u) {
-    rtype norm = norm_2<2>(v);
-    u[0] = v[0] / norm;
-    u[1] = v[1] / norm;
+    const rtype inv_norm = 1 / norm_2<2>(v);
+    u[0] = v[0] * inv_norm;
+    u[1] = v[1] * inv_norm;
 }
 
 // Explicit instantiation for N = 3
 template <> KOKKOS_INLINE_FUNCTION
 void unit<3>(const rtype * v, rtype * u) {
-    rtype norm = norm_2<3>(v);
-    u[0] = v[0] / norm;
-    u[1] = v[1] / norm;
-    u[2] = v[2] / norm;
+    const rtype inv_norm = 1 / norm_2<3>(v);
+    u[0] = v[0] * inv_norm;
+    u[1] = v[1] * inv_norm;
+    u[2] = v[2] * inv_norm;
 }
 
 /**
- * @brief Compute the area of a triangle from vertices in R^2.
+ * @brief Invert a matrix. Will be instantiated for 2x2 and 3x3 matrices.
  * 
- * @param v0 Coordinates of the first vertex.
- * @param v1 Coordinates of the second vertex.
- * @param v2 Coordinates of the third vertex.
- * @return Area of the triangle.
+ * @param A Matrix to invert.
+ * @param A_inv Inverted matrix.
  */
-rtype triangle_area_2(const NVector& v0,
-                      const NVector& v1,
-                      const NVector& v2);
+template <u_int32_t N> KOKKOS_INLINE_FUNCTION
+void invert_matrix(const rtype * A, rtype * A_inv);
+
+// Explicit instantiation for N = 2
+template <> KOKKOS_INLINE_FUNCTION
+void invert_matrix<2>(const rtype * A, rtype * A_inv) {
+    // Calculate determinant
+    const rtype det_A = A[0] * A[3] - A[1] * A[2];
+    assert(det_A != 0.0);
+    const rtype inv_det = 1.0 / det_A;
+
+    // Store inverse
+    A_inv[0] =  A[3] * inv_det;
+    A_inv[1] = -A[1] * inv_det;
+    A_inv[2] = -A[2] * inv_det;
+    A_inv[3] =  A[0] * inv_det;
+}
+
+// Explicit instantiation for N = 3
+template <> KOKKOS_INLINE_FUNCTION
+void invert_matrix<3>(const rtype * A, rtype * A_inv) {
+    // Calculate cofactors
+    const rtype c11 =   A[4] * A[8] - A[5] * A[7];
+    const rtype c12 = -(A[3] * A[8] - A[5] * A[6]);
+    const rtype c13 =   A[3] * A[7] - A[4] * A[6];
+    
+    // Calculate determinant using first row
+    const rtype det_A = A[0] * c11 + A[1] * c12 + A[2] * c13;
+    assert(det_A != 0.0);
+    const rtype inv_det = 1.0 / det_A;
+    
+    // Calculate remaining cofactors
+    const rtype c21 = -(A[1] * A[8] - A[2] * A[7]);
+    const rtype c22 =   A[0] * A[8] - A[2] * A[6];
+    const rtype c23 = -(A[0] * A[7] - A[1] * A[6]);
+    const rtype c31 =   A[1] * A[5] - A[2] * A[4];
+    const rtype c32 = -(A[0] * A[5] - A[2] * A[3]);
+    const rtype c33 =   A[0] * A[4] - A[1] * A[3];
+    
+    // Store inverse
+    A_inv[0] = c11 * inv_det;
+    A_inv[1] = c21 * inv_det;
+    A_inv[2] = c31 * inv_det;
+    A_inv[3] = c12 * inv_det;
+    A_inv[4] = c22 * inv_det;
+    A_inv[5] = c32 * inv_det;
+    A_inv[6] = c13 * inv_det;
+    A_inv[7] = c23 * inv_det;
+    A_inv[8] = c33 * inv_det;
+}
 
 /**
- * @brief Compute the area of a triangle from vertices in R^3.
+ * @brief General matrix-vector multiplication. Will be instantiated for 2x2 and 3x3 matrices.
+ * 
+ * @param A Matrix.
+ * @param x Vector.
+ * @param y Resulting vector.
+ */
+template <u_int32_t N> KOKKOS_INLINE_FUNCTION
+void gemv(const rtype * A, const rtype * x, rtype * y);
+
+// Explicit instantiation for N = 2
+template <> KOKKOS_INLINE_FUNCTION
+void gemv<2>(const rtype * A, const rtype * x, rtype * y) {
+    y[0] = A[0] * x[0] + A[1] * x[1];
+    y[1] = A[2] * x[0] + A[3] * x[1];
+}
+
+// Explicit instantiation for N = 3
+template <> KOKKOS_INLINE_FUNCTION
+void gemv<3>(const rtype * A, const rtype * x, rtype * y) {
+    y[0] = A[0] * x[0] + A[1] * x[1] + A[2] * x[2];
+    y[1] = A[3] * x[0] + A[4] * x[1] + A[5] * x[2];
+    y[2] = A[6] * x[0] + A[7] * x[1] + A[8] * x[2];
+}
+
+/**
+ * @brief Compute the area of a triangle from its vertices.
  * 
  * @param v0 Coordinates of the first vertex.
  * @param v1 Coordinates of the second vertex.
  * @param v2 Coordinates of the third vertex.
  * @return Area of the triangle.
  */
-rtype triangle_area_3(const std::array<rtype, 3>& v0,
-                      const std::array<rtype, 3>& v1,
-                      const std::array<rtype, 3>& v2);
+template <u_int32_t N> KOKKOS_INLINE_FUNCTION
+rtype triangle_area(const rtype * v0,
+                    const rtype * v1,
+                    const rtype * v2);
+
+// Explicit instantiation for N = 2
+template <> KOKKOS_INLINE_FUNCTION
+rtype triangle_area<2>(const rtype * v0,
+                       const rtype * v1,
+                       const rtype * v2) {
+    return 0.5 * Kokkos::fabs(v0[0] * (v1[1] - v2[1]) +
+                              v1[0] * (v2[1] - v0[1]) +
+                              v2[0] * (v0[1] - v1[1]));
+}
+
+// Explicit instantiation for N = 3
+// template <> KOKKOS_INLINE_FUNCTION
+// rtype triangle_area<3>(const rtype * v0,
+//                        const rtype * v1,
+//                        const rtype * v2) {
+//     assert(false);
+// }
+
+/**
+ * @brief Get the transformation matrix into a triangle's local coordinates.
+ * 
+ * @param v0 Coordinates of the first vertex.
+ * @param v1 Coordinates of the second vertex.
+ * @param v2 Coordinates of the third vertex.
+ * @param J Transformation matrix.
+ * @param J_inv Inverse of the transformation matrix.
+ */
+KOKKOS_INLINE_FUNCTION
+void triangle_J_Jinv(const rtype * v0,
+                     const rtype * v1,
+                     const rtype * v2,
+                     rtype * J,
+                     rtype * J_inv) {
+    J[0] = v1[0] - v0[0];
+    J[1] = v2[0] - v0[0];
+    J[2] = v1[1] - v0[1];
+    J[3] = v2[1] - v0[1];
+
+    invert_matrix<2>(J, J_inv);
+}
+
+/**
+ * @brief Get the transformation matrix into a tetrahedron's local coordinates.
+ * 
+ * @param v0 Coordinates of the first vertex.
+ * @param v1 Coordinates of the second vertex.
+ * @param v2 Coordinates of the third vertex.
+ * @param v3 Coordinates of the fourth vertex.
+ * @param J Transformation matrix.
+ * @param J_inv Inverse of the transformation matrix.
+ */
+KOKKOS_INLINE_FUNCTION
+void tetrahedron_J_Jinv(const rtype * v0,
+                        const rtype * v1,
+                        const rtype * v2,
+                        const rtype * v3,
+                        rtype * J,
+                        rtype * J_inv) {
+    J[0] = v1[0] - v0[0];
+    J[1] = v2[0] - v0[0];
+    J[2] = v3[0] - v0[0];
+    J[3] = v1[1] - v0[1];
+    J[4] = v2[1] - v0[1];
+    J[5] = v3[1] - v0[1];
+    J[6] = v1[2] - v0[2];
+    J[7] = v2[2] - v0[2];
+    J[8] = v3[2] - v0[2];
+
+    invert_matrix<3>(J, J_inv);
+}
 
 /**
  * @brief Compute the maximum of each element along the first dimension of a.

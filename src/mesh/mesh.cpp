@@ -118,7 +118,7 @@ u_int32_t Mesh::h_node_of_face(u_int32_t i_face, u_int8_t i_node_local) const {
     return h_nodes_of_face(h_offsets_nodes_of_face(i_face) + i_node_local);
 }
 
-void Mesh::neighbors_of_cell_helper(u_int32_t i_cell, u_int8_t n_order, std::vector<u_int32_t> & neighbors) const {
+void Mesh::h_neighbors_of_cell_helper(u_int32_t i_cell, u_int8_t n_order, std::vector<u_int32_t> & neighbors) const {
     // Warning: results are not sorted and may contain duplicates
     // List will contain the current cv and its neighbors up to n_neighbors graph distance
 
@@ -138,15 +138,15 @@ void Mesh::neighbors_of_cell_helper(u_int32_t i_cell, u_int8_t n_order, std::vec
                 continue;
             } else {
                 // Recursively call the function for the neighbor cv
-                neighbors_of_cell_helper(i_cell_1, n_order - 1, neighbors);
+                h_neighbors_of_cell_helper(i_cell_1, n_order - 1, neighbors);
             }
         }
     }
 }
 
-void Mesh::neighbors_of_cell(u_int32_t i_cell, u_int8_t n_order, std::vector<u_int32_t> & neighbors) const {
+void Mesh::h_neighbors_of_cell(u_int32_t i_cell, u_int8_t n_order, std::vector<u_int32_t> & neighbors) const {
     // Get the neighbors, unsorted and with duplicates
-    neighbors_of_cell_helper(i_cell, n_order, neighbors);
+    h_neighbors_of_cell_helper(i_cell, n_order, neighbors);
     
     // Sort and remove duplicates
     std::sort(neighbors.begin(), neighbors.end());
@@ -186,7 +186,7 @@ void Mesh::compute_cell_volumes() {
                 const NVector coords_1 = {h_node_coords(i_node_1, 0), h_node_coords(i_node_1, 1)};
                 const NVector coords_2 = {h_node_coords(i_node_2, 0), h_node_coords(i_node_2, 1)};
 
-                h_cell_volume(i_cell) = triangle_area_2(coords_0, coords_1, coords_2);
+                h_cell_volume(i_cell) = triangle_area<2>(coords_0.data(), coords_1.data(), coords_2.data());
                 break;
             }
             case CellType::QUAD: {
@@ -200,8 +200,8 @@ void Mesh::compute_cell_volumes() {
                 const NVector coords_2 = {h_node_coords(i_node_2, 0), h_node_coords(i_node_2, 1)};
                 const NVector coords_3 = {h_node_coords(i_node_3, 0), h_node_coords(i_node_3, 1)};
 
-                rtype a1 = triangle_area_2(coords_0, coords_1, coords_2);
-                rtype a2 = triangle_area_2(coords_0, coords_2, coords_3);
+                rtype a1 = triangle_area<2>(coords_0.data(), coords_1.data(), coords_2.data());
+                rtype a2 = triangle_area<2>(coords_0.data(), coords_2.data(), coords_3.data());
                 h_cell_volume(i_cell) = a1 + a2;
                 break;
             }
@@ -524,13 +524,11 @@ void Mesh::init_cart(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly) {
 void Mesh::init_wedge(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly) {
     init_cart(nx, ny, Lx, Ly);
 
-    rtype wedge_theta = 8 * Kokkos::numbers::pi / 180.0;
-    rtype wedge_x = 0.5;
-
     // Adjust node coordinates
     rtype dx = Lx / nx;
     rtype dy = Ly / ny;
-
+    rtype wedge_theta = 8 * Kokkos::numbers::pi / 180.0;
+    rtype wedge_x = 0.5;
     for (u_int32_t i = 0; i < nx + 1; ++i) {
         for (u_int32_t j = 0; j < ny + 1; ++j) {
             u_int32_t i_node = i * (ny + 1) + j;

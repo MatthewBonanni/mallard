@@ -87,9 +87,7 @@ struct FluxFunctor {
             unit<N_DIM>(n_vec, n_unit);
 
             // Get cell conservatives
-            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-                conservatives_l[j] = face_solution(i_face, 0, j);
-            }
+            FOR_I_CONSERVATIVE conservatives_l[i] = face_solution(i_face, 0, i);
 
             // Compute relevant primitive variables
             physics.compute_primitives_from_conservatives(primitives_l, conservatives_l);
@@ -106,9 +104,7 @@ struct FluxFunctor {
                                      primitives_r[2], physics.get_gamma(), primitives_r[4]);
 
             // Add flux to RHS
-            for (u_int16_t j = 0; j < N_CONSERVATIVE; j++) {
-                Kokkos::atomic_add(&rhs(i_cell_l, j), -face_area(i_face) * flux[j]);
-            }
+            FOR_I_CONSERVATIVE Kokkos::atomic_add(&rhs(i_cell_l, i), -face_area(i_face) * flux[i]);
         }
     
     private:

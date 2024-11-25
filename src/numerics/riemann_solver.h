@@ -411,9 +411,7 @@ void Rusanov::calc_flux(rtype * flux, const rtype * n_unit,
 
     rtype S_max = Kokkos::fmax(Kokkos::fabs(u_l_n) + a_l, Kokkos::fabs(u_r_n) + a_r);
 
-    for (u_int16_t i = 0; i < N_CONSERVATIVE; i++) {
-        flux[i] = 0.5 * (flux_l[i] + flux_r[i] + S_max * (U_l[i] - U_r[i]));
-    }
+    FOR_I_CONSERVATIVE flux[i] = 0.5 * (flux_l[i] + flux_r[i] + S_max * (U_l[i] - U_r[i]));
 }
 
 KOKKOS_INLINE_FUNCTION
@@ -494,17 +492,11 @@ void HLL::calc_flux(rtype * flux, const rtype * n_unit,
     
     // Calculate the flux
     if (0.0 <= S_l) {
-        for (u_int16_t i = 0; i < N_CONSERVATIVE; i++) {
-            flux[i] = flux_l[i];
-        }
+        FOR_I_CONSERVATIVE flux[i] = flux_l[i];
     } else if (S_r <= 0.0) {
-        for (u_int16_t i = 0; i < N_CONSERVATIVE; i++) {
-            flux[i] = flux_r[i];
-        }
+        FOR_I_CONSERVATIVE flux[i] = flux_r[i];
     } else {
-        for (u_int16_t i = 0; i < N_CONSERVATIVE; i++) {
-            flux[i] = (S_r * flux_l[i] - S_l * flux_r[i] + S_l * S_r * (U_r[i] - U_l[i])) / (S_r - S_l);
-        }
+        FOR_I_CONSERVATIVE flux[i] = (S_r * flux_l[i] - S_l * flux_r[i] + S_l * S_r * (U_r[i] - U_l[i])) / (S_r - S_l);
     }
 }
 
@@ -566,25 +558,21 @@ void HLLC::calc_flux(rtype * flux, const rtype * n_unit,
     
     // Calculate the flux (variant 2)
     if (0.0 <= S_l) {
-        for (u_int16_t i = 0; i < N_CONSERVATIVE; i++) {
-            flux[i] = flux_l[i];
-        }
+        FOR_I_CONSERVATIVE flux[i] = flux_l[i];
     } else if (S_r <= 0.0) {
-        for (u_int16_t i = 0; i < N_CONSERVATIVE; i++) {
-            flux[i] = flux_r[i];
-        }
+        FOR_I_CONSERVATIVE flux[i] = flux_r[i];
     } else {
         rtype D_star[N_CONSERVATIVE] = {0.0, n_unit[0], n_unit[1], S_star};
         rtype P_lr = 0.5 * (p_l + p_r +
                             rho_l * (S_l - u_l_n) * (S_star - u_l_n) +
                             rho_r * (S_r - u_r_n) * (S_star - u_r_n));
         if (S_star >= 0.0) {
-            for (u_int16_t i = 0; i < N_CONSERVATIVE; i++) {
+            FOR_I_CONSERVATIVE {
                 flux[i] = (S_star * (S_l * U_l[i] - flux_l[i]) + S_l * P_lr * D_star[i]) /
                           (S_l - S_star);
             }
         } else {
-            for (u_int16_t i = 0; i < N_CONSERVATIVE; i++) {
+            FOR_I_CONSERVATIVE {
                 flux[i] = (S_star * (S_r * U_r[i] - flux_r[i]) + S_r * P_lr * D_star[i]) /
                           (S_r - S_star);
             }
