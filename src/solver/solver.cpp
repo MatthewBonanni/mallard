@@ -141,10 +141,11 @@ void Solver::init_numerics() {
 
     if (face_reconstruction_type == FaceReconstructionType::FirstOrder) {
         face_reconstruction = std::make_unique<FirstOrder>();
-    } else if (face_reconstruction_type == FaceReconstructionType::WENO) {
+    } else if (face_reconstruction_type == FaceReconstructionType::TENO) {
         /** \todo Make this an input file option */
-        int poly_order = 5;
-        face_reconstruction = std::make_unique<WENO>(poly_order);
+        u_int8_t poly_order = 5;
+        rtype max_stencil_size_factor = 2.0;
+        face_reconstruction = std::make_unique<TENO>(poly_order, max_stencil_size_factor);
     } else {
         // Should never get here due to the enum class.
         throw std::runtime_error("Unknown face reconstruction type: " + face_reconstruction_str + ".");

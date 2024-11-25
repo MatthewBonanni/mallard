@@ -22,17 +22,17 @@
 
 enum class FaceReconstructionType {
     FirstOrder,
-    WENO,
+    TENO,
 };
 
 static const std::unordered_map<std::string, FaceReconstructionType> FACE_RECONSTRUCTION_TYPES = {
     {"FO", FaceReconstructionType::FirstOrder},
-    {"WENO", FaceReconstructionType::WENO},
+    {"TENO", FaceReconstructionType::TENO},
 };
 
 static const std::unordered_map<FaceReconstructionType, std::string> FACE_RECONSTRUCTION_NAMES = {
     {FaceReconstructionType::FirstOrder, "FO"},
-    {FaceReconstructionType::WENO, "WENO"},
+    {FaceReconstructionType::TENO, "TENO"},
 };
 
 /**
@@ -116,17 +116,17 @@ class FirstOrder : public FaceReconstruction {
     private:
 };
 
-class WENO : public FaceReconstruction {
+class TENO : public FaceReconstruction {
     public:
         /**
-         * @brief Construct a new WENO object
+         * @brief Construct a new TENO object
          */
-        WENO(u_int8_t poly_order);
+        TENO(u_int8_t poly_order);
 
         /**
-         * @brief Destroy the WENO object
+         * @brief Destroy the TENO object
          */
-        ~WENO();
+        ~TENO();
 
         /**
          * @brief Reconstruct the face values.
@@ -137,6 +137,7 @@ class WENO : public FaceReconstruction {
                               Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) override;
     protected:
     private:
+        void calc_max_stencil_size();
         std::vector<u_int32_t> compute_stencil_of_cell_centered(u_int32_t i_cell);
         std::vector<std::vector<u_int32_t>> compute_stencils_of_cell_directional(u_int32_t i_cell);
         void compute_stencils_of_cell(u_int32_t i_cell,
@@ -144,9 +145,12 @@ class WENO : public FaceReconstruction {
                                       std::vector<u_int32_t> & v_stencils_of_cell,
                                       std::vector<u_int32_t> & v_stencils);
         void compute_stencils();
+        void compute_reconstruction_matrices();
+        void compute_oscillation_indicators():
 
         u_int8_t poly_order;
         u_int16_t n_dof;
+        rtype max_stencil_size_factor;
         u_int16_t max_cells_per_stencil;
         Kokkos::View<u_int32_t *> offsets_stencils_of_cell;
         Kokkos::View<u_int32_t *>::HostMirror h_offsets_stencils_of_cell;
@@ -160,6 +164,16 @@ class WENO : public FaceReconstruction {
         Kokkos::View<u_int32_t *> stencils;
         Kokkos::View<u_int32_t *>::HostMirror h_stencils;
         // ^ vector of cell indices that are part of each stencil.
+        Kokkos::View<u_int32_t *> weights_of_cell;
+        Kokkos::View<u_int32_t *>::HostMirror h_weights_of_cell;
+        // ^ vector of offsets into reconstruction_matrices, to get the group of matrices for a
+        // stencil. The difference between two entries is the number of matrix elements for the
+        // stencil, which is MxK, where M is the number of cells in the stencil and K is the number
+        // of degrees of freedom. This vector can be indexed by offsets_stencils_of_cell.
+        Kokkos::View<rtype *> reconstruction_matrices;
+        Kokkos::View<rtype *>::HostMirror h_reconstruction_matrices;
+        // ^ vector of reconstruction matrices for each cell in the stencil. Matrices are stored in
+        // row-major order.
 };
 
 #endif // FACE_RECONSTRUCTION_H

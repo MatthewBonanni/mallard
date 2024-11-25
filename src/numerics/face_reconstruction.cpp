@@ -97,33 +97,33 @@ void FirstOrder::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution
     Kokkos::parallel_for(mesh->n_faces, flux_functor);
 }
 
-WENO::WENO(u_int8_t poly_order) :
-        poly_order(poly_order) {
-    type = FaceReconstructionType::WENO;
-    switch (N_DIM) {
-        case 2 : {
-            n_dof = (poly_order + 1) * (poly_order + 2) / 2 - 1;
-            break;
-        }
-        case 3 : {
-            n_dof = (poly_order + 1) * (poly_order + 2) * (poly_order + 3) / 6 - 1;
-            break;
-        }
-        default : {
-            throw std::runtime_error("WENO has not been implemented for N_DIM = " + std::to_string(N_DIM) + ".");
-        }
-    }
-    max_cells_per_stencil = 2 * n_dof;
+TENO::TENO(u_int8_t poly_order
+           rtype max_stencil_size_factor) :
+        poly_order(poly_order),
+        max_stencil_size_factor(max_stencil_size_factor) {
+    /** \todo input file options */
+    type = FaceReconstructionType::TENO;
     compute_stencils();
 }
 
-WENO::~WENO() {
+TENO::calc_max_stencil_size() {
+    // Nd = (prod(r + m) from m=1 to N_DIM) / N_DIM!
+    n_dof = 1;
+    for (u_int8_t i = 1; i <= N_DIM; ++i) {
+        n_dof *= poly_order + i;
+    }
+    for (u_int8_t i = 1; i <= N_DIM; ++i) {
+        n_dof /= i;
+    }
+    max_cells_per_stencil = max_stencil_size_factor * n_dof;
+}
+
+TENO::~TENO() {
     // Empty
 }
 
-std::vector<u_int32_t> WENO::compute_stencil_of_cell_centered(u_int32_t i_cell) {
+std::vector<u_int32_t> TENO::compute_stencil_of_cell_centered(u_int32_t i_cell) {
     // Naive Cell Based (NCB) algorithm (Tsoutsanis 2023)
-    // Just fill up to max_cells_per_stencil for now
     /** \todo Condition number optimization */
     bool done = false;
     std::vector<std::vector<u_int32_t>> neighbor_rings;
@@ -191,7 +191,7 @@ std::vector<u_int32_t> WENO::compute_stencil_of_cell_centered(u_int32_t i_cell) 
     return stencil;
 }
 
-std::vector<std::vector<u_int32_t>> WENO::compute_stencils_of_cell_directional(u_int32_t i_cell) {
+std::vector<std::vector<u_int32_t>> TENO::compute_stencils_of_cell_directional(u_int32_t i_cell) {
     //  Type 4 algorithm (Tsoutsanis 2023)
     u_int8_t n_stencils = mesh->n_faces_of_cell(i_cell);
     std::vector<std::vector<u_int32_t>> stencils(n_stencils);
@@ -299,7 +299,7 @@ std::vector<std::vector<u_int32_t>> WENO::compute_stencils_of_cell_directional(u
     return stencils;
 }
 
-void WENO::compute_stencils_of_cell(u_int32_t i_cell,
+void TENO::compute_stencils_of_cell(u_int32_t i_cell,
                                     std::vector<u_int32_t> & v_offsets_stencils_of_cell,
                                     std::vector<u_int32_t> & v_stencils_of_cell,
                                     std::vector<u_int32_t> & v_stencils) {
@@ -325,7 +325,7 @@ void WENO::compute_stencils_of_cell(u_int32_t i_cell,
     v_offsets_stencils_of_cell.push_back(v_stencils_of_cell.size());
 }
 
-void WENO::compute_stencils() {
+void TENO::compute_stencils() {
     std::vector<u_int32_t> v_offsets_stencils_of_cell;
     std::vector<u_int32_t> v_stencils_of_cell;
     std::vector<u_int32_t> v_stencils;
@@ -364,16 +364,68 @@ void WENO::compute_stencils() {
     Kokkos::deep_copy(stencils, h_stencils);
 }
 
-struct WENOFunctor {
+void TENO::compute_reconstruction_matrices() {
+    for (u_int32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
+        if (mesh->n_nodes_of_cell(i_cell) != 3) {
+            throw std::runtime_error("TENO has only been implemented for triangular cells.");
+            /** \todo Implement other cell types */
+        }
+
+        // Compute the transformation matrix for the target cell
+        std::vector<rtype> J;
+        std::vector<rtype> J_inv;
+        std::vector<rtype> w0(N_DIM);
+        std::vector<rtype> w1(N_DIM);
+        std::vector<rtype> w2(N_DIM);
+        FOR_I_DIM w0[i] = mesh->h_node_coords(mesh->h_node_of_cell(i_cell, 0), i);
+        FOR_I_DIM w1[i] = mesh->h_node_coords(mesh->h_node_of_cell(i_cell, 1), i);
+        FOR_I_DIM w2[i] = mesh->h_node_coords(mesh->h_node_of_cell(i_cell, 2), i);
+        triangle_J_Jinv(v0.data(), v1.data(), v2.data(), J.data(), J_inv.data());
+
+        u_int8_t stencil_offset = h_offsets_stencils_of_cell(i_cell);
+        u_int8_t n_stencils = h_offsets_stencils_of_cell(i_cell + 1) -
+                              h_offsets_stencils_of_cell(i_cell    );
+        for (u_int8_t i_stencil = 0; i_stencil < n_stencils; ++i_stencil) {
+            u_int16_t stencil_size = h_stencils_of_cell(stencil_offset + i_stencil + 1) -
+                                     h_stencils_of_cell(stencil_offset + i_stencil    );
+            for (u_int8_t i_neighbor = 0; i_neighbor < stencil_size; ++i_neighbor) {
+                // Transform the neighbor vertex coordinates to the target cell's local coordinates
+                u_int32_t i_neighbor_cell = h_stencils(h_stencils_of_cell(stencil_offset + i_stencil) + i_neighbor);
+                std::vector<rtype> v0(N_DIM);
+                std::vector<rtype> v1(N_DIM);
+                std::vector<rtype> v2(N_DIM);
+
+                FOR_I_DIM v0[i] = mesh->h_node_coords(mesh->h_node_of_cell(i_neighbor_cell, 0), i) - w0[i];
+                FOR_I_DIM v1[i] = mesh->h_node_coords(mesh->h_node_of_cell(i_neighbor_cell, 1), i) - w0[i];
+                FOR_I_DIM v2[i] = mesh->h_node_coords(mesh->h_node_of_cell(i_neighbor_cell, 2), i) - w0[i];
+
+                std::vector<rtype> v0_trans(N_DIM);
+                std::vector<rtype> v1_trans(N_DIM);
+                std::vector<rtype> v2_trans(N_DIM);
+
+                gemv<N_DIM>(J_inv.data, v0.data(), v0_trans.data());
+                gemv<N_DIM>(J_inv.data, v1.data(), v1_trans.data());
+                gemv<N_DIM>(J_inv.data, v2.data(), v2_trans.data());
+
+                for (u_int16_t i_dof = 0; i_dof < n_dof; ++i_dof) {
+                    // Integrate the basis function over the transformed triangle using
+                    // gaussian quadrature
+                }
+            }
+        }
+    }
+}
+
+struct TENOFunctor {
     public:
         /**
-         * @brief Construct a new WENOFunctor object
+         * @brief Construct a new TENOFunctor object
          * @param cells_of_face Cells of face.
          * @param face_normals Face normals.
          * @param face_solution Face solution.
          * @param solution Cell solution.
          */
-        WENOFunctor(Kokkos::View<int32_t *[2]> cells_of_face,
+        TENOFunctor(Kokkos::View<int32_t *[2]> cells_of_face,
                     Kokkos::View<rtype *[2]> face_normals,
                     Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
                     Kokkos::View<rtype *[N_CONSERVATIVE]> solution) :
@@ -383,7 +435,7 @@ struct WENOFunctor {
                         solution(solution) {}
         
         /**
-         * @brief Overloaded operator for WENO face reconstruction.
+         * @brief Overloaded operator for TENO face reconstruction.
          * @param i_face Face index.
          */
         KOKKOS_INLINE_FUNCTION
@@ -398,9 +450,9 @@ struct WENOFunctor {
         Kokkos::View<rtype *[N_CONSERVATIVE]> solution;
 };
 
-void WENO::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+void TENO::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                 Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) {
-    WENOFunctor flux_functor(mesh->cells_of_face,
+    TENOFunctor flux_functor(mesh->cells_of_face,
                              mesh->face_normals,
                              face_solution,
                              solution);
