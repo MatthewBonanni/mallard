@@ -109,12 +109,12 @@ TENO::TENO(u_int8_t poly_order
 TENO::calc_max_stencil_size() {
     // Nd = (prod(r + m) from m=1 to N_DIM) / N_DIM!
     n_dof = 1;
+    u_int16_t denom = 1;
     for (u_int8_t i = 1; i <= N_DIM; ++i) {
+        denom *= i;
         n_dof *= poly_order + i;
     }
-    for (u_int8_t i = 1; i <= N_DIM; ++i) {
-        n_dof /= i;
-    }
+    n_dof /= denom;
     max_cells_per_stencil = max_stencil_size_factor * n_dof;
 }
 
