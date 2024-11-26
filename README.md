@@ -15,7 +15,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible N
 
 - Solves the fully compressible Navier-Stokes equations
 - Supports unstructured meshes
-- Performance portability on heterogeneous computing architectures, including GPUs, via Kokkos
+- Performance portability on heterogeneous computing architectures, including GPUs, via Kokkos and MPI
 - High-order TENO reconstruction
 - Simple TOML-based input file format
 
