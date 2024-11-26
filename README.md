@@ -3,9 +3,9 @@
 
 <p align="center">
     <picture>
-      <source media="(prefers-color-scheme: dark)" width="800" srcset="docs/images/mallard.png">
-      <source media="(prefers-color-scheme: light)" width="800" srcset="docs/images/mallard.png">
-      <img alt="mallard logotype" width="800" src="docs/images/mallard.png">
+      <source media="(prefers-color-scheme: dark)" width="1000" srcset="docs/images/mallard.png">
+      <source media="(prefers-color-scheme: light)" width="1000" srcset="docs/images/mallard.png">
+      <img alt="mallard logotype" width="1000" src="docs/images/mallard.png">
     </picture>
 </p>
 
