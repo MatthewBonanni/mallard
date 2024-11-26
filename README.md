@@ -1,7 +1,13 @@
 ![C++](https://img.shields.io/badge/C%2B%2B-17-blue)
 [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-# Mallard
+<p align="center">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" width="800" srcset="docs/images/mallard.png">
+      <source media="(prefers-color-scheme: light)" width="800" srcset="docs/images/mallard.png">
+      <img alt="mallard logotype" width="800" src="docs/images/mallard.png">
+    </picture>
+</p>
 
 Mallard is a high-order unstructured finite volume solver for the compressible Navier-Stokes equations.
 
