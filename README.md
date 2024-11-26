@@ -9,7 +9,7 @@
     </picture>
 </p>
 
-Mallard is a high-order unstructured finite volume solver for the compressible Navier-Stokes equations, written in C++.
+Mallard is a high-order unstructured finite volume solver for the compressible Navier-Stokes equations, written in C++. (WORK IN PROGRESS)
 
 ## Features
 
