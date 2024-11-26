@@ -42,8 +42,6 @@ void DataWriter::init(const toml::value & input,
         throw std::runtime_error("DataWriter: variables not specified.");
     }
 
-    // \todo Implement write geometries
-
     this->prefix = toml::find<std::string>(input, "prefix");
     this->interval = toml::find<u_int32_t>(input, "interval");
     std::string format_str = toml::find<std::string>(input, "format");

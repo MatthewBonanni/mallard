@@ -127,7 +127,6 @@ struct FluxFunctor {
             u_mag_l = norm_2<N_DIM>(u_l);
             sos_l = physics.get_sound_speed_from_pressure_density(p_l, rho_l);
             if (u_mag_l < sos_l) {
-                /** \todo Implement case where p_bc < 0.0, use average extrapolated pressure */
                 p_out = data_bc(0); // Use the set boundary pressure
             } else {
                 p_out = p_l; // Extrapolate pressure

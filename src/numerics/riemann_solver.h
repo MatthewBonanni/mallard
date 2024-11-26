@@ -20,22 +20,22 @@
 
 enum class RiemannSolverType {
     Rusanov,
-    Roe,
     HLL,
+    HLLE,
     HLLC,
 };
 
 static const std::unordered_map<std::string, RiemannSolverType> RIEMANN_SOLVER_TYPES = {
     {"Rusanov", RiemannSolverType::Rusanov},
-    {"Roe", RiemannSolverType::Roe},
     {"HLL", RiemannSolverType::HLL},
+    {"HLLE", RiemannSolverType::HLLE},
     {"HLLC", RiemannSolverType::HLLC}
 };
 
 static const std::unordered_map<RiemannSolverType, std::string> RIEMANN_SOLVER_NAMES = {
     {RiemannSolverType::Rusanov, "Rusanov"},
-    {RiemannSolverType::Roe, "Roe"},
     {RiemannSolverType::HLL, "HLL"},
+    {RiemannSolverType::HLLE, "HLLE"},
     {RiemannSolverType::HLLC, "HLLC"}
 };
 
@@ -133,43 +133,6 @@ class Rusanov : public RiemannSolver {
     private:
 };
 
-class Roe : public RiemannSolver {
-    public:
-        /**
-         * @brief Construct a new Roe object
-         */
-        Roe();
-
-        /**
-         * @brief Destroy the Roe object
-         */
-        virtual ~Roe();
-
-        /**
-         * @brief Calculate the Roe flux.
-         * @param flux Roe flux.
-         * @param n_unit Unit normal vector.
-         * @param rho_l Left density.
-         * @param u_l Left velocity.
-         * @param p_l Left pressure.
-         * @param gamma_l Left gamma.
-         * @param h_l Left enthalpy.
-         * @param rho_r Right density.
-         * @param u_r Right velocity.
-         * @param p_r Right pressure.
-         * @param gamma_r Right gamma.
-         * @param h_r Right enthalpy.
-         */
-        KOKKOS_INLINE_FUNCTION
-        void calc_flux(rtype * flux, const rtype * n_unit,
-                       const rtype rho_l, const rtype * u_l,
-                       const rtype p_l, const rtype gamma_l, const rtype h_l,
-                       const rtype rho_r, const rtype * u_r,
-                       const rtype p_r, const rtype gamma_r, const rtype h_r) const override;
-    protected:
-    private:
-};
-
 class HLL : public RiemannSolver {
     public:
         /**
@@ -204,6 +167,41 @@ class HLL : public RiemannSolver {
                        const rtype rho_r, const rtype * u_r,
                        const rtype p_r, const rtype gamma_r, const rtype h_r) const override;
 };
+
+class HLLE : public RiemannSolver {
+    public:
+        /**
+         * @brief Construct a new HLLE object
+         */
+        HLLE();
+
+        /**
+         * @brief Destroy the HLLE object
+         */
+        virtual ~HLLE();
+
+        /**
+         * @brief Calculate the HLLE flux.
+         * @param flux HLLE flux.
+         * @param n_unit Unit normal vector.
+         * @param rho_l Left density.
+         * @param u_l Left velocity.
+         * @param p_l Left pressure.
+         * @param gamma_l Left gamma.
+         * @param h_l Left enthalpy.
+         * @param rho_r Right density.
+         * @param u_r Right velocity.
+         * @param p_r Right pressure.
+         * @param gamma_r Right gamma.
+         * @param h_r Right enthalpy.
+         */
+        KOKKOS_INLINE_FUNCTION
+        void calc_flux(rtype * flux, const rtype * n_unit,
+                       const rtype rho_l, const rtype * u_l,
+                       const rtype p_l, const rtype gamma_l, const rtype h_l,
+                       const rtype rho_r, const rtype * u_r,
+                       const rtype p_r, const rtype gamma_r, const rtype h_r) const override;
+}
 
 class HLLC : public RiemannSolver {
     public:
@@ -412,28 +410,6 @@ void Rusanov::calc_flux(rtype * flux, const rtype * n_unit,
     rtype S_max = Kokkos::fmax(Kokkos::fabs(u_l_n) + a_l, Kokkos::fabs(u_r_n) + a_r);
 
     FOR_I_CONSERVATIVE flux[i] = 0.5 * (flux_l[i] + flux_r[i] + S_max * (U_l[i] - U_r[i]));
-}
-
-KOKKOS_INLINE_FUNCTION
-void Roe::calc_flux(rtype * flux, const rtype * n_unit,
-                    const rtype rho_l, const rtype * u_l,
-                    const rtype p_l, const rtype gamma_l, const rtype h_l,
-                    const rtype rho_r, const rtype * u_r,
-                    const rtype p_r, const rtype gamma_r, const rtype h_r) const {
-    (void)(flux);
-    (void)(n_unit);
-    (void)(rho_l);
-    (void)(u_l);
-    (void)(p_l);
-    (void)(gamma_l);
-    (void)(h_l);
-    (void)(rho_r);
-    (void)(u_r);
-    (void)(p_r);
-    (void)(gamma_r);
-    (void)(h_r);
-    Kokkos::abort("Roe Riemann solver not implemented.");
-    /** \todo Implement Roe Riemann solver */
 }
 
 KOKKOS_INLINE_FUNCTION

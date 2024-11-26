@@ -53,7 +53,6 @@ int Solver::init(const std::string& input_file_name) {
 
     std::cout << LOG_SEPARATOR << std::endl;
 
-    /** \todo Implement restarts. */
     t = 0.0;
     step = 0;
     t_wall_0 = timer.seconds();
@@ -142,7 +141,6 @@ void Solver::init_numerics() {
     if (face_reconstruction_type == FaceReconstructionType::FirstOrder) {
         face_reconstruction = std::make_unique<FirstOrder>();
     } else if (face_reconstruction_type == FaceReconstructionType::TENO) {
-        /** \todo Make this an input file option */
         u_int8_t poly_order = 5;
         rtype max_stencil_size_factor = 2.0;
         face_reconstruction = std::make_unique<TENO>(poly_order, max_stencil_size_factor);
@@ -529,7 +527,6 @@ void Solver::print_logo() const {
 }
 
 void Solver::take_step() {
-    /** \todo MPI implementation */
     time_integrator->take_step(dt,
                                solution_vec,
                                face_conservatives,
@@ -702,7 +699,6 @@ struct SpectralRadiusFunctor {
             spectral_radius_convective *= 1.37 * geom_factor;
             spectral_radius_acoustic = 1.37 * Kokkos::sqrt(geom_factor * spectral_radius_acoustic);
 
-            /** \todo Implement viscous and heat spectral radii */
             spectral_radius_overall = spectral_radius_convective + spectral_radius_acoustic;
 
             // Update max spectral radius

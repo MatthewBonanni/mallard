@@ -65,7 +65,6 @@ void Solver::calc_rhs_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                              Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
     (void)(solution);
     (void)(rhs);
-    /** \todo Implement source terms. */
 }
 
 template <typename T_physics, typename T_riemann_solver>

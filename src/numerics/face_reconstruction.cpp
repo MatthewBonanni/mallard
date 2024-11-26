@@ -101,7 +101,6 @@ TENO::TENO(u_int8_t poly_order
            rtype max_stencil_size_factor) :
         poly_order(poly_order),
         max_stencil_size_factor(max_stencil_size_factor) {
-    /** \todo input file options */
     type = FaceReconstructionType::TENO;
     compute_stencils();
 }
@@ -124,7 +123,6 @@ TENO::~TENO() {
 
 std::vector<u_int32_t> TENO::compute_stencil_of_cell_centered(u_int32_t i_cell) {
     // Naive Cell Based (NCB) algorithm (Tsoutsanis 2023)
-    /** \todo Condition number optimization */
     bool done = false;
     std::vector<std::vector<u_int32_t>> neighbor_rings;
     neighbor_rings.push_back({i_cell});
@@ -368,7 +366,6 @@ void TENO::compute_reconstruction_matrices() {
     for (u_int32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
         if (mesh->n_nodes_of_cell(i_cell) != 3) {
             throw std::runtime_error("TENO has only been implemented for triangular cells.");
-            /** \todo Implement other cell types */
         }
 
         // Compute the transformation matrix for the target cell

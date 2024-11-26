@@ -7,8 +7,6 @@
  * 
  * @copyright Copyright (c) 2023 Matthew Bonanni
  * 
- * 
- * \todo Move this to its own Initialization class.
  */
 
 #include "solver.h"

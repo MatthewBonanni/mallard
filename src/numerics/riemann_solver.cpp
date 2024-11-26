@@ -44,19 +44,19 @@ Rusanov::~Rusanov() {
     // Empty
 }
 
-Roe::Roe() {
-    type = RiemannSolverType::Roe;
-}
-
-Roe::~Roe() {
-    // Empty
-}
-
 HLL::HLL() {
     type = RiemannSolverType::HLL;
 }
 
 HLL::~HLL() {
+    // Empty
+}
+
+HLLE::HLLE() {
+    type = RiemannSolverType::HLLE;
+}
+
+HLLE::~HLLE() {
     // Empty
 }
 
