@@ -26,8 +26,8 @@ Mallard is a high-order unstructured finite volume solver for the compressible N
 Mallard depends on the Kokkos Ecosystem, specifically:
 - [kokkos](https://github.com/kokkos/kokkos)
 - [kokkos-kernels](https://github.com/kokkos/kokkos-kernels)
-Follow the instructions for each of these, compiling with the desired backends enabled.
-All other prerequisites will be installed automatically.
+
+Follow the instructions for each of these, compiling with the desired backends enabled. All other prerequisites will be installed automatically.
 
 ### Building
 
