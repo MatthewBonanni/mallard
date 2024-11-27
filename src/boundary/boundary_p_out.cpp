@@ -41,7 +41,7 @@ void BoundaryPOut::init(const toml::value & input) {
     data_bc = Kokkos::View<rtype [1]>("data_bc");
     h_data_bc = Kokkos::create_mirror_view(data_bc);
     
-    h_data_bc(0) = toml::find<rtype>(input, "initialize", "p");
+    h_data_bc(0) = toml::find<rtype>(input, "p");
 
     print();
 }

@@ -36,24 +36,24 @@ void BoundaryUPT::print() {
 }
 
 void BoundaryUPT::init(const toml::value & input) {
-    if (!input.contains("u_in")) {
+    if (!input.contains("u")) {
         throw std::runtime_error("Missing u for boundary: " + zone->get_name() + ".");
     }
-    if (!input.contains("p_in")) {
+    if (!input.contains("p")) {
         throw std::runtime_error("Missing p for boundary: " + zone->get_name() + ".");
     }
-    if (!input.contains("T_in")) {
+    if (!input.contains("T")) {
         throw std::runtime_error("Missing T for boundary: " + zone->get_name() + ".");
     }
 
-    std::vector<rtype> u_in = toml::find<std::vector<rtype>>(input, "u_in");
+    std::vector<rtype> u_in = toml::find<std::vector<rtype>>(input, "u");
     if (u_in.size() != N_DIM) {
         throw std::runtime_error("Invalid u for boundary: " + zone->get_name() + ".");
     }
 
     FOR_I_DIM u_bc[i] = u_in[i];
-    p_bc = toml::find<rtype>(input, "p_in");
-    T_bc = toml::find<rtype>(input, "T_in");
+    p_bc = toml::find<rtype>(input, "p");
+    T_bc = toml::find<rtype>(input, "T");
 
     rtype rho_bc = physics->h_get_density_from_pressure_temperature(p_bc, T_bc);
     rtype e_bc = physics->h_get_energy_from_temperature(T_bc);
