@@ -4,6 +4,7 @@ set(LIB_SRCS
     time_integrator.cpp
     face_reconstruction.cpp
     riemann_solver.cpp
+    flux_functor.cpp
 )
 
 # Add the library

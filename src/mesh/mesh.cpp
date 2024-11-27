@@ -30,7 +30,7 @@ Mesh::~Mesh() {
 }
 
 void Mesh::init(const toml::value & input) {
-    std::string type_str = toml::find_or<std::string>(input, "mesh", "type", "FILE");
+    std::string type_str = toml::find_or<std::string>(input, "mesh", "type", "file");
     typename std::unordered_map<std::string, MeshType>::const_iterator it = MESH_TYPES.find(type_str);
     if (it == MESH_TYPES.end()) {
         throw std::runtime_error("Unknown mesh type: " + type_str + ".");
@@ -388,61 +388,77 @@ void Mesh::init_cart(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly) {
     }
 
     // Handle boundary faces
+    FaceZone zone_i = FaceZone();
     FaceZone zone_r = FaceZone();
     FaceZone zone_t = FaceZone();
     FaceZone zone_l = FaceZone();
     FaceZone zone_b = FaceZone();
+    zone_i.set_name("interior");
     zone_r.set_name("right");
     zone_t.set_name("top");
     zone_l.set_name("left");
     zone_b.set_name("bottom");
+    zone_i.set_type(FaceZoneType::INTERIOR);
     zone_r.set_type(FaceZoneType::BOUNDARY);
     zone_t.set_type(FaceZoneType::BOUNDARY);
     zone_l.set_type(FaceZoneType::BOUNDARY);
     zone_b.set_type(FaceZoneType::BOUNDARY);
 
-    std::vector<u_int32_t> faces_r, faces_t, faces_l, faces_b;
+    std::vector<u_int32_t> faces_i, faces_r, faces_t, faces_l, faces_b;
     for (u_int32_t i_cell = 0; i_cell < n_cells; i_cell++) {
         u_int32_t ic = i_cell / ny;
         u_int32_t jc = i_cell % ny;
         u_int32_t i_face;
 
         // Right boundary
+        i_face = _faces_of_cell[i_cell][0];
         if (ic == nx - 1) {
-            i_face = _faces_of_cell[i_cell][0];
             h_cells_of_face(i_face, 1) = -1;
             faces_r.push_back(i_face);
+        } else {
+            faces_i.push_back(i_face);
         }
         // Top boundary
+        i_face = _faces_of_cell[i_cell][1];
         if (jc == ny - 1) {
-            i_face = _faces_of_cell[i_cell][1];
             h_cells_of_face(i_face, 1) = -1;
             faces_t.push_back(i_face);
+        } else {
+            faces_i.push_back(i_face);
         }
         // Left boundary
+        i_face = _faces_of_cell[i_cell][2];
         if (ic == 0) {
-            i_face = _faces_of_cell[i_cell][2];
             h_cells_of_face(i_face, 1) = -1;
             faces_l.push_back(i_face);
+        } else {
+            faces_i.push_back(i_face);
         }
         // Bottom boundary
+        i_face = _faces_of_cell[i_cell][3];
         if (jc == 0) {
-            i_face = _faces_of_cell[i_cell][3];
             h_cells_of_face(i_face, 1) = -1;
             faces_b.push_back(i_face);
+        } else {
+            faces_i.push_back(i_face);
         }
     }
 
+    zone_i.faces = Kokkos::View<u_int32_t *>("zone_i_faces", faces_i.size());
     zone_r.faces = Kokkos::View<u_int32_t *>("zone_r_faces", faces_r.size());
     zone_t.faces = Kokkos::View<u_int32_t *>("zone_t_faces", faces_t.size());
     zone_l.faces = Kokkos::View<u_int32_t *>("zone_l_faces", faces_l.size());
     zone_b.faces = Kokkos::View<u_int32_t *>("zone_b_faces", faces_b.size());
 
+    zone_i.h_faces = Kokkos::create_mirror_view(zone_i.faces);
     zone_r.h_faces = Kokkos::create_mirror_view(zone_r.faces);
     zone_t.h_faces = Kokkos::create_mirror_view(zone_t.faces);
     zone_l.h_faces = Kokkos::create_mirror_view(zone_l.faces);
     zone_b.h_faces = Kokkos::create_mirror_view(zone_b.faces);
 
+    for (u_int32_t i = 0; i < faces_i.size(); ++i) {
+        zone_i.h_faces(i) = faces_i[i];
+    }
     for (u_int32_t i = 0; i < faces_r.size(); ++i) {
         zone_r.h_faces(i) = faces_r[i];
     }
@@ -456,6 +472,7 @@ void Mesh::init_cart(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly) {
         zone_b.h_faces(i) = faces_b[i];
     }
 
+    m_face_zones.push_back(zone_i);
     m_face_zones.push_back(zone_r);
     m_face_zones.push_back(zone_t);
     m_face_zones.push_back(zone_l);

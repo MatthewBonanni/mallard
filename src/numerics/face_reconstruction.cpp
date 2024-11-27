@@ -97,7 +97,7 @@ void FirstOrder::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution
     Kokkos::parallel_for(mesh->n_faces, flux_functor);
 }
 
-TENO::TENO(u_int8_t poly_order
+TENO::TENO(u_int8_t poly_order,
            rtype max_stencil_size_factor) :
         poly_order(poly_order),
         max_stencil_size_factor(max_stencil_size_factor) {
@@ -105,7 +105,11 @@ TENO::TENO(u_int8_t poly_order
     compute_stencils();
 }
 
-TENO::calc_max_stencil_size() {
+TENO::~TENO() {
+    // Empty
+}
+
+void TENO::calc_max_stencil_size() {
     // Nd = (prod(r + m) from m=1 to N_DIM) / N_DIM!
     n_dof = 1;
     u_int16_t denom = 1;
@@ -115,10 +119,6 @@ TENO::calc_max_stencil_size() {
     }
     n_dof /= denom;
     max_cells_per_stencil = max_stencil_size_factor * n_dof;
-}
-
-TENO::~TENO() {
-    // Empty
 }
 
 std::vector<u_int32_t> TENO::compute_stencil_of_cell_centered(u_int32_t i_cell) {
@@ -377,7 +377,7 @@ void TENO::compute_reconstruction_matrices() {
         FOR_I_DIM w0[i] = mesh->h_node_coords(mesh->h_node_of_cell(i_cell, 0), i);
         FOR_I_DIM w1[i] = mesh->h_node_coords(mesh->h_node_of_cell(i_cell, 1), i);
         FOR_I_DIM w2[i] = mesh->h_node_coords(mesh->h_node_of_cell(i_cell, 2), i);
-        triangle_J_Jinv(v0.data(), v1.data(), v2.data(), J.data(), J_inv.data());
+        triangle_J_Jinv(w0.data(), w1.data(), w2.data(), J.data(), J_inv.data());
 
         u_int8_t stencil_offset = h_offsets_stencils_of_cell(i_cell);
         u_int8_t n_stencils = h_offsets_stencils_of_cell(i_cell + 1) -
@@ -400,9 +400,9 @@ void TENO::compute_reconstruction_matrices() {
                 std::vector<rtype> v1_trans(N_DIM);
                 std::vector<rtype> v2_trans(N_DIM);
 
-                gemv<N_DIM>(J_inv.data, v0.data(), v0_trans.data());
-                gemv<N_DIM>(J_inv.data, v1.data(), v1_trans.data());
-                gemv<N_DIM>(J_inv.data, v2.data(), v2_trans.data());
+                gemv<N_DIM>(J_inv.data(), v0.data(), v0_trans.data());
+                gemv<N_DIM>(J_inv.data(), v1.data(), v1_trans.data());
+                gemv<N_DIM>(J_inv.data(), v2.data(), v2_trans.data());
 
                 for (u_int16_t i_dof = 0; i_dof < n_dof; ++i_dof) {
                     // Integrate the basis function over the transformed triangle using

@@ -151,10 +151,10 @@ void Solver::init_numerics() {
 
     if (riemann_solver_type == RiemannSolverType::Rusanov) {
         riemann_solver = std::make_unique<Rusanov>();
-    } else if (riemann_solver_type == RiemannSolverType::Roe) {
-        riemann_solver = std::make_unique<Roe>();
     } else if (riemann_solver_type == RiemannSolverType::HLL) {
         riemann_solver = std::make_unique<HLL>();
+    } else if (riemann_solver_type == RiemannSolverType::HLLE) {
+        riemann_solver = std::make_unique<HLLE>();
     } else if (riemann_solver_type == RiemannSolverType::HLLC) {
         riemann_solver = std::make_unique<HLLC>();
     } else {

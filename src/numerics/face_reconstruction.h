@@ -121,7 +121,7 @@ class TENO : public FaceReconstruction {
         /**
          * @brief Construct a new TENO object
          */
-        TENO(u_int8_t poly_order);
+        TENO(u_int8_t poly_order, rtype max_stencil_size_factor);
 
         /**
          * @brief Destroy the TENO object
@@ -146,7 +146,7 @@ class TENO : public FaceReconstruction {
                                       std::vector<u_int32_t> & v_stencils);
         void compute_stencils();
         void compute_reconstruction_matrices();
-        void compute_oscillation_indicators():
+        void compute_oscillation_indicators();
 
         u_int8_t poly_order;
         u_int16_t n_dof;

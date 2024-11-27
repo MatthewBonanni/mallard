@@ -201,7 +201,7 @@ class HLLE : public RiemannSolver {
                        const rtype p_l, const rtype gamma_l, const rtype h_l,
                        const rtype rho_r, const rtype * u_r,
                        const rtype p_r, const rtype gamma_r, const rtype h_r) const override;
-}
+};
 
 class HLLC : public RiemannSolver {
     public:
@@ -554,6 +554,27 @@ void HLLC::calc_flux(rtype * flux, const rtype * n_unit,
             }
         }
     }
+}
+
+KOKKOS_INLINE_FUNCTION
+void HLLE::calc_flux(rtype * flux, const rtype * n_unit,
+                     const rtype rho_l, const rtype * u_l,
+                     const rtype p_l, const rtype gamma_l, const rtype h_l,
+                     const rtype rho_r, const rtype * u_r,
+                     const rtype p_r, const rtype gamma_r, const rtype h_r) const {
+    (void)(flux);
+    (void)(n_unit);
+    (void)(rho_l);
+    (void)(u_l);
+    (void)(p_l);
+    (void)(gamma_l);
+    (void)(h_l);
+    (void)(rho_r);
+    (void)(u_r);
+    (void)(p_r);
+    (void)(gamma_r);
+    (void)(h_r);
+    Kokkos::abort("HLLE Riemann solver not implemented.");
 }
 
 #endif // RIEMANN_SOLVER_H

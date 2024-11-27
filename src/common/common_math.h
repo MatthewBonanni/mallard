@@ -128,7 +128,9 @@ template <> KOKKOS_INLINE_FUNCTION
 void invert_matrix<2>(const rtype * A, rtype * A_inv) {
     // Calculate determinant
     const rtype det_A = A[0] * A[3] - A[1] * A[2];
-    assert(det_A != 0.0);
+    if (det_A == 0.0) {
+        Kokkos::abort("Matrix is singular.");
+    }
     const rtype inv_det = 1.0 / det_A;
 
     // Store inverse
@@ -148,7 +150,9 @@ void invert_matrix<3>(const rtype * A, rtype * A_inv) {
     
     // Calculate determinant using first row
     const rtype det_A = A[0] * c11 + A[1] * c12 + A[2] * c13;
-    assert(det_A != 0.0);
+    if (det_A == 0.0) {
+        Kokkos::abort("Matrix is singular.");
+    }
     const rtype inv_det = 1.0 / det_A;
     
     // Calculate remaining cofactors
@@ -224,7 +228,6 @@ rtype triangle_area<2>(const rtype * v0,
 // rtype triangle_area<3>(const rtype * v0,
 //                        const rtype * v1,
 //                        const rtype * v2) {
-//     assert(false);
 // }
 
 /**

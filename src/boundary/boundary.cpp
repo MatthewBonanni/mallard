@@ -15,6 +15,7 @@
 #include <utility>
 
 #include "common.h"
+#include "flux_functor.h"
 
 Boundary::Boundary() {
     // Empty
@@ -57,11 +58,4 @@ void Boundary::copy_host_to_device() {
 
 void Boundary::copy_device_to_host() {
     // Empty
-}
-
-void Boundary::apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
-                     Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
-    (void)(face_solution);
-    (void)(rhs);
-    throw std::runtime_error("Boundary::apply() not implemented.");
 }

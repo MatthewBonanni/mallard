@@ -16,6 +16,8 @@
 
 #include <Kokkos_Core.hpp>
 
+#include "flux_functor.h"
+
 class BoundaryUPT : public Boundary {
     public:
         /**
@@ -51,13 +53,56 @@ class BoundaryUPT : public Boundary {
 
         /**
          * @brief Apply the boundary condition.
-         * @param face_solution Pointer to the face solution vector.
-         * @param rhs Pointer to the right-hand side vector.
+         * @param face_solution Face solution.
+         * @param rhs Right hand side.
          */
         void apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
                    Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) override;
     protected:
     private:
+        /**
+         * @brief Launch the flux functor.
+         */
+        template <typename T_physics, typename T_riemann_solver>
+        void launch_flux_functor(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                                 Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
+
+        template <typename T_physics, typename T_riemann_solver>
+        class UPTFluxFunctor : public BaseFluxFunctor<UPTFluxFunctor<T_physics, T_riemann_solver>,
+                                                      T_physics,
+                                                      T_riemann_solver> {
+            public:
+                UPTFluxFunctor(Kokkos::View<u_int32_t *> faces,
+                               Kokkos::View<rtype *[N_DIM]> normals,
+                               Kokkos::View<rtype *> face_area,
+                               Kokkos::View<int32_t *[2]> cells_of_face,
+                               Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                               Kokkos::View<rtype *[N_CONSERVATIVE]> rhs,
+                               const T_physics physics,
+                               const T_riemann_solver riemann_solver,
+                               Kokkos::View<rtype [N_PRIMITIVE+1]> data_bc) :
+                                   BaseFluxFunctor<UPTFluxFunctor<T_physics, T_riemann_solver>,
+                                                   T_physics,
+                                                   T_riemann_solver>(faces,
+                                                                     normals,
+                                                                     face_area,
+                                                                     cells_of_face,
+                                                                     face_solution,
+                                                                     rhs,
+                                                                     physics,
+                                                                     riemann_solver),
+                                   data_bc(data_bc) {}
+
+                KOKKOS_INLINE_FUNCTION
+                void calc_lr_states_impl(const u_int32_t i_face,
+                                         rtype * conservatives_l,
+                                         rtype * conservatives_r,
+                                         rtype * primitives_l,
+                                         rtype * primitives_r) const;
+            private:
+                Kokkos::View<rtype [N_PRIMITIVE+1]> data_bc;
+        };
+
         // Input
         NVector u_bc;
         rtype p_bc;

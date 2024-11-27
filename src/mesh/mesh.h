@@ -27,15 +27,15 @@ enum class MeshType {
 };
 
 static const std::unordered_map<std::string, MeshType> MESH_TYPES = {
-    {"FILE", MeshType::FILE},
-    {"CARTESIAN", MeshType::CARTESIAN},
-    {"WEDGE", MeshType::WEDGE}
+    {"file", MeshType::FILE},
+    {"cartesian", MeshType::CARTESIAN},
+    {"wedge", MeshType::WEDGE}
 };
 
 static const std::unordered_map<MeshType, std::string> MESH_NAMES = {
-    {MeshType::FILE, "FILE"},
-    {MeshType::CARTESIAN, "CARTESIAN"},
-    {MeshType::WEDGE, "WEDGE"}
+    {MeshType::FILE, "file"},
+    {MeshType::CARTESIAN, "cartesian"},
+    {MeshType::WEDGE, "wedge"}
 };
 
 enum class CellType {
@@ -44,13 +44,13 @@ enum class CellType {
 };
 
 static const std::unordered_map<std::string, CellType> CELL_TYPES = {
-    {"TRIANGLE", CellType::TRIANGLE},
-    {"QUAD", CellType::QUAD}
+    {"triangle", CellType::TRIANGLE},
+    {"quad", CellType::QUAD}
 };
 
 static const std::unordered_map<CellType, std::string> CELL_NAMES = {
-    {CellType::TRIANGLE, "TRIANGLE"},
-    {CellType::QUAD, "QUAD"}
+    {CellType::TRIANGLE, "triangle"},
+    {CellType::QUAD, "quad"}
 };
 
 
