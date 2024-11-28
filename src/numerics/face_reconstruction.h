@@ -18,8 +18,6 @@
 #include "common_typedef.h"
 #include "mesh.h"
 
-#define MAX_N_STENCIL_PER_CELL 5
-
 enum class FaceReconstructionType {
     FirstOrder,
     TENO,

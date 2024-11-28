@@ -387,7 +387,8 @@ void Mesh::init_cart(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly) {
         _nodes_of_face[_faces_of_cell[i_cell][3]][1] = _nodes_of_cell[i_cell][3]; // Bottom face - bottom right node
     }
 
-    // Handle boundary faces
+    // Assign faces to face zones
+    /** \todo Figure out a better way to do this so we don't need to dedupe faces_i */
     FaceZone zone_i = FaceZone();
     FaceZone zone_r = FaceZone();
     FaceZone zone_t = FaceZone();
@@ -443,6 +444,10 @@ void Mesh::init_cart(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly) {
             faces_i.push_back(i_face);
         }
     }
+
+    // Dedupe interior faces
+    std::sort(faces_i.begin(), faces_i.end());
+    faces_i.erase(std::unique(faces_i.begin(), faces_i.end()), faces_i.end());
 
     zone_i.faces = Kokkos::View<u_int32_t *>("zone_i_faces", faces_i.size());
     zone_r.faces = Kokkos::View<u_int32_t *>("zone_r_faces", faces_r.size());

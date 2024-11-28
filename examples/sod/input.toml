@@ -26,23 +26,19 @@ p = """\
 
 [[boundaries]]
 name = "left"
-# type = "symmetry"
-type = "extrapolation"
+type = "symmetry"
 
 [[boundaries]]
 name = "right"
-# type = "symmetry"
-type = "extrapolation"
+type = "symmetry"
 
 [[boundaries]]
 name = "top"
-# type = "symmetry"
-type = "extrapolation"
+type = "symmetry"
 
 [[boundaries]]
 name = "bottom"
-# type = "symmetry"
-type = "extrapolation"
+type = "symmetry"
 
 [numerics]
 face_reconstruction = "FO"

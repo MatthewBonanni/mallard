@@ -80,8 +80,8 @@ TEST(PhysicsTest, EulerPrimitivesFromConservatives) {
     Kokkos::View<rtype [2][N_CONSERVATIVE]> conservatives("conservatives");
     Kokkos::View<rtype [2][N_PRIMITIVE]> primitives("primitives");
 
-    Kokkos::View<rtype [2][N_CONSERVATIVE]>::HostMirror h_conservatives = Kokkos::create_mirror_view(conservatives);
-    Kokkos::View<rtype [2][N_PRIMITIVE]>::HostMirror h_primitives = Kokkos::create_mirror_view(primitives);
+    auto h_conservatives = Kokkos::create_mirror_view(conservatives);
+    auto h_primitives = Kokkos::create_mirror_view(primitives);
 
     h_conservatives(0, 0) = rho;
     h_conservatives(0, 1) = rho * u[0];
