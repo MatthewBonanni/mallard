@@ -15,6 +15,7 @@
 #include <string>
 
 #define LOG_SEPARATOR "----------------------------------------------------------------------"
+#define WARN_SEPARATOR "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
 #define LEN_STEP 6
 
 /**
@@ -28,5 +29,11 @@ std::string endianness();
  * @return std::string 
  */
 std::string vtk_float_type();
+
+/**
+ * @brief Print a warning to stdout.
+ * @param message Warning message.
+ */
+void print_warning(const std::string & message);
 
 #endif // COMMON_IO_H

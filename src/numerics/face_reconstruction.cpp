@@ -16,6 +16,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "common_math.h"
+#include "quadrature.h"
 
 FaceReconstruction::FaceReconstruction() {
     // Empty
@@ -363,6 +364,8 @@ void TENO::compute_stencils() {
 }
 
 void TENO::compute_reconstruction_matrices() {
+    TriangleDunavant<3> quadrature;
+
     for (u_int32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
         if (mesh->n_nodes_of_cell(i_cell) != 3) {
             throw std::runtime_error("TENO has only been implemented for triangular cells.");
@@ -407,6 +410,14 @@ void TENO::compute_reconstruction_matrices() {
                 for (u_int16_t i_dof = 0; i_dof < n_dof; ++i_dof) {
                     // Integrate the basis function over the transformed triangle using
                     // gaussian quadrature
+
+                    // Transform the quadrature points to the target cell's local coordinates
+
+                    // Evaluate the basis function at each quadrature point
+                    std::vector<rtype> basis_values(quadrature.h_points.extent(0));
+
+                    // Compute the dot product
+                    A(i_cell, i_stencil, i_neighbor, i_dof) = 0.0;
                 }
             }
         }

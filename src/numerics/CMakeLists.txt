@@ -5,6 +5,7 @@ set(LIB_SRCS
     face_reconstruction.cpp
     riemann_solver.cpp
     flux_functor.cpp
+    quadrature.cpp
 )
 
 # Add the library
