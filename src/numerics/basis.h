@@ -39,6 +39,20 @@ template <typename Derived>
 class Basis {
     public:
         /**
+         * @brief Construct a new Basis object
+         */
+        Basis() {
+            // Empty
+        }
+
+        /**
+         * @brief Destroy the Basis object
+         */
+        virtual ~Basis() {
+            // Empty
+        }
+
+        /**
          * @brief Compute the 1D basis function of degree n at point x.
          * 
          * @param n Degree of the basis function.
@@ -46,8 +60,8 @@ class Basis {
          * @return rtype Value of the basis function at x.
          */
         KOKKOS_INLINE_FUNCTION
-        rtype compute_1D(u_int8_t n, rtype x) const {
-            return static_cast<const Derived *>(this)->compute_1D_impl(n, x);
+        static rtype compute_1D(u_int8_t n, rtype x) {
+            return Derived::compute_1D_impl(n, x);
         }
 
         /**
@@ -60,7 +74,7 @@ class Basis {
          * @return rtype Value of the basis function at (x, y).
          */
         KOKKOS_INLINE_FUNCTION
-        rtype compute_2D(u_int8_t nx, u_int8_t ny, rtype x, rtype y) const {
+        static rtype compute_2D(u_int8_t nx, u_int8_t ny, rtype x, rtype y) {
             return compute_1D(nx, x) * compute_1D(ny, y);
         }
 
@@ -72,8 +86,8 @@ class Basis {
          * @return rtype Value of the derivative at x.
          */
         KOKKOS_INLINE_FUNCTION
-        rtype gradient_1D(u_int8_t n, rtype x) const {
-            return static_cast<const Derived *>(this)->gradient_1D_impl(n, x);
+        static rtype gradient_1D(u_int8_t n, rtype x) {
+            return Derived::gradient_1D_impl(n, x);
         }
 
         /**
@@ -87,8 +101,8 @@ class Basis {
          * @param grad_y Address to store the gradient in the y direction.
          */
         KOKKOS_INLINE_FUNCTION
-        void gradient_2D(u_int8_t nx, u_int8_t ny, rtype x, rtype y,
-                         rtype & grad_x, rtype & grad_y) const {
+        static void gradient_2D(u_int8_t nx, u_int8_t ny, rtype x, rtype y,
+                                rtype & grad_x, rtype & grad_y) {
             grad_x = gradient_1D(nx, x) * compute_1D(ny, y);
             grad_y = compute_1D(nx, x) * gradient_1D(ny, y);
         }
@@ -103,19 +117,8 @@ class Lagrange : public Basis<Lagrange> {
          * @param x Point at which to evaluate the polynomial.
          * @return rtype Value of the polynomial at x.
          */
-        static rtype compute_1D(u_int8_t n, rtype x) {
-            return Lagrange().compute_1D_impl(n, x);
-        }
-
-        /**
-         * @brief Compute the 1D Lagrange polynomial of degree n at point x.
-         * 
-         * @param n Degree of the polynomial.
-         * @param x Point at which to evaluate the polynomial.
-         * @return rtype Value of the polynomial at x.
-         */
         KOKKOS_INLINE_FUNCTION
-        rtype compute_1D_impl(u_int8_t n, rtype x) const {
+        static rtype compute_1D_impl(u_int8_t n, rtype x) {
             rtype result = 1.0;
             for (int i = 0; i <= n; ++i) {
                 if (i != n) {
@@ -132,19 +135,8 @@ class Lagrange : public Basis<Lagrange> {
          * @param x Point at which to evaluate the derivative.
          * @return rtype Value of the derivative at x.
          */
-        static rtype gradient_1D(u_int8_t n, rtype x) {
-            return Lagrange().gradient_1D_impl(n, x);
-        }
-
-        /**
-         * @brief Derivative of the 1D Lagrange polynomial of degree n at point x.
-         * 
-         * @param n Degree of the polynomial.
-         * @param x Point at which to evaluate the derivative.
-         * @return rtype Value of the derivative at x.
-         */
         KOKKOS_INLINE_FUNCTION
-        rtype gradient_1D_impl(u_int8_t n, rtype x) const {
+        static rtype gradient_1D_impl(u_int8_t n, rtype x) {
             rtype result = 0.0;
             for (int i = 0; i <= n; ++i) {
                 rtype term = 1.0;
@@ -168,20 +160,8 @@ class Legendre : public Basis<Legendre> {
          * @param x Point at which to evaluate the polynomial.
          * @return rtype Value of the polynomial at x.
          */
-        static rtype compute_1D(u_int8_t n, rtype x) {
-            return Legendre().compute_1D_impl(n, x);
-        }
-
-
-        /**
-         * @brief Compute the 1D Legendre polynomial of degree n at point x.
-         * 
-         * @param n Degree of the polynomial.
-         * @param x Point at which to evaluate the polynomial.
-         * @return rtype Value of the polynomial at x.
-         */
         KOKKOS_INLINE_FUNCTION
-        rtype compute_1D_impl(u_int8_t n, rtype x) const {
+        static rtype compute_1D_impl(u_int8_t n, rtype x) {
             if (n == 0) return 1.0;
             if (n == 1) return x;
 
@@ -204,19 +184,8 @@ class Legendre : public Basis<Legendre> {
          * @param x Point at which to evaluate the derivative.
          * @return rtype Value of the derivative at x.
          */
-        static rtype gradient_1D(u_int8_t n, rtype x) {
-            return Legendre().gradient_1D_impl(n, x);
-        }
-
-        /**
-         * @brief Derivative of the 1D Legendre polynomial of degree n at point x.
-         * 
-         * @param n Degree of the polynomial.
-         * @param x Point at which to evaluate the derivative.
-         * @return rtype Value of the derivative at x.
-         */
         KOKKOS_INLINE_FUNCTION
-        rtype gradient_1D_impl(u_int8_t n, rtype x) const {
+        static rtype gradient_1D_impl(u_int8_t n, rtype x) {
             if (n == 0) return 0.0;
             if (n == 1) return 1.0;
             rtype Pn = compute_1D(n, x);

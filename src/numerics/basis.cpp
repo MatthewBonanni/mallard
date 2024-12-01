@@ -10,19 +10,3 @@
  */
 
 #include "basis.h"
-
-Basis::Basis() {
-    // Empty
-}
-
-Basis::~Basis() {
-    // Empty
-}
-
-Legendre::Legendre() {
-    // Empty
-}
-
-Legendre::~Legendre() {
-    // Empty
-}

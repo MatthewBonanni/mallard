@@ -15,10 +15,6 @@ Quadrature::Quadrature() {
     // Empty
 }
 
-Quadrature::~Quadrature() {
-    // Empty
-}
-
 void Quadrature::copy_host_to_device() {
     Kokkos::deep_copy(points, h_points);
     Kokkos::deep_copy(weights, h_weights);
@@ -39,10 +35,7 @@ TriangleCentroid::TriangleCentroid() {
     copy_host_to_device();
 }
 
-TriangleCentroid::~TriangleCentroid() {
-    // Empty
-}
-
+template <>
 TriangleDunavant<1>::TriangleDunavant() {
     points = Kokkos::View<rtype **>("points", 1, 2);
     weights = Kokkos::View<rtype *>("weights", 1);
@@ -58,6 +51,7 @@ TriangleDunavant<1>::TriangleDunavant() {
     copy_host_to_device();
 }
 
+template <>
 TriangleDunavant<2>::TriangleDunavant() {
     points = Kokkos::View<rtype **>("points", 3, 2);
     weights = Kokkos::View<rtype *>("weights", 3);
@@ -79,6 +73,7 @@ TriangleDunavant<2>::TriangleDunavant() {
     copy_host_to_device();
 }
 
+template <>
 TriangleDunavant<3>::TriangleDunavant() {
     print_warning("Quadrature rule TriangleDunavant<3> has negative weights.\n"
                   "This may cause numerical issues. Use with caution.");
@@ -106,6 +101,7 @@ TriangleDunavant<3>::TriangleDunavant() {
     copy_host_to_device();
 }
 
+template <>
 TriangleDunavant<4>::TriangleDunavant() {
     points = Kokkos::View<rtype **>("points", 6, 2);
     weights = Kokkos::View<rtype *>("weights", 6);
@@ -136,6 +132,7 @@ TriangleDunavant<4>::TriangleDunavant() {
     copy_host_to_device();
 }
 
+template <>
 TriangleDunavant<5>::TriangleDunavant() {
     points = Kokkos::View<rtype **>("points", 7, 2);
     weights = Kokkos::View<rtype *>("weights", 7);
@@ -167,8 +164,4 @@ TriangleDunavant<5>::TriangleDunavant() {
     h_weights(6) = 0.125939180544827;
 
     copy_host_to_device();
-}
-
-TriangleDunavant::~TriangleDunavant() {
-    // Empty
 }

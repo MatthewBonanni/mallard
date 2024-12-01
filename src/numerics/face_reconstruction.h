@@ -136,6 +136,7 @@ class TENO : public FaceReconstruction {
     protected:
     private:
         void calc_max_stencil_size();
+        void calc_polynomial_indices();
         std::vector<u_int32_t> compute_stencil_of_cell_centered(u_int32_t i_cell);
         std::vector<std::vector<u_int32_t>> compute_stencils_of_cell_directional(u_int32_t i_cell);
         void compute_stencils_of_cell(u_int32_t i_cell,
@@ -148,6 +149,10 @@ class TENO : public FaceReconstruction {
 
         u_int8_t poly_order;
         u_int16_t n_dof;
+        Kokkos::View<u_int32_t *[N_DIM]> poly_indices;
+        Kokkos::View<u_int32_t *[N_DIM]>::HostMirror h_poly_indices;
+        // ^ contains the polynomial powers for each dimension for each degree of freedom,
+        // precompute for easy lookup
         rtype max_stencil_size_factor;
         u_int16_t max_cells_per_stencil;
         Kokkos::View<u_int32_t *> offsets_stencils_of_cell;

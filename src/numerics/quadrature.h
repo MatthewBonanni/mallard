@@ -26,7 +26,7 @@ class Quadrature {
         /**
          * @brief Destroy the Quadrature object
          */
-        ~Quadrature();
+        ~Quadrature() = default;
 
         /**
          * @brief Copy the quadrature points to the device.
@@ -45,11 +45,6 @@ class TriangleCentroid : public Quadrature {
          * @brief Construct a new Centroid object
          */
         TriangleCentroid();
-
-        /**
-         * @brief Destroy the Centroid object
-         */
-        ~TriangleCentroid();
 };
 
 template <u_int32_t N>
@@ -59,11 +54,6 @@ class TriangleDunavant : public Quadrature {
          * @brief Construct a new TriangleDunavant object
          */
         TriangleDunavant();
-
-        /**
-         * @brief Destroy the TriangleDunavant object
-         */
-        ~TriangleDunavant();
 };
 
 #endif // QUADRATURE_H

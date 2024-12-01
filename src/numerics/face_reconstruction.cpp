@@ -17,6 +17,7 @@
 
 #include "common_math.h"
 #include "quadrature.h"
+#include "basis.h"
 
 FaceReconstruction::FaceReconstruction() {
     // Empty
@@ -103,6 +104,8 @@ TENO::TENO(u_int8_t poly_order,
         poly_order(poly_order),
         max_stencil_size_factor(max_stencil_size_factor) {
     type = FaceReconstructionType::TENO;
+    calc_max_stencil_size();
+    calc_polynomial_indices();
     compute_stencils();
 }
 
@@ -120,6 +123,18 @@ void TENO::calc_max_stencil_size() {
     }
     n_dof /= denom;
     max_cells_per_stencil = max_stencil_size_factor * n_dof;
+}
+
+void TENO::calc_polynomial_indices() {
+    for (int k = 0; k < n_dof; ++k) {
+        int sum = k;  // Start with index 'k' to iterate through all polynomial terms
+        for (int d = 0; d < N_DIM; ++d) {
+            // Compute the exponent in dimension 'd'
+            h_poly_indices(k, d) = sum % (poly_order + 1);
+            sum /= (poly_order + 1);  // Move to the next coefficient in higher order
+        }
+    }
+    Kokkos::deep_copy(poly_indices, h_poly_indices);
 }
 
 std::vector<u_int32_t> TENO::compute_stencil_of_cell_centered(u_int32_t i_cell) {
@@ -388,6 +403,9 @@ void TENO::compute_reconstruction_matrices() {
         for (u_int8_t i_stencil = 0; i_stencil < n_stencils; ++i_stencil) {
             u_int16_t stencil_size = h_stencils_of_cell(stencil_offset + i_stencil + 1) -
                                      h_stencils_of_cell(stencil_offset + i_stencil    );
+            
+            // Compute the reconstruction matrix for the target cell
+            std::vector<rtype> A(stencil_size * n_dof);
             for (u_int8_t i_neighbor = 0; i_neighbor < stencil_size; ++i_neighbor) {
                 // Transform the neighbor vertex coordinates to the target cell's local coordinates
                 u_int32_t i_neighbor_cell = h_stencils(h_stencils_of_cell(stencil_offset + i_stencil) + i_neighbor);
@@ -407,19 +425,29 @@ void TENO::compute_reconstruction_matrices() {
                 gemv<N_DIM>(J_inv.data(), v1.data(), v1_trans.data());
                 gemv<N_DIM>(J_inv.data(), v2.data(), v2_trans.data());
 
+                rtype area_trans = triangle_area<2>(v0_trans.data(), v1_trans.data(), v2_trans.data());
+
                 for (u_int16_t i_dof = 0; i_dof < n_dof; ++i_dof) {
-                    // Integrate the basis function over the transformed triangle using
-                    // gaussian quadrature
+                    size_t ind = i_neighbor * n_dof + i_dof;
+                    A[ind] = 0.0;
+                    for (u_int16_t i_quad = 0; i_quad < quadrature.h_points.extent(0); ++i_quad) {
+                        // Transform the quadrature point to the target cell's local coordinates
+                        std::vector<rtype> x(N_DIM);
+                        FOR_I_DIM x[i] = quadrature.h_points(i_quad, i);
+                        gemv<N_DIM>(J_inv.data(), x.data(), x.data());
 
-                    // Transform the quadrature points to the target cell's local coordinates
+                        // Evaluate the basis function at the transformed point
+                        rtype basis_value = Legendre::compute_2D(poly_indices(i_dof, 0),
+                                                                 poly_indices(i_dof, 1),
+                                                                 x[0], x[1]);
 
-                    // Evaluate the basis function at each quadrature point
-                    std::vector<rtype> basis_values(quadrature.h_points.extent(0));
-
-                    // Compute the dot product
-                    A(i_cell, i_stencil, i_neighbor, i_dof) = 0.0;
+                        A[ind] += quadrature.h_weights(i_quad) * basis_value;
+                    }
+                    A[ind] *= area_trans;
                 }
             }
+
+            // Compute the Moore-Penrose pseudoinverse of the reconstruction matrix
         }
     }
 }
