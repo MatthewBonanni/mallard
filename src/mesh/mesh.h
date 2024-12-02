@@ -23,18 +23,21 @@
 enum class MeshType {
     FILE = 1,
     CARTESIAN = 2,
-    WEDGE = 3
+    CARTESIAN_TRI = 3,
+    WEDGE = 4
 };
 
 static const std::unordered_map<std::string, MeshType> MESH_TYPES = {
     {"file", MeshType::FILE},
     {"cartesian", MeshType::CARTESIAN},
+    {"cartesian_tri", MeshType::CARTESIAN_TRI},
     {"wedge", MeshType::WEDGE}
 };
 
 static const std::unordered_map<MeshType, std::string> MESH_NAMES = {
     {MeshType::FILE, "file"},
     {MeshType::CARTESIAN, "cartesian"},
+    {MeshType::CARTESIAN_TRI, "cartesian_tri"},
     {MeshType::WEDGE, "wedge"}
 };
 
@@ -256,6 +259,17 @@ class Mesh {
          * @param Ly Length of the domain in the y-direction.
          */
         void init_cart(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly);
+
+        /**
+         * @brief Initialize the mesh as a cartesian grid,
+         * with each cell split into two triangles.
+         * 
+         * @param nx Number of cells in the x-direction.
+         * @param ny Number of cells in the y-direction.
+         * @param Lx Length of the domain in the x-direction.
+         * @param Ly Length of the domain in the y-direction.
+         */
+        void init_cart_tri(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly);
 
         /**
          * @brief Initialize the supersonic wedge mesh.
