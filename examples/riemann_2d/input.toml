@@ -6,9 +6,9 @@ t_stop = 0.3
 cfl = 0.1
 
 [mesh]
-type = "cartesian"
-Nx = 1000
-Ny = 1000
+type = "cartesian_tri"
+Nx = 1024
+Ny = 1024
 Lx = 1.0
 Ly = 1.0
 
@@ -64,10 +64,17 @@ name = "bottom"
 type = "symmetry"
 
 [numerics]
-face_reconstruction = "FO"
+face_reconstruction = "TENO"
 riemann_solver = "HLLC"
 time_integrator = "SSPRK3"
 check_nan = true
+
+[numerics.TENO]
+basis = "legendre"
+basis_order = 3
+quadrature = "triangle_dunavant"
+quadrature_order = 3
+max_stencil_size_factor = 2.0
 
 [physics]
 type = "euler"

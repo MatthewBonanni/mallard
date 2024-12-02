@@ -632,11 +632,11 @@ void Mesh::init_cart_tri(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly) {
         u_int32_t i_node_bl = (ic    ) * (ny + 1) + jc    ;
         u_int32_t i_node_br = (ic + 1) * (ny + 1) + jc    ;
 
-        u_int32_t i_face_r = (3 * ny + 1) * (ic + 1) + jc               ;
-        u_int32_t i_face_t = (3 * ny + 1) * (ic)     + jc + (2 * ny) + 2;
-        u_int32_t i_face_l = (3 * ny + 1) * (ic)     + jc               ;
-        u_int32_t i_face_b = (3 * ny + 1) * (ic)     + jc + (2 * ny)    ;
-        u_int32_t i_face_d = (3 * ny + 1) * (ic)     + jc + (2 * ny) + 1;
+        u_int32_t i_face_r = (3 * ny + 1) * (ic + 1) + (    jc)         ;
+        u_int32_t i_face_t = (3 * ny + 1) * (ic)     + (2 * jc) + ny + 2;
+        u_int32_t i_face_l = (3 * ny + 1) * (ic)     + (    jc)         ;
+        u_int32_t i_face_b = (3 * ny + 1) * (ic)     + (2 * jc) + ny    ;
+        u_int32_t i_face_d = (3 * ny + 1) * (ic)     + (2 * jc) + ny + 1;
 
         _nodes_of_cell[i_cell_cr][0] = i_node_bl;
         _nodes_of_cell[i_cell_cr][1] = i_node_br;

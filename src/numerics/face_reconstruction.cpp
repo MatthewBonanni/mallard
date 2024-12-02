@@ -104,6 +104,7 @@ TENO::TENO(u_int8_t poly_order,
         poly_order(poly_order),
         max_stencil_size_factor(max_stencil_size_factor) {
     type = FaceReconstructionType::TENO;
+    quadrature_order = 2 * poly_order;
     calc_max_stencil_size();
     calc_polynomial_indices();
     compute_stencils();

@@ -148,6 +148,7 @@ class TENO : public FaceReconstruction {
         void compute_oscillation_indicators();
 
         u_int8_t poly_order;
+        u_int8_t quadrature_order;
         u_int16_t n_dof;
         Kokkos::View<u_int32_t *[N_DIM]> poly_indices;
         Kokkos::View<u_int32_t *[N_DIM]>::HostMirror h_poly_indices;
