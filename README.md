@@ -8,7 +8,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible N
 
 > **NOTE:** Mallard is a **work in progress** and many features are incomplete or **not validated**. Its performance **has not been extensively characterized**.
 
-## Features
+## Features (IN PROGRESS)
 
 - Solves the fully compressible Navier-Stokes equations
 - Supports unstructured meshes
