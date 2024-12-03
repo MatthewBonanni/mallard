@@ -95,8 +95,8 @@ struct FirstOrderFunctor {
 
 void FirstOrder::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                   Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) {
-    FirstOrderFunctor flux_functor(mesh->cells_of_face, face_solution, solution);
-    Kokkos::parallel_for(mesh->n_faces, flux_functor);
+    FirstOrderFunctor recon_functor(mesh->cells_of_face, face_solution, solution);
+    Kokkos::parallel_for(mesh->n_faces, recon_functor);
 }
 
 TENO::TENO(u_int8_t poly_order,
@@ -489,9 +489,9 @@ struct TENOFunctor {
 
 void TENO::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                 Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) {
-    TENOFunctor flux_functor(mesh->cells_of_face,
-                             mesh->face_normals,
-                             face_solution,
-                             solution);
-    Kokkos::parallel_for(mesh->n_faces, flux_functor);
+    TENOFunctor recon_functor(mesh->cells_of_face,
+                              mesh->face_normals,
+                              face_solution,
+                              solution);
+    Kokkos::parallel_for(mesh->n_faces, recon_functor);
 }

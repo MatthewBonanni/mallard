@@ -393,13 +393,13 @@ void Mesh::init_cart(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly) {
         // the values will be the same for all cells.
 
         h_cells_of_face(i_face_r, 0) = i_cell;
-        h_cells_of_face(i_face_r, 1) = ic == (nx - 1) ? -1 : i_cell_r;
+        h_cells_of_face(i_face_r, 1) = ic == (nx - 1) ? -1 : (int32_t)i_cell_r;
         h_cells_of_face(i_face_t, 0) = i_cell;
-        h_cells_of_face(i_face_t, 1) = jc == (ny - 1) ? -1 : i_cell_t;
+        h_cells_of_face(i_face_t, 1) = jc == (ny - 1) ? -1 : (int32_t)i_cell_t;
         h_cells_of_face(i_face_l, 0) = i_cell;
-        h_cells_of_face(i_face_l, 1) = ic == 0 ? -1 : i_cell_l;
+        h_cells_of_face(i_face_l, 1) = ic == 0 ? -1 : (int32_t)i_cell_l;
         h_cells_of_face(i_face_b, 0) = i_cell;
-        h_cells_of_face(i_face_b, 1) = jc == 0 ? -1 : i_cell_b;
+        h_cells_of_face(i_face_b, 1) = jc == 0 ? -1 : (int32_t)i_cell_b;
 
         _nodes_of_face[i_face_r][0] = i_node_br;
         _nodes_of_face[i_face_r][1] = i_node_tr;
@@ -655,13 +655,13 @@ void Mesh::init_cart_tri(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly) {
         _faces_of_cell[i_cell_cl][2] = i_face_d;
 
         h_cells_of_face(i_face_r, 0) = i_cell_cr;
-        h_cells_of_face(i_face_r, 1) = ic == (nx - 1) ? -1 : i_cell_r;
+        h_cells_of_face(i_face_r, 1) = ic == (nx - 1) ? -1 : (int32_t)i_cell_r;
         h_cells_of_face(i_face_t, 0) = i_cell_cl;
-        h_cells_of_face(i_face_t, 1) = jc == (ny - 1) ? -1 : i_cell_t;
+        h_cells_of_face(i_face_t, 1) = jc == (ny - 1) ? -1 : (int32_t)i_cell_t;
         h_cells_of_face(i_face_l, 0) = i_cell_cl;
-        h_cells_of_face(i_face_l, 1) = ic == 0 ? -1 : i_cell_l;
+        h_cells_of_face(i_face_l, 1) = ic == 0 ? -1 : (int32_t)i_cell_l;
         h_cells_of_face(i_face_b, 0) = i_cell_cr;
-        h_cells_of_face(i_face_b, 1) = jc == 0 ? -1 : i_cell_b;
+        h_cells_of_face(i_face_b, 1) = jc == 0 ? -1 : (int32_t)i_cell_b;
         h_cells_of_face(i_face_d, 0) = i_cell_cr;
         h_cells_of_face(i_face_d, 1) = i_cell_cl;
 
@@ -695,6 +695,7 @@ void Mesh::init_cart_tri(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly) {
     zone_l.set_type(FaceZoneType::BOUNDARY);
     zone_b.set_type(FaceZoneType::BOUNDARY);
 
+    /** \todo MAKE SURE GROUPS ARE CORRECT! */
     std::vector<u_int32_t> faces_i, faces_r, faces_t, faces_l, faces_b;
     for (u_int32_t i_quad = 0; i_quad < nx * ny; ++i_quad) {
         u_int32_t ic = i_quad / ny;
@@ -731,6 +732,9 @@ void Mesh::init_cart_tri(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly) {
         } else {
             faces_i.push_back(i_face);
         }
+        // Diagonal face
+        i_face = _faces_of_cell[i_cell_cr][2];
+        faces_i.push_back(i_face);
     }
 
     // Dedupe interior faces
