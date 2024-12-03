@@ -839,23 +839,14 @@ void Mesh::init_wedge(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly) {
     init_cart(nx, ny, Lx, Ly);
 
     // Adjust node coordinates
-    rtype dx = Lx / nx;
-    rtype dy = Ly / ny;
     rtype wedge_theta = 8 * Kokkos::numbers::pi / 180.0;
     rtype wedge_x = 0.5;
-    for (u_int32_t i = 0; i < nx + 1; ++i) {
-        for (u_int32_t j = 0; j < ny + 1; ++j) {
-            u_int32_t i_node = i * (ny + 1) + j;
-            rtype x = i * dx;
-            rtype y;
-            if (x > wedge_x) {
-                rtype y_bottom = (x - wedge_x) * tan(wedge_theta);
-                y = j * (Ly - y_bottom) / ny + y_bottom;
-            } else {
-                y = j * dy;
-            }
-            h_node_coords(i_node, 0) = x;
-            h_node_coords(i_node, 1) = y;
+    for (u_int32_t i_node = 0; i_node < n_nodes; ++i_node) {
+        rtype x = h_node_coords(i_node, 0);
+        rtype y = h_node_coords(i_node, 1);
+        if (x > wedge_x) {
+            rtype y_bottom = (x - wedge_x) * tan(wedge_theta);
+            h_node_coords(i_node, 1) = (y / Ly) * (Ly - y_bottom) + y_bottom;
         }
     }
 
