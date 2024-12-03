@@ -18,7 +18,9 @@ if (${PROJECT_NAME}_USE_DOUBLES)
 endif()
 
 # Libraries
+set(Kokkos_DIR "${CMAKE_SOURCE_DIR}/build/external/kokkos" CACHE PATH "Kokkos install directory")
 set(Kokkos_ROOT "${CMAKE_SOURCE_DIR}/build/external/kokkos" CACHE PATH "Kokkos install directory")
+set(KokkosKernels_DIR "${CMAKE_SOURCE_DIR}/build/external/kokkos-kernels/lib/cmake/KokkosKernels" CACHE PATH "KokkosKernels install directory")
 set(KokkosKernels_ROOT "${CMAKE_SOURCE_DIR}/build/external/kokkos-kernels" CACHE PATH "KokkosKernels install directory")
 
 find_package(Kokkos REQUIRED)
