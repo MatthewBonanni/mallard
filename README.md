@@ -82,4 +82,4 @@ Mallard uses the [Google C++ Style Guide](https://google.github.io/styleguide/cp
 
 ## License
 
-Mallard is licensed under the GPL v3.0 License. See the [LICENSE](LICENSE) file for more details.
+Mallard is licensed under the AGPL v3.0 License. See the [LICENSE](LICENSE) file for more details.
