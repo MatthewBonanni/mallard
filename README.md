@@ -46,16 +46,16 @@ Mallard uses CMake for building. Follow the steps below to install Mallard:
     ```
 
 3. Configure, build, and install Mallard:
-   1. If using in-tree Kokkos and KokkosKernels:
+   1. If using in-tree Kokkos and KokkosKernels (be sure to enable the desired backends):
       ```sh
       ccmake .. -DCMAKE_INSTALL_PREFIX=/path/to/Mallard/build -DUSE_SYSTEM_KOKKOS=OFF
       make -j install
       ```
-    2. If using existing Kokkos and KokkosKernels installations:
-       ```sh
-       ccmake .. -DCMAKE_INSTALL_PREFIX=/path/to/Mallard/build -DUSE_SYSTEM_KOKKOS=ON -DKokkos_DIR=/path/to/kokkos
-       make -j install
-       ```
+   2. If using existing Kokkos and KokkosKernels installations:
+      ```sh
+      ccmake .. -DCMAKE_INSTALL_PREFIX=/path/to/Mallard/build -DUSE_SYSTEM_KOKKOS=ON -DKokkos_DIR=/path/to/kokkos
+      make -j install
+      ```
 
 ## Contributing
 
