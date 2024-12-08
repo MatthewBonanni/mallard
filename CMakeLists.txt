@@ -13,28 +13,33 @@ add_compile_options(-Wall -Wextra -Wpedantic)
 # Compile-time options
 option(${PROJECT_NAME}_USE_DOUBLES "Use double precision" ON)
 message(STATUS "Mallard: Double precision: ${${PROJECT_NAME}_USE_DOUBLES}")
-if (${PROJECT_NAME}_USE_DOUBLES)
+if(${PROJECT_NAME}_USE_DOUBLES)
     add_compile_definitions(${PROJECT_NAME}_USE_DOUBLES)
 endif()
 
-# Libraries
-set(Kokkos_DIR "${CMAKE_SOURCE_DIR}/build/external/kokkos" CACHE PATH "Kokkos install directory")
-set(Kokkos_ROOT "${CMAKE_SOURCE_DIR}/build/external/kokkos" CACHE PATH "Kokkos install directory")
-set(KokkosKernels_DIR "${CMAKE_SOURCE_DIR}/build/external/kokkos-kernels/lib/cmake/KokkosKernels" CACHE PATH "KokkosKernels install directory")
-set(KokkosKernels_ROOT "${CMAKE_SOURCE_DIR}/build/external/kokkos-kernels" CACHE PATH "KokkosKernels install directory")
+# Add Kokkos and KokkosKernels subdirectories
+option(USE_SYSTEM_KOKKOS "Use system-installed Kokkos" ON)
 
-find_package(Kokkos REQUIRED)
-find_package(KokkosKernels REQUIRED)
+if(USE_SYSTEM_KOKKOS)
+    find_package(Kokkos REQUIRED)
+    find_package(KokkosKernels REQUIRED)
+else()
+    add_subdirectory(src/external/kokkos ${CMAKE_BINARY_DIR}/external/kokkos)
+    add_subdirectory(src/external/kokkos-kernels ${CMAKE_BINARY_DIR}/external/kokkos-kernels)
+    include_directories(${CMAKE_BINARY_DIR}/external/kokkos)
+    include_directories(${CMAKE_BINARY_DIR}/external/kokkos-kernels)
+endif()
 
-include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/exprtk")
-include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/toml11/single_include")
+# Include other external libraries
+include_directories("${CMAKE_SOURCE_DIR}/src/external/toml11/include")
+include_directories("${CMAKE_SOURCE_DIR}/src/external/exprtk")
 
+# Add your main project source
 add_subdirectory(src)
 add_subdirectory(test)
 
-# Documentation stuff
+# Documentation setup
 option(BUILD_DOCS "Build documentation" ON)
-
 if(BUILD_DOCS)
     find_package(Doxygen)
     if(Doxygen_FOUND)
@@ -50,7 +55,7 @@ if(BUILD_DOCS)
     endif()
 endif()
 
-# Installation stuff
+# Installation setup
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX /path/to/install/dir CACHE PATH "Default installation path" FORCE)
 endif()
@@ -59,6 +64,6 @@ install(TARGETS Mallard
     DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
 )
 
-# Testing stuff
+# Enable testing
 enable_testing()
 add_test(NAME MallardTest COMMAND MallardTest)
