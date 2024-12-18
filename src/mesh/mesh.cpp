@@ -138,13 +138,18 @@ void Mesh::h_neighbors_of_cell_helper(u_int32_t i_cell, u_int8_t n_order, std::v
         // Iterate over the neighbors of the current cv, and call the function recursively
         for (u_int8_t i_face_local = 0; i_face_local < h_n_faces_of_cell(i_cell); ++i_face_local) {
             u_int32_t i_face = h_face_of_cell(i_cell, i_face_local);
+            int32_t i_cell_0 = h_cells_of_face(i_face, 0);
             int32_t i_cell_1 = h_cells_of_face(i_face, 1);
             if (i_cell_1 == -1) {
                 // This is a boundary face, so skip it
                 continue;
             } else {
                 // Recursively call the function for the neighbor cv
-                h_neighbors_of_cell_helper(i_cell_1, n_order - 1, neighbors);
+                if (i_cell_0 == (int32_t)i_cell) {
+                    h_neighbors_of_cell_helper(i_cell_1, n_order - 1, neighbors);
+                } else {
+                    h_neighbors_of_cell_helper(i_cell_0, n_order - 1, neighbors);
+                }
             }
         }
     }

@@ -104,14 +104,17 @@ TENO::TENO(u_int8_t poly_order,
         poly_order(poly_order),
         max_stencil_size_factor(max_stencil_size_factor) {
     type = FaceReconstructionType::TENO;
-    quadrature_order = 2 * poly_order;
-    calc_max_stencil_size();
-    calc_polynomial_indices();
-    compute_stencils();
 }
 
 TENO::~TENO() {
     // Empty
+}
+
+void TENO::init() {
+    quadrature_order = 2 * poly_order;
+    calc_max_stencil_size();
+    calc_polynomial_indices();
+    compute_stencils();
 }
 
 void TENO::calc_max_stencil_size() {
@@ -178,10 +181,18 @@ std::vector<u_int32_t> TENO::compute_stencil_of_cell_centered(u_int32_t i_cell) 
             std::vector<u_int32_t> neighbors;
             mesh->h_neighbors_of_cell(i_neighbor_cell, 1, neighbors);
             for (auto neighbor : neighbors) {
-                // Check if this neighbor is already in the current ring
-                if (std::find(neighbor_rings.back().begin(),
-                              neighbor_rings.back().end(),
-                              neighbor) == neighbor_rings.back().end()) {
+                // Check if this neighbor is already in a previous ring or the next ring
+                bool in_old_ring = false;
+                for (auto ring : neighbor_rings) {
+                    if (std::find(ring.begin(), ring.end(), neighbor) != ring.end()) {
+                        in_old_ring = true;
+                        break;
+                    }
+                }
+                bool in_next_ring = (std::find(next_ring.begin(),
+                                               next_ring.end(),
+                                               neighbor) != next_ring.end());
+                if (!in_old_ring && !in_next_ring) {
                     next_ring.push_back(neighbor);
                 }
             }
@@ -278,8 +289,18 @@ std::vector<std::vector<u_int32_t>> TENO::compute_stencils_of_cell_directional(u
             std::vector<u_int32_t> neighbors;
             mesh->h_neighbors_of_cell(i_neighbor_cell, 1, neighbors);
             for (auto neighbor : neighbors) {
-                // Check if this neighbor is already in the current ring
-                if (std::find(neighbor_rings.back().begin(), neighbor_rings.back().end(), neighbor) == neighbor_rings.back().end()) {
+                // Check if this neighbor is already in a previous ring or the next ring
+                bool in_old_ring = false;
+                for (auto ring : neighbor_rings) {
+                    if (std::find(ring.begin(), ring.end(), neighbor) != ring.end()) {
+                        in_old_ring = true;
+                        break;
+                    }
+                }
+                bool in_next_ring = (std::find(next_ring.begin(),
+                                               next_ring.end(),
+                                               neighbor) != next_ring.end());
+                if (!in_old_ring && !in_next_ring) {
                     next_ring.push_back(neighbor);
                 }
             }

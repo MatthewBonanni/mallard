@@ -127,6 +127,11 @@ class TENO : public FaceReconstruction {
         ~TENO();
 
         /**
+         * @brief Initialize the TENO face reconstruction.
+         */
+        void init() override;
+
+        /**
          * @brief Reconstruct the face values.
          * @param solution View of the solution.
          * @param face_solution View of the face solution.
