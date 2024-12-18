@@ -245,7 +245,7 @@ std::vector<u_int32_t> TENO::compute_stencil_of_cell_centered(u_int32_t i_cell) 
 }
 
 std::vector<std::vector<u_int32_t>> TENO::compute_stencils_of_cell_directional(u_int32_t i_cell) {
-    //  Type 4 algorithm (Tsoutsanis 2023)
+    // Type 4 algorithm (Tsoutsanis 2023)
     u_int8_t n_stencils = mesh->n_faces_of_cell(i_cell);
     std::vector<std::vector<u_int32_t>> stencils(n_stencils);
     bool all_done = false;
@@ -312,7 +312,7 @@ std::vector<std::vector<u_int32_t>> TENO::compute_stencils_of_cell_directional(u
                     distance += std::pow(mesh->cell_coords(i_neighbor_cell, i) -
                                          mesh->cell_coords(i_cell,          i), 2);
                 }
-                distances.push_back(std::make_pair(i_cell, distance));
+                distances.push_back(std::make_pair(i_neighbor_cell, distance));
             }
             std::sort(distances.begin(),
                       distances.end(),
@@ -324,6 +324,7 @@ std::vector<std::vector<u_int32_t>> TENO::compute_stencils_of_cell_directional(u
                 next_ring.push_back(distance.first);
             }
         }
+        neighbor_rings.push_back(next_ring);
 
         // Add the neighbors to the stencils as needed
         for (u_int8_t i_stencil = 0; i_stencil < n_stencils; ++i_stencil) {
@@ -351,8 +352,17 @@ std::vector<std::vector<u_int32_t>> TENO::compute_stencils_of_cell_directional(u
 
         // Check if all stencils are done
         all_done = true;
-        for (auto stencil : stencils) {
-            if (stencil.size() < max_cells_per_stencil) {
+        for (u_int8_t i_stencil = 0; i_stencil < n_stencils; ++i_stencil) {
+            // If this face is a boundary face, it has no directional stencil,
+            // and being empty is allowable
+            if (mesh->cells_of_face(mesh->h_face_of_cell(i_cell, i_stencil), 1) == -1) {
+                // Empty it just in case of weird meshes with strong concavity at the boundary
+                stencils[i_stencil].clear();
+                continue;
+            }
+            
+            // If the stencil is not full, we are not done
+            if (stencils[i_stencil].size() < max_cells_per_stencil) {
                 all_done = false;
                 break;
             }
