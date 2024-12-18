@@ -115,6 +115,7 @@ void TENO::init() {
     calc_max_stencil_size();
     calc_polynomial_indices();
     compute_stencils();
+    compute_reconstruction_matrices();
 }
 
 void TENO::calc_max_stencil_size() {
@@ -248,6 +249,7 @@ std::vector<std::vector<u_int32_t>> TENO::compute_stencils_of_cell_directional(u
     // Type 4 algorithm (Tsoutsanis 2023)
     u_int8_t n_stencils = mesh->n_faces_of_cell(i_cell);
     std::vector<std::vector<u_int32_t>> stencils(n_stencils);
+    std::vector<bool> stencil_grew(n_stencils);
     bool all_done = false;
 
     // First, compute the transformation matrices for the target cell
@@ -327,6 +329,7 @@ std::vector<std::vector<u_int32_t>> TENO::compute_stencils_of_cell_directional(u
         neighbor_rings.push_back(next_ring);
 
         // Add the neighbors to the stencils as needed
+        std::fill(stencil_grew.begin(), stencil_grew.end(), false);
         for (u_int8_t i_stencil = 0; i_stencil < n_stencils; ++i_stencil) {
             for (auto i_neighbor_cell : next_ring) {
                 // Check if the stencil is full
@@ -346,6 +349,7 @@ std::vector<std::vector<u_int32_t>> TENO::compute_stencils_of_cell_directional(u
                 FOR_I_DIM if (dx_transformed[i] < 0.0) in_region = false;
                 if (in_region) {
                     stencils[i_stencil].push_back(i_neighbor_cell);
+                    stencil_grew[i_stencil] = true;
                 }
             }
         }
@@ -354,18 +358,22 @@ std::vector<std::vector<u_int32_t>> TENO::compute_stencils_of_cell_directional(u
         all_done = true;
         for (u_int8_t i_stencil = 0; i_stencil < n_stencils; ++i_stencil) {
             // If this face is a boundary face, it has no directional stencil,
-            // and being empty is allowable
-            if (mesh->cells_of_face(mesh->h_face_of_cell(i_cell, i_stencil), 1) == -1) {
-                // Empty it just in case of weird meshes with strong concavity at the boundary
-                stencils[i_stencil].clear();
-                continue;
-            }
-            
-            // If the stencil is not full, we are not done
-            if (stencils[i_stencil].size() < max_cells_per_stencil) {
+            // and being empty is allowable so we can be done even if it is empty
+            // Otherwise, if the stencil is not full, as long as the stencil grew in the last
+            // iteration, there may be more neighbors to add so we are not done
+            if ((mesh->cells_of_face(mesh->h_face_of_cell(i_cell, i_stencil), 1) != -1) &&
+                (stencils[i_stencil].size() < max_cells_per_stencil) &&
+                stencil_grew[i_stencil]) {
                 all_done = false;
                 break;
             }
+        }
+    }
+
+    // Empty the stencils for boundary faces
+    for (u_int8_t i_stencil = 0; i_stencil < n_stencils; ++i_stencil) {
+        if (mesh->cells_of_face(mesh->h_face_of_cell(i_cell, i_stencil), 1) == -1) {
+            stencils[i_stencil].clear();
         }
     }
 
@@ -446,8 +454,8 @@ void TENO::compute_reconstruction_matrices() {
         }
 
         // Compute the transformation matrix for the target cell
-        std::vector<rtype> J;
-        std::vector<rtype> J_inv;
+        std::vector<rtype> J(N_DIM * N_DIM);
+        std::vector<rtype> J_inv(N_DIM * N_DIM);
         std::vector<rtype> w0(N_DIM);
         std::vector<rtype> w1(N_DIM);
         std::vector<rtype> w2(N_DIM);
