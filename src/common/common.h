@@ -15,5 +15,6 @@
 #include "common_typedef.h"
 #include "common_math.h"
 #include "common_io.h"
+#include "common_debug_helpers.h"
 
 #endif // COMMON_H

@@ -15,7 +15,7 @@
 
 #include <Kokkos_Core.hpp>
 
-#include "common_math.h"
+#include "common.h"
 #include "quadrature.h"
 #include "basis.h"
 
@@ -127,14 +127,41 @@ void TENO::calc_max_stencil_size() {
 }
 
 void TENO::calc_polynomial_indices() {
-    for (int k = 0; k < n_dof; ++k) {
-        int sum = k;  // Start with index 'k' to iterate through all polynomial terms
-        for (int d = 0; d < N_DIM; ++d) {
-            // Compute the exponent in dimension 'd'
-            h_poly_indices(k, d) = sum % (poly_order + 1);
-            sum /= (poly_order + 1);  // Move to the next coefficient in higher order
+    poly_indices = Kokkos::View<u_int32_t *[N_DIM]>("poly_indices", n_dof);
+    h_poly_indices = Kokkos::create_mirror_view(poly_indices);
+
+    // Use a lexicographic ordering to generate the polynomial indices
+    int idx = 0;
+    std::vector<int> indices(N_DIM);
+    for (int i_poly = 0; i_poly <= poly_order; i_poly++) {
+        // First set of indices has i_dim set to i_poly
+        std::fill(indices.begin(), indices.end(), 0);
+        indices[0] = i_poly;
+
+        // Write to the view
+        for (int i_dim = 0; i_dim < N_DIM; ++i_dim) {
+            h_poly_indices(idx, i_dim) = indices[i_dim];
+        }
+        ++idx;
+
+        // Propagate 1 from each dimension's index to the right,
+        // repeating until the last dimension's index is equal to i_poly
+        while (indices[N_DIM-1] < i_poly) {
+            for (int i_dim = 0; i_dim < N_DIM-1; ++i_dim) {
+                if (indices[i_dim] > 0) {
+                    indices[i_dim] -= 1;
+                    indices[i_dim + 1] += 1;
+                }
+            }
+
+            // Write to the view
+            for (int i_dim = 0; i_dim < N_DIM; ++i_dim) {
+                h_poly_indices(idx, i_dim) = indices[i_dim];
+            }
+            ++idx;
         }
     }
+
     Kokkos::deep_copy(poly_indices, h_poly_indices);
 }
 
