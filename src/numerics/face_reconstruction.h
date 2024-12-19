@@ -15,8 +15,12 @@
 #include <memory>
 #include <unordered_map>
 
+#include <toml.hpp>
+
 #include "common_typedef.h"
 #include "mesh.h"
+#include "basis.h"
+#include "quadrature.h"
 
 enum class FaceReconstructionType {
     FirstOrder,
@@ -51,12 +55,12 @@ class FaceReconstruction {
         /**
          * @brief Initialize the face reconstruction.
          */
-        virtual void init();
+        virtual void init(const toml::value & input) = 0;
 
         /**
          * @brief Print the face reconstruction.
          */
-        void print() const;
+        virtual void print() const;
 
         /**
          * @brief Set the cell conservatives.
@@ -104,6 +108,11 @@ class FirstOrder : public FaceReconstruction {
         ~FirstOrder();
 
         /**
+         * @brief Initialize the first order face reconstruction.
+         */
+        void init(const toml::value & input) override;
+
+        /**
          * @brief Reconstruct the face values.
          * @param solution View of the solution.
          * @param face_solution View of the face solution.
@@ -119,7 +128,7 @@ class TENO : public FaceReconstruction {
         /**
          * @brief Construct a new TENO object
          */
-        TENO(u_int8_t poly_order, rtype max_stencil_size_factor);
+        TENO();
 
         /**
          * @brief Destroy the TENO object
@@ -129,7 +138,12 @@ class TENO : public FaceReconstruction {
         /**
          * @brief Initialize the TENO face reconstruction.
          */
-        void init() override;
+        void init(const toml::value & input) override;
+
+        /**
+         * @brief Print the TENO face reconstruction.
+         */
+        void print() const override;
 
         /**
          * @brief Reconstruct the face values.
@@ -152,8 +166,30 @@ class TENO : public FaceReconstruction {
         void compute_reconstruction_matrices();
         void compute_oscillation_indicators();
 
+        KOKKOS_INLINE_FUNCTION
+        rtype basis_compute_1D(u_int8_t n, rtype x) const {
+            return dispatch_compute_1D(basis_type, n, x);
+        }
+
+        KOKKOS_INLINE_FUNCTION
+        rtype basis_gradient_1D(u_int8_t n, rtype x) const {
+            return dispatch_gradient_1D(basis_type, n, x);
+        }
+
+        KOKKOS_INLINE_FUNCTION
+        rtype basis_compute_2D(u_int8_t nx, u_int8_t ny, rtype x, rtype y) const {
+            return dispatch_compute_2D(basis_type, nx, ny, x, y);
+        }
+
+        KOKKOS_INLINE_FUNCTION
+        void basis_gradient_2D(u_int8_t nx, u_int8_t ny, rtype x, rtype y,
+                               rtype &grad_x, rtype &grad_y) const {
+            dispatch_gradient_2D(basis_type, nx, ny, x, y, grad_x, grad_y);
+        }
+
+        BasisType basis_type;
         u_int8_t poly_order;
-        u_int8_t quadrature_order;
+        Quadrature quadrature;
         u_int16_t n_dof;
         Kokkos::View<u_int32_t *[N_DIM]> poly_indices;
         Kokkos::View<u_int32_t *[N_DIM]>::HostMirror h_poly_indices;

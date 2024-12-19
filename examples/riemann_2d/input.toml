@@ -64,15 +64,15 @@ name = "bottom"
 type = "symmetry"
 
 [numerics]
-face_reconstruction = "TENO"
 riemann_solver = "HLLC"
 time_integrator = "SSPRK3"
 check_nan = true
 
-[numerics.TENO]
-basis = "legendre"
+[numerics.face_reconstruction]
+type = "TENO"
+basis_type = "legendre"
 basis_order = 3
-quadrature = "triangle_dunavant"
+quadrature_type = "triangle_dunavant"
 quadrature_order = 3
 max_stencil_size_factor = 2.0
 

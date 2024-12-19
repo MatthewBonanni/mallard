@@ -16,6 +16,21 @@
 
 #include "common.h"
 
+enum class QuadratureType {
+    TriangleCentroid,
+    TriangleDunavant,
+};
+
+static const std::unordered_map<std::string, QuadratureType> QUADRATURE_TYPES = {
+    {"triangle_centroid", QuadratureType::TriangleCentroid},
+    {"triangle_dunavant", QuadratureType::TriangleDunavant},
+};
+
+static const std::unordered_map<QuadratureType, std::string> QUADRATURE_NAMES = {
+    {QuadratureType::TriangleCentroid, "triangle_centroid"},
+    {QuadratureType::TriangleDunavant, "triangle_dunavant"},
+};
+
 class Quadrature {
     public:
         /**
@@ -33,6 +48,7 @@ class Quadrature {
          */
         void copy_host_to_device();
 
+        u_int8_t order;
         Kokkos::View<rtype **> points;
         Kokkos::View<rtype **>::HostMirror h_points;
         Kokkos::View<rtype *> weights;
@@ -47,13 +63,12 @@ class TriangleCentroid : public Quadrature {
         TriangleCentroid();
 };
 
-template <u_int32_t N>
 class TriangleDunavant : public Quadrature {
     public:
         /**
          * @brief Construct a new TriangleDunavant object
          */
-        TriangleDunavant();
+        TriangleDunavant(u_int8_t order);
 };
 
 #endif // QUADRATURE_H

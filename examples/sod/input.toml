@@ -41,10 +41,12 @@ name = "bottom"
 type = "symmetry"
 
 [numerics]
-face_reconstruction = "FO"
 riemann_solver = "HLLC"
 time_integrator = "SSPRK3"
 check_nan = true
+
+[numerics.face_reconstruction]
+type = "FO"
 
 [physics]
 type = "euler"

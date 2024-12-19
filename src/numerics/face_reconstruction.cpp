@@ -14,10 +14,11 @@
 #include <iostream>
 
 #include <Kokkos_Core.hpp>
+#include <toml.hpp>
 
 #include "common.h"
-#include "quadrature.h"
 #include "basis.h"
+#include "quadrature.h"
 
 FaceReconstruction::FaceReconstruction() {
     // Empty
@@ -25,10 +26,6 @@ FaceReconstruction::FaceReconstruction() {
 
 FaceReconstruction::~FaceReconstruction() {
     std::cout << "Destroying face reconstruction: " << FACE_RECONSTRUCTION_NAMES.at(type) << std::endl;
-}
-
-void FaceReconstruction::init() {
-    print();
 }
 
 void FaceReconstruction::print() const {
@@ -55,6 +52,11 @@ FirstOrder::FirstOrder() {
 
 FirstOrder::~FirstOrder() {
     // Empty
+}
+
+void FirstOrder::init(const toml::value & input) {
+    (void)(input);
+    print();
 }
 
 struct FirstOrderFunctor {
@@ -99,10 +101,7 @@ void FirstOrder::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution
     Kokkos::parallel_for(mesh->n_faces, recon_functor);
 }
 
-TENO::TENO(u_int8_t poly_order,
-           rtype max_stencil_size_factor) :
-        poly_order(poly_order),
-        max_stencil_size_factor(max_stencil_size_factor) {
+TENO::TENO() {
     type = FaceReconstructionType::TENO;
 }
 
@@ -110,12 +109,53 @@ TENO::~TENO() {
     // Empty
 }
 
-void TENO::init() {
-    quadrature_order = 2 * poly_order;
+void TENO::init(const toml::value & input) {
+    std::string basis_type_str = toml::find_or<std::string>(input, "basis_type", "legendre");
+    poly_order = toml::find<u_int8_t>(input, "basis_order");
+    max_stencil_size_factor = toml::find_or<rtype>(input, "max_stencil_size_factor", 2.0);
+    std::string quadrature_type_str = toml::find_or<std::string>(input, "quadrature_type", "triangle_dunavant");
+    u_int8_t quadrature_order = toml::find_or<u_int8_t>(input, "quadrature_order", 2 * poly_order);
+
+    if (BASIS_TYPES.find(basis_type_str) == BASIS_TYPES.end()) {
+        throw std::runtime_error("Unknown basis type: " + basis_type_str + ".");
+    } else {
+        basis_type = BASIS_TYPES.at(basis_type_str);
+    }
+
+    QuadratureType quadrature_type;
+    if (QUADRATURE_TYPES.find(quadrature_type_str) == QUADRATURE_TYPES.end()) {
+        throw std::runtime_error("Unknown quadrature type: " + quadrature_type_str + ".");
+    } else {
+        quadrature_type = QUADRATURE_TYPES.at(quadrature_type_str);
+    }
+
+    switch (quadrature_type) {
+        case QuadratureType::TriangleCentroid:
+            quadrature = TriangleCentroid();
+            break;
+        case QuadratureType::TriangleDunavant:
+            quadrature = TriangleDunavant(quadrature_order);
+            break;
+        default:
+            throw std::runtime_error("Unknown quadrature type.");
+    }
+
     calc_max_stencil_size();
     calc_polynomial_indices();
     compute_stencils();
     compute_reconstruction_matrices();
+    print();
+}
+
+void TENO::print() const {
+    std::cout << LOG_SEPARATOR << std::endl;
+    std::cout << "Face reconstruction: " << FACE_RECONSTRUCTION_NAMES.at(type) << std::endl;
+    std::cout << "> Polynomial order: " << (u_int16_t)poly_order << std::endl;
+    std::cout << "> Quadrature order: " << (u_int16_t)quadrature.order << std::endl;
+    std::cout << "> Maximum stencil size factor: " << max_stencil_size_factor << std::endl;
+    std::cout << "> Maximum cells per stencil: " << max_cells_per_stencil << std::endl;
+    std::cout << "> Number of degrees of freedom: " << n_dof << std::endl;
+    std::cout << LOG_SEPARATOR << std::endl;
 }
 
 void TENO::calc_max_stencil_size() {
@@ -446,8 +486,6 @@ void TENO::compute_stencils() {
 }
 
 void TENO::compute_reconstruction_matrices() {
-    TriangleDunavant<3> quadrature;
-
     for (u_int32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
         if (mesh->n_nodes_of_cell(i_cell) != 3) {
             throw std::runtime_error("TENO has only been implemented for triangular cells.");
@@ -504,9 +542,9 @@ void TENO::compute_reconstruction_matrices() {
                         gemv<N_DIM>(J_inv.data(), x.data(), x.data());
 
                         // Evaluate the basis function at the transformed point
-                        rtype basis_value = Legendre::compute_2D(poly_indices(i_dof, 0),
-                                                                 poly_indices(i_dof, 1),
-                                                                 x[0], x[1]);
+                        rtype basis_value = basis_compute_2D(poly_indices(i_dof, 0),
+                                                             poly_indices(i_dof, 1),
+                                                             x[0], x[1]);
 
                         A[ind] += quadrature.h_weights(i_quad) * basis_value;
                     }

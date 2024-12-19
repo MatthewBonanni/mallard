@@ -110,7 +110,8 @@ void Solver::init_physics() {
 void Solver::init_numerics() {
     std::cout << "Initializing numerics..." << std::endl;
 
-    std::string face_reconstruction_str = toml::find_or<std::string>(input, "numerics", "face_reconstruction", "FO");
+    toml::value face_reconstruction_input = toml::find(input, "numerics", "face_reconstruction");
+    std::string face_reconstruction_str = toml::find_or<std::string>(face_reconstruction_input, "type", "FO");
     std::string riemann_solver_str = toml::find_or<std::string>(input, "numerics", "riemann_solver", "HLLC");
     std::string time_integrator_str = toml::find_or<std::string>(input, "numerics", "time_integrator", "LSSSPRK3");
 
@@ -141,9 +142,7 @@ void Solver::init_numerics() {
     if (face_reconstruction_type == FaceReconstructionType::FirstOrder) {
         face_reconstruction = std::make_unique<FirstOrder>();
     } else if (face_reconstruction_type == FaceReconstructionType::TENO) {
-        u_int8_t poly_order = 5;
-        rtype max_stencil_size_factor = 2.0;
-        face_reconstruction = std::make_unique<TENO>(poly_order, max_stencil_size_factor);
+        face_reconstruction = std::make_unique<TENO>();
     } else {
         // Should never get here due to the enum class.
         throw std::runtime_error("Unknown face reconstruction type: " + face_reconstruction_str + ".");
@@ -176,7 +175,7 @@ void Solver::init_numerics() {
     face_reconstruction->set_mesh(mesh);
     face_reconstruction->set_cell_conservatives(&conservatives);
     face_reconstruction->set_face_conservatives(&face_conservatives);
-    face_reconstruction->init();
+    face_reconstruction->init(face_reconstruction_input);
 
     riemann_solver->init(input);
 
