@@ -21,21 +21,18 @@
 enum class RiemannSolverType {
     Rusanov,
     HLL,
-    HLLE,
     HLLC,
 };
 
 static const std::unordered_map<std::string, RiemannSolverType> RIEMANN_SOLVER_TYPES = {
     {"Rusanov", RiemannSolverType::Rusanov},
     {"HLL", RiemannSolverType::HLL},
-    {"HLLE", RiemannSolverType::HLLE},
     {"HLLC", RiemannSolverType::HLLC}
 };
 
 static const std::unordered_map<RiemannSolverType, std::string> RIEMANN_SOLVER_NAMES = {
     {RiemannSolverType::Rusanov, "Rusanov"},
     {RiemannSolverType::HLL, "HLL"},
-    {RiemannSolverType::HLLE, "HLLE"},
     {RiemannSolverType::HLLC, "HLLC"}
 };
 
@@ -148,41 +145,6 @@ class HLL : public RiemannSolver {
         /**
          * @brief Calculate the HLL flux.
          * @param flux HLL flux.
-         * @param n_unit Unit normal vector.
-         * @param rho_l Left density.
-         * @param u_l Left velocity.
-         * @param p_l Left pressure.
-         * @param gamma_l Left gamma.
-         * @param h_l Left enthalpy.
-         * @param rho_r Right density.
-         * @param u_r Right velocity.
-         * @param p_r Right pressure.
-         * @param gamma_r Right gamma.
-         * @param h_r Right enthalpy.
-         */
-        KOKKOS_INLINE_FUNCTION
-        void calc_flux(rtype * flux, const rtype * n_unit,
-                       const rtype rho_l, const rtype * u_l,
-                       const rtype p_l, const rtype gamma_l, const rtype h_l,
-                       const rtype rho_r, const rtype * u_r,
-                       const rtype p_r, const rtype gamma_r, const rtype h_r) const override;
-};
-
-class HLLE : public RiemannSolver {
-    public:
-        /**
-         * @brief Construct a new HLLE object
-         */
-        HLLE();
-
-        /**
-         * @brief Destroy the HLLE object
-         */
-        virtual ~HLLE();
-
-        /**
-         * @brief Calculate the HLLE flux.
-         * @param flux HLLE flux.
          * @param n_unit Unit normal vector.
          * @param rho_l Left density.
          * @param u_l Left velocity.
@@ -554,27 +516,6 @@ void HLLC::calc_flux(rtype * flux, const rtype * n_unit,
             }
         }
     }
-}
-
-KOKKOS_INLINE_FUNCTION
-void HLLE::calc_flux(rtype * flux, const rtype * n_unit,
-                     const rtype rho_l, const rtype * u_l,
-                     const rtype p_l, const rtype gamma_l, const rtype h_l,
-                     const rtype rho_r, const rtype * u_r,
-                     const rtype p_r, const rtype gamma_r, const rtype h_r) const {
-    (void)(flux);
-    (void)(n_unit);
-    (void)(rho_l);
-    (void)(u_l);
-    (void)(p_l);
-    (void)(gamma_l);
-    (void)(h_l);
-    (void)(rho_r);
-    (void)(u_r);
-    (void)(p_r);
-    (void)(gamma_r);
-    (void)(h_r);
-    Kokkos::abort("HLLE Riemann solver not implemented.");
 }
 
 #endif // RIEMANN_SOLVER_H

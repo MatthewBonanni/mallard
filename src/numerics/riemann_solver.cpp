@@ -52,14 +52,6 @@ HLL::~HLL() {
     // Empty
 }
 
-HLLE::HLLE() {
-    type = RiemannSolverType::HLLE;
-}
-
-HLLE::~HLLE() {
-    // Empty
-}
-
 HLLC::HLLC() {
     type = RiemannSolverType::HLLC;
 }

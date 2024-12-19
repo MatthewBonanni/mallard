@@ -152,8 +152,6 @@ void Solver::init_numerics() {
         riemann_solver = std::make_unique<Rusanov>();
     } else if (riemann_solver_type == RiemannSolverType::HLL) {
         riemann_solver = std::make_unique<HLL>();
-    } else if (riemann_solver_type == RiemannSolverType::HLLE) {
-        riemann_solver = std::make_unique<HLLE>();
     } else if (riemann_solver_type == RiemannSolverType::HLLC) {
         riemann_solver = std::make_unique<HLLC>();
     } else {

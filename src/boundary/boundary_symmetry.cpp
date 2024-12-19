@@ -91,9 +91,6 @@ void BoundarySymmetry::apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solut
             case RiemannSolverType::HLL:
                 launch_flux_functor<Euler, HLL>(face_solution, rhs);
                 break;
-            case RiemannSolverType::HLLE:
-                launch_flux_functor<Euler, HLLE>(face_solution, rhs);
-                break;
             case RiemannSolverType::HLLC:
                 launch_flux_functor<Euler, HLLC>(face_solution, rhs);
                 break;
