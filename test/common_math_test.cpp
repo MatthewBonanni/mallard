@@ -66,6 +66,47 @@ TEST(CommonMathTest, UnitNegative) {
     EXPECT_RTYPE_EQ(expected_unit[1], actual_unit[1]);
 }
 
+TEST(CommonMathTest, Transpose2) {
+    std::vector<rtype> A = {1.0, 2.0,
+                            3.0, 4.0};
+    std::vector<rtype> expected_AT = {1.0, 3.0,
+                                      2.0, 4.0};
+    std::vector<rtype> actual_AT(4);
+    transpose(A.data(), actual_AT.data(), 2, 2);
+
+    for (u_int32_t i = 0; i < 4; ++i) {
+        EXPECT_RTYPE_EQ(expected_AT[i], actual_AT[i]);
+    }
+}
+
+TEST(CommonMathTest, TransposeWide) {
+    std::vector<rtype> A = {1.0, 2.0, 3.0,
+                            4.0, 5.0, 6.0};
+    std::vector<rtype> expected_AT = {1.0, 4.0,
+                                      2.0, 5.0,
+                                      3.0, 6.0};
+    std::vector<rtype> actual_AT(6);
+    transpose(A.data(), actual_AT.data(), 2, 3);
+
+    for (u_int32_t i = 0; i < 6; ++i) {
+        EXPECT_RTYPE_EQ(expected_AT[i], actual_AT[i]);
+    }
+}
+
+TEST(CommonMathTest, TransposeTall) {
+    std::vector<rtype> A = {1.0, 2.0,
+                            3.0, 4.0,
+                            5.0, 6.0};
+    std::vector<rtype> expected_AT = {1.0, 3.0, 5.0,
+                                      2.0, 4.0, 6.0};
+    std::vector<rtype> actual_AT(6);
+    transpose(A.data(), actual_AT.data(), 3, 2);
+
+    for (u_int32_t i = 0; i < 6; ++i) {
+        EXPECT_RTYPE_EQ(expected_AT[i], actual_AT[i]);
+    }
+}
+
 TEST(CommonMathTest, InvertMatrix2) {
     std::vector<rtype> A = {1.0, 2.0,
                             3.0, 4.0};
@@ -112,6 +153,19 @@ TEST(CommonMathTest, GEMV2) {
     }
 }
 
+TEST(CommonMathTest, GEMV2InPlace) {
+    std::vector<rtype> A = {1.0, 2.0,
+                            3.0, 4.0};
+    std::vector<rtype> x = {5.0, 6.0};
+
+    std::vector<rtype> expected_x = {17.0, 39.0};
+    gemv<2>(A.data(), x.data(), x.data());
+
+    for (u_int32_t i = 0; i < 2; ++i) {
+        EXPECT_RTYPE_EQ(expected_x[i], x[i]);
+    }
+}
+
 TEST(CommonMathTest, GEMV3) {
     std::vector<rtype> A = {1.0, 2.0, 3.0,
                             4.0, 5.0, 6.0,
@@ -124,6 +178,175 @@ TEST(CommonMathTest, GEMV3) {
 
     for (u_int32_t i = 0; i < 3; ++i) {
         EXPECT_RTYPE_EQ(expected_y[i], actual_y[i]);
+    }
+}
+
+TEST(CommonMathTest, GEMV3InPlace) {
+    std::vector<rtype> A = {1.0, 2.0, 3.0,
+                            4.0, 5.0, 6.0,
+                            7.0, 8.0, 9.0};
+    std::vector<rtype> x = {1.0, 2.0, 3.0};
+
+    std::vector<rtype> expected_x = {14.0, 32.0, 50.0};
+    gemv<3>(A.data(), x.data(), x.data());
+
+    for (u_int32_t i = 0; i < 3; ++i) {
+        EXPECT_RTYPE_EQ(expected_x[i], x[i]);
+    }
+}
+
+TEST(CommonMathTest, GEMM2) {
+    std::vector<rtype> A = {1.0, 2.0,
+                            3.0, 4.0};
+    std::vector<rtype> B = {5.0, 6.0,
+                            7.0, 8.0};
+    std::vector<rtype> C(4);
+
+    std::vector<rtype> expected_C = {19.0, 22.0,
+                                     43.0, 50.0};
+    gemm(A.data(), B.data(), C.data(), 2, 2, 2, 2, false, false);
+
+    for (u_int32_t i = 0; i < 4; ++i) {
+        EXPECT_RTYPE_EQ(expected_C[i], C[i]);
+    }
+}
+
+TEST(CommonMathTest, GEMM234) {
+    std::vector<rtype> A = {1.0, 2.0, 3.0,
+                            4.0, 5.0, 6.0};
+    std::vector<rtype> B = { 7.0,  8.0,  9.0, 10.0,
+                            11.0, 12.0, 13.0, 14.0,
+                            15.0, 16.0, 17.0, 18.0};
+    std::vector<rtype> C(8);
+
+    std::vector<rtype> expected_C = { 74.0,  80.0,  86.0,  92.0,
+                                     173.0, 188.0, 203.0, 218.0};
+    gemm(A.data(), B.data(), C.data(), 2, 3, 3, 4, false, false);
+
+    for (u_int32_t i = 0; i < 8; ++i) {
+        EXPECT_RTYPE_EQ(expected_C[i], C[i]);
+    }
+}
+
+TEST(CommonMathTest, GEMM2TransposeA) {
+    std::vector<rtype> A = {1.0, 2.0,
+                            3.0, 4.0};
+    std::vector<rtype> B = {5.0, 6.0,
+                            7.0, 8.0};
+    std::vector<rtype> C(4);
+
+    std::vector<rtype> expected_C = {26.0, 30.0,
+                                     38.0, 44.0};
+    gemm(A.data(), B.data(), C.data(), 2, 2, 2, 2, true, false);
+
+    for (u_int32_t i = 0; i < 4; ++i) {
+        EXPECT_RTYPE_EQ(expected_C[i], C[i]);
+    }
+}
+
+TEST(CommonMathTest, GEMM234TransposeA) {
+    std::vector<rtype> A = {1.0, 4.0,
+                            2.0, 5.0,
+                            3.0, 6.0};
+    std::vector<rtype> B = { 7.0,  8.0,  9.0, 10.0,
+                            11.0, 12.0, 13.0, 14.0,
+                            15.0, 16.0, 17.0, 18.0};
+    std::vector<rtype> C(8);
+
+    std::vector<rtype> expected_C = { 74.0,  80.0,  86.0,  92.0,
+                                     173.0, 188.0, 203.0, 218.0};
+    gemm(A.data(), B.data(), C.data(), 3, 2, 3, 4, true, false);
+
+    for (u_int32_t i = 0; i < 8; ++i) {
+        EXPECT_RTYPE_EQ(expected_C[i], C[i]);
+    }
+}
+
+TEST(CommonMathTest, GEMM2TransposeB) {
+    std::vector<rtype> A = {1.0, 2.0,
+                            3.0, 4.0};
+    std::vector<rtype> B = {5.0, 6.0,
+                            7.0, 8.0};
+    std::vector<rtype> C(4);
+
+    std::vector<rtype> expected_C = {17.0, 23.0,
+                                     39.0, 53.0};
+    gemm(A.data(), B.data(), C.data(), 2, 2, 2, 2, false, true);
+
+    for (u_int32_t i = 0; i < 4; ++i) {
+        EXPECT_RTYPE_EQ(expected_C[i], C[i]);
+    }
+}
+
+TEST(CommonMathTest, GEMM234TransposeB) {
+    std::vector<rtype> A = {1.0, 2.0, 3.0,
+                            4.0, 5.0, 6.0};
+    std::vector<rtype> B = { 7.0, 11.0, 15.0,
+                             8.0, 12.0, 16.0,
+                             9.0, 13.0, 17.0,
+                            10.0, 14.0, 18.0};
+    std::vector<rtype> C(8);
+
+    std::vector<rtype> expected_C = { 74.0,  80.0,  86.0,  92.0,
+                                     173.0, 188.0, 203.0, 218.0};
+    gemm(A.data(), B.data(), C.data(), 2, 3, 4, 3, false, true);
+
+    for (u_int32_t i = 0; i < 8; ++i) {
+        EXPECT_RTYPE_EQ(expected_C[i], C[i]);
+    }
+}
+
+TEST(CommonMathTest, GEMM2TransposeAB) {
+    std::vector<rtype> A = {1.0, 2.0,
+                            3.0, 4.0};
+    std::vector<rtype> B = {5.0, 6.0,
+                            7.0, 8.0};
+    std::vector<rtype> C(4);
+
+    std::vector<rtype> expected_C = {23.0, 31.0,
+                                     34.0, 46.0};
+    gemm(A.data(), B.data(), C.data(), 2, 2, 2, 2, true, true);
+
+    for (u_int32_t i = 0; i < 4; ++i) {
+        EXPECT_RTYPE_EQ(expected_C[i], C[i]);
+    }
+}
+
+TEST(CommonMathTest, GEMM234TransposeAB) {
+    std::vector<rtype> A = {1.0, 4.0,
+                            2.0, 5.0,
+                            3.0, 6.0};
+    std::vector<rtype> B = { 7.0, 11.0, 15.0,
+                             8.0, 12.0, 16.0,
+                             9.0, 13.0, 17.0,
+                            10.0, 14.0, 18.0};
+    std::vector<rtype> C(8);
+
+    std::vector<rtype> expected_C = { 74.0,  80.0,  86.0,  92.0,
+                                     173.0, 188.0, 203.0, 218.0};
+    gemm(A.data(), B.data(), C.data(), 3, 2, 4, 3, true, true);
+
+    for (u_int32_t i = 0; i < 8; ++i) {
+        EXPECT_RTYPE_EQ(expected_C[i], C[i]);
+    }
+}
+
+TEST(CommonMathTest, QRHouseholder) {
+    std::vector<rtype> A = {1.0, 2.0,
+                            3.0, 4.0};
+    std::vector<rtype> Q(4);
+    std::vector<rtype> R(4);
+
+    std::vector<rtype> expected_Q = {0.31622776601683794, 0.9486832980505138,
+                                     0.9486832980505138, -0.31622776601683794};
+    std::vector<rtype> expected_R = {3.1622776601683795, 4.427188724235731,
+                                     0.0, 0.6324555320336759};
+    qr_householder(A.data(), Q.data(), R.data(), 2, 2);
+
+    rtype tol = 1e-6;
+    for (u_int32_t i = 0; i < 4; ++i) {
+        EXPECT_NEAR(expected_Q[i], Q[i], tol);
+        EXPECT_NEAR(expected_R[i], R[i], tol);
     }
 }
 
@@ -200,7 +423,8 @@ TEST(CommonMathTest, TriangleJJinvTranslate) {
 
     std::vector<rtype> J(4);
     std::vector<rtype> J_inv(4);
-    triangle_J_Jinv(v0.data(), v1.data(), v2.data(), J.data(), J_inv.data());
+    triangle_J(v0.data(), v1.data(), v2.data(), J.data());
+    invert_matrix<2>(J.data(), J_inv.data());
 
     std::vector<rtype> expected_J = {1.0, 0.0, 0.0, 1.0};
     std::vector<rtype> expected_J_inv = {1.0, 0.0, 0.0, 1.0};
@@ -218,7 +442,8 @@ TEST(CommonMathTest, TriangleJJinvUnit) {
 
     std::vector<rtype> J(4);
     std::vector<rtype> J_inv(4);
-    triangle_J_Jinv(v0.data(), v1.data(), v2.data(), J.data(), J_inv.data());
+    triangle_J(v0.data(), v1.data(), v2.data(), J.data());
+    invert_matrix<2>(J.data(), J_inv.data());
 
     std::vector<rtype> expected_J = {1.0, 0.0, 0.0, 1.0};
     std::vector<rtype> expected_J_inv = {1.0, 0.0, 0.0, 1.0};

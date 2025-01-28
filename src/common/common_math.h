@@ -115,6 +115,24 @@ void unit<3>(const rtype * v, rtype * u) {
 }
 
 /**
+ * @brief Transpose a matrix.
+ * Only intended for use with small matrices within kernels.
+ * 
+ * @param A Matrix
+ * @param AT Transposed matrix
+ * @param m Number of rows in A
+ * @param n Number of columns in A
+ */
+KOKKOS_INLINE_FUNCTION
+void transpose(const rtype * A, rtype * AT, const u_int16_t m, const u_int16_t n) {
+    for (u_int16_t i = 0; i < m; i++) {
+        for (u_int16_t j = 0; j < n; j++) {
+            AT[j*m + i] = A[i*n + j];
+        }
+    }
+}
+
+/**
  * @brief Invert a matrix. Will be instantiated for 2x2 and 3x3 matrices.
  * 
  * @param A Matrix to invert.
@@ -188,16 +206,243 @@ void gemv(const rtype * A, const rtype * x, rtype * y);
 // Explicit instantiation for N = 2
 template <> KOKKOS_INLINE_FUNCTION
 void gemv<2>(const rtype * A, const rtype * x, rtype * y) {
-    y[0] = A[0] * x[0] + A[1] * x[1];
-    y[1] = A[2] * x[0] + A[3] * x[1];
+    rtype temp0 = A[0] * x[0] + A[1] * x[1];
+    rtype temp1 = A[2] * x[0] + A[3] * x[1];
+    y[0] = temp0;
+    y[1] = temp1;
 }
 
 // Explicit instantiation for N = 3
 template <> KOKKOS_INLINE_FUNCTION
 void gemv<3>(const rtype * A, const rtype * x, rtype * y) {
-    y[0] = A[0] * x[0] + A[1] * x[1] + A[2] * x[2];
-    y[1] = A[3] * x[0] + A[4] * x[1] + A[5] * x[2];
-    y[2] = A[6] * x[0] + A[7] * x[1] + A[8] * x[2];
+    rtype temp0 = A[0] * x[0] + A[1] * x[1] + A[2] * x[2];
+    rtype temp1 = A[3] * x[0] + A[4] * x[1] + A[5] * x[2];
+    rtype temp2 = A[6] * x[0] + A[7] * x[1] + A[8] * x[2];
+    y[0] = temp0;
+    y[1] = temp1;
+    y[2] = temp2;
+}
+
+/**
+ * @brief General matrix-matrix multiplication.
+ * Only intended for use with small matrices within kernels.
+ * 
+ * @param A Matrix.
+ * @param B Matrix.
+ * @param C Resulting matrix.
+ * @param m Number of rows in A.
+ * @param n Number of columns in A.
+ * @param p Number of rows in B.
+ * @param q Number of columns in B.
+ * @param tA Transpose A.
+ * @param tB Transpose B.
+ */
+KOKKOS_INLINE_FUNCTION
+void gemm(const rtype * A,
+          const rtype * B,
+          rtype * C,
+          const u_int16_t m,
+          const u_int16_t n,
+          const u_int16_t p,
+          const u_int16_t q,
+          const bool tA,
+          const bool tB) {
+    // Validate dimensions
+    if (!tA && !tB) {
+        if (n != p) {
+            Kokkos::abort("Invalid matrix dimensions.");
+        }
+        for (u_int16_t i = 0; i < m; i++) {
+            for (u_int16_t j = 0; j < q; j++) {
+                rtype sum = 0.0;
+                for (u_int16_t k = 0; k < n; k++) {
+                    sum += A[i*n + k] * B[k*q + j];
+                }
+                C[i*q + j] = sum;
+            }
+        }
+    } else if (tA && !tB) {
+        if (m != p) {
+            Kokkos::abort("Invalid matrix dimensions.");
+        }
+        for (u_int16_t i = 0; i < n; i++) {
+            for (u_int16_t j = 0; j < q; j++) {
+                rtype sum = 0.0;
+                for (u_int16_t k = 0; k < m; k++) {
+                    sum += A[k*n + i] * B[k*q + j];
+                }
+                C[i*q + j] = sum;
+            }
+        }
+    } else if (!tA && tB) {
+        if (n != q) {
+            Kokkos::abort("Invalid matrix dimensions.");
+        }
+        for (u_int16_t i = 0; i < m; i++) {
+            for (u_int16_t j = 0; j < p; j++) {
+                rtype sum = 0.0;
+                for (u_int16_t k = 0; k < n; k++) {
+                    sum += A[i*n + k] * B[j*q + k];
+                }
+                C[i*p + j] = sum;
+            }
+        }
+    } else {
+        if (m != q) {
+            Kokkos::abort("Invalid matrix dimensions.");
+        }
+        for (u_int16_t i = 0; i < n; i++) {
+            for (u_int16_t j = 0; j < p; j++) {
+                rtype sum = 0.0;
+                for (u_int16_t k = 0; k < m; k++) {
+                    sum += A[k*n + i] * B[j*q + k];
+                }
+                C[i*p + j] = sum;
+            }
+        }
+    }
+}
+
+/**
+ * @brief Compute the QR decomposition of a matrix.
+ * 
+ * @param A Matrix.
+ * @param Q Orthogonal matrix.
+ * @param R Upper triangular matrix.
+ * @param m Number of rows.
+ * @param n Number of columns.
+ */
+KOKKOS_INLINE_FUNCTION
+void qr_householder(const rtype * A,
+                    rtype * Q,
+                    rtype * R,
+                    const u_int16_t m,
+                    const u_int16_t n) {
+    // Initialize Q to identity
+    for (u_int16_t i = 0; i < m; i++) {
+        for (u_int16_t j = 0; j < n; j++) {
+            Q[i*n + j] = (i == j) ? 1.0 : 0.0;
+        }
+    }
+    
+    // Copy A into R
+    for (u_int16_t i = 0; i < m; i++) {
+        for (u_int16_t j = 0; j < n; j++) {
+            R[i*n + j] = A[i*n + j];
+        }
+    }
+
+    rtype v[m];
+    for (u_int16_t j = 0; j < n; j++) {
+        // Compute norm
+        rtype norm = 0.0;
+        for (u_int16_t i = j; i < m; i++) {
+            norm += R[i*n + j] * R[i*n + j];
+        }
+        norm = Kokkos::sqrt(norm);
+        if (norm < 1e-15) {
+            continue;  // Skip if column is already zeroed
+        }
+
+        // Compute Householder vector
+        rtype sign = (R[j*n + j] >= 0.0) ? 1.0 : -1.0;
+        rtype u1 = R[j*n + j] + sign * norm;
+        rtype tau = -sign * u1 / norm;
+        v[0] = 1.0;
+        for (u_int16_t k = 1; k < m - j; k++) {
+            v[k] = R[(j+k)*n + j] / u1;
+        }
+        
+        // Update R
+        for (u_int16_t k = j; k < n; k++) {
+            rtype dot = 0.0;
+            for (u_int16_t i = j; i < m; i++) {
+                dot += v[i-j] * R[i*n + k];
+            }
+            for (u_int16_t i = j; i < m; i++) {
+                R[i*n + k] -= tau * v[i-j] * dot;
+            }
+        }
+        
+        // Update Q
+        for (u_int16_t k = 0; k < m; k++) {
+            rtype dot = 0.0;
+            for (u_int16_t i = j; i < m; i++) {
+                dot += v[i-j] * Q[k*m + i];
+            }
+            for (u_int16_t i = j; i < m; i++) {
+                Q[k*m + i] -= tau * v[i-j] * dot;
+            }
+        }
+    }
+}
+
+/**
+ * @brief Perform forward substitution to solve a lower triangular system.
+ * 
+ * @param L Lower triangular matrix [m x n].
+ * @param B Right-hand side matrix [n x p].
+ * @param X Solution matrix [m x p].
+ * @param m Number of rows in L.
+ * @param n Number of columns in L.
+ * @param p Number of columns in B.
+ * @param tL Transpose L.
+ * @param tB Transpose B.
+ */
+KOKKOS_INLINE_FUNCTION
+void forward_substitution(const rtype * L,
+                          const rtype * B,
+                          rtype * X,
+                          const u_int16_t m,
+                          const u_int16_t n,
+                          const u_int16_t p,
+                          const bool tL,
+                          const bool tB) {
+    for (u_int16_t i = 0; i < m; i++) {
+        for (u_int16_t j = 0; j < p; j++) {
+            rtype sum = 0.0;
+            for (u_int16_t k = 0; k < i; k++) {
+                u_int16_t idx_L = tL ? k*m + i : i*n + k;
+                sum += L[idx_L] * X[j*p + k];
+            }
+            u_int16_t idx_B = tB ? j*n + i : i*p + j;
+            X[j*p + i] = (B[idx_B] - sum) / L[i*m + i];
+        }
+    }
+}
+
+/**
+ * @brief Perform back substitution to solve an upper triangular system.
+ * 
+ * @param U Upper triangular matrix [m x n].
+ * @param B Right-hand side matrix [n x p].
+ * @param X Solution matrix [m x p].
+ * @param m Number of rows in U.
+ * @param n Number of columns in U.
+ * @param p Number of columns in B.
+ * @param tU Transpose U.
+ * @param tB Transpose B.
+ */
+KOKKOS_INLINE_FUNCTION
+void back_substitution(const rtype * U,
+                       const rtype * B,
+                       rtype * X,
+                       const u_int16_t m,
+                       const u_int16_t n,
+                       const u_int16_t p,
+                       const bool tU,
+                       const bool tB) {
+    for (int16_t i = m - 1; i >= 0; i--) {
+        for (u_int16_t j = 0; j < p; j++) {
+            rtype sum = 0.0;
+            for (u_int16_t k = i + 1; k < p; k++) {
+                u_int16_t idx_U = tU ? k*m + i : i*n + k;
+                sum += U[idx_U] * X[j*p + k];
+            }
+            u_int16_t idx_B = tB ? j*n + i : i*p + j;
+            X[j*p + i] = (B[idx_B] - sum) / U[i*m + i];
+        }
+    }
 }
 
 /**
@@ -237,20 +482,16 @@ rtype triangle_area<2>(const rtype * v0,
  * @param v1 Coordinates of the second vertex.
  * @param v2 Coordinates of the third vertex.
  * @param J Transformation matrix.
- * @param J_inv Inverse of the transformation matrix.
  */
 KOKKOS_INLINE_FUNCTION
-void triangle_J_Jinv(const rtype * v0,
-                     const rtype * v1,
-                     const rtype * v2,
-                     rtype * J,
-                     rtype * J_inv) {
+void triangle_J(const rtype * v0,
+                const rtype * v1,
+                const rtype * v2,
+                rtype * J) {
     J[0] = v1[0] - v0[0];
     J[1] = v2[0] - v0[0];
     J[2] = v1[1] - v0[1];
     J[3] = v2[1] - v0[1];
-
-    invert_matrix<2>(J, J_inv);
 }
 
 /**
@@ -261,15 +502,13 @@ void triangle_J_Jinv(const rtype * v0,
  * @param v2 Coordinates of the third vertex.
  * @param v3 Coordinates of the fourth vertex.
  * @param J Transformation matrix.
- * @param J_inv Inverse of the transformation matrix.
  */
 KOKKOS_INLINE_FUNCTION
-void tetrahedron_J_Jinv(const rtype * v0,
-                        const rtype * v1,
-                        const rtype * v2,
-                        const rtype * v3,
-                        rtype * J,
-                        rtype * J_inv) {
+void tetrahedron_J(const rtype * v0,
+                   const rtype * v1,
+                   const rtype * v2,
+                   const rtype * v3,
+                   rtype * J) {
     J[0] = v1[0] - v0[0];
     J[1] = v2[0] - v0[0];
     J[2] = v3[0] - v0[0];
@@ -279,8 +518,6 @@ void tetrahedron_J_Jinv(const rtype * v0,
     J[6] = v1[2] - v0[2];
     J[7] = v2[2] - v0[2];
     J[8] = v3[2] - v0[2];
-
-    invert_matrix<3>(J, J_inv);
 }
 
 /**
