@@ -518,9 +518,8 @@ void TENO::compute_reconstruction_matrices() {
             
             // Compute the reconstruction matrix for the target cell
             std::vector<rtype> A(stencil_size * n_dof);
-            std::vector<rtype> Q(stencil_size * stencil_size);
             std::vector<rtype> R(stencil_size * n_dof);
-            std::vector<rtype> R1(n_dof * n_dof);
+            std::vector<rtype> Y(n_dof * n_dof);
             std::vector<rtype> A_pinv(n_dof * stencil_size);
 
             // Integrate the basis functions over each cell in the stencil
@@ -558,8 +557,7 @@ void TENO::compute_reconstruction_matrices() {
                 // Get all the properly transformed quadrature points
                 std::vector<rtype> quad_points(quadrature.h_points.extent(0) * N_DIM);
                 for (u_int16_t i_quad = 0; i_quad < quadrature.h_points.extent(0); ++i_quad) {
-                    // Get the quadrature point and transform it to global coordinates
-                    // using the neighbor cell's transformation matrix
+                    // Get the quadrature point
                     std::vector<rtype> x(N_DIM);
                     FOR_I_DIM x[i] = quadrature.h_points(i_quad, i);
                     
@@ -586,7 +584,7 @@ void TENO::compute_reconstruction_matrices() {
                                                              quad_points[i_quad * N_DIM + 0],
                                                              quad_points[i_quad * N_DIM + 1]);
 
-                        // Add the weighted basis value the integral
+                        // Add the weighted basis value to the integral
                         A[ind] += quadrature.h_weights(i_quad) * basis_value;
                     }
                     A[ind] *= area_trans;
@@ -608,18 +606,18 @@ void TENO::compute_reconstruction_matrices() {
             // Compute the Moore-Penrose pseudoinverse of the reconstruction matrix
 
             // Compute the QR decomposition of A
-            // qr_householder(A.data(), Q.data(), R.data(), stencil_size, n_dof);
+            QR_householder_noQ(A.data(), R.data(), stencil_size, n_dof);
 
             // Now we need to solve the system R^T R A^+ = A^T
             // First, we use forward substitution to solve R^T Y = A^T
-            // forward_substitution(R.data(), A.data(), Y.data(),
-            //                      stencil_size, n_dof, stencil_size,
-            //                      true, true);
+            forward_substitution(R.data(), A.data(), Y.data(),
+                                 stencil_size, n_dof, stencil_size,
+                                 true, true);
 
             // Next, we use back substitution to solve R A^+ = Y
-            // back_substitution(R.data(), Y.data(), A_pinv.data(),
-            //                   stencil_size, n_dof, stencil_size,
-            //                   false, false);
+            back_substitution(R.data(), Y.data(), A_pinv.data(),
+                              stencil_size, n_dof, stencil_size,
+                              false, false);
         }
     }
 }

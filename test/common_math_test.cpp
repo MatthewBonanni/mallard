@@ -211,6 +211,21 @@ TEST(CommonMathTest, GEMM2) {
     }
 }
 
+TEST(CommonMathTest, GEMM2InPlace) {
+    std::vector<rtype> A = {1.0, 2.0,
+                            3.0, 4.0};
+    std::vector<rtype> B = {5.0, 6.0,
+                            7.0, 8.0};
+
+    std::vector<rtype> expected_B = {19.0, 22.0,
+                                     43.0, 50.0};
+    gemm(A.data(), B.data(), B.data(), 2, 2, 2, 2, false, false);
+
+    for (u_int32_t i = 0; i < 4; ++i) {
+        EXPECT_RTYPE_EQ(expected_B[i], B[i]);
+    }
+}
+
 TEST(CommonMathTest, GEMM234) {
     std::vector<rtype> A = {1.0, 2.0, 3.0,
                             4.0, 5.0, 6.0};
@@ -331,21 +346,38 @@ TEST(CommonMathTest, GEMM234TransposeAB) {
     }
 }
 
-TEST(CommonMathTest, QRHouseholder) {
-    std::vector<rtype> A = {1.0, 2.0,
-                            3.0, 4.0};
-    std::vector<rtype> Q(4);
-    std::vector<rtype> R(4);
+TEST(CommonMathTest, QRHouseholder3x3) {
+    std::vector<rtype> A = {12.0, -51.0,   4.0,
+                             6.0, 167.0, -68.0,
+                            -4.0,  24.0, -41.0};
+    std::vector<rtype> R(9);
 
-    std::vector<rtype> expected_Q = {0.31622776601683794, 0.9486832980505138,
-                                     0.9486832980505138, -0.31622776601683794};
-    std::vector<rtype> expected_R = {3.1622776601683795, 4.427188724235731,
-                                     0.0, 0.6324555320336759};
-    qr_householder(A.data(), Q.data(), R.data(), 2, 2);
+    std::vector<rtype> expected_R = {-14.0,  -21.0, 14.0,
+                                       0.0, -175.0, 70.0,
+                                       0.0,    0.0, 35.0};
+    QR_householder_noQ(A.data(), R.data(), 3, 3);
 
     rtype tol = 1e-6;
-    for (u_int32_t i = 0; i < 4; ++i) {
-        EXPECT_NEAR(expected_Q[i], Q[i], tol);
+    for (u_int32_t i = 0; i < 9; ++i) {
+        EXPECT_NEAR(expected_R[i], R[i], tol);
+    }
+}
+
+TEST(CommonMathTest, QRHouseholder3x4) {
+    std::vector<rtype> A = { 1.0,  1.0,  1.0,
+                             1.0,  1.0,  0.0,
+                             1.0,  0.0, -1.0,
+                             1.0,  0.0,  4.0};
+    std::vector<rtype> R(12);
+
+    std::vector<rtype> expected_R = {-2.0, -1.0, -2.0,
+                                      0.0, -1.0,  1.0,
+                                      0.0,  0.0,  3.6055512755,
+                                      0.0,  0.0,  0.0};
+    QR_householder_noQ(A.data(), R.data(), 4, 3);
+
+    rtype tol = 1e-6;
+    for (u_int32_t i = 0; i < 12; ++i) {
         EXPECT_NEAR(expected_R[i], R[i], tol);
     }
 }

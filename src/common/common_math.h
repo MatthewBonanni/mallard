@@ -247,7 +247,15 @@ void gemm(const rtype * A,
           const u_int16_t q,
           const bool tA,
           const bool tB) {
-    // Validate dimensions
+    // Handle in-place multiplication
+    rtype * C_out;
+    if (C == A || C == B) {
+        C_out = new rtype[m*q];
+    } else {
+        C_out = C;
+    }
+
+    // Handle different transpositions
     if (!tA && !tB) {
         if (n != p) {
             Kokkos::abort("Invalid matrix dimensions.");
@@ -258,7 +266,7 @@ void gemm(const rtype * A,
                 for (u_int16_t k = 0; k < n; k++) {
                     sum += A[i*n + k] * B[k*q + j];
                 }
-                C[i*q + j] = sum;
+                C_out[i*q + j] = sum;
             }
         }
     } else if (tA && !tB) {
@@ -271,7 +279,7 @@ void gemm(const rtype * A,
                 for (u_int16_t k = 0; k < m; k++) {
                     sum += A[k*n + i] * B[k*q + j];
                 }
-                C[i*q + j] = sum;
+                C_out[i*q + j] = sum;
             }
         }
     } else if (!tA && tB) {
@@ -284,7 +292,7 @@ void gemm(const rtype * A,
                 for (u_int16_t k = 0; k < n; k++) {
                     sum += A[i*n + k] * B[j*q + k];
                 }
-                C[i*p + j] = sum;
+                C_out[i*p + j] = sum;
             }
         }
     } else {
@@ -297,83 +305,89 @@ void gemm(const rtype * A,
                 for (u_int16_t k = 0; k < m; k++) {
                     sum += A[k*n + i] * B[j*q + k];
                 }
-                C[i*p + j] = sum;
+                C_out[i*p + j] = sum;
             }
         }
+    }
+
+    // Copy result back to C if necessary
+    if (C == A || C == B) {
+        for (u_int16_t i = 0; i < m*q; i++) {
+            C[i] = C_out[i];
+        }
+        delete[] C_out;
     }
 }
 
 /**
- * @brief Compute the QR decomposition of a matrix.
+ * @brief Compute the R part of the QR decomposition of a matrix.
  * 
  * @param A Matrix.
- * @param Q Orthogonal matrix.
  * @param R Upper triangular matrix.
  * @param m Number of rows.
  * @param n Number of columns.
  */
 KOKKOS_INLINE_FUNCTION
-void qr_householder(const rtype * A,
-                    rtype * Q,
-                    rtype * R,
-                    const u_int16_t m,
-                    const u_int16_t n) {
-    // Initialize Q to identity
-    for (u_int16_t i = 0; i < m; i++) {
-        for (u_int16_t j = 0; j < n; j++) {
-            Q[i*n + j] = (i == j) ? 1.0 : 0.0;
-        }
-    }
-    
-    // Copy A into R
+void QR_householder_noQ(const rtype * A,
+                        rtype * R,
+                        const u_int16_t m,
+                        const u_int16_t n) {
+    // Copy A into R (m×n)
     for (u_int16_t i = 0; i < m; i++) {
         for (u_int16_t j = 0; j < n; j++) {
             R[i*n + j] = A[i*n + j];
         }
     }
 
+    // Iterate over columns of A
     rtype v[m];
+    rtype Q_j[m*m];
     for (u_int16_t j = 0; j < n; j++) {
-        // Compute norm
-        rtype norm = 0.0;
+        // Compute the norm of the first column of the submatrix
+        // The submatrix is taken from R = Q_j-1 ... Q_2 Q_1 A
+        // starting at the j-th column
+        rtype norm_x = 0.0;
         for (u_int16_t i = j; i < m; i++) {
-            norm += R[i*n + j] * R[i*n + j];
+            norm_x += R[i*n + j] * R[i*n + j];
         }
-        norm = Kokkos::sqrt(norm);
-        if (norm < 1e-15) {
-            continue;  // Skip if column is already zeroed
-        }
+        norm_x = Kokkos::sqrt(norm_x);
 
         // Compute Householder vector
-        rtype sign = (R[j*n + j] >= 0.0) ? 1.0 : -1.0;
-        rtype u1 = R[j*n + j] + sign * norm;
-        rtype tau = -sign * u1 / norm;
-        v[0] = 1.0;
-        for (u_int16_t k = 1; k < m - j; k++) {
-            v[k] = R[(j+k)*n + j] / u1;
+        rtype sign = (R[j*n + j] >= 0.0) ? 1.0 : -1.0;        
+        rtype alpha = -sign * norm_x;
+        rtype norm_u = 0.0;
+        for (u_int16_t k = 0; k < m - j; k++) {
+            v[k] = R[(j+k)*n + j];
+            if (k == 0) {
+                v[k] -= alpha;
+            }
+            norm_u += v[k] * v[k];
         }
-        
-        // Update R
-        for (u_int16_t k = j; k < n; k++) {
-            rtype dot = 0.0;
-            for (u_int16_t i = j; i < m; i++) {
-                dot += v[i-j] * R[i*n + k];
-            }
-            for (u_int16_t i = j; i < m; i++) {
-                R[i*n + k] -= tau * v[i-j] * dot;
-            }
+        norm_u = Kokkos::sqrt(norm_u);
+        for (u_int16_t k = 0; k < m - j; k++) {
+            v[k] /= norm_u;
         }
-        
-        // Update Q
-        for (u_int16_t k = 0; k < m; k++) {
-            rtype dot = 0.0;
-            for (u_int16_t i = j; i < m; i++) {
-                dot += v[i-j] * Q[k*m + i];
-            }
-            for (u_int16_t i = j; i < m; i++) {
-                Q[k*m + i] -= tau * v[i-j] * dot;
+
+        // Compute the Q_j matrix
+        // Q_j = I - 2 v v^T
+        for (u_int16_t i = 0; i < m; i++) {
+            for (u_int16_t k = 0; k < m; k++) {
+                Q_j[i*m + k] = (i == k) ? 1.0 : 0.0;
             }
         }
+        for (u_int16_t i = j; i < m; i++) {
+            for (u_int16_t k = j; k < m; k++) {
+                Q_j[i*m + k] -= 2.0 * v[i-j] * v[k-j];
+            }
+        }
+
+        // NOTE: Q can be found via
+        // Q = Q_1^T Q_2^T ... Q_n^T
+
+        // Update R by multiplying
+        // R = Q_n ... Q_2 Q_1 A
+        // R is already initialized to A above, so simply multiply
+        gemm(Q_j, R, R, m, m, m, n, false, false);
     }
 }
 
