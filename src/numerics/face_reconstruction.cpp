@@ -492,6 +492,10 @@ void TENO::compute_stencils() {
 }
 
 void TENO::compute_reconstruction_matrices() {
+    std::vector<u_int32_t> v_weights_of_cell;
+    std::vector<rtype> v_reconstruction_matrices;
+
+    v_weights_of_cell.push_back(0);
     for (u_int32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
         if (mesh->n_nodes_of_cell(i_cell) != 3) {
             throw std::runtime_error("TENO has only been implemented for triangular cells.");
@@ -516,11 +520,17 @@ void TENO::compute_reconstruction_matrices() {
             u_int16_t stencil_size = h_stencils_of_cell(stencil_offset + i_stencil + 1) -
                                      h_stencils_of_cell(stencil_offset + i_stencil    );
             
+            // Handle the case where the stencil is empty
+            if (stencil_size == 0) {
+                v_weights_of_cell.push_back(v_reconstruction_matrices.size());
+                continue;
+            }
+            
             // Compute the reconstruction matrix for the target cell
+            std::vector<rtype> area_trans(stencil_size);
             std::vector<rtype> A(stencil_size * n_dof);
             std::vector<rtype> R(stencil_size * n_dof);
-            std::vector<rtype> Y(n_dof * n_dof);
-            std::vector<rtype> A_pinv(n_dof * stencil_size);
+            std::vector<rtype> Y(n_dof * stencil_size);
 
             // Integrate the basis functions over each cell in the stencil
             for (u_int8_t i_neighbor = 0; i_neighbor < stencil_size; ++i_neighbor) {
@@ -552,7 +562,7 @@ void TENO::compute_reconstruction_matrices() {
                 gemv<N_DIM>(J_inv.data(), v1_trans.data(), v1_trans.data());
                 gemv<N_DIM>(J_inv.data(), v2_trans.data(), v2_trans.data());
 
-                rtype area_trans = triangle_area<2>(v0_trans.data(), v1_trans.data(), v2_trans.data());
+                area_trans[i_neighbor] = triangle_area<2>(v0_trans.data(), v1_trans.data(), v2_trans.data());
 
                 // Get all the properly transformed quadrature points
                 std::vector<rtype> quad_points(quadrature.h_points.extent(0) * N_DIM);
@@ -587,39 +597,137 @@ void TENO::compute_reconstruction_matrices() {
                         // Add the weighted basis value to the integral
                         A[ind] += quadrature.h_weights(i_quad) * basis_value;
                     }
-                    A[ind] *= area_trans;
+                    A[ind] *= area_trans[i_neighbor];
                 }
             }
 
             // Subtract the integral of the basis function over the target cell
-            for (u_int16_t i_dof = 0; i_dof < n_dof; ++i_dof) {
-                size_t ind_target = i_dof;
-
-                // Start at the last neighbor, because the first neighbor is the target cell
-                // (i_neighbor needs to be signed so it can go negative and terminate)
-                for (int8_t i_neighbor = stencil_size-1; i_neighbor >= 0; --i_neighbor) {
-                    size_t ind = i_neighbor * n_dof + i_dof;
-                    A[ind] -= A[ind_target];
+            // Start at the last neighbor and work backwards so that the target cell
+            // entries are not overwritten before they are used
+            // i_neighbor is signed so that it can go negative and exit the loop
+            for (int8_t i_neighbor = stencil_size - 1; i_neighbor >= 0; --i_neighbor) {
+                for (u_int16_t i_dof = 0; i_dof < n_dof; ++i_dof) {
+                    size_t ind_target   =                      i_dof; // i_target = 0
+                    size_t ind_neighbor = i_neighbor * n_dof + i_dof;
+                    A[ind_neighbor] -= (area_trans[i_neighbor] / area_trans[0]) * A[ind_target];
                 }
             }
 
             // Compute the Moore-Penrose pseudoinverse of the reconstruction matrix
+            // NOTES:
+            // - In all cases, the first row of A is zero by definition.
+            // - In the case where all cells in the stencil have identical areas in the
+            //   target cell's local coordinates, the first column of A will also be 0, so we
+            //   need to compute the pseudoinverse of the submatrix of A that excludes the first
+            //   row and column.
 
-            // Compute the QR decomposition of A
-            QR_householder_noQ(A.data(), R.data(), stencil_size, n_dof);
+            // Check for the special case where the first column of A is zero
+            bool first_column_zero = true;
+            for (u_int16_t i_neighbor = 0; i_neighbor < stencil_size; ++i_neighbor) {
+                if (A[i_neighbor * n_dof] > 1.0e-12) {
+                    first_column_zero = false;
+                    break;
+                }
+            }
 
-            // Now we need to solve the system R^T R A^+ = A^T
-            // First, we use forward substitution to solve R^T Y = A^T
-            forward_substitution(R.data(), A.data(), Y.data(),
-                                 stencil_size, n_dof, stencil_size,
-                                 true, true);
+            if (first_column_zero) {
+                // Allocate a new B matrix to hold the submatrix of A, excluding the first row and column
+                // NOTES:
+                // - The existing R and Y matrices are fine, we just won't use their full memory allocation
+                // - In the future we can just reuse A as well by shuffling elements,
+                //   but we'll have to be careful not to overwrite in the process
+                std::vector<rtype> B((stencil_size - 1) * (n_dof - 1));
 
-            // Next, we use back substitution to solve R A^+ = Y
-            back_substitution(R.data(), Y.data(), A_pinv.data(),
-                              stencil_size, n_dof, stencil_size,
-                              false, false);
+                // Fill the B matrix with the submatrix of A that excludes the first row and column
+                for (u_int8_t i_neighbor = 1; i_neighbor < stencil_size; ++i_neighbor) {
+                    for (u_int16_t i_dof = 1; i_dof < n_dof; ++i_dof) {
+                        size_t ind_A = i_neighbor * n_dof + i_dof;
+                        size_t ind_B = (i_neighbor - 1) * (n_dof - 1) + (i_dof - 1);
+                        B[ind_B] = A[ind_A];
+                    }
+                }
+
+                // Compute the QR decomposition of B
+                QR_householder_noQ(B.data(), R.data(), stencil_size - 1, n_dof - 1);
+
+                // Now we need to solve the system R^T R B^+ = B^T
+                // First, we use forward substitution to solve R^T Y = B^T
+                // We ignore everything beyond the square part of R since it's zero
+                forward_substitution(R.data(), B.data(), Y.data(),
+                                     n_dof - 1, n_dof - 1, stencil_size - 1,
+                                     true, true);
+                
+                // Next, we use back substitution to solve R B^+ = Y
+                // Store B^+ in B since we don't need B anymore and it has the same number of elements
+                // Again, we ignore everything beyond the square part of R since it's zero
+                back_substitution(R.data(), Y.data(), B.data(),
+                                  n_dof - 1, n_dof - 1, stencil_size - 1,
+                                  false, false);
+                
+                // Finally, we fill A^+ with the submatrix B^+ and zeros for the first row and column
+                // Store A^+ in A since we don't need A anymore and it has the same number of elements
+                for (u_int8_t i_dof = 0; i_dof < n_dof; ++i_dof) {
+                    for (u_int16_t i_neighbor = 0; i_neighbor < stencil_size; ++i_neighbor) {
+                        size_t ind_A = i_dof * stencil_size + i_neighbor;
+                        size_t ind_B = (i_dof - 1) * (stencil_size - 1) + (i_neighbor - 1);
+                        if ((i_dof == 0) || (i_neighbor == 0)) {
+                            A[ind_A] = 0.0;
+                        } else {
+                            A[ind_A] = B[ind_B];
+                        }
+                    }
+                }
+            } else {
+                // Compute the QR decomposition of A
+                QR_householder_noQ(A.data(), R.data(), stencil_size, n_dof);
+
+                // Now we need to solve the system R^T R A^+ = A^T
+                // First, we use forward substitution to solve R^T Y = A^T
+                // We ignore everything beyond the square part of R since it's zero
+                forward_substitution(R.data(), A.data(), Y.data(),
+                                     n_dof, n_dof, stencil_size,
+                                     true, true);
+
+                // Next, we use back substitution to solve R A^+ = Y
+                // Store A^+ in A since we don't need A anymore and it has the same number of elements
+                // Again, we ignore everything beyond the square part of R since it's zero
+                back_substitution(R.data(), Y.data(), A.data(),
+                                  n_dof, n_dof, stencil_size,
+                                  false, false);
+            }
+
+            // At this point, A contains the Moore-Penrose pseudoinverse of the reconstruction matrix.
+            // We store it in the v_reconstruction_matrices vector and update the v_weights_of_cell vector
+            // with the proper offset for the stencil.
+            for (u_int16_t i_dof = 0; i_dof < n_dof; ++i_dof) {
+                for (u_int8_t i_neighbor = 0; i_neighbor < stencil_size; ++i_neighbor) {
+                    v_reconstruction_matrices.push_back(A[i_dof * stencil_size + i_neighbor]);
+                }
+            }
+            v_weights_of_cell.push_back(v_reconstruction_matrices.size());
         }
     }
+    v_weights_of_cell.pop_back();
+
+    // Allocate device arrays
+    weights_of_cell = Kokkos::View<u_int32_t *>("weights_of_cell", v_weights_of_cell.size());
+    reconstruction_matrices = Kokkos::View<rtype *>("reconstruction_matrices", v_reconstruction_matrices.size());
+
+    // Set up host mirrors
+    h_weights_of_cell = Kokkos::create_mirror_view(weights_of_cell);
+    h_reconstruction_matrices = Kokkos::create_mirror_view(reconstruction_matrices);
+
+    // Fill host mirrors
+    for (u_int32_t i = 0; i < v_weights_of_cell.size(); ++i) {
+        h_weights_of_cell(i) = v_weights_of_cell[i];
+    }
+    for (u_int32_t i = 0; i < v_reconstruction_matrices.size(); ++i) {
+        h_reconstruction_matrices(i) = v_reconstruction_matrices[i];
+    }
+
+    // Copy from host to device
+    Kokkos::deep_copy(weights_of_cell, h_weights_of_cell);
+    Kokkos::deep_copy(reconstruction_matrices, h_reconstruction_matrices);
 }
 
 struct TENOFunctor {

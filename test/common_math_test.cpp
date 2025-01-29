@@ -382,6 +382,202 @@ TEST(CommonMathTest, QRHouseholder3x4) {
     }
 }
 
+TEST(CommonMathTest, ForwardSubstitution331) {
+    std::vector<rtype> L = { 0.5, 0.0, 0.0,
+                            -1.0, 2.0, 0.0,
+                             0.5, 1.0, 1.0};
+    std::vector<rtype> b = {1.0,
+                            2.0,
+                            3.0};
+    std::vector<rtype> x(3);
+
+    std::vector<rtype> expected_x = {2.0,
+                                     2.0,
+                                     0.0};
+    forward_substitution(L.data(), b.data(), x.data(), 3, 3, 1, false, false);
+
+    rtype tol = 1e-6;
+    for (u_int32_t i = 0; i < 3; ++i) {
+        EXPECT_NEAR(expected_x[i], x[i], tol);
+    }
+}
+
+TEST(CommonMathTest, ForwardSubstitution332) {
+    std::vector<rtype> L = { 0.5, 0.0, 0.0,
+                            -1.0, 2.0, 0.0,
+                             0.5, 1.0, 1.0};
+    std::vector<rtype> B = {1.0, 4.0,
+                            2.0, 5.0,
+                            3.0, 6.0};
+    std::vector<rtype> X(6);
+
+    std::vector<rtype> expected_X = {2.0,  8.0,
+                                     2.0,  6.5,
+                                     0.0, -4.5};
+    forward_substitution(L.data(), B.data(), X.data(), 3, 3, 2, false, false);
+
+    rtype tol = 1e-6;
+    for (u_int32_t i = 0; i < 6; ++i) {
+        EXPECT_NEAR(expected_X[i], X[i], tol);
+    }
+}
+
+TEST(CommonMathTest, ForwardSubstitution332TransposeL) {
+    std::vector<rtype> L = {0.5, -1.0, 0.5,
+                            0.0,  2.0, 1.0,
+                            0.0,  0.0, 1.0};
+    std::vector<rtype> B = {1.0, 4.0,
+                            2.0, 5.0,
+                            3.0, 6.0};
+    std::vector<rtype> X(6);
+
+    std::vector<rtype> expected_X = {2.0,  8.0,
+                                     2.0,  6.5,
+                                     0.0, -4.5};
+    forward_substitution(L.data(), B.data(), X.data(), 3, 3, 2, true, false);
+
+    rtype tol = 1e-6;
+    for (u_int32_t i = 0; i < 6; ++i) {
+        EXPECT_NEAR(expected_X[i], X[i], tol);
+    }
+}
+
+TEST(CommonMathTest, ForwardSubstitution332TransposeB) {
+    std::vector<rtype> L = { 0.5, 0.0, 0.0,
+                            -1.0, 2.0, 0.0,
+                             0.5, 1.0, 1.0};
+    std::vector<rtype> B = {1.0, 2.0, 3.0,
+                            4.0, 5.0, 6.0};
+    std::vector<rtype> X(6);
+
+    std::vector<rtype> expected_X = {2.0,  8.0,
+                                     2.0,  6.5,
+                                     0.0, -4.5};
+    forward_substitution(L.data(), B.data(), X.data(), 3, 3, 2, false, true);
+
+    rtype tol = 1e-6;
+    for (u_int32_t i = 0; i < 6; ++i) {
+        EXPECT_NEAR(expected_X[i], X[i], tol);
+    }
+}
+
+TEST(CommonMathTest, ForwardSubstitution332TransposeLB) {
+    std::vector<rtype> L = {0.5, -1.0, 0.5,
+                            0.0,  2.0, 1.0,
+                            0.0,  0.0, 1.0};
+    std::vector<rtype> B = {1.0, 2.0, 3.0,
+                            4.0, 5.0, 6.0};
+    std::vector<rtype> X(6);
+
+    std::vector<rtype> expected_X = {2.0,  8.0,
+                                     2.0,  6.5,
+                                     0.0, -4.5};
+    forward_substitution(L.data(), B.data(), X.data(), 3, 3, 2, true, true);
+
+    rtype tol = 1e-6;
+    for (u_int32_t i = 0; i < 6; ++i) {
+        EXPECT_NEAR(expected_X[i], X[i], tol);
+    }
+}
+
+TEST(CommonMathTest, BackSubstitution331) {
+    std::vector<rtype> U = {1.0, 1.0,  0.5,
+                            0.0, 2.0, -1.0,
+                            0.0, 0.0,  0.5};
+    std::vector<rtype> b = {3.0,
+                            2.0,
+                            1.0};
+    std::vector<rtype> x(3);
+
+    std::vector<rtype> expected_x = {0.0,
+                                     2.0,
+                                     2.0};
+    back_substitution(U.data(), b.data(), x.data(), 3, 3, 1, false, false);
+
+    rtype tol = 1e-6;
+    for (u_int32_t i = 0; i < 3; ++i) {
+        EXPECT_NEAR(expected_x[i], x[i], tol);
+    }
+}
+
+TEST(CommonMathTest, BackSubstitution332) {
+    std::vector<rtype> U = {1.0, 1.0,  0.5,
+                            0.0, 2.0, -1.0,
+                            0.0, 0.0,  0.5};
+    std::vector<rtype> B = {3.0, 6.0,
+                            2.0, 5.0,
+                            1.0, 4.0};
+    std::vector<rtype> X(6);
+
+    std::vector<rtype> expected_X = {0.0, -4.5,
+                                     2.0,  6.5,
+                                     2.0,  8.0};
+    back_substitution(U.data(), B.data(), X.data(), 3, 3, 2, false, false);
+
+    rtype tol = 1e-6;
+    for (u_int32_t i = 0; i < 6; ++i) {
+        EXPECT_NEAR(expected_X[i], X[i], tol);
+    }
+}
+
+TEST(CommonMathTest, BackSubstitution332TransposeU) {
+    std::vector<rtype> U = {1.0,  0.0, 0.0,
+                            1.0,  2.0, 0.0,
+                            0.5, -1.0, 0.5};
+    std::vector<rtype> B = {3.0, 6.0,
+                            2.0, 5.0,
+                            1.0, 4.0};
+    std::vector<rtype> X(6);
+
+    std::vector<rtype> expected_X = {0.0, -4.5,
+                                     2.0,  6.5,
+                                     2.0,  8.0};
+    back_substitution(U.data(), B.data(), X.data(), 3, 3, 2, true, false);
+
+    rtype tol = 1e-6;
+    for (u_int32_t i = 0; i < 6; ++i) {
+        EXPECT_NEAR(expected_X[i], X[i], tol);
+    }
+}
+
+TEST(CommonMathTest, BackSubstitution332TransposeB) {
+    std::vector<rtype> U = {1.0, 1.0,  0.5,
+                            0.0, 2.0, -1.0,
+                            0.0, 0.0,  0.5};
+    std::vector<rtype> B = {3.0, 2.0, 1.0,
+                            6.0, 5.0, 4.0};
+    std::vector<rtype> X(6);
+
+    std::vector<rtype> expected_X = {0.0, -4.5,
+                                     2.0,  6.5,
+                                     2.0,  8.0};
+    back_substitution(U.data(), B.data(), X.data(), 3, 3, 2, false, true);
+
+    rtype tol = 1e-6;
+    for (u_int32_t i = 0; i < 6; ++i) {
+        EXPECT_NEAR(expected_X[i], X[i], tol);
+    }
+}
+
+TEST(CommonMathTest, BackSubstitution332TransposeUB) {
+    std::vector<rtype> U = {1.0,  0.0, 0.0,
+                            1.0,  2.0, 0.0,
+                            0.5, -1.0, 0.5};
+    std::vector<rtype> B = {3.0, 2.0, 1.0,
+                            6.0, 5.0, 4.0};
+    std::vector<rtype> X(6);
+
+    std::vector<rtype> expected_X = {0.0, -4.5,
+                                     2.0,  6.5,
+                                     2.0,  8.0};
+    back_substitution(U.data(), B.data(), X.data(), 3, 3, 2, true, true);
+
+    rtype tol = 1e-6;
+    for (u_int32_t i = 0; i < 6; ++i) {
+        EXPECT_NEAR(expected_X[i], X[i], tol);
+    }
+}
+
 TEST(CommonMathTest, TriangleArea2) {
     std::vector<rtype> v0 = {0.0, 0.0};
     std::vector<rtype> v1 = {1.0, 0.0};

@@ -351,6 +351,9 @@ void QR_householder_noQ(const rtype * A,
             norm_x += R[i*n + j] * R[i*n + j];
         }
         norm_x = Kokkos::sqrt(norm_x);
+        if (norm_x < 1.0e-15) {
+            continue;
+        }
 
         // Compute Householder vector
         rtype sign = (R[j*n + j] >= 0.0) ? 1.0 : -1.0;        
@@ -417,10 +420,11 @@ void forward_substitution(const rtype * L,
             rtype sum = 0.0;
             for (u_int16_t k = 0; k < i; k++) {
                 u_int16_t idx_L = tL ? k*m + i : i*n + k;
-                sum += L[idx_L] * X[j*p + k];
+                sum += L[idx_L] * X[k*p + j];
             }
             u_int16_t idx_B = tB ? j*n + i : i*p + j;
-            X[j*p + i] = (B[idx_B] - sum) / L[i*m + i];
+            u_int16_t idx_L = tL ? i*m + i : i*n + i;
+            X[i*p + j] = (B[idx_B] - sum) / L[idx_L];
         }
     }
 }
@@ -449,12 +453,14 @@ void back_substitution(const rtype * U,
     for (int16_t i = m - 1; i >= 0; i--) {
         for (u_int16_t j = 0; j < p; j++) {
             rtype sum = 0.0;
-            for (u_int16_t k = i + 1; k < p; k++) {
+            u_int16_t end = tU ? n : m;
+            for (u_int16_t k = i + 1; k < end; k++) {
                 u_int16_t idx_U = tU ? k*m + i : i*n + k;
-                sum += U[idx_U] * X[j*p + k];
+                sum += U[idx_U] * X[k*p + j];
             }
             u_int16_t idx_B = tB ? j*n + i : i*p + j;
-            X[j*p + i] = (B[idx_B] - sum) / U[i*m + i];
+            u_int16_t idx_U = tU ? i*m + i : i*n + i;
+            X[i*p + j] = (B[idx_B] - sum) / U[idx_U];
         }
     }
 }

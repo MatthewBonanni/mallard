@@ -201,7 +201,8 @@ class TENO : public FaceReconstruction {
         Kokkos::View<u_int32_t *>::HostMirror h_offsets_stencils_of_cell;
         // ^ vector of offsets into stencils_of_cell, to get the group of stencils for the target
         // cell. The difference between two entries is the number of stencils
-        // for the target cell
+        // for the target cell. This can be used to index into stencils_of_cell as well as
+        // weights_of_cell.
         Kokkos::View<u_int32_t *> stencils_of_cell;
         Kokkos::View<u_int32_t *>::HostMirror h_stencils_of_cell;
         // ^ vector of offsets into stencils, to get a particular stencil from the group.
@@ -217,7 +218,7 @@ class TENO : public FaceReconstruction {
         // of degrees of freedom. This vector can be indexed by offsets_stencils_of_cell.
         Kokkos::View<rtype *> reconstruction_matrices;
         Kokkos::View<rtype *>::HostMirror h_reconstruction_matrices;
-        // ^ vector of reconstruction matrices for each cell in the stencil. Matrices are stored in
+        // ^ vector of reconstruction matrices for each stencil. Matrices are stored in
         // row-major order.
 };
 
