@@ -209,77 +209,73 @@ void TENO::calc_polynomial_indices() {
     Kokkos::deep_copy(poly_indices, h_poly_indices);
 }
 
-std::vector<u_int32_t> TENO::compute_stencil_of_cell_centered(u_int32_t i_cell) {
-    // Naive Cell Based (NCB) algorithm (Tsoutsanis 2023)
-    bool done = false;
-    std::vector<std::vector<u_int32_t>> neighbor_rings;
-    neighbor_rings.push_back({i_cell});
-    u_int16_t stencil_size = 1;
-    while (!done) {
-        // Get the next ring of neighbors
-        std::vector<u_int32_t> next_ring;
-        for (auto i_neighbor_cell : neighbor_rings.back()) {
-            std::vector<u_int32_t> neighbors;
-            mesh->h_neighbors_of_cell(i_neighbor_cell, 1, neighbors);
-            for (auto neighbor : neighbors) {
-                // Check if this neighbor is already in a previous ring or the next ring
-                bool in_old_ring = false;
-                for (auto ring : neighbor_rings) {
-                    if (std::find(ring.begin(), ring.end(), neighbor) != ring.end()) {
-                        in_old_ring = true;
-                        break;
-                    }
-                }
-                bool in_next_ring = (std::find(next_ring.begin(),
-                                               next_ring.end(),
-                                               neighbor) != next_ring.end());
-                if (!in_old_ring && !in_next_ring) {
-                    next_ring.push_back(neighbor);
+void TENO::get_next_ring(std::vector<std::vector<u_int32_t>> & neighbor_rings,
+                         u_int32_t i_target_cell) {
+    // Get the next ring of neighbors
+    std::vector<u_int32_t> next_ring;
+    for (auto i_neighbor_cell : neighbor_rings.back()) {
+        std::vector<u_int32_t> neighbors;
+        mesh->h_neighbors_of_cell(i_neighbor_cell, 1, neighbors);
+        for (auto neighbor : neighbors) {
+            // Check if this neighbor is already in a previous ring or
+            // the ring we are currently building
+            bool in_old_ring = false;
+            for (auto ring : neighbor_rings) {
+                if (std::find(ring.begin(), ring.end(), neighbor) != ring.end()) {
+                    in_old_ring = true;
+                    break;
                 }
             }
-        }
-
-        // Check if adding the next ring would exceed the maximum size
-        u_int16_t next_size = stencil_size + next_ring.size();
-        if (next_size < max_cells_per_stencil) {
-            // Add the ring and continue
-            neighbor_rings.push_back(next_ring);
-            stencil_size = next_size;
-        } else if (next_size == max_cells_per_stencil) {
-            // Add the ring and stop
-            neighbor_rings.push_back(next_ring);
-            stencil_size = next_size;
-            done = true;
-        } else {
-            // Adding the ring would exceed the maximum size,
-            // so we sort the ring by distance to the target cell,
-            // and add the closest neighbors until we reach the maximum size
-            std::vector<std::pair<u_int32_t, rtype>> distances;
-            for (auto i_neighbor_cell : next_ring) {
-                rtype distance = 0.0;
-                FOR_I_DIM {
-                    distance += std::pow(mesh->cell_coords(i_neighbor_cell, i) -
-                                         mesh->cell_coords(i_cell,          i), 2);
-                }
-                distances.push_back(std::make_pair(i_cell, distance));
+            bool in_next_ring = (std::find(next_ring.begin(),
+                                           next_ring.end(),
+                                           neighbor) != next_ring.end());
+            if (!in_old_ring && !in_next_ring) {
+                next_ring.push_back(neighbor);
             }
-            std::sort(distances.begin(),
-                      distances.end(),
-                      [](auto & left, auto & right) {
-                          return left.second < right.second;
-                      });
-            // Drop the farthest neighbors
-            next_ring.resize(max_cells_per_stencil - stencil_size);
-            neighbor_rings.push_back(next_ring);
-            done = true;
         }
     }
 
-    // The stencil is obtained by flattening the neighbor_rings vector
+    // Sort the ring by distance to the target cell
+    std::vector<std::pair<u_int32_t, rtype>> distances;
+    for (auto i_neighbor_cell : next_ring) {
+        rtype distance = 0.0;
+        FOR_I_DIM {
+            distance += std::pow(mesh->cell_coords(i_neighbor_cell, i) -
+                                 mesh->cell_coords(i_target_cell,   i), 2);
+        }
+        distances.push_back(std::make_pair(i_neighbor_cell, distance));
+    }
+    std::sort(distances.begin(),
+              distances.end(),
+              [](auto & left, auto & right) {
+                  return left.second < right.second;
+              });
+    next_ring.clear();
+    for (auto pair : distances) {
+        next_ring.push_back(pair.first);
+    }
+
+    // Add the ring to the neighbor_rings vector
+    neighbor_rings.push_back(next_ring);
+}
+
+std::vector<u_int32_t> TENO::compute_stencil_of_cell_centered(u_int32_t i_cell) {
+    // Naive Cell Based (NCB) algorithm (Tsoutsanis 2023)
     std::vector<u_int32_t> stencil;
-    for (auto ring : neighbor_rings) {
-        for (auto i_cell : ring) {
-            stencil.push_back(i_cell);
+    std::vector<std::vector<u_int32_t>> neighbor_rings;
+    stencil.push_back(i_cell);
+    neighbor_rings.push_back(stencil);
+    u_int16_t stencil_size = 1;
+    while (stencil.size() < max_cells_per_stencil) {
+        // Get the next ring of neighbors
+        get_next_ring(neighbor_rings, i_cell);
+
+        // Add the neighbors to the stencil as needed
+        for (auto i_neighbor_cell : neighbor_rings.back()) {
+            if (stencil.size() == max_cells_per_stencil) {
+                break;
+            }
+            stencil.push_back(i_neighbor_cell);
         }
     }
     return stencil;
@@ -327,52 +323,12 @@ std::vector<std::vector<u_int32_t>> TENO::compute_stencils_of_cell_directional(u
     neighbor_rings.push_back({i_cell});
     while (!all_done) {
         // Get the next ring of neighbors
-        std::vector<u_int32_t> next_ring;
-        for (auto i_neighbor_cell : neighbor_rings.back()) {
-            std::vector<u_int32_t> neighbors;
-            mesh->h_neighbors_of_cell(i_neighbor_cell, 1, neighbors);
-            for (auto neighbor : neighbors) {
-                // Check if this neighbor is already in a previous ring or the next ring
-                bool in_old_ring = false;
-                for (auto ring : neighbor_rings) {
-                    if (std::find(ring.begin(), ring.end(), neighbor) != ring.end()) {
-                        in_old_ring = true;
-                        break;
-                    }
-                }
-                bool in_next_ring = (std::find(next_ring.begin(),
-                                               next_ring.end(),
-                                               neighbor) != next_ring.end());
-                if (!in_old_ring && !in_next_ring) {
-                    next_ring.push_back(neighbor);
-                }
-            }
-            // Sort the ring by distance to the target cell
-            std::vector<std::pair<u_int32_t, rtype>> distances;
-            for (auto i_neighbor_cell : next_ring) {
-                rtype distance = 0.0;
-                FOR_I_DIM {
-                    distance += std::pow(mesh->cell_coords(i_neighbor_cell, i) -
-                                         mesh->cell_coords(i_cell,          i), 2);
-                }
-                distances.push_back(std::make_pair(i_neighbor_cell, distance));
-            }
-            std::sort(distances.begin(),
-                      distances.end(),
-                      [](auto & left, auto & right) {
-                          return left.second < right.second;
-                      });
-            next_ring.clear();
-            for (auto distance : distances) {
-                next_ring.push_back(distance.first);
-            }
-        }
-        neighbor_rings.push_back(next_ring);
+        get_next_ring(neighbor_rings, i_cell);
 
         // Add the neighbors to the stencils as needed
         std::fill(stencil_grew.begin(), stencil_grew.end(), false);
         for (u_int8_t i_stencil = 0; i_stencil < n_stencils; ++i_stencil) {
-            for (auto i_neighbor_cell : next_ring) {
+            for (auto i_neighbor_cell : neighbor_rings.back()) {
                 // Check if the stencil is full
                 if (stencils[i_stencil].size() == max_cells_per_stencil) {
                     break;
@@ -412,10 +368,31 @@ std::vector<std::vector<u_int32_t>> TENO::compute_stencils_of_cell_directional(u
         }
     }
 
-    // Empty the stencils for boundary faces
+    // If a stencil is not full, it must be near a boundary. In this case, we loosen
+    // the requirement of directionality and build the stencil outwards until it is full
     for (u_int8_t i_stencil = 0; i_stencil < n_stencils; ++i_stencil) {
+        // If this is a boundary face, it simply has no stencil. Empty it
+        // to be sure and continue to the next stencil
         if (mesh->cells_of_face(mesh->h_face_of_cell(i_cell, i_stencil), 1) == -1) {
             stencils[i_stencil].clear();
+            continue;
+        }
+
+        // Otherwise, it is near a boundary, but not a boundary face itself.
+        // We will build the stencil outwards until it is full
+        neighbor_rings.clear();
+        neighbor_rings.push_back(stencils[i_stencil]);
+        while (stencils[i_stencil].size() < max_cells_per_stencil) {
+            // Get the next ring of neighbors
+            get_next_ring(neighbor_rings, i_cell);
+
+            // Add the neighbors to the stencil as needed
+            for (auto i_neighbor_cell : neighbor_rings.back()) {
+                if (stencils[i_stencil].size() == max_cells_per_stencil) {
+                    break;
+                }
+                stencils[i_stencil].push_back(i_neighbor_cell);
+            }
         }
     }
 
@@ -439,18 +416,16 @@ void TENO::compute_stencils_of_cell(u_int32_t i_cell,
     }
 
     // Update the global arrays
-    v_offsets_stencils.push_back(v_stencils.size());
     for (auto stencil : stencils) {
-        if (stencil.size() < n_dof) {
-            std::cout << "HERE" << std::endl;
+        if ((stencil.size() < max_cells_per_stencil) && (stencil.size() > 0)) {
+            throw std::runtime_error("Stencil is not full.");
         }
         for (auto i_cell : stencil) {
             v_stencils.push_back(i_cell);
         }
         v_offsets_stencils.push_back(v_stencils.size());
     }
-    v_offsets_stencils.pop_back();
-    v_offsets_stencil_groups.push_back(v_offsets_stencils.size());
+    v_offsets_stencil_groups.push_back(v_offsets_stencils.size()-1);
 }
 
 void TENO::compute_stencils() {
@@ -458,6 +433,7 @@ void TENO::compute_stencils() {
     std::vector<u_int32_t> v_offsets_stencils;
     std::vector<u_int32_t> v_stencils;
     
+    v_offsets_stencils.push_back(0);
     v_offsets_stencil_groups.push_back(0);
     for (u_int32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
         compute_stencils_of_cell(i_cell,
@@ -465,7 +441,6 @@ void TENO::compute_stencils() {
                                  v_offsets_stencils,
                                  v_stencils);
     }
-    v_offsets_stencil_groups.pop_back();
 
     // Allocate device arrays
     offsets_stencil_groups = Kokkos::View<u_int32_t *>("offsets_stencil_groups", v_offsets_stencil_groups.size());
@@ -716,7 +691,6 @@ void TENO::compute_reconstruction_matrices() {
             }
         }
     }
-    v_offsets_reconstruction_matrices.pop_back();
 
     // Allocate device arrays
     offsets_reconstruction_matrices = Kokkos::View<u_int32_t *>("offsets_reconstruction_matrices", v_offsets_reconstruction_matrices.size());

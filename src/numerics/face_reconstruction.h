@@ -156,6 +156,7 @@ class TENO : public FaceReconstruction {
     private:
         void calc_max_stencil_size();
         void calc_polynomial_indices();
+        void get_next_ring(std::vector<std::vector<u_int32_t>> & neighbor_rings, u_int32_t i_target_cell);
         std::vector<u_int32_t> compute_stencil_of_cell_centered(u_int32_t i_cell);
         std::vector<std::vector<u_int32_t>> compute_stencils_of_cell_directional(u_int32_t i_cell);
         void compute_stencils_of_cell(u_int32_t i_cell,
