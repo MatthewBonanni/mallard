@@ -159,8 +159,8 @@ class TENO : public FaceReconstruction {
         std::vector<u_int32_t> compute_stencil_of_cell_centered(u_int32_t i_cell);
         std::vector<std::vector<u_int32_t>> compute_stencils_of_cell_directional(u_int32_t i_cell);
         void compute_stencils_of_cell(u_int32_t i_cell,
-                                      std::vector<u_int32_t> & v_offsets_stencils_of_cell,
-                                      std::vector<u_int32_t> & v_stencils_of_cell,
+                                      std::vector<u_int32_t> & v_offsets_stencil_groups,
+                                      std::vector<u_int32_t> & v_offsets_stencils,
                                       std::vector<u_int32_t> & v_stencils);
         void compute_stencils();
         void compute_reconstruction_matrices();
@@ -193,33 +193,59 @@ class TENO : public FaceReconstruction {
         u_int16_t n_dof;
         Kokkos::View<u_int32_t *[N_DIM]> poly_indices;
         Kokkos::View<u_int32_t *[N_DIM]>::HostMirror h_poly_indices;
-        // ^ contains the polynomial powers for each dimension for each degree of freedom,
-        // precompute for easy lookup
+        // ^ Contains the polynomial powers for each dimension for each degree of freedom,
+        //   precomputed for easy lookup
         rtype max_stencil_size_factor;
         u_int16_t max_cells_per_stencil;
-        Kokkos::View<u_int32_t *> offsets_stencils_of_cell;
-        Kokkos::View<u_int32_t *>::HostMirror h_offsets_stencils_of_cell;
-        // ^ vector of offsets into stencils_of_cell, to get the group of stencils for the target
-        // cell. The difference between two entries is the number of stencils
-        // for the target cell. This can be used to index into stencils_of_cell as well as
-        // weights_of_cell.
-        Kokkos::View<u_int32_t *> stencils_of_cell;
-        Kokkos::View<u_int32_t *>::HostMirror h_stencils_of_cell;
-        // ^ vector of offsets into stencils, to get a particular stencil from the group.
-        // The difference between two offsets is the number of cells in a given stencil
+        Kokkos::View<u_int32_t *> offsets_stencil_groups;
+        Kokkos::View<u_int32_t *>::HostMirror h_offsets_stencil_groups;
+        // ^ Used to get the IDs of the stencils associated with a given cell.
+        // - The difference between two entries is the number of stencils for the target cell.
+        // - The last entry is the total number of stencils.
+        // - Indexed by:
+        //   - i_cell
+        // - Indexes the following:
+        //   - offsets_stencils
+        //   - offsets_reconstruction_matrices
+        Kokkos::View<u_int32_t *> offsets_stencils;
+        Kokkos::View<u_int32_t *>::HostMirror h_offsets_stencils;
+        // ^ Used to get a particular stencil from the stencils array.
+        // - The difference between two entries is the number of neighbor cells in a given stencil.
+        // - The last entry is the total number of neighbor cells in all stencils.
+        // - Indexed by:
+        //   - offsets_stencil_groups
+        // - Indexes the following:
+        //   - stencils
+        //   - transformed_areas
         Kokkos::View<u_int32_t *> stencils;
         Kokkos::View<u_int32_t *>::HostMirror h_stencils;
-        // ^ vector of cell indices that are part of each stencil.
-        Kokkos::View<u_int32_t *> weights_of_cell;
-        Kokkos::View<u_int32_t *>::HostMirror h_weights_of_cell;
-        // ^ vector of offsets into reconstruction_matrices, to get the group of matrices for a
-        // stencil. The difference between two entries is the number of matrix elements for the
-        // stencil, which is MxK, where M is the number of cells in the stencil and K is the number
-        // of degrees of freedom. This vector can be indexed by offsets_stencils_of_cell.
+        // ^ Contains the IDs of the neighbor cells in a given stencil.
+        // - Indexed by:
+        //   - offsets_stencils
+        Kokkos::View<u_int32_t *> offsets_reconstruction_matrices;
+        Kokkos::View<u_int32_t *>::HostMirror h_offsets_reconstruction_matrices;
+        // ^ Used to get the a particular reconstruction matrix from the reconstruction_matrices array.
+        // - Each reconstruction matrix is associated with one stencil.
+        // - The difference between two entries is the number of matrix elements for the stencil,
+        //   which is MxK, where M is the number of cells in the stencil and K is the number of degrees
+        //   of freedom.
+        // - Indexed by:
+        //   - offsets_stencil_groups
+        // - Indexes the following:
+        //   - reconstruction_matrices
         Kokkos::View<rtype *> reconstruction_matrices;
         Kokkos::View<rtype *>::HostMirror h_reconstruction_matrices;
-        // ^ vector of reconstruction matrices for each stencil. Matrices are stored in
-        // row-major order.
+        // ^ Contains the reconstruction matrices (stored as Moore-Penrose pseudoinverses) for each stencil.
+        // - The matrices are stored in row-major order.
+        // - Each matrix is MxK, where M is the number of cells in the stencil and K is the number of degrees
+        //   of freedom.
+        // - Indexed by:
+        //   - offsets_reconstruction_matrices
+        Kokkos::View<rtype *> transformed_areas;
+        Kokkos::View<rtype *>::HostMirror h_transformed_areas;
+        // ^ Contains the areas of the transformed triangles for each neighbor cell in each stencil.
+        // - Indexed by:
+        //   - offsets_stencils
 };
 
 #endif // FACE_RECONSTRUCTION_H

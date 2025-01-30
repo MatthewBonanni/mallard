@@ -423,8 +423,8 @@ std::vector<std::vector<u_int32_t>> TENO::compute_stencils_of_cell_directional(u
 }
 
 void TENO::compute_stencils_of_cell(u_int32_t i_cell,
-                                    std::vector<u_int32_t> & v_offsets_stencils_of_cell,
-                                    std::vector<u_int32_t> & v_stencils_of_cell,
+                                    std::vector<u_int32_t> & v_offsets_stencil_groups,
+                                    std::vector<u_int32_t> & v_offsets_stencils,
                                     std::vector<u_int32_t> & v_stencils) {
     std::vector<std::vector<u_int32_t>> stencils;
 
@@ -439,63 +439,67 @@ void TENO::compute_stencils_of_cell(u_int32_t i_cell,
     }
 
     // Update the global arrays
-    v_stencils_of_cell.push_back(v_stencils.size());
+    v_offsets_stencils.push_back(v_stencils.size());
     for (auto stencil : stencils) {
+        if (stencil.size() < n_dof) {
+            std::cout << "HERE" << std::endl;
+        }
         for (auto i_cell : stencil) {
             v_stencils.push_back(i_cell);
         }
-        v_stencils_of_cell.push_back(v_stencils.size());
+        v_offsets_stencils.push_back(v_stencils.size());
     }
-    v_stencils_of_cell.pop_back();
-    v_offsets_stencils_of_cell.push_back(v_stencils_of_cell.size());
+    v_offsets_stencils.pop_back();
+    v_offsets_stencil_groups.push_back(v_offsets_stencils.size());
 }
 
 void TENO::compute_stencils() {
-    std::vector<u_int32_t> v_offsets_stencils_of_cell;
-    std::vector<u_int32_t> v_stencils_of_cell;
+    std::vector<u_int32_t> v_offsets_stencil_groups;
+    std::vector<u_int32_t> v_offsets_stencils;
     std::vector<u_int32_t> v_stencils;
     
-    v_offsets_stencils_of_cell.push_back(0);
+    v_offsets_stencil_groups.push_back(0);
     for (u_int32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
         compute_stencils_of_cell(i_cell,
-                                 v_offsets_stencils_of_cell,
-                                 v_stencils_of_cell,
+                                 v_offsets_stencil_groups,
+                                 v_offsets_stencils,
                                  v_stencils);
     }
-    v_offsets_stencils_of_cell.pop_back();
+    v_offsets_stencil_groups.pop_back();
 
     // Allocate device arrays
-    offsets_stencils_of_cell = Kokkos::View<u_int32_t *>("offsets_stencils_of_cell", v_offsets_stencils_of_cell.size());
-    stencils_of_cell = Kokkos::View<u_int32_t *>("stencils_of_cell", v_stencils.size());
+    offsets_stencil_groups = Kokkos::View<u_int32_t *>("offsets_stencil_groups", v_offsets_stencil_groups.size());
+    offsets_stencils = Kokkos::View<u_int32_t *>("offsets_stencils", v_stencils.size());
     stencils = Kokkos::View<u_int32_t *>("stencils", v_stencils.size());
 
     // Set up host mirrors
-    h_offsets_stencils_of_cell = Kokkos::create_mirror_view(offsets_stencils_of_cell);
-    h_stencils_of_cell = Kokkos::create_mirror_view(stencils_of_cell);
+    h_offsets_stencil_groups = Kokkos::create_mirror_view(offsets_stencil_groups);
+    h_offsets_stencils = Kokkos::create_mirror_view(offsets_stencils);
     h_stencils = Kokkos::create_mirror_view(stencils);
 
     // Fill host mirrors
-    for (u_int32_t i = 0; i < v_offsets_stencils_of_cell.size(); ++i) {
-        h_offsets_stencils_of_cell(i) = v_offsets_stencils_of_cell[i];
+    for (u_int32_t i = 0; i < v_offsets_stencil_groups.size(); ++i) {
+        h_offsets_stencil_groups(i) = v_offsets_stencil_groups[i];
     }
-    for (u_int32_t i = 0; i < v_stencils_of_cell.size(); ++i) {
-        h_stencils_of_cell(i) = v_stencils_of_cell[i];
+    for (u_int32_t i = 0; i < v_offsets_stencils.size(); ++i) {
+        h_offsets_stencils(i) = v_offsets_stencils[i];
     }
     for (u_int32_t i = 0; i < v_stencils.size(); ++i) {
         h_stencils(i) = v_stencils[i];
     }
 
     // Copy from host to device
-    Kokkos::deep_copy(offsets_stencils_of_cell, h_offsets_stencils_of_cell);
-    Kokkos::deep_copy(stencils_of_cell, h_stencils_of_cell);
+    Kokkos::deep_copy(offsets_stencil_groups, h_offsets_stencil_groups);
+    Kokkos::deep_copy(offsets_stencils, h_offsets_stencils);
     Kokkos::deep_copy(stencils, h_stencils);
 }
 
 void TENO::compute_reconstruction_matrices() {
-    std::vector<u_int32_t> v_weights_of_cell;
+    std::vector<u_int32_t> v_offsets_reconstruction_matrices;
     std::vector<rtype> v_reconstruction_matrices;
+    std::vector<rtype> v_transformed_areas;
 
-    v_weights_of_cell.push_back(0);
+    v_offsets_reconstruction_matrices.push_back(0);
     for (u_int32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
         if (mesh->n_nodes_of_cell(i_cell) != 3) {
             throw std::runtime_error("TENO has only been implemented for triangular cells.");
@@ -513,16 +517,16 @@ void TENO::compute_reconstruction_matrices() {
         triangle_J(w0.data(), w1.data(), w2.data(), J.data());
         invert_matrix<N_DIM>(J.data(), J_inv.data());
 
-        u_int8_t stencil_offset = h_offsets_stencils_of_cell(i_cell);
-        u_int8_t n_stencils = h_offsets_stencils_of_cell(i_cell + 1) -
-                              h_offsets_stencils_of_cell(i_cell    );
-        for (u_int8_t i_stencil = 0; i_stencil < n_stencils; ++i_stencil) {
-            u_int16_t stencil_size = h_stencils_of_cell(stencil_offset + i_stencil + 1) -
-                                     h_stencils_of_cell(stencil_offset + i_stencil    );
+        u_int32_t i_first_stencil = h_offsets_stencil_groups(i_cell);
+        u_int8_t group_size = h_offsets_stencil_groups(i_cell + 1) - i_first_stencil;
+        for (u_int8_t i_stencil_loc = 0; i_stencil_loc < group_size; ++i_stencil_loc) {
+            u_int32_t i_stencil = i_first_stencil + i_stencil_loc;
+            u_int32_t stencil_offset = h_offsets_stencils(i_stencil);
+            u_int32_t stencil_size = h_offsets_stencils(i_stencil + 1) - stencil_offset;
             
             // Handle the case where the stencil is empty
             if (stencil_size == 0) {
-                v_weights_of_cell.push_back(v_reconstruction_matrices.size());
+                v_offsets_reconstruction_matrices.push_back(v_reconstruction_matrices.size());
                 continue;
             }
             
@@ -533,16 +537,16 @@ void TENO::compute_reconstruction_matrices() {
             std::vector<rtype> Y(n_dof * stencil_size);
 
             // Integrate the basis functions over each cell in the stencil
-            for (u_int8_t i_neighbor = 0; i_neighbor < stencil_size; ++i_neighbor) {
+            for (u_int8_t i_neighbor_loc = 0; i_neighbor_loc < stencil_size; ++i_neighbor_loc) {
                 // Get the neighbor cell's vertex coordinates
-                u_int32_t i_neighbor_cell = h_stencils(h_stencils_of_cell(stencil_offset + i_stencil) + i_neighbor);
+                u_int32_t i_neighbor = h_stencils(stencil_offset + i_neighbor_loc);
                 std::vector<rtype> v0(N_DIM);
                 std::vector<rtype> v1(N_DIM);
                 std::vector<rtype> v2(N_DIM);
 
-                FOR_I_DIM v0[i] = mesh->h_node_coords(mesh->h_node_of_cell(i_neighbor_cell, 0), i);
-                FOR_I_DIM v1[i] = mesh->h_node_coords(mesh->h_node_of_cell(i_neighbor_cell, 1), i);
-                FOR_I_DIM v2[i] = mesh->h_node_coords(mesh->h_node_of_cell(i_neighbor_cell, 2), i);
+                FOR_I_DIM v0[i] = mesh->h_node_coords(mesh->h_node_of_cell(i_neighbor, 0), i);
+                FOR_I_DIM v1[i] = mesh->h_node_coords(mesh->h_node_of_cell(i_neighbor, 1), i);
+                FOR_I_DIM v2[i] = mesh->h_node_coords(mesh->h_node_of_cell(i_neighbor, 2), i);
 
                 // Compute the neighbor cell's transformation matrix, to be used for mapping
                 // the quadrature points to physical space
@@ -562,7 +566,7 @@ void TENO::compute_reconstruction_matrices() {
                 gemv<N_DIM>(J_inv.data(), v1_trans.data(), v1_trans.data());
                 gemv<N_DIM>(J_inv.data(), v2_trans.data(), v2_trans.data());
 
-                area_trans[i_neighbor] = triangle_area<2>(v0_trans.data(), v1_trans.data(), v2_trans.data());
+                area_trans[i_neighbor_loc] = triangle_area<2>(v0_trans.data(), v1_trans.data(), v2_trans.data());
 
                 // Get all the properly transformed quadrature points
                 std::vector<rtype> quad_points(quadrature.h_points.extent(0) * N_DIM);
@@ -585,7 +589,7 @@ void TENO::compute_reconstruction_matrices() {
                 }
 
                 for (u_int16_t i_dof = 0; i_dof < n_dof; ++i_dof) {
-                    size_t ind = i_neighbor * n_dof + i_dof;
+                    size_t ind = i_neighbor_loc * n_dof + i_dof;
                     A[ind] = 0.0;
                     for (u_int16_t i_quad = 0; i_quad < quadrature.h_points.extent(0); ++i_quad) {
                         // Evaluate the basis function at the transformed point
@@ -597,7 +601,7 @@ void TENO::compute_reconstruction_matrices() {
                         // Add the weighted basis value to the integral
                         A[ind] += quadrature.h_weights(i_quad) * basis_value;
                     }
-                    A[ind] *= area_trans[i_neighbor];
+                    A[ind] *= area_trans[i_neighbor_loc];
                 }
             }
 
@@ -605,11 +609,11 @@ void TENO::compute_reconstruction_matrices() {
             // Start at the last neighbor and work backwards so that the target cell
             // entries are not overwritten before they are used
             // i_neighbor is signed so that it can go negative and exit the loop
-            for (int8_t i_neighbor = stencil_size - 1; i_neighbor >= 0; --i_neighbor) {
+            for (int8_t i_neighbor_loc = stencil_size - 1; i_neighbor_loc >= 0; --i_neighbor_loc) {
                 for (u_int16_t i_dof = 0; i_dof < n_dof; ++i_dof) {
-                    size_t ind_target   =                      i_dof; // i_target = 0
-                    size_t ind_neighbor = i_neighbor * n_dof + i_dof;
-                    A[ind_neighbor] -= (area_trans[i_neighbor] / area_trans[0]) * A[ind_target];
+                    size_t ind_target   =                          i_dof; // i_target = 0
+                    size_t ind_neighbor = i_neighbor_loc * n_dof + i_dof;
+                    A[ind_neighbor] -= (area_trans[i_neighbor_loc] / area_trans[0]) * A[ind_target];
                 }
             }
 
@@ -623,8 +627,8 @@ void TENO::compute_reconstruction_matrices() {
 
             // Check for the special case where the first column of A is zero
             bool first_column_zero = true;
-            for (u_int16_t i_neighbor = 0; i_neighbor < stencil_size; ++i_neighbor) {
-                if (A[i_neighbor * n_dof] > 1.0e-12) {
+            for (u_int16_t i_neighbor_loc = 0; i_neighbor_loc < stencil_size; ++i_neighbor_loc) {
+                if (A[i_neighbor_loc * n_dof] > 1.0e-12) {
                     first_column_zero = false;
                     break;
                 }
@@ -639,10 +643,10 @@ void TENO::compute_reconstruction_matrices() {
                 std::vector<rtype> B((stencil_size - 1) * (n_dof - 1));
 
                 // Fill the B matrix with the submatrix of A that excludes the first row and column
-                for (u_int8_t i_neighbor = 1; i_neighbor < stencil_size; ++i_neighbor) {
+                for (u_int8_t i_neighbor_loc = 1; i_neighbor_loc < stencil_size; ++i_neighbor_loc) {
                     for (u_int16_t i_dof = 1; i_dof < n_dof; ++i_dof) {
-                        size_t ind_A = i_neighbor * n_dof + i_dof;
-                        size_t ind_B = (i_neighbor - 1) * (n_dof - 1) + (i_dof - 1);
+                        size_t ind_A = i_neighbor_loc * n_dof + i_dof;
+                        size_t ind_B = (i_neighbor_loc - 1) * (n_dof - 1) + (i_dof - 1);
                         B[ind_B] = A[ind_A];
                     }
                 }
@@ -667,10 +671,10 @@ void TENO::compute_reconstruction_matrices() {
                 // Finally, we fill A^+ with the submatrix B^+ and zeros for the first row and column
                 // Store A^+ in A since we don't need A anymore and it has the same number of elements
                 for (u_int8_t i_dof = 0; i_dof < n_dof; ++i_dof) {
-                    for (u_int16_t i_neighbor = 0; i_neighbor < stencil_size; ++i_neighbor) {
-                        size_t ind_A = i_dof * stencil_size + i_neighbor;
-                        size_t ind_B = (i_dof - 1) * (stencil_size - 1) + (i_neighbor - 1);
-                        if ((i_dof == 0) || (i_neighbor == 0)) {
+                    for (u_int16_t i_neighbor_loc = 0; i_neighbor_loc < stencil_size; ++i_neighbor_loc) {
+                        size_t ind_A = i_dof * stencil_size + i_neighbor_loc;
+                        size_t ind_B = (i_dof - 1) * (stencil_size - 1) + (i_neighbor_loc - 1);
+                        if ((i_dof == 0) || (i_neighbor_loc == 0)) {
                             A[ind_A] = 0.0;
                         } else {
                             A[ind_A] = B[ind_B];
@@ -697,37 +701,48 @@ void TENO::compute_reconstruction_matrices() {
             }
 
             // At this point, A contains the Moore-Penrose pseudoinverse of the reconstruction matrix.
-            // We store it in the v_reconstruction_matrices vector and update the v_weights_of_cell vector
+            // We store it in the v_reconstruction_matrices vector and update the v_offsets_reconstruction_matrices vector
             // with the proper offset for the stencil.
             for (u_int16_t i_dof = 0; i_dof < n_dof; ++i_dof) {
-                for (u_int8_t i_neighbor = 0; i_neighbor < stencil_size; ++i_neighbor) {
-                    v_reconstruction_matrices.push_back(A[i_dof * stencil_size + i_neighbor]);
+                for (u_int8_t i_neighbor_loc = 0; i_neighbor_loc < stencil_size; ++i_neighbor_loc) {
+                    v_reconstruction_matrices.push_back(A[i_dof * stencil_size + i_neighbor_loc]);
                 }
             }
-            v_weights_of_cell.push_back(v_reconstruction_matrices.size());
+            v_offsets_reconstruction_matrices.push_back(v_reconstruction_matrices.size());
+
+            // Store the transformed areas for the stencil
+            for (u_int8_t i_neighbor_loc = 0; i_neighbor_loc < stencil_size; ++i_neighbor_loc) {
+                v_transformed_areas.push_back(area_trans[i_neighbor_loc]);
+            }
         }
     }
-    v_weights_of_cell.pop_back();
+    v_offsets_reconstruction_matrices.pop_back();
 
     // Allocate device arrays
-    weights_of_cell = Kokkos::View<u_int32_t *>("weights_of_cell", v_weights_of_cell.size());
+    offsets_reconstruction_matrices = Kokkos::View<u_int32_t *>("offsets_reconstruction_matrices", v_offsets_reconstruction_matrices.size());
     reconstruction_matrices = Kokkos::View<rtype *>("reconstruction_matrices", v_reconstruction_matrices.size());
+    transformed_areas = Kokkos::View<rtype *>("transformed_areas", v_transformed_areas.size());
 
     // Set up host mirrors
-    h_weights_of_cell = Kokkos::create_mirror_view(weights_of_cell);
+    h_offsets_reconstruction_matrices = Kokkos::create_mirror_view(offsets_reconstruction_matrices);
     h_reconstruction_matrices = Kokkos::create_mirror_view(reconstruction_matrices);
+    h_transformed_areas = Kokkos::create_mirror_view(transformed_areas);
 
     // Fill host mirrors
-    for (u_int32_t i = 0; i < v_weights_of_cell.size(); ++i) {
-        h_weights_of_cell(i) = v_weights_of_cell[i];
+    for (u_int32_t i = 0; i < v_offsets_reconstruction_matrices.size(); ++i) {
+        h_offsets_reconstruction_matrices(i) = v_offsets_reconstruction_matrices[i];
     }
     for (u_int32_t i = 0; i < v_reconstruction_matrices.size(); ++i) {
         h_reconstruction_matrices(i) = v_reconstruction_matrices[i];
     }
+    for (u_int32_t i = 0; i < v_transformed_areas.size(); ++i) {
+        h_transformed_areas(i) = v_transformed_areas[i];
+    }
 
     // Copy from host to device
-    Kokkos::deep_copy(weights_of_cell, h_weights_of_cell);
+    Kokkos::deep_copy(offsets_reconstruction_matrices, h_offsets_reconstruction_matrices);
     Kokkos::deep_copy(reconstruction_matrices, h_reconstruction_matrices);
+    Kokkos::deep_copy(transformed_areas, h_transformed_areas);
 }
 
 struct TENOFunctor {
