@@ -18,12 +18,12 @@
 #include "common.h"
 
 enum class FaceZoneType {
-    BOUNDARY = 1,
-    INTERIOR = 2
+    BOUNDARY,
+    INTERIOR
 };
 
 enum class CellZoneType {
-    FLUID = 1
+    FLUID
 };
 
 class Zone {

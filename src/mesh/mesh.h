@@ -21,10 +21,10 @@
 #include "zone.h"
 
 enum class MeshType {
-    FILE = 1,
-    CARTESIAN = 2,
-    CARTESIAN_TRI = 3,
-    WEDGE = 4
+    FILE,
+    CARTESIAN,
+    CARTESIAN_TRI,
+    WEDGE
 };
 
 static const std::unordered_map<std::string, MeshType> MESH_TYPES = {
@@ -42,8 +42,8 @@ static const std::unordered_map<MeshType, std::string> MESH_NAMES = {
 };
 
 enum class CellType {
-    TRIANGLE = 1,
-    QUAD = 2
+    TRIANGLE,
+    QUAD
 };
 
 static const std::unordered_map<std::string, CellType> CELL_TYPES = {

@@ -17,18 +17,18 @@
 #include "common.h"
 
 enum class QuadratureType {
-    TriangleCentroid,
-    TriangleDunavant,
+    TRIANGLE_CENTROID,
+    TRIANGLE_DUNAVANT,
 };
 
 static const std::unordered_map<std::string, QuadratureType> QUADRATURE_TYPES = {
-    {"triangle_centroid", QuadratureType::TriangleCentroid},
-    {"triangle_dunavant", QuadratureType::TriangleDunavant},
+    {"triangle_centroid", QuadratureType::TRIANGLE_CENTROID},
+    {"triangle_dunavant", QuadratureType::TRIANGLE_DUNAVANT},
 };
 
 static const std::unordered_map<QuadratureType, std::string> QUADRATURE_NAMES = {
-    {QuadratureType::TriangleCentroid, "triangle_centroid"},
-    {QuadratureType::TriangleDunavant, "triangle_dunavant"},
+    {QuadratureType::TRIANGLE_CENTROID, "triangle_centroid"},
+    {QuadratureType::TRIANGLE_DUNAVANT, "triangle_dunavant"},
 };
 
 class Quadrature {

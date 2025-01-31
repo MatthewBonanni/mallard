@@ -19,19 +19,19 @@
 #include "common_math.h"
 
 enum class RiemannSolverType {
-    Rusanov,
+    RUSANOV,
     HLL,
     HLLC,
 };
 
 static const std::unordered_map<std::string, RiemannSolverType> RIEMANN_SOLVER_TYPES = {
-    {"Rusanov", RiemannSolverType::Rusanov},
+    {"Rusanov", RiemannSolverType::RUSANOV},
     {"HLL", RiemannSolverType::HLL},
     {"HLLC", RiemannSolverType::HLLC}
 };
 
 static const std::unordered_map<RiemannSolverType, std::string> RIEMANN_SOLVER_NAMES = {
-    {RiemannSolverType::Rusanov, "Rusanov"},
+    {RiemannSolverType::RUSANOV, "Rusanov"},
     {RiemannSolverType::HLL, "HLL"},
     {RiemannSolverType::HLLC, "HLLC"}
 };

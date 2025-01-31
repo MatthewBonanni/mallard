@@ -23,17 +23,17 @@
 #include "quadrature.h"
 
 enum class FaceReconstructionType {
-    FirstOrder,
+    FIRST_ORDER,
     TENO,
 };
 
 static const std::unordered_map<std::string, FaceReconstructionType> FACE_RECONSTRUCTION_TYPES = {
-    {"FO", FaceReconstructionType::FirstOrder},
+    {"FO", FaceReconstructionType::FIRST_ORDER},
     {"TENO", FaceReconstructionType::TENO},
 };
 
 static const std::unordered_map<FaceReconstructionType, std::string> FACE_RECONSTRUCTION_NAMES = {
-    {FaceReconstructionType::FirstOrder, "FO"},
+    {FaceReconstructionType::FIRST_ORDER, "FO"},
     {FaceReconstructionType::TENO, "TENO"},
 };
 

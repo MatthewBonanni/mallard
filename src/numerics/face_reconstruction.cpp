@@ -47,7 +47,7 @@ void FaceReconstruction::set_mesh(std::shared_ptr<Mesh> mesh) {
 }
 
 FirstOrder::FirstOrder() {
-    type = FaceReconstructionType::FirstOrder;
+    type = FaceReconstructionType::FIRST_ORDER;
 }
 
 FirstOrder::~FirstOrder() {
@@ -130,10 +130,10 @@ void TENO::init(const toml::value & input) {
     }
 
     switch (quadrature_type) {
-        case QuadratureType::TriangleCentroid:
+        case QuadratureType::TRIANGLE_CENTROID:
             quadrature = TriangleCentroid();
             break;
-        case QuadratureType::TriangleDunavant:
+        case QuadratureType::TRIANGLE_DUNAVANT:
             quadrature = TriangleDunavant(quadrature_order);
             break;
         default:
@@ -722,7 +722,6 @@ void TENO::compute_reconstruction_matrices() {
 void TENO::compute_oscillation_indicators() {
     // TODO: OSCILLATION MATRIX IS THE SAME FOR ALL CELLS OF THE SAME
     //       TYPE, SINCE IT IS COMPUTED FOR THE REFERENCE CELL
-    // TODO: BUILD A TABLE FIRST SO THAT WE'RE NOT REPEATING WORK
     std::vector<u_int32_t> v_offsets_oscillation_indicators;
     std::vector<rtype> v_oscillation_indicators;
 

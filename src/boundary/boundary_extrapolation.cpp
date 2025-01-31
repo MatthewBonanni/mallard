@@ -71,7 +71,7 @@ void BoundaryExtrapolation::apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_
                                   Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
     if (physics->get_type() == PhysicsType::EULER) {
         switch (riemann_solver->get_type()) {
-            case RiemannSolverType::Rusanov:
+            case RiemannSolverType::RUSANOV:
                 launch_flux_functor<Euler, Rusanov>(face_solution, rhs);
                 break;
             case RiemannSolverType::HLL:

@@ -139,7 +139,7 @@ void Solver::init_numerics() {
         time_integrator_type = it_time->second;
     }
 
-    if (face_reconstruction_type == FaceReconstructionType::FirstOrder) {
+    if (face_reconstruction_type == FaceReconstructionType::FIRST_ORDER) {
         face_reconstruction = std::make_unique<FirstOrder>();
     } else if (face_reconstruction_type == FaceReconstructionType::TENO) {
         face_reconstruction = std::make_unique<TENO>();
@@ -148,7 +148,7 @@ void Solver::init_numerics() {
         throw std::runtime_error("Unknown face reconstruction type: " + face_reconstruction_str + ".");
     }
 
-    if (riemann_solver_type == RiemannSolverType::Rusanov) {
+    if (riemann_solver_type == RiemannSolverType::RUSANOV) {
         riemann_solver = std::make_unique<Rusanov>();
     } else if (riemann_solver_type == RiemannSolverType::HLL) {
         riemann_solver = std::make_unique<HLL>();

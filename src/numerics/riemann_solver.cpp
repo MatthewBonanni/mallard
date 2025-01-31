@@ -37,7 +37,7 @@ void RiemannSolver::print() const {
 }
 
 Rusanov::Rusanov() {
-    type = RiemannSolverType::Rusanov;
+    type = RiemannSolverType::RUSANOV;
 }
 
 Rusanov::~Rusanov() {
