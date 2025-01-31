@@ -165,7 +165,7 @@ class TENO : public FaceReconstruction {
                                       std::vector<u_int32_t> & v_stencils);
         void compute_stencils();
         void compute_reconstruction_matrices();
-        void compute_oscillation_indicators();
+        void compute_oscillation_indicator();
 
         KOKKOS_INLINE_FUNCTION
         rtype basis_compute_1D(u_int8_t p, rtype x) const {
@@ -241,23 +241,11 @@ class TENO : public FaceReconstruction {
         // ^ Contains the areas of the transformed triangles for each neighbor cell in each stencil.
         // - Indexed by:
         //   - offsets_stencils
-        Kokkos::View<u_int32_t *> offsets_oscillation_indicators;
-        Kokkos::View<u_int32_t *>::HostMirror h_offsets_oscillation_indicators;
-        // ^ Used to get a particular oscillation indicator matrix from the oscillation_indicators array.
-        // - Each oscillation indicator matrix is associated with one cell.
-        // - The difference between two entries is the number of matrix elements for the cell,
-        //   which is KxK, where K is the number of degrees of freedom.
-        // - Indexed by:
-        //   - i_cell
-        // - Indexes the following:
-        //   - oscillation_indicators
-        Kokkos::View<rtype *> oscillation_indicators;
-        Kokkos::View<rtype *>::HostMirror h_oscillation_indicators;
-        // ^ Contains the oscillation indicator matrix for each cell.
-        // - The matrix is stored in row-major order.
-        // - Each matrix is KxK, where K is the number of degrees of freedom.
-        // - Indexed by:
-        //   - offsets_oscillation_indicators
+        Kokkos::View<rtype *> oscillation_indicator;
+        Kokkos::View<rtype *>::HostMirror h_oscillation_indicator;
+        // ^ Contains the oscillation indicator matrix, stored in row-major order.
+        // - The matrix is KxK, where K is the number of degrees of freedom.
+        // - Since this matrix is computed in the reference cell, it is the same for all cells of the same type.
 };
 
 #endif // FACE_RECONSTRUCTION_H

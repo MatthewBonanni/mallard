@@ -144,6 +144,7 @@ void TENO::init(const toml::value & input) {
     calc_polynomial_indices();
     compute_stencils();
     compute_reconstruction_matrices();
+    compute_oscillation_indicator();
     print();
 }
 
@@ -265,7 +266,6 @@ std::vector<u_int32_t> TENO::compute_stencil_of_cell_centered(u_int32_t i_cell) 
     std::vector<std::vector<u_int32_t>> neighbor_rings;
     stencil.push_back(i_cell);
     neighbor_rings.push_back(stencil);
-    u_int16_t stencil_size = 1;
     while (stencil.size() < max_cells_per_stencil) {
         // Get the next ring of neighbors
         get_next_ring(neighbor_rings, i_cell);
@@ -719,89 +719,57 @@ void TENO::compute_reconstruction_matrices() {
     Kokkos::deep_copy(transformed_areas, h_transformed_areas);
 }
 
-void TENO::compute_oscillation_indicators() {
-    // TODO: OSCILLATION MATRIX IS THE SAME FOR ALL CELLS OF THE SAME
-    //       TYPE, SINCE IT IS COMPUTED FOR THE REFERENCE CELL
-    std::vector<u_int32_t> v_offsets_oscillation_indicators;
-    std::vector<rtype> v_oscillation_indicators;
+void TENO::compute_oscillation_indicator() {
+    oscillation_indicator = Kokkos::View<rtype *>("oscillation_indicator", n_dof * n_dof);
+    h_oscillation_indicator = Kokkos::create_mirror_view(oscillation_indicator);
 
-    v_offsets_oscillation_indicators.push_back(0);
+    // i_dof indexes the basis function phi_i.
+    // The polynomial indices for phi_i are taken as
+    // poly_indices(i_dof, 0) and poly_indices(i_dof, 1)
+    for (u_int8_t i_dof = 0; i_dof < n_dof; i_dof++) {
 
-    // i_cell indexes the cell. Each cell has an oscillation indicator matrix.
-    for (u_int32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
+        // j_dof indexes the basis function phi_j.
+        // The polynomial indices for phi_j are taken as
+        // poly_indices(j_dof, 0) and poly_indices(j_dof, 1)
+        for (u_int8_t j_dof = 0; j_dof < n_dof; j_dof++) {
+            size_t ind = i_dof * n_dof + j_dof;
+            h_oscillation_indicator(ind) = 0.0;
 
-        // i_dof indexes the basis function phi_i.
-        // The polynomial indices for phi_i are taken as
-        // poly_indices(i_dof, 0) and poly_indices(i_dof, 1)
-        for (u_int8_t i_dof = 0; i_dof < n_dof; i_dof++) {
+            // k_dof indexes the order of the derivative to be taken.
+            // The derivative order in dimension i_dim is poly_indices(k_dof, i_dim)
+            // We skip k_dof = 0 because this represents the zeroth derivative in all dimensions,
+            // i.e. the basis function itself.
+            for (u_int8_t k_dof = 1; k_dof < n_dof; k_dof++) {
 
-            // j_dof indexes the basis function phi_j.
-            // The polynomial indices for phi_j are taken as
-            // poly_indices(j_dof, 0) and poly_indices(j_dof, 1)
-            for (u_int8_t j_dof = 0; j_dof < n_dof; j_dof++) {
-
-                // Compute this element of the oscillation indicator matrix
-                rtype OI_ij = 0.0;
-
-                // k_dof indexes the order of the derivative to be taken.
-                // The derivative order in dimension i_dim is poly_indices(k_dof, i_dim)
-                // We skip k_dof = 0 because this represents the zeroth derivative in all dimensions,
-                // i.e. the basis function itself.
-                for (u_int8_t k_dof = 1; k_dof < n_dof; k_dof++) {
-
-                    // i_quad indexes the quadrature points
-                    for (u_int8_t i_quad = 0; i_quad < quadrature.h_points.extent(0); ++i_quad) {
-                        // Evaluate the requested derivative of phi_i at the quadrature point
-                        // i_dim indexes the dimension of the derivative
-                        rtype dphi_i = 1.0;
-                        for (u_int8_t i_dim = 0; i_dim < N_DIM; ++i_dim) {
-                            rtype dphi_i_dim = basis_derivative_1D(poly_indices(k_dof, i_dim),
-                                                                   poly_indices(i_dof, i_dim),
-                                                                   quadrature.h_points(i_quad, i_dim));
-                            dphi_i *= dphi_i_dim;
-                        }
-                        // Evaluate the requested derivative of phi_j at the quadrature point
-                        // i_dim indexes the dimension of the derivative
-                        rtype dphi_j = 1.0;
-                        for (u_int8_t i_dim = 0; i_dim < N_DIM; ++i_dim) {
-                            rtype dphi_j_dim = basis_derivative_1D(poly_indices(k_dof, i_dim),
-                                                                   poly_indices(j_dof, i_dim),
-                                                                   quadrature.h_points(i_quad, i_dim));
-                            dphi_j *= dphi_j_dim;
-                        }
-                        // The integrand is the product of the two derivatives
-                        OI_ij += quadrature.h_weights(i_quad) * dphi_i * dphi_j;
+                // i_quad indexes the quadrature points
+                for (u_int8_t i_quad = 0; i_quad < quadrature.h_points.extent(0); ++i_quad) {
+                    // Evaluate the requested derivative of phi_i at the quadrature point
+                    // i_dim indexes the dimension of the derivative
+                    rtype dphi_i = 1.0;
+                    for (u_int8_t i_dim = 0; i_dim < N_DIM; ++i_dim) {
+                        rtype dphi_i_dim = basis_derivative_1D(poly_indices(k_dof, i_dim),
+                                                               poly_indices(i_dof, i_dim),
+                                                               quadrature.h_points(i_quad, i_dim));
+                        dphi_i *= dphi_i_dim;
                     }
+                    // Evaluate the requested derivative of phi_j at the quadrature point
+                    // i_dim indexes the dimension of the derivative
+                    rtype dphi_j = 1.0;
+                    for (u_int8_t i_dim = 0; i_dim < N_DIM; ++i_dim) {
+                        rtype dphi_j_dim = basis_derivative_1D(poly_indices(k_dof, i_dim),
+                                                               poly_indices(j_dof, i_dim),
+                                                               quadrature.h_points(i_quad, i_dim));
+                        dphi_j *= dphi_j_dim;
+                    }
+                    // The integrand is the product of the two derivatives
+                    h_oscillation_indicator(ind) += quadrature.h_weights(i_quad) * dphi_i * dphi_j;
                 }
-
-                // Store the matrix element in the global array.
-                // Our loop nesting order ensures that the elements are stored in row-major order.
-                v_oscillation_indicators.push_back(OI_ij);
             }
         }
-        // Update the offset array
-        v_offsets_oscillation_indicators.push_back(v_oscillation_indicators.size());
-    }
-
-    // Allocate device arrays
-    offsets_oscillation_indicators = Kokkos::View<u_int32_t *>("offsets_oscillation_indicators", v_offsets_oscillation_indicators.size());
-    oscillation_indicators = Kokkos::View<rtype *>("oscillation_indicators", v_oscillation_indicators.size());
-
-    // Set up host mirrors
-    h_offsets_oscillation_indicators = Kokkos::create_mirror_view(offsets_oscillation_indicators);
-    h_oscillation_indicators = Kokkos::create_mirror_view(oscillation_indicators);
-
-    // Fill host mirrors
-    for (u_int32_t i = 0; i < v_offsets_oscillation_indicators.size(); ++i) {
-        h_offsets_oscillation_indicators(i) = v_offsets_oscillation_indicators[i];
-    }
-    for (u_int32_t i = 0; i < v_oscillation_indicators.size(); ++i) {
-        h_oscillation_indicators(i) = v_oscillation_indicators[i];
     }
 
     // Copy from host to device
-    Kokkos::deep_copy(offsets_oscillation_indicators, h_offsets_oscillation_indicators);
-    Kokkos::deep_copy(oscillation_indicators, h_oscillation_indicators);
+    Kokkos::deep_copy(oscillation_indicator, h_oscillation_indicator);
 }
 
 struct TENOFunctor {
