@@ -168,24 +168,18 @@ class TENO : public FaceReconstruction {
         void compute_oscillation_indicators();
 
         KOKKOS_INLINE_FUNCTION
-        rtype basis_compute_1D(u_int8_t n, rtype x) const {
-            return dispatch_compute_1D(basis_type, n, x);
+        rtype basis_compute_1D(u_int8_t p, rtype x) const {
+            return dispatch_compute_1D(basis_type, p, x);
         }
 
         KOKKOS_INLINE_FUNCTION
-        rtype basis_gradient_1D(u_int8_t n, rtype x) const {
-            return dispatch_gradient_1D(basis_type, n, x);
+        rtype basis_derivative_1D(u_int8_t n, u_int8_t p, rtype x) const {
+            return dispatch_derivative_1D(basis_type, n, p, x);
         }
 
         KOKKOS_INLINE_FUNCTION
-        rtype basis_compute_2D(u_int8_t nx, u_int8_t ny, rtype x, rtype y) const {
-            return dispatch_compute_2D(basis_type, nx, ny, x, y);
-        }
-
-        KOKKOS_INLINE_FUNCTION
-        void basis_gradient_2D(u_int8_t nx, u_int8_t ny, rtype x, rtype y,
-                               rtype &grad_x, rtype &grad_y) const {
-            dispatch_gradient_2D(basis_type, nx, ny, x, y, grad_x, grad_y);
+        rtype basis_compute_2D(u_int8_t px, u_int8_t py, rtype x, rtype y) const {
+            return dispatch_compute_2D(basis_type, px, py, x, y);
         }
 
         BasisType basis_type;
@@ -225,7 +219,7 @@ class TENO : public FaceReconstruction {
         //   - offsets_stencils
         Kokkos::View<u_int32_t *> offsets_reconstruction_matrices;
         Kokkos::View<u_int32_t *>::HostMirror h_offsets_reconstruction_matrices;
-        // ^ Used to get the a particular reconstruction matrix from the reconstruction_matrices array.
+        // ^ Used to get a particular reconstruction matrix from the reconstruction_matrices array.
         // - Each reconstruction matrix is associated with one stencil.
         // - The difference between two entries is the number of matrix elements for the stencil,
         //   which is MxK, where M is the number of cells in the stencil and K is the number of degrees
@@ -247,6 +241,23 @@ class TENO : public FaceReconstruction {
         // ^ Contains the areas of the transformed triangles for each neighbor cell in each stencil.
         // - Indexed by:
         //   - offsets_stencils
+        Kokkos::View<u_int32_t *> offsets_oscillation_indicators;
+        Kokkos::View<u_int32_t *>::HostMirror h_offsets_oscillation_indicators;
+        // ^ Used to get a particular oscillation indicator matrix from the oscillation_indicators array.
+        // - Each oscillation indicator matrix is associated with one cell.
+        // - The difference between two entries is the number of matrix elements for the cell,
+        //   which is KxK, where K is the number of degrees of freedom.
+        // - Indexed by:
+        //   - i_cell
+        // - Indexes the following:
+        //   - oscillation_indicators
+        Kokkos::View<rtype *> oscillation_indicators;
+        Kokkos::View<rtype *>::HostMirror h_oscillation_indicators;
+        // ^ Contains the oscillation indicator matrix for each cell.
+        // - The matrix is stored in row-major order.
+        // - Each matrix is KxK, where K is the number of degrees of freedom.
+        // - Indexed by:
+        //   - offsets_oscillation_indicators
 };
 
 #endif // FACE_RECONSTRUCTION_H
