@@ -70,7 +70,7 @@ class Solver {
          * @param rhs Right hand side vector.
          */
         void calc_rhs(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                      Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                      Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                       Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
         
         /**
@@ -80,7 +80,7 @@ class Solver {
          * @param rhs Right hand side vector.
          */
         void pre_rhs(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                     Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                      Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
         
         /**
@@ -96,7 +96,7 @@ class Solver {
          * @param face_solution Face solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs_interior(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+        void calc_rhs_interior(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                                Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
         
         /**
@@ -104,7 +104,7 @@ class Solver {
          * @param face_solution Face solution vector.
          * @param rhs Right hand side vector.
          */
-        void calc_rhs_boundaries(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+        void calc_rhs_boundaries(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                                  Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
     protected:
         /**
@@ -225,19 +225,17 @@ class Solver {
         
         Kokkos::View<rtype *[N_CONSERVATIVE]> conservatives;
         Kokkos::View<rtype *[   N_PRIMITIVE]> primitives;
-        Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_conservatives;
-        Kokkos::View<rtype *[2][   N_PRIMITIVE]> face_primitives;
+        Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_conservatives;
 
         Kokkos::View<rtype *[N_CONSERVATIVE]>::HostMirror h_conservatives;
         Kokkos::View<rtype *[   N_PRIMITIVE]>::HostMirror h_primitives;
-        Kokkos::View<rtype *[2][N_CONSERVATIVE]>::HostMirror h_face_conservatives;
-        Kokkos::View<rtype *[2][   N_PRIMITIVE]>::HostMirror h_face_primitives;
+        Kokkos::View<rtype **[2][N_CONSERVATIVE]>::HostMirror h_face_conservatives;
     private:
         /**
          * @brief Launch the flux functor.
          */
         template <typename T_physics, typename T_riemann_solver>
-        void launch_flux_functor(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+        void launch_flux_functor(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                                  Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
 
         toml::value input;
@@ -268,7 +266,7 @@ class Solver {
         std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> solution_vec;
         std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> rhs_vec;
         std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]>,
-                           Kokkos::View<rtype *[2][N_CONSERVATIVE]>,
+                           Kokkos::View<rtype **[2][N_CONSERVATIVE]>,
                            Kokkos::View<rtype *[N_CONSERVATIVE]>)> rhs_func;
         
         // Checks

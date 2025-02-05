@@ -46,7 +46,7 @@ class BoundaryExtrapolation : public Boundary {
          * @param face_solution Face solution.
          * @param rhs Right hand side.
          */
-        void apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+        void apply(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                    Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) override;
     protected:
     private:
@@ -54,7 +54,7 @@ class BoundaryExtrapolation : public Boundary {
          * @brief Launch the flux functor.
          */
         template <typename T_physics, typename T_riemann_solver>
-        void launch_flux_functor(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+        void launch_flux_functor(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                                  Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
 
         template <typename T_physics, typename T_riemann_solver>
@@ -66,6 +66,7 @@ class BoundaryExtrapolation : public Boundary {
 
                 KOKKOS_INLINE_FUNCTION
                 void calc_lr_states_impl(const u_int32_t i_face,
+                                         const u_int8_t i_quad,
                                          rtype * conservatives_l,
                                          rtype * conservatives_r,
                                          rtype * primitives_l,

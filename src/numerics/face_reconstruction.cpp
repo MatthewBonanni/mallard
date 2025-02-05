@@ -34,20 +34,13 @@ void FaceReconstruction::print() const {
     std::cout << LOG_SEPARATOR << std::endl;
 }
 
-void FaceReconstruction::set_cell_conservatives(Kokkos::View<rtype *[N_CONSERVATIVE]> * cell_conservatives) {
-    this->cell_conservatives = cell_conservatives;
-}
-
-void FaceReconstruction::set_face_conservatives(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_conservatives) {
-    this->face_conservatives = face_conservatives;
-}
-
 void FaceReconstruction::set_mesh(std::shared_ptr<Mesh> mesh) {
     this->mesh = mesh;
 }
 
 FirstOrder::FirstOrder() {
     type = FaceReconstructionType::FIRST_ORDER;
+    quadrature_face = GaussLegendre(1);
 }
 
 FirstOrder::~FirstOrder() {
@@ -59,6 +52,10 @@ void FirstOrder::init(const toml::value & input) {
     print();
 }
 
+u_int8_t FirstOrder::n_face_quadrature_points() const {
+    return 1;
+}
+
 struct FirstOrderFunctor {
     public:
         /**
@@ -68,7 +65,7 @@ struct FirstOrderFunctor {
          * @param solution Cell solution.
          */
         FirstOrderFunctor(Kokkos::View<int32_t *[2]> cells_of_face,
-                          Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                          Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                           Kokkos::View<rtype *[N_CONSERVATIVE]> solution) :
                               cells_of_face(cells_of_face),
                               face_solution(face_solution),
@@ -84,19 +81,19 @@ struct FirstOrderFunctor {
             int32_t i_cell_r = cells_of_face(i_face, 1);
 
             FOR_I_CONSERVATIVE {
-                face_solution(i_face, 0, i) = solution(i_cell_l, i);
-                face_solution(i_face, 1, i) = solution(i_cell_r, i);
+                face_solution(i_face, 0, 0, i) = solution(i_cell_l, i);
+                face_solution(i_face, 0, 1, i) = solution(i_cell_r, i);
             }
         }
 
     private:
         Kokkos::View<int32_t *[2]> cells_of_face;
-        Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution;
+        Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
         Kokkos::View<rtype *[N_CONSERVATIVE]> solution;
 };
 
 void FirstOrder::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                                  Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) {
+                                  Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
     FirstOrderFunctor recon_functor(mesh->cells_of_face, face_solution, solution);
     Kokkos::parallel_for(mesh->n_faces, recon_functor);
 }
@@ -113,31 +110,29 @@ void TENO::init(const toml::value & input) {
     std::string basis_type_str = toml::find_or<std::string>(input, "basis_type", "monomial");
     poly_order = toml::find<u_int8_t>(input, "basis_order");
     max_stencil_size_factor = toml::find_or<rtype>(input, "max_stencil_size_factor", 2.0);
-    std::string quadrature_type_str = toml::find_or<std::string>(input, "quadrature_type", "triangle_dunavant");
-    u_int8_t quadrature_order = toml::find_or<u_int8_t>(input, "quadrature_order", 2 * poly_order);
+    std::string quadrature_type_cell_str = toml::find_or<std::string>(input, "quadrature_type_cell", "triangle_dunavant");
+    u_int8_t quadrature_order_cell = toml::find_or<u_int8_t>(input, "quadrature_order", poly_order + 1);
+    std::string quadrature_type_face_str = toml::find_or<std::string>(input, "quadrature_type_face", "gauss_legendre");
+    u_int8_t quadrature_order_face = toml::find_or<u_int8_t>(input, "quadrature_order_face", (poly_order + 1) / 2);
 
-    if (BASIS_TYPES.find(basis_type_str) == BASIS_TYPES.end()) {
-        throw std::runtime_error("Unknown basis type: " + basis_type_str + ".");
-    } else {
-        basis_type = BASIS_TYPES.at(basis_type_str);
-    }
+    basis_type = BASIS_TYPES.at(basis_type_str);
 
-    QuadratureType quadrature_type;
-    if (QUADRATURE_TYPES.find(quadrature_type_str) == QUADRATURE_TYPES.end()) {
-        throw std::runtime_error("Unknown quadrature type: " + quadrature_type_str + ".");
-    } else {
-        quadrature_type = QUADRATURE_TYPES.at(quadrature_type_str);
-    }
-
-    switch (quadrature_type) {
-        case QuadratureType::TRIANGLE_CENTROID:
-            quadrature = TriangleCentroid();
-            break;
+    switch (QUADRATURE_TYPES.at(quadrature_type_cell_str)) {
         case QuadratureType::TRIANGLE_DUNAVANT:
-            quadrature = TriangleDunavant(quadrature_order);
+            quadrature_cell = TriangleDunavant(quadrature_order_cell);
             break;
         default:
-            throw std::runtime_error("Unknown quadrature type.");
+            // Should never get here due to bounds checking in .at()
+            throw std::runtime_error("Unknown quadrature type: " + quadrature_type_cell_str);
+    }
+
+    switch (QUADRATURE_TYPES.at(quadrature_type_face_str)) {
+        case QuadratureType::GAUSS_LEGENDRE:
+            quadrature_face = GaussLegendre(quadrature_order_face);
+            break;
+        default:
+            // Should never get here due to bounds checking in .at()
+            throw std::runtime_error("Unknown quadrature type: " + quadrature_type_face_str);
     }
 
     calc_max_stencil_size();
@@ -152,11 +147,16 @@ void TENO::print() const {
     std::cout << LOG_SEPARATOR << std::endl;
     std::cout << "Face reconstruction: " << FACE_RECONSTRUCTION_NAMES.at(type) << std::endl;
     std::cout << "> Polynomial order: " << (u_int16_t)poly_order << std::endl;
-    std::cout << "> Quadrature order: " << (u_int16_t)quadrature.order << std::endl;
+    std::cout << "> Quadrature order (cell): " << (u_int16_t)quadrature_cell.order << std::endl;
+    std::cout << "> Quadrature order (face): " << (u_int16_t)quadrature_face.order << std::endl;
     std::cout << "> Maximum stencil size factor: " << max_stencil_size_factor << std::endl;
     std::cout << "> Maximum cells per stencil: " << max_cells_per_stencil << std::endl;
     std::cout << "> Number of degrees of freedom: " << n_dof << std::endl;
     std::cout << LOG_SEPARATOR << std::endl;
+}
+
+u_int8_t TENO::n_face_quadrature_points() const {
+    return quadrature_face.h_points.extent(0);
 }
 
 void TENO::calc_max_stencil_size() {
@@ -172,19 +172,19 @@ void TENO::calc_max_stencil_size() {
 }
 
 void TENO::calc_polynomial_indices() {
-    poly_indices = Kokkos::View<u_int32_t *[N_DIM]>("poly_indices", n_dof);
+    poly_indices = Kokkos::View<u_int8_t *[N_DIM]>("poly_indices", n_dof);
     h_poly_indices = Kokkos::create_mirror_view(poly_indices);
 
     // Use a lexicographic ordering to generate the polynomial indices
-    int idx = 0;
-    std::vector<int> indices(N_DIM);
-    for (int i_poly = 0; i_poly <= poly_order; i_poly++) {
+    u_int8_t idx = 0;
+    std::vector<u_int8_t> indices(N_DIM);
+    for (u_int8_t i_poly = 0; i_poly <= poly_order; i_poly++) {
         // First set of indices has i_dim set to i_poly
         std::fill(indices.begin(), indices.end(), 0);
         indices[0] = i_poly;
 
         // Write to the view
-        for (int i_dim = 0; i_dim < N_DIM; ++i_dim) {
+        for (u_int8_t i_dim = 0; i_dim < N_DIM; ++i_dim) {
             h_poly_indices(idx, i_dim) = indices[i_dim];
         }
         ++idx;
@@ -192,7 +192,7 @@ void TENO::calc_polynomial_indices() {
         // Propagate 1 from each dimension's index to the right,
         // repeating until the last dimension's index is equal to i_poly
         while (indices[N_DIM-1] < i_poly) {
-            for (int i_dim = 0; i_dim < N_DIM-1; ++i_dim) {
+            for (u_int8_t i_dim = 0; i_dim < N_DIM-1; ++i_dim) {
                 if (indices[i_dim] > 0) {
                     indices[i_dim] -= 1;
                     indices[i_dim + 1] += 1;
@@ -200,7 +200,7 @@ void TENO::calc_polynomial_indices() {
             }
 
             // Write to the view
-            for (int i_dim = 0; i_dim < N_DIM; ++i_dim) {
+            for (u_int8_t i_dim = 0; i_dim < N_DIM; ++i_dim) {
                 h_poly_indices(idx, i_dim) = indices[i_dim];
             }
             ++idx;
@@ -283,7 +283,7 @@ std::vector<u_int32_t> TENO::compute_stencil_of_cell_centered(u_int32_t i_cell) 
 
 std::vector<std::vector<u_int32_t>> TENO::compute_stencils_of_cell_directional(u_int32_t i_cell) {
     // Type 4 algorithm (Tsoutsanis 2023)
-    u_int8_t n_stencils = mesh->n_faces_of_cell(i_cell);
+    u_int8_t n_stencils = mesh->h_n_faces_of_cell(i_cell);
     std::vector<std::vector<u_int32_t>> stencils(n_stencils);
     std::vector<bool> stencil_grew(n_stencils);
     bool all_done = false;
@@ -464,6 +464,7 @@ void TENO::compute_stencils() {
     }
 
     // Copy from host to device
+    // TODO: DO ALL DEEP COPIES IN ONE FUNCTION, LIKE IN MESH
     Kokkos::deep_copy(offsets_stencil_groups, h_offsets_stencil_groups);
     Kokkos::deep_copy(offsets_stencils, h_offsets_stencils);
     Kokkos::deep_copy(stencils, h_stencils);
@@ -472,11 +473,12 @@ void TENO::compute_stencils() {
 void TENO::compute_reconstruction_matrices() {
     std::vector<u_int32_t> v_offsets_reconstruction_matrices;
     std::vector<rtype> v_reconstruction_matrices;
+    std::vector<rtype> v_integral_psi_target(n_dof);
     std::vector<rtype> v_transformed_areas;
 
     v_offsets_reconstruction_matrices.push_back(0);
     for (u_int32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
-        if (mesh->n_nodes_of_cell(i_cell) != 3) {
+        if (mesh->h_n_nodes_of_cell(i_cell) != 3) {
             throw std::runtime_error("TENO has only been implemented for triangular cells.");
         }
 
@@ -501,6 +503,10 @@ void TENO::compute_reconstruction_matrices() {
             
             // Handle the case where the stencil is empty
             if (stencil_size == 0) {
+                if (i_stencil_loc == 0) {
+                    throw std::runtime_error("Central stencil is empty for cell " + std::to_string(i_cell) + ".");
+                }
+
                 v_offsets_reconstruction_matrices.push_back(v_reconstruction_matrices.size());
                 continue;
             }
@@ -544,11 +550,11 @@ void TENO::compute_reconstruction_matrices() {
                 area_trans[i_neighbor_loc] = triangle_area<2>(v0_trans.data(), v1_trans.data(), v2_trans.data());
 
                 // Get all the properly transformed quadrature points
-                std::vector<rtype> quad_points(quadrature.h_points.extent(0) * N_DIM);
-                for (u_int16_t i_quad = 0; i_quad < quadrature.h_points.extent(0); ++i_quad) {
+                std::vector<rtype> quad_points(quadrature_cell.h_points.extent(0) * N_DIM);
+                for (u_int16_t i_quad = 0; i_quad < quadrature_cell.h_points.extent(0); ++i_quad) {
                     // Get the quadrature point
                     std::vector<rtype> x(N_DIM);
-                    FOR_I_DIM x[i] = quadrature.h_points(i_quad, i);
+                    FOR_I_DIM x[i] = quadrature_cell.h_points(i_quad, i);
                     
                     // Transform the quadrature point into global coordinates
                     // using the neighbor cell's transformation matrix
@@ -566,7 +572,7 @@ void TENO::compute_reconstruction_matrices() {
                 for (u_int16_t i_dof = 0; i_dof < n_dof; ++i_dof) {
                     size_t ind = i_neighbor_loc * n_dof + i_dof;
                     A[ind] = 0.0;
-                    for (u_int16_t i_quad = 0; i_quad < quadrature.h_points.extent(0); ++i_quad) {
+                    for (u_int16_t i_quad = 0; i_quad < quadrature_cell.h_points.extent(0); ++i_quad) {
                         // Evaluate the basis function at the transformed point
                         rtype basis_value = basis_compute_2D(poly_indices(i_dof, 0),
                                                              poly_indices(i_dof, 1),
@@ -574,21 +580,28 @@ void TENO::compute_reconstruction_matrices() {
                                                              quad_points[i_quad * N_DIM + 1]);
 
                         // Add the weighted basis value to the integral
-                        A[ind] += quadrature.h_weights(i_quad) * basis_value;
+                        A[ind] += quadrature_cell.h_weights(i_quad) * basis_value;
                     }
                     A[ind] *= area_trans[i_neighbor_loc];
                 }
             }
 
-            // Subtract the integral of the basis function over the target cell
-            // Start at the last neighbor and work backwards so that the target cell
-            // entries are not overwritten before they are used
-            // i_neighbor is signed so that it can go negative and exit the loop
-            for (int8_t i_neighbor_loc = stencil_size - 1; i_neighbor_loc >= 0; --i_neighbor_loc) {
+            // Store the integral of the basis function over the target cell
+            // Since this is computed for the reference cell, we only do this
+            // for i_cell = 0, i_stencil_loc = 0 because this is the same
+            // for all cells of the same type.
+            // (Assuming the same basis functions are used for all stencils)
+            if (i_cell == 0 && i_stencil_loc == 0) {
                 for (u_int16_t i_dof = 0; i_dof < n_dof; ++i_dof) {
-                    size_t ind_target   =                          i_dof; // i_target = 0
-                    size_t ind_neighbor = i_neighbor_loc * n_dof + i_dof;
-                    A[ind_neighbor] -= (area_trans[i_neighbor_loc] / area_trans[0]) * A[ind_target];
+                    v_integral_psi_target[i_dof] = A[i_dof] / area_trans[0];
+                }
+            }
+
+            // Subtract the integral of the basis function over the target cell
+            // from the integral in each cell of the stencil
+            for (u_int8_t i_neighbor_loc = 0; i_neighbor_loc < stencil_size; ++i_neighbor_loc) {
+                for (u_int16_t i_dof = 0; i_dof < n_dof; ++i_dof) {
+                    A[i_neighbor_loc * n_dof + i_dof] -= area_trans[i_neighbor_loc] * v_integral_psi_target[i_dof];
                 }
             }
 
@@ -678,10 +691,8 @@ void TENO::compute_reconstruction_matrices() {
             // At this point, A contains the Moore-Penrose pseudoinverse of the reconstruction matrix.
             // We store it in the v_reconstruction_matrices vector and update the v_offsets_reconstruction_matrices vector
             // with the proper offset for the stencil.
-            for (u_int16_t i_dof = 0; i_dof < n_dof; ++i_dof) {
-                for (u_int8_t i_neighbor_loc = 0; i_neighbor_loc < stencil_size; ++i_neighbor_loc) {
-                    v_reconstruction_matrices.push_back(A[i_dof * stencil_size + i_neighbor_loc]);
-                }
+            for (auto val : A) {
+                v_reconstruction_matrices.push_back(val);
             }
             v_offsets_reconstruction_matrices.push_back(v_reconstruction_matrices.size());
 
@@ -695,11 +706,13 @@ void TENO::compute_reconstruction_matrices() {
     // Allocate device arrays
     offsets_reconstruction_matrices = Kokkos::View<u_int32_t *>("offsets_reconstruction_matrices", v_offsets_reconstruction_matrices.size());
     reconstruction_matrices = Kokkos::View<rtype *>("reconstruction_matrices", v_reconstruction_matrices.size());
+    integral_psi_target = Kokkos::View<rtype *>("integral_psi_target", v_integral_psi_target.size());
     transformed_areas = Kokkos::View<rtype *>("transformed_areas", v_transformed_areas.size());
 
     // Set up host mirrors
     h_offsets_reconstruction_matrices = Kokkos::create_mirror_view(offsets_reconstruction_matrices);
     h_reconstruction_matrices = Kokkos::create_mirror_view(reconstruction_matrices);
+    h_integral_psi_target = Kokkos::create_mirror_view(integral_psi_target);
     h_transformed_areas = Kokkos::create_mirror_view(transformed_areas);
 
     // Fill host mirrors
@@ -709,6 +722,9 @@ void TENO::compute_reconstruction_matrices() {
     for (u_int32_t i = 0; i < v_reconstruction_matrices.size(); ++i) {
         h_reconstruction_matrices(i) = v_reconstruction_matrices[i];
     }
+    for (u_int32_t i = 0; i < v_integral_psi_target.size(); ++i) {
+        h_integral_psi_target(i) = v_integral_psi_target[i];
+    }
     for (u_int32_t i = 0; i < v_transformed_areas.size(); ++i) {
         h_transformed_areas(i) = v_transformed_areas[i];
     }
@@ -716,6 +732,7 @@ void TENO::compute_reconstruction_matrices() {
     // Copy from host to device
     Kokkos::deep_copy(offsets_reconstruction_matrices, h_offsets_reconstruction_matrices);
     Kokkos::deep_copy(reconstruction_matrices, h_reconstruction_matrices);
+    Kokkos::deep_copy(integral_psi_target, h_integral_psi_target);
     Kokkos::deep_copy(transformed_areas, h_transformed_areas);
 }
 
@@ -742,14 +759,14 @@ void TENO::compute_oscillation_indicator() {
             for (u_int8_t k_dof = 1; k_dof < n_dof; k_dof++) {
 
                 // i_quad indexes the quadrature points
-                for (u_int8_t i_quad = 0; i_quad < quadrature.h_points.extent(0); ++i_quad) {
+                for (u_int8_t i_quad = 0; i_quad < quadrature_cell.h_points.extent(0); ++i_quad) {
                     // Evaluate the requested derivative of phi_i at the quadrature point
                     // i_dim indexes the dimension of the derivative
                     rtype dphi_i = 1.0;
                     for (u_int8_t i_dim = 0; i_dim < N_DIM; ++i_dim) {
                         rtype dphi_i_dim = basis_derivative_1D(poly_indices(k_dof, i_dim),
                                                                poly_indices(i_dof, i_dim),
-                                                               quadrature.h_points(i_quad, i_dim));
+                                                               quadrature_cell.h_points(i_quad, i_dim));
                         dphi_i *= dphi_i_dim;
                     }
                     // Evaluate the requested derivative of phi_j at the quadrature point
@@ -758,11 +775,11 @@ void TENO::compute_oscillation_indicator() {
                     for (u_int8_t i_dim = 0; i_dim < N_DIM; ++i_dim) {
                         rtype dphi_j_dim = basis_derivative_1D(poly_indices(k_dof, i_dim),
                                                                poly_indices(j_dof, i_dim),
-                                                               quadrature.h_points(i_quad, i_dim));
+                                                               quadrature_cell.h_points(i_quad, i_dim));
                         dphi_j *= dphi_j_dim;
                     }
                     // The integrand is the product of the two derivatives
-                    h_oscillation_indicator(ind) += quadrature.h_weights(i_quad) * dphi_i * dphi_j;
+                    h_oscillation_indicator(ind) += quadrature_cell.h_weights(i_quad) * dphi_i * dphi_j;
                 }
             }
         }
@@ -776,36 +793,309 @@ struct TENOFunctor {
     public:
         /**
          * @brief Construct a new TENOFunctor object
+         * @param basis_type Basis type.
          * @param cells_of_face Cells of face.
+         * @param offsets_faces_of_cell Offsets into faces of cell.
+         * @param faces_of_cell Faces of cell.
+         * @param offsets_nodes_of_cell Offsets into nodes of cell.
+         * @param nodes_of_cell Nodes of cell.
+         * @param offsets_nodes_of_face Offsets into nodes of face.
+         * @param nodes_of_face Nodes of face.
+         * @param node_coords Node coordinates.
+         * @param offsets_stencil_groups Offsets of stencil groups.
+         * @param offsets_stencils Offsets of stencils.
+         * @param stencils Stencils.
+         * @param offsets_reconstruction_matrices Offsets of reconstruction matrices.
+         * @param reconstruction_matrices Reconstruction matrices.
+         * @param transformed_areas Transformed areas.
+         * @param integral_psi_target Integral of the basis function over the target cell.
+         * @param oscillation_indicator Oscillation indicator.
+         * @param n_dof Number of degrees of freedom.
+         * @param poly_indices Polynomial indices.
+         * @param quad_face_points Quadrature points on the face.
          * @param face_solution Face solution.
          * @param solution Cell solution.
          */
-        TENOFunctor(Kokkos::View<int32_t *[2]> cells_of_face,
-                    Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+        TENOFunctor(BasisType basis_type,
+                    Kokkos::View<int32_t *[2]> cells_of_face,
+                    Kokkos::View<u_int32_t *> offsets_faces_of_cell,
+                    Kokkos::View<u_int32_t *> faces_of_cell,
+                    Kokkos::View<u_int32_t *> offsets_nodes_of_cell,
+                    Kokkos::View<u_int32_t *> nodes_of_cell,
+                    Kokkos::View<u_int32_t *> offsets_nodes_of_face,
+                    Kokkos::View<u_int32_t *> nodes_of_face,
+                    Kokkos::View<rtype *[N_DIM]> node_coords,
+                    Kokkos::View<u_int32_t *> offsets_stencil_groups,
+                    Kokkos::View<u_int32_t *> offsets_stencils,
+                    Kokkos::View<u_int32_t *> stencils,
+                    Kokkos::View<u_int32_t *> offsets_reconstruction_matrices,
+                    Kokkos::View<rtype *> reconstruction_matrices,
+                    Kokkos::View<rtype *> transformed_areas,
+                    Kokkos::View<rtype *> integral_psi_target,
+                    Kokkos::View<rtype *> oscillation_indicator,
+                    u_int16_t n_dof,
+                    Kokkos::View<u_int8_t *[N_DIM]> poly_indices,
+                    Kokkos::View<rtype *[N_DIM]> quad_face_points,
+                    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                     Kokkos::View<rtype *[N_CONSERVATIVE]> solution) :
+                        basis_type(basis_type),
                         cells_of_face(cells_of_face),
+                        offsets_faces_of_cell(offsets_faces_of_cell),
+                        faces_of_cell(faces_of_cell),
+                        offsets_nodes_of_cell(offsets_nodes_of_cell),
+                        nodes_of_cell(nodes_of_cell),
+                        offsets_nodes_of_face(offsets_nodes_of_face),
+                        nodes_of_face(nodes_of_face),
+                        node_coords(node_coords),
+                        offsets_stencil_groups(offsets_stencil_groups),
+                        offsets_stencils(offsets_stencils),
+                        stencils(stencils),
+                        offsets_reconstruction_matrices(offsets_reconstruction_matrices),
+                        reconstruction_matrices(reconstruction_matrices),
+                        transformed_areas(transformed_areas),
+                        integral_psi_target(integral_psi_target),
+                        oscillation_indicator(oscillation_indicator),
+                        n_dof(n_dof),
+                        poly_indices(poly_indices),
+                        quad_face_points(quad_face_points),
                         face_solution(face_solution),
                         solution(solution) {}
         
         /**
          * @brief Overloaded operator for TENO face reconstruction.
-         * @param i_face Face index.
+         * @param i_cell Cell index.
          */
         KOKKOS_INLINE_FUNCTION
-        void operator()(const u_int32_t i_face) const {
-            // Empty
+        void operator()(const u_int32_t i_cell) const {
+            u_int32_t face_offset = offsets_faces_of_cell(i_cell);
+            u_int32_t node_offset = offsets_nodes_of_cell(i_cell);
+            u_int8_t n_faces = offsets_faces_of_cell(i_cell + 1) - face_offset;
+            u_int32_t i_first_stencil = offsets_stencil_groups(i_cell);
+            u_int8_t group_size = offsets_stencil_groups(i_cell + 1) - i_first_stencil;
+            rtype stencil_weights[group_size * N_CONSERVATIVE];
+            rtype dof_weights[group_size * n_dof * N_CONSERVATIVE];
+
+            // Compute the transformation matrix for the target cell
+            rtype J[N_DIM * N_DIM];
+            rtype J_inv[N_DIM * N_DIM];
+            rtype w0[N_DIM];
+            rtype w1[N_DIM];
+            rtype w2[N_DIM];
+            FOR_I_DIM w0[i] = node_coords(nodes_of_cell(node_offset + 0), i);
+            FOR_I_DIM w1[i] = node_coords(nodes_of_cell(node_offset + 1), i);
+            FOR_I_DIM w2[i] = node_coords(nodes_of_cell(node_offset + 2), i);
+            triangle_J(w0, w1, w2, J);
+            invert_matrix<N_DIM>(J, J_inv);
+
+            // Compute the stencil weights for each conservative variable
+            for (u_int8_t i_stencil_loc = 0; i_stencil_loc < group_size; ++i_stencil_loc) {
+                u_int32_t i_stencil = i_first_stencil + i_stencil_loc;
+                u_int32_t stencil_offset = offsets_stencils(i_stencil);
+                u_int32_t stencil_size = offsets_stencils(i_stencil + 1) - stencil_offset;
+                u_int32_t reconstruction_matrix_offset = offsets_reconstruction_matrices(i_stencil);
+
+                // Handle the case where the stencil is empty
+                if (stencil_size == 0) {
+                    continue;
+                }
+
+                // Construct the b matrix [M x N]
+                rtype b[stencil_size * N_CONSERVATIVE];
+                for (u_int8_t i_neighbor_loc = 0; i_neighbor_loc < stencil_size; ++i_neighbor_loc) {
+                    u_int32_t i_neighbor = stencils(stencil_offset + i_neighbor_loc);
+                    for (u_int8_t i_cons = 0; i_cons < N_CONSERVATIVE; ++i_cons) {
+                        b[i_neighbor_loc * N_CONSERVATIVE + i_cons] = transformed_areas(stencil_offset + i_neighbor_loc) *
+                                                                      (solution(i_neighbor, i_cons) -
+                                                                       solution(i_cell, i_cons));
+                    }
+                }
+
+                // The degrees of freedom are obtained by multiplying the (inverted) reconstruction matrix by b
+                // The reconstruction matrix is [K x M] and b is [M x N], so the result is [K x N]
+                // a = A^+ b
+                gemm(reconstruction_matrices.data() + reconstruction_matrix_offset,
+                     b,
+                     &dof_weights[i_stencil_loc * n_dof * N_CONSERVATIVE],
+                     n_dof, stencil_size, stencil_size, N_CONSERVATIVE, false, false);
+                
+                // Compute the smoothness indicator for the stencil
+                rtype smoothness_indicator[N_CONSERVATIVE];
+                rtype OI_times_a[n_dof * N_CONSERVATIVE];
+                gemm(oscillation_indicator.data(),
+                     &dof_weights[i_stencil_loc * n_dof * N_CONSERVATIVE],
+                     OI_times_a,
+                     n_dof, n_dof, n_dof, N_CONSERVATIVE, false, false);
+                for (u_int8_t i_cons = 0; i_cons < N_CONSERVATIVE; ++i_cons) {
+                    smoothness_indicator[i_cons] = 0.0;
+                    for (u_int8_t i_dof = 0; i_dof < n_dof; ++i_dof) {
+                        smoothness_indicator[i_cons] += dof_weights[i_stencil_loc * n_dof * N_CONSERVATIVE +
+                                                                    i_dof * N_CONSERVATIVE +
+                                                                    i_cons] *
+                                                        OI_times_a[i_dof * N_CONSERVATIVE + i_cons];
+                    }
+                }
+
+                // Compute the weight for the stencil
+                constexpr rtype eps = 1.0e-12;
+                for (u_int8_t i_cons = 0; i_cons < N_CONSERVATIVE; ++i_cons) {
+                    stencil_weights[i_stencil_loc * N_CONSERVATIVE + i_cons] = 1.0 / Kokkos::pow(smoothness_indicator[i_cons] + eps, 6.0);
+                }
+            }
+
+            // Iterate over conservative variables
+            for (u_int8_t i_cons = 0; i_cons < N_CONSERVATIVE; ++i_cons) {
+                // Sum the stencil weights for normalization
+                rtype sum_directional = 0.0;
+                for (u_int8_t i_stencil_loc = 1; i_stencil_loc < group_size; ++i_stencil_loc) {
+                    sum_directional += stencil_weights[i_stencil_loc * N_CONSERVATIVE + i_cons];
+                }
+
+                // Evaluate cutoff function for large central stencil
+                constexpr rtype CT1 = 1.0e-7;
+                constexpr rtype CT2 = 1.0e-5;
+                if (stencil_weights[i_cons] / (sum_directional + stencil_weights[i_cons]) > CT1) {
+                    // Simply use the central stencil
+                    stencil_weights[i_cons] = 1.0;
+                    for (u_int8_t i_stencil_loc = 1; i_stencil_loc < group_size; ++i_stencil_loc) {
+                        stencil_weights[i_stencil_loc * N_CONSERVATIVE + i_cons] = 0.0;
+                    }
+                } else {
+                    // There is a discontinuity within the central stencil, so we use an ENO-like
+                    // selection from the directional stencils
+                    for (u_int8_t i_stencil_loc = 1; i_stencil_loc < group_size; ++i_stencil_loc) {
+                        if (stencil_weights[i_stencil_loc * N_CONSERVATIVE + i_cons] / sum_directional > CT2) {
+                            stencil_weights[i_stencil_loc * N_CONSERVATIVE + i_cons] = (1.0 / n_dof);
+                        }
+                    }
+
+                    // Normalize the weights
+                    sum_directional = 0.0;
+                    for (u_int8_t i_stencil_loc = 1; i_stencil_loc < group_size; ++i_stencil_loc) {
+                        sum_directional += stencil_weights[i_stencil_loc * N_CONSERVATIVE + i_cons];
+                    }
+                    for (u_int8_t i_stencil_loc = 1; i_stencil_loc < group_size; ++i_stencil_loc) {
+                        stencil_weights[i_stencil_loc * N_CONSERVATIVE + i_cons] /= sum_directional;
+                    }
+                }
+
+                // Evaluate the face solution using the weighted stencil solutions
+                // Iterate over the faces of the cell
+                for (u_int8_t i_face_loc = 0; i_face_loc < n_faces; i_face_loc++) {
+                    u_int32_t i_face = faces_of_cell(face_offset + i_face_loc);
+                    u_int8_t i_cell_loc = cells_of_face(i_face, 0) == (int32_t)i_cell ? 0 : 1;
+
+                    // Get the transformed coordinates of the face nodes
+                    u_int32_t i_node_0 = nodes_of_face(offsets_nodes_of_face(i_face_loc) + 0);
+                    u_int32_t i_node_1 = nodes_of_face(offsets_nodes_of_face(i_face_loc) + 1);
+                    rtype x0[N_DIM];
+                    rtype x1[N_DIM];
+                    FOR_I_DIM x0[i] = node_coords(i_node_0, i) - w0[i];
+                    FOR_I_DIM x1[i] = node_coords(i_node_1, i) - w0[i];
+                    gemv<N_DIM>(J_inv, x0, x0);
+                    gemv<N_DIM>(J_inv, x1, x1);
+
+                    // Iterate over the quadrature points of the face
+                    for (u_int8_t i_quad = 0; i_quad < quad_face_points.extent(0); i_quad++) {
+
+                        // Initialize the face solution
+                        face_solution(i_face, i_quad, i_cell_loc, i_cons) = 0.0;
+
+                        // Get the transformed coordinates of the quadrature point
+                        rtype x_quad[N_DIM];
+                        FOR_I_DIM x_quad[i] = (quad_face_points(i_quad, 0) + 1.0) * 0.5 * (x1[i] - x0[i]) + x0[i];
+
+                        // Sum over the stencils
+                        for (u_int8_t i_stencil_loc = 0; i_stencil_loc < group_size; i_stencil_loc++) {
+                            if (stencil_weights[i_stencil_loc * N_CONSERVATIVE + i_cons] == 0.0) {
+                                continue;
+                            }
+
+                            // Get the stencil offset
+                            u_int32_t i_stencil = i_first_stencil + i_stencil_loc;
+                            u_int32_t stencil_offset = offsets_stencils(i_stencil);
+
+                            // Sum over the degrees of freedom
+                            for (u_int8_t i_dof = 0; i_dof < n_dof; i_dof++) {
+                                face_solution(i_face, i_quad, i_cell_loc, i_cons) += stencil_weights[i_stencil_loc * N_CONSERVATIVE + i_cons] *
+                                                                                     dof_weights[i_stencil_loc * n_dof * N_CONSERVATIVE +
+                                                                                                 i_dof * N_CONSERVATIVE +
+                                                                                                 i_cons] *
+                                                                                     (basis_compute_2D(poly_indices(i_dof, 0),
+                                                                                                       poly_indices(i_dof, 1),
+                                                                                                       x_quad[0],
+                                                                                                       x_quad[1]) +
+                                                                                      (integral_psi_target(i_dof) /
+                                                                                       transformed_areas(stencil_offset)));
+                            }
+                        }
+                    }
+                }
+            }
         }
     
     private:
+        KOKKOS_INLINE_FUNCTION
+        rtype basis_compute_1D(u_int8_t p, rtype x) const {
+            return dispatch_compute_1D(basis_type, p, x);
+        }
+
+        KOKKOS_INLINE_FUNCTION
+        rtype basis_derivative_1D(u_int8_t n, u_int8_t p, rtype x) const {
+            return dispatch_derivative_1D(basis_type, n, p, x);
+        }
+
+        KOKKOS_INLINE_FUNCTION
+        rtype basis_compute_2D(u_int8_t px, u_int8_t py, rtype x, rtype y) const {
+            return dispatch_compute_2D(basis_type, px, py, x, y);
+        }
+
+        BasisType basis_type;
         Kokkos::View<int32_t *[2]> cells_of_face;
-        Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution;
+        Kokkos::View<u_int32_t *> offsets_faces_of_cell;
+        Kokkos::View<u_int32_t *> faces_of_cell;
+        Kokkos::View<u_int32_t *> offsets_nodes_of_cell;
+        Kokkos::View<u_int32_t *> nodes_of_cell;
+        Kokkos::View<u_int32_t *> offsets_nodes_of_face;
+        Kokkos::View<u_int32_t *> nodes_of_face;
+        Kokkos::View<rtype *[N_DIM]> node_coords;
+        Kokkos::View<u_int32_t *> offsets_stencil_groups;
+        Kokkos::View<u_int32_t *> offsets_stencils;
+        Kokkos::View<u_int32_t *> stencils;
+        Kokkos::View<u_int32_t *> offsets_reconstruction_matrices;
+        Kokkos::View<rtype *> reconstruction_matrices;
+        Kokkos::View<rtype *> transformed_areas;
+        Kokkos::View<rtype *> integral_psi_target;
+        Kokkos::View<rtype *> oscillation_indicator;
+        u_int16_t n_dof;
+        Kokkos::View<u_int8_t *[N_DIM]> poly_indices;
+        Kokkos::View<rtype *[N_DIM]> quad_face_points;
+        Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
         Kokkos::View<rtype *[N_CONSERVATIVE]> solution;
 };
 
 void TENO::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                                Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) {
-    TENOFunctor recon_functor(mesh->cells_of_face,
+                            Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
+    TENOFunctor recon_functor(basis_type,
+                              mesh->cells_of_face,
+                              mesh->offsets_faces_of_cell,
+                              mesh->faces_of_cell,
+                              mesh->offsets_nodes_of_cell,
+                              mesh->nodes_of_cell,
+                              mesh->offsets_nodes_of_face,
+                              mesh->nodes_of_face,
+                              mesh->node_coords,
+                              offsets_stencil_groups,
+                              offsets_stencils,
+                              stencils,
+                              offsets_reconstruction_matrices,
+                              reconstruction_matrices,
+                              transformed_areas,
+                              integral_psi_target,
+                              oscillation_indicator,
+                              n_dof,
+                              poly_indices,
+                              quadrature_face.h_points,
                               face_solution,
                               solution);
-    Kokkos::parallel_for(mesh->n_faces, recon_functor);
+    Kokkos::parallel_for(mesh->n_cells, recon_functor);
 }

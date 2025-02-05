@@ -171,8 +171,6 @@ void Solver::init_numerics() {
     }
 
     face_reconstruction->set_mesh(mesh);
-    face_reconstruction->set_cell_conservatives(&conservatives);
-    face_reconstruction->set_face_conservatives(&face_conservatives);
     face_reconstruction->init(face_reconstruction_input);
 
     riemann_solver->init(input);
@@ -231,6 +229,7 @@ void Solver::init_boundaries() {
 
         boundaries.back()->set_zone(mesh->get_face_zone(name));
         boundaries.back()->set_mesh(mesh);
+        boundaries.back()->set_face_quad_weights(face_reconstruction->quadrature_face.weights);
         boundaries.back()->set_physics(physics);
         boundaries.back()->set_riemann_solver(riemann_solver);
         boundaries.back()->init(bound);
@@ -300,14 +299,12 @@ void Solver::allocate_memory() {
 
     Kokkos::resize(conservatives, mesh->n_cells);
     Kokkos::resize(primitives, mesh->n_cells);
-    Kokkos::resize(face_conservatives, mesh->n_faces);
-    Kokkos::resize(face_primitives, mesh->n_faces);
+    Kokkos::resize(face_conservatives, mesh->n_faces, face_reconstruction->n_face_quadrature_points());
     Kokkos::resize(cfl_local, mesh->n_cells);
 
     h_conservatives = Kokkos::create_mirror_view(conservatives);
     h_primitives = Kokkos::create_mirror_view(primitives);
     h_face_conservatives = Kokkos::create_mirror_view(face_conservatives);
-    h_face_primitives = Kokkos::create_mirror_view(face_primitives);
     h_cfl_local = Kokkos::create_mirror_view(cfl_local);
 
     solution_vec.push_back(conservatives);
@@ -326,7 +323,6 @@ void Solver::copy_host_to_device() {
     Kokkos::deep_copy(conservatives, h_conservatives);
     Kokkos::deep_copy(primitives, h_primitives);
     Kokkos::deep_copy(face_conservatives, h_face_conservatives);
-    Kokkos::deep_copy(face_primitives, h_face_primitives);
     Kokkos::deep_copy(cfl_local, h_cfl_local);
 }
 
@@ -334,7 +330,6 @@ void Solver::copy_device_to_host() {
     Kokkos::deep_copy(h_conservatives, conservatives);
     Kokkos::deep_copy(h_primitives, primitives);
     Kokkos::deep_copy(h_face_conservatives, face_conservatives);
-    Kokkos::deep_copy(h_face_primitives, face_primitives);
     Kokkos::deep_copy(h_cfl_local, cfl_local);
 }
 
@@ -602,8 +597,8 @@ struct SpectralRadiusFunctor {
          * @param offsets_faces_of_cell Offsets of faces of cell.
          * @param cells_of_face Cells of face.
          * @param face_normals Face normals.
-         * @param face_coords Face coordinates.
          * @param cell_coords Cell coordinates.
+         * @param cell_volume Cell volume.
          * @param physics Physics.
          * @param conservatives Conservatives.
          * @param primitives Primitives.
@@ -612,8 +607,8 @@ struct SpectralRadiusFunctor {
         SpectralRadiusFunctor(Kokkos::View<u_int32_t *> offsets_faces_of_cell,
                               Kokkos::View<int32_t *[2]> cells_of_face,
                               Kokkos::View<rtype *[N_DIM]> face_normals,
-                              Kokkos::View<rtype *[N_DIM]> face_coords,
                               Kokkos::View<rtype *[N_DIM]> cell_coords,
+                              Kokkos::View<rtype *> cell_volume,
                               const T physics,
                               Kokkos::View<rtype *[N_CONSERVATIVE]> conservatives,
                               Kokkos::View<rtype *[N_PRIMITIVE]> primitives,
@@ -621,8 +616,8 @@ struct SpectralRadiusFunctor {
                                   offsets_faces_of_cell(offsets_faces_of_cell),
                                   cells_of_face(cells_of_face),
                                   face_normals(face_normals),
-                                  face_coords(face_coords),
                                   cell_coords(cell_coords),
+                                  cell_volume(cell_volume),
                                   physics(physics),
                                   conservatives(conservatives),
                                   primitives(primitives),
@@ -662,8 +657,8 @@ struct SpectralRadiusFunctor {
 
                 if (i_cell_r == -1) {
                     // Boundary face, hack
-                    s[0] = 2.0 * (face_coords(i_face, 0) - cell_coords(i_cell_l, 0));
-                    s[1] = 2.0 * (face_coords(i_face, 1) - cell_coords(i_cell_l, 1));
+                    s[0] = 2.0 * Kokkos::pow(cell_volume(i_cell_l), 1.0 / N_DIM);
+                    s[1] = 2.0 * Kokkos::pow(cell_volume(i_cell_l), 1.0 / N_DIM);
                     i_cell_r = i_cell_l;
                 } else {
                     s[0] = cell_coords(i_cell_r, 0) - cell_coords(i_cell_l, 0);
@@ -710,8 +705,8 @@ struct SpectralRadiusFunctor {
         Kokkos::View<u_int32_t *> offsets_faces_of_cell;
         Kokkos::View<int32_t *[2]> cells_of_face;
         Kokkos::View<rtype *[N_DIM]> face_normals;
-        Kokkos::View<rtype *[N_DIM]> face_coords;
         Kokkos::View<rtype *[N_DIM]> cell_coords;
+        Kokkos::View<rtype *> cell_volume;
         const T physics;
         Kokkos::View<rtype *[N_CONSERVATIVE]> conservatives;
         Kokkos::View<rtype *[N_PRIMITIVE]> primitives;
@@ -724,8 +719,8 @@ rtype Solver::calc_spectral_radius() {
         SpectralRadiusFunctor<Euler> spectral_radius_functor(mesh->offsets_faces_of_cell,
                                                              mesh->cells_of_face,
                                                              mesh->face_normals,
-                                                             mesh->face_coords,
                                                              mesh->cell_coords,
+                                                             mesh->cell_volume,
                                                              *physics->get_as<Euler>(),
                                                              conservatives,
                                                              primitives,

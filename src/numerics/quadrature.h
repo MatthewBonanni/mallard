@@ -17,17 +17,17 @@
 #include "common.h"
 
 enum class QuadratureType {
-    TRIANGLE_CENTROID,
+    GAUSS_LEGENDRE,
     TRIANGLE_DUNAVANT,
 };
 
 static const std::unordered_map<std::string, QuadratureType> QUADRATURE_TYPES = {
-    {"triangle_centroid", QuadratureType::TRIANGLE_CENTROID},
+    {"gauss_legendre", QuadratureType::GAUSS_LEGENDRE},
     {"triangle_dunavant", QuadratureType::TRIANGLE_DUNAVANT},
 };
 
 static const std::unordered_map<QuadratureType, std::string> QUADRATURE_NAMES = {
-    {QuadratureType::TRIANGLE_CENTROID, "triangle_centroid"},
+    {QuadratureType::GAUSS_LEGENDRE, "gauss_legendre"},
     {QuadratureType::TRIANGLE_DUNAVANT, "triangle_dunavant"},
 };
 
@@ -48,6 +48,7 @@ class Quadrature {
          */
         void copy_host_to_device();
 
+        u_int8_t dim;
         u_int8_t order;
         Kokkos::View<rtype **> points;
         Kokkos::View<rtype **>::HostMirror h_points;
@@ -55,12 +56,12 @@ class Quadrature {
         Kokkos::View<rtype *>::HostMirror h_weights;
 };
 
-class TriangleCentroid : public Quadrature {
+class GaussLegendre : public Quadrature {
     public:
         /**
-         * @brief Construct a new Centroid object
+         * @brief Construct a new GaussLegendre object
          */
-        TriangleCentroid();
+        GaussLegendre(u_int8_t order);
 };
 
 class TriangleDunavant : public Quadrature {

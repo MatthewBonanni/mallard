@@ -63,22 +63,16 @@ class FaceReconstruction {
         virtual void print() const;
 
         /**
-         * @brief Set the cell conservatives.
-         * @param cell_conservatives Pointer to the cell conservatives.
-         */
-        void set_cell_conservatives(Kokkos::View<rtype *[N_CONSERVATIVE]> * cell_conservatives);
-
-        /**
-         * @brief Set the face conservatives.
-         * @param face_conservatives Pointer to the face conservatives.
-         */
-        void set_face_conservatives(Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_conservatives);
-
-        /**
          * @brief Set the mesh.
          * @param mesh Pointer to the mesh.
          */
         void set_mesh(std::shared_ptr<Mesh> mesh);
+
+        /**
+         * @brief Get the number of quadrature points per face.
+         * @return Number of quadrature points per face.
+         */
+        virtual u_int8_t n_face_quadrature_points() const = 0;
 
         /**
          * @brief Reconstruct the face values.
@@ -86,11 +80,11 @@ class FaceReconstruction {
          * @param face_solution View of the face solution.
          */
         virtual void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                                      Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) = 0;
+                                      Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) = 0;
+        
+        Quadrature quadrature_face;
     protected:
         FaceReconstructionType type;
-        Kokkos::View<rtype *[N_CONSERVATIVE]> * cell_conservatives;
-        Kokkos::View<rtype *[2][N_CONSERVATIVE]> * face_conservatives;
         std::shared_ptr<Mesh> mesh;
     private:
 };
@@ -113,12 +107,18 @@ class FirstOrder : public FaceReconstruction {
         void init(const toml::value & input) override;
 
         /**
+         * @brief Get the number of quadrature points per face.
+         * @return Number of quadrature points per face.
+         */
+        u_int8_t n_face_quadrature_points() const override;
+
+        /**
          * @brief Reconstruct the face values.
          * @param solution View of the solution.
          * @param face_solution View of the face solution.
          */
         void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                              Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) override;
+                              Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) override;
     protected:
     private:
 };
@@ -146,12 +146,18 @@ class TENO : public FaceReconstruction {
         void print() const override;
 
         /**
+         * @brief Get the number of quadrature points per face.
+         * @return Number of quadrature points per face.
+         */
+        u_int8_t n_face_quadrature_points() const override;
+
+        /**
          * @brief Reconstruct the face values.
          * @param solution View of the solution.
          * @param face_solution View of the face solution.
          */
         void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                              Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution) override;
+                              Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) override;
     protected:
     private:
         void calc_max_stencil_size();
@@ -184,10 +190,10 @@ class TENO : public FaceReconstruction {
 
         BasisType basis_type;
         u_int8_t poly_order;
-        Quadrature quadrature;
+        Quadrature quadrature_cell;
         u_int16_t n_dof;
-        Kokkos::View<u_int32_t *[N_DIM]> poly_indices;
-        Kokkos::View<u_int32_t *[N_DIM]>::HostMirror h_poly_indices;
+        Kokkos::View<u_int8_t *[N_DIM]> poly_indices;
+        Kokkos::View<u_int8_t *[N_DIM]>::HostMirror h_poly_indices;
         // ^ Contains the polynomial powers for each dimension for each degree of freedom,
         //   precomputed for easy lookup
         rtype max_stencil_size_factor;
@@ -222,8 +228,8 @@ class TENO : public FaceReconstruction {
         // ^ Used to get a particular reconstruction matrix from the reconstruction_matrices array.
         // - Each reconstruction matrix is associated with one stencil.
         // - The difference between two entries is the number of matrix elements for the stencil,
-        //   which is MxK, where M is the number of cells in the stencil and K is the number of degrees
-        //   of freedom.
+        //   which is KxM, where K is the number of degrees of freedom and
+        //                       M is the number of cells in the stencil.
         // - Indexed by:
         //   - offsets_stencil_groups
         // - Indexes the following:
@@ -232,8 +238,8 @@ class TENO : public FaceReconstruction {
         Kokkos::View<rtype *>::HostMirror h_reconstruction_matrices;
         // ^ Contains the reconstruction matrices (stored as Moore-Penrose pseudoinverses) for each stencil.
         // - The matrices are stored in row-major order.
-        // - Each matrix is MxK, where M is the number of cells in the stencil and K is the number of degrees
-        //   of freedom.
+        // - Each inverted matrix is KxM, where K is the number of degrees of freedom and
+        //                                      M is the number of cells in the stencil.
         // - Indexed by:
         //   - offsets_reconstruction_matrices
         Kokkos::View<rtype *> transformed_areas;
@@ -241,6 +247,12 @@ class TENO : public FaceReconstruction {
         // ^ Contains the areas of the transformed triangles for each neighbor cell in each stencil.
         // - Indexed by:
         //   - offsets_stencils
+        Kokkos::View<rtype *> integral_psi_target;
+        Kokkos::View<rtype *>::HostMirror h_integral_psi_target;
+        // ^ Contains the integral of the basis functions over the transformed target cell.
+        // - This is used when computing the modified basis functions.
+        // - This is a vector of length K, where K is the number of degrees of freedom.
+        // - Since this is computed in the reference cell, it is the same for all cells of the same type.
         Kokkos::View<rtype *> oscillation_indicator;
         Kokkos::View<rtype *>::HostMirror h_oscillation_indicator;
         // ^ Contains the oscillation indicator matrix, stored in row-major order.

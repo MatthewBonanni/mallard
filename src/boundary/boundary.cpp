@@ -33,6 +33,10 @@ void Boundary::set_mesh(std::shared_ptr<Mesh> mesh) {
     this->mesh = mesh;
 }
 
+void Boundary::set_face_quad_weights(Kokkos::View<rtype *> face_quad_weights) {
+    this->face_quad_weights = face_quad_weights;
+}
+
 void Boundary::set_physics(std::shared_ptr<PhysicsWrapper> physics) {
     this->physics = physics;
 }

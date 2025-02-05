@@ -69,6 +69,12 @@ class Boundary {
         void set_mesh(std::shared_ptr<Mesh> mesh);
 
         /**
+         * @brief Set the face quadrature weights.
+         * @param face_quad_weights Face quadrature weights.
+         */
+        void set_face_quad_weights(Kokkos::View<rtype *> face_quad_weights);
+
+        /**
          * @brief Set the physics.
          * @param physics Pointer to the physics.
          */
@@ -106,12 +112,13 @@ class Boundary {
          * @param face_solution Pointer to the face solution.
          * @param rhs Pointer to the right hand side.
          */
-        virtual void apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+        virtual void apply(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                            Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) = 0;
         
     protected:
         FaceZone * zone;
         std::shared_ptr<Mesh> mesh;
+        Kokkos::View<rtype *> face_quad_weights;
         BoundaryType type;
         std::shared_ptr<PhysicsWrapper> physics;
         std::shared_ptr<RiemannSolver> riemann_solver;

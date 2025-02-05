@@ -56,7 +56,7 @@ class BoundaryUPT : public Boundary {
          * @param face_solution Face solution.
          * @param rhs Right hand side.
          */
-        void apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+        void apply(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                    Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) override;
     protected:
     private:
@@ -64,7 +64,7 @@ class BoundaryUPT : public Boundary {
          * @brief Launch the flux functor.
          */
         template <typename T_physics, typename T_riemann_solver>
-        void launch_flux_functor(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+        void launch_flux_functor(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                                  Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
 
         template <typename T_physics, typename T_riemann_solver>
@@ -76,7 +76,8 @@ class BoundaryUPT : public Boundary {
                                Kokkos::View<rtype *[N_DIM]> normals,
                                Kokkos::View<rtype *> face_area,
                                Kokkos::View<int32_t *[2]> cells_of_face,
-                               Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                               Kokkos::View<rtype *> quad_weights,
+                               Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                                Kokkos::View<rtype *[N_CONSERVATIVE]> rhs,
                                const T_physics physics,
                                const T_riemann_solver riemann_solver,
@@ -87,6 +88,7 @@ class BoundaryUPT : public Boundary {
                                                                      normals,
                                                                      face_area,
                                                                      cells_of_face,
+                                                                     quad_weights,
                                                                      face_solution,
                                                                      rhs,
                                                                      physics,
@@ -95,6 +97,7 @@ class BoundaryUPT : public Boundary {
 
                 KOKKOS_INLINE_FUNCTION
                 void calc_lr_states_impl(const u_int32_t i_face,
+                                         const u_int8_t i_quad,
                                          rtype * conservatives_l,
                                          rtype * conservatives_r,
                                          rtype * primitives_l,

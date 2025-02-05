@@ -86,10 +86,10 @@ class TimeIntegrator {
          */
         virtual void take_step(const rtype & dt,
                                std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & solution_vec,
-                               Kokkos::View<rtype *[2][N_CONSERVATIVE]> & face_solution,
+                               Kokkos::View<rtype **[2][N_CONSERVATIVE]> & face_solution,
                                std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & rhs_vec,
                                std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                                                  Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                                                  Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                                                   Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> * calc_rhs) = 0;
     protected:
         TimeIntegratorType type;
@@ -120,10 +120,10 @@ class FE : public TimeIntegrator {
          */
         void take_step(const rtype & dt,
                        std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & solution_vec,
-                       Kokkos::View<rtype *[2][N_CONSERVATIVE]> & face_solution,
+                       Kokkos::View<rtype **[2][N_CONSERVATIVE]> & face_solution,
                        std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & rhs_vec,
                        std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                                          Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                                          Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                                           Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> * calc_rhs) override;
     protected:
     private:
@@ -151,10 +151,10 @@ class RK4 : public TimeIntegrator {
          */
         void take_step(const rtype & dt,
                        std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & solution_vec,
-                       Kokkos::View<rtype *[2][N_CONSERVATIVE]> & face_solution,
+                       Kokkos::View<rtype **[2][N_CONSERVATIVE]> & face_solution,
                        std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & rhs_vec,
                        std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                                          Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                                          Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                                           Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> * calc_rhs) override;
     protected:
     private:
@@ -183,10 +183,10 @@ class SSPRK3 : public TimeIntegrator {
          */
         void take_step(const rtype & dt,
                        std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & solution_vec,
-                       Kokkos::View<rtype *[2][N_CONSERVATIVE]> & face_solution,
+                       Kokkos::View<rtype **[2][N_CONSERVATIVE]> & face_solution,
                        std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & rhs_vec,
                        std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                                          Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                                          Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                                           Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> * calc_rhs) override;
     protected:
     private:

@@ -26,6 +26,7 @@ class BaseFluxFunctor {
          * @param normals Face normals.
          * @param face_area Face areas.
          * @param cells_of_face Cells of face.
+         * @param quad_weights Quadrature weights.
          * @param face_solution Face solution.
          * @param rhs RHS.
          * @param physics Physics.
@@ -35,7 +36,8 @@ class BaseFluxFunctor {
                         Kokkos::View<rtype *[N_DIM]> normals,
                         Kokkos::View<rtype *> face_area,
                         Kokkos::View<int32_t *[2]> cells_of_face,
-                        Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                        Kokkos::View<rtype *> quad_weights,
+                        Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                         Kokkos::View<rtype *[N_CONSERVATIVE]> rhs,
                         const T_physics physics,
                         const T_riemann_solver riemann_solver) :
@@ -43,6 +45,7 @@ class BaseFluxFunctor {
                             normals(normals),
                             face_area(face_area),
                             cells_of_face(cells_of_face),
+                            quad_weights(quad_weights),
                             face_solution(face_solution),
                             rhs(rhs),
                             physics(physics),
@@ -66,7 +69,8 @@ class BaseFluxFunctor {
     
         /**
          * @brief Calculate the left and right states.
-         * @param i_face_local Index into the faces view, which contains the global face index.
+         * @param i_face Global face index.
+         * @param i_quad Quadrature point index.
          * @param conservatives_l Left conservatives.
          * @param conservatives_r Right conservatives.
          * @param primitives_l Left primitives.
@@ -74,11 +78,13 @@ class BaseFluxFunctor {
          */
         KOKKOS_INLINE_FUNCTION
         void calc_lr_states(const u_int32_t i_face,
+                            const u_int8_t i_quad,
                             rtype * conservatives_l,
                             rtype * conservatives_r,
                             rtype * primitives_l,
                             rtype * primitives_r) const {
             static_cast<const Derived *>(this)->calc_lr_states_impl(i_face,
+                                                                    i_quad,
                                                                     conservatives_l,
                                                                     conservatives_r,
                                                                     primitives_l,
@@ -90,7 +96,8 @@ class BaseFluxFunctor {
         Kokkos::View<rtype *[N_DIM]> normals;
         Kokkos::View<rtype *> face_area;
         Kokkos::View<int32_t *[2]> cells_of_face;
-        Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution;
+        Kokkos::View<rtype *> quad_weights;
+        Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
         Kokkos::View<rtype *[N_CONSERVATIVE]> rhs;
         const T_physics physics;
         const T_riemann_solver riemann_solver;
@@ -107,6 +114,7 @@ class InteriorFluxFunctor : public BaseFluxFunctor<InteriorFluxFunctor<T_physics
         
         KOKKOS_INLINE_FUNCTION
         void calc_lr_states_impl(const u_int32_t i_face,
+                                 const u_int8_t i_quad,
                                  rtype * conservatives_l,
                                  rtype * conservatives_r,
                                  rtype * primitives_l,
@@ -115,6 +123,8 @@ class InteriorFluxFunctor : public BaseFluxFunctor<InteriorFluxFunctor<T_physics
 
 template <typename Derived, typename T_physics, typename T_riemann_solver>
 void BaseFluxFunctor<Derived, T_physics, T_riemann_solver>::call_impl(const u_int32_t i_face_local) const {
+    const u_int8_t n_quad = quad_weights.extent(0);
+    rtype flux_temp[N_CONSERVATIVE];
     rtype flux[N_CONSERVATIVE];
     rtype conservatives_l[N_CONSERVATIVE];
     rtype conservatives_r[N_CONSERVATIVE];
@@ -122,21 +132,26 @@ void BaseFluxFunctor<Derived, T_physics, T_riemann_solver>::call_impl(const u_in
     rtype primitives_r[N_PRIMITIVE];
     rtype n_vec[N_DIM];
     rtype n_unit[N_DIM];
-
+    
     const u_int32_t i_face = faces(i_face_local);
-
-    calc_lr_states(i_face, conservatives_l, conservatives_r, primitives_l, primitives_r);
-
-    FOR_I_DIM n_vec[i] = normals(i_face, i);
+    FOR_I_DIM n_vec[i] = normals(i_face_local, i);
     unit<N_DIM>(n_vec, n_unit);
 
-    // Calculate flux
-    riemann_solver.calc_flux(flux, n_unit,
-                             conservatives_l[0], primitives_l,
-                             primitives_l[2], physics.get_gamma(), primitives_l[4],
-                             conservatives_r[0], primitives_r,
-                             primitives_r[2], physics.get_gamma(), primitives_r[4]);
-    
+    FOR_I_CONSERVATIVE flux[i] = 0.0;
+    for (u_int8_t i_quad = 0; i_quad < n_quad; i_quad++) {
+        // Compute the flux at the quadrature point
+        calc_lr_states(i_face, i_quad, conservatives_l, conservatives_r, primitives_l, primitives_r);
+        riemann_solver.calc_flux(flux_temp, n_unit,
+                                 conservatives_l[0], primitives_l,
+                                 primitives_l[2], physics.get_gamma(), primitives_l[4],
+                                 conservatives_r[0], primitives_r,
+                                 primitives_r[2], physics.get_gamma(), primitives_r[4]);
+        
+        // Add this point's contribution to the integral
+        FOR_I_CONSERVATIVE flux[i] += quad_weights(i_quad) * flux_temp[i];
+    }
+    FOR_I_CONSERVATIVE flux[i] *= 0.5;
+
     // Add flux to RHS
     FOR_I_CONSERVATIVE {
         Kokkos::atomic_add(&rhs(cells_of_face(i_face, 0), i), -face_area(i_face) * flux[i]);
@@ -148,13 +163,14 @@ void BaseFluxFunctor<Derived, T_physics, T_riemann_solver>::call_impl(const u_in
 
 template <typename T_physics, typename T_riemann_solver>
 void InteriorFluxFunctor<T_physics, T_riemann_solver>::calc_lr_states_impl(const u_int32_t i_face,
+                                                                           const u_int8_t i_quad,
                                                                            rtype * conservatives_l,
                                                                            rtype * conservatives_r,
                                                                            rtype * primitives_l,
                                                                            rtype * primitives_r) const {
     FOR_I_CONSERVATIVE {
-        conservatives_l[i] = this->face_solution(i_face, 0, i);
-        conservatives_r[i] = this->face_solution(i_face, 1, i);
+        conservatives_l[i] = this->face_solution(i_face, i_quad, 0, i);
+        conservatives_r[i] = this->face_solution(i_face, i_quad, 1, i);
     }
 
     this->physics.compute_primitives_from_conservatives(primitives_l, conservatives_l);

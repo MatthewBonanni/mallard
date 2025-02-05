@@ -37,12 +37,13 @@ void BoundaryExtrapolation::init(const toml::value & input) {
 
 template <typename T_physics, typename T_riemann_solver>
 void BoundaryExtrapolation::ExtrapolationFluxFunctor<T_physics, T_riemann_solver>::calc_lr_states_impl(const u_int32_t i_face,
+                                                                                                       const u_int8_t i_quad,
                                                                                                        rtype * conservatives_l,
                                                                                                        rtype * conservatives_r,
                                                                                                        rtype * primitives_l,
                                                                                                        rtype * primitives_r) const {
     FOR_I_CONSERVATIVE {
-        conservatives_l[i] = this->face_solution(i_face, 0, i);
+        conservatives_l[i] = this->face_solution(i_face, i_quad, 0, i);
         conservatives_r[i] = conservatives_l[i];
     }
 
@@ -54,12 +55,13 @@ void BoundaryExtrapolation::ExtrapolationFluxFunctor<T_physics, T_riemann_solver
 }
 
 template <typename T_physics, typename T_riemann_solver>
-void BoundaryExtrapolation::launch_flux_functor(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+void BoundaryExtrapolation::launch_flux_functor(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                                                 Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
     ExtrapolationFluxFunctor<T_physics, T_riemann_solver> flux_functor(zone->faces,
                                                                        mesh->face_normals,
                                                                        mesh->face_area,
                                                                        mesh->cells_of_face,
+                                                                       face_quad_weights,
                                                                        face_solution,
                                                                        rhs,
                                                                        *physics->get_as<T_physics>(),
@@ -67,7 +69,7 @@ void BoundaryExtrapolation::launch_flux_functor(Kokkos::View<rtype *[2][N_CONSER
     Kokkos::parallel_for(zone->n_faces(), flux_functor);
 }
 
-void BoundaryExtrapolation::apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+void BoundaryExtrapolation::apply(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                                   Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
     if (physics->get_type() == PhysicsType::EULER) {
         switch (riemann_solver->get_type()) {

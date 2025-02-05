@@ -37,6 +37,7 @@ void BoundarySymmetry::init(const toml::value & input) {
 
 template <typename T_physics, typename T_riemann_solver>
 void BoundarySymmetry::SymmetryFluxFunctor<T_physics, T_riemann_solver>::calc_lr_states_impl(const u_int32_t i_face,
+                                                                                             const u_int8_t i_quad,
                                                                                              rtype * conservatives_l,
                                                                                              rtype * conservatives_r,
                                                                                              rtype * primitives_l,
@@ -51,7 +52,7 @@ void BoundarySymmetry::SymmetryFluxFunctor<T_physics, T_riemann_solver>::calc_lr
     unit<N_DIM>(n_vec, n_unit);
 
     FOR_I_CONSERVATIVE {
-        conservatives_l[i] = this->face_solution(i_face, 0, i);
+        conservatives_l[i] = this->face_solution(i_face, i_quad, 0, i);
         conservatives_r[i] = conservatives_l[i]; // Only density will be used
     }
 
@@ -68,12 +69,13 @@ void BoundarySymmetry::SymmetryFluxFunctor<T_physics, T_riemann_solver>::calc_lr
 }
 
 template <typename T_physics, typename T_riemann_solver>
-void BoundarySymmetry::launch_flux_functor(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+void BoundarySymmetry::launch_flux_functor(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                                            Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
     SymmetryFluxFunctor<T_physics, T_riemann_solver> flux_functor(zone->faces,
                                                                   mesh->face_normals,
                                                                   mesh->face_area,
                                                                   mesh->cells_of_face,
+                                                                  face_quad_weights,
                                                                   face_solution,
                                                                   rhs,
                                                                   *physics->get_as<T_physics>(),
@@ -81,7 +83,7 @@ void BoundarySymmetry::launch_flux_functor(Kokkos::View<rtype *[2][N_CONSERVATIV
     Kokkos::parallel_for(zone->n_faces(), flux_functor);
 }
 
-void BoundarySymmetry::apply(Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+void BoundarySymmetry::apply(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                              Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
     if (physics->get_type() == PhysicsType::EULER) {
         switch (riemann_solver->get_type()) {

@@ -20,7 +20,7 @@ const int N_CELLS = 2;
 const rtype TOL = 1e-6;
 
 void calc_rhs_test(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                   Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                   Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                    Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
     Kokkos::parallel_for(N_CELLS, KOKKOS_LAMBDA(const u_int8_t i_cell) {
         FOR_I_CONSERVATIVE rhs(i_cell, i) = i_cell * static_cast<rtype>(N_CONSERVATIVE) + i;
@@ -31,8 +31,8 @@ TEST(TimeIntegratorTest, FE) {
     FE integrator;
     std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> solution_vec;
     std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>::HostMirror> h_solution_vec;
-    Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution;
-    Kokkos::View<rtype *[2][N_CONSERVATIVE]>::HostMirror h_face_solution;
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]>::HostMirror h_face_solution;
     std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> rhs_vec;
     std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>::HostMirror> h_rhs_vec;
 
@@ -49,7 +49,7 @@ TEST(TimeIntegratorTest, FE) {
     }
 
     std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                       Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                       Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                        Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> rhs_func = calc_rhs_test;
 
     for (u_int8_t i_cell = 0; i_cell < N_CELLS; i_cell++) {
@@ -82,8 +82,8 @@ TEST(TimeIntegratorTest, RK4) {
     RK4 integrator;
     std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> solution_vec;
     std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>::HostMirror> h_solution_vec;
-    Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution;
-    Kokkos::View<rtype *[2][N_CONSERVATIVE]>::HostMirror h_face_solution;
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]>::HostMirror h_face_solution;
     std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> rhs_vec;
     std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>::HostMirror> h_rhs_vec;
 
@@ -100,7 +100,7 @@ TEST(TimeIntegratorTest, RK4) {
     }
 
     std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                       Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                       Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                        Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> rhs_func = calc_rhs_test;
 
     for (u_int8_t i_cell = 0; i_cell < N_CELLS; i_cell++) {
@@ -133,8 +133,8 @@ TEST(TimeIntegratorTest, SSPRK3) {
     SSPRK3 integrator;
     std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> solution_vec;
     std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>::HostMirror> h_solution_vec;
-    Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution;
-    Kokkos::View<rtype *[2][N_CONSERVATIVE]>::HostMirror h_face_solution;
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]>::HostMirror h_face_solution;
     std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> rhs_vec;
     std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>::HostMirror> h_rhs_vec;
 
@@ -151,7 +151,7 @@ TEST(TimeIntegratorTest, SSPRK3) {
     }
 
     std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                       Kokkos::View<rtype *[2][N_CONSERVATIVE]> face_solution,
+                       Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                        Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> rhs_func = calc_rhs_test;
 
     for (u_int8_t i_cell = 0; i_cell < N_CELLS; i_cell++) {
