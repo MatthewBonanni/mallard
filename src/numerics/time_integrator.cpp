@@ -55,9 +55,9 @@ FE::~FE() {
 }
 
 void FE::take_step(const rtype & dt,
-                   std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & solution_vec,
-                   Kokkos::View<rtype **[2][N_CONSERVATIVE]> & face_solution,
-                   std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & rhs_vec,
+                   std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> solution_vec,
+                   Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
+                   std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> rhs_vec,
                    std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                       Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                                       Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> * calc_rhs) {
@@ -83,9 +83,9 @@ RK4::~RK4() {
 }
 
 void RK4::take_step(const rtype & dt,
-                    std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & solution_vec,
-                    Kokkos::View<rtype **[2][N_CONSERVATIVE]> & face_solution,
-                    std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & rhs_vec,
+                    std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> solution_vec,
+                    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
+                    std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> rhs_vec,
                     std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                        Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                                        Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> * calc_rhs) {
@@ -133,9 +133,9 @@ SSPRK3::~SSPRK3() {
 }
 
 void SSPRK3::take_step(const rtype & dt,
-                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & solution_vec,
-                       Kokkos::View<rtype **[2][N_CONSERVATIVE]> & face_solution,
-                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> & rhs_vec,
+                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> solution_vec,
+                       Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
+                       std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> rhs_vec,
                        std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                           Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                                           Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> * calc_rhs) {

@@ -547,7 +547,7 @@ void tetrahedron_J(const rtype * v0,
  * @return Maximum of each element.
  */
 template <u_int32_t N>
-std::array<rtype, N> max_array(const Kokkos::View<rtype **> & a) {
+std::array<rtype, N> max_array(Kokkos::View<rtype **> a) {
     std::array<rtype, N> max;
     for (u_int32_t i = 0; i < N; ++i) {
         rtype max_i = std::numeric_limits<rtype>::lowest();
@@ -570,7 +570,7 @@ std::array<rtype, N> max_array(const Kokkos::View<rtype **> & a) {
  * @return Minimum of each element.
  */
 template <u_int32_t N>
-std::array<rtype, N> min_array(const Kokkos::View<rtype **> & a) {
+std::array<rtype, N> min_array(Kokkos::View<rtype **> a) {
     std::array<rtype, N> min;
     for (u_int32_t i = 0; i < N; ++i) {
         rtype min_i = std::numeric_limits<rtype>::max();
