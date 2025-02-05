@@ -7,3 +7,6 @@
 [submodule "src/external/toml11"]
 	path = src/external/toml11
 	url = https://github.com/ToruNiina/toml11.git
+[submodule "src/external/hdf5"]
+	path = src/external/hdf5
+	url = https://github.com/HDFGroup/hdf5.git

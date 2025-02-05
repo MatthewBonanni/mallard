@@ -1,6 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
 project(Mallard VERSION 0.1.0 LANGUAGES CXX)
-
 set(CMAKE_CXX_STANDARD 20)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -17,9 +16,20 @@ if(${PROJECT_NAME}_USE_DOUBLES)
     add_compile_definitions(${PROJECT_NAME}_USE_DOUBLES)
 endif()
 
-# Add Kokkos and KokkosKernels subdirectories
-option(USE_SYSTEM_KOKKOS "Use system-installed Kokkos" ON)
+# Add HDF5 dependency
+option(USE_SYSTEM_HDF5 "Use system-installed HDF5" ON)
+if(USE_SYSTEM_HDF5)
+    find_package(HDF5 REQUIRED COMPONENTS CXX)
+    message(STATUS "Found system HDF5: version ${HDF5_VERSION}")
+    include_directories(${HDF5_INCLUDE_DIRS})
+else()
+    message(STATUS "Using external HDF5 from submodule")
+    add_subdirectory(src/external/hdf5 ${CMAKE_BINARY_DIR}/external/hdf5)
+    include_directories(${CMAKE_BINARY_DIR}/external/hdf5)
+endif()
 
+# Add Kokkos and KokkosKernels dependencies
+option(USE_SYSTEM_KOKKOS "Use system-installed Kokkos" ON)
 if(USE_SYSTEM_KOKKOS)
     find_package(Kokkos REQUIRED)
     find_package(KokkosKernels REQUIRED)
