@@ -146,7 +146,7 @@ void DataWriter::write_vtu(u_int32_t step) const {
     out << "      <Cells>\n";
 
     // connectivity
-    out << "        <DataArray type=\"Int32\" Name=\"connectivity\" ";
+    out << "        <DataArray type=\"UInt32\" Name=\"connectivity\" ";
     out << "format=\"appended\" ";
     out << "offset=\"" << offset_data << "\">\n";
     out << "        </DataArray>\n";
@@ -156,14 +156,14 @@ void DataWriter::write_vtu(u_int32_t step) const {
     offset_data += sizeof(int) + len_connectivity * sizeof(int);
 
     // offsets
-    out << "        <DataArray type=\"Int32\" Name=\"offsets\" ";
+    out << "        <DataArray type=\"UInt32\" Name=\"offsets\" ";
     out << "format=\"appended\" ";
     out << "offset=\"" << offset_data << "\">\n";
     out << "        </DataArray>\n";
     offset_data += sizeof(int) + mesh->n_cells * sizeof(int);
 
     // types
-    out << "        <DataArray type=\"Int32\" Name=\"types\" ";
+    out << "        <DataArray type=\"UInt8\" Name=\"types\" ";
     out << "format=\"appended\" ";
     out << "offset=\"" << offset_data << "\">\n";
     out << "        </DataArray>\n";
@@ -215,17 +215,17 @@ void DataWriter::write_vtu(u_int32_t step) const {
     for (u_int32_t i = 0; i < mesh->n_cells; i++) {
         for (u_int32_t j = 0; j < mesh->h_n_nodes_of_cell(i); j++) {
             i_node = mesh->h_node_of_cell(i, j);
-            out.write(reinterpret_cast<const char *>(&i_node), sizeof(int));
+            out.write(reinterpret_cast<const char *>(&i_node), sizeof(u_int32_t));
         }
     }
 
     // offsets
     n_bytes = sizeof(int) * mesh->n_cells;
     out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
-    u_int64_t offset = 0;
+    u_int32_t offset = 0;
     for (u_int32_t i = 0; i < mesh->n_cells; i++) {
         offset += mesh->h_n_nodes_of_cell(i);
-        out.write(reinterpret_cast<const char *>(&offset), sizeof(int));
+        out.write(reinterpret_cast<const char *>(&offset), sizeof(u_int32_t));
     }
 
     // types
@@ -233,7 +233,7 @@ void DataWriter::write_vtu(u_int32_t step) const {
     out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
     u_int8_t cell_type = 7;
     for (u_int32_t i = 0; i < mesh->n_cells; i++) {
-        out.write(reinterpret_cast<const char *>(&cell_type), sizeof(int));
+        out.write(reinterpret_cast<const char *>(&cell_type), sizeof(u_int8_t));
     }
 
     out << "\n";
