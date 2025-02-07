@@ -987,8 +987,8 @@ struct TENOFunctor {
                     uint8_t i_cell_loc = cells_of_face(i_face, 0) == (int32_t)i_cell ? 0 : 1;
 
                     // Get the transformed coordinates of the face nodes
-                    uint32_t i_node_0 = nodes_of_face(offsets_nodes_of_face(i_face_loc) + 0);
-                    uint32_t i_node_1 = nodes_of_face(offsets_nodes_of_face(i_face_loc) + 1);
+                    uint32_t i_node_0 = nodes_of_face(offsets_nodes_of_face(i_face) + 0);
+                    uint32_t i_node_1 = nodes_of_face(offsets_nodes_of_face(i_face) + 1);
                     rtype x0[N_DIM];
                     rtype x1[N_DIM];
                     FOR_I_DIM x0[i] = node_coords(i_node_0, i) - w0[i];
