@@ -59,20 +59,20 @@ class DataWriter {
          * @param step Current time step.
          * @param force Force write.
          */
-        void write(u_int32_t step, bool force = false) const;
+        void write(uint32_t step, bool force = false) const;
     protected:
         /**
          * @brief Write the data in VTU format.
          */
-        void write_vtu(u_int32_t step) const;
+        void write_vtu(uint32_t step) const;
 
         /**
          * @brief Write the data in Tecplot format.
          */
-        void write_tecplot(u_int32_t step) const;
+        void write_tecplot(uint32_t step) const;
 
         std::string prefix;
-        u_int32_t interval;
+        uint32_t interval;
         DataFormat format;
         std::vector<const Data *> data_ptrs;
         std::shared_ptr<Mesh> mesh;

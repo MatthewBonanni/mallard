@@ -84,7 +84,7 @@ void Solver::init_solution_constant() {
     rtype rhou_y = rho * u[1];
     rtype rhoE = rho * E;
 
-    for (u_int32_t i = 0; i < mesh->n_cells; ++i) {
+    for (uint32_t i = 0; i < mesh->n_cells; ++i) {
         h_conservatives(i, 0) = rho;
         h_conservatives(i, 1) = rhou_x;
         h_conservatives(i, 2) = rhou_y;
@@ -108,7 +108,7 @@ void Solver::init_solution_analytical() {
     bool rho_in = input["initialize"].contains("rho");
     bool p_in = input["initialize"].contains("p");
     bool T_in = input["initialize"].contains("T");
-    u_int8_t n_specified = rho_in + p_in + T_in;
+    uint8_t n_specified = rho_in + p_in + T_in;
     if (n_specified != 2) {
         throw std::runtime_error("Exactly two of rho, p, and T must be specified for initialization: analytical.");
     }
@@ -146,7 +146,7 @@ void Solver::init_solution_analytical() {
     rtype p, T;
     rtype rho, e, E, h, rhou_x, rhou_y, rhoE;
 
-    for (u_int32_t i = 0; i < mesh->n_cells; ++i) {
+    for (uint32_t i = 0; i < mesh->n_cells; ++i) {
         x = mesh->h_cell_coords(i, 0);
         y = mesh->h_cell_coords(i, 1);
 

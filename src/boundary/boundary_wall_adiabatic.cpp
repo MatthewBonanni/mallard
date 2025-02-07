@@ -36,8 +36,8 @@ void BoundaryWallAdiabatic::init(const toml::value & input) {
 }
 
 template <typename T_physics, typename T_riemann_solver>
-void BoundaryWallAdiabatic::WallAdiabaticFluxFunctor<T_physics, T_riemann_solver>::call_impl(const u_int32_t i_face_local) const {
-    const u_int8_t n_quad = this->quad_weights.extent(0);
+void BoundaryWallAdiabatic::WallAdiabaticFluxFunctor<T_physics, T_riemann_solver>::call_impl(const uint32_t i_face_local) const {
+    const uint8_t n_quad = this->quad_weights.extent(0);
     rtype flux_temp[N_CONSERVATIVE];
     rtype flux[N_CONSERVATIVE];
     rtype conservatives_l[N_CONSERVATIVE];
@@ -45,12 +45,12 @@ void BoundaryWallAdiabatic::WallAdiabaticFluxFunctor<T_physics, T_riemann_solver
     rtype n_vec[N_DIM];
     rtype n_unit[N_DIM];
 
-    u_int32_t i_face = this->faces(i_face_local);
+    uint32_t i_face = this->faces(i_face_local);
     FOR_I_DIM n_vec[i] = this->normals(i_face, i);
     unit<N_DIM>(n_vec, n_unit);
 
     FOR_I_CONSERVATIVE flux[i] = 0.0;
-    for (u_int8_t i_quad = 0; i_quad < n_quad; i_quad++) {
+    for (uint8_t i_quad = 0; i_quad < n_quad; i_quad++) {
         // Compute the flux at the quadrature point
         FOR_I_CONSERVATIVE conservatives_l[i] = this->face_solution(i_face, i_quad, 0, i);
         this->physics.compute_primitives_from_conservatives(primitives_l, conservatives_l);

@@ -267,7 +267,7 @@ void Solver::init_run_parameters() {
         cfl = toml::find<rtype>(input, "run", "cfl");
     }
 
-    n_steps = toml::find_or<u_int32_t>(input, "run", "n_steps", -1);
+    n_steps = toml::find_or<uint32_t>(input, "run", "n_steps", -1);
     t_stop = toml::find_or<rtype>(input, "run", "t_stop", -1.0);
     t_wall_stop = toml::find_or<rtype>(input, "run", "t_wall_stop", -1.0);
 }
@@ -275,7 +275,7 @@ void Solver::init_run_parameters() {
 void Solver::init_output() {
     std::cout << "Initializing output..." << std::endl;
 
-    check_interval = toml::find_or<u_int32_t>(input, "output", "check_interval", 1);
+    check_interval = toml::find_or<uint32_t>(input, "output", "check_interval", 1);
 
     init_data_writers();
 }
@@ -308,12 +308,12 @@ void Solver::allocate_memory() {
     h_cfl_local = Kokkos::create_mirror_view(cfl_local);
 
     solution_vec.push_back(conservatives);
-    for (u_int8_t i = 0; i < time_integrator->get_n_solution_vectors() - 1; i++) {
+    for (uint8_t i = 0; i < time_integrator->get_n_solution_vectors() - 1; i++) {
         Kokkos::View<rtype *[N_CONSERVATIVE]> solution("solution", mesh->n_cells);
         solution_vec.push_back(solution);
     }
 
-    for (u_int8_t i = 0; i < time_integrator->get_n_rhs_vectors(); i++) {
+    for (uint8_t i = 0; i < time_integrator->get_n_rhs_vectors(); i++) {
         Kokkos::View<rtype *[N_CONSERVATIVE]> rhs("rhs", mesh->n_cells);
         rhs_vec.push_back(rhs);
     }
@@ -467,7 +467,7 @@ void Solver::check_fields() const {
     }
 
     bool nan_found = false;
-    for (u_int32_t i_cell = 0; i_cell < mesh->n_cells; i_cell++) {
+    for (uint32_t i_cell = 0; i_cell < mesh->n_cells; i_cell++) {
         FOR_I_CONSERVATIVE {
             if (Kokkos::isnan(h_conservatives(i_cell, i))) {
                 nan_found = true;
@@ -551,7 +551,7 @@ struct UpdatePrimitivesFunctor {
          * @param i_cell Cell index.
          */
         KOKKOS_INLINE_FUNCTION
-        void operator()(const u_int32_t i_cell) const {
+        void operator()(const uint32_t i_cell) const {
             rtype cell_conservatives[N_CONSERVATIVE];
             rtype cell_primitives[N_PRIMITIVE];
             FOR_I_CONSERVATIVE cell_conservatives[i] = conservatives(i_cell, i);
@@ -604,7 +604,7 @@ struct SpectralRadiusFunctor {
          * @param primitives Primitives.
          * @param cfl_local Local CFL.
          */
-        SpectralRadiusFunctor(Kokkos::View<u_int32_t *> offsets_faces_of_cell,
+        SpectralRadiusFunctor(Kokkos::View<uint32_t *> offsets_faces_of_cell,
                               Kokkos::View<int32_t *[2]> cells_of_face,
                               Kokkos::View<rtype *[N_DIM]> face_normals,
                               Kokkos::View<rtype *[N_DIM]> cell_coords,
@@ -629,7 +629,7 @@ struct SpectralRadiusFunctor {
          * @param max_spectral_radius_i Max spectral radius for cell i_cell.
          */
         KOKKOS_INLINE_FUNCTION
-        void operator()(const u_int32_t i_cell, rtype & max_spectral_radius_i) const {
+        void operator()(const uint32_t i_cell, rtype & max_spectral_radius_i) const {
             rtype spectral_radius_convective;
             rtype spectral_radius_acoustic;
             // rtype spectral_radius_viscous;
@@ -647,9 +647,9 @@ struct SpectralRadiusFunctor {
             // spectral_radius_viscous = 0.0;
             // spectral_radius_heat = 0.0;
 
-            u_int32_t n_faces = offsets_faces_of_cell(i_cell + 1) - offsets_faces_of_cell(i_cell);
+            uint32_t n_faces = offsets_faces_of_cell(i_cell + 1) - offsets_faces_of_cell(i_cell);
 
-            for (u_int32_t i_face = 0; i_face < n_faces; i_face++) {
+            for (uint32_t i_face = 0; i_face < n_faces; i_face++) {
                 int32_t i_cell_l = cells_of_face(i_face, 0);
                 int32_t i_cell_r = cells_of_face(i_face, 1);
                 FOR_I_DIM n_vec[i] = face_normals(i_face, i);
@@ -702,7 +702,7 @@ struct SpectralRadiusFunctor {
         }
     
     private:
-        Kokkos::View<u_int32_t *> offsets_faces_of_cell;
+        Kokkos::View<uint32_t *> offsets_faces_of_cell;
         Kokkos::View<int32_t *[2]> cells_of_face;
         Kokkos::View<rtype *[N_DIM]> face_normals;
         Kokkos::View<rtype *[N_DIM]> cell_coords;

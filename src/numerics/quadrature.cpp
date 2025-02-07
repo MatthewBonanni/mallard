@@ -20,7 +20,7 @@ void Quadrature::copy_host_to_device() {
     Kokkos::deep_copy(weights, h_weights);
 }
 
-GaussLegendre::GaussLegendre(u_int8_t order) {
+GaussLegendre::GaussLegendre(uint8_t order) {
     this->dim = 1;
     this->order = order;
     switch (order) {
@@ -150,7 +150,7 @@ GaussLegendre::GaussLegendre(u_int8_t order) {
     copy_host_to_device();
 }
 
-TriangleDunavant::TriangleDunavant(u_int8_t order) {
+TriangleDunavant::TriangleDunavant(uint8_t order) {
     this->dim = 2;
     this->order = order;
     switch (order) {

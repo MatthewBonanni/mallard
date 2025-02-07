@@ -72,7 +72,7 @@ class BoundaryUPT : public Boundary {
                                                       T_physics,
                                                       T_riemann_solver> {
             public:
-                UPTFluxFunctor(Kokkos::View<u_int32_t *> faces,
+                UPTFluxFunctor(Kokkos::View<uint32_t *> faces,
                                Kokkos::View<rtype *[N_DIM]> normals,
                                Kokkos::View<rtype *> face_area,
                                Kokkos::View<int32_t *[2]> cells_of_face,
@@ -96,8 +96,8 @@ class BoundaryUPT : public Boundary {
                                    data_bc(data_bc) {}
 
                 KOKKOS_INLINE_FUNCTION
-                void calc_lr_states_impl(const u_int32_t i_face,
-                                         const u_int8_t i_quad,
+                void calc_lr_states_impl(const uint32_t i_face,
+                                         const uint8_t i_quad,
                                          rtype * conservatives_l,
                                          rtype * conservatives_r,
                                          rtype * primitives_l,

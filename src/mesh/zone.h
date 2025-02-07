@@ -70,7 +70,7 @@ class FaceZone : public Zone {
          * @brief Get the number of faces in the zone.
          * @return Number of faces in the zone.
          */
-        u_int32_t n_faces() const;
+        uint32_t n_faces() const;
 
         /**
          * @brief Get the type of the zone.
@@ -94,8 +94,8 @@ class FaceZone : public Zone {
          */
         void copy_device_to_host();
 
-        Kokkos::View<u_int32_t *> faces;
-        Kokkos::View<u_int32_t *>::HostMirror h_faces;
+        Kokkos::View<uint32_t *> faces;
+        Kokkos::View<uint32_t *>::HostMirror h_faces;
     protected:
     private:
         FaceZoneType type;
@@ -117,7 +117,7 @@ class CellZone : public Zone {
          * @brief Get the number of cells in the zone.
          * @return Number of cells in the zone.
          */
-        u_int32_t n_cells() const;
+        uint32_t n_cells() const;
 
         /**
          * @brief Get the type of the zone.
@@ -135,8 +135,8 @@ class CellZone : public Zone {
          */
         void copy_device_to_host();
 
-        Kokkos::View<u_int32_t *> cells;
-        Kokkos::View<u_int32_t *>::HostMirror h_cells;
+        Kokkos::View<uint32_t *> cells;
+        Kokkos::View<uint32_t *>::HostMirror h_cells;
     protected:
     private:
         CellZoneType m_type;

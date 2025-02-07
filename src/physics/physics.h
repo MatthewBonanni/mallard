@@ -588,15 +588,15 @@ class Euler : public Physics<Euler> {
         Kokkos::View<rtype [9]> constants;
         Kokkos::View<rtype [9]>::HostMirror h_constants;
 
-        u_int8_t i_gamma = 0;
-        u_int8_t i_p_ref = 1;
-        u_int8_t i_T_ref = 2;
-        u_int8_t i_rho_ref = 3;
-        u_int8_t i_R = 4;
-        u_int8_t i_cp = 5;
-        u_int8_t i_cv = 6;
-        u_int8_t i_p_min = 7;
-        u_int8_t i_p_max = 8;
+        uint8_t i_gamma = 0;
+        uint8_t i_p_ref = 1;
+        uint8_t i_T_ref = 2;
+        uint8_t i_rho_ref = 3;
+        uint8_t i_R = 4;
+        uint8_t i_cp = 5;
+        uint8_t i_cv = 6;
+        uint8_t i_p_min = 7;
+        uint8_t i_p_max = 8;
 };
 
 // Type-erased wrapper

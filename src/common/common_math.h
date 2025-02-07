@@ -28,10 +28,10 @@
  * @tparam N Length of the arrays.
  * @return Dot product.
  */
-template <u_int32_t N> KOKKOS_INLINE_FUNCTION
+template <uint32_t N> KOKKOS_INLINE_FUNCTION
 rtype dot(const rtype * a, const rtype * b) {
     rtype dot = 0.0;
-    for (u_int32_t i = 0; i < N; i++) {
+    for (uint32_t i = 0; i < N; i++) {
         dot += a[i] * b[i];
     }
     return dot;
@@ -58,7 +58,7 @@ rtype dot<3>(const rtype * a, const rtype * b) {
  * @tparam N Length of the vector.
  * @return Norm.
  */
-template <u_int32_t N> KOKKOS_INLINE_FUNCTION
+template <uint32_t N> KOKKOS_INLINE_FUNCTION
 rtype norm_2(const rtype * v) {
     rtype norm = 0.0;
     for (u_int64_t i = 0; i < N; ++i) {
@@ -85,7 +85,7 @@ rtype norm_2<3>(const rtype * v) {
  * @param u Unit vector.
  * @tparam N Length of the vector.
  */
-template <u_int32_t N> KOKKOS_INLINE_FUNCTION
+template <uint32_t N> KOKKOS_INLINE_FUNCTION
 void unit(const rtype * v, rtype * u) {
     rtype norm = 0.0;
     for (u_int64_t i = 0; i < N; ++i) {
@@ -124,9 +124,9 @@ void unit<3>(const rtype * v, rtype * u) {
  * @param n Number of columns in A
  */
 KOKKOS_INLINE_FUNCTION
-void transpose(const rtype * A, rtype * AT, const u_int16_t m, const u_int16_t n) {
-    for (u_int16_t i = 0; i < m; i++) {
-        for (u_int16_t j = 0; j < n; j++) {
+void transpose(const rtype * A, rtype * AT, const uint16_t m, const uint16_t n) {
+    for (uint16_t i = 0; i < m; i++) {
+        for (uint16_t j = 0; j < n; j++) {
             AT[j*m + i] = A[i*n + j];
         }
     }
@@ -138,7 +138,7 @@ void transpose(const rtype * A, rtype * AT, const u_int16_t m, const u_int16_t n
  * @param A Matrix to invert.
  * @param A_inv Inverted matrix.
  */
-template <u_int32_t N> KOKKOS_INLINE_FUNCTION
+template <uint32_t N> KOKKOS_INLINE_FUNCTION
 void invert_matrix(const rtype * A, rtype * A_inv);
 
 // Explicit instantiation for N = 2
@@ -200,7 +200,7 @@ void invert_matrix<3>(const rtype * A, rtype * A_inv) {
  * @param x Vector.
  * @param y Resulting vector.
  */
-template <u_int32_t N> KOKKOS_INLINE_FUNCTION
+template <uint32_t N> KOKKOS_INLINE_FUNCTION
 void gemv(const rtype * A, const rtype * x, rtype * y);
 
 // Explicit instantiation for N = 2
@@ -241,12 +241,13 @@ KOKKOS_INLINE_FUNCTION
 void gemm(const rtype * A,
           const rtype * B,
           rtype * C,
-          const u_int16_t m,
-          const u_int16_t n,
-          const u_int16_t p,
-          const u_int16_t q,
+          const uint16_t m,
+          const uint16_t n,
+          const uint16_t p,
+          const uint16_t q,
           const bool tA,
-          const bool tB) {
+          const bool tB,
+          const bool print_debug = false) {
     // Handle in-place multiplication
     rtype * C_out;
     if (C == A || C == B) {
@@ -260,10 +261,10 @@ void gemm(const rtype * A,
         if (n != p) {
             Kokkos::abort("Invalid matrix dimensions.");
         }
-        for (u_int16_t i = 0; i < m; i++) {
-            for (u_int16_t j = 0; j < q; j++) {
+        for (uint16_t i = 0; i < m; i++) {
+            for (uint16_t j = 0; j < q; j++) {
                 rtype sum = 0.0;
-                for (u_int16_t k = 0; k < n; k++) {
+                for (uint16_t k = 0; k < n; k++) {
                     sum += A[i*n + k] * B[k*q + j];
                 }
                 C_out[i*q + j] = sum;
@@ -273,10 +274,10 @@ void gemm(const rtype * A,
         if (m != p) {
             Kokkos::abort("Invalid matrix dimensions.");
         }
-        for (u_int16_t i = 0; i < n; i++) {
-            for (u_int16_t j = 0; j < q; j++) {
+        for (uint16_t i = 0; i < n; i++) {
+            for (uint16_t j = 0; j < q; j++) {
                 rtype sum = 0.0;
-                for (u_int16_t k = 0; k < m; k++) {
+                for (uint16_t k = 0; k < m; k++) {
                     sum += A[k*n + i] * B[k*q + j];
                 }
                 C_out[i*q + j] = sum;
@@ -286,10 +287,10 @@ void gemm(const rtype * A,
         if (n != q) {
             Kokkos::abort("Invalid matrix dimensions.");
         }
-        for (u_int16_t i = 0; i < m; i++) {
-            for (u_int16_t j = 0; j < p; j++) {
+        for (uint16_t i = 0; i < m; i++) {
+            for (uint16_t j = 0; j < p; j++) {
                 rtype sum = 0.0;
-                for (u_int16_t k = 0; k < n; k++) {
+                for (uint16_t k = 0; k < n; k++) {
                     sum += A[i*n + k] * B[j*q + k];
                 }
                 C_out[i*p + j] = sum;
@@ -299,10 +300,10 @@ void gemm(const rtype * A,
         if (m != q) {
             Kokkos::abort("Invalid matrix dimensions.");
         }
-        for (u_int16_t i = 0; i < n; i++) {
-            for (u_int16_t j = 0; j < p; j++) {
+        for (uint16_t i = 0; i < n; i++) {
+            for (uint16_t j = 0; j < p; j++) {
                 rtype sum = 0.0;
-                for (u_int16_t k = 0; k < m; k++) {
+                for (uint16_t k = 0; k < m; k++) {
                     sum += A[k*n + i] * B[j*q + k];
                 }
                 C_out[i*p + j] = sum;
@@ -312,10 +313,34 @@ void gemm(const rtype * A,
 
     // Copy result back to C if necessary
     if (C == A || C == B) {
-        for (u_int16_t i = 0; i < m*q; i++) {
+        for (uint16_t i = 0; i < m*q; i++) {
             C[i] = C_out[i];
         }
         delete[] C_out;
+    }
+
+    if (print_debug) {
+        printf("A: %d x %d\n", m, n);
+        for (uint16_t i = 0; i < m; i++) {
+            for (uint16_t j = 0; j < n; j++) {
+                printf("%8.3f ", A[i*n + j]);
+            }
+            printf("\n");
+        }
+        printf("B: %d x %d\n", p, q);
+        for (uint16_t i = 0; i < p; i++) {
+            for (uint16_t j = 0; j < q; j++) {
+                printf("%8.3f ", B[i*q + j]);
+            }
+            printf("\n");
+        }
+        printf("C: %d x %d\n", m, q);
+        for (uint16_t i = 0; i < m; i++) {
+            for (uint16_t j = 0; j < q; j++) {
+                printf("%8.3f ", C_out[i*q + j]);
+            }
+            printf("\n");
+        }
     }
 }
 
@@ -330,24 +355,24 @@ void gemm(const rtype * A,
 KOKKOS_INLINE_FUNCTION
 void QR_householder_noQ(const rtype * A,
                         rtype * R,
-                        const u_int16_t m,
-                        const u_int16_t n) {
+                        const uint16_t m,
+                        const uint16_t n) {
     // Copy A into R (m×n)
-    for (u_int16_t i = 0; i < m; i++) {
-        for (u_int16_t j = 0; j < n; j++) {
+    for (uint16_t i = 0; i < m; i++) {
+        for (uint16_t j = 0; j < n; j++) {
             R[i*n + j] = A[i*n + j];
         }
     }
 
     // Iterate over columns of A
-    rtype v[m];
-    rtype Q_j[m*m];
-    for (u_int16_t j = 0; j < n; j++) {
+    rtype * v = new rtype[m];
+    rtype * Q_j = new rtype[m*m];
+    for (uint16_t j = 0; j < n; j++) {
         // Compute the norm of the first column of the submatrix
         // The submatrix is taken from R = Q_j-1 ... Q_2 Q_1 A
         // starting at the j-th column
         rtype norm_x = 0.0;
-        for (u_int16_t i = j; i < m; i++) {
+        for (uint16_t i = j; i < m; i++) {
             norm_x += R[i*n + j] * R[i*n + j];
         }
         norm_x = Kokkos::sqrt(norm_x);
@@ -359,7 +384,7 @@ void QR_householder_noQ(const rtype * A,
         rtype sign = (R[j*n + j] >= 0.0) ? 1.0 : -1.0;        
         rtype alpha = -sign * norm_x;
         rtype norm_u = 0.0;
-        for (u_int16_t k = 0; k < m - j; k++) {
+        for (uint16_t k = 0; k < m - j; k++) {
             v[k] = R[(j+k)*n + j];
             if (k == 0) {
                 v[k] -= alpha;
@@ -367,19 +392,19 @@ void QR_householder_noQ(const rtype * A,
             norm_u += v[k] * v[k];
         }
         norm_u = Kokkos::sqrt(norm_u);
-        for (u_int16_t k = 0; k < m - j; k++) {
+        for (uint16_t k = 0; k < m - j; k++) {
             v[k] /= norm_u;
         }
 
         // Compute the Q_j matrix
         // Q_j = I - 2 v v^T
-        for (u_int16_t i = 0; i < m; i++) {
-            for (u_int16_t k = 0; k < m; k++) {
+        for (uint16_t i = 0; i < m; i++) {
+            for (uint16_t k = 0; k < m; k++) {
                 Q_j[i*m + k] = (i == k) ? 1.0 : 0.0;
             }
         }
-        for (u_int16_t i = j; i < m; i++) {
-            for (u_int16_t k = j; k < m; k++) {
+        for (uint16_t i = j; i < m; i++) {
+            for (uint16_t k = j; k < m; k++) {
                 Q_j[i*m + k] -= 2.0 * v[i-j] * v[k-j];
             }
         }
@@ -392,6 +417,8 @@ void QR_householder_noQ(const rtype * A,
         // R is already initialized to A above, so simply multiply
         gemm(Q_j, R, R, m, m, m, n, false, false);
     }
+    delete[] v;
+    delete[] Q_j;
 }
 
 /**
@@ -410,20 +437,20 @@ KOKKOS_INLINE_FUNCTION
 void forward_substitution(const rtype * L,
                           const rtype * B,
                           rtype * X,
-                          const u_int16_t m,
-                          const u_int16_t n,
-                          const u_int16_t p,
+                          const uint16_t m,
+                          const uint16_t n,
+                          const uint16_t p,
                           const bool tL,
                           const bool tB) {
-    for (u_int16_t i = 0; i < m; i++) {
-        for (u_int16_t j = 0; j < p; j++) {
+    for (uint16_t i = 0; i < m; i++) {
+        for (uint16_t j = 0; j < p; j++) {
             rtype sum = 0.0;
-            for (u_int16_t k = 0; k < i; k++) {
-                u_int16_t idx_L = tL ? k*m + i : i*n + k;
+            for (uint16_t k = 0; k < i; k++) {
+                uint16_t idx_L = tL ? k*m + i : i*n + k;
                 sum += L[idx_L] * X[k*p + j];
             }
-            u_int16_t idx_B = tB ? j*n + i : i*p + j;
-            u_int16_t idx_L = tL ? i*m + i : i*n + i;
+            uint16_t idx_B = tB ? j*n + i : i*p + j;
+            uint16_t idx_L = tL ? i*m + i : i*n + i;
             X[i*p + j] = (B[idx_B] - sum) / L[idx_L];
         }
     }
@@ -445,21 +472,21 @@ KOKKOS_INLINE_FUNCTION
 void back_substitution(const rtype * U,
                        const rtype * B,
                        rtype * X,
-                       const u_int16_t m,
-                       const u_int16_t n,
-                       const u_int16_t p,
+                       const uint16_t m,
+                       const uint16_t n,
+                       const uint16_t p,
                        const bool tU,
                        const bool tB) {
     for (int16_t i = m - 1; i >= 0; i--) {
-        for (u_int16_t j = 0; j < p; j++) {
+        for (uint16_t j = 0; j < p; j++) {
             rtype sum = 0.0;
-            u_int16_t end = tU ? n : m;
-            for (u_int16_t k = i + 1; k < end; k++) {
-                u_int16_t idx_U = tU ? k*m + i : i*n + k;
+            uint16_t end = tU ? n : m;
+            for (uint16_t k = i + 1; k < end; k++) {
+                uint16_t idx_U = tU ? k*m + i : i*n + k;
                 sum += U[idx_U] * X[k*p + j];
             }
-            u_int16_t idx_B = tB ? j*n + i : i*p + j;
-            u_int16_t idx_U = tU ? i*m + i : i*n + i;
+            uint16_t idx_B = tB ? j*n + i : i*p + j;
+            uint16_t idx_U = tU ? i*m + i : i*n + i;
             X[i*p + j] = (B[idx_B] - sum) / U[idx_U];
         }
     }
@@ -473,7 +500,7 @@ void back_substitution(const rtype * U,
  * @param v2 Coordinates of the third vertex.
  * @return Area of the triangle.
  */
-template <u_int32_t N> KOKKOS_INLINE_FUNCTION
+template <uint32_t N> KOKKOS_INLINE_FUNCTION
 rtype triangle_area(const rtype * v0,
                     const rtype * v1,
                     const rtype * v2);
@@ -546,13 +573,13 @@ void tetrahedron_J(const rtype * v0,
  * @param a Array.
  * @return Maximum of each element.
  */
-template <u_int32_t N>
+template <uint32_t N>
 std::array<rtype, N> max_array(Kokkos::View<rtype **> a) {
     std::array<rtype, N> max;
-    for (u_int32_t i = 0; i < N; ++i) {
+    for (uint32_t i = 0; i < N; ++i) {
         rtype max_i = std::numeric_limits<rtype>::lowest();
         Kokkos::parallel_reduce(a.extent(0),
-                                KOKKOS_LAMBDA(const u_int32_t j, rtype & max_j) {
+                                KOKKOS_LAMBDA(const uint32_t j, rtype & max_j) {
             if (a(j, i) > max_j) {
                 max_j = a(j, i);
             }
@@ -569,13 +596,13 @@ std::array<rtype, N> max_array(Kokkos::View<rtype **> a) {
  * @param a Array.
  * @return Minimum of each element.
  */
-template <u_int32_t N>
+template <uint32_t N>
 std::array<rtype, N> min_array(Kokkos::View<rtype **> a) {
     std::array<rtype, N> min;
-    for (u_int32_t i = 0; i < N; ++i) {
+    for (uint32_t i = 0; i < N; ++i) {
         rtype min_i = std::numeric_limits<rtype>::max();
         Kokkos::parallel_reduce(a.extent(0),
-                                KOKKOS_LAMBDA(const u_int32_t j, rtype & min_j) {
+                                KOKKOS_LAMBDA(const uint32_t j, rtype & min_j) {
             if (a(j, i) < min_j) {
                 min_j = a(j, i);
             }

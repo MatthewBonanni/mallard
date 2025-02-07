@@ -37,7 +37,7 @@ static const std::unordered_map<BasisType, std::string> BASIS_NAMES = {
 };
 
 template <typename T>
-concept BasisTraits = requires(T t, u_int8_t n, u_int8_t p, rtype x) {
+concept BasisTraits = requires(T t, uint8_t n, uint8_t p, rtype x) {
     { T::compute_1D(p, x) } -> std::same_as<rtype>;
     { T::derivative_1D(n, p, x) } -> std::same_as<rtype>;
 };
@@ -46,17 +46,17 @@ template <typename Traits>
 requires BasisTraits<Traits>
 struct BasisDispatcher {
     KOKKOS_INLINE_FUNCTION
-    static rtype compute_1D(u_int8_t p, rtype x) {
+    static rtype compute_1D(uint8_t p, rtype x) {
         return Traits::compute_1D(p, x);
     }
 
     KOKKOS_INLINE_FUNCTION
-    static rtype derivative_1D(u_int8_t n, u_int8_t p, rtype x) {
+    static rtype derivative_1D(uint8_t n, uint8_t p, rtype x) {
         return Traits::derivative_1D(n, p, x);
     }
 
     KOKKOS_INLINE_FUNCTION
-    static rtype compute_2D(u_int8_t px, u_int8_t py, rtype x, rtype y) {
+    static rtype compute_2D(uint8_t px, uint8_t py, rtype x, rtype y) {
         return compute_1D(px, x) * compute_1D(py, y);
     }
 };
@@ -64,14 +64,14 @@ struct BasisDispatcher {
 
 struct MonomialTraits {
     KOKKOS_INLINE_FUNCTION
-    static rtype compute_1D(u_int8_t p, rtype x) {
+    static rtype compute_1D(uint8_t p, rtype x) {
         return Kokkos::pow(x, p);
     }
 
     KOKKOS_INLINE_FUNCTION
-    static rtype derivative_1D(u_int8_t n, u_int8_t p, rtype x) {
+    static rtype derivative_1D(uint8_t n, uint8_t p, rtype x) {
         rtype result = Kokkos::pow(x, p - n);
-        for (u_int8_t k = 0; k < n; ++k) {
+        for (uint8_t k = 0; k < n; ++k) {
             result *= (p - k + 1);
         }
         return result;
@@ -80,7 +80,7 @@ struct MonomialTraits {
 
 struct LegendreTraits {
     KOKKOS_INLINE_FUNCTION
-    static rtype compute_1D(u_int8_t p, rtype x) {
+    static rtype compute_1D(uint8_t p, rtype x) {
         // Hardcode for p <= 9
         if (p == 0) return 1.0       * (    1.0                                                                                       );
         if (p == 1) return 1.0       * (    1.0*x                                                                                     );
@@ -107,11 +107,7 @@ struct LegendreTraits {
     }
 
     KOKKOS_INLINE_FUNCTION
-    static rtype derivative_1D(u_int8_t n, u_int8_t p, rtype x) {
-        if (p > 9) {
-            Kokkos::abort("Legendre polynomial derivatives not implemented for p > 7.");
-        }
-
+    static rtype derivative_1D(uint8_t n, uint8_t p, rtype x) {
         // Early return for n > p
         if (n > p) {
             return 0.0;
@@ -182,12 +178,14 @@ struct LegendreTraits {
             if (p == 9) return 0.0078125 * (12155.0*9.0*8.0*7.0*6.0*5.0*4.0*3.0*2.0*x);
         } else if (n == 9) {
             if (p == 9) return 0.0078125 * (12155.0*9.0*8.0*7.0*6.0*5.0*4.0*3.0*2.0*1.0);
+        } else {
+            Kokkos::abort("Legendre polynomial derivatives not implemented for n > 9.");
         }
     }
 };
 
 KOKKOS_INLINE_FUNCTION
-rtype dispatch_compute_1D(BasisType type, u_int8_t p, rtype x) {
+rtype dispatch_compute_1D(BasisType type, uint8_t p, rtype x) {
     switch (type) {
         case BasisType::MONOMIAL:
             return BasisDispatcher<MonomialTraits>::compute_1D(p, x);
@@ -199,7 +197,7 @@ rtype dispatch_compute_1D(BasisType type, u_int8_t p, rtype x) {
 }
 
 KOKKOS_INLINE_FUNCTION
-rtype dispatch_derivative_1D(BasisType type, u_int8_t n, u_int8_t p, rtype x) {
+rtype dispatch_derivative_1D(BasisType type, uint8_t n, uint8_t p, rtype x) {
     switch (type) {
         case BasisType::MONOMIAL:
             return BasisDispatcher<MonomialTraits>::derivative_1D(n, p, x);
@@ -211,7 +209,7 @@ rtype dispatch_derivative_1D(BasisType type, u_int8_t n, u_int8_t p, rtype x) {
 }
 
 KOKKOS_INLINE_FUNCTION
-rtype dispatch_compute_2D(BasisType type, u_int8_t px, u_int8_t py, rtype x, rtype y) {
+rtype dispatch_compute_2D(BasisType type, uint8_t px, uint8_t py, rtype x, rtype y) {
     switch (type) {
         case BasisType::MONOMIAL:
             return BasisDispatcher<MonomialTraits>::compute_2D(px, py, x, y);

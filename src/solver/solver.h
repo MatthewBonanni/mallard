@@ -239,7 +239,7 @@ class Solver {
                                  Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
 
         toml::value input;
-        u_int32_t n_steps;
+        uint32_t n_steps;
         rtype t_stop;
         rtype t_wall_stop;
         bool use_cfl;
@@ -251,7 +251,7 @@ class Solver {
         rtype t_last_check;
         rtype t_wall_0;
         rtype t_wall_last_check;
-        u_int32_t step;
+        uint32_t step;
         Kokkos::Timer timer;
 
         // Numerics and physics
@@ -270,7 +270,7 @@ class Solver {
                            Kokkos::View<rtype *[N_CONSERVATIVE]>)> rhs_func;
         
         // Checks
-        u_int32_t check_interval;
+        uint32_t check_interval;
         bool check_nan;
 
         // Outputs

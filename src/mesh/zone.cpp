@@ -35,7 +35,7 @@ FaceZone::~FaceZone() {
     // Empty
 }
 
-u_int32_t FaceZone::n_faces() const {
+uint32_t FaceZone::n_faces() const {
     return faces.extent(0);
 }
 
@@ -63,7 +63,7 @@ CellZone::~CellZone() {
     // Empty
 }
 
-u_int32_t CellZone::n_cells() const {
+uint32_t CellZone::n_cells() const {
     return cells.extent(0);
 }
 

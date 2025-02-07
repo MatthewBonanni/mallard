@@ -30,11 +30,11 @@ void TimeIntegrator::init() {
     print();
 }
 
-u_int8_t TimeIntegrator::get_n_solution_vectors() const {
+uint8_t TimeIntegrator::get_n_solution_vectors() const {
     return n_solution_vectors;
 }
 
-u_int8_t TimeIntegrator::get_n_rhs_vectors() const {
+uint8_t TimeIntegrator::get_n_rhs_vectors() const {
     return n_rhs_vectors;
 }
 

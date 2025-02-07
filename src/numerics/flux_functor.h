@@ -32,7 +32,7 @@ class BaseFluxFunctor {
          * @param physics Physics.
          * @param riemann_solver Riemann solver.
          */
-        BaseFluxFunctor(Kokkos::View<u_int32_t *> faces,
+        BaseFluxFunctor(Kokkos::View<uint32_t *> faces,
                         Kokkos::View<rtype *[N_DIM]> normals,
                         Kokkos::View<rtype *> face_area,
                         Kokkos::View<int32_t *[2]> cells_of_face,
@@ -56,7 +56,7 @@ class BaseFluxFunctor {
          * @param i_face_local Index into the faces view, which contains the global face index.
          */
         KOKKOS_INLINE_FUNCTION
-        void operator()(const u_int32_t i_face_local) const {
+        void operator()(const uint32_t i_face_local) const {
             static_cast<const Derived *>(this)->call_impl(i_face_local);
         }
 
@@ -65,7 +65,7 @@ class BaseFluxFunctor {
          * @param i_face_local Index into the faces view, which contains the global face index. 
          */
         KOKKOS_INLINE_FUNCTION
-        void call_impl(const u_int32_t i_face_local) const;
+        void call_impl(const uint32_t i_face_local) const;
     
         /**
          * @brief Calculate the left and right states.
@@ -77,8 +77,8 @@ class BaseFluxFunctor {
          * @param primitives_r Right primitives.
          */
         KOKKOS_INLINE_FUNCTION
-        void calc_lr_states(const u_int32_t i_face,
-                            const u_int8_t i_quad,
+        void calc_lr_states(const uint32_t i_face,
+                            const uint8_t i_quad,
                             rtype * conservatives_l,
                             rtype * conservatives_r,
                             rtype * primitives_l,
@@ -92,7 +92,7 @@ class BaseFluxFunctor {
         }
 
     protected:
-        Kokkos::View<u_int32_t *> faces;
+        Kokkos::View<uint32_t *> faces;
         Kokkos::View<rtype *[N_DIM]> normals;
         Kokkos::View<rtype *> face_area;
         Kokkos::View<int32_t *[2]> cells_of_face;
@@ -113,8 +113,8 @@ class InteriorFluxFunctor : public BaseFluxFunctor<InteriorFluxFunctor<T_physics
                               T_riemann_solver>::BaseFluxFunctor;
         
         KOKKOS_INLINE_FUNCTION
-        void calc_lr_states_impl(const u_int32_t i_face,
-                                 const u_int8_t i_quad,
+        void calc_lr_states_impl(const uint32_t i_face,
+                                 const uint8_t i_quad,
                                  rtype * conservatives_l,
                                  rtype * conservatives_r,
                                  rtype * primitives_l,
@@ -122,8 +122,8 @@ class InteriorFluxFunctor : public BaseFluxFunctor<InteriorFluxFunctor<T_physics
 };
 
 template <typename Derived, typename T_physics, typename T_riemann_solver>
-void BaseFluxFunctor<Derived, T_physics, T_riemann_solver>::call_impl(const u_int32_t i_face_local) const {
-    const u_int8_t n_quad = quad_weights.extent(0);
+void BaseFluxFunctor<Derived, T_physics, T_riemann_solver>::call_impl(const uint32_t i_face_local) const {
+    const uint8_t n_quad = quad_weights.extent(0);
     rtype flux_temp[N_CONSERVATIVE];
     rtype flux[N_CONSERVATIVE];
     rtype conservatives_l[N_CONSERVATIVE];
@@ -133,12 +133,12 @@ void BaseFluxFunctor<Derived, T_physics, T_riemann_solver>::call_impl(const u_in
     rtype n_vec[N_DIM];
     rtype n_unit[N_DIM];
     
-    const u_int32_t i_face = faces(i_face_local);
+    const uint32_t i_face = faces(i_face_local);
     FOR_I_DIM n_vec[i] = normals(i_face_local, i);
     unit<N_DIM>(n_vec, n_unit);
 
     FOR_I_CONSERVATIVE flux[i] = 0.0;
-    for (u_int8_t i_quad = 0; i_quad < n_quad; i_quad++) {
+    for (uint8_t i_quad = 0; i_quad < n_quad; i_quad++) {
         // Compute the flux at the quadrature point
         calc_lr_states(i_face, i_quad, conservatives_l, conservatives_r, primitives_l, primitives_r);
         riemann_solver.calc_flux(flux_temp, n_unit,
@@ -162,8 +162,8 @@ void BaseFluxFunctor<Derived, T_physics, T_riemann_solver>::call_impl(const u_in
 }
 
 template <typename T_physics, typename T_riemann_solver>
-void InteriorFluxFunctor<T_physics, T_riemann_solver>::calc_lr_states_impl(const u_int32_t i_face,
-                                                                           const u_int8_t i_quad,
+void InteriorFluxFunctor<T_physics, T_riemann_solver>::calc_lr_states_impl(const uint32_t i_face,
+                                                                           const uint8_t i_quad,
                                                                            rtype * conservatives_l,
                                                                            rtype * conservatives_r,
                                                                            rtype * primitives_l,

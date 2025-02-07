@@ -89,7 +89,7 @@ class Mesh {
          * @brief Get the number of face zones.
          * @return Number of face zones.
          */
-        u_int32_t n_face_zones() const;
+        uint32_t n_face_zones() const;
 
         /**
          * @brief Get the face zones.
@@ -108,21 +108,21 @@ class Mesh {
          * @param i_cell Index of the cell.
          * @return Number of nodes comprising the cell.
          */
-        u_int32_t h_n_nodes_of_cell(u_int32_t i_cell) const;
+        uint32_t h_n_nodes_of_cell(uint32_t i_cell) const;
 
         /**
          * @brief Get the number of faces comprising a cell - host version.
          * @param i_cell Index of the cell.
          * @return Number of faces comprising the cell.
          */
-        u_int32_t h_n_faces_of_cell(u_int32_t i_cell) const;
+        uint32_t h_n_faces_of_cell(uint32_t i_cell) const;
 
         /**
          * @brief Get the number of nodes comprising a face - host version.
          * @param i_face Index of the face.
          * @return Number of nodes comprising the face.
          */
-        u_int32_t h_n_nodes_of_face(u_int32_t i_face) const;
+        uint32_t h_n_nodes_of_face(uint32_t i_face) const;
 
         /**
          * @brief Get the id of the i-th node of a cell - host version.
@@ -130,7 +130,7 @@ class Mesh {
          * @param i_node_local Index of the node.
          * @return Node id.
          */
-        u_int32_t h_node_of_cell(u_int32_t i_cell, u_int8_t i_node_local) const;
+        uint32_t h_node_of_cell(uint32_t i_cell, uint8_t i_node_local) const;
 
         /**
          * @brief Get the id of the i-th face of a cell - host version.
@@ -138,7 +138,7 @@ class Mesh {
          * @param i_face_local Index of the face.
          * @return Face id.
          */
-        u_int32_t h_face_of_cell(u_int32_t i_cell, u_int8_t i_face_local) const;
+        uint32_t h_face_of_cell(uint32_t i_cell, uint8_t i_face_local) const;
 
         /**
          * @brief Get the id of the i-th node of a face - host version.
@@ -146,13 +146,13 @@ class Mesh {
          * @param i_node_local Index of the node.
          * @return Node id.
          */
-        u_int32_t h_node_of_face(u_int32_t i_face, u_int8_t i_node_local) const;
+        uint32_t h_node_of_face(uint32_t i_face, uint8_t i_node_local) const;
 
         /**
          * @brief Get the type of a cell.
          * @param i_cell Index of the cell.
          */
-        CellType h_cell_type(u_int32_t i_cell) const;
+        CellType h_cell_type(uint32_t i_cell) const;
 
         /**
          * @brief Get neighbors of a cell up to n_order graph distance.
@@ -160,9 +160,9 @@ class Mesh {
          * @param n_order Maximum graph distance.
          * @param neighbors Vector to store the neighbors.
          */
-        void h_neighbors_of_cell(u_int32_t i_cell,
-                                 u_int8_t n_order,
-                                 std::vector<u_int32_t> & neighbors) const;
+        void h_neighbors_of_cell(uint32_t i_cell,
+                                 uint8_t n_order,
+                                 std::vector<uint32_t> & neighbors) const;
 
         /**
          * @brief Compute cell centroids.
@@ -202,7 +202,7 @@ class Mesh {
          * @param Lx Length of the domain in the x-direction.
          * @param Ly Length of the domain in the y-direction.
          */
-        void init_cart(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly);
+        void init_cart(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly);
 
         /**
          * @brief Initialize the mesh as a cartesian grid,
@@ -213,7 +213,7 @@ class Mesh {
          * @param Lx Length of the domain in the x-direction.
          * @param Ly Length of the domain in the y-direction.
          */
-        void init_cart_tri(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly);
+        void init_cart_tri(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly);
 
         /**
          * @brief Initialize the supersonic wedge mesh.
@@ -223,20 +223,20 @@ class Mesh {
          * @param Lx Length of the domain in the x-direction.
          * @param Ly Length of the domain in the y-direction.
          */
-        void init_wedge(u_int32_t nx, u_int32_t ny, rtype Lx, rtype Ly);
+        void init_wedge(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly);
 
-        u_int32_t n_cells, n_nodes, n_faces;
+        uint32_t n_cells, n_nodes, n_faces;
         Kokkos::View<rtype *[N_DIM]> node_coords;
         Kokkos::View<rtype *[N_DIM]> cell_coords;
         Kokkos::View<rtype *> cell_volume;
         Kokkos::View<rtype *> face_area;
         Kokkos::View<rtype *[N_DIM]> face_normals;
-        Kokkos::View<u_int32_t *> nodes_of_cell;
-        Kokkos::View<u_int32_t *> offsets_nodes_of_cell;
-        Kokkos::View<u_int32_t *> faces_of_cell;
-        Kokkos::View<u_int32_t *> offsets_faces_of_cell;
-        Kokkos::View<u_int32_t *> nodes_of_face;
-        Kokkos::View<u_int32_t *> offsets_nodes_of_face;
+        Kokkos::View<uint32_t *> nodes_of_cell;
+        Kokkos::View<uint32_t *> offsets_nodes_of_cell;
+        Kokkos::View<uint32_t *> faces_of_cell;
+        Kokkos::View<uint32_t *> offsets_faces_of_cell;
+        Kokkos::View<uint32_t *> nodes_of_face;
+        Kokkos::View<uint32_t *> offsets_nodes_of_face;
         Kokkos::View<int32_t *[2]> cells_of_face;
 
         Kokkos::View<rtype *[N_DIM]>::HostMirror h_node_coords;
@@ -244,18 +244,18 @@ class Mesh {
         Kokkos::View<rtype *>::HostMirror h_cell_volume;
         Kokkos::View<rtype *>::HostMirror h_face_area;
         Kokkos::View<rtype *[N_DIM]>::HostMirror h_face_normals;
-        Kokkos::View<u_int32_t *>::HostMirror h_nodes_of_cell;
-        Kokkos::View<u_int32_t *>::HostMirror h_offsets_nodes_of_cell;
-        Kokkos::View<u_int32_t *>::HostMirror h_faces_of_cell;
-        Kokkos::View<u_int32_t *>::HostMirror h_offsets_faces_of_cell;
-        Kokkos::View<u_int32_t *>::HostMirror h_nodes_of_face;
-        Kokkos::View<u_int32_t *>::HostMirror h_offsets_nodes_of_face;
+        Kokkos::View<uint32_t *>::HostMirror h_nodes_of_cell;
+        Kokkos::View<uint32_t *>::HostMirror h_offsets_nodes_of_cell;
+        Kokkos::View<uint32_t *>::HostMirror h_faces_of_cell;
+        Kokkos::View<uint32_t *>::HostMirror h_offsets_faces_of_cell;
+        Kokkos::View<uint32_t *>::HostMirror h_nodes_of_face;
+        Kokkos::View<uint32_t *>::HostMirror h_offsets_nodes_of_face;
         Kokkos::View<int32_t *[2]>::HostMirror h_cells_of_face;
     protected:
     private:
-        void h_neighbors_of_cell_helper(u_int32_t i_cell,
-                                        u_int8_t n_order,
-                                        std::vector<u_int32_t> & neighbors) const;
+        void h_neighbors_of_cell_helper(uint32_t i_cell,
+                                        uint8_t n_order,
+                                        std::vector<uint32_t> & neighbors) const;
 
         MeshType type;
         std::vector<CellZone> m_cell_zones;

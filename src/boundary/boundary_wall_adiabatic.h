@@ -65,7 +65,7 @@ class BoundaryWallAdiabatic : public Boundary {
                 using BaseFluxFunctor<WallAdiabaticFluxFunctor, T_physics, T_riemann_solver>::BaseFluxFunctor;
 
                 KOKKOS_INLINE_FUNCTION
-                void call_impl(const u_int32_t i_face_local) const;
+                void call_impl(const uint32_t i_face_local) const;
         };
 };
 

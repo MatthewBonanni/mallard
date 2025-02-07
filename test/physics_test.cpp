@@ -43,7 +43,7 @@ struct ConversionFunctor {
                             physics(physics) {}
 
         KOKKOS_INLINE_FUNCTION
-        void operator()(const u_int32_t i_cell) const {
+        void operator()(const uint32_t i_cell) const {
             rtype conservatives_i[N_CONSERVATIVE];
             rtype primitives_i[N_PRIMITIVE];
             FOR_I_CONSERVATIVE conservatives_i[i] = conservatives(i_cell, i);

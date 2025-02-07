@@ -65,8 +65,8 @@ class BoundarySymmetry : public Boundary {
                 using BaseFluxFunctor<SymmetryFluxFunctor, T_physics, T_riemann_solver>::BaseFluxFunctor;
 
                 KOKKOS_INLINE_FUNCTION
-                void calc_lr_states_impl(const u_int32_t i_face,
-                                         const u_int8_t i_quad,
+                void calc_lr_states_impl(const uint32_t i_face,
+                                         const uint8_t i_quad,
                                          rtype * conservatives_l,
                                          rtype * conservatives_r,
                                          rtype * primitives_l,

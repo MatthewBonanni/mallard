@@ -32,7 +32,7 @@ struct DivideVolumeFunctor {
          * @param i_cell Cell index.
          */
         KOKKOS_INLINE_FUNCTION
-        void operator()(const u_int32_t i_cell) const {
+        void operator()(const uint32_t i_cell) const {
             FOR_I_CONSERVATIVE rhs(i_cell, i) /= cell_volume(i_cell);
         }
 
@@ -58,7 +58,7 @@ void Solver::pre_rhs(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                      Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                      Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) {
     // Zero out RHS
-    Kokkos::parallel_for(mesh->n_cells, KOKKOS_LAMBDA(const u_int32_t i_cell) {
+    Kokkos::parallel_for(mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
         FOR_I_CONSERVATIVE rhs(i_cell, i) = 0.0;
     });
 

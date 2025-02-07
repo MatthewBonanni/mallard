@@ -74,7 +74,7 @@ TEST(CommonMathTest, Transpose2) {
     std::vector<rtype> actual_AT(4);
     transpose(A.data(), actual_AT.data(), 2, 2);
 
-    for (u_int32_t i = 0; i < 4; ++i) {
+    for (uint32_t i = 0; i < 4; ++i) {
         EXPECT_RTYPE_EQ(expected_AT[i], actual_AT[i]);
     }
 }
@@ -88,7 +88,7 @@ TEST(CommonMathTest, TransposeWide) {
     std::vector<rtype> actual_AT(6);
     transpose(A.data(), actual_AT.data(), 2, 3);
 
-    for (u_int32_t i = 0; i < 6; ++i) {
+    for (uint32_t i = 0; i < 6; ++i) {
         EXPECT_RTYPE_EQ(expected_AT[i], actual_AT[i]);
     }
 }
@@ -102,7 +102,7 @@ TEST(CommonMathTest, TransposeTall) {
     std::vector<rtype> actual_AT(6);
     transpose(A.data(), actual_AT.data(), 3, 2);
 
-    for (u_int32_t i = 0; i < 6; ++i) {
+    for (uint32_t i = 0; i < 6; ++i) {
         EXPECT_RTYPE_EQ(expected_AT[i], actual_AT[i]);
     }
 }
@@ -117,7 +117,7 @@ TEST(CommonMathTest, InvertMatrix2) {
     invert_matrix<2>(A.data(), actual_A_inv.data());
 
     rtype tol = 1e-6;
-    for (u_int32_t i = 0; i < 4; ++i) {
+    for (uint32_t i = 0; i < 4; ++i) {
         EXPECT_NEAR(expected_A_inv[i], actual_A_inv[i], tol);
     }
 }
@@ -134,7 +134,7 @@ TEST(CommonMathTest, InvertMatrix3) {
     invert_matrix<3>(A.data(), actual_A_inv.data());
 
     rtype tol = 1e-6;
-    for (u_int32_t i = 0; i < 9; ++i) {
+    for (uint32_t i = 0; i < 9; ++i) {
         EXPECT_NEAR(expected_A_inv[i], actual_A_inv[i], tol);
     }
 }
@@ -148,7 +148,7 @@ TEST(CommonMathTest, GEMV2) {
     std::vector<rtype> actual_y(2);
     gemv<2>(A.data(), x.data(), actual_y.data());
 
-    for (u_int32_t i = 0; i < 2; ++i) {
+    for (uint32_t i = 0; i < 2; ++i) {
         EXPECT_RTYPE_EQ(expected_y[i], actual_y[i]);
     }
 }
@@ -161,7 +161,7 @@ TEST(CommonMathTest, GEMV2InPlace) {
     std::vector<rtype> expected_x = {17.0, 39.0};
     gemv<2>(A.data(), x.data(), x.data());
 
-    for (u_int32_t i = 0; i < 2; ++i) {
+    for (uint32_t i = 0; i < 2; ++i) {
         EXPECT_RTYPE_EQ(expected_x[i], x[i]);
     }
 }
@@ -176,7 +176,7 @@ TEST(CommonMathTest, GEMV3) {
     std::vector<rtype> actual_y(3);
     gemv<3>(A.data(), x.data(), actual_y.data());
 
-    for (u_int32_t i = 0; i < 3; ++i) {
+    for (uint32_t i = 0; i < 3; ++i) {
         EXPECT_RTYPE_EQ(expected_y[i], actual_y[i]);
     }
 }
@@ -190,7 +190,7 @@ TEST(CommonMathTest, GEMV3InPlace) {
     std::vector<rtype> expected_x = {14.0, 32.0, 50.0};
     gemv<3>(A.data(), x.data(), x.data());
 
-    for (u_int32_t i = 0; i < 3; ++i) {
+    for (uint32_t i = 0; i < 3; ++i) {
         EXPECT_RTYPE_EQ(expected_x[i], x[i]);
     }
 }
@@ -206,7 +206,7 @@ TEST(CommonMathTest, GEMM2) {
                                      43.0, 50.0};
     gemm(A.data(), B.data(), C.data(), 2, 2, 2, 2, false, false);
 
-    for (u_int32_t i = 0; i < 4; ++i) {
+    for (uint32_t i = 0; i < 4; ++i) {
         EXPECT_RTYPE_EQ(expected_C[i], C[i]);
     }
 }
@@ -221,7 +221,7 @@ TEST(CommonMathTest, GEMM2InPlace) {
                                      43.0, 50.0};
     gemm(A.data(), B.data(), B.data(), 2, 2, 2, 2, false, false);
 
-    for (u_int32_t i = 0; i < 4; ++i) {
+    for (uint32_t i = 0; i < 4; ++i) {
         EXPECT_RTYPE_EQ(expected_B[i], B[i]);
     }
 }
@@ -238,7 +238,7 @@ TEST(CommonMathTest, GEMM234) {
                                      173.0, 188.0, 203.0, 218.0};
     gemm(A.data(), B.data(), C.data(), 2, 3, 3, 4, false, false);
 
-    for (u_int32_t i = 0; i < 8; ++i) {
+    for (uint32_t i = 0; i < 8; ++i) {
         EXPECT_RTYPE_EQ(expected_C[i], C[i]);
     }
 }
@@ -254,7 +254,7 @@ TEST(CommonMathTest, GEMM2TransposeA) {
                                      38.0, 44.0};
     gemm(A.data(), B.data(), C.data(), 2, 2, 2, 2, true, false);
 
-    for (u_int32_t i = 0; i < 4; ++i) {
+    for (uint32_t i = 0; i < 4; ++i) {
         EXPECT_RTYPE_EQ(expected_C[i], C[i]);
     }
 }
@@ -272,7 +272,7 @@ TEST(CommonMathTest, GEMM234TransposeA) {
                                      173.0, 188.0, 203.0, 218.0};
     gemm(A.data(), B.data(), C.data(), 3, 2, 3, 4, true, false);
 
-    for (u_int32_t i = 0; i < 8; ++i) {
+    for (uint32_t i = 0; i < 8; ++i) {
         EXPECT_RTYPE_EQ(expected_C[i], C[i]);
     }
 }
@@ -288,7 +288,7 @@ TEST(CommonMathTest, GEMM2TransposeB) {
                                      39.0, 53.0};
     gemm(A.data(), B.data(), C.data(), 2, 2, 2, 2, false, true);
 
-    for (u_int32_t i = 0; i < 4; ++i) {
+    for (uint32_t i = 0; i < 4; ++i) {
         EXPECT_RTYPE_EQ(expected_C[i], C[i]);
     }
 }
@@ -306,7 +306,7 @@ TEST(CommonMathTest, GEMM234TransposeB) {
                                      173.0, 188.0, 203.0, 218.0};
     gemm(A.data(), B.data(), C.data(), 2, 3, 4, 3, false, true);
 
-    for (u_int32_t i = 0; i < 8; ++i) {
+    for (uint32_t i = 0; i < 8; ++i) {
         EXPECT_RTYPE_EQ(expected_C[i], C[i]);
     }
 }
@@ -322,7 +322,7 @@ TEST(CommonMathTest, GEMM2TransposeAB) {
                                      34.0, 46.0};
     gemm(A.data(), B.data(), C.data(), 2, 2, 2, 2, true, true);
 
-    for (u_int32_t i = 0; i < 4; ++i) {
+    for (uint32_t i = 0; i < 4; ++i) {
         EXPECT_RTYPE_EQ(expected_C[i], C[i]);
     }
 }
@@ -341,7 +341,7 @@ TEST(CommonMathTest, GEMM234TransposeAB) {
                                      173.0, 188.0, 203.0, 218.0};
     gemm(A.data(), B.data(), C.data(), 3, 2, 4, 3, true, true);
 
-    for (u_int32_t i = 0; i < 8; ++i) {
+    for (uint32_t i = 0; i < 8; ++i) {
         EXPECT_RTYPE_EQ(expected_C[i], C[i]);
     }
 }
@@ -358,7 +358,7 @@ TEST(CommonMathTest, QRHouseholder3x3) {
     QR_householder_noQ(A.data(), R.data(), 3, 3);
 
     rtype tol = 1e-6;
-    for (u_int32_t i = 0; i < 9; ++i) {
+    for (uint32_t i = 0; i < 9; ++i) {
         EXPECT_NEAR(expected_R[i], R[i], tol);
     }
 }
@@ -377,7 +377,7 @@ TEST(CommonMathTest, QRHouseholder3x4) {
     QR_householder_noQ(A.data(), R.data(), 4, 3);
 
     rtype tol = 1e-6;
-    for (u_int32_t i = 0; i < 12; ++i) {
+    for (uint32_t i = 0; i < 12; ++i) {
         EXPECT_NEAR(expected_R[i], R[i], tol);
     }
 }
@@ -397,7 +397,7 @@ TEST(CommonMathTest, ForwardSubstitution331) {
     forward_substitution(L.data(), b.data(), x.data(), 3, 3, 1, false, false);
 
     rtype tol = 1e-6;
-    for (u_int32_t i = 0; i < 3; ++i) {
+    for (uint32_t i = 0; i < 3; ++i) {
         EXPECT_NEAR(expected_x[i], x[i], tol);
     }
 }
@@ -417,7 +417,7 @@ TEST(CommonMathTest, ForwardSubstitution332) {
     forward_substitution(L.data(), B.data(), X.data(), 3, 3, 2, false, false);
 
     rtype tol = 1e-6;
-    for (u_int32_t i = 0; i < 6; ++i) {
+    for (uint32_t i = 0; i < 6; ++i) {
         EXPECT_NEAR(expected_X[i], X[i], tol);
     }
 }
@@ -437,7 +437,7 @@ TEST(CommonMathTest, ForwardSubstitution332TransposeL) {
     forward_substitution(L.data(), B.data(), X.data(), 3, 3, 2, true, false);
 
     rtype tol = 1e-6;
-    for (u_int32_t i = 0; i < 6; ++i) {
+    for (uint32_t i = 0; i < 6; ++i) {
         EXPECT_NEAR(expected_X[i], X[i], tol);
     }
 }
@@ -456,7 +456,7 @@ TEST(CommonMathTest, ForwardSubstitution332TransposeB) {
     forward_substitution(L.data(), B.data(), X.data(), 3, 3, 2, false, true);
 
     rtype tol = 1e-6;
-    for (u_int32_t i = 0; i < 6; ++i) {
+    for (uint32_t i = 0; i < 6; ++i) {
         EXPECT_NEAR(expected_X[i], X[i], tol);
     }
 }
@@ -475,7 +475,7 @@ TEST(CommonMathTest, ForwardSubstitution332TransposeLB) {
     forward_substitution(L.data(), B.data(), X.data(), 3, 3, 2, true, true);
 
     rtype tol = 1e-6;
-    for (u_int32_t i = 0; i < 6; ++i) {
+    for (uint32_t i = 0; i < 6; ++i) {
         EXPECT_NEAR(expected_X[i], X[i], tol);
     }
 }
@@ -495,7 +495,7 @@ TEST(CommonMathTest, BackSubstitution331) {
     back_substitution(U.data(), b.data(), x.data(), 3, 3, 1, false, false);
 
     rtype tol = 1e-6;
-    for (u_int32_t i = 0; i < 3; ++i) {
+    for (uint32_t i = 0; i < 3; ++i) {
         EXPECT_NEAR(expected_x[i], x[i], tol);
     }
 }
@@ -515,7 +515,7 @@ TEST(CommonMathTest, BackSubstitution332) {
     back_substitution(U.data(), B.data(), X.data(), 3, 3, 2, false, false);
 
     rtype tol = 1e-6;
-    for (u_int32_t i = 0; i < 6; ++i) {
+    for (uint32_t i = 0; i < 6; ++i) {
         EXPECT_NEAR(expected_X[i], X[i], tol);
     }
 }
@@ -535,7 +535,7 @@ TEST(CommonMathTest, BackSubstitution332TransposeU) {
     back_substitution(U.data(), B.data(), X.data(), 3, 3, 2, true, false);
 
     rtype tol = 1e-6;
-    for (u_int32_t i = 0; i < 6; ++i) {
+    for (uint32_t i = 0; i < 6; ++i) {
         EXPECT_NEAR(expected_X[i], X[i], tol);
     }
 }
@@ -554,7 +554,7 @@ TEST(CommonMathTest, BackSubstitution332TransposeB) {
     back_substitution(U.data(), B.data(), X.data(), 3, 3, 2, false, true);
 
     rtype tol = 1e-6;
-    for (u_int32_t i = 0; i < 6; ++i) {
+    for (uint32_t i = 0; i < 6; ++i) {
         EXPECT_NEAR(expected_X[i], X[i], tol);
     }
 }
@@ -573,7 +573,7 @@ TEST(CommonMathTest, BackSubstitution332TransposeUB) {
     back_substitution(U.data(), B.data(), X.data(), 3, 3, 2, true, true);
 
     rtype tol = 1e-6;
-    for (u_int32_t i = 0; i < 6; ++i) {
+    for (uint32_t i = 0; i < 6; ++i) {
         EXPECT_NEAR(expected_X[i], X[i], tol);
     }
 }
@@ -657,7 +657,7 @@ TEST(CommonMathTest, TriangleJJinvTranslate) {
     std::vector<rtype> expected_J = {1.0, 0.0, 0.0, 1.0};
     std::vector<rtype> expected_J_inv = {1.0, 0.0, 0.0, 1.0};
 
-    for (u_int32_t i = 0; i < 4; ++i) {
+    for (uint32_t i = 0; i < 4; ++i) {
         EXPECT_RTYPE_EQ(expected_J[i], J[i]);
         EXPECT_RTYPE_EQ(expected_J_inv[i], J_inv[i]);
     }
@@ -676,7 +676,7 @@ TEST(CommonMathTest, TriangleJJinvUnit) {
     std::vector<rtype> expected_J = {1.0, 0.0, 0.0, 1.0};
     std::vector<rtype> expected_J_inv = {1.0, 0.0, 0.0, 1.0};
 
-    for (u_int32_t i = 0; i < 4; ++i) {
+    for (uint32_t i = 0; i < 4; ++i) {
         EXPECT_RTYPE_EQ(expected_J[i], J[i]);
         EXPECT_RTYPE_EQ(expected_J_inv[i], J_inv[i]);
     }

@@ -59,17 +59,17 @@ class TimeIntegrator {
          * @brief Get the number of solution vectors required by the method,
          *        including the actual solution vector and any intermediate
          *        vectors.
-         * @return u_int8_t Number of solution vectors.
+         * @return uint8_t Number of solution vectors.
          */
-        u_int8_t get_n_solution_vectors() const;
+        uint8_t get_n_solution_vectors() const;
 
         /**
          * @brief Get the number of rhs vectors required by the method,
          *        including the actual rhs vector and any intermediate
          *        vectors.
-         * @return u_int8_t Number of rhs vectors.
+         * @return uint8_t Number of rhs vectors.
          */
-        u_int8_t get_n_rhs_vectors() const;
+        uint8_t get_n_rhs_vectors() const;
 
         /**
          * @brief Print the time integrator.
@@ -93,8 +93,8 @@ class TimeIntegrator {
                                                   Kokkos::View<rtype *[N_CONSERVATIVE]> rhs)> * calc_rhs) = 0;
     protected:
         TimeIntegratorType type;
-        u_int8_t n_solution_vectors;
-        u_int8_t n_rhs_vectors;
+        uint8_t n_solution_vectors;
+        uint8_t n_rhs_vectors;
     private:
 };
 

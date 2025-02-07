@@ -48,8 +48,8 @@ class Quadrature {
          */
         void copy_host_to_device();
 
-        u_int8_t dim;
-        u_int8_t order;
+        uint8_t dim;
+        uint8_t order;
         Kokkos::View<rtype **> points;
         Kokkos::View<rtype **>::HostMirror h_points;
         Kokkos::View<rtype *> weights;
@@ -61,7 +61,7 @@ class GaussLegendre : public Quadrature {
         /**
          * @brief Construct a new GaussLegendre object
          */
-        GaussLegendre(u_int8_t order);
+        GaussLegendre(uint8_t order);
 };
 
 class TriangleDunavant : public Quadrature {
@@ -69,7 +69,7 @@ class TriangleDunavant : public Quadrature {
         /**
          * @brief Construct a new TriangleDunavant object
          */
-        TriangleDunavant(u_int8_t order);
+        TriangleDunavant(uint8_t order);
 };
 
 #endif // QUADRATURE_H
