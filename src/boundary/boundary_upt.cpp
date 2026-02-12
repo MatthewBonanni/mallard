@@ -95,7 +95,7 @@ void BoundaryUPT::UPTFluxFunctor<T_physics, T_riemann_solver>::calc_lr_states_im
 
     conservatives_r[0] = this->data_bc(0);
     FOR_I_PRIMITIVE {
-        primitives_r[i] = this->data_bc(i+i);
+        primitives_r[i] = this->data_bc(i+1);
     }
 }
 
