@@ -134,7 +134,7 @@ void BaseFluxFunctor<Derived, T_physics, T_riemann_solver>::call_impl(const uint
     rtype n_unit[N_DIM];
     
     const uint32_t i_face = faces(i_face_local);
-    FOR_I_DIM n_vec[i] = normals(i_face_local, i);
+    FOR_I_DIM n_vec[i] = normals(i_face, i);
     unit<N_DIM>(n_vec, n_unit);
 
     FOR_I_CONSERVATIVE flux[i] = 0.0;
