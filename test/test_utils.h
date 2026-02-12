@@ -14,7 +14,7 @@
 
 #include <gtest/gtest.h>
 
-#ifdef Mallard_USE_DOUBLES
+#ifdef Mallard_USE_DOUBLE
     #define EXPECT_RTYPE_EQ EXPECT_DOUBLE_EQ
 #else
     #define EXPECT_RTYPE_EQ EXPECT_FLOAT_EQ

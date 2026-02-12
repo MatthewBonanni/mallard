@@ -40,7 +40,7 @@ int Solver::init(const std::string& input_file_name) {
     print_logo();
     std::cout << LOG_SEPARATOR << std::endl;
     std::cout << "Initializing solver..." << std::endl;
-#ifdef Mallard_USE_DOUBLES
+#ifdef Mallard_USE_DOUBLE
     std::cout << "Mallard has been compiled with DOUBLE precision." << std::endl;
 #else   
     std::cout << "Mallard has been compiled with SINGLE precision." << std::endl;

@@ -24,7 +24,7 @@ std::string endianness() {
 }
 
 std::string vtk_float_type() {
-#ifdef Mallard_USE_DOUBLES
+#ifdef Mallard_USE_DOUBLE
     return "Float64";
 #else
     return "Float32";

@@ -24,7 +24,7 @@
 #define FOR_I_CONSERVATIVE for (uint8_t i = 0; i < N_CONSERVATIVE; i++)
 #define FOR_I_PRIMITIVE for (uint8_t i = 0; i < N_PRIMITIVE; i++)
 
-#ifdef Mallard_USE_DOUBLES
+#ifdef Mallard_USE_DOUBLE
     using rtype = double;
 #else
     using rtype = float;
