@@ -152,8 +152,8 @@ void SSPRK3::take_step(const rtype & dt,
 
     // Calculate k2
     (*calc_rhs)(U_temp, face_solution, rhs2);
-    Kokkos::deep_copy(U_temp, U);
-    KokkosBlas::axpby(dt / static_cast<rtype>(4.0), rhs2, 3.0 / 4.0, U_temp);
+    KokkosBlas::axpby(3.0 / 4.0, U, 1.0 / 4.0, U_temp);
+    KokkosBlas::axpy(dt / static_cast<rtype>(4.0), rhs2, U_temp);
 
     // Calculate k3
     (*calc_rhs)(U_temp, face_solution, rhs3);
