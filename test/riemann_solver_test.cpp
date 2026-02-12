@@ -81,8 +81,8 @@ TEST(RiemannSolverTest, RusanovFluxXY) {
     rtype gamma = 1.4;
 
     rtype flux[N_CONSERVATIVE];
-    NVector n_unit = {1.0 / Kokkos::sqrt(2.0),
-                      1.0 / Kokkos::sqrt(2.0)};
+    NVector n_unit = {(rtype)1.0 / (rtype)Kokkos::sqrt(2.0),
+                      (rtype)1.0 / (rtype)Kokkos::sqrt(2.0)};
 
     rtype rho_l = 1.0;
     NVector u_l = {0.0, 0.0};
@@ -206,8 +206,8 @@ TEST(RiemannSolverTest, HLLCFluxXY) {
     rtype gamma = 1.4;
 
     rtype flux[N_CONSERVATIVE];
-    NVector n_unit = {1.0 / Kokkos::sqrt(2.0),
-                      1.0 / Kokkos::sqrt(2.0)};
+    NVector n_unit = {(rtype)1.0 / (rtype)Kokkos::sqrt(2.0),
+                      (rtype)1.0 / (rtype)Kokkos::sqrt(2.0)};
 
     rtype rho_l = 1.0;
     NVector u_l = {0.0, 0.0};

@@ -42,7 +42,7 @@ endif()
 
 # Include other external libraries
 include_directories("${CMAKE_SOURCE_DIR}/src/external/toml11/include")
-include_directories("${CMAKE_SOURCE_DIR}/src/external/exprtk")
+include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/exprtk")
 
 # Add your main project source
 add_subdirectory(src)
