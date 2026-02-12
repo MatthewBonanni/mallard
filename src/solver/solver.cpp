@@ -595,6 +595,7 @@ struct SpectralRadiusFunctor {
         /**
          * @brief Construct a new SpectralRadiusFunctor object
          * @param offsets_faces_of_cell Offsets of faces of cell.
+         * @param faces_of_cell Faces of cell.
          * @param cells_of_face Cells of face.
          * @param face_normals Face normals.
          * @param cell_coords Cell coordinates.
@@ -605,6 +606,7 @@ struct SpectralRadiusFunctor {
          * @param cfl_local Local CFL.
          */
         SpectralRadiusFunctor(Kokkos::View<uint32_t *> offsets_faces_of_cell,
+                              Kokkos::View<uint32_t *> faces_of_cell,
                               Kokkos::View<int32_t *[2]> cells_of_face,
                               Kokkos::View<rtype *[N_DIM]> face_normals,
                               Kokkos::View<rtype *[N_DIM]> cell_coords,
@@ -614,6 +616,7 @@ struct SpectralRadiusFunctor {
                               Kokkos::View<rtype *[N_PRIMITIVE]> primitives,
                               Kokkos::View<rtype *> cfl_local) :
                                   offsets_faces_of_cell(offsets_faces_of_cell),
+                                  faces_of_cell(faces_of_cell),
                                   cells_of_face(cells_of_face),
                                   face_normals(face_normals),
                                   cell_coords(cell_coords),
@@ -649,7 +652,8 @@ struct SpectralRadiusFunctor {
 
             uint32_t n_faces = offsets_faces_of_cell(i_cell + 1) - offsets_faces_of_cell(i_cell);
 
-            for (uint32_t i_face = 0; i_face < n_faces; i_face++) {
+            for (uint32_t i_face_local = 0; i_face_local < n_faces; i_face_local++) {
+                uint32_t i_face = faces_of_cell(offsets_faces_of_cell(i_cell) + i_face_local);
                 int32_t i_cell_l = cells_of_face(i_face, 0);
                 int32_t i_cell_r = cells_of_face(i_face, 1);
                 FOR_I_DIM n_vec[i] = face_normals(i_face, i);
@@ -703,6 +707,7 @@ struct SpectralRadiusFunctor {
     
     private:
         Kokkos::View<uint32_t *> offsets_faces_of_cell;
+        Kokkos::View<uint32_t *> faces_of_cell;
         Kokkos::View<int32_t *[2]> cells_of_face;
         Kokkos::View<rtype *[N_DIM]> face_normals;
         Kokkos::View<rtype *[N_DIM]> cell_coords;
@@ -717,6 +722,7 @@ rtype Solver::calc_spectral_radius() {
     rtype max_spectral_radius = -1.0;
     if (physics->get_type() == PhysicsType::EULER) {
         SpectralRadiusFunctor<Euler> spectral_radius_functor(mesh->offsets_faces_of_cell,
+                                                             mesh->faces_of_cell,
                                                              mesh->cells_of_face,
                                                              mesh->face_normals,
                                                              mesh->cell_coords,
