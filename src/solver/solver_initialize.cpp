@@ -78,7 +78,7 @@ void Solver::init_solution_constant() {
 
     rtype rho = physics->h_get_density_from_pressure_temperature(p, T);
     rtype e = physics->h_get_energy_from_temperature(T);
-    rtype E = e + 0.5 * norm_2<N_DIM>(u.data());
+    rtype E = e + 0.5 * dot<N_DIM>(u.data(), u.data());
     rtype h = e + p / rho;
     rtype rhou_x = rho * u[0];
     rtype rhou_y = rho * u[1];
@@ -167,7 +167,7 @@ void Solver::init_solution_analytical() {
         }
 
         e = physics->h_get_energy_from_temperature(T);
-        E = e + 0.5 * norm_2<N_DIM>(u.data());
+        E = e + 0.5 * dot<N_DIM>(u.data(), u.data());
         h = e + p / rho;
         rhou_x = rho * u[0];
         rhou_y = rho * u[1];
