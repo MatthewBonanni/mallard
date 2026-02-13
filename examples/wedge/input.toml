@@ -9,7 +9,7 @@ cfl = 1.0
 type = "wedge"
 Nx = 150
 Ny = 50
-Lx = 4
+Lx = 4.0
 Ly = 1.5
 
 [initialize]
