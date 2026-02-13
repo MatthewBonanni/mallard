@@ -166,6 +166,8 @@ void Mesh::h_neighbors_of_cell(uint32_t i_cell, uint8_t n_order, std::vector<uin
 
 void Mesh::compute_cell_centroids() {
     for (uint32_t i_cell = 0; i_cell < n_cells; ++i_cell) {
+        h_cell_coords(i_cell, 0) = 0.0;
+        h_cell_coords(i_cell, 1) = 0.0;
         uint8_t n_nodes = h_n_nodes_of_cell(i_cell);
         for (uint8_t i_node = 0; i_node < n_nodes; ++i_node) {
             h_cell_coords(i_cell, 0) += h_node_coords(h_node_of_cell(i_cell, i_node), 0);
