@@ -167,7 +167,7 @@ void DataWriter::write_vtu(uint32_t step) const {
     out << "format=\"appended\" ";
     out << "offset=\"" << offset_data << "\">\n";
     out << "        </DataArray>\n";
-    offset_data += sizeof(int) + mesh->n_cells * sizeof(int);
+    offset_data += sizeof(int) + mesh->n_cells * sizeof(uint8_t);
 
     out << "      </Cells>\n";
     out << "    </Piece>\n";
@@ -229,7 +229,7 @@ void DataWriter::write_vtu(uint32_t step) const {
     }
 
     // types
-    n_bytes = sizeof(int) * mesh->n_cells;
+    n_bytes = sizeof(uint8_t) * mesh->n_cells;
     out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
     uint8_t cell_type = 7;
     for (uint32_t i = 0; i < mesh->n_cells; i++) {
