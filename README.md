@@ -19,7 +19,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Face reconstruction:
   - First order
   - Second-order MUSCL with least-squares gradients and Barth-Jespersen or Venkatakrishnan limiting
-  - TENO-E of orders 2 to 6 ([Liang, Shyy & Fu, J. Sci. Comput. 2025](https://doi.org/10.1007/s10915-025-02918-w)): k-exact least squares on a large central stencil and three or four sector stencils, a density-based troubled-cell indicator, characteristic-wise stencil selection with an adaptive cutoff, and mirror ghost cells at boundaries
+  - TENO-E of orders 3 to 6 ([Liang, Shyy & Fu, J. Sci. Comput. 2025](https://doi.org/10.1007/s10915-025-02918-w)): k-exact least squares on a large central stencil and three or four sector stencils, a density-based troubled-cell indicator, characteristic-wise stencil selection with an adaptive cutoff, and mirror ghost cells at boundaries
 - Riemann solvers: Rusanov, HLL, HLLC, Roe, and the carbuncle-free rotated-hybrid HLL-Roe
 - Source terms: gravity and arbitrary expressions
 - Time integration: forward Euler, SSPRK3, RK4, with the time step set by a CFL number
@@ -40,7 +40,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_
 cmake --build build -j
 ```
 
-Pick the Kokkos backend at configure time, for example `-DKokkos_ENABLE_OPENMP=ON`, or `-DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON` for NVIDIA A100 GPUs. To use an installed Kokkos instead, pass `-DUSE_SYSTEM_KOKKOS=ON -DKokkos_DIR=/path/to/kokkos`.
+Pick the Kokkos backend at configure time, for example `-DKokkos_ENABLE_OPENMP=ON`, or `-DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON -DCMAKE_CXX_COMPILER=$PWD/src/external/kokkos/bin/nvcc_wrapper` for NVIDIA A100 GPUs (add `-DKokkos_ENABLE_OPENMP=ON` too, so host-side setup such as TENO's precomputation runs in parallel). To use an installed Kokkos instead, pass `-DUSE_SYSTEM_KOKKOS=ON -DKokkos_DIR=/path/to/kokkos`.
 
 | CMake option | Default | Description |
 |---|---|---|

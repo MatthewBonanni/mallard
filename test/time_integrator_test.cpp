@@ -19,6 +19,14 @@
 
 namespace {
 
+// Device lambdas cannot live in a test body (nvcc rejects them in non-public
+// member functions), so the kernel is a free function
+void negate(StateView U, StateView R) {
+    Kokkos::parallel_for(U.extent(0), KOKKOS_LAMBDA(const uint32_t c) {
+        FOR_I_CONSERVATIVE R(c, i) = -U(c, i);
+    });
+}
+
 /**
  * @brief Integrate the nonautonomous-free test system dU_i/dt = lambda_i U_i
  *        to t = 1 and return the max error.
@@ -83,11 +91,7 @@ TEST(TimeIntegratorTest, SSPRK3IsConvexCombinationOfEulerSteps) {
     std::vector<StateView> solution_vec = {StateView("U", 1), StateView("U1", 1)};
     std::vector<StateView> rhs_vec = {StateView("k", 1)};
     Kokkos::deep_copy(solution_vec[0], 1.0);
-    RHSFunction rhs = [](StateView U, StateView R, rtype) {
-        Kokkos::parallel_for(U.extent(0), KOKKOS_LAMBDA(const uint32_t c) {
-            FOR_I_CONSERVATIVE R(c, i) = -U(c, i);
-        });
-    };
+    RHSFunction rhs = [](StateView U, StateView R, rtype) { negate(U, R); };
     integrator.take_step(0.0, 1.0, solution_vec, rhs_vec, rhs);
     auto h_U = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec[0]);
     FOR_I_CONSERVATIVE EXPECT_NEAR(h_U(0, i), 1.0 / 3.0, 1e-15);
