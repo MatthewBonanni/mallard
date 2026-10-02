@@ -14,8 +14,14 @@
 #include <algorithm>
 #include <limits>
 #include <numeric>
+#include <stdexcept>
 
+#include "comm.h"
 #include "mesh.h"
+
+#ifdef Mallard_HAS_KAMINPAR
+#include <dkaminpar.h>
+#endif
 
 uint64_t hilbert_key(const std::array<double, N_DIM> & x, const std::array<double, N_DIM> & lo,
                      const std::array<double, N_DIM> & hi) {
@@ -79,4 +85,46 @@ std::vector<int> partition_hilbert(const Mesh & mesh, int n_parts) {
         owner[order[k]] = static_cast<int>((uint64_t(k) * n_parts) / n);
     }
     return owner;
+}
+
+bool have_graph_partitioner() {
+#ifdef Mallard_HAS_KAMINPAR
+    return true;
+#else
+    return false;
+#endif
+}
+
+std::vector<int> partition_graph(const Mesh & mesh, int n_parts) {
+#ifdef Mallard_HAS_KAMINPAR
+    using kaminpar::dist::GlobalEdgeID;
+    using kaminpar::dist::GlobalNodeID;
+    const uint64_t n = mesh.n_cells;
+    const int p = comm::size(), r = comm::rank();
+    std::vector<GlobalNodeID> vtxdist(p + 1);
+    for (int k = 0; k <= p; k++) vtxdist[k] = (n * k) / p;
+    std::vector<GlobalEdgeID> xadj{0};
+    std::vector<GlobalNodeID> adjncy;
+    for (uint64_t c = vtxdist[r]; c < vtxdist[r + 1]; c++) {
+        for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
+            const uint32_t f = mesh.h_face_of_cell(c, k);
+            const int32_t c0 = mesh.h_cells_of_face(f, 0), c1 = mesh.h_cells_of_face(f, 1);
+            const int32_t other = (c0 == static_cast<int32_t>(c)) ? c1 : c0;
+            if (other >= 0) adjncy.push_back(other);
+        }
+        xadj.push_back(adjncy.size());
+    }
+    kaminpar::dKaMinPar partitioner(comm::world(), 1, kaminpar::dist::create_default_context());
+    partitioner.set_output_level(kaminpar::OutputLevel::QUIET);
+    partitioner.copy_graph(vtxdist, xadj, adjncy);
+    std::vector<kaminpar::dist::BlockID> blocks(vtxdist[r + 1] - vtxdist[r]);
+    partitioner.compute_partition(n_parts, blocks);
+    std::vector<int32_t> local(blocks.begin(), blocks.end());
+    std::vector<int32_t> all = comm::allgatherv(local);
+    return std::vector<int>(all.begin(), all.end());
+#else
+    (void)mesh;
+    (void)n_parts;
+    throw std::runtime_error("This build has no graph partitioner (configure with Mallard_ENABLE_KAMINPAR=ON).");
+#endif
 }

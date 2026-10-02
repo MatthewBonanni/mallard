@@ -147,6 +147,14 @@ Optional source terms, added per unit volume.
 
 The scheme is not exactly well balanced: hydrostatic states carry small spurious velocities (about 1e-4 of the sound speed on a 32x32 mesh) that vanish at second order under refinement. Wall and symmetry ghost states continue the hydrostatic pressure gradient.
 
+## `[parallel]`
+
+Used when Mallard runs on several MPI ranks (`mpirun -n N Mallard -i input.toml`).
+
+| Key | Description |
+|---|---|
+| `partitioner` | `graph` (dKaMinPar on the cell connectivity, minimizing the faces between ranks; default when built with `Mallard_ENABLE_KAMINPAR`) or `hilbert` (cells split along a Hilbert curve of their centroids; the default otherwise) |
+
 ## `[output]`
 
 | Key | Description |

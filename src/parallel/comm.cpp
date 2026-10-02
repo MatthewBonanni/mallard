@@ -109,6 +109,20 @@ std::vector<std::vector<T>> alltoallv(const std::vector<std::vector<T>> & send) 
     return recv;
 }
 
+template <typename T>
+std::vector<T> allgatherv(const std::vector<T> & local) {
+    const int p = size();
+    int n_local = static_cast<int>(local.size());
+    std::vector<int> counts(p), displs(p + 1, 0);
+    check(MPI_Allgather(&n_local, 1, MPI_INT, counts.data(), 1, MPI_INT, MPI_COMM_WORLD), "MPI_Allgather");
+    for (int r = 0; r < p; r++) displs[r + 1] = displs[r] + counts[r];
+    std::vector<T> all(displs[p]);
+    check(MPI_Allgatherv(local.data(), n_local, mpi_type<T>(), all.data(), counts.data(), displs.data(),
+                         mpi_type<T>(), MPI_COMM_WORLD),
+          "MPI_Allgatherv");
+    return all;
+}
+
 #else
 
 Session::Session(int &, char **&) {}
@@ -120,6 +134,11 @@ void barrier() {}
 
 template <typename T>
 void allreduce(std::span<T>, Op) {}
+
+template <typename T>
+std::vector<T> allgatherv(const std::vector<T> & local) {
+    return local;
+}
 
 template <typename T>
 std::vector<std::vector<T>> alltoallv(const std::vector<std::vector<T>> & send) {
@@ -136,6 +155,8 @@ template void allreduce<int64_t>(std::span<int64_t>, Op);
 template void allreduce<uint32_t>(std::span<uint32_t>, Op);
 template void allreduce<uint64_t>(std::span<uint64_t>, Op);
 template std::vector<std::vector<uint64_t>> alltoallv(const std::vector<std::vector<uint64_t>> &);
+template std::vector<int32_t> allgatherv(const std::vector<int32_t> &);
+template std::vector<uint64_t> allgatherv(const std::vector<uint64_t> &);
 template std::vector<std::vector<double>> alltoallv(const std::vector<std::vector<double>> &);
 template std::vector<std::vector<float>> alltoallv(const std::vector<std::vector<float>> &);
 

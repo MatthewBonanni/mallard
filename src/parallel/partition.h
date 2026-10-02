@@ -33,4 +33,15 @@ uint64_t hilbert_key(const std::array<double, N_DIM> & x, const std::array<doubl
  */
 std::vector<int> partition_hilbert(const Mesh & mesh, int n_parts);
 
+/**
+ * @brief Owner rank of every cell from dKaMinPar on the cell dual graph (cells
+ *        sharing a face), which minimizes the faces between ranks and so the
+ *        halo volume (collective; each rank contributes a block of rows).
+ *        Requires Mallard_ENABLE_KAMINPAR.
+ */
+std::vector<int> partition_graph(const Mesh & mesh, int n_parts);
+
+/** @brief Whether this build has a graph partitioner. */
+bool have_graph_partitioner();
+
 #endif // PARTITION_H

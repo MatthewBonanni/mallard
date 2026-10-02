@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "comm.h"
+#include "partition.h"
 #include "test_fixtures.h"
 #include "solver.h"
 
@@ -270,4 +271,21 @@ TEST(MPITest, EveryCellIsInExactlyOneOutputPiece) {
     }
     EXPECT_EQ(total, n_global);
     EXPECT_NE(read(dir + "/f.pvd").find("f_000002.pvtu"), std::string::npos);
+}
+
+TEST(MPITest, GraphPartitionIsBalancedAndMatchesSerial) {
+    if (!have_graph_partitioner()) GTEST_SKIP() << "built without a graph partitioner";
+    const std::string input =
+        box_input("cartesian_tri", "type = \"TENO\"\norder = 4\n", EULER,
+                  bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n", "type = \"wall_adiabatic\"\n",
+                      "type = \"extrapolation\"\n"),
+                  10) +
+        "[parallel]\npartitioner = \"graph\"\n";
+    expect_matches_serial(input);
+    Solver solver;
+    solver.init(parse_toml(input));
+    if (!solver.is_distributed()) return;
+    const uint64_t n_owned = solver.get_distribution().n_owned;
+    const uint64_t n_global = solver.get_mesh()->n_global_cells;
+    EXPECT_LE(comm::allreduce(n_owned, comm::Op::MAX), 1.03 * n_global / comm::size() + 1);
 }

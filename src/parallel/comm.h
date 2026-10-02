@@ -81,6 +81,12 @@ std::array<T, N> allreduce(std::array<T, N> values, Op op) {
 template <typename T>
 std::vector<std::vector<T>> alltoallv(const std::vector<std::vector<T>> & send);
 
+/**
+ * @brief Concatenation of every rank's local vector, in rank order.
+ */
+template <typename T>
+std::vector<T> allgatherv(const std::vector<T> & local);
+
 #ifdef Mallard_HAS_MPI
 /** @brief The world communicator. */
 MPI_Comm world();

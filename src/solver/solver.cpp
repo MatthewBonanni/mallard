@@ -84,7 +84,13 @@ void Solver::init_mesh() {
     mesh->init(input);
     if (is_distributed()) {
         if (halo_layers == 0) halo_layers = base_halo_layers();
-        const std::vector<int> owner = partition_hilbert(*mesh, comm::size());
+        const std::string partitioner = toml::find_or<std::string>(
+            input, "parallel", "partitioner", have_graph_partitioner() ? "graph" : "hilbert");
+        if (partitioner != "graph" && partitioner != "hilbert") {
+            throw std::runtime_error("Unknown partitioner: " + partitioner + " (graph or hilbert).");
+        }
+        const std::vector<int> owner = partitioner == "graph" ? partition_graph(*mesh, comm::size())
+                                                              : partition_hilbert(*mesh, comm::size());
         const uint32_t n_global = mesh->n_cells;
         mesh = build_local_mesh(*mesh, owner, halo_layers, distribution);
         halo = HaloExchange(distribution);

@@ -28,6 +28,24 @@ option(${PROJECT_NAME}_ENABLE_MPI "Distributed memory parallelism with MPI" OFF)
 if(${PROJECT_NAME}_ENABLE_MPI)
     find_package(MPI REQUIRED COMPONENTS CXX)
     message(STATUS "Mallard: MPI ${MPI_CXX_VERSION}")
+    option(${PROJECT_NAME}_GPU_AWARE_MPI "Pass device buffers to MPI directly (CUDA-aware MPI)" OFF)
+    option(${PROJECT_NAME}_ENABLE_KAMINPAR "Graph partitioning with dKaMinPar (needs oneTBB)" OFF)
+    if(${PROJECT_NAME}_ENABLE_KAMINPAR)
+        include(FetchContent)
+        FetchContent_Declare(KaMinPar
+            GIT_REPOSITORY https://github.com/KaHIP/KaMinPar.git
+            GIT_TAG v3.7.3
+            EXCLUDE_FROM_ALL)
+        set(KAMINPAR_BUILD_DISTRIBUTED ON CACHE BOOL "" FORCE)
+        set(KAMINPAR_BUILD_APPS OFF CACHE BOOL "" FORCE)
+        set(KAMINPAR_BUILD_IO OFF CACHE BOOL "" FORCE)
+        set(KAMINPAR_BUILD_WITH_SPARSEHASH OFF CACHE BOOL "" FORCE)
+        set(KAMINPAR_BUILD_WITH_CCACHE OFF CACHE BOOL "" FORCE)
+        set(KAMINPAR_BUILD_WITH_MTUNE_NATIVE OFF CACHE BOOL "" FORCE)
+        set(KAMINPAR_64BIT_NODE_IDS ON CACHE BOOL "" FORCE)
+        set(KAMINPAR_64BIT_EDGE_IDS ON CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(KaMinPar)
+    endif()
 endif()
 
 # HDF5 is not used by the solver yet; it is only built/found on request
