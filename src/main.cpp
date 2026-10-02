@@ -4,8 +4,6 @@
  * @version 0.1
  * @date 2023-12-17
  * 
- * @mainpage Mallard
- * 
  * @copyright Copyright (c) 2023 Matthew Bonanni
  */
 

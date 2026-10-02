@@ -236,6 +236,7 @@ void gemv<3>(const rtype * A, const rtype * x, rtype * y) {
  * @param q Number of columns in B.
  * @param tA Transpose A.
  * @param tB Transpose B.
+ * @param print_debug Print the operands and result.
  */
 KOKKOS_INLINE_FUNCTION
 void gemm(const rtype * A,

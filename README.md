@@ -10,7 +10,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 
 *2D Riemann problem (configuration 3) on 980,000 triangles with fifth-order TENO-E reconstruction.*
 
-> **NOTE:** Mallard is a **work in progress**. Its performance **has not been extensively characterized**, and it has not yet been run on GPUs.
+> **NOTE:** Mallard is a **work in progress**: 2D only for now (3D and MPI are next), and GPU performance has only begun to be tuned.
 
 ## Features
 
@@ -35,7 +35,7 @@ Mallard depends on [Kokkos](https://github.com/kokkos/kokkos) (5.x), [toml11](ht
 
 ```sh
 git clone --recursive https://github.com/MatthewBonanni/mallard.git
-cd Mallard
+cd mallard
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_ENABLE_THREADS=ON
 cmake --build build -j
 ```

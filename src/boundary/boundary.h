@@ -94,9 +94,12 @@ struct BoundaryCondition {
 
     /**
      * @brief Ghost state W_g = [rho, u_x, u_y, p] given the interior state W_i.
+     * @param W_i Interior state.
      * @param n Unit normal pointing out of the domain.
+     * @param gamma Ratio of specific heats.
      * @param R Gas constant.
      * @param viscous Whether walls enforce no-slip (else slip) and wall temperature.
+     * @param W_g Ghost state (output).
      */
     KOKKOS_INLINE_FUNCTION
     void ghost_W(const rtype * W_i, const rtype * n, const rtype gamma, const rtype R,
