@@ -1,8 +1,8 @@
 {
  "width": 6,
  "dpi": 300,
- "fps": 15,
- "footer": "Mallard  |  TENO5-E finite volume  |  1.8M triangles, 1M and 500k quads  |  Euler and Navier-Stokes",
+ "fps": 30,
+ "footer": "Mallard  |  TENO5-E finite volume  |  2D: 1.8M triangles, 1M and 500k quads  |  3D: 262k hexahedra  |  Euler and Navier-Stokes",
  "rows": [
   [
    {
@@ -12,6 +12,11 @@
      0,
      3
     ]
+   },
+   {
+    "type": "frames",
+    "series": "examples/taylor_green_3d/frames",
+    "title": "Taylor-Green vortex, Re = 1600, 3D"
    }
   ],
   [
@@ -132,8 +137,33 @@
        82.7077
       ]
      ]
-    }
+    },
+    "legend_loc": "lower right"
+   },
+   {
+    "type": "curve",
+    "data": "examples/taylor_green_3d/eps.csv",
+    "t_end": 19.9,
+    "title": "TGV dissipation rate",
+    "label": "Mallard",
+    "reference": {
+     "label": "spectral DNS, 512\u00b3",
+     "file": "examples/taylor_green_3d/eps_dns.csv"
+    },
+    "xlim": [
+     0,
+     20
+    ],
+    "ylim": [
+     0,
+     0.0175
+    ],
+    "xlabel": "t",
+    "aspect": 1.1,
+    "margin_left": 0.25
    }
   ]
- ]
+ ],
+ "gif_width": 1500,
+ "gif_colors": 64
 }

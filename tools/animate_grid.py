@@ -7,7 +7,8 @@ normalized time t / t_end, and write an MP4 and a looping GIF.
 CONFIG lists rows of panels; the panels of a row share one height and fill the
 figure width in proportion to their aspect ratios:
 
-    {"width": 6, "dpi": 300, "fps": 30, "footer": "...",
+    {"width": 6, "dpi": 300, "fps": 30, "gif_width": 1500, "gif_colors": 64,
+     "footer": "...",
      "rows": [[{"series": "runs/dmr/solut", "title": "Double Mach reflection",
                 "xlim": [0, 3]}],
               [{"series": "runs/riemann/solut", "title": "2D Riemann problem"},
@@ -17,11 +18,17 @@ figure width in proportion to their aspect ratios:
 
 Field panels ("type": "field", the default) show density (or "var") in color,
 shaded by a numerical schlieren. Wall panels plot "var" along the first row of
-cells of a Cartesian mesh (y = min) against reference points. Every frame is
-one snapshot of each case: a case with N snapshots is sampled at the nearest
-normalized time, so cases written with the same number of snapshots line up
-exactly. The last frame is held for --hold seconds by lengthening its GIF delay
-rather than by repeating it.
+cells of a Cartesian mesh (y = min) against reference points. Frames panels
+show a sequence of pre-rendered images ("series" holds 00000.png, 00001.png,
+... and optionally times.txt), e.g. 3D views. Curve panels trace a time series
+("data": CSV with columns t and y) up to the current time over a reference
+curve ("reference": {"label", "file": a CSV of t and y}); "t_end" maps the
+normalized time to t. "gif_width" and "gif_colors" shrink the GIF.
+
+Every frame is one snapshot of each case: a case with N snapshots is sampled
+at the nearest normalized time, so cases written with the same number of
+snapshots line up exactly. The last frame is held for --hold seconds by
+lengthening its GIF delay rather than by repeating it.
 """
 import argparse
 import glob
@@ -48,15 +55,19 @@ DIM = "#9a9a9a"
 
 
 def snapshot_files(panel):
-    files = sorted(glob.glob(os.path.join(panel["series"], panel.get("glob", "*.vtu"))))
+    pattern = "*.png" if panel.get("type") == "frames" else panel.get("glob", "*.vtu")
+    files = sorted(glob.glob(os.path.join(panel["series"], pattern)))
     if not files:
         raise SystemExit(f"no snapshots in {panel['series']}")
     return files
 
 
 def panel_aspect(panel):
-    if panel.get("type", "field") == "wall":
+    if panel.get("type", "field") in ("wall", "curve"):
         return panel.get("aspect", 1.0)
+    if panel.get("type") == "frames":
+        h, w = imageio.imread(snapshot_files(panel)[0]).shape[:2]
+        return w / h
     pts = read_vtu(snapshot_files(panel)[0])[0]
     x0, x1 = panel.get("xlim") or (pts[:, 0].min(), pts[:, 0].max())
     y0, y1 = panel.get("ylim") or (pts[:, 1].min(), pts[:, 1].max())
@@ -132,7 +143,6 @@ class WallPanel:
     def draw(self, ax, k, n):
         f = self.files[round(k * (len(self.files) - 1) / max(n - 1, 1))]
         d = read_vtu(f)[3]
-        ax.set_facecolor(BG)
         ax.plot(self.x, d[self.p.get("var", "RHO")][self.cells], color="#f2b134", lw=1.0, label="Mallard")
         ref = self.p.get("reference")
         if ref:
@@ -141,17 +151,65 @@ class WallPanel:
         ax.set_xlim(self.p.get("xlim") or (self.x[0], self.x[-1]))
         if self.p.get("ylim"):
             ax.set_ylim(self.p["ylim"])
-        for s in ("top", "right"):
-            ax.spines[s].set_visible(False)
-        for s in ("left", "bottom"):
-            ax.spines[s].set_color(DIM)
-            ax.spines[s].set_linewidth(0.5)
-        ax.tick_params(colors=DIM, labelsize=4.5, width=0.5, length=2, pad=1)
-        if self.p.get("xlabel"):
-            ax.set_xlabel(self.p["xlabel"], fontsize=5, color=DIM, labelpad=1)
+        style_plot_axes(ax, self.p)
         ax.legend(loc=self.p.get("legend_loc", "upper left"), fontsize=4.5, frameon=False, labelcolor=FG,
                   handlelength=1.2, borderaxespad=0.2)
         return d.get("TIME", np.nan)
+
+
+def style_plot_axes(ax, p):
+    ax.set_facecolor(BG)
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
+    for s in ("left", "bottom"):
+        ax.spines[s].set_color(DIM)
+        ax.spines[s].set_linewidth(0.5)
+    ax.tick_params(colors=DIM, labelsize=4.5, width=0.5, length=2, pad=1)
+    if p.get("xlabel"):
+        ax.set_xlabel(p["xlabel"], fontsize=5, color=DIM, labelpad=1)
+    if p.get("ylabel"):
+        ax.set_ylabel(p["ylabel"], fontsize=5, color=DIM, labelpad=1)
+
+
+class FramesPanel:
+    def __init__(self, panel, rect, fig_px):
+        self.p = panel
+        self.files = snapshot_files(panel)
+        times = os.path.join(panel["series"], "times.txt")
+        self.times = np.loadtxt(times) if os.path.exists(times) else None
+
+    def draw(self, ax, k, n):
+        i = round(k * (len(self.files) - 1) / max(n - 1, 1))
+        ax.imshow(imageio.imread(self.files[i]), interpolation="antialiased")
+        return self.times[i] if self.times is not None else np.nan
+
+
+class CurvePanel:
+    def __init__(self, panel, rect, fig_px):
+        self.p = panel
+        d = np.genfromtxt(panel["data"], delimiter=",", names=True)
+        self.t, self.y = d["t"], d["y"]
+        ref = panel.get("reference")
+        self.ref = np.genfromtxt(ref["file"], delimiter=",", names=True) if ref else None
+
+    def draw(self, ax, k, n):
+        t_now = self.p["t_end"] * k / max(n - 1, 1)
+        if self.ref is not None:
+            ax.plot(self.ref["t"], self.ref["y"], color=FG, lw=0.8, alpha=0.75, label=self.p["reference"]["label"])
+        m = self.t <= t_now + 1e-9
+        ax.plot(self.t[m], self.y[m], color="#f2b134", lw=1.0, label=self.p.get("label", "Mallard"))
+        if m.any():
+            ax.plot(self.t[m][-1], self.y[m][-1], "o", ms=2.2, color="#f2b134")
+        ax.set_xlim(self.p.get("xlim") or (0, self.p["t_end"]))
+        if self.p.get("ylim"):
+            ax.set_ylim(self.p["ylim"])
+        style_plot_axes(ax, self.p)
+        ax.legend(loc=self.p.get("legend_loc", "upper right"), fontsize=4.5, frameon=False, labelcolor=FG,
+                  handlelength=1.2, borderaxespad=0.2)
+        return t_now
+
+
+PANELS = {"field": FieldPanel, "wall": WallPanel, "frames": FramesPanel, "curve": CurvePanel}
 
 
 def render(args):
@@ -159,16 +217,16 @@ def render(args):
     rects, height, footer_h = _layout
     fig = plt.figure(figsize=(config["width"], height), dpi=config["dpi"], facecolor=BG)
     for (p, rect), obj in zip(rects, _panels):
-        if isinstance(obj, WallPanel):
+        if isinstance(obj, (WallPanel, CurvePanel)):
             # room for tick labels inside the slot
-            ml, mb = 0.2 / config["width"], 0.16 / height
+            ml, mb = p.get("margin_left", 0.2) / config["width"], 0.16 / height
             ax = fig.add_axes([rect[0] + ml, rect[1] + mb, rect[2] - ml - 0.08 / config["width"], rect[3] - mb])
         else:
             ax = fig.add_axes(rect)
             ax.set_axis_off()
         t = obj.draw(ax, k, n)
         fig.text(rect[0], rect[1] + rect[3] + 0.006, p.get("title", ""), fontsize=6, color=FG, ha="left", va="bottom")
-        if p.get("show_time", isinstance(obj, FieldPanel)):
+        if p.get("show_time", isinstance(obj, (FieldPanel, FramesPanel))):
             ax.text(0.985, 0.975, f"t = {t:.3f}", transform=ax.transAxes, fontsize=4.5, color="white", ha="right",
                     va="top", family="DejaVu Sans Mono",
                     bbox=dict(boxstyle="round,pad=0.25", fc=BG, ec="none", alpha=0.6))
@@ -182,7 +240,7 @@ def render(args):
 def init_worker(config, fig_px):
     global _panels, _layout
     _layout = layout(config)
-    _panels = [(WallPanel if p.get("type", "field") == "wall" else FieldPanel)(p, rect, fig_px)
+    _panels = [PANELS[p.get("type", "field")](p, rect, fig_px)
                for p, rect in _layout[0]]
 
 
@@ -209,7 +267,8 @@ def main():
     config.setdefault("fps", 30)
     plt.rcParams.update({"font.family": "DejaVu Sans"})
 
-    n_total = args.frames or max(len(snapshot_files(p)) for row in config["rows"] for p in row)
+    n_total = args.frames or max(len(snapshot_files(p)) for row in config["rows"] for p in row
+                                 if p.get("type") != "curve")
     first = int(round(args.start * (n_total - 1)))
     _, height, _ = layout(config)
     fig_px = (config["width"] * config["dpi"], height * config["dpi"])
@@ -221,7 +280,8 @@ def main():
                 print(f"frame {i + 1}/{len(jobs)}", flush=True)
     pattern = os.path.join(tmp, "%05d.png")
     write_mp4(pattern, args.output_stem + ".mp4", config["fps"])
-    write_gif(pattern, args.output_stem + ".gif", config["fps"])
+    write_gif(pattern, args.output_stem + ".gif", config["fps"], config.get("gif_width"),
+              config.get("gif_colors", 256))
     set_last_delay(args.output_stem + ".gif", args.hold)
     shutil.copy(jobs[-1][3], args.output_stem + "_final.png")
     shutil.rmtree(tmp)

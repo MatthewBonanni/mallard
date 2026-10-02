@@ -8,7 +8,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 
 ![Mallard simulations](./docs/images/hero.gif)
 
-*Double Mach reflection, a 2D Riemann problem and the Daru & Tenaud viscous shock tube ([`examples/`](examples)), with the shock tube's wall density at t = 1 landing on the grid-converged reference of [Zhou et al.](https://arxiv.org/abs/1705.09062).*
+*Double Mach reflection, a 2D Riemann problem, the Daru & Tenaud viscous shock tube and, in 3D, the Taylor-Green vortex at Re = 1600 ([`examples/`](examples)): the shock tube's wall density at t = 1 lands on the grid-converged reference of [Zhou et al.](https://arxiv.org/abs/1705.09062), and the vortex's kinetic-energy dissipation rate follows the 512³ spectral DNS of the [High-Order CFD Workshop](https://cfd.ku.edu/hiocfd/).*
 
 > **NOTE:** Mallard is a **work in progress**: 3D support is new, MPI is in progress, and GPU performance has only begun to be tuned.
 
