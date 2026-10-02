@@ -335,6 +335,15 @@ class Mesh {
          */
         void init_wedge(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly);
 
+        /**
+         * @brief Global id of local cell i_cell (i_cell itself unless distributed).
+         *        Connectivity is ordered by global ids, so that every rank count
+         *        builds bitwise identical faces and stencils.
+         */
+        uint64_t h_global_cell(uint32_t i_cell) const {
+            return h_global_cell_id.empty() ? i_cell : h_global_cell_id[i_cell];
+        }
+
         uint32_t n_cells, n_nodes, n_faces;
         // Cells [0, n_owned()) are owned by this rank; the rest are halo cells
         uint32_t n_owned_cells = 0;
@@ -379,6 +388,9 @@ class Mesh {
         Kokkos::View<int32_t *[2]>::host_mirror_type h_cells_of_face;
     protected:
     private:
+        void init_box(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, bool triangles, bool wedge);
+        // Local cells in increasing global id: the first cell to visit a face becomes its cell 0
+        std::vector<uint32_t> cells_by_global_id() const;
         void init_from_connectivity_3d(const std::vector<std::array<rtype, N_DIM>> & nodes,
                                        const std::vector<std::vector<uint32_t>> & cells,
                                        const std::vector<BoundaryFace> & boundary_faces,

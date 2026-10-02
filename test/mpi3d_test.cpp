@@ -72,7 +72,7 @@ void expect_matches_serial(const std::string & input) {
             max_rel = std::max(max_rel, std::abs(gathered[g * N_CONSERVATIVE + i] - ref) / (std::abs(ref) + 1e-3));
         }
     }
-    EXPECT_LT(max_rel, 1e-11) << "on " << comm::size() << " ranks";
+    EXPECT_EQ(max_rel, 0.0) << "on " << comm::size() << " ranks";
 }
 
 } // namespace

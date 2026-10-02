@@ -126,10 +126,11 @@ std::shared_ptr<Mesh> build_local_mesh(Mesh & global, const std::vector<int> & o
     }
 
     auto local = std::make_shared<Mesh>();
-    local->init_from_connectivity(nodes, cells, boundary_faces);
-    local->n_owned_cells = dist.n_owned;
+    // Global ids first: they order the faces and neighbor lists like the serial mesh's
     local->h_global_cell_id = dist.global_cell;
     local->n_global_cells = n_global;
+    local->init_from_connectivity(nodes, cells, boundary_faces);
+    local->n_owned_cells = dist.n_owned;
     local->n_reconstructed_cells = std::count_if(dist.layer.begin(), dist.layer.end(), [](uint8_t l) { return l <= 1; });
     local->n_complete_cells =
         std::count_if(dist.layer.begin(), dist.layer.end(), [&](uint8_t l) { return l < halo_layers; });

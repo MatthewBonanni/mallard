@@ -271,7 +271,8 @@ void TENO::compute_stencils_and_matrices() {
                 if (c != i) nb.push_back(c);
             }
         }
-        std::sort(nb.begin(), nb.end());
+        std::sort(nb.begin(), nb.end(),
+                  [&](uint32_t a, uint32_t b) { return mesh->h_global_cell(a) < mesh->h_global_cell(b); });
         nb.erase(std::unique(nb.begin(), nb.end()), nb.end());
     });
 
@@ -738,7 +739,8 @@ void TENO::compute_stencils_and_matrices_3d() {
                 if (c != i) nb.push_back(c);
             }
         }
-        std::sort(nb.begin(), nb.end());
+        std::sort(nb.begin(), nb.end(),
+                  [&](uint32_t a, uint32_t b) { return mesh->h_global_cell(a) < mesh->h_global_cell(b); });
         nb.erase(std::unique(nb.begin(), nb.end()), nb.end());
     });
 

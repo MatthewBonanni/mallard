@@ -189,7 +189,7 @@ void Mesh::init_from_connectivity_3d(const std::vector<std::array<rtype, N_DIM>>
     std::vector<std::vector<uint32_t>> face_nodes;
     std::vector<std::array<int32_t, 2>> face_cells;
     std::vector<std::vector<uint32_t>> cell_faces(n_cells);
-    for (uint32_t c = 0; c < n_cells; c++) {
+    for (uint32_t c : cells_by_global_id()) {
         for (const auto & local : cell_local_faces(cell_nodes[c].size())) {
             std::vector<uint32_t> fn;
             for (uint8_t k : local) fn.push_back(cell_nodes[c][k]);

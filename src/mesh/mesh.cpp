@@ -18,6 +18,7 @@
 #include <string>
 #include <cmath>
 #include <algorithm>
+#include <numeric>
 
 #include <Kokkos_Core.hpp>
 
@@ -291,6 +292,13 @@ void Mesh::compute_face_centroids() {
     }
 }
 
+std::vector<uint32_t> Mesh::cells_by_global_id() const {
+    std::vector<uint32_t> order(n_cells);
+    std::iota(order.begin(), order.end(), 0u);
+    std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) { return h_global_cell(a) < h_global_cell(b); });
+    return order;
+}
+
 void Mesh::compute_cell_neighbors() {
     std::vector<std::vector<uint32_t>> cells_of_node(n_nodes);
     for (uint32_t c = 0; c < n_cells; c++) {
@@ -304,7 +312,7 @@ void Mesh::compute_cell_neighbors() {
                 if (other != c) nb.push_back(other);
             }
         }
-        std::sort(nb.begin(), nb.end());
+        std::sort(nb.begin(), nb.end(), [&](uint32_t a, uint32_t b) { return h_global_cell(a) < h_global_cell(b); });
         nb.erase(std::unique(nb.begin(), nb.end()), nb.end());
         flat.insert(flat.end(), nb.begin(), nb.end());
         offsets[c + 1] = flat.size();
@@ -363,548 +371,54 @@ void Mesh::copy_device_to_host() {
     }
 }
 
-void Mesh::init_cart(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
-    n_cells = nx * ny;
-    n_nodes = (nx + 1) * (ny + 1);
-    n_faces = 2 * n_cells + nx + ny;
-
-    node_coords = Kokkos::View<rtype *[N_DIM]>("node_coords", n_nodes);
-    cell_coords = Kokkos::View<rtype *[N_DIM]>("cell_coords", n_cells);
-    cell_volume = Kokkos::View<rtype *>("cell_volume", n_cells);
-    face_area = Kokkos::View<rtype *>("face_area", n_faces);
-    face_normals = Kokkos::View<rtype *[N_DIM]>("face_normals", n_faces);
-    face_coords = Kokkos::View<rtype *[N_DIM]>("face_coords", n_faces);
-    cells_of_face = Kokkos::View<int32_t *[2]>("cells_of_face", n_faces);
-
-    h_node_coords = Kokkos::create_mirror_view(node_coords);
-    h_cell_coords = Kokkos::create_mirror_view(cell_coords);
-    h_cell_volume = Kokkos::create_mirror_view(cell_volume);
-    h_face_area = Kokkos::create_mirror_view(face_area);
-    h_face_normals = Kokkos::create_mirror_view(face_normals);
-    h_face_coords = Kokkos::create_mirror_view(face_coords);
-    h_cells_of_face = Kokkos::create_mirror_view(cells_of_face);
-
-    // Temporary connectivity arrays
-    std::vector<std::vector<uint32_t>> _nodes_of_cell;
-    std::vector<std::vector<uint32_t>> _faces_of_cell;
-    std::vector<std::vector<uint32_t>> _nodes_of_face;
-
-    // In this case, we know the sizes of the connectivity arrays a priori
-    _nodes_of_cell.resize(n_cells);
-    _faces_of_cell.resize(n_cells);
-    _nodes_of_face.resize(n_faces);
-    for (uint32_t i_cell = 0; i_cell < n_cells; ++i_cell) {
-        _nodes_of_cell[i_cell].resize(4);
-        _faces_of_cell[i_cell].resize(4);
-    }
-    for (uint32_t i_face = 0; i_face < n_faces; ++i_face) {
-        _nodes_of_face[i_face].resize(2);
-    }
-
-    // Compute node coordinates
-    rtype dx = Lx / nx;
-    rtype dy = Ly / ny;
-
+void Mesh::init_box(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, bool triangles, bool wedge) {
+    const rtype dx = Lx / nx;
+    const rtype dy = Ly / ny;
+    std::vector<std::array<rtype, N_DIM>> nodes;
     for (uint32_t i = 0; i < nx + 1; ++i) {
         for (uint32_t j = 0; j < ny + 1; ++j) {
-            uint32_t i_node = i * (ny + 1) + j;
-            h_node_coords(i_node, 0) = i * dx;
-            h_node_coords(i_node, 1) = j * dy;
+            std::array<rtype, 2> x = {i * dx, j * dy};
+            if (wedge) x = wedge_node(x[0], x[1], Ly);
+            std::array<rtype, N_DIM> p{};
+            p[0] = x[0];
+            p[1] = x[1];
+            nodes.push_back(p);
         }
     }
-
-    // Build associations between nodes, cells, and faces
-    for (uint32_t i_cell = 0; i_cell < n_cells; ++i_cell) {
-        uint32_t ic = i_cell / ny;
-        uint32_t jc = i_cell % ny;
-
-        uint32_t i_cell_r = i_cell + ny;
-        uint32_t i_cell_t = i_cell + 1;
-        uint32_t i_cell_l = i_cell - ny;
-        uint32_t i_cell_b = i_cell - 1;
-        // ^ THESE WILL OVERFLOW OR BE INVALID AT THE BOUNDARIES
-        // (this is okay because they are not used in those cases)
-
-        uint32_t i_node_tr = (ic + 1) * (ny + 1) + jc + 1;
-        uint32_t i_node_tl = (ic)     * (ny + 1) + jc + 1;
-        uint32_t i_node_bl = (ic)     * (ny + 1) + jc    ;
-        uint32_t i_node_br = (ic + 1) * (ny + 1) + jc    ;
-
-        uint32_t i_face_r = (2 * ny + 1) * (ic + 1) + jc         ;
-        uint32_t i_face_t = (2 * ny + 1) * (ic)     + jc + ny + 1;
-        uint32_t i_face_l = (2 * ny + 1) * (ic)     + jc         ;
-        uint32_t i_face_b = (2 * ny + 1) * (ic)     + jc + ny    ;
-
-        _nodes_of_cell[i_cell][0] = i_node_tr;
-        _nodes_of_cell[i_cell][1] = i_node_tl;
-        _nodes_of_cell[i_cell][2] = i_node_bl;
-        _nodes_of_cell[i_cell][3] = i_node_br;
-
-        _faces_of_cell[i_cell][0] = i_face_r;
-        _faces_of_cell[i_cell][1] = i_face_t;
-        _faces_of_cell[i_cell][2] = i_face_l;
-        _faces_of_cell[i_cell][3] = i_face_b;
-
-        // NOTE: cells_of_face and nodes_of_face will be overwritten
-        // by future loop iterations, but this is okay because
-        // the values will be the same for all cells.
-
-        h_cells_of_face(i_face_r, 0) = i_cell;
-        h_cells_of_face(i_face_r, 1) = ic == (nx - 1) ? -1 : (int32_t)i_cell_r;
-        h_cells_of_face(i_face_t, 0) = i_cell;
-        h_cells_of_face(i_face_t, 1) = jc == (ny - 1) ? -1 : (int32_t)i_cell_t;
-        h_cells_of_face(i_face_l, 0) = i_cell;
-        h_cells_of_face(i_face_l, 1) = ic == 0 ? -1 : (int32_t)i_cell_l;
-        h_cells_of_face(i_face_b, 0) = i_cell;
-        h_cells_of_face(i_face_b, 1) = jc == 0 ? -1 : (int32_t)i_cell_b;
-
-        _nodes_of_face[i_face_r][0] = i_node_br;
-        _nodes_of_face[i_face_r][1] = i_node_tr;
-        _nodes_of_face[i_face_t][0] = i_node_tr;
-        _nodes_of_face[i_face_t][1] = i_node_tl;
-        _nodes_of_face[i_face_l][0] = i_node_tl;
-        _nodes_of_face[i_face_l][1] = i_node_bl;
-        _nodes_of_face[i_face_b][0] = i_node_bl;
-        _nodes_of_face[i_face_b][1] = i_node_br;
-    }
-
-    // Assign faces to face zones
-    FaceZone zone_i = FaceZone();
-    FaceZone zone_r = FaceZone();
-    FaceZone zone_t = FaceZone();
-    FaceZone zone_l = FaceZone();
-    FaceZone zone_b = FaceZone();
-    zone_i.set_name("interior");
-    zone_r.set_name("right");
-    zone_t.set_name("top");
-    zone_l.set_name("left");
-    zone_b.set_name("bottom");
-    zone_i.set_type(FaceZoneType::INTERIOR);
-    zone_r.set_type(FaceZoneType::BOUNDARY);
-    zone_t.set_type(FaceZoneType::BOUNDARY);
-    zone_l.set_type(FaceZoneType::BOUNDARY);
-    zone_b.set_type(FaceZoneType::BOUNDARY);
-
-    std::vector<uint32_t> faces_i, faces_r, faces_t, faces_l, faces_b;
-    for (uint32_t i_cell = 0; i_cell < n_cells; i_cell++) {
-        uint32_t ic = i_cell / ny;
-        uint32_t jc = i_cell % ny;
-        uint32_t i_face;
-
-        // Right boundary
-        i_face = _faces_of_cell[i_cell][0];
-        if (ic == nx - 1) {
-            faces_r.push_back(i_face);
-        } else {
-            faces_i.push_back(i_face);
-        }
-        // Top boundary
-        i_face = _faces_of_cell[i_cell][1];
-        if (jc == ny - 1) {
-            faces_t.push_back(i_face);
-        } else {
-            faces_i.push_back(i_face);
-        }
-        // Left boundary
-        i_face = _faces_of_cell[i_cell][2];
-        if (ic == 0) {
-            faces_l.push_back(i_face);
-        } else {
-            faces_i.push_back(i_face);
-        }
-        // Bottom boundary
-        i_face = _faces_of_cell[i_cell][3];
-        if (jc == 0) {
-            faces_b.push_back(i_face);
-        } else {
-            faces_i.push_back(i_face);
+    auto node = [&](uint32_t i, uint32_t j) { return i * (ny + 1) + j; };
+    std::vector<std::vector<uint32_t>> cells;
+    for (uint32_t ic = 0; ic < nx; ++ic) {
+        for (uint32_t jc = 0; jc < ny; ++jc) {
+            const uint32_t tr = node(ic + 1, jc + 1), tl = node(ic, jc + 1);
+            const uint32_t bl = node(ic, jc), br = node(ic + 1, jc);
+            if (triangles) {
+                cells.push_back({br, tr, bl});
+                cells.push_back({tl, bl, tr});
+            } else {
+                cells.push_back({tr, tl, bl, br});
+            }
         }
     }
-
-    // Dedupe interior faces
-    std::sort(faces_i.begin(), faces_i.end());
-    faces_i.erase(std::unique(faces_i.begin(), faces_i.end()), faces_i.end());
-
-    zone_i.faces = Kokkos::View<uint32_t *>("zone_i_faces", faces_i.size());
-    zone_r.faces = Kokkos::View<uint32_t *>("zone_r_faces", faces_r.size());
-    zone_t.faces = Kokkos::View<uint32_t *>("zone_t_faces", faces_t.size());
-    zone_l.faces = Kokkos::View<uint32_t *>("zone_l_faces", faces_l.size());
-    zone_b.faces = Kokkos::View<uint32_t *>("zone_b_faces", faces_b.size());
-
-    zone_i.h_faces = Kokkos::create_mirror_view(zone_i.faces);
-    zone_r.h_faces = Kokkos::create_mirror_view(zone_r.faces);
-    zone_t.h_faces = Kokkos::create_mirror_view(zone_t.faces);
-    zone_l.h_faces = Kokkos::create_mirror_view(zone_l.faces);
-    zone_b.h_faces = Kokkos::create_mirror_view(zone_b.faces);
-
-    for (uint32_t i = 0; i < faces_i.size(); ++i) {
-        zone_i.h_faces(i) = faces_i[i];
+    std::vector<BoundaryFace> boundary_faces;
+    for (uint32_t i = 0; i < nx; ++i) {
+        boundary_faces.push_back({{node(i, 0), node(i + 1, 0)}, "bottom"});
+        boundary_faces.push_back({{node(i + 1, ny), node(i, ny)}, "top"});
     }
-    for (uint32_t i = 0; i < faces_r.size(); ++i) {
-        zone_r.h_faces(i) = faces_r[i];
+    for (uint32_t j = 0; j < ny; ++j) {
+        boundary_faces.push_back({{node(nx, j), node(nx, j + 1)}, "right"});
+        boundary_faces.push_back({{node(0, j + 1), node(0, j)}, "left"});
     }
-    for (uint32_t i = 0; i < faces_t.size(); ++i) {
-        zone_t.h_faces(i) = faces_t[i];
-    }
-    for (uint32_t i = 0; i < faces_l.size(); ++i) {
-        zone_l.h_faces(i) = faces_l[i];
-    }
-    for (uint32_t i = 0; i < faces_b.size(); ++i) {
-        zone_b.h_faces(i) = faces_b[i];
-    }
+    init_from_connectivity(nodes, cells, boundary_faces);
+}
 
-    m_face_zones.push_back(zone_i);
-    m_face_zones.push_back(zone_r);
-    m_face_zones.push_back(zone_t);
-    m_face_zones.push_back(zone_l);
-    m_face_zones.push_back(zone_b);
-
-    // Compute offsets and assign connectivity views
-    uint32_t nodes_of_cell_size = 0;
-    uint32_t faces_of_cell_size = 0;
-    uint32_t nodes_of_face_size = 0;
-    for (uint32_t i_cell = 0; i_cell < n_cells; ++i_cell) {
-        nodes_of_cell_size += _nodes_of_cell[i_cell].size();
-        faces_of_cell_size += _faces_of_cell[i_cell].size();
-    }
-    for (uint32_t i_face = 0; i_face < n_faces; ++i_face) {
-        nodes_of_face_size += _nodes_of_face[i_face].size();
-    }
-
-    nodes_of_cell = Kokkos::View<uint32_t *>("nodes_of_cell", nodes_of_cell_size);
-    offsets_nodes_of_cell = Kokkos::View<uint32_t *>("offsets_nodes_of_cell", n_cells + 1);
-    faces_of_cell = Kokkos::View<uint32_t *>("faces_of_cell", faces_of_cell_size);
-    offsets_faces_of_cell = Kokkos::View<uint32_t *>("offsets_faces_of_cell", n_cells + 1);
-    nodes_of_face = Kokkos::View<uint32_t *>("nodes_of_face", nodes_of_face_size);
-    offsets_nodes_of_face = Kokkos::View<uint32_t *>("offsets_nodes_of_face", n_faces + 1);
-
-    h_nodes_of_cell = Kokkos::create_mirror_view(nodes_of_cell);
-    h_offsets_nodes_of_cell = Kokkos::create_mirror_view(offsets_nodes_of_cell);
-    h_faces_of_cell = Kokkos::create_mirror_view(faces_of_cell);
-    h_offsets_faces_of_cell = Kokkos::create_mirror_view(offsets_faces_of_cell);
-    h_nodes_of_face = Kokkos::create_mirror_view(nodes_of_face);
-    h_offsets_nodes_of_face = Kokkos::create_mirror_view(offsets_nodes_of_face);
-
-    uint32_t _n_nodes_of_cell;
-    uint32_t _n_faces_of_cell;
-    uint32_t _n_nodes_of_face;
-    h_offsets_nodes_of_cell(0) = 0;
-    h_offsets_faces_of_cell(0) = 0;
-    h_offsets_nodes_of_face(0) = 0;
-    for (uint32_t i_cell = 0; i_cell < n_cells; ++i_cell) {
-        _n_nodes_of_cell = _nodes_of_cell[i_cell].size();
-        _n_faces_of_cell = _faces_of_cell[i_cell].size();
-        h_offsets_nodes_of_cell(i_cell + 1) = h_offsets_nodes_of_cell(i_cell) + _n_nodes_of_cell;
-        h_offsets_faces_of_cell(i_cell + 1) = h_offsets_faces_of_cell(i_cell) + _n_faces_of_cell;
-        for (uint32_t i_node_local = 0; i_node_local < _n_nodes_of_cell; ++i_node_local) {
-            h_nodes_of_cell(h_offsets_nodes_of_cell(i_cell) + i_node_local) = _nodes_of_cell[i_cell][i_node_local];
-        }
-        for (uint32_t i_face_local = 0; i_face_local < _n_faces_of_cell; ++i_face_local) {
-            h_faces_of_cell(h_offsets_faces_of_cell(i_cell) + i_face_local) = _faces_of_cell[i_cell][i_face_local];
-        }
-    }
-    for (uint32_t i_face = 0; i_face < n_faces; ++i_face) {
-        _n_nodes_of_face = _nodes_of_face[i_face].size();
-        h_offsets_nodes_of_face(i_face + 1) = h_offsets_nodes_of_face(i_face) + _n_nodes_of_face;
-        for (uint32_t i_node_local = 0; i_node_local < _n_nodes_of_face; ++i_node_local) {
-            h_nodes_of_face(h_offsets_nodes_of_face(i_face) + i_node_local) = _nodes_of_face[i_face][i_node_local];
-        }
-    }
-
-    // Compute derived quantities
-    compute_face_areas();
-    compute_cell_volumes();
-    compute_cell_centroids();
-    compute_face_normals();
-    compute_face_centroids();
-    compute_cell_neighbors();
+void Mesh::init_cart(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
+    init_box(nx, ny, Lx, Ly, false, false);
 }
 
 void Mesh::init_cart_tri(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
-    n_cells = 2 * nx * ny;
-    n_nodes = (nx + 1) * (ny + 1);
-    n_faces = 3 * nx * ny + nx + ny;
-
-    node_coords = Kokkos::View<rtype *[N_DIM]>("node_coords", n_nodes);
-    cell_coords = Kokkos::View<rtype *[N_DIM]>("cell_coords", n_cells);
-    cell_volume = Kokkos::View<rtype *>("cell_volume", n_cells);
-    face_area = Kokkos::View<rtype *>("face_area", n_faces);
-    face_normals = Kokkos::View<rtype *[N_DIM]>("face_normals", n_faces);
-    face_coords = Kokkos::View<rtype *[N_DIM]>("face_coords", n_faces);
-    cells_of_face = Kokkos::View<int32_t *[2]>("cells_of_face", n_faces);
-
-    h_node_coords = Kokkos::create_mirror_view(node_coords);
-    h_cell_coords = Kokkos::create_mirror_view(cell_coords);
-    h_cell_volume = Kokkos::create_mirror_view(cell_volume);
-    h_face_area = Kokkos::create_mirror_view(face_area);
-    h_face_normals = Kokkos::create_mirror_view(face_normals);
-    h_face_coords = Kokkos::create_mirror_view(face_coords);
-    h_cells_of_face = Kokkos::create_mirror_view(cells_of_face);
-
-    // Temporary connectivity arrays
-    std::vector<std::vector<uint32_t>> _nodes_of_cell;
-    std::vector<std::vector<uint32_t>> _faces_of_cell;
-    std::vector<std::vector<uint32_t>> _nodes_of_face;
-
-    // In this case, we know the sizes of the connectivity arrays a priori
-    _nodes_of_cell.resize(n_cells);
-    _faces_of_cell.resize(n_cells);
-    _nodes_of_face.resize(n_faces);
-    for (uint32_t i_cell = 0; i_cell < n_cells; ++i_cell) {
-        _nodes_of_cell[i_cell].resize(3);
-        _faces_of_cell[i_cell].resize(3);
-    }
-    for (uint32_t i_face = 0; i_face < n_faces; ++i_face) {
-        _nodes_of_face[i_face].resize(2);
-    }
-
-    // Compute node coordinates
-    rtype dx = Lx / nx;
-    rtype dy = Ly / ny;
-
-    for (uint32_t i = 0; i < nx + 1; ++i) {
-        for (uint32_t j = 0; j < ny + 1; ++j) {
-            uint32_t i_node = i * (ny + 1) + j;
-            h_node_coords(i_node, 0) = i * dx;
-            h_node_coords(i_node, 1) = j * dy;
-        }
-    }
-
-    // Build associations between nodes, cells, and faces
-    for (uint32_t i_quad = 0; i_quad < nx * ny; ++i_quad) {
-        uint32_t ic = i_quad / ny;
-        uint32_t jc = i_quad % ny;
-
-        uint32_t i_cell_cr = 2 * i_quad;
-        uint32_t i_cell_cl = i_cell_cr + 1;
-        uint32_t i_cell_r  = i_cell_cl + 2 * ny;
-        uint32_t i_cell_t  = i_cell_cl + 1; 
-        uint32_t i_cell_l  = i_cell_cr - 2 * ny;
-        uint32_t i_cell_b  = i_cell_cr - 1;
-        // ^ THESE WILL OVERFLOW OR BE INVALID AT THE BOUNDARIES
-        // (this is okay because they are not used in those cases)
-
-        uint32_t i_node_tr = (ic + 1) * (ny + 1) + jc + 1;
-        uint32_t i_node_tl = (ic    ) * (ny + 1) + jc + 1;
-        uint32_t i_node_bl = (ic    ) * (ny + 1) + jc    ;
-        uint32_t i_node_br = (ic + 1) * (ny + 1) + jc    ;
-
-        uint32_t i_face_r = (3 * ny + 1) * (ic + 1) + (    jc)         ;
-        uint32_t i_face_t = (3 * ny + 1) * (ic)     + (2 * jc) + ny + 2;
-        uint32_t i_face_l = (3 * ny + 1) * (ic)     + (    jc)         ;
-        uint32_t i_face_b = (3 * ny + 1) * (ic)     + (2 * jc) + ny    ;
-        uint32_t i_face_d = (3 * ny + 1) * (ic)     + (2 * jc) + ny + 1;
-
-        _nodes_of_cell[i_cell_cr][0] = i_node_br;
-        _nodes_of_cell[i_cell_cr][1] = i_node_tr;
-        _nodes_of_cell[i_cell_cr][2] = i_node_bl;
-
-        _nodes_of_cell[i_cell_cl][0] = i_node_tl;
-        _nodes_of_cell[i_cell_cl][1] = i_node_bl;
-        _nodes_of_cell[i_cell_cl][2] = i_node_tr;
-
-        _faces_of_cell[i_cell_cr][0] = i_face_b;
-        _faces_of_cell[i_cell_cr][1] = i_face_r;
-        _faces_of_cell[i_cell_cr][2] = i_face_d;
-
-        _faces_of_cell[i_cell_cl][0] = i_face_t;
-        _faces_of_cell[i_cell_cl][1] = i_face_l;
-        _faces_of_cell[i_cell_cl][2] = i_face_d;
-
-        h_cells_of_face(i_face_r, 0) = i_cell_cr;
-        h_cells_of_face(i_face_r, 1) = ic == (nx - 1) ? -1 : (int32_t)i_cell_r;
-        h_cells_of_face(i_face_t, 0) = i_cell_cl;
-        h_cells_of_face(i_face_t, 1) = jc == (ny - 1) ? -1 : (int32_t)i_cell_t;
-        h_cells_of_face(i_face_l, 0) = i_cell_cl;
-        h_cells_of_face(i_face_l, 1) = ic == 0 ? -1 : (int32_t)i_cell_l;
-        h_cells_of_face(i_face_b, 0) = i_cell_cr;
-        h_cells_of_face(i_face_b, 1) = jc == 0 ? -1 : (int32_t)i_cell_b;
-        h_cells_of_face(i_face_d, 0) = i_cell_cr;
-        h_cells_of_face(i_face_d, 1) = i_cell_cl;
-
-        _nodes_of_face[i_face_r][0] = i_node_br;
-        _nodes_of_face[i_face_r][1] = i_node_tr;
-        _nodes_of_face[i_face_t][0] = i_node_tr;
-        _nodes_of_face[i_face_t][1] = i_node_tl;
-        _nodes_of_face[i_face_l][0] = i_node_tl;
-        _nodes_of_face[i_face_l][1] = i_node_bl;
-        _nodes_of_face[i_face_b][0] = i_node_bl;
-        _nodes_of_face[i_face_b][1] = i_node_br;
-        _nodes_of_face[i_face_d][0] = i_node_bl;
-        _nodes_of_face[i_face_d][1] = i_node_tr;
-    }
-
-    // Assign faces to face zones
-    FaceZone zone_i = FaceZone();
-    FaceZone zone_r = FaceZone();
-    FaceZone zone_t = FaceZone();
-    FaceZone zone_l = FaceZone();
-    FaceZone zone_b = FaceZone();
-    zone_i.set_name("interior");
-    zone_r.set_name("right");
-    zone_t.set_name("top");
-    zone_l.set_name("left");
-    zone_b.set_name("bottom");
-    zone_i.set_type(FaceZoneType::INTERIOR);
-    zone_r.set_type(FaceZoneType::BOUNDARY);
-    zone_t.set_type(FaceZoneType::BOUNDARY);
-    zone_l.set_type(FaceZoneType::BOUNDARY);
-    zone_b.set_type(FaceZoneType::BOUNDARY);
-
-    std::vector<uint32_t> faces_i, faces_r, faces_t, faces_l, faces_b;
-    for (uint32_t i_quad = 0; i_quad < nx * ny; ++i_quad) {
-        uint32_t ic = i_quad / ny;
-        uint32_t jc = i_quad % ny;
-        uint32_t i_cell_cr = 2 * i_quad;
-        uint32_t i_cell_cl = i_cell_cr + 1;
-        uint32_t i_face;
-
-        // Right boundary
-        i_face = _faces_of_cell[i_cell_cr][1];
-        if (ic == nx - 1) {
-            faces_r.push_back(i_face);
-        } else {
-            faces_i.push_back(i_face);
-        }
-        // Top boundary
-        i_face = _faces_of_cell[i_cell_cl][0];
-        if (jc == ny - 1) {
-            faces_t.push_back(i_face);
-        } else {
-            faces_i.push_back(i_face);
-        }
-        // Left boundary
-        i_face = _faces_of_cell[i_cell_cl][1];
-        if (ic == 0) {
-            faces_l.push_back(i_face);
-        } else {
-            faces_i.push_back(i_face);
-        }
-        // Bottom boundary
-        i_face = _faces_of_cell[i_cell_cr][0];
-        if (jc == 0) {
-            faces_b.push_back(i_face);
-        } else {
-            faces_i.push_back(i_face);
-        }
-        // Diagonal face
-        i_face = _faces_of_cell[i_cell_cr][2];
-        faces_i.push_back(i_face);
-    }
-
-    // Dedupe interior faces
-    std::sort(faces_i.begin(), faces_i.end());
-    faces_i.erase(std::unique(faces_i.begin(), faces_i.end()), faces_i.end());
-
-    zone_i.faces = Kokkos::View<uint32_t *>("zone_i_faces", faces_i.size());
-    zone_r.faces = Kokkos::View<uint32_t *>("zone_r_faces", faces_r.size());
-    zone_t.faces = Kokkos::View<uint32_t *>("zone_t_faces", faces_t.size());
-    zone_l.faces = Kokkos::View<uint32_t *>("zone_l_faces", faces_l.size());
-    zone_b.faces = Kokkos::View<uint32_t *>("zone_b_faces", faces_b.size());
-
-    zone_i.h_faces = Kokkos::create_mirror_view(zone_i.faces);
-    zone_r.h_faces = Kokkos::create_mirror_view(zone_r.faces);
-    zone_t.h_faces = Kokkos::create_mirror_view(zone_t.faces);
-    zone_l.h_faces = Kokkos::create_mirror_view(zone_l.faces);
-    zone_b.h_faces = Kokkos::create_mirror_view(zone_b.faces);
-
-    for (uint32_t i = 0; i < faces_i.size(); ++i) {
-        zone_i.h_faces(i) = faces_i[i];
-    }
-    for (uint32_t i = 0; i < faces_r.size(); ++i) {
-        zone_r.h_faces(i) = faces_r[i];
-    }
-    for (uint32_t i = 0; i < faces_t.size(); ++i) {
-        zone_t.h_faces(i) = faces_t[i];
-    }
-    for (uint32_t i = 0; i < faces_l.size(); ++i) {
-        zone_l.h_faces(i) = faces_l[i];
-    }
-    for (uint32_t i = 0; i < faces_b.size(); ++i) {
-        zone_b.h_faces(i) = faces_b[i];
-    }
-
-    m_face_zones.push_back(zone_i);
-    m_face_zones.push_back(zone_r);
-    m_face_zones.push_back(zone_t);
-    m_face_zones.push_back(zone_l);
-    m_face_zones.push_back(zone_b);
-
-    // Compute offsets and assign connectivity views
-    uint32_t nodes_of_cell_size = 0;
-    uint32_t faces_of_cell_size = 0;
-    uint32_t nodes_of_face_size = 0;
-    for (uint32_t i_cell = 0; i_cell < n_cells; ++i_cell) {
-        nodes_of_cell_size += _nodes_of_cell[i_cell].size();
-        faces_of_cell_size += _faces_of_cell[i_cell].size();
-    }
-    for (uint32_t i_face = 0; i_face < n_faces; ++i_face) {
-        nodes_of_face_size += _nodes_of_face[i_face].size();
-    }
-
-    nodes_of_cell = Kokkos::View<uint32_t *>("nodes_of_cell", nodes_of_cell_size);
-    offsets_nodes_of_cell = Kokkos::View<uint32_t *>("offsets_nodes_of_cell", n_cells + 1);
-    faces_of_cell = Kokkos::View<uint32_t *>("faces_of_cell", faces_of_cell_size);
-    offsets_faces_of_cell = Kokkos::View<uint32_t *>("offsets_faces_of_cell", n_cells + 1);
-    nodes_of_face = Kokkos::View<uint32_t *>("nodes_of_face", nodes_of_face_size);
-    offsets_nodes_of_face = Kokkos::View<uint32_t *>("offsets_nodes_of_face", n_faces + 1);
-
-    h_nodes_of_cell = Kokkos::create_mirror_view(nodes_of_cell);
-    h_offsets_nodes_of_cell = Kokkos::create_mirror_view(offsets_nodes_of_cell);
-    h_faces_of_cell = Kokkos::create_mirror_view(faces_of_cell);
-    h_offsets_faces_of_cell = Kokkos::create_mirror_view(offsets_faces_of_cell);
-    h_nodes_of_face = Kokkos::create_mirror_view(nodes_of_face);
-    h_offsets_nodes_of_face = Kokkos::create_mirror_view(offsets_nodes_of_face);
-
-    uint32_t _n_nodes_of_cell;
-    uint32_t _n_faces_of_cell;
-    uint32_t _n_nodes_of_face;
-    h_offsets_nodes_of_cell(0) = 0;
-    h_offsets_faces_of_cell(0) = 0;
-    h_offsets_nodes_of_face(0) = 0;
-    for (uint32_t i_cell = 0; i_cell < n_cells; ++i_cell) {
-        _n_nodes_of_cell = _nodes_of_cell[i_cell].size();
-        _n_faces_of_cell = _faces_of_cell[i_cell].size();
-        h_offsets_nodes_of_cell(i_cell + 1) = h_offsets_nodes_of_cell(i_cell) + _n_nodes_of_cell;
-        h_offsets_faces_of_cell(i_cell + 1) = h_offsets_faces_of_cell(i_cell) + _n_faces_of_cell;
-        for (uint32_t i_node_local = 0; i_node_local < _n_nodes_of_cell; ++i_node_local) {
-            h_nodes_of_cell(h_offsets_nodes_of_cell(i_cell) + i_node_local) = _nodes_of_cell[i_cell][i_node_local];
-        }
-        for (uint32_t i_face_local = 0; i_face_local < _n_faces_of_cell; ++i_face_local) {
-            h_faces_of_cell(h_offsets_faces_of_cell(i_cell) + i_face_local) = _faces_of_cell[i_cell][i_face_local];
-        }
-    }
-    for (uint32_t i_face = 0; i_face < n_faces; ++i_face) {
-        _n_nodes_of_face = _nodes_of_face[i_face].size();
-        h_offsets_nodes_of_face(i_face + 1) = h_offsets_nodes_of_face(i_face) + _n_nodes_of_face;
-        for (uint32_t i_node_local = 0; i_node_local < _n_nodes_of_face; ++i_node_local) {
-            h_nodes_of_face(h_offsets_nodes_of_face(i_face) + i_node_local) = _nodes_of_face[i_face][i_node_local];
-        }
-    }
-
-    // Compute derived quantities
-    compute_face_areas();
-    compute_cell_volumes();
-    compute_cell_centroids();
-    compute_face_normals();
-    compute_face_centroids();
-    compute_cell_neighbors();
+    init_box(nx, ny, Lx, Ly, true, false);
 }
 
 void Mesh::init_wedge(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
-    init_cart(nx, ny, Lx, Ly);
-
-    for (uint32_t i_node = 0; i_node < n_nodes; ++i_node) {
-        const auto x = wedge_node(h_node_coords(i_node, 0), h_node_coords(i_node, 1), Ly);
-        h_node_coords(i_node, 0) = x[0];
-        h_node_coords(i_node, 1) = x[1];
-    }
-
-    // Recompute derived quantities
-    compute_face_areas();
-    compute_cell_volumes();
-    compute_cell_centroids();
-    compute_face_normals();
-    compute_face_centroids();
-    compute_cell_neighbors();
+    init_box(nx, ny, Lx, Ly, false, true);
 }

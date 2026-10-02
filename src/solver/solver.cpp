@@ -13,12 +13,14 @@
 
 #include "input.h"
 
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <filesystem>
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <sstream>
 
 #include <Kokkos_Core.hpp>
@@ -202,7 +204,20 @@ void Solver::init_boundaries() {
             auto h_faces = Kokkos::create_mirror_view(faces);
             for (size_t i = 0; i < owned.size(); i++) h_faces(i) = owned[i];
             Kokkos::deep_copy(faces, h_faces);
-            average_pressure_outlets.emplace_back(i_bc, faces);
+            // Sum in an order every rank count agrees on: by global cell, then by
+            // the face's position in that cell
+            std::vector<uint64_t> keys;
+            for (uint32_t f : owned) {
+                const uint32_t c = mesh->h_cells_of_face(f, 0);
+                uint64_t k = 0;
+                while (mesh->h_face_of_cell(c, k) != f) k++;
+                keys.push_back(mesh->h_global_cell(c) * 8 + k);  // No cell has 8 faces
+            }
+            if (is_distributed()) keys = comm::allgatherv(keys);
+            std::vector<uint32_t> order(keys.size());
+            std::iota(order.begin(), order.end(), 0u);
+            std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) { return keys[a] < keys[b]; });
+            average_pressure_outlets.push_back({static_cast<int32_t>(i_bc), faces, std::move(order)});
         }
         std::cout << "> Boundary " << name << ": " << BOUNDARY_NAMES.at(bcs.back().type) << std::endl;
     }
@@ -281,25 +296,28 @@ void Solver::update_source_field(rtype t_eval) {
 void Solver::update_average_pressure_outlets(StateView solution) {
     const Euler phys = physics;
     for (const auto & outlet : average_pressure_outlets) {
-        const int32_t i_bc = outlet.first;
-        Kokkos::View<uint32_t *> faces = outlet.second;
+        Kokkos::View<uint32_t *> faces = outlet.faces;
         Kokkos::View<int32_t *[2]> cells_of_face = mesh->cells_of_face;
         Kokkos::View<rtype *> face_area = mesh->face_area;
-        rtype pA = 0.0, A = 0.0;
-        Kokkos::parallel_reduce("outlet_average_pressure", faces.extent(0),
-                                KOKKOS_LAMBDA(const uint32_t k, rtype & sum_pA, rtype & sum_A) {
+        Kokkos::View<rtype *[2], Kokkos::LayoutRight> pA_A("outlet_pA_A", faces.extent(0));
+        Kokkos::parallel_for("outlet_average_pressure", faces.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
             const uint32_t f = faces(k);
             const int32_t c = cells_of_face(f, 0);
             rtype U[N_CONSERVATIVE], W[N_CONSERVATIVE];
             FOR_I_CONSERVATIVE U[i] = solution(c, i);
             phys.compute_W_from_conservatives(W, U);
-            sum_pA += W[N_DIM + 1] * face_area(f);
-            sum_A += face_area(f);
-        }, pA, A);
-        const auto sums = comm::allreduce(std::array<rtype, 2>{pA, A}, comm::Op::SUM);
-        pA = sums[0];
-        A = sums[1];
-        auto bc = Kokkos::subview(boundary_data.bcs, i_bc);
+            pA_A(k, 0) = W[N_DIM + 1] * face_area(f);
+            pA_A(k, 1) = face_area(f);
+        });
+        auto h_pA_A = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), pA_A);
+        std::vector<rtype> local(h_pA_A.data(), h_pA_A.data() + h_pA_A.size());
+        const std::vector<rtype> all = is_distributed() ? comm::allgatherv(local) : local;
+        rtype pA = 0.0, A = 0.0;
+        for (uint32_t k : outlet.sum_order) {
+            pA += all[2 * k];
+            A += all[2 * k + 1];
+        }
+        auto bc = Kokkos::subview(boundary_data.bcs, outlet.i_bc);
         auto h_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bc);
         h_bc().data[0] = h_bc().data[N_DIM + 1] - pA / A;
         Kokkos::deep_copy(bc, h_bc);

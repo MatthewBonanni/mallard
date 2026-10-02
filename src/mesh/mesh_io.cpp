@@ -51,7 +51,7 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
     std::vector<std::array<uint32_t, 2>> face_nodes;
     std::vector<std::array<int32_t, 2>> face_cells;
     std::vector<std::vector<uint32_t>> cell_faces(n_cells);
-    for (uint32_t c = 0; c < n_cells; c++) {
+    for (uint32_t c : cells_by_global_id()) {
         const auto & cn = cell_nodes[c];
         for (size_t k = 0; k < cn.size(); k++) {
             const uint32_t a = cn[k], b = cn[(k + 1) % cn.size()];

@@ -87,7 +87,7 @@ void expect_matches_serial(const std::string & input) {
     comm::allreduce(std::span<double>(count), comm::Op::SUM);
 
     EXPECT_EQ(distributed.get_step(), serial.get_step());
-    EXPECT_NEAR(distributed.get_time(), serial.get_time(), 1e-12 * serial.get_time());
+    EXPECT_EQ(distributed.get_time(), serial.get_time());
     double max_rel = 0.0;
     for (uint32_t g = 0; g < n_global; g++) {
         ASSERT_EQ(count[g], 1.0) << "cell " << g << " owned " << count[g] << " times";
@@ -96,8 +96,9 @@ void expect_matches_serial(const std::string & input) {
             max_rel = std::max(max_rel, std::abs(gathered[g * N_CONSERVATIVE + i] - ref) / (std::abs(ref) + 1e-3));
         }
     }
-    // Ranks sum the same face fluxes in a different order: round-off only
-    EXPECT_LT(max_rel, 1e-11) << "on " << comm::size() << " ranks";
+    // Faces and stencils are ordered by global cell ids, so every rank count
+    // computes the same sums in the same order
+    EXPECT_EQ(max_rel, 0.0) << "on " << comm::size() << " ranks";
 }
 
 } // namespace
@@ -226,14 +227,14 @@ TEST(MPITest, RestartFilesDoNotDependOnTheRankCount) {
     second.init(parse_toml(input));
     EXPECT_EQ(second.get_step(), 10u);
     second.run();
-    EXPECT_LT(max_rel_diff(gather(second), U_ref), 1e-11);
+    EXPECT_EQ(max_rel_diff(gather(second), U_ref), 0.0);
 
     // The same file read by a single rank
     Solver serial;
     serial.set_distributed(false);
     serial.init(parse_toml(input));
     serial.run();
-    EXPECT_LT(max_rel_diff(gather(serial), U_ref), 1e-11);
+    EXPECT_EQ(max_rel_diff(gather(serial), U_ref), 0.0);
     comm::barrier();
 }
 

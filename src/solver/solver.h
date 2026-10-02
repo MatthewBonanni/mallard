@@ -216,7 +216,12 @@ class Solver {
         Euler physics;
         BoundaryData boundary_data;
         std::vector<DirichletBoundary> dirichlet_boundaries;
-        std::vector<std::pair<int32_t, Kokkos::View<uint32_t *>>> average_pressure_outlets;  // (bc index, faces)
+        struct AveragePressureOutlet {
+            int32_t i_bc;
+            Kokkos::View<uint32_t *> faces;   // Faces of owned cells
+            std::vector<uint32_t> sum_order;  // Order of the gathered faces of all ranks by global key
+        };
+        std::vector<AveragePressureOutlet> average_pressure_outlets;
         Kokkos::View<rtype *[N_DIM + 2]>::host_mirror_type h_face_state;
         Kokkos::View<int32_t *>::host_mirror_type h_face_state_index;
         rtype t_boundary_states;
