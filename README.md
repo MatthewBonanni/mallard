@@ -34,7 +34,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 Mallard depends on [Kokkos](https://github.com/kokkos/kokkos) (5.x), [toml11](https://github.com/ToruNiina/toml11) and [exprtk](https://github.com/ArashPartow/exprtk), all included in this repository; Kokkos and toml11 are submodules.
 
 ```sh
-git clone --recursive https://github.com/MatthewBonanni/Mallard.git
+git clone --recursive https://github.com/MatthewBonanni/mallard.git
 cd Mallard
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_ENABLE_THREADS=ON
 cmake --build build -j

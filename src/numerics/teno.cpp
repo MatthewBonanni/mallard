@@ -267,6 +267,9 @@ void TENO::compute_stencils_and_matrices() {
     pinv_small = Kokkos::View<rtype ****>("teno_pinv_small", n_cells, teno::MAX_FACES, teno::NK_SMALL, nss_max);
     si_matrix = Kokkos::View<rtype ***>("teno_si_matrix", n_cells, nk, nk);
     troubled = Kokkos::View<rtype *>("teno_sigma", n_cells);
+    troubled_coeffs = Kokkos::View<rtype ***>("teno_troubled_coeffs", n_cells, n_dof_large, N_CONSERVATIVE);
+    troubled_cells = Kokkos::View<uint32_t *>("teno_troubled_cells", n_cells);
+    n_troubled = Kokkos::View<uint32_t>("teno_n_troubled");
 
     auto h_scale = Kokkos::create_mirror_view(scale);
     auto h_basis_mean = Kokkos::create_mirror_view(basis_mean);
@@ -612,12 +615,18 @@ void TENO::compute_stencils_and_matrices() {
 }
 
 /**
- * @brief Per-cell TENO-E reconstruction to the quadrature points of all of
- *        the cell's faces.
+ * @brief Per-cell TENO-E reconstruction of degree DEG to the quadrature points
+ *        of all of the cell's faces. SmoothPass finishes the cells below the
+ *        troubled threshold and queues the others with their central
+ *        coefficients; TroubledPass runs the stencil selection on that queue
+ *        only, so the register-heavy path does not slow the smooth cells.
  */
+template <uint8_t DEG>
 struct TENOFunctor {
-    uint8_t degree;
-    uint8_t nk;
+    static constexpr uint8_t NK = teno::n_dof(DEG);
+    struct SmoothPass {};
+    struct TroubledPass {};
+
     rtype sigma_threshold;
     rtype sigma_upper;
     rtype C_T;
@@ -649,6 +658,9 @@ struct TENOFunctor {
     Kokkos::View<rtype ****> pinv_small;
     Kokkos::View<rtype ***> si_matrix;
     Kokkos::View<rtype *> sigma_out;
+    Kokkos::View<rtype ***> coeffs;           // (cell, l, var): central coefficients of queued cells
+    Kokkos::View<uint32_t *> troubled_cells;  // queue of troubled cells
+    Kokkos::View<uint32_t> n_troubled;
 
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
@@ -708,8 +720,15 @@ struct TENOFunctor {
     }
 
     KOKKOS_INLINE_FUNCTION
-    void operator()(const uint32_t i_cell) const {
-        constexpr rtype eps = 1.0e-12;
+    void to_primitives(const rtype * U, rtype * Wq) const {
+        Wq[0] = U[0];
+        Wq[1] = U[1] / U[0];
+        Wq[2] = U[2] / U[0];
+        Wq[3] = (gamma - 1.0) * (U[3] - 0.5 * U[0] * (Wq[1] * Wq[1] + Wq[2] * Wq[2]));
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(SmoothPass, const uint32_t i_cell) const {
         rtype U0[N_CONSERVATIVE], W0[N_CONSERVATIVE];
         conservatives(i_cell, U0);
         FOR_I_CONSERVATIVE W0[i] = W(i_cell, i);
@@ -718,7 +737,7 @@ struct TENOFunctor {
         // One pass over the central stencil: large-stencil coefficients (conservative
         // variables) and the troubled-cell measure, the variance of the relative
         // density jumps (Welford's update)
-        rtype aK[teno::MAX_NK][N_CONSERVATIVE] = {};
+        rtype aK[NK][N_CONSERVATIVE] = {};
         rtype g_mean = 0.0, g_m2 = 0.0;
         for (uint16_t s = 0; s < ns; s++) {
             rtype U[N_CONSERVATIVE];
@@ -727,14 +746,76 @@ struct TENOFunctor {
             const rtype delta = g - g_mean;
             g_mean += delta / (s + 1);
             g_m2 += delta * (g - g_mean);
-            for (uint8_t l = 0; l < nk; l++) {
+            for (uint8_t l = 0; l < NK; l++) {
                 const rtype P = pinv_large(i_cell, l, s);
                 FOR_I_CONSERVATIVE aK[l][i] += P * (U[i] - U0[i]);
             }
         }
         const rtype sigma = g_m2 / ns;
         sigma_out(i_cell) = sigma;
-        const bool is_troubled = sigma >= sigma_threshold;
+        if (sigma >= sigma_threshold) {
+            for (uint8_t l = 0; l < NK; l++) {
+                FOR_I_CONSERVATIVE coeffs(i_cell, l, i) = aK[l][i];
+            }
+            troubled_cells(Kokkos::atomic_fetch_add(&n_troubled(), 1u)) = i_cell;
+            return;
+        }
+
+        const rtype h = scale(i_cell);
+        const rtype xc = cell_coords(i_cell, 0), yc = cell_coords(i_cell, 1);
+        const uint8_t n_quad = quad_points.extent(0);
+        const uint32_t f_begin = offsets_faces_of_cell(i_cell);
+        const uint8_t n_faces = offsets_faces_of_cell(i_cell + 1) - f_begin;
+        bool admissible = true;
+        for (uint8_t k = 0; k < n_faces; k++) {
+            const uint32_t f = faces_of_cell(f_begin + k);
+            const uint8_t side = (cells_of_face(f, 0) == (int32_t)i_cell) ? 0 : 1;
+            const uint32_t node_0 = nodes_of_face(offsets_nodes_of_face(f));
+            const uint32_t node_1 = nodes_of_face(offsets_nodes_of_face(f) + 1);
+            for (uint8_t q = 0; q < n_quad; q++) {
+                const rtype s_q = 0.5 * quad_points(q, 0);
+                const rtype x = face_coords(f, 0) + s_q * (node_coords(node_1, 0) - node_coords(node_0, 0));
+                const rtype y = face_coords(f, 1) + s_q * (node_coords(node_1, 1) - node_coords(node_0, 1));
+                rtype psi[NK];
+                teno::monomials(DEG, (x - xc) / h, (y - yc) / h, psi);
+                rtype U_f[N_CONSERVATIVE];
+                FOR_I_CONSERVATIVE U_f[i] = U0[i];
+                for (uint8_t l = 0; l < NK; l++) {
+                    const rtype psi_l = psi[l] - basis_mean(i_cell, l);
+                    FOR_I_CONSERVATIVE U_f[i] += aK[l][i] * psi_l;
+                }
+                rtype Wq[N_CONSERVATIVE];
+                to_primitives(U_f, Wq);
+                admissible = admissible && (Wq[0] > 0.0) && (Wq[3] > 0.0) && Kokkos::isfinite(Wq[3]);
+                FOR_I_CONSERVATIVE face_solution(f, q, side, i) = Wq[i];
+            }
+        }
+        if (!admissible) {
+            for (uint8_t k = 0; k < n_faces; k++) {
+                const uint32_t f = faces_of_cell(f_begin + k);
+                const uint8_t side = (cells_of_face(f, 0) == (int32_t)i_cell) ? 0 : 1;
+                for (uint8_t q = 0; q < n_quad; q++) {
+                    FOR_I_CONSERVATIVE face_solution(f, q, side, i) = W0[i];
+                }
+            }
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(TroubledPass, const uint32_t j) const {
+        if (j >= n_troubled()) return;
+        const uint32_t i_cell = troubled_cells(j);
+        constexpr rtype eps = 1.0e-12;
+        rtype U0[N_CONSERVATIVE], W0[N_CONSERVATIVE];
+        conservatives(i_cell, U0);
+        FOR_I_CONSERVATIVE W0[i] = W(i_cell, i);
+
+        rtype aK[NK][N_CONSERVATIVE];
+        for (uint8_t l = 0; l < NK; l++) {
+            FOR_I_CONSERVATIVE aK[l][i] = coeffs(i_cell, l, i);
+        }
+        const rtype sigma = sigma_out(i_cell);
+        constexpr bool is_troubled = true;
         const rtype cutoff = (C_T > 0.0) ? C_T : teno::adaptive_CT(sigma, sigma_threshold, sigma_upper);
 
         // Small-stencil coefficients, only needed in troubled cells
@@ -772,7 +853,7 @@ struct TENOFunctor {
 
             // Stencil selection per characteristic variable (troubled cells only)
             rtype L[N_CONSERVATIVE][N_CONSERVATIVE], R[N_CONSERVATIVE][N_CONSERVATIVE];
-            rtype cK[teno::MAX_NK][N_CONSERVATIVE];
+            rtype cK[NK][N_CONSERVATIVE];
             rtype cS[teno::MAX_FACES][teno::NK_SMALL][N_CONSERVATIVE];
             rtype c0_char[N_CONSERVATIVE];
             bool use_large[N_CONSERVATIVE];
@@ -801,7 +882,7 @@ struct TENOFunctor {
                     }
                 };
                 project(U0, c0_char);
-                for (uint8_t l = 0; l < nk; l++) project(aK[l], cK[l]);
+                for (uint8_t l = 0; l < NK; l++) project(aK[l], cK[l]);
                 for (uint8_t s = 0; s < n_faces; s++) {
                     if (!valid[s]) continue;
                     for (uint8_t l = 0; l < teno::NK_SMALL; l++) project(aS[s][l], cS[s][l]);
@@ -809,7 +890,7 @@ struct TENOFunctor {
                 for (uint8_t var = 0; var < N_CONSERVATIVE; var++) {
                     // gamma_k = 1 / (SI_k + eps)^6, normalized by the largest one so
                     // that the weights cannot overflow (even in single precision)
-                    const rtype si_K = smoothness(cK, nk, var, i_cell) + eps;
+                    const rtype si_K = smoothness(cK, NK, var, i_cell) + eps;
                     rtype si_small[teno::MAX_FACES] = {};
                     rtype si_min = si_K;
                     for (uint8_t s = 0; s < n_faces; s++) {
@@ -844,22 +925,22 @@ struct TENOFunctor {
                 const rtype s_q = 0.5 * quad_points(q, 0);
                 const rtype x = face_coords(f, 0) + s_q * (node_coords(node_1, 0) - node_coords(node_0, 0));
                 const rtype y = face_coords(f, 1) + s_q * (node_coords(node_1, 1) - node_coords(node_0, 1));
-                rtype psi[teno::MAX_NK];
-                teno::monomials(degree, (x - xc) / h, (y - yc) / h, psi);
-                for (uint8_t l = 0; l < nk; l++) psi[l] -= basis_mean(i_cell, l);
+                rtype psi[NK];
+                teno::monomials(DEG, (x - xc) / h, (y - yc) / h, psi);
+                for (uint8_t l = 0; l < NK; l++) psi[l] -= basis_mean(i_cell, l);
 
                 rtype U_f[N_CONSERVATIVE];
                 if (!is_troubled) {
                     FOR_I_CONSERVATIVE {
                         U_f[i] = U0[i];
-                        for (uint8_t l = 0; l < nk; l++) U_f[i] += aK[l][i] * psi[l];
+                        for (uint8_t l = 0; l < NK; l++) U_f[i] += aK[l][i] * psi[l];
                     }
                 } else {
                     rtype v_char[N_CONSERVATIVE];
                     for (uint8_t var = 0; var < N_CONSERVATIVE; var++) {
                         v_char[var] = c0_char[var];
                         if (use_large[var]) {
-                            for (uint8_t l = 0; l < nk; l++) v_char[var] += cK[l][var] * psi[l];
+                            for (uint8_t l = 0; l < NK; l++) v_char[var] += cK[l][var] * psi[l];
                         } else {
                             for (uint8_t s = 0; s < n_faces; s++) {
                                 if (!valid[s] || w_small[s][var] == 0.0) continue;
@@ -938,19 +1019,38 @@ struct TENOFunctor {
     }
 };
 
+template <uint8_t DEG>
+void TENO::launch_reconstruction(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                 Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
+    using Functor = TENOFunctor<DEG>;
+    Functor functor{sigma_threshold, sigma_upper, C_T, characteristic, bound_preserving, boundaries.gamma,
+                    mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
+                    mesh->offsets_nodes_of_face, mesh->nodes_of_face, mesh->node_coords,
+                    mesh->cell_coords, mesh->face_coords, mesh->face_normals,
+                    quadrature_face.points, boundaries,
+                    scale, basis_mean, stencil_large_size, stencil_large, stencil_large_face, pinv_large,
+                    stencil_small_size, stencil_small, stencil_small_face, pinv_small,
+                    si_matrix, troubled, troubled_coeffs, troubled_cells, n_troubled,
+                    solution, face_solution};
+    using Dynamic = Kokkos::Schedule<Kokkos::Dynamic>;
+    // The troubled pass covers all cells and exits past the queue length, so the
+    // count never has to be read back to the host
+    Kokkos::deep_copy(n_troubled, 0u);
+    Kokkos::parallel_for("teno_smooth",
+                         Kokkos::RangePolicy<typename Functor::SmoothPass, Dynamic>(0, mesh->n_cells), functor);
+    Kokkos::parallel_for("teno_troubled",
+                         Kokkos::RangePolicy<typename Functor::TroubledPass, Dynamic>(0, mesh->n_cells), functor);
+}
+
 void TENO::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                             Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
-    TENOFunctor functor{degree, n_dof_large,
-                        sigma_threshold, sigma_upper, C_T, characteristic, bound_preserving, boundaries.gamma,
-                        mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
-                        mesh->offsets_nodes_of_face, mesh->nodes_of_face, mesh->node_coords,
-                        mesh->cell_coords, mesh->face_coords, mesh->face_normals,
-                        quadrature_face.points, boundaries,
-                        scale, basis_mean, stencil_large_size, stencil_large, stencil_large_face, pinv_large,
-                        stencil_small_size, stencil_small, stencil_small_face, pinv_small,
-                        si_matrix, troubled, solution, face_solution};
-    Kokkos::parallel_for("teno_reconstruction",
-                         Kokkos::RangePolicy<Kokkos::Schedule<Kokkos::Dynamic>>(0, mesh->n_cells), functor);
+    switch (degree) {
+        case 2: launch_reconstruction<2>(solution, face_solution); break;
+        case 3: launch_reconstruction<3>(solution, face_solution); break;
+        case 4: launch_reconstruction<4>(solution, face_solution); break;
+        case 5: launch_reconstruction<5>(solution, face_solution); break;
+        default: throw std::runtime_error("TENO: unsupported degree.");
+    }
 }
 
 namespace {
@@ -1063,6 +1163,9 @@ bool TENO::load_cache(const std::string & filename) {
         return false;
     }
     troubled = Kokkos::View<rtype *>("teno_sigma", mesh->n_cells);
+    troubled_coeffs = Kokkos::View<rtype ***>("teno_troubled_coeffs", mesh->n_cells, n_dof_large, N_CONSERVATIVE);
+    troubled_cells = Kokkos::View<uint32_t *>("teno_troubled_cells", mesh->n_cells);
+    n_troubled = Kokkos::View<uint32_t>("teno_n_troubled");
     std::cout << "TENO: loaded stencil cache " << filename << std::endl;
     return true;
 }

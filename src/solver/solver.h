@@ -112,6 +112,11 @@ class Solver {
          */
         std::array<rtype, N_CONSERVATIVE> integrate_conservatives();
 
+        // Public because nvcc rejects device lambdas in non-public member functions
+        void update_average_pressure_outlets(StateView solution);
+        void calc_dt();
+        void check_fields();
+
         rtype get_time() const { return t; }
         uint32_t get_step() const { return step; }
         const Euler & get_physics() const { return physics; }
@@ -134,16 +139,13 @@ class Solver {
         void init_solution_analytical();
         void init_solution_restart();
         void update_boundary_states(rtype t_eval);
-        void update_average_pressure_outlets(StateView solution);
         void init_sources();
         void update_source_field(rtype t_eval);
         void allocate_memory();
         void register_data();
         bool done() const;
         void print_logo() const;
-        void calc_dt();
         void do_checks();
-        void check_fields();
         void write_data(bool force = false);
         void write_forces();
 

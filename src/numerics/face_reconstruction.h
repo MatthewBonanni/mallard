@@ -226,8 +226,15 @@ class TENO : public FaceReconstruction {
         Kokkos::View<rtype ****> pinv_small;               // (cell, face, l, s)
         Kokkos::View<rtype ***> si_matrix;                 // (cell, l, m)
         Kokkos::View<rtype *> troubled;                    // (cell): sigma, for diagnostics
+        Kokkos::View<rtype ***> troubled_coeffs;           // (cell, l, var): scratch for the troubled pass
+        Kokkos::View<uint32_t *> troubled_cells;           // queue of troubled cells
+        Kokkos::View<uint32_t> n_troubled;
 
     private:
+        template <uint8_t DEG>
+        void launch_reconstruction(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                   Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution);
+
         void compute_stencils_and_matrices();
         uint64_t cache_key() const;
         void save_cache(const std::string & filename) const;
