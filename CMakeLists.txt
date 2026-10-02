@@ -6,8 +6,41 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
 endif()
 
-# Build options
-add_compile_options(-Wall -Wextra -Wpedantic)
+# Warnings for Mallard's own targets; third-party headers are included as SYSTEM
+option(${PROJECT_NAME}_WARNINGS_AS_ERRORS "Treat warnings in Mallard's own code as errors" OFF)
+function(mallard_target_warnings target)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        return()
+    endif()
+    # Kokkos builds for CUDA with nvcc_wrapper, which CMake identifies as GNU
+    if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        set(nvcc TRUE)
+    endif()
+    set(warnings
+        -Wall -Wextra -Wpedantic -Wshadow -Wnon-virtual-dtor -Wcast-align -Wunused
+        -Woverloaded-virtual -Wdouble-promotion -Wformat=2 -Wimplicit-fallthrough)
+    # nvcc rewrites functional casts such as T(x) into C-style casts before the host compiler sees them
+    if(NOT nvcc)
+        list(APPEND warnings -Wold-style-cast)
+    endif()
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        list(APPEND warnings -Wduplicated-cond -Wlogical-op)
+    else()
+        # GCC's -Wnull-dereference flags code inlined from toml11 and exprtk, which SYSTEM cannot silence
+        list(APPEND warnings -Wnull-dereference)
+    endif()
+    if(${PROJECT_NAME}_WARNINGS_AS_ERRORS)
+        list(APPEND warnings -Werror)
+        if(nvcc)
+            list(APPEND warnings "SHELL:-Werror all-warnings")
+        endif()
+    endif()
+    target_compile_options(${target} PRIVATE ${warnings})
+endfunction()
+
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.25)
+    set(MALLARD_THIRD_PARTY SYSTEM)
+endif()
 
 # Compile-time options
 option(${PROJECT_NAME}_USE_DOUBLE "Use double precision" ON)
@@ -35,7 +68,8 @@ if(${PROJECT_NAME}_ENABLE_MPI)
         FetchContent_Declare(KaMinPar
             GIT_REPOSITORY https://github.com/KaHIP/KaMinPar.git
             GIT_TAG v3.7.3
-            EXCLUDE_FROM_ALL)
+            EXCLUDE_FROM_ALL
+            ${MALLARD_THIRD_PARTY})
         set(KAMINPAR_BUILD_DISTRIBUTED ON CACHE BOOL "" FORCE)
         set(KAMINPAR_BUILD_APPS OFF CACHE BOOL "" FORCE)
         set(KAMINPAR_BUILD_IO OFF CACHE BOOL "" FORCE)
@@ -61,7 +95,7 @@ if(${PROJECT_NAME}_ENABLE_HDF5)
     else()
         message(STATUS "Using external HDF5 from submodule")
         set(HDF5_ENABLE_PARALLEL ${${PROJECT_NAME}_ENABLE_MPI} CACHE BOOL "" FORCE)
-        add_subdirectory(src/external/hdf5 ${CMAKE_BINARY_DIR}/external/hdf5)
+        add_subdirectory(src/external/hdf5 ${CMAKE_BINARY_DIR}/external/hdf5 ${MALLARD_THIRD_PARTY})
         set(HDF5_C_LIBRARIES hdf5-static)
     endif()
 endif()
@@ -71,11 +105,11 @@ option(USE_SYSTEM_KOKKOS "Use system-installed Kokkos" ON)
 if(USE_SYSTEM_KOKKOS)
     find_package(Kokkos 5 REQUIRED)
 else()
-    add_subdirectory(src/external/kokkos ${CMAKE_BINARY_DIR}/external/kokkos)
+    add_subdirectory(src/external/kokkos ${CMAKE_BINARY_DIR}/external/kokkos ${MALLARD_THIRD_PARTY})
 endif()
 
 # Include other external libraries
-include_directories("${CMAKE_SOURCE_DIR}/src/external/toml11/include")
+include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/toml11/include")
 include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/exprtk")
 
 # Add your main project source
