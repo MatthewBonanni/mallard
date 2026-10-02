@@ -186,7 +186,8 @@ struct LimiterFunctor {
             }
         }
 
-        // Venkatakrishnan threshold, scaled per variable so it is dimensionally consistent
+        // Venkatakrishnan threshold (K h)^3, scaled per variable by its local magnitude
+        // (the length scale still depends on the mesh units, as in the original method)
         const rtype h = Kokkos::sqrt(cell_volume(i_cell));
         const rtype a = Kokkos::sqrt(neighbors.boundaries.gamma * W_i[3] / W_i[0]);
         const rtype scale[N_CONSERVATIVE] = {W_i[0], a, a, W_i[3]};

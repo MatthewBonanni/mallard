@@ -8,7 +8,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 
 ![2D Riemann problem](./docs/images/riemann_2d.gif)
 
-*2D Riemann problem (configuration 3) on 320,000 triangles with fifth-order TENO-E reconstruction.*
+*2D Riemann problem (configuration 3) on 980,000 triangles with fifth-order TENO-E reconstruction.*
 
 > **NOTE:** Mallard is a **work in progress**. Its performance **has not been extensively characterized**, and it has not yet been run on GPUs.
 

@@ -86,3 +86,26 @@ TEST(IOTest, IntegerValuedRealInputsAreAccepted) {
     EXPECT_DOUBLE_EQ(solver.h_conservatives(0, 1), 1.0);
     EXPECT_THROW(Solver().init(parse_toml(input + "[source]\ngravity = [\"down\", 0]\n")), std::runtime_error);
 }
+
+TEST(IOTest, FixedTimeStepIsOnlyShortenedToLandOnOutputs) {
+    // dt = 0.01 with outputs every 0.015: every other step is clipped to land
+    // on an output time, the others take the full dt
+    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_fixed_dt").string();
+    const std::string input =
+        "[run]\nn_steps = 10\ndt = 0.01\n"
+        "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 1.0\nLy = 1.0\n"
+        "[initialize]\ntype = \"constant\"\nu = [0.1, 0.0]\np = 1.0\nT = 1.0\n"
+        "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
+        "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+        "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+        "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
+        "[numerics.face_reconstruction]\ntype = \"FO\"\n"
+        "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+        "[output]\ncheck_interval = 1000000\n"
+        "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtu\"\ntime_interval = 0.015\nvariables = [\"RHO\"]\n";
+    Solver solver;
+    solver.init(parse_toml(input));
+    solver.run();
+    EXPECT_NEAR(solver.get_time(), 0.075, 1e-12);
+    std::filesystem::remove_all(dir);
+}

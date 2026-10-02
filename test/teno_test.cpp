@@ -13,6 +13,7 @@
 #include <Kokkos_Core.hpp>
 
 #include <cmath>
+#include <filesystem>
 #include <string>
 #include <tuple>
 
@@ -222,4 +223,124 @@ TEST(TENOTest, ConditionLimitIsEnforced) {
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
     EXPECT_NO_THROW(make_teno(mesh, bd, 4, "max_condition = 1e3\n"));
     EXPECT_THROW(make_teno(mesh, bd, 4, "max_condition = 0.5\n"), std::runtime_error);
+}
+
+TEST(TENOTest, OrderTwoIsRejected) {
+    auto mesh = make_mesh("cartesian", 8, 8);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    EXPECT_THROW(make_teno(mesh, bd, 2), std::runtime_error);
+}
+
+TEST(TENOTest, MirrorImagesTakeTheConditionOfTheNearestBoundaryFace) {
+    // Bottom boundary: Dirichlet for x < 0.25, symmetry elsewhere. Cells far
+    // from the junction must mirror across symmetry faces only.
+    auto mesh = make_mesh("cartesian", 16, 8);
+    std::vector<int32_t> face_bc(mesh->n_faces, -1);
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        if (mesh->h_cells_of_face(f, 1) >= 0) continue;
+        const bool bottom = mesh->h_face_coords(f, 1) < 1e-12;
+        face_bc[f] = (bottom && mesh->h_face_coords(f, 0) < 0.25) ? 1 : 0;
+    }
+    BoundaryCondition sym, dir;
+    sym.type = BoundaryType::SYMMETRY;
+    dir.type = BoundaryType::DIRICHLET;
+    BoundaryData bd = make_boundary_data(*mesh, face_bc, {sym, dir}, GAMMA);
+    auto teno = make_teno(mesh, bd, 4);
+    auto sizes = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->stencil_large_size);
+    auto faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->stencil_large_face);
+    uint32_t n_checked = 0;
+    auto cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->stencil_large);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        for (uint16_t s = 0; s < sizes(c); s++) {
+            const int32_t f = faces(c, s);
+            if (f < 0 || mesh->h_face_coords(f, 1) > 1e-12) continue;
+            // The image of a cell across the bottom takes the state of the face
+            // directly beneath that cell
+            EXPECT_NEAR(mesh->h_face_coords(f, 0), mesh->h_cell_coords(cells(c, s), 0), 1e-12) << "cell " << c;
+            if (mesh->h_cell_coords(c, 0) > 0.6) EXPECT_EQ(face_bc[f], 0) << "cell " << c;
+            n_checked++;
+        }
+    }
+    EXPECT_GT(n_checked, 0u);
+}
+
+TEST(TENOTest, MirrorImagesNeverLandInsideNonConvexDomains) {
+    // L-shaped domain: the unit square minus its upper-right quarter
+    Mesh mesh;
+    const uint32_t n = 8;
+    std::vector<std::array<rtype, N_DIM>> nodes;
+    for (uint32_t j = 0; j <= n; j++) {
+        for (uint32_t i = 0; i <= n; i++) nodes.push_back({rtype(i) / n, rtype(j) / n});
+    }
+    auto id = [&](uint32_t i, uint32_t j) { return j * (n + 1) + i; };
+    std::vector<std::vector<uint32_t>> cells;
+    for (uint32_t j = 0; j < n; j++) {
+        for (uint32_t i = 0; i < n; i++) {
+            if (i >= n / 2 && j >= n / 2) continue;
+            cells.push_back({id(i, j), id(i + 1, j), id(i + 1, j + 1), id(i, j + 1)});
+        }
+    }
+    mesh.init_from_connectivity(nodes, cells, {});
+    auto mesh_ptr = std::make_shared<Mesh>(std::move(mesh));
+    mesh_ptr->copy_host_to_device();
+    std::vector<int32_t> face_bc(mesh_ptr->n_faces, -1);
+    for (uint32_t f = 0; f < mesh_ptr->n_faces; f++) face_bc[f] = mesh_ptr->h_cells_of_face(f, 1) < 0 ? 0 : -1;
+    BoundaryCondition sym;
+    sym.type = BoundaryType::SYMMETRY;
+    BoundaryData bd = make_boundary_data(*mesh_ptr, face_bc, {sym}, GAMMA);
+    auto teno = make_teno(mesh_ptr, bd, 3);
+    auto sizes = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->stencil_large_size);
+    auto cells_v = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->stencil_large);
+    auto faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->stencil_large_face);
+    const auto & m = *mesh_ptr;
+    for (uint32_t c = 0; c < m.n_cells; c++) {
+        for (uint16_t s = 0; s < sizes(c); s++) {
+            const int32_t f = faces(c, s);
+            if (f < 0) continue;
+            // Mirror the stencil cell's centroid across the face's line
+            const rtype nx = m.h_face_normals(f, 0) / m.h_face_area(f), ny = m.h_face_normals(f, 1) / m.h_face_area(f);
+            const rtype px = m.h_cell_coords(cells_v(c, s), 0), py = m.h_cell_coords(cells_v(c, s), 1);
+            const rtype d = (px - m.h_face_coords(f, 0)) * nx + (py - m.h_face_coords(f, 1)) * ny;
+            const rtype qx = px - 2 * d * nx, qy = py - 2 * d * ny;
+            const bool in_domain = (qx > 0 && qx < 1 && qy > 0 && qy < 1) && !(qx > 0.5 && qy > 0.5);
+            EXPECT_FALSE(in_domain) << "cell " << c << " image at " << qx << ", " << qy;
+        }
+    }
+}
+
+TEST(TENOTest, StencilCacheReproducesPrecomputationAndRejectsOtherMeshes) {
+    const std::string cache = (std::filesystem::temp_directory_path() / "mallard_teno_cache.bin").string();
+    std::filesystem::remove(cache);
+    auto mesh = make_mesh("cartesian_tri", 10, 8);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto avg = cell_averages(*mesh, smooth_conservatives);
+    Euler euler = Euler::from_reference(GAMMA, 1.0, 1.0, 1.0);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    auto h_W = Kokkos::create_mirror_view(W);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        rtype U[N_CONSERVATIVE], Wc[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE U[i] = avg(c, i);
+        euler.compute_W_from_conservatives(Wc, U);
+        FOR_I_CONSERVATIVE h_W(c, i) = Wc[i];
+    }
+    Kokkos::deep_copy(W, h_W);
+    auto reconstruct = [&](std::shared_ptr<Mesh> m, const BoundaryData & b) {
+        auto teno = make_teno(m, b, 4, "cache_file = \"" + cache + "\"\n");
+        Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", m->n_faces, teno->n_face_quadrature_points());
+        teno->calc_face_values(W, face_W);
+        return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+    };
+    auto first = reconstruct(mesh, bd);
+    ASSERT_TRUE(std::filesystem::exists(cache));
+    const auto written = std::filesystem::last_write_time(cache);
+    auto second = reconstruct(mesh, bd);
+    EXPECT_EQ(std::filesystem::last_write_time(cache), written);  // Loaded, not rewritten
+    for (size_t i = 0; i < first.span(); i++) EXPECT_EQ(first.data()[i], second.data()[i]);
+
+    // A different mesh must not reuse the cache
+    auto other = make_mesh("cartesian_tri", 10, 8, 1.0, 1.5);
+    BoundaryData bd_other = make_uniform_boundaries(*other, BoundaryType::SYMMETRY, GAMMA);
+    auto teno = make_teno(other, bd_other, 4, "cache_file = \"" + cache + "\"\n");
+    EXPECT_NE(std::filesystem::last_write_time(cache), written);
+    std::filesystem::remove(cache);
 }

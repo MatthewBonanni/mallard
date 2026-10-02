@@ -12,6 +12,7 @@
 #ifndef SOLVER_H
 #define SOLVER_H
 
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <string>
@@ -32,6 +33,13 @@
  * @brief Faces with a Dirichlet condition and the expressions of x, y, t
  *        for their exterior state W = [rho, u_x, u_y, p].
  */
+struct ForceMonitor {
+    std::string zone;
+    Kokkos::View<uint32_t *> faces;
+    uint64_t interval = 1;
+    std::shared_ptr<std::ofstream> out;
+};
+
 struct DirichletBoundary {
     std::vector<uint32_t> faces;
     std::vector<Expression> W;
@@ -94,6 +102,12 @@ class Solver {
         void copy_host_to_device();
 
         /**
+         * @brief Force exerted by the fluid on a boundary zone: pressure part
+         *        [Fx, Fy] and viscous part [Fx, Fy].
+         */
+        std::array<rtype, 2 * N_DIM> calc_force(const Kokkos::View<uint32_t *> & faces);
+
+        /**
          * @brief Sum of each conservative variable integrated over the domain.
          */
         std::array<rtype, N_CONSERVATIVE> integrate_conservatives();
@@ -131,6 +145,7 @@ class Solver {
         void do_checks();
         void check_fields();
         void write_data(bool force = false);
+        void write_forces();
 
     private:
         template <typename T_riemann_solver>
@@ -144,6 +159,7 @@ class Solver {
         rtype t_wall_stop;
         bool use_cfl;
         rtype dt;
+        rtype dt_fixed = 0.0;
         rtype cfl;
         rtype t;
         uint64_t step;
@@ -170,6 +186,7 @@ class Solver {
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> viscous_gradients;
         Kokkos::View<rtype *> cfl_local;
         Kokkos::View<rtype *>::host_mirror_type h_cfl_local;
+        Kokkos::View<rtype *>::host_mirror_type h_teno_sigma;
         std::vector<StateView> solution_vec;
         std::vector<StateView> rhs_vec;
         RHSFunction rhs_func;
@@ -190,6 +207,7 @@ class Solver {
         // Outputs
         std::vector<Data> data;
         std::vector<std::unique_ptr<DataWriter>> data_writers;
+        std::vector<ForceMonitor> force_monitors;
 };
 
 #endif // SOLVER_H

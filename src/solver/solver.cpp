@@ -14,6 +14,8 @@
 #include "input.h"
 
 #include <cmath>
+#include <iomanip>
+#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -23,6 +25,7 @@
 
 #include "common.h"
 #include "expression.h"
+#include "gradient.h"
 
 Solver::Solver() {
     // Empty
@@ -172,6 +175,8 @@ void Solver::init_sources() {
         }
         has_gravity = true;
         FOR_I_DIM gravity[i] = g[i];
+        FOR_I_DIM boundary_data.gravity[i] = g[i];
+        face_reconstruction->set_boundaries(boundary_data);
         std::cout << "> Gravity: [" << gravity[0] << ", " << gravity[1] << "]" << std::endl;
     }
     const bool any_expression = source.contains("rho") || source.contains("rhou") || source.contains("rhoE");
@@ -323,7 +328,8 @@ void Solver::init_run_parameters() {
     if (use_cfl) {
         cfl = find_real(input, "run", "cfl");
     } else {
-        dt = find_real(input, "run", "dt");
+        dt_fixed = find_real(input, "run", "dt");
+        dt = dt_fixed;
     }
     n_steps = toml::find_or<uint64_t>(input, "run", "n_steps", 0);
     t_stop = find_real_or(input, "run", "t_stop", -1.0);
@@ -333,6 +339,25 @@ void Solver::init_run_parameters() {
 void Solver::init_output() {
     std::cout << "Initializing output..." << std::endl;
     check_interval = toml::find_or<uint32_t>(input, "output", "check_interval", 1);
+    if (input.contains("forces")) {
+        for (const auto & entry : toml::find<std::vector<toml::value>>(input, "forces")) {
+            ForceMonitor monitor;
+            monitor.zone = toml::find<std::string>(entry, "zone");
+            FaceZone * zone = mesh->get_face_zone(monitor.zone);
+            if (zone == nullptr || zone->get_type() != FaceZoneType::BOUNDARY) {
+                throw std::runtime_error("forces: unknown boundary zone " + monitor.zone + ".");
+            }
+            monitor.faces = zone->faces;
+            monitor.interval = toml::find_or<uint64_t>(entry, "interval", 1);
+            const std::string file = toml::find_or<std::string>(entry, "file", "forces_" + monitor.zone + ".csv");
+            const std::filesystem::path parent = std::filesystem::path(file).parent_path();
+            if (!parent.empty()) std::filesystem::create_directories(parent);
+            const bool resume = step > 0;
+            monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
+            if (!resume) *monitor.out << "step,t,Fx_pressure,Fy_pressure,Fx_viscous,Fy_viscous\n";
+            force_monitors.push_back(monitor);
+        }
+    }
     if (!input.contains("write_data")) {
         return;
     }
@@ -379,12 +404,15 @@ void Solver::copy_device_to_host() {
     Kokkos::deep_copy(h_conservatives, conservatives);
     Kokkos::deep_copy(h_primitives, primitives);
     Kokkos::deep_copy(h_cfl_local, cfl_local);
+    if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
+        Kokkos::deep_copy(h_teno_sigma, teno->troubled);
+    }
 }
 
 void Solver::register_data() {
     std::cout << "Registering data..." << std::endl;
     data.clear();
-    data.reserve(CONSERVATIVE_NAMES.size() + PRIMITIVE_NAMES.size() + 1);
+    data.reserve(CONSERVATIVE_NAMES.size() + PRIMITIVE_NAMES.size() + 2);
     for (size_t i = 0; i < CONSERVATIVE_NAMES.size(); i++) {
         data.push_back(Data(CONSERVATIVE_NAMES[i], Kokkos::subview(h_conservatives, Kokkos::ALL(), i)));
     }
@@ -392,6 +420,11 @@ void Solver::register_data() {
         data.push_back(Data(PRIMITIVE_NAMES[i], Kokkos::subview(h_primitives, Kokkos::ALL(), i)));
     }
     data.push_back(Data("CFL", h_cfl_local));
+    if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
+        // Troubled-cell indicator: TENO stencil selection is active where it exceeds the threshold
+        h_teno_sigma = Kokkos::create_mirror_view(teno->troubled);
+        data.push_back(Data("TENO_SIGMA", h_teno_sigma));
+    }
 }
 
 int Solver::run() {
@@ -407,6 +440,7 @@ int Solver::run() {
         check_fields();
         do_checks();
         write_data();
+        write_forces();
     }
     copy_device_to_host();
     write_data(true);
@@ -526,9 +560,7 @@ void Solver::update_primitives() {
 }
 
 void Solver::calc_dt() {
-    if (use_cfl) {
-        dt = cfl * calc_dt_cfl1();
-    }
+    dt = use_cfl ? cfl * calc_dt_cfl1() : dt_fixed;
     // Land exactly on t_stop and on time-based output times
     rtype t_target = (t_stop > 0) ? t_stop : std::numeric_limits<rtype>::infinity();
     for (const auto & writer : data_writers) {
@@ -621,6 +653,109 @@ rtype Solver::calc_dt_cfl1() {
     rtype dt_min = std::numeric_limits<rtype>::max();
     Kokkos::parallel_reduce("time_step", mesh->n_cells, functor, Kokkos::Min<rtype>(dt_min));
     return dt_min;
+}
+
+/**
+ * @brief Traction of the fluid on boundary faces, t = p n - tau . n with n
+ *        pointing out of the fluid. Pressure is the adjacent cell's; on walls
+ *        the velocity gradient is corrected with the wall velocity as in the
+ *        viscous flux.
+ */
+struct ForceFunctor {
+    Kokkos::View<uint32_t *> faces;
+    Kokkos::View<rtype *[N_DIM]> normals;
+    Kokkos::View<rtype *[N_DIM]> face_coords;
+    Kokkos::View<rtype *[N_DIM]> cell_coords;
+    Kokkos::View<int32_t *[2]> cells_of_face;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W;
+    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
+    BoundaryData boundaries;
+    Euler physics;
+    bool viscous;
+
+    struct value_type {
+        rtype v[2 * N_DIM];
+    };
+
+    KOKKOS_INLINE_FUNCTION
+    void init(value_type & sum) const {
+        for (int i = 0; i < 2 * N_DIM; i++) sum.v[i] = 0.0;
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    void join(value_type & dst, const value_type & src) const {
+        for (int i = 0; i < 2 * N_DIM; i++) dst.v[i] += src.v[i];
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t k, value_type & total) const {
+        rtype * sum = total.v;
+        const uint32_t f = faces(k);
+        const int32_t c = cells_of_face(f, 0);
+        const rtype n_A[N_DIM] = {normals(f, 0), normals(f, 1)};
+        sum[0] += W(c, 3) * n_A[0];
+        sum[1] += W(c, 3) * n_A[1];
+        if (!viscous) return;
+        rtype n[N_DIM];
+        unit<N_DIM>(n_A, n);
+        rtype g[2][N_DIM];
+        FOR_I_DIM {
+            g[0][i] = gradients(c, 1, i);
+            g[1][i] = gradients(c, 2, i);
+        }
+        const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(f));
+        if (bc.is_wall()) {
+            rtype dn = 0.0;
+            FOR_I_DIM dn += (face_coords(f, i) - cell_coords(c, i)) * n[i];
+            for (uint8_t v = 0; v < 2; v++) {
+                const rtype correction = (bc.data[1 + v] - W(c, 1 + v)) / dn - (g[v][0] * n[0] + g[v][1] * n[1]);
+                FOR_I_DIM g[v][i] += correction * n[i];
+            }
+        }
+        const rtype T = W(c, 3) / (W(c, 0) * physics.R);
+        const rtype mu = physics.viscosity(T);
+        const rtype div = g[0][0] + g[1][1];
+        const rtype txx = mu * (2.0 * g[0][0] - 2.0 / 3.0 * div);
+        const rtype tyy = mu * (2.0 * g[1][1] - 2.0 / 3.0 * div);
+        const rtype txy = mu * (g[0][1] + g[1][0]);
+        sum[2] -= txx * n_A[0] + txy * n_A[1];
+        sum[3] -= txy * n_A[0] + tyy * n_A[1];
+    }
+};
+
+std::array<rtype, 2 * N_DIM> Solver::calc_force(const Kokkos::View<uint32_t *> & faces) {
+    const Euler phys = physics;
+    StateView U = conservatives;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
+    Kokkos::parallel_for("force_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
+        rtype cons[N_CONSERVATIVE], W_c[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE cons[i] = U(i_cell, i);
+        phys.compute_W_from_conservatives(W_c, cons);
+        FOR_I_CONSERVATIVE W(i_cell, i) = W_c[i];
+    });
+    if (physics.is_viscous()) {
+        LSQGradientFunctor gradient_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell,
+                                            mesh->cells_of_face, mesh->cell_coords, mesh->face_coords,
+                                            mesh->face_normals, boundary_data, W_cells, viscous_gradients};
+        LSQVertexGradientFunctor vertex_gradient_functor{gradient_functor, mesh->offsets_cells_of_cell,
+                                                         mesh->cells_of_cell};
+        Kokkos::parallel_for("force_gradients", mesh->n_cells, vertex_gradient_functor);
+    }
+    ForceFunctor functor{faces, mesh->face_normals, mesh->face_coords, mesh->cell_coords, mesh->cells_of_face,
+                         W_cells, viscous_gradients, boundary_data, physics, physics.is_viscous()};
+    ForceFunctor::value_type result;
+    Kokkos::parallel_reduce("force", faces.extent(0), functor, result);
+    return {result.v[0], result.v[1], result.v[2], result.v[3]};
+}
+
+void Solver::write_forces() {
+    for (auto & monitor : force_monitors) {
+        if (step % monitor.interval != 0) continue;
+        const auto F = calc_force(monitor.faces);
+        *monitor.out << step << "," << std::setprecision(12) << t << "," << F[0] << "," << F[1] << ","
+                     << F[2] << "," << F[3] << "\n";
+        monitor.out->flush();
+    }
 }
 
 std::array<rtype, N_CONSERVATIVE> Solver::integrate_conservatives() {

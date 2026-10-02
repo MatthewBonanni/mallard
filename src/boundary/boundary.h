@@ -166,6 +166,7 @@ struct BoundaryData {
     rtype R = 1.0;
     bool viscous = false;
     Euler gas;
+    rtype gravity[N_DIM] = {0.0, 0.0};
 
     /**
      * @brief Exterior state seen by the Riemann solver on boundary face i_face.

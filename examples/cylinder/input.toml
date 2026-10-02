@@ -60,6 +60,11 @@ Pr = 0.72
 [output]
 check_interval = 2000
 
+[[forces]]
+zone = "cylinder"
+interval = 50
+file = "./solut/forces_cylinder.csv"
+
 [[write_data]]
 prefix = "./solut/cylinder"
 format = "vtu"

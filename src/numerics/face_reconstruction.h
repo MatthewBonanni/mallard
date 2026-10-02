@@ -229,6 +229,9 @@ class TENO : public FaceReconstruction {
 
     private:
         void compute_stencils_and_matrices();
+        uint64_t cache_key() const;
+        void save_cache(const std::string & filename) const;
+        bool load_cache(const std::string & filename);
 };
 
 #endif // FACE_RECONSTRUCTION_H

@@ -133,7 +133,7 @@ TEST_P(ViscousMesh, HeatFluxWallSetsTemperatureGradient) {
     auto m = solver->get_mesh();
     for (uint32_t i = 0; i < m->n_cells; i++) {
         const double y = m->h_cell_coords(i, 1);
-        EXPECT_NEAR(solver->h_primitives(i, 3), 1.0 + 0.2 * (1.0 - y) / kappa, 5e-3);
+        EXPECT_NEAR(solver->h_primitives(i, 3), 1.0 + 0.2 * (1.0 - y) / kappa, 5e-4);
     }
 }
 
@@ -155,3 +155,22 @@ TEST_P(ViscousMesh, UniformFlowIsPreservedWithViscosity) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Viscous, ViscousMesh, ::testing::Values("cartesian", "cartesian_tri"));
+
+TEST(ViscousForces, CouetteWallShearMatchesMuUOverH) {
+    // Steady Couette flow: shear stress mu U / H = 0.2 * 0.1 / 1 on both walls.
+    // The fluid drags the moving top wall back and the bottom wall forward;
+    // pressure (p = 1) pushes both walls outward.
+    ViscousCase c;
+    c.mu = 0.2;
+    c.top = "type = \"wall_isothermal\"\nT = 1.0\nu = [0.1, 0.0]\n";
+    c.run = "t_stop = 15.0\ncfl = 0.8\n";
+    auto solver = run_viscous(c);
+    auto mesh = solver->get_mesh();
+    const auto top = solver->calc_force(mesh->get_face_zone("top")->faces);
+    const auto bottom = solver->calc_force(mesh->get_face_zone("bottom")->faces);
+    EXPECT_NEAR(top[2], -0.02, 2e-4);
+    EXPECT_NEAR(bottom[2], 0.02, 2e-4);
+    EXPECT_NEAR(top[1], 1.0, 1e-3);
+    EXPECT_NEAR(bottom[1], -1.0, 1e-3);
+    EXPECT_NEAR(top[0], 0.0, 1e-12);
+}

@@ -189,11 +189,11 @@ GmshData read_gmsh(const std::string & filename) {
     if (file_type != 0) {
         throw std::runtime_error("Gmsh file " + filename + ": only ASCII files are supported.");
     }
-    if (!(version == 2.2 || (version >= 4.0 && version < 5.0))) {
+    if (!(version == 2.2 || (version >= 4.1 && version < 5.0))) {
         throw std::runtime_error("Gmsh file " + filename + ": unsupported format version.");
     }
 
-    std::map<int, std::string> physical_names;
+    std::map<int, std::string> physical_names;  // Physical curves (dim 1) only
     std::map<int, std::vector<int>> curve_physicals;  // 4.x: curve entity -> physical tags
     std::map<size_t, uint32_t> node_index;             // Gmsh node tag -> index
 
@@ -208,7 +208,9 @@ GmshData read_gmsh(const std::string & filename) {
                 in >> dim >> tag;
                 std::getline(in, name);
                 const size_t a = name.find('"'), b = name.rfind('"');
-                physical_names[tag] = (a != std::string::npos && b > a) ? name.substr(a + 1, b - a - 1) : name;
+                if (dim == 1) {
+                    physical_names[tag] = (a != std::string::npos && b > a) ? name.substr(a + 1, b - a - 1) : name;
+                }
             }
         } else if (token == "$Entities") {
             size_t n_points, n_curves, n_surfaces, n_volumes;

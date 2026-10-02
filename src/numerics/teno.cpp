@@ -11,7 +11,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -165,9 +167,10 @@ TENO::~TENO() {
 
 void TENO::init(const toml::value & input) {
     const int order = toml::find_or<int>(input, "order", 5);
-    if (order < 2 || order > teno::MAX_DEGREE + 1) {
-        throw std::runtime_error("TENO order must be between 2 and " +
-                                 std::to_string(teno::MAX_DEGREE + 1) + ".");
+    // The small stencils are degree 2, so the central polynomial must be at least degree 2
+    if (order < 3 || order > teno::MAX_DEGREE + 1) {
+        throw std::runtime_error("TENO order must be between 3 and " +
+                                 std::to_string(teno::MAX_DEGREE + 1) + " (use MUSCL for second order).");
     }
     degree = order - 1;
     n_dof_large = teno::n_dof(degree);
@@ -185,7 +188,11 @@ void TENO::init(const toml::value & input) {
     quadrature_face = GaussLegendre(n_gp);
 
     Kokkos::Timer timer;
-    compute_stencils_and_matrices();
+    const std::string cache_file = toml::find_or<std::string>(input, "cache_file", "");
+    if (cache_file.empty() || !load_cache(cache_file)) {
+        compute_stencils_and_matrices();
+        if (!cache_file.empty()) save_cache(cache_file);
+    }
     print();
     std::cout << "> Precomputation time: " << timer.seconds() << " s" << std::endl;
 }
@@ -335,6 +342,22 @@ void TENO::compute_stencils_and_matrices() {
         monomial_means(Entry{i, -1, x0, y0}, r, mean0);
         for (uint8_t l = 0; l < nk; l++) h_basis_mean(i, l) = mean0[l];
 
+        auto point_in_cell = [&](uint32_t c, double px, double py) {
+            const uint32_t n = mesh->h_n_nodes_of_cell(c);
+            int sign = 0;
+            for (uint32_t k = 0; k < n; k++) {
+                const uint32_t a = mesh->h_node_of_cell(c, k), b = mesh->h_node_of_cell(c, (k + 1) % n);
+                const double cross = (mesh->h_node_coords(b, 0) - mesh->h_node_coords(a, 0)) * (py - mesh->h_node_coords(a, 1)) -
+                                     (mesh->h_node_coords(b, 1) - mesh->h_node_coords(a, 1)) * (px - mesh->h_node_coords(a, 0));
+                const double scale = 1e-12 * h * h;
+                const int s = (cross > scale) - (cross < -scale);
+                if (s == 0) return false;  // On an edge: treat as outside (mirror of a boundary cell)
+                if (sign == 0) sign = s;
+                if (s != sign) return false;
+            }
+            return true;
+        };
+
         // Candidates by vertex-neighbor layers plus their mirror images across
         // nearby boundary lines, sorted by distance
         auto gather = [&](size_t n_min, int max_layers) {
@@ -352,34 +375,64 @@ void TENO::compute_stencils_and_matrices() {
                 }
                 if (next.empty()) break;
                 layer = next;
-                // Unique boundary lines touched by the gathered cells
-                std::vector<int32_t> lines;
+                // Straight boundary lines touched by the gathered cells. One line can
+                // carry several conditions (e.g. inflow then wall), so each image takes
+                // its state from the line's face nearest to it.
+                struct Line {
+                    double nx, ny;
+                    std::vector<int32_t> faces;
+                };
+                std::vector<Line> lines;
                 for (uint32_t c : cells) {
                     for (uint32_t k = 0; k < mesh->h_n_faces_of_cell(c); k++) {
                         const uint32_t f = mesh->h_face_of_cell(c, k);
                         if (mesh->h_cells_of_face(f, 1) >= 0 || h_face_bc(f) < 0) continue;
                         const double nx = mesh->h_face_normals(f, 0) / mesh->h_face_area(f);
                         const double ny = mesh->h_face_normals(f, 1) / mesh->h_face_area(f);
-                        bool duplicate = false;
-                        for (int32_t g : lines) {
-                            const double gx = mesh->h_face_normals(g, 0) / mesh->h_face_area(g);
-                            const double gy = mesh->h_face_normals(g, 1) / mesh->h_face_area(g);
-                            const double off = (mesh->h_face_coords(f, 0) - mesh->h_face_coords(g, 0)) * gx +
-                                               (mesh->h_face_coords(f, 1) - mesh->h_face_coords(g, 1)) * gy;
-                            if (std::abs(nx * gx + ny * gy - 1.0) < 1e-10 && std::abs(off) < 1e-10 * h) {
-                                duplicate = true;
+                        Line * match = nullptr;
+                        for (Line & line : lines) {
+                            const int32_t g = line.faces[0];
+                            const double off = (mesh->h_face_coords(f, 0) - mesh->h_face_coords(g, 0)) * line.nx +
+                                               (mesh->h_face_coords(f, 1) - mesh->h_face_coords(g, 1)) * line.ny;
+                            if (std::abs(nx * line.nx + ny * line.ny - 1.0) < 1e-10 && std::abs(off) < 1e-10 * h) {
+                                match = &line;
                                 break;
                             }
                         }
-                        if (!duplicate) lines.push_back(f);
+                        if (match == nullptr) {
+                            lines.push_back(Line{nx, ny, {}});
+                            match = &lines.back();
+                        }
+                        if (std::find(match->faces.begin(), match->faces.end(), (int32_t)f) == match->faces.end()) {
+                            match->faces.push_back(f);
+                        }
                     }
                 }
                 entries.clear();
                 for (uint32_t c : cells) {
                     if (c != i) entries.push_back(Entry{c, -1, mesh->h_cell_coords(c, 0), mesh->h_cell_coords(c, 1)});
-                    for (int32_t f : lines) {
-                        Entry e{c, f, 0.0, 0.0};
-                        mirror(f, mesh->h_cell_coords(c, 0), mesh->h_cell_coords(c, 1), e.x, e.y);
+                    for (const Line & line : lines) {
+                        Entry e{c, line.faces[0], 0.0, 0.0};
+                        mirror(e.face, mesh->h_cell_coords(c, 0), mesh->h_cell_coords(c, 1), e.x, e.y);
+                        // Images that land inside the domain (non-convex boundaries) are not ghosts
+                        bool inside = false;
+                        for (uint32_t other : cells) {
+                            if (point_in_cell(other, e.x, e.y)) {
+                                inside = true;
+                                break;
+                            }
+                        }
+                        if (inside) continue;
+                        // The ghost state comes from the line's face nearest to the image
+                        double best = std::numeric_limits<double>::max();
+                        for (int32_t f : line.faces) {
+                            const double dx = mesh->h_face_coords(f, 0) - 0.5 * (e.x + mesh->h_cell_coords(c, 0));
+                            const double dy = mesh->h_face_coords(f, 1) - 0.5 * (e.y + mesh->h_cell_coords(c, 1));
+                            if (dx * dx + dy * dy < best) {
+                                best = dx * dx + dy * dy;
+                                e.face = f;
+                            }
+                        }
                         entries.push_back(e);
                     }
                 }
@@ -654,38 +707,28 @@ struct TENOFunctor {
         conservatives(i_cell, U0);
         FOR_I_CONSERVATIVE W0[i] = W(i_cell, i);
 
-        // Troubled-cell indicator: variance of relative density jumps over the large stencil
         const uint16_t ns = stencil_large_size(i_cell);
-        auto entry_rho = [&](const uint16_t s) {
-            rtype W_e[N_CONSERVATIVE];
-            entry_W(stencil_large(i_cell, s), stencil_large_face(i_cell, s), W_e);
-            return W_e[0];
-        };
-        rtype g_mean = 0.0;
-        for (uint16_t s = 0; s < ns; s++) {
-            g_mean += Kokkos::fabs(entry_rho(s) - W0[0]) / W0[0];
-        }
-        g_mean /= ns;
-        rtype sigma = 0.0;
-        for (uint16_t s = 0; s < ns; s++) {
-            const rtype g = Kokkos::fabs(entry_rho(s) - W0[0]) / W0[0];
-            sigma += (g - g_mean) * (g - g_mean);
-        }
-        sigma /= ns;
-        sigma_out(i_cell) = sigma;
-        const bool is_troubled = sigma >= sigma_threshold;
-        const rtype cutoff = (C_T > 0.0) ? C_T : teno::adaptive_CT(sigma, sigma_threshold, sigma_upper);
-
-        // Large-stencil coefficients (conservative variables)
+        // One pass over the central stencil: large-stencil coefficients (conservative
+        // variables) and the troubled-cell measure, the variance of the relative
+        // density jumps (Welford's update)
         rtype aK[teno::MAX_NK][N_CONSERVATIVE] = {};
+        rtype g_mean = 0.0, g_m2 = 0.0;
         for (uint16_t s = 0; s < ns; s++) {
             rtype U[N_CONSERVATIVE];
             entry_conservatives(stencil_large(i_cell, s), stencil_large_face(i_cell, s), U);
+            const rtype g = Kokkos::fabs(U[0] - W0[0]) / W0[0];
+            const rtype delta = g - g_mean;
+            g_mean += delta / (s + 1);
+            g_m2 += delta * (g - g_mean);
             for (uint8_t l = 0; l < nk; l++) {
                 const rtype P = pinv_large(i_cell, l, s);
                 FOR_I_CONSERVATIVE aK[l][i] += P * (U[i] - U0[i]);
             }
         }
+        const rtype sigma = g_m2 / ns;
+        sigma_out(i_cell) = sigma;
+        const bool is_troubled = sigma >= sigma_threshold;
+        const rtype cutoff = (C_T > 0.0) ? C_T : teno::adaptive_CT(sigma, sigma_threshold, sigma_upper);
 
         // Small-stencil coefficients, only needed in troubled cells
         rtype aS[teno::MAX_FACES][teno::NK_SMALL][N_CONSERVATIVE] = {};
@@ -757,12 +800,22 @@ struct TENOFunctor {
                     for (uint8_t l = 0; l < teno::NK_SMALL; l++) project(aS[s][l], cS[s][l]);
                 }
                 for (uint8_t var = 0; var < N_CONSERVATIVE; var++) {
-                    const rtype gK = 1.0 / Kokkos::pow(smoothness(cK, nk, var, i_cell) + eps, 6.0);
+                    // gamma_k = 1 / (SI_k + eps)^6, normalized by the largest one so
+                    // that the weights cannot overflow (even in single precision)
+                    const rtype si_K = smoothness(cK, nk, var, i_cell) + eps;
+                    rtype si_small[teno::MAX_FACES] = {};
+                    rtype si_min = si_K;
+                    for (uint8_t s = 0; s < n_faces; s++) {
+                        if (!valid[s]) continue;
+                        si_small[s] = smoothness(cS[s], teno::NK_SMALL, var, i_cell) + eps;
+                        si_min = Kokkos::fmin(si_min, si_small[s]);
+                    }
+                    const rtype gK = Kokkos::pow(si_min / si_K, 6.0);
                     rtype g_small[teno::MAX_FACES] = {};
                     rtype sum_small = 0.0;
                     for (uint8_t s = 0; s < n_faces; s++) {
                         if (!valid[s]) continue;
-                        g_small[s] = 1.0 / Kokkos::pow(smoothness(cS[s], teno::NK_SMALL, var, i_cell) + eps, 6.0);
+                        g_small[s] = Kokkos::pow(si_min / si_small[s], 6.0);
                         sum_small += g_small[s];
                     }
                     use_large[var] = (sum_small == 0.0) || (gK / (gK + sum_small) >= cutoff);
@@ -890,4 +943,115 @@ void TENO::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                         stencil_small_size, stencil_small, stencil_small_face, pinv_small,
                         si_matrix, troubled, solution, face_solution};
     Kokkos::parallel_for("teno_reconstruction", mesh->n_cells, functor);
+}
+
+namespace {
+
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-1";
+
+struct Fnv1a {
+    uint64_t h = 1469598103934665603ULL;
+    void add(const void * data, size_t n) {
+        const unsigned char * p = static_cast<const unsigned char *>(data);
+        for (size_t i = 0; i < n; i++) {
+            h ^= p[i];
+            h *= 1099511628211ULL;
+        }
+    }
+    template <typename T>
+    void add(const T & value) { add(&value, sizeof(T)); }
+};
+
+template <typename View>
+void write_view(std::ofstream & out, const View & view) {
+    auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), view);
+    for (int r = 0; r < 4; r++) {
+        const uint64_t e = view.extent(r);
+        out.write(reinterpret_cast<const char *>(&e), sizeof(e));
+    }
+    out.write(reinterpret_cast<const char *>(h.data()), h.span() * sizeof(typename View::value_type));
+}
+
+template <typename View>
+bool read_view(std::ifstream & in, View & view, const std::string & label) {
+    uint64_t e[4];
+    for (int r = 0; r < 4; r++) in.read(reinterpret_cast<char *>(&e[r]), sizeof(e[r]));
+    if (!in.good()) return false;
+    view = View(label, e[0], e[1], e[2], e[3]);
+    auto h = Kokkos::create_mirror_view(view);
+    in.read(reinterpret_cast<char *>(h.data()), h.span() * sizeof(typename View::value_type));
+    if (!in.good()) return false;
+    Kokkos::deep_copy(view, h);
+    return true;
+}
+
+} // namespace
+
+uint64_t TENO::cache_key() const {
+    Fnv1a hash;
+    hash.add(sizeof(rtype));
+    hash.add(degree);
+    hash.add(n_stencil_small);
+    hash.add(stencil_factor);
+    hash.add(max_condition);
+    hash.add(mesh->n_cells);
+    hash.add(mesh->n_faces);
+    hash.add(mesh->h_node_coords.data(), mesh->h_node_coords.span() * sizeof(rtype));
+    hash.add(mesh->h_nodes_of_cell.data(), mesh->h_nodes_of_cell.span() * sizeof(uint32_t));
+    hash.add(mesh->h_faces_of_cell.data(), mesh->h_faces_of_cell.span() * sizeof(uint32_t));
+    auto h_face_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_bc);
+    hash.add(h_face_bc.data(), h_face_bc.span() * sizeof(int32_t));
+    return hash.h;
+}
+
+void TENO::save_cache(const std::string & filename) const {
+    std::ofstream out(filename, std::ios::binary);
+    if (!out.good()) {
+        std::cout << "TENO: could not write cache file " << filename << "." << std::endl;
+        return;
+    }
+    const uint64_t key = cache_key();
+    out.write(TENO_CACHE_MAGIC, sizeof(TENO_CACHE_MAGIC));
+    out.write(reinterpret_cast<const char *>(&key), sizeof(key));
+    write_view(out, scale);
+    write_view(out, basis_mean);
+    write_view(out, stencil_large_size);
+    write_view(out, stencil_large);
+    write_view(out, stencil_large_face);
+    write_view(out, pinv_large);
+    write_view(out, stencil_small_size);
+    write_view(out, stencil_small);
+    write_view(out, stencil_small_face);
+    write_view(out, pinv_small);
+    write_view(out, si_matrix);
+    std::cout << "TENO: wrote stencil cache " << filename << std::endl;
+}
+
+bool TENO::load_cache(const std::string & filename) {
+    std::ifstream in(filename, std::ios::binary);
+    if (!in.good()) return false;
+    char magic[sizeof(TENO_CACHE_MAGIC)];
+    uint64_t key = 0;
+    in.read(magic, sizeof(magic));
+    in.read(reinterpret_cast<char *>(&key), sizeof(key));
+    if (!in.good() || std::string(magic) != TENO_CACHE_MAGIC || key != cache_key()) {
+        std::cout << "TENO: cache " << filename << " does not match this case; recomputing." << std::endl;
+        return false;
+    }
+    const bool ok = read_view(in, scale, "teno_scale") && read_view(in, basis_mean, "teno_basis_mean") &&
+                    read_view(in, stencil_large_size, "teno_stencil_large_size") &&
+                    read_view(in, stencil_large, "teno_stencil_large") &&
+                    read_view(in, stencil_large_face, "teno_stencil_large_face") &&
+                    read_view(in, pinv_large, "teno_pinv_large") &&
+                    read_view(in, stencil_small_size, "teno_stencil_small_size") &&
+                    read_view(in, stencil_small, "teno_stencil_small") &&
+                    read_view(in, stencil_small_face, "teno_stencil_small_face") &&
+                    read_view(in, pinv_small, "teno_pinv_small") && read_view(in, si_matrix, "teno_si_matrix");
+    if (!ok) {
+        std::cout << "TENO: cache " << filename << " is truncated; recomputing." << std::endl;
+        return false;
+    }
+    troubled = Kokkos::View<rtype *>("teno_sigma", mesh->n_cells);
+    std::cout << "TENO: loaded stencil cache " << filename << std::endl;
+    return true;
 }

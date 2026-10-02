@@ -86,13 +86,25 @@ the zone's faces whose centers satisfy the expression.
 | `limiter` | (`MUSCL`) `venkatakrishnan` (default), `barth_jespersen` or `none` |
 | `venkatakrishnan_K` | (`MUSCL`) Venkatakrishnan threshold constant, default 5 |
 | `order` | (`TENO`) Order of accuracy, 2 to 6, default 5 |
-| `stencil_factor` | (`TENO`) Large-stencil size as a multiple of the number of polynomial coefficients, default 2 |
+| `stencil_factor` | (`TENO`) Large-stencil size as a multiple of the number of polynomial coefficients, default 2. Smaller values (e.g. 1.5) are markedly less dissipative for fine smooth structures (Shu-Osher entropy waves: 50% more amplitude at 200 cells) but less robust at discontinuities. |
 | `small_stencil_size` | (`TENO`) Cells per sector stencil, default 10 |
 | `troubled_threshold` | (`TENO`) Troubled-cell threshold on the density-jump variance, default 1e-3 |
 | `C_T` | (`TENO`) Fixed TENO cutoff; adaptive (1e-10 to 1e-6) if omitted |
 | `characteristic` | (`TENO`) Select stencils on characteristic variables, default true |
 | `max_condition` | (`TENO`) Stencils grow until the least-squares system's condition estimate is below this, default 1e8 |
+| `cache_file` | (`TENO`) Save the precomputed stencils and matrices here, and reuse them on later runs of the same mesh, boundary assignment and TENO options |
 | `bound_preserving` | (`TENO`) Scale troubled-cell polynomials to keep density and pressure within the neighbors' range, default false |
+
+## `[[forces]]`
+
+Write the force of the fluid on a boundary zone to a CSV file
+(`step, t, Fx_pressure, Fy_pressure, Fx_viscous, Fy_viscous`, per unit depth).
+
+| Key | Description |
+|---|---|
+| `zone` | Boundary zone name |
+| `interval` | Every this many steps, default 1 |
+| `file` | Output file, default `forces_<zone>.csv` |
 
 ## `[source]`
 
@@ -104,7 +116,7 @@ Optional source terms, added per unit volume.
 | `rho`, `rhou`, `rhoE` | Expressions in `x`, `y`, `t` (`rhou` is a two-element array) for the mass, momentum and energy sources |
 | `time_dependent` | Re-evaluate the expressions at every Runge-Kutta stage (host-side, so costly on large meshes); otherwise they are evaluated once |
 
-The scheme is not well balanced: hydrostatic states carry small spurious velocities that vanish under refinement.
+The scheme is not exactly well balanced: hydrostatic states carry small spurious velocities (about 1e-4 of the sound speed on a 32x32 mesh) that vanish at second order under refinement. Wall and symmetry ghost states continue the hydrostatic pressure gradient.
 
 ## `[output]`
 
@@ -119,5 +131,5 @@ The scheme is not well balanced: hydrostatic states carry small spurious velocit
 | `prefix` | Output path prefix; directories are created as needed |
 | `format` | `vtu` (with a `.pvd` series next to it) or `restart` |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
-| `variables` | (`vtu`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, `RHOE`, `U_X`, `U_Y`, `P`, `T`, `H`, `CFL` |
+| `variables` | (`vtu`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, `RHOE`, `U_X`, `U_Y`, `P`, `T`, `H`, `CFL`, and with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`) |
 | `geometry` | (`vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |

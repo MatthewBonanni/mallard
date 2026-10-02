@@ -130,9 +130,13 @@ struct ViscousFluxFunctor {
         rtype tau_n[N_DIM] = {txx * n[0] + txy * n[1], txy * n[0] + tyy * n[1]};
         rtype q_n = kappa * (g_f[2][0] * n[0] + g_f[2][1] * n[1]);
         if (symmetry) {
-            // Keep only the normal stress
+            // Keep only the normal stress; the normal velocity vanishes on the plane,
+            // so the normal stress does no work
             const rtype tau_nn = tau_n[0] * n[0] + tau_n[1] * n[1];
             FOR_I_DIM tau_n[i] = tau_nn * n[i];
+            const rtype u_n = q_f[0] * n[0] + q_f[1] * n[1];
+            q_f[0] -= u_n * n[0];
+            q_f[1] -= u_n * n[1];
             q_n = 0.0;
         }
         if (heat_flux_given) {

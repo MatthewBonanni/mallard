@@ -79,8 +79,8 @@ TEST(SourceTest, GravityPullsGasDown) {
 
 TEST(SourceTest, IsothermalAtmosphereConvergesToHydrostaticEquilibrium) {
     // rho = p = exp(-y) with R = T = 1 balances gravity g = -1. The scheme is
-    // not well balanced, so spurious velocities remain but vanish under
-    // refinement.
+    // not exactly well balanced, so small spurious velocities remain and
+    // vanish under refinement.
     auto spurious_velocity = [](uint32_t n) {
         std::string input = box_input("gravity = [0.0, -1.0]\n",
                                       "type = \"analytical\"\nrho = \"exp(-y)\"\nu = [\"0.0\", \"0.0\"]\np = \"exp(-y)\"\n",
@@ -99,6 +99,8 @@ TEST(SourceTest, IsothermalAtmosphereConvergesToHydrostaticEquilibrium) {
         return v_max;
     };
     const double v16 = spurious_velocity(16), v32 = spurious_velocity(32);
-    EXPECT_LT(v32, 0.6 * v16);
-    EXPECT_LT(v32, 0.04);
+    // Hydrostatic wall ghosts: second-order convergence and small magnitude
+    // (mirrored wall pressures gave 0.06 and 0.03)
+    EXPECT_LT(v32, 0.35 * v16);
+    EXPECT_LT(v32, 5e-4);
 }

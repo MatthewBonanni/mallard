@@ -1,0 +1,62 @@
+# Shu-Osher problem: a Mach 3 shock running into a sinusoidal entropy wave
+# (Shu & Osher 1989), on [0, 10] (the usual [-5, 5] shifted by 5), t = 1.8.
+
+[run]
+t_stop = 1.8
+cfl = 0.5
+
+[mesh]
+type = "cartesian"
+Nx = 200
+Ny = 4
+Lx = 10.0
+Ly = 0.2
+
+[initialize]
+type = "analytical"
+rho = "x < 1 ? 3.857143 : 1 + 0.2 * sin(5 * (x - 5))"
+u = ["x < 1 ? 2.629369 : 0", "0"]
+p = "x < 1 ? 10.33333 : 1"
+
+[[boundaries]]
+name = "left"
+type = "dirichlet"
+rho = "3.857143"
+u = ["2.629369", "0"]
+p = "10.33333"
+
+[[boundaries]]
+name = "right"
+type = "extrapolation"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[output]
+check_interval = 1000
+
+[[write_data]]
+prefix = "./solut/shu_osher"
+format = "vtu"
+time_interval = 1.8
+variables = ["RHO", "U_X", "P"]
