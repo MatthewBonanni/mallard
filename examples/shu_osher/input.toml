@@ -1,5 +1,7 @@
 # Shu-Osher problem: a Mach 3 shock running into a sinusoidal entropy wave
 # (Shu & Osher 1989), on [0, 10] (the usual [-5, 5] shifted by 5), t = 1.8.
+# Uses RHLL: HLLC suffers a grid-aligned shock instability on this strip and
+# does not converge under refinement.
 
 [run]
 t_stop = 1.8
@@ -38,7 +40,7 @@ name = "bottom"
 type = "symmetry"
 
 [numerics]
-riemann_solver = "HLLC"
+riemann_solver = "RHLL"
 time_integrator = "SSPRK3"
 
 [numerics.face_reconstruction]
