@@ -6,29 +6,11 @@
 
 Mallard is a high-order unstructured finite volume solver for the compressible Euler and Navier-Stokes equations, written in C++ with [Kokkos](https://github.com/kokkos/kokkos) for performance portability.
 
-![2D Riemann problem](./docs/images/riemann_2d.gif)
+![Mallard simulations](./docs/images/hero.gif)
 
-*2D Riemann problem (configuration 3) on 980,000 triangles with fifth-order TENO-E reconstruction.*
+*Double Mach reflection, a 2D Riemann problem and the Daru & Tenaud viscous shock tube ([`examples/`](examples)), with the shock tube's wall density at t = 1 landing on the grid-converged reference of [Zhou et al.](https://arxiv.org/abs/1705.09062).*
 
 > **NOTE:** Mallard is a **work in progress**: 2D only for now (3D and MPI are next), and GPU performance has only begun to be tuned.
-
-## Gallery
-
-![Double Mach reflection](./docs/images/double_mach.gif)
-
-*Double Mach reflection of a Mach 10 shock ([`examples/double_mach`](examples/double_mach)): 1.84 million triangles, TENO5-E with the rotated-hybrid HLL-Roe flux, SSPRK3.*
-
-![2D Riemann problem on quadrilaterals](./docs/images/riemann_2d_quads.gif)
-
-*2D Riemann problem, configuration 3, on 1,000,000 quadrilaterals ([`examples/riemann_2d_quads`](examples/riemann_2d_quads)): TENO5-E, HLLC, SSPRK3. The same case on triangles is at the top of this page ([`examples/riemann_2d`](examples/riemann_2d)).*
-
-![Viscous shock tube](./docs/images/viscous_shock_tube.gif)
-
-*Viscous shock tube of Daru & Tenaud at Re = 200 ([`examples/viscous_shock_tube`](examples/viscous_shock_tube)): a Mach 2.37 shock reflects off the end wall and separates the boundary layer it left on the floor into a lambda shock and a primary vortex. Navier-Stokes on 500,000 quadrilaterals (lower half of the box, symmetry plane on top), TENO5-E, HLLC, SSPRK3.*
-
-![Viscous shock tube validation](./docs/images/viscous_shock_tube_validation.png)
-
-*Viscous shock tube at t = 1 against the grid-converged reference of [Zhou et al.](https://arxiv.org/abs/1705.09062) (1500 x 750 grid): the wall density matches their tabulated values to 0.5 (RMS, on a range of 37 to 118), and the lambda-shock triple point is at (0.581, 0.138) against (0.58, 0.137).*
 
 ## Features
 

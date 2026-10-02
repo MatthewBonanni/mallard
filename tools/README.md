@@ -10,4 +10,5 @@ Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg.
 | `plot_sod.py` | Density profiles against the exact Sod solution |
 | `plot_viscous_shock_tube.py` | Viscous shock tube at t = 1 against the grid-converged reference of Zhou et al.: wall density, lambda-shock triple point |
 | `animate.py` | MP4/GIF animation of a VTU series: density (or `--var`, including `VORTICITY`) with contours, plus numerical schlieren |
+| `animate_grid.py` | Several cases side by side in one animation, synchronized in normalized time, with optional wall-profile panels against reference data. `hero_grid.json` makes the README animation (run from the repository root after running the three examples at the resolutions given in their headers) |
 | `make_cylinder_mesh.py` | Gmsh O-grid around a cylinder |
