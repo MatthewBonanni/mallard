@@ -14,10 +14,7 @@
 #define DISTRIBUTION_H
 
 #include <cstdint>
-#include <memory>
 #include <vector>
-
-class Mesh;
 
 /** @brief Boundary zone of local faces that border cells of other ranks. */
 inline constexpr const char * PARTITION_ZONE = "__partition__";
@@ -35,16 +32,6 @@ struct Distribution {
     std::vector<std::vector<uint32_t>> send_cells;  // per neighbor: owned cells it needs
     std::vector<std::vector<uint32_t>> recv_cells;  // per neighbor: halo cells it owns
 };
-
-/**
- * @brief Build this rank's local mesh from the global mesh and the owner of
- *        every cell: the owned cells plus halo_layers layers of vertex
- *        neighbors. Faces on the global boundary keep their zones; faces
- *        between a local and a non-local cell go to PARTITION_ZONE. Fills dist,
- *        including the exchange plan (collective).
- */
-std::shared_ptr<Mesh> build_local_mesh(Mesh & global, const std::vector<int> & owner, int halo_layers,
-                                       Distribution & dist);
 
 /**
  * @brief Fill the exchange plan of dist, whose cells are numbered, from the

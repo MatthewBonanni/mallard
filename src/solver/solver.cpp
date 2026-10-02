@@ -27,6 +27,7 @@
 
 #include "comm.h"
 #include "common.h"
+#include "mesh_block.h"
 #include "partition.h"
 #include "expression.h"
 #include "gradient.h"
@@ -71,6 +72,7 @@ int Solver::init(const toml::value & input) {
         init_boundaries();
         init_numerics();
     }
+    setup.reset();
     init_run_parameters();
     allocate_memory();
     init_sources();
@@ -82,24 +84,29 @@ int Solver::init(const toml::value & input) {
 
 void Solver::init_mesh() {
     std::cout << "Initializing mesh..." << std::endl;
-    mesh = std::make_shared<Mesh>();
-    mesh->init(input);
-    if (is_distributed()) {
-        if (halo_layers == 0) halo_layers = base_halo_layers();
+    if (!is_distributed()) {
+        mesh = std::make_shared<Mesh>();
+        mesh->init(input);
+        mesh->copy_host_to_device();
+        return;
+    }
+    if (halo_layers == 0) halo_layers = base_halo_layers();
+    // Partition once; deeper halos (see halo_too_shallow) grow the existing layers
+    if (!setup) {
         const std::string partitioner = toml::find_or<std::string>(
             input, "parallel", "partitioner", have_graph_partitioner() ? "graph" : "hilbert");
         if (partitioner != "graph" && partitioner != "hilbert") {
             throw std::runtime_error("Unknown partitioner: " + partitioner + " (graph or hilbert).");
         }
-        const std::vector<int> owner = partitioner == "graph" ? partition_graph(*mesh, comm::size())
-                                                              : partition_hilbert(*mesh, comm::size());
-        const uint32_t n_global = mesh->n_cells;
-        mesh = build_local_mesh(*mesh, owner, halo_layers, distribution);
-        halo = HaloExchange(distribution);
-        const uint64_t max_owned = comm::allreduce(uint64_t(distribution.n_owned), comm::Op::MAX);
-        std::cout << "> Distributed over " << comm::size() << " ranks: " << n_global << " cells, at most "
-                  << max_owned << " per rank, " << halo_layers << " halo layers" << std::endl;
+        setup = std::make_unique<DistributedMesh>(read_mesh_block(input));
+        setup->distribute(partitioner == "graph" ? partition_graph(*setup, comm::size())
+                                                 : partition_hilbert(*setup, comm::size()));
     }
+    mesh = setup->build_local_mesh(halo_layers, distribution);
+    halo = HaloExchange(distribution);
+    const uint64_t max_owned = comm::allreduce(uint64_t(distribution.n_owned), comm::Op::MAX);
+    std::cout << "> Distributed over " << comm::size() << " ranks: " << setup->n_global_cells()
+              << " cells, at most " << max_owned << " per rank, " << halo_layers << " halo layers" << std::endl;
     mesh->copy_host_to_device();
 }
 

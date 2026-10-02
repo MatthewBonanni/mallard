@@ -24,7 +24,9 @@ namespace {
 constexpr uint64_t NONE = ~uint64_t(0);
 constexpr uint32_t NO_ZONE = ~uint32_t(0);
 
-using FaceKey = std::array<uint64_t, 4>;  // sorted node ids, padded with NONE
+// A face's sorted node ids, padded with NONE (triangles in 3D)
+constexpr int KEY = N_DIM == 2 ? 2 : 4;
+using FaceKey = std::array<uint64_t, KEY>;
 
 uint64_t mix(uint64_t x) {
     x += 0x9e3779b97f4a7c15ull;
@@ -33,13 +35,11 @@ uint64_t mix(uint64_t x) {
     return x ^ (x >> 31);
 }
 
-struct FaceKeyHash {
-    size_t operator()(const FaceKey & key) const {
-        uint64_t h = 0;
-        for (uint64_t v : key) h = mix(h ^ v);
-        return h;
-    }
-};
+uint64_t hash(const FaceKey & key) {
+    uint64_t h = 0;
+    for (uint64_t v : key) h = mix(h ^ v);
+    return h;
+}
 
 FaceKey face_key(const std::vector<uint64_t> & nodes) {
     FaceKey key;
@@ -119,86 +119,84 @@ DistributedMesh::DistributedMesh(MeshBlock b) : block(std::move(b)) {
     const uint32_t unassigned = zones.size();
     zones.push_back("unassigned");
 
-    // Every cell face and boundary face goes to the rank its node set hashes to
+    // Every cell face and boundary face goes to the rank its node set hashes
+    // to, as (key, cell, local face) or (key, NONE, zone)
+    constexpr int WIDTH = KEY + 2;
     std::vector<std::vector<uint64_t>> send(p);
     std::vector<uint64_t> face;
-    auto post = [&](uint64_t cell, uint64_t k_or_zone) {
-        const FaceKey key = face_key(face);
-        auto & out = send[FaceKeyHash()(key) % p];
-        out.push_back(face.size());
-        out.insert(out.end(), key.begin(), key.begin() + face.size());
-        out.push_back(cell);
-        out.push_back(k_or_zone);
-    };
-    for (uint64_t c = 0; c < block.n_cells(); c++) {
-        const uint32_t n = block.cell_offsets[c + 1] - block.cell_offsets[c];
-        for (uint32_t k = 0; k < n_cell_faces(n); k++) {
-            cell_face(&block.cell_nodes[block.cell_offsets[c]], n, k, face);
-            post(block.first_cell + c, k);
-        }
-    }
-    for (uint64_t f = 0; f < block.n_faces(); f++) {
-        face.assign(block.face_nodes.begin() + block.face_offsets[f], block.face_nodes.begin() + block.face_offsets[f + 1]);
-        post(NONE, block.face_zone[f]);
-    }
-    std::vector<std::vector<uint64_t>> received = comm::alltoallv(send);
-    send.assign(p, {});
-
-    // Pair them: two cells make a graph edge; one cell a boundary face, whose
-    // zone is that of the first boundary face (in global order) that matches it
-    struct Match {
-        uint64_t cell[2];
-        uint32_t k[2];
-        uint32_t n_cells = 0;
-        uint32_t zone = NO_ZONE;
-    };
-    std::unordered_map<FaceKey, Match, FaceKeyHash> faces;
-    for (const auto & from : received) {
-        for (size_t i = 0; i < from.size();) {
-            const uint64_t n = from[i];
-            FaceKey key;
-            key.fill(NONE);
-            std::copy(&from[i + 1], &from[i + 1 + n], key.begin());
-            const uint64_t cell = from[i + 1 + n], k_or_zone = from[i + 2 + n];
-            i += n + 3;
-            Match & m = faces[key];
-            if (cell == NONE) {
-                if (m.zone == NO_ZONE) m.zone = k_or_zone;
-            } else if (m.n_cells == 2) {
-                error = "Mesh: a face is shared by more than two cells.";
-            } else {
-                m.cell[m.n_cells] = cell;
-                m.k[m.n_cells++] = k_or_zone;
+    // Two passes: count, then fill lists of exactly the right size
+    std::vector<uint64_t> count(p, 0);
+    auto for_each_face = [&](auto && post) {
+        for (uint64_t c = 0; c < block.n_cells(); c++) {
+            const uint32_t n = block.cell_offsets[c + 1] - block.cell_offsets[c];
+            for (uint32_t k = 0; k < n_cell_faces(n); k++) {
+                cell_face(&block.cell_nodes[block.cell_offsets[c]], n, k, face);
+                post(face_key(face), block.first_cell + c, k);
             }
         }
-    }
-    received.clear();
-    for (const auto & [key, m] : faces) {
-        if (m.n_cells == 0) {
-            error = "Mesh: boundary face of " + zones[m.zone] + " is not a cell face.";
-        } else if (m.n_cells == 2 && m.zone != NO_ZONE) {
-            error = "Mesh: boundary face of " + zones[m.zone] + " is an interior face.";
+        for (uint64_t f = 0; f < block.n_faces(); f++) {
+            face.assign(block.face_nodes.begin() + block.face_offsets[f],
+                        block.face_nodes.begin() + block.face_offsets[f + 1]);
+            post(face_key(face), NONE, block.face_zone[f]);
         }
-        for (uint32_t j = 0; j < m.n_cells; j++) {
-            const uint64_t other = m.n_cells == 2 ? m.cell[1 - j] : NONE;
-            const uint64_t zone = m.n_cells == 2 ? NO_ZONE : (m.zone == NO_ZONE ? unassigned : m.zone);
-            auto & out = send[rank_of_cell(m.cell[j])];
-            out.insert(out.end(), {m.cell[j], m.k[j], other, zone});
+    };
+    for_each_face([&](const FaceKey & key, uint64_t, uint64_t) { count[hash(key) % p] += WIDTH; });
+    for (int q = 0; q < p; q++) send[q].reserve(count[q]);
+    for_each_face([&](const FaceKey & key, uint64_t cell, uint64_t k_or_zone) {
+        auto & out = send[hash(key) % p];
+        out.insert(out.end(), key.begin(), key.end());
+        out.push_back(cell);
+        out.push_back(k_or_zone);
+    });
+    comm::Received<uint64_t> received = comm::exchange(std::move(send));
+
+    // Sorted by key, then cell: each face's cells come first, then the
+    // boundary faces matching it. Two cells make a graph edge; one cell a
+    // boundary face in the zone of the first matching boundary face (lowest
+    // zone index), else unassigned.
+    const uint64_t n_records = received.data.size() / WIDTH;
+    const uint64_t * r = received.data.data();
+    std::vector<uint32_t> order(n_records);
+    std::iota(order.begin(), order.end(), 0u);
+    std::sort(order.begin(), order.end(), [&](uint32_t x, uint32_t y) {
+        return std::lexicographical_compare(r + x * WIDTH, r + (x + 1) * WIDTH, r + y * WIDTH, r + (y + 1) * WIDTH);
+    });
+    send.assign(p, {});
+    for (uint64_t i = 0; i < n_records;) {
+        uint64_t j = i + 1;
+        while (j < n_records && std::equal(r + order[i] * WIDTH, r + order[i] * WIDTH + KEY, r + order[j] * WIDTH)) j++;
+        uint32_t n_cells = 0;
+        while (i + n_cells < j && r[order[i + n_cells] * WIDTH + KEY] != NONE) n_cells++;
+        const bool zoned = i + n_cells < j;
+        const uint64_t zone = zoned ? r[order[i + n_cells] * WIDTH + KEY + 1] : unassigned;
+        if (n_cells == 0) {
+            error = "Mesh: boundary face of " + zones[zone] + " is not a cell face.";
+        } else if (n_cells > 2) {
+            error = "Mesh: a face is shared by more than two cells.";
+        } else if (n_cells == 2 && zoned) {
+            error = "Mesh: boundary face of " + zones[zone] + " is an interior face.";
+        } else {
+            for (uint32_t m = 0; m < n_cells; m++) {
+                const uint64_t * rec = r + order[i + m] * WIDTH;
+                const uint64_t other = n_cells == 2 ? r[order[i + 1 - m] * WIDTH + KEY] : NONE;
+                auto & out = send[rank_of_cell(rec[KEY])];
+                out.insert(out.end(), {rec[KEY], rec[KEY + 1], other, n_cells == 2 ? uint64_t(NO_ZONE) : zone});
+            }
         }
+        i = j;
     }
-    faces = {};
+    received = {};
+    order = {};
     check_all(error);
-    received = comm::alltoallv(send);
-    send.clear();
+    received = comm::exchange(std::move(send));
 
     // Per block cell, in local face order: neighbors and boundary faces
-    std::vector<std::array<uint64_t, 4>> entries;
-    for (const auto & from : received) {
-        for (size_t i = 0; i < from.size(); i += 4) {
-            entries.push_back({from[i] - block.first_cell, from[i + 1], from[i + 2], from[i + 3]});
-        }
+    std::vector<std::array<uint64_t, 4>> entries(received.data.size() / 4);
+    for (size_t i = 0; i < entries.size(); i++) {
+        const uint64_t * e = &received.data[4 * i];
+        entries[i] = {e[0] - block.first_cell, e[1], e[2], e[3]};
     }
-    received.clear();
+    received = {};
     std::sort(entries.begin(), entries.end());
     graph_offsets_.assign(block.n_cells() + 1, 0);
     boundary_offsets.assign(block.n_cells() + 1, 0);
@@ -219,25 +217,18 @@ std::vector<std::array<double, N_DIM>> DistributedMesh::fetch_nodes(const std::v
     const int p = comm::size();
     std::vector<std::vector<uint64_t>> wanted(p);
     for (uint64_t g : sorted_ids) wanted[rank_of_node(g)].push_back(g);
-    const auto asked = comm::alltoallv(wanted);
+    const auto asked = comm::exchange(std::move(wanted));
     std::vector<std::vector<double>> answer(p);
     for (int r = 0; r < p; r++) {
-        for (uint64_t g : asked[r]) {
+        for (uint64_t g : asked.from(r)) {
             const auto & x = block.node_coords[g - block.first_node];
             answer[r].insert(answer[r].end(), x.begin(), x.end());
         }
     }
-    const auto got = comm::alltoallv(answer);
+    const auto got = comm::exchange(std::move(answer));
     // Ids are sorted, so the ranks' answers come back in the same order
-    std::vector<std::array<double, N_DIM>> coords;
-    coords.reserve(sorted_ids.size());
-    for (const auto & from : got) {
-        for (size_t k = 0; k < from.size(); k += N_DIM) {
-            std::array<double, N_DIM> x;
-            FOR_I_DIM x[i] = from[k + i];
-            coords.push_back(x);
-        }
-    }
+    std::vector<std::array<double, N_DIM>> coords(sorted_ids.size());
+    for (size_t k = 0; k < coords.size(); k++) FOR_I_DIM coords[k][i] = got.data[k * N_DIM + i];
     return coords;
 }
 
@@ -273,8 +264,8 @@ void DistributedMesh::append_record(std::vector<uint64_t> & out, uint32_t c) con
     }
 }
 
-void DistributedMesh::read_records(const std::vector<std::vector<uint64_t>> & in, uint8_t layer) {
-    for (const auto & from : in) {
+void DistributedMesh::read_records(const std::vector<uint64_t> & from, uint8_t layer) {
+    {
         for (size_t i = 0; i < from.size();) {
             const uint64_t g = from[i++];
             if (layer > 0) halo_index.emplace(g, cells.gid.size());
@@ -310,7 +301,7 @@ void DistributedMesh::distribute(const std::vector<int> & cell_owner) {
     // ids, so the owned cells arrive sorted.
     std::vector<std::vector<uint64_t>> send(p);
     for (uint32_t c = 0; c < block.n_cells(); c++) append_record(send[owner[c]], c);
-    read_records(comm::alltoallv(send), 0);
+    read_records(comm::exchange(std::move(send)).data, 0);
     owned_nodes = cells.nodes;
     std::sort(owned_nodes.begin(), owned_nodes.end());
     owned_nodes.erase(std::unique(owned_nodes.begin(), owned_nodes.end()), owned_nodes.end());
@@ -323,19 +314,15 @@ void DistributedMesh::distribute(const std::vector<int> & cell_owner) {
                                                           {block.cell_nodes[k], block.first_cell + c, uint64_t(owner[c])});
         }
     }
-    const auto uses = comm::alltoallv(send);
+    const std::vector<uint64_t> uses = comm::exchange(std::move(send)).data;
     directory_offsets.assign(block.n_nodes() + 1, 0);
-    for (const auto & from : uses) {
-        for (size_t i = 0; i < from.size(); i += 3) directory_offsets[from[i] - block.first_node + 1]++;
-    }
+    for (size_t i = 0; i < uses.size(); i += 3) directory_offsets[uses[i] - block.first_node + 1]++;
     std::partial_sum(directory_offsets.begin(), directory_offsets.end(), directory_offsets.begin());
     directory.assign(directory_offsets.back(), {});
     {
         std::vector<uint64_t> fill(directory_offsets.begin(), directory_offsets.end() - 1);
-        for (const auto & from : uses) {
-            for (size_t i = 0; i < from.size(); i += 3) {
-                directory[fill[from[i] - block.first_node]++] = {from[i + 1], int(from[i + 2])};
-            }
+        for (size_t i = 0; i < uses.size(); i += 3) {
+            directory[fill[uses[i] - block.first_node]++] = {uses[i + 1], int(uses[i + 2])};
         }
     }
 
@@ -356,9 +343,8 @@ void DistributedMesh::distribute(const std::vector<int> & cell_owner) {
         }
     }
     next_layer.clear();
-    for (const auto & from : comm::alltoallv(send)) {
-        for (size_t i = 0; i < from.size(); i += 2) next_layer.push_back({from[i], int(from[i + 1])});
-    }
+    const std::vector<uint64_t> pushed = comm::exchange(std::move(send)).data;
+    for (size_t i = 0; i < pushed.size(); i += 2) next_layer.push_back({pushed[i], int(pushed[i + 1])});
     std::sort(next_layer.begin(), next_layer.end());
     next_layer.erase(std::unique(next_layer.begin(), next_layer.end()), next_layer.end());
 }
@@ -381,10 +367,10 @@ void DistributedMesh::grow_layer() {
                 if (searched_nodes.insert(node).second) query[rank_of_node(node)].push_back(node);
             }
         }
-        const auto asked = comm::alltoallv(query);
+        const auto asked = comm::exchange(std::move(query));
         std::vector<std::vector<uint64_t>> answer(p);
         for (int r = 0; r < p; r++) {
-            for (uint64_t node : asked[r]) {
+            for (uint64_t node : asked.from(r)) {
                 const uint64_t n = node - block.first_node;
                 for (uint64_t i = directory_offsets[n]; i < directory_offsets[n + 1]; i++) {
                     answer[r].insert(answer[r].end(), {directory[i].first, uint64_t(directory[i].second)});
@@ -392,12 +378,11 @@ void DistributedMesh::grow_layer() {
             }
         }
         const auto n_owned = cells.gid.begin() + std::count(cells.layer.begin(), cells.layer.end(), 0);
-        for (const auto & from : comm::alltoallv(answer)) {
-            for (size_t i = 0; i < from.size(); i += 2) {
-                const uint64_t g = from[i];
-                if (std::binary_search(cells.gid.begin(), n_owned, g) || halo_index.count(g)) continue;
-                found.push_back({g, int(from[i + 1])});
-            }
+        const std::vector<uint64_t> around = comm::exchange(std::move(answer)).data;
+        for (size_t i = 0; i < around.size(); i += 2) {
+            const uint64_t g = around[i];
+            if (std::binary_search(cells.gid.begin(), n_owned, g) || halo_index.count(g)) continue;
+            found.push_back({g, int(around[i + 1])});
         }
         std::sort(found.begin(), found.end());
         found.erase(std::unique(found.begin(), found.end()), found.end());
@@ -406,12 +391,12 @@ void DistributedMesh::grow_layer() {
     // Fetch the new cells from the ranks whose blocks hold them, in global order
     std::vector<std::vector<uint64_t>> wanted(p);
     for (const auto & [g, o] : found) wanted[rank_of_cell(g)].push_back(g);
-    const auto asked = comm::alltoallv(wanted);
+    const auto asked = comm::exchange(std::move(wanted));
     std::vector<std::vector<uint64_t>> records(p);
     for (int r = 0; r < p; r++) {
-        for (uint64_t g : asked[r]) append_record(records[r], g - block.first_cell);
+        for (uint64_t g : asked.from(r)) append_record(records[r], g - block.first_cell);
     }
-    read_records(comm::alltoallv(records), layer);
+    read_records(comm::exchange(std::move(records)).data, layer);
     layers = layer;
 }
 
@@ -466,5 +451,7 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
     mesh->init_from_connectivity(nodes, local_cells, boundary_faces, PARTITION_ZONE);
     mesh->n_owned_cells = dist.n_owned;
     mesh->n_reconstructed_cells = std::count_if(dist.layer.begin(), dist.layer.end(), [](uint8_t l) { return l <= 1; });
+    mesh->n_complete_cells =
+        std::count_if(dist.layer.begin(), dist.layer.end(), [&](uint8_t l) { return l < halo_layers; });
     return mesh;
 }

@@ -51,7 +51,7 @@ Pick the Kokkos backend at configure time, for example `-DKokkos_ENABLE_OPENMP=O
 | `USE_SYSTEM_KOKKOS` | `ON` | Use an installed Kokkos instead of the submodule |
 | `Mallard_DIM` | `2` | Spatial dimension, `2` or `3` (one binary per dimension) |
 | `Mallard_USE_DOUBLE` | `ON` | Double precision (single precision otherwise) |
-| `Mallard_ENABLE_MPI` | `OFF` | Distributed memory with MPI: `mpirun -n N Mallard -i input.toml` splits the mesh between ranks (solution output and restart from several ranks are not supported yet) |
+| `Mallard_ENABLE_MPI` | `OFF` | Distributed memory with MPI: `mpirun -n N Mallard -i input.toml` splits the mesh between ranks; with generated meshes or HDF5 mesh files (`mallard-mesh-convert`) no rank ever holds the whole mesh, while Gmsh files are read whole by every rank |
 | `Mallard_GPU_AWARE_MPI` | `OFF` | With MPI on GPUs: hand device buffers to a CUDA-aware MPI instead of staging halos through host memory |
 | `Mallard_ENABLE_KAMINPAR` | `OFF` | With MPI: partition the mesh with the [dKaMinPar](https://github.com/KaHIP/KaMinPar) graph partitioner (fetched at configure time; needs oneTBB) instead of a Hilbert curve |
 | `Mallard_ENABLE_HDF5` | `OFF` | HDF5 mesh files (parallel HDF5 with MPI, when available) and the `mallard-mesh-convert` tool |

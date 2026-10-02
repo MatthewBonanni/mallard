@@ -89,7 +89,7 @@ class DistributedMesh {
         int rank_of_cell(uint64_t g) const;
         int rank_of_node(uint64_t g) const;
         void append_record(std::vector<uint64_t> & out, uint32_t i) const;
-        void read_records(const std::vector<std::vector<uint64_t>> & in, uint8_t layer);
+        void read_records(const std::vector<uint64_t> & in, uint8_t layer);
         std::vector<std::array<double, N_DIM>> fetch_nodes(const std::vector<uint64_t> & sorted_ids) const;
         void grow_layer();
 

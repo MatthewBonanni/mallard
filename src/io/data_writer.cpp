@@ -14,12 +14,14 @@
 #include "comm.h"
 #include "input.h"
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <numeric>
 #include <sstream>
 #include <unordered_map>
 
@@ -311,7 +313,7 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
 #endif
 }
 
-RestartData read_restart(const std::string & filename) {
+RestartData read_restart(const std::string & filename, const std::vector<uint64_t> * cells) {
     std::ifstream in(filename, std::ios::binary);
     if (!in.good()) {
         throw std::runtime_error("Could not open restart file: " + filename + ".");
@@ -339,9 +341,33 @@ RestartData read_restart(const std::string & filename) {
                                  "D run), but Mallard was built with Mallard_DIM = " + std::to_string(N_DIM) +
                                  " (" + std::to_string(N_CONSERVATIVE) + " variables).");
     }
-    data.conservatives.assign(n_vars, std::vector<rtype>(data.n_cells));
-    for (auto & var : data.conservatives) {
-        in.read(reinterpret_cast<char *>(var.data()), data.n_cells * sizeof(rtype));
+    if (!cells) {
+        data.conservatives.assign(n_vars, std::vector<rtype>(data.n_cells));
+        for (auto & var : data.conservatives) {
+            in.read(reinterpret_cast<char *>(var.data()), data.n_cells * sizeof(rtype));
+        }
+    } else {
+        // Runs of consecutive global ids, read with one seek each
+        const std::streamoff header = in.tellg();
+        std::vector<uint32_t> order(cells->size());
+        std::iota(order.begin(), order.end(), 0u);
+        std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) { return (*cells)[a] < (*cells)[b]; });
+        if (!order.empty() && (*cells)[order.back()] >= data.n_cells) {
+            throw std::runtime_error("Restart file " + filename + " does not match the mesh.");
+        }
+        data.conservatives.assign(n_vars, std::vector<rtype>(cells->size()));
+        std::vector<rtype> run;
+        for (uint64_t v = 0; v < n_vars; v++) {
+            for (size_t a = 0; a < order.size();) {
+                size_t b = a + 1;
+                while (b < order.size() && (*cells)[order[b]] == (*cells)[order[b - 1]] + 1) b++;
+                run.resize(b - a);
+                in.seekg(header + std::streamoff((v * data.n_cells + (*cells)[order[a]]) * sizeof(rtype)));
+                in.read(reinterpret_cast<char *>(run.data()), run.size() * sizeof(rtype));
+                for (size_t k = a; k < b; k++) data.conservatives[v][order[k]] = run[k - a];
+                a = b;
+            }
+        }
     }
     if (!in.good()) {
         throw std::runtime_error("Restart file " + filename + " is truncated.");

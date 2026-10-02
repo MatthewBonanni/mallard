@@ -45,14 +45,16 @@ static const std::unordered_map<DataFormat, std::string> FORMAT_NAMES = {
 struct RestartData {
     uint64_t step = 0;
     double t = 0.0;
-    uint64_t n_cells = 0;
-    std::vector<std::vector<rtype>> conservatives;  // [variable][cell]
+    uint64_t n_cells = 0;                           // in the file
+    std::vector<std::vector<rtype>> conservatives;  // [variable][cell read]
 };
 
 /**
- * @brief Read a restart file written by a DataWriter with format = "restart".
+ * @brief Read a restart file written by a DataWriter with format = "restart":
+ *        every cell, or with cells, only those global cells (conservatives
+ *        then hold their values in the order of cells).
  */
-RestartData read_restart(const std::string & filename);
+RestartData read_restart(const std::string & filename, const std::vector<uint64_t> * cells = nullptr);
 
 /**
  * @brief Writes snapshots either every `interval` steps or every

@@ -22,6 +22,8 @@
 #include <vector>
 
 #include "comm.h"
+#include "mesh_block.h"
+#include "mpi_compare.h"
 #include "partition.h"
 #include "test_fixtures.h"
 #include "solver.h"
@@ -57,49 +59,6 @@ std::string bcs(const char * left, const char * right, const char * top, const c
 
 const std::string EULER = "type = \"euler\"\n";
 const std::string NS = "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n";
-
-/**
- * @brief Run the input distributed and serially; every rank compares the
- *        gathered distributed solution with its serial one.
- */
-void expect_matches_serial(const std::string & input) {
-    Solver distributed;
-    distributed.init(parse_toml(input));
-    distributed.run();
-    distributed.copy_device_to_host();
-
-    Solver serial;
-    serial.set_distributed(false);
-    serial.init(parse_toml(input));
-    serial.run();
-    serial.copy_device_to_host();
-
-    const uint32_t n_global = serial.get_mesh()->n_cells;
-    const auto & dist = distributed.get_distribution();
-    std::vector<double> gathered(n_global * N_CONSERVATIVE, 0.0);
-    std::vector<double> count(n_global, 0.0);
-    for (uint32_t c = 0; c < distributed.get_mesh()->n_owned(); c++) {
-        const uint64_t g = distributed.is_distributed() ? dist.global_cell[c] : c;
-        FOR_I_CONSERVATIVE gathered[g * N_CONSERVATIVE + i] = distributed.h_conservatives(c, i);
-        count[g] += 1.0;
-    }
-    comm::allreduce(std::span<double>(gathered), comm::Op::SUM);
-    comm::allreduce(std::span<double>(count), comm::Op::SUM);
-
-    EXPECT_EQ(distributed.get_step(), serial.get_step());
-    EXPECT_EQ(distributed.get_time(), serial.get_time());
-    double max_rel = 0.0;
-    for (uint32_t g = 0; g < n_global; g++) {
-        ASSERT_EQ(count[g], 1.0) << "cell " << g << " owned " << count[g] << " times";
-        FOR_I_CONSERVATIVE {
-            const double ref = serial.h_conservatives(g, i);
-            max_rel = std::max(max_rel, std::abs(gathered[g * N_CONSERVATIVE + i] - ref) / (std::abs(ref) + 1e-3));
-        }
-    }
-    // Faces and stencils are ordered by global cell ids, so every rank count
-    // computes the same sums in the same order
-    EXPECT_EQ(max_rel, 0.0) << "on " << comm::size() << " ranks";
-}
 
 } // namespace
 
@@ -289,4 +248,20 @@ TEST(MPITest, GraphPartitionIsBalancedAndMatchesSerial) {
     const uint64_t n_owned = solver.get_distribution().n_owned;
     const uint64_t n_global = solver.get_mesh()->n_global_cells;
     EXPECT_LE(comm::allreduce(n_owned, comm::Op::MAX), 1.03 * n_global / comm::size() + 1);
+}
+
+TEST(MPITest, RunFromHDF5MeshFileMatchesSerial) {
+    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5 to write the mesh";
+    const std::string file = (std::filesystem::temp_directory_path() / "mallard_mpi_mesh.h5").string();
+    write_mesh_h5(file, read_mesh_block(parse_toml("[mesh]\ntype = \"cartesian_tri\"\nNx = 24\nNy = 18\n"
+                                                   "Lx = 1.0\nLy = 0.8\n")));
+    comm::barrier();
+    std::string input = box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                                  bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                                      "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 10);
+    const std::string generated = "type = \"cartesian_tri\"\n";
+    input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
+    expect_matches_serial(input);
+    comm::barrier();
 }

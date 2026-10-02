@@ -12,6 +12,7 @@
 #include "comm.h"
 
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -110,6 +111,39 @@ std::vector<std::vector<T>> alltoallv(const std::vector<std::vector<T>> & send) 
 }
 
 template <typename T>
+Received<T> exchange(std::vector<std::vector<T>> && send) {
+    const int p = size();
+    if (static_cast<int>(send.size()) != p) throw std::invalid_argument("comm::exchange: one list per rank");
+    std::vector<int> send_counts(p), recv_counts(p), send_displs(p + 1, 0), recv_displs(p + 1, 0);
+    for (int r = 0; r < p; r++) {
+        if (send[r].size() > size_t(std::numeric_limits<int>::max())) {
+            throw std::length_error("comm::exchange: message too large");
+        }
+        send_counts[r] = static_cast<int>(send[r].size());
+        send_displs[r + 1] = send_displs[r] + send_counts[r];
+    }
+    check(MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD),
+          "MPI_Alltoall");
+    std::vector<T> send_flat;
+    send_flat.reserve(send_displs[p]);
+    for (int r = 0; r < p; r++) {
+        send_flat.insert(send_flat.end(), send[r].begin(), send[r].end());
+        std::vector<T>().swap(send[r]);
+    }
+    Received<T> received;
+    received.offsets.assign(p + 1, 0);
+    for (int r = 0; r < p; r++) {
+        recv_displs[r + 1] = recv_displs[r] + recv_counts[r];
+        received.offsets[r + 1] = recv_displs[r + 1];
+    }
+    received.data.resize(recv_displs[p]);
+    check(MPI_Alltoallv(send_flat.data(), send_counts.data(), send_displs.data(), mpi_type<T>(),
+                        received.data.data(), recv_counts.data(), recv_displs.data(), mpi_type<T>(), MPI_COMM_WORLD),
+          "MPI_Alltoallv");
+    return received;
+}
+
+template <typename T>
 std::vector<T> allgatherv(const std::vector<T> & local) {
     const int p = size();
     int n_local = static_cast<int>(local.size());
@@ -146,6 +180,15 @@ std::vector<std::vector<T>> alltoallv(const std::vector<std::vector<T>> & send) 
     return send;
 }
 
+template <typename T>
+Received<T> exchange(std::vector<std::vector<T>> && send) {
+    if (send.size() != 1) throw std::invalid_argument("comm::exchange: one list per rank");
+    Received<T> received;
+    received.data = std::move(send[0]);
+    received.offsets = {0, received.data.size()};
+    return received;
+}
+
 #endif
 
 template void allreduce<double>(std::span<double>, Op);
@@ -161,5 +204,7 @@ template std::vector<double> allgatherv(const std::vector<double> &);
 template std::vector<float> allgatherv(const std::vector<float> &);
 template std::vector<std::vector<double>> alltoallv(const std::vector<std::vector<double>> &);
 template std::vector<std::vector<float>> alltoallv(const std::vector<std::vector<float>> &);
+template Received<uint64_t> exchange(std::vector<std::vector<uint64_t>> &&);
+template Received<double> exchange(std::vector<std::vector<double>> &&);
 
 } // namespace comm

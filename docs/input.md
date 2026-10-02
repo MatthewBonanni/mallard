@@ -54,9 +54,10 @@ zone named after it (`physical_<tag>` if unnamed); boundary faces not in any
 such group form the zone `unassigned`. Elements of other dimensions (points,
 and curves in 3D) are ignored, and higher-order elements are rejected.
 
-Large meshes should be converted to Mallard's HDF5 mesh format (builds with
-`-DMallard_ENABLE_HDF5=ON`), which every rank of a distributed run reads only
-its share of:
+In a distributed run every rank reads a Gmsh file whole (keeping only its
+share), so large meshes should be converted to Mallard's HDF5 mesh format
+(builds with `-DMallard_ENABLE_HDF5=ON`), of which each rank reads only its
+share; generated meshes are also produced per rank:
 
 ```sh
 mallard-mesh-convert mesh.msh mesh.h5               # from Gmsh

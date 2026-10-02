@@ -18,7 +18,6 @@
 
 #include "common_typedef.h"
 
-class Mesh;
 class DistributedMesh;
 
 /**
@@ -27,20 +26,6 @@ class DistributedMesh;
  */
 uint64_t hilbert_key(const std::array<double, N_DIM> & x, const std::array<double, N_DIM> & lo,
                      const std::array<double, N_DIM> & hi);
-
-/**
- * @brief Owner rank of every cell: cells sorted along the Hilbert curve of their
- *        centroids, split into n_parts contiguous pieces of nearly equal size.
- */
-std::vector<int> partition_hilbert(const Mesh & mesh, int n_parts);
-
-/**
- * @brief Owner rank of every cell from dKaMinPar on the cell dual graph (cells
- *        sharing a face), which minimizes the faces between ranks and so the
- *        halo volume (collective; each rank contributes a block of rows).
- *        Requires Mallard_ENABLE_KAMINPAR.
- */
-std::vector<int> partition_graph(const Mesh & mesh, int n_parts);
 
 /**
  * @brief Owner rank of every block cell of a distributed mesh: cells sorted

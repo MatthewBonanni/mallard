@@ -29,6 +29,7 @@
 #include "data_writer.h"
 #include "expression.h"
 #include "comm.h"
+#include "distributed_mesh.h"
 #include "distribution.h"
 #include "halo_exchange.h"
 
@@ -186,6 +187,7 @@ class Solver {
     private:
         bool distribute = true;
         int halo_layers = 0;
+        std::unique_ptr<DistributedMesh> setup;  // during init only
         Distribution distribution;
         HaloExchange halo;
 
