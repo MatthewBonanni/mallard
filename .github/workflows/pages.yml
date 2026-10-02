@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Mallard ref to document (default: latest release tag)
+        description: "Mallard ref to document (default: latest release tag)"
         required: false
 
 permissions:
