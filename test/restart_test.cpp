@@ -16,6 +16,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "test_fixtures.h"
 #include "solver.h"
@@ -36,8 +37,9 @@ std::string restart_input(const std::string & dir, const std::string & init, uin
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[output]\ncheck_interval = 1000000\n"
       << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 20\n"
-      << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtu\"\ntime_interval = 0.002\n"
-      << "variables = [\"RHO\"]\n";
+      << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtu\"\ntime_interval = 0.005\n"
+      << "variables = [\"RHO\"]\n"
+      << "[[forces]]\nzone = \"bottom\"\ninterval = 5\nfile = \"" << dir << "/forces.csv\"\n";
     return s.str();
 }
 
@@ -59,6 +61,7 @@ TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
     Solver first;
     first.init(parse_toml(restart_input(dir + "/b", BLAST, 20)));
     first.run();
+    const double t_stop_first = first.get_time();
     Solver second;
     second.init(parse_toml(restart_input(dir + "/b", "type = \"restart\"\nfile = \"" + dir + "/b/restart_000020.restart\"\n", 40)));
     EXPECT_EQ(second.get_step(), 20u);
@@ -79,7 +82,41 @@ TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
         while (std::getline(in, line)) n += line.find("<DataSet") != std::string::npos;
         return n;
     };
-    EXPECT_EQ(count_entries(dir + "/b/flow.pvd"), count_entries(dir + "/a/flow.pvd"));
+    // The time series continues: the off-grid snapshot written when the first
+    // run stopped is kept, and no file is listed (or written) twice
+    std::ifstream pvd(dir + "/b/flow.pvd");
+    std::string line;
+    std::vector<std::pair<double, std::string>> entries;
+    while (std::getline(pvd, line)) {
+        const size_t a = line.find("timestep=\""), b = line.find("file=\"");
+        if (a == std::string::npos) continue;
+        entries.emplace_back(std::stod(line.substr(a + 10)), line.substr(b + 6, line.find('"', b + 6) - b - 6));
+    }
+    EXPECT_EQ(entries.size(), count_entries(dir + "/a/flow.pvd") + 1u);
+    std::string stop_file;
+    for (size_t i = 0; i < entries.size(); i++) {
+        if (entries[i].first == t_stop_first) stop_file = entries[i].second;
+        if (i > 0) {
+            EXPECT_LT(entries[i - 1].first, entries[i].first);
+            EXPECT_NE(entries[i - 1].second, entries[i].second);
+        }
+    }
+    ASSERT_FALSE(stop_file.empty());
+    // ... and still holds the solution at that time
+    std::ifstream in(dir + "/b/" + stop_file);
+    std::string header(4096, '\0');
+    in.read(header.data(), header.size());
+    const size_t k = header.find(">", header.find("Name=\"TIME\"")) + 1;
+    EXPECT_EQ(std::stod(header.substr(k)), t_stop_first);
+
+    // The force history is appended to, not overwritten
+    auto read_all = [](const std::string & file) {
+        std::ifstream in(file);
+        std::stringstream ss;
+        ss << in.rdbuf();
+        return ss.str();
+    };
+    EXPECT_EQ(read_all(dir + "/b/forces.csv"), read_all(dir + "/a/forces.csv"));
     std::filesystem::remove_all(dir);
 }
 
@@ -94,4 +131,11 @@ TEST(RestartTest, RejectsMismatchedMesh) {
     Solver second;
     EXPECT_THROW(second.init(parse_toml(input)), std::runtime_error);
     std::filesystem::remove_all(dir);
+}
+
+TEST(RestartTest, RejectsZeroForceInterval) {
+    std::string input = restart_input("unused", BLAST, 1);
+    input.replace(input.find("interval = 5"), 12, "interval = 0");
+    Solver solver;
+    EXPECT_THROW(solver.init(parse_toml(input)), std::runtime_error);
 }

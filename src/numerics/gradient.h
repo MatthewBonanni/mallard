@@ -53,14 +53,15 @@ struct LSQGradientFunctor {
             unit<N_DIM>(n_vec, n);
             rtype d = 0.0;
             FOR_I_DIM d += (face_coords(i_face, i) - cell_coords(i_cell, i)) * n[i];
-            FOR_I_DIM dx[i] = 2.0 * d * n[i];
-            boundaries.ghost_W(i_face, W_i, n, W_j);
             const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(i_face));
-            if (bc.is_wall() || bc.type == BoundaryType::SYMMETRY) {
-                // Hydrostatic ghost pressure: a resting fluid under gravity is not
-                // mirrored across walls but continues its pressure gradient
-                const rtype g_n = boundaries.gravity[0] * n[0] + boundaries.gravity[1] * n[1];
-                W_j[3] += W_i[0] * g_n * 2.0 * d;
+            if (bc.type == BoundaryType::DIRICHLET || bc.type == BoundaryType::UPT ||
+                bc.type == BoundaryType::FARFIELD) {
+                // A prescribed state is the value at the face centroid
+                FOR_I_DIM dx[i] = face_coords(i_face, i) - cell_coords(i_cell, i);
+                boundaries.ghost_W(i_face, W_i, n, W_j);
+            } else {
+                FOR_I_DIM dx[i] = 2.0 * d * n[i];
+                boundaries.ghost_W_at(i_face, W_i, n, 2.0 * d, W_j);
             }
             if (boundaries.viscous && bc.type == BoundaryType::WALL_HEAT_FLUX) {
                 // Ghost temperature consistent with the prescribed heat flux into the

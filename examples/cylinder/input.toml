@@ -1,12 +1,14 @@
 # Flow past a circular cylinder at Re = 100, Mach 0.2: periodic vortex
-# shedding (Karman vortex street, Strouhal number ~0.165).
-# Generate the mesh first:
-#   python ../../tools/make_cylinder_mesh.py cylinder.msh --dr0 0.01 --n-r 96
+# shedding (Karman vortex street). On this mesh, over t = 60..160:
+# St = 0.164, mean Cd = 1.36, lift amplitude 0.33 (references for
+# incompressible flow: St 0.164-0.166, Cd 1.33-1.35, Cl' 0.33).
+# Generate the mesh first (384 x 128 quads):
+#   python ../../tools/make_cylinder_mesh.py cylinder.msh --n-theta 384 --n-r 128 --r-far 25 --dr0 0.01
 # Nondimensionalization: cylinder diameter 1, free-stream density and sound
 # speed 1, so U = M = 0.2 and mu = U D / Re.
 
 [run]
-t_stop = 150.0
+t_stop = 160.0
 cfl = 0.8
 
 [mesh]
@@ -16,9 +18,10 @@ filename = "cylinder.msh"
 [initialize]
 type = "analytical"
 rho = "1.0"
-# A small transverse kick behind the cylinder triggers shedding sooner
+# A transverse kick behind the cylinder: shedding saturates by t = 60
+# (the instability e-folds only every ~50 time units)
 u = ["0.2 * (1 - exp(-4 * (x^2 + y^2 - 0.25)))",
-     "0.02 * exp(-((x - 2)^2 + y^2))"]
+     "0.1 * exp(-((x - 1.5)^2 + y^2))"]
 p = "0.7142857142857143"
 
 [[boundaries]]
@@ -27,17 +30,10 @@ type = "wall_adiabatic"
 
 [[boundaries]]
 name = "farfield"
-type = "upt"
-where = "x < 0"
+type = "farfield"
 u = [0.2, 0.0]
 p = 0.7142857142857143
 T = 0.7142857142857143
-
-[[boundaries]]
-name = "farfield"
-type = "p_out"
-where = "x >= 0"
-p = 0.7142857142857143
 
 [numerics]
 riemann_solver = "HLLC"

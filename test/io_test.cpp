@@ -109,3 +109,57 @@ TEST(IOTest, FixedTimeStepIsOnlyShortenedToLandOnOutputs) {
     EXPECT_NEAR(solver.get_time(), 0.075, 1e-12);
     std::filesystem::remove_all(dir);
 }
+
+TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
+    // Uniform flow u = 0.1, a = sqrt(1.4) on 0.25 x 0.5 cells: the CFL = 1 time
+    // step is V / sum_f (|u_n| + a) A_f = 0.125 / (0.1 + 1.5 a)
+    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_cfl_output").string();
+    std::filesystem::remove_all(dir);
+    const std::string input =
+        "[run]\nn_steps = 1\ndt = 0.01\n"
+        "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 1.0\nLy = 1.0\n"
+        "[initialize]\ntype = \"constant\"\nu = [0.1, 0.0]\np = 1.0\nT = 1.0\n"
+        "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
+        "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+        "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+        "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
+        "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+        "[output]\ncheck_interval = 1000000\n"
+        "[[write_data]]\nprefix = \"" + dir + "/wall\"\nformat = \"vtu\"\ngeometry = \"bottom\"\n"
+        "interval = 1\nvariables = [\"CFL\"]\n";
+    Solver solver;
+    solver.init(parse_toml(input));
+    solver.run();
+    const double expected = 0.01 * (0.1 + 1.5 * std::sqrt(1.4)) / 0.125;
+    for (const char * file : {"/wall_000000.vtu", "/wall_000001.vtu"}) {
+        std::ifstream in(dir + file);
+        ASSERT_TRUE(in.good()) << file;
+        std::stringstream buffer;
+        buffer << in.rdbuf();
+        const std::string text = buffer.str();
+        const size_t start = text.find(">", text.find("Name=\"CFL\"")) + 1;
+        std::istringstream values(text.substr(start, text.find("</DataArray>", start) - start));
+        double cfl;
+        int n = 0;
+        while (values >> cfl) {
+            EXPECT_NEAR(cfl, expected, 1e-6) << file;
+            n++;
+        }
+        EXPECT_EQ(n, 4) << file;
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST(IOTest, ZeroCheckIntervalIsRejected) {
+    const std::string input =
+        "[run]\nn_steps = 1\ncfl = 0.5\n"
+        "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 1.0\nLy = 1.0\n"
+        "[initialize]\ntype = \"constant\"\nu = [0.1, 0.0]\np = 1.0\nT = 1.0\n"
+        "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
+        "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+        "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+        "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
+        "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
+    EXPECT_NO_THROW(Solver().init(parse_toml(input)));
+    EXPECT_THROW(Solver().init(parse_toml(input + "[output]\ncheck_interval = 0\n")), std::runtime_error);
+}

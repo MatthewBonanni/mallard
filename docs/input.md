@@ -66,6 +66,7 @@ the zone's faces whose centers satisfy the expression.
 | `wall_isothermal` | Wall at temperature `T` | `T`, `u` (optional) |
 | `wall_heat_flux` | Wall with heat flux `q` into the fluid | `q`, `u` (optional) |
 | `upt` | Inflow with fixed velocity, pressure and temperature | `u`, `p`, `T` |
+| `farfield` | Characteristic far field for a free stream: the outgoing Riemann invariant comes from the interior, the incoming one from the free stream, so waves leave and the boundary works for inflow, outflow and tangential flow alike | `u`, `p`, `T` (free stream) |
 | `dirichlet` | Exterior state from expressions in `x`, `y`, `t`, evaluated at face centers at every stage | `rho`, `u` (two expressions), `p` |
 | `p_out` | Outlet: imposes `p` if the outflow is subsonic | `p` |
 | `p_out_average` | Outlet for mixed subsonic/supersonic flow: on subsonic faces, shifts the local pressure so that its area average over the boundary equals `p`, preserving the transverse profile | `p` |
@@ -85,10 +86,11 @@ the zone's faces whose centers satisfy the expression.
 | `type` | `FO` (first order), `MUSCL` or `TENO` |
 | `limiter` | (`MUSCL`) `venkatakrishnan` (default), `barth_jespersen` or `none` |
 | `venkatakrishnan_K` | (`MUSCL`) Venkatakrishnan threshold constant, default 5 |
-| `order` | (`TENO`) Order of accuracy, 2 to 6, default 5 |
+| `order` | (`TENO`) Order of accuracy, 3 to 6, default 5 |
 | `stencil_factor` | (`TENO`) Large-stencil size as a multiple of the number of polynomial coefficients, default 2. Smaller values (e.g. 1.5) are markedly less dissipative for fine smooth structures (Shu-Osher entropy waves: 50% more amplitude at 200 cells) but less robust at discontinuities. |
 | `small_stencil_size` | (`TENO`) Cells per sector stencil, default 10 |
 | `troubled_threshold` | (`TENO`) Troubled-cell threshold on the density-jump variance, default 1e-3 |
+| `troubled_upper` | (`TENO`) Variance at which the adaptive cutoff reaches its largest value (most dissipative), default 1e-2 |
 | `C_T` | (`TENO`) Fixed TENO cutoff; adaptive (1e-10 to 1e-6) if omitted |
 | `characteristic` | (`TENO`) Select stencils on characteristic variables, default true |
 | `max_condition` | (`TENO`) Stencils grow until the least-squares system's condition estimate is below this, default 1e8 |

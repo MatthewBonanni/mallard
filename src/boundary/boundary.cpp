@@ -32,7 +32,7 @@ BoundaryCondition BoundaryCondition::from_input(const toml::value & input, const
             throw std::runtime_error(std::string("Missing ") + key + " for boundary: " + name + ".");
         }
     };
-    if (bc.type == BoundaryType::UPT) {
+    if (bc.type == BoundaryType::UPT || bc.type == BoundaryType::FARFIELD) {
         require("u");
         require("p");
         require("T");

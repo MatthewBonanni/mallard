@@ -205,6 +205,14 @@ TEST(MeshFileTest, ReadsGmsh22MixedMesh) {
     check_small_mesh(write_temp("mallard_small_22.msh", MSH22));
 }
 
+TEST(MeshFileTest, Gmsh22IgnoresUntaggedCurves) {
+    // An untagged line (physical 0) along the interior edge 2-5
+    std::string msh = MSH22;
+    msh.replace(msh.find("$Elements\n9\n"), 12, "$Elements\n10\n");
+    msh.replace(msh.find("$EndElements"), 12, "10 1 2 0 0 2 5\n$EndElements");
+    check_small_mesh(write_temp("mallard_untagged_22.msh", msh));
+}
+
 TEST(MeshFileTest, ReadsGmsh41MixedMesh) {
     check_small_mesh(write_temp("mallard_small_41.msh", MSH41));
 }

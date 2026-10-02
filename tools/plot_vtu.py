@@ -6,26 +6,14 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import meshio
 import numpy as np
+
+from mallard_vtu import read_vtu
 
 
 def load(path, var):
-    m = meshio.read(path)
-    pts = m.points[:, :2]
-    tris = []
-    vals = []
-    for block, data in zip(m.cells, m.cell_data[var]):
-        conn = block.data
-        if conn.shape[1] == 3:
-            tris.append(conn)
-            vals.append(data)
-        elif conn.shape[1] == 4:
-            tris.append(conn[:, [0, 1, 2]])
-            tris.append(conn[:, [0, 2, 3]])
-            vals.append(data)
-            vals.append(data)
-    return pts, np.vstack(tris), np.concatenate(vals)
+    pts, tris, tri_cell, arrays = read_vtu(path)
+    return pts, tris, arrays[var][tri_cell]
 
 
 def main():

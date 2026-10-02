@@ -41,6 +41,24 @@ std::string box_input(const std::string & source, const std::string & init, cons
 
 const std::string REST = "type = \"analytical\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\"]\np = \"1.0\"\n";
 
+double hydrostatic_spurious_velocity(uint32_t n, const std::string & recon) {
+    std::string input = box_input("gravity = [0.0, -1.0]\n",
+                                  "type = \"analytical\"\nrho = \"exp(-y)\"\nu = [\"0.0\", \"0.0\"]\np = \"exp(-y)\"\n",
+                                  "t_stop = 0.5\ncfl = 0.5\n", recon);
+    const std::string from = "Nx = 16\nNy = 16";
+    input.replace(input.find(from), from.size(), "Nx = " + std::to_string(n) + "\nNy = " + std::to_string(n));
+    Solver solver;
+    solver.init(parse_toml(input));
+    solver.run();
+    solver.update_primitives();
+    solver.copy_device_to_host();
+    double v_max = 0.0;
+    for (uint32_t i = 0; i < solver.get_mesh()->n_cells; i++) {
+        v_max = std::max(v_max, std::hypot(solver.h_primitives(i, 0), solver.h_primitives(i, 1)));
+    }
+    return v_max;
+}
+
 } // namespace
 
 TEST(SourceTest, SpatialMassSourceAddsExactMass) {
@@ -81,26 +99,15 @@ TEST(SourceTest, IsothermalAtmosphereConvergesToHydrostaticEquilibrium) {
     // rho = p = exp(-y) with R = T = 1 balances gravity g = -1. The scheme is
     // not exactly well balanced, so small spurious velocities remain and
     // vanish under refinement.
-    auto spurious_velocity = [](uint32_t n) {
-        std::string input = box_input("gravity = [0.0, -1.0]\n",
-                                      "type = \"analytical\"\nrho = \"exp(-y)\"\nu = [\"0.0\", \"0.0\"]\np = \"exp(-y)\"\n",
-                                      "t_stop = 0.5\ncfl = 0.5\n", "MUSCL");
-        const std::string from = "Nx = 16\nNy = 16";
-        input.replace(input.find(from), from.size(), "Nx = " + std::to_string(n) + "\nNy = " + std::to_string(n));
-        Solver solver;
-        solver.init(parse_toml(input));
-        solver.run();
-        solver.update_primitives();
-        solver.copy_device_to_host();
-        double v_max = 0.0;
-        for (uint32_t i = 0; i < solver.get_mesh()->n_cells; i++) {
-            v_max = std::max(v_max, std::hypot(solver.h_primitives(i, 0), solver.h_primitives(i, 1)));
-        }
-        return v_max;
-    };
-    const double v16 = spurious_velocity(16), v32 = spurious_velocity(32);
+    const double v16 = hydrostatic_spurious_velocity(16, "MUSCL"), v32 = hydrostatic_spurious_velocity(32, "MUSCL");
     // Hydrostatic wall ghosts: second-order convergence and small magnitude
     // (mirrored wall pressures gave 0.06 and 0.03)
     EXPECT_LT(v32, 0.35 * v16);
     EXPECT_LT(v32, 5e-4);
+}
+
+TEST(SourceTest, TENOHydrostaticAtmosphereHasSmallSpuriousVelocity) {
+    // TENO mirror cells continue the hydrostatic pressure gradient like the
+    // gradient ghosts; mirrored pressures drive a wall-normal jet
+    EXPECT_LT(hydrostatic_spurious_velocity(16, "TENO"), 1e-3);
 }

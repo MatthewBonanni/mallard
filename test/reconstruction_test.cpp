@@ -72,6 +72,35 @@ TEST_P(MeshTypes, LSQGradientExactForLinearFieldInInterior) {
     }
 }
 
+TEST_P(MeshTypes, LSQGradientExactForLinearFieldWithDirichletBoundaries) {
+    // A Dirichlet state is the value at the face, so boundary cells are exact too
+    auto mesh = make_mesh(GetParam(), 8, 7);
+    std::vector<int32_t> face_bc(mesh->n_faces, -1);
+    for (uint32_t f = 0; f < mesh->n_faces; f++) face_bc[f] = mesh->h_cells_of_face(f, 1) < 0 ? 0 : -1;
+    BoundaryCondition dir;
+    dir.type = BoundaryType::DIRICHLET;
+    BoundaryData bd = make_boundary_data(*mesh, face_bc, {dir}, 1.4);
+    auto h_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_state_index);
+    auto h_state = Kokkos::create_mirror_view(bd.face_state);
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        if (h_index(f) < 0) continue;
+        FOR_I_CONSERVATIVE h_state(h_index(f), i) = linear(i, mesh->h_face_coords(f, 0), mesh->h_face_coords(f, 1));
+    }
+    Kokkos::deep_copy(bd.face_state, h_state);
+    auto W = linear_cell_field(*mesh);
+    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> grad("grad", mesh->n_cells);
+    LSQGradientFunctor functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
+                               mesh->cell_coords, mesh->face_coords, mesh->face_normals, bd, W, grad};
+    Kokkos::parallel_for(mesh->n_cells, functor);
+    auto h_grad = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), grad);
+    for (uint32_t i_cell = 0; i_cell < mesh->n_cells; i_cell++) {
+        FOR_I_CONSERVATIVE {
+            EXPECT_NEAR(h_grad(i_cell, i, 0), GX[i], 1e-10) << "cell " << i_cell << " var " << (int)i;
+            EXPECT_NEAR(h_grad(i_cell, i, 1), GY[i], 1e-10) << "cell " << i_cell << " var " << (int)i;
+        }
+    }
+}
+
 TEST_P(MeshTypes, UnlimitedMUSCLReproducesLinearFieldAtInteriorFaces) {
     auto mesh = make_mesh(GetParam(), 8, 7);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::EXTRAPOLATION);

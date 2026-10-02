@@ -258,7 +258,8 @@ void Solver::update_boundary_states(rtype t_eval) {
 
 void Solver::init_numerics() {
     std::cout << "Initializing numerics..." << std::endl;
-    toml::value face_reconstruction_input = toml::find(input, "numerics", "face_reconstruction");
+    const toml::value face_reconstruction_input =
+        toml::find_or(input, "numerics", "face_reconstruction", toml::value(toml::table{}));
     const std::string face_reconstruction_str = toml::find_or<std::string>(face_reconstruction_input, "type", "FO");
     const std::string riemann_solver_str = toml::find_or<std::string>(input, "numerics", "riemann_solver", "HLLC");
     const std::string time_integrator_str = toml::find_or<std::string>(input, "numerics", "time_integrator", "SSPRK3");
@@ -339,6 +340,9 @@ void Solver::init_run_parameters() {
 void Solver::init_output() {
     std::cout << "Initializing output..." << std::endl;
     check_interval = toml::find_or<uint32_t>(input, "output", "check_interval", 1);
+    if (check_interval == 0) {
+        throw std::runtime_error("output: check_interval must be positive.");
+    }
     if (input.contains("forces")) {
         for (const auto & entry : toml::find<std::vector<toml::value>>(input, "forces")) {
             ForceMonitor monitor;
@@ -349,10 +353,14 @@ void Solver::init_output() {
             }
             monitor.faces = zone->faces;
             monitor.interval = toml::find_or<uint64_t>(entry, "interval", 1);
+            if (monitor.interval == 0) {
+                throw std::runtime_error("forces: interval must be positive.");
+            }
             const std::string file = toml::find_or<std::string>(entry, "file", "forces_" + monitor.zone + ".csv");
             const std::filesystem::path parent = std::filesystem::path(file).parent_path();
             if (!parent.empty()) std::filesystem::create_directories(parent);
-            const bool resume = step > 0;
+            // init_output runs before the restart state is read, so check the input
+            const bool resume = toml::find_or<std::string>(input, "initialize", "type", "") == "restart";
             monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
             if (!resume) *monitor.out << "step,t,Fx_pressure,Fy_pressure,Fx_viscous,Fy_viscous\n";
             force_monitors.push_back(monitor);
@@ -430,8 +438,9 @@ void Solver::register_data() {
 int Solver::run() {
     std::cout << LOG_SEPARATOR << std::endl;
     std::cout << "Running solver..." << std::endl;
-    copy_device_to_host();
     if (step == 0) {
+        calc_dt();
+        copy_device_to_host();
         write_data(true);
     }
     while (!done()) {
@@ -560,7 +569,8 @@ void Solver::update_primitives() {
 }
 
 void Solver::calc_dt() {
-    dt = use_cfl ? cfl * calc_dt_cfl1() : dt_fixed;
+    const rtype dt_cfl1 = calc_dt_cfl1();
+    dt = use_cfl ? cfl * dt_cfl1 : dt_fixed;
     // Land exactly on t_stop and on time-based output times
     rtype t_target = (t_stop > 0) ? t_stop : std::numeric_limits<rtype>::infinity();
     for (const auto & writer : data_writers) {
@@ -572,14 +582,12 @@ void Solver::calc_dt() {
     if (!(dt > 0.0)) {
         throw std::runtime_error("Invalid dt: " + std::to_string(dt) + ".");
     }
-    if (use_cfl) {
-        // cfl_local holds dt_cfl1 per cell; convert to local CFL number
-        Kokkos::View<rtype *> c = cfl_local;
-        const rtype dt_ = dt;
-        Kokkos::parallel_for("local_cfl", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i) {
-            c(i) = dt_ / c(i);
-        });
-    }
+    // cfl_local holds dt_cfl1 per cell; convert to local CFL number
+    Kokkos::View<rtype *> c = cfl_local;
+    const rtype dt_ = dt;
+    Kokkos::parallel_for("local_cfl", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i) {
+        c(i) = dt_ / c(i);
+    });
 }
 
 /**

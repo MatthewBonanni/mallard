@@ -105,8 +105,7 @@ void eigenvectors(const rtype * W, const rtype * n, const rtype gamma,
  */
 KOKKOS_INLINE_FUNCTION
 rtype adaptive_CT(const rtype sigma, const rtype sigma_L, const rtype sigma_U) {
-    rtype m = (Kokkos::fmin(sigma_U, sigma) - sigma_L) / (sigma_U - sigma_L);
-    m = Kokkos::fmin(1.0, Kokkos::fmax(0.0, m));
+    const rtype m = (sigma >= sigma_U) ? 1.0 : Kokkos::fmin(1.0, Kokkos::fmax(0.0, (sigma - sigma_L) / (sigma_U - sigma_L)));
     const rtype g = (1.0 - m) * (1.0 - m) * (1.0 + 2.0 * m);
     const rtype psi = 10.0 - 4.0 * (1.0 - g);
     return Kokkos::pow(10.0, -Kokkos::floor(psi));

@@ -32,6 +32,7 @@ enum class BoundaryType {
     P_OUT,
     P_OUT_AVERAGE,
     DIRICHLET,
+    FARFIELD,
 };
 
 static const std::unordered_map<std::string, BoundaryType> BOUNDARY_TYPES = {
@@ -43,7 +44,8 @@ static const std::unordered_map<std::string, BoundaryType> BOUNDARY_TYPES = {
     {"upt", BoundaryType::UPT},
     {"p_out", BoundaryType::P_OUT},
     {"p_out_average", BoundaryType::P_OUT_AVERAGE},
-    {"dirichlet", BoundaryType::DIRICHLET}
+    {"dirichlet", BoundaryType::DIRICHLET},
+    {"farfield", BoundaryType::FARFIELD}
 };
 
 static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
@@ -55,7 +57,8 @@ static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
     {BoundaryType::UPT, "upt"},
     {BoundaryType::P_OUT, "p_out"},
     {BoundaryType::P_OUT_AVERAGE, "p_out_average"},
-    {BoundaryType::DIRICHLET, "dirichlet"}
+    {BoundaryType::DIRICHLET, "dirichlet"},
+    {BoundaryType::FARFIELD, "farfield"}
 };
 
 /**
@@ -65,6 +68,7 @@ static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
  * passed to the Riemann solver (and used for gradient reconstruction).
  * The meaning of data depends on type:
  * - UPT: data = W = [rho, u_x, u_y, p] of the inflow state
+ * - FARFIELD: data = W = [rho, u_x, u_y, p] of the free stream
  * - P_OUT: data[3] = back pressure
  * - P_OUT_AVERAGE: data[3] = target area-averaged pressure; data[0] = current
  *   pressure shift (target minus the average of the adjacent cells), updated
@@ -126,6 +130,32 @@ struct BoundaryCondition {
             case BoundaryType::DIRICHLET:
                 // Handled per face by BoundaryData
                 break;
+            case BoundaryType::FARFIELD: {
+                // Characteristic far field: the outgoing Riemann invariant comes from
+                // the interior, the incoming one from the free stream, and entropy and
+                // tangential velocity from the upwind side
+                const rtype a_i = Kokkos::sqrt(gamma * W_i[3] / W_i[0]);
+                const rtype a_inf = Kokkos::sqrt(gamma * data[3] / data[0]);
+                const rtype u_n_inf = data[1] * n[0] + data[2] * n[1];
+                if (Kokkos::fabs(u_n) >= a_i) {
+                    if (u_n < 0.0) {
+                        for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = data[i];
+                    }
+                    break;
+                }
+                const rtype r_out = u_n + 2.0 * a_i / (gamma - 1.0);
+                const rtype r_in = u_n_inf - 2.0 * a_inf / (gamma - 1.0);
+                const rtype u_n_b = 0.5 * (r_out + r_in);
+                const rtype a_b = 0.25 * (gamma - 1.0) * (r_out - r_in);
+                const rtype * W_up = (u_n_b < 0.0) ? data : W_i;
+                const rtype u_n_up = (u_n_b < 0.0) ? u_n_inf : u_n;
+                const rtype entropy = W_up[3] / Kokkos::pow(W_up[0], gamma);
+                W_g[0] = Kokkos::pow(a_b * a_b / (gamma * entropy), 1.0 / (gamma - 1.0));
+                W_g[1] = W_up[1] + (u_n_b - u_n_up) * n[0];
+                W_g[2] = W_up[2] + (u_n_b - u_n_up) * n[1];
+                W_g[3] = W_g[0] * a_b * a_b / gamma;
+                break;
+            }
             case BoundaryType::P_OUT: {
                 const rtype a = Kokkos::sqrt(gamma * W_i[3] / W_i[0]);
                 if (u_n < a) {
@@ -196,6 +226,22 @@ struct BoundaryData {
             for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = W_cells(image, i);
         } else {
             ghost_W(i_face, W_i, n, W_g);
+        }
+    }
+
+    /**
+     * @brief Ghost state for a point a distance dist outside boundary face
+     *        i_face (the mirror image of an interior point). Under gravity,
+     *        walls and symmetry planes continue the hydrostatic pressure
+     *        gradient instead of mirroring the pressure.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void ghost_W_at(const uint32_t i_face, const rtype * W_i, const rtype * n, const rtype dist,
+                    rtype * W_g) const {
+        ghost_W(i_face, W_i, n, W_g);
+        const BoundaryCondition & bc = bcs(face_bc(i_face));
+        if (bc.is_wall() || bc.type == BoundaryType::SYMMETRY) {
+            W_g[3] += W_i[0] * (gravity[0] * n[0] + gravity[1] * n[1]) * dist;
         }
     }
 

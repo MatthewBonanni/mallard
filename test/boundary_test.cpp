@@ -132,3 +132,95 @@ TEST(BoundaryTest, AveragePressureOutletKeepsTransversePressureProfile) {
     EXPECT_GT(uniform, 0.1);
     EXPECT_LT(average, 0.03);
 }
+
+namespace {
+
+struct FarfieldCase {
+    BoundaryCondition bc;
+    rtype W_g[N_CONSERVATIVE];
+    rtype n[N_DIM] = {0.6, 0.8};
+    static constexpr rtype G = 1.4;
+
+    FarfieldCase(const rtype * W_i) {
+        bc.type = BoundaryType::FARFIELD;
+        const rtype W_inf[N_CONSERVATIVE] = {1.0, 0.3, -0.1, 1.0 / G};
+        FOR_I_CONSERVATIVE bc.data[i] = W_inf[i];
+        bc.ghost_W(W_i, n, G, 1.0, false, W_g);
+    }
+    static rtype u_n(const rtype * W, const rtype * n) { return W[1] * n[0] + W[2] * n[1]; }
+    static rtype u_t(const rtype * W, const rtype * n) { return -W[1] * n[1] + W[2] * n[0]; }
+    static rtype a(const rtype * W) { return std::sqrt(G * W[3] / W[0]); }
+    static rtype r_plus(const rtype * W, const rtype * n) { return u_n(W, n) + 2.0 * a(W) / (G - 1.0); }
+    static rtype r_minus(const rtype * W, const rtype * n) { return u_n(W, n) - 2.0 * a(W) / (G - 1.0); }
+    static rtype entropy(const rtype * W) { return W[3] / std::pow(W[0], G); }
+};
+
+} // namespace
+
+TEST(BoundaryTest, FarfieldReturnsTheFreeStreamForTheFreeStream) {
+    const rtype W_inf[N_CONSERVATIVE] = {1.0, 0.3, -0.1, 1.0 / 1.4};
+    FarfieldCase c(W_inf);
+    FOR_I_CONSERVATIVE EXPECT_NEAR(c.W_g[i], W_inf[i], 1e-14);
+}
+
+TEST(BoundaryTest, FarfieldTakesEachCharacteristicFromItsUpwindSide) {
+    using F = FarfieldCase;
+    const rtype * W_inf = nullptr;
+    // Subsonic outflow (u_n > 0): outgoing invariant, entropy and tangential
+    // velocity from the interior; incoming invariant from the free stream
+    const rtype W_out[N_CONSERVATIVE] = {1.1, 0.4, 0.2, 0.8};
+    F out(W_out);
+    W_inf = out.bc.data;
+    ASSERT_GT(F::u_n(out.W_g, out.n), 0.0);
+    EXPECT_NEAR(F::r_plus(out.W_g, out.n), F::r_plus(W_out, out.n), 1e-12);
+    EXPECT_NEAR(F::r_minus(out.W_g, out.n), F::r_minus(W_inf, out.n), 1e-12);
+    EXPECT_NEAR(F::entropy(out.W_g), F::entropy(W_out), 1e-12);
+    EXPECT_NEAR(F::u_t(out.W_g, out.n), F::u_t(W_out, out.n), 1e-12);
+
+    // Subsonic inflow (u_n < 0): entropy and tangential velocity from the free stream
+    const rtype W_in[N_CONSERVATIVE] = {0.9, -0.5, -0.3, 0.6};
+    F in(W_in);
+    ASSERT_LT(F::u_n(in.W_g, in.n), 0.0);
+    EXPECT_NEAR(F::r_plus(in.W_g, in.n), F::r_plus(W_in, in.n), 1e-12);
+    EXPECT_NEAR(F::r_minus(in.W_g, in.n), F::r_minus(W_inf, in.n), 1e-12);
+    EXPECT_NEAR(F::entropy(in.W_g), F::entropy(W_inf), 1e-12);
+    EXPECT_NEAR(F::u_t(in.W_g, in.n), F::u_t(W_inf, in.n), 1e-12);
+
+    // Supersonic outflow keeps the interior, supersonic inflow takes the free stream
+    const rtype W_sup_out[N_CONSERVATIVE] = {1.0, 1.2, 1.6, 1.0 / 1.4};
+    F sup_out(W_sup_out);
+    FOR_I_CONSERVATIVE EXPECT_EQ(sup_out.W_g[i], W_sup_out[i]);
+    const rtype W_sup_in[N_CONSERVATIVE] = {1.0, -1.2, -1.6, 1.0 / 1.4};
+    F sup_in(W_sup_in);
+    FOR_I_CONSERVATIVE EXPECT_EQ(sup_in.W_g[i], W_inf[i]);
+}
+
+TEST(BoundaryTest, FarfieldLetsAPressurePulseLeave) {
+    // An isentropic pressure pulse leaves a box of far-field boundaries without
+    // reflection. (Riemann-invariant far fields do reflect entropy waves.)
+    std::ostringstream s;
+    s << "[run]\nt_stop = 3.0\ncfl = 0.5\n"
+      << "[mesh]\ntype = \"cartesian_tri\"\nNx = 24\nNy = 24\nLx = 1.0\nLy = 1.0\n"
+      << "[initialize]\ntype = \"analytical\"\nu = [\"0.3\", \"0.0\"]\n"
+      << "p = \"1 / 1.4 + 0.1 * exp(-100 * ((x - 0.5)^2 + (y - 0.5)^2))\"\n"
+      << "rho = \"(1 + 0.14 * exp(-100 * ((x - 0.5)^2 + (y - 0.5)^2)))^(1 / 1.4)\"\n";
+    for (const char * name : {"left", "right", "top", "bottom"}) {
+        s << "[[boundaries]]\nname = \"" << name << "\"\ntype = \"farfield\"\n"
+          << "u = [0.3, 0.0]\np = 0.7142857142857143\nT = 0.7142857142857143\n";
+    }
+    s << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[output]\ncheck_interval = 1000000\n";
+    Solver solver;
+    solver.init(parse_toml(s.str()));
+    solver.run();
+    solver.update_primitives();
+    solver.copy_device_to_host();
+    double dp_max = 0.0;
+    for (uint32_t i = 0; i < solver.get_mesh()->n_cells; i++) {
+        dp_max = std::max(dp_max, std::abs(solver.h_primitives(i, 2) - 1.0 / 1.4));
+    }
+    // upt leaves 1.8e-4, extrapolation 5e-4
+    EXPECT_LT(dp_max, 1.2e-4);
+}

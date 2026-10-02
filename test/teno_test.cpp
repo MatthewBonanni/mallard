@@ -143,6 +143,10 @@ TEST(TENOTest, MonomialOrderingByTotalDegree) {
 TEST(TENOTest, AdaptiveCutoffSpansDesignRange) {
     EXPECT_DOUBLE_EQ(teno::adaptive_CT(1e-3, 1e-3, 1e-2), 1e-10);
     EXPECT_DOUBLE_EQ(teno::adaptive_CT(5e-2, 1e-3, 1e-2), 1e-6);
+    // Troubled cells at or beyond the upper bound get the largest cutoff, also
+    // when the threshold is not below the upper bound
+    EXPECT_DOUBLE_EQ(teno::adaptive_CT(1e-2, 1e-2, 1e-2), 1e-6);
+    EXPECT_DOUBLE_EQ(teno::adaptive_CT(5e-2, 5e-2, 1e-2), 1e-6);
 }
 
 namespace {

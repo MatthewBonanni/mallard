@@ -300,7 +300,9 @@ GmshData read_gmsh(const std::string & filename) {
                     for (auto & t : etags) in >> t;
                     std::vector<size_t> nodes(n_nodes_of(type));
                     for (auto & v : nodes) in >> v;
-                    add_element(type, nodes, n_tags > 0 ? etags[0] : 0);
+                    const int physical = n_tags > 0 ? etags[0] : 0;
+                    if (type == 1 && physical == 0) continue;  // Untagged curves are not boundaries
+                    add_element(type, nodes, physical);
                 }
             } else {
                 size_t n_blocks, n_elements, min_tag, max_tag;

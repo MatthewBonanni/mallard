@@ -18,6 +18,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <unordered_map>
 
@@ -122,7 +123,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force) {
     }
     std::ostringstream stream;
     stream << prefix << "_" << std::setw(LEN_STEP) << std::setfill('0')
-           << (interval > 0 ? step : n_written);
+           << (interval > 0 || format == DataFormat::RESTART ? step : history.size());
     if (format == DataFormat::RESTART) {
         write_restart(stream.str() + ".restart", step, t);
     } else {
@@ -238,7 +239,7 @@ void DataWriter::write_pvd() const {
     out << "<VTKFile type=\"Collection\" version=\"0.1\" byte_order=\"" << endianness() << "\">\n";
     out << "  <Collection>\n";
     for (const auto & [t, filename] : history) {
-        out << "    <DataSet timestep=\"" << std::setprecision(10) << t << "\" file=\""
+        out << "    <DataSet timestep=\"" << std::setprecision(std::numeric_limits<double>::max_digits10) << t << "\" file=\""
             << std::filesystem::path(filename).filename().string() << "\"/>\n";
     }
     out << "  </Collection>\n";
