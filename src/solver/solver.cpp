@@ -466,6 +466,7 @@ void Solver::allocate_memory() {
     face_solution = Kokkos::View<rtype **[2][N_CONSERVATIVE]>("face_solution",
                                                               mesh->n_faces,
                                                               face_reconstruction->n_face_quadrature_points());
+    face_flux = Kokkos::View<rtype *[N_CONSERVATIVE]>("face_flux", mesh->n_faces);
     cfl_local = Kokkos::View<rtype *>("cfl_local", mesh->n_cells);
     if (physics.is_viscous()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);

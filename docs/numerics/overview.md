@@ -10,7 +10,10 @@ For each cell, `dU/dt = -(1/V) sum_faces F(U_L, U_R) . n A + viscous and source 
 Each face is integrated with Gauss-Legendre points (one for first order and
 MUSCL, `ceil((order + 1) / 2)` for TENO). At each point the convective flux is
 an approximate Riemann solver applied to the reconstructed left and right
-states. Time integration is explicit (SSPRK3 by default). The time step comes
+states. Each face's convective and viscous fluxes are stored once and every
+cell sums its faces in a fixed order, without atomics, so results are bitwise
+independent of the thread count and scheduling.
+Time integration is explicit (SSPRK3 by default). The time step comes
 from a per-cell spectral radius,
 `dt_i = V / (sum_f (|u_n| + a) A_f + 4 nu_eff sum_f A_f^2 / V)`.
 

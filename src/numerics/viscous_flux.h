@@ -40,7 +40,7 @@ void viscous_traction(const rtype mu, const rtype g[][N_DIM], const rtype * n, r
 
 /**
  * @brief Integrates the viscous stress and heat flux over every face (one-point
- *        rule) and scatters them to the adjacent cells.
+ *        rule) and adds them to face_flux (see ConvectiveFluxFunctor).
  *
  * Face gradients of velocity and temperature average the two cell gradients
  * and correct them along the face normal so that their component along the
@@ -62,7 +62,7 @@ struct ViscousFluxFunctor {
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
     BoundaryData boundaries;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> rhs;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
     Euler physics;
 
     static constexpr uint8_t NQ = N_DIM + 1;  // [u, T]
@@ -168,10 +168,7 @@ struct ViscousFluxFunctor {
         flux[N_DIM + 1] = dot<N_DIM>(q_f, tau_n) + q_n;
 
         const rtype A = face_area(i_face);
-        FOR_I_CONSERVATIVE {
-            Kokkos::atomic_add(&rhs(c0, i), A * flux[i]);
-            if (c1 >= 0) Kokkos::atomic_add(&rhs(c1, i), -A * flux[i]);
-        }
+        FOR_I_CONSERVATIVE face_flux(i_face, i) += A * flux[i];
     }
 };
 

@@ -14,7 +14,11 @@
 #include <Kokkos_Core.hpp>
 
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <tuple>
@@ -421,4 +425,52 @@ double carbuncle_growth(const std::string & riemann) {
 TEST(SolverValidation, RotatedHybridRiemannSolverIsCarbuncleFree) {
     EXPECT_GT(carbuncle_growth("Roe"), 0.1);
     EXPECT_LT(carbuncle_growth("RHLL"), 1e-10);
+}
+
+TEST(SolverTest, ResultIsIndependentOfThreadCount) {
+    // Runs a short viscous case in child processes with different thread counts:
+    // each cell must sum its face fluxes in the same order whatever the
+    // scheduling, so the solutions agree bit for bit
+#ifdef Mallard_HAS_MPI
+    GTEST_SKIP() << "Child processes cannot be launched from an MPI run";
+#endif
+    if (const char * out = std::getenv("MALLARD_THREAD_TEST_OUT")) {
+        Solver solver;
+        solver.init(parse_toml(
+            "[run]\nn_steps = 20\ncfl = 0.5\n"
+            "[mesh]\ntype = \"cartesian_tri\"\nNx = 16\nNy = 16\nLx = 1.0\nLy = 1.0\n"
+            "[initialize]\ntype = \"analytical\"\n"
+            "rho = \"1.0 + (x < 0.4 ? 1.0 : 0.0)\"\nu = [\"0.2\", \"0.1\"]\np = \"x < 0.4 ? 2.0 : 1.0\"\n"
+            "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
+            "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+            "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+            "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_isothermal\"\nT = 1.0\n"
+            "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+            "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+            "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+            "mu = 0.01\nPr = 0.72\n"
+            "[output]\ncheck_interval = 1000000\n"));
+        solver.run();
+        solver.copy_device_to_host();
+        std::ofstream(out, std::ios::binary).write(reinterpret_cast<const char *>(solver.h_conservatives.data()),
+                                                   solver.h_conservatives.span() * sizeof(rtype));
+        return;
+    }
+    const std::string exe = ::testing::internal::GetArgvs()[0];
+    const auto dir = std::filesystem::temp_directory_path();
+    auto run = [&](int threads) {
+        const std::string out = (dir / ("mallard_threads_" + std::to_string(threads) + ".bin")).string();
+        std::filesystem::remove(out);
+        const std::string cmd = "MALLARD_THREAD_TEST_OUT=" + out + " \"" + exe +
+                                "\" --gtest_filter=SolverTest.ResultIsIndependentOfThreadCount --kokkos-num-threads=" +
+                                std::to_string(threads) + " > /dev/null 2>&1";
+        EXPECT_EQ(std::system(cmd.c_str()), 0) << cmd;
+        std::ifstream in(out, std::ios::binary);
+        std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        std::filesystem::remove(out);
+        return bytes;
+    };
+    const std::string serial = run(1);
+    ASSERT_FALSE(serial.empty());
+    EXPECT_TRUE(serial == run(4));
 }

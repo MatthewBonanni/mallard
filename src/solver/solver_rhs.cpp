@@ -26,12 +26,9 @@ void Solver::calc_rhs(StateView solution, StateView rhs, rtype t_stage) {
 
     const Euler phys = physics;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
-    Kokkos::parallel_for("rhs_init", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
+    Kokkos::parallel_for("rhs_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
         rtype cons[N_CONSERVATIVE], W_c[N_CONSERVATIVE];
-        FOR_I_CONSERVATIVE {
-            cons[i] = solution(i_cell, i);
-            rhs(i_cell, i) = 0.0;
-        }
+        FOR_I_CONSERVATIVE cons[i] = solution(i_cell, i);
         phys.compute_W_from_conservatives(W_c, cons);
         FOR_I_CONSERVATIVE W(i_cell, i) = W_c[i];
     });
@@ -40,19 +37,19 @@ void Solver::calc_rhs(StateView solution, StateView rhs, rtype t_stage) {
 
     switch (riemann_solver_type) {
         case RiemannSolverType::RUSANOV:
-            launch_flux_functor<riemann::Rusanov>(rhs);
+            launch_flux_functor<riemann::Rusanov>();
             break;
         case RiemannSolverType::HLL:
-            launch_flux_functor<riemann::HLL>(rhs);
+            launch_flux_functor<riemann::HLL>();
             break;
         case RiemannSolverType::HLLC:
-            launch_flux_functor<riemann::HLLC>(rhs);
+            launch_flux_functor<riemann::HLLC>();
             break;
         case RiemannSolverType::ROE:
-            launch_flux_functor<riemann::Roe>(rhs);
+            launch_flux_functor<riemann::Roe>();
             break;
         case RiemannSolverType::RHLL:
-            launch_flux_functor<riemann::RHLL>(rhs);
+            launch_flux_functor<riemann::RHLL>();
             break;
     }
 
@@ -65,9 +62,13 @@ void Solver::calc_rhs(StateView solution, StateView rhs, rtype t_stage) {
         Kokkos::parallel_for("viscous_gradients", mesh->n_cells, vertex_gradient_functor);
         ViscousFluxFunctor viscous_functor{mesh->face_normals, mesh->face_area, mesh->face_coords,
                                            mesh->cell_coords, mesh->cells_of_face, W_cells,
-                                           viscous_gradients, boundary_data, rhs, physics};
+                                           viscous_gradients, boundary_data, face_flux, physics};
         Kokkos::parallel_for("viscous_flux", mesh->n_faces, viscous_functor);
     }
+
+    FaceFluxSumFunctor sum_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
+                                   face_flux, rhs};
+    Kokkos::parallel_for("face_flux_sum", mesh->n_cells, sum_functor);
 
     Kokkos::View<rtype *> vol = mesh->cell_volume;
     if (has_gravity || !source_expressions.empty()) {
@@ -99,7 +100,7 @@ void Solver::calc_rhs(StateView solution, StateView rhs, rtype t_stage) {
 }
 
 template <typename T_riemann_solver>
-void Solver::launch_flux_functor(StateView rhs) {
+void Solver::launch_flux_functor() {
     ConvectiveFluxFunctor<T_riemann_solver> functor{mesh->face_normals,
                                                     mesh->face_area,
                                                     mesh->cells_of_face,
@@ -108,7 +109,7 @@ void Solver::launch_flux_functor(StateView rhs) {
                                                     face_solution,
                                                     boundary_data,
                                                     W_cells,
-                                                    rhs,
+                                                    face_flux,
                                                     physics.gamma};
     Kokkos::parallel_for("convective_flux", mesh->n_faces, functor);
 }
