@@ -8,6 +8,7 @@ add_executable(MallardTest
     time_integrator_test.cpp
     reconstruction_test.cpp
     solver_test.cpp
+    teno_test.cpp
 )
 
 target_include_directories(MallardTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

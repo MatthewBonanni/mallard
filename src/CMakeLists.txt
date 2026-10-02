@@ -8,6 +8,7 @@ add_library(MallardCore STATIC
     numerics/basis.cpp
     numerics/face_reconstruction.cpp
     numerics/quadrature.cpp
+    numerics/teno.cpp
     numerics/time_integrator.cpp
     physics/physics.cpp
     solver/solver.cpp

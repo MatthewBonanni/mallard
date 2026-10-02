@@ -33,6 +33,7 @@ struct ConvectiveFluxFunctor {
     Kokkos::View<rtype *> quad_weights;
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
     BoundaryData boundaries;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
     Kokkos::View<rtype *[N_CONSERVATIVE]> rhs;
     rtype gamma;
 
@@ -52,7 +53,7 @@ struct ConvectiveFluxFunctor {
             if (c1 >= 0) {
                 FOR_I_CONSERVATIVE W_r[i] = face_solution(i_face, i_quad, 1, i);
             } else {
-                boundaries.ghost_W(i_face, W_l, n_unit, W_r);
+                boundaries.exterior_W(i_face, i_quad, n_quad, W_l, n_unit, W_cells, face_solution, W_r);
             }
             T_riemann_solver::calc_flux(flux_q, n_unit, W_l, W_r, gamma);
             FOR_I_CONSERVATIVE flux[i] += quad_weights(i_quad) * flux_q[i];

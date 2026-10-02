@@ -221,13 +221,8 @@ struct LimiterFunctor {
  * @brief Linear extrapolation of the limited cell states to face centroids.
  *        Falls back to first order on a face if density or pressure would
  *        become non-positive.
- *
- * Transmissive (extrapolation) boundary faces use the cell average, i.e. a
- * zero-gradient ghost: feeding the linearly extrapolated state back in as the
- * exterior state is unstable wherever the boundary is an inflow.
  */
 struct MUSCLFaceFunctor {
-    BoundaryData boundaries;
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<rtype *[N_DIM]> face_coords;
@@ -241,11 +236,6 @@ struct MUSCLFaceFunctor {
         for (uint8_t side = 0; side < 2; side++) {
             const int32_t c = cells_of_face(i_face, side);
             if (c < 0) continue;
-            if (cells_of_face(i_face, 1) < 0 &&
-                boundaries.bcs(boundaries.face_bc(i_face)).type == BoundaryType::EXTRAPOLATION) {
-                FOR_I_CONSERVATIVE face_solution(i_face, 0, side, i) = W(c, i);
-                continue;
-            }
             rtype r[N_DIM];
             FOR_I_DIM r[i] = face_coords(i_face, i) - cell_coords(c, i);
             rtype W_f[N_CONSERVATIVE];
@@ -275,8 +265,7 @@ void MUSCL::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
     LimiterFunctor limiter_functor{gradient_functor, mesh->cell_volume, limiters, limiter, venkat_K};
     Kokkos::parallel_for("limiter", mesh->n_cells, limiter_functor);
 
-    MUSCLFaceFunctor face_functor{boundaries,
-                                  mesh->cells_of_face,
+    MUSCLFaceFunctor face_functor{mesh->cells_of_face,
                                   mesh->cell_coords,
                                   mesh->face_coords,
                                   solution,

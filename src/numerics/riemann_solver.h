@@ -125,11 +125,33 @@ rtype ANRS(const rtype * W_l, const rtype * W_r, const rtype gamma) {
 }
 
 /**
+ * @brief Einfeldt (HLLE) wave speed estimates using Roe averages
+ *        (Einfeldt et al. 1991; Toro 10.52).
+ */
+KOKKOS_INLINE_FUNCTION
+void wave_speeds_einfeldt(const rtype * W_l, const rtype * W_r, const rtype u_l_n, const rtype u_r_n,
+                          const rtype gamma, rtype & S_l, rtype & S_r) {
+    const rtype a_l = Kokkos::sqrt(gamma * W_l[3] / W_l[0]);
+    const rtype a_r = Kokkos::sqrt(gamma * W_r[3] / W_r[0]);
+    const rtype s_l = Kokkos::sqrt(W_l[0]);
+    const rtype s_r = Kokkos::sqrt(W_r[0]);
+    const rtype H_l = a_l * a_l / (gamma - 1.0) + 0.5 * (W_l[1] * W_l[1] + W_l[2] * W_l[2]);
+    const rtype H_r = a_r * a_r / (gamma - 1.0) + 0.5 * (W_r[1] * W_r[1] + W_r[2] * W_r[2]);
+    const rtype u_roe = (s_l * W_l[1] + s_r * W_r[1]) / (s_l + s_r);
+    const rtype v_roe = (s_l * W_l[2] + s_r * W_r[2]) / (s_l + s_r);
+    const rtype H_roe = (s_l * H_l + s_r * H_r) / (s_l + s_r);
+    const rtype un_roe = (s_l * u_l_n + s_r * u_r_n) / (s_l + s_r);
+    const rtype a_roe = Kokkos::sqrt(Kokkos::fmax((gamma - 1.0) * (H_roe - 0.5 * (u_roe * u_roe + v_roe * v_roe)), 0.0));
+    S_l = Kokkos::fmin(u_l_n - a_l, un_roe - a_roe);
+    S_r = Kokkos::fmax(u_r_n + a_r, un_roe + a_roe);
+}
+
+/**
  * @brief Pressure-based wave speed estimates (Toro 10.59-10.60).
  */
 KOKKOS_INLINE_FUNCTION
-void wave_speeds(const rtype * W_l, const rtype * W_r, const rtype u_l_n, const rtype u_r_n,
-                 const rtype gamma, rtype & S_l, rtype & S_r) {
+void wave_speeds_pressure(const rtype * W_l, const rtype * W_r, const rtype u_l_n, const rtype u_r_n,
+                          const rtype gamma, rtype & S_l, rtype & S_r) {
     const rtype w_l[3] = {W_l[0], u_l_n, W_l[3]};
     const rtype w_r[3] = {W_r[0], u_r_n, W_r[3]};
     const rtype p_star = ANRS(w_l, w_r, gamma);
@@ -170,7 +192,7 @@ struct HLL {
         const rtype u_l_n = W_l[1] * n[0] + W_l[2] * n[1];
         const rtype u_r_n = W_r[1] * n[0] + W_r[2] * n[1];
         rtype S_l, S_r;
-        wave_speeds(W_l, W_r, u_l_n, u_r_n, gamma, S_l, S_r);
+        wave_speeds_einfeldt(W_l, W_r, u_l_n, u_r_n, gamma, S_l, S_r);
         if (0.0 <= S_l) {
             FOR_I_CONSERVATIVE flux[i] = F_l[i];
         } else if (S_r <= 0.0) {
@@ -194,7 +216,7 @@ struct HLLC {
         const rtype u_l_n = W_l[1] * n[0] + W_l[2] * n[1];
         const rtype u_r_n = W_r[1] * n[0] + W_r[2] * n[1];
         rtype S_l, S_r;
-        wave_speeds(W_l, W_r, u_l_n, u_r_n, gamma, S_l, S_r);
+        wave_speeds_einfeldt(W_l, W_r, u_l_n, u_r_n, gamma, S_l, S_r);
         if (0.0 <= S_l) {
             FOR_I_CONSERVATIVE flux[i] = F_l[i];
             return;

@@ -23,6 +23,7 @@
 #include "quadrature.h"
 #include "boundary.h"
 #include "gradient.h"
+#include "teno.h"
 
 enum class FaceReconstructionType {
     FIRST_ORDER,
@@ -179,6 +180,55 @@ class MUSCL : public FaceReconstruction {
         rtype venkat_K = 5.0;
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
         Kokkos::View<rtype *[N_CONSERVATIVE]> limiters;
+};
+
+/**
+ * @brief High-order TENO-E reconstruction on unstructured meshes
+ *        (Liang, Shyy & Fu, J. Sci. Comput. 104:1, 2025; see docs/numerics/teno_e.md).
+ *
+ * Each cell carries one large central stencil (degree r) and one small
+ * degree-2 sector stencil per face. Cells flagged smooth by a density-based
+ * indicator use the large-stencil polynomial directly on the conservative
+ * variables; troubled cells perform TENO stencil selection on characteristic
+ * variables per face. Works on triangles and quadrilaterals.
+ */
+class TENO : public FaceReconstruction {
+    public:
+        TENO();
+        ~TENO();
+        void init(const toml::value & input) override;
+        void print() const override;
+        uint8_t n_face_quadrature_points() const override;
+        void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                              Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) override;
+
+        uint8_t degree = 4;
+        uint8_t n_dof_large = 0;
+        uint16_t n_stencil_large = 0;
+        uint16_t n_stencil_small = 10;
+        rtype stencil_factor = 2.0;
+        rtype sigma_threshold = 1.0e-3;
+        rtype sigma_upper = 1.0e-2;
+        rtype C_T = -1.0;  // Fixed cutoff; negative selects the adaptive cutoff
+        bool characteristic = true;
+        bool bound_preserving = false;
+
+        // Per-cell precomputed data
+        Kokkos::View<rtype *> scale;                       // h = sqrt(V)
+        Kokkos::View<rtype **> basis_mean;                 // (cell, l): mean of phi_l over the cell
+        Kokkos::View<uint16_t *> stencil_large_size;       // (cell)
+        Kokkos::View<int32_t **> stencil_large;            // (cell, s)
+        Kokkos::View<int32_t **> stencil_large_face;       // (cell, s): mirror boundary face or -1
+        Kokkos::View<rtype ***> pinv_large;                // (cell, l, s)
+        Kokkos::View<uint16_t **> stencil_small_size;      // (cell, face); 0 if stencil invalid
+        Kokkos::View<int32_t ***> stencil_small;           // (cell, face, s)
+        Kokkos::View<int32_t ***> stencil_small_face;      // (cell, face, s): mirror boundary face or -1
+        Kokkos::View<rtype ****> pinv_small;               // (cell, face, l, s)
+        Kokkos::View<rtype ***> si_matrix;                 // (cell, l, m)
+        Kokkos::View<rtype *> troubled;                    // (cell): sigma, for diagnostics
+
+    private:
+        void compute_stencils_and_matrices();
 };
 
 #endif // FACE_RECONSTRUCTION_H

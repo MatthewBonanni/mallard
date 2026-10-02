@@ -12,6 +12,7 @@
 #ifndef TEST_FIXTURES_H
 #define TEST_FIXTURES_H
 
+#include <cmath>
 #include <memory>
 #include <string>
 
@@ -43,19 +44,13 @@ inline std::shared_ptr<Mesh> make_mesh(const std::string & type, uint32_t nx, ui
  */
 inline BoundaryData make_uniform_boundaries(const Mesh & mesh, BoundaryType type,
                                             rtype gamma = 1.4) {
-    BoundaryData data;
-    data.gamma = gamma;
-    data.face_bc = Kokkos::View<int32_t *>("face_bc", mesh.n_faces);
-    data.bcs = Kokkos::View<BoundaryCondition *>("bcs", 1);
-    auto h_face_bc = Kokkos::create_mirror_view(data.face_bc);
-    auto h_bcs = Kokkos::create_mirror_view(data.bcs);
-    h_bcs(0).type = type;
+    std::vector<int32_t> face_bc(mesh.n_faces);
     for (uint32_t i_face = 0; i_face < mesh.n_faces; i_face++) {
-        h_face_bc(i_face) = (mesh.h_cells_of_face(i_face, 1) < 0) ? 0 : -1;
+        face_bc[i_face] = (mesh.h_cells_of_face(i_face, 1) < 0) ? 0 : -1;
     }
-    Kokkos::deep_copy(data.face_bc, h_face_bc);
-    Kokkos::deep_copy(data.bcs, h_bcs);
-    return data;
+    BoundaryCondition bc;
+    bc.type = type;
+    return make_boundary_data(mesh, face_bc, {bc}, gamma);
 }
 
 /**
@@ -66,6 +61,43 @@ inline bool is_boundary_cell(const Mesh & mesh, uint32_t i_cell) {
         if (mesh.h_cells_of_face(mesh.h_face_of_cell(i_cell, k), 1) < 0) return true;
     }
     return false;
+}
+
+/**
+ * @brief Cell averages of f(x, y) -> array of N_CONSERVATIVE values, computed with
+ *        a high-order collapsed Gauss rule on each fan triangle of each cell.
+ */
+template <typename F>
+Kokkos::View<rtype *[N_CONSERVATIVE]>::host_mirror_type cell_averages(const Mesh & mesh, F && f) {
+    // 8-point Gauss-Legendre on [0, 1]
+    const double g[8] = {0.0198550717512319, 0.1016667612931866, 0.2372337950418355, 0.4082826787521751,
+                         0.5917173212478249, 0.7627662049581645, 0.8983332387068134, 0.9801449282487681};
+    const double gw[8] = {0.0506142681451881, 0.1111905172266872, 0.1568533229389436, 0.1813418916891810,
+                          0.1813418916891810, 0.1568533229389436, 0.1111905172266872, 0.0506142681451881};
+    Kokkos::View<rtype *[N_CONSERVATIVE]>::host_mirror_type avg("avg", mesh.n_cells);
+    for (uint32_t c = 0; c < mesh.n_cells; c++) {
+        double sum[N_CONSERVATIVE] = {}, area = 0.0;
+        const uint32_t n0 = mesh.h_node_of_cell(c, 0);
+        for (uint32_t k = 1; k + 1 < mesh.h_n_nodes_of_cell(c); k++) {
+            const uint32_t n1 = mesh.h_node_of_cell(c, k), n2 = mesh.h_node_of_cell(c, k + 1);
+            const double x0 = mesh.h_node_coords(n0, 0), y0 = mesh.h_node_coords(n0, 1);
+            const double ax = mesh.h_node_coords(n1, 0) - x0, ay = mesh.h_node_coords(n1, 1) - y0;
+            const double bx = mesh.h_node_coords(n2, 0) - x0, by = mesh.h_node_coords(n2, 1) - y0;
+            const double det = std::abs(ax * by - ay * bx);
+            for (int i = 0; i < 8; i++) {
+                for (int j = 0; j < 8; j++) {
+                    const double s = g[i], t = g[j] * (1.0 - g[i]);
+                    const double w = gw[i] * gw[j] * (1.0 - g[i]) * det;
+                    double v[N_CONSERVATIVE];
+                    f(x0 + s * ax + t * bx, y0 + s * ay + t * by, v);
+                    FOR_I_CONSERVATIVE sum[i] += w * v[i];
+                    area += w;
+                }
+            }
+        }
+        FOR_I_CONSERVATIVE avg(c, i) = sum[i] / area;
+    }
+    return avg;
 }
 
 #endif // TEST_FIXTURES_H

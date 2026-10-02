@@ -82,13 +82,8 @@ void Solver::init_physics() {
 void Solver::init_boundaries() {
     std::cout << "Initializing boundaries..." << std::endl;
     std::vector<toml::value> input_boundaries = toml::find<std::vector<toml::value>>(input, "boundaries");
-
-    boundary_data.gamma = physics.gamma;
-    boundary_data.face_bc = Kokkos::View<int32_t *>("face_bc", mesh->n_faces);
-    boundary_data.bcs = Kokkos::View<BoundaryCondition *>("bcs", input_boundaries.size());
-    auto h_face_bc = Kokkos::create_mirror_view(boundary_data.face_bc);
-    auto h_bcs = Kokkos::create_mirror_view(boundary_data.bcs);
-    Kokkos::deep_copy(h_face_bc, -1);
+    std::vector<int32_t> face_bc(mesh->n_faces, -1);
+    std::vector<BoundaryCondition> bcs;
 
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
         const toml::value & bound = input_boundaries[i_bc];
@@ -103,26 +98,24 @@ void Solver::init_boundaries() {
         if (zone == nullptr || zone->get_type() != FaceZoneType::BOUNDARY) {
             throw std::runtime_error("Boundary name " + name + " not found in mesh.");
         }
-        h_bcs(i_bc) = BoundaryCondition::from_input(bound, physics);
+        bcs.push_back(BoundaryCondition::from_input(bound, physics));
         for (uint32_t i = 0; i < zone->n_faces(); i++) {
             const uint32_t i_face = zone->h_faces(i);
-            if (h_face_bc(i_face) != -1) {
+            if (face_bc[i_face] != -1) {
                 throw std::runtime_error("Boundary " + name + " assigned more than once.");
             }
-            h_face_bc(i_face) = i_bc;
+            face_bc[i_face] = i_bc;
         }
-        std::cout << "> Boundary " << name << ": " << BOUNDARY_NAMES.at(h_bcs(i_bc).type) << std::endl;
+        std::cout << "> Boundary " << name << ": " << BOUNDARY_NAMES.at(bcs.back().type) << std::endl;
     }
 
     for (uint32_t i_face = 0; i_face < mesh->n_faces; i_face++) {
-        if (mesh->h_cells_of_face(i_face, 1) < 0 && h_face_bc(i_face) < 0) {
+        if (mesh->h_cells_of_face(i_face, 1) < 0 && face_bc[i_face] < 0) {
             throw std::runtime_error("Boundary face " + std::to_string(i_face) +
                                      " has no boundary condition.");
         }
     }
-
-    Kokkos::deep_copy(boundary_data.face_bc, h_face_bc);
-    Kokkos::deep_copy(boundary_data.bcs, h_bcs);
+    boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma);
 }
 
 void Solver::init_numerics() {
@@ -152,8 +145,9 @@ void Solver::init_numerics() {
         case FaceReconstructionType::MUSCL:
             face_reconstruction = std::make_unique<MUSCL>();
             break;
-        default:
-            throw std::runtime_error("Face reconstruction not available: " + face_reconstruction_str + ".");
+        case FaceReconstructionType::TENO:
+            face_reconstruction = std::make_unique<TENO>();
+            break;
     }
 
     riemann_solver_type = it_riemann->second;

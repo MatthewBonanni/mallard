@@ -56,6 +56,7 @@ void Solver::launch_flux_functor(StateView rhs) {
                                                     face_reconstruction->quadrature_face.weights,
                                                     face_solution,
                                                     boundary_data,
+                                                    W_cells,
                                                     rhs,
                                                     physics.gamma};
     Kokkos::parallel_for("convective_flux", mesh->n_faces, functor);

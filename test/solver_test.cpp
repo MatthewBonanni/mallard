@@ -88,7 +88,7 @@ TEST_P(FreeStream, UniformFlowIsPreservedExactly) {
 
 INSTANTIATE_TEST_SUITE_P(Solver, FreeStream,
     ::testing::Combine(::testing::Values("cartesian", "cartesian_tri", "wedge"),
-                       ::testing::Values("FO", "MUSCL"),
+                       ::testing::Values("FO", "MUSCL", "TENO"),
                        ::testing::Values("Rusanov", "HLL", "HLLC")));
 
 namespace {
@@ -154,7 +154,7 @@ TEST_P(MeshRecon, RiemannProblemIsSymmetricAboutDiagonal) {
 
 INSTANTIATE_TEST_SUITE_P(Solver, MeshRecon,
     ::testing::Combine(::testing::Values("cartesian", "cartesian_tri", "wedge"),
-                       ::testing::Values("FO", "MUSCL")));
+                       ::testing::Values("FO", "MUSCL", "TENO")));
 
 namespace {
 
@@ -254,3 +254,86 @@ TEST(SolverRegression, MUSCLTransmissiveInflowBoundaryStaysBounded) {
     }
     EXPECT_LT(max_speed, 2.0);
 }
+
+namespace {
+
+/**
+ * @brief L1 density error after advecting a smooth density pulse, which is an
+ *        exact solution of the Euler equations (uniform velocity and pressure).
+ */
+double advection_error(const std::string & mesh, const std::string & recon, uint32_t n) {
+    CaseConfig c;
+    c.mesh = mesh;
+    c.recon = recon;
+    c.nx = n;
+    c.ny = n;
+    c.run = "t_stop = 0.2\ncfl = 0.4\n";
+    c.init = "type = \"analytical\"\n"
+             "rho = \"1.0 + 0.3 * exp(-80 * ((x - 0.35)^2 + (y - 0.4)^2))\"\n"
+             "u = [\"1.0\", \"0.5\"]\n"
+             "p = \"1.0\"\n";
+    auto solver = run_case(c);
+    auto m = solver->get_mesh();
+    // Exact cell averages of the translated pulse
+    auto exact = cell_averages(*m, [](double x, double y, double * U) {
+        U[0] = 1.0 + 0.3 * std::exp(-80.0 * ((x - 0.55) * (x - 0.55) + (y - 0.5) * (y - 0.5)));
+        U[1] = U[2] = U[3] = 0.0;
+    });
+    double err = 0.0;
+    for (uint32_t i = 0; i < m->n_cells; i++) {
+        err += std::abs(solver->h_conservatives(i, 0) - exact(i, 0)) * m->h_cell_volume(i);
+    }
+    return err;
+}
+
+} // namespace
+
+TEST_P(SodMesh, TENOConvergesFasterThanMUSCLForSmoothFlow) {
+    // Time integration (SSPRK3, dt ~ h) caps the observed order at 3
+    const double m1 = advection_error(GetParam(), "MUSCL", 32), m2 = advection_error(GetParam(), "MUSCL", 64);
+    const double t1 = advection_error(GetParam(), "TENO", 32), t2 = advection_error(GetParam(), "TENO", 64);
+    std::cout << "advection L1: MUSCL " << m1 << " -> " << m2 << ", TENO " << t1 << " -> " << t2 << std::endl;
+    EXPECT_GT(std::log2(t1 / t2), 2.7);
+    EXPECT_LT(t2, 0.2 * m2);
+}
+
+namespace {
+
+class Recon : public ::testing::TestWithParam<std::string> {};
+
+} // namespace
+
+TEST_P(Recon, TransmissiveInflowOnTrianglesKeepsOneDimensionalShockSpeed) {
+    // Shock between quadrants 3 and 4 of 2D Riemann configuration 3, with the
+    // uniform transverse velocity v = 1.206 carrying flow in through the bottom
+    // and out through the top. The exact solution is one-dimensional: a shock
+    // moving at -0.4221 leaving the quadrant-4 state behind. With a
+    // zero-gradient copy of the boundary cell as the exterior state, triangle
+    // meshes gained an O(1) mass imbalance in the boundary row at the shock and
+    // the shock along the boundary ran at almost twice the correct speed.
+    CaseConfig c;
+    c.mesh = "cartesian_tri";
+    c.recon = GetParam();
+    c.nx = 60;
+    c.ny = 20;
+    c.run = "t_stop = 0.5\ncfl = 0.5\n";
+    c.init = "type = \"analytical\"\n"
+             "rho = \"x < 0.8 ? 0.1379928315 : 0.5322580645\"\n"
+             "u = [\"x < 0.8 ? 1.206045378 : 0.0\", \"1.206045378\"]\n"
+             "p = \"x < 0.8 ? 0.0290322581 : 0.3\"\n";
+    auto solver = run_case(c);
+    auto m = solver->get_mesh();
+    const double x_shock = 0.8 - 0.4221 * 0.5;
+    double max_dev = 0.0;
+    for (uint32_t i = 0; i < m->n_cells; i++) {
+        // Post-shock region in every row including the boundary rows, excluding
+        // the start-up entropy error that stays at the initial interface x = 0.8
+        if (m->h_cell_coords(i, 0) > x_shock + 0.1 && m->h_cell_coords(i, 0) < 0.75) {
+            const double dev = std::abs(solver->h_conservatives(i, 0) - 0.5322580645);
+            max_dev = std::max(max_dev, dev);
+        }
+    }
+    EXPECT_LT(max_dev, 0.01);
+}
+
+INSTANTIATE_TEST_SUITE_P(Solver, Recon, ::testing::Values("FO", "MUSCL", "TENO"));

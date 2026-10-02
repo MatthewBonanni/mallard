@@ -14,6 +14,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <Kokkos_Core.hpp>
 #include <toml.hpp>
@@ -106,9 +107,44 @@ struct BoundaryCondition {
  */
 struct BoundaryData {
     Kokkos::View<int32_t *> face_bc;          // Index into bcs, -1 for interior faces
+    Kokkos::View<int32_t *> face_image;       // Transmissive faces: interior image cell, else -1
+    Kokkos::View<int32_t *> face_image_face;  // Face of the image cell matching the translated face, else -1
+    Kokkos::View<uint8_t *> face_image_side;  // Side of face_image_face belonging to the image cell
+    Kokkos::View<uint8_t *> face_image_flip;  // Whether the image face runs opposite to the boundary face
     Kokkos::View<BoundaryCondition *> bcs;
     rtype gamma = 1.4;
     bool viscous = false;
+
+    /**
+     * @brief Exterior state seen by the Riemann solver on boundary face i_face.
+     *
+     * Transmissive faces take the reconstructed state on their image face: the
+     * face of the interior cell found by translating the exterior neighbor inward
+     * along the face normal. This matches what interior faces see for a solution
+     * that does not vary normal to the boundary, at any reconstruction order. A
+     * zero-gradient copy of the face's own interior state instead feeds the
+     * boundary cell back to itself at inflow boundaries; on triangles, whose
+     * centroids are offset from the face, that creates an O(1) mass imbalance
+     * at moving shocks and wrong shock speeds along the boundary.
+     */
+    template <typename T_W, typename T_F>
+    KOKKOS_INLINE_FUNCTION
+    void exterior_W(const uint32_t i_face, const uint8_t i_quad, const uint8_t n_quad,
+                    const rtype * W_i, const rtype * n, const T_W & W_cells, const T_F & face_solution,
+                    rtype * W_g) const {
+        const int32_t image_face = face_image_face(i_face);
+        const int32_t image = face_image(i_face);
+        if (image_face >= 0) {
+            const uint8_t q = face_image_flip(i_face) ? n_quad - 1 - i_quad : i_quad;
+            for (uint8_t i = 0; i < N_DIM + 2; i++) {
+                W_g[i] = face_solution(image_face, q, face_image_side(i_face), i);
+            }
+        } else if (image >= 0) {
+            for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = W_cells(image, i);
+        } else {
+            ghost_W(i_face, W_i, n, W_g);
+        }
+    }
 
     /**
      * @brief Ghost state for boundary face i_face.
@@ -118,5 +154,20 @@ struct BoundaryData {
         bcs(face_bc(i_face)).ghost_W(W_i, n, gamma, viscous, W_g);
     }
 };
+
+class Mesh;
+
+/**
+ * @brief Build BoundaryData (face -> condition map and transmissive image
+ *        cells) on the host and copy it to the device.
+ * @param mesh Mesh.
+ * @param h_face_bc Index into h_bcs for each face, -1 for interior faces.
+ * @param h_bcs Boundary conditions.
+ * @param gamma Ratio of specific heats.
+ */
+BoundaryData make_boundary_data(const Mesh & mesh,
+                                const std::vector<int32_t> & h_face_bc,
+                                const std::vector<BoundaryCondition> & h_bcs,
+                                rtype gamma);
 
 #endif // BOUNDARY_H

@@ -176,7 +176,7 @@ TEST(RiemannSolverTest, WaveSpeedsBracketExactWaves) {
     const rtype W_l[N_CONSERVATIVE] = {1.0, 0.0, 0.0, 1.0};
     const rtype W_r[N_CONSERVATIVE] = {0.125, 0.0, 0.0, 0.1};
     rtype S_l, S_r;
-    riemann::wave_speeds(W_l, W_r, 0.0, 0.0, GAMMA, S_l, S_r);
+    riemann::wave_speeds_pressure(W_l, W_r, 0.0, 0.0, GAMMA, S_l, S_r);
     const double a_l = std::sqrt(GAMMA);
     EXPECT_NEAR(S_l, -a_l, 1e-12);
     const double S_shock = std::sqrt(GAMMA * 0.1 / 0.125) *
