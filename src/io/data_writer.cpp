@@ -24,6 +24,34 @@
 
 #include "common_io.h"
 
+namespace {
+
+/**
+ * @brief VTK cell type of a cell or boundary face, by dimension and node count.
+ */
+uint8_t vtk_type(uint32_t dim, uint32_t n_nodes) {
+    if (dim == 1 && n_nodes == 2) return 3;   // VTK_LINE
+    if (dim == 2 && n_nodes == 3) return 5;   // VTK_TRIANGLE
+    if (dim == 2 && n_nodes == 4) return 9;   // VTK_QUAD
+    if (dim == 3 && n_nodes == 4) return 10;  // VTK_TETRA
+    if (dim == 3 && n_nodes == 8) return 12;  // VTK_HEXAHEDRON
+    if (dim == 3 && n_nodes == 6) return 13;  // VTK_WEDGE
+    if (dim == 3 && n_nodes == 5) return 14;  // VTK_PYRAMID
+    throw std::runtime_error("DataWriter: no VTK cell type for a " + std::to_string(dim) + "D element with " +
+                             std::to_string(n_nodes) + " nodes.");
+}
+
+/**
+ * @brief Local node of a cell at VTK position k. Mallard prisms have the
+ *        (0, 1, 2) normal pointing toward (3, 4, 5); VTK wedges point it away.
+ */
+uint32_t vtk_local_node(uint32_t n_nodes, uint32_t k) {
+    constexpr uint32_t WEDGE[6] = {0, 2, 1, 3, 5, 4};
+    return (N_DIM == 3 && n_nodes == 6) ? WEDGE[k] : k;
+}
+
+} // namespace
+
 void DataWriter::init(const toml::value & input,
                       std::vector<Data> & data,
                       std::shared_ptr<Mesh> mesh) {
@@ -59,7 +87,7 @@ void DataWriter::init(const toml::value & input,
 
     std::vector<std::string> variables;
     if (format == DataFormat::RESTART) {
-        variables = {"RHO", "RHOU_X", "RHOU_Y", "RHOE"};
+        variables.assign(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
     } else {
         if (!input.contains("variables")) {
             throw std::runtime_error("DataWriter: variables not specified.");
@@ -69,18 +97,28 @@ void DataWriter::init(const toml::value & input,
     if (variables.empty()) {
         throw std::runtime_error("DataWriter: No variables specified.");
     }
-    for (const auto & var : variables) {
-        bool found = false;
+    auto find_data = [&](const std::string & name) -> const Data * {
         for (const auto & data_var : data) {
-            if (data_var.name() == var) {
-                data_ptrs.push_back(&data_var);
-                found = true;
-                break;
-            }
+            if (data_var.name() == name) return &data_var;
         }
-        if (!found) {
+        return nullptr;
+    };
+    for (const auto & var : variables) {
+        Field field{var, {}};
+        if (const Data * scalar = find_data(var)) {
+            field.components.push_back(scalar);
+        } else if (format == DataFormat::VTU) {
+            // A vector name (e.g. U) collects its components U_X, U_Y(, U_Z)
+            const char * suffixes[3] = {"_X", "_Y", "_Z"};
+            FOR_I_DIM {
+                if (const Data * component = find_data(var + suffixes[i])) field.components.push_back(component);
+            }
+            if (field.components.size() != N_DIM) field.components.clear();
+        }
+        if (field.components.empty()) {
             throw std::runtime_error("DataWriter: Unknown variable: " + var + ".");
         }
+        fields.push_back(field);
     }
     this->mesh = mesh;
 
@@ -184,7 +222,7 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
     const uint32_t version = 1;
     const uint32_t real_size = sizeof(rtype);
     const uint64_t n_cells = mesh->n_cells;
-    const uint64_t n_vars = data_ptrs.size();
+    const uint64_t n_vars = fields.size();
     const double time = t;
     out.write(magic, sizeof(magic));
     out.write(reinterpret_cast<const char *>(&version), sizeof(version));
@@ -193,9 +231,9 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
     out.write(reinterpret_cast<const char *>(&n_vars), sizeof(n_vars));
     out.write(reinterpret_cast<const char *>(&step), sizeof(step));
     out.write(reinterpret_cast<const char *>(&time), sizeof(time));
-    for (const auto & data_ptr : data_ptrs) {
+    for (const auto & field : fields) {
         for (uint64_t i = 0; i < n_cells; i++) {
-            const rtype value = (*data_ptr)[i];
+            const rtype value = field.value(i, 0);
             out.write(reinterpret_cast<const char *>(&value), sizeof(rtype));
         }
     }
@@ -222,6 +260,12 @@ RestartData read_restart(const std::string & filename) {
     }
     if (real_size != sizeof(rtype)) {
         throw std::runtime_error("Restart file " + filename + " was written with a different floating-point precision.");
+    }
+    if (n_vars != N_CONSERVATIVE) {
+        throw std::runtime_error("Restart file " + filename + " has " + std::to_string(n_vars) +
+                                 " variables per cell (a " + std::to_string(n_vars - 2) +
+                                 "D run), but Mallard was built with Mallard_DIM = " + std::to_string(N_DIM) +
+                                 " (" + std::to_string(N_CONSERVATIVE) + " variables).");
     }
     data.conservatives.assign(n_vars, std::vector<rtype>(data.n_cells));
     for (auto & var : data.conservatives) {
@@ -273,17 +317,23 @@ void DataWriter::write_vtu_faces(const std::string & filename, rtype t) const {
     out << "    </FieldData>\n";
     out << "    <Piece NumberOfPoints=\"" << nodes.size() << "\" NumberOfCells=\"" << geometry_faces.size() << "\">\n";
     out << "      <CellData>\n";
-    for (const auto & data_ptr : data_ptrs) {
-        out << "        <DataArray type=\"Float64\" Name=\"" << data_ptr->name() << "\" format=\"ascii\">\n";
-        for (uint32_t f : geometry_faces) out << static_cast<double>((*data_ptr)[mesh->h_cells_of_face(f, 0)]) << " ";
+    for (const auto & field : fields) {
+        out << "        <DataArray type=\"Float64\" Name=\"" << field.name << "\" ";
+        if (field.n_vtk_components() > 1) out << "NumberOfComponents=\"" << field.n_vtk_components() << "\" ";
+        out << "format=\"ascii\">\n";
+        for (uint32_t f : geometry_faces) {
+            for (uint32_t k = 0; k < field.n_vtk_components(); k++) {
+                out << static_cast<double>(field.value(mesh->h_cells_of_face(f, 0), k)) << " ";
+            }
+        }
         out << "\n        </DataArray>\n";
     }
     out << "      </CellData>\n";
     out << "      <Points>\n";
     out << "        <DataArray type=\"Float64\" NumberOfComponents=\"3\" format=\"ascii\">\n";
     for (uint32_t node : nodes) {
-        out << static_cast<double>(mesh->h_node_coords(node, 0)) << " "
-            << static_cast<double>(mesh->h_node_coords(node, 1)) << " 0 ";
+        FOR_I_DIM out << static_cast<double>(mesh->h_node_coords(node, i)) << " ";
+        for (uint8_t i = N_DIM; i < 3; i++) out << "0 ";
     }
     out << "\n        </DataArray>\n";
     out << "      </Points>\n";
@@ -301,7 +351,7 @@ void DataWriter::write_vtu_faces(const std::string & filename, rtype t) const {
     }
     out << "\n        </DataArray>\n";
     out << "        <DataArray type=\"UInt8\" Name=\"types\" format=\"ascii\">\n";
-    for (size_t i = 0; i < geometry_faces.size(); i++) out << "3 ";
+    for (uint32_t f : geometry_faces) out << static_cast<int>(vtk_type(N_DIM - 1, mesh->h_n_nodes_of_face(f))) << " ";
     out << "\n        </DataArray>\n";
     out << "      </Cells>\n";
     out << "    </Piece>\n";
@@ -343,8 +393,9 @@ void DataWriter::write_vtu(const std::string & filename, rtype t) const {
     out << "    </FieldData>\n";
     out << "    <Piece NumberOfPoints=\"" << mesh->n_nodes << "\" NumberOfCells=\"" << mesh->n_cells << "\">\n";
     out << "      <CellData>\n";
-    for (const auto & data_ptr : data_ptrs) {
-        data_array(vtk_float_type(), data_ptr->name(), 1, mesh->n_cells * sizeof(rtype));
+    for (const auto & field : fields) {
+        data_array(vtk_float_type(), field.name, field.n_vtk_components(),
+                   mesh->n_cells * field.n_vtk_components() * sizeof(rtype));
     }
     out << "      </CellData>\n";
     out << "      <Points>\n";
@@ -367,10 +418,10 @@ void DataWriter::write_vtu(const std::string & filename, rtype t) const {
         out.write(reinterpret_cast<const char *>(&value), sizeof(value));
     };
 
-    for (const auto & data_ptr : data_ptrs) {
-        write_header(mesh->n_cells * sizeof(rtype));
+    for (const auto & field : fields) {
+        write_header(mesh->n_cells * field.n_vtk_components() * sizeof(rtype));
         for (uint32_t i = 0; i < mesh->n_cells; i++) {
-            write_value(static_cast<rtype>((*data_ptr)[i]));
+            for (uint32_t k = 0; k < field.n_vtk_components(); k++) write_value(field.value(i, k));
         }
     }
 
@@ -382,8 +433,9 @@ void DataWriter::write_vtu(const std::string & filename, rtype t) const {
 
     write_header(len_connectivity * sizeof(int64_t));
     for (uint32_t i = 0; i < mesh->n_cells; i++) {
-        for (uint32_t j = 0; j < mesh->h_n_nodes_of_cell(i); j++) {
-            write_value(static_cast<int64_t>(mesh->h_node_of_cell(i, j)));
+        const uint32_t n_nodes = mesh->h_n_nodes_of_cell(i);
+        for (uint32_t j = 0; j < n_nodes; j++) {
+            write_value(static_cast<int64_t>(mesh->h_node_of_cell(i, vtk_local_node(n_nodes, j))));
         }
     }
 
@@ -396,9 +448,7 @@ void DataWriter::write_vtu(const std::string & filename, rtype t) const {
 
     write_header(mesh->n_cells * sizeof(uint8_t));
     for (uint32_t i = 0; i < mesh->n_cells; i++) {
-        const uint32_t n_nodes = mesh->h_n_nodes_of_cell(i);
-        const uint8_t vtk_type = (n_nodes == 3) ? 5 : (n_nodes == 4) ? 9 : 7;
-        write_value(vtk_type);
+        write_value(vtk_type(N_DIM, mesh->h_n_nodes_of_cell(i)));
     }
 
     out << "\n  </AppendedData>\n";

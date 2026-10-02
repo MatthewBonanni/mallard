@@ -37,7 +37,7 @@ TEST(IOTest, BoundaryZoneOutputCarriesAdjacentCellValues) {
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[output]\ncheck_interval = 1000000\n"
       << "[[write_data]]\nprefix = \"" << dir << "/wall\"\nformat = \"vtu\"\ngeometry = \"bottom\"\n"
-      << "interval = 4\nvariables = [\"P\"]\n";
+      << "interval = 4\nvariables = [\"P\", \"U\"]\n";
     Solver solver;
     solver.init(parse_toml(s.str()));
     solver.run();
@@ -61,6 +61,20 @@ TEST(IOTest, BoundaryZoneOutputCarriesAdjacentCellValues) {
         values >> p;
         const int32_t c = solver.get_mesh()->h_cells_of_face(zone->h_faces(i), 0);
         EXPECT_DOUBLE_EQ(p, solver.h_primitives(c, 2));
+    }
+
+    // U is a 3-component vector, zero-padded in 2D
+    const size_t u_tag = text.find("Name=\"U\"");
+    const size_t u_start = text.find(">", u_tag) + 1;
+    EXPECT_NE(text.substr(u_tag, u_start - u_tag).find("NumberOfComponents=\"3\""), std::string::npos);
+    std::istringstream u_values(text.substr(u_start, text.find("</DataArray>", u_start) - u_start));
+    for (uint32_t i = 0; i < zone->n_faces(); i++) {
+        double u[3];
+        u_values >> u[0] >> u[1] >> u[2];
+        const int32_t c = solver.get_mesh()->h_cells_of_face(zone->h_faces(i), 0);
+        EXPECT_DOUBLE_EQ(u[0], solver.h_primitives(c, 0));
+        EXPECT_DOUBLE_EQ(u[1], solver.h_primitives(c, 1));
+        EXPECT_EQ(u[2], 0.0);
     }
     std::filesystem::remove_all(dir);
 }

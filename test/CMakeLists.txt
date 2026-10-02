@@ -25,6 +25,7 @@ else()
     list(APPEND MALLARD_TEST_SOURCES
     physics3d_test.cpp
     mesh3d_test.cpp
+    io3d_test.cpp
     )
 endif()
 add_executable(MallardTest ${MALLARD_TEST_SOURCES})

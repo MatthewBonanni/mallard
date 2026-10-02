@@ -93,6 +93,19 @@ class DataWriter {
         void write_restart(const std::string & filename, uint64_t step, rtype t) const;
         void write_pvd() const;
 
+        /**
+         * @brief An output array: one scalar, or the N_DIM components of a
+         *        vector (written as 3 components, zero-padded in 2D).
+         */
+        struct Field {
+            std::string name;
+            std::vector<const Data *> components;
+            uint32_t n_vtk_components() const { return components.size() == 1 ? 1 : 3; }
+            rtype value(uint32_t i_cell, uint32_t i_comp) const {
+                return i_comp < components.size() ? (*components[i_comp])[i_cell] : rtype(0);
+            }
+        };
+
         std::string prefix;
         uint64_t interval = 0;
         rtype time_interval = 0.0;
@@ -100,7 +113,7 @@ class DataWriter {
         rtype t_last = -std::numeric_limits<rtype>::infinity();
         uint64_t step_last = std::numeric_limits<uint64_t>::max();
         DataFormat format;
-        std::vector<const Data *> data_ptrs;
+        std::vector<Field> fields;
         std::shared_ptr<Mesh> mesh;
         std::vector<std::pair<rtype, std::string>> history;
         std::vector<uint32_t> geometry_faces;  // Empty: write all cells

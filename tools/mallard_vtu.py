@@ -6,8 +6,15 @@ import numpy as np
 _DTYPES = {"Float32": "<f4", "Float64": "<f8", "UInt32": "<u4", "Int32": "<i4",
            "Int64": "<i8", "UInt64": "<u8", "UInt8": "u1"}
 
+VTK_3D_TYPES = {10: "tetra", 12: "hexahedron", 13: "wedge", 14: "pyramid"}
 
-def read_vtu(path):
+
+def read_vtu_cells(path):
+    """Read a 2D or 3D volume VTU.
+
+    Returns points (n, 3), connectivity, offsets (end of each cell), VTK cell
+    types, and the cell arrays (vectors as (n_cells, 3)) plus "TIME".
+    """
     raw = open(path, "rb").read()
     start = raw.index(b"<AppendedData")
     start = raw.index(b"_", start) + 1
@@ -28,8 +35,21 @@ def read_vtu(path):
             data = data.reshape(-1, ncomp)
         arrays[attrs.get("Name", "Points")] = data
     conn, offs = arrays.pop("connectivity"), arrays.pop("offsets")
-    arrays.pop("types", None)
-    pts = arrays.pop("Points")[:, :2].astype(float)
+    types = arrays.pop("types")
+    pts = arrays.pop("Points").astype(float)
+    out = {k: np.asarray(v, dtype=float) for k, v in arrays.items()}
+    tm = re.search(r'Name="TIME"[^>]*>([^<]*)<', header)
+    if tm:
+        out["TIME"] = float(tm.group(1))
+    return pts, conn, offs, types, out
+
+
+def read_vtu(path):
+    """Read a 2D VTU as points (n, 2), a triangle fan of each cell, the cell
+    of each triangle, and the cell arrays plus "TIME"."""
+    pts, conn, offs, types, arrays = read_vtu_cells(path)
+    if np.isin(types, list(VTK_3D_TYPES)).any():
+        raise ValueError(f"{path} is a 3D mesh; use read_vtu_cells")
     starts = np.concatenate([[0], offs[:-1]])
     sizes = offs - starts
     tri_parts, idx_parts = [], []
@@ -41,7 +61,4 @@ def read_vtu(path):
             idx_parts.append(sel)
     tris = np.vstack(tri_parts).astype(np.int64)
     tri_cell = np.concatenate(idx_parts)
-    tm = re.search(r'Name="TIME"[^>]*>([^<]*)<', header)
-    if tm:
-        arrays["TIME"] = float(tm.group(1))
-    return pts, tris, tri_cell, {k: (v if k == 'TIME' else np.asarray(v, dtype=float)) for k, v in arrays.items()}
+    return pts[:, :2], tris, tri_cell, arrays

@@ -167,15 +167,47 @@ void Mesh::allocate_and_fill(const std::vector<std::array<rtype, N_DIM>> & nodes
 
 namespace {
 
+constexpr int BOUNDARY_DIM = N_DIM - 1;
+
 /**
- * @brief Parse an ASCII Gmsh file (format 2.2 or 4.1). Physical names of
- *        1D groups become boundary zone names (or "physical_<tag>" if unnamed).
+ * @brief Contents of a Gmsh file: cells are the N_DIM-dimensional elements;
+ *        boundary faces are the elements of physical groups of dimension
+ *        N_DIM - 1, named after the group (or "physical_<tag>" if unnamed).
  */
 struct GmshData {
     std::vector<std::array<rtype, N_DIM>> nodes;
     std::vector<std::vector<uint32_t>> cells;
-    std::vector<Mesh::BoundaryFace> edges;
+    std::vector<Mesh::BoundaryFace> boundary_faces;
 };
+
+struct GmshElementType {
+    int dim;
+    int n_nodes;
+};
+
+GmshElementType gmsh_element_type(int type, const std::string & filename) {
+    switch (type) {
+        case 15: return {0, 1};  // Point
+        case 1: return {1, 2};   // Line
+        case 2: return {2, 3};   // Triangle
+        case 3: return {2, 4};   // Quadrilateral
+        case 4: return {3, 4};   // Tetrahedron
+        case 5: return {3, 8};   // Hexahedron
+        case 6: return {3, 6};   // Prism
+        case 7: return {3, 5};   // Pyramid
+        default:
+            throw std::runtime_error("Gmsh file " + filename + ": unsupported element type " + std::to_string(type) +
+                                     "; only linear points, lines, triangles, quadrilaterals, tetrahedra, "
+                                     "hexahedra, prisms and pyramids are supported.");
+    }
+}
+
+std::array<rtype, N_DIM> make_node(double x, double y, double z) {
+    const double xyz[3] = {x, y, z};
+    std::array<rtype, N_DIM> node;
+    FOR_I_DIM node[i] = static_cast<rtype>(xyz[i]);
+    return node;
+}
 
 void expect_section(std::istream & in, const std::string & name) {
     std::string line;
@@ -202,9 +234,28 @@ GmshData read_gmsh(const std::string & filename) {
         throw std::runtime_error("Gmsh file " + filename + ": unsupported format version.");
     }
 
-    std::map<int, std::string> physical_names;  // Physical curves (dim 1) only
-    std::map<int, std::vector<int>> curve_physicals;  // 4.x: curve entity -> physical tags
-    std::map<size_t, uint32_t> node_index;             // Gmsh node tag -> index
+    std::map<int, std::string> physical_names;                  // Boundary-dimension groups only
+    std::map<int, std::vector<int>> boundary_entity_physicals;  // 4.x: entity -> physical tags
+    std::map<size_t, uint32_t> node_index;                      // Gmsh node tag -> index
+
+    auto add_element = [&](int type, int physical, const std::vector<size_t> & tags) {
+        const GmshElementType et = gmsh_element_type(type, filename);
+        if (et.dim > N_DIM) {
+            throw std::runtime_error("Gmsh file " + filename + " has " + std::to_string(et.dim) +
+                                     "D elements, but Mallard was built with Mallard_DIM = " +
+                                     std::to_string(N_DIM) + ".");
+        }
+        if (et.dim < BOUNDARY_DIM || (et.dim == BOUNDARY_DIM && physical == 0)) return;
+        std::vector<uint32_t> idx;
+        for (size_t t : tags) idx.push_back(node_index.at(t));
+        if (et.dim == N_DIM) {
+            data.cells.push_back(idx);
+        } else {
+            auto it = physical_names.find(physical);
+            data.boundary_faces.push_back(
+                {idx, it != physical_names.end() ? it->second : "physical_" + std::to_string(physical)});
+        }
+    };
 
     std::string token;
     while (in >> token) {
@@ -217,29 +268,31 @@ GmshData read_gmsh(const std::string & filename) {
                 in >> dim >> tag;
                 std::getline(in, name);
                 const size_t a = name.find('"'), b = name.rfind('"');
-                if (dim == 1) {
+                if (dim == BOUNDARY_DIM) {
                     physical_names[tag] = (a != std::string::npos && b > a) ? name.substr(a + 1, b - a - 1) : name;
                 }
             }
         } else if (token == "$Entities") {
-            size_t n_points, n_curves, n_surfaces, n_volumes;
-            in >> n_points >> n_curves >> n_surfaces >> n_volumes;
+            size_t n_entities[4];
+            for (size_t & n : n_entities) in >> n;
             std::string line;
             std::getline(in, line);
-            for (size_t i = 0; i < n_points; i++) std::getline(in, line);
-            for (size_t i = 0; i < n_curves; i++) {
-                std::getline(in, line);
-                std::istringstream ls(line);
-                int tag;
-                double bounds[6];
-                size_t n_phys;
-                ls >> tag;
-                for (double & b : bounds) ls >> b;
-                ls >> n_phys;
-                for (size_t k = 0; k < n_phys; k++) {
-                    int p;
-                    ls >> p;
-                    curve_physicals[tag].push_back(std::abs(p));
+            for (int dim = 0; dim < 4; dim++) {
+                for (size_t i = 0; i < n_entities[dim]; i++) {
+                    std::getline(in, line);
+                    if (dim != BOUNDARY_DIM) continue;
+                    std::istringstream ls(line);
+                    int tag;
+                    double bounds[6];
+                    size_t n_phys;
+                    ls >> tag;
+                    for (double & b : bounds) ls >> b;
+                    ls >> n_phys;
+                    for (size_t k = 0; k < n_phys; k++) {
+                        int p;
+                        ls >> p;
+                        boundary_entity_physicals[tag].push_back(std::abs(p));
+                    }
                 }
             }
         } else if (token == "$Nodes") {
@@ -251,7 +304,7 @@ GmshData read_gmsh(const std::string & filename) {
                     double x, y, z;
                     in >> tag >> x >> y >> z;
                     node_index[tag] = data.nodes.size();
-                    data.nodes.push_back({static_cast<rtype>(x), static_cast<rtype>(y)});
+                    data.nodes.push_back(make_node(x, y, z));
                 }
             } else {
                 size_t n_blocks, n_nodes, min_tag, max_tag;
@@ -269,35 +322,11 @@ GmshData read_gmsh(const std::string & filename) {
                             throw std::runtime_error("Gmsh file " + filename + ": parametric nodes are not supported.");
                         }
                         node_index[tags[i]] = data.nodes.size();
-                        data.nodes.push_back({static_cast<rtype>(x), static_cast<rtype>(y)});
+                        data.nodes.push_back(make_node(x, y, z));
                     }
                 }
             }
         } else if (token == "$Elements") {
-            auto add_element = [&](int type, const std::vector<size_t> & tags, int physical) {
-                std::vector<uint32_t> idx;
-                for (size_t t : tags) idx.push_back(node_index.at(t));
-                if (type == 1) {
-                    auto it = physical_names.find(physical);
-                    const std::string name = (it != physical_names.end()) ? it->second
-                                                                          : "physical_" + std::to_string(physical);
-                    data.edges.push_back({{idx[0], idx[1]}, name});
-                } else if (type == 2 || type == 3) {
-                    data.cells.push_back(idx);
-                }
-                // Points and higher-order elements are ignored
-            };
-            auto n_nodes_of = [&](int type) -> int {
-                switch (type) {
-                    case 1: return 2;
-                    case 2: return 3;
-                    case 3: return 4;
-                    case 15: return 1;
-                    default:
-                        throw std::runtime_error("Gmsh file " + filename + ": unsupported element type " +
-                                                 std::to_string(type) + ".");
-                }
-            };
             if (version == 2.2) {
                 size_t n;
                 in >> n;
@@ -307,11 +336,9 @@ GmshData read_gmsh(const std::string & filename) {
                     in >> tag >> type >> n_tags;
                     std::vector<int> etags(n_tags);
                     for (auto & t : etags) in >> t;
-                    std::vector<size_t> nodes(n_nodes_of(type));
+                    std::vector<size_t> nodes(gmsh_element_type(type, filename).n_nodes);
                     for (auto & v : nodes) in >> v;
-                    const int physical = n_tags > 0 ? etags[0] : 0;
-                    if (type == 1 && physical == 0) continue;  // Untagged curves are not boundaries
-                    add_element(type, nodes, physical);
+                    add_element(type, n_tags > 0 ? etags[0] : 0, nodes);
                 }
             } else {
                 size_t n_blocks, n_elements, min_tag, max_tag;
@@ -321,24 +348,24 @@ GmshData read_gmsh(const std::string & filename) {
                     size_t n_in_block;
                     in >> dim >> entity >> type >> n_in_block;
                     int physical = 0;
-                    if (dim == 1) {
-                        auto it = curve_physicals.find(entity);
-                        if (it != curve_physicals.end() && !it->second.empty()) physical = it->second[0];
+                    if (dim == BOUNDARY_DIM) {
+                        auto it = boundary_entity_physicals.find(entity);
+                        if (it != boundary_entity_physicals.end() && !it->second.empty()) physical = it->second[0];
                     }
+                    const int n_nodes_per_element = gmsh_element_type(type, filename).n_nodes;
                     for (size_t i = 0; i < n_in_block; i++) {
                         size_t tag;
                         in >> tag;
-                        std::vector<size_t> nodes(n_nodes_of(type));
+                        std::vector<size_t> nodes(n_nodes_per_element);
                         for (auto & v : nodes) in >> v;
-                        if (dim == 1 && physical == 0) continue;  // Untagged curves are not boundaries
-                        add_element(type, nodes, physical);
+                        add_element(type, physical, nodes);
                     }
                 }
             }
         }
     }
     if (data.cells.empty()) {
-        throw std::runtime_error("Gmsh file " + filename + " contains no triangles or quadrilaterals.");
+        throw std::runtime_error("Gmsh file " + filename + " contains no " + std::to_string(N_DIM) + "D elements.");
     }
     return data;
 }
@@ -347,5 +374,5 @@ GmshData read_gmsh(const std::string & filename) {
 
 void Mesh::init_file(const std::string & filename) {
     GmshData data = read_gmsh(filename);
-    init_from_connectivity(data.nodes, data.cells, data.edges);
+    init_from_connectivity(data.nodes, data.cells, data.boundary_faces);
 }

@@ -20,7 +20,7 @@ At least one stop condition is required.
 | Key | Description |
 |---|---|
 | `type` | `file`, `cartesian` (quads), `cartesian_tri` (each quad split into two triangles along its bottom-left to top-right diagonal), or `wedge` (quads over an 8 degree compression ramp starting at x = 0.5) |
-| `filename` | (`file`) ASCII Gmsh mesh, format 2.2 or 4.1, of triangles and/or quadrilaterals |
+| `filename` | (`file`) ASCII Gmsh mesh, format 2.2 or 4.1, of linear triangles and/or quadrilaterals (2D), or tetrahedra, pyramids, prisms and/or hexahedra (3D) |
 | `Nx`, `Ny` | Number of quads in x and y |
 | `Lx`, `Ly` | Domain size; the domain is `[0, Lx] x [0, Ly]` |
 
@@ -43,8 +43,10 @@ area vectors and centroids come from a triangle fan around the face's vertex
 average, and cell volumes and centroids from the tetrahedra joining those
 triangles to the cell's vertex average.
 
-For Gmsh meshes, each named physical curve becomes a boundary zone; boundary
-edges not in any physical curve form the zone `unassigned`.
+For Gmsh meshes, each physical curve (2D) or surface (3D) becomes a boundary
+zone named after it (`physical_<tag>` if unnamed); boundary faces not in any
+such group form the zone `unassigned`. Elements of other dimensions (points,
+and curves in 3D) are ignored, and higher-order elements are rejected.
 
 ## `[physics]`
 
@@ -151,5 +153,5 @@ The scheme is not exactly well balanced: hydrostatic states carry small spurious
 | `prefix` | Output path prefix; directories are created as needed |
 | `format` | `vtu` (with a `.pvd` series next to it) or `restart` |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
-| `variables` | (`vtu`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, `RHOE`, `U_X`, `U_Y`, `P`, `T`, `H`, `CFL`, and with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`) |
+| `variables` | (`vtu`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), and with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`) |
 | `geometry` | (`vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |
