@@ -1,0 +1,214 @@
+/**
+ * @file teno3d_test.cpp
+ * @author Matthew Bonanni (mbonanni001@gmail.com)
+ * @brief Tests for the TENO-E reconstruction on 3D meshes.
+ * @version 0.1
+ * @date 2026-10-02
+ *
+ * @copyright Copyright (c) 2026 Matthew Bonanni
+ *
+ */
+
+#include <gtest/gtest.h>
+#include <Kokkos_Core.hpp>
+
+#include <cmath>
+#include <sstream>
+#include <string>
+#include <tuple>
+
+#include "test_fixtures.h"
+#include "face_reconstruction.h"
+#include "physics.h"
+#include "solver.h"
+
+namespace {
+
+constexpr rtype GAMMA = 1.4;
+
+// Smooth field satisfying symmetry conditions on the unit cube: density,
+// pressure and tangential velocities are even across each wall, normal
+// velocity odd
+void smooth_conservatives(double x, double y, double z, double * U) {
+    const double rho = 1.0 + 0.2 * std::cos(2.0 * M_PI * x) * std::cos(M_PI * y) * std::cos(M_PI * z);
+    const double u = 0.1 * std::sin(2.0 * M_PI * x) * std::cos(M_PI * y) * std::cos(M_PI * z);
+    const double v = -0.1 * std::sin(M_PI * y) * std::cos(M_PI * x) * std::cos(M_PI * z);
+    const double w = 0.1 * std::sin(M_PI * z) * std::cos(M_PI * x) * std::cos(2.0 * M_PI * y);
+    const double p = 1.0 + 0.1 * std::cos(M_PI * x) * std::cos(2.0 * M_PI * y) * std::cos(M_PI * z);
+    U[0] = rho;
+    U[1] = rho * u;
+    U[2] = rho * v;
+    U[3] = rho * w;
+    U[4] = p / (GAMMA - 1.0) + 0.5 * rho * (u * u + v * v + w * w);
+}
+
+// Quadratic density (velocity and energy constant in conservative form)
+void quadratic_conservatives(double x, double y, double z, double * U) {
+    U[0] = 1.0 + 0.3 * x * x + 0.2 * x * y - 0.1 * z * z + 0.2 * y * z + 0.1 * x - 0.2 * z;
+    U[1] = 0.1;
+    U[2] = -0.1;
+    U[3] = 0.05;
+    U[4] = 10.0;
+}
+
+// Quartic density
+void quartic_conservatives(double x, double y, double z, double * U) {
+    quadratic_conservatives(x, y, z, U);
+    U[0] += 0.4 * x * x * y * z - 0.3 * z * z * z * z + 0.2 * x * y * y * y + 0.1 * x * x * z;
+}
+
+using Field = void (*)(double, double, double, double *);
+
+std::unique_ptr<TENO> make_teno(std::shared_ptr<Mesh> mesh, const BoundaryData & bd, int order,
+                                const std::string & extra = "") {
+    auto teno = std::make_unique<TENO>();
+    teno->set_mesh(mesh);
+    teno->set_boundaries(bd);
+    teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n" + extra));
+    return teno;
+}
+
+/**
+ * @brief Max density error of the reconstruction at the face quadrature points
+ *        (both sides), optionally only on faces at least margin from the walls.
+ */
+double reconstruction_error(const std::string & mesh_type, uint32_t n, int order, double margin = 0.0,
+                            const std::string & extra = "", Field field = smooth_conservatives) {
+    auto mesh = make_mesh_3d(mesh_type, n, n, n);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto avg = cell_averages_3d(*mesh, field);
+    Euler euler = Euler::from_reference(GAMMA, 1.0, 1.0, 1.0);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    auto h_W = Kokkos::create_mirror_view(W);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        rtype U[N_CONSERVATIVE], Wc[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE U[i] = avg(c, i);
+        euler.compute_W_from_conservatives(Wc, U);
+        FOR_I_CONSERVATIVE h_W(c, i) = Wc[i];
+    }
+    Kokkos::deep_copy(W, h_W);
+
+    auto teno = make_teno(mesh, bd, order, extra);
+    const uint8_t n_quad = teno->n_face_quadrature_points();
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, n_quad);
+    teno->calc_face_values(W, face_W);
+    auto h_face_W = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+    auto h_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->face_quad_points);
+    auto h_weights = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->face_quad_weights);
+
+    double err = 0.0;
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        for (uint8_t q = 0; q < n_quad; q++) {
+            if (h_weights(f, q) == 0.0) continue;
+            const double x = h_points(f, q, 0), y = h_points(f, q, 1), z = h_points(f, q, 2);
+            if (std::min({x, y, z}) < margin || std::max({x, y, z}) > 1.0 - margin) continue;
+            double U[N_CONSERVATIVE];
+            field(x, y, z, U);
+            for (uint8_t side = 0; side < 2; side++) {
+                if (mesh->h_cells_of_face(f, side) < 0) continue;
+                err = std::max(err, std::abs(h_face_W(f, q, side, 0) - U[0]));
+            }
+        }
+    }
+    return err;
+}
+
+// Smooth: every cell takes the central stencil. Troubled: every cell runs the
+// stencil selection, which must keep the central stencil on smooth data.
+const char * SMOOTH = "troubled_threshold = 1e9\n";
+const char * TROUBLED = "troubled_threshold = 0\n";
+
+using ExactnessParam = std::tuple<std::string, int, uint32_t>;
+class TENO3DExactness : public ::testing::TestWithParam<ExactnessParam> {};
+
+} // namespace
+
+TEST_P(TENO3DExactness, ReproducesPolynomialsOfTheReconstructionDegreeAwayFromWalls) {
+    // Exactness checks the cell averages of the basis, the stencil
+    // least-squares system (including rank detection) and the face quadrature
+    // points; the wall mirrors are only exact for symmetric fields
+    const auto [mesh_type, order, n] = GetParam();
+    const Field field = (order == 3) ? quadratic_conservatives : quartic_conservatives;
+    EXPECT_LT(reconstruction_error(mesh_type, n, order, 0.4, SMOOTH, field), 1e-10);
+}
+
+INSTANTIATE_TEST_SUITE_P(TENO, TENO3DExactness,
+    ::testing::Values(ExactnessParam{"cartesian", 3, 8}, ExactnessParam{"cartesian_tet", 3, 8},
+                      ExactnessParam{"cartesian_prism", 3, 8}, ExactnessParam{"cartesian_pyramid", 3, 8},
+                      ExactnessParam{"cartesian_mixed", 3, 9}, ExactnessParam{"cartesian", 5, 10},
+                      ExactnessParam{"cartesian_tet", 5, 10}));
+
+namespace {
+
+using OrderParam = std::tuple<std::string, int, uint32_t, const char *>;
+class TENO3DOrder : public ::testing::TestWithParam<OrderParam> {};
+
+} // namespace
+
+TEST_P(TENO3DOrder, SmoothReconstructionConvergesAtDesignOrder) {
+    // Max error at face quadrature points over all faces, with mirrored
+    // stencils at the symmetry walls
+    const auto [mesh_type, order, n, mode] = GetParam();
+    const double e1 = reconstruction_error(mesh_type, n, order, 0.0, mode);
+    const double e2 = reconstruction_error(mesh_type, 2 * n, order, 0.0, mode);
+    const double rate = std::log2(e1 / e2);
+    std::cout << mesh_type << " order " << order << ": max errors " << e1 << ", " << e2 << ", rate " << rate
+              << std::endl;
+    EXPECT_GT(rate, order - 0.5);
+}
+
+INSTANTIATE_TEST_SUITE_P(TENO, TENO3DOrder,
+    ::testing::Values(OrderParam{"cartesian", 3, 6, SMOOTH}, OrderParam{"cartesian", 4, 6, SMOOTH},
+                      OrderParam{"cartesian", 5, 6, SMOOTH}, OrderParam{"cartesian_tet", 3, 4, SMOOTH},
+                      OrderParam{"cartesian_tet", 4, 4, SMOOTH}, OrderParam{"cartesian_tet", 5, 4, SMOOTH},
+                      OrderParam{"cartesian", 5, 6, TROUBLED},
+                      OrderParam{"cartesian_tet", 4, 4, TROUBLED}));
+
+
+namespace {
+
+/**
+ * @brief L1 density error after advecting a smooth density pulse with the full
+ *        solver (uniform velocity and pressure: an exact Euler solution).
+ */
+double advection_error(const std::string & mesh, const std::string & recon, uint32_t n) {
+    std::ostringstream in;
+    in << "[run]\nt_stop = 0.1\ncfl = 0.4\n"
+       << "[mesh]\ntype = \"" << mesh << "\"\nNx = " << n << "\nNy = " << n << "\nNz = " << n << "\nLx = 2.0\nLy = 2.0\nLz = 2.0\n"
+       << "[initialize]\ntype = \"analytical\"\n"
+       << "rho = \"1.0 + 0.3 * exp(-8 * ((x - 0.9)^2 + (y - 0.95)^2 + (z - 0.97)^2))\"\n"
+       << "u = [\"1.0\", \"0.5\", \"0.3\"]\np = \"1.0\"\n";
+    for (const char * zone : {"left", "right", "bottom", "top", "back", "front"}) {
+        in << "[[boundaries]]\nname = \"" << zone << "\"\ntype = \"extrapolation\"\n";
+    }
+    in << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\ncheck_nan = true\n"
+       << "[numerics.face_reconstruction]\ntype = \"" << recon << "\"\norder = 5\n"
+       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+       << "[output]\ncheck_interval = 1000000\n";
+    Solver solver;
+    solver.init(parse_toml(in.str()));
+    solver.run();
+    solver.copy_device_to_host();
+    auto m = solver.get_mesh();
+    auto exact = cell_averages_3d(*m, [](double x, double y, double z, double * U) {
+        U[0] = 1.0 + 0.3 * std::exp(-8.0 * ((x - 1.0) * (x - 1.0) + (y - 1.0) * (y - 1.0) + (z - 1.0) * (z - 1.0)));
+        for (int i = 1; i < N_CONSERVATIVE; i++) U[i] = 0.0;
+    });
+    double err = 0.0;
+    for (uint32_t i = 0; i < m->n_cells; i++) {
+        err += std::abs(solver.h_conservatives(i, 0) - exact(i, 0)) * m->h_cell_volume(i);
+    }
+    return err;
+}
+
+} // namespace
+
+TEST(TENO3DSolver, AdvectedPulseConvergesAndBeatsMUSCL) {
+    // TENO5 with SSPRK3 (dt ~ h): third order overall once resolved
+    const double t1 = advection_error("cartesian", "TENO", 12), t2 = advection_error("cartesian", "TENO", 24);
+    const double m2 = advection_error("cartesian", "MUSCL", 24);
+    std::cout << "advection L1: TENO5 " << t1 << " -> " << t2 << " (rate " << std::log2(t1 / t2) << "), MUSCL " << m2
+              << std::endl;
+    EXPECT_GT(std::log2(t1 / t2), 3.0);
+    EXPECT_LT(t2, 0.25 * m2);
+}

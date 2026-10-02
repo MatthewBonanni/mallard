@@ -13,7 +13,12 @@
 
 #include "input.h"
 
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <iostream>
+#include <limits>
+#include <vector>
 
 #include <Kokkos_Core.hpp>
 #include <toml.hpp>
@@ -43,6 +48,104 @@ void FaceReconstruction::set_boundaries(const BoundaryData & boundaries) {
     this->boundaries = boundaries;
 }
 
+void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
+    const uint32_t n_faces = mesh->n_faces;
+    std::vector<std::vector<std::array<double, 3>>> points(n_faces);
+    std::vector<std::vector<double>> weights(n_faces);
+    const uint8_t tri_rule = (degree <= 2) ? degree : (degree <= 4 ? 4 : 5);
+    const int n_gp = std::min(3, std::max(1, (degree + 1) / 2));
+    const TriangleDunavant tri(std::max<uint8_t>(tri_rule, 1));
+    const GaussLegendre gl(n_gp);
+    size_t n_max = 1;
+    for (uint32_t f = 0; f < n_faces; f++) {
+        const uint32_t n = mesh->h_n_nodes_of_face(f);
+        std::vector<std::array<double, 3>> v(n);
+        for (uint32_t k = 0; k < n; k++) {
+            FOR_I_DIM v[k][i] = mesh->h_node_coords(mesh->h_node_of_face(f, k), i);
+        }
+        auto & pts = points[f];
+        auto & w = weights[f];
+        if (degree <= 1) {
+            std::array<double, 3> c;
+            FOR_I_DIM c[i] = mesh->h_face_coords(f, i);
+            pts.push_back(c);
+            w.push_back(1.0);
+        } else if (n == 3) {
+            for (uint32_t q = 0; q < tri.h_weights.extent(0); q++) {
+                const double a = tri.h_points(q, 0), b = tri.h_points(q, 1);
+                std::array<double, 3> p;
+                for (int i = 0; i < 3; i++) p[i] = v[0][i] + a * (v[1][i] - v[0][i]) + b * (v[2][i] - v[0][i]);
+                pts.push_back(p);
+                w.push_back(tri.h_weights(q));
+            }
+        } else {
+            for (int a = 0; a < n_gp; a++) {
+                for (int b = 0; b < n_gp; b++) {
+                    const double s = gl.h_points(a, 0), t = gl.h_points(b, 0);
+                    const double N[4] = {0.25 * (1 - s) * (1 - t), 0.25 * (1 + s) * (1 - t),
+                                         0.25 * (1 + s) * (1 + t), 0.25 * (1 - s) * (1 + t)};
+                    const double dNs[4] = {-0.25 * (1 - t), 0.25 * (1 - t), 0.25 * (1 + t), -0.25 * (1 + t)};
+                    const double dNt[4] = {-0.25 * (1 - s), -0.25 * (1 + s), 0.25 * (1 + s), 0.25 * (1 - s)};
+                    std::array<double, 3> p = {0, 0, 0}, xs = {0, 0, 0}, xt = {0, 0, 0};
+                    for (int k = 0; k < 4; k++) {
+                        for (int i = 0; i < 3; i++) {
+                            p[i] += N[k] * v[k][i];
+                            xs[i] += dNs[k] * v[k][i];
+                            xt[i] += dNt[k] * v[k][i];
+                        }
+                    }
+                    const double J = std::sqrt(std::pow(xs[1] * xt[2] - xs[2] * xt[1], 2) +
+                                               std::pow(xs[2] * xt[0] - xs[0] * xt[2], 2) +
+                                               std::pow(xs[0] * xt[1] - xs[1] * xt[0], 2));
+                    pts.push_back(p);
+                    w.push_back(gl.h_weights(a) * gl.h_weights(b) * J);
+                }
+            }
+        }
+        double sum = 0.0;
+        for (double x : w) sum += x;
+        for (double & x : w) x *= 2.0 / sum;
+        n_max = std::max(n_max, pts.size());
+    }
+    face_quad_points = Kokkos::View<rtype ***>("face_quad_points", n_faces, n_max, N_DIM);
+    face_quad_weights = Kokkos::View<rtype **>("face_quad_weights", n_faces, n_max);
+    auto h_points = Kokkos::create_mirror_view(face_quad_points);
+    auto h_weights = Kokkos::create_mirror_view(face_quad_weights);
+    for (uint32_t f = 0; f < n_faces; f++) {
+        for (size_t q = 0; q < n_max; q++) {
+            const size_t qq = std::min(q, points[f].size() - 1);
+            FOR_I_DIM h_points(f, q, i) = points[f][qq][i];
+            h_weights(f, q) = (q < points[f].size()) ? weights[f][q] : 0.0;
+        }
+    }
+    Kokkos::deep_copy(face_quad_points, h_points);
+    Kokkos::deep_copy(face_quad_weights, h_weights);
+
+    if (boundaries.face_image_quad.extent(0) != n_faces) return;
+    auto h_image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_image_face);
+    auto h_image_quad = Kokkos::create_mirror_view(boundaries.face_image_quad);
+    for (uint32_t f = 0; f < n_faces; f++) {
+        for (size_t q = 0; q < h_image_quad.extent(1); q++) h_image_quad(f, q) = q;
+        const int32_t g = h_image_face(f);
+        if (g < 0) continue;
+        for (size_t q = 0; q < points[f].size() && q < h_image_quad.extent(1); q++) {
+            double best = std::numeric_limits<double>::max();
+            for (size_t r = 0; r < points[g].size(); r++) {
+                double d2 = 0.0;
+                FOR_I_DIM {
+                    const double t = mesh->h_face_coords(g, i) - mesh->h_face_coords(f, i);
+                    d2 += std::pow(points[g][r][i] - points[f][q][i] - t, 2);
+                }
+                if (d2 < best) {
+                    best = d2;
+                    h_image_quad(f, q) = r;
+                }
+            }
+        }
+    }
+    Kokkos::deep_copy(boundaries.face_image_quad, h_image_quad);
+}
+
 FirstOrder::FirstOrder() {
     type = FaceReconstructionType::FIRST_ORDER;
     quadrature_face = GaussLegendre(1);
@@ -54,6 +157,7 @@ FirstOrder::~FirstOrder() {
 
 void FirstOrder::init(const toml::value & input) {
     (void)(input);
+    if constexpr (N_DIM == 3) init_face_quadrature_3d(1);
     print();
 }
 
@@ -122,6 +226,7 @@ void MUSCL::init(const toml::value & input) {
     venkat_K = find_real_or(input, "venkatakrishnan_K", 5.0);
     gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("gradients", mesh->n_cells);
     limiters = Kokkos::View<rtype *[N_CONSERVATIVE]>("limiters", mesh->n_cells);
+    if constexpr (N_DIM == 3) init_face_quadrature_3d(1);
     print();
 }
 

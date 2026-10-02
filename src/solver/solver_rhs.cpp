@@ -104,6 +104,7 @@ void Solver::launch_flux_functor(StateView rhs) {
                                                     mesh->face_area,
                                                     mesh->cells_of_face,
                                                     face_reconstruction->quadrature_face.weights,
+                                                    face_reconstruction->face_quad_weights,
                                                     face_solution,
                                                     boundary_data,
                                                     W_cells,

@@ -141,6 +141,10 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     data.face_image_side = Kokkos::View<uint8_t *>("face_image_side", mesh.n_faces);
     data.face_image_flip = Kokkos::View<uint8_t *>("face_image_flip", mesh.n_faces);
     data.face_state_index = Kokkos::View<int32_t *>("face_state_index", mesh.n_faces);
+    if constexpr (N_DIM == 3) {
+        // Filled with the per-face quadrature by the face reconstruction
+        data.face_image_quad = Kokkos::View<uint8_t **>("face_image_quad", mesh.n_faces, 9);
+    }
     data.bcs = Kokkos::View<BoundaryCondition *>("bcs", h_bcs_vec.size());
     auto h_face_bc = Kokkos::create_mirror_view(data.face_bc);
     auto h_face_image = Kokkos::create_mirror_view(data.face_image);

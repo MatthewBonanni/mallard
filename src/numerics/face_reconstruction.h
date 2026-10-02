@@ -100,7 +100,20 @@ class FaceReconstruction {
         virtual void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                       Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) = 0;
         
+        /**
+         * @brief Set up per-face quadrature (3D): Dunavant rules on triangles and
+         *        Gauss rules mapped bilinearly onto quadrilaterals, exact for
+         *        polynomials of the given degree on planar faces (degree <= 1
+         *        uses the face centroid). Also maps each quadrature point of a
+         *        transmissive boundary face to the matching point of its image
+         *        face (BoundaryData::face_image_quad).
+         * @param degree Polynomial degree to integrate exactly.
+         */
+        void init_face_quadrature_3d(uint8_t degree);
+
         Quadrature quadrature_face;
+        Kokkos::View<rtype ***> face_quad_points;   // 3D: (face, q, dim)
+        Kokkos::View<rtype **> face_quad_weights;   // 3D: (face, q), sum 2 per face, zero on padding
     protected:
         FaceReconstructionType type;
         std::shared_ptr<Mesh> mesh;
@@ -239,6 +252,7 @@ class TENO : public FaceReconstruction {
                                    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution);
 
         void compute_stencils_and_matrices();
+        void compute_stencils_and_matrices_3d();
         uint64_t cache_key() const;
         void save_cache(const std::string & filename) const;
         bool load_cache(const std::string & filename);

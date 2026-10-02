@@ -19,18 +19,23 @@
 namespace teno {
 
 constexpr uint8_t MAX_DEGREE = 5;
-constexpr uint8_t MAX_NK = (MAX_DEGREE + 1) * (MAX_DEGREE + 2) / 2 - 1;  // non-constant dofs
-constexpr uint8_t NK_SMALL = 5;                                           // degree-2 dofs
-constexpr uint8_t MAX_FACES = 4;
-constexpr uint8_t MAX_FACE_QUAD = 4;
 
 /**
- * @brief Number of non-constant 2D monomials of total degree <= r.
+ * @brief Number of non-constant N_DIM-variate monomials of total degree <= r.
  */
 KOKKOS_INLINE_FUNCTION
 constexpr uint8_t n_dof(const uint8_t r) {
-    return (r + 1) * (r + 2) / 2 - 1;
+    if constexpr (N_DIM == 2) {
+        return (r + 1) * (r + 2) / 2 - 1;
+    } else {
+        return (r + 1) * (r + 2) * (r + 3) / 6 - 1;
+    }
 }
+
+constexpr uint8_t MAX_NK = n_dof(MAX_DEGREE);     // non-constant dofs
+constexpr uint8_t NK_SMALL = n_dof(2);            // degree-2 dofs
+constexpr uint8_t MAX_FACES = (N_DIM == 2) ? 4 : 6;
+constexpr uint8_t MAX_FACE_QUAD = (N_DIM == 2) ? 4 : 9;
 
 /**
  * @brief Exponents (a, b) of the l-th monomial xi^a eta^b, ordered by total
@@ -46,6 +51,29 @@ void exponents(const uint8_t l, uint8_t & a, uint8_t & b) {
     }
     a = d - (l - first);
     b = l - first;
+}
+
+/**
+ * @brief Exponents (a, b, c) of the l-th trivariate monomial xi^a eta^b zeta^c,
+ *        ordered by total degree, then by decreasing a, then decreasing b:
+ *        (1,0,0), (0,1,0), (0,0,1), (2,0,0), (1,1,0), (1,0,1), (0,2,0), ...
+ */
+KOKKOS_INLINE_FUNCTION
+void exponents(const uint8_t l, uint8_t & a, uint8_t & b, uint8_t & c) {
+    uint8_t idx = 0;
+    for (uint8_t d = 1;; d++) {
+        for (int8_t i = d; i >= 0; i--) {
+            for (int8_t j = d - i; j >= 0; j--) {
+                if (idx == l) {
+                    a = i;
+                    b = j;
+                    c = d - i - j;
+                    return;
+                }
+                idx++;
+            }
+        }
+    }
 }
 
 KOKKOS_INLINE_FUNCTION
@@ -65,6 +93,33 @@ void monomials(const uint8_t r, const rtype xi, const rtype eta, rtype * phi) {
         uint8_t a, b;
         exponents(l, a, b);
         phi[l] = ipow(xi, a) * ipow(eta, b);
+    }
+}
+
+/**
+ * @brief Evaluate all trivariate monomials of degree 1..r at (xi, eta, zeta).
+ */
+KOKKOS_INLINE_FUNCTION
+void monomials(const uint8_t r, const rtype xi, const rtype eta, const rtype zeta, rtype * phi) {
+    uint8_t l = 0;
+    for (uint8_t d = 1; d <= r; d++) {
+        for (int8_t i = d; i >= 0; i--) {
+            for (int8_t j = d - i; j >= 0; j--) {
+                phi[l++] = ipow(xi, i) * ipow(eta, j) * ipow(zeta, d - i - j);
+            }
+        }
+    }
+}
+
+/**
+ * @brief Monomials at a point x (N_DIM coordinates, already scaled).
+ */
+KOKKOS_INLINE_FUNCTION
+void monomials(const uint8_t r, const rtype * x, rtype * phi) {
+    if constexpr (N_DIM == 2) {
+        monomials(r, x[0], x[1], phi);
+    } else {
+        monomials(r, x[0], x[1], x[2], phi);
     }
 }
 

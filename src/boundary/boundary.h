@@ -195,6 +195,7 @@ struct BoundaryData {
     Kokkos::View<int32_t *> face_image_face;  // Face of the image cell matching the translated face, else -1
     Kokkos::View<uint8_t *> face_image_side;  // Side of face_image_face belonging to the image cell
     Kokkos::View<uint8_t *> face_image_flip;  // 2D: whether the image face runs opposite to the boundary face
+    Kokkos::View<uint8_t **> face_image_quad; // 3D: quadrature point of the image face matching each point
     Kokkos::View<int32_t *> face_state_index; // Dirichlet faces: index into face_state, else -1
     Kokkos::View<rtype *[N_DIM + 2]> face_state; // Exterior W of Dirichlet faces
     Kokkos::View<BoundaryCondition *> bcs;
@@ -224,7 +225,12 @@ struct BoundaryData {
         const int32_t image_face = face_image_face(i_face);
         const int32_t image = face_image(i_face);
         if (image_face >= 0) {
-            const uint8_t q = face_image_flip(i_face) ? n_quad - 1 - i_quad : i_quad;
+            uint8_t q;
+            if constexpr (N_DIM == 2) {
+                q = face_image_flip(i_face) ? n_quad - 1 - i_quad : i_quad;
+            } else {
+                q = face_image_quad(i_face, i_quad);
+            }
             for (uint8_t i = 0; i < N_DIM + 2; i++) {
                 W_g[i] = face_solution(image_face, q, face_image_side(i_face), i);
             }
