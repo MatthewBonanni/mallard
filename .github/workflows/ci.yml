@@ -18,6 +18,8 @@ jobs:
           - name: mpi
             flags: -DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON
             mpi: true
+          - name: serial-3d
+            flags: -DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3
     name: ${{ matrix.backend.name }}
     steps:
       - uses: actions/checkout@v4

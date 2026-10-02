@@ -16,7 +16,14 @@
 #include <array>
 #include <vector>
 
-#define N_DIM 2
+#ifndef Mallard_DIM
+#define Mallard_DIM 2
+#endif
+#if Mallard_DIM != 2 && Mallard_DIM != 3
+#error "Mallard_DIM must be 2 or 3"
+#endif
+
+#define N_DIM Mallard_DIM
 #define N_CONSERVATIVE (N_DIM + 2)
 #define N_PRIMITIVE (N_DIM + 3)
 
@@ -33,6 +40,7 @@
 using NVector = std::array<rtype, N_DIM>;
 using NMatrix = std::array<std::array<rtype, N_DIM>, N_DIM>;
 
+#if N_DIM == 2
 const std::array<std::string, N_CONSERVATIVE> CONSERVATIVE_NAMES = {
     "RHO",
     "RHOU_X",
@@ -47,5 +55,23 @@ const std::array<std::string, N_PRIMITIVE> PRIMITIVE_NAMES = {
     "T",
     "H"
 };
+#else
+const std::array<std::string, N_CONSERVATIVE> CONSERVATIVE_NAMES = {
+    "RHO",
+    "RHOU_X",
+    "RHOU_Y",
+    "RHOU_Z",
+    "RHOE"
+};
+
+const std::array<std::string, N_PRIMITIVE> PRIMITIVE_NAMES = {
+    "U_X",
+    "U_Y",
+    "U_Z",
+    "P",
+    "T",
+    "H"
+};
+#endif
 
 #endif // COMMON_TYPEDEF_H

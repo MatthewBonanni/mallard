@@ -19,7 +19,7 @@
 
 void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & nodes,
                                   const std::vector<std::vector<uint32_t>> & cells,
-                                  const std::vector<BoundaryEdge> & boundary_edges) {
+                                  const std::vector<BoundaryFace> & boundary_faces) {
     n_nodes = nodes.size();
     n_cells = cells.size();
 
@@ -69,7 +69,7 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
     std::map<std::string, std::vector<uint32_t>> zone_faces;
     std::vector<uint32_t> interior;
     std::vector<bool> zoned(n_faces, false);
-    for (const auto & edge : boundary_edges) {
+    for (const auto & edge : boundary_faces) {
         auto it = face_of_edge.find(std::minmax(edge.nodes[0], edge.nodes[1]));
         if (it == face_of_edge.end()) {
             throw std::runtime_error("Mesh: boundary edge of " + edge.zone + " is not a cell edge.");
@@ -165,7 +165,7 @@ namespace {
 struct GmshData {
     std::vector<std::array<rtype, N_DIM>> nodes;
     std::vector<std::vector<uint32_t>> cells;
-    std::vector<Mesh::BoundaryEdge> edges;
+    std::vector<Mesh::BoundaryFace> edges;
 };
 
 void expect_section(std::istream & in, const std::string & name) {

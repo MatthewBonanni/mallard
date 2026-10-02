@@ -229,21 +229,24 @@ class Mesh {
         void init_cart_tri(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly);
 
         /**
-         * @brief A boundary edge (pair of node indices) and its zone name.
+         * @brief A boundary face (2 nodes in 2D; 3 or 4 nodes in 3D) and its
+         *        zone name.
          */
-        struct BoundaryEdge {
-            std::array<uint32_t, 2> nodes;
+        struct BoundaryFace {
+            std::vector<uint32_t> nodes;
             std::string zone;
         };
 
         /**
-         * @brief Build the mesh from nodes, cells (triangles and/or quads, any
-         *        orientation) and named boundary edges. Boundary faces without
-         *        a named edge go to the zone "unassigned".
+         * @brief Build the mesh from nodes, cells (any orientation) and named
+         *        boundary faces. Boundary faces without a named face go to the
+         *        zone "unassigned". Cells are triangles and quadrilaterals in 2D;
+         *        tetrahedra, pyramids, prisms and hexahedra (Gmsh/VTK node
+         *        order) in 3D.
          */
         void init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & nodes,
                                     const std::vector<std::vector<uint32_t>> & cells,
-                                    const std::vector<BoundaryEdge> & boundary_edges);
+                                    const std::vector<BoundaryFace> & boundary_faces);
 
         /**
          * @brief Read an ASCII Gmsh mesh (format 2.2 or 4.1). Named physical

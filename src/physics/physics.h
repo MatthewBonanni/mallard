@@ -46,8 +46,8 @@ enum class ViscosityModel {
  *        conducting (Navier-Stokes, Stokes hypothesis, constant Prandtl number).
  *
  * Plain aggregate so it can be captured by value in device kernels.
- * Primitive layout: [u_x, u_y, p, T, h] (see PRIMITIVE_NAMES).
- * Reconstruction layout ("W"): [rho, u_x, u_y, p].
+ * Primitive layout: [u_x, u_y, (u_z,) p, T, h] (see PRIMITIVE_NAMES).
+ * Reconstruction layout ("W"): [rho, u_x, u_y, (u_z,) p].
  */
 struct Euler {
     rtype gamma = 1.4;
@@ -136,43 +136,41 @@ struct Euler {
     }
 
     /**
-     * @brief Conservatives [rho, rho u, rho v, rho E] -> primitives [u, v, p, T, h].
+     * @brief Conservatives [rho, rho u, rho E] -> primitives [u, p, T, h].
      */
     KOKKOS_INLINE_FUNCTION
     void compute_primitives_from_conservatives(rtype * primitives,
                                                const rtype * conservatives) const {
         const rtype rho = conservatives[0];
-        const rtype u[N_DIM] = {conservatives[1] / rho, conservatives[2] / rho};
-        const rtype e = conservatives[3] / rho - 0.5 * dot<N_DIM>(u, u);
+        rtype u[N_DIM];
+        FOR_I_DIM u[i] = conservatives[1 + i] / rho;
+        const rtype e = conservatives[N_DIM + 1] / rho - 0.5 * dot<N_DIM>(u, u);
         const rtype p = get_pressure_from_density_energy(rho, e);
-        primitives[0] = u[0];
-        primitives[1] = u[1];
-        primitives[2] = p;
-        primitives[3] = get_temperature_from_energy(e);
-        primitives[4] = e + p / rho;
+        FOR_I_DIM primitives[i] = u[i];
+        primitives[N_DIM] = p;
+        primitives[N_DIM + 1] = get_temperature_from_energy(e);
+        primitives[N_DIM + 2] = e + p / rho;
     }
 
     /**
-     * @brief Conservatives -> W = [rho, u, v, p].
+     * @brief Conservatives -> W = [rho, u, p].
      */
     KOKKOS_INLINE_FUNCTION
     void compute_W_from_conservatives(rtype * W, const rtype * conservatives) const {
         const rtype rho = conservatives[0];
         W[0] = rho;
-        W[1] = conservatives[1] / rho;
-        W[2] = conservatives[2] / rho;
-        W[3] = (gamma - 1.0) * (conservatives[3] - 0.5 * rho * (W[1] * W[1] + W[2] * W[2]));
+        FOR_I_DIM W[1 + i] = conservatives[1 + i] / rho;
+        W[N_DIM + 1] = (gamma - 1.0) * (conservatives[N_DIM + 1] - 0.5 * rho * dot<N_DIM>(W + 1, W + 1));
     }
 
     /**
-     * @brief W = [rho, u, v, p] -> conservatives.
+     * @brief W = [rho, u, p] -> conservatives.
      */
     KOKKOS_INLINE_FUNCTION
     void compute_conservatives_from_W(rtype * conservatives, const rtype * W) const {
         conservatives[0] = W[0];
-        conservatives[1] = W[0] * W[1];
-        conservatives[2] = W[0] * W[2];
-        conservatives[3] = W[3] / (gamma - 1.0) + 0.5 * W[0] * (W[1] * W[1] + W[2] * W[2]);
+        FOR_I_DIM conservatives[1 + i] = W[0] * W[1 + i];
+        conservatives[N_DIM + 1] = W[N_DIM + 1] / (gamma - 1.0) + 0.5 * W[0] * dot<N_DIM>(W + 1, W + 1);
     }
 };
 

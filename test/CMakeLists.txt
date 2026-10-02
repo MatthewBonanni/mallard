@@ -1,11 +1,16 @@
 # CMakeLists.txt for MallardTest
-add_executable(MallardTest
+# Tests shared by both dimensions, then those specific to one
+set(MALLARD_TEST_SOURCES
     test_main.cpp
     common_math_test.cpp
+    time_integrator_test.cpp
+    comm_test.cpp
+)
+if(Mallard_DIM EQUAL 2)
+    list(APPEND MALLARD_TEST_SOURCES
     mesh_test.cpp
     physics_test.cpp
     riemann_solver_test.cpp
-    time_integrator_test.cpp
     reconstruction_test.cpp
     solver_test.cpp
     teno_test.cpp
@@ -15,8 +20,13 @@ add_executable(MallardTest
     source_test.cpp
     io_test.cpp
     mesh_file_test.cpp
-    comm_test.cpp
-)
+    )
+else()
+    list(APPEND MALLARD_TEST_SOURCES
+    physics3d_test.cpp
+    )
+endif()
+add_executable(MallardTest ${MALLARD_TEST_SOURCES})
 
 target_include_directories(MallardTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
