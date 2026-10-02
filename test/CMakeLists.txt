@@ -32,6 +32,7 @@ else()
     gradient3d_test.cpp
     solver3d_test.cpp
     io3d_test.cpp
+    mpi3d_test.cpp
     )
 endif()
 add_executable(MallardTest ${MALLARD_TEST_SOURCES})

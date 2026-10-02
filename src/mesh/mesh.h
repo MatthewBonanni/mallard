@@ -333,6 +333,9 @@ class Mesh {
         // Cells [0, n_reconstructed()) need face values: owned cells and halo layer 1
         uint32_t n_reconstructed_cells = 0;
         uint32_t n_reconstructed() const { return n_reconstructed_cells ? n_reconstructed_cells : n_cells; }
+        // Cells [0, n_complete()) have all their vertex neighbors: all but the outermost halo layer
+        uint32_t n_complete_cells = 0;
+        uint32_t n_complete() const { return n_complete_cells ? n_complete_cells : n_cells; }
         // Distributed runs: global id of every local cell and the global cell count (0 otherwise)
         std::vector<uint64_t> h_global_cell_id;
         uint64_t n_global_cells = 0;

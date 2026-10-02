@@ -392,12 +392,15 @@ void TENO::compute_stencils_and_matrices() {
         // Candidates by vertex-neighbor layers plus their mirror images across
         // nearby boundary lines, sorted by distance
         int layers_used = 0;
+        bool truncated = false;
         auto gather = [&](size_t n_min, int max_layers) {
             std::vector<uint32_t> layer = {i}, cells = {i}, next;
             std::vector<Entry> entries;
             for (int depth = 0; depth < max_layers && entries.size() < n_min; depth++) {
                 next.clear();
                 for (uint32_t c : layer) {
+                    // The outermost halo layer misses neighbors on other ranks
+                    if (c >= mesh->n_complete()) truncated = true;
                     for (uint32_t nb : neighbors[c]) {
                         if (std::find(cells.begin(), cells.end(), nb) == cells.end()) {
                             cells.push_back(nb);
@@ -514,7 +517,8 @@ void TENO::compute_stencils_and_matrices() {
             }
         }
         if (!ok) {
-            failed_large++;
+            // A stencil cut off by the halo is retried once the halo is deep enough
+            if (!truncated) failed_large++;
         } else {
             h_stencil_large_size(i) = n_used;
             for (uint16_t s = 0; s < n_used; s++) {
@@ -935,12 +939,15 @@ void TENO::compute_stencils_and_matrices_3d() {
         // Candidates by vertex-neighbor layers plus their mirror images across
         // nearby boundary planes, sorted by distance
         int layers_used = 0;
+        bool truncated = false;
         auto gather = [&](size_t n_min, int max_layers) {
             std::vector<uint32_t> layer = {i}, cells = {i}, next;
             std::vector<Entry> entries;
             for (int depth = 0; depth < max_layers && entries.size() < n_min; depth++) {
                 next.clear();
                 for (uint32_t c : layer) {
+                    // The outermost halo layer misses neighbors on other ranks
+                    if (c >= mesh->n_complete()) truncated = true;
                     for (uint32_t nb : neighbors[c]) {
                         if (std::find(cells.begin(), cells.end(), nb) == cells.end()) {
                             cells.push_back(nb);
@@ -1055,7 +1062,8 @@ void TENO::compute_stencils_and_matrices_3d() {
             }
         }
         if (!ok) {
-            failed_large++;
+            // A stencil cut off by the halo is retried once the halo is deep enough
+            if (!truncated) failed_large++;
         } else {
             h_stencil_large_size(i) = n_used;
             for (uint16_t s = 0; s < n_used; s++) {

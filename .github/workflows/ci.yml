@@ -20,6 +20,9 @@ jobs:
             mpi: true
           - name: serial-3d
             flags: -DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3
+          - name: mpi-3d
+            flags: -DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3
+            mpi: true
     name: ${{ matrix.backend.name }}
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +47,6 @@ jobs:
         run: |
           mpirun -n 1 ./build/test/MallardTest
           for n in 2 3 4; do
-            mpirun -n $n --oversubscribe ./build/test/MallardTest --gtest_filter='CommTest.*:MPITest.*'
+            mpirun -n $n --oversubscribe ./build/test/MallardTest --gtest_filter='CommTest.*:MPITest.*:MPI3DTest.*'
           done
 
