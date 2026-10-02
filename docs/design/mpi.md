@@ -35,8 +35,8 @@ Setup-time communication (partitioning, migration, I/O) always uses MPI.
 
 ### 2. Mesh input
 
-- **Format:** an HDF5 mesh file with global arrays: node coordinates, cell types and connectivity (CSR), boundary faces with zone ids, and zone names. Each rank reads a contiguous block of cells and the nodes it references, with collective parallel HDF5 I/O. HDF5 is already an optional dependency.
-- **Converter:** `mallard-mesh-convert` turns Gmsh (2.2/4.1) files into this format. It is serial, since it is run once per mesh, and later can stream for meshes that don't fit in memory.
+- **Format:** an HDF5 mesh file with global arrays, global ids being row indices: node coordinates, cell connectivity (CSR of node ids; the cell type follows from the node count), boundary faces (CSR) with zone ids, and zone names (layout in `docs/input.md`). Each rank reads a contiguous block of cells, of nodes and of boundary faces, with collective parallel HDF5 I/O (independent reads when HDF5 is not parallel). Node coordinates a rank needs but did not read are fetched later from the rank that read them (section 5).
+- **Converter:** `mallard-mesh-convert` turns Gmsh (2.2/4.1) files into this format, or writes a generated mesh described by an input file in parallel. A Gmsh file is read whole, since it is converted once per mesh; later the converter can stream meshes that don't fit in memory.
 - Generated meshes (`cartesian`, `wedge`, ...) are produced directly in blocks per rank.
 - Small cases may still read Gmsh on every rank, then partition; this is the default below a size threshold.
 

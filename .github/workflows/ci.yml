@@ -16,12 +16,13 @@ jobs:
           - name: openmp
             flags: -DKokkos_ENABLE_OPENMP=ON
           - name: mpi
-            flags: -DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON
+            flags: -DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON
             mpi: true
           - name: serial-3d
-            flags: -DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3
+            flags: -DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON
+            hdf5: true
           - name: mpi-3d
-            flags: -DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3
+            flags: -DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON
             mpi: true
     name: ${{ matrix.backend.name }}
     steps:
@@ -30,7 +31,12 @@ jobs:
           submodules: true
       - name: Install MPI
         if: matrix.backend.mpi
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libopenmpi-dev openmpi-bin libtbb-dev
+        run: >
+          sudo apt-get update -qq && sudo apt-get install -y -qq
+          libopenmpi-dev openmpi-bin libtbb-dev libhdf5-openmpi-dev
+      - name: Install HDF5
+        if: matrix.backend.hdf5
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libhdf5-dev
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -47,6 +53,6 @@ jobs:
         run: |
           mpirun -n 1 ./build/test/MallardTest
           for n in 2 3 4; do
-            mpirun -n $n --oversubscribe ./build/test/MallardTest --gtest_filter='CommTest.*:MPITest.*:MPI3DTest.*'
+            mpirun -n $n --oversubscribe ./build/test/MallardTest --gtest_filter='CommTest.*:MeshBlockTest.*:MPITest.*:MPI3DTest.*'
           done
 

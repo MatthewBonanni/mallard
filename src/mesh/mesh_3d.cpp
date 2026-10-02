@@ -10,6 +10,7 @@
  */
 
 #include "mesh.h"
+#include "mesh_block.h"
 
 #include <algorithm>
 #include <cmath>
@@ -241,85 +242,6 @@ void Mesh::init_from_connectivity_3d(const std::vector<std::array<rtype, N_DIM>>
 }
 
 void Mesh::init_cart_3d(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rtype Ly, rtype Lz, MeshType kind) {
-    std::vector<std::array<rtype, N_DIM>> nodes;
-    auto grid_node = [&](uint32_t i, uint32_t j, uint32_t k) { return (i * (ny + 1) + j) * (nz + 1) + k; };
-    for (uint32_t i = 0; i <= nx; i++) {
-        for (uint32_t j = 0; j <= ny; j++) {
-            for (uint32_t k = 0; k <= nz; k++) {
-                std::array<rtype, N_DIM> p{};
-                p[0] = Lx * i / nx;
-                p[1] = Ly * j / ny;
-                p[N_DIM - 1] = Lz * k / nz;
-                nodes.push_back(p);
-            }
-        }
-    }
-    std::vector<std::vector<uint32_t>> cells;
-    for (uint32_t i = 0; i < nx; i++) {
-        MeshType block = kind;
-        if (kind == MeshType::CARTESIAN_MIXED) {
-            block = (3 * i < nx) ? MeshType::CARTESIAN
-                  : (3 * i < 2 * nx) ? MeshType::CARTESIAN_PYRAMID : MeshType::CARTESIAN_PRISM;
-        }
-        for (uint32_t j = 0; j < ny; j++) {
-            for (uint32_t k = 0; k < nz; k++) {
-                const uint32_t v[8] = {grid_node(i, j, k), grid_node(i + 1, j, k), grid_node(i + 1, j + 1, k),
-                                       grid_node(i, j + 1, k), grid_node(i, j, k + 1), grid_node(i + 1, j, k + 1),
-                                       grid_node(i + 1, j + 1, k + 1), grid_node(i, j + 1, k + 1)};
-                switch (block) {
-                    case MeshType::CARTESIAN:
-                        cells.push_back({v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]});
-                        break;
-                    case MeshType::CARTESIAN_TET: {
-                        // Kuhn subdivision along the main diagonal v0-v6: conforming
-                        // across blocks because every block uses the same diagonal
-                        static const uint8_t paths[6][2] = {{1, 2}, {1, 5}, {3, 2}, {3, 7}, {4, 5}, {4, 7}};
-                        for (const auto & path : paths) cells.push_back({v[0], v[path[0]], v[path[1]], v[6]});
-                        break;
-                    }
-                    case MeshType::CARTESIAN_PRISM:
-                        cells.push_back({v[0], v[1], v[2], v[4], v[5], v[6]});
-                        cells.push_back({v[0], v[2], v[3], v[4], v[6], v[7]});
-                        break;
-                    case MeshType::CARTESIAN_PYRAMID: {
-                        std::array<rtype, N_DIM> center{};
-                        center[0] = Lx * (i + 0.5) / nx;
-                        center[1] = Ly * (j + 0.5) / ny;
-                        center[N_DIM - 1] = Lz * (k + 0.5) / nz;
-                        const uint32_t apex = nodes.size();
-                        nodes.push_back(center);
-                        for (const auto & face : cell_local_faces(8)) {
-                            cells.push_back({v[face[0]], v[face[1]], v[face[2]], v[face[3]], apex});
-                        }
-                        break;
-                    }
-                    default:
-                        throw std::runtime_error("Mesh: unknown 3D cartesian mesh type.");
-                }
-            }
-        }
-    }
-
-    // Boundary faces: cell faces whose nodes all lie on one side of the box
-    std::vector<BoundaryFace> boundary_faces;
-    const rtype L[3] = {Lx, Ly, Lz};
-    const char * names[3][2] = {{"left", "right"}, {"bottom", "top"}, {"back", "front"}};
-    for (const auto & c : cells) {
-        for (const auto & local : cell_local_faces(c.size())) {
-            for (int d = 0; d < 3; d++) {
-                for (int side = 0; side < 2; side++) {
-                    bool on = true;
-                    for (uint8_t k : local) {
-                        const rtype x = nodes[c[k]][d];
-                        on = on && std::abs(x - side * L[d]) < 1e-12 * L[d];
-                    }
-                    if (!on) continue;
-                    std::vector<uint32_t> fn;
-                    for (uint8_t k : local) fn.push_back(c[k]);
-                    boundary_faces.push_back({fn, names[d][side]});
-                }
-            }
-        }
-    }
-    init_from_connectivity(nodes, cells, boundary_faces);
+    const auto [n_cells, n_nodes] = cartesian_3d_size(nx, ny, nz, kind);
+    init_from_block(cartesian_3d_block(nx, ny, nz, Lx, Ly, Lz, kind, 0, n_cells, 0, n_nodes));
 }

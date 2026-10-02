@@ -100,6 +100,8 @@ void cell_tetrahedra(const std::vector<std::array<double, 3>> & nodes,
                      std::vector<std::array<std::array<double, 3>, 4>> & tets);
 
 
+struct MeshBlock;
+
 class Mesh {
     public:
         /**
@@ -311,8 +313,14 @@ class Mesh {
                                     const std::vector<BoundaryFace> & boundary_faces);
 
         /**
-         * @brief Read an ASCII Gmsh mesh (format 2.2 or 4.1). Named physical
-         *        curves become boundary zones.
+         * @brief Build the mesh from a block holding the whole mesh.
+         */
+        void init_from_block(const MeshBlock & block);
+
+        /**
+         * @brief Read a Mallard HDF5 mesh file (.h5, .hdf5), or an ASCII Gmsh
+         *        mesh (format 2.2 or 4.1) whose named physical curves (surfaces
+         *        in 3D) become boundary zones.
          */
         void init_file(const std::string & filename);
 

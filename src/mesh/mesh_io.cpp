@@ -10,12 +10,15 @@
  */
 
 #include "mesh.h"
+#include "mesh_block.h"
 
 #include <algorithm>
 #include <fstream>
 #include <map>
 #include <sstream>
 #include <stdexcept>
+
+#include "comm.h"
 
 void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & nodes,
                                   const std::vector<std::vector<uint32_t>> & cells,
@@ -373,6 +376,58 @@ GmshData read_gmsh(const std::string & filename) {
 } // namespace
 
 void Mesh::init_file(const std::string & filename) {
+    if (is_hdf5_mesh(filename)) {
+        init_from_block(read_mesh_h5(filename, true));
+        return;
+    }
     GmshData data = read_gmsh(filename);
     init_from_connectivity(data.nodes, data.cells, data.boundary_faces);
+}
+
+void Mesh::init_from_block(const MeshBlock & block) {
+    if (block.first_cell != 0 || block.first_node != 0) {
+        throw std::logic_error("Mesh::init_from_block: the block must hold the whole mesh.");
+    }
+    std::vector<std::array<rtype, N_DIM>> nodes(block.n_nodes());
+    for (uint64_t i = 0; i < block.n_nodes(); i++) {
+        for (int d = 0; d < N_DIM; d++) nodes[i][d] = block.node_coords[i][d];
+    }
+    std::vector<std::vector<uint32_t>> cells(block.n_cells());
+    for (uint64_t c = 0; c < block.n_cells(); c++) {
+        cells[c].assign(block.cell_nodes.begin() + block.cell_offsets[c],
+                        block.cell_nodes.begin() + block.cell_offsets[c + 1]);
+    }
+    std::vector<BoundaryFace> boundary_faces(block.n_faces());
+    for (uint64_t f = 0; f < block.n_faces(); f++) {
+        boundary_faces[f].nodes.assign(block.face_nodes.begin() + block.face_offsets[f],
+                                       block.face_nodes.begin() + block.face_offsets[f + 1]);
+        boundary_faces[f].zone = block.zone_names[block.face_zone[f]];
+    }
+    init_from_connectivity(nodes, cells, boundary_faces);
+}
+
+MeshBlock read_gmsh_block(const std::string & filename) {
+    GmshData data = read_gmsh(filename);
+    const int r = comm::rank(), p = comm::size();
+    MeshBlock block;
+    block.first_cell = block_begin(data.cells.size(), r, p);
+    block.first_node = block_begin(data.nodes.size(), r, p);
+    for (uint64_t c = block.first_cell; c < block_begin(data.cells.size(), r + 1, p); c++) {
+        block.add_cell(data.cells[c]);
+    }
+    for (uint64_t n = block.first_node; n < block_begin(data.nodes.size(), r + 1, p); n++) {
+        std::array<double, N_DIM> x;
+        FOR_I_DIM x[i] = data.nodes[n][i];
+        block.node_coords.push_back(x);
+    }
+    // Zones numbered in order of first appearance, the same on every rank
+    std::map<std::string, uint32_t> zone_index;
+    for (const auto & face : data.boundary_faces) {
+        if (zone_index.emplace(face.zone, block.zone_names.size()).second) block.zone_names.push_back(face.zone);
+    }
+    const uint64_t n_faces = data.boundary_faces.size();
+    for (uint64_t f = block_begin(n_faces, r, p); f < block_begin(n_faces, r + 1, p); f++) {
+        block.add_face(data.boundary_faces[f].nodes, zone_index.at(data.boundary_faces[f].zone));
+    }
+    return block;
 }

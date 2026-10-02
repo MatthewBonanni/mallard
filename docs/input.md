@@ -26,7 +26,7 @@ At least one stop condition is required.
 | Key | Description |
 |---|---|
 | `type` | `file`, `cartesian` (quads), `cartesian_tri` (each quad split into two triangles along its bottom-left to top-right diagonal), or `wedge` (quads over an 8 degree compression ramp starting at x = 0.5) |
-| `filename` | (`file`) ASCII Gmsh mesh, format 2.2 or 4.1, of linear triangles and/or quadrilaterals (2D), or tetrahedra, pyramids, prisms and/or hexahedra (3D) |
+| `filename` | (`file`) Mallard HDF5 mesh (`.h5` or `.hdf5`, see below), or ASCII Gmsh mesh, format 2.2 or 4.1, of linear triangles and/or quadrilaterals (2D), or tetrahedra, pyramids, prisms and/or hexahedra (3D) |
 | `Nx`, `Ny` | Number of quads in x and y |
 | `Lx`, `Ly` | Domain size; the domain is `[0, Lx] x [0, Ly]` |
 
@@ -53,6 +53,23 @@ For Gmsh meshes, each physical curve (2D) or surface (3D) becomes a boundary
 zone named after it (`physical_<tag>` if unnamed); boundary faces not in any
 such group form the zone `unassigned`. Elements of other dimensions (points,
 and curves in 3D) are ignored, and higher-order elements are rejected.
+
+Large meshes should be converted to Mallard's HDF5 mesh format (builds with
+`-DMallard_ENABLE_HDF5=ON`), which every rank of a distributed run reads only
+its share of:
+
+```sh
+mallard-mesh-convert mesh.msh mesh.h5               # from Gmsh
+mpirun -n 8 mallard-mesh-convert input.toml mesh.h5  # a generated mesh, written in parallel
+```
+
+The file holds global arrays, with global ids the row indices:
+`/nodes/coordinates` (`n_nodes x dim`, float64), `/cells/offsets` and
+`/cells/nodes` (CSR of node ids, uint64; the cell type follows from the node
+count, Gmsh/VTK node order), `/boundary/offsets`, `/boundary/nodes` and
+`/boundary/zone` (boundary faces and their zone index), the attribute
+`/boundary/zone_names`, and the root attributes `format = "mallard-mesh"`,
+`version = 1` and `dimension`.
 
 ## `[physics]`
 

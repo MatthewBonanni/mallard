@@ -5,6 +5,7 @@ add_library(MallardCore STATIC
     mesh/mesh.cpp
     mesh/mesh_io.cpp
     mesh/mesh_3d.cpp
+    mesh/mesh_block.cpp
     mesh/zone.cpp
     boundary/boundary.cpp
     numerics/face_reconstruction.cpp
@@ -46,5 +47,16 @@ if(Mallard_ENABLE_MPI)
     endif()
 endif()
 
+if(Mallard_ENABLE_HDF5)
+    target_include_directories(MallardCore PUBLIC ${HDF5_C_INCLUDE_DIRS})
+    target_compile_definitions(MallardCore PUBLIC Mallard_HAS_HDF5 ${HDF5_C_DEFINITIONS})
+    target_link_libraries(MallardCore PUBLIC ${HDF5_C_LIBRARIES})
+endif()
+
 add_executable(Mallard main.cpp)
 target_link_libraries(Mallard PRIVATE MallardCore)
+
+if(Mallard_ENABLE_HDF5)
+    add_executable(mallard-mesh-convert mesh_convert.cpp)
+    target_link_libraries(mallard-mesh-convert PRIVATE MallardCore)
+endif()

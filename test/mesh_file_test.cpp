@@ -19,6 +19,8 @@
 #include <sstream>
 #include <string>
 
+#include "comm.h"
+#include "mesh_block.h"
 #include "test_fixtures.h"
 #include "solver.h"
 
@@ -215,6 +217,32 @@ TEST(MeshFileTest, Gmsh22IgnoresUntaggedCurves) {
 
 TEST(MeshFileTest, ReadsGmsh41MixedMesh) {
     check_small_mesh(write_temp("mallard_small_41.msh", MSH41));
+}
+
+TEST(MeshFileTest, HDF5ConversionKeepsCellsNodesAndZones) {
+    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1) GTEST_SKIP() << "converts on one rank";
+    const std::string msh = write_temp("mallard_convert.msh", jittered_mixed_mesh(6));
+    const std::string h5 = (std::filesystem::temp_directory_path() / "mallard_convert.h5").string();
+    write_mesh_h5(h5, read_gmsh_block(msh));
+    Mesh gmsh, hdf5;
+    gmsh.init_file(msh);
+    hdf5.init_file(h5);
+    ASSERT_EQ(hdf5.n_cells, gmsh.n_cells);
+    ASSERT_EQ(hdf5.n_faces, gmsh.n_faces);
+    for (uint32_t c = 0; c < gmsh.n_cells; c++) {
+        ASSERT_EQ(hdf5.h_n_nodes_of_cell(c), gmsh.h_n_nodes_of_cell(c));
+        for (uint32_t k = 0; k < gmsh.h_n_nodes_of_cell(c); k++) {
+            FOR_I_DIM EXPECT_EQ(hdf5.h_node_coords(hdf5.h_node_of_cell(c, k), i),
+                                gmsh.h_node_coords(gmsh.h_node_of_cell(c, k), i));
+        }
+    }
+    for (FaceZone & zone : *gmsh.face_zones()) {
+        FaceZone * other = hdf5.get_face_zone(zone.get_name());
+        ASSERT_NE(other, nullptr) << zone.get_name();
+        ASSERT_EQ(other->n_faces(), zone.n_faces()) << zone.get_name();
+        for (uint32_t i = 0; i < zone.n_faces(); i++) EXPECT_EQ(other->h_faces(i), zone.h_faces(i));
+    }
 }
 
 TEST(MeshFileTest, JitteredMixedMeshSatisfiesInvariants) {

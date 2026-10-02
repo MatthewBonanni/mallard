@@ -10,6 +10,7 @@
  */
 
 #include "mesh.h"
+#include "mesh_block.h"
 
 #include "input.h"
 
@@ -893,16 +894,10 @@ void Mesh::init_cart_tri(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
 void Mesh::init_wedge(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
     init_cart(nx, ny, Lx, Ly);
 
-    // Adjust node coordinates
-    rtype wedge_theta = 8 * Kokkos::numbers::pi / 180.0;
-    rtype wedge_x = 0.5;
     for (uint32_t i_node = 0; i_node < n_nodes; ++i_node) {
-        rtype x = h_node_coords(i_node, 0);
-        rtype y = h_node_coords(i_node, 1);
-        if (x > wedge_x) {
-            rtype y_bottom = (x - wedge_x) * tan(wedge_theta);
-            h_node_coords(i_node, 1) = (y / Ly) * (Ly - y_bottom) + y_bottom;
-        }
+        const auto x = wedge_node(h_node_coords(i_node, 0), h_node_coords(i_node, 1), Ly);
+        h_node_coords(i_node, 0) = x[0];
+        h_node_coords(i_node, 1) = x[1];
     }
 
     // Recompute derived quantities

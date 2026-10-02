@@ -5,6 +5,7 @@ set(MALLARD_TEST_SOURCES
     common_math_test.cpp
     time_integrator_test.cpp
     comm_test.cpp
+    mesh_block_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
     list(APPEND MALLARD_TEST_SOURCES
