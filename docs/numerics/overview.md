@@ -48,13 +48,13 @@ from a per-cell spectral radius ([Blazek 2015](../references.md#blazek-2015)),
 
 Upwind fluxes damp the jump of the reconstructed velocity across a face at the
 sound speed. As the Mach number falls, that dissipation does not vanish
-relative to the flow scales (Guillard & Viozat, Comput. Fluids 28, 1999;
-Rieper, J. Comput. Phys. 230, 2011). At M = 0.1 it dominates under-resolved
+relative to the flow scales ([Guillard & Viozat 1999](../references.md#guillard-viozat-1999);
+[Rieper 2011](../references.md#rieper-2011)). At M = 0.1 it dominates under-resolved
 vortical flows. On the Taylor-Green vortex at 64^3 (full-box equivalent),
 TENO5 reaches its dissipation peak two time units early, and the resolved
 enstrophy is a third lower.
 
-Mallard follows Thornber et al. (J. Comput. Phys. 227, 2008). Before the
+Mallard follows [Thornber et al. (2008)](../references.md#thornber-2008). Before the
 Riemann solver, the velocity jump across each interior face is scaled by
 `z = min(1, max(M_L, M_R, M_cut))`, and its mean is kept. Supersonic faces
 (`z = 1`) are untouched, and density, pressure and the Riemann solver itself
@@ -62,7 +62,7 @@ are unchanged.
 
 The cutoff `M_cut` (`[numerics] low_mach_cutoff`, default 0.1) keeps some
 acoustic damping in gas nearly at rest, like the cutoff Mach number of
-preconditioned all-speed schemes (Weiss & Smith, AIAA J. 33, 1995). Without
+preconditioned all-speed schemes ([Weiss & Smith 1995](../references.md#weiss-smith-1995)). Without
 it, spurious acoustic velocities of a hydrostatic atmosphere are not damped at
 all and do not converge under refinement. With it, they converge at second
 order, about four times larger than without the correction.

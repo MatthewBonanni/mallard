@@ -47,6 +47,15 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="quirk-1994"></a>J. J. Quirk, A contribution to the great Riemann solver debate, *Int. J. Numer. Methods Fluids* 18, 555–574 (1994). [doi:10.1002/fld.1650180603](https://doi.org/10.1002/fld.1650180603)
   Used in: the carbuncle and odd–even decoupling tests that RHLL passes and HLLC and Roe fail (`test/solver_test.cpp`; the Shu–Osher validation).
 
+- <a id="guillard-viozat-1999"></a>H. Guillard and C. Viozat, On the behaviour of upwind schemes in the low Mach number limit, *Comput. Fluids* 28, 63–86 (1999). [doi:10.1016/S0045-7930(98)00017-6](https://doi.org/10.1016/S0045-7930%2898%2900017-6)
+  Used in: the motivation of the low-Mach correction: upwind dissipation that scales with the sound speed as M → 0.
+- <a id="rieper-2011"></a>F. Rieper, A low-Mach number fix for Roe's approximate Riemann solver, *J. Comput. Phys.* 230, 5263–5287 (2011). [doi:10.1016/j.jcp.2011.03.025](https://doi.org/10.1016/j.jcp.2011.03.025)
+  Used in: the motivation of the low-Mach correction, and its normal-velocity-only variant that was compared against Thornber's.
+- <a id="thornber-2008"></a>B. Thornber, A. Mosedale, D. Drikakis, D. Youngs and R. J. R. Williams, An improved reconstruction method for compressible flows with low Mach number features, *J. Comput. Phys.* 227, 4873–4894 (2008). [doi:10.1016/j.jcp.2008.01.036](https://doi.org/10.1016/j.jcp.2008.01.036)
+  Used in: the low-Mach correction of the face velocity jump, `[numerics] low_mach_cutoff`.
+- <a id="weiss-smith-1995"></a>J. M. Weiss and W. A. Smith, Preconditioning applied to variable and constant density flows, *AIAA J.* 33, 2050–2057 (1995). [doi:10.2514/3.12946](https://doi.org/10.2514/3.12946)
+  Used in: the cutoff Mach number of the low-Mach correction (`low_mach_cutoff`, default 0.1).
+
 ## Viscous terms and transport
 
 - <a id="diskin-2010"></a>B. Diskin, J. L. Thomas, E. J. Nielsen, H. Nishikawa and J. A. White, Comparison of node-centered and cell-centered unstructured finite-volume discretizations: viscous fluxes, *AIAA J.* 48, 1326–1338 (2010). [doi:10.2514/1.44940](https://doi.org/10.2514/1.44940)
