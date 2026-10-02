@@ -39,6 +39,11 @@ struct ForceMonitor {
     std::shared_ptr<std::ofstream> out;
 };
 
+struct IntegralMonitor {
+    uint64_t interval = 0;
+    std::shared_ptr<std::ofstream> out;
+};
+
 /**
  * @brief Faces with a Dirichlet condition and the expressions of x, y, z, t
  *        for their exterior state W = [rho, u, p].
@@ -115,6 +120,13 @@ class Solver {
          */
         std::array<rtype, N_CONSERVATIVE> integrate_conservatives();
 
+        /**
+         * @brief Domain integrals of kinetic energy rho |u|^2 / 2, enstrophy
+         *        rho |omega|^2 / 2, squared dilatation (div u)^2 and pressure
+         *        dilatation p div u, with least-squares velocity gradients.
+         */
+        std::array<rtype, 4> integrate_flow_statistics();
+
         // Public because nvcc rejects device lambdas in non-public member functions
         void update_average_pressure_outlets(StateView solution);
         void calc_dt();
@@ -168,6 +180,7 @@ class Solver {
         void do_checks();
         void write_data(bool force = false);
         void write_forces();
+        void write_integrals();
 
     private:
         bool distribute = true;
@@ -240,6 +253,7 @@ class Solver {
         std::vector<Data> data;
         std::vector<std::unique_ptr<DataWriter>> data_writers;
         std::vector<ForceMonitor> force_monitors;
+        IntegralMonitor integral_monitor;
 };
 
 #endif // SOLVER_H

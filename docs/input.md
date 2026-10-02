@@ -152,6 +152,20 @@ Write the force of the fluid on a boundary zone to a CSV file
 | `interval` | Every this many steps, default 1 |
 | `file` | Output file, default `forces_<zone>.csv` |
 
+## `[integrals]`
+
+Write domain integrals to a CSV file (`step, t, kinetic_energy, enstrophy,
+dilatation_squared, pressure_dilatation`): the integrals of `rho |u|^2 / 2`,
+`rho |omega|^2 / 2`, `(div u)^2` and `p div u`, with velocity gradients from
+the same least-squares reconstruction as the viscous fluxes. For decaying
+turbulence such as the Taylor-Green vortex, the kinetic energy dissipation
+rate is `-dE/dt` and its viscous part `2 mu * enstrophy / rho0`.
+
+| Key | Description |
+|---|---|
+| `interval` | Every this many steps, default 1 |
+| `file` | Output file, default `integrals.csv` |
+
 ## `[source]`
 
 Optional source terms, added per unit volume.

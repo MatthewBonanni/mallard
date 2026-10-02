@@ -14,6 +14,7 @@
 #include <Kokkos_Core.hpp>
 
 #include <cmath>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <sstream>
@@ -351,3 +352,26 @@ TEST_P(Couette3D, HeatFluxWallSetsTemperatureGradient) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Solver3D, Couette3D, ::testing::Values("cartesian", "cartesian_tet"));
+
+TEST(Solver3DValidation, FlowStatisticsOfALinearVelocityField) {
+    // u = (x + 2y, 3z, 5x): div u = 1 and omega = (-3, -5, -2), so the
+    // integrals over the unit cube are exact for least-squares gradients when
+    // the boundary states continue the field
+    Case3D c;
+    c.mesh = "cartesian_tet";
+    c.n[0] = c.n[1] = c.n[2] = 4;
+    const std::string u = "u = [\"x + 2 * y\", \"3 * z\", \"5 * x\"]\n";
+    c.set_all_bcs("type = \"dirichlet\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n");
+    c.init = "type = \"analytical\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n";
+    c.extra = "[integrals]\nfile = \"" +
+              (std::filesystem::temp_directory_path() / "mallard_integrals.csv").string() + "\"\n";
+    auto solver = init_case(c);
+    const auto s = solver->integrate_flow_statistics();
+    EXPECT_NEAR(s[1], 0.5 * (9.0 + 25.0 + 4.0), 1e-10);  // Enstrophy
+    EXPECT_NEAR(s[2], 1.0, 1e-10);                       // (div u)^2
+    // Pressure from cell averages carries the same O(h^2) kinetic energy error
+    EXPECT_NEAR(s[3], 2.0, 0.05);  // p div u
+    // Kinetic energy from the cell averages of rho u misses their variance
+    // within the cells: (8/3 + 3 + 25/3) / 2 = 7 minus O(h^2)
+    EXPECT_NEAR(s[0], 7.0, 0.1);
+}

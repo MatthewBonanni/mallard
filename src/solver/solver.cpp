@@ -448,6 +448,25 @@ void Solver::init_output() {
             force_monitors.push_back(monitor);
         }
     }
+    if (input.contains("integrals")) {
+        integral_monitor.interval = toml::find_or<uint64_t>(input, "integrals", "interval", 1);
+        if (integral_monitor.interval == 0) {
+            throw std::runtime_error("integrals: interval must be positive.");
+        }
+        if (!viscous_gradients.is_allocated()) {
+            viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
+        }
+        const std::string file = toml::find_or<std::string>(input, "integrals", "file", "integrals.csv");
+        if (comm::is_root()) {
+            const std::filesystem::path parent = std::filesystem::path(file).parent_path();
+            if (!parent.empty()) std::filesystem::create_directories(parent);
+            const bool resume = toml::find_or<std::string>(input, "initialize", "type", "") == "restart";
+            integral_monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
+            if (!resume) {
+                *integral_monitor.out << "step,t,kinetic_energy,enstrophy,dilatation_squared,pressure_dilatation\n";
+            }
+        }
+    }
     if (!input.contains("write_data")) {
         return;
     }
@@ -529,6 +548,7 @@ int Solver::run() {
         calc_dt();
         copy_device_to_host();
         write_data(true);
+        write_integrals();
     }
     while (!done()) {
         calc_dt();
@@ -537,6 +557,7 @@ int Solver::run() {
         do_checks();
         write_data();
         write_forces();
+        write_integrals();
     }
     copy_device_to_host();
     write_data(true);
@@ -864,4 +885,90 @@ std::array<rtype, N_CONSERVATIVE> Solver::integrate_conservatives() {
         total[i_var] = sum;
     }
     return comm::allreduce(total, comm::Op::SUM);
+}
+
+/**
+ * @brief Per-cell contributions to Solver::integrate_flow_statistics.
+ */
+struct FlowStatisticsFunctor {
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W;
+    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
+    Kokkos::View<rtype *> volume;
+
+    struct value_type {
+        rtype v[4];
+    };
+
+    KOKKOS_INLINE_FUNCTION
+    void init(value_type & sum) const {
+        for (int i = 0; i < 4; i++) sum.v[i] = 0.0;
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    void join(value_type & dst, const value_type & src) const {
+        for (int i = 0; i < 4; i++) dst.v[i] += src.v[i];
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t c, value_type & sum) const {
+        const rtype rho = W(c, 0);
+        const rtype V = volume(c);
+        rtype u2 = 0.0, div = 0.0;
+        FOR_I_DIM {
+            u2 += W(c, 1 + i) * W(c, 1 + i);
+            div += gradients(c, 1 + i, i);
+        }
+        // gradients(c, 1 + k, i) = d u_k / d x_i
+        rtype omega2 = 0.0;
+        if constexpr (N_DIM == 2) {
+            const rtype w = gradients(c, 2, 0) - gradients(c, 1, 1);
+            omega2 = w * w;
+        } else {
+            for (uint8_t k = 0; k < 3; k++) {
+                const uint8_t a = (k + 1) % 3, b = (k + 2) % 3;
+                const rtype w = gradients(c, 1 + b, a) - gradients(c, 1 + a, b);
+                omega2 += w * w;
+            }
+        }
+        sum.v[0] += 0.5 * rho * u2 * V;
+        sum.v[1] += 0.5 * rho * omega2 * V;
+        sum.v[2] += div * div * V;
+        sum.v[3] += W(c, N_DIM + 1) * div * V;
+    }
+};
+
+std::array<rtype, 4> Solver::integrate_flow_statistics() {
+    halo.exchange(conservatives);
+    update_boundary_states(t);
+    const Euler phys = physics;
+    StateView U = conservatives;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
+    Kokkos::parallel_for("statistics_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
+        rtype cons[N_CONSERVATIVE], W_c[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE cons[i] = U(i_cell, i);
+        phys.compute_W_from_conservatives(W_c, cons);
+        FOR_I_CONSERVATIVE W(i_cell, i) = W_c[i];
+    });
+    LSQGradientFunctor gradient_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell,
+                                        mesh->cells_of_face, mesh->cell_coords, mesh->face_coords,
+                                        mesh->face_normals, boundary_data, W_cells, viscous_gradients};
+    LSQVertexGradientFunctor vertex_gradient_functor{gradient_functor, mesh->offsets_cells_of_cell,
+                                                     mesh->cells_of_cell};
+    Kokkos::parallel_for("statistics_gradients", mesh->n_owned(), vertex_gradient_functor);
+    FlowStatisticsFunctor functor{W_cells, viscous_gradients, mesh->cell_volume};
+    FlowStatisticsFunctor::value_type result;
+    Kokkos::parallel_reduce("statistics", mesh->n_owned(), functor, result);
+    std::array<rtype, 4> sums;
+    for (int i = 0; i < 4; i++) sums[i] = result.v[i];
+    return comm::allreduce(sums, comm::Op::SUM);
+}
+
+void Solver::write_integrals() {
+    if (integral_monitor.interval == 0 || step % integral_monitor.interval != 0) return;
+    const auto sums = integrate_flow_statistics();
+    if (!integral_monitor.out) return;
+    *integral_monitor.out << step << "," << std::setprecision(12) << t;
+    for (const rtype s : sums) *integral_monitor.out << "," << s;
+    *integral_monitor.out << "\n";
+    integral_monitor.out->flush();
 }

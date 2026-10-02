@@ -1,0 +1,106 @@
+# Taylor-Green vortex at Re = 1600 and M = 0.1, the DNS benchmark of the
+# International Workshop on High-Order CFD Methods (case C3.5; Brachet et al.,
+# J. Fluid Mech. 130, 1983; van Rees et al., J. Comput. Phys. 230, 2011). Needs
+# the 3D build (cmake -DMallard_DIM=3).
+#
+# u = sin x cos y cos z, v = -cos x sin y cos z, w = 0 and
+# p = p0 + (cos 2x + cos 2y)(cos 2z + 2) / 16 with rho0 = V0 = L = 1, uniform
+# temperature, p0 = 1 / (gamma M^2), mu = 1 / 1600 and Pr = 0.71. The flow keeps
+# the mirror symmetries of its initial state, so only the octant [0, pi]^3 of the
+# periodic box [-pi, pi]^3 is computed, with symmetry planes on all six faces:
+# 8x fewer cells for the same resolution. TENO5 on Nx^3 hexahedra; Nx = 64 is
+# the workshop's 128^3, Nx = 128 its 256^3.
+#
+# Run (to t = 20 in convective units L / V0):
+#   ../../build3d/src/Mallard -i input.toml
+#   python ../../tools/plot_taylor_green.py integrals.csv --ref spectral_Re1600_512.gdiag
+# with the workshop's 512^3 pseudo-spectral reference
+# (https://cfd.ku.edu/hiocfd/spectral_Re1600_512.gdiag).
+#
+# Expected result: the kinetic energy decays slowly until t ~ 4, then the
+# vortex sheets roll up and break down, and the dissipation rate
+# eps = -dE/dt peaks at t ~ 9 before turbulent decay. The reference peak is
+# 0.01286 at t = 8.97. Nx = 64 gives 0.01302 at t = 8.12: TENO's numerical
+# dissipation stands in for the unresolved scales (the enstrophy-based
+# 2 mu E_omega only reaches 0.0049), so the peak comes early. Nx = 64
+# (262,144 cells, 32,000 steps) takes about an hour on one A100 GPU.
+
+[run]
+t_stop = 20.0
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 64
+Ny = 64
+Nz = 64
+Lx = 3.141592653589793
+Ly = 3.141592653589793
+Lz = 3.141592653589793
+
+[initialize]
+type = "analytical"
+u = ["sin(x) * cos(y) * cos(z)", "-cos(x) * sin(y) * cos(z)", "0.0"]
+p = "71.42857142857143 + (cos(2 * x) + cos(2 * y)) * (cos(2 * z) + 2) / 16"
+T = "1.0"
+
+[[boundaries]]
+name = "left"
+type = "symmetry"
+
+[[boundaries]]
+name = "right"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "back"
+type = "symmetry"
+
+[[boundaries]]
+name = "front"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+cache_file = "teno_cache.bin"
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 71.42857142857143
+T_ref = 1.0
+rho_ref = 1.0
+mu = 0.000625
+Pr = 0.71
+
+[output]
+check_interval = 500
+
+[integrals]
+interval = 5
+file = "integrals.csv"
+
+[[write_data]]
+prefix = "./solut/tgv"
+format = "vtu"
+time_interval = 0.1
+variables = ["U"]
+
+[[write_data]]
+prefix = "./restart/tgv"
+format = "restart"
+interval = 2000
