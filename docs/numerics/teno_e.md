@@ -39,6 +39,24 @@ HLL (Davis/Einfeldt speeds) or HLLC, Gauss points per edge, SSPRK3, CFL 0.4.
 2D Riemann config 8 (t=0.25) and 16 (t=0.2) on [-0.5,0.5]^2; DMR; sin^2 density advection
 for accuracy (expect design order on uniform triangles).
 
+## 3D (Mallard extension)
+- Same algorithm on tetrahedra, hexahedra, prisms and pyramids: trivariate monomials
+  (scaled by h = V^(1/3)), one sector stencil per face (entries whose direction from the
+  target centroid lies in the cone spanned by the face's vertices; 18 entries by
+  default), mirror images across planar boundary faces.
+- Cell averages of the basis and the SI matrix come from central moments of each cell,
+  integrated once over its tetrahedral decomposition (the one defining the mesh
+  geometry); stencil entries follow by binomial shifts, mirrored entries are integrated
+  directly.
+- Face quadrature: Dunavant rules on triangles, Gauss rules mapped bilinearly on
+  quadrilaterals, exact to the reconstruction order.
+- Equidistant shells are large on 3D lattices, so the large stencil may grow up to
+  3.5 x DOFs + 64 entries to avoid splitting one; columns of round-off (e.g. no xy
+  information when all centroids lie on axis planes) are rejected as rank deficient.
+- Measured orders (max error at face quadrature points, symmetry walls): hexahedra
+  16 -> 24: 3.83 and 4.85 for orders 4 and 5 (12 -> 16: 2.87 for order 3); Kuhn
+  tetrahedra 8 -> 12: 2.92, 3.90, 4.84 for orders 3, 4, 5.
+
 ## Known limitations in Mallard
 
 - Order 5 and up on curved, polygonal boundaries: on the cylinder O-grid

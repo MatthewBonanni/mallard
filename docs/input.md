@@ -112,9 +112,9 @@ the zone's faces whose centers satisfy the expression.
 | `type` | `FO` (first order), `MUSCL` or `TENO` |
 | `limiter` | (`MUSCL`) `venkatakrishnan` (default), `barth_jespersen` or `none` |
 | `venkatakrishnan_K` | (`MUSCL`) Venkatakrishnan threshold constant, default 5 |
-| `order` | (`TENO`) Order of accuracy, 3 to 6, default 5 |
+| `order` | (`TENO`) Order of accuracy, 3 to 6, default 5. In 3D, faces use Dunavant (triangles) or Gauss (quadrilaterals) rules exact to this order, capped at degree 5 on triangles |
 | `stencil_factor` | (`TENO`) Large-stencil size as a multiple of the number of polynomial coefficients, default 2. Smaller values (e.g. 1.5) are markedly less dissipative for fine smooth structures (Shu-Osher entropy waves: 50% more amplitude at 200 cells) but less robust at discontinuities. |
-| `small_stencil_size` | (`TENO`) Cells per sector stencil, default 10 |
+| `small_stencil_size` | (`TENO`) Cells per sector stencil, default 10 (18 in 3D) |
 | `troubled_threshold` | (`TENO`) Troubled-cell threshold on the density-jump variance, default 1e-3 |
 | `troubled_upper` | (`TENO`) Variance at which the adaptive cutoff reaches its largest value (most dissipative), default 1e-2 |
 | `C_T` | (`TENO`) Fixed TENO cutoff; adaptive (1e-10 to 1e-6) if omitted |

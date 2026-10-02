@@ -10,16 +10,16 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 
 *Double Mach reflection, a 2D Riemann problem and the Daru & Tenaud viscous shock tube ([`examples/`](examples)), with the shock tube's wall density at t = 1 landing on the grid-converged reference of [Zhou et al.](https://arxiv.org/abs/1705.09062).*
 
-> **NOTE:** Mallard is a **work in progress**: 2D only for now (3D and MPI are next), and GPU performance has only begun to be tuned.
+> **NOTE:** Mallard is a **work in progress**: 3D support is new, MPI is in progress, and GPU performance has only begun to be tuned.
 
 ## Features
 
 - Compressible Euler and Navier-Stokes equations (calorically perfect gas, constant or Sutherland viscosity)
-- Unstructured meshes of triangles, quadrilaterals or both, read from Gmsh files or generated
+- 2D or 3D (a build option): unstructured meshes of triangles and quadrilaterals, or of tetrahedra, hexahedra, prisms and pyramids, read from Gmsh files or generated
 - Face reconstruction:
   - First order
   - Second-order MUSCL with least-squares gradients and Barth-Jespersen or Venkatakrishnan limiting
-  - TENO-E of orders 3 to 6 ([Liang, Shyy & Fu, J. Sci. Comput. 2025](https://doi.org/10.1007/s10915-025-02918-w)): k-exact least squares on a large central stencil and three or four sector stencils, a density-based troubled-cell indicator, characteristic-wise stencil selection with an adaptive cutoff, and mirror ghost cells at boundaries
+  - TENO-E of orders 3 to 6 ([Liang, Shyy & Fu, J. Sci. Comput. 2025](https://doi.org/10.1007/s10915-025-02918-w)): k-exact least squares on a large central stencil and one sector stencil per face, a density-based troubled-cell indicator, characteristic-wise stencil selection with an adaptive cutoff, and mirror ghost cells at boundaries
 - Riemann solvers: Rusanov, HLL, HLLC, Roe, and the carbuncle-free rotated-hybrid HLL-Roe
 - Source terms: gravity and arbitrary expressions
 - Time integration: forward Euler, SSPRK3, RK4, with the time step set by a CFL number
@@ -40,11 +40,14 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_
 cmake --build build -j
 ```
 
+Add `-DMallard_DIM=3` (in a separate build directory) for the 3D solver.
+
 Pick the Kokkos backend at configure time, for example `-DKokkos_ENABLE_OPENMP=ON`, or `-DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON -DCMAKE_CXX_COMPILER=$PWD/src/external/kokkos/bin/nvcc_wrapper` for NVIDIA A100 GPUs (add `-DKokkos_ENABLE_OPENMP=ON` too, so host-side setup such as TENO's precomputation runs in parallel). To use an installed Kokkos instead, pass `-DUSE_SYSTEM_KOKKOS=ON -DKokkos_DIR=/path/to/kokkos`.
 
 | CMake option | Default | Description |
 |---|---|---|
 | `USE_SYSTEM_KOKKOS` | `ON` | Use an installed Kokkos instead of the submodule |
+| `Mallard_DIM` | `2` | Spatial dimension, `2` or `3` (one binary per dimension) |
 | `Mallard_USE_DOUBLE` | `ON` | Double precision (single precision otherwise) |
 | `Mallard_ENABLE_MPI` | `OFF` | Distributed memory with MPI: `mpirun -n N Mallard -i input.toml` splits the mesh between ranks (solution output and restart from several ranks are not supported yet) |
 | `Mallard_ENABLE_HDF5` | `OFF` | Find or build HDF5 (not used by the solver yet) |
@@ -65,7 +68,7 @@ See [`examples/`](examples) for complete input files and [`docs/input.md`](docs/
 ./build/test/MallardTest
 ```
 
-The test suite checks mesh geometry, the Riemann solvers against an exact Riemann solver, time integrator convergence orders, gradient and limiter properties, TENO design order on triangles and quadrilaterals, free-stream preservation, discrete conservation, symmetry preservation, shock tubes against exact solutions, viscous flows against exact solutions (Couette, Stokes' first problem, conduction), and bit-for-bit restarts.
+The test suite checks mesh geometry, the Riemann solvers against an exact Riemann solver, time integrator convergence orders, gradient and limiter properties, TENO design order on triangles and quadrilaterals and on 3D tetrahedra and hexahedra (with polynomial exactness on prisms, pyramids and mixed meshes), free-stream preservation, discrete conservation, symmetry preservation, shock tubes against exact solutions, viscous flows against exact solutions (Couette, Stokes' first problem, conduction), and bit-for-bit restarts.
 
 ## Postprocessing
 
