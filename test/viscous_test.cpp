@@ -26,18 +26,20 @@ struct ViscousCase {
     std::string mesh = "cartesian";
     uint32_t nx = 4;
     uint32_t ny = 16;
+    double lx = 1.0;
     double mu = 0.02;
     std::string bottom = "type = \"wall_isothermal\"\nT = 1.0\n";
     std::string top = "type = \"wall_isothermal\"\nT = 1.0\n";
     std::string init = "type = \"analytical\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\"]\np = \"1.0\"\n";
     std::string run = "t_stop = 5.0\ncfl = 0.8\n";
     std::string recon = "MUSCL";
+    std::string source;
 };
 
 std::unique_ptr<Solver> run_viscous(const ViscousCase & c) {
     std::ostringstream s;
     s << "[run]\n" << c.run
-      << "[mesh]\ntype = \"" << c.mesh << "\"\nNx = " << c.nx << "\nNy = " << c.ny << "\nLx = 1.0\nLy = 1.0\n"
+      << "[mesh]\ntype = \"" << c.mesh << "\"\nNx = " << c.nx << "\nNy = " << c.ny << "\nLx = " << c.lx << "\nLy = 1.0\n"
       << "[initialize]\n" << c.init
       << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
       << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
@@ -48,6 +50,7 @@ std::unique_ptr<Solver> run_viscous(const ViscousCase & c) {
       << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "mu = " << c.mu << "\nPr = 0.72\n"
       << "[output]\ncheck_interval = 1000000\n";
+    if (!c.source.empty()) s << "[source]\n" << c.source;
     auto solver = std::make_unique<Solver>();
     solver->init(parse_toml(s.str()));
     solver->run();
@@ -101,8 +104,35 @@ TEST_P(ViscousMesh, StokesFirstProblemMatchesErfcProfile) {
     };
     const double e1 = error(32), e2 = error(64);
     EXPECT_LT(e2, 0.01 * 0.05);
-    // Least-squares gradients on triangles are not fully second order
-    EXPECT_GT(std::log2(e1 / e2), GetParam() == "cartesian" ? 1.7 : 1.5);
+    EXPECT_GT(std::log2(e1 / e2), 1.8);
+}
+
+TEST_P(ViscousMesh, ForcedChannelFlowWithTransmissiveEndsConvergesAtSecondOrder) {
+    // u = 0.05 (y - y^3) between walls at rest, driven by the body force
+    // -mu u'' = 0.06 y, in a strip of width 1/4 with transmissive ends. On
+    // triangles, ends that took their viscous flux from the boundary cell's own
+    // gradient, rather than from the image face, converged at order 0.5.
+    auto error = [&](uint32_t ny) {
+        ViscousCase c;
+        c.mesh = GetParam();
+        c.nx = ny / 4;
+        c.ny = ny;
+        c.lx = 0.25;
+        c.mu = 0.2;
+        c.init = "type = \"analytical\"\nrho = \"1.0\"\nu = [\"0.05 * (y - y^3)\", \"0.0\"]\np = \"1.0\"\n";
+        c.source = "rhou = [\"0.06 * y\", \"0.0\"]\n";
+        c.run = "t_stop = 3.0\ncfl = 0.8\n";
+        auto solver = run_viscous(c);
+        auto m = solver->get_mesh();
+        double err = 0.0;
+        for (uint32_t i = 0; i < m->n_cells; i++) {
+            const double y = m->h_cell_coords(i, 1);
+            err = std::max(err, std::abs(solver->h_primitives(i, 0) - 0.05 * (y - y * y * y)));
+        }
+        return err;
+    };
+    const double e1 = error(8), e2 = error(16);
+    EXPECT_GT(std::log2(e1 / e2), 1.8);
 }
 
 TEST_P(ViscousMesh, ConductionBetweenIsothermalWallsIsLinear) {

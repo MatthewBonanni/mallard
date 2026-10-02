@@ -470,6 +470,10 @@ void Solver::allocate_memory() {
     cfl_local = Kokkos::View<rtype *>("cfl_local", mesh->n_cells);
     if (physics.is_viscous()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
+        LSQGradientFunctor gradient_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell,
+                                            mesh->cells_of_face, mesh->cell_coords, mesh->face_coords,
+                                            mesh->face_normals, boundary_data, W_cells, viscous_gradients};
+        viscous_gradient = make_vertex_gradient(gradient_functor, mesh->offsets_cells_of_cell, mesh->cells_of_cell);
     }
     h_conservatives = Kokkos::create_mirror_view(conservatives);
     h_primitives = Kokkos::create_mirror_view(primitives);
@@ -825,12 +829,7 @@ std::array<rtype, 2 * N_DIM> Solver::calc_force(const Kokkos::View<uint32_t *> &
         FOR_I_CONSERVATIVE W(i_cell, i) = W_c[i];
     });
     if (physics.is_viscous()) {
-        LSQGradientFunctor gradient_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell,
-                                            mesh->cells_of_face, mesh->cell_coords, mesh->face_coords,
-                                            mesh->face_normals, boundary_data, W_cells, viscous_gradients};
-        LSQVertexGradientFunctor vertex_gradient_functor{gradient_functor, mesh->offsets_cells_of_cell,
-                                                         mesh->cells_of_cell};
-        Kokkos::parallel_for("force_gradients", mesh->n_cells, vertex_gradient_functor);
+        Kokkos::parallel_for("force_gradients", mesh->n_cells, viscous_gradient);
     }
     ForceFunctor functor{faces, mesh->face_normals, mesh->face_coords, mesh->cell_coords, mesh->cells_of_face,
                          W_cells, viscous_gradients, boundary_data, physics, physics.is_viscous()};

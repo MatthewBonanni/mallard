@@ -57,7 +57,9 @@ the Riemann solver.
 
 ## Viscous fluxes
 
-- Face gradients of velocity and temperature average the vertex-neighbor least-squares cell gradients. They are then corrected along the face normal so that their component along the line between the cell centroids matches the direct difference.
+- Cell gradients come from a weighted least-squares quadratic fit over the vertex neighbors and the cell's boundary ghosts. A linear fit is only first-order accurate on one-sided boundary stencils and on triangles, where its errors cancel only in the interior of regular meshes.
+- Face gradients of velocity and temperature average the two cell gradients. They are then corrected along the face normal so that their component along the line between the cell centroids matches the direct difference.
+- Transmissive faces take the face values and gradients of their image face, as the convective flux does.
 - Stress follows the Stokes hypothesis; heat flux uses a constant Prandtl number.
 
 ## Known limitations

@@ -101,6 +101,46 @@ TEST_P(MeshTypes, LSQGradientExactForLinearFieldWithDirichletBoundaries) {
     }
 }
 
+TEST_P(MeshTypes, VertexLSQGradientExactForQuadraticFieldWithDirichletBoundaries) {
+    // The viscous gradients fit a quadratic, so they are exact for quadratic
+    // fields in every cell, including boundary cells with one-sided stencils
+    // (a linear fit is off by O(h) there)
+    auto quadratic = [](uint8_t i, rtype x, rtype y) {
+        return linear(i, x, y) + (0.3 + 0.1 * i) * x * x - 0.4 * x * y + (0.2 - 0.1 * i) * y * y;
+    };
+    auto mesh = make_mesh(GetParam(), 8, 7);
+    std::vector<int32_t> face_bc(mesh->n_faces, -1);
+    for (uint32_t f = 0; f < mesh->n_faces; f++) face_bc[f] = mesh->h_cells_of_face(f, 1) < 0 ? 0 : -1;
+    BoundaryCondition dir;
+    dir.type = BoundaryType::DIRICHLET;
+    BoundaryData bd = make_boundary_data(*mesh, face_bc, {dir}, 1.4);
+    auto h_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_state_index);
+    auto h_state = Kokkos::create_mirror_view(bd.face_state);
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        if (h_index(f) < 0) continue;
+        FOR_I_CONSERVATIVE h_state(h_index(f), i) = quadratic(i, mesh->h_face_coords(f, 0), mesh->h_face_coords(f, 1));
+    }
+    Kokkos::deep_copy(bd.face_state, h_state);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    auto h_W = Kokkos::create_mirror_view(W);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        FOR_I_CONSERVATIVE h_W(c, i) = quadratic(i, mesh->h_cell_coords(c, 0), mesh->h_cell_coords(c, 1));
+    }
+    Kokkos::deep_copy(W, h_W);
+    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> grad("grad", mesh->n_cells);
+    LSQGradientFunctor faces{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
+                             mesh->cell_coords, mesh->face_coords, mesh->face_normals, bd, W, grad};
+    Kokkos::parallel_for(mesh->n_cells, make_vertex_gradient(faces, mesh->offsets_cells_of_cell, mesh->cells_of_cell));
+    auto h_grad = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), grad);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        const rtype x = mesh->h_cell_coords(c, 0), y = mesh->h_cell_coords(c, 1);
+        FOR_I_CONSERVATIVE {
+            EXPECT_NEAR(h_grad(c, i, 0), GX[i] + 2.0 * (0.3 + 0.1 * i) * x - 0.4 * y, 1e-9) << "cell " << c;
+            EXPECT_NEAR(h_grad(c, i, 1), GY[i] - 0.4 * x + 2.0 * (0.2 - 0.1 * i) * y, 1e-9) << "cell " << c;
+        }
+    }
+}
+
 TEST_P(MeshTypes, UnlimitedMUSCLReproducesLinearFieldAtInteriorFaces) {
     auto mesh = make_mesh(GetParam(), 8, 7);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::EXTRAPOLATION);

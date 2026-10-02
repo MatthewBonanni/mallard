@@ -109,8 +109,7 @@ TEST_P(MeshTypes3D, LSQGradientsExactForLinearFieldWithDirichletBoundaries) {
 
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> grad_v("grad_v", mesh->n_cells);
     functor.gradients = grad_v;
-    LSQVertexGradientFunctor vertex{functor, mesh->offsets_cells_of_cell, mesh->cells_of_cell};
-    Kokkos::parallel_for(mesh->n_cells, vertex);
+    Kokkos::parallel_for(mesh->n_cells, make_vertex_gradient(functor, mesh->offsets_cells_of_cell, mesh->cells_of_cell));
     expect_exact_gradient(*mesh, grad_v, false);
 }
 

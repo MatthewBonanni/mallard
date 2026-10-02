@@ -150,40 +150,182 @@ struct LSQGradientFunctor {
 };
 
 /**
- * @brief Weighted least-squares gradient over all vertex neighbors plus the
- *        boundary ghost states of the cell's own boundary faces. The larger,
- *        nearly symmetric stencil makes the gradient second-order accurate on
- *        smooth meshes, including triangles, where three face neighbors only
- *        give first-order gradients.
+ * @brief Cholesky factorization A = L L^T of a symmetric positive definite
+ *        matrix given by its upper triangle. Returns false if a pivot falls
+ *        below 1e-10 of its diagonal entry, i.e. the matrix is (nearly) singular.
+ */
+template <uint8_t N>
+KOKKOS_INLINE_FUNCTION
+bool cholesky(const rtype A[N][N], rtype L[N][N]) {
+    for (uint8_t p = 0; p < N; p++) {
+        for (uint8_t q = 0; q <= p; q++) {
+            rtype s = A[q][p];
+            for (uint8_t k = 0; k < q; k++) s -= L[p][k] * L[q][k];
+            if (q < p) {
+                L[p][q] = s / L[q][q];
+            } else if (s > 1.0e-10 * A[p][p]) {
+                L[p][p] = Kokkos::sqrt(s);
+            } else {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/**
+ * @brief Solve L L^T x = b in place.
+ */
+template <uint8_t N>
+KOKKOS_INLINE_FUNCTION
+void cholesky_solve(const rtype L[N][N], rtype * x) {
+    for (uint8_t p = 0; p < N; p++) {
+        for (uint8_t k = 0; k < p; k++) x[p] -= L[p][k] * x[k];
+        x[p] /= L[p][p];
+    }
+    for (int p = N - 1; p >= 0; p--) {
+        for (uint8_t k = p + 1; k < N; k++) x[p] -= L[k][p] * x[k];
+        x[p] /= L[p][p];
+    }
+}
+
+/**
+ * @brief Weights of LSQVertexGradientFunctor, aligned with cells_of_cell and
+ *        faces_of_cell (zero for interior faces).
+ */
+struct VertexGradientWeights {
+    Kokkos::View<rtype *[N_DIM]> cells;
+    Kokkos::View<rtype *[N_DIM]> faces;
+};
+
+/**
+ * @brief Gradient over all vertex neighbors plus the boundary ghost states of
+ *        the cell's own boundary faces, as a fixed linear combination of the
+ *        differences to the cell's state.
+ *
+ * The weights come from an inverse-distance-squared weighted least-squares fit
+ * of a quadratic, so the gradient is second-order accurate on any stencil that
+ * determines the fit: on triangles and on the one-sided stencils of boundary
+ * cells, where a linear fit is only first-order accurate. Stencils with too few
+ * or degenerate points use the linear fit.
  */
 struct LSQVertexGradientFunctor {
     LSQGradientFunctor faces;
     Kokkos::View<uint32_t *> offsets_cells_of_cell;
     Kokkos::View<uint32_t *> cells_of_cell;
+    VertexGradientWeights weights;
+
+    static constexpr uint8_t NB = N_DIM + N_DIM * (N_DIM + 1) / 2;  // Linear and quadratic monomials
+
+    /**
+     * @brief Offset of every stencil point of cell i_cell, passed to
+     *        f(offset, is_face, index into cells_of_cell or faces_of_cell).
+     */
+    template <typename F>
+    KOKKOS_INLINE_FUNCTION
+    void for_each_point(const uint32_t i_cell, F && f) const {
+        for (uint32_t k = offsets_cells_of_cell(i_cell); k < offsets_cells_of_cell(i_cell + 1); k++) {
+            rtype dx[N_DIM];
+            FOR_I_DIM dx[i] = faces.cell_coords(cells_of_cell(k), i) - faces.cell_coords(i_cell, i);
+            f(dx, false, k);
+        }
+        // The ghost positions do not depend on the states
+        rtype W_i[N_CONSERVATIVE], W_g[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE W_i[i] = 1.0;
+        for (uint32_t k = faces.offsets_faces_of_cell(i_cell); k < faces.offsets_faces_of_cell(i_cell + 1); k++) {
+            const uint32_t i_face = faces.faces_of_cell(k);
+            if (faces.cells_of_face(i_face, 1) >= 0) continue;
+            rtype dx[N_DIM];
+            faces.neighbor(i_cell, i_face, W_i, dx, W_g);
+            f(dx, true, k);
+        }
+    }
+
+    /**
+     * @brief Compute the weights of cell i_cell.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void compute_weights(const uint32_t i_cell) const {
+        rtype A[NB][NB] = {}, M[N_DIM][N_DIM] = {};
+        rtype scale = 0.0;  // Inverse length that keeps the monomials of order one
+        uint16_t n_points = 0;
+        auto monomials = [&](const rtype * dx, rtype * phi) {
+            FOR_I_DIM phi[i] = dx[i] * scale;
+            uint8_t m = N_DIM;
+            for (uint8_t r = 0; r < N_DIM; r++) {
+                for (uint8_t c = r; c < N_DIM; c++) phi[m++] = phi[r] * phi[c];
+            }
+        };
+        for_each_point(i_cell, [&](const rtype * dx, bool, uint32_t) {
+            const rtype w = 1.0 / dot<N_DIM>(dx, dx);
+            if (n_points++ == 0) scale = Kokkos::sqrt(w);
+            rtype phi[NB];
+            monomials(dx, phi);
+            for (uint8_t p = 0; p < NB; p++) {
+                for (uint8_t q = p; q < NB; q++) A[p][q] += w * phi[p] * phi[q];
+            }
+            for (uint8_t p = 0; p < N_DIM; p++) {
+                for (uint8_t q = p; q < N_DIM; q++) M[p][q] += w * dx[p] * dx[q];
+            }
+        });
+        rtype L[NB][NB], L_lin[N_DIM][N_DIM];
+        const bool quadratic = n_points >= NB && cholesky<NB>(A, L);
+        if (!quadratic) cholesky<N_DIM>(M, L_lin);
+        for_each_point(i_cell, [&](const rtype * dx, bool is_face, uint32_t k) {
+            const rtype w = 1.0 / dot<N_DIM>(dx, dx);
+            rtype c[N_DIM];
+            if (quadratic) {
+                rtype phi[NB];
+                monomials(dx, phi);
+                cholesky_solve<NB>(L, phi);
+                FOR_I_DIM c[i] = w * scale * phi[i];
+            } else {
+                FOR_I_DIM c[i] = w * dx[i];
+                cholesky_solve<N_DIM>(L_lin, c);
+            }
+            FOR_I_DIM (is_face ? weights.faces(k, i) : weights.cells(k, i)) = c[i];
+        });
+    }
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_cell) const {
         rtype W_i[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE W_i[i] = faces.W(i_cell, i);
-        LSQSystem lsq;
+        rtype g[N_CONSERVATIVE][N_DIM] = {};
         for (uint32_t k = offsets_cells_of_cell(i_cell); k < offsets_cells_of_cell(i_cell + 1); k++) {
             const uint32_t j = cells_of_cell(k);
-            rtype dx[N_DIM], W_j[N_CONSERVATIVE];
-            FOR_I_DIM dx[i] = faces.cell_coords(j, i) - faces.cell_coords(i_cell, i);
-            FOR_I_CONSERVATIVE W_j[i] = faces.W(j, i);
-            lsq.add(dx, W_i, W_j);
+            FOR_I_CONSERVATIVE {
+                const rtype dW = faces.W(j, i) - W_i[i];
+                for (uint8_t d = 0; d < N_DIM; d++) g[i][d] += weights.cells(k, d) * dW;
+            }
         }
         for (uint32_t k = faces.offsets_faces_of_cell(i_cell); k < faces.offsets_faces_of_cell(i_cell + 1); k++) {
             const uint32_t i_face = faces.faces_of_cell(k);
             if (faces.cells_of_face(i_face, 1) >= 0) continue;
             rtype dx[N_DIM], W_j[N_CONSERVATIVE];
             faces.neighbor(i_cell, i_face, W_i, dx, W_j);
-            lsq.add(dx, W_i, W_j);
+            FOR_I_CONSERVATIVE {
+                const rtype dW = W_j[i] - W_i[i];
+                for (uint8_t d = 0; d < N_DIM; d++) g[i][d] += weights.faces(k, d) * dW;
+            }
         }
-        rtype g[N_CONSERVATIVE][N_DIM];
-        lsq.solve(g);
         FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) faces.gradients(i_cell, i, d) = g[i][d];
     }
 };
+
+/**
+ * @brief LSQVertexGradientFunctor over the given gradient functor's mesh,
+ *        boundaries, states and gradients, with its weights computed.
+ */
+inline LSQVertexGradientFunctor make_vertex_gradient(const LSQGradientFunctor & faces,
+                                                     Kokkos::View<uint32_t *> offsets_cells_of_cell,
+                                                     Kokkos::View<uint32_t *> cells_of_cell) {
+    LSQVertexGradientFunctor functor{faces, offsets_cells_of_cell, cells_of_cell,
+                                     {Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_cells", cells_of_cell.extent(0)),
+                                      Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_faces", faces.faces_of_cell.extent(0))}};
+    Kokkos::parallel_for("vertex_gradient_weights", offsets_cells_of_cell.extent(0) - 1,
+                         KOKKOS_LAMBDA(const uint32_t i_cell) { functor.compute_weights(i_cell); });
+    return functor;
+}
 
 #endif // GRADIENT_H

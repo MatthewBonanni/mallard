@@ -215,6 +215,7 @@ class Solver {
         Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
         Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> viscous_gradients;
+        LSQVertexGradientFunctor viscous_gradient;  // Fills viscous_gradients from W_cells
         Kokkos::View<rtype *> cfl_local;
         Kokkos::View<rtype *>::host_mirror_type h_cfl_local;
         Kokkos::View<rtype *>::host_mirror_type h_teno_sigma;

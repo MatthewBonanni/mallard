@@ -50,8 +50,13 @@ void viscous_traction(const rtype mu, const rtype g[][N_DIM], const rtype * n, r
  * use a one-sided difference between the cell centroid and the wall with the
  * wall velocity and, for isothermal walls, the wall temperature; adiabatic
  * walls carry no heat flux and heat-flux walls carry the prescribed one.
- * Symmetry faces carry no shear stress and no heat flux; transmissive and
- * outflow faces use zero normal derivatives.
+ * Symmetry faces carry no shear stress and no heat flux. Transmissive faces
+ * take the values and gradients of their image face (see
+ * BoundaryData::exterior_W), which is what an interior face sees for a flow
+ * that does not vary normal to the boundary; using the boundary cell's own
+ * gradient instead is off by O(h) on triangles, whose centroids are offset
+ * along the face. Transmissive faces without an image and outflow faces use
+ * zero normal derivatives.
  */
 struct ViscousFluxFunctor {
     Kokkos::View<rtype *[N_DIM]> normals;
@@ -83,6 +88,31 @@ struct ViscousFluxFunctor {
         }
     }
 
+    /**
+     * @brief Values and gradients q_f, g_f on interior face i_face.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void interior_face(const uint32_t i_face, rtype * q_f, rtype g_f[NQ][N_DIM]) const {
+        const int32_t c0 = cells_of_face(i_face, 0);
+        const int32_t c1 = cells_of_face(i_face, 1);
+        rtype n[N_DIM];
+        rtype n_vec[N_DIM];
+        FOR_I_DIM n_vec[i] = normals(i_face, i);
+        unit<N_DIM>(n_vec, n);
+        rtype q0[NQ], g0[NQ][N_DIM], q1[NQ], g1[NQ][N_DIM];
+        cell_state(c0, q0, g0);
+        cell_state(c1, q1, g1);
+        rtype d[N_DIM];
+        FOR_I_DIM d[i] = cell_coords(c1, i) - cell_coords(c0, i);
+        const rtype d_n = dot<N_DIM>(d, n);
+        for (uint8_t k = 0; k < NQ; k++) {
+            q_f[k] = 0.5 * (q0[k] + q1[k]);
+            FOR_I_DIM g_f[k][i] = 0.5 * (g0[k][i] + g1[k][i]);
+            const rtype correction = ((q1[k] - q0[k]) - dot<N_DIM>(g_f[k], d)) / d_n;
+            FOR_I_DIM g_f[k][i] += correction * n[i];
+        }
+    }
+
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
         const int32_t c0 = cells_of_face(i_face, 0);
@@ -100,17 +130,7 @@ struct ViscousFluxFunctor {
         bool symmetry = false;
 
         if (c1 >= 0) {
-            rtype q1[NQ], g1[NQ][N_DIM];
-            cell_state(c1, q1, g1);
-            rtype d[N_DIM];
-            FOR_I_DIM d[i] = cell_coords(c1, i) - cell_coords(c0, i);
-            const rtype d_n = dot<N_DIM>(d, n);
-            for (uint8_t k = 0; k < NQ; k++) {
-                q_f[k] = 0.5 * (q0[k] + q1[k]);
-                FOR_I_DIM g_f[k][i] = 0.5 * (g0[k][i] + g1[k][i]);
-                const rtype correction = ((q1[k] - q0[k]) - dot<N_DIM>(g_f[k], d)) / d_n;
-                FOR_I_DIM g_f[k][i] += correction * n[i];
-            }
+            interior_face(i_face, q_f, g_f);
         } else {
             const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(i_face));
             for (uint8_t k = 0; k < NQ; k++) {
@@ -133,6 +153,8 @@ struct ViscousFluxFunctor {
                 }
             } else if (bc.type == BoundaryType::SYMMETRY) {
                 symmetry = true;
+            } else if (boundaries.face_image_face(i_face) >= 0) {
+                interior_face(boundaries.face_image_face(i_face), q_f, g_f);
             } else if (bc.type == BoundaryType::EXTRAPOLATION || bc.type == BoundaryType::P_OUT ||
                        bc.type == BoundaryType::P_OUT_AVERAGE || bc.type == BoundaryType::FARFIELD ||
                        bc.type == BoundaryType::PARTITION) {
