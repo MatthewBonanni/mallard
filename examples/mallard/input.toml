@@ -1,0 +1,81 @@
+# Mach 8 inviscid flow over a flying mallard, from an impulsive start: the
+# whole domain starts at the free stream; bow shocks form off the bill, head and
+# wing, merge, and the starting vortices wash downstream, leaving the shock layer
+# and an unsteady shear-layer wake behind the tail. RHLL fluxes (carbuncle-free) with
+# bound-preserving TENO5 keep the near-vacuum lee side of the impulsive start
+# positive.
+#
+# Generate the mesh first (needs the gmsh Python module, pip install gmsh):
+#   python ../../tools/make_mallard_mesh.py mallard.msh     # 1.07M triangles
+# Run (75,000 steps, about 1.5 hours on one data-center GPU; 251 snapshots,
+# 20 GB), then animate:
+#   Mallard -i input.toml
+#   python ../../tools/animate.py solut mallard --var MACH --cmap inferno_r \
+#       --vmin 0 --vmax 8.5 --interp linear --layout single --overlay \
+#       --body-color "#2a2f3a" --res 2400 --dpi 300 --width 7 \
+#       --xlim -0.35 3.0 --ylim -0.85 1.2 --fps 18 --title "Mach 8 mallard"
+# Nondimensionalization: free-stream density and sound speed 1 (so u = M = 8),
+# duck length 1.1, bill tip at the origin.
+
+[run]
+t_stop = 0.75
+cfl = 0.5
+
+[mesh]
+type = "file"
+filename = "mallard.msh"
+
+[initialize]
+type = "constant"
+u = [8.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "duck"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "inflow"
+type = "upt"
+u = [8.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "outflow"
+type = "extrapolation"
+
+[[boundaries]]
+name = "top"
+type = "extrapolation"
+
+[[boundaries]]
+name = "bottom"
+type = "extrapolation"
+
+[numerics]
+riemann_solver = "RHLL"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+bound_preserving = true
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+
+[output]
+check_interval = 500
+
+[[write_data]]
+prefix = "./solut/mallard"
+format = "vtu"
+time_interval = 0.003
+variables = ["RHO", "U_X", "U_Y", "P"]

@@ -87,3 +87,11 @@ Mallard uses the [Google C++ Style Guide](https://google.github.io/styleguide/cp
 ## License
 
 Mallard is licensed under the AGPL v3.0 License. See the [LICENSE](LICENSE) file for more details.
+
+---
+
+<p align="center">
+  <img src="docs/images/mallard.gif" alt="Mach 8 flow over a mallard" width="100%">
+  <br>
+  <em>Mach 8 flow over a mallard: 1.07M triangles, TENO5 + RHLL (<a href="examples/mallard">examples/mallard</a>).</em>
+</p>

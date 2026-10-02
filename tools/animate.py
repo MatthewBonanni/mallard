@@ -104,6 +104,10 @@ def schlieren(img, valid):
     return np.exp(-6.0 * g)
 
 
+def mach(d, gamma):
+    return np.hypot(d["U_X"], d["U_Y"]) / np.sqrt(gamma * d["P"] / d["RHO"])
+
+
 def colorbar_axes(ax):
     """A thin colorbar to the right of ax that does not shrink it, so that
     panels with and without colorbars stay the same size."""
@@ -139,7 +143,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("series_dir")
     ap.add_argument("output_stem")
-    ap.add_argument("--var", default="RHO")
+    ap.add_argument("--var", default="RHO", help="Cell variable, or VORTICITY or MACH (derived)")
+    ap.add_argument("--gamma", type=float, default=1.4, help="Ratio of specific heats, for MACH")
     ap.add_argument("--res", type=int, default=1000)
     ap.add_argument("--fps", type=int, default=20)
     ap.add_argument("--title", default="2D Riemann problem, configuration 3")
@@ -152,13 +157,20 @@ def main():
     ap.add_argument("--interp", choices=["nearest", "linear"], default="nearest",
                     help="Pixel values: the cell's value, or linear interpolation through node averages")
     ap.add_argument("--cmap", default="turbo")
+    ap.add_argument("--vmin", type=float, help="Color range minimum (default: the series minimum)")
+    ap.add_argument("--vmax", type=float, help="Color range maximum (default: the series maximum)")
     ap.add_argument("--glob", default="*.vtu", help="Snapshot file pattern within the series directory")
     ap.add_argument("--width", type=float, default=14.0, help="Figure width in inches; text scales with it")
     ap.add_argument("--dpi", type=int, default=100)
+    ap.add_argument("--layout", choices=["auto", "stacked", "side", "single"], default="auto",
+                    help="Panel arrangement; auto stacks wide domains, single shows only the first panel")
+    ap.add_argument("--overlay", action="store_true", help="Shade the first panel with the density schlieren")
+    ap.add_argument("--body-color", default="#101014", help="Color of regions outside the mesh (bodies)")
     ap.add_argument("--gif-every", type=int, default=1,
                     help="The GIF uses every n-th frame, counting back from the last (the MP4 uses all)")
     ap.add_argument("--gif-fps", type=int, default=None, help="GIF frame rate (default: --fps)")
     ap.add_argument("--gif-width", type=int, default=None, help="Downscale the GIF to this width (default: none)")
+    ap.add_argument("--frames-dir", help="Keep the PNG frames in this directory")
     args = ap.parse_args()
 
     all_files = sorted(glob.glob(os.path.join(args.series_dir, args.glob)))
@@ -167,7 +179,7 @@ def main():
     cell, valid, extent = pixel_to_cell(pts, tris, tri_cell, args.res, args.xlim, args.ylim)
     raster = Rasterizer(pts, tris, tri_cell, cell, valid, extent, args.interp)
     aspect = (extent[1] - extent[0]) / (extent[3] - extent[2])
-    vertical = aspect > 1.8
+    layout = args.layout if args.layout != "auto" else ("stacked" if aspect > 1.8 else "side")
 
     dx = (extent[1] - extent[0]) / (cell.shape[1] - 1)
     dy = (extent[3] - extent[2]) / (cell.shape[0] - 1)
@@ -179,11 +191,13 @@ def main():
             v = gaussian_filter(np.nan_to_num(raster(d["U_Y"])), 1.0)
             w = np.gradient(v, dx, axis=1) - np.gradient(u, dy, axis=0)
             return np.where(valid, w, np.nan)
+        if args.var == "MACH":
+            return raster(mach(d, args.gamma))
         return raster(d[args.var])
 
     # Fixed color range over the whole series (within the displayed region)
     lo, hi = np.inf, -np.inf
-    for f in files:
+    for f in files if args.vmin is None or args.vmax is None else []:
         img = field(read_vtu(f)[3])
         if args.var == "VORTICITY":
             m = np.nanpercentile(np.abs(img), 99.5)
@@ -192,6 +206,8 @@ def main():
             lo, hi = min(lo, np.nanmin(img)), max(hi, np.nanmax(img))
     if args.var == "VORTICITY":
         lo, hi = -max(-lo, hi), max(-lo, hi)
+    lo = args.vmin if args.vmin is not None else lo
+    hi = args.vmax if args.vmax is not None else hi
     second_range = None
     if args.second != "schlieren":
         vals = [raster(read_vtu(f)[3][args.second]) for f in files[len(files) // 2:]]
@@ -200,34 +216,53 @@ def main():
     k = args.width / 14.0
     plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10 * k, "text.color": "#e8e8e8",
                          "axes.labelcolor": "#e8e8e8", "xtick.color": "#9a9a9a", "ytick.color": "#9a9a9a"})
-    tmp = tempfile.TemporaryDirectory()
+    if args.frames_dir:
+        os.makedirs(args.frames_dir, exist_ok=True)
+    tmp = tempfile.TemporaryDirectory(dir=args.frames_dir)
+    frame_dir = args.frames_dir or tmp.name
     frame_files = []
     for f in files:
         d = read_vtu(f)[3]
         img = field(d)
-        if vertical:
+        if layout == "single":
+            fig, ax = plt.subplots(figsize=(14 * k, (12.6 / aspect + 1.0) * k), facecolor="#101014", dpi=args.dpi)
+            axs = [ax]
+        elif layout == "stacked":
             fig, axs = plt.subplots(2, 1, figsize=(14 * k, (2 * 13 / aspect + 1.6) * k), facecolor="#101014",
                                     dpi=args.dpi)
         else:
             fig, axs = plt.subplots(1, 2, figsize=(14 * k, 7.2 * k), facecolor="#101014", dpi=args.dpi)
         for ax in axs:
-            ax.set_facecolor("#101014")
+            ax.set_facecolor(args.body_color)
             ax.set_xticks([])
             ax.set_yticks([])
             for s in ax.spines.values():
                 s.set_visible(False)
         im = axs[0].imshow(img, origin="lower", extent=extent, cmap=args.cmap, vmin=lo, vmax=hi,
                            interpolation="antialiased")
-        if args.var != "VORTICITY":
+        if args.overlay:
+            shade = np.nan_to_num(schlieren(raster(d["RHO"]), valid), nan=1.0)
+            rgba = plt.get_cmap(args.cmap)(np.clip((img - lo) / (hi - lo), 0, 1))
+            rgba[..., :3] *= (0.15 + 0.85 * shade)[..., None]
+            rgba[..., 3] = valid
+            im.set_visible(False)
+            axs[0].imshow(rgba, origin="lower", extent=extent, interpolation="bilinear")
+        elif args.var != "VORTICITY":
             axs[0].contour(np.linspace(extent[0], extent[1], img.shape[1]), np.linspace(extent[2], extent[3], img.shape[0]),
                            gaussian_filter(np.nan_to_num(img, nan=lo), 0.8), levels=contour_levels(img[valid], lo, hi),
                            colors="k", linewidths=0.25 * k, alpha=0.5)
-        axs[0].set_title({"RHO": "Density", "P": "Pressure", "VORTICITY": "Vorticity"}.get(args.var, args.var), fontsize=13 * k)
+        name = {"RHO": "Density", "P": "Pressure", "VORTICITY": "Vorticity", "MACH": "Mach number"}.get(args.var, args.var)
         cb = fig.colorbar(im, cax=colorbar_axes(axs[0]))
         cb.outline.set_visible(False)
-        if args.second == "schlieren":
+        if layout == "single":
+            cb.set_label(name, fontsize=12 * k)
+        else:
+            axs[0].set_title(name, fontsize=13 * k)
+        if layout == "single":
+            pass
+        elif args.second == "schlieren":
             rho_img = raster(d["RHO"]) if "RHO" in d else img
-            axs[1].imshow(schlieren(rho_img, valid), origin="lower", extent=extent, cmap="bone", vmin=0, vmax=1,
+            axs[1].imshow(np.where(valid, schlieren(rho_img, valid), np.nan), origin="lower", extent=extent, cmap="bone", vmin=0, vmax=1,
                           interpolation="bilinear")
             axs[1].set_title("Numerical schlieren", fontsize=13 * k)
         else:
@@ -241,7 +276,10 @@ def main():
         fig.suptitle(f"{args.title}    t = {t:.3f}", fontsize=15 * k, y=0.97)
         if args.subtitle:
             fig.text(0.5, 0.025, args.subtitle, ha="center", fontsize=10 * k, color="#9a9a9a")
-        if vertical:
+        if layout == "single":
+            fig.subplots_adjust(left=0.01, right=0.93, top=1 - 0.7 * k / fig.get_figheight(),
+                                bottom=0.3 * k / fig.get_figheight())
+        elif layout == "stacked":
             fig.subplots_adjust(left=0.02, right=0.93, top=0.9, bottom=0.06, hspace=0.18)
         else:
             fig.subplots_adjust(left=0.02, right=0.98 if args.second == "schlieren" else 0.93,
@@ -249,7 +287,7 @@ def main():
         fig.canvas.draw()
         frame = np.asarray(fig.canvas.buffer_rgba())[..., :3].copy()
         plt.close(fig)
-        frame_files.append(os.path.join(tmp.name, f"frame_{len(frame_files):05d}.png"))
+        frame_files.append(os.path.join(frame_dir, f"frame_{len(frame_files):05d}.png"))
         imageio.imwrite(frame_files[-1], frame)
         print(f"rendered {os.path.basename(f)} (t = {t:.3f})", flush=True)
 
