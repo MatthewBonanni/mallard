@@ -19,6 +19,26 @@
 #include "physics.h"
 
 /**
+ * @brief Viscous traction tau . n of a Newtonian fluid under Stokes' hypothesis,
+ *        tau = mu (grad u + grad u^T - 2/3 div u I), with g[k][i] = d u_k / d x_i.
+ */
+KOKKOS_INLINE_FUNCTION
+void viscous_traction(const rtype mu, const rtype g[][N_DIM], const rtype * n, rtype * tau_n) {
+    rtype div = 0.0;
+    if constexpr (N_DIM == 2) {
+        div = g[0][0] + g[1][1];
+    } else {
+        div = g[0][0] + g[1][1] + g[2][2];
+    }
+    rtype tau[N_DIM][N_DIM];
+    FOR_I_DIM {
+        for (uint8_t j = 0; j < N_DIM; j++) tau[i][j] = mu * (g[i][j] + g[j][i]);
+        tau[i][i] = mu * (2.0 * g[i][i] - 2.0 / 3.0 * div);
+    }
+    FOR_I_DIM tau_n[i] = dot<N_DIM>(tau[i], n);
+}
+
+/**
  * @brief Integrates the viscous stress and heat flux over every face (one-point
  *        rule) and scatters them to the adjacent cells.
  *
@@ -45,20 +65,21 @@ struct ViscousFluxFunctor {
     Kokkos::View<rtype *[N_CONSERVATIVE]> rhs;
     Euler physics;
 
+    static constexpr uint8_t NQ = N_DIM + 1;  // [u, T]
+
     /**
-     * @brief Velocity and temperature of cell c, and their gradients
-     *        [u, v, T][x, y], from W = [rho, u, v, p] and its gradient.
+     * @brief Velocity and temperature q = [u, T] of cell c, and their
+     *        gradients g[k][i] = d q_k / d x_i, from W = [rho, u, p] and its
+     *        gradient.
      */
     KOKKOS_INLINE_FUNCTION
-    void cell_state(const int32_t c, rtype * q, rtype g[3][N_DIM]) const {
-        const rtype rho = W(c, 0), p = W(c, 3);
-        q[0] = W(c, 1);
-        q[1] = W(c, 2);
-        q[2] = p / (rho * physics.R);
+    void cell_state(const int32_t c, rtype * q, rtype g[NQ][N_DIM]) const {
+        const rtype rho = W(c, 0), p = W(c, N_DIM + 1);
+        for (uint8_t k = 0; k < N_DIM; k++) q[k] = W(c, 1 + k);
+        q[N_DIM] = p / (rho * physics.R);
         FOR_I_DIM {
-            g[0][i] = gradients(c, 1, i);
-            g[1][i] = gradients(c, 2, i);
-            g[2][i] = (gradients(c, 3, i) - physics.R * q[2] * gradients(c, 0, i)) / (rho * physics.R);
+            for (uint8_t k = 0; k < N_DIM; k++) g[k][i] = gradients(c, 1 + k, i);
+            g[N_DIM][i] = (gradients(c, N_DIM + 1, i) - physics.R * q[N_DIM] * gradients(c, 0, i)) / (rho * physics.R);
         }
     }
 
@@ -67,48 +88,48 @@ struct ViscousFluxFunctor {
         const int32_t c0 = cells_of_face(i_face, 0);
         const int32_t c1 = cells_of_face(i_face, 1);
         rtype n[N_DIM];
-        const rtype n_vec[N_DIM] = {normals(i_face, 0), normals(i_face, 1)};
+        rtype n_vec[N_DIM];
+        FOR_I_DIM n_vec[i] = normals(i_face, i);
         unit<N_DIM>(n_vec, n);
 
-        rtype q0[3], g0[3][N_DIM];
+        rtype q0[NQ], g0[NQ][N_DIM];
         cell_state(c0, q0, g0);
-        rtype q_f[3], g_f[3][N_DIM];
+        rtype q_f[NQ], g_f[NQ][N_DIM];
         bool heat_flux_given = false;
         rtype heat_flux = 0.0;   // Into the domain
         bool symmetry = false;
 
         if (c1 >= 0) {
-            rtype q1[3], g1[3][N_DIM];
+            rtype q1[NQ], g1[NQ][N_DIM];
             cell_state(c1, q1, g1);
             rtype d[N_DIM];
             FOR_I_DIM d[i] = cell_coords(c1, i) - cell_coords(c0, i);
-            const rtype d_n = d[0] * n[0] + d[1] * n[1];
-            for (uint8_t k = 0; k < 3; k++) {
+            const rtype d_n = dot<N_DIM>(d, n);
+            for (uint8_t k = 0; k < NQ; k++) {
                 q_f[k] = 0.5 * (q0[k] + q1[k]);
                 FOR_I_DIM g_f[k][i] = 0.5 * (g0[k][i] + g1[k][i]);
-                const rtype correction = ((q1[k] - q0[k]) - (g_f[k][0] * d[0] + g_f[k][1] * d[1])) / d_n;
+                const rtype correction = ((q1[k] - q0[k]) - dot<N_DIM>(g_f[k], d)) / d_n;
                 FOR_I_DIM g_f[k][i] += correction * n[i];
             }
         } else {
             const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(i_face));
-            for (uint8_t k = 0; k < 3; k++) {
+            for (uint8_t k = 0; k < NQ; k++) {
                 q_f[k] = q0[k];
                 FOR_I_DIM g_f[k][i] = g0[k][i];
             }
             if (bc.is_wall()) {
                 rtype dn = 0.0;
                 FOR_I_DIM dn += (face_coords(i_face, i) - cell_coords(c0, i)) * n[i];
-                q_f[0] = bc.data[1];
-                q_f[1] = bc.data[2];
-                const uint8_t n_set = (bc.type == BoundaryType::WALL_ISOTHERMAL) ? 3 : 2;
-                if (bc.type == BoundaryType::WALL_ISOTHERMAL) q_f[2] = bc.data[0];
+                for (uint8_t k = 0; k < N_DIM; k++) q_f[k] = bc.data[1 + k];
+                const uint8_t n_set = (bc.type == BoundaryType::WALL_ISOTHERMAL) ? NQ : N_DIM;
+                if (bc.type == BoundaryType::WALL_ISOTHERMAL) q_f[N_DIM] = bc.data[0];
                 for (uint8_t k = 0; k < n_set; k++) {
-                    const rtype correction = (q_f[k] - q0[k]) / dn - (g_f[k][0] * n[0] + g_f[k][1] * n[1]);
+                    const rtype correction = (q_f[k] - q0[k]) / dn - dot<N_DIM>(g_f[k], n);
                     FOR_I_DIM g_f[k][i] += correction * n[i];
                 }
                 if (bc.type != BoundaryType::WALL_ISOTHERMAL) {
                     heat_flux_given = true;
-                    heat_flux = (bc.type == BoundaryType::WALL_HEAT_FLUX) ? bc.data[3] : 0.0;
+                    heat_flux = (bc.type == BoundaryType::WALL_HEAT_FLUX) ? bc.data[N_DIM + 1] : 0.0;
                 }
             } else if (bc.type == BoundaryType::SYMMETRY) {
                 symmetry = true;
@@ -116,29 +137,25 @@ struct ViscousFluxFunctor {
                        bc.type == BoundaryType::P_OUT_AVERAGE || bc.type == BoundaryType::FARFIELD ||
                        bc.type == BoundaryType::PARTITION) {
                 // Zero normal derivatives across transmissive and outflow boundaries
-                for (uint8_t k = 0; k < 3; k++) {
-                    const rtype g_n = g_f[k][0] * n[0] + g_f[k][1] * n[1];
+                for (uint8_t k = 0; k < NQ; k++) {
+                    const rtype g_n = dot<N_DIM>(g_f[k], n);
                     FOR_I_DIM g_f[k][i] -= g_n * n[i];
                 }
             }
         }
 
-        const rtype mu = physics.viscosity(q_f[2]);
+        const rtype mu = physics.viscosity(q_f[N_DIM]);
         const rtype kappa = physics.conductivity(mu);
-        const rtype div = g_f[0][0] + g_f[1][1];
-        const rtype txx = mu * (2.0 * g_f[0][0] - 2.0 / 3.0 * div);
-        const rtype tyy = mu * (2.0 * g_f[1][1] - 2.0 / 3.0 * div);
-        const rtype txy = mu * (g_f[0][1] + g_f[1][0]);
-        rtype tau_n[N_DIM] = {txx * n[0] + txy * n[1], txy * n[0] + tyy * n[1]};
-        rtype q_n = kappa * (g_f[2][0] * n[0] + g_f[2][1] * n[1]);
+        rtype tau_n[N_DIM];
+        viscous_traction(mu, g_f, n, tau_n);
+        rtype q_n = kappa * dot<N_DIM>(g_f[N_DIM], n);
         if (symmetry) {
             // Keep only the normal stress; the normal velocity vanishes on the plane,
             // so the normal stress does no work
-            const rtype tau_nn = tau_n[0] * n[0] + tau_n[1] * n[1];
+            const rtype tau_nn = dot<N_DIM>(tau_n, n);
             FOR_I_DIM tau_n[i] = tau_nn * n[i];
-            const rtype u_n = q_f[0] * n[0] + q_f[1] * n[1];
-            q_f[0] -= u_n * n[0];
-            q_f[1] -= u_n * n[1];
+            const rtype u_n = dot<N_DIM>(q_f, n);
+            FOR_I_DIM q_f[i] -= u_n * n[i];
             q_n = 0.0;
         }
         if (heat_flux_given) {
@@ -147,9 +164,8 @@ struct ViscousFluxFunctor {
 
         rtype flux[N_CONSERVATIVE];
         flux[0] = 0.0;
-        flux[1] = tau_n[0];
-        flux[2] = tau_n[1];
-        flux[3] = q_f[0] * tau_n[0] + q_f[1] * tau_n[1] + q_n;
+        FOR_I_DIM flux[1 + i] = tau_n[i];
+        flux[N_DIM + 1] = dot<N_DIM>(q_f, tau_n) + q_n;
 
         const rtype A = face_area(i_face);
         FOR_I_CONSERVATIVE {

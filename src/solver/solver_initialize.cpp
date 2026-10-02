@@ -84,11 +84,14 @@ void Solver::init_solution_constant() {
     }
     std::vector<rtype> u = find_real_vector(input, "initialize", "u");
     if (u.size() != N_DIM) {
-        throw std::runtime_error("u must be a 2-element array for initialization: constant.");
+        throw std::runtime_error("u must be a " + std::to_string(N_DIM) + "-element array for initialization: constant.");
     }
     const rtype p = find_real(input, "initialize", "p");
     const rtype T = find_real(input, "initialize", "T");
-    const rtype W[N_CONSERVATIVE] = {physics.get_density_from_pressure_temperature(p, T), u[0], u[1], p};
+    rtype W[N_CONSERVATIVE];
+    W[0] = physics.get_density_from_pressure_temperature(p, T);
+    FOR_I_DIM W[1 + i] = u[i];
+    W[N_DIM + 1] = p;
     rtype cons[N_CONSERVATIVE];
     physics.compute_conservatives_from_W(cons, W);
     for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
@@ -98,15 +101,18 @@ void Solver::init_solution_constant() {
 
 /**
  * Cell averages of the conservative variables are computed by splitting each
- * cell into a fan of triangles, subdividing each into n_sub^2 sub-triangles,
- * and applying a degree-5 Dunavant rule on every sub-triangle. This resolves
+ * cell into simplices and applying a composite rule on each: in 2D, a fan of
+ * triangles, each subdivided into n_sub^2 sub-triangles with a degree-5
+ * Dunavant rule; in 3D, the tetrahedra of Mesh::h_cell_tetrahedra, each
+ * mapped from the unit cube (Duffy) and integrated with a 4^3-point Gauss
+ * rule on each of n_sub^3 sub-cubes (exact to degree 5). This resolves
  * discontinuous initial data that do not align with the mesh and is
  * high-order accurate for smooth data.
  */
 void Solver::init_solution_analytical() {
     const toml::value & init = input.at("initialize");
     if (!init.contains("u") || init.at("u").as_array().size() != N_DIM) {
-        throw std::runtime_error("u must be a 2-element array for initialization: analytical.");
+        throw std::runtime_error("u must be a " + std::to_string(N_DIM) + "-element array for initialization: analytical.");
     }
     const bool rho_in = init.contains("rho");
     const bool p_in = init.contains("p");
@@ -114,14 +120,15 @@ void Solver::init_solution_analytical() {
     if (rho_in + p_in + T_in != 2) {
         throw std::runtime_error("Exactly two of rho, p, and T must be specified for initialization: analytical.");
     }
-    const uint32_t n_sub = toml::find_or<uint32_t>(input, "initialize", "n_subdivisions", 4);
+    const uint32_t n_sub = toml::find_or<uint32_t>(input, "initialize", "n_subdivisions", (N_DIM == 2) ? 4 : 2);
 
     std::vector<std::string> u_str = toml::find<std::vector<std::string>>(input, "initialize", "u");
 
-    double x = 0.0, y = 0.0;
+    double x = 0.0, y = 0.0, z = 0.0;
     exprtk::symbol_table<double> symbol_table;
     symbol_table.add_variable("x", x);
     symbol_table.add_variable("y", y);
+    symbol_table.add_variable("z", z);
     symbol_table.add_constants();
     exprtk::parser<double> parser;
     auto compile = [&](const std::string & name, const std::string & expr_str) {
@@ -133,25 +140,35 @@ void Solver::init_solution_analytical() {
         }
         return expr;
     };
-    exprtk::expression<double> u_x_expr = compile("u[0]", u_str[0]);
-    exprtk::expression<double> u_y_expr = compile("u[1]", u_str[1]);
+    std::vector<exprtk::expression<double>> u_expr;
+    FOR_I_DIM u_expr.push_back(compile("u[" + std::to_string(i) + "]", u_str[i]));
     exprtk::expression<double> rho_expr, p_expr, T_expr;
     if (rho_in) rho_expr = compile("rho", toml::find<std::string>(input, "initialize", "rho"));
     if (p_in) p_expr = compile("p", toml::find<std::string>(input, "initialize", "p"));
     if (T_in) T_expr = compile("T", toml::find<std::string>(input, "initialize", "T"));
 
-    auto point_conservatives = [&](double px, double py, rtype * cons) {
+    auto point_conservatives = [&](double px, double py, double pz, rtype * cons) {
         x = px;
         y = py;
+        z = pz;
         rtype rho = rho_in ? rho_expr.value() : 0.0;
         rtype p = p_in ? p_expr.value() : 0.0;
         const rtype T = T_in ? T_expr.value() : 0.0;
         if (!rho_in) rho = physics.get_density_from_pressure_temperature(p, T);
         if (!p_in) p = physics.get_pressure_from_density_temperature(rho, T);
-        const rtype W[N_CONSERVATIVE] = {rho, static_cast<rtype>(u_x_expr.value()),
-                                         static_cast<rtype>(u_y_expr.value()), p};
+        rtype W[N_CONSERVATIVE];
+        W[0] = rho;
+        FOR_I_DIM W[1 + i] = static_cast<rtype>(u_expr[i].value());
+        W[N_DIM + 1] = p;
         physics.compute_conservatives_from_W(cons, W);
     };
+
+    if constexpr (N_DIM == 3) {
+        init_cell_averages_3d(n_sub, [&](double px, double py, double pz, rtype * cons) {
+            point_conservatives(px, py, pz, cons);
+        });
+        return;
+    }
 
     TriangleDunavant quad(5);
     const uint32_t n_quad = quad.h_weights.extent(0);
@@ -197,7 +214,7 @@ void Solver::init_solution_analytical() {
                             rtype cons[N_CONSERVATIVE];
                             point_conservatives(o[0] + xi * d1[0] + eta * d2[0],
                                                 o[1] + xi * d1[1] + eta * d2[1],
-                                                cons);
+                                                0.0, cons);
                             const rtype w = quad.h_weights(q) / weight_sum * sub_area;
                             FOR_I_CONSERVATIVE sum[i] += w * cons[i];
                         }
@@ -207,5 +224,55 @@ void Solver::init_solution_analytical() {
             }
         }
         FOR_I_CONSERVATIVE h_conservatives(i_cell, i) = sum[i] / area_sum;
+    }
+}
+
+void Solver::init_cell_averages_3d(const uint32_t n_sub,
+                                   const std::function<void(double, double, double, rtype *)> & f) {
+    // 4-point Gauss-Legendre rule on [0, 1]
+    const double g[4] = {0.5 - 0.5 * 0.8611363115940526, 0.5 - 0.5 * 0.3399810435848563,
+                         0.5 + 0.5 * 0.3399810435848563, 0.5 + 0.5 * 0.8611363115940526};
+    const double gw[4] = {0.5 * 0.3478548451374538, 0.5 * 0.6521451548625461,
+                          0.5 * 0.6521451548625461, 0.5 * 0.3478548451374538};
+    const double h = 1.0 / n_sub;
+    std::vector<std::array<std::array<double, 3>, 4>> tets;
+    for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
+        mesh->h_cell_tetrahedra(i_cell, tets);
+        double sum[N_CONSERVATIVE] = {};
+        double vol_sum = 0.0;
+        for (const auto & tet : tets) {
+            double e[3][3];
+            for (int k = 0; k < 3; k++) {
+                for (int d = 0; d < 3; d++) e[k][d] = tet[k + 1][d] - tet[0][d];
+            }
+            const double det = e[0][0] * (e[1][1] * e[2][2] - e[1][2] * e[2][1]) -
+                               e[0][1] * (e[1][0] * e[2][2] - e[1][2] * e[2][0]) +
+                               e[0][2] * (e[1][0] * e[2][1] - e[1][1] * e[2][0]);
+            const double six_vol = std::abs(det);
+            // Duffy map of the unit cube: barycentric (u, v (1 - u), w (1 - u) (1 - v))
+            for (uint32_t a = 0; a < n_sub; a++) {
+            for (uint32_t b = 0; b < n_sub; b++) {
+            for (uint32_t c = 0; c < n_sub; c++) {
+                for (int qa = 0; qa < 4; qa++) {
+                for (int qb = 0; qb < 4; qb++) {
+                for (int qc = 0; qc < 4; qc++) {
+                    const double u = (a + g[qa]) * h, v = (b + g[qb]) * h, w = (c + g[qc]) * h;
+                    const double l1 = u, l2 = v * (1.0 - u), l3 = w * (1.0 - u) * (1.0 - v);
+                    const double weight = gw[qa] * gw[qb] * gw[qc] * h * h * h *
+                                          six_vol * (1.0 - u) * (1.0 - u) * (1.0 - v);
+                    double p[3];
+                    for (int d = 0; d < 3; d++) p[d] = tet[0][d] + l1 * e[0][d] + l2 * e[1][d] + l3 * e[2][d];
+                    rtype cons[N_CONSERVATIVE];
+                    f(p[0], p[1], p[2], cons);
+                    FOR_I_CONSERVATIVE sum[i] += weight * cons[i];
+                    vol_sum += weight;
+                }
+                }
+                }
+            }
+            }
+            }
+        }
+        FOR_I_CONSERVATIVE h_conservatives(i_cell, i) = sum[i] / vol_sum;
     }
 }

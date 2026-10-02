@@ -43,27 +43,25 @@ BoundaryCondition BoundaryCondition::from_input(const toml::value & input, const
         const rtype p = find_real(input, "p");
         const rtype T = find_real(input, "T");
         bc.data[0] = physics.get_density_from_pressure_temperature(p, T);
-        bc.data[1] = u[0];
-        bc.data[2] = u[1];
-        bc.data[3] = p;
+        FOR_I_DIM bc.data[1 + i] = u[i];
+        bc.data[N_DIM + 1] = p;
     } else if (bc.type == BoundaryType::P_OUT || bc.type == BoundaryType::P_OUT_AVERAGE) {
         require("p");
-        bc.data[3] = find_real(input, "p");
+        bc.data[N_DIM + 1] = find_real(input, "p");
     } else if (bc.is_wall()) {
         if (input.contains("u")) {
             std::vector<rtype> u = find_real_vector(input, "u");
             if (u.size() != N_DIM) {
                 throw std::runtime_error("Invalid u for boundary: " + name + ".");
             }
-            bc.data[1] = u[0];
-            bc.data[2] = u[1];
+            FOR_I_DIM bc.data[1 + i] = u[i];
         }
         if (bc.type == BoundaryType::WALL_ISOTHERMAL) {
             require("T");
             bc.data[0] = find_real(input, "T");
         } else if (bc.type == BoundaryType::WALL_HEAT_FLUX) {
             require("q");
-            bc.data[3] = find_real(input, "q");
+            bc.data[N_DIM + 1] = find_real(input, "q");
         }
     }
     return bc;
@@ -71,7 +69,23 @@ BoundaryCondition BoundaryCondition::from_input(const toml::value & input, const
 
 namespace {
 
+bool point_in_cell_3d(const Mesh & mesh, uint32_t c, const rtype * p) {
+    rtype size2 = 0.0;
+    for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
+        size2 = std::max(size2, mesh.h_face_area(mesh.h_face_of_cell(c, k)));
+    }
+    for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
+        const uint32_t f = mesh.h_face_of_cell(c, k);
+        const rtype sign = (mesh.h_cells_of_face(f, 1) == (int32_t)c) ? -1.0 : 1.0;
+        rtype d = 0.0;
+        FOR_I_DIM d += (p[i] - mesh.h_face_coords(f, i)) * sign * mesh.h_face_normals(f, i);
+        if (d > 1e-10 * size2 * std::sqrt(size2)) return false;
+    }
+    return true;
+}
+
 bool point_in_cell(const Mesh & mesh, uint32_t c, const rtype * p) {
+    if constexpr (N_DIM == 3) return point_in_cell_3d(mesh, c, p);
     const uint32_t n = mesh.h_n_nodes_of_cell(c);
     int sign = 0;
     for (uint32_t k = 0; k < n; k++) {
@@ -85,6 +99,29 @@ bool point_in_cell(const Mesh & mesh, uint32_t c, const rtype * p) {
         if (s != sign) return false;
     }
     return true;
+}
+
+/**
+ * Face of cell `image` whose centroid is `target` and whose plane is parallel
+ * to boundary face f with the same area, or -1.
+ */
+int32_t find_image_face_3d(const Mesh & mesh, uint32_t f, int32_t image, const rtype * target) {
+    const rtype A_f = mesh.h_face_area(f);
+    for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(image); k++) {
+        const uint32_t g = mesh.h_face_of_cell(image, k);
+        const rtype A_g = mesh.h_face_area(g);
+        rtype dist = 0.0, cross2 = 0.0;
+        FOR_I_DIM {
+            dist += std::pow(mesh.h_face_coords(g, i) - target[i], 2);
+            const uint8_t j = (i + 1) % 3, k = (i + 2) % 3;
+            cross2 += std::pow(mesh.h_face_normals(f, j) * mesh.h_face_normals(g, k) -
+                               mesh.h_face_normals(f, k) * mesh.h_face_normals(g, j), 2);
+        }
+        if (dist < 1e-12 * A_f && cross2 < 1e-20 * A_f * A_f * A_g * A_g && std::abs(A_g - A_f) < 1e-10 * A_f) {
+            return g;
+        }
+    }
+    return -1;
 }
 
 } // namespace
@@ -136,8 +173,8 @@ BoundaryData make_boundary_data(const Mesh & mesh,
         if (h_face_bc_vec[f] < 0 || h_bcs_vec[h_face_bc_vec[f]].type != BoundaryType::EXTRAPOLATION) continue;
         // Image of the exterior neighbor: translate inward by most of the boundary cell's depth
         const uint32_t c = mesh.h_cells_of_face(f, 0);
-        const rtype n_in[N_DIM] = {-mesh.h_face_normals(f, 0) / mesh.h_face_area(f),
-                                   -mesh.h_face_normals(f, 1) / mesh.h_face_area(f)};
+        rtype n_in[N_DIM];
+        FOR_I_DIM n_in[i] = -mesh.h_face_normals(f, i) / mesh.h_face_area(f);
         rtype depth = 0.0;
         for (uint32_t k = 0; k < mesh.h_n_nodes_of_cell(c); k++) {
             const uint32_t node = mesh.h_node_of_cell(c, k);
@@ -161,21 +198,28 @@ BoundaryData make_boundary_data(const Mesh & mesh,
         // Face of the image cell that is the boundary face translated by the cell depth
         rtype target[N_DIM];
         FOR_I_DIM target[i] = mesh.h_face_coords(f, i) + depth * n_in[i];
-        const rtype t_f[N_DIM] = {mesh.h_node_coords(mesh.h_node_of_face(f, 1), 0) - mesh.h_node_coords(mesh.h_node_of_face(f, 0), 0),
-                                  mesh.h_node_coords(mesh.h_node_of_face(f, 1), 1) - mesh.h_node_coords(mesh.h_node_of_face(f, 0), 1)};
-        for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(image); k++) {
-            const uint32_t g = mesh.h_face_of_cell(image, k);
-            rtype dist = 0.0;
-            FOR_I_DIM dist += std::pow(mesh.h_face_coords(g, i) - target[i], 2);
-            const rtype t_g[N_DIM] = {mesh.h_node_coords(mesh.h_node_of_face(g, 1), 0) - mesh.h_node_coords(mesh.h_node_of_face(g, 0), 0),
-                                      mesh.h_node_coords(mesh.h_node_of_face(g, 1), 1) - mesh.h_node_coords(mesh.h_node_of_face(g, 0), 1)};
-            const rtype cross = t_f[0] * t_g[1] - t_f[1] * t_g[0];
-            const rtype len2 = t_f[0] * t_f[0] + t_f[1] * t_f[1];
-            if (dist < 1e-12 * len2 && std::abs(cross) < 1e-10 * len2 && std::abs(mesh.h_face_area(g) - mesh.h_face_area(f)) < 1e-10 * mesh.h_face_area(f)) {
-                h_face_image_face(f) = g;
-                h_face_image_side(f) = (mesh.h_cells_of_face(g, 0) == image) ? 0 : 1;
-                h_face_image_flip(f) = (t_f[0] * t_g[0] + t_f[1] * t_g[1] < 0.0) ? 1 : 0;
-                break;
+        if constexpr (N_DIM == 3) {
+            h_face_image_face(f) = find_image_face_3d(mesh, f, image, target);
+            if (h_face_image_face(f) >= 0) {
+                h_face_image_side(f) = (mesh.h_cells_of_face(h_face_image_face(f), 0) == image) ? 0 : 1;
+            }
+        } else {
+            const rtype t_f[N_DIM] = {mesh.h_node_coords(mesh.h_node_of_face(f, 1), 0) - mesh.h_node_coords(mesh.h_node_of_face(f, 0), 0),
+                                      mesh.h_node_coords(mesh.h_node_of_face(f, 1), 1) - mesh.h_node_coords(mesh.h_node_of_face(f, 0), 1)};
+            for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(image); k++) {
+                const uint32_t g = mesh.h_face_of_cell(image, k);
+                rtype dist = 0.0;
+                FOR_I_DIM dist += std::pow(mesh.h_face_coords(g, i) - target[i], 2);
+                const rtype t_g[N_DIM] = {mesh.h_node_coords(mesh.h_node_of_face(g, 1), 0) - mesh.h_node_coords(mesh.h_node_of_face(g, 0), 0),
+                                          mesh.h_node_coords(mesh.h_node_of_face(g, 1), 1) - mesh.h_node_coords(mesh.h_node_of_face(g, 0), 1)};
+                const rtype cross = t_f[0] * t_g[1] - t_f[1] * t_g[0];
+                const rtype len2 = t_f[0] * t_f[0] + t_f[1] * t_f[1];
+                if (dist < 1e-12 * len2 && std::abs(cross) < 1e-10 * len2 && std::abs(mesh.h_face_area(g) - mesh.h_face_area(f)) < 1e-10 * mesh.h_face_area(f)) {
+                    h_face_image_face(f) = g;
+                    h_face_image_side(f) = (mesh.h_cells_of_face(g, 0) == image) ? 0 : 1;
+                    h_face_image_flip(f) = (t_f[0] * t_g[0] + t_f[1] * t_g[1] < 0.0) ? 1 : 0;
+                    break;
+                }
             }
         }
     }

@@ -18,11 +18,68 @@
 #include "boundary.h"
 
 /**
- * @brief Weighted least-squares gradient of W = [rho, u_x, u_y, p] over
+ * @brief Inverse-distance-squared weighted least-squares normal equations
+ *        M g = b, with M stored as its upper triangle (row-major).
+ */
+struct LSQSystem {
+    rtype M[N_DIM * (N_DIM + 1) / 2] = {};
+    rtype b[N_CONSERVATIVE][N_DIM] = {};
+
+    KOKKOS_INLINE_FUNCTION
+    void add(const rtype * dx, const rtype * W_i, const rtype * W_j) {
+        const rtype w = 1.0 / dot<N_DIM>(dx, dx);
+        if constexpr (N_DIM == 2) {
+            M[0] += w * dx[0] * dx[0];
+            M[1] += w * dx[0] * dx[1];
+            M[2] += w * dx[1] * dx[1];
+            FOR_I_CONSERVATIVE {
+                const rtype dW = W_j[i] - W_i[i];
+                b[i][0] += w * dx[0] * dW;
+                b[i][1] += w * dx[1] * dW;
+            }
+        } else {
+            uint8_t k = 0;
+            for (uint8_t r = 0; r < N_DIM; r++) {
+                for (uint8_t c = r; c < N_DIM; c++) M[k++] += w * dx[r] * dx[c];
+            }
+            FOR_I_CONSERVATIVE {
+                const rtype dW = W_j[i] - W_i[i];
+                for (uint8_t d = 0; d < N_DIM; d++) b[i][d] += w * dx[d] * dW;
+            }
+        }
+    }
+
+    /**
+     * @brief Solve for the gradient of every variable: g[i][d] = d W_i / d x_d.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void solve(rtype g[N_CONSERVATIVE][N_DIM]) const {
+        if constexpr (N_DIM == 2) {
+            const rtype inv_det = 1.0 / (M[0] * M[2] - M[1] * M[1]);
+            FOR_I_CONSERVATIVE {
+                g[i][0] = inv_det * ( M[2] * b[i][0] - M[1] * b[i][1]);
+                g[i][1] = inv_det * (-M[1] * b[i][0] + M[0] * b[i][1]);
+            }
+        } else {
+            const rtype A[9] = {M[0], M[1], M[2],
+                                M[1], M[3], M[4],
+                                M[2], M[4], M[5]};
+            rtype A_inv[9];
+            invert_matrix<3>(A, A_inv);
+            FOR_I_CONSERVATIVE {
+                gemv<3>(A_inv, b[i], g[i]);
+            }
+        }
+    }
+};
+
+/**
+ * @brief Weighted least-squares gradient of W = [rho, u, p] over
  *        face neighbors, with boundary ghost states placed at the mirror image
  *        of the cell centroid across the boundary face.
  *
- * Exact for linear fields on any mesh where the neighbor offsets span 2D.
+ * Exact for linear fields on any mesh where the neighbor offsets span N_DIM
+ * dimensions.
  */
 struct LSQGradientFunctor {
     Kokkos::View<uint32_t *> offsets_faces_of_cell;
@@ -49,7 +106,8 @@ struct LSQGradientFunctor {
             FOR_I_CONSERVATIVE W_j[i] = W(j, i);
         } else {
             rtype n[N_DIM];
-            const rtype n_vec[N_DIM] = {face_normals(i_face, 0), face_normals(i_face, 1)};
+            rtype n_vec[N_DIM];
+            FOR_I_DIM n_vec[i] = face_normals(i_face, i);
             unit<N_DIM>(n_vec, n);
             rtype d = 0.0;
             FOR_I_DIM d += (face_coords(i_face, i) - cell_coords(i_cell, i)) * n[i];
@@ -67,10 +125,10 @@ struct LSQGradientFunctor {
                 // Ghost temperature consistent with the prescribed heat flux into the
                 // fluid: q = kappa dT/dn with n pointing out of the domain
                 const rtype R = boundaries.R;
-                const rtype T_i = W_i[3] / (W_i[0] * R);
+                const rtype T_i = W_i[N_DIM + 1] / (W_i[0] * R);
                 const rtype kappa = boundaries.gas.conductivity(boundaries.gas.viscosity(T_i));
-                const rtype T_g = Kokkos::fmax(T_i + 2.0 * d * bc.data[3] / kappa, 0.1 * T_i);
-                W_j[0] = W_i[3] / (R * T_g);
+                const rtype T_g = Kokkos::fmax(T_i + 2.0 * d * bc.data[N_DIM + 1] / kappa, 0.1 * T_i);
+                W_j[0] = W_i[N_DIM + 1] / (R * T_g);
             }
         }
     }
@@ -79,26 +137,15 @@ struct LSQGradientFunctor {
     void operator()(const uint32_t i_cell) const {
         rtype W_i[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE W_i[i] = W(i_cell, i);
-        rtype M[3] = {0.0, 0.0, 0.0};
-        rtype b[N_CONSERVATIVE][N_DIM] = {};
+        LSQSystem lsq;
         for (uint32_t k = offsets_faces_of_cell(i_cell); k < offsets_faces_of_cell(i_cell + 1); k++) {
             rtype dx[N_DIM], W_j[N_CONSERVATIVE];
             neighbor(i_cell, faces_of_cell(k), W_i, dx, W_j);
-            const rtype w = 1.0 / (dx[0] * dx[0] + dx[1] * dx[1]);
-            M[0] += w * dx[0] * dx[0];
-            M[1] += w * dx[0] * dx[1];
-            M[2] += w * dx[1] * dx[1];
-            FOR_I_CONSERVATIVE {
-                const rtype dW = W_j[i] - W_i[i];
-                b[i][0] += w * dx[0] * dW;
-                b[i][1] += w * dx[1] * dW;
-            }
+            lsq.add(dx, W_i, W_j);
         }
-        const rtype inv_det = 1.0 / (M[0] * M[2] - M[1] * M[1]);
-        FOR_I_CONSERVATIVE {
-            gradients(i_cell, i, 0) = inv_det * ( M[2] * b[i][0] - M[1] * b[i][1]);
-            gradients(i_cell, i, 1) = inv_det * (-M[1] * b[i][0] + M[0] * b[i][1]);
-        }
+        rtype g[N_CONSERVATIVE][N_DIM];
+        lsq.solve(g);
+        FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) gradients(i_cell, i, d) = g[i][d];
     }
 };
 
@@ -118,38 +165,24 @@ struct LSQVertexGradientFunctor {
     void operator()(const uint32_t i_cell) const {
         rtype W_i[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE W_i[i] = faces.W(i_cell, i);
-        rtype M[3] = {0.0, 0.0, 0.0};
-        rtype b[N_CONSERVATIVE][N_DIM] = {};
-        auto accumulate = [&](const rtype * dx, const rtype * W_j) {
-            const rtype w = 1.0 / (dx[0] * dx[0] + dx[1] * dx[1]);
-            M[0] += w * dx[0] * dx[0];
-            M[1] += w * dx[0] * dx[1];
-            M[2] += w * dx[1] * dx[1];
-            FOR_I_CONSERVATIVE {
-                const rtype dW = W_j[i] - W_i[i];
-                b[i][0] += w * dx[0] * dW;
-                b[i][1] += w * dx[1] * dW;
-            }
-        };
+        LSQSystem lsq;
         for (uint32_t k = offsets_cells_of_cell(i_cell); k < offsets_cells_of_cell(i_cell + 1); k++) {
             const uint32_t j = cells_of_cell(k);
             rtype dx[N_DIM], W_j[N_CONSERVATIVE];
             FOR_I_DIM dx[i] = faces.cell_coords(j, i) - faces.cell_coords(i_cell, i);
             FOR_I_CONSERVATIVE W_j[i] = faces.W(j, i);
-            accumulate(dx, W_j);
+            lsq.add(dx, W_i, W_j);
         }
         for (uint32_t k = faces.offsets_faces_of_cell(i_cell); k < faces.offsets_faces_of_cell(i_cell + 1); k++) {
             const uint32_t i_face = faces.faces_of_cell(k);
             if (faces.cells_of_face(i_face, 1) >= 0) continue;
             rtype dx[N_DIM], W_j[N_CONSERVATIVE];
             faces.neighbor(i_cell, i_face, W_i, dx, W_j);
-            accumulate(dx, W_j);
+            lsq.add(dx, W_i, W_j);
         }
-        const rtype inv_det = 1.0 / (M[0] * M[2] - M[1] * M[1]);
-        FOR_I_CONSERVATIVE {
-            faces.gradients(i_cell, i, 0) = inv_det * ( M[2] * b[i][0] - M[1] * b[i][1]);
-            faces.gradients(i_cell, i, 1) = inv_det * (-M[1] * b[i][0] + M[0] * b[i][1]);
-        }
+        rtype g[N_CONSERVATIVE][N_DIM];
+        lsq.solve(g);
+        FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) faces.gradients(i_cell, i, d) = g[i][d];
     }
 };
 

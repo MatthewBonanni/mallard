@@ -3,6 +3,12 @@
 Mallard reads a single [TOML](https://toml.io) file: `Mallard -i input.toml`.
 Kokkos options such as `--kokkos-num-threads=N` or `--kokkos-device-id=N` can be appended.
 
+The spatial dimension is fixed at build time with the CMake option
+`-DMallard_DIM=2` (default) or `3`. Vectors in the input (`u`, `gravity`,
+`rhou`) have that many components, and expressions are in `x`, `y`, `z`
+(`z` is 0 in 2D) and, where noted, `t`. Below, `[u_x, u_y]` reads
+`[u_x, u_y, u_z]` in 3D.
+
 ## `[run]`
 
 | Key | Description |
@@ -65,9 +71,9 @@ and curves in 3D) are ignored, and higher-order elements are rejected.
 | Key | Description |
 |---|---|
 | `type` | `constant`, `analytical` or `restart` |
-| `u` | `constant`: `[u_x, u_y]`; `analytical`: two expressions in `x` and `y` |
-| `rho`, `p`, `T` | `constant`: `p` and `T`; `analytical`: exactly two of the three, as expressions in `x` and `y` |
-| `n_subdivisions` | (`analytical`) Each cell is split into `n_subdivisions`² sub-triangles for computing cell averages, default 4 |
+| `u` | `constant`: `[u_x, u_y]`; `analytical`: one expression in `x`, `y`, `z` per component |
+| `rho`, `p`, `T` | `constant`: `p` and `T`; `analytical`: exactly two of the three, as expressions in `x`, `y`, `z` |
+| `n_subdivisions` | (`analytical`) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is integrated with a 64-point rule on each of `n_subdivisions`³ pieces (default 2) |
 | `file` | (`restart`) Restart file to resume from |
 
 Expressions use [exprtk](https://www.partow.net/programming/exprtk/) syntax, e.g. `"x < 0.5 ? 1.0 : 0.125"`.
@@ -75,7 +81,7 @@ Expressions use [exprtk](https://www.partow.net/programming/exprtk/) syntax, e.g
 ## `[[boundaries]]`
 
 Every boundary face must be assigned exactly once. A zone can be split
-between several entries with `where = "<expression in x, y>"`, which selects
+between several entries with `where = "<expression in x, y, z>"`, which selects
 the zone's faces whose centers satisfy the expression.
 
 | `type` | Description | Keys |
@@ -87,7 +93,7 @@ the zone's faces whose centers satisfy the expression.
 | `wall_heat_flux` | Wall with heat flux `q` into the fluid | `q`, `u` (optional) |
 | `upt` | Inflow with fixed velocity, pressure and temperature | `u`, `p`, `T` |
 | `farfield` | Characteristic far field for a free stream: the outgoing Riemann invariant comes from the interior, the incoming one from the free stream, so waves leave and the boundary works for inflow, outflow and tangential flow alike | `u`, `p`, `T` (free stream) |
-| `dirichlet` | Exterior state from expressions in `x`, `y`, `t`, evaluated at face centers at every stage | `rho`, `u` (two expressions), `p` |
+| `dirichlet` | Exterior state from expressions in `x`, `y`, `z`, `t`, evaluated at face centers at every stage | `rho`, `u` (one expression per component), `p` |
 | `p_out` | Outlet: imposes `p` if the outflow is subsonic | `p` |
 | `p_out_average` | Outlet for mixed subsonic/supersonic flow: on subsonic faces, shifts the local pressure so that its area average over the boundary equals `p`, preserving the transverse profile | `p` |
 
@@ -120,7 +126,8 @@ the zone's faces whose centers satisfy the expression.
 ## `[[forces]]`
 
 Write the force of the fluid on a boundary zone to a CSV file
-(`step, t, Fx_pressure, Fy_pressure, Fx_viscous, Fy_viscous`, per unit depth).
+(`step, t, Fx_pressure, Fy_pressure, Fx_viscous, Fy_viscous`, per unit depth; in
+3D `step, t, Fx_pressure, Fy_pressure, Fz_pressure, Fx_viscous, Fy_viscous, Fz_viscous`).
 
 | Key | Description |
 |---|---|
@@ -134,8 +141,8 @@ Optional source terms, added per unit volume.
 
 | Key | Description |
 |---|---|
-| `gravity` | `[g_x, g_y]`; adds `rho g` to the momentum and `rho u . g` to the energy equation |
-| `rho`, `rhou`, `rhoE` | Expressions in `x`, `y`, `t` (`rhou` is a two-element array) for the mass, momentum and energy sources |
+| `gravity` | `[g_x, g_y]` (`[g_x, g_y, g_z]` in 3D); adds `rho g` to the momentum and `rho u . g` to the energy equation |
+| `rho`, `rhou`, `rhoE` | Expressions in `x`, `y`, `z`, `t` (`rhou` has one per component) for the mass, momentum and energy sources |
 | `time_dependent` | Re-evaluate the expressions at every Runge-Kutta stage (host-side, so costly on large meshes); otherwise they are evaluated once |
 
 The scheme is not exactly well balanced: hydrostatic states carry small spurious velocities (about 1e-4 of the sound speed on a 32x32 mesh) that vanish at second order under refinement. Wall and symmetry ghost states continue the hydrostatic pressure gradient.

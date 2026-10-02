@@ -69,21 +69,21 @@ static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
  * Every boundary condition is imposed weakly through a ghost state that is
  * passed to the Riemann solver (and used for gradient reconstruction).
  * The meaning of data depends on type:
- * - UPT: data = W = [rho, u_x, u_y, p] of the inflow state
- * - FARFIELD: data = W = [rho, u_x, u_y, p] of the free stream
+ * - UPT: data = W = [rho, u, p] of the inflow state
+ * - FARFIELD: data = W = [rho, u, p] of the free stream
  * - PARTITION: faces towards cells of other ranks, at the edge of the halo. The
  *   interior state is copied; nothing an owned cell uses depends on it.
- * - P_OUT: data[3] = back pressure
- * - P_OUT_AVERAGE: data[3] = target area-averaged pressure; data[0] = current
- *   pressure shift (target minus the average of the adjacent cells), updated
- *   every stage
- * - walls: data[1], data[2] = wall velocity; WALL_ISOTHERMAL: data[0] = wall
- *   temperature; WALL_HEAT_FLUX: data[3] = heat flux into the fluid
+ * - P_OUT: data[N_DIM + 1] = back pressure
+ * - P_OUT_AVERAGE: data[N_DIM + 1] = target area-averaged pressure; data[0] =
+ *   current pressure shift (target minus the average of the adjacent cells),
+ *   updated every stage
+ * - walls: data[1..N_DIM] = wall velocity; WALL_ISOTHERMAL: data[0] = wall
+ *   temperature; WALL_HEAT_FLUX: data[N_DIM + 1] = heat flux into the fluid
  * - DIRICHLET: unused; the exterior state is set per face (BoundaryData::face_state)
  */
 struct BoundaryCondition {
     BoundaryType type = BoundaryType::EXTRAPOLATION;
-    rtype data[N_DIM + 2] = {0.0, 0.0, 0.0, 0.0};
+    rtype data[N_DIM + 2] = {};
 
     KOKKOS_INLINE_FUNCTION
     bool is_wall() const {
@@ -97,7 +97,7 @@ struct BoundaryCondition {
     static BoundaryCondition from_input(const toml::value & input, const Euler & physics);
 
     /**
-     * @brief Ghost state W_g = [rho, u_x, u_y, p] given the interior state W_i.
+     * @brief Ghost state W_g = [rho, u, p] given the interior state W_i.
      * @param W_i Interior state.
      * @param n Unit normal pointing out of the domain.
      * @param gamma Ratio of specific heats.
@@ -108,8 +108,9 @@ struct BoundaryCondition {
     KOKKOS_INLINE_FUNCTION
     void ghost_W(const rtype * W_i, const rtype * n, const rtype gamma, const rtype R,
                  const bool viscous, rtype * W_g) const {
+        constexpr uint8_t E = N_DIM + 1;
         for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = W_i[i];
-        const rtype u_n = W_i[1] * n[0] + W_i[2] * n[1];
+        const rtype u_n = dot<N_DIM>(W_i + 1, n);
         switch (type) {
             case BoundaryType::EXTRAPOLATION:
             case BoundaryType::PARTITION:
@@ -118,19 +119,17 @@ struct BoundaryCondition {
             case BoundaryType::WALL_ISOTHERMAL:
             case BoundaryType::WALL_HEAT_FLUX:
                 if (viscous) {
-                    W_g[1] = 2.0 * data[1] - W_i[1];
-                    W_g[2] = 2.0 * data[2] - W_i[2];
+                    FOR_I_DIM W_g[1 + i] = 2.0 * data[1 + i] - W_i[1 + i];
                     if (type == BoundaryType::WALL_ISOTHERMAL) {
-                        const rtype T_i = W_i[3] / (W_i[0] * R);
+                        const rtype T_i = W_i[E] / (W_i[0] * R);
                         const rtype T_g = Kokkos::fmax(2.0 * data[0] - T_i, 0.1 * data[0]);
-                        W_g[0] = W_i[3] / (R * T_g);
+                        W_g[0] = W_i[E] / (R * T_g);
                     }
                     break;
                 }
                 [[fallthrough]];
             case BoundaryType::SYMMETRY:
-                W_g[1] = W_i[1] - 2.0 * u_n * n[0];
-                W_g[2] = W_i[2] - 2.0 * u_n * n[1];
+                FOR_I_DIM W_g[1 + i] = W_i[1 + i] - 2.0 * u_n * n[i];
                 break;
             case BoundaryType::UPT:
                 for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = data[i];
@@ -142,9 +141,9 @@ struct BoundaryCondition {
                 // Characteristic far field: the outgoing Riemann invariant comes from
                 // the interior, the incoming one from the free stream, and entropy and
                 // tangential velocity from the upwind side
-                const rtype a_i = Kokkos::sqrt(gamma * W_i[3] / W_i[0]);
-                const rtype a_inf = Kokkos::sqrt(gamma * data[3] / data[0]);
-                const rtype u_n_inf = data[1] * n[0] + data[2] * n[1];
+                const rtype a_i = Kokkos::sqrt(gamma * W_i[E] / W_i[0]);
+                const rtype a_inf = Kokkos::sqrt(gamma * data[E] / data[0]);
+                const rtype u_n_inf = dot<N_DIM>(data + 1, n);
                 if (Kokkos::fabs(u_n) >= a_i) {
                     if (u_n < 0.0) {
                         for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = data[i];
@@ -157,30 +156,29 @@ struct BoundaryCondition {
                 const rtype a_b = 0.25 * (gamma - 1.0) * (r_out - r_in);
                 const rtype * W_up = (u_n_b < 0.0) ? data : W_i;
                 const rtype u_n_up = (u_n_b < 0.0) ? u_n_inf : u_n;
-                const rtype entropy = W_up[3] / Kokkos::pow(W_up[0], gamma);
+                const rtype entropy = W_up[E] / Kokkos::pow(W_up[0], gamma);
                 W_g[0] = Kokkos::pow(a_b * a_b / (gamma * entropy), 1.0 / (gamma - 1.0));
-                W_g[1] = W_up[1] + (u_n_b - u_n_up) * n[0];
-                W_g[2] = W_up[2] + (u_n_b - u_n_up) * n[1];
-                W_g[3] = W_g[0] * a_b * a_b / gamma;
+                FOR_I_DIM W_g[1 + i] = W_up[1 + i] + (u_n_b - u_n_up) * n[i];
+                W_g[E] = W_g[0] * a_b * a_b / gamma;
                 break;
             }
             case BoundaryType::P_OUT: {
-                const rtype a = Kokkos::sqrt(gamma * W_i[3] / W_i[0]);
+                const rtype a = Kokkos::sqrt(gamma * W_i[E] / W_i[0]);
                 if (u_n < a) {
                     // Subsonic: impose pressure, keep temperature
-                    W_g[0] = W_i[0] * data[3] / W_i[3];
-                    W_g[3] = data[3];
+                    W_g[0] = W_i[0] * data[E] / W_i[E];
+                    W_g[E] = data[E];
                 }
                 break;
             }
             case BoundaryType::P_OUT_AVERAGE: {
-                const rtype a = Kokkos::sqrt(gamma * W_i[3] / W_i[0]);
+                const rtype a = Kokkos::sqrt(gamma * W_i[E] / W_i[0]);
                 if (u_n < a) {
                     // Subsonic: shift the local pressure so the boundary average
                     // matches the target, keeping temperature
-                    const rtype p_g = Kokkos::fmax(W_i[3] + data[0], 1e-3 * W_i[3]);
-                    W_g[0] = W_i[0] * p_g / W_i[3];
-                    W_g[3] = p_g;
+                    const rtype p_g = Kokkos::fmax(W_i[E] + data[0], 1e-3 * W_i[E]);
+                    W_g[0] = W_i[0] * p_g / W_i[E];
+                    W_g[E] = p_g;
                 }
                 break;
             }
@@ -196,7 +194,7 @@ struct BoundaryData {
     Kokkos::View<int32_t *> face_image;       // Transmissive faces: interior image cell, else -1
     Kokkos::View<int32_t *> face_image_face;  // Face of the image cell matching the translated face, else -1
     Kokkos::View<uint8_t *> face_image_side;  // Side of face_image_face belonging to the image cell
-    Kokkos::View<uint8_t *> face_image_flip;  // Whether the image face runs opposite to the boundary face
+    Kokkos::View<uint8_t *> face_image_flip;  // 2D: whether the image face runs opposite to the boundary face
     Kokkos::View<int32_t *> face_state_index; // Dirichlet faces: index into face_state, else -1
     Kokkos::View<rtype *[N_DIM + 2]> face_state; // Exterior W of Dirichlet faces
     Kokkos::View<BoundaryCondition *> bcs;
@@ -204,7 +202,7 @@ struct BoundaryData {
     rtype R = 1.0;
     bool viscous = false;
     Euler gas;
-    rtype gravity[N_DIM] = {0.0, 0.0};
+    rtype gravity[N_DIM] = {};
 
     /**
      * @brief Exterior state seen by the Riemann solver on boundary face i_face.
@@ -249,7 +247,7 @@ struct BoundaryData {
         ghost_W(i_face, W_i, n, W_g);
         const BoundaryCondition & bc = bcs(face_bc(i_face));
         if (bc.is_wall() || bc.type == BoundaryType::SYMMETRY) {
-            W_g[3] += W_i[0] * (gravity[0] * n[0] + gravity[1] * n[1]) * dist;
+            W_g[N_DIM + 1] += W_i[0] * dot<N_DIM>(gravity, n) * dist;
         }
     }
 

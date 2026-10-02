@@ -115,6 +115,34 @@ void unit<3>(const rtype * v, rtype * u) {
 }
 
 /**
+ * @brief Unit tangents completing the unit normal n to an orthonormal,
+ *        right-handed basis: (n, t1) in 2D, (n, t1, t2) in 3D. In 2D,
+ *        t1 = (-n_y, n_x) and t2 is not written.
+ *
+ * @param n Unit normal.
+ * @param t1 First tangent.
+ * @param t2 Second tangent (3D only).
+ */
+KOKKOS_INLINE_FUNCTION
+void tangent_basis(const rtype * n, rtype * t1, rtype * t2) {
+    if constexpr (N_DIM == 2) {
+        t1[0] = -n[1];
+        t1[1] = n[0];
+        (void)t2;
+    } else {
+        // Project out of n the coordinate axis least aligned with it
+        const rtype ax = Kokkos::fabs(n[0]), ay = Kokkos::fabs(n[1]), az = Kokkos::fabs(n[2]);
+        const uint8_t k = (ax <= ay && ax <= az) ? 0 : ((ay <= az) ? 1 : 2);
+        rtype v[3];
+        for (uint8_t i = 0; i < 3; i++) v[i] = ((i == k) ? 1.0 : 0.0) - n[k] * n[i];
+        unit<3>(v, t1);
+        t2[0] = n[1] * t1[2] - n[2] * t1[1];
+        t2[1] = n[2] * t1[0] - n[0] * t1[2];
+        t2[2] = n[0] * t1[1] - n[1] * t1[0];
+    }
+}
+
+/**
  * @brief Transpose a matrix.
  * Only intended for use with small matrices within kernels.
  * 

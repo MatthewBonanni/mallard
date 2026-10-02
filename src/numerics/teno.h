@@ -69,34 +69,50 @@ void monomials(const uint8_t r, const rtype xi, const rtype eta, rtype * phi) {
 }
 
 /**
- * @brief Left (L) and right (R) eigenvectors of the 2D Euler flux Jacobian
- *        in direction n for conservative variables, at state W = [rho, u, v, p].
- *        Characteristic order: u_n - a, u_n (entropy), u_n + a, u_n (shear).
+ * @brief Left (L) and right (R) eigenvectors of the Euler flux Jacobian in
+ *        direction n for conservative variables, at state W = [rho, u, p].
+ *        Characteristic order: u_n - a, u_n (entropy), u_n + a, then one
+ *        u_n (shear) wave per tangent of tangent_basis(n).
  */
 KOKKOS_INLINE_FUNCTION
 void eigenvectors(const rtype * W, const rtype * n, const rtype gamma,
                   rtype L[N_CONSERVATIVE][N_CONSERVATIVE],
                   rtype R[N_CONSERVATIVE][N_CONSERVATIVE]) {
-    const rtype u = W[1], v = W[2];
-    const rtype a = Kokkos::sqrt(gamma * W[3] / W[0]);
-    const rtype q2 = u * u + v * v;
+    constexpr uint8_t E = N_DIM + 1;
+    const rtype * u = W + 1;
+    const rtype a = Kokkos::sqrt(gamma * W[E] / W[0]);
+    const rtype q2 = dot<N_DIM>(u, u);
     const rtype H = a * a / (gamma - 1.0) + 0.5 * q2;
-    const rtype qn = u * n[0] + v * n[1];
-    const rtype qt = -u * n[1] + v * n[0];
+    const rtype qn = dot<N_DIM>(u, n);
+    rtype t[N_DIM - 1][N_DIM];
+    tangent_basis(n, t[0], t[N_DIM - 2]);
     const rtype b1 = (gamma - 1.0) / (a * a);
     const rtype b2 = 0.5 * b1 * q2;
 
-    R[0][0] = 1.0;           R[0][1] = 1.0;      R[0][2] = 1.0;           R[0][3] = 0.0;
-    R[1][0] = u - a * n[0];  R[1][1] = u;        R[1][2] = u + a * n[0];  R[1][3] = -n[1];
-    R[2][0] = v - a * n[1];  R[2][1] = v;        R[2][2] = v + a * n[1];  R[2][3] = n[0];
-    R[3][0] = H - a * qn;    R[3][1] = 0.5 * q2; R[3][2] = H + a * qn;    R[3][3] = qt;
-
-    L[0][0] = 0.5 * (b2 + qn / a); L[0][1] = 0.5 * (-b1 * u - n[0] / a);
-    L[0][2] = 0.5 * (-b1 * v - n[1] / a); L[0][3] = 0.5 * b1;
-    L[1][0] = 1.0 - b2; L[1][1] = b1 * u; L[1][2] = b1 * v; L[1][3] = -b1;
-    L[2][0] = 0.5 * (b2 - qn / a); L[2][1] = 0.5 * (-b1 * u + n[0] / a);
-    L[2][2] = 0.5 * (-b1 * v + n[1] / a); L[2][3] = 0.5 * b1;
-    L[3][0] = -qt; L[3][1] = -n[1]; L[3][2] = n[0]; L[3][3] = 0.0;
+    R[0][0] = 1.0;        R[0][1] = 1.0;      R[0][2] = 1.0;
+    R[E][0] = H - a * qn; R[E][1] = 0.5 * q2; R[E][2] = H + a * qn;
+    L[0][0] = 0.5 * (b2 + qn / a); L[0][E] = 0.5 * b1;
+    L[1][0] = 1.0 - b2;            L[1][E] = -b1;
+    L[2][0] = 0.5 * (b2 - qn / a); L[2][E] = 0.5 * b1;
+    FOR_I_DIM {
+        R[1 + i][0] = u[i] - a * n[i];
+        R[1 + i][1] = u[i];
+        R[1 + i][2] = u[i] + a * n[i];
+        L[0][1 + i] = 0.5 * (-b1 * u[i] - n[i] / a);
+        L[1][1 + i] = b1 * u[i];
+        L[2][1 + i] = 0.5 * (-b1 * u[i] + n[i] / a);
+    }
+    for (uint8_t k = 0; k < N_DIM - 1; k++) {
+        const uint8_t c = 3 + k;
+        R[0][c] = 0.0;
+        R[E][c] = dot<N_DIM>(u, t[k]);
+        L[c][0] = -R[E][c];
+        L[c][E] = 0.0;
+        FOR_I_DIM {
+            R[1 + i][c] = t[k][i];
+            L[c][1 + i] = t[k][i];
+        }
+    }
 }
 
 /**

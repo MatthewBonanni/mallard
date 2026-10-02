@@ -43,7 +43,8 @@ struct ConvectiveFluxFunctor {
         const int32_t c0 = cells_of_face(i_face, 0);
         const int32_t c1 = cells_of_face(i_face, 1);
         rtype n_unit[N_DIM];
-        const rtype n_vec[N_DIM] = {normals(i_face, 0), normals(i_face, 1)};
+        rtype n_vec[N_DIM];
+        FOR_I_DIM n_vec[i] = normals(i_face, i);
         unit<N_DIM>(n_vec, n_unit);
 
         rtype flux[N_CONSERVATIVE] = {};

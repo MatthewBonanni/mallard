@@ -188,9 +188,12 @@ struct LimiterFunctor {
 
         // Venkatakrishnan threshold (K h)^3, scaled per variable by its local magnitude
         // (the length scale still depends on the mesh units, as in the original method)
-        const rtype h = Kokkos::sqrt(cell_volume(i_cell));
-        const rtype a = Kokkos::sqrt(neighbors.boundaries.gamma * W_i[3] / W_i[0]);
-        const rtype scale[N_CONSERVATIVE] = {W_i[0], a, a, W_i[3]};
+        const rtype h = (N_DIM == 2) ? Kokkos::sqrt(cell_volume(i_cell)) : Kokkos::cbrt(cell_volume(i_cell));
+        const rtype a = Kokkos::sqrt(neighbors.boundaries.gamma * W_i[N_DIM + 1] / W_i[0]);
+        rtype scale[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE scale[i] = a;
+        scale[0] = W_i[0];
+        scale[N_DIM + 1] = W_i[N_DIM + 1];
         const rtype Kh3 = Kokkos::pow(venkat_K * h, 3.0);
 
         rtype phi[N_CONSERVATIVE];
@@ -201,8 +204,9 @@ struct LimiterFunctor {
                 rtype r[N_DIM];
                 FOR_I_DIM r[i] = neighbors.face_coords(i_face, i) - neighbors.cell_coords(i_cell, i);
                 FOR_I_CONSERVATIVE {
-                    const rtype d_minus = neighbors.gradients(i_cell, i, 0) * r[0] +
-                                          neighbors.gradients(i_cell, i, 1) * r[1];
+                    rtype grad[N_DIM];
+                    for (uint8_t d = 0; d < N_DIM; d++) grad[d] = neighbors.gradients(i_cell, i, d);
+                    const rtype d_minus = dot<N_DIM>(grad, r);
                     const rtype d_max = W_max[i] - W_i[i];
                     const rtype d_min = W_min[i] - W_i[i];
                     rtype phi_f;
@@ -242,8 +246,9 @@ struct MUSCLFaceFunctor {
             FOR_I_DIM r[i] = face_coords(i_face, i) - cell_coords(c, i);
             rtype W_f[N_CONSERVATIVE];
             FOR_I_CONSERVATIVE {
-                W_f[i] = W(c, i) + limiters(c, i) * (gradients(c, i, 0) * r[0] +
-                                                      gradients(c, i, 1) * r[1]);
+                rtype grad[N_DIM];
+                for (uint8_t d = 0; d < N_DIM; d++) grad[d] = gradients(c, i, d);
+                W_f[i] = W(c, i) + limiters(c, i) * dot<N_DIM>(grad, r);
             }
             const bool admissible = (W_f[0] > 0.0) && (W_f[N_CONSERVATIVE - 1] > 0.0);
             FOR_I_CONSERVATIVE face_solution(i_face, 0, side, i) = admissible ? W_f[i] : W(c, i);

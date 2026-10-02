@@ -74,14 +74,18 @@ void Solver::calc_rhs(StateView solution, StateView rhs, rtype t_stage) {
         update_source_field(t_stage);
         const bool gravity_on = has_gravity;
         const bool field_on = !source_expressions.empty();
-        const rtype gx = gravity[0], gy = gravity[1];
+        Kokkos::Array<rtype, N_DIM> g;
+        FOR_I_DIM g[i] = gravity[i];
         StateView S = source_field;
         Kokkos::parallel_for("rhs_sources", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
             const rtype V = vol(i_cell);
             if (gravity_on) {
-                rhs(i_cell, 1) += solution(i_cell, 0) * gx * V;
-                rhs(i_cell, 2) += solution(i_cell, 0) * gy * V;
-                rhs(i_cell, 3) += (solution(i_cell, 1) * gx + solution(i_cell, 2) * gy) * V;
+                rtype rhou[N_DIM];
+                FOR_I_DIM {
+                    rhs(i_cell, 1 + i) += solution(i_cell, 0) * g[i] * V;
+                    rhou[i] = solution(i_cell, 1 + i);
+                }
+                rhs(i_cell, N_DIM + 1) += dot<N_DIM>(rhou, g.data()) * V;
             }
             if (field_on) {
                 FOR_I_CONSERVATIVE rhs(i_cell, i) += S(i_cell, i) * V;
