@@ -10,6 +10,8 @@
  */
 
 #include <gtest/gtest.h>
+
+#include <array>
 #include <Kokkos_Core.hpp>
 
 #include <cmath>
@@ -151,6 +153,33 @@ TEST(Boundary3DTest, FarfieldSubsonicStateKeepsRiemannInvariantsAndUpwindTangent
     }
 }
 
+namespace {
+
+struct GhostArgs {
+    rtype W[N_CONSERVATIVE];
+    rtype n[N_DIM];
+};
+
+// BoundaryData holds device views, so it is evaluated in a kernel
+std::array<rtype, N_CONSERVATIVE> ghost_at_on_device(const BoundaryData & bd, uint32_t f, const rtype * W,
+                                                     const rtype * n, rtype dist) {
+    GhostArgs args;
+    FOR_I_CONSERVATIVE args.W[i] = W[i];
+    FOR_I_DIM args.n[i] = n[i];
+    Kokkos::View<rtype[N_CONSERVATIVE]> out("ghost");
+    Kokkos::parallel_for(1, KOKKOS_LAMBDA(const int) {
+        rtype g[N_CONSERVATIVE];
+        bd.ghost_W_at(f, args.W, args.n, dist, g);
+        FOR_I_CONSERVATIVE out(i) = g[i];
+    });
+    auto h_out = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
+    std::array<rtype, N_CONSERVATIVE> result;
+    FOR_I_CONSERVATIVE result[i] = h_out(i);
+    return result;
+}
+
+} // namespace
+
 TEST(Boundary3DTest, HydrostaticGhostPressureFollowsGravityAlongTheNormal) {
     auto mesh = make_mesh_3d("cartesian", 2, 2, 2);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY);
@@ -162,9 +191,8 @@ TEST(Boundary3DTest, HydrostaticGhostPressureFollowsGravityAlongTheNormal) {
         if (mesh->h_cells_of_face(f, 1) < 0 && mesh->h_face_coords(f, 2) < 1e-12) f_back = f;
     }
     const rtype n_out[3] = {0.0, 0.0, -1.0};
-    rtype W_g[N_CONSERVATIVE];
     // The ghost point 0.5 below the plane sits deeper in the hydrostatic column
-    bd.ghost_W_at(f_back, W_I, n_out, 0.5, W_g);
+    const auto W_g = ghost_at_on_device(bd, f_back, W_I, n_out, 0.5);
     EXPECT_NEAR(W_g[4], W_I[4] + W_I[0] * 2.0 * 0.5, 1e-14);
 }
 
