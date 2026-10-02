@@ -278,9 +278,6 @@ void TENO::compute_stencils_and_matrices() {
     scale = Kokkos::View<rtype *>("teno_scale", n_cells);
     basis_mean = Kokkos::View<rtype **>("teno_basis_mean", n_cells, nk);
     stencil_large_size = Kokkos::View<uint16_t *>("teno_stencil_large_size", n_cells);
-    stencil_large = Kokkos::View<int32_t **>("teno_stencil_large", n_cells, ns_max);
-    stencil_large_face = Kokkos::View<int32_t **>("teno_stencil_large_face", n_cells, ns_max);
-    pinv_large = Kokkos::View<rtype ***>("teno_pinv_large", n_cells, nk, ns_max);
     stencil_small_size = Kokkos::View<uint16_t **>("teno_stencil_small_size", n_cells, teno::MAX_FACES);
     stencil_small = Kokkos::View<int32_t ***>("teno_stencil_small", n_cells, teno::MAX_FACES, nss_max);
     stencil_small_face = Kokkos::View<int32_t ***>("teno_stencil_small_face", n_cells, teno::MAX_FACES, nss_max);
@@ -294,12 +291,14 @@ void TENO::compute_stencils_and_matrices() {
     auto h_scale = Kokkos::create_mirror_view(scale);
     auto h_basis_mean = Kokkos::create_mirror_view(basis_mean);
     auto h_stencil_large_size = Kokkos::create_mirror_view(stencil_large_size);
-    auto h_stencil_large = Kokkos::create_mirror_view(stencil_large);
-    auto h_stencil_large_face = Kokkos::create_mirror_view(stencil_large_face);
+    // Large stencils are built on the host at the worst-case size; the device
+    // only gets the compacted arrays
+    Kokkos::View<int32_t **, Kokkos::HostSpace> h_stencil_large("teno_stencil_large_setup", n_cells, ns_max);
+    Kokkos::View<int32_t **, Kokkos::HostSpace> h_stencil_large_face("teno_stencil_large_face_setup", n_cells, ns_max);
     auto h_face_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_bc);
     auto h_bcs = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.bcs);
     gather_depth.assign(n_cells, 0);
-    auto h_pinv_large = Kokkos::create_mirror_view(pinv_large);
+    Kokkos::View<rtype ***, Kokkos::HostSpace> h_pinv_large("teno_pinv_large_setup", n_cells, nk, ns_max);
     auto h_stencil_small_size = Kokkos::create_mirror_view(stencil_small_size);
     auto h_stencil_small = Kokkos::create_mirror_view(stencil_small);
     auto h_stencil_small_face = Kokkos::create_mirror_view(stencil_small_face);
@@ -746,9 +745,6 @@ void TENO::compute_stencils_and_matrices_3d() {
     scale = Kokkos::View<rtype *>("teno_scale", n_cells);
     basis_mean = Kokkos::View<rtype **>("teno_basis_mean", n_cells, nk);
     stencil_large_size = Kokkos::View<uint16_t *>("teno_stencil_large_size", n_cells);
-    stencil_large = Kokkos::View<int32_t **>("teno_stencil_large", n_cells, ns_max);
-    stencil_large_face = Kokkos::View<int32_t **>("teno_stencil_large_face", n_cells, ns_max);
-    pinv_large = Kokkos::View<rtype ***>("teno_pinv_large", n_cells, nk, ns_max);
     stencil_small_size = Kokkos::View<uint16_t **>("teno_stencil_small_size", n_cells, teno::MAX_FACES);
     stencil_small = Kokkos::View<int32_t ***>("teno_stencil_small", n_cells, teno::MAX_FACES, nss_max);
     stencil_small_face = Kokkos::View<int32_t ***>("teno_stencil_small_face", n_cells, teno::MAX_FACES, nss_max);
@@ -761,12 +757,14 @@ void TENO::compute_stencils_and_matrices_3d() {
     auto h_scale = Kokkos::create_mirror_view(scale);
     auto h_basis_mean = Kokkos::create_mirror_view(basis_mean);
     auto h_stencil_large_size = Kokkos::create_mirror_view(stencil_large_size);
-    auto h_stencil_large = Kokkos::create_mirror_view(stencil_large);
-    auto h_stencil_large_face = Kokkos::create_mirror_view(stencil_large_face);
+    // Large stencils are built on the host at the worst-case size; the device
+    // only gets the compacted arrays
+    Kokkos::View<int32_t **, Kokkos::HostSpace> h_stencil_large("teno_stencil_large_setup", n_cells, ns_max);
+    Kokkos::View<int32_t **, Kokkos::HostSpace> h_stencil_large_face("teno_stencil_large_face_setup", n_cells, ns_max);
     auto h_face_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_bc);
     auto h_bcs = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.bcs);
     gather_depth.assign(n_cells, 0);
-    auto h_pinv_large = Kokkos::create_mirror_view(pinv_large);
+    Kokkos::View<rtype ***, Kokkos::HostSpace> h_pinv_large("teno_pinv_large_setup", n_cells, nk, ns_max);
     auto h_stencil_small_size = Kokkos::create_mirror_view(stencil_small_size);
     auto h_stencil_small = Kokkos::create_mirror_view(stencil_small);
     auto h_stencil_small_face = Kokkos::create_mirror_view(stencil_small_face);
