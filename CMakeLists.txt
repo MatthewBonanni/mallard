@@ -16,6 +16,12 @@ if(${PROJECT_NAME}_USE_DOUBLE)
     add_compile_definitions(${PROJECT_NAME}_USE_DOUBLE)
 endif()
 
+option(${PROJECT_NAME}_ENABLE_MPI "Distributed memory parallelism with MPI" OFF)
+if(${PROJECT_NAME}_ENABLE_MPI)
+    find_package(MPI REQUIRED COMPONENTS CXX)
+    message(STATUS "Mallard: MPI ${MPI_CXX_VERSION}")
+endif()
+
 # HDF5 is not used by the solver yet; it is only built/found on request
 option(${PROJECT_NAME}_ENABLE_HDF5 "Enable HDF5" OFF)
 option(USE_SYSTEM_HDF5 "Use system-installed HDF5" ON)

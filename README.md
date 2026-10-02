@@ -46,6 +46,7 @@ Pick the Kokkos backend at configure time, for example `-DKokkos_ENABLE_OPENMP=O
 |---|---|---|
 | `USE_SYSTEM_KOKKOS` | `ON` | Use an installed Kokkos instead of the submodule |
 | `Mallard_USE_DOUBLE` | `ON` | Double precision (single precision otherwise) |
+| `Mallard_ENABLE_MPI` | `OFF` | Distributed memory with MPI (work in progress: multi-rank runs are not supported yet) |
 | `Mallard_ENABLE_HDF5` | `OFF` | Find or build HDF5 (not used by the solver yet) |
 | `BUILD_DOCS` | `OFF` | Doxygen documentation target |
 

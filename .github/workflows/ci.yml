@@ -15,11 +15,17 @@ jobs:
             flags: -DKokkos_ENABLE_SERIAL=ON
           - name: openmp
             flags: -DKokkos_ENABLE_OPENMP=ON
+          - name: mpi
+            flags: -DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON
+            mpi: true
     name: ${{ matrix.backend.name }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
+      - name: Install MPI
+        if: matrix.backend.mpi
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libopenmpi-dev openmpi-bin
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -27,6 +33,13 @@ jobs:
       - name: Build
         run: cmake --build build -j $(nproc)
       - name: Test
+        if: ${{ !matrix.backend.mpi }}
         env:
           OMP_NUM_THREADS: 2
         run: ./build/test/MallardTest
+      - name: Test (MPI)
+        if: matrix.backend.mpi
+        run: |
+          mpirun -n 1 ./build/test/MallardTest
+          mpirun -n 3 --oversubscribe ./build/test/MallardTest --gtest_filter='CommTest.*'
+

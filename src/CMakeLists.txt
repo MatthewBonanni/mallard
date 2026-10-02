@@ -15,6 +15,7 @@ add_library(MallardCore STATIC
     solver/solver_initialize.cpp
     solver/solver_rhs.cpp
     io/data_writer.cpp
+    parallel/comm.cpp
 )
 
 target_include_directories(MallardCore PUBLIC
@@ -26,8 +27,13 @@ target_include_directories(MallardCore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/physics
     ${CMAKE_CURRENT_SOURCE_DIR}/solver
     ${CMAKE_CURRENT_SOURCE_DIR}/io
+    ${CMAKE_CURRENT_SOURCE_DIR}/parallel
 )
 target_link_libraries(MallardCore PUBLIC Kokkos::kokkos)
+if(Mallard_ENABLE_MPI)
+    target_link_libraries(MallardCore PUBLIC MPI::MPI_CXX)
+    target_compile_definitions(MallardCore PUBLIC Mallard_HAS_MPI)
+endif()
 
 add_executable(Mallard main.cpp)
 target_link_libraries(Mallard PRIVATE MallardCore)

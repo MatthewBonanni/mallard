@@ -15,6 +15,7 @@ add_executable(MallardTest
     source_test.cpp
     io_test.cpp
     mesh_file_test.cpp
+    comm_test.cpp
 )
 
 target_include_directories(MallardTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

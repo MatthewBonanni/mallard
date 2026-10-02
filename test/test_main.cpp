@@ -12,8 +12,16 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include "comm.h"
+
 int main(int argc, char** argv) {
+    comm::Session session(argc, argv);
     ::testing::InitGoogleTest(&argc, argv);
+    if (!comm::is_root()) {
+        // One report per run: other ranks stay quiet
+        auto & listeners = ::testing::UnitTest::GetInstance()->listeners();
+        delete listeners.Release(listeners.default_result_printer());
+    }
     Kokkos::initialize(argc, argv);
     int result = RUN_ALL_TESTS();
     Kokkos::finalize();

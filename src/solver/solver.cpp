@@ -23,6 +23,7 @@
 
 #include <Kokkos_Core.hpp>
 
+#include "comm.h"
 #include "common.h"
 #include "expression.h"
 #include "gradient.h"
@@ -233,6 +234,9 @@ void Solver::update_average_pressure_outlets(StateView solution) {
             sum_pA += W[3] * face_area(f);
             sum_A += face_area(f);
         }, pA, A);
+        const auto sums = comm::allreduce(std::array<rtype, 2>{pA, A}, comm::Op::SUM);
+        pA = sums[0];
+        A = sums[1];
         auto bc = Kokkos::subview(boundary_data.bcs, i_bc);
         auto h_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bc);
         h_bc().data[0] = h_bc().data[3] - pA / A;
@@ -518,6 +522,7 @@ void Solver::check_fields() {
             if (!Kokkos::isfinite(U(i_cell, i))) bad++;
         }
     }, n_bad);
+    n_bad = comm::allreduce(n_bad, comm::Op::SUM);
     if (n_bad > 0) {
         std::stringstream msg;
         msg << "Non-finite values found in solution at step " << step << ", t = " << t << ".";
@@ -660,7 +665,7 @@ rtype Solver::calc_dt_cfl1() {
                             physics};
     rtype dt_min = std::numeric_limits<rtype>::max();
     Kokkos::parallel_reduce("time_step", mesh->n_cells, functor, Kokkos::Min<rtype>(dt_min));
-    return dt_min;
+    return comm::allreduce(dt_min, comm::Op::MIN);
 }
 
 /**
@@ -753,7 +758,8 @@ std::array<rtype, 2 * N_DIM> Solver::calc_force(const Kokkos::View<uint32_t *> &
                          W_cells, viscous_gradients, boundary_data, physics, physics.is_viscous()};
     ForceFunctor::value_type result;
     Kokkos::parallel_reduce("force", faces.extent(0), functor, result);
-    return {result.v[0], result.v[1], result.v[2], result.v[3]};
+    return comm::allreduce(std::array<rtype, 2 * N_DIM>{result.v[0], result.v[1], result.v[2], result.v[3]},
+                           comm::Op::SUM);
 }
 
 void Solver::write_forces() {
@@ -777,5 +783,5 @@ std::array<rtype, N_CONSERVATIVE> Solver::integrate_conservatives() {
         }, sum);
         total[i_var] = sum;
     }
-    return total;
+    return comm::allreduce(total, comm::Op::SUM);
 }
