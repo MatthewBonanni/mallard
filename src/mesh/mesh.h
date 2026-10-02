@@ -101,6 +101,7 @@ void cell_tetrahedra(const std::vector<std::array<double, 3>> & nodes,
 
 
 struct MeshBlock;
+struct PeriodicNodes;
 
 class Mesh {
     public:
@@ -115,10 +116,25 @@ class Mesh {
         ~Mesh();
 
         /**
+         * @brief A periodic pair of boundary zones: zone_b is zone_a translated
+         *        by translation.
+         */
+        struct PeriodicPair {
+            std::string zone_a, zone_b;
+            std::array<rtype, N_DIM> translation;
+        };
+
+        /**
          * @brief Initialize the mesh.
          * @param input TOML input data.
          */
         void init(const toml::value & input);
+
+        /**
+         * @brief Periodic pairs of a generated mesh from [mesh] periodic:
+         *        left/right for x, bottom/top for y, back/front for z.
+         */
+        static std::vector<PeriodicPair> periodic_pairs(const toml::value & input);
 
         /**
          * @brief Get the type of mesh.
@@ -290,7 +306,8 @@ class Mesh {
          *        mixed type uses hexahedra, pyramids and prisms in thirds of x.
          *        Boundary zones: left/right (x), bottom/top (y), back/front (z).
          */
-        void init_cart_3d(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rtype Ly, rtype Lz, MeshType kind);
+        void init_cart_3d(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rtype Ly, rtype Lz, MeshType kind,
+                          const std::vector<PeriodicPair> & periodic = {});
 
         /**
          * @brief A boundary face (2 nodes in 2D; 3 or 4 nodes in 3D) and its
@@ -306,17 +323,41 @@ class Mesh {
          *        boundary faces. Boundary faces without a named face go to the
          *        zone unlisted_zone. Cells are triangles and quadrilaterals in 2D;
          *        tetrahedra, pyramids, prisms and hexahedra (Gmsh/VTK node
-         *        order) in 3D.
+         *        order) in 3D. The zones of each periodic pair are joined into
+         *        interior faces (see docs/design/periodic.md).
          */
         void init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & nodes,
                                     const std::vector<std::vector<uint32_t>> & cells,
                                     const std::vector<BoundaryFace> & boundary_faces,
-                                    const std::string & unlisted_zone = "unassigned");
+                                    const std::string & unlisted_zone = "unassigned",
+                                    const std::vector<PeriodicPair> & periodic = {});
+
+        /**
+         * @brief Build the mesh with periodic node classes found beforehand
+         *        (e.g. across ranks); boundary faces of classes.zones, if given,
+         *        are dropped.
+         */
+        void init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & nodes,
+                                    const std::vector<std::vector<uint32_t>> & cells,
+                                    const std::vector<BoundaryFace> & boundary_faces,
+                                    const std::string & unlisted_zone, const PeriodicNodes & classes);
 
         /**
          * @brief Build the mesh from a block holding the whole mesh.
          */
-        void init_from_block(const MeshBlock & block);
+        void init_from_block(const MeshBlock & block, const std::vector<PeriodicPair> & periodic = {});
+
+        /** @brief Whether some zones were joined periodically. */
+        bool is_periodic() const { return !periodic_translations.empty(); }
+
+        /**
+         * @brief Component i of the translation from face f's frame (that of
+         *        its cell 0) to cell c's frame: the face seen from c is at
+         *        h_face_coords(f) - h_face_offset(f, c, i).
+         */
+        rtype h_face_offset(uint32_t f, uint32_t c, int i) const {
+            return (h_cells_of_face(f, 1) == int32_t(c)) ? h_shifts(h_face_shift(f), i) : rtype(0);
+        }
 
         /**
          * @brief Read a Mallard HDF5 mesh file (.h5, .hdf5), or an ASCII Gmsh
@@ -372,6 +413,12 @@ class Mesh {
         Kokkos::View<int32_t *[2]> cells_of_face;
         Kokkos::View<uint32_t *> cells_of_cell;            // Vertex neighbors (CSR)
         Kokkos::View<uint32_t *> offsets_cells_of_cell;
+        // Periodic translations: row 0 of shifts is zero. Cell 1 of face f, seen
+        // from cell 0, is at cell_coords(c1) + shifts(face_shift(f)); vertex
+        // neighbor k of a cell is at cell_coords(cells_of_cell(k)) + shifts(cells_of_cell_shift(k))
+        Kokkos::View<rtype *[N_DIM]> shifts;
+        Kokkos::View<uint8_t *> face_shift;
+        Kokkos::View<uint8_t *> cells_of_cell_shift;
 
         Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_node_coords;
         Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_cell_coords;
@@ -386,6 +433,25 @@ class Mesh {
         Kokkos::View<uint32_t *>::host_mirror_type h_nodes_of_face;
         Kokkos::View<uint32_t *>::host_mirror_type h_offsets_nodes_of_face;
         Kokkos::View<int32_t *[2]>::host_mirror_type h_cells_of_face;
+        Kokkos::View<uint32_t *>::host_mirror_type h_cells_of_cell;
+        Kokkos::View<uint32_t *>::host_mirror_type h_offsets_cells_of_cell;
+        Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_shifts;
+        Kokkos::View<uint8_t *>::host_mirror_type h_face_shift;
+        Kokkos::View<uint8_t *>::host_mirror_type h_cells_of_cell_shift;
+
+        // Periodicity (host): the translation of each periodic pair, the zones
+        // the pairs joined, and per node its key (the lowest node id of its
+        // periodic class) and lattice offset, x_n = x_key + sum_j L_j T_j
+        // (empty for meshes without periodic pairs)
+        std::vector<std::array<rtype, N_DIM>> periodic_translations;
+        std::vector<std::string> periodic_zones;
+        std::vector<uint32_t> h_node_key;
+        std::vector<std::array<int8_t, 3>> h_node_lattice;
+        // Lattice offset of every row of shifts
+        std::vector<std::array<int8_t, 3>> shift_lattice;
+
+        /** @brief Row of shifts for a lattice offset, added if new. */
+        uint8_t shift_index(const std::array<int8_t, 3> & lattice);
     protected:
     private:
         void init_box(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, bool triangles, bool wedge);
@@ -407,6 +473,7 @@ class Mesh {
                                const std::vector<uint32_t> & face_node_offsets,
                                const std::vector<uint32_t> & face_nodes,
                                const std::vector<std::array<int32_t, 2>> & face_cells,
+                               const std::vector<uint8_t> & face_shifts,
                                const std::vector<uint32_t> & interior,
                                const std::map<std::string, std::vector<uint32_t>> & zone_faces);
 

@@ -5,8 +5,9 @@
         [--ref spectral_Re1600_512.gdiag] [--mu 0.000625] [-o tgv.png]
 
 Each CSV is the [integrals] output of a Taylor-Green run on the octant
-[0, pi]^3 (rho0 = V0 = L = 1). Prints, per run, the peak of eps = -dE/dt
-and of the enstrophy-based eps = 2 mu E_omega, with the reference's.
+[0, pi]^3 (rho0 = V0 = L = 1), or with --full-box on the periodic box of side
+2 pi. Prints, per run, the peak of eps = -dE/dt and of the enstrophy-based
+eps = 2 mu E_omega, with the reference's.
 """
 import argparse
 
@@ -16,15 +17,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 OCTANT_VOLUME = np.pi ** 3
+BOX_VOLUME = (2 * np.pi) ** 3
 
 
-def load(path, mu):
+def load(path, mu, volume=OCTANT_VOLUME):
     """Time, normalized kinetic energy, -dE/dt and 2 mu enstrophy."""
     d = np.genfromtxt(path, delimiter=",", names=True)
     t, i = np.unique(d["t"], return_index=True)
-    E = d["kinetic_energy"][i] / OCTANT_VOLUME
+    E = d["kinetic_energy"][i] / volume
     eps = -np.gradient(E, t)
-    eps_omega = 2.0 * mu * d["enstrophy"][i] / OCTANT_VOLUME
+    eps_omega = 2.0 * mu * d["enstrophy"][i] / volume
     return t, E, eps, eps_omega
 
 
@@ -49,6 +51,7 @@ def main():
     ap.add_argument("--label", nargs="*")
     ap.add_argument("--ref")
     ap.add_argument("--mu", type=float, default=1.0 / 1600)
+    ap.add_argument("--full-box", action="store_true", help="runs on the periodic box of side 2 pi")
     ap.add_argument("-o", "--output", default="tgv.png")
     args = ap.parse_args()
     labels = args.label or args.csv
@@ -61,7 +64,7 @@ def main():
         ax_e.plot(tr, Er, "k-", lw=2.2, label="Spectral DNS 512$^3$")
         ax_d.plot(tr, er, "k-", lw=2.2, label="Spectral DNS 512$^3$")
     for path, label in zip(args.csv, labels):
-        t, E, eps, eps_w = load(path, args.mu)
+        t, E, eps, eps_w = load(path, args.mu, BOX_VOLUME if args.full_box else OCTANT_VOLUME)
         pv, pt = peak(t, eps)
         wv, wt = peak(t, eps_w)
         print(f"{label}: peak -dE/dt = {pv:.5f} at t = {pt:.2f}; "

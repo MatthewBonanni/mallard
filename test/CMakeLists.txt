@@ -23,6 +23,7 @@ if(Mallard_DIM EQUAL 2)
     io_test.cpp
     mesh_file_test.cpp
     mpi_test.cpp
+    periodic_test.cpp
     )
 else()
     list(APPEND MALLARD_TEST_SOURCES
@@ -35,6 +36,7 @@ else()
     solver3d_test.cpp
     io3d_test.cpp
     mpi3d_test.cpp
+    periodic3d_test.cpp
     )
 endif()
 add_executable(MallardTest ${MALLARD_TEST_SOURCES})

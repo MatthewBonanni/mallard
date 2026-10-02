@@ -1,0 +1,66 @@
+# Taylor-Green vortex at Re = 1600 and M = 0.1 on the full periodic box, the
+# canonical form of the workshop case (see input.toml for the setup and the
+# reference). The box [0, 2 pi]^3 is the box [-pi, pi]^3 shifted by one half
+# period, which changes nothing on the torus. Unlike the octant with symmetry
+# planes, the full box does not impose the vortex's mirror symmetries, so
+# it is the right setup for schemes that break them slightly (TENO's stencil
+# selection) and for long-time turbulent decay. 8x the cells of the octant at
+# the same resolution: Nx = 128 here matches Nx = 64 in input.toml (the
+# workshop's 128^3).
+#
+# Run on several GPUs (3D build with MPI). TENO's setup runs on the host and
+# needs about 100 KB per local cell there (owned plus halo), so use enough
+# ranks: 8 A100s for Nx = 128 (on 4 A100s, Nx = 96 takes 2 x 1 minute of setup,
+# then 0.29 s per step):
+#   mpirun -n 8 --bind-to none ../../build3d/src/Mallard -i input_periodic.toml --kokkos-map-device-id-by=mpi_rank
+#   python ../../tools/plot_taylor_green.py integrals.csv --full-box --ref spectral_Re1600_512.gdiag
+
+[run]
+t_stop = 20.0
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 128
+Ny = 128
+Nz = 128
+Lx = 6.283185307179586
+Ly = 6.283185307179586
+Lz = 6.283185307179586
+periodic = ["x", "y", "z"]
+
+[initialize]
+type = "analytical"
+u = ["sin(x) * cos(y) * cos(z)", "-cos(x) * sin(y) * cos(z)", "0.0"]
+p = "71.42857142857143 + (cos(2 * x) + cos(2 * y)) * (cos(2 * z) + 2) / 16"
+T = "1.0"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 71.42857142857143
+T_ref = 1.0
+rho_ref = 1.0
+mu = 0.000625
+Pr = 0.71
+
+[output]
+check_interval = 500
+
+[integrals]
+interval = 5
+file = "integrals.csv"
+
+[[write_data]]
+prefix = "./restart/tgv_box"
+format = "restart"
+interval = 2000

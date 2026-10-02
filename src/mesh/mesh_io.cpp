@@ -19,6 +19,7 @@
 #include <stdexcept>
 
 #include "comm.h"
+#include "periodic.h"
 
 namespace {
 
@@ -41,9 +42,30 @@ FaceKey face_key(const Nodes & nodes, size_t n) {
 void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & nodes,
                                   const std::vector<std::vector<uint32_t>> & cells,
                                   const std::vector<BoundaryFace> & boundary_faces,
-                                  const std::string & unlisted_zone) {
+                                  const std::string & unlisted_zone,
+                                  const std::vector<PeriodicPair> & periodic) {
+    init_from_connectivity(nodes, cells, boundary_faces, unlisted_zone,
+                           periodic.empty() ? PeriodicNodes() : match_periodic_nodes(nodes, boundary_faces, periodic));
+}
+
+void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & nodes,
+                                  const std::vector<std::vector<uint32_t>> & cells,
+                                  const std::vector<BoundaryFace> & boundary_faces,
+                                  const std::string & unlisted_zone, const PeriodicNodes & classes) {
     n_nodes = nodes.size();
     n_cells = cells.size();
+
+    // Periodic classes of the nodes; faces are keyed by the classes' keys so a
+    // face of zone_a and its image in zone_b become one face
+    periodic_translations = classes.translations;
+    periodic_zones = classes.zones;
+    h_node_key = classes.key;
+    h_node_lattice = classes.lattice;
+    shift_lattice.assign(1, {0, 0, 0});
+    auto node_key = [&](uint32_t n) { return h_node_key.empty() ? n : h_node_key[n]; };
+    auto keyed = [&](std::vector<uint32_t> & face) {
+        for (uint32_t & n : face) n = node_key(n);
+    };
 
     // Cells oriented counterclockwise (2D) or positively (3D), as CSR
     std::vector<uint32_t> cell_node_offsets, cell_nodes;
@@ -96,6 +118,7 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
     for (uint32_t c = 0; c < n_cells; c++) {
         for (uint32_t h = cell_face_offsets[c]; h < cell_face_offsets[c + 1]; h++) {
             half_face(c, h - cell_face_offsets[c], half_nodes);
+            keyed(half_nodes);
             halves[h] = {face_key(half_nodes, half_nodes.size()), h};
         }
     }
@@ -113,15 +136,43 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
     }
     std::vector<uint32_t> cell_faces(n_half, NO_NODE), face_node_offsets{0}, face_nodes;
     std::vector<std::array<int32_t, 2>> face_cells;
+    std::vector<uint8_t> face_shifts;
+    std::vector<uint32_t> other_nodes;
     for (uint32_t c : cells_by_global_id()) {
         for (uint32_t h = cell_face_offsets[c]; h < cell_face_offsets[c + 1]; h++) {
             if (partner[h] != NO_NODE && cell_faces[partner[h]] != NO_NODE) {
-                cell_faces[h] = cell_faces[partner[h]];
-                face_cells[cell_faces[h]][1] = c;
+                const uint32_t f = cell_faces[partner[h]];
+                cell_faces[h] = f;
+                if (face_cells[f][0] == int32_t(c)) {
+                    throw std::runtime_error("Mesh: a cell touches itself across a periodic boundary; periodic "
+                                             "directions need at least 3 cells.");
+                }
+                face_cells[f][1] = c;
+                if (!h_node_key.empty()) {
+                    // Cell 1 moves next to cell 0 by L(a) - L(b), for nodes a of
+                    // cell 0 and b of cell 1 with the same key
+                    half_face(c, h - cell_face_offsets[c], other_nodes);
+                    std::array<int8_t, 3> lattice = {0, 0, 0};
+                    for (size_t k = 0; k < other_nodes.size(); k++) {
+                        const uint32_t b = other_nodes[k];
+                        uint32_t a = b;
+                        for (uint32_t i = face_node_offsets[f]; i < face_node_offsets[f + 1]; i++) {
+                            if (node_key(face_nodes[i]) == node_key(b)) a = face_nodes[i];
+                        }
+                        std::array<int8_t, 3> l;
+                        for (int j = 0; j < 3; j++) l[j] = h_node_lattice[a][j] - h_node_lattice[b][j];
+                        if (k > 0 && l != lattice) {
+                            throw std::runtime_error("Mesh: inconsistent periodic translation across a face.");
+                        }
+                        lattice = l;
+                    }
+                    face_shifts[f] = shift_index(lattice);
+                }
                 continue;
             }
             cell_faces[h] = face_cells.size();
             face_cells.push_back({int32_t(c), -1});
+            face_shifts.push_back(0);
             half_face(c, h - cell_face_offsets[c], half_nodes);
             face_nodes.insert(face_nodes.end(), half_nodes.begin(), half_nodes.end());
             face_node_offsets.push_back(face_nodes.size());
@@ -135,12 +186,21 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
     std::vector<uint32_t> interior;
     std::vector<bool> zoned(n_faces, false);
     for (const auto & bf : boundary_faces) {
-        const FaceKey key = face_key(bf.nodes, std::min<size_t>(bf.nodes.size(), KEY));
+        half_nodes.assign(bf.nodes.begin(), bf.nodes.begin() + std::min<size_t>(bf.nodes.size(), KEY));
+        keyed(half_nodes);
+        const FaceKey key = face_key(half_nodes, half_nodes.size());
         const auto it = std::lower_bound(halves.begin(), halves.end(), std::make_pair(key, uint32_t(0)));
         if (bf.nodes.size() > KEY || it == halves.end() || it->first != key) {
             throw std::runtime_error("Mesh: boundary face of " + bf.zone + " is not a cell face.");
         }
         const uint32_t f = cell_faces[it->second];
+        if (std::find(periodic_zones.begin(), periodic_zones.end(), bf.zone) != periodic_zones.end()) {
+            if (face_cells[f][1] == -1) {
+                throw std::runtime_error("Mesh: a face of periodic zone " + bf.zone +
+                                         " has no matching face in its partner zone.");
+            }
+            continue;
+        }
         if (face_cells[f][1] != -1) {
             throw std::runtime_error("Mesh: boundary face of " + bf.zone + " is an interior face.");
         }
@@ -159,7 +219,7 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
     }
 
     allocate_and_fill(nodes, cell_node_offsets, cell_nodes, cell_face_offsets, cell_faces, face_node_offsets,
-                      face_nodes, face_cells, interior, zone_faces);
+                      face_nodes, face_cells, face_shifts, interior, zone_faces);
     compute_geometry();
 }
 
@@ -171,6 +231,7 @@ void Mesh::allocate_and_fill(const std::vector<std::array<rtype, N_DIM>> & nodes
                              const std::vector<uint32_t> & face_node_offsets,
                              const std::vector<uint32_t> & face_nodes,
                              const std::vector<std::array<int32_t, 2>> & face_cells,
+                             const std::vector<uint8_t> & face_shifts,
                              const std::vector<uint32_t> & interior,
                              const std::map<std::string, std::vector<uint32_t>> & zone_faces) {
     // Allocate views and fill host mirrors
@@ -195,6 +256,9 @@ void Mesh::allocate_and_fill(const std::vector<std::array<rtype, N_DIM>> & nodes
         h_cells_of_face(f, 0) = face_cells[f][0];
         h_cells_of_face(f, 1) = face_cells[f][1];
     }
+    face_shift = Kokkos::View<uint8_t *>("face_shift", n_faces);
+    h_face_shift = Kokkos::create_mirror_view(face_shift);
+    std::copy(face_shifts.begin(), face_shifts.end(), h_face_shift.data());
 
     auto copy_csr = [](const std::vector<uint32_t> & offsets_in, const std::vector<uint32_t> & values_in,
                        Kokkos::View<uint32_t *> & values, Kokkos::View<uint32_t *> & offsets,
@@ -444,7 +508,7 @@ void Mesh::init_file(const std::string & filename) {
     init_from_connectivity(data.nodes, data.cells, data.boundary_faces);
 }
 
-void Mesh::init_from_block(const MeshBlock & block) {
+void Mesh::init_from_block(const MeshBlock & block, const std::vector<PeriodicPair> & periodic) {
     if (block.first_cell != 0 || block.first_node != 0) {
         throw std::logic_error("Mesh::init_from_block: the block must hold the whole mesh.");
     }
@@ -463,7 +527,7 @@ void Mesh::init_from_block(const MeshBlock & block) {
                                        block.face_nodes.begin() + block.face_offsets[f + 1]);
         boundary_faces[f].zone = block.zone_names[block.face_zone[f]];
     }
-    init_from_connectivity(nodes, cells, boundary_faces);
+    init_from_connectivity(nodes, cells, boundary_faces, "unassigned", periodic);
 }
 
 MeshBlock read_gmsh_block(const std::string & filename) {

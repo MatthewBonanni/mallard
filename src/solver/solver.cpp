@@ -188,7 +188,7 @@ void Solver::init_mesh() {
             if (partitioner != "graph" && partitioner != "hilbert") {
                 throw InputError("parallel.partitioner = \"" + partitioner + "\" is not one of: graph, hilbert.");
             }
-            setup = std::make_unique<DistributedMesh>(read_mesh_block(input));
+            setup = std::make_unique<DistributedMesh>(read_mesh_block(input), Mesh::periodic_pairs(input));
             setup->distribute(partitioner == "graph" ? partition_graph(*setup, comm::size())
                                                      : partition_hilbert(*setup, comm::size()));
         }
@@ -251,7 +251,10 @@ void Solver::init_physics() {
 }
 
 void Solver::init_boundaries() {
-    std::vector<toml::value> input_boundaries = toml::find<std::vector<toml::value>>(input, "boundaries");
+    // A fully periodic mesh has no boundary faces
+    const std::vector<toml::value> input_boundaries =
+        input.contains("boundaries") ? toml::find<std::vector<toml::value>>(input, "boundaries")
+                                     : std::vector<toml::value>{};
     std::vector<int32_t> face_bc(mesh->n_faces, -1);
     std::vector<BoundaryCondition> bcs;
     boundary_summary.clear();
@@ -265,6 +268,10 @@ void Solver::init_boundaries() {
             throw std::runtime_error("Boundary type not specified.");
         }
         const std::string name = toml::find<std::string>(bound, "name");
+        const auto & periodic = mesh->periodic_zones;
+        if (std::find(periodic.begin(), periodic.end(), name) != periodic.end()) {
+            throw InputError("boundaries: zone \"" + name + "\" is periodic and takes no condition.");
+        }
         FaceZone * zone = mesh->get_face_zone(name);
         if (zone != nullptr && zone->get_type() != FaceZoneType::BOUNDARY) zone = nullptr;
         // A rank's part of the mesh may not touch every zone
@@ -601,11 +608,7 @@ void Solver::init_output() {
         }
         if (!viscous_gradients.is_allocated()) {
             viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
-            LSQGradientFunctor gradient_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell,
-                                                mesh->cells_of_face, mesh->cell_coords, mesh->face_coords,
-                                                mesh->face_normals, boundary_data, W_cells, viscous_gradients};
-            viscous_gradient =
-                make_vertex_gradient(gradient_functor, mesh->offsets_cells_of_cell, mesh->cells_of_cell);
+            viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
         }
         const std::string file = toml::find_or<std::string>(input, "integrals", "file", "integrals.csv");
         integral_monitor.file = file;
@@ -640,10 +643,7 @@ void Solver::allocate_memory() {
     cfl_local = Kokkos::View<rtype *>("cfl_local", mesh->n_cells);
     if (physics.is_viscous()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
-        LSQGradientFunctor gradient_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell,
-                                            mesh->cells_of_face, mesh->cell_coords, mesh->face_coords,
-                                            mesh->face_normals, boundary_data, W_cells, viscous_gradients};
-        viscous_gradient = make_vertex_gradient(gradient_functor, mesh->offsets_cells_of_cell, mesh->cells_of_cell);
+        viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
     }
     h_conservatives = Kokkos::create_mirror_view(conservatives);
     h_primitives = Kokkos::create_mirror_view(primitives);

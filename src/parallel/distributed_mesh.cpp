@@ -91,9 +91,68 @@ int rank_in(const std::vector<uint64_t> & dist, uint64_t g) {
 
 int DistributedMesh::rank_of_cell(uint64_t g) const { return rank_in(cell_dist, g); }
 
+uint64_t DistributedMesh::node_key(uint64_t g) const {
+    const auto it = periodic_nodes.find(g);
+    return it == periodic_nodes.end() ? g : it->second.first;
+}
+
+void DistributedMesh::match_periodic(const std::vector<Mesh::PeriodicPair> & pairs) {
+    std::vector<uint32_t> zone_of(block.zone_names.size(), ~uint32_t(0));
+    for (const auto & pair : pairs) {
+        for (const std::string & zone : {pair.zone_a, pair.zone_b}) {
+            const auto it = std::find(block.zone_names.begin(), block.zone_names.end(), zone);
+            if (it == block.zone_names.end()) {
+                throw std::runtime_error("Periodic zone " + zone + " is not a boundary zone of the mesh.");
+            }
+            zone_of[it - block.zone_names.begin()] = 1;
+        }
+    }
+    // Every periodic boundary face on every rank, as (zone, n, nodes...)
+    std::vector<uint64_t> local;
+    for (uint64_t f = 0; f < block.n_faces(); f++) {
+        if (zone_of[block.face_zone[f]] == ~uint32_t(0)) continue;
+        local.push_back(block.face_zone[f]);
+        local.push_back(block.face_offsets[f + 1] - block.face_offsets[f]);
+        local.insert(local.end(), block.face_nodes.begin() + block.face_offsets[f],
+                     block.face_nodes.begin() + block.face_offsets[f + 1]);
+    }
+    const std::vector<uint64_t> faces = comm::allgatherv(local);
+    std::vector<uint64_t> ids;
+    for (size_t i = 0; i < faces.size(); i += 2 + faces[i + 1]) {
+        ids.insert(ids.end(), faces.begin() + i + 2, faces.begin() + i + 2 + faces[i + 1]);
+    }
+    std::sort(ids.begin(), ids.end());
+    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+    // Coordinates from the ranks whose node blocks hold them, in rank and so id order
+    std::vector<double> coords;
+    for (uint64_t g : ids) {
+        if (g < block.first_node || g >= block.first_node + block.n_nodes()) continue;
+        const auto & x = block.node_coords[g - block.first_node];
+        coords.insert(coords.end(), x.begin(), x.end());
+    }
+    coords = comm::allgatherv(coords);
+
+    // The serial matching on the compact mesh of these nodes and faces
+    std::vector<std::array<rtype, N_DIM>> nodes(ids.size());
+    for (size_t k = 0; k < ids.size(); k++) FOR_I_DIM nodes[k][i] = coords[k * N_DIM + i];
+    auto compact = [&](uint64_t g) { return uint32_t(std::lower_bound(ids.begin(), ids.end(), g) - ids.begin()); };
+    std::vector<Mesh::BoundaryFace> boundary_faces;
+    for (size_t i = 0; i < faces.size(); i += 2 + faces[i + 1]) {
+        Mesh::BoundaryFace bf;
+        bf.zone = block.zone_names[faces[i]];
+        for (uint64_t k = 0; k < faces[i + 1]; k++) bf.nodes.push_back(compact(faces[i + 2 + k]));
+        boundary_faces.push_back(std::move(bf));
+    }
+    PeriodicNodes classes = match_periodic_nodes(nodes, boundary_faces, pairs);
+    for (size_t k = 0; k < ids.size(); k++) periodic_nodes[ids[k]] = {ids[classes.key[k]], classes.lattice[k]};
+    periodic_classes.zones = std::move(classes.zones);
+    periodic_classes.translations = std::move(classes.translations);
+}
+
 int DistributedMesh::rank_of_node(uint64_t g) const { return rank_in(node_dist, g); }
 
-DistributedMesh::DistributedMesh(MeshBlock b) : block(std::move(b)) {
+DistributedMesh::DistributedMesh(MeshBlock b, const std::vector<Mesh::PeriodicPair> & periodic)
+    : block(std::move(b)) {
     const int p = comm::size(), me = comm::rank();
     cell_dist = distribution(block.n_cells());
     node_dist = distribution(block.n_nodes());
@@ -118,9 +177,15 @@ DistributedMesh::DistributedMesh(MeshBlock b) : block(std::move(b)) {
     zones = block.zone_names;
     const uint32_t unassigned = zones.size();
     zones.push_back("unassigned");
+    if (!periodic.empty()) match_periodic(periodic);
+    std::vector<bool> periodic_zone(zones.size(), false);
+    for (const std::string & zone : periodic_classes.zones) {
+        periodic_zone[std::find(zones.begin(), zones.end(), zone) - zones.begin()] = true;
+    }
 
     // Every cell face and boundary face goes to the rank its node set hashes
-    // to, as (key, cell, local face) or (key, NONE, zone)
+    // to, as (key, cell, local face) or (key, NONE, zone); faces of periodic
+    // zones are found as interior faces instead
     constexpr int WIDTH = KEY + 2;
     std::vector<std::vector<uint64_t>> send(p);
     std::vector<uint64_t> face;
@@ -131,12 +196,15 @@ DistributedMesh::DistributedMesh(MeshBlock b) : block(std::move(b)) {
             const uint32_t n = block.cell_offsets[c + 1] - block.cell_offsets[c];
             for (uint32_t k = 0; k < n_cell_faces(n); k++) {
                 cell_face(&block.cell_nodes[block.cell_offsets[c]], n, k, face);
+                for (uint64_t & node : face) node = node_key(node);
                 post(face_key(face), block.first_cell + c, k);
             }
         }
         for (uint64_t f = 0; f < block.n_faces(); f++) {
+            if (periodic_zone[block.face_zone[f]]) continue;
             face.assign(block.face_nodes.begin() + block.face_offsets[f],
                         block.face_nodes.begin() + block.face_offsets[f + 1]);
+            for (uint64_t & node : face) node = node_key(node);
             post(face_key(face), NONE, block.face_zone[f]);
         }
     };
@@ -173,6 +241,8 @@ DistributedMesh::DistributedMesh(MeshBlock b) : block(std::move(b)) {
             error = "Mesh: boundary face of " + zones[zone] + " is not a cell face.";
         } else if (n_cells > 2) {
             error = "Mesh: a face is shared by more than two cells.";
+        } else if (n_cells == 2 && r[order[i] * WIDTH + KEY] == r[order[i + 1] * WIDTH + KEY]) {
+            error = "Mesh: a cell touches itself across a periodic boundary; periodic directions need at least 3 cells.";
         } else if (n_cells == 2 && zoned) {
             error = "Mesh: boundary face of " + zones[zone] + " is an interior face.";
         } else {
@@ -306,15 +376,17 @@ void DistributedMesh::distribute(const std::vector<int> & cell_owner) {
     for (uint32_t c = 0; c < block.n_cells(); c++) append_record(send[owner[c]], c);
     read_records(comm::exchange(std::move(send)).data, 0);
     owned_nodes = cells.nodes;
+    for (uint64_t & node : owned_nodes) node = node_key(node);
     std::sort(owned_nodes.begin(), owned_nodes.end());
     owned_nodes.erase(std::unique(owned_nodes.begin(), owned_nodes.end()), owned_nodes.end());
 
-    // Node directory: the cells using each block node, and their owners
+    // Node directory: the cells using each block node (all nodes of a
+    // periodic class count as its key), and their owners
     send.assign(p, {});
     for (uint32_t c = 0; c < block.n_cells(); c++) {
         for (uint64_t k = block.cell_offsets[c]; k < block.cell_offsets[c + 1]; k++) {
-            send[rank_of_node(block.cell_nodes[k])].insert(send[rank_of_node(block.cell_nodes[k])].end(),
-                                                          {block.cell_nodes[k], block.first_cell + c, uint64_t(owner[c])});
+            const uint64_t key = node_key(block.cell_nodes[k]);
+            send[rank_of_node(key)].insert(send[rank_of_node(key)].end(), {key, block.first_cell + c, uint64_t(owner[c])});
         }
     }
     const std::vector<uint64_t> uses = comm::exchange(std::move(send)).data;
@@ -365,7 +437,7 @@ void DistributedMesh::grow_layer() {
         for (uint32_t i = 0; i < cells.gid.size(); i++) {
             if (cells.layer[i] != layer - 1) continue;
             for (uint64_t k = cells.node_offsets[i]; k < cells.node_offsets[i + 1]; k++) {
-                const uint64_t node = cells.nodes[k];
+                const uint64_t node = node_key(cells.nodes[k]);
                 if (std::binary_search(owned_nodes.begin(), owned_nodes.end(), node)) continue;
                 if (searched_nodes.insert(node).second) query[rank_of_node(node)].push_back(node);
             }
@@ -440,6 +512,19 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
             boundary_faces.push_back({std::move(local), zones[cells.boundary[b][1]]});
         }
     }
+    // Periodic classes of the local nodes, keyed by their first local node
+    PeriodicNodes classes = periodic_classes;
+    if (!periodic_nodes.empty()) {
+        std::unordered_map<uint64_t, uint32_t> local_key;
+        classes.key.resize(node_ids.size());
+        classes.lattice.resize(node_ids.size());
+        for (uint32_t j = 0; j < node_ids.size(); j++) {
+            const auto it = periodic_nodes.find(node_ids[j]);
+            const uint64_t key = it == periodic_nodes.end() ? node_ids[j] : it->second.first;
+            classes.key[j] = local_key.emplace(key, j).first->second;
+            classes.lattice[j] = it == periodic_nodes.end() ? std::array<int8_t, 3>{0, 0, 0} : it->second.second;
+        }
+    }
     dist = Distribution();
     dist.halo_layers = halo_layers;
     dist.global_cell.assign(cells.gid.begin(), cells.gid.begin() + n_local);
@@ -451,7 +536,7 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
     // Global ids first: they order the faces and neighbor lists like the serial mesh's
     mesh->h_global_cell_id = dist.global_cell;
     mesh->n_global_cells = n_global_cells();
-    mesh->init_from_connectivity(nodes, local_cells, boundary_faces, PARTITION_ZONE);
+    mesh->init_from_connectivity(nodes, local_cells, boundary_faces, PARTITION_ZONE, classes);
     mesh->n_owned_cells = dist.n_owned;
     mesh->n_reconstructed_cells = std::count_if(dist.layer.begin(), dist.layer.end(), [](uint8_t l) { return l <= 1; });
     mesh->n_complete_cells =

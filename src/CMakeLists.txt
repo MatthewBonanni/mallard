@@ -6,6 +6,7 @@ add_library(MallardCore STATIC
     common/log.cpp
     mesh/mesh.cpp
     mesh/mesh_io.cpp
+    mesh/periodic.cpp
     mesh/mesh_3d.cpp
     mesh/mesh_block.cpp
     mesh/zone.cpp

@@ -111,6 +111,48 @@ TEST(MPITest, TENOOnTrianglesMatchesSerial) {
                                         "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 15));
 }
 
+namespace {
+
+/**
+ * @brief Periodic faces whose cells are on different ranks, summed over the
+ *        ranks: halo cells reached across a seam.
+ */
+uint64_t seam_faces_cut_by_partition(const std::string & input) {
+    Solver solver;
+    solver.init(parse_toml(input));
+    const auto mesh = solver.get_mesh();
+    uint64_t n = 0;
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        const int32_t c0 = mesh->h_cells_of_face(f, 0), c1 = mesh->h_cells_of_face(f, 1);
+        if (c1 < 0 || mesh->h_face_shift(f) == 0) continue;
+        n += (uint32_t(c0) < mesh->n_owned()) != (uint32_t(c1) < mesh->n_owned());
+    }
+    return comm::allreduce(n, comm::Op::SUM);
+}
+
+std::string periodic_box(const std::string & mesh, const std::string & recon, const std::string & physics,
+                         const std::string & dirs, const std::string & boundaries, uint32_t n_steps) {
+    std::string input = box_input(mesh, recon, physics, boundaries, n_steps);
+    // A Hilbert partition always cuts the seams; a graph partition of a torus need not
+    const std::string anchor = "Ly = 0.8\n";
+    return input.replace(input.find(anchor), anchor.size(), anchor + "periodic = " + dirs + "\n") +
+           "[parallel]\npartitioner = \"hilbert\"\n";
+}
+
+} // namespace
+
+TEST(MPITest, PeriodicRunsMatchSerialAcrossSeamsCutByThePartition) {
+    // Stencils and halos wrap across the seams, and the partition cuts them
+    const std::string none = "";
+    const std::string walls = "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+                              "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n";
+    const std::string teno = periodic_box("cartesian", "type = \"TENO\"\norder = 5\n", EULER, "[\"x\", \"y\"]", none, 15);
+    if (comm::size() > 1) EXPECT_GT(seam_faces_cut_by_partition(teno), 0u);
+    expect_matches_serial(teno);
+    expect_matches_serial(periodic_box("cartesian_tri", "type = \"TENO\"\norder = 4\n", EULER, "[\"x\"]", walls, 10));
+    expect_matches_serial(periodic_box("cartesian_tri", "type = \"MUSCL\"\n", NS, "[\"x\", \"y\"]", none, 20));
+}
+
 TEST(MPITest, NavierStokesWithBoundaryConditionsMatchesSerial) {
     expect_matches_serial(box_input(
         "cartesian", "type = \"MUSCL\"\n", NS,

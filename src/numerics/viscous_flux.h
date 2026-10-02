@@ -64,6 +64,8 @@ struct ViscousFluxFunctor {
     Kokkos::View<rtype *[N_DIM]> face_coords;
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<int32_t *[2]> cells_of_face;
+    Kokkos::View<rtype *[N_DIM]> shifts;
+    Kokkos::View<uint8_t *> face_shift;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
     BoundaryData boundaries;
@@ -103,7 +105,8 @@ struct ViscousFluxFunctor {
         cell_state(c0, q0, g0);
         cell_state(c1, q1, g1);
         rtype d[N_DIM];
-        FOR_I_DIM d[i] = cell_coords(c1, i) - cell_coords(c0, i);
+        const uint8_t s = face_shift(i_face);
+        FOR_I_DIM d[i] = (cell_coords(c1, i) + shifts(s, i)) - cell_coords(c0, i);
         const rtype d_n = dot<N_DIM>(d, n);
         for (uint8_t k = 0; k < NQ; k++) {
             q_f[k] = 0.5 * (q0[k] + q1[k]);

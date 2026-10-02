@@ -290,3 +290,54 @@ TEST(DistributedMeshTest, HilbertPartitionSplitsTheGlobalCurveOrderEvenly) {
         ASSERT_EQ(owner[c], expected[distributed.first_cell() + c]) << "cell " << distributed.first_cell() + c;
     }
 }
+
+TEST(DistributedMeshTest, PeriodicHaloLayersFollowVertexNeighborsAcrossSeams) {
+    // Each halo layer holds exactly the cells one vertex-neighbor step further,
+    // including neighbors across the seams of a fully periodic box
+    const std::string input = N_DIM == 2
+        ? "[mesh]\ntype = \"cartesian_tri\"\nNx = 9\nNy = 7\nperiodic = [\"x\", \"y\"]\n"
+        : "[mesh]\ntype = \"cartesian_tet\"\nNx = 4\nNy = 3\nNz = 3\nperiodic = [\"x\", \"y\", \"z\"]\n";
+    const toml::value parsed = parse_toml(input);
+    Mesh global;
+    global.init(parsed);
+    DistributedMesh distributed(read_mesh_block(parsed), Mesh::periodic_pairs(parsed));
+    const std::vector<int> block_owner = partition_hilbert(distributed, comm::size());
+    std::vector<uint64_t> pairs;
+    for (uint32_t c = 0; c < block_owner.size(); c++) {
+        pairs.insert(pairs.end(), {distributed.first_cell() + c, uint64_t(block_owner[c])});
+    }
+    pairs = comm::allgatherv(pairs);
+    std::vector<int> owner(global.n_cells);
+    for (size_t i = 0; i < pairs.size(); i += 2) owner[pairs[i]] = pairs[i + 1];
+    distributed.distribute(block_owner);
+    const int layers = 3;
+    Distribution dist;
+    distributed.build_local_mesh(layers, dist);
+
+    std::vector<int> expected(global.n_cells, -1);
+    std::vector<uint32_t> front;
+    for (uint32_t c = 0; c < global.n_cells; c++) {
+        if (owner[c] == comm::rank()) {
+            expected[c] = 0;
+            front.push_back(c);
+        }
+    }
+    for (int l = 1; l <= layers; l++) {
+        std::vector<uint32_t> next;
+        for (uint32_t c : front) {
+            for (uint32_t k = global.h_offsets_cells_of_cell(c); k < global.h_offsets_cells_of_cell(c + 1); k++) {
+                const uint32_t nb = global.h_cells_of_cell(k);
+                if (expected[nb] < 0) {
+                    expected[nb] = l;
+                    next.push_back(nb);
+                }
+            }
+        }
+        front = next;
+    }
+    const auto n_expected = std::count_if(expected.begin(), expected.end(), [](int l) { return l >= 0; });
+    EXPECT_EQ(dist.global_cell.size(), size_t(n_expected));
+    for (size_t i = 0; i < dist.global_cell.size(); i++) {
+        EXPECT_EQ(int(dist.layer[i]), expected[dist.global_cell[i]]) << "cell " << dist.global_cell[i];
+    }
+}

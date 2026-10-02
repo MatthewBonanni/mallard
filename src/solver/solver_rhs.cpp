@@ -56,7 +56,8 @@ void Solver::calc_rhs(StateView solution, StateView rhs, rtype t_stage) {
     if (physics.is_viscous()) {
         Kokkos::parallel_for("viscous_gradients", mesh->n_cells, viscous_gradient);
         ViscousFluxFunctor viscous_functor{mesh->face_normals, mesh->face_area, mesh->face_coords,
-                                           mesh->cell_coords, mesh->cells_of_face, W_cells,
+                                           mesh->cell_coords, mesh->cells_of_face, mesh->shifts, mesh->face_shift,
+                                           W_cells,
                                            viscous_gradients, boundary_data, face_flux, physics};
         Kokkos::parallel_for("viscous_flux", mesh->n_faces, viscous_functor);
     }

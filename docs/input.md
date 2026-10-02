@@ -32,6 +32,12 @@ At least one stop condition is required.
 
 Generated meshes have boundary zones named `left`, `right`, `bottom` and `top`.
 
+`periodic = ["x", "y"]` (and `"z"` in 3D) makes a generated mesh (except
+`wedge`) periodic in those directions: `left`/`right`, `bottom`/`top` and
+`back`/`front` are joined into interior faces and disappear as boundary zones.
+Every scheme sees the seam as interior. Each periodic direction needs at least
+3 cells. Mesh files cannot be periodic yet.
+
 In the 3D build (`-DMallard_DIM=3`), generated meshes are boxes
 `[0, Lx] x [0, Ly] x [0, Lz]` of `Nx x Ny x Nz` blocks (`Nz`, `Lz` default to
 100 and 1), with the extra boundary zones `back` (z = 0) and `front` (z = Lz):
@@ -98,7 +104,8 @@ Expressions use [exprtk](https://www.partow.net/programming/exprtk/) syntax, e.g
 
 ## `[[boundaries]]`
 
-Every boundary face must be assigned exactly once. A zone can be split
+Every boundary face must be assigned exactly once (a fully periodic mesh has
+none, and needs no `[[boundaries]]`). A zone can be split
 between several entries with `where = "<expression in x, y, z>"`, which selects
 the zone's faces whose centers satisfy the expression.
 

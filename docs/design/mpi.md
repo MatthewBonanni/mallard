@@ -120,6 +120,13 @@ Dynamic rebalancing (troubled cells, and so the TENO cost, move with shocks) is 
 
 Setup exchanges are dense `alltoallv` calls, whose count arrays alone are O(ranks) per rank and whose latency grows with the rank count. The face matching and migration genuinely talk to many ranks, but halo growth and node-coordinate fetches have sparse patterns (a rank's partition neighbors and the few ranks whose blocks hold its cells). Beyond about 10k ranks these should move to MPI neighborhood collectives or a sparse NBX exchange (nonblocking sends, `MPI_Ibarrier` to detect completion); planned with milestone 6.
 
+### 12. Periodic boundaries
+
+See `periodic.md`. Periodic node classes are currently found by gathering the
+periodic zones on every rank, O(N^(2/3)) data per rank; the scalable
+alternative (hashing snapped node coordinates, as for faces) is described
+there.
+
 ## Testing
 
 - **Correctness:** run the solver test suite on 1, 2, 3 and 4 ranks (oversubscribed CPUs, Serial backend) in CI with OpenMPI.

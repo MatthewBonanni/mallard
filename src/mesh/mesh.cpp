@@ -41,6 +41,7 @@ void Mesh::init(const toml::value & input) {
         set_type(it->second);
     }
 
+    const std::vector<PeriodicPair> periodic = periodic_pairs(input);
     if (get_type() == MeshType::FILE) {
         std::string filename = toml::find_or<std::string>(input, "mesh", "filename", "mesh.msh");
         this->init_file(filename);
@@ -56,7 +57,15 @@ void Mesh::init(const toml::value & input) {
         if (get_type() == MeshType::CARTESIAN_TRI || get_type() == MeshType::WEDGE) {
             throw std::runtime_error("Mesh type " + type_str + " is 2D only.");
         }
-        this->init_cart_3d(Nx, Ny, Nz, Lx, Ly, Lz, get_type());
+        this->init_cart_3d(Nx, Ny, Nz, Lx, Ly, Lz, get_type(), periodic);
+        return;
+    }
+    if (!periodic.empty()) {
+        if (get_type() == MeshType::WEDGE) throw std::runtime_error("The wedge mesh cannot be periodic.");
+        if (get_type() != MeshType::CARTESIAN && get_type() != MeshType::CARTESIAN_TRI) {
+            throw std::runtime_error("Mesh type " + type_str + " is 3D only.");
+        }
+        init_from_block(cartesian_2d_block(Nx, Ny, Lx, Ly, get_type(), 0, 1), periodic);
         return;
     }
     if (get_type() == MeshType::CARTESIAN) {
@@ -68,6 +77,32 @@ void Mesh::init(const toml::value & input) {
     } else {
         throw std::runtime_error("Mesh type " + type_str + " is 3D only.");
     }
+}
+
+std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const toml::value & input) {
+    std::vector<PeriodicPair> pairs;
+    if (!input.contains("mesh") || !input.at("mesh").contains("periodic")) return pairs;
+    if (toml::find_or<std::string>(input, "mesh", "type", "file") == "file") {
+        throw std::runtime_error("[mesh] periodic applies to generated meshes; periodic zones of mesh files are "
+                                 "not supported yet.");
+    }
+    const rtype L[3] = {find_real_or(input, "mesh", "Lx", 1.0), find_real_or(input, "mesh", "Ly", 1.0),
+                        find_real_or(input, "mesh", "Lz", 1.0)};
+    const char * zones[3][2] = {{"left", "right"}, {"bottom", "top"}, {"back", "front"}};
+    for (const std::string & dir : toml::find<std::vector<std::string>>(input, "mesh", "periodic")) {
+        const int d = (dir == "x") ? 0 : (dir == "y") ? 1 : (dir == "z") ? 2 : -1;
+        if (d < 0 || d >= N_DIM) {
+            throw std::runtime_error("[mesh] periodic: unknown direction " + dir + " (one of x, y" +
+                                     (N_DIM == 3 ? ", z" : "") + ").");
+        }
+        for (const auto & pair : pairs) {
+            if (pair.zone_a == zones[d][0]) throw std::runtime_error("[mesh] periodic lists " + dir + " twice.");
+        }
+        PeriodicPair pair{zones[d][0], zones[d][1], {}};
+        pair.translation[d] = L[d];
+        pairs.push_back(pair);
+    }
+    return pairs;
 }
 
 MeshType Mesh::get_type() const {
@@ -298,42 +333,109 @@ std::vector<uint32_t> Mesh::cells_by_global_id() const {
     return order;
 }
 
-void Mesh::compute_cell_neighbors() {
-    // Cells of every node (CSR, cells in increasing order)
-    std::vector<uint32_t> node_offsets(n_nodes + 1, 0), node_cells;
-    for (uint32_t c = 0; c < n_cells; c++) {
-        for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) node_offsets[h_node_of_cell(c, k) + 1]++;
+uint8_t Mesh::shift_index(const std::array<int8_t, 3> & lattice) {
+    for (size_t i = 0; i < shift_lattice.size(); i++) {
+        if (shift_lattice[i] == lattice) return i;
     }
-    for (uint32_t n = 0; n < n_nodes; n++) node_offsets[n + 1] += node_offsets[n];
-    node_cells.resize(node_offsets[n_nodes]);
+    if (shift_lattice.size() == 256) throw std::runtime_error("Mesh: too many periodic translations.");
+    shift_lattice.push_back(lattice);
+    return shift_lattice.size() - 1;
+}
+
+void Mesh::compute_cell_neighbors() {
+    // Meshes built without periodic pairs
+    if (shift_lattice.empty()) shift_lattice.assign(1, {0, 0, 0});
+    if (h_face_shift.extent(0) != n_faces) {
+        face_shift = Kokkos::View<uint8_t *>("face_shift", n_faces);
+        h_face_shift = Kokkos::create_mirror_view(face_shift);
+        Kokkos::deep_copy(h_face_shift, 0);
+    }
+    // Cells sharing a node key with each cell, with the translation that brings
+    // them next to it: L(a) - L(b) for the cell's node a and the other's node b
+    const bool periodic = !h_node_key.empty();
+    auto key = [&](uint32_t n) { return periodic ? h_node_key[n] : n; };
+    // Cells of every key and their node of that key (CSR, cells in increasing order)
+    std::vector<uint32_t> key_offsets(n_nodes + 1, 0);
+    std::vector<std::array<uint32_t, 2>> key_cells;
+    for (uint32_t c = 0; c < n_cells; c++) {
+        for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) key_offsets[key(h_node_of_cell(c, k)) + 1]++;
+    }
+    for (uint32_t n = 0; n < n_nodes; n++) key_offsets[n + 1] += key_offsets[n];
+    key_cells.resize(key_offsets[n_nodes]);
     {
-        std::vector<uint32_t> fill(node_offsets.begin(), node_offsets.end() - 1);
+        std::vector<uint32_t> fill(key_offsets.begin(), key_offsets.end() - 1);
         for (uint32_t c = 0; c < n_cells; c++) {
-            for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) node_cells[fill[h_node_of_cell(c, k)]++] = c;
+            for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) {
+                const uint32_t n = h_node_of_cell(c, k);
+                key_cells[fill[key(n)]++] = {c, n};
+            }
         }
     }
-    std::vector<uint32_t> offsets(n_cells + 1, 0), flat, nb;
+    // Neighbors as (cell << 8 | shift row)
+    std::vector<uint32_t> offsets(n_cells + 1, 0);
+    std::vector<uint64_t> flat, nb;
     for (uint32_t c = 0; c < n_cells; c++) {
         nb.clear();
         for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) {
-            const uint32_t n = h_node_of_cell(c, k);
-            for (uint32_t i = node_offsets[n]; i < node_offsets[n + 1]; i++) {
-                if (node_cells[i] != c) nb.push_back(node_cells[i]);
+            const uint32_t a = h_node_of_cell(c, k);
+            for (uint32_t i = key_offsets[key(a)]; i < key_offsets[key(a) + 1]; i++) {
+                const auto [other, b] = key_cells[i];
+                uint8_t shift = 0;
+                if (periodic) {
+                    std::array<int8_t, 3> lattice;
+                    for (int j = 0; j < 3; j++) lattice[j] = h_node_lattice[a][j] - h_node_lattice[b][j];
+                    shift = shift_index(lattice);
+                }
+                if (other == c && shift == 0) continue;
+                if (other == c) {
+                    throw std::runtime_error("Mesh: a cell touches itself across a periodic boundary; periodic "
+                                             "directions need at least 3 cells.");
+                }
+                nb.push_back(uint64_t(other) << 8 | shift);
             }
         }
-        std::sort(nb.begin(), nb.end(), [&](uint32_t a, uint32_t b) { return h_global_cell(a) < h_global_cell(b); });
+        // By global id, so that neighbor order does not depend on the local numbering
+        std::sort(nb.begin(), nb.end(), [&](uint64_t a, uint64_t b) {
+            return std::make_pair(h_global_cell(a >> 8), a & 0xff) < std::make_pair(h_global_cell(b >> 8), b & 0xff);
+        });
         nb.erase(std::unique(nb.begin(), nb.end()), nb.end());
+        for (size_t i = 1; i < nb.size(); i++) {
+            if (nb[i] >> 8 == nb[i - 1] >> 8) {
+                throw std::runtime_error("Mesh: two cells touch both directly and across a periodic boundary; "
+                                         "periodic directions need at least 3 cells.");
+            }
+        }
         flat.insert(flat.end(), nb.begin(), nb.end());
         offsets[c + 1] = flat.size();
     }
     offsets_cells_of_cell = Kokkos::View<uint32_t *>("offsets_cells_of_cell", n_cells + 1);
     cells_of_cell = Kokkos::View<uint32_t *>("cells_of_cell", flat.size());
-    auto h_offsets = Kokkos::create_mirror_view(offsets_cells_of_cell);
-    auto h_cells = Kokkos::create_mirror_view(cells_of_cell);
-    for (uint32_t i = 0; i <= n_cells; i++) h_offsets(i) = offsets[i];
-    for (size_t i = 0; i < flat.size(); i++) h_cells(i) = flat[i];
-    Kokkos::deep_copy(offsets_cells_of_cell, h_offsets);
-    Kokkos::deep_copy(cells_of_cell, h_cells);
+    cells_of_cell_shift = Kokkos::View<uint8_t *>("cells_of_cell_shift", flat.size());
+    h_offsets_cells_of_cell = Kokkos::create_mirror_view(offsets_cells_of_cell);
+    h_cells_of_cell = Kokkos::create_mirror_view(cells_of_cell);
+    h_cells_of_cell_shift = Kokkos::create_mirror_view(cells_of_cell_shift);
+    for (uint32_t i = 0; i <= n_cells; i++) h_offsets_cells_of_cell(i) = offsets[i];
+    for (size_t i = 0; i < flat.size(); i++) {
+        h_cells_of_cell(i) = flat[i] >> 8;
+        h_cells_of_cell_shift(i) = flat[i] & 0xff;
+    }
+
+    shifts = Kokkos::View<rtype *[N_DIM]>("shifts", shift_lattice.size());
+    h_shifts = Kokkos::create_mirror_view(shifts);
+    for (size_t r = 0; r < shift_lattice.size(); r++) {
+        FOR_I_DIM {
+            double x = 0.0;
+            for (size_t j = 0; j < periodic_translations.size(); j++) {
+                x += shift_lattice[r][j] * double(periodic_translations[j][i]);
+            }
+            h_shifts(r, i) = x;
+        }
+    }
+    Kokkos::deep_copy(offsets_cells_of_cell, h_offsets_cells_of_cell);
+    Kokkos::deep_copy(cells_of_cell, h_cells_of_cell);
+    Kokkos::deep_copy(cells_of_cell_shift, h_cells_of_cell_shift);
+    Kokkos::deep_copy(shifts, h_shifts);
+    Kokkos::deep_copy(face_shift, h_face_shift);
 }
 
 void Mesh::copy_host_to_device() {
@@ -350,6 +452,8 @@ void Mesh::copy_host_to_device() {
     Kokkos::deep_copy(nodes_of_face, h_nodes_of_face);
     Kokkos::deep_copy(offsets_nodes_of_face, h_offsets_nodes_of_face);
     Kokkos::deep_copy(cells_of_face, h_cells_of_face);
+    Kokkos::deep_copy(shifts, h_shifts);
+    Kokkos::deep_copy(face_shift, h_face_shift);
     for (auto & zone : m_face_zones) {
         zone.copy_host_to_device();
     }
@@ -372,6 +476,8 @@ void Mesh::copy_device_to_host() {
     Kokkos::deep_copy(h_nodes_of_face, nodes_of_face);
     Kokkos::deep_copy(h_offsets_nodes_of_face, offsets_nodes_of_face);
     Kokkos::deep_copy(h_cells_of_face, cells_of_face);
+    Kokkos::deep_copy(h_shifts, shifts);
+    Kokkos::deep_copy(h_face_shift, face_shift);
     for (auto & zone : m_face_zones) {
         zone.copy_device_to_host();
     }

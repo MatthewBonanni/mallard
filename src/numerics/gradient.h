@@ -16,6 +16,7 @@
 
 #include "common.h"
 #include "boundary.h"
+#include "mesh.h"
 
 /**
  * @brief Inverse-distance-squared weighted least-squares normal equations
@@ -79,7 +80,7 @@ struct LSQSystem {
  *        of the cell centroid across the boundary face.
  *
  * Exact for linear fields on any mesh where the neighbor offsets span N_DIM
- * dimensions.
+ * dimensions. Build it with make_gradient.
  */
 struct LSQGradientFunctor {
     Kokkos::View<uint32_t *> offsets_faces_of_cell;
@@ -88,6 +89,8 @@ struct LSQGradientFunctor {
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<rtype *[N_DIM]> face_coords;
     Kokkos::View<rtype *[N_DIM]> face_normals;
+    Kokkos::View<rtype *[N_DIM]> shifts;
+    Kokkos::View<uint8_t *> face_shift;
     BoundaryData boundaries;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
@@ -101,8 +104,14 @@ struct LSQGradientFunctor {
         const int32_t c0 = cells_of_face(i_face, 0);
         const int32_t c1 = cells_of_face(i_face, 1);
         if (c1 >= 0) {
+            // Across a periodic face, cell 1 sits at its centroid plus the shift
+            const uint8_t s = face_shift(i_face);
+            if (c0 == (int32_t)i_cell) {
+                FOR_I_DIM dx[i] = (cell_coords(c1, i) + shifts(s, i)) - cell_coords(i_cell, i);
+            } else {
+                FOR_I_DIM dx[i] = (cell_coords(c0, i) - shifts(s, i)) - cell_coords(i_cell, i);
+            }
             const int32_t j = (c0 == (int32_t)i_cell) ? c1 : c0;
-            FOR_I_DIM dx[i] = cell_coords(j, i) - cell_coords(i_cell, i);
             FOR_I_CONSERVATIVE W_j[i] = W(j, i);
         } else {
             rtype n[N_DIM];
@@ -213,6 +222,7 @@ struct LSQVertexGradientFunctor {
     LSQGradientFunctor faces;
     Kokkos::View<uint32_t *> offsets_cells_of_cell;
     Kokkos::View<uint32_t *> cells_of_cell;
+    Kokkos::View<uint8_t *> cells_of_cell_shift;
     VertexGradientWeights weights;
 
     static constexpr uint8_t NB = N_DIM + N_DIM * (N_DIM + 1) / 2;  // Linear and quadratic monomials
@@ -226,7 +236,8 @@ struct LSQVertexGradientFunctor {
     void for_each_point(const uint32_t i_cell, F && f) const {
         for (uint32_t k = offsets_cells_of_cell(i_cell); k < offsets_cells_of_cell(i_cell + 1); k++) {
             rtype dx[N_DIM];
-            FOR_I_DIM dx[i] = faces.cell_coords(cells_of_cell(k), i) - faces.cell_coords(i_cell, i);
+            const uint8_t s = cells_of_cell_shift(k);
+            FOR_I_DIM dx[i] = (faces.cell_coords(cells_of_cell(k), i) + faces.shifts(s, i)) - faces.cell_coords(i_cell, i);
             f(dx, false, k);
         }
         // The ghost positions do not depend on the states
@@ -314,16 +325,25 @@ struct LSQVertexGradientFunctor {
 };
 
 /**
+ * @brief LSQGradientFunctor of the states W into gradients over a mesh.
+ */
+inline LSQGradientFunctor make_gradient(const Mesh & mesh, const BoundaryData & boundaries,
+                                        Kokkos::View<rtype *[N_CONSERVATIVE]> W,
+                                        Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients) {
+    return LSQGradientFunctor{mesh.offsets_faces_of_cell, mesh.faces_of_cell, mesh.cells_of_face, mesh.cell_coords,
+                              mesh.face_coords, mesh.face_normals, mesh.shifts, mesh.face_shift,
+                              boundaries, W, gradients};
+}
+
+/**
  * @brief LSQVertexGradientFunctor over the given gradient functor's mesh,
  *        boundaries, states and gradients, with its weights computed.
  */
-inline LSQVertexGradientFunctor make_vertex_gradient(const LSQGradientFunctor & faces,
-                                                     Kokkos::View<uint32_t *> offsets_cells_of_cell,
-                                                     Kokkos::View<uint32_t *> cells_of_cell) {
-    LSQVertexGradientFunctor functor{faces, offsets_cells_of_cell, cells_of_cell,
-                                     {Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_cells", cells_of_cell.extent(0)),
+inline LSQVertexGradientFunctor make_vertex_gradient(const LSQGradientFunctor & faces, const Mesh & mesh) {
+    LSQVertexGradientFunctor functor{faces, mesh.offsets_cells_of_cell, mesh.cells_of_cell, mesh.cells_of_cell_shift,
+                                     {Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_cells", mesh.cells_of_cell.extent(0)),
                                       Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_faces", faces.faces_of_cell.extent(0))}};
-    Kokkos::parallel_for("vertex_gradient_weights", offsets_cells_of_cell.extent(0) - 1,
+    Kokkos::parallel_for("vertex_gradient_weights", mesh.n_cells,
                          KOKKOS_LAMBDA(const uint32_t i_cell) { functor.compute_weights(i_cell); });
     return functor;
 }

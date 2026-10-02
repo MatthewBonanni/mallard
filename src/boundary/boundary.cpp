@@ -78,7 +78,7 @@ bool point_in_cell_3d(const Mesh & mesh, uint32_t c, const rtype * p) {
         const uint32_t f = mesh.h_face_of_cell(c, k);
         const rtype sign = (mesh.h_cells_of_face(f, 1) == (int32_t)c) ? -1.0 : 1.0;
         rtype d = 0.0;
-        FOR_I_DIM d += (p[i] - mesh.h_face_coords(f, i)) * sign * mesh.h_face_normals(f, i);
+        FOR_I_DIM d += (p[i] - (mesh.h_face_coords(f, i) - mesh.h_face_offset(f, c, i))) * sign * mesh.h_face_normals(f, i);
         if (d > 1e-10 * size2 * std::sqrt(size2)) return false;
     }
     return true;
@@ -112,7 +112,7 @@ int32_t find_image_face_3d(const Mesh & mesh, uint32_t f, int32_t image, const r
         const rtype A_g = mesh.h_face_area(g);
         rtype dist = 0.0, cross2 = 0.0;
         FOR_I_DIM {
-            dist += std::pow(mesh.h_face_coords(g, i) - target[i], 2);
+            dist += std::pow((mesh.h_face_coords(g, i) - mesh.h_face_offset(g, image, i)) - target[i], 2);
             const uint8_t j = (i + 1) % 3, k = (i + 2) % 3;
             cross2 += std::pow(mesh.h_face_normals(f, j) * mesh.h_face_normals(g, k) -
                                mesh.h_face_normals(f, k) * mesh.h_face_normals(g, j), 2);
@@ -197,11 +197,24 @@ BoundaryData make_boundary_data(const Mesh & mesh,
                 }
             }
         }
+        // Neighbors across periodic boundaries, at the image point moved into their frame
+        uint8_t image_shift = 0;
+        for (uint32_t k = mesh.h_offsets_cells_of_cell(c);
+             image == (int32_t)c && k < mesh.h_offsets_cells_of_cell(c + 1); k++) {
+            const uint8_t s = mesh.h_cells_of_cell_shift(k);
+            if (s == 0) continue;
+            rtype q[N_DIM];
+            FOR_I_DIM q[i] = p[i] - mesh.h_shifts(s, i);
+            if (point_in_cell(mesh, mesh.h_cells_of_cell(k), q)) {
+                image = mesh.h_cells_of_cell(k);
+                image_shift = s;
+            }
+        }
         h_face_image(f) = image;
 
         // Face of the image cell that is the boundary face translated by the cell depth
         rtype target[N_DIM];
-        FOR_I_DIM target[i] = mesh.h_face_coords(f, i) + depth * n_in[i];
+        FOR_I_DIM target[i] = (mesh.h_face_coords(f, i) + depth * n_in[i]) - mesh.h_shifts(image_shift, i);
         if constexpr (N_DIM == 3) {
             h_face_image_face(f) = find_image_face_3d(mesh, f, image, target);
             if (h_face_image_face(f) >= 0) {
@@ -213,7 +226,7 @@ BoundaryData make_boundary_data(const Mesh & mesh,
             for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(image); k++) {
                 const uint32_t g = mesh.h_face_of_cell(image, k);
                 rtype dist = 0.0;
-                FOR_I_DIM dist += std::pow(mesh.h_face_coords(g, i) - target[i], 2);
+                FOR_I_DIM dist += std::pow((mesh.h_face_coords(g, i) - mesh.h_face_offset(g, image, i)) - target[i], 2);
                 const rtype t_g[N_DIM] = {mesh.h_node_coords(mesh.h_node_of_face(g, 1), 0) - mesh.h_node_coords(mesh.h_node_of_face(g, 0), 0),
                                           mesh.h_node_coords(mesh.h_node_of_face(g, 1), 1) - mesh.h_node_coords(mesh.h_node_of_face(g, 0), 1)};
                 const rtype cross = t_f[0] * t_g[1] - t_f[1] * t_g[0];

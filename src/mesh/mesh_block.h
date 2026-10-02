@@ -63,6 +63,14 @@ struct MeshBlock {
 };
 
 /**
+ * @brief Part r of p of a generated 2D mesh (cartesian, cartesian_tri or
+ *        wedge): near-equal blocks of its cells and nodes, numbered as
+ *        Mesh::init_cart, init_cart_tri and init_wedge number them, and the
+ *        boundary faces of those cells.
+ */
+MeshBlock cartesian_2d_block(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, MeshType kind, int r, int p);
+
+/**
  * @brief A generated 3D box (see Mesh::init_cart_3d): the cells
  *        [first_cell, end_cell) and nodes [first_node, end_node) in the global
  *        numbering of the whole box, and the boundary faces of those cells.
