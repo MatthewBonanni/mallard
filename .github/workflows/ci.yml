@@ -3,8 +3,20 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'CITATION.cff'
+      - 'LICENSE'
+      - '.github/workflows/pages.yml'
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'CITATION.cff'
+      - 'LICENSE'
+      - '.github/workflows/pages.yml'
   workflow_dispatch:
 
 concurrency:
@@ -12,26 +24,36 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build-and-test:
+  # Pull requests run three jobs that together cover every test: the full 2D
+  # suite (OpenMP), the full 3D suite and the multi-rank tests. main also runs
+  # the serial-backend and non-MPI 3D builds.
+  matrix:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    outputs:
+      backends: ${{ steps.pick.outputs.backends }}
+    steps:
+      - id: pick
+        env:
+          ALL: ${{ github.event_name != 'pull_request' }}
+        run: |
+          backends='[
+            {"name": "openmp", "flags": "-DKokkos_ENABLE_OPENMP=ON", "full": true},
+            {"name": "mpi", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON", "mpi": true},
+            {"name": "mpi-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "mpi": true, "full": true},
+            {"name": "serial", "flags": "-DKokkos_ENABLE_SERIAL=ON", "full": true, "main_only": true},
+            {"name": "serial-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "hdf5": true, "full": true, "main_only": true}
+          ]'
+          if [ "$ALL" != true ]; then backends=$(jq -c 'map(select(.main_only | not))' <<< "$backends"); fi
+          echo "backends=$(jq -c . <<< "$backends")" >> "$GITHUB_OUTPUT"
+
+  build-and-test:
+    needs: matrix
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        backend:
-          - name: serial
-            flags: -DKokkos_ENABLE_SERIAL=ON
-          - name: openmp
-            flags: -DKokkos_ENABLE_OPENMP=ON
-          - name: mpi
-            flags: -DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON
-            mpi: true
-          - name: serial-3d
-            flags: -DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON
-            hdf5: true
-          - name: mpi-3d
-            flags: -DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON
-            mpi: true
+        backend: ${{ fromJSON(needs.matrix.outputs.backends) }}
     name: ${{ matrix.backend.name }}
     steps:
       - uses: actions/checkout@v4
@@ -80,9 +102,16 @@ jobs:
         run: ./build/test/MallardTest
       - name: Test (MPI)
         if: matrix.backend.mpi
+        env:
+          FULL: ${{ matrix.backend.full }}
         run: |
-          mpirun -n 1 ./build/test/MallardTest
+          mpi_tests='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*'
+          if [ "$FULL" = true ]; then
+            mpirun -n 1 ./build/test/MallardTest
+          else
+            mpirun -n 1 ./build/test/MallardTest --gtest_filter="$mpi_tests"
+          fi
           for n in 2 3 4; do
-            mpirun -n $n --oversubscribe ./build/test/MallardTest --gtest_filter='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*'
+            mpirun -n $n --oversubscribe ./build/test/MallardTest --gtest_filter="$mpi_tests"
           done
 
