@@ -17,6 +17,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 #include <vector>
 
 #include <Kokkos_Core.hpp>
@@ -35,6 +36,24 @@ FaceReconstruction::~FaceReconstruction() {
 
 logging::Items FaceReconstruction::summary() const {
     return {{"Reconstruction", type == FaceReconstructionType::FIRST_ORDER ? "first order" : FACE_RECONSTRUCTION_NAMES.at(type)}};
+}
+
+std::vector<uint32_t> FaceReconstruction::cells_independent_of_halo(uint32_t) const {
+    return {};
+}
+
+void FaceReconstruction::calc_cell_face_values(const Kokkos::DefaultExecutionSpace &,
+                                               Kokkos::View<rtype *[N_CONSERVATIVE]>,
+                                               Kokkos::View<rtype **[2][N_CONSERVATIVE]>,
+                                               Kokkos::View<uint32_t *>) {
+    throw std::logic_error("Face reconstruction " + FACE_RECONSTRUCTION_NAMES.at(type) +
+                           " cannot reconstruct a subset of the cells.");
+}
+
+void FaceReconstruction::finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]>,
+                                                 Kokkos::View<rtype **[2][N_CONSERVATIVE]>) {
+    throw std::logic_error("Face reconstruction " + FACE_RECONSTRUCTION_NAMES.at(type) +
+                           " cannot reconstruct a subset of the cells.");
 }
 
 void FaceReconstruction::set_mesh(std::shared_ptr<Mesh> mesh) {

@@ -82,6 +82,7 @@ int Solver::init(const toml::value & input) {
     setup.reset();
     timed_phase("fields and output", [&] {
         allocate_memory();
+        init_rhs_split();
         init_sources();
         register_data();
         init_output();
@@ -244,6 +245,37 @@ bool Solver::halo_too_shallow() {
     if (needed <= halo_layers) return false;
     halo_layers = needed;
     return true;
+}
+
+void Solver::init_rhs_split() {
+    auto to_device = [](const std::vector<uint32_t> & v, const char * label) {
+        Kokkos::View<uint32_t *> d(label, v.size());
+        Kokkos::deep_copy(d, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(v.data(), v.size()));
+        return d;
+    };
+    const uint32_t n_owned = mesh->n_owned();
+    std::vector<uint32_t> faces;
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        const int32_t c0 = mesh->h_cells_of_face(f, 0), c1 = mesh->h_cells_of_face(f, 1);
+        if (c0 < (int32_t)n_owned || (c1 >= 0 && c1 < (int32_t)n_owned)) faces.push_back(f);
+    }
+    rhs_faces = to_device(faces.size() < mesh->n_faces ? faces : std::vector<uint32_t>(), "rhs_faces");
+
+    std::vector<uint32_t> cells;
+    if (halo.active()) cells = face_reconstruction->cells_independent_of_halo(n_owned);
+    n_early_cells = cells.size();
+    if (n_early_cells == 0) return;
+    std::vector<bool> early(mesh->n_cells, false);
+    for (uint32_t c : cells) early[c] = true;
+    for (uint32_t c = 0; c < mesh->n_reconstructed(); c++) {
+        if (!early[c]) cells.push_back(c);
+    }
+    rhs_cells = to_device(cells, "rhs_cells");
+    // Host backends run kernels to completion anyway; on devices the early cells get their own stream
+    if constexpr (!Kokkos::SpaceAccessibility<Kokkos::HostSpace,
+                                              Kokkos::DefaultExecutionSpace::memory_space>::accessible) {
+        overlap_space = Kokkos::Experimental::partition_space(Kokkos::DefaultExecutionSpace(), 1)[0];
+    }
 }
 
 void Solver::init_physics() {
@@ -933,6 +965,7 @@ void Solver::write_data(bool force) {
 
 void Solver::take_step() {
     time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
+    halo_current = false;
     Kokkos::fence();
     step++;
     t += dt;
@@ -952,8 +985,10 @@ void Solver::update_primitives() {
 }
 
 void Solver::calc_dt() {
-    // Halo values are stale after the last stage of the previous step
+    // Halo values are stale after the last stage of the previous step; the
+    // first stage of the next one reuses them
     halo.exchange(conservatives);
+    halo_current = true;
     const rtype dt_cfl1 = calc_dt_cfl1();
     dt = use_cfl ? cfl * dt_cfl1 : dt_fixed;
     // Land exactly on t_stop and on time-based output times

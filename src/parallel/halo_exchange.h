@@ -17,6 +17,7 @@
 
 #include <Kokkos_Core.hpp>
 
+#include "comm.h"
 #include "common_typedef.h"
 #include "distribution.h"
 
@@ -31,7 +32,19 @@ class HaloExchange {
         explicit HaloExchange(const Distribution & dist);
 
         /** @brief Overwrite the halo cells of U with the owners' values (collective among neighbors). */
-        void exchange(Kokkos::View<rtype *[N_CONSERVATIVE]> U) const;
+        void exchange(Kokkos::View<rtype *[N_CONSERVATIVE]> U) {
+            start(U);
+            finish(U);
+        }
+
+        /**
+         * @brief Send the owned values of U that neighbors need and post the
+         *        receives; the halo cells of U stay stale until finish().
+         */
+        void start(Kokkos::View<rtype *[N_CONSERVATIVE]> U);
+
+        /** @brief Wait for the messages of start() and fill the halo cells of U. */
+        void finish(Kokkos::View<rtype *[N_CONSERVATIVE]> U);
 
         bool active() const { return !ranks.empty(); }
 
@@ -41,6 +54,9 @@ class HaloExchange {
         Kokkos::View<uint32_t *> send_cells, recv_cells;
         Kokkos::View<rtype *> send_buffer, recv_buffer;
         Kokkos::View<rtype *>::host_mirror_type h_send_buffer, h_recv_buffer;
+#ifdef Mallard_HAS_MPI
+        std::vector<MPI_Request> requests;
+#endif
 };
 
 #endif // HALO_EXCHANGE_H

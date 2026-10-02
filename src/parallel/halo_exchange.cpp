@@ -13,8 +13,6 @@
 
 #include <stdexcept>
 
-#include "comm.h"
-
 namespace {
 
 Kokkos::View<uint32_t *> flatten(const std::vector<std::vector<uint32_t>> & lists, std::vector<uint32_t> & offsets,
@@ -51,24 +49,24 @@ HaloExchange::HaloExchange(const Distribution & dist) : ranks(dist.neighbors) {
     h_recv_buffer = Kokkos::create_mirror_view(recv_buffer);
 }
 
-void HaloExchange::exchange(Kokkos::View<rtype *[N_CONSERVATIVE]> U) const {
+void HaloExchange::start(Kokkos::View<rtype *[N_CONSERVATIVE]> U) {
     if (!active()) return;
 #ifdef Mallard_HAS_MPI
-    Kokkos::View<uint32_t *> s_cells = send_cells, r_cells = recv_cells;
-    Kokkos::View<rtype *> s_buf = send_buffer, r_buf = recv_buffer;
+    Kokkos::View<uint32_t *> s_cells = send_cells;
+    Kokkos::View<rtype *> s_buf = send_buffer;
     Kokkos::parallel_for("halo_pack", s_cells.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
         FOR_I_CONSERVATIVE s_buf(k * N_CONSERVATIVE + i) = U(s_cells(k), i);
     });
     Kokkos::fence("halo_pack");
     rtype * send_ptr = s_buf.data();
-    rtype * recv_ptr = r_buf.data();
+    rtype * recv_ptr = recv_buffer.data();
     if constexpr (stage_through_host) {
         Kokkos::deep_copy(h_send_buffer, s_buf);
         send_ptr = h_send_buffer.data();
         recv_ptr = h_recv_buffer.data();
     }
     const MPI_Datatype type = sizeof(rtype) == sizeof(double) ? MPI_DOUBLE : MPI_FLOAT;
-    std::vector<MPI_Request> requests(2 * ranks.size());
+    requests.assign(2 * ranks.size(), MPI_REQUEST_NULL);
     for (size_t n = 0; n < ranks.size(); n++) {
         MPI_Irecv(recv_ptr + recv_offsets[n] * N_CONSERVATIVE,
                   static_cast<int>((recv_offsets[n + 1] - recv_offsets[n]) * N_CONSERVATIVE), type, ranks[n], 0,
@@ -79,9 +77,20 @@ void HaloExchange::exchange(Kokkos::View<rtype *[N_CONSERVATIVE]> U) const {
                   static_cast<int>((send_offsets[n + 1] - send_offsets[n]) * N_CONSERVATIVE), type, ranks[n], 0,
                   comm::world(), &requests[ranks.size() + n]);
     }
+#else
+    (void)U;
+    throw std::logic_error("HaloExchange: neighbors without MPI");
+#endif
+}
+
+void HaloExchange::finish(Kokkos::View<rtype *[N_CONSERVATIVE]> U) {
+    if (!active()) return;
+#ifdef Mallard_HAS_MPI
     if (MPI_Waitall(static_cast<int>(requests.size()), requests.data(), MPI_STATUSES_IGNORE) != MPI_SUCCESS) {
         throw std::runtime_error("HaloExchange: MPI_Waitall failed");
     }
+    Kokkos::View<uint32_t *> r_cells = recv_cells;
+    Kokkos::View<rtype *> r_buf = recv_buffer;
     if constexpr (stage_through_host) Kokkos::deep_copy(r_buf, h_recv_buffer);
     Kokkos::parallel_for("halo_unpack", r_cells.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
         FOR_I_CONSERVATIVE U(r_cells(k), i) = r_buf(k * N_CONSERVATIVE + i);

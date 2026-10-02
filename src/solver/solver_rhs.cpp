@@ -17,23 +17,75 @@
 #include "gradient.h"
 #include "viscous_flux.h"
 
+namespace {
+
+/** @brief Applies a per-face functor to the entries of a list. */
+template <typename F>
+struct OverList {
+    F f;
+    Kokkos::View<uint32_t *> items;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t k) const { f(items(k)); }
+};
+
+/** @brief Applies f to the faces of owned cells: all faces if the list is empty. */
+template <typename F>
+void parallel_for_faces(const char * label, const F & f, Kokkos::View<uint32_t *> list, uint32_t n_faces) {
+    if (list.extent(0) == 0) {
+        Kokkos::parallel_for(label, n_faces, f);
+    } else {
+        Kokkos::parallel_for(label, list.extent(0), OverList<F>{f, list});
+    }
+}
+
+struct CellWFunctor {
+    Euler physics;
+    StateView solution;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t i_cell) const {
+        rtype cons[N_CONSERVATIVE], W_c[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE cons[i] = solution(i_cell, i);
+        physics.compute_W_from_conservatives(W_c, cons);
+        FOR_I_CONSERVATIVE W(i_cell, i) = W_c[i];
+    }
+};
+
+} // namespace
+
 void Solver::calc_rhs(StateView solution, StateView rhs, rtype t_stage) {
-    halo.exchange(solution);
+    // The first stage reuses the halo that calc_dt filled
+    const bool exchange = halo.active() && !(halo_current && solution.data() == conservatives.data());
+    halo_current = false;
     update_boundary_states(t_stage);
     if (!average_pressure_outlets.empty()) {
         update_average_pressure_outlets(solution);
     }
 
-    const Euler phys = physics;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
-    Kokkos::parallel_for("rhs_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
-        rtype cons[N_CONSERVATIVE], W_c[N_CONSERVATIVE];
-        FOR_I_CONSERVATIVE cons[i] = solution(i_cell, i);
-        phys.compute_W_from_conservatives(W_c, cons);
-        FOR_I_CONSERVATIVE W(i_cell, i) = W_c[i];
-    });
-
-    face_reconstruction->calc_face_values(W_cells, face_solution);
+    const uint32_t n_owned = mesh->n_owned();
+    const CellWFunctor w_functor{physics, solution, W_cells};
+    if (exchange && n_early_cells > 0) {
+        // Cells whose reconstruction reads no halo cell go first, on their own
+        // instance, while the halo is exchanged; the rest follow on the default
+        // one and fill the device as the first ones drain
+        Kokkos::parallel_for("rhs_W", Kokkos::RangePolicy<>(0, n_owned), w_functor);
+        halo.start(solution);
+        face_reconstruction->calc_cell_face_values(overlap_space, W_cells, face_solution,
+                                                   Kokkos::subview(rhs_cells, Kokkos::make_pair(0u, n_early_cells)));
+        halo.finish(solution);
+        Kokkos::parallel_for("rhs_W", Kokkos::RangePolicy<>(n_owned, mesh->n_cells), w_functor);
+        face_reconstruction->calc_cell_face_values(
+            Kokkos::DefaultExecutionSpace(), W_cells, face_solution,
+            Kokkos::subview(rhs_cells, Kokkos::make_pair(n_early_cells, uint32_t(rhs_cells.extent(0)))));
+        overlap_space.fence("rhs_overlap");
+        face_reconstruction->finish_cell_face_values(W_cells, face_solution);
+    } else {
+        if (exchange) halo.exchange(solution);
+        Kokkos::parallel_for("rhs_W", mesh->n_cells, w_functor);
+        face_reconstruction->calc_face_values(W_cells, face_solution);
+    }
 
     switch (riemann_solver_type) {
         case RiemannSolverType::RUSANOV:
@@ -59,12 +111,12 @@ void Solver::calc_rhs(StateView solution, StateView rhs, rtype t_stage) {
                                            mesh->cell_coords, mesh->cells_of_face, mesh->shifts, mesh->face_shift,
                                            W_cells,
                                            viscous_gradients, boundary_data, face_flux, physics};
-        Kokkos::parallel_for("viscous_flux", mesh->n_faces, viscous_functor);
+        parallel_for_faces("viscous_flux", viscous_functor, rhs_faces, mesh->n_faces);
     }
 
     FaceFluxSumFunctor sum_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                    face_flux, rhs};
-    Kokkos::parallel_for("face_flux_sum", mesh->n_cells, sum_functor);
+    Kokkos::parallel_for("face_flux_sum", n_owned, sum_functor);
 
     Kokkos::View<rtype *> vol = mesh->cell_volume;
     if (has_gravity || !source_expressions.empty()) {
@@ -74,7 +126,7 @@ void Solver::calc_rhs(StateView solution, StateView rhs, rtype t_stage) {
         Kokkos::Array<rtype, N_DIM> g;
         FOR_I_DIM g[i] = gravity[i];
         StateView S = source_field;
-        Kokkos::parallel_for("rhs_sources", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
+        Kokkos::parallel_for("rhs_sources", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
             const rtype V = vol(i_cell);
             if (gravity_on) {
                 rtype rhou[N_DIM];
@@ -90,7 +142,7 @@ void Solver::calc_rhs(StateView solution, StateView rhs, rtype t_stage) {
         });
     }
 
-    Kokkos::parallel_for("rhs_divide_volume", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
+    Kokkos::parallel_for("rhs_divide_volume", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
         FOR_I_CONSERVATIVE rhs(i_cell, i) /= vol(i_cell);
     });
 }
@@ -108,5 +160,5 @@ void Solver::launch_flux_functor() {
                                                     face_flux,
                                                     physics.gamma,
                                                     low_mach_cutoff};
-    Kokkos::parallel_for("convective_flux", mesh->n_faces, functor);
+    parallel_for_faces("convective_flux", functor, rhs_faces, mesh->n_faces);
 }

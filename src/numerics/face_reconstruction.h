@@ -14,6 +14,7 @@
 
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 #include <toml.hpp>
 
@@ -100,6 +101,34 @@ class FaceReconstruction {
          */
         virtual void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                       Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) = 0;
+
+        /**
+         * @brief Cells below n_owned whose reconstruction reads no cell at or
+         *        above n_owned, so that calc_cell_face_values can reconstruct
+         *        them before the halo is filled. Empty if this reconstruction
+         *        cannot be split by cells.
+         */
+        virtual std::vector<uint32_t> cells_independent_of_halo(uint32_t n_owned) const;
+
+        /**
+         * @brief Reconstruct the listed cells' sides of their faces, on the
+         *        given execution space instance, as far as each cell can on its
+         *        own (see cells_independent_of_halo()). Once every reconstructed
+         *        cell went through this and those instances are fenced,
+         *        finish_cell_face_values() completes the face values.
+         * @param exec Execution space instance to launch on.
+         * @param solution Cell states W = [rho, u_x, u_y, p].
+         * @param face_solution Face states W, as in calc_face_values.
+         * @param cells Local cells to reconstruct (not empty).
+         */
+        virtual void calc_cell_face_values(const Kokkos::DefaultExecutionSpace & exec,
+                                           Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                           Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
+                                           Kokkos::View<uint32_t *> cells);
+
+        /** @brief Complete the face values after calc_cell_face_values(). */
+        virtual void finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                             Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution);
 
         /**
          * @brief Gradients of W = [rho, u, p] at the centroids of the first n_cells
@@ -226,6 +255,13 @@ class TENO : public FaceReconstruction {
         uint8_t n_face_quadrature_points() const override;
         void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                               Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) override;
+        std::vector<uint32_t> cells_independent_of_halo(uint32_t n_owned) const override;
+        void calc_cell_face_values(const Kokkos::DefaultExecutionSpace & exec,
+                                   Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                   Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
+                                   Kokkos::View<uint32_t *> cells) override;
+        void finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) override;
         bool cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                             Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells) override;
 
@@ -254,7 +290,8 @@ class TENO : public FaceReconstruction {
         Kokkos::View<rtype ****> pinv_small;               // (cell, face, l, s)
         Kokkos::View<rtype ***> si_matrix;                 // (cell, l, m)
         Kokkos::View<rtype *> troubled;                    // (cell): sigma, for diagnostics
-        Kokkos::View<rtype ***> troubled_coeffs;           // (cell, l, var): scratch for the troubled pass
+        Kokkos::View<rtype ***> troubled_coeffs;           // (cell, l, var): scratch for the troubled passes
+        Kokkos::View<rtype ****> troubled_small_coeffs;    // (cell, sector, l, var): scratch for the troubled passes
         Kokkos::View<uint32_t *> troubled_cells;           // queue of troubled cells
         Kokkos::View<uint32_t> n_troubled;
         // Vertex-neighbor layers each cell's stencil search visited (host); a
@@ -266,8 +303,13 @@ class TENO : public FaceReconstruction {
         void launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                               Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells);
         template <uint8_t DEG>
-        void launch_reconstruction(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                                   Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution);
+        void launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
+                                   Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                   Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
+                                   Kokkos::View<uint32_t *> cells, bool troubled_pass);
+        void dispatch(const Kokkos::DefaultExecutionSpace & exec, Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                      Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution, Kokkos::View<uint32_t *> cells,
+                      bool troubled_pass);
 
         void compute_stencils_and_matrices();
         void compute_stencils_and_matrices_3d();

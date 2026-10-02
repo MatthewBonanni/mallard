@@ -201,9 +201,16 @@ class Solver {
 
         int base_halo_layers() const;
         bool halo_too_shallow();
+        void init_rhs_split();
 
         template <typename T_riemann_solver>
         void launch_flux_functor();
+
+        Kokkos::View<uint32_t *> rhs_cells;  // reconstructed cells, the n_early_cells independent of the halo first
+        uint32_t n_early_cells = 0;
+        Kokkos::View<uint32_t *> rhs_faces;  // faces of owned cells, whose fluxes are used; empty if all faces
+        Kokkos::DefaultExecutionSpace overlap_space;  // runs the early cells while the halo is exchanged
+        bool halo_current = false;                     // halo of conservatives filled since its last update
 
         toml::value input;
 
