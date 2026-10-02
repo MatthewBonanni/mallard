@@ -11,6 +11,7 @@
 
 #include "comm.h"
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 
@@ -84,6 +85,30 @@ void allreduce(std::span<T> data, Op op) {
           "MPI_Allreduce");
 }
 
+template <typename T>
+std::vector<std::vector<T>> alltoallv(const std::vector<std::vector<T>> & send) {
+    const int p = size();
+    if (static_cast<int>(send.size()) != p) throw std::invalid_argument("comm::alltoallv: one list per rank");
+    std::vector<int> send_counts(p), recv_counts(p), send_displs(p + 1, 0), recv_displs(p + 1, 0);
+    for (int r = 0; r < p; r++) send_counts[r] = static_cast<int>(send[r].size());
+    check(MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD),
+          "MPI_Alltoall");
+    for (int r = 0; r < p; r++) {
+        send_displs[r + 1] = send_displs[r] + send_counts[r];
+        recv_displs[r + 1] = recv_displs[r] + recv_counts[r];
+    }
+    std::vector<T> send_flat(send_displs[p]), recv_flat(recv_displs[p]);
+    for (int r = 0; r < p; r++) std::copy(send[r].begin(), send[r].end(), send_flat.begin() + send_displs[r]);
+    check(MPI_Alltoallv(send_flat.data(), send_counts.data(), send_displs.data(), mpi_type<T>(),
+                        recv_flat.data(), recv_counts.data(), recv_displs.data(), mpi_type<T>(), MPI_COMM_WORLD),
+          "MPI_Alltoallv");
+    std::vector<std::vector<T>> recv(p);
+    for (int r = 0; r < p; r++) {
+        recv[r].assign(recv_flat.begin() + recv_displs[r], recv_flat.begin() + recv_displs[r + 1]);
+    }
+    return recv;
+}
+
 #else
 
 Session::Session(int &, char **&) {}
@@ -96,6 +121,12 @@ void barrier() {}
 template <typename T>
 void allreduce(std::span<T>, Op) {}
 
+template <typename T>
+std::vector<std::vector<T>> alltoallv(const std::vector<std::vector<T>> & send) {
+    if (send.size() != 1) throw std::invalid_argument("comm::alltoallv: one list per rank");
+    return send;
+}
+
 #endif
 
 template void allreduce<double>(std::span<double>, Op);
@@ -104,5 +135,8 @@ template void allreduce<int32_t>(std::span<int32_t>, Op);
 template void allreduce<int64_t>(std::span<int64_t>, Op);
 template void allreduce<uint32_t>(std::span<uint32_t>, Op);
 template void allreduce<uint64_t>(std::span<uint64_t>, Op);
+template std::vector<std::vector<uint64_t>> alltoallv(const std::vector<std::vector<uint64_t>> &);
+template std::vector<std::vector<double>> alltoallv(const std::vector<std::vector<double>> &);
+template std::vector<std::vector<float>> alltoallv(const std::vector<std::vector<float>> &);
 
 } // namespace comm

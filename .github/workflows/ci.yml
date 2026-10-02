@@ -43,5 +43,7 @@ jobs:
         if: matrix.backend.mpi
         run: |
           mpirun -n 1 ./build/test/MallardTest
-          mpirun -n 3 --oversubscribe ./build/test/MallardTest --gtest_filter='CommTest.*'
+          for n in 2 3 4; do
+            mpirun -n $n --oversubscribe ./build/test/MallardTest --gtest_filter='CommTest.*:MPITest.*'
+          done
 

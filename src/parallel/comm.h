@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <vector>
 #include <type_traits>
 
 #ifdef Mallard_HAS_MPI
@@ -38,7 +39,7 @@ class Session {
         Session & operator=(const Session &) = delete;
 
     private:
-        bool owns_mpi = false;
+        [[maybe_unused]] bool owns_mpi = false;
 };
 
 /** @brief Rank of this process in the world communicator. */
@@ -72,6 +73,13 @@ std::array<T, N> allreduce(std::array<T, N> values, Op op) {
     allreduce(std::span<T>(values), op);
     return values;
 }
+
+/**
+ * @brief Personalized all-to-all: send[r] goes to rank r; returns what each rank
+ *        sent to this one, indexed by source rank.
+ */
+template <typename T>
+std::vector<std::vector<T>> alltoallv(const std::vector<std::vector<T>> & send);
 
 #ifdef Mallard_HAS_MPI
 /** @brief The world communicator. */

@@ -229,6 +229,9 @@ class TENO : public FaceReconstruction {
         Kokkos::View<rtype ***> troubled_coeffs;           // (cell, l, var): scratch for the troubled pass
         Kokkos::View<uint32_t *> troubled_cells;           // queue of troubled cells
         Kokkos::View<uint32_t> n_troubled;
+        // Vertex-neighbor layers each cell's stencil search visited (host); a
+        // distributed run needs this many complete layers around the cell
+        std::vector<uint8_t> gather_depth;
 
     private:
         template <uint8_t DEG>

@@ -1,0 +1,93 @@
+/**
+ * @file halo_exchange.cpp
+ * @author Matthew Bonanni (mbonanni001@gmail.com)
+ * @brief Fills halo cells with their owners' values.
+ * @version 0.3
+ * @date 2026-10-02
+ *
+ * @copyright Copyright (c) 2026 Matthew Bonanni
+ *
+ */
+
+#include "halo_exchange.h"
+
+#include <stdexcept>
+
+#include "comm.h"
+
+namespace {
+
+Kokkos::View<uint32_t *> flatten(const std::vector<std::vector<uint32_t>> & lists, std::vector<uint32_t> & offsets,
+                                 const char * label) {
+    offsets.assign(1, 0);
+    for (const auto & l : lists) offsets.push_back(offsets.back() + l.size());
+    Kokkos::View<uint32_t *> v(label, offsets.back());
+    auto h = Kokkos::create_mirror_view(v);
+    size_t k = 0;
+    for (const auto & l : lists) {
+        for (uint32_t c : l) h(k++) = c;
+    }
+    Kokkos::deep_copy(v, h);
+    return v;
+}
+
+constexpr bool device_is_host_accessible =
+    Kokkos::SpaceAccessibility<Kokkos::HostSpace, Kokkos::DefaultExecutionSpace::memory_space>::accessible;
+
+#ifdef Mallard_GPU_AWARE_MPI
+constexpr bool stage_through_host = false;
+#else
+constexpr bool stage_through_host = !device_is_host_accessible;
+#endif
+
+} // namespace
+
+HaloExchange::HaloExchange(const Distribution & dist) : ranks(dist.neighbors) {
+    send_cells = flatten(dist.send_cells, send_offsets, "halo_send_cells");
+    recv_cells = flatten(dist.recv_cells, recv_offsets, "halo_recv_cells");
+    send_buffer = Kokkos::View<rtype *>("halo_send_buffer", send_offsets.back() * N_CONSERVATIVE);
+    recv_buffer = Kokkos::View<rtype *>("halo_recv_buffer", recv_offsets.back() * N_CONSERVATIVE);
+    h_send_buffer = Kokkos::create_mirror_view(send_buffer);
+    h_recv_buffer = Kokkos::create_mirror_view(recv_buffer);
+}
+
+void HaloExchange::exchange(Kokkos::View<rtype *[N_CONSERVATIVE]> U) const {
+    if (!active()) return;
+#ifdef Mallard_HAS_MPI
+    Kokkos::View<uint32_t *> s_cells = send_cells, r_cells = recv_cells;
+    Kokkos::View<rtype *> s_buf = send_buffer, r_buf = recv_buffer;
+    Kokkos::parallel_for("halo_pack", s_cells.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
+        FOR_I_CONSERVATIVE s_buf(k * N_CONSERVATIVE + i) = U(s_cells(k), i);
+    });
+    Kokkos::fence("halo_pack");
+    rtype * send_ptr = s_buf.data();
+    rtype * recv_ptr = r_buf.data();
+    if constexpr (stage_through_host) {
+        Kokkos::deep_copy(h_send_buffer, s_buf);
+        send_ptr = h_send_buffer.data();
+        recv_ptr = h_recv_buffer.data();
+    }
+    const MPI_Datatype type = sizeof(rtype) == sizeof(double) ? MPI_DOUBLE : MPI_FLOAT;
+    std::vector<MPI_Request> requests(2 * ranks.size());
+    for (size_t n = 0; n < ranks.size(); n++) {
+        MPI_Irecv(recv_ptr + recv_offsets[n] * N_CONSERVATIVE,
+                  static_cast<int>((recv_offsets[n + 1] - recv_offsets[n]) * N_CONSERVATIVE), type, ranks[n], 0,
+                  comm::world(), &requests[n]);
+    }
+    for (size_t n = 0; n < ranks.size(); n++) {
+        MPI_Isend(send_ptr + send_offsets[n] * N_CONSERVATIVE,
+                  static_cast<int>((send_offsets[n + 1] - send_offsets[n]) * N_CONSERVATIVE), type, ranks[n], 0,
+                  comm::world(), &requests[ranks.size() + n]);
+    }
+    if (MPI_Waitall(static_cast<int>(requests.size()), requests.data(), MPI_STATUSES_IGNORE) != MPI_SUCCESS) {
+        throw std::runtime_error("HaloExchange: MPI_Waitall failed");
+    }
+    if constexpr (stage_through_host) Kokkos::deep_copy(r_buf, h_recv_buffer);
+    Kokkos::parallel_for("halo_unpack", r_cells.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
+        FOR_I_CONSERVATIVE U(r_cells(k), i) = r_buf(k * N_CONSERVATIVE + i);
+    });
+#else
+    (void)U;
+    throw std::logic_error("HaloExchange: neighbors without MPI");
+#endif
+}

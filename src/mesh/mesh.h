@@ -327,6 +327,12 @@ class Mesh {
         void init_wedge(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly);
 
         uint32_t n_cells, n_nodes, n_faces;
+        // Cells [0, n_owned()) are owned by this rank; the rest are halo cells
+        uint32_t n_owned_cells = 0;
+        uint32_t n_owned() const { return n_owned_cells ? n_owned_cells : n_cells; }
+        // Cells [0, n_reconstructed()) need face values: owned cells and halo layer 1
+        uint32_t n_reconstructed_cells = 0;
+        uint32_t n_reconstructed() const { return n_reconstructed_cells ? n_reconstructed_cells : n_cells; }
         Kokkos::View<rtype *[N_DIM]> node_coords;
         Kokkos::View<rtype *[N_DIM]> cell_coords;
         Kokkos::View<rtype *> cell_volume;

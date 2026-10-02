@@ -18,6 +18,7 @@
 #include "viscous_flux.h"
 
 void Solver::calc_rhs(StateView solution, StateView rhs, rtype t_stage) {
+    halo.exchange(solution);
     update_boundary_states(t_stage);
     if (!average_pressure_outlets.empty()) {
         update_average_pressure_outlets(solution);

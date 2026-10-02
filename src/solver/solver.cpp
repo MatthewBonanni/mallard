@@ -25,6 +25,7 @@
 
 #include "comm.h"
 #include "common.h"
+#include "partition.h"
 #include "expression.h"
 #include "gradient.h"
 
@@ -62,6 +63,11 @@ int Solver::init(const toml::value & input) {
     init_physics();
     init_boundaries();
     init_numerics();
+    while (halo_too_shallow()) {
+        init_mesh();
+        init_boundaries();
+        init_numerics();
+    }
     init_run_parameters();
     allocate_memory();
     init_sources();
@@ -75,7 +81,43 @@ void Solver::init_mesh() {
     std::cout << "Initializing mesh..." << std::endl;
     mesh = std::make_shared<Mesh>();
     mesh->init(input);
+    if (is_distributed()) {
+        if (halo_layers == 0) halo_layers = base_halo_layers();
+        const std::vector<int> owner = partition_hilbert(*mesh, comm::size());
+        const uint32_t n_global = mesh->n_cells;
+        mesh = build_local_mesh(*mesh, owner, halo_layers, distribution);
+        halo = HaloExchange(distribution);
+        const uint64_t max_owned = comm::allreduce(uint64_t(distribution.n_owned), comm::Op::MAX);
+        std::cout << "> Distributed over " << comm::size() << " ranks: " << n_global << " cells, at most "
+                  << max_owned << " per rank, " << halo_layers << " halo layers" << std::endl;
+    }
     mesh->copy_host_to_device();
+}
+
+int Solver::base_halo_layers() const {
+    const std::string type = toml::find_or<std::string>(
+        toml::find_or(input, "numerics", "face_reconstruction", toml::value(toml::table{})), "type", "FO");
+    // Faces between owned and halo-layer-1 cells need the layer-1 reconstruction,
+    // which reads one more layer (MUSCL gradients and limiters, viscous gradients)
+    const bool viscous = toml::find_or<std::string>(input, "physics", "type", "euler") == "navier_stokes";
+    return (type == "FO" && !viscous) ? 1 : 2;
+}
+
+bool Solver::halo_too_shallow() {
+    if (!is_distributed()) return false;
+    auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
+    if (teno == nullptr) return false;
+    // Owned and halo-layer-1 cells are reconstructed; their stencil searches must
+    // see every layer they visited, so stencils match the serial ones exactly
+    int needed = 0;
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        if (distribution.layer[c] <= 1) needed = std::max(needed, distribution.layer[c] + teno->gather_depth[c] + 1);
+    }
+    needed = comm::allreduce(needed, comm::Op::MAX);
+    if (needed <= halo_layers) return false;
+    std::cout << "> TENO stencils need " << needed << " halo layers; rebuilding the local meshes" << std::endl;
+    halo_layers = needed;
+    return true;
 }
 
 void Solver::init_physics() {
@@ -99,7 +141,9 @@ void Solver::init_boundaries() {
         }
         const std::string name = toml::find<std::string>(bound, "name");
         FaceZone * zone = mesh->get_face_zone(name);
-        if (zone == nullptr || zone->get_type() != FaceZoneType::BOUNDARY) {
+        if (zone != nullptr && zone->get_type() != FaceZoneType::BOUNDARY) zone = nullptr;
+        // A rank's part of the mesh may not touch every zone
+        if (comm::allreduce(uint32_t(zone != nullptr), comm::Op::SUM) == 0) {
             throw std::runtime_error("Boundary name " + name + " not found in mesh.");
         }
         bcs.push_back(BoundaryCondition::from_input(bound, physics));
@@ -125,7 +169,7 @@ void Solver::init_boundaries() {
             dirichlet.W.emplace_back(name + ".p", toml::find<std::string>(bound, "p"));
         }
         uint32_t n_selected = 0;
-        for (uint32_t i = 0; i < zone->n_faces(); i++) {
+        for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
             const uint32_t i_face = zone->h_faces(i);
             if (where && (*where)(mesh->h_face_coords(i_face, 0), mesh->h_face_coords(i_face, 1)) == 0.0) {
                 continue;
@@ -137,21 +181,32 @@ void Solver::init_boundaries() {
             dirichlet.faces.push_back(i_face);
             n_selected++;
         }
-        if (n_selected == 0) {
+        if (comm::allreduce(n_selected, comm::Op::SUM) == 0) {
             throw std::runtime_error("Boundary " + name + " selects no faces.");
         }
         if (bcs.back().type == BoundaryType::DIRICHLET) {
             dirichlet_boundaries.push_back(std::move(dirichlet));
         } else if (bcs.back().type == BoundaryType::P_OUT_AVERAGE) {
-            Kokkos::View<uint32_t *> faces("average_pressure_faces", dirichlet.faces.size());
+            // The area average runs over faces of owned cells only, so no face counts twice
+            std::vector<uint32_t> owned;
+            for (uint32_t f : dirichlet.faces) {
+                if (static_cast<uint32_t>(mesh->h_cells_of_face(f, 0)) < mesh->n_owned()) owned.push_back(f);
+            }
+            Kokkos::View<uint32_t *> faces("average_pressure_faces", owned.size());
             auto h_faces = Kokkos::create_mirror_view(faces);
-            for (size_t i = 0; i < dirichlet.faces.size(); i++) h_faces(i) = dirichlet.faces[i];
+            for (size_t i = 0; i < owned.size(); i++) h_faces(i) = owned[i];
             Kokkos::deep_copy(faces, h_faces);
             average_pressure_outlets.emplace_back(i_bc, faces);
         }
         std::cout << "> Boundary " << name << ": " << BOUNDARY_NAMES.at(bcs.back().type) << std::endl;
     }
 
+    if (FaceZone * partition = mesh->get_face_zone(PARTITION_ZONE)) {
+        BoundaryCondition bc;
+        bc.type = BoundaryType::PARTITION;
+        bcs.push_back(bc);
+        for (uint32_t i = 0; i < partition->n_faces(); i++) face_bc[partition->h_faces(i)] = bcs.size() - 1;
+    }
     for (uint32_t i_face = 0; i_face < mesh->n_faces; i_face++) {
         if (mesh->h_cells_of_face(i_face, 1) < 0 && face_bc[i_face] < 0) {
             throw std::runtime_error("Boundary face " + std::to_string(i_face) +
@@ -352,26 +407,40 @@ void Solver::init_output() {
             ForceMonitor monitor;
             monitor.zone = toml::find<std::string>(entry, "zone");
             FaceZone * zone = mesh->get_face_zone(monitor.zone);
-            if (zone == nullptr || zone->get_type() != FaceZoneType::BOUNDARY) {
+            if (zone != nullptr && zone->get_type() != FaceZoneType::BOUNDARY) zone = nullptr;
+            if (comm::allreduce(uint32_t(zone != nullptr), comm::Op::SUM) == 0) {
                 throw std::runtime_error("forces: unknown boundary zone " + monitor.zone + ".");
             }
-            monitor.faces = zone->faces;
+            std::vector<uint32_t> owned;
+            for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
+                const uint32_t f = zone->h_faces(i);
+                if (static_cast<uint32_t>(mesh->h_cells_of_face(f, 0)) < mesh->n_owned()) owned.push_back(f);
+            }
+            monitor.faces = Kokkos::View<uint32_t *>("force_faces", owned.size());
+            auto h_faces = Kokkos::create_mirror_view(monitor.faces);
+            for (size_t i = 0; i < owned.size(); i++) h_faces(i) = owned[i];
+            Kokkos::deep_copy(monitor.faces, h_faces);
             monitor.interval = toml::find_or<uint64_t>(entry, "interval", 1);
             if (monitor.interval == 0) {
                 throw std::runtime_error("forces: interval must be positive.");
             }
             const std::string file = toml::find_or<std::string>(entry, "file", "forces_" + monitor.zone + ".csv");
-            const std::filesystem::path parent = std::filesystem::path(file).parent_path();
-            if (!parent.empty()) std::filesystem::create_directories(parent);
-            // init_output runs before the restart state is read, so check the input
-            const bool resume = toml::find_or<std::string>(input, "initialize", "type", "") == "restart";
-            monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
-            if (!resume) *monitor.out << "step,t,Fx_pressure,Fy_pressure,Fx_viscous,Fy_viscous\n";
+            if (comm::is_root()) {
+                const std::filesystem::path parent = std::filesystem::path(file).parent_path();
+                if (!parent.empty()) std::filesystem::create_directories(parent);
+                // init_output runs before the restart state is read, so check the input
+                const bool resume = toml::find_or<std::string>(input, "initialize", "type", "") == "restart";
+                monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
+                if (!resume) *monitor.out << "step,t,Fx_pressure,Fy_pressure,Fx_viscous,Fy_viscous\n";
+            }
             force_monitors.push_back(monitor);
         }
     }
     if (!input.contains("write_data")) {
         return;
+    }
+    if (is_distributed()) {
+        throw std::runtime_error("write_data with more than one MPI rank is not supported yet.");
     }
     std::vector<toml::value> outputs = toml::find<std::vector<toml::value>>(input, "write_data");
     for (const auto & output : outputs) {
@@ -517,7 +586,7 @@ void Solver::check_fields() {
     }
     StateView U = conservatives;
     uint32_t n_bad = 0;
-    Kokkos::parallel_reduce("check_nan", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell, uint32_t & bad) {
+    Kokkos::parallel_reduce("check_nan", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i_cell, uint32_t & bad) {
         FOR_I_CONSERVATIVE {
             if (!Kokkos::isfinite(U(i_cell, i))) bad++;
         }
@@ -574,6 +643,8 @@ void Solver::update_primitives() {
 }
 
 void Solver::calc_dt() {
+    // Halo values are stale after the last stage of the previous step
+    halo.exchange(conservatives);
     const rtype dt_cfl1 = calc_dt_cfl1();
     dt = use_cfl ? cfl * dt_cfl1 : dt_fixed;
     // Land exactly on t_stop and on time-based output times
@@ -664,7 +735,7 @@ rtype Solver::calc_dt_cfl1() {
                             cfl_local,
                             physics};
     rtype dt_min = std::numeric_limits<rtype>::max();
-    Kokkos::parallel_reduce("time_step", mesh->n_cells, functor, Kokkos::Min<rtype>(dt_min));
+    Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor, Kokkos::Min<rtype>(dt_min));
     return comm::allreduce(dt_min, comm::Op::MIN);
 }
 
@@ -766,6 +837,7 @@ void Solver::write_forces() {
     for (auto & monitor : force_monitors) {
         if (step % monitor.interval != 0) continue;
         const auto F = calc_force(monitor.faces);
+        if (!monitor.out) continue;
         *monitor.out << step << "," << std::setprecision(12) << t << "," << F[0] << "," << F[1] << ","
                      << F[2] << "," << F[3] << "\n";
         monitor.out->flush();
@@ -778,7 +850,7 @@ std::array<rtype, N_CONSERVATIVE> Solver::integrate_conservatives() {
     Kokkos::View<rtype *> vol = mesh->cell_volume;
     for (uint8_t i_var = 0; i_var < N_CONSERVATIVE; i_var++) {
         rtype sum = 0.0;
-        Kokkos::parallel_reduce("integrate", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i, rtype & s) {
+        Kokkos::parallel_reduce("integrate", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i, rtype & s) {
             s += U(i, i_var) * vol(i);
         }, sum);
         total[i_var] = sum;

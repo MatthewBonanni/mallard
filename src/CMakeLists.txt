@@ -17,6 +17,9 @@ add_library(MallardCore STATIC
     solver/solver_rhs.cpp
     io/data_writer.cpp
     parallel/comm.cpp
+    parallel/distribution.cpp
+    parallel/halo_exchange.cpp
+    parallel/partition.cpp
 )
 
 target_include_directories(MallardCore PUBLIC

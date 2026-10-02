@@ -52,6 +52,9 @@ void Solver::init_solution() {
 }
 
 void Solver::init_solution_restart() {
+    if (is_distributed()) {
+        throw std::runtime_error("Restart with more than one MPI rank is not supported yet.");
+    }
     if (!input.at("initialize").contains("file")) {
         throw std::runtime_error("Missing file for initialization: restart.");
     }

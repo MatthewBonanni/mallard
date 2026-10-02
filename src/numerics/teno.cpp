@@ -19,6 +19,7 @@
 
 #include <Kokkos_Core.hpp>
 
+#include "comm.h"
 #include "face_reconstruction.h"
 
 #include "input.h"
@@ -188,7 +189,8 @@ void TENO::init(const toml::value & input) {
     quadrature_face = GaussLegendre(n_gp);
 
     Kokkos::Timer timer;
-    const std::string cache_file = toml::find_or<std::string>(input, "cache_file", "");
+    // The cache holds no gather depths, which distributed runs need to size the halo
+    const std::string cache_file = comm::size() > 1 ? "" : toml::find_or<std::string>(input, "cache_file", "");
     if (cache_file.empty() || !load_cache(cache_file)) {
         compute_stencils_and_matrices();
         if (!cache_file.empty()) save_cache(cache_file);
@@ -277,6 +279,8 @@ void TENO::compute_stencils_and_matrices() {
     auto h_stencil_large = Kokkos::create_mirror_view(stencil_large);
     auto h_stencil_large_face = Kokkos::create_mirror_view(stencil_large_face);
     auto h_face_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_bc);
+    auto h_bcs = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.bcs);
+    gather_depth.assign(n_cells, 0);
     auto h_pinv_large = Kokkos::create_mirror_view(pinv_large);
     auto h_stencil_small_size = Kokkos::create_mirror_view(stencil_small_size);
     auto h_stencil_small = Kokkos::create_mirror_view(stencil_small);
@@ -290,6 +294,12 @@ void TENO::compute_stencils_and_matrices() {
 
     Kokkos::parallel_reduce("teno_precompute", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n_cells),
                             [&](const uint32_t i, uint32_t & failed_large, uint32_t & invalid_small) {
+        if (i >= mesh->n_reconstructed()) {
+            // Outer halo cells are never reconstructed; their neighborhoods are cut off
+            h_stencil_large_size(i) = 0;
+            for (uint32_t k = 0; k < teno::MAX_FACES; k++) h_stencil_small_size(i, k) = 0;
+            return;
+        }
         const double x0 = mesh->h_cell_coords(i, 0);
         const double y0 = mesh->h_cell_coords(i, 1);
         const double h = std::sqrt(mesh->h_cell_volume(i));
@@ -363,6 +373,7 @@ void TENO::compute_stencils_and_matrices() {
 
         // Candidates by vertex-neighbor layers plus their mirror images across
         // nearby boundary lines, sorted by distance
+        int layers_used = 0;
         auto gather = [&](size_t n_min, int max_layers) {
             std::vector<uint32_t> layer = {i}, cells = {i}, next;
             std::vector<Entry> entries;
@@ -378,6 +389,7 @@ void TENO::compute_stencils_and_matrices() {
                 }
                 if (next.empty()) break;
                 layer = next;
+                layers_used = std::max(layers_used, depth + 1);
                 // Straight boundary lines touched by the gathered cells. One line can
                 // carry several conditions (e.g. inflow then wall), so each image takes
                 // its state from the line's face nearest to it.
@@ -390,6 +402,7 @@ void TENO::compute_stencils_and_matrices() {
                     for (uint32_t k = 0; k < mesh->h_n_faces_of_cell(c); k++) {
                         const uint32_t f = mesh->h_face_of_cell(c, k);
                         if (mesh->h_cells_of_face(f, 1) >= 0 || h_face_bc(f) < 0) continue;
+                        if (h_bcs(h_face_bc(f)).type == BoundaryType::PARTITION) continue;
                         const double nx = mesh->h_face_normals(f, 0) / mesh->h_face_area(f);
                         const double ny = mesh->h_face_normals(f, 1) / mesh->h_face_area(f);
                         Line * match = nullptr;
@@ -495,6 +508,7 @@ void TENO::compute_stencils_and_matrices() {
 
         // Small sector stencils, one per face
         std::vector<Entry> wide = gather(8 * nss, 6);
+        gather_depth[i] = layers_used;
         const uint32_t n_faces = mesh->h_n_faces_of_cell(i);
         for (uint32_t k = 0; k < teno::MAX_FACES; k++) {
             h_stencil_small_size(i, k) = 0;
@@ -1037,9 +1051,9 @@ void TENO::launch_reconstruction(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
     // count never has to be read back to the host
     Kokkos::deep_copy(n_troubled, 0u);
     Kokkos::parallel_for("teno_smooth",
-                         Kokkos::RangePolicy<typename Functor::SmoothPass, Dynamic>(0, mesh->n_cells), functor);
+                         Kokkos::RangePolicy<typename Functor::SmoothPass, Dynamic>(0, mesh->n_reconstructed()), functor);
     Kokkos::parallel_for("teno_troubled",
-                         Kokkos::RangePolicy<typename Functor::TroubledPass, Dynamic>(0, mesh->n_cells), functor);
+                         Kokkos::RangePolicy<typename Functor::TroubledPass, Dynamic>(0, mesh->n_reconstructed()), functor);
 }
 
 void TENO::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,

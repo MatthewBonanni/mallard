@@ -28,6 +28,9 @@
 #include "physics.h"
 #include "data_writer.h"
 #include "expression.h"
+#include "comm.h"
+#include "distribution.h"
+#include "halo_exchange.h"
 
 /**
  * @brief Faces with a Dirichlet condition and the expressions of x, y, t
@@ -117,6 +120,15 @@ class Solver {
         void calc_dt();
         void check_fields();
 
+        /**
+         * @brief Whether a run on several ranks splits the mesh between them
+         *        (default). Call before init(); tests turn it off to get a
+         *        serial reference on every rank.
+         */
+        void set_distributed(bool on) { distribute = on; }
+        bool is_distributed() const { return distribute && comm::size() > 1; }
+        const Distribution & get_distribution() const { return distribution; }
+
         rtype get_time() const { return t; }
         uint32_t get_step() const { return step; }
         const Euler & get_physics() const { return physics; }
@@ -150,6 +162,14 @@ class Solver {
         void write_forces();
 
     private:
+        bool distribute = true;
+        int halo_layers = 0;
+        Distribution distribution;
+        HaloExchange halo;
+
+        int base_halo_layers() const;
+        bool halo_too_shallow();
+
         template <typename T_riemann_solver>
         void launch_flux_functor(StateView rhs);
 

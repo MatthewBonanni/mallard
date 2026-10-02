@@ -33,6 +33,7 @@ enum class BoundaryType {
     P_OUT_AVERAGE,
     DIRICHLET,
     FARFIELD,
+    PARTITION,
 };
 
 static const std::unordered_map<std::string, BoundaryType> BOUNDARY_TYPES = {
@@ -58,7 +59,8 @@ static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
     {BoundaryType::P_OUT, "p_out"},
     {BoundaryType::P_OUT_AVERAGE, "p_out_average"},
     {BoundaryType::DIRICHLET, "dirichlet"},
-    {BoundaryType::FARFIELD, "farfield"}
+    {BoundaryType::FARFIELD, "farfield"},
+    {BoundaryType::PARTITION, "partition"}
 };
 
 /**
@@ -69,6 +71,8 @@ static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
  * The meaning of data depends on type:
  * - UPT: data = W = [rho, u_x, u_y, p] of the inflow state
  * - FARFIELD: data = W = [rho, u_x, u_y, p] of the free stream
+ * - PARTITION: faces towards cells of other ranks, at the edge of the halo. The
+ *   interior state is copied; nothing an owned cell uses depends on it.
  * - P_OUT: data[3] = back pressure
  * - P_OUT_AVERAGE: data[3] = target area-averaged pressure; data[0] = current
  *   pressure shift (target minus the average of the adjacent cells), updated
@@ -108,6 +112,7 @@ struct BoundaryCondition {
         const rtype u_n = W_i[1] * n[0] + W_i[2] * n[1];
         switch (type) {
             case BoundaryType::EXTRAPOLATION:
+            case BoundaryType::PARTITION:
                 break;
             case BoundaryType::WALL_ADIABATIC:
             case BoundaryType::WALL_ISOTHERMAL:
