@@ -13,6 +13,7 @@
 #define MESH_H
 
 #include <array>
+#include <map>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -26,37 +27,77 @@ enum class MeshType {
     FILE,
     CARTESIAN,
     CARTESIAN_TRI,
-    WEDGE
+    WEDGE,
+    CARTESIAN_TET,
+    CARTESIAN_PRISM,
+    CARTESIAN_PYRAMID,
+    CARTESIAN_MIXED
 };
 
 static const std::unordered_map<std::string, MeshType> MESH_TYPES = {
     {"file", MeshType::FILE},
     {"cartesian", MeshType::CARTESIAN},
     {"cartesian_tri", MeshType::CARTESIAN_TRI},
-    {"wedge", MeshType::WEDGE}
+    {"wedge", MeshType::WEDGE},
+    {"cartesian_tet", MeshType::CARTESIAN_TET},
+    {"cartesian_prism", MeshType::CARTESIAN_PRISM},
+    {"cartesian_pyramid", MeshType::CARTESIAN_PYRAMID},
+    {"cartesian_mixed", MeshType::CARTESIAN_MIXED}
 };
 
 static const std::unordered_map<MeshType, std::string> MESH_NAMES = {
     {MeshType::FILE, "file"},
     {MeshType::CARTESIAN, "cartesian"},
     {MeshType::CARTESIAN_TRI, "cartesian_tri"},
-    {MeshType::WEDGE, "wedge"}
+    {MeshType::WEDGE, "wedge"},
+    {MeshType::CARTESIAN_TET, "cartesian_tet"},
+    {MeshType::CARTESIAN_PRISM, "cartesian_prism"},
+    {MeshType::CARTESIAN_PYRAMID, "cartesian_pyramid"},
+    {MeshType::CARTESIAN_MIXED, "cartesian_mixed"}
 };
 
 enum class CellType {
     TRIANGLE,
-    QUAD
+    QUAD,
+    TETRAHEDRON,
+    PYRAMID,
+    PRISM,
+    HEXAHEDRON
 };
 
 static const std::unordered_map<std::string, CellType> CELL_TYPES = {
     {"triangle", CellType::TRIANGLE},
-    {"quad", CellType::QUAD}
+    {"quad", CellType::QUAD},
+    {"tetrahedron", CellType::TETRAHEDRON},
+    {"pyramid", CellType::PYRAMID},
+    {"prism", CellType::PRISM},
+    {"hexahedron", CellType::HEXAHEDRON}
 };
 
 static const std::unordered_map<CellType, std::string> CELL_NAMES = {
     {CellType::TRIANGLE, "triangle"},
-    {CellType::QUAD, "quad"}
+    {CellType::QUAD, "quad"},
+    {CellType::TETRAHEDRON, "tetrahedron"},
+    {CellType::PYRAMID, "pyramid"},
+    {CellType::PRISM, "prism"},
+    {CellType::HEXAHEDRON, "hexahedron"}
 };
+
+/**
+ * @brief Local faces of a positively oriented 3D cell with n_nodes nodes
+ *        (4 tetrahedron, 5 pyramid, 6 prism, 8 hexahedron; Gmsh/VTK node
+ *        order), each ordered so its right-hand normal points out of the cell.
+ */
+const std::vector<std::vector<uint8_t>> & cell_local_faces(uint32_t n_nodes);
+
+/**
+ * @brief Decompose a 3D cell (node coordinates in Gmsh/VTK order, positively
+ *        oriented) into tetrahedra: each face is fanned around its vertex
+ *        average and joined to the cell's vertex average. This is the
+ *        decomposition that defines the mesh's cell volumes and centroids.
+ */
+void cell_tetrahedra(const std::vector<std::array<double, 3>> & nodes,
+                     std::vector<std::array<std::array<double, 3>, 4>> & tets);
 
 
 class Mesh {
@@ -192,6 +233,18 @@ class Mesh {
         void compute_face_centroids();
 
         /**
+         * @brief Compute all derived geometry (face areas and normals, cell
+         *        volumes and centroids, face centroids) and the vertex-neighbor
+         *        adjacency from the node coordinates and connectivity.
+         */
+        void compute_geometry();
+
+        /**
+         * @brief Tetrahedra of a 3D cell (see cell_tetrahedra).
+         */
+        void h_cell_tetrahedra(uint32_t i_cell, std::vector<std::array<std::array<double, 3>, 4>> & tets) const;
+
+        /**
          * @brief Build the vertex-neighbor (cells sharing a node) adjacency on
          *        the device.
          */
@@ -227,6 +280,15 @@ class Mesh {
          * @param Ly Length of the domain in the y-direction.
          */
         void init_cart_tri(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly);
+
+        /**
+         * @brief Initialize a 3D box [0, Lx] x [0, Ly] x [0, Lz] of nx x ny x nz
+         *        blocks, each a hexahedron or split into tetrahedra (6, Kuhn),
+         *        prisms (2) or pyramids (6, apex at the block center). The
+         *        mixed type uses hexahedra, pyramids and prisms in thirds of x.
+         *        Boundary zones: left/right (x), bottom/top (y), back/front (z).
+         */
+        void init_cart_3d(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rtype Ly, rtype Lz, MeshType kind);
 
         /**
          * @brief A boundary face (2 nodes in 2D; 3 or 4 nodes in 3D) and its
@@ -296,6 +358,18 @@ class Mesh {
         Kokkos::View<int32_t *[2]>::host_mirror_type h_cells_of_face;
     protected:
     private:
+        void init_from_connectivity_3d(const std::vector<std::array<rtype, N_DIM>> & nodes,
+                                       const std::vector<std::vector<uint32_t>> & cells,
+                                       const std::vector<BoundaryFace> & boundary_faces);
+
+        void allocate_and_fill(const std::vector<std::array<rtype, N_DIM>> & nodes,
+                               const std::vector<std::vector<uint32_t>> & cell_nodes,
+                               const std::vector<std::vector<uint32_t>> & cell_faces,
+                               const std::vector<std::vector<uint32_t>> & face_node_lists,
+                               const std::vector<std::array<int32_t, 2>> & face_cells,
+                               const std::vector<uint32_t> & interior,
+                               const std::map<std::string, std::vector<uint32_t>> & zone_faces);
+
         void h_neighbors_of_cell_helper(uint32_t i_cell,
                                         uint8_t n_order,
                                         std::vector<uint32_t> & neighbors) const;

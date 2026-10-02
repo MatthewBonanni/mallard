@@ -43,27 +43,29 @@ void Mesh::init(const toml::value & input) {
     if (get_type() == MeshType::FILE) {
         std::string filename = toml::find_or<std::string>(input, "mesh", "filename", "mesh.msh");
         this->init_file(filename);
-    } else if (get_type() == MeshType::CARTESIAN) {
-        uint32_t Nx = toml::find_or<uint32_t>(input, "mesh", "Nx", 100);
-        uint32_t Ny = toml::find_or<uint32_t>(input, "mesh", "Ny", 100);
-        rtype Lx = find_real_or(input, "mesh", "Lx", 1.0);
-        rtype Ly = find_real_or(input, "mesh", "Ly", 1.0);
+        return;
+    }
+    uint32_t Nx = toml::find_or<uint32_t>(input, "mesh", "Nx", 100);
+    uint32_t Ny = toml::find_or<uint32_t>(input, "mesh", "Ny", 100);
+    rtype Lx = find_real_or(input, "mesh", "Lx", 1.0);
+    rtype Ly = find_real_or(input, "mesh", "Ly", 1.0);
+    if constexpr (N_DIM == 3) {
+        const uint32_t Nz = toml::find_or<uint32_t>(input, "mesh", "Nz", 100);
+        const rtype Lz = find_real_or(input, "mesh", "Lz", 1.0);
+        if (get_type() == MeshType::CARTESIAN_TRI || get_type() == MeshType::WEDGE) {
+            throw std::runtime_error("Mesh type " + type_str + " is 2D only.");
+        }
+        this->init_cart_3d(Nx, Ny, Nz, Lx, Ly, Lz, get_type());
+        return;
+    }
+    if (get_type() == MeshType::CARTESIAN) {
         this->init_cart(Nx, Ny, Lx, Ly);
     } else if (get_type() == MeshType::CARTESIAN_TRI) {
-        uint32_t Nx = toml::find_or<uint32_t>(input, "mesh", "Nx", 100);
-        uint32_t Ny = toml::find_or<uint32_t>(input, "mesh", "Ny", 100);
-        rtype Lx = find_real_or(input, "mesh", "Lx", 1.0);
-        rtype Ly = find_real_or(input, "mesh", "Ly", 1.0);
         this->init_cart_tri(Nx, Ny, Lx, Ly);
     } else if (get_type() == MeshType::WEDGE) {
-        uint32_t Nx = toml::find_or<uint32_t>(input, "mesh", "Nx", 100);
-        uint32_t Ny = toml::find_or<uint32_t>(input, "mesh", "Ny", 100);
-        rtype Lx = find_real_or(input, "mesh", "Lx", 1.0);
-        rtype Ly = find_real_or(input, "mesh", "Ly", 1.0);
         this->init_wedge(Nx, Ny, Lx, Ly);
     } else {
-        // Should never get here due to the enum class.
-        throw std::runtime_error("Unknown mesh type.");
+        throw std::runtime_error("Mesh type " + type_str + " is 3D only.");
     }
 }
 
@@ -93,6 +95,15 @@ FaceZone * Mesh::get_face_zone(const std::string& name) {
 }
 
 CellType Mesh::h_cell_type(uint32_t i_cell) const {
+    if constexpr (N_DIM == 3) {
+        switch (h_n_nodes_of_cell(i_cell)) {
+            case 4: return CellType::TETRAHEDRON;
+            case 5: return CellType::PYRAMID;
+            case 6: return CellType::PRISM;
+            case 8: return CellType::HEXAHEDRON;
+            default: throw std::runtime_error("Unknown cell type.");
+        }
+    }
     if (h_n_nodes_of_cell(i_cell) == 4) {
         return CellType::QUAD;
     } else if (h_n_nodes_of_cell(i_cell) == 3) {

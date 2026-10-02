@@ -20,6 +20,10 @@
 void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & nodes,
                                   const std::vector<std::vector<uint32_t>> & cells,
                                   const std::vector<BoundaryFace> & boundary_faces) {
+    if constexpr (N_DIM == 3) {
+        init_from_connectivity_3d(nodes, cells, boundary_faces);
+        return;
+    }
     n_nodes = nodes.size();
     n_cells = cells.size();
 
@@ -90,6 +94,19 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
         }
     }
 
+    std::vector<std::vector<uint32_t>> face_node_lists(n_faces);
+    for (uint32_t f = 0; f < n_faces; f++) face_node_lists[f] = {face_nodes[f][0], face_nodes[f][1]};
+    allocate_and_fill(nodes, cell_nodes, cell_faces, face_node_lists, face_cells, interior, zone_faces);
+    compute_geometry();
+}
+
+void Mesh::allocate_and_fill(const std::vector<std::array<rtype, N_DIM>> & nodes,
+                             const std::vector<std::vector<uint32_t>> & cell_nodes,
+                             const std::vector<std::vector<uint32_t>> & cell_faces,
+                             const std::vector<std::vector<uint32_t>> & face_node_lists,
+                             const std::vector<std::array<int32_t, 2>> & face_cells,
+                             const std::vector<uint32_t> & interior,
+                             const std::map<std::string, std::vector<uint32_t>> & zone_faces) {
     // Allocate views and fill host mirrors
     node_coords = Kokkos::View<rtype *[N_DIM]>("node_coords", n_nodes);
     cell_coords = Kokkos::View<rtype *[N_DIM]>("cell_coords", n_cells);
@@ -129,8 +146,6 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
             for (size_t k = 0; k < lists[i].size(); k++) h_values(h_offsets(i) + k) = lists[i][k];
         }
     };
-    std::vector<std::vector<uint32_t>> face_node_lists(n_faces);
-    for (uint32_t f = 0; f < n_faces; f++) face_node_lists[f] = {face_nodes[f][0], face_nodes[f][1]};
     build_csr(cell_nodes, nodes_of_cell, offsets_nodes_of_cell, h_nodes_of_cell, h_offsets_nodes_of_cell, "nodes_of_cell");
     build_csr(cell_faces, faces_of_cell, offsets_faces_of_cell, h_faces_of_cell, h_offsets_faces_of_cell, "faces_of_cell");
     build_csr(face_node_lists, nodes_of_face, offsets_nodes_of_face, h_nodes_of_face, h_offsets_nodes_of_face, "nodes_of_face");
@@ -148,12 +163,6 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
     add_zone("interior", FaceZoneType::INTERIOR, interior);
     for (const auto & [name, faces] : zone_faces) add_zone(name, FaceZoneType::BOUNDARY, faces);
 
-    compute_face_areas();
-    compute_cell_volumes();
-    compute_cell_centroids();
-    compute_face_normals();
-    compute_face_centroids();
-    compute_cell_neighbors();
 }
 
 namespace {

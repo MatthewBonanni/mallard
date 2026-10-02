@@ -15,6 +15,7 @@
 #include <cmath>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <Kokkos_Core.hpp>
 #include <toml.hpp>
@@ -37,6 +38,69 @@ inline std::shared_ptr<Mesh> make_mesh(const std::string & type, uint32_t nx, ui
     mesh->init(input);
     mesh->copy_host_to_device();
     return mesh;
+}
+
+/**
+ * @brief Generated 3D box mesh ("cartesian", "cartesian_tet", "cartesian_prism",
+ *        "cartesian_pyramid" or "cartesian_mixed").
+ */
+inline std::shared_ptr<Mesh> make_mesh_3d(const std::string & type, uint32_t nx, uint32_t ny, uint32_t nz,
+                                          rtype Lx = 1.0, rtype Ly = 1.0, rtype Lz = 1.0) {
+    toml::value input = parse_toml("[mesh]\ntype = \"" + type + "\"\n" +
+                                   "Nx = " + std::to_string(nx) + "\n" +
+                                   "Ny = " + std::to_string(ny) + "\n" +
+                                   "Nz = " + std::to_string(nz) + "\n" +
+                                   "Lx = " + std::to_string(Lx) + "\n" +
+                                   "Ly = " + std::to_string(Ly) + "\n" +
+                                   "Lz = " + std::to_string(Lz) + "\n");
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(input);
+    mesh->copy_host_to_device();
+    return mesh;
+}
+
+/**
+ * @brief Cell averages of f(x, y, z) -> array of N_CONSERVATIVE values over 3D
+ *        cells, with an 8^3-point collapsed Gauss rule on each tetrahedron of
+ *        the cell.
+ */
+template <typename F>
+Kokkos::View<rtype *[N_CONSERVATIVE]>::host_mirror_type cell_averages_3d(const Mesh & mesh, F && f) {
+    const double g[8] = {0.0198550717512319, 0.1016667612931866, 0.2372337950418355, 0.4082826787521751,
+                         0.5917173212478249, 0.7627662049581645, 0.8983332387068134, 0.9801449282487681};
+    const double gw[8] = {0.0506142681451881, 0.1111905172266872, 0.1568533229389436, 0.1813418916891810,
+                          0.1813418916891810, 0.1568533229389436, 0.1111905172266872, 0.0506142681451881};
+    Kokkos::View<rtype *[N_CONSERVATIVE]>::host_mirror_type avg("avg", mesh.n_cells);
+    std::vector<std::array<std::array<double, 3>, 4>> tets;
+    for (uint32_t c = 0; c < mesh.n_cells; c++) {
+        double sum[N_CONSERVATIVE] = {}, vol = 0.0;
+        mesh.h_cell_tetrahedra(c, tets);
+        for (const auto & t : tets) {
+            double e[3][3];
+            for (int a = 0; a < 3; a++) {
+                for (int d = 0; d < 3; d++) e[a][d] = t[a + 1][d] - t[0][d];
+            }
+            const double det = std::abs(e[0][0] * (e[1][1] * e[2][2] - e[1][2] * e[2][1]) -
+                                        e[0][1] * (e[1][0] * e[2][2] - e[1][2] * e[2][0]) +
+                                        e[0][2] * (e[1][0] * e[2][1] - e[1][1] * e[2][0]));
+            for (int i = 0; i < 8; i++) {
+                for (int j = 0; j < 8; j++) {
+                    for (int k = 0; k < 8; k++) {
+                        const double u = g[i], v = g[j] * (1.0 - g[i]), w = g[k] * (1.0 - g[i]) * (1.0 - g[j]);
+                        const double wt = gw[i] * gw[j] * gw[k] * (1.0 - g[i]) * (1.0 - g[i]) * (1.0 - g[j]) * det;
+                        double p[3];
+                        for (int d = 0; d < 3; d++) p[d] = t[0][d] + u * e[0][d] + v * e[1][d] + w * e[2][d];
+                        double val[N_CONSERVATIVE];
+                        f(p[0], p[1], p[2], val);
+                        FOR_I_CONSERVATIVE sum[i] += wt * val[i];
+                        vol += wt;
+                    }
+                }
+            }
+        }
+        FOR_I_CONSERVATIVE avg(c, i) = sum[i] / vol;
+    }
+    return avg;
 }
 
 /**

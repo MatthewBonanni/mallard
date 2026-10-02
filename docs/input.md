@@ -25,6 +25,24 @@ At least one stop condition is required.
 | `Lx`, `Ly` | Domain size; the domain is `[0, Lx] x [0, Ly]` |
 
 Generated meshes have boundary zones named `left`, `right`, `bottom` and `top`.
+
+In the 3D build (`-DMallard_DIM=3`), generated meshes are boxes
+`[0, Lx] x [0, Ly] x [0, Lz]` of `Nx x Ny x Nz` blocks (`Nz`, `Lz` default to
+100 and 1), with the extra boundary zones `back` (z = 0) and `front` (z = Lz):
+
+| `type` | Cells |
+|---|---|
+| `cartesian` | One hexahedron per block |
+| `cartesian_tet` | Six tetrahedra per block (Kuhn subdivision along the block diagonal) |
+| `cartesian_prism` | Two triangular prisms per block (split along the xy diagonal) |
+| `cartesian_pyramid` | Six pyramids per block, with apexes at the block center |
+| `cartesian_mixed` | Hexahedra, pyramids and prisms in successive thirds of x |
+
+3D cell geometry is exact for warped (non-planar) quadrilateral faces: face
+area vectors and centroids come from a triangle fan around the face's vertex
+average, and cell volumes and centroids from the tetrahedra joining those
+triangles to the cell's vertex average.
+
 For Gmsh meshes, each named physical curve becomes a boundary zone; boundary
 edges not in any physical curve form the zone `unassigned`.
 
