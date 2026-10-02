@@ -134,7 +134,7 @@ void DataWriter::init(const toml::value & input,
         }
         surface = true;
         // Each rank writes the faces of its owned cells
-        for (uint32_t i = 0; i < zone->n_faces(); i++) {
+        for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
             const uint32_t f = zone->h_faces(i);
             if (static_cast<uint32_t>(mesh->h_cells_of_face(f, 0)) < mesh->n_owned()) geometry_faces.push_back(f);
         }

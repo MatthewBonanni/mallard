@@ -13,6 +13,9 @@
 #include <Kokkos_Core.hpp>
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -81,3 +84,30 @@ TEST(MPI3DTest, TENOOnHexahedraMatchesSerial) {
     expect_matches_serial(blast_input("cartesian", "type = \"TENO\"\norder = 5\n"));
 }
 
+
+TEST(MPI3DTest, SurfaceOutputOfAZoneMissingFromSomeRanks) {
+    // Ranks whose part of the mesh does not touch the zone write empty pieces
+    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mpi3d_faces").string();
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    Solver solver;
+    solver.init(parse_toml(blast_input("cartesian", "type = \"FO\"\n") +
+                           "[[write_data]]\nprefix = \"" + dir + "/left\"\nformat = \"vtu\"\ngeometry = \"left\"\n"
+                           "interval = 3\nvariables = [\"RHO\"]\n"));
+    solver.run();
+    comm::barrier();
+    uint64_t total = 0;
+    for (int r = 0; r < comm::size(); r++) {
+        std::ostringstream piece;
+        piece << dir << "/left_000003";
+        if (comm::size() > 1) piece << "_p" << std::setw(4) << std::setfill('0') << r;
+        std::ifstream in(piece.str() + ".vtu");
+        std::stringstream ss;
+        ss << in.rdbuf();
+        const std::string text = ss.str();
+        const size_t k = text.find("NumberOfCells=\"");
+        ASSERT_NE(k, std::string::npos) << piece.str();
+        total += std::stoull(text.substr(k + 15));
+    }
+    EXPECT_EQ(total, 12u * 12u);
+}
