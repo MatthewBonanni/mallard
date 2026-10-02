@@ -1,0 +1,82 @@
+# Viscous shock tube (Daru & Tenaud, Computers & Fluids 38, 2009), Re = 200.
+# A diaphragm at x = 0.5 in a closed unit square box releases a Mach 2.37
+# shock. It reflects off the right wall at t ~ 0.2 and runs back into the
+# boundary layer it laid down on the floor, which separates into a lambda
+# shock and a large primary vortex by t = 1. All walls are no-slip and
+# adiabatic; only the lower half [0, 1] x [0, 0.5] is computed, with a
+# symmetry plane on top.
+#
+# Nondimensionalization: left density 120 and sound speed 1, mu = 1 / Re,
+# Pr = 0.73, gamma = 1.4 (R = 1 / gamma, so the initial temperature is 1).
+#
+# Run (500,000 quads; the time step is set by viscosity, so this takes
+# about 58,500 steps: use a GPU build, or Nx = 500, Ny = 250 on a CPU):
+#   ../../build/src/Mallard -i input.toml
+#   python ../../tools/plot_viscous_shock_tube.py solut/vst_000100.vtu vst.png
+#
+# Expected result at t = 1 (grid-converged reference: Zhou et al.,
+# arXiv:1705.09062, 1500 x 750 grid): primary lambda-shock triple point at
+# (x, y) ~ (0.58, 0.137), primary vortex height ~0.166, and the wall density
+# of their Table 1 (minima ~37 near x = 0.45 and 0.66, maximum ~118 near
+# x = 0.86). On this mesh Mallard matches the tabulated wall density to 0.5
+# RMS (1.7 at most) and puts the triple point at (0.581, 0.138).
+
+[run]
+t_stop = 1.0
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 1000
+Ny = 500
+Lx = 1.0
+Ly = 0.5
+
+[initialize]
+type = "analytical"
+rho = "x <= 0.5 ? 120.0 : 1.2"
+u = ["0.0", "0.0"]
+p = "x <= 0.5 ? 85.71428571428571 : 0.8571428571428571"
+
+[[boundaries]]
+name = "left"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "right"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "bottom"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 1.0
+rho_ref = 1.0
+mu = 0.005
+Pr = 0.73
+
+[output]
+check_interval = 5000
+
+[[write_data]]
+prefix = "./solut/vst"
+format = "vtu"
+time_interval = 0.01
+variables = ["RHO", "U_X", "U_Y", "P"]

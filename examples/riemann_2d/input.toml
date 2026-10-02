@@ -1,6 +1,15 @@
-# 2D Riemann problem, configuration 3 (Lax & Liu 1998; Liska & Wendroff 2003):
-# four shocks meeting at (0.8, 0.8), run to t = 0.8 on the unit square with
-# transmissive boundaries.
+# 2D Riemann problem, configuration 3 (Lax & Liu, SIAM J. Sci. Comput. 1998;
+# Liska & Wendroff, SIAM J. Sci. Comput. 2003): four shocks meeting at
+# (0.8, 0.8), run to t = 0.8 on the unit square with transmissive boundaries,
+# on 320,000 triangles. examples/riemann_2d_quads is the same case on quads.
+#
+# Run:
+#   ../../build/src/Mallard -i input.toml --kokkos-num-threads=8
+#   python ../../tools/animate.py solut riemann
+#
+# Expected result at t = 0.8: the mushroom-shaped jet along the diagonal with
+# Kelvin-Helmholtz roll-ups on its slip lines. The README animation uses
+# Nx = Ny = 700 (980,000 triangles).
 
 [run]
 t_stop = 0.8

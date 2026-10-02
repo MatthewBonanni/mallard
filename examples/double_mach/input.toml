@@ -1,6 +1,16 @@
-# Double Mach reflection (Woodward & Colella 1984): a Mach 10 shock at 60
-# degrees to a reflecting wall that starts at x = 1/6. The top boundary
-# follows the exact shock motion.
+# Double Mach reflection (Woodward & Colella, J. Comput. Phys. 54, 1984): a
+# Mach 10 shock at 60 degrees to a reflecting wall that starts at x = 1/6.
+# The bottom boundary is split (post-shock inflow, then a slip wall) and the
+# top boundary follows the exact shock motion.
+#
+# Run (460,000 triangles):
+#   ../../build/src/Mallard -i input.toml --kokkos-num-threads=8
+#   python ../../tools/animate.py solut dmr --title "Double Mach reflection" --xlim 0 3
+#
+# Expected result at t = 0.2: the two Mach stems and triple points, and the
+# wall jet curling up along the floor, with Kelvin-Helmholtz roll-ups along
+# the primary slip line. The README animation uses Nx = 1920, Ny = 480
+# (1.84 million triangles).
 
 [run]
 t_stop = 0.2
