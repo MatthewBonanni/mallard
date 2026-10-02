@@ -163,83 +163,28 @@ void Mesh::compute_geometry() {
     compute_cell_neighbors();
 }
 
-void Mesh::init_from_connectivity_3d(const std::vector<std::array<rtype, N_DIM>> & nodes,
-                                     const std::vector<std::vector<uint32_t>> & cells,
-                                     const std::vector<BoundaryFace> & boundary_faces,
-                                     const std::string & unlisted_zone) {
-    n_nodes = nodes.size();
-    n_cells = cells.size();
-    auto coords = [&](uint32_t node) {
-        Vec3 p = {0.0, 0.0, 0.0};
-        FOR_I_DIM p[i] = nodes[node][i];
-        return p;
-    };
-
-    // Orient every cell positively (Gmsh/VTK convention)
-    std::vector<std::vector<uint32_t>> cell_nodes = cells;
-    for (auto & c : cell_nodes) {
+void Mesh::orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes,
+                           const std::vector<std::vector<uint32_t>> & cells, std::vector<uint32_t> & offsets,
+                           std::vector<uint32_t> & cell_nodes) {
+    offsets.assign(1, 0);
+    cell_nodes.clear();
+    std::vector<Vec3> p;
+    for (const auto & c : cells) {
         cell_local_faces(c.size());
-        std::vector<Vec3> p;
-        for (uint32_t node : c) p.push_back(coords(node));
-        if (signed_volume(p) < 0.0) c = reflected(c);
+        p.clear();
+        for (uint32_t node : c) {
+            Vec3 x = {0.0, 0.0, 0.0};
+            FOR_I_DIM x[i] = nodes[node][i];
+            p.push_back(x);
+        }
+        if (signed_volume(p) < 0.0) {
+            const auto r = reflected(c);
+            cell_nodes.insert(cell_nodes.end(), r.begin(), r.end());
+        } else {
+            cell_nodes.insert(cell_nodes.end(), c.begin(), c.end());
+        }
+        offsets.push_back(cell_nodes.size());
     }
-
-    // Faces keyed by their sorted node set, ordered outward from their first cell
-    std::map<std::vector<uint32_t>, uint32_t> face_of_key;
-    std::vector<std::vector<uint32_t>> face_nodes;
-    std::vector<std::array<int32_t, 2>> face_cells;
-    std::vector<std::vector<uint32_t>> cell_faces(n_cells);
-    for (uint32_t c : cells_by_global_id()) {
-        for (const auto & local : cell_local_faces(cell_nodes[c].size())) {
-            std::vector<uint32_t> fn;
-            for (uint8_t k : local) fn.push_back(cell_nodes[c][k]);
-            std::vector<uint32_t> key = fn;
-            std::sort(key.begin(), key.end());
-            auto it = face_of_key.find(key);
-            if (it == face_of_key.end()) {
-                face_of_key.emplace(key, face_nodes.size());
-                cell_faces[c].push_back(face_nodes.size());
-                face_nodes.push_back(fn);
-                face_cells.push_back({(int32_t)c, -1});
-            } else {
-                if (face_cells[it->second][1] != -1) {
-                    throw std::runtime_error("Mesh: a face is shared by more than two cells.");
-                }
-                face_cells[it->second][1] = c;
-                cell_faces[c].push_back(it->second);
-            }
-        }
-    }
-    n_faces = face_nodes.size();
-
-    std::map<std::string, std::vector<uint32_t>> zone_faces;
-    std::vector<uint32_t> interior;
-    std::vector<bool> zoned(n_faces, false);
-    for (const auto & bf : boundary_faces) {
-        std::vector<uint32_t> key = bf.nodes;
-        std::sort(key.begin(), key.end());
-        auto it = face_of_key.find(key);
-        if (it == face_of_key.end()) {
-            throw std::runtime_error("Mesh: boundary face of " + bf.zone + " is not a cell face.");
-        }
-        if (face_cells[it->second][1] != -1) {
-            throw std::runtime_error("Mesh: boundary face of " + bf.zone + " is an interior face.");
-        }
-        if (!zoned[it->second]) {
-            zone_faces[bf.zone].push_back(it->second);
-            zoned[it->second] = true;
-        }
-    }
-    for (uint32_t f = 0; f < n_faces; f++) {
-        if (face_cells[f][1] >= 0) {
-            interior.push_back(f);
-        } else if (!zoned[f]) {
-            zone_faces[unlisted_zone].push_back(f);
-        }
-    }
-
-    allocate_and_fill(nodes, cell_nodes, cell_faces, face_nodes, face_cells, interior, zone_faces);
-    compute_geometry();
 }
 
 void Mesh::init_cart_3d(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rtype Ly, rtype Lz, MeshType kind) {

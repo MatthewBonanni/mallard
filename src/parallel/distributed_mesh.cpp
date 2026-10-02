@@ -292,6 +292,9 @@ void DistributedMesh::distribute(const std::vector<int> & cell_owner) {
     }
     check_all(error);
     owner = cell_owner;
+    // The dual graph only serves the partitioner
+    graph_offsets_ = {};
+    graph_neighbors_ = {};
     cells = Cells();
     halo_index.clear();
     searched_nodes.clear();

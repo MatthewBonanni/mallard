@@ -20,76 +20,136 @@
 
 #include "comm.h"
 
+namespace {
+
+// A face's sorted node ids, padded with NO_NODE (triangles in 3D)
+constexpr uint32_t NO_NODE = ~uint32_t(0);
+constexpr int KEY = N_DIM == 2 ? 2 : 4;
+using FaceKey = std::array<uint32_t, KEY>;
+
+template <typename Nodes>
+FaceKey face_key(const Nodes & nodes, size_t n) {
+    FaceKey key;
+    key.fill(NO_NODE);
+    for (size_t k = 0; k < n; k++) key[k] = nodes[k];
+    std::sort(key.begin(), key.begin() + n);
+    return key;
+}
+
+} // namespace
+
 void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & nodes,
                                   const std::vector<std::vector<uint32_t>> & cells,
                                   const std::vector<BoundaryFace> & boundary_faces,
                                   const std::string & unlisted_zone) {
-    if constexpr (N_DIM == 3) {
-        init_from_connectivity_3d(nodes, cells, boundary_faces, unlisted_zone);
-        return;
-    }
     n_nodes = nodes.size();
     n_cells = cells.size();
 
-    // Orient every cell counterclockwise
-    std::vector<std::vector<uint32_t>> cell_nodes = cells;
-    for (auto & c : cell_nodes) {
-        if (c.size() != 3 && c.size() != 4) {
-            throw std::runtime_error("Mesh: only triangles and quadrilaterals are supported.");
+    // Cells oriented counterclockwise (2D) or positively (3D), as CSR
+    std::vector<uint32_t> cell_node_offsets, cell_nodes;
+    if constexpr (N_DIM == 3) {
+        orient_cells_3d(nodes, cells, cell_node_offsets, cell_nodes);
+    } else {
+        cell_node_offsets.assign(1, 0);
+        for (const auto & c : cells) {
+            if (c.size() != 3 && c.size() != 4) {
+                throw std::runtime_error("Mesh: only triangles and quadrilaterals are supported.");
+            }
+            rtype area2 = 0.0;
+            for (size_t k = 0; k < c.size(); k++) {
+                const auto & a = nodes[c[k]];
+                const auto & b = nodes[c[(k + 1) % c.size()]];
+                area2 += a[0] * b[1] - b[0] * a[1];
+            }
+            if (area2 < 0.0) {
+                cell_nodes.insert(cell_nodes.end(), c.rbegin(), c.rend());
+            } else {
+                cell_nodes.insert(cell_nodes.end(), c.begin(), c.end());
+            }
+            cell_node_offsets.push_back(cell_nodes.size());
         }
-        rtype area2 = 0.0;
-        for (size_t k = 0; k < c.size(); k++) {
-            const auto & a = nodes[c[k]];
-            const auto & b = nodes[c[(k + 1) % c.size()]];
-            area2 += a[0] * b[1] - b[0] * a[1];
-        }
-        if (area2 < 0.0) std::reverse(c.begin(), c.end());
     }
 
-    // Faces from cell edges, keyed by sorted node pair
-    std::map<std::pair<uint32_t, uint32_t>, uint32_t> face_of_edge;
-    std::vector<std::array<uint32_t, 2>> face_nodes;
-    std::vector<std::array<int32_t, 2>> face_cells;
-    std::vector<std::vector<uint32_t>> cell_faces(n_cells);
-    for (uint32_t c : cells_by_global_id()) {
-        const auto & cn = cell_nodes[c];
-        for (size_t k = 0; k < cn.size(); k++) {
-            const uint32_t a = cn[k], b = cn[(k + 1) % cn.size()];
-            const auto key = std::minmax(a, b);
-            auto it = face_of_edge.find(key);
-            if (it == face_of_edge.end()) {
-                face_of_edge.emplace(key, face_nodes.size());
-                cell_faces[c].push_back(face_nodes.size());
-                face_nodes.push_back({a, b});
-                face_cells.push_back({(int32_t)c, -1});
-            } else {
-                if (face_cells[it->second][1] != -1) {
-                    throw std::runtime_error("Mesh: an edge is shared by more than two cells.");
-                }
-                face_cells[it->second][1] = c;
-                cell_faces[c].push_back(it->second);
-            }
+    // Local face k of every cell (a "half face"), its nodes ordered outward
+    std::vector<uint32_t> cell_face_offsets(n_cells + 1, 0);
+    for (uint32_t c = 0; c < n_cells; c++) {
+        const uint32_t n = cell_node_offsets[c + 1] - cell_node_offsets[c];
+        cell_face_offsets[c + 1] = cell_face_offsets[c] + (N_DIM == 2 ? n : cell_local_faces(n).size());
+    }
+    const uint32_t n_half = cell_face_offsets[n_cells];
+    std::vector<uint32_t> half_nodes;
+    auto half_face = [&](uint32_t c, uint32_t k, std::vector<uint32_t> & face) {
+        const uint32_t * cn = &cell_nodes[cell_node_offsets[c]];
+        const uint32_t n = cell_node_offsets[c + 1] - cell_node_offsets[c];
+        face.clear();
+        if constexpr (N_DIM == 2) {
+            face = {cn[k], cn[(k + 1) % n]};
+        } else {
+            for (uint8_t i : cell_local_faces(n)[k]) face.push_back(cn[i]);
+        }
+    };
+
+    // Half faces sorted by node set pair up into faces. Faces are numbered in the
+    // order cells reach them, visiting cells by global id, and ordered as the
+    // first cell sees them, so every rank count orients them alike
+    std::vector<std::pair<FaceKey, uint32_t>> halves(n_half);
+    for (uint32_t c = 0; c < n_cells; c++) {
+        for (uint32_t h = cell_face_offsets[c]; h < cell_face_offsets[c + 1]; h++) {
+            half_face(c, h - cell_face_offsets[c], half_nodes);
+            halves[h] = {face_key(half_nodes, half_nodes.size()), h};
         }
     }
-    n_faces = face_nodes.size();
+    std::sort(halves.begin(), halves.end());
+    std::vector<uint32_t> partner(n_half, NO_NODE);
+    for (uint32_t i = 0; i < n_half;) {
+        uint32_t j = i + 1;
+        while (j < n_half && halves[j].first == halves[i].first) j++;
+        if (j - i > 2) throw std::runtime_error("Mesh: a face is shared by more than two cells.");
+        if (j - i == 2) {
+            partner[halves[i].second] = halves[i + 1].second;
+            partner[halves[i + 1].second] = halves[i].second;
+        }
+        i = j;
+    }
+    std::vector<uint32_t> cell_faces(n_half, NO_NODE), face_node_offsets{0}, face_nodes;
+    std::vector<std::array<int32_t, 2>> face_cells;
+    for (uint32_t c : cells_by_global_id()) {
+        for (uint32_t h = cell_face_offsets[c]; h < cell_face_offsets[c + 1]; h++) {
+            if (partner[h] != NO_NODE && cell_faces[partner[h]] != NO_NODE) {
+                cell_faces[h] = cell_faces[partner[h]];
+                face_cells[cell_faces[h]][1] = c;
+                continue;
+            }
+            cell_faces[h] = face_cells.size();
+            face_cells.push_back({int32_t(c), -1});
+            half_face(c, h - cell_face_offsets[c], half_nodes);
+            face_nodes.insert(face_nodes.end(), half_nodes.begin(), half_nodes.end());
+            face_node_offsets.push_back(face_nodes.size());
+        }
+    }
+    partner = {};
+    n_faces = face_cells.size();
 
     // Zones: interior plus one per boundary name
     std::map<std::string, std::vector<uint32_t>> zone_faces;
     std::vector<uint32_t> interior;
     std::vector<bool> zoned(n_faces, false);
-    for (const auto & edge : boundary_faces) {
-        auto it = face_of_edge.find(std::minmax(edge.nodes[0], edge.nodes[1]));
-        if (it == face_of_edge.end()) {
-            throw std::runtime_error("Mesh: boundary edge of " + edge.zone + " is not a cell edge.");
+    for (const auto & bf : boundary_faces) {
+        const FaceKey key = face_key(bf.nodes, std::min<size_t>(bf.nodes.size(), KEY));
+        const auto it = std::lower_bound(halves.begin(), halves.end(), std::make_pair(key, uint32_t(0)));
+        if (bf.nodes.size() > KEY || it == halves.end() || it->first != key) {
+            throw std::runtime_error("Mesh: boundary face of " + bf.zone + " is not a cell face.");
         }
-        if (face_cells[it->second][1] != -1) {
-            throw std::runtime_error("Mesh: boundary edge of " + edge.zone + " is an interior edge.");
+        const uint32_t f = cell_faces[it->second];
+        if (face_cells[f][1] != -1) {
+            throw std::runtime_error("Mesh: boundary face of " + bf.zone + " is an interior face.");
         }
-        if (!zoned[it->second]) {
-            zone_faces[edge.zone].push_back(it->second);
-            zoned[it->second] = true;
+        if (!zoned[f]) {
+            zone_faces[bf.zone].push_back(f);
+            zoned[f] = true;
         }
     }
+    halves = {};
     for (uint32_t f = 0; f < n_faces; f++) {
         if (face_cells[f][1] >= 0) {
             interior.push_back(f);
@@ -98,16 +158,18 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
         }
     }
 
-    std::vector<std::vector<uint32_t>> face_node_lists(n_faces);
-    for (uint32_t f = 0; f < n_faces; f++) face_node_lists[f] = {face_nodes[f][0], face_nodes[f][1]};
-    allocate_and_fill(nodes, cell_nodes, cell_faces, face_node_lists, face_cells, interior, zone_faces);
+    allocate_and_fill(nodes, cell_node_offsets, cell_nodes, cell_face_offsets, cell_faces, face_node_offsets,
+                      face_nodes, face_cells, interior, zone_faces);
     compute_geometry();
 }
 
 void Mesh::allocate_and_fill(const std::vector<std::array<rtype, N_DIM>> & nodes,
-                             const std::vector<std::vector<uint32_t>> & cell_nodes,
-                             const std::vector<std::vector<uint32_t>> & cell_faces,
-                             const std::vector<std::vector<uint32_t>> & face_node_lists,
+                             const std::vector<uint32_t> & cell_node_offsets,
+                             const std::vector<uint32_t> & cell_nodes,
+                             const std::vector<uint32_t> & cell_face_offsets,
+                             const std::vector<uint32_t> & cell_faces,
+                             const std::vector<uint32_t> & face_node_offsets,
+                             const std::vector<uint32_t> & face_nodes,
                              const std::vector<std::array<int32_t, 2>> & face_cells,
                              const std::vector<uint32_t> & interior,
                              const std::map<std::string, std::vector<uint32_t>> & zone_faces) {
@@ -134,25 +196,23 @@ void Mesh::allocate_and_fill(const std::vector<std::array<rtype, N_DIM>> & nodes
         h_cells_of_face(f, 1) = face_cells[f][1];
     }
 
-    auto build_csr = [](const std::vector<std::vector<uint32_t>> & lists,
-                        Kokkos::View<uint32_t *> & values, Kokkos::View<uint32_t *> & offsets,
-                        Kokkos::View<uint32_t *>::host_mirror_type & h_values,
-                        Kokkos::View<uint32_t *>::host_mirror_type & h_offsets, const std::string & name) {
-        size_t total = 0;
-        for (const auto & l : lists) total += l.size();
-        values = Kokkos::View<uint32_t *>(name, total);
-        offsets = Kokkos::View<uint32_t *>("offsets_" + name, lists.size() + 1);
+    auto copy_csr = [](const std::vector<uint32_t> & offsets_in, const std::vector<uint32_t> & values_in,
+                       Kokkos::View<uint32_t *> & values, Kokkos::View<uint32_t *> & offsets,
+                       Kokkos::View<uint32_t *>::host_mirror_type & h_values,
+                       Kokkos::View<uint32_t *>::host_mirror_type & h_offsets, const std::string & name) {
+        values = Kokkos::View<uint32_t *>(name, values_in.size());
+        offsets = Kokkos::View<uint32_t *>("offsets_" + name, offsets_in.size());
         h_values = Kokkos::create_mirror_view(values);
         h_offsets = Kokkos::create_mirror_view(offsets);
-        h_offsets(0) = 0;
-        for (size_t i = 0; i < lists.size(); i++) {
-            h_offsets(i + 1) = h_offsets(i) + lists[i].size();
-            for (size_t k = 0; k < lists[i].size(); k++) h_values(h_offsets(i) + k) = lists[i][k];
-        }
+        std::copy(offsets_in.begin(), offsets_in.end(), h_offsets.data());
+        std::copy(values_in.begin(), values_in.end(), h_values.data());
     };
-    build_csr(cell_nodes, nodes_of_cell, offsets_nodes_of_cell, h_nodes_of_cell, h_offsets_nodes_of_cell, "nodes_of_cell");
-    build_csr(cell_faces, faces_of_cell, offsets_faces_of_cell, h_faces_of_cell, h_offsets_faces_of_cell, "faces_of_cell");
-    build_csr(face_node_lists, nodes_of_face, offsets_nodes_of_face, h_nodes_of_face, h_offsets_nodes_of_face, "nodes_of_face");
+    copy_csr(cell_node_offsets, cell_nodes, nodes_of_cell, offsets_nodes_of_cell, h_nodes_of_cell,
+             h_offsets_nodes_of_cell, "nodes_of_cell");
+    copy_csr(cell_face_offsets, cell_faces, faces_of_cell, offsets_faces_of_cell, h_faces_of_cell,
+             h_offsets_faces_of_cell, "faces_of_cell");
+    copy_csr(face_node_offsets, face_nodes, nodes_of_face, offsets_nodes_of_face, h_nodes_of_face,
+             h_offsets_nodes_of_face, "nodes_of_face");
 
     auto add_zone = [&](const std::string & name, FaceZoneType type, const std::vector<uint32_t> & faces) {
         FaceZone zone;
@@ -166,7 +226,6 @@ void Mesh::allocate_and_fill(const std::vector<std::array<rtype, N_DIM>> & nodes
     m_face_zones.clear();
     add_zone("interior", FaceZoneType::INTERIOR, interior);
     for (const auto & [name, faces] : zone_faces) add_zone(name, FaceZoneType::BOUNDARY, faces);
-
 }
 
 namespace {

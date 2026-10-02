@@ -300,16 +300,26 @@ std::vector<uint32_t> Mesh::cells_by_global_id() const {
 }
 
 void Mesh::compute_cell_neighbors() {
-    std::vector<std::vector<uint32_t>> cells_of_node(n_nodes);
+    // Cells of every node (CSR, cells in increasing order)
+    std::vector<uint32_t> node_offsets(n_nodes + 1, 0), node_cells;
     for (uint32_t c = 0; c < n_cells; c++) {
-        for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) cells_of_node[h_node_of_cell(c, k)].push_back(c);
+        for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) node_offsets[h_node_of_cell(c, k) + 1]++;
     }
-    std::vector<uint32_t> offsets(n_cells + 1, 0), flat;
+    for (uint32_t n = 0; n < n_nodes; n++) node_offsets[n + 1] += node_offsets[n];
+    node_cells.resize(node_offsets[n_nodes]);
+    {
+        std::vector<uint32_t> fill(node_offsets.begin(), node_offsets.end() - 1);
+        for (uint32_t c = 0; c < n_cells; c++) {
+            for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) node_cells[fill[h_node_of_cell(c, k)]++] = c;
+        }
+    }
+    std::vector<uint32_t> offsets(n_cells + 1, 0), flat, nb;
     for (uint32_t c = 0; c < n_cells; c++) {
-        std::vector<uint32_t> nb;
+        nb.clear();
         for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) {
-            for (uint32_t other : cells_of_node[h_node_of_cell(c, k)]) {
-                if (other != c) nb.push_back(other);
+            const uint32_t n = h_node_of_cell(c, k);
+            for (uint32_t i = node_offsets[n]; i < node_offsets[n + 1]; i++) {
+                if (node_cells[i] != c) nb.push_back(node_cells[i]);
             }
         }
         std::sort(nb.begin(), nb.end(), [&](uint32_t a, uint32_t b) { return h_global_cell(a) < h_global_cell(b); });

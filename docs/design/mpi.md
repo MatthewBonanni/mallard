@@ -136,7 +136,7 @@ Setup exchanges are dense `alltoallv` calls, whose count arrays alone are O(rank
 1. **Comm layer and build:** `Mallard_ENABLE_MPI`, one-rank stub, CI with `mpirun`.
 2. **Correct multi-rank runs at small scale:** global Gmsh read on every rank, Hilbert partition, halo, exchange, reductions. Rank-count-independence tests for FO, MUSCL, TENO and viscous fluxes.
 3. **Output and restart:** `.pvtu` output; HDF5 restart independent of the partition.
-4. **Scalable setup:** HDF5 mesh format and converter, distributed read, distributed dual graph, dKaMinPar, migration. Done: no rank holds the global mesh in a distributed run, and restart files are read by global id, each rank reading only its cells.
+4. **Scalable setup:** HDF5 mesh format and converter, distributed read, distributed dual graph, dKaMinPar, migration. Done: with generated meshes or HDF5 mesh files no rank holds the global mesh in a distributed run (Gmsh files are still read whole by every rank), and restart files are read by global id, each rank reading only its cells. Setup only (one FO step), CPU, peak memory per rank: 4.1M hexahedra took 6.0 GiB on every rank count before (each rank built the global mesh) and now 3.1 / 1.7 / 0.9 / 0.5 GiB on 2 / 4 / 8 / 16 ranks (setup 40 s -> 19 / 11 / 6.4 / 4.5 s); 16M quadrilaterals 8.7-11 GiB per rank before, now 6.5 / 3.3 / 1.7 / 0.9 GiB; 64M quadrilaterals set up on 16 ranks in 3.3 GiB each.
 5. **Performance:** communication/computation overlap, GPU-aware MPI, the NCCL backend, single-node 8-GPU scaling study, then launch-overhead work (CUDA graphs, which the stream-ordered NCCL exchange allows) where it matters at small per-rank sizes.
 6. **Multi-node:** runs across nodes; HDF5/XDMF solution output.
 
