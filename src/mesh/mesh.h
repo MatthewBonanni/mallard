@@ -185,6 +185,11 @@ class Mesh {
         void compute_face_normals();
 
         /**
+         * @brief Compute the face centroids.
+         */
+        void compute_face_centroids();
+
+        /**
          * @brief Copy mesh data from host to device.
          */
         void copy_host_to_device();
@@ -231,6 +236,7 @@ class Mesh {
         Kokkos::View<rtype *> cell_volume;
         Kokkos::View<rtype *> face_area;
         Kokkos::View<rtype *[N_DIM]> face_normals;
+        Kokkos::View<rtype *[N_DIM]> face_coords;
         Kokkos::View<uint32_t *> nodes_of_cell;
         Kokkos::View<uint32_t *> offsets_nodes_of_cell;
         Kokkos::View<uint32_t *> faces_of_cell;
@@ -239,18 +245,19 @@ class Mesh {
         Kokkos::View<uint32_t *> offsets_nodes_of_face;
         Kokkos::View<int32_t *[2]> cells_of_face;
 
-        Kokkos::View<rtype *[N_DIM]>::HostMirror h_node_coords;
-        Kokkos::View<rtype *[N_DIM]>::HostMirror h_cell_coords;
-        Kokkos::View<rtype *>::HostMirror h_cell_volume;
-        Kokkos::View<rtype *>::HostMirror h_face_area;
-        Kokkos::View<rtype *[N_DIM]>::HostMirror h_face_normals;
-        Kokkos::View<uint32_t *>::HostMirror h_nodes_of_cell;
-        Kokkos::View<uint32_t *>::HostMirror h_offsets_nodes_of_cell;
-        Kokkos::View<uint32_t *>::HostMirror h_faces_of_cell;
-        Kokkos::View<uint32_t *>::HostMirror h_offsets_faces_of_cell;
-        Kokkos::View<uint32_t *>::HostMirror h_nodes_of_face;
-        Kokkos::View<uint32_t *>::HostMirror h_offsets_nodes_of_face;
-        Kokkos::View<int32_t *[2]>::HostMirror h_cells_of_face;
+        Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_node_coords;
+        Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_cell_coords;
+        Kokkos::View<rtype *>::host_mirror_type h_cell_volume;
+        Kokkos::View<rtype *>::host_mirror_type h_face_area;
+        Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_face_normals;
+        Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_face_coords;
+        Kokkos::View<uint32_t *>::host_mirror_type h_nodes_of_cell;
+        Kokkos::View<uint32_t *>::host_mirror_type h_offsets_nodes_of_cell;
+        Kokkos::View<uint32_t *>::host_mirror_type h_faces_of_cell;
+        Kokkos::View<uint32_t *>::host_mirror_type h_offsets_faces_of_cell;
+        Kokkos::View<uint32_t *>::host_mirror_type h_nodes_of_face;
+        Kokkos::View<uint32_t *>::host_mirror_type h_offsets_nodes_of_face;
+        Kokkos::View<int32_t *[2]>::host_mirror_type h_cells_of_face;
     protected:
     private:
         void h_neighbors_of_cell_helper(uint32_t i_cell,

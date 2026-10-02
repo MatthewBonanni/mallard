@@ -1,16 +1,23 @@
 /**
  * @file data_writer.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief DataWriter class declaration.
- * @version 0.1
- * @date 2024-01-01
- * 
+ * @brief Data writer class declaration.
+ * @version 0.2
+ * @date 2024-01-11
+ *
  * @copyright Copyright (c) 2024 Matthew Bonanni
- * 
+ *
  */
 
 #ifndef DATA_WRITER_H
 #define DATA_WRITER_H
+
+#include <limits>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include <toml.hpp>
 
@@ -19,64 +26,57 @@
 
 enum class DataFormat {
     VTU,
-    TECPLOT
 };
 
 static const std::unordered_map<std::string, DataFormat> FORMAT_TYPES = {
     {"vtu", DataFormat::VTU},
-    {"tecplot", DataFormat::TECPLOT}
 };
 
 static const std::unordered_map<DataFormat, std::string> FORMAT_NAMES = {
     {DataFormat::VTU, "vtu"},
-    {DataFormat::TECPLOT, "tecplot"}
 };
 
+/**
+ * @brief Writes snapshots either every `interval` steps or every
+ *        `time_interval` units of simulation time. Time-based writers also
+ *        constrain the time step so that snapshots land exactly on output times.
+ */
 class DataWriter {
     public:
-        /**
-         * @brief Construct a new DataWriter object
-         */
-        DataWriter();
-
-        /**
-         * @brief Destroy the DataWriter object
-         */
-        ~DataWriter();
-
-        /**
-         * @brief Initialize the DataWriter.
-         * @param input TOML input parameter table.
-         * @param data Data objects.
-         * @param mesh pointer to the mesh.
-         */
         void init(const toml::value & input,
                   std::vector<Data> & data,
                   std::shared_ptr<Mesh> mesh);
 
         /**
-         * @brief Write the data.
-         * @param step Current time step.
-         * @param force Force write.
+         * @brief Whether a snapshot is due at this step/time.
          */
-        void write(uint32_t step, bool force = false) const;
-    protected:
-        /**
-         * @brief Write the data in VTU format.
-         */
-        void write_vtu(uint32_t step) const;
+        bool due(uint64_t step, rtype t) const;
 
         /**
-         * @brief Write the data in Tecplot format.
+         * @brief Write a snapshot if due (or forced).
          */
-        void write_tecplot(uint32_t step) const;
+        void write(uint64_t step, rtype t, bool force = false);
+
+        /**
+         * @brief Next simulation time at which a snapshot is due
+         *        (infinity for step-based writers).
+         */
+        rtype next_time() const;
+
+    protected:
+        void write_vtu(const std::string & filename, rtype t) const;
+        void write_pvd() const;
 
         std::string prefix;
-        uint32_t interval;
+        uint64_t interval = 0;
+        rtype time_interval = 0.0;
+        uint64_t n_written = 0;
+        rtype t_last = -std::numeric_limits<rtype>::infinity();
+        uint64_t step_last = std::numeric_limits<uint64_t>::max();
         DataFormat format;
         std::vector<const Data *> data_ptrs;
         std::shared_ptr<Mesh> mesh;
-    private:
+        std::vector<std::pair<rtype, std::string>> history;
 };
 
 #endif // DATA_WRITER_H

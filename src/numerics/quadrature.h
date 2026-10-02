@@ -51,9 +51,9 @@ class Quadrature {
         uint8_t dim;
         uint8_t order;
         Kokkos::View<rtype **> points;
-        Kokkos::View<rtype **>::HostMirror h_points;
+        Kokkos::View<rtype **>::host_mirror_type h_points;
         Kokkos::View<rtype *> weights;
-        Kokkos::View<rtype *>::HostMirror h_weights;
+        Kokkos::View<rtype *>::host_mirror_type h_weights;
 };
 
 class GaussLegendre : public Quadrature {

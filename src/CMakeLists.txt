@@ -1,22 +1,32 @@
 # CMakeLists.txt for Mallard
-add_executable(Mallard
-    main.cpp
+add_library(MallardCore STATIC
+    common/common_math.cpp
+    common/common_io.cpp
+    mesh/mesh.cpp
+    mesh/zone.cpp
+    boundary/boundary.cpp
+    numerics/basis.cpp
+    numerics/face_reconstruction.cpp
+    numerics/quadrature.cpp
+    numerics/time_integrator.cpp
+    physics/physics.cpp
+    solver/solver.cpp
+    solver/solver_initialize.cpp
+    solver/solver_rhs.cpp
+    io/data_writer.cpp
 )
 
-add_subdirectory(common)
-add_subdirectory(mesh)
-add_subdirectory(boundary)
-add_subdirectory(numerics)
-add_subdirectory(solver)
-add_subdirectory(physics)
-add_subdirectory(io)
+target_include_directories(MallardCore PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/common
+    ${CMAKE_CURRENT_SOURCE_DIR}/mesh
+    ${CMAKE_CURRENT_SOURCE_DIR}/boundary
+    ${CMAKE_CURRENT_SOURCE_DIR}/numerics
+    ${CMAKE_CURRENT_SOURCE_DIR}/physics
+    ${CMAKE_CURRENT_SOURCE_DIR}/solver
+    ${CMAKE_CURRENT_SOURCE_DIR}/io
+)
+target_link_libraries(MallardCore PUBLIC Kokkos::kokkos)
 
-target_link_libraries(Mallard Kokkos::kokkos)
-target_link_libraries(Mallard Kokkos::kokkoskernels)
-target_link_libraries(Mallard CommonLib)
-target_link_libraries(Mallard MeshLib)
-target_link_libraries(Mallard BoundaryLib)
-target_link_libraries(Mallard NumericsLib)
-target_link_libraries(Mallard SolverLib)
-target_link_libraries(Mallard PhysicsLib)
-target_link_libraries(Mallard IOLib)
+add_executable(Mallard main.cpp)
+target_link_libraries(Mallard PRIVATE MallardCore)

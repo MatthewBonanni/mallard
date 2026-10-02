@@ -1,63 +1,62 @@
 /**
  * @file data_writer.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief DataWriter class implementation.
- * @version 0.1
- * @date 2024-01-01
- * 
+ * @brief Data writer class implementation.
+ * @version 0.2
+ * @date 2024-01-11
+ *
  * @copyright Copyright (c) 2024 Matthew Bonanni
- * 
+ *
  */
 
 #include "data_writer.h"
 
-#include <iostream>
-#include <string>
+#include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
-#include <optional>
+#include <iostream>
+#include <sstream>
 
 #include "common_io.h"
-
-DataWriter::DataWriter() {
-    // Empty
-}
-
-DataWriter::~DataWriter() {
-    // Empty
-}
 
 void DataWriter::init(const toml::value & input,
                       std::vector<Data> & data,
                       std::shared_ptr<Mesh> mesh) {
-    if (!input.contains("prefix")) {
-        throw std::runtime_error("DataWriter: prefix not specified.");
+    for (const char * key : {"prefix", "format", "variables"}) {
+        if (!input.contains(key)) {
+            throw std::runtime_error(std::string("DataWriter: ") + key + " not specified.");
+        }
     }
-    if (!input.contains("format")) {
-        throw std::runtime_error("DataWriter: format not specified.");
+    const bool has_interval = input.contains("interval");
+    const bool has_time_interval = input.contains("time_interval");
+    if (has_interval == has_time_interval) {
+        throw std::runtime_error("DataWriter: specify exactly one of interval or time_interval.");
     }
-    if (!input.contains("interval")) {
-        throw std::runtime_error("DataWriter: interval not specified.");
-    }
-    if (!input.contains("variables")) {
-        throw std::runtime_error("DataWriter: variables not specified.");
+    prefix = toml::find<std::string>(input, "prefix");
+    if (has_interval) {
+        interval = toml::find<uint64_t>(input, "interval");
+        if (interval == 0) {
+            throw std::runtime_error("DataWriter: interval must be positive.");
+        }
+    } else {
+        time_interval = toml::find<rtype>(input, "time_interval");
+        if (!(time_interval > 0.0)) {
+            throw std::runtime_error("DataWriter: time_interval must be positive.");
+        }
     }
 
-    this->prefix = toml::find<std::string>(input, "prefix");
-    this->interval = toml::find<uint32_t>(input, "interval");
-    std::string format_str = toml::find<std::string>(input, "format");
+    const std::string format_str = toml::find<std::string>(input, "format");
+    auto it = FORMAT_TYPES.find(format_str);
+    if (it == FORMAT_TYPES.end()) {
+        throw std::runtime_error("DataWriter: Unknown format type: " + format_str + ".");
+    }
+    format = it->second;
+
     std::vector<std::string> variables = toml::find<std::vector<std::string>>(input, "variables");
-
     if (variables.empty()) {
         throw std::runtime_error("DataWriter: No variables specified.");
     }
-
-    typename std::unordered_map<std::string, DataFormat>::const_iterator it = FORMAT_TYPES.find(format_str);
-    if (it == FORMAT_TYPES.end()) {
-        throw std::runtime_error("DataWriter: Unknown format type: " + format_str + ".");
-    } else {
-        format = it->second;
-    }
-
     for (const auto & var : variables) {
         bool found = false;
         for (const auto & data_var : data) {
@@ -71,180 +70,157 @@ void DataWriter::init(const toml::value & input,
             throw std::runtime_error("DataWriter: Unknown variable: " + var + ".");
         }
     }
-
     this->mesh = mesh;
+
+    const std::filesystem::path parent = std::filesystem::path(prefix).parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent);
+    }
 }
 
-void DataWriter::write(uint32_t step, bool force) const {
-    bool write_now = (step % interval == 0) || force;
-    if (!write_now) {
+bool DataWriter::due(uint64_t step, rtype t) const {
+    if (interval > 0) {
+        return step % interval == 0;
+    }
+    // Relative tolerance absorbs round-off in accumulated time
+    return t >= next_time() - 1.0e-9 * time_interval;
+}
+
+rtype DataWriter::next_time() const {
+    if (interval > 0) {
+        return std::numeric_limits<rtype>::infinity();
+    }
+    return n_written * time_interval;
+}
+
+void DataWriter::write(uint64_t step, rtype t, bool force) {
+    if (!(due(step, t) || force) || step == step_last) {
         return;
     }
-
-    if (format == DataFormat::VTU) {
-        write_vtu(step);
-    } else if (format == DataFormat::TECPLOT) {
-        write_tecplot(step);
+    std::ostringstream stream;
+    stream << prefix << "_" << std::setw(LEN_STEP) << std::setfill('0')
+           << (interval > 0 ? step : n_written) << ".vtu";
+    const std::string filename = stream.str();
+    write_vtu(filename, t);
+    history.emplace_back(t, filename);
+    write_pvd();
+    if (interval == 0) {
+        // Skip any output times already passed (e.g. if dt exceeded time_interval)
+        while (next_time() <= t + 1.0e-9 * time_interval) {
+            n_written++;
+        }
     } else {
-        throw std::runtime_error("DataWriter::write not implemented.");
+        n_written++;
     }
+    step_last = step;
+    t_last = t;
 }
 
-void DataWriter::write_vtu(uint32_t step) const {
-    std::string filename;
-    std::ostringstream stream;
-    stream << std::setw(LEN_STEP) << std::setfill('0') << step;
-    filename = prefix + "_" + stream.str() + ".vtu";
+void DataWriter::write_pvd() const {
+    std::ofstream out(prefix + ".pvd");
+    out << "<?xml version=\"1.0\"?>\n";
+    out << "<VTKFile type=\"Collection\" version=\"0.1\" byte_order=\"" << endianness() << "\">\n";
+    out << "  <Collection>\n";
+    for (const auto & [t, filename] : history) {
+        out << "    <DataSet timestep=\"" << std::setprecision(10) << t << "\" file=\""
+            << std::filesystem::path(filename).filename().string() << "\"/>\n";
+    }
+    out << "  </Collection>\n";
+    out << "</VTKFile>\n";
+}
 
-    std::ofstream out(filename);
-    if (!out.is_open()) {
+void DataWriter::write_vtu(const std::string & filename, rtype t) const {
+    std::ofstream out(filename, std::ios::binary);
+    if (!out.good()) {
         throw std::runtime_error("DataWriter::write_vtu: Could not open file: " + filename + ".");
     }
-    if (!out.good()) {
-        throw std::runtime_error("DataWriter::write_vtu: Could not write to file: " + filename + ".");
-    }
-
     std::cout << "Writing data to file: " << filename << std::endl;
 
-    u_int64_t offset_data = 0;
-    u_int64_t len_connectivity = 0;
-
-    // ---------------------------------------------------------------------------------------------
-    // Write header
-    out << "<?xml version=\"1.0\"?>\n";
-    out << "<VTKFile type=\"UnstructuredGrid\" version=\"0.1\" byte_order=\"" << endianness() << "\">\n";
-    out << "  <UnstructuredGrid>\n";
-    out << "    <Piece NumberOfPoints=\"" << mesh->n_nodes << "\" NumberOfCells=\"" << mesh->n_cells << "\">\n";
-
-    // Write PointData
-    out << "      <PointData>\n";
-    out << "      </PointData>\n";
-
-    // Write CellData
-    out << "      <CellData>\n";
-    for (const auto & data_ptr : data_ptrs) {
-        out << "        <DataArray type=\"" << vtk_float_type() << "\" ";
-        out << "Name=\"" << data_ptr->name() << "\" ";
-        out << "format=\"appended\" ";
-        out << "offset=\"" << offset_data << "\">\n";
-        out << "        </DataArray>\n";
-        offset_data += sizeof(int) + mesh->n_cells * sizeof(rtype);
-    }
-    out << "      </CellData>\n";
-
-    // Write Points
-    out << "      <Points>\n";
-    out << "        <DataArray type=\"" << vtk_float_type() << "\" ";
-    out << "NumberOfComponents=\"" << 3 << "\" ";
-    out << "format=\"appended\" ";
-    out << "offset=\"" << offset_data << "\">\n";
-    out << "        </DataArray>\n";
-    offset_data += sizeof(int) + mesh->n_nodes * 3 * sizeof(rtype);
-    out << "      </Points>\n";
-
-    // Write Cells
-    out << "      <Cells>\n";
-
-    // connectivity
-    out << "        <DataArray type=\"UInt32\" Name=\"connectivity\" ";
-    out << "format=\"appended\" ";
-    out << "offset=\"" << offset_data << "\">\n";
-    out << "        </DataArray>\n";
+    using header_t = uint64_t;
+    uint64_t len_connectivity = 0;
     for (uint32_t i = 0; i < mesh->n_cells; i++) {
         len_connectivity += mesh->h_n_nodes_of_cell(i);
     }
-    offset_data += sizeof(int) + len_connectivity * sizeof(int);
 
-    // offsets
-    out << "        <DataArray type=\"UInt32\" Name=\"offsets\" ";
-    out << "format=\"appended\" ";
-    out << "offset=\"" << offset_data << "\">\n";
-    out << "        </DataArray>\n";
-    offset_data += sizeof(int) + mesh->n_cells * sizeof(int);
+    // Header with appended-data offsets
+    uint64_t offset = 0;
+    auto data_array = [&](const std::string & type, const std::string & name,
+                          uint32_t n_comp, uint64_t n_bytes) {
+        out << "        <DataArray type=\"" << type << "\" ";
+        if (!name.empty()) out << "Name=\"" << name << "\" ";
+        if (n_comp > 1) out << "NumberOfComponents=\"" << n_comp << "\" ";
+        out << "format=\"appended\" offset=\"" << offset << "\"/>\n";
+        offset += sizeof(header_t) + n_bytes;
+    };
 
-    // types
-    out << "        <DataArray type=\"UInt8\" Name=\"types\" ";
-    out << "format=\"appended\" ";
-    out << "offset=\"" << offset_data << "\">\n";
-    out << "        </DataArray>\n";
-    offset_data += sizeof(int) + mesh->n_cells * sizeof(uint8_t);
-
+    out << "<?xml version=\"1.0\"?>\n";
+    out << "<VTKFile type=\"UnstructuredGrid\" version=\"1.0\" byte_order=\"" << endianness()
+        << "\" header_type=\"UInt64\">\n";
+    out << "  <UnstructuredGrid>\n";
+    out << "    <FieldData>\n";
+    out << "      <DataArray type=\"Float64\" Name=\"TIME\" NumberOfTuples=\"1\" format=\"ascii\">"
+        << std::setprecision(17) << static_cast<double>(t) << "</DataArray>\n";
+    out << "    </FieldData>\n";
+    out << "    <Piece NumberOfPoints=\"" << mesh->n_nodes << "\" NumberOfCells=\"" << mesh->n_cells << "\">\n";
+    out << "      <CellData>\n";
+    for (const auto & data_ptr : data_ptrs) {
+        data_array(vtk_float_type(), data_ptr->name(), 1, mesh->n_cells * sizeof(rtype));
+    }
+    out << "      </CellData>\n";
+    out << "      <Points>\n";
+    data_array(vtk_float_type(), "", 3, mesh->n_nodes * 3 * sizeof(rtype));
+    out << "      </Points>\n";
+    out << "      <Cells>\n";
+    data_array("Int64", "connectivity", 1, len_connectivity * sizeof(int64_t));
+    data_array("Int64", "offsets", 1, mesh->n_cells * sizeof(int64_t));
+    data_array("UInt8", "types", 1, mesh->n_cells * sizeof(uint8_t));
     out << "      </Cells>\n";
     out << "    </Piece>\n";
     out << "  </UnstructuredGrid>\n";
+    out << "  <AppendedData encoding=\"raw\">\n_";
 
-    // ---------------------------------------------------------------------------------------------
-    // Write appended data
-    out << "<AppendedData encoding=\"raw\">\n_";
+    auto write_header = [&](uint64_t n_bytes) {
+        header_t h = n_bytes;
+        out.write(reinterpret_cast<const char *>(&h), sizeof(header_t));
+    };
+    auto write_value = [&](auto value) {
+        out.write(reinterpret_cast<const char *>(&value), sizeof(value));
+    };
 
-    u_int64_t n_bytes;
-
-    // Write PointData
-    // Do nothing, no point data
-
-    // Write CellData
-    n_bytes = sizeof(rtype) * mesh->n_cells;
     for (const auto & data_ptr : data_ptrs) {
-        out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
+        write_header(mesh->n_cells * sizeof(rtype));
         for (uint32_t i = 0; i < mesh->n_cells; i++) {
-            out.write(reinterpret_cast<const char *>(&(*data_ptr)[i]), sizeof(rtype));
+            write_value(static_cast<rtype>((*data_ptr)[i]));
         }
     }
 
-    // Write Points
-    n_bytes = sizeof(rtype) * mesh->n_nodes * 3;
-    out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
-    rtype coord;
+    write_header(mesh->n_nodes * 3 * sizeof(rtype));
     for (uint32_t i_node = 0; i_node < mesh->n_nodes; i_node++) {
-        FOR_I_DIM {
-            coord = mesh->h_node_coords(i_node, i);
-            out.write(reinterpret_cast<const char *>(&coord), sizeof(rtype));
-        }
-        if (N_DIM == 2) {
-            rtype zero = 0.0;
-            out.write(reinterpret_cast<const char *>(&zero), sizeof(rtype));
-        }
+        FOR_I_DIM write_value(static_cast<rtype>(mesh->h_node_coords(i_node, i)));
+        for (uint8_t i = N_DIM; i < 3; i++) write_value(static_cast<rtype>(0.0));
     }
 
-    // Write Cells
-
-    // connectivity
-    n_bytes = sizeof(int) * len_connectivity;
-    out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
-    uint32_t i_node;
+    write_header(len_connectivity * sizeof(int64_t));
     for (uint32_t i = 0; i < mesh->n_cells; i++) {
         for (uint32_t j = 0; j < mesh->h_n_nodes_of_cell(i); j++) {
-            i_node = mesh->h_node_of_cell(i, j);
-            out.write(reinterpret_cast<const char *>(&i_node), sizeof(uint32_t));
+            write_value(static_cast<int64_t>(mesh->h_node_of_cell(i, j)));
         }
     }
 
-    // offsets
-    n_bytes = sizeof(int) * mesh->n_cells;
-    out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
-    uint32_t offset = 0;
+    write_header(mesh->n_cells * sizeof(int64_t));
+    int64_t cell_offset = 0;
     for (uint32_t i = 0; i < mesh->n_cells; i++) {
-        offset += mesh->h_n_nodes_of_cell(i);
-        out.write(reinterpret_cast<const char *>(&offset), sizeof(uint32_t));
+        cell_offset += mesh->h_n_nodes_of_cell(i);
+        write_value(cell_offset);
     }
 
-    // types
-    n_bytes = sizeof(uint8_t) * mesh->n_cells;
-    out.write(reinterpret_cast<const char *>(&n_bytes), sizeof(int));
-    uint8_t cell_type = 7;
+    write_header(mesh->n_cells * sizeof(uint8_t));
     for (uint32_t i = 0; i < mesh->n_cells; i++) {
-        out.write(reinterpret_cast<const char *>(&cell_type), sizeof(uint8_t));
+        const uint32_t n_nodes = mesh->h_n_nodes_of_cell(i);
+        const uint8_t vtk_type = (n_nodes == 3) ? 5 : (n_nodes == 4) ? 9 : 7;
+        write_value(vtk_type);
     }
 
-    out << "\n";
-    out << "</AppendedData>\n";
+    out << "\n  </AppendedData>\n";
     out << "</VTKFile>\n";
-
-    out.close();
-}
-
-void DataWriter::write_tecplot(uint32_t step) const {
-    std::string filename = prefix + "_" + std::to_string(step) + ".dat";
-
-    throw std::runtime_error("DataWriter::write_tecplot not implemented.");
 }

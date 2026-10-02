@@ -1,24 +1,25 @@
 /**
  * @file boundary.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Boundary class declaration.
- * @version 0.1
+ * @brief Boundary conditions.
+ * @version 0.2
  * @date 2023-12-20
- * 
+ *
  * @copyright Copyright (c) 2023 Matthew Bonanni
- * 
+ *
  */
 
 #ifndef BOUNDARY_H
 #define BOUNDARY_H
 
+#include <string>
+#include <unordered_map>
+
+#include <Kokkos_Core.hpp>
 #include <toml.hpp>
 
 #include "common.h"
-#include "zone.h"
-#include "mesh.h"
 #include "physics.h"
-#include "riemann_solver.h"
 
 enum class BoundaryType {
     SYMMETRY,
@@ -44,85 +45,78 @@ static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
     {BoundaryType::P_OUT, "p_out"}
 };
 
-class Boundary {
-    public:
-        /**
-         * @brief Construct a new Boundary object
-         */
-        Boundary();
+/**
+ * @brief Device-copyable boundary condition.
+ *
+ * Every boundary condition is imposed weakly through a ghost state that is
+ * passed to the Riemann solver (and used for gradient reconstruction).
+ * data holds a W = [rho, u_x, u_y, p] state; its meaning depends on type.
+ */
+struct BoundaryCondition {
+    BoundaryType type = BoundaryType::EXTRAPOLATION;
+    rtype data[N_DIM + 2] = {0.0, 0.0, 0.0, 0.0};
 
-        /**
-         * @brief Destroy the Boundary object
-         */
-        virtual ~Boundary();
+    /**
+     * @brief Parse a [[boundaries]] table entry.
+     */
+    static BoundaryCondition from_input(const toml::value & input, const Euler & physics);
 
-        /**
-         * @brief Set the zone.
-         * @param zone Pointer to the zone.
-         */
-        void set_zone(FaceZone * zone);
+    /**
+     * @brief Ghost state W_g = [rho, u_x, u_y, p] given the interior state W_i.
+     * @param n Unit normal pointing out of the domain.
+     * @param viscous Whether walls should enforce no-slip (else slip).
+     */
+    KOKKOS_INLINE_FUNCTION
+    void ghost_W(const rtype * W_i, const rtype * n, const rtype gamma,
+                 const bool viscous, rtype * W_g) const {
+        for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = W_i[i];
+        const rtype u_n = W_i[1] * n[0] + W_i[2] * n[1];
+        switch (type) {
+            case BoundaryType::EXTRAPOLATION:
+                break;
+            case BoundaryType::WALL_ADIABATIC:
+                if (viscous) {
+                    W_g[1] = -W_i[1];
+                    W_g[2] = -W_i[2];
+                    break;
+                }
+                [[fallthrough]];
+            case BoundaryType::SYMMETRY:
+                W_g[1] = W_i[1] - 2.0 * u_n * n[0];
+                W_g[2] = W_i[2] - 2.0 * u_n * n[1];
+                break;
+            case BoundaryType::UPT:
+                for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = data[i];
+                break;
+            case BoundaryType::P_OUT: {
+                const rtype a = Kokkos::sqrt(gamma * W_i[3] / W_i[0]);
+                if (u_n < a) {
+                    // Subsonic: impose pressure, keep temperature
+                    W_g[0] = W_i[0] * data[3] / W_i[3];
+                    W_g[3] = data[3];
+                }
+                break;
+            }
+        }
+    }
+};
 
-        /**
-         * @brief Set the mesh.
-         * @param mesh Pointer to the mesh.
-         */
-        void set_mesh(std::shared_ptr<Mesh> mesh);
+/**
+ * @brief Device-side lookup from faces to boundary conditions.
+ */
+struct BoundaryData {
+    Kokkos::View<int32_t *> face_bc;          // Index into bcs, -1 for interior faces
+    Kokkos::View<BoundaryCondition *> bcs;
+    rtype gamma = 1.4;
+    bool viscous = false;
 
-        /**
-         * @brief Set the face quadrature weights.
-         * @param face_quad_weights Face quadrature weights.
-         */
-        void set_face_quad_weights(Kokkos::View<rtype *> face_quad_weights);
-
-        /**
-         * @brief Set the physics.
-         * @param physics Pointer to the physics.
-         */
-        void set_physics(std::shared_ptr<PhysicsWrapper> physics);
-
-        /**
-         * @brief Set the Riemann solver.
-         * @param riemann_solver Pointer to the Riemann solver.
-         */
-        void set_riemann_solver(std::shared_ptr<RiemannSolver> riemann_solver);
-
-        /**
-         * @brief Print the boundary.
-         */
-        virtual void print();
-
-        /**
-         * @brief Initialize the boundary.
-         * @param input TOML input parameter table.
-         */
-        virtual void init(const toml::value & input);
-
-        /**
-         * @brief Copy data from the host to the device.
-         */
-        virtual void copy_host_to_device();
-
-        /**
-         * @brief Copy data from the device to the host.
-         */
-        virtual void copy_device_to_host();
-
-        /**
-         * @brief Compute and apply the boundary flux.
-         * @param face_solution Pointer to the face solution.
-         * @param rhs Pointer to the right hand side.
-         */
-        virtual void apply(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
-                           Kokkos::View<rtype *[N_CONSERVATIVE]> rhs) = 0;
-        
-    protected:
-        FaceZone * zone;
-        std::shared_ptr<Mesh> mesh;
-        Kokkos::View<rtype *> face_quad_weights;
-        BoundaryType type;
-        std::shared_ptr<PhysicsWrapper> physics;
-        std::shared_ptr<RiemannSolver> riemann_solver;
-    private:
+    /**
+     * @brief Ghost state for boundary face i_face.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void ghost_W(const uint32_t i_face, const rtype * W_i, const rtype * n, rtype * W_g) const {
+        bcs(face_bc(i_face)).ghost_W(W_i, n, gamma, viscous, W_g);
+    }
 };
 
 #endif // BOUNDARY_H

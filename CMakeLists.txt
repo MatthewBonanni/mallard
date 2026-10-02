@@ -10,34 +10,33 @@ endif()
 add_compile_options(-Wall -Wextra -Wpedantic)
 
 # Compile-time options
-option(${PROJECT_NAME}_USE_DOUBLES "Use double precision" ON)
-message(STATUS "Mallard: Double precision: ${${PROJECT_NAME}_USE_DOUBLES}")
-if(${PROJECT_NAME}_USE_DOUBLES)
-    add_compile_definitions(${PROJECT_NAME}_USE_DOUBLES)
+option(${PROJECT_NAME}_USE_DOUBLE "Use double precision" ON)
+message(STATUS "Mallard: Double precision: ${${PROJECT_NAME}_USE_DOUBLE}")
+if(${PROJECT_NAME}_USE_DOUBLE)
+    add_compile_definitions(${PROJECT_NAME}_USE_DOUBLE)
 endif()
 
-# Add HDF5 dependency
+# HDF5 is not used by the solver yet; it is only built/found on request
+option(${PROJECT_NAME}_ENABLE_HDF5 "Enable HDF5" OFF)
 option(USE_SYSTEM_HDF5 "Use system-installed HDF5" ON)
-if(USE_SYSTEM_HDF5)
-    find_package(HDF5 REQUIRED COMPONENTS CXX)
-    message(STATUS "Found system HDF5: version ${HDF5_VERSION}")
-    include_directories(${HDF5_INCLUDE_DIRS})
-else()
-    message(STATUS "Using external HDF5 from submodule")
-    add_subdirectory(src/external/hdf5 ${CMAKE_BINARY_DIR}/external/hdf5)
-    include_directories(${CMAKE_BINARY_DIR}/external/hdf5)
+if(${PROJECT_NAME}_ENABLE_HDF5)
+    if(USE_SYSTEM_HDF5)
+        find_package(HDF5 REQUIRED COMPONENTS CXX)
+        message(STATUS "Found system HDF5: version ${HDF5_VERSION}")
+        include_directories(${HDF5_INCLUDE_DIRS})
+    else()
+        message(STATUS "Using external HDF5 from submodule")
+        add_subdirectory(src/external/hdf5 ${CMAKE_BINARY_DIR}/external/hdf5)
+        include_directories(${CMAKE_BINARY_DIR}/external/hdf5)
+    endif()
 endif()
 
-# Add Kokkos and KokkosKernels dependencies
+# Add Kokkos dependency
 option(USE_SYSTEM_KOKKOS "Use system-installed Kokkos" ON)
 if(USE_SYSTEM_KOKKOS)
-    find_package(Kokkos REQUIRED)
-    find_package(KokkosKernels REQUIRED)
+    find_package(Kokkos 5 REQUIRED)
 else()
     add_subdirectory(src/external/kokkos ${CMAKE_BINARY_DIR}/external/kokkos)
-    add_subdirectory(src/external/kokkos-kernels ${CMAKE_BINARY_DIR}/external/kokkos-kernels)
-    include_directories(${CMAKE_BINARY_DIR}/external/kokkos)
-    include_directories(${CMAKE_BINARY_DIR}/external/kokkos-kernels)
 endif()
 
 # Include other external libraries
@@ -49,7 +48,7 @@ add_subdirectory(src)
 add_subdirectory(test)
 
 # Documentation setup
-option(BUILD_DOCS "Build documentation" ON)
+option(BUILD_DOCS "Build documentation" OFF)
 if(BUILD_DOCS)
     find_package(Doxygen)
     if(Doxygen_FOUND)

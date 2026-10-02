@@ -1,21 +1,21 @@
 /**
  * @file solver.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Solver class declaration. 
- * @version 0.1
- * @date 2023-12-17
- * 
+ * @brief Solver class declaration.
+ * @version 0.2
+ * @date 2023-12-20
+ *
  * @copyright Copyright (c) 2023 Matthew Bonanni
- * 
+ *
  */
 
 #ifndef SOLVER_H
 #define SOLVER_H
 
+#include <functional>
+#include <memory>
 #include <string>
 #include <vector>
-#include <memory>
-#include <functional>
 
 #include <toml.hpp>
 
@@ -29,246 +29,130 @@
 
 class Solver {
     public:
-        /**
-         * @brief Construct a new Solver object
-         */
         Solver();
-
-        /**
-         * @brief Destroy the Solver object
-         */
         ~Solver();
 
         /**
-         * @brief Initialize the solver.
-         * @param input_file_name Name of the input file.
+         * @brief Initialize the solver from an input file.
+         * @param input_file_name Path to the TOML input file.
          * @return Exit status.
          */
-        int init(const std::string& input_file_name);
+        int init(const std::string & input_file_name);
 
         /**
-         * @brief Run the solver.
+         * @brief Initialize the solver from a parsed TOML input.
+         * @param input Parsed TOML input.
+         * @return Exit status.
+         */
+        int init(const toml::value & input);
+
+        /**
+         * @brief Run until a stop condition is reached.
          * @return Exit status.
          */
         int run();
 
         /**
-         * @brief Update primitive variables.
-         */
-        void update_primitives();
-
-        /**
-         * @brief Compute the spectral radius.
-         * @return maximum cell-wise spectral radius.
-         */
-        rtype calc_spectral_radius();
-
-        /**
-         * @brief Calculate the right hand side.
-         * @param solution Solution vector.
-         * @param face_solution Face solution vector.
-         * @param rhs Right hand side vector.
-         */
-        void calc_rhs(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                      Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
-                      Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
-        
-        /**
-         * @brief Pre-RHS hook.
-         * @param solution Solution vector.
-         * @param face_solution Face solution vector.
-         * @param rhs Right hand side vector.
-         */
-        void pre_rhs(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
-                     Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
-        
-        /**
-         * @brief Add the source term contributions to the right hand side.
-         * @param solution Solution vector.
-         * @param rhs Right hand side vector.
-         */
-        void calc_rhs_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                             Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
-        
-        /**
-         * @brief Add the interior flux contributions to the right hand side.
-         * @param face_solution Face solution vector.
-         * @param rhs Right hand side vector.
-         */
-        void calc_rhs_interior(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
-                               Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
-        
-        /**
-         * @brief Add the boundary flux contributions to the right hand side.
-         * @param face_solution Face solution vector.
-         * @param rhs Right hand side vector.
-         */
-        void calc_rhs_boundaries(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
-                                 Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
-    protected:
-        /**
-         * @brief Initialize the mesh.
-         */
-        void init_mesh();
-
-        /**
-         * @brief Initialize the physics options.
-         */
-        void init_physics();
-
-        /**
-         * @brief Initialize the numerics options.
-         */
-        void init_numerics();
-
-        /**
-         * @brief Initialize the boundaries.
-         */
-        void init_boundaries();
-
-        /**
-         * @brief Initialize the run parameters.
-         */
-        void init_run_parameters();
-
-        /**
-         * @brief Initialize various output options.
-         */
-        void init_output();
-
-        /**
-         * @brief Initialize the data writers.
-         */
-        void init_data_writers();
-
-        /**
-         * @brief Initialize the solution vectors.
-         */
-        void init_solution();
-
-        /**
-         * @brief Initialize the solution to a constant value.
-         */
-        void init_solution_constant();
-
-        /**
-         * @brief Initialize the solution based on an analytical expression.
-         */
-        void init_solution_analytical();
-
-        /**
-         * @brief Allocate memory for the data vectors.
-         */
-        void allocate_memory();
-
-        /**
-         * @brief Copy data from the host to the device.
-         */
-        void copy_host_to_device();
-
-        /**
-         * @brief Copy data from the device to the host.
-         */
-        void copy_device_to_host();
-
-        /**
-         * @brief Register the data objects.
-         */
-        void register_data();
-
-        /**
-         * @brief Determine whether the simulation should stop.
-         * @return Done flag.
-         */
-        bool done() const;
-
-        /**
-         * @brief Deallocate memory for the data vectors.
-         */
-        void deallocate_memory();
-
-        /**
-         * @brief Print the logo.
-         */
-        void print_logo() const;
-
-        /**
-         * @brief Compute the time step size.
-         */
-        void calc_dt();
-
-        /**
-         * @brief Take a single time step.
+         * @brief Advance the solution by one time step.
          */
         void take_step();
 
         /**
-         * @brief Print step info.
+         * @brief Compute dU/dt for the given conservative state.
          */
-        void print_step_info() const;
+        void calc_rhs(StateView solution, StateView rhs);
 
         /**
-         * @brief Do checks.
+         * @brief Compute the stable time step for the current solution.
+         * @return dt corresponding to CFL = 1.
          */
+        rtype calc_dt_cfl1();
+
+        /**
+         * @brief Recompute primitives from conservatives on the device.
+         */
+        void update_primitives();
+
+        /**
+         * @brief Copy the device solution to the host mirrors.
+         */
+        void copy_device_to_host();
+
+        /**
+         * @brief Copy the host mirrors to the device solution.
+         */
+        void copy_host_to_device();
+
+        /**
+         * @brief Sum of each conservative variable integrated over the domain.
+         */
+        std::array<rtype, N_CONSERVATIVE> integrate_conservatives();
+
+        rtype get_time() const { return t; }
+        uint32_t get_step() const { return step; }
+        const Euler & get_physics() const { return physics; }
+        std::shared_ptr<Mesh> get_mesh() const { return mesh; }
+
+        StateView conservatives;
+        Kokkos::View<rtype *[N_PRIMITIVE]> primitives;
+        StateView::host_mirror_type h_conservatives;
+        Kokkos::View<rtype *[N_PRIMITIVE]>::host_mirror_type h_primitives;
+
+    protected:
+        void init_mesh();
+        void init_physics();
+        void init_numerics();
+        void init_boundaries();
+        void init_run_parameters();
+        void init_output();
+        void init_solution();
+        void init_solution_constant();
+        void init_solution_analytical();
+        void allocate_memory();
+        void register_data();
+        bool done() const;
+        void print_logo() const;
+        void calc_dt();
         void do_checks();
+        void check_fields();
+        void write_data(bool force = false);
 
-        /**
-         * @brief Check fields for NaNs.
-         */
-        void check_fields() const;
-
-        /**
-         * @brief Write data.
-         */
-        void write_data(bool force = false) const;
-        
-        Kokkos::View<rtype *[N_CONSERVATIVE]> conservatives;
-        Kokkos::View<rtype *[   N_PRIMITIVE]> primitives;
-        Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_conservatives;
-
-        Kokkos::View<rtype *[N_CONSERVATIVE]>::HostMirror h_conservatives;
-        Kokkos::View<rtype *[   N_PRIMITIVE]>::HostMirror h_primitives;
-        Kokkos::View<rtype **[2][N_CONSERVATIVE]>::HostMirror h_face_conservatives;
     private:
-        /**
-         * @brief Launch the flux functor.
-         */
-        template <typename T_physics, typename T_riemann_solver>
-        void launch_flux_functor(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
-                                 Kokkos::View<rtype *[N_CONSERVATIVE]> rhs);
+        template <typename T_riemann_solver>
+        void launch_flux_functor(StateView rhs);
 
         toml::value input;
-        uint32_t n_steps;
+
+        // Run parameters
+        uint64_t n_steps;
         rtype t_stop;
         rtype t_wall_stop;
         bool use_cfl;
         rtype dt;
         rtype cfl;
-        Kokkos::View<rtype *> cfl_local;
-        Kokkos::View<rtype *>::HostMirror h_cfl_local;
         rtype t;
-        rtype t_last_check;
-        rtype t_wall_0;
-        rtype t_wall_last_check;
-        uint32_t step;
+        uint64_t step;
         Kokkos::Timer timer;
+        rtype t_wall_last_check;
+        rtype t_last_check;
 
         // Numerics and physics
         std::shared_ptr<Mesh> mesh;
-        std::vector<std::unique_ptr<Boundary>> boundaries;
+        Euler physics;
+        BoundaryData boundary_data;
         std::unique_ptr<FaceReconstruction> face_reconstruction;
-        std::shared_ptr<RiemannSolver> riemann_solver;
+        RiemannSolverType riemann_solver_type;
         std::unique_ptr<TimeIntegrator> time_integrator;
-        std::shared_ptr<PhysicsWrapper> physics;
 
-        // Data views
-        std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> solution_vec;
-        std::vector<Kokkos::View<rtype *[N_CONSERVATIVE]>> rhs_vec;
-        std::function<void(Kokkos::View<rtype *[N_CONSERVATIVE]>,
-                           Kokkos::View<rtype **[2][N_CONSERVATIVE]>,
-                           Kokkos::View<rtype *[N_CONSERVATIVE]>)> rhs_func;
-        
+        // Work arrays
+        Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
+        Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
+        Kokkos::View<rtype *> cfl_local;
+        Kokkos::View<rtype *>::host_mirror_type h_cfl_local;
+        std::vector<StateView> solution_vec;
+        std::vector<StateView> rhs_vec;
+        RHSFunction rhs_func;
+
         // Checks
         uint32_t check_interval;
         bool check_nan;

@@ -1,112 +1,52 @@
 /**
  * @file physics_test.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Tests for physics
- * @version 0.1
- * @date 2024-01-05
- * 
+ * @brief Tests for the physics models.
+ * @version 0.2
+ * @date 2024-11-26
+ *
  * @copyright Copyright (c) 2024 Matthew Bonanni
- * 
+ *
  */
 
 #include <gtest/gtest.h>
-#include "test_utils.h"
+
 #include "physics.h"
 
-const rtype TOL = 1e-6;
-
-TEST(PhysicsTest, SetRCpCv) {
-    Euler physics;
-    rtype p_min = 0.0;
-    rtype p_max = 1e20;
-    rtype gamma = 1.4;
-    rtype p_ref = 101325.0;
-    rtype T_ref = 298.15;
-    rtype rho_ref = 1.225;
-    physics.init(p_min, p_max, gamma, p_ref, T_ref, rho_ref);
-    physics.copy_host_to_device();
-
-    EXPECT_NEAR(physics.get_h_gamma(), gamma,              TOL);
-    EXPECT_NEAR(physics.get_h_R(),     277.42507366857529, TOL);
-    EXPECT_NEAR(physics.get_h_Cp(),    970.98775784001373, TOL);
-    EXPECT_NEAR(physics.get_h_Cv(),    693.56268417143838, TOL);
+TEST(PhysicsTest, ReferenceStateDefinesGasConstants) {
+    Euler euler = Euler::from_reference(1.4, 101325.0, 298.15, 1.225);
+    const rtype R = 101325.0 / (298.15 * 1.225);
+    EXPECT_DOUBLE_EQ(euler.R, R);
+    EXPECT_DOUBLE_EQ(euler.cp, R * 1.4 / 0.4);
+    EXPECT_DOUBLE_EQ(euler.cv, R / 0.4);
+    EXPECT_NEAR(euler.get_pressure_from_density_temperature(1.225, 298.15), 101325.0, 1e-8);
 }
 
-template <typename T_physics>
-struct ConversionFunctor {
-    public:
-        ConversionFunctor(Kokkos::View<rtype *[N_CONSERVATIVE]> conservatives,
-                          Kokkos::View<rtype *[N_PRIMITIVE]> primitives,
-                          T_physics physics) : 
-                            conservatives(conservatives),
-                            primitives(primitives),
-                            physics(physics) {}
+TEST(PhysicsTest, PrimitivesFromConservatives) {
+    Euler euler = Euler::from_reference(1.4, 1.0, 1.0, 1.0);
+    const rtype rho = 1.2, u = 0.3, v = -0.4, p = 2.5;
+    const rtype W[N_CONSERVATIVE] = {rho, u, v, p};
+    rtype cons[N_CONSERVATIVE], prim[N_PRIMITIVE];
+    euler.compute_conservatives_from_W(cons, W);
+    EXPECT_DOUBLE_EQ(cons[0], rho);
+    EXPECT_DOUBLE_EQ(cons[1], rho * u);
+    EXPECT_DOUBLE_EQ(cons[2], rho * v);
+    EXPECT_DOUBLE_EQ(cons[3], p / 0.4 + 0.5 * rho * (u * u + v * v));
 
-        KOKKOS_INLINE_FUNCTION
-        void operator()(const uint32_t i_cell) const {
-            rtype conservatives_i[N_CONSERVATIVE];
-            rtype primitives_i[N_PRIMITIVE];
-            FOR_I_CONSERVATIVE conservatives_i[i] = conservatives(i_cell, i);
-            physics.compute_primitives_from_conservatives(primitives_i, conservatives_i);
-            FOR_I_PRIMITIVE primitives(i_cell, i) = primitives_i[i];
-        }
+    euler.compute_primitives_from_conservatives(prim, cons);
+    const rtype T = p / (rho * euler.R);
+    EXPECT_NEAR(prim[0], u, 1e-14);
+    EXPECT_NEAR(prim[1], v, 1e-14);
+    EXPECT_NEAR(prim[2], p, 1e-13);
+    EXPECT_NEAR(prim[3], T, 1e-13);
+    EXPECT_NEAR(prim[4], euler.cp * T, 1e-13);
+}
 
-    private:
-        Kokkos::View<rtype *[N_CONSERVATIVE]> conservatives;
-        Kokkos::View<rtype *[N_PRIMITIVE]> primitives;
-        const T_physics physics;
-};
-
-TEST(PhysicsTest, EulerPrimitivesFromConservatives) {
-    Euler physics;
-    rtype p_min = 0.0;
-    rtype p_max = 1e20;
-    rtype gamma = 1.4;
-    rtype p_ref = 101325.0;
-    rtype T_ref = 298.15;
-    rtype rho_ref = 1.225;
-    physics.init(p_min, p_max, gamma, p_ref, T_ref, rho_ref);
-    physics.copy_host_to_device();
-
-    NVector u = {10.0, 5.0};
-    rtype p = 101325.0;
-    rtype T = 298.15;
-    rtype rho = p / (physics.get_h_R() * T);
-    rtype e = physics.get_h_Cv() * T;
-    rtype h = e + p / rho;
-    rtype E = e + 0.5 * (u[0] * u[0] + u[1] * u[1]);
-    rtype rhoE = rho * E;
-
-    Kokkos::View<rtype [2][N_CONSERVATIVE]> conservatives("conservatives");
-    Kokkos::View<rtype [2][N_PRIMITIVE]> primitives("primitives");
-
-    auto h_conservatives = Kokkos::create_mirror_view(conservatives);
-    auto h_primitives = Kokkos::create_mirror_view(primitives);
-
-    h_conservatives(0, 0) = rho;
-    h_conservatives(0, 1) = rho * u[0];
-    h_conservatives(0, 2) = rho * u[1];
-    h_conservatives(0, 3) = rhoE;
-    h_conservatives(1, 0) = rho;
-    h_conservatives(1, 1) = rho * u[0];
-    h_conservatives(1, 2) = rho * u[1];
-    h_conservatives(1, 3) = rhoE;
-
-    Kokkos::deep_copy(conservatives, h_conservatives);
-
-    ConversionFunctor<Euler> conversion_functor(conservatives, primitives, physics);
-    Kokkos::parallel_for(2, conversion_functor);
-
-    Kokkos::deep_copy(h_primitives, primitives);
-
-    EXPECT_NEAR(h_primitives(0, 0), u[0], TOL);
-    EXPECT_NEAR(h_primitives(0, 1), u[1], TOL);
-    EXPECT_NEAR(h_primitives(0, 2), p,    TOL);
-    EXPECT_NEAR(h_primitives(0, 3), T,    TOL);
-    EXPECT_NEAR(h_primitives(0, 4), h,    TOL);
-    EXPECT_NEAR(h_primitives(1, 0), u[0], TOL);
-    EXPECT_NEAR(h_primitives(1, 1), u[1], TOL);
-    EXPECT_NEAR(h_primitives(1, 2), p,    TOL);
-    EXPECT_NEAR(h_primitives(1, 3), T,    TOL);
-    EXPECT_NEAR(h_primitives(1, 4), h,    TOL);
+TEST(PhysicsTest, WRoundTrip) {
+    Euler euler = Euler::from_reference(1.67, 2.0, 3.0, 0.5);
+    const rtype W[N_CONSERVATIVE] = {0.7, -1.3, 2.1, 0.05};
+    rtype cons[N_CONSERVATIVE], W2[N_CONSERVATIVE];
+    euler.compute_conservatives_from_W(cons, W);
+    euler.compute_W_from_conservatives(W2, cons);
+    FOR_I_CONSERVATIVE EXPECT_NEAR(W2[i], W[i], 1e-13);
 }

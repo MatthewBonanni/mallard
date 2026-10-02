@@ -95,7 +95,7 @@ class FaceZone : public Zone {
         void copy_device_to_host();
 
         Kokkos::View<uint32_t *> faces;
-        Kokkos::View<uint32_t *>::HostMirror h_faces;
+        Kokkos::View<uint32_t *>::host_mirror_type h_faces;
     protected:
     private:
         FaceZoneType type;
@@ -136,7 +136,7 @@ class CellZone : public Zone {
         void copy_device_to_host();
 
         Kokkos::View<uint32_t *> cells;
-        Kokkos::View<uint32_t *>::HostMirror h_cells;
+        Kokkos::View<uint32_t *>::host_mirror_type h_cells;
     protected:
     private:
         CellZoneType m_type;

@@ -165,16 +165,23 @@ void Mesh::h_neighbors_of_cell(uint32_t i_cell, uint8_t n_order, std::vector<uin
 }
 
 void Mesh::compute_cell_centroids() {
+    // Area centroid of the polygon (the vertex average is only correct for
+    // triangles and parallelograms)
     for (uint32_t i_cell = 0; i_cell < n_cells; ++i_cell) {
-        h_cell_coords(i_cell, 0) = 0.0;
-        h_cell_coords(i_cell, 1) = 0.0;
-        uint8_t n_nodes = h_n_nodes_of_cell(i_cell);
-        for (uint8_t i_node = 0; i_node < n_nodes; ++i_node) {
-            h_cell_coords(i_cell, 0) += h_node_coords(h_node_of_cell(i_cell, i_node), 0);
-            h_cell_coords(i_cell, 1) += h_node_coords(h_node_of_cell(i_cell, i_node), 1);
+        const uint32_t n_nodes = h_n_nodes_of_cell(i_cell);
+        rtype A = 0.0, Cx = 0.0, Cy = 0.0;
+        for (uint32_t k = 0; k < n_nodes; ++k) {
+            const uint32_t a = h_node_of_cell(i_cell, k);
+            const uint32_t b = h_node_of_cell(i_cell, (k + 1) % n_nodes);
+            const rtype xa = h_node_coords(a, 0), ya = h_node_coords(a, 1);
+            const rtype xb = h_node_coords(b, 0), yb = h_node_coords(b, 1);
+            const rtype cross = xa * yb - xb * ya;
+            A += 0.5 * cross;
+            Cx += (xa + xb) * cross;
+            Cy += (ya + yb) * cross;
         }
-        h_cell_coords(i_cell, 0) /= n_nodes;
-        h_cell_coords(i_cell, 1) /= n_nodes;
+        h_cell_coords(i_cell, 0) = Cx / (6.0 * A);
+        h_cell_coords(i_cell, 1) = Cy / (6.0 * A);
     }
 }
 
@@ -260,12 +267,23 @@ void Mesh::compute_face_normals() {
     }
 }
 
+void Mesh::compute_face_centroids() {
+    for (uint32_t i_face = 0; i_face < n_faces; ++i_face) {
+        uint32_t i_node_0 = h_node_of_face(i_face, 0);
+        uint32_t i_node_1 = h_node_of_face(i_face, 1);
+        FOR_I_DIM {
+            h_face_coords(i_face, i) = 0.5 * (h_node_coords(i_node_0, i) + h_node_coords(i_node_1, i));
+        }
+    }
+}
+
 void Mesh::copy_host_to_device() {
     Kokkos::deep_copy(node_coords, h_node_coords);
     Kokkos::deep_copy(cell_coords, h_cell_coords);
     Kokkos::deep_copy(cell_volume, h_cell_volume);
     Kokkos::deep_copy(face_area, h_face_area);
     Kokkos::deep_copy(face_normals, h_face_normals);
+    Kokkos::deep_copy(face_coords, h_face_coords);
     Kokkos::deep_copy(nodes_of_cell, h_nodes_of_cell);
     Kokkos::deep_copy(offsets_nodes_of_cell, h_offsets_nodes_of_cell);
     Kokkos::deep_copy(faces_of_cell, h_faces_of_cell);
@@ -287,6 +305,7 @@ void Mesh::copy_device_to_host() {
     Kokkos::deep_copy(h_cell_volume, cell_volume);
     Kokkos::deep_copy(h_face_area, face_area);
     Kokkos::deep_copy(h_face_normals, face_normals);
+    Kokkos::deep_copy(h_face_coords, face_coords);
     Kokkos::deep_copy(h_nodes_of_cell, nodes_of_cell);
     Kokkos::deep_copy(h_offsets_nodes_of_cell, offsets_nodes_of_cell);
     Kokkos::deep_copy(h_faces_of_cell, faces_of_cell);
@@ -312,6 +331,7 @@ void Mesh::init_cart(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
     cell_volume = Kokkos::View<rtype *>("cell_volume", n_cells);
     face_area = Kokkos::View<rtype *>("face_area", n_faces);
     face_normals = Kokkos::View<rtype *[N_DIM]>("face_normals", n_faces);
+    face_coords = Kokkos::View<rtype *[N_DIM]>("face_coords", n_faces);
     cells_of_face = Kokkos::View<int32_t *[2]>("cells_of_face", n_faces);
 
     h_node_coords = Kokkos::create_mirror_view(node_coords);
@@ -319,6 +339,7 @@ void Mesh::init_cart(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
     h_cell_volume = Kokkos::create_mirror_view(cell_volume);
     h_face_area = Kokkos::create_mirror_view(face_area);
     h_face_normals = Kokkos::create_mirror_view(face_normals);
+    h_face_coords = Kokkos::create_mirror_view(face_coords);
     h_cells_of_face = Kokkos::create_mirror_view(cells_of_face);
 
     // Temporary connectivity arrays
@@ -554,18 +575,20 @@ void Mesh::init_cart(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
     compute_cell_volumes();
     compute_cell_centroids();
     compute_face_normals();
+    compute_face_centroids();
 }
 
 void Mesh::init_cart_tri(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
     n_cells = 2 * nx * ny;
     n_nodes = (nx + 1) * (ny + 1);
-    n_faces = 3 * n_cells + nx + ny;
+    n_faces = 3 * nx * ny + nx + ny;
 
     node_coords = Kokkos::View<rtype *[N_DIM]>("node_coords", n_nodes);
     cell_coords = Kokkos::View<rtype *[N_DIM]>("cell_coords", n_cells);
     cell_volume = Kokkos::View<rtype *>("cell_volume", n_cells);
     face_area = Kokkos::View<rtype *>("face_area", n_faces);
     face_normals = Kokkos::View<rtype *[N_DIM]>("face_normals", n_faces);
+    face_coords = Kokkos::View<rtype *[N_DIM]>("face_coords", n_faces);
     cells_of_face = Kokkos::View<int32_t *[2]>("cells_of_face", n_faces);
 
     h_node_coords = Kokkos::create_mirror_view(node_coords);
@@ -573,6 +596,7 @@ void Mesh::init_cart_tri(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
     h_cell_volume = Kokkos::create_mirror_view(cell_volume);
     h_face_area = Kokkos::create_mirror_view(face_area);
     h_face_normals = Kokkos::create_mirror_view(face_normals);
+    h_face_coords = Kokkos::create_mirror_view(face_coords);
     h_cells_of_face = Kokkos::create_mirror_view(cells_of_face);
 
     // Temporary connectivity arrays
@@ -823,6 +847,7 @@ void Mesh::init_cart_tri(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
     compute_cell_volumes();
     compute_cell_centroids();
     compute_face_normals();
+    compute_face_centroids();
 }
 
 void Mesh::init_wedge(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
@@ -845,4 +870,5 @@ void Mesh::init_wedge(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
     compute_cell_volumes();
     compute_cell_centroids();
     compute_face_normals();
+    compute_face_centroids();
 }
