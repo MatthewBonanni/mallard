@@ -13,7 +13,6 @@
 #include <array>
 #include <cmath>
 #include <fstream>
-#include <iostream>
 #include <limits>
 #include <map>
 #include <stdexcept>
@@ -201,33 +200,35 @@ void TENO::init(const toml::value & input) {
     quadrature_face = GaussLegendre(n_gp);
     if constexpr (N_DIM == 3) init_face_quadrature_3d(order);
 
-    Kokkos::Timer timer;
     // The cache holds no gather depths, which distributed runs need to size the halo
     const std::string cache_file = comm::size() > 1 ? "" : toml::find_or<std::string>(input, "cache_file", "");
     if (cache_file.empty() || !load_cache(cache_file)) {
         compute_stencils_and_matrices();
-        if (!cache_file.empty()) save_cache(cache_file);
+        if (!cache_file.empty() && save_cache(cache_file)) {
+            cache_status += (cache_status.empty() ? "" : ", ") + std::string("written to ") + cache_file;
+        }
     }
-    print();
-    std::cout << "> Precomputation time: " << timer.seconds() << " s" << std::endl;
+    largest_stencil = comm::allreduce(static_cast<uint32_t>(stencil_large.extent(1)), comm::Op::MAX);
 }
 
-void TENO::print() const {
-    std::cout << LOG_SEPARATOR << std::endl;
-    std::cout << "Face reconstruction: " << FACE_RECONSTRUCTION_NAMES.at(type) << std::endl;
-    std::cout << "> Order: " << (int)degree + 1 << " (polynomial degree " << (int)degree << ")" << std::endl;
-    std::cout << "> Large stencil size: " << n_stencil_large << " + target" << std::endl;
-    std::cout << "> Small stencil size: " << n_stencil_small << " + target" << std::endl;
-    std::cout << "> Face quadrature points: " << (int)n_face_quadrature_points() << std::endl;
-    std::cout << "> Troubled-cell threshold: " << sigma_threshold << std::endl;
-    if (C_T > 0.0) {
-        std::cout << "> C_T: " << C_T << std::endl;
-    } else {
-        std::cout << "> C_T: adaptive" << std::endl;
+logging::Items TENO::summary() const {
+    using logging::format;
+    std::string stencils = format("large %d+1 (largest %u), small %d+1", static_cast<int>(n_stencil_large),
+                                  largest_stencil, static_cast<int>(n_stencil_small));
+    if (n_sector_unavailable > 0 && comm::size() == 1) {
+        stencils += format(", %lld sector stencils cut by boundaries", static_cast<long long>(n_sector_unavailable));
     }
-    std::cout << "> Characteristic decomposition: " << (characteristic ? "yes" : "no") << std::endl;
-    std::cout << "> Bound-preserving scaling in troubled cells: " << (bound_preserving ? "yes" : "no") << std::endl;
-    std::cout << LOG_SEPARATOR << std::endl;
+    logging::Items out = {
+        {"Reconstruction", format("TENO, order %d (degree %d), %d face quadrature points", degree + 1, degree,
+                                  static_cast<int>(n_face_quadrature_points()))},
+        {"TENO stencils", stencils},
+        {"TENO switch", "threshold " + logging::real(sigma_threshold) + ", C_T " +
+                            (C_T > 0.0 ? logging::real(C_T) : std::string("adaptive")) + ", characteristic " +
+                            (characteristic ? "yes" : "no") + ", bound-preserving " +
+                            (bound_preserving ? "yes" : "no")},
+    };
+    if (!cache_status.empty()) out.emplace_back("TENO cache", cache_status);
+    return out;
 }
 
 uint8_t TENO::n_face_quadrature_points() const {
@@ -615,7 +616,7 @@ void TENO::compute_stencils_and_matrices() {
         throw std::runtime_error("TENO: could not build a full-rank large stencil for " +
                                  std::to_string(n_failed_large) + " cells (mesh too small for this order?).");
     }
-    std::cout << "TENO: " << n_invalid_small << " small sector stencils unavailable (boundaries)." << std::endl;
+    n_sector_unavailable = n_invalid_small;
 
     Kokkos::deep_copy(scale, h_scale);
     Kokkos::deep_copy(basis_mean, h_basis_mean);
@@ -641,7 +642,6 @@ void TENO::compute_stencils_and_matrices() {
     Kokkos::deep_copy(stencil_large_size, h_stencil_large_size);
     Kokkos::deep_copy(stencil_large, h_compact_stencil);
     Kokkos::deep_copy(stencil_large_face, h_compact_face);
-    std::cout << "TENO: largest central stencil " << ns_used << " cells (nominal " << ns << ")." << std::endl;
     Kokkos::deep_copy(pinv_large, h_compact_pinv);
     Kokkos::deep_copy(stencil_small_size, h_stencil_small_size);
     Kokkos::deep_copy(stencil_small, h_stencil_small);
@@ -1172,7 +1172,7 @@ void TENO::compute_stencils_and_matrices_3d() {
         throw std::runtime_error("TENO: could not build a full-rank large stencil for " +
                                  std::to_string(n_failed_large) + " cells (mesh too small for this order?).");
     }
-    std::cout << "TENO: " << n_invalid_small << " small sector stencils unavailable (boundaries)." << std::endl;
+    n_sector_unavailable = n_invalid_small;
     Kokkos::deep_copy(scale, h_scale);
     Kokkos::deep_copy(basis_mean, h_basis_mean);
     // Keep only as many stencil slots on the device as the largest stencil uses
@@ -1197,7 +1197,6 @@ void TENO::compute_stencils_and_matrices_3d() {
     Kokkos::deep_copy(stencil_large_size, h_stencil_large_size);
     Kokkos::deep_copy(stencil_large, h_compact_stencil);
     Kokkos::deep_copy(stencil_large_face, h_compact_face);
-    std::cout << "TENO: largest central stencil " << ns_used << " cells (nominal " << ns << ")." << std::endl;
     Kokkos::deep_copy(pinv_large, h_compact_pinv);
     Kokkos::deep_copy(stencil_small_size, h_stencil_small_size);
     Kokkos::deep_copy(stencil_small, h_stencil_small);
@@ -1859,11 +1858,11 @@ uint64_t TENO::cache_key() const {
     return hash.h;
 }
 
-void TENO::save_cache(const std::string & filename) const {
+bool TENO::save_cache(const std::string & filename) const {
     std::ofstream out(filename, std::ios::binary);
     if (!out.good()) {
-        std::cout << "TENO: could not write cache file " << filename << "." << std::endl;
-        return;
+        logging::warning("TENO: could not write stencil cache " + filename + ".");
+        return false;
     }
     const uint64_t key = cache_key();
     out.write(TENO_CACHE_MAGIC, sizeof(TENO_CACHE_MAGIC));
@@ -1879,7 +1878,7 @@ void TENO::save_cache(const std::string & filename) const {
     write_view(out, stencil_small_face);
     write_view(out, pinv_small);
     write_view(out, si_matrix);
-    std::cout << "TENO: wrote stencil cache " << filename << std::endl;
+    return true;
 }
 
 bool TENO::load_cache(const std::string & filename) {
@@ -1890,7 +1889,7 @@ bool TENO::load_cache(const std::string & filename) {
     in.read(magic, sizeof(magic));
     in.read(reinterpret_cast<char *>(&key), sizeof(key));
     if (!in.good() || std::string(magic) != TENO_CACHE_MAGIC || key != cache_key()) {
-        std::cout << "TENO: cache " << filename << " does not match this case; recomputing." << std::endl;
+        cache_status = filename + " does not match this case, recomputed";
         return false;
     }
     const bool ok = read_view(in, scale, "teno_scale") && read_view(in, basis_mean, "teno_basis_mean") &&
@@ -1903,13 +1902,13 @@ bool TENO::load_cache(const std::string & filename) {
                     read_view(in, stencil_small_face, "teno_stencil_small_face") &&
                     read_view(in, pinv_small, "teno_pinv_small") && read_view(in, si_matrix, "teno_si_matrix");
     if (!ok) {
-        std::cout << "TENO: cache " << filename << " is truncated; recomputing." << std::endl;
+        cache_status = filename + " is truncated, recomputed";
         return false;
     }
     troubled = Kokkos::View<rtype *>("teno_sigma", mesh->n_cells);
     troubled_coeffs = Kokkos::View<rtype ***>("teno_troubled_coeffs", mesh->n_cells, n_dof_large, N_CONSERVATIVE);
     troubled_cells = Kokkos::View<uint32_t *>("teno_troubled_cells", mesh->n_cells);
     n_troubled = Kokkos::View<uint32_t>("teno_n_troubled");
-    std::cout << "TENO: loaded stencil cache " << filename << std::endl;
+    cache_status = "loaded from " + filename;
     return true;
 }

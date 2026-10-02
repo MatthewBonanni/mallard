@@ -245,7 +245,7 @@ bool is_hdf5_mesh(const std::string & filename) {
 MeshBlock read_mesh_block(const toml::value & input) {
     const std::string type_str = toml::find_or<std::string>(input, "mesh", "type", "file");
     const auto it = MESH_TYPES.find(type_str);
-    if (it == MESH_TYPES.end()) throw std::runtime_error("Unknown mesh type: " + type_str + ".");
+    if (it == MESH_TYPES.end()) throw unknown_option(MESH_TYPES, "mesh.type", type_str);
     const MeshType type = it->second;
     if (type == MeshType::FILE) {
         const std::string filename = toml::find_or<std::string>(input, "mesh", "filename", "mesh.msh");

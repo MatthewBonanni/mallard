@@ -51,8 +51,6 @@ class TimeIntegrator {
     public:
         virtual ~TimeIntegrator() = default;
 
-        void print() const;
-
         TimeIntegratorType get_type() const { return type; }
         uint8_t get_n_solution_vectors() const { return n_solution_vectors; }
         uint8_t get_n_rhs_vectors() const { return n_rhs_vectors; }

@@ -11,18 +11,11 @@
 
 #include "time_integrator.h"
 
-#include <iostream>
 
 void axpby(const rtype a, StateView x, const rtype b, StateView y) {
     Kokkos::parallel_for("axpby", x.extent(0), KOKKOS_LAMBDA(const uint32_t i_cell) {
         FOR_I_CONSERVATIVE y(i_cell, i) = a * x(i_cell, i) + b * y(i_cell, i);
     });
-}
-
-void TimeIntegrator::print() const {
-    std::cout << LOG_SEPARATOR << std::endl;
-    std::cout << "Time integrator: " << TIME_INTEGRATOR_NAMES.at(type) << std::endl;
-    std::cout << LOG_SEPARATOR << std::endl;
 }
 
 FE::FE() {

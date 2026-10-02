@@ -2,6 +2,16 @@ cmake_minimum_required(VERSION 3.16)
 project(Mallard VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 
+# Version string for the run header, fixed at configure time
+set(Mallard_GIT_DESCRIBE "")
+find_package(Git QUIET)
+if(GIT_FOUND)
+    execute_process(COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE Mallard_GIT_DESCRIBE
+        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+endif()
+
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
 endif()

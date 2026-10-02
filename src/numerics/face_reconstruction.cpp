@@ -16,7 +16,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <iostream>
 #include <limits>
 #include <vector>
 
@@ -31,13 +30,11 @@ FaceReconstruction::FaceReconstruction() {
 }
 
 FaceReconstruction::~FaceReconstruction() {
-    std::cout << "Destroying face reconstruction: " << FACE_RECONSTRUCTION_NAMES.at(type) << std::endl;
+    // Empty
 }
 
-void FaceReconstruction::print() const {
-    std::cout << LOG_SEPARATOR << std::endl;
-    std::cout << "Face reconstruction: " << FACE_RECONSTRUCTION_NAMES.at(type) << std::endl;
-    std::cout << LOG_SEPARATOR << std::endl;
+logging::Items FaceReconstruction::summary() const {
+    return {{"Reconstruction", type == FaceReconstructionType::FIRST_ORDER ? "first order" : FACE_RECONSTRUCTION_NAMES.at(type)}};
 }
 
 void FaceReconstruction::set_mesh(std::shared_ptr<Mesh> mesh) {
@@ -158,7 +155,6 @@ FirstOrder::~FirstOrder() {
 void FirstOrder::init(const toml::value & input) {
     (void)(input);
     if constexpr (N_DIM == 3) init_face_quadrature_3d(1);
-    print();
 }
 
 uint8_t FirstOrder::n_face_quadrature_points() const {
@@ -220,24 +216,19 @@ void MUSCL::init(const toml::value & input) {
     const std::string limiter_str = toml::find_or<std::string>(input, "limiter", "venkatakrishnan");
     auto it = LIMITER_TYPES.find(limiter_str);
     if (it == LIMITER_TYPES.end()) {
-        throw std::runtime_error("Unknown limiter type: " + limiter_str + ".");
+        throw unknown_option(LIMITER_TYPES, "numerics.face_reconstruction.limiter", limiter_str);
     }
     limiter = it->second;
     venkat_K = find_real_or(input, "venkatakrishnan_K", 5.0);
     gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("gradients", mesh->n_cells);
     limiters = Kokkos::View<rtype *[N_CONSERVATIVE]>("limiters", mesh->n_cells);
     if constexpr (N_DIM == 3) init_face_quadrature_3d(1);
-    print();
 }
 
-void MUSCL::print() const {
-    std::cout << LOG_SEPARATOR << std::endl;
-    std::cout << "Face reconstruction: " << FACE_RECONSTRUCTION_NAMES.at(type) << std::endl;
-    std::cout << "> Limiter: " << LIMITER_NAMES.at(limiter) << std::endl;
-    if (limiter == LimiterType::VENKATAKRISHNAN) {
-        std::cout << "> Venkatakrishnan K: " << venkat_K << std::endl;
-    }
-    std::cout << LOG_SEPARATOR << std::endl;
+logging::Items MUSCL::summary() const {
+    std::string limiter_text = LIMITER_NAMES.at(limiter);
+    if (limiter == LimiterType::VENKATAKRISHNAN) limiter_text += " (K " + logging::real(venkat_K) + ")";
+    return {{"Reconstruction", "MUSCL, limiter " + limiter_text}};
 }
 
 uint8_t MUSCL::n_face_quadrature_points() const {

@@ -14,7 +14,6 @@
 
 #include "input.h"
 
-#include <iostream>
 #include <string>
 #include <cmath>
 #include <algorithm>
@@ -30,14 +29,14 @@ Mesh::Mesh() {
 }
 
 Mesh::~Mesh() {
-    std::cout << "Destroying mesh: " << MESH_NAMES.at(type) << std::endl;
+    // Empty
 }
 
 void Mesh::init(const toml::value & input) {
     std::string type_str = toml::find_or<std::string>(input, "mesh", "type", "file");
     typename std::unordered_map<std::string, MeshType>::const_iterator it = MESH_TYPES.find(type_str);
     if (it == MESH_TYPES.end()) {
-        throw std::runtime_error("Unknown mesh type: " + type_str + ".");
+        throw unknown_option(MESH_TYPES, "mesh.type", type_str);
     } else {
         set_type(it->second);
     }

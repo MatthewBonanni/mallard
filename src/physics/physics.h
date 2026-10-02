@@ -19,6 +19,7 @@
 #include <toml.hpp>
 
 #include "common.h"
+#include "log.h"
 
 enum class PhysicsType {
     EULER,
@@ -70,7 +71,8 @@ struct Euler {
      */
     static Euler from_input(const toml::value & input);
 
-    void print() const;
+    /** @brief Display lines for the run log. */
+    logging::Items summary() const;
 
     KOKKOS_INLINE_FUNCTION
     PhysicsType get_type() const {

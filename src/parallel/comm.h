@@ -54,6 +54,9 @@ inline bool is_root() { return rank() == 0; }
 /** @brief Block until all ranks arrive. */
 void barrier();
 
+/** @brief Ends every rank with the given exit code (MPI_Abort in parallel runs). */
+[[noreturn]] void abort(int code);
+
 enum class Op { SUM, MIN, MAX };
 
 /**

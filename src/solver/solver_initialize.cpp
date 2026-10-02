@@ -13,7 +13,6 @@
 
 #include "input.h"
 
-#include <iostream>
 #include <string>
 #include <unordered_map>
 
@@ -34,12 +33,12 @@ static const std::unordered_map<std::string, InitType> INIT_TYPES = {
 };
 
 void Solver::init_solution() {
-    std::cout << "Initializing solution..." << std::endl;
     const std::string type_str = toml::find_or<std::string>(input, "initialize", "type", "constant");
     auto it = INIT_TYPES.find(type_str);
     if (it == INIT_TYPES.end()) {
-        throw std::runtime_error("Unknown initialization type: " + type_str + ".");
+        throw unknown_option(INIT_TYPES, "initialize.type", type_str);
     }
+    initial_state = type_str;
     if (it->second == InitType::CONSTANT) {
         init_solution_constant();
     } else if (it->second == InitType::ANALYTICAL) {
@@ -69,11 +68,10 @@ void Solver::init_solution_restart() {
     }
     step = restart.step;
     t = restart.t;
-    t_last_check = t;
     for (auto & writer : data_writers) {
         writer->resume(step, t);
     }
-    std::cout << "Restarted from " << file << " at step " << step << ", t = " << t << std::endl;
+    initial_state = "restart from " + file + " (step " + std::to_string(step) + ", t = " + logging::real(t) + ")";
 }
 
 void Solver::init_solution_constant() {

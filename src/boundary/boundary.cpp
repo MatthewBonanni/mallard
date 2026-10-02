@@ -23,7 +23,7 @@ BoundaryCondition BoundaryCondition::from_input(const toml::value & input, const
     const std::string type_str = toml::find<std::string>(input, "type");
     auto it = BOUNDARY_TYPES.find(type_str);
     if (it == BOUNDARY_TYPES.end()) {
-        throw std::runtime_error("Unknown boundary type: " + type_str + ".");
+        throw unknown_option(BOUNDARY_TYPES, "boundaries[name = \"" + name + "\"].type", type_str);
     }
     BoundaryCondition bc;
     bc.type = it->second;

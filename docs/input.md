@@ -197,7 +197,18 @@ Used when Mallard runs on several MPI ranks (`mpirun -n N Mallard -i input.toml`
 
 | Key | Description |
 |---|---|
-| `check_interval` | Print solution ranges and timing every this many steps |
+| `check_interval` | Print a progress row every this many steps (default 1) |
+
+Each progress row shows the step, time `t`, time step `dt`, the fraction of the run done (by
+whichever of `n_steps`, `t_stop` and `t_wall_stop` comes first), the time-stepping wall time
+per step, the throughput in cell updates per second, the estimated time remaining, the minimum
+density and pressure, the maximum Mach number and, with TENO, the percentage of troubled cells.
+Files written appear as rows led by their step and time. The run ends with a summary of wall
+time (setup, time stepping, diagnostics, output) and average throughput.
+
+Only rank 0 prints, except for errors, which go to stderr from any rank and carry the rank in
+parallel runs. Output on a terminal is colored unless `NO_COLOR` is set (`CLICOLOR_FORCE=1`
+forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 
 ## `[[write_data]]`
 
