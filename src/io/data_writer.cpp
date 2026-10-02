@@ -11,6 +11,7 @@
 
 #include "data_writer.h"
 
+#include "comm.h"
 #include "input.h"
 
 #include <cmath>
@@ -128,10 +129,15 @@ void DataWriter::init(const toml::value & input,
             throw std::runtime_error("DataWriter: geometry can only be set for vtu output.");
         }
         FaceZone * zone = mesh->get_face_zone(geometry);
-        if (zone == nullptr) {
+        if (comm::allreduce(uint32_t(zone != nullptr), comm::Op::SUM) == 0) {
             throw std::runtime_error("DataWriter: unknown geometry: " + geometry + ".");
         }
-        for (uint32_t i = 0; i < zone->n_faces(); i++) geometry_faces.push_back(zone->h_faces(i));
+        surface = true;
+        // Each rank writes the faces of its owned cells
+        for (uint32_t i = 0; i < zone->n_faces(); i++) {
+            const uint32_t f = zone->h_faces(i);
+            if (static_cast<uint32_t>(mesh->h_cells_of_face(f, 0)) < mesh->n_owned()) geometry_faces.push_back(f);
+        }
     }
 
     const std::filesystem::path parent = std::filesystem::path(prefix).parent_path();
@@ -165,14 +171,20 @@ void DataWriter::write(uint64_t step, rtype t, bool force) {
     if (format == DataFormat::RESTART) {
         write_restart(stream.str() + ".restart", step, t);
     } else {
-        const std::string filename = stream.str() + ".vtu";
-        if (geometry_faces.empty()) {
-            write_vtu(filename, t);
+        // Distributed runs: one piece per rank and a .pvtu index
+        const bool pieces = mesh->n_global_cells > 0;
+        std::ostringstream piece;
+        piece << stream.str();
+        if (pieces) piece << "_p" << std::setw(4) << std::setfill('0') << comm::rank();
+        if (!surface) {
+            write_vtu(piece.str() + ".vtu", t);
         } else {
-            write_vtu_faces(filename, t);
+            write_vtu_faces(piece.str() + ".vtu", t);
         }
+        const std::string filename = stream.str() + (pieces ? ".pvtu" : ".vtu");
+        if (pieces && comm::is_root()) write_pvtu(filename, std::filesystem::path(stream.str()).filename().string());
         history.emplace_back(t, filename);
-        write_pvd();
+        if (comm::is_root()) write_pvd();
     }
     if (interval == 0) {
         // Skip any output times already passed (e.g. if dt exceeded time_interval)
@@ -213,6 +225,10 @@ void DataWriter::resume(uint64_t step, rtype t) {
 }
 
 void DataWriter::write_restart(const std::string & filename, uint64_t step, rtype t) const {
+    if (mesh->n_global_cells > 0) {
+        write_restart_distributed(filename, step, t);
+        return;
+    }
     std::ofstream out(filename, std::ios::binary);
     if (!out.good()) {
         throw std::runtime_error("DataWriter::write_restart: Could not open file: " + filename + ".");
@@ -237,6 +253,62 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
             out.write(reinterpret_cast<const char *>(&value), sizeof(rtype));
         }
     }
+}
+
+void DataWriter::write_restart_distributed(const std::string & filename, uint64_t step, rtype t) const {
+#ifdef Mallard_HAS_MPI
+    // Same layout as a serial restart, cells in global order: each rank writes
+    // its owned cells at their global offsets, so any rank count can read it
+    std::cout << "Writing restart file: " << filename << std::endl;
+    MPI_File fh;
+    if (MPI_File_open(comm::world(), filename.c_str(), MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh) !=
+        MPI_SUCCESS) {
+        throw std::runtime_error("DataWriter::write_restart: Could not open file: " + filename + ".");
+    }
+    MPI_File_set_size(fh, 0);
+    const uint64_t n_global = mesh->n_global_cells;
+    if (comm::is_root()) {
+        const char magic[16] = "MALLARD-RESTART";
+        const uint32_t version = 1;
+        const uint32_t real_size = sizeof(rtype);
+        const uint64_t n_vars = fields.size();
+        const double time = t;
+        std::vector<char> header;
+        auto put = [&](const void * p, size_t n) {
+            header.insert(header.end(), static_cast<const char *>(p), static_cast<const char *>(p) + n);
+        };
+        put(magic, sizeof(magic));
+        put(&version, sizeof(version));
+        put(&real_size, sizeof(real_size));
+        put(&n_global, sizeof(n_global));
+        put(&n_vars, sizeof(n_vars));
+        put(&step, sizeof(step));
+        put(&time, sizeof(time));
+        MPI_File_write_at(fh, 0, header.data(), static_cast<int>(header.size()), MPI_BYTE, MPI_STATUS_IGNORE);
+    }
+    constexpr MPI_Offset header_size = 16 + 4 + 4 + 8 + 8 + 8 + 8;
+    const uint32_t n_owned = mesh->n_owned();
+    const MPI_Datatype real_type = sizeof(rtype) == sizeof(double) ? MPI_DOUBLE : MPI_FLOAT;
+    std::vector<MPI_Aint> displacements(n_owned);
+    for (uint32_t i = 0; i < n_owned; i++) displacements[i] = mesh->h_global_cell_id[i] * sizeof(rtype);
+    MPI_Datatype file_type;
+    MPI_Type_create_hindexed_block(static_cast<int>(n_owned), 1, displacements.data(), real_type, &file_type);
+    MPI_Type_commit(&file_type);
+    std::vector<rtype> values(n_owned);
+    for (size_t v = 0; v < fields.size(); v++) {
+        for (uint32_t i = 0; i < n_owned; i++) values[i] = fields[v].value(i, 0);
+        MPI_File_set_view(fh, header_size + MPI_Offset(v * n_global * sizeof(rtype)), real_type, file_type, "native",
+                          MPI_INFO_NULL);
+        MPI_File_write_all(fh, values.data(), static_cast<int>(n_owned), real_type, MPI_STATUS_IGNORE);
+    }
+    MPI_Type_free(&file_type);
+    MPI_File_close(&fh);
+#else
+    (void)filename;
+    (void)step;
+    (void)t;
+    throw std::logic_error("DataWriter: distributed restart without MPI");
+#endif
 }
 
 RestartData read_restart(const std::string & filename) {
@@ -275,6 +347,27 @@ RestartData read_restart(const std::string & filename) {
         throw std::runtime_error("Restart file " + filename + " is truncated.");
     }
     return data;
+}
+
+void DataWriter::write_pvtu(const std::string & filename, const std::string & stem) const {
+    std::ofstream out(filename);
+    out << "<?xml version=\"1.0\"?>\n";
+    out << "<VTKFile type=\"PUnstructuredGrid\" version=\"1.0\" byte_order=\"" << endianness()
+        << "\" header_type=\"UInt64\">\n";
+    out << "  <PUnstructuredGrid GhostLevel=\"0\">\n";
+    out << "    <PCellData>\n";
+    for (const auto & field : fields) {
+        out << "      <PDataArray type=\"" << vtk_float_type() << "\" Name=\"" << field.name << "\"";
+        if (field.n_vtk_components() > 1) out << " NumberOfComponents=\"" << field.n_vtk_components() << "\"";
+        out << "/>\n";
+    }
+    out << "    </PCellData>\n";
+    out << "    <PPoints>\n      <PDataArray type=\"" << vtk_float_type() << "\" NumberOfComponents=\"3\"/>\n    </PPoints>\n";
+    for (int r = 0; r < comm::size(); r++) {
+        out << "    <Piece Source=\"" << stem << "_p" << std::setw(4) << std::setfill('0') << r << ".vtu\"/>\n";
+    }
+    out << "  </PUnstructuredGrid>\n";
+    out << "</VTKFile>\n";
 }
 
 void DataWriter::write_pvd() const {
@@ -367,8 +460,10 @@ void DataWriter::write_vtu(const std::string & filename, rtype t) const {
     std::cout << "Writing data to file: " << filename << std::endl;
 
     using header_t = uint64_t;
+    // Distributed runs write their owned cells; unused halo nodes are harmless
+    const uint32_t n_out = mesh->n_owned();
     uint64_t len_connectivity = 0;
-    for (uint32_t i = 0; i < mesh->n_cells; i++) {
+    for (uint32_t i = 0; i < n_out; i++) {
         len_connectivity += mesh->h_n_nodes_of_cell(i);
     }
 
@@ -391,11 +486,11 @@ void DataWriter::write_vtu(const std::string & filename, rtype t) const {
     out << "      <DataArray type=\"Float64\" Name=\"TIME\" NumberOfTuples=\"1\" format=\"ascii\">"
         << std::setprecision(17) << static_cast<double>(t) << "</DataArray>\n";
     out << "    </FieldData>\n";
-    out << "    <Piece NumberOfPoints=\"" << mesh->n_nodes << "\" NumberOfCells=\"" << mesh->n_cells << "\">\n";
+    out << "    <Piece NumberOfPoints=\"" << mesh->n_nodes << "\" NumberOfCells=\"" << n_out << "\">\n";
     out << "      <CellData>\n";
     for (const auto & field : fields) {
         data_array(vtk_float_type(), field.name, field.n_vtk_components(),
-                   mesh->n_cells * field.n_vtk_components() * sizeof(rtype));
+                   n_out * field.n_vtk_components() * sizeof(rtype));
     }
     out << "      </CellData>\n";
     out << "      <Points>\n";
@@ -403,8 +498,8 @@ void DataWriter::write_vtu(const std::string & filename, rtype t) const {
     out << "      </Points>\n";
     out << "      <Cells>\n";
     data_array("Int64", "connectivity", 1, len_connectivity * sizeof(int64_t));
-    data_array("Int64", "offsets", 1, mesh->n_cells * sizeof(int64_t));
-    data_array("UInt8", "types", 1, mesh->n_cells * sizeof(uint8_t));
+    data_array("Int64", "offsets", 1, n_out * sizeof(int64_t));
+    data_array("UInt8", "types", 1, n_out * sizeof(uint8_t));
     out << "      </Cells>\n";
     out << "    </Piece>\n";
     out << "  </UnstructuredGrid>\n";
@@ -419,8 +514,8 @@ void DataWriter::write_vtu(const std::string & filename, rtype t) const {
     };
 
     for (const auto & field : fields) {
-        write_header(mesh->n_cells * field.n_vtk_components() * sizeof(rtype));
-        for (uint32_t i = 0; i < mesh->n_cells; i++) {
+        write_header(n_out * field.n_vtk_components() * sizeof(rtype));
+        for (uint32_t i = 0; i < n_out; i++) {
             for (uint32_t k = 0; k < field.n_vtk_components(); k++) write_value(field.value(i, k));
         }
     }
@@ -432,22 +527,22 @@ void DataWriter::write_vtu(const std::string & filename, rtype t) const {
     }
 
     write_header(len_connectivity * sizeof(int64_t));
-    for (uint32_t i = 0; i < mesh->n_cells; i++) {
+    for (uint32_t i = 0; i < n_out; i++) {
         const uint32_t n_nodes = mesh->h_n_nodes_of_cell(i);
         for (uint32_t j = 0; j < n_nodes; j++) {
             write_value(static_cast<int64_t>(mesh->h_node_of_cell(i, vtk_local_node(n_nodes, j))));
         }
     }
 
-    write_header(mesh->n_cells * sizeof(int64_t));
+    write_header(n_out * sizeof(int64_t));
     int64_t cell_offset = 0;
-    for (uint32_t i = 0; i < mesh->n_cells; i++) {
+    for (uint32_t i = 0; i < n_out; i++) {
         cell_offset += mesh->h_n_nodes_of_cell(i);
         write_value(cell_offset);
     }
 
-    write_header(mesh->n_cells * sizeof(uint8_t));
-    for (uint32_t i = 0; i < mesh->n_cells; i++) {
+    write_header(n_out * sizeof(uint8_t));
+    for (uint32_t i = 0; i < n_out; i++) {
         write_value(vtk_type(N_DIM, mesh->h_n_nodes_of_cell(i)));
     }
 

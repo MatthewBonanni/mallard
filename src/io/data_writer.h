@@ -116,6 +116,9 @@ class DataWriter {
         std::vector<Field> fields;
         std::shared_ptr<Mesh> mesh;
         std::vector<std::pair<rtype, std::string>> history;
+        bool surface = false;
+        void write_pvtu(const std::string & filename, const std::string & stem) const;
+        void write_restart_distributed(const std::string & filename, uint64_t step, rtype t) const;
         std::vector<uint32_t> geometry_faces;  // Empty: write all cells
 };
 

@@ -13,6 +13,9 @@
 #include <Kokkos_Core.hpp>
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <set>
 #include <sstream>
 #include <string>
@@ -155,4 +158,116 @@ TEST(MPITest, NavierStokesWithBoundaryConditionsMatchesSerial) {
             "type = \"wall_isothermal\"\nT = 1.2\nu = [0.1, 0.0]\n",
             "type = \"wall_adiabatic\"\n"),
         25));
+}
+
+namespace {
+
+std::string io_dir() {
+    // Same path on every rank (they share a file system)
+    return (std::filesystem::temp_directory_path() / "mallard_mpi_io").string();
+}
+
+std::string restart_case(const std::string & init, uint32_t n_steps, const std::string & output) {
+    return box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                     bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n", "type = \"wall_adiabatic\"\n",
+                         "type = \"extrapolation\"\n"),
+                     n_steps) +
+           output;
+}
+
+std::vector<double> gather(Solver & solver) {
+    solver.copy_device_to_host();
+    const auto mesh = solver.get_mesh();
+    const uint64_t n_global = mesh->n_global_cells ? mesh->n_global_cells : mesh->n_cells;
+    std::vector<double> U(n_global * N_CONSERVATIVE, 0.0);
+    for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+        const uint64_t g = mesh->n_global_cells ? mesh->h_global_cell_id[c] : c;
+        FOR_I_CONSERVATIVE U[g * N_CONSERVATIVE + i] = solver.h_conservatives(c, i);
+    }
+    // A serial run holds every cell on every rank already
+    if (mesh->n_global_cells > 0) comm::allreduce(std::span<double>(U), comm::Op::SUM);
+    return U;
+}
+
+double max_rel_diff(const std::vector<double> & a, const std::vector<double> & b) {
+    double m = 0.0;
+    for (size_t k = 0; k < a.size(); k++) m = std::max(m, std::abs(a[k] - b[k]) / (std::abs(b[k]) + 1e-3));
+    return m;
+}
+
+} // namespace
+
+TEST(MPITest, RestartFilesDoNotDependOnTheRankCount) {
+    const std::string dir = io_dir();
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    const std::string writer = "[[write_data]]\nprefix = \"" + dir + "/r\"\nformat = \"restart\"\ninterval = 10\n";
+    auto from = [&](const std::string & file) { return "type = \"restart\"\nfile = \"" + file + "\"\n"; };
+    std::string init = BLAST;
+
+    // Uninterrupted serial reference
+    Solver reference;
+    reference.set_distributed(false);
+    reference.init(parse_toml(restart_case(init, 20, "")));
+    reference.run();
+    const auto U_ref = gather(reference);
+
+    // Written by all ranks at step 10, continued by all ranks
+    {
+        Solver first;
+        first.init(parse_toml(restart_case(init, 10, writer)));
+        first.run();
+    }
+    comm::barrier();
+    std::string input = restart_case(init, 20, "");
+    input.replace(input.find("[initialize]\n") + 13, init.size(), from(dir + "/r_000010.restart"));
+    Solver second;
+    second.init(parse_toml(input));
+    EXPECT_EQ(second.get_step(), 10u);
+    second.run();
+    EXPECT_LT(max_rel_diff(gather(second), U_ref), 1e-11);
+
+    // The same file read by a single rank
+    Solver serial;
+    serial.set_distributed(false);
+    serial.init(parse_toml(input));
+    serial.run();
+    EXPECT_LT(max_rel_diff(gather(serial), U_ref), 1e-11);
+    comm::barrier();
+}
+
+TEST(MPITest, EveryCellIsInExactlyOneOutputPiece) {
+    const std::string dir = io_dir() + "_vtu";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    Solver solver;
+    solver.init(parse_toml(restart_case(BLAST, 2, "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtu\"\n"
+                                                  "interval = 2\nvariables = [\"RHO\"]\n")));
+    solver.run();
+    comm::barrier();
+    const uint64_t n_global = solver.get_mesh()->n_global_cells ? solver.get_mesh()->n_global_cells
+                                                                : solver.get_mesh()->n_cells;
+    auto read = [](const std::string & path) {
+        std::ifstream in(path);
+        std::stringstream ss;
+        ss << in.rdbuf();
+        return ss.str();
+    };
+    if (comm::size() == 1) {
+        EXPECT_TRUE(std::filesystem::exists(dir + "/f_000002.vtu"));
+        return;
+    }
+    const std::string index = read(dir + "/f_000002.pvtu");
+    uint64_t total = 0;
+    for (int r = 0; r < comm::size(); r++) {
+        std::ostringstream piece;
+        piece << "f_000002_p" << std::setw(4) << std::setfill('0') << r << ".vtu";
+        EXPECT_NE(index.find(piece.str()), std::string::npos) << piece.str();
+        const std::string text = read(dir + "/" + piece.str());
+        const size_t k = text.find("NumberOfCells=\"");
+        ASSERT_NE(k, std::string::npos) << piece.str();
+        total += std::stoull(text.substr(k + 15));
+    }
+    EXPECT_EQ(total, n_global);
+    EXPECT_NE(read(dir + "/f.pvd").find("f_000002.pvtu"), std::string::npos);
 }

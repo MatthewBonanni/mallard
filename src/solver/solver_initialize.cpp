@@ -52,19 +52,20 @@ void Solver::init_solution() {
 }
 
 void Solver::init_solution_restart() {
-    if (is_distributed()) {
-        throw std::runtime_error("Restart with more than one MPI rank is not supported yet.");
-    }
     if (!input.at("initialize").contains("file")) {
         throw std::runtime_error("Missing file for initialization: restart.");
     }
     const std::string file = toml::find<std::string>(input, "initialize", "file");
     RestartData restart = read_restart(file);
-    if (restart.n_cells != mesh->n_cells || restart.conservatives.size() != N_CONSERVATIVE) {
+    // Restart files hold cells in global order, so any number of ranks can read them
+    const bool distributed = mesh->n_global_cells > 0;
+    const uint64_t n_expected = distributed ? mesh->n_global_cells : mesh->n_cells;
+    if (restart.n_cells != n_expected || restart.conservatives.size() != N_CONSERVATIVE) {
         throw std::runtime_error("Restart file " + file + " does not match the mesh.");
     }
     for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
-        FOR_I_CONSERVATIVE h_conservatives(i_cell, i) = restart.conservatives[i][i_cell];
+        const uint64_t g = distributed ? mesh->h_global_cell_id[i_cell] : i_cell;
+        FOR_I_CONSERVATIVE h_conservatives(i_cell, i) = restart.conservatives[i][g];
     }
     step = restart.step;
     t = restart.t;

@@ -445,9 +445,6 @@ void Solver::init_output() {
     if (!input.contains("write_data")) {
         return;
     }
-    if (is_distributed()) {
-        throw std::runtime_error("write_data with more than one MPI rank is not supported yet.");
-    }
     std::vector<toml::value> outputs = toml::find<std::vector<toml::value>>(input, "write_data");
     for (const auto & output : outputs) {
         data_writers.push_back(std::make_unique<DataWriter>());
