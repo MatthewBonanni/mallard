@@ -394,6 +394,10 @@ void Solver::init_numerics() {
 
     rhs_func = [this](StateView solution, StateView rhs, rtype t_stage) { calc_rhs(solution, rhs, t_stage); };
     check_nan = toml::find_or<bool>(input, "numerics", "check_nan", false);
+    low_mach_cutoff = find_real_or(input, "numerics", "low_mach_cutoff", 0.1);
+    if (!(low_mach_cutoff > 0.0)) {
+        throw std::runtime_error("numerics: low_mach_cutoff must be positive (1 disables the low-Mach correction).");
+    }
 }
 
 void Solver::init_run_parameters() {

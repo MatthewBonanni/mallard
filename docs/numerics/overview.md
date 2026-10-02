@@ -44,6 +44,33 @@ from a per-cell spectral radius ([Blazek 2015](../references.md#blazek-2015)),
 | Roe | [Roe 1981](../references.md#roe-1981), with Harten's entropy fix ([Harten 1983](../references.md#harten-1983)) |
 | RHLL | [Nishikawa & Kitamura 2008](../references.md#nishikawa-kitamura-2008), a rotated hybrid: HLL along the velocity-difference direction, Roe across it. Carbuncle-free. |
 
+### Low-Mach correction
+
+Upwind fluxes damp the jump of the reconstructed velocity across a face at the
+sound speed. As the Mach number falls, that dissipation does not vanish
+relative to the flow scales (Guillard & Viozat, Comput. Fluids 28, 1999;
+Rieper, J. Comput. Phys. 230, 2011). At M = 0.1 it dominates under-resolved
+vortical flows. On the Taylor-Green vortex at 64^3 (full-box equivalent),
+TENO5 reaches its dissipation peak two time units early, and the resolved
+enstrophy is a third lower.
+
+Mallard follows Thornber et al. (J. Comput. Phys. 227, 2008). Before the
+Riemann solver, the velocity jump across each interior face is scaled by
+`z = min(1, max(M_L, M_R, M_cut))`, and its mean is kept. Supersonic faces
+(`z = 1`) are untouched, and density, pressure and the Riemann solver itself
+are unchanged.
+
+The cutoff `M_cut` (`[numerics] low_mach_cutoff`, default 0.1) keeps some
+acoustic damping in gas nearly at rest, like the cutoff Mach number of
+preconditioned all-speed schemes (Weiss & Smith, AIAA J. 33, 1995). Without
+it, spurious acoustic velocities of a hydrostatic atmosphere are not damped at
+all and do not converge under refinement. With it, they converge at second
+order, about four times larger than without the correction.
+
+`z` uses lab-frame velocities, so the scheme is not Galilean invariant. A
+shock moving into gas at rest sees `z < 1` on its upstream faces; Sod and
+Shu-Osher are unaffected, within 10% in L1 and without overshoots.
+
 ## Boundary conditions
 
 Every boundary condition is imposed weakly through an exterior state passed to

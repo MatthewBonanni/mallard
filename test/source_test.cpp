@@ -101,9 +101,12 @@ TEST(SourceTest, IsothermalAtmosphereConvergesToHydrostaticEquilibrium) {
     // vanish under refinement.
     const double v16 = hydrostatic_spurious_velocity(16, "MUSCL"), v32 = hydrostatic_spurious_velocity(32, "MUSCL");
     // Hydrostatic wall ghosts: second-order convergence and small magnitude
-    // (mirrored wall pressures gave 0.06 and 0.03)
+    // (mirrored wall pressures gave 0.06 and 0.03). The low-Mach correction
+    // damps these acoustic errors with z = 0.1 instead of 1 in gas at rest,
+    // which raises them about fourfold (v32 = 5.9e-4, 1.2e-4 without it) but
+    // keeps the order
     EXPECT_LT(v32, 0.35 * v16);
-    EXPECT_LT(v32, 5e-4);
+    EXPECT_LT(v32, 1e-3);
 }
 
 TEST(SourceTest, TENOHydrostaticAtmosphereHasSmallSpuriousVelocity) {

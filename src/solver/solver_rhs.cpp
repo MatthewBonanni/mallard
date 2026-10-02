@@ -105,6 +105,7 @@ void Solver::launch_flux_functor() {
                                                     boundary_data,
                                                     W_cells,
                                                     face_flux,
-                                                    physics.gamma};
+                                                    physics.gamma,
+                                                    low_mach_cutoff};
     Kokkos::parallel_for("convective_flux", mesh->n_faces, functor);
 }

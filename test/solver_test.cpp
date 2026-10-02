@@ -474,3 +474,46 @@ TEST(SolverTest, ResultIsIndependentOfThreadCount) {
     ASSERT_FALSE(serial.empty());
     EXPECT_TRUE(serial == run(4));
 }
+
+namespace {
+
+/**
+ * @brief Relative kinetic energy lost by the steady 2D Taylor-Green vortex
+ *        (an exact Euler solution in a box of symmetry planes) at Mach 0.1
+ *        over one convective time: purely numerical dissipation.
+ */
+double vortex_energy_loss(double low_mach_cutoff) {
+    const double p0 = 1.0 / (1.4 * 0.01);
+    std::ostringstream s;
+    s << std::setprecision(17)
+      << "[run]\nt_stop = 1.0\ncfl = 0.5\n"
+      << "[mesh]\ntype = \"cartesian\"\nNx = 32\nNy = 32\nLx = " << M_PI << "\nLy = " << M_PI << "\n"
+      << "[initialize]\ntype = \"analytical\"\nu = [\"sin(x) * cos(y)\", \"-cos(x) * sin(y)\"]\n"
+      << "p = \"" << p0 << " + (cos(2 * x) + cos(2 * y)) / 4\"\nT = \"1.0\"\n";
+    for (const char * b : {"left", "right", "top", "bottom"}) {
+        s << "[[boundaries]]\nname = \"" << b << "\"\ntype = \"symmetry\"\n";
+    }
+    s << "[numerics]\nriemann_solver = \"HLLC\"\nlow_mach_cutoff = " << low_mach_cutoff << "\n"
+      << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = " << p0 << "\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[output]\ncheck_interval = 1000000\n"
+      << "[integrals]\nfile = \"" << (std::filesystem::temp_directory_path() / "mallard_vortex.csv").string()
+      << "\"\ninterval = 1000000\n";
+    Solver solver;
+    solver.init(parse_toml(s.str()));
+    const double e0 = solver.integrate_flow_statistics()[0];
+    solver.run();
+    return 1.0 - solver.integrate_flow_statistics()[0] / e0;
+}
+
+} // namespace
+
+TEST(LowMachCorrection, ReducesTheNumericalDissipationOfALowMachVortex) {
+    // Upwind fluxes damp velocity jumps at the sound speed, ten times the flow
+    // speed here; scaling the jumps by the local Mach number (cutoff 0.1)
+    // removes most of that dissipation: 3.2e-4 instead of 2.5e-3
+    const double off = vortex_energy_loss(1.0);
+    const double on = vortex_energy_loss(0.1);
+    EXPECT_GT(on, 0.0);
+    EXPECT_LT(on, 0.25 * off);
+}

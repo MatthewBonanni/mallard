@@ -227,6 +227,7 @@ class Solver {
         rtype t_boundary_states;
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         RiemannSolverType riemann_solver_type;
+        rtype low_mach_cutoff = 0.1;
         std::unique_ptr<TimeIntegrator> time_integrator;
 
         // Work arrays
