@@ -34,7 +34,7 @@ double integrate_error(TimeIntegrator & integrator, uint32_t n_steps) {
     }
     Kokkos::deep_copy(solution_vec[0], 1.0);
     const rtype l0 = lambda[0], l1 = lambda[1], l2 = lambda[2], l3 = lambda[3];
-    RHSFunction rhs = [=](StateView U, StateView R) {
+    RHSFunction rhs = [=](StateView U, StateView R, rtype) {
         Kokkos::parallel_for(U.extent(0), KOKKOS_LAMBDA(const uint32_t c) {
             R(c, 0) = l0 * U(c, 0);
             R(c, 1) = l1 * U(c, 1);
@@ -44,7 +44,7 @@ double integrate_error(TimeIntegrator & integrator, uint32_t n_steps) {
     };
     const rtype dt = 1.0 / n_steps;
     for (uint32_t s = 0; s < n_steps; s++) {
-        integrator.take_step(dt, solution_vec, rhs_vec, rhs);
+        integrator.take_step(s * dt, dt, solution_vec, rhs_vec, rhs);
     }
     auto h_U = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec[0]);
     double err = 0.0;
@@ -83,12 +83,45 @@ TEST(TimeIntegratorTest, SSPRK3IsConvexCombinationOfEulerSteps) {
     std::vector<StateView> solution_vec = {StateView("U", 1), StateView("U1", 1)};
     std::vector<StateView> rhs_vec = {StateView("k", 1)};
     Kokkos::deep_copy(solution_vec[0], 1.0);
-    RHSFunction rhs = [](StateView U, StateView R) {
+    RHSFunction rhs = [](StateView U, StateView R, rtype) {
         Kokkos::parallel_for(U.extent(0), KOKKOS_LAMBDA(const uint32_t c) {
             FOR_I_CONSERVATIVE R(c, i) = -U(c, i);
         });
     };
-    integrator.take_step(1.0, solution_vec, rhs_vec, rhs);
+    integrator.take_step(0.0, 1.0, solution_vec, rhs_vec, rhs);
     auto h_U = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec[0]);
     FOR_I_CONSERVATIVE EXPECT_NEAR(h_U(0, i), 1.0 / 3.0, 1e-15);
+}
+
+namespace {
+
+/**
+ * @brief Error at t = 1 for dU/dt = cos(t), U(0) = 0, exact U = sin(t).
+ *        Integrators only keep their order if stages are evaluated at the
+ *        right times.
+ */
+double nonautonomous_error(TimeIntegrator & integrator, uint32_t n_steps) {
+    std::vector<StateView> solution_vec, rhs_vec;
+    for (uint8_t i = 0; i < integrator.get_n_solution_vectors(); i++) solution_vec.push_back(StateView("U", 1));
+    for (uint8_t i = 0; i < integrator.get_n_rhs_vectors(); i++) rhs_vec.push_back(StateView("rhs", 1));
+    RHSFunction rhs = [](StateView U, StateView R, rtype t) {
+        Kokkos::parallel_for(U.extent(0), KOKKOS_LAMBDA(const uint32_t c) {
+            FOR_I_CONSERVATIVE R(c, i) = Kokkos::cos(t);
+        });
+    };
+    const rtype dt = 1.0 / n_steps;
+    for (uint32_t s = 0; s < n_steps; s++) integrator.take_step(s * dt, dt, solution_vec, rhs_vec, rhs);
+    auto h_U = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec[0]);
+    return std::abs(h_U(0, 0) - std::sin(1.0));
+}
+
+} // namespace
+
+TEST(TimeIntegratorTest, StageTimesGiveDesignOrderForTimeDependentRHS) {
+    SSPRK3 ssprk3;
+    RK4 rk4;
+    // Evaluating every stage at the start of the step drops both to first order.
+    // (SSPRK3 reduces to Simpson's rule on this pure quadrature, hence >= 3.)
+    EXPECT_GT(std::log2(nonautonomous_error(ssprk3, 10) / nonautonomous_error(ssprk3, 20)), 2.85);
+    EXPECT_GT(std::log2(nonautonomous_error(rk4, 10) / nonautonomous_error(rk4, 20)), 3.85);
 }

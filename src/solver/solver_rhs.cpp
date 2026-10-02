@@ -17,7 +17,12 @@
 #include "gradient.h"
 #include "viscous_flux.h"
 
-void Solver::calc_rhs(StateView solution, StateView rhs) {
+void Solver::calc_rhs(StateView solution, StateView rhs, rtype t_stage) {
+    update_boundary_states(t_stage);
+    if (!average_pressure_outlets.empty()) {
+        update_average_pressure_outlets(solution);
+    }
+
     const Euler phys = physics;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
     Kokkos::parallel_for("rhs_init", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
@@ -42,6 +47,12 @@ void Solver::calc_rhs(StateView solution, StateView rhs) {
         case RiemannSolverType::HLLC:
             launch_flux_functor<riemann::HLLC>(rhs);
             break;
+        case RiemannSolverType::ROE:
+            launch_flux_functor<riemann::Roe>(rhs);
+            break;
+        case RiemannSolverType::RHLL:
+            launch_flux_functor<riemann::RHLL>(rhs);
+            break;
     }
 
     if (physics.is_viscous()) {
@@ -58,6 +69,25 @@ void Solver::calc_rhs(StateView solution, StateView rhs) {
     }
 
     Kokkos::View<rtype *> vol = mesh->cell_volume;
+    if (has_gravity || !source_expressions.empty()) {
+        update_source_field(t_stage);
+        const bool gravity_on = has_gravity;
+        const bool field_on = !source_expressions.empty();
+        const rtype gx = gravity[0], gy = gravity[1];
+        StateView S = source_field;
+        Kokkos::parallel_for("rhs_sources", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
+            const rtype V = vol(i_cell);
+            if (gravity_on) {
+                rhs(i_cell, 1) += solution(i_cell, 0) * gx * V;
+                rhs(i_cell, 2) += solution(i_cell, 0) * gy * V;
+                rhs(i_cell, 3) += (solution(i_cell, 1) * gx + solution(i_cell, 2) * gy) * V;
+            }
+            if (field_on) {
+                FOR_I_CONSERVATIVE rhs(i_cell, i) += S(i_cell, i) * V;
+            }
+        });
+    }
+
     Kokkos::parallel_for("rhs_divide_volume", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
         FOR_I_CONSERVATIVE rhs(i_cell, i) /= vol(i_cell);
     });

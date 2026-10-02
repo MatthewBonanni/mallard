@@ -11,6 +11,8 @@
 
 #include "boundary.h"
 
+#include "input.h"
+
 #include <stdexcept>
 #include <vector>
 
@@ -34,22 +36,22 @@ BoundaryCondition BoundaryCondition::from_input(const toml::value & input, const
         require("u");
         require("p");
         require("T");
-        std::vector<rtype> u = toml::find<std::vector<rtype>>(input, "u");
+        std::vector<rtype> u = find_real_vector(input, "u");
         if (u.size() != N_DIM) {
             throw std::runtime_error("Invalid u for boundary: " + name + ".");
         }
-        const rtype p = toml::find<rtype>(input, "p");
-        const rtype T = toml::find<rtype>(input, "T");
+        const rtype p = find_real(input, "p");
+        const rtype T = find_real(input, "T");
         bc.data[0] = physics.get_density_from_pressure_temperature(p, T);
         bc.data[1] = u[0];
         bc.data[2] = u[1];
         bc.data[3] = p;
-    } else if (bc.type == BoundaryType::P_OUT) {
+    } else if (bc.type == BoundaryType::P_OUT || bc.type == BoundaryType::P_OUT_AVERAGE) {
         require("p");
-        bc.data[3] = toml::find<rtype>(input, "p");
+        bc.data[3] = find_real(input, "p");
     } else if (bc.is_wall()) {
         if (input.contains("u")) {
-            std::vector<rtype> u = toml::find<std::vector<rtype>>(input, "u");
+            std::vector<rtype> u = find_real_vector(input, "u");
             if (u.size() != N_DIM) {
                 throw std::runtime_error("Invalid u for boundary: " + name + ".");
             }
@@ -58,10 +60,10 @@ BoundaryCondition BoundaryCondition::from_input(const toml::value & input, const
         }
         if (bc.type == BoundaryType::WALL_ISOTHERMAL) {
             require("T");
-            bc.data[0] = toml::find<rtype>(input, "T");
+            bc.data[0] = find_real(input, "T");
         } else if (bc.type == BoundaryType::WALL_HEAT_FLUX) {
             require("q");
-            bc.data[3] = toml::find<rtype>(input, "q");
+            bc.data[3] = find_real(input, "q");
         }
     }
     return bc;
@@ -101,12 +103,15 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     data.face_image_face = Kokkos::View<int32_t *>("face_image_face", mesh.n_faces);
     data.face_image_side = Kokkos::View<uint8_t *>("face_image_side", mesh.n_faces);
     data.face_image_flip = Kokkos::View<uint8_t *>("face_image_flip", mesh.n_faces);
+    data.face_state_index = Kokkos::View<int32_t *>("face_state_index", mesh.n_faces);
     data.bcs = Kokkos::View<BoundaryCondition *>("bcs", h_bcs_vec.size());
     auto h_face_bc = Kokkos::create_mirror_view(data.face_bc);
     auto h_face_image = Kokkos::create_mirror_view(data.face_image);
     auto h_face_image_face = Kokkos::create_mirror_view(data.face_image_face);
     auto h_face_image_side = Kokkos::create_mirror_view(data.face_image_side);
     auto h_face_image_flip = Kokkos::create_mirror_view(data.face_image_flip);
+    auto h_face_state_index = Kokkos::create_mirror_view(data.face_state_index);
+    int32_t n_dirichlet = 0;
     auto h_bcs = Kokkos::create_mirror_view(data.bcs);
     for (size_t i = 0; i < h_bcs_vec.size(); i++) h_bcs(i) = h_bcs_vec[i];
 
@@ -124,6 +129,10 @@ BoundaryData make_boundary_data(const Mesh & mesh,
         h_face_image_face(f) = -1;
         h_face_image_side(f) = 0;
         h_face_image_flip(f) = 0;
+        h_face_state_index(f) = -1;
+        if (h_face_bc_vec[f] >= 0 && h_bcs_vec[h_face_bc_vec[f]].type == BoundaryType::DIRICHLET) {
+            h_face_state_index(f) = n_dirichlet++;
+        }
         if (h_face_bc_vec[f] < 0 || h_bcs_vec[h_face_bc_vec[f]].type != BoundaryType::EXTRAPOLATION) continue;
         // Image of the exterior neighbor: translate inward by most of the boundary cell's depth
         const uint32_t c = mesh.h_cells_of_face(f, 0);
@@ -175,6 +184,8 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     Kokkos::deep_copy(data.face_image_face, h_face_image_face);
     Kokkos::deep_copy(data.face_image_side, h_face_image_side);
     Kokkos::deep_copy(data.face_image_flip, h_face_image_flip);
+    Kokkos::deep_copy(data.face_state_index, h_face_state_index);
+    data.face_state = Kokkos::View<rtype *[N_DIM + 2]>("face_state", n_dirichlet);
     Kokkos::deep_copy(data.bcs, h_bcs);
     return data;
 }

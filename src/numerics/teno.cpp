@@ -18,6 +18,8 @@
 #include <Kokkos_Core.hpp>
 
 #include "face_reconstruction.h"
+
+#include "input.h"
 #include "teno.h"
 
 namespace {
@@ -92,9 +94,11 @@ void integrate_polygon(const std::vector<double> & px, const std::vector<double>
 /**
  * @brief Least-squares pseudo-inverse P = R^-1 Q^T (n x m) of a full-column-rank
  *        m x n matrix A (row-major) via Householder QR.
- * @return False if A is numerically rank deficient.
+ * @param max_condition Largest accepted ratio of the diagonal entries of R
+ *        after column equilibration (an estimate of the condition number).
+ * @return False if A is too ill conditioned.
  */
-bool pseudo_inverse(std::vector<double> A, int m, int n, std::vector<double> & P) {
+bool pseudo_inverse(std::vector<double> A, int m, int n, std::vector<double> & P, double max_condition) {
     // Equilibrate columns so the rank test is independent of monomial scaling
     std::vector<double> col_scale(n, 0.0);
     for (int j = 0; j < n; j++) {
@@ -133,7 +137,7 @@ bool pseudo_inverse(std::vector<double> A, int m, int n, std::vector<double> & P
         max_diag = std::max(max_diag, std::abs(A[k * n + k]));
     }
     for (int k = 0; k < n; k++) {
-        if (std::abs(A[k * n + k]) < 1e-8 * max_diag) return false;
+        if (std::abs(A[k * n + k]) * max_condition < max_diag) return false;
     }
     P.assign(n * m, 0.0);
     for (int j = 0; j < m; j++) {
@@ -167,13 +171,14 @@ void TENO::init(const toml::value & input) {
     }
     degree = order - 1;
     n_dof_large = teno::n_dof(degree);
-    stencil_factor = toml::find_or<rtype>(input, "stencil_factor", 2.0);
+    stencil_factor = find_real_or(input, "stencil_factor", 2.0);
     n_stencil_large = static_cast<uint16_t>(std::ceil(stencil_factor * n_dof_large));
     n_stencil_small = toml::find_or<int>(input, "small_stencil_size", 10);
-    sigma_threshold = toml::find_or<rtype>(input, "troubled_threshold", 1.0e-3);
-    sigma_upper = toml::find_or<rtype>(input, "troubled_upper", 1.0e-2);
-    C_T = toml::find_or<rtype>(input, "C_T", -1.0);
+    sigma_threshold = find_real_or(input, "troubled_threshold", 1.0e-3);
+    sigma_upper = find_real_or(input, "troubled_upper", 1.0e-2);
+    C_T = find_real_or(input, "C_T", -1.0);
     characteristic = toml::find_or<bool>(input, "characteristic", true);
+    max_condition = find_real_or(input, "max_condition", 1.0e8);
     bound_preserving = toml::find_or<bool>(input, "bound_preserving", false);
 
     const int n_gp = std::max(1, std::min<int>(teno::MAX_FACE_QUAD, (order + 1) / 2));
@@ -397,7 +402,7 @@ void TENO::compute_stencils_and_matrices() {
                 monomial_means(stencil[s], deg, means);
                 for (uint8_t l = 0; l < n; l++) A[s * n + l] = means[l] - mean0[l];
             }
-            return pseudo_inverse(A, m, n, P);
+            return pseudo_inverse(A, m, n, P, max_condition);
         };
 
         // Large central stencil, grown until the least-squares system has full rank
@@ -522,10 +527,30 @@ void TENO::compute_stencils_and_matrices() {
 
     Kokkos::deep_copy(scale, h_scale);
     Kokkos::deep_copy(basis_mean, h_basis_mean);
+    // Keep only as many stencil slots on the device as the largest stencil uses
+    uint16_t ns_used = 0;
+    for (uint32_t i = 0; i < n_cells; i++) ns_used = std::max(ns_used, h_stencil_large_size(i));
+    Kokkos::View<int32_t **> compact_stencil("teno_stencil_large", n_cells, ns_used);
+    Kokkos::View<int32_t **> compact_face("teno_stencil_large_face", n_cells, ns_used);
+    Kokkos::View<rtype ***> compact_pinv("teno_pinv_large", n_cells, nk, ns_used);
+    auto h_compact_stencil = Kokkos::create_mirror_view(compact_stencil);
+    auto h_compact_face = Kokkos::create_mirror_view(compact_face);
+    auto h_compact_pinv = Kokkos::create_mirror_view(compact_pinv);
+    for (uint32_t i = 0; i < n_cells; i++) {
+        for (uint16_t s = 0; s < ns_used; s++) {
+            h_compact_stencil(i, s) = h_stencil_large(i, s);
+            h_compact_face(i, s) = h_stencil_large_face(i, s);
+            for (uint8_t l = 0; l < nk; l++) h_compact_pinv(i, l, s) = h_pinv_large(i, l, s);
+        }
+    }
+    stencil_large = compact_stencil;
+    stencil_large_face = compact_face;
+    pinv_large = compact_pinv;
     Kokkos::deep_copy(stencil_large_size, h_stencil_large_size);
-    Kokkos::deep_copy(stencil_large, h_stencil_large);
-    Kokkos::deep_copy(stencil_large_face, h_stencil_large_face);
-    Kokkos::deep_copy(pinv_large, h_pinv_large);
+    Kokkos::deep_copy(stencil_large, h_compact_stencil);
+    Kokkos::deep_copy(stencil_large_face, h_compact_face);
+    std::cout << "TENO: largest central stencil " << ns_used << " cells (nominal " << ns << ")." << std::endl;
+    Kokkos::deep_copy(pinv_large, h_compact_pinv);
     Kokkos::deep_copy(stencil_small_size, h_stencil_small_size);
     Kokkos::deep_copy(stencil_small, h_stencil_small);
     Kokkos::deep_copy(stencil_small_face, h_stencil_small_face);

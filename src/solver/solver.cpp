@@ -11,6 +11,8 @@
 
 #include "solver.h"
 
+#include "input.h"
+
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -20,6 +22,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "common.h"
+#include "expression.h"
 
 Solver::Solver() {
     // Empty
@@ -57,6 +60,7 @@ int Solver::init(const toml::value & input) {
     init_numerics();
     init_run_parameters();
     allocate_memory();
+    init_sources();
     register_data();
     init_output();
     init_solution();
@@ -95,12 +99,51 @@ void Solver::init_boundaries() {
             throw std::runtime_error("Boundary name " + name + " not found in mesh.");
         }
         bcs.push_back(BoundaryCondition::from_input(bound, physics));
+        // Optional filter selecting part of the zone by face centroid
+        std::unique_ptr<Expression> where;
+        if (bound.contains("where")) {
+            where = std::make_unique<Expression>(name + ".where", toml::find<std::string>(bound, "where"));
+        }
+        DirichletBoundary dirichlet;
+        if (bcs.back().type == BoundaryType::DIRICHLET) {
+            for (const char * key : {"rho", "u", "p"}) {
+                if (!bound.contains(key)) {
+                    throw std::runtime_error(std::string("Missing ") + key + " for boundary: " + name + ".");
+                }
+            }
+            std::vector<std::string> u = toml::find<std::vector<std::string>>(bound, "u");
+            if (u.size() != N_DIM) {
+                throw std::runtime_error("Invalid u for boundary: " + name + ".");
+            }
+            dirichlet.W.emplace_back(name + ".rho", toml::find<std::string>(bound, "rho"));
+            dirichlet.W.emplace_back(name + ".u[0]", u[0]);
+            dirichlet.W.emplace_back(name + ".u[1]", u[1]);
+            dirichlet.W.emplace_back(name + ".p", toml::find<std::string>(bound, "p"));
+        }
+        uint32_t n_selected = 0;
         for (uint32_t i = 0; i < zone->n_faces(); i++) {
             const uint32_t i_face = zone->h_faces(i);
+            if (where && (*where)(mesh->h_face_coords(i_face, 0), mesh->h_face_coords(i_face, 1)) == 0.0) {
+                continue;
+            }
             if (face_bc[i_face] != -1) {
                 throw std::runtime_error("Boundary " + name + " assigned more than once.");
             }
             face_bc[i_face] = i_bc;
+            dirichlet.faces.push_back(i_face);
+            n_selected++;
+        }
+        if (n_selected == 0) {
+            throw std::runtime_error("Boundary " + name + " selects no faces.");
+        }
+        if (bcs.back().type == BoundaryType::DIRICHLET) {
+            dirichlet_boundaries.push_back(std::move(dirichlet));
+        } else if (bcs.back().type == BoundaryType::P_OUT_AVERAGE) {
+            Kokkos::View<uint32_t *> faces("average_pressure_faces", dirichlet.faces.size());
+            auto h_faces = Kokkos::create_mirror_view(faces);
+            for (size_t i = 0; i < dirichlet.faces.size(); i++) h_faces(i) = dirichlet.faces[i];
+            Kokkos::deep_copy(faces, h_faces);
+            average_pressure_outlets.emplace_back(i_bc, faces);
         }
         std::cout << "> Boundary " << name << ": " << BOUNDARY_NAMES.at(bcs.back().type) << std::endl;
     }
@@ -112,6 +155,100 @@ void Solver::init_boundaries() {
         }
     }
     boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, physics.is_viscous(), physics);
+    h_face_state = Kokkos::create_mirror_view(boundary_data.face_state);
+    h_face_state_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_state_index);
+    t_boundary_states = -1.0;
+}
+
+void Solver::init_sources() {
+    if (!input.contains("source")) {
+        return;
+    }
+    const toml::value & source = input.at("source");
+    if (source.contains("gravity")) {
+        std::vector<rtype> g = find_real_vector(input, "source", "gravity");
+        if (g.size() != N_DIM) {
+            throw std::runtime_error("source.gravity must have " + std::to_string(N_DIM) + " components.");
+        }
+        has_gravity = true;
+        FOR_I_DIM gravity[i] = g[i];
+        std::cout << "> Gravity: [" << gravity[0] << ", " << gravity[1] << "]" << std::endl;
+    }
+    const bool any_expression = source.contains("rho") || source.contains("rhou") || source.contains("rhoE");
+    if (!any_expression) {
+        return;
+    }
+    std::vector<std::string> texts = {toml::find_or<std::string>(input, "source", "rho", "0"), "0", "0",
+                                      toml::find_or<std::string>(input, "source", "rhoE", "0")};
+    if (source.contains("rhou")) {
+        std::vector<std::string> rhou = toml::find<std::vector<std::string>>(input, "source", "rhou");
+        if (rhou.size() != N_DIM) {
+            throw std::runtime_error("source.rhou must have " + std::to_string(N_DIM) + " components.");
+        }
+        texts[1] = rhou[0];
+        texts[2] = rhou[1];
+    }
+    for (size_t i = 0; i < texts.size(); i++) {
+        source_expressions.emplace_back("source[" + CONSERVATIVE_NAMES[i] + "]", texts[i]);
+    }
+    source_time_dependent = toml::find_or<bool>(input, "source", "time_dependent", false);
+    source_field = StateView("source_field", mesh->n_cells);
+    h_source_field = Kokkos::create_mirror_view(source_field);
+    std::cout << "> Source terms: " << (source_time_dependent ? "time dependent" : "steady") << std::endl;
+}
+
+void Solver::update_source_field(rtype t_eval) {
+    if (source_expressions.empty() || (t_source >= 0.0 && (!source_time_dependent || t_eval == t_source))) {
+        return;
+    }
+    for (uint32_t i_cell = 0; i_cell < mesh->n_cells; i_cell++) {
+        const rtype x = mesh->h_cell_coords(i_cell, 0);
+        const rtype y = mesh->h_cell_coords(i_cell, 1);
+        FOR_I_CONSERVATIVE h_source_field(i_cell, i) = source_expressions[i](x, y, t_eval);
+    }
+    Kokkos::deep_copy(source_field, h_source_field);
+    t_source = t_eval;
+}
+
+void Solver::update_average_pressure_outlets(StateView solution) {
+    const Euler phys = physics;
+    for (const auto & outlet : average_pressure_outlets) {
+        const int32_t i_bc = outlet.first;
+        Kokkos::View<uint32_t *> faces = outlet.second;
+        Kokkos::View<int32_t *[2]> cells_of_face = mesh->cells_of_face;
+        Kokkos::View<rtype *> face_area = mesh->face_area;
+        rtype pA = 0.0, A = 0.0;
+        Kokkos::parallel_reduce("outlet_average_pressure", faces.extent(0),
+                                KOKKOS_LAMBDA(const uint32_t k, rtype & sum_pA, rtype & sum_A) {
+            const uint32_t f = faces(k);
+            const int32_t c = cells_of_face(f, 0);
+            rtype U[N_CONSERVATIVE], W[N_CONSERVATIVE];
+            FOR_I_CONSERVATIVE U[i] = solution(c, i);
+            phys.compute_W_from_conservatives(W, U);
+            sum_pA += W[3] * face_area(f);
+            sum_A += face_area(f);
+        }, pA, A);
+        auto bc = Kokkos::subview(boundary_data.bcs, i_bc);
+        auto h_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bc);
+        h_bc().data[0] = h_bc().data[3] - pA / A;
+        Kokkos::deep_copy(bc, h_bc);
+    }
+}
+
+void Solver::update_boundary_states(rtype t_eval) {
+    if (dirichlet_boundaries.empty() || t_eval == t_boundary_states) {
+        return;
+    }
+    for (const auto & bc : dirichlet_boundaries) {
+        for (uint32_t i_face : bc.faces) {
+            const rtype x = mesh->h_face_coords(i_face, 0);
+            const rtype y = mesh->h_face_coords(i_face, 1);
+            const int32_t k = h_face_state_index(i_face);
+            for (uint8_t i = 0; i < N_DIM + 2; i++) h_face_state(k, i) = bc.W[i](x, y, t_eval);
+        }
+    }
+    Kokkos::deep_copy(boundary_data.face_state, h_face_state);
+    t_boundary_states = t_eval;
 }
 
 void Solver::init_numerics() {
@@ -166,7 +303,7 @@ void Solver::init_numerics() {
     face_reconstruction->set_boundaries(boundary_data);
     face_reconstruction->init(face_reconstruction_input);
 
-    rhs_func = [this](StateView solution, StateView rhs) { calc_rhs(solution, rhs); };
+    rhs_func = [this](StateView solution, StateView rhs, rtype t_stage) { calc_rhs(solution, rhs, t_stage); };
     check_nan = toml::find_or<bool>(input, "numerics", "check_nan", false);
 }
 
@@ -184,13 +321,13 @@ void Solver::init_run_parameters() {
     }
     use_cfl = run.contains("cfl");
     if (use_cfl) {
-        cfl = toml::find<rtype>(input, "run", "cfl");
+        cfl = find_real(input, "run", "cfl");
     } else {
-        dt = toml::find<rtype>(input, "run", "dt");
+        dt = find_real(input, "run", "dt");
     }
     n_steps = toml::find_or<uint64_t>(input, "run", "n_steps", 0);
-    t_stop = toml::find_or<rtype>(input, "run", "t_stop", -1.0);
-    t_wall_stop = toml::find_or<rtype>(input, "run", "t_wall_stop", -1.0);
+    t_stop = find_real_or(input, "run", "t_stop", -1.0);
+    t_wall_stop = find_real_or(input, "run", "t_wall_stop", -1.0);
 }
 
 void Solver::init_output() {
@@ -369,7 +506,7 @@ void Solver::print_logo() const {
 }
 
 void Solver::take_step() {
-    time_integrator->take_step(dt, solution_vec, rhs_vec, rhs_func);
+    time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
     Kokkos::fence();
     step++;
     t += dt;

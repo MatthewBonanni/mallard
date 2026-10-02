@@ -11,6 +11,8 @@
 
 #include "mesh.h"
 
+#include "input.h"
+
 #include <iostream>
 #include <string>
 #include <cmath>
@@ -40,24 +42,24 @@ void Mesh::init(const toml::value & input) {
 
     if (get_type() == MeshType::FILE) {
         std::string filename = toml::find_or<std::string>(input, "mesh", "filename", "mesh.msh");
-        throw std::runtime_error("MeshType::FILE not implemented.");
+        this->init_file(filename);
     } else if (get_type() == MeshType::CARTESIAN) {
         uint32_t Nx = toml::find_or<uint32_t>(input, "mesh", "Nx", 100);
         uint32_t Ny = toml::find_or<uint32_t>(input, "mesh", "Ny", 100);
-        rtype Lx = toml::find_or<rtype>(input, "mesh", "Lx", 1.0);
-        rtype Ly = toml::find_or<rtype>(input, "mesh", "Ly", 1.0);
+        rtype Lx = find_real_or(input, "mesh", "Lx", 1.0);
+        rtype Ly = find_real_or(input, "mesh", "Ly", 1.0);
         this->init_cart(Nx, Ny, Lx, Ly);
     } else if (get_type() == MeshType::CARTESIAN_TRI) {
         uint32_t Nx = toml::find_or<uint32_t>(input, "mesh", "Nx", 100);
         uint32_t Ny = toml::find_or<uint32_t>(input, "mesh", "Ny", 100);
-        rtype Lx = toml::find_or<rtype>(input, "mesh", "Lx", 1.0);
-        rtype Ly = toml::find_or<rtype>(input, "mesh", "Ly", 1.0);
+        rtype Lx = find_real_or(input, "mesh", "Lx", 1.0);
+        rtype Ly = find_real_or(input, "mesh", "Ly", 1.0);
         this->init_cart_tri(Nx, Ny, Lx, Ly);
     } else if (get_type() == MeshType::WEDGE) {
         uint32_t Nx = toml::find_or<uint32_t>(input, "mesh", "Nx", 100);
         uint32_t Ny = toml::find_or<uint32_t>(input, "mesh", "Ny", 100);
-        rtype Lx = toml::find_or<rtype>(input, "mesh", "Lx", 1.0);
-        rtype Ly = toml::find_or<rtype>(input, "mesh", "Ly", 1.0);
+        rtype Lx = find_real_or(input, "mesh", "Lx", 1.0);
+        rtype Ly = find_real_or(input, "mesh", "Ly", 1.0);
         this->init_wedge(Nx, Ny, Lx, Ly);
     } else {
         // Should never get here due to the enum class.

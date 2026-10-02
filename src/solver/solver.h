@@ -26,6 +26,16 @@
 #include "time_integrator.h"
 #include "physics.h"
 #include "data_writer.h"
+#include "expression.h"
+
+/**
+ * @brief Faces with a Dirichlet condition and the expressions of x, y, t
+ *        for their exterior state W = [rho, u_x, u_y, p].
+ */
+struct DirichletBoundary {
+    std::vector<uint32_t> faces;
+    std::vector<Expression> W;
+};
 
 class Solver {
     public:
@@ -58,9 +68,9 @@ class Solver {
         void take_step();
 
         /**
-         * @brief Compute dU/dt for the given conservative state.
+         * @brief Compute dU/dt for the given conservative state at time t.
          */
-        void calc_rhs(StateView solution, StateView rhs);
+        void calc_rhs(StateView solution, StateView rhs, rtype t);
 
         /**
          * @brief Compute the stable time step for the current solution.
@@ -109,6 +119,10 @@ class Solver {
         void init_solution_constant();
         void init_solution_analytical();
         void init_solution_restart();
+        void update_boundary_states(rtype t_eval);
+        void update_average_pressure_outlets(StateView solution);
+        void init_sources();
+        void update_source_field(rtype t_eval);
         void allocate_memory();
         void register_data();
         bool done() const;
@@ -141,6 +155,11 @@ class Solver {
         std::shared_ptr<Mesh> mesh;
         Euler physics;
         BoundaryData boundary_data;
+        std::vector<DirichletBoundary> dirichlet_boundaries;
+        std::vector<std::pair<int32_t, Kokkos::View<uint32_t *>>> average_pressure_outlets;  // (bc index, faces)
+        Kokkos::View<rtype *[N_DIM + 2]>::host_mirror_type h_face_state;
+        Kokkos::View<int32_t *>::host_mirror_type h_face_state_index;
+        rtype t_boundary_states;
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         RiemannSolverType riemann_solver_type;
         std::unique_ptr<TimeIntegrator> time_integrator;
@@ -154,6 +173,15 @@ class Solver {
         std::vector<StateView> solution_vec;
         std::vector<StateView> rhs_vec;
         RHSFunction rhs_func;
+
+        // Source terms
+        bool has_gravity = false;
+        rtype gravity[N_DIM] = {0.0, 0.0};
+        std::vector<Expression> source_expressions;  // Per conservative variable, empty if none
+        bool source_time_dependent = false;
+        StateView source_field;
+        StateView::host_mirror_type h_source_field;
+        rtype t_source = -1.0;
 
         // Checks
         uint32_t check_interval;

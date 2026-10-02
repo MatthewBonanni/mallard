@@ -19,23 +19,30 @@
 
 #include "common_typedef.h"
 #include "common_math.h"
+#include "teno.h"
 
 enum class RiemannSolverType {
     RUSANOV,
     HLL,
     HLLC,
+    ROE,
+    RHLL,
 };
 
 static const std::unordered_map<std::string, RiemannSolverType> RIEMANN_SOLVER_TYPES = {
     {"Rusanov", RiemannSolverType::RUSANOV},
     {"HLL", RiemannSolverType::HLL},
-    {"HLLC", RiemannSolverType::HLLC}
+    {"HLLC", RiemannSolverType::HLLC},
+    {"Roe", RiemannSolverType::ROE},
+    {"RHLL", RiemannSolverType::RHLL}
 };
 
 static const std::unordered_map<RiemannSolverType, std::string> RIEMANN_SOLVER_NAMES = {
     {RiemannSolverType::RUSANOV, "Rusanov"},
     {RiemannSolverType::HLL, "HLL"},
-    {RiemannSolverType::HLLC, "HLLC"}
+    {RiemannSolverType::HLLC, "HLLC"},
+    {RiemannSolverType::ROE, "Roe"},
+    {RiemannSolverType::RHLL, "RHLL"}
 };
 
 /**
@@ -242,6 +249,98 @@ struct HLLC {
         U_star[2] = coeff * (W[2] + (S_star - u_n) * n[1]);
         U_star[3] = coeff * (U[3] / W[0] + (S_star - u_n) * (S_star + W[3] / (W[0] * (S - u_n))));
         FOR_I_CONSERVATIVE flux[i] = F[i] + S * (U_star[i] - U[i]);
+    }
+};
+
+/**
+ * @brief Roe's approximate Riemann solver with Harten's entropy fix on the
+ *        acoustic waves.
+ */
+struct Roe {
+    KOKKOS_INLINE_FUNCTION
+    static void calc_flux(rtype * flux, const rtype * n,
+                          const rtype * W_l, const rtype * W_r, const rtype gamma) {
+        rtype U_l[N_CONSERVATIVE], U_r[N_CONSERVATIVE];
+        rtype F_l[N_CONSERVATIVE], F_r[N_CONSERVATIVE];
+        physical_flux(W_l, n, gamma, U_l, F_l);
+        physical_flux(W_r, n, gamma, U_r, F_r);
+
+        // Roe-averaged state, expressed as W = [rho, u, v, p] with a matching sound speed
+        const rtype s_l = Kokkos::sqrt(W_l[0]);
+        const rtype s_r = Kokkos::sqrt(W_r[0]);
+        const rtype H_l = (U_l[3] + W_l[3]) / W_l[0];
+        const rtype H_r = (U_r[3] + W_r[3]) / W_r[0];
+        rtype W_roe[N_CONSERVATIVE];
+        W_roe[0] = s_l * s_r;
+        W_roe[1] = (s_l * W_l[1] + s_r * W_r[1]) / (s_l + s_r);
+        W_roe[2] = (s_l * W_l[2] + s_r * W_r[2]) / (s_l + s_r);
+        const rtype H = (s_l * H_l + s_r * H_r) / (s_l + s_r);
+        const rtype a2 = Kokkos::fmax((gamma - 1.0) * (H - 0.5 * (W_roe[1] * W_roe[1] + W_roe[2] * W_roe[2])), 1e-14);
+        W_roe[3] = W_roe[0] * a2 / gamma;
+        const rtype a = Kokkos::sqrt(a2);
+
+        rtype L[N_CONSERVATIVE][N_CONSERVATIVE], R[N_CONSERVATIVE][N_CONSERVATIVE];
+        teno::eigenvectors(W_roe, n, gamma, L, R);
+        const rtype u_n = W_roe[1] * n[0] + W_roe[2] * n[1];
+        rtype lambda[N_CONSERVATIVE] = {u_n - a, u_n, u_n + a, u_n};
+        const rtype delta = 0.1 * a;
+        for (uint8_t k = 0; k < N_CONSERVATIVE; k++) {
+            rtype l = Kokkos::fabs(lambda[k]);
+            if ((k == 0 || k == 2) && l < delta) l = 0.5 * (l * l + delta * delta) / delta;
+            lambda[k] = l;
+        }
+        rtype strength[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE {
+            strength[i] = 0.0;
+            for (uint8_t j = 0; j < N_CONSERVATIVE; j++) strength[i] += L[i][j] * (U_r[j] - U_l[j]);
+        }
+        FOR_I_CONSERVATIVE {
+            rtype dissipation = 0.0;
+            for (uint8_t k = 0; k < N_CONSERVATIVE; k++) dissipation += R[i][k] * lambda[k] * strength[k];
+            flux[i] = 0.5 * (F_l[i] + F_r[i] - dissipation);
+        }
+    }
+};
+
+/**
+ * @brief Rotated-hybrid HLL-Roe solver (Nishikawa & Kitamura, J. Comput.
+ *        Phys. 227, 2008): HLL along the direction of the velocity difference
+ *        (normal to shocks, where Roe's lack of dissipation causes carbuncles)
+ *        and Roe across it (shear layers and contacts stay sharp).
+ */
+struct RHLL {
+    KOKKOS_INLINE_FUNCTION
+    static void calc_flux(rtype * flux, const rtype * n,
+                          const rtype * W_l, const rtype * W_r, const rtype gamma) {
+        const rtype dq[N_DIM] = {W_r[1] - W_l[1], W_r[2] - W_l[2]};
+        const rtype dq_mag = Kokkos::sqrt(dq[0] * dq[0] + dq[1] * dq[1]);
+        const rtype a_ref = Kokkos::sqrt(gamma * Kokkos::fmax(W_l[3] / W_l[0], W_r[3] / W_r[0]));
+        rtype n1[N_DIM];
+        if (dq_mag > 1e-12 * a_ref) {
+            n1[0] = dq[0] / dq_mag;
+            n1[1] = dq[1] / dq_mag;
+        } else {
+            // No velocity jump: fall back to the face normal (pure HLL)
+            n1[0] = n[0];
+            n1[1] = n[1];
+        }
+        rtype alpha1 = n1[0] * n[0] + n1[1] * n[1];
+        if (alpha1 < 0.0) {
+            n1[0] = -n1[0];
+            n1[1] = -n1[1];
+            alpha1 = -alpha1;
+        }
+        rtype n2[N_DIM] = {-n1[1], n1[0]};
+        rtype alpha2 = n2[0] * n[0] + n2[1] * n[1];
+        if (alpha2 < 0.0) {
+            n2[0] = -n2[0];
+            n2[1] = -n2[1];
+            alpha2 = -alpha2;
+        }
+        rtype f1[N_CONSERVATIVE], f2[N_CONSERVATIVE];
+        HLL::calc_flux(f1, n1, W_l, W_r, gamma);
+        Roe::calc_flux(f2, n2, W_l, W_r, gamma);
+        FOR_I_CONSERVATIVE flux[i] = alpha1 * f1[i] + alpha2 * f2[i];
     }
 };
 

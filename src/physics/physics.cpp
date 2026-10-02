@@ -11,6 +11,8 @@
 
 #include "physics.h"
 
+#include "input.h"
+
 #include <iostream>
 #include <stdexcept>
 
@@ -29,24 +31,24 @@ Euler Euler::from_input(const toml::value & input) {
             throw std::runtime_error(std::string("Missing ") + key + " for physics: euler.");
         }
     }
-    Euler euler = from_reference(toml::find<rtype>(input, "physics", "gamma"),
-                                 toml::find<rtype>(input, "physics", "p_ref"),
-                                 toml::find<rtype>(input, "physics", "T_ref"),
-                                 toml::find<rtype>(input, "physics", "rho_ref"));
+    Euler euler = from_reference(find_real(input, "physics", "gamma"),
+                                 find_real(input, "physics", "p_ref"),
+                                 find_real(input, "physics", "T_ref"),
+                                 find_real(input, "physics", "rho_ref"));
     const std::string type = toml::find_or<std::string>(input, "physics", "type", "euler");
     if (type == "navier_stokes") {
         if (!input.at("physics").contains("mu")) {
             throw std::runtime_error("Missing mu for physics: navier_stokes.");
         }
-        euler.mu_ref = toml::find<rtype>(input, "physics", "mu");
-        euler.Pr = toml::find_or<rtype>(input, "physics", "Pr", 0.72);
+        euler.mu_ref = find_real(input, "physics", "mu");
+        euler.Pr = find_real_or(input, "physics", "Pr", 0.72);
         const std::string model = toml::find_or<std::string>(input, "physics", "viscosity_model", "constant");
         if (model == "constant") {
             euler.viscosity_model = ViscosityModel::CONSTANT;
         } else if (model == "sutherland") {
             euler.viscosity_model = ViscosityModel::SUTHERLAND;
-            euler.T_mu_ref = toml::find_or<rtype>(input, "physics", "T_mu_ref", 273.15);
-            euler.S_mu = toml::find_or<rtype>(input, "physics", "sutherland_S", 110.4);
+            euler.T_mu_ref = find_real_or(input, "physics", "T_mu_ref", 273.15);
+            euler.S_mu = find_real_or(input, "physics", "sutherland_S", 110.4);
         } else {
             throw std::runtime_error("Unknown viscosity model: " + model + ".");
         }

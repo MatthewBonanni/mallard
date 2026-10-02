@@ -1,0 +1,74 @@
+# Flow past a circular cylinder at Re = 100, Mach 0.2: periodic vortex
+# shedding (Karman vortex street, Strouhal number ~0.165).
+# Generate the mesh first:
+#   python ../../tools/make_cylinder_mesh.py cylinder.msh --dr0 0.01 --n-r 96
+# Nondimensionalization: cylinder diameter 1, free-stream density and sound
+# speed 1, so U = M = 0.2 and mu = U D / Re.
+
+[run]
+t_stop = 150.0
+cfl = 0.8
+
+[mesh]
+type = "file"
+filename = "cylinder.msh"
+
+[initialize]
+type = "analytical"
+rho = "1.0"
+# A small transverse kick behind the cylinder triggers shedding sooner
+u = ["0.2 * (1 - exp(-4 * (x^2 + y^2 - 0.25)))",
+     "0.02 * exp(-((x - 2)^2 + y^2))"]
+p = "0.7142857142857143"
+
+[[boundaries]]
+name = "cylinder"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "farfield"
+type = "upt"
+where = "x < 0"
+u = [0.2, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "farfield"
+type = "p_out"
+where = "x >= 0"
+p = 0.7142857142857143
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 3
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+mu = 0.002
+Pr = 0.72
+
+[output]
+check_interval = 2000
+
+[[write_data]]
+prefix = "./solut/cylinder"
+format = "vtu"
+time_interval = 1.0
+variables = ["RHO", "U_X", "U_Y", "P"]
+
+[[write_data]]
+prefix = "./solut/wall"
+format = "vtu"
+geometry = "cylinder"
+time_interval = 1.0
+variables = ["P"]

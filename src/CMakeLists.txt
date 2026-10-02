@@ -3,9 +3,9 @@ add_library(MallardCore STATIC
     common/common_math.cpp
     common/common_io.cpp
     mesh/mesh.cpp
+    mesh/mesh_io.cpp
     mesh/zone.cpp
     boundary/boundary.cpp
-    numerics/basis.cpp
     numerics/face_reconstruction.cpp
     numerics/quadrature.cpp
     numerics/teno.cpp

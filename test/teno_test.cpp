@@ -214,3 +214,12 @@ TEST_P(TENOMesh, BoundPreservingScalingLimitsOvershoot) {
 }
 
 INSTANTIATE_TEST_SUITE_P(TENO, TENOMesh, ::testing::Values("cartesian", "cartesian_tri"));
+
+TEST(TENOTest, ConditionLimitIsEnforced) {
+    // Equilibrated least-squares systems on these meshes are well conditioned,
+    // so only an impossible limit (below 1) rejects every stencil
+    auto mesh = make_mesh("wedge", 16, 12);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    EXPECT_NO_THROW(make_teno(mesh, bd, 4, "max_condition = 1e3\n"));
+    EXPECT_THROW(make_teno(mesh, bd, 4, "max_condition = 0.5\n"), std::runtime_error);
+}

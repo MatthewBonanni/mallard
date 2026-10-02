@@ -31,13 +31,13 @@ FE::FE() {
     n_rhs_vectors = 1;
 }
 
-void FE::take_step(const rtype dt,
+void FE::take_step(const rtype t, const rtype dt,
                    std::vector<StateView> & solution_vec,
                    std::vector<StateView> & rhs_vec,
                    const RHSFunction & calc_rhs) {
     StateView U = solution_vec[0];
     StateView k1 = rhs_vec[0];
-    calc_rhs(U, k1);
+    calc_rhs(U, k1, t);
     axpby(dt, k1, 1.0, U);
 }
 
@@ -47,7 +47,7 @@ RK4::RK4() {
     n_rhs_vectors = 4;
 }
 
-void RK4::take_step(const rtype dt,
+void RK4::take_step(const rtype t, const rtype dt,
                     std::vector<StateView> & solution_vec,
                     std::vector<StateView> & rhs_vec,
                     const RHSFunction & calc_rhs) {
@@ -58,19 +58,19 @@ void RK4::take_step(const rtype dt,
     StateView k3 = rhs_vec[2];
     StateView k4 = rhs_vec[3];
 
-    calc_rhs(U, k1);
+    calc_rhs(U, k1, t);
     Kokkos::deep_copy(U_temp, U);
     axpby(0.5 * dt, k1, 1.0, U_temp);
 
-    calc_rhs(U_temp, k2);
+    calc_rhs(U_temp, k2, t + 0.5 * dt);
     Kokkos::deep_copy(U_temp, U);
     axpby(0.5 * dt, k2, 1.0, U_temp);
 
-    calc_rhs(U_temp, k3);
+    calc_rhs(U_temp, k3, t + 0.5 * dt);
     Kokkos::deep_copy(U_temp, U);
     axpby(dt, k3, 1.0, U_temp);
 
-    calc_rhs(U_temp, k4);
+    calc_rhs(U_temp, k4, t + dt);
     axpby(dt / 6.0, k1, 1.0, U);
     axpby(dt / 3.0, k2, 1.0, U);
     axpby(dt / 3.0, k3, 1.0, U);
@@ -83,7 +83,7 @@ SSPRK3::SSPRK3() {
     n_rhs_vectors = 1;
 }
 
-void SSPRK3::take_step(const rtype dt,
+void SSPRK3::take_step(const rtype t, const rtype dt,
                        std::vector<StateView> & solution_vec,
                        std::vector<StateView> & rhs_vec,
                        const RHSFunction & calc_rhs) {
@@ -92,17 +92,17 @@ void SSPRK3::take_step(const rtype dt,
     StateView k = rhs_vec[0];
 
     // U1 = U + dt L(U)
-    calc_rhs(U, k);
+    calc_rhs(U, k, t);
     Kokkos::deep_copy(U_temp, U);
     axpby(dt, k, 1.0, U_temp);
 
     // U2 = 3/4 U + 1/4 (U1 + dt L(U1))
-    calc_rhs(U_temp, k);
+    calc_rhs(U_temp, k, t + dt);
     axpby(dt, k, 1.0, U_temp);
     axpby(0.75, U, 0.25, U_temp);
 
     // U^{n+1} = 1/3 U + 2/3 (U2 + dt L(U2))
-    calc_rhs(U_temp, k);
+    calc_rhs(U_temp, k, t + 0.5 * dt);
     axpby(dt, k, 1.0, U_temp);
     axpby(2.0 / 3.0, U_temp, 1.0 / 3.0, U);
 }

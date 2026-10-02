@@ -1,0 +1,78 @@
+# Double Mach reflection (Woodward & Colella 1984): a Mach 10 shock at 60
+# degrees to a reflecting wall that starts at x = 1/6. The top boundary
+# follows the exact shock motion.
+
+[run]
+t_stop = 0.2
+cfl = 0.5
+
+[mesh]
+type = "cartesian_tri"
+Nx = 960
+Ny = 240
+Lx = 4.0
+Ly = 1.0
+
+[initialize]
+type = "analytical"
+rho = "y > 1.7320508075688772 * (x - 1/6) ? 8.0 : 1.4"
+u = ["y > 1.7320508075688772 * (x - 1/6) ? 7.1447096811216 : 0.0",
+     "y > 1.7320508075688772 * (x - 1/6) ? -4.125 : 0.0"]
+p = "y > 1.7320508075688772 * (x - 1/6) ? 116.5 : 1.0"
+
+[[boundaries]]
+name = "left"
+type = "dirichlet"
+rho = "8.0"
+u = ["7.1447096811216", "-4.125"]
+p = "116.5"
+
+[[boundaries]]
+name = "right"
+type = "extrapolation"
+
+[[boundaries]]
+name = "bottom"
+type = "dirichlet"
+where = "x < 1/6"
+rho = "8.0"
+u = ["7.1447096811216", "-4.125"]
+p = "116.5"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+where = "x >= 1/6"
+
+[[boundaries]]
+name = "top"
+type = "dirichlet"
+rho = "x < 1/6 + (1 + 20 * t) / 1.7320508075688772 ? 8.0 : 1.4"
+u = ["x < 1/6 + (1 + 20 * t) / 1.7320508075688772 ? 7.1447096811216 : 0.0",
+     "x < 1/6 + (1 + 20 * t) / 1.7320508075688772 ? -4.125 : 0.0"]
+p = "x < 1/6 + (1 + 20 * t) / 1.7320508075688772 ? 116.5 : 1.0"
+
+[numerics]
+riemann_solver = "RHLL"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[output]
+check_interval = 200
+
+[[write_data]]
+prefix = "./solut/dmr"
+format = "vtu"
+time_interval = 0.002
+variables = ["RHO", "U_X", "U_Y", "P"]

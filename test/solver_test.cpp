@@ -14,6 +14,7 @@
 #include <Kokkos_Core.hpp>
 
 #include <cmath>
+#include <iomanip>
 #include <sstream>
 #include <string>
 #include <tuple>
@@ -372,4 +373,52 @@ TEST(SolverValidation, ObliqueShockOverWedgeMatchesTheory) {
     }
     ASSERT_GT(n, 0);
     EXPECT_NEAR(sum / n, 1.4984, 0.01);
+}
+
+namespace {
+
+/**
+ * @brief Largest transverse velocity after 3000 steps of a standing Mach 6
+ *        normal shock on a grid-aligned quad mesh with a tiny density bump
+ *        behind it (the setup that triggers the carbuncle instability).
+ */
+double carbuncle_growth(const std::string & riemann) {
+    const double rho1 = 1.0, u1 = 6.0, p1 = 1.0 / 1.4;
+    const double rho2 = 5.2682926829268295, u2 = 1.1388888888888888, p2 = 29.880952380952383;
+    std::ostringstream s;
+    s << std::setprecision(17)
+      << "[run]\nn_steps = 3000\ncfl = 0.4\n"
+      << "[mesh]\ntype = \"cartesian\"\nNx = 40\nNy = 40\nLx = 1.0\nLy = 1.0\n"
+      << "[initialize]\ntype = \"analytical\"\n"
+      << "rho = \"x < 0.5 ? " << rho1 << " : " << rho2
+      << " * (1 + (abs(y - 0.5) < 0.026 and abs(x - 0.51) < 0.02 ? 1e-3 : 0))\"\n"
+      << "u = [\"x < 0.5 ? " << u1 << " : " << u2 << "\", \"0.0\"]\n"
+      << "p = \"x < 0.5 ? " << p1 << " : " << p2 << "\"\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"dirichlet\"\nrho = \"" << rho1 << "\"\n"
+      << "u = [\"" << u1 << "\", \"0.0\"]\np = \"" << p1 << "\"\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"dirichlet\"\nrho = \"" << rho2 << "\"\n"
+      << "u = [\"" << u2 << "\", \"0.0\"]\np = \"" << p2 << "\"\n"
+      << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+      << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
+      << "[numerics]\nriemann_solver = \"" << riemann << "\"\ntime_integrator = \"SSPRK3\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"FO\"\n"
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[output]\ncheck_interval = 1000000\n";
+    Solver solver;
+    solver.init(parse_toml(s.str()));
+    solver.run();
+    solver.update_primitives();
+    solver.copy_device_to_host();
+    double v_max = 0.0;
+    for (uint32_t i = 0; i < solver.get_mesh()->n_cells; i++) {
+        v_max = std::max(v_max, std::abs(solver.h_primitives(i, 1)));
+    }
+    return v_max;
+}
+
+} // namespace
+
+TEST(SolverValidation, RotatedHybridRiemannSolverIsCarbuncleFree) {
+    EXPECT_GT(carbuncle_growth("Roe"), 0.1);
+    EXPECT_LT(carbuncle_growth("RHLL"), 1e-10);
 }

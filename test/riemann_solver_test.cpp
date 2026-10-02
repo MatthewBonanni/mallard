@@ -23,7 +23,7 @@ constexpr rtype GAMMA = 1.4;
 template <typename T>
 class RiemannSolverTest : public ::testing::Test {};
 
-using Solvers = ::testing::Types<riemann::Rusanov, riemann::HLL, riemann::HLLC>;
+using Solvers = ::testing::Types<riemann::Rusanov, riemann::HLL, riemann::HLLC, riemann::Roe, riemann::RHLL>;
 TYPED_TEST_SUITE(RiemannSolverTest, Solvers);
 
 const rtype STATES[][N_CONSERVATIVE] = {
@@ -182,4 +182,37 @@ TEST(RiemannSolverTest, WaveSpeedsBracketExactWaves) {
     const double S_shock = std::sqrt(GAMMA * 0.1 / 0.125) *
                            std::sqrt((GAMMA + 1.0) / (2.0 * GAMMA) * exact.p_star / 0.1 + (GAMMA - 1.0) / (2.0 * GAMMA));
     EXPECT_NEAR(S_r, S_shock, 0.02 * S_shock);
+}
+
+TEST(RiemannSolverTest, RoeResolvesStationaryContactAndShearExactly) {
+    const rtype W_l[N_CONSERVATIVE] = {1.0, 0.0, 0.4, 1.0};
+    const rtype W_r[N_CONSERVATIVE] = {0.1, 0.0, -0.3, 1.0};
+    const rtype n[N_DIM] = {1.0, 0.0};
+    rtype f[N_CONSERVATIVE];
+    riemann::Roe::calc_flux(f, n, W_l, W_r, GAMMA);
+    EXPECT_NEAR(f[0], 0.0, 1e-14);
+    EXPECT_NEAR(f[1], 1.0, 1e-14);
+    EXPECT_NEAR(f[2], 0.0, 1e-14);
+    EXPECT_NEAR(f[3], 0.0, 1e-14);
+}
+
+TEST(RiemannSolverTest, RotatedHybridReducesToHLLForNormalVelocityJump) {
+    // Velocity jump along the face normal: n1 = n, so the flux is pure HLL
+    const rtype W_l[N_CONSERVATIVE] = {1.0, 0.5, 0.2, 1.0};
+    const rtype W_r[N_CONSERVATIVE] = {0.4, -0.3, 0.2, 0.6};
+    const rtype n[N_DIM] = {1.0, 0.0};
+    rtype f[N_CONSERVATIVE], f_hll[N_CONSERVATIVE];
+    riemann::RHLL::calc_flux(f, n, W_l, W_r, GAMMA);
+    riemann::HLL::calc_flux(f_hll, n, W_l, W_r, GAMMA);
+    FOR_I_CONSERVATIVE EXPECT_NEAR(f[i], f_hll[i], 1e-13);
+}
+
+TEST(RiemannSolverTest, RotatedHybridReducesToRoeForTangentialVelocityJump) {
+    const rtype W_l[N_CONSERVATIVE] = {1.0, 0.3, 0.5, 1.0};
+    const rtype W_r[N_CONSERVATIVE] = {0.4, 0.3, -0.2, 0.6};
+    const rtype n[N_DIM] = {1.0, 0.0};
+    rtype f[N_CONSERVATIVE], f_roe[N_CONSERVATIVE];
+    riemann::RHLL::calc_flux(f, n, W_l, W_r, GAMMA);
+    riemann::Roe::calc_flux(f_roe, n, W_l, W_r, GAMMA);
+    FOR_I_CONSERVATIVE EXPECT_NEAR(f[i], f_roe[i], 1e-13);
 }

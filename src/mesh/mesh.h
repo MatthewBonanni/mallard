@@ -12,6 +12,8 @@
 #ifndef MESH_H
 #define MESH_H
 
+#include <array>
+#include <string>
 #include <vector>
 #include <unordered_map>
 
@@ -227,6 +229,29 @@ class Mesh {
         void init_cart_tri(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly);
 
         /**
+         * @brief A boundary edge (pair of node indices) and its zone name.
+         */
+        struct BoundaryEdge {
+            std::array<uint32_t, 2> nodes;
+            std::string zone;
+        };
+
+        /**
+         * @brief Build the mesh from nodes, cells (triangles and/or quads, any
+         *        orientation) and named boundary edges. Boundary faces without
+         *        a named edge go to the zone "unassigned".
+         */
+        void init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & nodes,
+                                    const std::vector<std::vector<uint32_t>> & cells,
+                                    const std::vector<BoundaryEdge> & boundary_edges);
+
+        /**
+         * @brief Read an ASCII Gmsh mesh (format 2.2 or 4.1). Named physical
+         *        curves become boundary zones.
+         */
+        void init_file(const std::string & filename);
+
+        /**
          * @brief Initialize the supersonic wedge mesh.
          * 
          * @param nx Number of cells in the x-direction.
@@ -272,7 +297,7 @@ class Mesh {
                                         uint8_t n_order,
                                         std::vector<uint32_t> & neighbors) const;
 
-        MeshType type;
+        MeshType type = MeshType::FILE;
         std::vector<CellZone> m_cell_zones;
         std::vector<FaceZone> m_face_zones;
 };

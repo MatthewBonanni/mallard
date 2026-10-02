@@ -89,6 +89,7 @@ class DataWriter {
 
     protected:
         void write_vtu(const std::string & filename, rtype t) const;
+        void write_vtu_faces(const std::string & filename, rtype t) const;
         void write_restart(const std::string & filename, uint64_t step, rtype t) const;
         void write_pvd() const;
 
@@ -102,6 +103,7 @@ class DataWriter {
         std::vector<const Data *> data_ptrs;
         std::shared_ptr<Mesh> mesh;
         std::vector<std::pair<rtype, std::string>> history;
+        std::vector<uint32_t> geometry_faces;  // Empty: write all cells
 };
 
 #endif // DATA_WRITER_H

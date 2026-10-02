@@ -11,13 +11,14 @@
 
 #include "face_reconstruction.h"
 
+#include "input.h"
+
 #include <iostream>
 
 #include <Kokkos_Core.hpp>
 #include <toml.hpp>
 
 #include "common.h"
-#include "basis.h"
 #include "quadrature.h"
 
 FaceReconstruction::FaceReconstruction() {
@@ -118,7 +119,7 @@ void MUSCL::init(const toml::value & input) {
         throw std::runtime_error("Unknown limiter type: " + limiter_str + ".");
     }
     limiter = it->second;
-    venkat_K = toml::find_or<rtype>(input, "venkatakrishnan_K", 5.0);
+    venkat_K = find_real_or(input, "venkatakrishnan_K", 5.0);
     gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("gradients", mesh->n_cells);
     limiters = Kokkos::View<rtype *[N_CONSERVATIVE]>("limiters", mesh->n_cells);
     print();

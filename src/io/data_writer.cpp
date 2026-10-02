@@ -11,12 +11,15 @@
 
 #include "data_writer.h"
 
+#include "input.h"
+
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <unordered_map>
 
 #include "common_io.h"
 
@@ -40,7 +43,7 @@ void DataWriter::init(const toml::value & input,
             throw std::runtime_error("DataWriter: interval must be positive.");
         }
     } else {
-        time_interval = toml::find<rtype>(input, "time_interval");
+        time_interval = find_real(input, "time_interval");
         if (!(time_interval > 0.0)) {
             throw std::runtime_error("DataWriter: time_interval must be positive.");
         }
@@ -80,6 +83,18 @@ void DataWriter::init(const toml::value & input,
     }
     this->mesh = mesh;
 
+    const std::string geometry = toml::find_or<std::string>(input, "geometry", "all");
+    if (geometry != "all") {
+        if (format != DataFormat::VTU) {
+            throw std::runtime_error("DataWriter: geometry can only be set for vtu output.");
+        }
+        FaceZone * zone = mesh->get_face_zone(geometry);
+        if (zone == nullptr) {
+            throw std::runtime_error("DataWriter: unknown geometry: " + geometry + ".");
+        }
+        for (uint32_t i = 0; i < zone->n_faces(); i++) geometry_faces.push_back(zone->h_faces(i));
+    }
+
     const std::filesystem::path parent = std::filesystem::path(prefix).parent_path();
     if (!parent.empty()) {
         std::filesystem::create_directories(parent);
@@ -112,7 +127,11 @@ void DataWriter::write(uint64_t step, rtype t, bool force) {
         write_restart(stream.str() + ".restart", step, t);
     } else {
         const std::string filename = stream.str() + ".vtu";
-        write_vtu(filename, t);
+        if (geometry_faces.empty()) {
+            write_vtu(filename, t);
+        } else {
+            write_vtu_faces(filename, t);
+        }
         history.emplace_back(t, filename);
         write_pvd();
     }
@@ -223,6 +242,69 @@ void DataWriter::write_pvd() const {
             << std::filesystem::path(filename).filename().string() << "\"/>\n";
     }
     out << "  </Collection>\n";
+    out << "</VTKFile>\n";
+}
+
+void DataWriter::write_vtu_faces(const std::string & filename, rtype t) const {
+    std::ofstream out(filename);
+    if (!out.good()) {
+        throw std::runtime_error("DataWriter::write_vtu_faces: Could not open file: " + filename + ".");
+    }
+    std::cout << "Writing data to file: " << filename << std::endl;
+
+    // Renumber the nodes of the selected faces
+    std::unordered_map<uint32_t, uint32_t> local;
+    std::vector<uint32_t> nodes;
+    for (uint32_t f : geometry_faces) {
+        for (uint32_t k = 0; k < mesh->h_n_nodes_of_face(f); k++) {
+            const uint32_t node = mesh->h_node_of_face(f, k);
+            if (local.emplace(node, nodes.size()).second) nodes.push_back(node);
+        }
+    }
+
+    out << std::setprecision(std::numeric_limits<rtype>::max_digits10);
+    out << "<?xml version=\"1.0\"?>\n";
+    out << "<VTKFile type=\"UnstructuredGrid\" version=\"1.0\" byte_order=\"" << endianness() << "\">\n";
+    out << "  <UnstructuredGrid>\n";
+    out << "    <FieldData>\n";
+    out << "      <DataArray type=\"Float64\" Name=\"TIME\" NumberOfTuples=\"1\" format=\"ascii\">"
+        << static_cast<double>(t) << "</DataArray>\n";
+    out << "    </FieldData>\n";
+    out << "    <Piece NumberOfPoints=\"" << nodes.size() << "\" NumberOfCells=\"" << geometry_faces.size() << "\">\n";
+    out << "      <CellData>\n";
+    for (const auto & data_ptr : data_ptrs) {
+        out << "        <DataArray type=\"Float64\" Name=\"" << data_ptr->name() << "\" format=\"ascii\">\n";
+        for (uint32_t f : geometry_faces) out << static_cast<double>((*data_ptr)[mesh->h_cells_of_face(f, 0)]) << " ";
+        out << "\n        </DataArray>\n";
+    }
+    out << "      </CellData>\n";
+    out << "      <Points>\n";
+    out << "        <DataArray type=\"Float64\" NumberOfComponents=\"3\" format=\"ascii\">\n";
+    for (uint32_t node : nodes) {
+        out << static_cast<double>(mesh->h_node_coords(node, 0)) << " "
+            << static_cast<double>(mesh->h_node_coords(node, 1)) << " 0 ";
+    }
+    out << "\n        </DataArray>\n";
+    out << "      </Points>\n";
+    out << "      <Cells>\n";
+    out << "        <DataArray type=\"Int64\" Name=\"connectivity\" format=\"ascii\">\n";
+    for (uint32_t f : geometry_faces) {
+        for (uint32_t k = 0; k < mesh->h_n_nodes_of_face(f); k++) out << local.at(mesh->h_node_of_face(f, k)) << " ";
+    }
+    out << "\n        </DataArray>\n";
+    out << "        <DataArray type=\"Int64\" Name=\"offsets\" format=\"ascii\">\n";
+    uint64_t offset = 0;
+    for (uint32_t f : geometry_faces) {
+        offset += mesh->h_n_nodes_of_face(f);
+        out << offset << " ";
+    }
+    out << "\n        </DataArray>\n";
+    out << "        <DataArray type=\"UInt8\" Name=\"types\" format=\"ascii\">\n";
+    for (size_t i = 0; i < geometry_faces.size(); i++) out << "3 ";
+    out << "\n        </DataArray>\n";
+    out << "      </Cells>\n";
+    out << "    </Piece>\n";
+    out << "  </UnstructuredGrid>\n";
     out << "</VTKFile>\n";
 }
 

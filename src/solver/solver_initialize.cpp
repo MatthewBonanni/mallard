@@ -11,6 +11,8 @@
 
 #include "solver.h"
 
+#include "input.h"
+
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -77,12 +79,12 @@ void Solver::init_solution_constant() {
             throw std::runtime_error(std::string("Missing ") + key + " for initialization: constant.");
         }
     }
-    std::vector<rtype> u = toml::find<std::vector<rtype>>(input, "initialize", "u");
+    std::vector<rtype> u = find_real_vector(input, "initialize", "u");
     if (u.size() != N_DIM) {
         throw std::runtime_error("u must be a 2-element array for initialization: constant.");
     }
-    const rtype p = toml::find<rtype>(input, "initialize", "p");
-    const rtype T = toml::find<rtype>(input, "initialize", "T");
+    const rtype p = find_real(input, "initialize", "p");
+    const rtype T = find_real(input, "initialize", "T");
     const rtype W[N_CONSERVATIVE] = {physics.get_density_from_pressure_temperature(p, T), u[0], u[1], p};
     rtype cons[N_CONSERVATIVE];
     physics.compute_conservatives_from_W(cons, W);
