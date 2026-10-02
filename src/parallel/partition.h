@@ -19,6 +19,7 @@
 #include "common_typedef.h"
 
 class Mesh;
+class DistributedMesh;
 
 /**
  * @brief Position along the Hilbert curve of a point in the box [lo, hi]
@@ -40,6 +41,20 @@ std::vector<int> partition_hilbert(const Mesh & mesh, int n_parts);
  *        Requires Mallard_ENABLE_KAMINPAR.
  */
 std::vector<int> partition_graph(const Mesh & mesh, int n_parts);
+
+/**
+ * @brief Owner rank of every block cell of a distributed mesh: cells sorted
+ *        along the Hilbert curve of their vertex averages (ties by global id)
+ *        by a distributed sample sort, split into n_parts contiguous pieces of
+ *        nearly equal size (collective).
+ */
+std::vector<int> partition_hilbert(const DistributedMesh & mesh, int n_parts);
+
+/**
+ * @brief Owner rank of every block cell of a distributed mesh from dKaMinPar
+ *        on its dual graph (collective). Requires Mallard_ENABLE_KAMINPAR.
+ */
+std::vector<int> partition_graph(const DistributedMesh & mesh, int n_parts);
 
 /** @brief Whether this build has a graph partitioner. */
 bool have_graph_partitioner();

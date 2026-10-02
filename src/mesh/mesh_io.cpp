@@ -22,9 +22,10 @@
 
 void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & nodes,
                                   const std::vector<std::vector<uint32_t>> & cells,
-                                  const std::vector<BoundaryFace> & boundary_faces) {
+                                  const std::vector<BoundaryFace> & boundary_faces,
+                                  const std::string & unlisted_zone) {
     if constexpr (N_DIM == 3) {
-        init_from_connectivity_3d(nodes, cells, boundary_faces);
+        init_from_connectivity_3d(nodes, cells, boundary_faces, unlisted_zone);
         return;
     }
     n_nodes = nodes.size();
@@ -93,7 +94,7 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
         if (face_cells[f][1] >= 0) {
             interior.push_back(f);
         } else if (!zoned[f]) {
-            zone_faces["unassigned"].push_back(f);
+            zone_faces[unlisted_zone].push_back(f);
         }
     }
 

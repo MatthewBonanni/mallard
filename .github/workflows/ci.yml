@@ -53,6 +53,6 @@ jobs:
         run: |
           mpirun -n 1 ./build/test/MallardTest
           for n in 2 3 4; do
-            mpirun -n $n --oversubscribe ./build/test/MallardTest --gtest_filter='CommTest.*:MeshBlockTest.*:MPITest.*:MPI3DTest.*'
+            mpirun -n $n --oversubscribe ./build/test/MallardTest --gtest_filter='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*'
           done
 

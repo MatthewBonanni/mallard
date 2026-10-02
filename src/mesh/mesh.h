@@ -304,13 +304,14 @@ class Mesh {
         /**
          * @brief Build the mesh from nodes, cells (any orientation) and named
          *        boundary faces. Boundary faces without a named face go to the
-         *        zone "unassigned". Cells are triangles and quadrilaterals in 2D;
+         *        zone unlisted_zone. Cells are triangles and quadrilaterals in 2D;
          *        tetrahedra, pyramids, prisms and hexahedra (Gmsh/VTK node
          *        order) in 3D.
          */
         void init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & nodes,
                                     const std::vector<std::vector<uint32_t>> & cells,
-                                    const std::vector<BoundaryFace> & boundary_faces);
+                                    const std::vector<BoundaryFace> & boundary_faces,
+                                    const std::string & unlisted_zone = "unassigned");
 
         /**
          * @brief Build the mesh from a block holding the whole mesh.
@@ -380,7 +381,8 @@ class Mesh {
     private:
         void init_from_connectivity_3d(const std::vector<std::array<rtype, N_DIM>> & nodes,
                                        const std::vector<std::vector<uint32_t>> & cells,
-                                       const std::vector<BoundaryFace> & boundary_faces);
+                                       const std::vector<BoundaryFace> & boundary_faces,
+                                       const std::string & unlisted_zone);
 
         void allocate_and_fill(const std::vector<std::array<rtype, N_DIM>> & nodes,
                                const std::vector<std::vector<uint32_t>> & cell_nodes,

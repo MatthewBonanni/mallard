@@ -53,6 +53,8 @@ A `Partitioner` interface with two backends:
 | **dKaMinPar** ([KaHIP/KaMinPar](https://github.com/KaHIP/KaMinPar), MIT, C++20; `FetchContent`) | Default when available. Distributed, scales to trillion-edge graphs, guarantees balance. Built with 64-bit ids for hero meshes. New dependency: oneTBB. |
 | **Hilbert curve** (built in) | No-dependency fallback; also used everywhere to order cells within a rank for memory locality. |
 
+The Hilbert backend sorts cells by the curve key of their vertex average (not their centroid, which needs the geometry a rank does not have yet) with a distributed sample sort, so its partitions differ from a global-mesh Hilbert partition but are equally valid; dKaMinPar works directly on the distributed dual graph (section 3).
+
 Vertex weights model cost: a base weight per cell plus a term for the TENO stencil size. ParMETIS or PT-Scotch can be added behind the same interface if needed.
 
 ### 5. Migration
@@ -112,6 +114,10 @@ Dynamic rebalancing (troubled cells, and so the TENO cost, move with shocks) is 
 - **The partitioner takes per-cell weights from the caller**, so measured costs (e.g. the troubled-cell fraction from the last N steps) can replace the static model. KaMinPar can also refine an existing partition rather than start from scratch.
 - **Per-rank derived data** (stencils, pseudo-inverses, halo plans) is cached by global id where it is expensive, so a rebalance recomputes only what moved.
 - **No assumption that the partition is fixed** in output or restart: both are keyed by global id.
+
+### 11. Communication patterns at scale
+
+Setup exchanges are dense `alltoallv` calls, whose count arrays alone are O(ranks) per rank and whose latency grows with the rank count. The face matching and migration genuinely talk to many ranks, but halo growth and node-coordinate fetches have sparse patterns (a rank's partition neighbors and the few ranks whose blocks hold its cells). Beyond about 10k ranks these should move to MPI neighborhood collectives or a sparse NBX exchange (nonblocking sends, `MPI_Ibarrier` to detect completion); planned with milestone 6.
 
 ## Testing
 

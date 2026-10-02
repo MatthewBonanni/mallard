@@ -46,4 +46,12 @@ struct Distribution {
 std::shared_ptr<Mesh> build_local_mesh(Mesh & global, const std::vector<int> & owner, int halo_layers,
                                        Distribution & dist);
 
+/**
+ * @brief Fill the exchange plan of dist, whose cells are numbered, from the
+ *        owner of each of its halo cells (collective): each rank asks the
+ *        owners for its halo cells, and the requests it receives become its
+ *        send lists.
+ */
+void plan_halo_exchange(Distribution & dist, const std::vector<int> & halo_owner);
+
 #endif // DISTRIBUTION_H

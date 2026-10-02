@@ -165,7 +165,8 @@ void Mesh::compute_geometry() {
 
 void Mesh::init_from_connectivity_3d(const std::vector<std::array<rtype, N_DIM>> & nodes,
                                      const std::vector<std::vector<uint32_t>> & cells,
-                                     const std::vector<BoundaryFace> & boundary_faces) {
+                                     const std::vector<BoundaryFace> & boundary_faces,
+                                     const std::string & unlisted_zone) {
     n_nodes = nodes.size();
     n_cells = cells.size();
     auto coords = [&](uint32_t node) {
@@ -233,7 +234,7 @@ void Mesh::init_from_connectivity_3d(const std::vector<std::array<rtype, N_DIM>>
         if (face_cells[f][1] >= 0) {
             interior.push_back(f);
         } else if (!zoned[f]) {
-            zone_faces["unassigned"].push_back(f);
+            zone_faces[unlisted_zone].push_back(f);
         }
     }
 

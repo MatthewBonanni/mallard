@@ -19,6 +19,7 @@ add_library(MallardCore STATIC
     io/data_writer.cpp
     parallel/comm.cpp
     parallel/distribution.cpp
+    parallel/distributed_mesh.cpp
     parallel/halo_exchange.cpp
     parallel/partition.cpp
 )
