@@ -1,13 +1,14 @@
 # TENO-E on unstructured triangles (implementation reference)
 
-Primary source: Liang, Shyy, Fu, "Efficient Arbitrary-High-Order TENO Schemes with Local
+Primary source ([Liang, Shyy & Fu 2025](../references.md#liang-shyy-fu-2025)): Liang, Shyy, Fu, "Efficient Arbitrary-High-Order TENO Schemes with Local
 Adaptive Dissipation for Compressible Flow Simulation on Unstructured Meshes",
 J. Sci. Comput. 104:1 (2025), doi:10.1007/s10915-025-02918-w.
-Predecessor: Ji, Liang, Fu, J. Sci. Comput. 92:61 (2022), arXiv:2105.02127.
+Predecessor: Ji, Liang, Fu, J. Sci. Comput. 92:61 (2022), arXiv:2105.02127 ([Ji, Liang & Fu 2022](../references.md#ji-liang-fu-2022)).
+TENO itself: [Fu, Hu & Adams 2016](../references.md#fu-hu-adams-2016).
 
 ## Stencils
 - Large central stencil S_K: degree r, ~2x the number of non-constant DOFs, grown by
-  neighbour layers and sorted by centroid distance (Tsoutsanis NCB).
+  neighbour layers and sorted by centroid distance (Tsoutsanis NCB; [Tsoutsanis, Titarev & Drikakis 2011](../references.md#tsoutsanis-2011)).
 - K = 3 small directional stencils (degree 2), one per face sector of the triangle.
 
 ## k-exact constrained least squares

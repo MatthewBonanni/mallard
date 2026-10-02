@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Mallard"
+abstract: "Unstructured, GPU accelerated, high-order finite volume CFD solver"
+type: software
+authors:
+  - family-names: "Bonanni"
+    given-names: "Matthew"
+    orcid: "https://orcid.org/0000-0002-8671-7955"
+version: "0.2.0"
+date-released: "2026-10-02"
+url: "https://github.com/MatthewBonanni/mallard"
+repository-code: "https://github.com/MatthewBonanni/mallard"
+license: AGPL-3.0-only
+keywords:
+  - computational fluid dynamics
+  - finite volume method
+  - unstructured meshes
+  - high-order methods
+  - TENO
+  - compressible flow
+  - Navier-Stokes equations
+  - GPU
+  - Kokkos
