@@ -337,3 +337,39 @@ TEST_P(Recon, TransmissiveInflowOnTrianglesKeepsOneDimensionalShockSpeed) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Solver, Recon, ::testing::Values("FO", "MUSCL", "TENO"));
+
+TEST(SolverValidation, ObliqueShockOverWedgeMatchesTheory) {
+    // Mach 1.758 flow over an 8 degree compression ramp: weak oblique shock
+    // with p2/p1 = 1.4984 (inlet contraction is mild enough to stay started)
+    std::ostringstream s;
+    s << "[run]\nt_stop = 0.01\ncfl = 0.5\n"
+      << "[mesh]\ntype = \"wedge\"\nNx = 80\nNy = 60\nLx = 2.0\nLy = 1.5\n"
+      << "[initialize]\ntype = \"constant\"\nu = [600.0, 0.0]\np = 101325.0\nT = 300.0\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"upt\"\nu = [600.0, 0.0]\np = 101325.0\nT = 300.0\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"p_out\"\np = 101325.0\n"
+      << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+      << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 101325.0\nT_ref = 298.15\nrho_ref = 1.225\n"
+      << "[output]\ncheck_interval = 1000000\n";
+    Solver solver;
+    solver.init(parse_toml(s.str()));
+    solver.run();
+    solver.update_primitives();
+    solver.copy_device_to_host();
+    auto m = solver.get_mesh();
+    const double tan8 = std::tan(8.0 * M_PI / 180.0);
+    double sum = 0.0;
+    int n = 0;
+    for (uint32_t i = 0; i < m->n_cells; i++) {
+        const double x = m->h_cell_coords(i, 0), y = m->h_cell_coords(i, 1);
+        const double y_ramp = (x - 0.5) * tan8;
+        if (x > 0.9 && x < 1.1 && y > y_ramp + 0.03 && y < y_ramp + 0.12) {
+            sum += solver.h_primitives(i, 2) / 101325.0;
+            n++;
+        }
+    }
+    ASSERT_GT(n, 0);
+    EXPECT_NEAR(sum / n, 1.4984, 0.01);
+}

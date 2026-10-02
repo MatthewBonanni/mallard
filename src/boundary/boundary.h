@@ -26,6 +26,8 @@ enum class BoundaryType {
     SYMMETRY,
     EXTRAPOLATION,
     WALL_ADIABATIC,
+    WALL_ISOTHERMAL,
+    WALL_HEAT_FLUX,
     UPT,
     P_OUT,
 };
@@ -34,6 +36,8 @@ static const std::unordered_map<std::string, BoundaryType> BOUNDARY_TYPES = {
     {"symmetry", BoundaryType::SYMMETRY},
     {"extrapolation", BoundaryType::EXTRAPOLATION},
     {"wall_adiabatic", BoundaryType::WALL_ADIABATIC},
+    {"wall_isothermal", BoundaryType::WALL_ISOTHERMAL},
+    {"wall_heat_flux", BoundaryType::WALL_HEAT_FLUX},
     {"upt", BoundaryType::UPT},
     {"p_out", BoundaryType::P_OUT}
 };
@@ -42,6 +46,8 @@ static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
     {BoundaryType::SYMMETRY, "symmetry"},
     {BoundaryType::EXTRAPOLATION, "extrapolation"},
     {BoundaryType::WALL_ADIABATIC, "wall_adiabatic"},
+    {BoundaryType::WALL_ISOTHERMAL, "wall_isothermal"},
+    {BoundaryType::WALL_HEAT_FLUX, "wall_heat_flux"},
     {BoundaryType::UPT, "upt"},
     {BoundaryType::P_OUT, "p_out"}
 };
@@ -51,11 +57,21 @@ static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
  *
  * Every boundary condition is imposed weakly through a ghost state that is
  * passed to the Riemann solver (and used for gradient reconstruction).
- * data holds a W = [rho, u_x, u_y, p] state; its meaning depends on type.
+ * The meaning of data depends on type:
+ * - UPT: data = W = [rho, u_x, u_y, p] of the inflow state
+ * - P_OUT: data[3] = back pressure
+ * - walls: data[1], data[2] = wall velocity; WALL_ISOTHERMAL: data[0] = wall
+ *   temperature; WALL_HEAT_FLUX: data[3] = heat flux into the fluid
  */
 struct BoundaryCondition {
     BoundaryType type = BoundaryType::EXTRAPOLATION;
     rtype data[N_DIM + 2] = {0.0, 0.0, 0.0, 0.0};
+
+    KOKKOS_INLINE_FUNCTION
+    bool is_wall() const {
+        return type == BoundaryType::WALL_ADIABATIC || type == BoundaryType::WALL_ISOTHERMAL ||
+               type == BoundaryType::WALL_HEAT_FLUX;
+    }
 
     /**
      * @brief Parse a [[boundaries]] table entry.
@@ -65,10 +81,11 @@ struct BoundaryCondition {
     /**
      * @brief Ghost state W_g = [rho, u_x, u_y, p] given the interior state W_i.
      * @param n Unit normal pointing out of the domain.
-     * @param viscous Whether walls should enforce no-slip (else slip).
+     * @param R Gas constant.
+     * @param viscous Whether walls enforce no-slip (else slip) and wall temperature.
      */
     KOKKOS_INLINE_FUNCTION
-    void ghost_W(const rtype * W_i, const rtype * n, const rtype gamma,
+    void ghost_W(const rtype * W_i, const rtype * n, const rtype gamma, const rtype R,
                  const bool viscous, rtype * W_g) const {
         for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = W_i[i];
         const rtype u_n = W_i[1] * n[0] + W_i[2] * n[1];
@@ -76,9 +93,16 @@ struct BoundaryCondition {
             case BoundaryType::EXTRAPOLATION:
                 break;
             case BoundaryType::WALL_ADIABATIC:
+            case BoundaryType::WALL_ISOTHERMAL:
+            case BoundaryType::WALL_HEAT_FLUX:
                 if (viscous) {
-                    W_g[1] = -W_i[1];
-                    W_g[2] = -W_i[2];
+                    W_g[1] = 2.0 * data[1] - W_i[1];
+                    W_g[2] = 2.0 * data[2] - W_i[2];
+                    if (type == BoundaryType::WALL_ISOTHERMAL) {
+                        const rtype T_i = W_i[3] / (W_i[0] * R);
+                        const rtype T_g = Kokkos::fmax(2.0 * data[0] - T_i, 0.1 * data[0]);
+                        W_g[0] = W_i[3] / (R * T_g);
+                    }
                     break;
                 }
                 [[fallthrough]];
@@ -113,7 +137,9 @@ struct BoundaryData {
     Kokkos::View<uint8_t *> face_image_flip;  // Whether the image face runs opposite to the boundary face
     Kokkos::View<BoundaryCondition *> bcs;
     rtype gamma = 1.4;
+    rtype R = 1.0;
     bool viscous = false;
+    Euler gas;
 
     /**
      * @brief Exterior state seen by the Riemann solver on boundary face i_face.
@@ -151,7 +177,7 @@ struct BoundaryData {
      */
     KOKKOS_INLINE_FUNCTION
     void ghost_W(const uint32_t i_face, const rtype * W_i, const rtype * n, rtype * W_g) const {
-        bcs(face_bc(i_face)).ghost_W(W_i, n, gamma, viscous, W_g);
+        bcs(face_bc(i_face)).ghost_W(W_i, n, gamma, R, viscous, W_g);
     }
 };
 
@@ -164,10 +190,14 @@ class Mesh;
  * @param h_face_bc Index into h_bcs for each face, -1 for interior faces.
  * @param h_bcs Boundary conditions.
  * @param gamma Ratio of specific heats.
+ * @param R Gas constant.
+ * @param viscous Whether walls enforce no-slip.
+ * @param gas Gas model (transport properties for heat-flux walls).
  */
 BoundaryData make_boundary_data(const Mesh & mesh,
                                 const std::vector<int32_t> & h_face_bc,
                                 const std::vector<BoundaryCondition> & h_bcs,
-                                rtype gamma);
+                                rtype gamma, rtype R = 1.0, bool viscous = false,
+                                const Euler & gas = Euler());
 
 #endif // BOUNDARY_H

@@ -9,6 +9,8 @@ add_executable(MallardTest
     reconstruction_test.cpp
     solver_test.cpp
     teno_test.cpp
+    viscous_test.cpp
+    restart_test.cpp
 )
 
 target_include_directories(MallardTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

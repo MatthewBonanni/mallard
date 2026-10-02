@@ -23,7 +23,7 @@
 void DataWriter::init(const toml::value & input,
                       std::vector<Data> & data,
                       std::shared_ptr<Mesh> mesh) {
-    for (const char * key : {"prefix", "format", "variables"}) {
+    for (const char * key : {"prefix", "format"}) {
         if (!input.contains(key)) {
             throw std::runtime_error(std::string("DataWriter: ") + key + " not specified.");
         }
@@ -53,7 +53,15 @@ void DataWriter::init(const toml::value & input,
     }
     format = it->second;
 
-    std::vector<std::string> variables = toml::find<std::vector<std::string>>(input, "variables");
+    std::vector<std::string> variables;
+    if (format == DataFormat::RESTART) {
+        variables = {"RHO", "RHOU_X", "RHOU_Y", "RHOE"};
+    } else {
+        if (!input.contains("variables")) {
+            throw std::runtime_error("DataWriter: variables not specified.");
+        }
+        variables = toml::find<std::vector<std::string>>(input, "variables");
+    }
     if (variables.empty()) {
         throw std::runtime_error("DataWriter: No variables specified.");
     }
@@ -99,11 +107,15 @@ void DataWriter::write(uint64_t step, rtype t, bool force) {
     }
     std::ostringstream stream;
     stream << prefix << "_" << std::setw(LEN_STEP) << std::setfill('0')
-           << (interval > 0 ? step : n_written) << ".vtu";
-    const std::string filename = stream.str();
-    write_vtu(filename, t);
-    history.emplace_back(t, filename);
-    write_pvd();
+           << (interval > 0 ? step : n_written);
+    if (format == DataFormat::RESTART) {
+        write_restart(stream.str() + ".restart", step, t);
+    } else {
+        const std::string filename = stream.str() + ".vtu";
+        write_vtu(filename, t);
+        history.emplace_back(t, filename);
+        write_pvd();
+    }
     if (interval == 0) {
         // Skip any output times already passed (e.g. if dt exceeded time_interval)
         while (next_time() <= t + 1.0e-9 * time_interval) {
@@ -114,6 +126,91 @@ void DataWriter::write(uint64_t step, rtype t, bool force) {
     }
     step_last = step;
     t_last = t;
+}
+
+void DataWriter::resume(uint64_t step, rtype t) {
+    step_last = step;
+    t_last = t;
+    if (interval > 0) {
+        n_written = step / interval + 1;
+    } else {
+        n_written = static_cast<uint64_t>(std::floor(t / time_interval + 1.0e-9)) + 1;
+    }
+    // Keep the entries of the previous run's .pvd up to the restart time
+    history.clear();
+    std::ifstream in(prefix + ".pvd");
+    std::string line;
+    const std::filesystem::path dir = std::filesystem::path(prefix).parent_path();
+    while (std::getline(in, line)) {
+        const size_t a = line.find("timestep=\"");
+        const size_t b = line.find("file=\"");
+        if (a == std::string::npos || b == std::string::npos) continue;
+        const double t_entry = std::stod(line.substr(a + 10));
+        const size_t b0 = b + 6;
+        const std::string file = line.substr(b0, line.find('"', b0) - b0);
+        if (t_entry <= t * (1.0 + 1.0e-12) + 1.0e-300) {
+            history.emplace_back(t_entry, (dir / file).string());
+        }
+    }
+}
+
+void DataWriter::write_restart(const std::string & filename, uint64_t step, rtype t) const {
+    std::ofstream out(filename, std::ios::binary);
+    if (!out.good()) {
+        throw std::runtime_error("DataWriter::write_restart: Could not open file: " + filename + ".");
+    }
+    std::cout << "Writing restart file: " << filename << std::endl;
+    const char magic[16] = "MALLARD-RESTART";
+    const uint32_t version = 1;
+    const uint32_t real_size = sizeof(rtype);
+    const uint64_t n_cells = mesh->n_cells;
+    const uint64_t n_vars = data_ptrs.size();
+    const double time = t;
+    out.write(magic, sizeof(magic));
+    out.write(reinterpret_cast<const char *>(&version), sizeof(version));
+    out.write(reinterpret_cast<const char *>(&real_size), sizeof(real_size));
+    out.write(reinterpret_cast<const char *>(&n_cells), sizeof(n_cells));
+    out.write(reinterpret_cast<const char *>(&n_vars), sizeof(n_vars));
+    out.write(reinterpret_cast<const char *>(&step), sizeof(step));
+    out.write(reinterpret_cast<const char *>(&time), sizeof(time));
+    for (const auto & data_ptr : data_ptrs) {
+        for (uint64_t i = 0; i < n_cells; i++) {
+            const rtype value = (*data_ptr)[i];
+            out.write(reinterpret_cast<const char *>(&value), sizeof(rtype));
+        }
+    }
+}
+
+RestartData read_restart(const std::string & filename) {
+    std::ifstream in(filename, std::ios::binary);
+    if (!in.good()) {
+        throw std::runtime_error("Could not open restart file: " + filename + ".");
+    }
+    char magic[16];
+    uint32_t version, real_size;
+    uint64_t n_vars;
+    RestartData data;
+    in.read(magic, sizeof(magic));
+    in.read(reinterpret_cast<char *>(&version), sizeof(version));
+    in.read(reinterpret_cast<char *>(&real_size), sizeof(real_size));
+    in.read(reinterpret_cast<char *>(&data.n_cells), sizeof(data.n_cells));
+    in.read(reinterpret_cast<char *>(&n_vars), sizeof(n_vars));
+    in.read(reinterpret_cast<char *>(&data.step), sizeof(data.step));
+    in.read(reinterpret_cast<char *>(&data.t), sizeof(data.t));
+    if (!in.good() || std::string(magic) != "MALLARD-RESTART" || version != 1) {
+        throw std::runtime_error("Not a Mallard restart file: " + filename + ".");
+    }
+    if (real_size != sizeof(rtype)) {
+        throw std::runtime_error("Restart file " + filename + " was written with a different floating-point precision.");
+    }
+    data.conservatives.assign(n_vars, std::vector<rtype>(data.n_cells));
+    for (auto & var : data.conservatives) {
+        in.read(reinterpret_cast<char *>(var.data()), data.n_cells * sizeof(rtype));
+    }
+    if (!in.good()) {
+        throw std::runtime_error("Restart file " + filename + " is truncated.");
+    }
+    return data;
 }
 
 void DataWriter::write_pvd() const {

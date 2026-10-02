@@ -55,6 +55,15 @@ struct LSQGradientFunctor {
             FOR_I_DIM d += (face_coords(i_face, i) - cell_coords(i_cell, i)) * n[i];
             FOR_I_DIM dx[i] = 2.0 * d * n[i];
             boundaries.ghost_W(i_face, W_i, n, W_j);
+            const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(i_face));
+            if (boundaries.viscous && bc.type == BoundaryType::WALL_HEAT_FLUX) {
+                // Ghost temperature consistent with the prescribed heat flux into the fluid
+                const rtype R = boundaries.R;
+                const rtype T_i = W_i[3] / (W_i[0] * R);
+                const rtype kappa = boundaries.gas.conductivity(boundaries.gas.viscosity(T_i));
+                const rtype T_g = Kokkos::fmax(T_i - 2.0 * d * bc.data[3] / kappa, 0.1 * T_i);
+                W_j[0] = W_i[3] / (R * T_g);
+            }
         }
     }
 
@@ -81,6 +90,57 @@ struct LSQGradientFunctor {
         FOR_I_CONSERVATIVE {
             gradients(i_cell, i, 0) = inv_det * ( M[2] * b[i][0] - M[1] * b[i][1]);
             gradients(i_cell, i, 1) = inv_det * (-M[1] * b[i][0] + M[0] * b[i][1]);
+        }
+    }
+};
+
+/**
+ * @brief Weighted least-squares gradient over all vertex neighbors plus the
+ *        boundary ghost states of the cell's own boundary faces. The larger,
+ *        nearly symmetric stencil makes the gradient second-order accurate on
+ *        smooth meshes, including triangles, where three face neighbors only
+ *        give first-order gradients.
+ */
+struct LSQVertexGradientFunctor {
+    LSQGradientFunctor faces;
+    Kokkos::View<uint32_t *> offsets_cells_of_cell;
+    Kokkos::View<uint32_t *> cells_of_cell;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t i_cell) const {
+        rtype W_i[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE W_i[i] = faces.W(i_cell, i);
+        rtype M[3] = {0.0, 0.0, 0.0};
+        rtype b[N_CONSERVATIVE][N_DIM] = {};
+        auto accumulate = [&](const rtype * dx, const rtype * W_j) {
+            const rtype w = 1.0 / (dx[0] * dx[0] + dx[1] * dx[1]);
+            M[0] += w * dx[0] * dx[0];
+            M[1] += w * dx[0] * dx[1];
+            M[2] += w * dx[1] * dx[1];
+            FOR_I_CONSERVATIVE {
+                const rtype dW = W_j[i] - W_i[i];
+                b[i][0] += w * dx[0] * dW;
+                b[i][1] += w * dx[1] * dW;
+            }
+        };
+        for (uint32_t k = offsets_cells_of_cell(i_cell); k < offsets_cells_of_cell(i_cell + 1); k++) {
+            const uint32_t j = cells_of_cell(k);
+            rtype dx[N_DIM], W_j[N_CONSERVATIVE];
+            FOR_I_DIM dx[i] = faces.cell_coords(j, i) - faces.cell_coords(i_cell, i);
+            FOR_I_CONSERVATIVE W_j[i] = faces.W(j, i);
+            accumulate(dx, W_j);
+        }
+        for (uint32_t k = faces.offsets_faces_of_cell(i_cell); k < faces.offsets_faces_of_cell(i_cell + 1); k++) {
+            const uint32_t i_face = faces.faces_of_cell(k);
+            if (faces.cells_of_face(i_face, 1) >= 0) continue;
+            rtype dx[N_DIM], W_j[N_CONSERVATIVE];
+            faces.neighbor(i_cell, i_face, W_i, dx, W_j);
+            accumulate(dx, W_j);
+        }
+        const rtype inv_det = 1.0 / (M[0] * M[2] - M[1] * M[1]);
+        FOR_I_CONSERVATIVE {
+            faces.gradients(i_cell, i, 0) = inv_det * ( M[2] * b[i][0] - M[1] * b[i][1]);
+            faces.gradients(i_cell, i, 1) = inv_det * (-M[1] * b[i][0] + M[0] * b[i][1]);
         }
     }
 };

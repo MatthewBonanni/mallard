@@ -26,15 +26,33 @@
 
 enum class DataFormat {
     VTU,
+    RESTART,
 };
 
 static const std::unordered_map<std::string, DataFormat> FORMAT_TYPES = {
     {"vtu", DataFormat::VTU},
+    {"restart", DataFormat::RESTART},
 };
 
 static const std::unordered_map<DataFormat, std::string> FORMAT_NAMES = {
     {DataFormat::VTU, "vtu"},
+    {DataFormat::RESTART, "restart"},
 };
+
+/**
+ * @brief Contents of a restart file.
+ */
+struct RestartData {
+    uint64_t step = 0;
+    double t = 0.0;
+    uint64_t n_cells = 0;
+    std::vector<std::vector<rtype>> conservatives;  // [variable][cell]
+};
+
+/**
+ * @brief Read a restart file written by a DataWriter with format = "restart".
+ */
+RestartData read_restart(const std::string & filename);
 
 /**
  * @brief Writes snapshots either every `interval` steps or every
@@ -63,8 +81,15 @@ class DataWriter {
          */
         rtype next_time() const;
 
+        /**
+         * @brief Continue numbering and the .pvd series of a previous run that
+         *        stopped at (step, t), whose snapshot at t was already written.
+         */
+        void resume(uint64_t step, rtype t);
+
     protected:
         void write_vtu(const std::string & filename, rtype t) const;
+        void write_restart(const std::string & filename, uint64_t step, rtype t) const;
         void write_pvd() const;
 
         std::string prefix;

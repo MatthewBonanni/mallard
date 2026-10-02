@@ -108,6 +108,7 @@ class Solver {
         void init_solution();
         void init_solution_constant();
         void init_solution_analytical();
+        void init_solution_restart();
         void allocate_memory();
         void register_data();
         bool done() const;
@@ -147,6 +148,7 @@ class Solver {
         // Work arrays
         Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
         Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
+        Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> viscous_gradients;
         Kokkos::View<rtype *> cfl_local;
         Kokkos::View<rtype *>::host_mirror_type h_cfl_local;
         std::vector<StateView> solution_vec;

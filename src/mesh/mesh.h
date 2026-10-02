@@ -190,6 +190,12 @@ class Mesh {
         void compute_face_centroids();
 
         /**
+         * @brief Build the vertex-neighbor (cells sharing a node) adjacency on
+         *        the device.
+         */
+        void compute_cell_neighbors();
+
+        /**
          * @brief Copy mesh data from host to device.
          */
         void copy_host_to_device();
@@ -244,6 +250,8 @@ class Mesh {
         Kokkos::View<uint32_t *> nodes_of_face;
         Kokkos::View<uint32_t *> offsets_nodes_of_face;
         Kokkos::View<int32_t *[2]> cells_of_face;
+        Kokkos::View<uint32_t *> cells_of_cell;            // Vertex neighbors (CSR)
+        Kokkos::View<uint32_t *> offsets_cells_of_cell;
 
         Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_node_coords;
         Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_cell_coords;

@@ -1,6 +1,6 @@
 [submodule "src/external/kokkos"]
 	path = src/external/kokkos
-	url = git@github.com:kokkos/kokkos.git
+	url = https://github.com/kokkos/kokkos.git
 [submodule "src/external/toml11"]
 	path = src/external/toml11
 	url = https://github.com/ToruNiina/toml11.git

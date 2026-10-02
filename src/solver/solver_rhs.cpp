@@ -14,6 +14,8 @@
 #include <Kokkos_Core.hpp>
 
 #include "flux_functor.h"
+#include "gradient.h"
+#include "viscous_flux.h"
 
 void Solver::calc_rhs(StateView solution, StateView rhs) {
     const Euler phys = physics;
@@ -40,6 +42,19 @@ void Solver::calc_rhs(StateView solution, StateView rhs) {
         case RiemannSolverType::HLLC:
             launch_flux_functor<riemann::HLLC>(rhs);
             break;
+    }
+
+    if (physics.is_viscous()) {
+        LSQGradientFunctor gradient_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell,
+                                            mesh->cells_of_face, mesh->cell_coords, mesh->face_coords,
+                                            mesh->face_normals, boundary_data, W_cells, viscous_gradients};
+        LSQVertexGradientFunctor vertex_gradient_functor{gradient_functor, mesh->offsets_cells_of_cell,
+                                                         mesh->cells_of_cell};
+        Kokkos::parallel_for("viscous_gradients", mesh->n_cells, vertex_gradient_functor);
+        ViscousFluxFunctor viscous_functor{mesh->face_normals, mesh->face_area, mesh->face_coords,
+                                           mesh->cell_coords, mesh->cells_of_face, W_cells,
+                                           viscous_gradients, boundary_data, rhs, physics};
+        Kokkos::parallel_for("viscous_flux", mesh->n_faces, viscous_functor);
     }
 
     Kokkos::View<rtype *> vol = mesh->cell_volume;

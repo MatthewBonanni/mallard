@@ -21,12 +21,14 @@
 
 enum class InitType {
     CONSTANT,
-    ANALYTICAL
+    ANALYTICAL,
+    RESTART
 };
 
 static const std::unordered_map<std::string, InitType> INIT_TYPES = {
     {"constant", InitType::CONSTANT},
-    {"analytical", InitType::ANALYTICAL}
+    {"analytical", InitType::ANALYTICAL},
+    {"restart", InitType::RESTART}
 };
 
 void Solver::init_solution() {
@@ -38,11 +40,34 @@ void Solver::init_solution() {
     }
     if (it->second == InitType::CONSTANT) {
         init_solution_constant();
-    } else {
+    } else if (it->second == InitType::ANALYTICAL) {
         init_solution_analytical();
+    } else {
+        init_solution_restart();
     }
     copy_host_to_device();
     update_primitives();
+}
+
+void Solver::init_solution_restart() {
+    if (!input.at("initialize").contains("file")) {
+        throw std::runtime_error("Missing file for initialization: restart.");
+    }
+    const std::string file = toml::find<std::string>(input, "initialize", "file");
+    RestartData restart = read_restart(file);
+    if (restart.n_cells != mesh->n_cells || restart.conservatives.size() != N_CONSERVATIVE) {
+        throw std::runtime_error("Restart file " + file + " does not match the mesh.");
+    }
+    for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
+        FOR_I_CONSERVATIVE h_conservatives(i_cell, i) = restart.conservatives[i][i_cell];
+    }
+    step = restart.step;
+    t = restart.t;
+    t_last_check = t;
+    for (auto & writer : data_writers) {
+        writer->resume(step, t);
+    }
+    std::cout << "Restarted from " << file << " at step " << step << ", t = " << t << std::endl;
 }
 
 void Solver::init_solution_constant() {

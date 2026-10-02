@@ -1,67 +1,46 @@
+# 2D Riemann problem, configuration 3 (Lax & Liu 1998; Liska & Wendroff 2003):
+# four shocks meeting at (0.8, 0.8), run to t = 0.8 on the unit square with
+# transmissive boundaries.
+
 [run]
-# n_steps = 100000
-t_stop = 0.3
-# t_wall_stop = 3.0
-# dt = 1.0e-5
-cfl = 0.1
+t_stop = 0.8
+cfl = 0.5
 
 [mesh]
 type = "cartesian_tri"
-Nx = 1024
-Ny = 1024
+Nx = 400
+Ny = 400
 Lx = 1.0
 Ly = 1.0
 
 [initialize]
 type = "analytical"
 rho = """\
-    var l := x <  0.8; \
-    var r := x >= 0.8; \
-    var b := y <  0.8; \
-    var t := y >= 0.8; \
-    1.5 * r * t + 0.532258064516129 * l * t \
-                + 0.137992831541219 * l * b \
-                + 0.532258064516129 * r * b"""
+    x >= 0.8 ? (y >= 0.8 ? 1.5 : 0.532258064516129) \
+             : (y >= 0.8 ? 0.532258064516129 : 0.137992831541219)"""
 u = [
-    """\
-    var l := x <  0.8; \
-    var r := x >= 0.8; \
-    var b := y <  0.8; \
-    var t := y >= 0.8; \
-    0.0 * r * t + 1.206045378311055 * l * t \
-                + 1.206045378311055 * l * b \
-                + 0.0               * r * b""",
-    """\
-     var l := x <  0.8; \
-     var r := x >= 0.8; \
-     var b := y <  0.8; \
-     var t := y >= 0.8; \
-     0.0 * r * t + 0.0               * l * t \
-                 + 1.206045378311055 * l * b \
-                 + 1.206045378311055 * r * b"""
+    "x >= 0.8 ? 0.0 : 1.206045378311055",
+    "y >= 0.8 ? 0.0 : 1.206045378311055",
 ]
 p = """\
-    var l := x <  0.8; \
-    var r := x >= 0.8; \
-    var b := y <  0.8; \
-    var t := y >= 0.8; \
-    1.5 * r * t + 0.3 * l * t + 0.029032258064516 * l * b + 0.3 * r * b"""
+    x >= 0.8 ? (y >= 0.8 ? 1.5 : 0.3) \
+             : (y >= 0.8 ? 0.3 : 0.029032258064516)"""
 
 [[boundaries]]
 name = "left"
-type = "symmetry"
+type = "extrapolation"
 
 [[boundaries]]
 name = "right"
-type = "symmetry"
+type = "extrapolation"
 
 [[boundaries]]
 name = "top"
-type = "symmetry"
+type = "extrapolation"
 
 [[boundaries]]
 name = "bottom"
-type = "symmetry"
+type = "extrapolation"
 
 [numerics]
 riemann_solver = "HLLC"
@@ -70,25 +49,20 @@ check_nan = true
 
 [numerics.face_reconstruction]
 type = "TENO"
-basis_type = "legendre"
-basis_order = 3
-quadrature_type = "triangle_dunavant"
-quadrature_order = 3
-max_stencil_size_factor = 2.0
+order = 5
 
 [physics]
 type = "euler"
 gamma = 1.4
-p_ref = 101325.0
-T_ref = 298.15
-rho_ref = 1.225
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
 
 [output]
-check_interval = 100
+check_interval = 200
 
 [[write_data]]
-prefix = "./solut/all/riemann_all"
+prefix = "./solut/riemann"
 format = "vtu"
-geometry = "all"
-interval = 100
-variables = ["CFL", "RHO", "RHOU_X", "RHOU_Y", "RHOE", "U_X",  "U_Y", "P", "T", "H"]
+time_interval = 0.01
+variables = ["RHO", "U_X", "U_Y", "P"]

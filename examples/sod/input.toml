@@ -3,14 +3,14 @@
 t_stop = 0.2
 # t_wall_stop = 3.0
 # dt = 1.0e-3
-cfl = 1.0
+cfl = 0.5
 
 [mesh]
 type = "cartesian"
-Nx = 1000
-Ny = 1
+Nx = 200
+Ny = 4
 Lx = 1.0
-Ly = 0.001
+Ly = 0.02
 
 [initialize]
 type = "analytical"
@@ -46,23 +46,21 @@ time_integrator = "SSPRK3"
 check_nan = true
 
 [numerics.face_reconstruction]
-type = "FO"
+type = "TENO"
+order = 5
 
 [physics]
 type = "euler"
 gamma = 1.4
-p_ref = 101325.0
-T_ref = 298.15
-rho_ref = 1.225
-# p_min = 1.0e-6
-# p_max = 1.0e20
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
 
 [output]
 check_interval = 100
 
 [[write_data]]
-prefix = "./solut/all/sod_all"
+prefix = "./solut/sod"
 format = "vtu"
-geometry = "all"
-interval = 100
-variables = ["CFL", "RHO", "RHOU_X", "RHOU_Y", "RHOE", "U_X",  "U_Y", "P", "T", "H"]
+time_interval = 0.02
+variables = ["RHO", "U_X", "P", "T"]

@@ -21,19 +21,29 @@
 #include "common.h"
 
 enum class PhysicsType {
-    EULER
+    EULER,
+    NAVIER_STOKES
 };
 
 static const std::unordered_map<std::string, PhysicsType> PHYSICS_TYPES = {
-    {"euler", PhysicsType::EULER}
+    {"euler", PhysicsType::EULER},
+    {"navier_stokes", PhysicsType::NAVIER_STOKES}
 };
 
 static const std::unordered_map<PhysicsType, std::string> PHYSICS_NAMES = {
-    {PhysicsType::EULER, "euler"}
+    {PhysicsType::EULER, "euler"},
+    {PhysicsType::NAVIER_STOKES, "navier_stokes"}
+};
+
+enum class ViscosityModel {
+    NONE,
+    CONSTANT,
+    SUTHERLAND
 };
 
 /**
- * @brief Calorically perfect gas governed by the Euler equations.
+ * @brief Calorically perfect gas, inviscid (Euler) or viscous and heat
+ *        conducting (Navier-Stokes, Stokes hypothesis, constant Prandtl number).
  *
  * Plain aggregate so it can be captured by value in device kernels.
  * Primitive layout: [u_x, u_y, p, T, h] (see PRIMITIVE_NAMES).
@@ -44,6 +54,11 @@ struct Euler {
     rtype R = 287.0;
     rtype cp = 1004.5;
     rtype cv = 717.5;
+    ViscosityModel viscosity_model = ViscosityModel::NONE;
+    rtype mu_ref = 0.0;      // Viscosity (constant) or at T_mu_ref (Sutherland)
+    rtype T_mu_ref = 273.15;
+    rtype S_mu = 110.4;      // Sutherland temperature
+    rtype Pr = 0.72;
 
     /**
      * @brief Construct from gamma and a reference state (p_ref = rho_ref * R * T_ref).
@@ -58,7 +73,33 @@ struct Euler {
     void print() const;
 
     KOKKOS_INLINE_FUNCTION
-    PhysicsType get_type() const { return PhysicsType::EULER; }
+    PhysicsType get_type() const {
+        return viscosity_model == ViscosityModel::NONE ? PhysicsType::EULER : PhysicsType::NAVIER_STOKES;
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    bool is_viscous() const { return viscosity_model != ViscosityModel::NONE; }
+
+    /**
+     * @brief Dynamic viscosity at temperature T.
+     */
+    KOKKOS_INLINE_FUNCTION
+    rtype viscosity(const rtype T) const {
+        switch (viscosity_model) {
+            case ViscosityModel::CONSTANT:
+                return mu_ref;
+            case ViscosityModel::SUTHERLAND:
+                return mu_ref * Kokkos::pow(T / T_mu_ref, 1.5) * (T_mu_ref + S_mu) / (T + S_mu);
+            default:
+                return 0.0;
+        }
+    }
+
+    /**
+     * @brief Thermal conductivity for dynamic viscosity mu.
+     */
+    KOKKOS_INLINE_FUNCTION
+    rtype conductivity(const rtype mu) const { return mu * cp / Pr; }
 
     KOKKOS_INLINE_FUNCTION
     rtype get_gamma() const { return gamma; }

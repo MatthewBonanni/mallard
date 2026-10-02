@@ -72,10 +72,6 @@ void Solver::init_mesh() {
 
 void Solver::init_physics() {
     std::cout << "Initializing physics..." << std::endl;
-    const std::string physics_str = toml::find_or<std::string>(input, "physics", "type", "euler");
-    if (PHYSICS_TYPES.find(physics_str) == PHYSICS_TYPES.end()) {
-        throw std::runtime_error("Unknown physics type: " + physics_str + ".");
-    }
     physics = Euler::from_input(input);
 }
 
@@ -115,7 +111,7 @@ void Solver::init_boundaries() {
                                      " has no boundary condition.");
         }
     }
-    boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma);
+    boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, physics.is_viscous(), physics);
 }
 
 void Solver::init_numerics() {
@@ -219,6 +215,9 @@ void Solver::allocate_memory() {
                                                               mesh->n_faces,
                                                               face_reconstruction->n_face_quadrature_points());
     cfl_local = Kokkos::View<rtype *>("cfl_local", mesh->n_cells);
+    if (physics.is_viscous()) {
+        viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
+    }
     h_conservatives = Kokkos::create_mirror_view(conservatives);
     h_primitives = Kokkos::create_mirror_view(primitives);
     h_cfl_local = Kokkos::create_mirror_view(cfl_local);
@@ -262,7 +261,9 @@ int Solver::run() {
     std::cout << LOG_SEPARATOR << std::endl;
     std::cout << "Running solver..." << std::endl;
     copy_device_to_host();
-    write_data(true);
+    if (step == 0) {
+        write_data(true);
+    }
     while (!done()) {
         calc_dt();
         take_step();
@@ -414,8 +415,9 @@ void Solver::calc_dt() {
 
 /**
  * @brief Per-cell stable time step for CFL = 1:
- *        dt_i = V_i / sum_f (|u_n| + a)_f A_f,
- *        with the face wave speed taken as the max over the two adjacent cells.
+ *        dt_i = V_i / (sum_f (|u_n| + a)_f A_f + 4 nu_eff sum_f A_f^2 / V_i),
+ *        with the face wave speed taken as the max over the two adjacent cells
+ *        and nu_eff = max(4/3, gamma/Pr) mu / rho for viscous flow.
  */
 struct TimeStepFunctor {
     Kokkos::View<uint32_t *> offsets_faces_of_cell;
@@ -440,6 +442,7 @@ struct TimeStepFunctor {
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_cell, rtype & dt_min) const {
         rtype sum = 0.0;
+        rtype sum_area2 = 0.0;
         for (uint32_t k = offsets_faces_of_cell(i_cell); k < offsets_faces_of_cell(i_cell + 1); k++) {
             const uint32_t i_face = faces_of_cell(k);
             rtype n[N_DIM];
@@ -450,6 +453,17 @@ struct TimeStepFunctor {
             rtype lambda = wave_speed(c0, n);
             if (c1 >= 0) lambda = Kokkos::fmax(lambda, wave_speed(c1, n));
             sum += lambda * face_area(i_face);
+            sum_area2 += face_area(i_face) * face_area(i_face);
+        }
+        if (physics.is_viscous()) {
+            // Blazek eq. 6.21 with C = 4
+            rtype cons[N_CONSERVATIVE], W[N_CONSERVATIVE];
+            FOR_I_CONSERVATIVE cons[i] = conservatives(i_cell, i);
+            physics.compute_W_from_conservatives(W, cons);
+            const rtype T = W[3] / (W[0] * physics.R);
+            const rtype mu = physics.viscosity(T);
+            const rtype coeff = Kokkos::fmax(4.0 / 3.0, physics.gamma / physics.Pr) * mu / W[0];
+            sum += 4.0 * coeff * sum_area2 / cell_volume(i_cell);
         }
         const rtype dt_i = cell_volume(i_cell) / sum;
         dt_local(i_cell) = dt_i;

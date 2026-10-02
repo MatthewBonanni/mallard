@@ -47,6 +47,22 @@ BoundaryCondition BoundaryCondition::from_input(const toml::value & input, const
     } else if (bc.type == BoundaryType::P_OUT) {
         require("p");
         bc.data[3] = toml::find<rtype>(input, "p");
+    } else if (bc.is_wall()) {
+        if (input.contains("u")) {
+            std::vector<rtype> u = toml::find<std::vector<rtype>>(input, "u");
+            if (u.size() != N_DIM) {
+                throw std::runtime_error("Invalid u for boundary: " + name + ".");
+            }
+            bc.data[1] = u[0];
+            bc.data[2] = u[1];
+        }
+        if (bc.type == BoundaryType::WALL_ISOTHERMAL) {
+            require("T");
+            bc.data[0] = toml::find<rtype>(input, "T");
+        } else if (bc.type == BoundaryType::WALL_HEAT_FLUX) {
+            require("q");
+            bc.data[3] = toml::find<rtype>(input, "q");
+        }
     }
     return bc;
 }
@@ -74,9 +90,12 @@ bool point_in_cell(const Mesh & mesh, uint32_t c, const rtype * p) {
 BoundaryData make_boundary_data(const Mesh & mesh,
                                 const std::vector<int32_t> & h_face_bc_vec,
                                 const std::vector<BoundaryCondition> & h_bcs_vec,
-                                rtype gamma) {
+                                rtype gamma, rtype R, bool viscous, const Euler & gas) {
     BoundaryData data;
+    data.gas = gas;
     data.gamma = gamma;
+    data.R = R;
+    data.viscous = viscous;
     data.face_bc = Kokkos::View<int32_t *>("face_bc", mesh.n_faces);
     data.face_image = Kokkos::View<int32_t *>("face_image", mesh.n_faces);
     data.face_image_face = Kokkos::View<int32_t *>("face_image_face", mesh.n_faces);

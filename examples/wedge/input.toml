@@ -1,15 +1,15 @@
 [run]
 # n_steps = 100000
-t_stop = 0.1
+t_stop = 0.02
 # t_wall_stop = 3.0
 # dt = 1.0e-5
-cfl = 1.0
+cfl = 0.5
 
 [mesh]
 type = "wedge"
-Nx = 150
-Ny = 50
-Lx = 4.0
+Nx = 160
+Ny = 120
+Lx = 2.0
 Ly = 1.5
 
 [initialize]
@@ -46,7 +46,8 @@ time_integrator = "SSPRK3"
 check_nan = false
 
 [numerics.face_reconstruction]
-type = "FO"
+type = "MUSCL"
+limiter = "venkatakrishnan"
 
 [physics]
 type = "euler"
@@ -54,15 +55,13 @@ gamma = 1.4
 p_ref = 101325.0
 T_ref = 298.15
 rho_ref = 1.225
-p_min = 1.0e-6
 # p_max = 1e20
 
 [output]
 check_interval = 100
 
 [[write_data]]
-prefix = "./solut/all/wedge_all"
+prefix = "./solut/wedge"
 format = "vtu"
-geometry = "all"
-interval = 1000
-variables = ["CFL", "RHO", "RHOU_X", "RHOU_Y", "RHOE", "U_X",  "U_Y", "P", "T", "H"]
+time_interval = 0.0005
+variables = ["RHO", "U_X", "U_Y", "P", "T"]

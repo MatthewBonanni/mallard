@@ -277,6 +277,34 @@ void Mesh::compute_face_centroids() {
     }
 }
 
+void Mesh::compute_cell_neighbors() {
+    std::vector<std::vector<uint32_t>> cells_of_node(n_nodes);
+    for (uint32_t c = 0; c < n_cells; c++) {
+        for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) cells_of_node[h_node_of_cell(c, k)].push_back(c);
+    }
+    std::vector<uint32_t> offsets(n_cells + 1, 0), flat;
+    for (uint32_t c = 0; c < n_cells; c++) {
+        std::vector<uint32_t> nb;
+        for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) {
+            for (uint32_t other : cells_of_node[h_node_of_cell(c, k)]) {
+                if (other != c) nb.push_back(other);
+            }
+        }
+        std::sort(nb.begin(), nb.end());
+        nb.erase(std::unique(nb.begin(), nb.end()), nb.end());
+        flat.insert(flat.end(), nb.begin(), nb.end());
+        offsets[c + 1] = flat.size();
+    }
+    offsets_cells_of_cell = Kokkos::View<uint32_t *>("offsets_cells_of_cell", n_cells + 1);
+    cells_of_cell = Kokkos::View<uint32_t *>("cells_of_cell", flat.size());
+    auto h_offsets = Kokkos::create_mirror_view(offsets_cells_of_cell);
+    auto h_cells = Kokkos::create_mirror_view(cells_of_cell);
+    for (uint32_t i = 0; i <= n_cells; i++) h_offsets(i) = offsets[i];
+    for (size_t i = 0; i < flat.size(); i++) h_cells(i) = flat[i];
+    Kokkos::deep_copy(offsets_cells_of_cell, h_offsets);
+    Kokkos::deep_copy(cells_of_cell, h_cells);
+}
+
 void Mesh::copy_host_to_device() {
     Kokkos::deep_copy(node_coords, h_node_coords);
     Kokkos::deep_copy(cell_coords, h_cell_coords);
@@ -576,6 +604,7 @@ void Mesh::init_cart(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
     compute_cell_centroids();
     compute_face_normals();
     compute_face_centroids();
+    compute_cell_neighbors();
 }
 
 void Mesh::init_cart_tri(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
@@ -848,6 +877,7 @@ void Mesh::init_cart_tri(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
     compute_cell_centroids();
     compute_face_normals();
     compute_face_centroids();
+    compute_cell_neighbors();
 }
 
 void Mesh::init_wedge(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
@@ -871,4 +901,5 @@ void Mesh::init_wedge(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
     compute_cell_centroids();
     compute_face_normals();
     compute_face_centroids();
+    compute_cell_neighbors();
 }
