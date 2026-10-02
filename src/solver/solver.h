@@ -123,7 +123,8 @@ class Solver {
         /**
          * @brief Domain integrals of kinetic energy rho |u|^2 / 2, enstrophy
          *        rho |omega|^2 / 2, squared dilatation (div u)^2 and pressure
-         *        dilatation p div u, with least-squares velocity gradients.
+         *        dilatation p div u, with the reconstruction's velocity gradients
+         *        (TENO polynomials) or else least-squares ones.
          */
         std::array<rtype, 4> integrate_flow_statistics();
 

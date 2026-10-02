@@ -375,3 +375,22 @@ TEST(Solver3DValidation, FlowStatisticsOfALinearVelocityField) {
     // within the cells: (8/3 + 3 + 25/3) / 2 = 7 minus O(h^2)
     EXPECT_NEAR(s[0], 7.0, 0.1);
 }
+
+TEST(Solver3DValidation, TENOEnstrophyOfTheTaylorGreenVortex) {
+    // With TENO the integrals take gradients from the reconstruction
+    // polynomials (order 5 by default): on 16^3 cells of the octant [0, pi]^3
+    // the initial enstrophy of the Taylor-Green vortex, 3/8 per unit volume, is
+    // within 0.5% (second-order least squares misses it by 5%)
+    Case3D c;
+    c.n[0] = c.n[1] = c.n[2] = 16;
+    c.L[0] = c.L[1] = c.L[2] = M_PI;
+    c.recon = "TENO";
+    c.set_all_bcs("type = \"symmetry\"\n");
+    c.init = "type = \"analytical\"\nrho = \"1.0\"\n"
+             "u = [\"sin(x) * cos(y) * cos(z)\", \"-cos(x) * sin(y) * cos(z)\", \"0.0\"]\np = \"100.0\"\n";
+    c.extra = "[integrals]\nfile = \"" +
+              (std::filesystem::temp_directory_path() / "mallard_integrals_tgv.csv").string() + "\"\n";
+    auto solver = init_case(c);
+    const double enstrophy = solver->integrate_flow_statistics()[1] / std::pow(M_PI, 3);
+    EXPECT_NEAR(enstrophy, 0.375, 0.005 * 0.375);
+}

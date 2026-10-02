@@ -954,7 +954,9 @@ std::array<rtype, 4> Solver::integrate_flow_statistics() {
         phys.compute_W_from_conservatives(W_c, cons);
         FOR_I_CONSERVATIVE W(i_cell, i) = W_c[i];
     });
-    Kokkos::parallel_for("statistics_gradients", mesh->n_owned(), viscous_gradient);
+    if (!face_reconstruction->cell_gradients(W_cells, viscous_gradients, mesh->n_owned())) {
+        Kokkos::parallel_for("statistics_gradients", mesh->n_owned(), viscous_gradient);
+    }
     FlowStatisticsFunctor functor{W_cells, viscous_gradients, mesh->cell_volume};
     FlowStatisticsFunctor::value_type result;
     Kokkos::parallel_reduce("statistics", mesh->n_owned(), functor, result);

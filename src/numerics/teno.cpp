@@ -1220,6 +1220,7 @@ struct TENOFunctor {
     struct SmoothPass {};
     struct TroubledFacePass {};
     struct TroubledFinishPass {};
+    struct GradientPass {};
 
     rtype sigma_threshold;
     rtype sigma_upper;
@@ -1260,6 +1261,7 @@ struct TENOFunctor {
 
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
+    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;  // GradientPass output
 
     /**
      * @brief State of a stencil entry: cell c, or its mirror across boundary face f.
@@ -1353,6 +1355,40 @@ struct TENOFunctor {
         }
         for (uint8_t l = 0; l < NK; l++) psi[l] -= basis_mean(i_cell, l);
         return true;
+    }
+
+    /**
+     * @brief Gradients of W at the centroid from the central (large-stencil)
+     *        polynomial of the conservative variables, whose linear monomials
+     *        carry the first derivatives at the centroid.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void operator()(GradientPass, const uint32_t i_cell) const {
+        rtype U0[N_CONSERVATIVE];
+        conservatives(i_cell, U0);
+        rtype dU[N_CONSERVATIVE][N_DIM] = {};
+        const rtype inv_h = 1.0 / scale(i_cell);
+        for (uint16_t s = 0; s < stencil_large_size(i_cell); s++) {
+            rtype U[N_CONSERVATIVE];
+            entry_conservatives(stencil_large(i_cell, s), stencil_large_face(i_cell, s), U);
+            FOR_I_DIM {
+                const rtype P = pinv_large(i_cell, i, s) * inv_h;
+                for (uint8_t v = 0; v < N_CONSERVATIVE; v++) dU[v][i] += P * (U[v] - U0[v]);
+            }
+        }
+        const rtype rho = W(i_cell, 0);
+        rtype u[N_DIM];
+        FOR_I_DIM u[i] = W(i_cell, 1 + i);
+        FOR_I_DIM {
+            gradients(i_cell, 0, i) = dU[0][i];
+            rtype work = dU[N_DIM + 1][i] - 0.5 * dot<N_DIM>(u, u) * dU[0][i];
+            for (uint8_t k = 0; k < N_DIM; k++) {
+                const rtype du = (dU[1 + k][i] - u[k] * dU[0][i]) / rho;
+                gradients(i_cell, 1 + k, i) = du;
+                work -= rho * u[k] * du;
+            }
+            gradients(i_cell, N_DIM + 1, i) = (gamma - 1.0) * work;
+        }
     }
 
     KOKKOS_INLINE_FUNCTION
@@ -1718,6 +1754,34 @@ void TENO::launch_reconstruction(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
     Kokkos::parallel_for("teno_troubled_finish",
                          Kokkos::RangePolicy<typename Functor::TroubledFinishPass, Dynamic>(0, mesh->n_reconstructed()),
                          functor);
+}
+
+template <uint8_t DEG>
+void TENO::launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                            Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, const uint32_t n_cells) {
+    using Functor = TENOFunctor<DEG>;
+    Functor functor{sigma_threshold, sigma_upper, C_T, characteristic, bound_preserving, boundaries.gamma,
+                    mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
+                    mesh->offsets_nodes_of_face, mesh->nodes_of_face, mesh->node_coords,
+                    mesh->cell_coords, mesh->face_coords, mesh->face_normals,
+                    quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
+                    scale, basis_mean, stencil_large_size, stencil_large, stencil_large_face, pinv_large,
+                    stencil_small_size, stencil_small, stencil_small_face, pinv_small,
+                    si_matrix, troubled, troubled_coeffs, troubled_cells, n_troubled,
+                    solution, {}, gradients};
+    Kokkos::parallel_for("teno_gradients", Kokkos::RangePolicy<typename Functor::GradientPass>(0, n_cells), functor);
+}
+
+bool TENO::cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                          Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, const uint32_t n_cells) {
+    switch (degree) {
+        case 2: launch_gradients<2>(solution, gradients, n_cells); break;
+        case 3: launch_gradients<3>(solution, gradients, n_cells); break;
+        case 4: launch_gradients<4>(solution, gradients, n_cells); break;
+        case 5: launch_gradients<5>(solution, gradients, n_cells); break;
+        default: throw std::runtime_error("TENO: unsupported degree.");
+    }
+    return true;
 }
 
 void TENO::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,

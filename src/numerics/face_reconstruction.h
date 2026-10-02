@@ -99,6 +99,18 @@ class FaceReconstruction {
          */
         virtual void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                       Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) = 0;
+
+        /**
+         * @brief Gradients of W = [rho, u, p] at the centroids of the first n_cells
+         *        cells from the reconstruction polynomials, if the scheme has
+         *        higher-order ones than least squares on face neighbors.
+         * @return Whether gradients were written.
+         */
+        virtual bool cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> /*solution*/,
+                                    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> /*gradients*/,
+                                    uint32_t /*n_cells*/) {
+            return false;
+        }
         
         /**
          * @brief Set up per-face quadrature (3D): Dunavant rules on triangles and
@@ -213,6 +225,8 @@ class TENO : public FaceReconstruction {
         uint8_t n_face_quadrature_points() const override;
         void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                               Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) override;
+        bool cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                            Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells) override;
 
         uint8_t degree = 4;
         uint8_t n_dof_large = 0;
@@ -247,6 +261,9 @@ class TENO : public FaceReconstruction {
         std::vector<uint8_t> gather_depth;
 
     private:
+        template <uint8_t DEG>
+        void launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                              Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells);
         template <uint8_t DEG>
         void launch_reconstruction(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution);
