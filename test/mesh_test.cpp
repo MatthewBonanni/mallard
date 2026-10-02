@@ -101,5 +101,22 @@ TEST_P(MeshInvariants, InteriorZoneHoldsEveryInteriorFaceOnce) {
     }
 }
 
+TEST(MeshZones, BoxZonesLieOnTheirEdges) {
+    for (const char * type : {"cartesian", "cartesian_tri"}) {
+        auto mesh = make_mesh(type, 6, 4, 2.0, 1.0);
+        const std::pair<const char *, std::pair<int, rtype>> edges[] = {
+            {"left", {0, 0.0}}, {"right", {0, 2.0}}, {"bottom", {1, 0.0}}, {"top", {1, 1.0}}};
+        for (const auto & [name, edge] : edges) {
+            FaceZone * zone = mesh->get_face_zone(name);
+            ASSERT_NE(zone, nullptr) << type << " " << name;
+            EXPECT_EQ(zone->n_faces(), edge.first == 0 ? 4u : 6u) << type << " " << name;
+            for (uint32_t i = 0; i < zone->n_faces(); i++) {
+                EXPECT_NEAR(mesh->h_face_coords(zone->h_faces(i), edge.first), edge.second, 1e-14)
+                    << type << " " << name;
+            }
+        }
+    }
+}
+
 INSTANTIATE_TEST_SUITE_P(Mesh, MeshInvariants,
                          ::testing::Values("cartesian", "cartesian_tri", "wedge"));

@@ -468,7 +468,6 @@ void Mesh::init_cart(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
     }
 
     // Assign faces to face zones
-    /** \todo Figure out a better way to do this so we don't need to dedupe faces_i */
     FaceZone zone_i = FaceZone();
     FaceZone zone_r = FaceZone();
     FaceZone zone_t = FaceZone();
@@ -735,7 +734,6 @@ void Mesh::init_cart_tri(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
     }
 
     // Assign faces to face zones
-    /** \todo Figure out a better way to do this so we don't need to dedupe faces_i */
     FaceZone zone_i = FaceZone();
     FaceZone zone_r = FaceZone();
     FaceZone zone_t = FaceZone();
@@ -752,7 +750,6 @@ void Mesh::init_cart_tri(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
     zone_l.set_type(FaceZoneType::BOUNDARY);
     zone_b.set_type(FaceZoneType::BOUNDARY);
 
-    /** \todo MAKE SURE GROUPS ARE CORRECT! */
     std::vector<uint32_t> faces_i, faces_r, faces_t, faces_l, faces_b;
     for (uint32_t i_quad = 0; i_quad < nx * ny; ++i_quad) {
         uint32_t ic = i_quad / ny;
