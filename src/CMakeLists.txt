@@ -72,6 +72,10 @@ add_executable(Mallard main.cpp)
 target_link_libraries(Mallard PRIVATE MallardCore)
 mallard_target_warnings(Mallard)
 
+add_executable(MallardReactor reactor_main.cpp)
+target_link_libraries(MallardReactor PRIVATE MallardCore)
+mallard_target_warnings(MallardReactor)
+
 if(Mallard_ENABLE_HDF5)
     add_executable(mallard-mesh-convert mesh_convert.cpp)
     target_link_libraries(mallard-mesh-convert PRIVATE MallardCore)

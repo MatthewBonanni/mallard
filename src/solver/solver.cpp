@@ -444,7 +444,7 @@ void Solver::init_boundaries() {
         auto h_thermo = Kokkos::create_mirror_view(boundary_data.bc_thermo);
         for (size_t i_bc = 0; i_bc < bcs.size(); i_bc++) {
             for (uint32_t k = 0; k < n_species; k++) {
-                h_bc_Y(i_bc, k) = bc_mass_fractions[i_bc].empty() ? 0.0 : static_cast<rtype>(bc_mass_fractions[i_bc][k]);
+                h_bc_Y(i_bc, k) = bc_mass_fractions[i_bc].empty() ? 0.0_r : static_cast<rtype>(bc_mass_fractions[i_bc][k]);
             }
             h_thermo(i_bc, 0) = static_cast<rtype>(bc_surrogates[i_bc][0]);
             h_thermo(i_bc, 1) = static_cast<rtype>(bc_surrogates[i_bc][1]);

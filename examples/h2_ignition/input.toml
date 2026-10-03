@@ -1,0 +1,21 @@
+# Constant-volume ignition of stoichiometric H2/air at 1200 K and 1 atm.
+# Run with MallardReactor (not Mallard):
+#   ../../build/src/MallardReactor -i input.toml
+# Cantera's IdealGasReactor gives an ignition delay of 44.2 us.
+
+[physics]
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+
+[reactor]
+type = "constant_volume"
+T = 1200.0
+p = 101325.0
+X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }
+end_time = 2.0e-4
+output_interval = 1.0e-6
+output = "reactor.csv"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10

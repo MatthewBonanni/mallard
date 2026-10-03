@@ -269,3 +269,26 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
 | `variables` | (`vtu`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
 | `geometry` | (`vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |
+
+## `MallardReactor`
+
+`MallardReactor -i input.toml` integrates one adiabatic, constant-volume
+reactor with the solver's chemistry kernels (the RODAS Rosenbrock integrator
+with the analytical Jacobian, in double precision) and writes its history as
+CSV (`t`, `T`, `p`, `Y_<species>`). It reads `[physics]` (`mechanism`,
+`phase`), the optional `[chemistry]` table and:
+
+| Key | Description |
+|---|---|
+| `[reactor] type` | `constant_volume` (default; the only type so far) |
+| `[reactor] T`, `p` | Initial temperature and pressure |
+| `[reactor] X` or `Y` | Initial composition, as in `[initialize]` |
+| `[reactor] end_time` | Integration time |
+| `[reactor] output_interval` | Time between CSV rows (default `end_time / 100`); each interval ends like a splitting step: negative mass fractions clipped, mass fractions renormalized, `T` from the conserved energy |
+| `[reactor] output` | CSV file (default `reactor.csv`) |
+| `[chemistry] rtol` | Relative tolerance on `Y` and `T` (default `1e-6`) |
+| `[chemistry] atol` | Absolute tolerance on `Y` (default `1e-10`) |
+| `[chemistry] max_steps` | Sub-steps allowed per output interval (default 100000) |
+
+It prints the ignition delay (time of the maximum of `dT/dt`) when `T` rose
+by more than 400 K. Example: `examples/h2_ignition`.

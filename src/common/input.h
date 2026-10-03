@@ -56,6 +56,22 @@ inline rtype as_real(const toml::value & v, const std::string & key) {
     throw InputError(toml::format_error(key + " must be a number", v, "here"));
 }
 
+/** @brief Double-precision lookups, for inputs of the chemistry (double in every build). */
+inline double as_double(const toml::value & v, const std::string & key) {
+    if (v.is_floating()) return v.as_floating();
+    if (v.is_integer()) return static_cast<double>(v.as_integer());
+    throw InputError(toml::format_error(key + " must be a number", v, "here"));
+}
+
+inline double find_double(const toml::value & v, const std::string & key) {
+    if (!v.contains(key)) throw InputError("missing " + key + ".");
+    return as_double(v.at(key), key);
+}
+
+inline double find_double_or(const toml::value & v, const std::string & key, const double fallback) {
+    return v.contains(key) ? as_double(v.at(key), key) : fallback;
+}
+
 inline rtype find_real(const toml::value & v, const std::string & key) {
     if (!v.contains(key)) throw InputError("missing " + key + ".");
     return as_real(v.at(key), key);

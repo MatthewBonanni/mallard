@@ -386,7 +386,7 @@ TEST(MPITest, TENOCacheOfEachRankReproducesItsSetupAndHalo) {
         solver.copy_device_to_host();
         Run out{{}, solver.get_distribution().halo_layers};
         for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
-            FOR_I_CONSERVATIVE out.U.push_back(solver.h_conservatives(c, i));
+            FOR_I_CONSERVATIVE out.U.push_back(static_cast<double>(solver.h_conservatives(c, i)));
         }
         return out;
     };

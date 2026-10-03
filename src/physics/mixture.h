@@ -22,6 +22,7 @@
 #include "common.h"
 #include "log.h"
 #include "mechanism.h"
+#include "reactor.h"
 #include "state.h"
 #include "thermo.h"
 
@@ -125,5 +126,11 @@ class MixtureModel {
         chemistry::ThermoTable<Kokkos::HostSpace> host_thermo;
         Mixture gas;
 };
+
+/**
+ * @brief Chemistry integrator options from the optional [chemistry] table:
+ *        rtol, atol (on mass fractions), max_steps (sub-steps per call).
+ */
+chemistry::ReactorOptions reactor_options(const toml::value & input);
 
 #endif // MIXTURE_H

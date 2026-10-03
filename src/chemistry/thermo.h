@@ -82,6 +82,15 @@ struct ThermoTable {
                (coeffs(r, 2) + T * (coeffs(r, 3) + T * (coeffs(r, 4) + T * (coeffs(r, 5) + T * coeffs(r, 6)))));
     }
 
+    /** @brief d(cp_k / R) / dT. */
+    KOKKOS_INLINE_FUNCTION
+    double dcp_R_dT(const uint32_t k, const Powers & p) const {
+        const uint32_t r = range(k, p.T);
+        const double T = p.T;
+        return -2.0 * coeffs(r, 0) * p.inv_T2 * p.inv_T - coeffs(r, 1) * p.inv_T2 +
+               (coeffs(r, 3) + T * (2.0 * coeffs(r, 4) + T * (3.0 * coeffs(r, 5) + T * 4.0 * coeffs(r, 6))));
+    }
+
     /** @brief h_k / (R T), molar enthalpy including the formation enthalpy. */
     KOKKOS_INLINE_FUNCTION
     double h_RT(const uint32_t k, const Powers & p) const {

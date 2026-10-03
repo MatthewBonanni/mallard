@@ -1,7 +1,7 @@
 # Design: finite-rate chemistry
 
 Status: accepted (see [Decisions on the open questions](#decisions-on-the-open-questions)).
-Implementation follows the [milestones](#10-milestones); done: 1, 2, 3, 4, 5, 6.
+Implementation follows the [milestones](#10-milestones); done: 1, 2, 3, 4, 5, 6, 7.
 
 Mallard today solves a single calorically perfect gas. This document adds
 multicomponent, thermally perfect mixtures and finite-rate chemistry with
@@ -627,6 +627,27 @@ struct ChemistryIntegrator {
                          std::optional<ForcingView> forcing, CostView cost) = 0;
 };
 ```
+
+As implemented (milestone 7, `src/chemistry/rosenbrock.h`, `reactor.h`):
+RODAS with Hairer's coefficients (`rodas.f`), one cell per thread, dense LU
+with partial pivoting in per-cell work memory (`2 (Ns + 1)^2 + 16 Ns + 4 Nr + 10`
+doubles: the Jacobian is kept across rejected sub-steps). The error norm is
+the RMS of `err_i / (atol_i + rtol max(|y0_i|, |y1_i|))` (Hairer's), with
+`atol` on `Y` only and one `rtol` (default 1e-6) on `Y` and `T`; sub-step
+factor `0.9 err^(-1/4)` within [0.2, 6], no growth right after a rejection.
+Sub-steps to `Y_k < -atol` or non-finite errors are rejected. At the end of
+each call, negative `Y_k` are clipped, `Y` renormalized and `T` recomputed
+from the initial `e`. The reactor Jacobian in `(Y, T)` includes the `T`
+dependence of `cv` (a new `d cp / dT` in the thermo tables); it matches
+finite differences to 1e-6 of the row norm for the three test mechanisms.
+`MallardReactor` is constant volume only; constant pressure (another
+Jacobian, no solver use) is left until a case needs it. V1/V2 at the
+default tolerances, in device kernels, with each run split into three
+calls as splitting steps would: ignition delays within 1.4e-4 (H2/air,
+h2o2) and 3e-6 (CH4/air, GRI-3.0) of Cantera's at rtol 1e-12, `T` at 0.5
+and 2 delays within 1%, equilibrium `T` within 0.1 K and mass fractions
+within 1e-4 over the 36 cases. V3 (large mechanisms) moves to milestone 10
+with the sparse LU.
 
 ### Precision
 

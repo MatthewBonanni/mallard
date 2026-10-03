@@ -113,3 +113,21 @@ logging::Items MixtureModel::summary() const {
         {"Mechanism", mech.file + (mech.phase.empty() ? "" : ", phase " + mech.phase)},
     };
 }
+
+chemistry::ReactorOptions reactor_options(const toml::value & input) {
+    chemistry::ReactorOptions options;
+    if (!input.contains("chemistry")) return options;
+    const toml::value & table = input.at("chemistry");
+    options.integrator.rtol = find_double_or(table, "rtol", options.integrator.rtol);
+    options.atol_Y = find_double_or(table, "atol", options.atol_Y);
+    if (!(options.integrator.rtol > 0.0)) throw InputError("chemistry.rtol must be positive.");
+    if (!(options.atol_Y > 0.0)) throw InputError("chemistry.atol must be positive.");
+    if (table.contains("max_steps")) {
+        const toml::value & v = table.at("max_steps");
+        if (!v.is_integer() || v.as_integer() < 1) {
+            throw InputError(toml::format_error("chemistry.max_steps must be a positive integer", v, "here"));
+        }
+        options.integrator.max_steps = static_cast<uint32_t>(v.as_integer());
+    }
+    return options;
+}

@@ -7,6 +7,7 @@ set(MALLARD_TEST_SOURCES
     comm_test.cpp
     chemistry_thermo_test.cpp
     chemistry_kinetics_test.cpp
+    chemistry_reactor_test.cpp
     mixture_test.cpp
     mesh_block_test.cpp
     distributed_mesh_test.cpp

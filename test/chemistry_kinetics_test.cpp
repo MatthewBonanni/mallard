@@ -31,6 +31,10 @@ namespace {
 
 const std::string SOURCE_DIR = MALLARD_SOURCE_DIR;
 
+// Row-major on every backend: kernels take pointers to rows
+template <typename T>
+using Rows = Kokkos::View<T **, Kokkos::LayoutRight>;
+
 struct Case {
     std::string name, file, phase;
 };
@@ -77,10 +81,10 @@ KOKKOS_INLINE_FUNCTION void species_state(const Thermo & thermo, const double T,
 }
 
 /** @brief Net rates of progress and production rates at each state, on the device. */
-void device_rates(const ThermoTable<> & thermo, const KineticsTable<> & kinetics, Kokkos::View<double **> states,
-                  Kokkos::View<double **> q, Kokkos::View<double **> omega) {
+void device_rates(const ThermoTable<> & thermo, const KineticsTable<> & kinetics, Rows<double> states,
+                  Rows<double> q, Rows<double> omega) {
     const uint32_t ns = thermo.n_species;
-    Kokkos::View<double **> work("work", states.extent(0), 3 * ns);
+    Rows<double> work("work", states.extent(0), 3 * ns);
     Kokkos::parallel_for("rates", states.extent(0), KOKKOS_LAMBDA(const uint32_t s) {
         double * C = &work(s, 0);
         double * g_RT = C + ns;
@@ -101,13 +105,13 @@ TEST(ChemistryKineticsTest, RatesOfProgressAndProductionRatesMatchCantera) {
         const uint32_t ns = mech.n_species(), nr = mech.reactions.size();
         const auto rows = read_rows(c.name + "_rates.csv");
         ASSERT_EQ(rows.at(0).size(), 2 + 2 * ns + nr) << c.name;
-        Kokkos::View<double **> states("states", rows.size(), 2 + ns);
+        Rows<double> states("states", rows.size(), 2 + ns);
         auto h_states = Kokkos::create_mirror_view(states);
         for (size_t s = 0; s < rows.size(); s++) {
             for (uint32_t j = 0; j < 2 + ns; j++) h_states(s, j) = rows[s][j];
         }
         Kokkos::deep_copy(states, h_states);
-        Kokkos::View<double **> q("q", rows.size(), nr), omega("omega", rows.size(), ns);
+        Rows<double> q("q", rows.size(), nr), omega("omega", rows.size(), ns);
         device_rates(thermo, kinetics, states, q, omega);
         auto h_q = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), q);
         auto h_omega = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), omega);
