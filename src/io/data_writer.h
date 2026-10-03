@@ -45,14 +45,22 @@ static const std::unordered_map<DataFormat, std::string> FORMAT_NAMES = {
 struct RestartData {
     uint64_t step = 0;
     double t = 0.0;
-    uint64_t n_cells = 0;                           // in the file
-    std::vector<std::vector<rtype>> conservatives;  // [variable][cell read]
+    uint64_t n_cells = 0;                    // in the file
+    std::vector<std::string> names;          // [variable]
+    std::vector<std::vector<rtype>> fields;  // [variable][cell read]
+
+    /** @brief Values of the named variable, or nullptr if the file has none. */
+    const std::vector<rtype> * find(const std::string & name) const;
 };
 
 /**
  * @brief Read a restart file written by a DataWriter with format = "restart":
- *        every cell, or with cells, only those global cells (conservatives
- *        then hold their values in the order of cells).
+ *        every cell, or with cells, only those global cells (fields then hold
+ *        their values in the order of cells).
+ *
+ * Version 2 files list their variable names; version 1 files hold the flow
+ * block CONSERVATIVE_NAMES only. Either must contain the flow block of this
+ * build's dimension.
  */
 RestartData read_restart(const std::string & filename, const std::vector<uint64_t> * cells = nullptr);
 
@@ -63,9 +71,15 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
  */
 class DataWriter {
     public:
+        /**
+         * @brief Set up from a [[write_data]] entry.
+         * @param restart_variables Variables of a restart file, in order
+         *        (default: CONSERVATIVE_NAMES); ignored for other formats.
+         */
         void init(const toml::value & input,
                   std::vector<Data> & data,
-                  std::shared_ptr<Mesh> mesh);
+                  std::shared_ptr<Mesh> mesh,
+                  const std::vector<std::string> & restart_variables = {});
 
         /**
          * @brief Whether a snapshot is due at this step/time.

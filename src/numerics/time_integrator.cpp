@@ -12,9 +12,16 @@
 #include "time_integrator.h"
 
 
-void axpby(const rtype a, StateView x, const rtype b, StateView y) {
-    Kokkos::parallel_for("axpby", x.extent(0), KOKKOS_LAMBDA(const uint32_t i_cell) {
-        FOR_I_CONSERVATIVE y(i_cell, i) = a * x(i_cell, i) + b * y(i_cell, i);
+void axpby(const rtype a, const State & x, const rtype b, const State & y) {
+    StateView x_flow = x.flow, y_flow = y.flow;
+    Kokkos::parallel_for("axpby", x_flow.extent(0), KOKKOS_LAMBDA(const uint32_t i_cell) {
+        FOR_I_CONSERVATIVE y_flow(i_cell, i) = a * x_flow(i_cell, i) + b * y_flow(i_cell, i);
+    });
+    if (x.species.span() == 0) return;
+    const rtype * x_s = x.species.data();
+    rtype * y_s = y.species.data();
+    Kokkos::parallel_for("axpby_species", x.species.span(), KOKKOS_LAMBDA(const size_t k) {
+        y_s[k] = a * x_s[k] + b * y_s[k];
     });
 }
 
@@ -25,11 +32,11 @@ FE::FE() {
 }
 
 void FE::take_step(const rtype t, const rtype dt,
-                   std::vector<StateView> & solution_vec,
-                   std::vector<StateView> & rhs_vec,
+                   std::vector<State> & solution_vec,
+                   std::vector<State> & rhs_vec,
                    const RHSFunction & calc_rhs) {
-    StateView U = solution_vec[0];
-    StateView k1 = rhs_vec[0];
+    State U = solution_vec[0];
+    State k1 = rhs_vec[0];
     calc_rhs(U, k1, t);
     axpby(dt, k1, 1.0, U);
 }
@@ -41,26 +48,26 @@ RK4::RK4() {
 }
 
 void RK4::take_step(const rtype t, const rtype dt,
-                    std::vector<StateView> & solution_vec,
-                    std::vector<StateView> & rhs_vec,
+                    std::vector<State> & solution_vec,
+                    std::vector<State> & rhs_vec,
                     const RHSFunction & calc_rhs) {
-    StateView U = solution_vec[0];
-    StateView U_temp = solution_vec[1];
-    StateView k1 = rhs_vec[0];
-    StateView k2 = rhs_vec[1];
-    StateView k3 = rhs_vec[2];
-    StateView k4 = rhs_vec[3];
+    State U = solution_vec[0];
+    State U_temp = solution_vec[1];
+    State k1 = rhs_vec[0];
+    State k2 = rhs_vec[1];
+    State k3 = rhs_vec[2];
+    State k4 = rhs_vec[3];
 
     calc_rhs(U, k1, t);
-    Kokkos::deep_copy(U_temp, U);
+    deep_copy(U_temp, U);
     axpby(0.5 * dt, k1, 1.0, U_temp);
 
     calc_rhs(U_temp, k2, t + 0.5 * dt);
-    Kokkos::deep_copy(U_temp, U);
+    deep_copy(U_temp, U);
     axpby(0.5 * dt, k2, 1.0, U_temp);
 
     calc_rhs(U_temp, k3, t + 0.5 * dt);
-    Kokkos::deep_copy(U_temp, U);
+    deep_copy(U_temp, U);
     axpby(dt, k3, 1.0, U_temp);
 
     calc_rhs(U_temp, k4, t + dt);
@@ -77,16 +84,16 @@ SSPRK3::SSPRK3() {
 }
 
 void SSPRK3::take_step(const rtype t, const rtype dt,
-                       std::vector<StateView> & solution_vec,
-                       std::vector<StateView> & rhs_vec,
+                       std::vector<State> & solution_vec,
+                       std::vector<State> & rhs_vec,
                        const RHSFunction & calc_rhs) {
-    StateView U = solution_vec[0];
-    StateView U_temp = solution_vec[1];
-    StateView k = rhs_vec[0];
+    State U = solution_vec[0];
+    State U_temp = solution_vec[1];
+    State k = rhs_vec[0];
 
     // U1 = U + dt L(U)
     calc_rhs(U, k, t);
-    Kokkos::deep_copy(U_temp, U);
+    deep_copy(U_temp, U);
     axpby(dt, k, 1.0, U_temp);
 
     // U2 = 3/4 U + 1/4 (U1 + dt L(U1))

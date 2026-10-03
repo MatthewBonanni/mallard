@@ -55,7 +55,9 @@ struct CellWFunctor {
 
 } // namespace
 
-void Solver::calc_rhs(StateView solution, StateView rhs, rtype t_stage) {
+void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
+    StateView solution = state.flow;
+    StateView rhs = rhs_state.flow;
     // The first stage reuses the halo that calc_dt filled
     const bool exchange = halo.active() && !(halo_current && solution.data() == conservatives.data());
     halo_current = false;
@@ -71,10 +73,10 @@ void Solver::calc_rhs(StateView solution, StateView rhs, rtype t_stage) {
         // instance, while the halo is exchanged; the rest follow on the default
         // one and fill the device as the first ones drain
         Kokkos::parallel_for("rhs_W", Kokkos::RangePolicy<>(0, n_owned), w_functor);
-        halo.start(solution);
+        halo.start(state);
         face_reconstruction->calc_cell_face_values(overlap_space, W_cells, face_solution,
                                                    Kokkos::subview(rhs_cells, Kokkos::make_pair(0u, n_early_cells)));
-        halo.finish(solution);
+        halo.finish(state);
         Kokkos::parallel_for("rhs_W", Kokkos::RangePolicy<>(n_owned, mesh->n_cells), w_functor);
         face_reconstruction->calc_cell_face_values(
             Kokkos::DefaultExecutionSpace(), W_cells, face_solution,
@@ -82,7 +84,7 @@ void Solver::calc_rhs(StateView solution, StateView rhs, rtype t_stage) {
         overlap_space.fence("rhs_overlap");
         face_reconstruction->finish_cell_face_values(W_cells, face_solution);
     } else {
-        if (exchange) halo.exchange(solution);
+        if (exchange) halo.exchange(state);
         Kokkos::parallel_for("rhs_W", mesh->n_cells, w_functor);
         face_reconstruction->calc_face_values(W_cells, face_solution);
     }

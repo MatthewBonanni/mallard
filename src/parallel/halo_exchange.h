@@ -20,6 +20,7 @@
 #include "comm.h"
 #include "common_typedef.h"
 #include "distribution.h"
+#include "state.h"
 
 /**
  * @brief Point-to-point exchange of per-cell state following a Distribution's
@@ -32,7 +33,7 @@ class HaloExchange {
         explicit HaloExchange(const Distribution & dist);
 
         /** @brief Overwrite the halo cells of U with the owners' values (collective among neighbors). */
-        void exchange(Kokkos::View<rtype *[N_CONSERVATIVE]> U) {
+        void exchange(const State & U) {
             start(U);
             finish(U);
         }
@@ -41,15 +42,18 @@ class HaloExchange {
          * @brief Send the owned values of U that neighbors need and post the
          *        receives; the halo cells of U stay stale until finish().
          */
-        void start(Kokkos::View<rtype *[N_CONSERVATIVE]> U);
+        void start(const State & U);
 
         /** @brief Wait for the messages of start() and fill the halo cells of U. */
-        void finish(Kokkos::View<rtype *[N_CONSERVATIVE]> U);
+        void finish(const State & U);
 
         bool active() const { return !ranks.empty(); }
 
     private:
+        void allocate_buffers(uint32_t n_values_per_cell);
+
         std::vector<int> ranks;
+        uint32_t n_values = 0;  // per cell in the buffers: the flow block, then the species
         std::vector<uint32_t> send_offsets, recv_offsets;  // per neighbor, in cells
         Kokkos::View<uint32_t *> send_cells, recv_cells;
         Kokkos::View<rtype *> send_buffer, recv_buffer;

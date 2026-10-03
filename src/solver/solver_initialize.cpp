@@ -13,6 +13,7 @@
 
 #include "input.h"
 
+#include <algorithm>
 #include <string>
 #include <unordered_map>
 
@@ -60,11 +61,29 @@ void Solver::init_solution_restart() {
     const bool distributed = mesh->n_global_cells > 0;
     RestartData restart = read_restart(file, distributed ? &mesh->h_global_cell_id : nullptr);
     const uint64_t n_expected = distributed ? mesh->n_global_cells : mesh->n_cells;
-    if (restart.n_cells != n_expected || restart.conservatives.size() != N_CONSERVATIVE) {
+    if (restart.n_cells != n_expected) {
         throw std::runtime_error("Restart file " + file + " does not match the mesh.");
     }
-    for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
-        FOR_I_CONSERVATIVE h_conservatives(i_cell, i) = restart.conservatives[i][i_cell];
+    // Variables map by name: the flow block, then one RHOY_<name> per species
+    std::vector<std::string> expected = restart_variables();
+    for (const auto & name : restart.names) {
+        if (std::find(expected.begin(), expected.end(), name) == expected.end()) {
+            throw std::runtime_error("Restart file " + file + " has variable " + name + ", which this run does not " +
+                                     (name.rfind("RHOY_", 0) == 0 ? "transport." : "know."));
+        }
+    }
+    for (uint32_t v = 0; v < expected.size(); v++) {
+        const std::vector<rtype> * values = restart.find(expected[v]);
+        if (values == nullptr) {
+            throw std::runtime_error("Restart file " + file + " has no variable " + expected[v] + ".");
+        }
+        for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
+            if (v < N_CONSERVATIVE) {
+                h_conservatives(i_cell, v) = (*values)[i_cell];
+            } else {
+                h_species(i_cell, v - N_CONSERVATIVE) = (*values)[i_cell];
+            }
+        }
     }
     step = restart.step;
     t = restart.t;

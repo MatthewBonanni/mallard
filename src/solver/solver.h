@@ -90,7 +90,7 @@ class Solver {
         /**
          * @brief Compute dU/dt for the given conservative state at time t.
          */
-        void calc_rhs(StateView solution, StateView rhs, rtype t);
+        void calc_rhs(State solution, State rhs, rtype t);
 
         /**
          * @brief Compute the stable time step for the current solution.
@@ -151,9 +151,17 @@ class Solver {
         const Euler & get_physics() const { return physics; }
         std::shared_ptr<Mesh> get_mesh() const { return mesh; }
 
+        /** @brief The solution: flow block and species partial densities. */
+        State state() const { return State(conservatives, species); }
+
+        /** @brief Names of the transported species, empty for a single gas. */
+        const std::vector<std::string> & get_species_names() const { return species_names; }
+
         StateView conservatives;
+        SpeciesView species;
         Kokkos::View<rtype *[N_PRIMITIVE]> primitives;
         StateView::host_mirror_type h_conservatives;
+        SpeciesView::host_mirror_type h_species;
         Kokkos::View<rtype *[N_PRIMITIVE]>::host_mirror_type h_primitives;
 
     protected:
@@ -180,6 +188,7 @@ class Solver {
         void update_source_field(rtype t_eval);
         void allocate_memory();
         void register_data();
+        std::vector<std::string> restart_variables() const;  // Flow block, then RHOY_<species>
         std::string stop_reason() const;  // Empty while no stop condition holds
         double progress() const;          // Fraction of the run done, by the first stop condition to hit
         void print_setup() const;
@@ -246,6 +255,7 @@ class Solver {
         // Numerics and physics
         std::shared_ptr<Mesh> mesh;
         Euler physics;
+        std::vector<std::string> species_names;
         BoundaryData boundary_data;
         std::vector<DirichletBoundary> dirichlet_boundaries;
         struct AveragePressureOutlet {
@@ -271,8 +281,8 @@ class Solver {
         Kokkos::View<rtype *> cfl_local;
         Kokkos::View<rtype *>::host_mirror_type h_cfl_local;
         Kokkos::View<rtype *>::host_mirror_type h_teno_sigma;
-        std::vector<StateView> solution_vec;
-        std::vector<StateView> rhs_vec;
+        std::vector<State> solution_vec;
+        std::vector<State> rhs_vec;
         RHSFunction rhs_func;
 
         // Source terms

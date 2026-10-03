@@ -70,16 +70,28 @@ TEST(MPITest, HaloExchangeFillsEveryHaloCellFromItsOwner) {
     if (!solver.is_distributed()) GTEST_SKIP() << "needs more than one rank";
     const auto & dist = solver.get_distribution();
     const uint32_t n_local = solver.get_mesh()->n_cells;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> U("U", n_local);
-    auto h_U = Kokkos::create_mirror_view(U);
-    for (uint32_t c = 0; c < n_local; c++) {
-        FOR_I_CONSERVATIVE h_U(c, i) = c < dist.n_owned ? dist.global_cell[c] + 0.25 * i : -1.0;
-    }
-    Kokkos::deep_copy(U, h_U);
-    HaloExchange(dist).exchange(U);
-    Kokkos::deep_copy(h_U, U);
-    for (uint32_t c = 0; c < n_local; c++) {
-        FOR_I_CONSERVATIVE EXPECT_EQ(h_U(c, i), dist.global_cell[c] + 0.25 * i) << "local cell " << c;
+    HaloExchange halo(dist);
+    // Flow block alone, then with species, through the same exchange object
+    for (const uint32_t n_species : {0u, 3u}) {
+        State U("U", n_local, n_species);
+        auto h_flow = Kokkos::create_mirror_view(U.flow);
+        auto h_species = Kokkos::create_mirror_view(U.species);
+        for (uint32_t c = 0; c < n_local; c++) {
+            const bool owned = c < dist.n_owned;
+            FOR_I_CONSERVATIVE h_flow(c, i) = owned ? dist.global_cell[c] + 0.25 * i : -1.0;
+            for (uint32_t k = 0; k < n_species; k++) h_species(c, k) = owned ? dist.global_cell[c] + 0.125 * k : -1.0;
+        }
+        Kokkos::deep_copy(U.flow, h_flow);
+        Kokkos::deep_copy(U.species, h_species);
+        halo.exchange(U);
+        Kokkos::deep_copy(h_flow, U.flow);
+        Kokkos::deep_copy(h_species, U.species);
+        for (uint32_t c = 0; c < n_local; c++) {
+            FOR_I_CONSERVATIVE EXPECT_EQ(h_flow(c, i), dist.global_cell[c] + 0.25 * i) << "local cell " << c;
+            for (uint32_t k = 0; k < n_species; k++) {
+                EXPECT_EQ(h_species(c, k), dist.global_cell[c] + 0.125 * k) << "local cell " << c;
+            }
+        }
     }
     std::set<uint64_t> ids(dist.global_cell.begin(), dist.global_cell.end());
     EXPECT_EQ(ids.size(), dist.global_cell.size());

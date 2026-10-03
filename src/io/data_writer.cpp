@@ -57,7 +57,8 @@ uint32_t vtk_local_node(uint32_t n_nodes, uint32_t k) {
 
 void DataWriter::init(const toml::value & input,
                       std::vector<Data> & data,
-                      std::shared_ptr<Mesh> mesh_in) {
+                      std::shared_ptr<Mesh> mesh_in,
+                      const std::vector<std::string> & restart_variables) {
     for (const char * key : {"prefix", "format"}) {
         if (!input.contains(key)) {
             throw std::runtime_error(std::string("DataWriter: ") + key + " not specified.");
@@ -90,7 +91,11 @@ void DataWriter::init(const toml::value & input,
 
     std::vector<std::string> variables;
     if (format == DataFormat::RESTART) {
-        variables.assign(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
+        if (restart_variables.empty()) {
+            variables.assign(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
+        } else {
+            variables = restart_variables;
+        }
     } else {
         if (!input.contains("variables")) {
             throw std::runtime_error("DataWriter: variables not specified.");
@@ -241,6 +246,48 @@ void DataWriter::resume(uint64_t step, rtype t) {
     }
 }
 
+namespace {
+
+constexpr char RESTART_MAGIC[16] = "MALLARD-RESTART";
+constexpr uint32_t RESTART_VERSION = 2;
+
+/**
+ * @brief Restart header: magic, version, real size, cell count, variable
+ *        count, step, time, then (version 2) each variable name as a uint32
+ *        length and its characters. The values follow, one block of n_cells
+ *        per variable.
+ */
+std::vector<char> restart_header(uint64_t n_cells, uint64_t step, double t, const std::vector<std::string> & names) {
+    std::vector<char> header;
+    auto put = [&](const void * p, size_t n) {
+        header.insert(header.end(), static_cast<const char *>(p), static_cast<const char *>(p) + n);
+    };
+    const uint32_t real_size = sizeof(rtype);
+    const uint64_t n_vars = names.size();
+    put(RESTART_MAGIC, sizeof(RESTART_MAGIC));
+    put(&RESTART_VERSION, sizeof(RESTART_VERSION));
+    put(&real_size, sizeof(real_size));
+    put(&n_cells, sizeof(n_cells));
+    put(&n_vars, sizeof(n_vars));
+    put(&step, sizeof(step));
+    put(&t, sizeof(t));
+    for (const auto & name : names) {
+        const uint32_t length = static_cast<uint32_t>(name.size());
+        put(&length, sizeof(length));
+        put(name.data(), name.size());
+    }
+    return header;
+}
+
+} // namespace
+
+const std::vector<rtype> * RestartData::find(const std::string & name) const {
+    for (size_t v = 0; v < names.size(); v++) {
+        if (names[v] == name) return &fields[v];
+    }
+    return nullptr;
+}
+
 void DataWriter::write_restart(const std::string & filename, uint64_t step, rtype t) const {
     if (mesh->n_global_cells > 0) {
         write_restart_distributed(filename, step, t);
@@ -250,21 +297,12 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
     if (!out.good()) {
         throw std::runtime_error("DataWriter::write_restart: Could not open file: " + filename + ".");
     }
-    const char magic[16] = "MALLARD-RESTART";
-    const uint32_t version = 1;
-    const uint32_t real_size = sizeof(rtype);
-    const uint64_t n_cells = mesh->n_cells;
-    const uint64_t n_vars = fields.size();
-    const double time = t;
-    out.write(magic, sizeof(magic));
-    out.write(reinterpret_cast<const char *>(&version), sizeof(version));
-    out.write(reinterpret_cast<const char *>(&real_size), sizeof(real_size));
-    out.write(reinterpret_cast<const char *>(&n_cells), sizeof(n_cells));
-    out.write(reinterpret_cast<const char *>(&n_vars), sizeof(n_vars));
-    out.write(reinterpret_cast<const char *>(&step), sizeof(step));
-    out.write(reinterpret_cast<const char *>(&time), sizeof(time));
+    std::vector<std::string> names;
+    for (const auto & field : fields) names.push_back(field.name);
+    const std::vector<char> header = restart_header(mesh->n_cells, step, t, names);
+    out.write(header.data(), static_cast<std::streamsize>(header.size()));
     for (const auto & field : fields) {
-        for (uint64_t i = 0; i < n_cells; i++) {
+        for (uint64_t i = 0; i < mesh->n_cells; i++) {
             const rtype value = field.value(i, 0);
             out.write(reinterpret_cast<const char *>(&value), sizeof(rtype));
         }
@@ -282,26 +320,13 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
     }
     MPI_File_set_size(fh, 0);
     const uint64_t n_global = mesh->n_global_cells;
+    std::vector<std::string> names;
+    for (const auto & field : fields) names.push_back(field.name);
+    const std::vector<char> header = restart_header(n_global, step, t, names);
     if (comm::is_root()) {
-        const char magic[16] = "MALLARD-RESTART";
-        const uint32_t version = 1;
-        const uint32_t real_size = sizeof(rtype);
-        const uint64_t n_vars = fields.size();
-        const double time = t;
-        std::vector<char> header;
-        auto put = [&](const void * p, size_t n) {
-            header.insert(header.end(), static_cast<const char *>(p), static_cast<const char *>(p) + n);
-        };
-        put(magic, sizeof(magic));
-        put(&version, sizeof(version));
-        put(&real_size, sizeof(real_size));
-        put(&n_global, sizeof(n_global));
-        put(&n_vars, sizeof(n_vars));
-        put(&step, sizeof(step));
-        put(&time, sizeof(time));
         MPI_File_write_at(fh, 0, header.data(), static_cast<int>(header.size()), MPI_BYTE, MPI_STATUS_IGNORE);
     }
-    constexpr MPI_Offset header_size = 16 + 4 + 4 + 8 + 8 + 8 + 8;
+    const MPI_Offset header_size = static_cast<MPI_Offset>(header.size());
     const uint32_t n_owned = mesh->n_owned();
     const MPI_Datatype real_type = sizeof(rtype) == sizeof(double) ? MPI_DOUBLE : MPI_FLOAT;
     std::vector<MPI_Aint> displacements(n_owned);
@@ -342,22 +367,52 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
     in.read(reinterpret_cast<char *>(&n_vars), sizeof(n_vars));
     in.read(reinterpret_cast<char *>(&data.step), sizeof(data.step));
     in.read(reinterpret_cast<char *>(&data.t), sizeof(data.t));
-    if (!in.good() || std::string(magic) != "MALLARD-RESTART" || version != 1) {
+    magic[sizeof(magic) - 1] = '\0';
+    if (!in.good() || std::string(magic) != RESTART_MAGIC || version < 1 || version > RESTART_VERSION) {
         throw std::runtime_error("Not a Mallard restart file: " + filename + ".");
     }
     if (real_size != sizeof(rtype)) {
         throw std::runtime_error("Restart file " + filename + " was written with a different floating-point precision.");
     }
-    if (n_vars != N_CONSERVATIVE) {
-        throw std::runtime_error("Restart file " + filename + " has " + std::to_string(n_vars) +
-                                 " variables per cell (a " + std::to_string(n_vars - 2) +
-                                 "D run), but Mallard was built with Mallard_DIM = " + std::to_string(N_DIM) +
-                                 " (" + std::to_string(N_CONSERVATIVE) + " variables).");
+    if (version == 1) {
+        // Version 1 holds the flow block only; its size gives the dimension
+        if (n_vars != N_CONSERVATIVE) {
+            throw std::runtime_error("Restart file " + filename + " has " + std::to_string(n_vars) +
+                                     " variables per cell (a " + std::to_string(n_vars - 2) +
+                                     "D run), but Mallard was built with Mallard_DIM = " + std::to_string(N_DIM) +
+                                     " (" + std::to_string(N_CONSERVATIVE) + " variables).");
+        }
+        data.names.assign(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
+    } else {
+        constexpr uint32_t MAX_NAME = 256;
+        for (uint64_t v = 0; v < n_vars && in.good(); v++) {
+            uint32_t length = 0;
+            in.read(reinterpret_cast<char *>(&length), sizeof(length));
+            if (!in.good() || length > MAX_NAME) {
+                throw std::runtime_error("Restart file " + filename + " has a corrupt variable list.");
+            }
+            std::string name(length, '\0');
+            in.read(name.data(), length);
+            data.names.push_back(name);
+        }
+        const bool has_z = std::find(data.names.begin(), data.names.end(), "RHOU_Z") != data.names.end();
+        if (has_z != (N_DIM == 3)) {
+            throw std::runtime_error("Restart file " + filename + " holds a " + std::string(has_z ? "3" : "2") +
+                                     "D run, but Mallard was built with Mallard_DIM = " + std::to_string(N_DIM) + ".");
+        }
+        for (const auto & name : CONSERVATIVE_NAMES) {
+            if (std::find(data.names.begin(), data.names.end(), name) == data.names.end()) {
+                throw std::runtime_error("Restart file " + filename + " has no variable " + name + ".");
+            }
+        }
+    }
+    if (!in.good()) {
+        throw std::runtime_error("Restart file " + filename + " is truncated.");
     }
     if (!cells) {
-        data.conservatives.assign(n_vars, std::vector<rtype>(data.n_cells));
-        for (auto & var : data.conservatives) {
-            in.read(reinterpret_cast<char *>(var.data()), data.n_cells * sizeof(rtype));
+        data.fields.assign(n_vars, std::vector<rtype>(data.n_cells));
+        for (auto & var : data.fields) {
+            in.read(reinterpret_cast<char *>(var.data()), static_cast<std::streamsize>(data.n_cells * sizeof(rtype)));
         }
     } else {
         // Runs of consecutive global ids, read with one seek each
@@ -368,16 +423,16 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
         if (!order.empty() && (*cells)[order.back()] >= data.n_cells) {
             throw std::runtime_error("Restart file " + filename + " does not match the mesh.");
         }
-        data.conservatives.assign(n_vars, std::vector<rtype>(cells->size()));
+        data.fields.assign(n_vars, std::vector<rtype>(cells->size()));
         std::vector<rtype> run;
         for (uint64_t v = 0; v < n_vars; v++) {
             for (size_t a = 0; a < order.size();) {
                 size_t b = a + 1;
                 while (b < order.size() && (*cells)[order[b]] == (*cells)[order[b - 1]] + 1) b++;
                 run.resize(b - a);
-                in.seekg(header + std::streamoff((v * data.n_cells + (*cells)[order[a]]) * sizeof(rtype)));
-                in.read(reinterpret_cast<char *>(run.data()), run.size() * sizeof(rtype));
-                for (size_t k = a; k < b; k++) data.conservatives[v][order[k]] = run[k - a];
+                in.seekg(header + static_cast<std::streamoff>((v * data.n_cells + (*cells)[order[a]]) * sizeof(rtype)));
+                in.read(reinterpret_cast<char *>(run.data()), static_cast<std::streamsize>(run.size() * sizeof(rtype)));
+                for (size_t k = a; k < b; k++) data.fields[v][order[k]] = run[k - a];
                 a = b;
             }
         }

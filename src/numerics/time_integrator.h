@@ -20,6 +20,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "common.h"
+#include "state.h"
 
 enum class TimeIntegratorType {
     FE,
@@ -39,13 +40,12 @@ static const std::unordered_map<TimeIntegratorType, std::string> TIME_INTEGRATOR
     {TimeIntegratorType::SSPRK3, "SSPRK3"},
 };
 
-using StateView = Kokkos::View<rtype *[N_CONSERVATIVE]>;
-using RHSFunction = std::function<void(StateView solution, StateView rhs, rtype t)>;
+using RHSFunction = std::function<void(State solution, State rhs, rtype t)>;
 
 /**
- * @brief y = a * x + b * y
+ * @brief y = a * x + b * y, on both blocks of the state.
  */
-void axpby(const rtype a, StateView x, const rtype b, StateView y);
+void axpby(const rtype a, const State & x, const rtype b, const State & y);
 
 class TimeIntegrator {
     public:
@@ -64,8 +64,8 @@ class TimeIntegrator {
          * @param calc_rhs RHS evaluator, dU/dt = calc_rhs(U, t).
          */
         virtual void take_step(const rtype t, const rtype dt,
-                               std::vector<StateView> & solution_vec,
-                               std::vector<StateView> & rhs_vec,
+                               std::vector<State> & solution_vec,
+                               std::vector<State> & rhs_vec,
                                const RHSFunction & calc_rhs) = 0;
 
     protected:
@@ -78,8 +78,8 @@ class FE : public TimeIntegrator {
     public:
         FE();
         void take_step(const rtype t, const rtype dt,
-                       std::vector<StateView> & solution_vec,
-                       std::vector<StateView> & rhs_vec,
+                       std::vector<State> & solution_vec,
+                       std::vector<State> & rhs_vec,
                        const RHSFunction & calc_rhs) override;
 };
 
@@ -87,8 +87,8 @@ class RK4 : public TimeIntegrator {
     public:
         RK4();
         void take_step(const rtype t, const rtype dt,
-                       std::vector<StateView> & solution_vec,
-                       std::vector<StateView> & rhs_vec,
+                       std::vector<State> & solution_vec,
+                       std::vector<State> & rhs_vec,
                        const RHSFunction & calc_rhs) override;
 };
 
@@ -100,8 +100,8 @@ class SSPRK3 : public TimeIntegrator {
     public:
         SSPRK3();
         void take_step(const rtype t, const rtype dt,
-                       std::vector<StateView> & solution_vec,
-                       std::vector<StateView> & rhs_vec,
+                       std::vector<State> & solution_vec,
+                       std::vector<State> & rhs_vec,
                        const RHSFunction & calc_rhs) override;
 };
 

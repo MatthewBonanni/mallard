@@ -12,8 +12,11 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -138,4 +141,100 @@ TEST(RestartTest, RejectsZeroForceInterval) {
     input.replace(input.find("interval = 5"), 12, "interval = 0");
     Solver solver;
     EXPECT_THROW(solver.init(parse_toml(input)), std::runtime_error);
+}
+
+namespace {
+
+/** @brief A version 2 restart file split into its header fields, names and value blocks. */
+struct RestartFile {
+    std::string prefix;  // magic through time
+    std::vector<std::string> names;
+    std::vector<std::string> blocks;
+
+    explicit RestartFile(const std::string & path) {
+        std::ifstream in(path, std::ios::binary);
+        const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        constexpr size_t PREFIX = 16 + 4 + 4 + 8 + 8 + 8 + 8;
+        prefix = bytes.substr(0, PREFIX);
+        uint64_t n_cells, n_vars;
+        std::memcpy(&n_cells, bytes.data() + 24, sizeof(n_cells));
+        std::memcpy(&n_vars, bytes.data() + 32, sizeof(n_vars));
+        size_t pos = PREFIX;
+        for (uint64_t v = 0; v < n_vars; v++) {
+            uint32_t length;
+            std::memcpy(&length, bytes.data() + pos, sizeof(length));
+            names.push_back(bytes.substr(pos + 4, length));
+            pos += 4 + length;
+        }
+        for (uint64_t v = 0; v < n_vars; v++) {
+            blocks.push_back(bytes.substr(pos, n_cells * sizeof(rtype)));
+            pos += n_cells * sizeof(rtype);
+        }
+    }
+
+    void write(const std::string & path, uint32_t version) const {
+        std::string bytes = prefix;
+        std::memcpy(bytes.data() + 16, &version, sizeof(version));
+        const uint64_t n_vars = names.size();
+        std::memcpy(bytes.data() + 32, &n_vars, sizeof(n_vars));
+        if (version >= 2) {
+            for (const auto & name : names) {
+                const uint32_t length = name.size();
+                bytes.append(reinterpret_cast<const char *>(&length), sizeof(length));
+                bytes += name;
+            }
+        }
+        for (const auto & block : blocks) bytes += block;
+        std::ofstream(path, std::ios::binary) << bytes;
+    }
+};
+
+} // namespace
+
+TEST(RestartTest, ReadsVersion1FilesAndMapsVersion2VariablesByName) {
+    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_versions").string();
+    std::filesystem::remove_all(dir);
+    Solver straight;
+    straight.init(parse_toml(restart_input(dir + "/a", BLAST, 40)));
+    straight.run();
+    straight.copy_device_to_host();
+    Solver first;
+    first.init(parse_toml(restart_input(dir + "/b", BLAST, 20)));
+    first.run();
+    const RestartFile file(dir + "/b/restart_000020.restart");
+    ASSERT_EQ(file.names, std::vector<std::string>(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end()));
+
+    // Version 1: the flow block without names
+    file.write(dir + "/v1.restart", 1);
+    // Version 2 with the variables in reverse order
+    RestartFile reversed = file;
+    std::reverse(reversed.names.begin(), reversed.names.end());
+    std::reverse(reversed.blocks.begin(), reversed.blocks.end());
+    reversed.write(dir + "/reversed.restart", 2);
+    for (const std::string name : {"v1", "reversed"}) {
+        Solver second;
+        second.init(parse_toml(restart_input(dir + "/c", "type = \"restart\"\nfile = \"" + dir + "/" + name +
+                                                             ".restart\"\n", 40)));
+        second.run();
+        second.copy_device_to_host();
+        for (uint32_t i = 0; i < straight.get_mesh()->n_cells; i++) {
+            for (uint8_t v = 0; v < N_CONSERVATIVE; v++) {
+                ASSERT_EQ(second.h_conservatives(i, v), straight.h_conservatives(i, v)) << name;
+            }
+        }
+    }
+
+    // A species the run does not transport is an error, not silently dropped
+    RestartFile with_species = file;
+    with_species.names.push_back("RHOY_H2");
+    with_species.blocks.push_back(file.blocks[0]);
+    with_species.write(dir + "/species.restart", 2);
+    Solver third;
+    try {
+        third.init(parse_toml(restart_input(dir + "/d", "type = \"restart\"\nfile = \"" + dir + "/species.restart\"\n", 40)));
+        ADD_FAILURE() << "a restart file with species was accepted by a single-gas run";
+    } catch (const std::runtime_error & e) {
+        EXPECT_NE(std::string(e.what()).find("RHOY_H2"), std::string::npos) << e.what();
+    }
+    std::filesystem::remove_all(dir);
 }
