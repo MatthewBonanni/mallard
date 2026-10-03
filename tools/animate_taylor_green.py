@@ -4,11 +4,13 @@
     animate_taylor_green.py SOLUT_DIR integrals.csv OUTPUT_BASE
         [--ref spectral_Re1600_512.gdiag] [--q-factor 0.5] [--width 1920] [--fps 15]
         [--orbit 150] [--gif-width 720] [--compare CSV LABEL ...] [--hold 2]
+        [--enstrophy] [--full-box]
 
 SOLUT_DIR holds the VTU (or PVTU) series of a run of
-examples/taylor_green_3d, with U on the octant [0, pi]^3 of hexahedra. Each
-snapshot is mirrored into the full periodic box [-pi, pi]^3 through the
-vortex's symmetry planes; isosurfaces of Q = (|Omega|^2 - |S|^2) / 2 are
+examples/taylor_green_3d, with U on the octant [0, pi]^3 of hexahedra, each
+snapshot mirrored into the full periodic box [-pi, pi]^3 through the
+vortex's symmetry planes, or with --full-box on the periodic box itself
+(input_periodic.toml); isosurfaces of Q = (|Omega|^2 - |S|^2) / 2 are
 colored by vorticity magnitude while the camera orbits the box, next to the
 dissipation rate -dE/dt tracing the reference. Writes OUTPUT_BASE.mp4
 (H.264, CRF 18), OUTPUT_BASE.gif (if --gif-width > 0) and a still of the
@@ -30,7 +32,7 @@ import pyvista as pv
 
 from animate import write_gif, write_mp4
 from mallard_vtu import read_vtu_cells
-from plot_taylor_green import OCTANT_VOLUME, load, load_reference
+from plot_taylor_green import BOX_VOLUME, OCTANT_VOLUME, load, load_reference
 
 BG = "#0d1117"
 FG = "#e6edf3"
@@ -46,8 +48,9 @@ def snapshot_files(solut):
     return [(None, f) for f in files]
 
 
-def read_octant(path):
-    """Cell-centered velocity of a uniform hexahedral octant as an (n, n, n, 3) array."""
+def read_octant(path, length=np.pi):
+    """Cell-centered velocity of a uniform hexahedral cube of side length (the
+    octant by default) as an (n, n, n, 3) array."""
     if path.endswith(".pvtu"):
         pieces = re.findall(r'<Piece Source="([^"]+)"', open(path).read())
         parts = [read_vtu_cells(os.path.join(os.path.dirname(path), p)) for p in pieces]
@@ -61,7 +64,7 @@ def read_octant(path):
         t = arrays.get("TIME", t)
     centers, U = np.vstack(centers), np.vstack(U)
     n = round(len(U) ** (1 / 3))
-    h = np.pi / n
+    h = length / n
     ijk = np.clip(np.round(centers / h - 0.5).astype(int), 0, n - 1)
     grid = np.empty((n, n, n, 3))
     grid[ijk[:, 0], ijk[:, 1], ijk[:, 2]] = U
@@ -124,9 +127,13 @@ def render_panel(t_now, curves, ref, size, dpi):
     ax = fig.add_axes([0.2, 0.14, 0.74, 0.62], facecolor=BG)
     if ref is not None:
         ax.plot(ref[0], ref[1], color="#8b949e", lw=2.5, label="Spectral DNS $512^3$")
-    for (t, eps, label, color) in curves:
+        if ref[2] is not None:
+            ax.plot(ref[0], ref[2], color="#8b949e", lw=1.8, ls="--", label="DNS $2\\mu\\,\\mathcal{E}$")
+    for (t, eps, eps_w, label, color) in curves:
         m = t <= t_now
         ax.plot(t[m], eps[m], color=color, lw=2.8, label=label)
+        if eps_w is not None:
+            ax.plot(t[m], eps_w[m], color=color, lw=2.0, ls="--", label=f"{label}: $2\\mu\\,\\mathcal{{E}}$")
         if m.any():
             ax.plot(t[m][-1], eps[m][-1], "o", color=color, ms=9)
     ax.set_xlim(0, 20)
@@ -166,18 +173,23 @@ def main():
     ap.add_argument("--compare", nargs=2, action="append", default=[], metavar=("CSV", "LABEL"),
                     help="Another run's integrals to trace in the panel (e.g. a coarser mesh)")
     ap.add_argument("--hold", type=float, default=2.0, help="Seconds to hold the last frame")
+    ap.add_argument("--enstrophy", action="store_true",
+                    help="Also trace the enstrophy-based dissipation 2 mu E (dashed), for the run and the DNS")
+    ap.add_argument("--full-box", action="store_true",
+                    help="Runs on the periodic box [0, 2 pi]^3 (examples/taylor_green_3d/input_periodic.toml)")
     args = ap.parse_args()
 
     files = snapshot_files(args.solut)[::args.every]
-    t, E, eps, _ = load(args.integrals, 1.0 / 1600)
-    curves = [(t, eps, args.label, "#ff9e3d")]
+    volume = BOX_VOLUME if args.full_box else OCTANT_VOLUME
+    t, E, eps, eps_w = load(args.integrals, 1.0 / 1600, volume)
+    curves = [(t, eps, eps_w if args.enstrophy else None, args.label, "#ff9e3d")]
     for (path, label), color in zip(args.compare, ["#58a6ff", "#3fb950", "#d2a8ff"]):
-        tc, _, ec, _ = load(path, 1.0 / 1600)
-        curves.append((tc, ec, label, color))
+        tc, _, ec, _ = load(path, 1.0 / 1600, volume)
+        curves.append((tc, ec, None, label, color))
     ref = None
     if args.ref:
         tr, _, er = load_reference(args.ref)
-        ref = (tr, er)
+        ref = (tr, er, 2.0 / 1600 * np.loadtxt(args.ref, comments="#")[:, 3] if args.enstrophy else None)
 
     W, H = args.width, round(args.width * 9 / 16)
     w3d = round(W * 0.62)
@@ -189,10 +201,10 @@ def main():
     still, still_dt = None, np.inf
     with tempfile.TemporaryDirectory() as tmp:
         for k, (t_file, path) in enumerate(files):
-            octant, t_vtu = read_octant(path)
+            octant, t_vtu = read_octant(path, 2 * np.pi if args.full_box else np.pi)
             t_now = t_vtu if t_vtu is not None else t_file
             az = 35 + args.orbit * k / max(len(files) - 1, 1)
-            left = render_3d(plotter, mirror(octant), args.q_factor, az)
+            left = render_3d(plotter, octant if args.full_box else mirror(octant), args.q_factor, az)
             right = render_panel(t_now, curves, ref, (W - w3d, H), 100)
             frame = np.concatenate([left[:H, :w3d], right[:H]], axis=1)
             imageio.imwrite(os.path.join(tmp, f"f{k:05d}.png"), frame)

@@ -14,6 +14,12 @@
 # then 0.29 s per step):
 #   mpirun -n 8 --bind-to none ../../build3d/src/Mallard -i input_periodic.toml --kokkos-map-device-id-by=mpi_rank
 #   python ../../tools/plot_taylor_green.py integrals.csv --full-box --ref spectral_Re1600_512.gdiag
+#
+# Result at Nx = 128 (the workshop's 128^3) with the default low-Mach
+# correction: E_k(t) within 2% of the 512^3 spectral DNS up to t = 20;
+# -dE/dt peaks at 0.0116 (t = 8.4) against 0.0129 (t = 9.0); the resolved
+# viscous dissipation 2 mu E peaks at 0.0072 (TENO polynomial gradients). On
+# 8 A100s: 15 minutes of setup, then 32,000 steps at 0.115 s each.
 
 [run]
 t_stop = 20.0

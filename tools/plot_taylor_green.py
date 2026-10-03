@@ -63,6 +63,10 @@ def main():
         print(f"reference: peak eps = {pv:.5f} at t = {pt:.2f}")
         ax_e.plot(tr, Er, "k-", lw=2.2, label="Spectral DNS 512$^3$")
         ax_d.plot(tr, er, "k-", lw=2.2, label="Spectral DNS 512$^3$")
+        ew = 2.0 * args.mu * np.loadtxt(args.ref, comments="#")[:, 3]
+        wv, wt = peak(tr, ew)
+        print(f"reference: peak 2 mu enstrophy = {wv:.5f} at t = {wt:.2f}")
+        ax_d.plot(tr, ew, "k--", lw=1.4, label="Spectral DNS: $2\\mu\\,\\mathcal{E}$")
     for path, label in zip(args.csv, labels):
         t, E, eps, eps_w = load(path, args.mu, BOX_VOLUME if args.full_box else OCTANT_VOLUME)
         pv, pt = peak(t, eps)
