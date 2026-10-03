@@ -108,15 +108,50 @@ These are found during per-rank precomputation on owned plus halo cells, and wit
 - **Solution output:** per-rank VTU pieces plus a `.pvtu` index and the `.pvd` series to start. At scale, HDF5 with an XDMF index (one shared file per snapshot, collective writes).
 - **Restart:** HDF5, written by global cell id, so a run can restart on a **different rank count**. This is essential for hero runs, which rarely get the same allocation twice.
 
-### 10. Room for dynamic load balancing
+### 10. Dynamic load balancing
 
-Dynamic rebalancing (troubled cells, and so the TENO cost, move with shocks) is deferred, but the design keeps it cheap to add:
+Status: prototyped and measured on A100s (milestone 7); not adopted, because a rebalance does not pay for itself on the cases below. The prototype is kept in draft PRs #103 (weighted partitioners), #104 (runtime migration), #105 (cost model and trigger) and #108 (TENO data migration).
 
-- **Setup is a function of a distributed cell set**, not of a file: `build_local(cells owned by this rank) -> local mesh, halo, exchange plan, stencils, boundary data`. Startup calls it after the first partition; a rebalance would call it again after migrating cells.
-- **Global ids everywhere** (cells, nodes, faces of boundary zones), and **state migrates with cells** through the same `alltoallv` as setup, keyed by global id.
-- **The partitioner takes per-cell weights from the caller**, so measured costs (e.g. the troubled-cell fraction from the last N steps) can replace the static model. KaMinPar can also refine an existing partition rather than start from scratch.
-- **Per-rank derived data** (stencils, pseudo-inverses, halo plans) is cached by global id where it is expensive, so a rebalance recomputes only what moved.
-- **No assumption that the partition is fixed** in output or restart: both are keyed by global id.
+**Why it was tried.** TENO's troubled cells (near shocks) cost several times a smooth cell, cluster on the ranks a shock crosses, and move with the shocks, so a static partition can't balance them. Chemistry will add larger per-cell cost variation, which it balances by moving chemistry states between ranks without touching the mesh (`chemistry.md`, decision 9).
+
+**Invariant.** Results must stay bitwise identical with and without rebalancing, as they are on any rank count. The prototype keeps it: stencils, pseudo-inverses and face orders are functions of global ids, reductions are exact or ordered by global keys, and state and per-cell data move as raw bits. Its tests compare rebalanced runs with serial ones bitwise (TENO with mirror faces and periodic seams, MUSCL Navier-Stokes with Dirichlet and average-pressure boundaries, 2D and 3D, 2-4 ranks, CPU and A100).
+
+#### 10.1 The prototype
+
+- **Cost model.** Per-cell weight `16 (1 + (kappa - 1) f_c)`, with `f_c` the fraction of steps cell c was troubled (a per-step counter kernel) and `kappa` fitted by least squares over ranks from their busy times, `B_r = a N_r + b T_r`.
+- **Busy time.** Step time minus host time blocked in MPI waits, measured in the last 5 steps of every check window with the device finished before the halo wait. Without that fence, on GPUs the `Kokkos::fence` before each send also waits for communication, and the measured imbalance read 1.3-1.5 where the per-phase compute imbalance was 1.05-1.25.
+- **Trigger.** Every `rebalance_interval` steps: rebalance when max/mean busy time exceeds a threshold, the saving (slowest rank brought to 1.05 x the mean) over the expected horizon beats twice the predicted cost, and total rebalancing stays within a budget of the run's wall time. Every input to the decision must be the same on all ranks: one rank-local term made ranks decide differently and mismatch collectives.
+- **Repartitioning.** The `DistributedMesh` (blocks, node directory, dual graph) is kept for the run. Hilbert: the sample sort carries the weights and the curve is split at weighted prefix sums. dKaMinPar: node weights, then parts relabeled to keep the most weight in place. dKaMinPar 3.7's node balancer never terminates when single cells weigh more than a few percent of a part, so tiny parts fall back to the curve.
+- **Migration.** Owned state goes to the new owners by global id; the local mesh, halo, boundaries and outputs are rebuilt as at startup. TENO data is not recomputed: each reconstructed cell's tables are exported with global keys, kept or fetched from the previous owner, and taken by `init()` instead of precomputing (recomputing would cost about 330 us per cell on one core).
+
+#### 10.2 Measurements
+
+2D TENO5, Hilbert partition, SSPRK3, A100-80GB with GPU-aware MPI; 8 GPUs on one node, 16 GPUs as 4 nodes x 4 over InfiniBand. Riemann problem (configuration 3, quadrilaterals, HLLC) and double Mach reflection (triangles, RHLL), each run to its final time. *Imbalance* and *excess* are means over the run's checks of the measured busy times: max/mean, and the slowest rank's time above 1.05 x the mean. The *bound* is the stepping time an instantaneous, free rebalance at every check could save.
+
+| case | GPUs | cells/GPU | steps | ms/step | imbalance | excess (ms/step) | bound |
+|---|---|---|---|---|---|---|---|
+| Riemann 1M | 8 | 125k | 16,670 | 3.80 | 1.17 | 0.41 | 6.9 s of 64 s (11%) |
+| Riemann 1M | 16 | 62.5k | 16,670 | 2.73 | 1.28 | 0.50 | 8.4 s of 46 s (18%) |
+| Riemann 4M | 8 | 500k | 34,840 | 11.2 | 1.15 | 1.00 | 35 s of 390 s (9%) |
+| Riemann 4M | 16 | 250k | 34,840 | 7.06 | 1.29 | 1.30 | 45 s of 246 s (18%) |
+| DMR 1.84M | 8 | 230k | 20,274 | 5.57 | 1.12 | 0.33 | 6.7 s of 113 s (6%) |
+| DMR 1.84M | 16 | 115k | 20,274 | 3.60 | 1.19 | 0.40 | 8.1 s of 73 s (11%) |
+
+- **Where the time goes** (Riemann 1M, 8 GPUs, per stage with fences between phases): the smooth TENO pass takes 0.85 ms on every rank, the troubled passes 0.04-0.31 ms, the fluxes 0.11 ms. Splitting the troubled passes (milestone 5) already removed most of the imbalance this section was meant to fix.
+- **A rebalance costs** 5.0 s at 125k cells/GPU and 21.6 s at 500k (TENO export 1.3 s, TENO repacking 1.0 s, `cells_independent_of_halo` 1.0 s, data exchange 0.7 s, local mesh 0.6 s, partition 0.2 s at 125k); recomputing the stencils instead would add the 6-7 s of the startup's TENO setup. A weighted curve split moves 9-13% of the cells (85-130k of 1M) or 6% (252k of 4M).
+- **The pattern moves faster than a rebalance pays back.** Forced rebalances (Riemann 1M, 8 GPUs) took the imbalance from 1.25 to 1.05; it was back to 1.2-1.3 within 2,000-4,000 steps, and a partition weighted for earlier shock positions became worse than the uniform one. Stepping took 3.85-4.03 ms instead of 3.80, plus 5 s per rebalance. On Riemann 4M (8 GPUs) one rebalance cost 21.6 s and left 11.2 ms/step unchanged. The probe steps cost under 1%.
+
+#### 10.3 Why not, and what would change it
+
+If the imbalance returns over `R_d` steps after a rebalance, rebalancing every `R` steps captures a fraction `1 - R / (2 R_d)` of the excess `e` per step at cost `C` each, at best with `R = sqrt(2 R_d C / e)`. With the measured `R_d` of 3,000-6,000 steps, even a rebalance 3x cheaper than the prototype's (1.5 s per 125k cells) nets about zero on Riemann 1M at 16 GPUs and about 2% on Riemann 4M at 16 GPUs, within the optimism of assuming each rebalance resets the imbalance to 1.05. It pays clearly only below about 5 us per cell, a few tenths of a second per rank, which a full local rebuild does not reach.
+
+It would be worth revisiting if:
+
+- imbalance grows relative to the smooth work, e.g. at many more ranks per mesh or with costlier troubled reconstructions (3D, higher order), and lasts longer than a few thousand steps;
+- an incremental scheme moves only cells near partition boundaries and patches the local mesh and TENO tables in place, instead of rebuilding them;
+- a long-lived imbalance comes from a source that moves slowly, e.g. chemistry's long-term cost (which `chemistry.md` balances by redistributing chemistry states instead).
+
+The structure the prototype relied on stays in place: setup is a function of a distributed cell set, everything is keyed by global ids, weights are a small addition to the partitioners (#103), and output and restart do not assume a fixed partition.
 
 ### 11. Communication patterns at scale
 
@@ -167,12 +202,12 @@ there.
      - The 8 GPUs give the same times on one node as on 2 nodes x 4.
      - Host-staged MPI is 15-25% slower; the overlap recovers about 10% of it.
      - dKaMinPar partitions give the same times within a few percent, and 0.141 s on 1M cells at 16 GPUs.
-     - What remains at small per-GPU sizes is the cost of troubled cells concentrated on the ranks crossed by shocks, and of the smooth TENO pass's last partial wave of threads. Dynamic load balancing (section 10) addresses the first.
+     - What remains at small per-GPU sizes is the cost of troubled cells concentrated on the ranks crossed by shocks, and of the smooth TENO pass's last partial wave of threads. Dynamic load balancing (section 10) was measured against the first and does not pay off.
 6. **Multi-node:** runs across nodes; HDF5/XDMF solution output. Runs across nodes work, with GPUDirect RDMA (milestone 5 table). HDF5/XDMF output is still to do.
-6. **Multi-node:** runs across nodes; HDF5/XDMF solution output.
+7. **Dynamic load balancing** (section 10): prototyped (weighted partitioners, runtime migration with TENO data carried over, measured cost model and trigger, bitwise tests) and measured on 8 and 16 A100s; not adopted, since a rebalance costs more than the imbalance it removes before the shocks move on. The prototype stays in draft PRs.
 
 ## Decisions from review
 
 1. One halo exchange per stage with a redundant halo-layer-1 reconstruction (section 7).
 2. Optional NCCL backend for the halo exchange and reductions (section 1).
-3. Dynamic load balancing deferred, with the setup structured to allow it (section 10).
+3. Dynamic load balancing deferred, with the setup structured to allow it (section 10); prototyped and measured in milestone 7, and not adopted.
