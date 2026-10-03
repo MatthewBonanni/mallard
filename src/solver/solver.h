@@ -237,16 +237,6 @@ class Solver {
         void init_solution();
         void init_solution_constant();
         void init_solution_analytical();
-
-        /**
-         * @brief Set the cell averages of a 3D mesh from point values f(x, y, z, cons)
-         *        by integrating over the tetrahedra of each cell.
-         * @param n_sub Subdivisions per direction of the Duffy cube of each tetrahedron.
-         * @param n_vars Values per point: the conservatives, then the partial densities.
-         * @param f Conservative variables at a point.
-         */
-        void init_cell_averages_3d(uint32_t n_sub, uint32_t n_vars,
-                                   const std::function<void(double, double, double, rtype *)> & f);
         void init_solution_restart();
         void update_boundary_states(rtype t_eval);
         void init_sources();
