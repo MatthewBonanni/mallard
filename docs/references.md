@@ -92,7 +92,7 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="trott-2022"></a>C. R. Trott et al., Kokkos 3: Programming model extensions for the exascale era, *IEEE Trans. Parallel Distrib. Syst.* 33, 805–817 (2022). [doi:10.1109/TPDS.2021.3097283](https://doi.org/10.1109/TPDS.2021.3097283)
   Used in: all of Mallard's kernels and data ([Kokkos](https://github.com/kokkos/kokkos)).
 - <a id="geuzaine-remacle-2009"></a>C. Geuzaine and J.-F. Remacle, Gmsh: A 3-D finite element mesh generator with built-in pre- and post-processing facilities, *Int. J. Numer. Methods Eng.* 79, 1309–1331 (2009). [doi:10.1002/nme.2579](https://doi.org/10.1002/nme.2579)
-  Used in: the Gmsh 2.2 and 4.1 mesh reader, and the meshes of `tools/make_cylinder_mesh.py` and `tools/make_mallard_mesh.py`.
+  Used in: the Gmsh 2.2 and 4.1 mesh reader, and the meshes of `tools/make_cylinder_mesh.py`, `tools/make_mallard_mesh.py` and `tools/make_sphere_re300_mesh.py`.
 - [toml11](https://github.com/ToruNiina/toml11) reads the input file; [exprtk](https://www.partow.net/programming/exprtk/) evaluates its expressions.
 
 ## Validation cases and reference data
@@ -120,6 +120,12 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="liu-zheng-sung-1998"></a>C. Liu, X. Zheng and C. H. Sung, Preconditioned multigrid methods for unsteady incompressible flows, *J. Comput. Phys.* 139, 35–57 (1998). [doi:10.1006/jcph.1997.5859](https://doi.org/10.1006/jcph.1997.5859)
 - <a id="park-kwon-choi-1998"></a>J. Park, K. Kwon and H. Choi, Numerical solutions of flow past a circular cylinder at Reynolds numbers up to 160, *KSME Int. J.* 12, 1200–1205 (1998). [doi:10.1007/BF02942594](https://doi.org/10.1007/BF02942594)
   Used in: `examples/cylinder` (Strouhal number, drag and lift at Re = 100).
+- <a id="johnson-patel-1999"></a>T. A. Johnson and V. C. Patel, Flow past a sphere up to a Reynolds number of 300, *J. Fluid Mech.* 378, 19–70 (1999). [doi:10.1017/S0022112098003206](https://doi.org/10.1017/S0022112098003206)
+- <a id="tomboulides-1993"></a>A. G. Tomboulides, S. A. Orszag and G. E. Karniadakis, Direct and large-eddy simulation of the flow past a sphere, in *Engineering Turbulence Modelling and Experiments 2*, Elsevier, 273–282 (1993). [doi:10.1016/B978-0-444-89802-9.50030-7](https://doi.org/10.1016/B978-0-444-89802-9.50030-7)
+- <a id="tomboulides-orszag-2000"></a>A. G. Tomboulides and S. A. Orszag, Numerical investigation of transitional and weak turbulent flow past a sphere, *J. Fluid Mech.* 416, 45–73 (2000). [doi:10.1017/S0022112000008880](https://doi.org/10.1017/S0022112000008880)
+- <a id="kim-kim-choi-2001"></a>J. Kim, D. Kim and H. Choi, An immersed-boundary finite-volume method for simulations of flow in complex geometries, *J. Comput. Phys.* 171, 132–150 (2001). [doi:10.1006/jcph.2001.6778](https://doi.org/10.1006/jcph.2001.6778)
+- <a id="constantinescu-squires-2003"></a>G. S. Constantinescu and K. D. Squires, LES and DES investigations of turbulent flow over a sphere at Re = 10,000, *Flow Turbul. Combust.* 70, 267–298 (2003). [doi:10.1023/B:APPL.0000004937.34078.71](https://doi.org/10.1023/B:APPL.0000004937.34078.71)
+  Used in: `examples/sphere_re300` and `tools/plot_sphere_re300.py` (Strouhal number, mean drag and lift at Re = 300: Johnson & Patel, Tomboulides et al., Kim et al., and the laminar Re = 300 validation of Constantinescu & Squires; Tomboulides & Orszag describe the regime, a single-frequency shedding that keeps a plane of symmetry).
 - <a id="brachet-1983"></a>M. E. Brachet, D. I. Meiron, S. A. Orszag, B. G. Nickel, R. H. Morf and U. Frisch, Small-scale structure of the Taylor–Green vortex, *J. Fluid Mech.* 130, 411–452 (1983). [doi:10.1017/S0022112083001159](https://doi.org/10.1017/S0022112083001159)
 - <a id="van-rees-2011"></a>W. M. van Rees, A. Leonard, D. I. Pullin and P. Koumoutsakos, A comparison of vortex and pseudo-spectral methods for the simulation of periodic vortical flows at high Reynolds numbers, *J. Comput. Phys.* 230, 2794–2805 (2011). [doi:10.1016/j.jcp.2010.11.031](https://doi.org/10.1016/j.jcp.2010.11.031)
 - <a id="wang-2013"></a>Z. J. Wang et al., High-order CFD methods: current status and perspective, *Int. J. Numer. Methods Fluids* 72, 811–845 (2013). [doi:10.1002/fld.3767](https://doi.org/10.1002/fld.3767)

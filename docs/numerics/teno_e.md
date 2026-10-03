@@ -81,3 +81,11 @@ for accuracy (expect design order on uniform triangles).
   in the stretched boundary cells is the more likely cause; reducing the
   order near boundaries is the next thing to try. Use `order = 3` near
   curved boundaries until this is resolved.
+
+- Thin cells: on tetrahedra and prisms of high aspect ratio, TENO-E amplifies
+  small perturbations. A 1% acoustic pulse at rest in a 16 x 16 x 4 box of
+  `cartesian_prism` cells 0.0625 x 0.0625 x 0.01 (symmetry walls) reaches
+  Mach 0.8 by t = 2 at order 3 (0.45 with every cell smooth, 0.6 with every
+  cell troubled); `cartesian_tet` cells of the same size reach Mach 1.2,
+  while hexahedra stay at rest. Boundary-layer meshes
+  (`examples/sphere_re300`) therefore use MUSCL.

@@ -1,0 +1,122 @@
+# Flow past a sphere at Re = 300, Mach 0.2 (3D build): periodic shedding of
+# hairpin vortices from a wake with one plane of symmetry (Johnson & Patel,
+# J. Fluid Mech. 378, 1999). The Strouhal number of the lift, mean drag and
+# mean lift, averaged over the 7 shedding periods of t = 450-750:
+#
+#                                  St      Cd      Cl
+#   this input, 0.85M cells     0.1331  0.6688  0.0731
+#   2.06M cells (--scale 1.4)   0.1328  0.6664  0.0697
+#   Johnson & Patel 1999        0.137   0.656   0.069
+#   Kim, Kim & Choi 2001        0.134   0.657   0.067
+#   Constantinescu & Squires    0.136   0.655   0.065
+#   Tomboulides et al. 1993     0.136   0.671
+#
+# Refining the mesh by 1.4 in every direction changes St by 0.2%, Cd by 0.4%
+# and Cl by 5%. Lift oscillates by +-0.014 about its mean, drag by +-0.0026.
+# Cl is the magnitude of the mean lift. The plane of symmetry, set near x-y by
+# the initial kick, drifts slowly about the x axis (13-26 degrees from x-y).
+#
+# Mesh: prism boundary layer (10 layers from 0.005 D) and tetrahedra refined
+# through the near wake, on the full box x = -15..30, |y|, |z| < 15 (the wake
+# is not axisymmetric, so no symmetry planes). Generate it first:
+#   python ../../tools/make_sphere_re300_mesh.py sphere.msh
+# Nondimensionalization: sphere diameter 1, free-stream density and sound
+# speed 1, so U = M = 0.2, mu = U D / Re, and t = 750 is t U / D = 150.
+# Shedding sets in by t U / D = 50 (period 7.5 D / U).
+#
+# MUSCL: TENO is noisy on the thin prisms of the boundary layer
+# (docs/numerics/teno_e.md).
+#
+# Run:
+#   mpirun -n 4 ../../build3d/src/Mallard -i input.toml
+#   python ../../tools/plot_sphere_re300.py solut/forces_sphere.csv --t-start 450
+#
+# Cost: 4.7 hours on four A100 GPUs (1.04M steps). The 2.06M-cell run started
+# at t = 244 from this one (tools/interpolate_restart.py) and took 6.7 hours on
+# eight A100s. tools/animate_sphere_re300.py animates the wake.
+
+[run]
+t_stop = 750.0
+cfl = 0.8
+
+[mesh]
+type = "file"
+filename = "sphere.msh"
+
+[initialize]
+type = "analytical"
+rho = "1.0"
+# Potential flow around the sphere, plus a transverse kick behind it that
+# starts the wake's instability near the x-y plane
+u = ["0.2 * (1 + 0.0625 / (x^2 + y^2 + z^2)^1.5 - 0.1875 * x^2 / (x^2 + y^2 + z^2)^2.5)",
+     "-0.0375 * x * y / (x^2 + y^2 + z^2)^2.5 + 0.04 * exp(-((x - 1.5)^2 + y^2 + z^2))",
+     "-0.0375 * x * z / (x^2 + y^2 + z^2)^2.5"]
+p = "0.7142857142857143"
+
+[[boundaries]]
+name = "sphere"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "inflow"
+type = "farfield"
+u = [0.2, 0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "lateral"
+type = "farfield"
+u = [0.2, 0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "outflow"
+type = "farfield"
+u = [0.2, 0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+mu = 6.666666666666667e-4
+Pr = 0.72
+
+[output]
+check_interval = 1000
+
+[[forces]]
+zone = "sphere"
+interval = 20
+file = "./solut/forces_sphere.csv"
+
+[[write_data]]
+prefix = "./solut/sphere"
+format = "vtu"
+time_interval = 100.0
+variables = ["RHO", "U", "P"]
+
+[[write_data]]
+prefix = "./solut/wall"
+format = "vtu"
+geometry = "sphere"
+time_interval = 5.0
+variables = ["P"]
+
+[[write_data]]
+prefix = "./restart/sphere"
+format = "restart"
+interval = 20000

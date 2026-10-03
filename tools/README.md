@@ -21,3 +21,7 @@ Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the 3D
 | `animate_sphere.py` | Sphere animation: Mach number on the horizontal meridian plane, schlieren on the vertical one, the bow shock revolved into a 3D surface, and the standoff history against Billig |
 | `sedov.py` | Exact 3D Sedov-Taylor blast (similarity ODEs): the constant xi0 of R = xi0 (E t^2 / rho0)^(1/5), and a run's shock radius and density profile against it |
 | `animate_sedov.py` | Sedov-Taylor animation: density on the three symmetry planes (mirrored to full disks) with the exact shock sphere, orbiting camera, shock radius and density profile against the exact solution |
+| `make_sphere_re300_mesh.py` | Gmsh mesh of the full domain around a sphere for viscous flow: prism boundary layer, tetrahedra refined through the near wake; `--scale` refines every size for mesh studies |
+| `plot_sphere_re300.py` | Sphere at Re = 300: Strouhal number from the lift, mean drag and lift over whole shedding periods, against Johnson & Patel and other simulations |
+| `animate_sphere_re300.py` | Sphere wake animation: Q-criterion isosurfaces colored by streamwise velocity, orbiting camera, and the drag and lift histories |
+| `interpolate_restart.py` | Interpolate a restart file onto another Gmsh mesh of the same domain (inverse-distance weighting of the nearest cells), to start a refined run from a developed flow |
