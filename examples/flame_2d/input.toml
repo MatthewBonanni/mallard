@@ -1,0 +1,98 @@
+# Lean H2/air flame (phi = 0.4, 700 K, 1 atm) in a periodic channel, with
+# mixture-averaged transport (this file) and unity Lewis numbers
+# (unity/input.toml), from the same wrinkled front: a demonstration of
+# differential diffusion, which Mallard's mixture-averaged transport carries
+# and unity Lewis numbers remove. 36 um cells: 12 per thermal thickness of
+# the mixture-averaged flame (0.434 mm; 8 for the unity-Lewis flame, 0.291 mm)
+# over a channel 18 thicknesses wide and 28 long, the front displaced by up
+# to half a thickness by random modes. The fresh gas enters at 1.25 S_L
+# (unity: S_L) so the wrinkled, faster flame stays inside. Make the initial
+# states from Cantera's flames first, from this directory (this rewrites
+# both input files with the default output list):
+#
+#   python ../../tools/flame_reference.py --single h2 0.4 700 .
+#   python ../../tools/flame_restart.py h2_phi0.4_T700_mix_full.csv ../../mechanisms/h2o2.yaml ohmech 12 . \
+#       --ref-delta 4.343e-4 --ny 216 --upstream 12 --downstream 16 --perturb 0.5 --t-stop 2.4e-3 \
+#       --outputs 150 --cfl 0.8 --inlet-factor 1.25
+#   python ../../tools/flame_restart.py h2_phi0.4_T700_unity_full.csv ../../mechanisms/h2o2.yaml ohmech 12 unity \
+#       --ref-delta 4.343e-4 --ny 216 --upstream 12 --downstream 16 --perturb 0.5 --t-stop 2.4e-3 \
+#       --outputs 150 --cfl 0.8 --transport unity_lewis
+#
+# then run both (72,576 cells each; 378,000 and 301,000 viscous-limited steps:
+# 82 and 67 minutes on one A100 each) and animate them side by side with
+#
+#   python ../../tools/animate_flame_2d.py flame_2d.mp4 \
+#       --run "Mixture-averaged transport" solut/flame.pvd h2_phi0.4_T700_mix_full.csv \
+#       --run "Unity Lewis numbers" unity/solut/flame.pvd h2_phi0.4_T700_unity_full.csv
+#
+# Validation, planar flames on the same mesh (1D runs of flame_restart.py with
+# --ref-delta 4.343e-4 --cfl 0.8, measured with flame_speed.py): consumption
+# speeds 3.3446 m/s mixture-averaged and 3.1093 m/s unity Lewis, against
+# Cantera's grid-converged 3.346 and 3.129 m/s (-0.04% and -0.6%; -0.3% and
+# -1.0% with 24 um cells). Results in 2D: with mixture-averaged transport the
+# burnt gas leaves the front between 0.958 and 1.017 times the adiabatic flame
+# temperature (superadiabatic behind the bulges, where hydrogen diffuses in
+# faster than heat out), against 0.996-1.000 with unity Lewis numbers; the
+# consumption speed rises to 1.14 S_L by 1.1 ms (unity: 1.02), while both
+# fronts coarsen to a single cusped cell across the 7.8 mm channel, whose
+# hydrodynamic (Darrieus-Landau) growth brings the unity-Lewis flame to
+# 1.08 S_L by 2.4 ms. At 700 K this mixture is only mildly thermodiffusively
+# unstable; colder or higher-pressure lean flames, with stronger cellular
+# instability, need many more flame times than fit in this run.
+
+[run]
+t_stop = 0.0023999999999999998
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 336
+Ny = 216
+Lx = 0.0121604
+Ly = 0.0078174000000000004
+periodic = ["y"]
+
+[initialize]
+type = "restart"
+file = "flame.restart"
+
+[[boundaries]]
+name = "left"
+type = "upt"
+u = [4.2061810389970624, 0.0]
+p = 101325.0
+T = 700
+X = { "H2" = 0.14388489208632688, "O2" = 0.17985611510791061, "N2" = 0.67625899280576252 }
+
+[[boundaries]]
+name = "right"
+type = "p_out"
+p = 101325.0
+
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+phase = "ohmech"
+transport = "mixture_averaged"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+
+[output]
+check_interval = 2000
+
+[[write_data]]
+prefix = "./solut/flame"
+format = "vtu"
+time_interval = 1.5999999999999999e-05
+variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"]

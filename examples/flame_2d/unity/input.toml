@@ -1,0 +1,60 @@
+# Unity-Lewis-number counterpart of ../input.toml (see its header)
+# Premixed flame (V8): h2_phi0.4_T700_unity_full.csv, 12 cells per
+# thermal thickness (0.2907 mm), Cantera S_L = 3.136438 m/s
+
+[run]
+t_stop = 0.0023999999999999998
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 336
+Ny = 216
+Lx = 0.0121604
+Ly = 0.0078174000000000004
+periodic = ["y"]
+
+[initialize]
+type = "restart"
+file = "flame.restart"
+
+[[boundaries]]
+name = "left"
+type = "upt"
+u = [3.1364382441686103, 0.0]
+p = 101325.0
+T = 700
+X = { "H2" = 0.14388489208633015, "O2" = 0.17985611510791077, "N2" = 0.67625899280575918 }
+
+[[boundaries]]
+name = "right"
+type = "p_out"
+p = 101325.0
+
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../../mechanisms/h2o2.yaml"
+phase = "ohmech"
+transport = "unity_lewis"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+
+[output]
+check_interval = 2000
+
+[[write_data]]
+prefix = "./solut/flame"
+format = "vtu"
+time_interval = 1.5999999999999999e-05
+variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"]

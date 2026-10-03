@@ -16,6 +16,11 @@ examples/premixed_flame/reference):
 and, with FULL_DIR, each flame's full solution (x, u, T, rho, Y) as
 FULL_DIR/<case>_full.csv: the initial state of Mallard's runs
 (tools/flame_restart.py). <case> is e.g. "h2_phi1.0_mix".
+
+    python tools/flame_reference.py --single FUEL PHI T_U FULL_DIR
+
+computes only the flames of one mixture at T_U (both transport models, on a
+3 cm domain) and writes their full solutions, e.g. FULL_DIR/h2_phi0.4_T700_mix_full.csv.
 """
 import os
 import sys
@@ -37,18 +42,38 @@ def case_name(fuel, phi, model):
     return f"{fuel}_phi{phi:.1f}_{model}"
 
 
-def solve(fuel, phi, model):
-    mech, phase, species, width = FUELS[fuel]
+def solve(fuel, phi, model, T_u=T_U, width=None):
+    mech, phase, species, _ = FUELS[fuel]
     gas = ct.Solution(os.path.join(ROOT, mech), phase, transport_model=MODELS[model])
     gas.set_equivalence_ratio(phi, species, "O2:1.0, N2:3.76")
-    gas.TP = T_U, P
-    flame = ct.FreeFlame(gas, width=width)
+    gas.TP = T_u, P
+    flame = ct.FreeFlame(gas, width=width or FUELS[fuel][3])
     flame.set_refine_criteria(ratio=2.0, slope=0.02, curve=0.02, prune=0.002)
     flame.solve(loglevel=0, auto=True)
     return flame
 
 
+def write_full(f, path):
+    data = np.column_stack([f.grid, f.velocity, f.T, f.density, f.Y.T])
+    header = "x,u,T,rho," + ",".join("Y_" + s for s in f.gas.species_names)
+    np.savetxt(path, data, delimiter=",", header=header, comments="")
+
+
+def single(fuel, phi, T_u, full):
+    os.makedirs(full, exist_ok=True)
+    for model in MODELS:
+        f = solve(fuel, phi, model, T_u, width=0.03)
+        delta = (f.T[-1] - f.T[0]) / np.gradient(f.T, f.grid).max()
+        name = f"{fuel}_phi{phi:.1f}_T{T_u:.0f}_{model}"
+        print(f"{name}: S_L = {f.velocity[0]:.5f} m/s, T_b = {f.T[-1]:.1f} K, delta = {delta * 1e3:.4f} mm, "
+              f"rho_u / rho_b = {f.density[0] / f.density[-1]:.3f}")
+        write_full(f, os.path.join(full, name + "_full.csv"))
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--single":
+        single(sys.argv[2], float(sys.argv[3]), float(sys.argv[4]), sys.argv[5])
+        return
     out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "examples", "premixed_flame", "reference")
     full = sys.argv[2] if len(sys.argv) > 2 else None
     os.makedirs(out, exist_ok=True)
@@ -77,10 +102,7 @@ def main():
                         fh.write(f"{xi - x[i_max]:.6e},{np.interp(xi, x, f.velocity):.6e},"
                                  f"{np.interp(xi, x, T):.6e},{np.interp(xi, x, hrr):.6e}\n")
                 if full:
-                    data = np.column_stack([x, f.velocity, T, f.density, f.Y.T])
-                    header = "x,u,T,rho," + ",".join("Y_" + s for s in f.gas.species_names)
-                    np.savetxt(os.path.join(full, name + "_full.csv"), data, delimiter=",", header=header,
-                               comments="")
+                    write_full(f, os.path.join(full, name + "_full.csv"))
     with open(os.path.join(out, "flames.csv"), "w") as fh:
         fh.write(f"# Cantera {ct.__version__} FreeFlame, T_u = {T_U} K, p = {P} Pa, air O2:N2 = 1:3.76\n")
         fh.write("fuel,phi,transport,S_L,T_b,delta_T,points\n")
