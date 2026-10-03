@@ -1,0 +1,126 @@
+# Sedov-Taylor point blast in 3D (Sedov, "Similarity and Dimensional Methods
+# in Mechanics", 1959; Taylor, Proc. R. Soc. A 201, 1950): energy E = 1 released
+# at the origin of a gas at rest with rho0 = 1 and negligible pressure drives a
+# spherical shock R(t) = xi0 (E t^2 / rho0)^(1/5), with xi0 = 1.0328 for
+# gamma = 1.4 (Kamm & Timmes, LA-UR-07-2849, 2007: alpha = xi0^-5 = 0.8511;
+# xi0 = 1.15 is the gamma = 5/3 value). Needs the 3D build (cmake -DMallard_DIM=3).
+#
+# Only the octant [0, 1.1]^3 is computed, with symmetry planes at x = 0, y = 0
+# and z = 0, on 128^3 hexahedra with bound-preserving TENO5. The shock never
+# reaches the outer faces, which are symmetry planes too: their mirror images
+# keep TENO stencils compact, where transmissive faces would need one-sided
+# stencils twice as large (and twice the GPU memory). The octant holds
+# E / 8, deposited as pressure in the ball r < 0.05 (about 6 cells); the ambient
+# pressure is 1e-5 (shock Mach number above 100 at the end).
+#
+# Run, then compare the shock radius and density profile with the exact
+# solution (tools/sedov.py integrates the similarity ODEs):
+#   ../../build3d/src/Mallard -i input.toml
+#   python ../../tools/sedov.py solut --energy 1
+#
+# Expected result at t = 0.8: the shock at R = 0.945 (exact), the density
+# jumping to (gamma + 1) / (gamma - 1) = 6 behind it and falling to vacuum at
+# the center. Here the shock radius (where the shell-averaged density crosses
+# the middle of its jump) is 1.1% ahead of R(t) at t = 0.8 and 2.6% at
+# t = 0.1, the offset left by the finite initial blast radius. The density
+# profile follows the exact one, with the peak smeared to 4.2 (shell average;
+# the jump spans about three cells). The shell stays spherical (2.5% spread
+# at the peak), and mass is conserved to round-off. About 1.5 hours on four
+# A100 GPUs (half of it TENO setup); TENO5 on 2.1M cells needs at least 3.
+
+[run]
+t_stop = 0.8
+cfl = 0.5
+
+[mesh]
+type = "cartesian"
+Nx = 128
+Ny = 128
+Nz = 128
+Lx = 1.1
+Ly = 1.1
+Lz = 1.1
+
+[initialize]
+type = "analytical"
+n_subdivisions = 4
+rho = "1.0"
+u = ["0.0", "0.0", "0.0"]
+p = "x^2 + y^2 + z^2 < 0.0025 ? 0.4 / (4 / 3 * pi * 0.05^3) : 1e-5"
+
+[[boundaries]]
+name = "left"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "back"
+type = "symmetry"
+
+[[boundaries]]
+name = "right"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "front"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+bound_preserving = true
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[output]
+check_interval = 100
+
+[[write_data]]
+prefix = "./solut/sedov"
+format = "vtu"
+time_interval = 0.1
+variables = ["RHO", "P"]
+
+# Density on the three symmetry planes, for the animation
+[[write_data]]
+prefix = "./planes/x0"
+format = "vtu"
+geometry = "left"
+time_interval = 0.005
+variables = ["RHO"]
+
+[[write_data]]
+prefix = "./planes/y0"
+format = "vtu"
+geometry = "bottom"
+time_interval = 0.005
+variables = ["RHO"]
+
+[[write_data]]
+prefix = "./planes/z0"
+format = "vtu"
+geometry = "back"
+time_interval = 0.005
+variables = ["RHO"]
+
+[[write_data]]
+prefix = "./restart/sedov"
+format = "restart"
+interval = 1000

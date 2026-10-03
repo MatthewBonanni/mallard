@@ -8,7 +8,7 @@
 # Run:
 #   ../../build3d/src/Mallard -i input.toml --kokkos-num-threads=8
 #
-# Expected result at t = 0.25: an outgoing spherical shock near r = 0.82, a
+# Expected result at t = 0.25: an outgoing spherical shock near r = 0.80, a
 # contact near r = 0.6 and a rarefaction running into the center, with density
 # a function of r only (at 24^3 the spread within thin radial shells is about
 # 1% of the mean). Set type = "cartesian_tet" for the same case on
