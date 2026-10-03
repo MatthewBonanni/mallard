@@ -52,6 +52,7 @@ void Solver::init_solution() {
     copy_host_to_device();
     if (is_mixture() && it->second != InitType::RESTART) init_temperature_seed();
     update_primitives();
+    if (p_max.is_allocated()) update_p_max();
 }
 
 void Solver::init_solution_restart() {
@@ -72,7 +73,7 @@ void Solver::init_solution_restart() {
     // may start from a non-reacting one, and a non-reacting run ignores it
     std::vector<std::string> expected = restart_variables();
     for (const auto & name : restart.names) {
-        if (name == "CHEM_H") continue;
+        if (name == "CHEM_H" || name == "P_MAX") continue;
         if (std::find(expected.begin(), expected.end(), name) == expected.end()) {
             throw std::runtime_error("Restart file " + file + " has variable " + name + ", which this run does not " +
                                      (name.rfind("RHOY_", 0) == 0 ? "transport." : "know."));
@@ -80,6 +81,12 @@ void Solver::init_solution_restart() {
     }
     for (uint32_t v = 0; v < expected.size(); v++) {
         const std::vector<rtype> * values = restart.find(expected[v]);
+        if (expected[v] == "P_MAX") {
+            for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
+                h_p_max(i_cell) = values ? (*values)[i_cell] : 0.0_r;
+            }
+            continue;
+        }
         if (expected[v] == "CHEM_H") {
             for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
                 h_chem_h(i_cell) = values ? (*values)[i_cell] : 0.0_r;

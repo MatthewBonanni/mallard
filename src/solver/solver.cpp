@@ -175,6 +175,17 @@ logging::Items describe_mesh(const Mesh & mesh) {
     };
 }
 
+bool writes_variable(const toml::value & input, const std::string & name) {
+    if (!input.contains("write_data")) return false;
+    const auto outputs = toml::find<std::vector<toml::value>>(input, "write_data");
+    for (const auto & output : outputs) {
+        if (!output.contains("variables")) continue;
+        const auto variables = toml::find<std::vector<std::string>>(output, "variables");
+        if (std::find(variables.begin(), variables.end(), name) != variables.end()) return true;
+    }
+    return false;
+}
+
 } // namespace
 
 void Solver::init_mesh() {
@@ -743,6 +754,10 @@ void Solver::allocate_memory() {
                                                               face_reconstruction->n_face_quadrature_points());
     face_flux = Kokkos::View<rtype *[N_CONSERVATIVE]>("face_flux", mesh->n_faces);
     cfl_local = Kokkos::View<rtype *>("cfl_local", mesh->n_cells);
+    if (writes_variable(input, "P_MAX")) {
+        p_max = Kokkos::View<rtype *>("p_max", mesh->n_cells);
+        h_p_max = Kokkos::create_mirror_view(p_max);
+    }
     if (is_viscous()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
@@ -798,6 +813,7 @@ void Solver::copy_host_to_device() {
     if (species.span() > 0) Kokkos::deep_copy(species, h_species);
     if (is_mixture()) Kokkos::deep_copy(T_seed, h_T_seed);
     if (reacting) Kokkos::deep_copy(chem_h, h_chem_h);
+    if (p_max.is_allocated()) Kokkos::deep_copy(p_max, h_p_max);
     Kokkos::deep_copy(primitives, h_primitives);
 }
 
@@ -844,6 +860,7 @@ void Solver::copy_device_to_host() {
     }
     Kokkos::deep_copy(h_primitives, primitives);
     Kokkos::deep_copy(h_cfl_local, cfl_local);
+    if (p_max.is_allocated()) Kokkos::deep_copy(h_p_max, p_max);
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
         Kokkos::deep_copy(h_teno_sigma, teno->troubled);
     }
@@ -851,7 +868,7 @@ void Solver::copy_device_to_host() {
 
 void Solver::register_data() {
     data.clear();
-    data.reserve(CONSERVATIVE_NAMES.size() + species_names.size() + PRIMITIVE_NAMES.size() + 2);
+    data.reserve(CONSERVATIVE_NAMES.size() + species_names.size() + PRIMITIVE_NAMES.size() + 3);
     for (size_t i = 0; i < CONSERVATIVE_NAMES.size(); i++) {
         data.push_back(Data(CONSERVATIVE_NAMES[i], Kokkos::subview(h_conservatives, Kokkos::ALL(), i)));
     }
@@ -885,6 +902,7 @@ void Solver::register_data() {
         data.push_back(Data(PRIMITIVE_NAMES[i], Kokkos::subview(h_primitives, Kokkos::ALL(), i)));
     }
     data.push_back(Data("CFL", h_cfl_local));
+    if (p_max.is_allocated()) data.push_back(Data("P_MAX", h_p_max));
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
         // Troubled-cell indicator: TENO stencil selection is active where it exceeds the threshold
         h_teno_sigma = Kokkos::create_mirror_view(teno->troubled);
@@ -897,6 +915,7 @@ std::vector<std::string> Solver::restart_variables() const {
     for (const auto & name : species_names) names.push_back("RHOY_" + name);
     if (is_mixture()) names.push_back("T_SEED");
     if (reacting) names.push_back("CHEM_H");
+    if (p_max.is_allocated()) names.push_back("P_MAX");
     return names;
 }
 
@@ -963,6 +982,7 @@ int Solver::run() {
             chemistry_pending = 0.0;
             halo_current = false;
         }
+        if (p_max.is_allocated()) update_p_max();
         check_fields();
         t_wall_stepping += step_timer.seconds();
         if (step % check_interval == 0) {
@@ -1247,6 +1267,15 @@ void Solver::update_primitives() {
         FOR_I_CONSERVATIVE cons[i] = U(i_cell, i);
         phys.compute_primitives_from_conservatives(prim, cons);
         FOR_I_PRIMITIVE P(i_cell, i) = prim[i];
+    });
+}
+
+void Solver::update_p_max() {
+    update_primitives();
+    Kokkos::View<rtype *> peak = p_max;
+    Kokkos::View<rtype *[N_PRIMITIVE]> P = primitives;
+    Kokkos::parallel_for("update_p_max", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
+        peak(i_cell) = Kokkos::max(peak(i_cell), P(i_cell, N_DIM));
     });
 }
 

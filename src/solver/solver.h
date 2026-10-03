@@ -109,6 +109,11 @@ class Solver {
         void update_primitives();
 
         /**
+         * @brief Raise P_MAX to the current pressure (updates the primitives).
+         */
+        void update_p_max();
+
+        /**
          * @brief Copy the device solution to the host mirrors.
          */
         void copy_device_to_host();
@@ -219,6 +224,8 @@ class Solver {
         StateView::host_mirror_type h_conservatives;
         SpeciesView::host_mirror_type h_species;
         Kokkos::View<rtype *[N_PRIMITIVE]>::host_mirror_type h_primitives;
+        Kokkos::View<rtype *> p_max;  // largest pressure of each cell so far, if P_MAX is written
+        Kokkos::View<rtype *>::host_mirror_type h_p_max;
 
     protected:
         void init_mesh();
