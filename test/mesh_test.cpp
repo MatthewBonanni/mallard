@@ -73,6 +73,19 @@ TEST_P(MeshInvariants, VolumesSumToDomainAreaAndCentroidsAreExact) {
     }
 }
 
+TEST(MeshCentroids, FineCellsFarFromTheOriginKeepCentroidsToRoundOff) {
+    // Shoelace moments in absolute coordinates lose eps |x|^2 / h here
+    auto mesh = make_mesh("cartesian", 800, 4, 1.0, 0.005);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        const uint32_t n = mesh->h_n_nodes_of_cell(c);
+        rtype mean[N_DIM] = {};
+        for (uint32_t k = 0; k < n; k++) {
+            FOR_I_DIM mean[i] += mesh->h_node_coords(mesh->h_node_of_cell(c, k), i) / n;
+        }
+        FOR_I_DIM EXPECT_NEAR(mesh->h_cell_coords(c, i), mean[i], roundoff(1e-15)) << "cell " << c;
+    }
+}
+
 TEST_P(MeshInvariants, BoundaryZonesPartitionBoundaryFaces) {
     auto mesh = make_mesh(GetParam(), 6, 4);
     std::multiset<uint32_t> zone_faces;

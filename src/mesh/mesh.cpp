@@ -229,22 +229,27 @@ void Mesh::h_neighbors_of_cell(uint32_t i_cell, uint8_t n_order, std::vector<uin
 
 void Mesh::compute_cell_centroids() {
     // Area centroid of the polygon (the vertex average is only correct for
-    // triangles and parallelograms)
+    // triangles and parallelograms), relative to the cell's first node: in
+    // absolute coordinates the cross products cancel, leaving errors of
+    // eps |x|^2 / h, which break the equidistance of mirror-equivalent
+    // stencil entries on fine meshes away from the origin
     for (uint32_t i_cell = 0; i_cell < n_cells; ++i_cell) {
         const uint32_t n = h_n_nodes_of_cell(i_cell);
+        const uint32_t o = h_node_of_cell(i_cell, 0);
+        const rtype x0 = h_node_coords(o, 0), y0 = h_node_coords(o, 1);
         rtype A = 0.0, Cx = 0.0, Cy = 0.0;
         for (uint32_t k = 0; k < n; ++k) {
             const uint32_t a = h_node_of_cell(i_cell, k);
             const uint32_t b = h_node_of_cell(i_cell, (k + 1) % n);
-            const rtype xa = h_node_coords(a, 0), ya = h_node_coords(a, 1);
-            const rtype xb = h_node_coords(b, 0), yb = h_node_coords(b, 1);
+            const rtype xa = h_node_coords(a, 0) - x0, ya = h_node_coords(a, 1) - y0;
+            const rtype xb = h_node_coords(b, 0) - x0, yb = h_node_coords(b, 1) - y0;
             const rtype cross = xa * yb - xb * ya;
             A += 0.5_r * cross;
             Cx += (xa + xb) * cross;
             Cy += (ya + yb) * cross;
         }
-        h_cell_coords(i_cell, 0) = Cx / (6.0_r * A);
-        h_cell_coords(i_cell, 1) = Cy / (6.0_r * A);
+        h_cell_coords(i_cell, 0) = x0 + Cx / (6.0_r * A);
+        h_cell_coords(i_cell, 1) = y0 + Cy / (6.0_r * A);
     }
 }
 

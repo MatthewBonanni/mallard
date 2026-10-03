@@ -2437,8 +2437,9 @@ void TENO::dispatch(const Kokkos::DefaultExecutionSpace & exec, Kokkos::View<rty
 namespace {
 
 // Version 3 stores each reconstructed cell's tables at their actual stencil sizes; version 4 gathers
-// candidates by interior cells, version 5 sorts them in the mesh-spacing metric
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-5";
+// candidates by interior cells, version 5 sorts them in the mesh-spacing metric, version 6 follows
+// the round-off-accurate 2D cell centroids
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-6";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {

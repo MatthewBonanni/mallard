@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -22,6 +23,7 @@
 #include <sstream>
 #include <string>
 #include <tuple>
+#include <vector>
 
 #include "test_fixtures.h"
 #include "exact_riemann.h"
@@ -236,6 +238,46 @@ TEST_P(SodMesh, XAndYDirectionsGiveSameError) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Solver, SodMesh, ::testing::Values("cartesian", "cartesian_tri"));
+
+TEST(SolverRegression, TENOSodOnAFineStripBetweenSymmetryPlanesStaysOneDimensional) {
+    // Fine square cells far from the origin: round-off in the cell centroids
+    // once split equidistant sector-stencil entries differently in the rows
+    SKIP_IN_SINGLE_PRECISION("round-off flips TENO stencil selections at the discontinuity");
+    const uint32_t nx = 800, ny = 4;
+    auto solver = std::make_unique<Solver>();
+    solver->init(parse_toml(
+        "[run]\nn_steps = 3\ncfl = 0.5\n"
+        "[mesh]\ntype = \"cartesian\"\nNx = 800\nNy = 4\nLx = 1.0\nLy = 0.005\n"
+        "[initialize]\ntype = \"analytical\"\nrho = \"x < 0.5 ? 1.0 : 0.125\"\nu = [\"0.0\", \"0.0\"]\n"
+        "p = \"x < 0.5 ? 1.0 : 0.1\"\n"
+        "[[boundaries]]\nname = \"left\"\ntype = \"symmetry\"\n"
+        "[[boundaries]]\nname = \"right\"\ntype = \"symmetry\"\n"
+        "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+        "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
+        "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+        "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 5\n"
+        "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+        "[output]\ncheck_interval = 1000000\n"));
+    solver->run();
+    solver->update_primitives();
+    solver->copy_device_to_host();
+    auto mesh = solver->get_mesh();
+    ASSERT_EQ(mesh->n_cells, nx * ny);
+    std::vector<std::vector<double>> rho(nx, std::vector<double>(ny, 0.0));
+    double max_v = 0.0;
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        const auto ix = static_cast<uint32_t>(double(mesh->h_cell_coords(c, 0)) * nx);
+        const auto iy = static_cast<uint32_t>(double(mesh->h_cell_coords(c, 1)) / 0.005 * ny);
+        rho[ix][iy] = double(solver->h_conservatives(c, 0));
+        max_v = std::max(max_v, std::abs(double(solver->h_primitives(c, 1))));
+    }
+    double max_row_diff = 0.0;
+    for (uint32_t ix = 0; ix < nx; ix++) {
+        for (uint32_t iy = 1; iy < ny; iy++) max_row_diff = std::max(max_row_diff, std::abs(rho[ix][iy] - rho[ix][0]));
+    }
+    EXPECT_LT(max_row_diff, 1e-12);
+    EXPECT_LT(max_v, 1e-12);
+}
 
 TEST(SolverRegression, MUSCLTransmissiveInflowBoundaryStaysBounded) {
     // Configuration 3 has supersonic inflow through the bottom and left
