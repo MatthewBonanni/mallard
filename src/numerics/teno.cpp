@@ -43,6 +43,13 @@ constexpr double GEOMETRY_TOL = precision_tol<double>(1e-10, 1e-5);
 // truncation error alike.
 constexpr double MAX_LEBESGUE = 10.0;
 
+// Stencil candidates are ranked by distance in the metric of the local mesh
+// spacing where its largest to smallest spacing ratio exceeds this. Regular
+// tilings of cubes measure 1 (hexahedra), 2.13 (Kuhn tetrahedra), 1.73
+// (prisms) and 1.57 (pyramids) from their cell shapes alone, and keep
+// physical distance; a 2:1 stretch of Kuhn tetrahedra measures 3.15
+constexpr double SPACING_ANISOTROPY = 2.5;
+
 /**
  * @brief Gauss-Legendre nodes and weights on [-1, 1] (Newton iteration).
  */
@@ -239,6 +246,118 @@ void for_each_neighbor(const Mesh & mesh, const Visit & v, F && f) {
         nb.t = lattice_translation(mesh, nb.lattice);
         f(nb);
     }
+}
+
+/**
+ * @brief Eigenvalues w and orthonormal eigenvectors (columns of v) of a
+ *        symmetric 3 x 3 matrix a (cyclic Jacobi).
+ */
+void symmetric_eigen(std::array<double, 9> a, double w[3], double v[9]) {
+    for (int k = 0; k < 9; k++) v[k] = (k % 4 == 0) ? 1.0 : 0.0;
+    for (int sweep = 0; sweep < 50; sweep++) {
+        const double off = a[1] * a[1] + a[2] * a[2] + a[5] * a[5];
+        if (off <= 1e-30 * (a[0] * a[0] + a[4] * a[4] + a[8] * a[8])) break;
+        for (int p = 0; p < 2; p++) {
+            for (int q = p + 1; q < 3; q++) {
+                const double apq = a[3 * p + q];
+                if (apq == 0.0) continue;
+                const double theta = 0.5 * (a[3 * q + q] - a[3 * p + p]) / apq;
+                const double t = (theta >= 0.0 ? 1.0 : -1.0) / (std::abs(theta) + std::sqrt(theta * theta + 1.0));
+                const double c = 1.0 / std::sqrt(t * t + 1.0), s = t * c;
+                for (int k = 0; k < 3; k++) {
+                    const double akp = a[3 * k + p], akq = a[3 * k + q];
+                    a[3 * k + p] = c * akp - s * akq;
+                    a[3 * k + q] = s * akp + c * akq;
+                }
+                for (int k = 0; k < 3; k++) {
+                    const double apk = a[3 * p + k], aqk = a[3 * q + k];
+                    a[3 * p + k] = c * apk - s * aqk;
+                    a[3 * q + k] = s * apk + c * aqk;
+                }
+                for (int k = 0; k < 3; k++) {
+                    const double vkp = v[3 * k + p], vkq = v[3 * k + q];
+                    v[3 * k + p] = c * vkp - s * vkq;
+                    v[3 * k + q] = s * vkp + c * vkq;
+                }
+            }
+        }
+    }
+    for (int k = 0; k < 3; k++) w[k] = a[4 * k];
+}
+
+/**
+ * @brief Metric of unit determinant whose unit length is the mesh spacing in
+ *        every direction, from the second moment m of the offsets of a cell's
+ *        neighbors; the identity unless its spacing ratio exceeds
+ *        SPACING_ANISOTROPY.
+ */
+std::array<double, 9> spacing_metric(const double m[9]) {
+    const std::array<double, 9> identity = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+    double w[3], v[9];
+    symmetric_eigen({m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8]}, w, v);
+    if (!(std::min({w[0], w[1], w[2]}) > 0.0)) return identity;
+    // Log spacings relative to their mean, and the largest log spacing ratio
+    double l[3];
+    for (int k = 0; k < 3; k++) l[k] = 0.5 * std::log(w[k]);
+    const double mean = (l[0] + l[1] + l[2]) / 3.0;
+    for (int k = 0; k < 3; k++) l[k] -= mean;
+    const double spread = std::max({l[0], l[1], l[2]}) - std::min({l[0], l[1], l[2]});
+    if (!(spread > std::log(SPACING_ANISOTROPY))) return identity;
+    std::array<double, 9> metric = {};
+    for (int k = 0; k < 3; k++) {
+        const double e = std::exp(-2.0 * l[k]);
+        for (int a = 0; a < 3; a++) {
+            for (int b = 0; b < 3; b++) metric[3 * a + b] += v[3 * a + k] * e * v[3 * b + k];
+        }
+    }
+    return metric;
+}
+
+/**
+ * @brief Metric in which the stencil candidates of cell i are ranked: that of
+ *        the second moment of its vertex neighbors' centroid offsets, completed
+ *        across its boundary faces by the images of the cells at most as far
+ *        from the boundary as the cell itself (see spacing_metric).
+ */
+std::array<double, 9> ranking_metric(const Mesh & mesh, const Kokkos::View<int32_t *>::host_mirror_type & face_bc,
+                                     const Kokkos::View<BoundaryCondition *>::host_mirror_type & bcs, const uint32_t i) {
+    using Point = std::array<double, 3>;
+    double spread[9] = {};
+    if constexpr (N_DIM == 3) {
+        Point x0;
+        for (int a = 0; a < 3; a++) x0[a] = double(mesh.h_cell_coords(i, a));
+        const double h = std::cbrt(double(mesh.h_cell_volume(i)));
+        std::vector<Point> offsets = {{0.0, 0.0, 0.0}};
+        for_each_neighbor(mesh, Visit{i, {0, 0, 0}, {0.0, 0.0, 0.0}}, [&](const Visit & nb) {
+            Point d;
+            for (int a = 0; a < 3; a++) d[a] = double(mesh.h_cell_coords(nb.cell, a)) + nb.t[a] - x0[a];
+            offsets.push_back(d);
+        });
+        for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(i); k++) {
+            const uint32_t f = mesh.h_face_of_cell(i, k);
+            if (mesh.h_cells_of_face(f, 1) >= 0 || face_bc(f) < 0) continue;
+            if (bcs(face_bc(f)).type == BoundaryType::PARTITION) continue;
+            Point n;
+            for (int a = 0; a < 3; a++) n[a] = double(mesh.h_face_normals(f, a)) / double(mesh.h_face_area(f));
+            double d0 = 0.0;
+            for (int a = 0; a < 3; a++) d0 += (double(mesh.h_face_coords(f, a)) - x0[a]) * n[a];
+            const size_t n_offsets = offsets.size();
+            for (size_t s = 0; s < n_offsets; s++) {
+                double d = d0;
+                for (int a = 0; a < 3; a++) d -= offsets[s][a] * n[a];
+                if (d > d0 + GEOMETRY_TOL * h) continue;
+                Point image;
+                for (int a = 0; a < 3; a++) image[a] = offsets[s][a] + 2.0 * d * n[a];
+                offsets.push_back(image);
+            }
+        }
+        for (const Point & d : offsets) {
+            for (int a = 0; a < 3; a++) {
+                for (int b = 0; b < 3; b++) spread[3 * a + b] += d[a] * d[b];
+            }
+        }
+    }
+    return spacing_metric(spread);
 }
 
 // Cells per batch of the precomputation, bounding the unpacked per-cell
@@ -1244,9 +1363,15 @@ void TENO::compute_stencils_and_matrices_3d() {
             return true;
         };
 
+        // On thin cells, physical distance takes the whole wall-normal column
+        // first and leaves the other directions to small centroid offsets: a
+        // fit whose face values amplify grid-scale vortical modes
+        const std::array<double, 9> metric = ranking_metric(*mesh, h_face_bc, h_bcs, i);
         auto dist2 = [&](const Entry & e) {
             double s = 0.0;
-            for (int d = 0; d < 3; d++) s += (e.x[d] - x0[d]) * (e.x[d] - x0[d]);
+            for (int a = 0; a < 3; a++) {
+                for (int b = 0; b < 3; b++) s += (e.x[a] - x0[a]) * metric[3 * a + b] * (e.x[b] - x0[b]);
+            }
             return s;
         };
 
@@ -2311,8 +2436,9 @@ void TENO::dispatch(const Kokkos::DefaultExecutionSpace & exec, Kokkos::View<rty
 
 namespace {
 
-// Version 3 stores each reconstructed cell's tables at their actual stencil sizes
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-4";
+// Version 3 stores each reconstructed cell's tables at their actual stencil sizes; version 4 gathers
+// candidates by interior cells, version 5 sorts them in the mesh-spacing metric
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-5";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {
@@ -2412,6 +2538,12 @@ void TENO::allocate_scratch() {
                                                      teno::NK_SMALL, N_CONSERVATIVE);
     troubled_cells = Kokkos::View<uint32_t *>("teno_troubled_cells", n_reconstructed);
     n_troubled = Kokkos::View<uint32_t>("teno_n_troubled");
+}
+
+std::array<double, 9> TENO::stencil_metric(const uint32_t i) const {
+    auto h_face_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_bc);
+    auto h_bcs = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.bcs);
+    return ranking_metric(*mesh, h_face_bc, h_bcs, i);
 }
 
 TENO::Stencils TENO::large_stencils() const {

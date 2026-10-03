@@ -24,8 +24,9 @@
 # speed 1, so U = M = 0.2, mu = U D / Re, and t = 750 is t U / D = 150.
 # Shedding sets in by t U / D = 50 (period 7.5 D / U).
 #
-# MUSCL: TENO is noisy on the thin prisms of the boundary layer
-# (docs/numerics/teno_e.md).
+# MUSCL, as validated above. TENO is stable on the thin prisms of the
+# boundary layer since its stencils are ranked in the mesh-spacing metric
+# (docs/numerics/teno_e.md), but has not been validated on this case.
 #
 # Run:
 #   mpirun -n 4 ../../build3d/src/Mallard -i input.toml
