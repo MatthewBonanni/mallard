@@ -499,13 +499,13 @@ GmshData read_gmsh(const std::string & filename) {
 
 } // namespace
 
-void Mesh::init_file(const std::string & filename) {
+void Mesh::init_file(const std::string & filename, const std::vector<PeriodicPair> & periodic) {
     if (is_hdf5_mesh(filename)) {
-        init_from_block(read_mesh_h5(filename, true));
+        init_from_block(read_mesh_h5(filename, true), periodic);
         return;
     }
     GmshData data = read_gmsh(filename);
-    init_from_connectivity(data.nodes, data.cells, data.boundary_faces);
+    init_from_connectivity(data.nodes, data.cells, data.boundary_faces, "unassigned", periodic);
 }
 
 void Mesh::init_from_block(const MeshBlock & block, const std::vector<PeriodicPair> & periodic) {

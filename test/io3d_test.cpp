@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 
+#include "gmsh_fixtures.h"
 #include "test_fixtures.h"
 #include "data.h"
 #include "data_writer.h"
@@ -171,12 +172,6 @@ $Elements
 21 5 8 9 12
 $EndElements
 )";
-
-std::string write_temp(const std::string & name, const std::string & content) {
-    const auto path = std::filesystem::temp_directory_path() / name;
-    std::ofstream(path) << content;
-    return path.string();
-}
 
 void check_mixed_mesh(const std::string & file) {
     Mesh mesh;

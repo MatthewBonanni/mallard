@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "comm.h"
+#include "gmsh_fixtures.h"
 #include "mesh_block.h"
 #include "mpi_compare.h"
 #include "partition.h"
@@ -165,6 +166,21 @@ TEST(MPITest, PeriodicRunsMatchSerialAcrossSeamsCutByThePartition) {
     expect_matches_serial(teno);
     expect_matches_serial(periodic_box("cartesian_tri", "type = \"TENO\"\norder = 4\n", EULER, "[\"x\"]", walls, 10));
     expect_matches_serial(periodic_box("cartesian_tri", "type = \"MUSCL\"\n", NS, "[\"x\", \"y\"]", none, 20));
+}
+
+TEST(MPITest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
+    const std::string file = write_temp_shared("mallard_mpi_periodic.msh", jittered_mixed_mesh(16));
+    std::string input = box_input("cartesian", "type = \"TENO\"\norder = 4\n", EULER, "", 12);
+    const std::string generated = "type = \"cartesian\"\n";
+    input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
+    input += "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0]\n"
+             "[[periodic]]\nzones = [\"bottom\", \"top\"]\ntranslation = [0.0, 1.0]\n"
+             "[parallel]\npartitioner = \"hilbert\"\n";
+    if (comm::size() > 1) {
+        EXPECT_GT(seam_faces_cut_by_partition(input), 0u);
+    }
+    expect_matches_serial(input);
+    comm::barrier();
 }
 
 TEST(MPITest, NavierStokesWithBoundaryConditionsMatchesSerial) {

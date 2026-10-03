@@ -131,8 +131,9 @@ class Mesh {
         void init(const toml::value & input);
 
         /**
-         * @brief Periodic pairs of a generated mesh from [mesh] periodic:
-         *        left/right for x, bottom/top for y, back/front for z.
+         * @brief Periodic pairs from [[periodic]] entries, and for generated
+         *        meshes from [mesh] periodic: left/right for x, bottom/top for
+         *        y, back/front for z.
          */
         static std::vector<PeriodicPair> periodic_pairs(const toml::value & input);
 
@@ -364,7 +365,7 @@ class Mesh {
          *        mesh (format 2.2 or 4.1) whose named physical curves (surfaces
          *        in 3D) become boundary zones.
          */
-        void init_file(const std::string & filename);
+        void init_file(const std::string & filename, const std::vector<PeriodicPair> & periodic = {});
 
         /**
          * @brief Initialize the supersonic wedge mesh.

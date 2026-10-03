@@ -36,7 +36,7 @@ Generated meshes have boundary zones named `left`, `right`, `bottom` and `top`.
 `wedge`) periodic in those directions: `left`/`right`, `bottom`/`top` and
 `back`/`front` are joined into interior faces and disappear as boundary zones.
 Every scheme sees the seam as interior. Each periodic direction needs at least
-3 cells. Mesh files cannot be periodic yet.
+3 cells. Zones of mesh files are paired with `[[periodic]]` (below).
 
 In the 3D build (`-DMallard_DIM=3`), generated meshes are boxes
 `[0, Lx] x [0, Ly] x [0, Lz]` of `Nx x Ny x Nz` blocks (`Nz`, `Lz` default to
@@ -77,6 +77,31 @@ count, Gmsh/VTK node order), `/boundary/offsets`, `/boundary/nodes` and
 `/boundary/zone` (boundary faces and their zone index), the attribute
 `/boundary/zone_names`, and the root attributes `format = "mallard-mesh"`,
 `version = 1` and `dimension`.
+
+## `[[periodic]]`
+
+Pairs two boundary zones of any mesh (e.g. Gmsh physical curves or surfaces,
+or zones of an HDF5 mesh) into a periodic seam, serially and in distributed
+runs: zone B must be zone A translated, node by node (to 1e-6 of the zones'
+shortest edge), as Gmsh's `Periodic` constraint produces. The faces of both
+zones become interior faces and take no `[[boundaries]]` entry. A node with no
+match is reported with its coordinates. Each zone joins at most one pair, and
+as for generated meshes, each periodic direction needs at least 3 cells.
+
+| Key | Description |
+|---|---|
+| `zones` | `[A, B]`: the zone names |
+| `translation` | `[t_x, t_y]` (`[t_x, t_y, t_z]` in 3D) with B = A + translation |
+
+```toml
+[mesh]
+type = "file"
+filename = "box.msh"
+
+[[periodic]]
+zones = ["left", "right"]
+translation = [1.0, 0.0]
+```
 
 ## `[physics]`
 

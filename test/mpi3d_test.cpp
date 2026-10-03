@@ -18,6 +18,7 @@
 #include <sstream>
 #include <string>
 
+#include "gmsh_fixtures.h"
 #include "mpi_compare.h"
 
 namespace {
@@ -76,6 +77,22 @@ TEST(MPI3DTest, MUSCLOnMixedCellsMatchesSerial) {
 TEST(MPI3DTest, NavierStokesOnTetrahedraMatchesSerial) {
     expect_matches_serial(box_input("cartesian_tet", "type = \"MUSCL\"\n",
                                     "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n"));
+}
+
+TEST(MPI3DTest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
+    // Fully periodic: every node class of the box corners spans eight nodes
+    const std::string file = write_temp_shared("mallard_mpi3d_periodic.msh", jittered_periodic_mesh_3d(6));
+    std::string input = blast_input("cartesian", "type = \"TENO\"\norder = 3\n");
+    input = input.substr(0, input.find("[[boundaries]]")) + input.substr(input.find("[numerics]"));
+    const std::string generated = "type = \"cartesian\"\n";
+    input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
+    for (int d = 0; d < 3; d++) {
+        input += std::string("[[periodic]]\nzones = [\"") + ZONES[2 * d] + "\", \"" + ZONES[2 * d + 1] +
+                 "\"]\ntranslation = [" + (d == 0 ? "1.0" : "0.0") + ", " + (d == 1 ? "1.0" : "0.0") + ", " +
+                 (d == 2 ? "1.0" : "0.0") + "]\n";
+    }
+    expect_matches_serial(input + "[parallel]\npartitioner = \"hilbert\"\n");
+    comm::barrier();
 }
 
 TEST(MPI3DTest, SurfaceOutputOfAZoneMissingFromSomeRanks) {

@@ -1,6 +1,6 @@
 # Design: periodic boundaries
 
-Status: generated meshes, serial and distributed (Gmsh periodic zones to follow). Motivated by the canonical Taylor-Green vortex (the full
+Status: implemented for generated meshes and mesh files, serial and distributed. Motivated by the canonical Taylor-Green vortex (the full
 box `[-pi L, pi L]^3`) and decaying isotropic turbulence, which need fully
 periodic boxes, and by 2D cases (isentropic vortex, Kelvin-Helmholtz).
 
@@ -83,8 +83,8 @@ cell-to-face distance for the hydrostatic ghost pressure.
 
 - Generated meshes: `[mesh] periodic = ["x", "y", "z"]` pairs `left`/`right`,
   `bottom`/`top` and `back`/`front`.
-- Gmsh meshes (later): `[[periodic]]` entries naming zone `A`, zone `B` and the
-  translation.
+- Any mesh, including Gmsh and HDF5 files: `[[periodic]]` entries naming zone
+  `A`, zone `B` and the translation.
 - `[[boundaries]]` is optional, since a fully periodic box has no boundary
   faces; naming a periodic zone there is an error.
 

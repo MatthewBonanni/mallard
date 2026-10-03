@@ -14,13 +14,13 @@
 
 #include <cmath>
 #include <filesystem>
-#include <fstream>
-#include <random>
 #include <sstream>
 #include <string>
 
 #include "comm.h"
+#include "gmsh_fixtures.h"
 #include "mesh_block.h"
+#include "periodic_fixtures.h"
 #include "test_fixtures.h"
 #include "solver.h"
 
@@ -114,12 +114,6 @@ $Elements
 $EndElements
 )";
 
-std::string write_temp(const std::string & name, const std::string & content) {
-    const auto path = std::filesystem::temp_directory_path() / name;
-    std::ofstream(path) << content;
-    return path.string();
-}
-
 void check_small_mesh(const std::string & file) {
     Mesh mesh;
     mesh.init_file(file);
@@ -136,51 +130,6 @@ void check_small_mesh(const std::string & file) {
     }
     EXPECT_EQ(mesh.get_face_zone("unassigned"), nullptr);
     EXPECT_EQ(mesh.get_face_zone("interior")->n_faces(), 2u);
-}
-
-/**
- * @brief Gmsh 2.2 file of the unit square: columns alternate between quads and
- *        pairs of triangles, and interior nodes are randomly displaced.
- */
-std::string jittered_mixed_mesh(uint32_t n) {
-    std::mt19937 rng(42);
-    std::uniform_real_distribution<double> jitter(-0.2, 0.2);
-    std::ostringstream s;
-    s << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$PhysicalNames\n4\n"
-      << "1 1 \"bottom\"\n1 2 \"right\"\n1 3 \"top\"\n1 4 \"left\"\n$EndPhysicalNames\n";
-    auto id = [&](uint32_t i, uint32_t j) { return j * (n + 1) + i + 1; };
-    s << "$Nodes\n" << (n + 1) * (n + 1) << "\n";
-    for (uint32_t j = 0; j <= n; j++) {
-        for (uint32_t i = 0; i <= n; i++) {
-            const bool interior = i > 0 && i < n && j > 0 && j < n;
-            const double x = (i + (interior ? jitter(rng) : 0.0)) / n;
-            const double y = (j + (interior ? jitter(rng) : 0.0)) / n;
-            s << id(i, j) << " " << x << " " << y << " 0\n";
-        }
-    }
-    std::vector<std::string> elements;
-    for (uint32_t i = 0; i < n; i++) {
-        elements.push_back("1 2 1 1 " + std::to_string(id(i, 0)) + " " + std::to_string(id(i + 1, 0)));
-        elements.push_back("1 2 3 3 " + std::to_string(id(i + 1, n)) + " " + std::to_string(id(i, n)));
-        elements.push_back("1 2 4 4 " + std::to_string(id(0, i + 1)) + " " + std::to_string(id(0, i)));
-        elements.push_back("1 2 2 2 " + std::to_string(id(n, i)) + " " + std::to_string(id(n, i + 1)));
-    }
-    for (uint32_t j = 0; j < n; j++) {
-        for (uint32_t i = 0; i < n; i++) {
-            const auto a = std::to_string(id(i, j)), b = std::to_string(id(i + 1, j));
-            const auto c = std::to_string(id(i + 1, j + 1)), d = std::to_string(id(i, j + 1));
-            if (i % 2 == 0) {
-                elements.push_back("3 2 0 1 " + a + " " + b + " " + c + " " + d);
-            } else {
-                elements.push_back("2 2 0 1 " + a + " " + b + " " + c);
-                elements.push_back("2 2 0 1 " + a + " " + c + " " + d);
-            }
-        }
-    }
-    s << "$EndNodes\n$Elements\n" << elements.size() << "\n";
-    for (size_t k = 0; k < elements.size(); k++) s << k + 1 << " " << elements[k] << "\n";
-    s << "$EndElements\n";
-    return s.str();
 }
 
 std::string file_mesh_input(const std::string & file, const std::string & recon, const std::string & init,
@@ -295,3 +244,74 @@ TEST_P(MixedMesh, BlastInClosedBoxConservesMassAndEnergy) {
 }
 
 INSTANTIATE_TEST_SUITE_P(MeshFile, MixedMesh, ::testing::Values("FO", "MUSCL", "TENO"));
+
+namespace {
+
+const char * PERIODIC_PAIRS = "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0]\n"
+                              "[[periodic]]\nzones = [\"bottom\", \"top\"]\ntranslation = [0.0, 1.0]\n";
+
+std::string periodic_file_input(const std::string & file) {
+    std::string input = file_mesh_input(file, "TENO",
+        "type = \"analytical\"\nrho = \"1.0 + 0.3 * exp(-30 * ((x - 0.3)^2 + (y - 0.6)^2))\"\n"
+        "u = [\"0.7\", \"-0.4\"]\np = \"1.0\"\n", "symmetry", "n_steps = 15\ncfl = 0.5\n");
+    return input.substr(0, input.find("[[boundaries]]")) + input.substr(input.find("[numerics]")) + PERIODIC_PAIRS;
+}
+
+std::string periodic_mesh_error(const std::string & file, const std::string & pairs) {
+    try {
+        Mesh().init(parse_toml("[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" + pairs));
+    } catch (const std::runtime_error & e) {
+        return e.what();
+    }
+    return "";
+}
+
+} // namespace
+
+TEST(MeshFileTest, PeriodicZonePairsJoinAJitteredGmshMesh) {
+    // The fully periodic box has no boundary faces and conserves momentum too
+    const std::string file = write_temp("mallard_jitter_periodic.msh", jittered_mixed_mesh(12));
+    Solver solver;
+    solver.init(parse_toml(periodic_file_input(file)));
+    const Mesh & mesh = *solver.get_mesh();
+    for (uint32_t f = 0; f < mesh.n_faces; f++) EXPECT_GE(mesh.h_cells_of_face(f, 1), 0);
+    expect_shifts_join_cells(mesh);
+    const auto before = solver.integrate_conservatives();
+    solver.run();
+    const auto after = solver.integrate_conservatives();
+    FOR_I_CONSERVATIVE EXPECT_NEAR(after[i], before[i], roundoff(1e-12)) << "variable " << int(i);
+
+    if (!have_hdf5() || comm::size() > 1) return;
+    const std::string h5 = (std::filesystem::temp_directory_path() / "mallard_jitter_periodic.h5").string();
+    write_mesh_h5(h5, read_gmsh_block(file));
+    Solver hdf5;
+    hdf5.init(parse_toml(periodic_file_input(h5)));
+    hdf5.run();
+    solver.copy_device_to_host();
+    hdf5.copy_device_to_host();
+    for (uint32_t c = 0; c < mesh.n_cells; c++) {
+        FOR_I_CONSERVATIVE ASSERT_EQ(hdf5.h_conservatives(c, i), solver.h_conservatives(c, i)) << "cell " << c;
+    }
+}
+
+TEST(MeshFileTest, PeriodicZonesThatDoNotMatchAreRejected) {
+    std::string msh = jittered_mixed_mesh(6);
+    const std::string node = "\n28 1 0.5 0\n";  // node (i, j) = (6, 3), on zone right
+    ASSERT_NE(msh.find(node), std::string::npos);
+    msh.replace(msh.find(node), node.size(), "\n28 1 0.52 0\n");
+    const std::string moved = write_temp("mallard_periodic_mismatch.msh", msh);
+    EXPECT_NE(periodic_mesh_error(moved, PERIODIC_PAIRS).find("Periodic zones left and right: node (0.000000, "
+                                                                "0.500000) of left has no match in right"),
+              std::string::npos);
+
+    const std::string file = write_temp("mallard_periodic_pairs.msh", jittered_mixed_mesh(6));
+    EXPECT_NE(periodic_mesh_error(file, "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [0.9, 0.0]\n")
+                  .find("has no match in right"),
+              std::string::npos);
+    EXPECT_NE(periodic_mesh_error(file, "[[periodic]]\nzones = [\"left\", \"rigth\"]\ntranslation = [1.0, 0.0]\n")
+                  .find("Periodic zone rigth is not a boundary zone"),
+              std::string::npos);
+    EXPECT_NE(periodic_mesh_error(file, "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0]\n")
+                  .find("[[periodic]] needs zones = [A, B]"),
+              std::string::npos);
+}

@@ -44,7 +44,7 @@ void Mesh::init(const toml::value & input) {
     const std::vector<PeriodicPair> periodic = periodic_pairs(input);
     if (get_type() == MeshType::FROM_FILE) {
         std::string filename = toml::find_or<std::string>(input, "mesh", "filename", "mesh.msh");
-        this->init_file(filename);
+        this->init_file(filename, periodic);
         return;
     }
     uint32_t Nx = toml::find_or<uint32_t>(input, "mesh", "Nx", 100);
@@ -81,10 +81,24 @@ void Mesh::init(const toml::value & input) {
 
 std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const toml::value & input) {
     std::vector<PeriodicPair> pairs;
+    if (input.contains("periodic")) {
+        const auto entries = toml::find<std::vector<toml::value>>(input, "periodic");
+        for (const auto & entry : entries) {
+            const auto zones = toml::find<std::vector<std::string>>(entry, "zones");
+            const std::vector<rtype> t = find_real_vector(entry, "translation");
+            if (zones.size() != 2 || t.size() != N_DIM) {
+                throw InputError("[[periodic]] needs zones = [A, B] and a translation with " +
+                                 std::to_string(N_DIM) + " components.");
+            }
+            PeriodicPair pair{zones[0], zones[1], {}};
+            FOR_I_DIM pair.translation[i] = t[i];
+            pairs.push_back(pair);
+        }
+    }
     if (!input.contains("mesh") || !input.at("mesh").contains("periodic")) return pairs;
     if (toml::find_or<std::string>(input, "mesh", "type", "file") == "file") {
-        throw std::runtime_error("[mesh] periodic applies to generated meshes; periodic zones of mesh files are "
-                                 "not supported yet.");
+        throw InputError("[mesh] periodic applies to generated meshes; pair the zones of a mesh file with "
+                         "[[periodic]].");
     }
     const rtype L[3] = {find_real_or(input, "mesh", "Lx", 1.0), find_real_or(input, "mesh", "Ly", 1.0),
                         find_real_or(input, "mesh", "Lz", 1.0)};

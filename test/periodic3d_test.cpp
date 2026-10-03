@@ -2,7 +2,8 @@
  * @file periodic3d_test.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Periodic boundaries in 3D: seam geometry on every cell type,
- *        conservation, design order and translation invariance across seams.
+ *        conservation, design order and translation invariance across seams,
+ *        and zone pairs of Gmsh files.
  * @version 0.1
  * @date 2026-10-02
  *
@@ -19,6 +20,7 @@
 #include <string>
 #include <tuple>
 
+#include "gmsh_fixtures.h"
 #include "periodic_fixtures.h"
 #include "solver.h"
 #include "test_fixtures.h"
@@ -266,3 +268,58 @@ INSTANTIATE_TEST_SUITE_P(Periodic, PeriodicInvariance3D,
     ::testing::Values(InvarianceParam{"cartesian", "TENO", "box"}, InvarianceParam{"cartesian", "TENO", "channel"},
                       InvarianceParam{"cartesian_tet", "TENO", "channel"},
                       InvarianceParam{"cartesian_tet", "MUSCL_NS", "box"}));
+
+namespace {
+
+const char * PERIODIC_PAIRS_3D = "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0, 0.0]\n"
+                                 "[[periodic]]\nzones = [\"bottom\", \"top\"]\ntranslation = [0.0, 1.0, 0.0]\n"
+                                 "[[periodic]]\nzones = [\"back\", \"front\"]\ntranslation = [0.0, 0.0, 1.0]\n";
+
+} // namespace
+
+TEST(PeriodicFile3D, ZonePairsJoinAJitteredGmshMeshOfHexahedraAndPrisms) {
+    const std::string file = write_temp("mallard_periodic3d.msh", jittered_periodic_mesh_3d(5));
+    std::ostringstream s;
+    s << "[run]\nn_steps = 8\ncfl = 0.5\n[mesh]\ntype = \"file\"\nfilename = \"" << file << "\"\n"
+      << "[initialize]\ntype = \"analytical\"\n"
+      << "rho = \"1.0 + 0.4 * exp(-30 * ((x - 0.3)^2 + (y - 0.6)^2 + (z - 0.2)^2))\"\n"
+      << "u = [\"0.7\", \"-0.4\", \"0.5\"]\np = \"1.0\"\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n"
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[output]\ncheck_interval = 1000000\n" << PERIODIC_PAIRS_3D;
+    Solver solver;
+    solver.init(parse_toml(s.str()));
+    const Mesh & mesh = *solver.get_mesh();
+    EXPECT_EQ(mesh.n_cells, 5u * 5 * 3 + 5u * 5 * 2 * 2);
+    for (uint32_t f = 0; f < mesh.n_faces; f++) EXPECT_GE(mesh.h_cells_of_face(f, 1), 0);
+    expect_shifts_join_cells(mesh);
+    const auto before = solver.integrate_conservatives();
+    solver.run();
+    const auto after = solver.integrate_conservatives();
+    FOR_I_CONSERVATIVE EXPECT_NEAR(after[i], before[i], roundoff(1e-12)) << "variable " << int(i);
+}
+
+TEST(PeriodicFile3D, ZonesThatDoNotMatchAreRejected) {
+    // A node of the front zone moved within its plane
+    std::string msh = jittered_periodic_mesh_3d(4);
+    const size_t front = msh.find("\n" + std::to_string(4 * 25 + 2 * 5 + 2 + 1) + " ");
+    ASSERT_NE(front, std::string::npos);
+    const size_t end = msh.find('\n', front + 1);
+    std::istringstream line(msh.substr(front + 1, end - front - 1));
+    uint32_t id;
+    double x, y, z;
+    line >> id >> x >> y >> z;
+    std::ostringstream moved;
+    moved.precision(17);
+    moved << "\n" << id << " " << x + 0.01 << " " << y << " " << z;
+    msh.replace(front, end - front, moved.str());
+    const std::string file = write_temp("mallard_periodic3d_mismatch.msh", msh);
+    try {
+        Mesh().init(parse_toml("[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" + PERIODIC_PAIRS_3D));
+        ADD_FAILURE() << "mismatched zones were accepted";
+    } catch (const std::runtime_error & e) {
+        EXPECT_NE(std::string(e.what()).find("Periodic zones back and front: node"), std::string::npos) << e.what();
+        EXPECT_NE(std::string(e.what()).find("has no match in front"), std::string::npos) << e.what();
+    }
+}
