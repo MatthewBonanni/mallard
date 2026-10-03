@@ -36,6 +36,13 @@ namespace {
 // Relative tolerance for geometric tests on the mesh, whose coordinates are rtype
 constexpr double GEOMETRY_TOL = precision_tol<double>(1e-10, 1e-5);
 
+// Largest accepted Lebesgue constant of a central stencil's reconstruction at
+// the cell's face quadrature points. Stencils on regular hexahedra, prisms and
+// tetrahedra stay at 2-5; full-rank stencils that resolve a direction only
+// through small centroid offsets reach tens to hundreds and amplify the
+// truncation error alike.
+constexpr double MAX_LEBESGUE = 10.0;
+
 /**
  * @brief Gauss-Legendre nodes and weights on [-1, 1] (Newton iteration).
  */
@@ -173,6 +180,28 @@ bool pseudo_inverse(std::vector<double> A, int m, int n, std::vector<double> & P
         for (int j = 0; j < m; j++) P[k * m + j] /= col_scale[k];
     }
     return true;
+}
+
+/**
+ * @brief Lebesgue constant of the reconstruction U(x_q) = U_0 + sum_s c_qs (U_s - U_0),
+ *        c_qs = psi(x_q)^T P[:, s]: max_q |1 - sum_s c_qs| + sum_s |c_qs|, the
+ *        largest factor by which it can amplify cell averages.
+ * @param psi Zero-mean basis at the evaluation points, row-major (point, l).
+ * @param P Pseudo-inverse (n x m, row-major) of the stencil's least-squares system.
+ */
+double lebesgue_constant(const std::vector<double> & psi, int n, const std::vector<double> & P, int m) {
+    double lambda = 0.0;
+    for (size_t q = 0; q * n < psi.size(); q++) {
+        double sum = 0.0, abs_sum = 0.0;
+        for (int s = 0; s < m; s++) {
+            double c = 0.0;
+            for (int l = 0; l < n; l++) c += psi[q * n + l] * P[l * m + s];
+            sum += c;
+            abs_sum += std::abs(c);
+        }
+        lambda = std::max(lambda, std::abs(1.0 - sum) + abs_sum);
+    }
+    return lambda;
 }
 
 /** @brief Periodic lattice offset of a stencil entry's cell. */
@@ -702,7 +731,7 @@ void TENO::compute_stencils_and_matrices() {
         auto gather = [&](size_t n_min, int max_layers) {
             std::vector<Visit> layer = {Visit{i, {0, 0, 0}, {0.0, 0.0, 0.0}}}, cells = layer, next;
             std::vector<Entry> entries;
-            for (int depth = 0; depth < max_layers && entries.size() < n_min; depth++) {
+            for (int depth = 0; depth < max_layers && cells.size() <= n_min; depth++) {
                 next.clear();
                 for (const Visit & v : layer) {
                     // The outermost halo layer misses neighbors on other ranks
@@ -814,8 +843,27 @@ void TENO::compute_stencils_and_matrices() {
             return pseudo_inverse(A, m, n, P, double(max_condition));
         };
 
-        // Large central stencil, grown until the least-squares system has full rank
-        // (anisotropic cells can have too few distinct rows/columns)
+        // Zero-mean basis at the cell's face quadrature points
+        std::vector<double> psi_faces;
+        for (uint32_t k = 0; k < mesh->h_n_faces_of_cell(i); k++) {
+            const uint32_t f = mesh->h_face_of_cell(i, k);
+            const uint32_t na = mesh->h_node_of_face(f, 0), nb = mesh->h_node_of_face(f, 1);
+            for (size_t q = 0; q < quadrature_face.h_points.extent(0); q++) {
+                const double s_q = 0.5 * double(quadrature_face.h_points(q, 0));
+                double xi[2], phi[teno::MAX_NK];
+                for (int d = 0; d < 2; d++) {
+                    const double x = double(mesh->h_face_coords(f, d)) +
+                                     s_q * (double(mesh->h_node_coords(nb, d)) - double(mesh->h_node_coords(na, d)));
+                    xi[d] = ((x - double(mesh->h_face_offset(f, i, d))) - (d == 0 ? x0 : y0)) / h;
+                }
+                teno::monomials(r, xi[0], xi[1], phi);
+                for (uint8_t l = 0; l < nk; l++) psi_faces.push_back(phi[l] - mean0[l]);
+            }
+        }
+
+        // Large central stencil, grown until the least-squares system has full
+        // rank (anisotropic cells can have too few distinct rows/columns) and
+        // is well conditioned
         std::vector<Entry> candidates = gather(ns_max, 64);
         std::vector<double> P;
         bool ok = false;
@@ -826,14 +874,22 @@ void TENO::compute_stencils_and_matrices() {
         auto splits_tie = [&](const std::vector<Entry> & list, size_t n) {
             return n < list.size() && std::abs(dist2(list[n]) - dist2(list[n - 1])) < GEOMETRY_TOL * h * h;
         };
+        // The smallest stencil within MAX_LEBESGUE, else the best conditioned one
         uint16_t n_used = ns;
-        for (; n_used <= std::min<size_t>(ns_max, candidates.size()); n_used++) {
-            if (splits_tie(candidates, n_used)) continue;
-            std::vector<Entry> stencil(candidates.begin(), candidates.begin() + n_used);
-            if (build_pinv(stencil, r, P)) {
+        double best_lebesgue = std::numeric_limits<double>::max();
+        for (uint16_t n_try = ns; n_try <= std::min<size_t>(ns_max, candidates.size()); n_try++) {
+            if (splits_tie(candidates, n_try)) continue;
+            std::vector<Entry> stencil(candidates.begin(), candidates.begin() + n_try);
+            std::vector<double> P_try;
+            if (!build_pinv(stencil, r, P_try)) continue;
+            const double lebesgue = lebesgue_constant(psi_faces, nk, P_try, n_try);
+            if (lebesgue < best_lebesgue) {
+                best_lebesgue = lebesgue;
+                n_used = n_try;
+                P = std::move(P_try);
                 ok = true;
-                break;
             }
+            if (lebesgue <= MAX_LEBESGUE) break;
         }
         if (!ok) {
             // A stencil cut off by the halo is retried once the halo is deep enough
@@ -1011,6 +1067,8 @@ void TENO::compute_stencils_and_matrices_3d() {
 
     auto h_face_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_bc);
     auto h_bcs = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.bcs);
+    auto h_face_quad_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_quad_points);
+    auto h_face_quad_weights = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_quad_weights);
 
     // Collapsed Gauss with n points per direction is exact to degree 2n - 3 on a tet
     const TetRule rule((r + 4) / 2);
@@ -1199,7 +1257,7 @@ void TENO::compute_stencils_and_matrices_3d() {
         auto gather = [&](size_t n_min, int max_layers) {
             std::vector<Visit> layer = {Visit{i, zero, origin}}, cells = layer, next;
             std::vector<Entry> entries;
-            for (int depth = 0; depth < max_layers && entries.size() < n_min; depth++) {
+            for (int depth = 0; depth < max_layers && cells.size() <= n_min; depth++) {
                 next.clear();
                 for (const Visit & v : layer) {
                     // The outermost halo layer misses neighbors on other ranks
@@ -1318,18 +1376,42 @@ void TENO::compute_stencils_and_matrices_3d() {
             return n < list.size() && std::abs(dist2(list[n]) - dist2(list[n - 1])) < GEOMETRY_TOL * h * h;
         };
 
-        // Large central stencil, grown until the least-squares system has full rank
+        // Zero-mean basis at the cell's face quadrature points
+        std::vector<double> psi_faces;
+        for (uint32_t k = 0; k < mesh->h_n_faces_of_cell(i); k++) {
+            const uint32_t f = mesh->h_face_of_cell(i, k);
+            for (size_t q = 0; q < h_face_quad_weights.extent(1); q++) {
+                if (h_face_quad_weights(f, q) == 0.0_r) continue;
+                double xi[3], phi[teno::MAX_NK];
+                for (int d = 0; d < 3; d++) {
+                    xi[d] = ((double(h_face_quad_points(f, q, d)) - double(mesh->h_face_offset(f, i, d))) - x0[d]) / h;
+                }
+                teno::monomials(r, xi[0], xi[1], xi[2], phi);
+                for (uint8_t l = 0; l < nk; l++) psi_faces.push_back(phi[l] - mean0[l]);
+            }
+        }
+
+        // Large central stencil, grown until the least-squares system has full
+        // rank and is well conditioned
         std::vector<Entry> candidates = gather(ns_max, 64);
         std::vector<double> P;
         bool ok = false;
+        // The smallest stencil within MAX_LEBESGUE, else the best conditioned one
         uint16_t n_used = ns;
-        for (; n_used <= std::min<size_t>(ns_max, candidates.size()); n_used++) {
-            if (splits_tie(candidates, n_used)) continue;
-            std::vector<Entry> stencil(candidates.begin(), candidates.begin() + n_used);
-            if (build_pinv(stencil, r, P)) {
+        double best_lebesgue = std::numeric_limits<double>::max();
+        for (uint16_t n_try = ns; n_try <= std::min<size_t>(ns_max, candidates.size()); n_try++) {
+            if (splits_tie(candidates, n_try)) continue;
+            std::vector<Entry> stencil(candidates.begin(), candidates.begin() + n_try);
+            std::vector<double> P_try;
+            if (!build_pinv(stencil, r, P_try)) continue;
+            const double lebesgue = lebesgue_constant(psi_faces, nk, P_try, n_try);
+            if (lebesgue < best_lebesgue) {
+                best_lebesgue = lebesgue;
+                n_used = n_try;
+                P = std::move(P_try);
                 ok = true;
-                break;
             }
+            if (lebesgue <= MAX_LEBESGUE) break;
         }
         if (!ok) {
             // A stencil cut off by the halo is retried once the halo is deep enough
@@ -2173,7 +2255,7 @@ void TENO::dispatch(const Kokkos::DefaultExecutionSpace & exec, Kokkos::View<rty
 namespace {
 
 // Version 3 stores each reconstructed cell's tables at their actual stencil sizes
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-3";
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-4";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {

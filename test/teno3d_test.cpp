@@ -18,6 +18,7 @@
 #include <tuple>
 
 #include "test_fixtures.h"
+#include "gmsh_fixtures.h"
 #include "face_reconstruction.h"
 #include "physics.h"
 #include "solver.h"
@@ -72,9 +73,8 @@ std::unique_ptr<TENO> make_teno(std::shared_ptr<Mesh> mesh, const BoundaryData &
  * @brief Max density error of the reconstruction at the face quadrature points
  *        (both sides), optionally only on faces at least margin from the walls.
  */
-double reconstruction_error(const std::string & mesh_type, uint32_t n, int order, double margin = 0.0,
+double reconstruction_error(std::shared_ptr<Mesh> mesh, int order, double margin = 0.0,
                             const std::string & extra = "", Field field = smooth_conservatives) {
-    auto mesh = make_mesh_3d(mesh_type, n, n, n);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
     auto avg = cell_averages_3d(*mesh, field);
     Euler euler = Euler::from_reference(GAMMA, 1.0, 1.0, 1.0);
@@ -113,6 +113,11 @@ double reconstruction_error(const std::string & mesh_type, uint32_t n, int order
     return err;
 }
 
+double reconstruction_error(const std::string & mesh_type, uint32_t n, int order, double margin = 0.0,
+                            const std::string & extra = "", Field field = smooth_conservatives) {
+    return reconstruction_error(make_mesh_3d(mesh_type, n, n, n), order, margin, extra, field);
+}
+
 // Smooth: every cell takes the central stencil. Troubled: every cell runs the
 // stencil selection, which must keep the central stencil on smooth data.
 const char * SMOOTH = "troubled_threshold = 1e9\n";
@@ -136,7 +141,7 @@ INSTANTIATE_TEST_SUITE_P(TENO, TENO3DExactness,
     ::testing::Values(ExactnessParam{"cartesian", 3, 8}, ExactnessParam{"cartesian_tet", 3, 8},
                       ExactnessParam{"cartesian_prism", 3, 8}, ExactnessParam{"cartesian_pyramid", 3, 8},
                       ExactnessParam{"cartesian_mixed", 3, 9}, ExactnessParam{"cartesian", 5, 10},
-                      ExactnessParam{"cartesian_tet", 5, 10}));
+                      ExactnessParam{"cartesian_tet", 5, 10}, ExactnessParam{"cartesian", 6, 10}));
 
 namespace {
 
@@ -163,6 +168,39 @@ INSTANTIATE_TEST_SUITE_P(TENO, TENO3DOrder,
                       OrderParam{"cartesian_tet", 4, 4, SMOOTH}, OrderParam{"cartesian_tet", 5, 4, SMOOTH},
                       OrderParam{"cartesian", 5, 6, TROUBLED},
                       OrderParam{"cartesian_tet", 4, 4, TROUBLED}));
+
+namespace {
+
+// Periodic on the unit cube
+void periodic_conservatives(double x, double y, double z, double * U) {
+    U[0] = 1.0 + 0.2 * std::sin(2.0 * M_PI * x) * std::cos(2.0 * M_PI * y) * std::sin(2.0 * M_PI * z) +
+           0.1 * std::cos(2.0 * M_PI * (x + y - z));
+    U[1] = 0.1;
+    U[2] = -0.1;
+    U[3] = 0.05;
+    U[4] = 10.0;
+}
+
+} // namespace
+
+TEST(TENO3DJittered, OrderFourBeatsOrderThreeOnJitteredHexahedraAndPrisms) {
+    // The nearest 2 x DOFs cells of a jittered hex/prism mesh span about three
+    // cell layers per direction, which resolves the cubic terms only through
+    // small centroid offsets: full rank, but a reconstruction that amplifies
+    // truncation errors tenfold, so order 4 was several times less accurate
+    // than order 3 on smooth data
+    const std::string file = write_temp("mallard_teno3d_jittered.msh", jittered_periodic_mesh_3d(6, 0.1));
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(parse_toml("[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
+                          "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0, 0.0]\n"
+                          "[[periodic]]\nzones = [\"bottom\", \"top\"]\ntranslation = [0.0, 1.0, 0.0]\n"
+                          "[[periodic]]\nzones = [\"back\", \"front\"]\ntranslation = [0.0, 0.0, 1.0]\n"));
+    mesh->copy_host_to_device();
+    const double e3 = reconstruction_error(mesh, 3, 0.0, SMOOTH, periodic_conservatives);
+    const double e4 = reconstruction_error(mesh, 4, 0.0, SMOOTH, periodic_conservatives);
+    std::cout << "jittered max errors: order 3 " << e3 << ", order 4 " << e4 << std::endl;
+    EXPECT_LT(e4, e3);
+}
 
 
 namespace {

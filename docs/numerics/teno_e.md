@@ -54,6 +54,18 @@ for accuracy (expect design order on uniform triangles).
 - Equidistant shells are large on 3D lattices, so the large stencil may grow up to
   3.5 x DOFs + 64 entries to avoid splitting one; columns of round-off (e.g. no xy
   information when all centroids lie on axis planes) are rejected as rank deficient.
+- Full rank is not enough: the large stencil keeps growing until the Lebesgue
+  constant of its reconstruction at the cell's face quadrature points,
+  max_q |1 - sum_s c_qs| + sum_s |c_qs|, is at most 10 (else the smallest one found
+  is used; 2D likewise). The 2 x DOFs nearest cells of a jittered hex/prism mesh
+  span only about three cell layers per direction, so odd degrees (3 and 5) see the
+  extra layer they need only through small centroid offsets: full rank, Lebesgue
+  constants of 20 to 150, and O(1) errors at order 4 (the generated mixed and
+  tetrahedral meshes had some up to 270 and 54). Lattice-aligned meshes include
+  the next layer through the equidistant-shell rule and stay at 2-5.
+- Candidates are gathered by vertex-neighbor layers until there are enough interior
+  cells; counting mirror images too would stop the search before the cells that
+  are nearer than the farther images (rank-deficient order-6 stencils near walls).
 - Measured orders (max error at face quadrature points, symmetry walls): hexahedra
   16 -> 24: 3.83 and 4.85 for orders 4 and 5 (12 -> 16: 2.87 for order 3); Kuhn
   tetrahedra 8 -> 12: 2.92, 3.90, 4.84 for orders 3, 4, 5.
