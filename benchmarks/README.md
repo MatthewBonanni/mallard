@@ -24,7 +24,8 @@ CSV.
 (e.g. 0.01: one igniting cell in a hundred, the others fresh or burnt, to
 measure the imbalance between cells), and the execution: `lanes` (vector
 lanes per cell, 1 for one thread per cell, 0 automatic), `threads` (team
-threads per cell), `shared` (-1 automatic, 0: work memory in global memory)
+threads per cell for every cell; 0, the default: one, with several for the
+cells whose last call took 16 or more sub-steps), `shared` (-1 automatic, 0: work memory in global memory)
 and `bin_by_cost` (GPUs: order the queue by the cells' last cost, most
 expensive first; default true, ignored on CPUs).
 `[chemistry] sparse = true/false` chooses the LU (by default sparse from 30 species

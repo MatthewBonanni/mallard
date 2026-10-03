@@ -36,6 +36,12 @@ A100,ndodecane,0.01,warp,sparse,1e-6,2.81e4
 A100,nhexane,0.047,warp ordered,sparse,1e-8,5.13e3
 A100,nhexane,0.047,warp ordered,sparse,1e-6,1.90e2
 A100,nhexane,0.047,warp,dense,1e-8,3.95e0
+A100,gri30,0.0625,warp ordered wide,sparse,1e-8,5.26e5
+A100,gri30,0.0625,warp ordered wide,sparse,1e-6,5.32e5
+A100,ndodecane,0.0156,warp ordered wide,sparse,1e-8,3.09e5
+A100,ndodecane,0.0156,warp ordered wide,sparse,1e-6,4.88e4
+A100,nhexane,0.047,warp ordered wide,sparse,1e-8,5.08e3
+A100,nhexane,0.047,warp ordered wide,sparse,1e-6,5.81e2
 EPYC7763-16c,h2o2,0.375,thread,dense,1e-8,9.52e5
 EPYC7763-16c,h2o2,0.375,thread,dense,1e-6,4.38e5
 EPYC7763-16c,gri30,0.0625,thread,sparse,1e-8,7.97e4

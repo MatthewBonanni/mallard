@@ -80,24 +80,28 @@ struct SerialLanes {
 /**
  * @brief All threads and vector lanes of a team (TeamPolicy(cells, T, V),
  *        T * V lanes) share the work of a cell. Scalar code runs on every
- *        lane with the same values; reductions accumulate each lane's strided
- *        share in index order and then the shares in lane order, so their
- *        result depends on T * V only. Needs scratch_bytes(T * V) of level-0
- *        team scratch.
+ *        lane with the same values; sums accumulate SUM_SHARES strided shares
+ *        in index order and then the shares in order, so a team's results do
+ *        not depend on its width. Needs scratch_bytes(T * V) of level-0 team
+ *        scratch.
  */
 template <typename Member>
 struct TeamLanes {
     static constexpr bool column_major = true;  // dense matrices: a column's rows contiguous across lanes
     static constexpr bool parallel = true;      // balance work across lanes (e.g. Jacobian entries, not rows)
+    static constexpr uint32_t SUM_SHARES = 32;
     const Member & member;
     uint32_t lanes;
     double * partial;    // (lanes)
     uint32_t * where;    // (lanes)
 
-    static constexpr size_t scratch_bytes(const uint32_t L) { return L * (sizeof(double) + sizeof(uint32_t)) + 16; }
+    KOKKOS_INLINE_FUNCTION static constexpr uint32_t shares(const uint32_t L) { return L > SUM_SHARES ? L : SUM_SHARES; }
+    static constexpr size_t scratch_bytes(const uint32_t L) {
+        return shares(L) * sizeof(double) + L * sizeof(uint32_t) + 16;
+    }
 
     KOKKOS_INLINE_FUNCTION TeamLanes(const Member & m, const uint32_t L) : member(m), lanes(L) {
-        partial = static_cast<double *>(m.team_scratch(0).get_shmem(L * sizeof(double)));
+        partial = static_cast<double *>(m.team_scratch(0).get_shmem(shares(L) * sizeof(double)));
         where = static_cast<uint32_t *>(m.team_scratch(0).get_shmem(L * sizeof(uint32_t)));
     }
 
@@ -115,15 +119,15 @@ struct TeamLanes {
 
     template <typename F>
     KOKKOS_INLINE_FUNCTION double sum(const uint32_t n, const F & f) const {
-        const uint32_t L = lanes;
-        Kokkos::parallel_for(Kokkos::TeamVectorRange(member, L), [&](const uint32_t l) {
+        constexpr uint32_t S = SUM_SHARES;
+        Kokkos::parallel_for(Kokkos::TeamVectorRange(member, S), [&](const uint32_t l) {
             double s = 0.0;
-            for (uint32_t i = l; i < n; i += L) s += f(i);
+            for (uint32_t i = l; i < n; i += S) s += f(i);
             partial[l] = s;
         });
         member.team_barrier();
         double s = 0.0;
-        for (uint32_t l = 0; l < L; l++) s += partial[l];
+        for (uint32_t l = 0; l < S; l++) s += partial[l];
         member.team_barrier();
         return s;
     }

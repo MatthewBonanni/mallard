@@ -27,7 +27,9 @@
 /**
  * @brief Options of CellChemistry: the reactor's tolerances, the temperature
  *        below which cells are frozen, the vector lanes and threads of the
- *        team of each cell (0: automatic; lanes = 1: one thread per cell),
+ *        team of each cell (0: automatic; lanes = 1: one thread per cell;
+ *        automatic threads on GPUs: one, and several warps for the cells
+ *        whose last call was expensive),
  *        whether a team keeps its factors and vectors in scratch (shared)
  *        memory where they fit (1; default no), and whether
  *        cells integrated by one thread are ordered by their last cost
@@ -90,6 +92,9 @@ class CellChemistry {
         /** @brief Threads of a cell's team. */
         uint32_t threads() const { return n_threads; }
 
+        /** @brief Threads of the teams of the cells whose last call was expensive (GPUs), 0 if the same. */
+        uint32_t wide_threads() const { return n_wide_threads; }
+
         /** @brief Whether cells integrated one per thread are ordered by their last cost (GPUs). */
         bool binned() const { return bin_by_cost; }
 
@@ -105,6 +110,9 @@ class CellChemistry {
         CellChemistryOptions options;
         uint32_t n_lanes = 1;
         uint32_t n_threads = 1;
+        uint32_t n_wide_threads = 0;  // threads of the expensive cells' teams, 0: the same teams for all
+        Kokkos::DefaultExecutionSpace narrow_space, wide_space;
+        Kokkos::View<uint32_t> team_failures[2];  // failures of the narrow and wide teams
         bool bin_by_cost = false;
         size_t fast_bytes = 0;
         bool sparse = false;

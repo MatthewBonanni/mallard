@@ -722,11 +722,12 @@ cell, its bin or its rank, so binning and load balancing only reorder work.
   chain rule to `(Y, T)`, dense and sparse LU and solves, the RODAS stages and
   error norm, the reactor) is written once against a `Lanes` interface:
   `SerialLanes` (one thread per cell) or `TeamLanes` (all threads and vector
-  lanes of a Kokkos team per cell). Reductions accumulate each lane's strided
-  share in index order and then the shares in lane order, so a cell's result
-  depends on the lane count only, which is fixed per mechanism and build:
-  results stay independent of the decomposition, the queue order, the binning
-  and the rank count. With lanes the work is balanced across them: the
+  lanes of a Kokkos team per cell). A team's sums accumulate 32 strided shares
+  in index order and then the shares in order, whatever the team's width, so
+  a cell's result depends only on whether a thread or a team integrates it,
+  which is fixed per mechanism and build: results stay independent of the
+  decomposition, the queue order, the binning, the team width and the rank
+  count. With lanes the work is balanced across them: the
   Jacobian is assembled by entries (each entry's terms listed at setup), not
   by rows (H appears in a hundred GRI-3.0 reactions), and production rates
   by chunks of four reactions; dense matrices are stored by columns, so that
@@ -734,6 +735,20 @@ cell, its bin or its rank, so binning and load balancing only reorder work.
   with partial pivoting gives the same factors for any lane count.
 - **Choice** (`[chemistry] lanes`, default automatic): a warp per cell on GPUs
   from 16 species, one thread per cell otherwise (and on CPUs).
+- **Wide teams for expensive cells** (GPUs, with a warp per cell): after the
+  cost ordering, the queued cells whose last call took at least 16 sub-steps
+  get 8 warps each (16 from 512 species), launched on a second stream
+  concurrently with the other cells' one-warp teams. These few igniting cells
+  set the time at dt = 1e-6 s; with more lanes each of their sub-steps
+  (rates, Jacobian entries, the sparse LU's updates per pivot, the solves)
+  takes fewer rounds. Since a team's result does not depend on its width
+  (bitwise; `VectorLanesIntegrateLikeOneThread` checks one against four warps
+  on GPUs), which cells are wide is free to depend on their history: a
+  restart, another decomposition or another queue order changes only the
+  speed. Teams of up to 512 threads keep the warp kernel's 128 registers per
+  thread (launch bounds 512 threads, one block per multiprocessor) and use
+  global memory for their work. Cells that take one or two sub-steps never
+  take this path, so the other cases are unchanged.
 - **Cost ordering** (GPUs only; `bin_by_cost` in the benchmark): the queued
   cells are sorted by the sub-steps they took in their last call, most
   expensive first. With one thread per cell a warp's cells then take similar
@@ -800,14 +815,31 @@ per cell, queue order, dense LU), the "before" of this milestone:
 | | | thread, ordered, sparse | 222k | 126k |
 | | | thread, unordered, dense | 121k | 98k |
 | GRI-3.0 1% | | warp, sparse, ordered / unordered | 525k / 531k | 531k / 512k |
-| n-dodecane | 100 | warp per cell, sparse LU, ordered (default) | 308k | 28.9k |
+| n-dodecane | 100 | warp per cell, sparse LU, ordered (milestone 10) | 308k | 28.9k |
 | | | warp, sparse, unordered | 307k | 27.6k |
 | | | warp, dense | 89.6k | 9.8k |
 | | | thread, unordered, dense | 11.7k | 874 |
 | n-dodecane 1% | | warp, sparse, ordered / unordered | 327k / 305k | 29.0k / 28.1k |
-| n-hexane | 1268 | warp per cell, sparse LU, ordered (default) | 5.13k | 190 |
+| n-hexane | 1268 | warp per cell, sparse LU, ordered (milestone 10) | 5.13k | 190 |
 | | | warp, sparse, full Jacobian | 677 | 23 |
 | | | warp, dense | 3.9 | (not run) |
+
+With wide teams for the expensive cells (now the default; same A100 and
+cases):
+
+| Case | Wide teams | dt = 1e-8 s | dt = 1e-6 s | Before (1e-6 s) |
+|---|---|---|---|---|
+| h2o2 | (thread per cell) | 6.08M | 2.62M | 2.64M |
+| GRI-3.0 | 8 warps (no cell reaches 16 sub-steps) | 526k | 532k | 530k |
+| n-dodecane | 8 warps for the 256 igniting cells | 309k | 48.8k | 28.9k |
+| n-hexane | 16 warps for the 16 igniting cells | 5.08k | 581 | 190 |
+
+Widths measured for the wide teams at 1e-6 s: n-dodecane 2/4/8 warps 40.0k,
+46.9k, 48.9k cells per second; n-hexane 4/8/16 warps 434, 534, 581. Giving
+every cell 4 warps instead (no cost threshold) reaches 45.2k for n-dodecane
+at 1e-6 s but costs a third at 1e-8 s (195k), where every cell takes one
+sub-step. The h2o2 run at 1e-8 s (6.08M against 6.53M) does not involve the
+change (one thread per cell) and is run-to-run variation.
 
 Sub-steps per cell at 1e-6 s (the benchmark's histogram): h2o2 127k cells
 with 1, 53k with 2, 57k with 3-4, 16k with 5-8, 8k with 9-16; GRI-3.0 64.5k
@@ -859,9 +891,11 @@ node) for h2o2 and GRI-3.0, of 5 for n-dodecane and of 1.8 for n-hexane at
 sub-steps on both (n-dodecane 106 accepted and 2 rejected, with the same step
 sizes and error estimates to 1e-9; n-hexane up to 44) and set the A100's
 time: each is one warp's sequence of sub-steps, behind which the other cells
-finish long before. The A100 then matches 1.2 slices for n-dodecane and is
-4.6x slower than 16 cores for n-hexane (190 against 877 cells per second), a
-target for later. The first CPU numbers
+finish long before. The A100 then matched 1.2 slices for n-dodecane and was
+4.6x slower than 16 cores for n-hexane (190 against 877 cells per second);
+with wide teams for these cells it matches 2.0 slices for n-dodecane (48.8k)
+and 0.66 for n-hexane (581), where 16 cells on 16 warps each still leave
+most of the GPU idle. The first CPU numbers
 of this milestone had these cells at 5-6 sub-steps: on host backends a mirror
 view of the cells' state is that state, so every call after the warm-up
 continued from the states the previous one had left instead of the sampled

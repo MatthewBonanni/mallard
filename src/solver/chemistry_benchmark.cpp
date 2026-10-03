@@ -132,6 +132,9 @@ ChemistryBenchmark run_chemistry_benchmark(const toml::value & input) {
                                                                                  " KiB in team scratch"
                                                                            : std::string(", global memory"))) +
                           (cells.binned() ? ", ordered by cost" : "") +
+                          (cells.wide_threads() > 0 ? ", " + std::to_string(cells.wide_threads()) + " x " +
+                                                          std::to_string(cells.lanes()) + " lanes for expensive cells"
+                                                    : std::string()) +
                           (cells.sparse_entries() > 0 ? ", sparse LU (" + std::to_string(cells.sparse_entries()) + " entries)"
                                                       : ", dense LU")},
         {"Tolerances", "rtol = " + brief(options.integrator.rtol) + ", atol = " + brief(options.atol_Y)},

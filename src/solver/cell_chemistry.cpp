@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 #include <Kokkos_Sort.hpp>
 
@@ -22,6 +23,8 @@
 namespace cell_chemistry_kernels {
 
 constexpr double WORK_MEMORY_BYTES = 1024.0 * 1024.0 * 1024.0;
+// Teams per cell: cells whose last call took at least WIDE_TEAM_COST sub-steps get several warps
+constexpr float WIDE_TEAM_COST = 16.0f;
 
 template <bool Sparse>
 struct TeamTag {};
@@ -30,6 +33,11 @@ struct TeamTag {};
 template <bool Sparse, bool Fast>
 using TeamPolicy = Kokkos::TeamPolicy<TeamTag<Sparse>, Kokkos::LaunchBounds<32, Fast ? 4 : 16>>;
 using Member = TeamPolicy<false, false>::member_type;
+// Several warps per cell, with the same registers per thread as a warp per cell
+constexpr uint32_t MAX_TEAM_LANES = 512;
+template <bool Sparse>
+using WideTeamPolicy = Kokkos::TeamPolicy<TeamTag<Sparse>, Kokkos::LaunchBounds<MAX_TEAM_LANES, 512 / MAX_TEAM_LANES>>;
+static_assert(std::is_same_v<WideTeamPolicy<false>::member_type, Member>);
 
 /**
  * @brief Mass fractions (double) and temperature of a cell; returns its
@@ -165,6 +173,7 @@ struct AdvanceFunctor {
     Kokkos::View<double **, Kokkos::LayoutRight> work;
     Kokkos::View<uint32_t **, Kokkos::LayoutRight> pivot;
     Kokkos::View<uint32_t *> queue;
+    uint32_t offset;  // teams: the first queued cell of the launch
     chemistry::ReactorOptions options;
     double dt;
     uint32_t lanes;
@@ -194,7 +203,7 @@ struct AdvanceFunctor {
     /** @brief All threads and lanes of a team per cell. */
     template <bool Sparse>
     KOKKOS_INLINE_FUNCTION void operator()(TeamTag<Sparse>, const Member & member, uint32_t & failures) const {
-        const uint32_t slot = static_cast<uint32_t>(member.league_rank()), c = queue(slot), ns = gas.n_species;
+        const uint32_t slot = offset + static_cast<uint32_t>(member.league_rank()), c = queue(slot), ns = gas.n_species;
         const chemistry::TeamLanes<Member> team(member, lanes * static_cast<uint32_t>(member.team_size()));
         double * fast =
             fast_size > 0 ? static_cast<double *>(member.team_scratch(0).get_shmem(fast_size * sizeof(double))) : nullptr;
@@ -216,11 +225,50 @@ struct AdvanceFunctor {
             chem_cost(c) += static_cast<rtype>(r.steps + r.rejected);
             previous_cost(c) = static_cast<float>(r.steps + r.rejected);
         });
-        Kokkos::single(Kokkos::PerThread(member), [&]() {
-            if (r.status != chemistry::RosenbrockStatus::SUCCESS) failures++;
-        });
+        if (member.team_rank() == 0) {
+            Kokkos::single(Kokkos::PerThread(member), [&]() {
+                if (r.status != chemistry::RosenbrockStatus::SUCCESS) failures++;
+            });
+        }
     }
 };
+
+/** @brief Counts the queued cells at least as expensive as a cost (the sorted queue holds minus the costs). */
+struct WideCountFunctor {
+    Kokkos::View<float *> cost;
+    float threshold;  // minus the cost
+
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t i, uint32_t & count) const { count += cost(i) <= threshold ? 1 : 0; }
+};
+
+/**
+ * @brief Integrates queued cells [functor.offset, functor.offset + league) by teams of
+ *        threads x lanes on an execution space instance; the failures go to a device scalar.
+ */
+template <typename Space>
+inline void launch_teams(const Space & space, const AdvanceFunctor & functor, const uint32_t league,
+                         const uint32_t threads, const uint32_t lanes, const bool sparse, const size_t fast_bytes,
+                         const Kokkos::View<uint32_t> & failures) {
+    const size_t scratch = chemistry::TeamLanes<Member>::scratch_bytes(lanes * threads) + fast_bytes + 64;
+    auto launch = [&](auto policy) {
+        policy.set_scratch_size(0, Kokkos::PerTeam(scratch));
+        Kokkos::parallel_reduce("chemistry_advance_teams", policy, functor, failures);
+    };
+    const int L = static_cast<int>(league), T = static_cast<int>(threads), V = static_cast<int>(lanes);
+    if (lanes * threads > 32) {
+        sparse ? launch(WideTeamPolicy<true>(space, L, T, V)) : launch(WideTeamPolicy<false>(space, L, T, V));
+    } else if (sparse) {
+        fast_bytes > 0 ? launch(TeamPolicy<true, true>(space, L, T, V)) : launch(TeamPolicy<true, false>(space, L, T, V));
+    } else {
+        fast_bytes > 0 ? launch(TeamPolicy<false, true>(space, L, T, V)) : launch(TeamPolicy<false, false>(space, L, T, V));
+    }
+}
+
+inline uint32_t read_failures(const Kokkos::View<uint32_t> & failures) {
+    uint32_t n = 0;
+    Kokkos::deep_copy(n, failures);
+    return n;
+}
 
 /**
  * @brief Heat release rate -sum_k h_k omega_k [W/m^3] and mass production
@@ -294,13 +342,27 @@ void CellChemistry::init(const Mixture & gas_in, const chemistry::Mechanism & me
     // cells, so that cheap ones fill in behind them. CPU threads take contiguous blocks of the queue, which
     // sorting would load with all the expensive cells
     bin_by_cost = options.bin_by_cost && gpu;
-    if (n_lanes * n_threads > 32) throw std::invalid_argument("chemistry: at most 32 threads and lanes per cell.");
+    if (n_lanes * n_threads > MAX_TEAM_LANES) {
+        throw std::invalid_argument("chemistry: at most " + std::to_string(MAX_TEAM_LANES) + " threads and lanes per cell.");
+    }
+    const bool wide = n_lanes * n_threads > 32;
+    // With automatic threads, the expensive cells of the sorted queue get several warps each, more for larger
+    // mechanisms; a team's result does not depend on its width
+    n_wide_threads = 0;
+    if (bin_by_cost && n_lanes == 32 && options.threads == 0) n_wide_threads = ns >= 512 ? 16 : 8;
+    team_failures[0] = Kokkos::View<uint32_t>("chem_failures");
+    team_failures[1] = Kokkos::View<uint32_t>("chem_failures_wide");
+    if (n_wide_threads > 0) {
+        const auto spaces = Kokkos::Experimental::partition_space(Kokkos::DefaultExecutionSpace(), 1, 1);
+        narrow_space = spaces[0];
+        wide_space = spaces[1];
+    }
     sparse = chemistry::use_sparse_lu(options.reactor, mechanism);
     if (sparse) pattern = chemistry::make_sparse_lu_pattern(mechanism);
     // Teams may keep the factors and the integrator's vectors in scratch memory where they fit; on the A100
     // this lowers the cells per SM more than it speeds each cell, so it is off unless asked for
     fast_bytes = 0;
-    if (n_lanes > 1 && options.shared == 1) {
+    if (n_lanes > 1 && !wide && options.shared == 1) {
         const size_t bytes = sizeof(double) * chemistry::reactor_fast_size(kinetics, sparse ? &pattern : nullptr);
         const size_t room = static_cast<size_t>(TeamPolicy<false, true>::scratch_size_max(0));
         if (bytes + chemistry::TeamLanes<Member>::scratch_bytes(n_lanes * n_threads) + 64 <= room) fast_bytes = bytes;
@@ -347,24 +409,31 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
             Kokkos::Experimental::sort_by_key(Kokkos::DefaultExecutionSpace(), Kokkos::subview(cost, queued),
                                               Kokkos::subview(queue, queued));
         }
-        const AdvanceFunctor functor{gas,  kinetics, U,     rhoY,  T_seed,          chem_h, chem_cost, previous_cost,
-                                     work, pivot,    queue, options.reactor, dt, n_lanes, pattern, sparse,
-                                     static_cast<uint32_t>(fast_bytes / sizeof(double))};
+        uint32_t n_wide = 0;
+        if (n_wide_threads > 0) {
+            Kokkos::parallel_reduce("chemistry_wide_cells", n_active, WideCountFunctor{cost, -WIDE_TEAM_COST}, n_wide);
+        }
+        AdvanceFunctor functor{gas,  kinetics, U,     rhoY, T_seed,          chem_h, chem_cost, previous_cost,
+                               work, pivot,    queue, 0u,   options.reactor, dt,     n_lanes,   pattern,
+                               sparse, static_cast<uint32_t>(fast_bytes / sizeof(double))};
         uint32_t failures = 0;
         if (n_lanes == 1) {
             Kokkos::parallel_reduce("chemistry_advance", n_active, functor, Kokkos::Sum<uint32_t>(failures));
+        } else if (n_wide == 0) {
+            launch_teams(Kokkos::DefaultExecutionSpace(), functor, n_active, n_threads, n_lanes, sparse, fast_bytes,
+                         team_failures[0]);
+            failures = read_failures(team_failures[0]);
         } else {
-            const size_t scratch = chemistry::TeamLanes<Member>::scratch_bytes(n_lanes * n_threads) + fast_bytes + 64;
-            auto launch = [&](auto policy) {
-                policy.set_scratch_size(0, Kokkos::PerTeam(scratch));
-                Kokkos::parallel_reduce("chemistry_advance_teams", policy, functor, Kokkos::Sum<uint32_t>(failures));
-            };
-            const int league = static_cast<int>(n_active), T = static_cast<int>(n_threads), V = static_cast<int>(n_lanes);
-            if (sparse) {
-                fast_bytes > 0 ? launch(TeamPolicy<true, true>(league, T, V)) : launch(TeamPolicy<true, false>(league, T, V));
-            } else {
-                fast_bytes > 0 ? launch(TeamPolicy<false, true>(league, T, V)) : launch(TeamPolicy<false, false>(league, T, V));
+            // The expensive cells' wide teams and the others' narrow ones run concurrently
+            AdvanceFunctor wide = functor;
+            wide.fast_size = 0;
+            launch_teams(wide_space, wide, n_wide, n_wide_threads, n_lanes, sparse, 0, team_failures[1]);
+            functor.offset = n_wide;
+            if (n_active > n_wide) {
+                launch_teams(narrow_space, functor, n_active - n_wide, n_threads, n_lanes, sparse, fast_bytes,
+                             team_failures[0]);
             }
+            failures = read_failures(team_failures[1]) + (n_active > n_wide ? read_failures(team_failures[0]) : 0u);
         }
         stats.failures += failures;
     }

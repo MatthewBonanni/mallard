@@ -207,7 +207,7 @@ struct LanesIgnitionFunctor {
     Rows<double> work;
     Rows<uint32_t> pivot;
     Rows<double> out;    // T, steps, Y
-    uint32_t lanes;
+    uint32_t lanes;  // threads x vector lanes of a team
 
     KOKKOS_INLINE_FUNCTION void operator()(const uint32_t c) const {
         const uint32_t ns = thermo.n_species;
@@ -238,7 +238,8 @@ struct LanesIgnitionFunctor {
     }
 };
 
-Rows<double>::host_mirror_type lanes_ignition(const Mechanism & mech, const Table & ref, const uint32_t lanes) {
+Rows<double>::host_mirror_type lanes_ignition(const Mechanism & mech, const Table & ref, const uint32_t lanes,
+                                              const uint32_t threads = 1) {
     const uint32_t ns = mech.n_species(), n_cases = ref.rows.size();
     const KineticsTable<> kinetics = make_kinetics_table(mech);
     Rows<double> state("state", n_cases, 3 + ns), out("out", n_cases, 2 + ns);
@@ -253,12 +254,13 @@ Rows<double>::host_mirror_type lanes_ignition(const Mechanism & mech, const Tabl
     Kokkos::deep_copy(state, h_state);
     const LanesIgnitionFunctor functor{make_thermo_table(mech), kinetics, state,
                                        Rows<double>("work", n_cases, ns + reactor_work_size(kinetics)),
-                                       Rows<uint32_t>("pivot", n_cases, ns + 1), out, lanes};
+                                       Rows<uint32_t>("pivot", n_cases, ns + 1), out, threads * lanes};
     if (lanes == 0) {
         Kokkos::parallel_for("ignition_threads", n_cases, functor);
     } else {
-        const auto policy = Kokkos::TeamPolicy<LanesIgnitionFunctor::TeamTag>(n_cases, 1, lanes).set_scratch_size(
-            0, Kokkos::PerTeam(TeamLanes<LanesIgnitionFunctor::Member>::scratch_bytes(lanes)));
+        const auto policy =
+            Kokkos::TeamPolicy<LanesIgnitionFunctor::TeamTag>(n_cases, static_cast<int>(threads), static_cast<int>(lanes))
+                .set_scratch_size(0, Kokkos::PerTeam(TeamLanes<LanesIgnitionFunctor::Member>::scratch_bytes(threads * lanes)));
         Kokkos::parallel_for("ignition_teams", policy, functor);
     }
     return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
@@ -269,8 +271,10 @@ Rows<double>::host_mirror_type lanes_ignition(const Mechanism & mech, const Tabl
 TEST(ChemistryReactorTest, VectorLanesIntegrateLikeOneThread) {
     // The team path (rates, Jacobian rows, LU and solves across lanes, reductions
     // in a fixed order) gives the one-thread result to round-off, with the
-    // largest vector length of the backend (1 on host backends)
+    // largest vector length of the backend (1 on host backends); on GPUs also
+    // with several warps per cell, as for large mechanisms
     const uint32_t lanes = std::min<uint32_t>(32, Kokkos::TeamPolicy<>::vector_length_max());
+    constexpr bool gpu = !Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace, Kokkos::HostSpace>::accessible;
     for (const auto & [name, file, phase] : {std::array<std::string, 3>{"h2o2", SOURCE_DIR + "/mechanisms/h2o2.yaml", "ohmech"},
                                             std::array<std::string, 3>{"gri30", SOURCE_DIR + "/mechanisms/gri30.yaml", ""}}) {
         const Mechanism mech = read_mechanism(file, phase);
@@ -283,6 +287,13 @@ TEST(ChemistryReactorTest, VectorLanesIntegrateLikeOneThread) {
             EXPECT_NEAR(team(c, 1), one(c, 1), 0.1 * one(c, 1) + 2) << name << " case " << c;
             for (uint32_t k = 0; k < mech.n_species(); k++) {
                 EXPECT_NEAR(team(c, 2 + k), one(c, 2 + k), 1e-6) << name << " case " << c << " Y_" << k;
+            }
+        }
+        // Several warps per cell (the expensive cells of large mechanisms) give the same bits as one
+        if (gpu) {
+            const auto wide = lanes_ignition(mech, ref, lanes, 4);
+            for (uint32_t c = 0; c < ref.rows.size(); c++) {
+                for (uint32_t i = 0; i < 2 + mech.n_species(); i++) EXPECT_EQ(wide(c, i), team(c, i)) << name << " case " << c << " " << i;
             }
         }
     }
