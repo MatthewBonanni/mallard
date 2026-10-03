@@ -123,6 +123,42 @@ TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
     std::filesystem::remove_all(dir);
 }
 
+TEST(RestartTest, PeakPressureIsARunningMaximumThatSurvivesRestarts) {
+    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_p_max").string();
+    std::filesystem::remove_all(dir);
+    auto input = [&](const std::string & sub, const std::string & init, uint32_t n_steps) {
+        std::string s = restart_input(dir + sub, init, n_steps);
+        s.replace(s.find("variables = [\"RHO\"]"), 19, "variables = [\"RHO\", \"P_MAX\"]");
+        return parse_toml(s);
+    };
+
+    Solver straight;
+    straight.init(input("/a", BLAST, 40));
+    straight.run();
+    straight.copy_device_to_host();
+
+    Solver first;
+    first.init(input("/b", BLAST, 20));
+    first.run();
+    Solver second;
+    second.init(input("/b", "type = \"restart\"\nfile = \"" + dir + "/b/restart_000020.restart\"\n", 40));
+    second.run();
+    second.copy_device_to_host();
+
+    const auto & mesh = *straight.get_mesh();
+    uint32_t n_decayed = 0;
+    for (uint32_t i = 0; i < mesh.n_cells; i++) {
+        const rtype p = straight.h_primitives(i, N_DIM);
+        EXPECT_GE(straight.h_p_max(i), p);
+        if (mesh.h_cell_coords(i, 0) < 0.3) EXPECT_GE(straight.h_p_max(i), 2.0_r);
+        n_decayed += straight.h_p_max(i) > p + 0.1_r;
+        EXPECT_EQ(second.h_p_max(i), straight.h_p_max(i));
+    }
+    // The blast's rarefaction has lowered the pressure below its peak
+    EXPECT_GT(n_decayed, 0u);
+    std::filesystem::remove_all(dir);
+}
+
 TEST(RestartTest, RejectsMismatchedMesh) {
     const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_mismatch").string();
     std::filesystem::remove_all(dir);
