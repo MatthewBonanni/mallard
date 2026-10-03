@@ -21,6 +21,7 @@ add_library(MallardCore STATIC
     physics/mixture.cpp
     physics/physics.cpp
     solver/solver.cpp
+    solver/solver_chemistry.cpp
     solver/solver_initialize.cpp
     solver/solver_mixture.cpp
     solver/solver_rhs.cpp

@@ -1,0 +1,67 @@
+# Reactive shock tube (V6 of docs/design/chemistry.md; Fedkiw, Merriman &
+# Osher 1997, Martinez Ferrer et al. 2014): a shock in 2H2-O2-7Ar runs into
+# the closed left end, and the gas behind its reflection ignites and turns
+# into a detonation that overtakes the reflected shock. Compare profiles at
+# 170 and 230 us. The states are the published (rho, u, p); T follows from
+# the mixture's gas constant. 50 um cells; refine with Nx = 4800, 9600.
+
+[run]
+t_stop = 2.3e-4
+cfl = 0.5
+
+[mesh]
+type = "cartesian"
+Nx = 2400
+Ny = 1
+Lx = 0.12
+Ly = 5.0e-5
+
+[initialize]
+type = "analytical"
+p = "x < 0.06 ? 7173.0 : 35594.0"
+T = "x < 0.06 ? 378.251986 : 747.672441"
+u = ["x < 0.06 ? 0.0 : -487.34", "0.0"]
+X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }
+
+[[boundaries]]
+name = "left"
+type = "symmetry"
+
+[[boundaries]]
+name = "right"
+type = "upt"
+u = [-487.34, 0.0]
+p = 35594.0
+T = 747.672441
+X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "euler"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+
+[chemistry]
+
+[output]
+check_interval = 2000
+
+[[write_data]]
+prefix = "./solut/rst"
+format = "vtu"
+time_interval = 1.0e-5
+variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*"]

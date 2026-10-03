@@ -48,3 +48,18 @@ extra-reactions:
 - equation: HO2 + H <=> 2 OH
   duplicate: true
   rate-constant: {A: 1.0e+12, b: 0.5, Ea: 1.0e+03}
+- equation: H2O2 + H <=> HO2 + H2
+  type: pressure-dependent-Arrhenius
+  rate-constants:
+  - {P: 0.5 atm, A: 1.2e+13, b: 0.0, Ea: 8000.0}
+  - {P: 1.0 atm, A: 3.0e+13, b: -0.2, Ea: 7600.0}
+  - {P: 1.0 atm, A: 2.0e+11, b: 0.3, Ea: 4000.0}
+  - {P: 3.0 atm, A: 9.0e+13, b: -0.3, Ea: 8400.0}
+- equation: HO2 + OH <=> H2O + O2
+  type: Chebyshev
+  temperature-range: [290.0, 3000.0]
+  pressure-range: [0.001 atm, 100.0 atm]
+  data:
+  - [13.0, 0.1, -0.02, 0.005]
+  - [-0.5, 0.05, 0.01, -0.002]
+  - [0.1, -0.01, 0.003, 0.001]

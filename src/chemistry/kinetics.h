@@ -31,7 +31,10 @@ namespace chemistry {
  * Rates follow Cantera: k = A T^b exp(-Ea / RT); three-body reactions
  * multiply both directions by [M] = sum_k eff_k C_k; falloff reactions use
  * k = k_inf Pr / (1 + Pr) F with Pr = k_0 [M] / k_inf and F = 1 (Lindemann),
- * Troe or SRI; reversible reactions take k_r = k_f / K_c with
+ * Troe or SRI; PLOG reactions interpolate ln k linearly in ln p between
+ * the bracketing pressures (constant outside them), summing the rates given
+ * at one pressure; Chebyshev reactions take log10 k as a series in reduced
+ * 1/T and log10 p, with p = C_total R T; reversible reactions take k_r = k_f / K_c with
  * K_c = exp(-sum_k nu_k g_k / RT) (p_atm / RT)^(sum_k nu_k).
  */
 template <typename MemorySpace = Kokkos::DefaultExecutionSpace::memory_space>
@@ -61,6 +64,14 @@ struct KineticsTable {
     View1<uint32_t> efficiency_species;
     View1<double> efficiency_extra;  // efficiency minus the default
     View1<double> default_efficiency;
+    View1<uint32_t> plog_offset;       // (n_reactions + 1): pressure levels of reaction i
+    View1<double> plog_ln_p;           // (level)
+    View1<uint32_t> plog_rate_offset;  // (level + 1): rates summed at a level
+    Kokkos::View<double *[3], Kokkos::LayoutRight, MemorySpace> plog_rate;  // A, b, Ea/R
+    View1<uint32_t> chebyshev_offset;  // (n_reactions + 1): coefficients of reaction i, n_T x n_p row-major
+    View1<uint32_t> chebyshev_n_p;
+    View1<double> chebyshev;
+    Kokkos::View<double *[4], Kokkos::LayoutRight, MemorySpace> chebyshev_range;  // 1/T_min, 1/T_max, ln p_min, ln p_max
 
     /** @brief C^order: repeated products for integer orders, pow of max(C, 0) otherwise. */
     KOKKOS_INLINE_FUNCTION
@@ -84,6 +95,91 @@ struct KineticsTable {
     KOKKOS_INLINE_FUNCTION
     static double arrhenius(const double A, const double b, const double Ea_R, const double log_T, const double inv_T) {
         return A * Kokkos::exp(b * log_T - Ea_R * inv_T);
+    }
+
+    /** @brief Sum of the PLOG rates at pressure level l and its d ln k / dT. */
+    KOKKOS_INLINE_FUNCTION
+    void plog_level(const uint32_t l, const double log_T, const double inv_T, double & k, double & dlnk_dT) const {
+        k = 0.0;
+        double weighted = 0.0;
+        for (uint32_t e = plog_rate_offset(l); e < plog_rate_offset(l + 1); e++) {
+            const double k_e = arrhenius(plog_rate(e, 0), plog_rate(e, 1), plog_rate(e, 2), log_T, inv_T);
+            k += k_e;
+            weighted += k_e * (plog_rate(e, 1) + plog_rate(e, 2) * inv_T) * inv_T;
+        }
+        dlnk_dT = k != 0.0 ? weighted / k : 0.0;
+    }
+
+    /**
+     * @brief Rate constant of a PLOG or Chebyshev reaction at T and ln p,
+     *        with d ln k / dT at fixed p and d ln k / d ln p.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void pressure_rate(const uint32_t i, const double log_T, const double inv_T, const double ln_p, double & k,
+                       double & dlnk_dT, double & dlnk_dlnp) const {
+        constexpr double LN10 = 2.302585092994045684;
+        dlnk_dlnp = 0.0;
+        if (type(i) == static_cast<uint8_t>(ReactionType::PLOG)) {
+            const uint32_t first = plog_offset(i), last = plog_offset(i + 1) - 1;
+            if (ln_p <= plog_ln_p(first) || first == last) {
+                plog_level(first, log_T, inv_T, k, dlnk_dT);
+                return;
+            }
+            if (ln_p >= plog_ln_p(last)) {
+                plog_level(last, log_T, inv_T, k, dlnk_dT);
+                return;
+            }
+            uint32_t l = first;
+            while (ln_p >= plog_ln_p(l + 1)) l++;
+            double k1, d1, k2, d2;
+            plog_level(l, log_T, inv_T, k1, d1);
+            plog_level(l + 1, log_T, inv_T, k2, d2);
+            const double span = plog_ln_p(l + 1) - plog_ln_p(l);
+            const double w = (ln_p - plog_ln_p(l)) / span;
+            const double ln_k1 = Kokkos::log(k1), ln_k2 = Kokkos::log(k2);
+            k = Kokkos::exp(ln_k1 + w * (ln_k2 - ln_k1));
+            dlnk_dT = d1 + w * (d2 - d1);
+            dlnk_dlnp = (ln_k2 - ln_k1) / span;
+            return;
+        }
+        // Chebyshev: series in Tr = (2/T - 1/T_min - 1/T_max) / (1/T_max - 1/T_min) and
+        // pr = (2 ln p - ln p_min - ln p_max) / (ln p_max - ln p_min), with the recurrences
+        // phi_{n+1} = 2 x phi_n - phi_{n-1} and phi'_{n+1} = 2 phi_n + 2 x phi'_n - phi'_{n-1}
+        const double a_T = chebyshev_range(i, 0), b_T = chebyshev_range(i, 1);
+        const double a_p = chebyshev_range(i, 2), b_p = chebyshev_range(i, 3);
+        const double Tr = (2.0 * inv_T - a_T - b_T) / (b_T - a_T);
+        const double pr = (2.0 * ln_p - a_p - b_p) / (b_p - a_p);
+        const uint32_t n_p = chebyshev_n_p(i), first = chebyshev_offset(i);
+        const uint32_t n_T = (chebyshev_offset(i + 1) - first) / n_p;
+        double log_k = 0.0, dlogk_dTr = 0.0, dlogk_dpr = 0.0;
+        double phi_T = 1.0, phi_T_prev = 0.0, d_T = 0.0, d_T_prev = 0.0;
+        for (uint32_t t = 0; t < n_T; t++) {
+            double sum = 0.0, dsum = 0.0;
+            double phi_p = 1.0, phi_p_prev = 0.0, d_p = 0.0, d_p_prev = 0.0;
+            for (uint32_t q = 0; q < n_p; q++) {
+                const double alpha = chebyshev(first + t * n_p + q);
+                sum += alpha * phi_p;
+                dsum += alpha * d_p;
+                const double phi_next = q == 0 ? pr : 2.0 * pr * phi_p - phi_p_prev;
+                const double d_next = q == 0 ? 1.0 : 2.0 * phi_p + 2.0 * pr * d_p - d_p_prev;
+                phi_p_prev = phi_p;
+                d_p_prev = d_p;
+                phi_p = phi_next;
+                d_p = d_next;
+            }
+            log_k += phi_T * sum;
+            dlogk_dTr += d_T * sum;
+            dlogk_dpr += phi_T * dsum;
+            const double phi_next = t == 0 ? Tr : 2.0 * Tr * phi_T - phi_T_prev;
+            const double d_next = t == 0 ? 1.0 : 2.0 * phi_T + 2.0 * Tr * d_T - d_T_prev;
+            phi_T_prev = phi_T;
+            d_T_prev = d_T;
+            phi_T = phi_next;
+            d_T = d_next;
+        }
+        k = Kokkos::pow(10.0, log_k);
+        dlnk_dT = LN10 * dlogk_dTr * (-2.0 * inv_T * inv_T / (b_T - a_T));
+        dlnk_dlnp = LN10 * dlogk_dpr * 2.0 / (b_p - a_p);
     }
 
     /** @brief Third-body concentration of reaction i. */
@@ -167,7 +263,13 @@ struct KineticsTable {
         for (uint32_t i = 0; i < n_reactions; i++) {
             double kf = arrhenius(rate(i, 0), rate(i, 1), rate(i, 2), log_T, inv_T);
             double dlnkf_dT = (rate(i, 1) + rate(i, 2) * inv_T) * inv_T;
-            if (type(i) == static_cast<uint8_t>(ReactionType::THREE_BODY)) {
+            if (type(i) == static_cast<uint8_t>(ReactionType::PLOG) ||
+                type(i) == static_cast<uint8_t>(ReactionType::CHEBYSHEV)) {
+                // p = C_total R T, so d ln p / dT = 1 / T at fixed concentrations
+                double dlnk_dlnp;
+                pressure_rate(i, log_T, inv_T, Kokkos::log(C_total * GAS_CONSTANT * T), kf, dlnkf_dT, dlnk_dlnp);
+                dlnkf_dT += dlnk_dlnp * inv_T;
+            } else if (type(i) == static_cast<uint8_t>(ReactionType::THREE_BODY)) {
                 kf *= third_body(i, C, C_total);
             } else if (type(i) == static_cast<uint8_t>(ReactionType::FALLOFF)) {
                 const double k0 = arrhenius(low(i, 0), low(i, 1), low(i, 2), log_T, inv_T);
@@ -253,7 +355,7 @@ struct KineticsTable {
                 }
             }
             if (type(i) == static_cast<uint8_t>(ReactionType::ELEMENTARY)) continue;
-            // Third-body terms: d q / d C_j = (d ln k / d M) q eff_j, with q = k (prod_f - prod_r / Kc)
+            // q = k (prod_f - prod_r / Kc)
             double prod_f = 1.0, prod_r = 0.0;
             for (uint32_t a = forward_offset(i); a < forward_offset(i + 1); a++) {
                 prod_f *= power(C[forward_species(a)], forward_order(a));
@@ -264,6 +366,18 @@ struct KineticsTable {
                     prod_r *= power(C[reverse_species(a)], reverse_order(a));
                 }
             }
+            if (type(i) == static_cast<uint8_t>(ReactionType::PLOG) ||
+                type(i) == static_cast<uint8_t>(ReactionType::CHEBYSHEV)) {
+                // Pressure terms: d q / d C_j = q (d ln k / d ln p) / C_total for every j
+                double k, dlnk_dT, dlnk_dlnp;
+                pressure_rate(i, log_T, inv_T, Kokkos::log(C_total * GAS_CONSTANT * T), k, dlnk_dT, dlnk_dlnp);
+                const double dq = C_total > 0.0 ? kf[i] * (prod_f - prod_r) * dlnk_dlnp / C_total : 0.0;
+                if (dq != 0.0) {
+                    for (uint32_t j = 0; j < n; j++) add(j, dq);
+                }
+                continue;
+            }
+            // Third-body terms: d q / d C_j = (d ln k / d M) q eff_j
             const double M = third_body(i, C, C_total);
             double dk_dM;
             if (type(i) == static_cast<uint8_t>(ReactionType::THREE_BODY)) {
@@ -302,8 +416,28 @@ KineticsTable<MemorySpace> make_kinetics_table(const Mechanism & mechanism) {
     std::vector<double> rate(3 * nr), low(3 * nr), params(5 * nr), delta_nu(nr), default_eff(nr);
     std::vector<uint32_t> f_off{0}, r_off{0}, n_off{0}, e_off{0}, f_sp, r_sp, n_sp, e_sp;
     std::vector<double> f_ord, r_ord, n_nu, e_extra;
+    std::vector<uint32_t> plog_off{0}, plog_rate_off{0}, cheb_off{0}, cheb_n_p(nr, 1);
+    std::vector<double> plog_ln_p, plog_rate, cheb, cheb_range(4 * nr, 0.0);
     for (uint32_t i = 0; i < nr; i++) {
         const Reaction & r = mechanism.reactions[i];
+        for (size_t e = 0; e < r.plog.size(); e++) {
+            if (e == 0 || r.plog[e].first != r.plog[e - 1].first) {
+                if (e > 0) plog_rate_off.push_back(plog_rate.size() / 3);
+                plog_ln_p.push_back(std::log(r.plog[e].first));
+            }
+            plog_rate.insert(plog_rate.end(), {r.plog[e].second.A, r.plog[e].second.b, r.plog[e].second.Ea_R});
+        }
+        if (!r.plog.empty()) plog_rate_off.push_back(plog_rate.size() / 3);
+        plog_off.push_back(plog_ln_p.size());
+        if (r.type == ReactionType::CHEBYSHEV) {
+            cheb.insert(cheb.end(), r.chebyshev.begin(), r.chebyshev.end());
+            cheb_n_p[i] = r.chebyshev_n_p;
+            cheb_range[4 * i] = 1.0 / r.chebyshev_range[0];
+            cheb_range[4 * i + 1] = 1.0 / r.chebyshev_range[1];
+            cheb_range[4 * i + 2] = std::log(r.chebyshev_range[2]);
+            cheb_range[4 * i + 3] = std::log(r.chebyshev_range[3]);
+        }
+        cheb_off.push_back(cheb.size());
         type[i] = static_cast<uint8_t>(r.type);
         falloff[i] = static_cast<uint8_t>(r.falloff);
         reversible[i] = r.reversible;
@@ -382,6 +516,14 @@ KineticsTable<MemorySpace> make_kinetics_table(const Mechanism & mechanism) {
     t.efficiency_species = copy(e_sp, "kinetics_efficiency_species");
     t.efficiency_extra = copy(e_extra, "kinetics_efficiency_extra");
     t.default_efficiency = copy(default_eff, "kinetics_default_efficiency");
+    t.plog_offset = copy(plog_off, "kinetics_plog_offset");
+    t.plog_ln_p = copy(plog_ln_p, "kinetics_plog_ln_p");
+    t.plog_rate_offset = copy(plog_rate_off, "kinetics_plog_rate_offset");
+    copy2(plog_rate, t.plog_rate, "kinetics_plog_rate");
+    t.chebyshev_offset = copy(cheb_off, "kinetics_chebyshev_offset");
+    t.chebyshev_n_p = copy(cheb_n_p, "kinetics_chebyshev_n_p");
+    t.chebyshev = copy(cheb, "kinetics_chebyshev");
+    copy2(cheb_range, t.chebyshev_range, "kinetics_chebyshev_range");
     return t;
 }
 

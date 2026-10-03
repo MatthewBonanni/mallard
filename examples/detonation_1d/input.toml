@@ -1,0 +1,71 @@
+# Planar CJ detonation in 2H2-O2-7Ar at 6.67 kPa and 298 K (V7 of
+# docs/design/chemistry.md), started from its ZND structure. With this
+# mechanism the recombination zone is about 0.8 m long, so a detonation
+# started by a driver runs well below D_CJ over any practical tube; started
+# from the ZND profile it must keep D_CJ = 1617 m/s and the ZND induction
+# length, 1.53 mm (tools/detonation_reference.py). 152.5 um cells: 10 per
+# induction length. Make the initial state first, from this directory:
+#
+#   python ../../tools/detonation_reference.py ../../mechanisms/h2o2.yaml ohmech \
+#       "H2:2, O2:1, AR:7" 298 6670 znd.csv
+#   python ../../tools/znd_restart.py znd.csv ../../mechanisms/h2o2.yaml ohmech 3934 0.6 0.25 znd.restart
+#
+# (Nx = 7868 or 15736 in both places for 20 or 40 cells per induction length),
+# then run and check the front with
+#   python ../../tools/plot_detonation.py solut/detonation.pvd 1616.93 1.5251
+
+[run]
+t_stop = 2.0e-4
+cfl = 0.5
+
+[mesh]
+type = "cartesian"
+Nx = 3934
+Ny = 1
+Lx = 0.6
+Ly = 1.525e-4
+
+[initialize]
+type = "restart"
+file = "znd.restart"
+
+[[boundaries]]
+name = "left"
+type = "extrapolation"
+
+[[boundaries]]
+name = "right"
+type = "extrapolation"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "euler"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+
+[output]
+check_interval = 1000
+
+[[write_data]]
+prefix = "./solut/detonation"
+format = "vtu"
+time_interval = 1.0e-5
+variables = ["RHO", "U_X", "P", "T", "HRR", "CHEM_COST", "Y_*"]

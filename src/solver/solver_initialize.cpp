@@ -68,8 +68,11 @@ void Solver::init_solution_restart() {
         throw std::runtime_error("Restart file " + file + " does not match the mesh.");
     }
     // Variables map by name: the flow block, then one RHOY_<name> per species
+    // CHEM_H (last chemistry sub-step) only seeds the integrator: a reacting run
+    // may start from a non-reacting one, and a non-reacting run ignores it
     std::vector<std::string> expected = restart_variables();
     for (const auto & name : restart.names) {
+        if (name == "CHEM_H") continue;
         if (std::find(expected.begin(), expected.end(), name) == expected.end()) {
             throw std::runtime_error("Restart file " + file + " has variable " + name + ", which this run does not " +
                                      (name.rfind("RHOY_", 0) == 0 ? "transport." : "know."));
@@ -77,6 +80,12 @@ void Solver::init_solution_restart() {
     }
     for (uint32_t v = 0; v < expected.size(); v++) {
         const std::vector<rtype> * values = restart.find(expected[v]);
+        if (expected[v] == "CHEM_H") {
+            for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
+                h_chem_h(i_cell) = values ? (*values)[i_cell] : 0.0_r;
+            }
+            continue;
+        }
         if (values == nullptr) {
             throw std::runtime_error("Restart file " + file + " has no variable " + expected[v] + ".");
         }
@@ -87,7 +96,7 @@ void Solver::init_solution_restart() {
             } else if (v < N_CONSERVATIVE + n_species) {
                 h_species(i_cell, v - N_CONSERVATIVE) = (*values)[i_cell];
             } else {
-                h_T_seed(i_cell) = (*values)[i_cell];  // the only auxiliary field
+                h_T_seed(i_cell) = (*values)[i_cell];
             }
         }
     }

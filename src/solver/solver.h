@@ -167,6 +167,18 @@ class Solver {
          */
         void update_cell_states(const State & solution, bool update_seed);
 
+        /**
+         * @brief Reacting mixtures: read [chemistry]; advance every owned cell
+         *        that needs it as an adiabatic constant-volume reactor over
+         *        dt_chem; heat release rate of every cell for output.
+         */
+        void init_chemistry();
+        void allocate_chemistry();
+        void advance_chemistry(double dt_chem);
+        void update_heat_release_rate();
+        /** @brief Over all ranks: owned cells advanced in the last chemistry call, max sub-steps of a cell in the last step. */
+        std::pair<uint64_t, double> chemistry_statistics();
+
         /** @brief Whether the gas is a mixture (a mechanism is given). */
         bool is_mixture() const { return mixture_model != nullptr; }
         const MixtureModel & get_mixture() const { return *mixture_model; }
@@ -345,6 +357,23 @@ class Solver {
         Kokkos::View<rtype **> face_mdot;                     // (face, q)
         Kokkos::View<rtype ***, Kokkos::LayoutRight> species_slots;  // (face, side, k)
         Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_Y, h_X;  // output
+
+        // Chemistry (Strang splitting around each flow step)
+        bool reacting = false;
+        chemistry::ReactorOptions chemistry_options;
+        double T_frozen = 0.0;
+        chemistry::KineticsTable<> kinetics;
+        Kokkos::View<rtype *> chem_h;     // last chemistry sub-step of each cell (restart: CHEM_H)
+        Kokkos::View<rtype *>::host_mirror_type h_chem_h;
+        Kokkos::View<rtype *> chem_cost;  // chemistry sub-steps of each cell in the last step
+        Kokkos::View<rtype *>::host_mirror_type h_chem_cost;
+        Kokkos::View<rtype *> hrr;        // heat release rate, for output
+        Kokkos::View<rtype *>::host_mirror_type h_hrr;
+        Kokkos::View<double **, Kokkos::LayoutRight> chem_work;     // (cell of a chunk, work)
+        Kokkos::View<uint32_t **, Kokkos::LayoutRight> chem_pivot;
+        Kokkos::View<uint32_t *> chem_active, chem_queue;
+        uint64_t chem_active_cells = 0;   // owned cells advanced in the last chemistry call
+        double t_wall_chemistry = 0.0;
 
         // Source terms
         bool has_gravity = false;

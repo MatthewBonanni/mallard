@@ -468,15 +468,18 @@ TEST(MixtureTest, InvalidMixtureInputsAreRejected) {
                                 "type = \"extrapolation\"\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n") +
                      mixture(H2O2),
                  "farfield");
-    expect_error(base + init + "X = { H2 = 1.0 }\n" + bcs + mixture(H2O2) + "[chemistry]\nenabled = true\n",
-                 "chemistry");
+    expect_error(base + init + "X = { H2 = 1.0 }\n" + bcs + mixture(H2O2) + "[chemistry]\nintegrator = \"bdf\"\n",
+                 "chemistry.integrator");
+    expect_error(base + init + "X = { N2 = 1.0 }\n" + bcs + mixture(PERFECT_AIR) + "[chemistry]\n", "no reactions");
+    expect_error(base + init + "[chemistry]\n" + bcs + perfect_air(), "[chemistry] needs");
 }
 
 TEST(MixtureTest, RestartedRunMatchesUninterruptedRunExactly) {
     // The temperature seed is part of the restart: without it, Newton starts
     // elsewhere and the last bits of T, and so of the flow, differ (also with
-    // double flux, whose frozen thermodynamics come from the seed)
-    for (const bool double_flux : {false, true}) {
+    // double flux, whose frozen thermodynamics come from the seed); with
+    // chemistry so is each cell's last sub-step, which seeds the integrator
+    for (const auto & [double_flux, reacting] : {std::pair{false, false}, {true, false}, {false, true}}) {
         const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mixture_restart").string();
         std::filesystem::remove_all(dir);
         auto input = [&](const std::string & init, uint32_t n_steps, const std::string & prefix) {
@@ -485,7 +488,8 @@ TEST(MixtureTest, RestartedRunMatchesUninterruptedRunExactly) {
                    "[initialize]\n" + init +
                    boundaries("type = \"extrapolation\"\n", "type = \"extrapolation\"\n", "type = \"symmetry\"\n",
                               "type = \"wall_adiabatic\"\n") +
-                   numerics("type = \"MUSCL\"\n", "HLLC", double_flux) + mixture(H2O2) + "[[write_data]]\nprefix = \"" +
+                   numerics("type = \"MUSCL\"\n", "HLLC", double_flux) + mixture(H2O2) +
+                   (reacting ? "[chemistry]\n" : "") + "[[write_data]]\nprefix = \"" +
                    dir + "/" + prefix + "\"\nformat = \"restart\"\ninterval = 15\n";
         };
         const std::string tube =
@@ -607,4 +611,61 @@ TEST(MixtureTest, DoubleFluxShockTubeStaysAccurateAndReportsItsEnergyError) {
     EXPECT_LT(double_flux, 1.2 * conservative) << "p: " << conservative << " -> " << double_flux;
     std::cout << "double flux: relative total-energy error " << double_flux_energy << ", L1 error of p "
               << double_flux << " (conservative " << conservative << ")\n";
+}
+
+namespace {
+
+/** @brief Temperature of every cell of a mixture run from its conservatives (host thermo). */
+std::vector<double> cell_temperatures(const Solver & solver, const chemistry::ThermoTable<Kokkos::HostSpace> & thermo) {
+    const uint32_t n_cells = solver.get_mesh()->n_cells, ns = thermo.n_species;
+    std::vector<double> T(n_cells), Y(ns);
+    for (uint32_t c = 0; c < n_cells; c++) {
+        const double rho = double(solver.h_conservatives(c, 0));
+        double u2 = 0.0;
+        FOR_I_DIM u2 += std::pow(double(solver.h_conservatives(c, 1 + i)) / rho, 2);
+        for (uint32_t k = 0; k < ns; k++) Y[k] = double(solver.h_species(c, k)) / rho;
+        const double e = double(solver.h_conservatives(c, N_DIM + 1)) / rho - 0.5 * u2;
+        T[c] = thermo.T_from_e(e, chemistry::MassFractions{Y.data()}, 1000.0);
+    }
+    return T;
+}
+
+std::string reacting_box(uint32_t n_steps, double dt) {
+    const std::string periodic = N_DIM == 2 ? "[\"x\", \"y\"]" : "[\"x\", \"y\", \"z\"]";
+    std::ostringstream s;
+    s << std::setprecision(17) << "[run]\nn_steps = " << n_steps << "\ndt = " << dt << "\n"
+      << mesh_block("cartesian", 3, 3, 1.0, 1.0, periodic)
+      << "[initialize]\ntype = \"constant\"\np = 101325.0\nT = 1200.0\nu = "
+      << (N_DIM == 2 ? "[0.0, 0.0]" : "[0.0, 0.0, 0.0]") << "\nX = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n"
+      << numerics("type = \"MUSCL\"\n", "HLLC") << mixture(H2O2) << "[chemistry]\n";
+    return s.str();
+}
+
+} // namespace
+
+TEST(ReactingTest, UniformMixtureIgnitesLikeTheConstantVolumeReactor) {
+    // V1 as a solver run: every cell of a uniform, quiescent box is an
+    // adiabatic constant-volume reactor; with Strang splitting the chemistry
+    // advances by dt per step. Against Cantera (stoichiometric H2/air,
+    // 1200 K, 1 atm): T at 0.5 and 2 ignition delays within 1%
+    const auto mech = chemistry::read_mechanism(H2O2);
+    const auto thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(mech);
+    std::vector<std::string> columns;
+    const auto ref = read_reference("h2o2_ignition.csv", columns);
+    const auto column = [&](const std::string & name) {
+        return static_cast<size_t>(std::find(columns.begin(), columns.end(), name) - columns.begin());
+    };
+    const auto row = std::find_if(ref.begin(), ref.end(), [&](const std::vector<double> & r) {
+        return r[column("T0")] == 1200.0 && r[column("phi")] == 1.0 && r[column("p0")] == 101325.0;
+    });
+    ASSERT_NE(row, ref.end());
+    const double tau = (*row)[column("tau")];
+    for (const auto & [n_steps, name] : {std::pair<uint32_t, std::string>{25, "T_half_tau"}, {100, "T_2tau"}}) {
+        Solver solver;
+        solver.init(parse_toml(reacting_box(n_steps, tau / 50.0)));
+        solver.run();
+        solver.copy_device_to_host();
+        const double T_ref = (*row)[column(name)];
+        for (double T : cell_temperatures(solver, thermo)) EXPECT_NEAR(T, T_ref, 1e-2 * T_ref) << name;
+    }
 }

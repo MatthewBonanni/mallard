@@ -1,7 +1,7 @@
 # Design: finite-rate chemistry
 
 Status: accepted (see [Decisions on the open questions](#decisions-on-the-open-questions)).
-Implementation follows the [milestones](#10-milestones); done: 1, 2, 3, 4, 5, 6, 7.
+Implementation follows the [milestones](#10-milestones); done: 1, 2, 3, 4, 5, 6, 7, 8.
 
 Mallard today solves a single calorically perfect gas. This document adds
 multicomponent, thermally perfect mixtures and finite-rate chemistry with
@@ -432,6 +432,49 @@ U^n --chem(dt/2)--> U* --SSPRK3 flow step(dt)--> U** --chem(dt/2)--> U^{n+1}
   flow work (TENO troubled cells, species fluxes) uses the dynamic mesh
   rebalancing prepared in [mpi.md, section 10](mpi.md#10-room-for-dynamic-load-balancing),
   with the measured per-cell chemistry cost added to the partition weights.
+
+### As implemented (milestone 8)
+
+`src/solver/solver_chemistry.cpp`: `take_step` runs chemistry over `dt / 2`,
+the flow step, and chemistry over `dt / 2` again; the two halves of
+consecutive steps are not fused yet (each half restarts RODAS from the
+cell's last sub-step, so the cost of the split is one extra Jacobian per
+cell and step; fusing is an optimization for later). Owned cells are
+processed in chunks sized to keep the per-cell work memory (mass fractions,
+RODAS vectors and two `(Ns + 1)^2` matrices) under 1 GiB; in each chunk a
+kernel flags the cells that need chemistry (`T >= T_frozen` and
+`dt/2 max_k |W_k omega_k / rho| > atol / 100` at the current state), a scan
+compacts them into a queue, and one thread per queued cell integrates.
+Halo cells get no chemistry: the halo exchange of the first RK stage
+refreshes them. Chemistry does not update the Newton seed of `T`
+(`T_SEED`): only the RHS does, so halo copies of a cell keep the same seed
+as its owner and runs stay bitwise independent of the rank count (writing
+the seed from chemistry broke this at the 1e-5 level through the ignition
+delay's sensitivity to 1e-10 differences in `T`). `CHEM_H` is restarted;
+`HRR` and `CHEM_COST` are output variables. PLOG (`ln k` linear in `ln p`
+between levels, constant outside, rates at one pressure summed) and
+Chebyshev reactions use `p = C_total R T`, so their Jacobian gains
+`d q / d C_j = q (d ln k / d ln p) / C_total` for every `j` and
+`d q / dT` a `(d ln k / d ln p) / T` term.
+
+Validation (MUSCL, HLLC, SSPRK3, h2o2 mechanism, default tolerances):
+- V7 (`examples/detonation_1d`): with this mechanism the recombination zone
+  of 2H2-O2-7Ar at 6.67 kPa is about 0.8 m (ZND), so a detonation started by
+  a driver at a closed end stays under-supported over practical tubes (it
+  ran steadily 9% below D_CJ over 0.6 m). The case therefore starts from the
+  ZND profile (`tools/znd_restart.py`) instead of an overdriven start. Front
+  speed against D_CJ = 1616.9 m/s: +0.11%, +0.01%, 0.00% at 10, 20, 40 cells
+  per ZND induction length (1.525 mm); induction length -4.5%, -1.8%, +2.7%
+  (one cell at 40 is 2.5%); peak pressure 174.8 kPa against the von
+  Neumann 174.7 kPa.
+- V6 (`examples/reactive_shock_tube`): reaction front at 230 us at
+  99.625, 99.662, 99.644 mm with 50, 25, 12.5 um cells (within one coarse
+  cell of the finest); peak T 2875.2, 2876.1, 2876.6 K and peak p 316.6,
+  315.7, 315.7 kPa.
+- A100 with one cell per thread: these 1D cases (2,400 to 16,000 cells) run
+  at 0.2-2 M cells/s, latency-bound (4-14 ms per step, 60-90% in chemistry);
+  a CPU with 8 threads reaches 0.6 M cells/s on them. Milestone 10's
+  team-per-cell kernels and larger meshes are what the GPU needs.
 
 ## 5. Chemistry
 

@@ -205,7 +205,7 @@ TEST(ChemistryKineticsTest, AnalyticalJacobianMatchesFiniteDifferences) {
 
 TEST(ChemistryKineticsTest, ReaderKeepsReactionOptionsAndRejectsUnsupportedTypes) {
     const Mechanism mech = read_mechanism(SOURCE_DIR + "/test/data/chemistry/test_kinetics.yaml", "gas");
-    ASSERT_EQ(mech.reactions.size(), 8u);  // both sections
+    ASSERT_EQ(mech.reactions.size(), 10u);  // both sections
     const Reaction & collider = mech.reactions[2];
     EXPECT_EQ(collider.type, ReactionType::FALLOFF);
     EXPECT_EQ(collider.default_efficiency, 0.0);
@@ -223,8 +223,8 @@ TEST(ChemistryKineticsTest, ReaderKeepsReactionOptionsAndRejectsUnsupportedTypes
                            "  kinetics: gas\nspecies:\n"
                            "- {name: H2, composition: {H: 2}, thermo: {model: constant-cp}}\n"
                            "- {name: H, composition: {H: 1}, thermo: {model: constant-cp}}\n"
-                           "reactions:\n- equation: H2 <=> 2 H\n  type: pressure-dependent-Arrhenius\n"
-                           "  rate-constants: []\n";
+                           "reactions:\n- equation: H2 <=> 2 H\n  type: chemically-activated\n"
+                           "  low-P-rate-constant: {A: 1.0, b: 0.0, Ea: 0.0}\n";
     try {
         read_mechanism(file);
         ADD_FAILURE() << "an unsupported reaction type was accepted";

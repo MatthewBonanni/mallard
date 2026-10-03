@@ -81,6 +81,8 @@ enum class ReactionType {
     ELEMENTARY,
     THREE_BODY,
     FALLOFF,
+    PLOG,       // pressure-dependent Arrhenius: ln k interpolated linearly in ln p
+    CHEBYSHEV,  // log10 k as a Chebyshev series in 1/T and log10 p
 };
 
 enum class FalloffType {
@@ -108,6 +110,10 @@ struct Reaction {
     std::array<double, 5> falloff_params = {};  // Troe A, T3, T1, T2; SRI a, b, c, d, e
     std::vector<std::pair<int32_t, double>> efficiencies;  // third-body efficiencies other than the default
     double default_efficiency = 1.0;
+    std::vector<std::pair<double, Arrhenius>> plog;  // PLOG: (pressure [Pa], rate), by increasing pressure
+    std::array<double, 4> chebyshev_range = {};     // Chebyshev: T_min, T_max [K], p_min, p_max [Pa]
+    uint32_t chebyshev_n_T = 0, chebyshev_n_p = 0;
+    std::vector<double> chebyshev;                  // (n_T x n_p) coefficients of log10 k, k in SI with kmol
 };
 
 /**

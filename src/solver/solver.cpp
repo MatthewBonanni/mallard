@@ -292,11 +292,8 @@ void Solver::init_rhs_split() {
 void Solver::init_physics() {
     if (!input.contains("physics")) throw InputError("missing [physics] table.");
     const std::string gas = toml::find_or<std::string>(input, "physics", "gas", "perfect");
-    if (input.contains("chemistry")) {
-        throw InputError("[chemistry]: finite-rate chemistry is not available yet; gas = \"mixture\" runs are "
-                         "non-reacting.");
-    }
     if (gas == "perfect") {
+        if (input.contains("chemistry")) throw InputError("[chemistry] needs physics.gas = \"mixture\".");
         physics = Euler::from_input(input);
         return;
     }
@@ -311,6 +308,7 @@ void Solver::init_physics() {
     mixture = mixture_model->device();
     species_names = mixture_model->species_names();
     physics = Euler();
+    init_chemistry();
 }
 
 void Solver::init_boundaries() {
@@ -759,6 +757,7 @@ void Solver::allocate_memory() {
         }
         h_Y = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("Y", mesh->n_cells, n_species);
         h_X = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("X", mesh->n_cells, n_species);
+        if (reacting) allocate_chemistry();
     }
     h_conservatives = Kokkos::create_mirror_view(conservatives);
     h_species = Kokkos::create_mirror_view(species);
@@ -780,6 +779,7 @@ void Solver::copy_host_to_device() {
     Kokkos::deep_copy(conservatives, h_conservatives);
     if (species.span() > 0) Kokkos::deep_copy(species, h_species);
     if (is_mixture()) Kokkos::deep_copy(T_seed, h_T_seed);
+    if (reacting) Kokkos::deep_copy(chem_h, h_chem_h);
     Kokkos::deep_copy(primitives, h_primitives);
 }
 
@@ -788,6 +788,12 @@ void Solver::copy_device_to_host() {
     if (species.span() > 0) Kokkos::deep_copy(h_species, species);
     if (is_mixture()) {
         Kokkos::deep_copy(h_T_seed, T_seed);
+        if (reacting) {
+            update_heat_release_rate();
+            Kokkos::deep_copy(h_hrr, hrr);
+            Kokkos::deep_copy(h_chem_h, chem_h);
+            Kokkos::deep_copy(h_chem_cost, chem_cost);
+        }
         std::vector<double> Y(species_names.size());
         for (uint32_t c = 0; c < mesh->n_cells; c++) {
             const double rho = static_cast<double>(h_conservatives(c, 0));
@@ -816,12 +822,17 @@ void Solver::register_data() {
         data.push_back(Data("RHOY_" + species_names[k], Kokkos::subview(h_species, Kokkos::ALL(), k)));
     }
     if (is_mixture()) {
-        data.reserve(data.size() + 2 * species_names.size() + 1 + PRIMITIVE_NAMES.size() + 2);
+        data.reserve(data.size() + 2 * species_names.size() + 4 + PRIMITIVE_NAMES.size() + 2);
         for (size_t k = 0; k < species_names.size(); k++) {
             data.push_back(Data("Y_" + species_names[k], Kokkos::subview(h_Y, Kokkos::ALL(), k)));
             data.push_back(Data("X_" + species_names[k], Kokkos::subview(h_X, Kokkos::ALL(), k)));
         }
         data.push_back(Data("T_SEED", h_T_seed));
+        if (reacting) {
+            data.push_back(Data("CHEM_H", h_chem_h));
+            data.push_back(Data("CHEM_COST", h_chem_cost));
+            data.push_back(Data("HRR", h_hrr));
+        }
     }
     for (size_t i = 0; i < PRIMITIVE_NAMES.size(); i++) {
         data.push_back(Data(PRIMITIVE_NAMES[i], Kokkos::subview(h_primitives, Kokkos::ALL(), i)));
@@ -838,6 +849,7 @@ std::vector<std::string> Solver::restart_variables() const {
     std::vector<std::string> names(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
     for (const auto & name : species_names) names.push_back("RHOY_" + name);
     if (is_mixture()) names.push_back("T_SEED");
+    if (reacting) names.push_back("CHEM_H");
     return names;
 }
 
@@ -960,6 +972,7 @@ void Solver::print_progress() {
                                     "wall/step", "cells/s", "ETA", "min rho", "min p", "max Ma");
         if (teno) header += format(" %8s", "troubled");
         if (is_mixture()) header += format(" %8s %8s %9s", "min T", "max T", "sum Y-1");
+        if (reacting) header += format(" %8s %6s", "reacting", "chem/c");
         logging::line(logging::style(header, logging::Style::BOLD));
     }
     n_progress_rows++;
@@ -982,6 +995,10 @@ void Solver::print_progress() {
     if (is_mixture()) {
         row += format(" %8.1f %8.1f %9.2e", static_cast<double>(mix[3]), static_cast<double>(-mix[4]),
                       static_cast<double>(-mix[5]));
+    }
+    if (reacting) {
+        const auto [active, max_cost] = chemistry_statistics();
+        row += format(" %7.2f%% %6.0f", 100.0 * active / n_cells_global, max_cost);
     }
     logging::line(row);
 
@@ -1011,6 +1028,12 @@ void Solver::print_setup() const {
     logging::item("Stop at", stop);
     if (check_nan) logging::item("NaN check", "every step");
     if (double_flux) logging::item("Double flux", "frozen gamma and e0 per cell and step (not energy conservative)");
+    if (reacting) {
+        logging::item("Chemistry", std::to_string(kinetics.n_reactions) + " reactions, Strang splitting, RODAS (rtol " +
+                                       real(chemistry_options.integrator.rtol) + ", atol " +
+                                       real(chemistry_options.atol_Y) + ")" +
+                                       (T_frozen > 0.0 ? ", frozen below " + real(T_frozen) + " K" : ""));
+    }
 
     logging::section("Boundaries");
     logging::items(boundary_summary);
@@ -1040,6 +1063,11 @@ void Solver::print_summary(const std::string & stop) const {
     logging::item("Wall time", duration(total) + ": setup " + duration(t_wall_setup) + ", time stepping " +
                                    duration(t_wall_stepping) + ", diagnostics " + duration(t_wall_checks) +
                                    ", output " + duration(t_wall_output));
+    if (reacting && t_wall_stepping > 0.0) {
+        logging::item("Chemistry", duration(t_wall_chemistry) + " (" +
+                                       logging::format("%.0f%%", 100.0 * t_wall_chemistry / t_wall_stepping) +
+                                       " of time stepping)");
+    }
     if (steps > 0 && t_wall_stepping > 0.0) {
         logging::item("Throughput", logging::si(n_cells_global * steps / t_wall_stepping) + " cells/s, " +
                                         duration(t_wall_stepping / steps) + " per step over " +
@@ -1106,6 +1134,11 @@ void Solver::write_data(bool force) {
 }
 
 void Solver::take_step() {
+    if (reacting) {
+        Kokkos::deep_copy(chem_cost, 0.0_r);
+        advance_chemistry(0.5 * static_cast<double>(dt));
+        halo_current = false;
+    }
     if (double_flux) {
         freeze_thermodynamics();
         cells_frozen = true;
@@ -1115,6 +1148,7 @@ void Solver::take_step() {
         cells_frozen = false;
         reset_energy();
     }
+    if (reacting) advance_chemistry(0.5 * static_cast<double>(dt));
     halo_current = false;
     Kokkos::fence();
     step++;

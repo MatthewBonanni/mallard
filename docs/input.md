@@ -118,8 +118,8 @@ translation = [1.0, 0.0]
 | `mechanism` | (`mixture`) A [Cantera YAML](https://cantera.org/stable/yaml/index.html) file, e.g. `mechanisms/h2o2.yaml` (see `mechanisms/README.md`); Chemkin files convert with Cantera's `ck2yaml` |
 | `phase` | (`mixture`) Phase of the file to use; default the first |
 
-Gas mixtures (`gas = "mixture"`) are non-reacting for now and need
-`type = "euler"` and the `Rusanov`, `HLL` or `HLLC` Riemann solver; any face
+Gas mixtures (`gas = "mixture"`) react when the input has a `[chemistry]`
+table, and need `type = "euler"` and the `Rusanov`, `HLL` or `HLLC` Riemann solver; any face
 reconstruction works. Species thermodynamics are NASA-7, NASA-9 or constant-cp
 polynomials from the file, evaluated in double precision in every build. Each
 species is transported (`rho Y_k`) with mass-flux upwinding, so mass fractions
@@ -191,6 +191,35 @@ the zone's faces whose centers satisfy the expression.
 | `max_condition` | (`TENO`) Stencils grow until the least-squares system's condition estimate is below this, default 1e8 |
 | `cache_file` | (`TENO`) Save the precomputed stencils and matrices here, and reuse them on later runs of the same mesh, boundary assignment and TENO options; anything else is detected and recomputed. Distributed runs write one file per rank, `<cache_file>.r<rank>-of-<ranks>`, for that rank count and partition, and record the halo depth the stencils need, so a cached run sets up its halo once. Hilbert and graph partitions repeat for the same mesh and rank count. Size per cell: about 2.5 / 4 / 6 / 11 KB in 2D and 10 / 19 / 36 KB (hexahedra) or 9 / 14 / 33 / 74 KB (tetrahedra) in 3D for orders 3 / 4 / 5 / 6, e.g. 9.4 GB for 64^3 hexahedra at order 5; reading it takes seconds, against minutes of setup in 3D |
 | `bound_preserving` | (`TENO`) Scale troubled-cell polynomials to keep density and pressure within the neighbors' range, default false |
+
+## `[chemistry]`
+
+Finite-rate chemistry of gas mixtures (`gas = "mixture"` with a mechanism
+that has reactions). Each step is Strang split: every owned cell that needs
+it is advanced as an adiabatic, constant-volume reactor over `dt / 2`, then
+the flow takes its step, then the reactors take another `dt / 2`. The
+integrator is RODAS, an adaptive Rosenbrock method with the analytical
+Jacobian, in double precision in every build.
+
+| Key | Description |
+|---|---|
+| `enabled` | `false` keeps the mixture non-reacting (default `true`) |
+| `integrator` | `rosenbrock` (the default and only choice so far) |
+| `coupling` | `strang` (the default and only choice so far) |
+| `rtol` | Relative tolerance on the mass fractions and `T` (default `1e-6`) |
+| `atol` | Absolute tolerance on the mass fractions (default `1e-10`) |
+| `max_steps` | Sub-steps allowed per cell and half step (default 100000); more stop the run |
+| `T_frozen` | No chemistry in cells below this temperature (default 0) |
+
+Cells whose mass fractions would change by less than `atol / 100` over the
+half step at their current rates are skipped. Reaction types: elementary,
+three-body, falloff (Lindemann, Troe, SRI), `pressure-dependent-Arrhenius`
+(PLOG) and `Chebyshev`. Output variables: `HRR` (heat release rate,
+W/m^3) and `CHEM_COST` (chemistry sub-steps of the cell in the last step);
+restart files also hold `CHEM_H`, each cell's last sub-step, so restarted
+runs repeat the uninterrupted one exactly. The progress rows add the share of
+cells advanced in the last half step and the most sub-steps of a cell in the
+last step, and the summary the chemistry's share of the wall time.
 
 ## `[[forces]]`
 
@@ -267,7 +296,7 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | `prefix` | Output path prefix; directories are created as needed |
 | `format` | `vtu` (with a `.pvd` series next to it) or `restart` |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
-| `variables` | (`vtu`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
+| `variables` | (`vtu`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `[chemistry]` also `HRR` and `CHEM_COST`). A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
 | `geometry` | (`vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |
 
 ## `MallardReactor`

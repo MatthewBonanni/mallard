@@ -121,6 +121,8 @@ void merge(std::vector<std::pair<int32_t, double>> & terms, int32_t k, double nu
     terms.emplace_back(k, nu);
 }
 
+const Dimension PRESSURE{0, 0, 0, 0, 0, 0, 1.0};
+
 class Reader {
     public:
         explicit Reader(const std::string & file) { main = load(file); }
@@ -276,9 +278,13 @@ bool Reader::parse_reaction(const YAML::Node & node, const Source & source, cons
     } else if (type == "three-body" || !lhs.third_body.empty()) {
         if (lhs.third_body.empty()) throw std::runtime_error(where + ": three-body reactions need + M.");
         r.type = ReactionType::THREE_BODY;
+    } else if (type == "pressure-dependent-Arrhenius") {
+        r.type = ReactionType::PLOG;
+    } else if (type == "Chebyshev") {
+        r.type = ReactionType::CHEBYSHEV;
     } else if (type != "elementary" && type != "reaction") {
         throw std::runtime_error(where + ": reaction type \"" + type + "\" is not supported (elementary, three-body, "
-                                 "falloff).");
+                                 "falloff, pressure-dependent-Arrhenius, Chebyshev).");
     }
     if (node["duplicate"]) r.duplicate = node["duplicate"].as<bool>();
 
@@ -327,6 +333,40 @@ bool Reader::parse_reaction(const YAML::Node & node, const Source & source, cons
             r.falloff_params = {sri["A"].as<double>(), sri["B"].as<double>(), sri["C"].as<double>(),
                                 sri["D"] ? sri["D"].as<double>() : 1.0, sri["E"] ? sri["E"].as<double>() : 0.0};
         }
+    } else if (r.type == ReactionType::PLOG) {
+        const YAML::Node list = node["rate-constants"];
+        if (!list || !list.IsSequence() || list.size() == 0) throw std::runtime_error(where + ": no rate-constants.");
+        for (const auto & entry : list) {
+            if (!entry["P"]) throw std::runtime_error(where + ": a rate-constants entry has no P.");
+            const double p = source.units.convert(entry["P"], PRESSURE, where + " P");
+            if (!(p > 0.0)) throw std::runtime_error(where + ": pressures must be positive.");
+            r.plog.emplace_back(p, arrhenius(entry, order, "rate-constants entry"));
+        }
+        std::stable_sort(r.plog.begin(), r.plog.end(),
+                         [](const auto & a, const auto & b) { return a.first < b.first; });
+    } else if (r.type == ReactionType::CHEBYSHEV) {
+        const YAML::Node T_range = node["temperature-range"], p_range = node["pressure-range"], data = node["data"];
+        if (!T_range || T_range.size() != 2 || !p_range || p_range.size() != 2 || !data || !data.IsSequence() ||
+            data.size() == 0) {
+            throw std::runtime_error(where + ": Chebyshev reactions need temperature-range, pressure-range and data.");
+        }
+        r.chebyshev_range = {T_range[0].as<double>(), T_range[1].as<double>(),
+                             source.units.convert(p_range[0], PRESSURE, where + " pressure-range"),
+                             source.units.convert(p_range[1], PRESSURE, where + " pressure-range")};
+        if (!(r.chebyshev_range[0] > 0.0 && r.chebyshev_range[1] > r.chebyshev_range[0] &&
+              r.chebyshev_range[2] > 0.0 && r.chebyshev_range[3] > r.chebyshev_range[2])) {
+            throw std::runtime_error(where + ": invalid Chebyshev ranges.");
+        }
+        r.chebyshev_n_T = data.size();
+        r.chebyshev_n_p = data[0].size();
+        // The rate constant's units (those of A for this order) enter through the first coefficient
+        const Dimension dimension{0, 3.0 * (order - 1.0), -1.0, 0, 1.0 - order, 0, 0};
+        const double factor = source.units.convert(YAML::Node(1.0), dimension, where + " data");
+        for (const auto & row : data) {
+            if (row.size() != r.chebyshev_n_p) throw std::runtime_error(where + ": Chebyshev data rows differ in length.");
+            for (const auto & value : row) r.chebyshev.push_back(value.as<double>());
+        }
+        r.chebyshev[0] += std::log10(factor);
     } else {
         if (node["rate-constant"] && node["rate-constant"].IsMap() && !node["rate-constant"]["A"]) {
             throw std::runtime_error(where + ": unsupported rate parameterization.");
@@ -334,7 +374,7 @@ bool Reader::parse_reaction(const YAML::Node & node, const Source & source, cons
         r.rate = arrhenius(node["rate-constant"], r.type == ReactionType::THREE_BODY ? order + 1.0 : order,
                            "rate-constant");
     }
-    if (r.type != ReactionType::ELEMENTARY) {
+    if (r.type == ReactionType::THREE_BODY || r.type == ReactionType::FALLOFF) {
         if (lhs.third_body != "M") {
             // A specific collider, "(+AR)"
             const int32_t k = mech.species_index(lhs.third_body);
