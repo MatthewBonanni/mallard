@@ -12,7 +12,11 @@
 #include "distributed_mesh.h"
 
 #include <algorithm>
+#include <bit>
+#include <cmath>
+#include <limits>
 #include <numeric>
+#include <span>
 #include <stdexcept>
 #include <string>
 
@@ -88,66 +92,295 @@ int rank_in(const std::vector<uint64_t> & dist, uint64_t g) {
     return std::upper_bound(dist.begin(), dist.end(), g) - dist.begin() - 1;
 }
 
+PeriodicGrid::Point to_point(const std::array<double, N_DIM> & x) {
+    PeriodicGrid::Point y;
+    FOR_I_DIM y[i] = x[i];
+    return y;
+}
+
+// Signs of periodic links
+constexpr uint64_t PLUS = 1, MINUS = 0;
+
+uint64_t pack_lattice(const std::array<int8_t, 3> & l) {
+    uint64_t x = 0;
+    for (int j = 0; j < 3; j++) x |= uint64_t(uint8_t(l[j])) << (8 * j);
+    return x;
+}
+
+std::array<int8_t, 3> unpack_lattice(uint64_t x) {
+    std::array<int8_t, 3> l;
+    for (int j = 0; j < 3; j++) l[j] = int8_t(uint8_t(x >> (8 * j)));
+    return l;
+}
+
 } // namespace
 
 int DistributedMesh::rank_of_cell(uint64_t g) const { return rank_in(cell_dist, g); }
 
+const std::pair<uint64_t, std::array<int8_t, 3>> * DistributedMesh::periodic_class(uint64_t g) const {
+    auto it = cells.periodic.find(g);
+    if (it != cells.periodic.end()) return &it->second;
+    it = block_periodic.find(g);
+    return it == block_periodic.end() ? nullptr : &it->second;
+}
+
 uint64_t DistributedMesh::node_key(uint64_t g) const {
-    const auto it = periodic_nodes.find(g);
-    return it == periodic_nodes.end() ? g : it->second.first;
+    const auto * c = periodic_class(g);
+    return c ? c->first : g;
 }
 
 void DistributedMesh::match_periodic(const std::vector<Mesh::PeriodicPair> & pairs) {
-    std::vector<uint32_t> zone_of(block.zone_names.size(), ~uint32_t(0));
-    for (const auto & pair : pairs) {
-        for (const std::string & zone : {pair.zone_a, pair.zone_b}) {
+    const int p = comm::size(), me = comm::rank();
+    const size_t n_pairs = pairs.size();
+    // Role of every periodic zone: 2 * pair + side (0 for zone_a, 1 for zone_b)
+    std::vector<uint32_t> role(block.zone_names.size(), NO_ZONE);
+    for (size_t k = 0; k < n_pairs; k++) {
+        for (uint32_t side = 0; side < 2; side++) {
+            const std::string & zone = side ? pairs[k].zone_b : pairs[k].zone_a;
             const auto it = std::find(block.zone_names.begin(), block.zone_names.end(), zone);
             if (it == block.zone_names.end()) {
                 throw std::runtime_error("Periodic zone " + zone + " is not a boundary zone of the mesh.");
             }
-            zone_of[it - block.zone_names.begin()] = 1;
+            role[it - block.zone_names.begin()] = 2 * k + side;
         }
     }
-    // Every periodic boundary face on every rank, as (zone, n, nodes...)
-    std::vector<uint64_t> local;
-    for (uint64_t f = 0; f < block.n_faces(); f++) {
-        if (zone_of[block.face_zone[f]] == ~uint32_t(0)) continue;
-        local.push_back(block.face_zone[f]);
-        local.push_back(block.face_offsets[f + 1] - block.face_offsets[f]);
-        local.insert(local.end(), block.face_nodes.begin() + block.face_offsets[f],
-                     block.face_nodes.begin() + block.face_offsets[f + 1]);
-    }
-    const std::vector<uint64_t> faces = comm::allgatherv(local);
+    const std::vector<size_t> dirs = periodic_directions(pairs, periodic_classes);
+
+    // The block's zone nodes; each pair's shortest zone edge h sets its grid
+    // and tolerance, as in the serial matching
+    std::vector<std::pair<uint64_t, uint64_t>> zone_nodes;  // (role, node)
     std::vector<uint64_t> ids;
-    for (size_t i = 0; i < faces.size(); i += 2 + faces[i + 1]) {
-        ids.insert(ids.end(), faces.begin() + i + 2, faces.begin() + i + 2 + faces[i + 1]);
+    for (uint64_t f = 0; f < block.n_faces(); f++) {
+        if (role[block.face_zone[f]] == NO_ZONE) continue;
+        for (uint64_t k = block.face_offsets[f]; k < block.face_offsets[f + 1]; k++) {
+            zone_nodes.push_back({role[block.face_zone[f]], block.face_nodes[k]});
+            ids.push_back(block.face_nodes[k]);
+        }
     }
+    std::sort(zone_nodes.begin(), zone_nodes.end());
+    zone_nodes.erase(std::unique(zone_nodes.begin(), zone_nodes.end()), zone_nodes.end());
     std::sort(ids.begin(), ids.end());
     ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
-    // Coordinates from the ranks whose node blocks hold them, in rank and so id order
-    std::vector<double> coords;
-    for (uint64_t g : ids) {
-        if (g < block.first_node || g >= block.first_node + block.n_nodes()) continue;
-        const auto & x = block.node_coords[g - block.first_node];
-        coords.insert(coords.end(), x.begin(), x.end());
+    const std::vector<std::array<double, N_DIM>> coords = fetch_nodes(ids);
+    auto coords_of = [&](uint64_t g) -> const std::array<double, N_DIM> & {
+        return coords[std::lower_bound(ids.begin(), ids.end(), g) - ids.begin()];
+    };
+    std::vector<rtype> min_edge(n_pairs, std::numeric_limits<rtype>::max());
+    for (uint64_t f = 0; f < block.n_faces(); f++) {
+        if (role[block.face_zone[f]] == NO_ZONE) continue;
+        rtype & h = min_edge[role[block.face_zone[f]] / 2];
+        const uint64_t * face_nodes = &block.face_nodes[block.face_offsets[f]];
+        const uint64_t n = block.face_offsets[f + 1] - block.face_offsets[f];
+        for (uint64_t k = 0; k < n; k++) {
+            const auto a = to_point(coords_of(face_nodes[k])), b = to_point(coords_of(face_nodes[(k + 1) % n]));
+            rtype d2 = 0.0;
+            FOR_I_DIM d2 += (a[i] - b[i]) * (a[i] - b[i]);
+            if (d2 > 0.0_r) h = std::min(h, std::sqrt(d2));
+        }
     }
-    coords = comm::allgatherv(coords);
+    std::vector<double> h(n_pairs);
+    for (size_t k = 0; k < n_pairs; k++) h[k] = static_cast<double>(min_edge[k]);
+    comm::allreduce(std::span<double>(h), comm::Op::MIN);
+    std::vector<PeriodicGrid> grids;
+    for (size_t k = 0; k < n_pairs; k++) grids.emplace_back(static_cast<rtype>(h[k]));
 
-    // The serial matching on the compact mesh of these nodes and faces
-    std::vector<std::array<rtype, N_DIM>> nodes(ids.size());
-    for (size_t k = 0; k < ids.size(); k++) FOR_I_DIM nodes[k][i] = coords[k * N_DIM + i];
-    auto compact = [&](uint64_t g) { return uint32_t(std::lower_bound(ids.begin(), ids.end(), g) - ids.begin()); };
-    std::vector<Mesh::BoundaryFace> boundary_faces;
-    for (size_t i = 0; i < faces.size(); i += 2 + faces[i + 1]) {
-        Mesh::BoundaryFace bf;
-        bf.zone = block.zone_names[faces[i]];
-        for (uint64_t k = 0; k < faces[i + 1]; k++) bf.nodes.push_back(compact(faces[i + 2 + k]));
-        boundary_faces.push_back(std::move(bf));
+    // Each node of zone_a, translated, goes to the rank its grid cell hashes
+    // to; each node of zone_b to the ranks of every cell around its own, so
+    // that rank sees all the candidates the serial matching sees. Records are
+    // (role, node, coordinates).
+    constexpr int WIDTH = 2 + N_DIM;
+    auto rank_of_grid_cell = [&](size_t k, const PeriodicGrid::Cell & c) {
+        uint64_t x = mix(k);
+        for (int64_t v : c) x = mix(x ^ uint64_t(v));
+        return int(x % p);
+    };
+    auto translated = [&](size_t k, PeriodicGrid::Point x) {
+        FOR_I_DIM x[i] += pairs[k].translation[i];
+        return x;
+    };
+    std::vector<std::vector<uint64_t>> send(p);
+    std::vector<int> ranks;
+    for (const auto & [r, g] : zone_nodes) {
+        const size_t k = r / 2;
+        const auto & x = coords_of(g);
+        ranks.clear();
+        if (r % 2 == 0) {
+            ranks.push_back(rank_of_grid_cell(k, grids[k].cell_of(translated(k, to_point(x)))));
+        } else {
+            const PeriodicGrid::Cell c = grids[k].cell_of(to_point(x));
+            for (int m = 0; m < PeriodicGrid::N_NEIGHBORS; m++) {
+                ranks.push_back(rank_of_grid_cell(k, PeriodicGrid::neighbor(c, m)));
+            }
+            std::sort(ranks.begin(), ranks.end());
+            ranks.erase(std::unique(ranks.begin(), ranks.end()), ranks.end());
+        }
+        for (int q : ranks) {
+            send[q].insert(send[q].end(), {r, g});
+            for (double v : x) send[q].push_back(std::bit_cast<uint64_t>(v));
+        }
     }
-    PeriodicNodes classes = match_periodic_nodes(nodes, boundary_faces, pairs);
-    for (size_t k = 0; k < ids.size(); k++) periodic_nodes[ids[k]] = {ids[classes.key[k]], classes.lattice[k]};
-    periodic_classes.zones = std::move(classes.zones);
-    periodic_classes.translations = std::move(classes.translations);
+    zone_nodes = {};
+    comm::Received<uint64_t> received = comm::exchange(std::move(send));
+    const uint64_t n_records = received.data.size() / WIDTH;
+    const uint64_t * rec = received.data.data();
+    // Sorted by (role, node), each node once
+    std::vector<uint64_t> order(n_records);
+    std::iota(order.begin(), order.end(), uint64_t(0));
+    auto same_node = [&](uint64_t x, uint64_t y) { return std::equal(rec + x * WIDTH, rec + x * WIDTH + 2, rec + y * WIDTH); };
+    std::sort(order.begin(), order.end(), [&](uint64_t x, uint64_t y) {
+        return std::lexicographical_compare(rec + x * WIDTH, rec + x * WIDTH + 2, rec + y * WIDTH, rec + y * WIDTH + 2);
+    });
+    order.erase(std::unique(order.begin(), order.end(), same_node), order.end());
+    auto record_point = [&](uint64_t j) {
+        std::array<double, N_DIM> x;
+        FOR_I_DIM x[i] = std::bit_cast<double>(rec[j * WIDTH + 2 + i]);
+        return to_point(x);
+    };
+
+    // Zone sizes, each node counted by the rank of its own grid cell
+    std::vector<uint64_t> b_nodes;
+    std::vector<uint64_t> counts(2 * n_pairs, 0);
+    for (uint64_t j : order) {
+        const uint64_t r = rec[j * WIDTH], k = r / 2;
+        if (r % 2 == 0) {
+            counts[r]++;
+        } else {
+            const auto x = record_point(j);
+            grids[k].insert(b_nodes.size(), x);
+            b_nodes.push_back(rec[j * WIDTH + 1]);
+            counts[r] += rank_of_grid_cell(k, grids[k].cell_of(x)) == me;
+        }
+    }
+    comm::allreduce(std::span<uint64_t>(counts), comm::Op::SUM);
+    for (size_t k = 0; k < n_pairs; k++) {
+        for (size_t side = 0; side < 2; side++) {
+            if (counts[2 * k + side] == 0) {
+                throw std::runtime_error("Periodic zone " + (side ? pairs[k].zone_b : pairs[k].zone_a) +
+                                         " is not a boundary zone of the mesh.");
+            }
+        }
+        if (counts[2 * k] != counts[2 * k + 1]) {
+            throw std::runtime_error("Periodic zones " + pairs[k].zone_a + " and " + pairs[k].zone_b + " have " +
+                                     std::to_string(counts[2 * k]) + " and " + std::to_string(counts[2 * k + 1]) +
+                                     " nodes.");
+        }
+    }
+
+    // Each match becomes two links (node, other, pair, sign), with x_node =
+    // x_other + sign * translation, at the ranks whose blocks hold the nodes
+    std::string error;
+    send.assign(p, {});
+    for (uint64_t j : order) {
+        const uint64_t r = rec[j * WIDTH], k = r / 2, a = rec[j * WIDTH + 1];
+        if (r % 2) continue;
+        const auto x = record_point(j);
+        uint32_t match = 0;
+        const uint32_t n_found = grids[k].find(translated(k, x), match);
+        if (n_found != 1) {
+            error = "Periodic zones " + pairs[k].zone_a + " and " + pairs[k].zone_b + ": node " +
+                    periodic_point_string(x) + " of " + pairs[k].zone_a + " has " +
+                    (n_found ? "several matches" : "no match") + " in " + pairs[k].zone_b +
+                    " after the translation " + periodic_point_string(pairs[k].translation) + ".";
+            continue;
+        }
+        const uint64_t b = b_nodes[match];
+        send[rank_of_node(b)].insert(send[rank_of_node(b)].end(), {b, a, k, PLUS});
+        send[rank_of_node(a)].insert(send[rank_of_node(a)].end(), {a, b, k, MINUS});
+    }
+    received = {};
+    order = {};
+    grids = {};
+    b_nodes = {};
+    check_all(error);
+    std::vector<std::array<uint64_t, 4>> links;
+    {
+        const std::vector<uint64_t> data = comm::exchange(std::move(send)).data;
+        for (size_t i = 0; i < data.size(); i += 4) links.push_back({data[i], data[i + 1], data[i + 2], data[i + 3]});
+    }
+    std::sort(links.begin(), links.end());
+    auto block_point = [&](uint64_t g) { return to_point(block.node_coords[g - block.first_node]); };
+    for (size_t i = 1; i < links.size(); i++) {
+        const auto & [n, m, k, sign] = links[i];
+        const auto & prev = links[i - 1];
+        if (sign == PLUS && prev[0] == n && prev[2] == k && prev[3] == PLUS) {
+            error = "Periodic zones " + pairs[k].zone_a + " and " + pairs[k].zone_b + ": node " +
+                    periodic_point_string(block_point(n)) + " of " + pairs[k].zone_b + " matches several nodes.";
+        }
+    }
+    check_all(error);
+
+    // Classes: every node takes the lowest key its links offer, with the
+    // offset the link implies, until no key changes. A class has a few nodes
+    // (8 at a box corner), so this takes a few rounds; once keys settle, an
+    // offer of the same key at another offset is a contradiction.
+    using Lattice = std::array<int64_t, 3>;
+    struct Class {
+        uint64_t key;
+        Lattice offset;
+    };
+    std::unordered_map<uint64_t, Class> classes;
+    for (const auto & link : links) classes.emplace(link[0], Class{link[0], {0, 0, 0}});
+    while (true) {
+        // x_other = x_node - sign * T = x_key + offset - sign * e_dir
+        send.assign(p, {});
+        for (const auto & [n, other, k, sign] : links) {
+            const Class & c = classes.at(n);
+            Lattice offset = c.offset;
+            offset[dirs[k]] -= sign == PLUS ? 1 : -1;
+            auto & out = send[rank_of_node(other)];
+            out.insert(out.end(), {other, c.key});
+            for (int64_t l : offset) out.push_back(uint64_t(l));
+        }
+        const std::vector<uint64_t> offers = comm::exchange(std::move(send)).data;
+        uint32_t changed = 0;
+        for (size_t i = 0; i < offers.size(); i += 5) {
+            Class & c = classes.at(offers[i]);
+            const Lattice offset = {int64_t(offers[i + 2]), int64_t(offers[i + 3]), int64_t(offers[i + 4])};
+            if (offers[i + 1] < c.key) {
+                c = {offers[i + 1], offset};
+                changed = 1;
+            } else if (offers[i + 1] == c.key && offset != c.offset) {
+                error = "Periodic pairs map node " + periodic_point_string(block_point(offers[i])) +
+                        " onto itself (do the zones of a pair touch?).";
+            }
+        }
+        if (comm::allreduce(changed, comm::Op::MAX) == 0) break;
+        error.clear();
+    }
+    for (const auto & [n, c] : classes) {
+        for (int64_t l : c.offset) {
+            if (l < -127 || l > 127) error = "Periodic lattice offset out of range.";
+        }
+    }
+    check_all(error);
+    links = {};
+
+    // Each rank learns the classes of its block's nodes from the ranks whose
+    // node blocks hold them
+    ids.assign(block.cell_nodes.begin(), block.cell_nodes.end());
+    ids.insert(ids.end(), block.face_nodes.begin(), block.face_nodes.end());
+    std::sort(ids.begin(), ids.end());
+    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+    std::vector<std::vector<uint64_t>> wanted(p);
+    for (uint64_t g : ids) wanted[rank_of_node(g)].push_back(g);
+    const auto asked = comm::exchange(std::move(wanted));
+    std::vector<std::vector<uint64_t>> answer(p);
+    for (int r = 0; r < p; r++) {
+        for (uint64_t g : asked.from(r)) {
+            const auto it = classes.find(g);
+            if (it == classes.end()) {
+                answer[r].insert(answer[r].end(), {NONE, 0});
+                continue;
+            }
+            std::array<int8_t, 3> offset;
+            for (int j = 0; j < 3; j++) offset[j] = int8_t(it->second.offset[j]);
+            answer[r].insert(answer[r].end(), {it->second.key, pack_lattice(offset)});
+        }
+    }
+    const std::vector<uint64_t> got = comm::exchange(std::move(answer)).data;
+    for (size_t i = 0; i < ids.size(); i++) {
+        if (got[2 * i] != NONE) block_periodic[ids[i]] = {got[2 * i], unpack_lattice(got[2 * i + 1])};
+    }
 }
 
 int DistributedMesh::rank_of_node(uint64_t g) const { return rank_in(node_dist, g); }
@@ -333,9 +566,20 @@ void DistributedMesh::append_record(std::vector<uint64_t> & out, uint32_t c) con
         out.push_back(boundary[i][0]);
         out.push_back(boundary[i][1]);
     }
+    if (periodic_classes.zones.empty()) return;
+    // Periodic classes of the cell's nodes, as (node, key, lattice offset)
+    const size_t n_at = out.size();
+    out.push_back(0);
+    for (uint64_t k = block.cell_offsets[c]; k < block.cell_offsets[c + 1]; k++) {
+        const auto it = block_periodic.find(block.cell_nodes[k]);
+        if (it == block_periodic.end()) continue;
+        out.insert(out.end(), {it->first, it->second.first, pack_lattice(it->second.second)});
+        out[n_at]++;
+    }
 }
 
 void DistributedMesh::read_records(const std::vector<uint64_t> & from, uint8_t layer) {
+    const bool periodic = !periodic_classes.zones.empty();
     {
         for (size_t i = 0; i < from.size();) {
             const uint64_t g = from[i++];
@@ -350,6 +594,10 @@ void DistributedMesh::read_records(const std::vector<uint64_t> & from, uint8_t l
             const uint64_t nb = from[i++];
             for (uint64_t k = 0; k < nb; k++, i += 2) cells.boundary.push_back({uint32_t(from[i]), uint32_t(from[i + 1])});
             cells.boundary_offsets.push_back(cells.boundary.size());
+            const uint64_t n_periodic = periodic ? from[i++] : 0;
+            for (uint64_t k = 0; k < n_periodic; k++, i += 3) {
+                cells.periodic.emplace(from[i], std::pair{from[i + 1], unpack_lattice(from[i + 2])});
+            }
         }
     }
 }
@@ -515,15 +763,15 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
     }
     // Periodic classes of the local nodes, keyed by their first local node
     PeriodicNodes classes = periodic_classes;
-    if (!periodic_nodes.empty()) {
+    if (!classes.zones.empty()) {
         std::unordered_map<uint64_t, uint32_t> local_key;
         classes.key.resize(node_ids.size());
         classes.lattice.resize(node_ids.size());
         for (uint32_t j = 0; j < node_ids.size(); j++) {
-            const auto it = periodic_nodes.find(node_ids[j]);
-            const uint64_t key = it == periodic_nodes.end() ? node_ids[j] : it->second.first;
-            classes.key[j] = local_key.emplace(key, j).first->second;
-            classes.lattice[j] = it == periodic_nodes.end() ? std::array<int8_t, 3>{0, 0, 0} : it->second.second;
+            const auto it = cells.periodic.find(node_ids[j]);
+            const bool found = it != cells.periodic.end();
+            classes.key[j] = local_key.emplace(found ? it->second.first : node_ids[j], j).first->second;
+            classes.lattice[j] = found ? it->second.second : std::array<int8_t, 3>{0, 0, 0};
         }
     }
     dist = Distribution();

@@ -159,10 +159,10 @@ Setup exchanges are dense `alltoallv` calls, whose count arrays alone are O(rank
 
 ### 12. Periodic boundaries
 
-See `periodic.md`. Periodic node classes are currently found by gathering the
-periodic zones on every rank, O(N^(2/3)) data per rank; the scalable
-alternative (hashing snapped node coordinates, as for faces) is described
-there.
+See `periodic.md`. Periodic node classes are found like faces: zone nodes are
+hashed by their matching-grid cell to the rank that pairs them, and the classes
+resolve at the nodes' block owners by a few rounds of key propagation. No rank
+gathers the periodic zones.
 
 ## Testing
 
