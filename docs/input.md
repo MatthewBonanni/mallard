@@ -119,14 +119,16 @@ translation = [1.0, 0.0]
 | `phase` | (`mixture`) Phase of the file to use; default the first |
 
 Gas mixtures (`gas = "mixture"`) are non-reacting for now and need
-`type = "euler"`, `FO` or `MUSCL` reconstruction and the `Rusanov`, `HLL` or
-`HLLC` Riemann solver. Species thermodynamics are NASA-7, NASA-9 or constant-cp
+`type = "euler"` and the `Rusanov`, `HLL` or `HLLC` Riemann solver; any face
+reconstruction works. Species thermodynamics are NASA-7, NASA-9 or constant-cp
 polynomials from the file, evaluated in double precision in every build. Each
 species is transported (`rho Y_k`) with mass-flux upwinding, so mass fractions
-stay in [0, 1] and sum to one; with MUSCL all mass fractions share one limiter
-per cell. The scheme is conservative: at contacts between gases of different
+stay in [0, 1] and sum to one; all mass fractions share one stencil and one
+limiter per cell (MUSCL), or the stencils TENO chose for the contact field
+(TENO, which reconstructs the flow in primitive variables for mixtures and
+also flags cells by jumps of the molar mass). The scheme is conservative: at contacts between gases of different
 `cp / cv` (e.g. cold hydrogen and hot air) the pressure is perturbed at the
-percent level on coarse meshes.
+percent level on coarse meshes; `double_flux` (in `[numerics]`) removes that.
 
 ## `[initialize]`
 
@@ -169,6 +171,7 @@ the zone's faces whose centers satisfy the expression.
 | `riemann_solver` | `Rusanov`, `HLL`, `HLLC` (default), `Roe`, or `RHLL` (rotated hybrid HLL-Roe, carbuncle-free) |
 | `time_integrator` | `FE`, `SSPRK3` (default) or `RK4` |
 | `check_nan` | Stop if the solution becomes non-finite |
+| `double_flux` | (gas mixtures) `true` for the double-flux scheme: each cell's energy is updated with its own `cp / cv` and energy offset frozen over the time step on both sides of its faces, and reset to the true equation of state after the step, so pressure and velocity stay exactly uniform across contacts between different gases. Energy is then not exactly conserved (about 0.2% over a multicomponent shock tube). Default `false` |
 | `low_mach_cutoff` | Low-Mach correction of the convective flux: the velocity jump across each interior face is scaled by `z = min(1, max(M_L, M_R, low_mach_cutoff))` before the Riemann solver, so that upwind dissipation scales with the flow speed rather than the sound speed. Default 0.1; 1 disables it. See [`numerics/overview.md`](numerics/overview.md) |
 
 ### `[numerics.face_reconstruction]`

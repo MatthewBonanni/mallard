@@ -106,22 +106,30 @@ TEST(MPITest, FirstOrderMatchesSerial) {
 }
 
 TEST(MPITest, GasMixtureMatchesSerial) {
-    // Species and the temperature seeds of halo cells follow the same history as their owners'
-    const std::string input =
-        "[run]\nn_steps = 20\ncfl = 0.5\n"
-        "[mesh]\ntype = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n"
-        "[initialize]\ntype = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\n"
-        "u = [\"0.0\", \"y * 100.0\"]\n"
-        "X = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", N2 = \"x < 0.5 ? 0 : 1\" }\n"
-        "[[boundaries]]\nname = \"left\"\ntype = \"upt\"\nu = [100.0, 0.0]\np = 1.0e5\nT = 1000.0\n"
-        "X = { H2 = 2.0, O2 = 1.0 }\n"
-        "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
-        "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
-        "[[boundaries]]\nname = \"top\"\ntype = \"p_out\"\np = 3.0e4\n"
-        "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
-        "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
-        "[output]\ncheck_interval = 1000000\n";
-    expect_matches_serial(input);
+    // Species and the temperature seeds of halo cells follow the same history
+    // as their owners'; with TENO also the troubled cells' stencil choices and
+    // the scalars' bound-preserving factors, and with double flux the frozen
+    // thermodynamics of each step
+    const std::pair<std::string, std::string> schemes[] = {{"", "type = \"MUSCL\"\n"},
+                                                           {"", "type = \"TENO\"\norder = 3\n"},
+                                                           {"double_flux = true\n", "type = \"MUSCL\"\n"}};
+    for (const auto & [extra, reconstruction] : schemes) {
+        const std::string input =
+            "[run]\nn_steps = 20\ncfl = 0.5\n"
+            "[mesh]\ntype = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n"
+            "[initialize]\ntype = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\n"
+            "u = [\"0.0\", \"y * 100.0\"]\n"
+            "X = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", N2 = \"x < 0.5 ? 0 : 1\" }\n"
+            "[[boundaries]]\nname = \"left\"\ntype = \"upt\"\nu = [100.0, 0.0]\np = 1.0e5\nT = 1000.0\n"
+            "X = { H2 = 2.0, O2 = 1.0 }\n"
+            "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+            "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
+            "[[boundaries]]\nname = \"top\"\ntype = \"p_out\"\np = 3.0e4\n"
+            "[numerics]\nriemann_solver = \"HLLC\"\n" + extra + "[numerics.face_reconstruction]\n" + reconstruction +
+            "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
+            "[output]\ncheck_interval = 1000000\n";
+        expect_matches_serial(input);
+    }
 }
 
 TEST(MPITest, MUSCLMatchesSerial) {

@@ -1,0 +1,50 @@
+description: |-
+  Mallard test mechanism for the kinetics: every supported reaction type and
+  option on the species of mechanisms/h2o2.yaml, with made-up rates. Not a
+  physical mechanism.
+
+units: {length: cm, quantity: mol, activation-energy: cal/mol}
+
+phases:
+- name: gas
+  thermo: ideal-gas
+  elements: [O, H, Ar, N]
+  species:
+  - ../../../mechanisms/h2o2.yaml/species: [H2, H, O, O2, OH, H2O, HO2, H2O2, AR, N2]
+  kinetics: gas
+  reactions: [reactions, extra-reactions]
+
+reactions:
+- equation: H2 + O <=> H + OH
+  rate-constant: {A: 3.87e+04 cm^3/mol/s, b: 2.7, Ea: 26.2 kJ/mol}
+- equation: 2 O + M <=> O2 + M
+  type: three-body
+  rate-constant: {A: 1.2e+17, b: -1.0, Ea: 0.0}
+  default-efficiency: 0.5
+  efficiencies: {AR: 0.83, H2O: 15.4}
+- equation: H + O2 (+AR) <=> HO2 (+AR)
+  type: falloff
+  low-P-rate-constant: {A: 6.366e+20, b: -1.72, Ea: 524.8}
+  high-P-rate-constant: {A: 4.7e+12, b: 0.44, Ea: 0.0}
+- equation: 2 OH (+M) <=> H2O2 (+M)
+  type: falloff
+  low-P-rate-constant: {A: 2.3e+18, b: -0.9, Ea: -1700.0}
+  high-P-rate-constant: {A: 7.4e+13, b: -0.37, Ea: 0.0}
+  SRI: {A: 0.5, B: 200.0, C: 1000.0, D: 1.2, E: 0.1}
+  efficiencies: {H2: 2.0, H2O: 6.0, AR: 0.7}
+- equation: H + OH (+M) <=> H2O (+M)
+  type: falloff
+  low-P-rate-constant: {A: 4.0e+22, b: -2.0, Ea: 0.0}
+  high-P-rate-constant: {A: 2.0e+13, b: 0.0, Ea: 0.0}
+  Troe: {A: 0.5, T3: 100.0, T1: 2000.0}
+
+extra-reactions:
+- equation: H2 + O2 => 2 OH
+  rate-constant: {A: 1.7e+11, b: 0.0, Ea: 48150.0}
+  orders: {H2: 0.5, O2: 1.5}
+- equation: HO2 + H <=> 2 OH
+  duplicate: true
+  rate-constant: {A: 8.4e+13, b: 0.0, Ea: 400 K}
+- equation: HO2 + H <=> 2 OH
+  duplicate: true
+  rate-constant: {A: 1.0e+12, b: 0.5, Ea: 1.0e+03}

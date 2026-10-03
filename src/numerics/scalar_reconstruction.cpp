@@ -11,6 +11,9 @@
 
 #include "scalar_reconstruction.h"
 
+#include "mixture_flux.h"
+#include "teno_scalars.h"
+
 #include <stdexcept>
 
 namespace {
@@ -197,6 +200,75 @@ struct FaceThermoFunctor {
     }
 };
 
+/**
+ * @brief TENO: the bound-preserving factor theta of each cell, then the face
+ *        values of [gamma, e0] with it.
+ */
+template <typename Eval>
+struct ScalarThetaFunctor {
+    Eval values;  // without theta
+    Kokkos::View<rtype *> theta;
+    Kokkos::View<rtype **[2][2]> face_thermo;
+    Kokkos::View<rtype *> sigma;
+    rtype sigma_threshold;
+    uint32_t n_species;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t c) const {
+        const uint32_t begin = values.offsets_faces_of_cell(c);
+        const uint8_t n_faces = static_cast<uint8_t>(values.offsets_faces_of_cell(c + 1) - begin);
+        const uint8_t nq = values.n_quad();
+        const bool troubled = sigma(c) >= sigma_threshold;
+        constexpr rtype BIG = Kokkos::Experimental::finite_max_v<rtype>;
+        rtype t = 1.0_r;
+        for (uint32_t j = 0; j < n_species + 2; j++) {
+            const rtype S_c = values.scalars(c, j);
+            // Physical bounds: mass fractions in [0, 1]; gamma - 1 keeps half its cell value
+            rtype lo = -BIG, hi = BIG;
+            if (j < n_species) {
+                lo = 0.0_r;
+                hi = 1.0_r;
+            } else if (j == n_species) {
+                lo = 1.0_r + 0.5_r * (S_c - 1.0_r);
+            }
+            if (troubled) {
+                rtype n_lo = S_c, n_hi = S_c;
+                for (uint8_t i = 0; i < n_faces; i++) {
+                    const uint32_t f = values.faces_of_cell(begin + i);
+                    const int32_t c0 = values.cells_of_face(f, 0), c1 = values.cells_of_face(f, 1);
+                    const int32_t nb = (c0 == static_cast<int32_t>(c)) ? c1 : c0;
+                    if (nb < 0) continue;
+                    n_lo = Kokkos::fmin(n_lo, values.scalars(nb, j));
+                    n_hi = Kokkos::fmax(n_hi, values.scalars(nb, j));
+                }
+                lo = Kokkos::fmax(lo, n_lo);
+                hi = Kokkos::fmin(hi, n_hi);
+            }
+            FacePointValues S[teno::MAX_FACES];
+            values.cell_values(c, j, S);
+            for (uint8_t i = 0; i < n_faces; i++) {
+                for (uint8_t q = 0; q < nq; q++) {
+                    const rtype d = S[i][q] - S_c;
+                    if (d > 0.0_r && hi < BIG) t = Kokkos::fmin(t, (hi - S_c) / d);
+                    if (d < 0.0_r && lo > -BIG) t = Kokkos::fmin(t, (lo - S_c) / d);
+                }
+            }
+        }
+        t = Kokkos::fmax(t, 0.0_r);
+        theta(c) = t;
+        for (uint32_t j = n_species; j < n_species + 2; j++) {
+            const rtype S_c = values.scalars(c, j);
+            FacePointValues S[teno::MAX_FACES];
+            values.cell_values(c, j, S);
+            for (uint8_t i = 0; i < n_faces; i++) {
+                const uint32_t f = values.faces_of_cell(begin + i);
+                const uint8_t side = (values.cells_of_face(f, 0) == static_cast<int32_t>(c)) ? 0 : 1;
+                for (uint8_t q = 0; q < nq; q++) face_thermo(f, q, side, j - n_species) = S_c + t * (S[i][q] - S_c);
+            }
+        }
+    }
+};
+
 } // namespace
 
 void ScalarReconstruction::init(std::shared_ptr<Mesh> mesh_in, const BoundaryData & boundaries_in,
@@ -215,8 +287,10 @@ void ScalarReconstruction::init(std::shared_ptr<Mesh> mesh_in, const BoundaryDat
             venkat_K = muscl.venkat_K;
             break;
         }
-        default:
-            throw std::logic_error("ScalarReconstruction: no scalar reconstruction for this face reconstruction.");
+        case FaceReconstructionType::TENO:
+            teno = &dynamic_cast<const TENO &>(flow);
+            theta = Kokkos::View<rtype *>("scalar_theta", mesh->n_cells);
+            break;
     }
     if (linear) {
         gradients = Kokkos::View<rtype ***, Kokkos::LayoutRight>("scalar_gradients", mesh->n_cells, n_species + 2,
@@ -226,12 +300,30 @@ void ScalarReconstruction::init(std::shared_ptr<Mesh> mesh_in, const BoundaryDat
 }
 
 ScalarFaceValues ScalarReconstruction::face_values(ScalarView scalars) const {
-    return ScalarFaceValues{mesh->cells_of_face, mesh->cell_coords, mesh->face_coords, mesh->shifts,
-                            mesh->face_shift, scalars, gradients, limiter};
+    return ScalarFaceValues{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face, mesh->cell_coords,
+                            mesh->face_coords, mesh->shifts, mesh->face_shift, scalars, gradients, limiter};
+}
+
+template <uint8_t DEG>
+void ScalarReconstruction::calc_teno(ScalarView scalars, Kokkos::View<rtype **[2][2]> face_thermo) {
+    const auto values = make_teno_scalar_values<DEG>(*teno, *mesh, boundaries, scalars, Kokkos::View<rtype *>(), n_species);
+    Kokkos::parallel_for("scalar_theta", mesh->n_reconstructed(),
+                         ScalarThetaFunctor<TENOScalarValues<DEG>>{values, theta, face_thermo, teno->troubled,
+                                                                   teno->sigma_threshold, n_species});
 }
 
 void ScalarReconstruction::calc(ScalarView scalars, Kokkos::View<rtype *[N_CONSERVATIVE]> W,
                                 Kokkos::View<rtype **[2][2]> face_thermo) {
+    if (teno) {
+        switch (teno->degree) {
+            case 2: calc_teno<2>(scalars, face_thermo); break;
+            case 3: calc_teno<3>(scalars, face_thermo); break;
+            case 4: calc_teno<4>(scalars, face_thermo); break;
+            case 5: calc_teno<5>(scalars, face_thermo); break;
+            default: throw std::runtime_error("ScalarReconstruction: unsupported TENO degree.");
+        }
+        return;
+    }
     if (linear) {
         ScalarLimiterFunctor functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                      mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->shifts,
@@ -240,4 +332,43 @@ void ScalarReconstruction::calc(ScalarView scalars, Kokkos::View<rtype *[N_CONSE
         Kokkos::parallel_for("scalar_limiter", mesh->n_cells, functor);
     }
     Kokkos::parallel_for("face_thermo", mesh->n_faces, FaceThermoFunctor{face_values(scalars), face_thermo, n_species});
+}
+
+template <typename Eval>
+void ScalarReconstruction::launch_slots(const Eval & values, Kokkos::View<rtype **> face_mdot,
+                                        Kokkos::View<rtype *> quad_weights, Kokkos::View<rtype **> face_weights,
+                                        Kokkos::View<rtype ***, Kokkos::LayoutRight> slots) {
+    SpeciesSlotFunctor<Eval> functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
+                                     mesh->face_area, quad_weights, face_weights, face_mdot, values, boundaries,
+                                     slots, n_species};
+    Kokkos::parallel_for("species_slots", mesh->n_reconstructed(), functor);
+}
+
+void ScalarReconstruction::species_slots(ScalarView scalars, Kokkos::View<rtype **> face_mdot,
+                                         Kokkos::View<rtype *> quad_weights, Kokkos::View<rtype **> face_weights,
+                                         Kokkos::View<rtype ***, Kokkos::LayoutRight> slots) {
+    if (!teno) {
+        launch_slots(face_values(scalars), face_mdot, quad_weights, face_weights, slots);
+        return;
+    }
+    switch (teno->degree) {
+        case 2:
+            launch_slots(make_teno_scalar_values<2>(*teno, *mesh, boundaries, scalars, theta, n_species), face_mdot,
+                         quad_weights, face_weights, slots);
+            break;
+        case 3:
+            launch_slots(make_teno_scalar_values<3>(*teno, *mesh, boundaries, scalars, theta, n_species), face_mdot,
+                         quad_weights, face_weights, slots);
+            break;
+        case 4:
+            launch_slots(make_teno_scalar_values<4>(*teno, *mesh, boundaries, scalars, theta, n_species), face_mdot,
+                         quad_weights, face_weights, slots);
+            break;
+        case 5:
+            launch_slots(make_teno_scalar_values<5>(*teno, *mesh, boundaries, scalars, theta, n_species), face_mdot,
+                         quad_weights, face_weights, slots);
+            break;
+        default:
+            throw std::runtime_error("ScalarReconstruction: unsupported TENO degree.");
+    }
 }

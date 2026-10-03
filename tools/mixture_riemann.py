@@ -149,7 +149,7 @@ SHOCK_TUBE = dict(
 
 def main():
     c = SHOCK_TUBE
-    for n in (100, 200, 400):
+    for n in (50, 100, 200, 400):
         x = (np.arange(n) + 0.5) / n
         rows, names, p_star, u_star = shock_tube(c["mech"], c["phase"], c["left"], c["right"], c["x0"], c["t"], x)
         path = os.path.join(ROOT, "test", "data", "chemistry", f"shock_tube_{n}.csv")

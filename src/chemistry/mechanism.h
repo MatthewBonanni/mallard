@@ -70,14 +70,55 @@ struct Species {
     SpeciesThermo thermo;
 };
 
+/** @brief Modified Arrhenius rate k = A T^b exp(-Ea / (R T)), SI units with kmol. */
+struct Arrhenius {
+    double A = 0.0;
+    double b = 0.0;
+    double Ea_R = 0.0;  // activation energy over the gas constant [K]
+};
+
+enum class ReactionType {
+    ELEMENTARY,
+    THREE_BODY,
+    FALLOFF,
+};
+
+enum class FalloffType {
+    LINDEMANN,
+    TROE,
+    SRI,
+};
+
 /**
- * @brief One ideal-gas phase of a Cantera YAML file: its elements and species.
+ * @brief A gas-phase reaction: elementary, three-body or falloff
+ *        (Lindemann, Troe, SRI), reversible (reverse rate from the
+ *        equilibrium constant) or not, with optional non-integer orders.
+ */
+struct Reaction {
+    std::string equation;
+    ReactionType type = ReactionType::ELEMENTARY;
+    std::vector<std::pair<int32_t, double>> reactants;  // species, stoichiometric coefficient
+    std::vector<std::pair<int32_t, double>> products;
+    std::vector<std::pair<int32_t, double>> orders;     // forward reaction orders of the reactants
+    bool reversible = true;
+    bool duplicate = false;
+    Arrhenius rate;  // falloff: the high-pressure limit
+    Arrhenius low;   // falloff: the low-pressure limit
+    FalloffType falloff = FalloffType::LINDEMANN;
+    std::array<double, 5> falloff_params = {};  // Troe A, T3, T1, T2; SRI a, b, c, d, e
+    std::vector<std::pair<int32_t, double>> efficiencies;  // third-body efficiencies other than the default
+    double default_efficiency = 1.0;
+};
+
+/**
+ * @brief One ideal-gas phase of a Cantera YAML file: its elements, species and reactions.
  */
 struct Mechanism {
     std::string file;
     std::string phase;
     std::vector<std::string> elements;
     std::vector<Species> species;
+    std::vector<Reaction> reactions;
 
     size_t n_species() const { return species.size(); }
 

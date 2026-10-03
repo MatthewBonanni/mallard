@@ -14,6 +14,9 @@
 #include <Kokkos_Core.hpp>
 
 #include <algorithm>
+#include <array>
+#include <iomanip>
+#include <iostream>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -74,9 +77,9 @@ std::string mixture(const std::string & mechanism, const std::string & phase = "
            (phase.empty() ? "" : "phase = \"" + phase + "\"\n");
 }
 
-std::string numerics(const std::string & reconstruction, const std::string & riemann) {
-    return "[numerics]\nriemann_solver = \"" + riemann + "\"\n[numerics.face_reconstruction]\n" + reconstruction +
-           "[output]\ncheck_interval = 1000000\n";
+std::string numerics(const std::string & reconstruction, const std::string & riemann, bool double_flux = false) {
+    return "[numerics]\nriemann_solver = \"" + riemann + "\"\n" + (double_flux ? "double_flux = true\n" : "") +
+           "[numerics.face_reconstruction]\n" + reconstruction + "[output]\ncheck_interval = 1000000\n";
 }
 
 /** @brief Max |a - b| over cells and conservatives, relative to each variable's max |b|. */
@@ -101,9 +104,12 @@ struct EquivalenceCase {
     std::string mesh;
     std::string reconstruction;
     std::string riemann;
+    bool double_flux = false;
 };
 
-void PrintTo(const EquivalenceCase & c, std::ostream * os) { *os << c.mesh << " " << c.riemann; }
+void PrintTo(const EquivalenceCase & c, std::ostream * os) {
+    *os << c.mesh << " " << c.riemann << (c.double_flux ? " double flux" : "");
+}
 
 class MixtureEquivalence : public ::testing::TestWithParam<EquivalenceCase> {};
 
@@ -130,7 +136,9 @@ TEST_P(MixtureEquivalence, ConstantCpSingleSpeciesReproducesPerfectGas) {
     perfect.run();
     perfect.copy_device_to_host();
     Solver mixed;
-    mixed.init(parse_toml(common + "Y = { AIR = 1.0 }\n" + scheme + bcs + mixture(PERFECT_AIR, "air")));
+    // With one species the frozen gamma and e0 of double flux are the true ones
+    mixed.init(parse_toml(common + "Y = { AIR = 1.0 }\n" + numerics(c.reconstruction, c.riemann, c.double_flux) + bcs +
+                          mixture(PERFECT_AIR, "air")));
     mixed.run();
     mixed.copy_device_to_host();
 
@@ -150,7 +158,9 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(EquivalenceCase{N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", "type = \"MUSCL\"\n", "HLLC"},
                       EquivalenceCase{"cartesian", "type = \"FO\"\n", "Rusanov"},
                       EquivalenceCase{N_DIM == 2 ? "cartesian_tri" : "cartesian_tet",
-                                      "type = \"MUSCL\"\nlimiter = \"barth_jespersen\"\n", "HLL"}));
+                                      "type = \"MUSCL\"\nlimiter = \"barth_jespersen\"\n", "HLL"},
+                      EquivalenceCase{N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", "type = \"MUSCL\"\n", "HLLC",
+                                      true}));
 
 TEST(MixtureTest, IdenticalSpeciesAdvectWithoutDisturbingTheFlow) {
     // Two species with identical thermodynamics: the flow stays exactly
@@ -231,15 +241,18 @@ std::vector<std::vector<double>> read_reference(const std::string & file, std::v
  *        Y_N2 against the exact solution of the multicomponent shock tube
  *        (tools/mixture_riemann.py), and the extreme mass fractions.
  */
-std::vector<double> shock_tube_errors(uint32_t n, double & Y_min, double & Y_max) {
+std::vector<double> shock_tube_errors(uint32_t n, const std::string & reconstruction, double & Y_min,
+                                      double & Y_max) {
+    // TENO's stencils need a few rows of cells
+    const uint32_t rows = reconstruction.find("TENO") != std::string::npos ? 4 : 1;
     const std::string input =
-        "[run]\nt_stop = 2.0e-4\ncfl = 0.5\n" + mesh_block("cartesian", n, 1, 1.0, 0.01) +
+        "[run]\nt_stop = 2.0e-4\ncfl = 0.5\n" + mesh_block("cartesian", n, rows, 1.0, rows * 1.0 / n) +
         "[initialize]\ntype = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\n"
         "u = " + velocity("0.0") + "\n"
         "X = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", AR = \"x < 0.5 ? 7 : 0\", N2 = \"x < 0.5 ? 0 : 1\" }\n" +
         boundaries("type = \"extrapolation\"\n", "type = \"extrapolation\"\n", "type = \"symmetry\"\n",
                    "type = \"symmetry\"\n") +
-        numerics("type = \"MUSCL\"\n", "HLLC") + mixture(H2O2);
+        numerics(reconstruction, "HLLC") + mixture(H2O2);
     Solver solver;
     solver.init(parse_toml(input));
     solver.run();
@@ -248,19 +261,20 @@ std::vector<double> shock_tube_errors(uint32_t n, double & Y_min, double & Y_max
     std::vector<std::string> columns;
     const auto ref = read_reference("shock_tube_" + std::to_string(n) + ".csv", columns);
     EXPECT_EQ(ref.size(), n);
+    const uint32_t n_cells = solver.get_mesh()->n_cells;
     const auto & names = solver.get_species_names();
     const size_t k_N2 = std::find(names.begin(), names.end(), "N2") - names.begin();
     std::vector<double> err(5, 0.0), scale(5, 0.0);
     Y_min = 1.0;
     Y_max = 0.0;
-    for (uint32_t c = 0; c < n; c++) {
+    for (uint32_t c = 0; c < n_cells; c++) {
         const uint32_t i = static_cast<uint32_t>(double(solver.get_mesh()->h_cell_coords(c, 0)) * n);
         const double rho = double(solver.h_conservatives(c, 0));
         const double values[5] = {rho, double(solver.h_primitives(c, 0)), double(solver.h_primitives(c, N_DIM)),
                                   double(solver.h_primitives(c, N_DIM + 1)), double(solver.h_species(c, k_N2)) / rho};
         const double exact[5] = {ref[i][1], ref[i][2], ref[i][3], ref[i][4], ref[i][5 + k_N2]};
         for (int j = 0; j < 5; j++) {
-            err[j] += std::abs(values[j] - exact[j]) / n;
+            err[j] += std::abs(values[j] - exact[j]) / n_cells;
             scale[j] = std::max(scale[j], std::abs(exact[j]));
         }
         for (size_t k = 0; k < names.size(); k++) {
@@ -274,29 +288,117 @@ std::vector<double> shock_tube_errors(uint32_t n, double & Y_min, double & Y_max
 
 } // namespace
 
-TEST(MixtureTest, MulticomponentShockTubeConvergesToExactSolution) {
+class MixtureShockTube : public ::testing::TestWithParam<std::string> {};
+
+TEST_P(MixtureShockTube, ConvergesToExactSolution) {
     // H2/O2/Ar at 1000 K and 1 bar against N2 at 300 K and 0.1 bar: shock,
     // contact between different gases, rarefaction, all thermally perfect
     double Y_min, Y_max;
-    const std::vector<double> coarse = shock_tube_errors(100, Y_min, Y_max);
+    // TENO is slower per cell, and converges as fast on coarser meshes
+    const bool teno = GetParam().find("TENO") != std::string::npos;
+    const uint32_t n = teno ? 50 : 100;
+    const std::vector<double> coarse = shock_tube_errors(n, GetParam(), Y_min, Y_max);
     EXPECT_GE(Y_min, -tol(1e-14, 1e-6));
     EXPECT_LE(Y_max, 1.0 + tol(1e-14, 1e-6));
-    const std::vector<double> fine = shock_tube_errors(200, Y_min, Y_max);
+    const std::vector<double> fine = shock_tube_errors(2 * n, GetParam(), Y_min, Y_max);
     EXPECT_GE(Y_min, -tol(1e-14, 1e-6));
     EXPECT_LE(Y_max, 1.0 + tol(1e-14, 1e-6));
     const char * names[5] = {"rho", "u", "p", "T", "Y_N2"};
     for (int j = 0; j < 5; j++) {
         EXPECT_LT(fine[j], 1.2e-2) << names[j];
-        EXPECT_GT(std::log2(coarse[j] / fine[j]), 0.7) << names[j] << ": " << coarse[j] << " -> " << fine[j];
+        EXPECT_GT(std::log2(coarse[j] / fine[j]), teno ? 0.5 : 0.7) << names[j] << ": " << coarse[j] << " -> " << fine[j];
     }
 }
+
+// TENO5 in 2D only: its 3D stencils make the test too slow for the suite
+INSTANTIATE_TEST_SUITE_P(Mixture, MixtureShockTube,
+                         ::testing::ValuesIn(N_DIM == 2 ? std::vector<std::string>{"type = \"MUSCL\"\n",
+                                                                                   "type = \"TENO\"\norder = 5\n"}
+                                                        : std::vector<std::string>{"type = \"MUSCL\"\n"}));
+
+namespace {
+
+/**
+ * @brief L1 errors of rho and rho Y_H2 after advecting a smooth composition
+ *        and temperature wave at uniform pressure across a periodic box over
+ *        n steps of a time step proportional to the mesh size, against the
+ *        exact (translated) cell averages.
+ */
+std::array<double, 2> advection_errors(const std::string & mesh, uint32_t n, const std::string & reconstruction) {
+    constexpr double t_end = 2.0e-4, u = 100.0, v = 50.0;
+    const std::string periodic = N_DIM == 2 ? "[\"x\", \"y\"]" : "[\"x\", \"y\", \"z\"]";
+    auto input = [&](uint32_t n_steps, double dx, double dy) {
+        std::ostringstream x, y;
+        x << std::setprecision(17) << "(x - " << dx << ")";
+        y << std::setprecision(17) << "(y - " << dy << ")";
+        std::ostringstream dt;
+        dt << std::setprecision(17) << t_end / n;
+        return "[run]\nn_steps = " + std::to_string(n_steps) + "\ndt = " + dt.str() + "\n" +
+               mesh_block(mesh, n, n, 1.0, 1.0, periodic) +
+               "[initialize]\ntype = \"analytical\"\nn_subdivisions = " + std::string(N_DIM == 2 ? "2" : "1") +
+               "\np = \"1.0e5\"\nT = \"300.0 + 50.0 * sin(2 * pi * (" + x.str() +
+               " + " + y.str() + "))\"\nu = " + velocity("100.0", "50.0") + "\nX = { H2 = \"0.3 + 0.05 * sin(2 * pi * " +
+               x.str() + ") * sin(2 * pi * " + y.str() + ")\" }\nbalance = \"N2\"\n" + numerics(reconstruction, "HLLC") +
+               mixture(H2O2);
+    };
+    Solver solver;
+    solver.init(parse_toml(input(n, 0.0, 0.0)));
+    solver.run();
+    solver.copy_device_to_host();
+    Solver exact;
+    exact.init(parse_toml(input(1, u * t_end, v * t_end)));
+    const auto & names = solver.get_species_names();
+    const size_t k = std::find(names.begin(), names.end(), "H2") - names.begin();
+    std::array<double, 2> err = {0.0, 0.0};
+    const uint32_t n_cells = solver.get_mesh()->n_cells;
+    for (uint32_t c = 0; c < n_cells; c++) {
+        err[0] += std::abs(double(solver.h_conservatives(c, 0) - exact.h_conservatives(c, 0))) / n_cells;
+        err[1] += std::abs(double(solver.h_species(c, k) - exact.h_species(c, k))) / n_cells;
+    }
+    return err;
+}
+
+struct OrderCase {
+    std::string mesh;
+    std::string reconstruction;
+    uint32_t n;
+    double order;
+};
+
+void PrintTo(const OrderCase & c, std::ostream * os) { *os << c.mesh << " " << c.reconstruction; }
+
+class MixtureAdvectionOrder : public ::testing::TestWithParam<OrderCase> {};
+
+} // namespace
+
+TEST_P(MixtureAdvectionOrder, SmoothCompositionWaveConvergesAtDesignOrder) {
+    // The flow block (primitive variables) and the species (the flow block's
+    // weights) both reach the scheme's order on a smooth contact wave
+    const OrderCase & c = GetParam();
+    const std::array<double, 2> coarse = advection_errors(c.mesh, c.n, c.reconstruction);
+    const std::array<double, 2> fine = advection_errors(c.mesh, 2 * c.n, c.reconstruction);
+    EXPECT_GT(std::log2(coarse[0] / fine[0]), c.order) << "rho: " << coarse[0] << " -> " << fine[0];
+    EXPECT_GT(std::log2(coarse[1] / fine[1]), c.order) << "rho Y_H2: " << coarse[1] << " -> " << fine[1];
+}
+
+// TENO5 in 2D only: on the coarse 3D meshes a test can afford, its large stencils
+// see the wave as under-resolved and flag every cell troubled
+INSTANTIATE_TEST_SUITE_P(
+    Mixture, MixtureAdvectionOrder,
+    ::testing::ValuesIn(N_DIM == 2
+                            ? std::vector<OrderCase>{{"cartesian", "type = \"MUSCL\"\n", 16u, 1.8},
+                                                     {"cartesian", "type = \"TENO\"\norder = 3\n", 32u, 2.6},
+                                                     {"cartesian_tri", "type = \"TENO\"\norder = 5\n", 16u, 4.0}}
+                            : std::vector<OrderCase>{{"cartesian", "type = \"MUSCL\"\n", 8u, 1.8},
+                                                     {"cartesian", "type = \"TENO\"\norder = 3\n", 8u, 2.4}}));
 
 namespace {
 
 /** @brief Max |p - p0| / p0 after a cold H2 slab crossed a quarter of a periodic hot-air channel. */
-double interface_pressure_error(uint32_t n, Solver & solver) {
+double interface_pressure_error(uint32_t n, Solver & solver, const std::string & reconstruction = "type = \"MUSCL\"\n") {
+    const uint32_t rows = reconstruction.find("TENO") != std::string::npos ? 4 : 1;
     const std::string input =
-        "[run]\nt_stop = 2.5e-4\ncfl = 0.5\n" + mesh_block("cartesian", n, 1, 1.0, 0.02, "[\"x\"]") +
+        "[run]\nt_stop = 2.5e-4\ncfl = 0.5\n" + mesh_block("cartesian", n, rows, 1.0, rows * 0.02, "[\"x\"]") +
         "[initialize]\ntype = \"analytical\"\np = \"1.0e5\"\nT = \"abs(x - 0.5) < 0.25 ? 300.0 : 1000.0\"\n"
         "u = " + velocity("1000.0") + "\n"
         "X = { H2 = \"abs(x - 0.5) < 0.25 ? 1 : 0\", O2 = \"abs(x - 0.5) < 0.25 ? 0 : 0.21\", "
@@ -305,7 +407,7 @@ double interface_pressure_error(uint32_t n, Solver & solver) {
         std::string(N_DIM == 3 ? "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n"
                                  "[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n"
                                : "") +
-        numerics("type = \"MUSCL\"\n", "HLLC") + mixture(H2O2);
+        numerics(reconstruction, "HLLC") + mixture(H2O2);
     solver.init(parse_toml(input));
     solver.run();
     solver.update_primitives();
@@ -333,6 +435,11 @@ TEST(MixtureTest, HydrogenAirContactPressureErrorDecreasesUnderRefinement) {
     double total = 0.0;
     for (rtype m : mass) total += double(m);
     EXPECT_NEAR(total, double(fine.integrate_conservatives()[0]), tol(1e-12, 1e-5) * total);
+    // TENO5 keeps the interface sharper, so the error does not shrink as fast, but stays bounded
+    if constexpr (N_DIM == 2) {
+        Solver teno;
+        EXPECT_LT(interface_pressure_error(50, teno, "type = \"TENO\"\norder = 5\n"), 0.03);
+    }
 }
 
 TEST(MixtureTest, InvalidMixtureInputsAreRejected) {
@@ -367,37 +474,137 @@ TEST(MixtureTest, InvalidMixtureInputsAreRejected) {
 
 TEST(MixtureTest, RestartedRunMatchesUninterruptedRunExactly) {
     // The temperature seed is part of the restart: without it, Newton starts
-    // elsewhere and the last bits of T, and so of the flow, differ
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mixture_restart").string();
-    std::filesystem::remove_all(dir);
-    auto input = [&](const std::string & init, uint32_t n_steps, const std::string & prefix) {
-        return "[run]\nn_steps = " + std::to_string(n_steps) + "\ncfl = 0.5\n" +
-               mesh_block(N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", N_DIM == 2 ? 24 : 8, 4, 1.0, 0.2) +
-               "[initialize]\n" + init +
-               boundaries("type = \"extrapolation\"\n", "type = \"extrapolation\"\n", "type = \"symmetry\"\n",
-                          "type = \"wall_adiabatic\"\n") +
-               numerics("type = \"MUSCL\"\n", "HLLC") + mixture(H2O2) + "[[write_data]]\nprefix = \"" + dir + "/" +
-               prefix + "\"\nformat = \"restart\"\ninterval = 15\n";
-    };
-    const std::string tube =
-        "type = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\nu = " +
-        velocity("0.0") + "\nX = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", N2 = \"x < 0.5 ? 0 : 1\" }\n";
-    Solver straight;
-    straight.init(parse_toml(input(tube, 30, "a")));
-    straight.run();
-    straight.copy_device_to_host();
-    Solver first;
-    first.init(parse_toml(input(tube, 15, "b")));
-    first.run();
-    Solver second;
-    second.init(parse_toml(input("type = \"restart\"\nfile = \"" + dir + "/b_000015.restart\"\n", 30, "b")));
-    second.run();
-    second.copy_device_to_host();
-    for (uint32_t c = 0; c < straight.get_mesh()->n_cells; c++) {
-        FOR_I_CONSERVATIVE ASSERT_EQ(second.h_conservatives(c, i), straight.h_conservatives(c, i)) << "cell " << c;
-        for (uint32_t k = 0; k < straight.get_species_names().size(); k++) {
-            ASSERT_EQ(second.h_species(c, k), straight.h_species(c, k)) << "cell " << c;
+    // elsewhere and the last bits of T, and so of the flow, differ (also with
+    // double flux, whose frozen thermodynamics come from the seed)
+    for (const bool double_flux : {false, true}) {
+        const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mixture_restart").string();
+        std::filesystem::remove_all(dir);
+        auto input = [&](const std::string & init, uint32_t n_steps, const std::string & prefix) {
+            return "[run]\nn_steps = " + std::to_string(n_steps) + "\ncfl = 0.5\n" +
+                   mesh_block(N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", N_DIM == 2 ? 24 : 8, 4, 1.0, 0.2) +
+                   "[initialize]\n" + init +
+                   boundaries("type = \"extrapolation\"\n", "type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                              "type = \"wall_adiabatic\"\n") +
+                   numerics("type = \"MUSCL\"\n", "HLLC", double_flux) + mixture(H2O2) + "[[write_data]]\nprefix = \"" +
+                   dir + "/" + prefix + "\"\nformat = \"restart\"\ninterval = 15\n";
+        };
+        const std::string tube =
+            "type = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\nu = " +
+            velocity("0.0") + "\nX = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", N2 = \"x < 0.5 ? 0 : 1\" }\n";
+        Solver straight;
+        straight.init(parse_toml(input(tube, 30, "a")));
+        straight.run();
+        straight.copy_device_to_host();
+        Solver first;
+        first.init(parse_toml(input(tube, 15, "b")));
+        first.run();
+        Solver second;
+        second.init(parse_toml(input("type = \"restart\"\nfile = \"" + dir + "/b_000015.restart\"\n", 30, "b")));
+        second.run();
+        second.copy_device_to_host();
+        for (uint32_t c = 0; c < straight.get_mesh()->n_cells; c++) {
+            FOR_I_CONSERVATIVE ASSERT_EQ(second.h_conservatives(c, i), straight.h_conservatives(c, i)) << "cell " << c;
+            for (uint32_t k = 0; k < straight.get_species_names().size(); k++) {
+                ASSERT_EQ(second.h_species(c, k), straight.h_species(c, k)) << "cell " << c;
+            }
         }
+        std::filesystem::remove_all(dir);
     }
-    std::filesystem::remove_all(dir);
+}
+
+namespace {
+
+/**
+ * @brief A cold H2 slab crossing a periodic channel of hot air at uniform
+ *        pressure and velocity (V4): the largest relative deviations of p
+ *        and u after a quarter of a flow-through. The slab's edges lie on
+ *        faces, so no cell starts mixed; air at 1200 K keeps clear of the
+ *        1000 K breakpoint of the NASA-7 fits, where e(T) jumps.
+ */
+std::array<double, 2> contact_errors(const std::string & reconstruction, bool double_flux) {
+    const bool teno = reconstruction.find("TENO") != std::string::npos;
+    const uint32_t n = 40, rows = teno ? 4 : 1;
+    const std::string input =
+        "[run]\nt_stop = 2.5e-4\ncfl = 0.5\n" +
+        mesh_block("cartesian", n, rows, 1.0, rows * 1.0 / n, "[\"x\"]") +
+        "[initialize]\ntype = \"analytical\"\np = \"1.0e5\"\nT = \"abs(x - 0.5) < 0.25 ? 300.0 : 1200.0\"\n"
+        "u = " + velocity("1000.0") + "\n"
+        "X = { H2 = \"abs(x - 0.5) < 0.25 ? 1 : 0\", O2 = \"abs(x - 0.5) < 0.25 ? 0 : 0.21\", "
+        "N2 = \"abs(x - 0.5) < 0.25 ? 0 : 0.79\" }\n"
+        "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n" +
+        std::string(N_DIM == 3 ? "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n"
+                                 "[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n"
+                               : "") +
+        numerics(reconstruction, "HLLC", double_flux) + mixture(H2O2);
+    Solver solver;
+    solver.init(parse_toml(input));
+    solver.run();
+    solver.update_primitives();
+    solver.copy_device_to_host();
+    std::array<double, 2> err = {0.0, 0.0};
+    for (uint32_t c = 0; c < solver.get_mesh()->n_cells; c++) {
+        err[0] = std::max(err[0], std::abs(double(solver.h_primitives(c, N_DIM)) / 1.0e5 - 1.0));
+        err[1] = std::max(err[1], std::abs(double(solver.h_primitives(c, 0)) / 1000.0 - 1.0));
+    }
+    return err;
+}
+
+} // namespace
+
+TEST(MixtureTest, DoubleFluxKeepsPressureAndVelocityUniformAtContacts) {
+    // Each cell's energy is updated with its own frozen gamma and e0, so a
+    // contact between different gases moves without pressure waves; the
+    // conservative scheme perturbs p and u by about a percent
+    std::vector<std::string> schemes = {"type = \"MUSCL\"\n"};
+    if constexpr (N_DIM == 2) schemes.push_back("type = \"TENO\"\norder = 5\n");
+    for (const std::string & scheme : schemes) {
+        const std::array<double, 2> df = contact_errors(scheme, true);
+        EXPECT_LT(df[0], tol(1e-12, 1e-5)) << scheme;
+        EXPECT_LT(df[1], tol(1e-12, 1e-5)) << scheme;
+    }
+    EXPECT_GT(contact_errors("type = \"MUSCL\"\n", false)[0], 1e-3);
+}
+
+TEST(MixtureTest, DoubleFluxShockTubeStaysAccurateAndReportsItsEnergyError) {
+    // Double flux gives up energy conservation in proportion to the jumps of
+    // gamma and e0; across the shock tube's waves (all still inside the
+    // domain, so the total energy is constant) it stays small, and the
+    // solution remains as close to the exact one as the conservative scheme's
+    auto run = [&](bool double_flux, double & energy_error) {
+        const uint32_t n = 200;
+        const std::string input =
+            "[run]\nt_stop = 2.0e-4\ncfl = 0.5\n" + mesh_block("cartesian", n, 1, 1.0, 1.0 / n) +
+            "[initialize]\ntype = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\n"
+            "u = " + velocity("0.0") + "\n"
+            "X = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", AR = \"x < 0.5 ? 7 : 0\", "
+            "N2 = \"x < 0.5 ? 0 : 1\" }\n" +
+            boundaries("type = \"extrapolation\"\n", "type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                       "type = \"symmetry\"\n") +
+            numerics("type = \"MUSCL\"\n", "HLLC", double_flux) + mixture(H2O2);
+        Solver solver;
+        solver.init(parse_toml(input));
+        const double E0 = double(solver.integrate_conservatives()[N_DIM + 1]);
+        solver.run();
+        energy_error = std::abs(double(solver.integrate_conservatives()[N_DIM + 1]) / E0 - 1.0);
+        solver.update_primitives();
+        solver.copy_device_to_host();
+        std::vector<std::string> columns;
+        const auto ref = read_reference("shock_tube_" + std::to_string(n) + ".csv", columns);
+        double err = 0.0, scale = 0.0;
+        for (uint32_t c = 0; c < n; c++) {
+            const uint32_t i = static_cast<uint32_t>(double(solver.get_mesh()->h_cell_coords(c, 0)) * n);
+            err += std::abs(double(solver.h_primitives(c, N_DIM)) - ref[i][3]) / n;
+            scale = std::max(scale, ref[i][3]);
+        }
+        return err / scale;
+    };
+    double conservative_energy, double_flux_energy;
+    const double conservative = run(false, conservative_energy);
+    const double double_flux = run(true, double_flux_energy);
+    EXPECT_LT(conservative_energy, tol(1e-13, 1e-5));
+    EXPECT_GT(double_flux_energy, conservative_energy);
+    EXPECT_LT(double_flux_energy, 5e-3);  // 0.16% measured
+    EXPECT_LT(double_flux, 1.2 * conservative) << "p: " << conservative << " -> " << double_flux;
+    std::cout << "double flux: relative total-energy error " << double_flux_energy << ", L1 error of p "
+              << double_flux << " (conservative " << conservative << ")\n";
 }

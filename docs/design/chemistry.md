@@ -1,7 +1,7 @@
 # Design: finite-rate chemistry
 
 Status: accepted (see [Decisions on the open questions](#decisions-on-the-open-questions)).
-Implementation follows the [milestones](#10-milestones); done: 1, 2, 3.
+Implementation follows the [milestones](#10-milestones); done: 1, 2, 3, 4, 5, 6.
 
 Mallard today solves a single calorically perfect gas. This document adds
 multicomponent, thermally perfect mixtures and finite-rate chemistry with
@@ -284,6 +284,22 @@ The design:
    interfaces at constant density (common in non-premixed flames). It becomes
    the maximum of the variances of `rho` and of the mixture molar mass `W`.
 
+As implemented (milestone 4): the primitive eigenvectors take the face
+average of `W` and the sound speed from the average of the two cells' frozen
+`gamma`; the entropy field's choice on each face side is stored as one byte
+(`0xFF` for the large stencil, else a bitmask of the kept sector stencils,
+averaged with equal weights as TENO does); the scalars' face values are not
+stored but recomputed from the stencil weights twice per stage, once for
+`theta` and the face values of `gamma` and `e0` before the flux, once for the
+species slots after it. The local-range bound of troubled cells clips smooth
+extrema where the indicator flags a smooth but coarsely resolved field: a
+smooth composition wave on 16^3 hexahedra flags every cell at TENO5 and
+converges at about third order there, at fifth order once resolved (2D).
+At sharp contacts between gases of different `gamma` the conservative
+scheme's pressure error stays at 2-3% under refinement with TENO5 (the contact
+stays a few cells wide), against a slow decrease with MUSCL: double flux
+(milestone 5) is the remedy.
+
 This makes species reconstruction a sequence of dot products with weights
 already computed for the flow block: no smoothness indicators per species and
 no per-species branching. The price is that species never get the high-order
@@ -304,6 +320,21 @@ accumulation gets a second slot for the energy flux. It is milestone 5, enabled 
 right after the conservative scheme and the interface test that measures the
 oscillations. A TENO/double-flux scheme on unstructured meshes appears not to
 have been published, so this is also where Mallard would be new.
+
+As implemented (milestone 5, `[numerics] double_flux = true`): `(gamma, e0)`
+are frozen per cell once per time step, from the true equation of state at the
+step's start (the temperature seed's only update in this mode, so its history
+stays rank independent), and every stage takes the cells' pressure from the
+frozen relation. Each face point computes the Riemann flux twice, with each
+side's frozen `(gamma, e0)` on both of its states; mass and momentum use the
+mean of the two (conservative, and equal to both at a contact, where HLLC
+returns the upwind physical flux), so `mdot` and the species fluxes stay
+unique, and each side takes its own energy flux (one extra word per face).
+After the step `rho E` is reset to the true equation of state at the pressure
+of the frozen one. There is no shock switch yet: the energy error over the
+multicomponent shock tube is 0.16% of the total energy, with an L1 pressure
+error equal to the conservative scheme's; contacts keep `p` and `u` uniform to
+1e-12 with MUSCL and TENO5.
 
 ### Species fluxes without races
 
@@ -550,6 +581,19 @@ column), then chain-ruled to `(Y, T)`.
 
 Unit tests compare the Jacobian against finite differences of the rates, and
 the rates against Cantera, at random states.
+
+As implemented (milestone 6, `src/chemistry/kinetics.h`): one table set per
+mechanism, compressed rows per reaction for the forward orders, the products
+(reverse orders), the nonzero net coefficients and the non-default third-body
+efficiencies; elementary, three-body and falloff (Lindemann, Troe, SRI)
+reactions, explicit colliders `(+AR)`, irreversible reactions, non-integer
+forward orders, duplicates, rate constants in any units. The kinetics layer
+returns the rates of progress with `d q / dT` at fixed concentrations, the
+production rates, and the dense `d omega / d C`; the chain rule to the
+reactor's `(Y, T)` is the integrator's (milestone 7). Rates of progress and
+production rates match Cantera to 1e-10 for h2o2, GRI-3.0 and a test
+mechanism with every reaction type; both derivatives match Richardson-
+extrapolated finite differences to 1e-6 of their row norms.
 
 ### Integrator
 

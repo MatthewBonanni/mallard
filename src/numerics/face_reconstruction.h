@@ -321,11 +321,26 @@ class TENO : public FaceReconstruction {
          */
         void save_cache(uint8_t halo_layers = 0);
 
+        // Gas mixtures: the flow block is reconstructed in primitive variables
+        // W with characteristic projections on the primitive system, whose
+        // sound speed comes from each cell's frozen gamma; troubled cells are
+        // also found by jumps of the mixture molar mass; and the stencil
+        // choice of the entropy field on each face side (SELECT_LARGE or a
+        // bitmask of the kept sector stencils) is left for the species
+        static constexpr uint8_t SELECT_LARGE = 0xFF;
+        bool primitive = false;
+        Kokkos::View<rtype *, Kokkos::LayoutStride> cell_gamma;  // (cell)
+        Kokkos::View<rtype *> cell_molar_mass;                   // (cell)
+        Kokkos::View<uint8_t **> selection;                      // (face, side)
+
+        /** @brief Switch to the mixture variant with these per-cell views (filled every stage). */
+        void set_mixture(Kokkos::View<rtype *, Kokkos::LayoutStride> gamma, Kokkos::View<rtype *> molar_mass);
+
     private:
-        template <uint8_t DEG>
+        template <uint8_t DEG, bool PRIM>
         void launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                               Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells);
-        template <uint8_t DEG>
+        template <uint8_t DEG, bool PRIM>
         void launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
                                    Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,

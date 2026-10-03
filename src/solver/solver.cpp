@@ -607,15 +607,15 @@ void Solver::init_numerics() {
     face_reconstruction->set_boundaries(boundary_data);
     face_reconstruction->init(face_reconstruction_input);
     if (is_mixture()) {
-        if (it_face->second == FaceReconstructionType::TENO) {
-            throw InputError("numerics.face_reconstruction: TENO is not yet supported with gas = \"mixture\" "
-                             "(FO, MUSCL).");
-        }
         if (riemann_solver_type == RiemannSolverType::ROE || riemann_solver_type == RiemannSolverType::RHLL) {
             throw InputError("numerics.riemann_solver: " + RIEMANN_SOLVER_NAMES.at(riemann_solver_type) +
                              " is not supported with gas = \"mixture\" (Rusanov, HLL, HLLC).");
         }
         scalar_reconstruction.init(mesh, boundary_data, mixture.n_species, *face_reconstruction);
+    }
+    double_flux = toml::find_or<bool>(input, "numerics", "double_flux", false);
+    if (double_flux && !is_mixture()) {
+        throw InputError("numerics.double_flux needs gas = \"mixture\".");
     }
 
     rhs_func = [this](State solution, State rhs, rtype t_stage) { calc_rhs(solution, rhs, t_stage); };
@@ -749,6 +749,14 @@ void Solver::allocate_memory() {
         face_thermo = Kokkos::View<rtype **[2][2]>("face_thermo", mesh->n_faces, n_quad);
         face_mdot = Kokkos::View<rtype **>("face_mdot", mesh->n_faces, n_quad);
         species_slots = Kokkos::View<rtype ***, Kokkos::LayoutRight>("species_slots", mesh->n_faces, 2, n_species);
+        if (double_flux) {
+            frozen_thermo = Kokkos::View<rtype *[2]>("frozen_thermo", mesh->n_cells);
+            face_energy_1 = Kokkos::View<rtype *>("face_energy_1", mesh->n_faces);
+        }
+        if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
+            cell_molar_mass = Kokkos::View<rtype *>("cell_molar_mass", mesh->n_cells);
+            teno->set_mixture(Kokkos::subview(cell_scalars, Kokkos::ALL(), n_species), cell_molar_mass);
+        }
         h_Y = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("Y", mesh->n_cells, n_species);
         h_X = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("X", mesh->n_cells, n_species);
     }
@@ -1002,6 +1010,7 @@ void Solver::print_setup() const {
     if (t_wall_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("wall ") + logging::duration(double(t_wall_stop));
     logging::item("Stop at", stop);
     if (check_nan) logging::item("NaN check", "every step");
+    if (double_flux) logging::item("Double flux", "frozen gamma and e0 per cell and step (not energy conservative)");
 
     logging::section("Boundaries");
     logging::items(boundary_summary);
@@ -1097,7 +1106,15 @@ void Solver::write_data(bool force) {
 }
 
 void Solver::take_step() {
+    if (double_flux) {
+        freeze_thermodynamics();
+        cells_frozen = true;
+    }
     time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
+    if (double_flux) {
+        cells_frozen = false;
+        reset_energy();
+    }
     halo_current = false;
     Kokkos::fence();
     step++;

@@ -13,6 +13,9 @@ Files (one set per mechanism and phase, prefix <name>):
                       some outside the fitted range (extrapolation)
   <name>_mixture.csv  mixture cp, cv, h, e per unit mass and gas constant at
                       random temperatures and mass fractions
+  <name>_rates.csv    net rates of progress and production rates at random
+                      temperatures, densities and mass fractions (mechanisms
+                      with reactions)
 """
 import os
 import sys
@@ -79,6 +82,32 @@ def write_case(name, path, phase, n_states, rng):
             f.write(",".join(fmt(x) for x in row) + "\n")
 
 
+KINETICS = [
+    # name, file, phase, states
+    ("h2o2", "mechanisms/h2o2.yaml", "ohmech", 40),
+    ("gri30", "mechanisms/gri30.yaml", "gri30", 12),
+    ("test_kinetics", "test/data/chemistry/test_kinetics.yaml", "gas", 40),
+]
+
+
+def write_rates(name, path, phase, n_states):
+    rng = np.random.default_rng(sum(map(ord, name)))
+    gas = ct.Solution(os.path.join(ROOT, path), phase)
+    with open(os.path.join(OUT, f"{name}_rates.csv"), "w") as f:
+        header(f, gas, path)
+        cols = (["T", "rho"] + [f"Y_{s}" for s in gas.species_names] +
+                [f"q_{i}" for i in range(gas.n_reactions)] + [f"omega_{s}" for s in gas.species_names])
+        f.write(",".join(cols) + "\n")
+        for _ in range(n_states):
+            T = rng.uniform(800.0, 2500.0)
+            p = 10.0 ** rng.uniform(4.0, 6.0)
+            Y = rng.dirichlet(np.full(gas.n_species, 0.5))
+            gas.TPY = T, p, Y
+            row = ([T, gas.density] + list(gas.Y) + list(gas.net_rates_of_progress) +
+                   list(gas.net_production_rates))
+            f.write(",".join("%.16e" % x for x in row) + "\n")
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     rng = np.random.default_rng(20261002)
@@ -88,6 +117,11 @@ def main():
             continue
         write_case(name, path, phase, n_states, rng)
         print("wrote", name)
+    for name, path, phase, n_states in KINETICS:
+        if names and name + "_rates" not in names:
+            continue
+        write_rates(name, path, phase, n_states)
+        print("wrote", name, "rates")
 
 
 if __name__ == "__main__":

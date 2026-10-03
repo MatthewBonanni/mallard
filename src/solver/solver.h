@@ -148,6 +148,14 @@ class Solver {
         void update_primitives_mixture();
         void init_temperature_seed();
         rtype calc_dt_cfl1_mixture();
+        /**
+         * @brief Double flux: freeze each cell's [gamma, e0] from the true
+         *        equation of state at the start of a step, and after the step
+         *        reset rho E to the true equation of state at the pressure the
+         *        frozen one gives.
+         */
+        void freeze_thermodynamics();
+        void reset_energy();
         /** @brief Over owned cells and all ranks: min rho, min p, -max Ma, min T, -max T, -max |sum Y - 1|. */
         std::array<rtype, 6> mixture_diagnostics();
         /**
@@ -244,6 +252,8 @@ class Solver {
         void launch_flux_functor();
         template <typename T_riemann_solver>
         void launch_mixture_flux_functor();
+        template <typename T_riemann_solver>
+        void launch_double_flux_functor();
         void init_mixture_boundaries(const std::vector<toml::value> & input_boundaries,
                                      std::vector<BoundaryCondition> & bcs);
 
@@ -324,6 +334,11 @@ class Solver {
 
         // Gas mixtures
         ScalarView cell_scalars;                              // (cell, [Y_1 .. Y_Ns, gamma, e0])
+        Kokkos::View<rtype *> cell_molar_mass;                // TENO: troubled-cell indicator
+        bool double_flux = false;
+        bool cells_frozen = false;                            // within a double-flux step
+        Kokkos::View<rtype *[2]> frozen_thermo;               // (cell, [gamma, e0]) of the step
+        Kokkos::View<rtype *> face_energy_1;                  // double flux: energy flux of side 1
         Kokkos::View<rtype *> T_seed;                         // Newton seed of each cell's temperature
         Kokkos::View<rtype *>::host_mirror_type h_T_seed;
         Kokkos::View<rtype **[2][2]> face_thermo;              // (face, q, side, [gamma, e0])

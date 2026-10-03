@@ -114,77 +114,239 @@ struct MixtureFluxFunctor {
 };
 
 /**
+ * @brief Double-flux variant of MixtureFluxFunctor (Abgrall & Karni 2001;
+ *        Billet & Abgrall 2003; Ma, Lv & Ihme 2017): each cell's energy
+ *        update uses a flux computed with its own frozen [gamma, e0] on both
+ *        sides of the face, so pressure and velocity stay exactly uniform
+ *        across contacts between different gases. Mass and momentum use the
+ *        mean of the two sides' fluxes, which stays conservative and equals
+ *        both at such contacts. face_flux holds side 0's energy flux,
+ *        face_energy_1 side 1's (both as the rate of change of side 0).
+ */
+template <typename T_riemann_solver>
+struct MixtureDoubleFluxFunctor {
+    Kokkos::View<rtype *[N_DIM]> normals;
+    Kokkos::View<rtype *> face_area;
+    Kokkos::View<int32_t *[2]> cells_of_face;
+    Kokkos::View<rtype *> quad_weights;
+    Kokkos::View<rtype **> face_weights;
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
+    BoundaryData boundaries;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
+    Kokkos::View<rtype *[2]> frozen;  // (cell, [gamma, e0])
+    Kokkos::View<rtype **[2][2]> face_thermo;
+    Kokkos::View<rtype **, Kokkos::LayoutStride> cell_thermo;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
+    Kokkos::View<rtype *> face_energy_1;
+    Kokkos::View<rtype **> face_mdot;
+    rtype low_mach_cutoff;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t i_face) const {
+        constexpr uint8_t E = N_DIM + 1;
+        uint8_t n_quad;
+        if constexpr (N_DIM == 2) {
+            n_quad = static_cast<uint8_t>(quad_weights.extent(0));
+        } else {
+            n_quad = static_cast<uint8_t>(face_weights.extent(1));
+        }
+        const int32_t c0 = cells_of_face(i_face, 0);
+        const int32_t c1 = cells_of_face(i_face, 1);
+        const riemann::SideThermo th_0{frozen(c0, 0), frozen(c0, 1)};
+        const riemann::SideThermo th_1 = c1 >= 0 ? riemann::SideThermo{frozen(c1, 0), frozen(c1, 1)} : th_0;
+        rtype n_unit[N_DIM];
+        rtype n_vec[N_DIM];
+        FOR_I_DIM n_vec[i] = normals(i_face, i);
+        unit<N_DIM>(n_vec, n_unit);
+
+        rtype flux[N_CONSERVATIVE] = {};
+        rtype energy_1 = 0.0_r;
+        for (uint8_t i_quad = 0; i_quad < n_quad; i_quad++) {
+            rtype w_q;
+            if constexpr (N_DIM == 2) {
+                w_q = quad_weights(i_quad);
+            } else {
+                w_q = face_weights(i_face, i_quad);
+                if (w_q == 0.0_r) {
+                    face_mdot(i_face, i_quad) = 0.0_r;
+                    continue;
+                }
+            }
+            rtype W_l[N_CONSERVATIVE], W_r[N_CONSERVATIVE];
+            FOR_I_CONSERVATIVE W_l[i] = face_solution(i_face, i_quad, 0, i);
+            if (c1 >= 0) {
+                FOR_I_CONSERVATIVE W_r[i] = face_solution(i_face, i_quad, 1, i);
+                if (low_mach_cutoff < 1.0_r) low_mach_correction(W_l, W_r, th_0.gamma, th_1.gamma, low_mach_cutoff);
+            } else {
+                const rtype th_i[2] = {th_0.gamma, th_0.e0};
+                rtype th_g[2];
+                boundaries.exterior_mixture(i_face, i_quad, n_quad, W_l, th_i, n_unit, W_cells, face_solution,
+                                            face_thermo, cell_thermo, W_r, th_g);
+            }
+            rtype F_0[N_CONSERVATIVE], F_1[N_CONSERVATIVE];
+            T_riemann_solver::calc_flux(F_0, n_unit, W_l, W_r, th_0, th_0);
+            if (c1 >= 0) {
+                T_riemann_solver::calc_flux(F_1, n_unit, W_l, W_r, th_1, th_1);
+            } else {
+                FOR_I_CONSERVATIVE F_1[i] = F_0[i];
+            }
+            const rtype mdot = 0.5_r * (F_0[0] + F_1[0]);
+            face_mdot(i_face, i_quad) = mdot;
+            flux[0] += w_q * mdot;
+            FOR_I_DIM flux[1 + i] += w_q * 0.5_r * (F_0[1 + i] + F_1[1 + i]);
+            flux[E] += w_q * F_0[E];
+            energy_1 += w_q * F_1[E];
+        }
+
+        const rtype scale = 0.5_r * face_area(i_face);
+        FOR_I_CONSERVATIVE face_flux(i_face, i) = -scale * flux[i];
+        face_energy_1(i_face) = -scale * energy_1;
+    }
+};
+
+/**
+ * @brief FaceFluxSumFunctor for double flux: the energy of a face's side-1
+ *        cell comes from face_energy_1.
+ */
+struct DoubleFluxSumFunctor {
+    Kokkos::View<uint32_t *> offsets_faces_of_cell;
+    Kokkos::View<uint32_t *> faces_of_cell;
+    Kokkos::View<int32_t *[2]> cells_of_face;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
+    Kokkos::View<rtype *> face_energy_1;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> rhs;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t i_cell) const {
+        constexpr uint8_t E = N_DIM + 1;
+        rtype sum[N_CONSERVATIVE] = {};
+        for (uint32_t k = offsets_faces_of_cell(i_cell); k < offsets_faces_of_cell(i_cell + 1); k++) {
+            const uint32_t i_face = faces_of_cell(k);
+            if (cells_of_face(i_face, 0) == static_cast<int32_t>(i_cell)) {
+                FOR_I_CONSERVATIVE sum[i] += face_flux(i_face, i);
+            } else {
+                for (uint8_t i = 0; i < E; i++) sum[i] -= face_flux(i_face, i);
+                sum[E] -= face_energy_1(i_face);
+            }
+        }
+        FOR_I_CONSERVATIVE rhs(i_cell, i) = sum[i];
+    }
+};
+
+/**
  * @brief Species fluxes by mass-flux upwinding (Larrouturou 1991),
  *        F_k = max(mdot, 0) Y_k^L + min(mdot, 0) Y_k^R, split by the side
  *        each part comes from: each cell writes, for each of its faces, the
  *        mass of each species leaving it through that face,
  *        slot(face, side, k) = A/2 sum_q w_q max(mdot_out, 0) Y_k(q), with
- *        Y_k from its own reconstruction; boundary faces also get the inflow
- *        from the exterior state in slot(face, 1, k). No two threads write the
- *        same slot.
+ *        Y_k from its own reconstruction (the evaluator Eval, see
+ *        ScalarFaceValues); boundary faces also get the inflow from the
+ *        exterior state in slot(face, 1, k). No two threads write the same slot.
  *
  * With face mass fractions in [0, 1] summing to one, the species fluxes sum
  * to the mass flux and keep rho Y_k non-negative under the flow's CFL limit.
  */
+template <typename Eval>
 struct SpeciesSlotFunctor {
+    static constexpr uint8_t MAX_Q = teno::MAX_FACE_QUAD;
+
     Kokkos::View<uint32_t *> offsets_faces_of_cell;
     Kokkos::View<uint32_t *> faces_of_cell;
+    Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *> face_area;
     Kokkos::View<rtype *> quad_weights;   // 2D
     Kokkos::View<rtype **> face_weights;  // 3D: (face, q)
     Kokkos::View<rtype **> face_mdot;
-    ScalarFaceValues values;
+    Eval values;
     BoundaryData boundaries;
     Kokkos::View<rtype ***, Kokkos::LayoutRight> slots;  // (face, side, k)
     uint32_t n_species;
 
-    /** @brief Mass fraction k beyond boundary face f of cell c (r: offset of c to the face). */
     KOKKOS_INLINE_FUNCTION
-    rtype exterior_Y(const uint32_t c, const uint32_t f, const rtype * r, const uint32_t k) const {
+    uint8_t n_quad() const {
+        if constexpr (N_DIM == 2) {
+            return static_cast<uint8_t>(quad_weights.extent(0));
+        } else {
+            return static_cast<uint8_t>(face_weights.extent(1));
+        }
+    }
+
+    /**
+     * @brief Mass fraction k beyond boundary face f (local face k_face of
+     *        cell c, whose own values there are interior) at each face point.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void exterior_Y(const uint32_t f, const uint32_t k, const rtype * interior, rtype * out) const {
+        const uint8_t nq = n_quad();
         const int32_t image_face = boundaries.face_image_face(f);
         const int32_t image = boundaries.face_image(f);
         if (image_face >= 0) {
-            rtype r_image[N_DIM];
-            values.offset(image, image_face, boundaries.face_image_side(f), r_image);
-            return values.value(image, k, r_image);
+            uint8_t k_image = 0;
+            while (faces_of_cell(offsets_faces_of_cell(image) + k_image) != static_cast<uint32_t>(image_face)) k_image++;
+            rtype image_values[MAX_Q];
+            values.face_values(image, k, k_image, image_values);
+            for (uint8_t q = 0; q < nq; q++) {
+                uint8_t q_image;
+                if constexpr (N_DIM == 2) {
+                    q_image = boundaries.face_image_flip(f) ? nq - 1 - q : q;
+                } else {
+                    q_image = boundaries.face_image_quad(f, q);
+                }
+                out[q] = image_values[q_image];
+            }
+            return;
         }
-        if (image >= 0) return values.scalars(image, k);
         const int32_t i_bc = boundaries.face_bc(f);
-        if (boundaries.bcs(i_bc).type == BoundaryType::UPT) return boundaries.bc_Y(i_bc, k);
-        return values.value(c, k, r);
+        for (uint8_t q = 0; q < nq; q++) {
+            if (image >= 0) {
+                out[q] = values.scalars(image, k);
+            } else if (boundaries.bcs(i_bc).type == BoundaryType::UPT) {
+                out[q] = boundaries.bc_Y(i_bc, k);
+            } else {
+                out[q] = interior[q];
+            }
+        }
     }
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
-        for (uint32_t i = offsets_faces_of_cell(c); i < offsets_faces_of_cell(c + 1); i++) {
-            const uint32_t f = faces_of_cell(i);
-            const uint8_t side = (values.cells_of_face(f, 0) == static_cast<int32_t>(c)) ? 0 : 1;
-            const bool boundary = values.cells_of_face(f, 1) < 0;
-            rtype r[N_DIM];
-            values.offset(c, f, side, r);
-            rtype out = 0.0_r, in = 0.0_r;  // A/2 sum_q w_q max(+-mdot_out, 0)
-            uint8_t n_quad;
-            if constexpr (N_DIM == 2) {
-                n_quad = static_cast<uint8_t>(quad_weights.extent(0));
-            } else {
-                n_quad = static_cast<uint8_t>(face_weights.extent(1));
-            }
-            for (uint8_t q = 0; q < n_quad; q++) {
+        const uint32_t begin = offsets_faces_of_cell(c);
+        const uint8_t n_faces = static_cast<uint8_t>(offsets_faces_of_cell(c + 1) - begin);
+        const uint8_t nq = n_quad();
+        // A/2 w_q max(+-mdot_out, 0) at each point of each face
+        rtype w_out[teno::MAX_FACES][MAX_Q], w_in[teno::MAX_FACES][MAX_Q];
+        for (uint8_t i = 0; i < n_faces; i++) {
+            const uint32_t f = faces_of_cell(begin + i);
+            const bool side_0 = cells_of_face(f, 0) == static_cast<int32_t>(c);
+            const rtype scale = 0.5_r * face_area(f);
+            for (uint8_t q = 0; q < nq; q++) {
                 rtype w_q;
                 if constexpr (N_DIM == 2) {
                     w_q = quad_weights(q);
                 } else {
                     w_q = face_weights(f, q);
                 }
-                const rtype m_out = side == 0 ? face_mdot(f, q) : -face_mdot(f, q);
-                out += w_q * Kokkos::fmax(m_out, 0.0_r);
-                in += w_q * Kokkos::fmax(-m_out, 0.0_r);
+                const rtype m_out = side_0 ? face_mdot(f, q) : -face_mdot(f, q);
+                w_out[i][q] = scale * w_q * Kokkos::fmax(m_out, 0.0_r);
+                w_in[i][q] = scale * w_q * Kokkos::fmax(-m_out, 0.0_r);
             }
-            const rtype scale = 0.5_r * face_area(f);
-            // First-order and MUSCL reconstructions have one point per face
-            for (uint32_t k = 0; k < n_species; k++) {
-                slots(f, side, k) = scale * out * values.value(c, k, r);
-                if (boundary) slots(f, 1, k) = scale * in * exterior_Y(c, f, r, k);
+        }
+        for (uint32_t k = 0; k < n_species; k++) {
+            FacePointValues Y[teno::MAX_FACES];
+            values.cell_values(c, k, Y);
+            for (uint8_t i = 0; i < n_faces; i++) {
+                const uint32_t f = faces_of_cell(begin + i);
+                const uint8_t side = cells_of_face(f, 0) == static_cast<int32_t>(c) ? 0 : 1;
+                rtype out = 0.0_r;
+                for (uint8_t q = 0; q < nq; q++) out += w_out[i][q] * Y[i][q];
+                slots(f, side, k) = out;
+                if (cells_of_face(f, 1) < 0) {
+                    rtype Y_ext[MAX_Q];
+                    exterior_Y(f, k, Y[i], Y_ext);
+                    rtype in = 0.0_r;
+                    for (uint8_t q = 0; q < nq; q++) in += w_in[i][q] * Y_ext[q];
+                    slots(f, 1, k) = in;
+                }
             }
         }
     }

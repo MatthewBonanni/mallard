@@ -12,6 +12,7 @@
 #include "mechanism.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cctype>
 #include <cmath>
 #include <filesystem>
@@ -50,6 +51,76 @@ struct Source {
     UnitSystem units;
 };
 
+/**
+ * @brief One side of a reaction equation: species with coefficients, and the
+ *        third body ("M" for "+ M", the species or "M" of "(+ X)").
+ */
+struct EquationSide {
+    std::vector<std::pair<std::string, double>> species;
+    std::string third_body;
+    bool falloff = false;
+};
+
+EquationSide parse_side(const std::string & text, const std::string & where) {
+    EquationSide side;
+    // Tokens separated by spaces; "+" alone separates terms; "(+M)" may be split as "(+" "M)"
+    std::vector<std::string> tokens;
+    std::string token;
+    for (size_t i = 0; i <= text.size(); i++) {
+        if (i == text.size() || std::isspace(static_cast<unsigned char>(text[i]))) {
+            if (!token.empty()) tokens.push_back(token);
+            token.clear();
+        } else {
+            token += text[i];
+        }
+    }
+    double coefficient = 1.0;
+    bool have_coefficient = false;
+    for (size_t i = 0; i < tokens.size(); i++) {
+        std::string t = tokens[i];
+        if (t == "+") continue;
+        if (t.rfind("(+", 0) == 0) {
+            // "(+M)" or "(+X)", possibly split into "(+" and "M)"
+            std::string body = t.substr(2);
+            if (body.empty() && i + 1 < tokens.size()) body = tokens[++i];
+            if (body.empty() || body.back() != ')') throw std::runtime_error(where + ": malformed falloff third body");
+            side.third_body = body.substr(0, body.size() - 1);
+            side.falloff = true;
+            continue;
+        }
+        if (t == "M") {
+            side.third_body = "M";
+            continue;
+        }
+        char * stop = nullptr;
+        const double value = std::strtod(t.c_str(), &stop);
+        if (stop != t.c_str() && *stop == '\0') {
+            coefficient = value;
+            have_coefficient = true;
+            continue;
+        }
+        if (!have_coefficient && stop != t.c_str() && std::isalpha(static_cast<unsigned char>(*stop))) {
+            // "2O2": a coefficient written against the species name
+            coefficient = value;
+            t = std::string(stop);
+        }
+        side.species.emplace_back(t, coefficient);
+        coefficient = 1.0;
+        have_coefficient = false;
+    }
+    return side;
+}
+
+void merge(std::vector<std::pair<int32_t, double>> & terms, int32_t k, double nu) {
+    for (auto & [species, coefficient] : terms) {
+        if (species == k) {
+            coefficient += nu;
+            return;
+        }
+    }
+    terms.emplace_back(k, nu);
+}
+
 class Reader {
     public:
         explicit Reader(const std::string & file) { main = load(file); }
@@ -62,6 +133,8 @@ class Reader {
         void add_species(const YAML::Node & entry, const Source & source, const std::string & section);
         Species parse_species(const YAML::Node & node, const Source & source) const;
         SpeciesThermo parse_thermo(const YAML::Node & node, const Source & source, const std::string & where) const;
+        void add_reactions(const YAML::Node & entry, const Source & source, const std::string & section);
+        bool parse_reaction(const YAML::Node & node, const Source & source, bool declared_only, Reaction & r) const;
 
         std::map<std::string, std::shared_ptr<Source>> sources;
         std::shared_ptr<Source> main;
@@ -145,6 +218,143 @@ void Reader::add_species(const YAML::Node & entry, const Source & source, const 
     }
 }
 
+void Reader::add_reactions(const YAML::Node & entry, const Source & source, const std::string & section) {
+    std::string mode = "all";
+    if (entry && entry.IsScalar()) mode = entry.Scalar();
+    if (mode == "none") return;
+    if (mode != "all" && mode != "declared-species") {
+        throw std::runtime_error("Mechanism " + mech.file + ": reactions \"" + mode +
+                                 "\" is not one of all, declared-species, none.");
+    }
+    const YAML::Node list = source.root[section];
+    if (!list) {
+        if (section == "reactions") return;
+        throw std::runtime_error("Mechanism file " + source.path + " has no reaction section \"" + section + "\".");
+    }
+    for (const auto & node : list) {
+        Reaction r;
+        if (parse_reaction(node, source, mode == "declared-species", r)) mech.reactions.push_back(std::move(r));
+    }
+}
+
+bool Reader::parse_reaction(const YAML::Node & node, const Source & source, const bool declared_only,
+                            Reaction & r) const {
+    if (!node["equation"]) throw std::runtime_error("Mechanism file " + source.path + ": a reaction has no equation.");
+    r.equation = node["equation"].as<std::string>();
+    const std::string where = "Mechanism file " + source.path + ", reaction \"" + r.equation + "\"";
+    std::string arrow;
+    size_t at = std::string::npos;
+    for (const char * a : {"<=>", "=>", "="}) {
+        at = r.equation.find(a);
+        if (at != std::string::npos) {
+            arrow = a;
+            break;
+        }
+    }
+    if (at == std::string::npos) throw std::runtime_error(where + ": no <=>, => or = in the equation.");
+    r.reversible = arrow != "=>";
+    const EquationSide lhs = parse_side(r.equation.substr(0, at), where);
+    const EquationSide rhs = parse_side(r.equation.substr(at + arrow.size()), where);
+    if (lhs.third_body != rhs.third_body || lhs.falloff != rhs.falloff) {
+        throw std::runtime_error(where + ": the third body differs between the sides.");
+    }
+    for (const auto & [side, terms] : {std::make_pair(&lhs, &r.reactants), std::make_pair(&rhs, &r.products)}) {
+        for (const auto & [name, nu] : side->species) {
+            const int32_t k = mech.species_index(name);
+            if (k < 0) {
+                if (declared_only) return false;
+                throw std::runtime_error(where + ": no species " + name + " in the phase.");
+            }
+            merge(*terms, k, nu);
+        }
+    }
+
+    const std::string type = node["type"] ? node["type"].as<std::string>() : "elementary";
+    if (type == "falloff" || lhs.falloff) {
+        if (!lhs.falloff || type != "falloff") throw std::runtime_error(where + ": falloff reactions need (+M).");
+        r.type = ReactionType::FALLOFF;
+    } else if (type == "three-body" || !lhs.third_body.empty()) {
+        if (lhs.third_body.empty()) throw std::runtime_error(where + ": three-body reactions need + M.");
+        r.type = ReactionType::THREE_BODY;
+    } else if (type != "elementary" && type != "reaction") {
+        throw std::runtime_error(where + ": reaction type \"" + type + "\" is not supported (elementary, three-body, "
+                                 "falloff).");
+    }
+    if (node["duplicate"]) r.duplicate = node["duplicate"].as<bool>();
+
+    // Forward orders: the reactants' coefficients unless given
+    r.orders = r.reactants;
+    if (node["orders"]) {
+        for (const auto & kv : node["orders"]) {
+            const int32_t k = mech.species_index(kv.first.as<std::string>());
+            bool found = false;
+            for (auto & [species, order] : r.orders) {
+                if (species == k) {
+                    order = kv.second.as<double>();
+                    found = true;
+                }
+            }
+            if (!found) throw std::runtime_error(where + ": orders are only supported for reactants.");
+        }
+    }
+    double order = 0.0;
+    for (const auto & term : r.orders) order += term.second;
+
+    // A has units concentration^(1 - n) / time for a rate of total order n
+    auto arrhenius = [&](const YAML::Node & k, double n, const std::string & what) {
+        if (!k || !k["A"]) throw std::runtime_error(where + ": missing " + what + ".");
+        Arrhenius a;
+        const Dimension dimension{0, 3.0 * (n - 1.0), -1.0, 0, 1.0 - n, 0, 0};
+        a.A = source.units.convert(k["A"], dimension, where + " " + what + ".A");
+        a.b = k["b"] ? k["b"].as<double>() : 0.0;
+        a.Ea_R = k["Ea"] ? source.units.convert_activation_energy(k["Ea"], where + " " + what + ".Ea") : 0.0;
+        if (a.A < 0.0 && !(node["negative-A"] && node["negative-A"].as<bool>())) {
+            throw std::runtime_error(where + ": negative " + what + ".A.");
+        }
+        return a;
+    };
+    if (r.type == ReactionType::FALLOFF) {
+        r.rate = arrhenius(node["high-P-rate-constant"], order, "high-P-rate-constant");
+        r.low = arrhenius(node["low-P-rate-constant"], order + 1.0, "low-P-rate-constant");
+        if (node["Troe"]) {
+            const YAML::Node troe = node["Troe"];
+            r.falloff = FalloffType::TROE;
+            r.falloff_params = {troe["A"].as<double>(), troe["T3"].as<double>(), troe["T1"].as<double>(),
+                                troe["T2"] ? troe["T2"].as<double>() : 0.0, 0.0};
+        } else if (node["SRI"]) {
+            const YAML::Node sri = node["SRI"];
+            r.falloff = FalloffType::SRI;
+            r.falloff_params = {sri["A"].as<double>(), sri["B"].as<double>(), sri["C"].as<double>(),
+                                sri["D"] ? sri["D"].as<double>() : 1.0, sri["E"] ? sri["E"].as<double>() : 0.0};
+        }
+    } else {
+        if (node["rate-constant"] && node["rate-constant"].IsMap() && !node["rate-constant"]["A"]) {
+            throw std::runtime_error(where + ": unsupported rate parameterization.");
+        }
+        r.rate = arrhenius(node["rate-constant"], r.type == ReactionType::THREE_BODY ? order + 1.0 : order,
+                           "rate-constant");
+    }
+    if (r.type != ReactionType::ELEMENTARY) {
+        if (lhs.third_body != "M") {
+            // A specific collider, "(+AR)"
+            const int32_t k = mech.species_index(lhs.third_body);
+            if (k < 0) throw std::runtime_error(where + ": no third-body species " + lhs.third_body + ".");
+            r.default_efficiency = 0.0;
+            r.efficiencies = {{k, 1.0}};
+        } else {
+            if (node["default-efficiency"]) r.default_efficiency = node["default-efficiency"].as<double>();
+            if (node["efficiencies"]) {
+                for (const auto & kv : node["efficiencies"]) {
+                    const int32_t k = mech.species_index(kv.first.as<std::string>());
+                    if (k < 0) continue;  // as Cantera: efficiencies of species outside the phase are ignored
+                    r.efficiencies.emplace_back(k, kv.second.as<double>());
+                }
+            }
+        }
+    }
+    return true;
+}
+
 Mechanism Reader::read(const std::string & phase_name) {
     mech.file = main->path;
     const YAML::Node phases = main->root["phases"];
@@ -201,6 +411,24 @@ Mechanism Reader::read(const std::string & phase_name) {
     }
     if (mech.species.empty()) {
         throw std::runtime_error("Mechanism " + main->path + ", phase " + mech.phase + " has no species.");
+    }
+    if (phase["kinetics"]) {
+        const YAML::Node reactions = phase["reactions"];
+        if (!reactions || reactions.IsScalar()) {
+            add_reactions(reactions, *main, "reactions");
+        } else {
+            for (const auto & item : reactions) {
+                if (item.IsScalar()) {
+                    add_reactions(YAML::Node("all"), *main, item.Scalar());
+                    continue;
+                }
+                for (const auto & kv : item) {
+                    std::string section;
+                    const auto source = source_of(kv.first.as<std::string>(), section);
+                    add_reactions(kv.second, *source, section);
+                }
+            }
+        }
     }
     return mech;
 }

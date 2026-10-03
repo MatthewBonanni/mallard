@@ -40,6 +40,8 @@ struct MixtureCellFunctor {
     Kokkos::View<rtype *> T_seed;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
     ScalarView scalars;
+    Kokkos::View<rtype *> molar_mass;  // empty unless TENO needs it
+    Kokkos::View<rtype *[2]> frozen;   // double flux within a step: [gamma, e0] in place of the EOS
     bool update_seed;
 
     KOKKOS_INLINE_FUNCTION
@@ -47,14 +49,75 @@ struct MixtureCellFunctor {
         rtype cons[N_CONSERVATIVE], W_c[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE cons[i] = U(c, i);
         const rtype * rhoY_c = &rhoY(c, 0);
-        rtype gamma, e0, T;
-        gas.cell_state(cons, rhoY_c, T_seed(c), W_c, gamma, e0, T);
+        rtype gamma, e0, T = 0.0_r;
+        if (frozen.extent(0) > 0) {
+            gamma = frozen(c, 0);
+            e0 = frozen(c, 1);
+            W_c[0] = cons[0];
+            FOR_I_DIM W_c[1 + i] = cons[1 + i] / cons[0];
+            W_c[N_DIM + 1] = (gamma - 1.0_r) * (cons[N_DIM + 1] - cons[0] * e0 -
+                                                0.5_r * cons[0] * dot<N_DIM>(W_c + 1, W_c + 1));
+        } else {
+            gas.cell_state(cons, rhoY_c, T_seed(c), W_c, gamma, e0, T);
+        }
         FOR_I_CONSERVATIVE W(c, i) = W_c[i];
+        if (molar_mass.extent(0) > 0) {
+            double n = 0.0;
+            for (uint32_t k = 0; k < gas.n_species; k++) n += static_cast<double>(rhoY_c[k]) * gas.thermo.inv_W(k);
+            molar_mass(c) = static_cast<rtype>(static_cast<double>(cons[0]) / n);
+        }
         const rtype inv_rho = 1.0_r / cons[0];
         for (uint32_t k = 0; k < gas.n_species; k++) scalars(c, k) = rhoY_c[k] * inv_rho;
         scalars(c, gas.n_species) = gamma;
         scalars(c, gas.n_species + 1) = e0;
-        if (update_seed) T_seed(c) = T;
+        if (update_seed && frozen.extent(0) == 0) T_seed(c) = T;
+    }
+};
+
+/** @brief Double flux: each cell's [gamma, e0] from the true EOS at the start of a step. */
+struct FreezeFunctor {
+    Mixture gas;
+    StateView U;
+    SpeciesView rhoY;
+    Kokkos::View<rtype *> T_seed;
+    Kokkos::View<rtype *[2]> frozen;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t c) const {
+        rtype cons[N_CONSERVATIVE], W[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE cons[i] = U(c, i);
+        rtype gamma, e0, T;
+        gas.cell_state(cons, &rhoY(c, 0), T_seed(c), W, gamma, e0, T);
+        T_seed(c) = T;
+        frozen(c, 0) = gamma;
+        frozen(c, 1) = e0;
+    }
+};
+
+/**
+ * @brief Double flux: rho E from the true EOS at the pressure that the
+ *        frozen [gamma, e0] give, keeping rho, rho u and the composition.
+ */
+struct ResetEnergyFunctor {
+    Mixture gas;
+    StateView U;
+    SpeciesView rhoY;
+    Kokkos::View<rtype *[2]> frozen;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t c) const {
+        constexpr uint8_t E = N_DIM + 1;
+        const double rho = static_cast<double>(U(c, 0));
+        double rhou2 = 0.0;
+        FOR_I_DIM rhou2 += static_cast<double>(U(c, 1 + i)) * static_cast<double>(U(c, 1 + i));
+        const double kinetic = 0.5 * rhou2 / rho;
+        const double p = (static_cast<double>(frozen(c, 0)) - 1.0) *
+                         (static_cast<double>(U(c, E)) - rho * static_cast<double>(frozen(c, 1)) - kinetic);
+        const PartialDensities y{&rhoY(c, 0), 1.0 / rho};
+        const double T = p / (rho * gas.thermo.gas_constant(y));
+        double e, cv;
+        gas.thermo.e_cv(T, y, e, cv);
+        U(c, E) = static_cast<rtype>(rho * e + kinetic);
     }
 };
 
@@ -193,8 +256,19 @@ std::array<rtype, 6> Solver::mixture_diagnostics() {
 }
 
 void Solver::update_cell_states(const State & solution, const bool update_seed) {
-    MixtureCellFunctor functor{mixture, solution.flow, solution.species, T_seed, W_cells, cell_scalars, update_seed};
+    MixtureCellFunctor functor{mixture, solution.flow, solution.species, T_seed, W_cells, cell_scalars,
+                               cell_molar_mass, cells_frozen ? frozen_thermo : Kokkos::View<rtype *[2]>(),
+                               update_seed};
     Kokkos::parallel_for("mixture_cells", mesh->n_cells, functor);
+}
+
+void Solver::freeze_thermodynamics() {
+    Kokkos::parallel_for("freeze_thermodynamics", mesh->n_cells,
+                         FreezeFunctor{mixture, conservatives, species, T_seed, frozen_thermo});
+}
+
+void Solver::reset_energy() {
+    Kokkos::parallel_for("reset_energy", mesh->n_owned(), ResetEnergyFunctor{mixture, conservatives, species, frozen_thermo});
 }
 
 void Solver::init_temperature_seed() {
@@ -210,38 +284,38 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
     face_reconstruction->calc_face_values(W_cells, face_solution);
     scalar_reconstruction.calc(cell_scalars, W_cells, face_thermo);
 
+    if (double_flux && !cells_frozen) {
+        throw std::logic_error("Double flux needs the cells' thermodynamics frozen (take_step).");
+    }
     switch (riemann_solver_type) {
         case RiemannSolverType::RUSANOV:
-            launch_mixture_flux_functor<riemann::Rusanov>();
+            double_flux ? launch_double_flux_functor<riemann::Rusanov>() : launch_mixture_flux_functor<riemann::Rusanov>();
             break;
         case RiemannSolverType::HLL:
-            launch_mixture_flux_functor<riemann::HLL>();
+            double_flux ? launch_double_flux_functor<riemann::HLL>() : launch_mixture_flux_functor<riemann::HLL>();
             break;
         case RiemannSolverType::HLLC:
-            launch_mixture_flux_functor<riemann::HLLC>();
+            double_flux ? launch_double_flux_functor<riemann::HLLC>() : launch_mixture_flux_functor<riemann::HLLC>();
             break;
         default:
             throw std::logic_error("Riemann solver without a mixture flux.");
     }
 
     const uint32_t n_species = mixture.n_species;
-    SpeciesSlotFunctor slot_functor{mesh->offsets_faces_of_cell,
-                                    mesh->faces_of_cell,
-                                    mesh->face_area,
-                                    face_reconstruction->quadrature_face.weights,
-                                    face_reconstruction->face_quad_weights,
-                                    face_mdot,
-                                    scalar_reconstruction.face_values(cell_scalars),
-                                    boundary_data,
-                                    species_slots,
-                                    n_species};
-    Kokkos::parallel_for("species_slots", mesh->n_cells, slot_functor);
+    scalar_reconstruction.species_slots(cell_scalars, face_mdot, face_reconstruction->quadrature_face.weights,
+                                        face_reconstruction->face_quad_weights, species_slots);
 
     const uint32_t n_owned = mesh->n_owned();
     StateView rhs = rhs_state.flow;
-    FaceFluxSumFunctor sum_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
-                                   face_flux, rhs};
-    Kokkos::parallel_for("face_flux_sum", n_owned, sum_functor);
+    if (double_flux) {
+        DoubleFluxSumFunctor sum_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
+                                         face_flux, face_energy_1, rhs};
+        Kokkos::parallel_for("face_flux_sum", n_owned, sum_functor);
+    } else {
+        FaceFluxSumFunctor sum_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
+                                       face_flux, rhs};
+        Kokkos::parallel_for("face_flux_sum", n_owned, sum_functor);
+    }
     SpeciesSumFunctor species_sum{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                   mesh->cell_volume, species_slots, rhs_state.species, n_species};
     Kokkos::parallel_for("species_sum", n_owned, species_sum);
@@ -298,6 +372,34 @@ void Solver::launch_mixture_flux_functor() {
     } else {
         Kokkos::View<uint32_t *> list = rhs_faces;
         Kokkos::parallel_for("mixture_flux", list.extent(0), OverFaces<MixtureFluxFunctor<T_riemann_solver>>{functor, list});
+    }
+}
+
+template <typename T_riemann_solver>
+void Solver::launch_double_flux_functor() {
+    const uint32_t n_species = mixture.n_species;
+    MixtureDoubleFluxFunctor<T_riemann_solver> functor{
+        mesh->face_normals,
+        mesh->face_area,
+        mesh->cells_of_face,
+        face_reconstruction->quadrature_face.weights,
+        face_reconstruction->face_quad_weights,
+        face_solution,
+        boundary_data,
+        W_cells,
+        frozen_thermo,
+        face_thermo,
+        Kokkos::subview(cell_scalars, Kokkos::ALL(), Kokkos::make_pair(n_species, n_species + 2)),
+        face_flux,
+        face_energy_1,
+        face_mdot,
+        low_mach_cutoff};
+    if (rhs_faces.extent(0) == 0) {
+        Kokkos::parallel_for("double_flux", mesh->n_faces, functor);
+    } else {
+        Kokkos::View<uint32_t *> list = rhs_faces;
+        Kokkos::parallel_for("double_flux", list.extent(0),
+                             OverFaces<MixtureDoubleFluxFunctor<T_riemann_solver>>{functor, list});
     }
 }
 

@@ -6,6 +6,7 @@ set(MALLARD_TEST_SOURCES
     time_integrator_test.cpp
     comm_test.cpp
     chemistry_thermo_test.cpp
+    chemistry_kinetics_test.cpp
     mixture_test.cpp
     mesh_block_test.cpp
     distributed_mesh_test.cpp

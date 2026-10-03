@@ -235,6 +235,51 @@ void eigenvectors(const rtype * W, const rtype * n, const rtype gamma,
 }
 
 /**
+ * @brief Left (L) and right (R) eigenvectors of the Euler equations in
+ *        primitive variables W = [rho, u, p] in direction n, for sound speed
+ *        a: valid for any equation of state. Same characteristic order as
+ *        eigenvectors(): u_n - a, u_n (entropy, here the density at fixed p
+ *        and u), u_n + a, then the shear waves.
+ */
+KOKKOS_INLINE_FUNCTION
+void primitive_eigenvectors(const rtype * W, const rtype a, const rtype * n,
+                            rtype L[N_CONSERVATIVE][N_CONSERVATIVE],
+                            rtype R[N_CONSERVATIVE][N_CONSERVATIVE]) {
+    constexpr uint8_t E = N_DIM + 1;
+    const rtype rho = W[0];
+    rtype t[N_DIM - 1][N_DIM];
+    tangent_basis(n, t[0], t[N_DIM - 2]);
+    for (uint8_t r = 0; r < N_CONSERVATIVE; r++) {
+        for (uint8_t c = 0; c < N_CONSERVATIVE; c++) {
+            L[r][c] = 0.0_r;
+            R[r][c] = 0.0_r;
+        }
+    }
+    // Acoustic waves r = [1, -+a n / rho, a^2], entropy r = [1, 0, 0], shear r = [0, t, 0]
+    R[0][0] = 1.0_r;
+    R[0][1] = 1.0_r;
+    R[0][2] = 1.0_r;
+    R[E][0] = a * a;
+    R[E][2] = a * a;
+    L[0][E] = 0.5_r / (a * a);
+    L[2][E] = 0.5_r / (a * a);
+    L[1][0] = 1.0_r;
+    L[1][E] = -1.0_r / (a * a);
+    FOR_I_DIM {
+        R[1 + i][0] = -a * n[i] / rho;
+        R[1 + i][2] = a * n[i] / rho;
+        L[0][1 + i] = -0.5_r * rho * n[i] / a;
+        L[2][1 + i] = 0.5_r * rho * n[i] / a;
+    }
+    for (uint8_t k = 0; k < N_DIM - 1; k++) {
+        FOR_I_DIM {
+            R[1 + i][3 + k] = t[k][i];
+            L[3 + k][1 + i] = t[k][i];
+        }
+    }
+}
+
+/**
  * @brief Adaptive cutoff C_T from the troubled-cell measure sigma
  *        (Liang, Shyy & Fu 2025): 1e-10 near sigma_L, 1e-6 above sigma_U.
  */
