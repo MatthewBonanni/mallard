@@ -79,6 +79,8 @@ int Solver::init(const toml::value & input_in) {
             init_numerics();
         });
     }
+    // The cache describes the local mesh at this halo depth
+    if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) teno->save_cache(halo_layers);
     setup.reset();
     timed_phase("fields and output", [&] {
         allocate_memory();
@@ -181,7 +183,16 @@ void Solver::init_mesh() {
         mesh = std::make_shared<Mesh>();
         mesh->init(input);
     } else {
-        if (halo_layers == 0) halo_layers = base_halo_layers();
+        if (halo_layers == 0) {
+            // A TENO cache records the halo depth its stencils need, which spares
+            // the setup pass that would otherwise find it out
+            const toml::value reconstruction =
+                toml::find_or(input, "numerics", "face_reconstruction", toml::value(toml::table{}));
+            const bool teno = toml::find_or<std::string>(reconstruction, "type", "FO") == "TENO";
+            const int cached =
+                comm::allreduce(teno ? int(TENO::cached_halo_layers(reconstruction)) : 0, comm::Op::MAX);
+            halo_layers = std::max(base_halo_layers(), cached);
+        }
         // Partition once; deeper halos (see halo_too_shallow) grow the existing layers
         if (!setup) {
             partitioner = toml::find_or<std::string>(input, "parallel", "partitioner",

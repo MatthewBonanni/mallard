@@ -13,9 +13,12 @@
 #include <Kokkos_Core.hpp>
 
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <string>
 #include <tuple>
+#include <vector>
 
 #include "test_fixtures.h"
 #include "face_reconstruction.h"
@@ -252,17 +255,15 @@ TEST(TENOTest, MirrorImagesTakeTheConditionOfTheNearestBoundaryFace) {
     dir.type = BoundaryType::DIRICHLET;
     BoundaryData bd = make_boundary_data(*mesh, face_bc, {sym, dir}, GAMMA);
     auto teno = make_teno(mesh, bd, 4);
-    auto sizes = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->stencil_large_size);
-    auto faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->stencil_large_face);
+    const TENO::Stencils stencils = teno->large_stencils();
     uint32_t n_checked = 0;
-    auto cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->stencil_large);
     for (uint32_t c = 0; c < mesh->n_cells; c++) {
-        for (uint16_t s = 0; s < sizes(c); s++) {
-            const int32_t f = faces(c, s);
+        for (uint64_t s = stencils.offsets[c]; s < stencils.offsets[c + 1]; s++) {
+            const int32_t f = stencils.faces[s];
             if (f < 0 || double(mesh->h_face_coords(f, 1)) > 1e-12) continue;
             // The image of a cell across the bottom takes the state of the face
             // directly beneath that cell
-            EXPECT_NEAR(mesh->h_face_coords(f, 0), mesh->h_cell_coords(cells(c, s), 0), 1e-12) << "cell " << c;
+            EXPECT_NEAR(mesh->h_face_coords(f, 0), mesh->h_cell_coords(stencils.cells[s], 0), 1e-12) << "cell " << c;
             if (double(mesh->h_cell_coords(c, 0)) > 0.6) {
                 EXPECT_EQ(face_bc[f], 0) << "cell " << c;
             }
@@ -297,17 +298,15 @@ TEST(TENOTest, MirrorImagesNeverLandInsideNonConvexDomains) {
     sym.type = BoundaryType::SYMMETRY;
     BoundaryData bd = make_boundary_data(*mesh_ptr, face_bc, {sym}, GAMMA);
     auto teno = make_teno(mesh_ptr, bd, 3);
-    auto sizes = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->stencil_large_size);
-    auto cells_v = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->stencil_large);
-    auto faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->stencil_large_face);
+    const TENO::Stencils stencils = teno->large_stencils();
     const auto & m = *mesh_ptr;
     for (uint32_t c = 0; c < m.n_cells; c++) {
-        for (uint16_t s = 0; s < sizes(c); s++) {
-            const int32_t f = faces(c, s);
+        for (uint64_t s = stencils.offsets[c]; s < stencils.offsets[c + 1]; s++) {
+            const int32_t f = stencils.faces[s];
             if (f < 0) continue;
             // Mirror the stencil cell's centroid across the face's line
             const rtype nx = m.h_face_normals(f, 0) / m.h_face_area(f), ny = m.h_face_normals(f, 1) / m.h_face_area(f);
-            const rtype px = m.h_cell_coords(cells_v(c, s), 0), py = m.h_cell_coords(cells_v(c, s), 1);
+            const rtype px = m.h_cell_coords(stencils.cells[s], 0), py = m.h_cell_coords(stencils.cells[s], 1);
             const rtype d = (px - m.h_face_coords(f, 0)) * nx + (py - m.h_face_coords(f, 1)) * ny;
             const rtype qx = px - 2 * d * nx, qy = py - 2 * d * ny;
             const bool in_domain = (qx > 0 && qx < 1 && qy > 0 && qy < 1) && !(qx > 0.5_r && qy > 0.5_r);
@@ -316,11 +315,20 @@ TEST(TENOTest, MirrorImagesNeverLandInsideNonConvexDomains) {
     }
 }
 
-TEST(TENOTest, StencilCacheReproducesPrecomputationAndRejectsOtherMeshes) {
-    const std::string cache = (std::filesystem::temp_directory_path() / "mallard_teno_cache.bin").string();
-    std::filesystem::remove(cache);
-    auto mesh = make_mesh("cartesian_tri", 10, 8);
-    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+/**
+ * @brief Face values (every cell troubled, so the large, sector and smoothness
+ *        tables all take part) and centroid gradients of a TENO on a smooth field.
+ */
+std::vector<double> teno_outputs(std::shared_ptr<Mesh> mesh, const BoundaryData & bd, int order,
+                                 const std::string & cache, uint8_t slice_shift = teno::SLICE_SHIFT,
+                                 bool save = false) {
+    auto teno = std::make_unique<TENO>();
+    teno->set_mesh(mesh);
+    teno->set_boundaries(bd);
+    teno->slice_shift = slice_shift;
+    teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) +
+                          "\ntroubled_threshold = 0\ncache_file = \"" + cache + "\"\n"));
+    if (save) teno->save_cache();
     auto avg = cell_averages(*mesh, smooth_conservatives);
     Euler euler = Euler::from_reference(GAMMA, 1.0, 1.0, 1.0);
     Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
@@ -332,23 +340,82 @@ TEST(TENOTest, StencilCacheReproducesPrecomputationAndRejectsOtherMeshes) {
         FOR_I_CONSERVATIVE h_W(c, i) = Wc[i];
     }
     Kokkos::deep_copy(W, h_W);
-    auto reconstruct = [&](std::shared_ptr<Mesh> m, const BoundaryData & b) {
-        auto teno = make_teno(m, b, 4, "cache_file = \"" + cache + "\"\n");
-        Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", m->n_faces, teno->n_face_quadrature_points());
-        teno->calc_face_values(W, face_W);
-        return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
-    };
-    auto first = reconstruct(mesh, bd);
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, teno->n_face_quadrature_points());
+    teno->calc_face_values(W, face_W);
+    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients("gradients", mesh->n_cells);
+    teno->cell_gradients(W, gradients, mesh->n_cells);
+    auto h_face_W = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+    auto h_gradients = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), gradients);
+    std::vector<double> out(h_face_W.data(), h_face_W.data() + h_face_W.span());
+    out.insert(out.end(), h_gradients.data(), h_gradients.data() + h_gradients.span());
+    return out;
+}
+
+void expect_bitwise_equal(const std::vector<double> & a, const std::vector<double> & b, const std::string & what) {
+    ASSERT_EQ(a.size(), b.size()) << what;
+    size_t n_diff = 0;
+    for (size_t i = 0; i < a.size(); i++) n_diff += std::memcmp(&a[i], &b[i], sizeof(double)) != 0;
+    EXPECT_EQ(n_diff, 0u) << what;
+}
+
+std::string temp_cache(const std::string & name) {
+    const std::string path = (std::filesystem::temp_directory_path() / name).string();
+    std::filesystem::remove(path);
+    return path;
+}
+
+TEST(TENOTest, PackedStencilsAndTheirCacheDoNotDependOnTheSliceWidth) {
+    // Stencils of different sizes, and a cell count that is not a multiple of
+    // the GPU slice width, so slices are both ragged and partly empty
+    auto mesh = make_mesh("cartesian_tri", 13, 11);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    {
+        auto teno = make_teno(mesh, bd, 4);
+        const TENO::Stencils stencils = teno->large_stencils();
+        uint64_t shortest = UINT64_MAX, longest = 0;
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            shortest = std::min(shortest, stencils.offsets[c + 1] - stencils.offsets[c]);
+            longest = std::max(longest, stencils.offsets[c + 1] - stencils.offsets[c]);
+        }
+        ASSERT_LT(shortest, longest);
+        ASSERT_NE(mesh->n_cells % 32, 0u);
+    }
+    const std::string cache = temp_cache("mallard_teno_cache_slices.bin");
+    const auto host = teno_outputs(mesh, bd, 4, "", 0);
+    const auto gpu = teno_outputs(mesh, bd, 4, cache, 5, true);
     ASSERT_TRUE(std::filesystem::exists(cache));
     const auto written = std::filesystem::last_write_time(cache);
-    auto second = reconstruct(mesh, bd);
-    EXPECT_EQ(std::filesystem::last_write_time(cache), written);  // Loaded, not rewritten
-    for (size_t i = 0; i < first.span(); i++) EXPECT_EQ(first.data()[i], second.data()[i]);
+    // A cache written with GPU slices loads into host rows, and back
+    const auto loaded_host = teno_outputs(mesh, bd, 4, cache, 0, true);
+    const auto loaded_gpu = teno_outputs(mesh, bd, 4, cache, 5, true);
+    EXPECT_EQ(std::filesystem::last_write_time(cache), written);  // Loaded, never rewritten
+    expect_bitwise_equal(host, gpu, "32-cell slices");
+    expect_bitwise_equal(host, loaded_host, "loaded into host rows");
+    expect_bitwise_equal(host, loaded_gpu, "loaded into 32-cell slices");
+    std::filesystem::remove(cache);
+}
 
-    // A different mesh must not reuse the cache
+TEST(TENOTest, StencilCacheIsRecomputedForOtherMeshesOrOptionsAndWhenTruncated) {
+    auto mesh = make_mesh("cartesian_tri", 10, 8);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
     auto other = make_mesh("cartesian_tri", 10, 8, 1.0, 1.5);
     BoundaryData bd_other = make_uniform_boundaries(*other, BoundaryType::SYMMETRY, GAMMA);
-    auto teno = make_teno(other, bd_other, 4, "cache_file = \"" + cache + "\"\n");
-    EXPECT_NE(std::filesystem::last_write_time(cache), written);
+    const std::string cache = temp_cache("mallard_teno_cache_mismatch.bin");
+    auto fresh = [&](std::shared_ptr<Mesh> m, const BoundaryData & b, int order) {
+        return teno_outputs(m, b, order, "");
+    };
+    auto write_cache = [&]() {
+        std::filesystem::remove(cache);
+        teno_outputs(mesh, bd, 4, cache, teno::SLICE_SHIFT, true);
+        ASSERT_TRUE(std::filesystem::exists(cache));
+    };
+
+    write_cache();
+    expect_bitwise_equal(teno_outputs(other, bd_other, 4, cache), fresh(other, bd_other, 4), "other mesh");
+    write_cache();
+    expect_bitwise_equal(teno_outputs(mesh, bd, 3, cache), fresh(mesh, bd, 3), "other order");
+    write_cache();
+    std::filesystem::resize_file(cache, std::filesystem::file_size(cache) / 2);
+    expect_bitwise_equal(teno_outputs(mesh, bd, 4, cache), fresh(mesh, bd, 4), "truncated cache");
     std::filesystem::remove(cache);
 }

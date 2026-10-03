@@ -38,6 +38,70 @@ constexpr uint8_t MAX_FACES = (N_DIM == 2) ? 4 : 6;
 constexpr uint8_t MAX_FACE_QUAD = (N_DIM == 2) ? 4 : 9;
 
 /**
+ * @brief Index of entry (l, m), l <= m, of a symmetric n x n matrix stored as
+ *        its upper triangle, row by row.
+ */
+KOKKOS_INLINE_FUNCTION
+constexpr uint16_t upper_index(const uint8_t l, const uint8_t m, const uint8_t n) {
+    return l * n - l * (l - 1) / 2 + (m - l);
+}
+
+/**
+ * @brief log2 of the cells per slice of PackedStencils: 32 on GPUs, so that a
+ *        warp reads consecutive words, and 1 on the host, where each cell's
+ *        stencil is then contiguous.
+ */
+constexpr uint8_t SLICE_SHIFT =
+    Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace, Kokkos::HostSpace>::accessible ? 0 : 5;
+
+/**
+ * @brief Per-cell stencils of different sizes, stored without padding to the
+ *        largest one in the mesh. Slot s of a cell's stencil holds the stencil
+ *        cell, its mirror boundary face (or -1) and `width` pseudo-inverse
+ *        entries. Consecutive cells form slices of 2^shift cells; a slice is
+ *        padded to its largest stencil and interleaves its cells' slots.
+ */
+struct PackedStencils {
+    Kokkos::View<uint64_t *> slice_start;  // (slice): first slot of the slice
+    Kokkos::View<int32_t *> cells;
+    Kokkos::View<int32_t *> faces;
+    Kokkos::View<rtype *> pinv;
+    uint8_t shift = SLICE_SHIFT;
+    uint8_t width = 0;
+
+    /** @brief One cell's stencil, resolved once per cell. */
+    struct Row {
+        const rtype * pinv_;
+        const int32_t * cells_;
+        const int32_t * faces_;
+        uint8_t shift;
+
+        KOKKOS_INLINE_FUNCTION
+        int32_t cell(const uint32_t s) const { return cells_[s << shift]; }
+
+        KOKKOS_INLINE_FUNCTION
+        int32_t face(const uint32_t s) const { return faces_[s << shift]; }
+
+        /** @brief Entry l of slot s, for pseudo-inverses of WIDTH entries per slot. */
+        template <uint8_t WIDTH>
+        KOKKOS_INLINE_FUNCTION
+        rtype pinv(const uint32_t s, const uint32_t l) const { return pinv_[(s * WIDTH + l) << shift]; }
+    };
+
+    // The arrays are single allocations whose base pointers reach the kernels
+    // as parameters: pointers loaded from device memory (e.g. a table of
+    // separately allocated chunks) compile to generic loads, which made the
+    // reconstruction up to 30% slower
+    KOKKOS_INLINE_FUNCTION
+    Row row(const uint32_t c) const {
+        const uint64_t start = slice_start(c >> shift);
+        const uint32_t lane = c & ((1u << shift) - 1);
+        return Row{pinv.data() + ((start * width) << shift) + lane, cells.data() + (start << shift) + lane,
+                   faces.data() + (start << shift) + lane, shift};
+    }
+};
+
+/**
  * @brief Exponents (a, b) of the l-th monomial xi^a eta^b, ordered by total
  *        degree: (1,0), (0,1), (2,0), (1,1), (0,2), (3,0), ...
  */

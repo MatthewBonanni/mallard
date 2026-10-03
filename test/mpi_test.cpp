@@ -13,6 +13,7 @@
 #include <Kokkos_Core.hpp>
 
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -333,6 +334,59 @@ TEST(MPITest, GraphPartitionIsBalancedAndMatchesSerial) {
     const uint64_t n_owned = solver.get_distribution().n_owned;
     const uint64_t n_global = solver.get_mesh()->n_global_cells;
     EXPECT_LE(comm::allreduce(n_owned, comm::Op::MAX), 1.03 * n_global / comm::size() + 1);
+}
+
+TEST(MPITest, TENOCacheOfEachRankReproducesItsSetupAndHalo) {
+    const std::string cache = (std::filesystem::temp_directory_path() / "mallard_mpi_teno_cache.bin").string();
+    const std::string rank_file =
+        comm::size() > 1 ? cache + ".r" + std::to_string(comm::rank()) + "-of-" + std::to_string(comm::size()) : cache;
+    std::filesystem::remove(rank_file);
+    comm::barrier();
+    auto input = [&](const std::string & partitioner) {
+        return box_input("cartesian_tri", "type = \"TENO\"\norder = 4\ncache_file = \"" + cache + "\"\n", EULER,
+                         bcs("type = \"extrapolation\"\n", "type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                             "type = \"symmetry\"\n"), 5) +
+               "[parallel]\npartitioner = \"" + partitioner + "\"\n";
+    };
+    struct Run {
+        std::vector<double> U;
+        int halo_layers;
+    };
+    auto run = [&](const std::string & partitioner) {
+        Solver solver;
+        solver.init(parse_toml(input(partitioner)));
+        solver.run();
+        solver.copy_device_to_host();
+        Run out{{}, solver.get_distribution().halo_layers};
+        for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
+            FOR_I_CONSERVATIVE out.U.push_back(solver.h_conservatives(c, i));
+        }
+        return out;
+    };
+
+    const Run fresh = run("hilbert");
+    ASSERT_TRUE(std::filesystem::exists(rank_file));
+    const auto written = std::filesystem::last_write_time(rank_file);
+    // Starts from the recorded halo depth, so the setup runs once
+    const Run cached = run("hilbert");
+    EXPECT_EQ(std::filesystem::last_write_time(rank_file), written);  // Loaded, not rewritten
+    EXPECT_EQ(cached.halo_layers, fresh.halo_layers);
+    ASSERT_EQ(cached.U.size(), fresh.U.size());
+    size_t n_diff = 0;
+    for (size_t i = 0; i < fresh.U.size(); i++) n_diff += std::memcmp(&fresh.U[i], &cached.U[i], sizeof(double)) != 0;
+    EXPECT_EQ(n_diff, 0u) << "on rank " << comm::rank() << " of " << comm::size();
+
+    // Another partition of the same mesh has other local meshes: recomputed.
+    // Graph partitions repeat too, so their caches are reused.
+    if (comm::size() > 1 && have_graph_partitioner()) {
+        run("graph");
+        const auto graph_written = std::filesystem::last_write_time(rank_file);
+        EXPECT_NE(graph_written, written);
+        run("graph");
+        EXPECT_EQ(std::filesystem::last_write_time(rank_file), graph_written);
+    }
+    comm::barrier();
+    std::filesystem::remove(rank_file);
 }
 
 TEST(MPITest, RunFromHDF5MeshFileMatchesSerial) {

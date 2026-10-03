@@ -276,27 +276,49 @@ class TENO : public FaceReconstruction {
         bool characteristic = true;
         bool bound_preserving = false;
         rtype max_condition = 1.0e8;
+        uint8_t slice_shift = teno::SLICE_SHIFT;  // log2 of the cells per slice of the packed stencils
 
-        // Per-cell precomputed data
+        // Per-cell precomputed data, for the reconstructed cells [0, n_reconstructed)
         Kokkos::View<rtype *> scale;                       // h = sqrt(V)
         Kokkos::View<rtype **> basis_mean;                 // (cell, l): mean of phi_l over the cell
         Kokkos::View<uint16_t *> stencil_large_size;       // (cell)
-        Kokkos::View<int32_t **> stencil_large;            // (cell, s)
-        Kokkos::View<int32_t **> stencil_large_face;       // (cell, s): mirror boundary face or -1
-        Kokkos::View<rtype ***> pinv_large;                // (cell, l, s)
+        teno::PackedStencils stencil_large;                // pseudo-inverse width: nk
         Kokkos::View<uint16_t **> stencil_small_size;      // (cell, face); 0 if stencil invalid
-        Kokkos::View<int32_t ***> stencil_small;           // (cell, face, s)
-        Kokkos::View<int32_t ***> stencil_small_face;      // (cell, face, s): mirror boundary face or -1
-        Kokkos::View<rtype ****> pinv_small;               // (cell, face, l, s)
-        Kokkos::View<rtype ***> si_matrix;                 // (cell, l, m)
-        Kokkos::View<rtype *> troubled;                    // (cell): sigma, for diagnostics
+        teno::PackedStencils stencil_small;                // the faces' stencils one after another; width NK_SMALL
+        Kokkos::View<rtype **> si_matrix;                  // (cell, upper_index(l, m)): symmetric
+        Kokkos::View<rtype *> troubled;                    // (local cell): sigma, for diagnostics
         Kokkos::View<rtype ***> troubled_coeffs;           // (cell, l, var): scratch for the troubled passes
         Kokkos::View<rtype ****> troubled_small_coeffs;    // (cell, sector, l, var): scratch for the troubled passes
         Kokkos::View<uint32_t *> troubled_cells;           // queue of troubled cells
         Kokkos::View<uint32_t> n_troubled;
-        // Vertex-neighbor layers each cell's stencil search visited (host); a
-        // distributed run needs this many complete layers around the cell
+        // Vertex-neighbor layers each reconstructed cell's stencil search visited
+        // (host); a distributed run needs this many complete layers around the cell
         std::vector<uint8_t> gather_depth;
+
+        /**
+         * @brief Stencil cells and mirror faces of every reconstructed cell, row
+         *        by row (host copy, for diagnostics).
+         */
+        struct Stencils {
+            std::vector<uint64_t> offsets;  // (cell + 1)
+            std::vector<int32_t> cells;
+            std::vector<int32_t> faces;
+        };
+        Stencils large_stencils() const;
+
+        /**
+         * @brief Halo layers recorded in this rank's cache file (0 if there is
+         *        none, or it was made with other TENO options or rank count),
+         *        so a distributed run can build its halo at that depth at once.
+         */
+        static uint8_t cached_halo_layers(const toml::value & input);
+
+        /**
+         * @brief Write the precomputed data to the cache file, unless init()
+         *        loaded it from there. A distributed run calls this once its halo
+         *        is final, with its halo layers.
+         */
+        void save_cache(uint8_t halo_layers = 0);
 
     private:
         template <uint8_t DEG>
@@ -311,11 +333,16 @@ class TENO : public FaceReconstruction {
                       Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution, Kokkos::View<uint32_t *> cells,
                       bool troubled_pass);
 
+        void read_options(const toml::value & input);
         void compute_stencils_and_matrices();
         void compute_stencils_and_matrices_3d();
+        void allocate_scratch();
+        uint64_t options_key() const;
         uint64_t cache_key() const;
-        bool save_cache(const std::string & filename) const;
-        bool load_cache(const std::string & filename);
+        bool load_cache();
+
+        std::string cache_file;  // this rank's
+        bool cache_loaded = false;
 
         uint32_t largest_stencil = 0;        // Largest central stencil on any rank (cells)
         int64_t n_sector_unavailable = -1;   // Small sector stencils cut by boundaries, -1 if unknown
