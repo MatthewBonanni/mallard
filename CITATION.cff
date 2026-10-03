@@ -7,8 +7,8 @@ authors:
   - family-names: "Bonanni"
     given-names: "Matthew"
     orcid: "https://orcid.org/0000-0002-8671-7955"
-version: "0.2.0"
-date-released: "2026-10-02"
+version: 0.3.0
+date-released: 2026-10-02
 url: "https://github.com/MatthewBonanni/mallard"
 repository-code: "https://github.com/MatthewBonanni/mallard"
 license: AGPL-3.0-only
