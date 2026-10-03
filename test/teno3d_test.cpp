@@ -12,6 +12,8 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <sstream>
 #include <string>
@@ -249,4 +251,63 @@ TEST(TENO3DSolver, AdvectedPulseConvergesAndBeatsMUSCL) {
               << std::endl;
     EXPECT_GT(std::log2(t1 / t2), 3.0);
     EXPECT_LT(t2, 0.25 * m2);
+}
+
+TEST(TENO3DSolver, PerturbationsAtRestStayBoundedOnThinPrisms) {
+    // Stencil candidates ranked by physical distance took the whole column
+    // across thin cells first and resolved the other directions only through
+    // small centroid offsets: full rank and a small Lebesgue constant, but a
+    // grid-scale vortical mode grew like exp(13 t) on these prisms of aspect
+    // ratio 6 (order 4, walls all around), to Mach 0.85 by t = 1
+    const double lz = 4.0 / 6.0 / 6.25;
+    std::ostringstream in;
+    in << "[run]\nt_stop = 1.0\ncfl = 0.4\n"
+       << "[mesh]\ntype = \"cartesian_prism\"\nNx = 6\nNy = 6\nNz = 4\nLx = 1.0\nLy = 1.0\nLz = " << lz << "\n"
+       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\n"
+       << "u = [\"1e-3 * sin(7 * x + 3 * y) * cos(5 * z / " << lz << ")\", \"1e-3 * cos(4 * x - 6 * y)\", \"0.0\"]\n"
+       << "p = \"1.0\"\n";
+    for (const char * zone : {"left", "right", "bottom", "top", "back", "front"}) {
+        in << "[[boundaries]]\nname = \"" << zone << "\"\ntype = \"symmetry\"\n";
+    }
+    in << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+       << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 4\n"
+       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+       << "[output]\ncheck_interval = 1000000\n";
+    Solver solver;
+    solver.init(parse_toml(in.str()));
+    solver.run();
+    solver.copy_device_to_host();
+    double speed = 0.0;
+    for (uint32_t i = 0; i < solver.get_mesh()->n_cells; i++) {
+        double q2 = 0.0;
+        for (int d = 0; d < N_DIM; d++) {
+            q2 += std::pow(double(solver.h_conservatives(i, 1 + d)) / double(solver.h_conservatives(i, 0)), 2);
+        }
+        speed = std::max(speed, std::sqrt(q2));
+    }
+    std::cout << "largest speed at t = 1: " << speed << std::endl;
+    EXPECT_LT(speed, 1e-2);
+}
+
+TEST(TENO3DStencils, MetricIsTheIdentityOnRegularTilingsOnly) {
+    // Regular tilings keep stencils ranked by physical distance, walls
+    // included; stretched ones do not
+    auto anisotropic_cells = [](const std::string & type, double lz) {
+        auto mesh = make_mesh_3d(type, 6, 6, 6, 1.0, 1.0, lz);
+        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+        TENO teno;
+        teno.set_mesh(mesh);
+        teno.set_boundaries(bd);
+        const std::array<double, 9> identity = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+        uint32_t n = 0;
+        for (uint32_t i = 0; i < mesh->n_cells; i++) n += (teno.stencil_metric(i) != identity);
+        return n;
+    };
+    for (const char * type : {"cartesian", "cartesian_tet", "cartesian_prism", "cartesian_pyramid", "cartesian_mixed"}) {
+        EXPECT_EQ(anisotropic_cells(type, 1.0), 0u) << type;
+    }
+    for (const char * type : {"cartesian", "cartesian_tet", "cartesian_prism"}) {
+        auto mesh = make_mesh_3d(type, 6, 6, 6, 1.0, 1.0, 1.0 / 6.25);
+        EXPECT_EQ(anisotropic_cells(type, 1.0 / 6.25), mesh->n_cells) << type;
+    }
 }

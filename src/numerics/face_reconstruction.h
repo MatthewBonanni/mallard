@@ -12,6 +12,7 @@
 #ifndef FACE_RECONSTRUCTION_H
 #define FACE_RECONSTRUCTION_H
 
+#include <array>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -306,6 +307,13 @@ class TENO : public FaceReconstruction {
             std::vector<int32_t> faces;
         };
         Stencils large_stencils() const;
+
+        /**
+         * @brief Metric (3 x 3, row-major) in which the stencil candidates of
+         *        cell i are ranked by distance (3D): the identity unless the
+         *        mesh spacing around the cell is markedly anisotropic.
+         */
+        std::array<double, 9> stencil_metric(uint32_t i) const;
 
         /**
          * @brief Halo layers recorded in this rank's cache file (0 if there is
