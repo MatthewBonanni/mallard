@@ -848,27 +848,30 @@ cases with 4-16x fewer cells; shared node, about 10% run-to-run noise):
 
 | Case | dt = 1e-8 s | dt = 1e-6 s | Sub-steps at 1e-6 s (igniting cells) |
 |---|---|---|---|
-| h2o2 | 837k | 412k | up to 12 |
-| GRI-3.0 | 73.4k | 72.2k | up to 5 |
-| n-dodecane | 59.4k | 52.7k | 5 |
-| n-hexane | 3.03k | 2.10k | up to 6 |
+| h2o2 | 952k | 438k | up to 13 |
+| GRI-3.0 | 79.7k | 77.5k | up to 3 |
+| n-dodecane | 60.7k | 24.7k | 108 |
+| n-hexane | 2.93k | 877 | up to 44 |
 
-One A100 thus does the work of 6-8 such 16-core slices (about one 128-core
-node) for h2o2 and GRI-3.0, and of 5 for n-dodecane at 1e-8 s. At 1e-6 s the
-large mechanisms' igniting cells take far more sub-steps on the A100 than on
-CPUs from the same states (n-dodecane 108 against 5, n-hexane up to 44
-against 6), which makes the A100 slower than 16 cores there (28.9k against
-52.7k, 190 against 2.1k cells per second). There the A100 accepts 106
-sub-steps (and rejects 2) where the CPU builds take 5, with or without the
-sparse LU and the lanes, so its error estimates for these states are far
-larger; ignition delays on the A100 still match Cantera (V3). This is open,
-to be traced before large mechanisms run at flame-like `dt` on GPUs. On the full
+One A100 thus does the work of 6-7 such 16-core slices (about one 128-core
+node) for h2o2 and GRI-3.0, of 5 for n-dodecane and of 1.8 for n-hexane at
+1e-8 s. At 1e-6 s the igniting cells of the large mechanisms take the same
+sub-steps on both (n-dodecane 106 accepted and 2 rejected, with the same step
+sizes and error estimates to 1e-9; n-hexane up to 44) and set the A100's
+time: each is one warp's sequence of sub-steps, behind which the other cells
+finish long before. The A100 then matches 1.2 slices for n-dodecane and is
+4.6x slower than 16 cores for n-hexane (190 against 877 cells per second), a
+target for later. The first CPU numbers
+of this milestone had these cells at 5-6 sub-steps: on host backends a mirror
+view of the cells' state is that state, so every call after the warm-up
+continued from the states the previous one had left instead of the sampled
+ones (`ChemistryBenchmarkTest` checks this now). On the full
 solver (2400 x 40 cells, h2o2, 20 steps; 2400 x 4 cells, GRI-3.0, 10 steps;
 both "hot") milestone 8 and this milestone take 163-169 and 179 ms per step
 (h2o2) and 295 and 270 ms (GRI-3.0); on CPUs the automatic choice is one
 thread per cell and the queue is not reordered (OpenMP hands each thread a
 contiguous block of it, which sorting would fill with the expensive cells:
-3.4x slower for h2o2 at 1e-6 s).
+3.6x slower for h2o2 at 1e-6 s).
 
 0D ignitions on one CPU core against Cantera 3.2 (CVODES, the same rtol
 1e-6 and atol 1e-10, the same output interval; its sparse preconditioned
