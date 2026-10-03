@@ -35,6 +35,7 @@ struct Case3D {
     uint32_t n[3] = {3, 3, 3};
     double L[3] = {1.0, 1.0, 1.0};
     std::string recon = "FO";
+    std::string recon_options;
     std::string riemann = "HLLC";
     std::string bc[6] = {"type = \"extrapolation\"\n", "type = \"extrapolation\"\n",
                          "type = \"extrapolation\"\n", "type = \"extrapolation\"\n",
@@ -57,7 +58,7 @@ std::unique_ptr<Solver> init_case(const Case3D & c) {
       << "[initialize]\n" << c.init;
     for (int k = 0; k < 6; k++) s << "[[boundaries]]\nname = \"" << ZONES[k] << "\"\n" << c.bc[k];
     s << "[numerics]\nriemann_solver = \"" << c.riemann << "\"\ntime_integrator = \"SSPRK3\"\ncheck_nan = true\n"
-      << "[numerics.face_reconstruction]\ntype = \"" << c.recon << "\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"" << c.recon << "\"\n" << c.recon_options
       << "[physics]\n" << c.physics
       << "[output]\ncheck_interval = 1000000\n" << c.extra;
     auto solver = std::make_unique<Solver>();
@@ -128,6 +129,28 @@ TEST_P(MeshRecon3D, ClosedBoxConservesMassAndEnergy) {
 
 INSTANTIATE_TEST_SUITE_P(Solver3D, MeshRecon3D,
     ::testing::Combine(::testing::ValuesIn(MESHES), ::testing::Values("FO", "MUSCL")));
+
+TEST(Solver3DValidation, UnlimitedMUSCLKeepsAnAcousticPulseBoundedOnTetrahedra) {
+    // Regression: with gradients fitted over face neighbors only, unlimited
+    // MUSCL grew a mode at the walls of this box of tetrahedra until the
+    // solution became non-finite at t = 1.9
+    Case3D c;
+    c.mesh = "cartesian_tet";
+    c.n[0] = c.n[1] = c.n[2] = 6;
+    c.recon = "MUSCL";
+    c.recon_options = "limiter = \"none\"\n";
+    c.set_all_bcs("type = \"symmetry\"\n");
+    const std::string pulse = "exp(-50 * ((x - 0.5)^2 + (y - 0.5)^2 + (z - 0.5)^2))";
+    c.init = "type = \"analytical\"\nrho = \"1.0 + 0.01 * " + pulse + "\"\n"
+             "u = [\"0.0\", \"0.0\", \"0.0\"]\np = \"0.7142857142857143 * (1.0 + 0.014 * " + pulse + ")\"\n";
+    c.run = "t_stop = 4.0\ncfl = 0.5\n";
+    auto solver = run_case(c);
+    double u_max = 0.0;
+    for (uint32_t i = 0; i < solver->get_mesh()->n_cells; i++) {
+        for (int d = 0; d < 3; d++) u_max = std::max(u_max, std::abs(double(solver->h_primitives(i, d))));
+    }
+    EXPECT_LT(u_max, 0.01);
+}
 
 namespace {
 

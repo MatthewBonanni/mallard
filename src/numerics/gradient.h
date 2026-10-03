@@ -216,7 +216,7 @@ struct VertexGradientWeights {
  * of a quadratic, so the gradient is second-order accurate on any stencil that
  * determines the fit: on triangles and on the one-sided stencils of boundary
  * cells, where a linear fit is only first-order accurate. Stencils with too few
- * or degenerate points use the linear fit.
+ * or degenerate points, or quadratic = false, use the linear fit.
  */
 struct LSQVertexGradientFunctor {
     LSQGradientFunctor faces;
@@ -224,6 +224,7 @@ struct LSQVertexGradientFunctor {
     Kokkos::View<uint32_t *> cells_of_cell;
     Kokkos::View<uint8_t *> cells_of_cell_shift;
     VertexGradientWeights weights;
+    bool quadratic = true;
 
     static constexpr uint8_t NB = N_DIM + N_DIM * (N_DIM + 1) / 2;  // Linear and quadratic monomials
 
@@ -288,13 +289,13 @@ struct LSQVertexGradientFunctor {
             }
         });
         double L[NB][NB], L_lin[N_DIM][N_DIM];
-        const bool quadratic = n_points >= NB && cholesky<NB>(A, L);
-        if (!quadratic) cholesky<N_DIM>(M, L_lin);
+        const bool fit_quadratic = quadratic && n_points >= NB && cholesky<NB>(A, L);
+        if (!fit_quadratic) cholesky<N_DIM>(M, L_lin);
         for_each_point(i_cell, [&](const rtype * dx_r, bool is_face, uint32_t k) {
             double dx[N_DIM];
             const double w = widen(dx_r, dx);
             double c[N_DIM];
-            if (quadratic) {
+            if (fit_quadratic) {
                 double phi[NB];
                 monomials(dx, phi);
                 cholesky_solve<NB>(L, phi);
@@ -346,12 +347,15 @@ inline LSQGradientFunctor make_gradient(const Mesh & mesh, const BoundaryData & 
 
 /**
  * @brief LSQVertexGradientFunctor over the given gradient functor's mesh,
- *        boundaries, states and gradients, with its weights computed.
+ *        boundaries, states and gradients, with its weights computed for a
+ *        quadratic or a linear fit.
  */
-inline LSQVertexGradientFunctor make_vertex_gradient(const LSQGradientFunctor & faces, const Mesh & mesh) {
+inline LSQVertexGradientFunctor make_vertex_gradient(const LSQGradientFunctor & faces, const Mesh & mesh,
+                                                     bool quadratic = true) {
     LSQVertexGradientFunctor functor{faces, mesh.offsets_cells_of_cell, mesh.cells_of_cell, mesh.cells_of_cell_shift,
                                      {Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_cells", mesh.cells_of_cell.extent(0)),
-                                      Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_faces", faces.faces_of_cell.extent(0))}};
+                                      Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_faces", faces.faces_of_cell.extent(0))},
+                                     quadratic};
     Kokkos::parallel_for("vertex_gradient_weights", mesh.n_cells,
                          KOKKOS_LAMBDA(const uint32_t i_cell) { functor.compute_weights(i_cell); });
     return functor;

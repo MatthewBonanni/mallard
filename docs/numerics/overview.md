@@ -22,7 +22,7 @@ from a per-cell spectral radius ([Blazek 2015](../references.md#blazek-2015)),
 - **First order**: cell averages.
 - **MUSCL** ([van Leer 1979](../references.md#van-leer-1979)):
   - Variables: W = [rho, u, v, p].
-  - Gradients: weighted least squares ([Mavriplis 2003](../references.md#mavriplis-2003)) over face neighbors, with boundary ghost states placed at the mirror image of the cell centroid.
+  - Gradients: weighted least squares ([Mavriplis 2003](../references.md#mavriplis-2003)) over face neighbors, with boundary ghost states placed at the mirror image of the cell centroid; on tetrahedra, over vertex neighbors. A tetrahedron's four face neighbors make weakly limited MUSCL unstable: a 1% acoustic pulse grows without bound in a box of generated tetrahedra with symmetry walls, and in a Delaunay tetrahedral mesh. Vertex neighbors are not used everywhere because their one-sided stencils at boundaries break the exact one-dimensionality of flows along aligned quadrilaterals.
   - Limiter: Barth-Jespersen ([Barth & Jespersen 1989](../references.md#barth-jespersen-1989)) or Venkatakrishnan ([Venkatakrishnan 1995](../references.md#venkatakrishnan-1995)).
   - Faces whose density or pressure would be non-positive fall back to first order.
 - **TENO-E** ([Liang, Shyy & Fu 2025](../references.md#liang-shyy-fu-2025), extending TENO, [Fu, Hu & Adams 2016](../references.md#fu-hu-adams-2016); see [TENO-E details](teno_e.md)):

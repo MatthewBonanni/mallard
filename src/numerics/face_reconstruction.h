@@ -234,6 +234,7 @@ class MUSCL : public FaceReconstruction {
         rtype venkat_K = 5.0;
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
         Kokkos::View<rtype *[N_CONSERVATIVE]> limiters;
+        LSQVertexGradientFunctor gradient;  // Its linear vertex fit serves tetrahedra
 };
 
 /**

@@ -241,6 +241,7 @@ void MUSCL::init(const toml::value & input) {
     venkat_K = find_real_or(input, "venkatakrishnan_K", 5.0);
     gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("gradients", mesh->n_cells);
     limiters = Kokkos::View<rtype *[N_CONSERVATIVE]>("limiters", mesh->n_cells);
+    gradient = make_vertex_gradient(make_gradient(*mesh, boundaries, {}, gradients), *mesh, false);
     if constexpr (N_DIM == 3) init_face_quadrature_3d(1);
 }
 
@@ -253,6 +254,26 @@ logging::Items MUSCL::summary() const {
 uint8_t MUSCL::n_face_quadrature_points() const {
     return 1;
 }
+
+/**
+ * @brief MUSCL gradients: a linear fit over face neighbors, or over vertex
+ *        neighbors on tetrahedra, whose four face neighbors make MUSCL unstable.
+ */
+struct MUSCLGradientFunctor {
+    LSQVertexGradientFunctor vertex;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t i_cell) const {
+        if constexpr (N_DIM == 3) {
+            const auto & offsets = vertex.faces.offsets_faces_of_cell;
+            if (offsets(i_cell + 1) - offsets(i_cell) == 4) {
+                vertex(i_cell);
+                return;
+            }
+        }
+        vertex.faces(i_cell);
+    }
+};
 
 /**
  * @brief Slope limiter evaluated at the face centroids of each cell, using the
@@ -379,10 +400,10 @@ struct MUSCLFaceFunctor {
 
 void MUSCL::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                              Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
-    LSQGradientFunctor gradient_functor = make_gradient(*mesh, boundaries, solution, gradients);
-    Kokkos::parallel_for("lsq_gradient", mesh->n_cells, gradient_functor);
+    gradient.faces = make_gradient(*mesh, boundaries, solution, gradients);
+    Kokkos::parallel_for("lsq_gradient", mesh->n_cells, MUSCLGradientFunctor{gradient});
 
-    LimiterFunctor limiter_functor{gradient_functor, mesh->cell_volume, limiters, limiter, venkat_K};
+    LimiterFunctor limiter_functor{gradient.faces, mesh->cell_volume, limiters, limiter, venkat_K};
     Kokkos::parallel_for("limiter", mesh->n_cells, limiter_functor);
 
     MUSCLFaceFunctor face_functor{mesh->cells_of_face,
