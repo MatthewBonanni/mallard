@@ -1,4 +1,5 @@
 """Minimal reader for Mallard's raw-appended VTU files."""
+import os
 import re
 
 import numpy as np
@@ -62,3 +63,32 @@ def read_vtu(path):
     tris = np.vstack(tri_parts).astype(np.int64)
     tri_cell = np.concatenate(idx_parts)
     return pts[:, :2], tris, tri_cell, arrays
+
+
+def read_quads(path, names):
+    """Cell centers and fields of a quad mesh VTU, or of all pieces of a PVTU."""
+    if path.endswith(".pvtu"):
+        pieces = re.findall(r'Source="([^"]+)"', open(path).read())
+        parts = [read_quads(os.path.join(os.path.dirname(path), p), names) for p in pieces]
+        return (parts[0][0], np.concatenate([q[1] for q in parts]),
+                {n: np.concatenate([q[2][n] for q in parts]) for n in names})
+    pts, conn, offs, _, arrays = read_vtu_cells(path)
+    n_nodes = np.diff(np.concatenate([[0], offs]))
+    if not np.all(n_nodes == 4):
+        raise ValueError(f"{path}: expected a quad mesh")
+    return arrays["TIME"], pts[conn.reshape(-1, 4)].mean(axis=1), {n: arrays[n] for n in names}
+
+
+def grid_fields(path, names):
+    """Cell fields of a generated quad mesh as (nx, ny) arrays, with x and y of the cell centers."""
+    time, c, arrays = read_quads(path, names)
+    xs, ys = np.unique(np.round(c[:, 0], 12)), np.unique(np.round(c[:, 1], 12))
+    dx, dy = xs[1] - xs[0], ys[1] - ys[0]
+    i = np.rint((c[:, 0] - xs[0]) / dx).astype(int)
+    j = np.rint((c[:, 1] - ys[0]) / dy).astype(int)
+    out = {}
+    for name in names:
+        f = np.empty((xs.size, ys.size))
+        f[i, j] = arrays[name]
+        out[name] = f
+    return time, xs, ys, out

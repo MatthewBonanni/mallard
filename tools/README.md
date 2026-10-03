@@ -30,3 +30,6 @@ Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the 3D
 | `plot_sphere_re300.py` | Sphere at Re = 300: Strouhal number from the lift, mean drag and lift over whole shedding periods, against Johnson & Patel and other simulations |
 | `animate_sphere_re300.py` | Sphere wake animation: Q-criterion isosurfaces colored by streamwise velocity, orbiting camera, and the drag and lift histories |
 | `interpolate_restart.py` | Interpolate a restart file onto another Gmsh mesh of the same domain (inverse-distance weighting of the nearest cells), to start a refined run from a developed flow |
+| `znd_restart.py` | Initial state of a detonation run from a ZND profile (`detonation_reference.py`): 1D, or 2D (`--ny`, `--ly`) with disks of unreacted gas behind the front (`--pocket`, repeatable; `--fresh-pocket` for fresh gas at rest) to trigger cells |
+| `soot_foil.py` | 2D cellular detonation: mean front speed against D_CJ, triple points on the front and the cell width they imply, and the numerical soot foil (`P_MAX`) as an image |
+| `animate_detonation_2d.py` | Cellular detonation animation: pressure and the soot foil building up in a window that follows the front, and the whole foil so far |

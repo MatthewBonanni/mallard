@@ -1,0 +1,97 @@
+# Cellular detonation in 2H2-O2-7Ar at 6.67 kPa and 298 K (V9 of
+# docs/design/chemistry.md): the planar CJ detonation of examples/detonation_1d
+# (D_CJ = 1617 m/s, ZND induction length 1.525 mm with mechanisms/h2o2.yaml)
+# in a 6 cm channel with slip walls, perturbed by six disks of fresh gas
+# 2-4 mm behind the front. 0.15 mm cells: 10 per induction length, the
+# resolution of Oran et al. (Combust. Flame 113:147, 1998; 0.15 mm in x for a
+# 1.4 mm induction length). P_MAX records the numerical soot foil. Make the
+# initial state first, from this directory:
+#
+#   python ../../tools/detonation_reference.py ../../mechanisms/h2o2.yaml ohmech \
+#       "H2:2, O2:1, AR:7" 298 6670 znd.csv
+#   python ../../tools/znd_restart.py znd.csv ../../mechanisms/h2o2.yaml ohmech 3000 0.45 0.1 \
+#       cell.restart --ny 400 --ly 0.06 --fresh-pocket \
+#       --pocket 0.097 0.006 0.002 --pocket 0.0965 0.017 0.002 --pocket 0.0975 0.026 0.002 \
+#       --pocket 0.096 0.038 0.002 --pocket 0.097 0.047 0.002 --pocket 0.0968 0.055 0.002
+#
+# then run (1.2M cells, 18,900 steps: 39 minutes on two A100s, chemistry 71% of
+# the time) and analyze and animate it with
+#
+#   python ../../tools/soot_foil.py solut/cell.pvd 1616.93 --png foil.png
+#   python ../../tools/animate_detonation_2d.py solut/cell.pvd detonation_2d.mp4
+#
+# Results: the front runs 328 mm at a mean speed over the second half of
+# 1617.0 m/s (D_CJ to 0.01%). The pockets start eight strong triple points
+# (soot_foil.py: cells 15 mm wide, x = 140-180 mm); as the
+# front runs the weaker ones die out (three or four by x = 260 mm, cells
+# 30-40 mm) and the rest weaken, leaving fainter tracks at 25-30 degrees to the
+# front's direction. Published numerical cells at this resolution are 3 cm
+# wide (Oran et al. 1998, two cells across a 6 cm channel; Deiterding,
+# J. Combust. 2011:738969, 44.8 points per 1.4 mm induction length): the
+# pattern passes through that size but is not yet regular after 33 cm;
+# measured cells in 70% argon are larger (about 4 cm at 10 kPa, Strehlow et
+# al. 1967). The track pattern is grid-converged: in a 3 cm channel seeded by
+# one pocket, runs at 10 and 20 cells per induction length (and TENO5 at 10)
+# put the first wall reflection and track crossing at the same positions to
+# within 1.5 mm after 75 mm of travel.
+
+[run]
+t_stop = 2.05e-4
+cfl = 0.5
+
+[mesh]
+type = "cartesian"
+Nx = 3000
+Ny = 400
+Lx = 0.45
+Ly = 0.06
+
+[initialize]
+type = "restart"
+file = "cell.restart"
+
+[[boundaries]]
+name = "left"
+type = "extrapolation"
+
+[[boundaries]]
+name = "right"
+type = "extrapolation"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "euler"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+
+[output]
+check_interval = 100
+
+[[write_data]]
+prefix = "./solut/cell"
+format = "vtu"
+time_interval = 1.5e-6
+variables = ["P", "T", "P_MAX"]
+
+[[write_data]]
+prefix = "./restart/cell"
+format = "restart"
+time_interval = 2.0e-5
