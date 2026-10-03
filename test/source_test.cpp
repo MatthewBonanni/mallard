@@ -54,7 +54,7 @@ double hydrostatic_spurious_velocity(uint32_t n, const std::string & recon) {
     solver.copy_device_to_host();
     double v_max = 0.0;
     for (uint32_t i = 0; i < solver.get_mesh()->n_cells; i++) {
-        v_max = std::max(v_max, std::hypot(solver.h_primitives(i, 0), solver.h_primitives(i, 1)));
+        v_max = std::max(v_max, std::hypot(double(solver.h_primitives(i, 0)), double(solver.h_primitives(i, 1))));
     }
     return v_max;
 }
@@ -70,7 +70,7 @@ TEST(SourceTest, SpatialMassSourceAddsExactMass) {
     solver.run();
     const auto after = solver.integrate_conservatives();
     // integral of 0.2 (1 + x) over the unit square = 0.3 (exact for the centroid rule: linear)
-    EXPECT_NEAR(after[0] - before[0], 0.3 * 0.5, 1e-12);
+    EXPECT_NEAR(after[0] - before[0], 0.3 * 0.5, precision_tol<double>(1e-12, 5e-5));  // single: rounding in ~100 SSPRK3 steps
 }
 
 TEST(SourceTest, TimeDependentEnergySourceIsIntegratedInTime) {
@@ -80,7 +80,7 @@ TEST(SourceTest, TimeDependentEnergySourceIsIntegratedInTime) {
     const auto before = solver.integrate_conservatives();
     solver.run();
     const auto after = solver.integrate_conservatives();
-    EXPECT_NEAR(after[3] - before[3], 1.0 - std::cos(1.0), 1e-7);
+    EXPECT_NEAR(after[3] - before[3], 1.0 - std::cos(1.0), precision_tol<double>(1e-7, 1e-4));  // single: rounding in ~100 SSPRK3 steps
 }
 
 TEST(SourceTest, GravityPullsGasDown) {

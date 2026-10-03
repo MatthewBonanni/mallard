@@ -54,13 +54,13 @@ TEST(BoundaryTest, TimeDependentDirichletInflowIsAdvected) {
     auto m = solver.get_mesh();
     double max_err = 0.0;
     for (uint32_t i = 0; i < m->n_cells; i++) {
-        const double x = m->h_cell_coords(i, 0);
+        const double x = double(m->h_cell_coords(i, 0));
         if (x > 0.7) continue;  // Beyond the entering front
         const double h = 0.01;
         // Exact cell average of 1 + 0.1 sin(2 pi (t - x)) over [x - h/2, x + h/2]
-        const double t = solver.get_time();
+        const double t = double(solver.get_time());
         const double exact = 1.0 + 0.1 * std::sin(2.0 * M_PI * (t - x)) * std::sin(M_PI * h) / (M_PI * h);
-        max_err = std::max(max_err, std::abs(solver.h_conservatives(i, 0) - exact));
+        max_err = std::max(max_err, std::abs(double(solver.h_conservatives(i, 0)) - exact));
     }
     EXPECT_LT(max_err, 5e-4);
 }
@@ -115,8 +115,8 @@ double outlet_profile_error(const std::string & outlet) {
     auto m = solver.get_mesh();
     double err = 0.0;
     for (uint32_t i = 0; i < m->n_cells; i++) {
-        if (m->h_cell_coords(i, 0) < 0.95) continue;
-        err = std::max(err, std::abs(solver.h_primitives(i, 2) - std::exp(-m->h_cell_coords(i, 1))));
+        if (m->h_cell_coords(i, 0) < 0.95_r) continue;
+        err = std::max(err, std::abs(double(solver.h_primitives(i, 2)) - std::exp(-double(m->h_cell_coords(i, 1)))));
     }
     return err;
 }
@@ -143,15 +143,15 @@ struct FarfieldCase {
 
     FarfieldCase(const rtype * W_i) {
         bc.type = BoundaryType::FARFIELD;
-        const rtype W_inf[N_CONSERVATIVE] = {1.0, 0.3, -0.1, 1.0 / G};
+        const rtype W_inf[N_CONSERVATIVE] = {1.0, 0.3, -0.1, 1.0_r / G};
         FOR_I_CONSERVATIVE bc.data[i] = W_inf[i];
         bc.ghost_W(W_i, n, G, 1.0, false, W_g);
     }
     static rtype u_n(const rtype * W, const rtype * n) { return W[1] * n[0] + W[2] * n[1]; }
     static rtype u_t(const rtype * W, const rtype * n) { return -W[1] * n[1] + W[2] * n[0]; }
     static rtype a(const rtype * W) { return std::sqrt(G * W[3] / W[0]); }
-    static rtype r_plus(const rtype * W, const rtype * n) { return u_n(W, n) + 2.0 * a(W) / (G - 1.0); }
-    static rtype r_minus(const rtype * W, const rtype * n) { return u_n(W, n) - 2.0 * a(W) / (G - 1.0); }
+    static rtype r_plus(const rtype * W, const rtype * n) { return u_n(W, n) + 2.0_r * a(W) / (G - 1.0_r); }
+    static rtype r_minus(const rtype * W, const rtype * n) { return u_n(W, n) - 2.0_r * a(W) / (G - 1.0_r); }
     static rtype entropy(const rtype * W) { return W[3] / std::pow(W[0], G); }
 };
 
@@ -160,7 +160,7 @@ struct FarfieldCase {
 TEST(BoundaryTest, FarfieldReturnsTheFreeStreamForTheFreeStream) {
     const rtype W_inf[N_CONSERVATIVE] = {1.0, 0.3, -0.1, 1.0 / 1.4};
     FarfieldCase c(W_inf);
-    FOR_I_CONSERVATIVE EXPECT_NEAR(c.W_g[i], W_inf[i], 1e-14);
+    FOR_I_CONSERVATIVE EXPECT_NEAR(c.W_g[i], W_inf[i], roundoff(1e-14));
 }
 
 TEST(BoundaryTest, FarfieldTakesEachCharacteristicFromItsUpwindSide) {
@@ -172,19 +172,19 @@ TEST(BoundaryTest, FarfieldTakesEachCharacteristicFromItsUpwindSide) {
     F out(W_out);
     W_inf = out.bc.data;
     ASSERT_GT(F::u_n(out.W_g, out.n), 0.0);
-    EXPECT_NEAR(F::r_plus(out.W_g, out.n), F::r_plus(W_out, out.n), 1e-12);
-    EXPECT_NEAR(F::r_minus(out.W_g, out.n), F::r_minus(W_inf, out.n), 1e-12);
-    EXPECT_NEAR(F::entropy(out.W_g), F::entropy(W_out), 1e-12);
-    EXPECT_NEAR(F::u_t(out.W_g, out.n), F::u_t(W_out, out.n), 1e-12);
+    EXPECT_NEAR(F::r_plus(out.W_g, out.n), F::r_plus(W_out, out.n), roundoff(1e-12));
+    EXPECT_NEAR(F::r_minus(out.W_g, out.n), F::r_minus(W_inf, out.n), roundoff(1e-12));
+    EXPECT_NEAR(F::entropy(out.W_g), F::entropy(W_out), roundoff(1e-12));
+    EXPECT_NEAR(F::u_t(out.W_g, out.n), F::u_t(W_out, out.n), roundoff(1e-12));
 
     // Subsonic inflow (u_n < 0): entropy and tangential velocity from the free stream
     const rtype W_in[N_CONSERVATIVE] = {0.9, -0.5, -0.3, 0.6};
     F in(W_in);
     ASSERT_LT(F::u_n(in.W_g, in.n), 0.0);
-    EXPECT_NEAR(F::r_plus(in.W_g, in.n), F::r_plus(W_in, in.n), 1e-12);
-    EXPECT_NEAR(F::r_minus(in.W_g, in.n), F::r_minus(W_inf, in.n), 1e-12);
-    EXPECT_NEAR(F::entropy(in.W_g), F::entropy(W_inf), 1e-12);
-    EXPECT_NEAR(F::u_t(in.W_g, in.n), F::u_t(W_inf, in.n), 1e-12);
+    EXPECT_NEAR(F::r_plus(in.W_g, in.n), F::r_plus(W_in, in.n), roundoff(1e-12));
+    EXPECT_NEAR(F::r_minus(in.W_g, in.n), F::r_minus(W_inf, in.n), roundoff(1e-12));
+    EXPECT_NEAR(F::entropy(in.W_g), F::entropy(W_inf), roundoff(1e-12));
+    EXPECT_NEAR(F::u_t(in.W_g, in.n), F::u_t(W_inf, in.n), roundoff(1e-12));
 
     // Supersonic outflow keeps the interior, supersonic inflow takes the free stream
     const rtype W_sup_out[N_CONSERVATIVE] = {1.0, 1.2, 1.6, 1.0 / 1.4};
@@ -219,8 +219,8 @@ TEST(BoundaryTest, FarfieldLetsAPressurePulseLeave) {
     solver.copy_device_to_host();
     double dp_max = 0.0;
     for (uint32_t i = 0; i < solver.get_mesh()->n_cells; i++) {
-        dp_max = std::max(dp_max, std::abs(solver.h_primitives(i, 2) - 1.0 / 1.4));
+        dp_max = std::max(dp_max, std::abs(double(solver.h_primitives(i, 2)) - 1.0 / 1.4));
     }
-    // upt leaves 1.8e-4, extrapolation 5e-4
-    EXPECT_LT(dp_max, 1.2e-4);
+    // upt leaves 1.8e-4, extrapolation 5e-4; single precision adds ~1e-6 of round-off
+    EXPECT_LT(dp_max, precision_tol<double>(1.2e-4, 1.3e-4));
 }

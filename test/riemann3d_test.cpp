@@ -16,6 +16,7 @@
 
 #include "physics.h"
 #include "riemann_solver.h"
+#include "test_utils.h"
 
 namespace {
 
@@ -69,7 +70,7 @@ void rotate(const rtype * v, rtype * out) {
     const rtype c = std::cos(0.7), s = std::sin(0.7);
     const rtype kv = k[0] * v[0] + k[1] * v[1] + k[2] * v[2];
     const rtype kxv[3] = {k[1] * v[2] - k[2] * v[1], k[2] * v[0] - k[0] * v[2], k[0] * v[1] - k[1] * v[0]};
-    for (int d = 0; d < 3; d++) out[d] = v[d] * c + kxv[d] * s + k[d] * kv * (1.0 - c);
+    for (int d = 0; d < 3; d++) out[d] = v[d] * c + kxv[d] * s + k[d] * kv * (1.0_r - c);
 }
 
 void flux_jacobian_fd(const rtype * W, const rtype * n, rtype A[N_CONSERVATIVE][N_CONSERVATIVE]) {
@@ -77,7 +78,7 @@ void flux_jacobian_fd(const rtype * W, const rtype * n, rtype A[N_CONSERVATIVE][
     rtype U0[N_CONSERVATIVE];
     gas.compute_conservatives_from_W(U0, W);
     for (int j = 0; j < N_CONSERVATIVE; j++) {
-        const rtype h = 1e-6 * (1.0 + std::abs(U0[j]));
+        const rtype h = precision_tol(1e-6, 1e-3) * (1.0_r + std::abs(U0[j]));
         rtype Up[N_CONSERVATIVE], Um[N_CONSERVATIVE], Wp[N_CONSERVATIVE], Wm[N_CONSERVATIVE];
         rtype Fp[N_CONSERVATIVE], Fm[N_CONSERVATIVE], tmp[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE Up[i] = Um[i] = U0[i];
@@ -87,7 +88,7 @@ void flux_jacobian_fd(const rtype * W, const rtype * n, rtype A[N_CONSERVATIVE][
         gas.compute_W_from_conservatives(Wm, Um);
         riemann::physical_flux(Wp, n, GAMMA, tmp, Fp);
         riemann::physical_flux(Wm, n, GAMMA, tmp, Fm);
-        FOR_I_CONSERVATIVE A[i][j] = (Fp[i] - Fm[i]) / (2.0 * h);
+        FOR_I_CONSERVATIVE A[i][j] = (Fp[i] - Fm[i]) / (2.0_r * h);
     }
 }
 
@@ -99,7 +100,7 @@ TYPED_TEST(Riemann3DTest, ConsistentWithPhysicalFlux) {
             rtype flux[N_CONSERVATIVE], U[N_CONSERVATIVE], F[N_CONSERVATIVE];
             TypeParam::calc_flux(flux, n, W, W, GAMMA);
             riemann::physical_flux(W, n, GAMMA, U, F);
-            FOR_I_CONSERVATIVE EXPECT_NEAR(flux[i], F[i], 1e-12 * (1.0 + std::abs(F[i])));
+            FOR_I_CONSERVATIVE EXPECT_NEAR(flux[i], F[i], roundoff(1e-12) * (1.0 + std::abs(double(F[i]))));
         }
     }
 }
@@ -121,7 +122,7 @@ TYPED_TEST(Riemann3DTest, RotationallyInvariant) {
                 rotate(n, n_rot);
                 TypeParam::calc_flux(flux_rot, n_rot, Wl_rot, Wr_rot, GAMMA);
                 rotate(flux + 1, expected);
-                const rtype tol = 1e-10 * (1.0 + std::abs(flux[4]));
+                const double tol = roundoff(1e-10) * (1.0 + std::abs(double(flux[4])));
                 EXPECT_NEAR(flux_rot[0], flux[0], tol);
                 FOR_I_DIM EXPECT_NEAR(flux_rot[1 + i], expected[i], tol);
                 EXPECT_NEAR(flux_rot[4], flux[4], tol);
@@ -143,11 +144,11 @@ TYPED_TEST(Riemann3DTest, UniformTransverseVelocityIsAdvectedWithTheMassFlux) {
     rtype F0[N_CONSERVATIVE], F[N_CONSERVATIVE];
     TypeParam::calc_flux(F0, f.n, W_l0, W_r0, GAMMA);
     TypeParam::calc_flux(F, f.n, W_l, W_r, GAMMA);
-    EXPECT_NEAR(F[0], F0[0], 1e-12);
-    EXPECT_NEAR(dot<3>(F + 1, f.n), dot<3>(F0 + 1, f.n), 1e-12);
-    EXPECT_NEAR(dot<3>(F + 1, f.t1), v1 * F0[0], 1e-12);
-    EXPECT_NEAR(dot<3>(F + 1, f.t2), v2 * F0[0], 1e-12);
-    EXPECT_NEAR(F[4], F0[4] + 0.5 * (v1 * v1 + v2 * v2) * F0[0], 1e-12);
+    EXPECT_NEAR(F[0], F0[0], roundoff(1e-12));
+    EXPECT_NEAR(dot<3>(F + 1, f.n), dot<3>(F0 + 1, f.n), roundoff(1e-12));
+    EXPECT_NEAR(dot<3>(F + 1, f.t1), v1 * F0[0], roundoff(1e-12));
+    EXPECT_NEAR(dot<3>(F + 1, f.t2), v2 * F0[0], roundoff(1e-12));
+    EXPECT_NEAR(F[4], F0[4] + 0.5_r * (v1 * v1 + v2 * v2) * F0[0], roundoff(1e-12));
 }
 
 TEST(Riemann3DTest, HLLCCarriesTransverseVelocityOfTheUpwindSideOfTheContact) {
@@ -158,10 +159,10 @@ TEST(Riemann3DTest, HLLCCarriesTransverseVelocityOfTheUpwindSideOfTheContact) {
         frame_state(f, 0.5, un, -0.4, 0.5, 1.0, W_r);
         rtype F[N_CONSERVATIVE];
         riemann::HLLC::calc_flux(F, f.n, W_l, W_r, GAMMA);
-        const rtype * W_up = (un > 0.0) ? W_l : W_r;
-        EXPECT_NEAR(F[0], W_up[0] * un, 1e-12);
-        EXPECT_NEAR(dot<3>(F + 1, f.t1), F[0] * dot<3>(W_up + 1, f.t1), 1e-12);
-        EXPECT_NEAR(dot<3>(F + 1, f.t2), F[0] * dot<3>(W_up + 1, f.t2), 1e-12);
+        const rtype * W_up = (un > 0.0_r) ? W_l : W_r;
+        EXPECT_NEAR(F[0], W_up[0] * un, roundoff(1e-12));
+        EXPECT_NEAR(dot<3>(F + 1, f.t1), F[0] * dot<3>(W_up + 1, f.t1), roundoff(1e-12));
+        EXPECT_NEAR(dot<3>(F + 1, f.t2), F[0] * dot<3>(W_up + 1, f.t2), roundoff(1e-12));
     }
 }
 
@@ -184,7 +185,7 @@ TEST(Riemann3DTest, RotatedHybridReducesToRoeForTangentialVelocityJump) {
     rtype F[N_CONSERVATIVE], F_roe[N_CONSERVATIVE];
     riemann::RHLL::calc_flux(F, f.n, W_l, W_r, GAMMA);
     riemann::Roe::calc_flux(F_roe, f.n, W_l, W_r, GAMMA);
-    FOR_I_CONSERVATIVE EXPECT_NEAR(F[i], F_roe[i], 1e-12);
+    FOR_I_CONSERVATIVE EXPECT_NEAR(F[i], F_roe[i], roundoff(1e-12));
 }
 
 TEST(Riemann3DTest, RotatedHybridBlendsHLLAndRoeForObliqueVelocityJump) {
@@ -194,7 +195,7 @@ TEST(Riemann3DTest, RotatedHybridBlendsHLLAndRoeForObliqueVelocityJump) {
     const rtype c = 0.5, s = std::sqrt(3.0) / 2.0;
     rtype W_l[N_CONSERVATIVE], W_r[N_CONSERVATIVE];
     frame_state(f, 1.0, 0.1, 0.2, 0.3, 1.0, W_l);
-    frame_state(f, 1.3, 0.1 + 0.4 * c, 0.2 + 0.4 * s, 0.3, 1.4, W_r);
+    frame_state(f, 1.3_r, 0.1_r + 0.4_r * c, 0.2_r + 0.4_r * s, 0.3_r, 1.4_r, W_r);
     rtype n1[3], n2[3];
     for (int d = 0; d < 3; d++) {
         n1[d] = c * f.n[d] + s * f.t1[d];
@@ -204,15 +205,15 @@ TEST(Riemann3DTest, RotatedHybridBlendsHLLAndRoeForObliqueVelocityJump) {
     riemann::RHLL::calc_flux(F, f.n, W_l, W_r, GAMMA);
     riemann::HLL::calc_flux(F_hll, n1, W_l, W_r, GAMMA);
     riemann::Roe::calc_flux(F_roe, n2, W_l, W_r, GAMMA);
-    FOR_I_CONSERVATIVE EXPECT_NEAR(F[i], c * F_hll[i] + s * F_roe[i], 1e-12);
+    FOR_I_CONSERVATIVE EXPECT_NEAR(F[i], c * F_hll[i] + s * F_roe[i], roundoff(1e-12));
 }
 
 TEST(Riemann3DTest, EigenvectorsDiagonalizeFluxJacobian) {
     std::mt19937 gen(7);
     std::uniform_real_distribution<rtype> uni(-1.0, 1.0);
     for (int trial = 0; trial < 20; trial++) {
-        const rtype W[N_CONSERVATIVE] = {static_cast<rtype>(1.0 + 0.5 * uni(gen)), uni(gen), uni(gen), uni(gen),
-                                         static_cast<rtype>(1.0 + 0.5 * uni(gen))};
+        const rtype W[N_CONSERVATIVE] = {1.0_r + 0.5_r * uni(gen), uni(gen), uni(gen), uni(gen),
+                                         1.0_r + 0.5_r * uni(gen)};
         rtype n_raw[N_DIM] = {uni(gen), uni(gen), uni(gen)}, n[N_DIM];
         if (trial == 0) {
             n_raw[0] = 0.0;
@@ -234,8 +235,8 @@ TEST(Riemann3DTest, EigenvectorsDiagonalizeFluxJacobian) {
                     LR += L[i][k] * R[k][j];
                     RLL += R[i][k] * lambda[k] * L[k][j];
                 }
-                EXPECT_NEAR(LR, (i == j) ? 1.0 : 0.0, 1e-12) << "trial " << trial;
-                EXPECT_NEAR(RLL, A[i][j], 1e-6 * (1.0 + std::abs(A[i][j]))) << "trial " << trial;
+                EXPECT_NEAR(LR, (i == j) ? 1.0 : 0.0, roundoff(1e-12)) << "trial " << trial;
+                EXPECT_NEAR(RLL, A[i][j], precision_tol<double>(1e-6, 1e-3) * (1.0 + std::abs(double(A[i][j])))) << "trial " << trial;
             }
         }
     }
@@ -250,7 +251,7 @@ TEST(Riemann3DTest, RoeResolvesStationaryContactAndShearExactly) {
     frame_state(f, 0.2, 0.0, -0.7, 0.4, 1.0, W_r);
     rtype F[N_CONSERVATIVE];
     riemann::Roe::calc_flux(F, f.n, W_l, W_r, GAMMA);
-    EXPECT_NEAR(F[0], 0.0, 1e-12);
+    EXPECT_NEAR(F[0], 0.0, roundoff(1e-12));
     FOR_I_DIM EXPECT_NEAR(F[1 + i], f.n[i], 1e-12);
-    EXPECT_NEAR(F[4], 0.0, 1e-12);
+    EXPECT_NEAR(F[4], 0.0, roundoff(1e-12));
 }

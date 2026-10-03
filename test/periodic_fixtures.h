@@ -43,7 +43,7 @@ void set_cell_averages(Solver & solver, F && U) {
 /** @brief Node coordinates as a 3-vector. */
 inline std::array<double, 3> node_point(const Mesh & mesh, uint32_t n) {
     std::array<double, 3> x = {0.0, 0.0, 0.0};
-    FOR_I_DIM x[i] = mesh.h_node_coords(n, i);
+    FOR_I_DIM x[i] = double(mesh.h_node_coords(n, i));
     return x;
 }
 
@@ -78,7 +78,7 @@ inline void expect_shifts_join_cells(const Mesh & mesh) {
         const int32_t c1 = mesh.h_cells_of_face(f, 1);
         if (c1 < 0) continue;
         double shift[3] = {0.0, 0.0, 0.0};
-        FOR_I_DIM shift[i] = mesh.h_shifts(mesh.h_face_shift(f), i);
+        FOR_I_DIM shift[i] = double(mesh.h_shifts(mesh.h_face_shift(f), i));
         n_shifted += mesh.h_face_shift(f) != 0;
         std::vector<uint32_t> face_nodes;
         for (uint32_t k = 0; k < mesh.h_n_nodes_of_face(f); k++) face_nodes.push_back(mesh.h_node_of_face(f, k));
@@ -107,7 +107,7 @@ inline void expect_shifts_join_cells(const Mesh & mesh) {
             for (uint32_t a = 0; a < mesh.h_n_nodes_of_cell(c); a++) {
                 for (uint32_t b = 0; b < mesh.h_n_nodes_of_cell(nb); b++) {
                     auto q = node_point(mesh, mesh.h_node_of_cell(nb, b));
-                    FOR_I_DIM q[i] += mesh.h_shifts(mesh.h_cells_of_cell_shift(k), i);
+                    FOR_I_DIM q[i] += double(mesh.h_shifts(mesh.h_cells_of_cell_shift(k), i));
                     touch = touch || close(node_point(mesh, mesh.h_node_of_cell(c, a)), q);
                 }
             }
@@ -123,7 +123,7 @@ inline void expect_shifts_join_cells(const Mesh & mesh) {
  */
 inline std::vector<uint32_t> translated_cells(const Mesh & mesh, const std::array<double, 3> & t) {
     std::array<double, 3> L = {0.0, 0.0, 0.0};
-    for (const auto & T : mesh.periodic_translations) FOR_I_DIM L[i] += T[i];
+    for (const auto & T : mesh.periodic_translations) FOR_I_DIM L[i] += double(T[i]);
     const double h = std::pow(double(mesh.h_cell_volume(0)), 1.0 / N_DIM);
     auto key = [&](std::array<double, 3> x) {
         std::array<long long, 3> k = {0, 0, 0};
@@ -136,13 +136,13 @@ inline std::vector<uint32_t> translated_cells(const Mesh & mesh, const std::arra
     std::map<std::array<long long, 3>, uint32_t> cell_at;
     for (uint32_t c = 0; c < mesh.n_cells; c++) {
         std::array<double, 3> x = {0.0, 0.0, 0.0};
-        FOR_I_DIM x[i] = mesh.h_cell_coords(c, i);
+        FOR_I_DIM x[i] = double(mesh.h_cell_coords(c, i));
         cell_at[key(x)] = c;
     }
     std::vector<uint32_t> map(mesh.n_cells);
     for (uint32_t c = 0; c < mesh.n_cells; c++) {
         std::array<double, 3> x = {0.0, 0.0, 0.0};
-        FOR_I_DIM x[i] = mesh.h_cell_coords(c, i) + t[i];
+        FOR_I_DIM x[i] = double(mesh.h_cell_coords(c, i)) + t[i];
         map[c] = cell_at.at(key(x));
     }
     return map;

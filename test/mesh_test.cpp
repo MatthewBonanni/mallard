@@ -32,7 +32,7 @@ TEST_P(MeshInvariants, CellsAreClosedAndNormalsPointFromCell0ToCell1) {
             const rtype sign = (mesh->h_cells_of_face(f, 0) == static_cast<int32_t>(i_cell)) ? 1.0 : -1.0;
             FOR_I_DIM closure[i] += sign * mesh->h_face_normals(f, i);
         }
-        FOR_I_DIM EXPECT_NEAR(closure[i], 0.0, 1e-14) << "cell " << i_cell;
+        FOR_I_DIM EXPECT_NEAR(closure[i], 0.0, roundoff(1e-14)) << "cell " << i_cell;
     }
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
         const int32_t c0 = mesh->h_cells_of_face(f, 0);
@@ -40,7 +40,7 @@ TEST_P(MeshInvariants, CellsAreClosedAndNormalsPointFromCell0ToCell1) {
         FOR_I_DIM d += (mesh->h_face_coords(f, i) - mesh->h_cell_coords(c0, i)) * mesh->h_face_normals(f, i);
         EXPECT_GT(d, 0.0) << "face " << f;
         const rtype n_mag = std::hypot(mesh->h_face_normals(f, 0), mesh->h_face_normals(f, 1));
-        EXPECT_NEAR(n_mag, mesh->h_face_area(f), 1e-14);
+        EXPECT_NEAR(n_mag, mesh->h_face_area(f), roundoff(1e-14));
     }
 }
 
@@ -52,7 +52,7 @@ TEST_P(MeshInvariants, VolumesSumToDomainAreaAndCentroidsAreExact) {
         total += mesh->h_cell_volume(i);
     }
     if (GetParam() != "wedge") {
-        EXPECT_NEAR(total, 2.0, 1e-13);
+        EXPECT_NEAR(total, 2.0, roundoff(1e-13));
     }
     // Centroid check: integral of x over each cell via its nodes (shoelace moments)
     for (uint32_t i = 0; i < mesh->n_cells; i++) {
@@ -63,13 +63,13 @@ TEST_P(MeshInvariants, VolumesSumToDomainAreaAndCentroidsAreExact) {
             const rtype xa = mesh->h_node_coords(a, 0), ya = mesh->h_node_coords(a, 1);
             const rtype xb = mesh->h_node_coords(b, 0), yb = mesh->h_node_coords(b, 1);
             const rtype cross = xa * yb - xb * ya;
-            A += 0.5 * cross;
-            Cx += (xa + xb) * cross / 6.0;
-            Cy += (ya + yb) * cross / 6.0;
+            A += 0.5_r * cross;
+            Cx += (xa + xb) * cross / 6.0_r;
+            Cy += (ya + yb) * cross / 6.0_r;
         }
-        EXPECT_NEAR(std::abs(A), mesh->h_cell_volume(i), 1e-14);
-        EXPECT_NEAR(Cx / A, mesh->h_cell_coords(i, 0), 1e-13) << "cell " << i;
-        EXPECT_NEAR(Cy / A, mesh->h_cell_coords(i, 1), 1e-13) << "cell " << i;
+        EXPECT_NEAR(std::abs(A), mesh->h_cell_volume(i), roundoff(1e-14));
+        EXPECT_NEAR(Cx / A, mesh->h_cell_coords(i, 0), roundoff(1e-13)) << "cell " << i;
+        EXPECT_NEAR(Cy / A, mesh->h_cell_coords(i, 1), roundoff(1e-13)) << "cell " << i;
     }
 }
 

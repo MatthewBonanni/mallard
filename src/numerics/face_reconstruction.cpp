@@ -77,27 +77,27 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
         const uint32_t n = mesh->h_n_nodes_of_face(f);
         std::vector<std::array<double, 3>> v(n);
         for (uint32_t k = 0; k < n; k++) {
-            FOR_I_DIM v[k][i] = mesh->h_node_coords(mesh->h_node_of_face(f, k), i);
+            FOR_I_DIM v[k][i] = double(mesh->h_node_coords(mesh->h_node_of_face(f, k), i));
         }
         auto & pts = points[f];
         auto & w = weights[f];
         if (degree <= 1) {
             std::array<double, 3> c;
-            FOR_I_DIM c[i] = mesh->h_face_coords(f, i);
+            FOR_I_DIM c[i] = double(mesh->h_face_coords(f, i));
             pts.push_back(c);
             w.push_back(1.0);
         } else if (n == 3) {
             for (uint32_t q = 0; q < tri.h_weights.extent(0); q++) {
-                const double a = tri.h_points(q, 0), b = tri.h_points(q, 1);
+                const double a = double(tri.h_points(q, 0)), b = double(tri.h_points(q, 1));
                 std::array<double, 3> p;
                 for (int i = 0; i < 3; i++) p[i] = v[0][i] + a * (v[1][i] - v[0][i]) + b * (v[2][i] - v[0][i]);
                 pts.push_back(p);
-                w.push_back(tri.h_weights(q));
+                w.push_back(double(tri.h_weights(q)));
             }
         } else {
             for (int a = 0; a < n_gp; a++) {
                 for (int b = 0; b < n_gp; b++) {
-                    const double s = gl.h_points(a, 0), t = gl.h_points(b, 0);
+                    const double s = double(gl.h_points(a, 0)), t = double(gl.h_points(b, 0));
                     const double N[4] = {0.25 * (1 - s) * (1 - t), 0.25 * (1 + s) * (1 - t),
                                          0.25 * (1 + s) * (1 + t), 0.25 * (1 - s) * (1 + t)};
                     const double dNs[4] = {-0.25 * (1 - t), 0.25 * (1 - t), 0.25 * (1 + t), -0.25 * (1 + t)};
@@ -114,7 +114,7 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
                                                std::pow(xs[2] * xt[0] - xs[0] * xt[2], 2) +
                                                std::pow(xs[0] * xt[1] - xs[1] * xt[0], 2));
                     pts.push_back(p);
-                    w.push_back(gl.h_weights(a) * gl.h_weights(b) * J);
+                    w.push_back(double(gl.h_weights(a)) * double(gl.h_weights(b)) * J);
                 }
             }
         }
@@ -149,7 +149,7 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
             for (size_t r = 0; r < points[g].size(); r++) {
                 double d2 = 0.0;
                 FOR_I_DIM {
-                    const double t = mesh->h_face_coords(g, i) - mesh->h_face_coords(f, i);
+                    const double t = double(mesh->h_face_coords(g, i)) - double(mesh->h_face_coords(f, i));
                     d2 += std::pow(points[g][r][i] - points[f][q][i] - t, 2);
                 }
                 if (d2 < best) {
@@ -246,7 +246,7 @@ void MUSCL::init(const toml::value & input) {
 
 logging::Items MUSCL::summary() const {
     std::string limiter_text = LIMITER_NAMES.at(limiter);
-    if (limiter == LimiterType::VENKATAKRISHNAN) limiter_text += " (K " + logging::real(venkat_K) + ")";
+    if (limiter == LimiterType::VENKATAKRISHNAN) limiter_text += " (K " + logging::real(double(venkat_K)) + ")";
     return {{"Reconstruction", "MUSCL, limiter " + limiter_text}};
 }
 
@@ -267,18 +267,18 @@ struct LimiterFunctor {
 
     KOKKOS_INLINE_FUNCTION
     static rtype barth_jespersen(const rtype d_minus, const rtype d_max, const rtype d_min) {
-        if (d_minus > 0.0) return Kokkos::fmin(1.0, d_max / d_minus);
-        if (d_minus < 0.0) return Kokkos::fmin(1.0, d_min / d_minus);
+        if (d_minus > 0.0_r) return Kokkos::fmin(1.0_r, d_max / d_minus);
+        if (d_minus < 0.0_r) return Kokkos::fmin(1.0_r, d_min / d_minus);
         return 1.0;
     }
 
     KOKKOS_INLINE_FUNCTION
     static rtype venkatakrishnan(const rtype d_minus, const rtype d_max, const rtype d_min,
                                  const rtype eps2) {
-        const rtype d_plus = (d_minus > 0.0) ? d_max : d_min;
-        if (d_minus == 0.0) return 1.0;
-        const rtype num = (d_plus * d_plus + eps2) + 2.0 * d_minus * d_plus;
-        const rtype den = d_plus * d_plus + 2.0 * d_minus * d_minus + d_minus * d_plus + eps2;
+        const rtype d_plus = (d_minus > 0.0_r) ? d_max : d_min;
+        if (d_minus == 0.0_r) return 1.0_r;
+        const rtype num = (d_plus * d_plus + eps2) + 2.0_r * d_minus * d_plus;
+        const rtype den = d_plus * d_plus + 2.0_r * d_minus * d_minus + d_minus * d_plus + eps2;
         return num / den;
     }
 
@@ -309,7 +309,7 @@ struct LimiterFunctor {
         FOR_I_CONSERVATIVE scale[i] = a;
         scale[0] = W_i[0];
         scale[N_DIM + 1] = W_i[N_DIM + 1];
-        const rtype Kh3 = Kokkos::pow(venkat_K * h, 3.0);
+        const rtype Kh3 = Kokkos::pow(venkat_K * h, 3.0_r);
 
         rtype phi[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE phi[i] = 1.0;
@@ -371,7 +371,7 @@ struct MUSCLFaceFunctor {
                 for (uint8_t d = 0; d < N_DIM; d++) grad[d] = gradients(c, i, d);
                 W_f[i] = W(c, i) + limiters(c, i) * dot<N_DIM>(grad, r);
             }
-            const bool admissible = (W_f[0] > 0.0) && (W_f[N_CONSERVATIVE - 1] > 0.0);
+            const bool admissible = (W_f[0] > 0.0_r) && (W_f[N_CONSERVATIVE - 1] > 0.0_r);
             FOR_I_CONSERVATIVE face_solution(i_face, 0, side, i) = admissible ? W_f[i] : W(c, i);
         }
     }

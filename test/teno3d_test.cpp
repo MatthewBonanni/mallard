@@ -39,7 +39,7 @@ void smooth_conservatives(double x, double y, double z, double * U) {
     U[1] = rho * u;
     U[2] = rho * v;
     U[3] = rho * w;
-    U[4] = p / (GAMMA - 1.0) + 0.5 * rho * (u * u + v * v + w * w);
+    U[4] = p / (double(GAMMA) - 1.0) + 0.5 * rho * (u * u + v * v + w * w);
 }
 
 // Quadratic density (velocity and energy constant in conservative form)
@@ -99,14 +99,14 @@ double reconstruction_error(const std::string & mesh_type, uint32_t n, int order
     double err = 0.0;
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
         for (uint8_t q = 0; q < n_quad; q++) {
-            if (h_weights(f, q) == 0.0) continue;
-            const double x = h_points(f, q, 0), y = h_points(f, q, 1), z = h_points(f, q, 2);
+            if (double(h_weights(f, q)) == 0.0) continue;
+            const double x = double(h_points(f, q, 0)), y = double(h_points(f, q, 1)), z = double(h_points(f, q, 2));
             if (std::min({x, y, z}) < margin || std::max({x, y, z}) > 1.0 - margin) continue;
             double U[N_CONSERVATIVE];
             field(x, y, z, U);
             for (uint8_t side = 0; side < 2; side++) {
                 if (mesh->h_cells_of_face(f, side) < 0) continue;
-                err = std::max(err, std::abs(h_face_W(f, q, side, 0) - U[0]));
+                err = std::max(err, std::abs(double(h_face_W(f, q, side, 0)) - U[0]));
             }
         }
     }
@@ -129,7 +129,7 @@ TEST_P(TENO3DExactness, ReproducesPolynomialsOfTheReconstructionDegreeAwayFromWa
     // points; the wall mirrors are only exact for symmetric fields
     const auto [mesh_type, order, n] = GetParam();
     const Field field = (order == 3) ? quadratic_conservatives : quartic_conservatives;
-    EXPECT_LT(reconstruction_error(mesh_type, n, order, 0.4, SMOOTH, field), 1e-10);
+    EXPECT_LT(reconstruction_error(mesh_type, n, order, 0.4, SMOOTH, field), precision_tol<double>(1e-10, 1e-5));
 }
 
 INSTANTIATE_TEST_SUITE_P(TENO, TENO3DExactness,
@@ -196,7 +196,7 @@ double advection_error(const std::string & mesh, const std::string & recon, uint
     });
     double err = 0.0;
     for (uint32_t i = 0; i < m->n_cells; i++) {
-        err += std::abs(solver.h_conservatives(i, 0) - exact(i, 0)) * m->h_cell_volume(i);
+        err += std::abs(double(solver.h_conservatives(i, 0)) - double(exact(i, 0))) * double(m->h_cell_volume(i));
     }
     return err;
 }

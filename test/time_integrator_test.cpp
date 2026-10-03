@@ -16,6 +16,7 @@
 #include <memory>
 
 #include "time_integrator.h"
+#include "test_utils.h"
 
 namespace {
 
@@ -62,7 +63,7 @@ double integrate_error(TimeIntegrator & integrator, uint32_t n_steps) {
     auto h_U = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec[0].flow);
     double err = 0.0;
     for (uint32_t c = 0; c < 3; c++) {
-        FOR_I_CONSERVATIVE err = std::max(err, std::abs(h_U(c, i) - std::exp(lambda[i])));
+        FOR_I_CONSERVATIVE err = std::max(err, std::abs(double(h_U(c, i)) - std::exp(double(lambda[i]))));
     }
     return err;
 }
@@ -81,11 +82,13 @@ TEST(TimeIntegratorTest, ForwardEulerIsFirstOrder) {
 }
 
 TEST(TimeIntegratorTest, SSPRK3IsThirdOrder) {
+    SKIP_IN_SINGLE_PRECISION("the errors after 20 and 40 steps are at round-off");
     SSPRK3 integrator;
     EXPECT_NEAR(observed_order(integrator), 3.0, 0.1);
 }
 
 TEST(TimeIntegratorTest, RK4IsFourthOrder) {
+    SKIP_IN_SINGLE_PRECISION("the errors after 20 and 40 steps are at round-off");
     RK4 integrator;
     EXPECT_NEAR(observed_order(integrator), 4.0, 0.1);
 }
@@ -99,7 +102,7 @@ TEST(TimeIntegratorTest, SSPRK3IsConvexCombinationOfEulerSteps) {
     RHSFunction rhs = [](State U, State R, rtype) { negate(U, R); };
     integrator.take_step(0.0, 1.0, solution_vec, rhs_vec, rhs);
     auto h_U = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec[0].flow);
-    FOR_I_CONSERVATIVE EXPECT_NEAR(h_U(0, i), 1.0 / 3.0, 1e-15);
+    FOR_I_CONSERVATIVE EXPECT_NEAR(h_U(0, i), 1.0 / 3.0, roundoff(1e-15));
 }
 
 TEST(TimeIntegratorTest, SpeciesBlockAdvancesExactlyLikeTheFlowBlock) {
@@ -150,12 +153,13 @@ double nonautonomous_error(TimeIntegrator & integrator, uint32_t n_steps) {
     const rtype dt = 1.0 / n_steps;
     for (uint32_t s = 0; s < n_steps; s++) integrator.take_step(s * dt, dt, solution_vec, rhs_vec, rhs);
     auto h_U = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec[0].flow);
-    return std::abs(h_U(0, 0) - std::sin(1.0));
+    return std::abs(double(h_U(0, 0)) - std::sin(1.0));
 }
 
 } // namespace
 
 TEST(TimeIntegratorTest, StageTimesGiveDesignOrderForTimeDependentRHS) {
+    SKIP_IN_SINGLE_PRECISION("the errors after 10 and 20 steps are at round-off");
     SSPRK3 ssprk3;
     RK4 rk4;
     // Evaluating every stage at the start of the step drops both to first order.

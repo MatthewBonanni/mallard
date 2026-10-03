@@ -60,7 +60,7 @@ class Expression {
          */
         template <typename T>
         double at(const T & x, const int n_dim, double t = 0.0) const {
-            return (*this)(x(0), x(1), n_dim > 2 ? x(2) : 0.0, t);
+            return (*this)(double(x(0)), double(x(1)), n_dim > 2 ? double(x(2)) : 0.0, t);
         }
 
     private:

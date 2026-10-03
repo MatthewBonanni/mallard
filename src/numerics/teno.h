@@ -76,9 +76,9 @@ void exponents(const uint8_t l, uint8_t & a, uint8_t & b, uint8_t & c) {
     }
 }
 
-KOKKOS_INLINE_FUNCTION
-rtype ipow(const rtype x, const uint8_t n) {
-    rtype result = 1.0;
+template <typename T> KOKKOS_INLINE_FUNCTION
+T ipow(const T x, const uint8_t n) {
+    T result = 1;
     for (uint8_t i = 0; i < n; i++) result *= x;
     return result;
 }
@@ -86,8 +86,8 @@ rtype ipow(const rtype x, const uint8_t n) {
 /**
  * @brief Evaluate all monomials of degree 1..r at (xi, eta).
  */
-KOKKOS_INLINE_FUNCTION
-void monomials(const uint8_t r, const rtype xi, const rtype eta, rtype * phi) {
+template <typename T> KOKKOS_INLINE_FUNCTION
+void monomials(const uint8_t r, const T xi, const T eta, T * phi) {
     const uint8_t nk = n_dof(r);
     for (uint8_t l = 0; l < nk; l++) {
         uint8_t a, b;
@@ -99,8 +99,8 @@ void monomials(const uint8_t r, const rtype xi, const rtype eta, rtype * phi) {
 /**
  * @brief Evaluate all trivariate monomials of degree 1..r at (xi, eta, zeta).
  */
-KOKKOS_INLINE_FUNCTION
-void monomials(const uint8_t r, const rtype xi, const rtype eta, const rtype zeta, rtype * phi) {
+template <typename T> KOKKOS_INLINE_FUNCTION
+void monomials(const uint8_t r, const T xi, const T eta, const T zeta, T * phi) {
     uint8_t l = 0;
     for (uint8_t d = 1; d <= r; d++) {
         for (int8_t i = d; i >= 0; i--) {
@@ -114,8 +114,8 @@ void monomials(const uint8_t r, const rtype xi, const rtype eta, const rtype zet
 /**
  * @brief Monomials at a point x (N_DIM coordinates, already scaled).
  */
-KOKKOS_INLINE_FUNCTION
-void monomials(const uint8_t r, const rtype * x, rtype * phi) {
+template <typename T> KOKKOS_INLINE_FUNCTION
+void monomials(const uint8_t r, const T * x, T * phi) {
     if constexpr (N_DIM == 2) {
         monomials(r, x[0], x[1], phi);
     } else {
@@ -137,25 +137,25 @@ void eigenvectors(const rtype * W, const rtype * n, const rtype gamma,
     const rtype * u = W + 1;
     const rtype a = Kokkos::sqrt(gamma * W[E] / W[0]);
     const rtype q2 = dot<N_DIM>(u, u);
-    const rtype H = a * a / (gamma - 1.0) + 0.5 * q2;
+    const rtype H = a * a / (gamma - 1.0_r) + 0.5_r * q2;
     const rtype qn = dot<N_DIM>(u, n);
     rtype t[N_DIM - 1][N_DIM];
     tangent_basis(n, t[0], t[N_DIM - 2]);
-    const rtype b1 = (gamma - 1.0) / (a * a);
-    const rtype b2 = 0.5 * b1 * q2;
+    const rtype b1 = (gamma - 1.0_r) / (a * a);
+    const rtype b2 = 0.5_r * b1 * q2;
 
     R[0][0] = 1.0;        R[0][1] = 1.0;      R[0][2] = 1.0;
-    R[E][0] = H - a * qn; R[E][1] = 0.5 * q2; R[E][2] = H + a * qn;
-    L[0][0] = 0.5 * (b2 + qn / a); L[0][E] = 0.5 * b1;
-    L[1][0] = 1.0 - b2;            L[1][E] = -b1;
-    L[2][0] = 0.5 * (b2 - qn / a); L[2][E] = 0.5 * b1;
+    R[E][0] = H - a * qn; R[E][1] = 0.5_r * q2; R[E][2] = H + a * qn;
+    L[0][0] = 0.5_r * (b2 + qn / a); L[0][E] = 0.5_r * b1;
+    L[1][0] = 1.0_r - b2;            L[1][E] = -b1;
+    L[2][0] = 0.5_r * (b2 - qn / a); L[2][E] = 0.5_r * b1;
     FOR_I_DIM {
         R[1 + i][0] = u[i] - a * n[i];
         R[1 + i][1] = u[i];
         R[1 + i][2] = u[i] + a * n[i];
-        L[0][1 + i] = 0.5 * (-b1 * u[i] - n[i] / a);
+        L[0][1 + i] = 0.5_r * (-b1 * u[i] - n[i] / a);
         L[1][1 + i] = b1 * u[i];
-        L[2][1 + i] = 0.5 * (-b1 * u[i] + n[i] / a);
+        L[2][1 + i] = 0.5_r * (-b1 * u[i] + n[i] / a);
     }
     for (uint8_t k = 0; k < N_DIM - 1; k++) {
         const uint8_t c = 3 + k;
@@ -176,10 +176,10 @@ void eigenvectors(const rtype * W, const rtype * n, const rtype gamma,
  */
 KOKKOS_INLINE_FUNCTION
 rtype adaptive_CT(const rtype sigma, const rtype sigma_L, const rtype sigma_U) {
-    const rtype m = (sigma >= sigma_U) ? 1.0 : Kokkos::fmin(1.0, Kokkos::fmax(0.0, (sigma - sigma_L) / (sigma_U - sigma_L)));
-    const rtype g = (1.0 - m) * (1.0 - m) * (1.0 + 2.0 * m);
-    const rtype psi = 10.0 - 4.0 * (1.0 - g);
-    return Kokkos::pow(10.0, -Kokkos::floor(psi));
+    const rtype m = (sigma >= sigma_U) ? 1.0_r : Kokkos::fmin(1.0_r, Kokkos::fmax(0.0_r, (sigma - sigma_L) / (sigma_U - sigma_L)));
+    const rtype g = (1.0_r - m) * (1.0_r - m) * (1.0_r + 2.0_r * m);
+    const rtype psi = 10.0_r - 4.0_r * (1.0_r - g);
+    return Kokkos::pow(10.0_r, -Kokkos::floor(psi));
 }
 
 } // namespace teno

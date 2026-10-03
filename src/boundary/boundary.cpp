@@ -79,7 +79,7 @@ namespace {
         const rtype sign = (mesh.h_cells_of_face(f, 1) == static_cast<int32_t>(c)) ? -1.0 : 1.0;
         rtype d = 0.0;
         FOR_I_DIM d += (p[i] - (mesh.h_face_coords(f, i) - mesh.h_face_offset(f, c, i))) * sign * mesh.h_face_normals(f, i);
-        if (d > 1e-10 * size2 * std::sqrt(size2)) return false;
+        if (d > precision_tol(1e-10, 1e-5) * size2 * std::sqrt(size2)) return false;
     }
     return true;
 }
@@ -93,7 +93,7 @@ bool point_in_cell(const Mesh & mesh, uint32_t c, const rtype * p) {
         const uint32_t b = mesh.h_node_of_cell(c, (k + 1) % n);
         const rtype cross = (mesh.h_node_coords(b, 0) - mesh.h_node_coords(a, 0)) * (p[1] - mesh.h_node_coords(a, 1)) -
                             (mesh.h_node_coords(b, 1) - mesh.h_node_coords(a, 1)) * (p[0] - mesh.h_node_coords(a, 0));
-        const int s = (cross > 0.0) - (cross < 0.0);
+        const int s = (cross > 0.0_r) - (cross < 0.0_r);
         if (s == 0) continue;
         if (sign == 0) sign = s;
         if (s != sign) return false;
@@ -112,12 +112,14 @@ bool point_in_cell(const Mesh & mesh, uint32_t c, const rtype * p) {
         const rtype A_g = mesh.h_face_area(g);
         rtype dist = 0.0, cross2 = 0.0;
         FOR_I_DIM {
-            dist += std::pow((mesh.h_face_coords(g, i) - mesh.h_face_offset(g, image, i)) - target[i], 2);
+            const rtype d = (mesh.h_face_coords(g, i) - mesh.h_face_offset(g, image, i)) - target[i];
+            dist += d * d;
             const uint8_t j = (i + 1) % 3, l = (i + 2) % 3;
-            cross2 += std::pow(mesh.h_face_normals(f, j) * mesh.h_face_normals(g, l) -
-                               mesh.h_face_normals(f, l) * mesh.h_face_normals(g, j), 2);
+            const rtype c = mesh.h_face_normals(f, j) * mesh.h_face_normals(g, l) - mesh.h_face_normals(f, l) * mesh.h_face_normals(g, j);
+            cross2 += c * c;
         }
-        if (dist < 1e-12 * A_f && cross2 < 1e-20 * A_f * A_f * A_g * A_g && std::abs(A_g - A_f) < 1e-10 * A_f) {
+        if (dist < precision_tol(1e-12, 1e-8) * A_f && cross2 < precision_tol(1e-20, 1e-10) * A_f * A_f * A_g * A_g &&
+            std::abs(A_g - A_f) < precision_tol(1e-10, 1e-5) * A_f) {
             return g;
         }
     }
@@ -187,7 +189,7 @@ BoundaryData make_boundary_data(const Mesh & mesh,
             depth = std::max(depth, d);
         }
         rtype p[N_DIM];
-        FOR_I_DIM p[i] = mesh.h_face_coords(f, i) + 0.75 * depth * n_in[i];
+        FOR_I_DIM p[i] = mesh.h_face_coords(f, i) + 0.75_r * depth * n_in[i];
         int32_t image = c;
         for (uint32_t k = 0; k < mesh.h_n_nodes_of_cell(c) && image == static_cast<int32_t>(c); k++) {
             for (uint32_t nb : cells_of_node[mesh.h_node_of_cell(c, k)]) {
@@ -226,15 +228,19 @@ BoundaryData make_boundary_data(const Mesh & mesh,
             for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(image); k++) {
                 const uint32_t g = mesh.h_face_of_cell(image, k);
                 rtype dist = 0.0;
-                FOR_I_DIM dist += std::pow((mesh.h_face_coords(g, i) - mesh.h_face_offset(g, image, i)) - target[i], 2);
+                FOR_I_DIM {
+                    const rtype d = (mesh.h_face_coords(g, i) - mesh.h_face_offset(g, image, i)) - target[i];
+                    dist += d * d;
+                }
                 const rtype t_g[N_DIM] = {mesh.h_node_coords(mesh.h_node_of_face(g, 1), 0) - mesh.h_node_coords(mesh.h_node_of_face(g, 0), 0),
                                           mesh.h_node_coords(mesh.h_node_of_face(g, 1), 1) - mesh.h_node_coords(mesh.h_node_of_face(g, 0), 1)};
                 const rtype cross = t_f[0] * t_g[1] - t_f[1] * t_g[0];
                 const rtype len2 = t_f[0] * t_f[0] + t_f[1] * t_f[1];
-                if (dist < 1e-12 * len2 && std::abs(cross) < 1e-10 * len2 && std::abs(mesh.h_face_area(g) - mesh.h_face_area(f)) < 1e-10 * mesh.h_face_area(f)) {
+                if (dist < precision_tol(1e-12, 1e-8) * len2 && std::abs(cross) < precision_tol(1e-10, 1e-5) * len2 &&
+                    std::abs(mesh.h_face_area(g) - mesh.h_face_area(f)) < precision_tol(1e-10, 1e-5) * mesh.h_face_area(f)) {
                     h_face_image_face(f) = g;
                     h_face_image_side(f) = (mesh.h_cells_of_face(g, 0) == image) ? 0 : 1;
-                    h_face_image_flip(f) = (t_f[0] * t_g[0] + t_f[1] * t_g[1] < 0.0) ? 1 : 0;
+                    h_face_image_flip(f) = (t_f[0] * t_g[0] + t_f[1] * t_g[1] < 0.0_r) ? 1 : 0;
                     break;
                 }
             }

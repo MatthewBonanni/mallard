@@ -91,7 +91,7 @@ struct Euler {
             case ViscosityModel::CONSTANT:
                 return mu_ref;
             case ViscosityModel::SUTHERLAND:
-                return mu_ref * Kokkos::pow(T / T_mu_ref, 1.5) * (T_mu_ref + S_mu) / (T + S_mu);
+                return mu_ref * Kokkos::pow(T / T_mu_ref, 1.5_r) * (T_mu_ref + S_mu) / (T + S_mu);
             default:
                 return 0.0;
         }
@@ -129,7 +129,7 @@ struct Euler {
 
     KOKKOS_INLINE_FUNCTION
     rtype get_pressure_from_density_energy(const rtype rho, const rtype e) const {
-        return (gamma - 1.0) * rho * e;
+        return (gamma - 1.0_r) * rho * e;
     }
 
     KOKKOS_INLINE_FUNCTION
@@ -146,7 +146,7 @@ struct Euler {
         const rtype rho = conservatives[0];
         rtype u[N_DIM];
         FOR_I_DIM u[i] = conservatives[1 + i] / rho;
-        const rtype e = conservatives[N_DIM + 1] / rho - 0.5 * dot<N_DIM>(u, u);
+        const rtype e = conservatives[N_DIM + 1] / rho - 0.5_r * dot<N_DIM>(u, u);
         const rtype p = get_pressure_from_density_energy(rho, e);
         FOR_I_DIM primitives[i] = u[i];
         primitives[N_DIM] = p;
@@ -162,7 +162,7 @@ struct Euler {
         const rtype rho = conservatives[0];
         W[0] = rho;
         FOR_I_DIM W[1 + i] = conservatives[1 + i] / rho;
-        W[N_DIM + 1] = (gamma - 1.0) * (conservatives[N_DIM + 1] - 0.5 * rho * dot<N_DIM>(W + 1, W + 1));
+        W[N_DIM + 1] = (gamma - 1.0_r) * (conservatives[N_DIM + 1] - 0.5_r * rho * dot<N_DIM>(W + 1, W + 1));
     }
 
     /**
@@ -172,7 +172,7 @@ struct Euler {
     void compute_conservatives_from_W(rtype * conservatives, const rtype * W) const {
         conservatives[0] = W[0];
         FOR_I_DIM conservatives[1 + i] = W[0] * W[1 + i];
-        conservatives[N_DIM + 1] = W[N_DIM + 1] / (gamma - 1.0) + 0.5 * W[0] * dot<N_DIM>(W + 1, W + 1);
+        conservatives[N_DIM + 1] = W[N_DIM + 1] / (gamma - 1.0_r) + 0.5_r * W[0] * dot<N_DIM>(W + 1, W + 1);
     }
 };
 

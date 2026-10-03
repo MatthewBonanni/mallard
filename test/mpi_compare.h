@@ -46,7 +46,7 @@ inline void expect_matches_serial(const std::string & input) {
     std::vector<double> count(n_global, 0.0);
     for (uint32_t c = 0; c < distributed.get_mesh()->n_owned(); c++) {
         const uint64_t g = distributed.is_distributed() ? dist.global_cell[c] : c;
-        FOR_I_CONSERVATIVE gathered[g * N_CONSERVATIVE + i] = distributed.h_conservatives(c, i);
+        FOR_I_CONSERVATIVE gathered[g * N_CONSERVATIVE + i] = double(distributed.h_conservatives(c, i));
         count[g] += 1.0;
     }
     comm::allreduce(std::span<double>(gathered), comm::Op::SUM);
@@ -58,7 +58,7 @@ inline void expect_matches_serial(const std::string & input) {
     for (uint32_t g = 0; g < n_global; g++) {
         ASSERT_EQ(count[g], 1.0) << "cell " << g << " owned " << count[g] << " times";
         FOR_I_CONSERVATIVE {
-            const double ref = serial.h_conservatives(g, i);
+            const double ref = double(serial.h_conservatives(g, i));
             max_rel = std::max(max_rel, std::abs(gathered[g * N_CONSERVATIVE + i] - ref) / (std::abs(ref) + 1e-3));
         }
     }

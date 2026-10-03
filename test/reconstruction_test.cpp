@@ -65,8 +65,8 @@ TEST_P(MeshTypes, LSQGradientExactForLinearFieldInInterior) {
     for (uint32_t i_cell = 0; i_cell < mesh->n_cells; i_cell++) {
         if (is_boundary_cell(*mesh, i_cell)) continue;
         FOR_I_CONSERVATIVE {
-            EXPECT_NEAR(h_grad(i_cell, i, 0), GX[i], 1e-10) << "cell " << i_cell << " var " << static_cast<int>(i);
-            EXPECT_NEAR(h_grad(i_cell, i, 1), GY[i], 1e-10) << "cell " << i_cell << " var " << static_cast<int>(i);
+            EXPECT_NEAR(h_grad(i_cell, i, 0), GX[i], roundoff(1e-10)) << "cell " << i_cell << " var " << static_cast<int>(i);
+            EXPECT_NEAR(h_grad(i_cell, i, 1), GY[i], roundoff(1e-10)) << "cell " << i_cell << " var " << static_cast<int>(i);
         }
     }
 }
@@ -93,8 +93,8 @@ TEST_P(MeshTypes, LSQGradientExactForLinearFieldWithDirichletBoundaries) {
     auto h_grad = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), grad);
     for (uint32_t i_cell = 0; i_cell < mesh->n_cells; i_cell++) {
         FOR_I_CONSERVATIVE {
-            EXPECT_NEAR(h_grad(i_cell, i, 0), GX[i], 1e-10) << "cell " << i_cell << " var " << static_cast<int>(i);
-            EXPECT_NEAR(h_grad(i_cell, i, 1), GY[i], 1e-10) << "cell " << i_cell << " var " << static_cast<int>(i);
+            EXPECT_NEAR(h_grad(i_cell, i, 0), GX[i], roundoff(1e-10)) << "cell " << i_cell << " var " << static_cast<int>(i);
+            EXPECT_NEAR(h_grad(i_cell, i, 1), GY[i], roundoff(1e-10)) << "cell " << i_cell << " var " << static_cast<int>(i);
         }
     }
 }
@@ -104,7 +104,7 @@ TEST_P(MeshTypes, VertexLSQGradientExactForQuadraticFieldWithDirichletBoundaries
     // fields in every cell, including boundary cells with one-sided stencils
     // (a linear fit is off by O(h) there)
     auto quadratic = [](uint8_t i, rtype x, rtype y) {
-        return linear(i, x, y) + (0.3 + 0.1 * i) * x * x - 0.4 * x * y + (0.2 - 0.1 * i) * y * y;
+        return linear(i, x, y) + (0.3_r + 0.1_r * i) * x * x - 0.4_r * x * y + (0.2_r - 0.1_r * i) * y * y;
     };
     auto mesh = make_mesh(GetParam(), 8, 7);
     std::vector<int32_t> face_bc(mesh->n_faces, -1);
@@ -132,8 +132,8 @@ TEST_P(MeshTypes, VertexLSQGradientExactForQuadraticFieldWithDirichletBoundaries
     for (uint32_t c = 0; c < mesh->n_cells; c++) {
         const rtype x = mesh->h_cell_coords(c, 0), y = mesh->h_cell_coords(c, 1);
         FOR_I_CONSERVATIVE {
-            EXPECT_NEAR(h_grad(c, i, 0), GX[i] + 2.0 * (0.3 + 0.1 * i) * x - 0.4 * y, 1e-9) << "cell " << c;
-            EXPECT_NEAR(h_grad(c, i, 1), GY[i] - 0.4 * x + 2.0 * (0.2 - 0.1 * i) * y, 1e-9) << "cell " << c;
+            EXPECT_NEAR(h_grad(c, i, 0), GX[i] + 2.0_r * (0.3_r + 0.1_r * i) * x - 0.4_r * y, roundoff(1e-9)) << "cell " << c;
+            EXPECT_NEAR(h_grad(c, i, 1), GY[i] - 0.4_r * x + 2.0_r * (0.2_r - 0.1_r * i) * y, roundoff(1e-9)) << "cell " << c;
         }
     }
 }
@@ -153,7 +153,7 @@ TEST_P(MeshTypes, UnlimitedMUSCLReproducesLinearFieldAtInteriorFaces) {
             FOR_I_CONSERVATIVE {
                 EXPECT_NEAR(h_face_W(i_face, 0, side, i),
                             linear(i, mesh->h_face_coords(i_face, 0), mesh->h_face_coords(i_face, 1)),
-                            1e-10) << "face " << i_face << " side " << static_cast<int>(side);
+                            roundoff(1e-10)) << "face " << i_face << " side " << static_cast<int>(side);
             }
         }
     }
@@ -168,7 +168,7 @@ TEST_P(MeshTypes, BarthJespersenFaceValuesStayWithinNeighborBounds) {
     for (uint32_t i_cell = 0; i_cell < mesh->n_cells; i_cell++) {
         const rtype x = mesh->h_cell_coords(i_cell, 0);
         const rtype y = mesh->h_cell_coords(i_cell, 1);
-        FOR_I_CONSERVATIVE h_W(i_cell, i) = 1.0 + (x > 0.45 ? 1.0 : 0.0) + 0.3 * std::sin(6.0 * y + i);
+        FOR_I_CONSERVATIVE h_W(i_cell, i) = 1.0_r + (x > 0.45_r ? 1.0_r : 0.0_r) + 0.3_r * std::sin(6.0_r * y + i);
     }
     Kokkos::deep_copy(W, h_W);
     auto muscl = make_muscl(mesh, bd, "barth_jespersen");
@@ -190,8 +190,8 @@ TEST_P(MeshTypes, BarthJespersenFaceValuesStayWithinNeighborBounds) {
                     lo = std::min(lo, h_W(nb, i));
                     hi = std::max(hi, h_W(nb, i));
                 }
-                EXPECT_GE(h_face_W(i_face, 0, side, i), lo - 1e-12);
-                EXPECT_LE(h_face_W(i_face, 0, side, i), hi + 1e-12);
+                EXPECT_GE(h_face_W(i_face, 0, side, i), double(lo) - roundoff(1e-12));
+                EXPECT_LE(h_face_W(i_face, 0, side, i), double(hi) + roundoff(1e-12));
             }
         }
     }
@@ -214,7 +214,7 @@ TEST_P(MeshTypes, FirstOrderCopiesCellValuesAndSkipsGhostSide) {
         for (uint8_t side = 0; side < 2; side++) {
             const int32_t c = mesh->h_cells_of_face(i_face, side);
             FOR_I_CONSERVATIVE {
-                EXPECT_EQ(h_face_W(i_face, 0, side, i), c < 0 ? -7.0 : h_W(c, i));
+                EXPECT_EQ(h_face_W(i_face, 0, side, i), c < 0 ? -7.0_r : h_W(c, i));
             }
         }
     }

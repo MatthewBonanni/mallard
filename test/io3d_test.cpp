@@ -208,7 +208,7 @@ void check_mixed_mesh(const std::string & file) {
         }
         FOR_I_DIM EXPECT_NEAR(closure[i], 0.0, 1e-14) << "cell " << c;
     }
-    EXPECT_NEAR(total, 1.0 + 0.5 + 1.0 / 3.0 + 0.1, 1e-14);
+    EXPECT_NEAR(total, 1.0 + 0.5 + 1.0 / 3.0 + 0.1, roundoff(1e-14));
 }
 
 /**

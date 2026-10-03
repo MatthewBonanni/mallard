@@ -90,11 +90,11 @@ TEST_P(FreeStream3D, UniformFlowIsPreservedExactly) {
     c.init = "type = \"constant\"\nu = [0.4, -0.25, 0.3]\np = 0.9\nT = 0.6923076923076923\n";
     auto solver = run_case(c);
     for (uint32_t i = 0; i < solver->get_mesh()->n_cells; i++) {
-        ASSERT_NEAR(solver->h_conservatives(i, 0), 1.3, 1e-12) << "cell " << i;
-        ASSERT_NEAR(solver->h_primitives(i, 0), 0.4, 1e-12) << "cell " << i;
-        ASSERT_NEAR(solver->h_primitives(i, 1), -0.25, 1e-12) << "cell " << i;
-        ASSERT_NEAR(solver->h_primitives(i, 2), 0.3, 1e-12) << "cell " << i;
-        ASSERT_NEAR(solver->h_primitives(i, 3), 0.9, 1e-12) << "cell " << i;
+        ASSERT_NEAR(solver->h_conservatives(i, 0), 1.3, roundoff(1e-12)) << "cell " << i;
+        ASSERT_NEAR(solver->h_primitives(i, 0), 0.4, roundoff(1e-12)) << "cell " << i;
+        ASSERT_NEAR(solver->h_primitives(i, 1), -0.25, roundoff(1e-12)) << "cell " << i;
+        ASSERT_NEAR(solver->h_primitives(i, 2), 0.3, roundoff(1e-12)) << "cell " << i;
+        ASSERT_NEAR(solver->h_primitives(i, 3), 0.9, roundoff(1e-12)) << "cell " << i;
     }
 }
 
@@ -121,8 +121,8 @@ TEST_P(MeshRecon3D, ClosedBoxConservesMassAndEnergy) {
     const auto before = solver->integrate_conservatives();
     solver->run();
     const auto after = solver->integrate_conservatives();
-    EXPECT_NEAR(after[0], before[0], 1e-12);
-    EXPECT_NEAR(after[4], before[4], 1e-12);
+    EXPECT_NEAR(after[0], before[0], roundoff(1e-12));
+    EXPECT_NEAR(after[4], before[4], roundoff(1e-12));
     EXPECT_GT(std::abs(after[1] - before[1]), 1e-6) << "the blob should have hit the walls";
 }
 
@@ -158,9 +158,9 @@ double sod_error(const std::string & mesh, const std::string & recon, uint32_t n
     double err = 0.0, vol = 0.0, max_v = 0.0;
     for (uint32_t i = 0; i < m->n_cells; i++) {
         double rho, u, p;
-        exact.sample((m->h_cell_coords(i, axis) - 0.5) / solver->get_time(), rho, u, p);
-        err += std::abs(solver->h_conservatives(i, 0) - rho) * m->h_cell_volume(i);
-        vol += m->h_cell_volume(i);
+        exact.sample((double(m->h_cell_coords(i, axis)) - 0.5) / double(solver->get_time()), rho, u, p);
+        err += std::abs(double(solver->h_conservatives(i, 0)) - rho) * double(m->h_cell_volume(i));
+        vol += double(m->h_cell_volume(i));
         for (int d = 0; d < 3; d++) {
             if (d != axis) max_v = std::max(max_v, std::abs(static_cast<double>(solver->h_primitives(i, d))));
         }
@@ -191,13 +191,13 @@ TEST_P(Sod3D, XYAndZDirectionsGiveSameSolution) {
     double v[3];
     double e[3];
     for (int axis = 0; axis < 3; axis++) e[axis] = sod_error(GetParam(), "MUSCL", 60, axis, &v[axis]);
-    EXPECT_NEAR(e[1], e[0], 1e-10);
-    EXPECT_NEAR(e[2], e[0], 1e-10);
-    EXPECT_NEAR(v[1], v[0], 1e-10);
-    EXPECT_NEAR(v[2], v[0], 1e-10);
+    EXPECT_NEAR(e[1], e[0], precision_tol<double>(1e-10, 1e-5));
+    EXPECT_NEAR(e[2], e[0], precision_tol<double>(1e-10, 1e-5));
+    EXPECT_NEAR(v[1], v[0], precision_tol<double>(1e-10, 1e-5));
+    EXPECT_NEAR(v[2], v[0], precision_tol<double>(1e-10, 1e-5));
     if (GetParam() == "cartesian") {
         // Hexahedra aligned with the wave keep the problem exactly one-dimensional
-        EXPECT_LT(v[0], 1e-12);
+        EXPECT_LT(v[0], roundoff(1e-12));
     }
 }
 
@@ -220,24 +220,25 @@ TEST(Solver3DValidation, SphericalBlastIsSymmetricUnderAxisPermutation) {
         double max_diff = 0.0, max_u = 0.0;
         uint32_t matched = 0;
         for (uint32_t i = 0; i < m->n_cells; i++) {
-            const double x = m->h_cell_coords(i, 0), y = m->h_cell_coords(i, 1), z = m->h_cell_coords(i, 2);
+            const double x = double(m->h_cell_coords(i, 0)), y = double(m->h_cell_coords(i, 1)), z = double(m->h_cell_coords(i, 2));
             for (uint32_t j = 0; j < m->n_cells; j++) {
-                if (std::abs(m->h_cell_coords(j, 0) - y) < 1e-9 && std::abs(m->h_cell_coords(j, 1) - z) < 1e-9 &&
-                    std::abs(m->h_cell_coords(j, 2) - x) < 1e-9) {
+                const double tol = precision_tol<double>(1e-9, 1e-5);
+                if (std::abs(double(m->h_cell_coords(j, 0)) - y) < tol && std::abs(double(m->h_cell_coords(j, 1)) - z) < tol &&
+                    std::abs(double(m->h_cell_coords(j, 2)) - x) < tol) {
                     matched++;
-                    max_diff = std::max(max_diff, std::abs(solver->h_conservatives(i, 0) - solver->h_conservatives(j, 0)));
-                    max_diff = std::max(max_diff, std::abs(solver->h_conservatives(i, 4) - solver->h_conservatives(j, 4)));
+                    max_diff = std::max(max_diff, std::abs(double(solver->h_conservatives(i, 0)) - double(solver->h_conservatives(j, 0))));
+                    max_diff = std::max(max_diff, std::abs(double(solver->h_conservatives(i, 4)) - double(solver->h_conservatives(j, 4))));
                     // Momentum (u, v, w) at (x, y, z) is (w, u, v) at (y, z, x)
-                    max_diff = std::max(max_diff, std::abs(solver->h_conservatives(i, 1) - solver->h_conservatives(j, 3)));
-                    max_diff = std::max(max_diff, std::abs(solver->h_conservatives(i, 2) - solver->h_conservatives(j, 1)));
-                    max_diff = std::max(max_diff, std::abs(solver->h_conservatives(i, 3) - solver->h_conservatives(j, 2)));
+                    max_diff = std::max(max_diff, std::abs(double(solver->h_conservatives(i, 1)) - double(solver->h_conservatives(j, 3))));
+                    max_diff = std::max(max_diff, std::abs(double(solver->h_conservatives(i, 2)) - double(solver->h_conservatives(j, 1))));
+                    max_diff = std::max(max_diff, std::abs(double(solver->h_conservatives(i, 3)) - double(solver->h_conservatives(j, 2))));
                     break;
                 }
             }
             max_u = std::max(max_u, std::abs(static_cast<double>(solver->h_primitives(i, 0))));
         }
         EXPECT_EQ(matched, m->n_cells) << mesh;
-        EXPECT_LT(max_diff, 1e-10) << mesh;
+        EXPECT_LT(max_diff, precision_tol<double>(1e-10, 1e-5)) << mesh;
         EXPECT_GT(max_u, 0.1) << mesh;
     }
 }
@@ -257,9 +258,9 @@ TEST(Solver3DValidation, AnalyticalInitializationIntegratesPolynomialsExactly) {
         solver->copy_device_to_host();
         auto m = solver->get_mesh();
         double total = 0.0;
-        for (uint32_t i = 0; i < m->n_cells; i++) total += solver->h_conservatives(i, 0) * m->h_cell_volume(i);
+        for (uint32_t i = 0; i < m->n_cells; i++) total += double(solver->h_conservatives(i, 0)) * double(m->h_cell_volume(i));
         // int_0^1 int_0^1 int_0^1 (1 + x^2 y + z^3) = 1 + 1/6 + 1/4
-        EXPECT_NEAR(total, 1.0 + 1.0 / 6.0 + 0.25, 1e-12) << mesh;
+        EXPECT_NEAR(total, 1.0 + 1.0 / 6.0 + 0.25, roundoff(1e-12)) << mesh;
         if (mesh != "cartesian") continue;
         for (uint32_t i = 0; i < m->n_cells; i++) {
             double lo[3] = {1e30, 1e30, 1e30}, hi[3] = {-1e30, -1e30, -1e30};
@@ -273,7 +274,7 @@ TEST(Solver3DValidation, AnalyticalInitializationIntegratesPolynomialsExactly) {
                 return (std::pow(hi[d], p + 1) - std::pow(lo[d], p + 1)) / ((p + 1) * (hi[d] - lo[d]));
             };
             const double exact = 1.0 + mean_pow(0, 2) * mean_pow(1, 1) + mean_pow(2, 3);
-            EXPECT_NEAR(solver->h_conservatives(i, 0), exact, 1e-12) << "cell " << i;
+            EXPECT_NEAR(solver->h_conservatives(i, 0), exact, roundoff(1e-12)) << "cell " << i;
         }
     }
 }
@@ -309,10 +310,10 @@ TEST_P(Couette3D, LinearVelocityAndWallForces) {
     auto m = solver->get_mesh();
     double max_err = 0.0;
     for (uint32_t i = 0; i < m->n_cells; i++) {
-        const double z = m->h_cell_coords(i, 2);
-        max_err = std::max(max_err, std::abs(solver->h_primitives(i, 0) - 0.1 * z));
-        max_err = std::max(max_err, std::abs(solver->h_primitives(i, 1) - 0.05 * z));
-        EXPECT_LT(std::abs(solver->h_primitives(i, 2)), 1e-6);
+        const double z = double(m->h_cell_coords(i, 2));
+        max_err = std::max(max_err, std::abs(double(solver->h_primitives(i, 0)) - 0.1 * z));
+        max_err = std::max(max_err, std::abs(double(solver->h_primitives(i, 1)) - 0.05 * z));
+        EXPECT_LT(std::abs(solver->h_primitives(i, 2)), precision_tol<double>(1e-6, 1e-4));
     }
     EXPECT_LT(max_err, 1e-3 * 0.1);
     // Shear mu U / H on the unit-area plates opposes the relative motion; p = 1 pushes outward
@@ -346,7 +347,7 @@ TEST_P(Couette3D, HeatFluxWallSetsTemperatureGradient) {
     const double kappa = 0.2 * 3.5 / 0.72;
     auto m = solver->get_mesh();
     for (uint32_t i = 0; i < m->n_cells; i++) {
-        const double z = m->h_cell_coords(i, 2);
+        const double z = double(m->h_cell_coords(i, 2));
         EXPECT_NEAR(solver->h_primitives(i, 4), 1.0 + 0.2 * (1.0 - z) / kappa, 5e-4);
     }
 }
@@ -367,8 +368,8 @@ TEST(Solver3DValidation, FlowStatisticsOfALinearVelocityField) {
               (std::filesystem::temp_directory_path() / "mallard_integrals.csv").string() + "\"\n";
     auto solver = init_case(c);
     const auto s = solver->integrate_flow_statistics();
-    EXPECT_NEAR(s[1], 0.5 * (9.0 + 25.0 + 4.0), 1e-10);  // Enstrophy
-    EXPECT_NEAR(s[2], 1.0, 1e-10);                       // (div u)^2
+    EXPECT_NEAR(s[1], 0.5 * (9.0 + 25.0 + 4.0), roundoff(1e-10));  // Enstrophy
+    EXPECT_NEAR(s[2], 1.0, roundoff(1e-10));                       // (div u)^2
     // Pressure from cell averages carries the same O(h^2) kinetic energy error
     EXPECT_NEAR(s[3], 2.0, 0.05);  // p div u
     // Kinetic energy from the cell averages of rho u misses their variance
@@ -391,6 +392,6 @@ TEST(Solver3DValidation, TENOEnstrophyOfTheTaylorGreenVortex) {
     c.extra = "[integrals]\nfile = \"" +
               (std::filesystem::temp_directory_path() / "mallard_integrals_tgv.csv").string() + "\"\n";
     auto solver = init_case(c);
-    const double enstrophy = solver->integrate_flow_statistics()[1] / std::pow(M_PI, 3);
+    const double enstrophy = double(solver->integrate_flow_statistics()[1]) / std::pow(M_PI, 3);
     EXPECT_NEAR(enstrophy, 0.375, 0.005 * 0.375);
 }

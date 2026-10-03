@@ -225,12 +225,12 @@ void Mesh::compute_cell_centroids() {
             const rtype xa = h_node_coords(a, 0), ya = h_node_coords(a, 1);
             const rtype xb = h_node_coords(b, 0), yb = h_node_coords(b, 1);
             const rtype cross = xa * yb - xb * ya;
-            A += 0.5 * cross;
+            A += 0.5_r * cross;
             Cx += (xa + xb) * cross;
             Cy += (ya + yb) * cross;
         }
-        h_cell_coords(i_cell, 0) = Cx / (6.0 * A);
-        h_cell_coords(i_cell, 1) = Cy / (6.0 * A);
+        h_cell_coords(i_cell, 0) = Cx / (6.0_r * A);
+        h_cell_coords(i_cell, 1) = Cy / (6.0_r * A);
     }
 }
 
@@ -303,8 +303,8 @@ void Mesh::compute_face_normals() {
         int32_t i_cell_0 = h_cells_of_face(i_face, 0);
         rtype x_cell_0 = h_cell_coords(i_cell_0, 0);
         rtype y_cell_0 = h_cell_coords(i_cell_0, 1);
-        rtype x_face_centroid = 0.5 * (x0 + x1);
-        rtype y_face_centroid = 0.5 * (y0 + y1);
+        rtype x_face_centroid = 0.5_r * (x0 + x1);
+        rtype y_face_centroid = 0.5_r * (y0 + y1);
         rtype dx_cell_0 = x_face_centroid - x_cell_0;
         rtype dy_cell_0 = y_face_centroid - y_cell_0;
         rtype dot = dx_cell_0 * h_face_normals(i_face, 0) +
@@ -321,7 +321,7 @@ void Mesh::compute_face_centroids() {
         uint32_t i_node_0 = h_node_of_face(i_face, 0);
         uint32_t i_node_1 = h_node_of_face(i_face, 1);
         FOR_I_DIM {
-            h_face_coords(i_face, i) = 0.5 * (h_node_coords(i_node_0, i) + h_node_coords(i_node_1, i));
+            h_face_coords(i_face, i) = 0.5_r * (h_node_coords(i_node_0, i) + h_node_coords(i_node_1, i));
         }
     }
 }

@@ -66,7 +66,7 @@ void physical_flux(const rtype * W, const rtype * n, const rtype gamma,
     const rtype u_n = dot<N_DIM>(W + 1, n);
     U[0] = W[0];
     FOR_I_DIM U[1 + i] = W[0] * W[1 + i];
-    U[E] = W[E] / (gamma - 1.0) + 0.5 * W[0] * dot<N_DIM>(W + 1, W + 1);
+    U[E] = W[E] / (gamma - 1.0_r) + 0.5_r * W[0] * dot<N_DIM>(W + 1, W + 1);
     F[0] = U[0] * u_n;
     FOR_I_DIM F[1 + i] = U[1 + i] * u_n + W[E] * n[i];
     F[E] = (U[E] + W[E]) * u_n;
@@ -79,9 +79,9 @@ KOKKOS_INLINE_FUNCTION
 rtype PVRS(const rtype * W_l, const rtype * W_r, const rtype gamma) {
     const rtype a_l = Kokkos::sqrt(gamma * W_l[2] / W_l[0]);
     const rtype a_r = Kokkos::sqrt(gamma * W_r[2] / W_r[0]);
-    const rtype rho_avg = 0.5 * (W_l[0] + W_r[0]);
-    const rtype a_avg = 0.5 * (a_l + a_r);
-    return 0.5 * (W_l[2] + W_r[2]) + 0.5 * (W_l[1] - W_r[1]) * rho_avg * a_avg;
+    const rtype rho_avg = 0.5_r * (W_l[0] + W_r[0]);
+    const rtype a_avg = 0.5_r * (a_l + a_r);
+    return 0.5_r * (W_l[2] + W_r[2]) + 0.5_r * (W_l[1] - W_r[1]) * rho_avg * a_avg;
 }
 
 /**
@@ -91,10 +91,10 @@ KOKKOS_INLINE_FUNCTION
 rtype TRRS(const rtype * W_l, const rtype * W_r, const rtype gamma) {
     const rtype a_l = Kokkos::sqrt(gamma * W_l[2] / W_l[0]);
     const rtype a_r = Kokkos::sqrt(gamma * W_r[2] / W_r[0]);
-    const rtype z = (gamma - 1.0) / (2.0 * gamma);
-    const rtype num = a_l + a_r - 0.5 * (gamma - 1.0) * (W_r[1] - W_l[1]);
+    const rtype z = (gamma - 1.0_r) / (2.0_r * gamma);
+    const rtype num = a_l + a_r - 0.5_r * (gamma - 1.0_r) * (W_r[1] - W_l[1]);
     const rtype den = a_l / Kokkos::pow(W_l[2], z) + a_r / Kokkos::pow(W_r[2], z);
-    return Kokkos::pow(Kokkos::fmax(num, 0.0) / den, 1.0 / z);
+    return Kokkos::pow(Kokkos::fmax(num, 0.0_r) / den, 1.0_r / z);
 }
 
 /**
@@ -102,11 +102,11 @@ rtype TRRS(const rtype * W_l, const rtype * W_r, const rtype gamma) {
  */
 KOKKOS_INLINE_FUNCTION
 rtype TSRS(const rtype * W_l, const rtype * W_r, const rtype gamma, const rtype p_0) {
-    const rtype A_l = 2.0 / ((gamma + 1.0) * W_l[0]);
-    const rtype A_r = 2.0 / ((gamma + 1.0) * W_r[0]);
-    const rtype B_l = (gamma - 1.0) / (gamma + 1.0) * W_l[2];
-    const rtype B_r = (gamma - 1.0) / (gamma + 1.0) * W_r[2];
-    const rtype p = Kokkos::fmax(0.0, p_0);
+    const rtype A_l = 2.0_r / ((gamma + 1.0_r) * W_l[0]);
+    const rtype A_r = 2.0_r / ((gamma + 1.0_r) * W_r[0]);
+    const rtype B_l = (gamma - 1.0_r) / (gamma + 1.0_r) * W_l[2];
+    const rtype B_r = (gamma - 1.0_r) / (gamma + 1.0_r) * W_r[2];
+    const rtype p = Kokkos::fmax(0.0_r, p_0);
     const rtype g_l = Kokkos::sqrt(A_l / (p + B_l));
     const rtype g_r = Kokkos::sqrt(A_r / (p + B_r));
     return (g_l * W_l[2] + g_r * W_r[2] - (W_r[1] - W_l[1])) / (g_l + g_r);
@@ -120,7 +120,7 @@ rtype ANRS(const rtype * W_l, const rtype * W_r, const rtype gamma) {
     constexpr rtype q_user = 2.0;
     const rtype p_min = Kokkos::fmin(W_l[2], W_r[2]);
     const rtype p_max = Kokkos::fmax(W_l[2], W_r[2]);
-    const rtype p_pv = Kokkos::fmax(0.0, PVRS(W_l, W_r, gamma));
+    const rtype p_pv = Kokkos::fmax(0.0_r, PVRS(W_l, W_r, gamma));
     if ((p_max / p_min < q_user) && (p_min <= p_pv) && (p_pv <= p_max)) {
         return p_pv;
     } else if (p_pv < p_min) {
@@ -141,13 +141,13 @@ void wave_speeds_einfeldt(const rtype * W_l, const rtype * W_r, const rtype u_l_
     const rtype a_r = Kokkos::sqrt(gamma * W_r[N_DIM + 1] / W_r[0]);
     const rtype s_l = Kokkos::sqrt(W_l[0]);
     const rtype s_r = Kokkos::sqrt(W_r[0]);
-    const rtype H_l = a_l * a_l / (gamma - 1.0) + 0.5 * dot<N_DIM>(W_l + 1, W_l + 1);
-    const rtype H_r = a_r * a_r / (gamma - 1.0) + 0.5 * dot<N_DIM>(W_r + 1, W_r + 1);
+    const rtype H_l = a_l * a_l / (gamma - 1.0_r) + 0.5_r * dot<N_DIM>(W_l + 1, W_l + 1);
+    const rtype H_r = a_r * a_r / (gamma - 1.0_r) + 0.5_r * dot<N_DIM>(W_r + 1, W_r + 1);
     rtype u_roe[N_DIM];
     FOR_I_DIM u_roe[i] = (s_l * W_l[1 + i] + s_r * W_r[1 + i]) / (s_l + s_r);
     const rtype H_roe = (s_l * H_l + s_r * H_r) / (s_l + s_r);
     const rtype un_roe = (s_l * u_l_n + s_r * u_r_n) / (s_l + s_r);
-    const rtype a_roe = Kokkos::sqrt(Kokkos::fmax((gamma - 1.0) * (H_roe - 0.5 * dot<N_DIM>(u_roe, u_roe)), 0.0));
+    const rtype a_roe = Kokkos::sqrt(Kokkos::fmax((gamma - 1.0_r) * (H_roe - 0.5_r * dot<N_DIM>(u_roe, u_roe)), 0.0_r));
     S_l = Kokkos::fmin(u_l_n - a_l, un_roe - a_roe);
     S_r = Kokkos::fmax(u_r_n + a_r, un_roe + a_roe);
 }
@@ -164,9 +164,9 @@ void wave_speeds_pressure(const rtype * W_l, const rtype * W_r, const rtype u_l_
     const rtype p_star = ANRS(w_l, w_r, gamma);
     const rtype a_l = Kokkos::sqrt(gamma * W_l[E] / W_l[0]);
     const rtype a_r = Kokkos::sqrt(gamma * W_r[E] / W_r[0]);
-    const rtype c = (gamma + 1.0) / (2.0 * gamma);
-    const rtype q_l = (p_star <= W_l[E]) ? 1.0 : Kokkos::sqrt(1.0 + c * (p_star / W_l[E] - 1.0));
-    const rtype q_r = (p_star <= W_r[E]) ? 1.0 : Kokkos::sqrt(1.0 + c * (p_star / W_r[E] - 1.0));
+    const rtype c = (gamma + 1.0_r) / (2.0_r * gamma);
+    const rtype q_l = (p_star <= W_l[E]) ? 1.0_r : Kokkos::sqrt(1.0_r + c * (p_star / W_l[E] - 1.0_r));
+    const rtype q_r = (p_star <= W_r[E]) ? 1.0_r : Kokkos::sqrt(1.0_r + c * (p_star / W_r[E] - 1.0_r));
     S_l = u_l_n - a_l * q_l;
     S_r = u_r_n + a_r * q_r;
 }
@@ -184,7 +184,7 @@ struct Rusanov {
         const rtype a_l = Kokkos::sqrt(gamma * W_l[N_DIM + 1] / W_l[0]);
         const rtype a_r = Kokkos::sqrt(gamma * W_r[N_DIM + 1] / W_r[0]);
         const rtype S_max = Kokkos::fmax(Kokkos::fabs(u_l_n) + a_l, Kokkos::fabs(u_r_n) + a_r);
-        FOR_I_CONSERVATIVE flux[i] = 0.5 * (F_l[i] + F_r[i] - S_max * (U_r[i] - U_l[i]));
+        FOR_I_CONSERVATIVE flux[i] = 0.5_r * (F_l[i] + F_r[i] - S_max * (U_r[i] - U_l[i]));
     }
 };
 
@@ -200,9 +200,9 @@ struct HLL {
         const rtype u_r_n = dot<N_DIM>(W_r + 1, n);
         rtype S_l, S_r;
         wave_speeds_einfeldt(W_l, W_r, u_l_n, u_r_n, gamma, S_l, S_r);
-        if (0.0 <= S_l) {
+        if (0.0_r <= S_l) {
             FOR_I_CONSERVATIVE flux[i] = F_l[i];
-        } else if (S_r <= 0.0) {
+        } else if (S_r <= 0.0_r) {
             FOR_I_CONSERVATIVE flux[i] = F_r[i];
         } else {
             FOR_I_CONSERVATIVE {
@@ -224,11 +224,11 @@ struct HLLC {
         const rtype u_r_n = dot<N_DIM>(W_r + 1, n);
         rtype S_l, S_r;
         wave_speeds_einfeldt(W_l, W_r, u_l_n, u_r_n, gamma, S_l, S_r);
-        if (0.0 <= S_l) {
+        if (0.0_r <= S_l) {
             FOR_I_CONSERVATIVE flux[i] = F_l[i];
             return;
         }
-        if (S_r <= 0.0) {
+        if (S_r <= 0.0_r) {
             FOR_I_CONSERVATIVE flux[i] = F_r[i];
             return;
         }
@@ -237,7 +237,7 @@ struct HLLC {
         const rtype m_r = W_r[0] * (S_r - u_r_n);
         constexpr uint8_t E = N_DIM + 1;
         const rtype S_star = (W_r[E] - W_l[E] + u_l_n * m_l - u_r_n * m_r) / (m_l - m_r);
-        const bool left = (S_star >= 0.0);
+        const bool left = (S_star >= 0.0_r);
         const rtype * W = left ? W_l : W_r;
         const rtype * U = left ? U_l : U_r;
         const rtype * F = left ? F_l : F_r;
@@ -275,7 +275,7 @@ struct Roe {
         W_roe[0] = s_l * s_r;
         FOR_I_DIM W_roe[1 + i] = (s_l * W_l[1 + i] + s_r * W_r[1 + i]) / (s_l + s_r);
         const rtype H = (s_l * H_l + s_r * H_r) / (s_l + s_r);
-        const rtype a2 = Kokkos::fmax((gamma - 1.0) * (H - 0.5 * dot<N_DIM>(W_roe + 1, W_roe + 1)), 1e-14);
+        const rtype a2 = Kokkos::fmax((gamma - 1.0_r) * (H - 0.5_r * dot<N_DIM>(W_roe + 1, W_roe + 1)), 1e-14_r);
         W_roe[E] = W_roe[0] * a2 / gamma;
         const rtype a = Kokkos::sqrt(a2);
 
@@ -286,10 +286,10 @@ struct Roe {
         FOR_I_CONSERVATIVE lambda[i] = u_n;
         lambda[0] = u_n - a;
         lambda[2] = u_n + a;
-        const rtype delta = 0.1 * a;
+        const rtype delta = 0.1_r * a;
         for (uint8_t k = 0; k < N_CONSERVATIVE; k++) {
             rtype l = Kokkos::fabs(lambda[k]);
-            if ((k == 0 || k == 2) && l < delta) l = 0.5 * (l * l + delta * delta) / delta;
+            if ((k == 0 || k == 2) && l < delta) l = 0.5_r * (l * l + delta * delta) / delta;
             lambda[k] = l;
         }
         rtype strength[N_CONSERVATIVE];
@@ -300,7 +300,7 @@ struct Roe {
         FOR_I_CONSERVATIVE {
             rtype dissipation = 0.0;
             for (uint8_t k = 0; k < N_CONSERVATIVE; k++) dissipation += R[i][k] * lambda[k] * strength[k];
-            flux[i] = 0.5 * (F_l[i] + F_r[i] - dissipation);
+            flux[i] = 0.5_r * (F_l[i] + F_r[i] - dissipation);
         }
     }
 };
@@ -323,7 +323,7 @@ struct RHLL {
         const rtype dq_mag = Kokkos::sqrt(dq[0] * dq[0] + dq[1] * dq[1]);
         const rtype a_ref = Kokkos::sqrt(gamma * Kokkos::fmax(W_l[3] / W_l[0], W_r[3] / W_r[0]));
         rtype n1[N_DIM];
-        if (dq_mag > 1e-12 * a_ref) {
+        if (dq_mag > precision_tol(1e-12, 1e-5) * a_ref) {
             n1[0] = dq[0] / dq_mag;
             n1[1] = dq[1] / dq_mag;
         } else {
@@ -332,14 +332,14 @@ struct RHLL {
             n1[1] = n[1];
         }
         rtype alpha1 = n1[0] * n[0] + n1[1] * n[1];
-        if (alpha1 < 0.0) {
+        if (alpha1 < 0.0_r) {
             n1[0] = -n1[0];
             n1[1] = -n1[1];
             alpha1 = -alpha1;
         }
         rtype n2[N_DIM] = {-n1[1], n1[0]};
         rtype alpha2 = n2[0] * n[0] + n2[1] * n[1];
-        if (alpha2 < 0.0) {
+        if (alpha2 < 0.0_r) {
             n2[0] = -n2[0];
             n2[1] = -n2[1];
             alpha2 = -alpha2;
@@ -362,9 +362,9 @@ struct RHLL {
         FOR_I_DIM dq[i] = W_r[1 + i] - W_l[1 + i];
         const rtype dq_mag = norm_2<N_DIM>(dq);
         const rtype a_ref = Kokkos::sqrt(gamma * Kokkos::fmax(W_l[N_DIM + 1] / W_l[0], W_r[N_DIM + 1] / W_r[0]));
-        FOR_I_DIM n1[i] = (dq_mag > 1e-12 * a_ref) ? dq[i] / dq_mag : n[i];
+        FOR_I_DIM n1[i] = (dq_mag > precision_tol(1e-12, 1e-5) * a_ref) ? dq[i] / dq_mag : n[i];
         rtype alpha1 = dot<N_DIM>(n1, n);
-        if (alpha1 < 0.0) {
+        if (alpha1 < 0.0_r) {
             FOR_I_DIM n1[i] = -n1[i];
             alpha1 = -alpha1;
         }
@@ -372,7 +372,7 @@ struct RHLL {
         const rtype alpha2 = norm_2<N_DIM>(n2);
         rtype f1[N_CONSERVATIVE];
         HLL::calc_flux(f1, n1, W_l, W_r, gamma);
-        if (alpha2 <= 1e-12) {
+        if (alpha2 <= precision_tol(1e-12, 1e-6)) {
             FOR_I_CONSERVATIVE flux[i] = alpha1 * f1[i];
             return;
         }

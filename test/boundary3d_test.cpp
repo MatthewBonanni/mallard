@@ -29,7 +29,7 @@ const rtype N[3] = {2.0 / 7.0, 3.0 / 7.0, 6.0 / 7.0};
 const rtype W_I[N_CONSERVATIVE] = {1.2, 0.3, -0.5, 0.4, 0.9};
 
 Euler gas() {
-    return Euler::from_reference(GAMMA, 1.0, 1.0 / R_GAS, 1.0);
+    return Euler::from_reference(GAMMA, 1.0_r, 1.0_r / R_GAS, 1.0_r);
 }
 
 BoundaryCondition parse(const std::string & body) {
@@ -46,14 +46,14 @@ TEST(Boundary3DTest, SymmetryReflectsOnlyTheNormalVelocity) {
     BoundaryCondition bc = parse("type = \"symmetry\"\n");
     rtype W_g[N_CONSERVATIVE];
     bc.ghost_W(W_I, N, GAMMA, R_GAS, true, W_g);
-    EXPECT_DOUBLE_EQ(W_g[0], W_I[0]);
-    EXPECT_DOUBLE_EQ(W_g[4], W_I[4]);
-    EXPECT_NEAR(normal_velocity(W_g), -normal_velocity(W_I), 1e-14);
+    EXPECT_RTYPE_EQ(W_g[0], W_I[0]);
+    EXPECT_RTYPE_EQ(W_g[4], W_I[4]);
+    EXPECT_NEAR(normal_velocity(W_g), -normal_velocity(W_I), roundoff(1e-14));
     rtype t_g[3], t_i[3];
     for (int d = 0; d < 3; d++) {
         t_g[d] = W_g[1 + d] - normal_velocity(W_g) * N[d];
         t_i[d] = W_I[1 + d] - normal_velocity(W_I) * N[d];
-        EXPECT_NEAR(t_g[d], t_i[d], 1e-14);
+        EXPECT_NEAR(t_g[d], t_i[d], roundoff(1e-14));
     }
 }
 
@@ -62,7 +62,7 @@ TEST(Boundary3DTest, InviscidWallIsASlipWall) {
     rtype W_g[N_CONSERVATIVE], W_s[N_CONSERVATIVE];
     bc.ghost_W(W_I, N, GAMMA, R_GAS, false, W_g);
     parse("type = \"symmetry\"\n").ghost_W(W_I, N, GAMMA, R_GAS, false, W_s);
-    FOR_I_CONSERVATIVE EXPECT_DOUBLE_EQ(W_g[i], W_s[i]);
+    FOR_I_CONSERVATIVE EXPECT_RTYPE_EQ(W_g[i], W_s[i]);
 }
 
 TEST(Boundary3DTest, NoSlipMovingWallAveragesToTheWallVelocity) {
@@ -70,9 +70,9 @@ TEST(Boundary3DTest, NoSlipMovingWallAveragesToTheWallVelocity) {
     const rtype u_wall[3] = {0.2, -0.1, 0.7};
     rtype W_g[N_CONSERVATIVE];
     bc.ghost_W(W_I, N, GAMMA, R_GAS, true, W_g);
-    FOR_I_DIM EXPECT_NEAR(0.5 * (W_g[1 + i] + W_I[1 + i]), u_wall[i], 1e-14);
-    EXPECT_DOUBLE_EQ(W_g[0], W_I[0]);
-    EXPECT_DOUBLE_EQ(W_g[4], W_I[4]);
+    FOR_I_DIM EXPECT_NEAR(0.5_r * (W_g[1 + i] + W_I[1 + i]), u_wall[i], roundoff(1e-14));
+    EXPECT_RTYPE_EQ(W_g[0], W_I[0]);
+    EXPECT_RTYPE_EQ(W_g[4], W_I[4]);
 }
 
 TEST(Boundary3DTest, IsothermalWallAveragesToTheWallTemperature) {
@@ -81,15 +81,15 @@ TEST(Boundary3DTest, IsothermalWallAveragesToTheWallTemperature) {
     bc.ghost_W(W_I, N, GAMMA, R_GAS, true, W_g);
     const rtype T_i = W_I[4] / (W_I[0] * R_GAS);
     const rtype T_g = W_g[4] / (W_g[0] * R_GAS);
-    EXPECT_NEAR(0.5 * (T_i + T_g), 1.3, 1e-12);
-    EXPECT_DOUBLE_EQ(W_g[4], W_I[4]);
+    EXPECT_NEAR(0.5_r * (T_i + T_g), 1.3_r, roundoff(1e-12));
+    EXPECT_RTYPE_EQ(W_g[4], W_I[4]);
     FOR_I_DIM EXPECT_NEAR(W_g[1 + i], -W_I[1 + i], 1e-14);
 }
 
 TEST(Boundary3DTest, HeatFluxIsStoredAfterTheVelocity) {
     BoundaryCondition bc = parse("type = \"wall_heat_flux\"\nq = 0.25\nu = [0.0, 0.0, 1.5]\n");
-    EXPECT_DOUBLE_EQ(bc.data[N_DIM + 1], 0.25);
-    EXPECT_DOUBLE_EQ(bc.data[3], 1.5);
+    EXPECT_RTYPE_EQ(bc.data[N_DIM + 1], 0.25);
+    EXPECT_RTYPE_EQ(bc.data[3], 1.5);
 }
 
 TEST(Boundary3DTest, TwoComponentVelocityIsRejected) {
@@ -100,33 +100,33 @@ TEST(Boundary3DTest, UPTImposesTheInflowState) {
     BoundaryCondition bc = parse("type = \"upt\"\nu = [0.5, 0.25, -0.125]\np = 2.0\nT = 1.5\n");
     rtype W_g[N_CONSERVATIVE];
     bc.ghost_W(W_I, N, GAMMA, R_GAS, false, W_g);
-    EXPECT_NEAR(W_g[0], 2.0 / (R_GAS * 1.5), 1e-12);
-    EXPECT_DOUBLE_EQ(W_g[1], 0.5);
-    EXPECT_DOUBLE_EQ(W_g[2], 0.25);
-    EXPECT_DOUBLE_EQ(W_g[3], -0.125);
-    EXPECT_DOUBLE_EQ(W_g[4], 2.0);
+    EXPECT_NEAR(W_g[0], 2.0_r / (R_GAS * 1.5_r), roundoff(1e-12));
+    EXPECT_RTYPE_EQ(W_g[1], 0.5);
+    EXPECT_RTYPE_EQ(W_g[2], 0.25);
+    EXPECT_RTYPE_EQ(W_g[3], -0.125);
+    EXPECT_RTYPE_EQ(W_g[4], 2.0);
 }
 
 TEST(Boundary3DTest, PressureOutletImposesSubsonicBackPressureAtFixedTemperature) {
     BoundaryCondition bc = parse("type = \"p_out\"\np = 0.6\n");
     rtype W_g[N_CONSERVATIVE];
     bc.ghost_W(W_I, N, GAMMA, R_GAS, false, W_g);
-    EXPECT_DOUBLE_EQ(W_g[4], 0.6);
+    EXPECT_RTYPE_EQ(W_g[4], 0.6);
     EXPECT_NEAR(W_g[4] / W_g[0], W_I[4] / W_I[0], 1e-14);
-    FOR_I_DIM EXPECT_DOUBLE_EQ(W_g[1 + i], W_I[1 + i]);
+    FOR_I_DIM EXPECT_RTYPE_EQ(W_g[1 + i], W_I[1 + i]);
 }
 
 TEST(Boundary3DTest, FarfieldSupersonicInflowAndOutflow) {
     BoundaryCondition bc = parse("type = \"farfield\"\nu = [-3.0, 0.5, 0.2]\np = 1.0\nT = 1.0\n");
     rtype W_g[N_CONSERVATIVE];
     // Supersonic inflow (u . n < -a): the free stream
-    const rtype W_in[N_CONSERVATIVE] = {1.0, -6.0 * N[0], -6.0 * N[1], -6.0 * N[2], 1.0};
+    const rtype W_in[N_CONSERVATIVE] = {1.0_r, -6.0_r * N[0], -6.0_r * N[1], -6.0_r * N[2], 1.0_r};
     bc.ghost_W(W_in, N, GAMMA, R_GAS, false, W_g);
-    FOR_I_CONSERVATIVE EXPECT_DOUBLE_EQ(W_g[i], bc.data[i]);
+    FOR_I_CONSERVATIVE EXPECT_RTYPE_EQ(W_g[i], bc.data[i]);
     // Supersonic outflow: the interior
-    const rtype W_out[N_CONSERVATIVE] = {1.0, 6.0 * N[0] + 0.1, 6.0 * N[1], 6.0 * N[2], 1.0};
+    const rtype W_out[N_CONSERVATIVE] = {1.0_r, 6.0_r * N[0] + 0.1_r, 6.0_r * N[1], 6.0_r * N[2], 1.0_r};
     bc.ghost_W(W_out, N, GAMMA, R_GAS, false, W_g);
-    FOR_I_CONSERVATIVE EXPECT_DOUBLE_EQ(W_g[i], W_out[i]);
+    FOR_I_CONSERVATIVE EXPECT_RTYPE_EQ(W_g[i], W_out[i]);
 }
 
 TEST(Boundary3DTest, FarfieldSubsonicStateKeepsRiemannInvariantsAndUpwindTangentialVelocity) {
@@ -136,19 +136,19 @@ TEST(Boundary3DTest, FarfieldSubsonicStateKeepsRiemannInvariantsAndUpwindTangent
         // Subsonic outflow (sign = 1) and inflow (sign = -1) through n
         rtype W_i[N_CONSERVATIVE] = {1.3, 0.0, 0.0, 0.0, 1.05};
         const rtype tang[3] = {3.0 / 7.0, -6.0 / 7.0, 2.0 / 7.0};
-        for (int d = 0; d < 3; d++) W_i[1 + d] = sign * 0.6 * N[d] + 0.25 * tang[d];
+        for (int d = 0; d < 3; d++) W_i[1 + d] = sign * 0.6_r * N[d] + 0.25_r * tang[d];
         rtype W_g[N_CONSERVATIVE];
         bc.ghost_W(W_i, N, GAMMA, R_GAS, false, W_g);
         auto a = [](const rtype * W) { return std::sqrt(GAMMA * W[4] / W[0]); };
-        const rtype r_out = normal_velocity(W_i) + 2.0 * a(W_i) / (GAMMA - 1.0);
-        const rtype r_in = normal_velocity(W_inf) - 2.0 * a(W_inf) / (GAMMA - 1.0);
-        EXPECT_NEAR(normal_velocity(W_g) + 2.0 * a(W_g) / (GAMMA - 1.0), r_out, 1e-12);
-        EXPECT_NEAR(normal_velocity(W_g) - 2.0 * a(W_g) / (GAMMA - 1.0), r_in, 1e-12);
+        const rtype r_out = normal_velocity(W_i) + 2.0_r * a(W_i) / (GAMMA - 1.0_r);
+        const rtype r_in = normal_velocity(W_inf) - 2.0_r * a(W_inf) / (GAMMA - 1.0_r);
+        EXPECT_NEAR(normal_velocity(W_g) + 2.0_r * a(W_g) / (GAMMA - 1.0_r), r_out, roundoff(1e-12));
+        EXPECT_NEAR(normal_velocity(W_g) - 2.0_r * a(W_g) / (GAMMA - 1.0_r), r_in, roundoff(1e-12));
         EXPECT_GT(sign * normal_velocity(W_g), 0.0);
-        const rtype * W_up = (sign > 0.0) ? W_i : W_inf;
-        EXPECT_NEAR(W_g[4] / std::pow(W_g[0], GAMMA), W_up[4] / std::pow(W_up[0], GAMMA), 1e-12);
+        const rtype * W_up = (sign > 0.0_r) ? W_i : W_inf;
+        EXPECT_NEAR(W_g[4] / std::pow(W_g[0], GAMMA), W_up[4] / std::pow(W_up[0], GAMMA), roundoff(1e-12));
         for (int d = 0; d < 3; d++) {
-            EXPECT_NEAR(W_g[1 + d] - normal_velocity(W_g) * N[d], W_up[1 + d] - normal_velocity(W_up) * N[d], 1e-12);
+            EXPECT_NEAR(W_g[1 + d] - normal_velocity(W_g) * N[d], W_up[1 + d] - normal_velocity(W_up) * N[d], roundoff(1e-12));
         }
     }
 }
@@ -188,12 +188,12 @@ TEST(Boundary3DTest, HydrostaticGhostPressureFollowsGravityAlongTheNormal) {
     bd.gravity[2] = -2.0;
     uint32_t f_back = 0;
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
-        if (mesh->h_cells_of_face(f, 1) < 0 && mesh->h_face_coords(f, 2) < 1e-12) f_back = f;
+        if (mesh->h_cells_of_face(f, 1) < 0 && mesh->h_face_coords(f, 2) < 1e-12_r) f_back = f;
     }
     const rtype n_out[3] = {0.0, 0.0, -1.0};
     // The ghost point 0.5 below the plane sits deeper in the hydrostatic column
     const auto W_g = ghost_at_on_device(bd, f_back, W_I, n_out, 0.5);
-    EXPECT_NEAR(W_g[4], W_I[4] + W_I[0] * 2.0 * 0.5, 1e-14);
+    EXPECT_NEAR(W_g[4], W_I[4] + W_I[0] * 2.0_r * 0.5_r, roundoff(1e-14));
 }
 
 TEST(Boundary3DTest, TransmissiveImageFaceIsTheOppositeFaceOfAHexCell) {
@@ -242,14 +242,14 @@ TEST(Boundary3DTest, TransmissiveImageCellContainsTheImagePoint) {
             if (img != c) n_moved++;
             // The image point, 3/4 of the boundary cell's depth inward, is inside the image cell
             for (int k = 0; k < 3; k++) {
-                const rtype p = mesh->h_face_coords(f, k) + 0.75 * depth * n_in[k];
+                const rtype p = mesh->h_face_coords(f, k) + 0.75_r * depth * n_in[k];
                 rtype lo = 1e30, hi = -1e30;
                 for (uint32_t j = 0; j < mesh->h_n_nodes_of_cell(img); j++) {
                     lo = std::min(lo, mesh->h_node_coords(mesh->h_node_of_cell(img, j), k));
                     hi = std::max(hi, mesh->h_node_coords(mesh->h_node_of_cell(img, j), k));
                 }
-                EXPECT_GE(p, lo - 1e-12) << type << " face " << f;
-                EXPECT_LE(p, hi + 1e-12) << type << " face " << f;
+                EXPECT_GE(p, double(lo) - roundoff(1e-12)) << type << " face " << f;
+                EXPECT_LE(p, double(hi) + roundoff(1e-12)) << type << " face " << f;
             }
         }
         // Boundary tetrahedra taper away from the face, so some image points leave them

@@ -64,7 +64,7 @@ TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
     Solver first;
     first.init(parse_toml(restart_input(dir + "/b", BLAST, 20)));
     first.run();
-    const double t_stop_first = first.get_time();
+    const double t_stop_first = double(first.get_time());
     Solver second;
     second.init(parse_toml(restart_input(dir + "/b", "type = \"restart\"\nfile = \"" + dir + "/b/restart_000020.restart\"\n", 40)));
     EXPECT_EQ(second.get_step(), 20u);

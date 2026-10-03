@@ -60,7 +60,7 @@ TEST(IOTest, BoundaryZoneOutputCarriesAdjacentCellValues) {
         double p;
         values >> p;
         const int32_t c = solver.get_mesh()->h_cells_of_face(zone->h_faces(i), 0);
-        EXPECT_DOUBLE_EQ(p, solver.h_primitives(c, 2));
+        EXPECT_RTYPE_EQ(p, solver.h_primitives(c, 2));
     }
 
     // U is a 3-component vector, zero-padded in 2D
@@ -72,8 +72,8 @@ TEST(IOTest, BoundaryZoneOutputCarriesAdjacentCellValues) {
         double u[3];
         u_values >> u[0] >> u[1] >> u[2];
         const int32_t c = solver.get_mesh()->h_cells_of_face(zone->h_faces(i), 0);
-        EXPECT_DOUBLE_EQ(u[0], solver.h_primitives(c, 0));
-        EXPECT_DOUBLE_EQ(u[1], solver.h_primitives(c, 1));
+        EXPECT_RTYPE_EQ(u[0], solver.h_primitives(c, 0));
+        EXPECT_RTYPE_EQ(u[1], solver.h_primitives(c, 1));
         EXPECT_EQ(u[2], 0.0);
     }
     std::filesystem::remove_all(dir);
@@ -95,9 +95,9 @@ TEST(IOTest, IntegerValuedRealInputsAreAccepted) {
     solver.init(parse_toml(input));
     rtype x_max = 0.0;
     for (uint32_t i = 0; i < solver.get_mesh()->n_nodes; i++) x_max = std::max(x_max, solver.get_mesh()->h_node_coords(i, 0));
-    EXPECT_DOUBLE_EQ(x_max, 2.0);
+    EXPECT_RTYPE_EQ(x_max, 2.0);
     solver.copy_device_to_host();
-    EXPECT_DOUBLE_EQ(solver.h_conservatives(0, 1), 1.0);
+    EXPECT_RTYPE_EQ(solver.h_conservatives(0, 1), 1.0);
     EXPECT_THROW(Solver().init(parse_toml(input + "[source]\ngravity = [\"down\", 0]\n")), std::runtime_error);
 }
 
@@ -120,7 +120,7 @@ TEST(IOTest, FixedTimeStepIsOnlyShortenedToLandOnOutputs) {
     Solver solver;
     solver.init(parse_toml(input));
     solver.run();
-    EXPECT_NEAR(solver.get_time(), 0.075, 1e-12);
+    EXPECT_NEAR(solver.get_time(), 0.075, roundoff(1e-12));
     std::filesystem::remove_all(dir);
 }
 

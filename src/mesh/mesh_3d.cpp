@@ -96,7 +96,7 @@ void Mesh::h_cell_tetrahedra(uint32_t i_cell, std::vector<std::array<std::array<
     std::vector<Vec3> p(h_n_nodes_of_cell(i_cell));
     for (size_t k = 0; k < p.size(); k++) {
         const uint32_t node = h_node_of_cell(i_cell, k);
-        for (int i = 0; i < 3; i++) p[k][i] = (i < N_DIM) ? h_node_coords(node, i) : 0.0;
+        for (int i = 0; i < 3; i++) p[k][i] = (i < N_DIM) ? double(h_node_coords(node, i)) : 0.0;
     }
     cell_tetrahedra(p, tets);
 }
@@ -113,7 +113,7 @@ void Mesh::compute_geometry() {
     }
     auto coords = [&](uint32_t node) {
         Vec3 p = {0.0, 0.0, 0.0};
-        FOR_I_DIM p[i] = h_node_coords(node, i);
+        FOR_I_DIM p[i] = double(h_node_coords(node, i));
         return p;
     };
     // Faces: area vector and centroid from a triangle fan around the vertex
@@ -174,7 +174,7 @@ void Mesh::orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes,
         p.clear();
         for (uint32_t node : c) {
             Vec3 x = {0.0, 0.0, 0.0};
-            FOR_I_DIM x[i] = nodes[node][i];
+            FOR_I_DIM x[i] = double(nodes[node][i]);
             p.push_back(x);
         }
         if (signed_volume(p) < 0.0) {

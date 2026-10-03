@@ -16,6 +16,8 @@
 #include <array>
 #include <vector>
 
+#include <Kokkos_Macros.hpp>
+
 #ifndef Mallard_DIM
 #define Mallard_DIM 2
 #endif
@@ -36,6 +38,25 @@
 #else
     using rtype = float;
 #endif
+
+/** @brief rtype literal, e.g. 0.5_r, so constants do not promote float expressions to double. */
+KOKKOS_INLINE_FUNCTION constexpr rtype operator""_r(long double x) { return static_cast<rtype>(x); }
+KOKKOS_INLINE_FUNCTION constexpr rtype operator""_r(unsigned long long x) { return static_cast<rtype>(x); }
+
+/**
+ * @brief A tolerance that depends on rtype's precision: double_tol in double
+ *        builds, single_tol in single. For tolerances against round-off in
+ *        rtype data whose double value is below single-precision resolution;
+ *        T is the type of the computation, which may be double in both.
+ */
+template <typename T = rtype>
+KOKKOS_INLINE_FUNCTION constexpr T precision_tol([[maybe_unused]] double double_tol, [[maybe_unused]] double single_tol) {
+#ifdef Mallard_USE_DOUBLE
+    return static_cast<T>(double_tol);
+#else
+    return static_cast<T>(single_tol);
+#endif
+}
 
 using NVector = std::array<rtype, N_DIM>;
 using NMatrix = std::array<std::array<rtype, N_DIM>, N_DIM>;

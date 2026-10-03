@@ -75,7 +75,7 @@ void expect_exact_gradient(const Mesh & mesh, Kokkos::View<rtype *[N_CONSERVATIV
         if (interior_only && is_boundary_cell(mesh, c)) continue;
         FOR_I_CONSERVATIVE {
             for (int d = 0; d < 3; d++) {
-                ASSERT_NEAR(h_grad(c, i, d), G[i][d], 1e-10) << "cell " << c << " var " << static_cast<int>(i) << " dir " << d;
+                ASSERT_NEAR(h_grad(c, i, d), G[i][d], roundoff(1e-10)) << "cell " << c << " var " << static_cast<int>(i) << " dir " << d;
             }
         }
     }
@@ -127,7 +127,7 @@ TEST_P(MeshTypes3D, UnlimitedMUSCLReproducesLinearFieldAtInteriorFaces) {
             const int32_t c = mesh->h_cells_of_face(f, side);
             if (c < 0 || is_boundary_cell(*mesh, c)) continue;
             FOR_I_CONSERVATIVE {
-                ASSERT_NEAR(h_face_W(f, 0, side, i), linear_at(i, mesh->h_face_coords, f), 1e-10)
+                ASSERT_NEAR(h_face_W(f, 0, side, i), linear_at(i, mesh->h_face_coords, f), roundoff(1e-10))
                     << "face " << f << " side " << static_cast<int>(side);
             }
         }
@@ -148,7 +148,7 @@ TEST(ViscousTraction3DTest, RigidRotationAndIsotropicExpansionAreStressFree) {
     viscous_traction(mu, rotation, n, tau_n);
     for (int d = 0; d < 3; d++) EXPECT_NEAR(tau_n[d], 0.0, 1e-15);
     viscous_traction(mu, dilation, n, tau_n);
-    for (int d = 0; d < 3; d++) EXPECT_NEAR(tau_n[d], 0.0, 1e-15);
+    for (int d = 0; d < 3; d++) EXPECT_NEAR(tau_n[d], 0.0, roundoff(1e-15));
 }
 
 TEST(ViscousTraction3DTest, SimpleShearGivesTangentialTraction) {

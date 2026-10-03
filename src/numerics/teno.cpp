@@ -29,6 +29,9 @@
 
 namespace {
 
+// Relative tolerance for geometric tests on the mesh, whose coordinates are rtype
+constexpr double GEOMETRY_TOL = precision_tol<double>(1e-10, 1e-5);
+
 /**
  * @brief Gauss-Legendre nodes and weights on [-1, 1] (Newton iteration).
  */
@@ -116,7 +119,7 @@ bool pseudo_inverse(std::vector<double> A, int m, int n, std::vector<double> & P
         // all lie on axis planes) would pass the rank test once equilibrated
         const double largest = *std::max_element(col_scale.begin(), col_scale.end());
         for (int j = 0; j < n; j++) {
-            if (col_scale[j] < 1e-10 * largest) return false;
+            if (col_scale[j] < GEOMETRY_TOL * largest) return false;
         }
     }
     for (int j = 0; j < n; j++) {
@@ -260,8 +263,8 @@ logging::Items TENO::summary() const {
         {"Reconstruction", format("TENO, order %d (degree %d), %d face quadrature points", degree + 1, degree,
                                   static_cast<int>(n_face_quadrature_points()))},
         {"TENO stencils", stencils},
-        {"TENO switch", "threshold " + logging::real(sigma_threshold) + ", C_T " +
-                            (C_T > 0.0 ? logging::real(C_T) : std::string("adaptive")) + ", characteristic " +
+        {"TENO switch", "threshold " + logging::real(double(sigma_threshold)) + ", C_T " +
+                            (C_T > 0.0_r ? logging::real(double(C_T)) : std::string("adaptive")) + ", characteristic " +
                             (characteristic ? "yes" : "no") + ", bound-preserving " +
                             (bound_preserving ? "yes" : "no")},
     };
@@ -338,9 +341,9 @@ void TENO::compute_stencils_and_matrices() {
             for (uint32_t k = 0; k < teno::MAX_FACES; k++) h_stencil_small_size(i, k) = 0;
             return;
         }
-        const double x0 = mesh->h_cell_coords(i, 0);
-        const double y0 = mesh->h_cell_coords(i, 1);
-        const double h = std::sqrt(mesh->h_cell_volume(i));
+        const double x0 = double(mesh->h_cell_coords(i, 0));
+        const double y0 = double(mesh->h_cell_coords(i, 1));
+        const double h = std::sqrt(double(mesh->h_cell_volume(i)));
         h_scale(i) = h;
 
         // Stencil entries are interior cells, or mirror images of interior cells
@@ -362,8 +365,8 @@ void TENO::compute_stencils_and_matrices() {
                 qy = py;
                 return;
             }
-            const double nx = mesh->h_face_normals(face, 0) / mesh->h_face_area(face);
-            const double ny = mesh->h_face_normals(face, 1) / mesh->h_face_area(face);
+            const double nx = double(mesh->h_face_normals(face, 0)) / double(mesh->h_face_area(face));
+            const double ny = double(mesh->h_face_normals(face, 1)) / double(mesh->h_face_area(face));
             const double d = (px - mx) * nx + (py - my) * ny;
             qx = px - 2.0 * d * nx;
             qy = py - 2.0 * d * ny;
@@ -376,7 +379,7 @@ void TENO::compute_stencils_and_matrices() {
             for (uint32_t k = 0; k < n_nodes; k++) {
                 const uint32_t node = mesh->h_node_of_cell(e.cell, k);
                 double qx, qy;
-                mirror(e.face, e.mx, e.my, mesh->h_node_coords(node, 0) + e.tx, mesh->h_node_coords(node, 1) + e.ty,
+                mirror(e.face, e.mx, e.my, double(mesh->h_node_coords(node, 0)) + e.tx, double(mesh->h_node_coords(node, 1)) + e.ty,
                        qx, qy);
                 px[k] = (qx - x0) / h;
                 py[k] = (qy - y0) / h;
@@ -384,7 +387,7 @@ void TENO::compute_stencils_and_matrices() {
             const uint8_t n = teno::n_dof(deg);
             means.assign(n, 0.0);
             double area = 0.0;
-            rtype phi[teno::MAX_NK];
+            double phi[teno::MAX_NK];
             integrate_polygon(px, py, rule, [&](double x, double y, double w) {
                 teno::monomials(deg, x, y, phi);
                 for (uint8_t l = 0; l < n; l++) means[l] += w * phi[l];
@@ -406,9 +409,9 @@ void TENO::compute_stencils_and_matrices() {
             int sign = 0;
             for (uint32_t k = 0; k < n; k++) {
                 const uint32_t a = mesh->h_node_of_cell(c, k), b = mesh->h_node_of_cell(c, (k + 1) % n);
-                const double cross = (mesh->h_node_coords(b, 0) - mesh->h_node_coords(a, 0)) * (py - mesh->h_node_coords(a, 1)) -
-                                     (mesh->h_node_coords(b, 1) - mesh->h_node_coords(a, 1)) * (px - mesh->h_node_coords(a, 0));
-                const double tol = 1e-12 * h * h;
+                const double cross = (double(mesh->h_node_coords(b, 0)) - double(mesh->h_node_coords(a, 0))) * (py - double(mesh->h_node_coords(a, 1))) -
+                                     (double(mesh->h_node_coords(b, 1)) - double(mesh->h_node_coords(a, 1))) * (px - double(mesh->h_node_coords(a, 0)));
+                const double tol = precision_tol<double>(1e-12, 1e-5) * h * h;
                 const int s = (cross > tol) - (cross < -tol);
                 if (s == 0) return false;  // On an edge: treat as outside (mirror of a boundary cell)
                 if (sign == 0) sign = s;
@@ -457,14 +460,14 @@ void TENO::compute_stencils_and_matrices() {
                         const uint32_t f = mesh->h_face_of_cell(c, k);
                         if (mesh->h_cells_of_face(f, 1) >= 0 || h_face_bc(f) < 0) continue;
                         if (h_bcs(h_face_bc(f)).type == BoundaryType::PARTITION) continue;
-                        const double nx = mesh->h_face_normals(f, 0) / mesh->h_face_area(f);
-                        const double ny = mesh->h_face_normals(f, 1) / mesh->h_face_area(f);
-                        const LineFace lf{static_cast<int32_t>(f), mesh->h_face_coords(f, 0) + v.t[0], mesh->h_face_coords(f, 1) + v.t[1]};
+                        const double nx = double(mesh->h_face_normals(f, 0)) / double(mesh->h_face_area(f));
+                        const double ny = double(mesh->h_face_normals(f, 1)) / double(mesh->h_face_area(f));
+                        const LineFace lf{static_cast<int32_t>(f), double(mesh->h_face_coords(f, 0)) + v.t[0], double(mesh->h_face_coords(f, 1)) + v.t[1]};
                         Line * match = nullptr;
                         for (Line & line : lines) {
                             const LineFace & g = line.faces[0];
                             const double off = (lf.x - g.x) * line.nx + (lf.y - g.y) * line.ny;
-                            if (std::abs(nx * line.nx + ny * line.ny - 1.0) < 1e-10 && std::abs(off) < 1e-10 * h) {
+                            if (std::abs(nx * line.nx + ny * line.ny - 1.0) < GEOMETRY_TOL && std::abs(off) < GEOMETRY_TOL * h) {
                                 match = &line;
                                 break;
                             }
@@ -482,7 +485,7 @@ void TENO::compute_stencils_and_matrices() {
                 entries.clear();
                 for (const Visit & v : cells) {
                     const uint32_t c = v.cell;
-                    const double cx = mesh->h_cell_coords(c, 0) + v.t[0], cy = mesh->h_cell_coords(c, 1) + v.t[1];
+                    const double cx = double(mesh->h_cell_coords(c, 0)) + v.t[0], cy = double(mesh->h_cell_coords(c, 1)) + v.t[1];
                     if (!(c == i && v.lattice == Lattice{0, 0, 0})) {
                         entries.push_back(Entry{c, -1, cx, cy, v.t[0], v.t[1], 0.0, 0.0});
                     }
@@ -533,7 +536,7 @@ void TENO::compute_stencils_and_matrices() {
                 monomial_means(stencil[s], deg, means);
                 for (uint8_t l = 0; l < n; l++) A[s * n + l] = means[l] - mean0[l];
             }
-            return pseudo_inverse(A, m, n, P, max_condition);
+            return pseudo_inverse(A, m, n, P, double(max_condition));
         };
 
         // Large central stencil, grown until the least-squares system has full rank
@@ -546,7 +549,7 @@ void TENO::compute_stencils_and_matrices() {
         // mirror-symmetric reconstructions
         auto dist2 = [&](const Entry & e) { return (e.x - x0) * (e.x - x0) + (e.y - y0) * (e.y - y0); };
         auto splits_tie = [&](const std::vector<Entry> & list, size_t n) {
-            return n < list.size() && std::abs(dist2(list[n]) - dist2(list[n - 1])) < 1e-10 * h * h;
+            return n < list.size() && std::abs(dist2(list[n]) - dist2(list[n - 1])) < GEOMETRY_TOL * h * h;
         };
         uint16_t n_used = ns;
         for (; n_used <= std::min<size_t>(ns_max, candidates.size()); n_used++) {
@@ -584,9 +587,9 @@ void TENO::compute_stencils_and_matrices() {
             const uint32_t na = mesh->h_node_of_face(f, 0);
             const uint32_t nb = mesh->h_node_of_face(f, 1);
             // The face's nodes are its cell 0's
-            const double sx = mesh->h_face_offset(f, i, 0), sy = mesh->h_face_offset(f, i, 1);
-            const double ax = (mesh->h_node_coords(na, 0) - sx) - x0, ay = (mesh->h_node_coords(na, 1) - sy) - y0;
-            const double bx = (mesh->h_node_coords(nb, 0) - sx) - x0, by = (mesh->h_node_coords(nb, 1) - sy) - y0;
+            const double sx = double(mesh->h_face_offset(f, i, 0)), sy = double(mesh->h_face_offset(f, i, 1));
+            const double ax = (double(mesh->h_node_coords(na, 0)) - sx) - x0, ay = (double(mesh->h_node_coords(na, 1)) - sy) - y0;
+            const double bx = (double(mesh->h_node_coords(nb, 0)) - sx) - x0, by = (double(mesh->h_node_coords(nb, 1)) - sy) - y0;
             const double det = ax * by - ay * bx;
             std::vector<Entry> sector;
             for (const Entry & e : wide) {
@@ -594,7 +597,7 @@ void TENO::compute_stencils_and_matrices() {
                 const double dy = e.y - y0;
                 const double alpha = (dx * by - dy * bx) / det;
                 const double beta = (ax * dy - ay * dx) / det;
-                if (alpha >= -1e-10 && beta >= -1e-10) sector.push_back(e);
+                if (alpha >= -GEOMETRY_TOL && beta >= -GEOMETRY_TOL) sector.push_back(e);
             }
             size_t n_sector = nss;
             while (n_sector < nss_max && splits_tie(sector, n_sector)) n_sector++;
@@ -621,8 +624,8 @@ void TENO::compute_stencils_and_matrices() {
             std::vector<double> px(n_nodes), py(n_nodes);
             for (uint32_t k = 0; k < n_nodes; k++) {
                 const uint32_t node = mesh->h_node_of_cell(i, k);
-                px[k] = (mesh->h_node_coords(node, 0) - x0) / h;
-                py[k] = (mesh->h_node_coords(node, 1) - y0) / h;
+                px[k] = (double(mesh->h_node_coords(node, 0)) - x0) / h;
+                py[k] = (double(mesh->h_node_coords(node, 1)) - y0) / h;
             }
             std::vector<double> M(nk * nk, 0.0);
             std::vector<double> d(nk);
@@ -805,12 +808,12 @@ void TENO::compute_stencils_and_matrices_3d() {
 
     auto node = [&](uint32_t n) {
         Point3 p;
-        for (int d = 0; d < 3; d++) p[d] = mesh->h_node_coords(n, d);
+        for (int d = 0; d < 3; d++) p[d] = double(mesh->h_node_coords(n, d));
         return p;
     };
     auto unit_normal = [&](uint32_t f) {
         Point3 n;
-        for (int d = 0; d < 3; d++) n[d] = mesh->h_face_normals(f, d) / mesh->h_face_area(f);
+        for (int d = 0; d < 3; d++) n[d] = double(mesh->h_face_normals(f, d)) / double(mesh->h_face_area(f));
         return n;
     };
 
@@ -823,8 +826,8 @@ void TENO::compute_stencils_and_matrices_3d() {
     Kokkos::parallel_for("teno_moments", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n_cells),
                          [&](const uint32_t c) {
         Point3 xc;
-        for (int d = 0; d < 3; d++) xc[d] = mesh->h_cell_coords(c, d);
-        const double hc = std::cbrt(mesh->h_cell_volume(c));
+        for (int d = 0; d < 3; d++) xc[d] = double(mesh->h_cell_coords(c, d));
+        const double hc = std::cbrt(double(mesh->h_cell_volume(c)));
         std::vector<Point3> p(mesh->h_n_nodes_of_cell(c));
         for (size_t k = 0; k < p.size(); k++) {
             const Point3 q = node(mesh->h_node_of_cell(c, k));
@@ -866,8 +869,8 @@ void TENO::compute_stencils_and_matrices_3d() {
             return;
         }
         Point3 x0;
-        for (int d = 0; d < 3; d++) x0[d] = mesh->h_cell_coords(i, d);
-        const double h = std::cbrt(mesh->h_cell_volume(i));
+        for (int d = 0; d < 3; d++) x0[d] = double(mesh->h_cell_coords(i, d));
+        const double h = std::cbrt(double(mesh->h_cell_volume(i)));
         h_scale(i) = h;
 
         // Stencil entries: interior cells, or mirror images of interior cells
@@ -909,13 +912,13 @@ void TENO::compute_stencils_and_matrices_3d() {
             means.assign(n, 0.0);
             if (e.face < 0) {
                 // ((x - x0) / h)^a = (d + s xi)^a with d = (x_c - x0) / h, s = h_c / h
-                const double s = std::cbrt(mesh->h_cell_volume(e.cell)) / h;
+                const double s = std::cbrt(double(mesh->h_cell_volume(e.cell))) / h;
                 double dpow[3][12], spow[12];
                 spow[0] = 1.0;
                 for (int k = 1; k < nm; k++) spow[k] = spow[k - 1] * s;
                 for (int d = 0; d < 3; d++) {
                     dpow[d][0] = 1.0;
-                    const double dd = ((mesh->h_cell_coords(e.cell, d) + e.t[d]) - x0[d]) / h;
+                    const double dd = ((double(mesh->h_cell_coords(e.cell, d)) + e.t[d]) - x0[d]) / h;
                     for (int k = 1; k < nm; k++) dpow[d][k] = dpow[d][k - 1] * dd;
                 }
                 const double * m = &moments[static_cast<size_t>(e.cell) * nm * nm * nm];
@@ -937,7 +940,7 @@ void TENO::compute_stencils_and_matrices_3d() {
                 return;
             }
             double vol = 0.0;
-            rtype phi[teno::MAX_NK];
+            double phi[teno::MAX_NK];
             integrate_cell(scaled_nodes(e), rule, [&](const Point3 & p, double w) {
                 teno::monomials(deg, p[0], p[1], p[2], phi);
                 for (uint8_t l = 0; l < n; l++) means[l] += w * phi[l];
@@ -961,10 +964,10 @@ void TENO::compute_stencils_and_matrices_3d() {
                 const double sign = (mesh->h_cells_of_face(f, 0) == static_cast<int32_t>(c)) ? 1.0 : -1.0;
                 double d = 0.0;
                 for (int q = 0; q < 3; q++) {
-                    d += ((p[q] - v.t[q]) - (mesh->h_face_coords(f, q) - mesh->h_face_offset(f, c, q))) * sign *
-                         mesh->h_face_normals(f, q);
+                    d += ((p[q] - v.t[q]) - (double(mesh->h_face_coords(f, q)) - double(mesh->h_face_offset(f, c, q)))) * sign *
+                         double(mesh->h_face_normals(f, q));
                 }
-                if (d > -1e-12 * h * mesh->h_face_area(f)) return false;
+                if (d > -precision_tol<double>(1e-12, 1e-5) * h * double(mesh->h_face_area(f))) return false;
             }
             return true;
         };
@@ -1017,7 +1020,7 @@ void TENO::compute_stencils_and_matrices_3d() {
                         if (h_bcs(h_face_bc(f)).type == BoundaryType::PARTITION) continue;
                         const Point3 n = unit_normal(f);
                         PlaneFace pf{static_cast<int32_t>(f), v.lattice, {}};
-                        for (int d = 0; d < 3; d++) pf.x[d] = mesh->h_face_coords(f, d) + v.t[d];
+                        for (int d = 0; d < 3; d++) pf.x[d] = double(mesh->h_face_coords(f, d)) + v.t[d];
                         Plane * match = nullptr;
                         for (Plane & plane : planes) {
                             const PlaneFace & g = plane.faces[0];
@@ -1026,7 +1029,7 @@ void TENO::compute_stencils_and_matrices_3d() {
                                 off += (pf.x[d] - g.x[d]) * plane.n[d];
                                 cos += n[d] * plane.n[d];
                             }
-                            if (std::abs(cos - 1.0) < 1e-10 && std::abs(off) < 1e-10 * h) {
+                            if (std::abs(cos - 1.0) < GEOMETRY_TOL && std::abs(off) < GEOMETRY_TOL * h) {
                                 match = &plane;
                                 break;
                             }
@@ -1045,7 +1048,7 @@ void TENO::compute_stencils_and_matrices_3d() {
                 for (const Visit & v : cells) {
                     const uint32_t c = v.cell;
                     Point3 xc;
-                    for (int d = 0; d < 3; d++) xc[d] = mesh->h_cell_coords(c, d) + v.t[d];
+                    for (int d = 0; d < 3; d++) xc[d] = double(mesh->h_cell_coords(c, d)) + v.t[d];
                     if (!(c == i && v.lattice == zero)) entries.push_back(Entry{c, -1, xc, v.lattice, v.t, zero, origin});
                     for (const Plane & plane : planes) {
                         const PlaneFace & first = plane.faces[0];
@@ -1095,10 +1098,10 @@ void TENO::compute_stencils_and_matrices_3d() {
                 }
                 for (uint8_t l = 0; l < n; l++) A[s * n + l] = it->second[l] - mean0[l];
             }
-            return pseudo_inverse(A, m, n, P, max_condition);
+            return pseudo_inverse(A, m, n, P, double(max_condition));
         };
         auto splits_tie = [&](const std::vector<Entry> & list, size_t n) {
-            return n < list.size() && std::abs(dist2(list[n]) - dist2(list[n - 1])) < 1e-10 * h * h;
+            return n < list.size() && std::abs(dist2(list[n]) - dist2(list[n - 1])) < GEOMETRY_TOL * h * h;
         };
 
         // Large central stencil, grown until the least-squares system has full rank
@@ -1143,7 +1146,7 @@ void TENO::compute_stencils_and_matrices_3d() {
             std::vector<Point3> v(mesh->h_n_nodes_of_face(f));
             for (size_t a = 0; a < v.size(); a++) {
                 const Point3 p = node(mesh->h_node_of_face(f, a));
-                for (int d = 0; d < 3; d++) v[a][d] = (p[d] - mesh->h_face_offset(f, i, d)) - x0[d];
+                for (int d = 0; d < 3; d++) v[a][d] = (p[d] - double(mesh->h_face_offset(f, i, d))) - x0[d];
             }
             std::vector<Entry> sector;
             for (const Entry & e : wide) {
@@ -1155,7 +1158,7 @@ void TENO::compute_stencils_and_matrices_3d() {
                     const double alpha = det3(dx, v[a], v[a + 1]) / det;
                     const double beta = det3(v[0], dx, v[a + 1]) / det;
                     const double gamma = det3(v[0], v[a], dx) / det;
-                    in = alpha >= -1e-10 && beta >= -1e-10 && gamma >= -1e-10;
+                    in = alpha >= -GEOMETRY_TOL && beta >= -GEOMETRY_TOL && gamma >= -GEOMETRY_TOL;
                 }
                 if (in) sector.push_back(e);
             }
@@ -1341,7 +1344,7 @@ struct TENOFunctor {
             FOR_I_CONSERVATIVE W_c[i] = W_e[i];
             rtype d = 0.0;
             FOR_I_DIM d += (face_coords(f, i) - cell_coords(c, i)) * n[i];
-            boundaries.ghost_W_at(f, W_c, n, 2.0 * Kokkos::fabs(d), W_e);
+            boundaries.ghost_W_at(f, W_c, n, 2.0_r * Kokkos::fabs(d), W_e);
             const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(f));
             if (bc.type == BoundaryType::FARFIELD) {
                 // The characteristic state holds at the face; outside lies the free stream
@@ -1356,7 +1359,7 @@ struct TENOFunctor {
         entry_W(c, f, W_e);
         U[0] = W_e[0];
         FOR_I_DIM U[1 + i] = W_e[0] * W_e[1 + i];
-        U[N_DIM + 1] = W_e[N_DIM + 1] / (gamma - 1.0) + 0.5 * W_e[0] * dot<N_DIM>(W_e + 1, W_e + 1);
+        U[N_DIM + 1] = W_e[N_DIM + 1] / (gamma - 1.0_r) + 0.5_r * W_e[0] * dot<N_DIM>(W_e + 1, W_e + 1);
     }
 
     KOKKOS_INLINE_FUNCTION
@@ -1365,14 +1368,14 @@ struct TENOFunctor {
         FOR_I_CONSERVATIVE W_c[i] = W(c, i);
         U[0] = W_c[0];
         FOR_I_DIM U[1 + i] = W_c[0] * W_c[1 + i];
-        U[N_DIM + 1] = W_c[N_DIM + 1] / (gamma - 1.0) + 0.5 * W_c[0] * dot<N_DIM>(W_c + 1, W_c + 1);
+        U[N_DIM + 1] = W_c[N_DIM + 1] / (gamma - 1.0_r) + 0.5_r * W_c[0] * dot<N_DIM>(W_c + 1, W_c + 1);
     }
 
     KOKKOS_INLINE_FUNCTION
     void to_primitives(const rtype * U, rtype * Wq) const {
         Wq[0] = U[0];
         FOR_I_DIM Wq[1 + i] = U[1 + i] / U[0];
-        Wq[N_DIM + 1] = (gamma - 1.0) * (U[N_DIM + 1] - 0.5 * U[0] * dot<N_DIM>(Wq + 1, Wq + 1));
+        Wq[N_DIM + 1] = (gamma - 1.0_r) * (U[N_DIM + 1] - 0.5_r * U[0] * dot<N_DIM>(Wq + 1, Wq + 1));
     }
 
     KOKKOS_INLINE_FUNCTION
@@ -1397,12 +1400,12 @@ struct TENOFunctor {
             const rtype xc = cell_coords(i_cell, 0), yc = cell_coords(i_cell, 1);
             const uint32_t node_0 = nodes_of_face(offsets_nodes_of_face(f));
             const uint32_t node_1 = nodes_of_face(offsets_nodes_of_face(f) + 1);
-            const rtype s_q = 0.5 * quad_points(q, 0);
+            const rtype s_q = 0.5_r * quad_points(q, 0);
             const rtype x = face_coords(f, 0) + s_q * (node_coords(node_1, 0) - node_coords(node_0, 0));
             const rtype y = face_coords(f, 1) + s_q * (node_coords(node_1, 1) - node_coords(node_0, 1));
             teno::monomials(DEG, ((x - shifts(s, 0)) - xc) / h, ((y - shifts(s, 1)) - yc) / h, psi);
         } else {
-            if (face_quad_weights(f, q) == 0.0) return false;
+            if (face_quad_weights(f, q) == 0.0_r) return false;
             rtype xi[N_DIM];
             FOR_I_DIM xi[i] = ((face_quad_points(f, q, i) - shifts(s, i)) - cell_coords(i_cell, i)) / h;
             teno::monomials(DEG, xi, psi);
@@ -1421,7 +1424,7 @@ struct TENOFunctor {
         rtype U0[N_CONSERVATIVE];
         conservatives(i_cell, U0);
         rtype dU[N_CONSERVATIVE][N_DIM] = {};
-        const rtype inv_h = 1.0 / scale(i_cell);
+        const rtype inv_h = 1.0_r / scale(i_cell);
         for (uint16_t s = 0; s < stencil_large_size(i_cell); s++) {
             rtype U[N_CONSERVATIVE];
             entry_conservatives(stencil_large(i_cell, s), stencil_large_face(i_cell, s), U);
@@ -1435,13 +1438,13 @@ struct TENOFunctor {
         FOR_I_DIM u[i] = W(i_cell, 1 + i);
         FOR_I_DIM {
             gradients(i_cell, 0, i) = dU[0][i];
-            rtype work = dU[N_DIM + 1][i] - 0.5 * dot<N_DIM>(u, u) * dU[0][i];
+            rtype work = dU[N_DIM + 1][i] - 0.5_r * dot<N_DIM>(u, u) * dU[0][i];
             for (uint8_t k = 0; k < N_DIM; k++) {
                 const rtype du = (dU[1 + k][i] - u[k] * dU[0][i]) / rho;
                 gradients(i_cell, 1 + k, i) = du;
                 work -= rho * u[k] * du;
             }
-            gradients(i_cell, N_DIM + 1, i) = (gamma - 1.0) * work;
+            gradients(i_cell, N_DIM + 1, i) = (gamma - 1.0_r) * work;
         }
     }
 
@@ -1497,7 +1500,7 @@ struct TENOFunctor {
                 }
                 rtype Wq[N_CONSERVATIVE];
                 to_primitives(U_f, Wq);
-                admissible = admissible && (Wq[0] > 0.0) && (Wq[N_DIM + 1] > 0.0) && Kokkos::isfinite(Wq[N_DIM + 1]);
+                admissible = admissible && (Wq[0] > 0.0_r) && (Wq[N_DIM + 1] > 0.0_r) && Kokkos::isfinite(Wq[N_DIM + 1]);
                 FOR_I_CONSERVATIVE face_solution(f, q, side, i) = Wq[i];
             }
         }
@@ -1517,7 +1520,7 @@ struct TENOFunctor {
         if constexpr (N_DIM == 2) {
             return false;
         } else {
-            return face_quad_weights(f, q) == 0.0;
+            return face_quad_weights(f, q) == 0.0_r;
         }
     }
 
@@ -1537,7 +1540,7 @@ struct TENOFunctor {
             const int32_t c0 = cells_of_face(f, 0), c1 = cells_of_face(f, 1);
             const int32_t nb = (c0 == static_cast<int32_t>(i_cell)) ? c1 : c0;
             rtype W_avg[N_CONSERVATIVE];
-            FOR_I_CONSERVATIVE W_avg[i] = (nb >= 0) ? 0.5 * (W0[i] + W(nb, i)) : W0[i];
+            FOR_I_CONSERVATIVE W_avg[i] = (nb >= 0) ? 0.5_r * (W0[i] + W(nb, i)) : W0[i];
             rtype n[N_DIM], n_vec[N_DIM];
             FOR_I_DIM n_vec[i] = face_normals(f, i);
             unit<N_DIM>(n_vec, n);
@@ -1637,7 +1640,7 @@ struct TENOFunctor {
         // gamma_k = 1 / (SI_k + eps)^6, normalized by the largest one so that
         // the weights cannot overflow (even in single precision)
         const rtype sigma = sigma_out(i_cell);
-        const rtype cutoff = (C_T > 0.0) ? C_T : teno::adaptive_CT(sigma, sigma_threshold, sigma_upper);
+        const rtype cutoff = (C_T > 0.0_r) ? C_T : teno::adaptive_CT(sigma, sigma_threshold, sigma_upper);
         const rtype si_K = smoothness(cK, NK, i_cell) + eps;
         rtype si_small[teno::MAX_FACES] = {};
         rtype si_min = si_K;
@@ -1646,15 +1649,15 @@ struct TENOFunctor {
             si_small[s] = smoothness(cS[s], teno::NK_SMALL, i_cell) + eps;
             si_min = Kokkos::fmin(si_min, si_small[s]);
         }
-        const rtype gK = Kokkos::pow(si_min / si_K, 6.0);
+        const rtype gK = Kokkos::pow(si_min / si_K, 6.0_r);
         rtype g_small[teno::MAX_FACES] = {};
         rtype sum_small = 0.0;
         for (uint8_t s = 0; s < n_faces; s++) {
             if (!valid[s]) continue;
-            g_small[s] = Kokkos::pow(si_min / si_small[s], 6.0);
+            g_small[s] = Kokkos::pow(si_min / si_small[s], 6.0_r);
             sum_small += g_small[s];
         }
-        const bool use_large = (sum_small == 0.0) || (gK / (gK + sum_small) >= cutoff);
+        const bool use_large = (sum_small == 0.0_r) || (gK / (gK + sum_small) >= cutoff);
         rtype w_small[teno::MAX_FACES] = {};
         if (!use_large) {
             rtype n_kept = 0.0;
@@ -1676,7 +1679,7 @@ struct TENOFunctor {
                 for (uint8_t l = 0; l < NK; l++) v_char += cK[l] * psi[l];
             } else {
                 for (uint8_t s = 0; s < n_faces; s++) {
-                    if (!valid[s] || w_small[s] == 0.0) continue;
+                    if (!valid[s] || w_small[s] == 0.0_r) continue;
                     rtype p_s = 0.0;
                     for (uint8_t l = 0; l < teno::NK_SMALL; l++) p_s += cS[s][l] * psi[l];
                     v_char += w_small[s] * p_s;
@@ -1779,7 +1782,7 @@ struct TENOFunctor {
                 rtype U_f[N_CONSERVATIVE], Wq[N_CONSERVATIVE];
                 troubled_face_U(f, q, side, U0, U_f);
                 to_primitives(U_f, Wq);
-                admissible = admissible && (Wq[0] > 0.0) && (Wq[N_DIM + 1] > 0.0) && Kokkos::isfinite(Wq[N_DIM + 1]);
+                admissible = admissible && (Wq[0] > 0.0_r) && (Wq[N_DIM + 1] > 0.0_r) && Kokkos::isfinite(Wq[N_DIM + 1]);
             }
         }
 
@@ -1811,13 +1814,13 @@ struct TENOFunctor {
                     const rtype centers[2] = {W0[0], W0[P]};
                     for (uint8_t v = 0; v < 2; v++) {
                         const rtype d = vals[v] - centers[v];
-                        if (d > 0.0) theta = Kokkos::fmin(theta, (hi[v] - centers[v]) / d);
-                        if (d < 0.0) theta = Kokkos::fmin(theta, (lo[v] - centers[v]) / d);
+                        if (d > 0.0_r) theta = Kokkos::fmin(theta, (hi[v] - centers[v]) / d);
+                        if (d < 0.0_r) theta = Kokkos::fmin(theta, (lo[v] - centers[v]) / d);
                     }
                 }
             }
-            if (theta < 1.0) {
-                theta = Kokkos::fmax(0.0, theta);
+            if (theta < 1.0_r) {
+                theta = Kokkos::fmax(0.0_r, theta);
                 admissible = true;
                 for (uint8_t k = 0; k < n_faces; k++) {
                     const uint32_t f = faces_of_cell(f_begin + k);
@@ -1827,12 +1830,12 @@ struct TENOFunctor {
                         troubled_face_U(f, q, side, U0, U_face);
                         FOR_I_CONSERVATIVE U_f[i] = U0[i] + theta * (U_face[i] - U0[i]);
                         to_primitives(U_f, Wq);
-                        admissible = admissible && (Wq[0] > 0.0) && (Wq[P] > 0.0);
+                        admissible = admissible && (Wq[0] > 0.0_r) && (Wq[P] > 0.0_r);
                     }
                 }
             }
         }
-        const bool limited = theta < 1.0;
+        const bool limited = theta < 1.0_r;
 
         for (uint8_t k = 0; k < n_faces; k++) {
             const uint32_t f = faces_of_cell(f_begin + k);

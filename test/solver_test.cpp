@@ -84,10 +84,10 @@ TEST_P(FreeStream, UniformFlowIsPreservedExactly) {
     c.init = UNIFORM_INIT;
     auto solver = run_case(c);
     for (uint32_t i_cell = 0; i_cell < solver->get_mesh()->n_cells; i_cell++) {
-        EXPECT_NEAR(solver->h_conservatives(i_cell, 0), 1.3, 1e-12);
-        EXPECT_NEAR(solver->h_primitives(i_cell, 0), 0.4, 1e-12);
-        EXPECT_NEAR(solver->h_primitives(i_cell, 1), -0.25, 1e-12);
-        EXPECT_NEAR(solver->h_primitives(i_cell, 2), 0.9, 1e-12);
+        EXPECT_NEAR(solver->h_conservatives(i_cell, 0), 1.3, roundoff(1e-12));
+        EXPECT_NEAR(solver->h_primitives(i_cell, 0), 0.4, roundoff(1e-12));
+        EXPECT_NEAR(solver->h_primitives(i_cell, 1), -0.25, roundoff(1e-12));
+        EXPECT_NEAR(solver->h_primitives(i_cell, 2), 0.9, roundoff(1e-12));
     }
 }
 
@@ -118,8 +118,8 @@ TEST_P(MeshRecon, ClosedBoxConservesMassMomentumEnergy) {
     solver->run();
     const auto after = solver->integrate_conservatives();
     // Mass and energy are conserved exactly; momentum changes only through wall pressure
-    EXPECT_NEAR(after[0], before[0], 1e-12);
-    EXPECT_NEAR(after[3], before[3], 1e-12);
+    EXPECT_NEAR(after[0], before[0], roundoff(1e-12));
+    EXPECT_NEAR(after[3], before[3], roundoff(1e-12));
 }
 
 TEST_P(MeshRecon, RiemannProblemIsSymmetricAboutDiagonal) {
@@ -128,6 +128,7 @@ TEST_P(MeshRecon, RiemannProblemIsSymmetricAboutDiagonal) {
     CaseConfig c;
     std::tie(c.mesh, c.recon) = GetParam();
     if (c.mesh == "wedge") GTEST_SKIP() << "wedge is not symmetric";
+    if (c.recon == "TENO") SKIP_IN_SINGLE_PRECISION("round-off flips TENO stencil selections at the discontinuities");
     c.nx = 20;
     c.ny = 20;
     c.run = "t_stop = 0.2\ncfl = 0.5\n";
@@ -143,8 +144,8 @@ TEST_P(MeshRecon, RiemannProblemIsSymmetricAboutDiagonal) {
     for (uint32_t i = 0; i < mesh->n_cells; i++) {
         const rtype x = mesh->h_cell_coords(i, 0), y = mesh->h_cell_coords(i, 1);
         for (uint32_t j = 0; j < mesh->n_cells; j++) {
-            if (std::abs(mesh->h_cell_coords(j, 0) - y) < 1e-9 &&
-                std::abs(mesh->h_cell_coords(j, 1) - x) < 1e-9) {
+            if (std::abs(mesh->h_cell_coords(j, 0) - y) < precision_tol(1e-9, 1e-5) &&
+                std::abs(mesh->h_cell_coords(j, 1) - x) < precision_tol(1e-9, 1e-5)) {
                 n_matched++;
                 max_diff = std::max(max_diff, std::abs(solver->h_conservatives(i, 0) - solver->h_conservatives(j, 0)));
                 max_diff = std::max(max_diff, std::abs(solver->h_conservatives(i, 1) - solver->h_conservatives(j, 2)));
@@ -154,7 +155,7 @@ TEST_P(MeshRecon, RiemannProblemIsSymmetricAboutDiagonal) {
         }
     }
     EXPECT_EQ(n_matched, mesh->n_cells);
-    EXPECT_LT(max_diff, 1e-10);
+    EXPECT_LT(max_diff, precision_tol(1e-10, 2e-4));
 }
 
 INSTANTIATE_TEST_SUITE_P(Solver, MeshRecon,
@@ -187,17 +188,17 @@ double sod_error(const std::string & mesh, const std::string & recon, uint32_t n
     auto m = solver->get_mesh();
     double err = 0.0, vol = 0.0;
     for (uint32_t i = 0; i < m->n_cells; i++) {
-        const double xi = m->h_cell_coords(i, along_y ? 1 : 0);
+        const double xi = double(m->h_cell_coords(i, along_y ? 1 : 0));
         double rho, u, p;
-        exact.sample((xi - 0.5) / solver->get_time(), rho, u, p);
-        err += std::abs(solver->h_conservatives(i, 0) - rho) * m->h_cell_volume(i);
-        vol += m->h_cell_volume(i);
+        exact.sample((xi - 0.5) / double(solver->get_time()), rho, u, p);
+        err += std::abs(double(solver->h_conservatives(i, 0)) - rho) * double(m->h_cell_volume(i));
+        vol += double(m->h_cell_volume(i));
     }
     if (transverse_variation) {
         // Cross-stream velocity should vanish
         double max_v = 0.0;
         for (uint32_t i = 0; i < m->n_cells; i++) {
-            max_v = std::max(max_v, std::abs(solver->h_primitives(i, along_y ? 0 : 1)));
+            max_v = std::max(max_v, std::abs(double(solver->h_primitives(i, along_y ? 0 : 1))));
         }
         *transverse_variation = max_v;
     }
@@ -226,11 +227,11 @@ TEST_P(SodMesh, XAndYDirectionsGiveSameError) {
     double v_x = 0.0, v_y = 0.0;
     const double e_x = sod_error(GetParam(), "MUSCL", 60, false, &v_x);
     const double e_y = sod_error(GetParam(), "MUSCL", 60, true, &v_y);
-    EXPECT_NEAR(e_x, e_y, 1e-10);
-    EXPECT_NEAR(v_x, v_y, 1e-10);
+    EXPECT_NEAR(e_x, e_y, precision_tol<double>(1e-10, 1e-5));
+    EXPECT_NEAR(v_x, v_y, precision_tol<double>(1e-10, 1e-5));
     if (GetParam() == "cartesian") {
         // Quads aligned with the wave keep the problem exactly one-dimensional
-        EXPECT_LT(v_x, 1e-12);
+        EXPECT_LT(v_x, roundoff(1e-12));
     }
 }
 
@@ -286,7 +287,7 @@ double advection_error(const std::string & mesh, const std::string & recon, uint
     });
     double err = 0.0;
     for (uint32_t i = 0; i < m->n_cells; i++) {
-        err += std::abs(solver->h_conservatives(i, 0) - exact(i, 0)) * m->h_cell_volume(i);
+        err += std::abs(double(solver->h_conservatives(i, 0)) - double(exact(i, 0))) * double(m->h_cell_volume(i));
     }
     return err;
 }
@@ -294,6 +295,9 @@ double advection_error(const std::string & mesh, const std::string & recon, uint
 } // namespace
 
 TEST_P(SodMesh, TENOConvergesFasterThanMUSCLForSmoothFlow) {
+    if (GetParam() == "cartesian_tri") {
+        SKIP_IN_SINGLE_PRECISION("the TENO error on the 64-cell triangle mesh reaches its ~1e-5 single-precision floor");
+    }
     // Time integration (SSPRK3, dt ~ h) caps the observed order at 3
     const double m1 = advection_error(GetParam(), "MUSCL", 32), m2 = advection_error(GetParam(), "MUSCL", 64);
     const double t1 = advection_error(GetParam(), "TENO", 32), t2 = advection_error(GetParam(), "TENO", 64);
@@ -333,8 +337,8 @@ TEST_P(Recon, TransmissiveInflowOnTrianglesKeepsOneDimensionalShockSpeed) {
     for (uint32_t i = 0; i < m->n_cells; i++) {
         // Post-shock region in every row including the boundary rows, excluding
         // the start-up entropy error that stays at the initial interface x = 0.8
-        if (m->h_cell_coords(i, 0) > x_shock + 0.1 && m->h_cell_coords(i, 0) < 0.75) {
-            const double dev = std::abs(solver->h_conservatives(i, 0) - 0.5322580645);
+        if (double(m->h_cell_coords(i, 0)) > x_shock + 0.1 && double(m->h_cell_coords(i, 0)) < 0.75) {
+            const double dev = std::abs(double(solver->h_conservatives(i, 0)) - 0.5322580645);
             max_dev = std::max(max_dev, dev);
         }
     }
@@ -368,10 +372,10 @@ TEST(SolverValidation, ObliqueShockOverWedgeMatchesTheory) {
     double sum = 0.0;
     int n = 0;
     for (uint32_t i = 0; i < m->n_cells; i++) {
-        const double x = m->h_cell_coords(i, 0), y = m->h_cell_coords(i, 1);
+        const double x = double(m->h_cell_coords(i, 0)), y = double(m->h_cell_coords(i, 1));
         const double y_ramp = (x - 0.5) * tan8;
         if (x > 0.9 && x < 1.1 && y > y_ramp + 0.03 && y < y_ramp + 0.12) {
-            sum += solver.h_primitives(i, 2) / 101325.0;
+            sum += double(solver.h_primitives(i, 2)) / 101325.0;
             n++;
         }
     }
@@ -415,7 +419,7 @@ double carbuncle_growth(const std::string & riemann) {
     solver.copy_device_to_host();
     double v_max = 0.0;
     for (uint32_t i = 0; i < solver.get_mesh()->n_cells; i++) {
-        v_max = std::max(v_max, std::abs(solver.h_primitives(i, 1)));
+        v_max = std::max(v_max, std::abs(double(solver.h_primitives(i, 1))));
     }
     return v_max;
 }
@@ -423,6 +427,8 @@ double carbuncle_growth(const std::string & riemann) {
 } // namespace
 
 TEST(SolverValidation, RotatedHybridRiemannSolverIsCarbuncleFree) {
+    SKIP_IN_SINGLE_PRECISION("at Mach 6, p = (gamma - 1) (E - rho u^2 / 2) has relative round-off ~3e-6, "
+                             "which this shock amplifies to O(0.1) cross-flow for HLL and HLLC too");
     EXPECT_GT(carbuncle_growth("Roe"), 0.1);
     EXPECT_LT(carbuncle_growth("RHLL"), 1e-10);
 }
@@ -501,9 +507,9 @@ double vortex_energy_loss(double low_mach_cutoff) {
       << "\"\ninterval = 1000000\n";
     Solver solver;
     solver.init(parse_toml(s.str()));
-    const double e0 = solver.integrate_flow_statistics()[0];
+    const double e0 = double(solver.integrate_flow_statistics()[0]);
     solver.run();
-    return 1.0 - solver.integrate_flow_statistics()[0] / e0;
+    return 1.0 - double(solver.integrate_flow_statistics()[0]) / e0;
 }
 
 } // namespace

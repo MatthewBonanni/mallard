@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include "physics.h"
+#include "test_utils.h"
 
 TEST(Physics3DTest, ConservativesCarryAllThreeVelocityComponents) {
     Euler euler = Euler::from_reference(1.4, 1.0, 1.0, 1.0);
@@ -19,16 +20,16 @@ TEST(Physics3DTest, ConservativesCarryAllThreeVelocityComponents) {
     const rtype W[N_CONSERVATIVE] = {rho, u, v, w, p};
     rtype cons[N_CONSERVATIVE], prim[N_PRIMITIVE], W2[N_CONSERVATIVE];
     euler.compute_conservatives_from_W(cons, W);
-    EXPECT_DOUBLE_EQ(cons[3], rho * w);
-    EXPECT_DOUBLE_EQ(cons[4], p / 0.4 + 0.5 * rho * (u * u + v * v + w * w));
+    EXPECT_RTYPE_EQ(cons[3], rho * w);
+    EXPECT_RTYPE_EQ(cons[4], p / 0.4_r + 0.5_r * rho * (u * u + v * v + w * w));
 
     euler.compute_primitives_from_conservatives(prim, cons);
     const rtype T = p / (rho * euler.R);
-    EXPECT_NEAR(prim[2], w, 1e-14);
-    EXPECT_NEAR(prim[3], p, 1e-13);
-    EXPECT_NEAR(prim[4], T, 1e-13);
-    EXPECT_NEAR(prim[5], euler.cp * T, 1e-13);
+    EXPECT_NEAR(prim[2], w, roundoff(1e-14));
+    EXPECT_NEAR(prim[3], p, roundoff(1e-13));
+    EXPECT_NEAR(prim[4], T, roundoff(1e-13));
+    EXPECT_NEAR(prim[5], euler.cp * T, roundoff(1e-13));
 
     euler.compute_W_from_conservatives(W2, cons);
-    FOR_I_CONSERVATIVE EXPECT_NEAR(W2[i], W[i], 1e-13);
+    FOR_I_CONSERVATIVE EXPECT_NEAR(W2[i], W[i], roundoff(1e-13));
 }

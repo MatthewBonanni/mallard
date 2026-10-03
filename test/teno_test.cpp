@@ -35,7 +35,7 @@ void smooth_conservatives(double x, double y, double * U) {
     U[0] = rho;
     U[1] = rho * u;
     U[2] = rho * v;
-    U[3] = p / (GAMMA - 1.0) + 0.5 * rho * (u * u + v * v);
+    U[3] = p / (double(GAMMA) - 1.0) + 0.5 * rho * (u * u + v * v);
 }
 
 std::unique_ptr<TENO> make_teno(std::shared_ptr<Mesh> mesh, const BoundaryData & bd, int order,
@@ -77,15 +77,15 @@ double reconstruction_error(const std::string & mesh_type, uint32_t n, int order
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
         const uint32_t a = mesh->h_node_of_face(f, 0), b = mesh->h_node_of_face(f, 1);
         for (uint8_t q = 0; q < n_quad; q++) {
-            const double s = 0.5 * h_qp(q, 0);
-            const double x = mesh->h_face_coords(f, 0) + s * (mesh->h_node_coords(b, 0) - mesh->h_node_coords(a, 0));
-            const double y = mesh->h_face_coords(f, 1) + s * (mesh->h_node_coords(b, 1) - mesh->h_node_coords(a, 1));
+            const double s = 0.5 * double(h_qp(q, 0));
+            const double x = double(mesh->h_face_coords(f, 0)) + s * (double(mesh->h_node_coords(b, 0)) - double(mesh->h_node_coords(a, 0)));
+            const double y = double(mesh->h_face_coords(f, 1)) + s * (double(mesh->h_node_coords(b, 1)) - double(mesh->h_node_coords(a, 1)));
             if (x < margin || x > 1.0 - margin || y < margin || y > 1.0 - margin) continue;
             double U[N_CONSERVATIVE];
             smooth_conservatives(x, y, U);
             for (uint8_t side = 0; side < 2; side++) {
                 if (mesh->h_cells_of_face(f, side) < 0) continue;
-                err = std::max(err, std::abs(h_face_W(f, q, side, 0) - U[0]));
+                err = std::max(err, std::abs(double(h_face_W(f, q, side, 0)) - U[0]));
             }
         }
     }
@@ -107,6 +107,7 @@ TEST_P(TENOOrder, SmoothReconstructionConvergesAtDesignOrderInInterior) {
 TEST_P(TENOOrder, SmoothReconstructionConvergesAtDesignOrderWithMirroredBoundaries) {
     // Mirror ghost cells at symmetry walls keep boundary stencils centered
     const auto [mesh_type, order] = GetParam();
+    if (order == 5) SKIP_IN_SINGLE_PRECISION("the order-5 error on the 64-cell mesh is at round-off");
     const double e1 = reconstruction_error(mesh_type, 32, order);
     const double e2 = reconstruction_error(mesh_type, 64, order);
     EXPECT_GT(std::log2(e1 / e2), order - 0.4);
@@ -125,7 +126,7 @@ TEST(TENOTest, EigenvectorsAreInverse) {
         for (uint8_t j = 0; j < N_CONSERVATIVE; j++) {
             rtype s = 0.0;
             for (uint8_t k = 0; k < N_CONSERVATIVE; k++) s += L[i][k] * R[k][j];
-            EXPECT_NEAR(s, i == j ? 1.0 : 0.0, 1e-13);
+            EXPECT_NEAR(s, i == j ? 1.0 : 0.0, roundoff(1e-13));
         }
     }
 }
@@ -141,12 +142,12 @@ TEST(TENOTest, MonomialOrderingByTotalDegree) {
 }
 
 TEST(TENOTest, AdaptiveCutoffSpansDesignRange) {
-    EXPECT_DOUBLE_EQ(teno::adaptive_CT(1e-3, 1e-3, 1e-2), 1e-10);
-    EXPECT_DOUBLE_EQ(teno::adaptive_CT(5e-2, 1e-3, 1e-2), 1e-6);
+    EXPECT_RTYPE_EQ(teno::adaptive_CT(1e-3, 1e-3, 1e-2), 1e-10);
+    EXPECT_RTYPE_EQ(teno::adaptive_CT(5e-2, 1e-3, 1e-2), 1e-6);
     // Troubled cells at or beyond the upper bound get the largest cutoff, also
     // when the threshold is not below the upper bound
-    EXPECT_DOUBLE_EQ(teno::adaptive_CT(1e-2, 1e-2, 1e-2), 1e-6);
-    EXPECT_DOUBLE_EQ(teno::adaptive_CT(5e-2, 5e-2, 1e-2), 1e-6);
+    EXPECT_RTYPE_EQ(teno::adaptive_CT(1e-2, 1e-2, 1e-2), 1e-6);
+    EXPECT_RTYPE_EQ(teno::adaptive_CT(5e-2, 5e-2, 1e-2), 1e-6);
 }
 
 namespace {
@@ -164,7 +165,7 @@ double step_overshoot(const std::string & mesh_type, const std::string & extra) 
         U[0] = rho;
         U[1] = 0.0;
         U[2] = 0.0;
-        U[3] = p / (GAMMA - 1.0);
+        U[3] = p / (double(GAMMA) - 1.0);
     });
     Euler euler = Euler::from_reference(GAMMA, 1.0, 1.0, 1.0);
     Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
@@ -183,11 +184,11 @@ double step_overshoot(const std::string & mesh_type, const std::string & extra) 
     double overshoot = 0.0;
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
         // Away from the walls, where the mirrored step forms a corner
-        if (mesh->h_face_coords(f, 1) < 0.2 || mesh->h_face_coords(f, 1) > 0.8) continue;
+        if (double(mesh->h_face_coords(f, 1)) < 0.2 || double(mesh->h_face_coords(f, 1)) > 0.8) continue;
         for (uint8_t q = 0; q < teno->n_face_quadrature_points(); q++) {
             for (uint8_t side = 0; side < 2; side++) {
                 if (mesh->h_cells_of_face(f, side) < 0) continue;
-                const double rho = h_face_W(f, q, side, 0);
+                const double rho = double(h_face_W(f, q, side, 0));
                 overshoot = std::max({overshoot, rho - 1.0, 0.125 - rho});
             }
         }
@@ -215,7 +216,8 @@ TEST_P(TENOMesh, BoundPreservingScalingLimitsOvershoot) {
     const double linear = step_overshoot(GetParam(), "troubled_threshold = 1e9\n");
     const double teno = step_overshoot(GetParam(), "bound_preserving = true\n");
     EXPECT_LT(teno, 0.02);
-    EXPECT_LT(teno, 0.05 * linear);
+    // Single-precision node coordinates perturb the degree-4 least-squares fits, which raises it by ~30%
+    EXPECT_LT(teno, precision_tol<double>(0.05, 0.07) * linear);
 }
 
 INSTANTIATE_TEST_SUITE_P(TENO, TENOMesh, ::testing::Values("cartesian", "cartesian_tri"));
@@ -242,8 +244,8 @@ TEST(TENOTest, MirrorImagesTakeTheConditionOfTheNearestBoundaryFace) {
     std::vector<int32_t> face_bc(mesh->n_faces, -1);
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
         if (mesh->h_cells_of_face(f, 1) >= 0) continue;
-        const bool bottom = mesh->h_face_coords(f, 1) < 1e-12;
-        face_bc[f] = (bottom && mesh->h_face_coords(f, 0) < 0.25) ? 1 : 0;
+        const bool bottom = double(mesh->h_face_coords(f, 1)) < 1e-12;
+        face_bc[f] = (bottom && double(mesh->h_face_coords(f, 0)) < 0.25) ? 1 : 0;
     }
     BoundaryCondition sym, dir;
     sym.type = BoundaryType::SYMMETRY;
@@ -257,11 +259,11 @@ TEST(TENOTest, MirrorImagesTakeTheConditionOfTheNearestBoundaryFace) {
     for (uint32_t c = 0; c < mesh->n_cells; c++) {
         for (uint16_t s = 0; s < sizes(c); s++) {
             const int32_t f = faces(c, s);
-            if (f < 0 || mesh->h_face_coords(f, 1) > 1e-12) continue;
+            if (f < 0 || double(mesh->h_face_coords(f, 1)) > 1e-12) continue;
             // The image of a cell across the bottom takes the state of the face
             // directly beneath that cell
             EXPECT_NEAR(mesh->h_face_coords(f, 0), mesh->h_cell_coords(cells(c, s), 0), 1e-12) << "cell " << c;
-            if (mesh->h_cell_coords(c, 0) > 0.6) {
+            if (double(mesh->h_cell_coords(c, 0)) > 0.6) {
                 EXPECT_EQ(face_bc[f], 0) << "cell " << c;
             }
             n_checked++;
@@ -308,7 +310,7 @@ TEST(TENOTest, MirrorImagesNeverLandInsideNonConvexDomains) {
             const rtype px = m.h_cell_coords(cells_v(c, s), 0), py = m.h_cell_coords(cells_v(c, s), 1);
             const rtype d = (px - m.h_face_coords(f, 0)) * nx + (py - m.h_face_coords(f, 1)) * ny;
             const rtype qx = px - 2 * d * nx, qy = py - 2 * d * ny;
-            const bool in_domain = (qx > 0 && qx < 1 && qy > 0 && qy < 1) && !(qx > 0.5 && qy > 0.5);
+            const bool in_domain = (qx > 0 && qx < 1 && qy > 0 && qy < 1) && !(qx > 0.5_r && qy > 0.5_r);
             EXPECT_FALSE(in_domain) << "cell " << c << " image at " << qx << ", " << qy;
         }
     }

@@ -357,7 +357,7 @@ TEST(CommonMathTest, QRHouseholder3x3) {
                                        0.0,    0.0, 35.0};
     QR_householder_noQ(A.data(), R.data(), 3, 3);
 
-    rtype tol = 1e-6;
+    const double tol = precision_tol<double>(1e-6, 1e-4);  // R entries reach 175
     for (uint32_t i = 0; i < 9; ++i) {
         EXPECT_NEAR(expected_R[i], R[i], tol);
     }

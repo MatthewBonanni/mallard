@@ -134,7 +134,7 @@ void tangent_basis(const rtype * n, rtype * t1, rtype * t2) {
         const rtype ax = Kokkos::fabs(n[0]), ay = Kokkos::fabs(n[1]), az = Kokkos::fabs(n[2]);
         const uint8_t k = (ax <= ay && ax <= az) ? 0 : ((ay <= az) ? 1 : 2);
         rtype v[3];
-        for (uint8_t i = 0; i < 3; i++) v[i] = ((i == k) ? 1.0 : 0.0) - n[k] * n[i];
+        for (uint8_t i = 0; i < 3; i++) v[i] = ((i == k) ? 1.0_r : 0.0_r) - n[k] * n[i];
         unit<3>(v, t1);
         t2[0] = n[1] * t1[2] - n[2] * t1[1];
         t2[1] = n[2] * t1[0] - n[0] * t1[2];
@@ -174,10 +174,10 @@ template <> KOKKOS_INLINE_FUNCTION
 void invert_matrix<2>(const rtype * A, rtype * A_inv) {
     // Calculate determinant
     const rtype det_A = A[0] * A[3] - A[1] * A[2];
-    if (det_A == 0.0) {
+    if (det_A == 0.0_r) {
         Kokkos::abort("Matrix is singular.");
     }
-    const rtype inv_det = 1.0 / det_A;
+    const rtype inv_det = 1.0_r / det_A;
 
     // Store inverse
     A_inv[0] =  A[3] * inv_det;
@@ -196,10 +196,10 @@ void invert_matrix<3>(const rtype * A, rtype * A_inv) {
     
     // Calculate determinant using first row
     const rtype det_A = A[0] * c11 + A[1] * c12 + A[2] * c13;
-    if (det_A == 0.0) {
+    if (det_A == 0.0_r) {
         Kokkos::abort("Matrix is singular.");
     }
-    const rtype inv_det = 1.0 / det_A;
+    const rtype inv_det = 1.0_r / det_A;
     
     // Calculate remaining cofactors
     const rtype c21 = -(A[1] * A[8] - A[2] * A[7]);
@@ -352,21 +352,21 @@ void gemm(const rtype * A,
         printf("A: %d x %d\n", m, n);
         for (uint16_t i = 0; i < m; i++) {
             for (uint16_t j = 0; j < n; j++) {
-                printf("%8.3f ", A[i*n + j]);
+                printf("%8.3f ", static_cast<double>(A[i*n + j]));
             }
             printf("\n");
         }
         printf("B: %d x %d\n", p, q);
         for (uint16_t i = 0; i < p; i++) {
             for (uint16_t j = 0; j < q; j++) {
-                printf("%8.3f ", B[i*q + j]);
+                printf("%8.3f ", static_cast<double>(B[i*q + j]));
             }
             printf("\n");
         }
         printf("C: %d x %d\n", m, q);
         for (uint16_t i = 0; i < m; i++) {
             for (uint16_t j = 0; j < q; j++) {
-                printf("%8.3f ", C_out[i*q + j]);
+                printf("%8.3f ", static_cast<double>(C_out[i*q + j]));
             }
             printf("\n");
         }
@@ -405,12 +405,12 @@ void QR_householder_noQ(const rtype * A,
             norm_x += R[i*n + j] * R[i*n + j];
         }
         norm_x = Kokkos::sqrt(norm_x);
-        if (norm_x < 1.0e-15) {
+        if (norm_x < 1.0e-15_r) {
             continue;
         }
 
         // Compute Householder vector
-        rtype sign = (R[j*n + j] >= 0.0) ? 1.0 : -1.0;        
+        rtype sign = (R[j*n + j] >= 0.0_r) ? 1.0_r : -1.0_r;        
         rtype alpha = -sign * norm_x;
         rtype norm_u = 0.0;
         for (uint16_t k = 0; k < m - j; k++) {
@@ -434,7 +434,7 @@ void QR_householder_noQ(const rtype * A,
         }
         for (uint16_t i = j; i < m; i++) {
             for (uint16_t k = j; k < m; k++) {
-                Q_j[i*m + k] -= 2.0 * v[i-j] * v[k-j];
+                Q_j[i*m + k] -= 2.0_r * v[i-j] * v[k-j];
             }
         }
 
@@ -539,7 +539,7 @@ template <> KOKKOS_INLINE_FUNCTION
 rtype triangle_area<2>(const rtype * v0,
                        const rtype * v1,
                        const rtype * v2) {
-    return 0.5 * Kokkos::fabs(v0[0] * (v1[1] - v2[1]) +
+    return 0.5_r * Kokkos::fabs(v0[0] * (v1[1] - v2[1]) +
                               v1[0] * (v2[1] - v0[1]) +
                               v2[0] * (v0[1] - v1[1]));
 }

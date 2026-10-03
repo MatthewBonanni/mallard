@@ -199,7 +199,7 @@ std::vector<double> gather(Solver & solver) {
     std::vector<double> U(n_global * N_CONSERVATIVE, 0.0);
     for (uint32_t c = 0; c < mesh->n_owned(); c++) {
         const uint64_t g = mesh->n_global_cells ? mesh->h_global_cell_id[c] : c;
-        FOR_I_CONSERVATIVE U[g * N_CONSERVATIVE + i] = solver.h_conservatives(c, i);
+        FOR_I_CONSERVATIVE U[g * N_CONSERVATIVE + i] = double(solver.h_conservatives(c, i));
     }
     // A serial run holds every cell on every rank already
     if (mesh->n_global_cells > 0) comm::allreduce(std::span<double>(U), comm::Op::SUM);

@@ -422,7 +422,7 @@ void Solver::init_sources() {
         FOR_I_DIM boundary_data.gravity[i] = g[i];
         face_reconstruction->set_boundaries(boundary_data);
         std::string text;
-        FOR_I_DIM text += (i ? ", " : "[") + logging::real(gravity[i]);
+        FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(gravity[i]));
         source_summary.emplace_back("Gravity", text + "]");
     }
     const bool any_expression = source.contains("rho") || source.contains("rhou") || source.contains("rhoE");
@@ -449,12 +449,12 @@ void Solver::init_sources() {
 }
 
 void Solver::update_source_field(rtype t_eval) {
-    if (source_expressions.empty() || (t_source >= 0.0 && (!source_time_dependent || t_eval == t_source))) {
+    if (source_expressions.empty() || (t_source >= 0.0_r && (!source_time_dependent || t_eval == t_source))) {
         return;
     }
     for (uint32_t i_cell = 0; i_cell < mesh->n_cells; i_cell++) {
         const auto x = Kokkos::subview(mesh->h_cell_coords, i_cell, Kokkos::ALL());
-        FOR_I_CONSERVATIVE h_source_field(i_cell, i) = source_expressions[i].at(x, N_DIM, t_eval);
+        FOR_I_CONSERVATIVE h_source_field(i_cell, i) = source_expressions[i].at(x, N_DIM, double(t_eval));
     }
     Kokkos::deep_copy(source_field, h_source_field);
     t_source = t_eval;
@@ -499,7 +499,7 @@ void Solver::update_boundary_states(rtype t_eval) {
         for (uint32_t i_face : bc.faces) {
             const auto x = Kokkos::subview(mesh->h_face_coords, i_face, Kokkos::ALL());
             const int32_t k = h_face_state_index(i_face);
-            for (uint8_t i = 0; i < N_DIM + 2; i++) h_face_state(k, i) = bc.W[i].at(x, N_DIM, t_eval);
+            for (uint8_t i = 0; i < N_DIM + 2; i++) h_face_state(k, i) = bc.W[i].at(x, N_DIM, double(t_eval));
         }
     }
     Kokkos::deep_copy(boundary_data.face_state, h_face_state);
@@ -559,7 +559,7 @@ void Solver::init_numerics() {
     rhs_func = [this](State solution, State rhs, rtype t_stage) { calc_rhs(solution, rhs, t_stage); };
     check_nan = toml::find_or<bool>(input, "numerics", "check_nan", false);
     low_mach_cutoff = find_real_or(input, "numerics", "low_mach_cutoff", 0.1);
-    if (!(low_mach_cutoff > 0.0)) {
+    if (!(low_mach_cutoff > 0.0_r)) {
         throw std::runtime_error("numerics: low_mach_cutoff must be positive (1 disables the low-Mach correction).");
     }
 }
@@ -816,9 +816,9 @@ int Solver::run() {
 
 std::string Solver::stop_reason() const {
     if (n_steps > 0 && step >= n_steps) return "n_steps = " + logging::count(n_steps) + " reached";
-    if (t_stop > 0 && t >= t_stop) return "t_stop = " + logging::real(t_stop) + " reached";
-    if (t_wall_stop > 0 && timer.seconds() >= t_wall_stop) {
-        return "t_wall_stop = " + logging::duration(t_wall_stop) + " reached";
+    if (t_stop > 0 && t >= t_stop) return "t_stop = " + logging::real(double(t_stop)) + " reached";
+    if (t_wall_stop > 0 && timer.seconds() >= double(t_wall_stop)) {
+        return "t_wall_stop = " + logging::duration(double(t_wall_stop)) + " reached";
     }
     return "";
 }
@@ -827,7 +827,7 @@ double Solver::progress() const {
     double f = 0.0;
     if (n_steps > 0) f = std::max(f, static_cast<double>(step) / n_steps);
     if (t_stop > 0) f = std::max(f, static_cast<double>(t / t_stop));
-    if (t_wall_stop > 0) f = std::max(f, timer.seconds() / t_wall_stop);
+    if (t_wall_stop > 0) f = std::max(f, timer.seconds() / double(t_wall_stop));
     return std::min(f, 1.0);
 }
 
@@ -887,11 +887,11 @@ void Solver::print_setup() const {
     logging::items(face_reconstruction->summary());
     logging::item("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
     logging::item("Time integrator", TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()));
-    logging::item("Time step", use_cfl ? "CFL " + real(cfl) : "dt " + real(dt_fixed) + " (fixed)");
+    logging::item("Time step", use_cfl ? "CFL " + real(double(cfl)) : "dt " + real(double(dt_fixed)) + " (fixed)");
     std::string stop;
     if (n_steps > 0) stop += "n_steps = " + logging::count(n_steps);
-    if (t_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("t = ") + real(t_stop);
-    if (t_wall_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("wall ") + logging::duration(t_wall_stop);
+    if (t_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("t = ") + real(double(t_stop));
+    if (t_wall_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("wall ") + logging::duration(double(t_wall_stop));
     logging::item("Stop at", stop);
     if (check_nan) logging::item("NaN check", "every step");
 
@@ -919,7 +919,7 @@ void Solver::print_summary(const std::string & stop) const {
     const double total = timer.seconds();
     const uint64_t steps = step - step_run_start;
     logging::section("Summary");
-    logging::item("Stopped", stop + " at step " + logging::count(step) + ", t = " + logging::real(t));
+    logging::item("Stopped", stop + " at step " + logging::count(step) + ", t = " + logging::real(double(t)));
     logging::item("Wall time", duration(total) + ": setup " + duration(t_wall_setup) + ", time stepping " +
                                    duration(t_wall_stepping) + ", diagnostics " + duration(t_wall_checks) +
                                    ", output " + duration(t_wall_output));
@@ -1013,7 +1013,7 @@ void Solver::calc_dt() {
     if (t + dt > t_target && t_target > t) {
         dt = t_target - t;
     }
-    if (!(dt > 0.0)) {
+    if (!(dt > 0.0_r)) {
         throw std::runtime_error("Invalid dt: " + std::to_string(dt) + ".");
     }
     // cfl_local holds dt_cfl1 per cell; convert to local CFL number
@@ -1074,8 +1074,8 @@ struct TimeStepFunctor {
             physics.compute_W_from_conservatives(W, cons);
             const rtype T = W[N_DIM + 1] / (W[0] * physics.R);
             const rtype mu = physics.viscosity(T);
-            const rtype coeff = Kokkos::fmax(4.0 / 3.0, physics.gamma / physics.Pr) * mu / W[0];
-            sum += 4.0 * coeff * sum_area2 / cell_volume(i_cell);
+            const rtype coeff = Kokkos::fmax(4.0_r / 3.0_r, physics.gamma / physics.Pr) * mu / W[0];
+            sum += 4.0_r * coeff * sum_area2 / cell_volume(i_cell);
         }
         const rtype dt_i = cell_volume(i_cell) / sum;
         dt_local(i_cell) = dt_i;
@@ -1253,8 +1253,8 @@ struct FlowStatisticsFunctor {
                 omega2 += w * w;
             }
         }
-        sum.v[0] += 0.5 * rho * u2 * V;
-        sum.v[1] += 0.5 * rho * omega2 * V;
+        sum.v[0] += 0.5_r * rho * u2 * V;
+        sum.v[1] += 0.5_r * rho * omega2 * V;
         sum.v[2] += div * div * V;
         sum.v[3] += W(c, N_DIM + 1) * div * V;
     }

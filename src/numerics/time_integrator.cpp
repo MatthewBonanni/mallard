@@ -60,21 +60,21 @@ void RK4::take_step(const rtype t, const rtype dt,
 
     calc_rhs(U, k1, t);
     deep_copy(U_temp, U);
-    axpby(0.5 * dt, k1, 1.0, U_temp);
+    axpby(0.5_r * dt, k1, 1.0_r, U_temp);
 
-    calc_rhs(U_temp, k2, t + 0.5 * dt);
+    calc_rhs(U_temp, k2, t + 0.5_r * dt);
     deep_copy(U_temp, U);
-    axpby(0.5 * dt, k2, 1.0, U_temp);
+    axpby(0.5_r * dt, k2, 1.0_r, U_temp);
 
-    calc_rhs(U_temp, k3, t + 0.5 * dt);
+    calc_rhs(U_temp, k3, t + 0.5_r * dt);
     deep_copy(U_temp, U);
     axpby(dt, k3, 1.0, U_temp);
 
     calc_rhs(U_temp, k4, t + dt);
-    axpby(dt / 6.0, k1, 1.0, U);
-    axpby(dt / 3.0, k2, 1.0, U);
-    axpby(dt / 3.0, k3, 1.0, U);
-    axpby(dt / 6.0, k4, 1.0, U);
+    axpby(dt / 6.0_r, k1, 1.0_r, U);
+    axpby(dt / 3.0_r, k2, 1.0_r, U);
+    axpby(dt / 3.0_r, k3, 1.0_r, U);
+    axpby(dt / 6.0_r, k4, 1.0_r, U);
 }
 
 SSPRK3::SSPRK3() {
@@ -102,7 +102,7 @@ void SSPRK3::take_step(const rtype t, const rtype dt,
     axpby(0.75, U, 0.25, U_temp);
 
     // U^{n+1} = 1/3 U + 2/3 (U2 + dt L(U2))
-    calc_rhs(U_temp, k, t + 0.5 * dt);
+    calc_rhs(U_temp, k, t + 0.5_r * dt);
     axpby(dt, k, 1.0, U_temp);
     axpby(2.0 / 3.0, U_temp, 1.0 / 3.0, U);
 }

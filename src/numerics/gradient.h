@@ -28,7 +28,7 @@ struct LSQSystem {
 
     KOKKOS_INLINE_FUNCTION
     void add(const rtype * dx, const rtype * W_i, const rtype * W_j) {
-        const rtype w = 1.0 / dot<N_DIM>(dx, dx);
+        const rtype w = 1.0_r / dot<N_DIM>(dx, dx);
         if constexpr (N_DIM == 2) {
             M[0] += w * dx[0] * dx[0];
             M[1] += w * dx[0] * dx[1];
@@ -56,7 +56,7 @@ struct LSQSystem {
     KOKKOS_INLINE_FUNCTION
     void solve(rtype g[N_CONSERVATIVE][N_DIM]) const {
         if constexpr (N_DIM == 2) {
-            const rtype inv_det = 1.0 / (M[0] * M[2] - M[1] * M[1]);
+            const rtype inv_det = 1.0_r / (M[0] * M[2] - M[1] * M[1]);
             FOR_I_CONSERVATIVE {
                 g[i][0] = inv_det * ( M[2] * b[i][0] - M[1] * b[i][1]);
                 g[i][1] = inv_det * (-M[1] * b[i][0] + M[0] * b[i][1]);
@@ -127,8 +127,8 @@ struct LSQGradientFunctor {
                 FOR_I_DIM dx[i] = face_coords(i_face, i) - cell_coords(i_cell, i);
                 boundaries.ghost_W(i_face, W_i, n, W_j);
             } else {
-                FOR_I_DIM dx[i] = 2.0 * d * n[i];
-                boundaries.ghost_W_at(i_face, W_i, n, 2.0 * d, W_j);
+                FOR_I_DIM dx[i] = 2.0_r * d * n[i];
+                boundaries.ghost_W_at(i_face, W_i, n, 2.0_r * d, W_j);
             }
             if (boundaries.viscous && bc.type == BoundaryType::WALL_HEAT_FLUX) {
                 // Ghost temperature consistent with the prescribed heat flux into the
@@ -136,7 +136,7 @@ struct LSQGradientFunctor {
                 const rtype R = boundaries.R;
                 const rtype T_i = W_i[N_DIM + 1] / (W_i[0] * R);
                 const rtype kappa = boundaries.gas.conductivity(boundaries.gas.viscosity(T_i));
-                const rtype T_g = Kokkos::fmax(T_i + 2.0 * d * bc.data[N_DIM + 1] / kappa, 0.1 * T_i);
+                const rtype T_g = Kokkos::fmax(T_i + 2.0_r * d * bc.data[N_DIM + 1] / kappa, 0.1_r * T_i);
                 W_j[0] = W_i[N_DIM + 1] / (R * T_g);
             }
         }
@@ -163,16 +163,16 @@ struct LSQGradientFunctor {
  *        matrix given by its upper triangle. Returns false if a pivot falls
  *        below 1e-10 of its diagonal entry, i.e. the matrix is (nearly) singular.
  */
-template <uint8_t N>
+template <uint8_t N, typename T>
 KOKKOS_INLINE_FUNCTION
-bool cholesky(const rtype A[N][N], rtype L[N][N]) {
+bool cholesky(const T A[N][N], T L[N][N]) {
     for (uint8_t p = 0; p < N; p++) {
         for (uint8_t q = 0; q <= p; q++) {
-            rtype s = A[q][p];
+            T s = A[q][p];
             for (uint8_t k = 0; k < q; k++) s -= L[p][k] * L[q][k];
             if (q < p) {
                 L[p][q] = s / L[q][q];
-            } else if (s > 1.0e-10 * A[p][p]) {
+            } else if (s > T(1.0e-10) * A[p][p]) {
                 L[p][p] = Kokkos::sqrt(s);
             } else {
                 return false;
@@ -185,9 +185,9 @@ bool cholesky(const rtype A[N][N], rtype L[N][N]) {
 /**
  * @brief Solve L L^T x = b in place.
  */
-template <uint8_t N>
+template <uint8_t N, typename T>
 KOKKOS_INLINE_FUNCTION
-void cholesky_solve(const rtype L[N][N], rtype * x) {
+void cholesky_solve(const T L[N][N], T * x) {
     for (uint8_t p = 0; p < N; p++) {
         for (uint8_t k = 0; k < p; k++) x[p] -= L[p][k] * x[k];
         x[p] /= L[p][p];
@@ -253,24 +253,32 @@ struct LSQVertexGradientFunctor {
     }
 
     /**
-     * @brief Compute the weights of cell i_cell.
+     * @brief Compute the weights of cell i_cell, in double: the normal equations
+     *        of the quadratic fit are too ill conditioned for single precision.
      */
     KOKKOS_INLINE_FUNCTION
     void compute_weights(const uint32_t i_cell) const {
-        rtype A[NB][NB] = {}, M[N_DIM][N_DIM] = {};
-        rtype scale = 0.0;  // Inverse length that keeps the monomials of order one
+        double A[NB][NB] = {}, M[N_DIM][N_DIM] = {};
+        double scale = 0.0;  // Inverse length that keeps the monomials of order one
         uint16_t n_points = 0;
-        auto monomials = [&](const rtype * dx, rtype * phi) {
+        auto monomials = [&](const double * dx, double * phi) {
             FOR_I_DIM phi[i] = dx[i] * scale;
             uint8_t m = N_DIM;
             for (uint8_t r = 0; r < N_DIM; r++) {
                 for (uint8_t c = r; c < N_DIM; c++) phi[m++] = phi[r] * phi[c];
             }
         };
-        for_each_point(i_cell, [&](const rtype * dx, bool, uint32_t) {
-            const rtype w = 1.0 / dot<N_DIM>(dx, dx);
+        auto widen = [](const rtype * dx_r, double * dx) {
+            FOR_I_DIM dx[i] = double(dx_r[i]);
+            double d2 = 0.0;
+            FOR_I_DIM d2 += dx[i] * dx[i];
+            return 1.0 / d2;
+        };
+        for_each_point(i_cell, [&](const rtype * dx_r, bool, uint32_t) {
+            double dx[N_DIM];
+            const double w = widen(dx_r, dx);
             if (n_points++ == 0) scale = Kokkos::sqrt(w);
-            rtype phi[NB];
+            double phi[NB];
             monomials(dx, phi);
             for (uint8_t p = 0; p < NB; p++) {
                 for (uint8_t q = p; q < NB; q++) A[p][q] += w * phi[p] * phi[q];
@@ -279,14 +287,15 @@ struct LSQVertexGradientFunctor {
                 for (uint8_t q = p; q < N_DIM; q++) M[p][q] += w * dx[p] * dx[q];
             }
         });
-        rtype L[NB][NB], L_lin[N_DIM][N_DIM];
+        double L[NB][NB], L_lin[N_DIM][N_DIM];
         const bool quadratic = n_points >= NB && cholesky<NB>(A, L);
         if (!quadratic) cholesky<N_DIM>(M, L_lin);
-        for_each_point(i_cell, [&](const rtype * dx, bool is_face, uint32_t k) {
-            const rtype w = 1.0 / dot<N_DIM>(dx, dx);
-            rtype c[N_DIM];
+        for_each_point(i_cell, [&](const rtype * dx_r, bool is_face, uint32_t k) {
+            double dx[N_DIM];
+            const double w = widen(dx_r, dx);
+            double c[N_DIM];
             if (quadratic) {
-                rtype phi[NB];
+                double phi[NB];
                 monomials(dx, phi);
                 cholesky_solve<NB>(L, phi);
                 FOR_I_DIM c[i] = w * scale * phi[i];
@@ -294,7 +303,7 @@ struct LSQVertexGradientFunctor {
                 FOR_I_DIM c[i] = w * dx[i];
                 cholesky_solve<N_DIM>(L_lin, c);
             }
-            FOR_I_DIM (is_face ? weights.faces(k, i) : weights.cells(k, i)) = c[i];
+            FOR_I_DIM (is_face ? weights.faces(k, i) : weights.cells(k, i)) = static_cast<rtype>(c[i]);
         });
     }
 

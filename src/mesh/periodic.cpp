@@ -95,14 +95,14 @@ PeriodicNodes match_periodic_nodes(const std::vector<std::array<rtype, N_DIM>> &
         // Lattice direction of this pair: shared with pairs of the same translation
         rtype length = 0.0;
         FOR_I_DIM length = std::max(length, std::abs(pair.translation[i]));
-        if (length == 0.0) {
+        if (length == 0.0_r) {
             throw std::runtime_error("Periodic pair " + pair.zone_a + " / " + pair.zone_b + " has no translation.");
         }
         size_t dir = 0;
         for (; dir < result.translations.size(); dir++) {
             rtype diff = 0.0;
             FOR_I_DIM diff = std::max(diff, std::abs(result.translations[dir][i] - pair.translation[i]));
-            if (diff <= 1e-12 * length) break;
+            if (diff <= 1e-12_r * length) break;
         }
         if (dir == result.translations.size()) {
             if (dir == 3) throw std::runtime_error("At most three distinct periodic translations are supported.");
@@ -119,7 +119,7 @@ PeriodicNodes match_periodic_nodes(const std::vector<std::array<rtype, N_DIM>> &
                     const auto & b = nodes[bf->nodes[(k + 1) % n]];
                     rtype d2 = 0.0;
                     FOR_I_DIM d2 += (a[i] - b[i]) * (a[i] - b[i]);
-                    if (d2 > 0.0) min_edge = std::min(min_edge, std::sqrt(d2));
+                    if (d2 > 0.0_r) min_edge = std::min(min_edge, std::sqrt(d2));
                 }
             }
             std::sort(ids.begin(), ids.end());
@@ -134,7 +134,7 @@ PeriodicNodes match_periodic_nodes(const std::vector<std::array<rtype, N_DIM>> &
                                      std::to_string(nodes_a.size()) + " and " + std::to_string(nodes_b.size()) +
                                      " nodes.");
         }
-        const rtype tol = 1e-6 * h;
+        const rtype tol = precision_tol(1e-6, 1e-3) * h;
 
         // Nodes of zone_b on a grid of spacing h; a match lies in one of the
         // 3^N_DIM grid cells around the translated node

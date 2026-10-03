@@ -33,7 +33,7 @@ void viscous_traction(const rtype mu, const rtype g[][N_DIM], const rtype * n, r
     rtype tau[N_DIM][N_DIM];
     FOR_I_DIM {
         for (uint8_t j = 0; j < N_DIM; j++) tau[i][j] = mu * (g[i][j] + g[j][i]);
-        tau[i][i] = mu * (2.0 * g[i][i] - 2.0 / 3.0 * div);
+        tau[i][i] = mu * (2.0_r * g[i][i] - 2.0_r / 3.0_r * div);
     }
     FOR_I_DIM tau_n[i] = dot<N_DIM>(tau[i], n);
 }
@@ -109,8 +109,8 @@ struct ViscousFluxFunctor {
         FOR_I_DIM d[i] = (cell_coords(c1, i) + shifts(s, i)) - cell_coords(c0, i);
         const rtype d_n = dot<N_DIM>(d, n);
         for (uint8_t k = 0; k < NQ; k++) {
-            q_f[k] = 0.5 * (q0[k] + q1[k]);
-            FOR_I_DIM g_f[k][i] = 0.5 * (g0[k][i] + g1[k][i]);
+            q_f[k] = 0.5_r * (q0[k] + q1[k]);
+            FOR_I_DIM g_f[k][i] = 0.5_r * (g0[k][i] + g1[k][i]);
             const rtype correction = ((q1[k] - q0[k]) - dot<N_DIM>(g_f[k], d)) / d_n;
             FOR_I_DIM g_f[k][i] += correction * n[i];
         }
@@ -152,7 +152,7 @@ struct ViscousFluxFunctor {
                 }
                 if (bc.type != BoundaryType::WALL_ISOTHERMAL) {
                     heat_flux_given = true;
-                    heat_flux = (bc.type == BoundaryType::WALL_HEAT_FLUX) ? bc.data[N_DIM + 1] : 0.0;
+                    heat_flux = (bc.type == BoundaryType::WALL_HEAT_FLUX) ? bc.data[N_DIM + 1] : 0.0_r;
                 }
             } else if (bc.type == BoundaryType::SYMMETRY) {
                 symmetry = true;

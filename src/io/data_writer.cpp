@@ -77,7 +77,7 @@ void DataWriter::init(const toml::value & input,
         }
     } else {
         time_interval = find_real(input, "time_interval");
-        if (!(time_interval > 0.0)) {
+        if (!(time_interval > 0.0_r)) {
             throw std::runtime_error("DataWriter: time_interval must be positive.");
         }
     }
@@ -156,7 +156,7 @@ void DataWriter::init(const toml::value & input,
 std::pair<std::string, std::string> DataWriter::summary() const {
     std::string text = prefix + (format == DataFormat::RESTART ? "_*.restart" : "_*.vtu");
     if (geometry != "all") text += " (" + geometry + ")";
-    text += interval > 0 ? " every " + logging::count(interval) + " steps" : " every t = " + logging::real(time_interval);
+    text += interval > 0 ? " every " + logging::count(interval) + " steps" : " every t = " + logging::real(double(time_interval));
     if (format == DataFormat::VTU) {
         std::string names;
         for (const auto & field : fields) names += (names.empty() ? "" : ", ") + field.name;
@@ -170,7 +170,7 @@ bool DataWriter::due(uint64_t step, rtype t) const {
         return step % interval == 0;
     }
     // Relative tolerance absorbs round-off in accumulated time
-    return t >= next_time() - 1.0e-9 * time_interval;
+    return t >= next_time() - precision_tol(1e-9, 1e-5) * time_interval;
 }
 
 rtype DataWriter::next_time() const {
@@ -189,7 +189,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force) {
            << (interval > 0 || format == DataFormat::RESTART ? step : history.size());
     if (format == DataFormat::RESTART) {
         write_restart(stream.str() + ".restart", step, t);
-        logging::event(step, t, "restart", stream.str() + ".restart");
+        logging::event(step, double(t), "restart", stream.str() + ".restart");
     } else {
         // Distributed runs: one piece per rank and a .pvtu index
         const bool pieces = mesh->n_global_cells > 0;
@@ -205,11 +205,11 @@ void DataWriter::write(uint64_t step, rtype t, bool force) {
         if (pieces && comm::is_root()) write_pvtu(filename, std::filesystem::path(stream.str()).filename().string());
         history.emplace_back(t, filename);
         if (comm::is_root()) write_pvd();
-        logging::event(step, t, surface ? "surface" : "vtu", filename);
+        logging::event(step, double(t), surface ? "surface" : "vtu", filename);
     }
     if (interval == 0) {
         // Skip any output times already passed (e.g. if dt exceeded time_interval)
-        while (next_time() <= t + 1.0e-9 * time_interval) {
+        while (next_time() <= t + precision_tol(1e-9, 1e-5) * time_interval) {
             n_written++;
         }
     } else {
@@ -226,7 +226,7 @@ void DataWriter::resume(uint64_t step, rtype t) {
     if (interval > 0) {
         n_written = step / interval + 1;
     } else {
-        n_written = static_cast<uint64_t>(std::floor(t / time_interval + 1.0e-9)) + 1;
+        n_written = static_cast<uint64_t>(std::floor(t / time_interval + precision_tol(1e-9, 1e-5))) + 1;
     }
     // Keep the entries of the previous run's .pvd up to the restart time
     history.clear();
@@ -240,7 +240,7 @@ void DataWriter::resume(uint64_t step, rtype t) {
         const double t_entry = std::stod(line.substr(a + 10));
         const size_t b0 = b + 6;
         const std::string file = line.substr(b0, line.find('"', b0) - b0);
-        if (t_entry <= t * (1.0 + 1.0e-12) + 1.0e-300) {
+        if (t_entry <= static_cast<double>(t) * (1.0 + 1.0e-12) + 1.0e-300) {
             history.emplace_back(t_entry, (dir / file).string());
         }
     }
@@ -299,7 +299,7 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
     }
     std::vector<std::string> names;
     for (const auto & field : fields) names.push_back(field.name);
-    const std::vector<char> header = restart_header(mesh->n_cells, step, t, names);
+    const std::vector<char> header = restart_header(mesh->n_cells, step, double(t), names);
     out.write(header.data(), static_cast<std::streamsize>(header.size()));
     for (const auto & field : fields) {
         for (uint64_t i = 0; i < mesh->n_cells; i++) {
@@ -322,7 +322,7 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
     const uint64_t n_global = mesh->n_global_cells;
     std::vector<std::string> names;
     for (const auto & field : fields) names.push_back(field.name);
-    const std::vector<char> header = restart_header(n_global, step, t, names);
+    const std::vector<char> header = restart_header(n_global, step, double(t), names);
     if (comm::is_root()) {
         MPI_File_write_at(fh, 0, header.data(), static_cast<int>(header.size()), MPI_BYTE, MPI_STATUS_IGNORE);
     }

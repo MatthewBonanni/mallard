@@ -20,7 +20,7 @@ Euler Euler::from_reference(rtype gamma, rtype p_ref, rtype T_ref, rtype rho_ref
     Euler euler;
     euler.gamma = gamma;
     euler.R = p_ref / (T_ref * rho_ref);
-    euler.cp = euler.R * gamma / (gamma - 1.0);
+    euler.cp = euler.R * gamma / (gamma - 1.0_r);
     euler.cv = euler.cp / gamma;
     return euler;
 }
@@ -62,14 +62,14 @@ logging::Items Euler::summary() const {
     using logging::real;
     logging::Items out = {
         {"Model", is_viscous() ? "Navier-Stokes" : "Euler"},
-        {"Gas", "gamma " + real(gamma) + ", R " + real(R) + ", cp " + real(cp) + ", cv " + real(cv)},
+        {"Gas", "gamma " + real(double(gamma)) + ", R " + real(double(R)) + ", cp " + real(double(cp)) + ", cv " + real(double(cv))},
     };
     if (is_viscous()) {
         if (viscosity_model == ViscosityModel::SUTHERLAND) {
-            out.emplace_back("Viscosity", "Sutherland, mu " + real(mu_ref) + " at T " + real(T_mu_ref) + ", S " +
-                                              real(S_mu) + ", Pr " + real(Pr));
+            out.emplace_back("Viscosity", "Sutherland, mu " + real(double(mu_ref)) + " at T " + real(double(T_mu_ref)) + ", S " +
+                                              real(double(S_mu)) + ", Pr " + real(double(Pr)));
         } else {
-            out.emplace_back("Viscosity", "constant, mu " + real(mu_ref) + ", Pr " + real(Pr));
+            out.emplace_back("Viscosity", "constant, mu " + real(double(mu_ref)) + ", Pr " + real(double(Pr)));
         }
     }
     return out;

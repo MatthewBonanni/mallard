@@ -32,10 +32,10 @@ KOKKOS_INLINE_FUNCTION
 void low_mach_correction(rtype * W_l, rtype * W_r, const rtype gamma, const rtype M_cut) {
     const rtype M_l2 = dot<N_DIM>(W_l + 1, W_l + 1) * W_l[0] / (gamma * W_l[N_DIM + 1]);
     const rtype M_r2 = dot<N_DIM>(W_r + 1, W_r + 1) * W_r[0] / (gamma * W_r[N_DIM + 1]);
-    const rtype z = Kokkos::fmin(1.0, Kokkos::fmax(M_cut, Kokkos::sqrt(Kokkos::fmax(M_l2, M_r2))));
+    const rtype z = Kokkos::fmin(1.0_r, Kokkos::fmax(M_cut, Kokkos::sqrt(Kokkos::fmax(M_l2, M_r2))));
     FOR_I_DIM {
-        const rtype mean = 0.5 * (W_l[1 + i] + W_r[1 + i]);
-        const rtype half_jump = 0.5 * (W_l[1 + i] - W_r[1 + i]);
+        const rtype mean = 0.5_r * (W_l[1 + i] + W_r[1 + i]);
+        const rtype half_jump = 0.5_r * (W_l[1 + i] - W_r[1 + i]);
         W_l[1 + i] = mean + z * half_jump;
         W_r[1 + i] = mean - z * half_jump;
     }
@@ -85,13 +85,13 @@ struct ConvectiveFluxFunctor {
                 w_q = quad_weights(i_quad);
             } else {
                 w_q = face_weights(i_face, i_quad);
-                if (w_q == 0.0) continue;
+                if (w_q == 0.0_r) continue;
             }
             rtype W_l[N_CONSERVATIVE], W_r[N_CONSERVATIVE], flux_q[N_CONSERVATIVE];
             FOR_I_CONSERVATIVE W_l[i] = face_solution(i_face, i_quad, 0, i);
             if (c1 >= 0) {
                 FOR_I_CONSERVATIVE W_r[i] = face_solution(i_face, i_quad, 1, i);
-                if (low_mach_cutoff < 1.0) low_mach_correction(W_l, W_r, gamma, low_mach_cutoff);
+                if (low_mach_cutoff < 1.0_r) low_mach_correction(W_l, W_r, gamma, low_mach_cutoff);
             } else {
                 boundaries.exterior_W(i_face, i_quad, n_quad, W_l, n_unit, W_cells, face_solution, W_r);
             }
@@ -100,7 +100,7 @@ struct ConvectiveFluxFunctor {
         }
 
         // Weights sum to 2 (Gauss-Legendre on [-1, 1] in 2D)
-        const rtype scale = 0.5 * face_area(i_face);
+        const rtype scale = 0.5_r * face_area(i_face);
         FOR_I_CONSERVATIVE face_flux(i_face, i) = -scale * flux[i];
     }
 };

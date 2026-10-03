@@ -75,14 +75,17 @@ TEST_P(ViscousMesh, CouetteFlowHasLinearVelocityProfile) {
     auto m = solver->get_mesh();
     double max_err = 0.0;
     for (uint32_t i = 0; i < m->n_cells; i++) {
-        const double y = m->h_cell_coords(i, 1);
-        max_err = std::max(max_err, std::abs(solver->h_primitives(i, 0) - 0.1 * y));
-        EXPECT_LT(std::abs(solver->h_primitives(i, 1)), 1e-6);
+        const double y = double(m->h_cell_coords(i, 1));
+        max_err = std::max(max_err, std::abs(double(solver->h_primitives(i, 0)) - 0.1 * y));
+        EXPECT_LT(std::abs(solver->h_primitives(i, 1)), precision_tol<double>(1e-6, 1e-4));
     }
     EXPECT_LT(max_err, 1e-3 * 0.1);
 }
 
 TEST_P(ViscousMesh, StokesFirstProblemMatchesErfcProfile) {
+    if (GetParam() == "cartesian_tri") {
+        SKIP_IN_SINGLE_PRECISION("round-off over the ~7000 steps on 64 rows of triangles is comparable to the 8e-6 error");
+    }
     // Impulsively started wall: u = U erfc(y / (2 sqrt(nu t))), second order in space
     auto error = [&](uint32_t ny) {
         ViscousCase c;
@@ -96,9 +99,9 @@ TEST_P(ViscousMesh, StokesFirstProblemMatchesErfcProfile) {
         auto m = solver->get_mesh();
         double err = 0.0;
         for (uint32_t i = 0; i < m->n_cells; i++) {
-            const double y = m->h_cell_coords(i, 1);
+            const double y = double(m->h_cell_coords(i, 1));
             const double exact = 0.05 * std::erfc(y / (2.0 * std::sqrt(0.01 * 2.0)));
-            err = std::max(err, std::abs(solver->h_primitives(i, 0) - exact));
+            err = std::max(err, std::abs(double(solver->h_primitives(i, 0)) - exact));
         }
         return err;
     };
@@ -126,8 +129,8 @@ TEST_P(ViscousMesh, ForcedChannelFlowWithTransmissiveEndsConvergesAtSecondOrder)
         auto m = solver->get_mesh();
         double err = 0.0;
         for (uint32_t i = 0; i < m->n_cells; i++) {
-            const double y = m->h_cell_coords(i, 1);
-            err = std::max(err, std::abs(solver->h_primitives(i, 0) - 0.05 * (y - y * y * y)));
+            const double y = double(m->h_cell_coords(i, 1));
+            err = std::max(err, std::abs(double(solver->h_primitives(i, 0)) - 0.05 * (y - y * y * y)));
         }
         return err;
     };
@@ -145,7 +148,7 @@ TEST_P(ViscousMesh, ConductionBetweenIsothermalWallsIsLinear) {
     auto solver = run_viscous(c);
     auto m = solver->get_mesh();
     for (uint32_t i = 0; i < m->n_cells; i++) {
-        const double y = m->h_cell_coords(i, 1);
+        const double y = double(m->h_cell_coords(i, 1));
         EXPECT_NEAR(solver->h_primitives(i, 3), 1.2 - 0.4 * y, 2e-3);
     }
 }
@@ -162,8 +165,8 @@ TEST_P(ViscousMesh, HeatFluxWallSetsTemperatureGradient) {
     auto solver = run_viscous(c);
     auto m = solver->get_mesh();
     for (uint32_t i = 0; i < m->n_cells; i++) {
-        const double y = m->h_cell_coords(i, 1);
-        EXPECT_NEAR(solver->h_primitives(i, 3), 1.0 + 0.2 * (1.0 - y) / kappa, 5e-4);
+        const double y = double(m->h_cell_coords(i, 1));
+        EXPECT_NEAR(solver->h_primitives(i, 3), 1.0 + 0.2 * (1.0 - y) / kappa, precision_tol<double>(5e-4, 1e-3));  // single: drift over ~1e4 steps
     }
 }
 
@@ -178,9 +181,9 @@ TEST_P(ViscousMesh, UniformFlowIsPreservedWithViscosity) {
     c.run = "n_steps = 50\ncfl = 0.8\n";
     auto solver = run_viscous(c);
     for (uint32_t i = 0; i < solver->get_mesh()->n_cells; i++) {
-        EXPECT_NEAR(solver->h_primitives(i, 0), 0.3, 1e-12);
-        EXPECT_NEAR(solver->h_primitives(i, 1), -0.2, 1e-12);
-        EXPECT_NEAR(solver->h_primitives(i, 2), 0.9, 1e-12);
+        EXPECT_NEAR(solver->h_primitives(i, 0), 0.3, roundoff(1e-12));
+        EXPECT_NEAR(solver->h_primitives(i, 1), -0.2, roundoff(1e-12));
+        EXPECT_NEAR(solver->h_primitives(i, 2), 0.9, roundoff(1e-12));
     }
 }
 

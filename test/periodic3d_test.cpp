@@ -119,7 +119,7 @@ TEST_P(PeriodicBox3D, PreservesUniformFlowAndConservesMassMomentumAndEnergy) {
     uniform->copy_device_to_host();
     const double U[4] = {1.3, 1.3 * 0.4, -1.3 * 0.25, 1.3 * 0.1};
     for (uint32_t cell = 0; cell < uniform->get_mesh()->n_owned(); cell++) {
-        for (int i = 0; i < 4; i++) EXPECT_NEAR(uniform->h_conservatives(cell, i), U[i], 1e-12);
+        for (int i = 0; i < 4; i++) EXPECT_NEAR(uniform->h_conservatives(cell, i), U[i], roundoff(1e-12));
     }
     // With no boundary at all, momentum is conserved too
     auto blob = start(c, [](double x, double y, double z, double * W) {
@@ -133,7 +133,7 @@ TEST_P(PeriodicBox3D, PreservesUniformFlowAndConservesMassMomentumAndEnergy) {
     const auto before = blob->integrate_conservatives();
     blob->run();
     const auto after = blob->integrate_conservatives();
-    FOR_I_CONSERVATIVE EXPECT_NEAR(after[i], before[i], 1e-12) << "variable " << int(i);
+    FOR_I_CONSERVATIVE EXPECT_NEAR(after[i], before[i], roundoff(1e-12)) << "variable " << int(i);
 }
 
 INSTANTIATE_TEST_SUITE_P(Periodic, PeriodicBox3D,
@@ -175,7 +175,7 @@ double advection_error(const std::string & recon, int order, uint32_t n) {
     });
     double err = 0.0;
     for (uint32_t i = 0; i < solver->get_mesh()->n_cells; i++) {
-        err = std::max(err, std::abs(solver->h_conservatives(i, 0) - exact(i, 0)));
+        err = std::max(err, std::abs(double(solver->h_conservatives(i, 0)) - double(exact(i, 0))));
     }
     return err;
 }
@@ -256,10 +256,10 @@ TEST_P(PeriodicInvariance3D, PulseCrossingTheSeamMatchesItsInteriorTranslate) {
     const auto map = translated_cells(*interior->get_mesh(), t);
     double diff = 0.0;
     for (uint32_t cell = 0; cell < map.size(); cell++) {
-        FOR_I_CONSERVATIVE diff = std::max(diff, std::abs(across->h_conservatives(map[cell], i) -
-                                                          interior->h_conservatives(cell, i)));
+        FOR_I_CONSERVATIVE diff = std::max(diff, std::abs(double(across->h_conservatives(map[cell], i)) -
+                                                          double(interior->h_conservatives(cell, i))));
     }
-    EXPECT_LT(diff, 1e-10);
+    EXPECT_LT(diff, precision_tol<double>(1e-10, 2e-4));
 }
 
 INSTANTIATE_TEST_SUITE_P(Periodic, PeriodicInvariance3D,

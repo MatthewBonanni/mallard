@@ -25,7 +25,7 @@ constexpr uint32_t NX = 6, NY = 4, NZ = 3;
 
 class Mesh3DInvariants : public ::testing::TestWithParam<std::string> {};
 
-void expect_closed_cells_and_consistent_faces(const Mesh & mesh, rtype tol) {
+void expect_closed_cells_and_consistent_faces(const Mesh & mesh, double tol) {
     for (uint32_t c = 0; c < mesh.n_cells; c++) {
         rtype closure[N_DIM] = {};
         for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
@@ -42,14 +42,14 @@ void expect_closed_cells_and_consistent_faces(const Mesh & mesh, rtype tol) {
             n2 += mesh.h_face_normals(f, i) * mesh.h_face_normals(f, i);
         }
         EXPECT_GT(d, 0.0) << "face " << f;
-        EXPECT_NEAR(std::sqrt(n2), mesh.h_face_area(f), 1e-14);
+        EXPECT_NEAR(std::sqrt(n2), mesh.h_face_area(f), roundoff(1e-14));
     }
 }
 
 /**
  * @brief Volumes sum to the box and the cell first moments sum to the box's.
  */
-void expect_box_moments(const Mesh & mesh, rtype tol) {
+void expect_box_moments(const Mesh & mesh, double tol) {
     rtype V = 0.0, M[N_DIM] = {};
     for (uint32_t c = 0; c < mesh.n_cells; c++) {
         EXPECT_GT(mesh.h_cell_volume(c), 0.0);
@@ -58,19 +58,19 @@ void expect_box_moments(const Mesh & mesh, rtype tol) {
     }
     const rtype L[3] = {LX, LY, LZ};
     EXPECT_NEAR(V, LX * LY * LZ, tol);
-    FOR_I_DIM EXPECT_NEAR(M[i], 0.5 * L[i] * LX * LY * LZ, tol) << "direction " << static_cast<int>(i);
+    FOR_I_DIM EXPECT_NEAR(M[i], 0.5_r * L[i] * LX * LY * LZ, tol) << "direction " << static_cast<int>(i);
 }
 
 } // namespace
 
 TEST_P(Mesh3DInvariants, CellsAreClosedAndNormalsPointFromCell0ToCell1) {
     auto mesh = make_mesh_3d(GetParam(), NX, NY, NZ, LX, LY, LZ);
-    expect_closed_cells_and_consistent_faces(*mesh, 1e-14);
+    expect_closed_cells_and_consistent_faces(*mesh, roundoff(1e-14));
 }
 
 TEST_P(Mesh3DInvariants, VolumesAndCentroidsMatchTheBox) {
     auto mesh = make_mesh_3d(GetParam(), NX, NY, NZ, LX, LY, LZ);
-    expect_box_moments(*mesh, 1e-12);
+    expect_box_moments(*mesh, roundoff(1e-12));
 }
 
 TEST_P(Mesh3DInvariants, BoundaryZonesCoverEachSideWithOutwardNormals) {
@@ -89,7 +89,7 @@ TEST_P(Mesh3DInvariants, BoundaryZonesCoverEachSideWithOutwardNormals) {
             EXPECT_EQ(mesh->h_cells_of_face(f, 1), -1);
             FOR_I_DIM A[i] += mesh->h_face_normals(f, i);
         }
-        FOR_I_DIM EXPECT_NEAR(A[i], (i == axis) ? (side.first > 0 ? 1.0 : -1.0) * side.second : 0.0, 1e-13) << name;
+        FOR_I_DIM EXPECT_NEAR(A[i], (i == axis) ? (side.first > 0 ? 1.0_r : -1.0_r) * side.second : 0.0_r, roundoff(1e-13)) << name;
         n_boundary += zone->n_faces();
     }
     EXPECT_EQ(mesh->get_face_zone("unassigned"), nullptr);
@@ -102,21 +102,21 @@ TEST_P(Mesh3DInvariants, WarpedFacesKeepCellsClosedAndConserveVolume) {
     auto mesh = make_mesh_3d(GetParam(), NX, NY, NZ, LX, LY, LZ);
     // Move interior nodes so quadrilateral faces become non-planar
     std::mt19937 rng(7);
-    std::uniform_real_distribution<double> jitter(-0.12, 0.12);
+    std::uniform_real_distribution<rtype> jitter(-0.12, 0.12);
     const rtype h[3] = {LX / NX, LY / NY, LZ / NZ};
     const rtype L[3] = {LX, LY, LZ};
     for (uint32_t n = 0; n < mesh->n_nodes; n++) {
         bool interior = true;
         FOR_I_DIM {
             const rtype x = mesh->h_node_coords(n, i);
-            interior = interior && x > 1e-9 && x < L[i] - 1e-9;
+            interior = interior && x > 1e-9_r && x < L[i] - 1e-9_r;
         }
         if (!interior) continue;
         FOR_I_DIM mesh->h_node_coords(n, i) += jitter(rng) * h[i];
     }
     mesh->compute_geometry();
-    expect_closed_cells_and_consistent_faces(*mesh, 1e-14);
-    expect_box_moments(*mesh, 1e-12);
+    expect_closed_cells_and_consistent_faces(*mesh, roundoff(1e-14));
+    expect_box_moments(*mesh, roundoff(1e-12));
 }
 
 INSTANTIATE_TEST_SUITE_P(Mesh, Mesh3DInvariants,
@@ -166,7 +166,7 @@ TEST(Mesh3D, ConnectivityIsReorientedAndBoundaryFacesMatchByNodeSet) {
     EXPECT_EQ(mesh.n_cells, 2u);
     EXPECT_EQ(mesh.n_faces, 6u + 5u - 1u);
     EXPECT_NEAR(mesh.h_cell_volume(0), 1.0, 1e-14);
-    EXPECT_NEAR(mesh.h_cell_volume(1), 1.0 / 6.0, 1e-14);
+    EXPECT_NEAR(mesh.h_cell_volume(1), 1.0 / 6.0, roundoff(1e-14));
     EXPECT_NEAR(mesh.h_cell_coords(1, 2), 1.125, 1e-14);
     ASSERT_NE(mesh.get_face_zone("floor"), nullptr);
     ASSERT_NE(mesh.get_face_zone("roof"), nullptr);
@@ -174,5 +174,5 @@ TEST(Mesh3D, ConnectivityIsReorientedAndBoundaryFacesMatchByNodeSet) {
     EXPECT_EQ(mesh.get_face_zone("unassigned")->n_faces(), 4u + 3u);
     const uint32_t floor = mesh.get_face_zone("floor")->h_faces(0);
     EXPECT_NEAR(mesh.h_face_normals(floor, 2), -1.0, 1e-14);
-    expect_closed_cells_and_consistent_faces(mesh, 1e-14);
+    expect_closed_cells_and_consistent_faces(mesh, roundoff(1e-14));
 }

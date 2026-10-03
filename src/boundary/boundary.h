@@ -119,17 +119,17 @@ struct BoundaryCondition {
             case BoundaryType::WALL_ISOTHERMAL:
             case BoundaryType::WALL_HEAT_FLUX:
                 if (viscous) {
-                    FOR_I_DIM W_g[1 + i] = 2.0 * data[1 + i] - W_i[1 + i];
+                    FOR_I_DIM W_g[1 + i] = 2.0_r * data[1 + i] - W_i[1 + i];
                     if (type == BoundaryType::WALL_ISOTHERMAL) {
                         const rtype T_i = W_i[E] / (W_i[0] * R);
-                        const rtype T_g = Kokkos::fmax(2.0 * data[0] - T_i, 0.1 * data[0]);
+                        const rtype T_g = Kokkos::fmax(2.0_r * data[0] - T_i, 0.1_r * data[0]);
                         W_g[0] = W_i[E] / (R * T_g);
                     }
                     break;
                 }
                 [[fallthrough]];
             case BoundaryType::SYMMETRY:
-                FOR_I_DIM W_g[1 + i] = W_i[1 + i] - 2.0 * u_n * n[i];
+                FOR_I_DIM W_g[1 + i] = W_i[1 + i] - 2.0_r * u_n * n[i];
                 break;
             case BoundaryType::UPT:
                 for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = data[i];
@@ -145,19 +145,19 @@ struct BoundaryCondition {
                 const rtype a_inf = Kokkos::sqrt(gamma * data[E] / data[0]);
                 const rtype u_n_inf = dot<N_DIM>(data + 1, n);
                 if (Kokkos::fabs(u_n) >= a_i) {
-                    if (u_n < 0.0) {
+                    if (u_n < 0.0_r) {
                         for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = data[i];
                     }
                     break;
                 }
-                const rtype r_out = u_n + 2.0 * a_i / (gamma - 1.0);
-                const rtype r_in = u_n_inf - 2.0 * a_inf / (gamma - 1.0);
-                const rtype u_n_b = 0.5 * (r_out + r_in);
-                const rtype a_b = 0.25 * (gamma - 1.0) * (r_out - r_in);
-                const rtype * W_up = (u_n_b < 0.0) ? data : W_i;
-                const rtype u_n_up = (u_n_b < 0.0) ? u_n_inf : u_n;
+                const rtype r_out = u_n + 2.0_r * a_i / (gamma - 1.0_r);
+                const rtype r_in = u_n_inf - 2.0_r * a_inf / (gamma - 1.0_r);
+                const rtype u_n_b = 0.5_r * (r_out + r_in);
+                const rtype a_b = 0.25_r * (gamma - 1.0_r) * (r_out - r_in);
+                const rtype * W_up = (u_n_b < 0.0_r) ? data : W_i;
+                const rtype u_n_up = (u_n_b < 0.0_r) ? u_n_inf : u_n;
                 const rtype entropy = W_up[E] / Kokkos::pow(W_up[0], gamma);
-                W_g[0] = Kokkos::pow(a_b * a_b / (gamma * entropy), 1.0 / (gamma - 1.0));
+                W_g[0] = Kokkos::pow(a_b * a_b / (gamma * entropy), 1.0_r / (gamma - 1.0_r));
                 FOR_I_DIM W_g[1 + i] = W_up[1 + i] + (u_n_b - u_n_up) * n[i];
                 W_g[E] = W_g[0] * a_b * a_b / gamma;
                 break;
@@ -176,7 +176,7 @@ struct BoundaryCondition {
                 if (u_n < a) {
                     // Subsonic: shift the local pressure so the boundary average
                     // matches the target, keeping temperature
-                    const rtype p_g = Kokkos::fmax(W_i[E] + data[0], 1e-3 * W_i[E]);
+                    const rtype p_g = Kokkos::fmax(W_i[E] + data[0], 1e-3_r * W_i[E]);
                     W_g[0] = W_i[0] * p_g / W_i[E];
                     W_g[E] = p_g;
                 }

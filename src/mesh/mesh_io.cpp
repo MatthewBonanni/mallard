@@ -83,7 +83,7 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
                 const auto & b = nodes[c[(k + 1) % c.size()]];
                 area2 += a[0] * b[1] - b[0] * a[1];
             }
-            if (area2 < 0.0) {
+            if (area2 < 0.0_r) {
                 cell_nodes.insert(cell_nodes.end(), c.rbegin(), c.rend());
             } else {
                 cell_nodes.insert(cell_nodes.end(), c.begin(), c.end());
@@ -541,7 +541,7 @@ MeshBlock read_gmsh_block(const std::string & filename) {
     }
     for (uint64_t n = block.first_node; n < block_begin(data.nodes.size(), r + 1, p); n++) {
         std::array<double, N_DIM> x;
-        FOR_I_DIM x[i] = data.nodes[n][i];
+        FOR_I_DIM x[i] = double(data.nodes[n][i]);
         block.node_coords.push_back(x);
     }
     // Zones numbered in order of first appearance, the same on every rank
