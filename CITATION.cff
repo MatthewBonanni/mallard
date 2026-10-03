@@ -17,6 +17,9 @@ identifiers:
   - type: doi
     value: 10.5281/zenodo.23112954
     description: "Version 0.3.0"
+  - type: doi
+    value: 10.5281/zenodo.23125024
+    description: "Version 0.4.0"
 url: "https://github.com/MatthewBonanni/mallard"
 repository-code: "https://github.com/MatthewBonanni/mallard"
 license: AGPL-3.0-only
