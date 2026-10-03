@@ -300,10 +300,6 @@ void Solver::init_physics() {
     if (gas != "mixture") {
         throw InputError("physics.gas = \"" + gas + "\" is not one of: perfect, mixture.");
     }
-    const std::string type = toml::find_or<std::string>(input, "physics", "type", "euler");
-    if (type != "euler") {
-        throw InputError("physics: gas = \"mixture\" supports type = \"euler\" only (transport comes later).");
-    }
     mixture_model = std::make_shared<MixtureModel>(MixtureModel::from_input(input));
     mixture = mixture_model->device();
     species_names = mixture_model->species_names();
@@ -433,7 +429,7 @@ void Solver::init_boundaries() {
         }
     }
     if (is_mixture()) init_mixture_boundaries(input_boundaries, bcs);
-    boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, physics.is_viscous(), physics);
+    boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics);
     if (is_mixture()) {
         const uint32_t n_species = mixture.n_species;
         boundary_data.bc_Y = Kokkos::View<rtype **, Kokkos::LayoutRight>("bc_Y", bcs.size(), n_species);
@@ -449,6 +445,18 @@ void Solver::init_boundaries() {
         }
         Kokkos::deep_copy(boundary_data.bc_Y, h_bc_Y);
         Kokkos::deep_copy(boundary_data.bc_thermo, h_thermo);
+        if (is_viscous()) {
+            bc_transport_values = Kokkos::View<rtype **, Kokkos::LayoutRight>("bc_transport_values", bcs.size(),
+                                                                              n_species + 1);
+            auto h_values = Kokkos::create_mirror_view(bc_transport_values);
+            for (size_t i_bc = 0; i_bc < bcs.size(); i_bc++) {
+                if (bc_mass_fractions[i_bc].empty()) continue;
+                const std::vector<double> X = mixture_model->mole_fractions(bc_mass_fractions[i_bc]);
+                h_values(i_bc, 0) = static_cast<rtype>(bc_temperatures[i_bc]);
+                for (uint32_t k = 0; k < n_species; k++) h_values(i_bc, 1 + k) = static_cast<rtype>(X[k]);
+            }
+            Kokkos::deep_copy(bc_transport_values, h_values);
+        }
     }
     h_face_state = Kokkos::create_mirror_view(boundary_data.face_state);
     h_face_state_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_state_index);
@@ -735,9 +743,19 @@ void Solver::allocate_memory() {
                                                               face_reconstruction->n_face_quadrature_points());
     face_flux = Kokkos::View<rtype *[N_CONSERVATIVE]>("face_flux", mesh->n_faces);
     cfl_local = Kokkos::View<rtype *>("cfl_local", mesh->n_cells);
-    if (physics.is_viscous()) {
+    if (is_viscous()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
+    }
+    if (is_mixture() && is_viscous()) {
+        cell_transport = Kokkos::View<rtype *[3]>("cell_transport", mesh->n_cells);
+        h_cell_transport = Kokkos::create_mirror_view(cell_transport);
+        cell_diffusion = Kokkos::View<double **, Kokkos::LayoutRight>("cell_diffusion", mesh->n_cells, n_species);
+        transport_values = Kokkos::View<rtype **, Kokkos::LayoutRight>("transport_values", mesh->n_cells,
+                                                                       N_DIM + 1 + n_species);
+        transport_gradients = Kokkos::View<rtype ***, Kokkos::LayoutRight>("transport_gradients", mesh->n_cells,
+                                                                           N_DIM + 1 + n_species, N_DIM);
+        h_D = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("D", mesh->n_cells, n_species);
     }
     if (is_mixture()) {
         const uint32_t n_quad = face_reconstruction->n_face_quadrature_points();
@@ -788,9 +806,28 @@ void Solver::copy_device_to_host() {
     if (species.span() > 0) Kokkos::deep_copy(h_species, species);
     if (is_mixture()) {
         Kokkos::deep_copy(h_T_seed, T_seed);
+        if (is_viscous()) {
+            // Coefficients of the current state; W and the scalars are work arrays the next RHS refills
+            update_cell_states(state(), false);
+            update_transport();
+            Kokkos::deep_copy(h_cell_transport, cell_transport);
+            auto h_c = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), cell_diffusion);
+            const auto & mech = mixture_model->mechanism();
+            for (uint32_t c = 0; c < mesh->n_cells; c++) {
+                const double rho = static_cast<double>(h_conservatives(c, 0));
+                double n = 0.0;
+                for (size_t k = 0; k < species_names.size(); k++) {
+                    n += static_cast<double>(h_species(c, k)) / (rho * mech.species[k].molecular_weight);
+                }
+                for (size_t k = 0; k < species_names.size(); k++) {
+                    h_D(c, k) = static_cast<rtype>(h_c(c, k) / (rho * mech.species[k].molecular_weight * n));
+                }
+            }
+        }
         if (reacting) {
             update_heat_release_rate();
             Kokkos::deep_copy(h_hrr, hrr);
+            Kokkos::deep_copy(h_production, production);
             Kokkos::deep_copy(h_chem_h, chem_h);
             Kokkos::deep_copy(h_chem_cost, chem_cost);
         }
@@ -822,16 +859,26 @@ void Solver::register_data() {
         data.push_back(Data("RHOY_" + species_names[k], Kokkos::subview(h_species, Kokkos::ALL(), k)));
     }
     if (is_mixture()) {
-        data.reserve(data.size() + 2 * species_names.size() + 4 + PRIMITIVE_NAMES.size() + 2);
+        data.reserve(data.size() + 4 * species_names.size() + 6 + PRIMITIVE_NAMES.size() + 2);
         for (size_t k = 0; k < species_names.size(); k++) {
             data.push_back(Data("Y_" + species_names[k], Kokkos::subview(h_Y, Kokkos::ALL(), k)));
             data.push_back(Data("X_" + species_names[k], Kokkos::subview(h_X, Kokkos::ALL(), k)));
         }
         data.push_back(Data("T_SEED", h_T_seed));
+        if (is_viscous()) {
+            data.push_back(Data("MU", Kokkos::subview(h_cell_transport, Kokkos::ALL(), 0)));
+            data.push_back(Data("LAMBDA", Kokkos::subview(h_cell_transport, Kokkos::ALL(), 1)));
+            for (size_t k = 0; k < species_names.size(); k++) {
+                data.push_back(Data("D_" + species_names[k], Kokkos::subview(h_D, Kokkos::ALL(), k)));
+            }
+        }
         if (reacting) {
             data.push_back(Data("CHEM_H", h_chem_h));
             data.push_back(Data("CHEM_COST", h_chem_cost));
             data.push_back(Data("HRR", h_hrr));
+            for (size_t k = 0; k < species_names.size(); k++) {
+                data.push_back(Data("OMEGA_" + species_names[k], Kokkos::subview(h_production, Kokkos::ALL(), k)));
+            }
         }
     }
     for (size_t i = 0; i < PRIMITIVE_NAMES.size(); i++) {
@@ -1290,6 +1337,7 @@ struct ForceFunctor {
     BoundaryData boundaries;
     Euler physics;
     bool viscous;
+    Kokkos::View<rtype *[3]> mixture_transport;  // viscous mixtures: (cell, [mu, ...]), else empty
 
     struct value_type {
         rtype v[2 * N_DIM];
@@ -1329,8 +1377,8 @@ struct ForceFunctor {
                 FOR_I_DIM g[v][i] += correction * n[i];
             }
         }
-        const rtype T = W(c, N_DIM + 1) / (W(c, 0) * physics.R);
-        const rtype mu = physics.viscosity(T);
+        const rtype mu = mixture_transport.extent(0) > 0 ? mixture_transport(c, 0)
+                                                         : physics.viscosity(W(c, N_DIM + 1) / (W(c, 0) * physics.R));
         rtype tau_n[N_DIM];
         viscous_traction(mu, g, n_A, tau_n);
         FOR_I_DIM sum[N_DIM + i] -= tau_n[i];
@@ -1349,11 +1397,13 @@ std::array<rtype, 2 * N_DIM> Solver::calc_force(const Kokkos::View<uint32_t *> &
         phys.compute_W_from_conservatives(W_c, cons);
         FOR_I_CONSERVATIVE W(i_cell, i) = W_c[i];
     });
-    if (physics.is_viscous()) {
+    if (is_viscous()) {
         Kokkos::parallel_for("force_gradients", mesh->n_cells, viscous_gradient);
+        if (is_mixture()) update_transport();
     }
     ForceFunctor functor{faces, mesh->face_normals, mesh->face_coords, mesh->cell_coords, mesh->cells_of_face,
-                         W_cells, viscous_gradients, boundary_data, physics, physics.is_viscous()};
+                         W_cells, viscous_gradients, boundary_data, physics, is_viscous(),
+                         is_mixture() ? cell_transport : Kokkos::View<rtype *[3]>()};
     ForceFunctor::value_type result;
     Kokkos::parallel_reduce("force", faces.extent(0), functor, result);
     std::array<rtype, 2 * N_DIM> F;

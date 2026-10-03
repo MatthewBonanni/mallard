@@ -1,0 +1,78 @@
+# Freely propagating stoichiometric H2/air flame at 300 K and 1 atm with
+# mixture-averaged transport (V8 of docs/design/chemistry.md), in the flame's
+# frame: the fresh mixture enters on the left at Cantera's flame speed, 2.3317
+# m/s, and leaves through a pressure outlet. 300 cells, 20 per thermal
+# thickness (0.329 mm), from 6 thicknesses upstream of the flame to 9
+# downstream; two flame times. Make the initial state from Cantera's flame
+# first, from this directory (flame_reference.py computes all twenty V8
+# flames, a few minutes):
+#
+#   python ../../tools/flame_reference.py reference full
+#   python ../../tools/flame_restart.py full/h2_phi1.0_mix_full.csv \
+#       ../../mechanisms/h2o2.yaml ohmech 20 . --flame-times 2
+#
+# then run and measure the flame speed with
+#   python ../../tools/flame_speed.py . 2.33170
+
+[run]
+t_stop = 0.00028228726308100434
+cfl = 0.4
+
+[mesh]
+type = "cartesian"
+Nx = 300
+Ny = 1
+Lx = 0.0049365796083111341
+Ly = 0.00016455265361037114
+
+[initialize]
+type = "restart"
+file = "flame.restart"
+
+[[boundaries]]
+name = "left"
+type = "upt"
+u = [2.3317049705236128, 0.0]
+p = 101325.0
+T = 300
+X = { "H2" = 0.29585798816567666, "O2" = 0.14792899408283733, "N2" = 0.55621301775148602 }
+
+[[boundaries]]
+name = "right"
+type = "p_out"
+p = 101325.0
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+phase = "ohmech"
+transport = "mixture_averaged"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+
+[output]
+check_interval = 2000
+
+[[write_data]]
+prefix = "./solut/flame"
+format = "vtu"
+time_interval = 9.409575436033478e-06
+variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"]

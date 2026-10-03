@@ -503,6 +503,40 @@ Species Reader::parse_species(const YAML::Node & node, const Source & source) co
     }
     if (!node["thermo"]) throw std::runtime_error(where + ": missing thermo.");
     sp.thermo = parse_thermo(node["thermo"], source, where);
+    if (const YAML::Node tr = node["transport"]) {
+        const std::string model = tr["model"] ? tr["model"].as<std::string>() : "";
+        if (model != "gas") throw std::runtime_error(where + ": transport model \"" + model + "\" is not supported (gas).");
+        if (!tr["geometry"] || !tr["well-depth"] || !tr["diameter"]) {
+            throw std::runtime_error(where + ": gas transport data need geometry, well-depth and diameter.");
+        }
+        double atoms = 0.0;
+        for (const auto & [element, n] : sp.composition) {
+            if (lower(element) != "e") atoms += n;
+        }
+        const std::string geometry = tr["geometry"].as<std::string>();
+        SpeciesTransport & t = sp.transport;
+        if (geometry == "atom" && atoms <= 1.0) {
+            t.geometry = MoleculeGeometry::ATOM;
+        } else if (geometry == "linear" && atoms >= 2.0) {
+            t.geometry = MoleculeGeometry::LINEAR;
+        } else if (geometry == "nonlinear" && atoms >= 3.0) {
+            t.geometry = MoleculeGeometry::NONLINEAR;
+        } else {
+            throw std::runtime_error(where + ": invalid transport geometry \"" + geometry + "\" for its atoms.");
+        }
+        auto value = [&](const char * key) { return tr[key] ? tr[key].as<double>() : 0.0; };
+        // Customary units: Angstrom, K, Debye, Angstrom^3
+        t.diameter = 1e-10 * value("diameter");
+        t.well_depth = BOLTZMANN * value("well-depth");
+        t.dipole = 1e-21 / LIGHT_SPEED * value("dipole");
+        t.polarizability = 1e-30 * value("polarizability");
+        t.rotational_relaxation = value("rotational-relaxation");
+        if (!(t.diameter > 0.0) || t.well_depth < 0.0 || t.dipole < 0.0 || t.polarizability < 0.0 ||
+            t.rotational_relaxation < 0.0) {
+            throw std::runtime_error(where + ": invalid transport data (non-positive diameter or negative values).");
+        }
+        sp.has_transport = true;
+    }
     return sp;
 }
 

@@ -12,6 +12,7 @@ add_library(MallardCore STATIC
     mesh/zone.cpp
     boundary/boundary.cpp
     chemistry/mechanism.cpp
+    chemistry/transport.cpp
     chemistry/units.cpp
     numerics/face_reconstruction.cpp
     numerics/quadrature.cpp

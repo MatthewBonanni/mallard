@@ -25,6 +25,7 @@
 #include "reactor.h"
 #include "state.h"
 #include "thermo.h"
+#include "transport.h"
 
 /** @brief Mass fractions of a cell from its contiguous partial densities. */
 struct PartialDensities {
@@ -43,7 +44,9 @@ struct PartialDensities {
  */
 struct Mixture {
     chemistry::ThermoTable<> thermo;
+    chemistry::TransportTable<> transport;  // empty for inviscid runs
     uint32_t n_species = 0;
+    bool viscous = false;
 
     /**
      * @brief State of a cell from its conservatives U and contiguous partial
@@ -79,11 +82,16 @@ struct Mixture {
  */
 class MixtureModel {
     public:
-        /** @brief From the [physics] table: mechanism and optional phase. */
+        /**
+         * @brief From the [physics] table: mechanism and optional phase; for
+         *        type = "navier_stokes" the transport model ("mixture_averaged",
+         *        "unity_lewis" or "constant_lewis" with lewis = { species = Le }).
+         */
         static MixtureModel from_input(const toml::value & input);
 
         const chemistry::Mechanism & mechanism() const { return mech; }
         const Mixture & device() const { return gas; }
+        bool viscous() const { return gas.viscous; }
         uint32_t n_species() const { return gas.n_species; }
         std::vector<std::string> species_names() const { return mech.species_names(); }
 
@@ -125,6 +133,7 @@ class MixtureModel {
         chemistry::Mechanism mech;
         chemistry::ThermoTable<Kokkos::HostSpace> host_thermo;
         Mixture gas;
+        std::string transport_name;
 };
 
 /**

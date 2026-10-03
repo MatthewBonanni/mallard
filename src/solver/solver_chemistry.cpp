@@ -133,7 +133,10 @@ struct ChemistryAdvanceFunctor {
     }
 };
 
-/** @brief Heat release rate -sum_k h_k omega_k [W/m^3] of the cells of a chunk. */
+/**
+ * @brief Heat release rate -sum_k h_k omega_k [W/m^3] and mass production
+ *        rates W_k omega_k [kg/(m^3 s)] of the cells of a chunk.
+ */
 struct HeatReleaseFunctor {
     Mixture gas;
     chemistry::KineticsTable<> kinetics;
@@ -142,6 +145,7 @@ struct HeatReleaseFunctor {
     Kokkos::View<rtype *> T_seed;
     Kokkos::View<double **, Kokkos::LayoutRight> work;
     Kokkos::View<rtype *> hrr;
+    Kokkos::View<rtype **, Kokkos::LayoutRight> production;
     uint32_t first;
 
     KOKKOS_INLINE_FUNCTION
@@ -165,7 +169,10 @@ struct HeatReleaseFunctor {
         kinetics.rates_of_progress(T, C, g_RT, h_RT, q, nullptr, nullptr, nullptr);
         kinetics.production_rates(q, omega);
         double sum = 0.0;
-        for (uint32_t k = 0; k < ns; k++) sum += h_RT[k] * omega[k];
+        for (uint32_t k = 0; k < ns; k++) {
+            sum += h_RT[k] * omega[k];
+            production(c, k) = static_cast<rtype>(omega[k] / gas.thermo.inv_W(k));
+        }
         hrr(c) = static_cast<rtype>(-chemistry::GAS_CONSTANT * T * sum);
     }
 };
@@ -210,6 +217,8 @@ void Solver::allocate_chemistry() {
     h_chem_cost = Kokkos::create_mirror_view(chem_cost);
     hrr = Kokkos::View<rtype *>("hrr", mesh->n_cells);
     h_hrr = Kokkos::create_mirror_view(hrr);
+    production = Kokkos::View<rtype **, Kokkos::LayoutRight>("production", mesh->n_cells, mixture.n_species);
+    h_production = Kokkos::create_mirror_view(production);
 
     const uint32_t ns = mixture.n_species, nr = kinetics.n_reactions;
     // Mass fractions, then the reactor's work memory
@@ -265,7 +274,7 @@ void Solver::update_heat_release_rate() {
         const uint32_t n = std::min(chunk, n_cells - first);
         Kokkos::parallel_for("heat_release_rate", n,
                              HeatReleaseFunctor{mixture, kinetics, conservatives, species, T_seed, chem_work, hrr,
-                                                first});
+                                                production, first});
     }
 }
 

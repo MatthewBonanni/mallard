@@ -23,6 +23,7 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "solver.h"
@@ -460,7 +461,7 @@ TEST(MixtureTest, InvalidMixtureInputsAreRejected) {
     };
     expect_error(base + init + "X = { H2 = 1.0 }\nY = { H2 = 1.0 }\n" + bcs + mixture(H2O2), "exactly one of X and Y");
     expect_error(base + init + "X = { CH4 = 1.0 }\n" + bcs + mixture(H2O2), "CH4");
-    expect_error(base + init + "X = { H2 = 1.0 }\n" + bcs + mixture(H2O2, "", "navier_stokes"), "physics");
+    expect_error(base + init + "X = { N2 = 1.0 }\n" + bcs + mixture(PERFECT_AIR, "", "navier_stokes"), "transport data");
     expect_error(base + init + "X = { H2 = 1.0 }\n" +
                      boundaries("type = \"farfield\"\nu = " +
                                     std::string(N_DIM == 2 ? "[0.0, 0.0]" : "[0.0, 0.0, 0.0]") +
@@ -479,7 +480,8 @@ TEST(MixtureTest, RestartedRunMatchesUninterruptedRunExactly) {
     // elsewhere and the last bits of T, and so of the flow, differ (also with
     // double flux, whose frozen thermodynamics come from the seed); with
     // chemistry so is each cell's last sub-step, which seeds the integrator
-    for (const auto & [double_flux, reacting] : {std::pair{false, false}, {true, false}, {false, true}}) {
+    for (const auto & [double_flux, reacting, viscous] :
+         {std::tuple{false, false, false}, {true, false, false}, {false, true, false}, {false, true, true}}) {
         const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mixture_restart").string();
         std::filesystem::remove_all(dir);
         auto input = [&](const std::string & init, uint32_t n_steps, const std::string & prefix) {
@@ -488,7 +490,8 @@ TEST(MixtureTest, RestartedRunMatchesUninterruptedRunExactly) {
                    "[initialize]\n" + init +
                    boundaries("type = \"extrapolation\"\n", "type = \"extrapolation\"\n", "type = \"symmetry\"\n",
                               "type = \"wall_adiabatic\"\n") +
-                   numerics("type = \"MUSCL\"\n", "HLLC", double_flux) + mixture(H2O2) +
+                   numerics("type = \"MUSCL\"\n", "HLLC", double_flux) +
+                   mixture(H2O2, "", viscous ? "navier_stokes" : "euler") +
                    (reacting ? "[chemistry]\n" : "") + "[[write_data]]\nprefix = \"" +
                    dir + "/" + prefix + "\"\nformat = \"restart\"\ninterval = 15\n";
         };

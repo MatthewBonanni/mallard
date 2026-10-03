@@ -26,6 +26,48 @@ MixtureModel MixtureModel::from_input(const toml::value & input) {
     model.host_thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(model.mech);
     model.gas.thermo = chemistry::make_thermo_table(model.mech);
     model.gas.n_species = static_cast<uint32_t>(model.mech.n_species());
+    const std::string type = toml::find_or<std::string>(physics, "type", "euler");
+    if (type != "euler" && type != "navier_stokes") {
+        throw InputError("physics.type = \"" + type + "\" is not one of: euler, navier_stokes.");
+    }
+    if (type == "euler") {
+        if (physics.contains("transport") || physics.contains("lewis")) {
+            throw InputError("physics: transport and lewis need type = \"navier_stokes\".");
+        }
+        return model;
+    }
+    model.transport_name = toml::find_or<std::string>(physics, "transport", "mixture_averaged");
+    const std::map<std::string, chemistry::TransportModel> models = {
+        {"mixture_averaged", chemistry::TransportModel::MIXTURE_AVERAGED},
+        {"unity_lewis", chemistry::TransportModel::UNITY_LEWIS},
+        {"constant_lewis", chemistry::TransportModel::CONSTANT_LEWIS}};
+    const auto it = models.find(model.transport_name);
+    if (it == models.end()) {
+        throw InputError("physics.transport = \"" + model.transport_name +
+                         "\" is not one of: mixture_averaged, unity_lewis, constant_lewis.");
+    }
+    std::vector<double> lewis;
+    if (it->second == chemistry::TransportModel::CONSTANT_LEWIS) {
+        lewis.assign(model.mech.n_species(), 1.0);
+        if (physics.contains("lewis")) {
+            const toml::value & entries = physics.at("lewis");
+            if (!entries.is_table()) throw InputError("physics.lewis must be a table of species and Lewis numbers.");
+            for (const auto & [name, value] : entries.as_table()) {
+                const int32_t k = model.mech.species_index(name);
+                if (k < 0) throw InputError("physics.lewis: no species " + name + " in the mechanism.");
+                lewis[k] = static_cast<double>(find_real(entries, name));
+                if (!(lewis[k] > 0.0)) throw InputError("physics.lewis." + name + " must be positive.");
+            }
+        }
+    } else if (physics.contains("lewis")) {
+        throw InputError("physics.lewis needs transport = \"constant_lewis\".");
+    }
+    try {
+        model.gas.transport = chemistry::make_transport_table(model.mech, it->second, lewis);
+    } catch (const std::runtime_error & e) {
+        throw InputError(std::string("physics: ") + e.what());
+    }
+    model.gas.viscous = true;
     return model;
 }
 
@@ -108,10 +150,12 @@ void MixtureModel::conservatives(double p, double T, const rtype * u, const std:
 }
 
 logging::Items MixtureModel::summary() const {
-    return {
+    logging::Items items = {
         {"Gas", "thermally perfect mixture, " + std::to_string(n_species()) + " species"},
         {"Mechanism", mech.file + (mech.phase.empty() ? "" : ", phase " + mech.phase)},
     };
+    if (viscous()) items.emplace_back("Transport", transport_name);
+    return items;
 }
 
 chemistry::ReactorOptions reactor_options(const toml::value & input) {

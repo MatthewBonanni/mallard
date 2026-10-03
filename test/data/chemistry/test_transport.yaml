@@ -1,0 +1,48 @@
+description: |-
+  Mallard test mechanism for diffusion: nitrogen (GRI-Mech 3.0 data) and a
+  copy of it with other Lennard-Jones parameters. The two have the same molar
+  mass and thermodynamics, so their interdiffusion at uniform temperature and
+  pressure is pure Fickian diffusion with their binary coefficient.
+
+phases:
+- name: gas
+  thermo: ideal-gas
+  elements: [N]
+  species: [N2, N2B]
+  transport: mixture-averaged
+  state: {T: 300.0, P: 1 atm}
+
+species:
+- name: N2
+  composition: {N: 2}
+  thermo:
+    model: NASA7
+    temperature-ranges: [300.0, 1000.0, 5000.0]
+    data:
+    - [3.298677, 1.4082404e-03, -3.963222e-06, 5.641515e-09, -2.444854e-12,
+      -1020.8999, 3.950372]
+    - [2.92664, 1.4879768e-03, -5.68476e-07, 1.0097038e-10, -6.753351e-15,
+      -922.7977, 5.980528]
+  transport:
+    model: gas
+    geometry: linear
+    well-depth: 97.53
+    diameter: 3.621
+    polarizability: 1.76
+    rotational-relaxation: 4.0
+- name: N2B
+  composition: {N: 2}
+  thermo:
+    model: NASA7
+    temperature-ranges: [300.0, 1000.0, 5000.0]
+    data:
+    - [3.298677, 1.4082404e-03, -3.963222e-06, 5.641515e-09, -2.444854e-12,
+      -1020.8999, 3.950372]
+    - [2.92664, 1.4879768e-03, -5.68476e-07, 1.0097038e-10, -6.753351e-15,
+      -922.7977, 5.980528]
+  transport:
+    model: gas
+    geometry: linear
+    well-depth: 60.0
+    diameter: 2.8
+    rotational-relaxation: 2.0

@@ -26,6 +26,8 @@ constexpr double BOLTZMANN = 1.380649e-23;           // J/K
 constexpr double GAS_CONSTANT = AVOGADRO * BOLTZMANN; // J/(kmol K)
 constexpr double ELEMENTARY_CHARGE = 1.602176634e-19; // C
 constexpr double ONE_ATM = 101325.0;                 // Pa
+constexpr double LIGHT_SPEED = 299792458.0;           // m/s
+constexpr double EPSILON_0 = 8.854187812773345e-12;  // F/m, as in Cantera
 
 /**
  * @brief Atomic weight in kg/kmol of an element symbol (Cantera's table;
@@ -63,11 +65,32 @@ struct SpeciesThermo {
     size_t range(double T) const;
 };
 
+enum class MoleculeGeometry {
+    ATOM,
+    LINEAR,
+    NONLINEAR,
+};
+
+/**
+ * @brief Gas transport data of a species (Cantera's "gas" transport model),
+ *        in SI units.
+ */
+struct SpeciesTransport {
+    MoleculeGeometry geometry = MoleculeGeometry::ATOM;
+    double diameter = 0.0;               // Lennard-Jones collision diameter [m]
+    double well_depth = 0.0;             // Lennard-Jones well depth [J]
+    double dipole = 0.0;                 // [C m]
+    double polarizability = 0.0;         // [m^3]
+    double rotational_relaxation = 0.0;  // collision number at 298 K
+};
+
 struct Species {
     std::string name;
     std::vector<std::pair<std::string, double>> composition;  // element, atoms
     double molecular_weight = 0.0;                            // kg/kmol
     SpeciesThermo thermo;
+    bool has_transport = false;
+    SpeciesTransport transport;
 };
 
 /** @brief Modified Arrhenius rate k = A T^b exp(-Ea / (R T)), SI units with kmol. */

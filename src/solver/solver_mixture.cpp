@@ -19,6 +19,7 @@
 #include "flux_functor.h"
 #include "input.h"
 #include "mixture_flux.h"
+#include "mixture_viscous_flux.h"
 
 namespace {
 
@@ -121,7 +122,7 @@ struct ResetEnergyFunctor {
     }
 };
 
-/** @brief Per-cell stable time step for CFL = 1 of an inviscid mixture, as TimeStepFunctor. */
+/** @brief Per-cell stable time step for CFL = 1 of a mixture, as TimeStepFunctor. */
 struct MixtureTimeStepFunctor {
     Kokkos::View<uint32_t *> offsets_faces_of_cell;
     Kokkos::View<uint32_t *> faces_of_cell;
@@ -133,6 +134,7 @@ struct MixtureTimeStepFunctor {
     ScalarView scalars;
     Kokkos::View<rtype *> dt_local;
     uint32_t n_species;
+    Kokkos::View<rtype *[3]> transport;  // viscous: (cell, [mu, lambda, nu_eff]), else empty
 
     KOKKOS_INLINE_FUNCTION
     rtype wave_speed(const int32_t c, const rtype * n) const {
@@ -143,7 +145,7 @@ struct MixtureTimeStepFunctor {
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c, rtype & dt_min) const {
-        rtype sum = 0.0_r;
+        rtype sum = 0.0_r, sum_area2 = 0.0_r;
         for (uint32_t k = offsets_faces_of_cell(c); k < offsets_faces_of_cell(c + 1); k++) {
             const uint32_t f = faces_of_cell(k);
             rtype n_vec[N_DIM], n[N_DIM];
@@ -152,7 +154,10 @@ struct MixtureTimeStepFunctor {
             rtype lambda = wave_speed(cells_of_face(f, 0), n);
             if (cells_of_face(f, 1) >= 0) lambda = Kokkos::fmax(lambda, wave_speed(cells_of_face(f, 1), n));
             sum += lambda * face_area(f);
+            sum_area2 += face_area(f) * face_area(f);
         }
+        // As TimeStepFunctor, with nu_eff = max(4/3 mu / rho, lambda / (rho cv), max_k D_k)
+        if (transport.extent(0) > 0) sum += 4.0_r * transport(c, NU_EFF) * sum_area2 / cell_volume(c);
         const rtype dt_c = cell_volume(c) / sum;
         dt_local(c) = dt_c;
         dt_min = Kokkos::fmin(dt_min, dt_c);
@@ -262,6 +267,15 @@ void Solver::update_cell_states(const State & solution, const bool update_seed) 
     Kokkos::parallel_for("mixture_cells", mesh->n_cells, functor);
 }
 
+void Solver::update_transport() {
+    Kokkos::parallel_for("mixture_transport", mesh->n_cells,
+                         MixtureTransportFunctor{mixture, W_cells, cell_scalars, cell_transport, cell_diffusion,
+                                                 transport_values});
+    Kokkos::parallel_for("mixture_gradients", mesh->n_cells,
+                         MixtureGradientFunctor{viscous_gradient, transport_values, transport_gradients,
+                                                bc_transport_values, mixture.n_species});
+}
+
 void Solver::freeze_thermodynamics() {
     Kokkos::parallel_for("freeze_thermodynamics", mesh->n_cells,
                          FreezeFunctor{mixture, conservatives, species, T_seed, frozen_thermo});
@@ -304,6 +318,21 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
     const uint32_t n_species = mixture.n_species;
     scalar_reconstruction.species_slots(cell_scalars, face_mdot, face_reconstruction->quadrature_face.weights,
                                         face_reconstruction->face_quad_weights, species_slots);
+    if (is_viscous()) {
+        update_transport();
+        MixtureViscousFluxFunctor viscous_functor{mesh->face_normals, mesh->face_area, mesh->face_coords,
+                                                  mesh->cell_coords, mesh->cells_of_face, mesh->shifts,
+                                                  mesh->face_shift, boundary_data, mixture, cell_scalars,
+                                                  transport_values, transport_gradients, cell_transport,
+                                                  cell_diffusion, face_flux, species_slots};
+        if (rhs_faces.extent(0) == 0) {
+            Kokkos::parallel_for("mixture_viscous_flux", mesh->n_faces, viscous_functor);
+        } else {
+            Kokkos::View<uint32_t *> list = rhs_faces;
+            Kokkos::parallel_for("mixture_viscous_flux", list.extent(0),
+                                 OverFaces<MixtureViscousFluxFunctor>{viscous_functor, list});
+        }
+    }
 
     const uint32_t n_owned = mesh->n_owned();
     StateView rhs = rhs_state.flow;
@@ -405,9 +434,14 @@ void Solver::launch_double_flux_functor() {
 
 rtype Solver::calc_dt_cfl1_mixture() {
     update_cell_states(state(), false);
+    if (is_viscous()) {
+        Kokkos::parallel_for("mixture_transport", mesh->n_owned(),
+                             MixtureTransportFunctor{mixture, W_cells, cell_scalars, cell_transport, cell_diffusion,
+                                                     transport_values});
+    }
     MixtureTimeStepFunctor functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                    mesh->face_normals, mesh->face_area, mesh->cell_volume, W_cells,
-                                   cell_scalars, cfl_local, mixture.n_species};
+                                   cell_scalars, cfl_local, mixture.n_species, cell_transport};
     rtype dt_min = std::numeric_limits<rtype>::max();
     Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor, Kokkos::Min<rtype>(dt_min));
     return comm::allreduce(dt_min, comm::Op::MIN);
@@ -435,6 +469,7 @@ void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boun
                                      std::vector<BoundaryCondition> & bcs) {
     bc_mass_fractions.assign(bcs.size(), {});
     bc_surrogates.assign(bcs.size(), {1.4, 0.0});
+    bc_temperatures.assign(bcs.size(), 0.0);
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
         const toml::value & bound = input_boundaries[i_bc];
         const std::string name = toml::find<std::string>(bound, "name");
@@ -451,6 +486,7 @@ void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boun
                 const double T = static_cast<double>(find_real(bound, "T"));
                 bc.data[0] = static_cast<rtype>(p / (mixture_model->gas_constant(Y) * T));
                 bc_mass_fractions[i_bc] = Y;
+                bc_temperatures[i_bc] = T;
                 mixture_model->surrogates(T, Y, bc_surrogates[i_bc][0], bc_surrogates[i_bc][1]);
                 break;
             }

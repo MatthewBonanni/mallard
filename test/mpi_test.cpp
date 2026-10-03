@@ -109,12 +109,14 @@ TEST(MPITest, GasMixtureMatchesSerial) {
     // Species and the temperature seeds of halo cells follow the same history
     // as their owners'; with TENO also the troubled cells' stencil choices and
     // the scalars' bound-preserving factors, and with double flux the frozen
-    // thermodynamics of each step; with chemistry each cell's reactor
-    const std::array<std::string, 3> schemes[] = {{"", "type = \"MUSCL\"\n", ""},
-                                                  {"", "type = \"TENO\"\norder = 3\n", ""},
-                                                  {"double_flux = true\n", "type = \"MUSCL\"\n", ""},
-                                                  {"", "type = \"MUSCL\"\n", "[chemistry]\n"}};
-    for (const auto & [extra, reconstruction, chemistry] : schemes) {
+    // thermodynamics of each step; with chemistry each cell's reactor; with
+    // transport the halo cells' coefficients and gradients
+    const std::array<std::string, 4> schemes[] = {{"", "type = \"MUSCL\"\n", "", "euler"},
+                                                  {"", "type = \"TENO\"\norder = 3\n", "", "euler"},
+                                                  {"double_flux = true\n", "type = \"MUSCL\"\n", "", "euler"},
+                                                  {"", "type = \"MUSCL\"\n", "[chemistry]\n", "euler"},
+                                                  {"", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes"}};
+    for (const auto & [extra, reconstruction, chemistry, type] : schemes) {
         const std::string input =
             "[run]\nn_steps = 20\ncfl = 0.5\n"
             "[mesh]\ntype = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n"
@@ -127,7 +129,7 @@ TEST(MPITest, GasMixtureMatchesSerial) {
             "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
             "[[boundaries]]\nname = \"top\"\ntype = \"p_out\"\np = 3.0e4\n"
             "[numerics]\nriemann_solver = \"HLLC\"\n" + extra + "[numerics.face_reconstruction]\n" + reconstruction +
-            "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
+            "[physics]\ntype = \"" + type + "\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
             "[output]\ncheck_interval = 1000000\n" + chemistry;
         expect_matches_serial(input);
     }

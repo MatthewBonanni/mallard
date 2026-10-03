@@ -16,6 +16,11 @@ Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the 3D
 | `plot_taylor_green.py` | Taylor-Green vortex: kinetic energy and dissipation rate (`-dE/dt` and enstrophy-based) from `[integrals]` output against the spectral DNS reference |
 | `animate_taylor_green.py` | Taylor-Green vortex animation: Q-criterion isosurfaces on the box mirrored from the computed octant, orbiting camera, and the dissipation rate tracing the reference |
 | `chemistry_reference.py` | Reference data for the chemistry tests from Cantera (`pip install cantera`): writes the CSV files in `test/data/chemistry/`, which are committed so the tests need no Cantera |
+| `transport_reference.py` | Transport reference data from Cantera: species viscosities, conductivities and binary diffusion coefficients, and mixture-averaged and unity-Lewis mixture properties, as CSV files in `test/data/chemistry/` |
+| `flame_reference.py` | Freely propagating premixed flames (Cantera `FreeFlame`) of H2/air and CH4/air at 300 K and 1 atm, phi 0.6-1.4, mixture-averaged and unity Lewis: flame speeds, thermal thicknesses and profiles in `examples/premixed_flame/reference/`, and optionally each flame's full solution |
+| `flame_restart.py` | A 1D premixed-flame run (input and restart file) in the flame's frame from a Cantera flame's full solution, at a given number of cells per thermal thickness |
+| `flame_speed.py` | Consumption and displacement speeds of a premixed-flame run over time, against a reference flame speed |
+| `plot_flame.py` | Temperature and heat release profiles of a premixed-flame run against Cantera's, aligned at the maximum of dT/dx |
 | `make_sphere_mesh.py` | Gmsh tetrahedral mesh of the quarter domain around a sphere (symmetry planes y = 0 and z = 0), refined on the sphere and through the bow-shock layer |
 | `plot_sphere.py` | Bow-shock standoff of supersonic flow over a sphere, from the meridian-plane output, against Billig's correlation |
 | `animate_sphere.py` | Sphere animation: Mach number on the horizontal meridian plane, schlieren on the vertical one, the bow shock revolved into a 3D surface, and the standoff history against Billig |

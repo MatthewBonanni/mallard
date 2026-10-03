@@ -168,7 +168,8 @@ constexpr uint32_t reactor_work_size(const uint32_t ns, const uint32_t nr) {
 /**
  * @brief Advance one adiabatic constant-volume reactor over dt: integrate
  *        (Y, T), then clip negative mass fractions, renormalize, and take T
- *        from the initial internal energy (so energy is exact).
+ *        from the initial internal energy (so energy is exact). Negative
+ *        initial mass fractions are clipped the same way before integrating.
  * @param Y Mass fractions (n_species), T temperature: updated in place.
  * @param h Sub-step size: first guess in, proposal for the next call out.
  * @param work reactor_work_size(n_species, n_reactions) doubles.
@@ -186,12 +187,24 @@ KOKKOS_INLINE_FUNCTION RosenbrockResult advance_reactor(const ThermoTable<Memory
     double * integrator_work = scratch + ConstantVolumeReactor<MemorySpace>::scratch_size(ns, kinetics.n_reactions);
     double e, cv;
     thermo.e_cv(T, MassFractions{Y}, e, cv);
-    for (uint32_t k = 0; k < ns; k++) y[k] = Y[k];
+    double sum = 0.0;
+    bool negative = false;
+    for (uint32_t k = 0; k < ns; k++) {
+        y[k] = Kokkos::fmax(Y[k], 0.0);
+        negative = negative || Y[k] < 0.0;
+        sum += y[k];
+    }
     y[ns] = T;
+    if (negative) {
+        // Small negative mass fractions (e.g. from explicit diffusion) would
+        // reject every sub-step: start from the clipped composition at the same energy
+        for (uint32_t k = 0; k < ns; k++) y[k] /= sum;
+        y[ns] = thermo.T_from_e(e, MassFractions{y}, T);
+    }
     const ConstantVolumeReactor<MemorySpace> reactor{thermo, kinetics, rho, options.atol_Y, scratch};
     const RosenbrockResult result = integrate(reactor, 0.0, dt, y, h, options.integrator, integrator_work, pivot,
                                               static_cast<Observer &&>(observer));
-    double sum = 0.0;
+    sum = 0.0;
     for (uint32_t k = 0; k < ns; k++) {
         Y[k] = Kokkos::fmax(y[k], 0.0);
         sum += Y[k];

@@ -1,7 +1,7 @@
 # Design: finite-rate chemistry
 
 Status: accepted (see [Decisions on the open questions](#decisions-on-the-open-questions)).
-Implementation follows the [milestones](#10-milestones); done: 1, 2, 3, 4, 5, 6, 7, 8.
+Implementation follows the [milestones](#10-milestones); done: 1, 2, 3, 4, 5, 6, 7, 8, 9.
 
 Mallard today solves a single calorically perfect gas. This document adds
 multicomponent, thermally perfect mixtures and finite-rate chemistry with
@@ -764,6 +764,124 @@ q    = -lambda grad T + sum_k h_k j_k
   order in `dt` for the coefficients but small, since they vary slowly; the
   two-CFL flame test measures it), and `constant_lewis` avoids it.
 
+### As implemented (milestone 9)
+
+`src/chemistry/transport.h`, `transport.cpp`; `src/numerics/mixture_viscous_flux.h`.
+
+- **Fits**: a port of Cantera 3.2's `GasTransport` fitting (collision
+  integrals of Monchick & Mason with their fits in the reduced dipole moment,
+  the polar/nonpolar corrections of the well depth and diameter, Parker's
+  rotational relaxation in the conductivity, weighted least squares of degree
+  4 in `ln T` over 50 points of the common thermo range). Species viscosities,
+  conductivities and binary diffusion coefficients match Cantera's to 1e-6
+  relative (worst seen: 2e-12) for h2o2 and GRI-3.0
+  (`tools/transport_reference.py`).
+- **Mixture rules** as Cantera's `mixture-averaged` and `unity-Lewis-number`
+  models, including its floor of 1e-20 on mole fractions in the mixing rules,
+  with two deviations that only matter where Cantera's formula breaks down:
+  `1 - Y_k` in `D_km = (1 - Y_k) / sum_(j != k) X_j / D_kj` is summed from the
+  other species (Cantera's `(W - X_k W_k) / W` leaves round-off over a
+  denominator of order 1e-20 in a nearly pure species, which gave `D_km` of
+  1e8 m^2/s and a vanishing time step), and negative mass fractions count as
+  zero. Mixture properties match Cantera to 1e-6.
+- **Fluxes** as in the formulas above (Cantera's default mole-fraction flux
+  basis), with the face `Y` normalized so that `sum_k j_k = 0` to round-off.
+  The coefficients are computed per cell (all cells, halo included, once per
+  RK stage) and averaged to faces, rather than evaluated at a face state:
+  half the `O(Ns^2)` work on hexahedra and a third on triangles, at the same
+  order. The gradients of `[u, T, X_1 .. X_Ns]` use the viscous gradient's
+  stencil and weights; boundary ghosts take the ghost state's velocity
+  (no-slip walls), and the prescribed `T` and `X` at `upt` faces. Walls and
+  symmetry planes carry no heat or species flux; transmissive faces take
+  their image face's values; outflow faces have zero normal derivatives.
+  `T = p / (rho R)` from `W`, also under double flux.
+- **Positivity**: explicit diffusion with the correction velocity can make
+  mass fractions slightly negative (1e-8 seen next to a contact); the
+  transport coefficients clip them, and so does the reactor at the start of a
+  chemistry call (renormalizing at the same energy), since a negative
+  starting `Y_k` would reject every sub-step. Cells without negative mass
+  fractions integrate exactly as before.
+- Walls of mixture runs are no-slip under `navier_stokes`; isothermal walls
+  (which need `R(Y)` in the ghost state) are still rejected for mixtures.
+- The frozen-coefficient option is not implemented: transport is 25% of the
+  GRI-3.0 flame's step on a CPU core, chemistry 75%.
+- Output: `MU`, `LAMBDA`, `D_<species>` (`D_km`), and `OMEGA_<species>`
+  (mass production rates `W_k omega_k`, for consumption speeds).
+
+Verification (`test/mixture_transport_test.cpp`, exact solutions): the
+interdiffusion of two gases with equal molar masses and thermodynamics
+follows the erf solution with their binary coefficient (max error 1.9e-4 in
+`Y` at 100 cells), with `p` uniform to 1e-9; the mixing of H2 and N2 at 1000 K
+stays isothermal within 2 K (76 K without the enthalpy flux); periodic shear
+and temperature waves decay at `mu k^2 / rho` (to 3e-6) and
+`lambda k^2 / (rho cp)` (to 3e-3, the coupling to acoustics). Reacting
+viscous runs are bitwise identical on 1-4 ranks and across restarts.
+
+V8 (`examples/premixed_flame`, `tools/flame_reference.py`,
+`flame_restart.py`, `flame_speed.py`): a 1D strip in
+the flame's frame, started from Cantera's flame (`FreeFlame`, same mechanism
+and transport model, refined to `slope = curve = 0.02`) shifted to 6 thermal
+thicknesses `delta_T = (T_b - T_u) / max dT/dx` from the inlet, 9 to the
+outlet; 20 cells per `delta_T` (cells ten times taller than wide, so that the
+cross-stream faces do not limit the time step); fresh mixture entering at
+Cantera's flame speed through `upt` and a pressure outlet at 1 atm; MUSCL,
+HLLC, SSPRK3, CFL 0.4 (and 0.2), two flame times `delta_T / S_L`. Why this
+setup: a frame moving with the flame would need moving-frame terms the solver
+does not have, and a flame propagating into gas at rest needs a domain many
+flame lengths long; holding it near its Cantera position keeps the domain at
+15 `delta_T`. The flame speed is measured as the consumption speed of the
+deficient reactant, `S_c = -int W_k omega_k dx / (rho_u (Y_k,u - Y_k,b))`
+(H2 or CH4 lean, O2 rich), which equals the flame speed of a steady flame in
+any frame, so the inflow velocity need not match it: the `upt` inlet, which
+imposes `p` as well as `u`, lets the inflow settle 3% below the imposed
+velocity, and the flame drifts upstream at a few cm/s. The displacement speed
+`u_inlet - dx_f/dt` of the mid-temperature point is the cross-check; both
+are averaged over the last third (`S_c`) or half (`S_d`) of the run, after the
+transient of about half a flame time in which the flame relaxes from
+Cantera's discretization to Mallard's.
+
+| H2/air, phi | 0.6 | 0.8 | 1.0 | 1.2 | 1.4 |
+|---|---|---|---|---|---|
+| Cantera `S_L` [m/s], mixture-averaged | 0.8075 | 1.6567 | 2.3317 | 2.7806 | 3.0341 |
+| Mallard `S_c` error | +0.60% | +0.31% | +0.24% | +0.32% | -0.20% |
+| Mallard `S_d` error | +0.44% | +0.11% | +0.21% | +0.21% | -0.01% |
+| Cantera `S_L` [m/s], unity Lewis | 0.9575 | 1.3716 | 1.6431 | 1.8013 | 1.8713 |
+| Mallard `S_c` error | -0.81% | -0.72% | -0.68% | -0.65% | -0.56% |
+| Mallard `S_d` error | -0.84% | -0.74% | -0.81% | -0.72% | -0.61% |
+
+All within the 2% criterion at 20 cells per `delta_T`. CFL 0.2 against 0.4
+(phi 0.6, 1.0, 1.4, both models): the consumption speeds differ by at most
+0.01%, against the 0.5% criterion, so Strang splitting adds no measurable
+error at these steps. Temperature and heat-release profiles overlay
+Cantera's (`tools/plot_flame.py`; below, phi = 1, mixture-averaged): peak heat
+release within 2%, temperature within 10-30 K where the profile is steepest
+(a fraction of a cell of offset). The unity-Lewis flames are consistently
+0.6-0.8% slow; Cantera's "unity-Lewis-number" model with its default
+mole-fraction flux basis (as Mallard's) is not exactly unity Lewis, so this is
+not a modeling difference, but its source has not been isolated.
+
+![H2/air flame, phi = 1](../images/premixed_flame_h2.png)
+
+CH4/air with GRI-3.0 costs about 15x more per step and needs 4-20x more steps
+per flame time (slower flames, the acoustic time step), so only phi = 1 is
+run here, over 1.5 flame times (three hours on six CPU threads):
+
+| CH4/air, phi = 1 | Cantera `S_L` [m/s] | `S_c` error | `S_d` error |
+|---|---|---|---|
+| mixture-averaged (CFL 0.2) | 0.3758 | -0.93% | -1.80% |
+| unity Lewis (CFL 0.4) | 0.2865 | -0.04% | -0.78% |
+
+Both are within 2%; the mixture-averaged consumption speed was still falling
+(0.4% over the last half flame time, and slowing), and the displacement speed,
+averaged over a longer window, still carries some of the initial transient.
+CFL 0.4 against 0.2 (mixture-averaged, at equal times up to 1.15 flame
+times): within 0.03%. The other equivalence ratios (references in
+`examples/premixed_flame/reference/`) are left as a follow-up for the GPU
+kernels of milestone 10.
+
+On a CPU core, chemistry is 68% of the H2 flame's step (h2o2) and 75% of the
+CH4 flame's (GRI-3.0); transport is most of the rest of the latter.
+
 ### Inviscid runs
 
 `type = "euler"` with a mechanism means reactive Euler: species are advected
@@ -853,8 +971,8 @@ surrogate `(gamma, e0)`:
 `farfield` uses the Riemann invariants with each side's frozen `gamma`.
 Catalytic walls and species-specific wall fluxes are out of scope.
 
-Milestone 3 supports `extrapolation`, `symmetry`, `wall_adiabatic` (slip, as
-mixtures are inviscid until milestone 9), `upt` and `p_out` for mixtures;
+Milestone 3 supports `extrapolation`, `symmetry`, `wall_adiabatic` (slip for
+`euler`, no-slip for `navier_stokes` from milestone 9), `upt` and `p_out` for mixtures;
 `farfield`, `dirichlet` and `p_out_average` are rejected at input until they
 are needed.
 

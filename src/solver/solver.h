@@ -166,6 +166,11 @@ class Solver {
          *        and the last bits of T, do not depend on output or diagnostics.
          */
         void update_cell_states(const State & solution, bool update_seed);
+        /**
+         * @brief Viscous mixtures, after update_cell_states: transport
+         *        coefficients of every cell and the gradients of [u, T, X].
+         */
+        void update_transport();
 
         /**
          * @brief Reacting mixtures: read [chemistry]; advance every owned cell
@@ -181,6 +186,8 @@ class Solver {
 
         /** @brief Whether the gas is a mixture (a mechanism is given). */
         bool is_mixture() const { return mixture_model != nullptr; }
+        /** @brief Whether the flow is viscous (Navier-Stokes), for a single gas or a mixture. */
+        bool is_viscous() const { return is_mixture() ? mixture.viscous : physics.is_viscous(); }
         const MixtureModel & get_mixture() const { return *mixture_model; }
 
         /**
@@ -315,6 +322,7 @@ class Solver {
         ScalarReconstruction scalar_reconstruction;
         std::vector<std::vector<double>> bc_mass_fractions;  // per boundary condition, empty unless prescribed
         std::vector<std::array<double, 2>> bc_surrogates;    // [gamma, e0] of prescribed states
+        std::vector<double> bc_temperatures;                  // T of prescribed states
         BoundaryData boundary_data;
         std::vector<DirichletBoundary> dirichlet_boundaries;
         struct AveragePressureOutlet {
@@ -356,6 +364,13 @@ class Solver {
         Kokkos::View<rtype **[2][2]> face_thermo;              // (face, q, side, [gamma, e0])
         Kokkos::View<rtype **> face_mdot;                     // (face, q)
         Kokkos::View<rtype ***, Kokkos::LayoutRight> species_slots;  // (face, side, k)
+        Kokkos::View<rtype *[3]> cell_transport;                     // viscous: (cell, [mu, lambda, nu_eff])
+        Kokkos::View<rtype *[3]>::host_mirror_type h_cell_transport;
+        Kokkos::View<double **, Kokkos::LayoutRight> cell_diffusion;  // (cell, k): rho D_k W_k / W
+        Kokkos::View<rtype **, Kokkos::LayoutRight> transport_values;      // (cell, [u, T, X_1 .. X_Ns])
+        Kokkos::View<rtype ***, Kokkos::LayoutRight> transport_gradients;  // (cell, variable, dimension)
+        Kokkos::View<rtype **, Kokkos::LayoutRight> bc_transport_values;   // (condition, [T, X]) of UPT
+        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_D;  // output: D_k
         Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_Y, h_X;  // output
 
         // Chemistry (Strang splitting around each flow step)
@@ -369,6 +384,8 @@ class Solver {
         Kokkos::View<rtype *>::host_mirror_type h_chem_cost;
         Kokkos::View<rtype *> hrr;        // heat release rate, for output
         Kokkos::View<rtype *>::host_mirror_type h_hrr;
+        Kokkos::View<rtype **, Kokkos::LayoutRight> production;  // W_k omega_k, for output
+        Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type h_production;
         Kokkos::View<double **, Kokkos::LayoutRight> chem_work;     // (cell of a chunk, work)
         Kokkos::View<uint32_t **, Kokkos::LayoutRight> chem_pivot;
         Kokkos::View<uint32_t *> chem_active, chem_queue;

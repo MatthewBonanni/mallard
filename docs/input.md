@@ -117,10 +117,18 @@ translation = [1.0, 0.0]
 | `gas` | `perfect` (default): a calorically perfect gas set by the keys above; `mixture`: a thermally perfect mixture of the species of a mechanism (no `gamma`, `p_ref`, `T_ref`, `rho_ref`) |
 | `mechanism` | (`mixture`) A [Cantera YAML](https://cantera.org/stable/yaml/index.html) file, e.g. `mechanisms/h2o2.yaml` (see `mechanisms/README.md`); Chemkin files convert with Cantera's `ck2yaml` |
 | `phase` | (`mixture`) Phase of the file to use; default the first |
+| `transport` | (`mixture`, `navier_stokes`) `mixture_averaged` (default: Wilke viscosity, Mathur conductivity, mixture-averaged diffusion coefficients), `unity_lewis` (diffusion coefficients `lambda / (rho cp)`) or `constant_lewis` (`lambda / (rho cp Le_k)`), as Cantera's models, from the species' transport data in the file |
+| `lewis` | (`constant_lewis`) Lewis numbers by species, e.g. `lewis = { H2 = 0.3, H = 0.18 }`; others 1 |
 
 Gas mixtures (`gas = "mixture"`) react when the input has a `[chemistry]`
-table, and need `type = "euler"` and the `Rusanov`, `HLL` or `HLLC` Riemann solver; any face
-reconstruction works. Species thermodynamics are NASA-7, NASA-9 or constant-cp
+table, and need the `Rusanov`, `HLL` or `HLLC` Riemann solver; any face
+reconstruction works. With `type = "navier_stokes"` they are viscous, heat
+conducting and diffusing: species diffuse along mole-fraction gradients with a
+correction velocity (so the diffusive mass fluxes sum to zero) and carry their
+enthalpy, and the time step includes the largest of `4/3 mu / rho`,
+`lambda / (rho cv)` and the species' diffusion coefficients. Walls are no-slip,
+adiabatic and non-catalytic (`wall_isothermal` is not yet available for
+mixtures). Species thermodynamics are NASA-7, NASA-9 or constant-cp
 polynomials from the file, evaluated in double precision in every build. Each
 species is transported (`rho Y_k`) with mass-flux upwinding, so mass fractions
 stay in [0, 1] and sum to one; all mass fractions share one stencil and one
@@ -296,7 +304,7 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | `prefix` | Output path prefix; directories are created as needed |
 | `format` | `vtu` (with a `.pvd` series next to it) or `restart` |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
-| `variables` | (`vtu`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `[chemistry]` also `HRR` and `CHEM_COST`). A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
+| `variables` | (`vtu`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m^3 s)]). A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
 | `geometry` | (`vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |
 
 ## `MallardReactor`
