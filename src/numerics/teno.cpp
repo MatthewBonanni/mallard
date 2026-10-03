@@ -1744,37 +1744,37 @@ struct TENOFunctor {
     void entry_conservatives(const int32_t c, const int32_t f, rtype * U) const {
         if constexpr (PRIM) {
             entry_W(c, f, U);
-            return;
+        } else {
+            rtype W_e[N_CONSERVATIVE];
+            entry_W(c, f, W_e);
+            U[0] = W_e[0];
+            FOR_I_DIM U[1 + i] = W_e[0] * W_e[1 + i];
+            U[N_DIM + 1] = W_e[N_DIM + 1] / (gamma - 1.0_r) + 0.5_r * W_e[0] * dot<N_DIM>(W_e + 1, W_e + 1);
         }
-        rtype W_e[N_CONSERVATIVE];
-        entry_W(c, f, W_e);
-        U[0] = W_e[0];
-        FOR_I_DIM U[1 + i] = W_e[0] * W_e[1 + i];
-        U[N_DIM + 1] = W_e[N_DIM + 1] / (gamma - 1.0_r) + 0.5_r * W_e[0] * dot<N_DIM>(W_e + 1, W_e + 1);
     }
 
     KOKKOS_INLINE_FUNCTION
     void conservatives(const int32_t c, rtype * U) const {
         if constexpr (PRIM) {
             FOR_I_CONSERVATIVE U[i] = W(c, i);
-            return;
+        } else {
+            rtype W_c[N_CONSERVATIVE];
+            FOR_I_CONSERVATIVE W_c[i] = W(c, i);
+            U[0] = W_c[0];
+            FOR_I_DIM U[1 + i] = W_c[0] * W_c[1 + i];
+            U[N_DIM + 1] = W_c[N_DIM + 1] / (gamma - 1.0_r) + 0.5_r * W_c[0] * dot<N_DIM>(W_c + 1, W_c + 1);
         }
-        rtype W_c[N_CONSERVATIVE];
-        FOR_I_CONSERVATIVE W_c[i] = W(c, i);
-        U[0] = W_c[0];
-        FOR_I_DIM U[1 + i] = W_c[0] * W_c[1 + i];
-        U[N_DIM + 1] = W_c[N_DIM + 1] / (gamma - 1.0_r) + 0.5_r * W_c[0] * dot<N_DIM>(W_c + 1, W_c + 1);
     }
 
     KOKKOS_INLINE_FUNCTION
     void to_primitives(const rtype * U, rtype * Wq) const {
         if constexpr (PRIM) {
             FOR_I_CONSERVATIVE Wq[i] = U[i];
-            return;
+        } else {
+            Wq[0] = U[0];
+            FOR_I_DIM Wq[1 + i] = U[1 + i] / U[0];
+            Wq[N_DIM + 1] = (gamma - 1.0_r) * (U[N_DIM + 1] - 0.5_r * U[0] * dot<N_DIM>(Wq + 1, Wq + 1));
         }
-        Wq[0] = U[0];
-        FOR_I_DIM Wq[1 + i] = U[1 + i] / U[0];
-        Wq[N_DIM + 1] = (gamma - 1.0_r) * (U[N_DIM + 1] - 0.5_r * U[0] * dot<N_DIM>(Wq + 1, Wq + 1));
     }
 
     KOKKOS_INLINE_FUNCTION
@@ -1835,20 +1835,20 @@ struct TENOFunctor {
         }
         if constexpr (PRIM) {
             FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) gradients(i_cell, i, d) = dU[i][d];
-            return;
-        }
-        const rtype rho = W(i_cell, 0);
-        rtype u[N_DIM];
-        FOR_I_DIM u[i] = W(i_cell, 1 + i);
-        FOR_I_DIM {
-            gradients(i_cell, 0, i) = dU[0][i];
-            rtype work = dU[N_DIM + 1][i] - 0.5_r * dot<N_DIM>(u, u) * dU[0][i];
-            for (uint8_t k = 0; k < N_DIM; k++) {
-                const rtype du = (dU[1 + k][i] - u[k] * dU[0][i]) / rho;
-                gradients(i_cell, 1 + k, i) = du;
-                work -= rho * u[k] * du;
+        } else {
+            const rtype rho = W(i_cell, 0);
+            rtype u[N_DIM];
+            FOR_I_DIM u[i] = W(i_cell, 1 + i);
+            FOR_I_DIM {
+                gradients(i_cell, 0, i) = dU[0][i];
+                rtype work = dU[N_DIM + 1][i] - 0.5_r * dot<N_DIM>(u, u) * dU[0][i];
+                for (uint8_t k = 0; k < N_DIM; k++) {
+                    const rtype du = (dU[1 + k][i] - u[k] * dU[0][i]) / rho;
+                    gradients(i_cell, 1 + k, i) = du;
+                    work -= rho * u[k] * du;
+                }
+                gradients(i_cell, N_DIM + 1, i) = (gamma - 1.0_r) * work;
             }
-            gradients(i_cell, N_DIM + 1, i) = (gamma - 1.0_r) * work;
         }
     }
 

@@ -69,8 +69,6 @@ Table read_table(const std::string & file) {
 
 /** @brief Van der Pol oscillator with mu = 1 (not stiff). */
 struct VanDerPol {
-    KOKKOS_INLINE_FUNCTION uint32_t size() const { return 2; }
-    KOKKOS_INLINE_FUNCTION double atol(uint32_t) const { return 0.0; }
     template <typename L> KOKKOS_INLINE_FUNCTION bool admissible(const L &, const double *) const { return true; }
     template <typename L> KOKKOS_INLINE_FUNCTION void rhs(const L &, const double * y, double * f) const {
         f[0] = y[1];
