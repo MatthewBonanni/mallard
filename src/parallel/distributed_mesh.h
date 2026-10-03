@@ -49,6 +49,9 @@ class Mesh;
  */
 class DistributedMesh {
     public:
+        /** @brief Periodic node -> (key, lattice offset), as in PeriodicNodes but by global id. */
+        using PeriodicMap = std::unordered_map<uint64_t, std::pair<uint64_t, std::array<int8_t, 3>>>;
+
         /**
          * @brief Match faces across ranks, joining the zones of the periodic
          *        pairs (collective).
@@ -65,6 +68,9 @@ class DistributedMesh {
         /** @brief Dual graph of the block cells (cells sharing a face), by global id (CSR); until distribute(). */
         const std::vector<uint64_t> & graph_offsets() const { return graph_offsets_; }
         const std::vector<uint64_t> & graph_neighbors() const { return graph_neighbors_; }
+
+        /** @brief Periodic classes of the periodic nodes of the block's cells and boundary faces, and no others. */
+        const PeriodicMap & block_periodic_classes() const { return block_periodic; }
 
         /** @brief Vertex average of every block cell (collective). */
         std::vector<std::array<double, N_DIM>> block_cell_centers() const;
@@ -90,14 +96,20 @@ class DistributedMesh {
             std::vector<uint64_t> node_offsets{0}, nodes;            // global node ids
             std::vector<uint32_t> boundary_offsets{0};
             std::vector<std::array<uint32_t, 2>> boundary;           // (local face, zone)
+            PeriodicMap periodic;                                    // classes of their periodic nodes
         };
 
         /**
-         * @brief Match the nodes of the periodic zones: every rank gathers the
-         *        zones' faces and nodes (a surface of the mesh) and finds the
-         *        same classes (collective).
+         * @brief Match the nodes of the periodic zones without gathering them:
+         *        zone nodes meet at ranks chosen by hashing their grid cells,
+         *        the matches join into classes at the ranks whose node blocks
+         *        hold the nodes, and each rank gets the classes of its block's
+         *        nodes (collective).
          */
         void match_periodic(const std::vector<Mesh::PeriodicPair> & pairs);
+
+        /** @brief Periodic key and lattice offset of a node this rank uses; null if it is not periodic. */
+        const std::pair<uint64_t, std::array<int8_t, 3>> * periodic_class(uint64_t g) const;
 
         /** @brief Periodic key of a node (the node itself if it is not periodic). */
         uint64_t node_key(uint64_t g) const;
@@ -112,9 +124,8 @@ class DistributedMesh {
         MeshBlock block;
         std::vector<uint64_t> cell_dist, node_dist;
         std::vector<std::string> zones;  // the block's zones, then "unassigned"
-        // Periodic nodes: key and lattice offset of every node of a periodic zone
         PeriodicNodes periodic_classes;  // translations and zones only
-        std::unordered_map<uint64_t, std::pair<uint64_t, std::array<int8_t, 3>>> periodic_nodes;
+        PeriodicMap block_periodic;      // classes of the periodic nodes of the block's cells and faces
         std::vector<uint64_t> graph_offsets_, graph_neighbors_;
         std::vector<uint32_t> boundary_offsets{0};
         std::vector<std::array<uint32_t, 2>> boundary;  // per block cell: (local face, zone)

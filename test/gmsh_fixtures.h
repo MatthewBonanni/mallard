@@ -83,6 +83,57 @@ inline std::string jittered_mixed_mesh(uint32_t n) {
 }
 
 /**
+ * @brief Gmsh 2.2 file of the unit square with zones left/right (x) and
+ *        bottom/top (y): columns alternate between quads and pairs of
+ *        triangles. Every node moves by a random displacement that depends on
+ *        its lattice indices modulo n and keeps it on its boundary lines, so
+ *        the seams are jittered, yet each zone is its opposite zone translated.
+ */
+inline std::string jittered_periodic_mesh_2d(uint32_t n, double amplitude = 0.15) {
+    std::mt19937 rng(11);
+    std::uniform_real_distribution<double> jitter(-amplitude, amplitude);
+    std::vector<std::array<double, 2>> displacement(n * n);
+    for (auto & d : displacement) d = {jitter(rng), jitter(rng)};
+    auto id = [&](uint32_t i, uint32_t j) { return std::to_string(j * (n + 1) + i + 1); };
+    std::ostringstream s;
+    s << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$PhysicalNames\n4\n"
+      << "1 1 \"bottom\"\n1 2 \"right\"\n1 3 \"top\"\n1 4 \"left\"\n$EndPhysicalNames\n"
+      << "$Nodes\n" << (n + 1) * (n + 1) << "\n";
+    s.precision(17);
+    for (uint32_t j = 0; j <= n; j++) {
+        for (uint32_t i = 0; i <= n; i++) {
+            const uint32_t idx[2] = {i, j};
+            const auto & d = displacement[(j % n) * n + i % n];
+            s << id(i, j);
+            for (int a = 0; a < 2; a++) s << " " << (idx[a] + (idx[a] % n ? d[a] : 0.0)) / n;
+            s << " 0\n";
+        }
+    }
+    std::vector<std::string> elements;
+    for (uint32_t i = 0; i < n; i++) {
+        elements.push_back("1 2 1 1 " + id(i, 0) + " " + id(i + 1, 0));
+        elements.push_back("1 2 3 3 " + id(i + 1, n) + " " + id(i, n));
+        elements.push_back("1 2 4 4 " + id(0, i + 1) + " " + id(0, i));
+        elements.push_back("1 2 2 2 " + id(n, i) + " " + id(n, i + 1));
+    }
+    for (uint32_t j = 0; j < n; j++) {
+        for (uint32_t i = 0; i < n; i++) {
+            const auto a = id(i, j), b = id(i + 1, j), c = id(i + 1, j + 1), d = id(i, j + 1);
+            if (i % 2 == 0) {
+                elements.push_back("3 2 0 1 " + a + " " + b + " " + c + " " + d);
+            } else {
+                elements.push_back("2 2 0 1 " + a + " " + b + " " + c);
+                elements.push_back("2 2 0 1 " + a + " " + c + " " + d);
+            }
+        }
+    }
+    s << "$EndNodes\n$Elements\n" << elements.size() << "\n";
+    for (size_t k = 0; k < elements.size(); k++) s << k + 1 << " " << elements[k] << "\n";
+    s << "$EndElements\n";
+    return s.str();
+}
+
+/**
  * @brief Gmsh 2.2 file of the unit cube with zones left/right (x),
  *        bottom/top (y) and back/front (z): columns alternate between
  *        hexahedra and pairs of prisms. Every node moves by a random

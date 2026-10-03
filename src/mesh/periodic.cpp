@@ -64,35 +64,18 @@ struct LatticeUnionFind {
     }
 };
 
-std::string coords_string(const std::array<rtype, N_DIM> & x) {
-    std::string s = "(";
-    FOR_I_DIM s += (i ? ", " : "") + std::to_string(x[i]);
-    return s + ")";
-}
-
 } // namespace
 
-PeriodicNodes match_periodic_nodes(const std::vector<std::array<rtype, N_DIM>> & nodes,
-                                   const std::vector<Mesh::BoundaryFace> & boundary_faces,
-                                   const std::vector<Mesh::PeriodicPair> & pairs) {
-    const uint32_t n_nodes = nodes.size();
-    PeriodicNodes result;
-    std::map<std::string, std::vector<const Mesh::BoundaryFace *>> faces_of_zone;
-    for (const auto & bf : boundary_faces) faces_of_zone[bf.zone].push_back(&bf);
-
-    LatticeUnionFind classes(n_nodes);
+std::vector<size_t> periodic_directions(const std::vector<Mesh::PeriodicPair> & pairs, PeriodicNodes & result) {
     std::set<std::string> used_zones;
+    std::vector<size_t> dirs;
     for (const auto & pair : pairs) {
         for (const std::string & zone : {pair.zone_a, pair.zone_b}) {
             result.zones.push_back(zone);
-            if (!faces_of_zone.count(zone)) {
-                throw std::runtime_error("Periodic zone " + zone + " is not a boundary zone of the mesh.");
-            }
             if (!used_zones.insert(zone).second) {
                 throw std::runtime_error("Periodic zone " + zone + " appears in more than one periodic pair.");
             }
         }
-        // Lattice direction of this pair: shared with pairs of the same translation
         rtype length = 0.0;
         FOR_I_DIM length = std::max(length, std::abs(pair.translation[i]));
         if (length == 0.0_r) {
@@ -108,7 +91,71 @@ PeriodicNodes match_periodic_nodes(const std::vector<std::array<rtype, N_DIM>> &
             if (dir == 3) throw std::runtime_error("At most three distinct periodic translations are supported.");
             result.translations.push_back(pair.translation);
         }
+        dirs.push_back(dir);
+    }
+    return dirs;
+}
 
+rtype periodic_tolerance(rtype h) { return precision_tol(1e-6, 1e-3) * h; }
+
+PeriodicGrid::Cell PeriodicGrid::cell_of(const Point & x) const {
+    Cell c;
+    FOR_I_DIM c[i] = static_cast<int64_t>(std::floor(x[i] / h));
+    return c;
+}
+
+PeriodicGrid::Cell PeriodicGrid::neighbor(const Cell & c, int m) {
+    Cell q;
+    FOR_I_DIM {
+        q[i] = c[i] + (m % 3) - 1;
+        m /= 3;
+    }
+    return q;
+}
+
+uint32_t PeriodicGrid::find(const Point & y, uint32_t & match) const {
+    const Cell c = cell_of(y);
+    uint32_t n_found = 0;
+    for (int m = 0; m < N_NEIGHBORS; m++) {
+        const auto it = grid.find(neighbor(c, m));
+        if (it == grid.end()) continue;
+        for (const auto & [id, x] : it->second) {
+            rtype d2 = 0.0;
+            FOR_I_DIM d2 += (x[i] - y[i]) * (x[i] - y[i]);
+            if (d2 <= tol * tol) {
+                match = id;
+                n_found++;
+            }
+        }
+    }
+    return n_found;
+}
+
+std::string periodic_point_string(const std::array<rtype, N_DIM> & x) {
+    std::string s = "(";
+    FOR_I_DIM s += (i ? ", " : "") + std::to_string(x[i]);
+    return s + ")";
+}
+
+PeriodicNodes match_periodic_nodes(const std::vector<std::array<rtype, N_DIM>> & nodes,
+                                   const std::vector<Mesh::BoundaryFace> & boundary_faces,
+                                   const std::vector<Mesh::PeriodicPair> & pairs) {
+    const uint32_t n_nodes = nodes.size();
+    PeriodicNodes result;
+    std::map<std::string, std::vector<const Mesh::BoundaryFace *>> faces_of_zone;
+    for (const auto & bf : boundary_faces) faces_of_zone[bf.zone].push_back(&bf);
+    for (const auto & pair : pairs) {
+        for (const std::string & zone : {pair.zone_a, pair.zone_b}) {
+            if (!faces_of_zone.count(zone)) {
+                throw std::runtime_error("Periodic zone " + zone + " is not a boundary zone of the mesh.");
+            }
+        }
+    }
+    const std::vector<size_t> dirs = periodic_directions(pairs, result);
+
+    LatticeUnionFind classes(n_nodes);
+    for (size_t p = 0; p < pairs.size(); p++) {
+        const auto & pair = pairs[p];
         auto zone_nodes = [&](const std::string & zone, rtype & min_edge) {
             std::vector<uint32_t> ids;
             for (const auto * bf : faces_of_zone.at(zone)) {
@@ -134,63 +181,35 @@ PeriodicNodes match_periodic_nodes(const std::vector<std::array<rtype, N_DIM>> &
                                      std::to_string(nodes_a.size()) + " and " + std::to_string(nodes_b.size()) +
                                      " nodes.");
         }
-        const rtype tol = precision_tol(1e-6, 1e-3) * h;
 
-        // Nodes of zone_b on a grid of spacing h; a match lies in one of the
-        // 3^N_DIM grid cells around the translated node
-        auto cell_of = [&](const std::array<rtype, N_DIM> & x) {
-            std::array<int64_t, N_DIM> c;
-            FOR_I_DIM c[i] = static_cast<int64_t>(std::floor(x[i] / h));
-            return c;
-        };
-        std::map<std::array<int64_t, N_DIM>, std::vector<uint32_t>> grid;
-        for (uint32_t b : nodes_b) grid[cell_of(nodes[b])].push_back(b);
+        PeriodicGrid grid(h);
+        for (uint32_t b : nodes_b) grid.insert(b, nodes[b]);
         std::vector<bool> matched(n_nodes, false);
         Lattice rel = {0, 0, 0};
-        rel[dir] = 1;
+        rel[dirs[p]] = 1;
         for (uint32_t a : nodes_a) {
             std::array<rtype, N_DIM> y;
             FOR_I_DIM y[i] = nodes[a][i] + pair.translation[i];
-            const auto c = cell_of(y);
-            int64_t match = -1;
-            uint32_t n_found = 0;
-            for (int m = 0; m < (N_DIM == 2 ? 9 : 27); m++) {
-                std::array<int64_t, N_DIM> q;
-                int r = m;
-                FOR_I_DIM {
-                    q[i] = c[i] + (r % 3) - 1;
-                    r /= 3;
-                }
-                const auto it = grid.find(q);
-                if (it == grid.end()) continue;
-                for (uint32_t b : it->second) {
-                    rtype d2 = 0.0;
-                    FOR_I_DIM d2 += (nodes[b][i] - y[i]) * (nodes[b][i] - y[i]);
-                    if (d2 <= tol * tol) {
-                        match = b;
-                        n_found++;
-                    }
-                }
-            }
+            uint32_t match = 0;
+            const uint32_t n_found = grid.find(y, match);
             if (n_found != 1) {
                 throw std::runtime_error("Periodic zones " + pair.zone_a + " and " + pair.zone_b + ": node " +
-                                         coords_string(nodes[a]) + " of " + pair.zone_a + " has " +
+                                         periodic_point_string(nodes[a]) + " of " + pair.zone_a + " has " +
                                          (n_found ? "several matches" : "no match") + " in " + pair.zone_b +
-                                         " after the translation " + coords_string(pair.translation) + ".");
+                                         " after the translation " + periodic_point_string(pair.translation) + ".");
             }
             if (matched[match]) {
                 throw std::runtime_error("Periodic zones " + pair.zone_a + " and " + pair.zone_b + ": node " +
-                                         coords_string(nodes[match]) + " of " + pair.zone_b +
+                                         periodic_point_string(nodes[match]) + " of " + pair.zone_b +
                                          " matches several nodes.");
             }
             matched[match] = true;
             if (!classes.join(match, a, rel)) {
-                throw std::runtime_error("Periodic pairs map node " + coords_string(nodes[a]) +
+                throw std::runtime_error("Periodic pairs map node " + periodic_point_string(nodes[a]) +
                                          " onto itself (do the zones of a pair touch?).");
             }
         }
     }
-
     // Keys are the lowest node id of each class, offsets relative to it
     std::vector<uint32_t> lowest(n_nodes, std::numeric_limits<uint32_t>::max());
     for (uint32_t n = 0; n < n_nodes; n++) {

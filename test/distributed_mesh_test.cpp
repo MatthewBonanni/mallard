@@ -21,9 +21,11 @@
 #include "comm.h"
 #include "distributed_mesh.h"
 #include "distribution.h"
+#include "gmsh_fixtures.h"
 #include "mesh.h"
 #include "mesh_block.h"
 #include "partition.h"
+#include "periodic.h"
 #include "test_fixtures.h"
 
 namespace {
@@ -340,4 +342,126 @@ TEST(DistributedMeshTest, PeriodicHaloLayersFollowVertexNeighborsAcrossSeams) {
     for (size_t i = 0; i < dist.global_cell.size(); i++) {
         EXPECT_EQ(int(dist.layer[i]), expected[dist.global_cell[i]]) << "cell " << dist.global_cell[i];
     }
+}
+
+namespace {
+
+std::string periodic_pairs_input(int n_dirs) {
+    static const char * zones[3][2] = {{"left", "right"}, {"bottom", "top"}, {"back", "front"}};
+    std::string s;
+    for (int d = 0; d < n_dirs; d++) {
+        s += std::string("[[periodic]]\nzones = [\"") + zones[d][0] + "\", \"" + zones[d][1] + "\"]\ntranslation = [";
+        for (int i = 0; i < N_DIM; i++) s += std::string(i ? ", " : "") + (i == d ? "1.0" : "0.0");
+        s += "]\n";
+    }
+    return s;
+}
+
+/** @brief Periodic meshes: generated with one to N_DIM directions, and a Gmsh mesh with jittered seams. */
+std::vector<std::string> periodic_inputs() {
+    if constexpr (N_DIM == 2) {
+        const std::string file = write_temp_shared("mallard_distributed_periodic.msh", jittered_periodic_mesh_2d(7));
+        return {"[mesh]\ntype = \"cartesian\"\nNx = 9\nNy = 7\nperiodic = [\"x\", \"y\"]\n",
+                "[mesh]\ntype = \"cartesian_tri\"\nNx = 6\nNy = 5\nperiodic = [\"x\"]\n",
+                "[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" + periodic_pairs_input(2)};
+    }
+    const std::string file = write_temp_shared("mallard_distributed_periodic.msh", jittered_periodic_mesh_3d(4));
+    return {"[mesh]\ntype = \"cartesian_tet\"\nNx = 4\nNy = 3\nNz = 3\nperiodic = [\"x\", \"y\", \"z\"]\n",
+            "[mesh]\ntype = \"cartesian_mixed\"\nNx = 6\nNy = 3\nNz = 4\nperiodic = [\"x\", \"z\"]\n",
+            "[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" + periodic_pairs_input(3)};
+}
+
+/**
+ * @brief The serial matcher on the whole mesh, gathered from the blocks; and
+ *        which nodes lie on the periodic zones.
+ */
+std::pair<PeriodicNodes, std::vector<bool>> serial_classes(const MeshBlock & block,
+                                                           const std::vector<Mesh::PeriodicPair> & pairs) {
+    std::vector<double> coords;
+    for (const auto & x : block.node_coords) coords.insert(coords.end(), x.begin(), x.end());
+    coords = comm::allgatherv(coords);
+    std::vector<uint64_t> faces;
+    for (uint64_t f = 0; f < block.n_faces(); f++) {
+        faces.push_back(block.face_zone[f]);
+        faces.push_back(block.face_offsets[f + 1] - block.face_offsets[f]);
+        faces.insert(faces.end(), block.face_nodes.begin() + block.face_offsets[f],
+                     block.face_nodes.begin() + block.face_offsets[f + 1]);
+    }
+    faces = comm::allgatherv(faces);
+    std::vector<std::array<rtype, N_DIM>> nodes(coords.size() / N_DIM);
+    for (size_t k = 0; k < nodes.size(); k++) FOR_I_DIM nodes[k][i] = coords[k * N_DIM + i];
+    std::vector<Mesh::BoundaryFace> boundary_faces;
+    for (size_t i = 0; i < faces.size(); i += 2 + faces[i + 1]) {
+        Mesh::BoundaryFace bf;
+        bf.zone = block.zone_names[faces[i]];
+        bf.nodes.assign(faces.begin() + i + 2, faces.begin() + i + 2 + faces[i + 1]);
+        boundary_faces.push_back(std::move(bf));
+    }
+    PeriodicNodes classes = match_periodic_nodes(nodes, boundary_faces, pairs);
+    std::vector<bool> on_zone(nodes.size(), false);
+    for (const auto & bf : boundary_faces) {
+        if (std::find(classes.zones.begin(), classes.zones.end(), bf.zone) == classes.zones.end()) continue;
+        for (uint32_t n : bf.nodes) on_zone[n] = true;
+    }
+    return {std::move(classes), std::move(on_zone)};
+}
+
+} // namespace
+
+/**
+ * @brief Distributed periodic matching finds the serial matcher's keys and
+ *        lattice offsets (doubly and triply periodic corners included), and no
+ *        rank learns the classes of nodes outside its block: the periodic
+ *        zones are never gathered.
+ */
+TEST(DistributedMeshTest, PeriodicClassesMatchTheSerialMatcherWithoutGatheringTheZones) {
+    for (const std::string & input : periodic_inputs()) {
+        SCOPED_TRACE(input);
+        const toml::value parsed = parse_toml(input);
+        const MeshBlock block = read_mesh_block(parsed);
+        const auto pairs = Mesh::periodic_pairs(parsed);
+        const auto [expected, on_zone] = serial_classes(block, pairs);
+        const DistributedMesh distributed(block, pairs);
+        const auto & held = distributed.block_periodic_classes();
+
+        std::vector<uint64_t> used(block.cell_nodes);
+        used.insert(used.end(), block.face_nodes.begin(), block.face_nodes.end());
+        std::sort(used.begin(), used.end());
+        used.erase(std::unique(used.begin(), used.end()), used.end());
+        size_t n_periodic = 0;
+        for (uint64_t g : used) {
+            const auto it = held.find(g);
+            if (!on_zone[g]) {
+                EXPECT_TRUE(it == held.end()) << "node " << g;
+                continue;
+            }
+            n_periodic++;
+            ASSERT_TRUE(it != held.end()) << "node " << g;
+            EXPECT_EQ(it->second.first, expected.key[g]) << "node " << g;
+            EXPECT_EQ(it->second.second, expected.lattice[g]) << "node " << g;
+        }
+        EXPECT_EQ(held.size(), n_periodic);
+        if (comm::size() > 1) {
+            EXPECT_LT(held.size(), size_t(std::count(on_zone.begin(), on_zone.end(), true)));
+        }
+    }
+}
+
+TEST(DistributedMeshTest, PeriodicZonesThatDoNotMatchAreRejectedOnEveryRank) {
+    const std::string file = write_temp_shared("mallard_distributed_mismatch.msh",
+                                               N_DIM == 2 ? jittered_periodic_mesh_2d(5) : jittered_periodic_mesh_3d(4));
+    std::string pairs = periodic_pairs_input(N_DIM);
+    const std::string unit = "translation = [1.0";
+    pairs.replace(pairs.find(unit), unit.size(), "translation = [0.9");
+    const toml::value parsed = parse_toml("[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" + pairs);
+    uint32_t reported = 0;
+    try {
+        DistributedMesh distributed(read_mesh_block(parsed), Mesh::periodic_pairs(parsed));
+        ADD_FAILURE() << "mismatched zones were accepted";
+    } catch (const std::runtime_error & e) {
+        const std::string what = e.what();
+        reported = what.find("Periodic zones left and right: node") != std::string::npos &&
+                   what.find("has no match in right") != std::string::npos;
+    }
+    EXPECT_EQ(comm::allreduce(reported, comm::Op::MAX), 1u);
 }

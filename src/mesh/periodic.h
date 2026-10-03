@@ -14,6 +14,7 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -30,6 +31,44 @@ struct PeriodicNodes {
     std::vector<uint32_t> key;
     std::vector<std::array<int8_t, 3>> lattice;
 };
+
+/**
+ * @brief Check the pairs (zones used once, nonzero translations, at most three
+ *        distinct ones) and fill result.zones and result.translations. Returns
+ *        the lattice direction of every pair: pairs with the same translation
+ *        share one.
+ */
+std::vector<size_t> periodic_directions(const std::vector<Mesh::PeriodicPair> & pairs, PeriodicNodes & result);
+
+/** @brief Matching tolerance of a pair whose zones' shortest edge is h. */
+rtype periodic_tolerance(rtype h);
+
+/**
+ * @brief Points on a grid of spacing h. A point within the tolerance of a
+ *        query lies in one of the 3^N_DIM grid cells around the query's.
+ */
+class PeriodicGrid {
+    public:
+        using Point = std::array<rtype, N_DIM>;
+        using Cell = std::array<int64_t, N_DIM>;
+        static constexpr int N_NEIGHBORS = N_DIM == 2 ? 9 : 27;
+
+        explicit PeriodicGrid(rtype spacing) : h(spacing), tol(periodic_tolerance(spacing)) {}
+
+        Cell cell_of(const Point & x) const;
+        /** @brief Neighbor m of cell c, m in [0, N_NEIGHBORS) (c itself included). */
+        static Cell neighbor(const Cell & c, int m);
+        void insert(uint32_t id, const Point & x) { grid[cell_of(x)].push_back({id, x}); }
+        /** @brief Number of points within the tolerance of y; match is the last one's id. */
+        uint32_t find(const Point & y, uint32_t & match) const;
+
+    private:
+        rtype h, tol;
+        std::map<Cell, std::vector<std::pair<uint32_t, Point>>> grid;
+};
+
+/** @brief "(x, y[, z])", for error messages. */
+std::string periodic_point_string(const std::array<rtype, N_DIM> & x);
 
 /**
  * @brief Match the nodes of zone_b of every pair to the nodes of zone_a

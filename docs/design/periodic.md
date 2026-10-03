@@ -90,9 +90,25 @@ cell-to-face distance for the hydrostatic ghost pressure.
 
 ## Distributed runs
 
-- `DistributedMesh` finds the node classes first: every rank gathers the faces
-  and node coordinates of the periodic zones and runs the serial matching on
-  that surface, so all ranks agree on every key and offset.
+- `DistributedMesh` finds the node classes first, without gathering the
+  zones, in the pattern of the face matching:
+  - Each pair's `h` is an `allreduce` minimum over the ranks' zone faces, so
+    grid and tolerance are the serial ones.
+  - Each node of `A`, translated by `T`, goes to the rank its grid cell hashes
+    to (pair index and cell coordinates). Each node of `B` goes to the ranks of
+    all 3^d cells around its own, so a rank sees every candidate the serial
+    search would see, and pairs the matches with the same arithmetic.
+  - Each match becomes a link to the ranks whose node blocks hold its two
+    nodes. Classes resolve there by lowest-key propagation: every node takes
+    the lowest key its links offer, with the implied lattice offset, until no
+    key changes (a few rounds: a class has at most 8 nodes, at a box corner).
+    An offer of the settled key at another offset is the serial matcher's
+    "maps a node onto itself" error.
+  - Each rank asks for the classes of its block's nodes; cell records carry
+    them on to the cells' owners and halos.
+
+  Keys and offsets are identical to the serial matcher's (tested on 1-4
+  ranks), and every rank holds only the classes of nodes it uses.
 - Faces are hashed by their node keys, so seam faces pair into interior faces
   (and dual-graph edges, which the graph partitioner sees); boundary faces of
   periodic zones are not posted.
@@ -101,14 +117,6 @@ cell-to-face distance for the hydrostatic ghost pressure.
 - Each local mesh gets its nodes' offsets and keys (the first local node of
   each class), and computes its own shifts: stencils, and so results, match the
   serial ones.
-
-Known limit: gathering the periodic zones puts O(N^(2/3)) data (the paired
-surfaces) on every rank. That is fine up to about 1e8-1e9 cells but breaks the
-"no rank holds global data" rule of `mpi.md`. The scalable alternative follows
-the face matching: send each zone node, snapped to the matching tolerance and
-translated into zone A's frame, to a rank chosen by hashing its snapped
-coordinates; pair the matches there, and resolve the classes (at most 8 nodes,
-at a box corner) with a few rounds of key propagation to the nodes' owners.
 
 ## Testing
 
@@ -120,6 +128,10 @@ at a box corner) with a few rounds of key propagation to the nodes' owners.
 - The 2D isentropic vortex across the seam.
 - Distributed periodic runs matching serial ones on 1-4 ranks, including
   partitions that cut the seam.
+- Distributed node classes equal to the serial matcher's on 1-4 ranks
+  (generated meshes periodic in one to three directions, Gmsh meshes with
+  jittered seams), with each rank holding only the classes of its block's
+  nodes; mismatched zones rejected on every rank.
 
 ## Pull requests
 
