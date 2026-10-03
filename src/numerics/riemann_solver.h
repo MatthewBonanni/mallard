@@ -49,10 +49,6 @@ static const std::unordered_map<RiemannSolverType, std::string> RIEMANN_SOLVER_N
  * All solvers take left/right states as W = [rho, u, p] (u with N_DIM
  * components) and a unit normal pointing from left to right, and return the
  * flux of [rho, rho u, rho E] through the face per unit area.
- *
- * The 1D star-region estimators (PVRS, TRRS, TSRS, ANRS) take
- * W = [rho, u_n, p] and follow Toro, "Riemann Solvers and Numerical
- * Methods for Fluid Dynamics", 3rd ed., chapter 9.
  */
 namespace riemann {
 
@@ -70,64 +66,6 @@ void physical_flux(const rtype * W, const rtype * n, const rtype gamma,
     F[0] = U[0] * u_n;
     FOR_I_DIM F[1 + i] = U[1 + i] * u_n + W[E] * n[i];
     F[E] = (U[E] + W[E]) * u_n;
-}
-
-/**
- * @brief Primitive variable Riemann solver (Toro 9.20, 9.28).
- */
-KOKKOS_INLINE_FUNCTION
-rtype PVRS(const rtype * W_l, const rtype * W_r, const rtype gamma) {
-    const rtype a_l = Kokkos::sqrt(gamma * W_l[2] / W_l[0]);
-    const rtype a_r = Kokkos::sqrt(gamma * W_r[2] / W_r[0]);
-    const rtype rho_avg = 0.5_r * (W_l[0] + W_r[0]);
-    const rtype a_avg = 0.5_r * (a_l + a_r);
-    return 0.5_r * (W_l[2] + W_r[2]) + 0.5_r * (W_l[1] - W_r[1]) * rho_avg * a_avg;
-}
-
-/**
- * @brief Two-rarefaction Riemann solver (Toro 9.32).
- */
-KOKKOS_INLINE_FUNCTION
-rtype TRRS(const rtype * W_l, const rtype * W_r, const rtype gamma) {
-    const rtype a_l = Kokkos::sqrt(gamma * W_l[2] / W_l[0]);
-    const rtype a_r = Kokkos::sqrt(gamma * W_r[2] / W_r[0]);
-    const rtype z = (gamma - 1.0_r) / (2.0_r * gamma);
-    const rtype num = a_l + a_r - 0.5_r * (gamma - 1.0_r) * (W_r[1] - W_l[1]);
-    const rtype den = a_l / Kokkos::pow(W_l[2], z) + a_r / Kokkos::pow(W_r[2], z);
-    return Kokkos::pow(Kokkos::fmax(num, 0.0_r) / den, 1.0_r / z);
-}
-
-/**
- * @brief Two-shock Riemann solver (Toro 9.42), linearized about p_0.
- */
-KOKKOS_INLINE_FUNCTION
-rtype TSRS(const rtype * W_l, const rtype * W_r, const rtype gamma, const rtype p_0) {
-    const rtype A_l = 2.0_r / ((gamma + 1.0_r) * W_l[0]);
-    const rtype A_r = 2.0_r / ((gamma + 1.0_r) * W_r[0]);
-    const rtype B_l = (gamma - 1.0_r) / (gamma + 1.0_r) * W_l[2];
-    const rtype B_r = (gamma - 1.0_r) / (gamma + 1.0_r) * W_r[2];
-    const rtype p = Kokkos::fmax(0.0_r, p_0);
-    const rtype g_l = Kokkos::sqrt(A_l / (p + B_l));
-    const rtype g_r = Kokkos::sqrt(A_r / (p + B_r));
-    return (g_l * W_l[2] + g_r * W_r[2] - (W_r[1] - W_l[1])) / (g_l + g_r);
-}
-
-/**
- * @brief Adaptive noniterative Riemann solver (Toro 9.5.2): estimate p*.
- */
-KOKKOS_INLINE_FUNCTION
-rtype ANRS(const rtype * W_l, const rtype * W_r, const rtype gamma) {
-    constexpr rtype q_user = 2.0;
-    const rtype p_min = Kokkos::fmin(W_l[2], W_r[2]);
-    const rtype p_max = Kokkos::fmax(W_l[2], W_r[2]);
-    const rtype p_pv = Kokkos::fmax(0.0_r, PVRS(W_l, W_r, gamma));
-    if ((p_max / p_min < q_user) && (p_min <= p_pv) && (p_pv <= p_max)) {
-        return p_pv;
-    } else if (p_pv < p_min) {
-        return TRRS(W_l, W_r, gamma);
-    } else {
-        return TSRS(W_l, W_r, gamma, p_pv);
-    }
 }
 
 /**
@@ -150,25 +88,6 @@ void wave_speeds_einfeldt(const rtype * W_l, const rtype * W_r, const rtype u_l_
     const rtype a_roe = Kokkos::sqrt(Kokkos::fmax((gamma - 1.0_r) * (H_roe - 0.5_r * dot<N_DIM>(u_roe, u_roe)), 0.0_r));
     S_l = Kokkos::fmin(u_l_n - a_l, un_roe - a_roe);
     S_r = Kokkos::fmax(u_r_n + a_r, un_roe + a_roe);
-}
-
-/**
- * @brief Pressure-based wave speed estimates (Toro 10.59-10.60).
- */
-KOKKOS_INLINE_FUNCTION
-void wave_speeds_pressure(const rtype * W_l, const rtype * W_r, const rtype u_l_n, const rtype u_r_n,
-                          const rtype gamma, rtype & S_l, rtype & S_r) {
-    constexpr uint8_t E = N_DIM + 1;
-    const rtype w_l[3] = {W_l[0], u_l_n, W_l[E]};
-    const rtype w_r[3] = {W_r[0], u_r_n, W_r[E]};
-    const rtype p_star = ANRS(w_l, w_r, gamma);
-    const rtype a_l = Kokkos::sqrt(gamma * W_l[E] / W_l[0]);
-    const rtype a_r = Kokkos::sqrt(gamma * W_r[E] / W_r[0]);
-    const rtype c = (gamma + 1.0_r) / (2.0_r * gamma);
-    const rtype q_l = (p_star <= W_l[E]) ? 1.0_r : Kokkos::sqrt(1.0_r + c * (p_star / W_l[E] - 1.0_r));
-    const rtype q_r = (p_star <= W_r[E]) ? 1.0_r : Kokkos::sqrt(1.0_r + c * (p_star / W_r[E] - 1.0_r));
-    S_l = u_l_n - a_l * q_l;
-    S_r = u_r_n + a_r * q_r;
 }
 
 struct Rusanov {

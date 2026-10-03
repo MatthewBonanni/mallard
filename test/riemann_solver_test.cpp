@@ -13,7 +13,6 @@
 
 #include <cmath>
 
-#include "exact_riemann.h"
 #include "riemann_solver.h"
 #include "test_utils.h"
 
@@ -135,55 +134,6 @@ TEST(RiemannSolverTest, HLLCPreservesMovingContact) {
     riemann::HLLC::calc_flux(f, n, W_l, W_r, GAMMA);
     riemann::physical_flux(W_l, n, GAMMA, U, F_l);
     FOR_I_CONSERVATIVE EXPECT_NEAR(f[i], F_l[i], roundoff(1e-13));
-}
-
-TEST(RiemannSolverTest, TRRSIsExactForTwoRarefactions) {
-    // Toro test 2 ("123 problem"): two symmetric rarefactions
-    ExactRiemann exact(1.0, -2.0, 0.4, 1.0, 2.0, 0.4, double(GAMMA));
-    const rtype w_l[3] = {1.0, -2.0, 0.4};
-    const rtype w_r[3] = {1.0, 2.0, 0.4};
-    EXPECT_NEAR(riemann::TRRS(w_l, w_r, GAMMA), exact.p_star, roundoff(1e-12));
-
-    // Asymmetric two-rarefaction problem
-    ExactRiemann exact2(1.0, -0.5, 1.0, 0.5, 0.8, 0.3, double(GAMMA));
-    ASSERT_LT(exact2.p_star, 0.3);
-    const rtype w_l2[3] = {1.0, -0.5, 1.0};
-    const rtype w_r2[3] = {0.5, 0.8, 0.3};
-    EXPECT_NEAR(riemann::TRRS(w_l2, w_r2, GAMMA), exact2.p_star, roundoff(1e-12));
-}
-
-TEST(RiemannSolverTest, ANRSApproximatesExactStarPressure) {
-    // Toro tests 1, 3, 4, 5 and a weak wave
-    const double cases[][6] = {
-        {1.0, 0.0, 1.0, 0.125, 0.0, 0.1},
-        {1.0, 0.0, 1000.0, 1.0, 0.0, 0.01},
-        {1.0, 0.0, 0.01, 1.0, 0.0, 100.0},
-        {5.99924, 19.5975, 460.894, 5.99242, -6.19633, 46.0950},
-        {1.0, 0.1, 1.0, 1.05, 0.0, 1.1},
-    };
-    for (const auto & c : cases) {
-        ExactRiemann exact(c[0], c[1], c[2], c[3], c[4], c[5], double(GAMMA));
-        const rtype w_l[3] = {rtype(c[0]), rtype(c[1]), rtype(c[2])};
-        const rtype w_r[3] = {rtype(c[3]), rtype(c[4]), rtype(c[5])};
-        const rtype p = riemann::ANRS(w_l, w_r, GAMMA);
-        // One TSRS pass from the PVRS guess undershoots strong collisions (Toro test 5) by ~25%
-        EXPECT_NEAR(p, exact.p_star, 0.3 * exact.p_star) << "p_l = " << c[2] << ", p_r = " << c[5];
-    }
-}
-
-TEST(RiemannSolverTest, WaveSpeedsBracketExactWaves) {
-    // Toro test 1 (Sod): left rarefaction head and right shock speeds
-    ExactRiemann exact(1.0, 0.0, 1.0, 0.125, 0.0, 0.1, double(GAMMA));
-    const rtype W_l[N_CONSERVATIVE] = {1.0, 0.0, 0.0, 1.0};
-    const rtype W_r[N_CONSERVATIVE] = {0.125, 0.0, 0.0, 0.1};
-    rtype S_l, S_r;
-    riemann::wave_speeds_pressure(W_l, W_r, 0.0, 0.0, GAMMA, S_l, S_r);
-    const double g = double(GAMMA);
-    const double a_l = std::sqrt(g);
-    EXPECT_NEAR(S_l, -a_l, roundoff(1e-12));
-    const double S_shock = std::sqrt(g * 0.1 / 0.125) *
-                           std::sqrt((g + 1.0) / (2.0 * g) * exact.p_star / 0.1 + (g - 1.0) / (2.0 * g));
-    EXPECT_NEAR(S_r, S_shock, 0.02 * S_shock);
 }
 
 TEST(RiemannSolverTest, RoeResolvesStationaryContactAndShearExactly) {
