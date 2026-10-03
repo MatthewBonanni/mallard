@@ -9,6 +9,14 @@ authors:
     orcid: "https://orcid.org/0000-0002-8671-7955"
 version: 0.3.0
 date-released: 2026-10-02
+doi: 10.5281/zenodo.23112953
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.23112953
+    description: "All versions (resolves to the latest)"
+  - type: doi
+    value: 10.5281/zenodo.23112954
+    description: "Version 0.3.0"
 url: "https://github.com/MatthewBonanni/mallard"
 repository-code: "https://github.com/MatthewBonanni/mallard"
 license: AGPL-3.0-only
