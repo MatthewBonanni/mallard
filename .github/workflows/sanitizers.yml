@@ -1,0 +1,51 @@
+name: Sanitizers
+
+# Nightly AddressSanitizer + UndefinedBehaviorSanitizer run of the 2D suite and the
+# multi-rank tests, skipped when main hasn't changed since the last run.
+on:
+  schedule:
+    - cron: '37 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  asan-ubsan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Skip if main is unchanged
+        id: changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last=$(gh run list --workflow sanitizers.yml --branch main --status success -L 1 --json headSha -q '.[0].headSha')
+          if [ "$last" = "$GITHUB_SHA" ] && [ "${{ github.event_name }}" = schedule ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Install MPI
+        if: steps.changed.outputs.skip != 'true'
+        run: >
+          sudo apt-get update -qq && sudo apt-get install -y -qq
+          libopenmpi-dev openmpi-bin libhdf5-openmpi-dev
+      - name: Configure
+        if: steps.changed.outputs.skip != 'true'
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DUSE_SYSTEM_KOKKOS=OFF
+          -DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_HDF5=ON
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+      - name: Build
+        if: steps.changed.outputs.skip != 'true'
+        run: cmake --build build -j $(nproc)
+      - name: Test
+        if: steps.changed.outputs.skip != 'true'
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: |
+          mpirun -n 1 ./build/test/MallardTest
+          mpirun -n 2 --oversubscribe -x ASAN_OPTIONS -x UBSAN_OPTIONS ./build/test/MallardTest \
+            --gtest_filter='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*'
