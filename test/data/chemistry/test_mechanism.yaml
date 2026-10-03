@@ -1,0 +1,53 @@
+description: |-
+  Mallard test mechanism: constant-cp species, units given as strings and in
+  non-default units, a custom element, and species taken from another file.
+
+units: {length: cm, quantity: mol, energy: kcal}
+
+elements:
+- symbol: Ai
+  atomic-weight: 28.9647
+
+phases:
+- name: air-cp
+  thermo: ideal-gas
+  elements: [Ai]
+  species: [AIR]
+- name: mixed
+  thermo: ideal-gas
+  elements: [O, H, N, Ar]
+  species:
+  - species: [HOT, COLD]
+  - ../../../mechanisms/h2o2.yaml/species: [H2, O2, N2, AR]
+
+species:
+- name: AIR
+  composition: {Ai: 1}
+  thermo:
+    model: constant-cp
+    T0: 300.0
+    h0: 2.4 kcal/mol
+    s0: 0.2 kJ/mol/K
+    cp0: 29.1 J/mol/K
+- name: HOT
+  composition: {H: 1, O: 1}
+  thermo:
+    model: constant-cp
+    T0: 298.15
+    h0: 9.3
+    s0: 43.9 cal/mol/K
+    cp0: 7.2 cal/mol/K
+    T-min: 100.0
+    T-max: 5000.0
+- name: COLD
+  composition: {N: 2}
+  thermo:
+    model: NASA9
+    temperature-ranges: [200.0, 1000.0, 6000.0, 2.0e+04]
+    data:
+    - [2.210371497e+04, -381.846182, 6.08273836, -8.53091441e-03, 1.384646189e-05,
+      -9.62579362e-09, 2.519705809e-12, 710.846086, -10.76003744]
+    - [5.87712406e+05, -2239.249073, 6.06694922, -6.1396855e-04, 1.491806679e-07,
+      -1.923105485e-11, 1.061954386e-15, 1.283210415e+04, -15.86640027]
+    - [8.31013916e+08, -6.42073354e+05, 202.0264635, -0.03065092046, 2.486903333e-06,
+      -9.70595411e-11, 1.437538881e-15, 4.93870704e+06, -1672.09974]

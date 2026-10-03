@@ -26,6 +26,8 @@
 #include "riemann_solver.h"
 #include "time_integrator.h"
 #include "physics.h"
+#include "mixture.h"
+#include "scalar_reconstruction.h"
 #include "data_writer.h"
 #include "expression.h"
 #include "comm.h"
@@ -125,6 +127,12 @@ class Solver {
         std::array<rtype, N_CONSERVATIVE> integrate_conservatives();
 
         /**
+         * @brief Partial density of each species integrated over the domain
+         *        (empty for a single gas).
+         */
+        std::vector<rtype> integrate_species();
+
+        /**
          * @brief Domain integrals of kinetic energy rho |u|^2 / 2, enstrophy
          *        rho |omega|^2 / 2, squared dilatation (div u)^2 and pressure
          *        dilatation p div u, with the reconstruction's velocity gradients
@@ -136,6 +144,24 @@ class Solver {
         void update_average_pressure_outlets(StateView solution);
         void calc_dt();
         void check_fields();
+        void calc_rhs_mixture(State solution, State rhs, rtype t);
+        void update_primitives_mixture();
+        void init_temperature_seed();
+        rtype calc_dt_cfl1_mixture();
+        /** @brief Over owned cells and all ranks: min rho, min p, -max Ma, min T, -max T, -max |sum Y - 1|. */
+        std::array<rtype, 6> mixture_diagnostics();
+        /**
+         * @brief Gas mixtures: W = [rho, u, p] and the scalars [Y, gamma, e0]
+         *        of every cell, with the temperature found by Newton from the
+         *        cached seed; update_seed stores the new temperature as the
+         *        seed. Only the RHS updates the seed, so that its history,
+         *        and the last bits of T, do not depend on output or diagnostics.
+         */
+        void update_cell_states(const State & solution, bool update_seed);
+
+        /** @brief Whether the gas is a mixture (a mechanism is given). */
+        bool is_mixture() const { return mixture_model != nullptr; }
+        const MixtureModel & get_mixture() const { return *mixture_model; }
 
         /**
          * @brief Whether a run on several ranks splits the mesh between them
@@ -179,9 +205,11 @@ class Solver {
          * @brief Set the cell averages of a 3D mesh from point values f(x, y, z, cons)
          *        by integrating over the tetrahedra of each cell.
          * @param n_sub Subdivisions per direction of the Duffy cube of each tetrahedron.
+         * @param n_vars Values per point: the conservatives, then the partial densities.
          * @param f Conservative variables at a point.
          */
-        void init_cell_averages_3d(uint32_t n_sub, const std::function<void(double, double, double, rtype *)> & f);
+        void init_cell_averages_3d(uint32_t n_sub, uint32_t n_vars,
+                                   const std::function<void(double, double, double, rtype *)> & f);
         void init_solution_restart();
         void update_boundary_states(rtype t_eval);
         void init_sources();
@@ -214,6 +242,10 @@ class Solver {
 
         template <typename T_riemann_solver>
         void launch_flux_functor();
+        template <typename T_riemann_solver>
+        void launch_mixture_flux_functor();
+        void init_mixture_boundaries(const std::vector<toml::value> & input_boundaries,
+                                     std::vector<BoundaryCondition> & bcs);
 
         Kokkos::View<uint32_t *> rhs_cells;  // reconstructed cells, the n_early_cells independent of the halo first
         uint32_t n_early_cells = 0;
@@ -256,6 +288,11 @@ class Solver {
         std::shared_ptr<Mesh> mesh;
         Euler physics;
         std::vector<std::string> species_names;
+        std::shared_ptr<MixtureModel> mixture_model;  // null for a single gas
+        Mixture mixture;
+        ScalarReconstruction scalar_reconstruction;
+        std::vector<std::vector<double>> bc_mass_fractions;  // per boundary condition, empty unless prescribed
+        std::vector<std::array<double, 2>> bc_surrogates;    // [gamma, e0] of prescribed states
         BoundaryData boundary_data;
         std::vector<DirichletBoundary> dirichlet_boundaries;
         struct AveragePressureOutlet {
@@ -284,6 +321,15 @@ class Solver {
         std::vector<State> solution_vec;
         std::vector<State> rhs_vec;
         RHSFunction rhs_func;
+
+        // Gas mixtures
+        ScalarView cell_scalars;                              // (cell, [Y_1 .. Y_Ns, gamma, e0])
+        Kokkos::View<rtype *> T_seed;                         // Newton seed of each cell's temperature
+        Kokkos::View<rtype *>::host_mirror_type h_T_seed;
+        Kokkos::View<rtype **[2][2]> face_thermo;              // (face, q, side, [gamma, e0])
+        Kokkos::View<rtype **> face_mdot;                     // (face, q)
+        Kokkos::View<rtype ***, Kokkos::LayoutRight> species_slots;  // (face, side, k)
+        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_Y, h_X;  // output
 
         // Source terms
         bool has_gravity = false;

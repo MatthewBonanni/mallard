@@ -290,7 +290,27 @@ void Solver::init_rhs_split() {
 }
 
 void Solver::init_physics() {
-    physics = Euler::from_input(input);
+    if (!input.contains("physics")) throw InputError("missing [physics] table.");
+    const std::string gas = toml::find_or<std::string>(input, "physics", "gas", "perfect");
+    if (input.contains("chemistry")) {
+        throw InputError("[chemistry]: finite-rate chemistry is not available yet; gas = \"mixture\" runs are "
+                         "non-reacting.");
+    }
+    if (gas == "perfect") {
+        physics = Euler::from_input(input);
+        return;
+    }
+    if (gas != "mixture") {
+        throw InputError("physics.gas = \"" + gas + "\" is not one of: perfect, mixture.");
+    }
+    const std::string type = toml::find_or<std::string>(input, "physics", "type", "euler");
+    if (type != "euler") {
+        throw InputError("physics: gas = \"mixture\" supports type = \"euler\" only (transport comes later).");
+    }
+    mixture_model = std::make_shared<MixtureModel>(MixtureModel::from_input(input));
+    mixture = mixture_model->device();
+    species_names = mixture_model->species_names();
+    physics = Euler();
 }
 
 void Solver::init_boundaries() {
@@ -414,7 +434,24 @@ void Solver::init_boundaries() {
                                      " has no boundary condition.");
         }
     }
+    if (is_mixture()) init_mixture_boundaries(input_boundaries, bcs);
     boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, physics.is_viscous(), physics);
+    if (is_mixture()) {
+        const uint32_t n_species = mixture.n_species;
+        boundary_data.bc_Y = Kokkos::View<rtype **, Kokkos::LayoutRight>("bc_Y", bcs.size(), n_species);
+        boundary_data.bc_thermo = Kokkos::View<rtype *[2]>("bc_thermo", bcs.size());
+        auto h_bc_Y = Kokkos::create_mirror_view(boundary_data.bc_Y);
+        auto h_thermo = Kokkos::create_mirror_view(boundary_data.bc_thermo);
+        for (size_t i_bc = 0; i_bc < bcs.size(); i_bc++) {
+            for (uint32_t k = 0; k < n_species; k++) {
+                h_bc_Y(i_bc, k) = bc_mass_fractions[i_bc].empty() ? 0.0 : static_cast<rtype>(bc_mass_fractions[i_bc][k]);
+            }
+            h_thermo(i_bc, 0) = static_cast<rtype>(bc_surrogates[i_bc][0]);
+            h_thermo(i_bc, 1) = static_cast<rtype>(bc_surrogates[i_bc][1]);
+        }
+        Kokkos::deep_copy(boundary_data.bc_Y, h_bc_Y);
+        Kokkos::deep_copy(boundary_data.bc_thermo, h_thermo);
+    }
     h_face_state = Kokkos::create_mirror_view(boundary_data.face_state);
     h_face_state_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_state_index);
     t_boundary_states = -1.0;
@@ -569,6 +606,17 @@ void Solver::init_numerics() {
     face_reconstruction->set_mesh(mesh);
     face_reconstruction->set_boundaries(boundary_data);
     face_reconstruction->init(face_reconstruction_input);
+    if (is_mixture()) {
+        if (it_face->second == FaceReconstructionType::TENO) {
+            throw InputError("numerics.face_reconstruction: TENO is not yet supported with gas = \"mixture\" "
+                             "(FO, MUSCL).");
+        }
+        if (riemann_solver_type == RiemannSolverType::ROE || riemann_solver_type == RiemannSolverType::RHLL) {
+            throw InputError("numerics.riemann_solver: " + RIEMANN_SOLVER_NAMES.at(riemann_solver_type) +
+                             " is not supported with gas = \"mixture\" (Rusanov, HLL, HLLC).");
+        }
+        scalar_reconstruction.init(mesh, boundary_data, mixture.n_species, *face_reconstruction);
+    }
 
     rhs_func = [this](State solution, State rhs, rtype t_stage) { calc_rhs(solution, rhs, t_stage); };
     check_nan = toml::find_or<bool>(input, "numerics", "check_nan", false);
@@ -693,6 +741,17 @@ void Solver::allocate_memory() {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
     }
+    if (is_mixture()) {
+        const uint32_t n_quad = face_reconstruction->n_face_quadrature_points();
+        cell_scalars = ScalarView("cell_scalars", mesh->n_cells, n_species + 2);
+        T_seed = Kokkos::View<rtype *>("T_seed", mesh->n_cells);
+        h_T_seed = Kokkos::create_mirror_view(T_seed);
+        face_thermo = Kokkos::View<rtype **[2][2]>("face_thermo", mesh->n_faces, n_quad);
+        face_mdot = Kokkos::View<rtype **>("face_mdot", mesh->n_faces, n_quad);
+        species_slots = Kokkos::View<rtype ***, Kokkos::LayoutRight>("species_slots", mesh->n_faces, 2, n_species);
+        h_Y = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("Y", mesh->n_cells, n_species);
+        h_X = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("X", mesh->n_cells, n_species);
+    }
     h_conservatives = Kokkos::create_mirror_view(conservatives);
     h_species = Kokkos::create_mirror_view(species);
     h_primitives = Kokkos::create_mirror_view(primitives);
@@ -712,12 +771,26 @@ void Solver::allocate_memory() {
 void Solver::copy_host_to_device() {
     Kokkos::deep_copy(conservatives, h_conservatives);
     if (species.span() > 0) Kokkos::deep_copy(species, h_species);
+    if (is_mixture()) Kokkos::deep_copy(T_seed, h_T_seed);
     Kokkos::deep_copy(primitives, h_primitives);
 }
 
 void Solver::copy_device_to_host() {
     Kokkos::deep_copy(h_conservatives, conservatives);
     if (species.span() > 0) Kokkos::deep_copy(h_species, species);
+    if (is_mixture()) {
+        Kokkos::deep_copy(h_T_seed, T_seed);
+        std::vector<double> Y(species_names.size());
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            const double rho = static_cast<double>(h_conservatives(c, 0));
+            for (size_t k = 0; k < Y.size(); k++) Y[k] = static_cast<double>(h_species(c, k)) / rho;
+            const std::vector<double> X = mixture_model->mole_fractions(Y);
+            for (size_t k = 0; k < Y.size(); k++) {
+                h_Y(c, k) = static_cast<rtype>(Y[k]);
+                h_X(c, k) = static_cast<rtype>(X[k]);
+            }
+        }
+    }
     Kokkos::deep_copy(h_primitives, primitives);
     Kokkos::deep_copy(h_cfl_local, cfl_local);
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
@@ -734,6 +807,14 @@ void Solver::register_data() {
     for (size_t k = 0; k < species_names.size(); k++) {
         data.push_back(Data("RHOY_" + species_names[k], Kokkos::subview(h_species, Kokkos::ALL(), k)));
     }
+    if (is_mixture()) {
+        data.reserve(data.size() + 2 * species_names.size() + 1 + PRIMITIVE_NAMES.size() + 2);
+        for (size_t k = 0; k < species_names.size(); k++) {
+            data.push_back(Data("Y_" + species_names[k], Kokkos::subview(h_Y, Kokkos::ALL(), k)));
+            data.push_back(Data("X_" + species_names[k], Kokkos::subview(h_X, Kokkos::ALL(), k)));
+        }
+        data.push_back(Data("T_SEED", h_T_seed));
+    }
     for (size_t i = 0; i < PRIMITIVE_NAMES.size(); i++) {
         data.push_back(Data(PRIMITIVE_NAMES[i], Kokkos::subview(h_primitives, Kokkos::ALL(), i)));
     }
@@ -748,6 +829,7 @@ void Solver::register_data() {
 std::vector<std::string> Solver::restart_variables() const {
     std::vector<std::string> names(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
     for (const auto & name : species_names) names.push_back("RHOY_" + name);
+    if (is_mixture()) names.push_back("T_SEED");
     return names;
 }
 
@@ -854,6 +936,13 @@ void Solver::print_progress() {
     Kokkos::parallel_reduce("diagnostics", Kokkos::RangePolicy<>(0, mesh->n_owned()), functor,
                             Kokkos::Min<rtype>(min_rho), Kokkos::Min<rtype>(min_p), Kokkos::Max<rtype>(max_mach),
                             Kokkos::Sum<uint64_t>(n_troubled));
+    std::array<rtype, 6> mix = {};  // min rho, min p, -max Ma, min T, -max T, -max |sum Y - 1|
+    if (is_mixture()) {
+        mix = mixture_diagnostics();
+        min_rho = mix[0];
+        min_p = mix[1];
+        max_mach = -mix[2];
+    }
     const auto mins = comm::allreduce(std::array<rtype, 3>{min_rho, min_p, -max_mach}, comm::Op::MIN);
     n_troubled = comm::allreduce(n_troubled, comm::Op::SUM);
 
@@ -862,6 +951,7 @@ void Solver::print_progress() {
         std::string header = format("%8s %10s %8s %6s  %9s %7s %7s  %9s %9s %6s", "step", "t", "dt", "done",
                                     "wall/step", "cells/s", "ETA", "min rho", "min p", "max Ma");
         if (teno) header += format(" %8s", "troubled");
+        if (is_mixture()) header += format(" %8s %8s %9s", "min T", "max T", "sum Y-1");
         logging::line(logging::style(header, logging::Style::BOLD));
     }
     n_progress_rows++;
@@ -881,6 +971,10 @@ void Solver::print_progress() {
                              eta_text.c_str(), static_cast<double>(mins[0]),
                              static_cast<double>(mins[1]), static_cast<double>(-mins[2]));
     if (teno) row += format(" %7.2f%%", 100.0 * n_troubled / n_cells_global);
+    if (is_mixture()) {
+        row += format(" %8.1f %8.1f %9.2e", static_cast<double>(mix[3]), static_cast<double>(-mix[4]),
+                      static_cast<double>(-mix[5]));
+    }
     logging::line(row);
 
     step_last_check = step;
@@ -893,7 +987,7 @@ void Solver::print_setup() const {
     logging::items(mesh_summary);
 
     logging::section("Physics");
-    logging::items(physics.summary());
+    logging::items(is_mixture() ? mixture_model->summary() : physics.summary());
     logging::items(source_summary);
     logging::item("Initial state", initial_state);
 
@@ -969,6 +1063,17 @@ void Solver::check_fields() {
         }
     }, n_bad);
     n_bad = comm::allreduce(n_bad, comm::Op::SUM);
+    if (species.span() > 0) {
+        SpeciesView Y = species;
+        const uint32_t n_species = Y.extent(1);
+        uint32_t n_bad_species = 0;
+        Kokkos::parallel_reduce("check_nan_species", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i_cell, uint32_t & bad) {
+            for (uint32_t k = 0; k < n_species; k++) {
+                if (!Kokkos::isfinite(Y(i_cell, k))) bad++;
+            }
+        }, n_bad_species);
+        n_bad += comm::allreduce(n_bad_species, comm::Op::SUM);
+    }
     if (n_bad > 0) {
         std::stringstream msg;
         msg << "Non-finite values found in solution at step " << step << ", t = " << t << ".";
@@ -1000,6 +1105,10 @@ void Solver::take_step() {
 }
 
 void Solver::update_primitives() {
+    if (is_mixture()) {
+        update_primitives_mixture();
+        return;
+    }
     const Euler phys = physics;
     StateView U = conservatives;
     Kokkos::View<rtype *[N_PRIMITIVE]> P = primitives;
@@ -1098,6 +1207,7 @@ struct TimeStepFunctor {
 };
 
 rtype Solver::calc_dt_cfl1() {
+    if (is_mixture()) return calc_dt_cfl1_mixture();
     TimeStepFunctor functor{mesh->offsets_faces_of_cell,
                             mesh->faces_of_cell,
                             mesh->cells_of_face,
@@ -1180,7 +1290,9 @@ std::array<rtype, 2 * N_DIM> Solver::calc_force(const Kokkos::View<uint32_t *> &
     const Euler phys = physics;
     StateView U = conservatives;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
-    Kokkos::parallel_for("force_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
+    if (is_mixture()) {
+        update_cell_states(state(), false);
+    } else Kokkos::parallel_for("force_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
         rtype cons[N_CONSERVATIVE], W_c[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE cons[i] = U(i_cell, i);
         phys.compute_W_from_conservatives(W_c, cons);
@@ -1280,7 +1392,9 @@ std::array<rtype, 4> Solver::integrate_flow_statistics() {
     const Euler phys = physics;
     StateView U = conservatives;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
-    Kokkos::parallel_for("statistics_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
+    if (is_mixture()) {
+        update_cell_states(state(), false);
+    } else Kokkos::parallel_for("statistics_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
         rtype cons[N_CONSERVATIVE], W_c[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE cons[i] = U(i_cell, i);
         phys.compute_W_from_conservatives(W_c, cons);

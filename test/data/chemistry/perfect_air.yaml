@@ -1,0 +1,37 @@
+description: |-
+  Calorically perfect air as a one-species (and a two-species) mixture:
+  R = 287 J/(kg K), cp = 3.5 R (gamma = 1.4), and e = cv T (h0 = cp0 T0),
+  for comparisons with the single-gas solver. Units are Cantera's defaults
+  (J, kmol, K).
+
+elements:
+- symbol: Ai
+  atomic-weight: 28.970253024924183
+
+phases:
+- name: air
+  thermo: ideal-gas
+  elements: [Ai]
+  species: [AIR]
+- name: two-airs
+  thermo: ideal-gas
+  elements: [Ai]
+  species: [AIR, AIR2]
+
+species:
+- name: AIR
+  composition: {Ai: 1}
+  thermo:
+    model: constant-cp
+    T0: 300.0
+    h0: 8730185.749060903
+    s0: 0.0
+    cp0: 29100.619163536343
+- name: AIR2
+  composition: {Ai: 1}
+  thermo:
+    model: constant-cp
+    T0: 300.0
+    h0: 8730185.749060903
+    s0: 0.0
+    cp0: 29100.619163536343

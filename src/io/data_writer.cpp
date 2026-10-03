@@ -111,6 +111,23 @@ void DataWriter::init(const toml::value & input,
         }
         return nullptr;
     };
+    // A trailing * selects every variable with that prefix (e.g. Y_* for all mass fractions)
+    std::vector<std::string> expanded;
+    for (const auto & var : variables) {
+        if (var.empty() || var.back() != '*') {
+            expanded.push_back(var);
+            continue;
+        }
+        const std::string stem = var.substr(0, var.size() - 1);
+        const size_t n_before = expanded.size();
+        for (const auto & data_var : data) {
+            if (data_var.name().rfind(stem, 0) == 0) expanded.push_back(data_var.name());
+        }
+        if (expanded.size() == n_before) {
+            throw InputError("write_data.variables: no variable matches \"" + var + "\".");
+        }
+    }
+    variables = expanded;
     for (const auto & var : variables) {
         Field field{var, {}};
         if (const Data * scalar = find_data(var)) {

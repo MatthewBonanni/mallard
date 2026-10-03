@@ -114,6 +114,19 @@ translation = [1.0, 0.0]
 | `Pr` | (`navier_stokes`) Prandtl number, default 0.72 |
 | `viscosity_model` | (`navier_stokes`) `constant` (default) or `sutherland` |
 | `T_mu_ref`, `sutherland_S` | (`sutherland`) Reference temperature (default 273.15) and Sutherland temperature (default 110.4) |
+| `gas` | `perfect` (default): a calorically perfect gas set by the keys above; `mixture`: a thermally perfect mixture of the species of a mechanism (no `gamma`, `p_ref`, `T_ref`, `rho_ref`) |
+| `mechanism` | (`mixture`) A [Cantera YAML](https://cantera.org/stable/yaml/index.html) file, e.g. `mechanisms/h2o2.yaml` (see `mechanisms/README.md`); Chemkin files convert with Cantera's `ck2yaml` |
+| `phase` | (`mixture`) Phase of the file to use; default the first |
+
+Gas mixtures (`gas = "mixture"`) are non-reacting for now and need
+`type = "euler"`, `FO` or `MUSCL` reconstruction and the `Rusanov`, `HLL` or
+`HLLC` Riemann solver. Species thermodynamics are NASA-7, NASA-9 or constant-cp
+polynomials from the file, evaluated in double precision in every build. Each
+species is transported (`rho Y_k`) with mass-flux upwinding, so mass fractions
+stay in [0, 1] and sum to one; with MUSCL all mass fractions share one limiter
+per cell. The scheme is conservative: at contacts between gases of different
+`cp / cv` (e.g. cold hydrogen and hot air) the pressure is perturbed at the
+percent level on coarse meshes.
 
 ## `[initialize]`
 
@@ -122,6 +135,8 @@ translation = [1.0, 0.0]
 | `type` | `constant`, `analytical` or `restart` |
 | `u` | `constant`: `[u_x, u_y]`; `analytical`: one expression in `x`, `y`, `z` per component |
 | `rho`, `p`, `T` | `constant`: `p` and `T`; `analytical`: exactly two of the three, as expressions in `x`, `y`, `z` |
+| `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
+| `balance` | (mixtures, `analytical`) Species taking `1 - sum` of the listed fractions; without it the listed fractions are normalized |
 | `n_subdivisions` | (`analytical`) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is integrated with a 64-point rule on each of `n_subdivisions`³ pieces (default 2) |
 | `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read |
 
@@ -141,7 +156,7 @@ the zone's faces whose centers satisfy the expression.
 | `wall_adiabatic` | Wall (no-slip for `navier_stokes`, slip for `euler`) with zero heat flux | `u` (wall velocity, optional) |
 | `wall_isothermal` | Wall at temperature `T` | `T`, `u` (optional) |
 | `wall_heat_flux` | Wall with heat flux `q` into the fluid | `q`, `u` (optional) |
-| `upt` | Inflow with fixed velocity, pressure and temperature | `u`, `p`, `T` |
+| `upt` | Inflow with fixed velocity, pressure and temperature | `u`, `p`, `T` (and `X` or `Y` for mixtures) |
 | `farfield` | Characteristic far field for a free stream: the outgoing Riemann invariant comes from the interior, the incoming one from the free stream, so waves leave and the boundary works for inflow, outflow and tangential flow alike | `u`, `p`, `T` (free stream) |
 | `dirichlet` | Exterior state from expressions in `x`, `y`, `z`, `t`, evaluated at face centers at every stage | `rho`, `u` (one expression per component), `p` |
 | `p_out` | Outlet: imposes `p` if the outflow is subsonic | `p` |
@@ -249,5 +264,5 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | `prefix` | Output path prefix; directories are created as needed |
 | `format` | `vtu` (with a `.pvd` series next to it) or `restart` |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
-| `variables` | (`vtu`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), and with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`) |
+| `variables` | (`vtu`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
 | `geometry` | (`vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |

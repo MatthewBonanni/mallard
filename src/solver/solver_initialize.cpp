@@ -14,6 +14,8 @@
 #include "input.h"
 
 #include <algorithm>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 
@@ -48,6 +50,7 @@ void Solver::init_solution() {
         init_solution_restart();
     }
     copy_host_to_device();
+    if (is_mixture() && it->second != InitType::RESTART) init_temperature_seed();
     update_primitives();
 }
 
@@ -77,11 +80,14 @@ void Solver::init_solution_restart() {
         if (values == nullptr) {
             throw std::runtime_error("Restart file " + file + " has no variable " + expected[v] + ".");
         }
+        const uint32_t n_species = species_names.size();
         for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
             if (v < N_CONSERVATIVE) {
                 h_conservatives(i_cell, v) = (*values)[i_cell];
-            } else {
+            } else if (v < N_CONSERVATIVE + n_species) {
                 h_species(i_cell, v - N_CONSERVATIVE) = (*values)[i_cell];
+            } else {
+                h_T_seed(i_cell) = (*values)[i_cell];  // the only auxiliary field
             }
         }
     }
@@ -106,6 +112,17 @@ void Solver::init_solution_constant() {
     }
     const rtype p = find_real(input, "initialize", "p");
     const rtype T = find_real(input, "initialize", "T");
+    if (is_mixture()) {
+        const std::vector<double> Y = mixture_model->mass_fractions(init, "initialize");
+        rtype cons[N_CONSERVATIVE];
+        std::vector<rtype> rhoY(species_names.size());
+        mixture_model->conservatives(static_cast<double>(p), static_cast<double>(T), u.data(), Y, cons, rhoY.data());
+        for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
+            FOR_I_CONSERVATIVE h_conservatives(i_cell, i) = cons[i];
+            for (size_t k = 0; k < rhoY.size(); k++) h_species(i_cell, k) = rhoY[k];
+        }
+        return;
+    }
     rtype W[N_CONSERVATIVE];
     W[0] = physics.get_density_from_pressure_temperature(p, T);
     FOR_I_DIM W[1 + i] = u[i];
@@ -165,10 +182,70 @@ void Solver::init_solution_analytical() {
     if (p_in) p_expr = compile("p", toml::find<std::string>(input, "initialize", "p"));
     if (T_in) T_expr = compile("T", toml::find<std::string>(input, "initialize", "T"));
 
+    // Mixtures: one expression per listed species of X or Y, and optionally a
+    // balance species taking the rest; otherwise the listed values are normalized
+    bool mole = false;
+    int32_t balance = -1;
+    std::vector<int32_t> listed;
+    std::vector<exprtk::expression<double>> fraction_expr;
+    if (is_mixture()) {
+        if (init.contains("X") == init.contains("Y")) {
+            throw InputError("initialize: give the composition as exactly one of X and Y.");
+        }
+        mole = init.contains("X");
+        const std::string key = mole ? "X" : "Y";
+        if (!init.at(key).is_table()) throw InputError("initialize." + key + " must be a table of species.");
+        for (const auto & [name, value] : init.at(key).as_table()) {
+            const int32_t k = mixture_model->mechanism().species_index(name);
+            if (k < 0) throw InputError("initialize." + key + ": no species " + name + " in the mechanism.");
+            listed.push_back(k);
+            std::ostringstream text;
+            if (value.is_string()) {
+                text << value.as_string();
+            } else {
+                text << std::setprecision(17) << static_cast<double>(as_real(value, name));
+            }
+            fraction_expr.push_back(compile(key + "." + name, text.str()));
+        }
+        if (init.contains("balance")) {
+            const std::string name = toml::find<std::string>(init, "balance");
+            balance = mixture_model->mechanism().species_index(name);
+            if (balance < 0) throw InputError("initialize.balance: no species " + name + " in the mechanism.");
+        }
+    }
+    const uint32_t n_species = species_names.size();
+    const uint32_t n_vars = N_CONSERVATIVE + n_species;
+    std::vector<double> fractions(n_species);
+
     auto point_conservatives = [&](double px, double py, double pz, rtype * cons) {
         x = px;
         y = py;
         z = pz;
+        if (is_mixture()) {
+            std::fill(fractions.begin(), fractions.end(), 0.0);
+            double sum = 0.0;
+            for (size_t i = 0; i < listed.size(); i++) {
+                fractions[listed[i]] = std::max(fraction_expr[i].value(), 0.0);
+                if (listed[i] != balance) sum += fractions[listed[i]];
+            }
+            if (balance >= 0) {
+                fractions[balance] = std::max(1.0 - sum, 0.0);
+                sum += fractions[balance];
+            }
+            if (!(sum > 0.0)) throw InputError("initialize: the composition is zero at a point.");
+            for (double & f : fractions) f /= sum;
+            const std::vector<double> Y = mole ? mixture_model->mass_fractions_from_mole(fractions) : fractions;
+            const double R = mixture_model->gas_constant(Y);
+            const double rho_m = rho_in ? rho_expr.value() : 0.0;
+            double p_m = p_in ? p_expr.value() : 0.0;
+            double T_m = T_in ? T_expr.value() : 0.0;
+            if (!p_in) p_m = rho_m * R * T_m;
+            if (!T_in) T_m = p_m / (rho_m * R);
+            rtype u[N_DIM];
+            FOR_I_DIM u[i] = static_cast<rtype>(u_expr[i].value());
+            mixture_model->conservatives(p_m, T_m, u, Y, cons, cons + N_CONSERVATIVE);
+            return;
+        }
         rtype rho = rho_in ? rho_expr.value() : 0.0;
         rtype p = p_in ? p_expr.value() : 0.0;
         const rtype T = T_in ? T_expr.value() : 0.0;
@@ -182,7 +259,7 @@ void Solver::init_solution_analytical() {
     };
 
     if constexpr (N_DIM == 3) {
-        init_cell_averages_3d(n_sub, [&](double px, double py, double pz, rtype * cons) {
+        init_cell_averages_3d(n_sub, n_vars, [&](double px, double py, double pz, rtype * cons) {
             point_conservatives(px, py, pz, cons);
         });
         return;
@@ -193,9 +270,11 @@ void Solver::init_solution_analytical() {
     double weight_sum = 0.0;
     for (uint32_t q = 0; q < n_quad; q++) weight_sum += double(quad.h_weights(q));
 
+    std::vector<double> sum(n_vars);
+    std::vector<rtype> cons(n_vars);
     for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
         const uint32_t n_nodes = mesh->h_n_nodes_of_cell(i_cell);
-        double sum[N_CONSERVATIVE] = {};
+        std::fill(sum.begin(), sum.end(), 0.0);
         double area_sum = 0.0;
         const uint32_t n0 = mesh->h_node_of_cell(i_cell, 0);
         for (uint32_t k = 1; k + 1 < n_nodes; k++) {
@@ -229,12 +308,11 @@ void Solver::init_solution_analytical() {
                         for (uint32_t q = 0; q < n_quad; q++) {
                             const double xi = double(quad.h_points(q, 0));
                             const double eta = double(quad.h_points(q, 1));
-                            rtype cons[N_CONSERVATIVE];
                             point_conservatives(o[0] + xi * d1[0] + eta * d2[0],
                                                 o[1] + xi * d1[1] + eta * d2[1],
-                                                0.0, cons);
+                                                0.0, cons.data());
                             const double w = double(quad.h_weights(q)) / weight_sum * sub_area;
-                            FOR_I_CONSERVATIVE sum[i] += w * double(cons[i]);
+                            for (uint32_t i = 0; i < n_vars; i++) sum[i] += w * double(cons[i]);
                         }
                         area_sum += sub_area;
                     }
@@ -242,10 +320,13 @@ void Solver::init_solution_analytical() {
             }
         }
         FOR_I_CONSERVATIVE h_conservatives(i_cell, i) = sum[i] / area_sum;
+        for (uint32_t k = 0; k < n_species; k++) {
+            h_species(i_cell, k) = static_cast<rtype>(sum[N_CONSERVATIVE + k] / area_sum);
+        }
     }
 }
 
-void Solver::init_cell_averages_3d(const uint32_t n_sub,
+void Solver::init_cell_averages_3d(const uint32_t n_sub, const uint32_t n_vars,
                                    const std::function<void(double, double, double, rtype *)> & f) {
     // 4-point Gauss-Legendre rule on [0, 1]
     const double g[4] = {0.5 - 0.5 * 0.8611363115940526, 0.5 - 0.5 * 0.3399810435848563,
@@ -254,9 +335,11 @@ void Solver::init_cell_averages_3d(const uint32_t n_sub,
                           0.5 * 0.6521451548625461, 0.5 * 0.3478548451374538};
     const double h = 1.0 / n_sub;
     std::vector<std::array<std::array<double, 3>, 4>> tets;
+    std::vector<double> sum(n_vars);
+    std::vector<rtype> cons(n_vars);
     for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
         mesh->h_cell_tetrahedra(i_cell, tets);
-        double sum[N_CONSERVATIVE] = {};
+        std::fill(sum.begin(), sum.end(), 0.0);
         double vol_sum = 0.0;
         for (const auto & tet : tets) {
             double e[3][3];
@@ -280,9 +363,8 @@ void Solver::init_cell_averages_3d(const uint32_t n_sub,
                                           six_vol * (1.0 - u) * (1.0 - u) * (1.0 - v);
                     double p[3];
                     for (int d = 0; d < 3; d++) p[d] = tet[0][d] + l1 * e[0][d] + l2 * e[1][d] + l3 * e[2][d];
-                    rtype cons[N_CONSERVATIVE];
-                    f(p[0], p[1], p[2], cons);
-                    FOR_I_CONSERVATIVE sum[i] += weight * double(cons[i]);
+                    f(p[0], p[1], p[2], cons.data());
+                    for (uint32_t i = 0; i < n_vars; i++) sum[i] += weight * double(cons[i]);
                     vol_sum += weight;
                 }
                 }
@@ -292,5 +374,8 @@ void Solver::init_cell_averages_3d(const uint32_t n_sub,
             }
         }
         FOR_I_CONSERVATIVE h_conservatives(i_cell, i) = sum[i] / vol_sum;
+        for (uint32_t k = 0; k + N_CONSERVATIVE < n_vars; k++) {
+            h_species(i_cell, k) = static_cast<rtype>(sum[N_CONSERVATIVE + k] / vol_sum);
+        }
     }
 }

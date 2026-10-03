@@ -5,6 +5,8 @@ set(MALLARD_TEST_SOURCES
     common_math_test.cpp
     time_integrator_test.cpp
     comm_test.cpp
+    chemistry_thermo_test.cpp
+    mixture_test.cpp
     mesh_block_test.cpp
     distributed_mesh_test.cpp
 )
@@ -42,6 +44,7 @@ endif()
 add_executable(MallardTest ${MALLARD_TEST_SOURCES})
 
 target_include_directories(MallardTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(MallardTest PRIVATE MALLARD_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 include(FetchContent)
 FetchContent_Declare(

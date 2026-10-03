@@ -204,6 +204,58 @@ struct BoundaryData {
     bool viscous = false;
     Euler gas;
     rtype gravity[N_DIM] = {};
+    // Gas mixtures: per condition, the mass fractions and [gamma, e0] of a
+    // prescribed state (UPT); empty for a single gas
+    Kokkos::View<rtype **, Kokkos::LayoutRight> bc_Y;
+    Kokkos::View<rtype *[2]> bc_thermo;
+
+    /**
+     * @brief Exterior state of a gas mixture on boundary face i_face: W as in
+     *        exterior_W (with the interior gamma for subsonic checks), and the
+     *        exterior thermodynamic surrogates [gamma, e0]: the image's for
+     *        transmissive faces, the prescribed state's for UPT, else the
+     *        interior's.
+     * @param th_i Interior [gamma, e0].
+     * @param face_thermo Face [gamma, e0], indexed (face, quadrature point, side, 0/1).
+     * @param cell_thermo Cell [gamma, e0] by cell, as columns (cell, 0/1).
+     */
+    template <typename T_W, typename T_F, typename T_FT, typename T_CT>
+    KOKKOS_INLINE_FUNCTION
+    void exterior_mixture(const uint32_t i_face, const uint8_t i_quad, const uint8_t n_quad, const rtype * W_i,
+                          const rtype * th_i, const rtype * n, const T_W & W_cells, const T_F & face_solution,
+                          const T_FT & face_thermo, const T_CT & cell_thermo, rtype * W_g, rtype * th_g) const {
+        const int32_t image_face = face_image_face(i_face);
+        const int32_t image = face_image(i_face);
+        if (image_face >= 0) {
+            uint8_t q;
+            if constexpr (N_DIM == 2) {
+                q = face_image_flip(i_face) ? n_quad - 1 - i_quad : i_quad;
+            } else {
+                q = face_image_quad(i_face, i_quad);
+            }
+            const uint8_t side = face_image_side(i_face);
+            for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = face_solution(image_face, q, side, i);
+            th_g[0] = face_thermo(image_face, q, side, 0);
+            th_g[1] = face_thermo(image_face, q, side, 1);
+            return;
+        }
+        if (image >= 0) {
+            for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = W_cells(image, i);
+            th_g[0] = cell_thermo(image, 0);
+            th_g[1] = cell_thermo(image, 1);
+            return;
+        }
+        const int32_t i_bc = face_bc(i_face);
+        const BoundaryCondition & bc = bcs(i_bc);
+        bc.ghost_W(W_i, n, th_i[0], R, viscous, W_g);
+        if (bc.type == BoundaryType::UPT) {
+            th_g[0] = bc_thermo(i_bc, 0);
+            th_g[1] = bc_thermo(i_bc, 1);
+        } else {
+            th_g[0] = th_i[0];
+            th_g[1] = th_i[1];
+        }
+    }
 
     /**
      * @brief Exterior state seen by the Riemann solver on boundary face i_face.

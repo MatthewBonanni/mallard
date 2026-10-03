@@ -118,6 +118,24 @@ else()
     add_subdirectory(src/external/kokkos ${CMAKE_BINARY_DIR}/external/kokkos ${MALLARD_THIRD_PARTY})
 endif()
 
+# Cantera YAML mechanism files
+include(FetchContent)
+FetchContent_Declare(yaml-cpp
+    GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+    GIT_TAG yaml-cpp-0.9.0
+    EXCLUDE_FROM_ALL
+    ${MALLARD_THIRD_PARTY})
+set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_INSTALL OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(yaml-cpp)
+# yaml-cpp has no device code, and nvcc cannot compile its bundled dragonbox:
+# Kokkos' nvcc_wrapper passes it to the host compiler
+if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
+    target_compile_options(yaml-cpp PRIVATE --host-only)
+endif()
+
 # Include other external libraries
 include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/toml11/include")
 include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/exprtk")

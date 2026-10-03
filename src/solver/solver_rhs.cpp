@@ -56,6 +56,10 @@ struct CellWFunctor {
 } // namespace
 
 void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
+    if (is_mixture()) {
+        calc_rhs_mixture(state, rhs_state, t_stage);
+        return;
+    }
     StateView solution = state.flow;
     StateView rhs = rhs_state.flow;
     // The first stage reuses the halo that calc_dt filled

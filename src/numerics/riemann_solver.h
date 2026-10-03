@@ -90,7 +90,76 @@ void wave_speeds_einfeldt(const rtype * W_l, const rtype * W_r, const rtype u_l_
     S_r = Kokkos::fmax(u_r_n + a_r, un_roe + a_roe);
 }
 
+/**
+ * @brief Thermodynamics of one side of a face for a gas mixture: the frozen
+ *        ratio of specific heats and the energy offset, with
+ *        rho E = p / (gamma - 1) + rho e0 + rho |u|^2 / 2 (e0 = 0 for a
+ *        calorically perfect gas).
+ */
+struct SideThermo {
+    rtype gamma;
+    rtype e0;
+};
+
+/**
+ * @brief Physical Euler flux of state W of a mixture side through unit normal n.
+ */
+KOKKOS_INLINE_FUNCTION
+void physical_flux(const rtype * W, const rtype * n, const SideThermo & th, rtype * U, rtype * F) {
+    constexpr uint8_t E = N_DIM + 1;
+    const rtype u_n = dot<N_DIM>(W + 1, n);
+    U[0] = W[0];
+    FOR_I_DIM U[1 + i] = W[0] * W[1 + i];
+    U[E] = W[E] / (th.gamma - 1.0_r) + W[0] * th.e0 + 0.5_r * W[0] * dot<N_DIM>(W + 1, W + 1);
+    F[0] = U[0] * u_n;
+    FOR_I_DIM F[1 + i] = U[1 + i] * u_n + W[E] * n[i];
+    F[E] = (U[E] + W[E]) * u_n;
+}
+
+/**
+ * @brief Einfeldt wave speed estimates for a mixture: the Roe average of the
+ *        perfect-gas estimates with sqrt(rho)-weighted averages of gamma and
+ *        e0, a^2 = (gamma - 1) (H - e0 - |u|^2 / 2). Equal to the perfect-gas
+ *        estimates when both sides share gamma and e0 = 0.
+ */
+KOKKOS_INLINE_FUNCTION
+void wave_speeds_einfeldt(const rtype * W_l, const rtype * W_r, const rtype u_l_n, const rtype u_r_n,
+                          const SideThermo & th_l, const SideThermo & th_r, rtype & S_l, rtype & S_r) {
+    const rtype a_l = Kokkos::sqrt(th_l.gamma * W_l[N_DIM + 1] / W_l[0]);
+    const rtype a_r = Kokkos::sqrt(th_r.gamma * W_r[N_DIM + 1] / W_r[0]);
+    const rtype s_l = Kokkos::sqrt(W_l[0]);
+    const rtype s_r = Kokkos::sqrt(W_r[0]);
+    const rtype H_l = a_l * a_l / (th_l.gamma - 1.0_r) + th_l.e0 + 0.5_r * dot<N_DIM>(W_l + 1, W_l + 1);
+    const rtype H_r = a_r * a_r / (th_r.gamma - 1.0_r) + th_r.e0 + 0.5_r * dot<N_DIM>(W_r + 1, W_r + 1);
+    rtype u_roe[N_DIM];
+    FOR_I_DIM u_roe[i] = (s_l * W_l[1 + i] + s_r * W_r[1 + i]) / (s_l + s_r);
+    const rtype H_roe = (s_l * H_l + s_r * H_r) / (s_l + s_r);
+    const rtype gamma_roe = (s_l * th_l.gamma + s_r * th_r.gamma) / (s_l + s_r);
+    const rtype e0_roe = (s_l * th_l.e0 + s_r * th_r.e0) / (s_l + s_r);
+    const rtype un_roe = (s_l * u_l_n + s_r * u_r_n) / (s_l + s_r);
+    const rtype a_roe = Kokkos::sqrt(
+        Kokkos::fmax((gamma_roe - 1.0_r) * (H_roe - e0_roe - 0.5_r * dot<N_DIM>(u_roe, u_roe)), 0.0_r));
+    S_l = Kokkos::fmin(u_l_n - a_l, un_roe - a_roe);
+    S_r = Kokkos::fmax(u_r_n + a_r, un_roe + a_roe);
+}
+
 struct Rusanov {
+    /** @brief Mixture flux with per-side thermodynamics. */
+    KOKKOS_INLINE_FUNCTION
+    static void calc_flux(rtype * flux, const rtype * n, const rtype * W_l, const rtype * W_r,
+                          const SideThermo & th_l, const SideThermo & th_r) {
+        rtype U_l[N_CONSERVATIVE], U_r[N_CONSERVATIVE];
+        rtype F_l[N_CONSERVATIVE], F_r[N_CONSERVATIVE];
+        physical_flux(W_l, n, th_l, U_l, F_l);
+        physical_flux(W_r, n, th_r, U_r, F_r);
+        const rtype u_l_n = dot<N_DIM>(W_l + 1, n);
+        const rtype u_r_n = dot<N_DIM>(W_r + 1, n);
+        const rtype a_l = Kokkos::sqrt(th_l.gamma * W_l[N_DIM + 1] / W_l[0]);
+        const rtype a_r = Kokkos::sqrt(th_r.gamma * W_r[N_DIM + 1] / W_r[0]);
+        const rtype S_max = Kokkos::fmax(Kokkos::fabs(u_l_n) + a_l, Kokkos::fabs(u_r_n) + a_r);
+        FOR_I_CONSERVATIVE flux[i] = 0.5_r * (F_l[i] + F_r[i] - S_max * (U_r[i] - U_l[i]));
+    }
+
     KOKKOS_INLINE_FUNCTION
     static void calc_flux(rtype * flux, const rtype * n,
                           const rtype * W_l, const rtype * W_r, const rtype gamma) {
@@ -108,6 +177,29 @@ struct Rusanov {
 };
 
 struct HLL {
+    /** @brief Mixture flux with per-side thermodynamics. */
+    KOKKOS_INLINE_FUNCTION
+    static void calc_flux(rtype * flux, const rtype * n, const rtype * W_l, const rtype * W_r,
+                          const SideThermo & th_l, const SideThermo & th_r) {
+        rtype U_l[N_CONSERVATIVE], U_r[N_CONSERVATIVE];
+        rtype F_l[N_CONSERVATIVE], F_r[N_CONSERVATIVE];
+        physical_flux(W_l, n, th_l, U_l, F_l);
+        physical_flux(W_r, n, th_r, U_r, F_r);
+        const rtype u_l_n = dot<N_DIM>(W_l + 1, n);
+        const rtype u_r_n = dot<N_DIM>(W_r + 1, n);
+        rtype S_l, S_r;
+        wave_speeds_einfeldt(W_l, W_r, u_l_n, u_r_n, th_l, th_r, S_l, S_r);
+        if (0.0_r <= S_l) {
+            FOR_I_CONSERVATIVE flux[i] = F_l[i];
+        } else if (S_r <= 0.0_r) {
+            FOR_I_CONSERVATIVE flux[i] = F_r[i];
+        } else {
+            FOR_I_CONSERVATIVE {
+                flux[i] = (S_r * F_l[i] - S_l * F_r[i] + S_l * S_r * (U_r[i] - U_l[i])) / (S_r - S_l);
+            }
+        }
+    }
+
     KOKKOS_INLINE_FUNCTION
     static void calc_flux(rtype * flux, const rtype * n,
                           const rtype * W_l, const rtype * W_r, const rtype gamma) {
@@ -132,6 +224,47 @@ struct HLL {
 };
 
 struct HLLC {
+    /**
+     * @brief Mixture flux with per-side thermodynamics. The star states
+     *        (Toro 10.38-10.39) hold for any equation of state.
+     */
+    KOKKOS_INLINE_FUNCTION
+    static void calc_flux(rtype * flux, const rtype * n, const rtype * W_l, const rtype * W_r,
+                          const SideThermo & th_l, const SideThermo & th_r) {
+        rtype U_l[N_CONSERVATIVE], U_r[N_CONSERVATIVE];
+        rtype F_l[N_CONSERVATIVE], F_r[N_CONSERVATIVE];
+        physical_flux(W_l, n, th_l, U_l, F_l);
+        physical_flux(W_r, n, th_r, U_r, F_r);
+        const rtype u_l_n = dot<N_DIM>(W_l + 1, n);
+        const rtype u_r_n = dot<N_DIM>(W_r + 1, n);
+        rtype S_l, S_r;
+        wave_speeds_einfeldt(W_l, W_r, u_l_n, u_r_n, th_l, th_r, S_l, S_r);
+        if (0.0_r <= S_l) {
+            FOR_I_CONSERVATIVE flux[i] = F_l[i];
+            return;
+        }
+        if (S_r <= 0.0_r) {
+            FOR_I_CONSERVATIVE flux[i] = F_r[i];
+            return;
+        }
+        const rtype m_l = W_l[0] * (S_l - u_l_n);
+        const rtype m_r = W_r[0] * (S_r - u_r_n);
+        constexpr uint8_t E = N_DIM + 1;
+        const rtype S_star = (W_r[E] - W_l[E] + u_l_n * m_l - u_r_n * m_r) / (m_l - m_r);
+        const bool left = (S_star >= 0.0_r);
+        const rtype * W = left ? W_l : W_r;
+        const rtype * U = left ? U_l : U_r;
+        const rtype * F = left ? F_l : F_r;
+        const rtype S = left ? S_l : S_r;
+        const rtype u_n = left ? u_l_n : u_r_n;
+        const rtype coeff = W[0] * (S - u_n) / (S - S_star);
+        rtype U_star[N_CONSERVATIVE];
+        U_star[0] = coeff;
+        FOR_I_DIM U_star[1 + i] = coeff * (W[1 + i] + (S_star - u_n) * n[i]);
+        U_star[E] = coeff * (U[E] / W[0] + (S_star - u_n) * (S_star + W[E] / (W[0] * (S - u_n))));
+        FOR_I_CONSERVATIVE flux[i] = F[i] + S * (U_star[i] - U[i]);
+    }
+
     KOKKOS_INLINE_FUNCTION
     static void calc_flux(rtype * flux, const rtype * n,
                           const rtype * W_l, const rtype * W_r, const rtype gamma) {

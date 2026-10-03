@@ -42,11 +42,17 @@ inline void expect_matches_serial(const std::string & input) {
 
     const uint32_t n_global = serial.get_mesh()->n_cells;
     const auto & dist = distributed.get_distribution();
-    std::vector<double> gathered(n_global * N_CONSERVATIVE, 0.0);
+    // Conservatives, then species partial densities
+    const uint32_t n_species = serial.get_species_names().size();
+    const uint32_t n_vars = N_CONSERVATIVE + n_species;
+    auto value = [&](const Solver & s, uint32_t c, uint32_t i) {
+        return static_cast<double>(i < N_CONSERVATIVE ? s.h_conservatives(c, i) : s.h_species(c, i - N_CONSERVATIVE));
+    };
+    std::vector<double> gathered(n_global * n_vars, 0.0);
     std::vector<double> count(n_global, 0.0);
     for (uint32_t c = 0; c < distributed.get_mesh()->n_owned(); c++) {
         const uint64_t g = distributed.is_distributed() ? dist.global_cell[c] : c;
-        FOR_I_CONSERVATIVE gathered[g * N_CONSERVATIVE + i] = double(distributed.h_conservatives(c, i));
+        for (uint32_t i = 0; i < n_vars; i++) gathered[g * n_vars + i] = value(distributed, c, i);
         count[g] += 1.0;
     }
     comm::allreduce(std::span<double>(gathered), comm::Op::SUM);
@@ -57,9 +63,9 @@ inline void expect_matches_serial(const std::string & input) {
     double max_rel = 0.0;
     for (uint32_t g = 0; g < n_global; g++) {
         ASSERT_EQ(count[g], 1.0) << "cell " << g << " owned " << count[g] << " times";
-        FOR_I_CONSERVATIVE {
-            const double ref = double(serial.h_conservatives(g, i));
-            max_rel = std::max(max_rel, std::abs(gathered[g * N_CONSERVATIVE + i] - ref) / (std::abs(ref) + 1e-3));
+        for (uint32_t i = 0; i < n_vars; i++) {
+            const double ref = value(serial, g, i);
+            max_rel = std::max(max_rel, std::abs(gathered[g * n_vars + i] - ref) / (std::abs(ref) + 1e-3));
         }
     }
     // Faces and stencils are ordered by global cell ids, so every rank count
