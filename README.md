@@ -11,11 +11,12 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 
 *Double Mach reflection, a 2D Riemann problem, the Daru & Tenaud viscous shock tube and, in 3D, the Taylor-Green vortex at Re = 1600 ([`examples/`](examples)): the shock tube's wall density at t = 1 lands on the grid-converged reference of [Zhou et al.](https://arxiv.org/abs/1705.09062), and the vortex's kinetic-energy dissipation rate follows the 512³ spectral DNS of the [High-Order CFD Workshop](https://cfd.ku.edu/hiocfd/).*
 
-> **NOTE:** Mallard is a **work in progress**: 3D support is new, MPI is in progress, and GPU performance has only begun to be tuned.
+> **NOTE:** Mallard is under active development; finite-rate chemistry is new, and its GPU performance is still being tuned.
 
 ## Features
 
-- Compressible Euler and Navier-Stokes equations (calorically perfect gas, constant or Sutherland viscosity)
+- Compressible Euler and Navier-Stokes equations: a calorically perfect gas (constant or Sutherland viscosity), or thermally perfect gas mixtures
+- Finite-rate chemistry with arbitrary Cantera (YAML) mechanisms read at run time: elementary, three-body, falloff, PLOG and Chebyshev reactions; an adaptive Rosenbrock integrator per cell with analytical Jacobians, Strang-split from the flow; mixture-averaged, unity-Lewis or constant-Lewis transport; an optional double-flux scheme for interfaces; `MallardReactor`, a 0D reactor tool
 - 2D or 3D (a build option): unstructured meshes of triangles and quadrilaterals, or of tetrahedra, hexahedra, prisms and pyramids, read from Gmsh or HDF5 files or generated
 - Face reconstruction:
   - First order
