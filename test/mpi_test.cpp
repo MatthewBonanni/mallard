@@ -177,6 +177,19 @@ TEST(MPITest, NavierStokesWithBoundaryConditionsMatchesSerial) {
         25));
 }
 
+TEST(MPITest, BoundaryConditionsSurviveTheHaloRebuild) {
+    // TENO stencils need a deeper halo than the first one, so the local mesh is
+    // built twice. Dirichlet face lists of the first mesh used to survive, and
+    // their faces, renumbered, could have no Dirichlet state in the second.
+    expect_matches_serial(box_input(
+        "cartesian", "type = \"TENO\"\norder = 3\n", EULER,
+        bcs("type = \"dirichlet\"\nrho = \"1.0\"\nu = [\"0.3\", \"0.0\"]\np = \"1.0 + 0.1 * sin(6 * y) * sin(20 * t)\"\n",
+            "type = \"p_out_average\"\np = 1.0\n",
+            "type = \"dirichlet\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\"]\np = \"1.0\"\n",
+            "type = \"dirichlet\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\"]\np = \"1.0\"\n"),
+        10));
+}
+
 namespace {
 
 std::string io_dir() {

@@ -290,6 +290,8 @@ void Solver::init_boundaries() {
     std::vector<int32_t> face_bc(mesh->n_faces, -1);
     std::vector<BoundaryCondition> bcs;
     boundary_summary.clear();
+    dirichlet_boundaries.clear();
+    average_pressure_outlets.clear();
 
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
         const toml::value & bound = input_boundaries[i_bc];
@@ -499,6 +501,7 @@ void Solver::update_boundary_states(rtype t_eval) {
         for (uint32_t i_face : bc.faces) {
             const auto x = Kokkos::subview(mesh->h_face_coords, i_face, Kokkos::ALL());
             const int32_t k = h_face_state_index(i_face);
+            if (k < 0) throw std::logic_error("Dirichlet boundary face " + std::to_string(i_face) + " has no state.");
             for (uint8_t i = 0; i < N_DIM + 2; i++) h_face_state(k, i) = bc.W[i].at(x, N_DIM, double(t_eval));
         }
     }
