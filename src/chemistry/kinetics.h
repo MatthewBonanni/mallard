@@ -19,9 +19,38 @@
 
 #include <Kokkos_Core.hpp>
 
+#include "lanes.h"
 #include "mechanism.h"
 
 namespace chemistry {
+
+/**
+ * @brief Per-reaction derivatives of the rates of progress, in one block of
+ *        KineticsTable::derivatives_size() doubles: d q / dT at fixed
+ *        concentrations; d q / d C of each forward (reactant) and reverse
+ *        (product) mass-action term; d q / d[M] of third-body and falloff
+ *        reactions; and the d q / d C_j shared by every species through the
+ *        pressure of PLOG and Chebyshev reactions.
+ */
+struct ReactionDerivatives {
+    double * dq_dT;
+    double * d_forward;
+    double * d_reverse;
+    double * dq_dM;
+    double * dq_uniform;
+
+    KOKKOS_INLINE_FUNCTION
+    static ReactionDerivatives at(double * work, const uint32_t n_reactions, const uint32_t n_forward,
+                                  const uint32_t n_reverse) {
+        ReactionDerivatives d;
+        d.dq_dT = work;
+        d.d_forward = d.dq_dT + n_reactions;
+        d.d_reverse = d.d_forward + n_forward;
+        d.dq_dM = d.d_reverse + n_reverse;
+        d.dq_uniform = d.dq_dM + n_reactions;
+        return d;
+    }
+};
 
 /**
  * @brief Reactions of a mechanism as flat device tables (compressed rows per
@@ -59,6 +88,16 @@ struct KineticsTable {
     View1<uint32_t> net_offset;      // nonzero net coefficients nu'' - nu'
     View1<uint32_t> net_species;
     View1<double> net_nu;
+    View1<uint32_t> species_offset;  // (n_species + 1): the same coefficients by species, by reaction index
+    View1<uint32_t> species_reaction;
+    View1<double> species_nu;
+    View1<uint32_t> chunk_offset;  // (n_species + 1): chunks of each species' coefficients, for lanes
+    View1<uint32_t> chunk_end;     // (chunk): end of its range in the species' coefficients
+    // Jacobian entries d omega_k / d C_j with their terms (per-reaction derivative and coefficient), for lanes
+    View1<uint32_t> entry_row, entry_column;
+    View1<uint32_t> entry_offset;  // (entries + 1)
+    View1<uint32_t> term_source;   // index into the ReactionDerivatives block
+    View1<double> term_coefficient;
     View1<double> delta_nu;          // sum of net coefficients
     View1<uint32_t> efficiency_offset;
     View1<uint32_t> efficiency_species;
@@ -244,34 +283,41 @@ struct KineticsTable {
         }
     }
 
+    /** @brief Doubles of ReactionDerivatives storage. */
+    KOKKOS_INLINE_FUNCTION uint32_t derivatives_size() const {
+        return 3 * n_reactions + static_cast<uint32_t>(forward_species.extent(0)) +
+               static_cast<uint32_t>(reverse_species.extent(0));
+    }
+
     /**
-     * @brief Rates of progress q_i [kmol/(m^3 s)] and, if dq_dT is not null,
-     *        their temperature derivatives at fixed concentrations.
-     * @param C Concentrations (n_species).
-     * @param g_RT, h_RT Species g / RT and h / RT at T (h_RT only for dq_dT).
+     * @brief Rates of progress q_i [kmol/(m^3 s)] of every reaction (one per
+     *        lane) and, with derivatives, what the Jacobian needs.
+     * @param C Concentrations (n_species), C_total their sum.
+     * @param g_RT, h_RT Species g / RT and h / RT at T (h_RT only with derivatives).
      * @param q Rates of progress (n_reactions).
-     * @param kf, kr Forward and reverse rate constants including third-body
-     *        and falloff factors (n_reactions), for the Jacobian; may be null.
+     * @param d Null, or the derivatives (laid out by ReactionDerivatives::at).
      */
-    KOKKOS_INLINE_FUNCTION
-    void rates_of_progress(const double T, const double * C, const double * g_RT, const double * h_RT, double * q,
-                           double * dq_dT, double * kf_out, double * kr_out) const {
+    template <typename Lanes>
+    KOKKOS_INLINE_FUNCTION void rates_of_progress(const Lanes & lanes, const double T, const double * C,
+                                                  const double C_total, const double * g_RT, const double * h_RT,
+                                                  double * q, const ReactionDerivatives * d) const {
         const double log_T = Kokkos::log(T), inv_T = 1.0 / T;
         const double log_c0 = Kokkos::log(ONE_ATM / (GAS_CONSTANT * T));
-        double C_total = 0.0;
-        for (uint32_t k = 0; k < n_species; k++) C_total += C[k];
-        for (uint32_t i = 0; i < n_reactions; i++) {
+        lanes.for_each(n_reactions, [&](const uint32_t i) {
             double kf = arrhenius(rate(i, 0), rate(i, 1), rate(i, 2), log_T, inv_T);
             double dlnkf_dT = (rate(i, 1) + rate(i, 2) * inv_T) * inv_T;
-            if (type(i) == static_cast<uint8_t>(ReactionType::PLOG) ||
-                type(i) == static_cast<uint8_t>(ReactionType::CHEBYSHEV)) {
+            double dlnk_dlnp = 0.0, dk_dM = 0.0;
+            const uint8_t kind = type(i);
+            if (kind == static_cast<uint8_t>(ReactionType::PLOG) ||
+                kind == static_cast<uint8_t>(ReactionType::CHEBYSHEV)) {
                 // p = C_total R T, so d ln p / dT = 1 / T at fixed concentrations
-                double dlnk_dlnp;
                 pressure_rate(i, log_T, inv_T, Kokkos::log(C_total * GAS_CONSTANT * T), kf, dlnkf_dT, dlnk_dlnp);
                 dlnkf_dT += dlnk_dlnp * inv_T;
-            } else if (type(i) == static_cast<uint8_t>(ReactionType::THREE_BODY)) {
-                kf *= third_body(i, C, C_total);
-            } else if (type(i) == static_cast<uint8_t>(ReactionType::FALLOFF)) {
+            } else if (kind == static_cast<uint8_t>(ReactionType::THREE_BODY)) {
+                const double M = third_body(i, C, C_total);
+                dk_dM = kf;
+                kf *= M;
+            } else if (kind == static_cast<uint8_t>(ReactionType::FALLOFF)) {
                 const double k0 = arrhenius(low(i, 0), low(i, 1), low(i, 2), log_T, inv_T);
                 const double dlnk0_dT = (low(i, 1) + low(i, 2) * inv_T) * inv_T;
                 const double M = third_body(i, C, C_total);
@@ -281,126 +327,204 @@ struct KineticsTable {
                 // ln k = ln k_inf + ln Pr - ln(1 + Pr) + ln F, with d ln Pr / dT = dlnk0 - dlnkinf
                 const double dlnPr_dT = dlnk0_dT - dlnkf_dT;
                 dlnkf_dT += (1.0 / (1.0 + Pr) + dlnF_dlnPr) * dlnPr_dT + dlnF_dT;
+                // k = k_inf Pr / (1 + Pr) F; dk/dM = k0 F [1 / (1 + Pr)^2 + d ln F / d ln Pr / (1 + Pr)]
+                dk_dM = k0 * F / (1.0 + Pr) * (1.0 / (1.0 + Pr) + dlnF_dlnPr);
                 kf *= Pr / (1.0 + Pr) * F;
             }
-            double fwd = kf;
+            double prod_f = 1.0;
             for (uint32_t j = forward_offset(i); j < forward_offset(i + 1); j++) {
-                fwd *= power(C[forward_species(j)], forward_order(j));
+                prod_f *= power(C[forward_species(j)], forward_order(j));
             }
-            double kr = 0.0, rev = 0.0, dlnKc_dT = 0.0;
+            double kr = 0.0, prod_r = 0.0, dlnKc_dT = 0.0;
             if (reversible(i)) {
                 double sum_g = 0.0, sum_h = 0.0;
                 for (uint32_t j = net_offset(i); j < net_offset(i + 1); j++) {
                     sum_g += net_nu(j) * g_RT[net_species(j)];
-                    if (dq_dT) sum_h += net_nu(j) * h_RT[net_species(j)];
+                    if (d) sum_h += net_nu(j) * h_RT[net_species(j)];
                 }
                 const double ln_Kc = -sum_g + delta_nu(i) * log_c0;
-                kr = kf * Kokkos::exp(-ln_Kc);
-                rev = kr;
+                const double inv_Kc = Kokkos::exp(-ln_Kc);
+                kr = kf * inv_Kc;
+                prod_r = inv_Kc;
                 for (uint32_t j = reverse_offset(i); j < reverse_offset(i + 1); j++) {
-                    rev *= power(C[reverse_species(j)], reverse_order(j));
+                    prod_r *= power(C[reverse_species(j)], reverse_order(j));
                 }
                 // d(g/RT)/dT = -h/(R T^2), d ln(p_atm / RT) / dT = -1/T
                 dlnKc_dT = (sum_h - delta_nu(i)) * inv_T;
             }
+            const double fwd = kf * prod_f, rev = kf * prod_r;
             q[i] = fwd - rev;
-            if (dq_dT) dq_dT[i] = fwd * dlnkf_dT - rev * (dlnkf_dT - dlnKc_dT);
-            if (kf_out) kf_out[i] = kf;
-            if (kr_out) kr_out[i] = kr;
-        }
+            if (!d) return;
+            d->dq_dT[i] = fwd * dlnkf_dT - rev * (dlnkf_dT - dlnKc_dT);
+            // Mass-action terms: kf d(prod C^o)/dC_j and kr d(prod C^nu'')/dC_j
+            for (uint32_t a = forward_offset(i); a < forward_offset(i + 1); a++) {
+                double dd = kf * power_derivative(C[forward_species(a)], forward_order(a));
+                for (uint32_t b = forward_offset(i); b < forward_offset(i + 1); b++) {
+                    if (b != a) dd *= power(C[forward_species(b)], forward_order(b));
+                }
+                d->d_forward[a] = dd;
+            }
+            for (uint32_t a = reverse_offset(i); a < reverse_offset(i + 1); a++) {
+                double dd = 0.0;
+                if (reversible(i)) {
+                    dd = kr * power_derivative(C[reverse_species(a)], reverse_order(a));
+                    for (uint32_t b = reverse_offset(i); b < reverse_offset(i + 1); b++) {
+                        if (b != a) dd *= power(C[reverse_species(b)], reverse_order(b));
+                    }
+                }
+                d->d_reverse[a] = dd;
+            }
+            // Through [M]: d q / d C_j = dq_dM eff_j; through p: d q / d C_j = q (d ln k / d ln p) / C_total
+            d->dq_dM[i] = dk_dM * (prod_f - prod_r);
+            d->dq_uniform[i] = dlnk_dlnp != 0.0 && C_total > 0.0 ? q[i] * dlnk_dlnp / C_total : 0.0;
+        });
+        lanes.sync();
     }
 
-    /** @brief Net production rates omega_k = sum_i nu_ki q_i [kmol/(m^3 s)]. */
+    /** @brief Rates of progress of one thread, without derivatives. */
     KOKKOS_INLINE_FUNCTION
-    void production_rates(const double * q, double * omega) const {
-        for (uint32_t k = 0; k < n_species; k++) omega[k] = 0.0;
-        for (uint32_t i = 0; i < n_reactions; i++) {
-            for (uint32_t j = net_offset(i); j < net_offset(i + 1); j++) omega[net_species(j)] += net_nu(j) * q[i];
+    void rates_of_progress(const double T, const double * C, const double * g_RT, double * q) const {
+        double C_total = 0.0;
+        for (uint32_t k = 0; k < n_species; k++) C_total += C[k];
+        rates_of_progress(SerialLanes(), T, C, C_total, g_RT, nullptr, q, nullptr);
+    }
+
+    /**
+     * @brief Net production rates omega_k = sum_i nu_ki q_i [kmol/(m^3 s)],
+     *        one species per lane, summed by reaction index (or the same
+     *        sums of any per-reaction quantity, e.g. dq_dT).
+     */
+    template <typename Lanes>
+    KOKKOS_INLINE_FUNCTION void production_rates(const Lanes & lanes, const double * q, double * omega,
+                                                 double * partial = nullptr) const {
+        if constexpr (Lanes::parallel) {
+            if (partial) {
+                // Chunks of a few reactions per lane, then each species' chunks in order
+                lanes.for_each(static_cast<uint32_t>(chunk_end.extent(0)), [&](const uint32_t c) {
+                    const uint32_t begin = c == 0 ? 0 : chunk_end(c - 1);
+                    double sum = 0.0;
+                    for (uint32_t e = begin; e < chunk_end(c); e++) sum += species_nu(e) * q[species_reaction(e)];
+                    partial[c] = sum;
+                });
+                lanes.sync();
+                lanes.for_each(n_species, [&](const uint32_t k) {
+                    double sum = 0.0;
+                    for (uint32_t c = chunk_offset(k); c < chunk_offset(k + 1); c++) sum += partial[c];
+                    omega[k] = sum;
+                });
+                lanes.sync();
+                return;
+            }
         }
+        lanes.for_each(n_species, [&](const uint32_t k) {
+            double sum = 0.0;
+            for (uint32_t e = species_offset(k); e < species_offset(k + 1); e++) {
+                sum += species_nu(e) * q[species_reaction(e)];
+            }
+            omega[k] = sum;
+        });
+        lanes.sync();
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    void production_rates(const double * q, double * omega) const { production_rates(SerialLanes(), q, omega); }
+
+    /**
+     * @brief The structural entries of the Jacobian of the production rates
+     *        (d omega_k / d C_j at fixed T, without the part shared by all
+     *        columns), values[e] for entry e = (entry_row(e), entry_column(e)),
+     *        one entry per lane; and that shared part of each row in all_columns.
+     */
+    template <typename Lanes>
+    KOKKOS_INLINE_FUNCTION void production_jacobian_entries(const Lanes & lanes, const ReactionDerivatives & d,
+                                                            double * values, double * all_columns) const {
+        lanes.for_each(n_species, [&](const uint32_t k) {
+            double uniform = 0.0;
+            for (uint32_t e = species_offset(k); e < species_offset(k + 1); e++) {
+                const uint32_t i = species_reaction(e);
+                uniform += species_nu(e) * (d.dq_dM[i] * default_efficiency(i) + d.dq_uniform[i]);
+            }
+            all_columns[k] = uniform;
+        });
+        const double * block = d.dq_dT;
+        lanes.for_each(static_cast<uint32_t>(entry_row.extent(0)), [&](const uint32_t e) {
+            double sum = 0.0;
+            for (uint32_t t = entry_offset(e); t < entry_offset(e + 1); t++) {
+                sum += term_coefficient(t) * block[term_source(t)];
+            }
+            values[e] = sum;
+        });
+        lanes.sync();
     }
 
     /**
      * @brief Jacobian of the production rates with respect to the
-     *        concentrations at fixed T: dw_dC[k * n_species + j] = d omega_k / d C_j.
-     * @param kf, kr Rate constants from rates_of_progress at the same state.
+     *        concentrations at fixed T, one row per lane:
+     *        J[dense_index(stride, k, j)] = d omega_k / d C_j for j < n_species
+     *        (by rows, or by columns for lanes with Lanes::column_major).
+     * @param d Derivatives from rates_of_progress at the same state.
+     * @param all_columns If not null, the part of row k that is the same in
+     *        every column (third bodies at their default efficiency, PLOG
+     *        and Chebyshev pressures) goes to all_columns[k] instead of J.
      */
-    KOKKOS_INLINE_FUNCTION
-    void production_jacobian(const double T, const double * C, const double * kf, const double * kr,
-                             double * dw_dC) const {
+    template <typename Lanes>
+    KOKKOS_INLINE_FUNCTION void production_jacobian(const Lanes & lanes, const ReactionDerivatives & d, double * J,
+                                                    const uint32_t stride, double * all_columns = nullptr) const {
         const uint32_t n = n_species;
-        for (uint32_t a = 0; a < n * n; a++) dw_dC[a] = 0.0;
-        const double log_T = Kokkos::log(T), inv_T = 1.0 / T;
-        double C_total = 0.0;
-        for (uint32_t k = 0; k < n; k++) C_total += C[k];
-        for (uint32_t i = 0; i < n_reactions; i++) {
-            const uint32_t net_begin = net_offset(i), net_end = net_offset(i + 1);
-            auto add = [&](const uint32_t j, const double dq) {
-                for (uint32_t m = net_begin; m < net_end; m++) dw_dC[net_species(m) * n + j] += net_nu(m) * dq;
-            };
-            // Mass-action terms: kf d(prod C^o)/dC_j - kr d(prod C^nu'')/dC_j
-            for (uint32_t a = forward_offset(i); a < forward_offset(i + 1); a++) {
-                double d = kf[i] * power_derivative(C[forward_species(a)], forward_order(a));
-                for (uint32_t b = forward_offset(i); b < forward_offset(i + 1); b++) {
-                    if (b != a) d *= power(C[forward_species(b)], forward_order(b));
+        constexpr bool CM = Lanes::column_major;
+        if constexpr (Lanes::parallel) {
+            // Rows start from the part shared by all columns; then each lane adds whole entries, so
+            // that the lanes' loads balance (a row's reactions do not)
+            lanes.for_each(n, [&](const uint32_t k) {
+                double uniform = 0.0;
+                for (uint32_t e = species_offset(k); e < species_offset(k + 1); e++) {
+                    const uint32_t i = species_reaction(e);
+                    uniform += species_nu(e) * (d.dq_dM[i] * default_efficiency(i) + d.dq_uniform[i]);
                 }
-                add(forward_species(a), d);
-            }
-            if (reversible(i)) {
-                for (uint32_t a = reverse_offset(i); a < reverse_offset(i + 1); a++) {
-                    double d = kr[i] * power_derivative(C[reverse_species(a)], reverse_order(a));
-                    for (uint32_t b = reverse_offset(i); b < reverse_offset(i + 1); b++) {
-                        if (b != a) d *= power(C[reverse_species(b)], reverse_order(b));
-                    }
-                    add(reverse_species(a), -d);
+                if (all_columns) all_columns[k] = uniform;
+                const double base = all_columns ? 0.0 : uniform;
+                for (uint32_t j = 0; j < n; j++) J[dense_index<CM>(stride, k, j)] = base;
+            });
+            lanes.sync();
+            const double * block = d.dq_dT;
+            lanes.for_each(static_cast<uint32_t>(entry_row.extent(0)), [&](const uint32_t e) {
+                double sum = 0.0;
+                for (uint32_t t = entry_offset(e); t < entry_offset(e + 1); t++) {
+                    sum += term_coefficient(t) * block[term_source(t)];
                 }
-            }
-            if (type(i) == static_cast<uint8_t>(ReactionType::ELEMENTARY)) continue;
-            // q = k (prod_f - prod_r / Kc)
-            double prod_f = 1.0, prod_r = 0.0;
-            for (uint32_t a = forward_offset(i); a < forward_offset(i + 1); a++) {
-                prod_f *= power(C[forward_species(a)], forward_order(a));
-            }
-            if (reversible(i)) {
-                prod_r = kf[i] > 0.0 ? kr[i] / kf[i] : 0.0;
-                for (uint32_t a = reverse_offset(i); a < reverse_offset(i + 1); a++) {
-                    prod_r *= power(C[reverse_species(a)], reverse_order(a));
-                }
-            }
-            if (type(i) == static_cast<uint8_t>(ReactionType::PLOG) ||
-                type(i) == static_cast<uint8_t>(ReactionType::CHEBYSHEV)) {
-                // Pressure terms: d q / d C_j = q (d ln k / d ln p) / C_total for every j
-                double k, dlnk_dT, dlnk_dlnp;
-                pressure_rate(i, log_T, inv_T, Kokkos::log(C_total * GAS_CONSTANT * T), k, dlnk_dT, dlnk_dlnp);
-                const double dq = C_total > 0.0 ? kf[i] * (prod_f - prod_r) * dlnk_dlnp / C_total : 0.0;
-                if (dq != 0.0) {
-                    for (uint32_t j = 0; j < n; j++) add(j, dq);
-                }
-                continue;
-            }
-            // Third-body terms: d q / d C_j = (d ln k / d M) q eff_j
-            const double M = third_body(i, C, C_total);
-            double dk_dM;
-            if (type(i) == static_cast<uint8_t>(ReactionType::THREE_BODY)) {
-                dk_dM = M != 0.0 ? kf[i] / M : arrhenius(rate(i, 0), rate(i, 1), rate(i, 2), log_T, inv_T);
-            } else {
-                const double k_inf = arrhenius(rate(i, 0), rate(i, 1), rate(i, 2), log_T, inv_T);
-                const double k0 = arrhenius(low(i, 0), low(i, 1), low(i, 2), log_T, inv_T);
-                const double Pr = k_inf > 0.0 ? k0 * M / k_inf : 0.0;
-                double F, dlnF_dlnPr, dlnF_dT;
-                falloff_function(i, T, Pr, F, dlnF_dlnPr, dlnF_dT);
-                // k = k_inf Pr / (1 + Pr) F; dk/dM = k0 F [1 / (1 + Pr)^2 + Pr / (1 + Pr) d ln F / d ln Pr / Pr]
-                dk_dM = k0 * F / (1.0 + Pr) * (1.0 / (1.0 + Pr) + dlnF_dlnPr);
-            }
-            const double dq_dM = dk_dM * (prod_f - prod_r);
-            if (dq_dM == 0.0) continue;
-            const double base = default_efficiency(i);
-            if (base != 0.0) {
-                for (uint32_t j = 0; j < n; j++) add(j, base * dq_dM);
-            }
-            for (uint32_t e = efficiency_offset(i); e < efficiency_offset(i + 1); e++) {
-                add(efficiency_species(e), efficiency_extra(e) * dq_dM);
-            }
+                J[dense_index<CM>(stride, entry_row(e), entry_column(e))] += sum;
+            });
+            lanes.sync();
+            return;
         }
+        lanes.for_each(n, [&](const uint32_t k) {
+            auto row = [&](const uint32_t j) -> double & { return J[dense_index<CM>(stride, k, j)]; };
+            for (uint32_t j = 0; j < n; j++) row(j) = 0.0;
+            double uniform = 0.0;
+            for (uint32_t e = species_offset(k); e < species_offset(k + 1); e++) {
+                const uint32_t i = species_reaction(e);
+                const double nu = species_nu(e);
+                for (uint32_t a = forward_offset(i); a < forward_offset(i + 1); a++) {
+                    row(forward_species(a)) += nu * d.d_forward[a];
+                }
+                for (uint32_t a = reverse_offset(i); a < reverse_offset(i + 1); a++) {
+                    row(reverse_species(a)) -= nu * d.d_reverse[a];
+                }
+                const double all = nu * (d.dq_dM[i] * default_efficiency(i) + d.dq_uniform[i]);
+                if (all_columns) {
+                    uniform += all;
+                } else if (all != 0.0) {
+                    for (uint32_t j = 0; j < n; j++) row(j) += all;
+                }
+                if (d.dq_dM[i] != 0.0) {
+                    for (uint32_t x = efficiency_offset(i); x < efficiency_offset(i + 1); x++) {
+                        row(efficiency_species(x)) += nu * d.dq_dM[i] * efficiency_extra(x);
+                    }
+                }
+            }
+            if (all_columns) all_columns[k] = uniform;
+        });
+        lanes.sync();
     }
 };
 
@@ -511,6 +635,75 @@ KineticsTable<MemorySpace> make_kinetics_table(const Mechanism & mechanism) {
     t.net_offset = copy(n_off, "kinetics_net_offset");
     t.net_species = copy(n_sp, "kinetics_net_species");
     t.net_nu = copy(n_nu, "kinetics_net_nu");
+    // Net coefficients by species, in reaction order
+    std::vector<uint32_t> s_off(t.n_species + 1, 0), s_re(n_sp.size());
+    std::vector<double> s_nu(n_sp.size());
+    for (uint32_t k : n_sp) s_off[k + 1]++;
+    for (uint32_t k = 0; k < t.n_species; k++) s_off[k + 1] += s_off[k];
+    std::vector<uint32_t> fill(s_off.begin(), s_off.end() - 1);
+    for (uint32_t i = 0; i < nr; i++) {
+        for (uint32_t j = n_off[i]; j < n_off[i + 1]; j++) {
+            s_re[fill[n_sp[j]]] = i;
+            s_nu[fill[n_sp[j]]++] = n_nu[j];
+        }
+    }
+    // Chunks of at most 4 coefficients of each species
+    {
+        std::vector<uint32_t> offsets{0}, ends;
+        for (uint32_t k = 0; k < t.n_species; k++) {
+            for (uint32_t e = s_off[k]; e < s_off[k + 1]; e += 4) ends.push_back(std::min(e + 4, s_off[k + 1]));
+            offsets.push_back(static_cast<uint32_t>(ends.size()));
+        }
+        t.chunk_offset = copy(offsets, "kinetics_chunk_offset");
+        t.chunk_end = copy(ends, "kinetics_chunk_end");
+    }
+    // Jacobian entries and their terms, in the order of production_jacobian's row loops
+    {
+        const uint32_t nf = static_cast<uint32_t>(f_sp.size()), nrv = static_cast<uint32_t>(r_sp.size());
+        const uint32_t off_forward = nr, off_reverse = nr + nf, off_dM = nr + nf + nrv;
+        std::vector<std::vector<std::pair<uint32_t, double>>> terms(static_cast<size_t>(t.n_species) * t.n_species);
+        for (uint32_t k = 0; k < t.n_species; k++) {
+            for (uint32_t e = s_off[k]; e < s_off[k + 1]; e++) {
+                const uint32_t i = s_re[e];
+                const double nu = s_nu[e];
+                auto & row = terms;
+                for (uint32_t a = f_off[i]; a < f_off[i + 1]; a++) {
+                    row[k * t.n_species + f_sp[a]].emplace_back(off_forward + a, nu);
+                }
+                if (reversible[i]) {
+                    for (uint32_t a = r_off[i]; a < r_off[i + 1]; a++) {
+                        row[k * t.n_species + r_sp[a]].emplace_back(off_reverse + a, -nu);
+                    }
+                }
+                for (uint32_t x = e_off[i]; x < e_off[i + 1]; x++) {
+                    row[k * t.n_species + e_sp[x]].emplace_back(off_dM + i, nu * e_extra[x]);
+                }
+            }
+        }
+        std::vector<uint32_t> rows, columns, offsets{0}, sources;
+        std::vector<double> coefficients;
+        for (uint32_t k = 0; k < t.n_species; k++) {
+            for (uint32_t j = 0; j < t.n_species; j++) {
+                const auto & list = terms[k * t.n_species + j];
+                if (list.empty()) continue;
+                rows.push_back(k);
+                columns.push_back(j);
+                for (const auto & [source, coefficient] : list) {
+                    sources.push_back(source);
+                    coefficients.push_back(coefficient);
+                }
+                offsets.push_back(static_cast<uint32_t>(sources.size()));
+            }
+        }
+        t.entry_row = copy(rows, "kinetics_entry_row");
+        t.entry_column = copy(columns, "kinetics_entry_column");
+        t.entry_offset = copy(offsets, "kinetics_entry_offset");
+        t.term_source = copy(sources, "kinetics_term_source");
+        t.term_coefficient = copy(coefficients, "kinetics_term_coefficient");
+    }
+    t.species_offset = copy(s_off, "kinetics_species_offset");
+    t.species_reaction = copy(s_re, "kinetics_species_reaction");
+    t.species_nu = copy(s_nu, "kinetics_species_nu");
     t.delta_nu = copy(delta_nu, "kinetics_delta_nu");
     t.efficiency_offset = copy(e_off, "kinetics_efficiency_offset");
     t.efficiency_species = copy(e_sp, "kinetics_efficiency_species");

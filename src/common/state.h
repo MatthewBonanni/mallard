@@ -22,11 +22,31 @@
 /** @brief Flow block [rho, rho u, rho E] per cell. */
 using StateView = Kokkos::View<rtype *[N_CONSERVATIVE]>;
 
-/** @brief Layout of the species block; LayoutRight keeps a cell's species contiguous. */
+/**
+ * @brief Layout of the species block: LayoutRight keeps a cell's species
+ *        contiguous (the default); LayoutLeft (CMake Mallard_SPECIES_LAYOUT_LEFT)
+ *        a species' cells.
+ */
+#ifdef Mallard_SPECIES_LAYOUT_LEFT
+using SpeciesLayout = Kokkos::LayoutLeft;
+#else
 using SpeciesLayout = Kokkos::LayoutRight;
+#endif
 
 /** @brief Partial densities rho Y_k per (cell, species). */
 using SpeciesView = Kokkos::View<rtype **, SpeciesLayout>;
+
+/** @brief The partial densities of one cell, in any layout. */
+struct CellSpecies {
+    const rtype * first;
+    size_t stride;
+    KOKKOS_INLINE_FUNCTION rtype operator[](const uint32_t k) const { return first[k * stride]; }
+};
+
+KOKKOS_INLINE_FUNCTION
+CellSpecies cell_species(const SpeciesView & rhoY, const uint32_t c) {
+    return CellSpecies{&rhoY(c, 0), rhoY.stride(1)};
+}
 
 /**
  * @brief Conservative state of every cell: the flow block and the partial

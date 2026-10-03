@@ -90,7 +90,7 @@ void device_rates(const ThermoTable<> & thermo, const KineticsTable<> & kinetics
         double * g_RT = C + ns;
         double * h_RT = g_RT + ns;
         species_state(thermo, states(s, 0), states(s, 1), &states(s, 2), C, g_RT, h_RT);
-        kinetics.rates_of_progress(states(s, 0), C, g_RT, h_RT, &q(s, 0), nullptr, nullptr, nullptr);
+        kinetics.rates_of_progress(states(s, 0), C, g_RT, &q(s, 0));
         kinetics.production_rates(&q(s, 0), &omega(s, 0));
     });
 }
@@ -141,20 +141,23 @@ TEST(ChemistryKineticsTest, AnalyticalJacobianMatchesFiniteDifferences) {
         const auto kinetics = make_kinetics_table<Kokkos::HostSpace>(mech);
         const uint32_t ns = mech.n_species(), nr = mech.reactions.size();
         const auto rows = read_rows(c.name + "_rates.csv");
-        std::vector<double> C(ns), g(ns), h(ns), q(nr), dq_dT(nr), kf(nr), kr(nr), J(ns * ns), omega(ns);
+        std::vector<double> C(ns), g(ns), h(ns), q(nr), J(ns * ns), omega(ns), derivatives(kinetics.derivatives_size());
+        const ReactionDerivatives deriv = ReactionDerivatives::at(
+            derivatives.data(), nr, kinetics.forward_species.extent(0), kinetics.reverse_species.extent(0));
+        const double * dq_dT = deriv.dq_dT;
         std::vector<double> Cp(ns), gp(ns), hp(ns), qp(nr), wp(ns), wm(ns);
         for (size_t s = 0; s < std::min<size_t>(rows.size(), 10); s++) {
             const double T = rows[s][0], rho = rows[s][1];
             species_state(thermo, T, rho, &rows[s][2], C.data(), g.data(), h.data());
-            kinetics.rates_of_progress(T, C.data(), g.data(), h.data(), q.data(), dq_dT.data(), kf.data(), kr.data());
-            kinetics.production_jacobian(T, C.data(), kf.data(), kr.data(), J.data());
             double C_total = 0.0;
             for (double x : C) C_total += x;
+            kinetics.rates_of_progress(SerialLanes(), T, C.data(), C_total, g.data(), h.data(), q.data(), &deriv);
+            kinetics.production_jacobian(SerialLanes(), deriv, J.data(), ns);
             // omega at C with C_j shifted by d
             auto omega_at = [&](uint32_t j, double d, std::vector<double> & w) {
                 Cp = C;
                 Cp[j] += d;
-                kinetics.rates_of_progress(T, Cp.data(), g.data(), h.data(), qp.data(), nullptr, nullptr, nullptr);
+                kinetics.rates_of_progress(T, Cp.data(), g.data(), qp.data());
                 kinetics.production_rates(qp.data(), w.data());
             };
             // Centered differences with Richardson extrapolation (one-sided near C_j = 0)
@@ -187,8 +190,7 @@ TEST(ChemistryKineticsTest, AnalyticalJacobianMatchesFiniteDifferences) {
                 std::vector<double> & qq = sign > 0 ? wp : wm;
                 qq.resize(nr);
                 species_state(thermo, T + sign * dT, rho, &rows[s][2], Cp.data(), gp.data(), hp.data());
-                kinetics.rates_of_progress(T + sign * dT, C.data(), gp.data(), hp.data(), qq.data(), nullptr, nullptr,
-                                           nullptr);
+                kinetics.rates_of_progress(T + sign * dT, C.data(), gp.data(), qq.data());
             }
             double largest = 0.0;
             for (uint32_t i = 0; i < nr; i++) largest = std::max(largest, std::abs(dq_dT[i]));

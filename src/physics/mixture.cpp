@@ -166,6 +166,7 @@ chemistry::ReactorOptions reactor_options(const toml::value & input) {
     options.atol_Y = find_double_or(table, "atol", options.atol_Y);
     if (!(options.integrator.rtol > 0.0)) throw InputError("chemistry.rtol must be positive.");
     if (!(options.atol_Y > 0.0)) throw InputError("chemistry.atol must be positive.");
+    if (table.contains("sparse")) options.sparse = toml::find<bool>(table, "sparse") ? 1 : 0;
     if (table.contains("max_steps")) {
         const toml::value & v = table.at("max_steps");
         if (!v.is_integer() || v.as_integer() < 1) {

@@ -1,0 +1,383 @@
+/**
+ * @file cell_chemistry.cpp
+ * @author Matthew Bonanni (mbonanni001@gmail.com)
+ * @brief Finite-rate chemistry of the cells of a mesh.
+ * @version 0.3
+ * @date 2026-10-03
+ *
+ * @copyright Copyright (c) 2026 Matthew Bonanni
+ *
+ */
+
+#include "cell_chemistry.h"
+
+#include <algorithm>
+#include <stdexcept>
+#include <string>
+
+#include <Kokkos_Sort.hpp>
+
+
+// A named namespace: functors in an anonymous one make GCC warn about the visibility of the lanes' closures
+namespace cell_chemistry_kernels {
+
+constexpr double WORK_MEMORY_BYTES = 1024.0 * 1024.0 * 1024.0;
+
+template <bool Sparse>
+struct TeamTag {};
+// The team kernels are latency bound: with work memory in global memory, fewer
+// registers per thread and more cells per SM; in team scratch, as many as fit
+template <bool Sparse, bool Fast>
+using TeamPolicy = Kokkos::TeamPolicy<TeamTag<Sparse>, Kokkos::LaunchBounds<32, Fast ? 4 : 16>>;
+using Member = TeamPolicy<false, false>::member_type;
+
+/**
+ * @brief Mass fractions (double) and temperature of a cell; returns its
+ *        specific internal energy.
+ */
+KOKKOS_INLINE_FUNCTION
+double cell_composition(const Mixture & gas, const StateView & U, const SpeciesView & rhoY,
+                        const Kokkos::View<rtype *> & T_seed, const uint32_t c, double * Y, double & T) {
+    const double rho = static_cast<double>(U(c, 0));
+    double u2 = 0.0;
+    FOR_I_DIM u2 += static_cast<double>(U(c, 1 + i)) * static_cast<double>(U(c, 1 + i));
+    const double e = static_cast<double>(U(c, N_DIM + 1)) / rho - 0.5 * u2 / (rho * rho);
+    for (uint32_t k = 0; k < gas.n_species; k++) Y[k] = static_cast<double>(rhoY(c, k)) / rho;
+    T = gas.thermo.T_from_e(e, chemistry::MassFractions{Y}, static_cast<double>(T_seed(c)));
+    return e;
+}
+
+struct ActivityTeamTag {};
+using ActivityPolicy = Kokkos::TeamPolicy<ActivityTeamTag>;
+
+/** @brief Flags the cells of a chunk that need chemistry (see CellChemistry), by threads or by teams. */
+struct ActivityFunctor {
+    Mixture gas;
+    chemistry::KineticsTable<> kinetics;
+    StateView U;
+    SpeciesView rhoY;
+    Kokkos::View<rtype *> T_seed;
+    Kokkos::View<double **, Kokkos::LayoutRight> work;
+    Kokkos::View<uint32_t *> active;
+    uint32_t first;
+    double dt, T_frozen, threshold;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t i) const {
+        const uint32_t c = first + i, ns = gas.n_species;
+        double * Y = &work(i, 0);
+        double * C = Y + ns;
+        double * g_RT = C + ns;
+        double * omega = g_RT + ns;
+        double * q = omega + ns;
+        double T;
+        cell_composition(gas, U, rhoY, T_seed, c, Y, T);
+        active(i) = 0;
+        if (T < T_frozen) return;
+        const double rho = static_cast<double>(U(c, 0));
+        const auto p = chemistry::ThermoTable<>::powers(T);
+        for (uint32_t k = 0; k < ns; k++) {
+            C[k] = rho * Y[k] * gas.thermo.inv_W(k);
+            g_RT[k] = gas.thermo.h_RT(k, p) - gas.thermo.s_R(k, p);
+        }
+        kinetics.rates_of_progress(T, C, g_RT, q);
+        kinetics.production_rates(q, omega);
+        double rate = 0.0;
+        for (uint32_t k = 0; k < ns; k++) rate = Kokkos::fmax(rate, Kokkos::fabs(omega[k]) / (rho * gas.thermo.inv_W(k)));
+        active(i) = dt * rate > threshold ? 1 : 0;
+    }
+
+    /** @brief The same by the lanes of a team (the same values: the rates do not depend on the lanes). */
+    KOKKOS_INLINE_FUNCTION
+    void operator()(ActivityTeamTag, const ActivityPolicy::member_type & member) const {
+        const uint32_t slot = static_cast<uint32_t>(member.league_rank()), c = first + slot, ns = gas.n_species;
+        const chemistry::TeamLanes<ActivityPolicy::member_type> team(member,
+                                                                    lanes * static_cast<uint32_t>(member.team_size()));
+        double * Y = &work(slot, 0);
+        double * C = Y + ns;
+        double * g_RT = C + ns;
+        double * omega = g_RT + ns;
+        double * q = omega + ns;
+        double * partial = q + kinetics.n_reactions;
+        const double rho = static_cast<double>(U(c, 0));
+        team.for_each(ns, [&](const uint32_t k) { Y[k] = static_cast<double>(rhoY(c, k)) / rho; });
+        team.sync();
+        double u2 = 0.0;
+        FOR_I_DIM u2 += static_cast<double>(U(c, 1 + i)) * static_cast<double>(U(c, 1 + i));
+        const double e = static_cast<double>(U(c, N_DIM + 1)) / rho - 0.5 * u2 / (rho * rho);
+        const double T = gas.thermo.T_from_e(e, chemistry::MassFractions{Y}, static_cast<double>(T_seed(c)));
+        if (T < T_frozen) {
+            team.single([&]() { active(slot) = 0; });
+            return;
+        }
+        const auto p = chemistry::ThermoTable<>::powers(T);
+        team.for_each(ns, [&](const uint32_t k) {
+            C[k] = rho * Y[k] * gas.thermo.inv_W(k);
+            g_RT[k] = gas.thermo.h_RT(k, p) - gas.thermo.s_R(k, p);
+        });
+        team.sync();
+        const double C_total = team.sum(ns, [&](const uint32_t k) { return C[k]; });
+        kinetics.rates_of_progress(team, T, C, C_total, g_RT, nullptr, q, nullptr);
+        kinetics.production_rates(team, q, omega, partial);
+        uint32_t where;
+        const double rate = team.argmax_abs(0, ns, [&](const uint32_t k) { return omega[k] / (rho * gas.thermo.inv_W(k)); },
+                                            where);
+        team.single([&]() { active(slot) = dt * rate > threshold ? 1 : 0; });
+    }
+
+    uint32_t lanes = 1;
+};
+
+/** @brief Compacts the flagged cells of a chunk into a queue; the total is the queue length. */
+struct QueueFunctor {
+    Kokkos::View<uint32_t *> active;
+    Kokkos::View<uint32_t *> queue;
+    Kokkos::View<float *> cost;
+    Kokkos::View<float *> previous_cost;
+    uint32_t first;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t i, uint32_t & offset, const bool final) const {
+        if (final && active(i)) {
+            queue(offset) = first + i;
+            cost(offset) = -previous_cost(first + i);  // most expensive first
+        }
+        offset += active(i);
+    }
+};
+
+/**
+ * @brief Advances the cells of a queue over dt, writes their partial
+ *        densities, last sub-step and cost, and counts failures. The
+ *        temperature seed stays as the RHS left it: halo copies of a cell
+ *        get no chemistry, and their seeds must follow the owner's.
+ */
+struct AdvanceFunctor {
+    using value_type = uint32_t;  // failures
+    Mixture gas;
+    chemistry::KineticsTable<> kinetics;
+    StateView U;
+    SpeciesView rhoY;
+    Kokkos::View<rtype *> T_seed;
+    Kokkos::View<rtype *> chem_h;
+    Kokkos::View<rtype *> chem_cost;
+    Kokkos::View<float *> previous_cost;
+    Kokkos::View<double **, Kokkos::LayoutRight> work;
+    Kokkos::View<uint32_t **, Kokkos::LayoutRight> pivot;
+    Kokkos::View<uint32_t *> queue;
+    chemistry::ReactorOptions options;
+    double dt;
+    uint32_t lanes;
+    chemistry::SparseLUPattern<> pattern;
+    bool sparse;
+    uint32_t fast_size;  // doubles of team scratch for the work memory, 0: global memory
+
+    /** @brief One thread per cell. */
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t i, uint32_t & failures) const {
+        const uint32_t c = queue(i), ns = gas.n_species;
+        double * Y = &work(i, 0);
+        double T;
+        cell_composition(gas, U, rhoY, T_seed, c, Y, T);
+        const double rho = static_cast<double>(U(c, 0));
+        double h = static_cast<double>(chem_h(c));
+        const chemistry::RosenbrockResult r =
+            chemistry::advance_reactor(gas.thermo, kinetics, rho, dt, Y, T, h, options, Y + ns, &pivot(i, 0),
+                                       chemistry::NoObserver(), sparse ? &pattern : nullptr);
+        for (uint32_t k = 0; k < ns; k++) rhoY(c, k) = static_cast<rtype>(rho * Y[k]);
+        chem_h(c) = static_cast<rtype>(h);
+        chem_cost(c) += static_cast<rtype>(r.steps + r.rejected);
+        previous_cost(c) = static_cast<float>(r.steps + r.rejected);
+        if (r.status != chemistry::RosenbrockStatus::SUCCESS) failures++;
+    }
+
+    /** @brief All threads and lanes of a team per cell. */
+    template <bool Sparse>
+    KOKKOS_INLINE_FUNCTION void operator()(TeamTag<Sparse>, const Member & member, uint32_t & failures) const {
+        const uint32_t slot = static_cast<uint32_t>(member.league_rank()), c = queue(slot), ns = gas.n_species;
+        const chemistry::TeamLanes<Member> team(member, lanes * static_cast<uint32_t>(member.team_size()));
+        double * fast =
+            fast_size > 0 ? static_cast<double *>(member.team_scratch(0).get_shmem(fast_size * sizeof(double))) : nullptr;
+        double * Y = &work(slot, 0);
+        const double rho = static_cast<double>(U(c, 0));
+        team.for_each(ns, [&](const uint32_t k) { Y[k] = static_cast<double>(rhoY(c, k)) / rho; });
+        team.sync();
+        double u2 = 0.0;
+        FOR_I_DIM u2 += static_cast<double>(U(c, 1 + i)) * static_cast<double>(U(c, 1 + i));
+        const double e = static_cast<double>(U(c, N_DIM + 1)) / rho - 0.5 * u2 / (rho * rho);
+        double T = gas.thermo.T_from_e(e, chemistry::MassFractions{Y}, static_cast<double>(T_seed(c)));
+        double h = static_cast<double>(chem_h(c));
+        const chemistry::RosenbrockResult r =
+            chemistry::advance_reactor<Sparse>(team, gas.thermo, kinetics, rho, dt, Y, T, h, options, Y + ns,
+                                               &pivot(slot, 0), chemistry::NoObserver(), &pattern, fast);
+        team.for_each(ns, [&](const uint32_t k) { rhoY(c, k) = static_cast<rtype>(rho * Y[k]); });
+        team.single([&]() {
+            chem_h(c) = static_cast<rtype>(h);
+            chem_cost(c) += static_cast<rtype>(r.steps + r.rejected);
+            previous_cost(c) = static_cast<float>(r.steps + r.rejected);
+        });
+        Kokkos::single(Kokkos::PerThread(member), [&]() {
+            if (r.status != chemistry::RosenbrockStatus::SUCCESS) failures++;
+        });
+    }
+};
+
+/**
+ * @brief Heat release rate -sum_k h_k omega_k [W/m^3] and mass production
+ *        rates W_k omega_k [kg/(m^3 s)] of the cells of a chunk.
+ */
+struct HeatReleaseFunctor {
+    Mixture gas;
+    chemistry::KineticsTable<> kinetics;
+    StateView U;
+    SpeciesView rhoY;
+    Kokkos::View<rtype *> T_seed;
+    Kokkos::View<double **, Kokkos::LayoutRight> work;
+    Kokkos::View<rtype *> hrr;
+    Kokkos::View<rtype **, Kokkos::LayoutRight> production;
+    uint32_t first;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t i) const {
+        const uint32_t c = first + i, ns = gas.n_species;
+        double * Y = &work(i, 0);
+        double * C = Y + ns;
+        double * g_RT = C + ns;
+        double * h_RT = g_RT + ns;
+        double * omega = h_RT + ns;
+        double * q = omega + ns;
+        double T;
+        cell_composition(gas, U, rhoY, T_seed, c, Y, T);
+        const double rho = static_cast<double>(U(c, 0));
+        const auto p = chemistry::ThermoTable<>::powers(T);
+        for (uint32_t k = 0; k < ns; k++) {
+            C[k] = rho * Y[k] * gas.thermo.inv_W(k);
+            h_RT[k] = gas.thermo.h_RT(k, p);
+            g_RT[k] = h_RT[k] - gas.thermo.s_R(k, p);
+        }
+        kinetics.rates_of_progress(T, C, g_RT, q);
+        kinetics.production_rates(q, omega);
+        double sum = 0.0;
+        for (uint32_t k = 0; k < ns; k++) {
+            sum += h_RT[k] * omega[k];
+            production(c, k) = static_cast<rtype>(omega[k] / gas.thermo.inv_W(k));
+        }
+        hrr(c) = static_cast<rtype>(-chemistry::GAS_CONSTANT * T * sum);
+    }
+};
+
+} // namespace cell_chemistry_kernels
+
+using namespace cell_chemistry_kernels;
+
+void CellChemistry::init(const Mixture & gas_in, const chemistry::Mechanism & mechanism,
+                         const chemistry::KineticsTable<> & kinetics_in, const CellChemistryOptions & options_in,
+                         const uint32_t n_cells) {
+    gas = gas_in;
+    kinetics = kinetics_in;
+    options = options_in;
+    const uint32_t ns = gas.n_species;
+    const uint32_t lanes_max = static_cast<uint32_t>(TeamPolicy<false, false>::vector_length_max());
+    // Host backends report a long vector length too, but one thread runs a team's lanes one after another
+    constexpr bool gpu = !Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace, Kokkos::HostSpace>::accessible;
+    if (options.lanes == 0) {
+        // A warp per cell where the mechanism fills it
+        n_lanes = (gpu && lanes_max >= 32 && ns >= 16) ? 32 : 1;
+    } else {
+        if ((options.lanes & (options.lanes - 1)) != 0) {
+            throw std::invalid_argument("chemistry.lanes must be a power of 2.");
+        }
+        n_lanes = std::min(options.lanes, lanes_max);
+    }
+    n_threads = n_lanes == 1 ? 1 : (options.threads > 0 ? options.threads : 1);
+    // On GPUs, neighboring threads of a warp get cells of similar cost, and teams start with the most expensive
+    // cells, so that cheap ones fill in behind them. CPU threads take contiguous blocks of the queue, which
+    // sorting would load with all the expensive cells
+    bin_by_cost = options.bin_by_cost && gpu;
+    if (n_lanes * n_threads > 32) throw std::invalid_argument("chemistry: at most 32 threads and lanes per cell.");
+    sparse = chemistry::use_sparse_lu(options.reactor, mechanism);
+    if (sparse) pattern = chemistry::make_sparse_lu_pattern(mechanism);
+    // Teams may keep the factors and the integrator's vectors in scratch memory where they fit; on the A100
+    // this lowers the cells per SM more than it speeds each cell, so it is off unless asked for
+    fast_bytes = 0;
+    if (n_lanes > 1 && options.shared == 1) {
+        const size_t bytes = sizeof(double) * chemistry::reactor_fast_size(kinetics, sparse ? &pattern : nullptr);
+        const size_t room = static_cast<size_t>(TeamPolicy<false, true>::scratch_size_max(0));
+        if (bytes + chemistry::TeamLanes<Member>::scratch_bytes(n_lanes * n_threads) + 64 <= room) fast_bytes = bytes;
+    }
+    // Mass fractions, then the reactor's work memory (also enough for the activity and heat release kernels)
+    const uint32_t work_size = ns + chemistry::reactor_work_size(kinetics, sparse ? &pattern : nullptr);
+    const double per_cell = 8.0 * work_size + 4.0 * (ns + 3) + 8.0;
+    const size_t concurrency = static_cast<size_t>(Kokkos::DefaultExecutionSpace().concurrency());
+    size_t chunk = std::max<size_t>(4096, 4 * concurrency);
+    chunk = std::min<size_t>(chunk, static_cast<size_t>(WORK_MEMORY_BYTES / per_cell));
+    chunk = std::max<size_t>(1, std::min<size_t>(chunk, n_cells));
+    work = Kokkos::View<double **, Kokkos::LayoutRight>("chem_work", chunk, work_size);
+    pivot = Kokkos::View<uint32_t **, Kokkos::LayoutRight>("chem_pivot", chunk, ns + 1);
+    active = Kokkos::View<uint32_t *>("chem_active", chunk);
+    queue = Kokkos::View<uint32_t *>("chem_queue", chunk);
+    cost = Kokkos::View<float *>("chem_queue_cost", chunk);
+    previous_cost = Kokkos::View<float *>("chem_previous_cost", n_cells);
+}
+
+CellChemistry::Statistics CellChemistry::advance(const StateView & U, const SpeciesView & rhoY,
+                                                 const Kokkos::View<rtype *> & T_seed,
+                                                 const Kokkos::View<rtype *> & chem_h,
+                                                 const Kokkos::View<rtype *> & chem_cost, const uint32_t n,
+                                                 const double dt) {
+    Statistics stats;
+    const uint32_t chunk = static_cast<uint32_t>(work.extent(0));
+    for (uint32_t first = 0; first < n; first += chunk) {
+        const uint32_t m = std::min(chunk, n - first);
+        const ActivityFunctor activity{gas,   kinetics, U,  rhoY,      T_seed, work, active, first,
+                                       dt,    options.T_frozen, 1e-2 * options.reactor.atol_Y, n_lanes};
+        if (n_lanes == 1) {
+            Kokkos::parallel_for("chemistry_activity", m, activity);
+        } else {
+            const auto policy = ActivityPolicy(static_cast<int>(m), 1, static_cast<int>(n_lanes))
+                                    .set_scratch_size(0, Kokkos::PerTeam(chemistry::TeamLanes<Member>::scratch_bytes(n_lanes)));
+            Kokkos::parallel_for("chemistry_activity_teams", policy, activity);
+        }
+        uint32_t n_active = 0;
+        Kokkos::parallel_scan("chemistry_queue", m, QueueFunctor{active, queue, cost, previous_cost, first}, n_active);
+        stats.active += n_active;
+        if (n_active == 0) continue;
+        const auto queued = Kokkos::make_pair(0u, n_active);
+        if (bin_by_cost) {
+            Kokkos::Experimental::sort_by_key(Kokkos::DefaultExecutionSpace(), Kokkos::subview(cost, queued),
+                                              Kokkos::subview(queue, queued));
+        }
+        const AdvanceFunctor functor{gas,  kinetics, U,     rhoY,  T_seed,          chem_h, chem_cost, previous_cost,
+                                     work, pivot,    queue, options.reactor, dt, n_lanes, pattern, sparse,
+                                     static_cast<uint32_t>(fast_bytes / sizeof(double))};
+        uint32_t failures = 0;
+        if (n_lanes == 1) {
+            Kokkos::parallel_reduce("chemistry_advance", n_active, functor, Kokkos::Sum<uint32_t>(failures));
+        } else {
+            const size_t scratch = chemistry::TeamLanes<Member>::scratch_bytes(n_lanes * n_threads) + fast_bytes + 64;
+            auto launch = [&](auto policy) {
+                policy.set_scratch_size(0, Kokkos::PerTeam(scratch));
+                Kokkos::parallel_reduce("chemistry_advance_teams", policy, functor, Kokkos::Sum<uint32_t>(failures));
+            };
+            const int league = static_cast<int>(n_active), T = static_cast<int>(n_threads), V = static_cast<int>(n_lanes);
+            if (sparse) {
+                fast_bytes > 0 ? launch(TeamPolicy<true, true>(league, T, V)) : launch(TeamPolicy<true, false>(league, T, V));
+            } else {
+                fast_bytes > 0 ? launch(TeamPolicy<false, true>(league, T, V)) : launch(TeamPolicy<false, false>(league, T, V));
+            }
+        }
+        stats.failures += failures;
+    }
+    return stats;
+}
+
+void CellChemistry::heat_release(const StateView & U, const SpeciesView & rhoY, const Kokkos::View<rtype *> & T_seed,
+                                 const Kokkos::View<rtype *> & hrr,
+                                 const Kokkos::View<rtype **, Kokkos::LayoutRight> & production, const uint32_t n) {
+    const uint32_t chunk = static_cast<uint32_t>(work.extent(0));
+    for (uint32_t first = 0; first < n; first += chunk) {
+        const uint32_t m = std::min(chunk, n - first);
+        Kokkos::parallel_for("heat_release_rate", m,
+                             HeatReleaseFunctor{gas, kinetics, U, rhoY, T_seed, work, hrr, production, first});
+    }
+}

@@ -1,0 +1,29 @@
+# Chemistry throughput, n-hexane/air at 10 atm with the NUIG mechanism of
+# Zhang et al. (1268 species, 5336 reactions; copy it from Cantera first with
+# python tools/cantera_mechanisms.py): run with
+#   MallardReactor -i nhexane.toml
+# States sampled along the constant-volume ignition below (ignition delay
+# 3.43 ms, as Cantera's), replicated over the cells and advanced over each
+# splitting step dt; writes nhexane.csv. See README.md.
+
+[physics]
+gas = "mixture"
+mechanism = "../../mechanisms/external/n-hexane-NUIG-2015.yaml"
+
+[reactor]
+type = "constant_volume"
+T = 1000.0
+p = 1013250.0
+X = { NC6H14 = 1.0, O2 = 9.5, N2 = 35.72 }
+end_time = 6.85e-3
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+
+[benchmark]
+cells = 1024
+samples = 64
+dt = [1.0e-8, 1.0e-6]
+repeats = 2
+output = "nhexane.csv"

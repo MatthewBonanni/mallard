@@ -49,7 +49,7 @@ struct MixtureCellFunctor {
     void operator()(const uint32_t c) const {
         rtype cons[N_CONSERVATIVE], W_c[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE cons[i] = U(c, i);
-        const rtype * rhoY_c = &rhoY(c, 0);
+        const CellSpecies rhoY_c = cell_species(rhoY, c);
         rtype gamma, e0, T = 0.0_r;
         if (frozen.extent(0) > 0) {
             gamma = frozen(c, 0);
@@ -88,7 +88,7 @@ struct FreezeFunctor {
         rtype cons[N_CONSERVATIVE], W[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE cons[i] = U(c, i);
         rtype gamma, e0, T;
-        gas.cell_state(cons, &rhoY(c, 0), T_seed(c), W, gamma, e0, T);
+        gas.cell_state(cons, cell_species(rhoY, c), T_seed(c), W, gamma, e0, T);
         T_seed(c) = T;
         frozen(c, 0) = gamma;
         frozen(c, 1) = e0;
@@ -114,7 +114,7 @@ struct ResetEnergyFunctor {
         const double kinetic = 0.5 * rhou2 / rho;
         const double p = (static_cast<double>(frozen(c, 0)) - 1.0) *
                          (static_cast<double>(U(c, E)) - rho * static_cast<double>(frozen(c, 1)) - kinetic);
-        const PartialDensities y{&rhoY(c, 0), 1.0 / rho};
+        const PartialDensities y{cell_species(rhoY, c), 1.0 / rho};
         const double T = p / (rho * gas.thermo.gas_constant(y));
         double e, cv;
         gas.thermo.e_cv(T, y, e, cv);
@@ -177,7 +177,7 @@ struct MixturePrimitivesFunctor {
         rtype cons[N_CONSERVATIVE], W[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE cons[i] = U(c, i);
         rtype gamma, e0, T;
-        gas.cell_state(cons, &rhoY(c, 0), T_seed(c), W, gamma, e0, T);
+        gas.cell_state(cons, cell_species(rhoY, c), T_seed(c), W, gamma, e0, T);
         FOR_I_DIM P(c, i) = W[1 + i];
         P(c, N_DIM) = W[N_DIM + 1];
         P(c, N_DIM + 1) = T;
@@ -198,7 +198,7 @@ struct TemperatureFunctor {
         rtype cons[N_CONSERVATIVE], W[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE cons[i] = U(c, i);
         rtype gamma, e0, T;
-        gas.cell_state(cons, &rhoY(c, 0), 0.0_r, W, gamma, e0, T);
+        gas.cell_state(cons, cell_species(rhoY, c), 0.0_r, W, gamma, e0, T);
         T_seed(c) = T;
     }
 };
@@ -239,7 +239,7 @@ struct MixtureDiagnosticsFunctor {
         rtype cons[N_CONSERVATIVE], W[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE cons[i] = U(c, i);
         rtype gamma, e0, T;
-        gas.cell_state(cons, &rhoY(c, 0), T_seed(c), W, gamma, e0, T);
+        gas.cell_state(cons, cell_species(rhoY, c), T_seed(c), W, gamma, e0, T);
         rtype u2 = 0.0_r, sum_Y = 0.0_r;
         FOR_I_DIM u2 += W[1 + i] * W[1 + i];
         for (uint32_t k = 0; k < gas.n_species; k++) sum_Y += rhoY(c, k);
