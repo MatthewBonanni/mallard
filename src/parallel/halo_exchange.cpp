@@ -30,7 +30,7 @@ Kokkos::View<uint32_t *> flatten(const std::vector<std::vector<uint32_t>> & list
 }
 
 #ifdef Mallard_HAS_MPI
-constexpr bool device_is_host_accessible =
+[[maybe_unused]] constexpr bool device_is_host_accessible =
     Kokkos::SpaceAccessibility<Kokkos::HostSpace, Kokkos::DefaultExecutionSpace::memory_space>::accessible;
 
 #ifdef Mallard_GPU_AWARE_MPI
