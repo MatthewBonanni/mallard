@@ -23,8 +23,8 @@ std::string Zone::get_name() const {
     return name;
 }
 
-void Zone::set_name(const std::string& name) {
-    this->name = name;
+void Zone::set_name(const std::string& name_in) {
+    this->name = name_in;
 }
 
 FaceZone::FaceZone() {
@@ -43,8 +43,8 @@ FaceZoneType FaceZone::get_type() const {
     return type;
 }
 
-void FaceZone::set_type(FaceZoneType type) {
-    this->type = type;
+void FaceZone::set_type(FaceZoneType type_in) {
+    this->type = type_in;
 }
 
 void FaceZone::copy_host_to_device() {

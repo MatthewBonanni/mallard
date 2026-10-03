@@ -253,6 +253,8 @@ TEST(Boundary3DTest, TransmissiveImageCellContainsTheImagePoint) {
             }
         }
         // Boundary tetrahedra taper away from the face, so some image points leave them
-        if (std::string(type) == "cartesian_tet") EXPECT_GT(n_moved, 0u);
+        if (std::string(type) == "cartesian_tet") {
+            EXPECT_GT(n_moved, 0u);
+        }
     }
 }

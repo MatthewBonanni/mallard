@@ -29,7 +29,7 @@ TEST_P(MeshInvariants, CellsAreClosedAndNormalsPointFromCell0ToCell1) {
         rtype closure[N_DIM] = {0.0, 0.0};
         for (uint32_t k = 0; k < mesh->h_n_faces_of_cell(i_cell); k++) {
             const uint32_t f = mesh->h_face_of_cell(i_cell, k);
-            const rtype sign = (mesh->h_cells_of_face(f, 0) == (int32_t)i_cell) ? 1.0 : -1.0;
+            const rtype sign = (mesh->h_cells_of_face(f, 0) == static_cast<int32_t>(i_cell)) ? 1.0 : -1.0;
             FOR_I_DIM closure[i] += sign * mesh->h_face_normals(f, i);
         }
         FOR_I_DIM EXPECT_NEAR(closure[i], 0.0, 1e-14) << "cell " << i_cell;

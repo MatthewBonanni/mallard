@@ -285,9 +285,9 @@ TEST_P(PeriodicInvariance2D, VortexCrossingTheSeamMatchesItsInteriorTranslate) {
     across->copy_device_to_host();
     const auto map = translated_cells(*interior->get_mesh(), t);
     double diff = 0.0;
-    for (uint32_t c = 0; c < map.size(); c++) {
-        FOR_I_CONSERVATIVE diff = std::max(diff, std::abs(across->h_conservatives(map[c], i) -
-                                                          interior->h_conservatives(c, i)));
+    for (uint32_t cell = 0; cell < map.size(); cell++) {
+        FOR_I_CONSERVATIVE diff = std::max(diff, std::abs(across->h_conservatives(map[cell], i) -
+                                                          interior->h_conservatives(cell, i)));
     }
     EXPECT_LT(diff, 1e-10);
 }

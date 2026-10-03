@@ -22,9 +22,9 @@ void Quadrature::copy_host_to_device() {
     Kokkos::deep_copy(weights, h_weights);
 }
 
-GaussLegendre::GaussLegendre(uint8_t order) {
+GaussLegendre::GaussLegendre(uint8_t order_in) {
     this->dim = 1;
-    this->order = order;
+    this->order = order_in;
     switch (order) {
         case 1:
             points = Kokkos::View<rtype **>("points", 1, dim);
@@ -152,9 +152,9 @@ GaussLegendre::GaussLegendre(uint8_t order) {
     copy_host_to_device();
 }
 
-TriangleDunavant::TriangleDunavant(uint8_t order) {
+TriangleDunavant::TriangleDunavant(uint8_t order_in) {
     this->dim = 2;
-    this->order = order;
+    this->order = order_in;
     switch (order) {
         case 1:
             points = Kokkos::View<rtype **>("points", 1, dim);

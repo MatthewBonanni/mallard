@@ -203,7 +203,7 @@ void check_mixed_mesh(const std::string & file) {
         rtype closure[N_DIM] = {};
         for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
             const uint32_t f = mesh.h_face_of_cell(c, k);
-            const rtype sign = (mesh.h_cells_of_face(f, 0) == (int32_t)c) ? 1.0 : -1.0;
+            const rtype sign = (mesh.h_cells_of_face(f, 0) == static_cast<int32_t>(c)) ? 1.0 : -1.0;
             FOR_I_DIM closure[i] += sign * mesh.h_face_normals(f, i);
         }
         FOR_I_DIM EXPECT_NEAR(closure[i], 0.0, 1e-14) << "cell " << c;
@@ -310,7 +310,7 @@ TEST(IO3DTest, VolumeOutputFollowsVTKCellConventions) {
     ASSERT_EQ(types.size(), mesh->n_cells);
     ASSERT_EQ(offsets.size(), mesh->n_cells);
     ASSERT_EQ(connectivity.size(), 4u + 5u + 6u + 8u);
-    EXPECT_EQ(offsets.back(), (int64_t)connectivity.size());
+    EXPECT_EQ(offsets.back(), static_cast<int64_t>(connectivity.size()));
 
     // VTK: the base face's right-hand normal points toward the opposite
     // node(s) for tetra (10), hexahedron (12) and pyramid (14), and away from

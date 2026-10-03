@@ -111,9 +111,9 @@ TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
 
     // The force history is appended to, not overwritten
     auto read_all = [](const std::string & file) {
-        std::ifstream in(file);
+        std::ifstream stream(file);
         std::stringstream ss;
-        ss << in.rdbuf();
+        ss << stream.rdbuf();
         return ss.str();
     };
     EXPECT_EQ(read_all(dir + "/b/forces.csv"), read_all(dir + "/a/forces.csv"));

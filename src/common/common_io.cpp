@@ -14,7 +14,7 @@
 
 std::string endianness() {
     int i = 1;
-    char * c = (char *) &i;
+    char * c = reinterpret_cast<char *>(&i);
     if (*c == 1) {
         return "LittleEndian";
     } else {

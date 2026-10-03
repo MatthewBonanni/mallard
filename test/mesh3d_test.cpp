@@ -30,7 +30,7 @@ void expect_closed_cells_and_consistent_faces(const Mesh & mesh, rtype tol) {
         rtype closure[N_DIM] = {};
         for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
             const uint32_t f = mesh.h_face_of_cell(c, k);
-            const rtype sign = (mesh.h_cells_of_face(f, 0) == (int32_t)c) ? 1.0 : -1.0;
+            const rtype sign = (mesh.h_cells_of_face(f, 0) == static_cast<int32_t>(c)) ? 1.0 : -1.0;
             FOR_I_DIM closure[i] += sign * mesh.h_face_normals(f, i);
         }
         FOR_I_DIM EXPECT_NEAR(closure[i], 0.0, tol) << "cell " << c;
@@ -58,7 +58,7 @@ void expect_box_moments(const Mesh & mesh, rtype tol) {
     }
     const rtype L[3] = {LX, LY, LZ};
     EXPECT_NEAR(V, LX * LY * LZ, tol);
-    FOR_I_DIM EXPECT_NEAR(M[i], 0.5 * L[i] * LX * LY * LZ, tol) << "direction " << (int)i;
+    FOR_I_DIM EXPECT_NEAR(M[i], 0.5 * L[i] * LX * LY * LZ, tol) << "direction " << static_cast<int>(i);
 }
 
 } // namespace

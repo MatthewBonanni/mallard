@@ -137,8 +137,8 @@ std::shared_ptr<Mesh> build_local_mesh_from_global(Mesh & global, const std::vec
                 continue;
             }
             std::vector<uint32_t> face_nodes;
-            for (uint32_t k = 0; k < global.h_n_nodes_of_face(f); k++) {
-                face_nodes.push_back(local_node.at(global.h_node_of_face(f, k)));
+            for (uint32_t j = 0; j < global.h_n_nodes_of_face(f); j++) {
+                face_nodes.push_back(local_node.at(global.h_node_of_face(f, j)));
             }
             boundary_faces.push_back({std::move(face_nodes), zone});
         }

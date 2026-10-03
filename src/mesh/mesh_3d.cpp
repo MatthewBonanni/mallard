@@ -189,6 +189,6 @@ void Mesh::orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes,
 
 void Mesh::init_cart_3d(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rtype Ly, rtype Lz, MeshType kind,
                         const std::vector<PeriodicPair> & periodic) {
-    const auto [n_cells, n_nodes] = cartesian_3d_size(nx, ny, nz, kind);
-    init_from_block(cartesian_3d_block(nx, ny, nz, Lx, Ly, Lz, kind, 0, n_cells, 0, n_nodes), periodic);
+    const auto [cells, nodes] = cartesian_3d_size(nx, ny, nz, kind);
+    init_from_block(cartesian_3d_block(nx, ny, nz, Lx, Ly, Lz, kind, 0, cells, 0, nodes), periodic);
 }

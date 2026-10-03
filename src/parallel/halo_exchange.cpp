@@ -29,6 +29,7 @@ Kokkos::View<uint32_t *> flatten(const std::vector<std::vector<uint32_t>> & list
     return v;
 }
 
+#ifdef Mallard_HAS_MPI
 constexpr bool device_is_host_accessible =
     Kokkos::SpaceAccessibility<Kokkos::HostSpace, Kokkos::DefaultExecutionSpace::memory_space>::accessible;
 
@@ -36,6 +37,7 @@ constexpr bool device_is_host_accessible =
 constexpr bool stage_through_host = false;
 #else
 constexpr bool stage_through_host = !device_is_host_accessible;
+#endif
 #endif
 
 } // namespace

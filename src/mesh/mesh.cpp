@@ -42,7 +42,7 @@ void Mesh::init(const toml::value & input) {
     }
 
     const std::vector<PeriodicPair> periodic = periodic_pairs(input);
-    if (get_type() == MeshType::FILE) {
+    if (get_type() == MeshType::FROM_FILE) {
         std::string filename = toml::find_or<std::string>(input, "mesh", "filename", "mesh.msh");
         this->init_file(filename);
         return;
@@ -109,8 +109,8 @@ MeshType Mesh::get_type() const {
     return type;
 }
 
-void Mesh::set_type(MeshType type) {
-    this->type = type;
+void Mesh::set_type(MeshType type_in) {
+    this->type = type_in;
 }
 
 uint32_t Mesh::n_face_zones() const {
@@ -194,7 +194,7 @@ void Mesh::h_neighbors_of_cell_helper(uint32_t i_cell, uint8_t n_order, std::vec
                 continue;
             } else {
                 // Recursively call the function for the neighbor cv
-                if (i_cell_0 == (int32_t)i_cell) {
+                if (i_cell_0 == static_cast<int32_t>(i_cell)) {
                     h_neighbors_of_cell_helper(i_cell_1, n_order - 1, neighbors);
                 } else {
                     h_neighbors_of_cell_helper(i_cell_0, n_order - 1, neighbors);
@@ -217,11 +217,11 @@ void Mesh::compute_cell_centroids() {
     // Area centroid of the polygon (the vertex average is only correct for
     // triangles and parallelograms)
     for (uint32_t i_cell = 0; i_cell < n_cells; ++i_cell) {
-        const uint32_t n_nodes = h_n_nodes_of_cell(i_cell);
+        const uint32_t n = h_n_nodes_of_cell(i_cell);
         rtype A = 0.0, Cx = 0.0, Cy = 0.0;
-        for (uint32_t k = 0; k < n_nodes; ++k) {
+        for (uint32_t k = 0; k < n; ++k) {
             const uint32_t a = h_node_of_cell(i_cell, k);
-            const uint32_t b = h_node_of_cell(i_cell, (k + 1) % n_nodes);
+            const uint32_t b = h_node_of_cell(i_cell, (k + 1) % n);
             const rtype xa = h_node_coords(a, 0), ya = h_node_coords(a, 1);
             const rtype xb = h_node_coords(b, 0), yb = h_node_coords(b, 1);
             const rtype cross = xa * yb - xb * ya;

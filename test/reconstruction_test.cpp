@@ -65,8 +65,8 @@ TEST_P(MeshTypes, LSQGradientExactForLinearFieldInInterior) {
     for (uint32_t i_cell = 0; i_cell < mesh->n_cells; i_cell++) {
         if (is_boundary_cell(*mesh, i_cell)) continue;
         FOR_I_CONSERVATIVE {
-            EXPECT_NEAR(h_grad(i_cell, i, 0), GX[i], 1e-10) << "cell " << i_cell << " var " << (int)i;
-            EXPECT_NEAR(h_grad(i_cell, i, 1), GY[i], 1e-10) << "cell " << i_cell << " var " << (int)i;
+            EXPECT_NEAR(h_grad(i_cell, i, 0), GX[i], 1e-10) << "cell " << i_cell << " var " << static_cast<int>(i);
+            EXPECT_NEAR(h_grad(i_cell, i, 1), GY[i], 1e-10) << "cell " << i_cell << " var " << static_cast<int>(i);
         }
     }
 }
@@ -93,8 +93,8 @@ TEST_P(MeshTypes, LSQGradientExactForLinearFieldWithDirichletBoundaries) {
     auto h_grad = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), grad);
     for (uint32_t i_cell = 0; i_cell < mesh->n_cells; i_cell++) {
         FOR_I_CONSERVATIVE {
-            EXPECT_NEAR(h_grad(i_cell, i, 0), GX[i], 1e-10) << "cell " << i_cell << " var " << (int)i;
-            EXPECT_NEAR(h_grad(i_cell, i, 1), GY[i], 1e-10) << "cell " << i_cell << " var " << (int)i;
+            EXPECT_NEAR(h_grad(i_cell, i, 0), GX[i], 1e-10) << "cell " << i_cell << " var " << static_cast<int>(i);
+            EXPECT_NEAR(h_grad(i_cell, i, 1), GY[i], 1e-10) << "cell " << i_cell << " var " << static_cast<int>(i);
         }
     }
 }
@@ -153,7 +153,7 @@ TEST_P(MeshTypes, UnlimitedMUSCLReproducesLinearFieldAtInteriorFaces) {
             FOR_I_CONSERVATIVE {
                 EXPECT_NEAR(h_face_W(i_face, 0, side, i),
                             linear(i, mesh->h_face_coords(i_face, 0), mesh->h_face_coords(i_face, 1)),
-                            1e-10) << "face " << i_face << " side " << (int)side;
+                            1e-10) << "face " << i_face << " side " << static_cast<int>(side);
             }
         }
     }

@@ -24,7 +24,7 @@
 #include "zone.h"
 
 enum class MeshType {
-    FILE,
+    FROM_FILE,
     CARTESIAN,
     CARTESIAN_TRI,
     WEDGE,
@@ -35,7 +35,7 @@ enum class MeshType {
 };
 
 static const std::unordered_map<std::string, MeshType> MESH_TYPES = {
-    {"file", MeshType::FILE},
+    {"file", MeshType::FROM_FILE},
     {"cartesian", MeshType::CARTESIAN},
     {"cartesian_tri", MeshType::CARTESIAN_TRI},
     {"wedge", MeshType::WEDGE},
@@ -46,7 +46,7 @@ static const std::unordered_map<std::string, MeshType> MESH_TYPES = {
 };
 
 static const std::unordered_map<MeshType, std::string> MESH_NAMES = {
-    {MeshType::FILE, "file"},
+    {MeshType::FROM_FILE, "file"},
     {MeshType::CARTESIAN, "cartesian"},
     {MeshType::CARTESIAN_TRI, "cartesian_tri"},
     {MeshType::WEDGE, "wedge"},
@@ -481,7 +481,7 @@ class Mesh {
                                         uint8_t n_order,
                                         std::vector<uint32_t> & neighbors) const;
 
-        MeshType type = MeshType::FILE;
+        MeshType type = MeshType::FROM_FILE;
         std::vector<CellZone> m_cell_zones;
         std::vector<FaceZone> m_face_zones;
 };

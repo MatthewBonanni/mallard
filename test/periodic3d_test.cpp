@@ -118,8 +118,8 @@ TEST_P(PeriodicBox3D, PreservesUniformFlowAndConservesMassMomentumAndEnergy) {
     uniform->run();
     uniform->copy_device_to_host();
     const double U[4] = {1.3, 1.3 * 0.4, -1.3 * 0.25, 1.3 * 0.1};
-    for (uint32_t c = 0; c < uniform->get_mesh()->n_owned(); c++) {
-        for (int i = 0; i < 4; i++) EXPECT_NEAR(uniform->h_conservatives(c, i), U[i], 1e-12);
+    for (uint32_t cell = 0; cell < uniform->get_mesh()->n_owned(); cell++) {
+        for (int i = 0; i < 4; i++) EXPECT_NEAR(uniform->h_conservatives(cell, i), U[i], 1e-12);
     }
     // With no boundary at all, momentum is conserved too
     auto blob = start(c, [](double x, double y, double z, double * W) {
@@ -255,9 +255,9 @@ TEST_P(PeriodicInvariance3D, PulseCrossingTheSeamMatchesItsInteriorTranslate) {
     across->copy_device_to_host();
     const auto map = translated_cells(*interior->get_mesh(), t);
     double diff = 0.0;
-    for (uint32_t c = 0; c < map.size(); c++) {
-        FOR_I_CONSERVATIVE diff = std::max(diff, std::abs(across->h_conservatives(map[c], i) -
-                                                          interior->h_conservatives(c, i)));
+    for (uint32_t cell = 0; cell < map.size(); cell++) {
+        FOR_I_CONSERVATIVE diff = std::max(diff, std::abs(across->h_conservatives(map[cell], i) -
+                                                          interior->h_conservatives(cell, i)));
     }
     EXPECT_LT(diff, 1e-10);
 }

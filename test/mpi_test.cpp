@@ -147,7 +147,9 @@ TEST(MPITest, PeriodicRunsMatchSerialAcrossSeamsCutByThePartition) {
     const std::string walls = "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
                               "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n";
     const std::string teno = periodic_box("cartesian", "type = \"TENO\"\norder = 5\n", EULER, "[\"x\", \"y\"]", none, 15);
-    if (comm::size() > 1) EXPECT_GT(seam_faces_cut_by_partition(teno), 0u);
+    if (comm::size() > 1) {
+        EXPECT_GT(seam_faces_cut_by_partition(teno), 0u);
+    }
     expect_matches_serial(teno);
     expect_matches_serial(periodic_box("cartesian_tri", "type = \"TENO\"\norder = 4\n", EULER, "[\"x\"]", walls, 10));
     expect_matches_serial(periodic_box("cartesian_tri", "type = \"MUSCL\"\n", NS, "[\"x\", \"y\"]", none, 20));
@@ -170,7 +172,7 @@ std::string io_dir() {
     return (std::filesystem::temp_directory_path() / "mallard_mpi_io").string();
 }
 
-std::string restart_case(const std::string & init, uint32_t n_steps, const std::string & output) {
+std::string restart_case(uint32_t n_steps, const std::string & output) {
     return box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
                      bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n", "type = \"wall_adiabatic\"\n",
                          "type = \"extrapolation\"\n"),
@@ -211,18 +213,18 @@ TEST(MPITest, RestartFilesDoNotDependOnTheRankCount) {
     // Uninterrupted serial reference
     Solver reference;
     reference.set_distributed(false);
-    reference.init(parse_toml(restart_case(init, 20, "")));
+    reference.init(parse_toml(restart_case(20, "")));
     reference.run();
     const auto U_ref = gather(reference);
 
     // Written by all ranks at step 10, continued by all ranks
     {
         Solver first;
-        first.init(parse_toml(restart_case(init, 10, writer)));
+        first.init(parse_toml(restart_case(10, writer)));
         first.run();
     }
     comm::barrier();
-    std::string input = restart_case(init, 20, "");
+    std::string input = restart_case(20, "");
     input.replace(input.find("[initialize]\n") + 13, init.size(), from(dir + "/r_000010.restart"));
     Solver second;
     second.init(parse_toml(input));
@@ -244,7 +246,7 @@ TEST(MPITest, EveryCellIsInExactlyOneOutputPiece) {
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
     Solver solver;
-    solver.init(parse_toml(restart_case(BLAST, 2, "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtu\"\n"
+    solver.init(parse_toml(restart_case(2, "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtu\"\n"
                                                   "interval = 2\nvariables = [\"RHO\"]\n")));
     solver.run();
     comm::barrier();

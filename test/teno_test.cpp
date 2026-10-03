@@ -261,7 +261,9 @@ TEST(TENOTest, MirrorImagesTakeTheConditionOfTheNearestBoundaryFace) {
             // The image of a cell across the bottom takes the state of the face
             // directly beneath that cell
             EXPECT_NEAR(mesh->h_face_coords(f, 0), mesh->h_cell_coords(cells(c, s), 0), 1e-12) << "cell " << c;
-            if (mesh->h_cell_coords(c, 0) > 0.6) EXPECT_EQ(face_bc[f], 0) << "cell " << c;
+            if (mesh->h_cell_coords(c, 0) > 0.6) {
+                EXPECT_EQ(face_bc[f], 0) << "cell " << c;
+            }
             n_checked++;
         }
     }

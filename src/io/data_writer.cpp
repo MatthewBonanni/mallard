@@ -57,7 +57,7 @@ uint32_t vtk_local_node(uint32_t n_nodes, uint32_t k) {
 
 void DataWriter::init(const toml::value & input,
                       std::vector<Data> & data,
-                      std::shared_ptr<Mesh> mesh) {
+                      std::shared_ptr<Mesh> mesh_in) {
     for (const char * key : {"prefix", "format"}) {
         if (!input.contains(key)) {
             throw std::runtime_error(std::string("DataWriter: ") + key + " not specified.");
@@ -123,7 +123,7 @@ void DataWriter::init(const toml::value & input,
         }
         fields.push_back(field);
     }
-    this->mesh = mesh;
+    this->mesh = mesh_in;
 
     geometry = toml::find_or<std::string>(input, "geometry", "all");
     if (geometry != "all") {

@@ -106,12 +106,12 @@ struct LSQGradientFunctor {
         if (c1 >= 0) {
             // Across a periodic face, cell 1 sits at its centroid plus the shift
             const uint8_t s = face_shift(i_face);
-            if (c0 == (int32_t)i_cell) {
+            if (c0 == static_cast<int32_t>(i_cell)) {
                 FOR_I_DIM dx[i] = (cell_coords(c1, i) + shifts(s, i)) - cell_coords(i_cell, i);
             } else {
                 FOR_I_DIM dx[i] = (cell_coords(c0, i) - shifts(s, i)) - cell_coords(i_cell, i);
             }
-            const int32_t j = (c0 == (int32_t)i_cell) ? c1 : c0;
+            const int32_t j = (c0 == static_cast<int32_t>(i_cell)) ? c1 : c0;
             FOR_I_CONSERVATIVE W_j[i] = W(j, i);
         } else {
             rtype n[N_DIM];

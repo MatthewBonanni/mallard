@@ -75,7 +75,7 @@ void expect_exact_gradient(const Mesh & mesh, Kokkos::View<rtype *[N_CONSERVATIV
         if (interior_only && is_boundary_cell(mesh, c)) continue;
         FOR_I_CONSERVATIVE {
             for (int d = 0; d < 3; d++) {
-                ASSERT_NEAR(h_grad(c, i, d), G[i][d], 1e-10) << "cell " << c << " var " << (int)i << " dir " << d;
+                ASSERT_NEAR(h_grad(c, i, d), G[i][d], 1e-10) << "cell " << c << " var " << static_cast<int>(i) << " dir " << d;
             }
         }
     }
@@ -128,7 +128,7 @@ TEST_P(MeshTypes3D, UnlimitedMUSCLReproducesLinearFieldAtInteriorFaces) {
             if (c < 0 || is_boundary_cell(*mesh, c)) continue;
             FOR_I_CONSERVATIVE {
                 ASSERT_NEAR(h_face_W(f, 0, side, i), linear_at(i, mesh->h_face_coords, f), 1e-10)
-                    << "face " << f << " side " << (int)side;
+                    << "face " << f << " side " << static_cast<int>(side);
             }
         }
     }

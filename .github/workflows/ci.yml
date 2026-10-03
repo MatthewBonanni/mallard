@@ -25,8 +25,9 @@ concurrency:
 
 jobs:
   # Pull requests run three jobs that together cover every test: the full 2D
-  # suite (OpenMP), the full 3D suite and the multi-rank tests. main also runs
-  # the serial-backend and non-MPI 3D builds.
+  # suite (OpenMP), the full 3D suite and the multi-rank tests, plus a Clang
+  # build (no tests) for the warnings GCC misses. main also runs the
+  # serial-backend and non-MPI 3D builds.
   matrix:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
@@ -41,6 +42,7 @@ jobs:
             {"name": "openmp", "flags": "-DKokkos_ENABLE_OPENMP=ON", "full": true},
             {"name": "mpi", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON", "mpi": true},
             {"name": "mpi-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "mpi": true, "full": true},
+            {"name": "clang", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_HDF5=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++", "hdf5": true, "build_only": true},
             {"name": "serial", "flags": "-DKokkos_ENABLE_SERIAL=ON", "full": true, "main_only": true},
             {"name": "serial-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "hdf5": true, "full": true, "main_only": true}
           ]'
@@ -81,7 +83,7 @@ jobs:
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-          -DUSE_SYSTEM_KOKKOS=OFF ${{ matrix.backend.flags }}
+          -DUSE_SYSTEM_KOKKOS=OFF -DMallard_WARNINGS_AS_ERRORS=ON ${{ matrix.backend.flags }}
       - name: Build
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -96,7 +98,7 @@ jobs:
           path: ${{ github.workspace }}/.ccache
           key: ccache-${{ matrix.backend.name }}-${{ github.sha }}
       - name: Test
-        if: ${{ !matrix.backend.mpi }}
+        if: ${{ !matrix.backend.mpi && !matrix.backend.build_only }}
         env:
           OMP_NUM_THREADS: 2
         run: ./build/test/MallardTest

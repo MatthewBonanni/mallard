@@ -57,8 +57,8 @@ void Solver::timed_phase(const std::string & name, F && f) {
     logging::end_phase(seconds);
 }
 
-int Solver::init(const toml::value & input) {
-    this->input = input;
+int Solver::init(const toml::value & input_in) {
+    this->input = input_in;
 
     t = 0.0;
     step = 0;
@@ -257,7 +257,7 @@ void Solver::init_rhs_split() {
     std::vector<uint32_t> faces;
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
         const int32_t c0 = mesh->h_cells_of_face(f, 0), c1 = mesh->h_cells_of_face(f, 1);
-        if (c0 < (int32_t)n_owned || (c1 >= 0 && c1 < (int32_t)n_owned)) faces.push_back(f);
+        if (c0 < static_cast<int32_t>(n_owned) || (c1 >= 0 && c1 < static_cast<int32_t>(n_owned))) faces.push_back(f);
     }
     rhs_faces = to_device(faces.size() < mesh->n_faces ? faces : std::vector<uint32_t>(), "rhs_faces");
 

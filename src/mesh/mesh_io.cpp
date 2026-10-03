@@ -33,7 +33,7 @@ FaceKey face_key(const Nodes & nodes, size_t n) {
     FaceKey key;
     key.fill(NO_NODE);
     for (size_t k = 0; k < n; k++) key[k] = nodes[k];
-    std::sort(key.begin(), key.begin() + n);
+    std::sort(key.begin(), key.end());  // the NO_NODE padding sorts last
     return key;
 }
 
@@ -278,10 +278,10 @@ void Mesh::allocate_and_fill(const std::vector<std::array<rtype, N_DIM>> & nodes
     copy_csr(face_node_offsets, face_nodes, nodes_of_face, offsets_nodes_of_face, h_nodes_of_face,
              h_offsets_nodes_of_face, "nodes_of_face");
 
-    auto add_zone = [&](const std::string & name, FaceZoneType type, const std::vector<uint32_t> & faces) {
+    auto add_zone = [&](const std::string & name, FaceZoneType zone_type, const std::vector<uint32_t> & faces) {
         FaceZone zone;
         zone.set_name(name);
-        zone.set_type(type);
+        zone.set_type(zone_type);
         zone.faces = Kokkos::View<uint32_t *>("zone_" + name, faces.size());
         zone.h_faces = Kokkos::create_mirror_view(zone.faces);
         for (size_t i = 0; i < faces.size(); i++) zone.h_faces(i) = faces[i];

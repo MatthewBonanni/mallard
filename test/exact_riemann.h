@@ -23,9 +23,9 @@ struct ExactRiemann {
     double p_star = 0.0;
     double u_star = 0.0;
 
-    ExactRiemann(double rho_l, double u_l, double p_l,
-                 double rho_r, double u_r, double p_r, double gamma) :
-        rho_l(rho_l), u_l(u_l), p_l(p_l), rho_r(rho_r), u_r(u_r), p_r(p_r), gamma(gamma) {
+    ExactRiemann(double rho_l_in, double u_l_in, double p_l_in,
+                 double rho_r_in, double u_r_in, double p_r_in, double gamma_in) :
+        rho_l(rho_l_in), u_l(u_l_in), p_l(p_l_in), rho_r(rho_r_in), u_r(u_r_in), p_r(p_r_in), gamma(gamma_in) {
         solve();
     }
 
