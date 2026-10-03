@@ -26,7 +26,10 @@
 
 namespace {
 
-std::string restart_input(const std::string & dir, const std::string & init, uint32_t n_steps) {
+const std::string PERFECT_GAS = "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
+
+std::string restart_input(const std::string & dir, const std::string & init, uint32_t n_steps,
+                          const std::string & physics = PERFECT_GAS) {
     std::ostringstream s;
     s << "[run]\nn_steps = " << n_steps << "\ncfl = 0.5\n"
       << "[mesh]\ntype = \"cartesian_tri\"\nNx = 12\nNy = 10\nLx = 1.0\nLy = 1.0\n"
@@ -37,7 +40,7 @@ std::string restart_input(const std::string & dir, const std::string & init, uin
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
       << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
-      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << physics
       << "[output]\ncheck_interval = 1000000\n"
       << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 20\n"
       << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtu\"\ntime_interval = 0.005\n"
@@ -49,6 +52,13 @@ std::string restart_input(const std::string & dir, const std::string & init, uin
 const std::string BLAST =
     "type = \"analytical\"\n"
     "rho = \"1.0 + (x < 0.4 ? 1.0 : 0.0)\"\nu = [\"0.2\", \"0.1\"]\np = \"x < 0.4 ? 2.0 : 1.0\"\n";
+
+// Hot stoichiometric H2/air igniting next to cold gas
+const std::string IGNITION =
+    "type = \"analytical\"\np = \"101325.0\"\nT = \"x < 0.5 ? 1200.0 : 300.0\"\nu = [\"0.0\", \"0.0\"]\n"
+    "X = { H2 = \"2\", O2 = \"1\", N2 = \"3.76\" }\n";
+const std::string REACTING = "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR
+                             "/mechanisms/h2o2.yaml\"\n[chemistry]\n";
 
 } // namespace
 
@@ -120,6 +130,37 @@ TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
         return ss.str();
     };
     EXPECT_EQ(read_all(dir + "/b/forces.csv"), read_all(dir + "/a/forces.csv"));
+    std::filesystem::remove_all(dir);
+}
+
+TEST(RestartTest, ReactingRestartedRunMatchesUninterruptedRunExactly) {
+    // Species, the chemistry's last sub-steps and the temperature seeds carry
+    // over, so restarted cells integrate exactly as in one run
+    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_reacting_restart_test").string();
+    std::filesystem::remove_all(dir);
+
+    Solver straight;
+    straight.init(parse_toml(restart_input(dir + "/a", IGNITION, 40, REACTING)));
+    straight.run();
+    straight.copy_device_to_host();
+
+    Solver first;
+    first.init(parse_toml(restart_input(dir + "/b", IGNITION, 20, REACTING)));
+    first.run();
+    Solver second;
+    second.init(parse_toml(restart_input(
+        dir + "/b", "type = \"restart\"\nfile = \"" + dir + "/b/restart_000020.restart\"\n", 40, REACTING)));
+    second.run();
+    second.copy_device_to_host();
+
+    ASSERT_EQ(second.get_step(), straight.get_step());
+    EXPECT_EQ(second.get_time(), straight.get_time());
+    const uint32_t ns = static_cast<uint32_t>(straight.get_species_names().size());
+    ASSERT_GT(ns, 0u);
+    for (uint32_t i = 0; i < straight.get_mesh()->n_cells; i++) {
+        for (uint8_t v = 0; v < N_CONSERVATIVE; v++) EXPECT_EQ(second.h_conservatives(i, v), straight.h_conservatives(i, v));
+        for (uint32_t k = 0; k < ns; k++) EXPECT_EQ(second.h_species(i, k), straight.h_species(i, k));
+    }
     std::filesystem::remove_all(dir);
 }
 

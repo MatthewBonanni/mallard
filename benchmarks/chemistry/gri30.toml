@@ -1,0 +1,28 @@
+# Chemistry throughput, CH4/air with GRI-Mech 3.0 (53 species, 325 reactions):
+# run with
+#   MallardReactor -i gri30.toml
+# States sampled along the constant-volume ignition below (fresh, igniting and
+# burnt; ignition delay 1.11 ms), replicated over the cells and advanced over
+# each splitting step dt; writes gri30.csv. See README.md.
+
+[physics]
+gas = "mixture"
+mechanism = "../../mechanisms/gri30.yaml"
+
+[reactor]
+type = "constant_volume"
+T = 1500.0
+p = 101325.0
+X = { CH4 = 1.0, O2 = 2.0, N2 = 7.52 }
+end_time = 2.2e-3
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+
+[benchmark]
+cells = 65536
+samples = 64
+dt = [1.0e-8, 1.0e-6]
+repeats = 3
+output = "gri30.csv"

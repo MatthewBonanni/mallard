@@ -27,9 +27,9 @@
 #include "thermo.h"
 #include "transport.h"
 
-/** @brief Mass fractions of a cell from its contiguous partial densities. */
+/** @brief Mass fractions of a cell from its partial densities. */
 struct PartialDensities {
-    const rtype * rhoY;
+    CellSpecies rhoY;
     double inv_rho;
     KOKKOS_INLINE_FUNCTION double operator()(const uint32_t k) const { return static_cast<double>(rhoY[k]) * inv_rho; }
 };
@@ -54,7 +54,7 @@ struct Mixture {
      *        found by Newton from T_guess.
      */
     KOKKOS_INLINE_FUNCTION
-    void cell_state(const rtype * U, const rtype * rhoY, const rtype T_guess, rtype * W, rtype & gamma, rtype & e0,
+    void cell_state(const rtype * U, const CellSpecies & rhoY, const rtype T_guess, rtype * W, rtype & gamma, rtype & e0,
                     rtype & T) const {
         constexpr uint8_t E = N_DIM + 1;
         const double rho = static_cast<double>(U[0]);
@@ -138,7 +138,8 @@ class MixtureModel {
 
 /**
  * @brief Chemistry integrator options from the optional [chemistry] table:
- *        rtol, atol (on mass fractions), max_steps (sub-steps per call).
+ *        rtol, atol (on mass fractions), max_steps (sub-steps per call),
+ *        sparse (the linear solver; automatic by default, see use_sparse_lu).
  */
 chemistry::ReactorOptions reactor_options(const toml::value & input);
 

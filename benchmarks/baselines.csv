@@ -1,0 +1,24 @@
+hardware,case,igniting,execution,lu,dt,cells_per_s
+A100,h2o2,0.375,thread binned,dense,1e-8,5.60e6
+A100,h2o2,0.375,thread binned,dense,1e-6,2.63e6
+A100,h2o2,0.375,thread,dense,1e-8,6.74e6
+A100,h2o2,0.375,thread,dense,1e-6,1.37e6
+A100,h2o2,0.01,thread binned,dense,1e-8,6.57e6
+A100,h2o2,0.01,thread binned,dense,1e-6,2.87e6
+A100,h2o2,0.01,thread,dense,1e-8,6.77e6
+A100,h2o2,0.01,thread,dense,1e-6,2.46e6
+A100,gri30,0.0625,warp,sparse,1e-8,5.07e5
+A100,gri30,0.0625,warp,sparse,1e-6,4.93e5
+A100,gri30,0.0625,warp,dense,1e-8,3.40e5
+A100,gri30,0.0625,warp,dense,1e-6,3.39e5
+A100,gri30,0.0625,thread binned,sparse,1e-8,2.22e5
+A100,gri30,0.0625,thread binned,sparse,1e-6,1.26e5
+A100,gri30,0.01,warp,sparse,1e-8,5.01e5
+A100,gri30,0.01,warp,sparse,1e-6,3.86e5
+A100,ndodecane,0.0156,warp,sparse,1e-8,3.06e5
+A100,ndodecane,0.0156,warp,sparse,1e-6,2.76e4
+A100,ndodecane,0.0156,warp,dense,1e-8,8.96e4
+A100,ndodecane,0.0156,warp,dense,1e-6,9.84e3
+A100,nhexane,0.047,warp,sparse,1e-8,5.13e3
+A100,nhexane,0.047,warp,sparse,1e-6,1.96e2
+A100,nhexane,0.047,warp,dense,1e-8,3.95e0

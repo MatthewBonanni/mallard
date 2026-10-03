@@ -1,0 +1,60 @@
+# Full-solver benchmark: the reactive shock tube (examples/reactive_shock_tube,
+# V6) on 2400 x 400 cells (960,000; h2o2, MUSCL, HLLC, SSPRK3, Strang
+# chemistry), from its start for 400 steps, a time in which the chemistry
+# runs in every cell behind the shocks: time per cell and step and the
+# chemistry's share (the run's summary). Run from this directory.
+
+[run]
+n_steps = 400
+cfl = 0.5
+
+[mesh]
+type = "cartesian"
+Nx = 2400
+Ny = 400
+Lx = 0.12
+Ly = 0.02
+
+[initialize]
+type = "analytical"
+p = "x < 0.06 ? 7173.0 : 35594.0"
+T = "x < 0.06 ? 378.251986 : 747.672441"
+u = ["x < 0.06 ? 0.0 : -487.34", "0.0"]
+X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }
+
+[[boundaries]]
+name = "left"
+type = "symmetry"
+
+[[boundaries]]
+name = "right"
+type = "upt"
+u = [-487.34, 0.0]
+p = 35594.0
+T = 747.672441
+X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "euler"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+
+[chemistry]
+
+[output]
+check_interval = 100

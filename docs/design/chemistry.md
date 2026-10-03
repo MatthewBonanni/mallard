@@ -1,7 +1,7 @@
 # Design: finite-rate chemistry
 
 Status: accepted (see [Decisions on the open questions](#decisions-on-the-open-questions)).
-Implementation follows the [milestones](#10-milestones); done: 1, 2, 3, 4, 5, 6, 7, 8, 9.
+Implementation follows the [milestones](#10-milestones); done: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10.
 
 Mallard today solves a single calorically perfect gas. This document adds
 multicomponent, thermally perfect mixtures and finite-rate chemistry with
@@ -711,6 +711,117 @@ fixed order (explicit loops over a fixed lane count, not `parallel_reduce`
 with an implementation-defined tree), and the per-cell code path (thread or
 team, team size) depends only on the mechanism and the build, never on the
 cell, its bin or its rank, so binning and load balancing only reorder work.
+
+### As implemented (milestone 10)
+
+`src/chemistry/lanes.h`, `sparse_lu.h`; `src/solver/cell_chemistry.*`;
+`benchmarks/`.
+
+- **One code for a thread or a team.** Every chemistry kernel (thermo per
+  species, rates of progress per reaction, production rates, Jacobian, the
+  chain rule to `(Y, T)`, dense and sparse LU and solves, the RODAS stages and
+  error norm, the reactor) is written once against a `Lanes` interface:
+  `SerialLanes` (one thread per cell) or `TeamLanes` (all threads and vector
+  lanes of a Kokkos team per cell). Reductions accumulate each lane's strided
+  share in index order and then the shares in lane order, so a cell's result
+  depends on the lane count only, which is fixed per mechanism and build:
+  results stay independent of the decomposition, the queue order, the binning
+  and the rank count. With lanes the work is balanced across them: the
+  Jacobian is assembled by entries (each entry's terms listed at setup), not
+  by rows (H appears in a hundred GRI-3.0 reactions), and production rates
+  by chunks of four reactions; dense matrices are stored by columns, so that
+  the lanes' rows of an elimination step or a solve are contiguous. The LU
+  with partial pivoting gives the same factors for any lane count.
+- **Choice** (`[chemistry] lanes`, default automatic): a warp per cell on GPUs
+  from 16 species, one thread per cell otherwise (and on CPUs). One thread
+  per cell orders the queued cells by their last cost (`bin_by_cost`), so that
+  a warp's cells take similar numbers of sub-steps.
+- **Sparse LU** (`[chemistry] sparse`, by default from 30 species when its
+  factors fill at most 60% of the dense matrix): the
+  Jacobian splits into the static pattern of its mass-action and
+  extra-efficiency terms, with the dense `T` row and column, plus a rank-one
+  part `u v^T` (`v_j = 1 / W_j`) that holds everything that is the same in
+  every column: third bodies at their default efficiency and the pressure of
+  PLOG and Chebyshev reactions. The pattern is ordered by minimum degree (`T`
+  last), its fill computed at setup, and factored without pivoting by a flat
+  list of updates per pivot (a vanishing pivot rejects the sub-step);
+  Sherman-Morrison adds the rank-one part with one more solve per
+  factorization. GRI-3.0 fills 1,545 of 2,916 entries; the NUIG n-hexane
+  mechanism (1268 species) 56,591 of 1.6 million, 3.5%.
+- **Fused half steps** (`[chemistry] fuse_half_steps`, default off): the
+  half steps of consecutive steps are one chemistry call, except where output,
+  checks or the end of the run read the state (and the next step's `dt` comes
+  from the state before the pending half step). One
+  chemistry call per step instead of two halves the chemistry's cost where
+  cells take one or two sub-steps per call: on the H2 flame (V8, one CPU
+  core) chemistry falls from 7.7 to 3.8 s over 3000 steps and the step from
+  3.8 to 2.5 ms. It is off by default because the result then depends on the
+  output schedule (`check_interval`, writers, monitors): a run stopped by
+  `t_wall_stop`, or restarted from a step at which the uninterrupted run wrote
+  nothing, no longer reproduces that run bitwise. Making it the default needs
+  the pending half step in the restart file and output from a flushed copy.
+- **Layout**: `SpeciesLayout` is a CMake option (`Mallard_SPECIES_LAYOUT_LEFT`);
+  every kernel indexes through the view. On the full-solver benchmark (A100)
+  `LayoutLeft` (cells contiguous per species) takes 58.7 ms per step and the
+  default `LayoutRight` (species contiguous per cell) 60.6 ms, the same in two
+  runs: 3%, all of it in the flow kernels (chemistry 3.26 vs 3.24 s, its
+  kernels copy a cell's species to work memory first). Too small to give the
+  GPU and CPU builds different layouts by default; the option stays for
+  large-mechanism runs to measure.
+
+Validation: V3 at 100 species (n-dodecane/air, 20 atm, phi 0.5-2, 1000-1400 K,
+`test/data/chemistry/ndodecane_ignition.csv`): ignition delays within 5.4e-6
+of Cantera's with the dense and the sparse LU, `T` at 0.5 and 2 delays within
+1% (the mechanism's irreversible soot-precursor reactions keep it from its UV
+equilibrium, which is therefore not compared). At 1268 species
+(`tools/v3_check.py`, 10 atm, phi 1, 1000-1400 K): delays within 4e-6, about a
+second per case on one CPU core with the sparse LU (128 s with the dense one).
+V1/V2/V6/V7 unchanged within their tolerances.
+
+Baselines (`benchmarks/`, recorded in `benchmarks/baselines.csv`): cells per
+second over one splitting step on states sampled along an ignition (2-38%
+of them igniting, as the ignition's length in the sampled time; "1%": one in
+a hundred), the best of two calls after a
+warm-up, one A100 (CUDA 12.9, double):
+
+| Case | Species | Execution | dt = 1e-8 s | dt = 1e-6 s |
+|---|---|---|---|---|
+| h2o2 | 10 | thread per cell, binned | 5.60M | 2.63M |
+| | | thread per cell, not binned | 6.74M | 1.37M |
+| h2o2 1% | | thread per cell, binned / not | 6.57M / 6.77M | 2.87M / 2.46M |
+| GRI-3.0 | 53 | warp per cell, sparse LU | 507k | 493k |
+| | | warp per cell, dense LU | 340k | 339k |
+| | | thread per cell, binned, sparse LU | 222k | 126k |
+| GRI-3.0 1% | | warp per cell, sparse LU | 501k | 386k |
+| n-dodecane | 100 | warp per cell, sparse LU | 306k | 27.6k |
+| | | warp per cell, dense LU | 89.6k | 9.8k |
+| n-hexane | 1268 | warp per cell, sparse LU | 5.13k | 196 |
+| | | warp per cell, sparse LU, full Jacobian | 677 | 23 |
+| | | warp per cell, dense LU | 3.9 | (not run) |
+
+Binning pays where cells' costs differ (2x at 1e-6 s, nothing at one
+sub-step per cell, where the sort costs 17%); a warp per cell beats a thread
+per cell 2.3-3.9x at 53 species. The sparse LU is 1.5x faster than the
+dense one at 53 species, 3x at 100 and 1300x at 1268; at 1268 species
+storing only the pattern and the rank-one part (instead of a full Jacobian
+next to the sparse factors) gains another 8x. Work memory in team scratch (`shared`) fits
+fewer cells per multiprocessor and was slower in every case, so it is off by
+default.
+
+CPU_RESULTS
+
+0D ignitions on one CPU core against Cantera 3.2 (CVODES, the same rtol
+1e-6 and atol 1e-10, the same output interval; its sparse preconditioned
+solver with the mole-based reactor): GRI-3.0 at 1500 K 0.031 s (Cantera
+0.015 s), n-dodecane 0.048 s sparse / 0.073 s dense (0.045 / 0.063 s),
+n-hexane 0.61 s sparse / 128 s dense (1.5 / 6.4 s), with ignition delays as
+above. The published GPU numbers (Niemeyer & Sung, Curtis et al., Balos et
+al.) use other GPUs, mechanisms or measures (per-reactor wall time of a
+whole ignition) and were not compared.
+
+Full solver (`benchmarks/solver/reactive_shock_tube_2d.toml`, 960,000 cells,
+h2o2, A100): 60.6 ms per step, 15.8M cells per second, chemistry 13% of the
+time stepping.
 
 ## 6. Transport
 

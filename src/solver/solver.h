@@ -27,6 +27,7 @@
 #include "time_integrator.h"
 #include "physics.h"
 #include "mixture.h"
+#include "cell_chemistry.h"
 #include "scalar_reconstruction.h"
 #include "data_writer.h"
 #include "expression.h"
@@ -85,7 +86,9 @@ class Solver {
         int run();
 
         /**
-         * @brief Advance the solution by one time step.
+         * @brief Advance the solution by one time step. With chemistry, the
+         *        half step that ends it may be deferred (see run) and fused
+         *        with the next step's first half.
          */
         void take_step();
 
@@ -245,6 +248,7 @@ class Solver {
         void register_data();
         std::vector<std::string> restart_variables() const;  // Flow block, then RHOY_<species>
         std::string stop_reason() const;  // Empty while no stop condition holds
+        bool state_needed() const;        // Whether output, checks or the end of the run read the state now
         double progress() const;          // Fraction of the run done, by the first stop condition to hit
         void print_setup() const;
         void print_progress();
@@ -386,11 +390,13 @@ class Solver {
         Kokkos::View<rtype *>::host_mirror_type h_hrr;
         Kokkos::View<rtype **, Kokkos::LayoutRight> production;  // W_k omega_k, for output
         Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type h_production;
-        Kokkos::View<double **, Kokkos::LayoutRight> chem_work;     // (cell of a chunk, work)
-        Kokkos::View<uint32_t **, Kokkos::LayoutRight> chem_pivot;
-        Kokkos::View<uint32_t *> chem_active, chem_queue;
+        uint32_t chemistry_lanes = 0;     // vector lanes per cell, 0: automatic
+        CellChemistry cell_chemistry;
         uint64_t chem_active_cells = 0;   // owned cells advanced in the last chemistry call
         double t_wall_chemistry = 0.0;
+        bool fuse_chemistry = false;      // run(): fuse consecutive half steps
+        bool defer_chemistry = false;     // take_step leaves its last half step pending
+        double chemistry_pending = 0.0;   // chemistry time not yet applied to the state
 
         // Source terms
         bool has_gravity = false;
