@@ -172,7 +172,7 @@ def molecular_weights(mechanism):
     weights, name = {}, None
     with open(mechanism) as f:
         for line in f:
-            if line.startswith("- name:"):
+            if line.strip().startswith("- name:"):
                 name = line.split(":", 1)[1].strip()
             elif name and line.strip().startswith("composition:"):
                 comp = line.split("{", 1)[1].split("}", 1)[0]
