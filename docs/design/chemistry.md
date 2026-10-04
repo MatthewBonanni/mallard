@@ -430,7 +430,7 @@ U^n --chem(dt/2)--> U* --SSPRK3 flow step(dt)--> U** --chem(dt/2)--> U^{n+1}
   halo or stencil rebuild and keeps results rank-count independent (each
   cell's integration is the same wherever it runs). Long-term imbalance of the
   flow work (TENO troubled cells, species fluxes) uses the dynamic mesh
-  rebalancing prepared in [mpi.md, section 10](mpi.md#10-room-for-dynamic-load-balancing),
+  rebalancing prepared in [mpi.md, section 10](mpi.md#10-dynamic-load-balancing),
   with the measured per-cell chemistry cost added to the partition weights.
 
 ### As implemented (milestone 8)
