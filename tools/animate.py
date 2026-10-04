@@ -123,9 +123,10 @@ def ffmpeg(*args):
     subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", *args], check=True)
 
 
-def write_mp4(pattern, mp4, fps):
+def write_mp4(pattern, mp4, fps, width=None):
     """H.264 for the web: yuv420p, even dimensions, metadata up front."""
-    ffmpeg("-framerate", str(fps), "-i", pattern, "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
+    scale = f"scale={width}:-2:flags=lanczos,setsar=1," if width else ""
+    ffmpeg("-framerate", str(fps), "-i", pattern, "-vf", scale + "pad=ceil(iw/2)*2:ceil(ih/2)*2",
            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-movflags", "+faststart", mp4)
 
 

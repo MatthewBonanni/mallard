@@ -23,7 +23,11 @@ show a sequence of pre-rendered images ("series" holds 00000.png, 00001.png,
 ... and optionally times.txt), e.g. 3D views. Curve panels trace a time series
 ("data": CSV with columns t and y) up to the current time over a reference
 curve ("reference": {"label", "file": a CSV of t and y}); "t_end" maps the
-normalized time to t. "gif_width" and "gif_colors" shrink the GIF.
+normalized time to t. Detonation panels show a 2D detonation run's pressure
+over the channel and, below it, the numerical soot foil (P_MAX) behind the
+front ("series": the run's .pvd; "xlim" in mesh units). "gif_width" and
+"gif_colors" shrink the GIF, "mp4_width" scales the MP4, and "background"
+sets the figure color (to match pre-rendered frames).
 
 Every frame is one snapshot of each case: a case with N snapshots is sampled
 at the nearest normalized time, so cases written with the same number of
@@ -34,6 +38,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import shutil
 import tempfile
 from multiprocessing import Pool
@@ -47,7 +52,9 @@ import numpy as np
 from matplotlib.colors import Normalize
 
 from animate import Rasterizer, pixel_to_cell, schlieren, write_gif, write_mp4
-from mallard_vtu import read_vtu
+from animate_detonation_2d import soot
+from mallard_vtu import grid_fields, read_vtu
+from soot_foil import front_position
 
 BG = "#101014"
 FG = "#e8e8e8"
@@ -55,6 +62,9 @@ DIM = "#9a9a9a"
 
 
 def snapshot_files(panel):
+    if panel.get("type") == "detonation":
+        base = os.path.dirname(panel["series"])
+        return [os.path.join(base, f) for f in re.findall(r'file="([^"]+)"', open(panel["series"]).read())]
     pattern = "*.png" if panel.get("type") == "frames" else panel.get("glob", "*.vtu")
     files = sorted(glob.glob(os.path.join(panel["series"], pattern)))
     if not files:
@@ -65,6 +75,10 @@ def snapshot_files(panel):
 def panel_aspect(panel):
     if panel.get("type", "field") in ("wall", "curve"):
         return panel.get("aspect", 1.0)
+    if panel.get("type") == "detonation":
+        _, x, y, _ = grid_fields(snapshot_files(panel)[0], ["P"])
+        x0, x1 = panel.get("xlim") or (x[0], x[-1])
+        return (x1 - x0) / ((y[-1] - y[0] + y[1] - y[0]) * (2 + DetonationPanel.GAP))
     if panel.get("type") == "frames":
         h, w = imageio.imread(snapshot_files(panel)[0]).shape[:2]
         return w / h
@@ -209,7 +223,44 @@ class CurvePanel:
         return t_now
 
 
-PANELS = {"field": FieldPanel, "wall": WallPanel, "frames": FramesPanel, "curve": CurvePanel}
+class DetonationPanel:
+    GAP = 0.06
+
+    def __init__(self, panel, rect, fig_px):
+        self.p = panel
+        self.files = snapshot_files(panel)
+        _, x, y, fld = grid_fields(self.files[0], ["P"])
+        self.p0 = fld["P"].min()
+        dy = y[1] - y[0]
+        self.xlim = panel.get("xlim") or (x[0], x[-1])
+        self.ylim = (y[0] - dy / 2, y[-1] + dy / 2)
+
+    def draw(self, ax, k, n):
+        t, x, y, fld = grid_fields(self.files[round(k * (len(self.files) - 1) / max(n - 1, 1))], ["P", "P_MAX"])
+        x_front = front_position(x, fld["P"], self.p0)
+        win = (x >= self.xlim[0]) & (x <= self.xlim[1])
+        ext = [*self.xlim, *self.ylim]
+        h = (1 - self.GAP / (2 + self.GAP)) / 2
+        top, bottom = ax.inset_axes([0, 1 - h, 1, h]), ax.inset_axes([0, 0, 1, h])
+        p_lo, p_hi = self.p.get("p_range", (12, 34))
+        top.imshow((fld["P"][win] / self.p0).T, origin="lower", extent=ext, cmap="inferno", vmin=p_lo, vmax=p_hi,
+                   aspect="auto", interpolation="antialiased")
+        foil = soot(fld["P_MAX"][win], self.p0)
+        foil[:, x[win] > x_front] = np.nan
+        cmap = plt.get_cmap("gray_r").copy()
+        cmap.set_bad(BG)
+        f_lo, f_hi = self.p.get("foil_range", (-0.12, 0.2))
+        bottom.imshow(foil, origin="lower", extent=ext, cmap=cmap, vmin=f_lo, vmax=f_hi, aspect="auto",
+                      interpolation="antialiased")
+        for a, label in ((top, "pressure"), (bottom, "soot foil")):
+            a.set_axis_off()
+            a.text(0.006, 0.94, label, transform=a.transAxes, fontsize=4.5, color="white", ha="left", va="top",
+                   bbox=dict(boxstyle="round,pad=0.25", fc=BG, ec="none", alpha=0.6))
+        return t
+
+
+PANELS = {"field": FieldPanel, "wall": WallPanel, "frames": FramesPanel, "curve": CurvePanel,
+          "detonation": DetonationPanel}
 
 
 def render(args):
@@ -226,7 +277,7 @@ def render(args):
             ax.set_axis_off()
         t = obj.draw(ax, k, n)
         fig.text(rect[0], rect[1] + rect[3] + 0.006, p.get("title", ""), fontsize=6, color=FG, ha="left", va="bottom")
-        if p.get("show_time", isinstance(obj, (FieldPanel, FramesPanel))):
+        if p.get("show_time", isinstance(obj, (FieldPanel, FramesPanel, DetonationPanel))):
             ax.text(0.985, 0.975, f"t = {t:.3f}", transform=ax.transAxes, fontsize=4.5, color="white", ha="right",
                     va="top", family="DejaVu Sans Mono",
                     bbox=dict(boxstyle="round,pad=0.25", fc=BG, ec="none", alpha=0.6))
@@ -238,7 +289,8 @@ def render(args):
 
 
 def init_worker(config, fig_px):
-    global _panels, _layout
+    global _panels, _layout, BG
+    BG = config.get("background", BG)
     _layout = layout(config)
     _panels = [PANELS[p.get("type", "field")](p, rect, fig_px)
                for p, rect in _layout[0]]
@@ -263,6 +315,8 @@ def main():
     ap.add_argument("--workers", type=int, default=4)
     args = ap.parse_args()
     config = json.load(open(args.config))
+    global BG
+    BG = config.get("background", BG)
     config.setdefault("dpi", 300)
     config.setdefault("fps", 30)
     plt.rcParams.update({"font.family": "DejaVu Sans"})
@@ -279,7 +333,7 @@ def main():
             if i % 25 == 0:
                 print(f"frame {i + 1}/{len(jobs)}", flush=True)
     pattern = os.path.join(tmp, "%05d.png")
-    write_mp4(pattern, args.output_stem + ".mp4", config["fps"])
+    write_mp4(pattern, args.output_stem + ".mp4", config["fps"], config.get("mp4_width"))
     write_gif(pattern, args.output_stem + ".gif", config["fps"], config.get("gif_width"),
               config.get("gif_colors", 256))
     set_last_delay(args.output_stem + ".gif", args.hold)
