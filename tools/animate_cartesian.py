@@ -196,10 +196,10 @@ def render(args):
         args.vmin = lo if args.vmin is None else args.vmin
         args.vmax = hi if args.vmax is None else args.vmax
     plt.rcParams.update({"font.family": "DejaVu Sans"})
-    keep = args.frames_dir is not None
-    tmp = tempfile.TemporaryDirectory()
+    if args.frames_dir:
+        os.makedirs(args.frames_dir, exist_ok=True)
+    tmp = tempfile.TemporaryDirectory(dir=args.frames_dir)
     args.frames_dir = args.frames_dir or tmp.name
-    os.makedirs(args.frames_dir, exist_ok=True)
     with Pool(args.workers) as pool:
         frames = []
         for f in pool.imap(Frame(args, times, (args.vmin, args.vmax)), list(enumerate(stems))):
@@ -216,8 +216,7 @@ def render(args):
             os.link(src, os.path.join(tmp.name, f"gif_{i:05d}.png"))
         write_gif(os.path.join(tmp.name, "gif_%05d.png"), args.output_stem + ".gif", args.fps, args.gif_width)
     shutil.copy(frames[-1], args.output_stem + "_final.png")
-    if not keep:
-        tmp.cleanup()
+    tmp.cleanup()
     print("wrote", args.output_stem + ".mp4", flush=True)
 
 
