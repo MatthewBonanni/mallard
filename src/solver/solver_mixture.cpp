@@ -12,7 +12,10 @@
 
 #include "solver.h"
 
+#include <algorithm>
+#include <iomanip>
 #include <limits>
+#include <sstream>
 
 #include <Kokkos_Core.hpp>
 
@@ -249,6 +252,68 @@ struct MixtureDiagnosticsFunctor {
     }
 };
 
+/**
+ * @brief A composition given as X or Y by species, each value a number or an
+ *        expression in x, y, z, with an optional balance species taking
+ *        1 - sum of the others; without one the values are normalized.
+ *        Negative values count as zero.
+ */
+class CompositionExpressions {
+    public:
+        CompositionExpressions(const MixtureModel & mixture_model, const toml::value & table, const std::string & name) :
+            mixture(mixture_model), where(name) {
+            if (table.contains("X") == table.contains("Y")) {
+                throw InputError(where + ": give the composition as exactly one of X and Y.");
+            }
+            mole = table.contains("X");
+            const std::string key = mole ? "X" : "Y";
+            if (!table.at(key).is_table()) throw InputError(where + "." + key + " must be a table of species.");
+            for (const auto & [species, value] : table.at(key).as_table()) {
+                const int32_t k = mixture.mechanism().species_index(species);
+                if (k < 0) throw InputError(where + "." + key + ": no species " + species + " in the mechanism.");
+                listed.push_back(k);
+                std::ostringstream text;
+                if (value.is_string()) {
+                    text << value.as_string();
+                } else {
+                    text << std::setprecision(17) << static_cast<double>(as_real(value, species));
+                }
+                values.emplace_back(where + "." + key + "." + species, text.str());
+            }
+            if (table.contains("balance")) {
+                const std::string species = toml::find<std::string>(table, "balance");
+                balance = mixture.mechanism().species_index(species);
+                if (balance < 0) throw InputError(where + ".balance: no species " + species + " in the mechanism.");
+            }
+        }
+
+        /** @brief Mass fractions at the point with coordinates x[0..N_DIM). */
+        template <typename T>
+        std::vector<double> mass_fractions(const T & x) const {
+            std::vector<double> f(mixture.n_species(), 0.0);
+            double sum = 0.0;
+            for (size_t i = 0; i < listed.size(); i++) {
+                f[listed[i]] = std::max(values[i].at(x, N_DIM), 0.0);
+                if (listed[i] != balance) sum += f[listed[i]];
+            }
+            if (balance >= 0) {
+                f[balance] = std::max(1.0 - sum, 0.0);
+                sum += f[balance];
+            }
+            if (!(sum > 0.0)) throw InputError(where + ": the composition is zero at a face.");
+            for (double & v : f) v /= sum;
+            return mole ? mixture.mass_fractions_from_mole(f) : f;
+        }
+
+    private:
+        const MixtureModel & mixture;
+        std::string where;
+        bool mole = false;
+        int32_t balance = -1;
+        std::vector<int32_t> listed;
+        std::vector<Expression> values;
+};
+
 } // namespace
 
 std::array<rtype, 6> Solver::mixture_diagnostics() {
@@ -466,32 +531,47 @@ std::vector<rtype> Solver::integrate_species() {
 }
 
 void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boundaries,
+                                     const std::vector<std::array<uint32_t, 2>> & profiled_faces,
                                      std::vector<BoundaryCondition> & bcs) {
     bc_mass_fractions.assign(bcs.size(), {});
     bc_surrogates.assign(bcs.size(), {1.4, 0.0});
     bc_temperatures.assign(bcs.size(), 0.0);
+    // Prescribed state of condition i_bc
+    auto prescribe = [&](size_t i_bc, const std::vector<double> & Y, double T) {
+        BoundaryCondition & bc = bcs[i_bc];
+        const double p = static_cast<double>(bc.data[N_DIM + 1]);
+        bc.data[0] = static_cast<rtype>(p / (mixture_model->gas_constant(Y) * T));
+        bc_mass_fractions[i_bc] = Y;
+        bc_temperatures[i_bc] = T;
+        mixture_model->surrogates(T, Y, bc_surrogates[i_bc][0], bc_surrogates[i_bc][1]);
+    };
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
         const toml::value & bound = input_boundaries[i_bc];
         const std::string name = toml::find<std::string>(bound, "name");
-        BoundaryCondition & bc = bcs[i_bc];
-        switch (bc.type) {
+        const std::string where = "boundaries[name = \"" + name + "\"]";
+        switch (bcs[i_bc].type) {
             case BoundaryType::EXTRAPOLATION:
             case BoundaryType::SYMMETRY:
             case BoundaryType::WALL_ADIABATIC:
             case BoundaryType::P_OUT:
                 break;
             case BoundaryType::UPT: {
-                const std::vector<double> Y = mixture_model->mass_fractions(bound, "boundaries[name = \"" + name + "\"]");
-                const double p = static_cast<double>(bc.data[N_DIM + 1]);
                 const double T = static_cast<double>(find_real(bound, "T"));
-                bc.data[0] = static_cast<rtype>(p / (mixture_model->gas_constant(Y) * T));
-                bc_mass_fractions[i_bc] = Y;
-                bc_temperatures[i_bc] = T;
-                mixture_model->surrogates(T, Y, bc_surrogates[i_bc][0], bc_surrogates[i_bc][1]);
+                if (!MixtureModel::composition_varies(bound)) {
+                    prescribe(i_bc, mixture_model->mass_fractions(bound, where), T);
+                    break;
+                }
+                // Each face's own copy of the condition, at the composition of its center
+                const CompositionExpressions composition(*mixture_model, bound, where);
+                for (size_t k = 0; k < profiled_faces.size(); k++) {
+                    if (profiled_faces[k][0] != i_bc) continue;
+                    const auto center = Kokkos::subview(mesh->h_face_coords, profiled_faces[k][1], Kokkos::ALL());
+                    prescribe(input_boundaries.size() + k, composition.mass_fractions(center), T);
+                }
                 break;
             }
             default:
-                throw InputError("boundaries[name = \"" + name + "\"]: type \"" + BOUNDARY_NAMES.at(bc.type) +
+                throw InputError(where + ": type \"" + BOUNDARY_NAMES.at(bcs[i_bc].type) +
                                  "\" is not yet supported with gas = \"mixture\" (extrapolation, symmetry, "
                                  "wall_adiabatic, upt, p_out).");
         }
