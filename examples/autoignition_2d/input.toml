@@ -1,0 +1,52 @@
+# Autoignition of H2/air (phi = 0.1, 1070 K, 41 atm) with T' = 15 K
+# (l_T = 1.25 mm), u' = 0.5 m/s (l_e = 1.25 mm), seed 1:
+# 400 x 400 cells of 10.250 um, from tools/autoignition_restart.py
+
+[run]
+t_stop = 0.0047999999999999996
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 400
+Ny = 400
+Lx = 0.0041000000000000003
+Ly = 0.0041000000000000003
+periodic = ["x", "y"]
+
+[initialize]
+type = "restart"
+file = "autoignition.restart"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+phase = "ohmech"
+transport = "mixture_averaged"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+fuse_half_steps = true
+
+[output]
+check_interval = 1000
+
+[[write_data]]
+prefix = "./solut/autoignition"
+format = "vtu"
+time_interval = 2.4999999999999998e-05
+variables = ["RHO", "U", "P", "T", "HRR", "Y_H2", "Y_H2O", "Y_OH", "Y_HO2", "OMEGA_H2O", "X_H2O", "D_H2O"]
+
+[[write_data]]
+prefix = "./restart/autoignition"
+format = "restart"
+time_interval = 0.00020000000000000001
