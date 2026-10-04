@@ -146,24 +146,9 @@ bool pseudo_inverse(std::vector<double> A, int m, int n, std::vector<double> & P
     for (int j = 0; j < n; j++) {
         for (int i = 0; i < m; i++) A[i * n + j] /= col_scale[j];
     }
-    // Reflections are applied a row at a time to all columns at once, which
-    // reads both matrices contiguously and keeps each entry's sequence of
-    // operations, so results do not depend on the loop order
-    std::vector<double> QT(m * m, 0.0);
-    for (int i = 0; i < m; i++) QT[i * m + i] = 1.0;
-    std::vector<double> v(m), d(m);
-    auto reflect = [&](double * M, const int cols, const int k, const double vnorm2) {
-        std::fill(d.begin(), d.begin() + cols, 0.0);
-        for (int i = k; i < m; i++) {
-            const double * row = M + i * cols;
-            for (int j = 0; j < cols; j++) d[j] += v[i] * row[j];
-        }
-        for (int j = 0; j < cols; j++) d[j] *= 2.0 / vnorm2;
-        for (int i = k; i < m; i++) {
-            double * row = M + i * cols;
-            for (int j = 0; j < cols; j++) row[j] -= d[j] * v[i];
-        }
-    };
+    // Householder reflections H_k = I - beta_k v_k v_k^T, applied a row at a
+    // time to all columns of A at once (contiguous reads)
+    std::vector<double> V(n * m, 0.0), beta(n, 0.0), d(n);
     double max_diag = 0.0;
     for (int k = 0; k < n; k++) {
         double norm = 0.0;
@@ -171,22 +156,49 @@ bool pseudo_inverse(std::vector<double> A, int m, int n, std::vector<double> & P
         norm = std::sqrt(norm);
         if (norm == 0.0) return false;
         const double alpha = (A[k * n + k] > 0.0) ? -norm : norm;
-        for (int i = 0; i < m; i++) v[i] = (i < k) ? 0.0 : A[i * n + k];
+        double * v = &V[k * m];
+        for (int i = k; i < m; i++) v[i] = A[i * n + k];
         v[k] -= alpha;
         double vnorm2 = 0.0;
         for (int i = k; i < m; i++) vnorm2 += v[i] * v[i];
         if (vnorm2 == 0.0) continue;
-        reflect(A.data(), n, k, vnorm2);
-        reflect(QT.data(), m, k, vnorm2);
+        beta[k] = 2.0 / vnorm2;
+        std::fill(d.begin(), d.end(), 0.0);
+        for (int i = k; i < m; i++) {
+            for (int j = 0; j < n; j++) d[j] += v[i] * A[i * n + j];
+        }
+        for (int j = 0; j < n; j++) d[j] *= beta[k];
+        for (int i = k; i < m; i++) {
+            for (int j = 0; j < n; j++) A[i * n + j] -= d[j] * v[i];
+        }
         max_diag = std::max(max_diag, std::abs(A[k * n + k]));
     }
     for (int k = 0; k < n; k++) {
         if (std::abs(A[k * n + k]) * max_condition < max_diag) return false;
     }
+    // Row r < n of Q^T = H_{n-1} ... H_0 is e_r^T H_r ... H_0, since H_k leaves
+    // e_r unchanged for k > r: only the n rows the pseudo-inverse needs, built
+    // as the columns of X (m x n) with H_k applied to columns r >= k at once
+    std::vector<double> X(m * n, 0.0);
+    for (int r = 0; r < n; r++) X[r * n + r] = 1.0;
+    for (int k = n - 1; k >= 0; k--) {
+        if (beta[k] == 0.0) continue;
+        const double * v = &V[k * m];
+        std::fill(d.begin(), d.end(), 0.0);
+        for (int i = k; i < m; i++) {
+            for (int r = k; r < n; r++) d[r] += X[i * n + r] * v[i];
+        }
+        for (int r = k; r < n; r++) d[r] *= beta[k];
+        for (int i = k; i < m; i++) {
+            for (int r = k; r < n; r++) X[i * n + r] -= d[r] * v[i];
+        }
+    }
     P.assign(n * m, 0.0);
+    for (int r = 0; r < n; r++) {
+        for (int j = 0; j < m; j++) P[r * m + j] = X[j * n + r];
+    }
     for (int k = n - 1; k >= 0; k--) {
         double * row = &P[k * m];
-        for (int j = 0; j < m; j++) row[j] = QT[k * m + j];
         for (int l = k + 1; l < n; l++) {
             const double a = A[k * n + l];
             for (int j = 0; j < m; j++) row[j] -= a * P[l * m + j];
@@ -1343,7 +1355,8 @@ void integrate_cell(const std::vector<Point3> & nodes, const TetRule & rule, F &
     }
 }
 
-// Moments of total degree below 2 * MAX_DEGREE - 1
+// Moments of total degree up to MAX_DEGREE, and below 2 * MAX_DEGREE - 1
+constexpr int MAX_LOW_MOMENTS = (teno::MAX_DEGREE + 1) * (teno::MAX_DEGREE + 2) * (teno::MAX_DEGREE + 3) / 6;
 constexpr int MAX_MOMENTS = (2 * teno::MAX_DEGREE - 1) * (2 * teno::MAX_DEGREE) * (2 * teno::MAX_DEGREE + 1) / 6;
 
 /** @brief Exponents (a, b, c), a + b + c < NM, ordered by a, then b, then c. */
@@ -1478,7 +1491,6 @@ void TENO::compute_stencils_and_matrices_3d() {
     auto h_face_quad_weights = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_quad_weights);
 
     // Collapsed Gauss with n points per direction is exact to degree 2n - 3 on a tet
-    const TetRule rule((r + 4) / 2);
     const TetRule rule_si(r + 1);
     uint32_t n_failed_large = 0;
     uint32_t n_invalid_small = 0;
@@ -1496,8 +1508,8 @@ void TENO::compute_stencils_and_matrices_3d() {
 
     // Central moments of every cell in its own scaled frame, mean of
     // ((x - x_c) / h_c)^a ((y - y_c) / h_c)^b ((z - z_c) / h_c)^c, so that
-    // monomial means over unmirrored stencil entries follow by binomial
-    // expansion instead of quadrature
+    // monomial means over stencil entries and their mirror images follow by
+    // binomial expansion instead of quadrature
     // Only total degrees below nm are stored
     const int nm = 2 * r - 1;
     std::vector<int> moment_slot(nm * nm * nm, -1);
@@ -1508,6 +1520,24 @@ void TENO::compute_stencils_and_matrices_3d() {
         }
     }
     auto moment = [&](int a, int b, int c) { return moment_slot[(a * nm + b) * nm + c]; };
+    // Exponents of total degree up to r, and their order by degree
+    std::vector<std::array<int, 3>> low_exps;
+    std::vector<int> low_slot((r + 1) * (r + 1) * (r + 1), -1);
+    for (int a = 0; a <= r; a++) {
+        for (int b = 0; a + b <= r; b++) {
+            for (int c = 0; a + b + c <= r; c++) {
+                low_slot[(a * (r + 1) + b) * (r + 1) + c] = low_exps.size();
+                low_exps.push_back({a, b, c});
+            }
+        }
+    }
+    const int n_low = low_exps.size();
+    auto low_index = [&](int a, int b, int c) { return low_slot[(a * (r + 1) + b) * (r + 1) + c]; };
+    std::vector<int> low_by_degree(n_low);
+    for (int g = 0; g < n_low; g++) low_by_degree[g] = g;
+    std::stable_sort(low_by_degree.begin(), low_by_degree.end(), [&](int a, int b) {
+        return low_exps[a][0] + low_exps[a][1] + low_exps[a][2] < low_exps[b][0] + low_exps[b][1] + low_exps[b][2];
+    });
     std::vector<double> moments(static_cast<size_t>(n_cells) * n_moments, 0.0);
     Kokkos::parallel_for("teno_moments", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n_cells),
                          [&](const uint32_t c) {
@@ -1583,65 +1613,96 @@ void TENO::compute_stencils_and_matrices_3d() {
             for (int k = 0; k < 3; k++) q[k] = p[k] - 2.0 * d * n[k];
             return q;
         };
-        auto scaled_nodes = [&](const Entry & e) {
-            std::vector<Point3> p(mesh->h_n_nodes_of_cell(e.cell));
-            for (size_t k = 0; k < p.size(); k++) {
-                Point3 x = node(mesh->h_node_of_cell(e.cell, k));
-                for (int d = 0; d < 3; d++) x[d] += e.t[d];
-                const Point3 q = mirror(e.face, e.m, x);
-                for (int d = 0; d < 3; d++) p[k][d] = (q[d] - x0[d]) / h;
+        // Moments, about its own centroid, of the image of a cell mirrored across
+        // face f: eta = Q xi with Q = I - 2 n n^T, so eta^g is a homogeneous
+        // polynomial in xi of degree |g|, whose coefficients C(g, b) depend on the
+        // face only
+        std::unordered_map<int32_t, std::vector<double>> reflections;
+        auto reflection = [&](const int32_t f) -> const std::vector<double> & {
+            auto it = reflections.find(f);
+            if (it != reflections.end()) return it->second;
+            const Point3 nf = unit_normal(f);
+            double Q[3][3];
+            for (int a = 0; a < 3; a++) {
+                for (int b = 0; b < 3; b++) Q[a][b] = (a == b ? 1.0 : 0.0) - 2.0 * nf[a] * nf[b];
             }
-            return p;
+            std::vector<double> C(n_low * n_low, 0.0);
+            C[0] = 1.0;
+            for (const int g : low_by_degree) {
+                if (g == 0) continue;
+                const auto & eg = low_exps[g];
+                const int k = eg[0] > 0 ? 0 : (eg[1] > 0 ? 1 : 2);
+                std::array<int, 3> ep = eg;
+                ep[k]--;
+                const int parent = low_index(ep[0], ep[1], ep[2]);
+                for (int b = 0; b < n_low; b++) {
+                    const double c = C[parent * n_low + b];
+                    if (c == 0.0) continue;
+                    for (int j = 0; j < 3; j++) {
+                        std::array<int, 3> eb = low_exps[b];
+                        eb[j]++;
+                        C[g * n_low + low_index(eb[0], eb[1], eb[2])] += c * Q[k][j];
+                    }
+                }
+            }
+            return reflections.emplace(f, std::move(C)).first->second;
+        };
+
+        // Means of the monomials over a cell (or its image) of scaled size s
+        // centered at d in the frame of cell i, from the moments M(a, b, c) of its
+        // own scaled coordinates: ((x - x0) / h)^a = (d + s xi)^a
+        auto binomial_means = [&](const double * dd, const double s, auto && M, const uint8_t n,
+                                  std::vector<double> & means) {
+            double dpow[3][12], spow[12];
+            spow[0] = 1.0;
+            for (int k = 1; k < nm; k++) spow[k] = spow[k - 1] * s;
+            for (int d = 0; d < 3; d++) {
+                dpow[d][0] = 1.0;
+                for (int k = 1; k < nm; k++) dpow[d][k] = dpow[d][k - 1] * dd[d];
+            }
+            for (uint8_t l = 0; l < n; l++) {
+                const auto & ex = expo_all[l];
+                double sum = 0.0;
+                for (int ka = 0; ka <= ex[0]; ka++) {
+                    const double ta = binom[ex[0]][ka] * dpow[0][ex[0] - ka];
+                    for (int kb = 0; kb <= ex[1]; kb++) {
+                        const double tb = ta * binom[ex[1]][kb] * dpow[1][ex[1] - kb];
+                        for (int kc = 0; kc <= ex[2]; kc++) {
+                            sum += tb * binom[ex[2]][kc] * dpow[2][ex[2] - kc] * spow[ka + kb + kc] * M(ka, kb, kc);
+                        }
+                    }
+                }
+                means[l] = sum;
+            }
         };
 
         auto monomial_means = [&](const Entry & e, uint8_t deg, std::vector<double> & means) {
             const uint8_t n = teno::n_dof(deg);
             means.assign(n, 0.0);
+            const double s = std::cbrt(double(mesh->h_cell_volume(e.cell))) / h;
+            const double * m = &moments[static_cast<size_t>(e.cell) * n_moments];
+            Point3 xc;
+            for (int d = 0; d < 3; d++) xc[d] = double(mesh->h_cell_coords(e.cell, d)) + e.t[d];
+            double dd[3];
             if (e.face < 0) {
-                // ((x - x0) / h)^a = (d + s xi)^a with d = (x_c - x0) / h, s = h_c / h
-                const double s = std::cbrt(double(mesh->h_cell_volume(e.cell))) / h;
-                double dpow[3][12], spow[12];
-                spow[0] = 1.0;
-                for (int k = 1; k < nm; k++) spow[k] = spow[k - 1] * s;
-                for (int d = 0; d < 3; d++) {
-                    dpow[d][0] = 1.0;
-                    const double dd = ((double(mesh->h_cell_coords(e.cell, d)) + e.t[d]) - x0[d]) / h;
-                    for (int k = 1; k < nm; k++) dpow[d][k] = dpow[d][k - 1] * dd;
-                }
-                const double * m = &moments[static_cast<size_t>(e.cell) * n_moments];
-                for (uint8_t l = 0; l < n; l++) {
-                    const auto & ex = expo_all[l];
-                    double sum = 0.0;
-                    for (int ka = 0; ka <= ex[0]; ka++) {
-                        const double ta = binom[ex[0]][ka] * dpow[0][ex[0] - ka];
-                        for (int kb = 0; kb <= ex[1]; kb++) {
-                            const double tb = ta * binom[ex[1]][kb] * dpow[1][ex[1] - kb];
-                            for (int kc = 0; kc <= ex[2]; kc++) {
-                                sum += tb * binom[ex[2]][kc] * dpow[2][ex[2] - kc] * spow[ka + kb + kc] *
-                                       m[moment(ka, kb, kc)];
-                            }
-                        }
-                    }
-                    means[l] = sum;
-                }
+                for (int d = 0; d < 3; d++) dd[d] = (xc[d] - x0[d]) / h;
+                binomial_means(dd, s, [&](int a, int b, int c) { return m[moment(a, b, c)]; }, n, means);
                 return;
             }
-            double vol = 0.0;
-            double phi[teno::MAX_NK];
-            integrate_cell(scaled_nodes(e), rule, [&](const Point3 & p, double w) {
-                // teno::monomials from tables of powers, which repeat its products
-                double px[teno::MAX_DEGREE + 1], py[teno::MAX_DEGREE + 1], pz[teno::MAX_DEGREE + 1];
-                px[0] = py[0] = pz[0] = 1.0;
-                for (uint8_t k = 1; k <= deg; k++) {
-                    px[k] = px[k - 1] * p[0];
-                    py[k] = py[k - 1] * p[1];
-                    pz[k] = pz[k - 1] * p[2];
+            const Point3 xm = mirror(e.face, e.m, xc);
+            for (int d = 0; d < 3; d++) dd[d] = (xm[d] - x0[d]) / h;
+            const std::vector<double> & C = reflection(e.face);
+            double eta[MAX_LOW_MOMENTS];
+            for (int g = 0; g < n_low; g++) {
+                const int degree_g = low_exps[g][0] + low_exps[g][1] + low_exps[g][2];
+                double sum = 0.0;
+                for (int b = 0; b < n_low; b++) {
+                    const auto & eb = low_exps[b];
+                    if (eb[0] + eb[1] + eb[2] == degree_g) sum += C[g * n_low + b] * m[moment(eb[0], eb[1], eb[2])];
                 }
-                for (uint8_t l = 0; l < n; l++) phi[l] = px[expo_all[l][0]] * py[expo_all[l][1]] * pz[expo_all[l][2]];
-                for (uint8_t l = 0; l < n; l++) means[l] += w * phi[l];
-                vol += w;
-            });
-            for (uint8_t l = 0; l < n; l++) means[l] /= vol;
+                eta[g] = sum;
+            }
+            binomial_means(dd, s, [&](int a, int b, int c) { return eta[low_index(a, b, c)]; }, n, means);
         };
 
         const Lattice zero = {0, 0, 0};
@@ -2770,7 +2831,8 @@ namespace {
 // Version 3 stores each reconstructed cell's tables at their actual stencil sizes; version 4 gathers
 // candidates by interior cells, version 5 sorts them in the mesh-spacing metric, version 6 follows
 // the round-off-accurate 2D cell centroids, version 7 can hold the pseudo-inverses and
-// smoothness-indicator matrices in single precision
+// smoothness-indicator matrices in single precision and has tables from the faster setup (#140),
+// which differ from version 6 at round-off
 constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-7";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
