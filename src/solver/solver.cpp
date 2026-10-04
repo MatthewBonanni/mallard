@@ -223,6 +223,13 @@ void Solver::init_mesh() {
                         {"Type", type == "file" ? "file " + toml::find_or<std::string>(input, "mesh", "filename",
                                                                                          "mesh.msh")
                                                 : type});
+    const Stretching stretching = mesh_stretching(input);
+    if (stretching != Stretching{}) {
+        if (type == "file") throw InputError("[mesh] stretching applies to generated meshes.");
+        std::string text;
+        FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(stretching[i]));
+        mesh_summary.insert(mesh_summary.begin() + 1, {"Stretching", text + "] (tanh, toward both ends)"});
+    }
     n_cells_global = comm::allreduce(uint64_t(mesh->n_owned()), comm::Op::SUM);
     if (is_distributed()) {
         const uint64_t n_owned = distribution.n_owned;
@@ -492,6 +499,29 @@ void Solver::init_sources() {
         FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(gravity[i]));
         source_summary.emplace_back("Gravity", text + "]");
     }
+    if (source.contains("mass_flow")) {
+        const std::vector<rtype> m = find_real_vector(input, "source", "mass_flow");
+        if (m.size() != N_DIM) {
+            throw InputError("source.mass_flow must have " + std::to_string(N_DIM) + " components.");
+        }
+        rtype norm = 0.0_r;
+        FOR_I_DIM norm += m[i] * m[i];
+        norm = std::sqrt(norm);
+        if (!(norm > 0.0_r) || !std::isfinite(norm)) {
+            throw InputError("source.mass_flow must be a finite, nonzero vector.");
+        }
+        hold_mass_flow = true;
+        mass_flow_target = double(norm);
+        FOR_I_DIM mass_flow_direction[i] = m[i] / norm;
+        double volume = 0.0;
+        for (uint32_t i_cell = 0; i_cell < mesh->n_owned(); i_cell++) {
+            volume += static_cast<double>(mesh->h_cell_volume(i_cell));
+        }
+        domain_volume = comm::allreduce(volume, comm::Op::SUM);
+        std::string text;
+        FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(m[i]));
+        source_summary.emplace_back("Mass flow", text + "] (volume average of rho u), held by a uniform body force");
+    }
     const bool any_expression = source.contains("rho") || source.contains("rhou") || source.contains("rhoE");
     if (!any_expression) {
         return;
@@ -513,6 +543,41 @@ void Solver::init_sources() {
     source_field = StateView("source_field", mesh->n_cells);
     h_source_field = Kokkos::create_mirror_view(source_field);
     source_summary.emplace_back("Source terms", source_time_dependent ? "expressions, time dependent" : "expressions, steady");
+}
+
+void Solver::add_mass_flow_force(StateView solution, StateView rhs) {
+    const uint32_t n_owned = mesh->n_owned();
+    Kokkos::View<rtype *> vol = mesh->cell_volume;
+    Kokkos::Array<rtype, N_DIM> e;
+    FOR_I_DIM e[i] = mass_flow_direction[i];
+    // Along e: the volume integral of rho u and the rate of change of that integral from all other terms
+    double momentum = 0.0, rate = 0.0;
+    Kokkos::parallel_reduce("mass_flow_sums", n_owned,
+                            KOKKOS_LAMBDA(const uint32_t i_cell, double & sum_momentum, double & sum_rate) {
+        rtype m = 0.0_r, r = 0.0_r;
+        FOR_I_DIM {
+            m += solution(i_cell, 1 + i) * e[i];
+            r += rhs(i_cell, 1 + i) * e[i];
+        }
+        sum_momentum += static_cast<double>(m * vol(i_cell));
+        sum_rate += static_cast<double>(r);
+    }, momentum, rate);
+    const std::array<double, 2> sums = comm::allreduce(std::array<double, 2>{momentum, rate}, comm::Op::SUM);
+    // Cancel the other terms, and close the gap to the target within a step
+    double force = -sums[1] / domain_volume;
+    if (dt > 0.0_r) force += (mass_flow_target - sums[0] / domain_volume) / static_cast<double>(dt);
+    mass_flow_force = force;
+    Kokkos::Array<rtype, N_DIM> f;
+    FOR_I_DIM f[i] = static_cast<rtype>(force) * e[i];
+    Kokkos::parallel_for("rhs_mass_flow_force", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
+        const rtype V = vol(i_cell);
+        rtype work = 0.0_r;
+        FOR_I_DIM {
+            rhs(i_cell, 1 + i) += f[i] * V;
+            work += f[i] * solution(i_cell, 1 + i);
+        }
+        rhs(i_cell, N_DIM + 1) += work / solution(i_cell, 0) * V;
+    });
 }
 
 void Solver::update_source_field(rtype t_eval) {

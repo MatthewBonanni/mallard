@@ -51,21 +51,25 @@ void Mesh::init(const toml::value & input) {
     uint32_t Ny = toml::find_or<uint32_t>(input, "mesh", "Ny", 100);
     rtype Lx = find_real_or(input, "mesh", "Lx", 1.0);
     rtype Ly = find_real_or(input, "mesh", "Ly", 1.0);
+    const Stretching stretching = mesh_stretching(input);
     if constexpr (N_DIM == 3) {
         const uint32_t Nz = toml::find_or<uint32_t>(input, "mesh", "Nz", 100);
         const rtype Lz = find_real_or(input, "mesh", "Lz", 1.0);
         if (get_type() == MeshType::CARTESIAN_TRI || get_type() == MeshType::WEDGE) {
             throw std::runtime_error("Mesh type " + type_str + " is 2D only.");
         }
-        this->init_cart_3d(Nx, Ny, Nz, Lx, Ly, Lz, get_type(), periodic);
+        this->init_cart_3d(Nx, Ny, Nz, Lx, Ly, Lz, get_type(), periodic, stretching);
         return;
     }
-    if (!periodic.empty()) {
-        if (get_type() == MeshType::WEDGE) throw std::runtime_error("The wedge mesh cannot be periodic.");
-        if (get_type() != MeshType::CARTESIAN && get_type() != MeshType::CARTESIAN_TRI) {
+    if (!periodic.empty() || stretching != Stretching{}) {
+        if (get_type() == MeshType::WEDGE && !periodic.empty()) {
+            throw std::runtime_error("The wedge mesh cannot be periodic.");
+        }
+        if (get_type() != MeshType::CARTESIAN && get_type() != MeshType::CARTESIAN_TRI &&
+            get_type() != MeshType::WEDGE) {
             throw std::runtime_error("Mesh type " + type_str + " is 3D only.");
         }
-        init_from_block(cartesian_2d_block(Nx, Ny, Lx, Ly, get_type(), 0, 1), periodic);
+        init_from_block(cartesian_2d_block(Nx, Ny, Lx, Ly, get_type(), 0, 1, stretching), periodic);
         return;
     }
     if (get_type() == MeshType::CARTESIAN) {

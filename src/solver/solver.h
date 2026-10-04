@@ -150,6 +150,15 @@ class Solver {
 
         // Public because nvcc rejects device lambdas in non-public member functions
         void update_average_pressure_outlets(StateView solution);
+        /**
+         * @brief Add the uniform body force along the mass flow direction that
+         *        holds the volume average of rho u at its target: it cancels the
+         *        rate of change of that average from all other terms of the RHS
+         *        (integrated over the cells, before division by volume), plus
+         *        the remaining gap divided by the time step. The energy gains
+         *        the force's work.
+         */
+        void add_mass_flow_force(StateView solution, StateView rhs);
         void calc_dt();
         void check_fields();
         void calc_rhs_mixture(State solution, State rhs, rtype t);
@@ -206,6 +215,9 @@ class Solver {
         void set_distributed(bool on) { distribute = on; }
         bool is_distributed() const { return distribute && comm::size() > 1; }
         const Distribution & get_distribution() const { return distribution; }
+
+        /** @brief Body force per unit volume, along the mass flow direction, of the last RHS ([source] mass_flow). */
+        double get_mass_flow_force() const { return mass_flow_force; }
 
         rtype get_time() const { return t; }
         uint32_t get_step() const { return step; }
@@ -290,7 +302,7 @@ class Solver {
         rtype t_stop;
         rtype t_wall_stop;
         bool use_cfl;
-        rtype dt;
+        rtype dt = 0.0;
         rtype dt_fixed = 0.0;
         rtype cfl;
         rtype t;
@@ -403,6 +415,11 @@ class Solver {
         StateView source_field;
         StateView::host_mirror_type h_source_field;
         rtype t_source = -1.0;
+        bool hold_mass_flow = false;
+        double mass_flow_target = 0.0;      // volume average of rho u along the direction
+        rtype mass_flow_direction[N_DIM] = {};
+        double domain_volume = 0.0;
+        double mass_flow_force = 0.0;
 
         // Checks
         uint32_t check_interval;

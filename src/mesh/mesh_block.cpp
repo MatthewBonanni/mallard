@@ -35,7 +35,31 @@ std::array<rtype, 2> wedge_node(rtype x, rtype y, rtype Ly) {
     return {x, y};
 }
 
-MeshBlock cartesian_2d_block(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, MeshType kind, int r, int p) {
+rtype stretched_coordinate(uint32_t i, uint32_t n, rtype L, rtype beta) {
+    if (i == 0) return 0.0_r;
+    if (i == n) return L;
+    const rtype s = 2.0_r * rtype(i) / rtype(n) - 1.0_r;
+    return 0.5_r * L * (1.0_r + std::tanh(beta * s) / std::tanh(beta));
+}
+
+Stretching mesh_stretching(const toml::value & input) {
+    Stretching stretching{};
+    if (!input.contains("mesh") || !input.at("mesh").contains("stretching")) return stretching;
+    const std::vector<rtype> beta = find_real_vector(input, "mesh", "stretching");
+    if (beta.size() != N_DIM) {
+        throw InputError("[mesh] stretching must have " + std::to_string(N_DIM) + " components.");
+    }
+    for (int d = 0; d < N_DIM; d++) {
+        if (!(beta[d] >= 0.0_r) || !std::isfinite(beta[d])) {
+            throw InputError("[mesh] stretching factors must be finite and non-negative.");
+        }
+        stretching[d] = beta[d];
+    }
+    return stretching;
+}
+
+MeshBlock cartesian_2d_block(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, MeshType kind, int r, int p,
+                             const Stretching & stretching) {
     const bool tri = kind == MeshType::CARTESIAN_TRI;
     const uint64_t n_cells = uint64_t(nx) * ny * (tri ? 2 : 1);
     const uint64_t n_nodes = uint64_t(nx + 1) * (ny + 1);
@@ -48,7 +72,8 @@ MeshBlock cartesian_2d_block(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, MeshT
     const rtype dy = Ly / ny;
     for (uint64_t g = block.first_node; g < block_begin(n_nodes, r + 1, p); g++) {
         const uint32_t i = g / (ny + 1), j = g % (ny + 1);
-        std::array<rtype, 2> x = {i * dx, j * dy};
+        std::array<rtype, 2> x = {stretching[0] > 0.0_r ? stretched_coordinate(i, nx, Lx, stretching[0]) : i * dx,
+                                  stretching[1] > 0.0_r ? stretched_coordinate(j, ny, Ly, stretching[1]) : j * dy};
         if (kind == MeshType::WEDGE) x = wedge_node(x[0], x[1], Ly);
         block.node_coords.push_back({double(x[0]), double(x[1])});
     }
@@ -124,23 +149,25 @@ std::array<uint64_t, 2> cartesian_3d_size(uint32_t nx, uint32_t ny, uint32_t nz,
 }
 
 MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rtype Ly, rtype Lz, MeshType kind,
-                             uint64_t first_cell, uint64_t end_cell, uint64_t first_node, uint64_t end_node) {
+                             uint64_t first_cell, uint64_t end_cell, uint64_t first_node, uint64_t end_node,
+                             const Stretching & stretching) {
     const SlabLayout layout(nx, ny, nz, kind);
     const uint64_t n_grid = layout.n_grid_nodes();
     auto grid_node = [&](uint32_t i, uint32_t j, uint32_t k) { return (uint64_t(i) * (ny + 1) + j) * (nz + 1) + k; };
+    const uint32_t n[3] = {nx, ny, nz};
+    const rtype L[3] = {Lx, Ly, Lz};
+    auto node_coordinate = [&](int d, uint32_t i) {
+        return stretching[d] > 0.0_r ? stretched_coordinate(i, n[d], L[d], stretching[d]) : L[d] * i / n[d];
+    };
+    auto center_coordinate = [&](int d, uint32_t i) {
+        return stretching[d] > 0.0_r ? 0.5_r * (node_coordinate(d, i) + node_coordinate(d, i + 1))
+                                     : L[d] * (i + 0.5_r) / n[d];
+    };
     auto grid_coords = [&](uint32_t i, uint32_t j, uint32_t k) {
-        std::array<rtype, 3> p{};
-        p[0] = Lx * i / nx;
-        p[1] = Ly * j / ny;
-        p[2] = Lz * k / nz;
-        return p;
+        return std::array<rtype, 3>{node_coordinate(0, i), node_coordinate(1, j), node_coordinate(2, k)};
     };
     auto apex_coords = [&](uint32_t i, uint32_t j, uint32_t k) {
-        std::array<rtype, 3> p{};
-        p[0] = Lx * (i + 0.5_r) / nx;
-        p[1] = Ly * (j + 0.5_r) / ny;
-        p[2] = Lz * (k + 0.5_r) / nz;
-        return p;
+        return std::array<rtype, 3>{center_coordinate(0, i), center_coordinate(1, j), center_coordinate(2, k)};
     };
     // Pyramid apexes follow the grid nodes, one per pyramid block in (i, j, k) order
     auto apex_node = [&](uint32_t i, uint32_t j, uint32_t k) {
@@ -168,7 +195,6 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
         block.node_coords.push_back(x);
     }
 
-    const rtype L[3] = {Lx, Ly, Lz};
     std::vector<uint64_t> cell;
     auto add = [&](uint64_t g, std::initializer_list<uint64_t> nodes) {
         if (g < first_cell || g >= end_cell) return;
@@ -260,12 +286,12 @@ MeshBlock read_mesh_block(const toml::value & input) {
         const int r = comm::rank(), p = comm::size();
         return cartesian_3d_block(Nx, Ny, Nz, Lx, Ly, Lz, type, block_begin(n_cells, r, p),
                                   block_begin(n_cells, r + 1, p), block_begin(n_nodes, r, p),
-                                  block_begin(n_nodes, r + 1, p));
+                                  block_begin(n_nodes, r + 1, p), mesh_stretching(input));
     }
     if (type != MeshType::CARTESIAN && type != MeshType::CARTESIAN_TRI && type != MeshType::WEDGE) {
         throw std::runtime_error("Mesh type " + type_str + " is 3D only.");
     }
-    return cartesian_2d_block(Nx, Ny, Lx, Ly, type, comm::rank(), comm::size());
+    return cartesian_2d_block(Nx, Ny, Lx, Ly, type, comm::rank(), comm::size(), mesh_stretching(input));
 }
 
 #ifdef Mallard_HAS_HDF5
