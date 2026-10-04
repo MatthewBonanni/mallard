@@ -84,6 +84,7 @@ int Solver::init(const toml::value & input_in) {
     setup.reset();
     timed_phase("fields and output", [&] {
         allocate_memory();
+        statistics.init(input, species_names, mesh->n_cells);
         init_rhs_split();
         init_sources();
         register_data();
@@ -733,6 +734,7 @@ void Solver::init_output() {
             }
         }
     }
+    probes.init(input, *mesh, species_names, toml::find_or<std::string>(input, "initialize", "type", "") == "restart");
     if (!input.contains("write_data")) {
         return;
     }
@@ -860,6 +862,7 @@ void Solver::copy_device_to_host() {
     }
     Kokkos::deep_copy(h_primitives, primitives);
     Kokkos::deep_copy(h_cfl_local, cfl_local);
+    statistics.copy_device_to_host();
     if (p_max.is_allocated()) Kokkos::deep_copy(h_p_max, p_max);
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
         Kokkos::deep_copy(h_teno_sigma, teno->troubled);
@@ -902,6 +905,7 @@ void Solver::register_data() {
         data.push_back(Data(PRIMITIVE_NAMES[i], Kokkos::subview(h_primitives, Kokkos::ALL(), i)));
     }
     data.push_back(Data("CFL", h_cfl_local));
+    statistics.register_data(data);
     if (p_max.is_allocated()) data.push_back(Data("P_MAX", h_p_max));
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
         // Troubled-cell indicator: TENO stencil selection is active where it exceeds the threshold
@@ -916,6 +920,7 @@ std::vector<std::string> Solver::restart_variables() const {
     if (is_mixture()) names.push_back("T_SEED");
     if (reacting) names.push_back("CHEM_H");
     if (p_max.is_allocated()) names.push_back("P_MAX");
+    for (const auto & name : statistics.variables()) names.push_back(name);
     return names;
 }
 
@@ -967,6 +972,7 @@ int Solver::run() {
         copy_device_to_host();
         write_data(true);
         write_integrals();
+        if (probes.due(step)) probes.write(step, t, cell_sampler());
         t_wall_output += output_timer.seconds();
     }
     std::string stop;
@@ -983,6 +989,7 @@ int Solver::run() {
             halo_current = false;
         }
         if (p_max.is_allocated()) update_p_max();
+        sample_statistics_and_probes();
         check_fields();
         t_wall_stepping += step_timer.seconds();
         if (step % check_interval == 0) {
@@ -1023,7 +1030,8 @@ bool Solver::state_needed() const {
     for (const auto & monitor : force_monitors) {
         if (step % monitor.interval == 0) return true;
     }
-    return integral_monitor.interval > 0 && step % integral_monitor.interval == 0;
+    return (integral_monitor.interval > 0 && step % integral_monitor.interval == 0) || statistics.due(step, t) ||
+           probes.due(step);
 }
 
 double Solver::progress() const {
@@ -1143,6 +1151,8 @@ void Solver::print_setup() const {
         logging::item("integrals", integral_monitor.file + " every " + logging::count(integral_monitor.interval) +
                                        " steps");
     }
+    if (statistics.enabled()) logging::item("statistics", statistics.summary());
+    logging::items(probes.summary());
 }
 
 void Solver::print_summary(const std::string & stop) const {
@@ -1176,6 +1186,7 @@ void Solver::print_summary(const std::string & stop) const {
     }
     for (const auto & monitor : force_monitors) add(monitor.file);
     if (integral_monitor.interval > 0) add(integral_monitor.file);
+    for (const auto & file : probes.files()) add(file);
     if (!files.empty()) logging::item("Files", files);
 }
 
@@ -1219,9 +1230,18 @@ void Solver::write_data(bool force) {
     }
     update_primitives();
     copy_device_to_host();
+    const RestartAttributes attributes = statistics.attributes();
     for (auto & writer : data_writers) {
-        writer->write(step, t, force);
+        writer->write(step, t, force, attributes);
     }
+}
+
+void Solver::sample_statistics_and_probes() {
+    const bool sample = statistics.due(step, t);
+    if (!sample && !probes.due(step)) return;
+    update_primitives();
+    if (sample) statistics.sample(t, cell_sampler(), mesh->n_owned());
+    if (probes.due(step)) probes.write(step, t, cell_sampler());
 }
 
 void Solver::take_step() {

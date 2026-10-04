@@ -28,6 +28,7 @@ add_library(MallardCore STATIC
     solver/solver_initialize.cpp
     solver/solver_mixture.cpp
     solver/solver_rhs.cpp
+    solver/statistics.cpp
     io/data_writer.cpp
     parallel/comm.cpp
     parallel/distribution.cpp
