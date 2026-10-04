@@ -260,38 +260,37 @@ struct MixtureDiagnosticsFunctor {
  */
 class CompositionExpressions {
     public:
-        CompositionExpressions(const MixtureModel & model, const toml::value & table, const std::string & where) :
-            model(model) {
+        CompositionExpressions(const MixtureModel & mixture_model, const toml::value & table, const std::string & name) :
+            mixture(mixture_model), where(name) {
             if (table.contains("X") == table.contains("Y")) {
                 throw InputError(where + ": give the composition as exactly one of X and Y.");
             }
             mole = table.contains("X");
             const std::string key = mole ? "X" : "Y";
             if (!table.at(key).is_table()) throw InputError(where + "." + key + " must be a table of species.");
-            for (const auto & [name, value] : table.at(key).as_table()) {
-                const int32_t k = model.mechanism().species_index(name);
-                if (k < 0) throw InputError(where + "." + key + ": no species " + name + " in the mechanism.");
+            for (const auto & [species, value] : table.at(key).as_table()) {
+                const int32_t k = mixture.mechanism().species_index(species);
+                if (k < 0) throw InputError(where + "." + key + ": no species " + species + " in the mechanism.");
                 listed.push_back(k);
                 std::ostringstream text;
                 if (value.is_string()) {
                     text << value.as_string();
                 } else {
-                    text << std::setprecision(17) << static_cast<double>(as_real(value, name));
+                    text << std::setprecision(17) << static_cast<double>(as_real(value, species));
                 }
-                values.emplace_back(where + "." + key + "." + name, text.str());
+                values.emplace_back(where + "." + key + "." + species, text.str());
             }
             if (table.contains("balance")) {
-                const std::string name = toml::find<std::string>(table, "balance");
-                balance = model.mechanism().species_index(name);
-                if (balance < 0) throw InputError(where + ".balance: no species " + name + " in the mechanism.");
+                const std::string species = toml::find<std::string>(table, "balance");
+                balance = mixture.mechanism().species_index(species);
+                if (balance < 0) throw InputError(where + ".balance: no species " + species + " in the mechanism.");
             }
-            this->where = where;
         }
 
         /** @brief Mass fractions at the point with coordinates x[0..N_DIM). */
         template <typename T>
         std::vector<double> mass_fractions(const T & x) const {
-            std::vector<double> f(model.n_species(), 0.0);
+            std::vector<double> f(mixture.n_species(), 0.0);
             double sum = 0.0;
             for (size_t i = 0; i < listed.size(); i++) {
                 f[listed[i]] = std::max(values[i].at(x, N_DIM), 0.0);
@@ -303,11 +302,11 @@ class CompositionExpressions {
             }
             if (!(sum > 0.0)) throw InputError(where + ": the composition is zero at a face.");
             for (double & v : f) v /= sum;
-            return mole ? model.mass_fractions_from_mole(f) : f;
+            return mole ? mixture.mass_fractions_from_mole(f) : f;
         }
 
     private:
-        const MixtureModel & model;
+        const MixtureModel & mixture;
         std::string where;
         bool mole = false;
         int32_t balance = -1;
