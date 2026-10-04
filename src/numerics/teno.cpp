@@ -705,6 +705,19 @@ void TENO::init(const toml::value & input) {
     quadrature_face = GaussLegendre(n_gp);
     if constexpr (N_DIM == 3) init_face_quadrature_3d(order);
 
+    if (mesh->axisymmetric) {
+        // Exact to degree >= the reconstruction's, for the geometric source
+        const TriangleRule rule((degree + 3) / 2);
+        cell_rule = Kokkos::View<rtype *[3]>("teno_cell_rule", rule.w.size());
+        auto h_rule = Kokkos::create_mirror_view(cell_rule);
+        for (size_t q = 0; q < rule.w.size(); q++) {
+            h_rule(q, 0) = rule.xi[q];
+            h_rule(q, 1) = rule.eta[q];
+            h_rule(q, 2) = rule.w[q];
+        }
+        Kokkos::deep_copy(cell_rule, h_rule);
+    }
+
     cache_loaded = !cache_file.empty() && load_cache();
     if (!cache_loaded) compute_stencils_and_matrices();
     allocate_scratch();
@@ -760,6 +773,7 @@ void TENO::compute_stencils_and_matrices() {
     auto h_bcs = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.bcs);
 
     const TriangleRule rule(r + 2);
+    const bool axisymmetric = mesh->axisymmetric;
     uint32_t n_failed_large = 0;
     uint32_t n_invalid_small = 0;
 
@@ -813,6 +827,9 @@ void TENO::compute_stencils_and_matrices() {
             double phi[teno::MAX_NK];
             integrate_polygon(px, py, rule, [&](double x, double y, double w) {
                 teno::monomials(deg, x, y, phi);
+                // Axisymmetric cell averages weight by the radius; |r| makes the
+                // mirror image of a cell across the axis carry its mirrored average
+                if (axisymmetric) w *= std::abs(y0 + h * y);
                 for (uint8_t l = 0; l < n; l++) means[l] += w * phi[l];
                 area += w;
             });
@@ -2153,6 +2170,91 @@ struct TENOFunctor {
 
     uint32_t stride = 0;  // threads of each troubled pass, which loop over the queue
 
+    // SourcePass (axisymmetric runs)
+    struct SourcePass {};
+    Kokkos::View<uint32_t *> offsets_nodes_of_cell{};
+    Kokkos::View<uint32_t *> nodes_of_cell{};
+    Kokkos::View<rtype *[3]> cell_rule{};              // (q, [xi, eta, w]) on the reference triangle
+    Kokkos::View<rtype *, Kokkos::LayoutStride> mu{};  // (cell), empty if inviscid
+    Kokkos::View<rtype *> source{};
+
+    /**
+     * @brief Geometric source int (p - tau_thetatheta) dA of a smooth cell
+     *        from its central polynomial at the points of cell_rule on a fan
+     *        of triangles. Troubled cells, and cells whose polynomial is not
+     *        admissible at a point, keep the source they have.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void operator()(SourcePass, const uint32_t i_cell) const {
+        if constexpr (N_DIM == 2) {
+            constexpr uint8_t E = N_DIM + 1;
+            if (sigma_out(i_cell) >= sigma_threshold) return;
+            rtype U0[N_CONSERVATIVE];
+            conservatives(i_cell, U0);
+            rtype aK[NK][N_CONSERVATIVE] = {};
+            const teno::PackedStencils::Row stencil = stencil_large.row(i_cell);
+            for (uint16_t s = 0; s < stencil_large_size(i_cell); s++) {
+                rtype U[N_CONSERVATIVE];
+                entry_conservatives(stencil.cell(s), stencil.face(s), U);
+                for (uint8_t l = 0; l < NK; l++) {
+                    const rtype P = stencil.pinv<NK>(s, l);
+                    FOR_I_CONSERVATIVE aK[l][i] += P * (U[i] - U0[i]);
+                }
+            }
+            const rtype h = scale(i_cell);
+            const rtype xc = cell_coords(i_cell, 0), yc = cell_coords(i_cell, 1);
+            const bool viscous = mu.extent(0) > 0;
+            const uint32_t begin = offsets_nodes_of_cell(i_cell);
+            const uint32_t n_nodes = offsets_nodes_of_cell(i_cell + 1) - begin;
+            const uint32_t n0 = nodes_of_cell(begin);
+            const rtype x0 = node_coords(n0, 0), y0 = node_coords(n0, 1);
+            rtype sum = 0.0_r;
+            for (uint32_t k = 1; k + 1 < n_nodes; k++) {
+                const uint32_t na = nodes_of_cell(begin + k), nb = nodes_of_cell(begin + k + 1);
+                const rtype ax = node_coords(na, 0) - x0, ay = node_coords(na, 1) - y0;
+                const rtype bx = node_coords(nb, 0) - x0, by = node_coords(nb, 1) - y0;
+                const rtype det = Kokkos::fabs(ax * by - ay * bx);
+                for (uint32_t q = 0; q < cell_rule.extent(0); q++) {
+                    const rtype x = x0 + cell_rule(q, 0) * ax + cell_rule(q, 1) * bx;
+                    const rtype y = y0 + cell_rule(q, 0) * ay + cell_rule(q, 1) * by;
+                    const rtype xi = (x - xc) / h, eta = (y - yc) / h;
+                    rtype psi[NK];
+                    teno::monomials(DEG, xi, eta, psi);
+                    rtype U[N_CONSERVATIVE];
+                    FOR_I_CONSERVATIVE U[i] = U0[i];
+                    for (uint8_t l = 0; l < NK; l++) {
+                        FOR_I_CONSERVATIVE U[i] += aK[l][i] * (psi[l] - basis_mean(i_cell, l));
+                    }
+                    rtype Wq[N_CONSERVATIVE];
+                    to_primitives(U, Wq);
+                    if (!(Wq[0] > 0.0_r && Wq[E] > 0.0_r)) return;
+                    rtype p_eff = Wq[E];
+                    if (viscous) {
+                        rtype d_xi[NK], d_eta[NK];
+                        teno::monomial_gradients(DEG, xi, eta, d_xi, d_eta);
+                        rtype dU[N_CONSERVATIVE][N_DIM] = {};
+                        for (uint8_t l = 0; l < NK; l++) {
+                            FOR_I_CONSERVATIVE {
+                                dU[i][0] += aK[l][i] * d_xi[l];
+                                dU[i][1] += aK[l][i] * d_eta[l];
+                            }
+                        }
+                        // du_x/dx and du_r/dr, from the conservative variables unless PRIM
+                        rtype g00 = dU[1][0] / h, g11 = dU[2][1] / h;
+                        if constexpr (!PRIM) {
+                            g00 = (dU[1][0] - Wq[1] * dU[0][0]) / (Wq[0] * h);
+                            g11 = (dU[2][1] - Wq[2] * dU[0][1]) / (Wq[0] * h);
+                        }
+                        const rtype hoop = Wq[2] / y;
+                        p_eff -= mu(i_cell) * (2.0_r * hoop - 2.0_r / 3.0_r * (g00 + g11 + hoop));
+                    }
+                    sum += cell_rule(q, 2) * det * p_eff;
+                }
+            }
+            source(i_cell) = sum;
+        }
+    }
+
     KOKKOS_INLINE_FUNCTION
     void operator()(TroubledSectorPass, const uint32_t t) const {
         const uint32_t n = n_troubled() * teno::MAX_FACES;
@@ -2350,6 +2452,44 @@ void TENO::launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                     si_matrix, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells, n_troubled,
                     solution, {}, {}, gradients, cell_gamma, cell_molar_mass, selection};
     Kokkos::parallel_for("teno_gradients", Kokkos::RangePolicy<typename Functor::GradientPass>(0, n_cells), functor);
+}
+
+template <uint8_t DEG, bool PRIM>
+void TENO::launch_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<rtype *, Kokkos::LayoutStride> mu,
+                         Kokkos::View<rtype *> source, const uint32_t n_cells) {
+    using Functor = TENOFunctor<DEG, PRIM>;
+    Functor functor{sigma_threshold, sigma_upper, C_T, characteristic, bound_preserving, boundaries.gamma,
+                    mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
+                    mesh->offsets_nodes_of_face, mesh->nodes_of_face, mesh->node_coords,
+                    mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->shifts, mesh->face_shift,
+                    quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
+                    scale, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
+                    si_matrix, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells, n_troubled,
+                    solution, {}, {}, {}, cell_gamma, cell_molar_mass, selection};
+    functor.offsets_nodes_of_cell = mesh->offsets_nodes_of_cell;
+    functor.nodes_of_cell = mesh->nodes_of_cell;
+    functor.cell_rule = cell_rule;
+    functor.mu = mu;
+    functor.source = source;
+    Kokkos::parallel_for("teno_axisymmetric_source", Kokkos::RangePolicy<typename Functor::SourcePass>(0, n_cells),
+                         functor);
+}
+
+void TENO::axisymmetric_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                               Kokkos::View<rtype *, Kokkos::LayoutStride> mu, Kokkos::View<rtype *> source,
+                               const uint32_t n_cells) {
+    if (!mesh->axisymmetric) return;
+    switch (degree * 2 + primitive) {
+        case 4: launch_source<2, false>(solution, mu, source, n_cells); break;
+        case 6: launch_source<3, false>(solution, mu, source, n_cells); break;
+        case 8: launch_source<4, false>(solution, mu, source, n_cells); break;
+        case 10: launch_source<5, false>(solution, mu, source, n_cells); break;
+        case 5: launch_source<2, true>(solution, mu, source, n_cells); break;
+        case 7: launch_source<3, true>(solution, mu, source, n_cells); break;
+        case 9: launch_source<4, true>(solution, mu, source, n_cells); break;
+        case 11: launch_source<5, true>(solution, mu, source, n_cells); break;
+        default: throw std::runtime_error("TENO: unsupported degree.");
+    }
 }
 
 void TENO::set_mixture(Kokkos::View<rtype *, Kokkos::LayoutStride> gamma, Kokkos::View<rtype *> molar_mass) {
@@ -2595,6 +2735,8 @@ uint64_t TENO::cache_key() const {
     hash.add(h_face_bc.data(), h_face_bc.span() * sizeof(int32_t));
     auto h_bcs = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.bcs);
     for (size_t b = 0; b < h_bcs.extent(0); b++) hash.add(h_bcs(b).type);
+    // Axisymmetric meshes have r-weighted moments and revolved centroids
+    if (mesh->axisymmetric) hash.add(uint8_t(1));
     if (mesh->is_periodic()) {
         hash.add(mesh->h_shifts.data(), mesh->h_shifts.span() * sizeof(rtype));
         hash.add(mesh->h_face_shift.data(), mesh->h_face_shift.span() * sizeof(uint8_t));

@@ -155,6 +155,12 @@ class Solver {
         void calc_dt();
         void check_fields();
         void calc_rhs_mixture(State solution, State rhs, rtype t);
+        /**
+         * @brief Axisymmetric runs: add geometric_source, made high order by the
+         *        reconstruction where it can (mu: cell viscosities, empty if inviscid),
+         *        to the radial momentum of owned cells.
+         */
+        void add_geometric_source(StateView rhs, Kokkos::View<rtype *, Kokkos::LayoutStride> mu);
         void update_primitives_mixture();
         void init_temperature_seed();
         rtype calc_dt_cfl1_mixture();
@@ -272,6 +278,7 @@ class Solver {
         int base_halo_layers() const;
         bool halo_too_shallow();
         void init_rhs_split();
+        void init_axisymmetric_weights();
 
         template <typename T_riemann_solver>
         void launch_flux_functor();
@@ -345,6 +352,15 @@ class Solver {
         RiemannSolverType riemann_solver_type;
         rtype low_mach_cutoff = 0.1;
         std::unique_ptr<TimeIntegrator> time_integrator;
+
+        // Axisymmetric runs (see docs/design/axisymmetric.md)
+        bool axisymmetric = false;
+        Kokkos::View<rtype *> geometric_source;  // (cell): int (p - tau_thetatheta) dA, the radial momentum source
+        Kokkos::View<rtype *> cell_mu;           // (cell): viscosity, viscous single gases
+
+        // Weights of the convective flux points, (face, q): 3D faces, and 2D Gauss
+        // weights times the radius in axisymmetric runs; empty for planar 2D runs
+        Kokkos::View<rtype **> flux_weights;
 
         // Work arrays
         Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
