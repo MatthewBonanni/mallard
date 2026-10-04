@@ -235,7 +235,7 @@ TEST(MixtureTest, UptCompositionExpressionsGiveAStratifiedInflow) {
     for (uint32_t c = 0; c < solver.get_mesh()->n_cells; c++) {
         const double rho = double(solver.h_conservatives(c, 0));
         const double y = double(solver.get_mesh()->h_cell_coords(c, 1));
-        EXPECT_NEAR(double(solver.h_species(c, 1)) / rho, 0.8 * y * y, 1e-6);
+        EXPECT_NEAR(double(solver.h_species(c, 1)) / rho, 0.8 * y * y, tol(1e-6, 1e-5));
         EXPECT_NEAR(double(solver.h_primitives(c, N_DIM)), 1.0e5, tol(1e-8, 1e-3));
     }
 
