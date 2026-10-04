@@ -12,6 +12,7 @@
 #ifndef SOLVER_H
 #define SOLVER_H
 
+#include <array>
 #include <fstream>
 #include <functional>
 #include <memory>
@@ -30,6 +31,7 @@
 #include "cell_chemistry.h"
 #include "scalar_reconstruction.h"
 #include "data_writer.h"
+#include "statistics.h"
 #include "expression.h"
 #include "comm.h"
 #include "distributed_mesh.h"
@@ -220,6 +222,7 @@ class Solver {
         double get_mass_flow_force() const { return mass_flow_force; }
 
         rtype get_time() const { return t; }
+        const Statistics & get_statistics() const { return statistics; }
         uint32_t get_step() const { return step; }
         const Euler & get_physics() const { return physics; }
         std::shared_ptr<Mesh> get_mesh() const { return mesh; }
@@ -267,6 +270,8 @@ class Solver {
         void write_data(bool force = false);
         void write_forces();
         void write_integrals();
+        void write_probes();
+        CellSampler cell_sampler() const { return CellSampler{conservatives, species, primitives}; }
 
     private:
         bool distribute = true;
@@ -287,6 +292,7 @@ class Solver {
         template <typename T_riemann_solver>
         void launch_double_flux_functor();
         void init_mixture_boundaries(const std::vector<toml::value> & input_boundaries,
+                                     const std::vector<std::array<uint32_t, 2>> & profiled_faces,
                                      std::vector<BoundaryCondition> & bcs);
 
         Kokkos::View<uint32_t *> rhs_cells;  // reconstructed cells, the n_early_cells independent of the halo first
@@ -430,6 +436,8 @@ class Solver {
         std::vector<std::unique_ptr<DataWriter>> data_writers;
         std::vector<ForceMonitor> force_monitors;
         IntegralMonitor integral_monitor;
+        Statistics statistics;
+        Probes probes;
 };
 
 #endif // SOLVER_H
