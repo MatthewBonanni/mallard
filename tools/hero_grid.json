@@ -1,169 +1,59 @@
 {
+ "_inputs": "Paths are relative to the directory the script runs in; the README animation was made in ~/local/mallard-runs/hero2 (outside the repository): double_mach = the double Mach example's snapshots at Nx = 1920, Ny = 480; detonation_2d = examples/detonation_2d's snapshots; tgv_frames and sphere_frames = the 3D views cropped from the 1920x1080 animations of tools/animate_taylor_green.py --full-box (examples/taylor_green_3d/input_periodic.toml, Nx = 128; frames resampled to uniform t) and tools/animate_sphere_re300.py (examples/sphere_re300), one PNG per frame with a times.txt; tgv_eps.csv and tgv_eps_dns.csv = -dE/dt of that run's integrals.csv and of the 512^3 spectral DNS, CSV with columns t,y. To use another rendering of a 3D case, replace its frames directory.",
  "width": 6,
  "dpi": 300,
  "fps": 30,
- "footer": "Mallard  |  TENO5-E finite volume  |  2D: 1.8M triangles, 1M and 500k quads  |  3D: 262k hexahedra  |  Euler and Navier-Stokes",
+ "background": "#0b1014",
+ "footer": "Mallard  |  TENO5-E and MUSCL finite volume  |  finite-rate chemistry  |  2D: 1.2M quads, 1.8M triangles  |  3D: 2.1M hexahedra, 0.85M prisms and tetrahedra",
  "rows": [
   [
    {
-    "series": "examples/double_mach/solut",
-    "title": "Double Mach reflection, Mach 10",
-    "xlim": [
-     0,
-     3
-    ]
+    "type": "detonation",
+    "series": "detonation_2d/cell.pvd",
+    "xlim": [0.095, 0.44],
+    "p_range": [8, 30],
+    "title": "Cellular detonation in 2H2-O2-7Ar: pressure and numerical soot foil",
+    "show_time": false
    },
    {
     "type": "frames",
-    "series": "examples/taylor_green_3d/frames",
-    "title": "Taylor-Green vortex, Re = 1600, 3D"
+    "series": "tgv_frames",
+    "title": "Taylor-Green vortex, Re = 1600"
    }
   ],
   [
    {
-    "series": "examples/riemann_2d_quads/solut",
-    "title": "2D Riemann problem"
+    "series": "double_mach",
+    "glob": "dmr_*.vtu",
+    "title": "Double Mach reflection, Mach 10",
+    "xlim": [0, 3]
    },
    {
-    "series": "examples/viscous_shock_tube/solut",
-    "glob": "vst_*.vtu",
-    "title": "Viscous shock tube, Re = 200",
-    "xlim": [
-     0.45,
-     1.0
-    ],
-    "interp": "linear",
-    "ylim": [
-     0,
-     0.5
-    ]
-   },
-   {
-    "type": "wall",
-    "series": "examples/viscous_shock_tube/solut",
-    "glob": "vst_*.vtu",
-    "title": "Shock tube wall density",
-    "xlim": [
-     0.45,
-     1.0
-    ],
-    "ylim": [
-     0,
-     135
-    ],
-    "aspect": 1.1,
-    "xlabel": "x",
-    "reference": {
-     "label": "Zhou et al. 2018, t = 1",
-     "points": [
-      [
-       0.303,
-       39.8418
-      ],
-      [
-       0.449,
-       37.0662
-      ],
-      [
-       0.523,
-       52.6465
-      ],
-      [
-       0.573,
-       42.44
-      ],
-      [
-       0.593,
-       40.5506
-      ],
-      [
-       0.6123,
-       47.3367
-      ],
-      [
-       0.637,
-       39.3203
-      ],
-      [
-       0.6577,
-       36.9558
-      ],
-      [
-       0.683,
-       49.6513
-      ],
-      [
-       0.707,
-       77.981
-      ],
-      [
-       0.7317,
-       108.3916
-      ],
-      [
-       0.7543,
-       92.576
-      ],
-      [
-       0.779,
-       64.5319
-      ],
-      [
-       0.7957,
-       59.4386
-      ],
-      [
-       0.8183,
-       95.3607
-      ],
-      [
-       0.8617,
-       117.6452
-      ],
-      [
-       0.9437,
-       96.4287
-      ],
-      [
-       0.967,
-       98.2689
-      ],
-      [
-       0.9883,
-       81.8465
-      ],
-      [
-       0.9943,
-       82.7077
-      ]
-     ]
-    },
-    "legend_loc": "lower right"
+    "type": "frames",
+    "series": "sphere_frames",
+    "title": "Sphere wake, Re = 300",
+    "show_time": false
    },
    {
     "type": "curve",
-    "data": "examples/taylor_green_3d/eps.csv",
-    "t_end": 19.9,
-    "title": "TGV dissipation rate",
+    "data": "tgv_eps.csv",
+    "t_end": 20.0,
+    "title": "TGV dissipation vs DNS",
     "label": "Mallard",
     "reference": {
-     "label": "spectral DNS, 512\u00b3",
-     "file": "examples/taylor_green_3d/eps_dns.csv"
+     "label": "DNS 512³",
+     "file": "tgv_eps_dns.csv"
     },
-    "xlim": [
-     0,
-     20
-    ],
-    "ylim": [
-     0,
-     0.0175
-    ],
+    "xlim": [0, 20],
+    "ylim": [0, 0.02],
     "xlabel": "t",
-    "aspect": 1.1,
+    "aspect": 1.45,
+    "legend_loc": "upper right",
     "margin_left": 0.25
    }
   ]
  ],
  "gif_width": 1500,
- "gif_colors": 64
+ "gif_colors": 96,
+ "mp4_width": 1920
 }
