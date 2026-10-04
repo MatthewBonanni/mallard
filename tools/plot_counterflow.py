@@ -1,22 +1,24 @@
 """Counterflow diffusion flame runs (V10) against Cantera.
 
     python tools/plot_counterflow.py OUT_PREFIX --run LABEL RUN_DIR [--run ...]
-        [--reference examples/counterflow_diffusion/reference] [--history]
+        [--reference examples/counterflow_diffusion/reference] [--history] [--still RADIUS]
 
 Each RUN_DIR holds a run of tools/counterflow_setup.py; its symmetry-plane
 output (solut/plane_*.vtu) gives the stagnation line: the cells next to the
 axis, extrapolated to r = 0 with the cells one further out (f = f0 + b r^2).
 On it: the peak temperature (parabola through the hottest cell and its
-neighbors) and the local strain rates K_ox and K_f (the largest -du/dx on the
-oxidizer side of the peak temperature and on the fuel side of the stagnation
-point), as tools/counterflow_reference.py measures Cantera's.
+neighbors) and the local strain rates K_ox and K_f (the first maximum of
+-du/dx going from each nozzle towards the flame), as
+tools/counterflow_reference.py measures Cantera's.
 
 Writes OUT_PREFIX_strain.png (peak T against K_ox: Cantera's sweep up to
 extinction, and the runs), OUT_PREFIX_profiles.png (T, u and major species
 along the stagnation line against Cantera's flame of the same K_ox, from
 reference/K<K_ox>.csv written by counterflow_reference.py --match, aligned
-at the peak temperature) and, with --history, OUT_PREFIX_history.png (peak T
-and K_ox over time), and prints the comparison table.
+at the peak temperature), with --history OUT_PREFIX_history.png (peak T
+and K_ox over time) and with --still OUT_PREFIX_still.png (the first run's
+temperature on the symmetry plane, with streamlines), and prints the
+comparison table.
 """
 import argparse
 import glob
@@ -45,11 +47,18 @@ def peak(x, T):
     return np.polyval(c, xm), x[i] + xm
 
 
-def local_strains(x, u, T):
-    dudx = np.gradient(u, x)
-    i_T = np.argmax(T)
-    i_s = np.argmin(np.abs(u[: i_T + 1]))
-    return np.max(-dudx[i_T:]), np.max(-dudx[: max(i_s, 1)])
+def local_strains(z, u):
+    """K_ox, K_f: the local strain rates ahead of the flame, the first maxima
+    of -du/dz met going from each nozzle towards the flame (before the
+    flame's dilatation reverses the gradient)."""
+    g = -np.gradient(u, z)
+    i = g.size - 1
+    while i > 0 and g[i - 1] >= g[i]:
+        i -= 1
+    j = 0
+    while j < g.size - 1 and g[j + 1] >= g[j]:
+        j += 1
+    return g[i], g[j]
 
 
 def stagnation_line(path):
@@ -86,8 +95,51 @@ def run_series(run_dir):
 
 def measure(line):
     T_max, x_T = peak(line["x"], line["T"])
-    K_ox, K_f = local_strains(line["x"], line["U"], line["T"])
+    K_ox, K_f = local_strains(line["x"], line["U"])
     return T_max, x_T, K_ox, K_f
+
+
+def still(path, out, radius=None):
+    """Temperature on the symmetry plane z = 0 mirrored about the axis, with
+    streamlines and heat release contours."""
+    from scipy.interpolate import RegularGridInterpolator
+    pts, conn, offs, _, arrays = read_vtu_cells(path)
+    c = pts[conn.reshape(-1, 4)].mean(axis=1)
+    xs, ys = np.unique(np.round(c[:, 0], 12)), np.unique(np.round(c[:, 1], 12))
+    i = np.searchsorted(xs, np.round(c[:, 0], 12))
+    j = np.searchsorted(ys, np.round(c[:, 1], 12))
+    grid = {}
+    for name in ["T", "HRR"]:
+        g = np.empty((xs.size, ys.size))
+        g[i, j] = arrays[name]
+        grid[name] = g
+    for k, name in enumerate(["ux", "uy"]):
+        g = np.empty((xs.size, ys.size))
+        g[i, j] = arrays["U"][:, k]
+        grid[name] = g
+    # mirror to y < 0 (u_y odd) and resample on a uniform grid for streamplot
+    ym = np.concatenate([-ys[::-1], ys])
+    mirror = lambda g, sign=1.0: np.concatenate([sign * g[:, ::-1], g], axis=1)
+    xu = np.linspace(xs[0], xs[-1], 400)
+    yu = np.linspace(ym[0], ym[-1], 2 * int(400 * ys[-1] / xs[-1]))
+    X, Y = np.meshgrid(xu, yu, indexing="ij")
+    q = np.column_stack([X.ravel(), Y.ravel()])
+    f = {n: RegularGridInterpolator((xs, ym), mirror(g, -1.0 if n == "uy" else 1.0), bounds_error=False,
+                                    fill_value=None)(q).reshape(X.shape) for n, g in grid.items()}
+    fig, ax = plt.subplots(figsize=(7.2, 7.2 * ym[-1] / xs[-1] + 0.6))
+    im = ax.pcolormesh(Y.T * 1e3, X.T * 1e3, f["T"].T, cmap="inferno", shading="gouraud", rasterized=True)
+    ax.streamplot(yu * 1e3, xu * 1e3, f["uy"], f["ux"], color="w", linewidth=0.5, density=1.4, arrowsize=0.6)
+    ax.contour(Y.T * 1e3, X.T * 1e3, f["HRR"].T, levels=[0.1 * f["HRR"].max()], colors="c", linewidths=0.8)
+    if radius:
+        for xn in (xs[0], xs[-1]):
+            ax.plot([-radius * 1e3, radius * 1e3], [xn * 1e3] * 2, "c-", lw=4, solid_capstyle="butt")
+    ax.set_aspect("equal")
+    ax.set_xlabel("r [mm] (symmetry plane, mirrored)")
+    ax.set_ylabel("x [mm] (fuel nozzle at x = 0)")
+    fig.colorbar(im, ax=ax, label="T [K]", shrink=0.8)
+    ax.set_title(f"H$_2$/N$_2$ (bottom) against air (top), t = {arrays['TIME'] * 1e3:.2f} ms", fontsize=10)
+    fig.tight_layout()
+    fig.savefig(out, dpi=150)
 
 
 def load_reference(path):
@@ -105,7 +157,11 @@ def main():
     ap.add_argument("--reference", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                                         "examples", "counterflow_diffusion", "reference"))
     ap.add_argument("--history", action="store_true")
+    ap.add_argument("--still", metavar="RADIUS", type=float,
+                    help="also OUT_PREFIX_still.png: the first run's last plane, nozzles of this radius marked")
     args = ap.parse_args()
+    if args.still:
+        still(run_series(args.run[0][1])[-1], args.out + "_still.png", args.still)
 
     sweep = np.genfromtxt(os.path.join(args.reference, "strain.csv"), delimiter=",", names=True, skip_header=1)
     K_ref, T_ref = sweep["K_ox"], sweep["T_max"]

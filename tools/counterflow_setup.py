@@ -6,7 +6,8 @@
 
 PROFILE.csv is Cantera's solution at the run's nozzle velocities from
 tools/counterflow_reference.py --profile (z from the fuel nozzle, u, spread
-rate V, T, rho, Y), whose header gives the velocities.
+rate V, T, rho, Y), whose header gives the velocities; --u-ox runs other
+velocities from it (e.g. above Cantera's extinction, from a burning flame).
 
 The run is a quarter of two opposed round jets: x from the fuel nozzle
 (x = 0) to the oxidizer nozzle (x = L, Cantera's gap), y and z from the
@@ -122,6 +123,8 @@ def main():
     ap.add_argument("--outputs", type=int, default=60)
     ap.add_argument("--restarts", type=int, default=10)
     ap.add_argument("--cfl", type=float, default=0.8)
+    ap.add_argument("--u-ox", type=float,
+                    help="oxidizer nozzle velocity of the run (the fuel's in the profile's ratio); default the profile's")
     args = ap.parse_args()
 
     with open(args.profile) as f:
@@ -130,6 +133,10 @@ def main():
     U_o = float(re.search(r"U_o = ([0-9.eE+-]+)", header).group(1))
     U_f = float(re.search(r"U_f = ([0-9.eE+-]+)", header).group(1))
     K_ox = float(re.search(r"K_ox = ([0-9.eE+-]+)", header).group(1))
+    if args.u_ox:
+        U_f *= args.u_ox / U_o
+        K_ox *= args.u_ox / U_o
+        U_o = args.u_ox
     data = np.loadtxt(args.profile, delimiter=",", skiprows=2)
     z, u, V, T, rho = (data[:, i] for i in range(5))
     species = [n[2:] for n in names[5:]]
@@ -202,8 +209,8 @@ def main():
     jet = f"y * y + z * z < {R2}"
     coflow = f"y * y + z * z >= {R2}"
     with open(os.path.join(args.run_dir, "input.toml"), "w") as f:
-        f.write(f"""# Counterflow diffusion flame (V10): {os.path.basename(args.profile)}, U_o = {U_o:.6g} m/s,
-# U_f = {U_f:.6g} m/s, Cantera K_ox = {K_ox:.6g} 1/s; {nx} x {nr} x {nr} = {n} hexahedra,
+        f.write(f"""# Counterflow diffusion flame (V10) from {os.path.basename(args.profile)}: U_o = {U_o:.6g} m/s,
+# U_f = {U_f:.6g} m/s, K_ox = {K_ox:.6g} 1/s (Cantera's{', scaled with U_o' if args.u_ox else ''}); {nx} x {nr} x {nr} = {n} hexahedra,
 # {h * 1e6:.2f} um along x through the flame ({args.cells_per_width:g} per FWHM of {fwhm * 1e3:.4f} mm),
 # {dr * 1e6:.1f} um across near the axis; nozzle radius {args.radius * 1e3:g} mm, domain width
 # {args.width * 1e3:g} mm, gap {L * 1e3:g} mm; t_stop = {args.strain_times:g} / K_ox

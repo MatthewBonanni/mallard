@@ -1,7 +1,8 @@
 """Counterflow diffusion flames from Cantera for V10 (docs/design/chemistry.md).
 
     python tools/counterflow_reference.py [OUT_DIR]
-    python tools/counterflow_reference.py --profile U_OX [U_OX ...] [OUT_DIR]
+    python tools/counterflow_reference.py [OUT_DIR] --profile U_OX [U_OX ...]
+    python tools/counterflow_reference.py [OUT_DIR] --match K_OX [K_OX ...]
 
 Cantera's CounterflowDiffusionFlame (the axisymmetric stagnation-flow
 similarity solution with plug-flow nozzles) of H2/N2 (X_H2 = 0.25) against
@@ -11,19 +12,22 @@ transport. Writes to OUT_DIR (default examples/counterflow_diffusion/reference):
 
   strain.csv     the strain-rate sweep: oxidizer and fuel nozzle velocities,
                  global strain (U_o + U_f) / L, local strains K_ox and K_f
-                 (the largest axial velocity gradient -du/dz ahead of the
-                 flame on each side), peak temperature and its position,
+                 (the axial velocity gradient -du/dz ahead of the flame on
+                 each side: its first maximum going from the nozzle towards
+                 the flame), peak temperature and its position,
                  stagnation point; up to the last burning flame, whose K_ox
                  is the extinction strain rate (bisected on U_o to 0.5%)
   U<U_OX>.csv    with --profile: the full solution (z, u, spread rate V =
                  v / r, T, rho, Y) at that oxidizer velocity, which is the
                  initial state of Mallard's runs (tools/counterflow_setup.py)
-                 and the overlay of the comparison (tools/plot_counterflow.py)
+  K<K_OX>.csv    with --match: the same for the flame whose K_ox is K_OX
+                 (to 0.1%, found by iterating on U_o from strain.csv): the
+                 overlays of the comparison (tools/plot_counterflow.py)
 
 z runs from the fuel nozzle (z = 0) to the oxidizer nozzle (z = L).
 """
+import argparse
 import os
-import sys
 
 import cantera as ct
 import numpy as np
@@ -43,13 +47,18 @@ def densities(gas):
     return rho_f, gas.density
 
 
-def local_strains(z, u, T):
-    """K_ox, K_f: the largest -du/dz on the oxidizer side of the peak
-    temperature and on the fuel side of the stagnation point."""
-    dudz = np.gradient(u, z)
-    i_T = np.argmax(T)
-    i_s = np.argmin(np.abs(u))
-    return np.max(-dudz[i_T:]), np.max(-dudz[: max(i_s, 1)])
+def local_strains(z, u):
+    """K_ox, K_f: the local strain rates ahead of the flame, the first maxima
+    of -du/dz met going from each nozzle towards the flame (before the
+    flame's dilatation reverses the gradient)."""
+    g = -np.gradient(u, z)
+    i = g.size - 1
+    while i > 0 and g[i - 1] >= g[i]:
+        i -= 1
+    j = 0
+    while j < g.size - 1 and g[j + 1] >= g[j]:
+        j += 1
+    return g[i], g[j]
 
 
 def make_flame():
@@ -78,7 +87,7 @@ def solve(f, U_o, guess=None, first=False):
 
 def row(f, U_o, U_f):
     z, u, T = f.grid, f.velocity, f.T
-    K_ox, K_f = local_strains(z, u, T)
+    K_ox, K_f = local_strains(z, u)
     i_s = np.argmin(np.abs(u))
     return (U_o, U_f, (U_o + U_f) / GAP, K_ox, K_f, T.max(), z[np.argmax(T)], z[i_s], z.size)
 
@@ -117,47 +126,67 @@ def sweep(out):
             fh.write(",".join(f"{v:.8g}" for v in r[:-1]) + f",{r[-1]}\n")
 
 
-def profile(U_o, out):
-    f = make_flame()
+def burning(f, U_o):
+    """Solve at U_o by continuation from U_o = 0.1 m/s."""
     U = min(0.1, U_o)
-    solve(f, U, first=True)
+    U_f = solve(f, U, first=True)
     while U < U_o:
         U = min(U * 1.5, U_o)
         U_f = solve(f, U)
-    U_f = solve(f, U_o)
     if f.extinct():
         raise RuntimeError(f"extinct at U_o = {U_o}")
+    return U_f
+
+
+def write_profile(f, U_o, U_f, path):
     r = row(f, U_o, U_f)
-    path = os.path.join(out, f"U{U_o:g}.csv")
     with open(path, "w") as fh:
         fh.write(f"# Cantera {ct.__version__} CounterflowDiffusionFlame as strain.csv; U_o = {U_o:.8g} m/s, "
                  f"U_f = {U_f:.8g} m/s, K_ox = {r[3]:.6g} 1/s, K_f = {r[4]:.6g} 1/s, T_max = {r[5]:.6g} K\n")
         fh.write("z,u,V,T,rho," + ",".join("Y_" + s for s in f.gas.species_names) + "\n")
         data = np.column_stack([f.grid, f.velocity, f.spread_rate, f.T, f.density, f.Y.T])
-        np.savetxt(fh, data, delimiter=",", fmt="%.10e")
-    print(f"{path}: K_ox = {r[3]:.1f} 1/s, T_max = {r[5]:.1f} K, {f.grid.size} points")
+        np.savetxt(fh, data, delimiter=",", fmt="%.8e")
+    print(f"{path}: U_o = {U_o:.5f} m/s, K_ox = {r[3]:.1f} 1/s, T_max = {r[5]:.1f} K, {f.grid.size} points")
+
+
+def profile(U_o, out):
+    f = make_flame()
+    U_f = burning(f, U_o)
+    write_profile(f, U_o, U_f, os.path.join(out, f"U{U_o:g}.csv"))
+
+
+def match(K, out):
+    """The flame whose K_ox is K (to 0.1%), starting from strain.csv."""
+    sweep = np.genfromtxt(os.path.join(out, "strain.csv"), delimiter=",", names=True, skip_header=1)
+    U = float(np.exp(np.interp(np.log(K), np.log(sweep["K_ox"]), np.log(sweep["U_o"]))))
+    f = make_flame()
+    U_f = burning(f, U)
+    for _ in range(20):
+        K_U = row(f, U, U_f)[3]
+        if abs(K_U / K - 1.0) < 1e-3:
+            break
+        U *= K / K_U
+        U_f = solve(f, U)
+    else:
+        raise RuntimeError(f"no flame with K_ox = {K}")
+    write_profile(f, U, U_f, os.path.join(out, f"K{K:.0f}.csv"))
 
 
 def main():
-    args = sys.argv[1:]
-    default_out = os.path.join(ROOT, "examples", "counterflow_diffusion", "reference")
-    if args and args[0] == "--profile":
-        values = []
-        rest = args[1:]
-        while rest:
-            try:
-                values.append(float(rest[0]))
-                rest = rest[1:]
-            except ValueError:
-                break
-        out = rest[0] if rest else default_out
-        os.makedirs(out, exist_ok=True)
-        for U_o in values:
-            profile(U_o, out)
-        return
-    out = args[0] if args else default_out
-    os.makedirs(out, exist_ok=True)
-    sweep(out)
+    ap = argparse.ArgumentParser(description="Cantera counterflow diffusion flames for V10")
+    ap.add_argument("out", nargs="?", default=os.path.join(ROOT, "examples", "counterflow_diffusion", "reference"))
+    ap.add_argument("--profile", type=float, nargs="+", metavar="U_OX",
+                    help="write the full solutions at these oxidizer velocities instead of the sweep")
+    ap.add_argument("--match", type=float, nargs="+", metavar="K_OX",
+                    help="write the full solutions with these local strain rates K_ox (from strain.csv)")
+    args = ap.parse_args()
+    os.makedirs(args.out, exist_ok=True)
+    for U_o in args.profile or []:
+        profile(U_o, args.out)
+    for K in args.match or []:
+        match(K, args.out)
+    if not args.profile and not args.match:
+        sweep(args.out)
 
 
 if __name__ == "__main__":
