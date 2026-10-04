@@ -112,9 +112,17 @@ struct KineticsTable {
     View1<double> chebyshev;
     Kokkos::View<double *[4], Kokkos::LayoutRight, MemorySpace> chebyshev_range;  // 1/T_min, 1/T_max, ln p_min, ln p_max
 
+    /**
+     * @brief Concentration [kmol/m^3] below which orders 0 < n < 1 follow
+     *        C_reg^n x ((2 - n) + (n - 1) x), x = C / C_reg (linear in C
+     *        for x < 0): C^1 at C_reg, with a bounded slope at C = 0 where
+     *        n C^(n - 1) diverges.
+     */
+    static constexpr double C_REG = 1e-12;
+
     /** @brief C^order: repeated products for integer orders, pow of max(C, 0) otherwise. */
     KOKKOS_INLINE_FUNCTION
-    static double power(const double C, const double order) {
+    static double plain_power(const double C, const double order) {
         const double whole = Kokkos::floor(order);
         if (whole == order && order >= 0.0 && order <= 4.0) {
             double p = 1.0;
@@ -124,11 +132,25 @@ struct KineticsTable {
         return Kokkos::pow(Kokkos::fmax(C, 0.0), order);
     }
 
-    /** @brief d(C^order)/dC. */
+    /** @brief Mass-action factor C^order, regularized below C_REG for 0 < order < 1. */
+    KOKKOS_INLINE_FUNCTION
+    static double power(const double C, const double order) {
+        if (order > 0.0 && order < 1.0 && C < C_REG) {
+            const double x = C / C_REG;
+            return Kokkos::pow(C_REG, order) * x * ((2.0 - order) + (order - 1.0) * Kokkos::fmax(x, 0.0));
+        }
+        return plain_power(C, order);
+    }
+
+    /** @brief d power(C, order) / dC. */
     KOKKOS_INLINE_FUNCTION
     static double power_derivative(const double C, const double order) {
         if (order == 0.0) return 0.0;
-        return order * power(C, order - 1.0);
+        if (order > 0.0 && order < 1.0 && C < C_REG) {
+            const double x = C / C_REG;
+            return Kokkos::pow(C_REG, order - 1.0) * ((2.0 - order) + 2.0 * (order - 1.0) * Kokkos::fmax(x, 0.0));
+        }
+        return order * plain_power(C, order - 1.0);
     }
 
     KOKKOS_INLINE_FUNCTION
