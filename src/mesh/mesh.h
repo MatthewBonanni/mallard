@@ -396,9 +396,11 @@ class Mesh {
         // Cells [0, n_complete()) have all their vertex neighbors: all but the outermost halo layer
         uint32_t n_complete_cells = 0;
         uint32_t n_complete() const { return n_complete_cells ? n_complete_cells : n_cells; }
-        // Distributed runs: global id of every local cell and the global cell count (0 otherwise)
+        // Distributed runs: global id of every local cell and node, and the global counts (0 otherwise)
         std::vector<uint64_t> h_global_cell_id;
         uint64_t n_global_cells = 0;
+        std::vector<uint64_t> h_global_node_id;
+        uint64_t n_global_nodes = 0;
         Kokkos::View<rtype *[N_DIM]> node_coords;
         Kokkos::View<rtype *[N_DIM]> cell_coords;
         Kokkos::View<rtype *> cell_volume;
