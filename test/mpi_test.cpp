@@ -313,6 +313,76 @@ TEST(MPITest, RestartFilesDoNotDependOnTheRankCount) {
     comm::barrier();
 }
 
+namespace {
+
+/** @brief Means, then covariances, of every global cell. */
+std::vector<double> gather_statistics(Solver & solver) {
+    solver.copy_device_to_host();
+    const auto mesh = solver.get_mesh();
+    const auto & mean = solver.get_statistics().host_means();
+    const auto & cov = solver.get_statistics().host_covariances();
+    const uint32_t n_vars = mean.extent(1) + cov.extent(1);
+    const uint64_t n_global = mesh->n_global_cells ? mesh->n_global_cells : mesh->n_cells;
+    std::vector<double> values(n_global * n_vars, 0.0);
+    for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+        const uint64_t g = mesh->n_global_cells ? mesh->h_global_cell_id[c] : c;
+        for (uint32_t i = 0; i < mean.extent(1); i++) values[g * n_vars + i] = double(mean(c, i));
+        for (uint32_t p = 0; p < cov.extent(1); p++) values[g * n_vars + mean.extent(1) + p] = double(cov(c, p));
+    }
+    if (mesh->n_global_cells > 0) comm::allreduce(std::span<double>(values), comm::Op::SUM);
+    return values;
+}
+
+} // namespace
+
+TEST(MPITest, StatisticsAndProbesDoNotDependOnTheRankCount) {
+    // Averages are per cell; probe points on faces between ranks take the same
+    // cell on every rank count; averages written by all ranks continue on one
+    const std::string dir = io_dir() + "_statistics";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    const std::string stats = "[statistics]\ninterval = 2\nfields = [\"P\"]\nproducts = [\"U_X*U_Y\", \"RHO*RHO\"]\n";
+    auto probe = [&](const std::string & file) {
+        return "[[probes]]\nname = \"line\"\nfile = \"" + dir + "/" + file + "\"\nvariables = [\"RHO\", \"P\"]\n"
+               "start = [0.0, 0.4]\nend = [1.0, 0.4]\nn_points = 13\n";
+    };
+    Solver reference;
+    reference.set_distributed(false);
+    reference.init(parse_toml(restart_case(20, stats + probe("reference.csv"))));
+    reference.run();
+    const auto ref = gather_statistics(reference);
+
+    Solver distributed;
+    distributed.init(parse_toml(restart_case(20, stats + probe("distributed.csv") + "[[write_data]]\nprefix = \"" +
+                                                     dir + "/r\"\nformat = \"restart\"\ninterval = 10\n")));
+    distributed.run();
+    EXPECT_EQ(max_rel_diff(gather_statistics(distributed), ref), 0.0);
+    comm::barrier();
+
+    std::string input = restart_case(20, stats);
+    const std::string init = BLAST;
+    input.replace(input.find("[initialize]\n") + 13, init.size(),
+                  "type = \"restart\"\nfile = \"" + dir + "/r_000010.restart\"\n");
+    Solver continued;
+    continued.set_distributed(false);
+    continued.init(parse_toml(input));
+    continued.run();
+    EXPECT_EQ(max_rel_diff(gather_statistics(continued), ref), 0.0);
+
+    if (comm::is_root()) {
+        auto read = [](const std::string & path) {
+            std::ifstream in(path);
+            std::stringstream ss;
+            ss << in.rdbuf();
+            return ss.str();
+        };
+        const std::string a = read(dir + "/reference.csv");
+        EXPECT_FALSE(a.empty());
+        EXPECT_EQ(read(dir + "/distributed.csv"), a);
+    }
+    comm::barrier();
+}
+
 TEST(MPITest, EveryCellIsInExactlyOneOutputPiece) {
     const std::string dir = io_dir() + "_vtu";
     if (comm::is_root()) std::filesystem::remove_all(dir);

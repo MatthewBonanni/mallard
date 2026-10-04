@@ -57,14 +57,20 @@ def read_restart(path):
         version, real_size = struct.unpack("<II", f.read(8))
         n_cells, n_vars, step = struct.unpack("<QQQ", f.read(24))
         (t,) = struct.unpack("<d", f.read(8))
-        if not magic.startswith(b"MALLARD-RESTART") or version != 2 or real_size != 8:
-            raise SystemExit(f"{path}: expected a double-precision restart file of version 2")
-        names = []
-        for _ in range(n_vars):
+        if not magic.startswith(b"MALLARD-RESTART") or version not in (2, 3) or real_size != 8:
+            raise SystemExit(f"{path}: expected a double-precision restart file of version 2 or 3")
+
+        def name():
             (length,) = struct.unpack("<I", f.read(4))
-            names.append(f.read(length).decode())
+            return f.read(length).decode()
+
+        names = [name() for _ in range(n_vars)]
+        attributes = []
+        if version == 3:
+            (n_attributes,) = struct.unpack("<Q", f.read(8))
+            attributes = [(name(), struct.unpack("<d", f.read(8))[0]) for _ in range(n_attributes)]
         fields = np.fromfile(f, dtype="<f8", count=n_vars * n_cells).reshape(n_vars, n_cells)
-    return {"version": version, "step": step, "t": t, "names": names, "fields": fields}
+    return {"version": version, "step": step, "t": t, "names": names, "attributes": attributes, "fields": fields}
 
 
 def write_restart(path, restart, fields):
@@ -76,6 +82,10 @@ def write_restart(path, restart, fields):
         f.write(struct.pack("<d", restart["t"]))
         for name in restart["names"]:
             f.write(struct.pack("<I", len(name)) + name.encode())
+        if restart["version"] == 3:
+            f.write(struct.pack("<Q", len(restart["attributes"])))
+            for name, value in restart["attributes"]:
+                f.write(struct.pack("<I", len(name)) + name.encode() + struct.pack("<d", value))
         fields.astype("<f8").tofile(f)
 
 

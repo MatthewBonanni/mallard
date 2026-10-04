@@ -60,6 +60,7 @@ void Solver::init_solution() {
         init_solution_restart();
     }
     copy_host_to_device();
+    if (it->second != InitType::RESTART) statistics.start(t);
     if (is_mixture() && it->second != InitType::RESTART) init_temperature_seed();
     update_primitives();
     if (p_max.is_allocated()) update_p_max();
@@ -82,14 +83,20 @@ void Solver::init_solution_restart() {
     // CHEM_H (last chemistry sub-step) only seeds the integrator: a reacting run
     // may start from a non-reacting one, and a non-reacting run ignores it
     std::vector<std::string> expected = restart_variables();
+    const std::vector<std::string> averages = statistics.variables();
+    auto is_average = [&](const std::string & name) {
+        return std::find(averages.begin(), averages.end(), name) != averages.end();
+    };
     for (const auto & name : restart.names) {
-        if (name == "CHEM_H" || name == "P_MAX") continue;
+        // Averages carry over only into a run that keeps them
+        if (name == "CHEM_H" || name == "P_MAX" || name.rfind("MEAN_", 0) == 0 || name.rfind("COV_", 0) == 0) continue;
         if (std::find(expected.begin(), expected.end(), name) == expected.end()) {
             throw std::runtime_error("Restart file " + file + " has variable " + name + ", which this run does not " +
                                      (name.rfind("RHOY_", 0) == 0 ? "transport." : "know."));
         }
     }
     for (uint32_t v = 0; v < expected.size(); v++) {
+        if (is_average(expected[v])) continue;
         const std::vector<rtype> * values = restart.find(expected[v]);
         if (expected[v] == "P_MAX") {
             for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
@@ -119,6 +126,7 @@ void Solver::init_solution_restart() {
     }
     step = restart.step;
     t = restart.t;
+    statistics.restore(restart, file, t);
     for (auto & writer : data_writers) {
         writer->resume(step, t);
     }

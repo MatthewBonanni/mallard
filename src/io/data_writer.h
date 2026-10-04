@@ -39,6 +39,9 @@ static const std::unordered_map<DataFormat, std::string> FORMAT_NAMES = {
     {DataFormat::RESTART, "restart"},
 };
 
+/** @brief Named scalars of a restart file (version 3), e.g. the statistics' weight. */
+using RestartAttributes = std::vector<std::pair<std::string, double>>;
+
 /**
  * @brief Contents of a restart file.
  */
@@ -48,9 +51,13 @@ struct RestartData {
     uint64_t n_cells = 0;                    // in the file
     std::vector<std::string> names;          // [variable]
     std::vector<std::vector<rtype>> fields;  // [variable][cell read]
+    RestartAttributes attributes;
 
     /** @brief Values of the named variable, or nullptr if the file has none. */
     const std::vector<rtype> * find(const std::string & name) const;
+
+    /** @brief Value of the named attribute, or nullptr if the file has none. */
+    const double * attribute(const std::string & name) const;
 };
 
 /**
@@ -58,8 +65,8 @@ struct RestartData {
  *        every cell, or with cells, only those global cells (fields then hold
  *        their values in the order of cells).
  *
- * Version 2 files list their variable names; version 1 files hold the flow
- * block CONSERVATIVE_NAMES only. Either must contain the flow block of this
+ * Version 2 files list their variable names, version 3 files also named
+ * scalar attributes; version 1 files hold the flow block CONSERVATIVE_NAMES only. Either must contain the flow block of this
  * build's dimension.
  */
 RestartData read_restart(const std::string & filename, const std::vector<uint64_t> * cells = nullptr);
@@ -87,9 +94,10 @@ class DataWriter {
         bool due(uint64_t step, rtype t) const;
 
         /**
-         * @brief Write a snapshot if due (or forced).
+         * @brief Write a snapshot if due (or forced); restart files also store
+         *        the attributes.
          */
-        void write(uint64_t step, rtype t, bool force = false);
+        void write(uint64_t step, rtype t, bool force = false, const RestartAttributes & attributes = {});
 
         /**
          * @brief Next simulation time at which a snapshot is due
@@ -115,7 +123,8 @@ class DataWriter {
     protected:
         void write_vtu(const std::string & filename, rtype t) const;
         void write_vtu_faces(const std::string & filename, rtype t) const;
-        void write_restart(const std::string & filename, uint64_t step, rtype t) const;
+        void write_restart(const std::string & filename, uint64_t step, rtype t,
+                           const RestartAttributes & attributes) const;
         void write_pvd() const;
 
         /**
@@ -145,7 +154,8 @@ class DataWriter {
         std::string geometry = "all";
         uint64_t n_files = 0;
         void write_pvtu(const std::string & filename, const std::string & stem) const;
-        void write_restart_distributed(const std::string & filename, uint64_t step, rtype t) const;
+        void write_restart_distributed(const std::string & filename, uint64_t step, rtype t,
+                                       const RestartAttributes & attributes) const;
         std::vector<uint32_t> geometry_faces;  // Empty: write all cells
 };
 
