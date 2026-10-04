@@ -125,16 +125,16 @@ def measure_run(run_dir):
     files = re.findall(r'file="([^"]+)"', open(pvd).read())
     rows = []
     for name in files:
-        t, c, f = read_quads(os.path.join(run_dir, "solut", name), ["RHO", "T", "Y_H2", "OMEGA_H2"])
+        t, c, f = read_quads(os.path.join(run_dir, "solut", name), ["RHO", "P", "T", "Y_H2", "OMEGA_H2"])
         order = np.argsort(c[:, 0])
         xs = c[order, 0]
-        rho, T, Y, w = (f[k][order] for k in ["RHO", "T", "Y_H2", "OMEGA_H2"])
+        rho, P, T, Y, w = (f[k][order] for k in ["RHO", "P", "T", "Y_H2", "OMEGA_H2"])
         dx = xs[1] - xs[0]
         u = -1  # fresh gas: the right end
         S_c = -w.sum() * dx / (rho[u] * Y[u])
         dTdx = np.abs(np.gradient(T, dx))
         delta = (T.max() - T[u]) / dTdx.max()
-        rows.append((t, S_c, delta, T[u], xs[np.argmax(dTdx)]))
+        rows.append((t, S_c, delta, T[u], xs[np.argmax(dTdx)], P[u]))
     return np.array(rows), dx
 
 
@@ -146,12 +146,12 @@ def measure(args):
         S_L, delta = rows[late, 1].mean(), rows[late, 2].mean()
         spread = rows[late, 1].std() / S_L
         print(f"{run_dir}: dx = {dx * 1e6:.3g} um, S_L = {S_L:.4f} m/s (+- {100 * spread:.1f}% over the last half), "
-              f"delta = {delta * 1e6:.1f} um = {delta / dx:.1f} cells, T_u = {rows[-1, 3]:.1f} K")
+              f"delta = {delta * 1e6:.1f} um = {delta / dx:.1f} cells, T_u = {rows[-1, 3]:.1f} K, p = {rows[-1, 5] / ct.one_atm:.2f} atm")
         for r in rows:
             print(f"    t = {r[0] * 1e6:8.2f} us  S_c = {r[1]:.4f} m/s  delta = {r[2] * 1e6:6.1f} um  x_f = {r[4] * 1e3:.4f} mm")
-        out.append((dx, rows[-1, 3], S_L, delta))
+        out.append((rows[-1, 3], rows[-1, 5] / ct.one_atm, S_L, delta, dx))
     if args.csv:
-        np.savetxt(args.csv, np.array(out), delimiter=",", header="dx,T_u,S_L,delta", comments="")
+        np.savetxt(args.csv, np.array(out), delimiter=",", header="T_u,p_atm,S_L,delta,dx", fmt="%.6g", comments="")
 
 
 def main():
