@@ -1,0 +1,76 @@
+# (header written with the results)
+
+[run]
+t_stop = 6.0e-6
+cfl = 0.5
+
+[mesh]
+type = "cartesian"
+Nx = 680
+Ny = 200
+Nz = 200
+Lx = 0.102
+Ly = 0.03
+Lz = 0.03
+
+[initialize]
+type = "restart"
+file = "window.restart"
+
+[[boundaries]]
+name = "left"
+type = "extrapolation"
+
+[[boundaries]]
+name = "right"
+type = "extrapolation"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "back"
+type = "symmetry"
+
+[[boundaries]]
+name = "front"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "euler"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+
+[output]
+check_interval = 100
+
+[[write_data]]
+prefix = "./restart/cell"
+format = "restart"
+time_interval = 1.5e-6
+
+# P_MAX (the soot foil) is kept when some output asks for it; the window
+# tool saves it from the restart files, so this wall output is only
+# overwritten by every segment
+[[write_data]]
+prefix = "./wall/bottom"
+format = "vtu"
+geometry = "bottom"
+time_interval = 6.0e-6
+variables = ["P_MAX"]
