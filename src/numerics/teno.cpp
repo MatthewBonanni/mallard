@@ -1346,7 +1346,27 @@ void integrate_cell(const std::vector<Point3> & nodes, const TetRule & rule, F &
 // Moments of total degree below 2 * MAX_DEGREE - 1
 constexpr int MAX_MOMENTS = (2 * teno::MAX_DEGREE - 1) * (2 * teno::MAX_DEGREE) * (2 * teno::MAX_DEGREE + 1) / 6;
 
-/** @brief Add w x^a y^b z^c, a + b + c < NM, to the moment sums m, ordered by a, then b, then c. */
+/** @brief Exponents (a, b, c), a + b + c < NM, ordered by a, then b, then c. */
+template <int NM>
+constexpr auto moment_exponents() {
+    std::array<std::array<int, 3>, NM * (NM + 1) * (NM + 2) / 6> e{};
+    int k = 0;
+    for (int a = 0; a < NM; a++) {
+        for (int b = 0; a + b < NM; b++) {
+            for (int c = 0; a + b + c < NM; c++) e[k++] = {a, b, c};
+        }
+    }
+    return e;
+}
+
+template <int NM, int... K>
+void add_moments(const double w, const double * px, const double * py, const double * pz, double * m,
+                 std::integer_sequence<int, K...>) {
+    static constexpr auto e = moment_exponents<NM>();
+    ((m[K] += w * px[e[K][0]] * py[e[K][1]] * pz[e[K][2]]), ...);
+}
+
+/** @brief Add w x^a y^b z^c, a + b + c < NM, to the moment sums m, ordered by a, then b, then c (unrolled). */
 template <int NM>
 void add_moments(const double w, const Point3 & x, double * m) {
     double px[NM], py[NM], pz[NM];
@@ -1356,18 +1376,81 @@ void add_moments(const double w, const Point3 & x, double * m) {
         py[k] = py[k - 1] * x[1];
         pz[k] = pz[k - 1] * x[2];
     }
-    int k = 0;
-    for (int a = 0; a < NM; a++) {
-        const double wa = w * px[a];
-        for (int b = 0; a + b < NM; b++) {
-            const double wab = wa * py[b];
-            for (int c = 0; a + b + c < NM; c++) m[k++] += wab * pz[c];
-        }
-    }
+    add_moments<NM>(w, px, py, pz, m, std::make_integer_sequence<int, NM * (NM + 1) * (NM + 2) / 6>());
 }
 
 double det3(const Point3 & a, const Point3 & b, const Point3 & c) {
     return a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0]);
+}
+
+/**
+ * @brief Box (lower corner, then upper corner, in the cell's frame) holding
+ *        every point inside all face planes of cell c, N_k . (q - x_k) <= 0 for
+ *        its outward area vectors N_k and face centroids x_k. By weak duality,
+ *        u . (q - x_c) <= sum_k mu_k N_k . (x_k - x_c) for any mu >= 0 with
+ *        sum_k mu_k N_k = u; the closed cell's sum_k N_k = 0 makes any
+ *        solution on three faces nonnegative once shifted by a constant. A
+ *        direction without an accurate such mu stays unbounded.
+ */
+std::array<double, 6> plane_bounds(const Mesh & mesh, const uint32_t c) {
+    const uint32_t n = mesh.h_n_faces_of_cell(c);
+    Point3 xc;
+    for (int d = 0; d < 3; d++) xc[d] = double(mesh.h_cell_coords(c, d));
+    const double hc = std::cbrt(double(mesh.h_cell_volume(c)));
+    std::array<Point3, teno::MAX_FACES> N;
+    std::array<double, teno::MAX_FACES> offset, norm;
+    for (uint32_t k = 0; k < n; k++) {
+        const uint32_t f = mesh.h_face_of_cell(c, k);
+        const double sign = (mesh.h_cells_of_face(f, 0) == static_cast<int32_t>(c)) ? 1.0 : -1.0;
+        offset[k] = 0.0;
+        for (int d = 0; d < 3; d++) {
+            N[k][d] = sign * double(mesh.h_face_normals(f, d));
+            offset[k] += N[k][d] * ((double(mesh.h_face_coords(f, d)) - double(mesh.h_face_offset(f, c, d))) - xc[d]);
+        }
+        norm[k] = std::sqrt(N[k][0] * N[k][0] + N[k][1] * N[k][1] + N[k][2] * N[k][2]);
+    }
+    std::array<double, 6> box;
+    for (int a = 0; a < 3; a++) {
+        for (const double s : {-1.0, 1.0}) {
+            double & bound = box[(s > 0.0 ? 3 : 0) + a];
+            bound = s * std::numeric_limits<double>::infinity();
+            // Faces most aligned with u = s e_a first
+            std::array<uint32_t, teno::MAX_FACES> order;
+            for (uint32_t k = 0; k < n; k++) order[k] = k;
+            std::sort(order.begin(), order.begin() + n, [&](uint32_t i, uint32_t j) {
+                return s * N[i][a] / norm[i] > s * N[j][a] / norm[j];
+            });
+            for (uint32_t i = 0; i < n && std::isinf(bound); i++) {
+                for (uint32_t j = i + 1; j < n && std::isinf(bound); j++) {
+                    for (uint32_t k = j + 1; k < n && std::isinf(bound); k++) {
+                        const Point3 & A = N[order[i]], & B = N[order[j]], & C = N[order[k]];
+                        const double det = det3(A, B, C);
+                        if (!(std::abs(det) > 1e-6 * norm[order[i]] * norm[order[j]] * norm[order[k]])) continue;
+                        Point3 u = {0.0, 0.0, 0.0};
+                        u[a] = s;
+                        std::array<double, teno::MAX_FACES> mu = {};
+                        mu[order[i]] = det3(u, B, C) / det;
+                        mu[order[j]] = det3(A, u, C) / det;
+                        mu[order[k]] = det3(A, B, u) / det;
+                        double shift = 0.0;
+                        for (uint32_t m = 0; m < n; m++) shift = std::max(shift, -mu[m]);
+                        Point3 residual = {-u[0], -u[1], -u[2]};
+                        double value = 0.0;
+                        for (uint32_t m = 0; m < n; m++) {
+                            mu[m] += shift;
+                            for (int d = 0; d < 3; d++) residual[d] += mu[m] * N[m][d];
+                            value += mu[m] * offset[m];
+                        }
+                        if (!(std::abs(residual[0]) + std::abs(residual[1]) + std::abs(residual[2]) < 1e-9)) break;
+                        // Margins far above round-off
+                        bound = s * (value + 1e-6 * (std::abs(value) + hc));
+                    }
+                }
+            }
+        }
+    }
+    for (int k = 0; k < 6; k++) box[k] += xc[k % 3];
+    return box;
 }
 
 } // namespace
@@ -1454,6 +1537,15 @@ void TENO::compute_stencils_and_matrices_3d() {
         double * m = &moments[static_cast<size_t>(c) * n_moments];
         for (int k = 0; k < n_moments; k++) m[k] = sums[k] / vol;
     });
+    // Boxes around the cells, which settle most inside tests of mirror images
+    bool mirrors = false;
+    for (uint32_t f = 0; f < mesh->n_faces && !mirrors; f++) {
+        mirrors = mesh->h_cells_of_face(f, 1) < 0 && h_face_bc(f) >= 0 &&
+                  h_bcs(h_face_bc(f)).type != BoundaryType::PARTITION;
+    }
+    std::vector<std::array<double, 6>> boxes(mirrors ? n_cells : 0);
+    Kokkos::parallel_for("teno_plane_bounds", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, boxes.size()),
+                         [&](const uint32_t c) { boxes[c] = plane_bounds(*mesh, c); });
     std::vector<std::array<uint8_t, 3>> expo_all(nk);
     for (uint8_t l = 0; l < nk; l++) teno::exponents(l, expo_all[l][0], expo_all[l][1], expo_all[l][2]);
     double binom[12][12] = {};
@@ -1592,6 +1684,10 @@ void TENO::compute_stencils_and_matrices_3d() {
             for (size_t c = 0; c < cells.size(); c++) {
                 Point3 q;
                 for (int a = 0; a < 3; a++) q[a] = p[a] - cells[c].t[a];
+                const std::array<double, 6> & box = boxes[cells[c].cell];
+                if (q[0] < box[0] || q[1] < box[1] || q[2] < box[2] || q[0] > box[3] || q[1] > box[4] || q[2] > box[5]) {
+                    continue;
+                }
                 bool inside = true;
                 for (uint32_t k = planes_begin[c]; k < planes_begin[c + 1] && inside; k++) {
                     const FacePlane & fp = face_planes[k];
@@ -1807,10 +1903,8 @@ void TENO::compute_stencils_and_matrices_3d() {
                 bool in = false;
                 for (size_t a = 1; a + 1 < v.size() && !in; a++) {
                     const double det = dets[a];
-                    const double alpha = det3(dx, v[a], v[a + 1]) / det;
-                    const double beta = det3(v[0], dx, v[a + 1]) / det;
-                    const double gamma = det3(v[0], v[a], dx) / det;
-                    in = alpha >= -GEOMETRY_TOL && beta >= -GEOMETRY_TOL && gamma >= -GEOMETRY_TOL;
+                    in = det3(dx, v[a], v[a + 1]) / det >= -GEOMETRY_TOL && det3(v[0], dx, v[a + 1]) / det >= -GEOMETRY_TOL &&
+                         det3(v[0], v[a], dx) / det >= -GEOMETRY_TOL;
                 }
                 if (in) sector.push_back(e);
             }
