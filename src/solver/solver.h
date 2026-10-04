@@ -12,6 +12,7 @@
 #ifndef SOLVER_H
 #define SOLVER_H
 
+#include <array>
 #include <fstream>
 #include <functional>
 #include <memory>
@@ -275,6 +276,7 @@ class Solver {
         template <typename T_riemann_solver>
         void launch_double_flux_functor();
         void init_mixture_boundaries(const std::vector<toml::value> & input_boundaries,
+                                     const std::vector<std::array<uint32_t, 2>> & profiled_faces,
                                      std::vector<BoundaryCondition> & bcs);
 
         Kokkos::View<uint32_t *> rhs_cells;  // reconstructed cells, the n_early_cells independent of the halo first

@@ -104,6 +104,12 @@ class MixtureModel {
          */
         std::vector<double> mass_fractions(const toml::value & table, const std::string & where) const;
 
+        /**
+         * @brief Whether the X or Y of a table varies in space: some value is
+         *        an expression (a string) or a balance species is named.
+         */
+        static bool composition_varies(const toml::value & table);
+
         /** @brief Mass fractions from mole fractions. */
         std::vector<double> mass_fractions_from_mole(const std::vector<double> & X) const;
 

@@ -1178,7 +1178,12 @@ Catalytic walls and species-specific wall fluxes are out of scope.
 Milestone 3 supports `extrapolation`, `symmetry`, `wall_adiabatic` (slip for
 `euler`, no-slip for `navier_stokes` from milestone 9), `upt` and `p_out` for mixtures;
 `farfield`, `dirichlet` and `p_out_average` are rejected at input until they
-are needed.
+are needed. The composition of `upt` may vary along the boundary (stratified
+inflows such as a mixing layer feeding a triple flame): each value of `X` or
+`Y` can be an expression in `x`, `y`, `z`, with an optional `balance` species
+as in `[initialize]`. Each face then gets its own copy of the condition, with
+the composition, density and surrogates at its center, so the flux kernels
+are unchanged.
 
 ## 9. Output and restart
 

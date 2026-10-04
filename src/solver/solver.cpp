@@ -328,6 +328,9 @@ void Solver::init_boundaries() {
     boundary_summary.clear();
     dirichlet_boundaries.clear();
     average_pressure_outlets.clear();
+    // Faces of upt boundaries whose composition varies along them, as (boundary, face):
+    // each face gets its own copy of the condition, appended after the input's
+    std::vector<std::array<uint32_t, 2>> profiled_faces;
 
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
         const toml::value & bound = input_boundaries[i_bc];
@@ -376,6 +379,8 @@ void Solver::init_boundaries() {
             FOR_I_DIM dirichlet.W.emplace_back(name + ".u[" + std::to_string(i) + "]", u[i]);
             dirichlet.W.emplace_back(name + ".p", toml::find<std::string>(bound, "p"));
         }
+        const bool profiled = is_mixture() && bcs.back().type == BoundaryType::UPT &&
+                              MixtureModel::composition_varies(bound);
         uint32_t n_selected = 0;
         uint64_t n_owned_selected = 0;
         for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
@@ -387,6 +392,7 @@ void Solver::init_boundaries() {
                 throw std::runtime_error("Boundary " + name + " assigned more than once.");
             }
             face_bc[i_face] = i_bc;
+            if (profiled) profiled_faces.push_back({static_cast<uint32_t>(i_bc), i_face});
             dirichlet.faces.push_back(i_face);
             n_selected++;
             n_owned_selected += static_cast<uint32_t>(mesh->h_cells_of_face(i_face, 0)) < mesh->n_owned();
@@ -424,7 +430,13 @@ void Solver::init_boundaries() {
         n_owned_selected = comm::allreduce(n_owned_selected, comm::Op::SUM);
         std::string text = BOUNDARY_NAMES.at(bcs.back().type) + ", " + logging::count(n_owned_selected) + " faces";
         if (where) text += ", where " + toml::find<std::string>(bound, "where");
+        if (profiled) text += ", varying composition";
         boundary_summary.emplace_back(name, text);
+    }
+    for (const auto & [i_bc, i_face] : profiled_faces) {
+        const BoundaryCondition copy = bcs[i_bc];
+        face_bc[i_face] = static_cast<int32_t>(bcs.size());
+        bcs.push_back(copy);
     }
 
     if (FaceZone * partition = mesh->get_face_zone(PARTITION_ZONE)) {
@@ -439,7 +451,7 @@ void Solver::init_boundaries() {
                                      " has no boundary condition.");
         }
     }
-    if (is_mixture()) init_mixture_boundaries(input_boundaries, bcs);
+    if (is_mixture()) init_mixture_boundaries(input_boundaries, profiled_faces, bcs);
     boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics);
     if (is_mixture()) {
         const uint32_t n_species = mixture.n_species;
