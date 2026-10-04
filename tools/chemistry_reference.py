@@ -18,7 +18,8 @@ Files (one set per mechanism and phase, prefix <name>):
                       with reactions)
   <name>_ignition.csv adiabatic constant-volume ignition of fuel/air: initial
                       state, ignition delay (time of max dT/dt), T at 0.5 and
-                      2 delays, and the UV equilibrium state
+                      2 delays, and the UV equilibrium state (the state at
+                      1000 delays for irreversible mechanisms)
 """
 import os
 import sys
@@ -90,6 +91,7 @@ KINETICS = [
     ("h2o2", "mechanisms/h2o2.yaml", "ohmech", 40),
     ("gri30", "mechanisms/gri30.yaml", "gri30", 12),
     ("test_kinetics", "test/data/chemistry/test_kinetics.yaml", "gas", 40),
+    ("propane_2step", "test/data/chemistry/propane_2step.yaml", "gas", 40),
 ]
 
 
@@ -112,9 +114,13 @@ def write_rates(name, path, phase, n_states):
 
 
 IGNITION = [
-    # name, file, phase, fuel, O2 per fuel at phi = 1
-    ("h2o2", "mechanisms/h2o2.yaml", "ohmech", "H2", 0.5),
-    ("gri30", "mechanisms/gri30.yaml", "gri30", "CH4", 2.0),
+    # name, file, phase, fuel, O2 per fuel at phi = 1, end state (UV equilibrium, or
+    # the reactor's at 1000 delays for irreversible mechanisms), CVODES rtol and atol
+    ("h2o2", "mechanisms/h2o2.yaml", "ohmech", "H2", 0.5, "equilibrium", 1e-12, 1e-22),
+    ("gri30", "mechanisms/gri30.yaml", "gri30", "CH4", 2.0, "equilibrium", 1e-12, 1e-22),
+    # Exact orders below 1 make the rates non-Lipschitz at depletion, where
+    # CVODES fails at the tighter tolerances
+    ("propane_2step", "test/data/chemistry/propane_2step.yaml", "gas", "C3H8", 5.0, "reactor", 1e-10, 1e-20),
 ]
 
 
@@ -132,15 +138,15 @@ def peak_time(t, g):
     return t1 - 0.5 * num / den
 
 
-def reactor(gas):
+def reactor(gas, rtol=1e-12, atol=1e-22):
     r = ct.IdealGasReactor(gas, clone=False)
     net = ct.ReactorNet([r])
-    net.rtol, net.atol = 1e-12, 1e-22
+    net.rtol, net.atol = rtol, atol
     net.max_steps = 1000000
     return r, net
 
 
-def write_ignition(name, path, phase, fuel, o2_per_fuel):
+def write_ignition(name, path, phase, fuel, o2_per_fuel, end, rtol, atol):
     gas = ct.Solution(os.path.join(ROOT, path), phase)
     with open(os.path.join(OUT, f"{name}_ignition.csv"), "w") as f:
         header(f, gas, path)
@@ -153,7 +159,7 @@ def write_ignition(name, path, phase, fuel, o2_per_fuel):
                     X = {fuel: phi, "O2": o2_per_fuel, "N2": 3.76 * o2_per_fuel}
                     gas.TPX = T0, p_atm * ct.one_atm, X
                     initial = gas.TDY
-                    r, net = reactor(gas)
+                    r, net = reactor(gas, rtol, atol)
                     t, g = [0.0], [dT_dt(r.phase)]
                     while r.phase.T < T0 + 400.0 or g[-1] > 0.01 * max(g):
                         net.step()
@@ -161,13 +167,16 @@ def write_ignition(name, path, phase, fuel, o2_per_fuel):
                         g.append(dT_dt(r.phase))
                     tau = peak_time(np.array(t), np.array(g))
                     gas.TDY = initial
-                    r, net = reactor(gas)
+                    r, net = reactor(gas, rtol, atol)
                     net.advance(0.5 * tau)
                     T_half = r.phase.T
                     net.advance(2.0 * tau)
                     T_2 = r.phase.T
-                    gas.TDY = initial
-                    gas.equilibrate("UV")
+                    if end == "reactor":
+                        net.advance(1000.0 * tau)
+                    else:
+                        gas.TDY = initial
+                        gas.equilibrate("UV")
                     row = ([T0, p_atm * ct.one_atm, phi, initial[1]] + list(initial[2]) +
                            [tau, T_half, T_2, gas.T] + list(gas.Y))
                     f.write(",".join("%.16e" % x for x in row) + "\n")
@@ -187,10 +196,10 @@ def main():
             continue
         write_rates(name, path, phase, n_states)
         print("wrote", name, "rates")
-    for name, path, phase, fuel, o2 in IGNITION:
+    for name, path, phase, *ignition in IGNITION:
         if names and name + "_ignition" not in names:
             continue
-        write_ignition(name, path, phase, fuel, o2)
+        write_ignition(name, path, phase, *ignition)
         print("wrote", name, "ignition")
 
 
