@@ -155,3 +155,7 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="wang-2013"></a>Z. J. Wang et al., High-order CFD methods: current status and perspective, *Int. J. Numer. Methods Fluids* 72, 811–845 (2013). [doi:10.1002/fld.3767](https://doi.org/10.1002/fld.3767)
   Used in: `examples/taylor_green_3d`, compared with the 512³ pseudo-spectral DNS of the International Workshop on High-Order CFD Methods (case C3.5; [data](https://cfd.ku.edu/hiocfd/spectral_Re1600_512.gdiag)).
 - The spherical explosion of `examples/explosion_3d` is from [Toro (2009)](#toro-2009), §17.1.3.
+- <a id="noh-1987"></a>W. F. Noh, Errors for calculations of strong shocks using an artificial viscosity and an artificial heat flux, *J. Comput. Phys.* 72, 78–120 (1987). [doi:10.1016/0021-9991(87)90074-X](https://doi.org/10.1016/0021-9991(87)90074-X)
+  Used in: `examples/noh_axisymmetric` and `tools/plot_noh.py` (the spherical Noh problem and its exact solution).
+- <a id="clift-grace-weber-1978"></a>R. Clift, J. R. Grace and M. E. Weber, *Bubbles, Drops, and Particles*, Academic Press (1978).
+  Used in: `examples/sphere_axisymmetric` and `tools/plot_sphere_axisymmetric.py` (correlations of the drag coefficient and the separation angle of a sphere in steady flow, 20 < Re < 260), with [Johnson & Patel (1999)](#johnson-patel-1999) for the wake length.

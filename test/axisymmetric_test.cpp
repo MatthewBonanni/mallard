@@ -97,7 +97,7 @@ TEST(AxisymmetricTest, RevolvedGeometryOfCellsAndFaces) {
         // Pappus: the revolved volume is the planar area times the radius of its centroid
         double cy = 0.0;
         for (uint32_t k = 0; k < 3; k++) cy += double(mesh.h_node_coords(mesh.h_node_of_cell(i, k), 1)) / 3.0;
-        EXPECT_NEAR(double(mesh.h_cell_measure(i)), double(mesh.h_cell_volume(i)) * cy, 1e-15);
+        EXPECT_NEAR(double(mesh.h_cell_measure(i)), double(mesh.h_cell_volume(i)) * cy, precision_tol<double>(1e-15, 1e-7));
         // The face radii close each cell against its planar area: the discrete
         // identity that keeps quiescent gas at rest
         double closure = 0.0;
@@ -205,8 +205,10 @@ TEST(AxisymmetricTest, ConservesMassAxialMomentumAndEnergy) {
     const auto before = solver.integrate_conservatives();
     solver.run();
     const auto after = solver.integrate_conservatives();
-    for (int i : {0, 1, 3}) EXPECT_NEAR(after[i], before[i], precision_tol<double>(1e-14, 1e-6) * std::abs(before[3]));
-    EXPECT_GT(std::abs(after[2] - before[2]), 1e-6);
+    for (int i : {0, 1, 3}) {
+        EXPECT_NEAR(double(after[i]), double(before[i]), precision_tol<double>(1e-14, 1e-6) * std::abs(double(before[3])));
+    }
+    EXPECT_GT(std::abs(double(after[2] - before[2])), 1e-6);
 }
 
 namespace {
@@ -253,6 +255,7 @@ TEST(AxisymmetricTest, PoiseuilleResidualConvergesAtSecondOrderUpToTheAxis) {
     // In planar geometry this profile has an O(1) residual (the 1/r du/dr term);
     // next to the axis, gradients fit the cells' r-weighted averages and the face
     // gradients are interpolated to the faces, or the residual there stays O(1)
+    SKIP_IN_SINGLE_PRECISION("the residual on 16 cells is at round-off");
     const double forcing = 4.0 * 0.01 * 0.1;
     const auto e1 = poiseuille_residual(8);
     const auto e2 = poiseuille_residual(16);
@@ -350,7 +353,7 @@ double mms_residual_error(const std::string & mesh, uint32_t n, const std::strin
     double sum = 0.0;
     uint32_t count = 0;
     for (uint32_t i = 0; i < m.n_cells; i++) {
-        if (m.h_cell_coords(i, 1) > 0.6) continue;
+        if (double(m.h_cell_coords(i, 1)) > 0.6) continue;
         for (int v = 0; v < 4; v++) sum += std::abs(rhs[i][v] - exact[i][v]);
         count++;
     }
