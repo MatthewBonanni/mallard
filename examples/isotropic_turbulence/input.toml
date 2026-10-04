@@ -1,0 +1,56 @@
+# Decaying compressible isotropic turbulence with eddy shocklets: the
+# code-comparison case of Johnsen et al. (J. Comput. Phys. 229, 2010), as DNS.
+# Needs the 3D build (cmake -DMallard_DIM=3).
+#
+# RESULTS: filled in below.
+
+[run]
+t_stop = 5.773502691896256
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 256
+Ny = 256
+Nz = 256
+Lx = 6.283185307179586
+Ly = 6.283185307179586
+Lz = 6.283185307179586
+periodic = ["x", "y", "z"]
+
+[initialize]
+type = "restart"
+file = "hit_256.restart"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+mu = 0.001732050807568877
+viscosity_model = "power_law"
+T_mu_ref = 0.7142857142857143
+viscosity_exponent = 0.75
+Pr = 0.7
+
+[output]
+check_interval = 200
+
+[integrals]
+interval = 5
+file = "integrals.csv"
+
+[[write_data]]
+prefix = "./restart/hit"
+format = "restart"
+time_interval = 0.0721687836487032
