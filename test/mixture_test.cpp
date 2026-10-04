@@ -124,7 +124,7 @@ TEST_P(MixtureEquivalence, ConstantCpSingleSpeciesReproducesPerfectGas) {
     const EquivalenceCase & c = GetParam();
     const uint32_t n = N_DIM == 2 ? 16 : 6;
     const std::string common =
-        "[run]\nn_steps = 30\ncfl = 0.5\n" + mesh_block(c.mesh, n, n, 1.0, 1.0) +
+        "[run]\nn_steps = 30\ncfl = 0.25\n" + mesh_block(c.mesh, n, n, 1.0, 1.0) +
         "[initialize]\ntype = \"analytical\"\np = \"x < 0.5 and y < 0.5 ? 1.0e5 : 3.0e4\"\n"
         "T = \"x < 0.5 ? 400.0 : 300.0\"\nu = " + velocity("x > 0.5 ? 50.0 : 0.0", "y > 0.6 ? -30.0 : 0.0") + "\n";
     const std::string scheme = numerics(c.reconstruction, c.riemann);
@@ -170,7 +170,7 @@ TEST(MixtureTest, IdenticalSpeciesAdvectWithoutDisturbingTheFlow) {
     const uint32_t n = N_DIM == 2 ? 20 : 8;
     const std::string periodic = N_DIM == 2 ? "[\"x\", \"y\"]" : "[\"x\", \"y\", \"z\"]";
     const std::string input =
-        "[run]\nn_steps = " + std::to_string(N_DIM == 2 ? 40 : 100) + "\ncfl = 0.5\n" +
+        "[run]\nn_steps = " + std::to_string(N_DIM == 2 ? 40 : 100) + "\ncfl = 0.25\n" +
         mesh_block(N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", n, n, 1.0, 1.0, periodic) +
         "[initialize]\ntype = \"analytical\"\np = \"1.0e5\"\nT = \"300.0\"\nu = " + velocity("100.0", "50.0") +
         "\nY = { AIR2 = \"(x - 0.5)^2 + (y - 0.5)^2 < 0.06 ? 1.0 : 0.0\" }\nbalance = \"AIR\"\n" +
@@ -221,7 +221,7 @@ TEST(MixtureTest, UptCompositionExpressionsGiveAStratifiedInflow) {
     // the composition of the inlet face at its height
     const uint32_t nx = 12, n = N_DIM == 2 ? 8 : 4;
     const std::string input =
-        "[run]\nt_stop = 0.06\ncfl = 0.5\n" + mesh_block("cartesian", nx, n, 1.0, 1.0) +
+        "[run]\nt_stop = 0.06\ncfl = 0.25\n" + mesh_block("cartesian", nx, n, 1.0, 1.0) +
         "[initialize]\ntype = \"constant\"\np = 1.0e5\nT = 300.0\nu = " +
         (N_DIM == 2 ? "[50.0, 0.0]" : "[50.0, 0.0, 0.0]") + "\nY = { AIR = 1.0 }\n" +
         numerics("type = \"MUSCL\"\n", "HLLC") + mixture(PERFECT_AIR, "two-airs") +
@@ -278,7 +278,7 @@ std::vector<double> shock_tube_errors(uint32_t n, const std::string & reconstruc
     // TENO's stencils need a few rows of cells
     const uint32_t rows = reconstruction.find("TENO") != std::string::npos ? 4 : 1;
     const std::string input =
-        "[run]\nt_stop = 2.0e-4\ncfl = 0.5\n" + mesh_block("cartesian", n, rows, 1.0, rows * 1.0 / n) +
+        "[run]\nt_stop = 2.0e-4\ncfl = 0.25\n" + mesh_block("cartesian", n, rows, 1.0, rows * 1.0 / n) +
         "[initialize]\ntype = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\n"
         "u = " + velocity("0.0") + "\n"
         "X = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", AR = \"x < 0.5 ? 7 : 0\", N2 = \"x < 0.5 ? 0 : 1\" }\n" +
@@ -430,7 +430,7 @@ namespace {
 double interface_pressure_error(uint32_t n, Solver & solver, const std::string & reconstruction = "type = \"MUSCL\"\n") {
     const uint32_t rows = reconstruction.find("TENO") != std::string::npos ? 4 : 1;
     const std::string input =
-        "[run]\nt_stop = 2.5e-4\ncfl = 0.5\n" + mesh_block("cartesian", n, rows, 1.0, rows * 0.02, "[\"x\"]") +
+        "[run]\nt_stop = 2.5e-4\ncfl = 0.25\n" + mesh_block("cartesian", n, rows, 1.0, rows * 0.02, "[\"x\"]") +
         "[initialize]\ntype = \"analytical\"\np = \"1.0e5\"\nT = \"abs(x - 0.5) < 0.25 ? 300.0 : 1000.0\"\n"
         "u = " + velocity("1000.0") + "\n"
         "X = { H2 = \"abs(x - 0.5) < 0.25 ? 1 : 0\", O2 = \"abs(x - 0.5) < 0.25 ? 0 : 0.21\", "
@@ -475,7 +475,7 @@ TEST(MixtureTest, HydrogenAirContactPressureErrorDecreasesUnderRefinement) {
 }
 
 TEST(MixtureTest, InvalidMixtureInputsAreRejected) {
-    const std::string base = "[run]\nn_steps = 1\ncfl = 0.5\n" + mesh_block("cartesian", 4, 4, 1.0, 1.0) +
+    const std::string base = "[run]\nn_steps = 1\ncfl = 0.25\n" + mesh_block("cartesian", 4, 4, 1.0, 1.0) +
                              numerics("type = \"FO\"\n", "HLLC");
     const std::string bcs = boundaries("type = \"extrapolation\"\n", "type = \"extrapolation\"\n",
                                        "type = \"symmetry\"\n", "type = \"symmetry\"\n");
@@ -516,7 +516,7 @@ TEST(MixtureTest, RestartedRunMatchesUninterruptedRunExactly) {
         const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mixture_restart").string();
         std::filesystem::remove_all(dir);
         auto input = [&](const std::string & init, uint32_t n_steps, const std::string & prefix) {
-            return "[run]\nn_steps = " + std::to_string(n_steps) + "\ncfl = 0.5\n" +
+            return "[run]\nn_steps = " + std::to_string(n_steps) + "\ncfl = 0.25\n" +
                    mesh_block(N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", N_DIM == 2 ? 24 : 8, 4, 1.0, 0.2) +
                    "[initialize]\n" + init +
                    boundaries("type = \"extrapolation\"\n", "type = \"extrapolation\"\n", "type = \"symmetry\"\n",
@@ -563,7 +563,7 @@ std::array<double, 2> contact_errors(const std::string & reconstruction, bool do
     const bool teno = reconstruction.find("TENO") != std::string::npos;
     const uint32_t n = 40, rows = teno ? 4 : 1;
     const std::string input =
-        "[run]\nt_stop = 2.5e-4\ncfl = 0.5\n" +
+        "[run]\nt_stop = 2.5e-4\ncfl = 0.25\n" +
         mesh_block("cartesian", n, rows, 1.0, rows * 1.0 / n, "[\"x\"]") +
         "[initialize]\ntype = \"analytical\"\np = \"1.0e5\"\nT = \"abs(x - 0.5) < 0.25 ? 300.0 : 1200.0\"\n"
         "u = " + velocity("1000.0") + "\n"
@@ -611,7 +611,7 @@ TEST(MixtureTest, DoubleFluxShockTubeStaysAccurateAndReportsItsEnergyError) {
     auto run = [&](bool double_flux, double & energy_error) {
         const uint32_t n = 200;
         const std::string input =
-            "[run]\nt_stop = 2.0e-4\ncfl = 0.5\n" + mesh_block("cartesian", n, 1, 1.0, 1.0 / n) +
+            "[run]\nt_stop = 2.0e-4\ncfl = 0.25\n" + mesh_block("cartesian", n, 1, 1.0, 1.0 / n) +
             "[initialize]\ntype = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\n"
             "u = " + velocity("0.0") + "\n"
             "X = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", AR = \"x < 0.5 ? 7 : 0\", "

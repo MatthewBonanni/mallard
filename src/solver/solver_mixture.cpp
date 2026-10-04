@@ -161,7 +161,7 @@ struct MixtureTimeStepFunctor {
         }
         // As TimeStepFunctor, with nu_eff = max(4/3 mu / rho, lambda / (rho cv), max_k D_k)
         if (transport.extent(0) > 0) sum += 4.0_r * transport(c, NU_EFF) * sum_area2 / cell_volume(c);
-        const rtype dt_c = cell_volume(c) / sum;
+        const rtype dt_c = 2.0_r * cell_volume(c) / sum;
         dt_local(c) = dt_c;
         dt_min = Kokkos::fmin(dt_min, dt_c);
     }

@@ -1029,7 +1029,7 @@ thicknesses `delta_T = (T_b - T_u) / max dT/dx` from the inlet, 9 to the
 outlet; 20 cells per `delta_T` (cells ten times taller than wide, so that the
 cross-stream faces do not limit the time step); fresh mixture entering at
 Cantera's flame speed through `upt` and a pressure outlet at 1 atm; MUSCL,
-HLLC, SSPRK3, CFL 0.4 (and 0.2), two flame times `delta_T / S_L`. Why this
+HLLC, SSPRK3, CFL 0.2 (and 0.1), two flame times `delta_T / S_L`. Why this
 setup: a frame moving with the flame would need moving-frame terms the solver
 does not have, and a flame propagating into gas at rest needs a domain many
 flame lengths long; holding it near its Cantera position keeps the domain at
@@ -1053,7 +1053,7 @@ Cantera's discretization to Mallard's.
 | Mallard `S_c` error | -0.81% | -0.72% | -0.68% | -0.65% | -0.56% |
 | Mallard `S_d` error | -0.84% | -0.74% | -0.81% | -0.72% | -0.61% |
 
-All within the 2% criterion at 20 cells per `delta_T`. CFL 0.2 against 0.4
+All within the 2% criterion at 20 cells per `delta_T`. CFL 0.1 against 0.2
 (phi 0.6, 1.0, 1.4, both models): the consumption speeds differ by at most
 0.01%, against the 0.5% criterion, so Strang splitting adds no measurable
 error at these steps. Temperature and heat-release profiles overlay
@@ -1072,13 +1072,13 @@ run here, over 1.5 flame times (three hours on six CPU threads):
 
 | CH4/air, phi = 1 | Cantera `S_L` [m/s] | `S_c` error | `S_d` error |
 |---|---|---|---|
-| mixture-averaged (CFL 0.2) | 0.3758 | -0.93% | -1.80% |
-| unity Lewis (CFL 0.4) | 0.2865 | -0.04% | -0.78% |
+| mixture-averaged (CFL 0.1) | 0.3758 | -0.93% | -1.80% |
+| unity Lewis (CFL 0.2) | 0.2865 | -0.04% | -0.78% |
 
 Both are within 2%; the mixture-averaged consumption speed was still falling
 (0.4% over the last half flame time, and slowing), and the displacement speed,
 averaged over a longer window, still carries some of the initial transient.
-CFL 0.4 against 0.2 (mixture-averaged, at equal times up to 1.15 flame
+CFL 0.2 against 0.1 (mixture-averaged, at equal times up to 1.15 flame
 times): within 0.03%. The other equivalence ratios (references in
 `examples/premixed_flame/reference/`) are left as a follow-up for the GPU
 kernels of milestone 10.
@@ -1310,7 +1310,7 @@ Species counts are taken from the files when they are added.
 | V5 | **Thermally perfect multicomponent shock tube** (non-reacting, [Fedkiw, Merriman & Osher 1997](https://doi.org/10.1006/jcph.1996.5622) type, H2/O2/Ar) | Exact Riemann solution for the thermally perfect mixture (our own iterative solver in `tools/`, Cantera thermo) | L1 errors of `rho`, `u`, `p`, `T`, `Y` converge at the expected rate (about 1 for discontinuous data); no overshoot of `Y` | 3, 4 |
 | V6 | **Reactive shock tube**: H2:O2:Ar = 2:1:7, reflected-shock ignition turning into a detonation (Fedkiw et al. 1997; [Martinez Ferrer et al. 2014](https://doi.org/10.1016/j.compfluid.2013.10.014) for the viscous version and a resolution study) | Converged Mallard run and published profiles at 170 and 230 us | Detonation front within 2 cells of the converged position; peak `T` and `p` converge under refinement | 8 |
 | V7 | **1D CJ detonation**, 2H2-O2-7Ar at 6.67 kPa and H2/air, driven by an overdriven start | CJ speed and ZND profile from the [Shock and Detonation Toolbox](https://shepherd.caltech.edu/EDL/PublicResources/sdt/) (Cantera-based, same mechanism) | Mean front speed within 1% of `D_CJ` at 20+ cells per half-reaction length; ZND induction length within 5% and von Neumann state approached under refinement | 8 |
-| V8 | **Premixed laminar flame speed**, H2/air and CH4/air at `phi` = 0.6-1.4, 1 atm, mixture-averaged and unity Lewis | Cantera `FreeFlame` (same transport model) | Flame speed within 2% at 20+ cells per thermal thickness; difference between CFL 0.4 and 0.2 below 0.5% (splitting error); temperature and HRR profiles overlaid | 9 |
+| V8 | **Premixed laminar flame speed**, H2/air and CH4/air at `phi` = 0.6-1.4, 1 atm, mixture-averaged and unity Lewis | Cantera `FreeFlame` (same transport model) | Flame speed within 2% at 20+ cells per thermal thickness; difference between CFL 0.2 and 0.1 below 0.5% (splitting error); temperature and HRR profiles overlaid | 9 |
 | V9 | **2D cellular detonation**, 2H2-O2-7Ar at 6.67 kPa | [Oran et al. 1998](https://doi.org/10.1016/S0010-2180(97)00218-6), [Gamezo, Desbordes & Oran 1999](https://doi.org/10.1016/S0010-2180(98)00031-5), Deiterding's AMROC results; experimental cell widths | Regular cells; cell width within published numerical range at matched resolution; soot-foil (max `p`) image | 12 |
 | V10 | **Counterflow diffusion flame**, H2/N2 vs air, strain-rate sweep | Cantera `CounterflowDiffusionFlame` | Peak `T` vs strain within 2% near the axis, accepting that a 2D/3D opposed-jet run only approximates the similarity solution | 12 |
 | V11 | **Shock/H2-bubble interaction** with detailed transport, or a reacting mixing layer | [Billet, Giovangigli & de Gassowski 2008](https://doi.org/10.1080/13647830701545875) | Code-to-code: interface and shock positions; grid convergence | 12 |

@@ -14,8 +14,15 @@ states. Each face's convective and viscous fluxes are stored once and every
 cell sums its faces in a fixed order, without atomics, so results are bitwise
 independent of the thread count and scheduling.
 Time integration is explicit (SSPRK3 by default; [Shu & Osher 1988](../references.md#shu-osher-1988)). The time step comes
-from a per-cell spectral radius ([Blazek 2015](../references.md#blazek-2015)),
-`dt_i = V / (sum_f (|u_n| + a) A_f + 4 nu_eff sum_f A_f^2 / V)`.
+from per-cell spectral radii ([Blazek 2015](../references.md#blazek-2015), eqs. 6.20-6.21 with C = 4),
+`dt = cfl * min_i dt_i` with
+`dt_i = 2 V / (sum_f (|u_n| + a) A_f + 4 nu_eff sum_f A_f^2 / V)`,
+where `|u_n| + a` is the larger of the two cells' on each face and
+`nu_eff = max(4/3, gamma/Pr) mu / rho`. Half the sum over faces stands for the
+sum over coordinate directions of the projected areas, so this is the usual
+unstructured CFL number: on a uniform grid of spacing h it gives
+`dt = cfl * h / (|u| + |v| + 2a)` in 2D and `cfl * h / (|u| + |v| + |w| + 3a)`
+in 3D.
 
 ## Reconstruction
 

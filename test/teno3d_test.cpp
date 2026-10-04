@@ -213,7 +213,7 @@ namespace {
  */
 double advection_error(const std::string & mesh, const std::string & recon, uint32_t n) {
     std::ostringstream in;
-    in << "[run]\nt_stop = 0.1\ncfl = 0.4\n"
+    in << "[run]\nt_stop = 0.1\ncfl = 0.2\n"
        << "[mesh]\ntype = \"" << mesh << "\"\nNx = " << n << "\nNy = " << n << "\nNz = " << n << "\nLx = 2.0\nLy = 2.0\nLz = 2.0\n"
        << "[initialize]\ntype = \"analytical\"\n"
        << "rho = \"1.0 + 0.3 * exp(-8 * ((x - 0.9)^2 + (y - 0.95)^2 + (z - 0.97)^2))\"\n"
@@ -261,7 +261,7 @@ TEST(TENO3DSolver, PerturbationsAtRestStayBoundedOnThinPrisms) {
     // ratio 6 (order 4, walls all around), to Mach 0.85 by t = 1
     const double lz = 4.0 / 6.0 / 6.25;
     std::ostringstream in;
-    in << "[run]\nt_stop = 1.0\ncfl = 0.4\n"
+    in << "[run]\nt_stop = 1.0\ncfl = 0.2\n"
        << "[mesh]\ntype = \"cartesian_prism\"\nNx = 6\nNy = 6\nNz = 4\nLx = 1.0\nLy = 1.0\nLz = " << lz << "\n"
        << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\n"
        << "u = [\"1e-3 * sin(7 * x + 3 * y) * cos(5 * z / " << lz << ")\", \"1e-3 * cos(4 * x - 6 * y)\", \"0.0\"]\n"
