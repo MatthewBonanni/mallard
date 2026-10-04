@@ -23,22 +23,6 @@
 
 namespace {
 
-constexpr const char * MESH_FORMAT = "mallard-solution-mesh";
-constexpr const char * SOLUTION_FORMAT = "mallard-solution";
-constexpr int OUTPUT_VERSION = 1;
-
-/** @brief XDMF code of a cell in a Mixed topology, by node count. */
-uint64_t xdmf_type(uint32_t n_nodes) {
-    if (N_DIM == 2 && n_nodes == 3) return 4;  // Triangle
-    if (N_DIM == 2 && n_nodes == 4) return 5;  // Quadrilateral
-    if (N_DIM == 3 && n_nodes == 4) return 6;  // Tetrahedron
-    if (N_DIM == 3 && n_nodes == 5) return 7;  // Pyramid
-    if (N_DIM == 3 && n_nodes == 6) return 8;  // Wedge
-    if (N_DIM == 3 && n_nodes == 8) return 9;  // Hexahedron
-    throw std::runtime_error("DataWriter: no XDMF cell type for a " + std::to_string(N_DIM) + "D cell with " +
-                             std::to_string(n_nodes) + " nodes.");
-}
-
 std::string mesh_file(const std::string & prefix) { return prefix + "_mesh.h5"; }
 
 std::string file_name(const std::string & path) { return std::filesystem::path(path).filename().string(); }
@@ -121,6 +105,26 @@ void DataWriter::resume_xdmf(rtype t) {
 #ifdef Mallard_HAS_HDF5
 
 using namespace h5;
+
+namespace {
+
+constexpr const char * MESH_FORMAT = "mallard-solution-mesh";
+constexpr const char * SOLUTION_FORMAT = "mallard-solution";
+constexpr int OUTPUT_VERSION = 1;
+
+/** @brief XDMF code of a cell in a Mixed topology, by node count. */
+uint64_t xdmf_type(uint32_t n_nodes) {
+    if (N_DIM == 2 && n_nodes == 3) return 4;  // Triangle
+    if (N_DIM == 2 && n_nodes == 4) return 5;  // Quadrilateral
+    if (N_DIM == 3 && n_nodes == 4) return 6;  // Tetrahedron
+    if (N_DIM == 3 && n_nodes == 5) return 7;  // Pyramid
+    if (N_DIM == 3 && n_nodes == 6) return 8;  // Wedge
+    if (N_DIM == 3 && n_nodes == 8) return 9;  // Hexahedron
+    throw std::runtime_error("DataWriter: no XDMF cell type for a " + std::to_string(N_DIM) + "D cell with " +
+                             std::to_string(n_nodes) + " nodes.");
+}
+
+} // namespace
 
 void DataWriter::write_hdf5_mesh() {
     hdf5_mesh_written = true;
