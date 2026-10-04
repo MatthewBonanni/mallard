@@ -74,10 +74,10 @@ std::string DataWriter::xdmf_grid(const std::string & stem, double t, const std:
         << ":/nodes/coordinates</DataItem>\n"
         << indent << "  </Geometry>\n";
     for (const auto & field : fields) {
-        const bool vector = field.n_vtk_components() > 1;
-        out << indent << "  <Attribute Name=\"" << field.name << "\" AttributeType=\"" << (vector ? "Vector" : "Scalar")
-            << "\" Center=\"Cell\">\n"
-            << indent << "    <DataItem Dimensions=\"" << n_cells << (vector ? " 3" : "") << "\" " << real << ">"
+        const bool is_vector = field.n_vtk_components() > 1;
+        out << indent << "  <Attribute Name=\"" << field.name << "\" AttributeType=\""
+            << (is_vector ? "Vector" : "Scalar") << "\" Center=\"Cell\">\n"
+            << indent << "    <DataItem Dimensions=\"" << n_cells << (is_vector ? " 3" : "") << "\" " << real << ">"
             << data_h5 << ":/fields/" << field.name << "</DataItem>\n"
             << indent << "  </Attribute>\n";
     }
@@ -87,7 +87,8 @@ std::string DataWriter::xdmf_grid(const std::string & stem, double t, const std:
 
 void DataWriter::write_xdmf(const std::string & stem) const {
     write_xdmf_file(stem + ".xmf", xdmf_grid(stem, double(history.back().first), "    "));
-    std::string grids = "    <Grid Name=\"" + file_name(prefix) + "\" GridType=\"Collection\" CollectionType=\"Temporal\">\n";
+    std::string grids =
+        "    <Grid Name=\"" + file_name(prefix) + "\" GridType=\"Collection\" CollectionType=\"Temporal\">\n";
     for (const auto & [t, file] : history) {
         grids += xdmf_grid(std::filesystem::path(file).replace_extension().string(), double(t), "      ");
     }
@@ -205,7 +206,8 @@ void DataWriter::write_hdf5(const std::string & stem, uint64_t step, rtype t) co
     uint32_t width = 0;
     for (const auto & field : fields) width += field.n_vtk_components();
     std::vector<rtype> values(size_t(n_owned) * width);
-    for (uint32_t i = 0, at = 0; i < n_owned; i++) {
+    size_t at = 0;
+    for (uint32_t i = 0; i < n_owned; i++) {
         for (const auto & field : fields) {
             for (uint32_t k = 0; k < field.n_vtk_components(); k++) values[at++] = field.value(i, k);
         }
