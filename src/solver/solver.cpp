@@ -972,7 +972,7 @@ int Solver::run() {
         copy_device_to_host();
         write_data(true);
         write_integrals();
-        if (probes.due(step)) probes.write(step, t, cell_sampler());
+        write_probes();
         t_wall_output += output_timer.seconds();
     }
     std::string stop;
@@ -989,7 +989,10 @@ int Solver::run() {
             halo_current = false;
         }
         if (p_max.is_allocated()) update_p_max();
-        sample_statistics_and_probes();
+        if (statistics.due(step, t)) {
+            update_primitives();
+            statistics.sample(t, cell_sampler(), mesh->n_owned());
+        }
         check_fields();
         t_wall_stepping += step_timer.seconds();
         if (step % check_interval == 0) {
@@ -1001,6 +1004,7 @@ int Solver::run() {
         write_data();
         write_forces();
         write_integrals();
+        write_probes();
         t_wall_output += output_timer.seconds();
     }
     defer_chemistry = false;
@@ -1236,12 +1240,10 @@ void Solver::write_data(bool force) {
     }
 }
 
-void Solver::sample_statistics_and_probes() {
-    const bool sample = statistics.due(step, t);
-    if (!sample && !probes.due(step)) return;
+void Solver::write_probes() {
+    if (!probes.due(step)) return;
     update_primitives();
-    if (sample) statistics.sample(t, cell_sampler(), mesh->n_owned());
-    if (probes.due(step)) probes.write(step, t, cell_sampler());
+    probes.write(step, t, cell_sampler());
 }
 
 void Solver::take_step() {

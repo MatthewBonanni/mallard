@@ -257,7 +257,7 @@ class Solver {
         void write_data(bool force = false);
         void write_forces();
         void write_integrals();
-        void sample_statistics_and_probes();
+        void write_probes();
         CellSampler cell_sampler() const { return CellSampler{conservatives, species, primitives}; }
 
     private:

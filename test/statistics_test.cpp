@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <iomanip>
@@ -31,7 +32,7 @@ const std::string PERFECT_GAS = "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref
 std::string box(uint32_t n, bool periodic) {
     std::ostringstream s;
     s << "[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = " << n << "\nLx = 1.0\nLy = 1.0\n";
-    if (N_DIM == 3) s << "Nz = " << n / 2 << "\nLz = 1.0\n";
+    if (N_DIM == 3) s << "Nz = " << std::max(n / 2, 3u) << "\nLz = 1.0\n";
     if (periodic) s << (N_DIM == 2 ? "periodic = [\"x\", \"y\"]\n" : "periodic = [\"x\", \"y\", \"z\"]\n");
     return s.str();
 }
@@ -110,12 +111,12 @@ TEST(StatisticsTest, AveragesOfAnOscillatingFlowMatchTheAnalyticalOnes) {
     const auto & mean = stats.host_means();
     const auto & cov = stats.host_covariances();
     for (uint32_t c = 0; c < solver.get_mesh()->n_cells; c++) {
-        EXPECT_NEAR(mean(c, 0), 1.0, tol);
-        EXPECT_NEAR(mean(c, 1), 1.0 - 0.1 * u0 * u0, tol);
-        EXPECT_NEAR(mean(c, 2), 0.0, tol * u0);
-        EXPECT_NEAR(cov(c, 0), 0.5 * u0 * u0, tol * u0 * u0);
+        EXPECT_NEAR(double(mean(c, 0)), 1.0, tol);
+        EXPECT_NEAR(double(mean(c, 1)), 1.0 - 0.1 * u0 * u0, tol);
+        EXPECT_NEAR(double(mean(c, 2)), 0.0, tol * u0);
+        EXPECT_NEAR(double(cov(c, 0)), 0.5 * u0 * u0, tol * u0 * u0);
         // p' = 0.1 u0^2 cos(2 w t) is orthogonal to u' over a period
-        EXPECT_NEAR(cov(c, 1), 0.0, tol * u0 * u0);
+        EXPECT_NEAR(double(cov(c, 1)), 0.0, tol * u0 * u0);
     }
 }
 
@@ -195,6 +196,7 @@ TEST(StatisticsTest, ProbesReadTheCellHoldingEachPoint) {
     solver.copy_device_to_host();
     const Mesh & mesh = *solver.get_mesh();
 
+    const double tol = precision_tol<double>(1e-12, 1e-6);
     auto expected_cell = [&](const std::vector<double> & x) {
         for (uint32_t c = 0; c < mesh.n_cells; c++) {
             bool inside = true;
@@ -205,7 +207,7 @@ TEST(StatisticsTest, ProbesReadTheCellHoldingEachPoint) {
                     lo = std::min(lo, v);
                     hi = std::max(hi, v);
                 }
-                inside = inside && x[d] >= lo - 1e-12 && x[d] <= hi + 1e-12;
+                inside = inside && x[d] >= lo - tol && x[d] <= hi + tol;
             }
             if (inside) return c;
         }

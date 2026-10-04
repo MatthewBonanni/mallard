@@ -374,7 +374,8 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
 void Probes::init(const toml::value & input, const Mesh & mesh, const std::vector<std::string> & species_names,
                   bool resume) {
     if (!input.contains("probes")) return;
-    for (const auto & entry : toml::find<std::vector<toml::value>>(input, "probes")) {
+    const auto entries = toml::find<std::vector<toml::value>>(input, "probes");
+    for (const auto & entry : entries) {
         Set set;
         if (!entry.contains("name")) throw InputError("probes: every probe needs a name.");
         set.name = toml::find<std::string>(entry, "name");
