@@ -377,9 +377,13 @@ snapshot with collective I/O instead of a VTU piece of its own. It writes
   ParaView opens (XDMF reader).
 
 Row i of every cell array is global cell i, the cell order of the mesh file and
-of restart files, so the files do not depend on the number of ranks. VTU
-output remains the simpler choice for small runs. `tools/mallard_h5.py`
-reads the files.
+of restart files, so the files do not depend on the number of ranks.
+Snapshots are about half the size of VTU pieces (the mesh is not repeated) and
+two files instead of one per rank. A shared file pays off on parallel file
+systems; on one node's local disk, which serializes writes to a file, VTU
+pieces write faster beyond a few ranks (2.1M hexahedra, 16 ranks: 115 ms per
+HDF5 snapshot against 72 ms, 1 rank: 140 ms against 1.1 s). VTU output remains
+the simpler choice for small runs. `tools/mallard_h5.py` reads the files.
 
 ## `MallardReactor`
 
