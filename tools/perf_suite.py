@@ -68,10 +68,12 @@ def stage_input(case_input, work):
     return staged
 
 
-def run_once(case, binary, launcher, work):
+def run_once(case, binary, launcher, work, log=None):
     staged = stage_input((PERF_DIR / case["input"]).resolve(), work)
     cmd = launcher + [str(binary), "-i", staged.name]
     out = subprocess.run(cmd, cwd=work, capture_output=True, text=True)
+    if log:
+        log.write_text(out.stdout + out.stderr)
     if out.returncode != 0:
         raise RuntimeError(f"{case['name']}: {shlex.join(cmd)} exited with {out.returncode}\n"
                            f"{out.stdout[-3000:]}\n{out.stderr[-3000:]}")
@@ -102,6 +104,9 @@ def cmd_run(args):
         suite = [c for c in suite if c["name"] in wanted]
     builds = {"2d": args.build_2d, "3d": args.build_3d}
     launcher = shlex.split(args.launcher) if args.launcher else []
+    logs = Path(args.logs) if args.logs else None
+    if logs:
+        logs.mkdir(parents=True, exist_ok=True)
     runs = {}
     for case in suite:
         build = builds[case["build"]]
@@ -110,9 +115,12 @@ def cmd_run(args):
             continue
         binary = Path(build).resolve() / "src" / case["program"]
         with tempfile.TemporaryDirectory(prefix=f"perf-{case['name']}-") as tmp:
-            run_once(case, binary, launcher, Path(tmp))
-            for _ in range(args.repeats):
-                for name, value in run_once(case, binary, launcher, Path(tmp)).items():
+            for i in range(args.repeats + 1):
+                log = logs / f"{case['name']}-{i}.log" if logs else None
+                result = run_once(case, binary, launcher, Path(tmp), log)
+                if i == 0:
+                    continue  # warm-up
+                for name, value in result.items():
                     runs.setdefault(name, []).append(value)
         for name in runs:
             if name == case["name"] or name.startswith(case["name"] + "@"):
@@ -204,6 +212,7 @@ def main():
     r.add_argument("--hardware", help="override the detected hardware name")
     r.add_argument("--out", default="perf.json")
     r.add_argument("--csv")
+    r.add_argument("--logs", help="directory for each run's output (run 0 is the warm-up)")
     c = sub.add_parser("compare")
     c.add_argument("results")
     c.add_argument("--hardware")
