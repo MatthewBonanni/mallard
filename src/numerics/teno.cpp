@@ -20,6 +20,7 @@
 #include <string>
 #include <utility>
 #include <tuple>
+#include <type_traits>
 #include <stdexcept>
 #include <vector>
 
@@ -631,7 +632,8 @@ class PackedRows {
             chunk.cells = PageArray<int32_t>(n_slots, -1);
             chunk.faces = PageArray<int32_t>(n_slots, -1);
             chunk.pinv = PageArray<rtype>(n_slots * width, 0.0);
-            for (uint32_t c = 0; c < n; c++) {
+            Kokkos::parallel_for("teno_pack", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n),
+                                 [&](const uint32_t c) {
                 const CellTables & t = tables[c];
                 const uint64_t start = slice_start[(c0 + c) >> shift] - chunk.slot0;
                 const uint32_t lane = (c0 + c) & (slice - 1);
@@ -642,7 +644,7 @@ class PackedRows {
                         chunk.pinv[(((start + s) * width + l) << shift) + lane] = (t.*pinv)[s * width + l];
                     }
                 }
-            }
+            });
             chunks.push_back(std::move(chunk));
         }
 
@@ -756,7 +758,8 @@ class TableBuilder {
             Kokkos::View<rtype **>::host_mirror_type h_si("teno_si_rows", n, scheme.si_matrix.extent(1));
             Kokkos::View<uint16_t *>::host_mirror_type h_large_size("teno_large_size_rows", n);
             Kokkos::View<uint16_t **>::host_mirror_type h_small_size("teno_small_size_rows", n, teno::MAX_FACES);
-            for (uint32_t c = 0; c < n; c++) {
+            Kokkos::parallel_for("teno_rows", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n),
+                                 [&](const uint32_t c) {
                 const CellTables & t = tables[c];
                 scheme.gather_depth[c0 + c] = t.gather_depth;
                 h_scale(c) = t.scale;
@@ -764,7 +767,7 @@ class TableBuilder {
                 for (size_t k = 0; k < t.si.size(); k++) h_si(c, k) = t.si[k];
                 h_large_size(c) = t.large_cells.size();
                 for (uint8_t k = 0; k < teno::MAX_FACES; k++) h_small_size(c, k) = t.small_size[k];
-            }
+            });
             upload_rows(scheme.scale, c0, h_scale);
             upload_rows(scheme.basis_mean, c0, h_mean);
             upload_rows(scheme.si_matrix, c0, h_si);
@@ -1042,81 +1045,78 @@ void TENO::compute_stencils_and_matrices() {
             entries_depth = depth;
             entries.clear();
             const std::vector<Visit> cells(layers.cells.begin(), layers.cells.begin() + layers.size(depth));
-            {
-                // Straight boundary lines touched by the gathered cells. One line can
-                // carry several conditions (e.g. inflow then wall), so each image takes
-                // its state from the line's face nearest to it.
-                struct LineFace {
-                    int32_t face;
-                    double x, y;  // centroid, translated with its cell
-                };
-                struct Line {
-                    double nx, ny;
-                    std::vector<LineFace> faces;
-                };
-                std::vector<Line> lines;
-                for (const Visit & v : cells) {
-                    const uint32_t c = v.cell;
-                    for (uint32_t k = 0; k < mesh->h_n_faces_of_cell(c); k++) {
-                        const uint32_t f = mesh->h_face_of_cell(c, k);
-                        if (mesh->h_cells_of_face(f, 1) >= 0 || h_face_bc(f) < 0) continue;
-                        if (h_bcs(h_face_bc(f)).type == BoundaryType::PARTITION) continue;
-                        const double nx = double(mesh->h_face_normals(f, 0)) / double(mesh->h_face_area(f));
-                        const double ny = double(mesh->h_face_normals(f, 1)) / double(mesh->h_face_area(f));
-                        const LineFace lf{static_cast<int32_t>(f), double(mesh->h_face_coords(f, 0)) + v.t[0], double(mesh->h_face_coords(f, 1)) + v.t[1]};
-                        Line * match = nullptr;
-                        for (Line & line : lines) {
-                            const LineFace & g = line.faces[0];
-                            const double off = (lf.x - g.x) * line.nx + (lf.y - g.y) * line.ny;
-                            if (std::abs(nx * line.nx + ny * line.ny - 1.0) < GEOMETRY_TOL && std::abs(off) < GEOMETRY_TOL * h) {
-                                match = &line;
-                                break;
-                            }
+            // Straight boundary lines touched by the gathered cells. One line can
+            // carry several conditions (e.g. inflow then wall), so each image takes
+            // its state from the line's face nearest to it.
+            struct LineFace {
+                int32_t face;
+                double x, y;  // centroid, translated with its cell
+            };
+            struct Line {
+                double nx, ny;
+                std::vector<LineFace> faces;
+            };
+            std::vector<Line> lines;
+            for (const Visit & v : cells) {
+                const uint32_t c = v.cell;
+                for (uint32_t k = 0; k < mesh->h_n_faces_of_cell(c); k++) {
+                    const uint32_t f = mesh->h_face_of_cell(c, k);
+                    if (mesh->h_cells_of_face(f, 1) >= 0 || h_face_bc(f) < 0) continue;
+                    if (h_bcs(h_face_bc(f)).type == BoundaryType::PARTITION) continue;
+                    const double nx = double(mesh->h_face_normals(f, 0)) / double(mesh->h_face_area(f));
+                    const double ny = double(mesh->h_face_normals(f, 1)) / double(mesh->h_face_area(f));
+                    const LineFace lf{static_cast<int32_t>(f), double(mesh->h_face_coords(f, 0)) + v.t[0], double(mesh->h_face_coords(f, 1)) + v.t[1]};
+                    Line * match = nullptr;
+                    for (Line & line : lines) {
+                        const LineFace & g = line.faces[0];
+                        const double off = (lf.x - g.x) * line.nx + (lf.y - g.y) * line.ny;
+                        if (std::abs(nx * line.nx + ny * line.ny - 1.0) < GEOMETRY_TOL && std::abs(off) < GEOMETRY_TOL * h) {
+                            match = &line;
+                            break;
                         }
-                        if (match == nullptr) {
-                            lines.push_back(Line{nx, ny, {}});
-                            match = &lines.back();
-                        }
-                        const bool known = std::any_of(match->faces.begin(), match->faces.end(), [&](const LineFace & g) {
-                            return g.face == lf.face && g.x == lf.x && g.y == lf.y;
-                        });
-                        if (!known) match->faces.push_back(lf);
                     }
+                    if (match == nullptr) {
+                        lines.push_back(Line{nx, ny, {}});
+                        match = &lines.back();
+                    }
+                    const bool known = std::any_of(match->faces.begin(), match->faces.end(), [&](const LineFace & g) {
+                        return g.face == lf.face && g.x == lf.x && g.y == lf.y;
+                    });
+                    if (!known) match->faces.push_back(lf);
                 }
-                entries.clear();
-                for (const Visit & v : cells) {
-                    const uint32_t c = v.cell;
-                    const double cx = double(mesh->h_cell_coords(c, 0)) + v.t[0], cy = double(mesh->h_cell_coords(c, 1)) + v.t[1];
-                    if (!(c == i && v.lattice == Lattice{0, 0, 0})) {
-                        entries.push_back(Entry{c, -1, cx, cy, v.t[0], v.t[1], 0.0, 0.0});
-                    }
-                    for (const Line & line : lines) {
-                        const LineFace & first = line.faces[0];
-                        Entry e{c, first.face, 0.0, 0.0, v.t[0], v.t[1], first.x, first.y};
-                        mirror(e.face, e.mx, e.my, cx, cy, e.x, e.y);
-                        // Images that land inside the domain (non-convex boundaries) are not ghosts
-                        bool inside = false;
-                        for (const Visit & other : cells) {
-                            if (point_in_cell(other, e.x, e.y)) {
-                                inside = true;
-                                break;
-                            }
+            }
+            for (const Visit & v : cells) {
+                const uint32_t c = v.cell;
+                const double cx = double(mesh->h_cell_coords(c, 0)) + v.t[0], cy = double(mesh->h_cell_coords(c, 1)) + v.t[1];
+                if (!(c == i && v.lattice == Lattice{0, 0, 0})) {
+                    entries.push_back(Entry{c, -1, cx, cy, v.t[0], v.t[1], 0.0, 0.0});
+                }
+                for (const Line & line : lines) {
+                    const LineFace & first = line.faces[0];
+                    Entry e{c, first.face, 0.0, 0.0, v.t[0], v.t[1], first.x, first.y};
+                    mirror(e.face, e.mx, e.my, cx, cy, e.x, e.y);
+                    // Images that land inside the domain (non-convex boundaries) are not ghosts
+                    bool inside = false;
+                    for (const Visit & other : cells) {
+                        if (point_in_cell(other, e.x, e.y)) {
+                            inside = true;
+                            break;
                         }
-                        if (inside) continue;
-                        // The ghost state comes from the line's face nearest to the image
-                        double best = std::numeric_limits<double>::max();
-                        for (const LineFace & lf : line.faces) {
-                            const double dx = lf.x - 0.5 * (e.x + cx);
-                            const double dy = lf.y - 0.5 * (e.y + cy);
-                            if (dx * dx + dy * dy < best) {
-                                best = dx * dx + dy * dy;
-                                e.face = lf.face;
-                                e.mx = lf.x;
-                                e.my = lf.y;
-                            }
-                        }
-                        entries.push_back(e);
                     }
+                    if (inside) continue;
+                    // The ghost state comes from the line's face nearest to the image
+                    double best = std::numeric_limits<double>::max();
+                    for (const LineFace & lf : line.faces) {
+                        const double dx = lf.x - 0.5 * (e.x + cx);
+                        const double dy = lf.y - 0.5 * (e.y + cy);
+                        if (dx * dx + dy * dy < best) {
+                            best = dx * dx + dy * dy;
+                            e.face = lf.face;
+                            e.mx = lf.x;
+                            e.my = lf.y;
+                        }
+                    }
+                    entries.push_back(e);
                 }
             }
             auto dist2 = [&](const Entry & e) {
@@ -1338,6 +1338,29 @@ void integrate_cell(const std::vector<Point3> & nodes, const TetRule & rule, F &
     }
 }
 
+// Moments of total degree below 2 * MAX_DEGREE - 1
+constexpr int MAX_MOMENTS = (2 * teno::MAX_DEGREE - 1) * (2 * teno::MAX_DEGREE) * (2 * teno::MAX_DEGREE + 1) / 6;
+
+/** @brief Add w x^a y^b z^c, a + b + c < NM, to the moment sums m, ordered by a, then b, then c. */
+template <int NM>
+void add_moments(const double w, const Point3 & x, double * m) {
+    double px[NM], py[NM], pz[NM];
+    px[0] = py[0] = pz[0] = 1.0;
+    for (int k = 1; k < NM; k++) {
+        px[k] = px[k - 1] * x[0];
+        py[k] = py[k - 1] * x[1];
+        pz[k] = pz[k - 1] * x[2];
+    }
+    int k = 0;
+    for (int a = 0; a < NM; a++) {
+        const double wa = w * px[a];
+        for (int b = 0; a + b < NM; b++) {
+            const double wab = wa * py[b];
+            for (int c = 0; a + b + c < NM; c++) m[k++] += wab * pz[c];
+        }
+    }
+}
+
 double det3(const Point3 & a, const Point3 & b, const Point3 & c) {
     return a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0]);
 }
@@ -1408,24 +1431,23 @@ void TENO::compute_stencils_and_matrices_3d() {
             const Point3 q = node(mesh->h_node_of_cell(c, k));
             for (int d = 0; d < 3; d++) p[k][d] = (q[d] - xc[d]) / hc;
         }
-        double * m = &moments[static_cast<size_t>(c) * n_moments];
+        double sums[MAX_MOMENTS] = {};
         double vol = 0.0;
-        integrate_cell(p, rule_si, [&](const Point3 & x, double w) {
-            double px[12], py[12], pz[12];
-            px[0] = py[0] = pz[0] = 1.0;
-            for (int k = 1; k < nm; k++) {
-                px[k] = px[k - 1] * x[0];
-                py[k] = py[k - 1] * x[1];
-                pz[k] = pz[k - 1] * x[2];
-            }
-            for (int a = 0; a < nm; a++) {
-                for (int b = 0; a + b < nm; b++) {
-                    for (int cc = 0; a + b + cc < nm; cc++) m[moment(a, b, cc)] += w * px[a] * py[b] * pz[cc];
-                }
-            }
-            vol += w;
-        });
-        for (int k = 0; k < n_moments; k++) m[k] /= vol;
+        auto integrate = [&](auto nm_c) {
+            integrate_cell(p, rule_si, [&](const Point3 & x, double w) {
+                add_moments<decltype(nm_c)::value>(w, x, sums);
+                vol += w;
+            });
+        };
+        switch (nm) {
+            case 3: integrate(std::integral_constant<int, 3>()); break;
+            case 5: integrate(std::integral_constant<int, 5>()); break;
+            case 7: integrate(std::integral_constant<int, 7>()); break;
+            case 9: integrate(std::integral_constant<int, 9>()); break;
+            default: break;
+        }
+        double * m = &moments[static_cast<size_t>(c) * n_moments];
+        for (int k = 0; k < n_moments; k++) m[k] = sums[k] / vol;
     });
     std::vector<std::array<uint8_t, 3>> expo_all(nk);
     for (uint8_t l = 0; l < nk; l++) teno::exponents(l, expo_all[l][0], expo_all[l][1], expo_all[l][2]);
@@ -1603,74 +1625,72 @@ void TENO::compute_stencils_and_matrices_3d() {
             entries_depth = depth;
             entries.clear();
             const std::vector<Visit> cells(layers.cells.begin(), layers.cells.begin() + layers.size(depth));
-            {
-                // Planar boundaries touched by the gathered cells; each image takes
-                // its state from the plane's face nearest to it
-                struct PlaneFace {
-                    int32_t face;
-                    Lattice lattice;
-                    Point3 x;  // centroid, translated with its cell
-                };
-                struct Plane {
-                    Point3 n;
-                    std::vector<PlaneFace> faces;
-                };
-                std::vector<Plane> planes;
-                for (const Visit & v : cells) {
-                    const uint32_t c = v.cell;
-                    for (uint32_t k = 0; k < mesh->h_n_faces_of_cell(c); k++) {
-                        const uint32_t f = mesh->h_face_of_cell(c, k);
-                        if (mesh->h_cells_of_face(f, 1) >= 0 || h_face_bc(f) < 0) continue;
-                        if (h_bcs(h_face_bc(f)).type == BoundaryType::PARTITION) continue;
-                        const Point3 n = unit_normal(f);
-                        PlaneFace pf{static_cast<int32_t>(f), v.lattice, {}};
-                        for (int d = 0; d < 3; d++) pf.x[d] = double(mesh->h_face_coords(f, d)) + v.t[d];
-                        Plane * match = nullptr;
-                        for (Plane & plane : planes) {
-                            const PlaneFace & g = plane.faces[0];
-                            double off = 0.0, cos = 0.0;
-                            for (int d = 0; d < 3; d++) {
-                                off += (pf.x[d] - g.x[d]) * plane.n[d];
-                                cos += n[d] * plane.n[d];
-                            }
-                            if (std::abs(cos - 1.0) < GEOMETRY_TOL && std::abs(off) < GEOMETRY_TOL * h) {
-                                match = &plane;
-                                break;
-                            }
+            // Planar boundaries touched by the gathered cells; each image takes
+            // its state from the plane's face nearest to it
+            struct PlaneFace {
+                int32_t face;
+                Lattice lattice;
+                Point3 x;  // centroid, translated with its cell
+            };
+            struct Plane {
+                Point3 n;
+                std::vector<PlaneFace> faces;
+            };
+            std::vector<Plane> planes;
+            for (const Visit & v : cells) {
+                const uint32_t c = v.cell;
+                for (uint32_t k = 0; k < mesh->h_n_faces_of_cell(c); k++) {
+                    const uint32_t f = mesh->h_face_of_cell(c, k);
+                    if (mesh->h_cells_of_face(f, 1) >= 0 || h_face_bc(f) < 0) continue;
+                    if (h_bcs(h_face_bc(f)).type == BoundaryType::PARTITION) continue;
+                    const Point3 n = unit_normal(f);
+                    PlaneFace pf{static_cast<int32_t>(f), v.lattice, {}};
+                    for (int d = 0; d < 3; d++) pf.x[d] = double(mesh->h_face_coords(f, d)) + v.t[d];
+                    Plane * match = nullptr;
+                    for (Plane & plane : planes) {
+                        const PlaneFace & g = plane.faces[0];
+                        double off = 0.0, cos = 0.0;
+                        for (int d = 0; d < 3; d++) {
+                            off += (pf.x[d] - g.x[d]) * plane.n[d];
+                            cos += n[d] * plane.n[d];
                         }
-                        if (match == nullptr) {
-                            planes.push_back(Plane{n, {}});
-                            match = &planes.back();
+                        if (std::abs(cos - 1.0) < GEOMETRY_TOL && std::abs(off) < GEOMETRY_TOL * h) {
+                            match = &plane;
+                            break;
                         }
-                        const bool known = std::any_of(match->faces.begin(), match->faces.end(), [&](const PlaneFace & g) {
-                            return g.face == pf.face && g.lattice == pf.lattice;
-                        });
-                        if (!known) match->faces.push_back(pf);
                     }
+                    if (match == nullptr) {
+                        planes.push_back(Plane{n, {}});
+                        match = &planes.back();
+                    }
+                    const bool known = std::any_of(match->faces.begin(), match->faces.end(), [&](const PlaneFace & g) {
+                        return g.face == pf.face && g.lattice == pf.lattice;
+                    });
+                    if (!known) match->faces.push_back(pf);
                 }
-                if (!planes.empty()) tabulate_face_planes(cells);
-                for (const Visit & v : cells) {
-                    const uint32_t c = v.cell;
-                    Point3 xc;
-                    for (int d = 0; d < 3; d++) xc[d] = double(mesh->h_cell_coords(c, d)) + v.t[d];
-                    if (!(c == i && v.lattice == zero)) entries.push_back(Entry{c, -1, xc, v.lattice, v.t, zero, origin});
-                    for (const Plane & plane : planes) {
-                        const PlaneFace & first = plane.faces[0];
-                        Entry e{c, first.face, mirror(first.face, first.x, xc), v.lattice, v.t, first.lattice, first.x};
-                        if (inside_any(cells, e.x)) continue;
-                        double best = std::numeric_limits<double>::max();
-                        for (const PlaneFace & pf : plane.faces) {
-                            double d2 = 0.0;
-                            for (int d = 0; d < 3; d++) d2 += std::pow(pf.x[d] - 0.5 * (e.x[d] + xc[d]), 2);
-                            if (d2 < best) {
-                                best = d2;
-                                e.face = pf.face;
-                                e.face_lattice = pf.lattice;
-                                e.m = pf.x;
-                            }
+            }
+            if (!planes.empty()) tabulate_face_planes(cells);
+            for (const Visit & v : cells) {
+                const uint32_t c = v.cell;
+                Point3 xc;
+                for (int d = 0; d < 3; d++) xc[d] = double(mesh->h_cell_coords(c, d)) + v.t[d];
+                if (!(c == i && v.lattice == zero)) entries.push_back(Entry{c, -1, xc, v.lattice, v.t, zero, origin});
+                for (const Plane & plane : planes) {
+                    const PlaneFace & first = plane.faces[0];
+                    Entry e{c, first.face, mirror(first.face, first.x, xc), v.lattice, v.t, first.lattice, first.x};
+                    if (inside_any(cells, e.x)) continue;
+                    double best = std::numeric_limits<double>::max();
+                    for (const PlaneFace & pf : plane.faces) {
+                        double d2 = 0.0;
+                        for (int d = 0; d < 3; d++) d2 += std::pow(pf.x[d] - 0.5 * (e.x[d] + xc[d]), 2);
+                        if (d2 < best) {
+                            best = d2;
+                            e.face = pf.face;
+                            e.face_lattice = pf.lattice;
+                            e.m = pf.x;
                         }
-                        entries.push_back(e);
                     }
+                    entries.push_back(e);
                 }
             }
             sort_by_key(entries, dist2);
