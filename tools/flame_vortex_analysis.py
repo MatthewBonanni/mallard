@@ -16,9 +16,9 @@ For each output of RUN_DIR/solut/flame.pvd (the half channel y > 0):
 Each run is then classified as Poinsot, Veynante & Candel (1991) do:
   quenched  the front is locally extinguished, q_min < 0.1;
   pocket    a pocket of fresh gas is cut off, without quenching;
-  wrinkled  Q or L changes by 5% or more;
-  no effect the total heat release changes by less than 5% (below their
-            cut-off limit).
+  wrinkled  Q changes by 5% or more from its initial value (their cut-off
+            limit: about 5% change in the total reaction rate);
+  no effect Q changes by less than 5%.
 Prints a table per run and the outcomes; --plot draws the runs on the
 spectral diagram (u' / S_L against r / delta_L) with the line Ka(r) =
 (u' / r) / (S_L / delta_L) = 1 that bounds Poinsot et al.'s quenching zone
@@ -100,7 +100,7 @@ def classify(rows):
         return "quenched"
     if rows[:, 4].any():
         return "pocket"
-    if np.abs(rows[:, 1] - rows[0, 1]).max() >= 0.05 * rows[0, 1] or np.abs(rows[:, 2] - rows[0, 2]).max() >= 0.05:
+    if np.abs(rows[:, 1] - rows[0, 1]).max() >= 0.05 * rows[0, 1]:
         return "wrinkled"
     return "no effect"
 

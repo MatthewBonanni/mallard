@@ -37,9 +37,10 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mallard_vtu import read_quads  # noqa: E402
 
-# Ruetsch, Vervisch & Linan (1995), Table I: alpha, D_TF, U_F / S_L (beta = 8, Le = 1, Pr = 0.75)
-RUETSCH = [(0.75, 8.3, 1.23), (0.75, 8.9, 1.26), (0.75, 11.1, 1.33), (0.75, 13.7, 1.39), (0.75, 19.7, 1.46),
-           (0.75, 34.0, 1.51), (0.5, 35.8, 1.17), (0.66, 35.0, 1.36), (0.8, 33.4, 1.61)]
+# Ruetsch, Vervisch & Linan (1995), Table I (beta = 8, Le = 1, Pr = 0.75): alpha = 1 - rho_b / rho_u, D_TF,
+# U_F / S_L. At rho_u / rho_b = 4, U_F / S_L rises from 1.23 to 1.51 as D_TF goes from 8.3 to 34 (the ends of
+# that series); their simulation IX has rho_u / rho_b = 5.
+RUETSCH = [(0.75, 8.3, 1.23), (0.75, 34.0, 1.51), (0.8, 33.4, 1.61)]
 
 
 def grid(path, names):
@@ -174,32 +175,51 @@ def plot(results, out):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    fig, axs = plt.subplots(1, 2, figsize=(12, 4.6))
+    fig, axs = plt.subplots(1, 3, figsize=(17, 4.8))
+    colors = ["#e8710a", "#1a73e8", "#188038", "#a142f4"]
     ax = axs[0]
-    for r in results:
+    for r, c in zip(results, colors):
         tau = r["info"]["delta"] / r["info"]["S_L"]
         rows = r["rows"]
         t = rows[:, 0] / tau
-        x = rows[:, 1]
-        v = np.gradient(x, rows[:, 0])
+        v = np.gradient(rows[:, 1], rows[:, 0])
         k = max(3, len(t) // 15)
         v_s = np.convolve(v, np.ones(k) / k, mode="same")
-        ax.plot(t[k:-k], (r["info"]["u_in"] - v_s[k:-k]) / r["info"]["S_L"],
+        ax.plot(t[k:-k], (r["info"]["u_in"] - v_s[k:-k]) / r["info"]["S_L"], color=c,
                 label=f"delta_M0 = {r['info']['mixing']:g} delta_L")
-        ax.axhline(np.sqrt(r["info"]["sigma"]), color="#888", ls=":", lw=1)
+    if results:
+        ax.axhline(np.sqrt(results[0]["info"]["sigma"]), color="#888", ls=":", lw=1)
     ax.set_xlabel("t S_L / delta_L")
     ax.set_ylabel("U_F / S_L")
     ax.set_title("Propagation speed against the inflow (smoothed)")
     ax.legend()
     ax = axs[1]
-    for alpha, D, U in RUETSCH:
-        sigma = 1 / (1 - alpha)
-        ax.plot(D, (U - 1) / (np.sqrt(sigma) - 1), "o", mfc="none", color="#555")
-    ax.plot([], [], "o", mfc="none", color="#555", label="Ruetsch et al. 1995 (one-step, Le = 1)")
-    for r in results:
-        ax.plot(r["D_TF"], r["share"], "s", ms=9, label=f"Mallard, delta_M0 = {r['info']['mixing']:g} delta_L")
+    for (alpha, D, U), m in zip(RUETSCH, ["o", "o", "^"]):
+        ax.plot(D, U, m, mfc="none", mec="#555", ms=8)
+    ax.plot([], [], "o", mfc="none", mec="#555", label="Ruetsch et al. 1995, rho_u/rho_b = 4")
+    ax.plot([], [], "^", mfc="none", mec="#555", label="Ruetsch et al. 1995, rho_u/rho_b = 5")
+    for s, ls in ((4.0, "--"), (5.0, "-.")):
+        ax.axhline(np.sqrt(s), color="#999", ls=ls, lw=0.8)
+    for r, c in zip(results, colors):
+        ax.plot(r["D_TF"], r["U_F"], "s", color=c, ms=9,
+                label=f"Mallard, delta_M0 = {r['info']['mixing']:g} (rho_u/rho_b = {r['info']['sigma']:.2f})")
+    if results:
+        ax.axhline(np.sqrt(results[0]["info"]["sigma"]), color=colors[0], ls=":", lw=1)
+    ax.set_xlabel("D_TF = local mixing thickness / delta_L")
+    ax.set_ylabel("U_F / S_L")
+    ax.set_xlim(0, 40)
+    ax.set_ylim(1, 2.6)
+    ax.legend(fontsize=8, loc="upper left")
+    ax.set_title("U_F / S_L (lines: sqrt(rho_u / rho_b))")
+    ax = axs[2]
+    for (alpha, D, U), m in zip(RUETSCH, ["o", "o", "^"]):
+        ax.plot(D, (U - 1) / (np.sqrt(1 / (1 - alpha)) - 1), m, mfc="none", mec="#555", ms=8)
+    ax.plot([], [], "o", mfc="none", mec="#555", label="Ruetsch et al. 1995 (one-step, Le = 1)")
+    for r, c in zip(results, colors):
+        ax.plot(r["D_TF"], r["share"], "s", ms=9, color=c, label=f"Mallard, delta_M0 = {r['info']['mixing']:g} delta_L")
     ax.set_xlabel("D_TF = local mixing thickness / delta_L")
     ax.set_ylabel("(U_F / S_L - 1) / (sqrt(rho_u / rho_b) - 1)")
+    ax.set_xlim(0, 40)
     ax.set_ylim(0, 1.05)
     ax.axhline(1, color="#888", ls=":", lw=1)
     ax.legend(fontsize=9, loc="lower right")

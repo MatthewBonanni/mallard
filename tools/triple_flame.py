@@ -229,7 +229,7 @@ variables = ["RHO", "U", "T", "HRR", "Y_H2", "Y_O2", "Y_H2O", "Y_N2"]
 [[write_data]]
 prefix = "./restart/flame"
 format = "restart"
-time_interval = {t_stop / 6:.17g}
+time_interval = {t_stop / 20:.17g}
 """)
     print(f"{args.run_dir}: Z_st = {Z_st:.4f}, S_L = {S_L:.4f} m/s, delta_L = {delta * 1e3:.4f} mm, "
           f"rho_u / rho_b = {sigma:.3f}, sqrt = {np.sqrt(sigma):.3f}; {nx} x {ny} cells of {dx * 1e6:.2f} um, "
