@@ -2,16 +2,20 @@
 """Animate the sphere wake at Re = 300: Q-criterion isosurfaces and the force history.
 
     animate_sphere_re300.py SOLUT_DIR FORCES.csv OUTPUT_BASE [--q 0.02] [--u 0.2]
-        [--width 1920] [--fps 15] [--orbit 120] [--hold 2] [--gif-width 640]
-        [--gif-every 2] [--t-start 600] [--prefix sphere]
+        [--spacing 0.02] [--sigma 1.5] [--width 1920] [--fps 15] [--orbit 120]
+        [--hold 2] [--gif-width 640] [--gif-every 2] [--t-start 600] [--prefix sphere]
     animate_sphere_re300.py --extract SOLUT_DIR SURFACE_DIR [--q 0.02] [--u 0.2]
 
 SOLUT_DIR holds the volume VTU (or PVTU) series of examples/sphere_re300 with
-U. Each snapshot is clipped to the near wake, Q = (|Omega|^2 - |S|^2) / 2 of
-the velocity (interpolated to the vertices) is contoured at Q (in units of
-(U / D)^2, U the free-stream speed) and colored by the streamwise velocity,
-with the sphere, while the camera orbits the wake; the panels on the right
-trace the drag and lift coefficients from t-start (solver time, D / a) on.
+U and Q, the Q-criterion from the solver's velocity gradients. Each snapshot
+is resampled near the wake onto a uniform grid of the given spacing (in D),
+smoothed by a Gaussian of sigma grid spacings, and Q is contoured there at
+--q (in units of (U / D)^2, U the free-stream speed), colored by the
+streamwise velocity, with the sphere, while the camera orbits the wake;
+the panels on the right trace the drag and lift coefficients from t-start
+(solver time, D / a) on. The tetrahedra make a piecewise-constant field
+whose contours would follow their facets; the resampling and filter remove
+that without moving the isosurfaces by more than about sigma * spacing.
 Writes OUTPUT_BASE.mp4 (H.264, CRF 18), OUTPUT_BASE.gif (if --gif-width >
 0) and a still of the last frame, OUTPUT_BASE_still.png. Needs pyvista besides
 the packages in tools/README.md.
@@ -169,9 +173,9 @@ def main():
     ap.add_argument("--q", type=float, default=0.02, help="Isosurface level of Q, in (U / D)^2")
     ap.add_argument("--u", type=float, default=0.2, help="Free-stream speed")
     ap.add_argument("--spacing", type=float, default=0.02, help="Sampling grid spacing, in D")
-    ap.add_argument("--sigma", type=float, default=1.0, help="Gaussian filter width, in grid spacings")
+    ap.add_argument("--sigma", type=float, default=1.5, help="Gaussian filter width, in grid spacings")
     ap.add_argument("--t-start", type=float, default=600.0, help="Start of the force panels (solver time)")
-    ap.add_argument("--subtitle", default="Q isosurfaces colored by streamwise velocity")
+    ap.add_argument("--subtitle", help="Default: the isosurface level and coloring")
     ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--fps", type=int, default=15)
     ap.add_argument("--orbit", type=float, default=120.0, help="Camera orbit about the stream axis, degrees")
@@ -198,7 +202,8 @@ def main():
     plotter = pv.Plotter(off_screen=True, window_size=(w3d, H))
     plotter.set_background(BG)
     plotter.enable_anti_aliasing("ssaa")
-    title = ("Sphere at Re = 300, M = 0.2", args.subtitle)
+    subtitle = args.subtitle or f"Isosurfaces Q = {args.q:g} (U/D)$^2$, colored by streamwise velocity"
+    title = ("Sphere at Re = 300, M = 0.2", subtitle)
     with tempfile.TemporaryDirectory() as tmp:
         for k, (t_file, path) in enumerate(files):
             surf = q_surface(path, args.q * args.u ** 2, args.spacing, args.sigma)
