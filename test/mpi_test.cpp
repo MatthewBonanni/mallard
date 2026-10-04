@@ -224,6 +224,16 @@ TEST(MPITest, NavierStokesWithBoundaryConditionsMatchesSerial) {
         25));
 }
 
+TEST(MPITest, AxisymmetricRunsMatchSerial) {
+    // Revolved geometry, r-weighted stencils, the high-order geometric source
+    // and the axis-corrected viscous gradients of halo cells
+    const std::string axis = "axisymmetric = true\n";
+    const std::string boundaries = bcs("type = \"extrapolation\"\n", "type = \"wall_adiabatic\"\n",
+                                       "type = \"wall_isothermal\"\nT = 1.2\n", "type = \"symmetry\"\n");
+    expect_matches_serial(box_input("cartesian_tri", "type = \"TENO\"\norder = 4\n", NS + axis, boundaries, 12));
+    expect_matches_serial(box_input("cartesian", "type = \"MUSCL\"\n", NS + axis, boundaries, 20));
+}
+
 TEST(MPITest, BoundaryConditionsSurviveTheHaloRebuild) {
     // TENO stencils need a deeper halo than the first one, so the local mesh is
     // built twice. Dirichlet face lists of the first mesh used to survive, and

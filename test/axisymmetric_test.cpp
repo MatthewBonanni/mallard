@@ -166,6 +166,30 @@ INSTANTIATE_TEST_SUITE_P(
                        ::testing::Values("type = \"euler\"",
                                          "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.7")));
 
+TEST(AxisymmetricTest, GasMixtureAtRestStaysAtRest) {
+    // The mixture flux, its pressure in the geometric source and, viscous, its
+    // transport. (Cell averages of a gas whose temperature or composition varies
+    // are not at uniform pressure, in planar runs too.)
+    const std::string mechanism = "gas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n";
+    for (const std::string type : {"euler", "navier_stokes"}) {
+        for (const std::string reconstruction : {"type = \"MUSCL\"", "type = \"TENO\"\norder = 3"}) {
+            Case c;
+            c.reconstruction = reconstruction;
+            c.sides = "type = \"wall_adiabatic\"";
+            c.init = "type = \"constant\"\np = 1.0e5\nT = 600.0\nu = [0.0, 0.0]\nX = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n";
+            c.physics = "type = \"" + type + "\"\n" + mechanism;
+            std::string text = input(c);
+            // The mixture takes no perfect-gas constants
+            const std::string constants = "gamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
+            text.replace(text.find(constants), constants.size(), "");
+            Solver solver;
+            solver.init(parse_toml(text));
+            solver.run();
+            EXPECT_LT(max_speed(solver), precision_tol<double>(1e-10, 1e-3)) << type << " " << reconstruction;
+        }
+    }
+}
+
 TEST(AxisymmetricTest, ConservesMassAxialMomentumAndEnergy) {
     // Periodic pipe with a slip wall: nothing crosses the axis or the wall, and
     // only the radial momentum has a source
