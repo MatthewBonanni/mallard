@@ -400,6 +400,27 @@ TEST(Solver3DValidation, FlowStatisticsOfALinearVelocityField) {
     EXPECT_NEAR(s[0], 7.0, 0.1);
 }
 
+TEST(Solver3DValidation, QAndVorticityOutputOfALinearVelocityField) {
+    // u = (x + 2y - z, 3z - 2x, 5x + y): Q = -(d u_k / d x_i d u_i / d x_k) / 2
+    // = 5.5 and omega = (-2, -6, -4) in every cell, exact for least squares
+    Case3D c;
+    c.mesh = "cartesian_tet";
+    c.n[0] = c.n[1] = c.n[2] = 3;
+    const std::string u = "u = [\"x + 2 * y - z\", \"3 * z - 2 * x\", \"5 * x + y\"]\n";
+    c.set_all_bcs("type = \"dirichlet\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n");
+    c.init = "type = \"analytical\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n";
+    c.extra = "[[write_data]]\nprefix = \"" + (std::filesystem::temp_directory_path() / "mallard_vortex").string() +
+              "\"\nformat = \"vtu\"\ninterval = 1000000\nvariables = [\"Q\", \"VORTICITY\"]\n";
+    auto solver = init_case(c);
+    solver->copy_device_to_host();
+    const double expected[4] = {5.5, -2.0, -6.0, -4.0};
+    for (uint32_t i = 0; i < solver->get_mesh()->n_owned(); i++) {
+        for (int k = 0; k < 4; k++) {
+            EXPECT_NEAR(solver->h_vortex_fields(i, k), expected[k], roundoff(1e-10)) << "cell " << i << ", field " << k;
+        }
+    }
+}
+
 TEST(Solver3DValidation, TENOEnstrophyOfTheTaylorGreenVortex) {
     // With TENO the integrals take gradients from the reconstruction
     // polynomials (order 5 by default): on 16^3 cells of the octant [0, pi]^3

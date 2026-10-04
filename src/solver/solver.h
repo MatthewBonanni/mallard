@@ -148,6 +148,16 @@ class Solver {
          */
         std::array<rtype, 4> integrate_flow_statistics();
 
+        /**
+         * @brief W = [rho, u, p] in W_cells and its gradients in
+         *        viscous_gradients on the owned cells: from the reconstruction
+         *        polynomials (TENO), else least squares.
+         */
+        void update_velocity_gradients();
+
+        /** @brief Q = (|Omega|^2 - |S|^2) / 2 and the vorticity of each owned cell, into vortex_fields. */
+        void update_vortex_fields();
+
         // Public because nvcc rejects device lambdas in non-public member functions
         void update_average_pressure_outlets(StateView solution);
         void calc_dt();
@@ -226,6 +236,9 @@ class Solver {
         Kokkos::View<rtype *[N_PRIMITIVE]>::host_mirror_type h_primitives;
         Kokkos::View<rtype *> p_max;  // largest pressure of each cell so far, if P_MAX is written
         Kokkos::View<rtype *>::host_mirror_type h_p_max;
+        // Q, then the vorticity (one component in 2D), if any of them is written
+        Kokkos::View<rtype **> vortex_fields;
+        Kokkos::View<rtype **>::host_mirror_type h_vortex_fields;
 
     protected:
         void init_mesh();

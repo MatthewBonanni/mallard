@@ -758,7 +758,15 @@ void Solver::allocate_memory() {
         p_max = Kokkos::View<rtype *>("p_max", mesh->n_cells);
         h_p_max = Kokkos::create_mirror_view(p_max);
     }
-    if (is_viscous()) {
+    bool vortex_output = false;
+    for (const char * name : {"Q", "VORTICITY", "VORTICITY_X", "VORTICITY_Y", "VORTICITY_Z"}) {
+        vortex_output = vortex_output || writes_variable(input, name);
+    }
+    if (vortex_output) {
+        vortex_fields = Kokkos::View<rtype **>("vortex_fields", mesh->n_cells, N_DIM == 2 ? 2 : 4);
+        h_vortex_fields = Kokkos::create_mirror_view(vortex_fields);
+    }
+    if (is_viscous() || vortex_output) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
     }
@@ -861,6 +869,10 @@ void Solver::copy_device_to_host() {
     Kokkos::deep_copy(h_primitives, primitives);
     Kokkos::deep_copy(h_cfl_local, cfl_local);
     if (p_max.is_allocated()) Kokkos::deep_copy(h_p_max, p_max);
+    if (vortex_fields.is_allocated()) {
+        update_vortex_fields();
+        Kokkos::deep_copy(h_vortex_fields, vortex_fields);
+    }
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
         Kokkos::deep_copy(h_teno_sigma, teno->troubled);
     }
@@ -868,7 +880,7 @@ void Solver::copy_device_to_host() {
 
 void Solver::register_data() {
     data.clear();
-    data.reserve(CONSERVATIVE_NAMES.size() + species_names.size() + PRIMITIVE_NAMES.size() + 3);
+    data.reserve(CONSERVATIVE_NAMES.size() + species_names.size() + PRIMITIVE_NAMES.size() + 7);
     for (size_t i = 0; i < CONSERVATIVE_NAMES.size(); i++) {
         data.push_back(Data(CONSERVATIVE_NAMES[i], Kokkos::subview(h_conservatives, Kokkos::ALL(), i)));
     }
@@ -903,6 +915,17 @@ void Solver::register_data() {
     }
     data.push_back(Data("CFL", h_cfl_local));
     if (p_max.is_allocated()) data.push_back(Data("P_MAX", h_p_max));
+    if (vortex_fields.is_allocated()) {
+        data.push_back(Data("Q", Kokkos::subview(h_vortex_fields, Kokkos::ALL(), 0)));
+        if constexpr (N_DIM == 2) {
+            data.push_back(Data("VORTICITY", Kokkos::subview(h_vortex_fields, Kokkos::ALL(), 1)));
+        } else {
+            FOR_I_DIM {
+                data.push_back(Data(std::string("VORTICITY_") + "XYZ"[i],
+                                    Kokkos::subview(h_vortex_fields, Kokkos::ALL(), 1 + i)));
+            }
+        }
+    }
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
         // Troubled-cell indicator: TENO stencil selection is active where it exceeds the threshold
         h_teno_sigma = Kokkos::create_mirror_view(teno->troubled);
@@ -1547,7 +1570,7 @@ struct FlowStatisticsFunctor {
     }
 };
 
-std::array<rtype, 4> Solver::integrate_flow_statistics() {
+void Solver::update_velocity_gradients() {
     halo.exchange(state());
     update_boundary_states(t);
     const Euler phys = physics;
@@ -1564,12 +1587,38 @@ std::array<rtype, 4> Solver::integrate_flow_statistics() {
     if (!face_reconstruction->cell_gradients(W_cells, viscous_gradients, mesh->n_owned())) {
         Kokkos::parallel_for("statistics_gradients", mesh->n_owned(), viscous_gradient);
     }
+}
+
+std::array<rtype, 4> Solver::integrate_flow_statistics() {
+    update_velocity_gradients();
     FlowStatisticsFunctor functor{W_cells, viscous_gradients, mesh->cell_volume};
     FlowStatisticsFunctor::value_type result;
     Kokkos::parallel_reduce("statistics", mesh->n_owned(), functor, result);
     std::array<rtype, 4> sums;
     for (int i = 0; i < 4; i++) sums[i] = result.v[i];
     return comm::allreduce(sums, comm::Op::SUM);
+}
+
+void Solver::update_vortex_fields() {
+    update_velocity_gradients();
+    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> g = viscous_gradients;
+    Kokkos::View<rtype **> out = vortex_fields;
+    Kokkos::parallel_for("vortex_fields", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
+        // g(c, 1 + k, i) = d u_k / d x_i, and |S|^2 - |Omega|^2 = d u_k / d x_i d u_i / d x_k
+        rtype gg = 0.0;
+        FOR_I_DIM {
+            for (uint8_t k = 0; k < N_DIM; k++) gg += g(c, 1 + k, i) * g(c, 1 + i, k);
+        }
+        out(c, 0) = -0.5_r * gg;
+        if constexpr (N_DIM == 2) {
+            out(c, 1) = g(c, 2, 0) - g(c, 1, 1);
+        } else {
+            for (uint8_t k = 0; k < 3; k++) {
+                const uint8_t a = (k + 1) % 3, b = (k + 2) % 3;
+                out(c, 1 + k) = g(c, 1 + b, a) - g(c, 1 + a, b);
+            }
+        }
+    });
 }
 
 void Solver::write_integrals() {
