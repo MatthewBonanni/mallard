@@ -880,6 +880,7 @@ void TENO::read_options(const toml::value & input) {
     max_condition = find_real_or(input, "max_condition", 1.0e8);
     bound_preserving = toml::find_or<bool>(input, "bound_preserving", false);
     cache_file = toml::find_or<std::string>(input, "cache_file", "");
+    cache_single = toml::find_or<bool>(input, "cache_single_precision", false);
     // One file per rank, made for this partition
     if (!cache_file.empty() && comm::size() > 1) {
         cache_file += ".r" + std::to_string(comm::rank()) + "-of-" + std::to_string(comm::size());
@@ -894,7 +895,11 @@ void TENO::init(const toml::value & input) {
     if constexpr (N_DIM == 3) init_face_quadrature_3d(order);
 
     cache_loaded = !cache_file.empty() && load_cache();
-    if (!cache_loaded) compute_stencils_and_matrices();
+    if (!cache_loaded) {
+        compute_stencils_and_matrices();
+        // Runs that write the cache use the tables as they will be read back
+        if (cache_single && !cache_file.empty()) round_to_single();
+    }
     allocate_scratch();
     largest_stencil = comm::allreduce(largest_stencil, comm::Op::MAX);
 }
@@ -2670,8 +2675,9 @@ namespace {
 
 // Version 3 stores each reconstructed cell's tables at their actual stencil sizes; version 4 gathers
 // candidates by interior cells, version 5 sorts them in the mesh-spacing metric, version 6 follows
-// the round-off-accurate 2D cell centroids
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-6";
+// the round-off-accurate 2D cell centroids, version 7 can hold the pseudo-inverses and
+// smoothness-indicator matrices in single precision
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-7";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {
@@ -2722,24 +2728,54 @@ bool read_header(std::istream & in, CacheHeader & h) {
            get(in, &h.halo_layers, 1) && get(in, &h.n_reconstructed, 1);
 }
 
-/** @brief Append one cell's record: its fixed-size data, then its stencils at their actual sizes. */
-void serialize(const CellTables & t, std::vector<char> & buf) {
+/** @brief Round values to single precision in place. */
+void round_values_to_single(const Kokkos::View<rtype *> & values) {
+    Kokkos::parallel_for("teno_round_to_single", values.extent(0), KOKKOS_LAMBDA(const size_t k) {
+        values(k) = static_cast<rtype>(static_cast<float>(values(k)));
+    });
+}
+
+/** @brief Append values, in single precision if single. */
+void put_values(std::vector<char> & buf, const std::vector<rtype> & values, const bool single) {
+    if (!single) {
+        put(buf, values.data(), values.size());
+        return;
+    }
+    std::vector<float> narrow(values.begin(), values.end());
+    put(buf, narrow.data(), narrow.size());
+}
+
+/** @brief Read values.size() values, stored in single precision if single. */
+bool get_values(std::istream & in, std::vector<rtype> & values, const bool single) {
+    if (!single) return get(in, values.data(), values.size());
+    std::vector<float> narrow(values.size());
+    if (!get(in, narrow.data(), narrow.size())) return false;
+    std::copy(narrow.begin(), narrow.end(), values.begin());
+    return true;
+}
+
+/**
+ * @brief Append one cell's record: its fixed-size data, then its stencils at
+ *        their actual sizes; single stores the pseudo-inverses and the
+ *        smoothness-indicator matrix in single precision.
+ */
+void serialize(const CellTables & t, const bool single, std::vector<char> & buf) {
     const uint16_t n_large = t.large_cells.size();
     put(buf, &t.gather_depth, 1);
     put(buf, &t.scale, 1);
     put(buf, &n_large, 1);
     put(buf, t.small_size.data(), t.small_size.size());
     put(buf, t.basis_mean.data(), t.basis_mean.size());
-    put(buf, t.si.data(), t.si.size());
+    put_values(buf, t.si, single);
     put(buf, t.large_cells.data(), n_large);
     put(buf, t.large_faces.data(), n_large);
-    put(buf, t.large_pinv.data(), t.large_pinv.size());
+    put_values(buf, t.large_pinv, single);
     put(buf, t.small_cells.data(), t.small_cells.size());
     put(buf, t.small_faces.data(), t.small_faces.size());
-    put(buf, t.small_pinv.data(), t.small_pinv.size());
+    put_values(buf, t.small_pinv, single);
 }
 
-bool deserialize(std::istream & in, const uint8_t nk, CellTables & t) {
+bool deserialize(std::istream & in, const uint8_t nk, const bool single, CellTables & t) {
     uint16_t n_large = 0;
     if (!get(in, &t.gather_depth, 1) || !get(in, &t.scale, 1) || !get(in, &n_large, 1) ||
         !get(in, t.small_size.data(), t.small_size.size())) {
@@ -2755,13 +2791,20 @@ bool deserialize(std::istream & in, const uint8_t nk, CellTables & t) {
     t.small_cells.resize(n_small);
     t.small_faces.resize(n_small);
     t.small_pinv.resize(n_small * teno::NK_SMALL);
-    return get(in, t.basis_mean.data(), t.basis_mean.size()) && get(in, t.si.data(), t.si.size()) &&
+    return get(in, t.basis_mean.data(), t.basis_mean.size()) && get_values(in, t.si, single) &&
            get(in, t.large_cells.data(), n_large) && get(in, t.large_faces.data(), n_large) &&
-           get(in, t.large_pinv.data(), t.large_pinv.size()) && get(in, t.small_cells.data(), n_small) &&
-           get(in, t.small_faces.data(), n_small) && get(in, t.small_pinv.data(), t.small_pinv.size());
+           get_values(in, t.large_pinv, single) && get(in, t.small_cells.data(), n_small) &&
+           get(in, t.small_faces.data(), n_small) && get_values(in, t.small_pinv, single);
 }
 
 } // namespace
+
+void TENO::round_to_single() {
+    round_values_to_single(stencil_large.pinv);
+    round_values_to_single(stencil_small.pinv);
+    round_values_to_single(Kokkos::View<rtype *>(si_matrix.data(), si_matrix.span()));
+    Kokkos::fence();
+}
 
 void TENO::allocate_scratch() {
     const uint32_t n_reconstructed = mesh->n_reconstructed();
@@ -2805,6 +2848,7 @@ uint64_t TENO::options_key() const {
     hash.add(n_stencil_small);
     hash.add(stencil_factor);
     hash.add(max_condition);
+    hash.add(cache_single);
     hash.add(comm::size());
     hash.add(comm::rank());
     return hash.h;
@@ -2871,7 +2915,7 @@ void TENO::save_cache(const uint8_t halo_layers) {
         chunk.assign(std::min(CHUNK_CELLS, n_reconstructed - c0), CellTables());
         download_tables(*this, large_slices, small_slices, c0, chunk);
         buf.clear();
-        for (const CellTables & t : chunk) serialize(t, buf);
+        for (const CellTables & t : chunk) serialize(t, cache_single, buf);
         out.write(buf.data(), buf.size());
     }
     out.close();
@@ -2910,7 +2954,7 @@ bool TENO::load_cache() {
     for (uint32_t c0 = 0; c0 < n_reconstructed && ok; c0 += CHUNK_CELLS) {
         chunk.assign(std::min(CHUNK_CELLS, n_reconstructed - c0), CellTables());
         for (CellTables & t : chunk) {
-            ok = ok && deserialize(in, n_dof_large, t);
+            ok = ok && deserialize(in, n_dof_large, cache_single, t);
             largest_stencil = std::max<uint32_t>(largest_stencil, t.large_cells.size());
         }
         if (ok) builder.add(c0, chunk);
