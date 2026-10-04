@@ -98,6 +98,17 @@ std::vector<double> MixtureModel::mass_fractions(const toml::value & table, cons
     return has_X ? mass_fractions_from_mole(f) : f;
 }
 
+bool MixtureModel::composition_varies(const toml::value & table) {
+    if (table.contains("balance")) return true;
+    for (const char * key : {"X", "Y"}) {
+        if (!table.contains(key) || !table.at(key).is_table()) continue;
+        for (const auto & [name, value] : table.at(key).as_table()) {
+            if (value.is_string()) return true;
+        }
+    }
+    return false;
+}
+
 std::vector<double> MixtureModel::mass_fractions_from_mole(const std::vector<double> & X) const {
     std::vector<double> Y(X.size());
     double sum = 0.0;

@@ -625,6 +625,42 @@ column), then chain-ruled to `(Y, T)`.
 Unit tests compare the Jacobian against finite differences of the rates, and
 the rates against Cantera, at random states.
 
+**Fractional orders below 1.** A global rate `k C^n` with `0 < n < 1`
+(Westbrook–Dryer: `[C3H8]^0.1`, `[H2O]^0.5 [O2]^0.25`) has
+`d(C^n)/dC = n C^(n - 1)`, unbounded as `C -> 0`, and is not Lipschitz there:
+the exact solution reaches `C = 0` in finite time. The Jacobian then
+overflows wherever such a reactant runs out or starts at zero (`inf * 0 = NaN`
+when another reactant is also zero, as `CO` and `H2O` before ignition), and
+step-size control stalls at depletion. Cantera evaluates the exact law
+(`C_AnyN` in `StoichManager.h`: zero rate and derivative for `C <= 0`, the
+pow otherwise); its CVODES integration of the two-step propane mechanism fails
+at fuel depletion at `rtol = 1e-12`, and its reference data are generated at
+`1e-10`. Mallard regularizes the rate law itself, below
+`C_reg = 1e-12` kmol/m^3 (`KineticsTable::C_REG`):
+
+    C^n  ->  C_reg^n x ((2 - n) + (n - 1) x),   x = C / C_reg,   0 <= x < 1
+    C^n  ->  C_reg^n (2 - n) x,                 x < 0
+
+the quadratic through the origin that matches `C^n` and its slope at
+`C_reg` (`C^1`), continued linearly to negative concentrations as integer
+orders are (a negative reactant gives a restoring rate). The slope at zero is
+`(2 - n) C_reg^(n - 1)`, finite, and the rate is monotone; the analytical
+Jacobian differentiates the regularized law, so RODAS sees the exact
+Jacobian of the right-hand side it integrates. Below `C_reg` the reactant
+decays exponentially instead of vanishing in finite time. `C_reg` is a fixed
+concentration at the scale of the default `atol = 1e-10` on `Y`: the
+concentration `rho Y / W` of a fuel at that mass fraction is about `1e-12`
+kmol/m^3 at 1 atm and above it at higher pressures, so the regularization acts
+where the error control already treats the reactant as zero. The fixed value
+keeps the reaction tables free of the integrator's options. Integer orders,
+orders above 1 (bounded slope) and negative orders (whose rates diverge
+themselves) are unchanged. Tests: the Jacobian of the two-step propane
+mechanism against finite differences as each fractional-order reactant goes
+from above `C_reg` to zero and negative, and its constant-volume ignition at
+the V1 conditions to depletion of fuel (lean), oxygen (rich) or both
+(stoichiometric) against Cantera: ignition delays within 0.5%, end states
+within `1e-6` in `Y`.
+
 As implemented (milestone 6, `src/chemistry/kinetics.h`): one table set per
 mechanism, compressed rows per reaction for the forward orders, the products
 (reverse orders), the nonzero net coefficients and the non-default third-body
@@ -1178,7 +1214,12 @@ Catalytic walls and species-specific wall fluxes are out of scope.
 Milestone 3 supports `extrapolation`, `symmetry`, `wall_adiabatic` (slip for
 `euler`, no-slip for `navier_stokes` from milestone 9), `upt` and `p_out` for mixtures;
 `farfield`, `dirichlet` and `p_out_average` are rejected at input until they
-are needed.
+are needed. The composition of `upt` may vary along the boundary (stratified
+inflows such as a mixing layer feeding a triple flame): each value of `X` or
+`Y` can be an expression in `x`, `y`, `z`, with an optional `balance` species
+as in `[initialize]`. Each face then gets its own copy of the condition, with
+the composition, density and surrogates at its center, so the flux kernels
+are unchanged.
 
 ## 9. Output and restart
 

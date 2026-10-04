@@ -84,6 +84,7 @@ int Solver::init(const toml::value & input_in) {
     setup.reset();
     timed_phase("fields and output", [&] {
         allocate_memory();
+        statistics.init(input, species_names, mesh->n_cells);
         init_rhs_split();
         init_sources();
         register_data();
@@ -328,6 +329,9 @@ void Solver::init_boundaries() {
     boundary_summary.clear();
     dirichlet_boundaries.clear();
     average_pressure_outlets.clear();
+    // Faces of upt boundaries whose composition varies along them, as (boundary, face):
+    // each face gets its own copy of the condition, appended after the input's
+    std::vector<std::array<uint32_t, 2>> profiled_faces;
 
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
         const toml::value & bound = input_boundaries[i_bc];
@@ -376,6 +380,8 @@ void Solver::init_boundaries() {
             FOR_I_DIM dirichlet.W.emplace_back(name + ".u[" + std::to_string(i) + "]", u[i]);
             dirichlet.W.emplace_back(name + ".p", toml::find<std::string>(bound, "p"));
         }
+        const bool profiled = is_mixture() && bcs.back().type == BoundaryType::UPT &&
+                              MixtureModel::composition_varies(bound);
         uint32_t n_selected = 0;
         uint64_t n_owned_selected = 0;
         for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
@@ -387,6 +393,7 @@ void Solver::init_boundaries() {
                 throw std::runtime_error("Boundary " + name + " assigned more than once.");
             }
             face_bc[i_face] = i_bc;
+            if (profiled) profiled_faces.push_back({static_cast<uint32_t>(i_bc), i_face});
             dirichlet.faces.push_back(i_face);
             n_selected++;
             n_owned_selected += static_cast<uint32_t>(mesh->h_cells_of_face(i_face, 0)) < mesh->n_owned();
@@ -424,7 +431,13 @@ void Solver::init_boundaries() {
         n_owned_selected = comm::allreduce(n_owned_selected, comm::Op::SUM);
         std::string text = BOUNDARY_NAMES.at(bcs.back().type) + ", " + logging::count(n_owned_selected) + " faces";
         if (where) text += ", where " + toml::find<std::string>(bound, "where");
+        if (profiled) text += ", varying composition";
         boundary_summary.emplace_back(name, text);
+    }
+    for (const auto & [i_bc, i_face] : profiled_faces) {
+        const BoundaryCondition copy = bcs[i_bc];
+        face_bc[i_face] = static_cast<int32_t>(bcs.size());
+        bcs.push_back(copy);
     }
 
     if (FaceZone * partition = mesh->get_face_zone(PARTITION_ZONE)) {
@@ -439,7 +452,7 @@ void Solver::init_boundaries() {
                                      " has no boundary condition.");
         }
     }
-    if (is_mixture()) init_mixture_boundaries(input_boundaries, bcs);
+    if (is_mixture()) init_mixture_boundaries(input_boundaries, profiled_faces, bcs);
     boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics);
     if (is_mixture()) {
         const uint32_t n_species = mixture.n_species;
@@ -737,6 +750,7 @@ void Solver::init_output() {
             }
         }
     }
+    probes.init(input, *mesh, species_names, toml::find_or<std::string>(input, "initialize", "type", "") == "restart");
     if (!input.contains("write_data")) {
         return;
     }
@@ -864,6 +878,7 @@ void Solver::copy_device_to_host() {
     }
     Kokkos::deep_copy(h_primitives, primitives);
     Kokkos::deep_copy(h_cfl_local, cfl_local);
+    statistics.copy_device_to_host();
     if (p_max.is_allocated()) Kokkos::deep_copy(h_p_max, p_max);
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
         Kokkos::deep_copy(h_teno_sigma, teno->troubled);
@@ -906,6 +921,7 @@ void Solver::register_data() {
         data.push_back(Data(PRIMITIVE_NAMES[i], Kokkos::subview(h_primitives, Kokkos::ALL(), i)));
     }
     data.push_back(Data("CFL", h_cfl_local));
+    statistics.register_data(data);
     if (p_max.is_allocated()) data.push_back(Data("P_MAX", h_p_max));
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
         // Troubled-cell indicator: TENO stencil selection is active where it exceeds the threshold
@@ -920,6 +936,7 @@ std::vector<std::string> Solver::restart_variables() const {
     if (is_mixture()) names.push_back("T_SEED");
     if (reacting) names.push_back("CHEM_H");
     if (p_max.is_allocated()) names.push_back("P_MAX");
+    for (const auto & name : statistics.variables()) names.push_back(name);
     return names;
 }
 
@@ -971,6 +988,7 @@ int Solver::run() {
         copy_device_to_host();
         write_data(true);
         write_integrals();
+        write_probes();
         t_wall_output += output_timer.seconds();
     }
     std::string stop;
@@ -987,6 +1005,10 @@ int Solver::run() {
             halo_current = false;
         }
         if (p_max.is_allocated()) update_p_max();
+        if (statistics.due(step, t)) {
+            update_primitives();
+            statistics.sample(t, cell_sampler(), mesh->n_owned());
+        }
         check_fields();
         t_wall_stepping += step_timer.seconds();
         if (step % check_interval == 0) {
@@ -998,6 +1020,7 @@ int Solver::run() {
         write_data();
         write_forces();
         write_integrals();
+        write_probes();
         t_wall_output += output_timer.seconds();
     }
     defer_chemistry = false;
@@ -1027,7 +1050,8 @@ bool Solver::state_needed() const {
     for (const auto & monitor : force_monitors) {
         if (step % monitor.interval == 0) return true;
     }
-    return integral_monitor.interval > 0 && step % integral_monitor.interval == 0;
+    return (integral_monitor.interval > 0 && step % integral_monitor.interval == 0) || statistics.due(step, t) ||
+           probes.due(step);
 }
 
 double Solver::progress() const {
@@ -1147,6 +1171,8 @@ void Solver::print_setup() const {
         logging::item("integrals", integral_monitor.file + " every " + logging::count(integral_monitor.interval) +
                                        " steps");
     }
+    if (statistics.enabled()) logging::item("statistics", statistics.summary());
+    logging::items(probes.summary());
 }
 
 void Solver::print_summary(const std::string & stop) const {
@@ -1180,6 +1206,7 @@ void Solver::print_summary(const std::string & stop) const {
     }
     for (const auto & monitor : force_monitors) add(monitor.file);
     if (integral_monitor.interval > 0) add(integral_monitor.file);
+    for (const auto & file : probes.files()) add(file);
     if (!files.empty()) logging::item("Files", files);
 }
 
@@ -1223,9 +1250,16 @@ void Solver::write_data(bool force) {
     }
     update_primitives();
     copy_device_to_host();
+    const RestartAttributes attributes = statistics.attributes();
     for (auto & writer : data_writers) {
-        writer->write(step, t, force);
+        writer->write(step, t, force, attributes);
     }
+}
+
+void Solver::write_probes() {
+    if (!probes.due(step)) return;
+    update_primitives();
+    probes.write(step, t, cell_sampler());
 }
 
 void Solver::take_step() {

@@ -214,6 +214,37 @@ TEST(MixtureTest, IdenticalSpeciesAdvectWithoutDisturbingTheFlow) {
     }
 }
 
+TEST(MixtureTest, UptCompositionExpressionsGiveAStratifiedInflow) {
+    // An inlet whose composition varies along it (an expression and a balance
+    // species): with two species of identical thermodynamics the flow stays
+    // uniform and, once the inflow has crossed the channel, each cell carries
+    // the composition of the inlet face at its height
+    const uint32_t nx = 12, n = N_DIM == 2 ? 8 : 4;
+    const std::string input =
+        "[run]\nt_stop = 0.06\ncfl = 0.5\n" + mesh_block("cartesian", nx, n, 1.0, 1.0) +
+        "[initialize]\ntype = \"constant\"\np = 1.0e5\nT = 300.0\nu = " +
+        (N_DIM == 2 ? "[50.0, 0.0]" : "[50.0, 0.0, 0.0]") + "\nY = { AIR = 1.0 }\n" +
+        numerics("type = \"MUSCL\"\n", "HLLC") + mixture(PERFECT_AIR, "two-airs") +
+        boundaries("type = \"upt\"\nu = " + std::string(N_DIM == 2 ? "[50.0, 0.0]" : "[50.0, 0.0, 0.0]") +
+                       "\np = 1.0e5\nT = 300.0\nY = { AIR2 = \"0.8 * y^2\" }\nbalance = \"AIR\"\n",
+                   "type = \"p_out\"\np = 1.0e5\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n");
+    Solver solver;
+    solver.init(parse_toml(input));
+    solver.run();
+    solver.copy_device_to_host();
+    for (uint32_t c = 0; c < solver.get_mesh()->n_cells; c++) {
+        const double rho = double(solver.h_conservatives(c, 0));
+        const double y = double(solver.get_mesh()->h_cell_coords(c, 1));
+        EXPECT_NEAR(double(solver.h_species(c, 1)) / rho, 0.8 * y * y, tol(1e-6, 1e-5));
+        EXPECT_NEAR(double(solver.h_primitives(c, N_DIM)), 1.0e5, tol(1e-8, 1e-3));
+    }
+
+    Solver bad;
+    EXPECT_THROW(bad.init(parse_toml(input.substr(0, input.find("Y = { AIR2")) + "Y = { AIR2 = \"0.5 *\" }\n" +
+                                     input.substr(input.find("balance = \"AIR\"")))),
+                 std::runtime_error);
+}
+
 namespace {
 
 std::vector<std::vector<double>> read_reference(const std::string & file, std::vector<std::string> & columns) {

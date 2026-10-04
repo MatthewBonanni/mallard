@@ -149,7 +149,7 @@ percent level on coarse meshes; `double_flux` (in `[numerics]`) removes that.
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
 | `balance` | (mixtures, `analytical`) Species taking `1 - sum` of the listed fractions; without it the listed fractions are normalized |
 | `n_subdivisions` | (`analytical`) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is integrated with a 64-point rule on each of `n_subdivisions`³ pieces (default 2) |
-| `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read |
+| `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, or 3 when they also hold the weights of `[statistics]` averages) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read |
 
 Expressions use [exprtk](https://www.partow.net/programming/exprtk/) syntax, e.g. `"x < 0.5 ? 1.0 : 0.125"`.
 
@@ -167,7 +167,7 @@ the zone's faces whose centers satisfy the expression.
 | `wall_adiabatic` | Wall (no-slip for `navier_stokes`, slip for `euler`) with zero heat flux | `u` (wall velocity, optional) |
 | `wall_isothermal` | Wall at temperature `T` | `T`, `u` (optional) |
 | `wall_heat_flux` | Wall with heat flux `q` into the fluid | `q`, `u` (optional) |
-| `upt` | Inflow with fixed velocity, pressure and temperature | `u`, `p`, `T` (and `X` or `Y` for mixtures) |
+| `upt` | Inflow with fixed velocity, pressure and temperature | `u`, `p`, `T` (and `X` or `Y` for mixtures: numbers, or expressions in `x`, `y`, `z` evaluated at each face center for a composition that varies along the boundary, with an optional `balance` species as in `[initialize]`) |
 | `farfield` | Characteristic far field for a free stream: the outgoing Riemann invariant comes from the interior, the incoming one from the free stream, so waves leave and the boundary works for inflow, outflow and tangential flow alike | `u`, `p`, `T` (free stream) |
 | `dirichlet` | Exterior state from expressions in `x`, `y`, `z`, `t`, evaluated at face centers at every stage | `rho`, `u` (one expression per component), `p` |
 | `p_out` | Outlet: imposes `p` if the outflow is subsonic | `p` |
@@ -221,14 +221,18 @@ double precision in every build.
 | `atol` | Absolute tolerance on the mass fractions (default `1e-10`) |
 | `max_steps` | Sub-steps allowed per cell and half step (default 100000); more stop the run |
 | `T_frozen` | No chemistry in cells below this temperature (default 0) |
-| `fuse_half_steps` | `true` fuses the closing half step of a step with the next step's opening one, except where output, checks or the end of the run read the state (default `false`). Faster where cells take few sub-steps, but results then depend on when output is written, and a restart reproduces an uninterrupted run only from a step at which that run also wrote output |
+| `fuse_half_steps` | `true` fuses the closing half step of a step with the next step's opening one, except where output, checks, probes, statistics or the end of the run read the state (default `false`). Faster where cells take few sub-steps, but results then depend on when output is written, and a restart reproduces an uninterrupted run only from a step at which that run also wrote output |
 | `sparse` | `true` for the sparse LU (static pattern, with the Jacobian's dense rank-one part by Sherman-Morrison), `false` for the dense one; by default sparse from 30 species when its factors fill at most 60% of the dense matrix (GRI-3.0 and larger) |
 | `lanes` | Vector lanes integrating one cell: 1 for one thread per cell (cells ordered by their last cost), a power of 2 up to 32 for a team per cell on GPUs; default 0, automatic: a warp per cell on GPUs from 16 species (8 warps, 16 from 512 species, for cells whose last call took 16 or more sub-steps), else one thread |
 
 Cells whose mass fractions would change by less than `atol / 100` over the
 half step at their current rates are skipped. Reaction types: elementary,
 three-body, falloff (Lindemann, Troe, SRI), `pressure-dependent-Arrhenius`
-(PLOG) and `Chebyshev`. Output variables: `HRR` (heat release rate,
+(PLOG) and `Chebyshev`, with non-integer reactant `orders` (global
+mechanisms such as Westbrook–Dryer's). Orders between 0 and 1 follow the
+power law down to a concentration of `1e-12` kmol/m^3 and a quadratic with a
+bounded slope below it (see `docs/design/chemistry.md`), so the Jacobian
+stays finite where such a reactant runs out. Output variables: `HRR` (heat release rate,
 W/m^3) and `CHEM_COST` (chemistry sub-steps of the cell in the last step);
 restart files also hold `CHEM_H`, each cell's last sub-step, so restarted
 runs repeat the uninterrupted one exactly. The progress rows add the share of
@@ -269,6 +273,55 @@ rate is `-dE/dt` and its viscous part `2 mu * enstrophy / rho0`.
 |---|---|
 | `interval` | Every this many steps, default 1 |
 | `file` | Output file, default `integrals.csv` |
+
+## `[statistics]`
+
+Running time averages, kept per cell on the device. Every `interval` steps
+once `t > t_start`, the sample at time `t` enters with weight `t - t_prev`
+(the time since the previous sample, or since `t_start` for the first), so the
+averages approximate time integrals over `(t_start, t]` also when the time
+step varies. Each cell's averages are its own (no communication), so they are
+bitwise the same on any number of ranks, and sampling reads the state without
+changing it.
+
+| Key | Description |
+|---|---|
+| `fields` | Variables to average: `RHO`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H` and, for mixtures, `Y_<species>` |
+| `products` | Pairs `"A*B"` of those variables (e.g. `"U_X*U_X"`, `"U_X*U_Y"`, `"T*T"`) whose covariance to keep; their means are kept too |
+| `t_start` | Start time, default 0 |
+| `interval` | Every this many steps, default 1 |
+| `reset` | `true` starts the averages afresh on a restart instead of continuing those of the restart file (default `false`) |
+
+The averages are output variables for `[[write_data]]`: `MEAN_<A>` and
+`COV_<A>_<B>`, the covariance `<A'B'> = <AB> - <A><B>` (kept directly, by a
+weighted Welford update, rather than as `<AB>`, which loses the fluctuations
+to round-off when they are small), e.g. `MEAN_U` (a vector), `COV_U_X_U_Y`, or
+`MEAN_*`, `COV_*`. Restart files carry them and their weights (format version
+3), so a restarted run continues the averages bitwise, also on a different
+number of ranks; a restart file without them starts them afresh, and one with
+only some of them is an error unless `reset = true`. With
+`chemistry.fuse_half_steps`, sampling steps read the state like output does.
+`tools/plane_average.py` averages them further over homogeneous directions
+(e.g. over x and z of a channel, as a function of y).
+
+## `[[probes]]`
+
+Point and line probes: the values of the cells holding a set of points, every
+`interval` steps, appended by rank 0 to a CSV file with rows
+`step, t, point, x, y(, z), <variables>` (one per point and step; a restarted run
+appends). Each point reads the cell average of the cell containing it (on a
+face between cells, the one with the lowest global id, so any number of ranks
+picks the same cell), or of the nearest cell centroid if no cell contains it.
+Values are written to full precision.
+
+| Key | Description |
+|---|---|
+| `name` | Probe name |
+| `variables` | Any of the `[statistics]` fields |
+| `point` | One point `[x, y(, z)]`, or |
+| `start`, `end`, `n_points` | `n_points` (at least 2) evenly spaced points from `start` to `end` |
+| `interval` | Every this many steps, default 1 |
+| `file` | Output file, default `probe_<name>.csv` |
 
 ## `[source]`
 
@@ -314,7 +367,7 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | `prefix` | Output path prefix; directories are created as needed |
 | `format` | `vtu` (with a `.pvd` series next to it) or `restart` |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
-| `variables` | (`vtu`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m^3 s)]), and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts). A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
+| `variables` | (`vtu`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m^3 s)]), and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>` and `COV_<A>_<B>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
 | `geometry` | (`vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |
 
 ## `MallardReactor`
