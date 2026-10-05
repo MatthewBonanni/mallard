@@ -1,0 +1,80 @@
+# Large-eddy simulation of decaying isotropic turbulence: the grid turbulence
+# of Comte-Bellot & Corrsin (J. Fluid Mech. 48, 1971, 273) behind a mesh of
+# M = 5.08 cm at U0 = 10 m/s, from station 1 (t U0 / M = 42, t = 0 here) to
+# stations 2 and 3 (t U0 / M = 98 and 171). Needs the 3D build. See
+# docs/design/les.md, section 8.1.
+#
+# Physics. Periodic box of side L = 11 M = 0.5588 m, air viscosity
+# nu = 1.5e-5 m^2/s at rho = 1.2 kg/m^3. The initial field
+# (tools/cbc_les.py init) has the measured spectrum of station 1 up to the
+# grid cutoff k_c = pi N / L, random phases and uniform density and pressure;
+# the pressure sets a fictitious sound speed for a turbulent Mach number of
+# 0.1, so the flow is nearly incompressible at the experiment's Reynolds
+# number. N = 32: k_c = 180 1/m; N = 64: 360 1/m; N = 128: 720 1/m, set
+# Nx, Ny, Nz, the initial file and p_ref from the tool's output.
+#
+# Numerics. Sigma model with the hybrid KEEP / Riemann flux and unlimited
+# MUSCL, so the model dissipates the energy at the cutoff, as the budget in
+# integrals.csv shows. Run:
+#   python ../../tools/cbc_les.py init 64 cbc_64.restart
+#   ../../build3d/src/Mallard -i input.toml --kokkos-num-threads=8
+#   python ../../tools/cbc_les.py spectra restart/cbc_*.restart -o spectra.csv
+#   python ../../tools/cbc_les.py compare spectra.csv --budget integrals.csv --plot spectra.png
+
+[run]
+t_stop = 0.65532
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 64
+Ny = 64
+Nz = 64
+Lx = 0.5588
+Ly = 0.5588
+Lz = 0.5588
+periodic = ["x", "y", "z"]
+
+[initialize]
+type = "restart"
+file = "cbc_64.restart"
+
+[numerics]
+riemann_solver = "HLLC"
+convective_flux = "hybrid"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+limiter = "none"
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 4.7
+T_ref = 300.0
+rho_ref = 1.2
+mu = 1.8e-5
+Pr = 0.71
+
+[les]
+model = "sigma"
+
+[output]
+check_interval = 50
+
+[integrals]
+interval = 5
+budget = true
+
+# Snapshots at stations 2 and 3 exactly
+[[write_data]]
+prefix = "./restart/station2"
+format = "restart"
+time_interval = 0.28448
+
+[[write_data]]
+prefix = "./restart/station3"
+format = "restart"
+time_interval = 0.65532
