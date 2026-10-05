@@ -6,7 +6,7 @@
 # 3D blast at twice the resolution of examples/sedov_3d:
 #   python ../../tools/sedov.py solut --energy 1
 #
-# 256 x 256 quads, bound-preserving TENO5 (5 minutes on one A100, or
+# 256 x 256 quads, bound-preserving TENO5 (about a minute on one A100, or
 # Nx = Ny = 128 on a laptop): the shock (where the shell-averaged density
 # crosses the middle of its jump) is 1.5% ahead of R(t) at t = 0.1, the offset
 # of the finite initial blast, and 0.6% at t = 0.8 (0.950 against 0.945). The
@@ -15,7 +15,7 @@
 
 [run]
 t_stop = 0.8
-cfl = 0.25
+cfl = 1.0
 
 [mesh]
 type = "cartesian"
