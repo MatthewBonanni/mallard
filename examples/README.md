@@ -18,6 +18,7 @@ python ../../tools/animate.py solut riemann
 | `explosion_3d` | Spherical explosion (3D build): one octant with symmetry planes, TENO5 on 64^3 hexahedra; the solution stays spherically symmetric | 262,144 cells, ~5 minutes on 8 threads |
 | `taylor_green_3d` | Taylor-Green vortex at Re = 1600 (3D build): the high-order workshop DNS case on the octant [0, pi]^3 with symmetry planes. At 64^3 per octant (128^3 full box) the dissipation peak is 0.01302 at t = 8.1, against 0.01286 at t = 9.0 for the 512^3 spectral DNS | 262,144 cells, 32,000 steps: ~1 hour on one A100 |
 | `taylor_green_3d` (`input_periodic.toml`) | The same case on the full periodic box [0, 2 pi]^3 (no symmetry planes), for runs on several GPUs | 128^3 = 2.1M cells |
+| `isotropic_turbulence` | Decaying compressible isotropic turbulence with eddy shocklets (3D build), the case of Johnsen et al. (2010): Mt = 0.6, Re_lambda = 100, k0 = 4 on the periodic box, as DNS on 64^3, 128^3 and 256^3 hexahedra (TENO5) from the same random initial field (`tools/isotropic_turbulence_restart.py`). At 256^3 (k_max eta >= 2.7) kinetic energy, temperature and density variances are grid-converged to 0.3% and the enstrophy to 3%; filtered to 64^3 as the references, the enstrophy is within 2.4% (mean) of Johnsen et al.'s filtered 256^3 and 0.3% of Subramaniam et al.'s filtered 512^3, the dilatation variance within 0.6%. `tools/isotropic_turbulence_stats.py`, `plot_isotropic_turbulence.py` and `animate_isotropic_turbulence.py` analyze and animate it; details in the input's header | 16.8M cells, 4,307 steps: about an hour on 12 A100s (128^3: 17 minutes on 3) |
 | `sphere_mach3` | Mach 3 flow over a sphere (3D build) on an unstructured Gmsh tetrahedral mesh of the quarter domain (generate it with `tools/make_sphere_mesh.py`): HLL with bound-preserving TENO5. The bow-shock standoff settles at Delta / R = 0.226, 10% above Billig's correlation (0.205): 0.01 D, under half the tetrahedron edge length (0.025 D) in the shock layer | 800,000 tetrahedra, ~1.5 hours on four A100s |
 | `sedov_3d` | Sedov-Taylor point blast (3D build): one octant, bound-preserving TENO5 on 128^3 hexahedra, against the exact similarity solution (`tools/sedov.py`). The shock radius stays within 1-3% of R = 1.0328 (E t^2 / rho0)^(1/5) | 2.1M cells, ~1.5 hours on four A100s |
 | `wedge` | Mach 1.76 flow over an 8 degree ramp; the oblique shock matches theory (p2/p1 = 1.498) | 19,200 quads, minutes |
@@ -31,3 +32,16 @@ python ../../tools/animate.py solut riemann
 | `premixed_flame` | Freely propagating stoichiometric H2/air flame at 1 atm with mixture-averaged transport (V8), started from Cantera's flame in its frame (generate the restart file first, see the input's header); the consumption speed settles within 0.1% of Cantera's 2.332 m/s | 300 cells, 20 per thermal thickness, ~10 min on one thread |
 | `flame_2d` | Lean H2/air flame (phi 0.4, 700 K, 1 atm) in a periodic channel with mixture-averaged transport and, in `unity/`, unity Lewis numbers, from the same wrinkled front: differential diffusion makes the burnt gas 0.96-1.02 times the adiabatic flame temperature (unity Lewis: uniform) and the flame up to 14% faster; planar flames on the same mesh are within 0.6% of Cantera. Generate the initial states first (see the input's header); `tools/animate_flame_2d.py` animates both side by side | 72,576 cells, 300,000-380,000 steps: 70-80 minutes per run on one A100 |
 | `h2_ignition` | Constant-volume ignition of stoichiometric H2/air at 1200 K, 1 atm with `MallardReactor` (`../../build/src/MallardReactor -i input.toml`, writes `reactor.csv`); ignition delay 44.2 us as Cantera | 0D, milliseconds |
+
+## Isotropic turbulence
+
+![Filtered statistics of the isotropic turbulence runs against the references](../docs/images/isotropic_turbulence_validation.png)
+
+`isotropic_turbulence` on 64^3, 128^3 and 256^3, filtered to 64^3 as the
+references: top, sixth-order differences against Johnsen et al. (2010,
+circles); bottom, spectral derivatives against Subramaniam et al. (2019,
+grey). 64^3 is under-resolved (k_max eta ~ 0.7) and misses 15% of the
+enstrophy; 128^3 and 256^3 agree within 2%. The remaining differences from
+the references (kinetic energy +2%, temperature variance -5%) are of the size
+of the spread between random initial fields, whose realizations the
+references do not publish.
