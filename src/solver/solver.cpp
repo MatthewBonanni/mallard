@@ -488,6 +488,7 @@ void Solver::init_boundaries() {
         characteristic_transverse |= bc.is_characteristic() && bc.relax[BoundaryCondition::BETA] != 0.0_r;
     }
     t_characteristic = -1.0;
+    characteristic_state_set = false;
     if (is_mixture()) init_mixture_boundaries(input_boundaries, profiled_faces, bcs);
     boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics);
     if (is_mixture()) {
@@ -1428,8 +1429,9 @@ void Solver::write_data(bool force) {
     update_primitives();
     copy_device_to_host();
     const RestartAttributes attributes = statistics.attributes();
+    const RestartFaces faces = characteristic_restart_faces();
     for (auto & writer : data_writers) {
-        writer->write(step, t, force, attributes);
+        writer->write(step, t, force, attributes, faces);
     }
 }
 
