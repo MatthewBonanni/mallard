@@ -233,7 +233,7 @@ times the half step (exact for the autonomous constant-volume reactor).
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
 | `balance` | (mixtures, `analytical`) Species taking `1 - sum` of the listed fractions; without it the listed fractions are normalized |
 | `n_subdivisions` | (`analytical`) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is split into `n_subdivisions`³ sub-tetrahedra, each with a 14-point degree-5 rule (default 1) |
-| `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, or 3 when they also hold the weights of `[statistics]` averages) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read |
+| `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, 3 when they also hold the weights of `[statistics]` averages, or 4 when they also hold the state of characteristic boundary faces) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read |
 
 Expressions use [exprtk](https://www.partow.net/programming/exprtk/) syntax, e.g. `"x < 0.5 ? 1.0 : 0.125"`.
 
@@ -263,8 +263,10 @@ Characteristic conditions change only the exterior state of the convective
 flux; viscous terms treat them like `extrapolation` (image faces, or zero
 normal derivatives: the outflow conditions of Poinsot & Lele). MUSCL boundary
 cells leave out their ghosts across them, so that waves leave intact. Each face keeps its pressure and
-normal velocity between steps; a restart starts them afresh from the
-solution. See [docs/design/nscbc.md](design/nscbc.md).
+normal velocity between steps, and restart files carry them, so a restarted
+run reproduces an uninterrupted one bitwise, also on a different number of
+ranks (restart files older than version 4 start them afresh from the
+solution). See [docs/design/nscbc.md](design/nscbc.md).
 
 ## `[[sponges]]`
 
