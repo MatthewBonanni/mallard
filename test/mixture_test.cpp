@@ -184,8 +184,8 @@ std::vector<std::array<rtype, N_DIM>> unit_normals() {
     std::array<rtype, N_DIM> x{}, oblique{};
     x[0] = 1.0;
     const rtype scale = N_DIM == 2 ? 1.0 : 0.8;
-    oblique[0] = 0.6 * scale;
-    oblique[1] = -0.8 * scale;
+    oblique[0] = 0.6_r * scale;
+    oblique[1] = -0.8_r * scale;
     if constexpr (N_DIM == 3) oblique[N_DIM - 1] = 0.6;
     return {x, oblique};
 }
