@@ -161,4 +161,43 @@ negative (next to walls) become zero.
 - **MPI.** A turbulent inlet on tetrahedra matches the serial run bitwise on
   2, 3 and 4 ranks.
 
-VALIDATION_RESULTS
+### Decaying turbulence in a duct (DNS, `examples/turbulent_inflow_duct`)
+
+**Setup.**
+- Box `6 x 2 x 2`, periodic across, 384 x 128 x 128 hexahedra.
+- `U = 1`, `M = 0.2`, isotropic `u' = 0.1`, `L = 0.25`, `Re_L = u' L / nu = 100`.
+- MUSCL (no limiter), HLLC, SSPRK3; `nscbc_inlet` and `nscbc_outlet`, no sponge.
+- Statistics over `t = 8-30` (3.7 flow-throughs), averaged over y and z.
+
+**Inlet.**
+- **Reynolds stresses.** The cells next to the inlet carry `R_uu, R_vv, R_ww = 0.0097, 0.0106, 0.0094` for 0.01 (`k` within 1%); `R_uv` is `2e-5`.
+- **Scales.** Probes in those cells give `L_y = 0.23` for 0.25. The integral time `U T = 0.32` is longer than at the faces: the first cell averages over a cell and smooths.
+
+**Adjustment and decay.** The digital-filter field is not solenoidal. Of an isotropic one, a third of the energy is dilatational, which a low-Mach flow cannot carry as vortices. Within `0.4 L` the energy drops to `0.85 k_in`, well short of the `2/3` bound. After that:
+
+| `x / L` | 1 | 4 | 8 | 12 | 16 | 20 |
+|---|---|---|---|---|---|---|
+| `k / k_in` | 0.89 | 0.85 | 0.80 | 0.73 | 0.65 | 0.58 |
+| `R_uu / R_vv` | 1.34 | 1.29 | 1.26 | 1.24 | 1.18 | 1.16 |
+
+- **Dissipation lags.** The dissipation `eps = -U dk/dx` is low at first: `eps L / u'^3 = 0.32` up to `x / L = 8`, rising to 0.44 at 12 and 0.60 at 16, as the cascade the synthetic field lacks builds up over 1-2 eddy turnovers (`t u' / L = x u' / (U L)`).
+- **No power law yet.** The power-law decay of grid turbulence
+  ([Comte-Bellot & Corrsin 1966](../references.md#comte-bellot-corrsin-1966),
+  `k ~ t^-1.25`) is not yet established within the domain.
+- **Transient anisotropy.** `R_uu` exceeds the transverse stresses by 30% after the adjustment. The normal component's dilatational part leaves differently from the tangential ones, and the anisotropy then relaxes toward isotropy.
+
+**Spurious pressure.**
+
+| `x / L` | 0.4 | 1 | 4 | 8 | 20 |
+|---|---|---|---|---|---|
+| `p'_rms / (rho U u')`, `zero_net_flux = true` | 0.90 | 0.55 | 0.15 | 0.13 | 0.11 |
+| `p'_rms / (rho U u')`, `zero_net_flux = false` | 1.19 | 0.95 | 0.80 | 0.79 | 0.78 |
+
+- **With `zero_net_flux`** (the default), the pressure fluctuations decay away from the inlet to `1.1-1.3 rho u'^2`, the level of the turbulence's own (hydrodynamic) pressure.
+- **Inlet near field.** The near field, `0.9 rho U u'` in the first cells, is the evanescent response to the non-solenoidal part of the injected field. It decays over a few `L` and does not radiate.
+- **Without `zero_net_flux`**, a plane acoustic wave of `p' = 0.078 = 7.8 rho u'^2` fills the duct: its average along a transverse line equals the local value. This is `rho c` times the inlet-mean normal fluctuation.
+- **Ratio.** The default removes 6-8 times the hydrodynamic level of spurious pressure downstream.
+
+### Spatially developing channel at `Re_tau = 180` (DNS)
+
+CHANNEL_RESULTS
