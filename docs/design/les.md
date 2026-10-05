@@ -1,0 +1,696 @@
+# Design: large-eddy simulation
+
+Status: proposed. Recommendations are marked **Decision**; the alternatives
+considered are listed with each. Implementation follows the
+[stages](#9-stages), one pull request each.
+
+Mallard resolves every scale it computes today (DNS of flames, detonations,
+Taylor-Green and isotropic turbulence). This document adds large-eddy
+simulation (LES) of compressible, possibly reacting, flows with **explicit**
+subgrid-scale (SGS) models: an eddy viscosity for the momentum, turbulent
+Prandtl and Schmidt numbers for heat and species, and a turbulence-chemistry
+closure for the filtered reaction rates.
+
+## Goals
+
+- **Explicit models, not implicit LES.** Results must be attributable to the
+  models. The scheme's own dissipation is measured at run time and kept below
+  the model's (section 4); validation shows the model-off and model-on runs
+  differ by much more than the model-on runs differ under refinement of the
+  numerical dissipation.
+- **Unstructured, mixed and high-order meshes**: triangles, quadrilaterals,
+  tetrahedra, hexahedra, prisms and pyramids, with any reconstruction (FO,
+  MUSCL, TENO-E of orders 3 to 6).
+- **Single gases and reacting mixtures**: finite-rate chemistry,
+  mixture-averaged / unity-Lewis / constant-Lewis transport, double flux.
+- **Determinism**: results bitwise independent of the MPI rank count and of
+  GPU/CPU team widths, as for the rest of the solver ([mpi.md](mpi.md)).
+- **No cost and no change without `[les]`**: runs without it give
+  byte-identical results and keep their speed.
+- **Validation with literature data and quantitative targets** (section 8).
+
+## Non-goals
+
+- Implicit LES, or tuning the scheme's dissipation to stand in for a model.
+- Wall models (wall-modeled LES). Walls are resolved (y+ of the first cell
+  about 1).
+- RANS and hybrid RANS/LES (DES, DDES, WMLES).
+- Synthetic inflow turbulence: that is #159. Cases that need it depend on it.
+- Flamelet / FPV / FGM tabulated chemistry, transported or presumed PDFs,
+  CMC, linear-eddy models, and other closures built on reduced chemistry
+  manifolds: Mallard's chemistry is finite-rate with mechanisms read at run
+  time, and the closure must keep it.
+- SGS models for the isotropic part of the SGS stress, the SGS viscous
+  diffusion, the SGS pressure-dilatation and the triple correlation of the
+  energy equation (section 1).
+
+## Summary of decisions
+
+| # | Decision | Main alternatives | Why |
+|---|---|---|---|
+| 1 | Favre-filtered equations closed by an eddy viscosity mu_t, with `lambda_t = cp mu_t / Pr_t` and `rho D_t = mu_t / Sc_t`; mu_t added to the molecular coefficients | Mixed or scale-similarity models; separate SGS flux kernels | Shares the viscous fluxes, boundary treatment, time step and transport infrastructure; the standard closure of compressible LES (Vreman et al. 1995; Garnier et al. 2009) |
+| 2 | **Sigma model** (Nicoud et al. 2011) as the primary eddy viscosity; WALE, Vreman and Smagorinsky also available | WALE, Vreman, dynamic Smagorinsky as primary | Local, no test filter, positive; vanishes in pure shear, solid rotation, two-component and axisymmetric/isotropic expansion; cubic near walls; insensitive to the one-dimensional dilatation of flames |
+| 3 | Dynamic Smagorinsky deferred | Germano-Lilly with local averaging | Needs a test filter and averaging on unstructured mixed meshes (section 2.5); Sigma gets near-wall and laminar behavior without it |
+| 4 | Filter width `Delta = V^(1/d)` (d = 2 or 3) of each cell, independent of the reconstruction order | Largest cell extent; Scotti's anisotropy correction; `h / (p + 1)` | A finite volume has one degree of freedom per cell at any order; Sigma and WALE vanish where the cells are most anisotropic (walls) |
+| 5 | Eddy viscosity per cell from the viscous cell gradients, averaged to faces; zero on wall faces | Per face from face gradients | One evaluation per cell; enters the time step and output; consistent across ranks |
+| 6 | A **kinetic-energy budget diagnostic** that measures the numerical dissipation of resolved kinetic energy against the SGS and molecular dissipation at run time | Inferring numerical dissipation from -dK/dt after the fact | Proves at every output which term dissipates the energy; needs no reference |
+| 7 | A **low-dissipation convective flux**: a kinetic-energy-preserving (KEEP) central flux blended with the Riemann solver by a compression-only Ducros sensor | Lower TENO cutoff; Riemann solvers with scaled dissipation only; artificial viscosity | Upwind Riemann fluxes dissipate resolved energy at the grid scale at a rate comparable to the SGS model; the KEEP flux adds none, and shocks keep the Riemann solver |
+| 8 | **Thickened flame (TFLES)** with dynamic thickening and the Charlette efficiency (beta = 0.5), Colin's operator for u'_Delta, as the primary combustion closure | PaSR; quasi-laminar | Works with finite-rate mechanisms and molecular transport unchanged; keeps the laminar flame speed exactly; explicit and well validated for premixed LES |
+| 9 | PaSR as an optional second closure, later | None; quasi-laminar | Covers non-premixed and MILD regimes; shares TFLES's per-cell rate scaling |
+| 10 | Chemistry rates scaled per cell by advancing each Strang reactor over `s dt` | Scaling the rates inside the kinetics | The constant-volume reactor is autonomous, so this is exact; no change to the kinetics or Jacobian |
+
+## 1. Filtered equations
+
+With the spatial filter `\bar{.}` (implicit in the grid, width Delta) and the
+Favre filter `\tilde{f} = \bar{rho f} / \bar{rho}`:
+
+```
+d rho/dt      + div(rho u)                                     = 0
+d(rho u)/dt   + div(rho u u + p I - tau - tau_sgs)             = 0
+d(rho E)/dt   + div((rho E + p) u - (tau + tau_sgs) . u + q + q_sgs) = 0
+d(rho Y_k)/dt + div(rho Y_k u + j_k + j_k^sgs)                 = omega_k
+```
+
+(all variables filtered; bars and tildes dropped). The resolved stress
+`tau`, heat flux `q` and diffusion fluxes `j_k` are the molecular ones
+evaluated with the filtered state; `p = rho R T` with the filtered mixture
+gas constant.
+
+Closures:
+
+- **SGS stress**, `tau_sgs = -rho (u u~ - u~ u~) = 2 mu_t (S - 1/3 tr(S) I)`.
+  The isotropic part `-2/3 rho k_sgs I` is not modeled: it is absorbed into
+  the pressure. At the turbulent Mach numbers of the validation cases
+  (`M_t < 0.3`) it is below 1% of `p` (Erlebacher et al. 1992; Garnier et
+  al. 2009, chapter 4), and modeling it (Yoshizawa) brings a constant whose
+  value is uncertain.
+- **SGS heat flux**, `q_sgs = -lambda_t grad T` with
+  `lambda_t = cp mu_t / Pr_t` (and, for mixtures, the enthalpy carried by
+  the SGS species fluxes, `sum_k h_k j_k^sgs`, which is what the molecular
+  energy flux already does with `j_k`).
+- **SGS species fluxes**, `j_k^sgs = -rho D_t (W_k / W) grad X_k + Y_k V_c`
+  with `rho D_t = mu_t / Sc_t`, added to the molecular mixture-averaged flux
+  in its Hirschfelder-Curtiss form, so the correction velocity `V_c` makes the
+  total diffusive fluxes sum to zero to round-off (Poinsot & Veynante
+  2012, chapter 4). With unity turbulent Lewis number (`Pr_t = Sc_t`, the
+  default) the SGS enthalpy and species fluxes do not separate enthalpy from
+  composition at subgrid scales.
+- **Neglected**: SGS viscous diffusion, SGS pressure-dilatation, SGS
+  turbulent diffusion of kinetic energy (triple correlation) and the
+  nonlinearity of `tau(u)` and `q(T)`. Vreman, Geurts & Kuerten (1995) showed
+  these are an order of magnitude below the retained terms in mixing layers;
+  the same simplification is used by nearly all compressible LES codes.
+- **Filtered reaction rates** `omega_k`: section 6.
+
+**Decision 1.** One eddy viscosity `mu_t = rho nu_t` per cell; the
+molecular viscous kernels use `mu + mu_t`, `lambda + cp mu_t / Pr_t` and the
+species diffusivities plus `mu_t / Sc_t` (as `rho D_k W_k / W` in Mallard's
+mole-fraction form). Defaults `Pr_t = Sc_t = 0.9`; both are inputs.
+
+Alternatives: scale-similarity and mixed models (Bardina; Zang, Street &
+Koseff) need explicit filtering of the resolved field on the unstructured
+mesh, with the same test-filter difficulty as dynamic models (section 2.5);
+gradient (Clark) models are not dissipative enough on their own and need an
+eddy viscosity anyway. Neither is proposed.
+
+## 2. SGS eddy viscosity
+
+All models below give `nu_t = (C Delta)^2 D(g)` from the resolved velocity
+gradient `g_ij = du_i/dx_j` (Vreman's in the form `c Delta^2 D(g)`), with
+`S = (g + g^T)/2`. In 2D builds `g` is the 3x3 gradient of a flow with
+`u_z = d/dz = 0`.
+
+### 2.1 Requirements
+
+An eddy viscosity should vanish where there is no subgrid turbulence and
+scale correctly near walls. Properties of a model's `D(g)` (Nicoud et al.
+2011, table I; the entries below are checked in the unit tests, section 7):
+
+| Property | Smagorinsky | WALE | Vreman | Sigma |
+|---|---|---|---|---|
+| Positive, local, cheap | yes | yes | yes | yes |
+| Zero in solid rotation | yes | **no** | **no** | yes |
+| Zero in pure shear | **no** | yes | yes | yes |
+| Zero for two-component / 2D flows | **no** | **no** | **no** | yes |
+| Zero for isotropic or axisymmetric expansion | **no** | **no** | **no** | yes |
+| Near-wall `nu_t ~ y^3` | **no** (`y^0`) | yes | **no** (`y^1`) | yes |
+| Galilean and rotation invariant | yes | yes | yes | yes |
+
+### 2.2 Models
+
+- **Smagorinsky** (1963): `nu_t = (C_s Delta)^2 sqrt(2 S:S)`, `C_s = 0.17`
+  (Lilly's value for isotropic turbulence). Kept as the classical reference
+  and for ablations; it needs wall damping, which is not provided.
+- **WALE** (Nicoud & Ducros 1999):
+  `nu_t = (C_w Delta)^2 (S^d:S^d)^(3/2) / ((S:S)^(5/2) + (S^d:S^d)^(5/4))`,
+  `S^d = (g^2 + (g^2)^T)/2 - tr(g^2)/3 I`, `C_w = 0.5` (Nicoud & Ducros
+  recommend 0.5 to 0.6 for isotropic turbulence).
+- **Vreman** (2004): `nu_t = c sqrt(B / (a:a))` with `a_ij = du_j/dx_i`,
+  `b = Delta^2 a^T a`, `B = b11 b22 - b12^2 + b11 b33 - b13^2 + b22 b33 - b23^2`,
+  `c = 2.5 C_s^2 = 0.07`.
+- **Sigma** (Nicoud, Baya Toda, Cabrit, Bose & Lee 2011):
+  `nu_t = (C_sigma Delta)^2 sigma_3 (sigma_1 - sigma_2)(sigma_2 - sigma_3) / sigma_1^2`
+  with `sigma_1 >= sigma_2 >= sigma_3 >= 0` the singular values of `g`,
+  `C_sigma = 1.35` (calibrated on isotropic turbulence in that paper). The
+  singular values are the square roots of the eigenvalues of `G = g^T g`,
+  found in closed form from its invariants (the trigonometric solution of the
+  characteristic cubic, as in the paper's appendix), in double precision.
+
+### 2.3 Recommendation
+
+**Decision 2: Sigma is the primary model** (`model = "sigma"`, the default
+when `[les]` is given in 3D).
+
+- It has every property of the table. WALE fails in solid rotation (vortex
+  cores, swirling flows) and Vreman near walls and in rotation; both give an
+  eddy viscosity in laminar two-dimensional regions (e.g. laminar shear
+  layers and flame fronts before transition).
+- For reacting flows it is the only one of the four that is zero for the
+  one-dimensional dilatation across a planar flame (`g` of rank one: `sigma_2
+  = sigma_3 = 0`). The others turn the thermal expansion of every flame into
+  an eddy viscosity and an SGS diffusivity, which then thickens laminar
+  flames. This also makes the SGS velocity of the combustion closure
+  (section 6.3) free of dilatation.
+- It costs one 3x3 symmetric eigenvalue problem in closed form per cell,
+  negligible next to the reconstruction.
+- It needs no test filter, no averaging and no extra transported field, so
+  it is local, deterministic across ranks and restartable from the state.
+
+Known limitations: Sigma vanishes for all two-dimensional flows, so 2D builds
+(which cannot hold 3D turbulence anyway; they are for tests and laminar
+cases) should use WALE or Vreman, and the 2D default is WALE. Its constant is
+calibrated on isotropic turbulence; Nicoud et al. found the same constant
+adequate for channel flow, and section 8 checks it.
+
+**WALE** is the fallback in 2D and the comparison model in validation.
+**Vreman** is the cheapest and is kept for comparison with the literature,
+where it is common. **Smagorinsky** is for ablation studies: it shows what
+the near-wall and laminar properties buy.
+
+### 2.4 Rejected or deferred alternatives
+
+- **Anisotropic minimum-dissipation (AMD)** (Rozema et al. 2015): attractive
+  for anisotropic grids (it uses directional filter widths), but its
+  `nu_t = max(0, ...)` clips half of the configurations and its constant
+  depends on the discretization order. Possible later addition; not needed
+  for the recommended validation.
+- **Dynamic Smagorinsky** (Germano et al. 1991; Lilly 1992; for compressible
+  flow Moin et al. 1991): **Decision 3, deferred.** See below.
+
+### 2.5 Why not the dynamic Smagorinsky model (yet)
+
+The Germano identity `L_ij = T_ij - \hat{tau}_ij` determines `C_s^2(x, t)` from
+the resolved field filtered at a test scale `\hat{Delta} > Delta`. On
+Mallard's meshes:
+
+- **The test filter.** A discrete filter on an unstructured mixed mesh (e.g.
+  a volume-weighted average over vertex neighbors) has a transfer function
+  that depends on the local cell type and arrangement, so its width
+  `\hat{Delta}/Delta`, which enters `M_ij` directly, is not uniform: it
+  differs between hexahedra (27-cell stencil), tetrahedra (up to about 100
+  vertex neighbors) and prisms. Commutative and well-defined unstructured
+  filters exist (Haselbacher & Vasilyev 2003; Najafi-Yazdi, Najafi-Yazdi &
+  Mongeau 2015), but they are wide, need per-cell weights computed at setup,
+  and still give a mesh-dependent effective ratio at mesh transitions.
+- **Averaging.** The raw coefficient `C = <L:M> / <M:M>` is negative over
+  large regions and must be averaged. Plane or line averages need homogeneous
+  directions, which general meshes lack. The alternatives are local volume
+  averaging (another filter, with the same issues) or Lagrangian averaging
+  (Meneveau, Lund & Cabot 1996), which adds two transported fields with their
+  own advection scheme, restart variables and relaxation time.
+- **Clipping** (`nu + nu_t >= 0`) is still required, and makes the model
+  partly ad hoc.
+- **Cost and halo depth**: two extra filter passes per stage over 10 to 20
+  quantities, each widening the halo the eddy viscosity needs by one layer.
+
+Sigma achieves the main benefits of the dynamic procedure (zero
+`nu_t` in laminar and near-wall regions, correct `y^3`) locally. A dynamic
+Sigma or dynamic Smagorinsky with Lagrangian averaging can follow if
+validation shows the static constant is inadequate (stage 7).
+
+## 3. Filter width
+
+**Decision 4.** `Delta = V^(1/d)`: the cube root of the cell volume in 3D
+(Deardorff 1970), the square root of the cell area in 2D (the planar area in
+axisymmetric runs), for every cell type and reconstruction order.
+
+- **High order.** In a finite volume method each cell carries one average
+  whatever the reconstruction order, so the shortest resolved wavelength is
+  about `2 h` at every order; a higher-order reconstruction resolves more
+  accurately the scales near that cutoff rather than smaller ones. `h / (p +
+  1)`, the width used for discontinuous Galerkin and spectral-element LES
+  where a cell carries `(p + 1)^d` degrees of freedom, does not apply.
+  Low-order schemes damp a band below the cutoff, i.e. act as an additional
+  implicit filter; this is what the dissipation budget (section 4) measures,
+  rather than a factor folded into Delta.
+- **Anisotropy.** Deardorff's width underestimates the largest extent of
+  stretched cells. Scotti, Meneveau & Lilly (1993) give a correction
+  `f(a_1, a_2) = cosh(sqrt(4/27 ((ln a_1)^2 - ln a_1 ln a_2 + (ln a_2)^2)))`
+  of the aspect ratios; the largest extent (`Delta_max`) is used in DES.
+  Both matter most in wall cells, where Sigma and WALE are already small
+  (`y^3`); the Scotti factor is 1.2 for an aspect ratio of 5 and 1.4 for 10. Not
+  implemented; can be added as `filter_width = "scotti"` (from each cell's
+  second-moment tensor, which gives its principal extents for any shape) if
+  validation shows a need.
+- **Mixed meshes.** `V^(1/d)` is continuous across hexahedron-prism-
+  tetrahedron transitions of equal edge length up to the volume ratio's
+  cube root (a regular tetrahedron of edge h has `V^(1/3) = 0.49 h`, a cube
+  `h`): tetrahedral regions get a smaller Delta at the same edge length,
+  which is consistent with their higher number of cells per volume.
+
+## 4. Keeping the model's dissipation dominant
+
+### 4.1 The problem
+
+Mallard's convective flux is an approximate Riemann solver applied to
+high-order reconstructed states (TENO-E, MUSCL). Its upwind part dissipates
+kinetic energy at a rate proportional to `|lambda| (u_R - u_L)^2`, where the
+jump `u_R - u_L` of the reconstructions is `O(h^p)` for smooth fields but
+`O(1)` relative at the grid cutoff, precisely where the SGS model acts
+(Ghosal 1996; Mittal & Moin 1997; Garnier et al. 1999). Two further sources:
+
+- TENO-E's nonlinear stencil selection discards the central stencil in
+  troubled cells, and on LES meshes most cells near the cutoff are flagged
+  (76% of cells at 64^3 in `examples/isotropic_turbulence`), so the
+  reconstruction falls back to more dissipative sector stencils.
+- The low-Mach correction (Thornber et al. 2008) already scales the velocity
+  jump by `min(1, max(M, M_cut))`, so at `M ~ 0.1` the upwind dissipation of
+  the velocity field is reduced roughly tenfold; it does not remove it.
+
+In under-resolved turbulence these terms can match or exceed the SGS
+dissipation. Then the results are implicit LES, whatever model is switched
+on. The design therefore (a) measures the numerical dissipation at run time,
+and (b) provides a convective flux that adds none in smooth regions.
+
+### 4.2 Dissipation budget (decision 6)
+
+The semi-discrete rate of change of the resolved kinetic energy
+`K = sum_c V_c rho_c |u_c|^2 / 2` caused by any part `R` of the right-hand
+side (`R_rho`, `R_m` per cell, conservative form) is exactly
+
+```
+dK/dt|_R = sum_c V_c (u_c . R_m,c - |u_c|^2 / 2 R_rho,c)
+```
+
+Mallard evaluates it separately for the convective, molecular viscous and
+SGS fluxes (one extra RHS evaluation, at the output interval only). For a
+periodic or walled domain the exact (continuous) contributions are
+
+- convection: `Pi = int p div u dV` (pressure-dilatation work; transport
+  terms integrate to zero),
+- molecular viscosity: `-eps_mol = -int tau : grad u dV`,
+- SGS: `-eps_sgs = -int tau_sgs : grad u dV`.
+
+The **numerical dissipation** is then `eps_num = Pi - dK/dt|_conv`, with
+`Pi` from the cell gradients, and the run reports `eps_mol`, `eps_sgs`,
+`eps_num` and `Pi` in `[integrals]` (with `budget = true`). The criterion
+for an LES result to count as explicit-model LES is **`eps_num <= 0.5 eps_sgs`
+averaged over the analysis window**, i.e. the model removes at least two
+thirds of the energy that leaves the resolved scales through the cutoff.
+`eps_num` includes the reconstruction's and the Riemann solver's dissipation
+together (dK/dt of the convective operator, whatever causes it); the time
+integrator's dissipation (SSPRK3's, of order `(lambda dt)^4`) is not
+included and is negligible at the CFL numbers used.
+
+Uncertainty of the diagnostic: `Pi` uses the viscous least-squares (or TENO)
+gradients, so `eps_num` is exact only up to the discretization error of
+`Pi`. In the validation cases (`M_t <= 0.2`) `|Pi|` is a few percent of the
+total dissipation, so this does not affect the criterion; the report gives
+`Pi` alongside.
+
+### 4.3 Low-dissipation convective flux (decision 7)
+
+`[numerics] convective_flux = "hybrid"` replaces the Riemann flux by
+
+```
+F = F_KEEP(W_L, W_R) + phi_f (F_Riemann(W_L, W_R) - F_KEEP(W_L, W_R))
+```
+
+at every face quadrature point, with the same reconstructed states.
+
+- **`F_KEEP`** is the kinetic-energy- and entropy-preserving two-point flux
+  of Kuya, Totani & Kawai (2018): with arithmetic means `\bar{.}`,
+  `C = \bar{rho} \bar{u}.n`, mass `C`, momentum `C \bar{u} + \bar{p} n`,
+  energy `C (\bar{e} + u_L . u_R / 2) + (p_L u_R.n + p_R u_L.n) / 2`. For a
+  mixture, `e = p / ((gamma - 1) rho) + e0` per side with the face's
+  surrogates. Its momentum flux has Jameson's (2008) form `C \bar{u} + \bar{p}
+  n` with the mass flux `C`, so for cell values (`W_L, W_R` the two cells'
+  averages) the semi-discrete kinetic energy changes only by the pressure
+  work, on any mesh: per face, `(u_R - u_L) . (C \bar{u} + \bar{p} n) - C
+  (|u_R|^2 - |u_L|^2) / 2 = \bar{p} (u_R - u_L) . n`. With high-order
+  reconstructed states this holds to the reconstruction's accuracy.
+- **`phi_f = max(phi_c0, phi_c1)`** from a cell sensor: the Ducros et al.
+  (1999) sensor restricted to compressions (Bhagatwala & Lele 2009),
+  `theta = H(-div u) (div u)^2 / ((div u)^2 + |omega|^2 + eps)`, and
+  `phi_c = 1` where `theta > theta_*` (default 0.65), else `phi_min` (default
+  0). Shocks therefore keep the full Riemann solver and TENO's
+  shock-capturing; vortical and expansion regions, and flames (expansions),
+  get the central flux.
+- Species stay upwinded by the mass flux (Larrouturou) with the blended
+  mass flux, so mass fractions stay in [0, 1] and sum to one; their
+  numerical diffusion is not part of the kinetic-energy budget and is
+  reported separately in validation via scalar variance decay where
+  relevant.
+- The low-Mach correction acts on the Riemann part only.
+- Double flux: the blend applies to both of a face's fluxes.
+
+Stability. The central flux has no dissipation, so the SGS model and the
+molecular viscosity are the only sinks at the cutoff, which is the intended
+LES. KEEP-type fluxes are stable for turbulence on smooth meshes (Kuya et al.
+2018; the same form underlies the second-order central schemes of
+production LES codes on unstructured meshes). The residual risk is
+aliasing on very irregular meshes or with nonlinear TENO stencils; `phi_min
+> 0` (e.g. 0.05) is the documented remedy, and the budget reports the
+dissipation it adds.
+
+Alternatives considered:
+
+- **Lowering TENO's dissipation** (fixed small `C_T`, smaller
+  `stencil_factor`, `troubled_threshold` up): reduces but never removes the
+  upwind dissipation of the Riemann solver, and makes shock capturing less
+  robust everywhere. Useful in combination; the budget quantifies it.
+- **Scaling only the Riemann solver's dissipation** (e.g. Roe with its
+  dissipation matrix multiplied by `phi`): equivalent to the blend above for
+  Rusanov and close to it for Roe, but tied to one solver; the blend works
+  with all five.
+- **Artificial bulk viscosity (localized artificial diffusivity, Cook &
+  Cabot)** for shocks with a central flux everywhere: needs second
+  derivatives and tuned constants, and is itself numerical dissipation that
+  the budget would have to separate.
+- **Implicit LES** (no model, rely on TENO/Riemann dissipation): a non-goal.
+
+## 5. Implementation: SGS fluxes in the solver
+
+- Input `[les]`: `model` (`sigma`, `wale`, `vreman`, `smagorinsky`),
+  optional `C`, `Pr_t`, `Sc_t`. `[les]` needs `type = "navier_stokes"`.
+- `les.h`: the models as one POD with `KOKKOS_INLINE_FUNCTION nu_t(g,
+  Delta)`, captured by value like `Euler`.
+- `Delta` per cell, computed once at setup (`V^(1/d)`).
+- **Single gas**: after the viscous gradients, a cell kernel stores
+  `mu_t = rho nu_t` (all local cells, so halo cells next to owned faces have
+  it, from the same gradients as their owners). `ViscousFluxFunctor` adds
+  the face mean of the two cells' `mu_t` to `mu` and `cp mu_t / Pr_t` to the
+  conductivity. Wall faces get `mu_t = 0` (the wall shear stress is the
+  molecular one; Sigma and WALE are `O(y^3)` there anyway). Other boundary
+  faces take the cell's value.
+- **Mixtures**: after the transport gradients, the same kernel adds `mu_t`
+  to `MU`, `cp mu_t / Pr_t` to `LAMBDA` and `mu_t / Sc_t W_k / W` to every
+  species' `rho D_k W_k / W`; the mixture viscous kernel is unchanged.
+- **Time step**: `nu_eff` includes `4/3 nu_t` and `gamma nu_t / Pr_t`
+  (`D_t` for mixtures). The eddy viscosity is recomputed from the state in
+  `calc_dt` (one gradient evaluation per step), so a restarted run takes
+  exactly the time steps of the uninterrupted one.
+- **Axisymmetric runs**: the hoop stress uses `mu + mu_t`.
+- **Output**: `MU_T` (cell eddy viscosity).
+- **Budget**: `[integrals] budget = true` adds the columns
+  `ke_rate_convective, ke_rate_viscous, ke_rate_sgs` (the `dK/dt|_R` of
+  section 4.2) and `eps_numerical = pressure_dilatation - ke_rate_convective`.
+- Without `[les]` no new kernel runs and no view is allocated; the existing
+  kernels take the empty-view branch, so results are byte-identical.
+
+## 6. Turbulence-chemistry interaction
+
+### 6.1 The candidates
+
+The filtered rates `\bar{omega}_k` must be modeled because on an LES mesh the
+flame (thermal thickness `delta_L ~ 0.1-0.5 mm` for hydrocarbon and hydrogen
+flames at 1 atm) is thinner than Delta (1-5 mm in a laboratory burner LES).
+
+| Closure | Idea | With finite-rate mechanisms | Explicit? | Premixed | Non-premixed |
+|---|---|---|---|---|---|
+| Quasi-laminar | `omega(\tilde{Y}, \tilde{T})` | yes | **no**: an under-resolved flame is thickened by the scheme | DNS-like meshes only | if mixing is resolved |
+| **TFLES** (Butler & O'Rourke 1977; Colin et al. 2000) | thicken the flame by `F` so it is resolved; restore the SGS wrinkling by an efficiency `E` | yes, unchanged | yes | yes, the standard premixed LES closure | only with the thickening switched off there (dynamic) |
+| PaSR (as in Sabelnikov & Fureby 2013) | `omega = kappa omega(\tilde{Y}, \tilde{T})`, `kappa = tau_c / (tau_c + tau_mix)` | yes | yes, but `tau_c` is ill-defined for multi-step chemistry | flame still under-resolved unless the mesh resolves it | yes |
+
+- **Quasi-laminar** (no model) is the model-off baseline. On an LES mesh it
+  is implicit: the resolved flame thickness is set by the scheme's
+  dissipation and the cell size. Rejected as the closure; kept as the
+  reference that shows what the model changes.
+- **TFLES**: the transformation `D -> F D`, `omega -> omega / F` keeps the
+  laminar flame speed `s_L ~ sqrt(D omega)` and multiplies the thickness by
+  `F`, for any mechanism and transport model, because it is an exact
+  rescaling of the one-dimensional flame equations. The efficiency `E >= 1`
+  (`D -> E F D`, `omega -> E omega / F`) multiplies the speed by `E`, the
+  SGS flame-surface wrinkling. Dynamic thickening (Légier et al. 2002)
+  applies `F` only in the flame through a sensor `Omega`, so
+  mixing and non-reacting regions keep their molecular and SGS transport.
+- **PaSR**: local, cheap, used for non-premixed and MILD combustion; but it
+  does not resolve the flame structure (the flame is still thinner than the
+  mesh, so its propagation is again set by numerics in premixed regimes),
+  and `tau_c` for a multi-step mechanism (from the Jacobian's eigenvalues,
+  from fuel consumption, from a reference flame) changes the results by
+  tens of percent.
+
+### 6.2 Recommendation
+
+**Decision 8: TFLES with dynamic thickening and the Charlette efficiency**
+is the primary closure. It keeps the finite-rate chemistry and the
+molecular transport models as they are, so the laminar flame speed,
+thickness ratio and response to strain are those of the mechanism; it is
+explicit (every effect is a term with a model constant); and its premixed
+validation is extensive (Colin et al. 2000; Charlette et al. 2002; Wang,
+Boileau & Veynante 2011; Volvo and swirl burners in AVBP).
+
+**Decision 9: PaSR is worth adding as a second closure** for non-premixed
+and partially premixed cases, but after TFLES is validated. It reuses
+TFLES's per-cell rate scaling (section 6.4) and the SGS mixing time
+`tau_mix = Delta^2 / nu_t` from section 2, so it costs about one stage.
+
+### 6.3 TFLES formulation
+
+Per cell, frozen over a time step (computed at the start of each step from
+the current state, so restarts reproduce):
+
+- **Thickening** `F = 1 + (F_max - 1) Omega` with
+  `F_max = max(1, n_res Delta / delta_L)`: `n_res` (default 5) cells across
+  the thickened flame, `delta_L` the laminar thermal thickness (input; e.g.
+  from Cantera's 1D flame, `(T_b - T_u) / max |dT/dx|`).
+- **Sensor** `Omega` in [0, 1]: from the progress variable
+  `c = (T - T_u) / (T_b - T_u)` clipped to [0, 1],
+  `Omega = min(1, c (1 - c) / (c_0 (1 - c_0)))` with `c_0 = 0.05`: one in the
+  whole flame including its preheat zone, zero in fresh and burnt gas. `T_u`
+  and `T_b` are inputs. It is local (no filtering pass, so no halo exchange)
+  and smooth. Alternatives: the reaction-rate sensor of Légier et al.
+  (`Omega = tanh(beta omega / omega_max)`, filtered to widen it over the
+  preheat zone, which needs a filtering pass and a halo exchange per step),
+  and Jaravel's multi-step variant; the temperature-based sensor is chosen
+  for its locality and because it cannot fire in non-reacting mixing of
+  cold streams. Its weakness, heat loss lowering `c` in burnt gas, is not
+  present in the validation cases.
+- **Efficiency** (Charlette, Meneveau & Veynante 2002, with `beta = 0.5`):
+  `E = (1 + min[F - 1, Gamma(F, u'_Delta / s_L, Re_Delta) u'_Delta / s_L])^beta`
+  with the filter width of the thickened flame `Delta_e = F delta_L`, so the
+  ratio `Delta_e / delta_L = F`; `Gamma` is their fit of the efficiency
+  function, and `Re_Delta = u'_Delta Delta_e
+  / nu`. In unthickened regions (`F = 1`) `E = 1`.
+- **SGS velocity** `u'_Delta = c_2 Delta^3 |lap(curl u)|` with `c_2 = 2`
+  (Colin et al. 2000), which removes the dilatational part of the resolved
+  field near the flame. The Laplacian of the vorticity is the divergence of
+  its least-squares gradient: two more gradient passes than the eddy
+  viscosity. It is evaluated on owned cells and its result (`F`, `E`,
+  `Omega` per cell) is exchanged once per step to the halo. Alternative:
+  `u'_Delta` from the eddy viscosity (`nu_t / (C Delta)`), which with Sigma
+  is also dilatation-free for planar flames, local and cheaper; kept as an
+  option if the Laplacian proves noisy on tetrahedra.
+- **Transport**: species diffusivities and the conductivity become
+  `E F D_k` and `E F lambda`, and the SGS diffusivities `(1 - Omega) D_t`
+  (the thickened flame is resolved, so its SGS transport is in `E`);
+  viscosity is not thickened.
+- **Chemistry**: rates `E omega / F`, see 6.4.
+- **Inputs** (`[les.combustion]`): `model = "tfles"`, `delta_L`, `s_L`,
+  `T_unburnt`, `T_burnt`, optional `n_res` (5), `beta` (0.5),
+  `efficiency = "charlette" | "none"`.
+
+### 6.4 Chemistry rate scaling (decision 10)
+
+Mallard's chemistry is Strang split: each owned cell is an adiabatic,
+constant-volume reactor `dY/dt = omega(Y, T)/rho`. That system is
+autonomous, so multiplying the rates by `s` is identical to integrating it
+over `s dt` instead of `dt`. TFLES (`s = E / F`) and PaSR (`s = kappa`)
+therefore only need a per-cell multiplier of the reactor's integration time.
+The kinetics, Jacobian, Rosenbrock integrator, sub-step history (`CHEM_H`),
+skipping of inactive cells and team-parallel lanes are untouched, so the
+chemistry stays bitwise independent of rank count and team width.
+
+### 6.5 Compatibility
+
+- **Mixture-averaged, unity- and constant-Lewis transport**: thickening
+  multiplies each `D_k` and `lambda` by the same factor, so Lewis numbers
+  are unchanged.
+- **Double flux**: concerns only the convective energy flux; independent.
+- **Determinism**: `F`, `E`, `Omega` are per-cell functions of the state and
+  of its gradients over the local stencil, exchanged to the halo by the same
+  exchange as the state; the result is bitwise independent of the rank
+  count. No reduction enters the model.
+
+## 7. Tests (each must fail under a plausible bug)
+
+- **Model kernels** (exact values): Sigma, WALE, Vreman, Smagorinsky on
+  analytic gradients: pure shear (WALE, Vreman, Sigma give 0;
+  Smagorinsky `(C Delta)^2 |s|`), solid rotation (Smagorinsky and Sigma give
+  0, WALE and Vreman positive), isotropic and axisymmetric expansion (Sigma
+  0), a generic gradient against an independent SVD / eigenvalue
+  evaluation, invariance under a random rotation `R g R^T` and under adding
+  a uniform velocity (gradients unchanged), and scaling `nu_t ~ Delta^2 |g|`.
+- **Filter width**: `Delta^d = V` per cell on every cell type; a test that
+  turns red if the width uses an edge length, the inverse, or the
+  measure of axisymmetric runs.
+- **Solver**: `[les]` off is byte-identical to no `[les]`; a decaying
+  random field loses kinetic energy faster with the model than without, by
+  the amount the budget reports; laminar Couette and Poiseuille flows are
+  unchanged by Sigma and WALE (pure shear, `mu_t = 0` to round-off) but not
+  by Smagorinsky; the budget's `ke_rate_sgs` equals `-int 2 mu_t |S^d|^2 dV`
+  computed independently on a smooth field; `MU_T` output and the time
+  step include `nu_t`.
+- **Mixtures**: SGS species fluxes sum to zero; a uniform-composition flow
+  is unchanged by `Sc_t`.
+- **MPI**: distributed runs with `[les]` (2D WALE and Vreman, 3D Sigma;
+  single gas and mixture; hybrid flux; TFLES) match serial runs bitwise.
+- **Hybrid flux**: KEEP conserves kinetic energy to round-off with FO
+  reconstruction on a periodic mesh of triangles (and tetrahedra) without
+  viscosity; a shock tube still captures the shock (sensor at 1) and
+  matches the exact solution as the Riemann solver alone does; free-stream
+  preservation.
+- **TFLES**: a 1D laminar flame thickened by `F = 4` and 8 keeps `s_L`
+  within 2% and its thickness scales by `F` within 5%; `Omega` is 0 in
+  fresh and burnt gas; `E = 1` for `u' = 0`; the chemistry multiplier
+  `s` integrates exactly like rates scaled by `s` for a 0D reactor.
+
+## 8. Validation
+
+Each case is an example with its reference data, analysis tool and the
+results quoted in its input header, like `examples/isotropic_turbulence`.
+Every case runs three ways at the main resolution: **model on**, **model
+off** (same scheme, same mesh) and with the **default upwind flux** instead
+of the hybrid one, plus a **grid refinement** with the model on, and
+reports the dissipation budget. The proof that the model, not the scheme,
+does the work is that (a) `eps_num <= 0.5 eps_sgs`, (b) model-off differs
+from the reference by much more than model-on, and (c) model-on results
+converge toward the reference under refinement without retuning.
+
+### 8.1 Decaying isotropic turbulence (Comte-Bellot & Corrsin 1971)
+
+- Grid turbulence at `M = 5.08 cm`, `U_0 = 10 m/s`, stations
+  `t U_0 / M = 42, 98, 171`. Periodic box of side `L = 11 M` (about ten
+  integral scales), air viscosity; a fictitious
+  sound speed sets the turbulent Mach number to 0.1 (same Reynolds number;
+  compressibility effects below 1% in kinetic energy).
+- Initial field: random solenoidal velocity matching the measured spectrum
+  at station 1, truncated at the grid cutoff (`tools/`), uniform density and
+  pressure; a short pre-run (`0.5` eddy turnover) to establish
+  phase correlations is excluded from the comparison, as is common.
+- Meshes `32^3` and `64^3` hexahedra (plus `64^3` tetrahedra to test the
+  unstructured path), TENO5 and MUSCL, hybrid flux, Sigma (and WALE,
+  Vreman, Smagorinsky at 64^3).
+- **Targets**: spectra at stations 2 and 3 within 15% of the measurements
+  for `k < 2/3 k_c` (`k_c = pi N / L`); resolved kinetic energy within 5% of
+  the measured energy integrated up to `k_c`; `eps_num <= 0.5 eps_sgs` over
+  stations 2-3. Model-off must show the pile-up at `k_c` (central flux) or
+  the over-dissipation (upwind), and miss these targets.
+
+### 8.2 Turbulent channel flow (Moser, Kim & Mansour 1999; Lee & Moser 2015)
+
+- `Re_tau = 395` (and 590): box `2 pi h x 2 h x pi h`, periodic in x and z,
+  isothermal no-slip walls, constant mass flow forcing at the bulk Reynolds
+  number of the DNS (`Re_b = 2 h U_b / nu` about 13,700 for 395), bulk Mach 0.2.
+  **Depends on #172** (mass-flow forcing and mesh stretching).
+- Mesh: `Delta x+ ~ 40-50`, `Delta z+ ~ 20`, first cell `y+ < 1`, tanh
+  stretching: 64 x 64 x 64 hexahedra at 395 (96 x 96 x 96 at 590), plus a
+  coarser `48^3` for refinement.
+- **Targets**: friction Reynolds number within 3% of the DNS (equivalently
+  `C_f` within 6%); mean velocity `U+` within 3% across `y+ = 30-300`;
+  peak `u'_rms+` within 10% and at `y+` 10-20; `v'_rms+`, `w'_rms+` and
+  `-<u'v'>+` within 10% of their peaks. Model-off at the same mesh must
+  miss `Re_tau` and the peak `u'_rms+` by more than twice the model-on
+  error. Budget reported per wall-normal band.
+
+### 8.3 Reacting validation
+
+1. **Laminar flame invariance** (stage 5, H2/air and CH4/air, existing
+   `premixed_flame`): with `F = 1, 4, 8`, `s_L` within 2% of the
+   unthickened flame and of Cantera; thickness ratio within 5% of `F`.
+2. **Flame-vortex or flame in decaying turbulence** (2D/3D periodic box,
+   no inflow needed): turbulent consumption speed against the efficiency
+   function's prediction `E s_L` at modest `u'/s_L`; model-off (`E = 1`)
+   comparison.
+3. **Volvo bluff-body flame** (Sjunnesson, Henrikson & Löfström 1992),
+   propane/air `phi = 0.65`, non-reacting
+   and reacting: mean and RMS axial velocity at `x/h = 0.375, 0.95, 1.53,
+   3.75, 9.4` within 10% of `U_b`, and the recirculation length. Its inflow
+   is laminar in most LES studies, so it does **not** need #159; a slot or
+   Bunsen flame (Filatyev et al. 2005; Dunn et al. 2010) would, and is listed
+   as conditional on #159.
+
+## 9. Stages
+
+One pull request each, stacked; the umbrella issue links them.
+
+1. **SGS eddy viscosity**: `[les]` with Sigma, WALE, Vreman, Smagorinsky;
+   filter width; SGS heat and species fluxes (single gas and mixtures);
+   time step; `MU_T`; dissipation budget in `[integrals]`; tests and docs.
+2. **Hybrid convective flux**: KEEP flux and compression-only Ducros sensor
+   for single gases, mixtures and double flux; tests and docs.
+3. **Decaying isotropic turbulence validation** (Comte-Bellot & Corrsin):
+   initial-field tool, reference data, example, budget study (upwind vs
+   hybrid, model on vs off, 32^3/64^3).
+4. **Channel validation** at `Re_tau = 395` (590 if affordable), after #172.
+5. **TFLES**: thickening, sensor, Charlette efficiency with Colin's
+   operator, per-cell chemistry time scaling; laminar-flame invariance tests.
+6. **Reacting validation**: flame in decaying turbulence, Volvo bluff body.
+7. **Optional**: PaSR; dynamic Sigma / Lagrangian dynamic Smagorinsky;
+   Scotti filter width; AMD.
+
+## 10. Risks
+
+- **Hybrid flux stability** on irregular tetrahedral meshes. Mitigation:
+  `phi_min`, tests on tetrahedra, budget.
+- **Sigma's closed-form singular values** lose relative accuracy for
+  nearly degenerate `G` in single precision. Mitigation: evaluated in double
+  in every build, clipped to non-negative eigenvalues.
+- **The budget's `Pi`** is only as accurate as the gradients; reported with
+  the result and small in the target cases.
+- **Channel cost** at `Re_tau = 590` (about 1M cells, `10^5` steps): one
+  A100 for about a day; 395 first.
+- **TFLES sensor** based on temperature misses flames with strong heat loss;
+  the reaction-rate sensor is the documented alternative.
+
+## References
+
+DOIs checked against Crossref. Entries move to [references.md](../references.md)
+with the stage that implements them.
+
+- Bhagatwala & Lele 2009, *J. Comput. Phys.* 228, 4965. [doi:10.1016/j.jcp.2009.04.009](https://doi.org/10.1016/j.jcp.2009.04.009)
+- Butler & O'Rourke 1977, *Proc. Combust. Inst.* 16, 1503. [doi:10.1016/S0082-0784(77)80432-3](https://doi.org/10.1016/S0082-0784%2877%2980432-3)
+- Charlette, Meneveau & Veynante 2002, *Combust. Flame* 131, 159. [doi:10.1016/S0010-2180(02)00400-5](https://doi.org/10.1016/S0010-2180%2802%2900400-5)
+- Colin, Ducros, Veynante & Poinsot 2000, *Phys. Fluids* 12, 1843. [doi:10.1063/1.870436](https://doi.org/10.1063/1.870436)
+- Comte-Bellot & Corrsin 1971, *J. Fluid Mech.* 48, 273. [doi:10.1017/S0022112071001599](https://doi.org/10.1017/S0022112071001599)
+- Deardorff 1970, *J. Fluid Mech.* 41, 453. [doi:10.1017/S0022112070000691](https://doi.org/10.1017/S0022112070000691)
+- Ducros, Ferrand, Nicoud, Weber, Darracq, Gacherieu & Poinsot 1999, *J. Comput. Phys.* 152, 517. [doi:10.1006/jcph.1999.6238](https://doi.org/10.1006/jcph.1999.6238)
+- Erlebacher, Hussaini, Speziale & Zang 1992, *J. Fluid Mech.* 238, 155. [doi:10.1017/S0022112092001678](https://doi.org/10.1017/S0022112092001678)
+- Filatyev, Driscoll, Carter & Donbar 2005, *Combust. Flame* 141, 1. [doi:10.1016/j.combustflame.2004.07.010](https://doi.org/10.1016/j.combustflame.2004.07.010)
+- Garnier, Adams & Sagaut 2009, *Large Eddy Simulation for Compressible Flows*, Springer. [doi:10.1007/978-90-481-2819-8](https://doi.org/10.1007/978-90-481-2819-8)
+- Garnier, Mossi, Sagaut, Comte & Deville 1999, *J. Comput. Phys.* 153, 273. [doi:10.1006/jcph.1999.6268](https://doi.org/10.1006/jcph.1999.6268)
+- Germano, Piomelli, Moin & Cabot 1991, *Phys. Fluids A* 3, 1760. [doi:10.1063/1.857955](https://doi.org/10.1063/1.857955)
+- Ghosal 1996, *J. Comput. Phys.* 125, 187. [doi:10.1006/jcph.1996.0088](https://doi.org/10.1006/jcph.1996.0088)
+- Haselbacher & Vasilyev 2003, *J. Comput. Phys.* 187, 197. [doi:10.1016/S0021-9991(03)00095-0](https://doi.org/10.1016/S0021-9991%2803%2900095-0)
+- Jameson 2008, *J. Sci. Comput.* 34, 188. [doi:10.1007/s10915-007-9172-6](https://doi.org/10.1007/s10915-007-9172-6)
+- Kuya, Totani & Kawai 2018, *J. Comput. Phys.* 375, 823. [doi:10.1016/j.jcp.2018.08.058](https://doi.org/10.1016/j.jcp.2018.08.058)
+- Lee & Moser 2015, *J. Fluid Mech.* 774, 395. [doi:10.1017/jfm.2015.268](https://doi.org/10.1017/jfm.2015.268)
+- Légier, Poinsot, Varoquié, Lacas & Veynante 2002, in *Advances in LES of Complex Flows*, Springer, 315. [doi:10.1007/978-94-017-1998-8_27](https://doi.org/10.1007/978-94-017-1998-8_27)
+- Lilly 1992, *Phys. Fluids A* 4, 633. [doi:10.1063/1.858280](https://doi.org/10.1063/1.858280)
+- Meneveau, Lund & Cabot 1996, *J. Fluid Mech.* 319, 353. [doi:10.1017/S0022112096007379](https://doi.org/10.1017/S0022112096007379)
+- Mittal & Moin 1997, *AIAA J.* 35, 1415. [doi:10.2514/2.253](https://doi.org/10.2514/2.253)
+- Moin, Squires, Cabot & Lee 1991, *Phys. Fluids A* 3, 2746. [doi:10.1063/1.858164](https://doi.org/10.1063/1.858164)
+- Moser, Kim & Mansour 1999, *Phys. Fluids* 11, 943. [doi:10.1063/1.869966](https://doi.org/10.1063/1.869966)
+- Najafi-Yazdi, Najafi-Yazdi & Mongeau 2015, *J. Comput. Phys.* 292, 272. [doi:10.1016/j.jcp.2015.03.034](https://doi.org/10.1016/j.jcp.2015.03.034)
+- Nicoud & Ducros 1999, *Flow Turbul. Combust.* 62, 183. [doi:10.1023/A:1009995426001](https://doi.org/10.1023/A:1009995426001)
+- Nicoud, Baya Toda, Cabrit, Bose & Lee 2011, *Phys. Fluids* 23, 085106. [doi:10.1063/1.3623274](https://doi.org/10.1063/1.3623274)
+- Poinsot & Veynante 2012, *Theoretical and Numerical Combustion*, 3rd ed., self-published.
+- Rozema, Bae, Moin & Verstappen 2015, *Phys. Fluids* 27, 085107. [doi:10.1063/1.4928700](https://doi.org/10.1063/1.4928700)
+- Sabelnikov & Fureby 2013, *Combust. Flame* 160, 83. [doi:10.1016/j.combustflame.2012.09.008](https://doi.org/10.1016/j.combustflame.2012.09.008)
+- Scotti, Meneveau & Lilly 1993, *Phys. Fluids A* 5, 2306. [doi:10.1063/1.858537](https://doi.org/10.1063/1.858537)
+- Sjunnesson, Henrikson & Löfström 1992, AIAA Paper 92-3650. [doi:10.2514/6.1992-3650](https://doi.org/10.2514/6.1992-3650)
+- Smagorinsky 1963, *Mon. Weather Rev.* 91, 99. [doi:10.1175/1520-0493(1963)091<0099:GCEWTP>2.3.CO;2](https://doi.org/10.1175/1520-0493%281963%29091%3C0099%3AGCEWTP%3E2.3.CO%3B2)
+- Vreman 2004, *Phys. Fluids* 16, 3670. [doi:10.1063/1.1785131](https://doi.org/10.1063/1.1785131)
+- Vreman, Geurts & Kuerten 1995, *Appl. Sci. Res.* 54, 191. [doi:10.1007/BF00849116](https://doi.org/10.1007/BF00849116)
+- Wang, Boileau & Veynante 2011, *Combust. Flame* 158, 2199. [doi:10.1016/j.combustflame.2011.04.008](https://doi.org/10.1016/j.combustflame.2011.04.008)
