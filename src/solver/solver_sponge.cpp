@@ -1,7 +1,7 @@
 /**
  * @file solver_sponge.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Sponge layers and the transverse terms of characteristic boundaries.
+ * @brief Sponge layers, and the per-step update of characteristic boundaries.
  * @version 0.1
  * @date 2026-10-04
  *

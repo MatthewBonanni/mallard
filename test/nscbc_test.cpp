@@ -282,9 +282,10 @@ double rms_pressure_difference(const Result & a, const Result & ref) {
 } // namespace
 
 TEST(NSCBCTest, VortexLeavesWithoutReflection) {
-    // At M = 0.25, the transverse terms keep the outlet from pushing the
-    // vortex's low pressure back to the target, which sets off a pressure
-    // wave and a transverse slosh between the walls
+    // At M = 0.25, cancelling the transverse terms in the incoming wave
+    // (beta = M, the default) keeps the outlet from pushing the vortex's low
+    // pressure back to the target; Poinsot & Lele's original condition
+    // (beta = 1) sets off a pressure wave and a transverse slosh between the walls
     const double t_stop = 3.0;
     const double dp_vortex = 0.5 * std::pow(SWIRL / std::exp(-0.5), 2);
     for (const std::string type : {"cartesian", "cartesian_tri", "jittered"}) {
@@ -293,8 +294,8 @@ TEST(NSCBCTest, VortexLeavesWithoutReflection) {
         const std::string mesh = mesh_input(type, 32, 32, 1.0, 1.0, 32);
         const double plain = rms_pressure_difference(run(vortex_input(outlet(0.25) + "beta = 1.0\n", mesh, t_stop)), ref);
         const double transverse = rms_pressure_difference(run(vortex_input(outlet(0.25), mesh, t_stop)), ref);
-        EXPECT_LT(transverse, 0.6 * plain);
-        if (type == "cartesian") EXPECT_LT(transverse, 0.1 * dp_vortex);
+        EXPECT_LT(transverse, 0.1 * dp_vortex);
+        EXPECT_GT(plain, 0.5 * dp_vortex);
     }
 }
 

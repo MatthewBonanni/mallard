@@ -21,9 +21,9 @@
 /**
  * @brief Pieces of the transverse terms of the incoming acoustic wave at
  *        every characteristic face (Yoo & Im 2007; Lodato, Domingo & Vervisch
- *        2008): [u_t . grad p, rho div_t u_t, rho u_t . grad u_n], combined
+ *        2008): [u_t . grad p, rho div_tangential u_t, rho u_t . grad u_n], combined
  *        by BoundaryData::characteristic_W with the face's sound speed c into
- *        T- = u_t . grad p + c^2 rho div_t u_t - c rho u_t . grad u_n.
+ *        T- = u_t . grad p + c^2 rho div_tangential u_t - c rho u_t . grad u_n.
  *
  * The tangential derivatives are a least-squares fit, in the plane of the
  * face, of the states of the cells of the neighboring characteristic faces
@@ -83,16 +83,16 @@ struct CharacteristicTransverseFunctor {
         const rtype u_n = dot<N_DIM>(W_f + 1, n);
         rtype u_t[N_DIM];
         FOR_I_DIM u_t[i] = W_f[1 + i] - u_n * n[i];
-        rtype div_t = 0.0_r, u_t_grad_u_n = 0.0_r;
+        rtype div_tangential = 0.0_r, u_t_grad_u_n = 0.0_r;
         FOR_I_DIM {
-            div_t += g[1 + i][i];
+            div_tangential += g[1 + i][i];
             for (uint8_t j = 0; j < N_DIM; j++) {
-                div_t -= n[i] * g[1 + i][j] * n[j];
+                div_tangential -= n[i] * g[1 + i][j] * n[j];
                 u_t_grad_u_n += n[i] * g[1 + i][j] * u_t[j];
             }
         }
         boundaries.char_transverse(k, 0) = dot<N_DIM>(u_t, g[E]);
-        boundaries.char_transverse(k, 1) = W_f[0] * div_t;
+        boundaries.char_transverse(k, 1) = W_f[0] * div_tangential;
         boundaries.char_transverse(k, 2) = W_f[0] * u_t_grad_u_n;
     }
 };
