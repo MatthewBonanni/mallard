@@ -753,7 +753,8 @@ void Solver::init_output() {
                 const std::filesystem::path parent = std::filesystem::path(file).parent_path();
                 if (!parent.empty()) std::filesystem::create_directories(parent);
                 // init_output runs before the restart state is read, so check the input
-                const bool resume = toml::find_or<std::string>(input, "initialize", "type", "") == "restart";
+                const bool resume = toml::find_or<std::string>(input, "initialize", "type", "") == "restart" &&
+                                    std::filesystem::exists(file) && std::filesystem::file_size(file) > 0;
                 monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
                 if (!resume) {
                     *monitor.out << "step,t";
@@ -780,10 +781,13 @@ void Solver::init_output() {
         if (comm::is_root()) {
             const std::filesystem::path parent = std::filesystem::path(file).parent_path();
             if (!parent.empty()) std::filesystem::create_directories(parent);
-            const bool resume = toml::find_or<std::string>(input, "initialize", "type", "") == "restart";
+            const bool resume = toml::find_or<std::string>(input, "initialize", "type", "") == "restart" &&
+                                std::filesystem::exists(file) && std::filesystem::file_size(file) > 0;
             integral_monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
             if (!resume) {
-                *integral_monitor.out << "step,t,kinetic_energy,enstrophy,dilatation_squared,pressure_dilatation\n";
+                *integral_monitor.out << "step,t,kinetic_energy,enstrophy,dilatation_squared,pressure_dilatation,"
+                                          "velocity_squared,vorticity_squared,density_squared,temperature,"
+                                          "temperature_squared\n";
             }
         }
     }
@@ -1588,27 +1592,29 @@ std::array<rtype, N_CONSERVATIVE> Solver::integrate_conservatives() {
  */
 struct FlowStatisticsFunctor {
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
+    Kokkos::View<rtype *[N_PRIMITIVE]> primitives;
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
     Kokkos::View<rtype *> volume;
     Kokkos::View<rtype *[N_DIM]> radius_coords;  // axisymmetric runs: cell_coords, else empty
 
     struct value_type {
-        rtype v[4];
+        rtype v[N_FLOW_STATISTICS];
     };
 
     KOKKOS_INLINE_FUNCTION
     void init(value_type & sum) const {
-        for (int i = 0; i < 4; i++) sum.v[i] = 0.0;
+        for (int i = 0; i < N_FLOW_STATISTICS; i++) sum.v[i] = 0.0;
     }
 
     KOKKOS_INLINE_FUNCTION
     void join(value_type & dst, const value_type & src) const {
-        for (int i = 0; i < 4; i++) dst.v[i] += src.v[i];
+        for (int i = 0; i < N_FLOW_STATISTICS; i++) dst.v[i] += src.v[i];
     }
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c, value_type & sum) const {
         const rtype rho = W(c, 0);
+        const rtype T = primitives(c, N_DIM + 1);
         const rtype V = volume(c);
         rtype u2 = 0.0, div = 0.0;
         FOR_I_DIM {
@@ -1632,10 +1638,15 @@ struct FlowStatisticsFunctor {
         sum.v[1] += 0.5_r * rho * omega2 * V;
         sum.v[2] += div * div * V;
         sum.v[3] += W(c, N_DIM + 1) * div * V;
+        sum.v[4] += u2 * V;
+        sum.v[5] += omega2 * V;
+        sum.v[6] += rho * rho * V;
+        sum.v[7] += T * V;
+        sum.v[8] += T * T * V;
     }
 };
 
-std::array<rtype, 4> Solver::integrate_flow_statistics() {
+std::array<rtype, N_FLOW_STATISTICS> Solver::integrate_flow_statistics() {
     halo.exchange(state());
     update_boundary_states(t);
     const Euler phys = physics;
@@ -1649,15 +1660,16 @@ std::array<rtype, 4> Solver::integrate_flow_statistics() {
         phys.compute_W_from_conservatives(W_c, cons);
         FOR_I_CONSERVATIVE W(i_cell, i) = W_c[i];
     });
+    update_primitives();
     if (!face_reconstruction->cell_gradients(W_cells, viscous_gradients, mesh->n_owned())) {
         Kokkos::parallel_for("statistics_gradients", mesh->n_owned(), viscous_gradient);
     }
-    FlowStatisticsFunctor functor{W_cells, viscous_gradients, mesh->cell_measure,
+    FlowStatisticsFunctor functor{W_cells, primitives, viscous_gradients, mesh->cell_measure,
                                   axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>()};
     FlowStatisticsFunctor::value_type result;
     Kokkos::parallel_reduce("statistics", mesh->n_owned(), functor, result);
-    std::array<rtype, 4> sums;
-    for (int i = 0; i < 4; i++) sums[i] = result.v[i];
+    std::array<rtype, N_FLOW_STATISTICS> sums;
+    for (int i = 0; i < N_FLOW_STATISTICS; i++) sums[i] = result.v[i];
     return comm::allreduce(sums, comm::Op::SUM);
 }
 

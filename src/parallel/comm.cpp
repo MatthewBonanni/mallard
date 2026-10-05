@@ -217,5 +217,6 @@ template std::vector<std::vector<double>> alltoallv(const std::vector<std::vecto
 template std::vector<std::vector<float>> alltoallv(const std::vector<std::vector<float>> &);
 template Received<uint64_t> exchange(std::vector<std::vector<uint64_t>> &&);
 template Received<double> exchange(std::vector<std::vector<double>> &&);
+template Received<float> exchange(std::vector<std::vector<float>> &&);
 
 } // namespace comm

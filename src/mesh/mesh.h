@@ -406,9 +406,11 @@ class Mesh {
         // Cells [0, n_complete()) have all their vertex neighbors: all but the outermost halo layer
         uint32_t n_complete_cells = 0;
         uint32_t n_complete() const { return n_complete_cells ? n_complete_cells : n_cells; }
-        // Distributed runs: global id of every local cell and the global cell count (0 otherwise)
+        // Distributed runs: global id of every local cell and node, and the global counts (0 otherwise)
         std::vector<uint64_t> h_global_cell_id;
         uint64_t n_global_cells = 0;
+        std::vector<uint64_t> h_global_node_id;
+        uint64_t n_global_nodes = 0;
         // Volume of each cell and area of each face in the flow's geometry: the
         // revolved ones per radian in axisymmetric runs, else the same views as
         // cell_volume and face_area

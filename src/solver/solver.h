@@ -47,6 +47,8 @@ struct ForceMonitor {
     std::shared_ptr<std::ofstream> out;
 };
 
+constexpr int N_FLOW_STATISTICS = 9;
+
 struct IntegralMonitor {
     uint64_t interval = 0;
     std::string file;
@@ -144,11 +146,12 @@ class Solver {
 
         /**
          * @brief Domain integrals of kinetic energy rho |u|^2 / 2, enstrophy
-         *        rho |omega|^2 / 2, squared dilatation (div u)^2 and pressure
-         *        dilatation p div u, with the reconstruction's velocity gradients
-         *        (TENO polynomials) or else least-squares ones.
+         *        rho |omega|^2 / 2, squared dilatation (div u)^2, pressure
+         *        dilatation p div u, |u|^2, |omega|^2, rho^2, T and T^2, with
+         *        the reconstruction's velocity gradients (TENO polynomials) or
+         *        else least-squares ones.
          */
-        std::array<rtype, 4> integrate_flow_statistics();
+        std::array<rtype, N_FLOW_STATISTICS> integrate_flow_statistics();
 
         // Public because nvcc rejects device lambdas in non-public member functions
         void update_average_pressure_outlets(StateView solution);

@@ -1,4 +1,6 @@
-"""Minimal reader for Mallard's raw-appended VTU files."""
+"""Minimal reader for Mallard's raw-appended VTU files, and (through
+mallard_h5, which needs h5py) its HDF5 snapshots: every function also takes a
+snapshot .h5 file."""
 import os
 import re
 
@@ -14,8 +16,12 @@ def read_vtu_cells(path):
     """Read a 2D or 3D volume VTU.
 
     Returns points (n, 3), connectivity, offsets (end of each cell), VTK cell
-    types, and the cell arrays (vectors as (n_cells, 3)) plus "TIME".
+    types, and the cell arrays (vectors as (n_cells, 3)) plus "TIME". An HDF5
+    snapshot (.h5) is read with mallard_h5.
     """
+    if path.endswith(".h5") or path.endswith(".xmf"):
+        from mallard_h5 import read_h5_cells
+        return read_h5_cells(path)
     raw = open(path, "rb").read()
     start = raw.index(b"<AppendedData")
     start = raw.index(b"_", start) + 1
