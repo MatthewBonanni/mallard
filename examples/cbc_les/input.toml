@@ -1,0 +1,101 @@
+# Large-eddy simulation of decaying isotropic turbulence: the grid turbulence
+# of Comte-Bellot & Corrsin (J. Fluid Mech. 48, 1971, 273,
+# doi:10.1017/S0022112071001599) behind a mesh of M = 5.08 cm at U0 = 10
+# m/s, from station 1 (t U0 / M = 42, t = 0 here) to stations 2 and 3
+# (t U0 / M = 98 and 171, t = 0.28448 and 0.65532 s). Needs the 3D build.
+# Design and results: docs/design/les.md, section 8.1.
+#
+# Physics. Periodic box of side L = 11 M = 0.5588 m, air viscosity
+# nu = 1.5e-5 m^2/s at rho = 1.2 kg/m^3. The initial field has the measured
+# spectrum of station 1 up to the grid cutoff k_c = pi N / L (N = 32, 64,
+# 128: k_c = 180, 360, 720 1/m), developed phases (two 0.1 s pre-runs, each
+# rescaled to that spectrum) and uniform density and pressure; the pressure
+# sets a fictitious sound speed for a turbulent Mach number of 0.1, so the
+# flow is nearly incompressible at the experiment's Reynolds number.
+#
+# Numerics. Sigma model, hybrid KEEP / HLLC flux, MUSCL without limiter: the
+# model removes the energy at the cutoff (integrals.csv, budget = true:
+# numerical dissipation 1-2% of the total, against 46-84% with HLLC
+# everywhere). TENO with the hybrid flux is not recommended: at 32^3 its
+# stencil selection fed energy into the resolved field (numerical
+# dissipation -22%).
+#
+# Results (log10 RMS deviation of the spectrum for k <= 2/3 k_c, and the
+# resolved energy over the measured energy up to k_c, at stations 2 / 3):
+#   32^3  Sigma            0.153 / 0.151   1.54 / 1.51
+#   64^3  Sigma            0.107 / 0.104   1.25 / 1.02
+#   128^3 Sigma            0.063 / 0.085   1.03 / 0.91
+#   64^3  Sigma C = 1.8    0.058 / 0.063   1.08 / 0.97
+#   64^3  no model         0.226 / 0.375   1.81 / 1.76   (pile-up at k_c)
+#   128^3 no model         0.182 / 0.249   1.13 / 0.77
+# On 64^3 the default constant (1.35, calibrated by Nicoud et al. on
+# isotropic turbulence) lets energy pile up near k_c; 1.8 matches the
+# spectrum, and at 128^3 1.35 does (1.8 then dissipates 5-8% too much).
+#
+# Run (N = 64; for 32 or 128 set Nx, Ny, Nz and the file names):
+#   python ../../tools/cbc_les.py init 64 cbc_64.restart     # prints p_ref
+#   (two pre-runs of 0.1 s, each followed by
+#    python ../../tools/cbc_les.py rescale restart/END.restart cbc_64.restart)
+#   ../../build3d/src/Mallard -i input.toml --kokkos-num-threads=8
+#   python ../../tools/cbc_les.py spectra cbc_64.restart restart/station*.restart -o spectra.csv
+#   python ../../tools/cbc_les.py compare spectra.csv --budget integrals.csv --plot spectra.png
+# Cost: 64^3, 2,035 steps, 3 minutes on 4 CPU threads; 128^3, 2,286 steps,
+# 2 minutes on one A100.
+
+[run]
+t_stop = 0.65532
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 64
+Ny = 64
+Nz = 64
+Lx = 0.5588
+Ly = 0.5588
+Lz = 0.5588
+periodic = ["x", "y", "z"]
+
+[initialize]
+type = "restart"
+file = "cbc_64.restart"
+
+[numerics]
+riemann_solver = "HLLC"
+convective_flux = "hybrid"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+limiter = "none"
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 4.7
+T_ref = 300.0
+rho_ref = 1.2
+mu = 1.8e-5
+Pr = 0.71
+
+[les]
+model = "sigma"
+
+[output]
+check_interval = 50
+
+[integrals]
+interval = 5
+budget = true
+
+# Snapshots at stations 2 and 3 exactly
+[[write_data]]
+prefix = "./restart/station2"
+format = "restart"
+time_interval = 0.28448
+
+[[write_data]]
+prefix = "./restart/station3"
+format = "restart"
+time_interval = 0.65532

@@ -2,7 +2,7 @@
 
 Status: proposed. Recommendations are marked **Decision**; the alternatives
 considered are listed with each. Implementation follows the
-[stages](#9-stages), one pull request each; done: 1, 2.
+[stages](#9-stages), one pull request each; done: 1, 2, 3.
 
 Mallard resolves every scale it computes today (DNS of flames, detonations,
 Taylor-Green and isotropic turbulence). This document adds large-eddy
@@ -608,6 +608,63 @@ converge toward the reference under refinement without retuning.
   the measured energy integrated up to `k_c`; `eps_num <= 0.5 eps_sgs` over
   stations 2-3. Model-off must show the pile-up at `k_c` (central flux) or
   the over-dissipation (upwind), and miss these targets.
+
+#### Results (stage 3, `examples/cbc_les`)
+
+![LES spectra against Comte-Bellot & Corrsin](../images/cbc_les_validation.png)
+
+Hexahedra, MUSCL without limiter, initial phases developed by two rescaled
+pre-runs. Spectral error: log10 RMS of `E_LES / E_CBC` for `k <= 2/3 k_c`;
+energy: resolved energy over the measured energy up to `k_c`; budget:
+shares of the total dissipation of resolved energy, averaged over t = 0 to
+station 3 (stations 2 / 3 for the first two columns):
+
+| Mesh | Flux | Model | Spectral error | Energy | Numerical | SGS | Molecular |
+|---|---|---|---|---|---|---|---|
+| 32^3 | hybrid | Sigma | 0.153 / 0.151 | 1.54 / 1.51 | -0.012 | 0.830 | 0.182 |
+| 32^3 | hybrid | Sigma `C = 1.8` | 0.103 / 0.082 | 1.29 / 1.20 | -0.002 | 0.891 | 0.111 |
+| 64^3 | hybrid | Sigma | 0.107 / 0.104 | 1.25 / 1.02 | 0.013 | 0.691 | 0.296 |
+| 64^3 | hybrid | Sigma `C = 1.8` | **0.058 / 0.063** | 1.08 / 0.97 | 0.013 | 0.796 | 0.191 |
+| 64^3 | hybrid | WALE | 0.090 / 0.086 | 1.20 / 0.98 | 0.007 | 0.730 | 0.263 |
+| 64^3 | hybrid | Vreman | 0.108 / 0.106 | 1.25 / 1.02 | 0.012 | 0.689 | 0.298 |
+| 64^3 | hybrid | Smagorinsky | 0.099 / 0.094 | 1.23 / 1.01 | 0.014 | 0.703 | 0.283 |
+| 64^3 | hybrid | none | 0.226 / 0.375 | 1.81 / 1.76 | -0.077 | 0 | 1.077 |
+| 64^3 | HLLC | Sigma `C = 1.8` | 0.154 / 0.217 | 0.95 / 0.93 | **0.463** | 0.435 | 0.103 |
+| 64^3 | HLLC | none (implicit LES) | 0.135 / 0.114 | 1.20 / 1.12 | **0.838** | 0 | 0.162 |
+| 128^3 | hybrid | Sigma | **0.063 / 0.085** | 1.03 / 0.91 | 0.020 | 0.522 | 0.459 |
+| 128^3 | hybrid | Sigma `C = 1.8` | 0.124 / 0.141 | 0.98 / 0.92 | 0.019 | 0.651 | 0.330 |
+| 128^3 | hybrid | none | 0.182 / 0.249 | 1.13 / 0.77 | 0.018 | 0 | 0.982 |
+
+Findings:
+
+- **With the hybrid flux the model does the work**: numerical dissipation
+  is 1-2% of the total at every resolution (`eps_num / eps_sgs <= 0.04`,
+  against the criterion 0.5). Model-off runs pile energy up at `k_c` (the
+  spectrum rises by an order of magnitude) and miss the spectrum by 2-4
+  times the model-on error.
+- **With HLLC everywhere the scheme does the work**: 84% of the dissipation
+  without a model and still 46% with one (`eps_num / eps_sgs = 1.06`), so
+  such runs are implicit LES whatever the model; implicit LES matches the
+  spectrum about as well as the explicit models at their default constants,
+  which is why a budget, not the spectrum alone, is needed to tell them
+  apart.
+- **Model constant and resolution**: at 64^3 (`k_c` in the inertial range)
+  every model at its literature constant leaves a pile-up over the last
+  third of the wavenumbers; Sigma with `C = 1.8` matches the spectrum to
+  0.06 decades (15%). At 128^3 the literature constant (1.35) is the best
+  (0.06-0.09 decades) and 1.8 over-dissipates. The second-order
+  discretization's own transfer function acts like a larger filter on the
+  coarser mesh. Recommendation: keep `C = 1.35` (the default), use 1.5-1.8
+  when `k_c` lies in the inertial range, and check with the budget and the
+  spectrum. The channel (8.2) brackets the same range.
+- **TENO-E with the hybrid flux** (32^3) gave `eps_num = -0.22`: the
+  nonlinear stencil selection feeds energy into the resolved field when
+  nothing upwinds it. Use MUSCL without limiter (or a linear reconstruction)
+  with the hybrid flux; TENO stays for shocks with the Riemann flux.
+- The targets of this section (15% for every `k <= 2/3 k_c`) are met in the
+  mean (0.06 decades = 15%) but not point by point: the largest single-shell
+  deviation is 31-47%, at the lowest shells (few modes, realization noise of
+  one random field) and near `2/3 k_c`.
 
 ### 8.2 Turbulent channel flow (Moser, Kim & Mansour 1999; Lee & Moser 2015)
 
