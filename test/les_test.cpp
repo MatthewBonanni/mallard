@@ -16,6 +16,7 @@
 #include <cmath>
 #include <filesystem>
 #include <functional>
+#include <iomanip>
 #include <sstream>
 #include <string>
 
@@ -314,6 +315,100 @@ TEST(LESSolver, EddyViscosityUsesTheCellVolumeAsFilterWidth) {
         checked++;
     }
     EXPECT_GT(checked, 10u);
+}
+
+TEST(LESModels, ScottiFactorOfTheAspectRatios) {
+    // Scotti, Meneveau & Lilly (1993): 1 for cubes, about 1.2 and 1.4 for aspect ratios 5 and 10
+    EXPECT_DOUBLE_EQ(LES::scotti_factor(1.0, 1.0, 1.0), 1.0);
+    EXPECT_NEAR(LES::scotti_factor(1.0, 1.0, 5.0), 1.198, 1e-3);
+    EXPECT_NEAR(LES::scotti_factor(1.0, 1.0, 10.0), 1.420, 1e-3);
+    // Only the ratios count
+    EXPECT_DOUBLE_EQ(LES::scotti_factor(0.2, 0.5, 2.0), LES::scotti_factor(1.0, 2.5, 10.0));
+}
+
+#if Mallard_DIM == 3
+
+TEST(LESSolver, ScottiWidthUsesTheExtentsOfEachCell) {
+    // Boxes of 0.1 x 0.02 x 0.05 and a linear velocity: the eddy viscosity grows by the factor squared of
+    // the extents' ratios (0.2, 0.5), against the volume width
+    auto input = [](const std::string & width) {
+        std::ostringstream s;
+        s << "[run]\nn_steps = 0\ncfl = 0.5\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 20\nNz = 10\n"
+          << "Lx = 0.8\nLy = 0.4\nLz = 0.5\nperiodic = [\"x\", \"y\", \"z\"]\n"
+          << "[initialize]\ntype = \"analytical\"\nrho = \"2.0\"\np = \"10.0\"\n"
+          << "u = [\"0.4 * sin(7.853981633974483 * y)\", \"0.3 * sin(12.566370614359172 * z)\", "
+             "\"0.2 * sin(7.853981633974483 * x)\"]\n"
+          << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
+          << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 1e-3\n"
+          << "[output]\ncheck_interval = 1000000\n[les]\nmodel = \"vreman\"\n" << width;
+        return make_solver(s.str());
+    };
+    auto volume = input("");
+    auto scotti = input("filter_width = \"scotti\"\n");
+    volume->copy_device_to_host();
+    scotti->copy_device_to_host();
+    const double f = LES::scotti_factor(0.02, 0.05, 0.1);
+    EXPECT_GT(f, 1.1);
+    const auto & a = volume->get_les_coefficients();
+    const auto & b = scotti->get_les_coefficients();
+    uint32_t checked = 0;
+    for (uint32_t c = 0; c < volume->get_mesh()->n_owned(); c++) {
+        if (a(c, 0) < 1e-12) continue;
+        EXPECT_NEAR(b(c, 0), f * f * a(c, 0), 1e-12 * f * f * a(c, 0) + 1e-300) << "cell " << c;
+        checked++;
+    }
+    EXPECT_GT(checked, 100u);
+}
+
+#endif
+
+namespace {
+
+/** @brief <L:M> / <M:M> of the dynamic procedure after one step of a periodic box of side length with velocity scale u0 plus u_shift. */
+double dynamic_constant(const std::string & model, double length, double u0, double u_shift) {
+    std::ostringstream s;
+    const double k = 6.283185307179586 / length;
+    // Modulated plane waves (sums of plain plane waves give <L:M> = 0 exactly), arbitrary phases per component
+    const int waves[4][3] = {{1, 2, 0}, {0, 1, 3}, {2, -1, 1}, {3, 1, -2}};
+    auto component = [&](int i) {
+        std::ostringstream m;
+        m << std::setprecision(17) << u_shift;
+        for (int w = 0; w < 4; w++) {
+            m << " + " << u0 * (1.0 + 0.3 * i - 0.2 * w) << " * sin(" << k << " * (" << waves[w][0] << " * x + "
+              << waves[w][1] << " * y" << (N_DIM == 3 ? " + " + std::to_string(waves[w][2]) + " * z" : std::string())
+              << ") + " << 0.7 * i + 1.3 * w << ") * (1.2 + cos(" << k << " * (x - 2 * y) + " << w << "))";
+        }
+        return m.str();
+    };
+    s << std::setprecision(17) << "[run]\nn_steps = 1\ncfl = 0.1\n[mesh]\ntype = \"cartesian\"\nNx = 12\nNy = 12\n"
+      << "Lx = " << length << "\nLy = " << length << "\n"
+      << (N_DIM == 3 ? "Nz = 12\nLz = " + std::to_string(length) + "\nperiodic = [\"x\", \"y\", \"z\"]\n"
+                     : std::string("periodic = [\"x\", \"y\"]\n"))
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\np = \"100.0\"\n";
+    if constexpr (N_DIM == 3) {
+        s << "u = [\"" << component(0) << "\", \"" << component(1) << "\", \"" << component(2) << "\"]\n";
+    } else {
+        s << "u = [\"" << component(0) << "\", \"" << component(1) << "\"]\n";
+    }
+    s << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
+      << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 1e-6\n"
+      << "[output]\ncheck_interval = 1000000\n[les]\nmodel = \"" << model << "\"\ndynamic = true\n";
+    auto solver = make_solver(s.str());
+    solver->run();
+    return solver->les_dynamic_ratio();
+}
+
+} // namespace
+
+TEST(LESSolver, DynamicConstantIsGalileanAndScaleInvariant) {
+    // L, M and so C depend on velocity differences only, and C^2 = <L:M> / <M:M> is dimensionless: a
+    // missing Delta^2, a test-filter width in the wrong units or a non-central L would break these
+    const std::string model = N_DIM == 3 ? "sigma" : "wale";
+    const double c = dynamic_constant(model, 1.0, 1.0, 0.0);
+    EXPECT_GT(std::abs(c), 1e-3);
+    EXPECT_NEAR(dynamic_constant(model, 1.0, 1.0, 0.7), c, 1e-6 * std::abs(c));
+    EXPECT_NEAR(dynamic_constant(model, 10.0, 1.0, 0.0), c, 1e-6 * std::abs(c));
+    EXPECT_NEAR(dynamic_constant(model, 1.0, 5.0, 0.0), c, 1e-6 * std::abs(c)) << c;
 }
 
 TEST(LESSolver, BudgetSplitsTheKineticEnergyRateOfTheRightHandSide) {

@@ -12,6 +12,8 @@
 
 #include "solver.h"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 
 #include <Kokkos_Core.hpp>
@@ -242,6 +244,226 @@ struct ThickenFunctor {
     }
 };
 
+/**
+ * @brief Germano-identity terms [L^d : M, M : M] V of one owned cell for the global dynamic procedure
+ *        (Germano et al. 1991, Lilly 1992; Favre-weighted as Moin et al. 1991), with the model's
+ *        tau^d = -2 C^2 rho Delta^2 D(g) S^d. The test filter is the volume-weighted average over the cell
+ *        and its vertex neighbors, of width Delta_hat^2 = Delta^2 + 12 / d tr(cov), cov the stencil's
+ *        volume-weighted covariance of the centroids (Delta_hat = 3 Delta on uniform hexahedra);
+ *        filtered gradients stand for the gradients of the filtered field.
+ */
+struct DynamicProcedureFunctor {
+    SGSModel model;
+    Kokkos::View<uint32_t *> offsets;
+    Kokkos::View<uint32_t *> neighbors;
+    Kokkos::View<uint8_t *> neighbor_shift;
+    Kokkos::View<rtype *[N_DIM]> shifts;
+    Kokkos::View<rtype *[N_DIM]> cell_coords;
+    Kokkos::View<rtype *> volume;
+    Kokkos::View<rtype *> delta;
+    StateView flow;                                // [rho, u, ...]
+    SpeciesView gradients;                         // d u_i / d x_j at 3 i + j
+    Kokkos::View<double *[6]> model_stresses;      // rho Delta^2 D(g) S^d: xx, yy, zz, xy, xz, yz
+    Kokkos::View<double *[2]> terms;
+
+    KOKKOS_INLINE_FUNCTION
+    static void gradient(const SpeciesView & gradients, const uint32_t n, double g[3][3]) {
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) g[i][j] = 0.0;
+        }
+        for (uint8_t i = 0; i < N_DIM; i++) {
+            for (uint8_t j = 0; j < N_DIM; j++) g[i][j] = static_cast<double>(gradients(n, 3 * i + j));
+        }
+    }
+
+    /** @brief The model stresses of every cell (owned and halo), filtered next. */
+    struct Stress {
+        SGSModel model;
+        StateView flow;
+        SpeciesView gradients;
+        Kokkos::View<rtype *> delta;
+        Kokkos::View<double *[6]> model_stresses;
+
+        KOKKOS_INLINE_FUNCTION
+        void operator()(const uint32_t n) const {
+            double g[3][3], s[3][3];
+            gradient(gradients, n, g);
+            deviatoric_strain(g, s);
+            const double d = static_cast<double>(delta(n));
+            const double q = static_cast<double>(flow(n, 0)) * d * d * LES::operator_of(model, g);
+            model_stresses(n, 0) = q * s[0][0];
+            model_stresses(n, 1) = q * s[1][1];
+            model_stresses(n, 2) = q * s[2][2];
+            model_stresses(n, 3) = q * s[0][1];
+            model_stresses(n, 4) = q * s[0][2];
+            model_stresses(n, 5) = q * s[1][2];
+        }
+    };
+
+    KOKKOS_INLINE_FUNCTION
+    static void deviatoric_strain(const double g[3][3], double s[3][3]) {
+        const double third_trace = (g[0][0] + g[1][1] + g[2][2]) / 3.0;
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) s[i][j] = 0.5 * (g[i][j] + g[j][i]) - (i == j ? third_trace : 0.0);
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t c) const {
+        double w_sum = 0.0, rho = 0.0, m[3] = {}, rho_uu[3][3] = {}, g[3][3] = {}, model_stress[3][3] = {};
+        double x1[3] = {}, x2[3] = {};
+        const uint32_t begin = offsets(c), end = offsets(c + 1);
+        for (uint32_t k = begin; k <= end; k++) {
+            const uint32_t n = k < end ? neighbors(k) : c;
+            const double w = static_cast<double>(volume(n));
+            double u[3] = {}, gn[3][3], dx[3] = {};
+            gradient(gradients, n, gn);
+            FOR_I_DIM {
+                u[i] = static_cast<double>(flow(n, 1 + i));
+                dx[i] = static_cast<double>(cell_coords(n, i) - cell_coords(c, i)) +
+                        (k < end ? static_cast<double>(shifts(neighbor_shift(k), i)) : 0.0);
+            }
+            const double r = static_cast<double>(flow(n, 0));
+            const double q[3][3] = {{model_stresses(n, 0), model_stresses(n, 3), model_stresses(n, 4)},
+                                    {model_stresses(n, 3), model_stresses(n, 1), model_stresses(n, 5)},
+                                    {model_stresses(n, 4), model_stresses(n, 5), model_stresses(n, 2)}};
+            w_sum += w;
+            rho += w * r;
+            for (int i = 0; i < 3; i++) {
+                m[i] += w * r * u[i];
+                x1[i] += w * dx[i];
+                x2[i] += w * dx[i] * dx[i];
+                for (int j = 0; j < 3; j++) {
+                    rho_uu[i][j] += w * r * u[i] * u[j];
+                    g[i][j] += w * gn[i][j];
+                    model_stress[i][j] += w * q[i][j];
+                }
+            }
+        }
+        double variance = 0.0;
+        for (int i = 0; i < 3; i++) {
+            x1[i] /= w_sum;
+            variance += x2[i] / w_sum - x1[i] * x1[i];
+        }
+        const double d = static_cast<double>(delta(c));
+        const double delta_hat2 = d * d + 12.0 / N_DIM * variance;
+        rho /= w_sum;
+        for (int i = 0; i < 3; i++) {
+            m[i] /= w_sum;
+            for (int j = 0; j < 3; j++) {
+                rho_uu[i][j] /= w_sum;
+                g[i][j] /= w_sum;
+                model_stress[i][j] /= w_sum;
+            }
+        }
+        double s_hat[3][3];
+        deviatoric_strain(g, s_hat);
+        const double nu_hat = delta_hat2 * LES::operator_of(model, g);
+        double L[3][3], M[3][3], trace = 0.0;
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                L[i][j] = rho_uu[i][j] - m[i] * m[j] / rho;
+                M[i][j] = 2.0 * (model_stress[i][j] - rho * nu_hat * s_hat[i][j]);
+            }
+            trace += L[i][i];
+        }
+        double lm = 0.0, mm = 0.0;
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                lm += (L[i][j] - (i == j ? trace / 3.0 : 0.0)) * M[i][j];
+                mm += M[i][j] * M[i][j];
+            }
+        }
+        const double V = static_cast<double>(volume(c));
+        terms(c, 0) = lm * V;
+        terms(c, 1) = mm * V;
+    }
+};
+
+/**
+ * @brief Sums over all ranks of the owned cells' terms, exact in fixed point (each term rounded to 2^-b of
+ *        the largest, b leaving room for every cell in 63 bits), so independent of the rank count and order.
+ */
+std::array<double, 2> exact_sums(const Kokkos::View<double *[2]> & terms, const uint32_t n_owned) {
+    std::array<double, 2> largest = {0.0, 0.0};
+    for (int k = 0; k < 2; k++) {
+        double local = 0.0;
+        Kokkos::parallel_reduce(
+            "dynamic_largest", n_owned,
+            KOKKOS_LAMBDA(const uint32_t c, double & m) { m = Kokkos::fmax(m, Kokkos::fabs(terms(c, k))); },
+            Kokkos::Max<double>(local));
+        largest[k] = local;
+    }
+    largest = comm::allreduce(largest, comm::Op::MAX);
+    const uint64_t n_global = comm::allreduce(static_cast<uint64_t>(n_owned), comm::Op::SUM);
+    const int bits = 62 - static_cast<int>(std::ceil(std::log2(static_cast<double>(n_global) + 1.0)));
+    std::array<int64_t, 2> sums = {0, 0};
+    std::array<double, 2> scale = {0.0, 0.0};
+    for (int k = 0; k < 2; k++) {
+        if (!(largest[k] > 0.0)) continue;
+        const double s = std::ldexp(1.0, bits) / largest[k];
+        scale[k] = s;
+        int64_t local = 0;
+        Kokkos::parallel_reduce(
+            "dynamic_sum", n_owned,
+            KOKKOS_LAMBDA(const uint32_t c, int64_t & sum) {
+                sum += static_cast<int64_t>(Kokkos::round(terms(c, k) * s));
+            },
+            Kokkos::Sum<int64_t>(local));
+        sums[k] = local;
+    }
+    sums = comm::allreduce(sums, comm::Op::SUM);
+    return {scale[0] > 0.0 ? static_cast<double>(sums[0]) / scale[0] : 0.0,
+            scale[1] > 0.0 ? static_cast<double>(sums[1]) / scale[1] : 0.0};
+}
+
+/**
+ * @brief Extents h_1 <= h_2 <= h_3 of a 3D cell: V over the eigenvalues of its projected-area tensor
+ *        1/2 sum_f A_f A_f^T / |A_f| (exact for boxes; equal for regular tetrahedra). Faces only, so cells
+ *        on periodic boundaries need no node unwrapping.
+ */
+std::array<double, 3> cell_extents(const Mesh & mesh, const uint32_t c) {
+    double a[3][3] = {};
+    for (uint32_t k = mesh.h_offsets_faces_of_cell(c); k < mesh.h_offsets_faces_of_cell(c + 1); k++) {
+        const uint32_t f = mesh.h_faces_of_cell(k);
+        double n[3] = {}, norm = 0.0;
+        FOR_I_DIM {
+            n[i] = static_cast<double>(mesh.h_face_normals(f, i));
+            norm += n[i] * n[i];
+        }
+        norm = std::sqrt(norm);
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) a[i][j] += 0.5 * n[i] * n[j] / norm;
+        }
+    }
+    // Cyclic Jacobi rotations of the symmetric tensor
+    for (int sweep = 0; sweep < 50; sweep++) {
+        const double off = a[0][1] * a[0][1] + a[0][2] * a[0][2] + a[1][2] * a[1][2];
+        if (off < 1e-30 * (a[0][0] * a[0][0] + a[1][1] * a[1][1] + a[2][2] * a[2][2])) break;
+        for (int p = 0; p < 2; p++) {
+            for (int q = p + 1; q < 3; q++) {
+                if (a[p][q] == 0.0) continue;
+                const double theta = 0.5 * std::atan2(2.0 * a[p][q], a[q][q] - a[p][p]);
+                const double cs = std::cos(theta), sn = std::sin(theta);
+                for (int k = 0; k < 3; k++) {
+                    const double akp = a[k][p], akq = a[k][q];
+                    a[k][p] = cs * akp - sn * akq;
+                    a[k][q] = sn * akp + cs * akq;
+                }
+                for (int k = 0; k < 3; k++) {
+                    const double apk = a[p][k], aqk = a[q][k];
+                    a[p][k] = cs * apk - sn * aqk;
+                    a[q][k] = sn * apk + cs * aqk;
+                }
+            }
+        }
+    }
+    const double V = static_cast<double>(mesh.h_cell_volume(c));
+    std::array<double, 3> h = {V / a[0][0], V / a[1][1], V / a[2][2]};
+    std::sort(h.begin(), h.end());
+    return h;
+}
+
 } // namespace
 
 void Solver::update_thickened_flame() {
@@ -260,6 +482,45 @@ void Solver::update_thickened_flame() {
                                                cell_transport, les_delta, tfles_fields, chem_time_scale});
     // Halo cells take their owners' fields: the face diffusivities need them
     exchange_cell_vectors(tfles_fields);
+}
+
+void Solver::update_dynamic_constant() {
+    const uint32_t n_owned = mesh->n_owned();
+    StateView flow = dynamic_halo.flow;
+    SpeciesView g = dynamic_halo.species;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
+    if (is_mixture()) {
+        Kokkos::View<rtype ***, Kokkos::LayoutRight> tg = transport_gradients;
+        Kokkos::parallel_for("dynamic_pack", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+            FOR_I_CONSERVATIVE flow(c, i) = W(c, i);
+            for (uint8_t i = 0; i < N_DIM; i++) {
+                for (uint8_t j = 0; j < N_DIM; j++) g(c, 3 * i + j) = tg(c, i, j);
+            }
+        });
+    } else {
+        Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> vg = viscous_gradients;
+        Kokkos::parallel_for("dynamic_pack", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+            FOR_I_CONSERVATIVE flow(c, i) = W(c, i);
+            for (uint8_t i = 0; i < N_DIM; i++) {
+                for (uint8_t j = 0; j < N_DIM; j++) g(c, 3 * i + j) = vg(c, 1 + i, j);
+            }
+        });
+    }
+    if (halo.active()) halo.exchange(dynamic_halo);
+    Kokkos::parallel_for("dynamic_stresses", mesh->n_cells,
+                         DynamicProcedureFunctor::Stress{les.model, flow, g, les_width, dynamic_stresses});
+    Kokkos::parallel_for("dynamic_terms", n_owned,
+                         DynamicProcedureFunctor{les.model, mesh->offsets_cells_of_cell, mesh->cells_of_cell,
+                                                 mesh->cells_of_cell_shift, mesh->shifts, mesh->cell_coords,
+                                                 mesh->cell_volume, les_width, flow, g, dynamic_stresses,
+                                                 dynamic_terms});
+    const auto [lm, mm] = exact_sums(dynamic_terms, n_owned);
+    // C^2 (Vreman: c) = <L:M> / <M:M>, clipped at zero; a field without resolved strain keeps the previous one
+    if (mm > 0.0) {
+        dynamic_ratio = lm / mm;
+        const double c2 = std::max(0.0, dynamic_ratio);
+        les.C = static_cast<rtype>(les.model == SGSModel::VREMAN ? c2 : std::sqrt(c2));
+    }
 }
 
 void Solver::exchange_cell_vectors(const Kokkos::View<rtype *[3]> & v) {
@@ -289,6 +550,21 @@ void Solver::init_les() {
     auto h_delta = Kokkos::create_mirror_view(les_delta);
     for (uint32_t c = 0; c < mesh->n_cells; c++) h_delta(c) = std::pow(mesh->h_cell_volume(c), 1.0_r / N_DIM);
     Kokkos::deep_copy(les_delta, h_delta);
+    les_width = les_delta;
+    if (les.scotti) {
+        les_width = Kokkos::View<rtype *>("les_width", mesh->n_cells);
+        auto h_width = Kokkos::create_mirror_view(les_width);
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            const std::array<double, 3> h = cell_extents(*mesh, c);
+            h_width(c) = h_delta(c) * static_cast<rtype>(LES::scotti_factor(h[0], h[1], h[2]));
+        }
+        Kokkos::deep_copy(les_width, h_width);
+    }
+    if (les.dynamic) {
+        dynamic_halo = State("dynamic_halo", mesh->n_cells, 9);
+        dynamic_terms = Kokkos::View<double *[2]>("dynamic_terms", mesh->n_owned());
+        dynamic_stresses = Kokkos::View<double *[6]>("dynamic_stresses", mesh->n_cells);
+    }
     les_coefficients = Kokkos::View<rtype *[3]>("les_coefficients", mesh->n_cells);
     h_les_coefficients = Kokkos::create_mirror_view(les_coefficients);
     if (!input.at("les").contains("combustion")) return;
@@ -309,11 +585,11 @@ void Solver::update_eddy_viscosity(const uint32_t n) {
     if (is_mixture()) {
         Kokkos::parallel_for("eddy_viscosity", n,
                              MixtureEddyViscosityFunctor{les, mixture, W_cells, cell_scalars, transport_values,
-                                                         transport_gradients, les_delta, cell_transport,
+                                                         transport_gradients, les_width, cell_transport,
                                                          les_coefficients});
     } else {
         Kokkos::parallel_for("eddy_viscosity", n,
-                             EddyViscosityFunctor{les, physics.cp, W_cells, viscous_gradients, les_delta, les_coefficients});
+                             EddyViscosityFunctor{les, physics.cp, W_cells, viscous_gradients, les_width, les_coefficients});
     }
 }
 

@@ -252,6 +252,12 @@ class Solver {
          *        exchanged to the halo), once per step in calc_dt.
          */
         void update_thickened_flame();
+        /**
+         * @brief Global dynamic procedure: les.C from the Germano identity of the current state, summed over
+         *        the domain exactly (fixed point), so the constant is independent of the rank count. The
+         *        velocity gradients of the state must be up to date on owned cells.
+         */
+        void update_dynamic_constant();
         /** @brief Thickened flame: multiply the transport of every cell (after update_eddy_viscosity). */
         void thicken_transport();
         /** @brief Overwrite the halo cells of a 3-vector cell field with their owners' values. */
@@ -276,6 +282,10 @@ class Solver {
          *        was (docs/design/les.md, section 4.2). Planar runs only.
          */
         KineticEnergyBudget kinetic_energy_budget();
+        /** @brief LES: the model constant in use (the dynamic procedure's latest with les.dynamic). */
+        rtype les_constant() const { return les.C; }
+        /** @brief LES: <L:M> / <M:M> of the latest dynamic procedure, before clipping at zero. */
+        double les_dynamic_ratio() const { return dynamic_ratio; }
 
         /** @brief Whether the run is a large-eddy simulation ([les]). */
         bool is_les() const { return les_on; }
@@ -480,7 +490,8 @@ class Solver {
         // Large-eddy simulation (docs/design/les.md)
         bool les_on = false;
         LES les;
-        Kokkos::View<rtype *> les_delta;               // (cell): filter width
+        Kokkos::View<rtype *> les_delta;               // (cell): filter width V^(1/d)
+        Kokkos::View<rtype *> les_width;               // (cell): the eddy viscosity's width (les_delta or Scotti's)
         Kokkos::View<rtype *[3]> les_coefficients;     // (cell, [mu_t, lambda_t, mu_t / (Sc_t W)]), empty without LES
         Kokkos::View<rtype *[3]>::host_mirror_type h_les_coefficients;
         bool budget_pass = false;                      // calc_rhs evaluates kinetic_energy_budget
@@ -492,6 +503,10 @@ class Solver {
         Kokkos::View<rtype *[3]> tfles_vorticity;
         Kokkos::View<rtype *[3][N_DIM]> tfles_gradients;
         State tfles_halo;                              // [F, E, Omega] as species, for the halo exchange
+        State dynamic_halo;                            // [rho, u] as flow, d u_i / d x_j as species, owners' values
+        Kokkos::View<double *[2]> dynamic_terms;       // (owned cell, [L:M, M:M] V)
+        Kokkos::View<double *[6]> dynamic_stresses;    // (cell, rho Delta^2 D(g) S^d)
+        double dynamic_ratio = 0.0;
         KineticEnergyBudget budget;
 
         // Gas mixtures
