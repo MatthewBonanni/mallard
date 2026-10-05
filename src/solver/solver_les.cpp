@@ -244,6 +244,49 @@ struct ThickenFunctor {
     }
 };
 
+/** @brief The 3x3 velocity gradient d u_i / d x_j of a cell packed at 3 i + j (zero beyond N_DIM). */
+KOKKOS_INLINE_FUNCTION
+void packed_gradient(const SpeciesView & gradients, const uint32_t n, double g[3][3]) {
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) g[i][j] = 0.0;
+    }
+    for (uint8_t i = 0; i < N_DIM; i++) {
+        for (uint8_t j = 0; j < N_DIM; j++) g[i][j] = static_cast<double>(gradients(n, 3 * i + j));
+    }
+}
+
+KOKKOS_INLINE_FUNCTION
+void deviatoric_strain(const double g[3][3], double s[3][3]) {
+    const double third_trace = (g[0][0] + g[1][1] + g[2][2]) / 3.0;
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) s[i][j] = 0.5 * (g[i][j] + g[j][i]) - (i == j ? third_trace : 0.0);
+    }
+}
+
+/** @brief rho Delta^2 D(g) S^d of every cell (owned and halo), filtered by DynamicProcedureFunctor. */
+struct DynamicModelStressFunctor {
+    SGSModel model;
+    StateView flow;          // [rho, u, ...]
+    SpeciesView gradients;   // d u_i / d x_j at 3 i + j
+    Kokkos::View<rtype *> delta;
+    Kokkos::View<double *[6]> model_stresses;  // xx, yy, zz, xy, xz, yz
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t n) const {
+        double g[3][3], s[3][3];
+        packed_gradient(gradients, n, g);
+        deviatoric_strain(g, s);
+        const double d = static_cast<double>(delta(n));
+        const double q = static_cast<double>(flow(n, 0)) * d * d * LES::operator_of(model, g);
+        model_stresses(n, 0) = q * s[0][0];
+        model_stresses(n, 1) = q * s[1][1];
+        model_stresses(n, 2) = q * s[2][2];
+        model_stresses(n, 3) = q * s[0][1];
+        model_stresses(n, 4) = q * s[0][2];
+        model_stresses(n, 5) = q * s[1][2];
+    }
+};
+
 /**
  * @brief Germano-identity terms [L^d : M, M : M] V of one owned cell for the global dynamic procedure
  *        (Germano et al. 1991, Lilly 1992; Favre-weighted as Moin et al. 1991), with the model's
@@ -261,52 +304,10 @@ struct DynamicProcedureFunctor {
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<rtype *> volume;
     Kokkos::View<rtype *> delta;
-    StateView flow;                                // [rho, u, ...]
-    SpeciesView gradients;                         // d u_i / d x_j at 3 i + j
-    Kokkos::View<double *[6]> model_stresses;      // rho Delta^2 D(g) S^d: xx, yy, zz, xy, xz, yz
+    StateView flow;
+    SpeciesView gradients;
+    Kokkos::View<double *[6]> model_stresses;
     Kokkos::View<double *[2]> terms;
-
-    KOKKOS_INLINE_FUNCTION
-    static void gradient(const SpeciesView & gradients, const uint32_t n, double g[3][3]) {
-        for (int i = 0; i < 3; i++) {
-            for (int j = 0; j < 3; j++) g[i][j] = 0.0;
-        }
-        for (uint8_t i = 0; i < N_DIM; i++) {
-            for (uint8_t j = 0; j < N_DIM; j++) g[i][j] = static_cast<double>(gradients(n, 3 * i + j));
-        }
-    }
-
-    /** @brief The model stresses of every cell (owned and halo), filtered next. */
-    struct Stress {
-        SGSModel model;
-        StateView flow;
-        SpeciesView gradients;
-        Kokkos::View<rtype *> delta;
-        Kokkos::View<double *[6]> model_stresses;
-
-        KOKKOS_INLINE_FUNCTION
-        void operator()(const uint32_t n) const {
-            double g[3][3], s[3][3];
-            gradient(gradients, n, g);
-            deviatoric_strain(g, s);
-            const double d = static_cast<double>(delta(n));
-            const double q = static_cast<double>(flow(n, 0)) * d * d * LES::operator_of(model, g);
-            model_stresses(n, 0) = q * s[0][0];
-            model_stresses(n, 1) = q * s[1][1];
-            model_stresses(n, 2) = q * s[2][2];
-            model_stresses(n, 3) = q * s[0][1];
-            model_stresses(n, 4) = q * s[0][2];
-            model_stresses(n, 5) = q * s[1][2];
-        }
-    };
-
-    KOKKOS_INLINE_FUNCTION
-    static void deviatoric_strain(const double g[3][3], double s[3][3]) {
-        const double third_trace = (g[0][0] + g[1][1] + g[2][2]) / 3.0;
-        for (int i = 0; i < 3; i++) {
-            for (int j = 0; j < 3; j++) s[i][j] = 0.5 * (g[i][j] + g[j][i]) - (i == j ? third_trace : 0.0);
-        }
-    }
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
@@ -317,7 +318,7 @@ struct DynamicProcedureFunctor {
             const uint32_t n = k < end ? neighbors(k) : c;
             const double w = static_cast<double>(volume(n));
             double u[3] = {}, gn[3][3], dx[3] = {};
-            gradient(gradients, n, gn);
+            packed_gradient(gradients, n, gn);
             FOR_I_DIM {
                 u[i] = static_cast<double>(flow(n, 1 + i));
                 dx[i] = static_cast<double>(cell_coords(n, i) - cell_coords(c, i)) +
@@ -508,7 +509,7 @@ void Solver::update_dynamic_constant() {
     }
     if (halo.active()) halo.exchange(dynamic_halo);
     Kokkos::parallel_for("dynamic_stresses", mesh->n_cells,
-                         DynamicProcedureFunctor::Stress{les.model, flow, g, les_width, dynamic_stresses});
+                         DynamicModelStressFunctor{les.model, flow, g, les_width, dynamic_stresses});
     Kokkos::parallel_for("dynamic_terms", n_owned,
                          DynamicProcedureFunctor{les.model, mesh->offsets_cells_of_cell, mesh->cells_of_cell,
                                                  mesh->cells_of_cell_shift, mesh->shifts, mesh->cell_coords,
