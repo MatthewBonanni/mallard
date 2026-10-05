@@ -1,0 +1,14 @@
+Mallard
+Copyright 2023-2026 Matthew Bonanni
+
+Mallard was originally developed by Matthew Bonanni
+(https://github.com/MatthewBonanni/mallard). Redistributions and derivative
+works must retain this NOTICE, as required by Section 4(d) of the Apache
+License, Version 2.0.
+
+This product includes software derived from Cantera
+(https://cantera.org): the species transport fitting in
+src/chemistry/transport.cpp is a port of Cantera 3.2.0's GasTransport and
+MMCollisionInt, and the mechanism files in mechanisms/ are taken from
+Cantera 3.2.0. Cantera is distributed under the BSD 3-Clause License; see
+licenses/Cantera-BSD-3-Clause.txt.

@@ -28,7 +28,7 @@ identifiers:
     description: "Version 0.6.0"
 url: "https://github.com/MatthewBonanni/mallard"
 repository-code: "https://github.com/MatthewBonanni/mallard"
-license: AGPL-3.0-only
+license: Apache-2.0
 keywords:
   - computational fluid dynamics
   - finite volume method

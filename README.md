@@ -1,5 +1,5 @@
 ![C++](https://img.shields.io/badge/C%2B%2B-20-blue)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23112953.svg)](https://doi.org/10.5281/zenodo.23112953)
 
 ![logo_dark](./docs/images/mallard_dark.png#gh-dark-mode-only)
@@ -137,7 +137,9 @@ If you use Mallard, please cite it ([doi:10.5281/zenodo.23112953](https://doi.or
 
 ## License
 
-Mallard is licensed under the AGPL v3.0 License. See the [LICENSE](LICENSE) file for more details.
+Mallard is licensed under the [Apache License, Version 2.0](LICENSE). Redistributions and derivative works must keep the attribution in [NOTICE](NOTICE). Versions 0.1.0 to 0.6.0 were released under the AGPL v3.0.
+
+Mallard includes code and data derived from [Cantera](https://cantera.org) under the BSD 3-Clause License ([licenses/Cantera-BSD-3-Clause.txt](licenses/Cantera-BSD-3-Clause.txt)).
 
 ---
 
