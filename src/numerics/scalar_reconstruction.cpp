@@ -11,6 +11,7 @@
 
 #include "scalar_reconstruction.h"
 
+#include "launch_bounds.h"
 #include "mixture_flux.h"
 #include "teno_scalars.h"
 
@@ -307,7 +308,7 @@ ScalarFaceValues ScalarReconstruction::face_values(ScalarView scalars) const {
 template <uint8_t DEG>
 void ScalarReconstruction::calc_teno(ScalarView scalars, Kokkos::View<rtype **[2][2]> face_thermo) {
     const auto values = make_teno_scalar_values<DEG>(*teno, *mesh, boundaries, scalars, Kokkos::View<rtype *>(), n_species);
-    Kokkos::parallel_for("scalar_theta", mesh->n_reconstructed(),
+    Kokkos::parallel_for("scalar_theta", HeavyRange<>(0, mesh->n_reconstructed()),
                          ScalarThetaFunctor<TENOScalarValues<DEG>>{values, theta, face_thermo, teno->troubled,
                                                                    teno->sigma_threshold, n_species});
 }
@@ -329,7 +330,7 @@ void ScalarReconstruction::calc(ScalarView scalars, Kokkos::View<rtype *[N_CONSE
                                      mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->shifts,
                                      mesh->face_shift, mesh->cell_volume, boundaries, scalars, W, gradients,
                                      limiter, limiter_type, venkat_K, n_species};
-        Kokkos::parallel_for("scalar_limiter", mesh->n_cells, functor);
+        Kokkos::parallel_for("scalar_limiter", HeavyRange<>(0, mesh->n_cells), functor);
     }
     Kokkos::parallel_for("face_thermo", mesh->n_faces, FaceThermoFunctor{face_values(scalars), face_thermo, n_species});
 }
@@ -341,7 +342,7 @@ void ScalarReconstruction::launch_slots(const Eval & values, Kokkos::View<rtype 
     SpeciesSlotFunctor<Eval> functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                      mesh->face_area, quad_weights, face_weights, face_mdot, values, boundaries,
                                      slots, n_species};
-    Kokkos::parallel_for("species_slots", mesh->n_reconstructed(), functor);
+    Kokkos::parallel_for("species_slots", HeavyRange<>(0, mesh->n_reconstructed()), functor);
 }
 
 void ScalarReconstruction::species_slots(ScalarView scalars, Kokkos::View<rtype **> face_mdot,

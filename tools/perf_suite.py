@@ -13,7 +13,7 @@ benchmark's cells per second at each dt), the best and the spread
 exits 1 if a metric is slower than its baseline by more than both the
 threshold and the run's spread; metrics without a baseline are listed, not
 failed. The hardware defaults to the one recorded in the results (the GPU
-name from nvidia-smi, else the CPU model).
+name from nvidia-smi or amd-smi, else the CPU model).
 """
 
 import argparse
@@ -42,6 +42,15 @@ def detect_hardware():
         if out.returncode == 0 and out.stdout.strip():
             return out.stdout.strip().splitlines()[0].strip()
     except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        out = subprocess.run(["amd-smi", "static", "--asic", "--json"], capture_output=True, text=True, timeout=30)
+        if out.returncode == 0:
+            data = json.loads(out.stdout)
+            gpus = data.get("gpu_data", []) if isinstance(data, dict) else data
+            if gpus:
+                return gpus[0]["asic"]["market_name"]
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, IndexError):
         pass
     try:
         for line in Path("/proc/cpuinfo").read_text().splitlines():

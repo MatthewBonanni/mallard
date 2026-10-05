@@ -12,6 +12,7 @@
 #include "face_reconstruction.h"
 
 #include "input.h"
+#include "launch_bounds.h"
 
 #include <algorithm>
 #include <array>
@@ -401,10 +402,10 @@ struct MUSCLFaceFunctor {
 void MUSCL::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                              Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
     gradient.faces = make_gradient(*mesh, boundaries, solution, gradients);
-    Kokkos::parallel_for("lsq_gradient", mesh->n_cells, MUSCLGradientFunctor{gradient});
+    Kokkos::parallel_for("lsq_gradient", HeavyRange<>(0, mesh->n_cells), MUSCLGradientFunctor{gradient});
 
     LimiterFunctor limiter_functor{gradient.faces, mesh->cell_volume, limiters, limiter, venkat_K};
-    Kokkos::parallel_for("limiter", mesh->n_cells, limiter_functor);
+    Kokkos::parallel_for("limiter", HeavyRange<>(0, mesh->n_cells), limiter_functor);
 
     MUSCLFaceFunctor face_functor{mesh->cells_of_face,
                                   mesh->cell_coords,
