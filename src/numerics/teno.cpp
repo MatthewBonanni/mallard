@@ -1429,12 +1429,14 @@ std::array<double, 6> plane_bounds(const Mesh & mesh, const uint32_t c) {
         for (const double s : {-1.0, 1.0}) {
             double & bound = box[(s > 0.0 ? 3 : 0) + a];
             bound = s * std::numeric_limits<double>::infinity();
-            // Faces most aligned with u = s e_a first
+            // Faces most aligned with u = s e_a first (insertion sort)
             std::array<uint32_t, teno::MAX_FACES> order;
-            for (uint32_t k = 0; k < n; k++) order[k] = k;
-            std::sort(order.begin(), order.begin() + n, [&](uint32_t i, uint32_t j) {
-                return s * N[i][a] / norm[i] > s * N[j][a] / norm[j];
-            });
+            auto alignment = [&](uint32_t k) { return s * N[k][a] / norm[k]; };
+            for (uint32_t k = 0; k < n; k++) {
+                uint32_t j = k;
+                for (; j > 0 && alignment(k) > alignment(order[j - 1]); j--) order[j] = order[j - 1];
+                order[j] = k;
+            }
             for (uint32_t i = 0; i < n && std::isinf(bound); i++) {
                 for (uint32_t j = i + 1; j < n && std::isinf(bound); j++) {
                     for (uint32_t k = j + 1; k < n && std::isinf(bound); k++) {
