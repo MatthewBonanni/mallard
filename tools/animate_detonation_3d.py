@@ -119,7 +119,7 @@ def render_3d(frame, foils, i_start, view_length, size, front_clim, norm):
         pl.add_mesh(plane, scalars="rgb", rgb=True, lighting=False)
     outline = pv.Box(bounds=(x_lo, x_front + 0.01, 0, ly, 0, lz))
     pl.add_mesh(outline, style="wireframe", color="#56606b", line_width=1)
-    focus = np.array([x_front - 0.45 * view_length, 0.5 * ly, 0.5 * lz])
+    focus = np.array([x_front - 0.32 * view_length, 0.5 * ly, 0.5 * lz])
     pl.camera.focal_point = focus
     pl.camera.position = focus + np.array([0.75, 1.0, 0.8]) * view_length * 1.8
     pl.camera.up = (0, 0, 1)
@@ -192,7 +192,8 @@ def main():
     with np.load(files[-1]) as z:
         last = {key: z[key] for key in z.files}
     final = full_foils(chunks, last)
-    logs = np.log(np.maximum(np.concatenate([final[w][i_start + 20:] for w in WALLS], axis=1), 1.0))
+    i_last = int(last["shift_cells"]) + int(last["i_front"]) - 5
+    logs = np.log(np.maximum(np.concatenate([final[w][i_start + 20:i_last] for w in WALLS], axis=1), 1.0))
     norm = matplotlib.colors.Normalize(*np.percentile(logs, [2, 99.5]))
     front = front_surface(last)
     front_clim = args.front_range or tuple(np.percentile(front["behind"], [2, 98]))
