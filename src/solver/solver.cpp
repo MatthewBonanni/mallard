@@ -491,6 +491,7 @@ void Solver::init_boundaries() {
         characteristic_transverse |= bc.is_characteristic() && bc.relax[BoundaryCondition::BETA] != 0.0_r;
     }
     t_characteristic = -1.0;
+    characteristic_state_set = false;
     if (is_mixture()) init_mixture_boundaries(input_boundaries, profiled_faces, bcs);
     boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics);
     if (is_mixture()) {
@@ -1038,8 +1039,8 @@ void Solver::copy_device_to_host() {
         eddy_viscosity_of_state(mesh->n_cells);
         Kokkos::deep_copy(h_les_coefficients, les_coefficients);
     }
+    if (tfles_on) Kokkos::deep_copy(h_tfles_fields, tfles_fields);
     statistics.copy_device_to_host();
-    copy_characteristic_state_to_host();
     if (p_max.is_allocated()) Kokkos::deep_copy(h_p_max, p_max);
     if (vortex_fields.is_allocated()) {
         update_vortex_fields();
@@ -1087,12 +1088,12 @@ void Solver::register_data() {
     }
     data.push_back(Data("CFL", h_cfl_local));
     if (les_on) data.push_back(Data("MU_T", Kokkos::subview(h_les_coefficients, Kokkos::ALL(), 0)));
-    statistics.register_data(data);
-    const std::vector<std::string> characteristic = characteristic_variables();
-    data.reserve(data.size() + characteristic.size() + 8);
-    for (size_t v = 0; v < characteristic.size(); v++) {
-        data.push_back(Data(characteristic[v], Kokkos::subview(h_char_cells, Kokkos::ALL(), v)));
+    if (tfles_on) {
+        data.push_back(Data("TF_F", Kokkos::subview(h_tfles_fields, Kokkos::ALL(), 0)));
+        data.push_back(Data("TF_E", Kokkos::subview(h_tfles_fields, Kokkos::ALL(), 1)));
+        data.push_back(Data("TF_OMEGA", Kokkos::subview(h_tfles_fields, Kokkos::ALL(), 2)));
     }
+    statistics.register_data(data);
     if (p_max.is_allocated()) data.push_back(Data("P_MAX", h_p_max));
     if (vortex_fields.is_allocated()) {
         data.push_back(Data("Q", Kokkos::subview(h_vortex_fields, Kokkos::ALL(), 0)));
@@ -1119,7 +1120,6 @@ std::vector<std::string> Solver::restart_variables() const {
     if (reacting) names.push_back("CHEM_H");
     if (p_max.is_allocated()) names.push_back("P_MAX");
     for (const auto & name : statistics.variables()) names.push_back(name);
-    for (const auto & name : characteristic_variables()) names.push_back(name);
     return names;
 }
 
@@ -1331,6 +1331,7 @@ void Solver::print_setup() const {
     logging::item("Stop at", stop);
     if (check_nan) logging::item("NaN check", "every step");
     if (les_on) logging::items(les.summary());
+    if (tfles_on) logging::items(thickened_flame.summary());
     if (double_flux) logging::item("Double flux", "frozen gamma and e0 per cell and step (not energy conservative)");
     if (reacting) {
         logging::item("Chemistry", std::to_string(kinetics.n_reactions) + " reactions, Strang splitting" +
@@ -1440,8 +1441,9 @@ void Solver::write_data(bool force) {
     update_primitives();
     copy_device_to_host();
     const RestartAttributes attributes = statistics.attributes();
+    const RestartFaces faces = characteristic_restart_faces();
     for (auto & writer : data_writers) {
-        writer->write(step, t, force, attributes);
+        writer->write(step, t, force, attributes, faces);
     }
 }
 

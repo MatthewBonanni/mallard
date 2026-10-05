@@ -89,27 +89,14 @@ void Solver::init_solution_restart() {
     };
     for (const auto & name : restart.names) {
         // Averages carry over only into a run that keeps them
-        if (name == "CHEM_H" || name == "P_MAX" || name.rfind("MEAN_", 0) == 0 || name.rfind("COV_", 0) == 0 ||
-            name.rfind("NSCBC_", 0) == 0) {
-            continue;
-        }
+        if (name == "CHEM_H" || name == "P_MAX" || name.rfind("MEAN_", 0) == 0 || name.rfind("COV_", 0) == 0) continue;
         if (std::find(expected.begin(), expected.end(), name) == expected.end()) {
             throw std::runtime_error("Restart file " + file + " has variable " + name + ", which this run does not " +
                                      (name.rfind("RHOY_", 0) == 0 ? "transport." : "know."));
         }
     }
-    // The state of characteristic faces continues if the file has it, else starts from the solution
-    const std::vector<std::string> characteristic = characteristic_variables();
-    bool characteristic_found = !characteristic.empty();
-    for (size_t v = 0; v < characteristic.size(); v++) {
-        const std::vector<rtype> * values = restart.find(characteristic[v]);
-        characteristic_found = characteristic_found && values != nullptr;
-        if (!values) continue;
-        for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) h_char_cells(i_cell, v) = (*values)[i_cell];
-    }
-    if (characteristic_found) restore_characteristic_state();
     for (uint32_t v = 0; v < expected.size(); v++) {
-        if (is_average(expected[v]) || expected[v].rfind("NSCBC_", 0) == 0) continue;
+        if (is_average(expected[v])) continue;
         const std::vector<rtype> * values = restart.find(expected[v]);
         if (expected[v] == "P_MAX") {
             for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
@@ -140,6 +127,7 @@ void Solver::init_solution_restart() {
     step = restart.step;
     t = restart.t;
     statistics.restore(restart, file, t);
+    restore_characteristic_state(restart);
     for (auto & writer : data_writers) {
         writer->resume(step, t);
     }

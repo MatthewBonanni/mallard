@@ -192,6 +192,37 @@ eddy viscosity of each cell comes from its least-squares velocity gradient
 measures how much of the kinetic-energy dissipation comes from the model and
 how much from the scheme.
 
+### `[les.combustion]`
+
+Turbulence-chemistry interaction of reacting LES (a viscous mixture with
+`[chemistry]`) by the dynamically thickened flame model (TFLES; Colin et al.
+2000, Légier et al. 2002): where a flame is, its species diffusivities and
+conductivity are multiplied by `E F` and its reaction rates by `E / F`, which
+keeps the laminar flame speed and thickens the flame by `F` so that it spans
+`n_res` cells; the efficiency `E` restores the flame-surface wrinkling of the
+subgrid scales (Charlette, Meneveau & Veynante 2002, `beta = 0.5`, at the
+filter width `F delta_L`, with the subgrid velocity
+`u' = 2 Delta^3 |lap(curl u)|` of Colin et al.). `F = 1 + (max(1, n_res Delta /
+delta_L) - 1) Omega` with the flame sensor `Omega = min(1, c (1 - c) /
+0.0475)` of the progress variable `c = (T - T_unburnt) / (T_burnt -
+T_unburnt)`, so `Omega = 1` across the whole flame (`0.05 <= c <= 0.95`) and 0
+in fresh and burnt gas, where the molecular and SGS transport are unchanged.
+In the flame the SGS heat and species fluxes are multiplied by `1 - Omega`.
+The rates are scaled by integrating each cell's Strang reactor over `E / F`
+times the half step (exact for the autonomous constant-volume reactor).
+`F`, `E` and `Omega` are computed once per step from the state, and written as
+`TF_F`, `TF_E`, `TF_OMEGA`. Design: [`design/les.md`](design/les.md), section 6.
+
+| Key | Description |
+|---|---|
+| `model` | `tfles` |
+| `delta_L` | Laminar thermal thickness `(T_b - T_u) / max dT/dx` of the flame (m), e.g. from Cantera |
+| `s_L` | Laminar flame speed (m/s) |
+| `T_unburnt`, `T_burnt` | Temperatures of the fresh and burnt gas (K) |
+| `n_res` | Cells across the thickened flame, default 5 |
+| `efficiency` | `charlette` (default) or `none` (`E = 1`) |
+| `beta` | Exponent of the Charlette efficiency, default 0.5 |
+
 ## `[initialize]`
 
 | Key | Description |
@@ -202,7 +233,7 @@ how much from the scheme.
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
 | `balance` | (mixtures, `analytical`) Species taking `1 - sum` of the listed fractions; without it the listed fractions are normalized |
 | `n_subdivisions` | (`analytical`) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is split into `n_subdivisions`³ sub-tetrahedra, each with a 14-point degree-5 rule (default 1) |
-| `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, or 3 when they also hold the weights of `[statistics]` averages) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read |
+| `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, 3 when they also hold the weights of `[statistics]` averages, or 4 when they also hold the state of characteristic boundary faces) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read |
 
 Expressions use [exprtk](https://www.partow.net/programming/exprtk/) syntax, e.g. `"x < 0.5 ? 1.0 : 0.125"`.
 
@@ -232,10 +263,10 @@ Characteristic conditions change only the exterior state of the convective
 flux; viscous terms treat them like `extrapolation` (image faces, or zero
 normal derivatives: the outflow conditions of Poinsot & Lele). MUSCL boundary
 cells leave out their ghosts across them, so that waves leave intact. Each face keeps its pressure and
-normal velocity between steps; restart files carry them (`NSCBC_P_<j>`,
-`NSCBC_U_<j>` per cell), so a restarted run continues bitwise, and a restart
-file without them starts them afresh from the solution. See
-[docs/design/nscbc.md](design/nscbc.md).
+normal velocity between steps, and restart files carry them, so a restarted
+run reproduces an uninterrupted one bitwise, also on a different number of
+ranks (restart files older than version 4 start them afresh from the
+solution). See [docs/design/nscbc.md](design/nscbc.md).
 
 ### Synthetic turbulence (`[boundaries.turbulence]`)
 
@@ -542,5 +573,7 @@ CSV (`t`, `T`, `p`, `Y_<species>`). It reads `[physics]` (`mechanism`,
 | `[chemistry] sparse` | The linear solver, as in the solver's `[chemistry]` |
 | `[benchmark]` | Instead of the run, a chemistry benchmark: states sampled along this reactor's trajectory, replicated over `cells` cells and advanced by the solver's chemistry kernels over each splitting step of `dt`; see `benchmarks/README.md` |
 
-It prints the ignition delay (time of the maximum of `dT/dt`) when `T` rose
-by more than 400 K. Example: `examples/h2_ignition`.
+It prints the ignition delay, the time of the maximum of `dT/dt`, once
+`dT/dt` has fallen below half that maximum by `end_time` (the runaway is over,
+however small the temperature rise of a lean mixture), and otherwise none.
+Example: `examples/h2_ignition`.

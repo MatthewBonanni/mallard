@@ -51,10 +51,13 @@ through an outlet changes `Z` by a factor of two, and a stored `w-` would
 then put an O(`Z u`) pressure jump on the face.
 
 `p_b` and `u_b` start from the interior face state at the first step. They
-are the only state, and restart files carry them per cell (`NSCBC_P_<j>`,
-`NSCBC_U_<j>` for the cell's `j`-th characteristic face in its face order),
-so restarted runs continue bitwise; a restart file without them starts them
-afresh from the interior.
+are the only state of the boundary, and restart files carry them (format
+version 4), so restarted runs reproduce uninterrupted ones bitwise. Each face
+is keyed by the global id of its cell and its local face in that cell, and the
+faces are written in key order, so a file written on any number of ranks
+continues on any other. A file without some face of the run (version 3 and
+earlier, or one written with that boundary not characteristic) starts every
+face afresh from the solution.
 
 An inlet's target velocity is per face, and may vary in time (synthetic
 turbulence, [synthetic_inflow.md](synthetic_inflow.md)). Its change over the

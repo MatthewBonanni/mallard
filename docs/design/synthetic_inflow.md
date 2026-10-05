@@ -128,8 +128,8 @@ profile once, and from the generator at every stage:
   times.
 - **Temperature** stays imposed (no temperature fluctuations).
 
-Restart files now carry the faces' `p_b` and `u_b`, so runs with
-characteristic boundaries restart bitwise.
+Restart files carry the faces' `p_b` and `u_b` ([nscbc.md](nscbc.md)), and
+the generator has no state, so turbulent inlets restart bitwise.
 
 ## Mean profile and statistics from a precursor
 

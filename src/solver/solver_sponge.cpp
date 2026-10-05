@@ -147,8 +147,45 @@ void Solver::update_characteristic_boundaries(const rtype t_stage) {
                                            face_reconstruction->quadrature_face.weights,
                                            face_reconstruction->face_quad_weights,
                                            dt,
-                                           !char_state_valid};
+                                           !characteristic_state_set};
     Kokkos::parallel_for("characteristic_state", boundary_data.char_faces.extent(0), state);
     t_characteristic = t_stage;
-    char_state_valid = true;
+    characteristic_state_set = true;
+}
+
+uint64_t Solver::restart_face_key(const uint32_t i_face) const {
+    const uint32_t c = static_cast<uint32_t>(mesh->h_cells_of_face(i_face, 0));
+    uint8_t local = 0;
+    while (mesh->h_face_of_cell(c, local) != i_face) local++;
+    return mesh->h_global_cell(c) * RESTART_FACES_PER_CELL + local;
+}
+
+RestartFaces Solver::characteristic_restart_faces() const {
+    RestartFaces faces;
+    if (!characteristic_state_set) return faces;
+    const auto h_faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.char_faces);
+    const auto h_state = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.char_state);
+    for (uint32_t k = 0; k < h_faces.extent(0); k++) {
+        if (static_cast<uint32_t>(mesh->h_cells_of_face(h_faces(k), 0)) >= mesh->n_owned()) continue;
+        faces.keys.push_back(restart_face_key(h_faces(k)));
+        for (uint32_t w = 0; w < RestartFaces::WIDTH; w++) faces.values.push_back(h_state(k, w));
+    }
+    return faces;
+}
+
+void Solver::restore_characteristic_state(const RestartData & restart) {
+    // A file without some face (older versions, or a boundary that was not
+    // characteristic) starts every face afresh from the solution
+    const auto h_faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.char_faces);
+    const auto h_state = Kokkos::create_mirror_view(boundary_data.char_state);
+    uint32_t missing = 0;
+    for (uint32_t k = 0; k < h_faces.extent(0) && !missing; k++) {
+        const rtype * values = restart.face(restart_face_key(h_faces(k)));
+        missing = values == nullptr;
+        for (uint32_t w = 0; w < RestartFaces::WIDTH && values; w++) h_state(k, w) = values[w];
+    }
+    if (mesh->n_global_cells > 0) missing = comm::allreduce(missing, comm::Op::MAX);
+    if (missing) return;
+    Kokkos::deep_copy(boundary_data.char_state, h_state);
+    characteristic_state_set = true;
 }
