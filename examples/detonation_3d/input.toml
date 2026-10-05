@@ -1,4 +1,47 @@
-# (header written with the results)
+# Cellular detonation in a 3 cm square duct (3D build): 2H2-O2-7Ar at
+# 6.67 kPa and 298 K, the mixture of examples/detonation_1d and
+# detonation_2d (D_CJ = 1617 m/s, ZND induction length 1.525 mm with
+# mechanisms/h2o2.yaml), in the duct of Deiterding's 3D runs (J. Combust.
+# 2011:738969, doi:10.1155/2011/738969; Tsuboi et al., Proc. Combust. Inst.
+# 29:2783, 2003, doi:10.1016/S1540-7489(02)80339-X, for the same
+# configuration). The transverse waves of the front sweep the duct in both
+# directions; on the walls the numerical soot foil (P_MAX) records the
+# triple-point tracks and the "slapping" bands of the waves that hit a
+# wall face-on (Williams, Bauwens & Oran, Proc. Combust. Inst. 26:2991,
+# 1996, doi:10.1016/S0082-0784(96)80142-1).
+#
+# 0.15 mm hexahedra, 10 per induction length (the resolution of
+# examples/detonation_2d, whose track pattern is the same at 20): 200 x 200
+# across the duct. A window 7.2 cm long follows the front
+# (tools/detonation_window.py): every 6 us the run stops, the box drops the
+# columns more than 5 cm behind the front and appends fresh gas ahead, and
+# the P_MAX of the dropped wall cells goes to the foil; the transmissive
+# left boundary cuts the burnt gas 5 cm behind the front. 480 x 200 x 200 =
+# 19.2M cells. MUSCL with HLL (HLLC, as in the 2D example, grows grid-scale
+# odd-even noise and spots on the planar 3D front within 15 us), Strang
+# chemistry with fused half steps.
+#
+# Two stages. (1) input_2d.toml (2D build): the 2D cellular detonation in a
+# 3 cm channel from the ZND profile and one pocket of fresh gas, in the
+# same kind of window, to t = 96 us (two triple points). (2) This input:
+# the 2D state extruded with --superpose (each cell takes the 2D state at
+# (x, y) or, turned into z, at (x, z), whichever is hotter), i.e. the 2D
+# transverse waves in both directions in phase. From this directory:
+#
+#   python ../../tools/detonation_reference.py ../../mechanisms/h2o2.yaml ohmech \
+#       "H2:2, O2:1, AR:7" 298 6670 znd.csv
+#   python ../../tools/znd_restart.py znd.csv ../../mechanisms/h2o2.yaml ohmech 680 0.102 0.08 \
+#       window_2d.restart --ny 200 --ly 0.03 --fresh-pocket --pocket 0.077 0.01 0.002
+#   python ../../tools/detonation_window.py run input_2d.toml --keep 0.08 --segment 6e-6 --t-end 9.6e-5 \
+#       --frames frames_2d -- ../../build/src/Mallard -i input_2d.toml
+#   python ../../tools/detonation_window.py extrude input_2d.toml window_2d.restart input.toml \
+#       window.restart --superpose
+#   python ../../tools/detonation_window.py run input.toml --keep 0.05 --segment 6e-6 --t-end 2.04e-4 \
+#       --frames frames -- mpirun -n 4 ../../build3d/src/Mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
+#   python ../../tools/soot_foil_3d.py input.toml frames --png foils.png
+#   python ../../tools/animate_detonation_3d.py input.toml frames detonation_3d
+#
+# RESULTS_PLACEHOLDER
 
 [run]
 t_stop = 6.0e-6

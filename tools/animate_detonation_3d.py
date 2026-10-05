@@ -12,7 +12,7 @@ show bright and incident shocks dark, in a cut-away of the duct whose two
 far walls (y = 0 and z = 0) carry the numerical soot foil written so far,
 with the camera following the front; on the right, the soot foils of all
 four walls unrolled over the run so far (from the window's foil chunks,
-foil/ next to INPUT), from the front's position in the first frame on
+INPUT_STEM.foil/ next to INPUT), from the front's position in the first frame on
 (log P_MAX, gray levels from its 2nd to 99.5th percentile).
 Writes OUTPUT_BASE.mp4 (H.264, CRF 18, holding the last frame for --hold
 seconds), OUTPUT_BASE.gif (if --gif-width > 0) and OUTPUT_BASE_still.png

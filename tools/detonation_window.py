@@ -15,7 +15,7 @@ many copies of the last (fresh) column, in place, so the front sits BEHIND
 from the left end again. The transmissive left boundary then cuts the burnt
 gas BEHIND behind the front. Before the columns go, the P_MAX of their cells
 next to the four side walls (3D; the whole plane in 2D) is saved as
-the next numbered chunk of the soot foils in foil/, and window.json (both
+the next numbered chunk of the soot foils in INPUT_STEM.foil/, and INPUT_STEM.window.json (both
 next to INPUT) records the total shift, i.e. where the box's left end is in
 the duct, and each chunk. The step and time of the restart are kept.
 
@@ -77,8 +77,9 @@ class Case:
         self.size = (float(m["Lx"]), float(m["Ly"]), float(m.get("Lz", 1.0)))
         self.dx = self.size[0] / self.shape[0]
         self.mechanism = os.path.join(self.dir, self.toml["physics"]["mechanism"])
-        self.state_file = os.path.join(self.dir, "window.json")
-        self.foil_dir = os.path.join(self.dir, "foil")
+        stem = os.path.splitext(os.path.basename(self.input))[0]
+        self.state_file = os.path.join(self.dir, stem + ".window.json")
+        self.foil_dir = os.path.join(self.dir, stem + ".foil")
 
     def path(self, p):
         return os.path.join(self.dir, p)
