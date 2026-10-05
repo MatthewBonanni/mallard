@@ -1,0 +1,112 @@
+# Wall-resolved large-eddy simulation of turbulent channel flow at
+# Re_tau = 395 (3D build), against the DNS of Moser, Kim & Mansour, Phys.
+# Fluids 11, 943 (1999), doi:10.1063/1.869966. See docs/design/les.md,
+# section 8.2, and examples/channel_retau180 (the DNS at Re_tau = 180 this
+# setup follows).
+#
+# Physics: walls at y = 0 and y = 2h, periodic in x and z, the box
+# 2 pi h x 2h x pi h of MKM at Re_tau = 395. Units h = 1, bulk density and
+# velocity 1, held by [source] mass_flow, so Re_b = 2 h U_b / nu = 13,764 as
+# in MKM (U_b+ = 17.54) and Re_tau comes out of the run. Bulk Mach 0.2,
+# isothermal walls at the bulk temperature, Pr = 0.72.
+#
+# LES: Sigma model, hybrid KEEP / HLLC flux (central everywhere but at
+# shocks, of which there are none), MUSCL without limiter. 64^3 hexahedra,
+# tanh-stretched in y: dx+ = 39, dz+ = 19, dy+ = 0.9 at the wall and 31 at
+# the center (wall-resolved). [integrals] budget = true reports the share of
+# the kinetic-energy dissipation that is numerical.
+#
+# Run:
+#   python ../../tools/channel_init.py input.toml init.restart
+#   ../../build3d/src/Mallard -i input.toml
+#   python ../../tools/plane_average.py stats/channel_<last>.vtu --average x z --out profile.csv
+#   python ../../tools/plot_channel.py input.toml profile.csv forces_bottom.csv forces_top.csv \
+#       --t-start 100 --retau 395
+
+[run]
+t_stop = 300.0
+cfl = 0.9
+
+[mesh]
+type = "cartesian"
+Nx = 64
+Ny = 64
+Nz = 64
+Lx = 6.283185307179586
+Ly = 2.0
+Lz = 3.141592653589793
+stretching = [0.0, 2.5, 0.0]
+periodic = ["x", "z"]
+
+[initialize]
+type = "restart"
+file = "init.restart"
+
+[[boundaries]]
+name = "bottom"
+type = "wall_isothermal"
+T = 1.0
+
+[[boundaries]]
+name = "top"
+type = "wall_isothermal"
+T = 1.0
+
+[source]
+mass_flow = [1.0, 0.0, 0.0]
+
+[numerics]
+riemann_solver = "HLLC"
+convective_flux = "hybrid"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+limiter = "none"
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 17.857142857142858
+T_ref = 1.0
+rho_ref = 1.0
+mu = 1.4531172e-4
+Pr = 0.72
+
+[les]
+model = "sigma"
+
+[statistics]
+fields = ["RHO", "U_X", "U_Y", "U_Z", "P", "T"]
+products = ["U_X*U_X", "U_Y*U_Y", "U_Z*U_Z", "U_X*U_Y"]
+t_start = 100.0
+interval = 10
+
+[output]
+check_interval = 5000
+
+[integrals]
+interval = 2000
+budget = true
+
+[[forces]]
+zone = "bottom"
+interval = 50
+file = "forces_bottom.csv"
+
+[[forces]]
+zone = "top"
+interval = 50
+file = "forces_top.csv"
+
+[[write_data]]
+prefix = "./stats/channel"
+format = "vtu"
+time_interval = 50.0
+variables = ["MEAN_*", "COV_*"]
+
+[[write_data]]
+prefix = "./restart/channel"
+format = "restart"
+interval = 50000
