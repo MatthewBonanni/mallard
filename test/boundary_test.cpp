@@ -47,7 +47,7 @@ TEST(BoundaryTest, TimeDependentDirichletInflowIsAdvected) {
     const std::string left = "type = \"dirichlet\"\nrho = \"1.0 + 0.1 * sin(2 * pi * t)\"\n"
                              "u = [\"1.0\", \"0.0\"]\np = \"1.0\"\n";
     Solver solver;
-    solver.init(parse_toml(strip_input(left, BOTTOM_SYMMETRY, "t_stop = 0.8\ncfl = 0.4\n")));
+    solver.init(parse_toml(strip_input(left, BOTTOM_SYMMETRY, "t_stop = 0.8\ncfl = 0.2\n")));
     solver.run();
     solver.update_primitives();
     solver.copy_device_to_host();
@@ -70,7 +70,7 @@ TEST(BoundaryTest, WhereSplitsAZoneBetweenConditions) {
         "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\nwhere = \"x < 0.5\"\n"
         "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\nwhere = \"x >= 0.5\"\n";
     Solver solver;
-    EXPECT_NO_THROW(solver.init(parse_toml(strip_input("type = \"extrapolation\"\n", bottom, "n_steps = 1\ncfl = 0.4\n", 20))));
+    EXPECT_NO_THROW(solver.init(parse_toml(strip_input("type = \"extrapolation\"\n", bottom, "n_steps = 1\ncfl = 0.2\n", 20))));
 }
 
 TEST(BoundaryTest, OverlappingOrMissingAssignmentsAreRejected) {
@@ -81,9 +81,9 @@ TEST(BoundaryTest, OverlappingOrMissingAssignmentsAreRejected) {
         "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\nwhere = \"x < 0.3\"\n"
         "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\nwhere = \"x >= 0.5\"\n";
     Solver a, b;
-    EXPECT_THROW(a.init(parse_toml(strip_input("type = \"extrapolation\"\n", overlap, "n_steps = 1\ncfl = 0.4\n", 20))),
+    EXPECT_THROW(a.init(parse_toml(strip_input("type = \"extrapolation\"\n", overlap, "n_steps = 1\ncfl = 0.2\n", 20))),
                  std::runtime_error);
-    EXPECT_THROW(b.init(parse_toml(strip_input("type = \"extrapolation\"\n", gap, "n_steps = 1\ncfl = 0.4\n", 20))),
+    EXPECT_THROW(b.init(parse_toml(strip_input("type = \"extrapolation\"\n", gap, "n_steps = 1\ncfl = 0.2\n", 20))),
                  std::runtime_error);
 }
 
@@ -95,7 +95,7 @@ namespace {
  */
 double outlet_profile_error(const std::string & outlet) {
     std::ostringstream s;
-    s << "[run]\nt_stop = 2.0\ncfl = 0.5\n"
+    s << "[run]\nt_stop = 2.0\ncfl = 0.25\n"
       << "[mesh]\ntype = \"cartesian\"\nNx = 20\nNy = 20\nLx = 1.0\nLy = 1.0\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"exp(-y)\"\nu = [\"0.3\", \"0.0\"]\np = \"exp(-y)\"\n"
       << "[[boundaries]]\nname = \"left\"\ntype = \"dirichlet\"\nrho = \"exp(-y)\"\nu = [\"0.3\", \"0.0\"]\np = \"exp(-y)\"\n"
@@ -199,7 +199,7 @@ TEST(BoundaryTest, FarfieldLetsAPressurePulseLeave) {
     // An isentropic pressure pulse leaves a box of far-field boundaries without
     // reflection. (Riemann-invariant far fields do reflect entropy waves.)
     std::ostringstream s;
-    s << "[run]\nt_stop = 3.0\ncfl = 0.5\n"
+    s << "[run]\nt_stop = 3.0\ncfl = 0.25\n"
       << "[mesh]\ntype = \"cartesian_tri\"\nNx = 24\nNy = 24\nLx = 1.0\nLy = 1.0\n"
       << "[initialize]\ntype = \"analytical\"\nu = [\"0.3\", \"0.0\"]\n"
       << "p = \"1 / 1.4 + 0.1 * exp(-100 * ((x - 0.5)^2 + (y - 0.5)^2))\"\n"

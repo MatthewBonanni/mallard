@@ -270,7 +270,7 @@ namespace {
 double reflection_3d(const std::string & mesh, const std::string & right) {
     const std::string pulse = "1e-3 * exp(-((x - 0.5) / 0.05)^2)";
     const std::string p0 = "0.7142857142857143";
-    std::string input = "[run]\nt_stop = 1.0\ncfl = 0.4\n[mesh]\ntype = \"" + mesh +
+    std::string input = "[run]\nt_stop = 1.0\ncfl = 0.2\n[mesh]\ntype = \"" + mesh +
                         "\"\nNx = 200\nNy = 2\nNz = 2\nLx = 1.0\nLy = 0.01\nLz = 0.01\n"
                         "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + " + pulse + "\"\nu = [\"" + pulse +
                         "\", \"0.0\", \"0.0\"]\np = \"" + p0 + " + " + pulse + "\"\n"

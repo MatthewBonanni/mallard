@@ -170,7 +170,7 @@ struct MixtureTimeStepFunctor {
                 sum += transport(c, NU_EFF) * cell_volume(c) / (r * r);
             }
         }
-        const rtype dt_c = cell_volume(c) / sum;
+        const rtype dt_c = 2.0_r * cell_volume(c) / sum;
         dt_local(c) = dt_c;
         dt_min = Kokkos::fmin(dt_min, dt_c);
     }

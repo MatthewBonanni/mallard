@@ -39,7 +39,7 @@
 
 [run]
 t_stop = 750.0
-cfl = 0.8
+cfl = 0.4
 
 [mesh]
 type = "file"

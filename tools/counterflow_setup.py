@@ -2,7 +2,7 @@
 
     python tools/counterflow_setup.py PROFILE.csv RUN_DIR [--cells-per-width 30]
         [--radius 5e-3] [--width 7.5e-3] [--dr-axis D] [--growth 1.08]
-        [--strain-times 4] [--outputs 60] [--cfl 0.8] [--restarts 10]
+        [--strain-times 4] [--outputs 60] [--cfl 0.4] [--restarts 10]
 
 PROFILE.csv is Cantera's solution at the run's nozzle velocities from
 tools/counterflow_reference.py --profile (z from the fuel nozzle, u, spread
@@ -122,7 +122,7 @@ def main():
     ap.add_argument("--strain-times", type=float, default=4.0)
     ap.add_argument("--outputs", type=int, default=60)
     ap.add_argument("--restarts", type=int, default=10)
-    ap.add_argument("--cfl", type=float, default=0.8)
+    ap.add_argument("--cfl", type=float, default=0.4)
     ap.add_argument("--u-ox", type=float,
                     help="oxidizer nozzle velocity of the run (the fuel's in the profile's ratio); default the profile's")
     args = ap.parse_args()

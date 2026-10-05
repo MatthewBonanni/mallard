@@ -1,7 +1,7 @@
 """A premixed flame-vortex interaction run (Poinsot, Veynante & Candel 1991).
 
     python tools/flame_vortex.py FULL.csv MECHANISM PHASE RUN_DIR --r R --u U
-        [--cells 12] [--cfl 0.8] [--flame-times T] [--outputs 100] [--transport mixture_averaged]
+        [--cells 12] [--cfl 0.4] [--flame-times T] [--outputs 100] [--transport mixture_averaged]
 
 A planar flame in its frame (tools/flame_restart.py: the fresh gas enters on
 the left at the flame speed S_L, cells of delta / --cells, delta the thermal
@@ -70,7 +70,7 @@ def main():
     ap.add_argument("--r", type=float, required=True, help="pair size r over the thermal thickness")
     ap.add_argument("--u", type=float, required=True, help="largest pair velocity u' over S_L")
     ap.add_argument("--cells", type=float, default=12)
-    ap.add_argument("--cfl", type=float, default=0.8)
+    ap.add_argument("--cfl", type=float, default=0.4)
     ap.add_argument("--flame-times", type=float)
     ap.add_argument("--outputs", type=int, default=100)
     ap.add_argument("--transport", default="mixture_averaged")
