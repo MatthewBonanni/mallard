@@ -154,6 +154,15 @@ order, about four times larger than without the correction.
 shock moving into gas at rest sees `z < 1` on its upstream faces; Sod and
 Shu-Osher are unaffected, within 10% in L1 and without overshoots.
 
+The remaining upwind dissipation still matters for wall-bounded turbulence
+at DNS resolution. In the Re_tau = 180 channel (`examples/channel_retau180`;
+dx+ = 12, dz+ = 6, MUSCL) HLLC removes about 7% of the kinetic-energy
+dissipation and the wall shear comes out 7% low; Roe is the same, the
+cutoff 0.01 gains 1%, and without the correction it is 23% low. Halving dx
+and dz brings HLLC to within 1% of the reference; the `hybrid` convective
+flux does so on the original mesh (0.9% numerical dissipation, wall shear 2%
+high).
+
 ## Boundary conditions
 
 Every boundary condition is imposed weakly through an exterior state passed to
