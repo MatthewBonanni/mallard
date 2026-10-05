@@ -200,4 +200,11 @@ negative (next to walls) become zero.
 
 ### Spatially developing channel at `Re_tau = 180` (DNS)
 
-CHANNEL_RESULTS
+Pending. The run (`8 pi h x 2h x 4 pi / 3 h`, 384 x 96 x 128 hexahedra, inlet
+`profile` = the statistics of the periodic channel, initialized from that
+channel repeated twice along x with `tools/tile_restart.py`) needs the outlet
+fix below before its statistics (from `t = 40 h / U_b`) can be gathered.
+With the default `beta` at the `nscbc_outlet`, a near-wall eddy reversed the
+flow in the outlet's last cells at `t = 18-19 h / U_b` and the run diverged,
+also with a sponge in front of the outlet. With `beta = 0` there, it ran
+cleanly to `t = 39 h / U_b`.
