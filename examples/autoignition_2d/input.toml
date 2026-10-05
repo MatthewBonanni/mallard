@@ -1,0 +1,106 @@
+# Autoignition of a thermally stratified lean H2/air mixture at constant volume:
+# the HCCI configuration of Chen, Hawkes, Sankaran, Mason & Im, Combust. Flame
+# 145 (2006) 128 (doi:10.1016/j.combustflame.2005.09.017), Hawkes, Sankaran,
+# Pebay & Chen, Combust. Flame 145 (2006) 145 (doi:10.1016/j.combustflame.2005.09.018)
+# and Sankaran, Im, Hawkes & Chen, Proc. Combust. Inst. 30 (2005) 875
+# (doi:10.1016/j.proci.2004.08.176): H2/air at phi = 0.1, a mean 1070 K and
+# 41 atm in a 4.1 mm periodic square, with random temperature fluctuations
+# T' and decaying turbulence (u' = 0.5 m/s), both of Passot-Pouquet spectra
+# with most energetic lengths of 1.25 mm. Ignition spreads from the hot spots
+# by spontaneous ignition fronts (where neighboring gas ignites by its own
+# chemistry, one cell after the other) and by deflagrations (carried by heat
+# conduction and diffusion), the more so the steeper the temperature
+# gradients. DNS, no turbulence model: 400 x 400 cells of 10.25 um, 11-15 per
+# thermal thickness of the deflagration (114-149 um, measured with
+# tools/autoignition_deflagration.py; its speed is the same to 0.1% at 2.5,
+# 5, 10 and 20 um), the h2o2 mechanism (GRI-Mech 3.0's H2/O2 subset; the
+# papers used Li et al.'s) and mixture-averaged transport. This file is
+# T' = 15 K; make it, its initial state and the other amplitudes with
+#
+#   python ../../tools/autoignition_restart.py . --t-rms 15
+#   python ../../tools/autoignition_restart.py RUN_DIR --t-rms 3.75 --t-stop 4.2e-3 --outputs 168
+#   (7.5 K: --t-stop 4.4e-3 --outputs 176; 30 K: --t-stop 5.5e-3 --outputs 220)
+#
+# (one seed: the same field shapes at every amplitude), the 0D references
+# (homogeneous reactor, ignition delays, multizone model of each initial
+# field; reactor.toml checks MallardReactor's delay against Cantera's) with
+#
+#   python ../../tools/autoignition_reference.py reference --restart RUN_DIR/autoignition.restart ...
+#
+# and compare the runs with them and classify their fronts with
+#
+#   python ../../tools/autoignition_analysis.py reference deflagration.csv --run "T' = 15 K" RUN_DIR ...
+#   python ../../tools/animate_autoignition.py autoignition_2d.mp4 reference --run "T' = 15 K" RUN_DIR ...
+#
+# Results (tau_0 = 3.650 ms, the homogeneous delay; mean heat release rate
+# peak time and full width at half maximum over tau_0, peak over the
+# homogeneous one, multizone in brackets; deflagrative share: heat released
+# where the H2O isolines move slower than 1.5 S_L; median front speed:
+# HRR-weighted median of |S_d*| / S_L):
+#
+#   T' [K]   peak time        FWHM             peak            deflagrative   median front speed
+#   3.75     0.993 (0.990)    0.062 (0.110)    0.95 (0.64)     0.0%           16.7 S_L
+#   7.5      0.986 (0.973)    0.069 (0.187)    0.86 (0.41)     0.2%            9.1 S_L
+#   15       0.952 (0.924)    0.089 (0.354)    0.67 (0.24)     2.9%            5.1 S_L
+#   30       0.822 (0.791)    0.164 (0.697)    0.42 (0.13)     25%             2.4 S_L
+#
+# Larger fluctuations ignite earlier and burn longer, and their fronts slow
+# from spontaneous ignition towards deflagration (the papers describe this
+# trend; their figures were not available for a quantitative comparison). All
+# burn in a much shorter time than the multizone model predicts: turbulent mixing
+# halves T' before ignition (15 K: 8.5 K at 0.45 tau_0) and deflagrations
+# consume the coldest gas. The deflagrative share depends on the threshold
+# (T' = 30 K: 15%, 25% and 51% at 1.1, 1.5 and 3 S_L), the trend does not.
+# Cost: 1.4-2.0 million acoustically limited steps per run (cfl = 0.4, t_stop 4.2-5.5
+# ms), 10.4 ms each on four A100s (chemistry 65-70%): 4.7 hours for this
+# run, 5.5 for T' = 30 K.
+
+
+[run]
+t_stop = 0.0047999999999999996
+cfl = 0.4
+
+[mesh]
+type = "cartesian"
+Nx = 400
+Ny = 400
+Lx = 0.0041000000000000003
+Ly = 0.0041000000000000003
+periodic = ["x", "y"]
+
+[initialize]
+type = "restart"
+file = "autoignition.restart"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+phase = "ohmech"
+transport = "mixture_averaged"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+fuse_half_steps = true
+
+[output]
+check_interval = 1000
+
+[[write_data]]
+prefix = "./solut/autoignition"
+format = "vtu"
+time_interval = 2.4999999999999998e-05
+variables = ["RHO", "U", "P", "T", "HRR", "Y_H2", "Y_H2O", "Y_OH", "Y_HO2", "OMEGA_H2O", "X_H2O", "D_H2O"]
+
+[[write_data]]
+prefix = "./restart/autoignition"
+format = "restart"
+time_interval = 0.00020000000000000001

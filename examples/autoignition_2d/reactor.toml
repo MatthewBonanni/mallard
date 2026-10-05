@@ -1,0 +1,22 @@
+# Homogeneous reference of the stratified autoignition runs: constant-volume
+# ignition of lean H2/air (phi = 0.1) at the mean state, 1070 K and 41 atm.
+# Run with MallardReactor (not Mallard), from this directory:
+#   ../../build/src/MallardReactor -i reactor.toml
+# Cantera's IdealGasReactor gives an ignition delay of 3.650 ms.
+
+[physics]
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+
+[reactor]
+type = "constant_volume"
+T = 1070.0
+p = 4154332.5
+X = { H2 = 0.040322580645161296, O2 = 0.20161290322580644, N2 = 0.7580645161290324 }
+end_time = 6.0e-3
+output_interval = 1.0e-6
+output = "reactor.csv"
+
+[chemistry]
+rtol = 1.0e-8
+atol = 1.0e-12
