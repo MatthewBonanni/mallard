@@ -360,10 +360,34 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | Key | Description |
 |---|---|
 | `prefix` | Output path prefix; directories are created as needed |
-| `format` | `vtu` (with a `.pvd` series next to it) or `restart` |
+| `format` | `vtu` (with a `.pvd` series next to it), `hdf5` (with XDMF indexes; see below) or `restart` |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
-| `variables` | (`vtu`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m^3 s)]), and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>` and `COV_<A>_<B>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
+| `variables` | (`vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m^3 s)]), and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>` and `COV_<A>_<B>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
 | `geometry` | (`vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |
+
+`format = "hdf5"` (builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need
+parallel HDF5) scales to large runs: every rank writes its part of one file per
+snapshot with collective I/O instead of a VTU piece of its own. It writes
+
+- `PREFIX_mesh.h5`, once: `nodes/coordinates` (n_nodes x dimension),
+  `cells/topology`, an XDMF `Mixed` topology (each cell's XDMF type, then its
+  nodes in VTK order: triangle 4, quadrilateral 5, tetrahedron 6, pyramid 7,
+  wedge 8, hexahedron 9) and `cells/offsets`, where each cell's record starts
+  (n_cells + 1 entries);
+- `PREFIX_NNNNNN.h5` per snapshot: the attributes `step`, `time` and `mesh`
+  (the mesh file's name), and `fields/<name>` for each variable (n_cells
+  values, or n_cells x 3 for vectors);
+- `PREFIX_NNNNNN.xmf` per snapshot and `PREFIX.xmf`, the time series, which
+  ParaView opens (XDMF reader).
+
+Row i of every cell array is global cell i, the cell order of the mesh file and
+of restart files, so the files do not depend on the number of ranks.
+Snapshots are about half the size of VTU pieces (the mesh is not repeated) and
+two files instead of one per rank. A shared file pays off on parallel file
+systems; on one node's local disk, which serializes writes to a file, VTU
+pieces write faster beyond a few ranks (2.1M hexahedra, 16 ranks: 115 ms per
+HDF5 snapshot against 72 ms, 1 rank: 140 ms against 1.1 s). VTU output remains
+the simpler choice for small runs. `tools/mallard_h5.py` reads the files.
 
 ## `MallardReactor`
 

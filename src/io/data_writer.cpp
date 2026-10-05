@@ -26,6 +26,7 @@
 
 #include "common_io.h"
 #include "log.h"
+#include "mesh_block.h"
 
 namespace {
 
@@ -42,15 +43,6 @@ uint8_t vtk_type(uint32_t dim, uint32_t n_nodes) {
     if (dim == 3 && n_nodes == 5) return 14;  // VTK_PYRAMID
     throw std::runtime_error("DataWriter: no VTK cell type for a " + std::to_string(dim) + "D element with " +
                              std::to_string(n_nodes) + " nodes.");
-}
-
-/**
- * @brief Local node of a cell at VTK position k. Mallard prisms have the
- *        (0, 1, 2) normal pointing toward (3, 4, 5); VTK wedges point it away.
- */
-uint32_t vtk_local_node(uint32_t n_nodes, uint32_t k) {
-    constexpr uint32_t WEDGE[6] = {0, 2, 1, 3, 5, 4};
-    return (N_DIM == 3 && n_nodes == 6) ? WEDGE[k] : k;
 }
 
 } // namespace
@@ -132,7 +124,7 @@ void DataWriter::init(const toml::value & input,
         Field field{var, {}};
         if (const Data * scalar = find_data(var)) {
             field.components.push_back(scalar);
-        } else if (format == DataFormat::VTU) {
+        } else if (format != DataFormat::RESTART) {
             // A vector name (e.g. U) collects its components U_X, U_Y(, U_Z)
             const char * suffixes[3] = {"_X", "_Y", "_Z"};
             FOR_I_DIM {
@@ -146,6 +138,16 @@ void DataWriter::init(const toml::value & input,
         fields.push_back(field);
     }
     this->mesh = mesh_in;
+
+    if (format == DataFormat::HDF5) {
+        if (!have_hdf5()) {
+            throw std::runtime_error(
+                "DataWriter: format = \"hdf5\" needs a build with HDF5 (configure with Mallard_ENABLE_HDF5=ON).");
+        }
+        if (mesh->n_global_cells > 0 && comm::size() > 1 && !have_parallel_hdf5()) {
+            throw std::runtime_error("DataWriter: format = \"hdf5\" on several ranks needs parallel HDF5.");
+        }
+    }
 
     geometry = toml::find_or<std::string>(input, "geometry", "all");
     if (geometry != "all") {
@@ -171,10 +173,12 @@ void DataWriter::init(const toml::value & input,
 }
 
 std::pair<std::string, std::string> DataWriter::summary() const {
-    std::string text = prefix + (format == DataFormat::RESTART ? "_*.restart" : "_*.vtu");
+    std::string text = prefix + (format == DataFormat::RESTART ? "_*.restart"
+                                 : format == DataFormat::HDF5  ? "_*.h5"
+                                                               : "_*.vtu");
     if (geometry != "all") text += " (" + geometry + ")";
     text += interval > 0 ? " every " + logging::count(interval) + " steps" : " every t = " + logging::real(double(time_interval));
-    if (format == DataFormat::VTU) {
+    if (format != DataFormat::RESTART) {
         std::string names;
         for (const auto & field : fields) names += (names.empty() ? "" : ", ") + field.name;
         text += ": " + names;
@@ -207,6 +211,12 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
     if (format == DataFormat::RESTART) {
         write_restart(stream.str() + ".restart", step, t, attributes);
         logging::event(step, double(t), "restart", stream.str() + ".restart");
+    } else if (format == DataFormat::HDF5) {
+        if (!hdf5_mesh_written) write_hdf5_mesh();
+        write_hdf5(stream.str(), step, t);
+        history.emplace_back(t, stream.str() + ".h5");
+        if (comm::is_root()) write_xdmf(stream.str());
+        logging::event(step, double(t), "hdf5", stream.str() + ".h5");
     } else {
         // Distributed runs: one piece per rank and a .pvtu index
         const bool pieces = mesh->n_global_cells > 0;
@@ -245,8 +255,12 @@ void DataWriter::resume(uint64_t step, rtype t) {
     } else {
         n_written = static_cast<uint64_t>(std::floor(t / time_interval + precision_tol(1e-9, 1e-5))) + 1;
     }
-    // Keep the entries of the previous run's .pvd up to the restart time
     history.clear();
+    if (format == DataFormat::HDF5) {
+        resume_xdmf(t);
+        return;
+    }
+    // Keep the entries of the previous run's .pvd up to the restart time
     std::ifstream in(prefix + ".pvd");
     std::string line;
     const std::filesystem::path dir = std::filesystem::path(prefix).parent_path();

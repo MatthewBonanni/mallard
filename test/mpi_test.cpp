@@ -24,6 +24,7 @@
 
 #include "comm.h"
 #include "gmsh_fixtures.h"
+#include "hdf5_output.h"
 #include "mesh_block.h"
 #include "mpi_compare.h"
 #include "partition.h"
@@ -57,6 +58,23 @@ std::string bcs(const char * left, const char * right, const char * top, const c
         s << "[[boundaries]]\nname = \"" << name << "\"\n" << type;
     }
     return s.str();
+}
+
+std::string mixture_input(const std::string & extra, const std::string & reconstruction,
+                          const std::string & chemistry, const std::string & type) {
+    return "[run]\nn_steps = 20\ncfl = 0.5\n"
+           "[mesh]\ntype = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n"
+           "[initialize]\ntype = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\n"
+           "u = [\"0.0\", \"y * 100.0\"]\n"
+           "X = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", N2 = \"x < 0.5 ? 0 : 1\" }\n"
+           "[[boundaries]]\nname = \"left\"\ntype = \"upt\"\nu = [100.0, 0.0]\np = 1.0e5\nT = 1000.0\n"
+           "X = { H2 = 2.0, O2 = 1.0 }\n"
+           "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+           "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
+           "[[boundaries]]\nname = \"top\"\ntype = \"p_out\"\np = 3.0e4\n"
+           "[numerics]\nriemann_solver = \"HLLC\"\n" + extra + "[numerics.face_reconstruction]\n" + reconstruction +
+           "[physics]\ntype = \"" + type + "\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
+           "[output]\ncheck_interval = 1000000\n" + chemistry;
 }
 
 const std::string EULER = "type = \"euler\"\n";
@@ -117,21 +135,7 @@ TEST(MPITest, GasMixtureMatchesSerial) {
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n", "euler"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes"}};
     for (const auto & [extra, reconstruction, chemistry, type] : schemes) {
-        const std::string input =
-            "[run]\nn_steps = 20\ncfl = 0.5\n"
-            "[mesh]\ntype = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n"
-            "[initialize]\ntype = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\n"
-            "u = [\"0.0\", \"y * 100.0\"]\n"
-            "X = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", N2 = \"x < 0.5 ? 0 : 1\" }\n"
-            "[[boundaries]]\nname = \"left\"\ntype = \"upt\"\nu = [100.0, 0.0]\np = 1.0e5\nT = 1000.0\n"
-            "X = { H2 = 2.0, O2 = 1.0 }\n"
-            "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
-            "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
-            "[[boundaries]]\nname = \"top\"\ntype = \"p_out\"\np = 3.0e4\n"
-            "[numerics]\nriemann_solver = \"HLLC\"\n" + extra + "[numerics.face_reconstruction]\n" + reconstruction +
-            "[physics]\ntype = \"" + type + "\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
-            "[output]\ncheck_interval = 1000000\n" + chemistry;
-        expect_matches_serial(input);
+        expect_matches_serial(mixture_input(extra, reconstruction, chemistry, type));
     }
 }
 
@@ -417,6 +421,28 @@ TEST(MPITest, EveryCellIsInExactlyOneOutputPiece) {
     }
     EXPECT_EQ(total, n_global);
     EXPECT_NE(read(dir + "/f.pvd").find("f_000002.pvtu"), std::string::npos);
+}
+
+TEST(MPITest, HDF5OutputDoesNotDependOnTheRankCount) {
+    // Cells and nodes of every rank land at their global ids: triangles and
+    // quads, vectors, statistics and species
+    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
+#ifdef Mallard_HAS_HDF5
+    const std::string file = write_temp_shared("mallard_mpi_h5_output.msh", jittered_mixed_mesh(16));
+    std::string input = box_input("cartesian", "type = \"MUSCL\"\n", EULER,
+                                  bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                                      "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 6);
+    const std::string generated = "type = \"cartesian\"\n";
+    input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
+    expect_hdf5_output_matches_serial(input + "[statistics]\ninterval = 2\nfields = [\"P\"]\n",
+                                      "interval = 3\nvariables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n",
+                                      io_dir() + "_hdf5", {0, 3, 6});
+    std::string mixture = mixture_input("", "type = \"MUSCL\"\n", "", "euler");
+    mixture.replace(mixture.find("n_steps = 20"), 12, "n_steps = 4");
+    expect_hdf5_output_matches_serial(mixture, "interval = 4\nvariables = [\"T\", \"Y_*\"]\n",
+                                      io_dir() + "_hdf5_species", {0, 4});
+#endif
 }
 
 TEST(MPITest, GraphPartitionIsBalancedAndMatchesSerial) {

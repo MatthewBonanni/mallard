@@ -11,6 +11,8 @@
 
 #include "common_io.h"
 
+#include "common_typedef.h"
+
 
 std::string endianness() {
     int i = 1;
@@ -28,4 +30,8 @@ std::string vtk_float_type() {
 #else
     return "Float32";
 #endif
+}
+uint32_t vtk_local_node(uint32_t n_nodes, uint32_t k) {
+    constexpr uint32_t WEDGE[6] = {0, 2, 1, 3, 5, 4};
+    return (N_DIM == 3 && n_nodes == 6) ? WEDGE[k] : k;
 }

@@ -4,7 +4,8 @@ Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the 3D
 
 | Script | Purpose |
 |---|---|
-| `mallard_vtu.py` | Minimal reader for Mallard's VTU files (cells, cell data, time) |
+| `mallard_vtu.py` | Minimal reader for Mallard's VTU files (cells, cell data, time); also reads HDF5 snapshots (`.h5`), so the scripts below accept them too |
+| `mallard_h5.py` | Reader for `format = "hdf5"` output (needs h5py): mesh, cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf` (`animate.py` takes `--glob "PREFIX_[0-9]*.h5"`) |
 | `plot_vtu.py` | Plot one cell field of a VTU file |
 | `compare_png.py` | Side-by-side plots of a field from several VTU files |
 | `plot_sod.py` | Density profiles against the exact Sod solution |
