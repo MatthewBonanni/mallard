@@ -202,7 +202,7 @@ def main():
     plotter = pv.Plotter(off_screen=True, window_size=(w3d, H))
     plotter.set_background(BG)
     plotter.enable_anti_aliasing("ssaa")
-    subtitle = args.subtitle or f"Isosurfaces Q = {args.q:g} (U/D)$^2$, colored by streamwise velocity"
+    subtitle = args.subtitle or f"Q = {args.q:g} (U/D)² isosurfaces, colored by streamwise velocity"
     title = ("Sphere at Re = 300, M = 0.2", subtitle)
     with tempfile.TemporaryDirectory() as tmp:
         for k, (t_file, path) in enumerate(files):
