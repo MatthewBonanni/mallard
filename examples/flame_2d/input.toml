@@ -13,27 +13,27 @@
 #   python ../../tools/flame_reference.py --single h2 0.4 700 .
 #   python ../../tools/flame_restart.py h2_phi0.4_T700_mix_full.csv ../../mechanisms/h2o2.yaml ohmech 12 . \
 #       --ref-delta 4.343e-4 --ny 216 --upstream 12 --downstream 16 --perturb 0.5 --t-stop 2.4e-3 \
-#       --outputs 150 --cfl 0.4 --inlet-factor 1.25
+#       --outputs 150 --cfl 1.0 --inlet-factor 1.25
 #   python ../../tools/flame_restart.py h2_phi0.4_T700_unity_full.csv ../../mechanisms/h2o2.yaml ohmech 12 unity \
 #       --ref-delta 4.343e-4 --ny 216 --upstream 12 --downstream 16 --perturb 0.5 --t-stop 2.4e-3 \
-#       --outputs 150 --cfl 0.4 --transport unity_lewis
+#       --outputs 150 --cfl 1.0 --transport unity_lewis
 #
-# then run both (72,576 cells each; 378,000 and 301,000 viscous-limited steps:
-# 82 and 67 minutes on one A100 each) and animate them side by side with
+# then run both (72,576 cells each; 151,000 and 120,000 viscous-limited steps:
+# about 35 and 30 minutes on one A100 each) and animate them side by side with
 #
 #   python ../../tools/animate_flame_2d.py flame_2d.mp4 \
 #       --run "Mixture-averaged transport" solut/flame.pvd h2_phi0.4_T700_mix_full.csv \
 #       --run "Unity Lewis numbers" unity/solut/flame.pvd h2_phi0.4_T700_unity_full.csv
 #
 # Validation, planar flames on the same mesh (1D runs of flame_restart.py with
-# --ref-delta 4.343e-4 --cfl 0.4, measured with flame_speed.py): consumption
+# --ref-delta 4.343e-4 --cfl 1.0, measured with flame_speed.py): consumption
 # speeds 3.3446 m/s mixture-averaged and 3.1093 m/s unity Lewis, against
 # Cantera's grid-converged 3.346 and 3.129 m/s (-0.04% and -0.6%; -0.3% and
 # -1.0% with 24 um cells). Results in 2D: with mixture-averaged transport the
 # burnt gas leaves the front between 0.958 and 1.017 times the adiabatic flame
 # temperature (superadiabatic behind the bulges, where hydrogen diffuses in
 # faster than heat out), against 0.996-1.000 with unity Lewis numbers; the
-# consumption speed rises to 1.14 S_L by 1.1 ms (unity: 1.02), while both
+# consumption speed rises to 1.15 S_L by 1.1 ms (unity: 1.01), while both
 # fronts coarsen to a single cusped cell across the 7.8 mm channel, whose
 # hydrodynamic (Darrieus-Landau) growth brings the unity-Lewis flame to
 # 1.08 S_L by 2.4 ms. At 700 K this mixture is only mildly thermodiffusively
@@ -42,7 +42,7 @@
 
 [run]
 t_stop = 0.0023999999999999998
-cfl = 0.4
+cfl = 1.0
 
 [mesh]
 type = "cartesian"
