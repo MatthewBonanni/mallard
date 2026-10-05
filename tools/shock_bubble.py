@@ -276,8 +276,8 @@ def compare(case, probe_path, frame_dir, png, out_csv):
             t = (float(z["t"]) - t_hit) * scale
             ring_t.append(t)
             ring_x.append((float(z["ring"][0]) - xb) * scale)
-            # Upstream and downstream faces of the whole helium volume (Y_HE = 0.5 anywhere)
-            inside = np.nonzero((z["y_he"] > 0.5).any(axis=(1, 2)))[0]
+            # Upstream and downstream faces of the whole helium volume (Y_HE = 0.15 anywhere: the helium mixes down to Y_HE ~ 0.2 by the end)
+            inside = np.nonzero((z["y_he"] > 0.15).any(axis=(1, 2)))[0]
             if inside.size:
                 up_t.append(t)
                 up_x.append(((z["lo"][0] + inside[0] + 0.5) * float(z["dx"]) - xb) * scale)

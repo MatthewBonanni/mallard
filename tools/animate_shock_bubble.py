@@ -5,7 +5,7 @@
         [--width 1920] [--gif-width 720] [--still-frame N] [--orbit 60]
 
 FRAME_DIR holds the frames of tools/shock_bubble.py (`frames`). Each frame
-shows the helium (isosurface Y_HE = 0.4, mirrored from the computed quarter
+shows the helium (isosurface Y_HE = 0.15, mirrored from the computed quarter
 into the full bubble) with the vortex sheet and ring (isosurfaces of the
 vorticity magnitude, colored by it) under a slowly orbiting camera; the
 numerical schlieren and the helium on the symmetry plane z = 0, mirrored
@@ -56,7 +56,7 @@ def render_3d(frame, size, azimuth, x_range, vort_level):
     grid = grid.cell_data_to_point_data()
     pl = pv.Plotter(off_screen=True, window_size=size)
     pl.set_background(BG)
-    he = grid.contour([0.4], scalars="y")
+    he = grid.contour([0.15], scalars="y")
     if he.n_points:
         pl.add_mesh(he, color="#7fd3ff", opacity=0.35, smooth_shading=True, specular=0.5)
     w = grid.contour([vort_level], scalars="w")
@@ -64,8 +64,10 @@ def render_3d(frame, size, azimuth, x_range, vort_level):
         pl.add_mesh(w, scalars="y", cmap="magma", clim=(0, 0.7), smooth_shading=True, show_scalar_bar=False,
                     specular=0.3)
     d = float(frame["d"])
-    center = np.array([0.5 * (x_range[0] + x_range[1]), 0.0, 0.0])
-    r = 3.6 * d
+    weight = frame["y_he"].astype(np.float64).sum(axis=(1, 2))
+    x_c = (lo[0] + (np.arange(weight.size) + 0.5) @ weight / weight.sum()) * dx
+    center = np.array([x_c, 0.0, 0.0])
+    r = 3.0 * d
     a = np.radians(azimuth)
     pl.camera.focal_point = center
     pl.camera.position = center + np.array([-0.15 * r, -r * np.cos(a), r * np.sin(a)])
@@ -125,7 +127,7 @@ def main():
         fig = plt.figure(figsize=(args.width / 100, args.width * 9 / 16 / 100), dpi=100, facecolor=BG)
         fig.text(0.02, 0.95, "Mach 1.25 shock on a helium bubble in air (Haas & Sturtevant 1987), "
                  "Navier-Stokes at Re = 1.5$\\times$10$^3$", color=FG, fontsize=17, weight="bold")
-        fig.text(0.02, 0.915, f"t = {t_ms:5.3f} ms (experiment scale, 4.5 cm bubble)    helium: Y = 0.4 surface; "
+        fig.text(0.02, 0.915, f"t = {t_ms:5.3f} ms (experiment scale, 4.5 cm bubble)    helium: Y = 0.15 surface; "
                  f"vortex sheet and ring: |$\\omega$| = {args.vort:g} u$_p$/D, colored by helium fraction",
                  color=FG, fontsize=11)
         ax3 = fig.add_axes([0.0, 0.0, 0.5, 0.88])
@@ -142,9 +144,9 @@ def main():
         axs = fig.add_axes([0.52, 0.53, 0.46, 0.35], facecolor=BG)
         axs.imshow(np.exp(-sch.T / 4.0), origin="lower", cmap="gray", extent=ext, vmin=0, vmax=1, aspect="equal")
         axs.contour(np.linspace(ext[0], ext[1], hel.shape[0]), np.linspace(ext[2], ext[3], hel.shape[1]), hel.T,
-                    [0.4], colors=["#7fd3ff"], linewidths=0.8)
+                    [0.15], colors=["#7fd3ff"], linewidths=0.8)
         axs.set_xlim(-40, (lx - xb) * scale * 1e3)
-        axs.set_title("numerical schlieren and helium (Y = 0.4) on the symmetry plane", color=FG, fontsize=10)
+        axs.set_title("numerical schlieren and helium (Y = 0.15) on the symmetry plane", color=FG, fontsize=10)
         axs.tick_params(colors=FG, labelsize=8)
         axs.set_xlabel("x (mm, experiment scale)", color=FG, fontsize=9)
         # x-t diagram on the axis

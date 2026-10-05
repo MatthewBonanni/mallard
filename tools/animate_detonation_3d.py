@@ -119,9 +119,9 @@ def render_3d(frame, foils, i_start, view_length, size, front_clim, norm):
         pl.add_mesh(plane, scalars="rgb", rgb=True, lighting=False)
     outline = pv.Box(bounds=(x_lo, x_front + 0.01, 0, ly, 0, lz))
     pl.add_mesh(outline, style="wireframe", color="#56606b", line_width=1)
-    focus = np.array([x_front - 0.3 * view_length, 0.45 * ly, 0.45 * lz])
+    focus = np.array([x_front - 0.45 * view_length, 0.5 * ly, 0.5 * lz])
     pl.camera.focal_point = focus
-    pl.camera.position = focus + np.array([0.75, 0.62, 0.48]) * view_length * 1.45
+    pl.camera.position = focus + np.array([0.75, 1.0, 0.8]) * view_length * 1.8
     pl.camera.up = (0, 0, 1)
     pl.camera.view_angle = 28
     pl.enable_anti_aliasing("ssaa")
