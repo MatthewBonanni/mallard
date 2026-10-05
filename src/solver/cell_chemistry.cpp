@@ -18,6 +18,8 @@
 
 #include <Kokkos_Sort.hpp>
 
+#include "launch_bounds.h"
+
 
 // A named namespace: functors in an anonymous one make GCC warn about the visibility of the lanes' closures
 namespace cell_chemistry_kernels {
@@ -403,7 +405,7 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
         const ActivityFunctor activity{gas,   kinetics, U,  rhoY,      T_seed, work, active, first,
                                        dt,    options.T_frozen, 1e-2 * options.reactor.atol_Y, n_lanes};
         if (n_lanes == 1) {
-            Kokkos::parallel_for("chemistry_activity", m, activity);
+            Kokkos::parallel_for("chemistry_activity", HeavyRange<>(0, m), activity);
         } else {
             const auto policy = ActivityPolicy(static_cast<int>(m), 1, static_cast<int>(n_lanes))
                                     .set_scratch_size(0, Kokkos::PerTeam(chemistry::TeamLanes<Member>::scratch_bytes(n_lanes)));
@@ -427,7 +429,7 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
                                sparse, static_cast<uint32_t>(fast_bytes / sizeof(double))};
         uint32_t failures = 0;
         if (n_lanes == 1) {
-            Kokkos::parallel_reduce("chemistry_advance", n_active, functor, Kokkos::Sum<uint32_t>(failures));
+            Kokkos::parallel_reduce("chemistry_advance", HeavyRange<>(0, n_active), functor, Kokkos::Sum<uint32_t>(failures));
         } else if (n_wide == 0) {
             launch_teams(Kokkos::DefaultExecutionSpace(), functor, n_active, n_threads, n_lanes, sparse, fast_bytes,
                          team_failures[0]);
@@ -455,7 +457,7 @@ void CellChemistry::heat_release(const StateView & U, const SpeciesView & rhoY, 
     const uint32_t chunk = static_cast<uint32_t>(work.extent(0));
     for (uint32_t first = 0; first < n; first += chunk) {
         const uint32_t m = std::min(chunk, n - first);
-        Kokkos::parallel_for("heat_release_rate", m,
+        Kokkos::parallel_for("heat_release_rate", HeavyRange<>(0, m),
                              HeatReleaseFunctor{gas, kinetics, U, rhoY, T_seed, work, hrr, production, first});
     }
 }
