@@ -2,7 +2,7 @@
 
 Status: proposed. Recommendations are marked **Decision**; the alternatives
 considered are listed with each. Implementation follows the
-[stages](#9-stages), one pull request each; done: 1, 2.
+[stages](#9-stages), one pull request each; done: 1, 2, 5 (3 and 4 in progress).
 
 Mallard resolves every scale it computes today (DNS of flames, detonations,
 Taylor-Green and isotropic turbulence). This document adds large-eddy
@@ -543,6 +543,42 @@ chemistry stays bitwise independent of rank count and team width.
   of its gradients over the local stencil, exchanged to the halo by the same
   exchange as the state; the result is bitwise independent of the rank
   count. No reduction enters the model.
+
+### 6.6 As implemented (stage 5)
+
+- `F`, `E`, `Omega` and `E / F` are computed in `calc_dt` (once per step,
+  from the state, so restarts reproduce) on owned cells: the vorticity from
+  the transport gradients, exchanged to the halo, its least-squares gradient,
+  and its Laplacian as the divergence of the face gradients (cell means
+  corrected along the line of centroids, no flux through boundary faces);
+  the fields are then exchanged to the halo (two exchanges of three values
+  per cell and step).
+- The thickening multiplies `LAMBDA`, every `rho D_k W_k / W` and the time
+  step's `nu_eff` by `E F` after the eddy viscosity of each RHS, and the SGS
+  heat and species coefficients by `1 - Omega`; viscosity is unchanged.
+- `HRR` and `OMEGA_*` outputs are the modeled rates (times `E / F`).
+- The SGS model in 2D builds should be Vreman for flames: WALE's eddy
+  viscosity is not zero for the one-dimensional dilatation across a flame.
+- Results, one-dimensional stoichiometric H2/air flame (h2o2.yaml,
+  mixture-averaged, `s_L = 2.3324` m/s, `delta_L = 0.330` mm from
+  Cantera), MUSCL and HLLC, strip cells of aspect ratio 10 (`Delta = 3.16
+  dx`), `n_res = 5`:
+
+  | Mesh | Model | `F` | Consumption speed | Displacement speed | Thermal thickness |
+  |---|---|---|---|---|---|
+  | 2 cells per `delta_L` | TFLES | 7.91 | 2.327 m/s (-0.2%) | 2.291 m/s (-1.8%) | 2.615 mm (`F delta_L` = 2.610 mm) |
+  | 0.5 cells per `delta_L` | TFLES | 31.6 | 2.328 m/s (-0.2%) | 2.251 m/s (-3.5%) | |
+  | 0.5 cells per `delta_L` | none (quasi-laminar) | 1 | 2.273 m/s (-2.5%) | 2.240 m/s (-4.0%) | one cell (numerical) |
+
+  The thickened flame keeps the laminar speed and has the thickness `F
+  delta_L` it is designed to have; the quasi-laminar flame's speed is also
+  within 5% in this one-dimensional case, but its structure is one cell
+  wide, set by the scheme. The displacement speeds include the slow drift
+  of a long domain's flame position (they are fitted over the last half of
+  the run). The thickened post-flame recombination zone is `F` times longer
+  too (rates times `1 / F` while `c < 0.95`), so the peak temperature in a
+  domain of a few thickened thicknesses stays below the adiabatic one
+  (2224 K against 2384 K at `F = 7.9`).
 
 ## 7. Tests (each must fail under a plausible bug)
 

@@ -85,7 +85,8 @@ void Solver::allocate_chemistry() {
 void Solver::advance_chemistry(const double dt_chem) {
     const double start = timer.seconds();
     const CellChemistry::Statistics stats =
-        cell_chemistry.advance(conservatives, species, T_seed, chem_h, chem_cost, mesh->n_owned(), dt_chem);
+        cell_chemistry.advance(conservatives, species, T_seed, chem_h, chem_cost, mesh->n_owned(), dt_chem,
+                               tfles_on ? chem_time_scale : Kokkos::View<rtype *>());
     const uint64_t active = stats.active;
     uint32_t failures = stats.failures;
     chem_active_cells = active;
@@ -101,6 +102,14 @@ void Solver::advance_chemistry(const double dt_chem) {
 
 void Solver::update_heat_release_rate() {
     cell_chemistry.heat_release(conservatives, species, T_seed, hrr, production, mesh->n_cells);
+    if (!tfles_on) return;
+    // The modeled rates of the thickened flame
+    Kokkos::View<rtype *> q = hrr, scale = chem_time_scale;
+    Kokkos::View<rtype **, Kokkos::LayoutRight> w = production;
+    Kokkos::parallel_for("tfles_rates", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+        q(c) *= scale(c);
+        for (uint32_t k = 0; k < w.extent(1); k++) w(c, k) *= scale(c);
+    });
 }
 
 std::pair<uint64_t, double> Solver::chemistry_statistics() {
