@@ -410,8 +410,12 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
         case RiemannSolverType::HLLC:
             double_flux ? launch_double_flux_functor<riemann::HLLC>() : launch_mixture_flux_functor<riemann::HLLC>();
             break;
-        default:
-            throw std::logic_error("Riemann solver without a mixture flux.");
+        case RiemannSolverType::ROE:
+            double_flux ? launch_double_flux_functor<riemann::Roe>() : launch_mixture_flux_functor<riemann::Roe>();
+            break;
+        case RiemannSolverType::RHLL:
+            double_flux ? launch_double_flux_functor<riemann::RHLL>() : launch_mixture_flux_functor<riemann::RHLL>();
+            break;
     }
 
     const uint32_t n_species = mixture.n_species;

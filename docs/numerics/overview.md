@@ -44,6 +44,15 @@ from a per-cell spectral radius ([Blazek 2015](../references.md#blazek-2015)),
 | Roe | [Roe 1981](../references.md#roe-1981), with Harten's entropy fix ([Harten 1983](../references.md#harten-1983)) |
 | RHLL | [Nishikawa & Kitamura 2008](../references.md#nishikawa-kitamura-2008), a rotated hybrid: HLL along the velocity-difference direction, Roe across it. Carbuncle-free. |
 
+All five also solve gas mixtures, on each side's frozen `cp / cv` and energy
+offset ([chemistry design](../design/chemistry.md#riemann-solvers)). The
+mixture Roe solver ([Glaister 1988](../references.md#glaister-1988);
+[Shuen, Liou & van Leer 1990](../references.md#shuen-liou-van-leer-1990)) lets the
+contact, shear and composition waves, which all move with the flow, carry
+the whole jump of the conservative variables left by the two acoustic waves.
+That makes it exact at contacts between different gases for any averaged
+sound speed, and it reduces to the single-gas Roe solver for one gas.
+
 ### Low-Mach correction
 
 Upwind fluxes damp the jump of the reconstructed velocity across a face at the
@@ -104,7 +113,7 @@ r-weighted centroids. See [the design notes](../design/axisymmetric.md).
 ## Known limitations
 
 - The scheme is not exactly well balanced: hydrostatic states carry small spurious velocities, which vanish at second order under refinement (wall ghosts continue the hydrostatic pressure gradient).
-- RHLL does not keep a 1D problem on a 2D mesh exactly 1D. Where the velocity jump across a face is small but above its fallback threshold, the rotation direction tilts by the round-off transverse velocity divided by that jump. On the Sod strip (800 x 4 quads, TENO5), the rows start out identical to 1e-16, still agree to 1e-12 at t = 0.04, and differ by up to about 1e-5 later on, at levels that depend on the time-step history. HLL and HLLC stay at round-off.
+- RHLL does not keep a 1D problem on a 2D mesh exactly 1D. Where the velocity jump across a face is small but above its fallback threshold, the rotation direction tilts by the round-off transverse velocity divided by that jump. On the Sod strip (800 x 4 quads, TENO5), the rows start out identical to 1e-16, still agree to 1e-12 at t = 0.04, and differ by up to about 1e-5 later on, at levels that depend on the time-step history. HLL and HLLC stay at round-off. In gas mixtures this costs the mass fractions' positivity with TENO5: on the multicomponent shock tube (4 rows) N2 reaches -2e-10 in three cells of the driver gas next to the diaphragm, where HLLC, Roe and MUSCL stay within [0, 1]. The species' bounds are enforced at face points only, which keeps them only for fluxes that do not draw a cell's species beyond its content.
 - TENO's k-exact least squares with 2x oversampling is noticeably more dissipative for under-resolved smooth waves than compact structured stencils. `stencil_factor = 1.5` helps, at some cost in robustness at discontinuities.
 
 All sources, with where Mallard uses them: [References](../references.md).

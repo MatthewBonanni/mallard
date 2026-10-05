@@ -201,8 +201,22 @@ They become functions of `W` and per-side `(gamma, e0)`:
   one-species mixture could not then reproduce it; implementation, milestone 3).
   The low-Mach correction uses each side's `gamma` in its Mach number.
 - **Roe and RHLL** need a Roe average for a variable-`gamma` gas
-  (Shuen, Liou & van Leer 1990; Glaister 1988). They come in a later
-  milestone; until then a mixture run rejects them at input.
+  (Shuen, Liou & van Leer 1990; Glaister 1988). As implemented (milestone
+  12): with `p = kappa rho e + chi rho` per side (`kappa = gamma - 1`,
+  `chi = -kappa e0`), any averages leave a pressure residual
+  `dp - chi_roe d(rho) - kappa_roe d(rho e)` from the jump in composition,
+  which a multicomponent Roe matrix carries in its species waves. Those move
+  at `u_n` with the entropy and shear waves, so all linearly degenerate waves
+  together carry `dU` minus the two acoustic waves, whatever the equation of
+  state, and the flux takes the jump form
+  `F = (F_L + F_R - |u_n| dU - sum_+- (|u_n +- a| - |u_n|) alpha_+- r_+-) / 2`,
+  `alpha_+- = (dp +- rho_roe a du_n) / (2 a^2)`, `r_+- = [1, u +- a n, H +- a u_n]`.
+  The Roe property then holds for any `a`; it is `a_roe` of the Einfeldt
+  speeds above, so the species never enter the solver. A contact between
+  gases is upwinded exactly, and with one `gamma` and `e0 = 0` the flux is the
+  perfect-gas Roe flux to round-off. RHLL rotates as for one gas, with HLL
+  and Roe on `(gamma, e0)` and the larger side's frozen sound speed scaling
+  its fallback threshold; the single-gas solvers are unchanged bit for bit.
 - The perfect-gas instantiation passes the constant `gamma` and `e0 = 0`
   as compile-time-known values, so it compiles to the current code.
 
@@ -328,13 +342,18 @@ stays rank independent), and every stage takes the cells' pressure from the
 frozen relation. Each face point computes the Riemann flux twice, with each
 side's frozen `(gamma, e0)` on both of its states; mass and momentum use the
 mean of the two (conservative, and equal to both at a contact, where HLLC
-returns the upwind physical flux), so `mdot` and the species fluxes stay
+and Roe return the upwind physical flux), so `mdot` and the species fluxes stay
 unique, and each side takes its own energy flux (one extra word per face).
+Both fluxes estimate the wave speeds with each side's own frozen
+`(gamma, e0)` (milestone 12): HLL and Rusanov smear a contact by an amount set
+by those speeds, and with each flux's own they gave the two fluxes different
+mass fluxes there, perturbing `p` by 0.1% (as did RHLL, which is HLL at a
+contact without a velocity jump).
 After the step `rho E` is reset to the true equation of state at the pressure
 of the frozen one. There is no shock switch yet: the energy error over the
 multicomponent shock tube is 0.16% of the total energy, with an L1 pressure
 error equal to the conservative scheme's; contacts keep `p` and `u` uniform to
-1e-12 with MUSCL and TENO5.
+1e-12 with MUSCL and TENO5 (HLLC, Roe and RHLL).
 
 ### Species fluxes without races
 
@@ -466,7 +485,11 @@ Validation (MUSCL, HLLC, SSPRK3, h2o2 mechanism, default tolerances):
   speed against D_CJ = 1616.9 m/s: +0.11%, +0.01%, 0.00% at 10, 20, 40 cells
   per ZND induction length (1.525 mm); induction length -4.5%, -1.8%, +2.7%
   (one cell at 40 is 2.5%); peak pressure 174.8 kPa against the von
-  Neumann 174.7 kPa.
+  Neumann 174.7 kPa. Roe and RHLL (milestone 12; in 1D RHLL is HLL, the
+  velocity jump being normal to every face) give the same front speed and
+  induction length to the digits above at 10 and 20 cells per induction
+  length (+0.11% and +0.01%; -4.5% and -1.8%), with profiles within 0.6% of
+  each other.
 - V6 (`examples/reactive_shock_tube`): reaction front at 230 us at
   99.625, 99.662, 99.644 mm with 50, 25, 12.5 um cells (within one coarse
   cell of the finest); peak T 2875.2, 2876.1, 2876.6 K and peak p 316.6,
@@ -1285,7 +1308,8 @@ until milestone 8 (the 0D tool arrives in milestone 7).
     sparse LU for large mechanisms, benchmark suite with recorded baselines.
 11. **MPI.** Chemistry load balancing; chemistry cost in partition weights.
     Tests: rank-count independence with chemistry; imbalance benchmark.
-12. **Extensions, each optional and driven by need:** Roe/RHLL for mixtures;
+12. **Extensions, each optional and driven by need:** Roe/RHLL for mixtures
+    (done);
     BDF integrator; SDC coupling; mechanism-specialized (code-generated)
     kernels; 2D cellular detonation, counterflow flame and mixing-layer
     cases.
@@ -1393,7 +1417,7 @@ Accepted by the user (2026-10-02):
 3. **Dependencies**: yaml-cpp via FetchContent; Cantera (Python) only for
    generating committed reference data in `tools/`.
 4. **Double flux** as a non-conservative input option; conservative by default.
-5. **HLLC first**; Roe/RHLL for mixtures stay in milestone 12.
+5. **HLLC first**; Roe/RHLL for mixtures stay in milestone 12 (since done).
 6. **Chemistry always in double**, also in float builds.
 7. **Scope of "done"**: as in milestone 12, the 2D cellular detonation and
    counterflow flame are extensions, not requirements for the first

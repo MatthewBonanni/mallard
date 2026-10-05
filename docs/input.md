@@ -123,8 +123,8 @@ translation = [1.0, 0.0]
 | `axisymmetric` | (2D) `true` for flows symmetric about the x axis without swirl (default `false`); see below |
 
 Gas mixtures (`gas = "mixture"`) react when the input has a `[chemistry]`
-table, and need the `Rusanov`, `HLL` or `HLLC` Riemann solver; any face
-reconstruction works. With `type = "navier_stokes"` they are viscous, heat
+table; every Riemann solver and face reconstruction works (`RHLL` for strong
+shocks prone to the carbuncle, e.g. blunt-body detonations). With `type = "navier_stokes"` they are viscous, heat
 conducting and diffusing: species diffuse along mole-fraction gradients with a
 correction velocity (so the diffusive mass fluxes sum to zero) and carry their
 enthalpy, and the time step includes the largest of `4/3 mu / rho`,
