@@ -267,7 +267,6 @@ struct Visit {
     uint32_t cell;
     Lattice lattice;
     std::array<double, 3> t;  // translation of the cell's copy
-    bool operator==(const Visit & o) const { return cell == o.cell && lattice == o.lattice; }
 };
 
 /** @brief Translation of a lattice offset. */
