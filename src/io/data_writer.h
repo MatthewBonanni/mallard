@@ -22,22 +22,29 @@
 #include <toml.hpp>
 
 #include "data.h"
+#include "global_order.h"
 #include "mesh.h"
 
 enum class DataFormat {
     VTU,
     RESTART,
+    HDF5,
 };
 
 static const std::unordered_map<std::string, DataFormat> FORMAT_TYPES = {
     {"vtu", DataFormat::VTU},
     {"restart", DataFormat::RESTART},
+    {"hdf5", DataFormat::HDF5},
 };
 
 static const std::unordered_map<DataFormat, std::string> FORMAT_NAMES = {
     {DataFormat::VTU, "vtu"},
     {DataFormat::RESTART, "restart"},
+    {DataFormat::HDF5, "hdf5"},
 };
+
+/** @brief Named scalars of a restart file (version 3), e.g. the statistics' weight. */
+using RestartAttributes = std::vector<std::pair<std::string, double>>;
 
 /**
  * @brief Contents of a restart file.
@@ -48,9 +55,13 @@ struct RestartData {
     uint64_t n_cells = 0;                    // in the file
     std::vector<std::string> names;          // [variable]
     std::vector<std::vector<rtype>> fields;  // [variable][cell read]
+    RestartAttributes attributes;
 
     /** @brief Values of the named variable, or nullptr if the file has none. */
     const std::vector<rtype> * find(const std::string & name) const;
+
+    /** @brief Value of the named attribute, or nullptr if the file has none. */
+    const double * attribute(const std::string & name) const;
 };
 
 /**
@@ -58,8 +69,8 @@ struct RestartData {
  *        every cell, or with cells, only those global cells (fields then hold
  *        their values in the order of cells).
  *
- * Version 2 files list their variable names; version 1 files hold the flow
- * block CONSERVATIVE_NAMES only. Either must contain the flow block of this
+ * Version 2 files list their variable names, version 3 files also named
+ * scalar attributes; version 1 files hold the flow block CONSERVATIVE_NAMES only. Either must contain the flow block of this
  * build's dimension.
  */
 RestartData read_restart(const std::string & filename, const std::vector<uint64_t> * cells = nullptr);
@@ -87,9 +98,10 @@ class DataWriter {
         bool due(uint64_t step, rtype t) const;
 
         /**
-         * @brief Write a snapshot if due (or forced).
+         * @brief Write a snapshot if due (or forced); restart files also store
+         *        the attributes.
          */
-        void write(uint64_t step, rtype t, bool force = false);
+        void write(uint64_t step, rtype t, bool force = false, const RestartAttributes & attributes = {});
 
         /**
          * @brief Next simulation time at which a snapshot is due
@@ -98,8 +110,8 @@ class DataWriter {
         rtype next_time() const;
 
         /**
-         * @brief Continue numbering and the .pvd series of a previous run that
-         *        stopped at (step, t), whose snapshot at t was already written.
+         * @brief Continue numbering and the .pvd (.xmf) series of a previous
+         *        run that stopped at (step, t), whose snapshot at t was already written.
          */
         void resume(uint64_t step, rtype t);
 
@@ -115,8 +127,20 @@ class DataWriter {
     protected:
         void write_vtu(const std::string & filename, rtype t) const;
         void write_vtu_faces(const std::string & filename, rtype t) const;
-        void write_restart(const std::string & filename, uint64_t step, rtype t) const;
+        void write_restart(const std::string & filename, uint64_t step, rtype t,
+                           const RestartAttributes & attributes) const;
         void write_pvd() const;
+
+        /**
+         * @brief HDF5 output: the mesh once (<prefix>_mesh.h5), then per
+         *        snapshot a file of cell fields, every array in global-id
+         *        order, and the XDMF indexes that let ParaView read them.
+         */
+        void write_hdf5_mesh();
+        void write_hdf5(const std::string & stem, uint64_t step, rtype t) const;
+        void write_xdmf(const std::string & stem) const;
+        std::string xdmf_grid(const std::string & stem, double t, const std::string & indent) const;
+        void resume_xdmf(rtype t);
 
         /**
          * @brief An output array: one scalar, or the N_DIM components of a
@@ -145,8 +169,13 @@ class DataWriter {
         std::string geometry = "all";
         uint64_t n_files = 0;
         void write_pvtu(const std::string & filename, const std::string & stem) const;
-        void write_restart_distributed(const std::string & filename, uint64_t step, rtype t) const;
+        void write_restart_distributed(const std::string & filename, uint64_t step, rtype t,
+                                       const RestartAttributes & attributes) const;
         std::vector<uint32_t> geometry_faces;  // Empty: write all cells
+        // HDF5 output: owned cells in global order, and the sizes of the mesh written
+        GlobalOrder cell_order;
+        bool hdf5_mesh_written = false;
+        uint64_t hdf5_n_nodes = 0, hdf5_topology_size = 0;
 };
 
 #endif // DATA_WRITER_H

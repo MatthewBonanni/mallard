@@ -1,0 +1,68 @@
+# Performance set (3D build): the Taylor-Green vortex at Re = 1600
+# (examples/taylor_green_3d) on 96^3 hexahedra (884,736 cells) with TENO5,
+# HLLC, SSPRK3 and viscous fluxes for a fixed 100 steps without output. The
+# run's summary gives the throughput (cells/s over the time stepping). See
+# benchmarks/README.md.
+
+[run]
+n_steps = 100
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 96
+Ny = 96
+Nz = 96
+Lx = 3.141592653589793
+Ly = 3.141592653589793
+Lz = 3.141592653589793
+
+[initialize]
+type = "analytical"
+u = ["sin(x) * cos(y) * cos(z)", "-cos(x) * sin(y) * cos(z)", "0.0"]
+p = "71.42857142857143 + (cos(2 * x) + cos(2 * y)) * (cos(2 * z) + 2) / 16"
+T = "1.0"
+
+[[boundaries]]
+name = "left"
+type = "symmetry"
+
+[[boundaries]]
+name = "right"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "back"
+type = "symmetry"
+
+[[boundaries]]
+name = "front"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 71.42857142857143
+T_ref = 1.0
+rho_ref = 1.0
+mu = 0.000625
+Pr = 0.71
+
+[output]
+check_interval = 50

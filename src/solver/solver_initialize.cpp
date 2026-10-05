@@ -60,6 +60,7 @@ void Solver::init_solution() {
         init_solution_restart();
     }
     copy_host_to_device();
+    if (it->second != InitType::RESTART) statistics.start(t);
     if (is_mixture() && it->second != InitType::RESTART) init_temperature_seed();
     update_primitives();
     if (p_max.is_allocated()) update_p_max();
@@ -82,14 +83,20 @@ void Solver::init_solution_restart() {
     // CHEM_H (last chemistry sub-step) only seeds the integrator: a reacting run
     // may start from a non-reacting one, and a non-reacting run ignores it
     std::vector<std::string> expected = restart_variables();
+    const std::vector<std::string> averages = statistics.variables();
+    auto is_average = [&](const std::string & name) {
+        return std::find(averages.begin(), averages.end(), name) != averages.end();
+    };
     for (const auto & name : restart.names) {
-        if (name == "CHEM_H" || name == "P_MAX") continue;
+        // Averages carry over only into a run that keeps them
+        if (name == "CHEM_H" || name == "P_MAX" || name.rfind("MEAN_", 0) == 0 || name.rfind("COV_", 0) == 0) continue;
         if (std::find(expected.begin(), expected.end(), name) == expected.end()) {
             throw std::runtime_error("Restart file " + file + " has variable " + name + ", which this run does not " +
                                      (name.rfind("RHOY_", 0) == 0 ? "transport." : "know."));
         }
     }
     for (uint32_t v = 0; v < expected.size(); v++) {
+        if (is_average(expected[v])) continue;
         const std::vector<rtype> * values = restart.find(expected[v]);
         if (expected[v] == "P_MAX") {
             for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
@@ -119,6 +126,7 @@ void Solver::init_solution_restart() {
     }
     step = restart.step;
     t = restart.t;
+    statistics.restore(restart, file, t);
     for (auto & writer : data_writers) {
         writer->resume(step, t);
     }
@@ -215,8 +223,9 @@ struct PointState {
 };
 
 /**
- * @brief Average of f over a 2D cell: a fan of triangles from node 0, each
- *        split into n_sub^2 sub-triangles carrying the rule quad.
+ * @brief Average of f over a 2D cell (r-weighted in axisymmetric runs): a fan
+ *        of triangles from node 0, each split into n_sub^2 sub-triangles
+ *        carrying the rule quad.
  */
 template <typename F>
 void cell_average_2d(const Mesh & mesh, const TriangleDunavant & quad, double weight_sum, uint32_t n_sub,
@@ -224,7 +233,7 @@ void cell_average_2d(const Mesh & mesh, const TriangleDunavant & quad, double we
     const uint32_t n_quad = quad.h_weights.extent(0);
     const uint32_t n_nodes = mesh.h_n_nodes_of_cell(i_cell);
     std::fill(s.sum.begin(), s.sum.end(), 0.0);
-    double area_sum = 0.0;
+    double area_sum = 0.0, revolved_sum = 0.0;
     const uint32_t n0 = mesh.h_node_of_cell(i_cell, 0);
     for (uint32_t k = 1; k + 1 < n_nodes; k++) {
         const uint32_t n1 = mesh.h_node_of_cell(i_cell, k);
@@ -257,8 +266,13 @@ void cell_average_2d(const Mesh & mesh, const TriangleDunavant & quad, double we
                     for (uint32_t q = 0; q < n_quad; q++) {
                         const double xi = double(quad.h_points(q, 0));
                         const double eta = double(quad.h_points(q, 1));
-                        f(s, o[0] + xi * d1[0] + eta * d2[0], o[1] + xi * d1[1] + eta * d2[1], 0.0);
-                        const double w = double(quad.h_weights(q)) / weight_sum * sub_area;
+                        const double y = o[1] + xi * d1[1] + eta * d2[1];
+                        f(s, o[0] + xi * d1[0] + eta * d2[0], y, 0.0);
+                        double w = double(quad.h_weights(q)) / weight_sum * sub_area;
+                        if (mesh.axisymmetric) {
+                            w *= y;
+                            revolved_sum += w;
+                        }
                         for (size_t i = 0; i < s.sum.size(); i++) s.sum[i] += w * double(s.cons[i]);
                     }
                     area_sum += sub_area;
@@ -266,7 +280,8 @@ void cell_average_2d(const Mesh & mesh, const TriangleDunavant & quad, double we
             }
         }
     }
-    for (double & v : s.sum) v /= area_sum;
+    const double measure = mesh.axisymmetric ? revolved_sum : area_sum;
+    for (double & v : s.sum) v /= measure;
 }
 
 /**
