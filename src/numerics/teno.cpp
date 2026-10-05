@@ -29,6 +29,7 @@
 #include "face_reconstruction.h"
 
 #include "input.h"
+#include "launch_bounds.h"
 #include "teno.h"
 
 namespace {
@@ -2317,7 +2318,7 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
     using Space = Kokkos::DefaultExecutionSpace;
     if (!troubled_pass) {
         const uint32_t n = cells.extent(0) ? cells.extent(0) : mesh->n_reconstructed();
-        Kokkos::parallel_for("teno_smooth", Kokkos::RangePolicy<Space, typename Functor::SmoothPass, Dynamic>(exec, 0, n),
+        Kokkos::parallel_for("teno_smooth", Kokkos::RangePolicy<Space, typename Functor::SmoothPass, Dynamic, HeavyBounds>(exec, 0, n),
                              functor);
         return;
     }
@@ -2327,7 +2328,7 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
     auto launch = [&](const char * label, auto tag, uint32_t per_cell) {
         functor.stride = std::min<uint64_t>(TROUBLED_THREADS, uint64_t(n) * per_cell);
         if (functor.stride == 0) return;
-        Kokkos::parallel_for(label, Kokkos::RangePolicy<Space, decltype(tag), Dynamic>(exec, 0, functor.stride),
+        Kokkos::parallel_for(label, Kokkos::RangePolicy<Space, decltype(tag), Dynamic, HeavyBounds>(exec, 0, functor.stride),
                              functor);
     };
     launch("teno_troubled_sectors", typename Functor::TroubledSectorPass{}, teno::MAX_FACES);
@@ -2349,7 +2350,7 @@ void TENO::launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                     scale, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
                     si_matrix, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells, n_troubled,
                     solution, {}, {}, gradients, cell_gamma, cell_molar_mass, selection};
-    Kokkos::parallel_for("teno_gradients", Kokkos::RangePolicy<typename Functor::GradientPass>(0, n_cells), functor);
+    Kokkos::parallel_for("teno_gradients", HeavyRange<typename Functor::GradientPass>(0, n_cells), functor);
 }
 
 void TENO::set_mixture(Kokkos::View<rtype *, Kokkos::LayoutStride> gamma, Kokkos::View<rtype *> molar_mass) {
