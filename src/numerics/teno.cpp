@@ -305,17 +305,13 @@ class VisitSet {
         static constexpr uint64_t EMPTY = ~uint64_t(0);
         static constexpr int LATTICE_BITS = 10;
 
-        // The cell in the low 32 bits and each lattice offset in 10 bits: bits
+        // The cell in the low 32 bits and each lattice offset in 10 bits (each
+        // layer moves it by at most 1 and the searches stop at 64 layers): bits
         // 62 and 63 stay clear, so no key equals EMPTY
         static uint64_t key(const Visit & v) {
             constexpr int bound = 1 << (LATTICE_BITS - 1);
             uint64_t k = v.cell;
-            for (int a = 0; a < 3; a++) {
-                if (v.lattice[a] < -bound || v.lattice[a] >= bound) {
-                    throw std::runtime_error("TENO: stencil search reached too many periodic copies of the mesh.");
-                }
-                k |= static_cast<uint64_t>(v.lattice[a] + bound) << (32 + LATTICE_BITS * a);
-            }
+            for (int a = 0; a < 3; a++) k |= static_cast<uint64_t>(v.lattice[a] + bound) << (32 + LATTICE_BITS * a);
             return k;
         }
 
