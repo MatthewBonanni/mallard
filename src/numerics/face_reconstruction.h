@@ -144,6 +144,18 @@ class FaceReconstruction {
         }
         
         /**
+         * @brief Axisymmetric runs: for each of the first n_cells cells whose
+         *        reconstruction has a smooth polynomial, replace source(c) by
+         *        int (p - tau_thetatheta) dA over the planar cell, with p and the
+         *        velocity of the polynomial at cell quadrature points and the cell
+         *        viscosity mu(c) (inviscid if mu is empty). Other cells keep
+         *        their source, which the caller set from cell values.
+         */
+        virtual void axisymmetric_source(Kokkos::View<rtype *[N_CONSERVATIVE]> /*solution*/,
+                                         Kokkos::View<rtype *, Kokkos::LayoutStride> /*mu*/,
+                                         Kokkos::View<rtype *> /*source*/, uint32_t /*n_cells*/) {}
+
+        /**
          * @brief Set up per-face quadrature (3D): Dunavant rules on triangles and
          *        Gauss rules mapped bilinearly onto quadrilaterals, exact for
          *        polynomials of the given degree on planar faces (degree <= 1
@@ -266,6 +278,9 @@ class TENO : public FaceReconstruction {
                                      Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) override;
         bool cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                             Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells) override;
+        void axisymmetric_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                 Kokkos::View<rtype *, Kokkos::LayoutStride> mu, Kokkos::View<rtype *> source,
+                                 uint32_t n_cells) override;
 
         uint8_t degree = 4;
         uint8_t n_dof_large = 0;
@@ -296,6 +311,8 @@ class TENO : public FaceReconstruction {
         // Vertex-neighbor layers each reconstructed cell's stencil search visited
         // (host); a distributed run needs this many complete layers around the cell
         std::vector<uint8_t> gather_depth;
+        // Axisymmetric runs: rule on the reference triangle (q, [xi, eta, w]) of the geometric source
+        Kokkos::View<rtype *[3]> cell_rule;
 
         /**
          * @brief Stencil cells and mirror faces of every reconstructed cell, row
@@ -345,6 +362,9 @@ class TENO : public FaceReconstruction {
         void set_mixture(Kokkos::View<rtype *, Kokkos::LayoutStride> gamma, Kokkos::View<rtype *> molar_mass);
 
     private:
+        template <uint8_t DEG, bool PRIM>
+        void launch_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<rtype *, Kokkos::LayoutStride> mu,
+                           Kokkos::View<rtype *> source, uint32_t n_cells);
         template <uint8_t DEG, bool PRIM>
         void launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                               Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells);
