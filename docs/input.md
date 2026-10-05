@@ -177,9 +177,8 @@ the zone's faces whose centers satisfy the expression.
 
 Characteristic conditions change only the exterior state of the convective
 flux; viscous terms treat them like `extrapolation` (image faces, or zero
-normal derivatives: the outflow conditions of Poinsot & Lele). The boundary
-cells' reconstructions leave out their ghosts (MUSCL) or mirror cells (TENO)
-across them, so that waves leave intact. Each face keeps its pressure and
+normal derivatives: the outflow conditions of Poinsot & Lele). MUSCL boundary
+cells leave out their ghosts across them, so that waves leave intact. Each face keeps its pressure and
 normal velocity between steps; a restart starts them afresh from the
 solution. See [docs/design/nscbc.md](design/nscbc.md).
 

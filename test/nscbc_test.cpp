@@ -31,6 +31,11 @@ const std::string GAS = "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 0.714
                         "T_ref = 0.7142857142857143\nrho_ref = 1.0\n";
 constexpr double P0 = 1.0 / 1.4;
 
+/** @brief A tolerance in double precision, or in single precision, where round-off makes noise of 1e-4 of the pressure. */
+constexpr double tol(double in_double, double in_float) {
+    return sizeof(rtype) == sizeof(double) ? in_double : in_float;
+}
+
 /**
  * @brief Gmsh 2.2 file of [0, Lx] x [0, Ly] on an n_x x n_y lattice of
  *        spacing h: columns alternate between quads and pairs of triangles,
@@ -198,12 +203,12 @@ TEST(NSCBCTest, PulseReflectionMatchesTheory) {
             const std::string mesh = mesh_input(type, 200, 2, 1.0, 0.01, 200);
             // sigma = 0: non-reflecting
             const Reflection none = measure_reflection(run(pulse_input(outlet(0.0), mesh, reconstruction)), 0.0);
-            EXPECT_LT(none.max_measured, 5e-3 * 2 * EPS);
+            EXPECT_LT(none.max_measured, tol(teno ? 2e-2 : 5e-3, 6e-2) * 2 * EPS);
             // A relaxation as fast as the pulse reflects part of it, as dw-/dt = -K p' predicts
             const double sigma = 20.0;
             const Reflection partial = measure_reflection(run(pulse_input(outlet(sigma), mesh, reconstruction)), sigma);
             EXPECT_GT(partial.max_theory, 0.45 * 2 * EPS);
-            EXPECT_LT(partial.max_error, 0.05 * partial.max_theory);
+            EXPECT_LT(partial.max_error, tol(0.05, 0.12) * partial.max_theory);
             // A pressure outlet reflects all of it
             std::ostringstream p_out;
             p_out.precision(17);
@@ -386,7 +391,7 @@ TEST(NSCBCTest, MixtureFrontLeavesThroughTheOutlet) {
     Solver solver;
     solver.init(parse_toml(front_input("type = \"nscbc_outlet\"\np = 101325.0\nL = 1.0\n", 0.016)));
     double spread = 0.0;
-    while (solver.get_time() < 0.016 * (1 - 1e-9)) {
+    while (double(solver.get_time()) < 0.016 * (1 - 1e-6)) {
         solver.calc_dt();
         solver.take_step();
         solver.update_primitives();

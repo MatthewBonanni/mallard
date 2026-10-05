@@ -114,22 +114,30 @@ outgoing wave does nothing. But the default low-Mach correction scales the
 velocity jump by `z = max(M, 0.1)`, which mixes it into the incoming wave.
 
 A normal acoustic pulse leaving through `extrapolation` (400 cells over the
-domain, the pulse 20 cells wide, default low-Mach correction) reflects by:
+domain, the pulse 20 cells wide, default low-Mach correction) reflects by
+these fractions:
 
 | Reconstruction | Quadrilaterals | Triangles | Jittered mixed |
 |---|---|---|---|
 | MUSCL | 15% | 5% | 0.6% |
 | TENO5 | 25% | 4% | 14% |
 
-So characteristic faces take no ghosts in the boundary cell's
-reconstruction:
+MUSCL boundary cells therefore leave out the ghost of a characteristic
+face. They use the vertex-neighbor least-squares fit without it, the fit
+MUSCL already uses on tetrahedra. On triangles the face-neighbor fit without
+the ghost is exactly determined and unstable.
 
-- **MUSCL**: boundary cells use the vertex-neighbor least-squares fit
-  without the ghost of the characteristic face (the fit MUSCL already uses on
-  tetrahedra). On triangles the face-neighbor fit without the ghost is
-  exactly determined and unstable.
-- **TENO-E**: no mirror cells across characteristic faces, as across
-  partition faces. Stencils grow one-sided.
+TENO-E keeps its mirror cells across characteristic faces. Its one-sided
+stencils without them are unstable in single precision, and with the face's
+own incoming wave the mirrors cost little:
+
+| Reconstruction | `extrapolation` | `nscbc_outlet`, `sigma = 0` |
+|---|---|---|
+| MUSCL | 15% | 0.2% (1% with the ghost) |
+| TENO5 | 34% | 1% |
+
+(the pulse reflected on quadrilaterals, 200 cells over the domain, pulse 10
+cells wide)
 
 Everything else treats the face like `extrapolation`:
 
@@ -243,9 +251,9 @@ front of an `nscbc_outlet` or `farfield`.
 ## Validation (`test/nscbc_test.cpp`, `test/boundary3d_test.cpp`, MPI tests)
 
 - **Acoustic pulse at normal incidence**, default low-Mach correction:
-  - `sigma = 0` reflects under 0.25% (MUSCL on quadrilaterals, triangles and
-    jittered mixed meshes; TENO5 on quadrilaterals), against 0.6 to 25% for
-    `extrapolation`.
+  - `sigma = 0` reflects under 0.25% with MUSCL (quadrilaterals, triangles
+    and jittered mixed meshes) and 1% with TENO5 (quadrilaterals), against
+    0.6 to 34% for `extrapolation`.
   - `sigma = 20` reflects as `dw-/dt = -K p'` predicts, within 3%.
   - `p_out` reflects 97 to 99%.
 - **Vortex** (M = 0.25, swirl 0.05) leaving through an outlet between walls,
@@ -265,5 +273,7 @@ front of an `nscbc_outlet` or `farfield`.
 - **3D**: a plane pulse leaves a box of hexahedra or tetrahedra (under 3%).
 - **MPI**: runs with characteristic boundaries and sponges are bitwise equal
   to serial ones (MUSCL and TENO, 2D and 3D).
+- **Single precision**: the same tests pass with round-off noise of about
+  1e-4 of the pressure.
 - **Unchanged behavior**: results with the existing conditions are bitwise
   unchanged; the examples were compared with the previous build.
