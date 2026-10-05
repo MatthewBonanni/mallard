@@ -1,0 +1,166 @@
+# Flame-vortex interaction: r / delta = 4, u' / S_L = 30 (r = 1.7599 mm, u' = 45.8137 m/s), pair at x = 2.1999 mm.
+# Planar flame: h2_phi4.0_T300_mix_full.csv, 12 cells per
+# thermal thickness (0.4400 mm), Cantera S_L = 1.527125 m/s
+#
+# Premixed flame-vortex interactions on the spectral diagram of Poinsot,
+# Veynante & Candel (1991), J. Fluid Mech. 228:561, doi 10.1017/S0022112091002823
+# (and Poinsot, Veynante & Candel, 23rd Symp. (Int.) Combust., 1990): a pair of
+# counter-rotating vortices, driven by its own induced velocity, runs into a
+# planar flame. Their pair size r is the vortex diameter plus the distance
+# between the centers, u' the largest velocity the pair induces; the outcome is
+# no effect (total reaction rate changed by less than about 5%: their cut-off
+# limit), a wrinkled front, a pocket of fresh gas cut off behind the flame, or
+# local quenching. They covered 0.81 < r / l_F < 11 and 1 < u' / S_L < 100 with
+# one-step chemistry (Le = 1.2) and found the front far harder to quench than
+# the Klimov-Williams criterion Ka = 1 says; their example of quenching is
+# r / l_F = 4.8, u' / S_L = 28.
+#
+# Their quenching is controlled by radiative heat losses, which Mallard does
+# not model: the pocket is quenched after it is pushed into burnt gas that the
+# losses have cooled. This case therefore uses a mixture whose flame stretch
+# alone weakens: rich H2/air, phi = 4, 300 K, 1 atm, mixture-averaged
+# transport (S_L = 1.527 m/s, thermal thickness delta_L = 0.440 mm, burnt gas
+# 1556 K, rho_u / rho_b = 4.78), where the deficient reactant is O2, with a
+# Lewis number of 2.2 (H2: 0.42). Lengths are in delta_L, the thermal
+# thickness (T_b - T_u) / max dT/dx; Poinsot et al.'s l_F is 3.7 nu_u / S_L of
+# their flame, whereas here delta_L = 19.3 nu_u / S_L, so placing these runs
+# by nu_u / S_L instead would move them 5 times further right.
+#
+# Setup (tools/flame_vortex.py): the planar Cantera flame in its frame (fresh
+# gas entering on the left at S_L, p_out on the right) and, 3 R_c + delta_L
+# upstream of it, two Gaussian vortices (stream function C exp(-d^2 / 2 R_c^2),
+# centers 2 R_c apart, so r = 4 R_c) with their cyclostrophic pressure. Only
+# the half above the pair's axis is computed (symmetry planes at the axis and
+# at the top, max(2 r, 8 delta_L) above it). 12 cells per delta_L (24 for
+# r = 1, where R_c is then 6 cells), MUSCL, HLLC, SSPRK3, CFL 0.8 (r = 4 at
+# u' <= 30 and r = 8 at u' = 40: 0.8); see "1D checks" below. The analysis
+# measures the heat release Q against that of a run without vortices on the
+# same mesh (--control: --u 0), the flame length, the weakest burning along the
+# front (q_min: the largest heat release within delta_L / 2 of each point of
+# the isotherm T_u + (T_b - T_u) / 2, over the planar peak; quenched below 0.1)
+# and cut-off pockets of fresh gas.
+#
+# Make the initial state (this file is the r = 4, u' = 30 run, next to
+# Poinsot et al.'s quenching example), from this directory, and run it:
+#
+#   python ../../tools/flame_reference.py --single h2 4.0 300 .
+#   python ../../tools/flame_vortex.py h2_phi4.0_T300_mix_full.csv ../../mechanisms/h2o2.yaml ohmech . \
+#       --r 4 --u 30 --cfl 0.8
+#
+# For the sweep, the same with --r R --u U into run directories (and --cells 24
+# for r = 1), plus the controls --r 4 --u 0 --flame-times 5.2 and --r 1 --u 0
+# --cells 24 --flame-times 4; then
+#
+#   python ../../tools/flame_vortex_analysis.py RUN_DIR... --control CONTROL_DIR... --plot fv.png
+#   python ../../tools/animate_flame_vortex.py flame_vortex.mp4 RUN_DIR... --control CONTROL_DIR... --cols 4
+#
+# Results (Q / Q_0: heat release over the control's at the same time):
+#
+#   r/delta_L  u'/S_L  Ka(r)  outcome    Q/Q_0      q_min
+#   1          3       3      no effect  1.00-1.00  0.97
+#   1          30      30     wrinkled   0.98-1.05  0.62
+#   2          10      5      no effect  0.97-1.03  0.56
+#   2          30      15     pocket     0.98-1.25  0.52
+#   4          3       0.75   wrinkled   0.99-1.08  0.65
+#   4          10      2.5    pocket     0.98-1.56  0.45
+#   4          30      7.5    pocket     0.99-1.80  0.39
+#   4          100     25     pocket     0.99-3.39  0.33
+#   8          10      1.25   pocket     0.99-1.83  0.43
+#   8          40      5      pocket     1.00-2.11  0.33
+#   8          100     12.5   pocket     1.00-2.12  0.23
+#
+# (Ka(r) = (u' / r) / (S_L / delta_L).) Nothing quenches: q_min stays above
+# 0.2 everywhere, up to u' = 100 S_L and Ka(r) = 25, far past the
+# Klimov-Williams line, and at Poinsot et al.'s quenching point the pair only
+# cuts off a pocket of fresh gas, which then burns out. Without heat losses,
+# stretch alone (even with the deficient reactant's Lewis number at 2.2)
+# weakens the front locally by 35-77% but does not extinguish it. That is the
+# part of Poinsot et al.'s conclusion that does not depend on losses: flame
+# fronts resist quenching by vortices far beyond Ka(r) = 1. The small-scale
+# cut-off is reproduced: a pair of r = 1 delta_L leaves the heat release
+# unchanged at u' = 3 S_L and changes it by 5% (the cut-off) at u' = 30 S_L,
+# r = 2 delta_L at u' = 10 S_L by 3% (viscous dissipation and the front's
+# curvature absorb them), while r = 4 delta_L at only u' = 3 S_L
+# (Ka(r) = 0.75) changes it by 8%. Larger and faster pairs all pinch off a
+# pocket. At u' = 100 S_L the pair's impulse in this narrow channel drives a
+# recirculation that later pulls the flame toward the inlet (Q keeps rising
+# after the interaction); only about the first flame time is the interaction
+# itself.
+#
+# Resolution: the r = 4, u' = 30 run at 24 cells per delta_L (552 x 192) gives
+# the same outcome, the largest Q / Q_0 1.785 against 1.797, the longest front
+# 2.68 against 2.66 channel heights and q_min 0.378 against 0.389.
+#
+# 1D checks (planar flame, tools/flame_restart.py and tools/flame_speed.py):
+# consumption speed against Cantera's -1.44%, -1.46%, -0.93% and -0.70% at
+# 10, 12, 16 and 24 cells per delta_L (CFL 0.4), and at 12 cells the same to
+# 5 digits at CFL 0.4, 0.6 and 0.8 (half the steps at 0.8).
+#
+# Cost on one A100: r = 4 (276 x 96 cells) 21 min for 145,000 steps at
+# CFL 0.8 (this file: about 14 min, 95,000 steps; 28 min at CFL 0.4); r = 2
+# (192 x 96) 12-13 min; r = 8 (444 x 192) 40-52 min at CFL 0.8; r = 1 at
+# 24 cells (300 x 192) about 1.5 hours for 210,000-265,000 steps.
+
+[run]
+t_stop = 0.00097957056200000006
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 276
+Ny = 96
+Lx = 0.010119500858045426
+Ly = 0.0035198263854071049
+
+[initialize]
+type = "restart"
+file = "flame.restart"
+
+[[boundaries]]
+name = "left"
+type = "upt"
+u = [1.5271245092529449, 0.0]
+p = 101325.0
+T = 300
+X = { "H2" = 0.626959247648878, "O2" = 0.078369905956099162, "N2" = 0.29467084639502295 }
+
+[[boundaries]]
+name = "right"
+type = "p_out"
+p = 101325.0
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+phase = "ohmech"
+transport = "mixture_averaged"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+
+[output]
+check_interval = 2000
+
+[[write_data]]
+prefix = "./solut/flame"
+format = "vtu"
+time_interval = 9.7957056200000014e-06
+variables = ["RHO", "U", "P", "T", "HRR", "Y_H2", "Y_O2"]

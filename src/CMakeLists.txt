@@ -28,11 +28,14 @@ add_library(MallardCore STATIC
     solver/solver_initialize.cpp
     solver/solver_mixture.cpp
     solver/solver_rhs.cpp
+    solver/solver_sponge.cpp
     solver/statistics.cpp
     io/data_writer.cpp
+    io/data_writer_hdf5.cpp
     parallel/comm.cpp
     parallel/distribution.cpp
     parallel/distributed_mesh.cpp
+    parallel/global_order.cpp
     parallel/halo_exchange.cpp
     parallel/partition.cpp
 )

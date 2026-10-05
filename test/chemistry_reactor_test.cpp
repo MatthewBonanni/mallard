@@ -271,10 +271,12 @@ Rows<double>::host_mirror_type lanes_ignition(const Mechanism & mech, const Tabl
 TEST(ChemistryReactorTest, VectorLanesIntegrateLikeOneThread) {
     // The team path (rates, Jacobian rows, LU and solves across lanes, reductions
     // in a fixed order) gives the one-thread result to round-off, with the
-    // largest vector length of the backend (1 on host backends); on GPUs also
-    // with several warps per cell, as for large mechanisms
-    const uint32_t lanes = std::min<uint32_t>(32, Kokkos::TeamPolicy<>::vector_length_max());
+    // largest vector length of the backend (a warp, 32 or 64 lanes, on GPUs; 1
+    // on host backends); on GPUs also with several warps per cell, as for large
+    // mechanisms
     constexpr bool gpu = !Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace, Kokkos::HostSpace>::accessible;
+    const uint32_t lanes_max = static_cast<uint32_t>(Kokkos::TeamPolicy<>::vector_length_max());
+    const uint32_t lanes = gpu ? lanes_max : std::min<uint32_t>(32, lanes_max);
     for (const auto & [name, file, phase] : {std::array<std::string, 3>{"h2o2", SOURCE_DIR + "/mechanisms/h2o2.yaml", "ohmech"},
                                             std::array<std::string, 3>{"gri30", SOURCE_DIR + "/mechanisms/gri30.yaml", ""}}) {
         const Mechanism mech = read_mechanism(file, phase);

@@ -1,0 +1,153 @@
+# Triple flame: fuel H2:0.5,N2:0.5 / oxidizer O2:1,N2:3.76 at 300 K, 1 atm; Z_st = 0.30427.
+# Planar flame at Z_st (Cantera): S_L = 1.19142 m/s, delta_L = 0.3847 mm, rho_u / rho_b = 5.9416.
+# Inlet mixing thickness delta_M = 4 delta_L, inflow 1.35 S_L, 12 cells per delta_L.
+#
+# Triple (tribrachial) flame against Ruetsch, Vervisch & Linan (1995), Phys.
+# Fluids 7:1447, doi 10.1063/1.868531 (and Veynante et al., CTR Summer Program
+# 1994): a premixed front meets a mixing layer of fuel and air and becomes a
+# lean and a rich premixed wing joined at a leading edge on the stoichiometric
+# line, with a diffusion flame trailing behind. Heat release deflects the flow
+# through the curved front, so the streamlines diverge ahead of the tip and the
+# flow there slows to about the local flame speed: the whole flame propagates
+# against the far-field flow at U_F > S_L. With one-step chemistry and unity
+# Lewis numbers, Ruetsch et al. find U_F / S_L rising with the mixing thickness
+# at the flame, D_TF = 1 / (delta_L dZ/dy) through the strongest reaction:
+# from 1.23 at D_TF = 8.3 to 1.51 at D_TF = 34 for rho_u / rho_b = 4 (1.61 at
+# D_TF = 33.4 for rho_u / rho_b = 5), bounded by sqrt(rho_u / rho_b) for weak
+# gradients.
+#
+# Here: fuel H2:N2 = 1:1 (by mole) against air, 300 K, 1 atm, detailed H2/O2
+# chemistry, mixture-averaged transport. The planar flame at Z_st = 0.304 has
+# S_L = 1.191 m/s, thermal thickness delta_L = 0.385 mm, burnt gas 2008 K and
+# rho_u / rho_b = 5.94 (sqrt: 2.44); its Lewis numbers are 0.41 (H2) and 1.67
+# (O2). The fresh gas enters on the left (upt with a composition that varies
+# across the inlet: a tanh mixture-fraction profile from air to fuel, Z_st on
+# the midline, mixing thickness 4 delta_L here and 12 delta_L in thick/), the
+# sides are symmetry planes 3 delta_M + 24 delta_L apart and the burnt gas
+# leaves through p_out. The run starts from a planar front 12 delta_L from the
+# inlet with each row's equilibrium products behind it (tools/triple_flame.py).
+# 12 cells per delta_L (32 um; 384 x 432 cells, thick/: 384 x 720), MUSCL,
+# HLLC, SSPRK3, CFL 0.8.
+#
+# Like Ruetsch et al., who correct the inflow to hold their flame in place,
+# the runs have two stages. First this file (u_in = 1.35 S_L; thick/: 1.6)
+# for 10 flame times delta_L / S_L: the front frays into a triple flame within
+# about 2 flame times and runs upstream at 0.9-1 S_L. Then each run continues
+# from its restart file at 4 flame times (restart/flame_<step>.restart, its tip
+# then 10-11 delta_L from the inlet) with the inflow raised to about U_F:
+# u = [2.7403, 0] (2.3 S_L; thick/: 2.97855, 2.5 S_L) in a copy of the input
+# whose [initialize] file points to that restart (Mallard resumes at its time
+# and stops at the same t_stop, after 6 more flame times). From this directory:
+#
+#   python ../../tools/triple_flame.py ../../mechanisms/h2o2.yaml ohmech . --mixing 4 --fuel H2:0.5,N2:0.5 \
+#       --u-in 1.35 --upstream 12 --downstream 20 --flame-times 10 --cfl 0.8
+#   python ../../tools/triple_flame.py ../../mechanisms/h2o2.yaml ohmech thick --mixing 12 --fuel H2:0.5,N2:0.5 \
+#       --u-in 1.6 --upstream 12 --downstream 20 --flame-times 10 --cfl 0.8 --planar planar_full.csv
+#   (run both; then the continuations, e.g. in matched/ and thick/matched/)
+#   python ../../tools/triple_flame_analysis.py matched thick/matched --fuel H2:0.5,N2:0.5 --fit 5 10 --plot speed.png
+#   python ../../tools/animate_triple_flame.py triple_flame.mp4 --fuel H2:0.5,N2:0.5 \
+#       --run "Inlet mixing thickness 4 delta_L" .,matched --run "Inlet mixing thickness 12 delta_L" thick,thick/matched
+#
+# (A continuation in a subdirectory needs planar_full.csv copied in and the
+# mechanism path one level deeper.)
+#
+# Results, fitted over 5-10 flame times of the continuations, in which the tips
+# stay within 0.4 delta_L (drift below 0.04 S_L):
+#
+#   inlet delta_M  D_TF at the flame  U_F / S_L  S_tip / S_L  U_F / S_tip
+#   4 delta_L      9.0                2.31       1.24         1.86
+#   12 delta_L     28                 2.46       1.30         1.90
+#
+# (2.35 and 2.49 over 5-9 flame times, before both tips start a slow sideways
+# swing of 1.5-2 delta_L.) As in Ruetsch et al., U_F / S_L exceeds 1 and rises
+# with D_TF, here by 0.16 from D_TF = 9 to 28 (theirs: by 0.28 from 8.3 to 34
+# at rho_u / rho_b = 4). The values are much higher: (U_F / S_L - 1) /
+# (sqrt(rho_u / rho_b) - 1) is 0.91 and 1.02 against their 0.23 and 0.51, and
+# U_F / S_L passes the weak-gradient value 2.44 in the thick layer. The
+# difference is the hydrogen flame's own speed-up at the tip: the local flame
+# speed there, S_tip = u_min - dx_tip/dt (u_min the slowest axial velocity just
+# ahead of the tip), is 1.24-1.30 S_L, where Ruetsch et al.'s unity-Lewis tip
+# burns at about S_L: hydrogen (Lewis number 0.4) diffuses into the curved tip
+# faster than heat leaves it. The speed-up by the streamlines'
+# divergence alone, U_F / S_tip = 1.86-1.90, stays below sqrt(rho_u / rho_b).
+# The comparison is therefore qualitative: the trend and the mechanism, not
+# Ruetsch et al.'s numbers, which hold for one-step, unity-Lewis chemistry.
+# D_TF and the mixture fraction come from N2 (inert, Lewis number near 1).
+#
+# 1D checks (planar flame at Z_st, tools/flame_restart.py and
+# tools/flame_speed.py): consumption speed against Cantera's -1.08%, -0.28%,
+# -0.17% and +0.18% at 10, 12, 16 and 24 cells per delta_L (CFL 0.4); at
+# 12 cells the same to 5 digits at CFL 0.4, 0.6 and 0.8. The 2D runs were not
+# repeated on a finer mesh.
+#
+# Cost on two A100s (one MPI rank each): first stage 2 h 45 min for 326,000
+# steps (thick/: 2 h 42 min, 327,000 steps), continuation 1 h 07 min
+# (thick/: 1 h 31 min).
+
+[run]
+t_stop = 0.0032292008531237082
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 384
+Ny = 432
+Lx = 0.012311440575814771
+Ly = 0.013850370647791618
+
+[initialize]
+type = "restart"
+file = "flame.restart"
+
+[[boundaries]]
+name = "left"
+type = "upt"
+u = [1.6084131118377614, 0.0]
+p = 101325.0
+T = 300
+Y = { "H2" = "(0.5 * (1 + tanh((y - 0.0071946171789348682) / 0.00065155119164290087))) * 0.067132867132867133 + (1 - (0.5 * (1 + tanh((y - 0.0071946171789348682) / 0.00065155119164290087)))) * 0", "O2" = "(0.5 * (1 + tanh((y - 0.0071946171789348682) / 0.00065155119164290087))) * 0 + (1 - (0.5 * (1 + tanh((y - 0.0071946171789348682) / 0.00065155119164290087)))) * 0.23299971514004453", "N2" = "(0.5 * (1 + tanh((y - 0.0071946171789348682) / 0.00065155119164290087))) * 0.93286713286713274 + (1 - (0.5 * (1 + tanh((y - 0.0071946171789348682) / 0.00065155119164290087)))) * 0.76700028485995553" }
+
+[[boundaries]]
+name = "right"
+type = "p_out"
+p = 101325.0
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+phase = "ohmech"
+transport = "mixture_averaged"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+
+[output]
+check_interval = 2000
+
+[[write_data]]
+prefix = "./solut/flame"
+format = "vtu"
+time_interval = 2.6910007109364236e-05
+variables = ["RHO", "U", "T", "HRR", "Y_H2", "Y_O2", "Y_H2O", "Y_N2"]
+
+[[write_data]]
+prefix = "./restart/flame"
+format = "restart"
+time_interval = 0.0001614600426561854

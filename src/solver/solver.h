@@ -15,6 +15,7 @@
 #include <array>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -46,6 +47,8 @@ struct ForceMonitor {
     uint64_t interval = 1;
     std::shared_ptr<std::ofstream> out;
 };
+
+constexpr int N_FLOW_STATISTICS = 9;
 
 struct IntegralMonitor {
     uint64_t interval = 0;
@@ -144,17 +147,32 @@ class Solver {
 
         /**
          * @brief Domain integrals of kinetic energy rho |u|^2 / 2, enstrophy
-         *        rho |omega|^2 / 2, squared dilatation (div u)^2 and pressure
-         *        dilatation p div u, with the reconstruction's velocity gradients
-         *        (TENO polynomials) or else least-squares ones.
+         *        rho |omega|^2 / 2, squared dilatation (div u)^2, pressure
+         *        dilatation p div u, |u|^2, |omega|^2, rho^2, T and T^2, with
+         *        the reconstruction's velocity gradients (TENO polynomials) or
+         *        else least-squares ones.
          */
-        std::array<rtype, 4> integrate_flow_statistics();
+        std::array<rtype, N_FLOW_STATISTICS> integrate_flow_statistics();
 
         // Public because nvcc rejects device lambdas in non-public member functions
         void update_average_pressure_outlets(StateView solution);
+        /**
+         * @brief At the first stage of each step: the transverse terms of the
+         *        characteristic boundaries and their incoming waves, advanced
+         *        over the step.
+         */
+        void update_characteristic_boundaries(rtype t_stage);
+        /** @brief Adds the sponge-layer sources to the RHS per unit volume (owned cells). */
+        void apply_sponges(const State & solution, const State & rhs);
         void calc_dt();
         void check_fields();
         void calc_rhs_mixture(State solution, State rhs, rtype t);
+        /**
+         * @brief Axisymmetric runs: add geometric_source, made high order by the
+         *        reconstruction where it can (mu: cell viscosities, empty if inviscid),
+         *        to the radial momentum of owned cells.
+         */
+        void add_geometric_source(StateView rhs, Kokkos::View<rtype *, Kokkos::LayoutStride> mu);
         void update_primitives_mixture();
         void init_temperature_seed();
         rtype calc_dt_cfl1_mixture();
@@ -244,6 +262,10 @@ class Solver {
         void update_boundary_states(rtype t_eval);
         void init_sources();
         void update_source_field(rtype t_eval);
+        void init_sponges();
+        /** @brief Mass fractions of a composition table (numbers or expressions) at the centroids of cells. */
+        std::vector<std::vector<double>> composition_at_cells(const toml::value & table, const std::string & where,
+                                                              const std::vector<uint32_t> & cells) const;
         void allocate_memory();
         void register_data();
         std::vector<std::string> restart_variables() const;  // Flow block, then RHOY_<species>
@@ -272,6 +294,7 @@ class Solver {
         int base_halo_layers() const;
         bool halo_too_shallow();
         void init_rhs_split();
+        void init_axisymmetric_weights();
 
         template <typename T_riemann_solver>
         void launch_flux_functor();
@@ -346,6 +369,15 @@ class Solver {
         rtype low_mach_cutoff = 0.1;
         std::unique_ptr<TimeIntegrator> time_integrator;
 
+        // Axisymmetric runs (see docs/design/axisymmetric.md)
+        bool axisymmetric = false;
+        Kokkos::View<rtype *> geometric_source;  // (cell): int (p - tau_thetatheta) dA, the radial momentum source
+        Kokkos::View<rtype *> cell_mu;           // (cell): viscosity, viscous single gases
+
+        // Weights of the convective flux points, (face, q): 3D faces, and 2D Gauss
+        // weights times the radius in axisymmetric runs; empty for planar 2D runs
+        Kokkos::View<rtype **> flux_weights;
+
         // Work arrays
         Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
         Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
@@ -409,6 +441,16 @@ class Solver {
         StateView source_field;
         StateView::host_mirror_type h_source_field;
         rtype t_source = -1.0;
+
+        // Sponge layers: owned cells of positive total strength sum_i sigma_i,
+        // and sum_i sigma_i U_ref,i of the conservatives, then the partial densities
+        Kokkos::View<uint32_t *> sponge_cells;
+        Kokkos::View<rtype *> sponge_strength;
+        Kokkos::View<rtype **, Kokkos::LayoutRight> sponge_target;
+        rtype sponge_dt_max = std::numeric_limits<rtype>::infinity();  // 1 / max strength
+
+        bool characteristic_transverse = false;  // Some characteristic boundary has transverse terms
+        rtype t_characteristic = -1.0;           // Time the incoming waves were last advanced from, < 0 before the first
 
         // Checks
         uint32_t check_interval;

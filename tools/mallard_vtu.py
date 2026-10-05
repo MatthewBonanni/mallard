@@ -1,4 +1,6 @@
-"""Minimal reader for Mallard's raw-appended VTU files."""
+"""Minimal reader for Mallard's raw-appended VTU files, and (through
+mallard_h5, which needs h5py) its HDF5 snapshots: every function also takes a
+snapshot .h5 file."""
 import os
 import re
 
@@ -14,9 +16,15 @@ def read_vtu_cells(path):
     """Read a 2D or 3D volume VTU.
 
     Returns points (n, 3), connectivity, offsets (end of each cell), VTK cell
-    types, and the cell arrays (vectors as (n_cells, 3)) plus "TIME".
+    types, and the cell arrays (vectors as (n_cells, 3)) plus "TIME". An HDF5
+    snapshot (.h5) is read with mallard_h5.
     """
+    if path.endswith(".h5") or path.endswith(".xmf"):
+        from mallard_h5 import read_h5_cells
+        return read_h5_cells(path)
     raw = open(path, "rb").read()
+    if b"<AppendedData" not in raw:
+        return _read_ascii(raw.decode("latin-1"))
     start = raw.index(b"<AppendedData")
     start = raw.index(b"_", start) + 1
     header = raw[:start].decode("latin-1")
@@ -42,6 +50,27 @@ def read_vtu_cells(path):
     tm = re.search(r'Name="TIME"[^>]*>([^<]*)<', header)
     if tm:
         out["TIME"] = float(tm.group(1))
+    return pts, conn, offs, types, out
+
+
+def _read_ascii(text):
+    """read_vtu_cells for ASCII VTU files (Mallard's boundary-zone output)."""
+    arrays = {}
+    time = None
+    for m in re.finditer(r"<DataArray([^>]*)>([^<]*)</DataArray>", text):
+        attrs = dict(re.findall(r'(\w+)="([^"]*)"', m.group(1)))
+        name = attrs.get("Name", "Points")
+        if name == "TIME":
+            time = float(m.group(2))
+            continue
+        data = np.array(m.group(2).split(), dtype=_DTYPES[attrs["type"]])
+        ncomp = int(attrs.get("NumberOfComponents", 1))
+        arrays[name] = data.reshape(-1, ncomp) if ncomp > 1 else data
+    conn, offs, types = arrays.pop("connectivity"), arrays.pop("offsets"), arrays.pop("types")
+    pts = arrays.pop("Points").astype(float)
+    out = {k: np.asarray(v, dtype=float) for k, v in arrays.items()}
+    if time is not None:
+        out["TIME"] = time
     return pts, conn, offs, types, out
 
 
