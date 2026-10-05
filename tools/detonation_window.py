@@ -206,7 +206,8 @@ def frame(case, restart, out, depth, state):
     if "P_MAX" in h["names"]:
         for wall, strip in wall_strips(np.asarray(data[h["names"].index("P_MAX")])).items():
             result["pmax_" + wall] = strip.astype(np.float32)
-    np.savez(out, **result)
+    np.savez(out + ".tmp.npz", **result)
+    os.replace(out + ".tmp.npz", out)
     print(f"{out}: t = {h['t']:.6e}, front at x = {(state['shift_cells'] + i_front + 0.5) * case.dx:.4f} m",
           flush=True)
 

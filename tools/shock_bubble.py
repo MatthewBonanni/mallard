@@ -186,11 +186,12 @@ def frame(case, restart, out):
     _, d, _, _ = geometry(case)
     u_ref = max(abs(float(b["u"][0])) for b in case.toml["boundaries"] if b.get("type") == "upt")
     rho_ref = float(rho[-1, -1, -1])
-    np.savez(out, t=h["t"], step=h["step"], dx=dx, lo=np.array(lo), d=d, u_ref=u_ref, rho_ref=rho_ref,
+    np.savez(out + ".tmp.npz", t=h["t"], step=h["step"], dx=dx, lo=np.array(lo), d=d, u_ref=u_ref, rho_ref=rho_ref,
              y_he=y_he[box].astype(np.float16), vort=(w[box] * d / u_ref).astype(np.float16),
              schlieren=(schlieren * d / rho_ref).astype(np.float16),
              p_plane=(p[:, :, 0] / 1000).astype(np.float16), y_he_plane=y_he[:, :, 0].astype(np.float16),
              ring=np.array([(i + 0.5) * dx, (j + j0 + 0.5) * dx]), vort_max=w.max())
+    os.replace(out + ".tmp.npz", out)
     print(f"{out}: t = {h['t']:.6e}, helium box {lo}..{hi}", flush=True)
 
 
@@ -213,15 +214,22 @@ def frames(case, restart_dir, frame_dir, keep_last, watch):
         time.sleep(watch)
 
 
+PROBE_COLUMNS = ["step", "t", "point", "x", "y", "z", "RHO", "U_X", "P", "Y_HE"]
+
+
 def read_probe(path):
-    """{t: (x, Y_HE, P)} of the axis probe, rows grouped by time step."""
+    """{t: (x, Y_HE, P)} of the axis probe, rows grouped by time step. A run started from a restart file
+    appends to the probe file without a header row; its columns are then those of the example's probe."""
     rows = {}
     with open(path) as f:
         r = csv.reader(f)
-        header = next(r)
+        first = next(r)
+        header = first if first[0] == "step" else PROBE_COLUMNS
         ix, iy, ip = header.index("x"), header.index("Y_HE"), header.index("P")
+        if first[0] != "step":
+            rows.setdefault(float(first[1]), []).append((float(first[ix]), float(first[iy]), float(first[ip])))
         for row in r:
-            if row[0] == "step":
+            if row[0] == "step" or len(row) < len(header):
                 continue
             rows.setdefault(float(row[1]), []).append((float(row[ix]), float(row[iy]), float(row[ip])))
     out = {}
