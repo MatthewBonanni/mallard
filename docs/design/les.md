@@ -2,7 +2,8 @@
 
 Status: proposed. Recommendations are marked **Decision**; the alternatives
 considered are listed with each. Implementation follows the
-[stages](#9-stages), one pull request each; done: 1, 2, 3, 5 (4 in progress).
+[stages](#9-stages), one pull request each; done: 1, 2, 3, 4, 5 (6 and 7 open:
+#197, #198).
 
 Mallard resolves every scale it computes today (DNS of flames, detonations,
 Taylor-Green and isotropic turbulence). This document adds large-eddy
@@ -717,6 +718,51 @@ Findings:
   `-<u'v'>+` within 10% of their peaks. Model-off at the same mesh must
   miss `Re_tau` and the peak `u'_rms+` by more than twice the model-on
   error. Budget reported per wall-normal band.
+
+#### Results (stage 4, `examples/channel_les`)
+
+![LES of the channel at Re_tau = 395 against MKM](../images/channel_les_validation.png)
+
+`Re_tau = 395`, hybrid flux, MUSCL without limiter, averaged over t =
+100-300 h/U_b (11-12 h/u_tau), resolved fluctuations; dissipation shares of
+the kinetic-energy budget over the same window:
+
+| Mesh | Flux | Model | `Re_tau` (392.2) | `Cf` | `U+(30)` / `U+(100)` (13.49 / 16.53) | peak `v_rms+` (1.00) | numerical / SGS / molecular |
+|---|---|---|---|---|---|---|---|
+| 64^3 | hybrid | Sigma | 402.3 (+2.6%) | +4.8% | 13.10 / 16.24 | 0.89 | 3.5 / 12.6 / 83.9% |
+| 64^3 | hybrid | Sigma `C = 1.8` | 389.4 (-0.7%) | -1.9% | 13.68 / 16.98 | 0.85 | 2.8 / 16.6 / 80.6% |
+| 64^3 | hybrid | none | 420.1 (+7.1%) | +14.2% | 12.27 / 15.16 | 0.97 | 5.0 / 0 / 95.0% |
+| 64^3 | HLLC | Sigma `C = 1.8` | 317.6 (-19%) | -35% | 17.86 / 22.05 | 0.78 | **13.5** / 5.4 / 81.1% |
+| 48^3 | hybrid | Sigma `C = 1.8` | 381.3 (-2.8%) | -5.9% | 14.09 / 17.47 | 0.80 | 3.2 / 17.9 / 78.9% |
+| 48^3 | hybrid | none | 405.3 (+3.3%) | +6.3% | 12.67 / 15.74 | 0.98 | 6.1 / 0 / 93.9% |
+
+Findings:
+
+- At 64^3 both Sigma constants meet the `Re_tau` target (3%) and the mean
+  profile target (3% for y+ = 30-300); without a model `Re_tau` is 7% high,
+  more than twice the model-on errors. `v_rms+` is 11-15% low (only the
+  resolved part is counted) and misses the 10% target; `u_rms`, `w_rms` and
+  `-u'v'` are within 10%.
+- At 48^3 the model-off run is closer to MKM in `Re_tau` than at 64^3 and
+  than the model-on run at 48^3 (+3.3% against -2.8%): on this mesh the
+  model-off result benefits from compensating errors, so the 48^3 pair does
+  not discriminate; the 64^3 pair does. Sigma's error decreases under
+  refinement (-2.8% -> -0.7% for `C = 1.8`).
+- The SGS model carries 13-18% of the dissipation of resolved energy; most
+  of it is molecular at this wall-resolved resolution. The hybrid flux's
+  numerical dissipation is 3-6% (`eps_num / eps_sgs` = 0.17-0.28, within the
+  criterion 0.5).
+- **With HLLC instead of the hybrid flux the result is wrong and the budget
+  says why**: the scheme removes 2.5 times as much resolved energy as the
+  model (13.5% against 5.4%), the near-wall streaks are too strong (peak
+  `u_rms+` 3.77), the turbulent momentum transfer too weak, and `Re_tau`
+  19% low (`Cf` -35%).
+- **The DNS at `Re_tau = 180`** (`examples/channel_retau180`, 192 x 96 x
+  128, no model; #209), averaged over t = 80-160 h/U_b: with HLLC 6.8% of
+  the dissipation is numerical and `Re_tau = 173.7` (-2.5% from MKM's
+  178.1, as the example's 172.6); with the hybrid flux 0.9% is numerical and
+  `Re_tau = 179.8` (+0.9%). The upwind dissipation explains most of that
+  DNS's deficit.
 
 ### 8.3 Reacting validation
 
