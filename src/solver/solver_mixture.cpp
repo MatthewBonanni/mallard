@@ -394,6 +394,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
     if (exchange) halo.exchange(state);
     update_cell_states(state, true);
     face_reconstruction->calc_face_values(W_cells, face_solution);
+    update_characteristic_boundaries(t_stage);
     scalar_reconstruction.calc(cell_scalars, W_cells, face_thermo);
 
     if (double_flux && !cells_frozen) {
@@ -486,6 +487,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
     Kokkos::parallel_for("rhs_divide_volume", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
         FOR_I_CONSERVATIVE rhs(i_cell, i) /= vol(i_cell);
     });
+    apply_sponges(state, rhs_state);
 }
 
 template <typename T_riemann_solver>
@@ -576,6 +578,15 @@ std::vector<rtype> Solver::integrate_species() {
     return total;
 }
 
+std::vector<std::vector<double>> Solver::composition_at_cells(const toml::value & table, const std::string & where,
+                                                              const std::vector<uint32_t> & cells) const {
+    const CompositionExpressions composition(*mixture_model, table, where);
+    std::vector<std::vector<double>> Y;
+    Y.reserve(cells.size());
+    for (uint32_t c : cells) Y.push_back(composition.mass_fractions(Kokkos::subview(mesh->h_cell_coords, c, Kokkos::ALL())));
+    return Y;
+}
+
 void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boundaries,
                                      const std::vector<std::array<uint32_t, 2>> & profiled_faces,
                                      std::vector<BoundaryCondition> & bcs) {
@@ -600,8 +611,10 @@ void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boun
             case BoundaryType::SYMMETRY:
             case BoundaryType::WALL_ADIABATIC:
             case BoundaryType::P_OUT:
+            case BoundaryType::NSCBC_OUTLET:
                 break;
-            case BoundaryType::UPT: {
+            case BoundaryType::UPT:
+            case BoundaryType::NSCBC_INLET: {
                 const double T = static_cast<double>(find_real(bound, "T"));
                 if (!MixtureModel::composition_varies(bound)) {
                     prescribe(i_bc, mixture_model->mass_fractions(bound, where), T);
@@ -619,7 +632,7 @@ void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boun
             default:
                 throw InputError(where + ": type \"" + BOUNDARY_NAMES.at(bcs[i_bc].type) +
                                  "\" is not yet supported with gas = \"mixture\" (extrapolation, symmetry, "
-                                 "wall_adiabatic, upt, p_out).");
+                                 "wall_adiabatic, upt, p_out, nscbc_outlet, nscbc_inlet).");
         }
     }
 }

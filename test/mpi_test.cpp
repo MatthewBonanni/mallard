@@ -228,6 +228,23 @@ TEST(MPITest, NavierStokesWithBoundaryConditionsMatchesSerial) {
         25));
 }
 
+TEST(MPITest, CharacteristicBoundariesAndSpongesMatchSerial) {
+    // The transverse terms read the cells of neighboring boundary faces, which
+    // may be halo cells
+    const std::string sponge = "[[sponges]]\nstrength = \"x > 0.7 ? 5 * (x - 0.7) : 0\"\nu = [0.3, 0.0]\np = 1.0\n"
+                               "T = 1.0\n";
+    for (const std::string & recon : {std::string("type = \"MUSCL\"\n"), std::string("type = \"TENO\"\norder = 5\n")}) {
+        expect_matches_serial(box_input("cartesian_tri", recon, NS,
+                                        bcs("type = \"nscbc_inlet\"\nu = [0.3, 0.0]\np = 1.0\nT = 1.0\nL = 1.0\n"
+                                            "sigma_T = 1.0\nsigma_t = 1.0\n",
+                                            "type = \"nscbc_outlet\"\np = 1.0\nL = 1.0\n",
+                                            "type = \"nscbc_outlet\"\np = 1.0\nL = 1.0\nsigma = 2.0\nbeta = 0.5\n",
+                                            "type = \"wall_adiabatic\"\n"),
+                                        20) +
+                              sponge);
+    }
+}
+
 TEST(MPITest, AxisymmetricRunsMatchSerial) {
     // Revolved geometry, r-weighted stencils, the high-order geometric source
     // and the axis-corrected viscous gradients of halo cells

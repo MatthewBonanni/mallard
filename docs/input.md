@@ -187,6 +187,27 @@ the zone's faces whose centers satisfy the expression.
 | `dirichlet` | Exterior state from expressions in `x`, `y`, `z`, `t`, evaluated at face centers at every stage | `rho`, `u` (one expression per component), `p` |
 | `p_out` | Outlet: imposes `p` if the outflow is subsonic | `p` |
 | `p_out_average` | Outlet for mixed subsonic/supersonic flow: on subsonic faces, shifts the local pressure so that its area average over the boundary equals `p`, preserving the transverse profile | `p` |
+| `nscbc_outlet` | Partially non-reflecting characteristic outlet (Poinsot & Lele): outgoing waves leave, and each face's incoming acoustic wave relaxes its pressure toward `p` at the rate `K = sigma c (1 - M^2) / L`. Waves of frequency `omega` reflect by `1 / sqrt(1 + (2 omega / K)^2)` | `p`, `L` (a length of the domain), `sigma` (default 0.25; 0 is perfectly non-reflecting but lets the mean pressure drift, large values approach `p_out`), `beta` (the weight of the transverse terms in the incoming wave, 0 to 1: default the local Mach number, as Lodato et al.; 1 is Poinsot & Lele's original condition, 0 drops them) |
+| `nscbc_inlet` | Partially non-reflecting characteristic inlet: the incoming acoustic wave relaxes the normal velocity toward `u` as `nscbc_outlet` relaxes the pressure; temperature and tangential velocity are imposed, or relaxed with `sigma_T`, `sigma_t`; the composition is imposed. Supersonic inflow imposes `u`, `p`, `T` | `u`, `p` (reference pressure, for supersonic inflow), `T`, `L`, `sigma` (default 0.25), `sigma_T`, `sigma_t` (optional), `beta`, and `X` or `Y` for mixtures (numbers or expressions, as `upt`) |
+
+Characteristic conditions change only the exterior state of the convective
+flux; viscous terms treat them like `extrapolation` (image faces, or zero
+normal derivatives: the outflow conditions of Poinsot & Lele). MUSCL boundary
+cells leave out their ghosts across them, so that waves leave intact. Each face keeps its pressure and
+normal velocity between steps; a restart starts them afresh from the
+solution. See [docs/design/nscbc.md](design/nscbc.md).
+
+## `[[sponges]]`
+
+Optional sponge layers, each adding `-strength (U - U_ref)` to the conservative variables (and species partial densities) per unit volume, with `U_ref` the conservatives of a reference state. Several sponges add up. The explicit source caps the time step at `1 / max strength`.
+
+| Key | Description |
+|---|---|
+| `strength` | Damping rate (1/s): a number or an expression in `x`, `y`, `z`, zero outside the layer, e.g. `"x > 4 ? 20 * ((x - 4) / 1)^2 : 0"` (a gradual ramp reflects less than a step) |
+| `u`, `p`, `T` | Reference state: numbers or expressions in `x`, `y`, `z` (`u` has one per component) |
+| `X` or `Y`, `balance` | (mixtures) Reference composition, numbers or expressions as in `[initialize]` |
+
+Strength and reference are evaluated once at cell centroids.
 
 ## `[numerics]`
 
