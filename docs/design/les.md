@@ -230,6 +230,36 @@ Sigma achieves the main benefits of the dynamic procedure (zero
 Sigma or dynamic Smagorinsky with Lagrangian averaging can follow if
 validation shows the static constant is inadequate (stage 7).
 
+**As implemented (stage 7, opt-in `dynamic = true`): a global dynamic
+procedure.** Section 8.1 showed the best static constant depends on the
+resolution (1.8 at 64^3, 1.35 at 128^3), which is what a dynamic constant
+should capture. The global form (one constant per step, `C^2 = <L^d:M> /
+<M:M>` summed over the domain) avoids the averaging and clipping problems
+above, and its test filter, the volume-weighted average over a cell and its
+vertex neighbors, enters only through `Delta_hat^2 = Delta^2 + 12 / d
+tr(cov)` of each cell's own stencil (`3 Delta` on uniform hexahedra), so
+mesh transitions are handled cell by cell. Favre-weighted `L` and `M` (Moin
+et al. 1991), filtered gradients for the gradients of the filtered field.
+The sums are exact (fixed point, scaled to the largest term), so the constant
+does not depend on the rank count. Cost: one extra pass over the vertex
+neighbors per step (about 30% of a CPU step on the CBC case, once per step).
+
+| Case | static `C` | dynamic `C` (time mean) | result, dynamic vs static 1.35 |
+|---|---|---|---|
+| CBC 32^3 | 1.35 / 1.8 | 1.6 (rising from 1.1) | spectral error 0.165 / 0.142 vs 0.153 / 0.151 (1.8: 0.103 / 0.082) |
+| CBC 64^3 | 1.35 / 1.8 | 1.4 | 0.116 / 0.077 vs 0.107 / 0.104 (1.8: 0.058 / 0.063) |
+| CBC 128^3 | 1.35 / 1.8 | 1.15 | **0.060 / 0.054** vs 0.063 / 0.085 (1.8: 0.124 / 0.141) |
+| channel 395, 64^3 | 1.35 | 1.09 | `Re_tau` 408.0 (+4.0%) vs 402.3 (+2.6%); peak `v_rms+` 0.912 vs 0.889 |
+
+The procedure finds the right trend with resolution (1.6, 1.4, 1.15) and the
+best spectra of any run at 128^3, but not the 1.8 that fits 64^3: that
+optimum compensates the second-order scheme's damping near the cutoff,
+which the Germano identity, written for the filter alone, cannot see. In the
+channel the domain-wide constant is pulled down by the regions of weak SGS
+activity and the mean flow is worse than with the static constant. Hence
+opt-in, not the default. `eps_num / eps_sgs` stays below the criterion
+(CBC 0.006-0.04, channel 0.40).
+
 ## 3. Filter width
 
 **Decision 4.** `Delta = V^(1/d)`: the cube root of the cell volume in 3D
@@ -250,10 +280,15 @@ axisymmetric runs), for every cell type and reconstruction order.
   `f(a_1, a_2) = cosh(sqrt(4/27 ((ln a_1)^2 - ln a_1 ln a_2 + (ln a_2)^2)))`
   of the aspect ratios; the largest extent (`Delta_max`) is used in DES.
   Both matter most in wall cells, where Sigma and WALE are already small
-  (`y^3`); the Scotti factor is 1.2 for an aspect ratio of 5 and 1.4 for 10. Not
-  implemented; can be added as `filter_width = "scotti"` (from each cell's
-  second-moment tensor, which gives its principal extents for any shape) if
-  validation shows a need.
+  (`y^3`); the Scotti factor is 1.2 for an aspect ratio of 5 and 1.4 for 10.
+  **Implemented (stage 7) as the opt-in `filter_width = "scotti"`**, with
+  each cell's extents `h_i = V / lambda_i` from the eigenvalues of its
+  projected-area tensor `1/2 sum_f A_f A_f^T / |A_f|` (exact for boxes, face
+  data only, so periodic cells need no unwrapping), for the eddy viscosity
+  only (TFLES keeps `V^(1/3)`). Channel at `Re_tau = 395`, 64^3, Sigma 1.35:
+  `Re_tau` 394.8 (+0.7%, against +2.6% with `V^(1/3)`), `Cf` +0.9%, `U+` at
+  y+ = 30 / 100 13.40 / 16.61 (MKM 13.49 / 16.53), `eps_num / eps_sgs` 0.21;
+  peak `v_rms+` 0.882, unchanged. On cubic cells it is `V^(1/3)`.
 - **Mixed meshes.** `V^(1/d)` is continuous across hexahedron-prism-
   tetrahedron transitions of equal edge length up to the volume ratio's
   cube root (a regular tetrahedron of edge h has `V^(1/3) = 0.49 h`, a cube
