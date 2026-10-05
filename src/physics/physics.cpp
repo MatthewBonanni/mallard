@@ -49,8 +49,17 @@ Euler Euler::from_input(const toml::value & input) {
             euler.viscosity_model = ViscosityModel::SUTHERLAND;
             euler.T_mu_ref = find_real_or(input, "physics", "T_mu_ref", 273.15);
             euler.S_mu = find_real_or(input, "physics", "sutherland_S", 110.4);
+        } else if (model == "power_law") {
+            for (const char * key : {"T_mu_ref", "viscosity_exponent"}) {
+                if (!input.at("physics").contains(key)) {
+                    throw InputError(std::string("Missing physics.") + key + " for viscosity_model = \"power_law\".");
+                }
+            }
+            euler.viscosity_model = ViscosityModel::POWER_LAW;
+            euler.T_mu_ref = find_real(input, "physics", "T_mu_ref");
+            euler.n_mu = find_real(input, "physics", "viscosity_exponent");
         } else {
-            throw InputError("physics.viscosity_model = \"" + model + "\" is not one of: constant, sutherland.");
+            throw InputError("physics.viscosity_model = \"" + model + "\" is not one of: constant, sutherland, power_law.");
         }
     } else if (type != "euler") {
         throw unknown_option(PHYSICS_TYPES, "physics.type", type);
@@ -68,6 +77,9 @@ logging::Items Euler::summary() const {
         if (viscosity_model == ViscosityModel::SUTHERLAND) {
             out.emplace_back("Viscosity", "Sutherland, mu " + real(double(mu_ref)) + " at T " + real(double(T_mu_ref)) + ", S " +
                                               real(double(S_mu)) + ", Pr " + real(double(Pr)));
+        } else if (viscosity_model == ViscosityModel::POWER_LAW) {
+            out.emplace_back("Viscosity", "power law, mu " + real(double(mu_ref)) + " (T / " + real(double(T_mu_ref)) +
+                                              ")^" + real(double(n_mu)) + ", Pr " + real(double(Pr)));
         } else {
             out.emplace_back("Viscosity", "constant, mu " + real(double(mu_ref)) + ", Pr " + real(double(Pr)));
         }

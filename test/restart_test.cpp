@@ -133,6 +133,26 @@ TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
     std::filesystem::remove_all(dir);
 }
 
+TEST(RestartTest, RunStartedFromARestartFileStartsNewMonitorFilesWithAHeader) {
+    // A restart file can be an initial state (e.g. from a tools/ script): a
+    // monitor file that does not exist yet gets its header
+    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_header_test").string();
+    std::filesystem::remove_all(dir);
+    Solver first;
+    first.init(parse_toml(restart_input(dir + "/a", BLAST, 20)));
+    first.run();
+    Solver second;
+    second.init(parse_toml(restart_input(dir + "/b", "type = \"restart\"\nfile = \"" + dir + "/a/restart_000020.restart\"\n", 30)));
+    second.run();
+    std::ifstream a(dir + "/a/forces.csv"), b(dir + "/b/forces.csv");
+    std::string header_a, header_b;
+    std::getline(a, header_a);
+    std::getline(b, header_b);
+    EXPECT_EQ(header_b, header_a);
+    EXPECT_EQ(header_b.rfind("step,t,", 0), 0u);
+    std::filesystem::remove_all(dir);
+}
+
 TEST(RestartTest, ReactingRestartedRunMatchesUninterruptedRunExactly) {
     // Species, the chemistry's last sub-steps and the temperature seeds carry
     // over, so restarted cells integrate exactly as in one run

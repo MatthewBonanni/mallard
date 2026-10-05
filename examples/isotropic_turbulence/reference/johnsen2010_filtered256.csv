@@ -1,0 +1,29 @@
+# Johnsen et al., J. Comput. Phys. 229 (2010) 1213, doi:10.1016/j.jcp.2009.10.028: reference solution of
+# the decaying isotropic turbulence case (Mt0 = 0.6, Re_lambda0 = 100, k0 = 4): the 256^3 solutions of the
+# Hybrid, ADPDIS3D and Stan codes (converged, pointwise agreement at t/tau = 4) spectrally filtered to 64^3,
+# differentiated with sixth-order central differences (Subramaniam et al. 2019, appendix F). Read from the
+# vector markers (circles) of the same figure in S. K. Lele, final report DE-FC02-06ER25787, OSTI 1052207
+# (2012), figure 3, to the precision of the PDF coordinates.
+# Normalizations: <u_i u_i>/(3 u_rms0^2); <w_i w_i> and <theta^2> over u_rms0^2/lambda0^2;
+# <T'T'>/((gamma - 1) T0 Mt0^2)^2; t/tau with tau = lambda0/u_rms0.
+t_over_tau,kinetic_energy,enstrophy,temperature_variance,dilatation_variance
+0.198,0.94358,15.118,0.085728,0.54639
+0.399,0.90873,17.802,0.18372,1.157
+0.599,0.89188,21.141,0.16265,1.3541
+0.799,0.85344,24.181,0.14627,1.2742
+1.002,0.81387,26.426,0.1325,1.1727
+1.199,0.77297,27.743,0.11579,1.1027
+1.398,0.72772,28.307,0.10353,1.0054
+1.599,0.68303,28.174,0.092923,0.91598
+1.800,0.63967,27.47,0.08374,0.84213
+1.999,0.59631,26.567,0.077917,0.75834
+2.201,0.55408,25.457,0.074793,0.68947
+2.399,0.51413,24.123,0.072852,0.61882
+2.598,0.47777,22.624,0.068781,0.56556
+2.801,0.44237,21.099,0.067029,0.50592
+3.000,0.41056,19.633,0.062343,0.45657
+3.199,0.38177,18.225,0.056521,0.41752
+3.400,0.35394,16.866,0.055195,0.38095
+3.602,0.32838,15.533,0.053018,0.35574
+3.802,0.30433,14.282,0.053633,0.32521
+4.000,0.28199,13.114,0.055669,0.30071

@@ -110,10 +110,11 @@ translation = [1.0, 0.0]
 | `type` | `euler` or `navier_stokes` |
 | `gamma` | Ratio of specific heats |
 | `p_ref`, `T_ref`, `rho_ref` | A reference state, which sets the gas constant `R = p_ref / (rho_ref T_ref)` |
-| `mu` | (`navier_stokes`) Dynamic viscosity, or its value at `T_mu_ref` for Sutherland's law |
+| `mu` | (`navier_stokes`) Dynamic viscosity, or its value at `T_mu_ref` for Sutherland's law or the power law |
 | `Pr` | (`navier_stokes`) Prandtl number, default 0.72 |
-| `viscosity_model` | (`navier_stokes`) `constant` (default) or `sutherland` |
+| `viscosity_model` | (`navier_stokes`) `constant` (default), `sutherland` or `power_law` (`mu (T / T_mu_ref)^viscosity_exponent`) |
 | `T_mu_ref`, `sutherland_S` | (`sutherland`) Reference temperature (default 273.15) and Sutherland temperature (default 110.4) |
+| `T_mu_ref`, `viscosity_exponent` | (`power_law`) Reference temperature and exponent, both required |
 | `gas` | `perfect` (default): a calorically perfect gas set by the keys above; `mixture`: a thermally perfect mixture of the species of a mechanism (no `gamma`, `p_ref`, `T_ref`, `rho_ref`) |
 | `mechanism` | (`mixture`) A [Cantera YAML](https://cantera.org/stable/yaml/index.html) file, e.g. `mechanisms/h2o2.yaml` (see `mechanisms/README.md`); Chemkin files convert with Cantera's `ck2yaml` |
 | `phase` | (`mixture`) Phase of the file to use; default the first |
@@ -253,8 +254,12 @@ Write the force of the fluid on a boundary zone to a CSV file
 ## `[integrals]`
 
 Write domain integrals to a CSV file (`step, t, kinetic_energy, enstrophy,
-dilatation_squared, pressure_dilatation`): the integrals of `rho |u|^2 / 2`,
-`rho |omega|^2 / 2`, `(div u)^2` and `p div u`. With TENO the velocity
+dilatation_squared, pressure_dilatation, velocity_squared, vorticity_squared,
+density_squared, temperature, temperature_squared`): the integrals of
+`rho |u|^2 / 2`, `rho |omega|^2 / 2`, `(div u)^2`, `p div u`, `|u|^2`,
+`|omega|^2`, `rho^2`, `T` and `T^2` (divided by the volume, the last ones give
+the mean squared velocity and vorticity and the density and temperature
+variances). With TENO the velocity
 gradients are those of the reconstruction polynomials at the cell centroids
 (order-consistent: on the Taylor-Green vortex at 64^3 per octant they match
 spectral derivatives of the same field to about 1%); otherwise they are the
