@@ -47,7 +47,8 @@
 #   upstream face, late (0.4-1 ms)             204     125
 #
 # The waves, the ring and the downstream face agree within the measurement
-# error. The upstream interface accelerates into the jet within the first
+# error. At 96 cells per D (same interface thickness in meters) every one of
+# these velocities is within 1.2% of the values above. The upstream interface accelerates into the jet within the first
 # 0.04 ms here; the jet pierces the helium at 0.34 ms; the late upstream face
 # is the trailing helium, which at this Reynolds and Peclet number is drawn
 # into the ring and moves with it rather than drifting at u_p.
