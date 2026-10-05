@@ -43,7 +43,7 @@ struct Case {
     std::string recon = "FO";
     std::string extra_recon;
     std::string physics = "type = \"euler\"\n";
-    std::string run = "n_steps = 10\ncfl = 0.5\n";
+    std::string run = "n_steps = 10\ncfl = 0.25\n";
     std::string integrator = "SSPRK3";
     std::string boundaries;
 };
@@ -280,7 +280,7 @@ const char * PERIODIC_PAIRS_3D = "[[periodic]]\nzones = [\"left\", \"right\"]\nt
 TEST(PeriodicFile3D, ZonePairsJoinAJitteredGmshMeshOfHexahedraAndPrisms) {
     const std::string file = write_temp("mallard_periodic3d.msh", jittered_periodic_mesh_3d(5));
     std::ostringstream s;
-    s << "[run]\nn_steps = 8\ncfl = 0.5\n[mesh]\ntype = \"file\"\nfilename = \"" << file << "\"\n"
+    s << "[run]\nn_steps = 8\ncfl = 0.25\n[mesh]\ntype = \"file\"\nfilename = \"" << file << "\"\n"
       << "[initialize]\ntype = \"analytical\"\n"
       << "rho = \"1.0 + 0.4 * exp(-30 * ((x - 0.3)^2 + (y - 0.6)^2 + (z - 0.2)^2))\"\n"
       << "u = [\"0.7\", \"-0.4\", \"0.5\"]\np = \"1.0\"\n"

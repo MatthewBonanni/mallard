@@ -6,7 +6,7 @@
 
 [run]
 n_steps = 100
-cfl = 0.8
+cfl = 0.4
 
 [mesh]
 type = "cartesian"

@@ -37,7 +37,7 @@ struct Case {
     std::string top = "type = \"wall_adiabatic\"";
     std::string sides = "";  // empty: periodic in x
     std::string source;
-    std::string run = "n_steps = 20\ncfl = 0.5\n";
+    std::string run = "n_steps = 20\ncfl = 0.25\n";
 };
 
 /** @brief Unit square (axis at y = 0, symmetry) with a gamma = 1.4 gas. */
