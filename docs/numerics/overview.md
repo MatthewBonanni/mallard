@@ -44,6 +44,15 @@ from a per-cell spectral radius ([Blazek 2015](../references.md#blazek-2015)),
 | Roe | [Roe 1981](../references.md#roe-1981), with Harten's entropy fix ([Harten 1983](../references.md#harten-1983)) |
 | RHLL | [Nishikawa & Kitamura 2008](../references.md#nishikawa-kitamura-2008), a rotated hybrid: HLL along the velocity-difference direction, Roe across it. Carbuncle-free. |
 
+All five also solve gas mixtures, on each side's frozen `cp / cv` and energy
+offset ([chemistry design](../design/chemistry.md#riemann-solvers)). The
+mixture Roe solver ([Glaister 1988](../references.md#glaister-1988);
+[Shuen, Liou & van Leer 1990](../references.md#shuen-liou-van-leer-1990)) lets the
+contact, shear and composition waves, which all move with the flow, carry
+the whole jump of the conservative variables left by the two acoustic waves.
+That makes it exact at contacts between different gases for any averaged
+sound speed, and it reduces to the single-gas Roe solver for one gas.
+
 ### Low-Mach correction
 
 Upwind fluxes damp the jump of the reconstructed velocity across a face at the

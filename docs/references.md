@@ -42,6 +42,10 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: `riemann_solver = "Roe"`, the Roe part of RHLL, and the Roe averages of the wave-speed estimates.
 - <a id="harten-1983"></a>A. Harten, High resolution schemes for hyperbolic conservation laws, *J. Comput. Phys.* 49, 357–393 (1983). [doi:10.1016/0021-9991(83)90136-5](https://doi.org/10.1016/0021-9991%2883%2990136-5)
   Used in: the entropy fix of the Roe solver on the acoustic waves.
+- <a id="glaister-1988"></a>P. Glaister, An approximate linearised Riemann solver for the Euler equations for real gases, *J. Comput. Phys.* 74, 382–408 (1988). [doi:10.1016/0021-9991(88)90084-8](https://doi.org/10.1016/0021-9991%2888%2990084-8)
+  Used in: the Roe and RHLL solvers for gas mixtures, a Roe linearization for a general equation of state.
+- <a id="shuen-liou-van-leer-1990"></a>J.-S. Shuen, M.-S. Liou and B. van Leer, Inviscid flux-splitting algorithms for real gases with non-equilibrium chemistry, *J. Comput. Phys.* 90, 371–395 (1990). [doi:10.1016/0021-9991(90)90172-W](https://doi.org/10.1016/0021-9991%2890%2990172-W)
+  Used in: the Roe and RHLL solvers for gas mixtures: the Roe average of a multicomponent gas, whose composition waves move with the contact.
 - <a id="nishikawa-kitamura-2008"></a>H. Nishikawa and K. Kitamura, Very simple, carbuncle-free, boundary-layer-resolving, rotated-hybrid Riemann solvers, *J. Comput. Phys.* 227, 2560–2581 (2008). [doi:10.1016/j.jcp.2007.11.003](https://doi.org/10.1016/j.jcp.2007.11.003)
   Used in: `riemann_solver = "RHLL"`, the rotated hybrid of HLL and Roe.
 - <a id="quirk-1994"></a>J. J. Quirk, A contribution to the great Riemann solver debate, *Int. J. Numer. Methods Fluids* 18, 555–574 (1994). [doi:10.1002/fld.1650180603](https://doi.org/10.1002/fld.1650180603)

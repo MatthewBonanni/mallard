@@ -658,10 +658,6 @@ void Solver::init_numerics() {
     flux_weights = face_reconstruction->face_quad_weights;
     if (axisymmetric) init_axisymmetric_weights();
     if (is_mixture()) {
-        if (riemann_solver_type == RiemannSolverType::ROE || riemann_solver_type == RiemannSolverType::RHLL) {
-            throw InputError("numerics.riemann_solver: " + RIEMANN_SOLVER_NAMES.at(riemann_solver_type) +
-                             " is not supported with gas = \"mixture\" (Rusanov, HLL, HLLC).");
-        }
         scalar_reconstruction.init(mesh, boundary_data, mixture.n_species, *face_reconstruction);
     }
     double_flux = toml::find_or<bool>(input, "numerics", "double_flux", false);
