@@ -28,6 +28,7 @@
 #include "riemann_solver.h"
 #include "time_integrator.h"
 #include "physics.h"
+#include "les.h"
 #include "mixture.h"
 #include "cell_chemistry.h"
 #include "scalar_reconstruction.h"
@@ -54,6 +55,17 @@ struct IntegralMonitor {
     uint64_t interval = 0;
     std::string file;
     std::shared_ptr<std::ofstream> out;
+    bool budget = false;  // also the kinetic-energy budget (Solver::kinetic_energy_budget)
+};
+
+/**
+ * @brief Rates of change of the resolved kinetic energy sum_c V rho |u|^2 / 2
+ *        caused by the convective, molecular viscous and SGS fluxes.
+ */
+struct KineticEnergyBudget {
+    rtype convective = 0.0;
+    rtype viscous = 0.0;
+    rtype sgs = 0.0;
 };
 
 /**
@@ -218,6 +230,15 @@ class Solver {
          *        coefficients of every cell and the gradients of [u, T, X].
          */
         void update_transport();
+        /**
+         * @brief LES: the SGS coefficients [mu_t, lambda_t, mu_t / (Sc_t W)] of
+         *        cells [0, n) from the velocity gradients of the current RHS
+         *        (viscous_gradients, or transport_gradients for mixtures, whose
+         *        time-step diffusivity NU_EFF also grows).
+         */
+        void update_eddy_viscosity(uint32_t n);
+        /** @brief LES: the eddy viscosity of the current state for the time step (owned cells) or output (all). */
+        void eddy_viscosity_of_state(uint32_t n);
 
         /**
          * @brief Reacting mixtures: read [chemistry]; advance every owned cell
@@ -230,6 +251,20 @@ class Solver {
         void update_heat_release_rate();
         /** @brief Over all ranks: owned cells advanced in the last chemistry call, max sub-steps of a cell in the last step. */
         std::pair<uint64_t, double> chemistry_statistics();
+
+        /**
+         * @brief Rates of change of the resolved kinetic energy by the
+         *        convective, viscous and SGS fluxes of the current state,
+         *        from an RHS evaluation that leaves the solver's state as it
+         *        was (docs/design/les.md, section 4.2). Planar runs only.
+         */
+        KineticEnergyBudget kinetic_energy_budget();
+
+        /** @brief Whether the run is a large-eddy simulation ([les]). */
+        bool is_les() const { return les_on; }
+        const LES & get_les() const { return les; }
+        /** @brief LES: [mu_t, lambda_t, mu_t / (Sc_t W)] of each cell as of the last copy_device_to_host. */
+        const Kokkos::View<rtype *[3]>::host_mirror_type & get_les_coefficients() const { return h_les_coefficients; }
 
         /** @brief Whether the gas is a mixture (a mechanism is given). */
         bool is_mixture() const { return mixture_model != nullptr; }
@@ -320,6 +355,11 @@ class Solver {
         bool halo_too_shallow();
         void init_rhs_split();
         void init_axisymmetric_weights();
+        void init_les();
+        /** @brief Hybrid flux: the upwind fraction of every cell from the gradients of W_cells. */
+        void update_upwind_sensor();
+        /** @brief sum over owned cells of u . R_m - |u|^2 / 2 R_rho for R the sum of face_flux over the cell's faces. */
+        rtype kinetic_energy_rate() const;
 
         template <typename T_riemann_solver>
         void launch_flux_functor();
@@ -392,6 +432,10 @@ class Solver {
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         RiemannSolverType riemann_solver_type;
         rtype low_mach_cutoff = 0.1;
+        bool hybrid_flux = false;           // [numerics] convective_flux = "hybrid" (docs/design/les.md, section 4.3)
+        rtype hybrid_threshold = 0.65;
+        rtype hybrid_floor = 0.0;
+        Kokkos::View<rtype *> cell_upwind;  // hybrid flux: upwind fraction of each cell, else empty
         std::unique_ptr<TimeIntegrator> time_integrator;
 
         // Axisymmetric runs (see docs/design/axisymmetric.md)
@@ -415,6 +459,15 @@ class Solver {
         std::vector<State> solution_vec;
         std::vector<State> rhs_vec;
         RHSFunction rhs_func;
+
+        // Large-eddy simulation (docs/design/les.md)
+        bool les_on = false;
+        LES les;
+        Kokkos::View<rtype *> les_delta;               // (cell): filter width
+        Kokkos::View<rtype *[3]> les_coefficients;     // (cell, [mu_t, lambda_t, mu_t / (Sc_t W)]), empty without LES
+        Kokkos::View<rtype *[3]>::host_mirror_type h_les_coefficients;
+        bool budget_pass = false;                      // calc_rhs evaluates kinetic_energy_budget
+        KineticEnergyBudget budget;
 
         // Gas mixtures
         ScalarView cell_scalars;                              // (cell, [Y_1 .. Y_Ns, gamma, e0])
