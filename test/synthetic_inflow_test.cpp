@@ -107,7 +107,9 @@ TEST(SyntheticInflowTest, InletPlaneReproducesTargetStressesAndScales) {
     std::ostringstream b;
     b.precision(17);
     b << "name = \"left\"\ntype = \"nscbc_inlet\"\nu = [" << U0 << ", 0.0" << (N_DIM == 3 ? ", 0.0" : "") << "]\n"
-      << "p = 1.0\nT = 1.0\nL = 1.0\n[turbulence]\nreynolds_stress = " << stress_list(R_xx, R_yy, R_zz, R_xy) << "\n";
+      << "p = 1.0\nT = 1.0\nL = 1.0\n[turbulence]\nreynolds_stress = " << stress_list(R_xx, R_yy, R_zz, R_xy)
+      // The plane mode removed by zero_net_flux carries about 4 L_y L_z / A of R_xx (2 L_y / W in 2D)
+      << "\nzero_net_flux = false\n";
     if constexpr (N_DIM == 3) {
         b << "length_scale = [[" << Lx_u << ", " << Ly_u << ", 0.15], [0.3, " << Ly_v << ", 0.1], [0.3, 0.15, 0.1]]\n";
     } else {

@@ -374,8 +374,13 @@ SyntheticInflow::SyntheticInflow(const toml::value & boundary, const std::string
         }
         axis_local = a;
     }
-    const int32_t axis_min = comm::allreduce(int32_t(axis_local), comm::Op::MIN);
-    const int32_t axis_max = comm::allreduce(int32_t(faces.empty() ? -1 : axis_local), comm::Op::MAX);
+    // A mesh that is not distributed is whole on every rank (also in a serial run under MPI)
+    const bool distributed = mesh.n_global_cells > 0;
+    int32_t axis_min = axis_local, axis_max = faces.empty() ? -1 : axis_local;
+    if (distributed) {
+        axis_min = comm::allreduce(axis_min, comm::Op::MIN);
+        axis_max = comm::allreduce(axis_max, comm::Op::MAX);
+    }
     if (axis_min != axis_max) {
         throw InputError(tw + ": synthetic turbulence needs a planar inlet normal to a coordinate axis.");
     }
@@ -396,8 +401,10 @@ SyntheticInflow::SyntheticInflow(const toml::value & boundary, const std::string
         FOR_I_DIM geometry.push_back(double(mesh.h_face_coords(f, i)));
         geometry.push_back(double(mesh.h_face_area(f)));
     }
-    keys = comm::allgatherv(keys);
-    geometry = comm::allgatherv(geometry);
+    if (distributed) {
+        keys = comm::allgatherv(keys);
+        geometry = comm::allgatherv(geometry);
+    }
     std::vector<size_t> order(keys.size());
     std::iota(order.begin(), order.end(), size_t(0));
     std::sort(order.begin(), order.end(), [&](size_t a, size_t b) { return keys[a] < keys[b]; });
@@ -666,7 +673,7 @@ void SyntheticInflow::random_plane(int64_t m, uint32_t slot) {
     Kokkos::parallel_for("inflow_random", Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {int(N_DIM), n_random}),
                          KOKKOS_LAMBDA(const int j, const int q) {
         int64_t g0 = q - pd[0], g1 = 0;
-        if constexpr (N_T == 2) {
+        if (N_T == 2) {
             g0 = q / np[N_T - 1] - pd[0];
             g1 = q % np[N_T - 1] - pd[N_T - 1];
         }

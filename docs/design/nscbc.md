@@ -50,9 +50,18 @@ velocity are continuous at contacts, `w-` is not. A hot front leaving
 through an outlet changes `Z` by a factor of two, and a stored `w-` would
 then put an O(`Z u`) pressure jump on the face.
 
-`p_b` and `u_b` start from the interior face state at the first step, and
-again after a restart. That is the only state, and restarts are therefore
-not bit-for-bit for runs with characteristic boundaries.
+`p_b` and `u_b` start from the interior face state at the first step. They
+are the only state, and restart files carry them per cell (`NSCBC_P_<j>`,
+`NSCBC_U_<j>` for the cell's `j`-th characteristic face in its face order),
+so restarted runs continue bitwise; a restart file without them starts them
+afresh from the interior.
+
+An inlet's target velocity is per face, and may vary in time (synthetic
+turbulence, [synthetic_inflow.md](synthetic_inflow.md)). Its change over the
+step enters the incoming wave as the target's own incoming wave,
+`-Z (u_n,t(t + dt) - u_n,t(t))`
+([Guézennec & Poinsot 2009](../references.md#guezennec-poinsot-2009)), so
+that the face follows the target without reflecting outgoing waves.
 
 This is the LODI relation of Poinsot & Lele itself. For a plane wave at
 normal incidence, `dw-/dt = -K p'` gives the reflection coefficient
