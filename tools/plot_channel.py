@@ -60,12 +60,12 @@ def read_profile(path, h):
     order = np.argsort(out["y"], kind="stable")
     folded = {k: v[order] for k, v in out.items()}
     # Average the mirror cells of the two halves
-    keys, idx = np.unique(np.round(folded["y"], 10), return_inverse=True)
+    _, idx = np.unique(np.round(folded["y"], 10), return_inverse=True)
     return {k: np.bincount(idx, v) / np.bincount(idx) for k, v in folded.items()}
 
 
-def read_forces(paths, t_start):
-    """Time and the mean viscous x-force per unit area on the walls from t_start (time-weighted)."""
+def read_forces(paths):
+    """Time and the sum of the viscous x-forces on the walls (one CSV per wall)."""
     out = []
     for p in paths:
         # step, t, F_pressure (3), F_viscous (3); runs started from a restart file write no header
@@ -104,7 +104,7 @@ def main():
     m_b = float(np.linalg.norm(inp["source"]["mass_flow"]))  # rho_b U_b
     ref = mkm(args.mkm)
 
-    t, F = read_forces(args.forces, args.t_start)
+    t, F = read_forces(args.forces)
     tau_t = F / (2 * Lx * Lz)  # both walls
     win = (t >= args.t_start) & (t <= (args.t_end if args.t_end is not None else np.inf))
     tau_w = np.trapezoid(tau_t[win], t[win]) / (t[win][-1] - t[win][0])
@@ -181,7 +181,8 @@ def main():
     a.plot(t * u_tau / h, Re_t, color="C0", lw=0.6)
     a.axvspan(args.t_start * u_tau / h, t[win][-1] * u_tau / h, color="C0", alpha=0.08, label="averaging window")
     a.axhline(178.12, color="k", lw=1.0, label="MKM")
-    a.set(xlabel="$t u_\\tau / h$", ylabel="$Re_\\tau(t)$ from the wall shear", title="Wall shear history", ylim=(140, 220))
+    a.set(xlabel="$t u_\\tau / h$", ylabel="$Re_\\tau(t)$ from the wall shear", title="Wall shear history",
+          ylim=(140, 220))
     a.legend(frameon=False)
     fig.suptitle(f"Channel flow, $Re_\\tau$ = {Re_tau:.1f}: Mallard vs Moser, Kim & Mansour (1999)")
     fig.tight_layout()
