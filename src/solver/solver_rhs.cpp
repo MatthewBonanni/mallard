@@ -15,6 +15,7 @@
 
 #include "flux_functor.h"
 #include "gradient.h"
+#include "launch_bounds.h"
 #include "viscous_flux.h"
 
 namespace {
@@ -33,9 +34,9 @@ struct OverList {
 template <typename F>
 void parallel_for_faces(const char * label, const F & f, Kokkos::View<uint32_t *> list, uint32_t n_faces) {
     if (list.extent(0) == 0) {
-        Kokkos::parallel_for(label, n_faces, f);
+        Kokkos::parallel_for(label, HeavyRange<>(0, n_faces), f);
     } else {
-        Kokkos::parallel_for(label, list.extent(0), OverList<F>{f, list});
+        Kokkos::parallel_for(label, HeavyRange<>(0, list.extent(0)), OverList<F>{f, list});
     }
 }
 
@@ -50,6 +51,36 @@ struct CellWFunctor {
         FOR_I_CONSERVATIVE cons[i] = solution(i_cell, i);
         physics.compute_W_from_conservatives(W_c, cons);
         FOR_I_CONSERVATIVE W(i_cell, i) = W_c[i];
+    }
+};
+
+/**
+ * @brief Geometric source of the radial momentum of axisymmetric flows from
+ *        cell values, (p - tau_thetatheta) A with the planar area A,
+ *        tau_thetatheta = mu (2 u_r / r - 2/3 div u) and div u = du_x/dx +
+ *        du_r/dr + u_r / r at the revolved centroid. Also stores mu for the
+ *        reconstruction's high-order source (viscous flows).
+ */
+struct GeometricSourceFunctor {
+    Euler physics;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W;
+    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;  // viscous, else empty
+    Kokkos::View<rtype *> area;
+    Kokkos::View<rtype *[N_DIM]> cell_coords;
+    Kokkos::View<rtype *> mu;
+    Kokkos::View<rtype *> source;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t c) const {
+        rtype p_eff = W(c, N_DIM + 1);
+        if (gradients.extent(0) > 0) {
+            const rtype m = physics.viscosity(W(c, N_DIM + 1) / (W(c, 0) * physics.R));
+            const rtype hoop = W(c, 2) / cell_coords(c, 1);
+            const rtype div = gradients(c, 1, 0) + gradients(c, 2, 1) + hoop;
+            p_eff -= m * (2.0_r * hoop - 2.0_r / 3.0_r * div);
+            mu(c) = m;
+        }
+        source(c) = p_eff * area(c);
     }
 };
 
@@ -93,6 +124,8 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
         face_reconstruction->calc_face_values(W_cells, face_solution);
     }
 
+    if (!budget_pass) update_characteristic_boundaries(t_stage);
+    if (hybrid_flux) update_upwind_sensor();
     switch (riemann_solver_type) {
         case RiemannSolverType::RUSANOV:
             launch_flux_functor<riemann::Rusanov>();
@@ -111,20 +144,35 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
             break;
     }
 
+    if (budget_pass) budget.convective = kinetic_energy_rate();
+    ViscousFluxFunctor viscous_functor;
     if (physics.is_viscous()) {
-        Kokkos::parallel_for("viscous_gradients", mesh->n_cells, viscous_gradient);
-        ViscousFluxFunctor viscous_functor{mesh->face_normals, mesh->face_area, mesh->face_coords,
-                                           mesh->cell_coords, mesh->cells_of_face, mesh->shifts, mesh->face_shift,
-                                           W_cells,
-                                           viscous_gradients, boundary_data, face_flux, physics};
+        if (!hybrid_flux) Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, mesh->n_cells), viscous_gradient);
+        if (les_on) update_eddy_viscosity(mesh->n_cells);
+        viscous_functor = ViscousFluxFunctor{mesh->face_normals, mesh->face_measure, mesh->face_coords,
+                                             mesh->cell_coords, mesh->cells_of_face, mesh->shifts, mesh->face_shift,
+                                             W_cells,
+                                             viscous_gradients, boundary_data, face_flux, physics, axisymmetric,
+                                             mesh->cell_covariance, les_coefficients};
         parallel_for_faces("viscous_flux", viscous_functor, rhs_faces, mesh->n_faces);
+        if (budget_pass) budget.viscous = kinetic_energy_rate() - budget.convective;
     }
 
     FaceFluxSumFunctor sum_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                    face_flux, rhs};
     Kokkos::parallel_for("face_flux_sum", n_owned, sum_functor);
 
-    Kokkos::View<rtype *> vol = mesh->cell_volume;
+    if (axisymmetric) {
+        Kokkos::View<rtype *> mu = physics.is_viscous() ? cell_mu : Kokkos::View<rtype *>();
+        Kokkos::parallel_for("geometric_source", n_owned,
+                             GeometricSourceFunctor{physics, W_cells,
+                                                    physics.is_viscous() ? viscous_gradients
+                                                                         : Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>(),
+                                                    mesh->cell_volume, mesh->cell_coords, mu, geometric_source});
+        add_geometric_source(rhs, mu);
+    }
+
+    Kokkos::View<rtype *> vol = mesh->cell_measure;
     if (has_gravity || !source_expressions.empty()) {
         update_source_field(t_stage);
         const bool gravity_on = has_gravity;
@@ -148,8 +196,33 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
         });
     }
 
+    if (hold_mass_flow) add_mass_flow_force(solution, rhs);
+
     Kokkos::parallel_for("rhs_divide_volume", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
         FOR_I_CONSERVATIVE rhs(i_cell, i) /= vol(i_cell);
+    });
+    apply_sponges(state, rhs_state);
+    if (budget_pass && les_on) {
+        // The SGS fluxes alone, into the face fluxes this evaluation no longer needs
+        Kokkos::deep_copy(face_flux, 0.0_r);
+        viscous_functor.sgs_only = true;
+        parallel_for_faces("viscous_flux", viscous_functor, rhs_faces, mesh->n_faces);
+        budget.sgs = kinetic_energy_rate();
+        budget.viscous -= budget.sgs;
+    }
+}
+
+void Solver::update_upwind_sensor() {
+    Kokkos::parallel_for("upwind_gradients", HeavyRange<>(0, mesh->n_cells), viscous_gradient);
+    Kokkos::parallel_for("upwind_sensor", mesh->n_cells,
+                         UpwindSensorFunctor{viscous_gradients, cell_upwind, hybrid_threshold, hybrid_floor});
+}
+
+void Solver::add_geometric_source(StateView rhs, Kokkos::View<rtype *, Kokkos::LayoutStride> mu) {
+    face_reconstruction->axisymmetric_source(W_cells, mu, geometric_source, mesh->n_owned());
+    Kokkos::View<rtype *> source = geometric_source;
+    Kokkos::parallel_for("add_geometric_source", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
+        rhs(c, 2) += source(c);
     });
 }
 
@@ -159,12 +232,13 @@ void Solver::launch_flux_functor() {
                                                     mesh->face_area,
                                                     mesh->cells_of_face,
                                                     face_reconstruction->quadrature_face.weights,
-                                                    face_reconstruction->face_quad_weights,
+                                                    flux_weights,
                                                     face_solution,
                                                     boundary_data,
                                                     W_cells,
                                                     face_flux,
                                                     physics.gamma,
-                                                    low_mach_cutoff};
+                                                    low_mach_cutoff,
+                                                    cell_upwind};
     parallel_for_faces("convective_flux", functor, rhs_faces, mesh->n_faces);
 }

@@ -22,21 +22,25 @@
 #include <toml.hpp>
 
 #include "data.h"
+#include "global_order.h"
 #include "mesh.h"
 
 enum class DataFormat {
     VTU,
     RESTART,
+    HDF5,
 };
 
 static const std::unordered_map<std::string, DataFormat> FORMAT_TYPES = {
     {"vtu", DataFormat::VTU},
     {"restart", DataFormat::RESTART},
+    {"hdf5", DataFormat::HDF5},
 };
 
 static const std::unordered_map<DataFormat, std::string> FORMAT_NAMES = {
     {DataFormat::VTU, "vtu"},
     {DataFormat::RESTART, "restart"},
+    {DataFormat::HDF5, "hdf5"},
 };
 
 /** @brief Named scalars of a restart file (version 3), e.g. the statistics' weight. */
@@ -106,8 +110,8 @@ class DataWriter {
         rtype next_time() const;
 
         /**
-         * @brief Continue numbering and the .pvd series of a previous run that
-         *        stopped at (step, t), whose snapshot at t was already written.
+         * @brief Continue numbering and the .pvd (.xmf) series of a previous
+         *        run that stopped at (step, t), whose snapshot at t was already written.
          */
         void resume(uint64_t step, rtype t);
 
@@ -126,6 +130,17 @@ class DataWriter {
         void write_restart(const std::string & filename, uint64_t step, rtype t,
                            const RestartAttributes & attributes) const;
         void write_pvd() const;
+
+        /**
+         * @brief HDF5 output: the mesh once (<prefix>_mesh.h5), then per
+         *        snapshot a file of cell fields, every array in global-id
+         *        order, and the XDMF indexes that let ParaView read them.
+         */
+        void write_hdf5_mesh();
+        void write_hdf5(const std::string & stem, uint64_t step, rtype t) const;
+        void write_xdmf(const std::string & stem) const;
+        std::string xdmf_grid(const std::string & stem, double t, const std::string & indent) const;
+        void resume_xdmf(rtype t);
 
         /**
          * @brief An output array: one scalar, or the N_DIM components of a
@@ -157,6 +172,10 @@ class DataWriter {
         void write_restart_distributed(const std::string & filename, uint64_t step, rtype t,
                                        const RestartAttributes & attributes) const;
         std::vector<uint32_t> geometry_faces;  // Empty: write all cells
+        // HDF5 output: owned cells in global order, and the sizes of the mesh written
+        GlobalOrder cell_order;
+        bool hdf5_mesh_written = false;
+        uint64_t hdf5_n_nodes = 0, hdf5_topology_size = 0;
 };
 
 #endif // DATA_WRITER_H

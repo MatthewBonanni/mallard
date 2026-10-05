@@ -20,6 +20,7 @@ add_library(MallardCore STATIC
     numerics/teno.cpp
     numerics/time_integrator.cpp
     physics/mixture.cpp
+    physics/les.cpp
     physics/physics.cpp
     solver/cell_chemistry.cpp
     solver/chemistry_benchmark.cpp
@@ -27,12 +28,16 @@ add_library(MallardCore STATIC
     solver/solver_chemistry.cpp
     solver/solver_initialize.cpp
     solver/solver_mixture.cpp
+    solver/solver_les.cpp
     solver/solver_rhs.cpp
+    solver/solver_sponge.cpp
     solver/statistics.cpp
     io/data_writer.cpp
+    io/data_writer_hdf5.cpp
     parallel/comm.cpp
     parallel/distribution.cpp
     parallel/distributed_mesh.cpp
+    parallel/global_order.cpp
     parallel/halo_exchange.cpp
     parallel/partition.cpp
 )

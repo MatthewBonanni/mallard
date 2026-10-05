@@ -56,6 +56,9 @@ static const std::unordered_map<MeshType, std::string> MESH_NAMES = {
     {MeshType::CARTESIAN_MIXED, "cartesian_mixed"}
 };
 
+/** @brief Tanh stretching factor of each direction of a generated mesh, 0 for uniform spacing. */
+using Stretching = std::array<rtype, 3>;
+
 enum class CellType {
     TRIANGLE,
     QUAD,
@@ -259,6 +262,16 @@ class Mesh {
         void compute_geometry();
 
         /**
+         * @brief Turn the planar 2D geometry into that of the solid of
+         *        revolution about the x axis (y = r >= 0), per radian:
+         *        cell_measure = int r dA, face_measure = r L (exact for
+         *        straight edges), and cell_coords become the r-weighted
+         *        centroids, where linear functions equal their r-weighted
+         *        averages. Planar areas, lengths and normals are kept.
+         */
+        void make_axisymmetric();
+
+        /**
          * @brief Tetrahedra of a 3D cell (see cell_tetrahedra).
          */
         void h_cell_tetrahedra(uint32_t i_cell, std::vector<std::array<std::array<double, 3>, 4>> & tets) const;
@@ -306,9 +319,11 @@ class Mesh {
          *        prisms (2) or pyramids (6, apex at the block center). The
          *        mixed type uses hexahedra, pyramids and prisms in thirds of x.
          *        Boundary zones: left/right (x), bottom/top (y), back/front (z).
+         *        Nodes are uniform, or clustered toward both ends of each
+         *        direction with a nonzero stretching factor (see stretched_coordinate).
          */
         void init_cart_3d(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rtype Ly, rtype Lz, MeshType kind,
-                          const std::vector<PeriodicPair> & periodic = {});
+                          const std::vector<PeriodicPair> & periodic = {}, const Stretching & stretching = {});
 
         /**
          * @brief A boundary face (2 nodes in 2D; 3 or 4 nodes in 3D) and its
@@ -396,9 +411,23 @@ class Mesh {
         // Cells [0, n_complete()) have all their vertex neighbors: all but the outermost halo layer
         uint32_t n_complete_cells = 0;
         uint32_t n_complete() const { return n_complete_cells ? n_complete_cells : n_cells; }
-        // Distributed runs: global id of every local cell and the global cell count (0 otherwise)
+        // Distributed runs: global id of every local cell and node, and the global counts (0 otherwise)
         std::vector<uint64_t> h_global_cell_id;
         uint64_t n_global_cells = 0;
+        std::vector<uint64_t> h_global_node_id;
+        uint64_t n_global_nodes = 0;
+        // Volume of each cell and area of each face in the flow's geometry: the
+        // revolved ones per radian in axisymmetric runs, else the same views as
+        // cell_volume and face_area
+        bool axisymmetric = false;
+        Kokkos::View<rtype *> cell_measure;
+        Kokkos::View<rtype *> face_measure;
+        Kokkos::View<rtype *>::host_mirror_type h_cell_measure;
+        Kokkos::View<rtype *>::host_mirror_type h_face_measure;
+        // Axisymmetric runs: r-weighted second central moments of each cell
+        // [xx, xy, yy] about its center (empty otherwise)
+        Kokkos::View<rtype *[3]> cell_covariance;
+        Kokkos::View<rtype *[3]>::host_mirror_type h_cell_covariance;
         Kokkos::View<rtype *[N_DIM]> node_coords;
         Kokkos::View<rtype *[N_DIM]> cell_coords;
         Kokkos::View<rtype *> cell_volume;

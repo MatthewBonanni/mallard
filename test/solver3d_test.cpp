@@ -41,7 +41,7 @@ struct Case3D {
                          "type = \"extrapolation\"\n", "type = \"extrapolation\"\n",
                          "type = \"extrapolation\"\n", "type = \"extrapolation\"\n"};
     std::string init;
-    std::string run = "n_steps = 10\ncfl = 0.5\n";
+    std::string run = "n_steps = 10\ncfl = 0.25\n";
     std::string physics = "type = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
     std::string extra;
 
@@ -143,7 +143,7 @@ TEST(Solver3DValidation, UnlimitedMUSCLKeepsAnAcousticPulseBoundedOnTetrahedra) 
     const std::string pulse = "exp(-50 * ((x - 0.5)^2 + (y - 0.5)^2 + (z - 0.5)^2))";
     c.init = "type = \"analytical\"\nrho = \"1.0 + 0.01 * " + pulse + "\"\n"
              "u = [\"0.0\", \"0.0\", \"0.0\"]\np = \"0.7142857142857143 * (1.0 + 0.014 * " + pulse + ")\"\n";
-    c.run = "t_stop = 4.0\ncfl = 0.5\n";
+    c.run = "t_stop = 4.0\ncfl = 0.25\n";
     auto solver = run_case(c);
     double u_max = 0.0;
     for (uint32_t i = 0; i < solver->get_mesh()->n_cells; i++) {
@@ -171,7 +171,7 @@ double sod_error(const std::string & mesh, const std::string & recon, uint32_t n
     c.set_all_bcs("type = \"symmetry\"\n");
     c.bc[2 * axis] = "type = \"extrapolation\"\n";
     c.bc[2 * axis + 1] = "type = \"extrapolation\"\n";
-    c.run = "t_stop = 0.2\ncfl = 0.5\n";
+    c.run = "t_stop = 0.2\ncfl = 0.25\n";
     const std::string s = std::string(1, "xyz"[axis]);
     c.init = "type = \"analytical\"\nrho = \"" + s + " < 0.5 ? 1.0 : 0.125\"\n"
              "u = [\"0.0\", \"0.0\", \"0.0\"]\np = \"" + s + " < 0.5 ? 1.0 : 0.1\"\n";
@@ -234,7 +234,7 @@ TEST(Solver3DValidation, SphericalBlastIsSymmetricUnderAxisPermutation) {
         c.n[0] = c.n[1] = c.n[2] = 6;
         c.recon = "MUSCL";
         c.set_all_bcs("type = \"symmetry\"\n");
-        c.run = "t_stop = 0.1\ncfl = 0.5\n";
+        c.run = "t_stop = 0.1\ncfl = 0.25\n";
         const std::string r2 = "((x - 0.5)^2 + (y - 0.5)^2 + (z - 0.5)^2)";
         c.init = "type = \"analytical\"\nrho = \"" + r2 + " < 0.04 ? 2.0 : 1.0\"\n"
                  "u = [\"0.0\", \"0.0\", \"0.0\"]\np = \"" + r2 + " < 0.04 ? 5.0 : 1.0\"\n";
@@ -267,23 +267,26 @@ TEST(Solver3DValidation, SphericalBlastIsSymmetricUnderAxisPermutation) {
 }
 
 TEST(Solver3DValidation, AnalyticalInitializationIntegratesPolynomialsExactly) {
-    // Degree-5 rule: the domain integral of a cubic is exact on every cell type,
-    // and on hexahedra so is each cell average
+    // Degree-5 rule: the domain integral of a quintic is exact on every cell
+    // type, and on hexahedra so is each cell average, also on subdivided
+    // tetrahedra (3: corner and inverted tetrahedra and octahedra)
     for (const std::string & mesh : MESHES) {
+    for (const int n_sub : {1, 3}) {
         Case3D c;
         c.mesh = mesh;
         c.n[0] = 2;
         c.n[1] = 3;
         c.n[2] = 2;
         c.set_all_bcs("type = \"symmetry\"\n");
-        c.init = "type = \"analytical\"\nrho = \"1 + x^2 * y + z^3\"\nu = [\"0\", \"0\", \"0\"]\np = \"1\"\n";
+        c.init = "type = \"analytical\"\nn_subdivisions = " + std::to_string(n_sub) +
+                 "\nrho = \"1 + x^2 * y + z^3 + x * y^2 * z^2 + y^5\"\nu = [\"0\", \"0\", \"0\"]\np = \"1\"\n";
         auto solver = init_case(c);
         solver->copy_device_to_host();
         auto m = solver->get_mesh();
         double total = 0.0;
         for (uint32_t i = 0; i < m->n_cells; i++) total += double(solver->h_conservatives(i, 0)) * double(m->h_cell_volume(i));
-        // int_0^1 int_0^1 int_0^1 (1 + x^2 y + z^3) = 1 + 1/6 + 1/4
-        EXPECT_NEAR(total, 1.0 + 1.0 / 6.0 + 0.25, roundoff(1e-12)) << mesh;
+        // int_0^1 int_0^1 int_0^1 (1 + x^2 y + z^3 + x y^2 z^2 + y^5) = 1 + 1/6 + 1/4 + 1/18 + 1/6
+        EXPECT_NEAR(total, 1.0 + 1.0 / 6.0 + 0.25 + 1.0 / 18.0 + 1.0 / 6.0, roundoff(1e-12)) << mesh << " " << n_sub;
         if (mesh != "cartesian") continue;
         for (uint32_t i = 0; i < m->n_cells; i++) {
             double lo[3] = {1e30, 1e30, 1e30}, hi[3] = {-1e30, -1e30, -1e30};
@@ -296,9 +299,11 @@ TEST(Solver3DValidation, AnalyticalInitializationIntegratesPolynomialsExactly) {
             auto mean_pow = [&](int d, int p) {
                 return (std::pow(hi[d], p + 1) - std::pow(lo[d], p + 1)) / ((p + 1) * (hi[d] - lo[d]));
             };
-            const double exact = 1.0 + mean_pow(0, 2) * mean_pow(1, 1) + mean_pow(2, 3);
-            EXPECT_NEAR(solver->h_conservatives(i, 0), exact, roundoff(1e-12)) << "cell " << i;
+            const double exact = 1.0 + mean_pow(0, 2) * mean_pow(1, 1) + mean_pow(2, 3) +
+                                 mean_pow(0, 1) * mean_pow(1, 2) * mean_pow(2, 2) + mean_pow(1, 5);
+            EXPECT_NEAR(solver->h_conservatives(i, 0), exact, roundoff(1e-12)) << "cell " << i << " " << n_sub;
         }
+    }
     }
 }
 
@@ -318,7 +323,7 @@ std::unique_ptr<Solver> couette(const std::string & mesh) {
     c.bc[4] = "type = \"wall_isothermal\"\nT = 1.0\n";
     c.bc[5] = "type = \"wall_isothermal\"\nT = 1.0\nu = [0.1, 0.05, 0.0]\n";
     c.init = "type = \"analytical\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\", \"0.0\"]\np = \"1.0\"\n";
-    c.run = "t_stop = 6.0\ncfl = 0.8\n";
+    c.run = "t_stop = 6.0\ncfl = 0.4\n";
     c.physics = "type = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 0.2\nPr = 0.72\n";
     return run_case(c);
 }
@@ -364,7 +369,7 @@ TEST_P(Couette3D, HeatFluxWallSetsTemperatureGradient) {
     c.bc[4] = "type = \"wall_heat_flux\"\nq = 0.2\n";
     c.bc[5] = "type = \"wall_isothermal\"\nT = 1.0\n";
     c.init = "type = \"analytical\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\", \"0.0\"]\np = \"1.0\"\n";
-    c.run = "t_stop = 12.0\ncfl = 0.8\n";
+    c.run = "t_stop = 12.0\ncfl = 0.4\n";
     c.physics = "type = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 0.2\nPr = 0.72\n";
     auto solver = run_case(c);
     const double kappa = 0.2 * 3.5 / 0.72;
@@ -392,12 +397,52 @@ TEST(Solver3DValidation, FlowStatisticsOfALinearVelocityField) {
     auto solver = init_case(c);
     const auto s = solver->integrate_flow_statistics();
     EXPECT_NEAR(s[1], 0.5 * (9.0 + 25.0 + 4.0), roundoff(1e-10));  // Enstrophy
+    EXPECT_NEAR(s[5], 9.0 + 25.0 + 4.0, roundoff(1e-10));         // |omega|^2
     EXPECT_NEAR(s[2], 1.0, roundoff(1e-10));                       // (div u)^2
     // Pressure from cell averages carries the same O(h^2) kinetic energy error
     EXPECT_NEAR(s[3], 2.0, 0.05);  // p div u
     // Kinetic energy from the cell averages of rho u misses their variance
     // within the cells: (8/3 + 3 + 25/3) / 2 = 7 minus O(h^2)
     EXPECT_NEAR(s[0], 7.0, 0.1);
+    EXPECT_NEAR(s[4], 14.0, 0.2);  // |u|^2
+}
+
+TEST(Solver3DValidation, FlowStatisticsOfDensityAndTemperature) {
+    // rho = 1 + x / 2 and p = 1 + y at rest with R = 1 on the unit cube:
+    // int rho^2 = 19 / 12, int T = 3 ln(3 / 2) and int T^2 = (7 / 3)(2 / 3),
+    // up to the O(h^2) error of cell averages
+    Case3D c;
+    c.n[0] = c.n[1] = c.n[2] = 8;
+    c.init = "type = \"analytical\"\nrho = \"1 + 0.5 * x\"\nu = [\"0.0\", \"0.0\", \"0.0\"]\np = \"1 + y\"\n";
+    c.extra = "[integrals]\nfile = \"" +
+              (std::filesystem::temp_directory_path() / "mallard_integrals_thermo.csv").string() + "\"\n";
+    auto solver = init_case(c);
+    const auto s = solver->integrate_flow_statistics();
+    EXPECT_NEAR(s[6], 19.0 / 12.0, 1e-3);
+    EXPECT_NEAR(s[7], 3.0 * std::log(1.5), 1e-3);
+    EXPECT_NEAR(s[8], 14.0 / 9.0, 2e-3);
+    EXPECT_NEAR(s[4], 0.0, roundoff(1e-14));
+}
+
+TEST(Solver3DValidation, QAndVorticityOutputOfALinearVelocityField) {
+    // u = (x + 2y - z, 3z - 2x, 5x + y): Q = -(d u_k / d x_i d u_i / d x_k) / 2
+    // = 5.5 and omega = (-2, -6, -4) in every cell, exact for least squares
+    Case3D c;
+    c.mesh = "cartesian_tet";
+    c.n[0] = c.n[1] = c.n[2] = 3;
+    const std::string u = "u = [\"x + 2 * y - z\", \"3 * z - 2 * x\", \"5 * x + y\"]\n";
+    c.set_all_bcs("type = \"dirichlet\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n");
+    c.init = "type = \"analytical\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n";
+    c.extra = "[[write_data]]\nprefix = \"" + (std::filesystem::temp_directory_path() / "mallard_vortex").string() +
+              "\"\nformat = \"vtu\"\ninterval = 1000000\nvariables = [\"Q\", \"VORTICITY\"]\n";
+    auto solver = init_case(c);
+    solver->copy_device_to_host();
+    const double expected[4] = {5.5, -2.0, -6.0, -4.0};
+    for (uint32_t i = 0; i < solver->get_mesh()->n_owned(); i++) {
+        for (int k = 0; k < 4; k++) {
+            EXPECT_NEAR(solver->h_vortex_fields(i, k), expected[k], roundoff(1e-10)) << "cell " << i << ", field " << k;
+        }
+    }
 }
 
 TEST(Solver3DValidation, TENOEnstrophyOfTheTaylorGreenVortex) {

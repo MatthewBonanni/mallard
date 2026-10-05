@@ -24,6 +24,7 @@
 
 #include "comm.h"
 #include "gmsh_fixtures.h"
+#include "hdf5_output.h"
 #include "mesh_block.h"
 #include "mpi_compare.h"
 #include "partition.h"
@@ -41,7 +42,7 @@ const char * BLAST =
 std::string box_input(const std::string & mesh, const std::string & recon, const std::string & physics,
                       const std::string & boundaries, uint32_t n_steps) {
     std::ostringstream s;
-    s << "[run]\nn_steps = " << n_steps << "\ncfl = 0.5\n"
+    s << "[run]\nn_steps = " << n_steps << "\ncfl = 0.25\n"
       << "[mesh]\ntype = \"" << mesh << "\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n"
       << "[initialize]\n" << BLAST << boundaries
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
@@ -57,6 +58,23 @@ std::string bcs(const char * left, const char * right, const char * top, const c
         s << "[[boundaries]]\nname = \"" << name << "\"\n" << type;
     }
     return s.str();
+}
+
+std::string mixture_input(const std::string & extra, const std::string & reconstruction,
+                          const std::string & chemistry, const std::string & type) {
+    return "[run]\nn_steps = 20\ncfl = 0.25\n"
+           "[mesh]\ntype = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n"
+           "[initialize]\ntype = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\n"
+           "u = [\"0.0\", \"y * 100.0\"]\n"
+           "X = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", N2 = \"x < 0.5 ? 0 : 1\" }\n"
+           "[[boundaries]]\nname = \"left\"\ntype = \"upt\"\nu = [100.0, 0.0]\np = 1.0e5\nT = 1000.0\n"
+           "X = { H2 = 2.0, O2 = 1.0 }\n"
+           "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+           "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
+           "[[boundaries]]\nname = \"top\"\ntype = \"p_out\"\np = 3.0e4\n"
+           "[numerics]\nriemann_solver = \"HLLC\"\n" + extra + "[numerics.face_reconstruction]\n" + reconstruction +
+           "[physics]\ntype = \"" + type + "\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
+           "[output]\ncheck_interval = 1000000\n" + chemistry;
 }
 
 const std::string EULER = "type = \"euler\"\n";
@@ -117,21 +135,7 @@ TEST(MPITest, GasMixtureMatchesSerial) {
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n", "euler"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes"}};
     for (const auto & [extra, reconstruction, chemistry, type] : schemes) {
-        const std::string input =
-            "[run]\nn_steps = 20\ncfl = 0.5\n"
-            "[mesh]\ntype = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n"
-            "[initialize]\ntype = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\n"
-            "u = [\"0.0\", \"y * 100.0\"]\n"
-            "X = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", N2 = \"x < 0.5 ? 0 : 1\" }\n"
-            "[[boundaries]]\nname = \"left\"\ntype = \"upt\"\nu = [100.0, 0.0]\np = 1.0e5\nT = 1000.0\n"
-            "X = { H2 = 2.0, O2 = 1.0 }\n"
-            "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
-            "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
-            "[[boundaries]]\nname = \"top\"\ntype = \"p_out\"\np = 3.0e4\n"
-            "[numerics]\nriemann_solver = \"HLLC\"\n" + extra + "[numerics.face_reconstruction]\n" + reconstruction +
-            "[physics]\ntype = \"" + type + "\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
-            "[output]\ncheck_interval = 1000000\n" + chemistry;
-        expect_matches_serial(input);
+        expect_matches_serial(mixture_input(extra, reconstruction, chemistry, type));
     }
 }
 
@@ -222,6 +226,60 @@ TEST(MPITest, NavierStokesWithBoundaryConditionsMatchesSerial) {
             "type = \"wall_isothermal\"\nT = 1.2\nu = [0.1, 0.0]\n",
             "type = \"wall_adiabatic\"\n"),
         25));
+}
+
+TEST(MPITest, LargeEddySimulationMatchesSerial) {
+    // Eddy viscosity of halo cells from their own gradients, as their owners'
+    for (const char * model : {"wale", "vreman"}) {
+        std::string input = box_input(
+            "cartesian_tri", "type = \"MUSCL\"\n", NS,
+            bcs("type = \"extrapolation\"\n", "type = \"p_out\"\np = 1.0\n", "type = \"wall_isothermal\"\nT = 1.2\n",
+                "type = \"wall_adiabatic\"\n"),
+            25);
+        const std::string u = "u = [\"0.3\", \"-0.1\"]\n";
+        input.replace(input.find(u), u.size(), "u = [\"0.3 + 0.4 * sin(9 * y)\", \"-0.1 + 0.3 * sin(7 * x + 2 * y)\"]\n");
+        expect_matches_serial(input + "[les]\nmodel = \"" + model + "\"\nC = 1.0\n");
+    }
+    expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "", "navier_stokes") + "[les]\nmodel = \"vreman\"\n");
+}
+
+TEST(MPITest, HybridConvectiveFluxMatchesSerial) {
+    // The sensor reads the gradients of halo-layer-1 cells, also with FO Euler
+    const std::string hybrid = "convective_flux = \"hybrid\"\n";
+    std::string input = box_input("cartesian_tri", "type = \"FO\"\n", EULER,
+                                  bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                                      "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 30);
+    input.replace(input.find("[numerics]\n"), 11, "[numerics]\n" + hybrid);
+    expect_matches_serial(input);
+    expect_matches_serial(mixture_input(hybrid, "type = \"MUSCL\"\n", "", "euler"));
+    expect_matches_serial(mixture_input(hybrid + "double_flux = true\n", "type = \"MUSCL\"\n", "", "euler"));
+}
+
+TEST(MPITest, CharacteristicBoundariesAndSpongesMatchSerial) {
+    // The transverse terms read the cells of neighboring boundary faces, which
+    // may be halo cells
+    const std::string sponge = "[[sponges]]\nstrength = \"x > 0.7 ? 5 * (x - 0.7) : 0\"\nu = [0.3, 0.0]\np = 1.0\n"
+                               "T = 1.0\n";
+    for (const std::string & recon : {std::string("type = \"MUSCL\"\n"), std::string("type = \"TENO\"\norder = 5\n")}) {
+        expect_matches_serial(box_input("cartesian_tri", recon, NS,
+                                        bcs("type = \"nscbc_inlet\"\nu = [0.3, 0.0]\np = 1.0\nT = 1.0\nL = 1.0\n"
+                                            "sigma_T = 1.0\nsigma_t = 1.0\n",
+                                            "type = \"nscbc_outlet\"\np = 1.0\nL = 1.0\n",
+                                            "type = \"nscbc_outlet\"\np = 1.0\nL = 1.0\nsigma = 2.0\nbeta = 0.5\n",
+                                            "type = \"wall_adiabatic\"\n"),
+                                        20) +
+                              sponge);
+    }
+}
+
+TEST(MPITest, AxisymmetricRunsMatchSerial) {
+    // Revolved geometry, r-weighted stencils, the high-order geometric source
+    // and the axis-corrected viscous gradients of halo cells
+    const std::string axis = "axisymmetric = true\n";
+    const std::string boundaries = bcs("type = \"extrapolation\"\n", "type = \"wall_adiabatic\"\n",
+                                       "type = \"wall_isothermal\"\nT = 1.2\n", "type = \"symmetry\"\n");
+    expect_matches_serial(box_input("cartesian_tri", "type = \"TENO\"\norder = 4\n", NS + axis, boundaries, 12));
+    expect_matches_serial(box_input("cartesian", "type = \"MUSCL\"\n", NS + axis, boundaries, 20));
 }
 
 TEST(MPITest, BoundaryConditionsSurviveTheHaloRebuild) {
@@ -417,6 +475,28 @@ TEST(MPITest, EveryCellIsInExactlyOneOutputPiece) {
     }
     EXPECT_EQ(total, n_global);
     EXPECT_NE(read(dir + "/f.pvd").find("f_000002.pvtu"), std::string::npos);
+}
+
+TEST(MPITest, HDF5OutputDoesNotDependOnTheRankCount) {
+    // Cells and nodes of every rank land at their global ids: triangles and
+    // quads, vectors, statistics and species
+    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
+#ifdef Mallard_HAS_HDF5
+    const std::string file = write_temp_shared("mallard_mpi_h5_output.msh", jittered_mixed_mesh(16));
+    std::string input = box_input("cartesian", "type = \"MUSCL\"\n", EULER,
+                                  bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                                      "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 6);
+    const std::string generated = "type = \"cartesian\"\n";
+    input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
+    expect_hdf5_output_matches_serial(input + "[statistics]\ninterval = 2\nfields = [\"P\"]\n",
+                                      "interval = 3\nvariables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n",
+                                      io_dir() + "_hdf5", {0, 3, 6});
+    std::string mixture = mixture_input("", "type = \"MUSCL\"\n", "", "euler");
+    mixture.replace(mixture.find("n_steps = 20"), 12, "n_steps = 4");
+    expect_hdf5_output_matches_serial(mixture, "interval = 4\nvariables = [\"T\", \"Y_*\"]\n",
+                                      io_dir() + "_hdf5_species", {0, 4});
+#endif
 }
 
 TEST(MPITest, GraphPartitionIsBalancedAndMatchesSerial) {

@@ -18,6 +18,8 @@
 #include <string>
 #include <vector>
 
+#include "data_writer.h"
+#include "mesh_block.h"
 #include "test_fixtures.h"
 #include "solver.h"
 
@@ -25,7 +27,7 @@ TEST(IOTest, BoundaryZoneOutputCarriesAdjacentCellValues) {
     const std::string dir = (std::filesystem::temp_directory_path() / "mallard_surface_test").string();
     std::filesystem::remove_all(dir);
     std::ostringstream s;
-    s << "[run]\nn_steps = 4\ncfl = 0.5\n"
+    s << "[run]\nn_steps = 4\ncfl = 0.25\n"
       << "[mesh]\ntype = \"wedge\"\nNx = 12\nNy = 6\nLx = 2.0\nLy = 1.5\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * x\"\nu = [\"1.5\", \"0.0\"]\np = \"1.0\"\n"
       << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
@@ -126,7 +128,7 @@ TEST(IOTest, FixedTimeStepIsOnlyShortenedToLandOnOutputs) {
 
 TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
     // Uniform flow u = 0.1, a = sqrt(1.4) on 0.25 x 0.5 cells: the CFL = 1 time
-    // step is V / sum_f (|u_n| + a) A_f = 0.125 / (0.1 + 1.5 a)
+    // step is 2 V / sum_f (|u_n| + a) A_f = 0.25 / (0.1 + 1.5 a)
     const std::string dir = (std::filesystem::temp_directory_path() / "mallard_cfl_output").string();
     std::filesystem::remove_all(dir);
     const std::string input =
@@ -144,7 +146,7 @@ TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
     Solver solver;
     solver.init(parse_toml(input));
     solver.run();
-    const double expected = 0.01 * (0.1 + 1.5 * std::sqrt(1.4)) / 0.125;
+    const double expected = 0.01 * (0.1 + 1.5 * std::sqrt(1.4)) / 0.25;
     for (const char * file : {"/wall_000000.vtu", "/wall_000001.vtu"}) {
         std::ifstream in(dir + file);
         ASSERT_TRUE(in.good()) << file;
@@ -166,7 +168,7 @@ TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
 
 TEST(IOTest, ZeroCheckIntervalIsRejected) {
     const std::string input =
-        "[run]\nn_steps = 1\ncfl = 0.5\n"
+        "[run]\nn_steps = 1\ncfl = 0.25\n"
         "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 1.0\nLy = 1.0\n"
         "[initialize]\ntype = \"constant\"\nu = [0.1, 0.0]\np = 1.0\nT = 1.0\n"
         "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
@@ -176,4 +178,43 @@ TEST(IOTest, ZeroCheckIntervalIsRejected) {
         "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
     EXPECT_NO_THROW(Solver().init(parse_toml(input)));
     EXPECT_THROW(Solver().init(parse_toml(input + "[output]\ncheck_interval = 0\n")), std::runtime_error);
+}
+
+TEST(IOTest, ResumedHDF5SeriesKeepsTheSnapshotsUpToTheRestartTime) {
+    // A run restarted at t = 0.1 rewrites the later snapshots: the XDMF time
+    // series lists each time once, and numbering continues from the restart
+    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_h5_resume").string();
+    std::filesystem::remove_all(dir);
+    auto mesh = make_mesh("cartesian_tri", 3, 2);
+    Kokkos::View<rtype **>::host_mirror_type values("values", mesh->n_cells, 1);
+    std::vector<Data> data = {Data("RHO", Kokkos::subview(values, Kokkos::ALL(), 0))};
+    const std::string input = "prefix = \"" + dir + "/f\"\nformat = \"hdf5\"\ntime_interval = 0.1\n"
+                              "variables = [\"RHO\"]\n";
+    {
+        DataWriter first;
+        first.init(parse_toml(input), data, mesh);
+        for (uint64_t step = 0; step < 4; step++) first.write(10 * step, 0.1 * step);
+    }
+    DataWriter second;
+    second.init(parse_toml(input), data, mesh);
+    second.resume(10, 0.1);
+    second.write(25, 0.2);
+
+    std::ifstream in(dir + "/f.xmf");
+    std::stringstream buffer;
+    buffer << in.rdbuf();
+    const std::string text = buffer.str();
+    std::vector<std::string> grids;
+    for (size_t at = 0; (at = text.find("<Grid Name=\"f_", at)) != std::string::npos; at++) {
+        grids.push_back(text.substr(at + 12, 8));
+    }
+    EXPECT_EQ(grids, (std::vector<std::string>{"f_000000", "f_000001", "f_000002"}));
+    std::vector<double> times;
+    for (size_t at = 0; (at = text.find("<Time Value=\"", at)) != std::string::npos; at++) {
+        times.push_back(std::stod(text.substr(at + 13)));
+    }
+    EXPECT_EQ(times, (std::vector<double>{0.0, double(rtype(0.1)), double(rtype(0.2))}));
+    EXPECT_TRUE(std::filesystem::exists(dir + "/f_mesh.h5"));
+    std::filesystem::remove_all(dir);
 }
