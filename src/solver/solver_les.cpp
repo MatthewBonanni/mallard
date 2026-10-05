@@ -245,7 +245,7 @@ struct ThickenFunctor {
 } // namespace
 
 void Solver::update_thickened_flame() {
-    halo.exchange(state());
+    // calc_dt has filled the halo of the state
     eddy_viscosity_of_state(mesh->n_cells);
     Kokkos::parallel_for("tfles_vorticity", mesh->n_cells, VorticityFunctor{transport_gradients, tfles_vorticity});
     // The vorticity of outer halo cells misses neighbors: take the owners' before differentiating it again
