@@ -511,13 +511,13 @@ namespace {
 double pressure_work(const Solver & solver, const double gamma) {
     const auto m = solver.get_mesh();
     auto state = [&](int32_t c, double * u, double & p) {
-        const double rho = solver.h_conservatives(c, 0);
+        const double rho = double(solver.h_conservatives(c, 0));
         double u2 = 0.0;
         FOR_I_DIM {
-            u[i] = solver.h_conservatives(c, 1 + i) / rho;
+            u[i] = double(solver.h_conservatives(c, 1 + i)) / rho;
             u2 += u[i] * u[i];
         }
-        p = (gamma - 1.0) * (solver.h_conservatives(c, N_DIM + 1) - 0.5 * rho * u2);
+        p = (gamma - 1.0) * (double(solver.h_conservatives(c, N_DIM + 1)) - 0.5 * rho * u2);
     };
     double sum = 0.0;
     for (uint32_t f = 0; f < m->n_faces; f++) {
@@ -556,7 +556,7 @@ TEST(HybridFlux, CentralFluxChangesKineticEnergyOnlyByThePressureWork) {
     const double work = pressure_work(*central, 1.4);
     double scale = 0.0;
     for (uint32_t c = 0; c < central->get_mesh()->n_owned(); c++) {
-        scale += std::abs(central->h_conservatives(c, 1)) * central->get_mesh()->h_cell_measure(c);
+        scale += double(std::abs(central->h_conservatives(c, 1)) * central->get_mesh()->h_cell_measure(c));
     }
     EXPECT_NEAR(central->kinetic_energy_budget().convective, work, precision_tol<double>(1e-12, 1e-5) * scale);
     // The Riemann solver dissipates on top of it
