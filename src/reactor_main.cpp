@@ -131,7 +131,8 @@ void run(const std::string & input_file) {
     const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     logging::items({
         {"Final T", brief(T) + " K"},
-        {"Ignition delay", T > T0 + 400.0 ? brief(observer.t_ignition) + " s (max dT/dt)" : "none (T rose < 400 K)"},
+        {"Ignition delay", observer.ignited() ? brief(observer.t_ignition) + " s (max dT/dt)"
+                                              : "none (dT/dt has not peaked and fallen to half its peak)"},
         {"Sub-steps", std::to_string(steps) + " accepted, " + std::to_string(rejected) + " rejected"},
         {"Wall time", brief(wall) + " s"},
     });
