@@ -223,8 +223,9 @@ struct PointState {
 };
 
 /**
- * @brief Average of f over a 2D cell: a fan of triangles from node 0, each
- *        split into n_sub^2 sub-triangles carrying the rule quad.
+ * @brief Average of f over a 2D cell (r-weighted in axisymmetric runs): a fan
+ *        of triangles from node 0, each split into n_sub^2 sub-triangles
+ *        carrying the rule quad.
  */
 template <typename F>
 void cell_average_2d(const Mesh & mesh, const TriangleDunavant & quad, double weight_sum, uint32_t n_sub,
@@ -232,7 +233,7 @@ void cell_average_2d(const Mesh & mesh, const TriangleDunavant & quad, double we
     const uint32_t n_quad = quad.h_weights.extent(0);
     const uint32_t n_nodes = mesh.h_n_nodes_of_cell(i_cell);
     std::fill(s.sum.begin(), s.sum.end(), 0.0);
-    double area_sum = 0.0;
+    double area_sum = 0.0, revolved_sum = 0.0;
     const uint32_t n0 = mesh.h_node_of_cell(i_cell, 0);
     for (uint32_t k = 1; k + 1 < n_nodes; k++) {
         const uint32_t n1 = mesh.h_node_of_cell(i_cell, k);
@@ -265,8 +266,13 @@ void cell_average_2d(const Mesh & mesh, const TriangleDunavant & quad, double we
                     for (uint32_t q = 0; q < n_quad; q++) {
                         const double xi = double(quad.h_points(q, 0));
                         const double eta = double(quad.h_points(q, 1));
-                        f(s, o[0] + xi * d1[0] + eta * d2[0], o[1] + xi * d1[1] + eta * d2[1], 0.0);
-                        const double w = double(quad.h_weights(q)) / weight_sum * sub_area;
+                        const double y = o[1] + xi * d1[1] + eta * d2[1];
+                        f(s, o[0] + xi * d1[0] + eta * d2[0], y, 0.0);
+                        double w = double(quad.h_weights(q)) / weight_sum * sub_area;
+                        if (mesh.axisymmetric) {
+                            w *= y;
+                            revolved_sum += w;
+                        }
                         for (size_t i = 0; i < s.sum.size(); i++) s.sum[i] += w * double(s.cons[i]);
                     }
                     area_sum += sub_area;
@@ -274,7 +280,8 @@ void cell_average_2d(const Mesh & mesh, const TriangleDunavant & quad, double we
             }
         }
     }
-    for (double & v : s.sum) v /= area_sum;
+    const double measure = mesh.axisymmetric ? revolved_sum : area_sum;
+    for (double & v : s.sum) v /= measure;
 }
 
 /**

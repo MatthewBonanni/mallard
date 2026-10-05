@@ -120,6 +120,7 @@ translation = [1.0, 0.0]
 | `phase` | (`mixture`) Phase of the file to use; default the first |
 | `transport` | (`mixture`, `navier_stokes`) `mixture_averaged` (default: Wilke viscosity, Mathur conductivity, mixture-averaged diffusion coefficients), `unity_lewis` (diffusion coefficients `lambda / (rho cp)`) or `constant_lewis` (`lambda / (rho cp Le_k)`), as Cantera's models, from the species' transport data in the file |
 | `lewis` | (`constant_lewis`) Lewis numbers by species, e.g. `lewis = { H2 = 0.3, H = 0.18 }`; others 1 |
+| `axisymmetric` | (2D) `true` for flows symmetric about the x axis without swirl (default `false`); see below |
 
 Gas mixtures (`gas = "mixture"`) react when the input has a `[chemistry]`
 table, and need the `Rusanov`, `HLL` or `HLLC` Riemann solver; any face
@@ -138,6 +139,20 @@ limiter per cell (MUSCL), or the stencils TENO chose for the contact field
 also flags cells by jumps of the molar mass). The scheme is conservative: at contacts between gases of different
 `cp / cv` (e.g. cold hydrogen and hot air) the pressure is perturbed at the
 percent level on coarse meshes; `double_flux` (in `[numerics]`) removes that.
+
+### Axisymmetric flows
+
+With `axisymmetric = true` the 2D mesh is the meridian half-plane of a body
+of revolution: x is the axial coordinate and y the radius, so every node needs
+`y >= 0`. Boundary faces on the axis (`y = 0`) must be `symmetry`; nothing
+crosses them. The solver integrates over each cell's solid of revolution:
+cell values are r-weighted averages (analytical initial conditions are
+averaged that way), and fluxes, sources, forces (`[[forces]]`), `[integrals]`
+and conserved totals are per radian of the revolved domain (multiply forces by
+`2 pi` for the force on the 3D body; only the axial component is meaningful).
+`u` is `[u_x, u_r]`. Every reconstruction, Riemann solver, viscous and
+mixture model, chemistry and MPI work as in planar runs; meshes cannot be
+periodic in y. Method and accuracy: `docs/design/axisymmetric.md`.
 
 ## `[initialize]`
 
@@ -242,7 +257,8 @@ last step, and the summary the chemistry's share of the wall time.
 ## `[[forces]]`
 
 Write the force of the fluid on a boundary zone to a CSV file
-(`step, t, Fx_pressure, Fy_pressure, Fx_viscous, Fy_viscous`, per unit depth; in
+(`step, t, Fx_pressure, Fy_pressure, Fx_viscous, Fy_viscous`, per unit depth, or per radian for
+axisymmetric flows; in
 3D `step, t, Fx_pressure, Fy_pressure, Fz_pressure, Fx_viscous, Fy_viscous, Fz_viscous`).
 
 | Key | Description |

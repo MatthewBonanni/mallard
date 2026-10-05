@@ -91,6 +91,15 @@ the Riemann solver.
 - Transmissive faces take the face values and gradients of their image face, as the convective flux does.
 - Stress follows the Stokes hypothesis; heat flux uses a constant Prandtl number. Viscosity is constant or follows Sutherland's law ([Sutherland 1893](../references.md#sutherland-1893)).
 
+## Axisymmetric flows
+
+With `[physics] axisymmetric = true`, cells are integrated over their solids
+of revolution about the x axis (per radian): r-weighted cell averages,
+revolved volumes and face areas, and the radial momentum source
+`int (p - tau_thetatheta) dA`, made high order from TENO's polynomials. TENO's
+least squares fit r-weighted averages, and second-order operators work at
+r-weighted centroids. See [the design notes](../design/axisymmetric.md).
+
 ## Known limitations
 
 - The scheme is not exactly well balanced: hydrostatic states carry small spurious velocities, which vanish at second order under refinement (wall ghosts continue the hydrostatic pressure gradient).

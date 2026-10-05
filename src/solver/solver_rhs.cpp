@@ -54,6 +54,36 @@ struct CellWFunctor {
     }
 };
 
+/**
+ * @brief Geometric source of the radial momentum of axisymmetric flows from
+ *        cell values, (p - tau_thetatheta) A with the planar area A,
+ *        tau_thetatheta = mu (2 u_r / r - 2/3 div u) and div u = du_x/dx +
+ *        du_r/dr + u_r / r at the revolved centroid. Also stores mu for the
+ *        reconstruction's high-order source (viscous flows).
+ */
+struct GeometricSourceFunctor {
+    Euler physics;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W;
+    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;  // viscous, else empty
+    Kokkos::View<rtype *> area;
+    Kokkos::View<rtype *[N_DIM]> cell_coords;
+    Kokkos::View<rtype *> mu;
+    Kokkos::View<rtype *> source;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t c) const {
+        rtype p_eff = W(c, N_DIM + 1);
+        if (gradients.extent(0) > 0) {
+            const rtype m = physics.viscosity(W(c, N_DIM + 1) / (W(c, 0) * physics.R));
+            const rtype hoop = W(c, 2) / cell_coords(c, 1);
+            const rtype div = gradients(c, 1, 0) + gradients(c, 2, 1) + hoop;
+            p_eff -= m * (2.0_r * hoop - 2.0_r / 3.0_r * div);
+            mu(c) = m;
+        }
+        source(c) = p_eff * area(c);
+    }
+};
+
 } // namespace
 
 void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
@@ -114,10 +144,11 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
 
     if (physics.is_viscous()) {
         Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, mesh->n_cells), viscous_gradient);
-        ViscousFluxFunctor viscous_functor{mesh->face_normals, mesh->face_area, mesh->face_coords,
+        ViscousFluxFunctor viscous_functor{mesh->face_normals, mesh->face_measure, mesh->face_coords,
                                            mesh->cell_coords, mesh->cells_of_face, mesh->shifts, mesh->face_shift,
                                            W_cells,
-                                           viscous_gradients, boundary_data, face_flux, physics};
+                                           viscous_gradients, boundary_data, face_flux, physics, axisymmetric,
+                                           mesh->cell_covariance};
         parallel_for_faces("viscous_flux", viscous_functor, rhs_faces, mesh->n_faces);
     }
 
@@ -125,7 +156,17 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
                                    face_flux, rhs};
     Kokkos::parallel_for("face_flux_sum", n_owned, sum_functor);
 
-    Kokkos::View<rtype *> vol = mesh->cell_volume;
+    if (axisymmetric) {
+        Kokkos::View<rtype *> mu = physics.is_viscous() ? cell_mu : Kokkos::View<rtype *>();
+        Kokkos::parallel_for("geometric_source", n_owned,
+                             GeometricSourceFunctor{physics, W_cells,
+                                                    physics.is_viscous() ? viscous_gradients
+                                                                         : Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>(),
+                                                    mesh->cell_volume, mesh->cell_coords, mu, geometric_source});
+        add_geometric_source(rhs, mu);
+    }
+
+    Kokkos::View<rtype *> vol = mesh->cell_measure;
     if (has_gravity || !source_expressions.empty()) {
         update_source_field(t_stage);
         const bool gravity_on = has_gravity;
@@ -154,13 +195,21 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
     });
 }
 
+void Solver::add_geometric_source(StateView rhs, Kokkos::View<rtype *, Kokkos::LayoutStride> mu) {
+    face_reconstruction->axisymmetric_source(W_cells, mu, geometric_source, mesh->n_owned());
+    Kokkos::View<rtype *> source = geometric_source;
+    Kokkos::parallel_for("add_geometric_source", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
+        rhs(c, 2) += source(c);
+    });
+}
+
 template <typename T_riemann_solver>
 void Solver::launch_flux_functor() {
     ConvectiveFluxFunctor<T_riemann_solver> functor{mesh->face_normals,
                                                     mesh->face_area,
                                                     mesh->cells_of_face,
                                                     face_reconstruction->quadrature_face.weights,
-                                                    face_reconstruction->face_quad_weights,
+                                                    flux_weights,
                                                     face_solution,
                                                     boundary_data,
                                                     W_cells,
