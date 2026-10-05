@@ -243,6 +243,18 @@ TEST(MPITest, LargeEddySimulationMatchesSerial) {
     expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "", "navier_stokes") + "[les]\nmodel = \"vreman\"\n");
 }
 
+TEST(MPITest, HybridConvectiveFluxMatchesSerial) {
+    // The sensor reads the gradients of halo-layer-1 cells, also with FO Euler
+    const std::string hybrid = "convective_flux = \"hybrid\"\n";
+    std::string input = box_input("cartesian_tri", "type = \"FO\"\n", EULER,
+                                  bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                                      "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 30);
+    input.replace(input.find("[numerics]\n"), 11, "[numerics]\n" + hybrid);
+    expect_matches_serial(input);
+    expect_matches_serial(mixture_input(hybrid, "type = \"MUSCL\"\n", "", "euler"));
+    expect_matches_serial(mixture_input(hybrid + "double_flux = true\n", "type = \"MUSCL\"\n", "", "euler"));
+}
+
 TEST(MPITest, CharacteristicBoundariesAndSpongesMatchSerial) {
     // The transverse terms read the cells of neighboring boundary faces, which
     // may be halo cells

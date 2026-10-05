@@ -19,6 +19,7 @@
 #include <sstream>
 #include <string>
 
+#include "exact_riemann.h"
 #include "input.h"
 #include "les.h"
 #include "solver.h"
@@ -503,3 +504,110 @@ TEST(LESMixture, SchmidtNumberActsOnCompositionGradientsOnly) {
     }
     EXPECT_GT(species_effect, 1e-9);
 }
+
+namespace {
+
+/** @brief Sum over faces of A mean(p) (u_1 - u_0) . n: the pressure work of a two-point flux of Jameson's form. */
+double pressure_work(const Solver & solver, const double gamma) {
+    const auto m = solver.get_mesh();
+    auto state = [&](int32_t c, double * u, double & p) {
+        const double rho = solver.h_conservatives(c, 0);
+        double u2 = 0.0;
+        FOR_I_DIM {
+            u[i] = solver.h_conservatives(c, 1 + i) / rho;
+            u2 += u[i] * u[i];
+        }
+        p = (gamma - 1.0) * (solver.h_conservatives(c, N_DIM + 1) - 0.5 * rho * u2);
+    };
+    double sum = 0.0;
+    for (uint32_t f = 0; f < m->n_faces; f++) {
+        double u0[N_DIM], u1[N_DIM], p0, p1, n2 = 0.0, du_n = 0.0;
+        state(m->h_cells_of_face(f, 0), u0, p0);
+        state(m->h_cells_of_face(f, 1), u1, p1);
+        FOR_I_DIM {
+            n2 += double(m->h_face_normals(f, i)) * double(m->h_face_normals(f, i));
+            du_n += (u1[i] - u0[i]) * double(m->h_face_normals(f, i));
+        }
+        sum += double(m->h_face_area(f)) * 0.5 * (p0 + p1) * du_n / std::sqrt(n2);
+    }
+    return sum;
+}
+
+std::string with_flux(std::string input, const std::string & numerics, const std::string & reconstruction) {
+    input.replace(input.find("[numerics]\n"), 11, "[numerics]\n" + numerics);
+    const std::string muscl = "type = \"MUSCL\"\nlimiter = \"none\"\n";
+    input.replace(input.find(muscl), muscl.size(), reconstruction);
+    return input;
+}
+
+} // namespace
+
+TEST(HybridFlux, CentralFluxChangesKineticEnergyOnlyByThePressureWork) {
+    // First-order reconstruction: the face states are the cell values, so
+    // KEEP's momentum flux C mean(u) + mean(p) n leaves the pressure work as
+    // the whole convective kinetic-energy rate, on any mesh
+    const uint32_t n = N_DIM == 2 ? 12 : 6;
+    const std::string box = periodic_box(MESH, n, "", "", "n_steps = 0\ncfl = 0.5\n");
+    // A threshold of 1 never selects the Riemann solver
+    auto central = make_solver(with_flux(box, "convective_flux = \"hybrid\"\n", "type = \"FO\"\n") +
+                               "[numerics.hybrid]\nsensor_threshold = 1.0\n");
+    auto upwind = make_solver(with_flux(box, "", "type = \"FO\"\n"));
+    central->copy_device_to_host();
+    const double work = pressure_work(*central, 1.4);
+    double scale = 0.0;
+    for (uint32_t c = 0; c < central->get_mesh()->n_owned(); c++) {
+        scale += std::abs(central->h_conservatives(c, 1)) * central->get_mesh()->h_cell_measure(c);
+    }
+    EXPECT_NEAR(central->kinetic_energy_budget().convective, work, precision_tol<double>(1e-12, 1e-5) * scale);
+    // The Riemann solver dissipates on top of it
+    EXPECT_LT(upwind->kinetic_energy_budget().convective, work - 1e-3 * scale);
+}
+
+#if Mallard_DIM == 2
+
+namespace {
+
+/** @brief L1 density error of Sod's problem against the exact solution, and the largest density. */
+std::pair<double, double> sod(const std::string & numerics) {
+    std::string input = "[run]\nt_stop = 0.2\ncfl = 0.5\n[mesh]\ntype = \"cartesian_tri\"\nNx = 200\nNy = 2\nLx = 1.0\n"
+                        "Ly = 0.01\n[initialize]\ntype = \"analytical\"\nrho = \"x < 0.5 ? 1.0 : 0.125\"\n"
+                        "u = [\"0.0\", \"0.0\"]\np = \"x < 0.5 ? 1.0 : 0.1\"\n"
+                        "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
+                        "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+                        "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
+                        "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+                        "[numerics]\nriemann_solver = \"HLLC\"\n" + numerics +
+                        "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+                        "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+                        "[output]\ncheck_interval = 1000000\n";
+    auto solver = make_solver(input);
+    solver->run();
+    solver->copy_device_to_host();
+    ExactRiemann exact(1.0, 0.0, 1.0, 0.125, 0.0, 0.1, 1.4);
+    const auto m = solver->get_mesh();
+    double err = 0.0, vol = 0.0, rho_max = 0.0;
+    for (uint32_t c = 0; c < m->n_cells; c++) {
+        double rho, u, p;
+        exact.sample((double(m->h_cell_coords(c, 0)) - 0.5) / double(solver->get_time()), rho, u, p);
+        err += std::abs(double(solver->h_conservatives(c, 0)) - rho) * double(m->h_cell_volume(c));
+        vol += double(m->h_cell_volume(c));
+        rho_max = std::max(rho_max, double(solver->h_conservatives(c, 0)));
+    }
+    return {err / vol, rho_max};
+}
+
+} // namespace
+
+TEST(HybridFlux, ShocksKeepTheRiemannSolver) {
+    const auto [riemann_error, riemann_max] = sod("");
+    const auto [hybrid_error, hybrid_max] = sod("convective_flux = \"hybrid\"\n");
+    // Without the sensor, the central flux alone oscillates at the shock
+    const auto [central_error, central_max] = sod("convective_flux = \"hybrid\"\n[numerics.hybrid]\nsensor_threshold = 1.0\n");
+    // The contact and the expansion stay central: a little less sharp, overshoot under 1%
+    EXPECT_LT(hybrid_error, 2.0 * riemann_error);
+    EXPECT_LT(hybrid_max, 1.01);
+    EXPECT_GT(central_error, 2.0 * hybrid_error) << central_max;
+    (void)riemann_max;
+}
+
+#endif

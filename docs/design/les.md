@@ -2,7 +2,7 @@
 
 Status: proposed. Recommendations are marked **Decision**; the alternatives
 considered are listed with each. Implementation follows the
-[stages](#9-stages), one pull request each; done: 1.
+[stages](#9-stages), one pull request each; done: 1, 2.
 
 Mallard resolves every scale it computes today (DNS of flames, detonations,
 Taylor-Green and isotropic turbulence). This document adds large-eddy
@@ -353,7 +353,18 @@ at every face quadrature point, with the same reconstructed states.
   reported separately in validation via scalar variance decay where
   relevant.
 - The low-Mach correction acts on the Riemann part only.
-- Double flux: the blend applies to both of a face's fluxes.
+- Double flux: the blend applies to both of a face's fluxes, each central flux
+  with its own side's frozen thermodynamics on both sides.
+- Boundary faces other than walls and symmetry planes (whose mirror ghost
+  states make the central flux exact: no mass flux, the pressure force)
+  keep the Riemann solver.
+- As implemented (stage 2): contacts and expansions are central, so on
+  Sod's problem (MUSCL, 200 cells) the L1 density error is 1.8 times the
+  Riemann solver's, with a 0.1% overshoot at the contact; without the
+  sensor (central everywhere) the shock oscillates and the error is more
+  than twice the hybrid's. With first-order reconstruction the convective
+  kinetic-energy rate equals the pressure work to round-off on triangles
+  and tetrahedra (tested).
 
 Stability. The central flux has no dissipation, so the SGS model and the
 molecular viscosity are the only sinks at the cutoff, which is the intended
