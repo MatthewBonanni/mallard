@@ -2,16 +2,20 @@
 """Animate the sphere wake at Re = 300: Q-criterion isosurfaces and the force history.
 
     animate_sphere_re300.py SOLUT_DIR FORCES.csv OUTPUT_BASE [--q 0.02] [--u 0.2]
-        [--width 1920] [--fps 15] [--orbit 120] [--hold 2] [--gif-width 640]
-        [--gif-every 2] [--t-start 600] [--prefix sphere]
+        [--spacing 0.02] [--sigma 1.5] [--width 1920] [--fps 15] [--orbit 120]
+        [--hold 2] [--gif-width 640] [--gif-every 2] [--t-start 600] [--prefix sphere]
     animate_sphere_re300.py --extract SOLUT_DIR SURFACE_DIR [--q 0.02] [--u 0.2]
 
 SOLUT_DIR holds the volume VTU (or PVTU) series of examples/sphere_re300 with
-U. Each snapshot is clipped to the near wake, Q = (|Omega|^2 - |S|^2) / 2 of
-the velocity (interpolated to the vertices) is contoured at Q (in units of
-(U / D)^2, U the free-stream speed) and colored by the streamwise velocity,
-with the sphere, while the camera orbits the wake; the panels on the right
-trace the drag and lift coefficients from t-start (solver time, D / a) on.
+U and Q, the Q-criterion from the solver's velocity gradients. Each snapshot
+is resampled near the wake onto a uniform grid of the given spacing (in D),
+smoothed by a Gaussian of sigma grid spacings, and Q is contoured there at
+--q (in units of (U / D)^2, U the free-stream speed), colored by the
+streamwise velocity, with the sphere, while the camera orbits the wake;
+the panels on the right trace the drag and lift coefficients from t-start
+(solver time, D / a) on. The tetrahedra make a piecewise-constant field
+whose contours would follow their facets; the resampling and filter remove
+that without moving the isosurfaces by more than about sigma * spacing.
 Writes OUTPUT_BASE.mp4 (H.264, CRF 18), OUTPUT_BASE.gif (if --gif-width >
 0) and a still of the last frame, OUTPUT_BASE_still.png. Needs pyvista besides
 the packages in tools/README.md.
@@ -33,6 +37,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pyvista as pv
 from PIL import Image
+from scipy.ndimage import gaussian_filter
 
 from animate import write_gif, write_mp4
 from plot_sphere_re300 import REFERENCES, load
@@ -51,38 +56,52 @@ def snapshot_files(solut, prefix):
     return [(float(t), os.path.join(solut, f)) for t, f in entries if os.path.exists(os.path.join(solut, f))]
 
 
-def q_surface(path, q_level):
+def q_surface(path, q_level, spacing, sigma):
     mesh = pv.read(path)
     if path.endswith(".vtp"):
         return mesh
+    if "Q" not in mesh.cell_data:
+        raise SystemExit(f"{path} has no Q: add \"Q\" to the variables of [[write_data]]")
+    lo, hi = np.array(BOUNDS[0::2]), np.array(BOUNDS[1::2])
+    margin = 4 * (sigma + 1) * spacing
     c = mesh.cell_centers().points
-    inside = np.all((c >= np.array(BOUNDS[0::2])) & (c <= np.array(BOUNDS[1::2])), axis=1)
+    near = np.all((c >= lo - margin) & (c <= hi + margin), axis=1)
+    mesh = mesh.extract_cells(np.flatnonzero(near))
+    for name in list(mesh.cell_data.keys()):
+        if name not in ("Q", "U"):
+            del mesh.cell_data[name]
+    # The pieces of a parallel output repeat the points they share
+    mesh = mesh.clean().cell_data_to_point_data(pass_cell_data=False)
+    n = np.round((hi - lo) / spacing).astype(int) + 1
+    grid = pv.ImageData(dimensions=n, spacing=(spacing,) * 3, origin=lo)
+    grid = grid.sample(mesh)
+    shape = tuple(n[::-1])  # ImageData points run fastest in x
+    valid = np.asarray(grid.point_data["vtkValidPointMask"]).reshape(shape) > 0
+    q = np.where(valid, np.asarray(grid.point_data["Q"]).reshape(shape), 0.0)
+    ux = np.where(valid, np.asarray(grid.point_data["U"])[:, 0].reshape(shape), 0.0)
     # The boundary layer carries Q ~ 0 of either sign: leave it out so that it
     # does not wrap the sphere in a sheath
-    inside &= np.linalg.norm(c, axis=1) > R_SHEATH
-    mesh = mesh.extract_cells(np.flatnonzero(inside))
-    mesh = mesh.cell_data_to_point_data(pass_cell_data=False)
-    mesh = mesh.compute_derivative(scalars="U", gradient="G")
-    g = np.asarray(mesh.point_data["G"]).reshape(-1, 3, 3)  # g[:, k, i] = d u_k / d x_i
-    S = 0.5 * (g + g.transpose(0, 2, 1))
-    W = 0.5 * (g - g.transpose(0, 2, 1))
-    mesh.point_data["Q"] = 0.5 * ((W ** 2).sum((1, 2)) - (S ** 2).sum((1, 2)))
-    mesh.point_data["UX"] = np.asarray(mesh.point_data["U"])[:, 0]
-    surf = mesh.contour([q_level], scalars="Q")
-    if surf.n_points > 0:
-        surf = surf.smooth_taubin(n_iter=30, pass_band=0.1)
+    r = np.linalg.norm(np.asarray(grid.points), axis=1).reshape(shape)
+    q[r < R_SHEATH] = min(q_level, 0.0) - 1.0
+    if sigma > 0:
+        q = gaussian_filter(q, sigma)
+        ux = gaussian_filter(ux, sigma)
+    out = pv.ImageData(dimensions=n, spacing=(spacing,) * 3, origin=lo)
+    out.point_data["Q"] = q.ravel()
+    out.point_data["UX"] = ux.ravel()
+    surf = out.contour([q_level], scalars="Q")
     for name in list(surf.point_data.keys()):
         if name != "UX":
             del surf.point_data[name]
     return surf
 
 
-def extract(solut, out, prefix, q_level):
+def extract(solut, out, prefix, q_level, spacing, sigma):
     os.makedirs(out, exist_ok=True)
     entries = []
     for k, (t, path) in enumerate(snapshot_files(solut, prefix)):
         name = f"q_{k:05d}.vtp"
-        q_surface(path, q_level).save(os.path.join(out, name))
+        q_surface(path, q_level, spacing, sigma).save(os.path.join(out, name))
         entries.append(f'    <DataSet timestep="{t:.10g}" file="{name}"/>')
         print(f"{name}: t = {t:.4g}", flush=True)
     with open(os.path.join(out, "q.pvd"), "w") as f:
@@ -153,8 +172,10 @@ def main():
     ap.add_argument("--prefix", default="sphere")
     ap.add_argument("--q", type=float, default=0.02, help="Isosurface level of Q, in (U / D)^2")
     ap.add_argument("--u", type=float, default=0.2, help="Free-stream speed")
+    ap.add_argument("--spacing", type=float, default=0.02, help="Sampling grid spacing, in D")
+    ap.add_argument("--sigma", type=float, default=1.5, help="Gaussian filter width, in grid spacings")
     ap.add_argument("--t-start", type=float, default=600.0, help="Start of the force panels (solver time)")
-    ap.add_argument("--subtitle", default="Q isosurfaces colored by streamwise velocity")
+    ap.add_argument("--subtitle", help="Default: the isosurface level and coloring")
     ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--fps", type=int, default=15)
     ap.add_argument("--orbit", type=float, default=120.0, help="Camera orbit about the stream axis, degrees")
@@ -163,7 +184,7 @@ def main():
     ap.add_argument("--gif-every", type=int, default=2, help="Use every n-th frame in the GIF")
     args = ap.parse_args()
     if args.extract:
-        extract(*args.extract, args.prefix, args.q * args.u ** 2)
+        extract(*args.extract, args.prefix, args.q * args.u ** 2, args.spacing, args.sigma)
         return
     if not args.output:
         ap.error("SOLUT_DIR, FORCES.csv and OUTPUT_BASE are required")
@@ -181,10 +202,11 @@ def main():
     plotter = pv.Plotter(off_screen=True, window_size=(w3d, H))
     plotter.set_background(BG)
     plotter.enable_anti_aliasing("ssaa")
-    title = ("Sphere at Re = 300, M = 0.2", args.subtitle)
+    subtitle = args.subtitle or f"Q = {args.q:g} (U/D)² isosurfaces, colored by streamwise velocity"
+    title = ("Sphere at Re = 300, M = 0.2", subtitle)
     with tempfile.TemporaryDirectory() as tmp:
         for k, (t_file, path) in enumerate(files):
-            surf = q_surface(path, args.q * args.u ** 2)
+            surf = q_surface(path, args.q * args.u ** 2, args.spacing, args.sigma)
             angle = args.orbit * k / max(len(files) - 1, 1)
             left = render_3d(plotter, surf, args.u, angle)
             right = render_panels(t_file * args.u, tu, C[:, 0], cl, args.t_start * args.u, (W - w3d, H), 100, title)
