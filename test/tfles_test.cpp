@@ -116,8 +116,8 @@ TEST(ThickenedFlame, ReactionRatesAreDividedByTheThickening) {
         diff = std::max(diff, std::abs(double(thick.h_species(0, k) - plain.h_species(0, k))));
     }
     EXPECT_GT(change, 1e-4);  // the mixture reacts
-    EXPECT_LT(diff, 1e-6 * change);
-    EXPECT_NEAR(thick.get_time(), 4.0 * plain.get_time(), 1e-15);
+    EXPECT_LT(diff, precision_tol<double>(1e-6, 1e-5) * change);
+    EXPECT_NEAR(double(thick.get_time()), 4.0 * double(plain.get_time()), precision_tol<double>(1e-15, 1e-9));
 }
 
 TEST(ThickenedFlame, InputErrors) {
