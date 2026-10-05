@@ -24,6 +24,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
   - Second-order MUSCL with least-squares gradients and Barth-Jespersen or Venkatakrishnan limiting
   - TENO-E of orders 3 to 6 ([Liang, Shyy & Fu, J. Sci. Comput. 2025](https://doi.org/10.1007/s10915-025-02918-w)): k-exact least squares on a large central stencil and one sector stencil per face, a density-based troubled-cell indicator, characteristic-wise stencil selection with an adaptive cutoff, and mirror ghost cells at boundaries
 - Riemann solvers: Rusanov, HLL, HLLC, Roe, and the carbuncle-free rotated-hybrid HLL-Roe
+- Large-eddy simulation with explicit subgrid-scale models (Sigma, WALE, Vreman, Smagorinsky) for single gases and reacting mixtures, and a run-time kinetic-energy budget that separates the model's dissipation from the scheme's ([design](docs/design/les.md))
 - Source terms: gravity and arbitrary expressions
 - Time integration: forward Euler, SSPRK3, RK4, with the time step set by a CFL number
 - Boundary conditions: transmissive, symmetry, adiabatic, isothermal and heat-flux walls (optionally moving), inflow with fixed velocity, pressure and temperature, pressure outlet, partially non-reflecting characteristic (NSCBC) inlets and outlets with transverse terms, and time-dependent states given as expressions; zones can be split between conditions; periodic boundaries (generated meshes, or paired zones of mesh files); sponge layers

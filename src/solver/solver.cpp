@@ -84,6 +84,7 @@ int Solver::init(const toml::value & input_in) {
     setup.reset();
     timed_phase("fields and output", [&] {
         allocate_memory();
+        init_les();
         statistics.init(input, species_names, mesh->n_cells);
         init_rhs_split();
         init_sources();
@@ -779,6 +780,11 @@ void Solver::init_output() {
             viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
             viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
         }
+        integral_monitor.budget = toml::find_or<bool>(input, "integrals", "budget", false);
+        if (integral_monitor.budget && axisymmetric) {
+            throw InputError("integrals.budget is for planar runs (the geometric source of axisymmetric runs is not "
+                             "in it).");
+        }
         const std::string file = toml::find_or<std::string>(input, "integrals", "file", "integrals.csv");
         integral_monitor.file = file;
         if (comm::is_root()) {
@@ -790,7 +796,11 @@ void Solver::init_output() {
             if (!resume) {
                 *integral_monitor.out << "step,t,kinetic_energy,enstrophy,dilatation_squared,pressure_dilatation,"
                                           "velocity_squared,vorticity_squared,density_squared,temperature,"
-                                          "temperature_squared\n";
+                                          "temperature_squared"
+                                       << (integral_monitor.budget ? ",ke_rate_convective,ke_rate_viscous,ke_rate_sgs,"
+                                                                     "eps_numerical"
+                                                                   : "")
+                                       << "\n";
             }
         }
     }
@@ -922,6 +932,11 @@ void Solver::copy_device_to_host() {
     }
     Kokkos::deep_copy(h_primitives, primitives);
     Kokkos::deep_copy(h_cfl_local, cfl_local);
+    if (les_on) {
+        halo.exchange(state());
+        eddy_viscosity_of_state(mesh->n_cells);
+        Kokkos::deep_copy(h_les_coefficients, les_coefficients);
+    }
     statistics.copy_device_to_host();
     if (p_max.is_allocated()) Kokkos::deep_copy(h_p_max, p_max);
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
@@ -965,6 +980,7 @@ void Solver::register_data() {
         data.push_back(Data(PRIMITIVE_NAMES[i], Kokkos::subview(h_primitives, Kokkos::ALL(), i)));
     }
     data.push_back(Data("CFL", h_cfl_local));
+    if (les_on) data.push_back(Data("MU_T", Kokkos::subview(h_les_coefficients, Kokkos::ALL(), 0)));
     statistics.register_data(data);
     if (p_max.is_allocated()) data.push_back(Data("P_MAX", h_p_max));
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
@@ -1186,6 +1202,7 @@ void Solver::print_setup() const {
     if (t_wall_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("wall ") + logging::duration(double(t_wall_stop));
     logging::item("Stop at", stop);
     if (check_nan) logging::item("NaN check", "every step");
+    if (les_on) logging::items(les.summary());
     if (double_flux) logging::item("Double flux", "frozen gamma and e0 per cell and step (not energy conservative)");
     if (reacting) {
         logging::item("Chemistry", std::to_string(kinetics.n_reactions) + " reactions, Strang splitting" +
@@ -1405,6 +1422,8 @@ struct TimeStepFunctor {
     Kokkos::View<rtype *> dt_local;
     Euler physics;
     Kokkos::View<rtype *[N_DIM]> radius_coords;  // axisymmetric runs: cell_coords, else empty
+    Kokkos::View<rtype *[3]> sgs;                // LES: (cell, [mu_t, ...]), else empty
+    rtype Pr_t = 1.0_r;
 
     KOKKOS_INLINE_FUNCTION
     rtype wave_speed(const int32_t i_cell, const rtype * n) const {
@@ -1439,7 +1458,12 @@ struct TimeStepFunctor {
             physics.compute_W_from_conservatives(W, cons);
             const rtype T = W[N_DIM + 1] / (W[0] * physics.R);
             const rtype mu = physics.viscosity(T);
-            const rtype coeff = Kokkos::fmax(4.0_r / 3.0_r, physics.gamma / physics.Pr) * mu / W[0];
+            rtype coeff = Kokkos::fmax(4.0_r / 3.0_r, physics.gamma / physics.Pr) * mu / W[0];
+            if (sgs.extent(0) > 0) {
+                const rtype mu_t = sgs(i_cell, 0);
+                coeff = Kokkos::fmax(4.0_r / 3.0_r * (mu + mu_t), physics.gamma * (mu / physics.Pr + mu_t / Pr_t)) /
+                        W[0];
+            }
             sum += 4.0_r * coeff * sum_area2 / cell_volume(i_cell);
             if (radius_coords.extent(0) > 0) {
                 // Decay of u_r by the hoop stress
@@ -1464,7 +1488,10 @@ rtype Solver::calc_dt_cfl1() {
                             conservatives,
                             cfl_local,
                             physics,
-                            axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>()};
+                            axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(),
+                            les_coefficients,
+                            les.Pr_t};
+    if (les_on) eddy_viscosity_of_state(mesh->n_owned());
     rtype dt_min = std::numeric_limits<rtype>::max();
     Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor, Kokkos::Min<rtype>(dt_min));
     return comm::allreduce(dt_min, comm::Op::MIN);
@@ -1680,9 +1707,16 @@ std::array<rtype, N_FLOW_STATISTICS> Solver::integrate_flow_statistics() {
 void Solver::write_integrals() {
     if (integral_monitor.interval == 0 || step % integral_monitor.interval != 0) return;
     const auto sums = integrate_flow_statistics();
+    KineticEnergyBudget rates;
+    if (integral_monitor.budget) rates = kinetic_energy_budget();
     if (!integral_monitor.out) return;
     *integral_monitor.out << step << "," << std::setprecision(12) << t;
     for (const rtype s : sums) *integral_monitor.out << "," << s;
+    if (integral_monitor.budget) {
+        // The exact convective rate is the pressure-dilatation work; the rest is numerical
+        *integral_monitor.out << "," << rates.convective << "," << rates.viscous << "," << rates.sgs << ","
+                              << sums[3] - rates.convective;
+    }
     *integral_monitor.out << "\n";
     integral_monitor.out->flush();
 }
