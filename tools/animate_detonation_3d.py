@@ -20,7 +20,6 @@ seconds), OUTPUT_BASE.gif (if --gif-width > 0) and OUTPUT_BASE_still.png
 """
 import argparse
 import glob
-import json
 import os
 import shutil
 import tempfile
@@ -150,7 +149,6 @@ def compose(img, frame, foils, i_start, norm, front_clim, path, width):
     cb.set_label("pressure behind the shock (kPa)", color=FG, fontsize=9)
     cb.ax.tick_params(colors=FG, labelsize=8)
     n = foils["bottom"].shape[0]
-    x0 = i_start * dx
     for k, wall in enumerate(WALLS):
         ax = fig.add_axes([0.625, 0.08 + 0.2 * (3 - k), 0.36, 0.165], facecolor=BG)
         ax.imshow(np.log(np.maximum(foils[wall][i_start:].T, 1.0)), origin="lower", cmap=soot_cmap(), norm=norm,
