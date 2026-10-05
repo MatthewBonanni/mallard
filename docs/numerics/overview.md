@@ -47,7 +47,7 @@ the vortex tolerates 15-45% more.
 | TENO 3 | 1.33 / 1.43 | 1.36 / 1.52 | 1.32 / 1.47 | 1.49 / 1.67 | 1.35 / 1.49 |
 | TENO 4 | 1.32 / 1.47 | 1.32 / 1.47 | 1.33 / 1.47 | 1.32 / 1.46 | 1.33 / 1.46 |
 | TENO 5 | 1.38 / 1.53 | 1.47 / 1.59 | 1.47 / 1.64 | 1.55 / 1.71 | 1.43 / 1.58 |
-| TENO 6 | 1.33 / 1.46 | 1.44 / 1.59 | 1.33 / 1.47 | TET6 | 1.32 / 1.47 |
+| TENO 6 | 1.33 / 1.46 | 1.44 / 1.59 | 1.33 / 1.47 | 1.36 / 1.50 | 1.32 / 1.47 |
 
 The first-order limits are the integrator's own: on quads and hexahedra the
 odd-even (checkerboard) acoustic mode has the eigenvalue `-2 cfl` in this
