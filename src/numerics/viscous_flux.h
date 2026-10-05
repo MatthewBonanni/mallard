@@ -132,6 +132,8 @@ struct ViscousFluxFunctor {
     Euler physics;
     bool axisymmetric = false;            // face_area is then the revolved area
     Kokkos::View<rtype *[3]> covariance;  // axisymmetric: Mesh::cell_covariance
+    Kokkos::View<rtype *[3]> sgs;         // LES: (cell, [mu_t, lambda_t, -]), else empty
+    bool sgs_only = false;                // LES budget: the SGS stress and heat flux alone
 
     static constexpr uint8_t NQ = N_DIM + 1;  // [u, T]
 
@@ -203,6 +205,7 @@ struct ViscousFluxFunctor {
         bool heat_flux_given = false;
         rtype heat_flux = 0.0;   // Into the domain
         bool symmetry = false;
+        bool wall = false;
 
         if (c1 >= 0) {
             interior_face(i_face, q_f, g_f);
@@ -213,6 +216,7 @@ struct ViscousFluxFunctor {
                 FOR_I_DIM g_f[k][i] = g0[k][i];
             }
             if (bc.is_wall()) {
+                wall = true;
                 rtype dn = 0.0;
                 FOR_I_DIM dn += (face_coords(i_face, i) - cell_coords(c0, i)) * n[i];
                 for (uint8_t k = 0; k < N_DIM; k++) q_f[k] = bc.data[1 + k];
@@ -241,8 +245,22 @@ struct ViscousFluxFunctor {
             }
         }
 
-        const rtype mu = physics.viscosity(q_f[N_DIM]);
-        const rtype kappa = physics.conductivity(mu);
+        rtype mu = physics.viscosity(q_f[N_DIM]);
+        rtype kappa = physics.conductivity(mu);
+        if (sgs.extent(0) > 0) {
+            // The wall shear stress and heat flux are molecular
+            rtype mu_t = 0.0_r, kappa_t = 0.0_r;
+            if (c1 >= 0) {
+                mu_t = 0.5_r * (sgs(c0, 0) + sgs(c1, 0));
+                kappa_t = 0.5_r * (sgs(c0, 1) + sgs(c1, 1));
+            } else if (!wall) {
+                mu_t = sgs(c0, 0);
+                kappa_t = sgs(c0, 1);
+            }
+            if (sgs_only) mu = kappa = 0.0_r;
+            mu += mu_t;
+            kappa += kappa_t;
+        }
         rtype tau_n[N_DIM];
         viscous_traction(mu, g_f, n, tau_n, axisymmetric ? hoop_divergence(face_coords(i_face, 1), q_f, g_f) : 0.0_r);
         rtype q_n = kappa * dot<N_DIM>(g_f[N_DIM], n);

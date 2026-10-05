@@ -33,6 +33,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Finite-rate chemistry: elementary, three-body, falloff, PLOG and Chebyshev reactions; a Rosenbrock (RODAS) integrator per cell with analytical Jacobians, Strang-split from the flow; ignition delays match Cantera up to 1268 species
 - Mixture-averaged, unity-Lewis or constant-Lewis transport
 - Gravity and arbitrary source terms
+- Large-eddy simulation with explicit subgrid-scale models (Sigma, WALE, Vreman, Smagorinsky) for single gases and mixtures, and a run-time kinetic-energy budget that separates the model's dissipation from the scheme's ([design](docs/design/les.md))
 
 **Boundary conditions**
 - Slip, adiabatic, isothermal and heat-flux walls, optionally moving

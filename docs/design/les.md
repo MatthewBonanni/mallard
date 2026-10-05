@@ -2,7 +2,7 @@
 
 Status: proposed. Recommendations are marked **Decision**; the alternatives
 considered are listed with each. Implementation follows the
-[stages](#9-stages), one pull request each.
+[stages](#9-stages), one pull request each; done: 1.
 
 Mallard resolves every scale it computes today (DNS of flames, detonations,
 Taylor-Green and isotropic turbulence). This document adds large-eddy
@@ -132,7 +132,8 @@ scale correctly near walls. Properties of a model's `D(g)` (Nicoud et al.
 | Zero in solid rotation | yes | **no** | **no** | yes |
 | Zero in pure shear | **no** | yes | yes | yes |
 | Zero for two-component / 2D flows | **no** | **no** | **no** | yes |
-| Zero for isotropic or axisymmetric expansion | **no** | **no** | **no** | yes |
+| Zero for isotropic expansion | **no** | yes | **no** | yes |
+| Zero for axisymmetric expansion | **no** | **no** | **no** | yes |
 | Near-wall `nu_t ~ y^3` | **no** (`y^0`) | yes | **no** (`y^1`) | yes |
 | Galilean and rotation invariant | yes | yes | yes | yes |
 
@@ -386,25 +387,34 @@ Alternatives considered:
 - `les.h`: the models as one POD with `KOKKOS_INLINE_FUNCTION nu_t(g,
   Delta)`, captured by value like `Euler`.
 - `Delta` per cell, computed once at setup (`V^(1/d)`).
-- **Single gas**: after the viscous gradients, a cell kernel stores
-  `mu_t = rho nu_t` (all local cells, so halo cells next to owned faces have
-  it, from the same gradients as their owners). `ViscousFluxFunctor` adds
-  the face mean of the two cells' `mu_t` to `mu` and `cp mu_t / Pr_t` to the
-  conductivity. Wall faces get `mu_t = 0` (the wall shear stress is the
-  molecular one; Sigma and WALE are `O(y^3)` there anyway). Other boundary
+- **SGS coefficients** per cell, `[mu_t, lambda_t, mu_t / (Sc_t W)]`
+  (`les_coefficients`), computed after the viscous gradients of each RHS on
+  all local cells, so halo cells next to owned faces have them from the same
+  gradients as their owners. Single gases take `lambda_t = cp mu_t / Pr_t`
+  with the constant `cp`; mixtures each cell's `cp(T, Y)` and mean molar mass
+  `W`.
+- **Viscous fluxes**: `ViscousFluxFunctor` and `MixtureViscousFluxFunctor`
+  add the face means of the SGS coefficients to `mu`, the conductivity and
+  (mixtures) every species' `rho D_k W_k / W` (as `W_k mu_t / (Sc_t W)`).
+  The molecular coefficients and their output (`MU`, `LAMBDA`, `D_k`) are
+  untouched. Wall faces get no SGS flux (the wall shear stress and heat flux
+  are molecular; Sigma and WALE are `O(y^3)` there anyway); other boundary
   faces take the cell's value.
-- **Mixtures**: after the transport gradients, the same kernel adds `mu_t`
-  to `MU`, `cp mu_t / Pr_t` to `LAMBDA` and `mu_t / Sc_t W_k / W` to every
-  species' `rho D_k W_k / W`; the mixture viscous kernel is unchanged.
-- **Time step**: `nu_eff` includes `4/3 nu_t` and `gamma nu_t / Pr_t`
-  (`D_t` for mixtures). The eddy viscosity is recomputed from the state in
-  `calc_dt` (one gradient evaluation per step), so a restarted run takes
+- **Time step**: single gases use `max(4/3 (mu + mu_t), gamma (mu / Pr +
+  mu_t / Pr_t)) / rho`; mixtures grow `nu_eff` by `max(4/3 nu_t, lambda_t /
+  (rho cv), nu_t / Sc_t)`. The eddy viscosity is recomputed from the state
+  in `calc_dt` (one gradient evaluation per step), so a restarted run takes
   exactly the time steps of the uninterrupted one.
-- **Axisymmetric runs**: the hoop stress uses `mu + mu_t`.
+- **Axisymmetric runs** are not supported (LES of turbulence is
+  three-dimensional; the hoop terms would need `mu_t` in the reconstruction's
+  geometric source).
 - **Output**: `MU_T` (cell eddy viscosity).
 - **Budget**: `[integrals] budget = true` adds the columns
   `ke_rate_convective, ke_rate_viscous, ke_rate_sgs` (the `dK/dt|_R` of
-  section 4.2) and `eps_numerical = pressure_dilatation - ke_rate_convective`.
+  section 4.2) and `eps_numerical = pressure_dilatation - ke_rate_convective`,
+  from one extra RHS evaluation that neither updates the mixture
+  temperature seeds nor advances the characteristic boundaries, so output
+  does not change the solution.
 - Without `[les]` no new kernel runs and no view is allocated; the existing
   kernels take the empty-view branch, so results are byte-identical.
 

@@ -160,6 +160,8 @@ struct MixtureViscousFluxFunctor {
     Kokkos::View<rtype ***, Kokkos::LayoutRight> slots;
     bool axisymmetric = false;            // face_area is then the revolved area
     Kokkos::View<rtype *[3]> covariance;  // axisymmetric: Mesh::cell_covariance
+    Kokkos::View<rtype *[3]> sgs;         // LES: (cell, [mu_t, lambda_t, mu_t / (Sc_t W)]), else empty
+    bool sgs_only = false;                // LES budget: the SGS fluxes alone
 
     static constexpr uint8_t NQ = N_DIM + 1;  // [u, T]
 
@@ -279,7 +281,14 @@ struct MixtureViscousFluxFunctor {
         auto coefficient = [&](const uint8_t m) {
             return two_cells ? 0.5_r * (coefficients(G.c0, m) + coefficients(G.c1, m)) : coefficients(c0, m);
         };
-        const rtype mu = coefficient(MU);
+        // SGS coefficients: zero on walls, whose fluxes are molecular
+        const bool les = sgs.extent(0) > 0;
+        auto sgs_coefficient = [&](const uint8_t m) {
+            if (!les || wall) return 0.0_r;
+            return two_cells ? 0.5_r * (sgs(G.c0, m) + sgs(G.c1, m)) : sgs(c0, m);
+        };
+        const rtype molecular = sgs_only ? 0.0_r : 1.0_r;
+        const rtype mu = les ? molecular * coefficient(MU) + sgs_coefficient(0) : coefficient(MU);
         rtype tau_n[N_DIM];
         viscous_traction(mu, g_f, n, tau_n, axisymmetric ? hoop_divergence(face_coords(i_face, 1), q_f, g_f) : 0.0_r);
         if (symmetry) {
@@ -293,7 +302,8 @@ struct MixtureViscousFluxFunctor {
         rtype energy = dot<N_DIM>(q_f, tau_n);
 
         if (mode != Mode::NONE) {
-            energy += coefficient(LAMBDA) * dot<N_DIM>(g_f[N_DIM], n);
+            const rtype lambda = les ? molecular * coefficient(LAMBDA) + sgs_coefficient(1) : coefficient(LAMBDA);
+            energy += lambda * dot<N_DIM>(g_f[N_DIM], n);
             // Species: j_k . n = -c_k dX_k/dn + Y_k sum_j c_j dX_j/dn with c_k = rho D_k W_k / W
             const uint32_t ns = gas.n_species;
             auto dX_dn = [&](const uint32_t k) {
@@ -307,8 +317,10 @@ struct MixtureViscousFluxFunctor {
                 }
                 return static_cast<double>(dot<N_DIM>(g, n));
             };
+            const double rho_D_t = static_cast<double>(sgs_coefficient(2));
             auto c_k = [&](const uint32_t k) {
-                return two_cells ? 0.5 * (diffusion(G.c0, k) + diffusion(G.c1, k)) : diffusion(c0, k);
+                const double c = two_cells ? 0.5 * (diffusion(G.c0, k) + diffusion(G.c1, k)) : diffusion(c0, k);
+                return les ? static_cast<double>(molecular) * c + rho_D_t * gas.transport.W(k) : c;
             };
             auto Y_k = [&](const uint32_t k) {
                 return two_cells ? 0.5 * (static_cast<double>(scalars(G.c0, k)) + static_cast<double>(scalars(G.c1, k)))

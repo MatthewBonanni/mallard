@@ -67,6 +67,25 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="sutherland-1893"></a>W. Sutherland, The viscosity of gases and molecular force, *Phil. Mag.* (5) 36, 507–531 (1893). [doi:10.1080/14786449308620508](https://doi.org/10.1080/14786449308620508)
   Used in: `viscosity_model = "sutherland"`.
 
+## Large-eddy simulation
+
+- <a id="smagorinsky-1963"></a>J. Smagorinsky, General circulation experiments with the primitive equations, *Mon. Weather Rev.* 91, 99–164 (1963). [doi:10.1175/1520-0493(1963)091<0099:GCEWTP>2.3.CO;2](https://doi.org/10.1175/1520-0493%281963%29091%3C0099%3AGCEWTP%3E2.3.CO%3B2)
+  Used in: `[les] model = "smagorinsky"`.
+- <a id="deardorff-1970"></a>J. W. Deardorff, A numerical study of three-dimensional turbulent channel flow at large Reynolds numbers, *J. Fluid Mech.* 41, 453–480 (1970). [doi:10.1017/S0022112070000691](https://doi.org/10.1017/S0022112070000691)
+  Used in: the LES filter width `V^(1/3)`.
+- <a id="nicoud-ducros-1999"></a>F. Nicoud and F. Ducros, Subgrid-scale stress modelling based on the square of the velocity gradient tensor, *Flow Turbul. Combust.* 62, 183–200 (1999). [doi:10.1023/A:1009995426001](https://doi.org/10.1023/A:1009995426001)
+  Used in: `[les] model = "wale"`.
+- <a id="vreman-2004"></a>A. W. Vreman, An eddy-viscosity subgrid-scale model for turbulent shear flow: algebraic theory and applications, *Phys. Fluids* 16, 3670–3681 (2004). [doi:10.1063/1.1785131](https://doi.org/10.1063/1.1785131)
+  Used in: `[les] model = "vreman"`.
+- <a id="nicoud-2011"></a>F. Nicoud, H. Baya Toda, O. Cabrit, S. Bose and J. Lee, Using singular values to build a subgrid-scale model for large eddy simulations, *Phys. Fluids* 23, 085106 (2011). [doi:10.1063/1.3623274](https://doi.org/10.1063/1.3623274)
+  Used in: `[les] model = "sigma"` (the default in 3D), its constant and the closed-form singular values; the table of model properties checked in `test/les_test.cpp`.
+- <a id="vreman-geurts-kuerten-1995"></a>B. Vreman, B. Geurts and H. Kuerten, Subgrid-modelling in LES of compressible flow, *Appl. Sci. Res.* 54, 191–203 (1995). [doi:10.1007/BF00849116](https://doi.org/10.1007/BF00849116)
+  Used in: the SGS terms of the filtered energy equation that are kept and neglected.
+- <a id="garnier-adams-sagaut-2009"></a>E. Garnier, N. Adams and P. Sagaut, *Large Eddy Simulation for Compressible Flows*, Springer (2009). [doi:10.1007/978-90-481-2819-8](https://doi.org/10.1007/978-90-481-2819-8)
+  Used in: the Favre-filtered equations and the eddy-viscosity closure of the SGS heat flux.
+- <a id="ghosal-1996"></a>S. Ghosal, An analysis of numerical errors in large-eddy simulations of turbulence, *J. Comput. Phys.* 125, 187–206 (1996). [doi:10.1006/jcph.1996.0088](https://doi.org/10.1006/jcph.1996.0088)
+  Used in: the motivation of the kinetic-energy budget (`[integrals] budget`), which separates the scheme's dissipation from the model's.
+
 ## Boundary conditions
 
 - <a id="poinsot-lele-1992"></a>T. J. Poinsot and S. K. Lele, Boundary conditions for direct simulations of compressible viscous flows, *J. Comput. Phys.* 101, 104–129 (1992). [doi:10.1016/0021-9991(92)90046-2](https://doi.org/10.1016/0021-9991%2892%2990046-2)
