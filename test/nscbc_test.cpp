@@ -134,7 +134,7 @@ std::string pulse_input(const std::string & right, const std::string & mesh, con
     std::ostringstream s;
     s.precision(17);
     const std::string pulse = "1e-3 * exp(-((x - 0.5) / 0.05)^2)";
-    s << "[run]\nt_stop = 1.0\ncfl = 0.4\n" << mesh
+    s << "[run]\nt_stop = 1.0\ncfl = 0.2\n" << mesh
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + " << pulse << "\"\nu = [\"" << pulse
       << "\", \"0.0\"]\np = \"" << P0 << " + " << pulse << "\"\n"
       << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
@@ -239,7 +239,7 @@ std::string vortex_input(const std::string & right, const std::string & mesh, do
     g << gamma_v / (RADIUS * RADIUS);
     e << "exp(-((x - 0.5)^2 + (y - 0.5)^2) / " << 2 * RADIUS * RADIUS << ")";
     dp << "(-" << gamma_v * gamma_v / (2 * RADIUS * RADIUS) << " * " << e.str() << "^2)";
-    s << "[run]\nt_stop = " << t_stop << "\ncfl = 0.4\n" << mesh
+    s << "[run]\nt_stop = " << t_stop << "\ncfl = 0.2\n" << mesh
       << "[initialize]\ntype = \"analytical\"\nrho = \"(1.0 + " << dp.str() << " / " << P0 << ")^(1 / 1.4)\"\n"
       << "u = [\"0.25 - " << g.str() << " * (y - 0.5) * " << e.str() << "\", \"" << g.str() << " * (x - 0.5) * "
       << e.str() << "\"]\np = \"" << P0 << " + " << dp.str() << "\"\n"
@@ -320,7 +320,7 @@ std::string channel_input(const std::string & right, const std::string & mesh) {
     s.precision(17);
     u.precision(17);
     u << 6.0 * U_MEAN << " * y * (1 - y)";
-    s << "[run]\nt_stop = 20.0\ncfl = 0.5\n" << mesh
+    s << "[run]\nt_stop = 20.0\ncfl = 0.25\n" << mesh
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"" << u.str() << "\", \"0.0\"]\np = \"" << P0
       << "\"\n"
       << "[[boundaries]]\nname = \"left\"\ntype = \"dirichlet\"\nrho = \"1.0\"\nu = [\"" << u.str()
@@ -366,7 +366,7 @@ const std::string H2O2_MECHANISM = std::string(MALLARD_SOURCE_DIR) + "/mechanism
 std::string front_input(const std::string & right, double t_stop) {
     const std::string front = "0.5 * (1 + tanh((x - 0.5) / 0.03))";
     std::ostringstream s;
-    s << "[run]\nt_stop = " << t_stop << "\ncfl = 0.4\n"
+    s << "[run]\nt_stop = " << t_stop << "\ncfl = 0.2\n"
       << "[mesh]\ntype = \"cartesian\"\nNx = 100\nNy = 1\nLx = 1.0\nLy = 0.01\n"
       << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\nT = \"300.0 + 600.0 * " << front
       << "\"\nu = [\"50.0\", \"0.0\"]\n"
@@ -425,7 +425,7 @@ double mixture_reflection(const std::string & right) {
     s.precision(17);
     pulse.precision(17);
     pulse << "100.0 * exp(-((x - 0.5) / 0.05)^2)";
-    s << "[run]\nt_stop = " << 1.0 / c << "\ncfl = 0.4\n" << mesh_input("cartesian", 200, 2, 1.0, 0.01, 200)
+    s << "[run]\nt_stop = " << 1.0 / c << "\ncfl = 0.2\n" << mesh_input("cartesian", 200, 2, 1.0, 0.01, 200)
       << "[initialize]\ntype = \"analytical\"\np = \"" << p0 << " + " << pulse.str() << "\"\nT = \"" << T0
       << " * (1 + " << (gamma - 1.0) / gamma / p0 << " * " << pulse.str() << ")\"\nu = [\"" << pulse.str() << " / "
       << rho * c << "\", \"0.0\"]\nX = { O2 = 0.21, N2 = 0.79 }\n"

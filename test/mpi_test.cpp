@@ -42,7 +42,7 @@ const char * BLAST =
 std::string box_input(const std::string & mesh, const std::string & recon, const std::string & physics,
                       const std::string & boundaries, uint32_t n_steps) {
     std::ostringstream s;
-    s << "[run]\nn_steps = " << n_steps << "\ncfl = 0.5\n"
+    s << "[run]\nn_steps = " << n_steps << "\ncfl = 0.25\n"
       << "[mesh]\ntype = \"" << mesh << "\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n"
       << "[initialize]\n" << BLAST << boundaries
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
@@ -62,7 +62,7 @@ std::string bcs(const char * left, const char * right, const char * top, const c
 
 std::string mixture_input(const std::string & extra, const std::string & reconstruction,
                           const std::string & chemistry, const std::string & type) {
-    return "[run]\nn_steps = 20\ncfl = 0.5\n"
+    return "[run]\nn_steps = 20\ncfl = 0.25\n"
            "[mesh]\ntype = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n"
            "[initialize]\ntype = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\n"
            "u = [\"0.0\", \"y * 100.0\"]\n"

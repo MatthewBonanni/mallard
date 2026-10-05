@@ -27,7 +27,7 @@
 # leaves through p_out. The run starts from a planar front 12 delta_L from the
 # inlet with each row's equilibrium products behind it (tools/triple_flame.py).
 # 12 cells per delta_L (32 um; 384 x 432 cells, thick/: 384 x 720), MUSCL,
-# HLLC, SSPRK3, CFL 1.6.
+# HLLC, SSPRK3, CFL 0.8.
 #
 # Like Ruetsch et al., who correct the inflow to hold their flame in place,
 # the runs have two stages. First this file (u_in = 1.35 S_L; thick/: 1.6)
@@ -40,9 +40,9 @@
 # and stops at the same t_stop, after 6 more flame times). From this directory:
 #
 #   python ../../tools/triple_flame.py ../../mechanisms/h2o2.yaml ohmech . --mixing 4 --fuel H2:0.5,N2:0.5 \
-#       --u-in 1.35 --upstream 12 --downstream 20 --flame-times 10 --cfl 1.6
+#       --u-in 1.35 --upstream 12 --downstream 20 --flame-times 10 --cfl 0.8
 #   python ../../tools/triple_flame.py ../../mechanisms/h2o2.yaml ohmech thick --mixing 12 --fuel H2:0.5,N2:0.5 \
-#       --u-in 1.6 --upstream 12 --downstream 20 --flame-times 10 --cfl 1.6 --planar planar_full.csv
+#       --u-in 1.6 --upstream 12 --downstream 20 --flame-times 10 --cfl 0.8 --planar planar_full.csv
 #   (run both; then the continuations, e.g. in matched/ and thick/matched/)
 #   python ../../tools/triple_flame_analysis.py matched thick/matched --fuel H2:0.5,N2:0.5 --fit 5 10 --plot speed.png
 #   python ../../tools/animate_triple_flame.py triple_flame.mp4 --fuel H2:0.5,N2:0.5 \
@@ -76,9 +76,8 @@
 #
 # 1D checks (planar flame at Z_st, tools/flame_restart.py and
 # tools/flame_speed.py): consumption speed against Cantera's -1.08%, -0.28%,
-# -0.17% and +0.18% at 10, 12, 16 and 24 cells per delta_L (CFL 0.8); at
-# 12 cells the same to 5 digits at CFL 0.8, 1.2 and 1.6 (Mallard's CFL is about
-# twice as strict as the usual convention, issue #173). The 2D runs were not
+# -0.17% and +0.18% at 10, 12, 16 and 24 cells per delta_L (CFL 0.4); at
+# 12 cells the same to 5 digits at CFL 0.4, 0.6 and 0.8. The 2D runs were not
 # repeated on a finer mesh.
 #
 # Cost on two A100s (one MPI rank each): first stage 2 h 45 min for 326,000
@@ -87,7 +86,7 @@
 
 [run]
 t_stop = 0.0032292008531237082
-cfl = 1.6
+cfl = 0.8
 
 [mesh]
 type = "cartesian"

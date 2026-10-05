@@ -44,7 +44,7 @@ const std::string REST = "type = \"analytical\"\nrho = \"1.0\"\nu = [\"0.0\", \"
 double hydrostatic_spurious_velocity(uint32_t n, const std::string & recon) {
     std::string input = box_input("gravity = [0.0, -1.0]\n",
                                   "type = \"analytical\"\nrho = \"exp(-y)\"\nu = [\"0.0\", \"0.0\"]\np = \"exp(-y)\"\n",
-                                  "t_stop = 0.5\ncfl = 0.5\n", recon);
+                                  "t_stop = 0.5\ncfl = 0.25\n", recon);
     const std::string from = "Nx = 16\nNy = 16";
     input.replace(input.find(from), from.size(), "Nx = " + std::to_string(n) + "\nNy = " + std::to_string(n));
     Solver solver;
@@ -65,7 +65,7 @@ TEST(SourceTest, SpatialMassSourceAddsExactMass) {
     // Closed box: total mass grows by integral(S) * t, and the steady source
     // is evaluated once
     Solver solver;
-    solver.init(parse_toml(box_input("rho = \"0.2 * (1 + x)\"\n", REST, "t_stop = 0.5\ncfl = 0.5\n")));
+    solver.init(parse_toml(box_input("rho = \"0.2 * (1 + x)\"\n", REST, "t_stop = 0.5\ncfl = 0.25\n")));
     const auto before = solver.integrate_conservatives();
     solver.run();
     const auto after = solver.integrate_conservatives();
@@ -76,7 +76,7 @@ TEST(SourceTest, SpatialMassSourceAddsExactMass) {
 TEST(SourceTest, TimeDependentEnergySourceIsIntegratedInTime) {
     // d(total energy)/dt = sin(t) over a unit area: Delta E = 1 - cos(t)
     Solver solver;
-    solver.init(parse_toml(box_input("rhoE = \"sin(t)\"\ntime_dependent = true\n", REST, "t_stop = 1.0\ncfl = 0.5\n")));
+    solver.init(parse_toml(box_input("rhoE = \"sin(t)\"\ntime_dependent = true\n", REST, "t_stop = 1.0\ncfl = 0.25\n")));
     const auto before = solver.integrate_conservatives();
     solver.run();
     const auto after = solver.integrate_conservatives();
@@ -87,7 +87,7 @@ TEST(SourceTest, GravityPullsGasDown) {
     // Gas initially at rest with uniform pressure falls: total y-momentum
     // decreases at rate (total mass) * g while the box is still balanced by walls
     Solver solver;
-    solver.init(parse_toml(box_input("gravity = [0.0, -1.0]\n", REST, "t_stop = 0.05\ncfl = 0.5\n")));
+    solver.init(parse_toml(box_input("gravity = [0.0, -1.0]\n", REST, "t_stop = 0.05\ncfl = 0.25\n")));
     solver.run();
     const auto total = solver.integrate_conservatives();
     // Walls push back through pressure, so momentum is at most -g * M * t

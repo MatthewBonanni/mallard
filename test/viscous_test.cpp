@@ -31,7 +31,7 @@ struct ViscousCase {
     std::string bottom = "type = \"wall_isothermal\"\nT = 1.0\n";
     std::string top = "type = \"wall_isothermal\"\nT = 1.0\n";
     std::string init = "type = \"analytical\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\"]\np = \"1.0\"\n";
-    std::string run = "t_stop = 5.0\ncfl = 0.8\n";
+    std::string run = "t_stop = 5.0\ncfl = 0.4\n";
     std::string recon = "MUSCL";
     std::string source;
 };
@@ -70,7 +70,7 @@ TEST_P(ViscousMesh, CouetteFlowHasLinearVelocityProfile) {
     c.mesh = GetParam();
     c.mu = 0.2;
     c.top = "type = \"wall_isothermal\"\nT = 1.0\nu = [0.1, 0.0]\n";
-    c.run = "t_stop = 15.0\ncfl = 0.8\n";
+    c.run = "t_stop = 15.0\ncfl = 0.4\n";
     auto solver = run_viscous(c);
     auto m = solver->get_mesh();
     double max_err = 0.0;
@@ -94,7 +94,7 @@ TEST_P(ViscousMesh, StokesFirstProblemMatchesErfcProfile) {
         c.mu = 0.01;
         c.bottom = "type = \"wall_isothermal\"\nT = 1.0\nu = [0.05, 0.0]\n";
         c.top = "type = \"symmetry\"\n";
-        c.run = "t_stop = 2.0\ncfl = 0.8\n";
+        c.run = "t_stop = 2.0\ncfl = 0.4\n";
         auto solver = run_viscous(c);
         auto m = solver->get_mesh();
         double err = 0.0;
@@ -124,7 +124,7 @@ TEST_P(ViscousMesh, ForcedChannelFlowWithTransmissiveEndsConvergesAtSecondOrder)
         c.mu = 0.2;
         c.init = "type = \"analytical\"\nrho = \"1.0\"\nu = [\"0.05 * (y - y^3)\", \"0.0\"]\np = \"1.0\"\n";
         c.source = "rhou = [\"0.06 * y\", \"0.0\"]\n";
-        c.run = "t_stop = 3.0\ncfl = 0.8\n";
+        c.run = "t_stop = 3.0\ncfl = 0.4\n";
         auto solver = run_viscous(c);
         auto m = solver->get_mesh();
         double err = 0.0;
@@ -144,7 +144,7 @@ TEST_P(ViscousMesh, ConductionBetweenIsothermalWallsIsLinear) {
     c.mu = 0.2;
     c.bottom = "type = \"wall_isothermal\"\nT = 1.2\n";
     c.top = "type = \"wall_isothermal\"\nT = 0.8\n";
-    c.run = "t_stop = 20.0\ncfl = 0.8\n";
+    c.run = "t_stop = 20.0\ncfl = 0.4\n";
     auto solver = run_viscous(c);
     auto m = solver->get_mesh();
     for (uint32_t i = 0; i < m->n_cells; i++) {
@@ -161,7 +161,7 @@ TEST_P(ViscousMesh, HeatFluxWallSetsTemperatureGradient) {
     const double kappa = 0.2 * 3.5 / 0.72;
     c.bottom = "type = \"wall_heat_flux\"\nq = 0.2\n";
     c.top = "type = \"wall_isothermal\"\nT = 1.0\n";
-    c.run = "t_stop = 25.0\ncfl = 0.8\n";
+    c.run = "t_stop = 25.0\ncfl = 0.4\n";
     auto solver = run_viscous(c);
     auto m = solver->get_mesh();
     for (uint32_t i = 0; i < m->n_cells; i++) {
@@ -178,7 +178,7 @@ TEST_P(ViscousMesh, UniformFlowIsPreservedWithViscosity) {
     c.init = "type = \"analytical\"\nrho = \"1.1\"\nu = [\"0.3\", \"-0.2\"]\np = \"0.9\"\n";
     c.bottom = "type = \"extrapolation\"\n";
     c.top = "type = \"extrapolation\"\n";
-    c.run = "n_steps = 50\ncfl = 0.8\n";
+    c.run = "n_steps = 50\ncfl = 0.4\n";
     auto solver = run_viscous(c);
     for (uint32_t i = 0; i < solver->get_mesh()->n_cells; i++) {
         EXPECT_NEAR(solver->h_primitives(i, 0), 0.3, roundoff(1e-12));
@@ -196,7 +196,7 @@ TEST(ViscousForces, CouetteWallShearMatchesMuUOverH) {
     ViscousCase c;
     c.mu = 0.2;
     c.top = "type = \"wall_isothermal\"\nT = 1.0\nu = [0.1, 0.0]\n";
-    c.run = "t_stop = 15.0\ncfl = 0.8\n";
+    c.run = "t_stop = 15.0\ncfl = 0.4\n";
     auto solver = run_viscous(c);
     auto mesh = solver->get_mesh();
     const auto top = solver->calc_force(mesh->get_face_zone("top")->faces);

@@ -3,7 +3,7 @@
     python tools/triple_flame.py MECHANISM PHASE RUN_DIR --mixing D0
         [--fuel H2:0.3,N2:0.7] [--oxidizer O2:1,N2:3.76] [--T 300] [--cells 12]
         [--width W] [--upstream 12] [--downstream 30] [--u-in 1.6] [--flame-times 12]
-        [--outputs 120] [--cfl 0.8] [--transport mixture_averaged] [--planar FULL.csv]
+        [--outputs 120] [--cfl 0.4] [--transport mixture_averaged] [--planar FULL.csv]
 
 The fresh gas enters on the left at a uniform velocity --u-in times S_L (upt),
 at T and 1 atm, with the mixture fraction Z (kg of fuel stream per kg) of a
@@ -75,7 +75,7 @@ def main():
     ap.add_argument("--u-in", type=float, default=1.6)
     ap.add_argument("--flame-times", type=float, default=12.0)
     ap.add_argument("--outputs", type=int, default=120)
-    ap.add_argument("--cfl", type=float, default=0.8)
+    ap.add_argument("--cfl", type=float, default=0.4)
     ap.add_argument("--transport", default="mixture_averaged")
     ap.add_argument("--planar")
     args = ap.parse_args()

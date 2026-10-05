@@ -115,7 +115,7 @@ TEST(MixtureTransportTest, BinaryInterdiffusionMatchesTheErfSolution) {
     const double D = table.binary_diffusion(0, 1, T, p);
     const double t = std::pow(0.1 * L, 2) / D;  // diffusion length 2 sqrt(D t) = L / 5
     std::ostringstream input;
-    input << std::setprecision(17) << "[run]\nt_stop = " << t << "\ncfl = 0.5\n" << strip(100, L, false)
+    input << std::setprecision(17) << "[run]\nt_stop = " << t << "\ncfl = 0.25\n" << strip(100, L, false)
           << "[initialize]\ntype = \"analytical\"\np = \"" << p << "\"\nT = \"" << T << "\"\nu = " << velocity("0.0")
           << "\nX = { N2 = \"x < " << x0 << " ? 1 : 0\", N2B = \"x < " << x0 << " ? 0 : 1\" }\n"
           << viscous_mixture(TWO_NITROGENS);
@@ -143,7 +143,7 @@ TEST(MixtureTransportTest, EnthalpyDiffusionKeepsTheMixingOfEqualTemperatureGase
     const double T = 1000.0, L = 2e-3, x0 = 1e-3, w = 1e-4;
     std::ostringstream input;
     const std::string f = "0.5 * (1 - tanh((x - " + std::to_string(x0) + ") / " + std::to_string(w) + "))";
-    input << std::setprecision(17) << "[run]\nt_stop = 4e-6\ncfl = 0.5\n" << strip(100, L, false)
+    input << std::setprecision(17) << "[run]\nt_stop = 4e-6\ncfl = 0.25\n" << strip(100, L, false)
           << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\nT = \"" << T << "\"\nu = " << velocity("0.0")
           << "\nX = { H2 = \"" << f << "\", N2 = \"1 - " << f << "\" }\n" << viscous_mixture(H2O2);
     Solver solver;
@@ -173,7 +173,7 @@ TEST(MixtureTransportTest, ShearAndThermalWavesDecayAtTheirDiffusionRates) {
     for (int wave = 0; wave < 2; wave++) {
         const double t = 0.5 / rate[wave];
         std::ostringstream input;
-        input << std::setprecision(17) << "[run]\nt_stop = " << t << "\ncfl = 0.5\n" << strip(32, L, true)
+        input << std::setprecision(17) << "[run]\nt_stop = " << t << "\ncfl = 0.25\n" << strip(32, L, true)
               << "[initialize]\ntype = \"analytical\"\np = \"" << p << "\"\nX = { N2 = 1.0 }\n";
         if (wave == 0) {
             input << "T = \"" << T << "\"\nu = " << velocity("1.0 * sin(2 * pi * x / " + std::to_string(L) + ")") << "\n";
@@ -194,7 +194,7 @@ TEST(MixtureTransportTest, ShearAndThermalWavesDecayAtTheirDiffusionRates) {
 }
 
 TEST(MixtureTransportTest, InvalidTransportInputsAreRejected) {
-    const std::string base = "[run]\nn_steps = 1\ncfl = 0.5\n" + strip(4, 1.0, false) +
+    const std::string base = "[run]\nn_steps = 1\ncfl = 0.25\n" + strip(4, 1.0, false) +
                              "[initialize]\ntype = \"constant\"\np = 1.0e5\nT = 300.0\nu = " +
                              std::string(N_DIM == 2 ? "[0.0, 0.0]" : "[0.0, 0.0, 0.0]") + "\nX = { N2 = 1.0 }\n" +
                              "[numerics]\n[numerics.face_reconstruction]\ntype = \"FO\"\n";

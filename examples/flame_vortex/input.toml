@@ -32,7 +32,7 @@
 # centers 2 R_c apart, so r = 4 R_c) with their cyclostrophic pressure. Only
 # the half above the pair's axis is computed (symmetry planes at the axis and
 # at the top, max(2 r, 8 delta_L) above it). 12 cells per delta_L (24 for
-# r = 1, where R_c is then 6 cells), MUSCL, HLLC, SSPRK3, CFL 1.6 (r = 4 at
+# r = 1, where R_c is then 6 cells), MUSCL, HLLC, SSPRK3, CFL 0.8 (r = 4 at
 # u' <= 30 and r = 8 at u' = 40: 0.8); see "1D checks" below. The analysis
 # measures the heat release Q against that of a run without vortices on the
 # same mesh (--control: --u 0), the flame length, the weakest burning along the
@@ -45,7 +45,7 @@
 #
 #   python ../../tools/flame_reference.py --single h2 4.0 300 .
 #   python ../../tools/flame_vortex.py h2_phi4.0_T300_mix_full.csv ../../mechanisms/h2o2.yaml ohmech . \
-#       --r 4 --u 30 --cfl 1.6
+#       --r 4 --u 30 --cfl 0.8
 #
 # For the sweep, the same with --r R --u U into run directories (and --cells 24
 # for r = 1), plus the controls --r 4 --u 0 --flame-times 5.2 and --r 1 --u 0
@@ -93,18 +93,17 @@
 #
 # 1D checks (planar flame, tools/flame_restart.py and tools/flame_speed.py):
 # consumption speed against Cantera's -1.44%, -1.46%, -0.93% and -0.70% at
-# 10, 12, 16 and 24 cells per delta_L (CFL 0.8), and at 12 cells the same to
-# 5 digits at CFL 0.8, 1.2 and 1.6 (half the steps at 1.6; Mallard's CFL is
-# about twice as strict as the usual convention, issue #173).
+# 10, 12, 16 and 24 cells per delta_L (CFL 0.4), and at 12 cells the same to
+# 5 digits at CFL 0.4, 0.6 and 0.8 (half the steps at 0.8).
 #
 # Cost on one A100: r = 4 (276 x 96 cells) 21 min for 145,000 steps at
-# CFL 1.6 (this file: about 14 min, 95,000 steps; 28 min at CFL 0.8); r = 2
-# (192 x 96) 12-13 min; r = 8 (444 x 192) 40-52 min at CFL 1.6; r = 1 at
+# CFL 0.8 (this file: about 14 min, 95,000 steps; 28 min at CFL 0.4); r = 2
+# (192 x 96) 12-13 min; r = 8 (444 x 192) 40-52 min at CFL 0.8; r = 1 at
 # 24 cells (300 x 192) about 1.5 hours for 210,000-265,000 steps.
 
 [run]
 t_stop = 0.00097957056200000006
-cfl = 1.6
+cfl = 0.8
 
 [mesh]
 type = "cartesian"

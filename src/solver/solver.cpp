@@ -1412,10 +1412,11 @@ void Solver::calc_dt() {
 }
 
 /**
- * @brief Per-cell stable time step for CFL = 1:
- *        dt_i = V_i / (sum_f (|u_n| + a)_f A_f + 4 nu_eff sum_f A_f^2 / V_i),
+ * @brief Per-cell stable time step for CFL = 1 (Blazek eqs. 6.20-6.21, C = 4):
+ *        dt_i = 2 V_i / (sum_f (|u_n| + a)_f A_f + 4 nu_eff sum_f A_f^2 / V_i),
  *        with the face wave speed taken as the max over the two adjacent cells
- *        and nu_eff = max(4/3, gamma/Pr) mu / rho for viscous flow.
+ *        and nu_eff = max(4/3, gamma/Pr) mu / rho for viscous flow. Half the
+ *        sums over faces stand for Blazek's sums of projected areas.
  */
 struct TimeStepFunctor {
     Kokkos::View<uint32_t *> offsets_faces_of_cell;
@@ -1456,7 +1457,6 @@ struct TimeStepFunctor {
             sum_area2 += face_area(i_face) * face_area(i_face);
         }
         if (physics.is_viscous()) {
-            // Blazek eq. 6.21 with C = 4
             rtype cons[N_CONSERVATIVE], W[N_CONSERVATIVE];
             FOR_I_CONSERVATIVE cons[i] = conservatives(i_cell, i);
             physics.compute_W_from_conservatives(W, cons);
@@ -1470,7 +1470,7 @@ struct TimeStepFunctor {
                 sum += coeff * cell_volume(i_cell) / (r * r);
             }
         }
-        const rtype dt_i = cell_volume(i_cell) / sum;
+        const rtype dt_i = 2.0_r * cell_volume(i_cell) / sum;
         dt_local(i_cell) = dt_i;
         dt_min = Kokkos::fmin(dt_min, dt_i);
     }

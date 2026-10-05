@@ -31,7 +31,7 @@ const std::string PERFECT_GAS = "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref
 std::string restart_input(const std::string & dir, const std::string & init, uint32_t n_steps,
                           const std::string & physics = PERFECT_GAS) {
     std::ostringstream s;
-    s << "[run]\nn_steps = " << n_steps << "\ncfl = 0.5\n"
+    s << "[run]\nn_steps = " << n_steps << "\ncfl = 0.25\n"
       << "[mesh]\ntype = \"cartesian_tri\"\nNx = 12\nNy = 10\nLx = 1.0\nLy = 1.0\n"
       << "[initialize]\n" << init
       << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"

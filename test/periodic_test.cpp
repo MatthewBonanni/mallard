@@ -52,7 +52,7 @@ struct Case {
     std::string recon = "FO";
     std::string extra_recon;
     std::string physics = "type = \"euler\"\n";
-    std::string run = "n_steps = 20\ncfl = 0.5\n";
+    std::string run = "n_steps = 20\ncfl = 0.25\n";
     std::string integrator = "SSPRK3";
     std::string boundaries;
 };
