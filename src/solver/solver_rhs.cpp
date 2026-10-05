@@ -15,6 +15,7 @@
 
 #include "flux_functor.h"
 #include "gradient.h"
+#include "launch_bounds.h"
 #include "viscous_flux.h"
 
 namespace {
@@ -33,9 +34,9 @@ struct OverList {
 template <typename F>
 void parallel_for_faces(const char * label, const F & f, Kokkos::View<uint32_t *> list, uint32_t n_faces) {
     if (list.extent(0) == 0) {
-        Kokkos::parallel_for(label, n_faces, f);
+        Kokkos::parallel_for(label, HeavyRange<>(0, n_faces), f);
     } else {
-        Kokkos::parallel_for(label, list.extent(0), OverList<F>{f, list});
+        Kokkos::parallel_for(label, HeavyRange<>(0, list.extent(0)), OverList<F>{f, list});
     }
 }
 
@@ -142,7 +143,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
     }
 
     if (physics.is_viscous()) {
-        Kokkos::parallel_for("viscous_gradients", mesh->n_cells, viscous_gradient);
+        Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, mesh->n_cells), viscous_gradient);
         ViscousFluxFunctor viscous_functor{mesh->face_normals, mesh->face_measure, mesh->face_coords,
                                            mesh->cell_coords, mesh->cells_of_face, mesh->shifts, mesh->face_shift,
                                            W_cells,
