@@ -573,6 +573,9 @@ rtype Solver::calc_dt_cfl1_mixture() {
     if (tfles_on) {
         update_thickened_flame();
         thicken_transport();
+    } else if (pasr_on) {
+        eddy_viscosity_of_state(mesh->n_owned());
+        update_partially_stirred_reactor();
     } else if (les_on) {
         eddy_viscosity_of_state(mesh->n_owned());
     } else {

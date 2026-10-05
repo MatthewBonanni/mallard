@@ -29,6 +29,7 @@
 #include "time_integrator.h"
 #include "physics.h"
 #include "les.h"
+#include "pasr.h"
 #include "tfles.h"
 #include "mixture.h"
 #include "cell_chemistry.h"
@@ -252,6 +253,8 @@ class Solver {
          *        exchanged to the halo), once per step in calc_dt.
          */
         void update_thickened_flame();
+        /** @brief PaSR: the reacting fraction kappa of every owned cell (chem_time_scale), once per step in calc_dt. */
+        void update_partially_stirred_reactor();
         /** @brief Thickened flame: multiply the transport of every cell (after update_eddy_viscosity). */
         void thicken_transport();
         /** @brief Overwrite the halo cells of a 3-vector cell field with their owners' values. */
@@ -282,6 +285,8 @@ class Solver {
         const LES & get_les() const { return les; }
         /** @brief LES: [mu_t, lambda_t, mu_t / (Sc_t W)] of each cell as of the last copy_device_to_host. */
         const Kokkos::View<rtype *[3]>::host_mirror_type & get_les_coefficients() const { return h_les_coefficients; }
+        /** @brief PaSR: the reacting fraction kappa per cell, after copy_device_to_host. */
+        const Kokkos::View<rtype *>::host_mirror_type & get_chem_time_scale() const { return h_chem_time_scale; }
 
         /** @brief Whether the gas is a mixture (a mechanism is given). */
         bool is_mixture() const { return mixture_model != nullptr; }
@@ -488,7 +493,10 @@ class Solver {
         ThickenedFlame thickened_flame;
         Kokkos::View<rtype *[3]> tfles_fields;         // (cell, [F, E, Omega])
         Kokkos::View<rtype *[3]>::host_mirror_type h_tfles_fields;
-        Kokkos::View<rtype *> chem_time_scale;         // (cell): E / F, the chemistry's rate multiplier
+        Kokkos::View<rtype *> chem_time_scale;         // (cell): E / F or kappa, the chemistry's rate multiplier
+        Kokkos::View<rtype *>::host_mirror_type h_chem_time_scale;
+        bool pasr_on = false;                          // [les.combustion]: partially stirred reactor
+        PartiallyStirredReactor pasr;
         Kokkos::View<rtype *[3]> tfles_vorticity;
         Kokkos::View<rtype *[3][N_DIM]> tfles_gradients;
         State tfles_halo;                              // [F, E, Omega] as species, for the halo exchange

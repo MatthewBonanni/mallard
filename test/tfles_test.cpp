@@ -13,10 +13,13 @@
 #include <Kokkos_Core.hpp>
 
 #include <cmath>
+#include <iomanip>
+#include <memory>
 #include <sstream>
 #include <string>
 
 #include "input.h"
+#include "pasr.h"
 #include "solver.h"
 #include "test_fixtures.h"
 #include "tfles.h"
@@ -131,4 +134,71 @@ TEST(ThickenedFlame, InputErrors) {
     no_chemistry.replace(no_chemistry.find("[chemistry]\n"), 12, "");
     Solver t;
     EXPECT_THROW(t.init(parse_toml(no_chemistry)), InputError);
+}
+
+TEST(PartiallyStirredReactor, FractionOfTheChemicalAndMixingTimes) {
+    PartiallyStirredReactor pasr;
+    const double rho_cp_T = 5e5, q = 2e9, nu = 2e-4;
+    // kappa = tau_c / (tau_c + tau_mix), tau_c = rho cp T / |q|, tau_mix = Delta^2 / (nu + nu_t)
+    const double tau_c = rho_cp_T / q, tau_mix = 1e-8 / (nu + 3e-4);
+    EXPECT_NEAR(pasr.fraction(rho_cp_T, q, 1e-4, nu, 3e-4), tau_c / (tau_c + tau_mix), 1e-14);
+    EXPECT_EQ(pasr.fraction(rho_cp_T, -q, 1e-4, nu, 3e-4), pasr.fraction(rho_cp_T, q, 1e-4, nu, 3e-4));
+    // Resolved mixing (the DNS limit) or no reaction: the rates of the filtered state
+    EXPECT_GT(pasr.fraction(rho_cp_T, q, 1e-9, nu, 0.0), 1.0 - 1e-9);
+    EXPECT_EQ(pasr.fraction(rho_cp_T, 0.0, 1e-2, nu, 0.0), 1.0);
+    // Fast chemistry: the heat release kappa q tends to the mixing-limited rho cp T / tau_mix
+    const double limited = rho_cp_T / (1e-6 / nu);
+    EXPECT_NEAR(pasr.fraction(rho_cp_T, 1e20, 1e-3, nu, 0.0) * 1e20, limited, 1e-6 * limited);
+    pasr.C_mix = 2.0;
+    EXPECT_NEAR(1.0 / pasr.fraction(rho_cp_T, q, 1e-4, nu, 3e-4) - 1.0, 2.0 * tau_mix / tau_c, 1e-12 * tau_mix / tau_c);
+}
+
+namespace {
+
+/** @brief The uniform box with cells of side h, run as given and copied to the host. */
+std::unique_ptr<Solver> uniform_cells(const double h, const std::string & run, const std::string & combustion) {
+    std::string input = uniform_box(run, combustion);
+    auto set = [&](const std::string & key, const double value) {
+        const size_t at = input.find(key + " = ");
+        const size_t end = input.find('\n', at);
+        std::ostringstream v;
+        v << std::setprecision(17) << key << " = " << value;
+        input.replace(at, end - at, v.str());
+    };
+    set("Lx", 4 * h);
+    set("Ly", 4 * h);
+    if (N_DIM == 3) set("Lz", 3 * h);
+    auto solver = std::make_unique<Solver>();
+    solver->init(parse_toml(input));
+    if (run.find("n_steps = 0") == std::string::npos) solver->run();
+    solver->copy_device_to_host();
+    return solver;
+}
+
+} // namespace
+
+TEST(PartiallyStirredReactor, ReactionRatesAreScaledByTheReactingFraction) {
+    // A step of dt with PaSR is the chemistry of a step of kappa dt without it; kappa follows
+    // tau_mix ~ C_mix Delta^2 / nu (a uniform state has no SGS viscosity) across meshes and constants
+    const std::string pasr = "[les.combustion]\nmodel = \"pasr\"\n";
+    const double h = 0.01;
+    auto mixed = uniform_cells(h, "n_steps = 1\ndt = 2e-6\n", pasr);
+    const double kappa = double(mixed->get_chem_time_scale()(0));
+    EXPECT_GT(kappa, 0.02);
+    EXPECT_LT(kappa, 0.98);
+    auto coarse = uniform_cells(2 * h, "n_steps = 1\ndt = 2e-6\n", pasr);
+    EXPECT_NEAR(1.0 / double(coarse->get_chem_time_scale()(0)) - 1.0, 4.0 * (1.0 / kappa - 1.0), 1e-9 / kappa);
+    auto slow = uniform_cells(h, "n_steps = 1\ndt = 2e-6\n", pasr + "C_mix = 2.0\n");
+    EXPECT_NEAR(1.0 / double(slow->get_chem_time_scale()(0)) - 1.0, 2.0 * (1.0 / kappa - 1.0), 1e-9 / kappa);
+    std::ostringstream run;
+    run << std::setprecision(17) << "n_steps = 1\ndt = " << 2e-6 * kappa << "\n";
+    auto plain = uniform_cells(h, run.str(), "");
+    auto initial = uniform_cells(h, "n_steps = 0\ndt = 1e-6\n", "");
+    double change = 0.0, diff = 0.0;
+    for (uint32_t k = 0; k < mixed->get_species_names().size(); k++) {
+        change = std::max(change, std::abs(double(plain->h_species(0, k) - initial->h_species(0, k))));
+        diff = std::max(diff, std::abs(double(mixed->h_species(0, k) - plain->h_species(0, k))));
+    }
+    EXPECT_GT(change, 1e-7);
+    EXPECT_LT(diff, precision_tol<double>(1e-6, 1e-4) * change);
 }
