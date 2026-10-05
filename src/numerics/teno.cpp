@@ -293,7 +293,7 @@ void for_each_neighbor(const Mesh & mesh, const Visit & v, F && f) {
  */
 class VisitSet {
     public:
-        VisitSet() : keys(64, EMPTY) {}
+        VisitSet() : keys(1024, EMPTY) {}
 
         /** @brief Insert v; false if it was present. */
         bool insert(const Visit & v) {
@@ -585,7 +585,8 @@ class PageArray {
             void * p = mmap(nullptr, n * sizeof(T), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
             if (p == MAP_FAILED) throw std::bad_alloc();
             data_ = static_cast<T *>(p);
-            std::fill(data_, data_ + n, value);
+            // Fresh anonymous pages are zero
+            if (value != T(0)) std::fill(data_, data_ + n, value);
         }
         PageArray(PageArray && other) noexcept
             : data_(std::exchange(other.data_, nullptr)), n_(std::exchange(other.n_, 0)) {}
@@ -1569,11 +1570,16 @@ void TENO::compute_stencils_and_matrices_3d() {
         double * m = &moments[static_cast<size_t>(c) * n_moments];
         for (int k = 0; k < n_moments; k++) m[k] = sums[k] / vol;
     });
-    // Boxes around the cells, which settle most inside tests of mirror images
+    // Cells with faces that mirror stencil entries, and boxes around the
+    // cells, which settle most inside tests of mirror images
+    auto mirror_face = [&](const uint32_t f) {
+        return mesh->h_cells_of_face(f, 1) < 0 && h_face_bc(f) >= 0 && h_bcs(h_face_bc(f)).type != BoundaryType::PARTITION;
+    };
+    std::vector<uint8_t> has_mirror_face(n_cells, 0);
     bool mirrors = false;
-    for (uint32_t f = 0; f < mesh->n_faces && !mirrors; f++) {
-        mirrors = mesh->h_cells_of_face(f, 1) < 0 && h_face_bc(f) >= 0 &&
-                  h_bcs(h_face_bc(f)).type != BoundaryType::PARTITION;
+    for (uint32_t c = 0; c < n_cells; c++) {
+        for (uint32_t k = 0; k < mesh->h_n_faces_of_cell(c); k++) has_mirror_face[c] |= mirror_face(mesh->h_face_of_cell(c, k));
+        mirrors = mirrors || has_mirror_face[c];
     }
     std::vector<std::array<double, 6>> boxes(mirrors ? n_cells : 0);
     Kokkos::parallel_for("teno_plane_bounds", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, boxes.size()),
@@ -1817,10 +1823,10 @@ void TENO::compute_stencils_and_matrices_3d() {
             std::vector<Plane> planes;
             for (const Visit & v : cells) {
                 const uint32_t c = v.cell;
+                if (!has_mirror_face[c]) continue;
                 for (uint32_t k = 0; k < mesh->h_n_faces_of_cell(c); k++) {
                     const uint32_t f = mesh->h_face_of_cell(c, k);
-                    if (mesh->h_cells_of_face(f, 1) >= 0 || h_face_bc(f) < 0) continue;
-                    if (h_bcs(h_face_bc(f)).type == BoundaryType::PARTITION) continue;
+                    if (!mirror_face(f)) continue;
                     const Point3 n = unit_normal(f);
                     PlaneFace pf{static_cast<int32_t>(f), v.lattice, {}};
                     for (int d = 0; d < 3; d++) pf.x[d] = double(mesh->h_face_coords(f, d)) + v.t[d];
@@ -2048,16 +2054,20 @@ void TENO::compute_stencils_and_matrices_3d() {
                 for (int b1 = 0; b0 + b1 <= r; b1++) {
                     for (int b2 = 0; b0 + b1 + b2 <= r; b2++) {
                         if (b0 + b1 + b2 == 0) continue;
+                        // Only the monomials this derivative leaves nonzero, and the upper triangle
+                        std::array<uint8_t, teno::MAX_NK> nonzero;
+                        uint8_t n_nonzero = 0;
                         for (uint8_t l = 0; l < nk; l++) {
                             const auto & e = expo[l];
                             d[l] = (e[0] >= b0 && e[1] >= b1 && e[2] >= b2)
                                        ? falling(e[0], b0) * falling(e[1], b1) * falling(e[2], b2)
                                        : 0.0;
+                            if (d[l] != 0.0) nonzero[n_nonzero++] = l;
                         }
-                        for (uint8_t l = 0; l < nk; l++) {
-                            if (d[l] == 0.0) continue;
-                            for (uint8_t m = 0; m < nk; m++) {
-                                if (d[m] == 0.0) continue;
+                        for (uint8_t jl = 0; jl < n_nonzero; jl++) {
+                            const uint8_t l = nonzero[jl];
+                            for (uint8_t jm = jl; jm < n_nonzero; jm++) {
+                                const uint8_t m = nonzero[jm];
                                 const auto & el = expo[l];
                                 const auto & em = expo[m];
                                 M[l * nk + m] += d[l] * d[m] *
