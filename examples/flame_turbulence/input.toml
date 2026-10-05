@@ -1,5 +1,36 @@
-# Premixed flame in decaying turbulence (3D build): DNS reference of #197.
-# Header with results: see the end of the validation in docs/design/les.md, section 8.3.
+# Premixed H2/air flame (phi = 1, 300 K, 1 atm) propagating into decaying
+# turbulence (3D build): the DNS reference of the reacting LES validation,
+# docs/design/les.md, section 8.3 (design, results and the LES runs).
+#
+# Flame: mechanisms/h2o2.yaml, mixture-averaged transport, S_L = 2.332 m/s
+# and thermal thickness delta_L = 0.330 mm (Cantera). Box: 224 x 128 x 128
+# hexahedra of h = delta_L / 10 = 33.0 um (7.40 x 4.23 x 4.23 mm), periodic
+# in y and z, a pressure outlet on the left and a slip wall on the right, so
+# the fresh gas is at rest and the burnt gas leaves to the left. The laminar
+# flame starts 8 delta_L from the outlet, in the frame of the fresh gas.
+#
+# Turbulence: a Passot-Pouquet field (u' = 5 m/s, l_t = 0.8 mm) developed for
+# 0.08 ms in a periodic 128^3 box of fresh gas (hit.toml), then placed ahead
+# of the flame from 1.5 delta_L on (smooth window over l_t): u' = 4.87 m/s
+# = 2.1 S_L, l_t / delta_L = 2.4, Re_t = 180, Ka = 2.0 (thin reaction
+# zones), Kolmogorov scale eta = 24 um from the pre-run's dissipation, so
+# h / eta = 1.4 (k_max eta = 2.3) and 10 cells per delta_L: DNS, no model.
+#
+# Numerics: hybrid KEEP / HLLC flux with MUSCL without limiter, SSPRK3, fused
+# Strang chemistry. [integrals] budget = true: the numerical dissipation of
+# kinetic energy against the molecular one (eps_numerical, from the scheme's
+# own pressure work; docs/design/les.md, section 4.2).
+#
+# Run (from this directory; the LES inputs differ in the mesh, [les] and
+# [les.combustion], see section 8.3):
+#   python ../../tools/flame_turbulence.py hit hit_random.restart --length 0.004225788952895495 --urms 5 --lt 8e-4
+#   ../../build3d/src/Mallard -i hit.toml                      # writes restart/hit_<step>.restart at 0.08 ms
+#   python ../../tools/flame_reference.py --single h2 1.0 300 .  # h2_phi1.0_T300_mix_full.csv
+#   python ../../tools/flame_turbulence.py init h2_phi1.0_T300_mix_full.csv ../../mechanisms/h2o2.yaml ohmech \
+#       restart/hit_<last>.restart flame.restart --lt 8e-4
+#   mpirun -n 3 ../../build3d/src/Mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
+#   python ../../tools/flame_turbulence.py laminar h2_phi1.0_T300_mix_full.csv ../../mechanisms/h2o2.yaml ohmech
+#   python ../../tools/flame_turbulence.py analyze . <the printed options> --pdf-times 4e-4 --filter 4,8,16
 
 [run]
 t_stop = 4.0e-4

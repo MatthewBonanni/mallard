@@ -21,7 +21,7 @@ import tempfile
 import numpy as np
 
 
-def scene(plotter, path, q_factor, y_u, label, clim):
+def scene(plotter, path, q_factor, y_u, label, clim, args_window=None):
     import pyvista as pv
     d = np.load(path)
     h = float(d["h"])
@@ -46,10 +46,13 @@ def scene(plotter, path, q_factor, y_u, label, clim):
             plotter.add_mesh(vort, color="lightsteelblue", opacity=0.35, smooth_shading=True)
     plotter.add_mesh(grid.outline(), color="gray")
     plotter.add_text(f"{label}  t = {float(d['t']) * 1e3:.3f} ms", font_size=10, color="black")
-    plotter.camera_position = "iso"
-    plotter.camera.azimuth = -35
-    plotter.camera.elevation = -10
-    plotter.camera.zoom(1.25)
+    # x (propagation, burnt gas on the left) across the image, viewed from slightly above and in front
+    lx, ly, lz = (np.array(c.shape) * h * 1e3)
+    center = np.array([lx, ly, lz]) / 2
+    if args_window is not None:
+        center[0] = args_window
+    plotter.camera_position = [tuple(center + np.array([1.9 * ly, -1.9 * ly, 1.3 * lz])), tuple(center), (0, 0, 1)]
+    plotter.camera.zoom(1.0)
 
 
 def render(paths, labels, out, args):
@@ -73,8 +76,8 @@ def main():
     ap.add_argument("--q-factor", type=float, default=1.0)
     ap.add_argument("--y-u", type=float, default=2.85223875e-02)
     ap.add_argument("--width", type=int, default=1600)
-    ap.add_argument("--hrr-min", type=float, default=8.0)
-    ap.add_argument("--hrr-max", type=float, default=10.5)
+    ap.add_argument("--hrr-min", type=float, default=9.0)
+    ap.add_argument("--hrr-max", type=float, default=10.8)
     ap.add_argument("--movie", help="glob of the snapshots of one run, one frame each")
     ap.add_argument("--fps", type=int, default=8)
     args = ap.parse_args()

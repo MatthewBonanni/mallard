@@ -394,31 +394,36 @@ def figure(args):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    series = [s.split("=", 1) for s in args.series]
-    fig, ax = plt.subplots(1, 3, figsize=(15, 4.2))
-    styles = {}
-    for label, path in series:
+    fig, ax = plt.subplots(1, 4, figsize=(19, 4.2))
+    colors = {}
+    for spec in args.series:
+        label, path = spec.split("=", 1)
         d = np.genfromtxt(path, delimiter=",", names=True)
-        line, = ax[0].plot(d["t"] * 1e3, d["S_c"], label=label)
-        styles[label] = line.get_color()
-        ax[1].plot(d["t"] * 1e3, d["A_res"], color=line.get_color(), label=label)
+        t = d["t"] * 1e3
+        style = "k-" if label.startswith("DNS") else "-"
+        line, = ax[0].plot(0.5 * (t[1:] + t[:-1]), -np.diff(d["fresh"]) / np.diff(d["t"]) / args.s_l, style,
+                           label=label, lw=2.2 if label.startswith("DNS") else 1.3)
+        colors[label] = line.get_color()
+        ax[1].plot(t, d["S_c"], style, color=line.get_color(), lw=line.get_linewidth())
+        ax[2].plot(t, d["A_res"], style, color=line.get_color(), lw=line.get_linewidth())
         if np.isfinite(d["A_E"]).any():
-            ax[1].plot(d["t"] * 1e3, d["A_E"], "--", color=line.get_color())
-    ax[0].set(xlabel="t [ms]", ylabel="consumption speed $S_c / S_L$")
-    ax[1].set(xlabel="t [ms]", ylabel="flame surface / $L^2$ (dashed: $E$-weighted)")
-    ax[0].legend(fontsize=7)
+            ax[2].plot(t, d["A_E"], "--", color=line.get_color(), lw=line.get_linewidth())
+    ax[0].set(xlabel="t [ms]", ylabel="turbulent flame speed $S_T / S_L$")
+    ax[1].set(xlabel="t [ms]", ylabel="fuel consumption speed $S_c / S_L$")
+    ax[2].set(xlabel="t [ms]", ylabel="flame surface / $L^2$ (dashed: $E$-weighted)")
+    ax[0].legend(fontsize=7, ncol=2)
     for spec in args.pdf or []:
         label, rest = spec.split("=", 1)
-        path, t_sel, r_sel = rest.split(":")
-        rows = np.genfromtxt(path, delimiter=",", skip_header=1)
+        path, t_sel, r_sel = rest.rsplit(":", 2)
         with open(path) as f:
             mid = np.array([float(v) for v in f.readline().strip().split(",")[2:]])
-        rows = np.atleast_2d(rows)
+        rows = np.atleast_2d(np.genfromtxt(path, delimiter=",", skip_header=1))
         pick = rows[(np.abs(rows[:, 0] - float(t_sel)) < 1e-9) & (rows[:, 1] == float(r_sel))]
         if len(pick):
-            ax[2].plot(mid, pick[0, 2:], label=label, color=styles.get(label.split(" ")[0]))
-    ax[2].set(xlabel=r"$\theta = (T - T_u) / (T_b - T_u)$", ylabel="PDF (0.02 < $\\theta$ < 0.98)")
-    ax[2].legend(fontsize=7)
+            ax[3].plot(mid, pick[0, 2:], "k--" if label.startswith("DNS") else "-", label=label,
+                       color=None if label.startswith("DNS") else colors.get(label.split(" (")[0]))
+    ax[3].set(xlabel=r"$\theta = (T - T_u) / (T_b - T_u)$", ylabel=r"PDF in the brush (0.02 < $\theta$ < 0.98)")
+    ax[3].legend(fontsize=7)
     fig.tight_layout()
     fig.savefig(args.out, dpi=130)
     print(f"wrote {args.out}")
@@ -476,6 +481,7 @@ def main():
     a.add_argument("series", nargs="+", help="LABEL=series.csv")
     a.add_argument("--pdf", nargs="*", help="LABEL=pdf.csv:TIME:FILTER")
     a.add_argument("--out", default="flame_turbulence.png")
+    a.add_argument("--s-l", type=float, default=2.33237442)
     args = ap.parse_args()
     {"hit": hit, "init": init, "laminar": laminar, "analyze": analyze, "extract": extract, "figure": figure}[args.cmd](args)
 
