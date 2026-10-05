@@ -55,6 +55,7 @@
 #   HLLC (low-Mach cutoff 0.1)          Cf -6.8%  u_rms+ 2.89
 #   HLLC, low-Mach cutoff 0.01          Cf -5.8%  u_rms+ 2.87
 #   Roe instead of HLLC                 Cf -7.9%  u_rms+ 2.91
+#   HLLC, TENO3 instead of MUSCL        Cf -10.6% u_rms+ 2.93
 #   HLLC, 384 x 96 x 128 (dx+ 5.9)      Cf -5.5%  u_rms+ 2.82
 #   HLLC, 192 x 96 x 256 (dz+ 3.0)      Cf -2.6%  u_rms+ 2.80
 #   HLLC, 384 x 96 x 256                Cf -0.8%  u_rms+ 2.72, v, w, -u'v' within 2%
