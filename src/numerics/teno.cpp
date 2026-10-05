@@ -1231,6 +1231,8 @@ void TENO::compute_stencils_and_matrices() {
             const double det = ax * by - ay * bx;
             std::vector<Entry> sector;
             for (const Entry & e : wide) {
+                // Entries past nss_max + 1 cannot change the stencil or the tie tests
+                if (sector.size() > nss_max) break;
                 const double dx = e.x - x0;
                 const double dy = e.y - y0;
                 const double alpha = (dx * by - dy * bx) / det;
@@ -1955,16 +1957,26 @@ void TENO::compute_stencils_and_matrices_3d() {
                 const Point3 p = node(mesh->h_node_of_face(f, a));
                 for (int d = 0; d < 3; d++) v[a][d] = (p[d] - double(mesh->h_face_offset(f, i, d))) - x0[d];
             }
+            // det3(dx, v[a], v[a + 1]) = dx . cofactors[a]
             std::vector<double> dets(v.size());
-            for (size_t a = 1; a + 1 < v.size(); a++) dets[a] = det3(v[0], v[a], v[a + 1]);
+            std::vector<Point3> cofactors(v.size());
+            for (size_t a = 1; a + 1 < v.size(); a++) {
+                dets[a] = det3(v[0], v[a], v[a + 1]);
+                const Point3 & b = v[a], & c = v[a + 1];
+                cofactors[a] = {b[1] * c[2] - b[2] * c[1], b[0] * c[2] - b[2] * c[0], b[0] * c[1] - b[1] * c[0]};
+            }
             std::vector<Entry> sector;
             for (const Entry & e : wide) {
+                // Entries past nss_max + 1 cannot change the stencil or the tie tests
+                if (sector.size() > nss_max) break;
                 Point3 dx;
                 for (int d = 0; d < 3; d++) dx[d] = e.x[d] - x0[d];
                 bool in = false;
                 for (size_t a = 1; a + 1 < v.size() && !in; a++) {
                     const double det = dets[a];
-                    in = det3(dx, v[a], v[a + 1]) / det >= -GEOMETRY_TOL && det3(v[0], dx, v[a + 1]) / det >= -GEOMETRY_TOL &&
+                    const Point3 & cf = cofactors[a];
+                    in = (dx[0] * cf[0] - dx[1] * cf[1] + dx[2] * cf[2]) / det >= -GEOMETRY_TOL &&
+                         det3(v[0], dx, v[a + 1]) / det >= -GEOMETRY_TOL &&
                          det3(v[0], v[a], dx) / det >= -GEOMETRY_TOL;
                 }
                 if (in) sector.push_back(e);
