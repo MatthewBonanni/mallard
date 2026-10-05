@@ -384,8 +384,10 @@ class TENO : public FaceReconstruction {
         uint64_t options_key() const;
         uint64_t cache_key() const;
         bool load_cache();
+        void round_to_single();
 
         std::string cache_file;  // this rank's
+        bool cache_single = false;  // pseudo-inverses and smoothness-indicator matrices cached in single precision
         bool cache_loaded = false;
 
         uint32_t largest_stencil = 0;        // Largest central stencil on any rank (cells)
