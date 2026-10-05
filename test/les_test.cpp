@@ -303,11 +303,11 @@ TEST(LESSolver, EddyViscosityUsesTheCellVolumeAsFilterWidth) {
     const double h = 0.6 / ny;
     uint32_t checked = 0;
     for (uint32_t c = 0; c < mesh->n_cells; c++) {
-        const double x = mesh->h_cell_coords(c, 0), y = mesh->h_cell_coords(c, 1);
+        const double x = double(mesh->h_cell_coords(c, 0)), y = double(mesh->h_cell_coords(c, 1));
         bool interior = x > 2 * h && x < 1.3 - 2 * h && y > 2 * h && y < 0.6 - 2 * h;
-        if constexpr (N_DIM == 3) interior = interior && mesh->h_cell_coords(c, 2) > 2 * h && mesh->h_cell_coords(c, 2) < 0.45 - 2 * h;
+        if constexpr (N_DIM == 3) interior = interior && double(mesh->h_cell_coords(c, 2)) > 2 * h && double(mesh->h_cell_coords(c, 2)) < 0.45 - 2 * h;
         if (!interior) continue;
-        const double V = mesh->h_cell_volume(c);
+        const double V = double(mesh->h_cell_volume(c));
         const double mu_t = 2.0 * 0.16 * std::pow(V, 2.0 / N_DIM) * d;
         EXPECT_NEAR(sgs(c, 0), mu_t, precision_tol<double>(1e-9, 1e-4) * mu_t) << "cell " << c;
         EXPECT_NEAR(sgs(c, 1), 3.5 * mu_t / 0.6, precision_tol<double>(1e-9, 1e-4) * 3.5 * mu_t / 0.6);
@@ -329,19 +329,19 @@ TEST(LESSolver, BudgetSplitsTheKineticEnergyRateOfTheRightHandSide) {
     double total = 0.0, viscous = 0.0, sgs = 0.0, scale = 0.0;
     const auto & coefficients = solver->get_les_coefficients();
     for (uint32_t c = 0; c < mesh->n_owned(); c++) {
-        const double rho = solver->h_conservatives(c, 0), V = mesh->h_cell_measure(c);
+        const double rho = double(solver->h_conservatives(c, 0)), V = double(mesh->h_cell_measure(c));
         double u[N_DIM], u2 = 0.0, work = 0.0;
         FOR_I_DIM {
-            u[i] = solver->h_conservatives(c, 1 + i) / rho;
+            u[i] = double(solver->h_conservatives(c, 1 + i)) / rho;
             u2 += u[i] * u[i];
-            work += u[i] * h_rhs(c, 1 + i);
+            work += u[i] * double(h_rhs(c, 1 + i));
         }
-        total += (work - 0.5 * u2 * h_rhs(c, 0)) * V;
+        total += (work - 0.5 * u2 * double(h_rhs(c, 0))) * V;
         double x[3] = {};
-        FOR_I_DIM x[i] = mesh->h_cell_coords(c, i);
+        FOR_I_DIM x[i] = double(mesh->h_cell_coords(c, i));
         const double phi = dissipation_per_viscosity(box_gradient(x)) * V;
         viscous -= 1e-3 * phi;
-        sgs -= coefficients(c, 0) * phi;
+        sgs -= double(coefficients(c, 0)) * phi;
         scale += std::abs(work * V);
     }
     // The three parts add up to the whole convective and diffusive rate
@@ -389,7 +389,7 @@ TEST(LESSolver, EddyViscosityLimitsTheTimeStep) {
     auto with = make_solver(periodic_box("cartesian", n, "[les]\nmodel = \"smagorinsky\"\nC = 3.0\n", "", run));
     without->run();
     with->run();
-    EXPECT_LT(with->get_time(), 0.7 * without->get_time());
+    EXPECT_LT(double(with->get_time()), 0.7 * double(without->get_time()));
 }
 
 TEST(LESSolver, InputErrors) {
@@ -496,7 +496,7 @@ TEST(LESMixture, SchmidtNumberActsOnCompositionGradientsOnly) {
     for (uint32_t c = 0; c < n; c++) {
         double sum = 0.0;
         for (uint32_t k = 0; k < ns; k++) {
-            sum += low_s->h_species(c, k);
+            sum += double(low_s->h_species(c, k));
             species_effect = std::max(species_effect, std::abs(double(low_s->h_species(c, k) - high_s->h_species(c, k))));
         }
         // SGS fluxes sum to zero: the partial densities still add up to rho
