@@ -56,6 +56,9 @@ static const std::unordered_map<MeshType, std::string> MESH_NAMES = {
     {MeshType::CARTESIAN_MIXED, "cartesian_mixed"}
 };
 
+/** @brief Tanh stretching factor of each direction of a generated mesh, 0 for uniform spacing. */
+using Stretching = std::array<rtype, 3>;
+
 enum class CellType {
     TRIANGLE,
     QUAD,
@@ -316,9 +319,11 @@ class Mesh {
          *        prisms (2) or pyramids (6, apex at the block center). The
          *        mixed type uses hexahedra, pyramids and prisms in thirds of x.
          *        Boundary zones: left/right (x), bottom/top (y), back/front (z).
+         *        Nodes are uniform, or clustered toward both ends of each
+         *        direction with a nonzero stretching factor (see stretched_coordinate).
          */
         void init_cart_3d(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rtype Ly, rtype Lz, MeshType kind,
-                          const std::vector<PeriodicPair> & periodic = {});
+                          const std::vector<PeriodicPair> & periodic = {}, const Stretching & stretching = {});
 
         /**
          * @brief A boundary face (2 nodes in 2D; 3 or 4 nodes in 3D) and its

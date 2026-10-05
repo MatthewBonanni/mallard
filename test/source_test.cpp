@@ -114,3 +114,61 @@ TEST(SourceTest, TENOHydrostaticAtmosphereHasSmallSpuriousVelocity) {
     // gradient ghosts; mirrored pressures drive a wall-normal jet
     EXPECT_LT(hydrostatic_spurious_velocity(16, "TENO"), 1e-3);
 }
+
+namespace {
+
+/**
+ * @brief Channel of half-height h = 1 between no-slip adiabatic walls,
+ *        periodic in x, with nu = 0.01 and sound speed 1; with hold, the bulk
+ *        momentum is held at 0.1 by the mass flow forcing.
+ */
+std::string channel_input(const std::string & u, const std::string & run, bool hold = true) {
+    std::ostringstream s;
+    s << "[run]\n" << run
+      << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 32\nLx = 0.5\nLy = 2.0\nperiodic = [\"x\"]\n"
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"" << u << "\", \"0.0\"]\n"
+      << "p = \"0.7142857142857143\"\n"
+      << "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n"
+      << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\nlimiter = \"none\"\n"
+      << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 0.7142857142857143\nT_ref = 1.0\n"
+      << "rho_ref = 1.0\nmu = 0.01\n"
+      << "[output]\ncheck_interval = 1000000\n";
+    if (hold) s << "[source]\nmass_flow = [0.1, 0.0]\n";
+    return s.str();
+}
+
+} // namespace
+
+TEST(SourceTest, MassFlowForcingHoldsTheBulkMomentumAgainstWallFriction) {
+    // Plug flow decelerates at the walls; the force restores the target bulk
+    // momentum every step (to rounding), and without it the bulk decays
+    const double volume = 0.5 * 2.0;
+    Solver held;
+    held.init(parse_toml(channel_input("0.1", "n_steps = 200\ncfl = 0.5\n")));
+    held.run();
+    EXPECT_NEAR(double(held.integrate_conservatives()[1]) / volume, 0.1, precision_tol<double>(1e-12, 1e-6));
+    EXPECT_GT(held.get_mass_flow_force(), 0.0);
+
+    Solver free;
+    free.init(parse_toml(channel_input("0.1", "n_steps = 200\ncfl = 0.5\n", false)));
+    free.run();
+    EXPECT_LT(double(free.integrate_conservatives()[1]) / volume, 0.1 - 1e-4);
+}
+
+TEST(SourceTest, MassFlowForcingBalancesTheWallShearOfPoiseuilleFlow) {
+    // Steady laminar channel at bulk velocity 0.1: the force per unit volume
+    // is the wall shear stress over the half height, 3 mu U_b / h^2 = 0.003,
+    // and its work f U_b per unit volume heats the gas between adiabatic walls
+    Solver solver;
+    solver.init(parse_toml(channel_input("0.15 * (1 - (y - 1)^2)", "t_stop = 2.0\ncfl = 0.5\n")));
+    const double E0 = double(solver.integrate_conservatives()[N_DIM + 1]);
+    solver.run();
+    const double f = solver.get_mass_flow_force();
+    EXPECT_NEAR(f, 0.003, 0.003 * 0.01);
+    // The bulk velocity is 0.1 to within the density changes (Mach 0.15), and
+    // f settles from the start-up transient
+    const double dE = double(solver.integrate_conservatives()[N_DIM + 1]) - E0;
+    EXPECT_NEAR(dE, f * 0.1 * 1.0 * 2.0, f * 0.1 * 2.0 * precision_tol<double>(0.01, 0.1));  // single: rho E rounds at 1e-7 of 1.8
+}

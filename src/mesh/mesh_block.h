@@ -63,12 +63,23 @@ struct MeshBlock {
 };
 
 /**
+ * @brief Node i of n along a side of length L of a generated mesh, clustered
+ *        toward both ends by the tanh stretching factor beta > 0:
+ *        L / 2 (1 + tanh(beta (2 i / n - 1)) / tanh(beta)).
+ */
+rtype stretched_coordinate(uint32_t i, uint32_t n, rtype L, rtype beta);
+
+/** @brief [mesh] stretching: the tanh factor of each direction, 0 (uniform) if not given. */
+Stretching mesh_stretching(const toml::value & input);
+
+/**
  * @brief Part r of p of a generated 2D mesh (cartesian, cartesian_tri or
  *        wedge): near-equal blocks of its cells and nodes, numbered as
  *        Mesh::init_cart, init_cart_tri and init_wedge number them, and the
  *        boundary faces of those cells.
  */
-MeshBlock cartesian_2d_block(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, MeshType kind, int r, int p);
+MeshBlock cartesian_2d_block(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, MeshType kind, int r, int p,
+                             const Stretching & stretching = {});
 
 /**
  * @brief A generated 3D box (see Mesh::init_cart_3d): the cells
@@ -77,7 +88,7 @@ MeshBlock cartesian_2d_block(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, MeshT
  */
 MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rtype Ly, rtype Lz,
                              MeshType kind, uint64_t first_cell, uint64_t end_cell,
-                             uint64_t first_node, uint64_t end_node);
+                             uint64_t first_node, uint64_t end_node, const Stretching & stretching = {});
 
 /** @brief Total cell and node counts of a generated 3D box. */
 std::array<uint64_t, 2> cartesian_3d_size(uint32_t nx, uint32_t ny, uint32_t nz, MeshType kind);

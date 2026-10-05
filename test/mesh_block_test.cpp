@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <map>
 #include <set>
@@ -106,10 +107,13 @@ std::vector<std::string> generated_types() {
  *        serial generator does.
  */
 TEST(MeshBlockTest, GeneratedBlocksNumberCellsAndNodesAsTheSerialMesh) {
+    const std::string stretched = N_DIM == 2 ? "stretching = [0.8, 1.7]\n" : "stretching = [0.8, 1.7, 0.0]\n";
     for (const std::string & type : generated_types()) {
-        SCOPED_TRACE(type);
+      for (const std::string & stretching : {std::string(), stretched}) {
+        SCOPED_TRACE(type + " " + stretching);
         const toml::value input = parse_toml("[mesh]\ntype = \"" + type +
-                                             "\"\nNx = 6\nNy = 5\nNz = 3\nLx = 1.5\nLy = 1.0\nLz = 0.7\n");
+                                             "\"\nNx = 6\nNy = 5\nNz = 3\nLx = 1.5\nLy = 1.0\nLz = 0.7\n" +
+                                             stretching);
         Mesh serial;
         serial.init(input);
         const MeshBlock block = read_mesh_block(input);
@@ -153,5 +157,45 @@ TEST(MeshBlockTest, GeneratedBlocksNumberCellsAndNodesAsTheSerialMesh) {
             EXPECT_TRUE(serial_faces[block.zone_names[block.face_zone[f]]].count(nodes))
                 << "boundary face " << f << " of zone " << block.zone_names[block.face_zone[f]];
         }
+      }
     }
+}
+
+/**
+ * @brief Wall-resolved channel grids: tanh stretching clusters the nodes of a
+ *        direction toward both ends, y_j = L/2 (1 + tanh(beta (2j/n - 1)) / tanh(beta)),
+ *        leaves the other directions uniform, and the cells still tile the box
+ *        with the periodic seams and walls in place.
+ */
+TEST(MeshBlockTest, StretchingClustersNodesTowardBothEnds) {
+    const double beta = 1.7, Ly = 2.0;
+    const uint32_t ny = 8;
+    const toml::value input = parse_toml(
+        std::string("[mesh]\ntype = \"cartesian\"\nNx = 3\nNy = 8\nNz = 4\nLx = 1.5\nLy = 2.0\nLz = 0.5\n") +
+        (N_DIM == 2 ? "stretching = [0.0, 1.7]\nperiodic = [\"x\"]\n" : "stretching = [0.0, 1.7, 0.0]\nperiodic = [\"x\", \"z\"]\n"));
+    Mesh mesh;
+    mesh.init(input);
+    std::set<double> ys, xs;
+    for (uint32_t n = 0; n < mesh.n_nodes; n++) {
+        ys.insert(double(mesh.h_node_coords(n, 1)));
+        xs.insert(double(mesh.h_node_coords(n, 0)));
+    }
+    ASSERT_EQ(ys.size(), ny + 1);
+    uint32_t j = 0;
+    for (double y : ys) {
+        const double expected = 0.5 * Ly * (1.0 + std::tanh(beta * (2.0 * j / ny - 1.0)) / std::tanh(beta));
+        EXPECT_NEAR(y, expected, precision_tol<double>(1e-14, 1e-6)) << "node " << j;
+        j++;
+    }
+    // Uniform in x: 4 nodes 0.5 apart
+    ASSERT_EQ(xs.size(), 4u);
+    EXPECT_NEAR(*std::next(xs.begin()), 0.5, precision_tol<double>(1e-14, 1e-6));
+    double volume = 0.0;
+    for (uint32_t c = 0; c < mesh.n_cells; c++) volume += double(mesh.h_cell_volume(c));
+    EXPECT_NEAR(volume, N_DIM == 2 ? 3.0 : 1.5, precision_tol<double>(1e-12, 1e-5));
+    std::set<std::string> zones;
+    for (FaceZone & zone : *mesh.face_zones()) {
+        if (zone.get_type() == FaceZoneType::BOUNDARY) zones.insert(zone.get_name());
+    }
+    EXPECT_EQ(zones, (std::set<std::string>{"bottom", "top"}));
 }
