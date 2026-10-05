@@ -50,3 +50,9 @@ EPYC7763-16c,ndodecane,0.0156,thread,sparse,1e-8,6.07e4
 EPYC7763-16c,ndodecane,0.0156,thread,sparse,1e-6,2.47e4
 EPYC7763-16c,nhexane,0.047,thread,sparse,1e-8,2.93e3
 EPYC7763-16c,nhexane,0.047,thread,sparse,1e-6,8.77e2
+MI355X,h2o2,0.375,thread ordered,dense,1e-8,1.27e7
+MI355X,h2o2,0.375,thread ordered,dense,1e-6,3.62e6
+MI355X,gri30,0.0625,warp ordered wide,sparse,1e-8,8.11e5
+MI355X,gri30,0.0625,warp ordered wide,sparse,1e-6,7.76e5
+MI355X,ndodecane,0.0156,warp ordered wide,sparse,1e-8,4.09e5
+MI355X,ndodecane,0.0156,warp ordered wide,sparse,1e-6,5.42e4

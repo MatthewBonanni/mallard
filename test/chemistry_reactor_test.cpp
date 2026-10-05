@@ -271,10 +271,12 @@ Rows<double>::host_mirror_type lanes_ignition(const Mechanism & mech, const Tabl
 TEST(ChemistryReactorTest, VectorLanesIntegrateLikeOneThread) {
     // The team path (rates, Jacobian rows, LU and solves across lanes, reductions
     // in a fixed order) gives the one-thread result to round-off, with the
-    // largest vector length of the backend (1 on host backends); on GPUs also
-    // with several warps per cell, as for large mechanisms
-    const uint32_t lanes = std::min<uint32_t>(32, Kokkos::TeamPolicy<>::vector_length_max());
+    // largest vector length of the backend (a warp, 32 or 64 lanes, on GPUs; 1
+    // on host backends); on GPUs also with several warps per cell, as for large
+    // mechanisms
     constexpr bool gpu = !Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace, Kokkos::HostSpace>::accessible;
+    const uint32_t lanes_max = static_cast<uint32_t>(Kokkos::TeamPolicy<>::vector_length_max());
+    const uint32_t lanes = gpu ? lanes_max : std::min<uint32_t>(32, lanes_max);
     for (const auto & [name, file, phase] : {std::array<std::string, 3>{"h2o2", SOURCE_DIR + "/mechanisms/h2o2.yaml", "ohmech"},
                                             std::array<std::string, 3>{"gri30", SOURCE_DIR + "/mechanisms/gri30.yaml", ""}}) {
         const Mechanism mech = read_mechanism(file, phase);
@@ -335,6 +337,7 @@ TEST(ChemistryReactorTest, ReactorJacobianMatchesFiniteDifferences) {
         {"h2o2", SOURCE_DIR + "/mechanisms/h2o2.yaml", "ohmech"},
         {"gri30", SOURCE_DIR + "/mechanisms/gri30.yaml", ""},
         {"test_kinetics", SOURCE_DIR + "/test/data/chemistry/test_kinetics.yaml", "gas"},
+        {"propane_2step", SOURCE_DIR + "/test/data/chemistry/propane_2step.yaml", "gas"},
     };
     for (const auto & [name, file, phase] : cases) {
         const Mechanism mech = read_mechanism(file, phase);
@@ -413,6 +416,36 @@ TEST(ChemistryReactorTest, IgnitionDelaysAndEquilibriumMatchCantera) {
         }
         std::cout << name << ": max ignition delay error " << worst_tau << ", " << r.steps << " sub-steps\n";
     }
+}
+
+TEST(ChemistryReactorTest, FractionalOrdersIgniteToDepletionLikeCantera) {
+    // Westbrook-Dryer two-step propane/air (orders 0.1, 0.25, 0.5 and 1.65),
+    // the cases of V1: a reactant runs out (C3H8 lean, O2 rich, both at phi = 1),
+    // and H2O and CO start at zero in the CO oxidation [CO] [H2O]^0.5 [O2]^0.25.
+    // The end state is Cantera's reactor at 1000 delays (irreversible mechanism)
+    const Mechanism mech = read_mechanism(SOURCE_DIR + "/test/data/chemistry/propane_2step.yaml", "gas");
+    const uint32_t ns = mech.n_species();
+    const Table ref = read_table("propane_2step_ignition.csv");
+    ASSERT_EQ(ref.rows.size(), 18u);
+    const IgnitionResults r = device_ignition(mech, ref);
+    EXPECT_EQ(r.failures, 0u);
+    const size_t c_Y = ref.column("Yeq_" + mech.species[0].name);
+    double worst_tau = 0.0;
+    for (size_t c = 0; c < ref.rows.size(); c++) {
+        const auto & row = ref.rows[c];
+        const std::string where = "T0 " + std::to_string(row[0]) + " p0 " + std::to_string(row[1]) + " phi " +
+                                  std::to_string(row[2]);
+        const double tau = row[ref.column("tau")];
+        worst_tau = std::max(worst_tau, std::abs(r.tau[c] / tau - 1.0));
+        EXPECT_NEAR(r.tau[c], tau, 5e-3 * tau) << where;
+        EXPECT_NEAR(r.T_half[c], row[ref.column("T_half_tau")], 1e-2 * row[ref.column("T_half_tau")]) << where;
+        EXPECT_NEAR(r.T_2tau[c], row[ref.column("T_2tau")], 1e-2 * row[ref.column("T_2tau")]) << where;
+        EXPECT_NEAR(r.T_eq[c], row[ref.column("T_eq")], 0.1) << where;
+        for (uint32_t k = 0; k < ns; k++) {
+            EXPECT_NEAR(r.Y_eq[c][k], row[c_Y + k], 1e-6) << where << " Y_" << mech.species[k].name;
+        }
+    }
+    std::cout << "propane_2step: max ignition delay error " << worst_tau << ", " << r.steps << " sub-steps\n";
 }
 
 TEST(ChemistryReactorTest, SparseLUSolvesLikeTheDenseOne) {

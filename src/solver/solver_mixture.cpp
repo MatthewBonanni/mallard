@@ -21,6 +21,7 @@
 
 #include "flux_functor.h"
 #include "input.h"
+#include "launch_bounds.h"
 #include "mixture_flux.h"
 #include "mixture_viscous_flux.h"
 
@@ -464,10 +465,10 @@ void Solver::launch_mixture_flux_functor() {
         low_mach_cutoff};
     // Faces of owned cells, as the single-gas flux
     if (rhs_faces.extent(0) == 0) {
-        Kokkos::parallel_for("mixture_flux", mesh->n_faces, functor);
+        Kokkos::parallel_for("mixture_flux", HeavyRange<>(0, mesh->n_faces), functor);
     } else {
         Kokkos::View<uint32_t *> list = rhs_faces;
-        Kokkos::parallel_for("mixture_flux", list.extent(0), OverFaces<MixtureFluxFunctor<T_riemann_solver>>{functor, list});
+        Kokkos::parallel_for("mixture_flux", HeavyRange<>(0, list.extent(0)), OverFaces<MixtureFluxFunctor<T_riemann_solver>>{functor, list});
     }
 }
 
@@ -491,10 +492,10 @@ void Solver::launch_double_flux_functor() {
         face_mdot,
         low_mach_cutoff};
     if (rhs_faces.extent(0) == 0) {
-        Kokkos::parallel_for("double_flux", mesh->n_faces, functor);
+        Kokkos::parallel_for("double_flux", HeavyRange<>(0, mesh->n_faces), functor);
     } else {
         Kokkos::View<uint32_t *> list = rhs_faces;
-        Kokkos::parallel_for("double_flux", list.extent(0),
+        Kokkos::parallel_for("double_flux", HeavyRange<>(0, list.extent(0)),
                              OverFaces<MixtureDoubleFluxFunctor<T_riemann_solver>>{functor, list});
     }
 }

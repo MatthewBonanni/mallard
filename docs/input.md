@@ -110,10 +110,11 @@ translation = [1.0, 0.0]
 | `type` | `euler` or `navier_stokes` |
 | `gamma` | Ratio of specific heats |
 | `p_ref`, `T_ref`, `rho_ref` | A reference state, which sets the gas constant `R = p_ref / (rho_ref T_ref)` |
-| `mu` | (`navier_stokes`) Dynamic viscosity, or its value at `T_mu_ref` for Sutherland's law |
+| `mu` | (`navier_stokes`) Dynamic viscosity, or its value at `T_mu_ref` for Sutherland's law or the power law |
 | `Pr` | (`navier_stokes`) Prandtl number, default 0.72 |
-| `viscosity_model` | (`navier_stokes`) `constant` (default) or `sutherland` |
+| `viscosity_model` | (`navier_stokes`) `constant` (default), `sutherland` or `power_law` (`mu (T / T_mu_ref)^viscosity_exponent`) |
 | `T_mu_ref`, `sutherland_S` | (`sutherland`) Reference temperature (default 273.15) and Sutherland temperature (default 110.4) |
+| `T_mu_ref`, `viscosity_exponent` | (`power_law`) Reference temperature and exponent, both required |
 | `gas` | `perfect` (default): a calorically perfect gas set by the keys above; `mixture`: a thermally perfect mixture of the species of a mechanism (no `gamma`, `p_ref`, `T_ref`, `rho_ref`) |
 | `mechanism` | (`mixture`) A [Cantera YAML](https://cantera.org/stable/yaml/index.html) file, e.g. `mechanisms/h2o2.yaml` (see `mechanisms/README.md`); Chemkin files convert with Cantera's `ck2yaml` |
 | `phase` | (`mixture`) Phase of the file to use; default the first |
@@ -249,7 +250,11 @@ double precision in every build.
 Cells whose mass fractions would change by less than `atol / 100` over the
 half step at their current rates are skipped. Reaction types: elementary,
 three-body, falloff (Lindemann, Troe, SRI), `pressure-dependent-Arrhenius`
-(PLOG) and `Chebyshev`. Output variables: `HRR` (heat release rate,
+(PLOG) and `Chebyshev`, with non-integer reactant `orders` (global
+mechanisms such as Westbrook–Dryer's). Orders between 0 and 1 follow the
+power law down to a concentration of `1e-12` kmol/m^3 and a quadratic with a
+bounded slope below it (see `docs/design/chemistry.md`), so the Jacobian
+stays finite where such a reactant runs out. Output variables: `HRR` (heat release rate,
 W/m^3) and `CHEM_COST` (chemistry sub-steps of the cell in the last step);
 restart files also hold `CHEM_H`, each cell's last sub-step, so restarted
 runs repeat the uninterrupted one exactly. The progress rows add the share of
@@ -271,8 +276,12 @@ Write the force of the fluid on a boundary zone to a CSV file
 ## `[integrals]`
 
 Write domain integrals to a CSV file (`step, t, kinetic_energy, enstrophy,
-dilatation_squared, pressure_dilatation`): the integrals of `rho |u|^2 / 2`,
-`rho |omega|^2 / 2`, `(div u)^2` and `p div u`. With TENO the velocity
+dilatation_squared, pressure_dilatation, velocity_squared, vorticity_squared,
+density_squared, temperature, temperature_squared`): the integrals of
+`rho |u|^2 / 2`, `rho |omega|^2 / 2`, `(div u)^2`, `p div u`, `|u|^2`,
+`|omega|^2`, `rho^2`, `T` and `T^2` (divided by the volume, the last ones give
+the mean squared velocity and vorticity and the density and temperature
+variances). With TENO the velocity
 gradients are those of the reconstruction polynomials at the cell centroids
 (order-consistent: on the Taylor-Green vortex at 64^3 per octant they match
 spectral derivatives of the same field to about 1%); otherwise they are the
@@ -378,10 +387,34 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | Key | Description |
 |---|---|
 | `prefix` | Output path prefix; directories are created as needed |
-| `format` | `vtu` (with a `.pvd` series next to it) or `restart` |
+| `format` | `vtu` (with a `.pvd` series next to it), `hdf5` (with XDMF indexes; see below) or `restart` |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
-| `variables` | (`vtu`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m^3 s)]), and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>` and `COV_<A>_<B>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
+| `variables` | (`vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m^3 s)]), and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>` and `COV_<A>_<B>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
 | `geometry` | (`vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |
+
+`format = "hdf5"` (builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need
+parallel HDF5) scales to large runs: every rank writes its part of one file per
+snapshot with collective I/O instead of a VTU piece of its own. It writes
+
+- `PREFIX_mesh.h5`, once: `nodes/coordinates` (n_nodes x dimension),
+  `cells/topology`, an XDMF `Mixed` topology (each cell's XDMF type, then its
+  nodes in VTK order: triangle 4, quadrilateral 5, tetrahedron 6, pyramid 7,
+  wedge 8, hexahedron 9) and `cells/offsets`, where each cell's record starts
+  (n_cells + 1 entries);
+- `PREFIX_NNNNNN.h5` per snapshot: the attributes `step`, `time` and `mesh`
+  (the mesh file's name), and `fields/<name>` for each variable (n_cells
+  values, or n_cells x 3 for vectors);
+- `PREFIX_NNNNNN.xmf` per snapshot and `PREFIX.xmf`, the time series, which
+  ParaView opens (XDMF reader).
+
+Row i of every cell array is global cell i, the cell order of the mesh file and
+of restart files, so the files do not depend on the number of ranks.
+Snapshots are about half the size of VTU pieces (the mesh is not repeated) and
+two files instead of one per rank. A shared file pays off on parallel file
+systems; on one node's local disk, which serializes writes to a file, VTU
+pieces write faster beyond a few ranks (2.1M hexahedra, 16 ranks: 115 ms per
+HDF5 snapshot against 72 ms, 1 rank: 140 ms against 1.1 s). VTU output remains
+the simpler choice for small runs. `tools/mallard_h5.py` reads the files.
 
 ## `MallardReactor`
 

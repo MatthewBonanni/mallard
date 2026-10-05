@@ -1,0 +1,26 @@
+description: |-
+  Westbrook & Dryer two-step propane/air mechanism (Combust. Sci. Technol.
+  27 (1981) 31-43, Table IV): C3H8 + 3.5 O2 => 3 CO + 4 H2O with rate
+  10^12 exp(-30 kcal/mol / RT) [C3H8]^0.1 [O2]^1.65, then
+  CO + 0.5 O2 => CO2 with rate 10^14.6 exp(-40 kcal/mol / RT) [CO] [H2O]^0.5 [O2]^0.25
+  (H2O on both sides of the second reaction carries its order).
+  Fractional orders below 1 for the kinetics' low-concentration regularization.
+
+units: {length: cm, quantity: mol, activation-energy: cal/mol}
+
+phases:
+- name: gas
+  thermo: ideal-gas
+  elements: [O, H, C, N]
+  species:
+  - ../../../mechanisms/gri30.yaml/species: [C3H8, O2, CO, H2O, CO2, N2]
+  kinetics: gas
+  state: {T: 300.0, P: 1 atm}
+
+reactions:
+- equation: C3H8 + 3.5 O2 => 3 CO + 4 H2O
+  rate-constant: {A: 1.0e+12, b: 0.0, Ea: 3.0e+04}
+  orders: {C3H8: 0.1, O2: 1.65}
+- equation: CO + 0.5 O2 + H2O => CO2 + H2O
+  rate-constant: {A: 3.981e+14, b: 0.0, Ea: 4.0e+04}
+  orders: {CO: 1.0, O2: 0.25, H2O: 0.5}

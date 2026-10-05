@@ -48,15 +48,25 @@ Add `-DMallard_DIM=3` (in a separate build directory) for the 3D solver.
 
 Pick the Kokkos backend at configure time, for example `-DKokkos_ENABLE_OPENMP=ON`, or `-DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON -DCMAKE_CXX_COMPILER=$PWD/src/external/kokkos/bin/nvcc_wrapper` for NVIDIA A100 GPUs (add `-DKokkos_ENABLE_OPENMP=ON` too, so host-side setup such as TENO's precomputation runs in parallel). To use an installed Kokkos instead, pass `-DUSE_SYSTEM_KOKKOS=ON -DKokkos_DIR=/path/to/kokkos`.
 
+For AMD GPUs, build with ROCm's Clang (ROCm 6.2 or newer, with the HIP development headers):
+
+```sh
+cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
+    -DKokkos_ENABLE_HIP=ON -DKokkos_ARCH_AMD_GFX950=ON -DKokkos_ENABLE_OPENMP=ON \
+    -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++
+```
+
+`AMD_GFX950` is the MI350X/MI355X; use `AMD_GFX942` for the MI300X/MI300A or `AMD_GFX90A` for the MI250X. Instinct GPUs run 64-wide wavefronts where NVIDIA GPUs run 32-wide warps; the chemistry gives each cell a wavefront, and a team's results do not depend on its width. With MPI and dKaMinPar, also pass `-DCMAKE_POSITION_INDEPENDENT_CODE=ON`. On a node with automatic NUMA balancing on (`/proc/sys/kernel/numa_balancing` is 1), the ROCm driver stalls a process's GPU queues for up to seconds at a time: turn it off, as AMD recommends for Instinct GPUs, or bind each rank to its GPU's NUMA node (`numactl --cpunodebind=N --membind=N`).
+
 | CMake option | Default | Description |
 |---|---|---|
 | `USE_SYSTEM_KOKKOS` | `ON` | Use an installed Kokkos instead of the submodule |
 | `Mallard_DIM` | `2` | Spatial dimension, `2` or `3` (one binary per dimension) |
 | `Mallard_USE_DOUBLE` | `ON` | Double precision (single precision otherwise) |
 | `Mallard_ENABLE_MPI` | `OFF` | Distributed memory with MPI: `mpirun -n N Mallard -i input.toml` splits the mesh between ranks; with generated meshes or HDF5 mesh files (`mallard-mesh-convert`) no rank ever holds the whole mesh, while Gmsh files are read whole by every rank |
-| `Mallard_GPU_AWARE_MPI` | `OFF` | With MPI on GPUs: hand device buffers to a CUDA-aware MPI instead of staging halos through host memory |
+| `Mallard_GPU_AWARE_MPI` | `OFF` | With MPI on GPUs: hand device buffers to a CUDA- or ROCm-aware MPI (e.g. Open MPI over UCX built with CUDA or ROCm) instead of staging halos through host memory |
 | `Mallard_ENABLE_KAMINPAR` | `OFF` | With MPI: partition the mesh with the [dKaMinPar](https://github.com/KaHIP/KaMinPar) graph partitioner (fetched at configure time; needs oneTBB) instead of a Hilbert curve. With CUDA, configure with the host compiler (`-DCMAKE_CXX_COMPILER=g++`) instead of `nvcc_wrapper`: Kokkos then compiles the code that uses it through `nvcc_wrapper` itself, and dKaMinPar does not compile with nvcc |
-| `Mallard_ENABLE_HDF5` | `OFF` | HDF5 mesh files (parallel HDF5 with MPI, when available) and the `mallard-mesh-convert` tool |
+| `Mallard_ENABLE_HDF5` | `OFF` | HDF5 mesh files and solution output (`format = "hdf5"`, with XDMF for ParaView; parallel HDF5 with MPI, when available) and the `mallard-mesh-convert` tool |
 | `Mallard_WARNINGS_AS_ERRORS` | `OFF` | Treat compiler warnings in Mallard's own code as errors (on in CI) |
 | `BUILD_DOCS` | `OFF` | Doxygen documentation target |
 
