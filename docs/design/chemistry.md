@@ -485,7 +485,11 @@ Validation (MUSCL, HLLC, SSPRK3, h2o2 mechanism, default tolerances):
   speed against D_CJ = 1616.9 m/s: +0.11%, +0.01%, 0.00% at 10, 20, 40 cells
   per ZND induction length (1.525 mm); induction length -4.5%, -1.8%, +2.7%
   (one cell at 40 is 2.5%); peak pressure 174.8 kPa against the von
-  Neumann 174.7 kPa.
+  Neumann 174.7 kPa. Roe and RHLL (milestone 12; in 1D RHLL is HLL, the
+  velocity jump being normal to every face) give the same front speed and
+  induction length to the digits above at 10 and 20 cells per induction
+  length (+0.11% and +0.01%; -4.5% and -1.8%), with profiles within 0.6% of
+  each other.
 - V6 (`examples/reactive_shock_tube`): reaction front at 230 us at
   99.625, 99.662, 99.644 mm with 50, 25, 12.5 um cells (within one coarse
   cell of the finest); peak T 2875.2, 2876.1, 2876.6 K and peak p 316.6,
