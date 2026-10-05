@@ -818,10 +818,13 @@ double mixture_carbuncle_growth(const std::string & riemann) {
 } // namespace
 
 TEST(MixtureTest, RotatedHybridRiemannSolverIsCarbuncleFree) {
-    if constexpr (N_DIM != 2) GTEST_SKIP() << "the 2D setup of solver_test.cpp";
     SKIP_IN_SINGLE_PRECISION("Mach 6 amplifies the round-off of p to O(0.1) cross-flow for every solver");
-    EXPECT_GT(mixture_carbuncle_growth("Roe"), 0.1);
-    EXPECT_LT(mixture_carbuncle_growth("RHLL"), 1e-10);
+    if constexpr (N_DIM == 2) {
+        EXPECT_GT(mixture_carbuncle_growth("Roe"), 0.1);
+        EXPECT_LT(mixture_carbuncle_growth("RHLL"), 1e-10);
+    } else {
+        GTEST_SKIP() << "the 2D setup of solver_test.cpp";
+    }
 }
 
 namespace {
