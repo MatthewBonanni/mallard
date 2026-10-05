@@ -48,9 +48,10 @@ mechanism = "../../mechanisms/h2o2.yaml"
 [chemistry]
 rtol = 1.0e-6
 atol = 1.0e-10
+fuse_half_steps = true
 
 [output]
-check_interval = 200
+check_interval = 500
 
 [[write_data]]
 prefix = "./restart_2d/cell"

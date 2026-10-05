@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
 """Shock / light-bubble interaction (examples/shock_bubble_3d): frames and comparison with Haas & Sturtevant.
 
+    shock_bubble.py init INPUT OUT.restart --d D --xb XB [--gap 0.1] [--delta-cells 3] [--ms 1.25] [--air 0.28]
     shock_bubble.py frame INPUT RESTART OUT.npz
     shock_bubble.py frames INPUT RESTART_DIR FRAME_DIR [--keep-last] [--watch SECONDS]
     shock_bubble.py compare INPUT probe_axis.csv FRAME_DIR [--png xt.png] [--csv features.csv]
 
 The run is a quarter of a square shock tube (symmetry planes y = 0 and z = 0)
-on a generated cartesian box, with the bubble centered at (XB, 0, 0); XB,
-the bubble diameter D and the incident shock's start position XS are read
-from the input's initial He mass fraction expression and velocity
-expression.
+on a generated cartesian box, with the bubble centered at (XB, 0, 0). `init`
+writes its initial state (needs Cantera): air (N2/O2 0.767/0.233 by mass)
+at T0, p0, a bubble of diameter D of helium with a mass fraction AIR of air,
+at rest at T0, p0, with a tanh profile DELTA_CELLS cells thick, and a shock
+of Mach MS (Rankine-Hugoniot of the thermally perfect air) GAP diameters
+ahead of it moving to +x, with the post-shock air behind it; cell averages
+over 2 x 2 x 2 points. It prints the post-shock state, which the input's
+`upt` inflow on the left must match, and writes the geometry to bubble.json
+next to INPUT for the other commands.
 
 `frame` reduces a restart file to what the renders need: the He mass
 fraction and the vorticity magnitude in the box around the helium
@@ -33,9 +39,11 @@ times and positions scale with the diameter.
 """
 import argparse
 import csv
+import json
 import glob
 import os
 import re
+import struct
 import sys
 import time
 
@@ -52,13 +60,89 @@ HS_SPHERE = {"V_s": 420, "V_R": 960, "V_T": 365, "V_ui": 190, "V_uf": 125, "V_di
 
 
 def geometry(case):
-    """Bubble center XB, diameter D and shock start XS from the input's expressions."""
-    init = case.toml["initialize"]
-    he = init["Y"]["HE"]
-    xb = float(re.search(r"\(x - ([0-9.eE+-]+)\)", he).group(1))
-    r = float(re.search(r"\) - ([0-9.eE+-]+)\)", he).group(1))
-    xs = float(re.search(r"x < ([0-9.eE+-]+)", init["u"][0]).group(1))
-    return xb, 2 * r, xs
+    """Bubble center XB, diameter D, shock start XS and shock speed W, from the bubble.json of `init`."""
+    with open(case.path("bubble.json")) as f:
+        b = json.load(f)
+    return b["xb"], b["d"], b["xs"], b["w"]
+
+
+def init(case, out, d, xb, gap, delta_cells, ms, air, T0, p0):
+    """Initial state: the bubble, the incident shock GAP * D upstream of it, and the post-shock air behind."""
+    import cantera as ct
+    gas = ct.Solution(case.mechanism)
+    air_y = {"N2": 0.767, "O2": 0.233}
+    gas.TPY = T0, p0, air_y
+    rho1, h1, c1 = gas.density, gas.enthalpy_mass, gas.sound_speed
+    w = ms * c1
+
+    def jump(r2):
+        u2 = w * rho1 / r2
+        p2 = p0 + rho1 * w ** 2 - r2 * u2 ** 2
+        gas.TPY = T0, p0, air_y
+        gas.TPY = p2 / (r2 * ct.gas_constant / gas.mean_molecular_weight), p2, air_y
+        return gas.enthalpy_mass + 0.5 * u2 ** 2 - (h1 + 0.5 * w ** 2), p2, u2
+
+    lo, hi = 1.01 * rho1, 3 * rho1
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if jump(lo)[0] * jump(mid)[0] <= 0:
+            hi = mid
+        else:
+            lo = mid
+    r2 = 0.5 * (lo + hi)
+    _, p2, u2 = jump(r2)
+    T2 = gas.T
+    up = w - u2
+    nx, ny, nz = case.shape
+    dx = case.dx
+    xs = round((xb - 0.5 * d - gap * d) / dx) * dx  # on a cell face
+    delta = delta_cells * dx
+    names = [s for s in gas.species_names]
+    # Species internal energies at the two temperatures, J/kg
+    e = {}
+    for T in (T0, T2):
+        gas.TP = T, p0
+        e[T] = gas.standard_int_energies_RT * ct.gas_constant * T / gas.molecular_weights
+    wts = gas.molecular_weights
+    k_he = names.index("HE")
+    y_air = np.array([air_y.get(s, 0.0) for s in names])
+    n_cells = nx * ny * nz
+    var_names = ["RHO", "RHOU_X", "RHOU_Y", "RHOU_Z", "RHOE"] + ["RHOY_" + s for s in names] + ["T_SEED"]
+    sub = (np.arange(2) + 0.5) / 2
+    with open(out, "wb") as f:
+        f.write(b"MALLARD-RESTART\0")
+        f.write(struct.pack("<IIQQQd", 2, 8, n_cells, len(var_names), 0, 0.0))
+        for name in var_names:
+            f.write(struct.pack("<I", len(name)) + name.encode())
+        y = (np.arange(ny)[:, None, None, None] + sub[None, :, None, None]) * dx
+        z = (np.arange(nz)[None, None, :, None] + sub[None, None, None, :]) * dx
+        cols = {v: np.empty((nx, ny, nz)) for v in var_names}
+        for i in range(nx):
+            acc = {v: np.zeros((ny, nz)) for v in var_names}
+            for sx in sub:
+                x = (i + sx) * dx
+                r = np.sqrt((x - xb) ** 2 + y ** 2 + z ** 2)  # (ny, 2, nz, 2)
+                y_he = (1 - air) * 0.5 * (1 - np.tanh((r - 0.5 * d) / delta))
+                Y = y_he[..., None] * np.eye(len(names))[k_he] + (1 - y_he)[..., None] * y_air
+                behind = x < xs
+                T, p, u = (T2, p2, up) if behind else (T0, p0, 0.0)
+                rho = p / (ct.gas_constant * T * (Y / wts).sum(-1))
+                e_mix = (Y * e[T]).sum(-1)
+                parts = {"RHO": rho, "RHOU_X": rho * u, "RHOU_Y": 0 * rho, "RHOU_Z": 0 * rho,
+                         "RHOE": rho * (e_mix + 0.5 * u * u), "T_SEED": T + 0 * rho}
+                for k, s in enumerate(names):
+                    parts["RHOY_" + s] = rho * Y[..., k]
+                for v in var_names:
+                    acc[v] += parts[v].mean(axis=(1, 3)) / 2
+            for v in var_names:
+                cols[v][i] = acc[v]
+        for v in var_names:
+            cols[v].astype("<f8").tofile(f)
+    with open(case.path("bubble.json"), "w") as f:
+        json.dump({"xb": xb, "d": d, "xs": xs, "w": w, "ms": ms, "u_p": up, "p2": p2, "T2": T2, "rho2": r2,
+                   "T0": T0, "p0": p0, "air_in_bubble": air, "delta": delta}, f, indent=1)
+    print(f"wrote {out}: {nx} x {ny} x {nz} cells; shock at x = {xs:.6g} (W = {w:.2f} m/s); behind it "
+          f"u = {up:.4f} m/s, p = {p2:.2f} Pa, T = {T2:.4f} K (the left boundary's upt state)")
 
 
 def fields(case, restart):
@@ -99,7 +183,7 @@ def frame(case, restart, out):
     plane_w = w[:, :, 0]
     j0 = 3  # skip the axis
     i, j = np.unravel_index(np.argmax(plane_w[:, j0:]), plane_w[:, j0:].shape)
-    _, d, _ = geometry(case)
+    _, d, _, _ = geometry(case)
     u_ref = max(abs(float(b["u"][0])) for b in case.toml["boundaries"] if b.get("type") == "upt")
     rho_ref = float(rho[-1, -1, -1])
     np.savez(out, t=h["t"], step=h["step"], dx=dx, lo=np.array(lo), d=d, u_ref=u_ref, rho_ref=rho_ref,
@@ -160,10 +244,9 @@ def fit(t, x, window):
 
 
 def compare(case, probe_path, frame_dir, png, out_csv):
-    xb, d, xs = geometry(case)
+    xb, d, xs, ws = geometry(case)
     scale = D_EXPERIMENT / d
     probe = read_probe(probe_path)
-    ws = 1.25 * 344.93  # incident shock speed of the input (Ms = 1.25 in air at 295 K)
     t_hit = (xb - d / 2 - xs) / ws
     ts, ui, di, shock_in, shock_out = [], [], [], [], []
     for t, a in probe.items():
@@ -244,9 +327,22 @@ def main():
     p.add_argument("frame_dir")
     p.add_argument("--png")
     p.add_argument("--csv")
+    p = sub.add_parser("init")
+    p.add_argument("input")
+    p.add_argument("out")
+    p.add_argument("--d", type=float, required=True, help="bubble diameter [m]")
+    p.add_argument("--xb", type=float, required=True, help="bubble center x [m] (center on y = z = 0)")
+    p.add_argument("--gap", type=float, default=0.1, help="shock start ahead of the bubble, in diameters")
+    p.add_argument("--delta-cells", type=float, default=3.0, help="interface tanh thickness in cells")
+    p.add_argument("--ms", type=float, default=1.25)
+    p.add_argument("--air", type=float, default=0.28, help="mass fraction of air in the bubble")
+    p.add_argument("--T0", type=float, default=295.0)
+    p.add_argument("--p0", type=float, default=101325.0)
     args = ap.parse_args()
     case = Case(args.input)
-    if args.cmd == "frame":
+    if args.cmd == "init":
+        init(case, args.out, args.d, args.xb, args.gap, args.delta_cells, args.ms, args.air, args.T0, args.p0)
+    elif args.cmd == "frame":
         frame(case, args.restart, args.out)
     elif args.cmd == "frames":
         frames(case, args.restart_dir, args.frame_dir, args.keep_last, args.watch)

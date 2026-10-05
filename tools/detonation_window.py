@@ -4,7 +4,7 @@
     detonation_window.py run INPUT --keep BEHIND --segment DT --t-end T [--frames DIR] -- MALLARD COMMAND...
     detonation_window.py shift INPUT RESTART --keep BEHIND
     detonation_window.py frame INPUT RESTART OUT.npz [--depth D]
-    detonation_window.py extrude INPUT_2D RESTART_2D NZ OUT.restart [--pocket BEHIND Y Z R]...
+    detonation_window.py extrude INPUT_2D RESTART_2D INPUT_3D OUT.restart [--superpose] [--pocket BEHIND Y Z R]...
 
 A detonation runs to +x through fresh gas at rest, and only the front, its
 reaction zone and a stretch of the flow behind it matter. `shift` moves the
@@ -14,7 +14,7 @@ one), drops the columns more than BEHIND meters behind it and appends as
 many copies of the last (fresh) column, in place, so the front sits BEHIND
 from the left end again. The transmissive left boundary then cuts the burnt
 gas BEHIND behind the front. Before the columns go, the P_MAX of their cells
-next to the side walls (y = 0, y = LY and, in 3D, z = 0, z = LZ) is saved as
+next to the four side walls (3D; the whole plane in 2D) is saved as
 the next numbered chunk of the soot foils in foil/, and window.json (both
 next to INPUT) records the total shift, i.e. where the box's left end is in
 the duct, and each chunk. The step and time of the restart are kept.
@@ -32,10 +32,13 @@ resumes after the last completed segment.
 meters (default 0.03) behind the front at full resolution, and P_MAX on the
 side walls over the whole box, with the shift, step and time.
 
-`extrude` turns a 2D restart of an NX x NY box into a 3D one of NX x NY x
-NZ, uniform in z (zero z momentum, LZ = LY / NY * NZ), e.g. to start a 3D
-run from a developed 2D cellular detonation; INPUT_2D is the 2D run's input.
-Each --pocket fills a sphere of radius R centered BEHIND meters behind the
+`extrude` turns a 2D restart into the initial state of the 3D box of
+INPUT_3D (the 2D run's cells and NY, at most its NX: the last NX columns are
+kept), uniform in z (zero z momentum), e.g. to start a 3D run from a
+developed 2D cellular detonation. With --superpose (NZ = NY) each cell takes
+instead the 2D state at (x, y) or, turned into the z direction, at (x, z),
+whichever is hotter (further into the reaction zone): the 2D cellular front
+in both transverse directions at once, in phase. Each --pocket fills a sphere of radius R centered BEHIND meters behind the
 front at (Y, Z) with the fresh gas of the last column, at rest, to start
 transverse waves in z.
 
@@ -134,11 +137,10 @@ def front_index(rho):
 
 
 def wall_strips(p_max):
-    """P_MAX next to the side walls, (x cells, transverse cells) each: y walls, then z walls in 3D."""
-    strips = {"bottom": p_max[:, 0, :], "top": p_max[:, -1, :]}
-    if p_max.shape[2] > 1:
-        strips.update({"back": p_max[:, :, 0], "front": p_max[:, :, -1]})
-    return strips
+    """P_MAX of the cells next to the side walls, (x cells, transverse cells) each, or (2D) of the whole plane."""
+    if p_max.shape[2] == 1:
+        return {"plane": p_max[:, :, 0]}
+    return {"bottom": p_max[:, 0, :], "top": p_max[:, -1, :], "back": p_max[:, :, 0], "front": p_max[:, :, -1]}
 
 
 def shift(case, restart, keep, state):
@@ -225,41 +227,57 @@ def foils(input_path, restart=None):
     return {w: np.concatenate(p) for w, p in parts.items()}, case.dx
 
 
-def extrude(input_2d, restart_2d, nz, out, pockets):
-    case = Case(input_2d)
+def extrude(input_2d, restart_2d, input_3d, out, pockets, superpose):
+    case2, case3 = Case(input_2d), Case(input_3d)
     with open(restart_2d, "rb") as f:
         h = read_header(f)
-    nx, ny = case.shape[:2]
-    _, data = open_restart(restart_2d, (nx, ny, 1))
+    nx2, ny = case2.shape[:2]
+    nx, ny3, nz = case3.shape
+    if ny3 != ny or nx > nx2 or abs(case3.dx - case2.dx) > 1e-9 * case2.dx or (superpose and nz != ny):
+        raise SystemExit("the 3D box needs the 2D box's cells and NY, at most its NX, and NZ = NY to superpose")
+    _, data = open_restart(restart_2d, (nx2, ny, 1))
+    cut = nx2 - nx
     names = list(h["names"])
     names.insert(names.index("RHOU_Y") + 1, "RHOU_Z")
-    i_front = front_index(data[h["names"].index("RHO")])
-    h_cell = case.size[1] / ny
-    x = (np.arange(nx) + 0.5) * case.dx
+    i_front = front_index(data[h["names"].index("RHO")]) - cut
+    h_cell = case2.size[1] / ny
+    x = (np.arange(nx) + 0.5) * case2.dx
     y = (np.arange(ny) + 0.5) * h_cell
     z = (np.arange(nz) + 0.5) * h_cell
     inside = np.zeros((nx, ny, nz), dtype=bool)
     for behind, yc, zc, r in pockets:
-        xc = (i_front + 0.5) * case.dx - behind
+        xc = (i_front + 0.5) * case2.dx - behind
         inside |= ((x[:, None, None] - xc) ** 2 + (y[None, :, None] - yc) ** 2 + (z[None, None, :] - zc) ** 2
                    < r ** 2)
+    column = {name: np.asarray(data[h["names"].index(name), cut:, :, 0]) for name in h["names"]}
+    if superpose:
+        T = column["T_SEED"]
+        from_z = T[:, None, :] > T[:, :, None]  # at (x, y, z): the 2D state at (x, z) is hotter than at (x, y)
     with open(out, "wb") as f:
         f.write(b"MALLARD-RESTART\0")
         f.write(struct.pack("<IIQQQd", 2, 8, nx * ny * nz, len(names), h["step"], h["t"]))
         for name in names:
             f.write(struct.pack("<I", len(name)) + name.encode())
         for name in names:
-            if name == "RHOU_Z":
-                f.write(np.zeros(nx * ny * nz, dtype="<f8").tobytes())
-                continue
-            column = np.asarray(data[h["names"].index(name), :, :, 0])
-            field = np.repeat(column[:, :, None], nz, axis=2)
+            source = column["RHOU_Y"] if name == "RHOU_Z" else column[name]
+            if superpose:
+                along_y = np.broadcast_to(source[:, :, None], (nx, ny, nz))
+                along_z = np.broadcast_to(source[:, None, :], (nx, ny, nz))
+                if name == "RHOU_Y":
+                    field = np.where(from_z, 0.0, along_y)
+                elif name == "RHOU_Z":
+                    field = np.where(from_z, along_z, 0.0)
+                else:
+                    field = np.where(from_z, along_z, along_y)
+            elif name == "RHOU_Z":
+                field = np.zeros((nx, ny, nz))
+            else:
+                field = np.repeat(source[:, :, None], nz, axis=2)
             if name not in ("CHEM_H", "P_MAX"):
-                fresh = 0.0 if name.startswith("RHOU_") else column[-1].mean()
-                field[inside] = fresh
+                field[inside] = 0.0 if name.startswith("RHOU_") else column[name][-1].mean()
             field.astype("<f8").tofile(f)
-    print(f"wrote {out}: {nx} x {ny} x {nz} cells at t = {h['t']:.6e}, LZ = {h_cell * nz} m; "
-          f"{inside.sum()} cells of fresh gas in {len(pockets)} pockets")
+    print(f"wrote {out}: {nx} x {ny} x {nz} cells at t = {h['t']:.6e} ({cut} columns cut behind), "
+          f"{'superposed in y and z, ' if superpose else ''}{inside.sum()} cells of fresh gas in {len(pockets)} pockets")
 
 
 def set_toml_value(text, table, key, value):
@@ -339,14 +357,15 @@ def main():
     p = sub.add_parser("extrude")
     p.add_argument("input")
     p.add_argument("restart")
-    p.add_argument("nz", type=int)
+    p.add_argument("input_3d")
     p.add_argument("out")
     p.add_argument("--pocket", type=float, nargs=4, action="append", default=[])
+    p.add_argument("--superpose", action="store_true")
     argv = sys.argv[1:]
     command = argv[argv.index("--") + 1:] if "--" in argv else []
     args = ap.parse_args(argv[:argv.index("--")] if "--" in argv else argv)
     if args.cmd == "extrude":
-        extrude(args.input, args.restart, args.nz, args.out, args.pocket)
+        extrude(args.input, args.restart, args.input_3d, args.out, args.pocket, args.superpose)
         return
     case = Case(args.input)
     state = case.load_state()

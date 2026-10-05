@@ -1,26 +1,21 @@
 # (header written with the results)
 
 [run]
-t_stop = 6.667e-6
+t_stop = 4.0e-6
 cfl = 0.5
 
 [mesh]
 type = "cartesian"
-Nx = 1340
-Ny = 198
-Nz = 198
-Lx = 1.675e-3
-Ly = 2.475e-4
-Lz = 2.475e-4
+Nx = 704
+Ny = 127
+Nz = 127
+Lx = 9.9e-4
+Ly = 1.7859375e-4
+Lz = 1.7859375e-4
 
 [initialize]
-type = "analytical"
-u = ["x < 2.25e-4 ? 129.682 : 0.0", "0.0", "0.0"]
-p = "x < 2.25e-4 ? 167966.887 : 101325.0"
-T = "x < 2.25e-4 ? 341.939 : 295.0"
-Y = { HE = "0.36 * (1 - tanh((sqrt((x - 3.75e-4)^2 + y^2 + z^2) - 1.25e-4) / 3.75e-6))", O2 = "0.233 * (1 - 0.36 * (1 - tanh((sqrt((x - 3.75e-4)^2 + y^2 + z^2) - 1.25e-4) / 3.75e-6)))" }
-balance = "N2"
-n_subdivisions = 1
+type = "restart"
+file = "init.restart"
 
 [[boundaries]]
 name = "left"
@@ -70,12 +65,12 @@ check_interval = 100
 [[probes]]
 name = "axis"
 variables = ["RHO", "U_X", "P", "Y_HE"]
-start = [6.25e-7, 1.0e-9, 1.0e-9]
-end = [1.674375e-3, 1.0e-9, 1.0e-9]
-n_points = 1340
+start = [7.03125e-7, 1.0e-9, 1.0e-9]
+end = [9.89296875e-4, 1.0e-9, 1.0e-9]
+n_points = 704
 interval = 50
 
 [[write_data]]
 prefix = "./restart/bubble"
 format = "restart"
-time_interval = 5.5556e-8
+time_interval = 4.0e-8
