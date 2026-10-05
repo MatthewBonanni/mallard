@@ -103,6 +103,12 @@ BoundaryCondition BoundaryCondition::from_input(const toml::value & input, const
                 throw InputError(where + ".beta must be in [0, 1].");
             }
         }
+        if (bc.type == BoundaryType::NSCBC_INLET && InletProfile::turbulent(input)) {
+            // The incoming wave follows the target's own, which holds the target's transverse terms;
+            // adding the face's would count them twice and drive the inflow velocity away
+            if (input.contains("beta")) throw InputError(where + ".beta does not apply with turbulence.");
+            bc.relax[Relax::BETA] = 0.0_r;
+        }
         if (bc.type == BoundaryType::NSCBC_INLET) {
             bc.relax[Relax::TEMPERATURE] = rate("sigma_T", -1.0_r);
             bc.relax[Relax::TANGENTIAL] = rate("sigma_t", -1.0_r);
