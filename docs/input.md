@@ -110,19 +110,21 @@ translation = [1.0, 0.0]
 | `type` | `euler` or `navier_stokes` |
 | `gamma` | Ratio of specific heats |
 | `p_ref`, `T_ref`, `rho_ref` | A reference state, which sets the gas constant `R = p_ref / (rho_ref T_ref)` |
-| `mu` | (`navier_stokes`) Dynamic viscosity, or its value at `T_mu_ref` for Sutherland's law |
+| `mu` | (`navier_stokes`) Dynamic viscosity, or its value at `T_mu_ref` for Sutherland's law or the power law |
 | `Pr` | (`navier_stokes`) Prandtl number, default 0.72 |
-| `viscosity_model` | (`navier_stokes`) `constant` (default) or `sutherland` |
+| `viscosity_model` | (`navier_stokes`) `constant` (default), `sutherland` or `power_law` (`mu (T / T_mu_ref)^viscosity_exponent`) |
 | `T_mu_ref`, `sutherland_S` | (`sutherland`) Reference temperature (default 273.15) and Sutherland temperature (default 110.4) |
+| `T_mu_ref`, `viscosity_exponent` | (`power_law`) Reference temperature and exponent, both required |
 | `gas` | `perfect` (default): a calorically perfect gas set by the keys above; `mixture`: a thermally perfect mixture of the species of a mechanism (no `gamma`, `p_ref`, `T_ref`, `rho_ref`) |
 | `mechanism` | (`mixture`) A [Cantera YAML](https://cantera.org/stable/yaml/index.html) file, e.g. `mechanisms/h2o2.yaml` (see `mechanisms/README.md`); Chemkin files convert with Cantera's `ck2yaml` |
 | `phase` | (`mixture`) Phase of the file to use; default the first |
 | `transport` | (`mixture`, `navier_stokes`) `mixture_averaged` (default: Wilke viscosity, Mathur conductivity, mixture-averaged diffusion coefficients), `unity_lewis` (diffusion coefficients `lambda / (rho cp)`) or `constant_lewis` (`lambda / (rho cp Le_k)`), as Cantera's models, from the species' transport data in the file |
 | `lewis` | (`constant_lewis`) Lewis numbers by species, e.g. `lewis = { H2 = 0.3, H = 0.18 }`; others 1 |
+| `axisymmetric` | (2D) `true` for flows symmetric about the x axis without swirl (default `false`); see below |
 
 Gas mixtures (`gas = "mixture"`) react when the input has a `[chemistry]`
-table, and need the `Rusanov`, `HLL` or `HLLC` Riemann solver; any face
-reconstruction works. With `type = "navier_stokes"` they are viscous, heat
+table; every Riemann solver and face reconstruction works (`RHLL` for strong
+shocks prone to the carbuncle, e.g. blunt-body detonations). With `type = "navier_stokes"` they are viscous, heat
 conducting and diffusing: species diffuse along mole-fraction gradients with a
 correction velocity (so the diffusive mass fluxes sum to zero) and carry their
 enthalpy, and the time step includes the largest of `4/3 mu / rho`,
@@ -138,6 +140,20 @@ also flags cells by jumps of the molar mass). The scheme is conservative: at con
 `cp / cv` (e.g. cold hydrogen and hot air) the pressure is perturbed at the
 percent level on coarse meshes; `double_flux` (in `[numerics]`) removes that.
 
+### Axisymmetric flows
+
+With `axisymmetric = true` the 2D mesh is the meridian half-plane of a body
+of revolution: x is the axial coordinate and y the radius, so every node needs
+`y >= 0`. Boundary faces on the axis (`y = 0`) must be `symmetry`; nothing
+crosses them. The solver integrates over each cell's solid of revolution:
+cell values are r-weighted averages (analytical initial conditions are
+averaged that way), and fluxes, sources, forces (`[[forces]]`), `[integrals]`
+and conserved totals are per radian of the revolved domain (multiply forces by
+`2 pi` for the force on the 3D body; only the axial component is meaningful).
+`u` is `[u_x, u_r]`. Every reconstruction, Riemann solver, viscous and
+mixture model, chemistry and MPI work as in planar runs; meshes cannot be
+periodic in y. Method and accuracy: `docs/design/axisymmetric.md`.
+
 ## `[initialize]`
 
 | Key | Description |
@@ -148,7 +164,7 @@ percent level on coarse meshes; `double_flux` (in `[numerics]`) removes that.
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
 | `balance` | (mixtures, `analytical`) Species taking `1 - sum` of the listed fractions; without it the listed fractions are normalized |
 | `n_subdivisions` | (`analytical`) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is integrated with a 64-point rule on each of `n_subdivisions`³ pieces (default 2) |
-| `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read |
+| `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, or 3 when they also hold the weights of `[statistics]` averages) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read |
 
 Expressions use [exprtk](https://www.partow.net/programming/exprtk/) syntax, e.g. `"x < 0.5 ? 1.0 : 0.125"`.
 
@@ -166,11 +182,32 @@ the zone's faces whose centers satisfy the expression.
 | `wall_adiabatic` | Wall (no-slip for `navier_stokes`, slip for `euler`) with zero heat flux | `u` (wall velocity, optional) |
 | `wall_isothermal` | Wall at temperature `T` | `T`, `u` (optional) |
 | `wall_heat_flux` | Wall with heat flux `q` into the fluid | `q`, `u` (optional) |
-| `upt` | Inflow with fixed velocity, pressure and temperature | `u`, `p`, `T` (and `X` or `Y` for mixtures) |
+| `upt` | Inflow with fixed velocity, pressure and temperature | `u`, `p`, `T` (and `X` or `Y` for mixtures: numbers, or expressions in `x`, `y`, `z` evaluated at each face center for a composition that varies along the boundary, with an optional `balance` species as in `[initialize]`) |
 | `farfield` | Characteristic far field for a free stream: the outgoing Riemann invariant comes from the interior, the incoming one from the free stream, so waves leave and the boundary works for inflow, outflow and tangential flow alike | `u`, `p`, `T` (free stream) |
 | `dirichlet` | Exterior state from expressions in `x`, `y`, `z`, `t`, evaluated at face centers at every stage | `rho`, `u` (one expression per component), `p` |
 | `p_out` | Outlet: imposes `p` if the outflow is subsonic | `p` |
 | `p_out_average` | Outlet for mixed subsonic/supersonic flow: on subsonic faces, shifts the local pressure so that its area average over the boundary equals `p`, preserving the transverse profile | `p` |
+| `nscbc_outlet` | Partially non-reflecting characteristic outlet (Poinsot & Lele): outgoing waves leave, and each face's incoming acoustic wave relaxes its pressure toward `p` at the rate `K = sigma c (1 - M^2) / L`. Waves of frequency `omega` reflect by `1 / sqrt(1 + (2 omega / K)^2)` | `p`, `L` (a length of the domain), `sigma` (default 0.25; 0 is perfectly non-reflecting but lets the mean pressure drift, large values approach `p_out`), `beta` (the weight of the transverse terms in the incoming wave, 0 to 1: default the local Mach number, as Lodato et al.; 1 is Poinsot & Lele's original condition, 0 drops them) |
+| `nscbc_inlet` | Partially non-reflecting characteristic inlet: the incoming acoustic wave relaxes the normal velocity toward `u` as `nscbc_outlet` relaxes the pressure; temperature and tangential velocity are imposed, or relaxed with `sigma_T`, `sigma_t`; the composition is imposed. Supersonic inflow imposes `u`, `p`, `T` | `u`, `p` (reference pressure, for supersonic inflow), `T`, `L`, `sigma` (default 0.25), `sigma_T`, `sigma_t` (optional), `beta`, and `X` or `Y` for mixtures (numbers or expressions, as `upt`) |
+
+Characteristic conditions change only the exterior state of the convective
+flux; viscous terms treat them like `extrapolation` (image faces, or zero
+normal derivatives: the outflow conditions of Poinsot & Lele). MUSCL boundary
+cells leave out their ghosts across them, so that waves leave intact. Each face keeps its pressure and
+normal velocity between steps; a restart starts them afresh from the
+solution. See [docs/design/nscbc.md](design/nscbc.md).
+
+## `[[sponges]]`
+
+Optional sponge layers, each adding `-strength (U - U_ref)` to the conservative variables (and species partial densities) per unit volume, with `U_ref` the conservatives of a reference state. Several sponges add up. The explicit source caps the time step at `1 / max strength`.
+
+| Key | Description |
+|---|---|
+| `strength` | Damping rate (1/s): a number or an expression in `x`, `y`, `z`, zero outside the layer, e.g. `"x > 4 ? 20 * ((x - 4) / 1)^2 : 0"` (a gradual ramp reflects less than a step) |
+| `u`, `p`, `T` | Reference state: numbers or expressions in `x`, `y`, `z` (`u` has one per component) |
+| `X` or `Y`, `balance` | (mixtures) Reference composition, numbers or expressions as in `[initialize]` |
+
+Strength and reference are evaluated once at cell centroids.
 
 ## `[numerics]`
 
@@ -198,6 +235,7 @@ the zone's faces whose centers satisfy the expression.
 | `characteristic` | (`TENO`) Select stencils on characteristic variables, default true |
 | `max_condition` | (`TENO`) Stencils grow until the least-squares system's condition estimate is below this, default 1e8 |
 | `cache_file` | (`TENO`) Save the precomputed stencils and matrices here, and reuse them on later runs of the same mesh, boundary assignment and TENO options; anything else is detected and recomputed. Distributed runs write one file per rank, `<cache_file>.r<rank>-of-<ranks>`, for that rank count and partition, and record the halo depth the stencils need, so a cached run sets up its halo once. Hilbert and graph partitions repeat for the same mesh and rank count. Size per cell: about 2.5 / 4 / 6 / 11 KB in 2D and 10 / 19 / 36 KB (hexahedra) or 9 / 14 / 33 / 74 KB (tetrahedra) in 3D for orders 3 / 4 / 5 / 6, e.g. 9.4 GB for 64^3 hexahedra at order 5; reading it takes seconds, against minutes of setup in 3D |
+| `cache_single_precision` | (`TENO`) Store the pseudo-inverses and smoothness-indicator matrices of `cache_file` in single precision: about half the size (19 instead of 36 KB per cell for hexahedra at order 5). The run that writes the cache rounds them too, so it and the runs that read the cache agree with each other, but no longer with a run without it, whose results differ at single-precision round-off. Default false |
 | `bound_preserving` | (`TENO`) Scale troubled-cell polynomials to keep density and pressure within the neighbors' range, default false |
 
 ## `[chemistry]`
@@ -220,14 +258,18 @@ double precision in every build.
 | `atol` | Absolute tolerance on the mass fractions (default `1e-10`) |
 | `max_steps` | Sub-steps allowed per cell and half step (default 100000); more stop the run |
 | `T_frozen` | No chemistry in cells below this temperature (default 0) |
-| `fuse_half_steps` | `true` fuses the closing half step of a step with the next step's opening one, except where output, checks or the end of the run read the state (default `false`). Faster where cells take few sub-steps, but results then depend on when output is written, and a restart reproduces an uninterrupted run only from a step at which that run also wrote output |
+| `fuse_half_steps` | `true` fuses the closing half step of a step with the next step's opening one, except where output, checks, probes, statistics or the end of the run read the state (default `false`). Faster where cells take few sub-steps, but results then depend on when output is written, and a restart reproduces an uninterrupted run only from a step at which that run also wrote output |
 | `sparse` | `true` for the sparse LU (static pattern, with the Jacobian's dense rank-one part by Sherman-Morrison), `false` for the dense one; by default sparse from 30 species when its factors fill at most 60% of the dense matrix (GRI-3.0 and larger) |
 | `lanes` | Vector lanes integrating one cell: 1 for one thread per cell (cells ordered by their last cost), a power of 2 up to 32 for a team per cell on GPUs; default 0, automatic: a warp per cell on GPUs from 16 species (8 warps, 16 from 512 species, for cells whose last call took 16 or more sub-steps), else one thread |
 
 Cells whose mass fractions would change by less than `atol / 100` over the
 half step at their current rates are skipped. Reaction types: elementary,
 three-body, falloff (Lindemann, Troe, SRI), `pressure-dependent-Arrhenius`
-(PLOG) and `Chebyshev`. Output variables: `HRR` (heat release rate,
+(PLOG) and `Chebyshev`, with non-integer reactant `orders` (global
+mechanisms such as Westbrook–Dryer's). Orders between 0 and 1 follow the
+power law down to a concentration of `1e-12` kmol/m^3 and a quadratic with a
+bounded slope below it (see `docs/design/chemistry.md`), so the Jacobian
+stays finite where such a reactant runs out. Output variables: `HRR` (heat release rate,
 W/m^3) and `CHEM_COST` (chemistry sub-steps of the cell in the last step);
 restart files also hold `CHEM_H`, each cell's last sub-step, so restarted
 runs repeat the uninterrupted one exactly. The progress rows add the share of
@@ -237,7 +279,8 @@ last step, and the summary the chemistry's share of the wall time.
 ## `[[forces]]`
 
 Write the force of the fluid on a boundary zone to a CSV file
-(`step, t, Fx_pressure, Fy_pressure, Fx_viscous, Fy_viscous`, per unit depth; in
+(`step, t, Fx_pressure, Fy_pressure, Fx_viscous, Fy_viscous`, per unit depth, or per radian for
+axisymmetric flows; in
 3D `step, t, Fx_pressure, Fy_pressure, Fz_pressure, Fx_viscous, Fy_viscous, Fz_viscous`).
 
 | Key | Description |
@@ -249,8 +292,12 @@ Write the force of the fluid on a boundary zone to a CSV file
 ## `[integrals]`
 
 Write domain integrals to a CSV file (`step, t, kinetic_energy, enstrophy,
-dilatation_squared, pressure_dilatation`): the integrals of `rho |u|^2 / 2`,
-`rho |omega|^2 / 2`, `(div u)^2` and `p div u`. With TENO the velocity
+dilatation_squared, pressure_dilatation, velocity_squared, vorticity_squared,
+density_squared, temperature, temperature_squared`): the integrals of
+`rho |u|^2 / 2`, `rho |omega|^2 / 2`, `(div u)^2`, `p div u`, `|u|^2`,
+`|omega|^2`, `rho^2`, `T` and `T^2` (divided by the volume, the last ones give
+the mean squared velocity and vorticity and the density and temperature
+variances). With TENO the velocity
 gradients are those of the reconstruction polynomials at the cell centroids
 (order-consistent: on the Taylor-Green vortex at 64^3 per octant they match
 spectral derivatives of the same field to about 1%); otherwise they are the
@@ -264,6 +311,55 @@ rate is `-dE/dt` and its viscous part `2 mu * enstrophy / rho0`.
 |---|---|
 | `interval` | Every this many steps, default 1 |
 | `file` | Output file, default `integrals.csv` |
+
+## `[statistics]`
+
+Running time averages, kept per cell on the device. Every `interval` steps
+once `t > t_start`, the sample at time `t` enters with weight `t - t_prev`
+(the time since the previous sample, or since `t_start` for the first), so the
+averages approximate time integrals over `(t_start, t]` also when the time
+step varies. Each cell's averages are its own (no communication), so they are
+bitwise the same on any number of ranks, and sampling reads the state without
+changing it.
+
+| Key | Description |
+|---|---|
+| `fields` | Variables to average: `RHO`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H` and, for mixtures, `Y_<species>` |
+| `products` | Pairs `"A*B"` of those variables (e.g. `"U_X*U_X"`, `"U_X*U_Y"`, `"T*T"`) whose covariance to keep; their means are kept too |
+| `t_start` | Start time, default 0 |
+| `interval` | Every this many steps, default 1 |
+| `reset` | `true` starts the averages afresh on a restart instead of continuing those of the restart file (default `false`) |
+
+The averages are output variables for `[[write_data]]`: `MEAN_<A>` and
+`COV_<A>_<B>`, the covariance `<A'B'> = <AB> - <A><B>` (kept directly, by a
+weighted Welford update, rather than as `<AB>`, which loses the fluctuations
+to round-off when they are small), e.g. `MEAN_U` (a vector), `COV_U_X_U_Y`, or
+`MEAN_*`, `COV_*`. Restart files carry them and their weights (format version
+3), so a restarted run continues the averages bitwise, also on a different
+number of ranks; a restart file without them starts them afresh, and one with
+only some of them is an error unless `reset = true`. With
+`chemistry.fuse_half_steps`, sampling steps read the state like output does.
+`tools/plane_average.py` averages them further over homogeneous directions
+(e.g. over x and z of a channel, as a function of y).
+
+## `[[probes]]`
+
+Point and line probes: the values of the cells holding a set of points, every
+`interval` steps, appended by rank 0 to a CSV file with rows
+`step, t, point, x, y(, z), <variables>` (one per point and step; a restarted run
+appends). Each point reads the cell average of the cell containing it (on a
+face between cells, the one with the lowest global id, so any number of ranks
+picks the same cell), or of the nearest cell centroid if no cell contains it.
+Values are written to full precision.
+
+| Key | Description |
+|---|---|
+| `name` | Probe name |
+| `variables` | Any of the `[statistics]` fields |
+| `point` | One point `[x, y(, z)]`, or |
+| `start`, `end`, `n_points` | `n_points` (at least 2) evenly spaced points from `start` to `end` |
+| `interval` | Every this many steps, default 1 |
+| `file` | Output file, default `probe_<name>.csv` |
 
 ## `[source]`
 
@@ -307,10 +403,34 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | Key | Description |
 |---|---|
 | `prefix` | Output path prefix; directories are created as needed |
-| `format` | `vtu` (with a `.pvd` series next to it) or `restart` |
+| `format` | `vtu` (with a `.pvd` series next to it), `hdf5` (with XDMF indexes; see below) or `restart` |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
-| `variables` | (`vtu`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m^3 s)]), and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts). A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
+| `variables` | (`vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m^3 s)]), and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>` and `COV_<A>_<B>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
 | `geometry` | (`vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |
+
+`format = "hdf5"` (builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need
+parallel HDF5) scales to large runs: every rank writes its part of one file per
+snapshot with collective I/O instead of a VTU piece of its own. It writes
+
+- `PREFIX_mesh.h5`, once: `nodes/coordinates` (n_nodes x dimension),
+  `cells/topology`, an XDMF `Mixed` topology (each cell's XDMF type, then its
+  nodes in VTK order: triangle 4, quadrilateral 5, tetrahedron 6, pyramid 7,
+  wedge 8, hexahedron 9) and `cells/offsets`, where each cell's record starts
+  (n_cells + 1 entries);
+- `PREFIX_NNNNNN.h5` per snapshot: the attributes `step`, `time` and `mesh`
+  (the mesh file's name), and `fields/<name>` for each variable (n_cells
+  values, or n_cells x 3 for vectors);
+- `PREFIX_NNNNNN.xmf` per snapshot and `PREFIX.xmf`, the time series, which
+  ParaView opens (XDMF reader).
+
+Row i of every cell array is global cell i, the cell order of the mesh file and
+of restart files, so the files do not depend on the number of ranks.
+Snapshots are about half the size of VTU pieces (the mesh is not repeated) and
+two files instead of one per rank. A shared file pays off on parallel file
+systems; on one node's local disk, which serializes writes to a file, VTU
+pieces write faster beyond a few ranks (2.1M hexahedra, 16 ranks: 115 ms per
+HDF5 snapshot against 72 ms, 1 rank: 140 ms against 1.1 s). VTU output remains
+the simpler choice for small runs. `tools/mallard_h5.py` reads the files.
 
 ## `MallardReactor`
 

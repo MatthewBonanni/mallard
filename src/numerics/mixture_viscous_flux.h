@@ -158,6 +158,8 @@ struct MixtureViscousFluxFunctor {
     Kokkos::View<double **, Kokkos::LayoutRight> diffusion;
     Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
     Kokkos::View<rtype ***, Kokkos::LayoutRight> slots;
+    bool axisymmetric = false;            // face_area is then the revolved area
+    Kokkos::View<rtype *[3]> covariance;  // axisymmetric: Mesh::cell_covariance
 
     static constexpr uint8_t NQ = N_DIM + 1;  // [u, T]
 
@@ -167,6 +169,8 @@ struct MixtureViscousFluxFunctor {
     struct Geometry {
         int32_t c0, c1;
         rtype n[N_DIM], d[N_DIM], d_n;
+        rtype t;     // axisymmetric: fraction along d of the face center's projection (see ViscousFluxFunctor)
+        rtype dvar;  // axisymmetric: ViscousFluxFunctor::variance_jump
     };
 
     KOKKOS_INLINE_FUNCTION
@@ -180,6 +184,12 @@ struct MixtureViscousFluxFunctor {
         const uint8_t s = face_shift(f);
         FOR_I_DIM g.d[i] = (cell_coords(g.c1, i) + shifts(s, i)) - cell_coords(g.c0, i);
         g.d_n = dot<N_DIM>(g.d, g.n);
+        g.t = 0.5_r;
+        g.dvar = 0.0_r;
+        if (axisymmetric) {
+            g.t = face_fraction(face_coords, cell_coords, f, g.c0, g.d);
+            g.dvar = variance_jump(covariance, g.c0, g.c1, g.d);
+        }
         return g;
     }
 
@@ -188,7 +198,21 @@ struct MixtureViscousFluxFunctor {
     rtype interior(const Geometry & G, const uint32_t v, rtype * g) const {
         const rtype q0 = values(G.c0, v), q1 = values(G.c1, v);
         FOR_I_DIM g[i] = 0.5_r * (gradients(G.c0, v, i) + gradients(G.c1, v, i));
-        const rtype correction = ((q1 - q0) - dot<N_DIM>(g, G.d)) / G.d_n;
+        rtype dq = q1 - q0;
+        if (axisymmetric) {
+            rtype g0[N_DIM], g1[N_DIM];
+            FOR_I_DIM {
+                g0[i] = gradients(G.c0, v, i);
+                g1[i] = gradients(G.c1, v, i);
+            }
+            dq -= mean_offset(g0, g1, G.d, G.dvar);
+        }
+        const rtype correction = (dq - dot<N_DIM>(g, G.d)) / G.d_n;
+        if (axisymmetric) {
+            FOR_I_DIM g[i] = gradients(G.c0, v, i) + G.t * (gradients(G.c1, v, i) - gradients(G.c0, v, i));
+            FOR_I_DIM g[i] += correction * G.n[i];
+            return q0 + G.t * (q1 - q0);
+        }
         FOR_I_DIM g[i] += correction * G.n[i];
         return 0.5_r * (q0 + q1);
     }
@@ -257,7 +281,7 @@ struct MixtureViscousFluxFunctor {
         };
         const rtype mu = coefficient(MU);
         rtype tau_n[N_DIM];
-        viscous_traction(mu, g_f, n, tau_n);
+        viscous_traction(mu, g_f, n, tau_n, axisymmetric ? hoop_divergence(face_coords(i_face, 1), q_f, g_f) : 0.0_r);
         if (symmetry) {
             const rtype tau_nn = dot<N_DIM>(tau_n, n);
             FOR_I_DIM tau_n[i] = tau_nn * n[i];

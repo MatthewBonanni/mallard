@@ -26,6 +26,7 @@
 
 #include "common_io.h"
 #include "log.h"
+#include "mesh_block.h"
 
 namespace {
 
@@ -42,15 +43,6 @@ uint8_t vtk_type(uint32_t dim, uint32_t n_nodes) {
     if (dim == 3 && n_nodes == 5) return 14;  // VTK_PYRAMID
     throw std::runtime_error("DataWriter: no VTK cell type for a " + std::to_string(dim) + "D element with " +
                              std::to_string(n_nodes) + " nodes.");
-}
-
-/**
- * @brief Local node of a cell at VTK position k. Mallard prisms have the
- *        (0, 1, 2) normal pointing toward (3, 4, 5); VTK wedges point it away.
- */
-uint32_t vtk_local_node(uint32_t n_nodes, uint32_t k) {
-    constexpr uint32_t WEDGE[6] = {0, 2, 1, 3, 5, 4};
-    return (N_DIM == 3 && n_nodes == 6) ? WEDGE[k] : k;
 }
 
 } // namespace
@@ -132,7 +124,7 @@ void DataWriter::init(const toml::value & input,
         Field field{var, {}};
         if (const Data * scalar = find_data(var)) {
             field.components.push_back(scalar);
-        } else if (format == DataFormat::VTU) {
+        } else if (format != DataFormat::RESTART) {
             // A vector name (e.g. U) collects its components U_X, U_Y(, U_Z)
             const char * suffixes[3] = {"_X", "_Y", "_Z"};
             FOR_I_DIM {
@@ -146,6 +138,16 @@ void DataWriter::init(const toml::value & input,
         fields.push_back(field);
     }
     this->mesh = mesh_in;
+
+    if (format == DataFormat::HDF5) {
+        if (!have_hdf5()) {
+            throw std::runtime_error(
+                "DataWriter: format = \"hdf5\" needs a build with HDF5 (configure with Mallard_ENABLE_HDF5=ON).");
+        }
+        if (mesh->n_global_cells > 0 && comm::size() > 1 && !have_parallel_hdf5()) {
+            throw std::runtime_error("DataWriter: format = \"hdf5\" on several ranks needs parallel HDF5.");
+        }
+    }
 
     geometry = toml::find_or<std::string>(input, "geometry", "all");
     if (geometry != "all") {
@@ -171,10 +173,12 @@ void DataWriter::init(const toml::value & input,
 }
 
 std::pair<std::string, std::string> DataWriter::summary() const {
-    std::string text = prefix + (format == DataFormat::RESTART ? "_*.restart" : "_*.vtu");
+    std::string text = prefix + (format == DataFormat::RESTART ? "_*.restart"
+                                 : format == DataFormat::HDF5  ? "_*.h5"
+                                                               : "_*.vtu");
     if (geometry != "all") text += " (" + geometry + ")";
     text += interval > 0 ? " every " + logging::count(interval) + " steps" : " every t = " + logging::real(double(time_interval));
-    if (format == DataFormat::VTU) {
+    if (format != DataFormat::RESTART) {
         std::string names;
         for (const auto & field : fields) names += (names.empty() ? "" : ", ") + field.name;
         text += ": " + names;
@@ -197,7 +201,7 @@ rtype DataWriter::next_time() const {
     return n_written * time_interval;
 }
 
-void DataWriter::write(uint64_t step, rtype t, bool force) {
+void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttributes & attributes) {
     if (!(due(step, t) || force) || step == step_last) {
         return;
     }
@@ -205,8 +209,14 @@ void DataWriter::write(uint64_t step, rtype t, bool force) {
     stream << prefix << "_" << std::setw(LEN_STEP) << std::setfill('0')
            << (interval > 0 || format == DataFormat::RESTART ? step : history.size());
     if (format == DataFormat::RESTART) {
-        write_restart(stream.str() + ".restart", step, t);
+        write_restart(stream.str() + ".restart", step, t, attributes);
         logging::event(step, double(t), "restart", stream.str() + ".restart");
+    } else if (format == DataFormat::HDF5) {
+        if (!hdf5_mesh_written) write_hdf5_mesh();
+        write_hdf5(stream.str(), step, t);
+        history.emplace_back(t, stream.str() + ".h5");
+        if (comm::is_root()) write_xdmf(stream.str());
+        logging::event(step, double(t), "hdf5", stream.str() + ".h5");
     } else {
         // Distributed runs: one piece per rank and a .pvtu index
         const bool pieces = mesh->n_global_cells > 0;
@@ -245,8 +255,12 @@ void DataWriter::resume(uint64_t step, rtype t) {
     } else {
         n_written = static_cast<uint64_t>(std::floor(t / time_interval + precision_tol(1e-9, 1e-5))) + 1;
     }
-    // Keep the entries of the previous run's .pvd up to the restart time
     history.clear();
+    if (format == DataFormat::HDF5) {
+        resume_xdmf(t);
+        return;
+    }
+    // Keep the entries of the previous run's .pvd up to the restart time
     std::ifstream in(prefix + ".pvd");
     std::string line;
     const std::filesystem::path dir = std::filesystem::path(prefix).parent_path();
@@ -266,23 +280,27 @@ void DataWriter::resume(uint64_t step, rtype t) {
 namespace {
 
 constexpr char RESTART_MAGIC[16] = "MALLARD-RESTART";
-constexpr uint32_t RESTART_VERSION = 2;
+constexpr uint32_t RESTART_VERSION = 3;
 
 /**
  * @brief Restart header: magic, version, real size, cell count, variable
  *        count, step, time, then (version 2) each variable name as a uint32
- *        length and its characters. The values follow, one block of n_cells
- *        per variable.
+ *        length and its characters, then (version 3) the attribute count as a
+ *        uint64 and each attribute's name, likewise, and double value. The
+ *        values follow, one block of n_cells per variable. Files without
+ *        attributes are written as version 2, which older builds read.
  */
-std::vector<char> restart_header(uint64_t n_cells, uint64_t step, double t, const std::vector<std::string> & names) {
+std::vector<char> restart_header(uint64_t n_cells, uint64_t step, double t, const std::vector<std::string> & names,
+                                 const RestartAttributes & attributes) {
     std::vector<char> header;
     auto put = [&](const void * p, size_t n) {
         header.insert(header.end(), static_cast<const char *>(p), static_cast<const char *>(p) + n);
     };
     const uint32_t real_size = sizeof(rtype);
     const uint64_t n_vars = names.size();
+    const uint32_t version = attributes.empty() ? 2 : RESTART_VERSION;
     put(RESTART_MAGIC, sizeof(RESTART_MAGIC));
-    put(&RESTART_VERSION, sizeof(RESTART_VERSION));
+    put(&version, sizeof(version));
     put(&real_size, sizeof(real_size));
     put(&n_cells, sizeof(n_cells));
     put(&n_vars, sizeof(n_vars));
@@ -292,6 +310,15 @@ std::vector<char> restart_header(uint64_t n_cells, uint64_t step, double t, cons
         const uint32_t length = static_cast<uint32_t>(name.size());
         put(&length, sizeof(length));
         put(name.data(), name.size());
+    }
+    if (attributes.empty()) return header;
+    const uint64_t n_attributes = attributes.size();
+    put(&n_attributes, sizeof(n_attributes));
+    for (const auto & [name, value] : attributes) {
+        const uint32_t length = static_cast<uint32_t>(name.size());
+        put(&length, sizeof(length));
+        put(name.data(), name.size());
+        put(&value, sizeof(value));
     }
     return header;
 }
@@ -305,9 +332,17 @@ const std::vector<rtype> * RestartData::find(const std::string & name) const {
     return nullptr;
 }
 
-void DataWriter::write_restart(const std::string & filename, uint64_t step, rtype t) const {
+const double * RestartData::attribute(const std::string & name) const {
+    for (const auto & [key, value] : attributes) {
+        if (key == name) return &value;
+    }
+    return nullptr;
+}
+
+void DataWriter::write_restart(const std::string & filename, uint64_t step, rtype t,
+                               const RestartAttributes & attributes) const {
     if (mesh->n_global_cells > 0) {
-        write_restart_distributed(filename, step, t);
+        write_restart_distributed(filename, step, t, attributes);
         return;
     }
     std::ofstream out(filename, std::ios::binary);
@@ -316,7 +351,7 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
     }
     std::vector<std::string> names;
     for (const auto & field : fields) names.push_back(field.name);
-    const std::vector<char> header = restart_header(mesh->n_cells, step, double(t), names);
+    const std::vector<char> header = restart_header(mesh->n_cells, step, double(t), names, attributes);
     out.write(header.data(), static_cast<std::streamsize>(header.size()));
     for (const auto & field : fields) {
         for (uint64_t i = 0; i < mesh->n_cells; i++) {
@@ -326,7 +361,8 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
     }
 }
 
-void DataWriter::write_restart_distributed(const std::string & filename, uint64_t step, rtype t) const {
+void DataWriter::write_restart_distributed(const std::string & filename, uint64_t step, rtype t,
+                                           const RestartAttributes & attributes) const {
 #ifdef Mallard_HAS_MPI
     // Same layout as a serial restart, cells in global order: each rank writes
     // its owned cells at their global offsets, so any rank count can read it
@@ -339,7 +375,7 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
     const uint64_t n_global = mesh->n_global_cells;
     std::vector<std::string> names;
     for (const auto & field : fields) names.push_back(field.name);
-    const std::vector<char> header = restart_header(n_global, step, double(t), names);
+    const std::vector<char> header = restart_header(n_global, step, double(t), names, attributes);
     if (comm::is_root()) {
         MPI_File_write_at(fh, 0, header.data(), static_cast<int>(header.size()), MPI_BYTE, MPI_STATUS_IGNORE);
     }
@@ -364,6 +400,7 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
     (void)filename;
     (void)step;
     (void)t;
+    (void)attributes;
     throw std::logic_error("DataWriter: distributed restart without MPI");
 #endif
 }
@@ -402,7 +439,7 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
         data.names.assign(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
     } else {
         constexpr uint32_t MAX_NAME = 256;
-        for (uint64_t v = 0; v < n_vars && in.good(); v++) {
+        auto read_name = [&]() {
             uint32_t length = 0;
             in.read(reinterpret_cast<char *>(&length), sizeof(length));
             if (!in.good() || length > MAX_NAME) {
@@ -410,7 +447,18 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
             }
             std::string name(length, '\0');
             in.read(name.data(), length);
-            data.names.push_back(name);
+            return name;
+        };
+        for (uint64_t v = 0; v < n_vars && in.good(); v++) data.names.push_back(read_name());
+        if (version >= 3) {
+            uint64_t n_attributes = 0;
+            in.read(reinterpret_cast<char *>(&n_attributes), sizeof(n_attributes));
+            for (uint64_t a = 0; a < n_attributes && in.good(); a++) {
+                std::string name = read_name();
+                double value = 0.0;
+                in.read(reinterpret_cast<char *>(&value), sizeof(value));
+                data.attributes.emplace_back(std::move(name), value);
+            }
         }
         const bool has_z = std::find(data.names.begin(), data.names.end(), "RHOU_Z") != data.names.end();
         if (has_z != (N_DIM == 3)) {

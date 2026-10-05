@@ -19,6 +19,8 @@
 #include <string>
 
 #include "gmsh_fixtures.h"
+#include "hdf5_output.h"
+#include "mesh_block.h"
 #include "mpi_compare.h"
 
 namespace {
@@ -79,6 +81,16 @@ TEST(MPI3DTest, NavierStokesOnTetrahedraMatchesSerial) {
                                     "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n"));
 }
 
+TEST(MPI3DTest, CharacteristicBoundariesMatchSerial) {
+    std::string input = box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"euler\"\n");
+    const std::string from = "name = \"right\"\ntype = \"symmetry\"\n";
+    input.replace(input.find(from), from.size(), "name = \"right\"\ntype = \"nscbc_outlet\"\np = 1.0\nL = 1.0\n");
+    const std::string left = "name = \"left\"\ntype = \"extrapolation\"\n";
+    input.replace(input.find(left), left.size(),
+                  "name = \"left\"\ntype = \"nscbc_inlet\"\nu = [0.3, 0.0, 0.0]\np = 1.0\nT = 1.0\nL = 1.0\n");
+    expect_matches_serial(input);
+}
+
 TEST(MPI3DTest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
     // Fully periodic: every node class of the box corners spans eight nodes
     const std::string file = write_temp_shared("mallard_mpi3d_periodic.msh", jittered_periodic_mesh_3d(6));
@@ -120,4 +132,15 @@ TEST(MPI3DTest, SurfaceOutputOfAZoneMissingFromSomeRanks) {
         total += std::stoull(text.substr(k + 15));
     }
     EXPECT_EQ(total, 12u * 12u);
+}
+
+TEST(MPI3DTest, HDF5OutputDoesNotDependOnTheRankCount) {
+    // Tetrahedra, pyramids, prisms and hexahedra at their global ids
+    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
+#ifdef Mallard_HAS_HDF5
+    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mpi3d_hdf5").string();
+    expect_hdf5_output_matches_serial(box_input("cartesian_mixed", "type = \"MUSCL\"\n", "type = \"euler\"\n"),
+                                      "interval = 4\nvariables = [\"RHO\", \"U\", \"P\"]\n", dir, {0, 4, 8});
+#endif
 }

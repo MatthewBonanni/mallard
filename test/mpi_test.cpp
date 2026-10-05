@@ -24,6 +24,7 @@
 
 #include "comm.h"
 #include "gmsh_fixtures.h"
+#include "hdf5_output.h"
 #include "mesh_block.h"
 #include "mpi_compare.h"
 #include "partition.h"
@@ -57,6 +58,23 @@ std::string bcs(const char * left, const char * right, const char * top, const c
         s << "[[boundaries]]\nname = \"" << name << "\"\n" << type;
     }
     return s.str();
+}
+
+std::string mixture_input(const std::string & extra, const std::string & reconstruction,
+                          const std::string & chemistry, const std::string & type) {
+    return "[run]\nn_steps = 20\ncfl = 0.5\n"
+           "[mesh]\ntype = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n"
+           "[initialize]\ntype = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\n"
+           "u = [\"0.0\", \"y * 100.0\"]\n"
+           "X = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", N2 = \"x < 0.5 ? 0 : 1\" }\n"
+           "[[boundaries]]\nname = \"left\"\ntype = \"upt\"\nu = [100.0, 0.0]\np = 1.0e5\nT = 1000.0\n"
+           "X = { H2 = 2.0, O2 = 1.0 }\n"
+           "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+           "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
+           "[[boundaries]]\nname = \"top\"\ntype = \"p_out\"\np = 3.0e4\n"
+           "[numerics]\nriemann_solver = \"HLLC\"\n" + extra + "[numerics.face_reconstruction]\n" + reconstruction +
+           "[physics]\ntype = \"" + type + "\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
+           "[output]\ncheck_interval = 1000000\n" + chemistry;
 }
 
 const std::string EULER = "type = \"euler\"\n";
@@ -117,21 +135,7 @@ TEST(MPITest, GasMixtureMatchesSerial) {
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n", "euler"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes"}};
     for (const auto & [extra, reconstruction, chemistry, type] : schemes) {
-        const std::string input =
-            "[run]\nn_steps = 20\ncfl = 0.5\n"
-            "[mesh]\ntype = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n"
-            "[initialize]\ntype = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\n"
-            "u = [\"0.0\", \"y * 100.0\"]\n"
-            "X = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", N2 = \"x < 0.5 ? 0 : 1\" }\n"
-            "[[boundaries]]\nname = \"left\"\ntype = \"upt\"\nu = [100.0, 0.0]\np = 1.0e5\nT = 1000.0\n"
-            "X = { H2 = 2.0, O2 = 1.0 }\n"
-            "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
-            "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
-            "[[boundaries]]\nname = \"top\"\ntype = \"p_out\"\np = 3.0e4\n"
-            "[numerics]\nriemann_solver = \"HLLC\"\n" + extra + "[numerics.face_reconstruction]\n" + reconstruction +
-            "[physics]\ntype = \"" + type + "\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
-            "[output]\ncheck_interval = 1000000\n" + chemistry;
-        expect_matches_serial(input);
+        expect_matches_serial(mixture_input(extra, reconstruction, chemistry, type));
     }
 }
 
@@ -224,6 +228,33 @@ TEST(MPITest, NavierStokesWithBoundaryConditionsMatchesSerial) {
         25));
 }
 
+TEST(MPITest, CharacteristicBoundariesAndSpongesMatchSerial) {
+    // The transverse terms read the cells of neighboring boundary faces, which
+    // may be halo cells
+    const std::string sponge = "[[sponges]]\nstrength = \"x > 0.7 ? 5 * (x - 0.7) : 0\"\nu = [0.3, 0.0]\np = 1.0\n"
+                               "T = 1.0\n";
+    for (const std::string & recon : {std::string("type = \"MUSCL\"\n"), std::string("type = \"TENO\"\norder = 5\n")}) {
+        expect_matches_serial(box_input("cartesian_tri", recon, NS,
+                                        bcs("type = \"nscbc_inlet\"\nu = [0.3, 0.0]\np = 1.0\nT = 1.0\nL = 1.0\n"
+                                            "sigma_T = 1.0\nsigma_t = 1.0\n",
+                                            "type = \"nscbc_outlet\"\np = 1.0\nL = 1.0\n",
+                                            "type = \"nscbc_outlet\"\np = 1.0\nL = 1.0\nsigma = 2.0\nbeta = 0.5\n",
+                                            "type = \"wall_adiabatic\"\n"),
+                                        20) +
+                              sponge);
+    }
+}
+
+TEST(MPITest, AxisymmetricRunsMatchSerial) {
+    // Revolved geometry, r-weighted stencils, the high-order geometric source
+    // and the axis-corrected viscous gradients of halo cells
+    const std::string axis = "axisymmetric = true\n";
+    const std::string boundaries = bcs("type = \"extrapolation\"\n", "type = \"wall_adiabatic\"\n",
+                                       "type = \"wall_isothermal\"\nT = 1.2\n", "type = \"symmetry\"\n");
+    expect_matches_serial(box_input("cartesian_tri", "type = \"TENO\"\norder = 4\n", NS + axis, boundaries, 12));
+    expect_matches_serial(box_input("cartesian", "type = \"MUSCL\"\n", NS + axis, boundaries, 20));
+}
+
 TEST(MPITest, BoundaryConditionsSurviveTheHaloRebuild) {
     // TENO stencils need a deeper halo than the first one, so the local mesh is
     // built twice. Dirichlet face lists of the first mesh used to survive, and
@@ -313,6 +344,76 @@ TEST(MPITest, RestartFilesDoNotDependOnTheRankCount) {
     comm::barrier();
 }
 
+namespace {
+
+/** @brief Means, then covariances, of every global cell. */
+std::vector<double> gather_statistics(Solver & solver) {
+    solver.copy_device_to_host();
+    const auto mesh = solver.get_mesh();
+    const auto & mean = solver.get_statistics().host_means();
+    const auto & cov = solver.get_statistics().host_covariances();
+    const uint32_t n_vars = mean.extent(1) + cov.extent(1);
+    const uint64_t n_global = mesh->n_global_cells ? mesh->n_global_cells : mesh->n_cells;
+    std::vector<double> values(n_global * n_vars, 0.0);
+    for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+        const uint64_t g = mesh->n_global_cells ? mesh->h_global_cell_id[c] : c;
+        for (uint32_t i = 0; i < mean.extent(1); i++) values[g * n_vars + i] = double(mean(c, i));
+        for (uint32_t p = 0; p < cov.extent(1); p++) values[g * n_vars + mean.extent(1) + p] = double(cov(c, p));
+    }
+    if (mesh->n_global_cells > 0) comm::allreduce(std::span<double>(values), comm::Op::SUM);
+    return values;
+}
+
+} // namespace
+
+TEST(MPITest, StatisticsAndProbesDoNotDependOnTheRankCount) {
+    // Averages are per cell; probe points on faces between ranks take the same
+    // cell on every rank count; averages written by all ranks continue on one
+    const std::string dir = io_dir() + "_statistics";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    const std::string stats = "[statistics]\ninterval = 2\nfields = [\"P\"]\nproducts = [\"U_X*U_Y\", \"RHO*RHO\"]\n";
+    auto probe = [&](const std::string & file) {
+        return "[[probes]]\nname = \"line\"\nfile = \"" + dir + "/" + file + "\"\nvariables = [\"RHO\", \"P\"]\n"
+               "start = [0.0, 0.4]\nend = [1.0, 0.4]\nn_points = 13\n";
+    };
+    Solver reference;
+    reference.set_distributed(false);
+    reference.init(parse_toml(restart_case(20, stats + probe("reference.csv"))));
+    reference.run();
+    const auto ref = gather_statistics(reference);
+
+    Solver distributed;
+    distributed.init(parse_toml(restart_case(20, stats + probe("distributed.csv") + "[[write_data]]\nprefix = \"" +
+                                                     dir + "/r\"\nformat = \"restart\"\ninterval = 10\n")));
+    distributed.run();
+    EXPECT_EQ(max_rel_diff(gather_statistics(distributed), ref), 0.0);
+    comm::barrier();
+
+    std::string input = restart_case(20, stats);
+    const std::string init = BLAST;
+    input.replace(input.find("[initialize]\n") + 13, init.size(),
+                  "type = \"restart\"\nfile = \"" + dir + "/r_000010.restart\"\n");
+    Solver continued;
+    continued.set_distributed(false);
+    continued.init(parse_toml(input));
+    continued.run();
+    EXPECT_EQ(max_rel_diff(gather_statistics(continued), ref), 0.0);
+
+    if (comm::is_root()) {
+        auto read = [](const std::string & path) {
+            std::ifstream in(path);
+            std::stringstream ss;
+            ss << in.rdbuf();
+            return ss.str();
+        };
+        const std::string a = read(dir + "/reference.csv");
+        EXPECT_FALSE(a.empty());
+        EXPECT_EQ(read(dir + "/distributed.csv"), a);
+    }
+    comm::barrier();
+}
+
 TEST(MPITest, EveryCellIsInExactlyOneOutputPiece) {
     const std::string dir = io_dir() + "_vtu";
     if (comm::is_root()) std::filesystem::remove_all(dir);
@@ -347,6 +448,28 @@ TEST(MPITest, EveryCellIsInExactlyOneOutputPiece) {
     }
     EXPECT_EQ(total, n_global);
     EXPECT_NE(read(dir + "/f.pvd").find("f_000002.pvtu"), std::string::npos);
+}
+
+TEST(MPITest, HDF5OutputDoesNotDependOnTheRankCount) {
+    // Cells and nodes of every rank land at their global ids: triangles and
+    // quads, vectors, statistics and species
+    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
+#ifdef Mallard_HAS_HDF5
+    const std::string file = write_temp_shared("mallard_mpi_h5_output.msh", jittered_mixed_mesh(16));
+    std::string input = box_input("cartesian", "type = \"MUSCL\"\n", EULER,
+                                  bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                                      "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 6);
+    const std::string generated = "type = \"cartesian\"\n";
+    input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
+    expect_hdf5_output_matches_serial(input + "[statistics]\ninterval = 2\nfields = [\"P\"]\n",
+                                      "interval = 3\nvariables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n",
+                                      io_dir() + "_hdf5", {0, 3, 6});
+    std::string mixture = mixture_input("", "type = \"MUSCL\"\n", "", "euler");
+    mixture.replace(mixture.find("n_steps = 20"), 12, "n_steps = 4");
+    expect_hdf5_output_matches_serial(mixture, "interval = 4\nvariables = [\"T\", \"Y_*\"]\n",
+                                      io_dir() + "_hdf5_species", {0, 4});
+#endif
 }
 
 TEST(MPITest, GraphPartitionIsBalancedAndMatchesSerial) {

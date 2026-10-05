@@ -42,6 +42,10 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: `riemann_solver = "Roe"`, the Roe part of RHLL, and the Roe averages of the wave-speed estimates.
 - <a id="harten-1983"></a>A. Harten, High resolution schemes for hyperbolic conservation laws, *J. Comput. Phys.* 49, 357–393 (1983). [doi:10.1016/0021-9991(83)90136-5](https://doi.org/10.1016/0021-9991%2883%2990136-5)
   Used in: the entropy fix of the Roe solver on the acoustic waves.
+- <a id="glaister-1988"></a>P. Glaister, An approximate linearised Riemann solver for the Euler equations for real gases, *J. Comput. Phys.* 74, 382–408 (1988). [doi:10.1016/0021-9991(88)90084-8](https://doi.org/10.1016/0021-9991%2888%2990084-8)
+  Used in: the Roe and RHLL solvers for gas mixtures, a Roe linearization for a general equation of state.
+- <a id="shuen-liou-van-leer-1990"></a>J.-S. Shuen, M.-S. Liou and B. van Leer, Inviscid flux-splitting algorithms for real gases with non-equilibrium chemistry, *J. Comput. Phys.* 90, 371–395 (1990). [doi:10.1016/0021-9991(90)90172-W](https://doi.org/10.1016/0021-9991%2890%2990172-W)
+  Used in: the Roe and RHLL solvers for gas mixtures: the Roe average of a multicomponent gas, whose composition waves move with the contact.
 - <a id="nishikawa-kitamura-2008"></a>H. Nishikawa and K. Kitamura, Very simple, carbuncle-free, boundary-layer-resolving, rotated-hybrid Riemann solvers, *J. Comput. Phys.* 227, 2560–2581 (2008). [doi:10.1016/j.jcp.2007.11.003](https://doi.org/10.1016/j.jcp.2007.11.003)
   Used in: `riemann_solver = "RHLL"`, the rotated hybrid of HLL and Roe.
 - <a id="quirk-1994"></a>J. J. Quirk, A contribution to the great Riemann solver debate, *Int. J. Numer. Methods Fluids* 18, 555–574 (1994). [doi:10.1002/fld.1650180603](https://doi.org/10.1002/fld.1650180603)
@@ -62,6 +66,27 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the viscous face gradients, the average of the two cell gradients corrected along the face normal so that their component along the line of centroids equals the direct difference (`src/numerics/viscous_flux.h`).
 - <a id="sutherland-1893"></a>W. Sutherland, The viscosity of gases and molecular force, *Phil. Mag.* (5) 36, 507–531 (1893). [doi:10.1080/14786449308620508](https://doi.org/10.1080/14786449308620508)
   Used in: `viscosity_model = "sutherland"`.
+
+## Boundary conditions
+
+- <a id="poinsot-lele-1992"></a>T. J. Poinsot and S. K. Lele, Boundary conditions for direct simulations of compressible viscous flows, *J. Comput. Phys.* 101, 104–129 (1992). [doi:10.1016/0021-9991(92)90046-2](https://doi.org/10.1016/0021-9991%2892%2990046-2)
+  Used in: the LODI relations of the characteristic boundaries (`nscbc_outlet`, `nscbc_inlet`; `BoundaryData::characteristic_W` in `src/boundary/boundary.h`) and their viscous outflow conditions.
+- <a id="rudy-strikwerda-1980"></a>D. H. Rudy and J. C. Strikwerda, A nonreflecting outflow boundary condition for subsonic Navier-Stokes calculations, *J. Comput. Phys.* 36, 55–70 (1980). [doi:10.1016/0021-9991(80)90174-6](https://doi.org/10.1016/0021-9991%2880%2990174-6)
+  Used in: the pressure relaxation of `nscbc_outlet` and its default `sigma`.
+- <a id="selle-nicoud-poinsot-2004"></a>L. Selle, F. Nicoud and T. Poinsot, Actual impedance of nonreflecting boundary conditions: implications for computation of resonators, *AIAA J.* 42(5), 958–964 (2004). [doi:10.2514/1.1883](https://doi.org/10.2514/1.1883)
+  Used in: the reflection coefficient of the relaxed outlet, against which the acoustic-pulse test checks `nscbc_outlet`.
+- <a id="yoo-2005"></a>C. S. Yoo, Y. Wang, A. Trouvé and H. G. Im, Characteristic boundary conditions for direct simulations of turbulent counterflow flames, *Combust. Theory Model.* 9(4), 617–646 (2005). [doi:10.1080/13647830500307378](https://doi.org/10.1080/13647830500307378)
+  Used in: the transverse terms of the characteristic boundaries.
+- <a id="yoo-im-2007"></a>C. S. Yoo and H. G. Im, Characteristic boundary conditions for simulations of compressible reacting flows with multi-dimensional, viscous and reaction effects, *Combust. Theory Model.* 11(2), 259–286 (2007). [doi:10.1080/13647830600898995](https://doi.org/10.1080/13647830600898995)
+  Used in: the transverse terms and the treatment of multicomponent, reacting flows at characteristic boundaries.
+- <a id="lodato-2008"></a>G. Lodato, P. Domingo and L. Vervisch, Three-dimensional boundary conditions for direct and large-eddy simulation of compressible viscous flows, *J. Comput. Phys.* 227, 5105–5143 (2008). [doi:10.1016/j.jcp.2008.01.038](https://doi.org/10.1016/j.jcp.2008.01.038)
+  Used in: the relaxation of the transverse terms with `beta` equal to the Mach number (`beta`).
+- <a id="granet-2010"></a>V. Granet, O. Vermorel, T. Leonard, L. Gicquel and T. Poinsot, Comparison of nonreflecting outlet boundary conditions for compressible solvers on unstructured grids, *AIAA J.* 48(10), 2348–2364 (2010). [doi:10.2514/1.J050391](https://doi.org/10.2514/1.J050391)
+  Used in: the default `beta` and the vortex-outflow validation of `nscbc_outlet`.
+- <a id="bodony-2006"></a>D. J. Bodony, Analysis of sponge zones for computational fluid mechanics, *J. Comput. Phys.* 212, 681–702 (2006). [doi:10.1016/j.jcp.2005.07.014](https://doi.org/10.1016/j.jcp.2005.07.014)
+  Used in: the sponge layers (`[[sponges]]`; `src/solver/solver_sponge.cpp`).
+- <a id="mani-2012"></a>A. Mani, Analysis and optimization of numerical sponge layers as a nonreflective boundary treatment, *J. Comput. Phys.* 231, 704–716 (2012). [doi:10.1016/j.jcp.2011.10.017](https://doi.org/10.1016/j.jcp.2011.10.017)
+  Used in: the sponge layers and the advice to ramp their strength.
 
 ## Time integration and time step
 
@@ -154,4 +179,19 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="van-rees-2011"></a>W. M. van Rees, A. Leonard, D. I. Pullin and P. Koumoutsakos, A comparison of vortex and pseudo-spectral methods for the simulation of periodic vortical flows at high Reynolds numbers, *J. Comput. Phys.* 230, 2794–2805 (2011). [doi:10.1016/j.jcp.2010.11.031](https://doi.org/10.1016/j.jcp.2010.11.031)
 - <a id="wang-2013"></a>Z. J. Wang et al., High-order CFD methods: current status and perspective, *Int. J. Numer. Methods Fluids* 72, 811–845 (2013). [doi:10.1002/fld.3767](https://doi.org/10.1002/fld.3767)
   Used in: `examples/taylor_green_3d`, compared with the 512³ pseudo-spectral DNS of the International Workshop on High-Order CFD Methods (case C3.5; [data](https://cfd.ku.edu/hiocfd/spectral_Re1600_512.gdiag)).
+- <a id="johnsen-2010"></a>E. Johnsen, J. Larsson, A. V. Bhagatwala, W. H. Cabot, P. Moin, B. J. Olson, P. S. Rawat, S. K. Shankar, B. Sjögreen, H. C. Yee, X. Zhong and S. K. Lele, Assessment of high-resolution methods for numerical simulations of compressible turbulence with shock waves, *J. Comput. Phys.* 229, 1213–1237 (2010). [doi:10.1016/j.jcp.2009.10.028](https://doi.org/10.1016/j.jcp.2009.10.028)
+- <a id="lele-2012"></a>S. K. Lele, Simulations of turbulent flows with strong shocks and density variations, final report DE-FC02-06ER25787, Stanford University (2012). [doi:10.2172/1052207](https://doi.org/10.2172/1052207)
+- <a id="subramaniam-2019"></a>A. Subramaniam, M. L. Wong and S. K. Lele, A high-order weighted compact high resolution scheme with boundary closures for compressible turbulent flows with shocks, *J. Comput. Phys.* 397, 108822 (2019). [doi:10.1016/j.jcp.2019.07.021](https://doi.org/10.1016/j.jcp.2019.07.021)
+- <a id="samtaney-2001"></a>R. Samtaney, D. I. Pullin and B. Kosović, Direct numerical simulation of decaying compressible turbulence and shocklet statistics, *Phys. Fluids* 13, 1415–1430 (2001). [doi:10.1063/1.1355682](https://doi.org/10.1063/1.1355682)
+  Used in: `examples/isotropic_turbulence` and `tools/plot_isotropic_turbulence.py`: the decaying isotropic turbulence case of Johnsen et al. and their filtered 256³ reference (read from the same figure in Lele's report), the filtered 512³ DNS and spectra of Subramaniam et al. (whose appendix F gives the post-processing of both references), and the regime of Samtaney et al.; also `viscosity_model = "power_law"`.
+- <a id="ruetsch-1995"></a>G. R. Ruetsch, L. Vervisch and A. Liñán, Effects of heat release on triple flames, *Phys. Fluids* 7, 1447–1454 (1995). [doi:10.1063/1.868531](https://doi.org/10.1063/1.868531)
+- <a id="veynante-1994"></a>D. Veynante, L. Vervisch, T. Poinsot, A. Liñán and G. Ruetsch, Triple flame structure and diffusion flame stabilization, *Proceedings of the Summer Program 1994*, Center for Turbulence Research, Stanford University (1994). [oa.upm.es/1537](https://oa.upm.es/1537/)
+  Used in (these two): `examples/triple_flame` and `tools/triple_flame_analysis.py` (the propagation speed U<sub>F</sub> / S<sub>L</sub> against the mixing thickness at the flame, D<sub>TF</sub>, and the weak-gradient limit √(ρ<sub>u</sub> / ρ<sub>b</sub>)).
+- <a id="poinsot-1990"></a>T. Poinsot, D. Veynante and S. Candel, Diagrams of premixed turbulent combustion based on direct simulation, *Proc. Combust. Inst.* 23, 613–619 (1990).
+- <a id="poinsot-1991"></a>T. Poinsot, D. Veynante and S. Candel, Quenching processes and premixed turbulent combustion diagrams, *J. Fluid Mech.* 228, 561–606 (1991). [doi:10.1017/S0022112091002823](https://doi.org/10.1017/S0022112091002823)
+  Used in (these two): `examples/flame_vortex` and `tools/flame_vortex_analysis.py` (the vortex-pair scales r and u′, the four outcomes and the 5% cut-off of the spectral diagram).
 - The spherical explosion of `examples/explosion_3d` is from [Toro (2009)](#toro-2009), §17.1.3.
+- <a id="noh-1987"></a>W. F. Noh, Errors for calculations of strong shocks using an artificial viscosity and an artificial heat flux, *J. Comput. Phys.* 72, 78–120 (1987). [doi:10.1016/0021-9991(87)90074-X](https://doi.org/10.1016/0021-9991(87)90074-X)
+  Used in: `examples/noh_axisymmetric` and `tools/plot_noh.py` (the spherical Noh problem and its exact solution).
+- <a id="clift-grace-weber-1978"></a>R. Clift, J. R. Grace and M. E. Weber, *Bubbles, Drops, and Particles*, Academic Press (1978).
+  Used in: `examples/sphere_axisymmetric` and `tools/plot_sphere_axisymmetric.py` (correlations of the drag coefficient and the separation angle of a sphere in steady flow, 20 < Re < 260), with [Johnson & Patel (1999)](#johnson-patel-1999) for the wake length.

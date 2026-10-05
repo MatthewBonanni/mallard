@@ -9,7 +9,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 
 ![Mallard simulations](./docs/images/hero.gif)
 
-*Double Mach reflection, a 2D Riemann problem, the Daru & Tenaud viscous shock tube and, in 3D, the Taylor-Green vortex at Re = 1600 ([`examples/`](examples)): the shock tube's wall density at t = 1 lands on the grid-converged reference of [Zhou et al.](https://arxiv.org/abs/1705.09062), and the vortex's kinetic-energy dissipation rate follows the 512³ spectral DNS of the [High-Order CFD Workshop](https://cfd.ku.edu/hiocfd/).*
+*A cellular detonation in 2H2-O2-7Ar with finite-rate chemistry, its numerical soot foil recording the triple-point tracks (front speed within 0.01% of the Chapman-Jouguet speed); the Taylor-Green vortex at Re = 1600 on the full periodic box, whose kinetic-energy dissipation rate follows the 512³ spectral DNS of the [High-Order CFD Workshop](https://cfd.ku.edu/hiocfd/); the Mach 10 double Mach reflection; and the hairpin vortices shed by a sphere at Re = 300, with Strouhal number, drag and lift within 3%, 2% and 6% of Johnson & Patel ([`examples/`](examples)).*
 
 > **NOTE:** Mallard is under active development; finite-rate chemistry is new, and its GPU performance is still being tuned.
 
@@ -18,6 +18,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Compressible Euler and Navier-Stokes equations: a calorically perfect gas (constant or Sutherland viscosity), or thermally perfect gas mixtures
 - Finite-rate chemistry with arbitrary Cantera (YAML) mechanisms read at run time: elementary, three-body, falloff, PLOG and Chebyshev reactions; an adaptive Rosenbrock integrator per cell with analytical Jacobians, Strang-split from the flow; mixture-averaged, unity-Lewis or constant-Lewis transport; an optional double-flux scheme for interfaces; `MallardReactor`, a 0D reactor tool
 - 2D or 3D (a build option): unstructured meshes of triangles and quadrilaterals, or of tetrahedra, hexahedra, prisms and pyramids, read from Gmsh or HDF5 files or generated
+- Axisymmetric (r-z) flows in 2D builds: revolved finite volumes, exactly well balanced, at the design order of the reconstruction up to the axis
 - Face reconstruction:
   - First order
   - Second-order MUSCL with least-squares gradients and Barth-Jespersen or Venkatakrishnan limiting
@@ -25,7 +26,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Riemann solvers: Rusanov, HLL, HLLC, Roe, and the carbuncle-free rotated-hybrid HLL-Roe
 - Source terms: gravity and arbitrary expressions
 - Time integration: forward Euler, SSPRK3, RK4, with the time step set by a CFL number
-- Boundary conditions: transmissive, symmetry, adiabatic, isothermal and heat-flux walls (optionally moving), inflow with fixed velocity, pressure and temperature, pressure outlet, and time-dependent states given as expressions; zones can be split between conditions; periodic boundaries (generated meshes, or paired zones of mesh files)
+- Boundary conditions: transmissive, symmetry, adiabatic, isothermal and heat-flux walls (optionally moving), inflow with fixed velocity, pressure and temperature, pressure outlet, partially non-reflecting characteristic (NSCBC) inlets and outlets with transverse terms, and time-dependent states given as expressions; zones can be split between conditions; periodic boundaries (generated meshes, or paired zones of mesh files); sponge layers
 - Initial conditions given as analytical expressions, integrated over each cell
 - Restart files
 - Output to VTU (ParaView), with `.pvd` time series
@@ -48,15 +49,25 @@ Add `-DMallard_DIM=3` (in a separate build directory) for the 3D solver.
 
 Pick the Kokkos backend at configure time, for example `-DKokkos_ENABLE_OPENMP=ON`, or `-DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON -DCMAKE_CXX_COMPILER=$PWD/src/external/kokkos/bin/nvcc_wrapper` for NVIDIA A100 GPUs (add `-DKokkos_ENABLE_OPENMP=ON` too, so host-side setup such as TENO's precomputation runs in parallel). To use an installed Kokkos instead, pass `-DUSE_SYSTEM_KOKKOS=ON -DKokkos_DIR=/path/to/kokkos`.
 
+For AMD GPUs, build with ROCm's Clang (ROCm 6.2 or newer, with the HIP development headers):
+
+```sh
+cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
+    -DKokkos_ENABLE_HIP=ON -DKokkos_ARCH_AMD_GFX950=ON -DKokkos_ENABLE_OPENMP=ON \
+    -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++
+```
+
+`AMD_GFX950` is the MI350X/MI355X; use `AMD_GFX942` for the MI300X/MI300A or `AMD_GFX90A` for the MI250X. Instinct GPUs run 64-wide wavefronts where NVIDIA GPUs run 32-wide warps; the chemistry gives each cell a wavefront, and a team's results do not depend on its width. With MPI and dKaMinPar, also pass `-DCMAKE_POSITION_INDEPENDENT_CODE=ON`. On a node with automatic NUMA balancing on (`/proc/sys/kernel/numa_balancing` is 1), the ROCm driver stalls a process's GPU queues for up to seconds at a time: turn it off, as AMD recommends for Instinct GPUs, or bind each rank to its GPU's NUMA node (`numactl --cpunodebind=N --membind=N`).
+
 | CMake option | Default | Description |
 |---|---|---|
 | `USE_SYSTEM_KOKKOS` | `ON` | Use an installed Kokkos instead of the submodule |
 | `Mallard_DIM` | `2` | Spatial dimension, `2` or `3` (one binary per dimension) |
 | `Mallard_USE_DOUBLE` | `ON` | Double precision (single precision otherwise) |
 | `Mallard_ENABLE_MPI` | `OFF` | Distributed memory with MPI: `mpirun -n N Mallard -i input.toml` splits the mesh between ranks; with generated meshes or HDF5 mesh files (`mallard-mesh-convert`) no rank ever holds the whole mesh, while Gmsh files are read whole by every rank |
-| `Mallard_GPU_AWARE_MPI` | `OFF` | With MPI on GPUs: hand device buffers to a CUDA-aware MPI instead of staging halos through host memory |
+| `Mallard_GPU_AWARE_MPI` | `OFF` | With MPI on GPUs: hand device buffers to a CUDA- or ROCm-aware MPI (e.g. Open MPI over UCX built with CUDA or ROCm) instead of staging halos through host memory |
 | `Mallard_ENABLE_KAMINPAR` | `OFF` | With MPI: partition the mesh with the [dKaMinPar](https://github.com/KaHIP/KaMinPar) graph partitioner (fetched at configure time; needs oneTBB) instead of a Hilbert curve. With CUDA, configure with the host compiler (`-DCMAKE_CXX_COMPILER=g++`) instead of `nvcc_wrapper`: Kokkos then compiles the code that uses it through `nvcc_wrapper` itself, and dKaMinPar does not compile with nvcc |
-| `Mallard_ENABLE_HDF5` | `OFF` | HDF5 mesh files (parallel HDF5 with MPI, when available) and the `mallard-mesh-convert` tool |
+| `Mallard_ENABLE_HDF5` | `OFF` | HDF5 mesh files and solution output (`format = "hdf5"`, with XDMF for ParaView; parallel HDF5 with MPI, when available) and the `mallard-mesh-convert` tool |
 | `Mallard_WARNINGS_AS_ERRORS` | `OFF` | Treat compiler warnings in Mallard's own code as errors (on in CI) |
 | `BUILD_DOCS` | `OFF` | Doxygen documentation target |
 
@@ -75,7 +86,7 @@ See [`examples/`](examples) for complete input files and [`docs/input.md`](docs/
 ./build/test/MallardTest
 ```
 
-The test suite checks mesh geometry, the Riemann solvers against an exact Riemann solver, time integrator convergence orders, gradient and limiter properties, TENO design order on triangles and quadrilaterals and on 3D tetrahedra and hexahedra (with polynomial exactness on prisms, pyramids and mixed meshes), free-stream preservation, discrete conservation, symmetry preservation, shock tubes against exact solutions, viscous flows against exact solutions (Couette, Stokes' first problem, conduction), and bit-for-bit restarts.
+The test suite checks mesh geometry, the Riemann solvers against an exact Riemann solver, time integrator convergence orders, gradient and limiter properties, TENO design order on triangles and quadrilaterals and on 3D tetrahedra and hexahedra (with polynomial exactness on prisms, pyramids and mixed meshes), free-stream preservation, discrete conservation, symmetry preservation, shock tubes against exact solutions, viscous flows against exact solutions (Couette, Stokes' first problem, conduction), axisymmetric well balance and design order (manufactured solution, Hagen-Poiseuille), and bit-for-bit restarts.
 
 ## Postprocessing
 

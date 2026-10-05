@@ -785,6 +785,8 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
     // Global ids first: they order the faces and neighbor lists like the serial mesh's
     mesh->h_global_cell_id = dist.global_cell;
     mesh->n_global_cells = n_global_cells();
+    mesh->h_global_node_id = std::move(node_ids);
+    mesh->n_global_nodes = node_dist.back();
     mesh->init_from_connectivity(nodes, local_cells, boundary_faces, PARTITION_ZONE, classes);
     mesh->n_owned_cells = dist.n_owned;
     mesh->n_reconstructed_cells = std::count_if(dist.layer.begin(), dist.layer.end(), [](uint8_t l) { return l <= 1; });

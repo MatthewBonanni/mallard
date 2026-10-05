@@ -201,8 +201,22 @@ They become functions of `W` and per-side `(gamma, e0)`:
   one-species mixture could not then reproduce it; implementation, milestone 3).
   The low-Mach correction uses each side's `gamma` in its Mach number.
 - **Roe and RHLL** need a Roe average for a variable-`gamma` gas
-  (Shuen, Liou & van Leer 1990; Glaister 1988). They come in a later
-  milestone; until then a mixture run rejects them at input.
+  (Shuen, Liou & van Leer 1990; Glaister 1988). As implemented (milestone
+  12): with `p = kappa rho e + chi rho` per side (`kappa = gamma - 1`,
+  `chi = -kappa e0`), any averages leave a pressure residual
+  `dp - chi_roe d(rho) - kappa_roe d(rho e)` from the jump in composition,
+  which a multicomponent Roe matrix carries in its species waves. Those move
+  at `u_n` with the entropy and shear waves, so all linearly degenerate waves
+  together carry `dU` minus the two acoustic waves, whatever the equation of
+  state, and the flux takes the jump form
+  `F = (F_L + F_R - |u_n| dU - sum_+- (|u_n +- a| - |u_n|) alpha_+- r_+-) / 2`,
+  `alpha_+- = (dp +- rho_roe a du_n) / (2 a^2)`, `r_+- = [1, u +- a n, H +- a u_n]`.
+  The Roe property then holds for any `a`; it is `a_roe` of the Einfeldt
+  speeds above, so the species never enter the solver. A contact between
+  gases is upwinded exactly, and with one `gamma` and `e0 = 0` the flux is the
+  perfect-gas Roe flux to round-off. RHLL rotates as for one gas, with HLL
+  and Roe on `(gamma, e0)` and the larger side's frozen sound speed scaling
+  its fallback threshold; the single-gas solvers are unchanged bit for bit.
 - The perfect-gas instantiation passes the constant `gamma` and `e0 = 0`
   as compile-time-known values, so it compiles to the current code.
 
@@ -328,13 +342,18 @@ stays rank independent), and every stage takes the cells' pressure from the
 frozen relation. Each face point computes the Riemann flux twice, with each
 side's frozen `(gamma, e0)` on both of its states; mass and momentum use the
 mean of the two (conservative, and equal to both at a contact, where HLLC
-returns the upwind physical flux), so `mdot` and the species fluxes stay
+and Roe return the upwind physical flux), so `mdot` and the species fluxes stay
 unique, and each side takes its own energy flux (one extra word per face).
+Both fluxes estimate the wave speeds with each side's own frozen
+`(gamma, e0)` (milestone 12): HLL and Rusanov smear a contact by an amount set
+by those speeds, and with each flux's own they gave the two fluxes different
+mass fluxes there, perturbing `p` by 0.1% (as did RHLL, which is HLL at a
+contact without a velocity jump).
 After the step `rho E` is reset to the true equation of state at the pressure
 of the frozen one. There is no shock switch yet: the energy error over the
 multicomponent shock tube is 0.16% of the total energy, with an L1 pressure
 error equal to the conservative scheme's; contacts keep `p` and `u` uniform to
-1e-12 with MUSCL and TENO5.
+1e-12 with MUSCL and TENO5 (HLLC, Roe and RHLL).
 
 ### Species fluxes without races
 
@@ -466,7 +485,11 @@ Validation (MUSCL, HLLC, SSPRK3, h2o2 mechanism, default tolerances):
   speed against D_CJ = 1616.9 m/s: +0.11%, +0.01%, 0.00% at 10, 20, 40 cells
   per ZND induction length (1.525 mm); induction length -4.5%, -1.8%, +2.7%
   (one cell at 40 is 2.5%); peak pressure 174.8 kPa against the von
-  Neumann 174.7 kPa.
+  Neumann 174.7 kPa. Roe and RHLL (milestone 12; in 1D RHLL is HLL, the
+  velocity jump being normal to every face) give the same front speed and
+  induction length to the digits above at 10 and 20 cells per induction
+  length (+0.11% and +0.01%; -4.5% and -1.8%), with profiles within 0.6% of
+  each other.
 - V6 (`examples/reactive_shock_tube`): reaction front at 230 us at
   99.625, 99.662, 99.644 mm with 50, 25, 12.5 um cells (within one coarse
   cell of the finest); peak T 2875.2, 2876.1, 2876.6 K and peak p 316.6,
@@ -624,6 +647,42 @@ column), then chain-ruled to `(Y, T)`.
 
 Unit tests compare the Jacobian against finite differences of the rates, and
 the rates against Cantera, at random states.
+
+**Fractional orders below 1.** A global rate `k C^n` with `0 < n < 1`
+(Westbrook–Dryer: `[C3H8]^0.1`, `[H2O]^0.5 [O2]^0.25`) has
+`d(C^n)/dC = n C^(n - 1)`, unbounded as `C -> 0`, and is not Lipschitz there:
+the exact solution reaches `C = 0` in finite time. The Jacobian then
+overflows wherever such a reactant runs out or starts at zero (`inf * 0 = NaN`
+when another reactant is also zero, as `CO` and `H2O` before ignition), and
+step-size control stalls at depletion. Cantera evaluates the exact law
+(`C_AnyN` in `StoichManager.h`: zero rate and derivative for `C <= 0`, the
+pow otherwise); its CVODES integration of the two-step propane mechanism fails
+at fuel depletion at `rtol = 1e-12`, and its reference data are generated at
+`1e-10`. Mallard regularizes the rate law itself, below
+`C_reg = 1e-12` kmol/m^3 (`KineticsTable::C_REG`):
+
+    C^n  ->  C_reg^n x ((2 - n) + (n - 1) x),   x = C / C_reg,   0 <= x < 1
+    C^n  ->  C_reg^n (2 - n) x,                 x < 0
+
+the quadratic through the origin that matches `C^n` and its slope at
+`C_reg` (`C^1`), continued linearly to negative concentrations as integer
+orders are (a negative reactant gives a restoring rate). The slope at zero is
+`(2 - n) C_reg^(n - 1)`, finite, and the rate is monotone; the analytical
+Jacobian differentiates the regularized law, so RODAS sees the exact
+Jacobian of the right-hand side it integrates. Below `C_reg` the reactant
+decays exponentially instead of vanishing in finite time. `C_reg` is a fixed
+concentration at the scale of the default `atol = 1e-10` on `Y`: the
+concentration `rho Y / W` of a fuel at that mass fraction is about `1e-12`
+kmol/m^3 at 1 atm and above it at higher pressures, so the regularization acts
+where the error control already treats the reactant as zero. The fixed value
+keeps the reaction tables free of the integrator's options. Integer orders,
+orders above 1 (bounded slope) and negative orders (whose rates diverge
+themselves) are unchanged. Tests: the Jacobian of the two-step propane
+mechanism against finite differences as each fractional-order reactant goes
+from above `C_reg` to zero and negative, and its constant-volume ignition at
+the V1 conditions to depletion of fuel (lean), oxygen (rich) or both
+(stoichiometric) against Cantera: ignition delays within 0.5%, end states
+within `1e-6` in `Y`.
 
 As implemented (milestone 6, `src/chemistry/kinetics.h`): one table set per
 mechanism, compressed rows per reaction for the forward orders, the products
@@ -1178,7 +1237,12 @@ Catalytic walls and species-specific wall fluxes are out of scope.
 Milestone 3 supports `extrapolation`, `symmetry`, `wall_adiabatic` (slip for
 `euler`, no-slip for `navier_stokes` from milestone 9), `upt` and `p_out` for mixtures;
 `farfield`, `dirichlet` and `p_out_average` are rejected at input until they
-are needed.
+are needed. The composition of `upt` may vary along the boundary (stratified
+inflows such as a mixing layer feeding a triple flame): each value of `X` or
+`Y` can be an expression in `x`, `y`, `z`, with an optional `balance` species
+as in `[initialize]`. Each face then gets its own copy of the condition, with
+the composition, density and surrogates at its center, so the flux kernels
+are unchanged.
 
 ## 9. Output and restart
 
@@ -1244,7 +1308,8 @@ until milestone 8 (the 0D tool arrives in milestone 7).
     sparse LU for large mechanisms, benchmark suite with recorded baselines.
 11. **MPI.** Chemistry load balancing; chemistry cost in partition weights.
     Tests: rank-count independence with chemistry; imbalance benchmark.
-12. **Extensions, each optional and driven by need:** Roe/RHLL for mixtures;
+12. **Extensions, each optional and driven by need:** Roe/RHLL for mixtures
+    (done);
     BDF integrator; SDC coupling; mechanism-specialized (code-generated)
     kernels; 2D cellular detonation, counterflow flame and mixing-layer
     cases.
@@ -1310,6 +1375,37 @@ Species counts are taken from the files when they are added.
 | V10 | **Counterflow diffusion flame**, H2/N2 vs air, strain-rate sweep | Cantera `CounterflowDiffusionFlame` | Peak `T` vs strain within 2% near the axis, accepting that a 2D/3D opposed-jet run only approximates the similarity solution | 12 |
 | V11 | **Shock/H2-bubble interaction** with detailed transport, or a reacting mixing layer | [Billet, Giovangigli & de Gassowski 2008](https://doi.org/10.1080/13647830701545875) | Code-to-code: interface and shock positions; grid convergence | 12 |
 
+V10 (`examples/counterflow_diffusion`, `tools/counterflow_reference.py`,
+`counterflow_setup.py`, `plot_counterflow.py`): H2/N2 (1:3) against air at
+300 K and 1 atm, nozzles 10 mm apart, momentum-balanced, against Cantera's
+`CounterflowDiffusionFlame` swept in strain up to extinction. Cantera's is
+the axisymmetric similarity solution, which has no exact planar
+equivalent; the case predates Mallard's axisymmetric formulation
+(`axisymmetric.md`), so the run is 3D: a quarter of two opposed round plug jets (r < 5 mm) with N2 coflows,
+symmetry planes and side pressure outlets, 15 cells per FWHM of the
+temperature profile along the axis, started from Cantera's solution. Strain
+is measured on the stagnation line in both, as the local strain rate of the
+oxidizer stream `K_ox` (the first maximum of `-du/dx` ahead of the flame)
+and as the spread rate `V_T = v / r` at the peak temperature. From
+`U_o` = 1 to 4.6 m/s (`K_ox` 344-1640 1/s, up to 90% of Cantera's
+extinction strain rate of 1816 1/s) the steady peak temperature is within
+2% of Cantera's at the same `K_ox` (+0.41% to +1.96%), so V10 passes, but
+the excess grows with strain and is mostly not a resolution error (at 4 m/s
+it is the same at 10 and 15 cells per FWHM; at 2 m/s it falls from 0.74% to
+0.34% between 10 and 22). The finite jets give the flame less strain for
+the same `K_ox` than the similarity solution (`V_T / K_ox` 0.89 against
+0.95 at 4 m/s), by an amount that depends on the jets: with 7.5 mm jets the
+excess at 4 m/s reaches 1.9% and was still rising. At matched `V_T` the
+peak temperatures agree within 0.3-0.6% everywhere on the branch, for both
+jet widths, and 1.0% at Cantera's extinction strain. Mallard's
+flame still burns at `K_ox` = 1818 1/s (`U_o` = 5.1 m/s) and goes out at
+5.6 m/s (`K_ox` 1890-1975 1/s while burning), so its extinction strain rate
+is 0-9% above Cantera's. Stagnation-line temperature, velocity and species
+profiles overlay Cantera's at matched `K_ox`. Results, plots and the
+resolution and domain-size variants are in the example's README.
+
+![Peak temperature against strain](../images/counterflow_strain.png)
+
 ### Performance benchmarks
 
 - **Chemistry throughput**: cells advanced per second per A100 (and per CPU
@@ -1352,7 +1448,7 @@ Accepted by the user (2026-10-02):
 3. **Dependencies**: yaml-cpp via FetchContent; Cantera (Python) only for
    generating committed reference data in `tools/`.
 4. **Double flux** as a non-conservative input option; conservative by default.
-5. **HLLC first**; Roe/RHLL for mixtures stay in milestone 12.
+5. **HLLC first**; Roe/RHLL for mixtures stay in milestone 12 (since done).
 6. **Chemistry always in double**, also in float builds.
 7. **Scope of "done"**: as in milestone 12, the 2D cellular detonation and
    counterflow flame are extensions, not requirements for the first

@@ -27,6 +27,8 @@
 #include "test_fixtures.h"
 #include "data.h"
 #include "data_writer.h"
+#include "hdf5_output.h"
+#include "mesh_block.h"
 
 namespace {
 
@@ -353,6 +355,54 @@ TEST(IO3DTest, VolumeOutputFollowsVTKCellConventions) {
         for (uint32_t k = 0; k < 3; k++) EXPECT_EQ(u[3 * c + k], fields.values(c, 1 + k));
     }
     std::filesystem::remove_all(dir);
+}
+
+TEST(IO3DTest, HDF5OutputHoldsTheVTUCellsAsAnXDMFMixedTopology) {
+    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+#ifdef Mallard_HAS_HDF5
+    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_h5_3d").string();
+    std::filesystem::remove_all(dir);
+    auto mesh = mixed_mesh();
+    CellFields fields(mesh->n_cells, {"RHO", "U_X", "U_Y", "U_Z"});
+    for (const char * format : {"vtu", "hdf5"}) {
+        DataWriter writer;
+        writer.init(parse_toml("prefix = \"" + dir + "/" + format + "\"\nformat = \"" + format +
+                               "\"\ninterval = 1\nvariables = [\"RHO\", \"U\"]\n"),
+                    fields.data, mesh);
+        writer.write(0, 0.0);
+    }
+    auto vtu = read_appended_arrays(dir + "/vtu_000000.vtu");
+    const auto mesh_h5 = h5_datasets(dir + "/hdf5_mesh.h5");
+    const auto fields_h5 = h5_datasets(dir + "/hdf5_000000.h5");
+
+    // Each XDMF record is its cell type code, then the VTU cell's nodes in VTK
+    // order (XDMF Tetrahedron 6, Pyramid 7, Wedge 8, Hexahedron 9)
+    const std::map<int64_t, uint8_t> vtk_of_xdmf = {{6, 10}, {7, 14}, {8, 13}, {9, 12}};
+    const auto topology = as_vector<int64_t>(std::string(mesh_h5.at("cells/topology").begin(),
+                                                         mesh_h5.at("cells/topology").end()));
+    const auto starts = as_vector<int64_t>(std::string(mesh_h5.at("cells/offsets").begin(),
+                                                       mesh_h5.at("cells/offsets").end()));
+    const auto connectivity = as_vector<int64_t>(vtu["connectivity"]);
+    const auto offsets = as_vector<int64_t>(vtu["offsets"]);
+    const auto types = as_vector<uint8_t>(vtu["types"]);
+    ASSERT_EQ(starts.size(), mesh->n_cells + 1);
+    ASSERT_EQ(topology.size(), mesh->n_cells + connectivity.size());
+    EXPECT_EQ(starts.back(), int64_t(topology.size()));
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        const int64_t begin = c == 0 ? 0 : offsets[c - 1];
+        ASSERT_TRUE(vtk_of_xdmf.count(topology[starts[c]])) << topology[starts[c]];
+        EXPECT_EQ(vtk_of_xdmf.at(topology[starts[c]]), types[c]);
+        const std::vector<int64_t> nodes(topology.begin() + starts[c] + 1, topology.begin() + starts[c + 1]);
+        EXPECT_EQ(nodes, std::vector<int64_t>(connectivity.begin() + begin, connectivity.begin() + offsets[c]));
+    }
+    const auto points = as_vector<rtype>(vtu["Points"]);
+    const auto coords = as_vector<rtype>(std::string(mesh_h5.at("nodes/coordinates").begin(),
+                                                     mesh_h5.at("nodes/coordinates").end()));
+    EXPECT_EQ(coords, points);
+    EXPECT_EQ(fields_h5.at("fields/U"), std::vector<char>(vtu["U"].begin(), vtu["U"].end()));
+    EXPECT_EQ(fields_h5.at("fields/RHO"), std::vector<char>(vtu["RHO"].begin(), vtu["RHO"].end()));
+    std::filesystem::remove_all(dir);
+#endif
 }
 
 TEST(IO3DTest, BoundaryZoneOutputWritesTrianglesAndQuads) {
