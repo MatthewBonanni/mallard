@@ -75,7 +75,7 @@ its coefficients.
 | case (A100) | main | change 1 |
 |---|---|---|
 | `teno_smooth`, 96^3 hexahedra, first stage | 111.8 ms | 44.9 ms |
-| TENO5 Taylor-Green 96^3 (`teno5_3d`) | 335 ms/step (2.64M cells/s) | 165 ms/step (5.36M cells/s) |
+| TENO5 Taylor-Green 96^3 (`teno5_3d`) | 335 ms/step (2.64M cells/s) | 151 ms/step (5.85M cells/s) |
 | TENO6 Taylor-Green 32^3 | 47.3 ms/step | 20.7 ms/step |
 | TENO5 explosion, 20^3 x 6 tetrahedra | 17.5 ms/step | 11.0 ms/step |
 | TENO3/TENO4 (degrees 2-3) | unchanged (per-thread kernel kept) | |
