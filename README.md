@@ -15,22 +15,52 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 
 ## Features
 
-- Compressible Euler and Navier-Stokes equations: a calorically perfect gas (constant or Sutherland viscosity), or thermally perfect gas mixtures
-- Finite-rate chemistry with arbitrary Cantera (YAML) mechanisms read at run time: elementary, three-body, falloff, PLOG and Chebyshev reactions; an adaptive Rosenbrock integrator per cell with analytical Jacobians, Strang-split from the flow; mixture-averaged, unity-Lewis or constant-Lewis transport; an optional double-flux scheme for interfaces; `MallardReactor`, a 0D reactor tool
-- 2D or 3D (a build option): unstructured meshes of triangles and quadrilaterals, or of tetrahedra, hexahedra, prisms and pyramids, read from Gmsh or HDF5 files or generated
-- Axisymmetric (r-z) flows in 2D builds: revolved finite volumes, exactly well balanced, at the design order of the reconstruction up to the axis
-- Face reconstruction:
-  - First order
-  - Second-order MUSCL with least-squares gradients and Barth-Jespersen or Venkatakrishnan limiting
-  - TENO-E of orders 3 to 6 ([Liang, Shyy & Fu, J. Sci. Comput. 2025](https://doi.org/10.1007/s10915-025-02918-w)): k-exact least squares on a large central stencil and one sector stencil per face, a density-based troubled-cell indicator, characteristic-wise stencil selection with an adaptive cutoff, and mirror ghost cells at boundaries
-- Riemann solvers: Rusanov, HLL, HLLC, Roe, and the carbuncle-free rotated-hybrid HLL-Roe
-- Source terms: gravity and arbitrary expressions
-- Time integration: forward Euler, SSPRK3, RK4, with the time step set by a CFL number
-- Boundary conditions: transmissive, symmetry, adiabatic, isothermal and heat-flux walls (optionally moving), inflow with fixed velocity, pressure and temperature, pressure outlet, partially non-reflecting characteristic (NSCBC) inlets and outlets with transverse terms, and time-dependent states given as expressions; zones can be split between conditions; periodic boundaries (generated meshes, or paired zones of mesh files); sponge layers
-- Initial conditions given as analytical expressions, integrated over each cell
-- Restart files
-- Output to VTU (ParaView), with `.pvd` time series
-- Simple TOML input files
+**Meshes**
+- 2D (triangles, quadrilaterals) or 3D (tetrahedra, hexahedra, prisms, pyramids, mixed), chosen at build time
+- Gmsh 2.2/4.1 or HDF5 mesh files (`mallard-mesh-convert`), or generated boxes
+- Periodic boundaries: generated meshes, or paired zones of mesh files
+- Axisymmetric (r-z) flows in 2D: revolved finite volumes, at design order up to the axis
+
+**Numerics**
+- Reconstruction: first order; MUSCL with Barth-Jespersen or Venkatakrishnan limiting; [TENO-E](https://doi.org/10.1007/s10915-025-02918-w) of orders 3 to 6, optionally bound preserving (measured orders 3-6 on triangles and quadrilaterals)
+- Riemann solvers: Rusanov, HLL, HLLC, Roe and the carbuncle-free rotated-hybrid HLL-Roe (RHLL), all for single gases and mixtures
+- Low-Mach correction of the upwind dissipation
+- Explicit time integration (forward Euler, SSPRK3, RK4) at a CFL number or a fixed step
+
+**Physics**
+- Compressible Euler and Navier-Stokes; constant, Sutherland or power-law viscosity
+- Thermally perfect multicomponent mixtures from [Cantera](https://cantera.org) YAML files; optional double-flux scheme for interfaces
+- Finite-rate chemistry: elementary, three-body, falloff, PLOG and Chebyshev reactions; a Rosenbrock (RODAS) integrator per cell with analytical Jacobians, Strang-split from the flow; ignition delays match Cantera up to 1268 species
+- Mixture-averaged, unity-Lewis or constant-Lewis transport
+- Gravity and arbitrary source terms
+
+**Boundary conditions**
+- Slip, adiabatic, isothermal and heat-flux walls, optionally moving
+- Inflow, characteristic far field, pressure outlets (local or area-averaged), transmissive, time-dependent expressions
+- Partially non-reflecting characteristic (NSCBC) inlets and outlets with transverse terms (1% of an acoustic pulse reflected, against 97-99% at a fixed-pressure outlet); sponge layers
+- Zones split between conditions by expressions
+
+**Performance and parallelism**
+- [Kokkos](https://github.com/kokkos/kokkos) backends: Serial, Threads, OpenMP, CUDA (NVIDIA) and HIP (AMD); double or single precision
+- MPI with Hilbert-curve or graph (dKaMinPar) partitions, GPU-aware halo exchange overlapped with computation: 93% weak-scaling efficiency on 16 A100 GPUs
+- No rank holds the whole mesh (HDF5 or generated meshes)
+- Bitwise-identical results on any number of threads or MPI ranks; restarts bit for bit, also on a different number of ranks
+- Stiff chemistry on GPUs: a warp or wider team per cell and a sparse LU for large mechanisms
+
+**Input, output and diagnostics**
+- TOML input; initial conditions, boundary states, sources and sponges as analytical expressions
+- VTU (ParaView) or parallel HDF5 with XDMF; surface output of boundary zones
+- Running means and covariances, point and line probes, domain integrals (kinetic energy, enstrophy, ...), wall forces
+- Heat release, species production rates and detonation soot foils (`P_MAX`)
+- `MallardReactor`, a 0D reactor, and Python tools for plotting, animation and HDF5 output
+
+**Validation and testing**
+- 29 [examples](examples) against exact solutions, theory, DNS or Cantera, e.g.:
+  - Sphere wake at Re = 300: Strouhal number and drag within 3% and 2% of Johnson & Patel
+  - Compressible isotropic turbulence: enstrophy within 2.4% of the filtered DNS of Johnsen et al.
+  - CJ detonation speed within 0.01%; H2/air flame speeds within 0.81% of Cantera from φ = 0.6 to 1.4
+- Over 300 unit and regression tests: exact Riemann solutions, design order, conservation, bitwise MPI and restart reproducibility
+- CI on every code change (2D, 3D, MPI on 1-4 ranks, single precision, GCC and Clang, warnings as errors); nightly sanitizers; a performance suite with per-hardware baselines
 
 The sources of every method and of the validation data are listed in [docs/references.md](docs/references.md).
 
