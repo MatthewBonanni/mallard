@@ -321,13 +321,13 @@ TEST(TENOTest, MirrorImagesNeverLandInsideNonConvexDomains) {
  */
 std::vector<double> teno_outputs(std::shared_ptr<Mesh> mesh, const BoundaryData & bd, int order,
                                  const std::string & cache, uint8_t slice_shift = teno::SLICE_SHIFT,
-                                 bool save = false) {
+                                 bool save = false, const std::string & options = "") {
     auto teno = std::make_unique<TENO>();
     teno->set_mesh(mesh);
     teno->set_boundaries(bd);
     teno->slice_shift = slice_shift;
     teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) +
-                          "\ntroubled_threshold = 0\ncache_file = \"" + cache + "\"\n"));
+                          "\ntroubled_threshold = 0\ncache_file = \"" + cache + "\"\n" + options));
     if (save) teno->save_cache();
     auto avg = cell_averages(*mesh, smooth_conservatives);
     Euler euler = Euler::from_reference(GAMMA, 1.0, 1.0, 1.0);
@@ -393,6 +393,32 @@ TEST(TENOTest, PackedStencilsAndTheirCacheDoNotDependOnTheSliceWidth) {
     expect_bitwise_equal(host, loaded_host, "loaded into host rows");
     expect_bitwise_equal(host, loaded_gpu, "loaded into 32-cell slices");
     std::filesystem::remove(cache);
+}
+
+TEST(TENOTest, SinglePrecisionCacheHalvesTheFileAndRunsThatWriteAndReadItAgree) {
+    if constexpr (sizeof(rtype) == sizeof(float)) GTEST_SKIP() << "tables are single precision already";
+    auto mesh = make_mesh("cartesian_tri", 10, 8);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    const std::string single = temp_cache("mallard_teno_cache_single.bin");
+    const std::string full = temp_cache("mallard_teno_cache_double.bin");
+    const std::string option = "cache_single_precision = true\n";
+    const auto exact = teno_outputs(mesh, bd, 4, full, teno::SLICE_SHIFT, true);
+    const auto written = teno_outputs(mesh, bd, 4, single, teno::SLICE_SHIFT, true, option);
+    const auto loaded = teno_outputs(mesh, bd, 4, single, teno::SLICE_SHIFT, true, option);
+    expect_bitwise_equal(written, loaded, "single-precision cache written, then read");
+    double max_diff = 0.0, max_value = 0.0;
+    for (size_t k = 0; k < exact.size(); k++) {
+        max_diff = std::max(max_diff, std::abs(written[k] - exact[k]));
+        max_value = std::max(max_value, std::abs(exact[k]));
+    }
+    EXPECT_GT(max_diff, 0.0);
+    EXPECT_LT(max_diff, 1e-5 * max_value);
+    EXPECT_LT(std::filesystem::file_size(single), 0.6 * std::filesystem::file_size(full));
+    // A cache in the other precision is recomputed, never reinterpreted
+    const auto exact_again = teno_outputs(mesh, bd, 4, single, teno::SLICE_SHIFT, true);
+    expect_bitwise_equal(exact, exact_again, "double run given a single-precision cache");
+    std::filesystem::remove(single);
+    std::filesystem::remove(full);
 }
 
 TEST(TENOTest, StencilCacheIsRecomputedForOtherMeshesOrOptionsAndWhenTruncated) {
