@@ -1,0 +1,69 @@
+# Premixed flame in decaying turbulence (3D build): DNS reference of #197.
+# Header with results: see the end of the validation in docs/design/les.md, section 8.3.
+
+[run]
+t_stop = 4.0e-4
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 224
+Ny = 128
+Nz = 128
+Lx = 0.007395130667567116
+Ly = 0.004225788952895495
+Lz = 0.004225788952895495
+periodic = ["y", "z"]
+
+[initialize]
+type = "restart"
+file = "flame.restart"
+
+[[boundaries]]
+name = "left"
+type = "p_out"
+p = 101325.0
+
+[[boundaries]]
+name = "right"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+convective_flux = "hybrid"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+limiter = "none"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+phase = "ohmech"
+transport = "mixture_averaged"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+fuse_half_steps = true
+
+[output]
+check_interval = 500
+
+[integrals]
+interval = 100
+budget = true
+
+[[write_data]]
+prefix = "./solut/flame"
+format = "vtu"
+time_interval = 2.5e-5
+variables = ["T", "HRR", "Q", "Y_H2", "OMEGA_H2"]
+
+[[write_data]]
+prefix = "./restart/flame"
+format = "restart"
+time_interval = 2.5e-5

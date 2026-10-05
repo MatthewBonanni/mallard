@@ -67,6 +67,7 @@ struct KineticEnergyBudget {
     rtype convective = 0.0;
     rtype viscous = 0.0;
     rtype sgs = 0.0;
+    rtype pressure_work = 0.0;  // the convective rate of a scheme without numerical dissipation
 };
 
 /**
@@ -371,6 +372,11 @@ class Solver {
         void update_upwind_sensor();
         /** @brief sum over owned cells of u . R_m - |u|^2 / 2 R_rho for R the sum of face_flux over the cell's faces. */
         rtype kinetic_energy_rate() const;
+        /**
+         * @brief Over owned cells, -u . sum_f mean(p) n_f of the interior faces (Jameson's two-point pressure
+         *        flux with cell values) plus the kinetic_energy_rate of the boundary faces' face_flux.
+         */
+        rtype pressure_work_rate() const;
 
         template <typename T_riemann_solver>
         void launch_flux_functor();

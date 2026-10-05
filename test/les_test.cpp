@@ -559,8 +559,46 @@ TEST(HybridFlux, CentralFluxChangesKineticEnergyOnlyByThePressureWork) {
         scale += double(std::abs(central->h_conservatives(c, 1)) * central->get_mesh()->h_cell_measure(c));
     }
     EXPECT_NEAR(central->kinetic_energy_budget().convective, work, precision_tol<double>(1e-12, 1e-5) * scale);
+    EXPECT_NEAR(central->kinetic_energy_budget().pressure_work, work, precision_tol<double>(1e-12, 1e-5) * scale);
     // The Riemann solver dissipates on top of it
     EXPECT_LT(upwind->kinetic_energy_budget().convective, work - 1e-3 * scale);
+}
+
+TEST(HybridFlux, BudgetPressureWorkMatchesTheSchemeWithOpenBoundaries) {
+    // An expanding flow at high pressure leaving through an outlet (a flame's
+    // burnt gas): p int div u is orders of magnitude above the dissipation, so
+    // the numerical dissipation must come from the scheme's own pressure work
+    // and leave the boundary fluxes out, or it measures the discretization
+    // error of p div u instead
+    std::ostringstream s;
+    const uint32_t n = N_DIM == 2 ? 16 : 8;
+    s << "[run]\nn_steps = 0\ncfl = 0.5\n[mesh]\ntype = \"" << MESH << "\"\nNx = " << n << "\nNy = " << n
+      << "\nLx = 1.0\nLy = 1.0\n" << (N_DIM == 3 ? "Nz = " + std::to_string(n) + "\nLz = 1.0\nperiodic = [\"y\", \"z\"]\n"
+                                                : std::string("periodic = [\"y\"]\n"))
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.5 * x\"\np = \"1000.0\"\n"
+      << (N_DIM == 3 ? "u = [\"-20.0 * x * x + 0.3 * sin(6.283185307179586 * y)\", \"0.2 * cos(6.283185307179586 * (x + z))\", "
+                       "\"0.1 * sin(6.283185307179586 * y)\"]\n"
+                     : "u = [\"-20.0 * x * x + 0.3 * sin(6.283185307179586 * y)\", \"0.2 * cos(6.283185307179586 * x)\"]\n")
+      << "[[boundaries]]\nname = \"left\"\ntype = \"p_out\"\np = 1000.0\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"symmetry\"\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\nconvective_flux = \"hybrid\"\n[numerics.hybrid]\nsensor_threshold = 1.0\n"
+      << "[numerics.face_reconstruction]\ntype = \"FO\"\n"
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[output]\ncheck_interval = 1000000\n";
+    auto central = make_solver(s.str());
+    const KineticEnergyBudget b = central->kinetic_energy_budget();
+    // p int div u from the cell gradients: about -p0 * 20, 1e4 times the kinetic-energy rates here
+    const double pi = double(central->integrate_flow_statistics()[3]);
+    const double scale = 1000.0 * 20.0;
+    EXPECT_GT(std::abs(pi), 0.25 * scale);
+    // The central flux with cell values adds no dissipation, open boundary or not
+    EXPECT_NEAR(b.pressure_work - b.convective, 0.0, precision_tol<double>(1e-11, 1e-4) * scale);
+    std::string upwind_input = s.str();
+    const std::string hybrid = "convective_flux = \"hybrid\"\n[numerics.hybrid]\nsensor_threshold = 1.0\n";
+    upwind_input.replace(upwind_input.find(hybrid), hybrid.size(), "");
+    auto upwind = make_solver(upwind_input);
+    const KineticEnergyBudget u = upwind->kinetic_energy_budget();
+    EXPECT_GT(u.pressure_work - u.convective, 1e-3 * std::abs(u.pressure_work));
 }
 
 #if Mallard_DIM == 2
