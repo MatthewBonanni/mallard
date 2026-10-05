@@ -161,6 +161,37 @@ and conserved totals are per radian of the revolved domain (multiply forces by
 mixture model, chemistry and MPI work as in planar runs; meshes cannot be
 periodic in y. Method and accuracy: `docs/design/axisymmetric.md`.
 
+## `[les]`
+
+Large-eddy simulation with an explicit subgrid-scale (SGS) model
+(`navier_stokes` only, single gases and mixtures, planar runs). The model's
+eddy viscosity `mu_t = rho nu_t` is added to the molecular viscosity, with
+`cp mu_t / Pr_t` added to the conductivity and `mu_t / Sc_t` to every
+species' diffusivity (mixtures: in the mixture-averaged form, so the
+diffusive fluxes still sum to zero). Wall faces keep the molecular fluxes. The
+eddy viscosity of each cell comes from its least-squares velocity gradient
+`g_ij = du_i/dx_j`, with the filter width `Delta = V^(1/3)` (3D) or `A^(1/2)`
+(2D) of the cell; the time step includes it. Design, choices and validation:
+[`design/les.md`](design/les.md).
+
+| Key | Description |
+|---|---|
+| `model` | `sigma` (default in 3D), `wale` (default in 2D), `vreman` or `smagorinsky`; see below |
+| `C` | Model constant; defaults 1.35 (Sigma), 0.5 (WALE), 0.07 (Vreman's `c`), 0.17 (Smagorinsky) |
+| `Pr_t` | Turbulent Prandtl number, default 0.9 |
+| `Sc_t` | Turbulent Schmidt number, default 0.9 |
+
+| `model` | `nu_t` | Zero for |
+|---|---|---|
+| `sigma` (Nicoud et al. 2011) | `(C Delta)^2 s3 (s1 - s2)(s2 - s3) / s1^2`, `s1 >= s2 >= s3` the singular values of `g` | pure shear, solid rotation, two-dimensional flows (so not allowed in 2D builds), isotropic and axisymmetric expansion; `~ y^3` at walls |
+| `wale` (Nicoud & Ducros 1999) | `(C Delta)^2 (Sd:Sd)^(3/2) / ((S:S)^(5/2) + (Sd:Sd)^(5/4))`, `Sd` the traceless symmetric part of `g^2` | pure shear, isotropic expansion; `~ y^3` at walls |
+| `vreman` (Vreman 2004) | `c Delta^2 sqrt(B / (g:g))`, `B` the second invariant of `g g^T` | pure shear |
+| `smagorinsky` (Smagorinsky 1963) | `(C Delta)^2 sqrt(2 S:S)` | solid rotation (no wall damping: for comparisons only) |
+
+`MU_T` (output variable) is the eddy viscosity. `[integrals] budget = true`
+measures how much of the kinetic-energy dissipation comes from the model and
+how much from the scheme.
+
 ## `[initialize]`
 
 | Key | Description |
@@ -318,6 +349,7 @@ rate is `-dE/dt` and its viscous part `2 mu * enstrophy / rho0`.
 |---|---|
 | `interval` | Every this many steps, default 1 |
 | `file` | Output file, default `integrals.csv` |
+| `budget` | `true` adds the kinetic-energy budget (planar runs): `ke_rate_convective`, `ke_rate_viscous` and `ke_rate_sgs`, the rates of change of the resolved kinetic energy `sum V rho |u|^2 / 2` caused by the convective, molecular viscous and SGS fluxes of the current state (each `sum V (u . R_m - |u|^2 / 2 R_rho)` over that part `R` of the right-hand side), and `eps_numerical = pressure_dilatation - ke_rate_convective`, the scheme's dissipation of kinetic energy (the convective terms of the exact equations change the kinetic energy of a periodic or walled domain only by the pressure work). `-ke_rate_viscous` and `-ke_rate_sgs` are the molecular and SGS dissipation. Costs one extra right-hand side per row and leaves the solution unchanged. Default `false` |
 
 ## `[statistics]`
 
