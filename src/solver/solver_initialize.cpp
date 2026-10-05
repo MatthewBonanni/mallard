@@ -285,18 +285,76 @@ void cell_average_2d(const Mesh & mesh, const TriangleDunavant & quad, double we
 }
 
 /**
- * @brief Average of f over a 3D cell: each tetrahedron of the cell is mapped
- *        from the unit cube (Duffy) and integrated with a 4^3-point Gauss rule
- *        on each of n_sub^3 sub-cubes.
+ * @brief Composite rule on the reference tetrahedron (0,0,0), (1,0,0),
+ *        (0,1,0), (0,0,1): the tetrahedron is split uniformly into n_sub^3
+ *        sub-tetrahedra (corner tetrahedra, octahedra split in four, inverted
+ *        tetrahedra), each carrying the symmetric 14-point degree-5 rule
+ *        (positive weights, interior points). Weights sum to 1/6.
+ */
+struct TetrahedronRule {
+    std::vector<std::array<double, 3>> points;
+    std::vector<double> weights;
+
+    explicit TetrahedronRule(uint32_t n_sub) {
+        // Barycentric points (orbits of (a, a, a, 1 - 3a) and (b, b, 1/2 - b, 1/2 - b)) and weights
+        const double a[2] = {0.09273525031089122640, 0.31088591926330060980};
+        const double wa[2] = {0.01224884051939365826, 0.01878132095300264180};
+        const double b = 0.04550370412564964949, wb = 0.00709100346284691107;
+        std::vector<std::array<double, 4>> bary;
+        std::vector<double> w;
+        for (int i = 0; i < 2; i++) {
+            for (int k = 0; k < 4; k++) {
+                std::array<double, 4> l;
+                l.fill(a[i]);
+                l[k] = 1.0 - 3.0 * a[i];
+                bary.push_back(l);
+                w.push_back(wa[i]);
+            }
+        }
+        for (int j = 0; j < 4; j++) {
+            for (int k = j + 1; k < 4; k++) {
+                std::array<double, 4> l;
+                l.fill(0.5 - b);
+                l[j] = l[k] = b;
+                bary.push_back(l);
+                w.push_back(wb);
+            }
+        }
+        using Lattice = std::array<uint32_t, 3>;
+        auto add = [&](const Lattice & p0, const Lattice & p1, const Lattice & p2, const Lattice & p3) {
+            const Lattice * v[4] = {&p0, &p1, &p2, &p3};
+            for (size_t q = 0; q < w.size(); q++) {
+                std::array<double, 3> x = {0.0, 0.0, 0.0};
+                for (int k = 0; k < 4; k++) {
+                    for (int d = 0; d < 3; d++) x[d] += bary[q][k] * (*v[k])[d];
+                }
+                for (double & xd : x) xd /= n_sub;
+                points.push_back(x);
+                weights.push_back(w[q] / (n_sub * n_sub * n_sub));
+            }
+        };
+        for (uint32_t i = 0; i < n_sub; i++) {
+            for (uint32_t j = 0; i + j < n_sub; j++) {
+                for (uint32_t k = 0; i + j + k < n_sub; k++) {
+                    add({i, j, k}, {i + 1, j, k}, {i, j + 1, k}, {i, j, k + 1});
+                    if (i + j + k + 2 > n_sub) continue;
+                    // Octahedron around the diagonal (i + 1, j, k) - (i, j + 1, k + 1)
+                    const Lattice d0 = {i + 1, j, k}, d1 = {i, j + 1, k + 1};
+                    const Lattice ring[4] = {{i, j + 1, k}, {i, j, k + 1}, {i + 1, j, k + 1}, {i + 1, j + 1, k}};
+                    for (int r = 0; r < 4; r++) add(d0, d1, ring[r], ring[(r + 1) % 4]);
+                    if (i + j + k + 3 > n_sub) continue;
+                    add({i + 1, j + 1, k}, {i + 1, j, k + 1}, {i, j + 1, k + 1}, {i + 1, j + 1, k + 1});
+                }
+            }
+        }
+    }
+};
+
+/**
+ * @brief Average of f over a 3D cell: rule on each tetrahedron of the cell.
  */
 template <typename F>
-void cell_average_3d(const Mesh & mesh, uint32_t n_sub, uint32_t i_cell, PointState & s, const F & f) {
-    // 4-point Gauss-Legendre rule on [0, 1]
-    const double g[4] = {0.5 - 0.5 * 0.8611363115940526, 0.5 - 0.5 * 0.3399810435848563,
-                         0.5 + 0.5 * 0.3399810435848563, 0.5 + 0.5 * 0.8611363115940526};
-    const double gw[4] = {0.5 * 0.3478548451374538, 0.5 * 0.6521451548625461,
-                          0.5 * 0.6521451548625461, 0.5 * 0.3478548451374538};
-    const double h = 1.0 / n_sub;
+void cell_average_3d(const Mesh & mesh, const TetrahedronRule & rule, uint32_t i_cell, PointState & s, const F & f) {
     mesh.h_cell_tetrahedra(i_cell, s.tets);
     std::fill(s.sum.begin(), s.sum.end(), 0.0);
     double vol_sum = 0.0;
@@ -305,31 +363,17 @@ void cell_average_3d(const Mesh & mesh, uint32_t n_sub, uint32_t i_cell, PointSt
         for (int k = 0; k < 3; k++) {
             for (int d = 0; d < 3; d++) e[k][d] = tet[k + 1][d] - tet[0][d];
         }
-        const double det = e[0][0] * (e[1][1] * e[2][2] - e[1][2] * e[2][1]) -
-                           e[0][1] * (e[1][0] * e[2][2] - e[1][2] * e[2][0]) +
-                           e[0][2] * (e[1][0] * e[2][1] - e[1][1] * e[2][0]);
-        const double six_vol = std::abs(det);
-        // Duffy map of the unit cube: barycentric (u, v (1 - u), w (1 - u) (1 - v))
-        for (uint32_t a = 0; a < n_sub; a++) {
-        for (uint32_t b = 0; b < n_sub; b++) {
-        for (uint32_t c = 0; c < n_sub; c++) {
-            for (int qa = 0; qa < 4; qa++) {
-            for (int qb = 0; qb < 4; qb++) {
-            for (int qc = 0; qc < 4; qc++) {
-                const double u = (a + g[qa]) * h, v = (b + g[qb]) * h, w = (c + g[qc]) * h;
-                const double l1 = u, l2 = v * (1.0 - u), l3 = w * (1.0 - u) * (1.0 - v);
-                const double weight = gw[qa] * gw[qb] * gw[qc] * h * h * h *
-                                      six_vol * (1.0 - u) * (1.0 - u) * (1.0 - v);
-                double p[3];
-                for (int d = 0; d < 3; d++) p[d] = tet[0][d] + l1 * e[0][d] + l2 * e[1][d] + l3 * e[2][d];
-                f(s, p[0], p[1], p[2]);
-                for (size_t i = 0; i < s.sum.size(); i++) s.sum[i] += weight * double(s.cons[i]);
-                vol_sum += weight;
-            }
-            }
-            }
-        }
-        }
+        const double six_vol = std::abs(e[0][0] * (e[1][1] * e[2][2] - e[1][2] * e[2][1]) -
+                                        e[0][1] * (e[1][0] * e[2][2] - e[1][2] * e[2][0]) +
+                                        e[0][2] * (e[1][0] * e[2][1] - e[1][1] * e[2][0]));
+        for (size_t q = 0; q < rule.weights.size(); q++) {
+            const std::array<double, 3> & r = rule.points[q];
+            double p[3];
+            for (int d = 0; d < 3; d++) p[d] = tet[0][d] + r[0] * e[0][d] + r[1] * e[1][d] + r[2] * e[2][d];
+            f(s, p[0], p[1], p[2]);
+            const double weight = rule.weights[q] * six_vol;
+            for (size_t i = 0; i < s.sum.size(); i++) s.sum[i] += weight * double(s.cons[i]);
+            vol_sum += weight;
         }
     }
     for (double & v : s.sum) v /= vol_sum;
@@ -342,8 +386,7 @@ void cell_average_3d(const Mesh & mesh, uint32_t n_sub, uint32_t i_cell, PointSt
  * cell into simplices and applying a composite rule on each: in 2D, a fan of
  * triangles, each subdivided into n_sub^2 sub-triangles with a degree-5
  * Dunavant rule; in 3D, the tetrahedra of Mesh::h_cell_tetrahedra, each
- * mapped from the unit cube (Duffy) and integrated with a 4^3-point Gauss
- * rule on each of n_sub^3 sub-cubes (exact to degree 5). This resolves
+ * subdivided into n_sub^3 sub-tetrahedra with a 14-point degree-5 rule. This resolves
  * discontinuous initial data that do not align with the mesh and is
  * high-order accurate for smooth data. Cells are averaged in parallel on the
  * host, each thread with its own compiled expressions; every cell's sum runs
@@ -361,7 +404,7 @@ void Solver::init_solution_analytical() {
     if (rho_in + p_in + T_in != 2) {
         throw std::runtime_error("Exactly two of rho, p, and T must be specified for initialization: analytical.");
     }
-    const uint32_t n_sub = toml::find_or<uint32_t>(input, "initialize", "n_subdivisions", (N_DIM == 2) ? 4 : 2);
+    const uint32_t n_sub = toml::find_or<uint32_t>(input, "initialize", "n_subdivisions", (N_DIM == 2) ? 4 : 1);
 
     InitialStateText text;
     text.u = toml::find<std::vector<std::string>>(input, "initialize", "u");
@@ -451,6 +494,7 @@ void Solver::init_solution_analytical() {
     std::vector<std::unique_ptr<PointState>> states;
     for (int32_t i = 0; i < token.size(); i++) states.push_back(std::make_unique<PointState>(text, n_species, n_vars));
 
+    const TetrahedronRule tet_rule(N_DIM == 3 ? n_sub : 1);
     const TriangleDunavant quad(5);
     double weight_sum = 0.0;
     for (uint32_t q = 0; q < quad.h_weights.extent(0); q++) weight_sum += double(quad.h_weights(q));
@@ -466,7 +510,7 @@ void Solver::init_solution_analytical() {
         PointState & s = *states[id];
         try {
             if constexpr (N_DIM == 3) {
-                cell_average_3d(*mesh, n_sub, i_cell, s, point_conservatives);
+                cell_average_3d(*mesh, tet_rule, i_cell, s, point_conservatives);
             } else {
                 cell_average_2d(*mesh, quad, weight_sum, n_sub, i_cell, s, point_conservatives);
             }

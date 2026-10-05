@@ -267,23 +267,26 @@ TEST(Solver3DValidation, SphericalBlastIsSymmetricUnderAxisPermutation) {
 }
 
 TEST(Solver3DValidation, AnalyticalInitializationIntegratesPolynomialsExactly) {
-    // Degree-5 rule: the domain integral of a cubic is exact on every cell type,
-    // and on hexahedra so is each cell average
+    // Degree-5 rule: the domain integral of a quintic is exact on every cell
+    // type, and on hexahedra so is each cell average, also on subdivided
+    // tetrahedra (3: corner and inverted tetrahedra and octahedra)
     for (const std::string & mesh : MESHES) {
+    for (const int n_sub : {1, 3}) {
         Case3D c;
         c.mesh = mesh;
         c.n[0] = 2;
         c.n[1] = 3;
         c.n[2] = 2;
         c.set_all_bcs("type = \"symmetry\"\n");
-        c.init = "type = \"analytical\"\nrho = \"1 + x^2 * y + z^3\"\nu = [\"0\", \"0\", \"0\"]\np = \"1\"\n";
+        c.init = "type = \"analytical\"\nn_subdivisions = " + std::to_string(n_sub) +
+                 "\nrho = \"1 + x^2 * y + z^3 + x * y^2 * z^2 + y^5\"\nu = [\"0\", \"0\", \"0\"]\np = \"1\"\n";
         auto solver = init_case(c);
         solver->copy_device_to_host();
         auto m = solver->get_mesh();
         double total = 0.0;
         for (uint32_t i = 0; i < m->n_cells; i++) total += double(solver->h_conservatives(i, 0)) * double(m->h_cell_volume(i));
-        // int_0^1 int_0^1 int_0^1 (1 + x^2 y + z^3) = 1 + 1/6 + 1/4
-        EXPECT_NEAR(total, 1.0 + 1.0 / 6.0 + 0.25, roundoff(1e-12)) << mesh;
+        // int_0^1 int_0^1 int_0^1 (1 + x^2 y + z^3 + x y^2 z^2 + y^5) = 1 + 1/6 + 1/4 + 1/18 + 1/6
+        EXPECT_NEAR(total, 1.0 + 1.0 / 6.0 + 0.25 + 1.0 / 18.0 + 1.0 / 6.0, roundoff(1e-12)) << mesh << " " << n_sub;
         if (mesh != "cartesian") continue;
         for (uint32_t i = 0; i < m->n_cells; i++) {
             double lo[3] = {1e30, 1e30, 1e30}, hi[3] = {-1e30, -1e30, -1e30};
@@ -296,9 +299,11 @@ TEST(Solver3DValidation, AnalyticalInitializationIntegratesPolynomialsExactly) {
             auto mean_pow = [&](int d, int p) {
                 return (std::pow(hi[d], p + 1) - std::pow(lo[d], p + 1)) / ((p + 1) * (hi[d] - lo[d]));
             };
-            const double exact = 1.0 + mean_pow(0, 2) * mean_pow(1, 1) + mean_pow(2, 3);
-            EXPECT_NEAR(solver->h_conservatives(i, 0), exact, roundoff(1e-12)) << "cell " << i;
+            const double exact = 1.0 + mean_pow(0, 2) * mean_pow(1, 1) + mean_pow(2, 3) +
+                                 mean_pow(0, 1) * mean_pow(1, 2) * mean_pow(2, 2) + mean_pow(1, 5);
+            EXPECT_NEAR(solver->h_conservatives(i, 0), exact, roundoff(1e-12)) << "cell " << i << " " << n_sub;
         }
+    }
     }
 }
 
