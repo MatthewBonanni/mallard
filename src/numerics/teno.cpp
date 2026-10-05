@@ -1743,24 +1743,38 @@ void TENO::compute_stencils_and_matrices_3d() {
             }
         };
         const double inside_tol = -precision_tol<double>(1e-12, 1e-5) * h;
-        auto inside_any = [&](const std::vector<Visit> & cells, const Point3 & p) {
-            for (size_t c = 0; c < cells.size(); c++) {
-                Point3 q;
-                for (int a = 0; a < 3; a++) q[a] = p[a] - cells[c].t[a];
-                const std::array<double, 6> & box = boxes[cells[c].cell];
-                if (q[0] < box[0] || q[1] < box[1] || q[2] < box[2] || q[0] > box[3] || q[1] > box[4] || q[2] > box[5]) {
-                    continue;
-                }
-                bool inside = true;
-                for (uint32_t k = planes_begin[c]; k < planes_begin[c + 1] && inside; k++) {
-                    const FacePlane & fp = face_planes[k];
-                    double d = 0.0;
-                    for (int a = 0; a < 3; a++) d += (q[a] - fp.x[a]) * fp.n[a];
-                    inside = !(d > inside_tol * fp.area);
-                }
-                if (inside) return true;
+        auto inside_cell = [&](const std::vector<Visit> & cells, const size_t c, const Point3 & p) {
+            Point3 q;
+            for (int a = 0; a < 3; a++) q[a] = p[a] - cells[c].t[a];
+            const std::array<double, 6> & box = boxes[cells[c].cell];
+            if (q[0] < box[0] || q[1] < box[1] || q[2] < box[2] || q[0] > box[3] || q[1] > box[4] || q[2] > box[5]) {
+                return false;
             }
-            return false;
+            bool inside = true;
+            for (uint32_t k = planes_begin[c]; k < planes_begin[c + 1] && inside; k++) {
+                const FacePlane & fp = face_planes[k];
+                double d = 0.0;
+                for (int a = 0; a < 3; a++) d += (q[a] - fp.x[a]) * fp.n[a];
+                inside = !(d > inside_tol * fp.area);
+            }
+            return inside;
+        };
+        // The cells by how far their boxes reach across the plane through m
+        // with unit normal n, farthest first: a point that far beyond the plane
+        // can only lie in the cells reaching at least as far
+        auto by_reach = [&](const std::vector<Visit> & cells, const Point3 & n, const Point3 & m) {
+            std::vector<std::pair<double, uint32_t>> order(cells.size());
+            for (size_t c = 0; c < cells.size(); c++) {
+                const std::array<double, 6> & box = boxes[cells[c].cell];
+                double reach = 0.0;
+                for (int a = 0; a < 3; a++) {
+                    if (n[a] == 0.0) continue;
+                    reach += n[a] * ((n[a] > 0.0 ? box[3 + a] : box[a]) + cells[c].t[a] - m[a]);
+                }
+                order[c] = {reach, static_cast<uint32_t>(c)};
+            }
+            std::sort(order.begin(), order.end(), [](const auto & a, const auto & b) { return a.first > b.first; });
+            return order;
         };
 
         // On thin cells, physical distance takes the whole wall-normal column
@@ -1833,16 +1847,32 @@ void TENO::compute_stencils_and_matrices_3d() {
                     if (!known) match->faces.push_back(pf);
                 }
             }
-            if (!planes.empty()) tabulate_face_planes(cells);
+            std::vector<std::vector<std::pair<double, uint32_t>>> reach(planes.size());
+            if (!planes.empty()) {
+                tabulate_face_planes(cells);
+                for (size_t k = 0; k < planes.size(); k++) reach[k] = by_reach(cells, planes[k].n, planes[k].faces[0].x);
+            }
             for (const Visit & v : cells) {
                 const uint32_t c = v.cell;
                 Point3 xc;
                 for (int d = 0; d < 3; d++) xc[d] = double(mesh->h_cell_coords(c, d)) + v.t[d];
                 if (!(c == i && v.lattice == zero)) entries.push_back(Entry{c, -1, xc, v.lattice, v.t, zero, origin});
-                for (const Plane & plane : planes) {
+                for (size_t k = 0; k < planes.size(); k++) {
+                    const Plane & plane = planes[k];
                     const PlaneFace & first = plane.faces[0];
                     Entry e{c, first.face, mirror(first.face, first.x, xc), v.lattice, v.t, first.lattice, first.x};
-                    if (inside_any(cells, e.x)) continue;
+                    // Images that land inside the domain (non-convex boundaries) are not ghosts
+                    double beyond = 0.0, extent = h;
+                    for (int a = 0; a < 3; a++) {
+                        beyond += plane.n[a] * (e.x[a] - first.x[a]);
+                        extent += std::abs(first.x[a]);
+                    }
+                    bool inside = false;
+                    for (const auto & [cell_reach, other] : reach[k]) {
+                        if (cell_reach < beyond - 1e-8 * extent || inside) break;
+                        inside = inside_cell(cells, other, e.x);
+                    }
+                    if (inside) continue;
                     double best = std::numeric_limits<double>::max();
                     for (const PlaneFace & pf : plane.faces) {
                         double d2 = 0.0;
