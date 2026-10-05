@@ -55,7 +55,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - `MallardReactor`, a 0D reactor, and Python tools for plotting, animation and HDF5 output
 
 **Validation and testing**
-- 28 [examples](examples) against exact solutions, theory, DNS or Cantera, e.g.:
+- 29 [examples](examples) against exact solutions, theory, DNS or Cantera, e.g.:
   - Sphere wake at Re = 300: Strouhal number and drag within 3% and 2% of Johnson & Patel
   - Compressible isotropic turbulence: enstrophy within 2.4% of the filtered DNS of Johnsen et al.
   - CJ detonation speed within 0.01%; H2/air flame speeds within 0.81% of Cantera from φ = 0.6 to 1.4
