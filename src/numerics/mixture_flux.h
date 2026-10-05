@@ -123,7 +123,9 @@ struct MixtureFluxFunctor {
  *        sides of the face, so pressure and velocity stay exactly uniform
  *        across contacts between different gases. Mass and momentum use the
  *        mean of the two sides' fluxes, which stays conservative and equals
- *        both at such contacts. face_flux holds side 0's energy flux,
+ *        both at such contacts: both estimate the wave speeds with each
+ *        side's own [gamma, e0], which makes their mass fluxes there agree
+ *        for every solver, HLL and Rusanov included. face_flux holds side 0's energy flux,
  *        face_energy_1 side 1's (both as the rate of change of side 0).
  */
 template <typename T_riemann_solver>
@@ -190,9 +192,9 @@ struct MixtureDoubleFluxFunctor {
                 }
             }
             rtype F_0[N_CONSERVATIVE], F_1[N_CONSERVATIVE];
-            T_riemann_solver::calc_flux(F_0, n_unit, W_l, W_r, th_0, th_0);
+            T_riemann_solver::calc_flux(F_0, n_unit, W_l, W_r, th_0, riemann::SideThermo(th_0, th_1));
             if (c1 >= 0) {
-                T_riemann_solver::calc_flux(F_1, n_unit, W_l, W_r, th_1, th_1);
+                T_riemann_solver::calc_flux(F_1, n_unit, W_l, W_r, riemann::SideThermo(th_1, th_0), th_1);
             } else {
                 FOR_I_CONSERVATIVE F_1[i] = F_0[i];
             }
