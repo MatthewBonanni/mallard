@@ -1,0 +1,85 @@
+description: |-
+  Non-reacting helium / air (N2, O2) mixture for shock-bubble runs. Assembled with
+  Cantera 3.2.0 from its data files: HE (ATcT thermo, transport) from
+  example_data/ammonia-CO-H2-Alzueta-2023.yaml, N2 and O2 (thermo, transport) from
+  h2o2.yaml (GRI-Mech 3.0). No reactions.
+generator: YamlWriter
+cantera-version: 3.2.0
+git-commit: 4a8358e
+date: Sun Oct  4 18:47:11 2026
+phases:
+  - name: he_air
+    thermo: ideal-gas
+    elements: [He, N, O]
+    species: [HE, N2, O2]
+    kinetics: bulk
+    reactions: none
+    transport: mixture-averaged
+    state:
+      T: 1.0e-03
+      density: 1.0e-03
+      Y: {HE: 1.0}
+species:
+  - name: HE
+    composition: {He: 1.0}
+    thermo:
+      model: NASA7
+      temperature-ranges: [200.0, 1000.0, 6000.0]
+      data:
+        - [2.49976293, 1.01013432e-06, -8.24578465e-10, -6.85983306e-13,
+        7.24751856e-16, -745.340917, 0.929800315]
+        - [2.49985609, 2.19365392e-07, -1.07525085e-10, 2.07198041e-14,
+        -1.39358612e-18, -745.309155, 0.929535014]
+      note: |
+        ATcT3E
+        He <g> ATcT ver. 1.122, DHf298 = 0.000 ?? 0.000 kJ/mol - fit JAN17
+    transport:
+      model: gas
+      geometry: atom
+      diameter: 2.576
+      well-depth: 10.2
+      note: "*"
+  - name: N2
+    composition: {N: 2.0}
+    thermo:
+      model: NASA7
+      temperature-ranges: [300.0, 1000.0, 5000.0]
+      data:
+        - [3.298677, 1.4082404e-03, -3.963222e-06, 5.641515e-09, -2.444854e-12,
+        -1020.8999, 3.950372]
+        - [2.92664, 1.4879768e-03, -5.68476e-07, 1.0097038e-10, -6.753351e-15,
+        -922.7977, 5.980528]
+      note: '121286'
+    transport:
+      model: gas
+      geometry: linear
+      diameter: 3.621
+      well-depth: 97.53
+      polarizability: 1.76
+      rotational-relaxation: 4.0
+    equation-of-state:
+      model: Redlich-Kwong
+      a: 1.55976e+12
+      b: 26.81724983
+  - name: O2
+    composition: {O: 2.0}
+    thermo:
+      model: NASA7
+      temperature-ranges: [200.0, 1000.0, 3500.0]
+      data:
+        - [3.78245636, -2.99673416e-03, 9.84730201e-06, -9.68129509e-09,
+        3.24372837e-12, -1063.94356, 3.65767573]
+        - [3.28253784, 1.48308754e-03, -7.57966669e-07, 2.09470555e-10,
+        -2.16717794e-14, -1088.45772, 5.45323129]
+      note: TPIS89
+    transport:
+      model: gas
+      geometry: linear
+      diameter: 3.458
+      well-depth: 107.4
+      polarizability: 1.6
+      rotational-relaxation: 3.8
+    equation-of-state:
+      model: Redlich-Kwong
+      a: 1.74102e+12
+      b: 22.08100907

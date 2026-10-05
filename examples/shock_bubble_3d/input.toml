@@ -1,0 +1,131 @@
+# Mach 1.25 shock on a helium bubble in air (3D build), after the experiment
+# of Haas & Sturtevant (J. Fluid Mech. 181:41, 1987, doi:10.1017/
+# S0022112087002003): a soap-film bubble of helium contaminated with 28% air
+# by mass (sound speed 872 m/s; he_air.yaml gives 871.5 m/s), 4.5 cm across,
+# in the 8.9 cm square test section of a shock tube. The shock passes, the
+# refracted wave runs ahead inside the fast helium, baroclinic vorticity
+# rolls the bubble into a kidney shape, an air jet pierces it along the axis
+# and a vortex ring forms and carries the helium downstream.
+#
+# Navier-Stokes with mixture-averaged transport, resolved at a lower Reynolds
+# number than the experiment's: the bubble is D = 0.18 mm, so
+# Re = rho1 u_p D / mu1 = 1.5e3 (u_p = 129.7 m/s behind the shock, air at
+# 295 K, 1 atm) instead of 3e5, with the same gases, Mach number and shock
+# tube in units of D (x and t scale with D, velocities do not). Helium
+# diffuses fast (Peclet number u_p D / D_He about 190), so by 1 ms the
+# helium mixes down to Y_HE = 0.25 at most; at 3e5 it stays nearly pure.
+# 128 cells per D (dx = D/128 = 1.9 Kolmogorov scales estimated as
+# D Re^(-3/4)); the interface starts as a tanh profile 3 cells thick (D/43)
+# and the shock as a jump; walls are slip (symmetry) planes, so no wall
+# boundary layers. A quarter of the tube (symmetry planes y = 0 and z = 0):
+# 704 x 127 x 127 = 11.4M hexahedra over 5.5 D x 0.99 D x 0.99 D, the shock
+# 0.1 D ahead of the bubble, the post-shock state imposed at the left (upt,
+# 1.2 D upstream of the bubble's center) and a transmissive right end. MUSCL,
+# HLLC, conservative (double_flux = false: at a 3-cell interface it removes
+# no visible pressure oscillation and makes the mixing layer 3 K too cold).
+#
+# Make the initial state and run (writes bubble.json, used by the tools):
+#   python ../../tools/shock_bubble.py init input.toml init.restart --d 1.8e-4 --xb 2.16e-4
+#   mpirun -n 4 ../../build3d/src/Mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
+#   python ../../tools/shock_bubble.py frames input.toml restart frames
+#   python ../../tools/shock_bubble.py compare input.toml probe_axis.csv frames --png xt.png
+#   python ../../tools/animate_shock_bubble.py input.toml frames probe_axis.csv shock_bubble_3d
+#
+# Results (experiment time, from the shock's arrival at the bubble, to 1 ms):
+# velocities (m/s) from straight-line fits to the axis x-t diagram (probe)
+# and to the frames, against table 2 of Haas & Sturtevant (sphere,
+# Ms = 1.25; 10% error, 30% for V_di):
+#
+#                                         this input   H&S
+#   refracted shock in the helium              961     960
+#   transmitted shock                          359     365
+#   vortex ring (0.4-1 ms)                     178     165
+#   downstream face, late (0.4-1 ms)           166     165
+#   downstream interface on the axis           173     145
+#   upstream interface, first 0.04 ms          236     190
+#   air jet on the axis (0.1 ms to piercing)   289     335
+#   upstream face, late (0.4-1 ms)             204     125
+#
+# The waves, the ring and the downstream face agree within the measurement
+# error. At 96 cells per D (same interface thickness in meters) every one of
+# these velocities is within 1.2% of the values above. The upstream interface accelerates into the jet within the first
+# 0.04 ms here; the jet pierces the helium at 0.34 ms; the late upstream face
+# is the trailing helium, which at this Reynolds and Peclet number is drawn
+# into the ring and moves with it rather than drifting at u_p.
+#
+# Cost: 52,091 steps in 3 h 22 min on four A100s (49M cells/s).
+
+[run]
+t_stop = 4.0e-6
+cfl = 0.25
+
+[mesh]
+type = "cartesian"
+Nx = 704
+Ny = 127
+Nz = 127
+Lx = 9.9e-4
+Ly = 1.7859375e-4
+Lz = 1.7859375e-4
+
+[initialize]
+type = "restart"
+file = "init.restart"
+
+[[boundaries]]
+name = "left"
+type = "upt"
+u = [129.682, 0.0, 0.0]
+p = 167966.887
+T = 341.939
+Y = { N2 = 0.767, O2 = 0.233 }
+
+[[boundaries]]
+name = "right"
+type = "extrapolation"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "back"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "front"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+double_flux = false
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../mechanisms/he_air.yaml"
+transport = "mixture_averaged"
+
+[output]
+check_interval = 100
+
+[[probes]]
+name = "axis"
+variables = ["RHO", "U_X", "P", "Y_HE"]
+start = [7.03125e-7, 1.0e-9, 1.0e-9]
+end = [9.89296875e-4, 1.0e-9, 1.0e-9]
+n_points = 704
+interval = 50
+
+[[write_data]]
+prefix = "./restart/bubble"
+format = "restart"
+time_interval = 4.0e-8
