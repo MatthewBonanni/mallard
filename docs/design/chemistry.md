@@ -1355,9 +1355,9 @@ V10 (`examples/counterflow_diffusion`, `tools/counterflow_reference.py`,
 `counterflow_setup.py`, `plot_counterflow.py`): H2/N2 (1:3) against air at
 300 K and 1 atm, nozzles 10 mm apart, momentum-balanced, against Cantera's
 `CounterflowDiffusionFlame` swept in strain up to extinction. Cantera's is
-the axisymmetric similarity solution, and Mallard has neither an
-axisymmetric formulation nor an exact planar equivalent of it, so the run
-is 3D: a quarter of two opposed round plug jets (r < 5 mm) with N2 coflows,
+the axisymmetric similarity solution, which has no exact planar
+equivalent; the case predates Mallard's axisymmetric formulation
+(`axisymmetric.md`), so the run is 3D: a quarter of two opposed round plug jets (r < 5 mm) with N2 coflows,
 symmetry planes and side pressure outlets, 15 cells per FWHM of the
 temperature profile along the axis, started from Cantera's solution. Strain
 is measured on the stagnation line in both, as the local strain rate of the

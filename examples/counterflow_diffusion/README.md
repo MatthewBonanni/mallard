@@ -7,12 +7,13 @@ transport.
 
 Cantera solves the axisymmetric stagnation-flow similarity problem: plug
 flows from two infinitely wide nozzles, the radial velocity `r V(x)`, and
-everything else a function of `x` only. Mallard has no axisymmetric
-formulation, and a planar run is a different flow (planar stagnation flow
-has another relation between nozzle velocity, strain and flame, with no
-exact rescaling onto the axisymmetric one), so the run is 3D: a quarter of
-the two jets, with symmetry planes `y = 0` and `z = 0`, plug jets (`upt`)
-at `r < 5 mm` surrounded by N2 coflows at the same velocity so that each
+everything else a function of `x` only. A planar run is a different flow
+(planar stagnation flow has another relation between nozzle velocity,
+strain and flame, with no exact rescaling onto the axisymmetric one), and
+this case predates Mallard's axisymmetric formulation
+(`docs/design/axisymmetric.md`, a 2D cross-check left for later), so the run
+is 3D: a quarter of the two jets, with symmetry planes `y = 0` and `z = 0`,
+plug jets (`upt`) at `r < 5 mm` surrounded by N2 coflows at the same velocity so that each
 whole nozzle plane is an inlet, and pressure outlets at `y, z = 7.5 mm`.
 The jets are momentum-balanced (`rho_f U_f^2 = rho_o U_o^2`). A finite jet
 only approximates the similarity solution, so the comparison is made where
