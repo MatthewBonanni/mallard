@@ -21,21 +21,80 @@
 /**
  * @brief Viscous traction tau . n of a Newtonian fluid under Stokes' hypothesis,
  *        tau = mu (grad u + grad u^T - 2/3 div u I), with g[k][i] = d u_k / d x_i.
+ *        Axisymmetric flows add the hoop part u_r / r of the divergence.
  */
 KOKKOS_INLINE_FUNCTION
-void viscous_traction(const rtype mu, const rtype g[][N_DIM], const rtype * n, rtype * tau_n) {
+void viscous_traction(const rtype mu, const rtype g[][N_DIM], const rtype * n, rtype * tau_n,
+                      const rtype hoop_divergence = 0.0_r) {
     rtype div = 0.0;
     if constexpr (N_DIM == 2) {
         div = g[0][0] + g[1][1];
     } else {
         div = g[0][0] + g[1][1] + g[2][2];
     }
+    if (hoop_divergence != 0.0_r) div += hoop_divergence;
     rtype tau[N_DIM][N_DIM];
     FOR_I_DIM {
         for (uint8_t j = 0; j < N_DIM; j++) tau[i][j] = mu * (g[i][j] + g[j][i]);
         tau[i][i] = mu * (2.0_r * g[i][i] - 2.0_r / 3.0_r * div);
     }
     FOR_I_DIM tau_n[i] = dot<N_DIM>(tau[i], n);
+}
+
+/**
+ * @brief u_r / r at radius r for velocity u and gradient g (g[k][i] = d u_k /
+ *        d x_i), with r = y: its limit d u_r / d r on the axis.
+ */
+KOKKOS_INLINE_FUNCTION
+rtype hoop_divergence(const rtype r, const rtype * u, const rtype g[][N_DIM]) {
+    return r > 0.0_r ? u[1] / r : g[1][1];
+}
+
+/**
+ * @brief Axisymmetric meshes: jump from cell c0 to c1 of the cells' r-weighted
+ *        variance along d (Mesh::cell_covariance), divided by |d|^2.
+ */
+KOKKOS_INLINE_FUNCTION
+rtype variance_jump(const Kokkos::View<rtype *[3]> & covariance, const int32_t c0, const int32_t c1,
+                    const rtype * d) {
+    if constexpr (N_DIM == 2) {
+        auto var = [&](const int32_t c) {
+            return covariance(c, 0) * d[0] * d[0] + 2.0_r * covariance(c, 1) * d[0] * d[1] +
+                   covariance(c, 2) * d[1] * d[1];
+        };
+        return (var(c1) - var(c0)) / dot<N_DIM>(d, d);
+    } else {
+        (void)covariance;
+        (void)c0;
+        (void)c1;
+        (void)d;
+        return 0.0_r;
+    }
+}
+
+/**
+ * @brief Part of the jump of two cell averages that comes from the cells'
+ *        different spreads (variance jump dvar along d, see variance_jump): an
+ *        average exceeds the value at the center by q_ss var / 2, with the
+ *        second derivative q_ss along d from the cell gradients g0, g1.
+ */
+KOKKOS_INLINE_FUNCTION
+rtype mean_offset(const rtype * g0, const rtype * g1, const rtype * d, const rtype dvar) {
+    rtype dg[N_DIM];
+    FOR_I_DIM dg[i] = g1[i] - g0[i];
+    return 0.5_r * dot<N_DIM>(dg, d) / dot<N_DIM>(d, d) * dvar;
+}
+
+/**
+ * @brief Fraction along d (from the center of cell c0 to that of its
+ *        neighbor) of the projection of face f's center.
+ */
+KOKKOS_INLINE_FUNCTION
+rtype face_fraction(const Kokkos::View<rtype *[N_DIM]> & face_coords, const Kokkos::View<rtype *[N_DIM]> & cell_coords,
+                    const uint32_t f, const int32_t c0, const rtype * d) {
+    rtype x_f[N_DIM];
+    FOR_I_DIM x_f[i] = face_coords(f, i) - cell_coords(c0, i);
+    return dot<N_DIM>(x_f, d) / dot<N_DIM>(d, d);
 }
 
 /**
@@ -71,6 +130,8 @@ struct ViscousFluxFunctor {
     BoundaryData boundaries;
     Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
     Euler physics;
+    bool axisymmetric = false;            // face_area is then the revolved area
+    Kokkos::View<rtype *[3]> covariance;  // axisymmetric: Mesh::cell_covariance
 
     static constexpr uint8_t NQ = N_DIM + 1;  // [u, T]
 
@@ -108,13 +169,24 @@ struct ViscousFluxFunctor {
         const uint8_t s = face_shift(i_face);
         FOR_I_DIM d[i] = (cell_coords(c1, i) + shifts(s, i)) - cell_coords(c0, i);
         const rtype d_n = dot<N_DIM>(d, n);
+        // Axisymmetric cell centers are not symmetric about the faces: interpolate
+        // to the face, at fraction t along the line between them
+        const rtype t = axisymmetric ? face_fraction(face_coords, cell_coords, i_face, c0, d) : 0.5_r;
+        const rtype dvar = axisymmetric ? variance_jump(covariance, c0, c1, d) : 0.0_r;
         for (uint8_t k = 0; k < NQ; k++) {
             q_f[k] = 0.5_r * (q0[k] + q1[k]);
             FOR_I_DIM g_f[k][i] = 0.5_r * (g0[k][i] + g1[k][i]);
-            const rtype correction = ((q1[k] - q0[k]) - dot<N_DIM>(g_f[k], d)) / d_n;
+            rtype dq = q1[k] - q0[k];
+            if (axisymmetric) dq -= mean_offset(g0[k], g1[k], d, dvar);
+            const rtype correction = (dq - dot<N_DIM>(g_f[k], d)) / d_n;
+            if (axisymmetric) {
+                q_f[k] = q0[k] + t * (q1[k] - q0[k]);
+                FOR_I_DIM g_f[k][i] = g0[k][i] + t * (g1[k][i] - g0[k][i]);
+            }
             FOR_I_DIM g_f[k][i] += correction * n[i];
         }
     }
+
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
@@ -172,7 +244,7 @@ struct ViscousFluxFunctor {
         const rtype mu = physics.viscosity(q_f[N_DIM]);
         const rtype kappa = physics.conductivity(mu);
         rtype tau_n[N_DIM];
-        viscous_traction(mu, g_f, n, tau_n);
+        viscous_traction(mu, g_f, n, tau_n, axisymmetric ? hoop_divergence(face_coords(i_face, 1), q_f, g_f) : 0.0_r);
         rtype q_n = kappa * dot<N_DIM>(g_f[N_DIM], n);
         if (symmetry) {
             // Keep only the normal stress; the normal velocity vanishes on the plane,

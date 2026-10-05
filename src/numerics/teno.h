@@ -161,6 +161,21 @@ void monomials(const uint8_t r, const T xi, const T eta, T * phi) {
 }
 
 /**
+ * @brief Derivatives with respect to xi and eta of all monomials of degree
+ *        1..r at (xi, eta).
+ */
+template <typename T> KOKKOS_INLINE_FUNCTION
+void monomial_gradients(const uint8_t r, const T xi, const T eta, T * d_xi, T * d_eta) {
+    const uint8_t nk = n_dof(r);
+    for (uint8_t l = 0; l < nk; l++) {
+        uint8_t a, b;
+        exponents(l, a, b);
+        d_xi[l] = a > 0 ? T(a) * ipow(xi, a - 1) * ipow(eta, b) : T(0);
+        d_eta[l] = b > 0 ? T(b) * ipow(xi, a) * ipow(eta, b - 1) : T(0);
+    }
+}
+
+/**
  * @brief Evaluate all trivariate monomials of degree 1..r at (xi, eta, zeta).
  */
 template <typename T> KOKKOS_INLINE_FUNCTION

@@ -12,7 +12,10 @@ Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the 3D
 | `plot_viscous_shock_tube.py` | Viscous shock tube at t = 1 against the grid-converged reference of Zhou et al.: wall density, lambda-shock triple point |
 | `animate.py` | MP4/GIF animation of a VTU series: density (or `--var`, including derived `VORTICITY` and `MACH`) with contours, plus numerical schlieren |
 | `animate_grid.py` | Several cases side by side in one animation, synchronized in normalized time: field panels, wall profiles against reference data, 2D detonations with their soot foil, pre-rendered frame sequences (e.g. 3D views) and time series traced over a reference curve. `hero_grid.json` makes the README animation from the double Mach, 2D detonation, Taylor-Green (full box) and Re = 300 sphere examples; `detonation` panels show a detonation run's pressure and numerical soot foil, and the 3D panels are frames cropped from the case animations (the config's `_inputs` lists where each input comes from) |
-| `make_cylinder_mesh.py` | Gmsh O-grid around a cylinder |
+| `make_cylinder_mesh.py` | Gmsh O-grid around a cylinder; `--half` gives the upper half with the axis cuts, the meridian plane of a sphere for axisymmetric runs |
+| `plot_poiseuille.py` | Axisymmetric Hagen-Poiseuille flow: axial velocity against the exact r-weighted cell averages |
+| `plot_noh.py` | Spherical Noh problem from an axisymmetric run: density against the exact solution, shock radius by direction |
+| `plot_sphere_axisymmetric.py` | Steady axisymmetric flow past a sphere: drag, separation angle and wake length against the literature |
 | `make_mallard_mesh.py` | Triangle mesh (via the gmsh Python module) around a flying mallard silhouette |
 | `plot_taylor_green.py` | Taylor-Green vortex: kinetic energy and dissipation rate (`-dE/dt` and enstrophy-based) from `[integrals]` output against the spectral DNS reference |
 | `animate_taylor_green.py` | Taylor-Green vortex animation: Q-criterion isosurfaces on the box mirrored from the computed octant, orbiting camera, and the dissipation rate tracing the reference |

@@ -59,7 +59,7 @@ struct ConvectiveFluxFunctor {
     Kokkos::View<rtype *> face_area;
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *> quad_weights;
-    Kokkos::View<rtype **> face_weights;  // 3D: (face, q), zero on padding points
+    Kokkos::View<rtype **> face_weights;  // (face, q): 3D, zero on padding points; 2D axisymmetric, Gauss weight times r; else empty
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
     BoundaryData boundaries;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
@@ -85,7 +85,7 @@ struct ConvectiveFluxFunctor {
         for (uint8_t i_quad = 0; i_quad < n_quad; i_quad++) {
             rtype w_q;
             if constexpr (N_DIM == 2) {
-                w_q = quad_weights(i_quad);
+                w_q = face_weights.extent(0) ? face_weights(i_face, i_quad) : quad_weights(i_quad);
             } else {
                 w_q = face_weights(i_face, i_quad);
                 if (w_q == 0.0_r) continue;

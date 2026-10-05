@@ -18,6 +18,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Compressible Euler and Navier-Stokes equations: a calorically perfect gas (constant or Sutherland viscosity), or thermally perfect gas mixtures
 - Finite-rate chemistry with arbitrary Cantera (YAML) mechanisms read at run time: elementary, three-body, falloff, PLOG and Chebyshev reactions; an adaptive Rosenbrock integrator per cell with analytical Jacobians, Strang-split from the flow; mixture-averaged, unity-Lewis or constant-Lewis transport; an optional double-flux scheme for interfaces; `MallardReactor`, a 0D reactor tool
 - 2D or 3D (a build option): unstructured meshes of triangles and quadrilaterals, or of tetrahedra, hexahedra, prisms and pyramids, read from Gmsh or HDF5 files or generated
+- Axisymmetric (r-z) flows in 2D builds: revolved finite volumes, exactly well balanced, at the design order of the reconstruction up to the axis
 - Face reconstruction:
   - First order
   - Second-order MUSCL with least-squares gradients and Barth-Jespersen or Venkatakrishnan limiting
@@ -85,7 +86,7 @@ See [`examples/`](examples) for complete input files and [`docs/input.md`](docs/
 ./build/test/MallardTest
 ```
 
-The test suite checks mesh geometry, the Riemann solvers against an exact Riemann solver, time integrator convergence orders, gradient and limiter properties, TENO design order on triangles and quadrilaterals and on 3D tetrahedra and hexahedra (with polynomial exactness on prisms, pyramids and mixed meshes), free-stream preservation, discrete conservation, symmetry preservation, shock tubes against exact solutions, viscous flows against exact solutions (Couette, Stokes' first problem, conduction), and bit-for-bit restarts.
+The test suite checks mesh geometry, the Riemann solvers against an exact Riemann solver, time integrator convergence orders, gradient and limiter properties, TENO design order on triangles and quadrilaterals and on 3D tetrahedra and hexahedra (with polynomial exactness on prisms, pyramids and mixed meshes), free-stream preservation, discrete conservation, symmetry preservation, shock tubes against exact solutions, viscous flows against exact solutions (Couette, Stokes' first problem, conduction), axisymmetric well balance and design order (manufactured solution, Hagen-Poiseuille), and bit-for-bit restarts.
 
 ## Postprocessing
 

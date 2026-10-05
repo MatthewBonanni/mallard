@@ -230,7 +230,7 @@ TEST(MPITest, NavierStokesWithBoundaryConditionsMatchesSerial) {
 
 TEST(MPITest, CharacteristicBoundariesAndSpongesMatchSerial) {
     // The transverse terms read the cells of neighboring boundary faces, which
-    // may be halo cells; TENO stencils grow one-sided at characteristic faces
+    // may be halo cells
     const std::string sponge = "[[sponges]]\nstrength = \"x > 0.7 ? 5 * (x - 0.7) : 0\"\nu = [0.3, 0.0]\np = 1.0\n"
                                "T = 1.0\n";
     for (const std::string & recon : {std::string("type = \"MUSCL\"\n"), std::string("type = \"TENO\"\norder = 5\n")}) {
@@ -243,6 +243,16 @@ TEST(MPITest, CharacteristicBoundariesAndSpongesMatchSerial) {
                                         20) +
                               sponge);
     }
+}
+
+TEST(MPITest, AxisymmetricRunsMatchSerial) {
+    // Revolved geometry, r-weighted stencils, the high-order geometric source
+    // and the axis-corrected viscous gradients of halo cells
+    const std::string axis = "axisymmetric = true\n";
+    const std::string boundaries = bcs("type = \"extrapolation\"\n", "type = \"wall_adiabatic\"\n",
+                                       "type = \"wall_isothermal\"\nT = 1.2\n", "type = \"symmetry\"\n");
+    expect_matches_serial(box_input("cartesian_tri", "type = \"TENO\"\norder = 4\n", NS + axis, boundaries, 12));
+    expect_matches_serial(box_input("cartesian", "type = \"MUSCL\"\n", NS + axis, boundaries, 20));
 }
 
 TEST(MPITest, BoundaryConditionsSurviveTheHaloRebuild) {
