@@ -43,6 +43,7 @@ const std::vector<Case> CASES = {
     {"h2o2", SOURCE_DIR + "/mechanisms/h2o2.yaml", "ohmech"},
     {"gri30", SOURCE_DIR + "/mechanisms/gri30.yaml", ""},
     {"test_kinetics", SOURCE_DIR + "/test/data/chemistry/test_kinetics.yaml", "gas"},
+    {"propane_2step", SOURCE_DIR + "/test/data/chemistry/propane_2step.yaml", "gas"},
 };
 
 std::vector<std::vector<double>> read_rows(const std::string & file) {
@@ -201,6 +202,79 @@ TEST(ChemistryKineticsTest, AnalyticalJacobianMatchesFiniteDifferences) {
             }
             wp.resize(ns);
             wm.resize(ns);
+        }
+    }
+}
+
+TEST(ChemistryKineticsTest, FractionalOrdersKeepAFiniteJacobianAsConcentrationsVanish) {
+    // Westbrook-Dryer two-step propane: [C3H8]^0.1 [O2]^1.65 and [CO] [H2O]^0.5
+    // [O2]^0.25. Each species is taken from above C_REG (exact power law) through
+    // the regularized range to zero and slightly negative; d omega / dC stays
+    // finite and matches finite differences of the rates
+    using Kinetics = KineticsTable<Kokkos::HostSpace>;
+    const Mechanism mech = read_mechanism(SOURCE_DIR + "/test/data/chemistry/propane_2step.yaml", "gas");
+    const auto thermo = make_thermo_table<Kokkos::HostSpace>(mech);
+    const auto kinetics = make_kinetics_table<Kokkos::HostSpace>(mech);
+    const uint32_t ns = mech.n_species(), nr = mech.reactions.size();
+    const double T = 1800.0, C_reg = Kinetics::C_REG;
+    std::vector<double> C0(ns), g(ns), h(ns), q(nr), J(ns * ns), derivatives(kinetics.derivatives_size());
+    const std::vector<std::pair<std::string, double>> base = {{"C3H8", 1e-4}, {"O2", 2e-3}, {"CO", 1e-3},
+                                                              {"H2O", 2e-3}, {"CO2", 1e-3}, {"N2", 2e-2}};
+    for (const auto & [name, value] : base) C0[mech.species_index(name)] = value;
+    const std::vector<double> Y(ns, 1.0 / ns);
+    std::vector<double> unused(ns);
+    species_state(thermo, T, 1.0, Y.data(), unused.data(), g.data(), h.data());
+    const ReactionDerivatives deriv = ReactionDerivatives::at(derivatives.data(), nr, kinetics.forward_species.extent(0),
+                                                              kinetics.reverse_species.extent(0));
+    auto omega_at = [&](const std::vector<double> & C, std::vector<double> & w) {
+        std::vector<double> qq(nr);
+        kinetics.rates_of_progress(T, C.data(), g.data(), qq.data());
+        kinetics.production_rates(qq.data(), w.data());
+    };
+    for (const char * name : {"C3H8", "H2O", "O2"}) {
+        const uint32_t j = mech.species_index(name);
+        for (const double x : {-0.5, 0.0, 1e-3, 0.25, 0.5, 0.75, 1.0, 3.0, 1e3, 1e6}) {
+            std::vector<double> C = C0;
+            C[j] = x * C_reg;
+            double C_total = 0.0;
+            for (const double c : C) C_total += c;
+            kinetics.rates_of_progress(SerialLanes(), T, C.data(), C_total, g.data(), h.data(), q.data(), &deriv);
+            kinetics.production_jacobian(SerialLanes(), deriv, J.data(), ns);
+            for (uint32_t k = 0; k < ns; k++) {
+                ASSERT_TRUE(std::isfinite(J[k * ns + j])) << name << " C = " << x << " C_REG, d omega_" << k;
+            }
+            // Away from the joins at C = 0 and C_REG, centered differences with Richardson extrapolation
+            if (x == 0.0 || x == 1.0) continue;
+            const double d = 1e-4 * C_reg * std::max(1.0, std::abs(x) * 1e-2);
+            std::vector<double> wp(ns), wm(ns), D[2] = {std::vector<double>(ns), std::vector<double>(ns)};
+            for (int r = 0; r < 2; r++) {
+                std::vector<double> Cs = C;
+                Cs[j] = C[j] + d / (1 << r);
+                omega_at(Cs, wp);
+                Cs[j] = C[j] - d / (1 << r);
+                omega_at(Cs, wm);
+                for (uint32_t k = 0; k < ns; k++) D[r][k] = (wp[k] - wm[k]) / (2.0 * d / (1 << r));
+            }
+            double column_norm = 0.0;
+            for (uint32_t k = 0; k < ns; k++) column_norm = std::max(column_norm, std::abs(J[k * ns + j]));
+            EXPECT_GT(column_norm, 0.0) << name << " C = " << x << " C_REG";
+            for (uint32_t k = 0; k < ns; k++) {
+                const double fd = (4.0 * D[1][k] - D[0][k]) / 3.0;
+                EXPECT_NEAR(J[k * ns + j], fd, 1e-6 * column_norm) << name << " C = " << x << " C_REG, d omega_" << k;
+            }
+        }
+    }
+    // The regularized power is C^1 at both joins and the exact power law above C_REG
+    for (const double n : {0.1, 0.25, 0.5}) {
+        for (const double at : {0.0, C_reg}) {
+            const double below = at - 1e-9 * C_reg, above = at + 1e-9 * C_reg;
+            const double slope = Kinetics::power_derivative(above, n);
+            EXPECT_NEAR(Kinetics::power(below, n), Kinetics::power(above, n), 1e-8 * slope * C_reg) << n << " " << at;
+            EXPECT_NEAR(Kinetics::power_derivative(below, n), slope, 1e-7 * slope) << n << " " << at;
+        }
+        for (const double x : {1.0, 1.5, 1e4}) {
+            EXPECT_DOUBLE_EQ(Kinetics::power(x * C_reg, n), std::pow(x * C_reg, n)) << n << " " << x;
+            EXPECT_DOUBLE_EQ(Kinetics::power_derivative(x * C_reg, n), n * std::pow(x * C_reg, n - 1.0)) << n << " " << x;
         }
     }
 }

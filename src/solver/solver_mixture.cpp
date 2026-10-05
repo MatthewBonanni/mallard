@@ -21,6 +21,7 @@
 
 #include "flux_functor.h"
 #include "input.h"
+#include "launch_bounds.h"
 #include "mixture_flux.h"
 #include "mixture_viscous_flux.h"
 
@@ -138,6 +139,7 @@ struct MixtureTimeStepFunctor {
     Kokkos::View<rtype *> dt_local;
     uint32_t n_species;
     Kokkos::View<rtype *[3]> transport;  // viscous: (cell, [mu, lambda, nu_eff]), else empty
+    Kokkos::View<rtype *[N_DIM]> radius_coords;  // axisymmetric runs: cell_coords, else empty
 
     KOKKOS_INLINE_FUNCTION
     rtype wave_speed(const int32_t c, const rtype * n) const {
@@ -160,7 +162,14 @@ struct MixtureTimeStepFunctor {
             sum_area2 += face_area(f) * face_area(f);
         }
         // As TimeStepFunctor, with nu_eff = max(4/3 mu / rho, lambda / (rho cv), max_k D_k)
-        if (transport.extent(0) > 0) sum += 4.0_r * transport(c, NU_EFF) * sum_area2 / cell_volume(c);
+        if (transport.extent(0) > 0) {
+            sum += 4.0_r * transport(c, NU_EFF) * sum_area2 / cell_volume(c);
+            // Decay of u_r by the hoop stress
+            if (radius_coords.extent(0) > 0) {
+                const rtype r = radius_coords(c, 1);
+                sum += transport(c, NU_EFF) * cell_volume(c) / (r * r);
+            }
+        }
         const rtype dt_c = cell_volume(c) / sum;
         dt_local(c) = dt_c;
         dt_min = Kokkos::fmin(dt_min, dt_c);
@@ -314,6 +323,30 @@ class CompositionExpressions {
         std::vector<Expression> values;
 };
 
+/**
+ * @brief GeometricSourceFunctor (solver_rhs.cpp) for mixtures: the viscosity
+ *        and velocity gradients come from the transport update.
+ */
+struct MixtureGeometricSourceFunctor {
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W;
+    Kokkos::View<rtype *[3]> transport;                         // viscous, else empty
+    Kokkos::View<rtype ***, Kokkos::LayoutRight> gradients;    // (cell, [u, T, X], dimension)
+    Kokkos::View<rtype *> area;
+    Kokkos::View<rtype *[N_DIM]> cell_coords;
+    Kokkos::View<rtype *> source;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t c) const {
+        rtype p_eff = W(c, N_DIM + 1);
+        if (transport.extent(0) > 0) {
+            const rtype hoop = W(c, 2) / cell_coords(c, 1);
+            const rtype div = gradients(c, 0, 0) + gradients(c, 1, 1) + hoop;
+            p_eff -= transport(c, MU) * (2.0_r * hoop - 2.0_r / 3.0_r * div);
+        }
+        source(c) = p_eff * area(c);
+    }
+};
+
 } // namespace
 
 std::array<rtype, 6> Solver::mixture_diagnostics() {
@@ -361,6 +394,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
     if (exchange) halo.exchange(state);
     update_cell_states(state, true);
     face_reconstruction->calc_face_values(W_cells, face_solution);
+    update_characteristic_boundaries(t_stage);
     scalar_reconstruction.calc(cell_scalars, W_cells, face_thermo);
 
     if (double_flux && !cells_frozen) {
@@ -382,14 +416,15 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
 
     const uint32_t n_species = mixture.n_species;
     scalar_reconstruction.species_slots(cell_scalars, face_mdot, face_reconstruction->quadrature_face.weights,
-                                        face_reconstruction->face_quad_weights, species_slots);
+                                        flux_weights, species_slots);
     if (is_viscous()) {
         update_transport();
-        MixtureViscousFluxFunctor viscous_functor{mesh->face_normals, mesh->face_area, mesh->face_coords,
+        MixtureViscousFluxFunctor viscous_functor{mesh->face_normals, mesh->face_measure, mesh->face_coords,
                                                   mesh->cell_coords, mesh->cells_of_face, mesh->shifts,
                                                   mesh->face_shift, boundary_data, mixture, cell_scalars,
                                                   transport_values, transport_gradients, cell_transport,
-                                                  cell_diffusion, face_flux, species_slots};
+                                                  cell_diffusion, face_flux, species_slots, axisymmetric,
+                                                  mesh->cell_covariance};
         if (rhs_faces.extent(0) == 0) {
             Kokkos::parallel_for("mixture_viscous_flux", mesh->n_faces, viscous_functor);
         } else {
@@ -411,11 +446,22 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
         Kokkos::parallel_for("face_flux_sum", n_owned, sum_functor);
     }
     SpeciesSumFunctor species_sum{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
-                                  mesh->cell_volume, species_slots, rhs_state.species, n_species};
+                                  mesh->cell_measure, species_slots, rhs_state.species, n_species};
     Kokkos::parallel_for("species_sum", n_owned, species_sum);
 
+    if (axisymmetric) {
+        const bool viscous = is_viscous();
+        Kokkos::parallel_for("geometric_source", n_owned,
+                             MixtureGeometricSourceFunctor{W_cells, viscous ? cell_transport : Kokkos::View<rtype *[3]>(),
+                                                           transport_gradients, mesh->cell_volume, mesh->cell_coords,
+                                                           geometric_source});
+        add_geometric_source(rhs, viscous ? Kokkos::View<rtype *, Kokkos::LayoutStride>(
+                                                Kokkos::subview(cell_transport, Kokkos::ALL(), int(MU)))
+                                          : Kokkos::View<rtype *, Kokkos::LayoutStride>());
+    }
+
     StateView solution = state.flow;
-    Kokkos::View<rtype *> vol = mesh->cell_volume;
+    Kokkos::View<rtype *> vol = mesh->cell_measure;
     if (has_gravity || !source_expressions.empty()) {
         update_source_field(t_stage);
         const bool gravity_on = has_gravity;
@@ -441,6 +487,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
     Kokkos::parallel_for("rhs_divide_volume", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
         FOR_I_CONSERVATIVE rhs(i_cell, i) /= vol(i_cell);
     });
+    apply_sponges(state, rhs_state);
 }
 
 template <typename T_riemann_solver>
@@ -451,7 +498,7 @@ void Solver::launch_mixture_flux_functor() {
         mesh->face_area,
         mesh->cells_of_face,
         face_reconstruction->quadrature_face.weights,
-        face_reconstruction->face_quad_weights,
+        flux_weights,
         face_solution,
         face_thermo,
         boundary_data,
@@ -462,10 +509,10 @@ void Solver::launch_mixture_flux_functor() {
         low_mach_cutoff};
     // Faces of owned cells, as the single-gas flux
     if (rhs_faces.extent(0) == 0) {
-        Kokkos::parallel_for("mixture_flux", mesh->n_faces, functor);
+        Kokkos::parallel_for("mixture_flux", HeavyRange<>(0, mesh->n_faces), functor);
     } else {
         Kokkos::View<uint32_t *> list = rhs_faces;
-        Kokkos::parallel_for("mixture_flux", list.extent(0), OverFaces<MixtureFluxFunctor<T_riemann_solver>>{functor, list});
+        Kokkos::parallel_for("mixture_flux", HeavyRange<>(0, list.extent(0)), OverFaces<MixtureFluxFunctor<T_riemann_solver>>{functor, list});
     }
 }
 
@@ -477,7 +524,7 @@ void Solver::launch_double_flux_functor() {
         mesh->face_area,
         mesh->cells_of_face,
         face_reconstruction->quadrature_face.weights,
-        face_reconstruction->face_quad_weights,
+        flux_weights,
         face_solution,
         boundary_data,
         W_cells,
@@ -489,10 +536,10 @@ void Solver::launch_double_flux_functor() {
         face_mdot,
         low_mach_cutoff};
     if (rhs_faces.extent(0) == 0) {
-        Kokkos::parallel_for("double_flux", mesh->n_faces, functor);
+        Kokkos::parallel_for("double_flux", HeavyRange<>(0, mesh->n_faces), functor);
     } else {
         Kokkos::View<uint32_t *> list = rhs_faces;
-        Kokkos::parallel_for("double_flux", list.extent(0),
+        Kokkos::parallel_for("double_flux", HeavyRange<>(0, list.extent(0)),
                              OverFaces<MixtureDoubleFluxFunctor<T_riemann_solver>>{functor, list});
     }
 }
@@ -505,8 +552,9 @@ rtype Solver::calc_dt_cfl1_mixture() {
                                                      transport_values});
     }
     MixtureTimeStepFunctor functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
-                                   mesh->face_normals, mesh->face_area, mesh->cell_volume, W_cells,
-                                   cell_scalars, cfl_local, mixture.n_species, cell_transport};
+                                   mesh->face_normals, mesh->face_measure, mesh->cell_measure, W_cells,
+                                   cell_scalars, cfl_local, mixture.n_species, cell_transport,
+                                   axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>()};
     rtype dt_min = std::numeric_limits<rtype>::max();
     Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor, Kokkos::Min<rtype>(dt_min));
     return comm::allreduce(dt_min, comm::Op::MIN);
@@ -522,12 +570,21 @@ std::vector<rtype> Solver::integrate_species() {
     for (uint32_t k = 0; k < total.size(); k++) {
         rtype sum = 0.0_r;
         Kokkos::parallel_reduce("integrate_species", mesh->n_owned(),
-                                SpeciesIntegralFunctor{species, mesh->cell_volume, k}, sum);
+                                SpeciesIntegralFunctor{species, mesh->cell_measure, k}, sum);
         total[k] = sum;
     }
     if (total.empty()) return total;
     comm::allreduce(std::span<rtype>(total), comm::Op::SUM);
     return total;
+}
+
+std::vector<std::vector<double>> Solver::composition_at_cells(const toml::value & table, const std::string & where,
+                                                              const std::vector<uint32_t> & cells) const {
+    const CompositionExpressions composition(*mixture_model, table, where);
+    std::vector<std::vector<double>> Y;
+    Y.reserve(cells.size());
+    for (uint32_t c : cells) Y.push_back(composition.mass_fractions(Kokkos::subview(mesh->h_cell_coords, c, Kokkos::ALL())));
+    return Y;
 }
 
 void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boundaries,
@@ -554,8 +611,10 @@ void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boun
             case BoundaryType::SYMMETRY:
             case BoundaryType::WALL_ADIABATIC:
             case BoundaryType::P_OUT:
+            case BoundaryType::NSCBC_OUTLET:
                 break;
-            case BoundaryType::UPT: {
+            case BoundaryType::UPT:
+            case BoundaryType::NSCBC_INLET: {
                 const double T = static_cast<double>(find_real(bound, "T"));
                 if (!MixtureModel::composition_varies(bound)) {
                     prescribe(i_bc, mixture_model->mass_fractions(bound, where), T);
@@ -573,7 +632,7 @@ void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boun
             default:
                 throw InputError(where + ": type \"" + BOUNDARY_NAMES.at(bcs[i_bc].type) +
                                  "\" is not yet supported with gas = \"mixture\" (extrapolation, symmetry, "
-                                 "wall_adiabatic, upt, p_out).");
+                                 "wall_adiabatic, upt, p_out, nscbc_outlet, nscbc_inlet).");
         }
     }
 }

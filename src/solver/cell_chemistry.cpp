@@ -18,6 +18,8 @@
 
 #include <Kokkos_Sort.hpp>
 
+#include "launch_bounds.h"
+
 
 // A named namespace: functors in an anonymous one make GCC warn about the visibility of the lanes' closures
 namespace cell_chemistry_kernels {
@@ -28,10 +30,19 @@ constexpr float WIDE_TEAM_COST = 16.0f;
 
 template <bool Sparse>
 struct TeamTag {};
-// The team kernels are latency bound: with work memory in global memory, fewer
-// registers per thread and more cells per SM; in team scratch, as many as fit
+// A team per cell is a warp (a wavefront on AMD GPUs). Its kernels are latency
+// bound: with work memory in global memory, fewer registers per thread and more
+// cells per SM; in team scratch, as many as fit. The second launch bound is the
+// blocks per SM in CUDA, the waves per SIMD in HIP
+#if defined(KOKKOS_ENABLE_HIP)
+constexpr uint32_t WARP = Kokkos::Impl::HIPTraits::WarpSize;
+constexpr uint32_t MIN_TEAMS = 2, MIN_FAST_TEAMS = 1;
+#else
+constexpr uint32_t WARP = 32;
+constexpr uint32_t MIN_TEAMS = 16, MIN_FAST_TEAMS = 4;
+#endif
 template <bool Sparse, bool Fast>
-using TeamPolicy = Kokkos::TeamPolicy<TeamTag<Sparse>, Kokkos::LaunchBounds<32, Fast ? 4 : 16>>;
+using TeamPolicy = Kokkos::TeamPolicy<TeamTag<Sparse>, Kokkos::LaunchBounds<WARP, Fast ? MIN_FAST_TEAMS : MIN_TEAMS>>;
 using Member = TeamPolicy<false, false>::member_type;
 // Several warps per cell, with the same registers per thread as a warp per cell
 constexpr uint32_t MAX_TEAM_LANES = 512;
@@ -255,7 +266,7 @@ inline void launch_teams(const Space & space, const AdvanceFunctor & functor, co
         Kokkos::parallel_reduce("chemistry_advance_teams", policy, functor, failures);
     };
     const int L = static_cast<int>(league), T = static_cast<int>(threads), V = static_cast<int>(lanes);
-    if (lanes * threads > 32) {
+    if (lanes * threads > WARP) {
         sparse ? launch(WideTeamPolicy<true>(space, L, T, V)) : launch(WideTeamPolicy<false>(space, L, T, V));
     } else if (sparse) {
         fast_bytes > 0 ? launch(TeamPolicy<true, true>(space, L, T, V)) : launch(TeamPolicy<true, false>(space, L, T, V));
@@ -330,7 +341,7 @@ void CellChemistry::init(const Mixture & gas_in, const chemistry::Mechanism & me
     constexpr bool gpu = !Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace, Kokkos::HostSpace>::accessible;
     if (options.lanes == 0) {
         // A warp per cell where the mechanism fills it
-        n_lanes = (gpu && lanes_max >= 32 && ns >= 16) ? 32 : 1;
+        n_lanes = (gpu && lanes_max == WARP && ns >= 16) ? WARP : 1;
     } else {
         if ((options.lanes & (options.lanes - 1)) != 0) {
             throw std::invalid_argument("chemistry.lanes must be a power of 2.");
@@ -345,11 +356,11 @@ void CellChemistry::init(const Mixture & gas_in, const chemistry::Mechanism & me
     if (n_lanes * n_threads > MAX_TEAM_LANES) {
         throw std::invalid_argument("chemistry: at most " + std::to_string(MAX_TEAM_LANES) + " threads and lanes per cell.");
     }
-    const bool wide = n_lanes * n_threads > 32;
-    // With automatic threads, the expensive cells of the sorted queue get several warps each, more for larger
+    const bool wide = n_lanes * n_threads > WARP;
+    // With automatic threads, the expensive cells of the sorted queue get 256 lanes each, 512 for larger
     // mechanisms; a team's result does not depend on its width
     n_wide_threads = 0;
-    if (bin_by_cost && n_lanes == 32 && options.threads == 0) n_wide_threads = ns >= 512 ? 16 : 8;
+    if (bin_by_cost && n_lanes == WARP && options.threads == 0) n_wide_threads = (ns >= 512 ? 512 : 256) / WARP;
     team_failures[0] = Kokkos::View<uint32_t>("chem_failures");
     team_failures[1] = Kokkos::View<uint32_t>("chem_failures_wide");
     if (n_wide_threads > 0) {
@@ -394,7 +405,7 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
         const ActivityFunctor activity{gas,   kinetics, U,  rhoY,      T_seed, work, active, first,
                                        dt,    options.T_frozen, 1e-2 * options.reactor.atol_Y, n_lanes};
         if (n_lanes == 1) {
-            Kokkos::parallel_for("chemistry_activity", m, activity);
+            Kokkos::parallel_for("chemistry_activity", HeavyRange<>(0, m), activity);
         } else {
             const auto policy = ActivityPolicy(static_cast<int>(m), 1, static_cast<int>(n_lanes))
                                     .set_scratch_size(0, Kokkos::PerTeam(chemistry::TeamLanes<Member>::scratch_bytes(n_lanes)));
@@ -418,7 +429,7 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
                                sparse, static_cast<uint32_t>(fast_bytes / sizeof(double))};
         uint32_t failures = 0;
         if (n_lanes == 1) {
-            Kokkos::parallel_reduce("chemistry_advance", n_active, functor, Kokkos::Sum<uint32_t>(failures));
+            Kokkos::parallel_reduce("chemistry_advance", HeavyRange<>(0, n_active), functor, Kokkos::Sum<uint32_t>(failures));
         } else if (n_wide == 0) {
             launch_teams(Kokkos::DefaultExecutionSpace(), functor, n_active, n_threads, n_lanes, sparse, fast_bytes,
                          team_failures[0]);
@@ -446,7 +457,7 @@ void CellChemistry::heat_release(const StateView & U, const SpeciesView & rhoY, 
     const uint32_t chunk = static_cast<uint32_t>(work.extent(0));
     for (uint32_t first = 0; first < n; first += chunk) {
         const uint32_t m = std::min(chunk, n - first);
-        Kokkos::parallel_for("heat_release_rate", m,
+        Kokkos::parallel_for("heat_release_rate", HeavyRange<>(0, m),
                              HeatReleaseFunctor{gas, kinetics, U, rhoY, T_seed, work, hrr, production, first});
     }
 }

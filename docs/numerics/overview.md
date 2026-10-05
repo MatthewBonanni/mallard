@@ -83,6 +83,7 @@ the Riemann solver.
 - **Transmissive boundaries**: take the exterior state from an *image face*, the interior face reached by translating the boundary face inward by the depth of the boundary cell. This is exactly what an interior face sees for a solution that does not vary normal to the boundary.
   - A zero-gradient copy of the boundary cell is not used, because at inflow boundaries it feeds the cell back to itself.
   - On triangles, where boundary-cell centroids are offset from the face, the copy creates an O(1) mass imbalance at every moving shock.
+- **Characteristic boundaries** (`nscbc_outlet`, `nscbc_inlet`): outgoing waves come from the interior and the incoming acoustic wave from the face's own pressure and normal velocity, advanced each step by the LODI relations of [Poinsot & Lele (1992)](../references.md#poinsot-lele-1992) with relaxation toward a target and the transverse terms of [Lodato, Domingo & Vervisch (2008)](../references.md#lodato-2008); see `docs/design/nscbc.md`. MUSCL boundary cells reconstruct without the ghosts across them: the zero normal gradient of a ghost leaves a jump at the cell's inner face, which the low-Mach correction turns into a reflected acoustic wave (15 to 34% of a normal pulse through `extrapolation`, with MUSCL or TENO).
 
 ## Viscous fluxes
 
@@ -90,6 +91,15 @@ the Riemann solver.
 - Face gradients of velocity and temperature average the two cell gradients. They are then corrected along the face normal so that their component along the line between the cell centroids matches the direct difference ([Diskin et al. 2010](../references.md#diskin-2010)).
 - Transmissive faces take the face values and gradients of their image face, as the convective flux does.
 - Stress follows the Stokes hypothesis; heat flux uses a constant Prandtl number. Viscosity is constant or follows Sutherland's law ([Sutherland 1893](../references.md#sutherland-1893)).
+
+## Axisymmetric flows
+
+With `[physics] axisymmetric = true`, cells are integrated over their solids
+of revolution about the x axis (per radian): r-weighted cell averages,
+revolved volumes and face areas, and the radial momentum source
+`int (p - tau_thetatheta) dA`, made high order from TENO's polynomials. TENO's
+least squares fit r-weighted averages, and second-order operators work at
+r-weighted centroids. See [the design notes](../design/axisymmetric.md).
 
 ## Known limitations
 

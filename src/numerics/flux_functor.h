@@ -45,7 +45,10 @@ void low_mach_correction(rtype * W_l, rtype * W_r, const rtype gamma, const rtyp
  * @brief Integrates the convective flux over every face into face_flux, the
  *        rate of change it causes in cells_of_face(:, 0) (cells_of_face(:, 1)
  *        receives its negative). Boundary faces use the boundary ghost state
- *        as the right state.
+ *        as the right state. Characteristic boundaries take the low-Mach
+ *        correction like interior faces: without it, the different
+ *        dissipation of the boundary cell's two sides holds the outlet
+ *        pressure of a steady shear flow away from its target.
  *
  * Face normals point from cells_of_face(:, 0) to cells_of_face(:, 1), i.e.
  * out of the domain on boundary faces.
@@ -56,7 +59,7 @@ struct ConvectiveFluxFunctor {
     Kokkos::View<rtype *> face_area;
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *> quad_weights;
-    Kokkos::View<rtype **> face_weights;  // 3D: (face, q), zero on padding points
+    Kokkos::View<rtype **> face_weights;  // (face, q): 3D, zero on padding points; 2D axisymmetric, Gauss weight times r; else empty
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
     BoundaryData boundaries;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
@@ -82,7 +85,7 @@ struct ConvectiveFluxFunctor {
         for (uint8_t i_quad = 0; i_quad < n_quad; i_quad++) {
             rtype w_q;
             if constexpr (N_DIM == 2) {
-                w_q = quad_weights(i_quad);
+                w_q = face_weights.extent(0) ? face_weights(i_face, i_quad) : quad_weights(i_quad);
             } else {
                 w_q = face_weights(i_face, i_quad);
                 if (w_q == 0.0_r) continue;
@@ -94,6 +97,9 @@ struct ConvectiveFluxFunctor {
                 if (low_mach_cutoff < 1.0_r) low_mach_correction(W_l, W_r, gamma, low_mach_cutoff);
             } else {
                 boundaries.exterior_W(i_face, i_quad, n_quad, W_l, n_unit, W_cells, face_solution, W_r);
+                if (low_mach_cutoff < 1.0_r && boundaries.bcs(boundaries.face_bc(i_face)).is_characteristic()) {
+                    low_mach_correction(W_l, W_r, gamma, low_mach_cutoff);
+                }
             }
             T_riemann_solver::calc_flux(flux_q, n_unit, W_l, W_r, gamma);
             FOR_I_CONSERVATIVE flux[i] += w_q * flux_q[i];
