@@ -1,6 +1,6 @@
 # Design: axisymmetric (r-z) flows
 
-Status: in progress (issue #157).
+Status: implemented (issue #157).
 
 `[physics] axisymmetric = true` turns the 2D solver into one for flows
 symmetric about the x axis without swirl: x is the axial coordinate z and y
@@ -174,18 +174,36 @@ Viscous fluxes are second order, as in planar runs.
 
 ## Validation
 
-- Quiescent gas, quads and triangles, FO/MUSCL/TENO5, perfect gas and mixture,
-  mesh touching the axis: velocities stay at round-off (unit test).
-- Discrete conservation of mass, axial momentum, energy, species in a closed
-  box (unit test).
-- Hagen-Poiseuille pipe flow driven by a body force: residual of the exact
-  solution, second order up to the axis (unit test), and steady profile
-  (example).
-- Manufactured smooth state: truncation error at design order for TENO3-5 on
-  quadrilaterals and triangles, including the axis cells (unit test).
-- Spherical Noh and Sedov problems on the meridian plane against the exact
-  solutions (examples).
-- Sphere at Re = 100 / 150: steady wake length, separation angle and drag
-  against Johnson & Patel (1999) and Taneda (1956) (example).
-- Counterflow diffusion flame against Cantera's axisymmetric
-  similarity solution (with the counterflow-flame work).
+Unit tests (`test/axisymmetric_test.cpp`, `MPITest.AxisymmetricRunsMatchSerial`):
+
+- Geometry: Pappus's theorem for every cell, and the closure `sum_f n_r
+  int_f r dl = A_c` that well balance rests on.
+- Quiescent gas, quads and triangles, FO/MUSCL/TENO3/TENO5, Euler (with a
+  density field) and Navier-Stokes, and gas mixtures: velocities stay at
+  round-off.
+- Conservation of mass, axial momentum and energy in a periodic pipe.
+- Hagen-Poiseuille: residual of the exact solution second order, below 1e-5
+  of the forcing next to the axis.
+- Manufactured smooth state: truncation error at design order for TENO3-5
+  on quadrilaterals (3.1, 4.5, 5.4) and triangles, axis cells included; with
+  the cell-value source instead, 2.5-2.9 on quadrilaterals and 1.1-1.6 on
+  triangles.
+- Distributed runs match serial ones bitwise on 1-4 ranks.
+
+Examples:
+
+- `poiseuille_pipe`: the steady profile converges at second order (mean
+  error 1.3e-3, 3.2e-4, 8.0e-5 of U for 16, 32, 64 cells across the radius).
+- `noh_axisymmetric`: shock radius within 1% of t / 3 in every direction,
+  post-shock density 62-63 of 64 (up to 74 in the first cells along the axis).
+- `sedov_axisymmetric`: shock radius 0.6% ahead of the exact one at t = 0.8,
+  density peak 4.66-4.76 in every direction.
+- `sphere_axisymmetric`: Re = 100 and 150, Cd within 1.2% of Clift, Grace &
+  Weber at Mach 0.2, separation angle within 0.2 degrees, wake length 0.885 and
+  1.21 D (Johnson & Patel: 0.88, about 1.2).
+- Counterflow diffusion flame (H2/N2 against air, 1 atm, 10 mm gap, the
+  finite-jet setup of the 3D counterflow validation on the meridian plane, 20
+  cells per flame width, MUSCL, mixture-averaged transport, started from
+  Cantera's flame and run for 4 / K_ox): the peak temperature is within 0.4%
+  (U_o = 2 m/s) and 0.7% (4 m/s) of Cantera's axisymmetric similarity solution
+  at the same local strain rate K_ox measured on the axis, as in the 3D runs.
