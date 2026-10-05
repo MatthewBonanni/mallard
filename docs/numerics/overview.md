@@ -44,6 +44,15 @@ from a per-cell spectral radius ([Blazek 2015](../references.md#blazek-2015)),
 | Roe | [Roe 1981](../references.md#roe-1981), with Harten's entropy fix ([Harten 1983](../references.md#harten-1983)) |
 | RHLL | [Nishikawa & Kitamura 2008](../references.md#nishikawa-kitamura-2008), a rotated hybrid: HLL along the velocity-difference direction, Roe across it. Carbuncle-free. |
 
+All five also solve gas mixtures, on each side's frozen `cp / cv` and energy
+offset ([chemistry design](../design/chemistry.md#riemann-solvers)). The
+mixture Roe solver ([Glaister 1988](../references.md#glaister-1988);
+[Shuen, Liou & van Leer 1990](../references.md#shuen-liou-van-leer-1990)) lets the
+contact, shear and composition waves, which all move with the flow, carry
+the whole jump of the conservative variables left by the two acoustic waves.
+That makes it exact at contacts between different gases for any averaged
+sound speed, and it reduces to the single-gas Roe solver for one gas.
+
 ### Low-Mach correction
 
 Upwind fluxes damp the jump of the reconstructed velocity across a face at the
@@ -83,6 +92,7 @@ the Riemann solver.
 - **Transmissive boundaries**: take the exterior state from an *image face*, the interior face reached by translating the boundary face inward by the depth of the boundary cell. This is exactly what an interior face sees for a solution that does not vary normal to the boundary.
   - A zero-gradient copy of the boundary cell is not used, because at inflow boundaries it feeds the cell back to itself.
   - On triangles, where boundary-cell centroids are offset from the face, the copy creates an O(1) mass imbalance at every moving shock.
+- **Characteristic boundaries** (`nscbc_outlet`, `nscbc_inlet`): outgoing waves come from the interior and the incoming acoustic wave from the face's own pressure and normal velocity, advanced each step by the LODI relations of [Poinsot & Lele (1992)](../references.md#poinsot-lele-1992) with relaxation toward a target and the transverse terms of [Lodato, Domingo & Vervisch (2008)](../references.md#lodato-2008); see `docs/design/nscbc.md`. MUSCL boundary cells reconstruct without the ghosts across them: the zero normal gradient of a ghost leaves a jump at the cell's inner face, which the low-Mach correction turns into a reflected acoustic wave (15 to 34% of a normal pulse through `extrapolation`, with MUSCL or TENO).
 
 ## Viscous fluxes
 
@@ -91,10 +101,19 @@ the Riemann solver.
 - Transmissive faces take the face values and gradients of their image face, as the convective flux does.
 - Stress follows the Stokes hypothesis; heat flux uses a constant Prandtl number. Viscosity is constant or follows Sutherland's law ([Sutherland 1893](../references.md#sutherland-1893)).
 
+## Axisymmetric flows
+
+With `[physics] axisymmetric = true`, cells are integrated over their solids
+of revolution about the x axis (per radian): r-weighted cell averages,
+revolved volumes and face areas, and the radial momentum source
+`int (p - tau_thetatheta) dA`, made high order from TENO's polynomials. TENO's
+least squares fit r-weighted averages, and second-order operators work at
+r-weighted centroids. See [the design notes](../design/axisymmetric.md).
+
 ## Known limitations
 
 - The scheme is not exactly well balanced: hydrostatic states carry small spurious velocities, which vanish at second order under refinement (wall ghosts continue the hydrostatic pressure gradient).
-- RHLL does not keep a 1D problem on a 2D mesh exactly 1D. Where the velocity jump across a face is small but above its fallback threshold, the rotation direction tilts by the round-off transverse velocity divided by that jump. On the Sod strip (800 x 4 quads, TENO5), the rows start out identical to 1e-16, still agree to 1e-12 at t = 0.04, and differ by up to about 1e-5 later on, at levels that depend on the time-step history. HLL and HLLC stay at round-off.
+- RHLL does not keep a 1D problem on a 2D mesh exactly 1D. Where the velocity jump across a face is small but above its fallback threshold, the rotation direction tilts by the round-off transverse velocity divided by that jump. On the Sod strip (800 x 4 quads, TENO5), the rows start out identical to 1e-16, still agree to 1e-12 at t = 0.04, and differ by up to about 1e-5 later on, at levels that depend on the time-step history. HLL and HLLC stay at round-off. In gas mixtures this costs the mass fractions' positivity with TENO5: on the multicomponent shock tube (4 rows) N2 reaches -2e-10 in three cells of the driver gas next to the diaphragm, where HLLC, Roe and MUSCL stay within [0, 1]. The species' bounds are enforced at face points only, which keeps them only for fluxes that do not draw a cell's species beyond its content.
 - TENO's k-exact least squares with 2x oversampling is noticeably more dissipative for under-resolved smooth waves than compact structured stencils. `stencil_factor = 1.5` helps, at some cost in robustness at discontinuities.
 
 All sources, with where Mallard uses them: [References](../references.md).

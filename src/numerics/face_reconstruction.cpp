@@ -12,6 +12,7 @@
 #include "face_reconstruction.h"
 
 #include "input.h"
+#include "launch_bounds.h"
 
 #include <algorithm>
 #include <array>
@@ -257,16 +258,24 @@ uint8_t MUSCL::n_face_quadrature_points() const {
 
 /**
  * @brief MUSCL gradients: a linear fit over face neighbors, or over vertex
- *        neighbors on tetrahedra, whose four face neighbors make MUSCL unstable.
+ *        neighbors on tetrahedra, whose four face neighbors make MUSCL
+ *        unstable, and in cells on characteristic boundaries, whose ghosts the
+ *        vertex fit leaves out (LSQGradientFunctor::one_sided).
  */
 struct MUSCLGradientFunctor {
     LSQVertexGradientFunctor vertex;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_cell) const {
+        const auto & offsets = vertex.faces.offsets_faces_of_cell;
         if constexpr (N_DIM == 3) {
-            const auto & offsets = vertex.faces.offsets_faces_of_cell;
             if (offsets(i_cell + 1) - offsets(i_cell) == 4) {
+                vertex(i_cell);
+                return;
+            }
+        }
+        for (uint32_t k = offsets(i_cell); k < offsets(i_cell + 1); k++) {
+            if (vertex.faces.one_sided(vertex.faces.faces_of_cell(k))) {
                 vertex(i_cell);
                 return;
             }
@@ -401,10 +410,10 @@ struct MUSCLFaceFunctor {
 void MUSCL::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                              Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
     gradient.faces = make_gradient(*mesh, boundaries, solution, gradients);
-    Kokkos::parallel_for("lsq_gradient", mesh->n_cells, MUSCLGradientFunctor{gradient});
+    Kokkos::parallel_for("lsq_gradient", HeavyRange<>(0, mesh->n_cells), MUSCLGradientFunctor{gradient});
 
     LimiterFunctor limiter_functor{gradient.faces, mesh->cell_volume, limiters, limiter, venkat_K};
-    Kokkos::parallel_for("limiter", mesh->n_cells, limiter_functor);
+    Kokkos::parallel_for("limiter", HeavyRange<>(0, mesh->n_cells), limiter_functor);
 
     MUSCLFaceFunctor face_functor{mesh->cells_of_face,
                                   mesh->cell_coords,
