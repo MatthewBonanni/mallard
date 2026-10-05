@@ -63,8 +63,11 @@
 # h/u_tau = 16.3 h/U_b), and the statistics (restart-carried, so they survive
 # restarts) average from t = 120.
 #
-# Cost: 3.28e-4 h/U_b per step (acoustic CFL at the wall cells), 978,000
-# steps to t = 320 at 17-19 ms each on four A100s: 5 hours.
+# Cost: the results above were computed at half the time step of this input
+# (cfl 0.9 in the CFL convention of Mallard 0.5). At this input's step,
+# 6.56e-4 h/U_b (acoustic CFL at the wall cells), a continuation averaged over
+# t = 365-560 gives Re_tau = 172.9 and the same peaks to 1%: 490,000 steps
+# to t = 320 at 17 ms each on two A100s, 2.3 hours.
 
 [run]
 t_stop = 320.0
