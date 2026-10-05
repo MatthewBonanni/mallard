@@ -353,6 +353,8 @@ void Solver::init_boundaries() {
     // Faces of upt boundaries whose composition varies along them, as (boundary, face):
     // each face gets its own copy of the condition, appended after the input's
     std::vector<std::array<uint32_t, 2>> profiled_faces;
+    // Faces of each nscbc_inlet on this rank, by input boundary
+    std::vector<std::pair<size_t, std::vector<uint32_t>>> inlets;
 
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
         const toml::value & bound = input_boundaries[i_bc];
@@ -423,6 +425,7 @@ void Solver::init_boundaries() {
         if (comm::allreduce(n_selected, comm::Op::SUM) == 0) {
             throw std::runtime_error("Boundary " + name + " selects no faces.");
         }
+        if (bcs.back().type == BoundaryType::NSCBC_INLET) inlets.emplace_back(i_bc, dirichlet.faces);
         if (bcs.back().type == BoundaryType::DIRICHLET) {
             dirichlet_boundaries.push_back(std::move(dirichlet));
         } else if (bcs.back().type == BoundaryType::P_OUT_AVERAGE) {
@@ -521,6 +524,7 @@ void Solver::init_boundaries() {
     h_face_state = Kokkos::create_mirror_view(boundary_data.face_state);
     h_face_state_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_state_index);
     t_boundary_states = -1.0;
+    init_inlets(input_boundaries, inlets);
 }
 
 void Solver::init_sources() {
@@ -666,6 +670,7 @@ void Solver::update_average_pressure_outlets(StateView solution) {
 }
 
 void Solver::update_boundary_states(rtype t_eval) {
+    update_inflow(t_eval);
     if (dirichlet_boundaries.empty() || t_eval == t_boundary_states) {
         return;
     }
@@ -1034,6 +1039,7 @@ void Solver::copy_device_to_host() {
         Kokkos::deep_copy(h_les_coefficients, les_coefficients);
     }
     statistics.copy_device_to_host();
+    copy_characteristic_state_to_host();
     if (p_max.is_allocated()) Kokkos::deep_copy(h_p_max, p_max);
     if (vortex_fields.is_allocated()) {
         update_vortex_fields();
@@ -1082,6 +1088,11 @@ void Solver::register_data() {
     data.push_back(Data("CFL", h_cfl_local));
     if (les_on) data.push_back(Data("MU_T", Kokkos::subview(h_les_coefficients, Kokkos::ALL(), 0)));
     statistics.register_data(data);
+    const std::vector<std::string> characteristic = characteristic_variables();
+    data.reserve(data.size() + characteristic.size() + 8);
+    for (size_t v = 0; v < characteristic.size(); v++) {
+        data.push_back(Data(characteristic[v], Kokkos::subview(h_char_cells, Kokkos::ALL(), v)));
+    }
     if (p_max.is_allocated()) data.push_back(Data("P_MAX", h_p_max));
     if (vortex_fields.is_allocated()) {
         data.push_back(Data("Q", Kokkos::subview(h_vortex_fields, Kokkos::ALL(), 0)));
@@ -1108,6 +1119,7 @@ std::vector<std::string> Solver::restart_variables() const {
     if (reacting) names.push_back("CHEM_H");
     if (p_max.is_allocated()) names.push_back("P_MAX");
     for (const auto & name : statistics.variables()) names.push_back(name);
+    for (const auto & name : characteristic_variables()) names.push_back(name);
     return names;
 }
 

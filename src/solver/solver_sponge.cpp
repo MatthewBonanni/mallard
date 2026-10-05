@@ -138,6 +138,8 @@ void Solver::update_characteristic_boundaries(const rtype t_stage) {
                                                          mesh->face_area,    mesh->cells_of_face, W_cells};
         Kokkos::parallel_for("characteristic_transverse", boundary_data.char_faces.extent(0), transverse);
     }
+    // Inlet targets at the end of the step, whose change enters the incoming wave
+    for (auto & inflow : inflows) inflow->fill(double(t + dt), boundary_data.char_target_next);
     const CharacteristicStateFunctor state{boundary_data,
                                            mesh->face_normals,
                                            face_solution,
@@ -145,7 +147,8 @@ void Solver::update_characteristic_boundaries(const rtype t_stage) {
                                            face_reconstruction->quadrature_face.weights,
                                            face_reconstruction->face_quad_weights,
                                            dt,
-                                           t_characteristic < 0.0_r};
+                                           !char_state_valid};
     Kokkos::parallel_for("characteristic_state", boundary_data.char_faces.extent(0), state);
     t_characteristic = t_stage;
+    char_state_valid = true;
 }

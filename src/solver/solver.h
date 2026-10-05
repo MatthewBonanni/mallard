@@ -34,6 +34,7 @@
 #include "scalar_reconstruction.h"
 #include "data_writer.h"
 #include "statistics.h"
+#include "synthetic_inflow.h"
 #include "expression.h"
 #include "comm.h"
 #include "distributed_mesh.h"
@@ -320,6 +321,12 @@ class Solver {
         void init_solution_analytical();
         void init_solution_restart();
         void update_boundary_states(rtype t_eval);
+        void init_inlets(const std::vector<toml::value> & input_boundaries,
+                         const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
+        void update_inflow(rtype t_eval);
+        std::vector<std::string> characteristic_variables() const;  // Restart: NSCBC_P_<slot>, NSCBC_U_<slot>
+        void copy_characteristic_state_to_host();
+        void restore_characteristic_state();
         void init_sources();
         void update_source_field(rtype t_eval);
         void init_sponges();
@@ -534,6 +541,15 @@ class Solver {
 
         bool characteristic_transverse = false;  // Some characteristic boundary has transverse terms
         rtype t_characteristic = -1.0;           // Time the incoming waves were last advanced from, < 0 before the first
+        bool char_state_valid = false;           // char_state holds a state (else it starts from the solution)
+        // Restart files hold char_state per cell: (cell, slot) of each characteristic face, the
+        // most faces of a cell on any rank, and per cell [p, u_n] of each slot
+        std::vector<std::array<uint32_t, 2>> char_cell_slot;
+        uint32_t n_char_slots = 0;
+        Kokkos::View<rtype **, Kokkos::LayoutLeft, Kokkos::HostSpace> h_char_cells;
+        // Synthetic turbulence of inlets, and the time of the targets in char_target
+        std::vector<std::unique_ptr<SyntheticInflow>> inflows;
+        rtype t_inflow = -1.0;
 
         // Checks
         uint32_t check_interval;

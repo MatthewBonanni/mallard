@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "mesh.h"
+#include "synthetic_inflow.h"
 
 BoundaryCondition BoundaryCondition::from_input(const toml::value & input, const Euler & physics) {
     const std::string name = toml::find<std::string>(input, "name");
@@ -49,17 +50,17 @@ BoundaryCondition BoundaryCondition::from_input(const toml::value & input, const
         FOR_I_DIM bc.data[1 + i] = u[i];
         bc.data[N_DIM + 1] = p;
     } else if (bc.type == BoundaryType::NSCBC_INLET) {
-        require("u");
         require("p");
         require("T");
-        std::vector<rtype> u = find_real_vector(input, "u");
-        if (u.size() != N_DIM) {
-            throw std::runtime_error("Invalid u for boundary: " + name + ".");
-        }
+        // The velocity may vary along the inlet and in time: the solver sets it per face
+        const InletProfile profile(input, "boundaries[name = \"" + name + "\"]");
         const rtype p = find_real(input, "p");
         const rtype T = find_real(input, "T");
         bc.data[0] = physics.get_density_from_pressure_temperature(p, T);
-        FOR_I_DIM bc.data[1 + i] = u[i];
+        if (profile.uniform()) {
+            const std::array<double, N_DIM> u = profile.velocity(Point{});
+            FOR_I_DIM bc.data[1 + i] = static_cast<rtype>(u[i]);
+        }
         bc.data[N_DIM + 1] = p;
         bc.relax[Relax::T_TARGET] = T;
     } else if (bc.type == BoundaryType::P_OUT || bc.type == BoundaryType::P_OUT_AVERAGE ||
@@ -314,14 +315,21 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     data.char_depth = Kokkos::View<rtype *>("char_depth", char_faces.size());
     data.char_transverse = Kokkos::View<rtype *[3]>("char_transverse", char_faces.size());
     data.char_state = Kokkos::View<rtype *[2]>("char_state", char_faces.size());
+    data.char_target = Kokkos::View<rtype *[N_DIM]>("char_target", char_faces.size());
+    data.char_target_next = Kokkos::View<rtype *[N_DIM]>("char_target_next", char_faces.size());
     auto h_char_faces = Kokkos::create_mirror_view(data.char_faces);
     auto h_char_depth = Kokkos::create_mirror_view(data.char_depth);
+    auto h_char_target = Kokkos::create_mirror_view(data.char_target);
     for (size_t k = 0; k < char_faces.size(); k++) {
         h_char_faces(k) = char_faces[k];
         h_char_depth(k) = char_depth[k];
+        const BoundaryCondition & bc = h_bcs_vec[h_face_bc_vec[char_faces[k]]];
+        FOR_I_DIM h_char_target(k, i) = (bc.type == BoundaryType::NSCBC_INLET) ? bc.data[1 + i] : 0.0_r;
     }
     Kokkos::deep_copy(data.char_faces, h_char_faces);
     Kokkos::deep_copy(data.char_depth, h_char_depth);
+    Kokkos::deep_copy(data.char_target, h_char_target);
+    Kokkos::deep_copy(data.char_target_next, h_char_target);
 
     // Neighbors along the boundary for the transverse terms: characteristic faces
     // sharing a node with nearly the same normal
