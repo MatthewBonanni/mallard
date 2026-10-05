@@ -60,6 +60,6 @@ TEST(PhysicsTest, PowerLawViscosity) {
     const Euler euler = Euler::from_input(toml::parse_str(physics + "T_mu_ref = 0.5\nviscosity_exponent = 0.75\n"));
     EXPECT_NEAR(euler.viscosity(0.5), 0.002, roundoff(1e-15));
     EXPECT_NEAR(euler.viscosity(2.0), 0.002 * std::pow(4.0, 0.75), roundoff(1e-14));
-    EXPECT_NEAR(euler.conductivity(euler.viscosity(2.0)), euler.viscosity(2.0) * euler.cp / 0.7, roundoff(1e-14));
+    EXPECT_NEAR(euler.conductivity(euler.viscosity(2.0)), euler.viscosity(2.0) * euler.cp / 0.7_r, roundoff(1e-14));
     EXPECT_THROW(Euler::from_input(toml::parse_str(physics + "T_mu_ref = 0.5\n")), std::exception);
 }
