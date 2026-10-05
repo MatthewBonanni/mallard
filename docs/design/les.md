@@ -303,9 +303,15 @@ periodic or walled domain the exact (continuous) contributions are
 - molecular viscosity: `-eps_mol = -int tau : grad u dV`,
 - SGS: `-eps_sgs = -int tau_sgs : grad u dV`.
 
-The **numerical dissipation** is then `eps_num = Pi - dK/dt|_conv`, with
-`Pi` from the cell gradients, and the run reports `eps_mol`, `eps_sgs`,
-`eps_num` and `Pi` in `[integrals]` (with `budget = true`). The criterion
+The **numerical dissipation** is then `eps_num = Pi_h - dK/dt|_conv`, with
+`Pi_h` the scheme's own pressure work: on interior faces, the work of the
+two-point pressure flux `mean(p) n` of the cell values, `sum_f mean(p) (u_1 -
+u_0) . n A_f` (a central flux with first-order states changes `K` by exactly
+this, section 4.3), plus the whole kinetic-energy rate of the boundary faces'
+fluxes, so that `eps_num` is the dissipation of the interior faces. The run
+reports `eps_mol`, `eps_sgs`, `eps_num`, `Pi_h` (`pressure_work`) and `Pi`
+from the cell gradients (`pressure_dilatation`) in `[integrals]` (with
+`budget = true`). The criterion
 for an LES result to count as explicit-model LES is **`eps_num <= 0.5 eps_sgs`
 averaged over the analysis window**, i.e. the model removes at least two
 thirds of the energy that leaves the resolved scales through the cutoff.
@@ -314,11 +320,19 @@ together (dK/dt of the convective operator, whatever causes it); the time
 integrator's dissipation (SSPRK3's, of order `(lambda dt)^4`) is not
 included and is negligible at the CFL numbers used.
 
-Uncertainty of the diagnostic: `Pi` uses the viscous least-squares (or TENO)
-gradients, so `eps_num` is exact only up to the discretization error of
-`Pi`. In the validation cases (`M_t <= 0.2`) `|Pi|` is a few percent of the
-total dissipation, so this does not affect the criterion; the report gives
-`Pi` alongside.
+Why the discrete pressure work: until #197 `eps_num` was `Pi - dK/dt|_conv`
+with `Pi` from the cell gradients, exact only up to their discretization
+error. That is harmless where `|Pi|` is a few percent of the dissipation
+(isotropic turbulence and the channel at `M_t <= 0.2`: on the 64^3 CBC case
+with Sigma `C = 1.8` the numerical share is -0.9% with `Pi_h` against +0.7%
+with `Pi`), but not in a flame at 1 atm, where thermal expansion makes `p
+div u` 1e3 to 1e4 times the dissipation and the gradient estimate of `Pi`
+then measures its own error (initial state of a coarse run of section 8.3's
+flame: `Pi = 18.6` W from the gradients, dominated by the gas leaving
+through the outlet at 1 atm, against `Pi_h = 0.022` W, `dK/dt|_conv =
+0.024` W and an SGS dissipation of 0.0014 W). `Pi_h` uses the same face pressures and cell velocities as the
+convective operator, so constant pressure cancels exactly and the open
+boundaries' fluxes (an outlet's `p u . n`) drop out.
 
 ### 4.3 Low-dissipation convective flux (decision 7)
 

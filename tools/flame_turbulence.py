@@ -61,6 +61,7 @@ MU_U = 1.8346476839430128e-05
 GAMMA_U = 1.4008750762916216
 P0 = 101325.0
 T_U = 300.0
+T_FRESH = 1300.0  # fresh-gas volume: weight 1 at T_U falling to 0 at T_FRESH; its decrease per area and time is S_T
 
 
 def passot_pouquet(n, length, urms, lt, seed):
@@ -113,6 +114,11 @@ def laminar_profile(path):
     x, u, T, rho = data[:, 0], data[:, 1], data[:, 2], data[:, 3]
     species = [s[2:] for s in names[4:]]
     dTdx = np.gradient(T, x)
+    if abs(T[-1] - T[0]) < 50.0:
+        # A diffusion flame (both streams at the same temperature): anchored at its peak temperature
+        i_f = np.argmax(T)
+        return {"x": x - x[i_f], "u": np.zeros_like(u), "T": T, "rho": rho, "Y": data[:, 4:], "species": species,
+                "delta": None, "S_L": 0.0}
     i_f = np.argmax(dTdx)
     delta = (T[-1] - T[0]) / dTdx[i_f]
     return {"x": x - x[i_f], "u": u, "T": T, "rho": rho, "Y": data[:, 4:], "species": species,
@@ -133,8 +139,11 @@ def init(args):
     gas = ct.Solution(args.mechanism, args.phase)
     assert gas.species_names == prof["species"], "species differ between the flame and the mechanism"
     delta, S_L = prof["delta"], prof["S_L"]
-    h = delta / 10.0
-    n, nx, r = args.n, args.nx, args.ratio
+    diffusion = delta is None
+    if diffusion and not (args.h and args.x_f and args.notch):
+        raise SystemExit("a diffusion flame needs --h, --x-f and --notch")
+    h = args.h or delta / 10.0
+    n, nx, r = args.n, args.nx + args.extend, args.ratio
     if n % r or nx % r:
         raise SystemExit("--ratio must divide --n and --nx")
     fields, _, _ = read_restart(args.hit)
@@ -145,7 +154,7 @@ def init(args):
 
     # 1D profile, cell averages over 4 points per DNS cell, stretched by F about x_f
     F = args.thicken
-    x_f = args.burnt * delta
+    x_f = args.x_f if diffusion else args.burnt * delta + args.extend * h
     n_sub = 4
     xs = ((np.arange(nx)[:, None] + (np.arange(n_sub)[None, :] + 0.5) / n_sub) * h).ravel()
     xi = (x_f - xs) / F  # Cantera's fresh side (x < 0) to the right of x_f
@@ -166,12 +175,17 @@ def init(args):
 
     # Turbulence window along x (DNS cell centers), the periodic HIT box tiled along x from its start
     xc = (np.arange(nx) + 0.5) * h
-    x_a = x_f + args.gap * delta
-    x_b = nx * h - args.margin * delta
     ramp = args.lt
-    w = (0.5 * (1 + np.tanh((xc - x_a - ramp) / (0.25 * ramp)))) * (0.5 * (1 - np.tanh((xc - x_b + ramp) / (0.25 * ramp))))
-    w[xc < x_a] = 0.0
-    w[xc > x_b] = 0.0
+    if diffusion:
+        # Turbulence on both sides, a Gaussian notch of half-width --notch at the flame, tapered at both outlets
+        x_a, x_b = 0.0, nx * h
+        w = (1.0 - np.exp(-((xc - x_f) / args.notch) ** 2)) * np.tanh(xc / (0.25 * ramp)) * np.tanh((x_b - xc) / (0.25 * ramp))
+    else:
+        x_a = x_f + args.gap * delta
+        x_b = nx * h - args.margin * delta
+        w = (0.5 * (1 + np.tanh((xc - x_a - ramp) / (0.25 * ramp)))) * (0.5 * (1 - np.tanh((xc - x_b + ramp) / (0.25 * ramp))))
+        w[xc < x_a] = 0.0
+        w[xc > x_b] = 0.0
     i0 = int(round(x_a / h))
     idx = (np.arange(nx) - i0) % n
 
@@ -195,9 +209,10 @@ def init(args):
     out["T_SEED"] = block_average(np.broadcast_to(col["T"][:, None, None], (nx, n, n)), r)
     write_restart(args.out, {k: np.ascontiguousarray(v).ravel() for k, v in out.items()})
     urms = np.sqrt((ut ** 2).mean())
-    print(f"{args.out}: {nx // r} x {n // r} x {n // r} cells of {h * r * 1e6:.3f} um (DNS h = delta_L / 10 = "
-          f"{h * 1e6:.3f} um), Lx = {nx * h * 1e3:.4f} mm, L = {n * h * 1e3:.4f} mm, delta_L = {delta * 1e3:.4f} mm, "
-          f"S_L = {S_L:.5f} m/s, x_f = {x_f * 1e3:.4f} mm, F = {F:g}, u' = {urms:.3f} m/s")
+    print(f"{args.out}: {nx // r} x {n // r} x {n // r} cells of {h * r * 1e6:.3f} um (DNS h = {h * 1e6:.3f} um), "
+          f"Lx = {nx * h * 1e3:.4f} mm, L = {n * h * 1e3:.4f} mm, "
+          + ("" if diffusion else f"delta_L = {delta * 1e3:.4f} mm, S_L = {S_L:.5f} m/s, ")
+          + f"x_f = {x_f * 1e3:.4f} mm, F = {F:g}, u' = {urms:.3f} m/s")
 
 
 # ---------------------------------------------------------------- analysis
@@ -242,30 +257,52 @@ def surface(c, h):
 
 
 def laminar_heat_release(full, mechanism, phase):
+    """Heat release and H2 consumption per area of the laminar flame of FULL.csv."""
     import cantera as ct
     prof = laminar_profile(full)
     gas = ct.Solution(mechanism, phase)
-    hrr = np.empty(prof["x"].size)
+    k = gas.species_index("H2")
+    hrr, fuel = np.empty(prof["x"].size), np.empty(prof["x"].size)
     for i in range(hrr.size):
         gas.TPY = prof["T"][i], P0, prof["Y"][i]
         hrr[i] = gas.heat_release_rate
-    return np.trapezoid(hrr, prof["x"]), prof
+        fuel[i] = -gas.net_production_rates[k] * gas.molecular_weights[k]
+    return np.trapezoid(hrr, prof["x"]), np.trapezoid(fuel, prof["x"]), prof
 
 
 def snapshots(run):
     """Snapshot groups of RUN/solut: {index: [piece paths]}."""
     groups = {}
     for p in sorted(glob.glob(os.path.join(run, "solut", "*.vtu"))):
-        m = re.search(r"_(\d+)(?:_\d+)?\.vtu$", os.path.basename(p))
+        m = re.search(r"_(\d+)(?:_p\d+)?\.vtu$", os.path.basename(p))
         if m:
             groups.setdefault(int(m.group(1)), []).append(p)
     return groups
 
 
 def laminar(args):
-    q_l, prof = laminar_heat_release(args.full, args.mechanism, args.phase)
-    print(f"--q-l {q_l:.8e} --t-b {prof['T'][-1]:.6f} --y-u {prof['Y'][0][prof['species'].index('H2')]:.8e} "
-          f"--s-l {prof['S_L']:.8f}")
+    q_l, fuel_l, prof = laminar_heat_release(args.full, args.mechanism, args.phase)
+    k = prof["species"].index("H2")
+    print(f"--q-l {q_l:.8e} --fuel-l {fuel_l:.8e} --t-b {prof['T'][-1]:.6f} --y-u {prof['Y'][0][k]:.8e} "
+          f"--y-b {prof['Y'][-1][k]:.8e}")
+
+
+# Mass of H per mass of each H-carrying species of mechanisms/h2o2.yaml
+H_FRACTION = {"H2": 1.0, "H": 1.0, "OH": 1.00794 / 17.00734, "H2O": 2.01588 / 18.01528, "HO2": 1.00794 / 33.00674,
+              "H2O2": 2.01588 / 34.01468}
+
+
+def nonpremixed_row(t, f, h, area, args):
+    """Diffusion flame: heat release and fuel consumption per area, stoichiometric surface and conditional means."""
+    V = h ** 3
+    Z = sum(f["Y_" + k] * w for k, w in H_FRACTION.items() if "Y_" + k in f) / args.z_fuel
+    g = surface(Z, h)
+    band = np.abs(Z - args.z_st) < 0.025
+    row = {"t": t, "heat_release": f["HRR"].sum() * V / area, "fuel_rate": -f["OMEGA_H2"].sum() * V / area,
+           "A_st": g[band].sum() * V / (0.05 * area), "T_max": f["T"].max(),
+           "T_st": f["T"][band].mean() if band.any() else np.nan,
+           "kappa_st": f["PASR_KAPPA"][band].mean() if "PASR_KAPPA" in f and band.any() else 1.0}
+    return row
 
 
 def analyze(args):
@@ -280,22 +317,35 @@ def analyze(args):
     filters = [int(s) for s in args.filter.split(",")] if args.filter else []
     bins = np.linspace(0.0, 1.0, 51)
     rows, pdf_rows = [], []
-    groups = snapshots(args.run)
-    for idx in sorted(groups):
-        t, f = read_snapshot(groups[idx], h)
+    if args.npz:
+        def load(path):
+            d = np.load(path)
+            return float(d["t"]), {k: d[k].astype(float) for k in d.files if k not in ("t", "h")}
+        frames = [lambda p=p: load(p) for p in sorted(glob.glob(os.path.join(args.npz, "flame_*.npz")))]
+    else:
+        groups = snapshots(args.run)
+        frames = [lambda p=groups[i]: read_snapshot(p, h) for i in sorted(groups)]
+    for frame in frames:
+        t, f = frame()
         V = h ** 3
-        c = np.clip(1.0 - f["Y_H2"] / args.y_u, 0.0, 1.0)
         theta = np.clip((f["T"] - T_U) / (T_b - T_U), 0.0, 1.0)
+        if args.z_fuel:
+            row = nonpremixed_row(t, f, h, area, args)
+            rows.append(row)
+            print(", ".join(f"{k} {v:.5g}" for k, v in row.items()), flush=True)
+            continue
+        c = np.clip((args.y_u - f["Y_H2"]) / (args.y_u - args.y_b), 0.0, 1.0)
         g = surface(c, h)
         cbar = c.mean(axis=(1, 2))
         x = (np.arange(c.shape[0]) + 0.5) * h
         i = np.argmax(cbar < 0.5) if cbar[0] >= 0.5 else 0
         x50 = np.interp(0.5, [cbar[i], cbar[i - 1]], [x[i], x[i - 1]]) if i > 0 else np.nan
         brush = 1.0 / np.max(np.abs(np.gradient(cbar, h)))
-        row = {"t": t, "S_c": -f["OMEGA_H2"].sum() * V / (RHO_U * args.y_u * args.s_l * area),
+        row = {"t": t, "S_c": -f["OMEGA_H2"].sum() * V / (args.fuel_l * area),
                "S_hrr": f["HRR"].sum() * V / (q_l * area), "A_res": g.sum() * V / area,
                "A_E": (g * f["TF_E"]).sum() * V / area if "TF_E" in f else np.nan,
                "x_flame": x50, "brush": brush, "T_max": f["T"].max(),
+               "fresh": np.clip((T_FRESH - f["T"]) / (T_FRESH - T_U), 0.0, 1.0).sum() * V / area,
                "E_mean": (f["TF_E"] * g).sum() / g.sum() if "TF_E" in f else 1.0,
                "F_mean": (f["TF_F"] * g).sum() / g.sum() if "TF_F" in f else 1.0}
         rows.append(row)
@@ -305,7 +355,9 @@ def analyze(args):
                 continue
             for r in [1] + filters:
                 cr = block_average(theta[: theta.shape[0] // r * r], r) if r > 1 else theta
-                sel = (cr > 0.02) & (cr < 0.98)
+                xr = (np.arange(cr.shape[0]) + 0.5) * h * r
+                near = (np.abs(xr - x50) < args.pdf_halfwidth)[:, None, None]
+                sel = (cr > 0.02) & (cr < 0.98) & near
                 hist, _ = np.histogram(cr[sel], bins=bins, density=True)
                 pdf_rows.append((t, r, hist))
     out = args.out or os.path.join(args.run, "series.csv")
@@ -318,6 +370,58 @@ def analyze(args):
             for t, r, hist in pdf_rows:
                 fo.write(f"{t:.6e},{r}," + ",".join(f"{v:.6g}" for v in hist) + "\n")
     print(f"wrote {out}")
+
+
+def extract(args):
+    """Each snapshot's fields on the (i, j, k) lattice as float32 arrays in OUT_DIR/flame_<index>.npz."""
+    import tomllib
+    with open(os.path.join(args.run, "input.toml"), "rb") as f:
+        m = tomllib.load(f)["mesh"]
+    h = m["Ly"] / m["Ny"]
+    os.makedirs(args.out_dir, exist_ok=True)
+    fields = args.fields.split(",")
+    for idx, paths in sorted(snapshots(args.run).items()):
+        out = os.path.join(args.out_dir, f"flame_{idx:06d}.npz")
+        if args.skip_existing and os.path.exists(out):
+            continue
+        t, f = read_snapshot(paths, h)
+        np.savez(os.path.join(args.out_dir, f"flame_{idx:06d}.npz"), t=t, h=h,
+                 **{k: f[k].astype(np.float32) for k in fields if k in f})
+        print(f"{idx}: t = {t:.4e}", flush=True)
+
+
+def figure(args):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    series = [s.split("=", 1) for s in args.series]
+    fig, ax = plt.subplots(1, 3, figsize=(15, 4.2))
+    styles = {}
+    for label, path in series:
+        d = np.genfromtxt(path, delimiter=",", names=True)
+        line, = ax[0].plot(d["t"] * 1e3, d["S_c"], label=label)
+        styles[label] = line.get_color()
+        ax[1].plot(d["t"] * 1e3, d["A_res"], color=line.get_color(), label=label)
+        if np.isfinite(d["A_E"]).any():
+            ax[1].plot(d["t"] * 1e3, d["A_E"], "--", color=line.get_color())
+    ax[0].set(xlabel="t [ms]", ylabel="consumption speed $S_c / S_L$")
+    ax[1].set(xlabel="t [ms]", ylabel="flame surface / $L^2$ (dashed: $E$-weighted)")
+    ax[0].legend(fontsize=7)
+    for spec in args.pdf or []:
+        label, rest = spec.split("=", 1)
+        path, t_sel, r_sel = rest.split(":")
+        rows = np.genfromtxt(path, delimiter=",", skip_header=1)
+        with open(path) as f:
+            mid = np.array([float(v) for v in f.readline().strip().split(",")[2:]])
+        rows = np.atleast_2d(rows)
+        pick = rows[(np.abs(rows[:, 0] - float(t_sel)) < 1e-9) & (rows[:, 1] == float(r_sel))]
+        if len(pick):
+            ax[2].plot(mid, pick[0, 2:], label=label, color=styles.get(label.split(" ")[0]))
+    ax[2].set(xlabel=r"$\theta = (T - T_u) / (T_b - T_u)$", ylabel="PDF (0.02 < $\\theta$ < 0.98)")
+    ax[2].legend(fontsize=7)
+    fig.tight_layout()
+    fig.savefig(args.out, dpi=130)
+    print(f"wrote {args.out}")
 
 
 def main():
@@ -338,23 +442,42 @@ def main():
     a.add_argument("--n", type=int, default=128)
     a.add_argument("--nx", type=int, default=224)
     a.add_argument("--burnt", type=float, default=8.0)
+    a.add_argument("--extend", type=int, default=0,
+                   help="DNS cells of burnt gas added at the outlet (room for the burnt side of thickened flames)")
     a.add_argument("--gap", type=float, default=1.5)
     a.add_argument("--margin", type=float, default=0.2)
     a.add_argument("--lt", type=float, required=True, help="window ramp length (the integral scale)")
+    a.add_argument("--h", type=float, help="DNS cell size (default delta_L / 10; required for a diffusion flame)")
+    a.add_argument("--x-f", type=float, help="diffusion flame: position of the peak temperature (m)")
+    a.add_argument("--notch", type=float, help="diffusion flame: half-width of the turbulence-free notch (m)")
     a = sub.add_parser("laminar")
     for name in ("full", "mechanism", "phase"):
         a.add_argument(name)
     a = sub.add_parser("analyze")
     a.add_argument("run")
-    a.add_argument("--q-l", type=float, required=True)
+    a.add_argument("--q-l", type=float, default=1.0)
     a.add_argument("--t-b", type=float, required=True)
-    a.add_argument("--y-u", type=float, required=True)
-    a.add_argument("--s-l", type=float, required=True)
+    a.add_argument("--y-u", type=float, default=0.0, help="H2 mass fraction of the fresh gas")
+    a.add_argument("--y-b", type=float, default=0.0, help="H2 mass fraction of the laminar flame's burnt gas")
+    a.add_argument("--fuel-l", type=float, default=1.0, help="H2 consumption per area of the laminar flame")
+    a.add_argument("--z-fuel", type=float, help="diffusion flame: H mass fraction of the fuel stream")
+    a.add_argument("--z-st", type=float, default=0.5, help="diffusion flame: stoichiometric mixture fraction")
     a.add_argument("--out")
     a.add_argument("--pdf-times")
     a.add_argument("--filter")
+    a.add_argument("--pdf-halfwidth", type=float, default=2e-3, help="PDF over cells within this distance of x_flame")
+    a.add_argument("--npz", help="read the snapshots from this directory of extract's files instead of RUN/solut")
+    a = sub.add_parser("extract")
+    a.add_argument("run")
+    a.add_argument("out_dir")
+    a.add_argument("--fields", default="T,Y_H2,Q,HRR,OMEGA_H2,TF_E,TF_F")
+    a.add_argument("--skip-existing", action="store_true")
+    a = sub.add_parser("figure")
+    a.add_argument("series", nargs="+", help="LABEL=series.csv")
+    a.add_argument("--pdf", nargs="*", help="LABEL=pdf.csv:TIME:FILTER")
+    a.add_argument("--out", default="flame_turbulence.png")
     args = ap.parse_args()
-    {"hit": hit, "init": init, "laminar": laminar, "analyze": analyze}[args.cmd](args)
+    {"hit": hit, "init": init, "laminar": laminar, "analyze": analyze, "extract": extract, "figure": figure}[args.cmd](args)
 
 
 if __name__ == "__main__":
