@@ -3,7 +3,7 @@
 t_stop = 0.02
 # t_wall_stop = 3.0
 # dt = 1.0e-5
-cfl = 0.5
+cfl = 0.25
 
 [mesh]
 type = "wedge"
