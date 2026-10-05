@@ -329,7 +329,6 @@ TEST(SyntheticInflowTest, InvalidInputIsRejected) {
              with(stress, "reynolds_stress = " + stress_list(0.01, 0.005, 0.005, 0.02) + "\n"),  // not semidefinite
              with(stress, "reynolds_stress = [0.01]\n"),
              with(stress, "profile = \"no_such_file.csv\"\n"),
-             with("T = 1.0\nL = 1.0\n", "T = 1.0\nL = 1.0\nbeta = 0.2\n"),  // transverse terms counted twice
          }) {
         Solver solver;
         EXPECT_THROW(solver.init(parse_toml(input)), std::runtime_error) << input;

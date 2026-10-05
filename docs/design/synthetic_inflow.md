@@ -126,6 +126,9 @@ profile once, and from the generator at every stage:
   target and its normal velocity follows `u_n,t`. Each step adds
   `-Z (u_n,t(t + dt) - u_n,t(t))`, with the generator evaluated at both
   times.
+- **Transverse terms.** The target's own incoming wave already holds the
+  target's transverse terms; adding the face's (`beta T-`) counts them
+  twice. Turbulent inlets therefore default to `beta = 0`.
 - **Temperature** stays imposed (no temperature fluctuations).
 
 Restart files carry the faces' `p_b` and `u_b` ([nscbc.md](nscbc.md)), and

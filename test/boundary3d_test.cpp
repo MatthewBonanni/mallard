@@ -221,6 +221,31 @@ TEST(Boundary3DTest, TransmissiveImageFaceIsTheOppositeFaceOfAHexCell) {
     EXPECT_EQ(n_boundary, 2u * (3 * 4 + 4 * 5 + 3 * 5));
 }
 
+TEST(Boundary3DTest, CharacteristicNeighborsContinueAcrossPeriodicSeams) {
+    // The transverse terms fit the faces around each characteristic face; at a
+    // periodic seam, a one-sided fit drove an outlet's pressure away with
+    // turbulence leaving through it
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 3\nNy = 4\nNz = 5\nLx = 1.5\nLy = 1.0\nLz = 2.0\n"
+                          "periodic = [\"y\", \"z\"]\n"));
+    mesh->copy_host_to_device();
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::NSCBC_OUTLET);
+    auto h_faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.char_faces);
+    auto h_offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.char_offsets);
+    auto h_dx = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.char_neighbor_dx);
+    ASSERT_EQ(h_faces.extent(0), 2u * 4 * 5);
+    for (uint32_t k = 0; k < h_faces.extent(0); k++) {
+        // Every face of the x planes has its 8 neighbors of the periodic 4 x 5 lattice, one spacing away
+        EXPECT_EQ(h_offsets(k + 1) - h_offsets(k), 8u) << "face " << h_faces(k);
+        for (uint32_t j = h_offsets(k); j < h_offsets(k + 1); j++) {
+            EXPECT_NEAR(std::abs(h_dx(j, 1)), 0.25 * std::round(std::abs(h_dx(j, 1)) / 0.25), 1e-12);
+            EXPECT_LE(std::abs(h_dx(j, 1)), 0.25 + 1e-12);
+            EXPECT_LE(std::abs(h_dx(j, 2)), 0.4 + 1e-12);
+            EXPECT_NEAR(h_dx(j, 0), 0.0, 1e-12);
+        }
+    }
+}
+
 TEST(Boundary3DTest, TransmissiveImageCellContainsTheImagePoint) {
     for (const char * type : {"cartesian_tet", "cartesian_prism", "cartesian_pyramid", "cartesian_mixed"}) {
         auto mesh = make_mesh_3d(type, 3, 3, 3);

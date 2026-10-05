@@ -14,6 +14,8 @@
 #include "input.h"
 
 #include <algorithm>
+#include <array>
+#include <limits>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
@@ -96,18 +98,14 @@ BoundaryCondition BoundaryCondition::from_input(const toml::value & input, const
             return sigma / L;
         };
         bc.relax[Relax::ACOUSTIC] = input.contains("sigma") ? rate("sigma", 0.0_r) : 0.25_r / L;
-        bc.relax[Relax::BETA] = -1.0_r;
+        // A turbulent inlet's incoming wave follows the target's own, which carries the target's
+        // transverse terms: by default it leaves out the face's, which would count them twice
+        bc.relax[Relax::BETA] = (bc.type == BoundaryType::NSCBC_INLET && InletProfile::turbulent(input)) ? 0.0_r : -1.0_r;
         if (input.contains("beta")) {
             bc.relax[Relax::BETA] = find_real(input, "beta");
             if (!(bc.relax[Relax::BETA] >= 0.0_r && bc.relax[Relax::BETA] <= 1.0_r)) {
                 throw InputError(where + ".beta must be in [0, 1].");
             }
-        }
-        if (bc.type == BoundaryType::NSCBC_INLET && InletProfile::turbulent(input)) {
-            // The incoming wave follows the target's own, which holds the target's transverse terms;
-            // adding the face's would count them twice and drive the inflow velocity away
-            if (input.contains("beta")) throw InputError(where + ".beta does not apply with turbulence.");
-            bc.relax[Relax::BETA] = 0.0_r;
         }
         if (bc.type == BoundaryType::NSCBC_INLET) {
             bc.relax[Relax::TEMPERATURE] = rate("sigma_T", -1.0_r);
@@ -338,19 +336,22 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     Kokkos::deep_copy(data.char_target_next, h_char_target);
 
     // Neighbors along the boundary for the transverse terms: characteristic faces
-    // sharing a node with nearly the same normal
+    // sharing a node (or its periodic image) with nearly the same normal
+    auto node_key = [&](uint32_t n) { return mesh.h_node_key.empty() ? n : mesh.h_node_key[n]; };
     std::unordered_map<uint32_t, std::vector<uint32_t>> char_of_node;
     for (size_t k = 0; k < char_faces.size(); k++) {
         for (uint32_t j = 0; j < mesh.h_n_nodes_of_face(char_faces[k]); j++) {
-            char_of_node[mesh.h_node_of_face(char_faces[k], static_cast<uint8_t>(j))].push_back(static_cast<uint32_t>(k));
+            char_of_node[node_key(mesh.h_node_of_face(char_faces[k], static_cast<uint8_t>(j)))].push_back(
+                static_cast<uint32_t>(k));
         }
     }
     std::vector<uint32_t> offsets(char_faces.size() + 1, 0), neighbors;
+    std::vector<std::array<rtype, N_DIM>> neighbor_dx;
     for (size_t k = 0; k < char_faces.size(); k++) {
         const uint32_t f = char_faces[k];
         std::vector<uint32_t> list;
         for (uint32_t j = 0; j < mesh.h_n_nodes_of_face(f); j++) {
-            for (uint32_t m : char_of_node[mesh.h_node_of_face(f, static_cast<uint8_t>(j))]) {
+            for (uint32_t m : char_of_node[node_key(mesh.h_node_of_face(f, static_cast<uint8_t>(j)))]) {
                 if (m == k || std::find(list.begin(), list.end(), m) != list.end()) continue;
                 const uint32_t g = char_faces[m];
                 rtype cos = 0.0;
@@ -360,6 +361,27 @@ BoundaryData make_boundary_data(const Mesh & mesh,
         }
         neighbors.insert(neighbors.end(), list.begin(), list.end());
         offsets[k + 1] = static_cast<uint32_t>(neighbors.size());
+        // Offset of each neighbor's center, the nearest periodic image of it
+        for (uint32_t m : list) {
+            const uint32_t g = char_faces[m];
+            std::array<rtype, N_DIM> best{};
+            rtype best2 = std::numeric_limits<rtype>::infinity();
+            for (uint32_t s = 0; s < mesh.h_shifts.extent(0); s++) {
+                for (const rtype sign : {1.0_r, -1.0_r}) {
+                    std::array<rtype, N_DIM> d;
+                    rtype d2 = 0.0_r;
+                    FOR_I_DIM {
+                        d[i] = (mesh.h_face_coords(g, i) - mesh.h_face_coords(f, i)) + sign * mesh.h_shifts(s, i);
+                        d2 += d[i] * d[i];
+                    }
+                    if (d2 < best2) {
+                        best2 = d2;
+                        best = d;
+                    }
+                }
+            }
+            neighbor_dx.push_back(best);
+        }
     }
     data.char_offsets = Kokkos::View<uint32_t *>("char_offsets", offsets.size());
     data.char_neighbors = Kokkos::View<uint32_t *>("char_neighbors", neighbors.size());
@@ -369,6 +391,10 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     for (size_t k = 0; k < neighbors.size(); k++) h_neighbors(k) = neighbors[k];
     Kokkos::deep_copy(data.char_offsets, h_offsets);
     Kokkos::deep_copy(data.char_neighbors, h_neighbors);
+    data.char_neighbor_dx = Kokkos::View<rtype *[N_DIM]>("char_neighbor_dx", neighbors.size());
+    auto h_neighbor_dx = Kokkos::create_mirror_view(data.char_neighbor_dx);
+    for (size_t k = 0; k < neighbors.size(); k++) FOR_I_DIM h_neighbor_dx(k, i) = neighbor_dx[k][i];
+    Kokkos::deep_copy(data.char_neighbor_dx, h_neighbor_dx);
     Kokkos::deep_copy(data.bcs, h_bcs);
     return data;
 }

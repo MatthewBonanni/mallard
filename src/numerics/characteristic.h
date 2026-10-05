@@ -71,7 +71,7 @@ struct CharacteristicTransverseFunctor {
         for (uint32_t j = boundaries.char_offsets(k); j < boundaries.char_offsets(k + 1); j++) {
             const uint32_t g = boundaries.char_faces(boundaries.char_neighbors(j));
             rtype dx[N_DIM], W_g[N_CONSERVATIVE];
-            FOR_I_DIM dx[i] = face_coords(g, i) - face_coords(f, i);
+            FOR_I_DIM dx[i] = boundaries.char_neighbor_dx(j, i);
             const rtype dx_n_g = dot<N_DIM>(dx, n);
             FOR_I_DIM dx[i] -= dx_n_g * n[i];
             face_state(g, W_g);

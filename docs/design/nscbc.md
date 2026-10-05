@@ -186,7 +186,12 @@ The tangential derivatives are a least-squares fit in the plane of the face,
 as finite-difference NSCBC differentiates along the boundary:
 
 - **Data.** The fit uses the states of the cells of the neighboring
-  characteristic faces (those sharing a node with nearly the same normal).
+  characteristic faces (those sharing a node with nearly the same normal),
+  also across periodic seams, at the nearest periodic image of their centers.
+  A one-sided fit at a seam biased the transverse terms there: with
+  turbulence leaving through an outlet periodic across, the outlet's
+  pressure along the seam fell and the run diverged after a few
+  flow-through times.
 - **Normal derivatives.** A point along the normal sets them to zero.
 - **Why not the boundary cell's own gradient.** It picks up the normal
   variation of waves crossing the boundary. On triangles it also picks up
