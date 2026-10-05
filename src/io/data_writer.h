@@ -46,6 +46,21 @@ static const std::unordered_map<DataFormat, std::string> FORMAT_NAMES = {
 /** @brief Named scalars of a restart file (version 3), e.g. the statistics' weight. */
 using RestartAttributes = std::vector<std::pair<std::string, double>>;
 
+/** @brief Upper bound on the faces of a cell, for the keys of RestartFaces. */
+constexpr uint64_t RESTART_FACES_PER_CELL = 8;
+
+/**
+ * @brief Face records of a restart file (version 4): the [p, u_n] of the
+ *        characteristic boundary faces (docs/design/nscbc.md). A face's key is
+ *        RESTART_FACES_PER_CELL times the global id of its cell, plus its local
+ *        face in that cell, so that it does not depend on the rank count.
+ */
+struct RestartFaces {
+    static constexpr uint32_t WIDTH = 2;
+    std::vector<uint64_t> keys;  // [face]
+    std::vector<rtype> values;   // [face][WIDTH]
+};
+
 /**
  * @brief Contents of a restart file.
  */
@@ -56,12 +71,16 @@ struct RestartData {
     std::vector<std::string> names;          // [variable]
     std::vector<std::vector<rtype>> fields;  // [variable][cell read]
     RestartAttributes attributes;
+    RestartFaces faces;                      // every face of the file, in increasing key
 
     /** @brief Values of the named variable, or nullptr if the file has none. */
     const std::vector<rtype> * find(const std::string & name) const;
 
     /** @brief Value of the named attribute, or nullptr if the file has none. */
     const double * attribute(const std::string & name) const;
+
+    /** @brief The RestartFaces::WIDTH values of the face with this key, or nullptr if the file has none. */
+    const rtype * face(uint64_t key) const;
 };
 
 /**
@@ -70,8 +89,9 @@ struct RestartData {
  *        their values in the order of cells).
  *
  * Version 2 files list their variable names, version 3 files also named
- * scalar attributes; version 1 files hold the flow block CONSERVATIVE_NAMES only. Either must contain the flow block of this
- * build's dimension.
+ * scalar attributes, version 4 files also face records; version 1 files hold
+ * the flow block CONSERVATIVE_NAMES only. Either must contain the flow block of
+ * this build's dimension.
  */
 RestartData read_restart(const std::string & filename, const std::vector<uint64_t> * cells = nullptr);
 
@@ -99,9 +119,10 @@ class DataWriter {
 
         /**
          * @brief Write a snapshot if due (or forced); restart files also store
-         *        the attributes.
+         *        the attributes and the faces (of the owned cells; collective).
          */
-        void write(uint64_t step, rtype t, bool force = false, const RestartAttributes & attributes = {});
+        void write(uint64_t step, rtype t, bool force = false, const RestartAttributes & attributes = {},
+                   const RestartFaces & faces = {});
 
         /**
          * @brief Next simulation time at which a snapshot is due
@@ -128,7 +149,7 @@ class DataWriter {
         void write_vtu(const std::string & filename, rtype t) const;
         void write_vtu_faces(const std::string & filename, rtype t) const;
         void write_restart(const std::string & filename, uint64_t step, rtype t,
-                           const RestartAttributes & attributes) const;
+                           const RestartAttributes & attributes, const RestartFaces & faces) const;
         void write_pvd() const;
 
         /**
@@ -170,7 +191,7 @@ class DataWriter {
         uint64_t n_files = 0;
         void write_pvtu(const std::string & filename, const std::string & stem) const;
         void write_restart_distributed(const std::string & filename, uint64_t step, rtype t,
-                                       const RestartAttributes & attributes) const;
+                                       const RestartAttributes & attributes, const RestartFaces & faces) const;
         std::vector<uint32_t> geometry_faces;  // Empty: write all cells
         // HDF5 output: owned cells in global order, and the sizes of the mesh written
         GlobalOrder cell_order;

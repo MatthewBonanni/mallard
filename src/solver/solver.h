@@ -194,6 +194,12 @@ class Solver {
          *        over the step.
          */
         void update_characteristic_boundaries(rtype t_stage);
+        /** @brief The [p, u_n] of the characteristic faces of owned cells, once they hold a state. */
+        RestartFaces characteristic_restart_faces() const;
+        /** @brief Takes the characteristic faces' [p, u_n] from a restart file that has every face. */
+        void restore_characteristic_state(const RestartData & restart);
+        /** @brief Rank-count independent key of a boundary face in restart files. */
+        uint64_t restart_face_key(uint32_t i_face) const;
         /** @brief Adds the sponge-layer sources to the RHS per unit volume (owned cells). */
         void apply_sponges(const State & solution, const State & rhs);
         void calc_dt();
@@ -552,7 +558,8 @@ class Solver {
         rtype sponge_dt_max = std::numeric_limits<rtype>::infinity();  // 1 / max strength
 
         bool characteristic_transverse = false;  // Some characteristic boundary has transverse terms
-        rtype t_characteristic = -1.0;           // Time the incoming waves were last advanced from, < 0 before the first
+        rtype t_characteristic = -1.0;           // Time the incoming waves were last advanced from
+        bool characteristic_state_set = false;   // char_state holds the faces' state (from a step or a restart)
 
         // Checks
         uint32_t check_interval;

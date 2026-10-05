@@ -378,6 +378,61 @@ TEST(MPITest, RestartFilesDoNotDependOnTheRankCount) {
     comm::barrier();
 }
 
+TEST(MPITest, CharacteristicBoundaryStateRestartsOnAnyRankCount) {
+    // The faces' pressure and normal velocity are keyed by cell global ids, so
+    // a file written on any rank count continues on any other bitwise
+    const std::string dir = io_dir() + "_nscbc";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    auto input = [&](uint32_t n_steps, const std::string & output) {
+        return box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                         bcs("type = \"nscbc_inlet\"\nu = [0.3, 0.0]\np = 1.0\nT = 1.0\nL = 1.0\nsigma = 2.0\n",
+                             "type = \"nscbc_outlet\"\np = 1.0\nL = 1.0\nsigma = 2.0\n",
+                             "type = \"nscbc_outlet\"\np = 1.0\nL = 1.0\nsigma = 2.0\nbeta = 0.5\n",
+                             "type = \"wall_adiabatic\"\n"),
+                         n_steps) +
+               output;
+    };
+    auto writer = [&](const std::string & prefix) {
+        return "[[write_data]]\nprefix = \"" + prefix + "\"\nformat = \"restart\"\ninterval = 10\n";
+    };
+    auto from = [&](const std::string & file) {
+        std::string s = input(20, "");
+        s.replace(s.find(BLAST), std::strlen(BLAST), "type = \"restart\"\nfile = \"" + file + "\"\n");
+        return parse_toml(s);
+    };
+
+    Solver reference;
+    reference.set_distributed(false);
+    reference.init(parse_toml(input(20, "")));
+    reference.run();
+    const auto U_ref = gather(reference);
+
+    // Written by all ranks, and by one (each rank its own copy)
+    {
+        Solver first;
+        first.init(parse_toml(input(10, writer(dir + "/all"))));
+        first.run();
+        Solver serial;
+        serial.set_distributed(false);
+        serial.init(parse_toml(input(10, writer(dir + "/one_" + std::to_string(comm::rank())))));
+        serial.run();
+    }
+    comm::barrier();
+    for (const std::string & file : {dir + "/all_000010.restart", dir + "/one_0_000010.restart"}) {
+        Solver distributed;
+        distributed.init(from(file));
+        distributed.run();
+        EXPECT_EQ(max_rel_diff(gather(distributed), U_ref), 0.0) << file << " on " << comm::size() << " ranks";
+        Solver serial;
+        serial.set_distributed(false);
+        serial.init(from(file));
+        serial.run();
+        EXPECT_EQ(max_rel_diff(gather(serial), U_ref), 0.0) << file << " on one rank";
+    }
+    comm::barrier();
+}
+
 namespace {
 
 /** @brief Means, then covariances, of every global cell. */

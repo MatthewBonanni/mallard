@@ -50,9 +50,14 @@ velocity are continuous at contacts, `w-` is not. A hot front leaving
 through an outlet changes `Z` by a factor of two, and a stored `w-` would
 then put an O(`Z u`) pressure jump on the face.
 
-`p_b` and `u_b` start from the interior face state at the first step, and
-again after a restart. That is the only state, and restarts are therefore
-not bit-for-bit for runs with characteristic boundaries.
+`p_b` and `u_b` start from the interior face state at the first step. They
+are the only state of the boundary, and restart files carry them (format
+version 4), so restarted runs reproduce uninterrupted ones bitwise. Each face
+is keyed by the global id of its cell and its local face in that cell, and the
+faces are written in key order, so a file written on any number of ranks
+continues on any other. A file without some face of the run (version 3 and
+earlier, or one written with that boundary not characteristic) starts every
+face afresh from the solution.
 
 This is the LODI relation of Poinsot & Lele itself. For a plane wave at
 normal incidence, `dw-/dt = -K p'` gives the reflection coefficient
