@@ -2,8 +2,10 @@
 """Decaying isotropic turbulence of Comte-Bellot & Corrsin (J. Fluid Mech. 48, 1971) for LES.
 
     cbc_les.py init N OUT.restart [--seed 1] [--mt 0.1]
+    cbc_les.py rescale IN.restart OUT.restart
     cbc_les.py spectra RESTART [RESTART ...] -o spectra.csv
     cbc_les.py compare spectra.csv [--budget integrals.csv] [--plot out.png]
+    cbc_les.py figure LABEL=spectra.csv ... [--out cbc_spectra.png]
 
 Grid turbulence behind a mesh of M = 5.08 cm at U0 = 10 m/s, measured at
 t U0 / M = 42, 98 and 171 (examples/cbc_les/reference/cbc_spectra.csv, their
@@ -20,6 +22,12 @@ the exact averages of that field. Uniform density 1.2 kg/m^3 and pressure
 from a fictitious sound speed c = sqrt(<u_i u_i>) / Mt (Mt = 0.1 by default,
 so compressibility stays at the 1% level while the Reynolds number is the
 experiment's: nu = 1.5e-5 m^2/s). Prints the [physics] values.
+
+rescale: a snapshot of a short pre-run (0.1 s) with its solenoidal velocity
+rescaled shell by shell to the spectrum of station 1, uniform density and
+the mean pressure, at t = 0: the phases of a developed field with the
+measured spectrum (two cycles remove the slow initial decay of random
+phases).
 
 spectra: shell spectra E(k) of each snapshot (cell averages turned into point
 values by dividing each mode by its cell-average factor), one row per shell
@@ -254,6 +262,29 @@ def compare(args):
     return rows
 
 
+def figure(args):
+    """Spectra of several runs (LABEL=spectra.csv) at stations 2 and 3 against the measurements."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    k_ref, e_ref = reference()
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.2), sharey=True)
+    for ax, station in zip(axes, (98, 171)):
+        ax.loglog(k_ref, e_ref[station], "ko", mfc="none", label="Comte-Bellot & Corrsin")
+        for i, item in enumerate(args.runs):
+            label, path = item.rsplit("=", 1)
+            data = np.loadtxt(path, delimiter=",", skiprows=1)
+            times = np.unique(data[:, 0])
+            t = times[np.argmin(np.abs(times - STATIONS[station]))]
+            sel = data[:, 0] == t
+            ax.loglog(data[sel, 3], data[sel, 4], "-", color=f"C{i}", lw=1.2, label=label)
+        ax.set(xlabel="k (1/m)", title=f"t U0 / M = {station}", xlim=(10, 1000), ylim=(1e-6, 1e-3))
+    axes[0].set_ylabel("E(k) (m$^3$/s$^2$)")
+    axes[1].legend(frameon=False, fontsize=8)
+    fig.tight_layout()
+    fig.savefig(args.out, dpi=150)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -268,12 +299,15 @@ def main():
     a = sub.add_parser("spectra")
     a.add_argument("restarts", nargs="+")
     a.add_argument("-o", "--output", required=True)
+    a = sub.add_parser("figure")
+    a.add_argument("runs", nargs="+", help="LABEL=spectra.csv")
+    a.add_argument("--out", default="cbc_spectra.png")
     a = sub.add_parser("compare")
     a.add_argument("spectra")
     a.add_argument("--budget")
     a.add_argument("--plot")
     args = ap.parse_args()
-    {"init": init, "rescale": rescale, "spectra": spectra, "compare": compare}[args.cmd](args)
+    {"init": init, "rescale": rescale, "spectra": spectra, "compare": compare, "figure": figure}[args.cmd](args)
 
 
 if __name__ == "__main__":
