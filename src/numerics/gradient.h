@@ -225,6 +225,9 @@ struct LSQVertexGradientFunctor {
     Kokkos::View<uint8_t *> cells_of_cell_shift;
     VertexGradientWeights weights;
     bool quadratic = true;
+    // Axisymmetric runs: r-weighted second moments of the cells (Mesh::cell_covariance),
+    // so that the quadratic fits the cells' averages rather than point values
+    Kokkos::View<rtype *[3]> covariance;
 
     static constexpr uint8_t NB = N_DIM + N_DIM * (N_DIM + 1) / 2;  // Linear and quadratic monomials
 
@@ -262,11 +265,48 @@ struct LSQVertexGradientFunctor {
         double A[NB][NB] = {}, M[N_DIM][N_DIM] = {};
         double scale = 0.0;  // Inverse length that keeps the monomials of order one
         uint16_t n_points = 0;
-        auto monomials = [&](const double * dx, double * phi) {
+        // The mean of (x - x_i)_a (x - x_i)_b over neighbor point k, minus that over cell i
+        auto moment_offset = [&](bool is_face, uint32_t k, uint8_t m) {
+            if constexpr (N_DIM == 2) {
+                if (covariance.extent(0) == 0) return 0.0;
+                const double C_i = double(covariance(i_cell, m));
+                if (!is_face) return double(covariance(cells_of_cell(k), m)) - C_i;
+                const uint32_t f = faces.faces_of_cell(k);
+                const BoundaryType type = faces.boundaries.bcs(faces.boundaries.face_bc(f)).type;
+                // A prescribed state is a point value at the face; other ghosts mirror cell i
+                if (type == BoundaryType::DIRICHLET || type == BoundaryType::UPT || type == BoundaryType::FARFIELD) {
+                    return -C_i;
+                }
+                double n[2] = {double(faces.face_normals(f, 0)), double(faces.face_normals(f, 1))};
+                const double len = Kokkos::sqrt(n[0] * n[0] + n[1] * n[1]);
+                n[0] /= len;
+                n[1] /= len;
+                const double R[2][2] = {{1.0 - 2.0 * n[0] * n[0], -2.0 * n[0] * n[1]},
+                                        {-2.0 * n[0] * n[1], 1.0 - 2.0 * n[1] * n[1]}};
+                const double C[2][2] = {{C_i, double(covariance(i_cell, 1))},
+                                        {double(covariance(i_cell, 1)), double(covariance(i_cell, 2))}};
+                const uint8_t a = (m == 2) ? 1 : 0, b = (m == 0) ? 0 : 1;
+                double mirrored = 0.0;
+                for (uint8_t p = 0; p < 2; p++) {
+                    for (uint8_t q = 0; q < 2; q++) mirrored += R[a][p] * C[p][q] * R[b][q];
+                }
+                return mirrored - double(covariance(i_cell, m));
+            } else {
+                (void)is_face;
+                (void)k;
+                (void)m;
+                return 0.0;
+            }
+        };
+        auto monomials = [&](const double * dx, double * phi, bool is_face, uint32_t k) {
             FOR_I_DIM phi[i] = dx[i] * scale;
             uint8_t m = N_DIM;
             for (uint8_t r = 0; r < N_DIM; r++) {
-                for (uint8_t c = r; c < N_DIM; c++) phi[m++] = phi[r] * phi[c];
+                for (uint8_t c = r; c < N_DIM; c++) {
+                    phi[m] = phi[r] * phi[c];
+                    if (covariance.extent(0) > 0) phi[m] += moment_offset(is_face, k, m - N_DIM) * scale * scale;
+                    m++;
+                }
             }
         };
         auto widen = [](const rtype * dx_r, double * dx) {
@@ -275,12 +315,12 @@ struct LSQVertexGradientFunctor {
             FOR_I_DIM d2 += dx[i] * dx[i];
             return 1.0 / d2;
         };
-        for_each_point(i_cell, [&](const rtype * dx_r, bool, uint32_t) {
+        for_each_point(i_cell, [&](const rtype * dx_r, bool is_face, uint32_t k) {
             double dx[N_DIM];
             const double w = widen(dx_r, dx);
             if (n_points++ == 0) scale = Kokkos::sqrt(w);
             double phi[NB];
-            monomials(dx, phi);
+            monomials(dx, phi, is_face, k);
             for (uint8_t p = 0; p < NB; p++) {
                 for (uint8_t q = p; q < NB; q++) A[p][q] += w * phi[p] * phi[q];
             }
@@ -297,7 +337,7 @@ struct LSQVertexGradientFunctor {
             double c[N_DIM];
             if (fit_quadratic) {
                 double phi[NB];
-                monomials(dx, phi);
+                monomials(dx, phi, is_face, k);
                 cholesky_solve<NB>(L, phi);
                 FOR_I_DIM c[i] = w * scale * phi[i];
             } else {
@@ -355,7 +395,7 @@ inline LSQVertexGradientFunctor make_vertex_gradient(const LSQGradientFunctor & 
     LSQVertexGradientFunctor functor{faces, mesh.offsets_cells_of_cell, mesh.cells_of_cell, mesh.cells_of_cell_shift,
                                      {Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_cells", mesh.cells_of_cell.extent(0)),
                                       Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_faces", faces.faces_of_cell.extent(0))},
-                                     quadratic};
+                                     quadratic, quadratic ? mesh.cell_covariance : Kokkos::View<rtype *[3]>()};
     Kokkos::parallel_for("vertex_gradient_weights", mesh.n_cells,
                          KOKKOS_LAMBDA(const uint32_t i_cell) { functor.compute_weights(i_cell); });
     return functor;

@@ -249,6 +249,13 @@ void Mesh::allocate_and_fill(const std::vector<std::array<rtype, N_DIM>> & nodes
     h_face_normals = Kokkos::create_mirror_view(face_normals);
     h_face_coords = Kokkos::create_mirror_view(face_coords);
     h_cells_of_face = Kokkos::create_mirror_view(cells_of_face);
+    axisymmetric = false;
+    cell_measure = cell_volume;
+    face_measure = face_area;
+    h_cell_measure = h_cell_volume;
+    h_face_measure = h_face_area;
+    cell_covariance = {};
+    h_cell_covariance = {};
     for (uint32_t i_node = 0; i_node < n_nodes; i_node++) {
         FOR_I_DIM h_node_coords(i_node, i) = nodes[i_node][i];
     }

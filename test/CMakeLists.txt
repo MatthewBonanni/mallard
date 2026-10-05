@@ -28,6 +28,7 @@ if(Mallard_DIM EQUAL 2)
     restart_test.cpp
     boundary_test.cpp
     source_test.cpp
+    axisymmetric_test.cpp
     io_test.cpp
     mesh_file_test.cpp
     mpi_test.cpp

@@ -1,0 +1,84 @@
+# Spherical Noh problem (Noh, J. Comput. Phys. 72, 1987) on the meridian
+# plane of an axisymmetric run: cold gas (gamma = 5/3, rho = 1, p ~ 0) streams
+# toward the origin at unit speed. A shock stalls the gas and runs outward at
+# 1/3; behind it rho = ((gamma + 1) / (gamma - 1))^3 = 64 and p = 64/3, ahead
+# of it the converging flow compresses the gas to rho = (1 + t / R)^2.
+#
+# The quadrant x, r in [0, 1] is the hemisphere x >= 0: a symmetry plane at
+# x = 0, the axis at r = 0, and the exact inflow state on the outer faces. A
+# spherical shock in the (x, r) plane tests the axisymmetric scheme along and
+# across the axis alike. Compare with the exact solution at t = 0.6 (shock at
+# R = 0.2):
+#   python ../../tools/plot_noh.py noh.png solut/noh_000006.vtu
+# 200 x 200 quads, bound-preserving TENO5 (about 2 minutes on 4 threads): the
+# shock is at 0.2016-0.2018 in every direction (0.2034 next to the x = 0
+# plane), the post-shock density 62-63 against 64 except in the first cells
+# along the axis (up to 74) and the x = 0 plane (up to 68), the usual Noh
+# overshoot at symmetry lines, and the converging gas ahead of the shock
+# within 3.3% of (1 + t / R)^2.
+
+[run]
+t_stop = 0.6
+cfl = 0.5
+
+[mesh]
+type = "cartesian"
+Nx = 200
+Ny = 200
+Lx = 1.0
+Ly = 1.0
+
+[initialize]
+type = "analytical"
+rho = "1.0"
+u = ["-x / sqrt(x^2 + y^2 + 1e-30)", "-y / sqrt(x^2 + y^2 + 1e-30)"]
+p = "1e-6"
+
+[[boundaries]]
+name = "left"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "right"
+type = "dirichlet"
+rho = "(1 + t / sqrt(x^2 + y^2))^2"
+u = ["-x / sqrt(x^2 + y^2)", "-y / sqrt(x^2 + y^2)"]
+p = "1e-6 * (1 + t / sqrt(x^2 + y^2))^(10 / 3)"
+
+[[boundaries]]
+name = "top"
+type = "dirichlet"
+rho = "(1 + t / sqrt(x^2 + y^2))^2"
+u = ["-x / sqrt(x^2 + y^2)", "-y / sqrt(x^2 + y^2)"]
+p = "1e-6 * (1 + t / sqrt(x^2 + y^2))^(10 / 3)"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+bound_preserving = true
+
+[physics]
+type = "euler"
+axisymmetric = true
+gamma = 1.6666666666666667
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[output]
+check_interval = 100
+
+[[write_data]]
+prefix = "./solut/noh"
+format = "vtu"
+time_interval = 0.1
+variables = ["RHO", "U_X", "U_Y", "P"]
