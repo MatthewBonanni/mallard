@@ -41,7 +41,7 @@ struct CaseConfig {
     std::string bc_lr = "extrapolation";
     std::string bc_tb = "extrapolation";
     std::string init;
-    std::string run = "n_steps = 20\ncfl = 0.5\n";
+    std::string run = "n_steps = 20\ncfl = 0.25\n";
 };
 
 std::string make_input(const CaseConfig & c) {
@@ -133,7 +133,7 @@ TEST_P(MeshRecon, RiemannProblemIsSymmetricAboutDiagonal) {
     if (c.recon == "TENO") SKIP_IN_SINGLE_PRECISION("round-off flips TENO stencil selections at the discontinuities");
     c.nx = 20;
     c.ny = 20;
-    c.run = "t_stop = 0.2\ncfl = 0.5\n";
+    c.run = "t_stop = 0.2\ncfl = 0.25\n";
     c.init = "type = \"analytical\"\n"
              "rho = \"x >= 0.8 ? (y >= 0.8 ? 1.5 : 0.5322580645) : (y >= 0.8 ? 0.5322580645 : 0.1379928315)\"\n"
              "u = [\"x >= 0.8 ? 0.0 : 1.206045378\", \"y >= 0.8 ? 0.0 : 1.206045378\"]\n"
@@ -179,7 +179,7 @@ double sod_error(const std::string & mesh, const std::string & recon, uint32_t n
     c.ny = along_y ? n : 4;
     c.bc_lr = along_y ? "symmetry" : "extrapolation";
     c.bc_tb = along_y ? "extrapolation" : "symmetry";
-    c.run = "t_stop = 0.2\ncfl = 0.5\n";
+    c.run = "t_stop = 0.2\ncfl = 0.25\n";
     const std::string s = along_y ? "y" : "x";
     c.init = "type = \"analytical\"\n"
              "rho = \"" + s + " < 0.5 ? 1.0 : 0.125\"\n"
@@ -246,7 +246,7 @@ TEST(SolverRegression, TENOSodOnAFineStripBetweenSymmetryPlanesStaysOneDimension
     const uint32_t nx = 800, ny = 4;
     auto solver = std::make_unique<Solver>();
     solver->init(parse_toml(
-        "[run]\nn_steps = 3\ncfl = 0.5\n"
+        "[run]\nn_steps = 3\ncfl = 0.25\n"
         "[mesh]\ntype = \"cartesian\"\nNx = 800\nNy = 4\nLx = 1.0\nLy = 0.005\n"
         "[initialize]\ntype = \"analytical\"\nrho = \"x < 0.5 ? 1.0 : 0.125\"\nu = [\"0.0\", \"0.0\"]\n"
         "p = \"x < 0.5 ? 1.0 : 0.1\"\n"
@@ -290,7 +290,7 @@ TEST(SolverRegression, MUSCLTransmissiveInflowBoundaryStaysBounded) {
     c.ny = 40;
     c.recon = "MUSCL";
     c.limiter = "venkatakrishnan";
-    c.run = "t_stop = 0.6\ncfl = 0.5\n";
+    c.run = "t_stop = 0.6\ncfl = 0.25\n";
     c.init = "type = \"analytical\"\n"
              "rho = \"x >= 0.8 ? (y >= 0.8 ? 1.5 : 0.5322580645) : (y >= 0.8 ? 0.5322580645 : 0.1379928315)\"\n"
              "u = [\"x >= 0.8 ? 0.0 : 1.206045378\", \"y >= 0.8 ? 0.0 : 1.206045378\"]\n"
@@ -315,7 +315,7 @@ double advection_error(const std::string & mesh, const std::string & recon, uint
     c.recon = recon;
     c.nx = n;
     c.ny = n;
-    c.run = "t_stop = 0.2\ncfl = 0.4\n";
+    c.run = "t_stop = 0.2\ncfl = 0.2\n";
     c.init = "type = \"analytical\"\n"
              "rho = \"1.0 + 0.3 * exp(-80 * ((x - 0.35)^2 + (y - 0.4)^2))\"\n"
              "u = [\"1.0\", \"0.5\"]\n"
@@ -367,7 +367,7 @@ TEST_P(Recon, TransmissiveInflowOnTrianglesKeepsOneDimensionalShockSpeed) {
     c.recon = GetParam();
     c.nx = 60;
     c.ny = 20;
-    c.run = "t_stop = 0.5\ncfl = 0.5\n";
+    c.run = "t_stop = 0.5\ncfl = 0.25\n";
     c.init = "type = \"analytical\"\n"
              "rho = \"x < 0.8 ? 0.1379928315 : 0.5322580645\"\n"
              "u = [\"x < 0.8 ? 1.206045378 : 0.0\", \"1.206045378\"]\n"
@@ -393,7 +393,7 @@ TEST(SolverValidation, ObliqueShockOverWedgeMatchesTheory) {
     // Mach 1.758 flow over an 8 degree compression ramp: weak oblique shock
     // with p2/p1 = 1.4984 (inlet contraction is mild enough to stay started)
     std::ostringstream s;
-    s << "[run]\nt_stop = 0.01\ncfl = 0.5\n"
+    s << "[run]\nt_stop = 0.01\ncfl = 0.25\n"
       << "[mesh]\ntype = \"wedge\"\nNx = 80\nNy = 60\nLx = 2.0\nLy = 1.5\n"
       << "[initialize]\ntype = \"constant\"\nu = [600.0, 0.0]\np = 101325.0\nT = 300.0\n"
       << "[[boundaries]]\nname = \"left\"\ntype = \"upt\"\nu = [600.0, 0.0]\np = 101325.0\nT = 300.0\n"
@@ -437,7 +437,7 @@ double carbuncle_growth(const std::string & riemann) {
     const double rho2 = 5.2682926829268295, u2 = 1.1388888888888888, p2 = 29.880952380952383;
     std::ostringstream s;
     s << std::setprecision(17)
-      << "[run]\nn_steps = 3000\ncfl = 0.4\n"
+      << "[run]\nn_steps = 3000\ncfl = 0.2\n"
       << "[mesh]\ntype = \"cartesian\"\nNx = 40\nNy = 40\nLx = 1.0\nLy = 1.0\n"
       << "[initialize]\ntype = \"analytical\"\n"
       << "rho = \"x < 0.5 ? " << rho1 << " : " << rho2
@@ -485,7 +485,7 @@ TEST(SolverTest, ResultIsIndependentOfThreadCount) {
     if (const char * out = std::getenv("MALLARD_THREAD_TEST_OUT")) {
         Solver solver;
         solver.init(parse_toml(
-            "[run]\nn_steps = 20\ncfl = 0.5\n"
+            "[run]\nn_steps = 20\ncfl = 0.25\n"
             "[mesh]\ntype = \"cartesian_tri\"\nNx = 16\nNy = 16\nLx = 1.0\nLy = 1.0\n"
             "[initialize]\ntype = \"analytical\"\n"
             "rho = \"1.0 + (x < 0.4 ? 1.0 : 0.0)\"\nu = [\"0.2\", \"0.1\"]\np = \"x < 0.4 ? 2.0 : 1.0\"\n"
@@ -534,7 +534,7 @@ double vortex_energy_loss(double low_mach_cutoff) {
     const double p0 = 1.0 / (1.4 * 0.01);
     std::ostringstream s;
     s << std::setprecision(17)
-      << "[run]\nt_stop = 1.0\ncfl = 0.5\n"
+      << "[run]\nt_stop = 1.0\ncfl = 0.25\n"
       << "[mesh]\ntype = \"cartesian\"\nNx = 32\nNy = 32\nLx = " << M_PI << "\nLy = " << M_PI << "\n"
       << "[initialize]\ntype = \"analytical\"\nu = [\"sin(x) * cos(y)\", \"-cos(x) * sin(y)\"]\n"
       << "p = \"" << p0 << " + (cos(2 * x) + cos(2 * y)) / 4\"\nT = \"1.0\"\n";

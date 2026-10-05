@@ -166,8 +166,27 @@ class Solver {
          */
         std::array<rtype, N_FLOW_STATISTICS> integrate_flow_statistics();
 
+        /**
+         * @brief W = [rho, u, p] in W_cells and its gradients in
+         *        viscous_gradients on the owned cells: from the reconstruction
+         *        polynomials (TENO), else least squares.
+         */
+        void update_velocity_gradients();
+
+        /** @brief Q = (|Omega|^2 - |S|^2) / 2 and the vorticity of each owned cell, into vortex_fields. */
+        void update_vortex_fields();
+
         // Public because nvcc rejects device lambdas in non-public member functions
         void update_average_pressure_outlets(StateView solution);
+        /**
+         * @brief Add the uniform body force along the mass flow direction that
+         *        holds the volume average of rho u at its target: it cancels the
+         *        rate of change of that average from all other terms of the RHS
+         *        (integrated over the cells, before division by volume), plus
+         *        the remaining gap divided by the time step. The energy gains
+         *        the force's work.
+         */
+        void add_mass_flow_force(StateView solution, StateView rhs);
         /**
          * @brief At the first stage of each step: the transverse terms of the
          *        characteristic boundaries and their incoming waves, advanced
@@ -262,6 +281,9 @@ class Solver {
         bool is_distributed() const { return distribute && comm::size() > 1; }
         const Distribution & get_distribution() const { return distribution; }
 
+        /** @brief Body force per unit volume, along the mass flow direction, of the last RHS ([source] mass_flow). */
+        double get_mass_flow_force() const { return mass_flow_force; }
+
         rtype get_time() const { return t; }
         const Statistics & get_statistics() const { return statistics; }
         uint32_t get_step() const { return step; }
@@ -282,6 +304,9 @@ class Solver {
         Kokkos::View<rtype *[N_PRIMITIVE]>::host_mirror_type h_primitives;
         Kokkos::View<rtype *> p_max;  // largest pressure of each cell so far, if P_MAX is written
         Kokkos::View<rtype *>::host_mirror_type h_p_max;
+        // Q, then the vorticity (one component in 2D), if any of them is written
+        Kokkos::View<rtype **> vortex_fields;
+        Kokkos::View<rtype **>::host_mirror_type h_vortex_fields;
 
     protected:
         void init_mesh();
@@ -357,7 +382,7 @@ class Solver {
         rtype t_stop;
         rtype t_wall_stop;
         bool use_cfl;
-        rtype dt;
+        rtype dt = 0.0;
         rtype dt_fixed = 0.0;
         rtype cfl;
         rtype t;
@@ -488,6 +513,11 @@ class Solver {
         StateView source_field;
         StateView::host_mirror_type h_source_field;
         rtype t_source = -1.0;
+        bool hold_mass_flow = false;
+        double mass_flow_target = 0.0;      // volume average of rho u along the direction
+        rtype mass_flow_direction[N_DIM] = {};
+        double domain_volume = 0.0;
+        double mass_flow_force = 0.0;
 
         // Sponge layers: owned cells of positive total strength sum_i sigma_i,
         // and sum_i sigma_i U_ref,i of the conservatives, then the partial densities

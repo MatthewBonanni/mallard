@@ -9,21 +9,21 @@
 # workshop's 128^3).
 #
 # Run on several GPUs (3D build with MPI). TENO's setup runs on the host and
-# needs about 100 KB per local cell there (owned plus halo), so use enough
-# ranks: 8 A100s for Nx = 128 (on 4 A100s, Nx = 96 takes 2 x 1 minute of setup,
-# then 0.29 s per step):
-#   mpirun -n 8 --bind-to none ../../build3d/src/Mallard -i input_periodic.toml --kokkos-map-device-id-by=mpi_rank
+# needs about 30 KB per local cell there (owned plus halo), so use enough
+# ranks: on 4 A100s (16 host threads each), Nx = 128 takes 1m 15s of setup,
+# then 0.21 s per step (Nx = 96: 40 s, then 0.09 s per step):
+#   mpirun -n 4 --bind-to none ../../build3d/src/Mallard -i input_periodic.toml --kokkos-map-device-id-by=mpi_rank
 #   python ../../tools/plot_taylor_green.py integrals.csv --full-box --ref spectral_Re1600_512.gdiag
 #
 # Result at Nx = 128 (the workshop's 128^3) with the default low-Mach
 # correction: E_k(t) within 2% of the 512^3 spectral DNS up to t = 20;
 # -dE/dt peaks at 0.0116 (t = 8.4) against 0.0129 (t = 9.0); the resolved
-# viscous dissipation 2 mu E peaks at 0.0072 (TENO polynomial gradients). On
-# 8 A100s: 15 minutes of setup, then 32,000 steps at 0.115 s each.
+# viscous dissipation 2 mu E peaks at 0.0072 (TENO polynomial gradients).
+# 32,000 steps: about 2 hours on 4 A100s (1 hour on 8, at 0.115 s per step).
 
 [run]
 t_stop = 20.0
-cfl = 0.8
+cfl = 0.4
 
 [mesh]
 type = "cartesian"

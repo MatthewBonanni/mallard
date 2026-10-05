@@ -48,7 +48,7 @@ std::string numbers3(const char * x, const char * y, const char * z) {
 
 // A blob advected through a fully periodic box
 std::string blob_input(uint32_t n_steps, const std::string & init, const std::string & extra) {
-    return "[run]\nn_steps = " + std::to_string(n_steps) + "\ncfl = 0.5\n" + box(10, true) + "[initialize]\n" + init +
+    return "[run]\nn_steps = " + std::to_string(n_steps) + "\ncfl = 0.25\n" + box(10, true) + "[initialize]\n" + init +
            "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
            "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n" +
            PERFECT_GAS + "[output]\ncheck_interval = 1000000\n" + extra;

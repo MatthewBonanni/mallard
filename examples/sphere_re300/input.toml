@@ -34,11 +34,12 @@
 #
 # Cost: 4.7 hours on four A100 GPUs (1.04M steps). The 2.06M-cell run started
 # at t = 244 from this one (tools/interpolate_restart.py) and took 6.7 hours on
-# eight A100s. tools/animate_sphere_re300.py animates the wake.
+# eight A100s. tools/animate_sphere_re300.py animates the wake from the Q
+# output (for an animation, write U and Q every 0.5 over the last periods).
 
 [run]
 t_stop = 750.0
-cfl = 0.8
+cfl = 0.4
 
 [mesh]
 type = "file"
@@ -108,7 +109,7 @@ file = "./solut/forces_sphere.csv"
 prefix = "./solut/sphere"
 format = "vtu"
 time_interval = 100.0
-variables = ["RHO", "U", "P"]
+variables = ["RHO", "U", "P", "Q"]
 
 [[write_data]]
 prefix = "./solut/wall"

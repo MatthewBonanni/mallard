@@ -4,7 +4,7 @@
 
 [run]
 t_stop = 0.0023999999999999998
-cfl = 0.8
+cfl = 0.4
 
 [mesh]
 type = "cartesian"
