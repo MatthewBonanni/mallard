@@ -32,6 +32,37 @@ expensive first; default true, ignored on CPUs).
 when it pays: GRI-3.0 and larger). V3 with the large mechanism: `python tools/v3_check.py
 <build>/src/MallardReactor` against `chemistry/nhexane_ignition.csv`.
 
+## `perf/`: performance set
+
+A fixed set for tracking performance across commits, defined in
+`perf/suite.json`, with baselines per hardware in `perf/baselines.csv`
+(cells per second; higher is better):
+
+| Benchmark | Build | Case |
+|---|---|---|
+| `teno5_2d` | 2D | 2D Riemann problem (configuration 3) on 1024 x 1024 quads, TENO5, 300 steps |
+| `muscl_2d` | 2D | the same with MUSCL |
+| `teno5_3d` | 3D | Taylor-Green vortex (Navier-Stokes) on 96^3 hexes, TENO5, 100 steps |
+| `h2o2@dt=...`, `gri30@dt=...` | 2D | `chemistry/h2o2.toml` and `chemistry/gri30.toml` at each `dt` |
+
+The solver cases report the throughput over the time stepping (the run's
+summary), the chemistry cases `MallardReactor`'s cells per second.
+
+```bash
+python tools/perf_suite.py run --build-2d build --build-3d build3d --out perf.json --csv perf.csv
+python tools/perf_suite.py compare perf.json            # exit 1 on a regression
+python tools/perf_suite.py update-baselines perf.json   # record new baselines
+```
+
+`run` runs each case once to warm up, then `--repeats` times (default 3),
+and records every run, the best and the spread ((best - worst) / best).
+MPI builds need a launcher, e.g. `--launcher "mpirun -n 1"`. The hardware is
+the GPU name from `nvidia-smi`, else the CPU model (`--hardware` overrides it).
+`compare` reports each benchmark's change from its baseline for that hardware
+and fails when one is slower by more than both `--threshold` (default 5%) and
+its spread. Benchmarks without a baseline are reported as `new`. After a
+deliberate performance change, update the baselines in the same pull request.
+
 ## `solver/`: full solver
 
 `reactive_shock_tube_2d.toml`: the reactive shock tube (V6) on 960,000 cells

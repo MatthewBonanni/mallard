@@ -40,3 +40,4 @@ Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the 3D
 | `soot_foil.py` | 2D cellular detonation: mean front speed against D_CJ, triple points on the front and the cell width they imply, and the numerical soot foil (`P_MAX`) as an image |
 | `animate_detonation_2d.py` | Cellular detonation animation: pressure and the soot foil building up in a window that follows the front, and the whole foil so far |
 | `animate_flame_2d.py` | Side-by-side animation of 2D flame runs (`flame_restart.py --ny`): temperature over the adiabatic flame temperature with heat-release contours, and the consumption speeds against time |
+| `perf_suite.py` | The performance set (`benchmarks/perf/`): runs it on 2D and 3D builds (best of several runs after a warm-up, with the spread), writes JSON/CSV, compares with the baselines for the hardware (fails when slower by more than the threshold and the spread) and updates them; standard library only |
