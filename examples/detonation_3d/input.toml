@@ -41,7 +41,24 @@
 #   python ../../tools/soot_foil_3d.py input.toml frames --png foils.png
 #   python ../../tools/animate_detonation_3d.py input.toml frames detonation_3d
 #
-# RESULTS_PLACEHOLDER
+# Results (t = 96 to 204 us, 17 cm of 3D travel): the front runs at
+# 1620.6 m/s over the second half (D_CJ to 0.2%). Its transverse waves stay
+# as two orthogonal families of lines parallel to the walls, crossing in
+# phase (the rectangular mode of Deiterding's and Tsuboi et al.'s runs,
+# seen in hydrogen-oxygen experiments as Deiterding notes); the peak
+# pressure behind the shock stays at 200-215 kPa (von Neumann: 175 kPa)
+# to the end, while in the 2D precursor it decays to 183 kPa by 252 us.
+# On every wall the foil shows
+# diagonal triple-point tracks crossing every 6.4 cm of travel (6.5 cm in
+# the 2D precursor; Deiterding's 2D period of 32 us is 5.2 cm) and dark
+# bands across the whole wall where a wave family hits it face-on, every
+# 4-8.6 cm, alternating between opposite walls. The superposed start is
+# symmetric under exchanging y and z and so is the solution: the foils of
+# y = 0 and z = 0 (and of y = W and z = W) are identical.
+#
+# Cost: 12,180 steps in 4.6 hours on four A100s (1.25 s per step, 15.4M
+# cells/s; chemistry about 60%), plus the 2D stage: 8,855 steps in 9
+# minutes on one A100.
 
 [run]
 t_stop = 6.0e-6
