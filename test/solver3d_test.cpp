@@ -392,12 +392,31 @@ TEST(Solver3DValidation, FlowStatisticsOfALinearVelocityField) {
     auto solver = init_case(c);
     const auto s = solver->integrate_flow_statistics();
     EXPECT_NEAR(s[1], 0.5 * (9.0 + 25.0 + 4.0), roundoff(1e-10));  // Enstrophy
+    EXPECT_NEAR(s[5], 9.0 + 25.0 + 4.0, roundoff(1e-10));         // |omega|^2
     EXPECT_NEAR(s[2], 1.0, roundoff(1e-10));                       // (div u)^2
     // Pressure from cell averages carries the same O(h^2) kinetic energy error
     EXPECT_NEAR(s[3], 2.0, 0.05);  // p div u
     // Kinetic energy from the cell averages of rho u misses their variance
     // within the cells: (8/3 + 3 + 25/3) / 2 = 7 minus O(h^2)
     EXPECT_NEAR(s[0], 7.0, 0.1);
+    EXPECT_NEAR(s[4], 14.0, 0.2);  // |u|^2
+}
+
+TEST(Solver3DValidation, FlowStatisticsOfDensityAndTemperature) {
+    // rho = 1 + x / 2 and p = 1 + y at rest with R = 1 on the unit cube:
+    // int rho^2 = 19 / 12, int T = 3 ln(3 / 2) and int T^2 = (7 / 3)(2 / 3),
+    // up to the O(h^2) error of cell averages
+    Case3D c;
+    c.n[0] = c.n[1] = c.n[2] = 8;
+    c.init = "type = \"analytical\"\nrho = \"1 + 0.5 * x\"\nu = [\"0.0\", \"0.0\", \"0.0\"]\np = \"1 + y\"\n";
+    c.extra = "[integrals]\nfile = \"" +
+              (std::filesystem::temp_directory_path() / "mallard_integrals_thermo.csv").string() + "\"\n";
+    auto solver = init_case(c);
+    const auto s = solver->integrate_flow_statistics();
+    EXPECT_NEAR(s[6], 19.0 / 12.0, 1e-3);
+    EXPECT_NEAR(s[7], 3.0 * std::log(1.5), 1e-3);
+    EXPECT_NEAR(s[8], 14.0 / 9.0, 2e-3);
+    EXPECT_NEAR(s[4], 0.0, roundoff(1e-14));
 }
 
 TEST(Solver3DValidation, TENOEnstrophyOfTheTaylorGreenVortex) {
