@@ -42,7 +42,7 @@ name = "front"
 type = "symmetry"
 
 [numerics]
-riemann_solver = "HLLC"
+riemann_solver = "HLL"
 time_integrator = "SSPRK3"
 
 [numerics.face_reconstruction]

@@ -270,26 +270,39 @@ def compare(case, probe_path, frame_dir, png, out_csv):
         shock_out.append((x[behind][np.argmax(np.abs(dp[behind]))] - xb) * scale if behind.any() else np.nan)
     ts, ui, di = np.array(ts), np.array(ui), np.array(di)
     shock_in, shock_out = np.array(shock_in), np.array(shock_out)
-    ring_t, ring_x = [], []
+    ring_t, ring_x, up_t, up_x, down_x = [], [], [], [], []
     for f in sorted(glob.glob(os.path.join(frame_dir, "frame_*.npz"))):
         with np.load(f) as z:
-            ring_t.append((float(z["t"]) - t_hit) * scale)
+            t = (float(z["t"]) - t_hit) * scale
+            ring_t.append(t)
             ring_x.append((float(z["ring"][0]) - xb) * scale)
+            # Upstream and downstream faces of the whole helium volume (Y_HE = 0.5 anywhere)
+            inside = np.nonzero((z["y_he"] > 0.5).any(axis=(1, 2)))[0]
+            if inside.size:
+                up_t.append(t)
+                up_x.append(((z["lo"][0] + inside[0] + 0.5) * float(z["dx"]) - xb) * scale)
+                down_x.append(((z["lo"][0] + inside[-1] + 0.5) * float(z["dx"]) - xb) * scale)
     ring_t, ring_x = np.array(ring_t), np.array(ring_x)
+    up_t, up_x, down_x = np.array(up_t), np.array(up_x), np.array(down_x)
     ms = 1e-3
-    # Windows (experiment time, s): early interface motion before the jet, late motion, ring after it forms
+    # The air jet pierces the helium when the axis has no upstream interface left
+    pierce = np.nonzero(np.isnan(ui) & (ts > 0.02 * ms))[0]
+    t_pierce = ts[pierce[0]] if pierce.size else ts.max()
+    t_last = ring_t.max() if ring_t.size else 0.0
+    # Windows in experiment time, after Haas & Sturtevant's x-t diagram (their figure 19): the initial
+    # interface motion over the first 0.04 ms; the air jet on the axis until it pierces the helium; the
+    # faces of the helium volume and the vortex ring once the ring has formed (t > 0.4 ms)
     result = {
-        "V_ui": fit(ts, ui, (0.01 * ms, 0.06 * ms)),
-        "V_uf": fit(ts, ui, (0.15 * ms, 0.30 * ms)),
-        "V_di": fit(ts, di, (0.03 * ms, 0.10 * ms)),
-        "V_df": fit(ts, di, (0.15 * ms, 0.40 * ms)),
         "V_R": fit(ts, shock_in, (0.0, 0.03 * ms)),
         "V_T": fit(ts, shock_out, (0.08 * ms, 0.15 * ms)),
-        "V_v": fit(ring_t, ring_x, (0.40 * ms, ring_t.max() if ring_t.size else 0)),
+        "V_ui": fit(ts, ui, (0.0, 0.04 * ms)),
+        "V_di": fit(ts, di, (0.0, t_pierce)),
+        "V_j": fit(ts, ui, (0.1 * ms, t_pierce)),
+        "V_uf": fit(up_t, up_x, (0.4 * ms, t_last)),
+        "V_df": fit(up_t, down_x, (0.4 * ms, t_last)),
+        "V_v": fit(ring_t, ring_x, (0.4 * ms, t_last)),
+        "t_pierce": t_pierce / ms,
     }
-    # The jet: the upstream interface on the axis overtakes the downstream one
-    pierce = np.nonzero(np.isnan(ui) & (ts > 0.02 * ms))[0]
-    result["t_j"] = ts[pierce[0]] / ms if pierce.size else np.nan
     for k, v in result.items():
         ref = HS_SPHERE.get(k)
         print(f"{k:5s} Mallard {v:8.1f}   Haas & Sturtevant {ref}")
@@ -307,8 +320,9 @@ def compare(case, probe_path, frame_dir, png, out_csv):
         ax.plot(ts / ms, di * 1e3, label="downstream interface (axis)")
         if ring_t.size:
             ax.plot(ring_t / ms, ring_x * 1e3, "o", ms=3, label="vortex ring core")
-        for key, x0, t0, label in (("V_ui", -22.5, 0.0, "H&S V_ui"), ("V_v", None, HS_SPHERE["t_v"], "H&S V_v")):
-            pass
+        if up_t.size:
+            ax.plot(up_t / ms, up_x * 1e3, ":", label="upstream face of the helium")
+            ax.plot(up_t / ms, down_x * 1e3, ":", label="downstream face of the helium")
         ax.set_xlabel("t (ms, experiment scale)")
         ax.set_ylabel("x - x_bubble (mm, experiment scale)")
         ax.legend()
