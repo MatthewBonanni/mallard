@@ -81,6 +81,15 @@ TEST(MPI3DTest, NavierStokesOnTetrahedraMatchesSerial) {
                                     "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n"));
 }
 
+TEST(MPI3DTest, LargeEddySimulationOnTetrahedraMatchesSerial) {
+    std::string input =
+        box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n");
+    const std::string u = "u = [\"0.3\", \"-0.1\", \"0.2\"]\n";
+    input.replace(input.find(u), u.size(),
+                  "u = [\"0.3 + 0.4 * sin(9 * y)\", \"-0.1 + 0.3 * sin(7 * z)\", \"0.2 + 0.3 * sin(8 * x + 3 * y)\"]\n");
+    expect_matches_serial(input + "[les]\nmodel = \"sigma\"\nC = 3.0\n");
+}
+
 TEST(MPI3DTest, CharacteristicBoundariesMatchSerial) {
     std::string input = box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"euler\"\n");
     const std::string from = "name = \"right\"\ntype = \"symmetry\"\n";

@@ -32,6 +32,13 @@ At least one stop condition is required.
 
 Generated meshes have boundary zones named `left`, `right`, `bottom` and `top`.
 
+`stretching = [beta_x, beta_y]` (`[beta_x, beta_y, beta_z]` in 3D) clusters the
+nodes of a generated mesh toward both ends of each direction with a nonzero
+factor: node `j` of `N` lies at `L/2 (1 + tanh(beta (2j/N - 1)) / tanh(beta))`;
+0 (the default) keeps the spacing uniform. For a channel between walls at
+`y = 0` and `y = Ly`, `stretching = [0, 1.7, 0]` makes the cells next to the
+walls about 8 times thinner than those at the center (with `Ny = 96`).
+
 `periodic = ["x", "y"]` (and `"z"` in 3D) makes a generated mesh (except
 `wedge`) periodic in those directions: `left`/`right`, `bottom`/`top` and
 `back`/`front` are joined into interior faces and disappear as boundary zones.
@@ -154,6 +161,37 @@ and conserved totals are per radian of the revolved domain (multiply forces by
 mixture model, chemistry and MPI work as in planar runs; meshes cannot be
 periodic in y. Method and accuracy: `docs/design/axisymmetric.md`.
 
+## `[les]`
+
+Large-eddy simulation with an explicit subgrid-scale (SGS) model
+(`navier_stokes` only, single gases and mixtures, planar runs). The model's
+eddy viscosity `mu_t = rho nu_t` is added to the molecular viscosity, with
+`cp mu_t / Pr_t` added to the conductivity and `mu_t / Sc_t` to every
+species' diffusivity (mixtures: in the mixture-averaged form, so the
+diffusive fluxes still sum to zero). Wall faces keep the molecular fluxes. The
+eddy viscosity of each cell comes from its least-squares velocity gradient
+`g_ij = du_i/dx_j`, with the filter width `Delta = V^(1/3)` (3D) or `A^(1/2)`
+(2D) of the cell; the time step includes it. Design, choices and validation:
+[`design/les.md`](design/les.md).
+
+| Key | Description |
+|---|---|
+| `model` | `sigma` (default in 3D), `wale` (default in 2D), `vreman` or `smagorinsky`; see below |
+| `C` | Model constant; defaults 1.35 (Sigma), 0.5 (WALE), 0.07 (Vreman's `c`), 0.17 (Smagorinsky) |
+| `Pr_t` | Turbulent Prandtl number, default 0.9 |
+| `Sc_t` | Turbulent Schmidt number, default 0.9 |
+
+| `model` | `nu_t` | Zero for |
+|---|---|---|
+| `sigma` (Nicoud et al. 2011) | `(C Delta)^2 s3 (s1 - s2)(s2 - s3) / s1^2`, `s1 >= s2 >= s3` the singular values of `g` | pure shear, solid rotation, two-dimensional flows (so not allowed in 2D builds), isotropic and axisymmetric expansion; `~ y^3` at walls |
+| `wale` (Nicoud & Ducros 1999) | `(C Delta)^2 (Sd:Sd)^(3/2) / ((S:S)^(5/2) + (Sd:Sd)^(5/4))`, `Sd` the traceless symmetric part of `g^2` | pure shear, isotropic expansion; `~ y^3` at walls |
+| `vreman` (Vreman 2004) | `c Delta^2 sqrt(B / (g:g))`, `B` the second invariant of `g g^T` | pure shear |
+| `smagorinsky` (Smagorinsky 1963) | `(C Delta)^2 sqrt(2 S:S)` | solid rotation (no wall damping: for comparisons only) |
+
+`MU_T` (output variable) is the eddy viscosity. `[integrals] budget = true`
+measures how much of the kinetic-energy dissipation comes from the model and
+how much from the scheme.
+
 ## `[initialize]`
 
 | Key | Description |
@@ -218,6 +256,14 @@ Strength and reference are evaluated once at cell centroids.
 | `check_nan` | Stop if the solution becomes non-finite |
 | `double_flux` | (gas mixtures) `true` for the double-flux scheme: each cell's energy is updated with its own `cp / cv` and energy offset frozen over the time step on both sides of its faces, and reset to the true equation of state after the step, so pressure and velocity stay exactly uniform across contacts between different gases. Energy is then not exactly conserved (about 0.2% over a multicomponent shock tube). Default `false` |
 | `low_mach_cutoff` | Low-Mach correction of the convective flux: the velocity jump across each interior face is scaled by `z = min(1, max(M_L, M_R, low_mach_cutoff))` before the Riemann solver, so that upwind dissipation scales with the flow speed rather than the sound speed. Default 0.1; 1 disables it. See [`numerics/overview.md`](numerics/overview.md) |
+| `convective_flux` | `riemann` (default): the Riemann solver at every face; `hybrid`: the kinetic-energy-preserving central flux of Kuya, Totani & Kawai (2018) on the same reconstructed states, blended into the Riemann solver where a shock sensor fires, `F = F_KEEP + phi (F_Riemann - F_KEEP)`. For large-eddy simulation: the central flux adds no dissipation, so the SGS model does the work (see `[integrals] budget`). `phi` is the larger of the face's two cells': 1 where the Ducros sensor restricted to compressions, `(div u)^2 / ((div u)^2 + |omega|^2)` with `div u < 0`, exceeds `sensor_threshold`, else `upwind_floor`. Boundary faces other than walls and symmetry planes use the Riemann solver. Species stay upwinded with the blended mass flux. Contacts and expansions are central: on Sod's problem the density error is about 1.8 times the Riemann solver's, with a 0.1% overshoot at the contact |
+
+### `[numerics.hybrid]`
+
+| Key | Description |
+|---|---|
+| `sensor_threshold` | Ducros sensor above which a cell compressing the flow is a shock, default 0.65 (1 disables the Riemann solver) |
+| `upwind_floor` | Upwind fraction of the other cells, default 0; a small value (e.g. 0.05) damps grid-scale noise on very irregular meshes, at the cost of numerical dissipation the budget then reports |
 
 ### `[numerics.face_reconstruction]`
 
@@ -311,6 +357,7 @@ rate is `-dE/dt` and its viscous part `2 mu * enstrophy / rho0`.
 |---|---|
 | `interval` | Every this many steps, default 1 |
 | `file` | Output file, default `integrals.csv` |
+| `budget` | `true` adds the kinetic-energy budget (planar runs): `ke_rate_convective`, `ke_rate_viscous` and `ke_rate_sgs`, the rates of change of the resolved kinetic energy `sum V rho |u|^2 / 2` caused by the convective, molecular viscous and SGS fluxes of the current state (each `sum V (u . R_m - |u|^2 / 2 R_rho)` over that part `R` of the right-hand side), and `eps_numerical = pressure_dilatation - ke_rate_convective`, the scheme's dissipation of kinetic energy (the convective terms of the exact equations change the kinetic energy of a periodic or walled domain only by the pressure work). `-ke_rate_viscous` and `-ke_rate_sgs` are the molecular and SGS dissipation. Costs one extra right-hand side per row and leaves the solution unchanged. Default `false` |
 
 ## `[statistics]`
 
@@ -370,6 +417,7 @@ Optional source terms, added per unit volume.
 | `gravity` | `[g_x, g_y]` (`[g_x, g_y, g_z]` in 3D); adds `rho g` to the momentum and `rho u . g` to the energy equation |
 | `rho`, `rhou`, `rhoE` | Expressions in `x`, `y`, `z`, `t` (`rhou` has one per component) for the mass, momentum and energy sources |
 | `time_dependent` | Re-evaluate the expressions at every Runge-Kutta stage (host-side, so costly on large meshes); otherwise they are evaluated once |
+| `mass_flow` | `[m_x, m_y]` (`[m_x, m_y, m_z]` in 3D): hold the volume average of `rho u` along this vector at its magnitude with a uniform body force `f` per unit volume along it (constant mass flow, e.g. a periodic channel). At every Runge-Kutta stage `f` cancels the rate of change of that average from all other terms (one global sum) and closes any remaining gap within the time step, so a flow started at the target stays there to rounding. The energy gains the force's work `f . u`. |
 
 The scheme is not exactly well balanced: hydrostatic states carry small spurious velocities (about 1e-4 of the sound speed on a 32x32 mesh) that vanish at second order under refinement. Wall and symmetry ghost states continue the hydrostatic pressure gradient.
 
