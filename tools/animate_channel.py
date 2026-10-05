@@ -41,6 +41,14 @@ def q_criterion(g):
     return 0.5 * ((w**2).sum((0, 1)) - (s**2).sum((0, 1)))
 
 
+def load_velocity(path, n):
+    """Step, time and velocity (3, nx, ny / 2, nz) of the lower half of the channel in a restart file."""
+    step, t, fields = read_restart(path)
+    rho = fields["RHO"].reshape(n)
+    u = np.stack([fields[f"RHOU_{c}"].reshape(n) / rho for c in "XYZ"])
+    return step, t, u[:, :, :n[1] // 2]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("input")
@@ -68,14 +76,12 @@ def main():
     yh = y[:ny_half]
     j_slice = int(np.argmin(np.abs(yh * u_tau / nu - args.slice_yplus)))
 
-    frames = sorted(args.frames, key=lambda p: read_restart(p)[0])
+    frames = sorted(args.frames)  # restart files are numbered by step
     images = []
     for k, path in enumerate(frames):
-        step, t, fields = read_restart(path)
-        rho = fields["RHO"].reshape(n)
-        u = np.stack([fields[f"RHOU_{c}"].reshape(n) / rho for c in "XYZ"])
-        q = q_criterion(velocity_gradient(u, x, y, z))[:, :ny_half]
-        ux = u[0][:, :ny_half]
+        step, t, u = load_velocity(path, n)
+        q = q_criterion(velocity_gradient(u, x, yh, z))
+        ux = u[0]
         mesh = pv.RectilinearGrid(x, yh, z)
         mesh.point_data["Q"] = q.ravel(order="F")
         mesh.point_data["u"] = ux.ravel(order="F")

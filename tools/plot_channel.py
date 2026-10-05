@@ -20,10 +20,14 @@ read from --mkm (downloaded there if missing).
 """
 import argparse
 import os
+import sys
 import tomllib
 import urllib.request
 
 import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from channel_init import grid, nodes  # noqa: E402
 
 MKM_URL = "https://turbulence.oden.utexas.edu/data/MKM/chan180/profiles/"
 
@@ -62,10 +66,13 @@ def read_profile(path, h):
 
 def read_forces(paths, t_start):
     """Time and the mean viscous x-force per unit area on the walls from t_start (time-weighted)."""
-    tables = [np.genfromtxt(p, delimiter=",", names=True) for p in paths]
     out = []
-    for d in tables:
-        t, f = d["t"], d["Fx_viscous"]
+    for p in paths:
+        # step, t, F_pressure (3), F_viscous (3); runs started from a restart file write no header
+        with open(p) as f:
+            header = not f.readline()[0].isdigit()
+        d = np.loadtxt(p, delimiter=",", skiprows=int(header), ndmin=2)
+        t, f = d[:, 1], d[:, 5]
         _, keep = np.unique(t, return_index=True)  # runs restarted from a restart repeat rows
         out.append((t[keep], f[keep]))
     t = out[0][0]
@@ -79,7 +86,9 @@ def main():
     ap.add_argument("profile")
     ap.add_argument("forces", nargs=2, help="forces CSVs of the bottom and top walls")
     ap.add_argument("--t-start", type=float, required=True, help="start of the averaging window")
+    ap.add_argument("--t-end", type=float, help="end of the averaging window (the profile's time; default: last force)")
     ap.add_argument("--half", help="profile over the first part of the window")
+    ap.add_argument("--half-label", default="first part of the window", help="legend of --half")
     ap.add_argument("--mkm", default=os.path.expanduser("~/.cache/mallard/mkm"))
     ap.add_argument("--out", default="channel.png")
     args = ap.parse_args()
@@ -97,14 +106,19 @@ def main():
 
     t, F = read_forces(args.forces, args.t_start)
     tau_t = F / (2 * Lx * Lz)  # both walls
-    win = t >= args.t_start
+    win = (t >= args.t_start) & (t <= (args.t_end if args.t_end is not None else np.inf))
     tau_w = np.trapezoid(tau_t[win], t[win]) / (t[win][-1] - t[win][0])
     prof = read_profile(args.profile, h)
     rho_w = prof["rho"][0]
     u_tau = np.sqrt(tau_w / rho_w)
     nu_w = mu / rho_w
     Re_tau = u_tau * h / nu_w
-    rho_b = np.trapezoid(prof["rho"], prof["y"])  # over the half channel, h = 1 units of y
+    raw = np.genfromtxt(args.profile, delimiter=",", names=True)
+    _, _, (_, y_centers, _) = grid(inp)
+    widths = np.diff(nodes(len(y_centers), Ly, float(inp["mesh"].get("stretching", [0, 0, 0])[1])))
+    if len(raw["y"]) != len(widths):
+        raise SystemExit(f"{args.profile}: {len(raw['y'])} rows, the mesh has {len(widths)} cells in y")
+    rho_b = (raw["MEAN_RHO"] * widths).sum() / Ly
     U_b = m_b / rho_b
     Cf = 2 * tau_w / (rho_b * U_b**2)
     Cf_mkm = 2 / ref["Ub"]**2
@@ -146,7 +160,7 @@ def main():
     a.semilogx(r["yp"][1:], r["U"][1:], "k-", lw=1.2, label="MKM 1999")
     a.semilogx(s["yp"], s["U"], "o", ms=3.5, mfc="none", color="C0", label="Mallard")
     if half:
-        a.semilogx(half["yp"], half["U"], "-", color="C1", lw=0.8, label="first part of window")
+        a.semilogx(half["yp"], half["U"], "-", color="C1", lw=0.8, label=args.half_label)
     yy = np.logspace(0, 2.4)
     a.semilogx(yy[yy < 12], yy[yy < 12], ":", color="0.5", lw=0.8)
     a.semilogx(yy[yy > 20], np.log(yy[yy > 20]) / 0.41 + 5.2, ":", color="0.5", lw=0.8)
@@ -158,16 +172,16 @@ def main():
         a.plot(r["yp"], sign * r[key], "k-", lw=1.2, label="MKM 1999")
         a.plot(s["yp"], sign * s[key], "o", ms=3.5, mfc="none", color="C0", label="Mallard")
         if half:
-            a.plot(half["yp"], sign * half[key], "-", color="C1", lw=0.8, label="first part of window")
+            a.plot(half["yp"], sign * half[key], "-", color="C1", lw=0.8, label=args.half_label)
         a.set(xlabel="$y^+$", ylabel=label, xlim=(0, 180))
     ax[1, 1].plot(r["yp"], 1 - r["yp"] / ref["Re_tau"], ":", color="0.5", lw=0.8, label="total stress $1 - y/h$")
     ax[1, 1].legend(frameon=False)
     a = ax[1, 2]
     Re_t = np.sqrt(tau_t / rho_w) * h / nu_w
     a.plot(t * u_tau / h, Re_t, color="C0", lw=0.6)
-    a.axvspan(args.t_start * u_tau / h, t[-1] * u_tau / h, color="C0", alpha=0.08, label="averaging window")
+    a.axvspan(args.t_start * u_tau / h, t[win][-1] * u_tau / h, color="C0", alpha=0.08, label="averaging window")
     a.axhline(178.12, color="k", lw=1.0, label="MKM")
-    a.set(xlabel="$t u_\\tau / h$", ylabel="$Re_\\tau(t)$ from the wall shear", title="Wall shear history")
+    a.set(xlabel="$t u_\\tau / h$", ylabel="$Re_\\tau(t)$ from the wall shear", title="Wall shear history", ylim=(140, 220))
     a.legend(frameon=False)
     fig.suptitle(f"Channel flow, $Re_\\tau$ = {Re_tau:.1f}: Mallard vs Moser, Kim & Mansour (1999)")
     fig.tight_layout()
