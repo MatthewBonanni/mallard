@@ -270,7 +270,9 @@ int Solver::base_halo_layers() const {
     // Faces between owned and halo-layer-1 cells need the layer-1 reconstruction,
     // which reads one more layer (MUSCL gradients and limiters, viscous gradients)
     const bool viscous = toml::find_or<std::string>(input, "physics", "type", "euler") == "navier_stokes";
-    return (type == "FO" && !viscous) ? 1 : 2;
+    // The hybrid flux's sensor reads the velocity gradients of halo-layer-1 cells too
+    const bool hybrid = toml::find_or<std::string>(input, "numerics", "convective_flux", "riemann") == "hybrid";
+    return (type == "FO" && !viscous && !hybrid) ? 1 : 2;
 }
 
 bool Solver::halo_too_shallow() {
@@ -744,6 +746,20 @@ void Solver::init_numerics() {
     if (!(low_mach_cutoff > 0.0_r)) {
         throw std::runtime_error("numerics: low_mach_cutoff must be positive (1 disables the low-Mach correction).");
     }
+    const std::string flux = toml::find_or<std::string>(input, "numerics", "convective_flux", "riemann");
+    if (flux != "riemann" && flux != "hybrid") {
+        throw InputError("numerics.convective_flux = \"" + flux + "\" is not one of: riemann, hybrid.");
+    }
+    hybrid_flux = flux == "hybrid";
+    const toml::value hybrid_input = toml::find_or(input, "numerics", "hybrid", toml::value(toml::table{}));
+    if (!hybrid_flux && !hybrid_input.as_table().empty()) {
+        throw InputError("[numerics.hybrid] needs numerics.convective_flux = \"hybrid\".");
+    }
+    hybrid_threshold = find_real_or(hybrid_input, "sensor_threshold", 0.65_r);
+    hybrid_floor = find_real_or(hybrid_input, "upwind_floor", 0.0_r);
+    if (!(hybrid_threshold >= 0.0_r && hybrid_threshold <= 1.0_r) || !(hybrid_floor >= 0.0_r && hybrid_floor <= 1.0_r)) {
+        throw InputError("numerics.hybrid: sensor_threshold and upwind_floor must be in [0, 1].");
+    }
 }
 
 void Solver::init_axisymmetric_weights() {
@@ -907,8 +923,15 @@ void Solver::allocate_memory() {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
     }
+    if (hybrid_flux) {
+        cell_upwind = Kokkos::View<rtype *>("cell_upwind", mesh->n_cells);
+        if (!viscous_gradients.is_allocated()) {
+            viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
+            viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
+        }
+    }
     if (is_mixture() && is_viscous()) {
-        cell_transport = Kokkos::View<rtype *[3]>("cell_transport", mesh->n_cells);
+        cell_transport =Kokkos::View<rtype *[3]>("cell_transport", mesh->n_cells);
         h_cell_transport = Kokkos::create_mirror_view(cell_transport);
         cell_diffusion = Kokkos::View<double **, Kokkos::LayoutRight>("cell_diffusion", mesh->n_cells, n_species);
         transport_values = Kokkos::View<rtype **, Kokkos::LayoutRight>("transport_values", mesh->n_cells,
@@ -1282,6 +1305,11 @@ void Solver::print_setup() const {
     logging::section("Numerics");
     logging::items(face_reconstruction->summary());
     logging::item("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
+    if (hybrid_flux) {
+        logging::item("Convective flux", "hybrid: KEEP central, Riemann solver where the compression sensor exceeds " +
+                                             real(double(hybrid_threshold)) + " (upwind floor " +
+                                             real(double(hybrid_floor)) + ")");
+    }
     logging::item("Time integrator", TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()));
     logging::item("Time step", use_cfl ? "CFL " + real(double(cfl)) : "dt " + real(double(dt_fixed)) + " (fixed)");
     std::string stop;

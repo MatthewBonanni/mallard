@@ -356,6 +356,8 @@ class Solver {
         void init_rhs_split();
         void init_axisymmetric_weights();
         void init_les();
+        /** @brief Hybrid flux: the upwind fraction of every cell from the gradients of W_cells. */
+        void update_upwind_sensor();
         /** @brief sum over owned cells of u . R_m - |u|^2 / 2 R_rho for R the sum of face_flux over the cell's faces. */
         rtype kinetic_energy_rate() const;
 
@@ -430,6 +432,10 @@ class Solver {
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         RiemannSolverType riemann_solver_type;
         rtype low_mach_cutoff = 0.1;
+        bool hybrid_flux = false;           // [numerics] convective_flux = "hybrid" (docs/design/les.md, section 4.3)
+        rtype hybrid_threshold = 0.65;
+        rtype hybrid_floor = 0.0;
+        Kokkos::View<rtype *> cell_upwind;  // hybrid flux: upwind fraction of each cell, else empty
         std::unique_ptr<TimeIntegrator> time_integrator;
 
         // Axisymmetric runs (see docs/design/axisymmetric.md)
