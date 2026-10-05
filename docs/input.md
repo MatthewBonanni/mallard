@@ -32,6 +32,13 @@ At least one stop condition is required.
 
 Generated meshes have boundary zones named `left`, `right`, `bottom` and `top`.
 
+`stretching = [beta_x, beta_y]` (`[beta_x, beta_y, beta_z]` in 3D) clusters the
+nodes of a generated mesh toward both ends of each direction with a nonzero
+factor: node `j` of `N` lies at `L/2 (1 + tanh(beta (2j/N - 1)) / tanh(beta))`;
+0 (the default) keeps the spacing uniform. For a channel between walls at
+`y = 0` and `y = Ly`, `stretching = [0, 1.7, 0]` makes the cells next to the
+walls about 8 times thinner than those at the center (with `Ny = 96`).
+
 `periodic = ["x", "y"]` (and `"z"` in 3D) makes a generated mesh (except
 `wedge`) periodic in those directions: `left`/`right`, `bottom`/`top` and
 `back`/`front` are joined into interior faces and disappear as boundary zones.
@@ -370,6 +377,7 @@ Optional source terms, added per unit volume.
 | `gravity` | `[g_x, g_y]` (`[g_x, g_y, g_z]` in 3D); adds `rho g` to the momentum and `rho u . g` to the energy equation |
 | `rho`, `rhou`, `rhoE` | Expressions in `x`, `y`, `z`, `t` (`rhou` has one per component) for the mass, momentum and energy sources |
 | `time_dependent` | Re-evaluate the expressions at every Runge-Kutta stage (host-side, so costly on large meshes); otherwise they are evaluated once |
+| `mass_flow` | `[m_x, m_y]` (`[m_x, m_y, m_z]` in 3D): hold the volume average of `rho u` along this vector at its magnitude with a uniform body force `f` per unit volume along it (constant mass flow, e.g. a periodic channel). At every Runge-Kutta stage `f` cancels the rate of change of that average from all other terms (one global sum) and closes any remaining gap within the time step, so a flow started at the target stays there to rounding. The energy gains the force's work `f . u`. |
 
 The scheme is not exactly well balanced: hydrostatic states carry small spurious velocities (about 1e-4 of the sound speed on a 32x32 mesh) that vanish at second order under refinement. Wall and symmetry ghost states continue the hydrostatic pressure gradient.
 
