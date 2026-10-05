@@ -19,11 +19,11 @@
 # correction: E_k(t) within 2% of the 512^3 spectral DNS up to t = 20;
 # -dE/dt peaks at 0.0116 (t = 8.4) against 0.0129 (t = 9.0); the resolved
 # viscous dissipation 2 mu E peaks at 0.0072 (TENO polynomial gradients).
-# 32,000 steps: about 2 hours on 4 A100s (1 hour on 8, at 0.115 s per step).
+# 12,900 steps: about 45 minutes on 4 A100s (25 on 8, at 0.115 s per step).
 
 [run]
 t_stop = 20.0
-cfl = 0.4
+cfl = 1.0
 
 [mesh]
 type = "cartesian"

@@ -14,7 +14,7 @@
 
 [run]
 t_stop = 0.2
-cfl = 0.25
+cfl = 1.0
 
 [mesh]
 type = "cartesian_tri"

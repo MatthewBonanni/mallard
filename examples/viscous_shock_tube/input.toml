@@ -10,7 +10,7 @@
 # Pr = 0.73, gamma = 1.4 (R = 1 / gamma, so the initial temperature is 1).
 #
 # Run (500,000 quads; the time step is set by viscosity, so this takes
-# about 58,500 steps: use a GPU build, or Nx = 500, Ny = 250 on a CPU):
+# about 23,400 steps: use a GPU build, or Nx = 500, Ny = 250 on a CPU):
 #   ../../build/src/Mallard -i input.toml
 #   python ../../tools/plot_viscous_shock_tube.py solut/vst_000100.vtu vst.png
 #
@@ -23,7 +23,7 @@
 
 [run]
 t_stop = 1.0
-cfl = 0.4
+cfl = 1.0
 
 [mesh]
 type = "cartesian"

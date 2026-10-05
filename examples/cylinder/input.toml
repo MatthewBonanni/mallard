@@ -9,7 +9,7 @@
 
 [run]
 t_stop = 160.0
-cfl = 0.4
+cfl = 1.0
 
 [mesh]
 type = "file"
@@ -58,7 +58,7 @@ check_interval = 2000
 
 [[forces]]
 zone = "cylinder"
-interval = 50
+interval = 20
 file = "./solut/forces_cylinder.csv"
 
 [[write_data]]
