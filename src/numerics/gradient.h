@@ -96,6 +96,18 @@ struct LSQGradientFunctor {
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
 
     /**
+     * @brief Whether vertex-neighbor gradients leave out the ghost of face
+     *        i_face: the zero-gradient ghost of a characteristic boundary would
+     *        halve the normal derivative of waves leaving the domain, and the
+     *        jump this leaves at the boundary cell's inner face reflects them
+     *        through the low-Mach correction.
+     */
+    KOKKOS_INLINE_FUNCTION
+    bool one_sided(const uint32_t i_face) const {
+        return cells_of_face(i_face, 1) < 0 && boundaries.bcs(boundaries.face_bc(i_face)).is_characteristic();
+    }
+
+    /**
      * @brief Offset to and state of the neighbor across face i_face.
      */
     KOKKOS_INLINE_FUNCTION
@@ -249,7 +261,7 @@ struct LSQVertexGradientFunctor {
         FOR_I_CONSERVATIVE W_i[i] = 1.0;
         for (uint32_t k = faces.offsets_faces_of_cell(i_cell); k < faces.offsets_faces_of_cell(i_cell + 1); k++) {
             const uint32_t i_face = faces.faces_of_cell(k);
-            if (faces.cells_of_face(i_face, 1) >= 0) continue;
+            if (faces.cells_of_face(i_face, 1) >= 0 || faces.one_sided(i_face)) continue;
             rtype dx[N_DIM];
             faces.neighbor(i_cell, i_face, W_i, dx, W_g);
             f(dx, true, k);
@@ -362,7 +374,7 @@ struct LSQVertexGradientFunctor {
         }
         for (uint32_t k = faces.offsets_faces_of_cell(i_cell); k < faces.offsets_faces_of_cell(i_cell + 1); k++) {
             const uint32_t i_face = faces.faces_of_cell(k);
-            if (faces.cells_of_face(i_face, 1) >= 0) continue;
+            if (faces.cells_of_face(i_face, 1) >= 0 || faces.one_sided(i_face)) continue;
             rtype dx[N_DIM], W_j[N_CONSERVATIVE];
             faces.neighbor(i_cell, i_face, W_i, dx, W_j);
             FOR_I_CONSERVATIVE {

@@ -63,6 +63,27 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="sutherland-1893"></a>W. Sutherland, The viscosity of gases and molecular force, *Phil. Mag.* (5) 36, 507–531 (1893). [doi:10.1080/14786449308620508](https://doi.org/10.1080/14786449308620508)
   Used in: `viscosity_model = "sutherland"`.
 
+## Boundary conditions
+
+- <a id="poinsot-lele-1992"></a>T. J. Poinsot and S. K. Lele, Boundary conditions for direct simulations of compressible viscous flows, *J. Comput. Phys.* 101, 104–129 (1992). [doi:10.1016/0021-9991(92)90046-2](https://doi.org/10.1016/0021-9991%2892%2990046-2)
+  Used in: the LODI relations of the characteristic boundaries (`nscbc_outlet`, `nscbc_inlet`; `BoundaryData::characteristic_W` in `src/boundary/boundary.h`) and their viscous outflow conditions.
+- <a id="rudy-strikwerda-1980"></a>D. H. Rudy and J. C. Strikwerda, A nonreflecting outflow boundary condition for subsonic Navier-Stokes calculations, *J. Comput. Phys.* 36, 55–70 (1980). [doi:10.1016/0021-9991(80)90174-6](https://doi.org/10.1016/0021-9991%2880%2990174-6)
+  Used in: the pressure relaxation of `nscbc_outlet` and its default `sigma`.
+- <a id="selle-nicoud-poinsot-2004"></a>L. Selle, F. Nicoud and T. Poinsot, Actual impedance of nonreflecting boundary conditions: implications for computation of resonators, *AIAA J.* 42(5), 958–964 (2004). [doi:10.2514/1.1883](https://doi.org/10.2514/1.1883)
+  Used in: the reflection coefficient of the relaxed outlet, against which the acoustic-pulse test checks `nscbc_outlet`.
+- <a id="yoo-2005"></a>C. S. Yoo, Y. Wang, A. Trouvé and H. G. Im, Characteristic boundary conditions for direct simulations of turbulent counterflow flames, *Combust. Theory Model.* 9(4), 617–646 (2005). [doi:10.1080/13647830500307378](https://doi.org/10.1080/13647830500307378)
+  Used in: the transverse terms of the characteristic boundaries.
+- <a id="yoo-im-2007"></a>C. S. Yoo and H. G. Im, Characteristic boundary conditions for simulations of compressible reacting flows with multi-dimensional, viscous and reaction effects, *Combust. Theory Model.* 11(2), 259–286 (2007). [doi:10.1080/13647830600898995](https://doi.org/10.1080/13647830600898995)
+  Used in: the transverse terms and the treatment of multicomponent, reacting flows at characteristic boundaries.
+- <a id="lodato-2008"></a>G. Lodato, P. Domingo and L. Vervisch, Three-dimensional boundary conditions for direct and large-eddy simulation of compressible viscous flows, *J. Comput. Phys.* 227, 5105–5143 (2008). [doi:10.1016/j.jcp.2008.01.038](https://doi.org/10.1016/j.jcp.2008.01.038)
+  Used in: the relaxation of the transverse terms with `beta` equal to the Mach number (`beta`).
+- <a id="granet-2010"></a>V. Granet, O. Vermorel, T. Leonard, L. Gicquel and T. Poinsot, Comparison of nonreflecting outlet boundary conditions for compressible solvers on unstructured grids, *AIAA J.* 48(10), 2348–2364 (2010). [doi:10.2514/1.J050391](https://doi.org/10.2514/1.J050391)
+  Used in: the default `beta` and the vortex-outflow validation of `nscbc_outlet`.
+- <a id="bodony-2006"></a>D. J. Bodony, Analysis of sponge zones for computational fluid mechanics, *J. Comput. Phys.* 212, 681–702 (2006). [doi:10.1016/j.jcp.2005.07.014](https://doi.org/10.1016/j.jcp.2005.07.014)
+  Used in: the sponge layers (`[[sponges]]`; `src/solver/solver_sponge.cpp`).
+- <a id="mani-2012"></a>A. Mani, Analysis and optimization of numerical sponge layers as a nonreflective boundary treatment, *J. Comput. Phys.* 231, 704–716 (2012). [doi:10.1016/j.jcp.2011.10.017](https://doi.org/10.1016/j.jcp.2011.10.017)
+  Used in: the sponge layers and the advice to ramp their strength.
+
 ## Time integration and time step
 
 - <a id="shu-osher-1988"></a>C.-W. Shu and S. Osher, Efficient implementation of essentially non-oscillatory shock-capturing schemes, *J. Comput. Phys.* 77, 439–471 (1988). [doi:10.1016/0021-9991(88)90177-5](https://doi.org/10.1016/0021-9991%2888%2990177-5)

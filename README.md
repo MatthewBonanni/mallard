@@ -26,7 +26,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Riemann solvers: Rusanov, HLL, HLLC, Roe, and the carbuncle-free rotated-hybrid HLL-Roe
 - Source terms: gravity and arbitrary expressions
 - Time integration: forward Euler, SSPRK3, RK4, with the time step set by a CFL number
-- Boundary conditions: transmissive, symmetry, adiabatic, isothermal and heat-flux walls (optionally moving), inflow with fixed velocity, pressure and temperature, pressure outlet, and time-dependent states given as expressions; zones can be split between conditions; periodic boundaries (generated meshes, or paired zones of mesh files)
+- Boundary conditions: transmissive, symmetry, adiabatic, isothermal and heat-flux walls (optionally moving), inflow with fixed velocity, pressure and temperature, pressure outlet, partially non-reflecting characteristic (NSCBC) inlets and outlets with transverse terms, and time-dependent states given as expressions; zones can be split between conditions; periodic boundaries (generated meshes, or paired zones of mesh files); sponge layers
 - Initial conditions given as analytical expressions, integrated over each cell
 - Restart files
 - Output to VTU (ParaView), with `.pvd` time series

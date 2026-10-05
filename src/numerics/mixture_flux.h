@@ -100,6 +100,9 @@ struct MixtureFluxFunctor {
             } else {
                 boundaries.exterior_mixture(i_face, i_quad, n_quad, W_l, th_l, n_unit, W_cells, face_solution,
                                             face_thermo, cell_thermo, W_r, th_r);
+                if (low_mach_cutoff < 1.0_r && boundaries.bcs(boundaries.face_bc(i_face)).is_characteristic()) {
+                    low_mach_correction(W_l, W_r, th_l[0], th_r[0], low_mach_cutoff);
+                }
             }
             T_riemann_solver::calc_flux(flux_q, n_unit, W_l, W_r, riemann::SideThermo{th_l[0], th_l[1]},
                                         riemann::SideThermo{th_r[0], th_r[1]});
@@ -182,6 +185,9 @@ struct MixtureDoubleFluxFunctor {
                 rtype th_g[2];
                 boundaries.exterior_mixture(i_face, i_quad, n_quad, W_l, th_i, n_unit, W_cells, face_solution,
                                             face_thermo, cell_thermo, W_r, th_g);
+                if (low_mach_cutoff < 1.0_r && boundaries.bcs(boundaries.face_bc(i_face)).is_characteristic()) {
+                    low_mach_correction(W_l, W_r, th_0.gamma, th_0.gamma, low_mach_cutoff);
+                }
             }
             rtype F_0[N_CONSERVATIVE], F_1[N_CONSERVATIVE];
             T_riemann_solver::calc_flux(F_0, n_unit, W_l, W_r, th_0, th_0);
@@ -278,8 +284,14 @@ struct SpeciesSlotFunctor {
     KOKKOS_INLINE_FUNCTION
     void exterior_Y(const uint32_t f, const uint32_t k, const rtype * interior, rtype * out) const {
         const uint8_t nq = n_quad();
+        const int32_t i_bc = boundaries.face_bc(f);
+        const BoundaryType type = boundaries.bcs(i_bc).type;
         const int32_t image_face = boundaries.face_image_face(f);
         const int32_t image = boundaries.face_image(f);
+        if (type == BoundaryType::NSCBC_INLET) {
+            for (uint8_t q = 0; q < nq; q++) out[q] = boundaries.bc_Y(i_bc, k);
+            return;
+        }
         if (image_face >= 0) {
             uint8_t k_image = 0;
             while (faces_of_cell(offsets_faces_of_cell(image) + k_image) != static_cast<uint32_t>(image_face)) k_image++;
@@ -296,11 +308,10 @@ struct SpeciesSlotFunctor {
             }
             return;
         }
-        const int32_t i_bc = boundaries.face_bc(f);
         for (uint8_t q = 0; q < nq; q++) {
             if (image >= 0) {
                 out[q] = values.scalars(image, k);
-            } else if (boundaries.bcs(i_bc).type == BoundaryType::UPT) {
+            } else if (type == BoundaryType::UPT) {
                 out[q] = boundaries.bc_Y(i_bc, k);
             } else {
                 out[q] = interior[q];

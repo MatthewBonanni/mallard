@@ -124,6 +124,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
         face_reconstruction->calc_face_values(W_cells, face_solution);
     }
 
+    update_characteristic_boundaries(t_stage);
     switch (riemann_solver_type) {
         case RiemannSolverType::RUSANOV:
             launch_flux_functor<riemann::Rusanov>();
@@ -193,6 +194,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
     Kokkos::parallel_for("rhs_divide_volume", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
         FOR_I_CONSERVATIVE rhs(i_cell, i) /= vol(i_cell);
     });
+    apply_sponges(state, rhs_state);
 }
 
 void Solver::add_geometric_source(StateView rhs, Kokkos::View<rtype *, Kokkos::LayoutStride> mu) {
