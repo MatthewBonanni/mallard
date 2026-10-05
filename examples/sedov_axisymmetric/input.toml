@@ -1,0 +1,75 @@
+# Sedov-Taylor point blast (see examples/sedov_3d) as an axisymmetric run:
+# the quadrant x, r in [0, 1.1] is the hemisphere x >= 0 (symmetry plane at
+# x = 0, the axis at r = 0, symmetry planes outside, which the shock never
+# reaches). The hemisphere holds E / 2 of the blast energy E = 1, deposited as
+# pressure in the ball R < 0.05; the ambient pressure is 1e-5. A 2D run of the
+# 3D blast at twice the resolution of examples/sedov_3d:
+#   python ../../tools/sedov.py solut --energy 1
+#
+# 256 x 256 quads, bound-preserving TENO5 (about a minute on one A100, or
+# Nx = Ny = 128 on a laptop): the shock (where the shell-averaged density
+# crosses the middle of its jump) is 1.5% ahead of R(t) at t = 0.1, the offset
+# of the finite initial blast, and 0.6% at t = 0.8 (0.950 against 0.945). The
+# density follows the exact profile, the peak smeared to 4.75 of the exact 6;
+# the peak is 4.66-4.76 in every direction, along the axis included.
+
+[run]
+t_stop = 0.8
+cfl = 1.0
+
+[mesh]
+type = "cartesian"
+Nx = 256
+Ny = 256
+Lx = 1.1
+Ly = 1.1
+
+[initialize]
+type = "analytical"
+n_subdivisions = 8
+rho = "1.0"
+u = ["0.0", "0.0"]
+p = "x^2 + y^2 < 0.0025 ? 0.4 / (4 / 3 * pi * 0.05^3) : 1e-5"
+
+[[boundaries]]
+name = "left"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "right"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+bound_preserving = true
+
+[physics]
+type = "euler"
+axisymmetric = true
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[output]
+check_interval = 500
+
+[[write_data]]
+prefix = "./solut/sedov"
+format = "vtu"
+time_interval = 0.1
+variables = ["RHO", "P"]

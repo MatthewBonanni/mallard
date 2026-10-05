@@ -57,7 +57,7 @@ def make(args):
 
 [run]
 t_stop = {args.t_stop:.17g}
-cfl = 0.8
+cfl = 0.4
 
 [mesh]
 type = "cartesian"

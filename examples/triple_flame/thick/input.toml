@@ -1,0 +1,75 @@
+# Triple flame: fuel H2:0.5,N2:0.5 / oxidizer O2:1,N2:3.76 at 300 K, 1 atm; Z_st = 0.30427.
+# Planar flame at Z_st (Cantera): S_L = 1.19142 m/s, delta_L = 0.3847 mm, rho_u / rho_b = 5.9416.
+# Inlet mixing thickness delta_M = 12 delta_L, inflow 1.6 S_L, 12 cells per delta_L.
+#
+# The triple flame of ../input.toml in a mixing layer three times thicker
+# (D_TF = 28 at the flame); see that file for the setup, the two stages and
+# the results.
+
+[run]
+t_stop = 0.0032292008531237082
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 384
+Ny = 720
+Lx = 0.012311440575814771
+Ly = 0.023083951079652696
+
+[initialize]
+type = "restart"
+file = "flame.restart"
+
+[[boundaries]]
+name = "left"
+type = "upt"
+u = [1.9062673918077171, 0.0]
+p = 101325.0
+T = 300
+Y = { "H2" = "(0.5 * (1 + tanh((y - 0.012350271104943527) / 0.0019546535749287025))) * 0.067132867132867133 + (1 - (0.5 * (1 + tanh((y - 0.012350271104943527) / 0.0019546535749287025)))) * 0", "O2" = "(0.5 * (1 + tanh((y - 0.012350271104943527) / 0.0019546535749287025))) * 0 + (1 - (0.5 * (1 + tanh((y - 0.012350271104943527) / 0.0019546535749287025)))) * 0.23299971514004453", "N2" = "(0.5 * (1 + tanh((y - 0.012350271104943527) / 0.0019546535749287025))) * 0.93286713286713274 + (1 - (0.5 * (1 + tanh((y - 0.012350271104943527) / 0.0019546535749287025)))) * 0.76700028485995553" }
+
+[[boundaries]]
+name = "right"
+type = "p_out"
+p = 101325.0
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../../mechanisms/h2o2.yaml"
+phase = "ohmech"
+transport = "mixture_averaged"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+
+[output]
+check_interval = 2000
+
+[[write_data]]
+prefix = "./solut/flame"
+format = "vtu"
+time_interval = 2.6910007109364236e-05
+variables = ["RHO", "U", "T", "HRR", "Y_H2", "Y_O2", "Y_H2O", "Y_N2"]
+
+[[write_data]]
+prefix = "./restart/flame"
+format = "restart"
+time_interval = 0.0001614600426561854

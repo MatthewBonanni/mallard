@@ -17,6 +17,7 @@
 #include <string>
 #include <cmath>
 #include <algorithm>
+#include <limits>
 #include <numeric>
 
 #include <Kokkos_Core.hpp>
@@ -51,21 +52,25 @@ void Mesh::init(const toml::value & input) {
     uint32_t Ny = toml::find_or<uint32_t>(input, "mesh", "Ny", 100);
     rtype Lx = find_real_or(input, "mesh", "Lx", 1.0);
     rtype Ly = find_real_or(input, "mesh", "Ly", 1.0);
+    const Stretching stretching = mesh_stretching(input);
     if constexpr (N_DIM == 3) {
         const uint32_t Nz = toml::find_or<uint32_t>(input, "mesh", "Nz", 100);
         const rtype Lz = find_real_or(input, "mesh", "Lz", 1.0);
         if (get_type() == MeshType::CARTESIAN_TRI || get_type() == MeshType::WEDGE) {
             throw std::runtime_error("Mesh type " + type_str + " is 2D only.");
         }
-        this->init_cart_3d(Nx, Ny, Nz, Lx, Ly, Lz, get_type(), periodic);
+        this->init_cart_3d(Nx, Ny, Nz, Lx, Ly, Lz, get_type(), periodic, stretching);
         return;
     }
-    if (!periodic.empty()) {
-        if (get_type() == MeshType::WEDGE) throw std::runtime_error("The wedge mesh cannot be periodic.");
-        if (get_type() != MeshType::CARTESIAN && get_type() != MeshType::CARTESIAN_TRI) {
+    if (!periodic.empty() || stretching != Stretching{}) {
+        if (get_type() == MeshType::WEDGE && !periodic.empty()) {
+            throw std::runtime_error("The wedge mesh cannot be periodic.");
+        }
+        if (get_type() != MeshType::CARTESIAN && get_type() != MeshType::CARTESIAN_TRI &&
+            get_type() != MeshType::WEDGE) {
             throw std::runtime_error("Mesh type " + type_str + " is 3D only.");
         }
-        init_from_block(cartesian_2d_block(Nx, Ny, Lx, Ly, get_type(), 0, 1), periodic);
+        init_from_block(cartesian_2d_block(Nx, Ny, Lx, Ly, get_type(), 0, 1, stretching), periodic);
         return;
     }
     if (get_type() == MeshType::CARTESIAN) {
@@ -250,6 +255,78 @@ void Mesh::compute_cell_centroids() {
         }
         h_cell_coords(i_cell, 0) = x0 + Cx / (6.0_r * A);
         h_cell_coords(i_cell, 1) = y0 + Cy / (6.0_r * A);
+    }
+}
+
+void Mesh::make_axisymmetric() {
+    if constexpr (N_DIM != 2) {
+        throw std::runtime_error("Axisymmetric flows need the 2D solver.");
+    } else {
+        rtype y_extent = 0.0, y_min = std::numeric_limits<rtype>::max();
+        for (uint32_t n = 0; n < n_nodes; n++) {
+            y_extent = std::max(y_extent, std::abs(h_node_coords(n, 1)));
+            y_min = std::min(y_min, h_node_coords(n, 1));
+        }
+        if (y_min < -precision_tol(1e-10, 1e-5) * y_extent) {
+            throw std::runtime_error("Axisymmetric meshes lie in y >= 0 (y is the radius); a node is at y = " +
+                                     std::to_string(double(y_min)) + ".");
+        }
+        cell_measure = Kokkos::View<rtype *>("cell_measure", n_cells);
+        face_measure = Kokkos::View<rtype *>("face_measure", n_faces);
+        h_cell_measure = Kokkos::create_mirror_view(cell_measure);
+        h_face_measure = Kokkos::create_mirror_view(face_measure);
+        cell_covariance = Kokkos::View<rtype *[3]>("cell_covariance", n_cells);
+        h_cell_covariance = Kokkos::create_mirror_view(cell_covariance);
+        // Fan triangles from the first node; int y, int (x - x0) y and int y^2
+        // are exact with the edge-midpoint rule for each triangle
+        for (uint32_t c = 0; c < n_cells; c++) {
+            const uint32_t n = h_n_nodes_of_cell(c);
+            const uint32_t o = h_node_of_cell(c, 0);
+            const double x0 = double(h_node_coords(o, 0)), y0 = double(h_node_coords(o, 1));
+            double I_y = 0.0, I_xy = 0.0, I_yy = 0.0;
+            for (uint32_t k = 1; k + 1 < n; k++) {
+                const uint32_t a = h_node_of_cell(c, k), b = h_node_of_cell(c, k + 1);
+                const double xa = double(h_node_coords(a, 0)) - x0, ya = double(h_node_coords(a, 1));
+                const double xb = double(h_node_coords(b, 0)) - x0, yb = double(h_node_coords(b, 1));
+                const double area = 0.5 * std::abs(xa * (yb - y0) - xb * (ya - y0));
+                I_y += area * (y0 + ya + yb) / 3.0;
+                const double mx[3] = {0.5 * xa, 0.5 * (xa + xb), 0.5 * xb};
+                const double my[3] = {0.5 * (y0 + ya), 0.5 * (ya + yb), 0.5 * (yb + y0)};
+                for (int m = 0; m < 3; m++) {
+                    I_xy += area / 3.0 * mx[m] * my[m];
+                    I_yy += area / 3.0 * my[m] * my[m];
+                }
+            }
+            h_cell_measure(c) = rtype(I_y);
+            const double xc = x0 + I_xy / I_y, yc = I_yy / I_y;
+            h_cell_coords(c, 0) = rtype(xc);
+            h_cell_coords(c, 1) = rtype(yc);
+            // Second moments: cubic integrands, a 3 x 3 collapsed Gauss rule (exact to degree 4)
+            const double g[3] = {0.5 - 0.5 * std::sqrt(0.6), 0.5, 0.5 + 0.5 * std::sqrt(0.6)};
+            const double w[3] = {5.0 / 18.0, 8.0 / 18.0, 5.0 / 18.0};
+            double C[3] = {0.0, 0.0, 0.0};
+            for (uint32_t k = 1; k + 1 < n; k++) {
+                const uint32_t a = h_node_of_cell(c, k), b = h_node_of_cell(c, k + 1);
+                const double ax = double(h_node_coords(a, 0)) - x0, ay = double(h_node_coords(a, 1)) - y0;
+                const double bx = double(h_node_coords(b, 0)) - x0, by = double(h_node_coords(b, 1)) - y0;
+                const double det = std::abs(ax * by - ay * bx);
+                for (int i = 0; i < 3; i++) {
+                    for (int j = 0; j < 3; j++) {
+                        const double s = g[i], t = g[j] * (1.0 - s);
+                        const double weight = w[i] * w[j] * (1.0 - s) * det;
+                        const double dx = x0 + s * ax + t * bx - xc, y = y0 + s * ay + t * by, dy = y - yc;
+                        C[0] += weight * y * dx * dx;
+                        C[1] += weight * y * dx * dy;
+                        C[2] += weight * y * dy * dy;
+                    }
+                }
+            }
+            for (int m = 0; m < 3; m++) h_cell_covariance(c, m) = rtype(C[m] / I_y);
+        }
+        for (uint32_t f = 0; f < n_faces; f++) {
+            h_face_measure(f) = h_face_area(f) * std::max(h_face_coords(f, 1), rtype(0));
+        }
+        axisymmetric = true;
     }
 }
 
@@ -462,6 +539,11 @@ void Mesh::copy_host_to_device() {
     Kokkos::deep_copy(cell_coords, h_cell_coords);
     Kokkos::deep_copy(cell_volume, h_cell_volume);
     Kokkos::deep_copy(face_area, h_face_area);
+    if (axisymmetric) {
+        Kokkos::deep_copy(cell_measure, h_cell_measure);
+        Kokkos::deep_copy(face_measure, h_face_measure);
+        Kokkos::deep_copy(cell_covariance, h_cell_covariance);
+    }
     Kokkos::deep_copy(face_normals, h_face_normals);
     Kokkos::deep_copy(face_coords, h_face_coords);
     Kokkos::deep_copy(nodes_of_cell, h_nodes_of_cell);
@@ -486,6 +568,10 @@ void Mesh::copy_device_to_host() {
     Kokkos::deep_copy(h_cell_coords, cell_coords);
     Kokkos::deep_copy(h_cell_volume, cell_volume);
     Kokkos::deep_copy(h_face_area, face_area);
+    if (axisymmetric) {
+        Kokkos::deep_copy(h_cell_measure, cell_measure);
+        Kokkos::deep_copy(h_face_measure, face_measure);
+    }
     Kokkos::deep_copy(h_face_normals, face_normals);
     Kokkos::deep_copy(h_face_coords, face_coords);
     Kokkos::deep_copy(h_nodes_of_cell, nodes_of_cell);

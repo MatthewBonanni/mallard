@@ -14,6 +14,8 @@ set(MALLARD_TEST_SOURCES
     mixture_transport_test.cpp
     mesh_block_test.cpp
     distributed_mesh_test.cpp
+    statistics_test.cpp
+    les_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
     list(APPEND MALLARD_TEST_SOURCES
@@ -26,7 +28,9 @@ if(Mallard_DIM EQUAL 2)
     viscous_test.cpp
     restart_test.cpp
     boundary_test.cpp
+    nscbc_test.cpp
     source_test.cpp
+    axisymmetric_test.cpp
     io_test.cpp
     mesh_file_test.cpp
     mpi_test.cpp

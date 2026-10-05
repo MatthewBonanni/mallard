@@ -243,7 +243,12 @@ class DetonationPanel:
         h = (1 - self.GAP / (2 + self.GAP)) / 2
         top, bottom = ax.inset_axes([0, 1 - h, 1, h]), ax.inset_axes([0, 0, 1, h])
         p_lo, p_hi = self.p.get("p_range", (12, 34))
-        top.imshow((fld["P"][win] / self.p0).T, origin="lower", extent=ext, cmap="inferno", vmin=p_lo, vmax=p_hi,
+        # The fresh gas ahead of the front lies far below the pressure range: background, like the foil
+        pressure = (fld["P"][win] / self.p0).T
+        pressure[:, x[win] > x_front] = np.nan
+        p_cmap = plt.get_cmap("inferno").copy()
+        p_cmap.set_bad(BG)
+        top.imshow(pressure, origin="lower", extent=ext, cmap=p_cmap, vmin=p_lo, vmax=p_hi,
                    aspect="auto", interpolation="antialiased")
         foil = soot(fld["P_MAX"][win], self.p0)
         foil[:, x[win] > x_front] = np.nan

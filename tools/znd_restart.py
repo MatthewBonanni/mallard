@@ -1,19 +1,20 @@
 """Initial state of a detonation run from a ZND profile, as a Mallard restart file.
 
     python tools/znd_restart.py ZND.csv MECHANISM PHASE NX LX X_SHOCK OUT.restart [DIM]
-        [--ny NY --ly LY] [--pocket XC YC R]... [--fresh-pocket]
+        [--ny NY --ly LY] [--nz NZ --lz LZ] [--pocket XC YC [ZC] R]... [--fresh-pocket]
 
 ZND.csv comes from tools/detonation_reference.py. The mesh is Mallard's
-generated "cartesian" box with NX x NY (x 1) cells over [0, LX] x [0, LY]
-(NY = 1 by default); the shock sits at X_SHOCK moving to +x at D_CJ (read
+generated "cartesian" box with NX x NY (x NZ in 3D) cells over [0, LX] x
+[0, LY] (x [0, LZ]); NY = NZ = 1 by default. The shock sits at X_SHOCK moving to +x at D_CJ (read
 from the file's header). Behind it each cell takes the ZND state at its
 distance from the shock, in the lab frame (beyond the profile's end, the end
 state); ahead of it the unburnt gas at rest (the ZND file's first state
 upstream: T0, p0 and the initial composition). Cell averages are taken over
 16 points per cell along x, so the shock lands inside a cell as a mixed state.
-Each --pocket puts a disk of unreacted gas (the initial composition at the local
-ZND pressure, temperature and velocity) of radius R centered at (XC, YC)
-behind the front, which triggers the cellular instability of a 2D run;
+Each --pocket puts a disk (2D) or sphere (3D, centered at (XC, YC, ZC)) of
+unreacted gas (the initial composition at the local ZND pressure, temperature
+and velocity) of radius R centered at (XC, YC) behind the front, which
+triggers the cellular instability;
 with --fresh-pocket the disk holds the unburnt gas at rest (T0, p0), a
 stronger perturbation.
 Values are written as float64 (double builds).
@@ -28,7 +29,7 @@ import numpy as np
 
 def main():
     args = sys.argv[1:]
-    ny, ly = 1, None
+    ny, ly, nz, lz = 1, None, 1, None
     fresh = "--fresh-pocket" in args
     if fresh:
         args.remove("--fresh-pocket")
@@ -40,18 +41,30 @@ def main():
         i = args.index("--ly")
         ly = float(args[i + 1])
         del args[i:i + 2]
+    if "--nz" in args:
+        i = args.index("--nz")
+        nz = int(args[i + 1])
+        del args[i:i + 2]
+    if "--lz" in args:
+        i = args.index("--lz")
+        lz = float(args[i + 1])
+        del args[i:i + 2]
+    dim = 3 if nz > 1 or lz is not None else None
+    n_pocket = 5 if dim == 3 else 4
     pockets = []
     while "--pocket" in args:
         i = args.index("--pocket")
-        pockets.append([float(v) for v in args[i + 1:i + 4]])
-        del args[i:i + 4]
-    if pockets and ly is None:
-        sys.exit("--pocket needs --ly")
+        pockets.append([float(v) for v in args[i + 1:i + n_pocket]])
+        del args[i:i + n_pocket]
+    if pockets and (ly is None or (dim == 3 and lz is None)):
+        sys.exit("--pocket needs --ly (and --lz in 3D)")
     znd_file, mech, phase = args[0], args[1], args[2]
     nx, lx, x_shock, out = int(args[3]), float(args[4]), float(args[5]), args[6]
-    dim = int(args[7]) if len(args) > 7 else 2
-    if dim == 3 and ny > 1:
-        sys.exit("--ny is for 2D meshes")
+    if len(args) > 7:
+        if dim == 3 and int(args[7]) != 3:
+            sys.exit("--nz and --lz are for 3D meshes")
+        dim = int(args[7])
+    dim = dim or 2
     header = open(znd_file).readline()
     D = float(re.search(r"D_CJ = ([0-9.eE+-]+)", header).group(1))
     T0 = float(re.search(r"T0 = ([0-9.eE+-]+)", header).group(1))
@@ -97,29 +110,32 @@ def main():
             Tm += T / n_sub
         cons[c] = acc / n_sub
         T_seed[c] = Tm
-    # Cells are numbered with y fastest: c = i * NY + j
-    cons = np.repeat(cons[:, None, :], ny, axis=1)
-    T_seed = np.repeat(T_seed[:, None], ny, axis=1)
+    # Cells are numbered with z fastest, then y: c = (i * NY + j) * NZ + k
+    cons = np.broadcast_to(cons[:, None, None, :], (nx, ny, nz, 3 + ns)).copy()
+    T_seed = np.broadcast_to(T_seed[:, None, None], (nx, ny, nz)).copy()
     if pockets:
         x = (np.arange(nx) + 0.5) * dx
         y = (np.arange(ny) + 0.5) * ly / ny
-        inside = np.zeros((nx, ny), dtype=bool)
-        for xc, yc, radius in pockets:
-            inside |= (x[:, None] - xc) ** 2 + (y[None, :] - yc) ** 2 < radius ** 2
-        inside &= (x < x_shock)[:, None]
-        for i, j in zip(*np.nonzero(inside)):
+        z = (np.arange(nz) + 0.5) * lz / nz if dim == 3 else np.zeros(1)
+        inside = np.zeros((nx, ny, nz), dtype=bool)
+        for pocket in pockets:
+            xc, yc, zc, radius = pocket if dim == 3 else (pocket[0], pocket[1], 0.0, pocket[2])
+            inside |= ((x[:, None, None] - xc) ** 2 + (y[None, :, None] - yc) ** 2 +
+                       (z[None, None, :] - zc) ** 2 < radius ** 2)
+        inside &= (x < x_shock)[:, None, None]
+        for i, j, k in zip(*np.nonzero(inside)):
             s = x_shock - x[i]
             T, p, u = np.interp(s, xi, T_z), np.interp(s, xi, p_z), np.interp(s, xi, u_lab)
             if fresh:
                 T, p, u = T0, p0, 0.0
             gas.TPY = T, p, Y0
             r = gas.density
-            cons[i, j] = np.concatenate(([r, r * u, r * (gas.int_energy_mass + 0.5 * u * u)], r * Y0))
-            T_seed[i, j] = T
+            cons[i, j, k] = np.concatenate(([r, r * u, r * (gas.int_energy_mass + 0.5 * u * u)], r * Y0))
+            T_seed[i, j, k] = T
         print(f"{len(pockets)} pockets: {inside.sum()} cells of unreacted gas")
-    cons = cons.reshape(nx * ny, -1)
+    n = nx * ny * nz
+    cons = cons.reshape(n, -1)
     T_seed = T_seed.reshape(-1)
-    n = nx * ny
     names = ["RHO", "RHOU_X", "RHOU_Y"] + (["RHOU_Z"] if dim == 3 else []) + ["RHOE"]
     names += ["RHOY_" + s for s in gas.species_names] + ["T_SEED"]
     zeros = np.zeros(n)
@@ -132,7 +148,7 @@ def main():
             f.write(struct.pack("<I", len(name)) + name.encode())
         for field in fields:
             f.write(np.asarray(field, dtype="<f8").tobytes())
-    print(f"wrote {out}: {nx} x {ny} cells, D_CJ = {D} m/s, shock at {x_shock} m")
+    print(f"wrote {out}: {nx} x {ny} x {nz} cells, D_CJ = {D} m/s, shock at {x_shock} m")
 
 
 if __name__ == "__main__":

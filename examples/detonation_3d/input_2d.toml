@@ -1,0 +1,68 @@
+# Stage 1 of examples/detonation_3d (see input.toml): the 2D cellular
+# detonation in a 3 cm channel that starts the 3D run, in a window that
+# follows the front (tools/detonation_window.py). 2D build.
+
+[run]
+t_stop = 6.0e-6
+cfl = 0.25
+
+[mesh]
+type = "cartesian"
+Nx = 680
+Ny = 200
+Lx = 0.102
+Ly = 0.03
+
+[initialize]
+type = "restart"
+file = "window_2d.restart"
+
+[[boundaries]]
+name = "left"
+type = "extrapolation"
+
+[[boundaries]]
+name = "right"
+type = "extrapolation"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "euler"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+fuse_half_steps = true
+
+[output]
+check_interval = 500
+
+[[write_data]]
+prefix = "./restart_2d/cell"
+format = "restart"
+time_interval = 2.0e-6
+
+# P_MAX (the soot foil) is kept when some output asks for it; the window
+# tool saves it, so this wall output is only overwritten by every segment
+[[write_data]]
+prefix = "./wall_2d/bottom"
+format = "vtu"
+geometry = "bottom"
+time_interval = 6.0e-6
+variables = ["P_MAX"]

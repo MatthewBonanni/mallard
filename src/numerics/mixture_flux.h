@@ -17,6 +17,7 @@
 
 #include "boundary.h"
 #include "common.h"
+#include "flux_functor.h"
 #include "riemann_solver.h"
 #include "scalar_reconstruction.h"
 #include "state.h"
@@ -51,7 +52,7 @@ struct MixtureFluxFunctor {
     Kokkos::View<rtype *> face_area;
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *> quad_weights;
-    Kokkos::View<rtype **> face_weights;  // 3D: (face, q), zero on padding points
+    Kokkos::View<rtype **> face_weights;  // (face, q): 3D, zero on padding points; 2D axisymmetric, Gauss weight times r; else empty
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
     Kokkos::View<rtype **[2][2]> face_thermo;
     BoundaryData boundaries;
@@ -60,6 +61,7 @@ struct MixtureFluxFunctor {
     Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
     Kokkos::View<rtype **> face_mdot;  // (face, q)
     rtype low_mach_cutoff;
+    Kokkos::View<rtype *> upwind;  // hybrid flux: upwind fraction of each cell, else empty
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
@@ -74,12 +76,15 @@ struct MixtureFluxFunctor {
         rtype n_vec[N_DIM];
         FOR_I_DIM n_vec[i] = normals(i_face, i);
         unit<N_DIM>(n_vec, n_unit);
+        const bool hybrid = upwind.extent(0) > 0;
+        const rtype phi =
+            hybrid ? face_upwind_fraction(upwind, boundaries, cells_of_face(i_face, 0), c1, i_face) : 1.0_r;
 
         rtype flux[N_CONSERVATIVE] = {};
         for (uint8_t i_quad = 0; i_quad < n_quad; i_quad++) {
             rtype w_q;
             if constexpr (N_DIM == 2) {
-                w_q = quad_weights(i_quad);
+                w_q = face_weights.extent(0) ? face_weights(i_face, i_quad) : quad_weights(i_quad);
             } else {
                 w_q = face_weights(i_face, i_quad);
                 if (w_q == 0.0_r) {
@@ -96,13 +101,23 @@ struct MixtureFluxFunctor {
                 FOR_I_CONSERVATIVE W_r[i] = face_solution(i_face, i_quad, 1, i);
                 th_r[0] = face_thermo(i_face, i_quad, 1, 0);
                 th_r[1] = face_thermo(i_face, i_quad, 1, 1);
-                if (low_mach_cutoff < 1.0_r) low_mach_correction(W_l, W_r, th_l[0], th_r[0], low_mach_cutoff);
             } else {
                 boundaries.exterior_mixture(i_face, i_quad, n_quad, W_l, th_l, n_unit, W_cells, face_solution,
                                             face_thermo, cell_thermo, W_r, th_r);
             }
-            T_riemann_solver::calc_flux(flux_q, n_unit, W_l, W_r, riemann::SideThermo{th_l[0], th_l[1]},
-                                        riemann::SideThermo{th_r[0], th_r[1]});
+            const riemann::SideThermo side_l{th_l[0], th_l[1]}, side_r{th_r[0], th_r[1]};
+            rtype central[N_CONSERVATIVE] = {};
+            if (hybrid) riemann::KEEP::calc_flux(central, n_unit, W_l, W_r, side_l, side_r);
+            if (phi > 0.0_r) {
+                if (low_mach_cutoff < 1.0_r &&
+                    (c1 >= 0 || boundaries.bcs(boundaries.face_bc(i_face)).is_characteristic())) {
+                    low_mach_correction(W_l, W_r, th_l[0], th_r[0], low_mach_cutoff);
+                }
+                T_riemann_solver::calc_flux(flux_q, n_unit, W_l, W_r, side_l, side_r);
+                if (hybrid) FOR_I_CONSERVATIVE flux_q[i] = central[i] + phi * (flux_q[i] - central[i]);
+            } else {
+                FOR_I_CONSERVATIVE flux_q[i] = central[i];
+            }
             face_mdot(i_face, i_quad) = flux_q[0];
             FOR_I_CONSERVATIVE flux[i] += w_q * flux_q[i];
         }
@@ -120,7 +135,9 @@ struct MixtureFluxFunctor {
  *        sides of the face, so pressure and velocity stay exactly uniform
  *        across contacts between different gases. Mass and momentum use the
  *        mean of the two sides' fluxes, which stays conservative and equals
- *        both at such contacts. face_flux holds side 0's energy flux,
+ *        both at such contacts: both estimate the wave speeds with each
+ *        side's own [gamma, e0], which makes their mass fluxes there agree
+ *        for every solver, HLL and Rusanov included. face_flux holds side 0's energy flux,
  *        face_energy_1 side 1's (both as the rate of change of side 0).
  */
 template <typename T_riemann_solver>
@@ -140,6 +157,7 @@ struct MixtureDoubleFluxFunctor {
     Kokkos::View<rtype *> face_energy_1;
     Kokkos::View<rtype **> face_mdot;
     rtype low_mach_cutoff;
+    Kokkos::View<rtype *> upwind;  // hybrid flux: upwind fraction of each cell, else empty
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
@@ -158,13 +176,15 @@ struct MixtureDoubleFluxFunctor {
         rtype n_vec[N_DIM];
         FOR_I_DIM n_vec[i] = normals(i_face, i);
         unit<N_DIM>(n_vec, n_unit);
+        const bool hybrid = upwind.extent(0) > 0;
+        const rtype phi = hybrid ? face_upwind_fraction(upwind, boundaries, c0, c1, i_face) : 1.0_r;
 
         rtype flux[N_CONSERVATIVE] = {};
         rtype energy_1 = 0.0_r;
         for (uint8_t i_quad = 0; i_quad < n_quad; i_quad++) {
             rtype w_q;
             if constexpr (N_DIM == 2) {
-                w_q = quad_weights(i_quad);
+                w_q = face_weights.extent(0) ? face_weights(i_face, i_quad) : quad_weights(i_quad);
             } else {
                 w_q = face_weights(i_face, i_quad);
                 if (w_q == 0.0_r) {
@@ -176,19 +196,37 @@ struct MixtureDoubleFluxFunctor {
             FOR_I_CONSERVATIVE W_l[i] = face_solution(i_face, i_quad, 0, i);
             if (c1 >= 0) {
                 FOR_I_CONSERVATIVE W_r[i] = face_solution(i_face, i_quad, 1, i);
-                if (low_mach_cutoff < 1.0_r) low_mach_correction(W_l, W_r, th_0.gamma, th_1.gamma, low_mach_cutoff);
             } else {
                 const rtype th_i[2] = {th_0.gamma, th_0.e0};
                 rtype th_g[2];
                 boundaries.exterior_mixture(i_face, i_quad, n_quad, W_l, th_i, n_unit, W_cells, face_solution,
                                             face_thermo, cell_thermo, W_r, th_g);
             }
+            // Each side's central flux with its own frozen thermodynamics on both sides
+            rtype K_0[N_CONSERVATIVE] = {}, K_1[N_CONSERVATIVE] = {};
+            if (hybrid) {
+                riemann::KEEP::calc_flux(K_0, n_unit, W_l, W_r, th_0, th_0);
+                riemann::KEEP::calc_flux(K_1, n_unit, W_l, W_r, th_1, th_1);
+            }
+            if (low_mach_cutoff < 1.0_r) {
+                if (c1 >= 0) {
+                    low_mach_correction(W_l, W_r, th_0.gamma, th_1.gamma, low_mach_cutoff);
+                } else if (boundaries.bcs(boundaries.face_bc(i_face)).is_characteristic()) {
+                    low_mach_correction(W_l, W_r, th_0.gamma, th_0.gamma, low_mach_cutoff);
+                }
+            }
             rtype F_0[N_CONSERVATIVE], F_1[N_CONSERVATIVE];
-            T_riemann_solver::calc_flux(F_0, n_unit, W_l, W_r, th_0, th_0);
+            T_riemann_solver::calc_flux(F_0, n_unit, W_l, W_r, th_0, riemann::SideThermo(th_0, th_1));
             if (c1 >= 0) {
-                T_riemann_solver::calc_flux(F_1, n_unit, W_l, W_r, th_1, th_1);
+                T_riemann_solver::calc_flux(F_1, n_unit, W_l, W_r, riemann::SideThermo(th_1, th_0), th_1);
             } else {
                 FOR_I_CONSERVATIVE F_1[i] = F_0[i];
+            }
+            if (hybrid) {
+                FOR_I_CONSERVATIVE {
+                    F_0[i] = K_0[i] + phi * (F_0[i] - K_0[i]);
+                    F_1[i] = K_1[i] + phi * (F_1[i] - K_1[i]);
+                }
             }
             const rtype mdot = 0.5_r * (F_0[0] + F_1[0]);
             face_mdot(i_face, i_quad) = mdot;
@@ -255,7 +293,7 @@ struct SpeciesSlotFunctor {
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *> face_area;
     Kokkos::View<rtype *> quad_weights;   // 2D
-    Kokkos::View<rtype **> face_weights;  // 3D: (face, q)
+    Kokkos::View<rtype **> face_weights;  // (face, q): 3D; 2D axisymmetric (see MixtureFluxFunctor); else empty
     Kokkos::View<rtype **> face_mdot;
     Eval values;
     BoundaryData boundaries;
@@ -278,8 +316,14 @@ struct SpeciesSlotFunctor {
     KOKKOS_INLINE_FUNCTION
     void exterior_Y(const uint32_t f, const uint32_t k, const rtype * interior, rtype * out) const {
         const uint8_t nq = n_quad();
+        const int32_t i_bc = boundaries.face_bc(f);
+        const BoundaryType type = boundaries.bcs(i_bc).type;
         const int32_t image_face = boundaries.face_image_face(f);
         const int32_t image = boundaries.face_image(f);
+        if (type == BoundaryType::NSCBC_INLET) {
+            for (uint8_t q = 0; q < nq; q++) out[q] = boundaries.bc_Y(i_bc, k);
+            return;
+        }
         if (image_face >= 0) {
             uint8_t k_image = 0;
             while (faces_of_cell(offsets_faces_of_cell(image) + k_image) != static_cast<uint32_t>(image_face)) k_image++;
@@ -296,11 +340,10 @@ struct SpeciesSlotFunctor {
             }
             return;
         }
-        const int32_t i_bc = boundaries.face_bc(f);
         for (uint8_t q = 0; q < nq; q++) {
             if (image >= 0) {
                 out[q] = values.scalars(image, k);
-            } else if (boundaries.bcs(i_bc).type == BoundaryType::UPT) {
+            } else if (type == BoundaryType::UPT) {
                 out[q] = boundaries.bc_Y(i_bc, k);
             } else {
                 out[q] = interior[q];
@@ -322,7 +365,7 @@ struct SpeciesSlotFunctor {
             for (uint8_t q = 0; q < nq; q++) {
                 rtype w_q;
                 if constexpr (N_DIM == 2) {
-                    w_q = quad_weights(q);
+                    w_q = face_weights.extent(0) ? face_weights(f, q) : quad_weights(q);
                 } else {
                     w_q = face_weights(f, q);
                 }

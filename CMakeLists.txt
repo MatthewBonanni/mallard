@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Mallard VERSION 0.5.0 LANGUAGES CXX)
+project(Mallard VERSION 0.6.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 
 # Version string for the run header, fixed at configure time
@@ -75,7 +75,7 @@ option(${PROJECT_NAME}_ENABLE_MPI "Distributed memory parallelism with MPI" OFF)
 if(${PROJECT_NAME}_ENABLE_MPI)
     find_package(MPI REQUIRED COMPONENTS CXX)
     message(STATUS "Mallard: MPI ${MPI_CXX_VERSION}")
-    option(${PROJECT_NAME}_GPU_AWARE_MPI "Pass device buffers to MPI directly (CUDA-aware MPI)" OFF)
+    option(${PROJECT_NAME}_GPU_AWARE_MPI "Pass device buffers to MPI directly (CUDA- or ROCm-aware MPI)" OFF)
     option(${PROJECT_NAME}_ENABLE_KAMINPAR "Graph partitioning with dKaMinPar (needs oneTBB)" OFF)
     if(${PROJECT_NAME}_ENABLE_KAMINPAR)
         include(FetchContent)

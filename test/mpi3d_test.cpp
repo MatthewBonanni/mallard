@@ -19,6 +19,8 @@
 #include <string>
 
 #include "gmsh_fixtures.h"
+#include "hdf5_output.h"
+#include "mesh_block.h"
 #include "mpi_compare.h"
 
 namespace {
@@ -28,7 +30,7 @@ const char * ZONES[6] = {"left", "right", "bottom", "top", "back", "front"};
 std::string blast_input(const std::string & mesh, const std::string & recon) {
     const std::string blob = "exp(-20 * ((x - 0.4)^2 + (y - 0.55)^2 + (z - 0.45)^2))";
     std::ostringstream s;
-    s << "[run]\nn_steps = 3\ncfl = 0.5\n"
+    s << "[run]\nn_steps = 3\ncfl = 0.25\n"
       << "[mesh]\ntype = \"" << mesh << "\"\nNx = 12\nNy = 12\nNz = 12\nLx = 1.0\nLy = 1.0\nLz = 1.0\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.5 * " << blob << "\"\n"
       << "u = [\"0.3\", \"-0.1\", \"0.2\"]\np = \"1.0 + 0.8 * " << blob << "\"\n";
@@ -47,7 +49,7 @@ std::string box_input(const std::string & mesh, const std::string & recon, const
     const char * types[6] = {"type = \"extrapolation\"\n", "type = \"symmetry\"\n", "type = \"wall_adiabatic\"\n",
                              "type = \"extrapolation\"\n", "type = \"symmetry\"\n", "type = \"extrapolation\"\n"};
     std::ostringstream s;
-    s << "[run]\nn_steps = 8\ncfl = 0.5\n"
+    s << "[run]\nn_steps = 8\ncfl = 0.25\n"
       << "[mesh]\ntype = \"" << mesh << "\"\nNx = 6\nNy = 4\nNz = 3\nLx = 1.0\nLy = 0.8\nLz = 0.6\n"
       << "[initialize]\ntype = \"analytical\"\n"
       << "rho = \"1.0 + 0.8 * exp(-20 * ((x - 0.35)^2 + (y - 0.45)^2 + (z - 0.3)^2))\"\n"
@@ -77,6 +79,25 @@ TEST(MPI3DTest, MUSCLOnMixedCellsMatchesSerial) {
 TEST(MPI3DTest, NavierStokesOnTetrahedraMatchesSerial) {
     expect_matches_serial(box_input("cartesian_tet", "type = \"MUSCL\"\n",
                                     "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n"));
+}
+
+TEST(MPI3DTest, LargeEddySimulationOnTetrahedraMatchesSerial) {
+    std::string input =
+        box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n");
+    const std::string u = "u = [\"0.3\", \"-0.1\", \"0.2\"]\n";
+    input.replace(input.find(u), u.size(),
+                  "u = [\"0.3 + 0.4 * sin(9 * y)\", \"-0.1 + 0.3 * sin(7 * z)\", \"0.2 + 0.3 * sin(8 * x + 3 * y)\"]\n");
+    expect_matches_serial(input + "[les]\nmodel = \"sigma\"\nC = 3.0\n");
+}
+
+TEST(MPI3DTest, CharacteristicBoundariesMatchSerial) {
+    std::string input = box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"euler\"\n");
+    const std::string from = "name = \"right\"\ntype = \"symmetry\"\n";
+    input.replace(input.find(from), from.size(), "name = \"right\"\ntype = \"nscbc_outlet\"\np = 1.0\nL = 1.0\n");
+    const std::string left = "name = \"left\"\ntype = \"extrapolation\"\n";
+    input.replace(input.find(left), left.size(),
+                  "name = \"left\"\ntype = \"nscbc_inlet\"\nu = [0.3, 0.0, 0.0]\np = 1.0\nT = 1.0\nL = 1.0\n");
+    expect_matches_serial(input);
 }
 
 TEST(MPI3DTest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
@@ -120,4 +141,15 @@ TEST(MPI3DTest, SurfaceOutputOfAZoneMissingFromSomeRanks) {
         total += std::stoull(text.substr(k + 15));
     }
     EXPECT_EQ(total, 12u * 12u);
+}
+
+TEST(MPI3DTest, HDF5OutputDoesNotDependOnTheRankCount) {
+    // Tetrahedra, pyramids, prisms and hexahedra at their global ids
+    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
+#ifdef Mallard_HAS_HDF5
+    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mpi3d_hdf5").string();
+    expect_hdf5_output_matches_serial(box_input("cartesian_mixed", "type = \"MUSCL\"\n", "type = \"euler\"\n"),
+                                      "interval = 4\nvariables = [\"RHO\", \"U\", \"P\"]\n", dir, {0, 4, 8});
+#endif
 }

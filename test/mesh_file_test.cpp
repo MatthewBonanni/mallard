@@ -218,7 +218,7 @@ TEST_P(MixedMesh, UniformFlowIsPreserved) {
     Solver solver;
     solver.init(parse_toml(file_mesh_input(file, GetParam(),
         "type = \"analytical\"\nrho = \"1.2\"\nu = [\"0.4\", \"-0.3\"]\np = \"0.8\"\n",
-        "extrapolation", "n_steps = 20\ncfl = 0.5\n")));
+        "extrapolation", "n_steps = 20\ncfl = 0.25\n")));
     solver.run();
     solver.update_primitives();
     solver.copy_device_to_host();
@@ -235,7 +235,7 @@ TEST_P(MixedMesh, BlastInClosedBoxConservesMassAndEnergy) {
     solver.init(parse_toml(file_mesh_input(file, GetParam(),
         "type = \"analytical\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\"]\n"
         "p = \"(x - 0.5)^2 + (y - 0.5)^2 < 0.04 ? 10.0 : 0.1\"\n",
-        "symmetry", "t_stop = 0.1\ncfl = 0.5\n")));
+        "symmetry", "t_stop = 0.1\ncfl = 0.25\n")));
     const auto before = solver.integrate_conservatives();
     solver.run();
     const auto after = solver.integrate_conservatives();
@@ -253,7 +253,7 @@ const char * PERIODIC_PAIRS = "[[periodic]]\nzones = [\"left\", \"right\"]\ntran
 std::string periodic_file_input(const std::string & file) {
     std::string input = file_mesh_input(file, "TENO",
         "type = \"analytical\"\nrho = \"1.0 + 0.3 * exp(-30 * ((x - 0.3)^2 + (y - 0.6)^2))\"\n"
-        "u = [\"0.7\", \"-0.4\"]\np = \"1.0\"\n", "symmetry", "n_steps = 15\ncfl = 0.5\n");
+        "u = [\"0.7\", \"-0.4\"]\np = \"1.0\"\n", "symmetry", "n_steps = 15\ncfl = 0.25\n");
     return input.substr(0, input.find("[[boundaries]]")) + input.substr(input.find("[numerics]")) + PERIODIC_PAIRS;
 }
 

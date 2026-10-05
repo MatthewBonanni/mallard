@@ -51,14 +51,14 @@
 # halves T' before ignition (15 K: 8.5 K at 0.45 tau_0) and deflagrations
 # consume the coldest gas. The deflagrative share depends on the threshold
 # (T' = 30 K: 15%, 25% and 51% at 1.1, 1.5 and 3 S_L), the trend does not.
-# Cost: 1.4-2.0 million acoustically limited steps per run (t_stop 4.2-5.5
+# Cost: 1.4-2.0 million acoustically limited steps per run (cfl = 0.4, t_stop 4.2-5.5
 # ms), 10.4 ms each on four A100s (chemistry 65-70%): 4.7 hours for this
 # run, 5.5 for T' = 30 K.
 
 
 [run]
 t_stop = 0.0047999999999999996
-cfl = 0.8
+cfl = 0.4
 
 [mesh]
 type = "cartesian"

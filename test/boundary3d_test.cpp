@@ -19,6 +19,7 @@
 
 #include "test_fixtures.h"
 #include "boundary.h"
+#include "solver.h"
 
 namespace {
 
@@ -256,5 +257,54 @@ TEST(Boundary3DTest, TransmissiveImageCellContainsTheImagePoint) {
         if (std::string(type) == "cartesian_tet") {
             EXPECT_GT(n_moved, 0u);
         }
+    }
+}
+
+namespace {
+
+/**
+ * @brief Largest |p' - u'| (rho = c = 1) of the wave reflected by the right
+ *        boundary at t = 1, from a right-running pulse of 1e-3 that reaches it
+ *        at t = 0.5, in a box of 200 x 2 x 2 blocks with symmetry sides.
+ */
+double reflection_3d(const std::string & mesh, const std::string & right) {
+    const std::string pulse = "1e-3 * exp(-((x - 0.5) / 0.05)^2)";
+    const std::string p0 = "0.7142857142857143";
+    std::string input = "[run]\nt_stop = 1.0\ncfl = 0.2\n[mesh]\ntype = \"" + mesh +
+                        "\"\nNx = 200\nNy = 2\nNz = 2\nLx = 1.0\nLy = 0.01\nLz = 0.01\n"
+                        "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + " + pulse + "\"\nu = [\"" + pulse +
+                        "\", \"0.0\", \"0.0\"]\np = \"" + p0 + " + " + pulse + "\"\n"
+                        "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
+                        "[[boundaries]]\nname = \"right\"\n" + right;
+    for (const char * side : {"bottom", "top", "back", "front"}) {
+        input += std::string("[[boundaries]]\nname = \"") + side + "\"\ntype = \"symmetry\"\n";
+    }
+    input += "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+             "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = " + p0 + "\nT_ref = " + p0 +
+             "\nrho_ref = 1.0\n[output]\ncheck_interval = 1000000\n";
+    Solver solver;
+    solver.init(parse_toml(input));
+    solver.run();
+    solver.update_primitives();
+    solver.copy_device_to_host();
+    double reflected = 0.0;
+    for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
+        const double x = double(solver.get_mesh()->h_cell_coords(c, 0));
+        if (x < 0.2 || x > 0.8) continue;
+        const double p = double(solver.h_primitives(c, N_DIM)) - 1.0 / 1.4;
+        reflected = std::max(reflected, std::abs(p - double(solver.h_primitives(c, 0))));
+    }
+    return reflected / 2e-3;
+}
+
+} // namespace
+
+TEST(Boundary3DTest, CharacteristicOutletLetsAPlaneWaveLeave) {
+    // With the transverse terms, on hexahedra and on tetrahedra
+    for (const std::string mesh : {"cartesian", "cartesian_tet"}) {
+        SCOPED_TRACE(mesh);
+        EXPECT_LT(reflection_3d(mesh, "type = \"nscbc_outlet\"\np = 0.7142857142857143\nL = 1.0\nsigma = 0.0\n"),
+                  0.03);
+        EXPECT_GT(reflection_3d(mesh, "type = \"p_out\"\np = 0.7142857142857143\n"), 0.9);
     }
 }

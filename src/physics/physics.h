@@ -39,7 +39,8 @@ static const std::unordered_map<PhysicsType, std::string> PHYSICS_NAMES = {
 enum class ViscosityModel {
     NONE,
     CONSTANT,
-    SUTHERLAND
+    SUTHERLAND,
+    POWER_LAW
 };
 
 /**
@@ -56,9 +57,10 @@ struct Euler {
     rtype cp = 1004.5;
     rtype cv = 717.5;
     ViscosityModel viscosity_model = ViscosityModel::NONE;
-    rtype mu_ref = 0.0;      // Viscosity (constant) or at T_mu_ref (Sutherland)
+    rtype mu_ref = 0.0;      // Viscosity (constant) or at T_mu_ref (Sutherland, power law)
     rtype T_mu_ref = 273.15;
     rtype S_mu = 110.4;      // Sutherland temperature
+    rtype n_mu = 0.75;       // Power-law exponent
     rtype Pr = 0.72;
 
     /**
@@ -92,6 +94,8 @@ struct Euler {
                 return mu_ref;
             case ViscosityModel::SUTHERLAND:
                 return mu_ref * Kokkos::pow(T / T_mu_ref, 1.5_r) * (T_mu_ref + S_mu) / (T + S_mu);
+            case ViscosityModel::POWER_LAW:
+                return mu_ref * Kokkos::pow(T / T_mu_ref, n_mu);
             default:
                 return 0.0;
         }

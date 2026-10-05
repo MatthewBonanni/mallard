@@ -1,0 +1,137 @@
+# Counterflow diffusion flame (V10 of docs/design/chemistry.md, 3D build):
+# H2/N2 (1:3 by volume) against air, both at 300 K and 1 atm, from opposed
+# round nozzles 10 mm apart, momentum-balanced (U_o = 2 m/s, U_f = 2.316
+# m/s), h2o2.yaml with mixture-averaged transport. A quarter of the two jets:
+# symmetry planes y = 0 and z = 0, plug jets (upt) at r < 5 mm inside N2
+# coflows at the same velocity, pressure outlets at y, z = 7.5 mm. Reference:
+# Cantera's CounterflowDiffusionFlame (the axisymmetric similarity
+# solution), reference/strain.csv and K711.csv from
+# tools/counterflow_reference.py. Hexahedra of 57 um along x through the
+# flame (15 per FWHM of the temperature profile), 229 um across near the
+# axis. Make the mesh and the initial state (Cantera's solution with radial
+# velocity r V(x)) first, from this directory; this rewrites this file
+# without this header:
+#
+#   python ../../tools/counterflow_setup.py reference/U2.csv . --cells-per-width 15
+#
+# then run, and compare on the stagnation line with
+#
+#   python ../../tools/plot_counterflow.py counterflow --run "U_o = 2 m/s" . --history --still 5e-3
+#
+# Results (README.md): steady after about 4 / K_ox; local strain rate K_ox =
+# 711 1/s (Cantera 730 at the same nozzle velocities) and peak temperature
+# 1426.9 K, 0.49% above Cantera's flame with the same K_ox (0.36% at the
+# same spread rate at the flame); stagnation-line temperature, velocity and
+# species profiles overlay Cantera's. Cost: 46,464 cells, 312,000 steps of
+# 14.3 ms: 75 minutes on one A100.
+#
+# Counterflow diffusion flame (V10) from U2.csv: U_o = 2 m/s,
+# U_f = 2.31602 m/s, K_ox = 729.748 1/s (Cantera's); 96 x 22 x 22 = 46464 hexahedra,
+# 57.29 um along x through the flame (15 per FWHM of 0.8594 mm),
+# 229.2 um across near the axis; nozzle radius 5 mm, domain width
+# 7.5 mm, gap 10 mm; t_stop = 4 / K_ox
+
+[run]
+t_stop = 0.005481344245
+cfl = 0.4
+
+[mesh]
+type = "file"
+filename = "counterflow.msh"
+
+[initialize]
+type = "restart"
+file = "counterflow.restart"
+
+[[boundaries]]
+name = "fuel"
+where = "y * y + z * z < 2.5e-05"
+type = "upt"
+u = [2.3160189, 0.0, 0.0]
+p = 101325.0
+T = 300
+X = { "H2" = 0.25, "N2" = 0.75 }
+
+[[boundaries]]
+name = "fuel"
+where = "y * y + z * z >= 2.5e-05"
+type = "upt"
+u = [2.3160189, 0.0, 0.0]
+p = 101325.0
+T = 300
+X = { "N2" = 1.0 }
+
+[[boundaries]]
+name = "oxidizer"
+where = "y * y + z * z < 2.5e-05"
+type = "upt"
+u = [-2, 0.0, 0.0]
+p = 101325.0
+T = 300
+X = { "O2" = 0.21, "N2" = 0.79 }
+
+[[boundaries]]
+name = "oxidizer"
+where = "y * y + z * z >= 2.5e-05"
+type = "upt"
+u = [-2, 0.0, 0.0]
+p = 101325.0
+T = 300
+X = { "N2" = 1.0 }
+
+[[boundaries]]
+name = "sym_y"
+type = "symmetry"
+
+[[boundaries]]
+name = "sym_z"
+type = "symmetry"
+
+[[boundaries]]
+name = "side_y"
+type = "p_out"
+p = 101325.0
+
+[[boundaries]]
+name = "side_z"
+type = "p_out"
+p = 101325.0
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+phase = "ohmech"
+transport = "mixture_averaged"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+
+[output]
+check_interval = 2000
+
+[[write_data]]
+prefix = "./solut/plane"
+format = "vtu"
+geometry = "sym_z"
+time_interval = 9.135573741e-05
+variables = ["RHO", "U", "P", "T", "HRR", "Y_*"]
+
+[[write_data]]
+prefix = "./solut/volume"
+format = "vtu"
+time_interval = 0.005481344245
+variables = ["U", "T", "HRR", "Y_H2", "Y_O2", "Y_OH", "Y_H2O"]
+
+[[write_data]]
+prefix = "./restart/counterflow"
+format = "restart"
+time_interval = 0.0005481344245

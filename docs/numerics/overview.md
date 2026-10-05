@@ -13,9 +13,83 @@ an approximate Riemann solver applied to the reconstructed left and right
 states. Each face's convective and viscous fluxes are stored once and every
 cell sums its faces in a fixed order, without atomics, so results are bitwise
 independent of the thread count and scheduling.
+
+## Time step
+
 Time integration is explicit (SSPRK3 by default; [Shu & Osher 1988](../references.md#shu-osher-1988)). The time step comes
-from a per-cell spectral radius ([Blazek 2015](../references.md#blazek-2015)),
-`dt_i = V / (sum_f (|u_n| + a) A_f + 4 nu_eff sum_f A_f^2 / V)`.
+from per-cell spectral radii ([Blazek 2015](../references.md#blazek-2015), eqs. 6.20-6.21 with C = 4),
+`dt = cfl * min_i dt_i` with
+`dt_i = 2 V / (sum_f (|u_n| + a) A_f + 4 nu_eff sum_f A_f^2 / V)`,
+where `|u_n| + a` is the larger of the two cells' on each face and
+`nu_eff = max(4/3, gamma/Pr) mu / rho` (for gas mixtures, the largest of
+`4/3 mu / rho`, `lambda / (rho cv)` and the species' diffusion coefficients;
+axisymmetric viscous runs add `nu_eff V / r^2` to the denominator).
+Half the sum over faces stands for the sum over coordinate directions of the
+projected areas, so this is the usual unstructured CFL number: on a uniform
+grid of spacing h it gives `dt = cfl * h / (|u| + |v| + 2a)` in 2D and
+`cfl * h / (|u| + |v| + |w| + 3a)` in 3D. (Mallard 0.5 and earlier omitted the
+factor 2: their inputs give the same time step with half their `cfl`.)
+
+Largest stable `cfl` for smooth inviscid flow, SSPRK3 / RK4, with HLLC and
+default options, on periodic boxes of generated meshes (40 x 40 quads or
+twice as many triangles; 20 x 20 x 6 blocks in 3D, one hexahedron, six
+tetrahedra or two prisms each): the largest `cfl`, bisected to 0.02, that
+still damps a 1% Gaussian acoustic pulse in gas at rest over 12 acoustic
+crossings of the box (500-1000 steps at the limit; the growth past it is
+abrupt), and keeps the isentropic vortex, convected diagonally at Mach 1.2,
+within its initial deviation over ten periods. The pulse sets every limit;
+the vortex tolerates 15-45% more.
+
+| Reconstruction | Quads | Triangles | Hexahedra | Tetrahedra | Prisms |
+|---|---|---|---|---|---|
+| First order | 1.26 / 1.41 | 1.29 / 1.39 | 1.27 / 1.41 | 1.26 / 1.39 | 1.27 / 1.39 |
+| MUSCL | 1.26 / 1.41 | 1.33 / 1.49 | 1.27 / 1.41 | 1.26 / 1.39 | 1.33 / 1.47 |
+| TENO 3 | 1.33 / 1.43 | 1.36 / 1.52 | 1.32 / 1.47 | 1.49 / 1.67 | 1.35 / 1.49 |
+| TENO 4 | 1.32 / 1.47 | 1.32 / 1.47 | 1.33 / 1.47 | 1.32 / 1.46 | 1.33 / 1.46 |
+| TENO 5 | 1.38 / 1.53 | 1.47 / 1.59 | 1.47 / 1.64 | 1.55 / 1.71 | 1.43 / 1.58 |
+| TENO 6 | 1.33 / 1.46 | 1.44 / 1.59 | 1.33 / 1.47 | 1.36 / 1.50 | 1.32 / 1.47 |
+
+The first-order limits are the integrator's own: on quads and hexahedra the
+odd-even (checkerboard) acoustic mode has the eigenvalue `-2 cfl` in this
+normalization, so it leaves the stability region on the negative real axis at
+`cfl` = 2.51 / 2 = 1.26 (SSPRK3) and 2.79 / 2 = 1.39 (RK4), and forward Euler
+stops at 1; the other cells come within 3% of that. Higher reconstruction
+orders are stable to about the same `cfl`, up to 25% more. The low-Mach correction
+does not change the limits (within 0.03 with `low_mach_cutoff = 1`), and the
+viscous term never binds first: acoustic pulses at cell Reynolds numbers below
+one (first order and TENO5) are stable to `cfl` = 2.5 on quads and 3.2 on
+triangles.
+
+Accuracy: the vortex's density error after one period on the 40 x 40 grid
+stays within 10% of its small-`cfl` value up to
+
+| Reconstruction | Quads | Triangles |
+|---|---|---|
+| First order | 1.51 / 1.64 | 1.60 / 1.76 |
+| MUSCL | 1.55 / 1.82 | 1.66 / 1.90 |
+| TENO 3 | 1.60 / 1.77 | 1.93 / 2.11 |
+| TENO 4 | 1.63 / 1.83 | 1.45 / 2.03 |
+| TENO 5 | 1.76 / 2.00 | 1.84 / 2.18 |
+| TENO 6 | 1.50 / 1.96 | 1.40 / 2.17 |
+
+above the stability limits, as in 3D (1.6-2.6 on hexahedra and tetrahedra, up
+to TENO5). Errors that are smaller relative to the time error (finer meshes,
+higher orders) lower these values, TENO4 and TENO6 with SSPRK3 first.
+
+So `cfl` = 1.2 (SSPRK3) or 1.35 (RK4) is the largest safe value on any of
+these cell types for smooth flow; distorted or stretched cells and strong
+shocks call for some margin, and 1.0 with SSPRK3 is a good default. Shocks do
+not lower the limit much: on the 200-cell Sod and Shu-Osher problems (TENO5,
+SSPRK3) the density L1 error is unchanged (within 1%) from `cfl` = 0.25 to 1.0,
+Shu-Osher's then grows by 4% at 1.2 and 11% at 1.4, and the double Mach
+reflection (on 240 x 60 blocks) runs at 1.2. Bound-preserving TENO keeps
+density and pressure positive only at smaller steps in the most extreme
+cases: the Noh problem (`examples/noh_axisymmetric`) needs `cfl` = 0.25 and
+goes to negative pressure at 0.5, while the Sedov blasts run at 1.0. With chemistry the splitting
+error can bind first: the 1D CJ detonation of `examples/detonation_1d` keeps
+its ZND induction length within 5% up to `cfl` = 0.35 but not at 0.5 (-5.5%) or
+1.0 (-25%), while the premixed flame's speed is the same to 0.001% at 0.2 and
+1.0.
 
 ## Reconstruction
 
@@ -43,6 +117,15 @@ from a per-cell spectral radius ([Blazek 2015](../references.md#blazek-2015)),
 | HLLC | [Toro, Spruce & Speares 1994](../references.md#toro-spruce-speares-1994), with the same Einfeldt wave speeds |
 | Roe | [Roe 1981](../references.md#roe-1981), with Harten's entropy fix ([Harten 1983](../references.md#harten-1983)) |
 | RHLL | [Nishikawa & Kitamura 2008](../references.md#nishikawa-kitamura-2008), a rotated hybrid: HLL along the velocity-difference direction, Roe across it. Carbuncle-free. |
+
+All five also solve gas mixtures, on each side's frozen `cp / cv` and energy
+offset ([chemistry design](../design/chemistry.md#riemann-solvers)). The
+mixture Roe solver ([Glaister 1988](../references.md#glaister-1988);
+[Shuen, Liou & van Leer 1990](../references.md#shuen-liou-van-leer-1990)) lets the
+contact, shear and composition waves, which all move with the flow, carry
+the whole jump of the conservative variables left by the two acoustic waves.
+That makes it exact at contacts between different gases for any averaged
+sound speed, and it reduces to the single-gas Roe solver for one gas.
 
 ### Low-Mach correction
 
@@ -83,6 +166,7 @@ the Riemann solver.
 - **Transmissive boundaries**: take the exterior state from an *image face*, the interior face reached by translating the boundary face inward by the depth of the boundary cell. This is exactly what an interior face sees for a solution that does not vary normal to the boundary.
   - A zero-gradient copy of the boundary cell is not used, because at inflow boundaries it feeds the cell back to itself.
   - On triangles, where boundary-cell centroids are offset from the face, the copy creates an O(1) mass imbalance at every moving shock.
+- **Characteristic boundaries** (`nscbc_outlet`, `nscbc_inlet`): outgoing waves come from the interior and the incoming acoustic wave from the face's own pressure and normal velocity, advanced each step by the LODI relations of [Poinsot & Lele (1992)](../references.md#poinsot-lele-1992) with relaxation toward a target and the transverse terms of [Lodato, Domingo & Vervisch (2008)](../references.md#lodato-2008); see `docs/design/nscbc.md`. MUSCL boundary cells reconstruct without the ghosts across them: the zero normal gradient of a ghost leaves a jump at the cell's inner face, which the low-Mach correction turns into a reflected acoustic wave (15 to 34% of a normal pulse through `extrapolation`, with MUSCL or TENO).
 
 ## Viscous fluxes
 
@@ -91,10 +175,19 @@ the Riemann solver.
 - Transmissive faces take the face values and gradients of their image face, as the convective flux does.
 - Stress follows the Stokes hypothesis; heat flux uses a constant Prandtl number. Viscosity is constant or follows Sutherland's law ([Sutherland 1893](../references.md#sutherland-1893)).
 
+## Axisymmetric flows
+
+With `[physics] axisymmetric = true`, cells are integrated over their solids
+of revolution about the x axis (per radian): r-weighted cell averages,
+revolved volumes and face areas, and the radial momentum source
+`int (p - tau_thetatheta) dA`, made high order from TENO's polynomials. TENO's
+least squares fit r-weighted averages, and second-order operators work at
+r-weighted centroids. See [the design notes](../design/axisymmetric.md).
+
 ## Known limitations
 
 - The scheme is not exactly well balanced: hydrostatic states carry small spurious velocities, which vanish at second order under refinement (wall ghosts continue the hydrostatic pressure gradient).
-- RHLL does not keep a 1D problem on a 2D mesh exactly 1D. Where the velocity jump across a face is small but above its fallback threshold, the rotation direction tilts by the round-off transverse velocity divided by that jump. On the Sod strip (800 x 4 quads, TENO5), the rows start out identical to 1e-16, still agree to 1e-12 at t = 0.04, and differ by up to about 1e-5 later on, at levels that depend on the time-step history. HLL and HLLC stay at round-off.
+- RHLL does not keep a 1D problem on a 2D mesh exactly 1D. Where the velocity jump across a face is small but above its fallback threshold, the rotation direction tilts by the round-off transverse velocity divided by that jump. On the Sod strip (800 x 4 quads, TENO5), the rows start out identical to 1e-16, still agree to 1e-12 at t = 0.04, and differ by up to about 1e-5 later on, at levels that depend on the time-step history. HLL and HLLC stay at round-off. In gas mixtures this costs the mass fractions' positivity with TENO5: on the multicomponent shock tube (4 rows) N2 reaches -2e-10 in three cells of the driver gas next to the diaphragm, where HLLC, Roe and MUSCL stay within [0, 1]. The species' bounds are enforced at face points only, which keeps them only for fluxes that do not draw a cell's species beyond its content.
 - TENO's k-exact least squares with 2x oversampling is noticeably more dissipative for under-resolved smooth waves than compact structured stencils. `stencil_factor = 1.5` helps, at some cost in robustness at discontinuities.
 
 All sources, with where Mallard uses them: [References](../references.md).

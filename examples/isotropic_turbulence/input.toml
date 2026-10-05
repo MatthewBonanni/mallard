@@ -1,0 +1,133 @@
+# Decaying compressible isotropic turbulence with eddy shocklets: the
+# code-comparison case of Johnsen et al. (J. Comput. Phys. 229, 2010, 1213),
+# computed as a direct numerical simulation (no turbulence model). Needs the 3D
+# build (cmake -DMallard_DIM=3).
+#
+# Physics. Periodic box [0, 2 pi]^3; random solenoidal velocity with energy
+# spectrum E(k) ~ k^4 exp(-2 (k / k0)^2), k0 = 4; uniform density rho0 = 1 and
+# pressure p0 = 1 / gamma (R = 1, T0 = 1 / gamma, mean sound speed 1);
+# turbulent Mach number Mt0 = sqrt(<u_i u_i>) / <c> = 0.6 (u_rms0 = 0.3464);
+# Taylor-microscale Reynolds number Re_lambda0 = rho0 u_rms0 lambda0 / mu0 = 100
+# with lambda0 = 2 / k0, so mu0 = 1.732e-3 at T0 and mu ~ T^(3/4); Pr = 0.7,
+# gamma = 1.4, no bulk viscosity. The eddy turnover time is tau = lambda0 / u_rms0
+# = 1.4434; the run ends at t / tau = 4. The uniform thermodynamic state is out
+# of acoustic equilibrium with the velocity field, so acoustic waves and
+# entropy modes appear at once, and weak shocks (shocklets) form in the
+# compressive regions, with local Mach numbers up to 1.9.
+#
+# Run (N = 64, 128 or 256: set Nx, Ny, Nz to N and the initial file):
+#   python ../../tools/isotropic_turbulence_restart.py 256 hit_256.restart
+#   mpirun -n 12 ../../build3d/src/Mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
+#   python ../../tools/isotropic_turbulence_stats.py restart/hit_*.restart -o stats.csv \
+#       --spectra spectra --fields fields
+#   python ../../tools/plot_isotropic_turbulence.py RUN_64 RUN_128 RUN_256
+# The restart snapshots (every tau / 20, 671 MB each at 256^3) feed the
+# statistics; the initial state is the same band-limited field on every mesh.
+# Build with the OpenMP host backend (-DKokkos_ENABLE_OPENMP=ON): TENO's setup
+# runs on the host, and with one thread per rank it takes hours at 256^3.
+#
+# Reference. Johnsen et al. compare against the 256^3 solutions of three codes
+# that agree pointwise at t / tau = 4, spectrally filtered to 64^3 and
+# differentiated with sixth-order central differences; Subramaniam, Wong &
+# Lele (J. Comput. Phys. 397, 2019, 108822) against a 512^3 DNS filtered to
+# 64^3 with spectral derivatives (reference/ holds both, read from the vector
+# figures). tools/isotropic_turbulence_stats.py applies the same filters to
+# every snapshot (after turning cell averages into point values), besides the
+# unfiltered statistics on the full mesh. Samtaney, Pullin & Kosovic (Phys.
+# Fluids 13, 2001, 1415) describe the regime with DNS at Mt ~ 0.1-0.5 and
+# Re_lambda = 50-100: random shocklets whose thickness scales with the
+# Kolmogorov length.
+#
+# Resolution. k_max eta (k_max = N / 2, eta the Kolmogorov scale from the
+# dissipation rate) stays above 2.71 at 256^3, 1.36 at 128^3 and 0.71 at
+# 64^3 (smallest at the enstrophy peak, t / tau ~ 1.3). At 256^3 the velocity
+# spectrum falls 8 decades and the dilatation spectrum 4 decades below their
+# peaks by the grid cutoff, and TENO flags at most 3.4% of the cells (around
+# the shocklets, t / tau ~ 0.9; 128^3: 27%, 64^3: 76%), so the scheme mostly
+# runs on its linear fifth-order stencils.
+#
+# Grid convergence (unfiltered, t / tau = 0.2-4, 128^3 against 256^3): kinetic
+# energy, temperature and density variances within 0.3%; enstrophy 2.5% mean,
+# 3.6% at most; dilatation variance 6% mean, 13% at its peak (t / tau = 0.7),
+# carried by the steepest shocklets (most negative dilatation -58 u_rms0 /
+# lambda0 at 256^3, -33 at 128^3), which are only a few cells thick. 64^3
+# misses 18% of the enstrophy. Filtered to 64^3 as the references, 128^3 and
+# 256^3 differ by under 2% (enstrophy) and 5% (dilatation).
+#
+# Result at 256^3 against the references (t / tau = 0.2-4):
+#   Johnsen et al. (filtered 256^3, sixth-order differences): kinetic energy
+#   +2.1% mean (+3.2% at most), enstrophy -2.4% (-4.8%), dilatation variance
+#   -0.5% (-14% at the early acoustic peak, t / tau = 0.4), temperature
+#   variance -4.9% (-12% at t / tau = 4). At t / tau = 4: kinetic energy
+#   0.290 against 0.282, enstrophy 13.14 against 13.11, dilatation 0.307
+#   against 0.301.
+#   Subramaniam et al. (filtered 512^3, spectral derivatives): kinetic energy
+#   +2.3%, enstrophy -0.3% (peak 29.7 against 30.8), dilatation variance -0.6%
+#   (peak 1.35 against 1.35). Spectra at t / tau = 2 and 4: same shapes within
+#   0.02-0.09 decades RMS (their normalization is not stated; each reference
+#   spectrum is scaled by one fitted factor).
+# These residuals are larger than the grid error and of the size of the
+# realization-to-realization spread of the random initial field (three seeds
+# at 64^3: kinetic energy at t / tau = 4 within +-1%, temperature variance
+# +-3%); the references' realizations are not published. The low-Mach
+# correction (default cutoff 0.1) is active here, since most faces are
+# subsonic: turning it off lowers the filtered enstrophy by 10% at 64^3 and 2%
+# at 128^3.
+#
+# Cost: 256^3 (16.8M cells, about 1,730 steps) on 12 A100s: 8 minutes of
+# setup, then 0.67 s per step, about 30 minutes (66 GB per A100 at 1.4M cells
+# per rank); 128^3 (about 730 steps) on 3 A100s, 8 minutes; 64^3 (about 340
+# steps) on one A100, 1.5 minutes. (The results above were computed at
+# cfl = 0.4; at 64^3, cfl = 1.0 changes the kinetic energy and enstrophy
+# histories by at most 0.1% and 0.2%.)
+
+[run]
+t_stop = 5.773502691896256
+cfl = 1.0
+
+[mesh]
+type = "cartesian"
+Nx = 256
+Ny = 256
+Nz = 256
+Lx = 6.283185307179586
+Ly = 6.283185307179586
+Lz = 6.283185307179586
+periodic = ["x", "y", "z"]
+
+[initialize]
+type = "restart"
+file = "hit_256.restart"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+mu = 0.001732050807568877
+viscosity_model = "power_law"
+T_mu_ref = 0.7142857142857143
+viscosity_exponent = 0.75
+Pr = 0.7
+
+[output]
+check_interval = 200
+
+[integrals]
+interval = 5
+file = "integrals.csv"
+
+[[write_data]]
+prefix = "./restart/hit"
+format = "restart"
+time_interval = 0.0721687836487032

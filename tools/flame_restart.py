@@ -1,7 +1,7 @@
 """A premixed flame run for Mallard from a Cantera FreeFlame (V8), 1D or 2D.
 
     python tools/flame_restart.py FULL.csv MECHANISM PHASE CELLS_PER_DELTA RUN_DIR
-        [--cfl 0.4] [--transport mixture_averaged] [--flame-times 3] [--t-stop T]
+        [--cfl 1.0] [--transport mixture_averaged] [--flame-times 3] [--t-stop T]
         [--outputs 30] [--dim 2] [--upstream 6] [--downstream 9] [--ref-delta D]
         [--inlet-factor 1] [--ny NY --perturb A --modes 8 --seed 1]
 
@@ -36,7 +36,7 @@ def main():
     ap.add_argument("phase")
     ap.add_argument("cells_per_delta", type=float)
     ap.add_argument("run_dir")
-    ap.add_argument("--cfl", type=float, default=0.4)
+    ap.add_argument("--cfl", type=float, default=1.0)
     ap.add_argument("--transport", default="mixture_averaged")
     ap.add_argument("--flame-times", type=float, default=3.0)
     ap.add_argument("--outputs", type=int, default=30)

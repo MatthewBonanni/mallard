@@ -2,7 +2,7 @@
 
     python tools/autoignition_restart.py RUN_DIR [--t-rms 15] [--n 400] [--length 4.1e-3]
         [--T0 1070] [--p0 41] [--phi 0.1] [--l-T 1.25e-3] [--u-rms 0.5] [--l-e 1.25e-3]
-        [--seed 1] [--t-stop 4.8e-3] [--outputs 192] [--restart-interval 2e-4] [--cfl 0.8]
+        [--seed 1] [--t-stop 4.8e-3] [--outputs 192] [--restart-interval 2e-4] [--cfl 0.4]
         [--mechanism mechanisms/h2o2.yaml --phase ohmech]
 
 A periodic square of side --length and N x N cells holds lean H2/air (--phi)
@@ -89,7 +89,7 @@ def main():
     ap.add_argument("--t-stop", type=float, default=4.8e-3)
     ap.add_argument("--outputs", type=int, default=192)
     ap.add_argument("--restart-interval", type=float, default=0.2e-3)
-    ap.add_argument("--cfl", type=float, default=0.8)
+    ap.add_argument("--cfl", type=float, default=0.4)
     ap.add_argument("--mechanism", default=os.path.join(os.path.dirname(__file__), "..", "mechanisms", "h2o2.yaml"))
     ap.add_argument("--phase", default="ohmech")
     args = ap.parse_args()

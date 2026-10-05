@@ -31,7 +31,7 @@ const std::string PERFECT_GAS = "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref
 std::string restart_input(const std::string & dir, const std::string & init, uint32_t n_steps,
                           const std::string & physics = PERFECT_GAS) {
     std::ostringstream s;
-    s << "[run]\nn_steps = " << n_steps << "\ncfl = 0.5\n"
+    s << "[run]\nn_steps = " << n_steps << "\ncfl = 0.25\n"
       << "[mesh]\ntype = \"cartesian_tri\"\nNx = 12\nNy = 10\nLx = 1.0\nLy = 1.0\n"
       << "[initialize]\n" << init
       << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
@@ -130,6 +130,26 @@ TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
         return ss.str();
     };
     EXPECT_EQ(read_all(dir + "/b/forces.csv"), read_all(dir + "/a/forces.csv"));
+    std::filesystem::remove_all(dir);
+}
+
+TEST(RestartTest, RunStartedFromARestartFileStartsNewMonitorFilesWithAHeader) {
+    // A restart file can be an initial state (e.g. from a tools/ script): a
+    // monitor file that does not exist yet gets its header
+    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_header_test").string();
+    std::filesystem::remove_all(dir);
+    Solver first;
+    first.init(parse_toml(restart_input(dir + "/a", BLAST, 20)));
+    first.run();
+    Solver second;
+    second.init(parse_toml(restart_input(dir + "/b", "type = \"restart\"\nfile = \"" + dir + "/a/restart_000020.restart\"\n", 30)));
+    second.run();
+    std::ifstream a(dir + "/a/forces.csv"), b(dir + "/b/forces.csv");
+    std::string header_a, header_b;
+    std::getline(a, header_a);
+    std::getline(b, header_b);
+    EXPECT_EQ(header_b, header_a);
+    EXPECT_EQ(header_b.rfind("step,t,", 0), 0u);
     std::filesystem::remove_all(dir);
 }
 

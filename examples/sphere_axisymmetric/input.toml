@@ -1,0 +1,80 @@
+# Steady flow past a sphere at Re = 100 (axisymmetric; Mach 0.2): below
+# Re = 210 the wake is a steady axisymmetric recirculation ring. Generate the
+# meridian-plane mesh first (128 x 128 quads, the upper half of an O-grid with
+# the two cuts along the axis):
+#   python ../../tools/make_cylinder_mesh.py sphere.msh --half --n-theta 128 --n-r 128 --r-far 25 --dr0 0.01
+# then run and compare drag, separation angle and wake length with the
+# literature (set mu = 0.2 / 150 for Re = 150):
+#   python ../../tools/plot_sphere_axisymmetric.py sphere.png solut --re 100
+# Nondimensionalization: sphere diameter 1, free-stream density and sound
+# speed 1, so U = M = 0.2 and mu = U D / Re.
+#
+# Results at t = 200 (40 D / U; Cd steady to 1e-5; 114,000 steps, under two
+# minutes on one A100):
+#   Re = 100: Cd = 1.100, separation 126.5 deg from the front, wake L / D = 0.885
+#   Re = 150: Cd = 0.900, separation 120.2 deg, L / D = 1.21
+# against the incompressible correlations of Clift, Grace & Weber (Cd 1.087 and
+# 0.889, separation 126.5 and 120.4 deg) and the wake lengths of Johnson & Patel
+# (0.88 and about 1.2). Cd is about 1% high, as expected at Mach 0.2.
+
+[run]
+t_stop = 200.0
+cfl = 1.0
+
+[mesh]
+type = "file"
+filename = "sphere.msh"
+
+[initialize]
+type = "analytical"
+rho = "1.0"
+u = ["0.2 * (1 - exp(-4 * (x^2 + y^2 - 0.25)))", "0.0"]
+p = "0.7142857142857143"
+
+[[boundaries]]
+name = "cylinder"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "farfield"
+type = "farfield"
+u = [0.2, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "axis"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 3
+
+[physics]
+type = "navier_stokes"
+axisymmetric = true
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+mu = 0.002
+Pr = 0.72
+
+[output]
+check_interval = 2000
+
+[[forces]]
+zone = "cylinder"
+interval = 50
+file = "./solut/forces_sphere.csv"
+
+[[write_data]]
+prefix = "./solut/sphere"
+format = "vtu"
+time_interval = 10.0
+variables = ["RHO", "U_X", "U_Y", "P"]

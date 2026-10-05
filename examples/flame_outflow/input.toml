@@ -1,0 +1,94 @@
+# A stoichiometric H2/air flame blown out of the domain through a
+# characteristic outlet (docs/design/nscbc.md). Fresh gas enters through a
+# characteristic inlet at 10 m/s, four times the flame speed, so the flame
+# drifts downstream and crosses the outlet after about 0.13 ms. The start is a
+# tanh profile from fresh gas to complete-combustion products; the flame forms
+# within a few tens of microseconds. Unity Lewis numbers, 40 um cells (8 per
+# thermal thickness); about 30 s on 3 threads.
+#
+# The probes (0.3 to 2.1 mm) record the pressure. Once the flame has formed,
+# the pressure stays within 0.75 kPa (0.7%) of the target and within 0.3 kPa
+# across the probes. The largest deviation is a uniform dip while the burnt
+# gas leaves and the exit velocity falls from 68 to 10 m/s; the outlet then
+# relaxes it within about 50 us (sigma = 0.25 over L = 2.4 mm). Swap the outlet
+# for the commented p_out to compare: the fixed pressure removes the dip, but
+# reflects acoustic waves.
+
+[run]
+t_stop = 3.0e-4
+cfl = 1.0
+
+[mesh]
+type = "cartesian"
+Nx = 60
+Ny = 1
+Lx = 2.4e-3
+Ly = 4.0e-5
+
+[initialize]
+type = "analytical"
+p = "101325.0"
+T = "300.0 + 2090.0 * 0.5 * (1 + tanh((x - 1.4e-3) / 2.0e-4))"
+u = ["10.0 * (1 + 5.8 * 0.5 * (1 + tanh((x - 1.4e-3) / 2.0e-4)))", "0.0"]
+X = { H2 = "0.29586 * (1 - 0.5 * (1 + tanh((x - 1.4e-3) / 2.0e-4)))", O2 = "0.14793 * (1 - 0.5 * (1 + tanh((x - 1.4e-3) / 2.0e-4)))", H2O = "0.34722 * 0.5 * (1 + tanh((x - 1.4e-3) / 2.0e-4))" }
+balance = "N2"
+
+[[boundaries]]
+name = "left"
+type = "nscbc_inlet"
+u = [10.0, 0.0]
+p = 101325.0
+T = 300.0
+L = 2.4e-3
+X = { H2 = 0.29586, O2 = 0.14793, N2 = 0.55621 }
+
+[[boundaries]]
+name = "right"
+type = "nscbc_outlet"
+p = 101325.0
+L = 2.4e-3
+# type = "p_out"
+# p = 101325.0
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+phase = "ohmech"
+transport = "unity_lewis"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+
+[output]
+check_interval = 2000
+
+[[probes]]
+name = "pressure"
+variables = ["P", "T"]
+start = [0.3e-3, 2.0e-5]
+end = [2.1e-3, 2.0e-5]
+n_points = 4
+interval = 50
+
+[[write_data]]
+prefix = "./solut/flame"
+format = "vtu"
+time_interval = 1.0e-5
+variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*"]
