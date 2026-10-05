@@ -20,7 +20,7 @@
 
 /**
  * @brief Each cell's rates are those of its filtered state times the reacting
- *        fraction kappa = tau_c / (tau_c + tau_mix) (Golovitchev & Chomiak;
+ *        fraction kappa = tau_c / (tau_c + tau_mix) (the partially stirred reactor;
  *        Sabelnikov & Fureby, Combust. Flame 160, 2013), with the chemical
  *        time tau_c = rho cp T / |q| of the heat release rate q and the mixing
  *        time tau_mix = C_mix Delta^2 / (nu + nu_t) of molecular and SGS
