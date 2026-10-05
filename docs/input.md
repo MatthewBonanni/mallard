@@ -227,7 +227,11 @@ double precision in every build.
 Cells whose mass fractions would change by less than `atol / 100` over the
 half step at their current rates are skipped. Reaction types: elementary,
 three-body, falloff (Lindemann, Troe, SRI), `pressure-dependent-Arrhenius`
-(PLOG) and `Chebyshev`. Output variables: `HRR` (heat release rate,
+(PLOG) and `Chebyshev`, with non-integer reactant `orders` (global
+mechanisms such as Westbrook–Dryer's). Orders between 0 and 1 follow the
+power law down to a concentration of `1e-12` kmol/m^3 and a quadratic with a
+bounded slope below it (see `docs/design/chemistry.md`), so the Jacobian
+stays finite where such a reactant runs out. Output variables: `HRR` (heat release rate,
 W/m^3) and `CHEM_COST` (chemistry sub-steps of the cell in the last step);
 restart files also hold `CHEM_H`, each cell's last sub-step, so restarted
 runs repeat the uninterrupted one exactly. The progress rows add the share of
