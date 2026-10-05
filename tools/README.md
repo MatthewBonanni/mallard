@@ -4,7 +4,7 @@ Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the 3D
 
 | Script | Purpose |
 |---|---|
-| `mallard_vtu.py` | Minimal reader for Mallard's VTU files (cells, cell data, time); also reads HDF5 snapshots (`.h5`), so the scripts below accept them too |
+| `mallard_vtu.py` | Minimal reader for Mallard's VTU files (cells, cell data, time), binary or ASCII (boundary-zone output); also reads HDF5 snapshots (`.h5`), so the scripts below accept them too |
 | `mallard_h5.py` | Reader for `format = "hdf5"` output (needs h5py): mesh, cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf` (`animate.py` takes `--glob "PREFIX_[0-9]*.h5"`) |
 | `plot_vtu.py` | Plot one cell field of a VTU file |
 | `compare_png.py` | Side-by-side plots of a field from several VTU files |
@@ -25,6 +25,9 @@ Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the 3D
 | `flame_restart.py` | A premixed-flame run (input and restart file) in the flame's frame from a Cantera flame's full solution, at a given number of cells per thermal thickness: a 1D strip, or with `--ny` a periodic 2D channel whose front is wrinkled by random modes (`--perturb`); `--ref-delta` gives flames of different transport the same mesh |
 | `flame_speed.py` | Consumption and displacement speeds of a premixed-flame run over time, against a reference flame speed |
 | `plot_flame.py` | Temperature and heat release profiles of a premixed-flame run against Cantera's, aligned at the maximum of dT/dx |
+| `counterflow_reference.py` | Counterflow diffusion flames (V10) from Cantera's `CounterflowDiffusionFlame`: H2/N2 against air swept in strain rate up to extinction (peak temperature against the local strain rates ahead of the flame and the spread rate at the flame), and full solutions at given nozzle velocities (`--profile`) or local strain rates (`--match`), in `examples/counterflow_diffusion/reference/` |
+| `counterflow_setup.py` | A 3D counterflow run from a Cantera solution: the quarter domain of two opposed round jets with N2 coflows, as a Gmsh file of hexahedra refined through the flame, the initial state (Cantera's solution with radial velocity `r V(x)`) and the input file |
+| `plot_counterflow.py` | Counterflow runs against Cantera on the stagnation line: peak temperature against the local strain rate and against the spread rate at the flame, temperature, velocity and species profiles at matched strain rate, histories, and a still of the flame |
 | `isotropic_turbulence_restart.py` | Initial state of `examples/isotropic_turbulence` as a restart file: random solenoidal velocity with E(k) ~ k^4 exp(-2 (k / k0)^2) at a given Mt, uniform density and pressure, as exact cell averages of the same band-limited field on any N^3 mesh; prints the derived viscosity and tau |
 | `isotropic_turbulence_stats.py` | Statistics of isotropic turbulence snapshots (restart files of a uniform hexahedral box): kinetic energy, enstrophy, dilatation, temperature, density and pressure variances on the full mesh and filtered to 64^3 (sixth-order or spectral derivatives, the references' protocols), Mt, Re_lambda, k_max eta; shell spectra and fields for the animation |
 | `plot_isotropic_turbulence.py` | Isotropic turbulence runs against the filtered DNS of Johnsen et al. (2010) and Subramaniam et al. (2019): filtered and unfiltered histories (grid convergence) and spectra |
