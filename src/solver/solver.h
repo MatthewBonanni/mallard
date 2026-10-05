@@ -29,6 +29,7 @@
 #include "time_integrator.h"
 #include "physics.h"
 #include "les.h"
+#include "tfles.h"
 #include "mixture.h"
 #include "cell_chemistry.h"
 #include "scalar_reconstruction.h"
@@ -193,6 +194,12 @@ class Solver {
          *        over the step.
          */
         void update_characteristic_boundaries(rtype t_stage);
+        /** @brief The [p, u_n] of the characteristic faces of owned cells, once they hold a state. */
+        RestartFaces characteristic_restart_faces() const;
+        /** @brief Takes the characteristic faces' [p, u_n] from a restart file that has every face. */
+        void restore_characteristic_state(const RestartData & restart);
+        /** @brief Rank-count independent key of a boundary face in restart files. */
+        uint64_t restart_face_key(uint32_t i_face) const;
         /** @brief Adds the sponge-layer sources to the RHS per unit volume (owned cells). */
         void apply_sponges(const State & solution, const State & rhs);
         void calc_dt();
@@ -239,6 +246,16 @@ class Solver {
         void update_eddy_viscosity(uint32_t n);
         /** @brief LES: the eddy viscosity of the current state for the time step (owned cells) or output (all). */
         void eddy_viscosity_of_state(uint32_t n);
+        /**
+         * @brief Thickened flame: [F, E, Omega] and the chemistry time scale
+         *        E / F of every cell from the current state (owned cells,
+         *        exchanged to the halo), once per step in calc_dt.
+         */
+        void update_thickened_flame();
+        /** @brief Thickened flame: multiply the transport of every cell (after update_eddy_viscosity). */
+        void thicken_transport();
+        /** @brief Overwrite the halo cells of a 3-vector cell field with their owners' values. */
+        void exchange_cell_vectors(const Kokkos::View<rtype *[3]> & v);
 
         /**
          * @brief Reacting mixtures: read [chemistry]; advance every owned cell
@@ -467,6 +484,14 @@ class Solver {
         Kokkos::View<rtype *[3]> les_coefficients;     // (cell, [mu_t, lambda_t, mu_t / (Sc_t W)]), empty without LES
         Kokkos::View<rtype *[3]>::host_mirror_type h_les_coefficients;
         bool budget_pass = false;                      // calc_rhs evaluates kinetic_energy_budget
+        bool tfles_on = false;                         // [les.combustion]: thickened flame
+        ThickenedFlame thickened_flame;
+        Kokkos::View<rtype *[3]> tfles_fields;         // (cell, [F, E, Omega])
+        Kokkos::View<rtype *[3]>::host_mirror_type h_tfles_fields;
+        Kokkos::View<rtype *> chem_time_scale;         // (cell): E / F, the chemistry's rate multiplier
+        Kokkos::View<rtype *[3]> tfles_vorticity;
+        Kokkos::View<rtype *[3][N_DIM]> tfles_gradients;
+        State tfles_halo;                              // [F, E, Omega] as species, for the halo exchange
         KineticEnergyBudget budget;
 
         // Gas mixtures
@@ -533,7 +558,8 @@ class Solver {
         rtype sponge_dt_max = std::numeric_limits<rtype>::infinity();  // 1 / max strength
 
         bool characteristic_transverse = false;  // Some characteristic boundary has transverse terms
-        rtype t_characteristic = -1.0;           // Time the incoming waves were last advanced from, < 0 before the first
+        rtype t_characteristic = -1.0;           // Time the incoming waves were last advanced from
+        bool characteristic_state_set = false;   // char_state holds the faces' state (from a step or a restart)
 
         // Checks
         uint32_t check_interval;

@@ -567,3 +567,74 @@ TEST(ChemistryReactorTest, LargeMechanismIgnitesLikeCanteraWithDenseAndSparseLU)
         std::cout << (sparse ? "sparse" : "dense") << " LU: max ignition delay error " << worst << "\n";
     }
 }
+
+TEST(ChemistryReactorTest, LeanIgnitionIsReportedAtTheSteepestTemperatureRise) {
+    // H2/air at phi = 0.1, 1070 K and 41 atm (examples/autoignition_2d) heats
+    // by less than 400 K. Its delay is the time of the steepest rise of the
+    // trajectory sampled every microsecond; a run that ends before ignition,
+    // or before dT/dt has fallen to half its peak, has none
+    const Mechanism mech = read_mechanism(SOURCE_DIR + "/mechanisms/h2o2.yaml", "ohmech");
+    const auto thermo = make_thermo_table<Kokkos::HostSpace>(mech);
+    const auto kinetics = make_kinetics_table<Kokkos::HostSpace>(mech);
+    const uint32_t ns = mech.n_species();
+    std::vector<double> Y0(ns, 0.0);
+    double mass = 0.0;
+    for (uint32_t k = 0; k < ns; k++) {
+        const std::string & name = mech.species[k].name;
+        const double X = name == "H2"   ? 0.040322580645161296
+                         : name == "O2" ? 0.20161290322580644
+                         : name == "N2" ? 0.7580645161290324
+                                        : 0.0;
+        Y0[k] = X * mech.species[k].molecular_weight;
+        mass += Y0[k];
+    }
+    for (double & y : Y0) y /= mass;
+    const double T0 = 1070.0, p0 = 4154332.5;
+    const double rho = p0 / (thermo.gas_constant(MassFractions{Y0.data()}) * T0);
+    ReactorOptions options;
+    options.integrator.rtol = 1e-8;
+    options.atol_Y = 1e-12;
+    std::vector<double> work(reactor_work_size(kinetics)), Y;
+    std::vector<uint32_t> pivot(ns + 1);
+    const double interval = 1e-6;
+    // The observer at end_time, and T at every interval
+    auto run = [&](double end_time, std::vector<double> & T_rows) {
+        Y = Y0;
+        double T = T0, h = 0.0, t = 0.0;
+        IgnitionObserver observer;
+        observer.index = ns;
+        T_rows.assign(1, T);
+        while (t < end_time) {
+            const double t_next = std::min(end_time, t + interval);
+            observer.t_offset = t;
+            const RosenbrockResult r = advance_reactor(thermo, kinetics, rho, t_next - t, Y.data(), T, h, options,
+                                                       work.data(), pivot.data(), observer);
+            EXPECT_EQ(r.status, RosenbrockStatus::SUCCESS);
+            t = t_next;
+            T_rows.push_back(T);
+        }
+        return observer;
+    };
+
+    std::vector<double> T_rows;
+    const IgnitionObserver lean = run(6e-3, T_rows);
+    EXPECT_LT(T_rows.back() - T0, 400.0);
+    size_t steepest = 0;
+    for (size_t i = 1; i + 1 < T_rows.size(); i++) {
+        if (T_rows[i + 1] - T_rows[i] > T_rows[steepest + 1] - T_rows[steepest]) steepest = i;
+    }
+    const double t_steepest = (steepest + 0.5) * interval;
+    ASSERT_TRUE(lean.ignited());
+    EXPECT_NEAR(lean.t_ignition, t_steepest, interval);
+    EXPECT_NEAR(lean.t_ignition, 3.650e-3, 5e-3 * 3.650e-3);  // Cantera
+
+    // Runs that end before ignition, and past the steepest rise while dT/dt
+    // is still above half its peak
+    const double steepest_rise = T_rows[steepest + 1] - T_rows[steepest];
+    size_t half = steepest;
+    while (T_rows[half + 1] - T_rows[half] > 0.5 * steepest_rise) half++;
+    for (const double end_time : {0.5 * t_steepest, 0.5 * (t_steepest + half * interval)}) {
+        std::vector<double> rows;
+        EXPECT_FALSE(run(end_time, rows).ignited()) << "end_time " << end_time;
+    }
+}

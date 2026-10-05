@@ -93,6 +93,14 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the shock sensor of the hybrid flux.
 - <a id="bhagatwala-lele-2009"></a>A. Bhagatwala and S. K. Lele, A modified artificial viscosity approach for compressible turbulence simulations, *J. Comput. Phys.* 228, 4965–4969 (2009). [doi:10.1016/j.jcp.2009.04.009](https://doi.org/10.1016/j.jcp.2009.04.009)
   Used in: restricting the Ducros sensor to compressions, so expansions and flames keep the central flux.
+- <a id="colin-2000"></a>O. Colin, F. Ducros, D. Veynante and T. Poinsot, A thickened flame model for large eddy simulations of turbulent premixed combustion, *Phys. Fluids* 12, 1843–1863 (2000). [doi:10.1063/1.870436](https://doi.org/10.1063/1.870436)
+  Used in: `[les.combustion] model = "tfles"`, and its subgrid velocity `2 Delta^3 |lap(curl u)|`.
+- <a id="charlette-2002"></a>F. Charlette, C. Meneveau and D. Veynante, A power-law flame wrinkling model for LES of premixed turbulent combustion. Part I: non-dynamic formulation and initial tests, *Combust. Flame* 131, 159–180 (2002). [doi:10.1016/S0010-2180(02)00400-5](https://doi.org/10.1016/S0010-2180%2802%2900400-5)
+  Used in: the efficiency `E` of the thickened flame (`efficiency = "charlette"`).
+- <a id="legier-2002"></a>J.-P. Légier, T. Poinsot, B. Varoquié, F. Lacas and D. Veynante, Large eddy simulation of a non-premixed turbulent burner using a dynamically thickened flame model, in *Advances in LES of Complex Flows*, Springer, 315–326 (2002). [doi:10.1007/978-94-017-1998-8_27](https://doi.org/10.1007/978-94-017-1998-8_27)
+  Used in: thickening only where the flame sensor is on (dynamic thickening).
+- <a id="butler-orourke-1977"></a>T. D. Butler and P. J. O'Rourke, A numerical method for two dimensional unsteady reacting flows, *Proc. Combust. Inst.* 16, 1503–1515 (1977). [doi:10.1016/S0082-0784(77)80432-3](https://doi.org/10.1016/S0082-0784%2877%2980432-3)
+  Used in: the thickening transformation `D -> F D`, `omega -> omega / F` that keeps the laminar flame speed.
 
 ## Boundary conditions
 
@@ -226,3 +234,8 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: `examples/noh_axisymmetric` and `tools/plot_noh.py` (the spherical Noh problem and its exact solution).
 - <a id="clift-grace-weber-1978"></a>R. Clift, J. R. Grace and M. E. Weber, *Bubbles, Drops, and Particles*, Academic Press (1978).
   Used in: `examples/sphere_axisymmetric` and `tools/plot_sphere_axisymmetric.py` (correlations of the drag coefficient and the separation angle of a sphere in steady flow, 20 < Re < 260), with [Johnson & Patel (1999)](#johnson-patel-1999) for the wake length.
+- <a id="sankaran-2005"></a>R. Sankaran, H. G. Im, E. R. Hawkes and J. H. Chen, The effects of non-uniform temperature distribution on the ignition of a lean homogeneous hydrogen–air mixture, *Proc. Combust. Inst.* 30, 875–882 (2005). [doi:10.1016/j.proci.2004.08.176](https://doi.org/10.1016/j.proci.2004.08.176)
+- <a id="chen-2006"></a>J. H. Chen, E. R. Hawkes, R. Sankaran, S. D. Mason and H. G. Im, Direct numerical simulation of ignition front propagation in a constant volume with temperature inhomogeneities: I. Fundamental analysis and diagnostics, *Combust. Flame* 145, 128–144 (2006). [doi:10.1016/j.combustflame.2005.09.017](https://doi.org/10.1016/j.combustflame.2005.09.017)
+- <a id="hawkes-2006"></a>E. R. Hawkes, R. Sankaran, P. P. Pébay and J. H. Chen, Direct numerical simulation of ignition front propagation in a constant volume with temperature inhomogeneities: II. Parametric study, *Combust. Flame* 145, 145–159 (2006). [doi:10.1016/j.combustflame.2005.09.018](https://doi.org/10.1016/j.combustflame.2005.09.018)
+- <a id="passot-pouquet-1987"></a>T. Passot and A. Pouquet, Numerical simulation of compressible homogeneous flows in the turbulent regime, *J. Fluid Mech.* 181, 441–466 (1987). [doi:10.1017/S0022112087002167](https://doi.org/10.1017/S0022112087002167)
+  Used in: `examples/autoignition_2d` (the configuration of Chen et al. and Hawkes et al., the displacement-speed diagnostic of their fronts, and the regime criterion of Sankaran et al. in `tools/autoignition_analysis.py`; the Passot–Pouquet spectrum of the initial temperature and velocity fields in `tools/autoignition_restart.py`).
