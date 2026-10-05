@@ -243,7 +243,10 @@ template <typename T, typename K>
 void sort_by_key(std::vector<T> & items, K && key) {
     std::vector<std::pair<double, uint32_t>> order(items.size());
     for (size_t k = 0; k < items.size(); k++) order[k] = {key(items[k]), static_cast<uint32_t>(k)};
-    std::stable_sort(order.begin(), order.end(), [](const auto & a, const auto & b) { return a.first < b.first; });
+    // Ties in position order: the order of a stable sort, without its buffer
+    std::sort(order.begin(), order.end(), [](const auto & a, const auto & b) {
+        return a.first < b.first || (!(b.first < a.first) && a.second < b.second);
+    });
     std::vector<T> sorted;
     sorted.reserve(items.size());
     for (const auto & o : order) sorted.push_back(items[o.second]);
@@ -1905,21 +1908,24 @@ void TENO::compute_stencils_and_matrices_3d() {
                 return x ^ (x >> 29);
             }
         };
-        std::unordered_map<MeansKey, std::vector<double>, MeansHash> means_cache;
+        // Entry -> offset of its means (nk values) in means_store
+        std::unordered_map<MeansKey, size_t, MeansHash> means_offset;
+        std::vector<double> means_store, entry_means;
+        means_offset.reserve(512);
         auto build_pinv = [&](const std::vector<Entry> & stencil, uint8_t deg, std::vector<double> & P) {
             const uint8_t n = teno::n_dof(deg);
             const int m = stencil.size();
             std::vector<double> A(m * n);
             for (int s = 0; s < m; s++) {
                 const Entry & e = stencil[s];
-                const MeansKey key(e.cell, e.face, e.lattice, e.face_lattice);
-                auto it = means_cache.find(key);
-                if (it == means_cache.end()) {
-                    std::vector<double> means;
-                    monomial_means(stencil[s], r, means);
-                    it = means_cache.emplace(key, std::move(means)).first;
+                const auto [it, added] = means_offset.try_emplace(MeansKey(e.cell, e.face, e.lattice, e.face_lattice),
+                                                                  means_store.size());
+                if (added) {
+                    monomial_means(e, r, entry_means);
+                    means_store.insert(means_store.end(), entry_means.begin(), entry_means.end());
                 }
-                for (uint8_t l = 0; l < n; l++) A[s * n + l] = it->second[l] - mean0[l];
+                const double * mean = &means_store[it->second];
+                for (uint8_t l = 0; l < n; l++) A[s * n + l] = mean[l] - mean0[l];
             }
             return pseudo_inverse(A, m, n, P, double(max_condition));
         };
