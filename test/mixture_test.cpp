@@ -787,7 +787,7 @@ namespace {
  *        3000 steps of a standing Mach 6 normal shock in perfect air with a
  *        tiny density bump behind it, as carbuncle_growth of solver_test.cpp.
  */
-double mixture_carbuncle_growth(const std::string & riemann) {
+[[maybe_unused]] double mixture_carbuncle_growth(const std::string & riemann) {
     // Rankine-Hugoniot at Mach 6, gamma = 1.4, R = 287
     const double T1 = 300.0, p1 = 1.0e5, a1 = std::sqrt(1.4 * 287.0 * T1), u1 = 6.0 * a1;
     const double rho_ratio = 5.2682926829268295, p2 = 41.833333333333333 * p1, u2 = u1 / rho_ratio;
