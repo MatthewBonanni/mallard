@@ -1033,6 +1033,7 @@ void Solver::copy_device_to_host() {
         eddy_viscosity_of_state(mesh->n_cells);
         Kokkos::deep_copy(h_les_coefficients, les_coefficients);
     }
+    if (tfles_on) Kokkos::deep_copy(h_tfles_fields, tfles_fields);
     statistics.copy_device_to_host();
     if (p_max.is_allocated()) Kokkos::deep_copy(h_p_max, p_max);
     if (vortex_fields.is_allocated()) {
@@ -1081,6 +1082,11 @@ void Solver::register_data() {
     }
     data.push_back(Data("CFL", h_cfl_local));
     if (les_on) data.push_back(Data("MU_T", Kokkos::subview(h_les_coefficients, Kokkos::ALL(), 0)));
+    if (tfles_on) {
+        data.push_back(Data("TF_F", Kokkos::subview(h_tfles_fields, Kokkos::ALL(), 0)));
+        data.push_back(Data("TF_E", Kokkos::subview(h_tfles_fields, Kokkos::ALL(), 1)));
+        data.push_back(Data("TF_OMEGA", Kokkos::subview(h_tfles_fields, Kokkos::ALL(), 2)));
+    }
     statistics.register_data(data);
     if (p_max.is_allocated()) data.push_back(Data("P_MAX", h_p_max));
     if (vortex_fields.is_allocated()) {
@@ -1319,6 +1325,7 @@ void Solver::print_setup() const {
     logging::item("Stop at", stop);
     if (check_nan) logging::item("NaN check", "every step");
     if (les_on) logging::items(les.summary());
+    if (tfles_on) logging::items(thickened_flame.summary());
     if (double_flux) logging::item("Double flux", "frozen gamma and e0 per cell and step (not energy conservative)");
     if (reacting) {
         logging::item("Chemistry", std::to_string(kinetics.n_reactions) + " reactions, Strang splitting" +

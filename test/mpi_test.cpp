@@ -243,6 +243,13 @@ TEST(MPITest, LargeEddySimulationMatchesSerial) {
     expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "", "navier_stokes") + "[les]\nmodel = \"vreman\"\n");
 }
 
+TEST(MPITest, ThickenedFlameMatchesSerial) {
+    // The vorticity and the flame fields are exchanged to the halo once per step
+    expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes") +
+                          "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
+                          "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n");
+}
+
 TEST(MPITest, HybridConvectiveFluxMatchesSerial) {
     // The sensor reads the gradients of halo-layer-1 cells, also with FO Euler
     const std::string hybrid = "convective_flux = \"hybrid\"\n";

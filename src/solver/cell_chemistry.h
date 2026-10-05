@@ -76,10 +76,13 @@ class CellChemistry {
          *        rho, rho u, rho E and the temperature seed do not.
          * @param chem_h Last sub-step of each cell, in and out.
          * @param chem_cost Sub-steps of each cell, incremented.
+         * @param time_scale Optional per-cell multiplier of dt: the rates of an
+         *        autonomous constant-volume reactor scaled by s give exactly its
+         *        state after s dt (combustion models, docs/design/les.md 6.4).
          */
         Statistics advance(const StateView & U, const SpeciesView & rhoY, const Kokkos::View<rtype *> & T_seed,
                            const Kokkos::View<rtype *> & chem_h, const Kokkos::View<rtype *> & chem_cost, uint32_t n,
-                           double dt);
+                           double dt, const Kokkos::View<rtype *> & time_scale = {});
 
         /** @brief Heat release rate and mass production rates W_k omega_k of cells [0, n). */
         void heat_release(const StateView & U, const SpeciesView & rhoY, const Kokkos::View<rtype *> & T_seed,

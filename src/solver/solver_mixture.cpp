@@ -436,6 +436,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
     if (is_viscous()) {
         update_transport();
         if (les_on) update_eddy_viscosity(mesh->n_cells);
+        if (tfles_on) thicken_transport();
         viscous_functor = MixtureViscousFluxFunctor{mesh->face_normals, mesh->face_measure, mesh->face_coords,
                                                     mesh->cell_coords, mesh->cells_of_face, mesh->shifts,
                                                     mesh->face_shift, boundary_data, mixture, cell_scalars,
@@ -569,7 +570,10 @@ void Solver::launch_double_flux_functor() {
 }
 
 rtype Solver::calc_dt_cfl1_mixture() {
-    if (les_on) {
+    if (tfles_on) {
+        update_thickened_flame();
+        thicken_transport();
+    } else if (les_on) {
         eddy_viscosity_of_state(mesh->n_owned());
     } else {
         update_cell_states(state(), false);

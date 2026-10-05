@@ -93,6 +93,14 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the shock sensor of the hybrid flux.
 - <a id="bhagatwala-lele-2009"></a>A. Bhagatwala and S. K. Lele, A modified artificial viscosity approach for compressible turbulence simulations, *J. Comput. Phys.* 228, 4965–4969 (2009). [doi:10.1016/j.jcp.2009.04.009](https://doi.org/10.1016/j.jcp.2009.04.009)
   Used in: restricting the Ducros sensor to compressions, so expansions and flames keep the central flux.
+- <a id="colin-2000"></a>O. Colin, F. Ducros, D. Veynante and T. Poinsot, A thickened flame model for large eddy simulations of turbulent premixed combustion, *Phys. Fluids* 12, 1843–1863 (2000). [doi:10.1063/1.870436](https://doi.org/10.1063/1.870436)
+  Used in: `[les.combustion] model = "tfles"`, and its subgrid velocity `2 Delta^3 |lap(curl u)|`.
+- <a id="charlette-2002"></a>F. Charlette, C. Meneveau and D. Veynante, A power-law flame wrinkling model for LES of premixed turbulent combustion. Part I: non-dynamic formulation and initial tests, *Combust. Flame* 131, 159–180 (2002). [doi:10.1016/S0010-2180(02)00400-5](https://doi.org/10.1016/S0010-2180%2802%2900400-5)
+  Used in: the efficiency `E` of the thickened flame (`efficiency = "charlette"`).
+- <a id="legier-2002"></a>J.-P. Légier, T. Poinsot, B. Varoquié, F. Lacas and D. Veynante, Large eddy simulation of a non-premixed turbulent burner using a dynamically thickened flame model, in *Advances in LES of Complex Flows*, Springer, 315–326 (2002). [doi:10.1007/978-94-017-1998-8_27](https://doi.org/10.1007/978-94-017-1998-8_27)
+  Used in: thickening only where the flame sensor is on (dynamic thickening).
+- <a id="butler-orourke-1977"></a>T. D. Butler and P. J. O'Rourke, A numerical method for two dimensional unsteady reacting flows, *Proc. Combust. Inst.* 16, 1503–1515 (1977). [doi:10.1016/S0082-0784(77)80432-3](https://doi.org/10.1016/S0082-0784%2877%2980432-3)
+  Used in: the thickening transformation `D -> F D`, `omega -> omega / F` that keeps the laminar flame speed.
 
 ## Boundary conditions
 

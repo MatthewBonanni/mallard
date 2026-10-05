@@ -16,6 +16,7 @@ set(MALLARD_TEST_SOURCES
     distributed_mesh_test.cpp
     statistics_test.cpp
     les_test.cpp
+    tfles_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
     list(APPEND MALLARD_TEST_SOURCES

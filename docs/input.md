@@ -192,6 +192,37 @@ eddy viscosity of each cell comes from its least-squares velocity gradient
 measures how much of the kinetic-energy dissipation comes from the model and
 how much from the scheme.
 
+### `[les.combustion]`
+
+Turbulence-chemistry interaction of reacting LES (a viscous mixture with
+`[chemistry]`) by the dynamically thickened flame model (TFLES; Colin et al.
+2000, Légier et al. 2002): where a flame is, its species diffusivities and
+conductivity are multiplied by `E F` and its reaction rates by `E / F`, which
+keeps the laminar flame speed and thickens the flame by `F` so that it spans
+`n_res` cells; the efficiency `E` restores the flame-surface wrinkling of the
+subgrid scales (Charlette, Meneveau & Veynante 2002, `beta = 0.5`, at the
+filter width `F delta_L`, with the subgrid velocity
+`u' = 2 Delta^3 |lap(curl u)|` of Colin et al.). `F = 1 + (max(1, n_res Delta /
+delta_L) - 1) Omega` with the flame sensor `Omega = min(1, c (1 - c) /
+0.0475)` of the progress variable `c = (T - T_unburnt) / (T_burnt -
+T_unburnt)`, so `Omega = 1` across the whole flame (`0.05 <= c <= 0.95`) and 0
+in fresh and burnt gas, where the molecular and SGS transport are unchanged.
+In the flame the SGS heat and species fluxes are multiplied by `1 - Omega`.
+The rates are scaled by integrating each cell's Strang reactor over `E / F`
+times the half step (exact for the autonomous constant-volume reactor).
+`F`, `E` and `Omega` are computed once per step from the state, and written as
+`TF_F`, `TF_E`, `TF_OMEGA`. Design: [`design/les.md`](design/les.md), section 6.
+
+| Key | Description |
+|---|---|
+| `model` | `tfles` |
+| `delta_L` | Laminar thermal thickness `(T_b - T_u) / max dT/dx` of the flame (m), e.g. from Cantera |
+| `s_L` | Laminar flame speed (m/s) |
+| `T_unburnt`, `T_burnt` | Temperatures of the fresh and burnt gas (K) |
+| `n_res` | Cells across the thickened flame, default 5 |
+| `efficiency` | `charlette` (default) or `none` (`E = 1`) |
+| `beta` | Exponent of the Charlette efficiency, default 0.5 |
+
 ## `[initialize]`
 
 | Key | Description |
