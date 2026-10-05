@@ -518,6 +518,47 @@ struct RHLL {
     }
 };
 
+/**
+ * @brief Kinetic-energy- and entropy-preserving central flux (KEEP; Kuya,
+ *        Totani & Kawai, J. Comput. Phys. 375, 2018) with arithmetic means:
+ *        mass C = mean(rho) mean(u).n, momentum C mean(u) + mean(p) n, energy
+ *        C (mean(e) + u_L . u_R / 2) + (p_L u_R.n + p_R u_L.n) / 2. Its
+ *        momentum flux has Jameson's form, so with cell values on both sides
+ *        the convective fluxes change the kinetic energy only by the pressure
+ *        work mean(p) (u_R - u_L).n per face. No dissipation: for the hybrid
+ *        convective flux (docs/design/les.md, section 4.3).
+ */
+struct KEEP {
+    KOKKOS_INLINE_FUNCTION
+    static void central(rtype * flux, const rtype * n, const rtype * W_l, const rtype * W_r, const rtype e_l,
+                        const rtype e_r) {
+        constexpr uint8_t E = N_DIM + 1;
+        rtype u[N_DIM];
+        FOR_I_DIM u[i] = 0.5_r * (W_l[1 + i] + W_r[1 + i]);
+        const rtype C = 0.5_r * (W_l[0] + W_r[0]) * dot<N_DIM>(u, n);
+        const rtype p = 0.5_r * (W_l[E] + W_r[E]);
+        flux[0] = C;
+        FOR_I_DIM flux[1 + i] = C * u[i] + p * n[i];
+        flux[E] = C * (0.5_r * (e_l + e_r) + 0.5_r * dot<N_DIM>(W_l + 1, W_r + 1)) +
+                  0.5_r * (W_l[E] * dot<N_DIM>(W_r + 1, n) + W_r[E] * dot<N_DIM>(W_l + 1, n));
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    static void calc_flux(rtype * flux, const rtype * n, const rtype * W_l, const rtype * W_r, const rtype gamma) {
+        constexpr uint8_t E = N_DIM + 1;
+        central(flux, n, W_l, W_r, W_l[E] / ((gamma - 1.0_r) * W_l[0]), W_r[E] / ((gamma - 1.0_r) * W_r[0]));
+    }
+
+    /** @brief Mixture flux with per-side thermodynamics, e = p / ((gamma - 1) rho) + e0. */
+    KOKKOS_INLINE_FUNCTION
+    static void calc_flux(rtype * flux, const rtype * n, const rtype * W_l, const rtype * W_r,
+                          const SideThermo & th_l, const SideThermo & th_r) {
+        constexpr uint8_t E = N_DIM + 1;
+        central(flux, n, W_l, W_r, W_l[E] / ((th_l.gamma - 1.0_r) * W_l[0]) + th_l.e0,
+                W_r[E] / ((th_r.gamma - 1.0_r) * W_r[0]) + th_r.e0);
+    }
+};
+
 } // namespace riemann
 
 #endif // RIEMANN_SOLVER_H

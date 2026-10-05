@@ -85,6 +85,14 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the Favre-filtered equations and the eddy-viscosity closure of the SGS heat flux.
 - <a id="ghosal-1996"></a>S. Ghosal, An analysis of numerical errors in large-eddy simulations of turbulence, *J. Comput. Phys.* 125, 187–206 (1996). [doi:10.1006/jcph.1996.0088](https://doi.org/10.1006/jcph.1996.0088)
   Used in: the motivation of the kinetic-energy budget (`[integrals] budget`), which separates the scheme's dissipation from the model's.
+- <a id="kuya-totani-kawai-2018"></a>Y. Kuya, K. Totani and S. Kawai, Kinetic energy and entropy preserving schemes for compressible flows by split convective forms, *J. Comput. Phys.* 375, 823–853 (2018). [doi:10.1016/j.jcp.2018.08.058](https://doi.org/10.1016/j.jcp.2018.08.058)
+  Used in: the central (KEEP) flux of `convective_flux = "hybrid"` (`riemann::KEEP`).
+- <a id="jameson-2008"></a>A. Jameson, Formulation of kinetic energy preserving conservative schemes for gas dynamics and direct numerical simulation of one-dimensional viscous compressible flow in a shock tube using entropy and kinetic energy preserving schemes, *J. Sci. Comput.* 34, 188–208 (2008). [doi:10.1007/s10915-007-9172-6](https://doi.org/10.1007/s10915-007-9172-6)
+  Used in: the condition on the momentum flux under which the central flux changes the kinetic energy only by the pressure work (tested in `test/les_test.cpp`).
+- <a id="ducros-1999"></a>F. Ducros, V. Ferrand, F. Nicoud, C. Weber, D. Darracq, C. Gacherieu and T. Poinsot, Large-eddy simulation of the shock/turbulence interaction, *J. Comput. Phys.* 152, 517–549 (1999). [doi:10.1006/jcph.1999.6238](https://doi.org/10.1006/jcph.1999.6238)
+  Used in: the shock sensor of the hybrid flux.
+- <a id="bhagatwala-lele-2009"></a>A. Bhagatwala and S. K. Lele, A modified artificial viscosity approach for compressible turbulence simulations, *J. Comput. Phys.* 228, 4965–4969 (2009). [doi:10.1016/j.jcp.2009.04.009](https://doi.org/10.1016/j.jcp.2009.04.009)
+  Used in: restricting the Ducros sensor to compressions, so expansions and flames keep the central flux.
 
 ## Boundary conditions
 
