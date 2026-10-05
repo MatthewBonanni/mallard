@@ -1,6 +1,6 @@
 """Animation of triple-flame runs (tools/triple_flame.py) side by side.
 
-    python tools/animate_triple_flame.py OUT.mp4 --run LABEL RUN_DIR [--run ...]
+    python tools/animate_triple_flame.py OUT.mp4 --run LABEL RUN_DIR[,CONTINUATION] [--run ...]
         [--fuel H2:0.3,N2:0.7] [--oxidizer O2:1,N2:3.76] [--fps 15] [--gif OUT.gif]
         [--png OUT.png] [--title TEXT] [--subtitle TEXT] [--half-height 2.2]
 
@@ -9,11 +9,13 @@ planar stoichiometric flame's peak with the stoichiometric line (white) and the
 lines of equivalence ratio 0.5 and 2 (dashed), streamlines of the fresh gas
 diverging ahead of the tip, and below them each run's propagation speed against
 the inflow, U_F / S_L = (u_in - dx_tip/dt) / S_L (smoothed over a few
-outputs), with the heat-release limit sqrt(rho_u / rho_b) of Ruetsch,
+outputs; dashed: u_in / S_L), with the heat-release limit sqrt(rho_u / rho_b) of Ruetsch,
 Vervisch & Linan (1995). Lengths are in thermal thicknesses delta_L of the
 planar flame; the window spans --half-height mixing thicknesses (plus 8
-delta_L) on each side of the midline. The MP4 is H.264 (CRF 18) and holds the
-last frame for 2 s.
+delta_L) on each side of the midline. A run continued from one of its restart
+files in another directory (e.g. with a different inflow velocity) is given
+as RUN_DIR,CONTINUATION: its outputs follow the first run's up to the restart
+time. The MP4 is H.264 (CRF 18) and holds the last frame for 2 s.
 """
 import argparse
 import os
@@ -63,15 +65,21 @@ def main():
     Z_st = gas.mixture_fraction(args.fuel, args.oxidizer)
     N2_F, N2_O = stream_n2(args.fuel, args.mechanism, args.phase), stream_n2(args.oxidizer, args.mechanism, args.phase)
     runs = []
-    for label, d in args.run:
-        pvd = os.path.join(d, "solut", "flame.pvd")
-        info = run_info(d, args.mechanism, args.phase)
-        runs.append(dict(label=label, dir=d, info=info, files=re.findall(r'file="([^"]+)"', open(pvd).read()),
-                         t=[], x=[], U=[]))
-    n_frames = min(len(r["files"]) for r in runs)
+    for label, dirs in args.run:
+        frames = []  # (path, time, inflow velocity, segment)
+        for seg, d in enumerate(dirs.split(",")):
+            pvd = open(os.path.join(d, "solut", "flame.pvd")).read()
+            u_in = run_info(d, args.mechanism, args.phase)["u_in"]
+            times = [float(s) for s in re.findall(r'timestep="([^"]+)"', pvd)]
+            files = re.findall(r'file="([^"]+)"', pvd)
+            if frames:
+                frames = [f for f in frames if f[1] < times[0] - 1e-12]
+            frames += [(os.path.join(d, "solut", f), t, u_in, seg) for f, t in zip(files, times)]
+        info = run_info(dirs.split(",")[0], args.mechanism, args.phase)
+        runs.append(dict(label=label, info=info, frames=frames, t=[], x=[], U=[], seg=[], u_in=[]))
+    n_frames = min(len(r["frames"]) for r in runs)
     tau = runs[0]["info"]["delta"] / runs[0]["info"]["S_L"]
-    t_end = max(float(re.findall(r'timestep="([^"]+)"', open(os.path.join(r["dir"], "solut", "flame.pvd")).read())[-1])
-                for r in runs) / tau
+    t_end = max(r["frames"][-1][1] for r in runs) / tau
     fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
     writer = imageio.get_writer(args.out, fps=args.fps, codec="libx264", quality=None,
                                 ffmpeg_params=["-crf", "18", "-pix_fmt", "yuv420p", "-preset", "slow"],
@@ -86,16 +94,20 @@ def main():
         for i, r in enumerate(runs):
             info = r["info"]
             dL = info["delta"]
-            t, xs, ys, a = grid(os.path.join(r["dir"], "solut", r["files"][k]), ["T", "HRR", "U", "Y_N2"])
+            path, _, u_in, seg = r["frames"][k]
+            t, xs, ys, a = grid(path, ["T", "HRR", "U", "Y_N2"])
             T_mid = info["T_u"] + 0.5 * (info["T_b"] - info["T_u"])
             x_tip, y_tip, _ = leading_edge(xs, ys, a["T"], T_mid)
             r["t"].append(t / tau)
             r["x"].append(x_tip)
-            if len(r["t"]) >= 3:
-                tt, xx = np.array(r["t"]) * tau, np.array(r["x"])
+            r["seg"].append(seg)
+            r["u_in"].append(u_in / info["S_L"])
+            same = np.array(r["seg"]) == seg
+            if same.sum() >= 3:
+                tt, xx = np.array(r["t"])[same] * tau, np.array(r["x"])[same]
                 m = min(len(tt), 9)
                 v = np.polyfit(tt[-m:], xx[-m:], 1)[0]
-                r["U"].append((info["u_in"] - v) / info["S_L"])
+                r["U"].append((u_in - v) / info["S_L"])
             else:
                 r["U"].append(np.nan)
             Z = (a["Y_N2"] - N2_O) / (N2_F - N2_O)
@@ -134,6 +146,7 @@ def main():
         for i, r in enumerate(runs):
             axp.plot(r["t"], r["U"], color=COLORS[i], lw=2.2, label=r["label"])
             axp.plot(r["t"][-1], r["U"][-1], "o", color=COLORS[i])
+            axp.plot(r["t"], r["u_in"], color=COLORS[i], lw=1, ls="--")
         s = np.sqrt(runs[0]["info"]["sigma"])
         axp.axhline(s, color="#ccc", lw=1, ls=":")
         axp.text(0.2, s + 0.05, "sqrt(rho_u / rho_b): heat-release limit for weak gradients", color="#ccc", fontsize=10)

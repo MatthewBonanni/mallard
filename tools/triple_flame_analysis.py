@@ -2,7 +2,7 @@
 
     python tools/triple_flame_analysis.py RUN_DIR [RUN_DIR ...] [--fuel H2:0.3,N2:0.7]
         [--oxidizer O2:1,N2:3.76] [--mechanism mechanisms/h2o2.yaml --phase ohmech]
-        [--window 0.5] [--plot OUT.png] [--csv OUT.csv]
+        [--fit T0 T1] [--plot OUT.png] [--csv OUT.csv]
 
 For each output of RUN_DIR/solut/flame.pvd:
   x_tip, y_tip  the leading edge: the most upstream point of the isotherm
@@ -20,11 +20,13 @@ For each output of RUN_DIR/solut/flame.pvd:
                 upstream of it: the flow slows from u_in to about the local
                 flame speed as the streamlines diverge ahead of the tip.
 The propagation speed against the incoming flow, U_F = u_in - dx_tip/dt, is
-fitted over the last --window of the run (default its second half). Prints
-U_F / S_L, (U_F / S_L - 1) / (sqrt(rho_u / rho_b) - 1) (the share of the
-heat-release limit of Ruetsch et al.'s scaling U_F / S_L -> sqrt(rho_u /
-rho_b) for weak gradients), u_min / S_L and D_TF, and with --plot draws them
-against Ruetsch et al.'s simulations (their Table I).
+fitted over --fit T0 T1 (in flame times delta_L / S_L; default the second half
+of the run), and the local flame speed at the tip, S_tip = u_min - dx_tip/dt,
+averaged there. Prints U_F / S_L, (U_F / S_L - 1) / (sqrt(rho_u / rho_b) - 1)
+(the share of the heat-release limit of Ruetsch et al.'s scaling U_F / S_L ->
+sqrt(rho_u / rho_b) for weak gradients), S_tip / S_L, U_F / S_tip (the
+speed-up by the streamlines' divergence alone) and D_TF, and with --plot draws
+them against Ruetsch et al.'s simulations (their Table I).
 """
 import argparse
 import os
@@ -130,7 +132,7 @@ def main():
     ap.add_argument("--mechanism", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
                                                         "mechanisms", "h2o2.yaml"))
     ap.add_argument("--phase", default="ohmech")
-    ap.add_argument("--window", type=float, default=0.5)
+    ap.add_argument("--fit", type=float, nargs=2, metavar=("T0", "T1"))
     ap.add_argument("--plot")
     ap.add_argument("--csv")
     args = ap.parse_args()
@@ -145,9 +147,11 @@ def main():
         info = run_info(run, args.mechanism, args.phase)
         rows = analyze(run, info, Y_N2_F, Y_N2_O, Z_st)
         S_L, tau = info["S_L"], info["delta"] / info["S_L"]
-        late = rows[rows[:, 0] >= (1 - args.window) * rows[-1, 0]]
+        t0, t1 = (np.array(args.fit) * tau) if args.fit else (0.5 * rows[-1, 0], rows[-1, 0])
+        late = rows[(rows[:, 0] >= t0 - 1e-12) & (rows[:, 0] <= t1 + 1e-12)]
         v_tip, _ = np.polyfit(late[:, 0], late[:, 1], 1)
         U_F = info["u_in"] - v_tip
+        S_tip = np.nanmean(late[:, 5]) - v_tip
         share = (U_F / S_L - 1) / (np.sqrt(info["sigma"]) - 1)
         D_TF = np.nanmean(late[:, 4])
         print(f"{run}: delta_M0 = {info['mixing']:g} delta_L, S_L = {S_L:.4f} m/s, delta_L = {info['delta'] * 1e3:.4f} mm, "
@@ -156,17 +160,19 @@ def main():
         for r in rows[:: max(1, len(rows) // 25)]:
             print(f"{r[0] / tau:7.2f} {r[1] / info['delta']:9.3f} {r[2] / info['delta']:9.3f} {r[3]:7.4f} {r[4]:7.2f} "
                   f"{r[5] / S_L:9.3f} {r[6]:7.3f}")
-        print(f"  U_F / S_L = {U_F / S_L:.4f} (tip drift {v_tip / S_L:+.4f} S_L over the last {args.window:.0%}), "
-              f"share of sqrt(rho_u/rho_b) - 1: {share:.3f}; u_min / S_L = {np.nanmean(late[:, 5]) / S_L:.3f}; "
+        print(f"  U_F / S_L = {U_F / S_L:.4f} (tip drift {v_tip / S_L:+.4f} S_L over t S_L / delta_L = "
+              f"{t0 / tau:.2f}-{t1 / tau:.2f}, x_tip / delta_L = {late[0, 1] / info['delta']:.2f}-"
+              f"{late[-1, 1] / info['delta']:.2f}), share of sqrt(rho_u/rho_b) - 1: {share:.3f}; "
+              f"S_tip / S_L = {S_tip / S_L:.3f}, U_F / S_tip = {U_F / S_tip:.3f}; "
               f"D_TF = {D_TF:.2f}; Z_tip = {late[:, 3].mean():.4f} (Z_st = {Z_st:.4f})")
         results.append(dict(run=run, info=info, rows=rows, U_F=U_F / S_L, share=share, D_TF=D_TF,
-                            u_min=np.nanmean(late[:, 5]) / S_L, Z_tip=late[:, 3].mean()))
+                            u_min=np.nanmean(late[:, 5]) / S_L, S_tip=S_tip / S_L, Z_tip=late[:, 3].mean()))
     if args.csv:
         with open(args.csv, "w") as fh:
-            fh.write("run,delta_M0,D_TF,U_F/S_L,share,u_min/S_L,Z_tip,rho_u/rho_b\n")
+            fh.write("run,delta_M0,D_TF,U_F/S_L,share,u_min/S_L,S_tip/S_L,Z_tip,rho_u/rho_b\n")
             for r in results:
                 fh.write(f"{r['run']},{r['info']['mixing']:g},{r['D_TF']:.3f},{r['U_F']:.4f},{r['share']:.4f},"
-                         f"{r['u_min']:.4f},{r['Z_tip']:.4f},{r['info']['sigma']:.4f}\n")
+                         f"{r['u_min']:.4f},{r['S_tip']:.4f},{r['Z_tip']:.4f},{r['info']['sigma']:.4f}\n")
     if args.plot:
         plot(results, args.plot)
 
@@ -217,6 +223,9 @@ def plot(results, out):
     ax.plot([], [], "o", mfc="none", mec="#555", label="Ruetsch et al. 1995 (one-step, Le = 1)")
     for r, c in zip(results, colors):
         ax.plot(r["D_TF"], r["share"], "s", ms=9, color=c, label=f"Mallard, delta_M0 = {r['info']['mixing']:g} delta_L")
+        ax.plot(r["D_TF"], (r["U_F"] / r["S_tip"] - 1) / (np.sqrt(r["info"]["sigma"]) - 1), "s", ms=9, mfc="none",
+                color=c)
+    ax.plot([], [], "s", ms=9, mfc="none", color="#555", label="Mallard, U_F / S_tip in place of U_F / S_L")
     ax.set_xlabel("D_TF = local mixing thickness / delta_L")
     ax.set_ylabel("(U_F / S_L - 1) / (sqrt(rho_u / rho_b) - 1)")
     ax.set_xlim(0, 40)

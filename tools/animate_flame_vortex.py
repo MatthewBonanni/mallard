@@ -2,6 +2,7 @@
 
     python tools/animate_flame_vortex.py OUT.mp4 RUN_DIR [RUN_DIR ...] [--cols 3] [--fps 15]
         [--gif OUT.gif] [--png OUT.png] [--title TEXT] [--subtitle TEXT] [--t-max T]
+        [--control RUN_DIR ...]
 
 Each run is a panel: the temperature over the planar flame's burnt-gas
 temperature, mirrored about the pair's axis to show the whole pair, with the
@@ -26,7 +27,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from flame_vortex_analysis import MARKERS, analyze, classify, parameters, planar  # noqa: E402
+from flame_vortex_analysis import (MARKERS, analyze, classify, control_for, load_controls, parameters,  # noqa: E402
+                                   planar, relative_Q)
 from triple_flame_analysis import grid  # noqa: E402
 
 BG = "#0d0f14"
@@ -44,12 +46,14 @@ def main():
     ap.add_argument("--fps", type=float, default=15)
     ap.add_argument("--frames", type=int, default=150)
     ap.add_argument("--t-max", type=float)
+    ap.add_argument("--control", nargs="+", help="runs of flame_vortex.py with --u 0: heat-release baselines")
     ap.add_argument("--gif")
     ap.add_argument("--png")
     ap.add_argument("--title", default="Premixed flame-vortex interactions")
     ap.add_argument("--subtitle", default="")
     args = ap.parse_args()
 
+    controls = load_controls(args.control, args.mechanism, args.phase)
     runs = []
     for d in args.runs:
         p = planar(d, args.mechanism, args.phase)
@@ -57,12 +61,13 @@ def main():
         files = re.findall(r'file="([^"]+)"', pvd)
         times = np.array([float(s) for s in re.findall(r'timestep="([^"]+)"', pvd)])
         rows = analyze(d, p)
+        control = control_for(d, controls)
         r, u = parameters(d)
         tau = p["delta"] / p["S_L"]
-        head = open(os.path.join(d, "input.toml")).readline()
+        head = open(os.path.join(d, "input.toml")).read()
         x_v = float(re.search(r"pair at x = ([0-9.]+) mm", head).group(1)) * 1e-3
-        runs.append(dict(dir=d, p=p, files=files, t=times / tau, rows=rows, r=r, u=u, tau=tau, x_v=x_v,
-                         outcome=classify(rows)))
+        runs.append(dict(dir=d, p=p, files=files, t=times / tau, rows=rows, Qr=relative_Q(rows, control), r=r, u=u,
+                         tau=tau, x_v=x_v, outcome=classify(rows, control)))
         print(f"{d}: r = {r:g}, u' = {u:g}: {runs[-1]['outcome']}", flush=True)
     runs.sort(key=lambda q: (q["r"], q["u"]))
     t_max = args.t_max or max(q["t"][-1] for q in runs)
@@ -107,7 +112,7 @@ def main():
             for s in ax.spines.values():
                 s.set_color(MARKERS[q["outcome"]][1])
                 s.set_linewidth(2)
-            ax.set_title(f"r = {q['r']:g} delta_L, u' = {q['u']:g} S_L: {q['outcome']}", color=FG, fontsize=12,
+            ax.set_title(f"r = {q['r']:g} delta_L, u' = {q['u']:g} S_L: {q['outcome']}", color=FG, fontsize=10,
                          pad=4)
         axd = fig.add_axes([0.71, 0.47, 0.27, 0.39])
         axd.set_facecolor(BG)
@@ -130,10 +135,10 @@ def main():
             t = q["rows"][:, 0] / q["tau"]
             sel = t <= tc + 1e-9
             col = MARKERS[q["outcome"]][1]
-            axq.plot(t[sel], q["rows"][sel, 1], color=col, lw=1.5)
+            axq.plot(t[sel], q["Qr"][sel], color=col, lw=1.5)
         axq.axhline(1.0, color="#777", ls="--", lw=1)
         axq.set_xlim(0, t_max)
-        axq.set_ylim(0, max(2.0, 1.1 * max(q["rows"][:, 1].max() for q in runs)))
+        axq.set_ylim(0, max(2.0, 1.1 * max(q["Qr"].max() for q in runs)))
         axq.set_xlabel("t S_L / delta_L", color=FG)
         axq.set_ylabel("heat release / planar flame's", color=FG)
         axq.tick_params(colors=FG)
