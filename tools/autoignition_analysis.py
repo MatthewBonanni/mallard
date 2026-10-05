@@ -16,8 +16,10 @@ and each cell is classified by the ignition-front diagnostic of Chen et al.
 
     S_d* = (omega_H2O + div(rho D_H2O (W_H2O / W) grad X_H2O)) / (rho_u |grad Y_H2O|),
 
-against the deflagration speed S_L of the end gas (the mean temperature and
-pressure of the cells with less than 10% of the burnt H2O, density rho_u).
+against the deflagration speed S_L of the end gas (the mean temperature,
+pressure and density rho_u of the least reacted tenth of the cells, or of
+all cells with less than 10% of the burnt H2O; none once that tenth has more
+than half of it).
 A front whose reaction is carried by diffusion moves at S_d* ~ S_L
 (deflagration); a spontaneous ignition front, where neighboring cells ignite
 one after the other by their own chemistry, moves much faster. Heat released
@@ -28,14 +30,15 @@ correction velocity).
 The a priori regime criterion of Sankaran et al. (2005) compares S_L with the
 spontaneous-propagation speed S_sp = 1 / |grad tau_ig| of the initial field:
 beta = S_L |dtau/dT| |grad T| > 1 predicts deflagrations; the share of the
-mass with beta > 1 is printed for each run.
+mass with beta > 1 is printed for each run, of the initial field and of the
+field at 10% heat release (turbulent mixing has then weakened the gradients).
 
 Writes OUT_DIR/<run>_history.csv (t, p, mean HRR, deflagrative share of the
 HRR, T_u, S_L) and the figures autoignition_hrr.png (mean HRR against
 t / tau_0 with the multizone and homogeneous references), autoignition_
 timing.png (HRR peak time and width and the deflagrative share against T')
 and autoignition_speed.png (HRR-weighted distribution of S_d* / S_L), and
-prints the table of results.
+prints the table of results (with the HRR-weighted median of |S_d*| / S_L).
 """
 import argparse
 import os
@@ -110,10 +113,12 @@ def analyze_snapshot(path, Y_b, S_L_of, ratio, bins):
     div = ddx(a * ddx(X, h, 0), h, 0) + ddx(a * ddx(X, h, 1), h, 1)
     grad = np.hypot(ddx(Y, h, 0), ddx(Y, h, 1))
     c = Y / Y_b
-    unburnt = c < 0.1
-    row = dict(t=t, p=p.mean(), hrr=hrr.mean(), defl=np.nan, T_u=np.nan, S_L=np.nan)
+    # End gas: the least reacted tenth of the cells (at least those below 10% of the burnt H2O)
+    c_u = max(0.1, np.percentile(c, 10))
+    unburnt = c <= c_u
+    row = dict(t=t, p=p.mean(), hrr=hrr.mean(), defl=np.nan, T_u=np.nan, S_L=np.nan, T_rms=T.std())
     hist = np.zeros(len(bins) - 1)
-    if unburnt.sum() > 0.01 * c.size and hrr.sum() > 0:
+    if c_u < 0.5 and hrr.sum() > 0:
         rho_u = rho[unburnt].mean()
         T_u, p_u = T[unburnt].mean(), p[unburnt].mean() / ct.one_atm
         S_L = float(S_L_of(T_u, p_u))
@@ -171,10 +176,11 @@ def main():
         with open(os.path.join(run_dir, "input.toml")) as fh:
             L = float(re.search(r"Lx = ([0-9.eE+-]+)", fh.read()).group(1))
         h = L / n
-        gradT = np.hypot(ddx(T0, h, 0), ddx(T0, h, 1))
-        dtau = np.abs(np.interp(T0, tig["T"], tig["dtau_dT"]))
-        beta = S_L_of(T0, p0 / ct.one_atm) * dtau * gradT
-        beta_share = (rho0 * (beta > 1)).sum() / rho0.sum()
+
+        def beta_share(T, rho, p_atm):
+            beta = S_L_of(T, p_atm) * np.abs(np.interp(T, tig["T"], tig["dtau_dT"])) * \
+                np.hypot(ddx(T, h, 0), ddx(T, h, 1))
+            return (rho * (beta > 1)).sum() / rho.sum()
 
         rows, hist = [], np.zeros(len(bins) - 1)
         files = series(run_dir)[::args.every]
@@ -186,25 +192,34 @@ def main():
         hrr = np.array([r["hrr"] for r in rows])
         defl = np.array([r["defl"] for r in rows])
         np.savetxt(os.path.join(args.out, f"{run}_history.csv"),
-                   np.array([[r[k] for k in ("t", "p", "hrr", "defl", "T_u", "S_L")] for r in rows]),
-                   delimiter=",", header="t,p,HRR,deflagrative_share,T_u,S_L", comments="")
+                   np.array([[r[k] for k in ("t", "p", "hrr", "defl", "T_u", "S_L", "T_rms")] for r in rows]),
+                   delimiter=",", header="t,p,HRR,deflagrative_share,T_u,S_L,T_rms", comments="")
         ok = np.isfinite(defl)
         defl_total = np.trapezoid((hrr * defl)[ok], hist_t[ok]) / np.trapezoid(hrr, hist_t)
         mz = np.loadtxt(os.path.join(args.reference, f"multizone_{run}.csv"), delimiter=",", skiprows=1)
+        dns = timing(hist_t, hrr)
+        # The same criterion on the field as ignition starts (10% of the heat released)
+        _, _, _, f10 = grid_fields(files[int(np.argmin(np.abs(hist_t - dns[2])))], ["T", "RHO", "P"])
         results.append(dict(label=label, run=run, t_rms=T0.std(), t=hist_t, hrr=hrr, defl=defl, hist=hist,
-                            dns=timing(hist_t, hrr), mz=timing(mz[:, 0], mz[:, 2]), mz_t=mz[:, 0], mz_hrr=mz[:, 2],
-                            defl_total=defl_total, beta_share=beta_share, p_end=rows[-1]["p"],
+                            beta_share_10=beta_share(f10["T"], f10["RHO"], f10["P"].mean() / ct.one_atm),
+                            t_rms_10=f10["T"].std(), dns=dns, mz=timing(mz[:, 0], mz[:, 2]), mz_t=mz[:, 0], mz_hrr=mz[:, 2],
+                            defl_total=defl_total, beta_share=beta_share(T0, rho0, p0 / ct.one_atm), p_end=rows[-1]["p"],
                             complete=hrr[-1] < 0.02 * hrr.max()))
+
+    def median_ratio(hist):
+        """HRR-weighted median of |S_d*| / S_L."""
+        q = np.cumsum(hist) / hist.sum()
+        return 10 ** np.interp(0.5, q, bins[1:])
 
     hom_timing = timing(hom["t"], hom["HRR"])
     print(f"homogeneous: tau_0 = {tau0 * 1e3:.4f} ms, HRR peak {hom_timing[4]:.3e} W/m^3, FWHM {hom_timing[1] * 1e6:.1f} us")
     print(f"{'run':>14} {'T_rms':>6} | {'t_peak/tau0':>11} {'FWHM/tau0':>9} {'t10/tau0':>8} {'t90/tau0':>8} {'peak/hom':>8}"
-          f" | {'MZ t_peak':>9} {'MZ FWHM':>8} {'MZ t10':>7} {'MZ t90':>7} {'MZ peak':>8} | {'defl':>5} {'beta>1':>6}")
+          f" | {'MZ t_peak':>9} {'MZ FWHM':>8} {'MZ t10':>7} {'MZ t90':>7} {'MZ peak':>8} | {'defl':>5} {'S_d/S_L':>7} {'beta>1':>6} {'at t10':>6} {'T_rms(t10)':>10}")
     for r in results:
         d, m = r["dns"], r["mz"]
         print(f"{r['label']:>14} {r['t_rms']:6.2f} | {d[0] / tau0:11.4f} {d[1] / tau0:9.4f} {d[2] / tau0:8.4f} {d[3] / tau0:8.4f}"
               f" {d[4] / hom_timing[4]:8.4f} | {m[0] / tau0:9.4f} {m[1] / tau0:8.4f} {m[2] / tau0:7.4f} {m[3] / tau0:7.4f}"
-              f" {m[4] / hom_timing[4]:8.4f} | {r['defl_total']:5.3f} {r['beta_share']:6.3f}"
+              f" {m[4] / hom_timing[4]:8.4f} | {r['defl_total']:5.3f} {median_ratio(r['hist']):7.2f} {r['beta_share']:6.3f} {r['beta_share_10']:6.3f} {r['t_rms_10']:10.2f}"
               f"{'' if r['complete'] else '  (run ends before the heat release does)'}")
 
     colors = plt.cm.viridis(np.linspace(0.0, 0.85, len(results)))
@@ -234,7 +249,8 @@ def main():
     axs[1].plot(Tr, [(r["mz"][3] - r["mz"][2]) / tau0 for r in results], "s:", label="multizone 10-90%")
     axs[1].set_ylabel(r"burn duration / $\tau_0$")
     axs[2].plot(Tr, [r["defl_total"] for r in results], "o-", label=rf"DNS: $S_d^* < {args.ratio:g}\,S_L$")
-    axs[2].plot(Tr, [r["beta_share"] for r in results], "s--", label=r"a priori: $\beta > 1$ (mass)")
+    axs[2].plot(Tr, [r["beta_share"] for r in results], "s--", label=r"$\beta > 1$, initial field (mass)")
+    axs[2].plot(Tr, [r["beta_share_10"] for r in results], "^:", label=r"$\beta > 1$ at 10% heat release")
     axs[2].set_ylabel("deflagrative share of heat release")
     axs[2].set_ylim(0, 1)
     for a in axs:

@@ -80,7 +80,7 @@ def main():
 
     fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
     writer = imageio.get_writer(args.out, fps=args.fps, codec="libx264", quality=None,
-                                ffmpeg_params=["-crf", "18", "-pix_fmt", "yuv420p", "-preset", "slow"],
+                                ffmpeg_params=["-crf", "18", "-pix_fmt", "yuv420p", "-preset", "slow", "-threads", "4"],
                                 macro_block_size=8)
     gif_frames, frame = [], None
     n = len(runs)
@@ -129,9 +129,9 @@ def main():
         axp.tick_params(colors=FG, labelsize=11)
         for s in axp.spines.values():
             s.set_color("#555")
-        axp.text(0.995, 0.86, "mean heat release rate over the homogeneous reactor's peak: DNS (solid), "
-                 "multizone without transport (dashed), homogeneous (dotted, off scale)", transform=axp.transAxes,
-                 color="#aab", ha="right", fontsize=11)
+        axp.text(0.995, 1.03, "mean heat release rate over the homogeneous reactor's peak: DNS (solid), "
+                 "multizone without transport (dashed), homogeneous (dotted)", transform=axp.transAxes,
+                 color="#aab", ha="right", va="bottom", fontsize=11)
         fig.text(0.5, 0.955, args.title, color=FG, fontsize=20, ha="center", weight="bold")
         fig.text(0.5, 0.922, args.subtitle, color="#aab", fontsize=13, ha="center")
         fig.text(0.985, 0.955, f"t = {tf * 1e3:5.3f} ms\n= {tf / tau0:5.3f} tau_0", color=FG, fontsize=14, ha="right",
