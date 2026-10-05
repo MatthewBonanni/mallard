@@ -45,7 +45,7 @@ jobs:
             {"name": "clang", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_HDF5=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++", "hdf5": true, "build_only": true},
             {"name": "serial", "flags": "-DKokkos_ENABLE_SERIAL=ON", "full": true, "main_only": true},
             {"name": "serial-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "hdf5": true, "full": true, "main_only": true},
-            {"name": "float", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF", "full": true, "main_only": true}
+            {"name": "float", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF", "full": true}
           ]'
           if [ "$ALL" != true ]; then backends=$(jq -c 'map(select(.main_only | not))' <<< "$backends"); fi
           echo "backends=$(jq -c . <<< "$backends")" >> "$GITHUB_OUTPUT"
