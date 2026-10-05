@@ -163,7 +163,7 @@ periodic in y. Method and accuracy: `docs/design/axisymmetric.md`.
 | `rho`, `p`, `T` | `constant`: `p` and `T`; `analytical`: exactly two of the three, as expressions in `x`, `y`, `z` |
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
 | `balance` | (mixtures, `analytical`) Species taking `1 - sum` of the listed fractions; without it the listed fractions are normalized |
-| `n_subdivisions` | (`analytical`) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is integrated with a 64-point rule on each of `n_subdivisions`³ pieces (default 2) |
+| `n_subdivisions` | (`analytical`) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is split into `n_subdivisions`³ sub-tetrahedra, each with a 14-point degree-5 rule (default 1) |
 | `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, or 3 when they also hold the weights of `[statistics]` averages) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read |
 
 Expressions use [exprtk](https://www.partow.net/programming/exprtk/) syntax, e.g. `"x < 0.5 ? 1.0 : 0.125"`.
