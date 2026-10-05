@@ -176,6 +176,10 @@ The numerical methods Mallard implements and the reference data it is validated 
 
 ## Validation cases and reference data
 
+- <a id="comte-bellot-corrsin-1971"></a>G. Comte-Bellot and S. Corrsin, Simple Eulerian time correlation of full- and narrow-band velocity signals in grid-generated, 'isotropic' turbulence, *J. Fluid Mech.* 48, 273–337 (1971). [doi:10.1017/S0022112071001599](https://doi.org/10.1017/S0022112071001599)
+- <a id="saad-2017"></a>T. Saad, D. Cline, R. Stoll and J. C. Sutherland, Scalable tools for generating synthetic isotropic turbulence with arbitrary spectra, *AIAA J.* 55, 327–331 (2017). [doi:10.2514/1.J055230](https://doi.org/10.2514/1.J055230)
+  Used in (these two): `examples/cbc_les` (LES of decaying grid turbulence); the measured spectra at the three stations as tabulated with the second's TurboGenPY (`examples/cbc_les/reference/cbc_spectra.csv`, in SI units).
+
 - <a id="fedkiw-merriman-osher-1997"></a>R. P. Fedkiw, B. Merriman and S. Osher, High accuracy numerical methods for thermally perfect gas flows with chemistry, *J. Comput. Phys.* 132, 175–190 (1997). [doi:10.1006/jcph.1996.5622](https://doi.org/10.1006/jcph.1996.5622)
 - <a id="martinez-ferrer-2014"></a>P. J. Martínez Ferrer, R. Buttay, G. Lehnasch and A. Mura, A detailed verification procedure for compressible reactive multicomponent Navier–Stokes solvers, *Comput. Fluids* 89, 88–110 (2014). [doi:10.1016/j.compfluid.2013.10.014](https://doi.org/10.1016/j.compfluid.2013.10.014)
   Used in (these two): `examples/reactive_shock_tube` (the reflected-shock ignition of 2H2–O2–7Ar).
