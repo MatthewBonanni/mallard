@@ -15,6 +15,8 @@
 
 #include <Kokkos_Core.hpp>
 
+#include "mechanism.h"
+
 namespace chemistry {
 
 enum class RadiatingSpecies { H2O = 0, CO2 = 1, CO = 2, CH4 = 3 };
@@ -40,6 +42,31 @@ double planck_mean_absorption(const RadiatingSpecies s, const double T) {
     }
     return 0.0;
 }
+
+constexpr double STEFAN_BOLTZMANN = 5.670374419e-8;  // W/(m^2 K^4), CODATA 2018 (Cantera's value)
+
+/**
+ * @brief Optically thin radiative loss q = 4 sigma sum_i p_i a_i(T) (T^4 - T_amb^4),
+ *        p_i the partial pressures [atm] of the radiating species present.
+ */
+struct OpticallyThinRadiation {
+    Kokkos::Array<int32_t, N_RADIATING_SPECIES> index{-1, -1, -1, -1};  // in the mechanism, -1 if not radiating
+    Kokkos::Array<double, N_RADIATING_SPECIES> inv_W{};                 // kmol/kg
+    double T_ambient4 = 0.0;
+
+    /** @brief Power lost per unit volume [W/m^3] at T, rho_k(k) the partial densities [kg/m^3]. */
+    template <typename F_rho>
+    KOKKOS_INLINE_FUNCTION double loss(const double T, const F_rho & rho_k) const {
+        const double RT_atm = GAS_CONSTANT * T / ONE_ATM;
+        double kappa = 0.0;  // 1/m
+        for (int s = 0; s < N_RADIATING_SPECIES; s++) {
+            if (index[s] < 0) continue;
+            kappa += rho_k(index[s]) * inv_W[s] * RT_atm * planck_mean_absorption(static_cast<RadiatingSpecies>(s), T);
+        }
+        const double T2 = T * T;
+        return 4.0 * STEFAN_BOLTZMANN * kappa * (T2 * T2 - T_ambient4);
+    }
+};
 
 } // namespace chemistry
 

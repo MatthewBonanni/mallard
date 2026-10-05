@@ -498,6 +498,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
         });
     }
     if (hold_mass_flow) add_mass_flow_force(solution, rhs);
+    if (radiating) add_radiation(rhs, state.species);
 
     Kokkos::parallel_for("rhs_divide_volume", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
         FOR_I_CONSERVATIVE rhs(i_cell, i) /= vol(i_cell);
