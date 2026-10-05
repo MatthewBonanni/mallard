@@ -535,5 +535,7 @@ CSV (`t`, `T`, `p`, `Y_<species>`). It reads `[physics]` (`mechanism`,
 | `[chemistry] sparse` | The linear solver, as in the solver's `[chemistry]` |
 | `[benchmark]` | Instead of the run, a chemistry benchmark: states sampled along this reactor's trajectory, replicated over `cells` cells and advanced by the solver's chemistry kernels over each splitting step of `dt`; see `benchmarks/README.md` |
 
-It prints the ignition delay (time of the maximum of `dT/dt`) when `T` rose
-by more than 400 K. Example: `examples/h2_ignition`.
+It prints the ignition delay, the time of the maximum of `dT/dt`, once
+`dT/dt` has fallen below half that maximum by `end_time` (the runaway is over,
+however small the temperature rise of a lean mixture), and otherwise none.
+Example: `examples/h2_ignition`.
