@@ -27,6 +27,7 @@ if(Mallard_DIM EQUAL 2)
     viscous_test.cpp
     restart_test.cpp
     boundary_test.cpp
+    nscbc_test.cpp
     source_test.cpp
     axisymmetric_test.cpp
     io_test.cpp
