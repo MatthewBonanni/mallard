@@ -11,6 +11,10 @@
 
 #include "comm.h"
 
+#ifdef Mallard_HAS_NCCL
+#include "device_comm.h"
+#endif
+
 #include <algorithm>
 #include <cstdlib>
 #include <limits>
@@ -59,6 +63,9 @@ Session::Session(int & argc, char **& argv) {
 }
 
 Session::~Session() {
+#ifdef Mallard_HAS_NCCL
+    finalize_nccl();
+#endif
     int finalized = 0;
     MPI_Finalized(&finalized);
     if (owns_mpi && !finalized) MPI_Finalize();
