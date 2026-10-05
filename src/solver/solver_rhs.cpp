@@ -93,7 +93,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
         face_reconstruction->calc_face_values(W_cells, face_solution);
     }
 
-    update_characteristic_boundaries();
+    update_characteristic_boundaries(t_stage);
     switch (riemann_solver_type) {
         case RiemannSolverType::RUSANOV:
             launch_flux_functor<riemann::Rusanov>();

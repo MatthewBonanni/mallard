@@ -87,13 +87,14 @@ BoundaryCondition BoundaryCondition::from_input(const toml::value & input, const
         require("L");
         const rtype L = find_real(input, "L");
         if (!(L > 0.0_r)) throw InputError(where + ".L must be positive.");
+        // sigma / L, or a negative fallback if the key is absent
         auto rate = [&](const char * key, rtype fallback) {
             if (!input.contains(key)) return fallback;
             const rtype sigma = find_real(input, key);
             if (!(sigma >= 0.0_r)) throw InputError(where + "." + key + " must be non-negative.");
             return sigma / L;
         };
-        bc.relax[Relax::ACOUSTIC] = rate("sigma", 0.25_r);
+        bc.relax[Relax::ACOUSTIC] = input.contains("sigma") ? rate("sigma", 0.0_r) : 0.25_r / L;
         bc.relax[Relax::BETA] = -1.0_r;
         if (input.contains("beta")) {
             bc.relax[Relax::BETA] = find_real(input, "beta");
@@ -312,6 +313,7 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     data.char_faces = Kokkos::View<uint32_t *>("char_faces", char_faces.size());
     data.char_depth = Kokkos::View<rtype *>("char_depth", char_faces.size());
     data.char_transverse = Kokkos::View<rtype *[3]>("char_transverse", char_faces.size());
+    data.char_state = Kokkos::View<rtype *[2]>("char_state", char_faces.size());
     auto h_char_faces = Kokkos::create_mirror_view(data.char_faces);
     auto h_char_depth = Kokkos::create_mirror_view(data.char_depth);
     for (size_t k = 0; k < char_faces.size(); k++) {

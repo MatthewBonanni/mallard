@@ -456,8 +456,9 @@ void Solver::init_boundaries() {
     }
     characteristic_transverse = false;
     for (const BoundaryCondition & bc : bcs) {
-        characteristic_transverse |= bc.is_characteristic() && bc.relax[BoundaryCondition::BETA] != 1.0_r;
+        characteristic_transverse |= bc.is_characteristic() && bc.relax[BoundaryCondition::BETA] != 0.0_r;
     }
+    t_characteristic = -1.0;
     if (is_mixture()) init_mixture_boundaries(input_boundaries, profiled_faces, bcs);
     boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics);
     if (is_mixture()) {

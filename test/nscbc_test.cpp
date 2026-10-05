@@ -15,7 +15,6 @@
 #include <Kokkos_Core.hpp>
 
 #include <cmath>
-#include <cstdio>
 #include <map>
 #include <sstream>
 #include <string>
@@ -199,12 +198,12 @@ TEST(NSCBCTest, PulseReflectionMatchesTheory) {
             const std::string mesh = mesh_input(type, 200, 2, 1.0, 0.01, 200);
             // sigma = 0: non-reflecting
             const Reflection none = measure_reflection(run(pulse_input(outlet(0.0), mesh, reconstruction)), 0.0);
-            EXPECT_LT(none.max_measured, (teno ? 1e-3 : 2.5e-2) * 2 * EPS);
+            EXPECT_LT(none.max_measured, 5e-3 * 2 * EPS);
             // A relaxation as fast as the pulse reflects part of it, as dw-/dt = -K p' predicts
             const double sigma = 20.0;
             const Reflection partial = measure_reflection(run(pulse_input(outlet(sigma), mesh, reconstruction)), sigma);
             EXPECT_GT(partial.max_theory, 0.45 * 2 * EPS);
-            EXPECT_LT(partial.max_error, (type == "cartesian_tri" ? 0.3 : 0.1) * partial.max_theory);
+            EXPECT_LT(partial.max_error, 0.05 * partial.max_theory);
             // A pressure outlet reflects all of it
             std::ostringstream p_out;
             p_out.precision(17);
@@ -294,7 +293,6 @@ TEST(NSCBCTest, VortexLeavesWithoutReflection) {
         const std::string mesh = mesh_input(type, 32, 32, 1.0, 1.0, 32);
         const double plain = rms_pressure_difference(run(vortex_input(outlet(0.25) + "beta = 1.0\n", mesh, t_stop)), ref);
         const double transverse = rms_pressure_difference(run(vortex_input(outlet(0.25), mesh, t_stop)), ref);
-        std::printf("DBG %s: PL %.3e, PL + transverse %.3e\n", type.c_str(), plain / dp_vortex, transverse / dp_vortex);
         EXPECT_LT(transverse, 0.6 * plain);
         if (type == "cartesian") EXPECT_LT(transverse, 0.1 * dp_vortex);
     }
@@ -346,7 +344,8 @@ TEST(NSCBCTest, PoiseuilleFlowLeavesUndisturbed) {
             err_u = std::max(err_u, std::abs(double(r.solver->h_primitives(c, 0)) - 6.0 * U_MEAN * y * (1.0 - y)));
             err_p = std::max(err_p, std::abs(double(r.solver->h_primitives(c, N_DIM)) - P0));
         }
-        std::printf("DBG %s: u %.3e, p %.3e\n", type.c_str(), err_u / U_MEAN, err_p / (12.0 * MU * U_MEAN * 4.0));
+        EXPECT_LT(err_u, 0.03 * U_MEAN);
+        EXPECT_LT(err_p, 0.1 * 12.0 * MU * U_MEAN * 4.0);  // A tenth of the pressure drop the force balances
     }
 }
 
@@ -381,34 +380,73 @@ std::string front_input(const std::string & right, double t_stop) {
 } // namespace
 
 TEST(NSCBCTest, MixtureFrontLeavesThroughTheOutlet) {
-    // A contact between air and hot H2/N2 carries no pressure; what the
-    // outlet makes of it spreads through the domain
-    double spread_p_out = 0.0, spread_nscbc = 0.0;
-    for (const std::string & right : {std::string("type = \"p_out\"\np = 101325.0\n"),
-                                      std::string("type = \"nscbc_outlet\"\np = 101325.0\nL = 1.0\n")}) {
-        Solver solver;
-        solver.init(parse_toml(front_input(right, 0.016)));
-        double spread = 0.0;
-        while (solver.get_time() < 0.016 * (1 - 1e-9)) {
-            solver.calc_dt();
-            solver.take_step();
-            solver.update_primitives();
-            solver.copy_device_to_host();
-            double p_min = 1e30, p_max = 0.0;
-            for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
-                p_min = std::min(p_min, double(solver.h_primitives(c, N_DIM)));
-                p_max = std::max(p_max, double(solver.h_primitives(c, N_DIM)));
-            }
-            spread = std::max(spread, (p_max - p_min) / 101325.0);
-        }
-        double max_T = 0.0;
+    // A contact between air and hot H2/N2 leaves through the outlet; the
+    // pressure stays within a few percent of the dynamic pressure of it
+    Solver solver;
+    solver.init(parse_toml(front_input("type = \"nscbc_outlet\"\np = 101325.0\nL = 1.0\n", 0.016)));
+    double spread = 0.0;
+    while (solver.get_time() < 0.016 * (1 - 1e-9)) {
+        solver.calc_dt();
+        solver.take_step();
+        solver.update_primitives();
+        solver.copy_device_to_host();
+        double p_min = 1e30, p_max = 0.0;
         for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
-            max_T = std::max(max_T, double(solver.h_primitives(c, N_DIM + 1)));
+            p_min = std::min(p_min, double(solver.h_primitives(c, N_DIM)));
+            p_max = std::max(p_max, double(solver.h_primitives(c, N_DIM)));
         }
-        EXPECT_LT(max_T, 301.0);  // The front has left
-        (right.find("nscbc") != std::string::npos ? spread_nscbc : spread_p_out) = spread;
+        spread = std::max(spread, p_max - p_min);
     }
-    std::printf("DBG spread p_out %.3e, nscbc %.3e\n", spread_p_out, spread_nscbc);
+    double max_T = 0.0;
+    for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
+        max_T = std::max(max_T, double(solver.h_primitives(c, N_DIM + 1)));
+    }
+    EXPECT_LT(max_T, 301.0);  // The front has left
+    EXPECT_LT(spread, 0.05 * 1.177 * 50.0 * 50.0);
+}
+
+namespace {
+
+/**
+ * @brief Right-running pulse of 100 Pa in air at 300 K and 1 atm (as a
+ *        thermally perfect mixture), at the outlet when t = 0.5 / c; returns
+ *        the largest |p' - rho c u'| of the reflected wave at t = 1 / c.
+ */
+double mixture_reflection(const std::string & right) {
+    const double R = 8.314462618 / (0.21 * 0.031998 + 0.79 * 0.028014), T0 = 300.0, p0 = 101325.0, gamma = 1.4;
+    const double c = std::sqrt(gamma * R * T0), rho = p0 / (R * T0);
+    std::ostringstream s, pulse;
+    s.precision(17);
+    pulse.precision(17);
+    pulse << "100.0 * exp(-((x - 0.5) / 0.05)^2)";
+    s << "[run]\nt_stop = " << 1.0 / c << "\ncfl = 0.4\n" << mesh_input("cartesian", 200, 2, 1.0, 0.01, 200)
+      << "[initialize]\ntype = \"analytical\"\np = \"" << p0 << " + " << pulse.str() << "\"\nT = \"" << T0
+      << " * (1 + " << (gamma - 1.0) / gamma / p0 << " * " << pulse.str() << ")\"\nu = [\"" << pulse.str() << " / "
+      << rho * c << "\", \"0.0\"]\nX = { O2 = 0.21, N2 = 0.79 }\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
+      << "[[boundaries]]\nname = \"right\"\n" << right
+      << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+      << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+      << "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" << H2O2_MECHANISM << "\"\n"
+      << "[output]\ncheck_interval = 1000000\n";
+    const Result r = run(s.str());
+    double reflected = 0.0;
+    for (uint32_t k = 0; k < r.mesh->n_owned(); k++) {
+        const double x = double(r.mesh->h_cell_coords(k, 0));
+        if (x < 0.2 || x > 0.8) continue;
+        const double w = double(r.solver->h_primitives(k, N_DIM)) - p0 - rho * c * double(r.solver->h_primitives(k, 0));
+        reflected = std::max(reflected, std::abs(w));
+    }
+    return reflected / 200.0;
+}
+
+} // namespace
+
+TEST(NSCBCTest, MixtureAcousticPulseLeaves) {
+    EXPECT_LT(mixture_reflection("type = \"nscbc_outlet\"\np = 101325.0\nL = 1.0\nsigma = 0.0\n"), 0.02);
+    EXPECT_GT(mixture_reflection("type = \"p_out\"\np = 101325.0\n"), 0.9);
 }
 
 namespace {
@@ -429,7 +467,6 @@ std::string sponge_input(const std::string & strength) {
 TEST(NSCBCTest, SpongeAbsorbsWhatAPressureOutletReflects) {
     // The pulse crosses the ramped layer twice before it comes back
     const Reflection sponge = measure_reflection(run(sponge_input("x > 0.6 ? 40 * ((x - 0.6) / 0.4)^2 : 0")), 0.0);
-    std::printf("DBG sponge %.3e\n", sponge.max_measured / (2 * EPS));
     EXPECT_LT(sponge.max_measured, 0.05 * 2 * EPS);
     // Strength 0 leaves the pressure outlet reflecting
     const Reflection off = measure_reflection(run(sponge_input("0")), 0.0);
@@ -453,4 +490,3 @@ TEST(NSCBCTest, InvalidCharacteristicInputIsRejected) {
                                         "[[sponges]]\nstrength = \"-1\"\nu = [0.0, 0.0]\np = 1.0\nT = 1.0\n")),
                  std::runtime_error);
 }
-

@@ -97,4 +97,91 @@ struct CharacteristicTransverseFunctor {
     }
 };
 
+/**
+ * @brief Advances the incoming acoustic wave w- = p - rho c u_n of every
+ *        characteristic face by one forward-Euler step of the LODI relation
+ *        (Poinsot & Lele 1992) at the face, with the transverse terms relaxed
+ *        by beta (Lodato, Domingo & Vervisch 2008):
+ *          dw-/dt = -K (p - p_t) - beta T-             (outlets)
+ *          dw-/dt = K rho c (u_n - u_n,t) - beta T-    (inlets)
+ *        with K = sigma c (1 - M^2) / L (K dt capped at 1). The face keeps its
+ *        pressure and normal velocity (char_state), which are continuous at
+ *        contacts, and the outgoing wave comes from the reconstructed interior
+ *        state averaged over the face. Faces of supersonic outflow follow the
+ *        interior; with initialize, the face starts from the interior state.
+ */
+struct CharacteristicStateFunctor {
+    BoundaryData boundaries;
+    Kokkos::View<rtype *[N_DIM]> face_normals;
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
+    Kokkos::View<rtype **[2][2]> face_thermo;  // Gas mixtures: [gamma, e0]; empty for a single gas
+    Kokkos::View<rtype *> quad_weights;        // 2D
+    Kokkos::View<rtype **> face_weights;       // 3D: (face, q)
+    rtype dt;
+    bool initialize;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t k) const {
+        using Relax = BoundaryCondition::Relax;
+        constexpr uint8_t E = N_DIM + 1;
+        const uint32_t f = boundaries.char_faces(k);
+        const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(f));
+        uint8_t n_quad;
+        if constexpr (N_DIM == 2) {
+            n_quad = static_cast<uint8_t>(quad_weights.extent(0));
+        } else {
+            n_quad = static_cast<uint8_t>(face_weights.extent(1));
+        }
+        rtype W[N_CONSERVATIVE] = {};
+        rtype gamma = 0.0_r, w_sum = 0.0_r;
+        for (uint8_t q = 0; q < n_quad; q++) {
+            rtype w;
+            if constexpr (N_DIM == 2) {
+                w = quad_weights(q);
+            } else {
+                w = face_weights(f, q);
+            }
+            if (w == 0.0_r) continue;
+            w_sum += w;
+            FOR_I_CONSERVATIVE W[i] += w * face_solution(f, q, 0, i);
+            gamma += w * (face_thermo.extent(0) > 0 ? face_thermo(f, q, 0, 0) : boundaries.gamma);
+        }
+        FOR_I_CONSERVATIVE W[i] /= w_sum;
+        gamma /= w_sum;
+        rtype n[N_DIM], n_vec[N_DIM];
+        FOR_I_DIM n_vec[i] = face_normals(f, i);
+        unit<N_DIM>(n_vec, n);
+
+        const rtype c2 = gamma * W[E] / W[0];
+        const rtype c = Kokkos::sqrt(c2);
+        const rtype Z = W[0] * c;
+        const rtype u_n = dot<N_DIM>(W + 1, n);
+        const rtype w_out = W[E] + Z * u_n;
+        if (initialize || u_n >= c) {
+            boundaries.char_state(k, 0) = W[E];
+            boundaries.char_state(k, 1) = u_n;
+            if (u_n >= c) return;
+        }
+        const bool inlet = bc.type == BoundaryType::NSCBC_INLET;
+        if (inlet && u_n <= -c) {
+            boundaries.char_state(k, 0) = bc.data[E];
+            boundaries.char_state(k, 1) = dot<N_DIM>(bc.data + 1, n);
+            return;
+        }
+        rtype w_in = boundaries.char_state(k, 0) - Z * boundaries.char_state(k, 1);
+        const rtype p_b = 0.5_r * (w_out + w_in);
+        const rtype u_b = 0.5_r * (w_out - w_in) / Z;
+        const rtype M2 = dot<N_DIM>(W + 1, W + 1) / c2;
+        const rtype K = Kokkos::fmin(bc.relax[Relax::ACOUSTIC] * c * Kokkos::fmax(1.0_r - M2, 0.0_r), 1.0_r / dt);
+        const rtype relaxation = inlet ? K * Z * (u_b - dot<N_DIM>(bc.data + 1, n)) : -K * (p_b - bc.data[E]);
+        const rtype beta = (bc.relax[Relax::BETA] < 0.0_r) ? Kokkos::fmin(Kokkos::sqrt(M2), 1.0_r)
+                                                            : bc.relax[Relax::BETA];
+        const rtype T_in = boundaries.char_transverse(k, 0) + c2 * boundaries.char_transverse(k, 1) -
+                           c * boundaries.char_transverse(k, 2);
+        w_in += dt * (relaxation - beta * T_in);
+        boundaries.char_state(k, 0) = 0.5_r * (w_out + w_in);
+        boundaries.char_state(k, 1) = 0.5_r * (w_out - w_in) / Z;
+    }
+};
+
 #endif // CHARACTERISTIC_H

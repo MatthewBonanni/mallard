@@ -89,9 +89,9 @@ static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
  * - NSCBC_OUTLET: data[N_DIM + 1] = target pressure
  * - NSCBC_INLET: data = W = [rho, u, p] of the target state
  *
- * Characteristic conditions (NSCBC_*) also use relax, indexed by Relax.
- * Everything but the Riemann solver's exterior state treats them as
- * EXTRAPOLATION (see BoundaryData::characteristic_W and docs/design/nscbc.md).
+ * Characteristic conditions (NSCBC_*) also use relax, indexed by Relax. Their
+ * exterior state for the Riemann solver is BoundaryData::characteristic_W;
+ * ghosts elsewhere are EXTRAPOLATION's (docs/design/nscbc.md).
  */
 struct BoundaryCondition {
     /** @brief Entries of relax: relaxation rates over the sound speed are sigma / L (1/length). */
@@ -236,8 +236,9 @@ struct BoundaryData {
     Kokkos::View<rtype *[N_DIM + 2]> face_state; // Exterior W of Dirichlet faces
     Kokkos::View<int32_t *> face_char;           // Characteristic faces: index into char_*, else -1
     Kokkos::View<uint32_t *> char_faces;         // Characteristic faces
-    Kokkos::View<rtype *> char_depth;            // V / A of the boundary cell
+    Kokkos::View<rtype *> char_depth;            // Twice the distance from the boundary cell's centroid to the face
     Kokkos::View<rtype *[3]> char_transverse;    // [u_t . grad p, rho div_t u_t, rho u_t . grad u_n] on the face
+    Kokkos::View<rtype *[2]> char_state;         // [p, u_n] of the face, whose p - rho c u_n is the incoming acoustic wave
     Kokkos::View<uint32_t *> char_offsets;       // CSR of char_neighbors
     Kokkos::View<uint32_t *> char_neighbors;     // Characteristic faces sharing a node and the orientation (index into char_*)
     Kokkos::View<BoundaryCondition *> bcs;
@@ -369,13 +370,11 @@ struct BoundaryData {
     /**
      * @brief Characteristic (NSCBC) exterior state of boundary face i_face for
      *        the Riemann solver (docs/design/nscbc.md): the outgoing waves of
-     *        the interior face state W_l, and the incoming waves of the
-     *        transmissive state W_e, the incoming acoustic one shifted by
-     *        -(V / A) L / |lambda| so that the boundary cell obeys
-     *        dw/dt = -L. L relaxes the pressure (outlets) or the normal
-     *        velocity (inlets) toward its target, with the transverse terms of
-     *        char_transverse; inlets also relax their temperature and
-     *        tangential velocity toward the target.
+     *        the interior face state W_l, the incoming acoustic wave of the
+     *        face (from char_state, advanced by the LODI relation each step), and
+     *        the incoming convective waves of the transmissive state W_e;
+     *        inlets relax their temperature and tangential velocity toward the
+     *        target.
      * @param gamma_l Ratio of specific heats of W_l.
      * @return The source of the ghost's entropy (and composition): the
      *         interior (outflow), W_e (backflow at outlets) or the target
@@ -401,22 +400,11 @@ struct BoundaryData {
             for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = bc.data[i];
             return GhostEntropy::TARGET;
         }
-        // Incoming acoustic wave w- = p - Z u_n, speed u_n - c
         const rtype Z = rho * c;
-        const rtype h = char_depth(k);
-        const rtype lambda = c - u_n;
-        const rtype M2 = dot<N_DIM>(W_l + 1, W_l + 1) / c2;
-        const rtype K = bc.relax[Relax::ACOUSTIC] * c * Kokkos::fmax(1.0_r - M2, 0.0_r);
-        const rtype gain = Kokkos::fmin(h * K / lambda, 2.0_r);
-        rtype dw = inlet ? gain * Z * (u_n - dot<N_DIM>(bc.data + 1, n)) : -gain * (p - bc.data[E]);
-        const rtype beta = (bc.relax[Relax::BETA] < 0.0_r) ? Kokkos::fmin(Kokkos::sqrt(M2), 1.0_r)
-                                                            : bc.relax[Relax::BETA];
-        const rtype T_in = char_transverse(k, 0) + c2 * char_transverse(k, 1) - c * char_transverse(k, 2);
-        dw += (h / lambda) * (1.0_r - beta) * T_in;
-
         const rtype u_n_e = dot<N_DIM>(W_e + 1, n);
         const rtype w_out = p + Z * u_n;
-        const rtype w_in = W_e[E] - Z * u_n_e + dw;
+        // Pressure and velocity are continuous at contacts, p - rho c u_n is not
+        const rtype w_in = char_state(k, 0) - Z * char_state(k, 1);
         const rtype p_g = Kokkos::fmax(0.5_r * (w_out + w_in), 1e-3_r * p);
         const rtype u_n_g = 0.5_r * (w_out - w_in) / Z;
         W_g[E] = p_g;
@@ -434,7 +422,7 @@ struct BoundaryData {
         // Inflow: temperature and tangential velocity relax toward the target, at the target's gas constant
         const rtype T_t = bc.relax[Relax::T_TARGET];
         const rtype R_t = bc.data[E] / (bc.data[0] * T_t);
-        const rtype hc_u = h * c / (-u_n);
+        const rtype hc_u = char_depth(k) * c / (-u_n);
         const rtype a_T = (bc.relax[Relax::TEMPERATURE] < 0.0_r)
                               ? 1.0_r : Kokkos::fmin(1.0_r, hc_u * bc.relax[Relax::TEMPERATURE]);
         const rtype a_t = (bc.relax[Relax::TANGENTIAL] < 0.0_r)

@@ -130,9 +130,22 @@ void Solver::apply_sponges(const State & solution, const State & rhs) {
     });
 }
 
-void Solver::update_characteristic_boundaries() {
-    if (!characteristic_transverse || boundary_data.char_faces.extent(0) == 0) return;
-    const CharacteristicTransverseFunctor functor{boundary_data,      mesh->face_coords,   mesh->face_normals,
-                                                  mesh->face_area,    mesh->cells_of_face, W_cells};
-    Kokkos::parallel_for("characteristic_transverse", boundary_data.char_faces.extent(0), functor);
+void Solver::update_characteristic_boundaries(const rtype t_stage) {
+    // Once per step, at the first stage
+    if (boundary_data.char_faces.extent(0) == 0 || t_stage != t || t_stage == t_characteristic) return;
+    if (characteristic_transverse) {
+        const CharacteristicTransverseFunctor transverse{boundary_data,      mesh->face_coords,   mesh->face_normals,
+                                                         mesh->face_area,    mesh->cells_of_face, W_cells};
+        Kokkos::parallel_for("characteristic_transverse", boundary_data.char_faces.extent(0), transverse);
+    }
+    const CharacteristicStateFunctor state{boundary_data,
+                                           mesh->face_normals,
+                                           face_solution,
+                                           is_mixture() ? face_thermo : Kokkos::View<rtype **[2][2]>(),
+                                           face_reconstruction->quadrature_face.weights,
+                                           face_reconstruction->face_quad_weights,
+                                           dt,
+                                           t_characteristic < 0.0_r};
+    Kokkos::parallel_for("characteristic_state", boundary_data.char_faces.extent(0), state);
+    t_characteristic = t_stage;
 }

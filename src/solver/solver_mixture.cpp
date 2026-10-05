@@ -361,7 +361,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
     if (exchange) halo.exchange(state);
     update_cell_states(state, true);
     face_reconstruction->calc_face_values(W_cells, face_solution);
-    update_characteristic_boundaries();
+    update_characteristic_boundaries(t_stage);
     scalar_reconstruction.calc(cell_scalars, W_cells, face_thermo);
 
     if (double_flux && !cells_frozen) {
