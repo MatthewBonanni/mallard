@@ -25,8 +25,9 @@
 # t = 0.1, the offset left by the finite initial blast radius. The density
 # profile follows the exact one, with the peak smeared to 4.2 (shell average;
 # the jump spans about three cells). The shell stays spherical (2.5% spread
-# at the peak), and mass is conserved to round-off. About 1.5 hours on four
-# A100 GPUs (half of it TENO setup); TENO5 on 2.1M cells needs at least 3.
+# at the peak), and mass is conserved to round-off. About 1h 15m on four
+# A100 GPUs (2 minutes of setup, 12,530 steps); TENO5 on 2.1M cells needs at
+# least 3.
 
 [run]
 t_stop = 0.8
