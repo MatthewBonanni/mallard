@@ -87,6 +87,7 @@ int Solver::init(const toml::value & input_in) {
         statistics.init(input, species_names, mesh->n_cells);
         init_rhs_split();
         init_sources();
+        init_sponges();
         register_data();
         init_output();
     });
@@ -380,7 +381,8 @@ void Solver::init_boundaries() {
             FOR_I_DIM dirichlet.W.emplace_back(name + ".u[" + std::to_string(i) + "]", u[i]);
             dirichlet.W.emplace_back(name + ".p", toml::find<std::string>(bound, "p"));
         }
-        const bool profiled = is_mixture() && bcs.back().type == BoundaryType::UPT &&
+        const bool profiled = is_mixture() &&
+                              (bcs.back().type == BoundaryType::UPT || bcs.back().type == BoundaryType::NSCBC_INLET) &&
                               MixtureModel::composition_varies(bound);
         uint32_t n_selected = 0;
         uint64_t n_owned_selected = 0;
@@ -451,6 +453,10 @@ void Solver::init_boundaries() {
             throw std::runtime_error("Boundary face " + std::to_string(i_face) +
                                      " has no boundary condition.");
         }
+    }
+    characteristic_transverse = false;
+    for (const BoundaryCondition & bc : bcs) {
+        characteristic_transverse |= bc.is_characteristic() && bc.relax[BoundaryCondition::BETA] != 1.0_r;
     }
     if (is_mixture()) init_mixture_boundaries(input_boundaries, profiled_faces, bcs);
     boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics);
@@ -1320,6 +1326,7 @@ void Solver::calc_dt() {
     halo_current = true;
     const rtype dt_cfl1 = calc_dt_cfl1();
     dt = use_cfl ? cfl * dt_cfl1 : dt_fixed;
+    dt = std::min(dt, sponge_dt_max);
     // Land exactly on t_stop and on time-based output times
     rtype t_target = (t_stop > 0) ? t_stop : std::numeric_limits<rtype>::infinity();
     for (const auto & writer : data_writers) {

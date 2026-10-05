@@ -13,7 +13,9 @@
 
 #include "input.h"
 
+#include <algorithm>
 #include <stdexcept>
+#include <unordered_map>
 #include <vector>
 
 #include "mesh.h"
@@ -25,6 +27,7 @@ BoundaryCondition BoundaryCondition::from_input(const toml::value & input, const
     if (it == BOUNDARY_TYPES.end()) {
         throw unknown_option(BOUNDARY_TYPES, "boundaries[name = \"" + name + "\"].type", type_str);
     }
+    using Relax = BoundaryCondition::Relax;
     BoundaryCondition bc;
     bc.type = it->second;
     auto require = [&](const char * key) {
@@ -45,7 +48,22 @@ BoundaryCondition BoundaryCondition::from_input(const toml::value & input, const
         bc.data[0] = physics.get_density_from_pressure_temperature(p, T);
         FOR_I_DIM bc.data[1 + i] = u[i];
         bc.data[N_DIM + 1] = p;
-    } else if (bc.type == BoundaryType::P_OUT || bc.type == BoundaryType::P_OUT_AVERAGE) {
+    } else if (bc.type == BoundaryType::NSCBC_INLET) {
+        require("u");
+        require("p");
+        require("T");
+        std::vector<rtype> u = find_real_vector(input, "u");
+        if (u.size() != N_DIM) {
+            throw std::runtime_error("Invalid u for boundary: " + name + ".");
+        }
+        const rtype p = find_real(input, "p");
+        const rtype T = find_real(input, "T");
+        bc.data[0] = physics.get_density_from_pressure_temperature(p, T);
+        FOR_I_DIM bc.data[1 + i] = u[i];
+        bc.data[N_DIM + 1] = p;
+        bc.relax[Relax::T_TARGET] = T;
+    } else if (bc.type == BoundaryType::P_OUT || bc.type == BoundaryType::P_OUT_AVERAGE ||
+               bc.type == BoundaryType::NSCBC_OUTLET) {
         require("p");
         bc.data[N_DIM + 1] = find_real(input, "p");
     } else if (bc.is_wall()) {
@@ -62,6 +80,30 @@ BoundaryCondition BoundaryCondition::from_input(const toml::value & input, const
         } else if (bc.type == BoundaryType::WALL_HEAT_FLUX) {
             require("q");
             bc.data[N_DIM + 1] = find_real(input, "q");
+        }
+    }
+    if (bc.is_characteristic()) {
+        const std::string where = "boundaries[name = \"" + name + "\"]";
+        require("L");
+        const rtype L = find_real(input, "L");
+        if (!(L > 0.0_r)) throw InputError(where + ".L must be positive.");
+        auto rate = [&](const char * key, rtype fallback) {
+            if (!input.contains(key)) return fallback;
+            const rtype sigma = find_real(input, key);
+            if (!(sigma >= 0.0_r)) throw InputError(where + "." + key + " must be non-negative.");
+            return sigma / L;
+        };
+        bc.relax[Relax::ACOUSTIC] = rate("sigma", 0.25_r);
+        bc.relax[Relax::BETA] = -1.0_r;
+        if (input.contains("beta")) {
+            bc.relax[Relax::BETA] = find_real(input, "beta");
+            if (!(bc.relax[Relax::BETA] >= 0.0_r && bc.relax[Relax::BETA] <= 1.0_r)) {
+                throw InputError(where + ".beta must be in [0, 1].");
+            }
+        }
+        if (bc.type == BoundaryType::NSCBC_INLET) {
+            bc.relax[Relax::TEMPERATURE] = rate("sigma_T", -1.0_r);
+            bc.relax[Relax::TANGENTIAL] = rate("sigma_t", -1.0_r);
         }
     }
     return bc;
@@ -155,6 +197,10 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     auto h_face_image_flip = Kokkos::create_mirror_view(data.face_image_flip);
     auto h_face_state_index = Kokkos::create_mirror_view(data.face_state_index);
     int32_t n_dirichlet = 0;
+    data.face_char = Kokkos::View<int32_t *>("face_char", mesh.n_faces);
+    auto h_face_char = Kokkos::create_mirror_view(data.face_char);
+    std::vector<uint32_t> char_faces;
+    std::vector<rtype> char_depth;
     auto h_bcs = Kokkos::create_mirror_view(data.bcs);
     for (size_t i = 0; i < h_bcs_vec.size(); i++) h_bcs(i) = h_bcs_vec[i];
 
@@ -173,10 +219,19 @@ BoundaryData make_boundary_data(const Mesh & mesh,
         h_face_image_side(f) = 0;
         h_face_image_flip(f) = 0;
         h_face_state_index(f) = -1;
+        h_face_char(f) = -1;
         if (h_face_bc_vec[f] >= 0 && h_bcs_vec[h_face_bc_vec[f]].type == BoundaryType::DIRICHLET) {
             h_face_state_index(f) = n_dirichlet++;
         }
-        if (h_face_bc_vec[f] < 0 || h_bcs_vec[h_face_bc_vec[f]].type != BoundaryType::EXTRAPOLATION) continue;
+        if (h_face_bc_vec[f] < 0 || !h_bcs_vec[h_face_bc_vec[f]].is_transmissive()) continue;
+        if (h_bcs_vec[h_face_bc_vec[f]].is_characteristic()) {
+            h_face_char(f) = static_cast<int32_t>(char_faces.size());
+            char_faces.push_back(f);
+            const uint32_t c = mesh.h_cells_of_face(f, 0);
+            rtype d = 0.0;
+            FOR_I_DIM d += (mesh.h_face_coords(f, i) - mesh.h_cell_coords(c, i)) * mesh.h_face_normals(f, i);
+            char_depth.push_back(2.0_r * d / mesh.h_face_area(f));
+        }
         // Image of the exterior neighbor: translate inward by most of the boundary cell's depth
         const uint32_t c = mesh.h_cells_of_face(f, 0);
         rtype n_in[N_DIM];
@@ -253,6 +308,51 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     Kokkos::deep_copy(data.face_image_flip, h_face_image_flip);
     Kokkos::deep_copy(data.face_state_index, h_face_state_index);
     data.face_state = Kokkos::View<rtype *[N_DIM + 2]>("face_state", n_dirichlet);
+    Kokkos::deep_copy(data.face_char, h_face_char);
+    data.char_faces = Kokkos::View<uint32_t *>("char_faces", char_faces.size());
+    data.char_depth = Kokkos::View<rtype *>("char_depth", char_faces.size());
+    data.char_transverse = Kokkos::View<rtype *[3]>("char_transverse", char_faces.size());
+    auto h_char_faces = Kokkos::create_mirror_view(data.char_faces);
+    auto h_char_depth = Kokkos::create_mirror_view(data.char_depth);
+    for (size_t k = 0; k < char_faces.size(); k++) {
+        h_char_faces(k) = char_faces[k];
+        h_char_depth(k) = char_depth[k];
+    }
+    Kokkos::deep_copy(data.char_faces, h_char_faces);
+    Kokkos::deep_copy(data.char_depth, h_char_depth);
+
+    // Neighbors along the boundary for the transverse terms: characteristic faces
+    // sharing a node with nearly the same normal
+    std::unordered_map<uint32_t, std::vector<uint32_t>> char_of_node;
+    for (size_t k = 0; k < char_faces.size(); k++) {
+        for (uint32_t j = 0; j < mesh.h_n_nodes_of_face(char_faces[k]); j++) {
+            char_of_node[mesh.h_node_of_face(char_faces[k], static_cast<uint8_t>(j))].push_back(static_cast<uint32_t>(k));
+        }
+    }
+    std::vector<uint32_t> offsets(char_faces.size() + 1, 0), neighbors;
+    for (size_t k = 0; k < char_faces.size(); k++) {
+        const uint32_t f = char_faces[k];
+        std::vector<uint32_t> list;
+        for (uint32_t j = 0; j < mesh.h_n_nodes_of_face(f); j++) {
+            for (uint32_t m : char_of_node[mesh.h_node_of_face(f, static_cast<uint8_t>(j))]) {
+                if (m == k || std::find(list.begin(), list.end(), m) != list.end()) continue;
+                const uint32_t g = char_faces[m];
+                rtype cos = 0.0;
+                FOR_I_DIM cos += mesh.h_face_normals(f, i) * mesh.h_face_normals(g, i);
+                if (cos > 0.9_r * mesh.h_face_area(f) * mesh.h_face_area(g)) list.push_back(m);
+            }
+        }
+        neighbors.insert(neighbors.end(), list.begin(), list.end());
+        offsets[k + 1] = static_cast<uint32_t>(neighbors.size());
+    }
+    data.char_offsets = Kokkos::View<uint32_t *>("char_offsets", offsets.size());
+    data.char_neighbors = Kokkos::View<uint32_t *>("char_neighbors", neighbors.size());
+    auto h_offsets = Kokkos::create_mirror_view(data.char_offsets);
+    auto h_neighbors = Kokkos::create_mirror_view(data.char_neighbors);
+    for (size_t k = 0; k < offsets.size(); k++) h_offsets(k) = offsets[k];
+    for (size_t k = 0; k < neighbors.size(); k++) h_neighbors(k) = neighbors[k];
+    Kokkos::deep_copy(data.char_offsets, h_offsets);
+    Kokkos::deep_copy(data.char_neighbors, h_neighbors);
     Kokkos::deep_copy(data.bcs, h_bcs);
     return data;
 }

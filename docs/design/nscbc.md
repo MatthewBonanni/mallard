@@ -21,24 +21,34 @@ interior. Incoming ones are prescribed. Mallard has no boundary points: a
 boundary face's flux comes from a Riemann solver, with the reconstructed
 interior state `W_l` on one side and a ghost state `W_g` on the other.
 
-The ghost is the face's own interior state, with the incoming characteristic
-variables shifted:
+The ghost takes its outgoing characteristic variables from `W_l`. Its
+incoming ones come from `W_e`, the transmissive exterior state of
+`extrapolation` (the reconstructed state on the interior image face), shifted:
 
 ```
-w_k(W_g) = w_k(W_l) - (h / |lambda_k|) L_k      (incoming k)
+w_k(W_g) = w_k(W_e) - (h / |lambda_k|) L_k      (incoming k)
 w_k(W_g) = w_k(W_l)                             (outgoing k)
 ```
 
 `h = V / A` is the boundary cell's volume over the face area. For an upwind
 Riemann solver, an incoming jump `dw` on the face changes the cell's `w_k`
 at the rate `|lambda_k| dw A / V`. So the boundary cell sees
-`dw_k/dt = -L_k` from its boundary face. This is the LODI relation of
-Poinsot & Lele, applied to the cell that touches the boundary, and the
-relaxation rate does not depend on the mesh. HLL, HLLC and Roe upwind a
-single-wave jump exactly. Rusanov adds dissipation, which raises the effective
-relaxation rate by at most a factor of two. With `L_k = 0` the ghost equals
-`W_l`, the Riemann problem has no jump, and the face is perfectly
+`dw_k/dt = -L_k` from its boundary face, on top of what `extrapolation` would
+give. This is the LODI relation of Poinsot & Lele, applied to the cell that
+touches the boundary, and the relaxation rate does not depend on the mesh.
+With first-order reconstruction on aligned quadrilaterals, the image face of
+a boundary cell is its own inner face, `W_e` is the cell's own state, and the
+relation is exact.
+
+HLL, HLLC and Roe upwind a single-wave jump exactly. Rusanov adds
+dissipation, which raises the effective relaxation rate by at most a factor
+of two. With `L_k = 0` the condition is `extrapolation`, which is
 non-reflecting for waves normal to it.
+
+Starting from the image state rather than from `W_l` matters on triangles.
+There the boundary cell's centroid is offset from the face, and a
+zero-gradient copy feeds the cell back to itself wherever a wave enters (see
+`make_boundary_data`).
 
 Acoustic variables are linearized about the face state:
 
@@ -51,13 +61,51 @@ A jump `dw` in `w-` gives `p_g = p_l + dw/2` and `u_n,g = u_n,l - dw/(2Z)`.
 The jump in density is isentropic, `rho_g = rho_l + (p_g - p_l)/c^2`, so the
 ghost carries no entropy jump.
 
-The ghost replaces only the exterior state seen by the convective flux.
-Everything else uses a zero-gradient copy of the cell, like `extrapolation`
-without image faces: the mirror ghost cells of TENO-E stencils, least-squares
-gradients, scalar reconstruction, and the viscous fluxes (zero normal
-derivatives, the outflow viscous conditions of Poinsot & Lele). This is
-stateless. Nothing is stored between stages, it works the same at every
-Runge-Kutta stage, restarts stay bit-for-bit, and it needs no communication.
+Beyond the exterior state of the convective flux, the face is treated like
+`extrapolation`:
+
+- the image-face values and gradients of the viscous fluxes, or zero normal
+  derivatives where no image exists (the outflow viscous conditions of
+  Poinsot & Lele)
+- the ghosts of least-squares gradients and of scalar reconstruction
+
+The exceptions are the boundary cell's own reconstruction.
+
+### Reconstruction next to the boundary
+
+A wave that leaves through an open boundary must leave the boundary cell's
+reconstruction intact. Zero-gradient ghosts break this: the mirror cells of
+TENO-E stencils and the ghost of the MUSCL least-squares fit force the normal
+derivative toward zero. The reconstructed states then jump by O(h) at the
+boundary cell's inner face.
+
+With exact upwinding, such a jump in an outgoing wave does nothing. But the
+default low-Mach correction (Thornber et al.) scales the velocity jump by
+`z = max(M, 0.1)`, which mixes it into the incoming wave. A normal acoustic
+pulse leaving through `extrapolation` reflects by:
+
+| Reconstruction | Quadrilaterals | Triangles |
+|---|---|---|
+| MUSCL | 15% | 5% |
+| TENO5 | 25% | 4% |
+
+(reflection of the incident amplitude with the default low-Mach correction)
+
+So characteristic faces take no ghosts in the boundary cell's reconstruction:
+
+- **MUSCL**: boundary cells use the vertex-neighbor least-squares fit
+  without the ghost of the characteristic face (the fit MUSCL already uses on
+  tetrahedra). On triangles the face-neighbor fit without the ghost is
+  exactly determined and unstable.
+- **TENO-E**: no mirror cells across characteristic faces, as across
+  partition faces. Stencils grow one-sided.
+
+The same pulse then reflects by about 0.1 to 0.4% with MUSCL and 0.002% with
+TENO5, on quadrilaterals, triangles and jittered mixed meshes.
+
+This is stateless. Nothing is stored between stages, it works the same at
+every Runge-Kutta stage, restarts stay bit-for-bit, and it needs no
+communication beyond the halo, which already holds the image cells.
 
 ## Outlet (`nscbc_outlet`)
 
@@ -91,7 +139,19 @@ which normal derivatives do not see:
 T- = u_t . grad p + rho c^2 div_t u_t - rho c (u_t . grad u_n)
 ```
 
-They come from a least-squares gradient of the boundary cell. With
+The tangential derivatives are a least-squares fit along the boundary. It
+uses the cells of the neighboring characteristic faces (those sharing a node
+with nearly the same normal), with the normal derivatives set to zero, as
+finite-difference NSCBC differentiates in the boundary plane.
+
+- Gradients of the boundary cell itself pick up the normal variation of
+  waves crossing the boundary.
+- On triangles they also pick up the grid-scale odd-even velocity pattern as
+  a transverse divergence. This reflected 5 to 20% of a normal pulse.
+- Reconstructed face states (TENO) instead of cell averages made the
+  correction unstable.
+
+With
 `beta = 0` the incoming wave cancels them and `w-` stays frozen against
 transverse forcing. Then a vortex leaving the domain distorts nothing, but
 the mean pressure drifts. [Yoo et al. (2005)](../references.md#yoo-2005),
@@ -107,8 +167,11 @@ Other cases:
 
 - **Supersonic outflow faces** (`u_n >= c`): every wave is outgoing, so the
   ghost is `W_l`.
+- **Entropy and tangential velocity** at outflow faces come from `W_l`, with
+  an isentropic density change.
 - **Backflow** (`u_n < 0`): the acoustic treatment is unchanged. Entropy,
-  tangential velocity and composition still come from the interior.
+  tangential velocity and composition come from the image state, as for
+  `extrapolation`.
 
 ## Inlet (`nscbc_inlet`)
 
@@ -128,7 +191,7 @@ the same cap.
 so the relaxation `dphi/dt = -K_phi (phi - phi_t)` becomes a blend:
 
 ```
-phi_g = phi_l + min(1, h K_phi / |u_n|) (phi_t - phi_l),   K_phi = sigma_phi c / L
+phi_g = phi_e + min(1, h K_phi / |u_n|) (phi_t - phi_e),   K_phi = sigma_phi c / L
 ```
 
 for `phi` = `T` or `u_t`. Without `sigma_T` or `sigma_t`, `T` and `u_t` are

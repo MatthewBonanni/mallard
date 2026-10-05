@@ -15,6 +15,7 @@
 #include <array>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -152,6 +153,10 @@ class Solver {
 
         // Public because nvcc rejects device lambdas in non-public member functions
         void update_average_pressure_outlets(StateView solution);
+        /** @brief Transverse terms of the characteristic boundaries from W_cells. */
+        void update_characteristic_boundaries();
+        /** @brief Adds the sponge-layer sources to the RHS per unit volume (owned cells). */
+        void apply_sponges(const State & solution, const State & rhs);
         void calc_dt();
         void check_fields();
         void calc_rhs_mixture(State solution, State rhs, rtype t);
@@ -244,6 +249,10 @@ class Solver {
         void update_boundary_states(rtype t_eval);
         void init_sources();
         void update_source_field(rtype t_eval);
+        void init_sponges();
+        /** @brief Mass fractions of a composition table (numbers or expressions) at the centroids of cells. */
+        std::vector<std::vector<double>> composition_at_cells(const toml::value & table, const std::string & where,
+                                                              const std::vector<uint32_t> & cells) const;
         void allocate_memory();
         void register_data();
         std::vector<std::string> restart_variables() const;  // Flow block, then RHOY_<species>
@@ -409,6 +418,15 @@ class Solver {
         StateView source_field;
         StateView::host_mirror_type h_source_field;
         rtype t_source = -1.0;
+
+        // Sponge layers: owned cells of positive total strength sum_i sigma_i,
+        // and sum_i sigma_i U_ref,i of the conservatives, then the partial densities
+        Kokkos::View<uint32_t *> sponge_cells;
+        Kokkos::View<rtype *> sponge_strength;
+        Kokkos::View<rtype **, Kokkos::LayoutRight> sponge_target;
+        rtype sponge_dt_max = std::numeric_limits<rtype>::infinity();  // 1 / max strength
+
+        bool characteristic_transverse = false;  // Some characteristic boundary has beta < 1
 
         // Checks
         uint32_t check_interval;

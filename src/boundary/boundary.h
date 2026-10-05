@@ -33,6 +33,8 @@ enum class BoundaryType {
     P_OUT_AVERAGE,
     DIRICHLET,
     FARFIELD,
+    NSCBC_OUTLET,
+    NSCBC_INLET,
     PARTITION,
 };
 
@@ -46,7 +48,9 @@ static const std::unordered_map<std::string, BoundaryType> BOUNDARY_TYPES = {
     {"p_out", BoundaryType::P_OUT},
     {"p_out_average", BoundaryType::P_OUT_AVERAGE},
     {"dirichlet", BoundaryType::DIRICHLET},
-    {"farfield", BoundaryType::FARFIELD}
+    {"farfield", BoundaryType::FARFIELD},
+    {"nscbc_outlet", BoundaryType::NSCBC_OUTLET},
+    {"nscbc_inlet", BoundaryType::NSCBC_INLET}
 };
 
 static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
@@ -60,6 +64,8 @@ static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
     {BoundaryType::P_OUT_AVERAGE, "p_out_average"},
     {BoundaryType::DIRICHLET, "dirichlet"},
     {BoundaryType::FARFIELD, "farfield"},
+    {BoundaryType::NSCBC_OUTLET, "nscbc_outlet"},
+    {BoundaryType::NSCBC_INLET, "nscbc_inlet"},
     {BoundaryType::PARTITION, "partition"}
 };
 
@@ -80,15 +86,43 @@ static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
  * - walls: data[1..N_DIM] = wall velocity; WALL_ISOTHERMAL: data[0] = wall
  *   temperature; WALL_HEAT_FLUX: data[N_DIM + 1] = heat flux into the fluid
  * - DIRICHLET: unused; the exterior state is set per face (BoundaryData::face_state)
+ * - NSCBC_OUTLET: data[N_DIM + 1] = target pressure
+ * - NSCBC_INLET: data = W = [rho, u, p] of the target state
+ *
+ * Characteristic conditions (NSCBC_*) also use relax, indexed by Relax.
+ * Everything but the Riemann solver's exterior state treats them as
+ * EXTRAPOLATION (see BoundaryData::characteristic_W and docs/design/nscbc.md).
  */
 struct BoundaryCondition {
+    /** @brief Entries of relax: relaxation rates over the sound speed are sigma / L (1/length). */
+    enum Relax : uint8_t {
+        ACOUSTIC = 0,  // sigma / L of the incoming acoustic wave
+        TEMPERATURE,   // NSCBC_INLET: sigma_T / L, negative to impose T exactly
+        TANGENTIAL,    // NSCBC_INLET: sigma_t / L, negative to impose the tangential velocity exactly
+        BETA,          // transverse relaxation in [0, 1], negative for the local Mach number
+        T_TARGET,      // NSCBC_INLET: target temperature
+        N_RELAX
+    };
+
     BoundaryType type = BoundaryType::EXTRAPOLATION;
     rtype data[N_DIM + 2] = {};
+    rtype relax[N_RELAX] = {};
 
     KOKKOS_INLINE_FUNCTION
     bool is_wall() const {
         return type == BoundaryType::WALL_ADIABATIC || type == BoundaryType::WALL_ISOTHERMAL ||
                type == BoundaryType::WALL_HEAT_FLUX;
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    bool is_characteristic() const {
+        return type == BoundaryType::NSCBC_OUTLET || type == BoundaryType::NSCBC_INLET;
+    }
+
+    /** @brief Whether the exterior state is transmissive away from the Riemann solver (image faces). */
+    KOKKOS_INLINE_FUNCTION
+    bool is_transmissive() const {
+        return type == BoundaryType::EXTRAPOLATION || is_characteristic();
     }
 
     /**
@@ -113,6 +147,8 @@ struct BoundaryCondition {
         const rtype u_n = dot<N_DIM>(W_i + 1, n);
         switch (type) {
             case BoundaryType::EXTRAPOLATION:
+            case BoundaryType::NSCBC_OUTLET:
+            case BoundaryType::NSCBC_INLET:
             case BoundaryType::PARTITION:
                 break;
             case BoundaryType::WALL_ADIABATIC:
@@ -198,6 +234,12 @@ struct BoundaryData {
     Kokkos::View<uint8_t **> face_image_quad; // 3D: quadrature point of the image face matching each point
     Kokkos::View<int32_t *> face_state_index; // Dirichlet faces: index into face_state, else -1
     Kokkos::View<rtype *[N_DIM + 2]> face_state; // Exterior W of Dirichlet faces
+    Kokkos::View<int32_t *> face_char;           // Characteristic faces: index into char_*, else -1
+    Kokkos::View<uint32_t *> char_faces;         // Characteristic faces
+    Kokkos::View<rtype *> char_depth;            // V / A of the boundary cell
+    Kokkos::View<rtype *[3]> char_transverse;    // [u_t . grad p, rho div_t u_t, rho u_t . grad u_n] on the face
+    Kokkos::View<uint32_t *> char_offsets;       // CSR of char_neighbors
+    Kokkos::View<uint32_t *> char_neighbors;     // Characteristic faces sharing a node and the orientation (index into char_*)
     Kokkos::View<BoundaryCondition *> bcs;
     rtype gamma = 1.4;
     rtype R = 1.0;
@@ -224,6 +266,13 @@ struct BoundaryData {
     void exterior_mixture(const uint32_t i_face, const uint8_t i_quad, const uint8_t n_quad, const rtype * W_i,
                           const rtype * th_i, const rtype * n, const T_W & W_cells, const T_F & face_solution,
                           const T_FT & face_thermo, const T_CT & cell_thermo, rtype * W_g, rtype * th_g) const {
+        const int32_t i_bc = face_bc(i_face);
+        const BoundaryCondition & bc = bcs(i_bc);
+        const bool characteristic = bc.is_characteristic();
+        // Characteristic faces start from the transmissive state
+        rtype W_e[N_DIM + 2], th_e[2];
+        rtype * W_t = characteristic ? W_e : W_g;
+        rtype * th_t = characteristic ? th_e : th_g;
         const int32_t image_face = face_image_face(i_face);
         const int32_t image = face_image(i_face);
         if (image_face >= 0) {
@@ -234,26 +283,32 @@ struct BoundaryData {
                 q = face_image_quad(i_face, i_quad);
             }
             const uint8_t side = face_image_side(i_face);
-            for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = face_solution(image_face, q, side, i);
-            th_g[0] = face_thermo(image_face, q, side, 0);
-            th_g[1] = face_thermo(image_face, q, side, 1);
-            return;
+            for (uint8_t i = 0; i < N_DIM + 2; i++) W_t[i] = face_solution(image_face, q, side, i);
+            th_t[0] = face_thermo(image_face, q, side, 0);
+            th_t[1] = face_thermo(image_face, q, side, 1);
+        } else if (image >= 0) {
+            for (uint8_t i = 0; i < N_DIM + 2; i++) W_t[i] = W_cells(image, i);
+            th_t[0] = cell_thermo(image, 0);
+            th_t[1] = cell_thermo(image, 1);
+        } else {
+            bc.ghost_W(W_i, n, th_i[0], R, viscous, W_t);
+            if (bc.type == BoundaryType::UPT) {
+                th_t[0] = bc_thermo(i_bc, 0);
+                th_t[1] = bc_thermo(i_bc, 1);
+            } else {
+                th_t[0] = th_i[0];
+                th_t[1] = th_i[1];
+            }
         }
-        if (image >= 0) {
-            for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = W_cells(image, i);
-            th_g[0] = cell_thermo(image, 0);
-            th_g[1] = cell_thermo(image, 1);
-            return;
-        }
-        const int32_t i_bc = face_bc(i_face);
-        const BoundaryCondition & bc = bcs(i_bc);
-        bc.ghost_W(W_i, n, th_i[0], R, viscous, W_g);
-        if (bc.type == BoundaryType::UPT) {
+        if (!characteristic) return;
+        const GhostEntropy entropy = characteristic_W(i_face, W_i, W_e, n, th_i[0], W_g);
+        const rtype * th_src = (entropy == GhostEntropy::INTERIOR) ? th_i : th_e;
+        if (entropy == GhostEntropy::TARGET) {
             th_g[0] = bc_thermo(i_bc, 0);
             th_g[1] = bc_thermo(i_bc, 1);
         } else {
-            th_g[0] = th_i[0];
-            th_g[1] = th_i[1];
+            th_g[0] = th_src[0];
+            th_g[1] = th_src[1];
         }
     }
 
@@ -274,6 +329,21 @@ struct BoundaryData {
     void exterior_W(const uint32_t i_face, const uint8_t i_quad, const uint8_t n_quad,
                     const rtype * W_i, const rtype * n, const T_W & W_cells, const T_F & face_solution,
                     rtype * W_g) const {
+        if (bcs(face_bc(i_face)).is_characteristic()) {
+            rtype W_e[N_DIM + 2];
+            transmissive_W(i_face, i_quad, n_quad, W_i, n, W_cells, face_solution, W_e);
+            characteristic_W(i_face, W_i, W_e, n, gamma, W_g);
+            return;
+        }
+        transmissive_W(i_face, i_quad, n_quad, W_i, n, W_cells, face_solution, W_g);
+    }
+
+    /** @brief Exterior state of exterior_W before the characteristic treatment. */
+    template <typename T_W, typename T_F>
+    KOKKOS_INLINE_FUNCTION
+    void transmissive_W(const uint32_t i_face, const uint8_t i_quad, const uint8_t n_quad,
+                        const rtype * W_i, const rtype * n, const T_W & W_cells, const T_F & face_solution,
+                        rtype * W_g) const {
         const int32_t image_face = face_image_face(i_face);
         const int32_t image = face_image(i_face);
         if (image_face >= 0) {
@@ -291,6 +361,94 @@ struct BoundaryData {
         } else {
             ghost_W(i_face, W_i, n, W_g);
         }
+    }
+
+    /** @brief Where the entropy of a characteristic ghost state comes from. */
+    enum class GhostEntropy : uint8_t { INTERIOR, EXTERIOR, TARGET };
+
+    /**
+     * @brief Characteristic (NSCBC) exterior state of boundary face i_face for
+     *        the Riemann solver (docs/design/nscbc.md): the outgoing waves of
+     *        the interior face state W_l, and the incoming waves of the
+     *        transmissive state W_e, the incoming acoustic one shifted by
+     *        -(V / A) L / |lambda| so that the boundary cell obeys
+     *        dw/dt = -L. L relaxes the pressure (outlets) or the normal
+     *        velocity (inlets) toward its target, with the transverse terms of
+     *        char_transverse; inlets also relax their temperature and
+     *        tangential velocity toward the target.
+     * @param gamma_l Ratio of specific heats of W_l.
+     * @return The source of the ghost's entropy (and composition): the
+     *         interior (outflow), W_e (backflow at outlets) or the target
+     *         (inflow at inlets).
+     */
+    KOKKOS_INLINE_FUNCTION
+    GhostEntropy characteristic_W(const uint32_t i_face, const rtype * W_l, const rtype * W_e, const rtype * n,
+                                  const rtype gamma_l, rtype * W_g) const {
+        using Relax = BoundaryCondition::Relax;
+        constexpr uint8_t E = N_DIM + 1;
+        const BoundaryCondition & bc = bcs(face_bc(i_face));
+        const int32_t k = face_char(i_face);
+        const bool inlet = bc.type == BoundaryType::NSCBC_INLET;
+        const rtype rho = W_l[0], p = W_l[E];
+        const rtype c2 = gamma_l * p / rho;
+        const rtype c = Kokkos::sqrt(c2);
+        const rtype u_n = dot<N_DIM>(W_l + 1, n);
+        if (u_n >= c) {
+            for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = W_l[i];
+            return GhostEntropy::INTERIOR;
+        }
+        if (inlet && u_n <= -c) {
+            for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = bc.data[i];
+            return GhostEntropy::TARGET;
+        }
+        // Incoming acoustic wave w- = p - Z u_n, speed u_n - c
+        const rtype Z = rho * c;
+        const rtype h = char_depth(k);
+        const rtype lambda = c - u_n;
+        const rtype M2 = dot<N_DIM>(W_l + 1, W_l + 1) / c2;
+        const rtype K = bc.relax[Relax::ACOUSTIC] * c * Kokkos::fmax(1.0_r - M2, 0.0_r);
+        const rtype gain = Kokkos::fmin(h * K / lambda, 2.0_r);
+        rtype dw = inlet ? gain * Z * (u_n - dot<N_DIM>(bc.data + 1, n)) : -gain * (p - bc.data[E]);
+        const rtype beta = (bc.relax[Relax::BETA] < 0.0_r) ? Kokkos::fmin(Kokkos::sqrt(M2), 1.0_r)
+                                                            : bc.relax[Relax::BETA];
+        const rtype T_in = char_transverse(k, 0) + c2 * char_transverse(k, 1) - c * char_transverse(k, 2);
+        dw += (h / lambda) * (1.0_r - beta) * T_in;
+
+        const rtype u_n_e = dot<N_DIM>(W_e + 1, n);
+        const rtype w_out = p + Z * u_n;
+        const rtype w_in = W_e[E] - Z * u_n_e + dw;
+        const rtype p_g = Kokkos::fmax(0.5_r * (w_out + w_in), 1e-3_r * p);
+        const rtype u_n_g = 0.5_r * (w_out - w_in) / Z;
+        W_g[E] = p_g;
+        if (u_n >= 0.0_r) {
+            // Entropy and tangential velocity leave with the flow
+            W_g[0] = rho * Kokkos::pow(p_g / p, 1.0_r / gamma_l);
+            FOR_I_DIM W_g[1 + i] = W_l[1 + i] + (u_n_g - u_n) * n[i];
+            return GhostEntropy::INTERIOR;
+        }
+        if (!inlet) {
+            W_g[0] = W_e[0] * Kokkos::pow(p_g / W_e[E], 1.0_r / gamma_l);
+            FOR_I_DIM W_g[1 + i] = W_e[1 + i] + (u_n_g - u_n_e) * n[i];
+            return GhostEntropy::EXTERIOR;
+        }
+        // Inflow: temperature and tangential velocity relax toward the target, at the target's gas constant
+        const rtype T_t = bc.relax[Relax::T_TARGET];
+        const rtype R_t = bc.data[E] / (bc.data[0] * T_t);
+        const rtype hc_u = h * c / (-u_n);
+        const rtype a_T = (bc.relax[Relax::TEMPERATURE] < 0.0_r)
+                              ? 1.0_r : Kokkos::fmin(1.0_r, hc_u * bc.relax[Relax::TEMPERATURE]);
+        const rtype a_t = (bc.relax[Relax::TANGENTIAL] < 0.0_r)
+                              ? 1.0_r : Kokkos::fmin(1.0_r, hc_u * bc.relax[Relax::TANGENTIAL]);
+        const rtype T_e = W_e[E] / (W_e[0] * R_t);
+        const rtype T_g = T_e + a_T * (T_t - T_e);
+        const rtype u_n_t = dot<N_DIM>(bc.data + 1, n);
+        FOR_I_DIM {
+            const rtype u_t_e = W_e[1 + i] - u_n_e * n[i];
+            const rtype u_t_t = bc.data[1 + i] - u_n_t * n[i];
+            W_g[1 + i] = u_t_e + a_t * (u_t_t - u_t_e) + u_n_g * n[i];
+        }
+        W_g[0] = p_g / (R_t * T_g);
+        return GhostEntropy::TARGET;
     }
 
     /**

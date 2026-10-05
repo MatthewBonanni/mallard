@@ -336,7 +336,7 @@ std::array<double, 9> ranking_metric(const Mesh & mesh, const Kokkos::View<int32
         for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(i); k++) {
             const uint32_t f = mesh.h_face_of_cell(i, k);
             if (mesh.h_cells_of_face(f, 1) >= 0 || face_bc(f) < 0) continue;
-            if (bcs(face_bc(f)).type == BoundaryType::PARTITION) continue;
+            if (bcs(face_bc(f)).type == BoundaryType::PARTITION || bcs(face_bc(f)).is_characteristic()) continue;
             Point n;
             for (int a = 0; a < 3; a++) n[a] = double(mesh.h_face_normals(f, a)) / double(mesh.h_face_area(f));
             double d0 = 0.0;
@@ -882,7 +882,7 @@ void TENO::compute_stencils_and_matrices() {
                     for (uint32_t k = 0; k < mesh->h_n_faces_of_cell(c); k++) {
                         const uint32_t f = mesh->h_face_of_cell(c, k);
                         if (mesh->h_cells_of_face(f, 1) >= 0 || h_face_bc(f) < 0) continue;
-                        if (h_bcs(h_face_bc(f)).type == BoundaryType::PARTITION) continue;
+                        if (h_bcs(h_face_bc(f)).type == BoundaryType::PARTITION || h_bcs(h_face_bc(f)).is_characteristic()) continue;
                         const double nx = double(mesh->h_face_normals(f, 0)) / double(mesh->h_face_area(f));
                         const double ny = double(mesh->h_face_normals(f, 1)) / double(mesh->h_face_area(f));
                         const LineFace lf{static_cast<int32_t>(f), double(mesh->h_face_coords(f, 0)) + v.t[0], double(mesh->h_face_coords(f, 1)) + v.t[1]};
@@ -1414,7 +1414,7 @@ void TENO::compute_stencils_and_matrices_3d() {
                     for (uint32_t k = 0; k < mesh->h_n_faces_of_cell(c); k++) {
                         const uint32_t f = mesh->h_face_of_cell(c, k);
                         if (mesh->h_cells_of_face(f, 1) >= 0 || h_face_bc(f) < 0) continue;
-                        if (h_bcs(h_face_bc(f)).type == BoundaryType::PARTITION) continue;
+                        if (h_bcs(h_face_bc(f)).type == BoundaryType::PARTITION || h_bcs(h_face_bc(f)).is_characteristic()) continue;
                         const Point3 n = unit_normal(f);
                         PlaneFace pf{static_cast<int32_t>(f), v.lattice, {}};
                         for (int d = 0; d < 3; d++) pf.x[d] = double(mesh->h_face_coords(f, d)) + v.t[d];

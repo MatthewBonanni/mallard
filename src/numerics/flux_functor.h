@@ -45,7 +45,10 @@ void low_mach_correction(rtype * W_l, rtype * W_r, const rtype gamma, const rtyp
  * @brief Integrates the convective flux over every face into face_flux, the
  *        rate of change it causes in cells_of_face(:, 0) (cells_of_face(:, 1)
  *        receives its negative). Boundary faces use the boundary ghost state
- *        as the right state.
+ *        as the right state. Characteristic boundaries take the low-Mach
+ *        correction like interior faces: without it, the different
+ *        dissipation of the boundary cell's two sides holds the outlet
+ *        pressure of a steady shear flow away from its target.
  *
  * Face normals point from cells_of_face(:, 0) to cells_of_face(:, 1), i.e.
  * out of the domain on boundary faces.
@@ -94,6 +97,9 @@ struct ConvectiveFluxFunctor {
                 if (low_mach_cutoff < 1.0_r) low_mach_correction(W_l, W_r, gamma, low_mach_cutoff);
             } else {
                 boundaries.exterior_W(i_face, i_quad, n_quad, W_l, n_unit, W_cells, face_solution, W_r);
+                if (low_mach_cutoff < 1.0_r && boundaries.bcs(boundaries.face_bc(i_face)).is_characteristic()) {
+                    low_mach_correction(W_l, W_r, gamma, low_mach_cutoff);
+                }
             }
             T_riemann_solver::calc_flux(flux_q, n_unit, W_l, W_r, gamma);
             FOR_I_CONSERVATIVE flux[i] += w_q * flux_q[i];

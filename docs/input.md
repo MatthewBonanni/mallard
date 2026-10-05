@@ -171,6 +171,22 @@ the zone's faces whose centers satisfy the expression.
 | `dirichlet` | Exterior state from expressions in `x`, `y`, `z`, `t`, evaluated at face centers at every stage | `rho`, `u` (one expression per component), `p` |
 | `p_out` | Outlet: imposes `p` if the outflow is subsonic | `p` |
 | `p_out_average` | Outlet for mixed subsonic/supersonic flow: on subsonic faces, shifts the local pressure so that its area average over the boundary equals `p`, preserving the transverse profile | `p` |
+| `nscbc_outlet` | Partially non-reflecting characteristic outlet (Poinsot & Lele): outgoing waves leave, and the incoming acoustic wave relaxes the pressure toward `p` at the rate `K = sigma c (1 - M^2) / L`, with the transverse terms relaxed by `beta`. Waves of frequency `omega` reflect by `1 / sqrt(1 + (2 omega / K)^2)` | `p`, `L` (a length of the domain), `sigma` (default 0.25; 0 is perfectly non-reflecting and drifts, large values approach `p_out`), `beta` (0 to 1, default the local Mach number; 1 drops the transverse terms) |
+| `nscbc_inlet` | Partially non-reflecting characteristic inlet: the incoming acoustic wave relaxes the normal velocity toward `u` like `nscbc_outlet`; temperature and tangential velocity are imposed, or relaxed with `sigma_T`, `sigma_t`; the composition is imposed. Supersonic inflow imposes `u`, `p`, `T` | `u`, `p` (reference pressure, for supersonic inflow), `T`, `L`, `sigma` (default 0.25), `sigma_T`, `sigma_t` (optional), `beta`, and `X` or `Y` for mixtures (as `upt`) |
+
+Characteristic conditions shift only the incoming waves of the exterior state that the Riemann solver sees; reconstruction, gradients and viscous terms treat them like `extrapolation` (zero normal derivatives in the viscous fluxes, the outflow conditions of Poinsot & Lele). See [docs/design/nscbc.md](design/nscbc.md).
+
+## `[[sponges]]`
+
+Optional sponge layers, each adding `-strength (U - U_ref)` to the conservative variables (and species partial densities) per unit volume, with `U_ref` the conservatives of a reference state. Several sponges add up. The explicit source caps the time step at `1 / max strength`.
+
+| Key | Description |
+|---|---|
+| `strength` | Damping rate (1/s): a number or an expression in `x`, `y`, `z`, zero outside the layer, e.g. `"x > 4 ? 20 * ((x - 4) / 1)^2 : 0"` (a gradual ramp reflects less than a step) |
+| `u`, `p`, `T` | Reference state: numbers or expressions in `x`, `y`, `z` (`u` has one per component) |
+| `X` or `Y`, `balance` | (mixtures) Reference composition, numbers or expressions as in `[initialize]` |
+
+Strength and reference are evaluated once at cell centroids.
 
 ## `[numerics]`
 
