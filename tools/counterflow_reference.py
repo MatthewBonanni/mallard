@@ -15,8 +15,10 @@ transport. Writes to OUT_DIR (default examples/counterflow_diffusion/reference):
                  (the axial velocity gradient -du/dz ahead of the flame on
                  each side: its first maximum going from the nozzle towards
                  the flame), peak temperature and its position,
-                 stagnation point; up to the last burning flame, whose K_ox
-                 is the extinction strain rate (bisected on U_o to 0.5%)
+                 stagnation point and the spread rate V = v / r at the
+                 peak temperature (V_T, the strain the flame itself
+                 sees); up to the last burning flame, whose K_ox is the
+                 extinction strain rate (bisected on U_o to 0.5%)
   U<U_OX>.csv    with --profile: the full solution (z, u, spread rate V =
                  v / r, T, rho, Y) at that oxidizer velocity, which is the
                  initial state of Mallard's runs (tools/counterflow_setup.py)
@@ -89,7 +91,8 @@ def row(f, U_o, U_f):
     z, u, T = f.grid, f.velocity, f.T
     K_ox, K_f = local_strains(z, u)
     i_s = np.argmin(np.abs(u))
-    return (U_o, U_f, (U_o + U_f) / GAP, K_ox, K_f, T.max(), z[np.argmax(T)], z[i_s], z.size)
+    i_T = np.argmax(T)
+    return (U_o, U_f, (U_o + U_f) / GAP, K_ox, K_f, T[i_T], z[i_T], z[i_s], f.spread_rate[i_T], z.size)
 
 
 def sweep(out):
@@ -121,7 +124,7 @@ def sweep(out):
         fh.write(f"# Cantera {ct.__version__} CounterflowDiffusionFlame, h2o2.yaml/{PHASE}, {TRANSPORT}; "
                  f"fuel H2:N2 = 0.25:0.75, air O2:N2 = 0.21:0.79, {T_IN} K, {P} Pa, gap {GAP} m; "
                  f"momentum-balanced; extinct above U_o = {hi:.5f} m/s (last row: extinction)\n")
-        fh.write("U_o,U_f,a_global,K_ox,K_f,T_max,z_T_max,z_stag,points\n")
+        fh.write("U_o,U_f,a_global,K_ox,K_f,T_max,z_T_max,z_stag,V_T,points\n")
         for r in rows:
             fh.write(",".join(f"{v:.8g}" for v in r[:-1]) + f",{r[-1]}\n")
 
@@ -142,7 +145,8 @@ def write_profile(f, U_o, U_f, path):
     r = row(f, U_o, U_f)
     with open(path, "w") as fh:
         fh.write(f"# Cantera {ct.__version__} CounterflowDiffusionFlame as strain.csv; U_o = {U_o:.8g} m/s, "
-                 f"U_f = {U_f:.8g} m/s, K_ox = {r[3]:.6g} 1/s, K_f = {r[4]:.6g} 1/s, T_max = {r[5]:.6g} K\n")
+                 f"U_f = {U_f:.8g} m/s, K_ox = {r[3]:.6g} 1/s, K_f = {r[4]:.6g} 1/s, T_max = {r[5]:.6g} K, "
+                 f"V_T = {r[8]:.6g} 1/s\n")
         fh.write("z,u,V,T,rho," + ",".join("Y_" + s for s in f.gas.species_names) + "\n")
         data = np.column_stack([f.grid, f.velocity, f.spread_rate, f.T, f.density, f.Y.T])
         np.savetxt(fh, data, delimiter=",", fmt="%.8e")

@@ -8,12 +8,13 @@ output (solut/plane_*.vtu) gives the stagnation line: the cells next to the
 axis, extrapolated to r = 0 with the cells one further out (f = f0 + b r^2).
 On it: the peak temperature (parabola through the hottest cell and its
 neighbors) and the local strain rates K_ox and K_f (the first maximum of
--du/dx going from each nozzle towards the flame), as
-tools/counterflow_reference.py measures Cantera's.
+-du/dx going from each nozzle towards the flame) and the spread rate
+V = v / r at the peak temperature, as tools/counterflow_reference.py
+measures Cantera's.
 
-Writes OUT_PREFIX_strain.png (peak T against K_ox: Cantera's sweep up to
-extinction, and the runs), OUT_PREFIX_profiles.png (T, u and major species
-along the stagnation line against Cantera's flame of the same K_ox, from
+Writes OUT_PREFIX_strain.png (peak T against K_ox and against V at the
+flame: Cantera's sweep up to extinction, and the runs),
+OUT_PREFIX_profiles.png (T, u and major species along the stagnation line against Cantera's flame of the same K_ox, from
 reference/K<K_ox>.csv written by counterflow_reference.py --match, aligned
 at the peak temperature), with --history OUT_PREFIX_history.png (peak T
 and K_ox over time) and with --still OUT_PREFIX_still.png (the first run's
@@ -83,6 +84,8 @@ def stagnation_line(path):
         if v.ndim == 2:
             v = v[:, 0]
         out[name] = v[rows[0]] - w * (v[rows[1]] - v[rows[0]])
+    V = [arrays["U"][rows[k], 1] / ys[k] for k in range(2)]
+    out["V"] = V[0] - w * (V[1] - V[0])
     return out
 
 
@@ -94,9 +97,10 @@ def run_series(run_dir):
 
 
 def measure(line):
+    """Peak temperature, its position, K_ox, K_f, and the spread rate V = v / r there."""
     T_max, x_T = peak(line["x"], line["T"])
     K_ox, K_f = local_strains(line["x"], line["U"])
-    return T_max, x_T, K_ox, K_f
+    return T_max, x_T, K_ox, K_f, np.interp(x_T, line["x"], line["V"])
 
 
 def still(path, out, radius=None):
@@ -139,7 +143,7 @@ def still(path, out, radius=None):
     fig.colorbar(im, ax=ax, label="T [K]", shrink=0.8)
     ax.set_title(f"H$_2$/N$_2$ (bottom) against air (top), t = {arrays['TIME'] * 1e3:.2f} ms", fontsize=10)
     fig.tight_layout()
-    fig.savefig(out, dpi=150)
+    fig.savefig(out, dpi=150, bbox_inches="tight")
 
 
 def load_reference(path):
@@ -164,7 +168,7 @@ def main():
         still(run_series(args.run[0][1])[-1], args.out + "_still.png", args.still)
 
     sweep = np.genfromtxt(os.path.join(args.reference, "strain.csv"), delimiter=",", names=True, skip_header=1)
-    K_ref, T_ref = sweep["K_ox"], sweep["T_max"]
+    K_ref, T_ref, V_ref = sweep["K_ox"], sweep["T_max"], sweep["V_T"]
     matched = {}
     for path in glob.glob(os.path.join(args.reference, "K*.csv")):
         header, prof = load_reference(path)
@@ -175,36 +179,49 @@ def main():
     for label, run_dir in args.run:
         files = run_series(run_dir)
         line = stagnation_line(files[-1])
-        T_max, x_T, K_ox, K_f = measure(line)
+        T_max, x_T, K_ox, K_f, V_T = measure(line)
         hist = None
         if args.history:
             hist = np.array([(stagnation_line(f)["TIME"],) + measure(stagnation_line(f)) for f in files])
         T_cantera = np.interp(K_ox, K_ref, T_ref) if K_ox <= K_ref.max() else np.nan
-        results.append(dict(label=label, line=line, T_max=T_max, x_T=x_T, K_ox=K_ox, K_f=K_f, hist=hist,
-                            T_cantera=T_cantera, t=line["TIME"]))
+        T_cantera_V = np.interp(V_T, V_ref, T_ref) if V_T <= V_ref.max() else np.nan
+        results.append(dict(label=label, line=line, T_max=T_max, x_T=x_T, K_ox=K_ox, K_f=K_f, V_T=V_T, hist=hist,
+                            T_cantera=T_cantera, T_cantera_V=T_cantera_V, t=line["TIME"]))
 
-    print(f"{'run':<28s} {'t [ms]':>8s} {'K_ox':>8s} {'K_f':>8s} {'T_max':>8s} {'Cantera':>8s} {'error':>7s}")
+    print(f"{'run':<28s} {'t [ms]':>8s} {'K_ox':>8s} {'K_f':>8s} {'T_max':>8s} {'Cantera':>8s} {'error':>7s} "
+          f"{'V_T':>8s} {'Cantera':>8s} {'error':>7s}")
     for r in results:
         err = (r["T_max"] - r["T_cantera"]) / r["T_cantera"]
+        err_V = (r["T_max"] - r["T_cantera_V"]) / r["T_cantera_V"]
         print(f"{r['label']:<28s} {r['t'] * 1e3:8.3f} {r['K_ox']:8.1f} {r['K_f']:8.1f} {r['T_max']:8.1f} "
-              f"{r['T_cantera']:8.1f} {100 * err:6.2f}%")
+              f"{r['T_cantera']:8.1f} {100 * err:6.2f}% {r['V_T']:8.1f} {r['T_cantera_V']:8.1f} {100 * err_V:6.2f}%")
 
-    fig, ax = plt.subplots(figsize=(6.4, 4.4))
-    ax.plot(K_ref, T_ref, "k-", lw=1.5, label="Cantera (axisymmetric similarity solution)")
-    ax.plot(K_ref[-1], T_ref[-1], "kx", ms=9, mew=2, label=f"Cantera extinction, $K_{{ox}}$ = {K_ref[-1]:.0f} 1/s")
-    band = np.linspace(K_ref.min(), K_ref.max(), 200)
-    T_band = np.interp(band, K_ref, T_ref)
-    ax.fill_between(band, 0.98 * T_band, 1.02 * T_band, color="0.85", lw=0, label="±2%")
-    for r in results:
-        ax.plot(r["K_ox"], r["T_max"], "o", ms=7, label=f"Mallard, {r['label']}")
-    ax.set_xscale("log")
-    ax.set_xlabel(r"local strain rate $K_{ox}$ = max $(-\partial u / \partial x)$ ahead of the flame [1/s]")
-    ax.set_ylabel("peak temperature [K]")
-    ax.set_title("H$_2$/N$_2$ (1:3) against air, 300 K, 1 atm")
-    ax.grid(True, which="both", alpha=0.3)
-    ax.legend(fontsize=8)
-    fig.tight_layout()
-    fig.savefig(args.out + "_strain.png", dpi=150)
+    fig, axes = plt.subplots(1, 2, figsize=(13.5, 4.6), sharey=True)
+    for ax, S_ref, key, label in [
+            (axes[0], K_ref, "K_ox", r"local strain rate $K_{ox}$ = max $(-\partial u / \partial x)$ ahead of the flame [1/s]"),
+            (axes[1], V_ref, "V_T", r"spread rate $V = v / r$ at the peak temperature [1/s]")]:
+        ax.plot(S_ref, T_ref, "k-", lw=1.5, label="Cantera (axisymmetric similarity solution)")
+        ax.plot(S_ref[-1], T_ref[-1], "kx", ms=9, mew=2, label=f"Cantera extinction ({S_ref[-1]:.0f} 1/s)")
+        band = np.linspace(S_ref.min(), S_ref.max(), 200)
+        T_band = np.interp(band, S_ref, T_ref)
+        ax.fill_between(band, 0.98 * T_band, 1.02 * T_band, color="0.85", lw=0, label="±2%")
+        for k, r in enumerate(results):
+            ax.plot(r[key], r["T_max"], "os^D"[k // 10 % 4], color=f"C{k % 10}", ms=7,
+                    label=f"Mallard, {r['label']}")
+        ax.set_xscale("log")
+        x0 = 0.5 * min(r[key] for r in results)
+        ax.set_xlim(x0, 1.3 * S_ref[-1])
+        T_lo = min(T_ref[-1], *(r["T_max"] for r in results))
+        T_hi = max(np.interp(x0, S_ref, T_ref), *(r["T_max"] for r in results))
+        ax.set_ylim(T_lo - 0.1 * (T_hi - T_lo), T_hi + 0.1 * (T_hi - T_lo))
+        ax.set_xlabel(label)
+        ax.grid(True, which="both", alpha=0.3)
+    axes[0].set_ylabel("peak temperature [K]")
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, fontsize=8, loc="center left", bbox_to_anchor=(0.8, 0.5))
+    fig.suptitle("H$_2$/N$_2$ (1:3) against air, 300 K, 1 atm: peak temperature against strain", fontsize=11)
+    fig.tight_layout(rect=(0, 0, 0.8, 1))
+    fig.savefig(args.out + "_strain.png", dpi=150, bbox_inches="tight")
 
     with_ref = [r for r in results if matched]
     if with_ref:

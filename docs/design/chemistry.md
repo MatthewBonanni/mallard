@@ -1315,6 +1315,37 @@ Species counts are taken from the files when they are added.
 | V10 | **Counterflow diffusion flame**, H2/N2 vs air, strain-rate sweep | Cantera `CounterflowDiffusionFlame` | Peak `T` vs strain within 2% near the axis, accepting that a 2D/3D opposed-jet run only approximates the similarity solution | 12 |
 | V11 | **Shock/H2-bubble interaction** with detailed transport, or a reacting mixing layer | [Billet, Giovangigli & de Gassowski 2008](https://doi.org/10.1080/13647830701545875) | Code-to-code: interface and shock positions; grid convergence | 12 |
 
+V10 (`examples/counterflow_diffusion`, `tools/counterflow_reference.py`,
+`counterflow_setup.py`, `plot_counterflow.py`): H2/N2 (1:3) against air at
+300 K and 1 atm, nozzles 10 mm apart, momentum-balanced, against Cantera's
+`CounterflowDiffusionFlame` swept in strain up to extinction. Cantera's is
+the axisymmetric similarity solution, and Mallard has neither an
+axisymmetric formulation nor an exact planar equivalent of it, so the run
+is 3D: a quarter of two opposed round plug jets (r < 5 mm) with N2 coflows,
+symmetry planes and side pressure outlets, 15 cells per FWHM of the
+temperature profile along the axis, started from Cantera's solution. Strain
+is measured on the stagnation line in both, as the local strain rate of the
+oxidizer stream `K_ox` (the first maximum of `-du/dx` ahead of the flame)
+and as the spread rate `V_T = v / r` at the peak temperature. From
+`U_o` = 1 to 4.6 m/s (`K_ox` 344-1640 1/s, up to 90% of Cantera's
+extinction strain rate of 1816 1/s) the steady peak temperature is within
+2% of Cantera's at the same `K_ox` (+0.41% to +1.96%), so V10 passes, but
+the excess grows with strain and is mostly not a resolution error (at 4 m/s
+it is the same at 10 and 15 cells per FWHM; at 2 m/s it falls from 0.74% to
+0.34% between 10 and 22). The finite jets give the flame less strain for
+the same `K_ox` than the similarity solution (`V_T / K_ox` 0.89 against
+0.95 at 4 m/s), by an amount that depends on the jets: with 7.5 mm jets the
+excess at 4 m/s reaches 1.9% and was still rising. At matched `V_T` the
+peak temperatures agree within 0.3-0.6% everywhere on the branch, for both
+jet widths, and 1.0% at Cantera's extinction strain. Mallard's
+flame still burns at `K_ox` = 1818 1/s (`U_o` = 5.1 m/s) and goes out at
+5.6 m/s (`K_ox` 1890-1975 1/s while burning), so its extinction strain rate
+is 0-9% above Cantera's. Stagnation-line temperature, velocity and species
+profiles overlay Cantera's at matched `K_ox`. Results, plots and the
+resolution and domain-size variants are in the example's README.
+
+![Peak temperature against strain](../images/counterflow_strain.png)
+
 ### Performance benchmarks
 
 - **Chemistry throughput**: cells advanced per second per A100 (and per CPU
