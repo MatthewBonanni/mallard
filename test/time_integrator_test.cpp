@@ -76,6 +76,37 @@ double observed_order(TimeIntegrator & integrator) {
 
 } // namespace
 
+TEST(TimeIntegratorTest, SSPRK3KeepsASteadyStateExactly) {
+    // In single precision the rounded weights 2/3 and 1/3 add up to more than
+    // one, so 2/3 U + 1/3 U creeps up by an ulp in about a third of the values
+    SSPRK3 integrator;
+    std::vector<State> solution_vec, rhs_vec;
+    for (uint8_t i = 0; i < integrator.get_n_solution_vectors(); i++) solution_vec.emplace_back("U", 1000, 2);
+    for (uint8_t i = 0; i < integrator.get_n_rhs_vectors(); i++) rhs_vec.emplace_back("rhs", 1000, 2);
+    State U = solution_vec[0];
+    auto h_flow = Kokkos::create_mirror(U.flow);
+    auto h_species = Kokkos::create_mirror(U.species);
+    for (uint32_t c = 0; c < 1000; c++) {
+        FOR_I_CONSERVATIVE h_flow(c, i) = static_cast<rtype>(0.01 + 0.0137 * (c * N_CONSERVATIVE + i));
+        for (uint32_t k = 0; k < 2; k++) h_species(c, k) = static_cast<rtype>(0.003 + 0.0071 * (2 * c + k));
+    }
+    Kokkos::deep_copy(U.flow, h_flow);
+    Kokkos::deep_copy(U.species, h_species);
+    RHSFunction zero = [](State, State R, rtype) {
+        Kokkos::deep_copy(R.flow, 0.0_r);
+        Kokkos::deep_copy(R.species, 0.0_r);
+    };
+    for (int s = 0; s < 10; s++) integrator.take_step(s * 0.1_r, 0.1_r, solution_vec, rhs_vec, zero);
+    auto flow = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), U.flow);
+    auto species = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), U.species);
+    uint32_t n_changed = 0;
+    for (uint32_t c = 0; c < 1000; c++) {
+        FOR_I_CONSERVATIVE n_changed += flow(c, i) != h_flow(c, i);
+        for (uint32_t k = 0; k < 2; k++) n_changed += species(c, k) != h_species(c, k);
+    }
+    EXPECT_EQ(n_changed, 0u);
+}
+
 TEST(TimeIntegratorTest, ForwardEulerIsFirstOrder) {
     FE integrator;
     EXPECT_NEAR(observed_order(integrator), 1.0, 0.1);
