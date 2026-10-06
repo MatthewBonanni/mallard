@@ -45,6 +45,7 @@ class GrowingBuffer {
         [[maybe_unused]] size_t granularity = 0;
         [[maybe_unused]] int device = 0;
         std::vector<unsigned long long> handles;
+        std::vector<size_t> sizes;  // of each handle's mapping, in address order
 };
 
 #endif // GROWING_BUFFER_H

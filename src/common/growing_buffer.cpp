@@ -54,7 +54,7 @@ void entry_point(const char * name, F & f) {
 }
 
 const Driver & driver() {
-    static const Driver d = [] {
+    static const Driver entries = [] {
         Driver d;
         entry_point("cuMemAddressReserve", d.address_reserve);
         entry_point("cuMemAddressFree", d.address_free);
@@ -66,7 +66,7 @@ const Driver & driver() {
         entry_point("cuMemGetAllocationGranularity", d.granularity);
         return d;
     }();
-    return d;
+    return entries;
 }
 
 void check(const CUresult r, const char * what) {
@@ -98,22 +98,24 @@ GrowingBuffer::GrowingBuffer(const size_t max_bytes) {
 GrowingBuffer::~GrowingBuffer() {
     // Freed while the device is idle, as cudaFree would
     Kokkos::fence("GrowingBuffer");
-    if (mapped > 0) driver().unmap(base, mapped);
-    for (const auto h : handles) driver().release(h);
+    size_t offset = 0;
+    for (size_t k = 0; k < handles.size(); k++) {
+        driver().unmap(base + offset, sizes[k]);
+        driver().release(handles[k]);
+        offset += sizes[k];
+    }
     if (base != 0) driver().address_free(base, reserved);
 }
 
 void GrowingBuffer::ensure(const size_t bytes) {
     if (bytes <= mapped) return;
     if (bytes > reserved) throw std::length_error("GrowingBuffer: more than the reserved size");
-    // Grow by at least a quarter, in whole granules, so that a table filled in
-    // many pieces maps a few large blocks
-    size_t size = std::max(bytes - mapped, mapped / 4);
-    size = std::min((size + granularity - 1) / granularity * granularity, reserved - mapped);
+    const size_t size = std::min((bytes - mapped + granularity - 1) / granularity * granularity, reserved - mapped);
     const CUmemAllocationProp prop = properties(device);
     CUmemGenericAllocationHandle handle;
     check(driver().create(&handle, size, &prop, 0), "cuMemCreate");
     handles.push_back(handle);
+    sizes.push_back(size);
     check(driver().map(base + mapped, size, 0, handle, 0), "cuMemMap");
     CUmemAccessDesc access = {};
     access.location = prop.location;
