@@ -21,10 +21,16 @@ import tempfile
 import numpy as np
 
 
-def scene(plotter, path, q_factor, y_u, label, clim, args_window=None):
+def scene(plotter, path, q_factor, y_u, label, clim, args_window=None, crop=None):
     import pyvista as pv
-    d = np.load(path)
+    d = dict(np.load(path))
     h = float(d["h"])
+    if crop:
+        # The last crop metres along x (the DNS box at the fresh-gas end of an extended LES box)
+        keep = int(round(crop / h))
+        for k, v in d.items():
+            if np.ndim(v) == 3:
+                d[k] = v[-keep:]
     c = np.clip(1.0 - d["Y_H2"] / y_u, 0.0, 1.0)
     grid = pv.ImageData(dimensions=np.array(c.shape) + 1, spacing=(h * 1e3,) * 3)
     grid.cell_data["c"] = c.ravel(order="F")
@@ -63,7 +69,7 @@ def render(paths, labels, out, args):
     p.set_background("white")
     for i, (path, label) in enumerate(zip(paths, labels)):
         p.subplot(0, i)
-        scene(p, path, args.q_factor, args.y_u, label, (args.hrr_min, args.hrr_max))
+        scene(p, path, args.q_factor, args.y_u, label, (args.hrr_min, args.hrr_max), crop=args.crop)
     p.screenshot(out)
     p.close()
 
@@ -80,6 +86,7 @@ def main():
     ap.add_argument("--hrr-max", type=float, default=10.8)
     ap.add_argument("--movie", help="glob of the snapshots of one run, one frame each")
     ap.add_argument("--fps", type=int, default=8)
+    ap.add_argument("--crop", type=float, help="draw only the last CROP metres along x")
     args = ap.parse_args()
     if args.snapshots:
         labels = args.labels.split(",") if args.labels else [os.path.basename(s) for s in args.snapshots]
