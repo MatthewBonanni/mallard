@@ -63,6 +63,13 @@ void dt_scales(const rtype dt, rtype * scales) {
     scales[DT_THIRD] = dt / 3.0_r;
 }
 
+/**
+ * @brief y = (1 - a) y + a x as y + a (x - y), on both blocks of the state:
+ *        unlike axpby with rounded weights a and 1 - a, it leaves y unchanged
+ *        where x == y.
+ */
+void lerp(const rtype a, const State & x, const State & y);
+
 class TimeIntegrator {
     public:
         virtual ~TimeIntegrator() = default;

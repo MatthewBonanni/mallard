@@ -136,12 +136,12 @@ inline std::string jittered_periodic_mesh_2d(uint32_t n, double amplitude = 0.15
 /**
  * @brief Gmsh 2.2 file of the unit cube with zones left/right (x),
  *        bottom/top (y) and back/front (z): columns alternate between
- *        hexahedra and pairs of prisms. Every node moves by a random
+ *        hexahedra and pairs of prisms (all prisms if prisms_only). Every node moves by a random
  *        displacement that depends on its lattice indices modulo n and keeps
  *        it on its boundary planes, so the mesh is jittered everywhere, seams
  *        included, yet each zone is its opposite zone translated.
  */
-inline std::string jittered_periodic_mesh_3d(uint32_t n, double amplitude = 0.15) {
+inline std::string jittered_periodic_mesh_3d(uint32_t n, double amplitude = 0.15, bool prisms_only = false) {
     std::mt19937 rng(7);
     std::uniform_real_distribution<double> jitter(-amplitude, amplitude);
     std::vector<std::array<double, 3>> displacement(n * n * n);
@@ -178,7 +178,7 @@ inline std::string jittered_periodic_mesh_3d(uint32_t n, double amplitude = 0.15
                 quad(e ? 2 : 1, id(e, p, q), id(e, p + 1, q), id(e, p + 1, q + 1), id(e, p, q + 1));
                 quad(e ? 4 : 3, id(p, e, q), id(p + 1, e, q), id(p + 1, e, q + 1), id(p, e, q + 1));
                 const int tag = e ? 6 : 5;
-                if (p % 2 == 0) {
+                if (!prisms_only && p % 2 == 0) {
                     quad(tag, id(p, q, e), id(p + 1, q, e), id(p + 1, q + 1, e), id(p, q + 1, e));
                 } else {
                     tri(tag, id(p, q, e), id(p + 1, q, e), id(p + 1, q + 1, e));
@@ -197,7 +197,7 @@ inline std::string jittered_periodic_mesh_3d(uint32_t n, double amplitude = 0.15
                     v[l][2] = id(i + 1, j + 1, k + l);
                     v[l][3] = id(i, j + 1, k + l);
                 }
-                if (i % 2 == 0) {
+                if (!prisms_only && i % 2 == 0) {
                     elements.push_back("5 2 0 1 " + v[0][0] + " " + v[0][1] + " " + v[0][2] + " " + v[0][3] + " " +
                                        v[1][0] + " " + v[1][1] + " " + v[1][2] + " " + v[1][3]);
                 } else {

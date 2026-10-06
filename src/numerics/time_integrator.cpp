@@ -27,6 +27,19 @@ void axpby(const rtype a_host, const State & x, const rtype b, const State & y, 
     });
 }
 
+void lerp(const rtype a, const State & x, const State & y) {
+    StateView x_flow = x.flow, y_flow = y.flow;
+    Kokkos::parallel_for("lerp", x_flow.extent(0), KOKKOS_LAMBDA(const uint32_t i_cell) {
+        FOR_I_CONSERVATIVE y_flow(i_cell, i) += a * (x_flow(i_cell, i) - y_flow(i_cell, i));
+    });
+    if (x.species.span() == 0) return;
+    const rtype * x_s = x.species.data();
+    rtype * y_s = y.species.data();
+    Kokkos::parallel_for("lerp_species", x.species.span(), KOKKOS_LAMBDA(const size_t k) {
+        y_s[k] += a * (x_s[k] - y_s[k]);
+    });
+}
+
 namespace {
 
 const rtype * scale(const rtype * dt_device, const DtScale k) { return dt_device ? dt_device + k : nullptr; }
@@ -112,5 +125,5 @@ void SSPRK3::take_step(const rtype t, const rtype dt,
     // U^{n+1} = 1/3 U + 2/3 (U2 + dt L(U2))
     calc_rhs(U_temp, k, t + 0.5_r * dt);
     axpby(dt, k, 1.0, U_temp, scale(dt_device, DT));
-    axpby(2.0 / 3.0, U_temp, 1.0 / 3.0, U);
+    lerp(2.0_r / 3.0_r, U_temp, U);
 }
