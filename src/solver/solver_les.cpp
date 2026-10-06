@@ -214,6 +214,7 @@ struct ThickenedFlameFunctor {
     Kokkos::View<rtype *> delta;
     Kokkos::View<rtype *[3]> fields;
     Kokkos::View<rtype *> time_scale;
+    Kokkos::View<rtype *[3]> sgs;  // [mu_t, ...]
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
@@ -238,10 +239,12 @@ struct ThickenedFlameFunctor {
         }
         const double V = static_cast<double>(cell_volume(c)), D = static_cast<double>(delta(c));
         const double lap_norm = Kokkos::sqrt(lap[0] * lap[0] + lap[1] * lap[1] + lap[2] * lap[2]) / V;
-        const double u_prime = 2.0 * D * D * D * lap_norm;
+        const double rho = static_cast<double>(W(c, 0));
+        const double u_prime = tf.eddy_viscosity_velocity ? tf.C_u * static_cast<double>(sgs(c, 0)) / (rho * D)
+                                                          : 2.0 * D * D * D * lap_norm;
         const double omega = tf.sensor(static_cast<double>(values(c, N_DIM)));
         const double F = tf.thickening(D, omega);
-        const double nu = static_cast<double>(transport(c, MU)) / static_cast<double>(W(c, 0));
+        const double nu = static_cast<double>(transport(c, MU)) / rho;
         const double E = tf.wrinkling(F, u_prime, nu);
         fields(c, 0) = static_cast<rtype>(F);
         fields(c, 1) = static_cast<rtype>(E);
@@ -291,7 +294,8 @@ void Solver::update_thickened_flame() {
                                                mesh->cells_of_face, mesh->face_normals, mesh->face_area,
                                                mesh->cell_volume, mesh->cell_coords, mesh->shifts, mesh->face_shift,
                                                tfles_vorticity, tfles_gradients, W_cells, transport_values,
-                                               cell_transport, les_delta, tfles_fields, chem_time_scale});
+                                               cell_transport, les_delta, tfles_fields, chem_time_scale,
+                                               les_coefficients});
     // Halo cells take their owners' fields: the face diffusivities need them
     exchange_cell_vectors(tfles_fields);
 }

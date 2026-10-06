@@ -35,6 +35,8 @@ struct ThickenedFlame {
     double n_res = 5.0;
     double beta = 0.5;
     bool efficiency = true;
+    bool eddy_viscosity_velocity = false;  // u' = C_u nu_t / Delta instead of Colin et al.'s operator
+    double C_u = 1.0;
 
     static constexpr double C_SENSOR = 0.05;  // progress variable at which Omega reaches 1
     static constexpr double C_K = 1.5;        // Kolmogorov constant of the efficiency function

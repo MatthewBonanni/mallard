@@ -89,7 +89,7 @@ def main():
     gx, gy, gz = grad(c, h)
     mag = np.sqrt(gx ** 2 + gy ** 2 + gz ** 2)
     print(f"t = {t * 1e3:.3f} ms; DNS flame surface int |grad c| dV / L^2 = {mag.sum() * h / (shape[1] * shape[2]):.3f}")
-    print("R  Delta/dL   F   Xi(DNS)  E(Colin)  E(Colin at F dL)  u'_Delta/S_L")
+    print("R  Delta/dL   F   Xi(DNS)  E(Colin)  E(Colin at F dL)  u'_Delta/S_L  E^(1/beta)-1 (beta=1)  beta fit")
     for r in [int(v) for v in args.ratios.split(",")]:
         F = max(1.0, args.n_res * r / 10.0)
         width = int(round(F * 10))  # F delta_L in DNS cells
@@ -118,8 +118,30 @@ def main():
         E_scaled = charlette(Fl, u_prime * (F * DELTA_L / H) ** (1.0 / 3.0), nu, args.beta)
         lx, ly, lz = grad(cl, H)
         wgt = np.sqrt(lx ** 2 + ly ** 2 + lz ** 2) * ((cl > 0.05) & (cl < 0.95))
+        # Colin's estimate against the DNS's own subgrid velocity at the scale F delta_L, in the fresh gas
+        fresh = (cl < 0.01) & (Tl < 320.0)
+        res2 = 0.0
+        for v in u:
+            vf = ndimage.uniform_filter(v, size=width, mode=modes)
+            res2 = res2 + ndimage.uniform_filter((v - vf) ** 2, size=width, mode=modes)
+        u_true = np.sqrt(block(res2 / 3.0, r))
+        colin_fresh = u_prime[fresh].mean() / S_L
+        # Sigma's eddy viscosity on the same field: nu_t / Delta is a velocity at the grid scale
+        G = np.empty(Tl.shape + (3, 3))
+        for i in range(3):
+            for j in range(3):
+                G[..., i, j] = g[i][j]
+        sv = np.linalg.svd(G, compute_uv=False)
+        D = np.where(sv[..., 0] > 0, sv[..., 2] * (sv[..., 0] - sv[..., 1]) * (sv[..., 1] - sv[..., 2]) /
+                     np.maximum(sv[..., 0], 1e-30) ** 2, 0.0)
+        nut = (1.35 * H) ** 2 * D
+        sigma_fresh = (nut / H)[fresh].mean() / S_L
+        true_fresh = u_true[fresh].mean() / S_L
+        e1 = np.sum(charlette(Fl, u_prime, nu, 1.0) * wgt) / wgt.sum()
+        beta_fit = np.log(xi) / np.log(e1) if e1 > 1.0 + 1e-9 else np.nan
         print(f"{r:2d} {H / DELTA_L:6.2f} {F:5.1f} {xi:8.3f} {np.sum(E * wgt) / wgt.sum():9.3f} "
-              f"{np.sum(E_scaled * wgt) / wgt.sum():17.3f} {np.sum(u_prime * wgt) / wgt.sum() / S_L:12.3f}")
+              f"{np.sum(E_scaled * wgt) / wgt.sum():17.3f} {np.sum(u_prime * wgt) / wgt.sum() / S_L:12.3f} "
+              f"{e1 - 1:22.3f} {beta_fit:9.3f}   fresh gas: Colin u'/S_L {colin_fresh:.3f}, Sigma nu_t/(Delta S_L) {sigma_fresh:.3f}, DNS u'(F dL)/S_L {true_fresh:.3f}")
 
 
 if __name__ == "__main__":

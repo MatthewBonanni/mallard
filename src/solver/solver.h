@@ -283,6 +283,9 @@ class Solver {
         const LES & get_les() const { return les; }
         /** @brief LES: [mu_t, lambda_t, mu_t / (Sc_t W)] of each cell as of the last copy_device_to_host. */
         const Kokkos::View<rtype *[3]>::host_mirror_type & get_les_coefficients() const { return h_les_coefficients; }
+        /** @brief Thickened flame: [F, E, Omega] per cell, after copy_device_to_host. */
+        const Kokkos::View<rtype *[3]>::host_mirror_type & get_tfles_fields() const { return h_tfles_fields; }
+        const Kokkos::View<rtype *[3]>::host_mirror_type & get_cell_transport() const { return h_cell_transport; }
 
         /** @brief Whether the gas is a mixture (a mechanism is given). */
         bool is_mixture() const { return mixture_model != nullptr; }
