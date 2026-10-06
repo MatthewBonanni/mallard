@@ -353,6 +353,8 @@ void Solver::init_boundaries() {
     // Faces of upt boundaries whose composition varies along them, as (boundary, face):
     // each face gets its own copy of the condition, appended after the input's
     std::vector<std::array<uint32_t, 2>> profiled_faces;
+    // Faces of each nscbc_inlet on this rank, by input boundary
+    std::vector<std::pair<size_t, std::vector<uint32_t>>> inlets;
 
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
         const toml::value & bound = input_boundaries[i_bc];
@@ -423,6 +425,7 @@ void Solver::init_boundaries() {
         if (comm::allreduce(n_selected, comm::Op::SUM) == 0) {
             throw std::runtime_error("Boundary " + name + " selects no faces.");
         }
+        if (bcs.back().type == BoundaryType::NSCBC_INLET) inlets.emplace_back(i_bc, dirichlet.faces);
         if (bcs.back().type == BoundaryType::DIRICHLET) {
             dirichlet_boundaries.push_back(std::move(dirichlet));
         } else if (bcs.back().type == BoundaryType::P_OUT_AVERAGE) {
@@ -522,6 +525,7 @@ void Solver::init_boundaries() {
     h_face_state = Kokkos::create_mirror_view(boundary_data.face_state);
     h_face_state_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_state_index);
     t_boundary_states = -1.0;
+    init_inlets(input_boundaries, inlets);
 }
 
 void Solver::init_sources() {
@@ -667,6 +671,7 @@ void Solver::update_average_pressure_outlets(StateView solution) {
 }
 
 void Solver::update_boundary_states(rtype t_eval) {
+    update_inflow(t_eval);
     if (dirichlet_boundaries.empty() || t_eval == t_boundary_states) {
         return;
     }

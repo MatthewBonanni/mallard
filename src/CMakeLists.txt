@@ -12,6 +12,7 @@ add_library(MallardCore STATIC
     mesh/mesh_block.cpp
     mesh/zone.cpp
     boundary/boundary.cpp
+    boundary/synthetic_inflow.cpp
     chemistry/mechanism.cpp
     chemistry/transport.cpp
     chemistry/units.cpp
@@ -33,6 +34,7 @@ add_library(MallardCore STATIC
     solver/solver_les.cpp
     solver/solver_rhs.cpp
     solver/solver_sponge.cpp
+    solver/solver_inflow.cpp
     solver/statistics.cpp
     io/data_writer.cpp
     io/data_writer_hdf5.cpp

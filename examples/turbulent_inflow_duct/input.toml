@@ -1,0 +1,132 @@
+# Synthetic turbulence entering a duct, periodic across, and decaying
+# downstream (3D build): direct numerical simulation, no turbulence model.
+#
+# Physics. Mean flow U = 1, rho = 1, sound speed 5 (Mach 0.2). The
+# nscbc_inlet at x = 0 adds isotropic digital-filter turbulence
+# ([boundaries.turbulence]): u' = 0.1 U, integral length L = 0.25 in every
+# direction and, by Taylor's hypothesis, integral time L / U. Re_L =
+# u' L / nu = 100. The nscbc_outlet at x = 6 lets it leave.
+#
+# Mesh: 384 x 128 x 128 hexahedra (dx = L / 16). Statistics over
+# t = 8-30 (3.7 flow-through times), averaged over y and z with
+# tools/plane_average.py.
+#
+# Results (docs/design/synthetic_inflow.md):
+#   cells at the inlet       R_uu, R_vv, R_ww = 0.0097, 0.0106, 0.0094 (target 0.01)
+#   k / k_in at x / L        0.4: 0.85, 4: 0.85, 8: 0.80, 12: 0.73, 20: 0.58
+#   p'_rms / (rho u'^2)      x / L = 1: 5.5, 4: 1.5, 20: 1.1
+#   zero_net_flux = false    p'_rms / (rho u'^2) = 7.8 everywhere (a plane acoustic wave)
+#
+# Run:
+#   mpirun -n 1 ../../build3d/src/Mallard -i input.toml
+#   python ../../tools/plane_average.py stats/duct_000003.vtu --average y z --out profile.csv
+#
+# Cost: 65,000 steps, 85 ms each on one A100 (1.5 hours).
+
+[run]
+t_stop = 30.0
+cfl = 0.5
+
+[mesh]
+type = "cartesian"
+Nx = 384
+Ny = 128
+Nz = 128
+Lx = 6.0
+Ly = 2.0
+Lz = 2.0
+periodic = ["y", "z"]
+
+[initialize]
+type = "constant"
+u = [1.0, 0.0, 0.0]
+p = 17.857142857142858
+T = 1.0
+
+[[boundaries]]
+name = "left"
+type = "nscbc_inlet"
+u = [1.0, 0.0, 0.0]
+p = 17.857142857142858
+T = 1.0
+L = 6.0
+
+[boundaries.turbulence]
+reynolds_stress = [0.01, 0.01, 0.01, 0.0, 0.0, 0.0]
+length_scale = 0.25
+zero_net_flux = true
+
+[[boundaries]]
+name = "right"
+type = "nscbc_outlet"
+p = 17.857142857142858
+L = 6.0
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+limiter = "none"
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 17.857142857142858
+T_ref = 1.0
+rho_ref = 1.0
+mu = 2.5e-4
+Pr = 0.72
+
+[statistics]
+fields = ["RHO", "U_X", "U_Y", "U_Z", "P"]
+products = ["U_X*U_X", "U_Y*U_Y", "U_Z*U_Z", "U_X*U_Y", "U_X*U_Z", "U_Y*U_Z", "P*P"]
+t_start = 8.0
+
+[output]
+check_interval = 1000
+
+[[probes]]
+name = "x0"
+variables = ["P", "U_X"]
+start = [0.0078125, 0.0078125, 1.0]
+end = [0.0078125, 1.9921875, 1.0]
+n_points = 32
+interval = 4
+
+[[probes]]
+name = "x1"
+variables = ["P", "U_X"]
+start = [1.0, 0.0078125, 1.0]
+end = [1.0, 1.9921875, 1.0]
+n_points = 32
+interval = 4
+
+[[probes]]
+name = "x3"
+variables = ["P", "U_X"]
+start = [3.0, 0.0078125, 1.0]
+end = [3.0, 1.9921875, 1.0]
+n_points = 32
+interval = 4
+
+[[probes]]
+name = "x5"
+variables = ["P", "U_X"]
+start = [5.5, 0.0078125, 1.0]
+end = [5.5, 1.9921875, 1.0]
+n_points = 32
+interval = 4
+
+[[write_data]]
+prefix = "restart/duct"
+format = "restart"
+interval = 10000
+
+[[write_data]]
+prefix = "stats/duct"
+format = "vtu"
+time_interval = 11.0
+variables = ["MEAN_*", "COV_*", "U", "P"]
