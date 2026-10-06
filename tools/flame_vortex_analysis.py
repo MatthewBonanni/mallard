@@ -1,7 +1,7 @@
 """Outcome of flame-vortex interaction runs (tools/flame_vortex.py) on the spectral diagram.
 
     python tools/flame_vortex_analysis.py RUN_DIR [RUN_DIR ...] [--mechanism mechanisms/h2o2.yaml]
-        [--phase ohmech] [--control RUN_DIR ...] [--plot OUT.png] [--csv OUT.csv]
+        [--phase ohmech] [--control RUN_DIR ...] [--plot OUT.png] [--csv OUT.csv] [--progress SPECIES]
 
 For each output of RUN_DIR/solut/flame.pvd (the half channel y > 0):
   Q      the heat release over that of the planar flame, int HRR dA / (L_y int
@@ -13,6 +13,10 @@ For each output of RUN_DIR/solut/flame.pvd (the half channel y > 0):
          and the smallest of these along the isotherm (1 for a planar flame);
   pocket whether fresh gas (T below the isotherm) has been cut off from the
          inlet.
+With --progress (e.g. CH4, for flames whose burnt gas radiates and cools
+below that isotherm), the front is instead where the reactant's mass fraction
+is midway between the planar flame's inlet and outlet values, and fresh gas
+is where more of it is left.
 Each run is then classified as Poinsot, Veynante & Candel (1991) do:
   quenched  the front is locally extinguished, q_min < 0.1;
   pocket    a pocket of fresh gas is cut off, without quenching;
@@ -45,16 +49,21 @@ MARKERS = {"no effect": ("o", "#9aa0a6"), "wrinkled": ("s", "#4fc3f7"), "pocket"
            "quenched": ("X", "#ef5350")}
 
 
-def planar(run_dir, mechanism, phase):
-    d = np.loadtxt(os.path.join(run_dir, "planar_full.csv"), delimiter=",", skiprows=1)
+def planar(run_dir, mechanism, phase, progress=None):
+    path = os.path.join(run_dir, "planar_full.csv")
+    d = np.loadtxt(path, delimiter=",", skiprows=1)
     gas = ct.Solution(mechanism, phase)
     hrr = np.empty(d.shape[0])
     for i, row in enumerate(d):
         gas.TDY = row[2], row[3], row[4:]
         hrr[i] = gas.heat_release_rate
     x, T = d[:, 0], d[:, 2]
-    return dict(I=np.trapezoid(hrr, x), peak=hrr.max(), S_L=d[0, 1], T_u=T[0], T_b=T[-1],
-                delta=(T[-1] - T[0]) / np.gradient(T, x).max())
+    p = dict(I=np.trapezoid(hrr, x), peak=hrr.max(), S_L=d[0, 1], T_u=T[0], T_b=T.max(),
+             delta=(T.max() - T[0]) / np.gradient(T, x).max(), progress=progress)
+    if progress:
+        Y = d[:, open(path).readline().strip().split(",").index("Y_" + progress)]
+        p["Y_mid"] = 0.5 * (Y[0] + Y[-1])
+    return p
 
 
 def isotherm(xs, ys, T, level):
@@ -70,12 +79,16 @@ def isotherm(xs, ys, T, level):
 
 
 def frame_metrics(path, p):
-    t, xs, ys, a = grid(path, ["T", "HRR"])
+    t, xs, ys, a = grid(path, ["T", "HRR"] + (["Y_" + p["progress"]] if p["progress"] else []))
     dx = xs[1] - xs[0]
     H = ys.size * dx
     Q = a["HRR"].sum() * dx * dx / (H * p["I"])
-    T_mid = p["T_u"] + 0.5 * (p["T_b"] - p["T_u"])
-    segs = isotherm(xs, ys, a["T"], T_mid)
+    if p["progress"]:
+        # Fresh gas has more of the reactant than the front: -Y is "cold" as T is
+        field, level = -a["Y_" + p["progress"]], -p["Y_mid"]
+    else:
+        field, level = a["T"], p["T_u"] + 0.5 * (p["T_b"] - p["T_u"])
+    segs = isotherm(xs, ys, field, level)
     L = sum(np.hypot(*np.diff(s, axis=0).T).sum() for s in segs) / H
     w = max(1, int(round(0.5 * p["delta"] / dx)))
     near = ndimage.maximum_filter(a["HRR"], size=2 * w + 1, mode="nearest") / p["peak"]
@@ -87,7 +100,7 @@ def frame_metrics(path, p):
         keep = ys[j] < ys[-1] - 2 * p["delta"]
         if keep.any():
             q_min = min(q_min, near[i[keep], j[keep]].min())
-    fresh, n = ndimage.label(a["T"] < T_mid)
+    fresh, n = ndimage.label(field < level)
     inlet = set(np.unique(fresh[0, :])) - {0}
     pocket = any(k not in inlet for k in range(1, n + 1))
     return t, Q, L, q_min, pocket
@@ -104,8 +117,8 @@ def cell_size(run_dir):
     return float(re.search(r"Lx = (\S+)", text).group(1)) / int(re.search(r"Nx = (\d+)", text).group(1))
 
 
-def load_controls(dirs, mechanism, phase):
-    return [(cell_size(d), analyze(d, planar(d, mechanism, phase))) for d in dirs or []]
+def load_controls(dirs, mechanism, phase, progress=None):
+    return [(cell_size(d), analyze(d, planar(d, mechanism, phase, progress))) for d in dirs or []]
 
 
 def control_for(run_dir, controls):
@@ -147,11 +160,13 @@ def main():
     ap.add_argument("--control", nargs="+")
     ap.add_argument("--plot")
     ap.add_argument("--csv")
+    ap.add_argument("--progress", help="locate the front and the fresh gas by this reactant's mass fraction "
+                                       "(midway between the planar flame's inlet and outlet) instead of T")
     args = ap.parse_args()
-    controls = load_controls(args.control, args.mechanism, args.phase)
+    controls = load_controls(args.control, args.mechanism, args.phase, args.progress)
     results = []
     for run in args.runs:
-        p = planar(run, args.mechanism, args.phase)
+        p = planar(run, args.mechanism, args.phase, args.progress)
         r, u = parameters(run)
         rows = analyze(run, p)
         tau = p["delta"] / p["S_L"]
