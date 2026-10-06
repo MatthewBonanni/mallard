@@ -238,10 +238,10 @@ TEST(Boundary3DTest, CharacteristicNeighborsContinueAcrossPeriodicSeams) {
         // Every face of the x planes has its 8 neighbors of the periodic 4 x 5 lattice, one spacing away
         EXPECT_EQ(h_offsets(k + 1) - h_offsets(k), 8u) << "face " << h_faces(k);
         for (uint32_t j = h_offsets(k); j < h_offsets(k + 1); j++) {
-            EXPECT_NEAR(std::abs(double(h_dx(j, 1))), 0.25 * std::round(std::abs(double(h_dx(j, 1))) / 0.25), precision_tol(1e-12, 1e-5));
-            EXPECT_LE(std::abs(double(h_dx(j, 1))), 0.25 + precision_tol(1e-12, 1e-5));
-            EXPECT_LE(std::abs(double(h_dx(j, 2))), 0.4 + precision_tol(1e-12, 1e-5));
-            EXPECT_NEAR(double(h_dx(j, 0)), 0.0, precision_tol(1e-12, 1e-5));
+            EXPECT_NEAR(std::abs(double(h_dx(j, 1))), 0.25 * std::round(std::abs(double(h_dx(j, 1))) / 0.25), double(precision_tol(1e-12, 1e-5)));
+            EXPECT_LE(std::abs(double(h_dx(j, 1))), 0.25 + double(precision_tol(1e-12, 1e-5)));
+            EXPECT_LE(std::abs(double(h_dx(j, 2))), 0.4 + double(precision_tol(1e-12, 1e-5)));
+            EXPECT_NEAR(double(h_dx(j, 0)), 0.0, double(precision_tol(1e-12, 1e-5)));
         }
     }
 }
