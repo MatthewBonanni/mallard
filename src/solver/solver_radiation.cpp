@@ -25,6 +25,25 @@ namespace {
 
 const std::array<std::string, chemistry::N_RADIATING_SPECIES> RADIATING_NAMES = {"H2O", "CO2", "CO", "CH4"};
 
+/** @brief Subtracts each owned cell's radiative loss times its volume from its energy RHS. */
+struct RadiationFunctor {
+    chemistry::OpticallyThinRadiation radiation;
+    Mixture gas;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W;
+    SpeciesView rhoY;
+    Kokkos::View<rtype *> volume;
+    StateView rhs;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t c) const {
+        const double rho = static_cast<double>(W(c, 0));
+        const CellSpecies rhoY_c = cell_species(rhoY, c);
+        const double T = static_cast<double>(W(c, N_DIM + 1)) / (rho * gas.thermo.gas_constant(PartialDensities{rhoY_c, 1.0 / rho}));
+        const double q = radiation.loss(T, PartialDensities{rhoY_c, 1.0});
+        rhs(c, N_DIM + 1) -= static_cast<rtype>(q * static_cast<double>(volume(c)));
+    }
+};
+
 } // namespace
 
 void Solver::init_radiation() {
@@ -72,16 +91,6 @@ void Solver::init_radiation() {
 }
 
 void Solver::add_radiation(StateView rhs, SpeciesView rhoY) {
-    const chemistry::OpticallyThinRadiation r = radiation;
-    const Mixture gas = mixture;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
-    Kokkos::View<rtype *> vol = mesh->cell_measure;
-    Kokkos::parallel_for("radiation", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
-        const double rho = static_cast<double>(W(c, 0));
-        const CellSpecies rhoY_c = cell_species(rhoY, c);
-        const PartialDensities y{rhoY_c, 1.0 / rho};
-        const double T = static_cast<double>(W(c, N_DIM + 1)) / (rho * gas.thermo.gas_constant(y));
-        const double q = r.loss(T, PartialDensities{rhoY_c, 1.0});
-        rhs(c, N_DIM + 1) -= static_cast<rtype>(q * static_cast<double>(vol(c)));
-    });
+    Kokkos::parallel_for("radiation", mesh->n_owned(), RadiationFunctor{radiation, mixture, W_cells, rhoY,
+                                                                         mesh->cell_measure, rhs});
 }

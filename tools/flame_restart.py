@@ -3,7 +3,7 @@
     python tools/flame_restart.py FULL.csv MECHANISM PHASE CELLS_PER_DELTA RUN_DIR
         [--cfl 1.0] [--transport mixture_averaged] [--flame-times 3] [--t-stop T]
         [--outputs 30] [--dim 2] [--upstream 6] [--downstream 9] [--ref-delta D]
-        [--inlet-factor 1] [--ny NY --perturb A --modes 8 --seed 1]
+        [--inlet-factor 1] [--ny NY --perturb A --modes 8 --seed 1] [--radiation cantera|tnf]
 
 FULL.csv is a flame's full solution from tools/flame_reference.py (x, u, T,
 rho, Y). The run is a strip of Nx cells (with an aspect ratio of 10, so that
@@ -50,6 +50,9 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--t-stop", type=float)
     ap.add_argument("--inlet-factor", type=float, default=1.0)
+    ap.add_argument("--radiation", choices=["cantera", "tnf"],
+                    help="optically thin radiation: as Cantera's (H2O, CO2, T_ambient = 0) or the TNF model's "
+                         "(H2O, CO2, CO, CH4, T_ambient = 300 K)")
     args = ap.parse_args()
     if args.ny > 1 and args.dim != 2:
         ap.error("--ny is for 2D runs")
@@ -65,7 +68,7 @@ def main():
     p = ct.one_atm
     dTdx = np.gradient(T, x)
     i_f = np.argmax(dTdx)
-    delta = (T[-1] - T[0]) / dTdx[i_f]
+    delta = (T.max() - T[0]) / dTdx[i_f]
     S_L = u[0]
     ref = args.ref_delta or delta
     dx = ref / args.cells_per_delta
@@ -143,6 +146,8 @@ def main():
                 '[[boundaries]]\nname = "front"\ntype = "symmetry"\n') if dim == 3 else ""
     mesh_z = f"Nz = 1\nLz = {h:.17g}\n" if dim == 3 else ""
     bottom_top = '[[boundaries]]\nname = "bottom"\ntype = "symmetry"\n\n[[boundaries]]\nname = "top"\ntype = "symmetry"\n'
+    radiation = {None: "", "cantera": '\n[radiation]\nspecies = ["H2O", "CO2"]\nT_ambient = 0.0\n',
+                 "tnf": "\n[radiation]\n"}[args.radiation]
     mech_path = os.path.relpath(os.path.abspath(args.mechanism), os.path.abspath(args.run_dir))
     with open(os.path.join(args.run_dir, "input.toml"), "w") as f:
         f.write(f"""# Premixed flame (V8): {os.path.basename(args.full)}, {args.cells_per_delta:g} cells per
@@ -194,7 +199,7 @@ transport = "{args.transport}"
 [chemistry]
 rtol = 1.0e-6
 atol = 1.0e-10
-
+{radiation}
 [output]
 check_interval = 2000
 
@@ -202,7 +207,7 @@ check_interval = 2000
 prefix = "./solut/flame"
 format = "vtu"
 time_interval = {t_stop / args.outputs:.17g}
-variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"]
+variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"{', "QRAD"' if args.radiation else ''}]
 """)
     print(f"{args.run_dir}: {nx} x {ny} cells of {dx * 1e6:.3f} um, delta = {delta * 1e3:.4f} mm, S_L = {S_L:.5f} m/s, "
           f"t_stop = {t_stop:.4e} s")

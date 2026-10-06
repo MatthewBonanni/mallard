@@ -2,7 +2,8 @@
  * @file radiation.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Planck-mean absorption coefficients of the optically thin radiation
- *        model of the TNF workshop (RADCAL fits; Barlow et al. 2001).
+ *        model of the TNF workshop (RADCAL fits; Barlow, Karpetis, Frank & Chen
+ *        2001, Combust. Flame 127:2102, doi 10.1016/S0010-2180(01)00313-3).
  * @version 0.3
  * @date 2026-10-05
  *
