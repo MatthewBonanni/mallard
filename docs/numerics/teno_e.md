@@ -56,13 +56,40 @@ for accuracy (expect design order on uniform triangles).
   information when all centroids lie on axis planes) are rejected as rank deficient.
 - Full rank is not enough: the large stencil keeps growing until the Lebesgue
   constant of its reconstruction at the cell's face quadrature points,
-  max_q |1 - sum_s c_qs| + sum_s |c_qs|, is at most 10 (else the smallest one found
-  is used; 2D likewise). The 2 x DOFs nearest cells of a jittered hex/prism mesh
-  span only about three cell layers per direction, so odd degrees (3 and 5) see the
-  extra layer they need only through small centroid offsets: full rank, Lebesgue
-  constants of 20 to 150, and O(1) errors at order 4 (the generated mixed and
-  tetrahedral meshes had some up to 270 and 54). Lattice-aligned meshes include
-  the next layer through the equidistant-shell rule and stay at 2-5.
+  max_q |1 - sum_s c_qs| + sum_s |c_qs|, is at most 4 in 3D (10 in 2D). The
+  2 x DOFs nearest cells of a jittered hex/prism mesh span only about three cell
+  layers per direction, so odd degrees (3 and 5) see the extra layer they need
+  only through small centroid offsets: full rank, Lebesgue constants of 20 to
+  150, and O(1) errors at order 4.
+- The 3D bound is 4, not 10, for linear stability (#126, #229). On lattices the
+  equidistant-shell rule skips the stencil sizes in between, so stencils within
+  10 were stable there. Where the lattice's ties are broken, the first size
+  within 10 can be a near-degenerate stencil. Ties break at symmetry walls of
+  tilings that are not mirror-symmetric (prisms split along a diagonal, Kuhn
+  tetrahedra): the mirror images make the wall a seam where the split flips. They
+  also break at such seams in the interior and on jittered meshes. For example,
+  aspect-ratio-2 prisms next to a side wall take 38 entries with a Lebesgue
+  constant of 8.7, against 50 entries and 3.4 in the interior. The face values of
+  such a stencil put up to 73% of their weight on cells across the face (32% on
+  the lattice), so the outflow value follows the downstream cell. The linearized
+  operator (acoustics at rest, HLLC) then has growing modes:
+
+  | Case | max Re lambda (c/L), bound 10 -> 4 |
+  |---|---|
+  | prisms, aspect ratio 2, 6x6x4, walls / side walls only, order 4 | 1.9 / 2.5 -> < 1e-8 |
+  | same, order 6 | 0.50 / 2.5 -> < 1e-8 |
+  | periodic prisms with a seam (12x4x8, aspect ratio 2, order 4) | 3.5 -> < 1e-7 |
+  | jittered prisms (8^3, jitter 0.1, periodic), order 6 | 3.4 -> 1.4e-7 |
+  | jittered prisms, aspect ratio 1.5, side walls, order 6 | 0.32 -> 7e-6 |
+  | Kuhn tetrahedra, aspect ratio 25, side walls, order 4 / 6 | 1.1 / 0.27 -> < 1e-7 |
+  | mixed tilings (4^3), walls, order 4 / 6 | 0.19 / 0.08 -> 8e-4 / 1e-7 |
+
+  Making only the near-degenerate cells first order removes these modes, and in
+  the walled boxes the energy is produced at their wall faces. Bounds of 5 to 7
+  do not remove them. Order 6 on tetrahedra and pyramids reaches only 4.3 to 5;
+  there the stencil is the smallest within 1.25 times the best Lebesgue constant
+  found, since the best alone is often the largest stencil and up to twice as
+  inaccurate.
 - Candidates are gathered by vertex-neighbor layers until there are enough interior
   cells; counting mirror images too would stop the search before the cells that
   are nearer than the farther images (rank-deficient order-6 stencils near walls).
@@ -96,7 +123,11 @@ for accuracy (expect design order on uniform triangles).
   8 times less accurate in the interior at order 5.
 - Measured orders (max error at face quadrature points, symmetry walls): hexahedra
   16 -> 24: 3.83 and 4.85 for orders 4 and 5 (12 -> 16: 2.87 for order 3); Kuhn
-  tetrahedra 8 -> 12: 2.92, 3.90, 4.84 for orders 3, 4, 5.
+  tetrahedra 8 -> 12: 2.92, 3.90, 4.84 for orders 3, 4, 5. Lowering the 3D bound
+  from 10 to 4 kept the rate 9 -> 12 for every cell type and order (hexahedra,
+  Kuhn tetrahedra, prisms, pyramids, mixed, jittered). Order 6 errors changed by
+  +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra), -18%
+  (pyramids) and -63% (jittered) at n = 12.
 
 ## Known limitations in Mallard
 
@@ -120,14 +151,28 @@ for accuracy (expect design order on uniform triangles).
   layers of aspect ratio about 7), TENO3 previously reached Mach 0.9 by t = 1
   with a free stream at 0.2. It now stays at the potential-flow start's 0.30
   or below to t = 10 (6741 steps), at 2.1 times MUSCL's cost per step. Remaining:
-  - Prisms of aspect ratio 2 at order 4 in a box with walls all around (spacing
-    ratio 2.25, below the cut-off) keep a growing mode (eigenvalue +2.8) as before.
-    With the metric applied, the same box is stable.
-  - At aspect ratio 25, order 4 prisms with walls all around have one slow mode
-    (eigenvalue +0.02, against spectral radius 350), with or without the metric.
+  - Prisms of aspect ratio 2 next to walls grew until the 3D Lebesgue bound
+    went from 10 to 4 (see Stencils above).
   - Follow-up: a metric from the second moment of the node positions within a
     Euclidean ball may serve better than the edge-connected neighbors. The nodes
     of the Kuhn tiling form the cubic lattice, so they read isotropic, and the
     cut-off could then be lower. On a ball of twice the cell's radius, though,
     stretched meshes read only 1.6-2.0 at 6.25:1, because a ball holds the same
     density in every direction. The radius would need to follow the spacing.
+
+- Pyramid tilings at orders 4 and 6: the regular `cartesian_pyramid` lattice is
+  linearly unstable at order 4 on 6^3 periodic boxes even with the old bound
+  (max Re lambda +2e-3 c/L), and the 3D bound of 4 makes pure pyramid lattices
+  worse:
+
+  | Case | bound 10 -> 4 |
+  |---|---|
+  | order 4, periodic, 4^3 / 6^3 | 7e-9 / 2e-3 -> 8e-3 / 2e-2 |
+  | order 4, walls, 4^3 | 3.3e-3 -> 1.1e-2 |
+  | order 6, periodic, 4^3 | 8e-9 -> 1.6e-3 |
+  | order 6, walls, 4^3 | 4.7e-3 -> 8.5e-6 |
+
+  Order 4 on that lattice is stable only from 85 stencil entries (Lebesgue
+  constant about 3.5; the bound of 4 takes 57). Mixed meshes with pyramids
+  improve with the bound (table above). Pure pyramid lattices are rare in
+  practice; prefer orders 3 or 5 there.
