@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <unordered_map>
 #include <string>
 #include <utility>
@@ -30,6 +31,7 @@
 
 #include "comm.h"
 #include "face_reconstruction.h"
+#include "growing_buffer.h"
 
 #include "input.h"
 #include "launch_bounds.h"
@@ -543,6 +545,9 @@ using ValueRow = std::vector<rtype> CellTables::*;
 template <typename T>
 using HostUnmanaged = Kokkos::View<T *, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
 
+template <typename T>
+using DeviceUnmanaged = Kokkos::View<T *, Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
+
 /** @brief Rows [c0, c0 + h.extent(0)) of a per-cell device array, from the host. */
 template <typename View>
 void upload_rows(const View & dev, const uint32_t c0, const typename View::host_mirror_type & h) {
@@ -628,12 +633,28 @@ class PageArray {
 /**
  * @brief Moves one stencil family (large or sector) of CellTables into a
  *        teno::PackedStencils and back. The device arrays can only be sized
- *        once every stencil is known, so chunks are packed on the host first.
+ *        once every stencil is known: on CUDA, each packed chunk goes straight
+ *        into device memory that grows in place (stream()); elsewhere chunks
+ *        stay packed on the host until finish().
  */
 class PackedRows {
     public:
         PackedRows(uint8_t slice_shift, uint8_t values_per_slot, IndexRow cell_row, IndexRow face_row, ValueRow pinv_row)
             : shift(slice_shift), width(values_per_slot), cells(cell_row), faces(face_row), pinv(pinv_row) {}
+
+        /**
+         * @brief Upload each chunk as it is added, for n_cells cells of at
+         *        most max_slots_per_cell stencil entries each.
+         */
+        void stream(const uint32_t n_cells, const size_t max_slots_per_cell) {
+            const size_t max_slots = ((size_t(n_cells) >> shift) + 1) * max_slots_per_cell << shift;
+            memory = {std::make_shared<GrowingBuffer>(max_slots * sizeof(int32_t)),
+                      std::make_shared<GrowingBuffer>(max_slots * sizeof(int32_t)),
+                      std::make_shared<GrowingBuffer>(max_slots * width * sizeof(rtype))};
+        }
+
+        /** @brief The device memory that the stencils of finish() live in, if streamed. */
+        const std::vector<std::shared_ptr<GrowingBuffer>> & device_memory() const { return memory; }
 
         /** @brief Pack the stencils of cells [c0, c0 + tables.size()), which follow the previous chunk. */
         void add(const uint32_t c0, const std::vector<CellTables> & tables) {
@@ -666,7 +687,20 @@ class PackedRows {
                     }
                 }
             });
-            chunks.push_back(std::move(chunk));
+            if (memory.empty()) {
+                chunks.push_back(std::move(chunk));
+                return;
+            }
+            const size_t b = chunk.slot0 << shift, n_chunk = chunk.cells.size();
+            memory[0]->ensure((b + n_chunk) * sizeof(int32_t));
+            memory[1]->ensure((b + n_chunk) * sizeof(int32_t));
+            memory[2]->ensure((b + n_chunk) * width * sizeof(rtype));
+            Kokkos::deep_copy(DeviceUnmanaged<int32_t>(static_cast<int32_t *>(memory[0]->data()) + b, n_chunk),
+                              HostUnmanaged<int32_t>(chunk.cells.data(), n_chunk));
+            Kokkos::deep_copy(DeviceUnmanaged<int32_t>(static_cast<int32_t *>(memory[1]->data()) + b, n_chunk),
+                              HostUnmanaged<int32_t>(chunk.faces.data(), n_chunk));
+            Kokkos::deep_copy(DeviceUnmanaged<rtype>(static_cast<rtype *>(memory[2]->data()) + b * width, n_chunk * width),
+                              HostUnmanaged<rtype>(chunk.pinv.data(), n_chunk * width));
         }
 
         /** @brief The packed stencils on the device; each host chunk is released once copied. */
@@ -675,6 +709,17 @@ class PackedRows {
             out.shift = shift;
             out.width = width;
             const size_t n_slots = slice_start.back() << shift;
+            if (!memory.empty()) {
+                memory[0]->ensure(n_slots * sizeof(int32_t));
+                memory[1]->ensure(n_slots * sizeof(int32_t));
+                memory[2]->ensure(n_slots * width * sizeof(rtype));
+                out.cells = Kokkos::View<int32_t *>(static_cast<int32_t *>(memory[0]->data()), n_slots);
+                out.faces = Kokkos::View<int32_t *>(static_cast<int32_t *>(memory[1]->data()), n_slots);
+                out.pinv = Kokkos::View<rtype *>(static_cast<rtype *>(memory[2]->data()), n_slots * width);
+                out.slice_start = Kokkos::View<uint64_t *>(label + "_slice_start", slice_start.size());
+                Kokkos::deep_copy(out.slice_start, HostUnmanaged<const uint64_t>(slice_start.data(), slice_start.size()));
+                return out;
+            }
             out.cells = Kokkos::View<int32_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, label), n_slots);
             out.faces = Kokkos::View<int32_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, label + "_face"), n_slots);
             out.pinv = Kokkos::View<rtype *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, label + "_pinv"),
@@ -745,6 +790,7 @@ class PackedRows {
         ValueRow pinv;
         std::vector<uint64_t> slice_start = {0};  // (slice + 1)
         std::vector<Chunk> chunks;
+        std::vector<std::shared_ptr<GrowingBuffer>> memory;  // streamed: cells, faces, pinv
 };
 
 PackedRows large_rows(const TENO & scheme) {
@@ -769,6 +815,12 @@ class TableBuilder {
             scheme.stencil_large_size = Kokkos::View<uint16_t *>("teno_stencil_large_size", n_cells);
             scheme.stencil_small_size = Kokkos::View<uint16_t **>("teno_stencil_small_size", n_cells, teno::MAX_FACES);
             scheme.gather_depth.assign(n_cells, 0);
+            if (GrowingBuffer::supported()) {
+                // The searches cap central stencils at 3.5 nk + 64 entries and sectors
+                // at twice small_stencil_size; the reservation is address space only
+                large.stream(n_cells, 4 * size_t(nk) + 64);
+                small.stream(n_cells, teno::MAX_FACES * 2 * size_t(scheme.n_stencil_small));
+            }
         }
 
         /** @brief Tables of cells [c0, c0 + tables.size()), the chunk after the previous one. */
@@ -801,6 +853,9 @@ class TableBuilder {
         void finish() {
             scheme.stencil_large = large.finish("teno_stencil_large");
             scheme.stencil_small = small.finish("teno_stencil_small");
+            scheme.table_memory = large.device_memory();
+            scheme.table_memory.insert(scheme.table_memory.end(), small.device_memory().begin(),
+                                       small.device_memory().end());
         }
 
     private:
