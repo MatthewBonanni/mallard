@@ -387,6 +387,13 @@ struct MUSCLFaceFunctor {
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
 
     KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t i_face) const {
+        for (uint8_t side = 0; side < 2; side++) {
+            if (cells_of_face(i_face, side) >= 0) this->side(i_face, side);
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
     void side(const uint32_t i_face, const uint8_t side) const {
         const int32_t c = cells_of_face(i_face, side);
         // The face centroid is in cell 0's frame
@@ -410,45 +417,31 @@ struct MUSCLFaceFunctor {
  *        limiter kernels and of MUSCLFaceFunctor.
  */
 struct MUSCLCellFunctor {
-    struct GradientPass {};
-    struct LimiterPass {};
-    struct FacePass {};
-
     MUSCLGradientFunctor gradient;
     LimiterFunctor limiter;
     MUSCLFaceFunctor face;
     Kokkos::View<uint32_t *> cells;  // empty: all cells
 
     KOKKOS_INLINE_FUNCTION
-    uint32_t cell(const uint32_t k) const { return cells.extent(0) ? cells(k) : k; }
-
-    KOKKOS_INLINE_FUNCTION
-    void operator()(GradientPass, const uint32_t k) const { gradient(cell(k)); }
-
-    KOKKOS_INLINE_FUNCTION
-    void operator()(LimiterPass, const uint32_t k) const { limiter(cell(k)); }
-
-    KOKKOS_INLINE_FUNCTION
-    void operator()(FacePass, const uint32_t k) const {
-        const uint32_t c = cell(k);
+    void operator()(const uint32_t k) const {
+        const uint32_t c = cells.extent(0) ? cells(k) : k;
+        gradient(c);
+        limiter(c);
         const auto & mesh_faces = limiter.neighbors;
         for (uint32_t j = mesh_faces.offsets_faces_of_cell(c); j < mesh_faces.offsets_faces_of_cell(c + 1); j++) {
             const uint32_t f = mesh_faces.faces_of_cell(j);
             face.side(f, (face.cells_of_face(f, 0) == static_cast<int32_t>(c)) ? 0 : 1);
         }
     }
-
-    // All three for one cell in one thread: no round trip of the gradients and
-    // limiters through memory, but a longer chain per thread
-    KOKKOS_INLINE_FUNCTION
-    void operator()(const uint32_t k) const {
-        operator()(GradientPass(), k);
-        operator()(LimiterPass(), k);
-        operator()(FacePass(), k);
-    }
 };
 
+// Measured on A100s: one fused kernel per cell is faster from about 2^17 cells,
+// separate kernels (more parallel, shorter chains) below
+constexpr uint32_t MUSCL_FUSED_CELLS = 1u << 17;
+
 std::vector<uint32_t> MUSCL::cells_independent_of_halo(const uint32_t n_owned) const {
+    // Subsets run fused; smaller meshes exchange first and reconstruct in separate kernels
+    if (n_owned < MUSCL_FUSED_CELLS) return {};
     // Gradients read the face or vertex neighbors, limiters the face neighbors
     std::vector<uint32_t> cells;
     for (uint32_t c = 0; c < n_owned; c++) {
@@ -479,22 +472,32 @@ void MUSCL::calc_cell_face_values(const Kokkos::DefaultExecutionSpace & exec,
                                               mesh->face_shift, solution, gradients, limiters, face_solution},
                              cells};
     const uint32_t n = cells.extent(0) ? cells.extent(0) : mesh->n_cells;
-    using Space = Kokkos::DefaultExecutionSpace;
-    // Measured on A100s: fused from about 2^17 cells, three passes below (latency-bound)
-    if (n >= (1u << 17)) {
-        Kokkos::parallel_for("muscl_cells", Kokkos::RangePolicy<Space, HeavyBounds>(exec, 0, n), functor);
-    } else {
-        Kokkos::parallel_for("lsq_gradient",
-                             Kokkos::RangePolicy<Space, HeavyBounds, MUSCLCellFunctor::GradientPass>(exec, 0, n), functor);
-        Kokkos::parallel_for("limiter", Kokkos::RangePolicy<Space, HeavyBounds, MUSCLCellFunctor::LimiterPass>(exec, 0, n),
-                             functor);
-        Kokkos::parallel_for("muscl_faces", Kokkos::RangePolicy<Space, MUSCLCellFunctor::FacePass>(exec, 0, n), functor);
-    }
+    Kokkos::parallel_for("muscl_cells", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace, HeavyBounds>(exec, 0, n),
+                         functor);
 }
 
 void MUSCL::finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]>, Kokkos::View<rtype **[2][N_CONSERVATIVE]>) {}
 
 void MUSCL::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                              Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
-    calc_cell_face_values(Kokkos::DefaultExecutionSpace(), solution, face_solution, Kokkos::View<uint32_t *>());
+    if (mesh->n_cells >= MUSCL_FUSED_CELLS) {
+        calc_cell_face_values(Kokkos::DefaultExecutionSpace(), solution, face_solution, Kokkos::View<uint32_t *>());
+        return;
+    }
+    gradient.faces = make_gradient(*mesh, boundaries, solution, gradients);
+    Kokkos::parallel_for("lsq_gradient", HeavyRange<>(0, mesh->n_cells), MUSCLGradientFunctor{gradient});
+
+    LimiterFunctor limiter_functor{gradient.faces, mesh->cell_volume, limiters, limiter, venkat_K};
+    Kokkos::parallel_for("limiter", HeavyRange<>(0, mesh->n_cells), limiter_functor);
+
+    MUSCLFaceFunctor face_functor{mesh->cells_of_face,
+                                  mesh->cell_coords,
+                                  mesh->face_coords,
+                                  mesh->shifts,
+                                  mesh->face_shift,
+                                  solution,
+                                  gradients,
+                                  limiters,
+                                  face_solution};
+    Kokkos::parallel_for("muscl_faces", mesh->n_faces, face_functor);
 }
