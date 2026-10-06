@@ -106,7 +106,7 @@ class Solver {
         /**
          * @brief Advance the solution by one time step. With chemistry, the
          *        half step that ends it may be deferred (see run) and fused
-         *        with the next step's first half.
+         *        with the next step's first half (Strang splitting).
          */
         void take_step();
 
@@ -265,6 +265,16 @@ class Solver {
         void init_chemistry();
         void allocate_chemistry();
         void advance_chemistry(double dt_chem);
+        /**
+         * @brief SIMPLER balanced splitting (Wu, Ma & Ihme 2019): with
+         *        c = -T(U^n), the reaction substep dU/dt = R(U) - c over dt,
+         *        then the transport substep dU/dt = T(U) + c over dt / 2.
+         */
+        void take_simpler_step();
+        /** @brief SIMPLER: rhs -= T(U^n) on the owned cells. */
+        void subtract_transport_rate(const State & rhs);
+        /** @brief Counts the active cells of a chemistry call; throws if any cell failed on any rank. */
+        void check_chemistry(const CellChemistry::Statistics & stats);
         void update_heat_release_rate();
         /** @brief Over all ranks: owned cells advanced in the last chemistry call, max sub-steps of a cell in the last step. */
         std::pair<uint64_t, double> chemistry_statistics();
@@ -533,6 +543,8 @@ class Solver {
         uint64_t chem_active_cells = 0;   // owned cells advanced in the last chemistry call
         double t_wall_chemistry = 0.0;
         bool fuse_chemistry = false;      // run(): fuse consecutive half steps
+        bool simpler = false;             // SIMPLER balanced splitting instead of Strang
+        State transport_rate;             // SIMPLER: -c = T(U^n), the transport tendency at the step's start
         bool defer_chemistry = false;     // take_step leaves its last half step pending
         double chemistry_pending = 0.0;   // chemistry time not yet applied to the state
 

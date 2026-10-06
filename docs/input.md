@@ -320,11 +320,17 @@ Strength and reference are evaluated once at cell centroids.
 ## `[chemistry]`
 
 Finite-rate chemistry of gas mixtures (`gas = "mixture"` with a mechanism
-that has reactions). Each step is Strang split: every owned cell that needs
-it is advanced as an adiabatic, constant-volume reactor over `dt / 2`, then
-the flow takes its step, then the reactors take another `dt / 2`; the second
-half step is fused with the next step's first (one chemistry call per step)
-except before output, progress rows and the end of the run. The integrator
+that has reactions). By default each step is Strang split: every owned cell
+that needs it is advanced as an adiabatic, constant-volume reactor over
+`dt / 2`, then the flow takes its step, then the reactors take another
+`dt / 2` (with `fuse_half_steps`, the second half step is fused with the
+next step's first). With `coupling = "simpler"` (SIMPLER balanced splitting,
+[Wu, Ma & Ihme 2019](https://doi.org/10.1016/j.cpc.2019.04.016)) each step
+evaluates the flow's right-hand side `T(U^n)` once, advances every owned
+cell over `dt` under its chemistry plus that constant source, then lets
+the flow correct over the second half of the step with `T(U) - T(U^n)`:
+steady states of chemistry and transport stay exactly steady at any `dt`
+(see [chemistry.md](design/chemistry.md#simpler-balanced-splitting-option)). The integrator
 is RODAS, an adaptive Rosenbrock method with the analytical Jacobian, in
 double precision in every build.
 
@@ -332,7 +338,7 @@ double precision in every build.
 |---|---|
 | `enabled` | `false` keeps the mixture non-reacting (default `true`) |
 | `integrator` | `rosenbrock` (the default and only choice so far) |
-| `coupling` | `strang` (the default and only choice so far) |
+| `coupling` | `strang` (default) or `simpler`; `simpler` does not combine with `fuse_half_steps` or `numerics.double_flux` |
 | `rtol` | Relative tolerance on the mass fractions and `T` (default `1e-6`) |
 | `atol` | Absolute tolerance on the mass fractions (default `1e-10`) |
 | `max_steps` | Sub-steps allowed per cell and half step (default 100000); more stop the run |

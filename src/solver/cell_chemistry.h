@@ -42,6 +42,19 @@ struct CellChemistryOptions {
     uint32_t threads = 0;
     int shared = 0;
     bool bin_by_cost = true;
+    bool forced = false;  // calls may take a ChemistryForcing
+};
+
+/**
+ * @brief A constant forcing of a chemistry call: the rates dU/dt of every
+ *        conservative variable of each cell (rho, rho u, rho E, rho Y_k),
+ *        e.g. the transport tendency of balanced splitting or of simplified
+ *        spectral deferred corrections, and a state of the same size for
+ *        scratch.
+ */
+struct ChemistryForcing {
+    State rate;
+    State scratch;
 };
 
 /**
@@ -79,10 +92,17 @@ class CellChemistry {
          * @param time_scale Optional per-cell multiplier of dt: the rates of an
          *        autonomous constant-volume reactor scaled by s give exactly its
          *        state after s dt (combustion models, docs/design/les.md 6.4).
+         * @param forcing Optional (options.forced): integrate
+         *        dU/dt = s R(U) + forcing->rate instead, so that rho, rho u
+         *        and rho E change by dt times their rates and every cell
+         *        moves, reacting or not. A cell reacts if its chemistry is
+         *        active at U or at U + dt rate; its internal energy per
+         *        volume is taken linear in time between the two.
          */
         Statistics advance(const StateView & U, const SpeciesView & rhoY, const Kokkos::View<rtype *> & T_seed,
                            const Kokkos::View<rtype *> & chem_h, const Kokkos::View<rtype *> & chem_cost, uint32_t n,
-                           double dt, const Kokkos::View<rtype *> & time_scale = {});
+                           double dt, const Kokkos::View<rtype *> & time_scale = {},
+                           const ChemistryForcing * forcing = nullptr);
 
         /** @brief Heat release rate and mass production rates W_k omega_k of cells [0, n). */
         void heat_release(const StateView & U, const SpeciesView & rhoY, const Kokkos::View<rtype *> & T_seed,
@@ -119,6 +139,7 @@ class CellChemistry {
         bool bin_by_cost = false;
         size_t fast_bytes = 0;
         bool sparse = false;
+        uint32_t forcing_offset = 0;  // of the forcing in a cell's work memory, 0: none
         chemistry::SparseLUPattern<> pattern;
         Kokkos::View<double **, Kokkos::LayoutRight> work;  // (cell of a chunk, work)
         Kokkos::View<uint32_t **, Kokkos::LayoutRight> pivot;

@@ -76,7 +76,8 @@ TEST(ThickenedFlame, EfficiencyIsOneWithoutSubgridTurbulenceAndSaturatesAtFToThe
 namespace {
 
 /** @brief A uniform reacting H2/air box: no gradients, so only the chemistry changes the state. */
-std::string uniform_box(const std::string & run, const std::string & combustion) {
+std::string uniform_box(const std::string & run, const std::string & combustion,
+                        const std::string & coupling = "strang") {
     std::ostringstream s;
     s << "[run]\n" << run << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 0.04\nLy = 0.04\n"
       << (N_DIM == 3 ? "Nz = 3\nLz = 0.03\nperiodic = [\"x\", \"y\", \"z\"]\n" : "periodic = [\"x\", \"y\"]\n")
@@ -85,7 +86,7 @@ std::string uniform_box(const std::string & run, const std::string & combustion)
       << "X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
       << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
-      << "[chemistry]\n[output]\ncheck_interval = 1000000\n[les]\n" << (N_DIM == 3 ? "model = \"sigma\"\n" : "model = \"wale\"\n")
+      << "[chemistry]\ncoupling = \"" << coupling << "\"\n[output]\ncheck_interval = 1000000\n[les]\n" << (N_DIM == 3 ? "model = \"sigma\"\n" : "model = \"wale\"\n")
       << combustion;
     return s.str();
 }
@@ -96,28 +97,30 @@ TEST(ThickenedFlame, ReactionRatesAreDividedByTheThickening) {
     // Delta = 1 cm everywhere and n_res Delta / delta_L = 4, the sensor is 1
     // throughout the ignition (T_u = 0, T_b = 4000 K) and there is no
     // subgrid turbulence: the chemistry of each step is that of a step 4
-    // times shorter without the model
+    // times shorter without the model (with either splitting)
     const std::string combustion = "[les.combustion]\nmodel = \"tfles\"\ndelta_L = 1.25e-2\ns_L = 2.0\n"
                                    "T_unburnt = 0.0\nT_burnt = 4000.0\nn_res = 5.0\n";
-    Solver thick, plain;
-    thick.init(parse_toml(uniform_box("n_steps = 60\ndt = 2e-6\n", combustion)));
-    plain.init(parse_toml(uniform_box("n_steps = 60\ndt = 5e-7\n", "")));
-    thick.run();
-    plain.run();
-    thick.copy_device_to_host();
-    plain.copy_device_to_host();
-    const uint32_t ns = thick.get_species_names().size();
-    double change = 0.0, diff = 0.0;
-    Solver initial;
-    initial.init(parse_toml(uniform_box("n_steps = 0\ndt = 1e-6\n", "")));
-    initial.copy_device_to_host();
-    for (uint32_t k = 0; k < ns; k++) {
-        change = std::max(change, std::abs(double(plain.h_species(0, k) - initial.h_species(0, k))));
-        diff = std::max(diff, std::abs(double(thick.h_species(0, k) - plain.h_species(0, k))));
+    for (const std::string coupling : {"strang", "simpler"}) {
+        Solver thick, plain;
+        thick.init(parse_toml(uniform_box("n_steps = 60\ndt = 2e-6\n", combustion, coupling)));
+        plain.init(parse_toml(uniform_box("n_steps = 60\ndt = 5e-7\n", "", coupling)));
+        thick.run();
+        plain.run();
+        thick.copy_device_to_host();
+        plain.copy_device_to_host();
+        const uint32_t ns = thick.get_species_names().size();
+        double change = 0.0, diff = 0.0;
+        Solver initial;
+        initial.init(parse_toml(uniform_box("n_steps = 0\ndt = 1e-6\n", "")));
+        initial.copy_device_to_host();
+        for (uint32_t k = 0; k < ns; k++) {
+            change = std::max(change, std::abs(double(plain.h_species(0, k) - initial.h_species(0, k))));
+            diff = std::max(diff, std::abs(double(thick.h_species(0, k) - plain.h_species(0, k))));
+        }
+        EXPECT_GT(change, 1e-4);  // the mixture reacts
+        EXPECT_LT(diff, precision_tol<double>(1e-6, 1e-5) * change);
+        EXPECT_NEAR(double(thick.get_time()), 4.0 * double(plain.get_time()), precision_tol<double>(1e-15, 1e-9));
     }
-    EXPECT_GT(change, 1e-4);  // the mixture reacts
-    EXPECT_LT(diff, precision_tol<double>(1e-6, 1e-5) * change);
-    EXPECT_NEAR(double(thick.get_time()), 4.0 * double(plain.get_time()), precision_tol<double>(1e-15, 1e-9));
 }
 
 TEST(ThickenedFlame, InputErrors) {
