@@ -48,6 +48,8 @@ static const std::unordered_map<FaceReconstructionType, std::string> FACE_RECONS
 /**
  * @brief Face reconstruction class.
  */
+class GrowingBuffer;
+
 class FaceReconstruction {
     public:
         /**
@@ -320,6 +322,8 @@ class TENO : public FaceReconstruction {
         std::vector<uint8_t> gather_depth;
         // Axisymmetric runs: rule on the reference triangle (q, [xi, eta, w]) of the geometric source
         Kokkos::View<rtype *[3]> cell_rule;
+        // Device memory of the packed stencils when they were streamed to the device (CUDA)
+        std::vector<std::shared_ptr<GrowingBuffer>> table_memory;
 
         /**
          * @brief Stencil cells and mirror faces of every reconstructed cell, row
