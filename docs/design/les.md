@@ -2,7 +2,8 @@
 
 Status: proposed. Recommendations are marked **Decision**; the alternatives
 considered are listed with each. Implementation follows the
-[stages](#9-stages), one pull request each.
+[stages](#9-stages), one pull request each; done: 1, 2, 3, 4, 5 (6 and 7 open:
+#197, #198).
 
 Mallard resolves every scale it computes today (DNS of flames, detonations,
 Taylor-Green and isotropic turbulence). This document adds large-eddy
@@ -132,7 +133,8 @@ scale correctly near walls. Properties of a model's `D(g)` (Nicoud et al.
 | Zero in solid rotation | yes | **no** | **no** | yes |
 | Zero in pure shear | **no** | yes | yes | yes |
 | Zero for two-component / 2D flows | **no** | **no** | **no** | yes |
-| Zero for isotropic or axisymmetric expansion | **no** | **no** | **no** | yes |
+| Zero for isotropic expansion | **no** | yes | **no** | yes |
+| Zero for axisymmetric expansion | **no** | **no** | **no** | yes |
 | Near-wall `nu_t ~ y^3` | **no** (`y^0`) | yes | **no** (`y^1`) | yes |
 | Galilean and rotation invariant | yes | yes | yes | yes |
 
@@ -352,7 +354,18 @@ at every face quadrature point, with the same reconstructed states.
   reported separately in validation via scalar variance decay where
   relevant.
 - The low-Mach correction acts on the Riemann part only.
-- Double flux: the blend applies to both of a face's fluxes.
+- Double flux: the blend applies to both of a face's fluxes, each central flux
+  with its own side's frozen thermodynamics on both sides.
+- Boundary faces other than walls and symmetry planes (whose mirror ghost
+  states make the central flux exact: no mass flux, the pressure force)
+  keep the Riemann solver.
+- As implemented (stage 2): contacts and expansions are central, so on
+  Sod's problem (MUSCL, 200 cells) the L1 density error is 1.8 times the
+  Riemann solver's, with a 0.1% overshoot at the contact; without the
+  sensor (central everywhere) the shock oscillates and the error is more
+  than twice the hybrid's. With first-order reconstruction the convective
+  kinetic-energy rate equals the pressure work to round-off on triangles
+  and tetrahedra (tested).
 
 Stability. The central flux has no dissipation, so the SGS model and the
 molecular viscosity are the only sinks at the cutoff, which is the intended
@@ -386,25 +399,34 @@ Alternatives considered:
 - `les.h`: the models as one POD with `KOKKOS_INLINE_FUNCTION nu_t(g,
   Delta)`, captured by value like `Euler`.
 - `Delta` per cell, computed once at setup (`V^(1/d)`).
-- **Single gas**: after the viscous gradients, a cell kernel stores
-  `mu_t = rho nu_t` (all local cells, so halo cells next to owned faces have
-  it, from the same gradients as their owners). `ViscousFluxFunctor` adds
-  the face mean of the two cells' `mu_t` to `mu` and `cp mu_t / Pr_t` to the
-  conductivity. Wall faces get `mu_t = 0` (the wall shear stress is the
-  molecular one; Sigma and WALE are `O(y^3)` there anyway). Other boundary
+- **SGS coefficients** per cell, `[mu_t, lambda_t, mu_t / (Sc_t W)]`
+  (`les_coefficients`), computed after the viscous gradients of each RHS on
+  all local cells, so halo cells next to owned faces have them from the same
+  gradients as their owners. Single gases take `lambda_t = cp mu_t / Pr_t`
+  with the constant `cp`; mixtures each cell's `cp(T, Y)` and mean molar mass
+  `W`.
+- **Viscous fluxes**: `ViscousFluxFunctor` and `MixtureViscousFluxFunctor`
+  add the face means of the SGS coefficients to `mu`, the conductivity and
+  (mixtures) every species' `rho D_k W_k / W` (as `W_k mu_t / (Sc_t W)`).
+  The molecular coefficients and their output (`MU`, `LAMBDA`, `D_k`) are
+  untouched. Wall faces get no SGS flux (the wall shear stress and heat flux
+  are molecular; Sigma and WALE are `O(y^3)` there anyway); other boundary
   faces take the cell's value.
-- **Mixtures**: after the transport gradients, the same kernel adds `mu_t`
-  to `MU`, `cp mu_t / Pr_t` to `LAMBDA` and `mu_t / Sc_t W_k / W` to every
-  species' `rho D_k W_k / W`; the mixture viscous kernel is unchanged.
-- **Time step**: `nu_eff` includes `4/3 nu_t` and `gamma nu_t / Pr_t`
-  (`D_t` for mixtures). The eddy viscosity is recomputed from the state in
-  `calc_dt` (one gradient evaluation per step), so a restarted run takes
+- **Time step**: single gases use `max(4/3 (mu + mu_t), gamma (mu / Pr +
+  mu_t / Pr_t)) / rho`; mixtures grow `nu_eff` by `max(4/3 nu_t, lambda_t /
+  (rho cv), nu_t / Sc_t)`. The eddy viscosity is recomputed from the state
+  in `calc_dt` (one gradient evaluation per step), so a restarted run takes
   exactly the time steps of the uninterrupted one.
-- **Axisymmetric runs**: the hoop stress uses `mu + mu_t`.
+- **Axisymmetric runs** are not supported (LES of turbulence is
+  three-dimensional; the hoop terms would need `mu_t` in the reconstruction's
+  geometric source).
 - **Output**: `MU_T` (cell eddy viscosity).
 - **Budget**: `[integrals] budget = true` adds the columns
   `ke_rate_convective, ke_rate_viscous, ke_rate_sgs` (the `dK/dt|_R` of
-  section 4.2) and `eps_numerical = pressure_dilatation - ke_rate_convective`.
+  section 4.2) and `eps_numerical = pressure_dilatation - ke_rate_convective`,
+  from one extra RHS evaluation that neither updates the mixture
+  temperature seeds nor advances the characteristic boundaries, so output
+  does not change the solution.
 - Without `[les]` no new kernel runs and no view is allocated; the existing
   kernels take the empty-view branch, so results are byte-identical.
 
@@ -523,6 +545,42 @@ chemistry stays bitwise independent of rank count and team width.
   exchange as the state; the result is bitwise independent of the rank
   count. No reduction enters the model.
 
+### 6.6 As implemented (stage 5)
+
+- `F`, `E`, `Omega` and `E / F` are computed in `calc_dt` (once per step,
+  from the state, so restarts reproduce) on owned cells: the vorticity from
+  the transport gradients, exchanged to the halo, its least-squares gradient,
+  and its Laplacian as the divergence of the face gradients (cell means
+  corrected along the line of centroids, no flux through boundary faces);
+  the fields are then exchanged to the halo (two exchanges of three values
+  per cell and step).
+- The thickening multiplies `LAMBDA`, every `rho D_k W_k / W` and the time
+  step's `nu_eff` by `E F` after the eddy viscosity of each RHS, and the SGS
+  heat and species coefficients by `1 - Omega`; viscosity is unchanged.
+- `HRR` and `OMEGA_*` outputs are the modeled rates (times `E / F`).
+- The SGS model in 2D builds should be Vreman for flames: WALE's eddy
+  viscosity is not zero for the one-dimensional dilatation across a flame.
+- Results, one-dimensional stoichiometric H2/air flame (h2o2.yaml,
+  mixture-averaged, `s_L = 2.3324` m/s, `delta_L = 0.330` mm from
+  Cantera), MUSCL and HLLC, strip cells of aspect ratio 10 (`Delta = 3.16
+  dx`), `n_res = 5`:
+
+  | Mesh | Model | `F` | Consumption speed | Displacement speed | Thermal thickness |
+  |---|---|---|---|---|---|
+  | 2 cells per `delta_L` | TFLES | 7.91 | 2.327 m/s (-0.2%) | 2.291 m/s (-1.8%) | 2.615 mm (`F delta_L` = 2.610 mm) |
+  | 0.5 cells per `delta_L` | TFLES | 31.6 | 2.328 m/s (-0.2%) | 2.251 m/s (-3.5%) | |
+  | 0.5 cells per `delta_L` | none (quasi-laminar) | 1 | 2.273 m/s (-2.5%) | 2.240 m/s (-4.0%) | one cell (numerical) |
+
+  The thickened flame keeps the laminar speed and has the thickness `F
+  delta_L` it is designed to have; the quasi-laminar flame's speed is also
+  within 5% in this one-dimensional case, but its structure is one cell
+  wide, set by the scheme. The displacement speeds include the slow drift
+  of a long domain's flame position (they are fitted over the last half of
+  the run). The thickened post-flame recombination zone is `F` times longer
+  too (rates times `1 / F` while `c < 0.95`), so the peak temperature in a
+  domain of a few thickened thicknesses stays below the adiabatic one
+  (2224 K against 2384 K at `F = 7.9`).
+
 ## 7. Tests (each must fail under a plausible bug)
 
 - **Model kernels** (exact values): Sigma, WALE, Vreman, Smagorinsky on
@@ -588,6 +646,63 @@ converge toward the reference under refinement without retuning.
   stations 2-3. Model-off must show the pile-up at `k_c` (central flux) or
   the over-dissipation (upwind), and miss these targets.
 
+#### Results (stage 3, `examples/cbc_les`)
+
+![LES spectra against Comte-Bellot & Corrsin](../images/cbc_les_validation.png)
+
+Hexahedra, MUSCL without limiter, initial phases developed by two rescaled
+pre-runs. Spectral error: log10 RMS of `E_LES / E_CBC` for `k <= 2/3 k_c`;
+energy: resolved energy over the measured energy up to `k_c`; budget:
+shares of the total dissipation of resolved energy, averaged over t = 0 to
+station 3 (stations 2 / 3 for the first two columns):
+
+| Mesh | Flux | Model | Spectral error | Energy | Numerical | SGS | Molecular |
+|---|---|---|---|---|---|---|---|
+| 32^3 | hybrid | Sigma | 0.153 / 0.151 | 1.54 / 1.51 | -0.012 | 0.830 | 0.182 |
+| 32^3 | hybrid | Sigma `C = 1.8` | 0.103 / 0.082 | 1.29 / 1.20 | -0.002 | 0.891 | 0.111 |
+| 64^3 | hybrid | Sigma | 0.107 / 0.104 | 1.25 / 1.02 | 0.013 | 0.691 | 0.296 |
+| 64^3 | hybrid | Sigma `C = 1.8` | **0.058 / 0.063** | 1.08 / 0.97 | 0.013 | 0.796 | 0.191 |
+| 64^3 | hybrid | WALE | 0.090 / 0.086 | 1.20 / 0.98 | 0.007 | 0.730 | 0.263 |
+| 64^3 | hybrid | Vreman | 0.108 / 0.106 | 1.25 / 1.02 | 0.012 | 0.689 | 0.298 |
+| 64^3 | hybrid | Smagorinsky | 0.099 / 0.094 | 1.23 / 1.01 | 0.014 | 0.703 | 0.283 |
+| 64^3 | hybrid | none | 0.226 / 0.375 | 1.81 / 1.76 | -0.077 | 0 | 1.077 |
+| 64^3 | HLLC | Sigma `C = 1.8` | 0.154 / 0.217 | 0.95 / 0.93 | **0.463** | 0.435 | 0.103 |
+| 64^3 | HLLC | none (implicit LES) | 0.135 / 0.114 | 1.20 / 1.12 | **0.838** | 0 | 0.162 |
+| 128^3 | hybrid | Sigma | **0.063 / 0.085** | 1.03 / 0.91 | 0.020 | 0.522 | 0.459 |
+| 128^3 | hybrid | Sigma `C = 1.8` | 0.124 / 0.141 | 0.98 / 0.92 | 0.019 | 0.651 | 0.330 |
+| 128^3 | hybrid | none | 0.182 / 0.249 | 1.13 / 0.77 | 0.018 | 0 | 0.982 |
+
+Findings:
+
+- **With the hybrid flux the model does the work**: numerical dissipation
+  is 1-2% of the total at every resolution (`eps_num / eps_sgs <= 0.04`,
+  against the criterion 0.5). Model-off runs pile energy up at `k_c` (the
+  spectrum rises by an order of magnitude) and miss the spectrum by 2-4
+  times the model-on error.
+- **With HLLC everywhere the scheme does the work**: 84% of the dissipation
+  without a model and still 46% with one (`eps_num / eps_sgs = 1.06`), so
+  such runs are implicit LES whatever the model; implicit LES matches the
+  spectrum about as well as the explicit models at their default constants,
+  which is why a budget, not the spectrum alone, is needed to tell them
+  apart.
+- **Model constant and resolution**: at 64^3 (`k_c` in the inertial range)
+  every model at its literature constant leaves a pile-up over the last
+  third of the wavenumbers; Sigma with `C = 1.8` matches the spectrum to
+  0.06 decades (15%). At 128^3 the literature constant (1.35) is the best
+  (0.06-0.09 decades) and 1.8 over-dissipates. The second-order
+  discretization's own transfer function acts like a larger filter on the
+  coarser mesh. Recommendation: keep `C = 1.35` (the default), use 1.5-1.8
+  when `k_c` lies in the inertial range, and check with the budget and the
+  spectrum. The channel (8.2) brackets the same range.
+- **TENO-E with the hybrid flux** (32^3) gave `eps_num = -0.22`: the
+  nonlinear stencil selection feeds energy into the resolved field when
+  nothing upwinds it. Use MUSCL without limiter (or a linear reconstruction)
+  with the hybrid flux; TENO stays for shocks with the Riemann flux.
+- The targets of this section (15% for every `k <= 2/3 k_c`) are met in the
+  mean (0.06 decades = 15%) but not point by point: the largest single-shell
+  deviation is 31-47%, at the lowest shells (few modes, realization noise of
+  one random field) and near `2/3 k_c`.
+
 ### 8.2 Turbulent channel flow (Moser, Kim & Mansour 1999; Lee & Moser 2015)
 
 - `Re_tau = 395` (and 590): box `2 pi h x 2 h x pi h`, periodic in x and z,
@@ -603,6 +718,51 @@ converge toward the reference under refinement without retuning.
   `-<u'v'>+` within 10% of their peaks. Model-off at the same mesh must
   miss `Re_tau` and the peak `u'_rms+` by more than twice the model-on
   error. Budget reported per wall-normal band.
+
+#### Results (stage 4, `examples/channel_les`)
+
+![LES of the channel at Re_tau = 395 against MKM](../images/channel_les_validation.png)
+
+`Re_tau = 395`, hybrid flux, MUSCL without limiter, averaged over t =
+100-300 h/U_b (11-12 h/u_tau), resolved fluctuations; dissipation shares of
+the kinetic-energy budget over the same window:
+
+| Mesh | Flux | Model | `Re_tau` (392.2) | `Cf` | `U+(30)` / `U+(100)` (13.49 / 16.53) | peak `v_rms+` (1.00) | numerical / SGS / molecular |
+|---|---|---|---|---|---|---|---|
+| 64^3 | hybrid | Sigma | 402.3 (+2.6%) | +4.8% | 13.10 / 16.24 | 0.89 | 3.5 / 12.6 / 83.9% |
+| 64^3 | hybrid | Sigma `C = 1.8` | 389.4 (-0.7%) | -1.9% | 13.68 / 16.98 | 0.85 | 2.8 / 16.6 / 80.6% |
+| 64^3 | hybrid | none | 420.1 (+7.1%) | +14.2% | 12.27 / 15.16 | 0.97 | 5.0 / 0 / 95.0% |
+| 64^3 | HLLC | Sigma `C = 1.8` | 317.6 (-19%) | -35% | 17.86 / 22.05 | 0.78 | **13.5** / 5.4 / 81.1% |
+| 48^3 | hybrid | Sigma `C = 1.8` | 381.3 (-2.8%) | -5.9% | 14.09 / 17.47 | 0.80 | 3.2 / 17.9 / 78.9% |
+| 48^3 | hybrid | none | 405.3 (+3.3%) | +6.3% | 12.67 / 15.74 | 0.98 | 6.1 / 0 / 93.9% |
+
+Findings:
+
+- At 64^3 both Sigma constants meet the `Re_tau` target (3%) and the mean
+  profile target (3% for y+ = 30-300); without a model `Re_tau` is 7% high,
+  more than twice the model-on errors. `v_rms+` is 11-15% low (only the
+  resolved part is counted) and misses the 10% target; `u_rms`, `w_rms` and
+  `-u'v'` are within 10%.
+- At 48^3 the model-off run is closer to MKM in `Re_tau` than at 64^3 and
+  than the model-on run at 48^3 (+3.3% against -2.8%): on this mesh the
+  model-off result benefits from compensating errors, so the 48^3 pair does
+  not discriminate; the 64^3 pair does. Sigma's error decreases under
+  refinement (-2.8% -> -0.7% for `C = 1.8`).
+- The SGS model carries 13-18% of the dissipation of resolved energy; most
+  of it is molecular at this wall-resolved resolution. The hybrid flux's
+  numerical dissipation is 3-6% (`eps_num / eps_sgs` = 0.17-0.28, within the
+  criterion 0.5).
+- **With HLLC instead of the hybrid flux the result is wrong and the budget
+  says why**: the scheme removes 2.5 times as much resolved energy as the
+  model (13.5% against 5.4%), the near-wall streaks are too strong (peak
+  `u_rms+` 3.77), the turbulent momentum transfer too weak, and `Re_tau`
+  19% low (`Cf` -35%).
+- **The DNS at `Re_tau = 180`** (`examples/channel_retau180`, 192 x 96 x
+  128, no model; #209), averaged over t = 80-160 h/U_b: with HLLC 6.8% of
+  the dissipation is numerical and `Re_tau = 173.7` (-2.5% from MKM's
+  178.1, as the example's 172.6); with the hybrid flux 0.9% is numerical and
+  `Re_tau = 179.8` (+0.9%). The upwind dissipation explains most of that
+  DNS's deficit.
 
 ### 8.3 Reacting validation
 

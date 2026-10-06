@@ -392,9 +392,10 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
     halo_current = false;
     update_boundary_states(t_stage);
     if (exchange) halo.exchange(state);
-    update_cell_states(state, true);
+    update_cell_states(state, !budget_pass);
     face_reconstruction->calc_face_values(W_cells, face_solution);
-    update_characteristic_boundaries(t_stage);
+    if (!budget_pass) update_characteristic_boundaries(t_stage);
+    if (hybrid_flux) update_upwind_sensor();
     scalar_reconstruction.calc(cell_scalars, W_cells, face_thermo);
 
     if (double_flux && !cells_frozen) {
@@ -421,14 +422,9 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
     const uint32_t n_species = mixture.n_species;
     scalar_reconstruction.species_slots(cell_scalars, face_mdot, face_reconstruction->quadrature_face.weights,
                                         flux_weights, species_slots);
-    if (is_viscous()) {
-        update_transport();
-        MixtureViscousFluxFunctor viscous_functor{mesh->face_normals, mesh->face_measure, mesh->face_coords,
-                                                  mesh->cell_coords, mesh->cells_of_face, mesh->shifts,
-                                                  mesh->face_shift, boundary_data, mixture, cell_scalars,
-                                                  transport_values, transport_gradients, cell_transport,
-                                                  cell_diffusion, face_flux, species_slots, axisymmetric,
-                                                  mesh->cell_covariance};
+    if (budget_pass) budget.convective = kinetic_energy_rate();
+    MixtureViscousFluxFunctor viscous_functor;
+    auto viscous_flux = [&] {
         if (rhs_faces.extent(0) == 0) {
             Kokkos::parallel_for("mixture_viscous_flux", mesh->n_faces, viscous_functor);
         } else {
@@ -436,6 +432,19 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
             Kokkos::parallel_for("mixture_viscous_flux", list.extent(0),
                                  OverFaces<MixtureViscousFluxFunctor>{viscous_functor, list});
         }
+    };
+    if (is_viscous()) {
+        update_transport();
+        if (les_on) update_eddy_viscosity(mesh->n_cells);
+        if (tfles_on) thicken_transport();
+        viscous_functor = MixtureViscousFluxFunctor{mesh->face_normals, mesh->face_measure, mesh->face_coords,
+                                                    mesh->cell_coords, mesh->cells_of_face, mesh->shifts,
+                                                    mesh->face_shift, boundary_data, mixture, cell_scalars,
+                                                    transport_values, transport_gradients, cell_transport,
+                                                    cell_diffusion, face_flux, species_slots, axisymmetric,
+                                                    mesh->cell_covariance, les_coefficients};
+        viscous_flux();
+        if (budget_pass) budget.viscous = kinetic_energy_rate() - budget.convective;
     }
 
     const uint32_t n_owned = mesh->n_owned();
@@ -494,6 +503,14 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
         FOR_I_CONSERVATIVE rhs(i_cell, i) /= vol(i_cell);
     });
     apply_sponges(state, rhs_state);
+    if (budget_pass && les_on) {
+        // The SGS fluxes alone, into the face fluxes this evaluation no longer needs
+        Kokkos::deep_copy(face_flux, 0.0_r);
+        viscous_functor.sgs_only = true;
+        viscous_flux();
+        budget.sgs = kinetic_energy_rate();
+        budget.viscous -= budget.sgs;
+    }
 }
 
 template <typename T_riemann_solver>
@@ -512,7 +529,8 @@ void Solver::launch_mixture_flux_functor() {
         Kokkos::subview(cell_scalars, Kokkos::ALL(), Kokkos::make_pair(n_species, n_species + 2)),
         face_flux,
         face_mdot,
-        low_mach_cutoff};
+        low_mach_cutoff,
+        cell_upwind};
     // Faces of owned cells, as the single-gas flux
     if (rhs_faces.extent(0) == 0) {
         Kokkos::parallel_for("mixture_flux", HeavyRange<>(0, mesh->n_faces), functor);
@@ -540,7 +558,8 @@ void Solver::launch_double_flux_functor() {
         face_flux,
         face_energy_1,
         face_mdot,
-        low_mach_cutoff};
+        low_mach_cutoff,
+        cell_upwind};
     if (rhs_faces.extent(0) == 0) {
         Kokkos::parallel_for("double_flux", HeavyRange<>(0, mesh->n_faces), functor);
     } else {
@@ -551,11 +570,18 @@ void Solver::launch_double_flux_functor() {
 }
 
 rtype Solver::calc_dt_cfl1_mixture() {
-    update_cell_states(state(), false);
-    if (is_viscous()) {
-        Kokkos::parallel_for("mixture_transport", mesh->n_owned(),
-                             MixtureTransportFunctor{mixture, W_cells, cell_scalars, cell_transport, cell_diffusion,
-                                                     transport_values});
+    if (tfles_on) {
+        update_thickened_flame();
+        thicken_transport();
+    } else if (les_on) {
+        eddy_viscosity_of_state(mesh->n_owned());
+    } else {
+        update_cell_states(state(), false);
+        if (is_viscous()) {
+            Kokkos::parallel_for("mixture_transport", mesh->n_owned(),
+                                 MixtureTransportFunctor{mixture, W_cells, cell_scalars, cell_transport, cell_diffusion,
+                                                         transport_values});
+        }
     }
     MixtureTimeStepFunctor functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                    mesh->face_normals, mesh->face_measure, mesh->cell_measure, W_cells,

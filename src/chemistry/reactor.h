@@ -332,7 +332,10 @@ KOKKOS_INLINE_FUNCTION RosenbrockResult advance_reactor(const ThermoTable<Memory
 
 /**
  * @brief Ignition delay as the time of the maximum of dT/dt: the vertex of
- *        the parabola through the largest sample and its two neighbors.
+ *        the parabola through the largest sample and its two neighbors. The
+ *        reactor has ignited once dT/dt has since fallen below half that
+ *        maximum: the thermal runaway is over, however small the temperature
+ *        rise (very lean mixtures).
  */
 struct IgnitionObserver {
     uint32_t index = 0;     // of T in the state
@@ -356,6 +359,9 @@ struct IgnitionObserver {
         const double den = (t[1] - t[0]) * (g[1] - g[2]) - (t[1] - t[2]) * (g[1] - g[0]);
         t_ignition = den != 0.0 ? t[1] - 0.5 * num / den : t[1];
     }
+
+    /** @brief Whether the reactor has ignited, at t_ignition. */
+    KOKKOS_INLINE_FUNCTION bool ignited() const { return peak > 0.0 && g[2] < 0.5 * peak; }
 };
 
 } // namespace chemistry

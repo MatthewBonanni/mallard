@@ -50,6 +50,7 @@ std::string Solver::step_graph_unsupported() const {
     if (!cuda_graphs) return "off ([run] cuda_graphs)";
     if (is_distributed() && !halo.uses_nccl()) return "halo exchanged with MPI";
     if (is_mixture()) return "gas mixture";
+    if (les_on) return "LES models (not verified under capture yet)";
     if (!average_pressure_outlets.empty()) return "average-pressure outlets";
     if (boundary_data.char_faces.extent(0) > 0) return "characteristic boundaries";
     if (!source_expressions.empty() && source_time_dependent) return "time-dependent sources";

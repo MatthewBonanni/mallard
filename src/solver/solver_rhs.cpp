@@ -126,7 +126,8 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
         face_reconstruction->calc_face_values(W_cells, face_solution);
     }
 
-    update_characteristic_boundaries(t_stage);
+    if (!budget_pass) update_characteristic_boundaries(t_stage);
+    if (hybrid_flux) update_upwind_sensor();
     switch (riemann_solver_type) {
         case RiemannSolverType::RUSANOV:
             launch_flux_functor<riemann::Rusanov>();
@@ -145,14 +146,18 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
             break;
     }
 
+    if (budget_pass) budget.convective = kinetic_energy_rate();
+    ViscousFluxFunctor viscous_functor;
     if (physics.is_viscous()) {
-        Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, mesh->n_cells), viscous_gradient);
-        ViscousFluxFunctor viscous_functor{mesh->face_normals, mesh->face_measure, mesh->face_coords,
-                                           mesh->cell_coords, mesh->cells_of_face, mesh->shifts, mesh->face_shift,
-                                           W_cells,
-                                           viscous_gradients, boundary_data, face_flux, physics, axisymmetric,
-                                           mesh->cell_covariance};
+        if (!hybrid_flux) Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, mesh->n_cells), viscous_gradient);
+        if (les_on) update_eddy_viscosity(mesh->n_cells);
+        viscous_functor = ViscousFluxFunctor{mesh->face_normals, mesh->face_measure, mesh->face_coords,
+                                             mesh->cell_coords, mesh->cells_of_face, mesh->shifts, mesh->face_shift,
+                                             W_cells,
+                                             viscous_gradients, boundary_data, face_flux, physics, axisymmetric,
+                                             mesh->cell_covariance, les_coefficients};
         parallel_for_faces("viscous_flux", viscous_functor, rhs_faces, mesh->n_faces);
+        if (budget_pass) budget.viscous = kinetic_energy_rate() - budget.convective;
     }
 
     FaceFluxSumFunctor sum_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
@@ -199,6 +204,20 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
         FOR_I_CONSERVATIVE rhs(i_cell, i) /= vol(i_cell);
     });
     apply_sponges(state, rhs_state);
+    if (budget_pass && les_on) {
+        // The SGS fluxes alone, into the face fluxes this evaluation no longer needs
+        Kokkos::deep_copy(face_flux, 0.0_r);
+        viscous_functor.sgs_only = true;
+        parallel_for_faces("viscous_flux", viscous_functor, rhs_faces, mesh->n_faces);
+        budget.sgs = kinetic_energy_rate();
+        budget.viscous -= budget.sgs;
+    }
+}
+
+void Solver::update_upwind_sensor() {
+    Kokkos::parallel_for("upwind_gradients", HeavyRange<>(0, mesh->n_cells), viscous_gradient);
+    Kokkos::parallel_for("upwind_sensor", mesh->n_cells,
+                         UpwindSensorFunctor{viscous_gradients, cell_upwind, hybrid_threshold, hybrid_floor});
 }
 
 void Solver::add_geometric_source(StateView rhs, Kokkos::View<rtype *, Kokkos::LayoutStride> mu) {
@@ -221,6 +240,7 @@ void Solver::launch_flux_functor() {
                                                     W_cells,
                                                     face_flux,
                                                     physics.gamma,
-                                                    low_mach_cutoff};
+                                                    low_mach_cutoff,
+                                                    cell_upwind};
     parallel_for_faces("convective_flux", functor, rhs_faces, mesh->n_faces);
 }

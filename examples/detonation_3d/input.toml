@@ -1,0 +1,137 @@
+# Cellular detonation in a 3 cm square duct (3D build): 2H2-O2-7Ar at
+# 6.67 kPa and 298 K, the mixture of examples/detonation_1d and
+# detonation_2d (D_CJ = 1617 m/s, ZND induction length 1.525 mm with
+# mechanisms/h2o2.yaml), in the duct of Deiterding's 3D runs (J. Combust.
+# 2011:738969, doi:10.1155/2011/738969; Tsuboi et al., Proc. Combust. Inst.
+# 29:2783, 2003, doi:10.1016/S1540-7489(02)80339-X, for the same
+# configuration). The transverse waves of the front sweep the duct in both
+# directions; on the walls the numerical soot foil (P_MAX) records the
+# triple-point tracks and the "slapping" bands of the waves that hit a
+# wall face-on (Williams, Bauwens & Oran, Proc. Combust. Inst. 26:2991,
+# 1996, doi:10.1016/S0082-0784(96)80142-1).
+#
+# 0.15 mm hexahedra, 10 per induction length (the resolution of
+# examples/detonation_2d, whose track pattern is the same at 20): 200 x 200
+# across the duct. A window 7.2 cm long follows the front
+# (tools/detonation_window.py): every 6 us the run stops, the box drops the
+# columns more than 5 cm behind the front and appends fresh gas ahead, and
+# the P_MAX of the dropped wall cells goes to the foil; the transmissive
+# left boundary cuts the burnt gas 5 cm behind the front. 480 x 200 x 200 =
+# 19.2M cells. MUSCL with HLL (HLLC, as in the 2D example, grows grid-scale
+# odd-even noise and spots on the planar 3D front within 15 us), Strang
+# chemistry with fused half steps.
+#
+# Two stages. (1) input_2d.toml (2D build): the 2D cellular detonation in a
+# 3 cm channel from the ZND profile and one pocket of fresh gas, in the
+# same kind of window, to t = 96 us (two triple points). (2) This input:
+# the 2D state extruded with --superpose (each cell takes the 2D state at
+# (x, y) or, turned into z, at (x, z), whichever is hotter), i.e. the 2D
+# transverse waves in both directions in phase. From this directory:
+#
+#   python ../../tools/detonation_reference.py ../../mechanisms/h2o2.yaml ohmech \
+#       "H2:2, O2:1, AR:7" 298 6670 znd.csv
+#   python ../../tools/znd_restart.py znd.csv ../../mechanisms/h2o2.yaml ohmech 680 0.102 0.08 \
+#       window_2d.restart --ny 200 --ly 0.03 --fresh-pocket --pocket 0.077 0.01 0.002
+#   python ../../tools/detonation_window.py run input_2d.toml --keep 0.08 --segment 6e-6 --t-end 9.6e-5 \
+#       --frames frames_2d -- ../../build/src/Mallard -i input_2d.toml
+#   python ../../tools/detonation_window.py extrude input_2d.toml window_2d.restart input.toml \
+#       window.restart --superpose
+#   python ../../tools/detonation_window.py run input.toml --keep 0.05 --segment 6e-6 --t-end 2.04e-4 \
+#       --frames frames -- mpirun -n 4 ../../build3d/src/Mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
+#   python ../../tools/soot_foil_3d.py input.toml frames --png foils.png
+#   python ../../tools/animate_detonation_3d.py input.toml frames detonation_3d
+#
+# Results (t = 96 to 204 us, 17 cm of 3D travel): the front runs at
+# 1620.6 m/s over the second half (D_CJ to 0.2%). Its transverse waves stay
+# as two orthogonal families of lines parallel to the walls, crossing in
+# phase (the rectangular mode of Deiterding's and Tsuboi et al.'s runs,
+# seen in hydrogen-oxygen experiments as Deiterding notes); the peak
+# pressure behind the shock stays at 200-215 kPa (von Neumann: 175 kPa)
+# to the end, while in the 2D precursor it decays to 183 kPa by 252 us.
+# On every wall the foil shows
+# diagonal triple-point tracks crossing every 6.4 cm of travel (6.5 cm in
+# the 2D precursor; Deiterding's 2D period of 32 us is 5.2 cm) and dark
+# bands across the whole wall where a wave family hits it face-on, every
+# 4-8.6 cm, alternating between opposite walls. The superposed start is
+# symmetric under exchanging y and z and so is the solution: the foils of
+# y = 0 and z = 0 (and of y = W and z = W) are identical.
+#
+# Cost: 12,180 steps in 4.6 hours on four A100s (1.25 s per step, 15.4M
+# cells/s; chemistry about 60%), plus the 2D stage: 8,855 steps in 9
+# minutes on one A100.
+
+[run]
+t_stop = 6.0e-6
+cfl = 0.25
+
+[mesh]
+type = "cartesian"
+Nx = 680
+Ny = 200
+Nz = 200
+Lx = 0.102
+Ly = 0.03
+Lz = 0.03
+
+[initialize]
+type = "restart"
+file = "window.restart"
+
+[[boundaries]]
+name = "left"
+type = "extrapolation"
+
+[[boundaries]]
+name = "right"
+type = "extrapolation"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "back"
+type = "symmetry"
+
+[[boundaries]]
+name = "front"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLL"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "euler"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+fuse_half_steps = true
+
+[output]
+check_interval = 500
+
+[[write_data]]
+prefix = "./restart/cell"
+format = "restart"
+time_interval = 1.5e-6
+
+# P_MAX (the soot foil) is kept when some output asks for it; the window
+# tool saves it from the restart files, so this wall output is only
+# overwritten by every segment
+[[write_data]]
+prefix = "./wall/bottom"
+format = "vtu"
+geometry = "bottom"
+time_interval = 6.0e-6
+variables = ["P_MAX"]

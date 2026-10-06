@@ -74,14 +74,16 @@
 # subsonic: turning it off lowers the filtered enstrophy by 10% at 64^3 and 2%
 # at 128^3.
 #
-# Cost: 256^3 (16.8M cells, 4,307 steps) on 12 A100s: 8 minutes of setup,
-# then 0.67 s per step, about an hour (66 GB per A100 at 1.4M cells per
-# rank); 128^3 (1,832 steps) on 3 A100s, 17 minutes; 64^3 (844 steps) on one
-# A100, 3.5 minutes.
+# Cost: 256^3 (16.8M cells, about 1,730 steps) on 12 A100s: 8 minutes of
+# setup, then 0.67 s per step, about 30 minutes (66 GB per A100 at 1.4M cells
+# per rank); 128^3 (about 730 steps) on 3 A100s, 8 minutes; 64^3 (about 340
+# steps) on one A100, 1.5 minutes. (The results above were computed at
+# cfl = 0.4; at 64^3, cfl = 1.0 changes the kinetic energy and enstrophy
+# histories by at most 0.1% and 0.2%.)
 
 [run]
 t_stop = 5.773502691896256
-cfl = 0.4
+cfl = 1.0
 
 [mesh]
 type = "cartesian"

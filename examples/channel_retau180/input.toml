@@ -3,27 +3,26 @@
 # doi:10.1063/1.869966 (MKM; the method of Kim, Moin & Moser, J. Fluid Mech.
 # 177, 133 (1987), doi:10.1017/S0022112087000892).
 #
-# Results, averaged over t = 120-320 h/U_b (12.3 h/u_tau) with [statistics]
+# Results, averaged over t = 120-320 h/U_b (12.9 h/u_tau) with [statistics]
 # and the wall shear of [[forces]], both halves of the channel folded:
 #
 #                          this input          MKM
-#   Re_tau                 172.6               178.1   (-3.1%)
-#   Cf = 2 tau_w / U_b^2   0.00757             0.00814 (-7.0%)
-#   U+ at y+ = 5, 10       4.84, 8.74          4.81, 8.52
-#   U+ at y+ = 30, 100     14.74, 17.90        13.87, 17.15
-#   U_c+                   18.81               18.30
-#   peak u_rms+            2.88 at y+ = 16     2.66 at 15
-#   peak v_rms+            0.80 at y+ = 58     0.84 at 52
-#   peak w_rms+            1.05 at y+ = 34     1.09 at 35
-#   peak -u'v'+            0.714 at y+ = 34    0.723 at 30
+#   Re_tau                 180.8               178.1   (+1.5%)
+#   Cf = 2 tau_w / U_b^2   0.00830             0.00814 (+2.0%)
+#   U+ at y+ = 5, 10       4.80, 8.48          4.81, 8.52
+#   U+ at y+ = 30, 100     13.76, 16.93        13.87, 17.15
+#   U_c+                   18.13               18.30
+#   peak u_rms+            2.645 at y+ = 15    2.658 at 15
+#   peak v_rms+            0.851 at y+ = 53    0.836 at 52
+#   peak w_rms+            1.102 at y+ = 36    1.087 at 35
+#   peak -u'v'+            0.734 at y+ = 30    0.723 at 30
 #
-# The viscous sublayer matches; the near-wall streaks (u_rms) are 8% too
-# strong and v_rms, w_rms 3-4% too weak, so the turbulent momentum transfer,
-# and with it the wall shear, comes out low and U+ beyond y+ = 10 lies about
-# 0.8 above MKM: the signature of a slightly under-resolved second-order DNS.
-# Averaging to t = 240 instead gives Re_tau = 172.1 and the same peaks to 2%.
-# Over the window Re_tau(t) from the wall shear varies between 168 and 178,
-# and its means on the two walls agree to 0.1%.
+# The RMS peaks are within 2% of MKM. A second run, continued from a
+# developed state and averaged over t = 365-560, gives Re_tau = 181.0, Cf
+# +2.1% and the same peaks to 0.5%. Over the window Re_tau(t) from the wall
+# shear, averaged over 1 h/u_tau, stays between 179 and 184, and its means
+# on the two walls agree to 0.1%. The mean momentum balance
+# mu dU/dy - rho <u'v'> = tau_w (1 - y/h) closes to 0.6% of tau_w.
 #
 # Physics: walls at y = 0 and y = 2h, periodic in x and z, the box
 # 4 pi h x 2h x 4/3 pi h of MKM. Units h = 1, bulk density and velocity 1:
@@ -35,36 +34,53 @@
 # isothermal at the bulk temperature, which removes the heat of viscous
 # dissipation so the flow reaches a statistically steady state (adiabatic
 # walls would heat the gas by 0.15% per h/u_tau without bound). Constant viscosity,
-# Pr = 0.72. Mallard's low-Mach correction of the convective flux is on (the
-# default, cutoff 0.1): it scales the upwind dissipation of velocity jumps
-# with the flow speed instead of the sound speed. This is a DNS: no
-# turbulence model, and no claim of an implicit LES.
+# Pr = 0.72. This is a DNS: no turbulence model.
 #
 # Mesh: 192 x 96 x 128 hexahedra (2.36M), uniform in x and z, tanh-stretched
-# in y ([mesh] stretching). In wall units at the computed Re_tau = 172.6:
-# dx+ = 11.3, dz+ = 5.6, dy+ = 0.84 at the wall (first cell center at
-# y+ = 0.42) and 6.5 at the center. MUSCL without limiter and HLLC, for its
-# cost: from the same developed state at t = 31, TENO3 (2.4 times the cost
-# per step, plus 2 minutes of setup) gave the same wall shear to 2% over the
-# next 10 h/U_b, and so did a low-Mach cutoff of 0.01.
+# in y ([mesh] stretching). In wall units at the computed Re_tau = 180.8:
+# dx+ = 11.8, dz+ = 5.9, dy+ = 0.88 at the wall (first cell center at
+# y+ = 0.44) and 6.8 at the center.
+#
+# Convective flux: the kinetic-energy-preserving central flux
+# (convective_flux = "hybrid"; the Riemann solver only where the compression
+# sensor fires) on unlimited MUSCL states. [integrals] budget = true
+# measures the scheme's dissipation of kinetic energy (eps_numerical in
+# integrals.csv): 0.9% of the total, the rest molecular. With the Riemann
+# solver (HLLC) at every face instead, the scheme removes about 7% of the
+# dissipation, and the wall shear comes out 7% low (Re_tau 172.9) with the
+# u_rms peak 9% high. The upwind dissipation sets that gap; each line below
+# starts from the same developed state and averages over 12 h/u_tau:
+#
+#   HLLC, low-Mach correction off       Cf -23%   u_rms+ 3.34
+#   HLLC (low-Mach cutoff 0.1)          Cf -6.8%  u_rms+ 2.89
+#   HLLC, low-Mach cutoff 0.01          Cf -5.8%  u_rms+ 2.87
+#   Roe instead of HLLC                 Cf -7.9%  u_rms+ 2.91
+#   HLLC, TENO3 instead of MUSCL        Cf -10.6% u_rms+ 2.93
+#   HLLC, 384 x 96 x 128 (dx+ 5.9)      Cf -5.5%  u_rms+ 2.82
+#   HLLC, 192 x 96 x 256 (dz+ 3.0)      Cf -2.6%  u_rms+ 2.80
+#   HLLC, 384 x 96 x 256                Cf -0.8%  u_rms+ 2.72, v, w, -u'v' within 2%
+#   hybrid (this input)                 Cf +2.0%  u_rms+ 2.65
+#
+# so HLLC reaches MKM by halving both dx and dz, at about 5 times the GPU time
+# of this input. Halving the time step changes nothing (to 1%).
 #
 # Run:
 #   python ../../tools/channel_init.py input.toml init.restart
-#   mpirun -n 4 ../../build3d/src/Mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
+#   mpirun -n 2 ../../build3d/src/Mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
 #   python ../../tools/plane_average.py stats/channel_<last>.pvtu --average x z --out profile.csv
 #   python ../../tools/plot_channel.py input.toml profile.csv forces_bottom.csv forces_top.csv --t-start 120 --t-end 320
-#   python ../../tools/animate_channel.py input.toml frames/*.restart --out channel --u-tau 0.0614
+#   python ../../tools/animate_channel.py input.toml frames/*.restart --out channel --u-tau 0.0643
 # (frames: restart files every 500 steps of a continuation run, 120 of them
 # for the 8-second animation)
 #
 # The initial state (a turbulent-like mean profile and a random
 # divergence-free perturbation) breaks down to turbulence within about
 # 1 h/u_tau; the wall shear settles by t = 80 h/U_b (5 h/u_tau, with
-# h/u_tau = 16.3 h/U_b), and the statistics (restart-carried, so they survive
+# h/u_tau = 15.6 h/U_b), and the statistics (restart-carried, so they survive
 # restarts) average from t = 120.
 #
-# Cost: 3.28e-4 h/U_b per step (acoustic CFL at the wall cells), 978,000
-# steps to t = 320 at 17-19 ms each on four A100s: 5 hours.
+# Cost: 6.56e-4 h/U_b per step (acoustic CFL at the wall cells), 489,000
+# steps to t = 320 at 17 ms each on two A100s: 2.3 hours.
 
 [run]
 t_stop = 320.0
@@ -100,6 +116,7 @@ mass_flow = [1.0, 0.0, 0.0]
 
 [numerics]
 riemann_solver = "HLLC"
+convective_flux = "hybrid"
 time_integrator = "SSPRK3"
 check_nan = true
 
@@ -121,6 +138,10 @@ fields = ["RHO", "U_X", "U_Y", "U_Z", "P", "T"]
 products = ["U_X*U_X", "U_Y*U_Y", "U_Z*U_Z", "U_X*U_Y"]
 t_start = 120.0
 interval = 10
+
+[integrals]
+interval = 100
+budget = true
 
 [output]
 check_interval = 1000
@@ -144,4 +165,4 @@ variables = ["MEAN_*", "COV_*"]
 [[write_data]]
 prefix = "./restart/channel"
 format = "restart"
-interval = 10000
+time_interval = 20.0

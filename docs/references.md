@@ -67,6 +67,41 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="sutherland-1893"></a>W. Sutherland, The viscosity of gases and molecular force, *Phil. Mag.* (5) 36, 507–531 (1893). [doi:10.1080/14786449308620508](https://doi.org/10.1080/14786449308620508)
   Used in: `viscosity_model = "sutherland"`.
 
+## Large-eddy simulation
+
+- <a id="smagorinsky-1963"></a>J. Smagorinsky, General circulation experiments with the primitive equations, *Mon. Weather Rev.* 91, 99–164 (1963). [doi:10.1175/1520-0493(1963)091<0099:GCEWTP>2.3.CO;2](https://doi.org/10.1175/1520-0493%281963%29091%3C0099%3AGCEWTP%3E2.3.CO%3B2)
+  Used in: `[les] model = "smagorinsky"`.
+- <a id="deardorff-1970"></a>J. W. Deardorff, A numerical study of three-dimensional turbulent channel flow at large Reynolds numbers, *J. Fluid Mech.* 41, 453–480 (1970). [doi:10.1017/S0022112070000691](https://doi.org/10.1017/S0022112070000691)
+  Used in: the LES filter width `V^(1/3)`.
+- <a id="nicoud-ducros-1999"></a>F. Nicoud and F. Ducros, Subgrid-scale stress modelling based on the square of the velocity gradient tensor, *Flow Turbul. Combust.* 62, 183–200 (1999). [doi:10.1023/A:1009995426001](https://doi.org/10.1023/A:1009995426001)
+  Used in: `[les] model = "wale"`.
+- <a id="vreman-2004"></a>A. W. Vreman, An eddy-viscosity subgrid-scale model for turbulent shear flow: algebraic theory and applications, *Phys. Fluids* 16, 3670–3681 (2004). [doi:10.1063/1.1785131](https://doi.org/10.1063/1.1785131)
+  Used in: `[les] model = "vreman"`.
+- <a id="nicoud-2011"></a>F. Nicoud, H. Baya Toda, O. Cabrit, S. Bose and J. Lee, Using singular values to build a subgrid-scale model for large eddy simulations, *Phys. Fluids* 23, 085106 (2011). [doi:10.1063/1.3623274](https://doi.org/10.1063/1.3623274)
+  Used in: `[les] model = "sigma"` (the default in 3D), its constant and the closed-form singular values; the table of model properties checked in `test/les_test.cpp`.
+- <a id="vreman-geurts-kuerten-1995"></a>B. Vreman, B. Geurts and H. Kuerten, Subgrid-modelling in LES of compressible flow, *Appl. Sci. Res.* 54, 191–203 (1995). [doi:10.1007/BF00849116](https://doi.org/10.1007/BF00849116)
+  Used in: the SGS terms of the filtered energy equation that are kept and neglected.
+- <a id="garnier-adams-sagaut-2009"></a>E. Garnier, N. Adams and P. Sagaut, *Large Eddy Simulation for Compressible Flows*, Springer (2009). [doi:10.1007/978-90-481-2819-8](https://doi.org/10.1007/978-90-481-2819-8)
+  Used in: the Favre-filtered equations and the eddy-viscosity closure of the SGS heat flux.
+- <a id="ghosal-1996"></a>S. Ghosal, An analysis of numerical errors in large-eddy simulations of turbulence, *J. Comput. Phys.* 125, 187–206 (1996). [doi:10.1006/jcph.1996.0088](https://doi.org/10.1006/jcph.1996.0088)
+  Used in: the motivation of the kinetic-energy budget (`[integrals] budget`), which separates the scheme's dissipation from the model's.
+- <a id="kuya-totani-kawai-2018"></a>Y. Kuya, K. Totani and S. Kawai, Kinetic energy and entropy preserving schemes for compressible flows by split convective forms, *J. Comput. Phys.* 375, 823–853 (2018). [doi:10.1016/j.jcp.2018.08.058](https://doi.org/10.1016/j.jcp.2018.08.058)
+  Used in: the central (KEEP) flux of `convective_flux = "hybrid"` (`riemann::KEEP`).
+- <a id="jameson-2008"></a>A. Jameson, Formulation of kinetic energy preserving conservative schemes for gas dynamics and direct numerical simulation of one-dimensional viscous compressible flow in a shock tube using entropy and kinetic energy preserving schemes, *J. Sci. Comput.* 34, 188–208 (2008). [doi:10.1007/s10915-007-9172-6](https://doi.org/10.1007/s10915-007-9172-6)
+  Used in: the condition on the momentum flux under which the central flux changes the kinetic energy only by the pressure work (tested in `test/les_test.cpp`).
+- <a id="ducros-1999"></a>F. Ducros, V. Ferrand, F. Nicoud, C. Weber, D. Darracq, C. Gacherieu and T. Poinsot, Large-eddy simulation of the shock/turbulence interaction, *J. Comput. Phys.* 152, 517–549 (1999). [doi:10.1006/jcph.1999.6238](https://doi.org/10.1006/jcph.1999.6238)
+  Used in: the shock sensor of the hybrid flux.
+- <a id="bhagatwala-lele-2009"></a>A. Bhagatwala and S. K. Lele, A modified artificial viscosity approach for compressible turbulence simulations, *J. Comput. Phys.* 228, 4965–4969 (2009). [doi:10.1016/j.jcp.2009.04.009](https://doi.org/10.1016/j.jcp.2009.04.009)
+  Used in: restricting the Ducros sensor to compressions, so expansions and flames keep the central flux.
+- <a id="colin-2000"></a>O. Colin, F. Ducros, D. Veynante and T. Poinsot, A thickened flame model for large eddy simulations of turbulent premixed combustion, *Phys. Fluids* 12, 1843–1863 (2000). [doi:10.1063/1.870436](https://doi.org/10.1063/1.870436)
+  Used in: `[les.combustion] model = "tfles"`, and its subgrid velocity `2 Delta^3 |lap(curl u)|`.
+- <a id="charlette-2002"></a>F. Charlette, C. Meneveau and D. Veynante, A power-law flame wrinkling model for LES of premixed turbulent combustion. Part I: non-dynamic formulation and initial tests, *Combust. Flame* 131, 159–180 (2002). [doi:10.1016/S0010-2180(02)00400-5](https://doi.org/10.1016/S0010-2180%2802%2900400-5)
+  Used in: the efficiency `E` of the thickened flame (`efficiency = "charlette"`).
+- <a id="legier-2002"></a>J.-P. Légier, T. Poinsot, B. Varoquié, F. Lacas and D. Veynante, Large eddy simulation of a non-premixed turbulent burner using a dynamically thickened flame model, in *Advances in LES of Complex Flows*, Springer, 315–326 (2002). [doi:10.1007/978-94-017-1998-8_27](https://doi.org/10.1007/978-94-017-1998-8_27)
+  Used in: thickening only where the flame sensor is on (dynamic thickening).
+- <a id="butler-orourke-1977"></a>T. D. Butler and P. J. O'Rourke, A numerical method for two dimensional unsteady reacting flows, *Proc. Combust. Inst.* 16, 1503–1515 (1977). [doi:10.1016/S0082-0784(77)80432-3](https://doi.org/10.1016/S0082-0784%2877%2980432-3)
+  Used in: the thickening transformation `D -> F D`, `omega -> omega / F` that keeps the laminar flame speed.
+
 ## Boundary conditions
 
 - <a id="poinsot-lele-1992"></a>T. J. Poinsot and S. K. Lele, Boundary conditions for direct simulations of compressible viscous flows, *J. Comput. Phys.* 101, 104–129 (1992). [doi:10.1016/0021-9991(92)90046-2](https://doi.org/10.1016/0021-9991%2892%2990046-2)
@@ -141,6 +176,10 @@ The numerical methods Mallard implements and the reference data it is validated 
 
 ## Validation cases and reference data
 
+- <a id="comte-bellot-corrsin-1971"></a>G. Comte-Bellot and S. Corrsin, Simple Eulerian time correlation of full- and narrow-band velocity signals in grid-generated, 'isotropic' turbulence, *J. Fluid Mech.* 48, 273–337 (1971). [doi:10.1017/S0022112071001599](https://doi.org/10.1017/S0022112071001599)
+- <a id="saad-2017"></a>T. Saad, D. Cline, R. Stoll and J. C. Sutherland, Scalable tools for generating synthetic isotropic turbulence with arbitrary spectra, *AIAA J.* 55, 327–331 (2017). [doi:10.2514/1.J055230](https://doi.org/10.2514/1.J055230)
+  Used in (these two): `examples/cbc_les` (LES of decaying grid turbulence); the measured spectra at the three stations as tabulated with the second's TurboGenPY (`examples/cbc_les/reference/cbc_spectra.csv`, in SI units).
+
 - <a id="fedkiw-merriman-osher-1997"></a>R. P. Fedkiw, B. Merriman and S. Osher, High accuracy numerical methods for thermally perfect gas flows with chemistry, *J. Comput. Phys.* 132, 175–190 (1997). [doi:10.1006/jcph.1996.5622](https://doi.org/10.1006/jcph.1996.5622)
 - <a id="martinez-ferrer-2014"></a>P. J. Martínez Ferrer, R. Buttay, G. Lehnasch and A. Mura, A detailed verification procedure for compressible reactive multicomponent Navier–Stokes solvers, *Comput. Fluids* 89, 88–110 (2014). [doi:10.1016/j.compfluid.2013.10.014](https://doi.org/10.1016/j.compfluid.2013.10.014)
   Used in (these two): `examples/reactive_shock_tube` (the reflected-shock ignition of 2H2–O2–7Ar).
@@ -195,3 +234,8 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: `examples/noh_axisymmetric` and `tools/plot_noh.py` (the spherical Noh problem and its exact solution).
 - <a id="clift-grace-weber-1978"></a>R. Clift, J. R. Grace and M. E. Weber, *Bubbles, Drops, and Particles*, Academic Press (1978).
   Used in: `examples/sphere_axisymmetric` and `tools/plot_sphere_axisymmetric.py` (correlations of the drag coefficient and the separation angle of a sphere in steady flow, 20 < Re < 260), with [Johnson & Patel (1999)](#johnson-patel-1999) for the wake length.
+- <a id="sankaran-2005"></a>R. Sankaran, H. G. Im, E. R. Hawkes and J. H. Chen, The effects of non-uniform temperature distribution on the ignition of a lean homogeneous hydrogen–air mixture, *Proc. Combust. Inst.* 30, 875–882 (2005). [doi:10.1016/j.proci.2004.08.176](https://doi.org/10.1016/j.proci.2004.08.176)
+- <a id="chen-2006"></a>J. H. Chen, E. R. Hawkes, R. Sankaran, S. D. Mason and H. G. Im, Direct numerical simulation of ignition front propagation in a constant volume with temperature inhomogeneities: I. Fundamental analysis and diagnostics, *Combust. Flame* 145, 128–144 (2006). [doi:10.1016/j.combustflame.2005.09.017](https://doi.org/10.1016/j.combustflame.2005.09.017)
+- <a id="hawkes-2006"></a>E. R. Hawkes, R. Sankaran, P. P. Pébay and J. H. Chen, Direct numerical simulation of ignition front propagation in a constant volume with temperature inhomogeneities: II. Parametric study, *Combust. Flame* 145, 145–159 (2006). [doi:10.1016/j.combustflame.2005.09.018](https://doi.org/10.1016/j.combustflame.2005.09.018)
+- <a id="passot-pouquet-1987"></a>T. Passot and A. Pouquet, Numerical simulation of compressible homogeneous flows in the turbulent regime, *J. Fluid Mech.* 181, 441–466 (1987). [doi:10.1017/S0022112087002167](https://doi.org/10.1017/S0022112087002167)
+  Used in: `examples/autoignition_2d` (the configuration of Chen et al. and Hawkes et al., the displacement-speed diagnostic of their fronts, and the regime criterion of Sankaran et al. in `tools/autoignition_analysis.py`; the Passot–Pouquet spectrum of the initial temperature and velocity fields in `tools/autoignition_restart.py`).

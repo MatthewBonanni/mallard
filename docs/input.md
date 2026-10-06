@@ -13,7 +13,7 @@ The spatial dimension is fixed at build time with the CMake option
 
 | Key | Description |
 |---|---|
-| `cfl` | CFL number in the usual unstructured convention ([Blazek](references.md#blazek-2015) eqs. 6.20-6.21; see [time step](numerics/overview.md)): on a uniform 2D grid of spacing h, `dt = cfl * h / (abs(u) + abs(v) + 2a)`. Measured stability limits for smooth flow are 1.26-1.6 with SSPRK3 and 1.39-1.8 with RK4, depending on reconstruction and cell type ([table](numerics/overview.md#time-step)): use at most 1.2 (SSPRK3) or 1.35 (RK4), and 1.0 with SSPRK3 as a robust default, shocks included; with `[chemistry]` the splitting error may call for less (detonations: about 0.35). Mallard 0.5 and earlier inputs give the same time step with half their `cfl`. Exactly one of `cfl` and `dt` is required. |
+| `cfl` | CFL number in the usual unstructured convention ([Blazek](references.md#blazek-2015) eqs. 6.20-6.21; see [time step](numerics/overview.md)): on a uniform 2D grid of spacing h, `dt = cfl * h / (abs(u) + abs(v) + 2a)`. Measured stability limits for smooth flow are 1.26-1.6 with SSPRK3 and 1.39-1.8 with RK4, depending on reconstruction and cell type ([table](numerics/overview.md#time-step)): use at most 1.2 (SSPRK3) or 1.35 (RK4), and 1.0 with SSPRK3 as a robust default, shocks included (but 0.25 for the Noh problem's infinite-strength shock with `bound_preserving`); with `[chemistry]` the splitting error may call for less (detonations: about 0.35). Mallard 0.5 and earlier inputs give the same time step with half their `cfl`. Exactly one of `cfl` and `dt` is required. |
 | `dt` | Fixed time step |
 | `t_stop` | Stop at this simulation time (the last step is shortened to land on it) |
 | `n_steps` | Stop after this many steps |
@@ -162,6 +162,68 @@ and conserved totals are per radian of the revolved domain (multiply forces by
 mixture model, chemistry and MPI work as in planar runs; meshes cannot be
 periodic in y. Method and accuracy: `docs/design/axisymmetric.md`.
 
+## `[les]`
+
+Large-eddy simulation with an explicit subgrid-scale (SGS) model
+(`navier_stokes` only, single gases and mixtures, planar runs). The model's
+eddy viscosity `mu_t = rho nu_t` is added to the molecular viscosity, with
+`cp mu_t / Pr_t` added to the conductivity and `mu_t / Sc_t` to every
+species' diffusivity (mixtures: in the mixture-averaged form, so the
+diffusive fluxes still sum to zero). Wall faces keep the molecular fluxes. The
+eddy viscosity of each cell comes from its least-squares velocity gradient
+`g_ij = du_i/dx_j`, with the filter width `Delta = V^(1/3)` (3D) or `A^(1/2)`
+(2D) of the cell; the time step includes it. Design, choices and validation:
+[`design/les.md`](design/les.md).
+
+| Key | Description |
+|---|---|
+| `model` | `sigma` (default in 3D), `wale` (default in 2D), `vreman` or `smagorinsky`; see below |
+| `C` | Model constant; defaults 1.35 (Sigma), 0.5 (WALE), 0.07 (Vreman's `c`), 0.17 (Smagorinsky) |
+| `Pr_t` | Turbulent Prandtl number, default 0.9 |
+| `Sc_t` | Turbulent Schmidt number, default 0.9 |
+
+| `model` | `nu_t` | Zero for |
+|---|---|---|
+| `sigma` (Nicoud et al. 2011) | `(C Delta)^2 s3 (s1 - s2)(s2 - s3) / s1^2`, `s1 >= s2 >= s3` the singular values of `g` | pure shear, solid rotation, two-dimensional flows (so not allowed in 2D builds), isotropic and axisymmetric expansion; `~ y^3` at walls |
+| `wale` (Nicoud & Ducros 1999) | `(C Delta)^2 (Sd:Sd)^(3/2) / ((S:S)^(5/2) + (Sd:Sd)^(5/4))`, `Sd` the traceless symmetric part of `g^2` | pure shear, isotropic expansion; `~ y^3` at walls |
+| `vreman` (Vreman 2004) | `c Delta^2 sqrt(B / (g:g))`, `B` the second invariant of `g g^T` | pure shear |
+| `smagorinsky` (Smagorinsky 1963) | `(C Delta)^2 sqrt(2 S:S)` | solid rotation (no wall damping: for comparisons only) |
+
+`MU_T` (output variable) is the eddy viscosity. `[integrals] budget = true`
+measures how much of the kinetic-energy dissipation comes from the model and
+how much from the scheme.
+
+### `[les.combustion]`
+
+Turbulence-chemistry interaction of reacting LES (a viscous mixture with
+`[chemistry]`) by the dynamically thickened flame model (TFLES; Colin et al.
+2000, Légier et al. 2002): where a flame is, its species diffusivities and
+conductivity are multiplied by `E F` and its reaction rates by `E / F`, which
+keeps the laminar flame speed and thickens the flame by `F` so that it spans
+`n_res` cells; the efficiency `E` restores the flame-surface wrinkling of the
+subgrid scales (Charlette, Meneveau & Veynante 2002, `beta = 0.5`, at the
+filter width `F delta_L`, with the subgrid velocity
+`u' = 2 Delta^3 |lap(curl u)|` of Colin et al.). `F = 1 + (max(1, n_res Delta /
+delta_L) - 1) Omega` with the flame sensor `Omega = min(1, c (1 - c) /
+0.0475)` of the progress variable `c = (T - T_unburnt) / (T_burnt -
+T_unburnt)`, so `Omega = 1` across the whole flame (`0.05 <= c <= 0.95`) and 0
+in fresh and burnt gas, where the molecular and SGS transport are unchanged.
+In the flame the SGS heat and species fluxes are multiplied by `1 - Omega`.
+The rates are scaled by integrating each cell's Strang reactor over `E / F`
+times the half step (exact for the autonomous constant-volume reactor).
+`F`, `E` and `Omega` are computed once per step from the state, and written as
+`TF_F`, `TF_E`, `TF_OMEGA`. Design: [`design/les.md`](design/les.md), section 6.
+
+| Key | Description |
+|---|---|
+| `model` | `tfles` |
+| `delta_L` | Laminar thermal thickness `(T_b - T_u) / max dT/dx` of the flame (m), e.g. from Cantera |
+| `s_L` | Laminar flame speed (m/s) |
+| `T_unburnt`, `T_burnt` | Temperatures of the fresh and burnt gas (K) |
+| `n_res` | Cells across the thickened flame, default 5 |
+| `efficiency` | `charlette` (default) or `none` (`E = 1`) |
+| `beta` | Exponent of the Charlette efficiency, default 0.5 |
+
 ## `[initialize]`
 
 | Key | Description |
@@ -172,7 +234,7 @@ periodic in y. Method and accuracy: `docs/design/axisymmetric.md`.
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
 | `balance` | (mixtures, `analytical`) Species taking `1 - sum` of the listed fractions; without it the listed fractions are normalized |
 | `n_subdivisions` | (`analytical`) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is split into `n_subdivisions`³ sub-tetrahedra, each with a 14-point degree-5 rule (default 1) |
-| `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, or 3 when they also hold the weights of `[statistics]` averages) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read |
+| `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, 3 when they also hold the weights of `[statistics]` averages, or 4 when they also hold the state of characteristic boundary faces) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read |
 
 Expressions use [exprtk](https://www.partow.net/programming/exprtk/) syntax, e.g. `"x < 0.5 ? 1.0 : 0.125"`.
 
@@ -202,8 +264,10 @@ Characteristic conditions change only the exterior state of the convective
 flux; viscous terms treat them like `extrapolation` (image faces, or zero
 normal derivatives: the outflow conditions of Poinsot & Lele). MUSCL boundary
 cells leave out their ghosts across them, so that waves leave intact. Each face keeps its pressure and
-normal velocity between steps; a restart starts them afresh from the
-solution. See [docs/design/nscbc.md](design/nscbc.md).
+normal velocity between steps, and restart files carry them, so a restarted
+run reproduces an uninterrupted one bitwise, also on a different number of
+ranks (restart files older than version 4 start them afresh from the
+solution). See [docs/design/nscbc.md](design/nscbc.md).
 
 ## `[[sponges]]`
 
@@ -226,6 +290,14 @@ Strength and reference are evaluated once at cell centroids.
 | `check_nan` | Stop if the solution becomes non-finite |
 | `double_flux` | (gas mixtures) `true` for the double-flux scheme: each cell's energy is updated with its own `cp / cv` and energy offset frozen over the time step on both sides of its faces, and reset to the true equation of state after the step, so pressure and velocity stay exactly uniform across contacts between different gases. Energy is then not exactly conserved (about 0.2% over a multicomponent shock tube). Default `false` |
 | `low_mach_cutoff` | Low-Mach correction of the convective flux: the velocity jump across each interior face is scaled by `z = min(1, max(M_L, M_R, low_mach_cutoff))` before the Riemann solver, so that upwind dissipation scales with the flow speed rather than the sound speed. Default 0.1; 1 disables it. See [`numerics/overview.md`](numerics/overview.md) |
+| `convective_flux` | `riemann` (default): the Riemann solver at every face; `hybrid`: the kinetic-energy-preserving central flux of Kuya, Totani & Kawai (2018) on the same reconstructed states, blended into the Riemann solver where a shock sensor fires, `F = F_KEEP + phi (F_Riemann - F_KEEP)`. For large-eddy simulation: the central flux adds no dissipation, so the SGS model does the work (see `[integrals] budget`). `phi` is the larger of the face's two cells': 1 where the Ducros sensor restricted to compressions, `(div u)^2 / ((div u)^2 + |omega|^2)` with `div u < 0`, exceeds `sensor_threshold`, else `upwind_floor`. Boundary faces other than walls and symmetry planes use the Riemann solver. Species stay upwinded with the blended mass flux. Contacts and expansions are central: on Sod's problem the density error is about 1.8 times the Riemann solver's, with a 0.1% overshoot at the contact |
+
+### `[numerics.hybrid]`
+
+| Key | Description |
+|---|---|
+| `sensor_threshold` | Ducros sensor above which a cell compressing the flow is a shock, default 0.65 (1 disables the Riemann solver) |
+| `upwind_floor` | Upwind fraction of the other cells, default 0; a small value (e.g. 0.05) damps grid-scale noise on very irregular meshes, at the cost of numerical dissipation the budget then reports |
 
 ### `[numerics.face_reconstruction]`
 
@@ -319,6 +391,7 @@ rate is `-dE/dt` and its viscous part `2 mu * enstrophy / rho0`.
 |---|---|
 | `interval` | Every this many steps, default 1 |
 | `file` | Output file, default `integrals.csv` |
+| `budget` | `true` adds the kinetic-energy budget (planar runs): `ke_rate_convective`, `ke_rate_viscous` and `ke_rate_sgs`, the rates of change of the resolved kinetic energy `sum V rho |u|^2 / 2` caused by the convective, molecular viscous and SGS fluxes of the current state (each `sum V (u . R_m - |u|^2 / 2 R_rho)` over that part `R` of the right-hand side), and `eps_numerical = pressure_dilatation - ke_rate_convective`, the scheme's dissipation of kinetic energy (the convective terms of the exact equations change the kinetic energy of a periodic or walled domain only by the pressure work). `-ke_rate_viscous` and `-ke_rate_sgs` are the molecular and SGS dissipation. Costs one extra right-hand side per row and leaves the solution unchanged. Default `false` |
 
 ## `[statistics]`
 
@@ -464,5 +537,7 @@ CSV (`t`, `T`, `p`, `Y_<species>`). It reads `[physics]` (`mechanism`,
 | `[chemistry] sparse` | The linear solver, as in the solver's `[chemistry]` |
 | `[benchmark]` | Instead of the run, a chemistry benchmark: states sampled along this reactor's trajectory, replicated over `cells` cells and advanced by the solver's chemistry kernels over each splitting step of `dt`; see `benchmarks/README.md` |
 
-It prints the ignition delay (time of the maximum of `dT/dt`) when `T` rose
-by more than 400 K. Example: `examples/h2_ignition`.
+It prints the ignition delay, the time of the maximum of `dT/dt`, once
+`dT/dt` has fallen below half that maximum by `end_time` (the runaway is over,
+however small the temperature rise of a lean mixture), and otherwise none.
+Example: `examples/h2_ignition`.

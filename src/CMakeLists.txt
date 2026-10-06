@@ -20,6 +20,8 @@ add_library(MallardCore STATIC
     numerics/teno.cpp
     numerics/time_integrator.cpp
     physics/mixture.cpp
+    physics/les.cpp
+    physics/tfles.cpp
     physics/physics.cpp
     solver/cell_chemistry.cpp
     solver/chemistry_benchmark.cpp
@@ -28,6 +30,7 @@ add_library(MallardCore STATIC
     solver/solver_graph.cpp
     solver/solver_initialize.cpp
     solver/solver_mixture.cpp
+    solver/solver_les.cpp
     solver/solver_rhs.cpp
     solver/solver_sponge.cpp
     solver/statistics.cpp

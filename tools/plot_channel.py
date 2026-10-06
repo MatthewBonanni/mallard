@@ -13,9 +13,9 @@ several runs) from --t-start on, the same window as the statistics, and sets
 u_tau = sqrt(tau_w / rho_w) and nu_w = mu / rho_w at the walls. --half adds a
 profile averaged over the first part of the window, to show convergence.
 
-Reference data (Re_tau = 178.12, Phys. Fluids 11, 943, doi:10.1063/1.869966;
+Reference data (--retau 180, 395 or 590: Re_tau = 178.12, 392.24 or 587.19; Phys. Fluids 11, 943, doi:10.1063/1.869966;
 method of Kim, Moin & Moser, J. Fluid Mech. 177, 133, doi:10.1017/S0022112087000892):
-chan180.means and chan180.reystress from the Turbulence Mapping data archive,
+chan<case>.means and chan<case>.reystress from the Turbulence Mapping data archive,
 read from --mkm (downloaded there if missing).
 """
 import argparse
@@ -29,20 +29,22 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from channel_init import grid, nodes  # noqa: E402
 
-MKM_URL = "https://turbulence.oden.utexas.edu/data/MKM/chan180/profiles/"
+MKM_URL = "https://turbulence.oden.utexas.edu/data/MKM/chan{0}/profiles/"
+MKM_RE_TAU = {180: 178.12, 395: 392.24, 590: 587.19}
 
 
-def mkm(directory):
+def mkm(directory, case=180):
     os.makedirs(directory, exist_ok=True)
     data = {}
-    for name in ("chan180.means", "chan180.reystress"):
+    for kind in ("means", "reystress"):
+        name = f"chan{case}.{kind}"
         path = os.path.join(directory, name)
         if not os.path.exists(path):
-            urllib.request.urlretrieve(MKM_URL + name, path)
-        data[name] = np.loadtxt(path, comments="#")
-    m, r = data["chan180.means"], data["chan180.reystress"]
+            urllib.request.urlretrieve(MKM_URL.format(case) + name, path)
+        data[kind] = np.loadtxt(path, comments="#")
+    m, r = data["means"], data["reystress"]
     return {"y": m[:, 0], "yp": m[:, 1], "U": m[:, 2], "uu": r[:, 2], "vv": r[:, 3], "ww": r[:, 4],
-            "uv": r[:, 5], "Re_tau": 178.12, "Ub": np.trapezoid(m[:, 2], m[:, 0])}
+            "uv": r[:, 5], "Re_tau": MKM_RE_TAU[case], "Ub": np.trapezoid(m[:, 2], m[:, 0])}
 
 
 def read_profile(path, h):
@@ -90,6 +92,7 @@ def main():
     ap.add_argument("--half", help="profile over the first part of the window")
     ap.add_argument("--half-label", default="first part of the window", help="legend of --half")
     ap.add_argument("--mkm", default=os.path.expanduser("~/.cache/mallard/mkm"))
+    ap.add_argument("--retau", type=int, default=180, choices=sorted(MKM_RE_TAU), help="MKM case to compare with")
     ap.add_argument("--out", default="channel.png")
     args = ap.parse_args()
     import matplotlib
@@ -102,7 +105,7 @@ def main():
     Lx, Ly, Lz = (float(inp["mesh"][k]) for k in ("Lx", "Ly", "Lz"))
     h = Ly / 2
     m_b = float(np.linalg.norm(inp["source"]["mass_flow"]))  # rho_b U_b
-    ref = mkm(args.mkm)
+    ref = mkm(args.mkm, args.retau)
 
     t, F = read_forces(args.forces)
     tau_t = F / (2 * Lx * Lz)  # both walls
@@ -140,7 +143,7 @@ def main():
 
     lines = [
         f"averaging window: t = {args.t_start:g} to {t[win][-1]:g} h/U_b = {window:.1f} h/u_tau",
-        f"Re_tau = {Re_tau:.1f} (MKM 178.1), u_tau / U_b = {u_tau / U_b:.5f} (MKM {1 / ref['Ub']:.5f})",
+        f"Re_tau = {Re_tau:.1f} (MKM {ref['Re_tau']:.1f}), u_tau / U_b = {u_tau / U_b:.5f} (MKM {1 / ref['Ub']:.5f})",
         f"Cf = {Cf:.5f} (MKM {Cf_mkm:.5f}, {100 * (Cf / Cf_mkm - 1):+.1f}%; Dean {Cf_dean:.5f}), Re_b = {Re_b:.0f}",
         f"U_b+ = {U_b / u_tau:.2f} (MKM {ref['Ub']:.2f}), U_c+ = {s['U'][-1]:.2f} (MKM {ref['U'][-1]:.2f})",
     ]
@@ -164,7 +167,7 @@ def main():
     yy = np.logspace(0, 2.4)
     a.semilogx(yy[yy < 12], yy[yy < 12], ":", color="0.5", lw=0.8)
     a.semilogx(yy[yy > 20], np.log(yy[yy > 20]) / 0.41 + 5.2, ":", color="0.5", lw=0.8)
-    a.set(xlabel="$y^+$", ylabel="$U^+$", xlim=(0.3, 200), title="Mean velocity")
+    a.set(xlabel="$y^+$", ylabel="$U^+$", xlim=(0.3, 1.1 * ref["Re_tau"]), title="Mean velocity")
     a.legend(frameon=False)
     for a, key, label in ((ax[0, 1], "u", "$u_{rms}^+$"), (ax[0, 2], "v", "$v_{rms}^+$"),
                           (ax[1, 0], "w", "$w_{rms}^+$"), (ax[1, 1], "uv", "$-\\overline{u'v'}^+$")):
@@ -173,16 +176,16 @@ def main():
         a.plot(s["yp"], sign * s[key], "o", ms=3.5, mfc="none", color="C0", label="Mallard")
         if half:
             a.plot(half["yp"], sign * half[key], "-", color="C1", lw=0.8, label=args.half_label)
-        a.set(xlabel="$y^+$", ylabel=label, xlim=(0, 180))
+        a.set(xlabel="$y^+$", ylabel=label, xlim=(0, ref["Re_tau"]))
     ax[1, 1].plot(r["yp"], 1 - r["yp"] / ref["Re_tau"], ":", color="0.5", lw=0.8, label="total stress $1 - y/h$")
     ax[1, 1].legend(frameon=False)
     a = ax[1, 2]
     Re_t = np.sqrt(tau_t / rho_w) * h / nu_w
     a.plot(t * u_tau / h, Re_t, color="C0", lw=0.6)
     a.axvspan(args.t_start * u_tau / h, t[win][-1] * u_tau / h, color="C0", alpha=0.08, label="averaging window")
-    a.axhline(178.12, color="k", lw=1.0, label="MKM")
+    a.axhline(ref["Re_tau"], color="k", lw=1.0, label="MKM")
     a.set(xlabel="$t u_\\tau / h$", ylabel="$Re_\\tau(t)$ from the wall shear", title="Wall shear history",
-          ylim=(140, 220))
+          ylim=(0.8 * ref["Re_tau"], 1.2 * ref["Re_tau"]))
     a.legend(frameon=False)
     fig.suptitle(f"Channel flow, $Re_\\tau$ = {Re_tau:.1f}: Mallard vs Moser, Kim & Mansour (1999)")
     fig.tight_layout()

@@ -82,7 +82,10 @@ shocks call for some margin, and 1.0 with SSPRK3 is a good default. Shocks do
 not lower the limit much: on the 200-cell Sod and Shu-Osher problems (TENO5,
 SSPRK3) the density L1 error is unchanged (within 1%) from `cfl` = 0.25 to 1.0,
 Shu-Osher's then grows by 4% at 1.2 and 11% at 1.4, and the double Mach
-reflection (on 240 x 60 blocks) runs at 1.2. With chemistry the splitting
+reflection (on 240 x 60 blocks) runs at 1.2. Bound-preserving TENO keeps
+density and pressure positive only at smaller steps in the most extreme
+cases: the Noh problem (`examples/noh_axisymmetric`) needs `cfl` = 0.25 and
+goes to negative pressure at 0.5, while the Sedov blasts run at 1.0. With chemistry the splitting
 error can bind first: the 1D CJ detonation of `examples/detonation_1d` keeps
 its ZND induction length within 5% up to `cfl` = 0.35 but not at 0.5 (-5.5%) or
 1.0 (-25%), while the premixed flame's speed is the same to 0.001% at 0.2 and
@@ -150,6 +153,15 @@ order, about four times larger than without the correction.
 `z` uses lab-frame velocities, so the scheme is not Galilean invariant. A
 shock moving into gas at rest sees `z < 1` on its upstream faces; Sod and
 Shu-Osher are unaffected, within 10% in L1 and without overshoots.
+
+The remaining upwind dissipation still matters for wall-bounded turbulence
+at DNS resolution. In the Re_tau = 180 channel (`examples/channel_retau180`;
+dx+ = 12, dz+ = 6, MUSCL) HLLC removes about 7% of the kinetic-energy
+dissipation and the wall shear comes out 7% low; Roe is the same, the
+cutoff 0.01 gains 1%, and without the correction it is 23% low. Halving dx
+and dz brings HLLC to within 1% of the reference; the `hybrid` convective
+flux does so on the original mesh (0.9% numerical dissipation, wall shear 2%
+high).
 
 ## Boundary conditions
 

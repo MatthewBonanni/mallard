@@ -23,11 +23,11 @@
 # 0.01286 at t = 8.97. Nx = 64 gives 0.01302 at t = 8.12: TENO's numerical
 # dissipation stands in for the unresolved scales (the enstrophy-based
 # 2 mu E_omega only reaches 0.0049), so the peak comes early. Nx = 64
-# (262,144 cells, 32,000 steps) takes about an hour on one A100 GPU.
+# (262,144 cells, 12,900 steps) takes about 25 minutes on one A100 GPU.
 
 [run]
 t_stop = 20.0
-cfl = 0.4
+cfl = 1.0
 
 [mesh]
 type = "cartesian"

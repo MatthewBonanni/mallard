@@ -80,6 +80,10 @@ struct ActivityFunctor {
     Kokkos::View<uint32_t *> active;
     uint32_t first;
     double dt, T_frozen, threshold;
+    Kokkos::View<rtype *> time_scale;  // per cell multiplier of dt (rates scaled by a combustion model), else empty
+
+    KOKKOS_INLINE_FUNCTION
+    double cell_dt(const uint32_t c) const { return time_scale.extent(0) > 0 ? dt * static_cast<double>(time_scale(c)) : dt; }
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i) const {
@@ -103,7 +107,7 @@ struct ActivityFunctor {
         kinetics.production_rates(q, omega);
         double rate = 0.0;
         for (uint32_t k = 0; k < ns; k++) rate = Kokkos::fmax(rate, Kokkos::fabs(omega[k]) / (rho * gas.thermo.inv_W(k)));
-        active(i) = dt * rate > threshold ? 1 : 0;
+        active(i) = cell_dt(c) * rate > threshold ? 1 : 0;
     }
 
     /** @brief The same by the lanes of a team (the same values: the rates do not depend on the lanes). */
@@ -141,7 +145,7 @@ struct ActivityFunctor {
         uint32_t where;
         const double rate = team.argmax_abs(0, ns, [&](const uint32_t k) { return omega[k] / (rho * gas.thermo.inv_W(k)); },
                                             where);
-        team.single([&]() { active(slot) = dt * rate > threshold ? 1 : 0; });
+        team.single([&]() { active(slot) = cell_dt(c) * rate > threshold ? 1 : 0; });
     }
 
     uint32_t lanes = 1;
@@ -191,6 +195,10 @@ struct AdvanceFunctor {
     chemistry::SparseLUPattern<> pattern;
     bool sparse;
     uint32_t fast_size;  // doubles of team scratch for the work memory, 0: global memory
+    Kokkos::View<rtype *> time_scale;  // see ActivityFunctor
+
+    KOKKOS_INLINE_FUNCTION
+    double cell_dt(const uint32_t c) const { return time_scale.extent(0) > 0 ? dt * static_cast<double>(time_scale(c)) : dt; }
 
     /** @brief One thread per cell. */
     KOKKOS_INLINE_FUNCTION
@@ -202,7 +210,7 @@ struct AdvanceFunctor {
         const double rho = static_cast<double>(U(c, 0));
         double h = static_cast<double>(chem_h(c));
         const chemistry::RosenbrockResult r =
-            chemistry::advance_reactor(gas.thermo, kinetics, rho, dt, Y, T, h, options, Y + ns, &pivot(i, 0),
+            chemistry::advance_reactor(gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options, Y + ns, &pivot(i, 0),
                                        chemistry::NoObserver(), sparse ? &pattern : nullptr);
         for (uint32_t k = 0; k < ns; k++) rhoY(c, k) = static_cast<rtype>(rho * Y[k]);
         chem_h(c) = static_cast<rtype>(h);
@@ -228,7 +236,7 @@ struct AdvanceFunctor {
         double T = gas.thermo.T_from_e(e, chemistry::MassFractions{Y}, static_cast<double>(T_seed(c)));
         double h = static_cast<double>(chem_h(c));
         const chemistry::RosenbrockResult r =
-            chemistry::advance_reactor<Sparse>(team, gas.thermo, kinetics, rho, dt, Y, T, h, options, Y + ns,
+            chemistry::advance_reactor<Sparse>(team, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options, Y + ns,
                                                &pivot(slot, 0), chemistry::NoObserver(), &pattern, fast);
         team.for_each(ns, [&](const uint32_t k) { rhoY(c, k) = static_cast<rtype>(rho * Y[k]); });
         team.single([&]() {
@@ -397,13 +405,13 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
                                                  const Kokkos::View<rtype *> & T_seed,
                                                  const Kokkos::View<rtype *> & chem_h,
                                                  const Kokkos::View<rtype *> & chem_cost, const uint32_t n,
-                                                 const double dt) {
+                                                 const double dt, const Kokkos::View<rtype *> & time_scale) {
     Statistics stats;
     const uint32_t chunk = static_cast<uint32_t>(work.extent(0));
     for (uint32_t first = 0; first < n; first += chunk) {
         const uint32_t m = std::min(chunk, n - first);
         const ActivityFunctor activity{gas,   kinetics, U,  rhoY,      T_seed, work, active, first,
-                                       dt,    options.T_frozen, 1e-2 * options.reactor.atol_Y, n_lanes};
+                                       dt,    options.T_frozen, 1e-2 * options.reactor.atol_Y, time_scale, n_lanes};
         if (n_lanes == 1) {
             Kokkos::parallel_for("chemistry_activity", HeavyRange<>(0, m), activity);
         } else {
@@ -426,7 +434,7 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
         }
         AdvanceFunctor functor{gas,  kinetics, U,     rhoY, T_seed,          chem_h, chem_cost, previous_cost,
                                work, pivot,    queue, 0u,   options.reactor, dt,     n_lanes,   pattern,
-                               sparse, static_cast<uint32_t>(fast_bytes / sizeof(double))};
+                               sparse, static_cast<uint32_t>(fast_bytes / sizeof(double)), time_scale};
         uint32_t failures = 0;
         if (n_lanes == 1) {
             Kokkos::parallel_reduce("chemistry_advance", HeavyRange<>(0, n_active), functor, Kokkos::Sum<uint32_t>(failures));
