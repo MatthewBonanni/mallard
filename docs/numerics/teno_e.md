@@ -81,7 +81,7 @@ for accuracy (expect design order on uniform triangles).
   | periodic prisms with a seam (12x4x8, aspect ratio 2, order 4) | 3.5 -> < 1e-7 |
   | jittered prisms (8^3, jitter 0.1, periodic), order 6 | 3.4 -> 1.4e-7 |
   | jittered prisms, aspect ratio 1.5, side walls, order 6 | 0.32 -> 7e-6 |
-  | Kuhn tetrahedra, aspect ratio 25, side walls, order 4 / 6 | 1.1 / 0.27 -> < 1e-7 |
+  | Kuhn tetrahedra, aspect ratio 25, side walls, order 4 / 6 | 1.1 / 0.27 -> 8e-8 / 0.022 |
   | mixed tilings (4^3), walls, order 4 / 6 | 0.19 / 0.08 -> 8e-4 / 1e-7 |
 
   Making only the near-degenerate cells first order removes these modes, and in
@@ -89,7 +89,8 @@ for accuracy (expect design order on uniform triangles).
   do not remove them. Order 6 on tetrahedra and pyramids reaches only 4.3 to 5;
   there the stencil is the smallest within 1.25 times the best Lebesgue constant
   found, since the best alone is often the largest stencil and up to twice as
-  inaccurate.
+  inaccurate. That leaves one slower mode, at order 6 on 25:1 Kuhn tetrahedra
+  with side walls (+0.022; +1e-7 with the best stencil).
 - Candidates are gathered by vertex-neighbor layers until there are enough interior
   cells; counting mirror images too would stop the search before the cells that
   are nearer than the farther images (rank-deficient order-6 stencils near walls).
