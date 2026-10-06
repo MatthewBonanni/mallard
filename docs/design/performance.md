@@ -80,6 +80,20 @@ its coefficients.
 | TENO5 explosion, 20^3 x 6 tetrahedra | 17.5 ms/step | 11.0 ms/step |
 | TENO3/TENO4 (degrees 2-3) | unchanged (per-thread kernel kept) | |
 
+### 2. TENO setup: stencil tables streamed to the device (host memory)
+
+The packed stencil tables (pseudo-inverses, stencil cells and faces) can only be sized on the device once every
+stencil is known, so the setup kept every packed chunk on the host until the end: 27 KB per cell for 3D TENO5.
+That host peak, more than device memory, set how many GPUs a large 3D run needs (#58). On CUDA each packed chunk
+now goes straight to the device, into a reserved address range whose pages are mapped as it fills (CUDA virtual
+memory management), so the host holds one chunk of 8192 cells at a time. The device arrays keep their exact sizes
+and single base addresses; results and step times are unchanged.
+
+| 3D TENO5, 64^3 hexahedra, one A100 | main | change 2 |
+|---|---|---|
+| host peak during setup | 8.55 GB (32.6 KB/cell) | 1.44 GB (5.5 KB/cell) |
+| device peak | 11.6 GB | 11.6 GB |
+
 ## Verification
 
 Bitwise identity with `main` is checked on restart files (identical MD5) after N steps of: the

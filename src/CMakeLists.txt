@@ -3,6 +3,7 @@ add_library(MallardCore STATIC
     common/common_math.cpp
     common/common_io.cpp
     common/build_info.cpp
+    common/growing_buffer.cpp
     common/log.cpp
     mesh/mesh.cpp
     mesh/mesh_io.cpp
