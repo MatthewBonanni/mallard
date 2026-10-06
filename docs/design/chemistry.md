@@ -1000,7 +1000,7 @@ the polynomial fits in `log T` that Cantera computes from the Lennard-Jones
 and polarity data in the YAML file (collision integrals of Monchick & Mason,
 fitted over the mechanism's temperature range). The fitting runs once on the
 host at setup. It is a port of Cantera's `GasTransport` fitting (BSD-3
-licensed, compatible with Mallard's AGPL with attribution); the test suite
+licensed; its license is in `licenses/Cantera-BSD-3-Clause.txt`); the test suite
 checks the fits against Cantera's to 1e-6 relative.
 
 ### Fluxes
