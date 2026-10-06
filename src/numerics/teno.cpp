@@ -43,11 +43,20 @@ namespace {
 constexpr double GEOMETRY_TOL = precision_tol<double>(1e-10, 1e-5);
 
 // Largest accepted Lebesgue constant of a central stencil's reconstruction at
-// the cell's face quadrature points. Stencils on regular hexahedra, prisms and
-// tetrahedra stay at 2-5; full-rank stencils that resolve a direction only
-// through small centroid offsets reach tens to hundreds and amplify the
-// truncation error alike.
-constexpr double MAX_LEBESGUE = 10.0;
+// the cell's face quadrature points. Full-rank stencils that resolve a
+// direction only through small centroid offsets reach tens to hundreds and
+// amplify the truncation error alike.
+constexpr double MAX_LEBESGUE_2D = 10.0;
+// In 3D a bound of 10 still accepts near-degenerate stencils wherever the ties
+// of a lattice are broken (mirror walls of prism, tetrahedral and mixed
+// tilings, seams, jittered meshes): their face values follow the cells across
+// the face, and the linearized scheme grows (#126, #229). Lattices are stable
+// up to about 10 only because their tie-complete shells skip those sizes.
+constexpr double MAX_LEBESGUE_3D = 4.0;
+// Where no stencil reaches it (order 6 on tetrahedra and pyramids: 4.3-5), the
+// smallest stencil within this factor of the best one found; the best alone is
+// often the largest stencil, and markedly less accurate
+constexpr double LEBESGUE_SLACK = 1.25;
 
 // Stencil candidates are ranked by distance in the metric of the local mesh
 // spacing where its largest to smallest spacing ratio exceeds this. Regular
@@ -1259,7 +1268,7 @@ void TENO::compute_stencils_and_matrices() {
         auto splits_tie = [&](const std::vector<Entry> & list, size_t n) {
             return n < list.size() && std::abs(dist2(list[n]) - dist2(list[n - 1])) < GEOMETRY_TOL * h * h;
         };
-        // The smallest stencil within MAX_LEBESGUE, else the best conditioned one
+        // The smallest stencil within MAX_LEBESGUE_2D, else the best conditioned one
         uint16_t n_used = ns;
         double best_lebesgue = std::numeric_limits<double>::max();
         for (uint16_t n_try = ns; n_try <= std::min<size_t>(ns_max, candidates.size()); n_try++) {
@@ -1274,7 +1283,7 @@ void TENO::compute_stencils_and_matrices() {
                 P = std::move(P_try);
                 ok = true;
             }
-            if (lebesgue <= MAX_LEBESGUE) break;
+            if (lebesgue <= MAX_LEBESGUE_2D) break;
         }
         if (!ok) {
             // A stencil cut off by the halo is retried once the halo is deep enough
@@ -2027,22 +2036,35 @@ void TENO::compute_stencils_and_matrices_3d() {
         std::vector<Entry> candidates = gather(ns_max, 64);
         std::vector<double> P;
         bool ok = false;
-        // The smallest stencil within MAX_LEBESGUE, else the best conditioned one
+        // The smallest stencil within MAX_LEBESGUE_3D, else the smallest within
+        // LEBESGUE_SLACK of the best conditioned one
         uint16_t n_used = ns;
-        double best_lebesgue = std::numeric_limits<double>::max();
+        std::vector<std::pair<uint16_t, double>> tried;
         for (uint16_t n_try = ns; n_try <= std::min<size_t>(ns_max, candidates.size()); n_try++) {
             if (splits_tie(candidates, n_try)) continue;
             std::vector<Entry> stencil(candidates.begin(), candidates.begin() + n_try);
             std::vector<double> P_try;
             if (!build_pinv(stencil, r, P_try)) continue;
             const double lebesgue = lebesgue_constant(psi_faces, nk, P_try, n_try);
-            if (lebesgue < best_lebesgue) {
-                best_lebesgue = lebesgue;
+            tried.emplace_back(n_try, lebesgue);
+            if (lebesgue <= MAX_LEBESGUE_3D) {
                 n_used = n_try;
                 P = std::move(P_try);
                 ok = true;
+                break;
             }
-            if (lebesgue <= MAX_LEBESGUE) break;
+        }
+        if (!ok && !tried.empty()) {
+            double best = std::numeric_limits<double>::max();
+            for (const auto & t : tried) best = std::min(best, t.second);
+            for (const auto & t : tried) {
+                if (t.second <= LEBESGUE_SLACK * best) {
+                    n_used = t.first;
+                    break;
+                }
+            }
+            const std::vector<Entry> stencil(candidates.begin(), candidates.begin() + n_used);
+            ok = build_pinv(stencil, r, P);
         }
         if (!ok) {
             // A stencil cut off by the halo is retried once the halo is deep enough
@@ -3244,8 +3266,8 @@ namespace {
 // candidates by interior cells, version 5 sorts them in the mesh-spacing metric, version 6 follows
 // the round-off-accurate 2D cell centroids, version 7 can hold the pseudo-inverses and
 // smoothness-indicator matrices in single precision and has tables from the faster setup (#140),
-// which differ from version 6 at round-off
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-7";
+// which differ from version 6 at round-off; version 8 bounds 3D Lebesgue constants by 4 (#126, #229)
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-8";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {
