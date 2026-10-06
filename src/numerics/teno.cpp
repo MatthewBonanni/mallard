@@ -46,13 +46,14 @@ constexpr double GEOMETRY_TOL = precision_tol<double>(1e-10, 1e-5);
 // amplify the truncation error alike.
 constexpr double MAX_LEBESGUE_2D = 10.0;
 // In 3D a bound of 10 still accepts near-degenerate stencils wherever the ties
-// of a lattice are broken (mirror walls of prism, tetrahedral and pyramid
+// of a lattice are broken (mirror walls of prism, tetrahedral and mixed
 // tilings, seams, jittered meshes): their face values follow the cells across
 // the face, and the linearized scheme grows (#126, #229). Lattices are stable
 // up to about 10 only because their tie-complete shells skip those sizes.
 constexpr double MAX_LEBESGUE_3D = 4.0;
-// Where no stencil reaches it (order 6 on tetrahedra and pyramids reach 4.3-5),
-// the smallest stencil within this factor of the best one found
+// Where no stencil reaches it (order 6 on tetrahedra and pyramids: 4.3-5), the
+// smallest stencil within this factor of the best one found; the best alone is
+// often the largest stencil, and markedly less accurate
 constexpr double LEBESGUE_SLACK = 1.25;
 
 // Stencil candidates are ranked by distance in the metric of the local mesh
@@ -1980,9 +1981,8 @@ void TENO::compute_stencils_and_matrices_3d() {
         std::vector<Entry> candidates = gather(ns_max, 64);
         std::vector<double> P;
         bool ok = false;
-        // The smallest stencil within MAX_LEBESGUE_3D; if none reaches it, the
-        // smallest within LEBESGUE_SLACK of the best one (the best alone is
-        // often the largest stencil, and markedly less accurate)
+        // The smallest stencil within MAX_LEBESGUE_3D, else the smallest within
+        // LEBESGUE_SLACK of the best conditioned one
         uint16_t n_used = ns;
         std::vector<std::pair<uint16_t, double>> tried;
         for (uint16_t n_try = ns; n_try <= std::min<size_t>(ns_max, candidates.size()); n_try++) {
