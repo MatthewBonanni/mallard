@@ -311,9 +311,9 @@ TEST(Boundary3DTest, CharacteristicOutletLetsAPlaneWaveLeave) {
 
 TEST(Boundary3DTest, CharacteristicOutletSurvivesEddiesThatReverseTheFlow) {
     // Eddies four times faster than the mean flow cross the outlet with local
-    // backflow, in a box with symmetry sides. Before the outlet dropped the
-    // transverse terms at its edges and on reversed faces, they drove its
-    // incoming waves away until the run diverged (t = 9.8).
+    // backflow, in a box with symmetry sides. The transverse terms, fitted over
+    // corner neighbors and applied at edges and on reversed faces, drove the
+    // outlet's incoming waves away until the run diverged (t = 9.8).
     const std::string p0 = "0.7142857142857143";
     const std::string k = "6.283185307179586", k2 = "12.566370614359172";
     const std::string u = "0.2 + 0.8 * sin(" + k + " * x) * cos(" + k + " * y + 0.3) * cos(" + k +
