@@ -2,7 +2,7 @@
 
     python tools/animate_flame_vortex.py OUT.mp4 RUN_DIR [RUN_DIR ...] [--cols 3] [--fps 15]
         [--gif OUT.gif] [--png OUT.png] [--title TEXT] [--subtitle TEXT] [--t-max T]
-        [--control RUN_DIR ...]
+        [--control RUN_DIR ...] [--mechanism M --phase P] [--progress SPECIES]
 
 Each run is a panel: the temperature over the planar flame's burnt-gas
 temperature, mirrored about the pair's axis to show the whole pair, with the
@@ -51,12 +51,13 @@ def main():
     ap.add_argument("--png")
     ap.add_argument("--title", default="Premixed flame-vortex interactions")
     ap.add_argument("--subtitle", default="")
+    ap.add_argument("--progress", help="as tools/flame_vortex_analysis.py")
     args = ap.parse_args()
 
-    controls = load_controls(args.control, args.mechanism, args.phase)
+    controls = load_controls(args.control, args.mechanism, args.phase, args.progress)
     runs = []
     for d in args.runs:
-        p = planar(d, args.mechanism, args.phase)
+        p = planar(d, args.mechanism, args.phase, args.progress)
         pvd = open(os.path.join(d, "solut", "flame.pvd")).read()
         files = re.findall(r'file="([^"]+)"', pvd)
         times = np.array([float(s) for s in re.findall(r'timestep="([^"]+)"', pvd)])

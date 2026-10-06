@@ -12,7 +12,9 @@ For each output of RUN_DIR/solut/flame.pvd (the half channel y > 0):
          largest heat release within delta_L / 2, over the planar flame's peak,
          and the smallest of these along the isotherm (1 for a planar flame);
   pocket whether fresh gas (T below the isotherm) has been cut off from the
-         inlet.
+         inlet;
+  escaped (with --progress) the largest mass fraction of the reactant at the
+         outlet over its inlet value: fresh gas that crossed the domain unburnt.
 With --progress (e.g. CH4, for flames whose burnt gas radiates and cools
 below that isotherm), the front is instead where the reactant's mass fraction
 is midway between the planar flame's inlet and outlet values, and fresh gas
@@ -63,6 +65,7 @@ def planar(run_dir, mechanism, phase, progress=None):
     if progress:
         Y = d[:, open(path).readline().strip().split(",").index("Y_" + progress)]
         p["Y_mid"] = 0.5 * (Y[0] + Y[-1])
+        p["Y_u"] = Y[0]
     return p
 
 
@@ -103,7 +106,9 @@ def frame_metrics(path, p):
     fresh, n = ndimage.label(field < level)
     inlet = set(np.unique(fresh[0, :])) - {0}
     pocket = any(k not in inlet for k in range(1, n + 1))
-    return t, Q, L, q_min, pocket
+    # Fresh mixture reaching the outlet unburnt (with --progress)
+    escaped = a["Y_" + p["progress"]][-1, :].max() / p["Y_u"] if p["progress"] else 0.0
+    return t, Q, L, q_min, pocket, escaped
 
 
 def parameters(run_dir):
@@ -178,16 +183,17 @@ def main():
         for row, q in list(zip(rows, Qr))[:: max(1, len(rows) // 20)]:
             print(f"{row[0] / tau:7.2f} {row[1]:7.3f} {q:7.3f} {row[2]:7.3f} {row[3]:7.3f} {'yes' if row[4] else ''}")
         print(f"  Q / Q_0 {Qr.min():.3f}-{Qr.max():.3f}, L up to {rows[:, 2].max():.3f}, "
-              f"q_min down to {rows[:, 3].min():.3f}")
+              f"q_min down to {rows[:, 3].min():.3f}" +
+              (f", unburnt reactant at the outlet up to {rows[:, 5].max():.3f} of the inlet's" if args.progress else ""))
         results.append(dict(run=run, r=r, u=u, rows=rows, Qr=Qr, tau=tau, outcome=outcome))
     if args.csv:
         with open(args.csv, "w") as fh:
-            fh.write("run,r/delta,u'/S_L,Ka(r),outcome,Q/Q0_min,Q/Q0_max,L_max,q_min,pocket\n")
+            fh.write("run,r/delta,u'/S_L,Ka(r),outcome,Q/Q0_min,Q/Q0_max,L_max,q_min,pocket,escaped\n")
             for res in results:
                 rows = res["rows"]
                 fh.write(f"{res['run']},{res['r']:g},{res['u']:g},{res['u'] / res['r']:.3g},{res['outcome']},"
                          f"{res['Qr'].min():.4f},{res['Qr'].max():.4f},{rows[:, 2].max():.4f},"
-                         f"{rows[:, 3].min():.4f},{int(rows[:, 4].any())}\n")
+                         f"{rows[:, 3].min():.4f},{int(rows[:, 4].any())},{rows[:, 5].max():.4f}\n")
     if args.plot:
         plot(results, args.plot)
 
