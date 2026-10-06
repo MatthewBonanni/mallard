@@ -71,7 +71,7 @@ struct CharacteristicTransverseFunctor {
         for (uint32_t j = boundaries.char_offsets(k); j < boundaries.char_offsets(k + 1); j++) {
             const uint32_t g = boundaries.char_faces(boundaries.char_neighbors(j));
             rtype dx[N_DIM], W_g[N_CONSERVATIVE];
-            FOR_I_DIM dx[i] = face_coords(g, i) - face_coords(f, i);
+            FOR_I_DIM dx[i] = boundaries.char_neighbor_dx(j, i);
             const rtype dx_n_g = dot<N_DIM>(dx, n);
             FOR_I_DIM dx[i] -= dx_n_g * n[i];
             face_state(g, W_g);
@@ -103,8 +103,11 @@ struct CharacteristicTransverseFunctor {
  *        (Poinsot & Lele 1992) at the face, with the transverse terms relaxed
  *        by beta (Lodato, Domingo & Vervisch 2008):
  *          dw-/dt = -K (p - p_t) - beta T-             (outlets)
- *          dw-/dt = K rho c (u_n - u_n,t) - beta T-    (inlets)
- *        with K = sigma c (1 - M^2) / L (K dt capped at 1). The face keeps its
+ *          dw-/dt = K rho c (u_n - u_n,t) - rho c du_n,t/dt - beta T-    (inlets)
+ *        with K = sigma c (1 - M^2) / L (K dt capped at 1). The inlet's target
+ *        u_n,t may vary in time (synthetic turbulence): its own incoming wave
+ *        -rho c du_n,t/dt over the step (char_target_next - char_target) then
+ *        enters without reflecting outgoing waves (Guezennec & Poinsot 2009). The face keeps its
  *        pressure and normal velocity (char_state), which are continuous at
  *        contacts, and the outgoing wave comes from the reconstructed interior
  *        state averaged over the face. Faces of supersonic outflow follow the
@@ -163,9 +166,14 @@ struct CharacteristicStateFunctor {
             if (u_n >= c) return;
         }
         const bool inlet = bc.type == BoundaryType::NSCBC_INLET;
+        rtype u_target[N_DIM], du_target[N_DIM];
+        FOR_I_DIM {
+            u_target[i] = boundaries.char_target(k, i);
+            du_target[i] = boundaries.char_target_next(k, i) - u_target[i];
+        }
         if (inlet && u_n <= -c) {
             boundaries.char_state(k, 0) = bc.data[E];
-            boundaries.char_state(k, 1) = dot<N_DIM>(bc.data + 1, n);
+            boundaries.char_state(k, 1) = dot<N_DIM>(u_target, n);
             return;
         }
         rtype w_in = boundaries.char_state(k, 0) - Z * boundaries.char_state(k, 1);
@@ -173,12 +181,14 @@ struct CharacteristicStateFunctor {
         const rtype u_b = 0.5_r * (w_out - w_in) / Z;
         const rtype M2 = dot<N_DIM>(W + 1, W + 1) / c2;
         const rtype K = Kokkos::fmin(bc.relax[Relax::ACOUSTIC] * c * Kokkos::fmax(1.0_r - M2, 0.0_r), 1.0_r / dt);
-        const rtype relaxation = inlet ? K * Z * (u_b - dot<N_DIM>(bc.data + 1, n)) : -K * (p_b - bc.data[E]);
+        const rtype relaxation = inlet ? K * Z * (u_b - dot<N_DIM>(u_target, n)) : -K * (p_b - bc.data[E]);
         const rtype beta = (bc.relax[Relax::BETA] < 0.0_r) ? Kokkos::fmin(Kokkos::sqrt(M2), 1.0_r)
                                                             : bc.relax[Relax::BETA];
         const rtype T_in = boundaries.char_transverse(k, 0) + c2 * boundaries.char_transverse(k, 1) -
                            c * boundaries.char_transverse(k, 2);
         w_in += dt * (relaxation - beta * T_in);
+        // A target that varies in time carries its own incoming wave, -Z du_n,t (Guezennec & Poinsot 2009)
+        if (inlet) w_in -= Z * dot<N_DIM>(du_target, n);
         boundaries.char_state(k, 0) = 0.5_r * (w_out + w_in);
         boundaries.char_state(k, 1) = 0.5_r * (w_out - w_in) / Z;
     }
