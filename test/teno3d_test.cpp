@@ -253,24 +253,20 @@ TEST(TENO3DSolver, AdvectedPulseConvergesAndBeatsMUSCL) {
     EXPECT_LT(t2, 0.25 * m2);
 }
 
-TEST(TENO3DSolver, PerturbationsAtRestStayBoundedOnThinPrisms) {
-    // Stencil candidates ranked by physical distance took the whole column
-    // across thin cells first and resolved the other directions only through
-    // small centroid offsets: full rank and a small Lebesgue constant, but a
-    // grid-scale vortical mode grew like exp(13 t) on these prisms of aspect
-    // ratio 6 (order 4, walls all around), to Mach 0.85 by t = 1
-    const double lz = 4.0 / 6.0 / 6.25;
+namespace {
+
+/**
+ * @brief Largest flow speed at t = 1 of a small velocity perturbation of a gas
+ *        at rest (unit density and pressure), TENO with HLLC: grows only if the
+ *        linearized scheme has a growing mode.
+ * @param mesh TOML [mesh] table and any [[boundaries]] / [[periodic]] tables.
+ */
+double largest_speed_at_rest(const std::string & mesh, int order, const std::string & u) {
     std::ostringstream in;
-    in << "[run]\nt_stop = 1.0\ncfl = 0.2\n"
-       << "[mesh]\ntype = \"cartesian_prism\"\nNx = 6\nNy = 6\nNz = 4\nLx = 1.0\nLy = 1.0\nLz = " << lz << "\n"
-       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\n"
-       << "u = [\"1e-3 * sin(7 * x + 3 * y) * cos(5 * z / " << lz << ")\", \"1e-3 * cos(4 * x - 6 * y)\", \"0.0\"]\n"
-       << "p = \"1.0\"\n";
-    for (const char * zone : {"left", "right", "bottom", "top", "back", "front"}) {
-        in << "[[boundaries]]\nname = \"" << zone << "\"\ntype = \"symmetry\"\n";
-    }
-    in << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
-       << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 4\n"
+    in << "[run]\nt_stop = 1.0\ncfl = 0.2\n" << mesh
+       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [" << u << "]\np = \"1.0\"\n"
+       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+       << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = " << order << "\n"
        << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
        << "[output]\ncheck_interval = 1000000\n";
     Solver solver;
@@ -285,8 +281,71 @@ TEST(TENO3DSolver, PerturbationsAtRestStayBoundedOnThinPrisms) {
         }
         speed = std::max(speed, std::sqrt(q2));
     }
+    return speed;
+}
+
+std::string prism_box(double lz, bool side_walls_only) {
+    std::ostringstream in;
+    in << "[mesh]\ntype = \"cartesian_prism\"\nNx = 6\nNy = 6\nNz = 4\nLx = 1.0\nLy = 1.0\nLz = " << lz << "\n";
+    for (const char * zone : {"left", "right", "bottom", "top", "back", "front"}) {
+        if (side_walls_only && std::string(zone) != "left" && std::string(zone) != "right") continue;
+        in << "[[boundaries]]\nname = \"" << zone << "\"\ntype = \"symmetry\"\n";
+    }
+    if (side_walls_only) {
+        in << "[[periodic]]\nzones = [\"bottom\", \"top\"]\ntranslation = [0.0, 1.0, 0.0]\n"
+           << "[[periodic]]\nzones = [\"back\", \"front\"]\ntranslation = [0.0, 0.0, " << lz << "]\n";
+    }
+    return in.str();
+}
+
+} // namespace
+
+TEST(TENO3DSolver, PerturbationsAtRestStayBoundedOnThinPrisms) {
+    // Stencil candidates ranked by physical distance took the whole column
+    // across thin cells first and resolved the other directions only through
+    // small centroid offsets: full rank and a small Lebesgue constant, but a
+    // grid-scale vortical mode grew like exp(13 t) on these prisms of aspect
+    // ratio 6 (order 4, walls all around), to Mach 0.85 by t = 1
+    const double lz = 4.0 / 6.0 / 6.25;
+    const double speed = largest_speed_at_rest(
+        prism_box(lz, false), 4,
+        "\"1e-3 * sin(7 * x + 3 * y) * cos(5 * z / " + std::to_string(lz) + ")\", \"1e-3 * cos(4 * x - 6 * y)\", \"0.0\"");
     std::cout << "largest speed at t = 1: " << speed << std::endl;
     EXPECT_LT(speed, 1e-2);
+}
+
+class TENO3DSideWalls : public ::testing::TestWithParam<int> {};
+
+TEST_P(TENO3DSideWalls, PerturbationsAtRestStayBoundedNextToSideWallsOfMildlyStretchedPrisms) {
+    // A symmetry wall mirrors the prism tiling, whose cells are split along
+    // the xy diagonal, so wall cells see a seam where the split flips. There
+    // the first large stencil within a Lebesgue constant of 10 was a
+    // near-degenerate one (8.7, against 3.4 in the interior) whose face values
+    // follow the cells across the face: at aspect ratio 2 this grid-scale
+    // perturbation reached 0.016 (order 4) and 0.007 (order 6) by t = 1 (#126)
+    const double lz = 4.0 / 6.0 / 2.0;
+    const double speed = largest_speed_at_rest(prism_box(lz, true), GetParam(),
+                                               "\"1e-3 * sin(37 * x + 23 * y)\", \"1e-3 * cos(29 * x - 41 * y)\", \"0.0\"");
+    std::cout << "order " << GetParam() << ": largest speed at t = 1: " << speed << std::endl;
+    EXPECT_LT(speed, 2e-3);
+}
+
+INSTANTIATE_TEST_SUITE_P(EvenOrders, TENO3DSideWalls, ::testing::Values(4, 6));
+
+TEST(TENO3DSolver, PerturbationsAtRestStayBoundedOnJitteredPrismsAtOrderSix) {
+    // Without lattice ties the same near-degenerate stencils appear in the
+    // interior: on jittered prisms the perturbation reached 0.02 by t = 1 at
+    // order 6 (#229)
+    const std::string file = write_temp("mallard_teno3d_jittered_prisms.msh", jittered_periodic_mesh_3d(8, 0.1, true));
+    const std::string mesh = "[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
+                             "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0, 0.0]\n"
+                             "[[periodic]]\nzones = [\"bottom\", \"top\"]\ntranslation = [0.0, 1.0, 0.0]\n"
+                             "[[periodic]]\nzones = [\"back\", \"front\"]\ntranslation = [0.0, 0.0, 1.0]\n";
+    const double speed = largest_speed_at_rest(mesh, 6,
+                                               "\"1e-4 * sin(2 * 3.14159265 * (x + 2 * y))\", "
+                                               "\"1e-4 * cos(2 * 3.14159265 * (3 * x - z))\", \"0.0\"");
+    std::cout << "largest speed at t = 1: " << speed << std::endl;
+    EXPECT_LT(speed, 1e-3);
 }
 
 TEST(TENO3DStencils, MetricIsTheIdentityOnRegularTilingsOnly) {
