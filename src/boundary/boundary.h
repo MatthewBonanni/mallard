@@ -241,6 +241,7 @@ struct BoundaryData {
     Kokkos::View<rtype *[2]> char_state;         // [p, u_n] of the face, whose p - rho c u_n is the incoming acoustic wave
     Kokkos::View<uint32_t *> char_offsets;       // CSR of char_neighbors
     Kokkos::View<uint32_t *> char_neighbors;     // Characteristic faces sharing a node and the orientation (index into char_*)
+    Kokkos::View<uint8_t *> char_edge;           // Faces sharing a node with a boundary face that is not characteristic (a wall)
     Kokkos::View<BoundaryCondition *> bcs;
     rtype gamma = 1.4;
     rtype R = 1.0;

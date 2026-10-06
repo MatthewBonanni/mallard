@@ -118,6 +118,8 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the relaxation of the transverse terms with `beta` equal to the Mach number (`beta`).
 - <a id="granet-2010"></a>V. Granet, O. Vermorel, T. Leonard, L. Gicquel and T. Poinsot, Comparison of nonreflecting outlet boundary conditions for compressible solvers on unstructured grids, *AIAA J.* 48(10), 2348–2364 (2010). [doi:10.2514/1.J050391](https://doi.org/10.2514/1.J050391)
   Used in: the default `beta` and the vortex-outflow validation of `nscbc_outlet`.
+- <a id="moghadam-2011"></a>M. Esmaily Moghadam, Y. Bazilevs, T.-Y. Hsia, I. E. Vignon-Clementel and A. L. Marsden, A comparison of outlet boundary treatments for prevention of backflow divergence with relevance to blood flow simulations, *Comput. Mech.* 48, 277–291 (2011). [doi:10.1007/s00466-011-0599-0](https://doi.org/10.1007/s00466-011-0599-0)
+  Used in: the backflow stabilization tried, and not adopted, for `nscbc_outlet` (docs/design/nscbc.md).
 - <a id="bodony-2006"></a>D. J. Bodony, Analysis of sponge zones for computational fluid mechanics, *J. Comput. Phys.* 212, 681–702 (2006). [doi:10.1016/j.jcp.2005.07.014](https://doi.org/10.1016/j.jcp.2005.07.014)
   Used in: the sponge layers (`[[sponges]]`; `src/solver/solver_sponge.cpp`).
 - <a id="mani-2012"></a>A. Mani, Analysis and optimization of numerical sponge layers as a nonreflective boundary treatment, *J. Comput. Phys.* 231, 704–716 (2012). [doi:10.1016/j.jcp.2011.10.017](https://doi.org/10.1016/j.jcp.2011.10.017)
