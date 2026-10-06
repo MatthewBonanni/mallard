@@ -321,7 +321,7 @@ def analyze(args):
         def load(path):
             d = np.load(path)
             return float(d["t"]), {k: d[k].astype(float) for k in d.files if k not in ("t", "h")}
-        frames = [lambda p=p: load(p) for p in sorted(glob.glob(os.path.join(args.npz, "flame_*.npz")))]
+        frames = [lambda p=p: load(p) for p in sorted(glob.glob(os.path.join(args.npz, "flame_t*.npz")))]
     else:
         groups = snapshots(args.run)
         frames = [lambda p=groups[i]: read_snapshot(p, h) for i in sorted(groups)]
@@ -373,20 +373,25 @@ def analyze(args):
 
 
 def extract(args):
-    """Each snapshot's fields on the (i, j, k) lattice as float32 arrays in OUT_DIR/flame_<index>.npz."""
+    """Each snapshot's fields on the (i, j, k) lattice as float32 arrays in OUT_DIR/flame_t<time in ns>.npz (named by
+    time, so the snapshots of a restarted run, numbered from 0 again, do not collide)."""
     import tomllib
     with open(os.path.join(args.run, "input.toml"), "rb") as f:
         m = tomllib.load(f)["mesh"]
     h = m["Ly"] / m["Ny"]
     os.makedirs(args.out_dir, exist_ok=True)
     fields = args.fields.split(",")
+    done_file = os.path.join(args.out_dir, "extracted.txt")
+    done = set(open(done_file).read().split()) if os.path.exists(done_file) else set()
     for idx, paths in sorted(snapshots(args.run).items()):
-        out = os.path.join(args.out_dir, f"flame_{idx:06d}.npz")
-        if args.skip_existing and os.path.exists(out):
+        key = f"{paths[0]}@{os.path.getmtime(paths[0]):.0f}"
+        if args.skip_existing and key in done:
             continue
         t, f = read_snapshot(paths, h)
-        np.savez(os.path.join(args.out_dir, f"flame_{idx:06d}.npz"), t=t, h=h,
+        np.savez(os.path.join(args.out_dir, f"flame_t{round(t * 1e9):09d}.npz"), t=t, h=h,
                  **{k: f[k].astype(np.float32) for k in fields if k in f})
+        with open(done_file, "a") as fo:
+            fo.write(key + "\n")
         print(f"{idx}: t = {t:.4e}", flush=True)
 
 
