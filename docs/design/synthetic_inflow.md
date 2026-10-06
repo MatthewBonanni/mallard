@@ -200,11 +200,27 @@ negative (next to walls) become zero.
 
 ### Spatially developing channel at `Re_tau = 180` (DNS)
 
-Pending. The run (`8 pi h x 2h x 4 pi / 3 h`, 384 x 96 x 128 hexahedra, inlet
-`profile` = the statistics of the periodic channel, initialized from that
-channel repeated twice along x with `tools/tile_restart.py`) needs the outlet
-fix below before its statistics (from `t = 40 h / U_b`) can be gathered.
-With the default `beta` at the `nscbc_outlet`, a near-wall eddy reversed the
-flow in the outlet's last cells at `t = 18-19 h / U_b` and the run diverged,
-also with a sponge in front of the outlet. With `beta = 0` there, it ran
-cleanly to `t = 39 h / U_b`.
+`examples/channel_inflow_retau180`.
+
+**Setup.**
+- Box `8 pi h x 2h x 4 pi / 3 h`, periodic in z, isothermal walls, 384 x 96 x 128 hexahedra (the mesh of the periodic channel example, repeated twice along x).
+- `Re_b = 5600`, `M_b = 0.2`. MUSCL (no limiter), HLLC, SSPRK3.
+- The inlet's `profile` holds the statistics of Mallard's periodic channel (`Re_tau = 172`). The length scales are `0.5h, 0.15h, 0.15h` for `u` and `0.1-0.2h` for `v`, `w`.
+- The flow starts from the periodic channel repeated twice along x (`tools/tile_restart.py`). Statistics run over `t = 40-110 h / U_b` (2.8 flow-throughs), averaged over z.
+- **Outlet.** A sponge covers `x > 20h` (not analyzed), and the `nscbc_outlet` runs with `beta = 0`. With the default `beta` (the local Mach number), a near-wall eddy reversed the flow in the outlet's last cells at `t = 18-19 h / U_b` and the run diverged, also with the sponge. That is a property of the outlet, not of the inflow.
+
+**Development.** Quantities against the precursor, smoothed over `+-0.5h`:
+
+| `x / h` | 0.5 | 2 | 4 | 6 | 8 | 12 | 16 | 19.5 |
+|---|---|---|---|---|---|---|---|---|
+| `C_f` | 1.05 | 1.03 | 1.01 | 1.00 | 1.00 | 0.99 | 0.98 | 1.01 |
+| peak `u_rms+` | 0.91 | 0.86 | 0.85 | 0.89 | 0.92 | 0.95 | 0.96 | 0.96 |
+| peak `v_rms+` | 0.94 | 0.86 | 0.85 | 0.89 | 0.90 | 0.92 | 0.94 | 0.97 |
+| peak `w_rms+` | 1.07 | 1.07 | 1.02 | 0.98 | 0.96 | 0.97 | 0.99 | 0.99 |
+| peak `-u'v'+` | 0.57 | 0.75 | 0.92 | 0.98 | 0.98 | 0.97 | 1.01 | 1.00 |
+
+- **Wall shear.** It is within 5% of the precursor everywhere and within 2% from `x = 2h`.
+- **Shear stress.** `-u'v'` recovers by `4.6h`. The synthetic field has the right `R_xy` at the inlet, but not the eddies that carry it to the wall.
+- **Normal stresses.** These take longest. `u_rms` and `v_rms` first dip by 15% (the dilatational part shed, as in the duct). They are back within 10% by about `8-10h`, and within 5% from `13.7h` (`u_rms`) and `16.6h` (`v_rms`).
+- **Overall.** All the quantities stay within 5% of the fully developed channel from about `17h`. [Keating et al. (2004)](../references.md#keating-2004) report that synthetic inflow needs long development lengths, about `20h` for a channel. Wall shear and shear stress recover faster here because the Reynolds stress is imposed in full, the mean profile is the precursor's, and the length scales are those of the outer layer.
+- **Inlet pressure.** Next to the inlet (`x = 0.02h`, channel center), `p'_rms = 10 tau_w`, of which the transverse line average is `3.7 tau_w`. This is the near field of the non-solenoidal injection, as in the duct, against about `1 tau_w` in the developed flow.
