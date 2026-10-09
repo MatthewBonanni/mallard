@@ -120,9 +120,11 @@ class Solver {
 
         /**
          * @brief Compute the stable time step for the current solution.
+         * @param on_device If given (single gas), the local minimum is left
+         *        there instead, without a host synchronization, and 0 returned.
          * @return dt corresponding to CFL = 1.
          */
-        rtype calc_dt_cfl1();
+        rtype calc_dt_cfl1(Kokkos::View<rtype> on_device = {});
 
         /**
          * @brief Recompute primitives from conservatives on the device.
@@ -206,7 +208,15 @@ class Solver {
         /** @brief Adds the sponge-layer sources to the RHS per unit volume (owned cells). */
         void apply_sponges(const State & solution, const State & rhs);
         void calc_dt();
+        /** @brief The time the next step must not pass: t_stop or the next time-based output. */
+        rtype next_target_time() const;
         void check_fields();
+
+        // A whole step (calc_dt and take_step) as one CUDA graph; see solver_graph.cpp
+        std::string step_graph_unsupported() const;
+        void graph_step();
+        void record_step();
+        void destroy_step_graph();
         void calc_rhs_mixture(State solution, State rhs, rtype t);
         /**
          * @brief Axisymmetric runs: add geometric_source, made high order by the
@@ -394,6 +404,14 @@ class Solver {
         CellSampler cell_sampler() const { return CellSampler{conservatives, species, primitives}; }
 
     private:
+        // Step graph (solver_graph.cpp)
+        bool cuda_graphs = true;               // [run] cuda_graphs
+        bool use_step_graph = false;
+        void * step_graph_exec = nullptr;      // cudaGraphExec_t
+        Kokkos::View<rtype> step_dt_cfl1;      // device: local, then global minimum
+        Kokkos::View<rtype *> step_scalars;    // device: [t, t_target, dt_scales...]
+        Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> step_io;  // pinned: [t, t_target, dt]
+
         bool distribute = true;
         int halo_layers = 0;
         std::unique_ptr<DistributedMesh> setup;  // during init only
@@ -484,6 +502,7 @@ class Solver {
         Kokkos::View<rtype *[N_DIM + 2]>::host_mirror_type h_face_state;
         Kokkos::View<int32_t *>::host_mirror_type h_face_state_index;
         rtype t_boundary_states;
+        bool boundary_states_steady = false;  // evaluated, and no expression depends on t
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         RiemannSolverType riemann_solver_type;
         rtype low_mach_cutoff = 0.1;

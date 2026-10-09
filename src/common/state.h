@@ -71,4 +71,11 @@ inline void deep_copy(const State & dst, const State & src) {
     if (src.species.span() > 0) Kokkos::deep_copy(dst.species, src.species);
 }
 
+/** @brief Copy both blocks of src into dst, ordered on exec without a fence. */
+template <typename ExecSpace>
+inline void deep_copy(const ExecSpace & exec, const State & dst, const State & src) {
+    Kokkos::deep_copy(exec, dst.flow, src.flow);
+    if (src.species.span() > 0) Kokkos::deep_copy(exec, dst.species, src.species);
+}
+
 #endif // STATE_H
