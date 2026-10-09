@@ -21,7 +21,7 @@
 # kinetic energy against the molecular one (eps_numerical, from the scheme's
 # own pressure work; docs/design/les.md, section 4.2).
 #
-# Run (from this directory; the LES inputs differ in the mesh, [les] and
+# Run (from this directory; the LES, les.toml, differs in the mesh, [les] and
 # [les.combustion], see section 8.3):
 #   python ../../tools/flame_turbulence.py hit hit_random.restart --length 0.004225788952895495 --urms 5 --lt 8e-4
 #   ../../build3d/src/Mallard -i hit.toml                      # writes restart/hit_<step>.restart at 0.08 ms
