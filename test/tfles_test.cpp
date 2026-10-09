@@ -149,7 +149,8 @@ TEST(ThickenedFlame, EddyViscosityVelocitySetsTheEfficiency) {
         const double rho = double(solver.h_conservatives(c, 0)), delta = std::pow(double(m->h_cell_volume(c)), 1.0 / N_DIM);
         const double F = double(fields(c, 0));
         const double u_prime = 26.0 * double(sgs(c, 0)) / (rho * delta);
-        EXPECT_NEAR(double(fields(c, 1)), tf.wrinkling(F, u_prime, double(transport(c, 0)) / rho), 1e-7) << "cell " << c;
+        EXPECT_NEAR(double(fields(c, 1)), tf.wrinkling(F, u_prime, double(transport(c, 0)) / rho),
+                    precision_tol<double>(1e-7, 1e-5)) << "cell " << c;
         turbulent += double(fields(c, 1)) > 1.01;
     }
     EXPECT_GT(turbulent, m->n_owned() / 2);
