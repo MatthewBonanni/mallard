@@ -565,6 +565,27 @@ void Solver::update_thickened_flame() {
     exchange_cell_vectors(tfles_fields);
 }
 
+void Solver::update_partially_stirred_reactor() {
+    const uint32_t n_owned = mesh->n_owned();
+    cell_chemistry.heat_release(conservatives, species, T_seed, hrr, production, n_owned);
+    const PartiallyStirredReactor model = pasr;
+    const Mixture gas = mixture;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
+    ScalarView scalars = cell_scalars;
+    Kokkos::View<rtype **, Kokkos::LayoutRight> values = transport_values;
+    Kokkos::View<rtype *[3]> transport = cell_transport, sgs = les_coefficients;
+    Kokkos::View<rtype *> q = hrr, delta = les_delta, kappa = chem_time_scale;
+    Kokkos::parallel_for("pasr_fraction", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+        const double rho = static_cast<double>(W(c, 0));
+        const double T = static_cast<double>(values(c, N_DIM));
+        const ScalarMassFractions y{&scalars(c, 0)};
+        const double rho_cp_T = rho * gas.thermo.cp_mass(T, y) * T;
+        kappa(c) = static_cast<rtype>(model.fraction(rho_cp_T, static_cast<double>(q(c)), static_cast<double>(delta(c)),
+                                                     static_cast<double>(transport(c, 0)) / rho,
+                                                     static_cast<double>(sgs(c, 0)) / rho));
+    });
+}
+
 void Solver::update_dynamic_constant() {
     const uint32_t n_owned = mesh->n_owned();
     StateView flow = dynamic_halo.flow;
@@ -661,6 +682,15 @@ void Solver::init_les() {
     if (!input.at("les").contains("combustion")) return;
     if (!reacting || !is_viscous()) {
         throw InputError("[les.combustion] needs a reacting viscous mixture (gas = \"mixture\", navier_stokes, [chemistry]).");
+    }
+    const toml::value & combustion = input.at("les").at("combustion");
+    if (toml::find_or<std::string>(combustion, "model", "") == "pasr") {
+        pasr = PartiallyStirredReactor::from_input(combustion);
+        pasr_on = true;
+        chem_time_scale = Kokkos::View<rtype *>("chem_time_scale", mesh->n_cells);
+        h_chem_time_scale = Kokkos::create_mirror_view(chem_time_scale);
+        Kokkos::deep_copy(chem_time_scale, 1.0_r);
+        return;
     }
     thickened_flame = ThickenedFlame::from_input(input.at("les").at("combustion"));
     tfles_on = true;
