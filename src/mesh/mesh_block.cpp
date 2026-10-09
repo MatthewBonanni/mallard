@@ -155,7 +155,8 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
     const uint32_t n[3] = {nx, ny, nz};
     const rtype L[3] = {Lx, Ly, Lz};
     auto node_coordinate = [&](int d, uint32_t i) {
-        return stretching[d] > 0.0_r ? stretched_coordinate(i, n[d], L[d], stretching[d]) : L[d] * i / n[d];
+        if (stretching[d] > 0.0_r) return stretched_coordinate(i, n[d], L[d], stretching[d]);
+        return i == n[d] ? L[d] : L[d] * i / n[d];
     };
     auto center_coordinate = [&](int d, uint32_t i) {
         return stretching[d] > 0.0_r ? 0.5_r * (node_coordinate(d, i) + node_coordinate(d, i + 1))
