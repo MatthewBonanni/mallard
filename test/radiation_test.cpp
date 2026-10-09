@@ -136,10 +136,11 @@ TEST(RadiationTest, HomogeneousGasCoolsLikeTheEnergyODE) {
 
     solver.run();
     solver.copy_device_to_host();
+    const bool single = sizeof(rtype) == sizeof(float);
     for (uint32_t c = 0; c < solver.get_mesh()->n_cells; c++) {
         const double e_c = double(solver.h_conservatives(c, N_DIM + 1)) / double(solver.h_conservatives(c, 0));
-        EXPECT_NEAR(thermo.T_from_e(e_c, y, T_ref), T_ref, 1e-6 * T_ref) << "cell " << c;
-        FOR_I_DIM EXPECT_NEAR(double(solver.h_conservatives(c, 1 + i)), 0.0, 1e-9);
+        EXPECT_NEAR(thermo.T_from_e(e_c, y, T_ref), T_ref, (single ? 1e-4 : 1e-6) * T_ref) << "cell " << c;
+        FOR_I_DIM EXPECT_NEAR(double(solver.h_conservatives(c, 1 + i)), 0.0, single ? 1e-4 : 1e-9);
     }
 }
 
