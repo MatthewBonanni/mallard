@@ -570,6 +570,10 @@ void Solver::launch_double_flux_functor() {
 }
 
 rtype Solver::calc_dt_cfl1_mixture() {
+    if (les_on && les.dynamic) {
+        eddy_viscosity_of_state(mesh->n_owned());
+        update_dynamic_constant();
+    }
     if (tfles_on) {
         update_thickened_flame();
         thicken_transport();

@@ -887,7 +887,7 @@ void Solver::init_output() {
                                        << (integral_monitor.budget ? ",ke_rate_convective,ke_rate_viscous,ke_rate_sgs,"
                                                                      "eps_numerical"
                                                                    : "")
-                                       << "\n";
+                                       << (les_on && les.dynamic ? ",les_C" : "") << "\n";
             }
         }
     }
@@ -1630,7 +1630,13 @@ rtype Solver::calc_dt_cfl1() {
                             axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(),
                             les_coefficients,
                             les.Pr_t};
-    if (les_on) eddy_viscosity_of_state(mesh->n_owned());
+    if (les_on) {
+        eddy_viscosity_of_state(mesh->n_owned());
+        if (les.dynamic) {
+            update_dynamic_constant();
+            update_eddy_viscosity(mesh->n_owned());
+        }
+    }
     rtype dt_min = std::numeric_limits<rtype>::max();
     Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor, Kokkos::Min<rtype>(dt_min));
     return comm::allreduce(dt_min, comm::Op::MIN);
@@ -1889,6 +1895,7 @@ void Solver::write_integrals() {
         *integral_monitor.out << "," << rates.convective << "," << rates.viscous << "," << rates.sgs << ","
                               << sums[3] - rates.convective;
     }
+    if (les_on && les.dynamic) *integral_monitor.out << "," << les.C;
     *integral_monitor.out << "\n";
     integral_monitor.out->flush();
 }

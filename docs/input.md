@@ -181,6 +181,8 @@ eddy viscosity of each cell comes from its least-squares velocity gradient
 | `C` | Model constant; defaults 1.35 (Sigma), 0.5 (WALE), 0.07 (Vreman's `c`), 0.17 (Smagorinsky) |
 | `Pr_t` | Turbulent Prandtl number, default 0.9 |
 | `Sc_t` | Turbulent Schmidt number, default 0.9 |
+| `filter_width` | `scotti` (default in 3D): `V^(1/3) f(a_1, a_2)`, Scotti, Meneveau & Lilly's correction for anisotropic cells, `f = cosh(sqrt(4/27 ((ln a_1)^2 - ln a_1 ln a_2 + (ln a_2)^2)))` of the ratios `a_1 = h_1 / h_3`, `a_2 = h_2 / h_3` of the cell's extents (`V` over the eigenvalues of its projected-area tensor `1/2 sum_f A_f A_f^T / |A_f|`; 1.2 for an aspect ratio of 5, 1.4 for 10; 1 on cubes and regular cells); `volume` (the 2D default): `Delta = V^(1/d)`. For the eddy viscosity only (`[les.combustion]` keeps `V^(1/3)`). Channel at `Re_tau = 395` and 590: `Re_tau` within 0.7% and 1.6% of MKM with `scotti`, 2.6% and 4.1% with `volume` |
+| `dynamic` | `true`: the constant from the global dynamic procedure (Germano et al. 1991; Lilly 1992), once per step from the state: `C^2 = <L^d : M> / <M : M>` (Vreman's `c` without the square) summed over the domain, `L = (rho u u)^ - (rho u)^ (rho u)^ / rho^`, `M = 2 ((rho Delta^2 D(g) S^d)^ - rho^ Delta_hat^2 D(g^) S^d(g^))`, with `^` the volume-weighted average over a cell and its vertex neighbors, of width `Delta_hat^2 = Delta^2 + 12 / d tr(cov)` from the covariance of the neighbors' centroids (`3 Delta` on uniform hexahedra), and filtered gradients for the gradients of the filtered field. Clipped at zero; `C` is the value until the first step. The sums are exact (fixed point), so the constant is independent of the rank count. `integrals.csv` gets the column `les_C`. Default `false` |
 
 | `model` | `nu_t` | Zero for |
 |---|---|---|
@@ -323,7 +325,7 @@ Strength and reference are evaluated once at cell centroids.
 
 | Key | Description |
 |---|---|
-| `riemann_solver` | `Rusanov`, `HLL`, `HLLC` (default), `Roe`, or `RHLL` (rotated hybrid HLL-Roe, carbuncle-free) |
+| `riemann_solver` | `Rusanov`, `HLL`, `HLLC` (default), `Roe`, or `RHLL` (rotated hybrid HLL-Roe, carbuncle-free except at shocks at rest on cell faces; see [numerics](numerics/overview.md#stationary-shocks-on-cell-faces)) |
 | `time_integrator` | `FE`, `SSPRK3` (default) or `RK4` |
 | `check_nan` | Stop if the solution becomes non-finite |
 | `double_flux` | (gas mixtures) `true` for the double-flux scheme: each cell's energy is updated with its own `cp / cv` and energy offset frozen over the time step on both sides of its faces, and reset to the true equation of state after the step, so pressure and velocity stay exactly uniform across contacts between different gases. Energy is then not exactly conserved (about 0.2% over a multicomponent shock tube). Default `false` |
