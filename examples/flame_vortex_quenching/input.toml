@@ -1,0 +1,187 @@
+# Flame-vortex interaction: r / delta = 4, u' / S_L = 30 (r = 11.9977 mm, u' = 0.8067 m/s), pair at x = 14.9971 mm.
+# Flame-vortex quenching with radiative heat losses: r / delta_L = 4, u' / S_L = 30
+#
+# The spectral diagram of Poinsot, Veynante & Candel (1991), J. Fluid Mech.
+# 228:561, doi 10.1017/S0022112091002823 (and 23rd Symp. (Int.) Combust.
+# 613, 1990, doi 10.1016/S0082-0784(06)80308-5) with heat losses: a pair of
+# counter-rotating vortices (size r = vortex diameter + distance between the
+# centers, u' its largest velocity) runs into a lean CH4/air flame near its
+# radiative flammability limit. examples/flame_vortex has the same setup
+# without losses, where nothing quenches.
+#
+# Poinsot et al. used one-step chemistry (Le = 1.2, beta = 8, alpha = 0.75,
+# s_L / a = 0.013) and a volumetric loss h (T - T_1) in the energy equation,
+# with h scaled on the flame (their parameter c = 1e-4, to which "the final
+# results are most sensitive"). Their quenching example, r / l_F = 4.8 and
+# u' / S_L = 28, quenches the downstream side of the pocket of fresh gas that
+# the pair cuts off, once it is pushed into burnt gas that the losses have
+# cooled. Here the loss is the optically thin radiation of the TNF workshop
+# ([radiation]: H2O, CO2, CO and CH4, background 300 K), which matters only
+# for slow flames: CH4/air at phi = 0.42, 300 K, 1 atm with the two-step
+# mechanism 2S-CH4-BFER (mechanisms/ch4_bfer.yaml) and mixture-averaged
+# transport. Cantera, with radiation (H2O and CO2): S_L = 2.689 cm/s,
+# thermal thickness delta_L = (T_max - T_u) / max dT/dx = 3.00 mm, T_max
+# 1266 K; adiabatic 3.50 cm/s and 1322 K; no steady flame at phi = 0.405
+# (the radiative limit: Mallard's 1D flame at phi = 0.40 dies out, at 0.41 it
+# burns at -1.3% of Cantera's speed). delta_L S_L / nu_u = 5.1 (Poinsot et
+# al.'s l_F = 3.7 nu / S_L), so r / delta_L is about r / l_F / 1.4.
+#
+# Setup (tools/flame_vortex.py, as examples/flame_vortex): the planar Cantera
+# flame in its frame, the pair 3 R_c + delta_L upstream of it (r = 4 R_c),
+# symmetry planes at the pair's axis and at the top, 12 cells per delta_L
+# (24 for r = 1), MUSCL, HLLC, SSPRK3, CFL 1.2 (1D: CFL 0.8 and 1.2 give the
+# same flame speed to 4 digits). The analysis locates the front by CH4
+# (--progress CH4: its mass fraction midway between inlet and outlet), since
+# the radiating burnt gas cools below the mid-temperature isotherm; quenched:
+# the weakest burning along the front q_min below 0.1 of the planar peak.
+#
+# Make the initial state, from this directory, and run it:
+#
+#   python ../../tools/flame_reference.py --single ch4_bfer 0.42 300 . --radiation --width 0.08
+#   python ../../tools/flame_vortex.py ch4_bfer_phi0.42_T300_mix_rad_full.csv ../../mechanisms/ch4_bfer.yaml gas . \
+#       --r 4 --u 30 --cfl 1.2 --radiation tnf
+#
+# For the sweep, the same with --r R --u U into run directories (--cells 24
+# for r = 1), the controls --u 0 (--flame-times 4; r = 1: --cells 24
+# --flame-times 3.2), and the adiabatic comparison from
+# flame_reference.py --single ch4_bfer 0.42 300 DIR --width 0.05 without
+# --radiation (flame_vortex.py ... --r 4 --u 30 without --radiation); then
+#
+#   python ../../tools/flame_vortex_analysis.py RUN_DIR... --control CONTROL_DIR... --mechanism ../../mechanisms/ch4_bfer.yaml \
+#       --phase gas --progress CH4 --plot fv.png --csv fv.csv
+#   python ../../tools/animate_flame_vortex.py OUT.mp4 RUN_DIR... --control CONTROL_DIR... --mechanism ../../mechanisms/ch4_bfer.yaml \
+#       --phase gas --progress CH4 --cols 4
+#
+# Results (phi = 0.42, radiating; Q / Q_0: heat release over the control's
+# at the same time; escaped: largest CH4 mass fraction at the outlet over the
+# inlet's, fresh gas that crossed the domain unburnt; the r = 1 runs cover
+# their first 2 flame times):
+#
+#   r/delta_L  u'/S_L  Ka(r)  outcome    Q/Q_0      q_min  escaped
+#   1          30      30     no effect  1.00-1.01  0.97   0
+#   1          100     100    wrinkled   1.00-1.25  0.52   0
+#   2          10      5      (running)
+#   2          30      15     wrinkled   1.00-1.21  0.82   0
+#   2          100     50     quenched   1.00-1.83  0.02   0.30
+#   4          3       0.75   no effect  1.00-1.04  0.93   0
+#   4          10      2.5    wrinkled   1.00-1.45  0.80   0
+#   4          30      7.5    quenched   1.00-2.25  0.005  0.30
+#   4          100     25     quenched   1.00-4.36  0.0002 0.88
+#   8          10      1.25   (running)
+#   8          40      5      quenched   1.00-2.17  0.0000 0.98
+#   8          100     12.5   quenched   1.00-4.50  0.0000 1.00
+#
+# (Ka(r) = (u' / r) / (S_L / delta_L).) The quenching zone of Poinsot et al.
+# appears: every pair that quenches first cuts off a pocket of fresh gas and
+# pushes it into the burnt gas, where its downstream side goes out (the
+# radiation has cooled that gas by 100-300 K below the flame) while its
+# upstream side still burns, and part of the pocket leaves the domain
+# unburnt, as in their example (their Fig. 3-4). The boundary lies between
+# Ka(r) = 1.25 and 5 for r = 8 delta_L, 2.5 and 7.5 for r = 4, and 15 and 50
+# for r = 2, and r = 1 does not quench up to u' = 100 S_L (Ka(r) = 100): the
+# line climbs ever more steeply toward small vortices, which curvature and
+# viscous dissipation make inefficient, and approaches Ka(r) = O(1) for large
+# ones, the shape of their quenching curve (fitted over 0.81 < r / l_F < 11
+# and joined to Ka(r) = 1 for r / l_F > 11). Their example point,
+# r / l_F = 4.8 and u' / S_L = 28 (r / delta_L about 3.4 here), sits next to
+# our r = 4, u' = 30 run, which quenches. The losses decide it, as they
+# found ("the final results are most sensitive" to the loss parameter): the
+# same pair at phi = 0.44 (radiating, 15% below the adiabatic flame speed
+# instead of 23%) cuts off a pocket that burns out (q_min 0.35, nothing
+# escapes), and at phi = 0.42 without radiation (S_L = 3.50 cm/s, delta_L =
+# 2.40 mm, the same r / delta_L and u' / S_L) the pocket burns out too (q_min
+# 0.45). The small-scale cut-off is also there: r = 1 at u' = 30 S_L and r = 4
+# at u' = 3 S_L change the heat release by less than 5%.
+#
+# What does not match:
+# - The loss: Poinsot et al.'s h (T - T_1) acts on all the gas from the start
+#   and its level is set by one parameter; here the radiation is that of
+#   CH4/air, strongest in the hot products, and the loss level is set by how
+#   close the mixture is to its limit. The boundary's position depends on it
+#   (no quenching at phi = 0.44 where phi = 0.42 quenches), so only its shape
+#   and its order of magnitude compare.
+# - Their chemistry is one step with Le = 1.2; the two-step mechanism with
+#   mixture-averaged transport gives the deficient CH4 a Lewis number near 1,
+#   so the thermodiffusive stabilization of small curved fronts that they
+#   describe for Le = 1.2 is weaker here.
+# - Their l_F = 3.7 nu_u / S_L against delta_L = 5.1 nu_u / S_L here: on their
+#   axis the runs sit at r / l_F = 1.4 r / delta_L.
+# - Pockets that quench reach the outlet (p_out) before they are gone; the
+#   classification relies on q_min along the front while the pocket is inside
+#   the domain.
+# - 2D, a pair in a channel of symmetry planes, as theirs; the TNF fits are
+#   optically thin (no reabsorption).
+#
+# Resolution: the r = 4, u' = 30 run at 24 cells per delta_L (552 x 192, over
+# its first 2 flame times) gives (running).
+#
+# Cost on one A100 (the flame time delta_L / S_L = 0.112 s is about 520,000
+# steps at 12 cells per delta_L): r = 4 (276 x 96 cells) 1.2-2 hours,
+# r = 2 (192 x 96) about 1 hour, r = 8 (444 x 192) 3-4 hours, r = 1 at 24
+# cells (300 x 192) about 4.5 hours.
+
+[run]
+t_stop = 0.37922772490000001
+cfl = 1.2
+
+[mesh]
+type = "cartesian"
+Nx = 276
+Ny = 96
+Lx = 0.068986841674888638
+Ly = 0.023995423191265613
+
+[initialize]
+type = "restart"
+file = "flame.restart"
+
+[[boundaries]]
+name = "left"
+type = "upt"
+u = [0.026891638416794341, 0.0]
+p = 101325.0
+T = 300
+X = { "CH4" = 0.04225351977940104, "O2" = 0.20120724335659781, "N2" = 0.75653923686400126 }
+
+[[boundaries]]
+name = "right"
+type = "p_out"
+p = 101325.0
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../mechanisms/ch4_bfer.yaml"
+phase = "gas"
+transport = "mixture_averaged"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+
+[radiation]
+
+[output]
+check_interval = 2000
+
+[[write_data]]
+prefix = "./solut/flame"
+format = "vtu"
+time_interval = 0.003792277249
+variables = ["RHO", "U", "P", "T", "HRR", "Y_CH4", "Y_O2", "QRAD"]
