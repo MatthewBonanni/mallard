@@ -223,9 +223,11 @@ TEST(PartiallyStirredReactor, ReactionRatesAreScaledByTheReactingFraction) {
     EXPECT_GT(kappa, 0.02);
     EXPECT_LT(kappa, 0.98);
     auto coarse = uniform_cells(2 * h, "n_steps = 1\ndt = 2e-6\n", pasr);
-    EXPECT_NEAR(1.0 / double(coarse->get_chem_time_scale()(0)) - 1.0, 4.0 * (1.0 / kappa - 1.0), 1e-9 / kappa);
+    EXPECT_NEAR(1.0 / double(coarse->get_chem_time_scale()(0)) - 1.0, 4.0 * (1.0 / kappa - 1.0),
+                precision_tol<double>(1e-9, 1e-6) / kappa);
     auto slow = uniform_cells(h, "n_steps = 1\ndt = 2e-6\n", pasr + "C_mix = 2.0\n");
-    EXPECT_NEAR(1.0 / double(slow->get_chem_time_scale()(0)) - 1.0, 2.0 * (1.0 / kappa - 1.0), 1e-9 / kappa);
+    EXPECT_NEAR(1.0 / double(slow->get_chem_time_scale()(0)) - 1.0, 2.0 * (1.0 / kappa - 1.0),
+                precision_tol<double>(1e-9, 1e-6) / kappa);
     std::ostringstream run;
     run << std::setprecision(17) << "n_steps = 1\ndt = " << 2e-6 * kappa << "\n";
     auto plain = uniform_cells(h, run.str(), "");
