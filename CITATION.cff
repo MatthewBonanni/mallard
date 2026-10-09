@@ -7,8 +7,8 @@ authors:
   - family-names: "Bonanni"
     given-names: "Matthew"
     orcid: "https://orcid.org/0000-0002-8671-7955"
-version: 0.6.0
-date-released: 2026-10-05
+version: 0.7.0
+date-released: 2026-10-09
 doi: 10.5281/zenodo.23112953
 identifiers:
   - type: doi
