@@ -68,6 +68,7 @@ struct KineticEnergyBudget {
     rtype convective = 0.0;
     rtype viscous = 0.0;
     rtype sgs = 0.0;
+    rtype pressure_work = 0.0;  // the convective rate of a scheme without numerical dissipation
 };
 
 /**
@@ -293,6 +294,9 @@ class Solver {
         const LES & get_les() const { return les; }
         /** @brief LES: [mu_t, lambda_t, mu_t / (Sc_t W)] of each cell as of the last copy_device_to_host. */
         const Kokkos::View<rtype *[3]>::host_mirror_type & get_les_coefficients() const { return h_les_coefficients; }
+        /** @brief Thickened flame: [F, E, Omega] per cell, after copy_device_to_host. */
+        const Kokkos::View<rtype *[3]>::host_mirror_type & get_tfles_fields() const { return h_tfles_fields; }
+        const Kokkos::View<rtype *[3]>::host_mirror_type & get_cell_transport() const { return h_cell_transport; }
 
         /** @brief Whether the gas is a mixture (a mechanism is given). */
         bool is_mixture() const { return mixture_model != nullptr; }
@@ -391,6 +395,11 @@ class Solver {
         void update_upwind_sensor();
         /** @brief sum over owned cells of u . R_m - |u|^2 / 2 R_rho for R the sum of face_flux over the cell's faces. */
         rtype kinetic_energy_rate() const;
+        /**
+         * @brief Over owned cells, -u . sum_f mean(p) n_f of the interior faces (Jameson's two-point pressure
+         *        flux with cell values) plus the kinetic_energy_rate of the boundary faces' face_flux.
+         */
+        rtype pressure_work_rate() const;
 
         template <typename T_riemann_solver>
         void launch_flux_functor();

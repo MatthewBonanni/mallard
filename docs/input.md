@@ -224,6 +224,8 @@ times the half step (exact for the autonomous constant-volume reactor).
 | `n_res` | Cells across the thickened flame, default 5 |
 | `efficiency` | `charlette` (default) or `none` (`E = 1`) |
 | `beta` | Exponent of the Charlette efficiency, default 0.5 |
+| `subgrid_velocity` | The `u'` of the efficiency: `colin` (default), `u' = 2 Delta^3 abs(lap(curl u))`; or `eddy_viscosity`, `u' = C_u nu_t / Delta` from the SGS model. Colin's operator overpredicts `u'` 5-8 times on meshes with `Delta >= 0.4 delta_L` and the flame speed by 2x at `Delta = 1.6 delta_L` (`docs/design/les.md`, section 8.3) |
+| `C_u` | Constant of `subgrid_velocity = "eddy_viscosity"`, default 28 (a priori from a DNS at `Delta = 0.8 delta_L`; 22-39 over `Delta = 0.4-1.6 delta_L`) |
 
 ## `[initialize]`
 
@@ -430,7 +432,7 @@ rate is `-dE/dt` and its viscous part `2 mu * enstrophy / rho0`.
 |---|---|
 | `interval` | Every this many steps, default 1 |
 | `file` | Output file, default `integrals.csv` |
-| `budget` | `true` adds the kinetic-energy budget (planar runs): `ke_rate_convective`, `ke_rate_viscous` and `ke_rate_sgs`, the rates of change of the resolved kinetic energy `sum V rho |u|^2 / 2` caused by the convective, molecular viscous and SGS fluxes of the current state (each `sum V (u . R_m - |u|^2 / 2 R_rho)` over that part `R` of the right-hand side), and `eps_numerical = pressure_dilatation - ke_rate_convective`, the scheme's dissipation of kinetic energy (the convective terms of the exact equations change the kinetic energy of a periodic or walled domain only by the pressure work). `-ke_rate_viscous` and `-ke_rate_sgs` are the molecular and SGS dissipation. Costs one extra right-hand side per row and leaves the solution unchanged. Default `false` |
+| `budget` | `true` adds the kinetic-energy budget (planar runs): `ke_rate_convective`, `ke_rate_viscous` and `ke_rate_sgs`, the rates of change of the resolved kinetic energy `sum V rho |u|^2 / 2` caused by the convective, molecular viscous and SGS fluxes of the current state (each `sum V (u . R_m - |u|^2 / 2 R_rho)` over that part `R` of the right-hand side), `pressure_work`, the rate a scheme without numerical dissipation would give (the two-point pressure flux `mean(p) n` of the cell values on interior faces, so `sum over faces mean(p) (u_1 - u_0) . n A`, plus the boundary faces' own fluxes), and `eps_numerical = pressure_work - ke_rate_convective`, the scheme's dissipation of kinetic energy on interior faces (the convective terms of the exact equations change the kinetic energy only by the pressure work and the boundary fluxes). `pressure_work` is the discrete counterpart of `pressure_dilatation`; unlike the latter it does not carry the gradients' discretization error, which matters where `p div u` is large (flames: thermal expansion at atmospheric pressure, several orders above the dissipation). `-ke_rate_viscous` and `-ke_rate_sgs` are the molecular and SGS dissipation. Costs one extra right-hand side per row and leaves the solution unchanged. Default `false` |
 
 ## `[statistics]`
 
