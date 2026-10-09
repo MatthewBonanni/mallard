@@ -21,10 +21,12 @@
 # efficiency uses u' = C_u nu_t / Delta (C_u = 28).
 #
 # Ignition: burnt gas (complete combustion at phi = 0.65, 1766 K) fills the
-# channel downstream of the base (x > 3 mm, tanh edge 2 mm wide: a step
-# rings under the central flux) at t = 0. A burnt slug only in the wake
+# channel downstream of the base (x > 12 mm, a tanh edge 8 mm wide) at t = 0.
+# The fresh/burnt contact that the inflow then pushes out overshoots under the
+# central flux: to 2550 K with a 2 mm edge, 1890 K with 8 mm (it leaves the
+# domain before the statistics start). A burnt slug only in the wake
 # (|y| < D/2) is flushed out before the recirculation zone forms, and the
-# flame blows off.
+# flame blows off; with double flux the run diverged within 700-2800 steps.
 #
 # Results: see the RESULTS block written into this header by the validation pass.
 #
@@ -50,8 +52,8 @@ translation = [0.0, 0.0, 0.08]
 type = "analytical"
 u = ["17.3", "0.0", "0.0"]
 p = "101325.0"
-T = "288.0 + 1478.0 * (0.5 * (1 + tanh((x - 0.003) / 0.002)))"
-X = { C3H8 = "0.13 + -0.13 * (0.5 * (1 + tanh((x - 0.003) / 0.002)))", O2 = "1.0 + -0.65 * (0.5 * (1 + tanh((x - 0.003) / 0.002)))", CO2 = "0.0 + 0.39 * (0.5 * (1 + tanh((x - 0.003) / 0.002)))", H2O = "0.0 + 0.52 * (0.5 * (1 + tanh((x - 0.003) / 0.002)))", N2 = "3.76" }
+T = "288.0 + 1478.0 * (0.5 * (1 + tanh((x - 0.012) / 0.008)))"
+X = { C3H8 = "0.13 + -0.13 * (0.5 * (1 + tanh((x - 0.012) / 0.008)))", O2 = "1.0 + -0.65 * (0.5 * (1 + tanh((x - 0.012) / 0.008)))", CO2 = "0.0 + 0.39 * (0.5 * (1 + tanh((x - 0.012) / 0.008)))", H2O = "0.0 + 0.52 * (0.5 * (1 + tanh((x - 0.012) / 0.008)))", N2 = "3.76" }
 
 [[boundaries]]
 name = "inlet"
