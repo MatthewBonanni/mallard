@@ -160,7 +160,9 @@ TEST(MPITest, ChemistryLoadBalancingMatchesSerial) {
                                   mixture_input("", "type = \"MUSCL\"\n", balanced, "navier_stokes") + tfles};
     for (const std::string & input : inputs) {
         expect_matches_serial(input, [](const Solver & s) {
-            if (s.is_distributed()) EXPECT_GT(s.chemistry_cells_sent(), 0.0);
+            if (s.is_distributed()) {
+                EXPECT_GT(s.chemistry_cells_sent(), 0.0);
+            }
         });
     }
 }

@@ -48,6 +48,8 @@ ChemistryBalance::ChemistryBalance(const uint32_t n_species_in, const double thr
     : n_species(n_species_in), threshold(threshold_in), state_stride(N_CONSERVATIVE + n_species_in + 4),
       result_stride(n_species_in + 3) {
 #ifndef Mallard_HAS_MPI
+    (void)state_stride;
+    (void)result_stride;
     throw std::logic_error("ChemistryBalance: built without MPI");
 #endif
 }
