@@ -33,13 +33,18 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Finite-rate chemistry: elementary, three-body, falloff, PLOG and Chebyshev reactions; a Rosenbrock (RODAS) integrator per cell with analytical Jacobians, Strang-split from the flow; ignition delays match Cantera up to 1268 species
 - Mixture-averaged, unity-Lewis or constant-Lewis transport
 - Gravity and arbitrary source terms
-- Large-eddy simulation with explicit subgrid-scale models (Sigma, WALE, Vreman, Smagorinsky) for single gases and mixtures, and a run-time kinetic-energy budget that separates the model's dissipation from the scheme's ([design](docs/design/les.md))
+
+**Large-eddy simulation** ([design](docs/design/les.md))
+- Explicit LES: Sigma (default), WALE, Vreman or Smagorinsky eddy viscosity for single gases and mixtures, with Scotti's filter width on anisotropic cells and an opt-in dynamic constant
+- Kinetic-energy-preserving hybrid convective flux, with the Riemann solver only at compressions, and a run-time dissipation budget that separates the model's, the scheme's and molecular dissipation
+- Thickened flame (TFLES) with dynamic thickening and Charlette efficiency; partially stirred reactor (PaSR) closure, experimental
+- Synthetic turbulent inflow: a digital filter with prescribed Reynolds stresses and length scales, or the statistics of a precursor run, bitwise the same on any number of ranks ([design](docs/design/synthetic_inflow.md))
+- Channel flow at Re<sub>τ</sub> = 395 and 590: Re<sub>τ</sub> within 0.7% and 1.6% of the DNS of Moser, Kim & Mansour
 
 **Boundary conditions**
 - Slip, adiabatic, isothermal and heat-flux walls, optionally moving
 - Inflow, characteristic far field, pressure outlets (local or area-averaged), transmissive, time-dependent expressions
 - Partially non-reflecting characteristic (NSCBC) inlets and outlets with transverse terms (1% of an acoustic pulse reflected, against 97-99% at a fixed-pressure outlet); sponge layers
-- Synthetic turbulent inflow: a digital filter with prescribed Reynolds stresses and length scales, or the statistics of a precursor run, bitwise the same on any number of ranks ([design](docs/design/synthetic_inflow.md))
 - Zones split between conditions by expressions
 
 **Performance and parallelism**
@@ -57,7 +62,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - `MallardReactor`, a 0D reactor, and Python tools for plotting, animation and HDF5 output
 
 **Validation and testing**
-- 29 [examples](examples) against exact solutions, theory, DNS or Cantera, e.g.:
+- 38 [examples](examples) against exact solutions, theory, DNS or Cantera, e.g.:
   - Sphere wake at Re = 300: Strouhal number and drag within 3% and 2% of Johnson & Patel
   - Compressible isotropic turbulence: enstrophy within 2.4% of the filtered DNS of Johnsen et al.
   - CJ detonation speed within 0.01%; H2/air flame speeds within 0.81% of Cantera from φ = 0.6 to 1.4
