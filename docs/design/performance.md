@@ -94,6 +94,57 @@ and single base addresses; results and step times are unchanged.
 | host peak during setup | 8.55 GB (32.6 KB/cell) | 1.44 GB (5.5 KB/cell) |
 | device peak | 11.6 GB | 11.6 GB |
 
+### 3. TENO setup on the device, incremental (AMR stage 0, [amr.md](amr.md))
+
+**Baseline** (`main` at v0.6.0-80, `numerics` setup phase, A100 node host: EPYC 7763, 16 OpenMP threads,
+symmetry walls on all sides). Per-cell work in thread-seconds (sum over threads):
+
+| 3D TENO5 | 100^3 hexahedra (1M) | 55^3 x 6 tetrahedra (998k) |
+|---|---|---|
+| setup | **43.5 s** | **123.2 s** |
+| moments (wall) | 7.5 s | 1.3 s |
+| per-cell work (wall) | 26.8 s | 109 s |
+| packing and upload (wall) | 9.1 s | 12.5 s |
+| search: layers, mirror images, sort (thread-s) | 75 | 89 |
+| means and QR (thread-s) | 178 | 1250 |
+| Lebesgue constants (thread-s) | 58 | 282 |
+| sector stencils (thread-s) | 70 | 40 |
+| smoothness indicators, face basis, metric (thread-s) | 23 | 19 |
+| least-squares fits per cell | 1.00 | 7.07 |
+| host / device peak | 3.4 / 42.1 GB | 2.9 / 50.0 GB |
+
+The time is the fits on tetrahedra (7 tried central stencils per cell, each a full QR and Lebesgue
+constant), and on hexahedra the search, the fits and the packing alike.
+
+**Change.** The per-cell setup (`teno_setup.cpp`) runs as a Kokkos team kernel with one cell per team
+of 128 threads; cells whose search outgrows the device scratch are redone on the host with the same
+code. Only independent sums run in parallel (columns of the QR, rows of the back substitution,
+quadrature points of the Lebesgue constant, entries of the search); every value takes the host's
+sequence of operations, and the file is compiled without FMA contraction, so the tables are bitwise
+those of the host setup. Hot data (the visit hash set, the sort, the least-squares matrix and, for up
+to 91 rows, its pseudo-inverse) is in shared memory; three teams fit an SM. Monomial means are unrolled
+per degree with their operands in registers. Moments, bounding boxes and packing run on the device;
+cube roots and the ranking metric (log, exp) stay on the host.
+
+| 3D TENO5, one A100 | 100^3 hexahedra | 55^3 x 6 tetrahedra |
+|---|---|---|
+| setup | **4.56 s (9.5x)** | **20.0 s (6.2x)** |
+| geometry (host metric and cube roots, device moments and boxes) | 0.50 s | 0.31 s |
+| tables (device) | 3.95 s (4.0 us/cell) | 19.5 s (19.5 us/cell) |
+| packing | 0.09 s | 0.12 s |
+| host / device peak | 3.2 / 44.1 GB | 1.8 / 51.5 GB |
+
+The device peak grows by the batch outputs and the per-team scratch (2 GB at 65,536 cells per batch).
+Per cell on hexahedra, the device time splits into the fit (30%), the search and sort (35%), the
+sector stencils (15%) and the rest (means, Lebesgue constant, smoothness indicators). On tetrahedra
+the seven fits take 75%: each step of a Householder reflection is a sequential sum over the rows, which
+the bitwise requirement keeps sequential, so the fits are latency-bound.
+
+`TENO::rebuild_cells()` recomputes a list of cells and repacks the stencils on the device, keeping
+every other cell's tables bitwise; `TENO::cells_within_reach()` gives the cells whose searches see a
+set of changed cells. Rebuilding those after moving nodes reproduces a full setup bitwise (tests on
+prisms, mixed cells and tetrahedra in 3D and triangles in 2D).
+
 ## Verification
 
 Bitwise identity with `main` is checked on restart files (identical MD5) after N steps of: the
