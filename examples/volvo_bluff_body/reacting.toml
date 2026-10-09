@@ -1,0 +1,156 @@
+# Reacting LES of the Volvo bluff-body combustor (3D build): the premixed
+# propane-air flame of Sjunnesson et al. (LDA 1991, CARS 1992) at the
+# conditions of the AIAA Model Validation for Propulsion workshop.
+# Geometry, inflow turbulence and numerics as cold.toml, on a coarser mesh
+# (tools/make_volvo_mesh.py --ds 2e-3 --nz 40: 0.66M hexahedra, 2 mm = D / 20
+# in the flame region; the cost of the reacting mixture, about 15 times that
+# of air per cell and step, rules out the cold flow's 1.25 mm). Design and
+# results: docs/design/les.md, section 8.3.
+#
+# Physics: propane-air at phi = 0.65, 288 K, 1 atm, U_b = 17.3 m/s.
+# Chemistry: mechanisms/c3h8_2step.yaml (Westbrook-Dryer two-step with CO,
+# its first step tuned to GRI-Mech 3.0's laminar flame: s_L = 0.209 m/s,
+# T_b = 1766 K, delta_L = 0.471 mm; Mallard's 1D flame on that mechanism:
+# s_L -1.5%). Mixture-averaged transport.
+#
+# LES: Sigma (Scotti width) for the momentum, TFLES with dynamic thickening
+# for the flame: Delta = V^(1/3) = 2 mm in the flame region = 4.2
+# delta_L, so F = n_res Delta / delta_L = 21 (5 cells across the thickened
+# flame, 10 mm). At Delta > 1.6 delta_L Colin's subgrid velocity
+# overpredicts the efficiency (docs/design/les.md, section 8.3), so the
+# efficiency uses u' = C_u nu_t / Delta (C_u = 28).
+#
+# Ignition: burnt gas (complete combustion at phi = 0.65, 1766 K) fills the
+# channel downstream of the base (x > 12 mm, a tanh edge 8 mm wide) at t = 0.
+# The fresh/burnt contact that the inflow then pushes out overshoots under the
+# central flux: to 2550 K with a 2 mm edge, 1890 K with 8 mm (it leaves the
+# domain before the statistics start). A burnt slug only in the wake
+# (|y| < D/2) is flushed out before the recirculation zone forms, and the
+# flame blows off; with double flux the run diverged within 700-2800 steps.
+#
+# Status: SET UP, NOT VALIDATED. F = 21 on this mesh is far above the F <= 5
+# that thickened-flame LES should use (Delta <= delta_L = 0.47 mm in the flame
+# region); a first run was stopped at t = 10 ms. Cost of the F <= 5 mesh
+# (~15-28M cells, ~2,700-5,000 A100-hours) and the plan:
+# docs/design/les.md, section 8.3. Cost here: 85 ms/step on four A100s,
+# ~470,000 steps for 0.2 s.
+#
+# Run:
+#   python ../../tools/make_volvo_mesh.py volvo.msh --ds 2e-3 --nz 40
+#   mpirun -n 4 ../../build3d/src/Mallard -i reacting.toml --kokkos-map-device-id-by=mpi_rank
+#   python ../../tools/volvo.py profiles stats/reacting_<last>.pvtu --u-bulk 17.3 --temperature --out reacting.npz
+#   python ../../tools/volvo.py plot reacting.npz --kind reacting --exp reference --out reacting.png
+
+[run]
+t_stop = 0.2
+cfl = 0.8
+
+[mesh]
+type = "file"
+filename = "volvo.msh"
+
+[[periodic]]
+zones = ["back", "front"]
+translation = [0.0, 0.0, 0.08]
+
+[initialize]
+type = "analytical"
+u = ["17.3", "0.0", "0.0"]
+p = "101325.0"
+T = "288.0 + 1478.0 * (0.5 * (1 + tanh((x - 0.012) / 0.008)))"
+X = { C3H8 = "0.13 + -0.13 * (0.5 * (1 + tanh((x - 0.012) / 0.008)))", O2 = "1.0 + -0.65 * (0.5 * (1 + tanh((x - 0.012) / 0.008)))", CO2 = "0.0 + 0.39 * (0.5 * (1 + tanh((x - 0.012) / 0.008)))", H2O = "0.0 + 0.52 * (0.5 * (1 + tanh((x - 0.012) / 0.008)))", N2 = "3.76" }
+
+[[boundaries]]
+name = "inlet"
+type = "nscbc_inlet"
+u = [17.3, 0.0, 0.0]
+p = 101325.0
+T = 288.0
+L = 0.88
+X = { C3H8 = 0.13, O2 = 1.0, N2 = 3.76 }
+
+[boundaries.turbulence]
+reynolds_stress = [0.748225, 0.748225, 0.748225, 0.0, 0.0, 0.0]
+length_scale = 0.01
+
+[[boundaries]]
+name = "outlet"
+type = "nscbc_outlet"
+p = 101325.0
+L = 0.88
+
+[[boundaries]]
+name = "top"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "bottom"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "bluffbody"
+type = "wall_adiabatic"
+
+[numerics]
+riemann_solver = "HLLC"
+convective_flux = "hybrid"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+limiter = "none"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../mechanisms/c3h8_2step.yaml"
+phase = "c3h8_2step"
+transport = "mixture_averaged"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+T_frozen = 500.0
+fuse_half_steps = true
+
+[les]
+model = "sigma"
+
+[les.combustion]
+model = "tfles"
+delta_L = 4.71e-4
+s_L = 0.2091
+T_unburnt = 288.0
+T_burnt = 1766.0
+subgrid_velocity = "eddy_viscosity"
+
+[statistics]
+fields = ["RHO", "U_X", "U_Y", "U_Z", "T"]
+products = ["U_X*U_X", "U_Y*U_Y", "U_Z*U_Z", "U_X*U_Y", "T*T"]
+t_start = 0.06
+interval = 5
+
+[integrals]
+interval = 2
+budget = true
+
+[output]
+check_interval = 2000
+
+[[write_data]]
+prefix = "restart/reacting"
+format = "restart"
+time_interval = 0.01
+
+[[write_data]]
+prefix = "stats/reacting"
+format = "vtu"
+time_interval = 0.05
+variables = ["MEAN_*", "COV_*"]
+
+[[write_data]]
+prefix = "snap/reacting"
+format = "vtu"
+time_interval = 0.125
+variables = ["U", "T", "HRR", "Q", "TF_F", "TF_E", "MU_T"]

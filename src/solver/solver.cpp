@@ -26,6 +26,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
+#include "device_comm.h"
 #include "common.h"
 #include "log.h"
 #include "mesh_block.h"
@@ -40,6 +41,7 @@ Solver::Solver() {
 
 Solver::~Solver() {
     Kokkos::fence();
+    destroy_step_graph();
 }
 
 int Solver::init(const std::string & input_file_name) {
@@ -79,6 +81,7 @@ int Solver::init(const toml::value & input_in) {
             init_numerics();
         });
     }
+    trim_halo();
     // The cache describes the local mesh at this halo depth
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) teno->save_cache(halo_layers);
     setup.reset();
@@ -219,7 +222,15 @@ void Solver::init_mesh() {
                                                      : partition_hilbert(*setup, comm::size()));
         }
         mesh = setup->build_local_mesh(halo_layers, distribution);
-        halo = HaloExchange(distribution);
+        const std::string exchange =
+            toml::find_or<std::string>(input, "parallel", "halo_exchange", comm::nccl_available() ? "nccl" : "mpi");
+        if (exchange != "nccl" && exchange != "mpi") {
+            throw InputError("parallel.halo_exchange = \"" + exchange + "\" is not one of: nccl, mpi.");
+        }
+        if (exchange == "nccl" && !comm::nccl_available()) {
+            throw InputError("parallel.halo_exchange = \"nccl\" needs a build with Mallard_ENABLE_NCCL.");
+        }
+        halo = HaloExchange(distribution, exchange == "nccl");
     }
     mesh_summary = describe_mesh(*mesh);
     mesh_summary.insert(mesh_summary.begin(),
@@ -241,10 +252,11 @@ void Solver::init_mesh() {
         const uint64_t max_owned = comm::allreduce(n_owned, comm::Op::MAX);
         const uint64_t max_halo = comm::allreduce(n_halo, comm::Op::MAX);
         const double mean = static_cast<double>(n_cells_global) / comm::size();
-        mesh_summary.emplace_back("Partition", logging::format("%s, %d ranks, %d halo layers",
+        mesh_summary.emplace_back("Partition", logging::format("%s, %d ranks, %d halo layers exchanged with %s",
                                                                partitioner == "graph" ? "graph (KaMinPar)"
                                                                                       : "Hilbert curve",
-                                                               comm::size(), halo_layers));
+                                                               comm::size(), halo_layers,
+                                                               halo.uses_nccl() ? "NCCL" : "MPI"));
         mesh_summary.emplace_back("Cells per rank",
                                   logging::format("%s to %s owned (imbalance %.3f), up to %s halo",
                                                   logging::count(min_owned).c_str(),
@@ -273,6 +285,19 @@ int Solver::base_halo_layers() const {
     // The hybrid flux's sensor reads the velocity gradients of halo-layer-1 cells too
     const bool hybrid = toml::find_or<std::string>(input, "numerics", "convective_flux", "riemann") == "hybrid";
     return (type == "FO" && !viscous && !hybrid) ? 1 : 2;
+}
+
+void Solver::trim_halo() {
+    // The deep TENO halo holds every cell the stencil searches visited, so that
+    // stencils match the serial ones; the time loop needs only the cells the
+    // stencils kept, and the layers the other kernels read
+    const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
+    if (!is_distributed() || teno == nullptr) return;
+    std::vector<uint8_t> needed = teno->stencil_cells();
+    const int base = base_halo_layers();
+    for (uint32_t c = 0; c < mesh->n_cells; c++) needed[c] = needed[c] || distribution.layer[c] <= base;
+    trim_halo_exchange(distribution, needed);
+    halo = HaloExchange(distribution, halo.uses_nccl());
 }
 
 bool Solver::halo_too_shallow() {
@@ -525,6 +550,7 @@ void Solver::init_boundaries() {
     h_face_state = Kokkos::create_mirror_view(boundary_data.face_state);
     h_face_state_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_state_index);
     t_boundary_states = -1.0;
+    boundary_states_steady = false;
     init_inlets(input_boundaries, inlets);
 }
 
@@ -672,7 +698,7 @@ void Solver::update_average_pressure_outlets(StateView solution) {
 
 void Solver::update_boundary_states(rtype t_eval) {
     update_inflow(t_eval);
-    if (dirichlet_boundaries.empty() || t_eval == t_boundary_states) {
+    if (dirichlet_boundaries.empty() || t_eval == t_boundary_states || boundary_states_steady) {
         return;
     }
     for (const auto & bc : dirichlet_boundaries) {
@@ -685,6 +711,9 @@ void Solver::update_boundary_states(rtype t_eval) {
     }
     Kokkos::deep_copy(boundary_data.face_state, h_face_state);
     t_boundary_states = t_eval;
+    boundary_states_steady = std::none_of(dirichlet_boundaries.begin(), dirichlet_boundaries.end(), [](const auto & bc) {
+        return std::any_of(bc.W.begin(), bc.W.end(), [](const Expression & w) { return w.depends_on_time(); });
+    });
 }
 
 void Solver::init_numerics() {
@@ -744,6 +773,10 @@ void Solver::init_numerics() {
     double_flux = toml::find_or<bool>(input, "numerics", "double_flux", false);
     if (double_flux && !is_mixture()) {
         throw InputError("numerics.double_flux needs gas = \"mixture\".");
+    }
+    if (double_flux && simpler) {
+        throw InputError("numerics.double_flux is not available with chemistry.coupling = \"simpler\" (its "
+                         "thermodynamics are frozen over a step, which the reaction substep would leave stale).");
     }
 
     rhs_func = [this](State solution, State rhs, rtype t_stage) { calc_rhs(solution, rhs, t_stage); };
@@ -807,6 +840,7 @@ void Solver::init_run_parameters() {
         dt = dt_fixed;
     }
     n_steps = toml::find_or<uint64_t>(input, "run", "n_steps", 0);
+    cuda_graphs = toml::find_or<bool>(input, "run", "cuda_graphs", true);
     t_stop = find_real_or(input, "run", "t_stop", -1.0);
     t_wall_stop = find_real_or(input, "run", "t_wall_stop", -1.0);
 }
@@ -1189,10 +1223,17 @@ int Solver::run() {
     // Strang splitting with the half steps of consecutive steps fused into one
     // chemistry call, except where output, checks or the end read the state
     defer_chemistry = reacting && fuse_chemistry;
+    use_step_graph = step_graph_unsupported().empty();
     while ((stop = stop_reason()).empty()) {
         Kokkos::Timer step_timer;
-        calc_dt();
-        take_step();
+        // The first step runs kernel by kernel, which also sets up what the
+        // kernels allocate on first use
+        if (use_step_graph && step > step_run_start) {
+            graph_step();
+        } else {
+            calc_dt();
+            take_step();
+        }
         if (chemistry_pending > 0.0 && state_needed()) {
             advance_chemistry(chemistry_pending);
             chemistry_pending = 0.0;
@@ -1218,6 +1259,7 @@ int Solver::run() {
         t_wall_output += output_timer.seconds();
     }
     defer_chemistry = false;
+    destroy_step_graph();
     if (step != step_last_check) print_progress();
     Kokkos::Timer output_timer;
     copy_device_to_host();
@@ -1340,13 +1382,18 @@ void Solver::print_setup() const {
     if (t_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("t = ") + real(double(t_stop));
     if (t_wall_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("wall ") + logging::duration(double(t_wall_stop));
     logging::item("Stop at", stop);
+#ifdef KOKKOS_ENABLE_CUDA
+    const std::string no_graph = step_graph_unsupported();
+    logging::item("CUDA graphs", no_graph.empty() ? "one per step" : "no: " + no_graph);
+#endif
     if (check_nan) logging::item("NaN check", "every step");
     if (les_on) logging::items(les.summary());
     if (tfles_on) logging::items(thickened_flame.summary());
     if (pasr_on) logging::items(pasr.summary());
     if (double_flux) logging::item("Double flux", "frozen gamma and e0 per cell and step (not energy conservative)");
     if (reacting) {
-        logging::item("Chemistry", std::to_string(kinetics.n_reactions) + " reactions, Strang splitting" +
+        logging::item("Chemistry", std::to_string(kinetics.n_reactions) + " reactions, " +
+                                       (simpler ? "SIMPLER balanced splitting" : "Strang splitting") +
                                        (fuse_chemistry ? " (half steps fused)" : "") + ", RODAS (rtol " +
                                        real(chemistry_options.integrator.rtol) + ", atol " +
                                        real(chemistry_options.atol_Y) + ")" +
@@ -1477,6 +1524,14 @@ void Solver::write_probes() {
 }
 
 void Solver::take_step() {
+    if (simpler) {
+        take_simpler_step();
+        halo_current = false;
+        Kokkos::fence();
+        step++;
+        t += dt;
+        return;
+    }
     if (reacting) {
         Kokkos::deep_copy(chem_cost, 0.0_r);
         advance_chemistry(chemistry_pending + 0.5 * static_cast<double>(dt));
@@ -1531,6 +1586,14 @@ void Solver::update_p_max() {
     });
 }
 
+rtype Solver::next_target_time() const {
+    rtype t_target = (t_stop > 0) ? t_stop : std::numeric_limits<rtype>::infinity();
+    for (const auto & writer : data_writers) {
+        t_target = std::min(t_target, writer->next_time());
+    }
+    return t_target;
+}
+
 void Solver::calc_dt() {
     // Halo values are stale after the last stage of the previous step; the
     // first stage of the next one reuses them
@@ -1540,10 +1603,7 @@ void Solver::calc_dt() {
     dt = use_cfl ? cfl * dt_cfl1 : dt_fixed;
     dt = std::min(dt, sponge_dt_max);
     // Land exactly on t_stop and on time-based output times
-    rtype t_target = (t_stop > 0) ? t_stop : std::numeric_limits<rtype>::infinity();
-    for (const auto & writer : data_writers) {
-        t_target = std::min(t_target, writer->next_time());
-    }
+    const rtype t_target = next_target_time();
     if (t + dt > t_target && t_target > t) {
         dt = t_target - t;
     }
@@ -1630,7 +1690,7 @@ struct TimeStepFunctor {
     }
 };
 
-rtype Solver::calc_dt_cfl1() {
+rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
     if (is_mixture()) return calc_dt_cfl1_mixture();
     TimeStepFunctor functor{mesh->offsets_faces_of_cell,
                             mesh->faces_of_cell,
@@ -1650,6 +1710,11 @@ rtype Solver::calc_dt_cfl1() {
             update_dynamic_constant();
             update_eddy_viscosity(mesh->n_owned());
         }
+    }
+    if (on_device.data()) {
+        Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor,
+                                Kokkos::Min<rtype, Kokkos::DefaultExecutionSpace::memory_space>(on_device));
+        return 0.0;
     }
     rtype dt_min = std::numeric_limits<rtype>::max();
     Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor, Kokkos::Min<rtype>(dt_min));

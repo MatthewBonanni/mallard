@@ -12,9 +12,11 @@
 #ifndef EXPRESSION_H
 #define EXPRESSION_H
 
+#include <algorithm>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <exprtk.hpp>
 
@@ -35,7 +37,13 @@ class Expression {
             if (!parser.compile(text, vars->expr)) {
                 throw std::runtime_error("Failed to parse expression for " + name + ": " + parser.error());
             }
+            std::vector<std::string> used;
+            time_dependent = !exprtk::collect_variables(text, vars->table, used) ||
+                             std::find(used.begin(), used.end(), "t") != used.end();
         }
+
+        /** @brief Whether the value can depend on t. */
+        bool depends_on_time() const { return time_dependent; }
 
         /**
          * @brief Evaluate at (x, y, z = 0, t).
@@ -71,6 +79,7 @@ class Expression {
             exprtk::expression<double> expr;
         };
         std::unique_ptr<Vars> vars;
+        bool time_dependent = true;
 };
 
 #endif // EXPRESSION_H

@@ -21,14 +21,17 @@ shaded by a numerical schlieren. Wall panels plot "var" along the first row of
 cells of a Cartesian mesh (y = min) against reference points. Frames panels
 show a sequence of pre-rendered images ("series" holds 00000.png, 00001.png,
 ... and optionally times.txt), e.g. 3D views. Curve panels trace a time series
-("data": CSV with columns t and y) up to the current time over a reference
-curve ("reference": {"label", "file": a CSV of t and y}); "t_end" maps the
-normalized time to t. Detonation panels show a 2D detonation run's pressure
+("data": CSV with columns t and y) up to the current time, marked by a
+vertical line, over reference curves ("reference": {"label", "file": a CSV
+of t and y, optional "color", "alpha", "lw", "ls"}, or a list of them);
+"t_end" maps the normalized time to t. Detonation panels show a 2D detonation run's pressure
 over the channel and, below it, the numerical soot foil (P_MAX) behind the
 front ("series": the run's .pvd; "xlim" in mesh units). "gif_width" and
 "gif_colors" shrink the GIF, "gif_dither" sets its dither (ffmpeg paletteuse),
 "mp4_width" scales the MP4, and "background" sets the figure color (to match
-pre-rendered frames).
+pre-rendered frames). Field, frames and detonation panels show their time in
+a corner ("show_time": false hides it), formatted by "time_format" (default
+"t = {:.3f}"; frames panels take it from times.txt, in its units).
 
 Every frame is one snapshot of each case: a case with N snapshots is sampled
 at the nearest normalized time, so cases written with the same number of
@@ -204,13 +207,16 @@ class CurvePanel:
         self.p = panel
         d = np.genfromtxt(panel["data"], delimiter=",", names=True)
         self.t, self.y = d["t"], d["y"]
-        ref = panel.get("reference")
-        self.ref = np.genfromtxt(ref["file"], delimiter=",", names=True) if ref else None
+        refs = panel.get("reference") or []
+        self.refs = [(r, np.genfromtxt(r["file"], delimiter=",", names=True))
+                     for r in (refs if isinstance(refs, list) else [refs])]
 
     def draw(self, ax, k, n):
         t_now = self.p["t_end"] * k / max(n - 1, 1)
-        if self.ref is not None:
-            ax.plot(self.ref["t"], self.ref["y"], color=FG, lw=0.8, alpha=0.75, label=self.p["reference"]["label"])
+        for r, d in self.refs:
+            ax.plot(d["t"], d["y"], color=r.get("color", FG), lw=r.get("lw", 0.8), alpha=r.get("alpha", 0.75),
+                    ls=r.get("ls", "-"), label=r["label"])
+        ax.axvline(t_now, color=DIM, lw=0.4, alpha=0.6)
         m = self.t <= t_now + 1e-9
         ax.plot(self.t[m], self.y[m], color="#f2b134", lw=1.0, label=self.p.get("label", "Mallard"))
         if m.any():
@@ -284,7 +290,8 @@ def render(args):
         t = obj.draw(ax, k, n)
         fig.text(rect[0], rect[1] + rect[3] + 0.006, p.get("title", ""), fontsize=6, color=FG, ha="left", va="bottom")
         if p.get("show_time", isinstance(obj, (FieldPanel, FramesPanel, DetonationPanel))):
-            ax.text(0.985, 0.975, f"t = {t:.3f}", transform=ax.transAxes, fontsize=4.5, color="white", ha="right",
+            label = p.get("time_format", "t = {:.3f}").format(t)
+            ax.text(0.985, 0.975, label, transform=ax.transAxes, fontsize=4.5, color="white", ha="right",
                     va="top", family="DejaVu Sans Mono",
                     bbox=dict(boxstyle="round,pad=0.25", fc=BG, ec="none", alpha=0.6))
     if config.get("footer"):
