@@ -12,6 +12,8 @@
 #ifndef TENO_H
 #define TENO_H
 
+#include <array>
+
 #include <Kokkos_Core.hpp>
 
 #include "common.h"
@@ -36,6 +38,16 @@ constexpr uint8_t MAX_NK = n_dof(MAX_DEGREE);     // non-constant dofs
 constexpr uint8_t NK_SMALL = n_dof(2);            // degree-2 dofs
 constexpr uint8_t MAX_FACES = (N_DIM == 2) ? 4 : 6;
 constexpr uint8_t MAX_FACE_QUAD = (N_DIM == 2) ? 4 : 9;
+
+/**
+ * @brief Boundary faces across which a stencil entry is mirrored in turn, -1
+ *        after the last: a cell's image at the junction of several planar
+ *        boundaries (e.g. across both symmetry planes of a quarter domain).
+ *        Stencils store an entry mirrored once by its face f >= 0, and one
+ *        mirrored repeatedly as -2 - k for chain k.
+ */
+constexpr uint8_t MAX_MIRRORS = N_DIM;
+using MirrorChain = std::array<int32_t, MAX_MIRRORS>;
 
 /**
  * @brief Index of entry (l, m), l <= m, of a symmetric n x n matrix stored as

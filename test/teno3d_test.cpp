@@ -15,6 +15,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <map>
 #include <sstream>
 #include <string>
 #include <tuple>
@@ -170,6 +172,82 @@ INSTANTIATE_TEST_SUITE_P(TENO, TENO3DOrder,
                       OrderParam{"cartesian_tet", 4, 4, SMOOTH}, OrderParam{"cartesian_tet", 5, 4, SMOOTH},
                       OrderParam{"cartesian", 5, 6, TROUBLED},
                       OrderParam{"cartesian_tet", 4, 4, TROUBLED}));
+
+namespace {
+
+/**
+ * @brief Face values of each cell at each of its faces' quadrature points, keyed
+ *        by the cell centroid and the point (shifted by -offset, rounded), for
+ *        the cells beyond offset in y and z; field smooth_conservatives,
+ *        central TENO5 stencils.
+ */
+std::map<std::array<int64_t, 6>, std::array<double, N_CONSERVATIVE>>
+face_values_by_point(std::shared_ptr<Mesh> mesh, double offset) {
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto avg = cell_averages_3d(*mesh, [&](double x, double y, double z, double * U) {
+        smooth_conservatives(x, y - offset, z - offset, U);
+    });
+    Euler euler = Euler::from_reference(GAMMA, 1.0, 1.0, 1.0);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    auto h_W = Kokkos::create_mirror_view(W);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        rtype U[N_CONSERVATIVE], Wc[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE U[i] = avg(c, i);
+        euler.compute_W_from_conservatives(Wc, U);
+        FOR_I_CONSERVATIVE h_W(c, i) = Wc[i];
+    }
+    Kokkos::deep_copy(W, h_W);
+    auto teno = make_teno(mesh, bd, 5, SMOOTH);
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, teno->n_face_quadrature_points());
+    teno->calc_face_values(W, face_W);
+    auto h_face_W = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+    auto h_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->face_quad_points);
+    auto h_weights = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->face_quad_weights);
+    auto key = [&](double v, int d) { return std::llround(1e6 * (d == 0 ? v : v - offset)); };
+    std::map<std::array<int64_t, 6>, std::array<double, N_CONSERVATIVE>> values;
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        for (uint8_t side = 0; side < 2; side++) {
+            const int32_t c = mesh->h_cells_of_face(f, side);
+            if (c < 0 || double(mesh->h_cell_coords(c, 1)) < offset || double(mesh->h_cell_coords(c, 2)) < offset) {
+                continue;
+            }
+            for (uint8_t q = 0; q < h_weights.extent(1); q++) {
+                if (double(h_weights(f, q)) == 0.0) continue;
+                std::array<int64_t, 6> k;
+                for (int d = 0; d < 3; d++) {
+                    k[d] = key(double(mesh->h_cell_coords(c, d)), d);
+                    k[3 + d] = key(double(h_points(f, q, d)), d);
+                }
+                FOR_I_CONSERVATIVE values[k][i] = double(h_face_W(f, q, side, i));
+            }
+        }
+    }
+    return values;
+}
+
+} // namespace
+
+TEST(TENO3DMirrors, TwoSymmetryPlanesReproduceTheMirroredDomain) {
+    // A box with symmetry walls is the interior scheme on the mesh mirrored
+    // across them: a quarter of a channel, whose walls y = 0 and z = 0 meet
+    // along the x axis, must reconstruct a field even in y and z as the whole
+    // channel does. Mirrored across each wall separately, the stencils of the
+    // cells along the axis missed the quadrant y, z < 0 and leaned away from
+    // it, which grew a carbuncle on the stagnation line of a sphere
+    // simulated on the quarter domain (#80).
+    const double h = 1.0 / 6.0;
+    const auto quarter = face_values_by_point(make_mesh_3d("cartesian", 4, 6, 6, 4 * h, 1.0, 1.0), 0.0);
+    const auto whole = face_values_by_point(make_mesh_3d("cartesian", 4, 12, 12, 4 * h, 2.0, 2.0), 1.0);
+    ASSERT_EQ(quarter.size(), whole.size());
+    double diff = 0.0;
+    for (const auto & [k, v] : quarter) {
+        const auto it = whole.find(k);
+        ASSERT_NE(it, whole.end());
+        for (int i = 0; i < N_CONSERVATIVE; i++) diff = std::max(diff, std::abs(v[i] - it->second[i]));
+    }
+    std::cout << "largest difference: " << diff << std::endl;
+    EXPECT_LT(diff, precision_tol<double>(1e-11, 1e-5));
+}
 
 namespace {
 

@@ -64,6 +64,7 @@ struct TENOScalarValues {
     Kokkos::View<rtype **, Kokkos::LayoutRight> scalars;
     Kokkos::View<rtype *> theta;  // (cell); empty: no scaling
     uint32_t n_species;
+    Kokkos::View<int32_t *[teno::MAX_MIRRORS]> mirror_chains;
 
     KOKKOS_INLINE_FUNCTION
     uint8_t n_quad() const {
@@ -79,16 +80,22 @@ struct TENOScalarValues {
         return static_cast<uint8_t>(offsets_faces_of_cell(c + 1) - offsets_faces_of_cell(c));
     }
 
-    /** @brief Scalar j of a stencil entry: cell c, or its mirror across boundary face f. */
+    /**
+     * @brief Scalar j of a stencil entry: cell c, or its image across boundary
+     *        face f >= 0, or across the faces of mirror chain -2 - f in turn.
+     */
     KOKKOS_INLINE_FUNCTION
     rtype entry_value(const int32_t c, const int32_t f, const uint32_t j) const {
-        if (f >= 0) {
-            const int32_t i_bc = boundaries.face_bc(f);
+        rtype value = scalars(c, j);
+        for (uint8_t k = 0; k < teno::MAX_MIRRORS; k++) {
+            const int32_t g = (f >= 0) ? (k == 0 ? f : -1) : (f < -1 ? mirror_chains(-2 - f, k) : -1);
+            if (g < 0) break;
+            const int32_t i_bc = boundaries.face_bc(g);
             if (boundaries.bcs(i_bc).type == BoundaryType::UPT) {
-                return j < n_species ? boundaries.bc_Y(i_bc, j) : boundaries.bc_thermo(i_bc, j - n_species);
+                value = j < n_species ? boundaries.bc_Y(i_bc, j) : boundaries.bc_thermo(i_bc, j - n_species);
             }
         }
-        return scalars(c, j);
+        return value;
     }
 
     /** @brief Monomials minus their cell means at point q of face f, in cell c's frame. */
@@ -222,7 +229,8 @@ TENOScalarValues<DEG> make_teno_scalar_values(const TENO & teno, const Mesh & me
                                  teno.quadrature_face.points, teno.face_quad_points, teno.face_quad_weights,
                                  teno.scale, teno.basis_mean, teno.stencil_large_size, teno.stencil_large,
                                  teno.stencil_small_size, teno.stencil_small, teno.troubled,
-                                 teno.selection, teno.sigma_threshold, boundaries, scalars, theta, n_species};
+                                 teno.selection, teno.sigma_threshold, boundaries, scalars, theta, n_species,
+                                 teno.mirror_chains};
 }
 
 #endif // TENO_SCALARS_H

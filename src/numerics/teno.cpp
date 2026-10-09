@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <memory>
 #include <unordered_map>
 #include <string>
@@ -537,6 +538,9 @@ struct CellTables {
     std::array<uint16_t, teno::MAX_FACES> small_size = {};
     std::vector<int32_t> small_cells, small_faces;  // the faces' sector stencils one after another
     std::vector<rtype> small_pinv;                  // (s, l)
+    // Mirror chains of the stencils' repeated images: face -2 - k of an entry is
+    // chains[k] here, renumbered into TENO::mirror_chains once the cell is packed
+    std::vector<teno::MirrorChain> chains;
 };
 
 using IndexRow = std::vector<int32_t> CellTables::*;
@@ -898,6 +902,37 @@ void download_tables(const TENO & scheme, const std::vector<uint64_t> & large_sl
     small_rows(scheme).download(scheme.stencil_small, small_slices, c0, n_small, tables);
 }
 
+/** @brief Device copy of the mirror chains (at least one row, so kernels always get a valid view). */
+void upload_mirror_chains(TENO & scheme) {
+    const size_t n = scheme.h_mirror_chains.size();
+    scheme.mirror_chains = Kokkos::View<int32_t *[teno::MAX_MIRRORS]>("teno_mirror_chains", std::max<size_t>(n, 1));
+    auto h = Kokkos::create_mirror_view(scheme.mirror_chains);
+    for (size_t k = 0; k < n; k++) {
+        for (uint8_t j = 0; j < teno::MAX_MIRRORS; j++) h(k, j) = scheme.h_mirror_chains[k][j];
+    }
+    Kokkos::deep_copy(scheme.mirror_chains, h);
+}
+
+/** @brief Renumber the cells' own mirror chains into the scheme's table. */
+void number_mirror_chains(TENO & scheme, std::map<teno::MirrorChain, int32_t> & index, std::vector<CellTables> & chunk) {
+    std::vector<int32_t> global;
+    for (CellTables & t : chunk) {
+        if (t.chains.empty()) continue;
+        global.resize(t.chains.size());
+        for (size_t k = 0; k < t.chains.size(); k++) {
+            const auto [it, added] = index.try_emplace(t.chains[k], int32_t(scheme.h_mirror_chains.size()));
+            if (added) scheme.h_mirror_chains.push_back(t.chains[k]);
+            global[k] = it->second;
+        }
+        for (std::vector<int32_t> * faces : {&t.large_faces, &t.small_faces}) {
+            for (int32_t & f : *faces) {
+                if (f < -1) f = -2 - global[-2 - f];
+            }
+        }
+        t.chains.clear();
+    }
+}
+
 /**
  * @brief Run precompute(i, tables, failed_large, invalid_small) over the
  *        reconstructed cells chunk by chunk, moving each chunk's tables to
@@ -908,6 +943,8 @@ uint16_t precompute_in_chunks(TENO & scheme, const uint32_t n_reconstructed, F &
                               uint32_t & n_invalid_small) {
     TableBuilder builder(scheme, n_reconstructed);
     std::vector<CellTables> chunk;
+    std::map<teno::MirrorChain, int32_t> chain_index;
+    scheme.h_mirror_chains.clear();
     uint16_t ns_used = 0;
     for (uint32_t c0 = 0; c0 < n_reconstructed; c0 += CHUNK_CELLS) {
         chunk.assign(std::min(CHUNK_CELLS, n_reconstructed - c0), CellTables());
@@ -921,9 +958,11 @@ uint16_t precompute_in_chunks(TENO & scheme, const uint32_t n_reconstructed, F &
         n_failed_large += failed;
         n_invalid_small += invalid;
         for (const CellTables & t : chunk) ns_used = std::max<uint16_t>(ns_used, t.large_cells.size());
+        number_mirror_chains(scheme, chain_index, chunk);
         if (n_failed_large == 0) builder.add(c0, chunk);
     }
     if (n_failed_large == 0) builder.finish();
+    upload_mirror_chains(scheme);
     return ns_used;
 }
 
@@ -1077,6 +1116,20 @@ void TENO::compute_stencils_and_matrices() {
             qx = px - 2.0 * d * nx;
             qy = py - 2.0 * d * ny;
         };
+        // This cell's images mirrored across several lines in turn (entry face
+        // -2 - k): the faces, and a point of each line
+        struct Chain {
+            teno::MirrorChain faces;
+            std::array<double, 2 * teno::MAX_MIRRORS> m;
+        };
+        std::vector<Chain> chains;
+        auto chain_face = [&](const Chain & chain) {
+            for (size_t k = 0; k < chains.size(); k++) {
+                if (chains[k].faces == chain.faces && chains[k].m == chain.m) return -2 - int32_t(k);
+            }
+            chains.push_back(chain);
+            return -2 - int32_t(chains.size() - 1);
+        };
 
         // Mean of each monomial over a stencil entry, in the frame of target cell i
         auto monomial_means = [&](const Entry & e, uint8_t deg, std::vector<double> & means) {
@@ -1085,8 +1138,14 @@ void TENO::compute_stencils_and_matrices() {
             for (uint32_t k = 0; k < n_nodes; k++) {
                 const uint32_t node = mesh->h_node_of_cell(e.cell, k);
                 double qx, qy;
-                mirror(e.face, e.mx, e.my, double(mesh->h_node_coords(node, 0)) + e.tx, double(mesh->h_node_coords(node, 1)) + e.ty,
-                       qx, qy);
+                mirror(e.face >= -1 ? e.face : -1, e.mx, e.my, double(mesh->h_node_coords(node, 0)) + e.tx,
+                       double(mesh->h_node_coords(node, 1)) + e.ty, qx, qy);
+                if (e.face < -1) {
+                    const Chain & chain = chains[-2 - e.face];
+                    for (uint8_t j = 0; j < teno::MAX_MIRRORS && chain.faces[j] >= 0; j++) {
+                        mirror(chain.faces[j], chain.m[2 * j], chain.m[2 * j + 1], qx, qy, qx, qy);
+                    }
+                }
                 px[k] = (qx - x0) / h;
                 py[k] = (qy - y0) / h;
             }
@@ -1183,38 +1242,80 @@ void TENO::compute_stencils_and_matrices() {
                     if (!known) match->faces.push_back(lf);
                 }
             }
+            // Image (qx, qy) across line k of point (px, py), and the line's face
+            // nearest to their midpoint, whose condition gives the image its
+            // state; false for images inside the domain (non-convex boundaries),
+            // which are not ghosts
+            auto image = [&](const size_t k, const double px, const double py, LineFace & face, double & qx, double & qy) {
+                const LineFace & first = lines[k].faces[0];
+                mirror(first.face, first.x, first.y, px, py, qx, qy);
+                for (const Visit & other : cells) {
+                    if (point_in_cell(other, qx, qy)) return false;
+                }
+                double best = std::numeric_limits<double>::max();
+                for (const LineFace & lf : lines[k].faces) {
+                    const double dx = lf.x - 0.5 * (qx + px);
+                    const double dy = lf.y - 0.5 * (qy + py);
+                    if (dx * dx + dy * dy < best) {
+                        best = dx * dx + dy * dy;
+                        face = lf;
+                    }
+                }
+                return true;
+            };
+            // Perpendicular lines, the 2D junctions (see compute_stencils_and_matrices_3d):
+            // a cell next to their corner also has its image across both
+            auto junction = [&](const size_t a, const size_t b) {
+                return std::abs(lines[a].nx * lines[b].nx + lines[a].ny * lines[b].ny) < precision_tol<double>(1e-8, 1e-4);
+            };
+            struct Image {
+                double x, y;
+                size_t line;
+                Chain chain;
+            };
+            std::vector<Image> images;
             for (const Visit & v : cells) {
                 const uint32_t c = v.cell;
                 const double cx = double(mesh->h_cell_coords(c, 0)) + v.t[0], cy = double(mesh->h_cell_coords(c, 1)) + v.t[1];
                 if (!(c == i && v.lattice == Lattice{0, 0, 0})) {
                     entries.push_back(Entry{c, -1, cx, cy, v.t[0], v.t[1], 0.0, 0.0});
                 }
-                for (const Line & line : lines) {
-                    const LineFace & first = line.faces[0];
-                    Entry e{c, first.face, 0.0, 0.0, v.t[0], v.t[1], first.x, first.y};
-                    mirror(e.face, e.mx, e.my, cx, cy, e.x, e.y);
-                    // Images that land inside the domain (non-convex boundaries) are not ghosts
-                    bool inside = false;
-                    for (const Visit & other : cells) {
-                        if (point_in_cell(other, e.x, e.y)) {
-                            inside = true;
-                            break;
-                        }
-                    }
-                    if (inside) continue;
-                    // The ghost state comes from the line's face nearest to the image
-                    double best = std::numeric_limits<double>::max();
-                    for (const LineFace & lf : line.faces) {
-                        const double dx = lf.x - 0.5 * (e.x + cx);
-                        const double dy = lf.y - 0.5 * (e.y + cy);
-                        if (dx * dx + dy * dy < best) {
-                            best = dx * dx + dy * dy;
-                            e.face = lf.face;
-                            e.mx = lf.x;
-                            e.my = lf.y;
-                        }
-                    }
+                images.clear();
+                for (size_t k = 0; k < lines.size(); k++) {
+                    Entry e{c, -1, 0.0, 0.0, v.t[0], v.t[1], 0.0, 0.0};
+                    LineFace lf;
+                    if (!image(k, cx, cy, lf, e.x, e.y)) continue;
+                    e.face = lf.face;
+                    e.mx = lf.x;
+                    e.my = lf.y;
                     entries.push_back(e);
+                    Chain chain{{}, {}};
+                    chain.faces.fill(-1);
+                    chain.faces[0] = lf.face;
+                    chain.m[0] = lf.x;
+                    chain.m[1] = lf.y;
+                    images.push_back(Image{e.x, e.y, k, chain});
+                }
+                const size_t n_single = images.size();
+                for (size_t j = 0; j < n_single; j++) {
+                    for (size_t k = 0; k < lines.size(); k++) {
+                        const Image from = images[j];
+                        if (k == from.line || !junction(from.line, k)) continue;
+                        double x, y;
+                        LineFace lf;
+                        if (!image(k, from.x, from.y, lf, x, y)) continue;
+                        // Commuting reflections reach the image twice; take it once
+                        const bool known = std::any_of(images.begin() + n_single, images.end(), [&](const Image & im) {
+                            return std::hypot(x - im.x, y - im.y) < GEOMETRY_TOL * h;
+                        });
+                        if (known) continue;
+                        Image next{x, y, k, from.chain};
+                        next.chain.faces[1] = lf.face;
+                        next.chain.m[2] = lf.x;
+                        next.chain.m[3] = lf.y;
+                        entries.push_back(Entry{c, chain_face(next.chain), x, y, v.t[0], v.t[1], 0.0, 0.0});
+                        images.push_back(next);
+                    }
                 }
             }
             auto dist2 = [&](const Entry & e) {
@@ -1338,6 +1439,7 @@ void TENO::compute_stencils_and_matrices() {
                 for (uint8_t l = 0; l < teno::NK_SMALL; l++) out.small_pinv.push_back(P[l * n_sector + s]);
             }
         }
+        for (const Chain & chain : chains) out.chains.push_back(chain.faces);
 
         // Smoothness-indicator matrix: M_lm = sum_{1<=|beta|<=r} int D^beta phi_l D^beta phi_m
         {
@@ -1703,18 +1805,39 @@ void TENO::compute_stencils_and_matrices_3d() {
             for (int k = 0; k < 3; k++) q[k] = p[k] - 2.0 * d * n[k];
             return q;
         };
+        // This cell's images mirrored across several planes in turn (entry face
+        // -2 - k): the faces, and the product Q of their reflections
+        struct Chain {
+            teno::MirrorChain faces;
+            std::array<Lattice, teno::MAX_MIRRORS> lattices;
+            std::array<double, 9> Q;
+        };
+        std::vector<Chain> chains;
+        auto chain_face = [&](const Chain & chain) {
+            for (size_t k = 0; k < chains.size(); k++) {
+                if (chains[k].faces == chain.faces && chains[k].lattices == chain.lattices) return -2 - int32_t(k);
+            }
+            chains.push_back(chain);
+            return -2 - int32_t(chains.size() - 1);
+        };
         // Moments, about its own centroid, of the image of a cell mirrored across
-        // face f: eta = Q xi with Q = I - 2 n n^T, so eta^g is a homogeneous
-        // polynomial in xi of degree |g|, whose coefficients C(g, b) depend on the
-        // face only
+        // face f (or chain -2 - f): eta = Q xi with Q = I - 2 n n^T (or the chain's
+        // product), so eta^g is a homogeneous polynomial in xi of degree |g|,
+        // whose coefficients C(g, b) depend on the face only
         std::unordered_map<int32_t, std::vector<double>> reflections;
         auto reflection = [&](const int32_t f) -> const std::vector<double> & {
             auto it = reflections.find(f);
             if (it != reflections.end()) return it->second;
-            const Point3 nf = unit_normal(f);
             double Q[3][3];
-            for (int a = 0; a < 3; a++) {
-                for (int b = 0; b < 3; b++) Q[a][b] = (a == b ? 1.0 : 0.0) - 2.0 * nf[a] * nf[b];
+            if (f >= 0) {
+                const Point3 nf = unit_normal(f);
+                for (int a = 0; a < 3; a++) {
+                    for (int b = 0; b < 3; b++) Q[a][b] = (a == b ? 1.0 : 0.0) - 2.0 * nf[a] * nf[b];
+                }
+            } else {
+                for (int a = 0; a < 3; a++) {
+                    for (int b = 0; b < 3; b++) Q[a][b] = chains[-2 - f].Q[3 * a + b];
+                }
             }
             std::vector<double> C(n_low * n_low, 0.0);
             C[0] = 1.0;
@@ -1774,12 +1897,12 @@ void TENO::compute_stencils_and_matrices_3d() {
             Point3 xc;
             for (int d = 0; d < 3; d++) xc[d] = double(mesh->h_cell_coords(e.cell, d)) + e.t[d];
             double dd[3];
-            if (e.face < 0) {
+            if (e.face == -1) {
                 for (int d = 0; d < 3; d++) dd[d] = (xc[d] - x0[d]) / h;
                 binomial_means(dd, s, [&](int a, int b, int c) { return m[moment(a, b, c)]; }, n, means);
                 return;
             }
-            const Point3 xm = mirror(e.face, e.m, xc);
+            const Point3 xm = (e.face >= 0) ? mirror(e.face, e.m, xc) : e.x;
             for (int d = 0; d < 3; d++) dd[d] = (xm[d] - x0[d]) / h;
             const std::vector<double> & C = reflection(e.face);
             double eta[MAX_LOW_MOMENTS];
@@ -1940,39 +2063,110 @@ void TENO::compute_stencils_and_matrices_3d() {
                 tabulate_face_planes(cells);
                 for (size_t k = 0; k < planes.size(); k++) reach[k] = by_reach(cells, planes[k].n, planes[k].faces[0].x);
             }
+            // Planes meeting at an angle pi / m (m = 2 .. MAX_MIRRORS): their
+            // reflections generate a finite group whose images of the wedge tile
+            // the space around their junction, so a cell next to it also has
+            // images mirrored across both in turn (e.g. the corner of two symmetry
+            // planes). Without them the stencils there lack a whole quadrant.
+            const double junction_tol = precision_tol<double>(1e-8, 1e-4);
+            auto junction = [&](const size_t a, const size_t b) {
+                double cos = 0.0;
+                for (int d = 0; d < 3; d++) cos += planes[a].n[d] * planes[b].n[d];
+                for (int m = 2; m <= teno::MAX_MIRRORS; m++) {
+                    if (std::abs(cos + std::cos(M_PI / m)) < junction_tol) return true;
+                }
+                return false;
+            };
+            // Image x across plane k of point p, and the plane's face nearest to
+            // their midpoint, whose condition gives the image its state; false
+            // for images inside the domain (non-convex boundaries), which are
+            // not ghosts
+            auto image = [&](const size_t k, const Point3 & p, PlaneFace & face, Point3 & x) {
+                const Plane & plane = planes[k];
+                const PlaneFace & first = plane.faces[0];
+                x = mirror(first.face, first.x, p);
+                double beyond = 0.0, extent = h;
+                for (int a = 0; a < 3; a++) {
+                    beyond += plane.n[a] * (x[a] - first.x[a]);
+                    extent += std::abs(first.x[a]);
+                }
+                bool inside = false;
+                for (const auto & [cell_reach, other] : reach[k]) {
+                    if (cell_reach < beyond - 1e-8 * extent || inside) break;
+                    inside = inside_cell(cells, other, x);
+                }
+                if (inside) return false;
+                double best = std::numeric_limits<double>::max();
+                for (const PlaneFace & pf : plane.faces) {
+                    double d2 = 0.0;
+                    for (int d = 0; d < 3; d++) d2 += std::pow(pf.x[d] - 0.5 * (x[d] + p[d]), 2);
+                    if (d2 < best) {
+                        best = d2;
+                        face = pf;
+                    }
+                }
+                return true;
+            };
+            struct Image {
+                Point3 x;
+                size_t plane;
+                uint8_t depth;
+                Chain chain;
+            };
+            std::vector<Image> images;
             for (const Visit & v : cells) {
                 const uint32_t c = v.cell;
                 Point3 xc;
                 for (int d = 0; d < 3; d++) xc[d] = double(mesh->h_cell_coords(c, d)) + v.t[d];
                 if (!(c == i && v.lattice == zero)) entries.push_back(Entry{c, -1, xc, v.lattice, v.t, zero, origin});
+                images.clear();
                 for (size_t k = 0; k < planes.size(); k++) {
-                    const Plane & plane = planes[k];
-                    const PlaneFace & first = plane.faces[0];
-                    Entry e{c, first.face, mirror(first.face, first.x, xc), v.lattice, v.t, first.lattice, first.x};
-                    // Images that land inside the domain (non-convex boundaries) are not ghosts
-                    double beyond = 0.0, extent = h;
-                    for (int a = 0; a < 3; a++) {
-                        beyond += plane.n[a] * (e.x[a] - first.x[a]);
-                        extent += std::abs(first.x[a]);
-                    }
-                    bool inside = false;
-                    for (const auto & [cell_reach, other] : reach[k]) {
-                        if (cell_reach < beyond - 1e-8 * extent || inside) break;
-                        inside = inside_cell(cells, other, e.x);
-                    }
-                    if (inside) continue;
-                    double best = std::numeric_limits<double>::max();
-                    for (const PlaneFace & pf : plane.faces) {
-                        double d2 = 0.0;
-                        for (int d = 0; d < 3; d++) d2 += std::pow(pf.x[d] - 0.5 * (e.x[d] + xc[d]), 2);
-                        if (d2 < best) {
-                            best = d2;
-                            e.face = pf.face;
-                            e.face_lattice = pf.lattice;
-                            e.m = pf.x;
-                        }
-                    }
+                    Entry e{c, -1, {}, v.lattice, v.t, zero, origin};
+                    PlaneFace pf;
+                    if (!image(k, xc, pf, e.x)) continue;
+                    e.face = pf.face;
+                    e.face_lattice = pf.lattice;
+                    e.m = pf.x;
                     entries.push_back(e);
+                    Chain chain{{}, {}, {}};
+                    chain.faces.fill(-1);
+                    chain.faces[0] = pf.face;
+                    chain.lattices[0] = pf.lattice;
+                    for (int a = 0; a < 3; a++) {
+                        for (int b = 0; b < 3; b++) chain.Q[3 * a + b] = (a == b ? 1.0 : 0.0) - 2.0 * planes[k].n[a] * planes[k].n[b];
+                    }
+                    images.push_back(Image{e.x, k, 1, chain});
+                }
+                for (size_t j = 0; j < images.size(); j++) {
+                    if (images[j].depth == teno::MAX_MIRRORS) continue;
+                    for (size_t k = 0; k < planes.size(); k++) {
+                        const Image from = images[j];
+                        if (k == from.plane || !junction(from.plane, k)) continue;
+                        Point3 x;
+                        PlaneFace pf;
+                        if (!image(k, from.x, pf, x)) continue;
+                        // Images reached along several chains (commuting reflections) once
+                        auto same = [&](const Point3 & y) {
+                            double d2 = 0.0;
+                            for (int d = 0; d < 3; d++) d2 += (x[d] - y[d]) * (x[d] - y[d]);
+                            return d2 < GEOMETRY_TOL * GEOMETRY_TOL * h * h;
+                        };
+                        if (same(xc) || std::any_of(images.begin(), images.end(), [&](const Image & im) { return same(im.x); })) {
+                            continue;
+                        }
+                        Image next{x, k, uint8_t(from.depth + 1), from.chain};
+                        next.chain.faces[from.depth] = pf.face;
+                        next.chain.lattices[from.depth] = pf.lattice;
+                        const Point3 & n = planes[k].n;
+                        for (int a = 0; a < 3; a++) {
+                            for (int b = 0; b < 3; b++) {
+                                next.chain.Q[3 * a + b] = from.chain.Q[3 * a + b];
+                                for (int d = 0; d < 3; d++) next.chain.Q[3 * a + b] -= 2.0 * n[a] * n[d] * from.chain.Q[3 * d + b];
+                            }
+                        }
+                        entries.push_back(Entry{c, chain_face(next.chain), x, v.lattice, v.t, zero, origin});
+                        images.push_back(next);
+                    }
                 }
             }
             sort_by_key(entries, dist2);
@@ -2133,6 +2327,7 @@ void TENO::compute_stencils_and_matrices_3d() {
                 for (uint8_t l = 0; l < teno::NK_SMALL; l++) out.small_pinv.push_back(P[l * n_sector + s]);
             }
         }
+        for (const Chain & chain : chains) out.chains.push_back(chain.faces);
 
         // Smoothness-indicator matrix: M_lm = sum_{1<=|beta|<=r} int D^beta phi_l D^beta phi_m
         {
@@ -2258,27 +2453,45 @@ struct TENOFunctor {
     Kokkos::View<rtype *, Kokkos::LayoutStride> cell_gamma;
     Kokkos::View<rtype *> cell_molar_mass;
     Kokkos::View<uint8_t **> selection;
+    Kokkos::View<int32_t *[teno::MAX_MIRRORS]> mirror_chains;
 
     /**
-     * @brief State of a stencil entry: cell c, or its mirror across boundary face f.
+     * @brief Mirror state W_e at point x across boundary face f, and the image of x.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void mirror_W(const int32_t f, rtype * x, rtype * W_e) const {
+        rtype n[N_DIM], n_vec[N_DIM];
+        FOR_I_DIM n_vec[i] = face_normals(f, i);
+        unit<N_DIM>(n_vec, n);
+        rtype W_c[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE W_c[i] = W_e[i];
+        rtype d = 0.0;
+        FOR_I_DIM d += (face_coords(f, i) - x[i]) * n[i];
+        boundaries.ghost_W_at(f, W_c, n, 2.0_r * Kokkos::fabs(d), W_e);
+        const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(f));
+        if (bc.type == BoundaryType::FARFIELD) {
+            // The characteristic state holds at the face; outside lies the free stream
+            FOR_I_CONSERVATIVE W_e[i] = bc.data[i];
+        }
+        FOR_I_DIM x[i] += 2.0_r * d * n[i];
+    }
+
+    /**
+     * @brief State of a stencil entry: cell c, or its image across boundary
+     *        face f >= 0, or across the faces of mirror chain -2 - f in turn.
      */
     KOKKOS_INLINE_FUNCTION
     void entry_W(const int32_t c, const int32_t f, rtype * W_e) const {
         FOR_I_CONSERVATIVE W_e[i] = W(c, i);
+        if (f == -1) return;
+        rtype x[N_DIM];
+        FOR_I_DIM x[i] = cell_coords(c, i);
         if (f >= 0) {
-            rtype n[N_DIM], n_vec[N_DIM];
-            FOR_I_DIM n_vec[i] = face_normals(f, i);
-            unit<N_DIM>(n_vec, n);
-            rtype W_c[N_CONSERVATIVE];
-            FOR_I_CONSERVATIVE W_c[i] = W_e[i];
-            rtype d = 0.0;
-            FOR_I_DIM d += (face_coords(f, i) - cell_coords(c, i)) * n[i];
-            boundaries.ghost_W_at(f, W_c, n, 2.0_r * Kokkos::fabs(d), W_e);
-            const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(f));
-            if (bc.type == BoundaryType::FARFIELD) {
-                // The characteristic state holds at the face; outside lies the free stream
-                FOR_I_CONSERVATIVE W_e[i] = bc.data[i];
-            }
+            mirror_W(f, x, W_e);
+            return;
+        }
+        for (uint8_t k = 0; k < teno::MAX_MIRRORS && mirror_chains(-2 - f, k) >= 0; k++) {
+            mirror_W(mirror_chains(-2 - f, k), x, W_e);
         }
     }
 
@@ -3089,7 +3302,7 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
                     quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
                     scale, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
                     si_matrix, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells, n_troubled,
-                    solution, face_solution, cells, {}, cell_gamma, cell_molar_mass, selection};
+                    solution, face_solution, cells, {}, cell_gamma, cell_molar_mass, selection, mirror_chains};
     using Dynamic = Kokkos::Schedule<Kokkos::Dynamic>;
     using Space = Kokkos::DefaultExecutionSpace;
     if (!troubled_pass) {
@@ -3136,7 +3349,7 @@ void TENO::launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                     quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
                     scale, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
                     si_matrix, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells, n_troubled,
-                    solution, {}, {}, gradients, cell_gamma, cell_molar_mass, selection};
+                    solution, {}, {}, gradients, cell_gamma, cell_molar_mass, selection, mirror_chains};
     Kokkos::parallel_for("teno_gradients", HeavyRange<typename Functor::GradientPass>(0, n_cells), functor);
 }
 
@@ -3151,7 +3364,7 @@ void TENO::launch_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos:
                     quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
                     scale, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
                     si_matrix, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells, n_troubled,
-                    solution, {}, {}, {}, cell_gamma, cell_molar_mass, selection};
+                    solution, {}, {}, {}, cell_gamma, cell_molar_mass, selection, mirror_chains};
     functor.offsets_nodes_of_cell = mesh->offsets_nodes_of_cell;
     functor.nodes_of_cell = mesh->nodes_of_cell;
     functor.cell_rule = cell_rule;
@@ -3266,8 +3479,9 @@ namespace {
 // candidates by interior cells, version 5 sorts them in the mesh-spacing metric, version 6 follows
 // the round-off-accurate 2D cell centroids, version 7 can hold the pseudo-inverses and
 // smoothness-indicator matrices in single precision and has tables from the faster setup (#140),
-// which differ from version 6 at round-off; version 8 bounds 3D Lebesgue constants by 4 (#126, #229)
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-8";
+// which differ from version 6 at round-off; version 8 bounds 3D Lebesgue constants by 4 (#126, #229);
+// version 9 adds images mirrored across several boundary planes and ends with their mirror chains (#80)
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-9";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {
@@ -3510,6 +3724,11 @@ void TENO::save_cache(const uint8_t halo_layers) {
         for (const CellTables & t : chunk) serialize(t, cache_single, buf);
         out.write(buf.data(), buf.size());
     }
+    buf.clear();
+    const uint32_t n_chains = h_mirror_chains.size();
+    put(buf, &n_chains, 1);
+    for (const teno::MirrorChain & chain : h_mirror_chains) put(buf, chain.data(), chain.size());
+    out.write(buf.data(), buf.size());
     out.close();
     std::error_code error;
     if (out.good()) std::filesystem::rename(partial, cache_file, error);
@@ -3551,11 +3770,16 @@ bool TENO::load_cache() {
         }
         if (ok) builder.add(c0, chunk);
     }
+    uint32_t n_chains = 0;
+    ok = ok && get(in, &n_chains, 1);
+    h_mirror_chains.assign(ok ? n_chains : 0, teno::MirrorChain{});
+    for (teno::MirrorChain & chain : h_mirror_chains) ok = ok && get(in, chain.data(), chain.size());
     if (!ok) {
         cache_status = cache_file + " is truncated, recomputed";
         return false;
     }
     builder.finish();
+    upload_mirror_chains(*this);
     cache_status = "loaded from " + cache_file;
     return true;
 }

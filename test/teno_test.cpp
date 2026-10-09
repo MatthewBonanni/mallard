@@ -16,6 +16,8 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <iostream>
+#include <map>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -313,6 +315,76 @@ TEST(TENOTest, MirrorImagesNeverLandInsideNonConvexDomains) {
             EXPECT_FALSE(in_domain) << "cell " << c << " image at " << qx << ", " << qy;
         }
     }
+}
+
+namespace {
+
+/**
+ * @brief Central TENO5 face values of each cell at each of its faces' Gauss
+ *        points, keyed by the cell centroid and the point (shifted by -offset,
+ *        rounded), for the cells beyond offset in x and y; field smooth_conservatives.
+ */
+std::map<std::array<int64_t, 4>, std::array<double, N_CONSERVATIVE>> face_values_by_point(std::shared_ptr<Mesh> mesh,
+                                                                                         double offset) {
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto avg = cell_averages(*mesh, [&](double x, double y, double * U) { smooth_conservatives(x - offset, y - offset, U); });
+    Euler euler = Euler::from_reference(GAMMA, 1.0, 1.0, 1.0);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    auto h_W = Kokkos::create_mirror_view(W);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        rtype U[N_CONSERVATIVE], Wc[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE U[i] = avg(c, i);
+        euler.compute_W_from_conservatives(Wc, U);
+        FOR_I_CONSERVATIVE h_W(c, i) = Wc[i];
+    }
+    Kokkos::deep_copy(W, h_W);
+    auto teno = make_teno(mesh, bd, 5, "troubled_threshold = 1e9\n");
+    const uint8_t n_quad = teno->n_face_quadrature_points();
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, n_quad);
+    teno->calc_face_values(W, face_W);
+    auto h_face_W = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+    auto h_qp = teno->quadrature_face.h_points;
+    auto key = [&](double v) { return std::llround(1e6 * (v - offset)); };
+    std::map<std::array<int64_t, 4>, std::array<double, N_CONSERVATIVE>> values;
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        const uint32_t a = mesh->h_node_of_face(f, 0), b = mesh->h_node_of_face(f, 1);
+        for (uint8_t side = 0; side < 2; side++) {
+            const int32_t c = mesh->h_cells_of_face(f, side);
+            if (c < 0 || double(mesh->h_cell_coords(c, 0)) < offset || double(mesh->h_cell_coords(c, 1)) < offset) continue;
+            for (uint8_t q = 0; q < n_quad; q++) {
+                const double s = 0.5 * double(h_qp(q, 0));
+                std::array<int64_t, 4> k;
+                for (int d = 0; d < 2; d++) {
+                    k[d] = key(double(mesh->h_cell_coords(c, d)));
+                    k[2 + d] = key(double(mesh->h_face_coords(f, d)) +
+                                   s * (double(mesh->h_node_coords(b, d)) - double(mesh->h_node_coords(a, d))));
+                }
+                FOR_I_CONSERVATIVE values[k][i] = double(h_face_W(f, q, side, i));
+            }
+        }
+    }
+    return values;
+}
+
+} // namespace
+
+TEST(TENOTest, TwoSymmetryWallsReproduceTheMirroredDomain) {
+    // A box with symmetry walls is the interior scheme on the mesh mirrored
+    // across them: the corner of two walls (a quarter of the doubled box)
+    // must reconstruct a field even across both as the doubled box does.
+    // Mirrored across each wall separately, the stencils of the cells at the
+    // corner missed the quadrant beyond it (#80).
+    const auto quarter = face_values_by_point(make_mesh("cartesian", 6, 6), 0.0);
+    const auto whole = face_values_by_point(make_mesh("cartesian", 12, 12, 2.0, 2.0), 1.0);
+    ASSERT_EQ(quarter.size(), whole.size());
+    double diff = 0.0;
+    for (const auto & [k, v] : quarter) {
+        const auto it = whole.find(k);
+        ASSERT_NE(it, whole.end());
+        for (int i = 0; i < N_CONSERVATIVE; i++) diff = std::max(diff, std::abs(v[i] - it->second[i]));
+    }
+    std::cout << "largest difference: " << diff << std::endl;
+    EXPECT_LT(diff, precision_tol<double>(1e-11, 1e-5));
 }
 
 /**
