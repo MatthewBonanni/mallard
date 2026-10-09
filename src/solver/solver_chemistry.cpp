@@ -15,6 +15,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
+#include <cstdlib>
+#include <string>
 #include <limits>
 
 #include <Kokkos_Core.hpp>
@@ -91,6 +94,19 @@ void Solver::advance_chemistry(const double dt_chem) {
     chem_active_cells = stats.active;
     Kokkos::fence();
     const double local = timer.seconds() - start;
+    static FILE * profile = [] {
+        const char * prefix = std::getenv("MALLARD_CHEM_PROFILE");
+        if (prefix == nullptr) return static_cast<FILE *>(nullptr);
+        FILE * f = std::fopen((std::string(prefix) + "_rank" + std::to_string(comm::rank()) + ".csv").c_str(), "w");
+        std::fprintf(f, "step,dt,local,activity,integrate,active,sub_steps,owned\n");
+        return f;
+    }();
+    if (profile != nullptr) {
+        std::fprintf(profile, "%llu,%.6e,%.6e,%.6e,%.6e,%llu,%llu,%u\n", static_cast<unsigned long long>(step), dt_chem,
+                     local, stats.t_activity, stats.t_integrate, static_cast<unsigned long long>(stats.active),
+                     static_cast<unsigned long long>(stats.sub_steps), mesh->n_owned());
+        if (step % 100 == 0) std::fflush(profile);
+    }
     const auto sums = comm::allreduce(std::array<double, 2>{static_cast<double>(stats.failures), local}, comm::Op::SUM);
     const uint64_t failures = static_cast<uint64_t>(sums[0]);
     if (comm::size() > 1) {

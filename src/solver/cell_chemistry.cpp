@@ -408,8 +408,10 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
                                                  const double dt, const Kokkos::View<rtype *> & time_scale) {
     Statistics stats;
     const uint32_t chunk = static_cast<uint32_t>(work.extent(0));
+    Kokkos::Timer profile_timer;
     for (uint32_t first = 0; first < n; first += chunk) {
         const uint32_t m = std::min(chunk, n - first);
+        profile_timer.reset();
         const ActivityFunctor activity{gas,   kinetics, U,  rhoY,      T_seed, work, active, first,
                                        dt,    options.T_frozen, 1e-2 * options.reactor.atol_Y, time_scale, n_lanes};
         if (n_lanes == 1) {
@@ -422,6 +424,8 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
         uint32_t n_active = 0;
         Kokkos::parallel_scan("chemistry_queue", m, QueueFunctor{active, queue, cost, previous_cost, first}, n_active);
         stats.active += n_active;
+        stats.t_activity += profile_timer.seconds();
+        profile_timer.reset();
         if (n_active == 0) continue;
         const auto queued = Kokkos::make_pair(0u, n_active);
         if (bin_by_cost) {
@@ -455,6 +459,15 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
             failures = read_failures(team_failures[1]) + (n_active > n_wide ? read_failures(team_failures[0]) : 0u);
         }
         stats.failures += failures;
+        Kokkos::fence();
+        stats.t_integrate += profile_timer.seconds();
+        uint64_t steps = 0;
+        const Kokkos::View<uint32_t *> q = queue;
+        const Kokkos::View<float *> pc = previous_cost;
+        Kokkos::parallel_reduce("chemistry_profile_steps", n_active, KOKKOS_LAMBDA(const uint32_t i, uint64_t & s) {
+            s += static_cast<uint64_t>(pc(q(i)));
+        }, steps);
+        stats.sub_steps += steps;
     }
     return stats;
 }

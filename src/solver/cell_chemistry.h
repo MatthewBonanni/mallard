@@ -69,6 +69,8 @@ class CellChemistry {
         struct Statistics {
             uint64_t active = 0;    // cells integrated
             uint32_t failures = 0;  // cells whose integration failed
+            double t_activity = 0.0, t_integrate = 0.0;
+            uint64_t sub_steps = 0;
         };
 
         /**
