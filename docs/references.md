@@ -202,6 +202,11 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="billet-abgrall-2003"></a>G. Billet and R. Abgrall, An adaptive shock-capturing algorithm for solving unsteady reactive flows, *Comput. Fluids* 32, 1473–1495 (2003). [doi:10.1016/S0045-7930(03)00004-5](https://doi.org/10.1016/S0045-7930%2803%2900004-5)
 - <a id="ma-lv-ihme-2017"></a>P. C. Ma, Y. Lv and M. Ihme, An entropy-stable hybrid scheme for simulations of transcritical real-fluid flows, *J. Comput. Phys.* 340, 330–357 (2017). [doi:10.1016/j.jcp.2017.03.022](https://doi.org/10.1016/j.jcp.2017.03.022)
   Used in (these three): the double-flux option for oscillation-free material and temperature interfaces.
+- <a id="barlow-2001"></a>R. S. Barlow, A. N. Karpetis, J. H. Frank and J.-Y. Chen, Scalar profiles and NO formation in laminar opposed-flow partially premixed methane/air flames, *Combust. Flame* 127, 2102–2118 (2001). [doi:10.1016/S0010-2180(01)00313-3](https://doi.org/10.1016/S0010-2180%2801%2900313-3)
+- <a id="grosshandler-1993"></a>W. L. Grosshandler, RADCAL: a narrow-band model for radiation calculations in a combustion environment, NIST Technical Note 1402 (1993). [doi:10.6028/NIST.TN.1402](https://doi.org/10.6028/NIST.TN.1402)
+  Used in (these two): the optically thin radiation model of the TNF workshop, `[radiation]` (the Planck-mean absorption coefficients of H2O, CO2, CO and CH4 fitted to RADCAL; `src/chemistry/radiation.h`).
+- <a id="franzelli-2012"></a>B. Franzelli, E. Riber, L. Y. M. Gicquel and T. Poinsot, Large Eddy Simulation of combustion instabilities in a lean partially premixed swirled flame, *Combust. Flame* 159, 621–637 (2012). [doi:10.1016/j.combustflame.2011.08.004](https://doi.org/10.1016/j.combustflame.2011.08.004)
+  Used in: `mechanisms/ch4_bfer.yaml`, the two-step mechanism 2S-CH4-BFER (lean branch) of `examples/flame_vortex_quenching`.
 
 ## Validation cases and reference data
 
@@ -255,9 +260,12 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="ruetsch-1995"></a>G. R. Ruetsch, L. Vervisch and A. Liñán, Effects of heat release on triple flames, *Phys. Fluids* 7, 1447–1454 (1995). [doi:10.1063/1.868531](https://doi.org/10.1063/1.868531)
 - <a id="veynante-1994"></a>D. Veynante, L. Vervisch, T. Poinsot, A. Liñán and G. Ruetsch, Triple flame structure and diffusion flame stabilization, *Proceedings of the Summer Program 1994*, Center for Turbulence Research, Stanford University (1994). [oa.upm.es/1537](https://oa.upm.es/1537/)
   Used in (these two): `examples/triple_flame` and `tools/triple_flame_analysis.py` (the propagation speed U<sub>F</sub> / S<sub>L</sub> against the mixing thickness at the flame, D<sub>TF</sub>, and the weak-gradient limit √(ρ<sub>u</sub> / ρ<sub>b</sub>)).
-- <a id="poinsot-1990"></a>T. Poinsot, D. Veynante and S. Candel, Diagrams of premixed turbulent combustion based on direct simulation, *Proc. Combust. Inst.* 23, 613–619 (1990).
+- <a id="poinsot-1990"></a>T. Poinsot, D. Veynante and S. Candel, Diagrams of premixed turbulent combustion based on direct simulation, *Proc. Combust. Inst.* 23, 613–619 (1990). [doi:10.1016/S0082-0784(06)80308-5](https://doi.org/10.1016/S0082-0784%2806%2980308-5)
 - <a id="poinsot-1991"></a>T. Poinsot, D. Veynante and S. Candel, Quenching processes and premixed turbulent combustion diagrams, *J. Fluid Mech.* 228, 561–606 (1991). [doi:10.1017/S0022112091002823](https://doi.org/10.1017/S0022112091002823)
-  Used in (these two): `examples/flame_vortex` and `tools/flame_vortex_analysis.py` (the vortex-pair scales r and u′, the four outcomes and the 5% cut-off of the spectral diagram).
+  Used in (these two): `examples/flame_vortex`, `examples/flame_vortex_quenching` and `tools/flame_vortex_analysis.py` (the vortex-pair scales r and u′, the four outcomes and the 5% cut-off of the spectral diagram; their one-step flame with a linear heat loss, Le = 1.2, and its quenching).
+- <a id="ju-1997"></a>Y. Ju, H. Guo, K. Maruta and F. Liu, On the extinction limit and flammability limit of non-adiabatic stretched methane–air premixed flames, *J. Fluid Mech.* 342, 315–334 (1997). [doi:10.1017/S0022112097005636](https://doi.org/10.1017/S0022112097005636)
+- <a id="ju-masuya-ronney-1998"></a>Y. Ju, G. Masuya and P. D. Ronney, Effects of radiative emission and absorption on the propagation and extinction of premixed gas flames, *Proc. Combust. Inst.* 27, 2619–2626 (1998). [doi:10.1016/S0082-0784(98)80116-1](https://doi.org/10.1016/S0082-0784%2898%2980116-1)
+  Used in (these two): the radiative flammability limits of the 1D radiation checks (`docs/design/chemistry.md`): the optically thin limit flame speed near e<sup>-1/2</sup> of the adiabatic one, and the limits of the optically thin model.
 - The spherical explosion of `examples/explosion_3d` is from [Toro (2009)](#toro-2009), §17.1.3.
 - <a id="noh-1987"></a>W. F. Noh, Errors for calculations of strong shocks using an artificial viscosity and an artificial heat flux, *J. Comput. Phys.* 72, 78–120 (1987). [doi:10.1016/0021-9991(87)90074-X](https://doi.org/10.1016/0021-9991(87)90074-X)
   Used in: `examples/noh_axisymmetric` and `tools/plot_noh.py` (the spherical Noh problem and its exact solution).

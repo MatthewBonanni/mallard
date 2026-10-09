@@ -67,7 +67,11 @@ def write_full(f, path):
 def single(fuel, phi, T_u, full, radiation=False, width=0.03):
     os.makedirs(full, exist_ok=True)
     for model in MODELS:
-        f = solve(fuel, phi, model, T_u, width=width, radiation=radiation)
+        try:
+            f = solve(fuel, phi, model, T_u, width=width, radiation=radiation)
+        except ct.CanteraError as e:
+            print(f"{fuel} phi = {phi:g}, {MODELS[model]}: no solution ({str(e).strip().splitlines()[-1]})")
+            continue
         delta = (f.T.max() - f.T[0]) / np.gradient(f.T, f.grid).max()
         name = f"{fuel}_phi{phi:g}_T{T_u:.0f}_{model}" + ("_rad" if radiation else "")
         print(f"{name}: S_L = {f.velocity[0]:.5f} m/s, T_b = {f.T[-1]:.1f} K, delta = {delta * 1e3:.4f} mm, "
