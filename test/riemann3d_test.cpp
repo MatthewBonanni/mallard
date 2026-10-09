@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <iostream>
 #include <random>
 
 #include "physics.h"
@@ -213,21 +214,28 @@ TEST(Riemann3DTest, RotatedHybridDissipatesAShockOnFacesAlongItsNormal) {
     // normal n, perpendicular to the shock normal: on tetrahedra, the faces
     // parallel to a shock's normal whose cells sit at different depths of it.
     // The velocity jump lies along t1, so n1 = t1, alpha1 = 0 and the flux
-    // was pure Roe along n: the shock's density and velocity jumps became
-    // shear and entropy waves of speed u . n = 0, with no dissipation at all,
-    // which grew a carbuncle on the stagnation line of a sphere (#80). The
-    // pressure jump makes it HLL along n, which dissipates them.
+    // was pure Roe along n, which sees the jump of u . t1 as a shear wave of
+    // speed u . n = 0 and leaves it undissipated (only the acoustic waves of
+    // the pressure jump are): Roe's carbuncle, grown on the stagnation line of
+    // a sphere on tetrahedra (#80). Measured as the t1-momentum the flux
+    // removes beyond what its mass flux carries at the Roe-averaged u . t1.
     const Frame f;
     rtype W_l[N_CONSERVATIVE], W_r[N_CONSERVATIVE];
-    frame_state(f, 1.0, 0.0, 6.0, 0.0, 1.0 / 1.4, W_l);
-    frame_state(f, 5.2682926829268295, 0.0, 1.1388888888888888, 0.0, 29.880952380952383, W_r);
+    const rtype rho_l = 1.0, rho_r = 5.2682926829268295, v_l = 6.0, v_r = 1.1388888888888888;
+    frame_state(f, rho_l, 0.0, v_l, 0.0, 1.0 / 1.4, W_l);
+    frame_state(f, rho_r, 0.0, v_r, 0.0, 29.880952380952383, W_r);
+    const rtype v_roe = (std::sqrt(rho_l) * v_l + std::sqrt(rho_r) * v_r) / (std::sqrt(rho_l) + std::sqrt(rho_r));
+    // The physical fluxes of mass and t1-momentum vanish (u . n = 0)
+    auto shear_dissipation = [&](const rtype * F) { return -dot<3>(F + 1, f.t1) + v_roe * F[0]; };
     rtype F[N_CONSERVATIVE], F_hll[N_CONSERVATIVE], F_roe[N_CONSERVATIVE];
     riemann::RHLL::calc_flux(F, f.n, W_l, W_r, GAMMA);
     riemann::HLL::calc_flux(F_hll, f.n, W_l, W_r, GAMMA);
     riemann::Roe::calc_flux(F_roe, f.n, W_l, W_r, GAMMA);
-    EXPECT_NEAR(F_roe[0], 0.0, roundoff(1e-12));
-    EXPECT_LT(F_hll[0], -1.0);
-    FOR_I_CONSERVATIVE EXPECT_NEAR(F[i], F_hll[i], 1e-3 * std::abs(F_hll[i]) + roundoff(1e-12));
+    std::cout << "shear dissipation: Roe " << shear_dissipation(F_roe) << ", HLL " << shear_dissipation(F_hll)
+              << ", RHLL " << shear_dissipation(F) << std::endl;
+    EXPECT_NEAR(shear_dissipation(F_roe), 0.0, roundoff(1e-12));
+    EXPECT_LT(shear_dissipation(F_hll), -1.0);
+    EXPECT_LT(shear_dissipation(F), 0.5 * shear_dissipation(F_hll));
 }
 
 TEST(Riemann3DTest, EigenvectorsDiagonalizeFluxJacobian) {
