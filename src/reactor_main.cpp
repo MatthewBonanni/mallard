@@ -87,7 +87,10 @@ void run(const std::string & input_file) {
         {"Initial state", "T = " + brief(T0) + " K, p = " + brief(p0) + " Pa, rho = " + brief(rho) + " kg/m^3"},
         {"Tolerances", "rtol = " + brief(options.integrator.rtol) + ", atol = " + brief(options.atol_Y)},
         {"Linear solver", sparse ? "sparse LU, " + std::to_string(pattern.nnz) + " entries of " +
-                                       std::to_string((ns + 1) * (ns + 1)) : std::string("dense LU")},
+                                       std::to_string((ns + 1) * (ns + 1)) + ", " +
+                                       std::to_string(pattern.n_stages) + " stages, the last " +
+                                       std::to_string(pattern.n - pattern.chain) + " a dense chain"
+                                 : std::string("dense LU")},
         {"Output", output},
     });
 
