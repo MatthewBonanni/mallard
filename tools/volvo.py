@@ -12,6 +12,8 @@
     volvo.py slice RUN_DIR --out slice.npz
         frames of the mid-span probe plane from probe_slice_*.csv
     volvo.py animate slice.npz --out MP4 [--field vorticity|T]
+    volvo.py render SNAPSHOT.(p)vtu --out PNG [--q 2e6 --color U]
+        Q-criterion isosurface in 3D, colored by a field (needs pyvista)
 
 Distances are in units of D = 0.04 m from the base of the triangle (x) and
 the channel's mid-plane (y); velocities over U_bulk.
@@ -301,6 +303,33 @@ def cmd_animate(a):
     print(f"wrote {a.out}")
 
 
+def cmd_render(a):
+    import pyvista as pv
+    pv.OFF_SCREEN = True
+    grid = pv.read(a.snapshot)
+    if "Q" not in grid.cell_data:
+        raise SystemExit(f"{a.snapshot} has no Q")
+    clip = grid.clip_box([-0.05, a.x_max, -0.06, 0.06, 0.0, 0.08], invert=False)
+    pts = clip.cell_data_to_point_data()
+    iso = pts.contour([a.q], scalars="Q")
+    color = a.color if a.color in iso.point_data else None
+    p = pv.Plotter(off_screen=True, window_size=(1800, 800))
+    p.set_background("white")
+    s3 = np.sqrt(3.0) / 2 * D
+    body = pv.PolyData(np.array([[-s3, 0, 0], [0, D / 2, 0], [0, -D / 2, 0]]), faces=[3, 0, 1, 2]).extrude(
+        (0, 0, 0.08), capping=True)
+    p.add_mesh(body, color="gray")
+    if color == "U":
+        iso.point_data["U_X"] = iso.point_data["U"][:, 0]
+        color = "U_X"
+    p.add_mesh(iso, scalars=color, cmap=a.cmap, clim=(a.vmin, a.vmax) if a.vmax > a.vmin else None,
+               scalar_bar_args={"title": a.label or (color or "")})
+    p.camera_position = [(0.05, -0.32, 0.30), (0.12, 0.0, 0.04), (0, 1, 0)]
+    p.add_text(a.title, font_size=12, color="black")
+    p.screenshot(a.out)
+    print(f"wrote {a.out}: Q = {a.q:g}, {iso.n_cells} triangles")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -340,9 +369,20 @@ def main():
     p.add_argument("--every", type=int, default=1)
     p.add_argument("--fps", type=int, default=20)
     p.add_argument("--title", default="")
+    p = sub.add_parser("render")
+    p.add_argument("snapshot")
+    p.add_argument("--out", required=True)
+    p.add_argument("--q", type=float, default=2e6)
+    p.add_argument("--color", default="U")
+    p.add_argument("--cmap", default="viridis")
+    p.add_argument("--vmin", type=float, default=0.0)
+    p.add_argument("--vmax", type=float, default=0.0)
+    p.add_argument("--x-max", type=float, default=0.4)
+    p.add_argument("--label", default="")
+    p.add_argument("--title", default="")
     a = ap.parse_args()
     {"probes": cmd_probes, "profiles": cmd_profiles, "plot": cmd_plot, "budget": cmd_budget, "slice": cmd_slice,
-     "animate": cmd_animate}[a.cmd](a)
+     "animate": cmd_animate, "render": cmd_render}[a.cmd](a)
 
 
 if __name__ == "__main__":
