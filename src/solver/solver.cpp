@@ -885,9 +885,9 @@ void Solver::init_output() {
                                           "velocity_squared,vorticity_squared,density_squared,temperature,"
                                           "temperature_squared"
                                        << (integral_monitor.budget ? ",ke_rate_convective,ke_rate_viscous,ke_rate_sgs,"
-                                                                     "eps_numerical"
+                                                                     "eps_numerical,pressure_work"
                                                                    : "")
-                                       << "\n";
+                                       << (les_on && les.dynamic ? ",les_C" : "") << "\n";
             }
         }
     }
@@ -1040,6 +1040,7 @@ void Solver::copy_device_to_host() {
         Kokkos::deep_copy(h_les_coefficients, les_coefficients);
     }
     if (tfles_on) Kokkos::deep_copy(h_tfles_fields, tfles_fields);
+    if (pasr_on) Kokkos::deep_copy(h_chem_time_scale, chem_time_scale);
     statistics.copy_device_to_host();
     if (p_max.is_allocated()) Kokkos::deep_copy(h_p_max, p_max);
     if (vortex_fields.is_allocated()) {
@@ -1093,6 +1094,7 @@ void Solver::register_data() {
         data.push_back(Data("TF_E", Kokkos::subview(h_tfles_fields, Kokkos::ALL(), 1)));
         data.push_back(Data("TF_OMEGA", Kokkos::subview(h_tfles_fields, Kokkos::ALL(), 2)));
     }
+    if (pasr_on) data.push_back(Data("PASR_KAPPA", h_chem_time_scale));
     statistics.register_data(data);
     if (p_max.is_allocated()) data.push_back(Data("P_MAX", h_p_max));
     if (vortex_fields.is_allocated()) {
@@ -1332,6 +1334,7 @@ void Solver::print_setup() const {
     if (check_nan) logging::item("NaN check", "every step");
     if (les_on) logging::items(les.summary());
     if (tfles_on) logging::items(thickened_flame.summary());
+    if (pasr_on) logging::items(pasr.summary());
     if (double_flux) logging::item("Double flux", "frozen gamma and e0 per cell and step (not energy conservative)");
     if (reacting) {
         logging::item("Chemistry", std::to_string(kinetics.n_reactions) + " reactions, Strang splitting" +
@@ -1621,7 +1624,13 @@ rtype Solver::calc_dt_cfl1() {
                             axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(),
                             les_coefficients,
                             les.Pr_t};
-    if (les_on) eddy_viscosity_of_state(mesh->n_owned());
+    if (les_on) {
+        eddy_viscosity_of_state(mesh->n_owned());
+        if (les.dynamic) {
+            update_dynamic_constant();
+            update_eddy_viscosity(mesh->n_owned());
+        }
+    }
     rtype dt_min = std::numeric_limits<rtype>::max();
     Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor, Kokkos::Min<rtype>(dt_min));
     return comm::allreduce(dt_min, comm::Op::MIN);
@@ -1876,10 +1885,11 @@ void Solver::write_integrals() {
     *integral_monitor.out << step << "," << std::setprecision(12) << t;
     for (const rtype s : sums) *integral_monitor.out << "," << s;
     if (integral_monitor.budget) {
-        // The exact convective rate is the pressure-dilatation work; the rest is numerical
+        // The exact convective rate is the pressure work; the rest is numerical
         *integral_monitor.out << "," << rates.convective << "," << rates.viscous << "," << rates.sgs << ","
-                              << sums[3] - rates.convective;
+                              << rates.pressure_work - rates.convective << "," << rates.pressure_work;
     }
+    if (les_on && les.dynamic) *integral_monitor.out << "," << les.C;
     *integral_monitor.out << "\n";
     integral_monitor.out->flush();
 }
