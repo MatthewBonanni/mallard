@@ -18,6 +18,7 @@
 #include <limits>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "mesh.h"
@@ -336,7 +337,11 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     Kokkos::deep_copy(data.char_target_next, h_char_target);
 
     // Neighbors along the boundary for the transverse terms: characteristic faces
-    // sharing a node (or its periodic image) with nearly the same normal
+    // with nearly the same normal sharing a node (2D) or an edge (3D), also
+    // across periodic seams. Faces sharing only a corner would make the fit
+    // read a grid-scale odd-even pattern across one direction as a gradient
+    // of the opposite sign along the other, which the incoming wave then
+    // amplifies.
     auto node_key = [&](uint32_t n) { return mesh.h_node_key.empty() ? n : mesh.h_node_key[n]; };
     std::unordered_map<uint32_t, std::vector<uint32_t>> char_of_node;
     for (size_t k = 0; k < char_faces.size(); k++) {
@@ -349,15 +354,26 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     std::vector<std::array<rtype, N_DIM>> neighbor_dx;
     for (size_t k = 0; k < char_faces.size(); k++) {
         const uint32_t f = char_faces[k];
-        std::vector<uint32_t> list;
+        std::vector<uint32_t> candidates, shared;
         for (uint32_t j = 0; j < mesh.h_n_nodes_of_face(f); j++) {
             for (uint32_t m : char_of_node[node_key(mesh.h_node_of_face(f, static_cast<uint8_t>(j)))]) {
-                if (m == k || std::find(list.begin(), list.end(), m) != list.end()) continue;
-                const uint32_t g = char_faces[m];
-                rtype cos = 0.0;
-                FOR_I_DIM cos += mesh.h_face_normals(f, i) * mesh.h_face_normals(g, i);
-                if (cos > 0.9_r * mesh.h_face_area(f) * mesh.h_face_area(g)) list.push_back(m);
+                if (m == k) continue;
+                const auto it = std::find(candidates.begin(), candidates.end(), m);
+                if (it != candidates.end()) {
+                    shared[it - candidates.begin()]++;
+                } else {
+                    candidates.push_back(m);
+                    shared.push_back(1);
+                }
             }
+        }
+        std::vector<uint32_t> list;
+        for (size_t c = 0; c < candidates.size(); c++) {
+            if (shared[c] < N_DIM - 1) continue;
+            const uint32_t g = char_faces[candidates[c]];
+            rtype cos = 0.0;
+            FOR_I_DIM cos += mesh.h_face_normals(f, i) * mesh.h_face_normals(g, i);
+            if (cos > 0.9_r * mesh.h_face_area(f) * mesh.h_face_area(g)) list.push_back(candidates[c]);
         }
         neighbors.insert(neighbors.end(), list.begin(), list.end());
         offsets[k + 1] = static_cast<uint32_t>(neighbors.size());
@@ -383,6 +399,26 @@ BoundaryData make_boundary_data(const Mesh & mesh,
             neighbor_dx.push_back(best);
         }
     }
+    // Edges of the characteristic boundaries: faces sharing a node with another
+    // boundary (a wall), where the fit of the transverse terms is one-sided
+    std::unordered_set<uint32_t> other_nodes;
+    for (uint32_t g = 0; g < mesh.n_faces; g++) {
+        const int32_t b = h_face_bc_vec[g];
+        if (b < 0 || h_bcs_vec[b].is_characteristic() || h_bcs_vec[b].type == BoundaryType::PARTITION) continue;
+        for (uint32_t j = 0; j < mesh.h_n_nodes_of_face(g); j++) {
+            other_nodes.insert(mesh.h_node_of_face(g, static_cast<uint8_t>(j)));
+        }
+    }
+    data.char_edge = Kokkos::View<uint8_t *>("char_edge", char_faces.size());
+    auto h_char_edge = Kokkos::create_mirror_view(data.char_edge);
+    for (size_t k = 0; k < char_faces.size(); k++) {
+        h_char_edge(k) = 0;
+        for (uint32_t j = 0; j < mesh.h_n_nodes_of_face(char_faces[k]); j++) {
+            if (other_nodes.count(mesh.h_node_of_face(char_faces[k], static_cast<uint8_t>(j)))) h_char_edge(k) = 1;
+        }
+    }
+    Kokkos::deep_copy(data.char_edge, h_char_edge);
+
     data.char_offsets = Kokkos::View<uint32_t *>("char_offsets", offsets.size());
     data.char_neighbors = Kokkos::View<uint32_t *>("char_neighbors", neighbors.size());
     auto h_offsets = Kokkos::create_mirror_view(data.char_offsets);
