@@ -235,13 +235,15 @@ TEST(Boundary3DTest, CharacteristicNeighborsContinueAcrossPeriodicSeams) {
     auto h_dx = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.char_neighbor_dx);
     ASSERT_EQ(h_faces.extent(0), 2u * 4 * 5);
     for (uint32_t k = 0; k < h_faces.extent(0); k++) {
-        // Every face of the x planes has its 8 neighbors of the periodic 4 x 5 lattice, one spacing away
-        EXPECT_EQ(h_offsets(k + 1) - h_offsets(k), 8u) << "face " << h_faces(k);
+        // Every face of the x planes has the 4 neighbors sharing an edge in the periodic 4 x 5 lattice, one
+        // spacing away along y or z
+        EXPECT_EQ(h_offsets(k + 1) - h_offsets(k), 4u) << "face " << h_faces(k);
         for (uint32_t j = h_offsets(k); j < h_offsets(k + 1); j++) {
-            EXPECT_NEAR(std::abs(double(h_dx(j, 1))), 0.25 * std::round(std::abs(double(h_dx(j, 1))) / 0.25), double(precision_tol(1e-12, 1e-5)));
-            EXPECT_LE(std::abs(double(h_dx(j, 1))), 0.25 + double(precision_tol(1e-12, 1e-5)));
-            EXPECT_LE(std::abs(double(h_dx(j, 2))), 0.4 + double(precision_tol(1e-12, 1e-5)));
-            EXPECT_NEAR(double(h_dx(j, 0)), 0.0, double(precision_tol(1e-12, 1e-5)));
+            const double dy = std::abs(double(h_dx(j, 1))), dz = std::abs(double(h_dx(j, 2)));
+            const double tol = double(precision_tol(1e-12, 1e-5));
+            EXPECT_TRUE((std::abs(dy - 0.25) < tol && dz < tol) || (dy < tol && std::abs(dz - 0.4) < tol))
+                << "face " << h_faces(k) << ": " << dy << ", " << dz;
+            EXPECT_NEAR(double(h_dx(j, 0)), 0.0, tol);
         }
     }
 }
@@ -332,4 +334,46 @@ TEST(Boundary3DTest, CharacteristicOutletLetsAPlaneWaveLeave) {
                   0.03);
         EXPECT_GT(reflection_3d(mesh, "type = \"p_out\"\np = 0.7142857142857143\n"), 0.9);
     }
+}
+
+TEST(Boundary3DTest, CharacteristicOutletSurvivesEddiesThatReverseTheFlow) {
+    // Eddies four times faster than the mean flow cross the outlet with local
+    // backflow, in a box with symmetry sides. The transverse terms, fitted over
+    // corner neighbors and applied at edges and on reversed faces, drove the
+    // outlet's incoming waves away until the run diverged (t = 9.8).
+    const std::string p0 = "0.7142857142857143";
+    const std::string k = "6.283185307179586", k2 = "12.566370614359172";
+    const std::string u = "0.2 + 0.8 * sin(" + k + " * x) * cos(" + k + " * y + 0.3) * cos(" + k +
+                          " * z + 0.7) + 0.4 * sin(" + k2 + " * y + 1.1) * cos(" + k2 + " * z)";
+    const std::string v = "-0.8 * cos(" + k + " * x) * sin(" + k + " * y + 0.3) * cos(" + k +
+                          " * z + 0.7) + 0.4 * sin(" + k2 + " * z + 0.4) * cos(" + k2 + " * x)";
+    const std::string w = "0.4 * sin(" + k2 + " * x + 2.0) * cos(" + k2 + " * y + 1.1)";
+    std::string input = "[run]\nt_stop = 12.0\ncfl = 0.4\n[mesh]\ntype = \"cartesian\"\nNx = 24\nNy = 12\nNz = 12\n"
+                        "Lx = 2.0\nLy = 1.0\nLz = 1.0\n[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\n"
+                        "u = [\"" + u + "\", \"" + v + "\", \"" + w + "\"]\np = \"" + p0 + "\"\n"
+                        "[[boundaries]]\nname = \"left\"\ntype = \"nscbc_inlet\"\nu = [0.2, 0.0, 0.0]\np = " + p0 +
+                        "\nT = " + p0 + "\nL = 1.0\n"
+                        "[[boundaries]]\nname = \"right\"\ntype = \"nscbc_outlet\"\np = " + p0 + "\nL = 12.0\n";
+    for (const char * side : {"bottom", "top", "back", "front"}) {
+        input += std::string("[[boundaries]]\nname = \"") + side + "\"\ntype = \"symmetry\"\n";
+    }
+    input += "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\ncheck_nan = true\n"
+             "[numerics.face_reconstruction]\ntype = \"MUSCL\"\nlimiter = \"none\"\n"
+             "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = " + p0 + "\nT_ref = " + p0 +
+             "\nrho_ref = 1.0\nmu = 2e-4\nPr = 0.72\n[output]\ncheck_interval = 1000000\n";
+    Solver solver;
+    solver.init(parse_toml(input));
+    ASSERT_NO_THROW(solver.run());
+    solver.update_primitives();
+    solver.copy_device_to_host();
+    double max_speed = 0.0, max_dp = 0.0;
+    for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
+        double speed2 = 0.0;
+        for (int i = 0; i < N_DIM; i++) speed2 += std::pow(double(solver.h_primitives(c, i)), 2);
+        max_speed = std::max(max_speed, std::sqrt(speed2));
+        max_dp = std::max(max_dp, std::abs(double(solver.h_primitives(c, N_DIM)) - 1.0 / 1.4));
+    }
+    // Bounded: the inflow is 0.2, and the weakly held mean pressure (L = 12) is still settling
+    EXPECT_LT(max_speed, 0.6);
+    EXPECT_LT(max_dp, 0.15);
 }
