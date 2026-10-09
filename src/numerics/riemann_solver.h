@@ -432,7 +432,7 @@ struct RHLL {
     static void calc_flux(rtype * flux, const rtype * n,
                           const rtype * W_l, const rtype * W_r, const rtype gamma) {
         const rtype a_ref = Kokkos::sqrt(gamma * Kokkos::fmax(W_l[N_DIM + 1] / W_l[0], W_r[N_DIM + 1] / W_r[0]));
-        rotated(flux, n, W_l, W_r, a_ref, gamma);
+        shock_blended(flux, n, W_l, W_r, a_ref, gamma);
     }
 
     /** @brief Mixture flux with per-side thermodynamics. */
@@ -441,7 +441,29 @@ struct RHLL {
                           const SideThermo & th_l, const SideThermo & th_r) {
         const rtype a_ref = Kokkos::sqrt(Kokkos::fmax(th_l.gamma_waves * W_l[N_DIM + 1] / W_l[0],
                                                       th_r.gamma_waves * W_r[N_DIM + 1] / W_r[0]));
-        rotated(flux, n, W_l, W_r, a_ref, th_l, th_r);
+        shock_blended(flux, n, W_l, W_r, a_ref, th_l, th_r);
+    }
+
+    /**
+     * @brief The rotated hybrid, blended toward HLL along the face normal by
+     *        the pressure jump across the face: w F_rotated + (1 - w) F_HLL(n),
+     *        w = min(p_l / p_r, p_r / p_l)^3 (the pressure weight of AUSMPW+:
+     *        Kim, Kim & Rho, J. Comput. Phys. 174, 2001). On faces aligned with a
+     *        shock the rotation is already HLL along n; on tetrahedra it turns
+     *        HLL toward the shock normal, which grows a carbuncle on the
+     *        stagnation line with MUSCL or TENO states (#80). Contacts and shear
+     *        layers carry no pressure jump and keep the rotated flux.
+     */
+    template <typename... Thermo>
+    KOKKOS_INLINE_FUNCTION static void shock_blended(rtype * flux, const rtype * n, const rtype * W_l,
+                                                     const rtype * W_r, const rtype a_ref, const Thermo &... th) {
+        rotated(flux, n, W_l, W_r, a_ref, th...);
+        const rtype ratio = Kokkos::fmin(W_l[N_DIM + 1] / W_r[N_DIM + 1], W_r[N_DIM + 1] / W_l[N_DIM + 1]);
+        const rtype w = ratio * ratio * ratio;
+        if (w >= 1.0_r) return;
+        rtype f_hll[N_CONSERVATIVE];
+        HLL::calc_flux(f_hll, n, W_l, W_r, th...);
+        FOR_I_CONSERVATIVE flux[i] = w * flux[i] + (1.0_r - w) * f_hll[i];
     }
 
     /**
