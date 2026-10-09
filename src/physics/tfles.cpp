@@ -15,7 +15,7 @@
 
 ThickenedFlame ThickenedFlame::from_input(const toml::value & table) {
     const std::string model = toml::find_or<std::string>(table, "model", "");
-    if (model != "tfles") throw InputError("les.combustion.model = \"" + model + "\" is not one of: tfles.");
+    if (model != "tfles") throw InputError("les.combustion.model = \"" + model + "\" is not one of: tfles, pasr.");
     ThickenedFlame tf;
     tf.delta_L = find_double(table, "delta_L");
     tf.s_L = find_double(table, "s_L");

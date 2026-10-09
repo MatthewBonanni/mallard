@@ -963,6 +963,26 @@ within 10% for `Delta <= 0.8 delta_L`; for coarser meshes use
 priori on case 1 and only checked for the absence of overshoot on case 2;
 `S_T` changes by -3% to +13% over the a priori range `C_u` = 22-39 (case 1, `F = 8`).
 
+#### Results: non-premixed flame in decaying turbulence (PaSR, experimental)
+
+DNS: an H2/N2 (25% H2) - air counterflow diffusion flame profile (`K = 160`
+1/s, peak 1544 K, `Z_st = 0.556`) in the box and turbulence of the premixed
+DNS, pressure outlets on both ends, to 0.4 ms (`tools/flame_turbulence.py
+init --x-f`, `analyze --z-fuel --z-st`). LES at `Delta` = 0.27 and 0.53 mm
+(8 and 16 DNS cells) with the Sigma model and `[les.combustion] model =
+"pasr"`, against quasi-laminar chemistry. Heat release over 0.2-0.4 ms
+(DNS: stoichiometric surface 1.58, `T` there 1262 K):
+
+| `Delta` | PaSR | quasi-laminar |
+|---|---|---|
+| 0.27 mm | -10.7% (`kappa` 0.62 at `Z_st`) | +16.6% |
+| 0.53 mm | -50% (`T_st` 892 K: near extinction; `kappa` 0.26) | +41% |
+
+`eps_num / eps_sgs` <= 0.10 (PaSR) and 0.23 (quasi-laminar). PaSR moves the
+heat release the right way at the finer width and overcorrects at the
+coarser one, where `tau_mix = Delta^2 / (nu + nu_t)` with `C_mix = 1`
+overestimates the mixing time; it ships as experimental, not as a default.
+
 ## 9. Stages
 
 One pull request each, stacked; the umbrella issue links them.
