@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <vector>
 
 #include <Kokkos_Core.hpp>
 
@@ -309,12 +310,44 @@ struct DynamicProcedureFunctor {
     Kokkos::View<double *[6]> model_stresses;
     Kokkos::View<double *[2]> terms;
 
+    static constexpr uint32_t MAX_STENCIL = 160;  // cell + vertex neighbors (tetrahedra: up to about 100)
+
+    /** @brief Component i of the position of stencil entry k (the cell itself for k == end) relative to cell c. */
+    KOKKOS_INLINE_FUNCTION
+    double relative(const uint32_t c, const uint32_t k, const uint32_t end, const uint8_t i) const {
+        if (k == end) return 0.0;
+        return static_cast<double>(cell_coords(neighbors(k), i) - cell_coords(c, i)) +
+               static_cast<double>(shifts(neighbor_shift(k), i));
+    }
+
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
         double w_sum = 0.0, rho = 0.0, m[3] = {}, rho_uu[3][3] = {}, g[3][3] = {}, model_stress[3][3] = {};
         double x1[3] = {}, x2[3] = {};
         const uint32_t begin = offsets(c), end = offsets(c + 1);
-        for (uint32_t k = begin; k <= end; k++) {
+        // The stencil in a canonical order (by relative position), so the sums do not depend on the local
+        // numbering of the neighbors and the constant is bitwise independent of the rank count
+        uint32_t order[MAX_STENCIL];
+        const uint32_t size = Kokkos::min(end - begin + 1, static_cast<uint32_t>(MAX_STENCIL));
+        for (uint32_t i = 0; i < size; i++) order[i] = begin + i;
+        auto before = [&](const uint32_t ka, const uint32_t kb) {
+            for (uint8_t i = 0; i < N_DIM; i++) {
+                const double a = relative(c, ka, end, i), b = relative(c, kb, end, i);
+                if (a != b) return a < b;
+            }
+            return false;
+        };
+        for (uint32_t i = 1; i < size; i++) {
+            const uint32_t key = order[i];
+            uint32_t j = i;
+            while (j > 0 && before(key, order[j - 1])) {
+                order[j] = order[j - 1];
+                j--;
+            }
+            order[j] = key;
+        }
+        for (uint32_t o = 0; o < size; o++) {
+            const uint32_t k = order[o];
             const uint32_t n = k < end ? neighbors(k) : c;
             const double w = static_cast<double>(volume(n));
             double u[3] = {}, gn[3][3], dx[3] = {};
@@ -385,7 +418,7 @@ struct DynamicProcedureFunctor {
  * @brief Sums over all ranks of the owned cells' terms, exact in fixed point (each term rounded to 2^-b of
  *        the largest, b leaving room for every cell in 63 bits), so independent of the rank count and order.
  */
-std::array<double, 2> exact_sums(const Kokkos::View<double *[2]> & terms, const uint32_t n_owned) {
+std::array<double, 2> exact_sums(const Kokkos::View<double *[2]> & terms, const uint32_t n_owned, const bool distributed) {
     std::array<double, 2> largest = {0.0, 0.0};
     for (int k = 0; k < 2; k++) {
         double local = 0.0;
@@ -395,8 +428,9 @@ std::array<double, 2> exact_sums(const Kokkos::View<double *[2]> & terms, const 
             Kokkos::Max<double>(local));
         largest[k] = local;
     }
-    largest = comm::allreduce(largest, comm::Op::MAX);
-    const uint64_t n_global = comm::allreduce(static_cast<uint64_t>(n_owned), comm::Op::SUM);
+    if (distributed) largest = comm::allreduce(largest, comm::Op::MAX);
+    const uint64_t n_global =
+        distributed ? comm::allreduce(static_cast<uint64_t>(n_owned), comm::Op::SUM) : static_cast<uint64_t>(n_owned);
     const int bits = 62 - static_cast<int>(std::ceil(std::log2(static_cast<double>(n_global) + 1.0)));
     std::array<int64_t, 2> sums = {0, 0};
     std::array<double, 2> scale = {0.0, 0.0};
@@ -413,7 +447,7 @@ std::array<double, 2> exact_sums(const Kokkos::View<double *[2]> & terms, const 
             Kokkos::Sum<int64_t>(local));
         sums[k] = local;
     }
-    sums = comm::allreduce(sums, comm::Op::SUM);
+    if (distributed) sums = comm::allreduce(sums, comm::Op::SUM);
     return {scale[0] > 0.0 ? static_cast<double>(sums[0]) / scale[0] : 0.0,
             scale[1] > 0.0 ? static_cast<double>(sums[1]) / scale[1] : 0.0};
 }
@@ -424,15 +458,23 @@ std::array<double, 2> exact_sums(const Kokkos::View<double *[2]> & terms, const 
  *        on periodic boundaries need no node unwrapping.
  */
 std::array<double, 3> cell_extents(const Mesh & mesh, const uint32_t c) {
-    double a[3][3] = {};
+    // Faces summed in a canonical order, so the extents do not depend on the local face numbering
+    std::vector<std::array<double, 3>> normals;
     for (uint32_t k = mesh.h_offsets_faces_of_cell(c); k < mesh.h_offsets_faces_of_cell(c + 1); k++) {
         const uint32_t f = mesh.h_faces_of_cell(k);
-        double n[3] = {}, norm = 0.0;
-        FOR_I_DIM {
-            n[i] = static_cast<double>(mesh.h_face_normals(f, i));
-            norm += n[i] * n[i];
+        std::array<double, 3> n = {};
+        FOR_I_DIM n[i] = static_cast<double>(mesh.h_face_normals(f, i));
+        // n n^T does not depend on the orientation: make the first nonzero component positive
+        const double sign = n[0] != 0.0 ? n[0] : (n[1] != 0.0 ? n[1] : n[2]);
+        if (sign < 0.0) {
+            for (double & v : n) v = -v;
         }
-        norm = std::sqrt(norm);
+        normals.push_back(n);
+    }
+    std::sort(normals.begin(), normals.end());
+    double a[3][3] = {};
+    for (const auto & n : normals) {
+        const double norm = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
         for (int i = 0; i < 3; i++) {
             for (int j = 0; j < 3; j++) a[i][j] += 0.5 * n[i] * n[j] / norm;
         }
@@ -515,7 +557,7 @@ void Solver::update_dynamic_constant() {
                                                  mesh->cells_of_cell_shift, mesh->shifts, mesh->cell_coords,
                                                  mesh->cell_volume, les_width, flow, g, dynamic_stresses,
                                                  dynamic_terms});
-    const auto [lm, mm] = exact_sums(dynamic_terms, n_owned);
+    const auto [lm, mm] = exact_sums(dynamic_terms, n_owned, is_distributed());
     // C^2 (Vreman: c) = <L:M> / <M:M>, clipped at zero; a field without resolved strain keeps the previous one
     if (mm > 0.0) {
         dynamic_ratio = lm / mm;
@@ -555,9 +597,19 @@ void Solver::init_les() {
     if (les.scotti) {
         les_width = Kokkos::View<rtype *>("les_width", mesh->n_cells);
         auto h_width = Kokkos::create_mirror_view(les_width);
-        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        for (uint32_t c = 0; c < mesh->n_owned(); c++) {
             const std::array<double, 3> h = cell_extents(*mesh, c);
             h_width(c) = h_delta(c) * static_cast<rtype>(LES::scotti_factor(h[0], h[1], h[2]));
+        }
+        // Halo cells lack some of their faces here: take their owners' widths
+        if (halo.active()) {
+            State packed("les_width_halo", mesh->n_cells, 1);
+            auto h_packed = Kokkos::create_mirror_view(packed.species);
+            for (uint32_t c = 0; c < mesh->n_owned(); c++) h_packed(c, 0) = h_width(c);
+            Kokkos::deep_copy(packed.species, h_packed);
+            halo.exchange(packed);
+            Kokkos::deep_copy(h_packed, packed.species);
+            for (uint32_t c = mesh->n_owned(); c < mesh->n_cells; c++) h_width(c) = h_packed(c, 0);
         }
         Kokkos::deep_copy(les_width, h_width);
     }

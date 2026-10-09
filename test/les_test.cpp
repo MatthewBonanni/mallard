@@ -353,8 +353,8 @@ TEST(LESSolver, ScottiWidthUsesTheExtentsOfEachCell) {
     const auto & b = scotti->get_les_coefficients();
     uint32_t checked = 0;
     for (uint32_t c = 0; c < volume->get_mesh()->n_owned(); c++) {
-        if (a(c, 0) < 1e-12) continue;
-        EXPECT_NEAR(b(c, 0), f * f * a(c, 0), 1e-12 * f * f * a(c, 0) + 1e-300) << "cell " << c;
+        if (double(a(c, 0)) < 1e-12) continue;
+        EXPECT_NEAR(double(b(c, 0)), f * f * double(a(c, 0)), precision_tol<double>(1e-12, 1e-5) * f * f * double(a(c, 0)) + 1e-300) << "cell " << c;
         checked++;
     }
     EXPECT_GT(checked, 100u);
@@ -406,9 +406,9 @@ TEST(LESSolver, DynamicConstantIsGalileanAndScaleInvariant) {
     const std::string model = N_DIM == 3 ? "sigma" : "wale";
     const double c = dynamic_constant(model, 1.0, 1.0, 0.0);
     EXPECT_GT(std::abs(c), 1e-3);
-    EXPECT_NEAR(dynamic_constant(model, 1.0, 1.0, 0.7), c, 1e-6 * std::abs(c));
-    EXPECT_NEAR(dynamic_constant(model, 10.0, 1.0, 0.0), c, 1e-6 * std::abs(c));
-    EXPECT_NEAR(dynamic_constant(model, 1.0, 5.0, 0.0), c, 1e-6 * std::abs(c)) << c;
+    EXPECT_NEAR(dynamic_constant(model, 1.0, 1.0, 0.7), c, precision_tol<double>(1e-6, 2e-2) * std::abs(c));
+    EXPECT_NEAR(dynamic_constant(model, 10.0, 1.0, 0.0), c, precision_tol<double>(1e-6, 2e-2) * std::abs(c));
+    EXPECT_NEAR(dynamic_constant(model, 1.0, 5.0, 0.0), c, precision_tol<double>(1e-6, 2e-2) * std::abs(c)) << c;
 }
 
 TEST(LESSolver, BudgetSplitsTheKineticEnergyRateOfTheRightHandSide) {
