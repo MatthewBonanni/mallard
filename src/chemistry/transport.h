@@ -96,7 +96,7 @@ struct TransportTable {
     Kokkos::View<double **, Kokkos::LayoutRight, MemorySpace> wilke_d;   // 1 / sqrt(8 (1 + W_k / W_j))
     bool thermal_diffusion = false;
     Kokkos::View<double **[9], Kokkos::LayoutRight, MemorySpace> cstar;  // (k, j, coefficient), symmetric
-    Kokkos::View<double **, Kokkos::LayoutRight, MemorySpace> kb_eps;    // k_B / epsilon_kj [1/K]
+    Kokkos::View<double **, Kokkos::LayoutRight, MemorySpace> log_eps;   // ln(epsilon_kj / k_B), so ln T* = ln T - log_eps
 
     static constexpr double TINY = 1.0e-20;  // smallest mole fraction in the mixing rules, as in Cantera
 
@@ -199,7 +199,7 @@ struct TransportTable {
             for (uint32_t k = 0; k < n_species; k++) D[k] = 0.0;
             for (uint32_t k = 0; k + 1 < n_species; k++) {
                 for (uint32_t j = k + 1; j < n_species; j++) {
-                    const double log_ts = Kokkos::log(T * kb_eps(k, j));
+                    const double log_ts = L - log_eps(k, j);
                     const double * c = &cstar(k, j, 0);
                     double C = c[8];
                     for (int m = 7; m >= 0; m--) C = C * log_ts + c[m];
@@ -296,9 +296,9 @@ TransportTable<MemorySpace> make_transport_table(const Mechanism & mechanism, co
         const ThermalDiffusionFits td = fit_thermal_diffusion(mechanism);
         table.thermal_diffusion = true;
         table.cstar = Kokkos::View<double **[9], Kokkos::LayoutRight, MemorySpace>("transport_cstar", n, n);
-        table.kb_eps = Kokkos::View<double **, Kokkos::LayoutRight, MemorySpace>("transport_kb_eps", n, n);
+        table.log_eps = Kokkos::View<double **, Kokkos::LayoutRight, MemorySpace>("transport_log_eps", n, n);
         auto h_cstar = Kokkos::create_mirror_view(table.cstar);
-        auto h_kb_eps = Kokkos::create_mirror_view(table.kb_eps);
+        auto h_log_eps = Kokkos::create_mirror_view(table.log_eps);
         size_t p = 0;
         for (uint32_t k = 0; k < n; k++) {
             for (uint32_t j = k; j < n; j++, p++) {
@@ -306,11 +306,11 @@ TransportTable<MemorySpace> make_transport_table(const Mechanism & mechanism, co
                     h_cstar(k, j, c) = td.cstar[p][c];
                     h_cstar(j, k, c) = td.cstar[p][c];
                 }
-                h_kb_eps(k, j) = h_kb_eps(j, k) = BOLTZMANN / td.well_depth[p];
+                h_log_eps(k, j) = h_log_eps(j, k) = std::log(td.well_depth[p] / BOLTZMANN);
             }
         }
         Kokkos::deep_copy(table.cstar, h_cstar);
-        Kokkos::deep_copy(table.kb_eps, h_kb_eps);
+        Kokkos::deep_copy(table.log_eps, h_log_eps);
     }
     return table;
 }
