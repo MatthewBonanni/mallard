@@ -500,15 +500,6 @@ struct Scratch {
           reflection("teno_setup_reflection", size_t(n_low) * n_low + 4, n, interleaved),
           planes("teno_setup_planes", size_t(c.planes) * 6, n, interleaved),
           caps(c), slots(n) {}
-
-    static size_t bytes_per_slot(const Caps & c, const uint8_t nk, const int n_low) {
-        const size_t words = 2 * size_t(c.visits) + size_t(c.visits) * c.flag_words() + 2 * size_t(c.entries) +
-                             3 * size_t(c.plane_faces) + c.planes + c.sector + c.rows;
-        const size_t doubles = c.entries + c.visits + 2 * size_t(c.rows) * nk +
-                               size_t(std::max<uint32_t>(c.rows, nk)) * nk + size_t(MAX_PSI_ROWS) * nk + 2 * c.rows +
-                               size_t(n_low) * n_low + 4 + 6 * size_t(c.planes);
-        return 4 * words + 8 * (size_t(c.hash) + doubles);
-    }
 };
 
 /** @brief One thread's view of its scratch. */
@@ -1800,11 +1791,10 @@ struct TeamLayout {
     size_t visit_cell = 0, visit_lattice = 0, hash_key = 0, hash_pos = 0, cand_cell = 0, cand_lattice = 0, cand_slot = 0,
            cand_off = 0, inside = 0, reach = 0, entry_ref = 0, entry_order = 0, entry_key = 0, planes = 0,
            plane_first = 0, plane_face = 0, plane_face_lattice = 0, plane_face_plane = 0, sector = 0, tried_n = 0,
-           tried_lebesgue = 0, means = 0, psi = 0, coef = 0, cone = 0, frame = 0, frame_face = 0, frame_cell = 0, X = 0,
+           tried_lebesgue = 0, means = 0, psi = 0, coef = 0, cone = 0, frame = 0, X = 0,
            plane_start = 0, plane_sorted = 0, plane_x = 0, A = 0,
-           reflection = 0, bytes = 0;
+           bytes = 0;
     uint32_t candidates = 0;   // per layer
-    bool x_shared = true;      // X in level-0 scratch
     size_t shared_bytes = 0;   // level 0
     size_t shared_head = 0;    // level 0 before the sort keys or A
 };
@@ -1825,7 +1815,6 @@ struct CellTeam {
     Kokkos::View<uint32_t *, Space> cells;
     TeamLayout layout;
     Caps caps;
-    int n_reflection = 0;  // doubles of each thread's reflection cache
 
     // Control words shared by the team (level 0)
     enum Ctl { N_END = 0, EXHAUSTED, TRUNCATED, SEARCH_OK, N_HASH, N_PLANES, N_PLANE_FACES, N_MEANS, N_CTL };
@@ -1833,7 +1822,7 @@ struct CellTeam {
     static constexpr int N_END_SLOTS = 66;
 
     KOKKOS_INLINE_FUNCTION
-    Lanes lanes(char * base, const int lane) const {
+    Lanes lanes(char * base) const {
         auto u32 = [&](const size_t off) { return Lane<uint32_t>{reinterpret_cast<uint32_t *>(base + off), 1}; };
         auto f64 = [&](const size_t off) { return Lane<double>{reinterpret_cast<double *>(base + off), 1}; };
         Lanes w;
@@ -1857,7 +1846,6 @@ struct CellTeam {
         w.psi = f64(layout.psi);
         w.coef = f64(layout.coef);
         w.tried_lebesgue = f64(layout.tried_lebesgue);
-        w.reflection = Lane<double>{reinterpret_cast<double *>(base + layout.reflection) + size_t(lane) * n_reflection, 1};
         w.planes = f64(layout.planes);
         return w;
     }
@@ -1867,7 +1855,7 @@ struct CellTeam {
         const uint32_t t = tm.league_rank();
         char * base = static_cast<char *>(tm.team_scratch(1).get_shmem(layout.bytes));
         char * shared = static_cast<char *>(tm.team_scratch(0).get_shmem(layout.shared_bytes));
-        const Lanes w = lanes(base, tm.team_rank());
+        const Lanes w = lanes(base);
         uint8_t depth = 0, failed = 0, invalid = 0;
         uint16_t n_large = 0, n_small = 0;
         uint16_t small_size[teno::MAX_FACES] = {};
@@ -3204,8 +3192,6 @@ class Setup3D {
             take(l.plane_x, 8 * 3 * PF);
             const size_t n_frames = std::max<size_t>(R, size_t(teno::MAX_FACES) * (nss_max + 1));
             take(l.frame, 8 * n_frames * (4 + 2 * size_t(tables.n_low)));
-            take(l.frame_face, 4 * n_frames);
-            take(l.frame_cell, 4 * n_frames);
             // A and X hold the central stencil's system, or every face's sector system
             const size_t sector_doubles = size_t(teno::MAX_FACES) * c_nss_max() * teno::NK_SMALL;
             // Level 0 holds A when it fits beside two more teams on an A100 (TENO5's largest)
@@ -3221,7 +3207,6 @@ class Setup3D {
             while (n_sort < E) n_sort <<= 1;
             const size_t sort_bytes = 12 * n_sort;
             const size_t max_shared = Kokkos::TeamPolicy<>::scratch_size_max(0);
-            l.x_shared = false;
             l.shared_bytes = l.shared_head + std::max(std::max(sort_bytes, a_bytes), 12 * H);
             if (l.shared_bytes > max_shared) throw std::runtime_error("TENO setup: the device has too little shared memory.");
             return l;
@@ -3251,7 +3236,7 @@ class Setup3D {
                 const TeamLayout layout = team_layout();
                 CellTeam<Exec> task{CellSetup<Exec>{device, d_tables.data(), Scratch<DefaultMem>(), out, cells, {}, r, nk, ns, nss,
                                                     ns_max, nss_max, double(options.max_condition)},
-                                    out, cells, layout, caps, tables.n_low * tables.n_low + 4};
+                                    out, cells, layout, caps};
                 Kokkos::TeamPolicy<Exec, Kokkos::LaunchBounds<TEAM_SIZE, 3>> policy(n, TEAM_SIZE);
                 policy.set_scratch_size(0, Kokkos::PerTeam(layout.shared_bytes))
                     .set_scratch_size(1, Kokkos::PerTeam(layout.bytes));
