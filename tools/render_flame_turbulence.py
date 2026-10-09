@@ -19,11 +19,12 @@ import os
 import tempfile
 
 import numpy as np
+from flame_turbulence import read_npz
 
 
 def scene(plotter, path, q_factor, y_u, label, clim, args_window=None, crop=None):
     import pyvista as pv
-    d = dict(np.load(path))
+    d = read_npz(path)
     h = float(d["h"])
     if crop:
         # The last crop metres along x (the DNS box at the fresh-gas end of an extended LES box)

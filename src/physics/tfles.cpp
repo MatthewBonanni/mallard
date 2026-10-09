@@ -33,7 +33,7 @@ ThickenedFlame ThickenedFlame::from_input(const toml::value & table) {
         throw InputError("les.combustion.subgrid_velocity = \"" + velocity + "\" is not one of: colin, eddy_viscosity.");
     }
     tf.eddy_viscosity_velocity = velocity == "eddy_viscosity";
-    tf.C_u = find_double_or(table, "C_u", 1.0);
+    tf.C_u = find_double_or(table, "C_u", 28.0);
     if (!(tf.C_u > 0.0)) throw InputError("les.combustion.C_u must be positive.");
     if (!(tf.delta_L > 0.0) || !(tf.s_L > 0.0) || !(tf.n_res > 0.0) || !(tf.beta > 0.0)) {
         throw InputError("les.combustion: delta_L, s_L, n_res and beta must be positive.");
