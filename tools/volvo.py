@@ -12,8 +12,12 @@
     volvo.py slice RUN_DIR --out slice.npz
         frames of the mid-span probe plane from probe_slice_*.csv
     volvo.py animate slice.npz --out MP4 [--field vorticity|T]
-    volvo.py render SNAPSHOT.(p)vtu --out PNG [--q 2e6 --color U]
-        Q-criterion isosurface in 3D, colored by a field (needs pyvista)
+    volvo.py meanfield STATS.(p)vtu --u-bulk U --out PNG [--temperature]
+        span-averaged mean velocity (recirculation contour), fluctuation level (and temperature)
+    volvo.py grid "snap/PREFIX_*.pvtu" --out-dir FRAMES [--fields Q,U_X,T --follow --delete]
+        snapshots resampled onto a uniform grid (float32 npz), e.g. in the pod while a run writes them
+    volvo.py render FRAMES --out-dir PNGS [--q 3e6 --flame 1200 --section T]
+        3D frames: Q vortices, flame surface, a section on the far spanwise plane, body, duct (needs pyvista)
 
 Distances are in units of D = 0.04 m from the base of the triangle (x) and
 the channel's mid-plane (y); velocities over U_bulk.
@@ -311,31 +315,142 @@ def cmd_animate(a):
     print(f"wrote {a.out}")
 
 
+def cmd_meanfield(a):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.tri import Triangulation
+    names = ["MEAN_U_X", "COV_U_X_U_X", "COV_U_Y_U_Y"] + (["MEAN_T"] if a.temperature else [])
+    t, c, f = read_cells(a.stats, names)
+    xy, avg = span_average(c, {n: f[n] for n in names})
+    x, y = xy[:, 0] / D, xy[:, 1] / D
+    keep = (x > -1.5) & (x < a.x_max)
+    tri = Triangulation(x[keep], y[keep])
+    xm, ym = tri.x[tri.triangles].mean(1), tri.y[tri.triangles].mean(1)
+    tri.set_mask(inside_body(xm * D, ym * D))
+    panels = [("MEAN_U_X", avg["MEAN_U_X"] / a.u_bulk, "mean U / U_b", "RdBu_r", (-1.0, 2.0)),
+              ("k", np.sqrt(avg["COV_U_X_U_X"] + avg["COV_U_Y_U_Y"]) / a.u_bulk, "sqrt(u'^2 + v'^2) / U_b",
+               "magma", (0.0, 1.0))]
+    if a.temperature:
+        panels.append(("MEAN_T", avg["MEAN_T"], "mean T (K)", "inferno", (288.0, 1800.0)))
+    fig, axes = plt.subplots(len(panels), 1, figsize=(12, 2.6 * len(panels)))
+    for ax, (_, v, lab, cmap, lim) in zip(np.atleast_1d(axes), panels):
+        cs = ax.tricontourf(tri, v[keep], levels=np.linspace(*lim, 41), cmap=cmap, extend="both")
+        if lab.startswith("mean U"):
+            ax.tricontour(tri, v[keep], levels=[0.0], colors="k", linewidths=0.8)
+        ax.fill([-np.sqrt(3) / 2, 0, 0], [0, 0.5, -0.5], color="0.6")
+        ax.set_aspect("equal")
+        ax.set_ylabel("y/D")
+        fig.colorbar(cs, ax=ax, label=lab, shrink=0.9, ticks=np.linspace(*lim, 5))
+    np.atleast_1d(axes)[-1].set_xlabel("x/D")
+    np.atleast_1d(axes)[0].set_title(a.title)
+    fig.tight_layout()
+    fig.savefig(a.out, dpi=130)
+    print(f"wrote {a.out}")
+
+
+def inside_body(x, y):
+    a = np.sqrt(3.0) / 2 * D
+    return (x > -a) & (x < 0) & (np.abs(y) < (x + a) / np.sqrt(3.0))
+
+
+def cmd_grid(a):
+    """Resample (P)VTU snapshots onto a uniform grid (nearest cell), one compressed npz per snapshot."""
+    import time
+    from scipy.spatial import cKDTree
+    os.makedirs(a.out_dir, exist_ok=True)
+    fields = a.fields.split(",")
+    index, shape, origin = None, None, None
+    idle = 0.0
+    while True:
+        snaps = sorted(glob.glob(a.pattern))
+        todo = [s for s in snaps[:-1] if not os.path.exists(os.path.join(a.out_dir, os.path.basename(s) + ".npz"))]
+        if not a.follow:
+            todo = [s for s in snaps if not os.path.exists(os.path.join(a.out_dir, os.path.basename(s) + ".npz"))]
+        for s in todo:
+            t, c, f = read_cells(s, fields)
+            if index is None:
+                xs = np.arange(a.x0, a.x1 + 1e-12, a.dx)
+                ys = np.arange(-0.06 + a.dx / 2, 0.06, a.dx)
+                zs = np.arange(a.dx / 2, a.lz, a.dx)
+                shape, origin = (len(xs), len(ys), len(zs)), (xs[0], ys[0], zs[0])
+                X, Y, Z = np.meshgrid(xs, ys, zs, indexing="ij")
+                index = cKDTree(c).query(np.column_stack([X.ravel(), Y.ravel(), Z.ravel()]), workers=a.threads)[1]
+                solid = inside_body(X.ravel(), Y.ravel())
+            out = {"t": t, "origin": np.array(origin), "spacing": a.dx, "shape": np.array(shape)}
+            for n in fields:
+                v = f[n] if f[n].ndim == 1 else f[n][:, 0]
+                g = v[index].astype(np.float32)
+                if n == "Q":
+                    g[solid] = 0.0
+                out[n] = g.reshape(shape)
+            np.savez_compressed(os.path.join(a.out_dir, os.path.basename(s) + ".npz"), **out)
+            if a.delete:
+                for p in [s] + [os.path.join(os.path.dirname(s), q) for q in re.findall(r'Source="([^"]+)"', open(s).read())] \
+                        if s.endswith(".pvtu") else [s]:
+                    os.remove(p)
+            print(f"{s}: t = {t}", flush=True)
+            idle = 0.0
+        if not a.follow or idle > a.timeout:
+            break
+        time.sleep(20)
+        idle += 20
+
+
 def cmd_render(a):
+    """3D frames from `grid` output: Q vortices, an optional flame surface, a section on the far spanwise plane."""
     import pyvista as pv
     pv.OFF_SCREEN = True
-    grid = pv.read(a.snapshot)
-    if "Q" not in grid.cell_data:
-        raise SystemExit(f"{a.snapshot} has no Q")
-    clip = grid.clip_box([-0.05, a.x_max, -0.06, 0.06, 0.0, 0.08], invert=False)
-    pts = clip.cell_data_to_point_data()
-    iso = pts.contour([a.q], scalars="Q")
-    color = a.color if a.color in iso.point_data else None
-    p = pv.Plotter(off_screen=True, window_size=(1800, 800))
-    p.set_background("white")
+    frames = sorted(glob.glob(os.path.join(a.frames, "*.npz")))[a.start::a.every][: a.max_frames or None]
+    os.makedirs(a.out_dir, exist_ok=True)
     s3 = np.sqrt(3.0) / 2 * D
-    body = pv.PolyData(np.array([[-s3, 0, 0], [0, D / 2, 0], [0, -D / 2, 0]]), faces=[3, 0, 1, 2]).extrude(
-        (0, 0, 0.08), capping=True)
-    p.add_mesh(body, color="gray")
-    if color == "U":
-        iso.point_data["U_X"] = iso.point_data["U"][:, 0]
-        color = "U_X"
-    p.add_mesh(iso, scalars=color, cmap=a.cmap, clim=(a.vmin, a.vmax) if a.vmax > a.vmin else None,
-               scalar_bar_args={"title": a.label or (color or "")})
-    p.camera_position = [(0.05, -0.32, 0.30), (0.12, 0.0, 0.04), (0, 1, 0)]
-    p.add_text(a.title, font_size=12, color="black")
-    p.screenshot(a.out)
-    print(f"wrote {a.out}: Q = {a.q:g}, {iso.n_cells} triangles")
+    body = pv.PolyData(np.array([[-s3, 0, 0], [0, D / 2, 0], [0, -D / 2, 0]], float), faces=[3, 0, 1, 2]).extrude(
+        (0, 0, a.lz), capping=True)
+    for k, path in enumerate(frames):
+        d = np.load(path)
+        g = pv.ImageData(dimensions=tuple(int(v) for v in d["shape"]), spacing=(float(d["spacing"]),) * 3,
+                         origin=tuple(float(v) for v in d["origin"]))
+        for n in d.files:
+            if d[n].ndim == 3:
+                g.point_data[n] = d[n].ravel(order="F")
+        p = pv.Plotter(off_screen=True, window_size=(a.width, a.height))
+        p.set_background(a.background)
+        p.enable_anti_aliasing("ssaa")
+        lo, hi = g.bounds[0::2], g.bounds[1::2]
+        z_far = hi[2] - 0.5 * float(d["spacing"]) if a.eye[2] < 0.5 * a.lz else lo[2] + 0.5 * float(d["spacing"])
+        back = g.slice(normal="z", origin=(0, 0, z_far))
+        p.add_mesh(back, scalars=a.section, cmap=a.section_cmap, clim=(a.section_min, a.section_max), opacity=1.0,
+                   show_scalar_bar=False, lighting=False)
+        p.add_mesh(pv.Box(bounds=(lo[0], hi[0], -0.06, 0.06, 0.0, a.lz)).extract_feature_edges(), color="#8a8f98",
+                   line_width=1, opacity=0.5)
+        p.add_mesh(body, color="#b8bcc4", smooth_shading=False, specular=0.3)
+        if a.flame and "T" in g.point_data:
+            flame = g.contour([a.flame], scalars="T")
+            if flame.n_points:
+                if a.flame_color in flame.point_data:
+                    p.add_mesh(flame, scalars=a.flame_color, cmap="inferno", show_scalar_bar=False, smooth_shading=True,
+                               specular=0.4)
+                else:
+                    p.add_mesh(flame, color=a.flame_color, smooth_shading=True, specular=0.4, opacity=0.85)
+        q = g.point_data["Q"].copy()
+        q[np.abs(g.points[:, 1]) > 0.06 - a.wall_margin] = 0.0  # the channel walls' unresolved boundary layers
+        g.point_data["Q_core"] = q
+        vort = g.contour([a.q], scalars="Q_core")
+        if vort.n_points:
+            if a.q_color == "U" and "U" in vort.point_data:
+                p.add_mesh(vort, scalars="U", cmap="cool", clim=(-10, 30), opacity=a.q_opacity,
+                           show_scalar_bar=False, smooth_shading=True)
+            else:
+                p.add_mesh(vort, color=a.q_color, opacity=a.q_opacity, smooth_shading=True, specular=0.2)
+        p.camera_position = [(a.eye[0], a.eye[1], a.eye[2]), (a.focus[0], a.focus[1], a.focus[2]), (0, 1, 0)]
+        p.camera.view_angle = a.view_angle
+        p.add_text(f"t = {1e3 * float(d['t']):.1f} ms", position="upper_right", font_size=11, color="white")
+        if a.title:
+            p.add_text(a.title, position="upper_left", font_size=11, color="white")
+        out = os.path.join(a.out_dir, f"frame_{k:04d}.png")
+        p.screenshot(out)
+        p.close()
+        print(out, flush=True)
 
 
 def main():
@@ -378,20 +493,52 @@ def main():
     p.add_argument("--every", type=int, default=1)
     p.add_argument("--fps", type=int, default=20)
     p.add_argument("--title", default="")
-    p = sub.add_parser("render")
-    p.add_argument("snapshot")
+    p = sub.add_parser("meanfield")
+    p.add_argument("stats")
+    p.add_argument("--u-bulk", type=float, required=True)
+    p.add_argument("--temperature", action="store_true")
+    p.add_argument("--x-max", type=float, default=10.0)
+    p.add_argument("--title", default="")
     p.add_argument("--out", required=True)
-    p.add_argument("--q", type=float, default=2e6)
-    p.add_argument("--color", default="U")
-    p.add_argument("--cmap", default="viridis")
-    p.add_argument("--vmin", type=float, default=0.0)
-    p.add_argument("--vmax", type=float, default=0.0)
-    p.add_argument("--x-max", type=float, default=0.4)
-    p.add_argument("--label", default="")
+    p = sub.add_parser("grid")
+    p.add_argument("pattern", help="glob of the snapshots, e.g. 'snap/media_*.pvtu'")
+    p.add_argument("--out-dir", required=True)
+    p.add_argument("--fields", default="Q,U")
+    p.add_argument("--dx", type=float, default=1.25e-3)
+    p.add_argument("--x0", type=float, default=-0.04)
+    p.add_argument("--x1", type=float, default=0.36)
+    p.add_argument("--lz", type=float, default=0.08)
+    p.add_argument("--threads", type=int, default=4)
+    p.add_argument("--follow", action="store_true", help="keep converting new snapshots (all but the newest)")
+    p.add_argument("--timeout", type=float, default=900.0, help="--follow: stop after this long without new ones")
+    p.add_argument("--delete", action="store_true", help="delete each snapshot once converted")
+    p = sub.add_parser("render")
+    p.add_argument("frames", help="directory of grid npz files")
+    p.add_argument("--out-dir", required=True)
+    p.add_argument("--q", type=float, default=3e6)
+    p.add_argument("--q-color", default="#d9dde3")
+    p.add_argument("--q-opacity", type=float, default=0.55)
+    p.add_argument("--wall-margin", type=float, default=0.005, help="no Q surfaces this close to the channel walls")
+    p.add_argument("--flame", type=float, default=0.0, help="temperature of the flame isosurface (0: none)")
+    p.add_argument("--flame-color", default="#ffb347", help="a color, or a field such as HRR")
+    p.add_argument("--section", default="U")
+    p.add_argument("--section-cmap", default="Blues_r")
+    p.add_argument("--section-min", type=float, default=-10.0)
+    p.add_argument("--section-max", type=float, default=30.0)
+    p.add_argument("--lz", type=float, default=0.08)
+    p.add_argument("--eye", type=float, nargs=3, default=[0.08, 0.13, 0.40])
+    p.add_argument("--focus", type=float, default=[0.15, -0.01, 0.04], nargs=3)
+    p.add_argument("--view-angle", type=float, default=30.0)
+    p.add_argument("--width", type=int, default=1600)
+    p.add_argument("--height", type=int, default=900)
+    p.add_argument("--background", default="#14161a")
+    p.add_argument("--start", type=int, default=0)
+    p.add_argument("--every", type=int, default=1)
+    p.add_argument("--max-frames", type=int, default=0)
     p.add_argument("--title", default="")
     a = ap.parse_args()
     {"probes": cmd_probes, "profiles": cmd_profiles, "plot": cmd_plot, "budget": cmd_budget, "slice": cmd_slice,
-     "animate": cmd_animate, "render": cmd_render}[a.cmd](a)
+     "animate": cmd_animate, "meanfield": cmd_meanfield, "grid": cmd_grid, "render": cmd_render}[a.cmd](a)
 
 
 if __name__ == "__main__":

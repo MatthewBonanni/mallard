@@ -13,20 +13,33 @@
 #
 # LES: Sigma model with Scotti's filter width, hybrid KEEP / HLLC flux, MUSCL
 # without limiter, SSPRK3. Mesh (tools/make_volvo_mesh.py --ds 1.25e-3 --nz 64):
-# 2.6M hexahedra, Delta = 1.25 mm = D / 32 in the shear layers and the near
+# 2.7M hexahedra, Delta = 1.25 mm = D / 32 in the shear layers and the near
 # wake (x < 5 D), 0.6 mm at the separation corners, growing to 5 mm at
-# x = 10 D and 10 mm at the outlet; dz = 1.25 mm.
+# x = 10 D and 10 mm at the outlet; dz = 1.25 mm. The mesh lines leave the
+# slanted faces normally: with 60-degree wall cells there the central flux
+# grew grid-scale velocity to Mach 0.4-0.8.
 #
-# Variants (same mesh, same inflow): no SGS model (delete [les]); HLLC everywhere
-# (convective_flux = "riemann"); laminar inflow (delete [boundaries.turbulence]).
-#
-# Results: see the RESULTS block written into this header by the validation pass.
+# Results, statistics over t = 0.08-0.30 s (26 shedding periods), averaged
+# over the span, against the LDA data (reference/, digitized from Wu et al.
+# 2017):
+#   recirculation length L_r / D        1.34 (experiment 1.35)
+#   centerline minimum U / U_b          -0.59 at x/D = 0.61 (-0.64 at 0.75)
+#   mean |U - U_exp| / U_b at x/D = 0.375 / 0.95 / 1.53 / 3.75 / 9.4
+#                                       0.13 / 0.14 / 0.11 / 0.07 / 0.08
+#   mean |u' - u'_exp| / U_b            0.05 / 0.08 / 0.08 / 0.05 / 0.06
+#   shedding frequency                  118 Hz (St = 0.285)
+#   eps_num / eps_sgs                   -0.38 (numerical / SGS / molecular
+#                                       shares -52 / 135 / 17%: the scheme
+#                                       feeds energy, the model removes it)
 #
 # Run:
 #   python ../../tools/make_volvo_mesh.py volvo.msh --ds 1.25e-3 --nz 64
+#   python ../../tools/volvo.py probes >> cold.toml   # optional: mid-span plane for a movie
 #   mpirun -n 4 ../../build3d/src/Mallard -i cold.toml --kokkos-map-device-id-by=mpi_rank
-#   python ../../tools/volvo_profiles.py stats/cold_<last>.vtu --u-bulk 16.6 --out profiles.npz
-#   python ../../tools/plot_volvo.py profiles.npz --exp <data dir> --out cold.png
+#   python ../../tools/volvo.py profiles stats/cold_000003.pvtu --u-bulk 16.6 --out cold.npz
+#   python ../../tools/volvo.py plot cold.npz --exp reference --out cold.png
+#   python ../../tools/volvo.py budget integrals.csv --t0 0.08
+# Cost: 626,000 steps, 14 ms each on four A100s (2.8 hours).
 
 [run]
 t_stop = 0.3

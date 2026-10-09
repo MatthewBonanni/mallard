@@ -28,13 +28,18 @@
 # (|y| < D/2) is flushed out before the recirculation zone forms, and the
 # flame blows off; with double flux the run diverged within 700-2800 steps.
 #
-# Results: see the RESULTS block written into this header by the validation pass.
+# Status: SET UP, NOT VALIDATED. F = 21 on this mesh is far above the F <= 5
+# that thickened-flame LES should use (Delta <= delta_L = 0.47 mm in the flame
+# region); a first run was stopped at t = 10 ms. Cost of the F <= 5 mesh
+# (~15-28M cells, ~2,700-5,000 A100-hours) and the plan:
+# docs/design/les.md, section 8.3. Cost here: 85 ms/step on four A100s,
+# ~470,000 steps for 0.2 s.
 #
 # Run:
 #   python ../../tools/make_volvo_mesh.py volvo.msh --ds 2e-3 --nz 40
 #   mpirun -n 4 ../../build3d/src/Mallard -i reacting.toml --kokkos-map-device-id-by=mpi_rank
 #   python ../../tools/volvo.py profiles stats/reacting_<last>.pvtu --u-bulk 17.3 --temperature --out reacting.npz
-#   python ../../tools/volvo.py plot reacting.npz --kind reacting --exp <data dir> --out reacting.png
+#   python ../../tools/volvo.py plot reacting.npz --kind reacting --exp reference --out reacting.png
 
 [run]
 t_stop = 0.2
