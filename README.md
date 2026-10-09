@@ -9,7 +9,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 
 ![Mallard simulations](./docs/images/hero.gif)
 
-*A cellular detonation in 2H2-O2-7Ar with finite-rate chemistry, its numerical soot foil recording the triple-point tracks (front speed within 0.01% of the Chapman-Jouguet speed); the Taylor-Green vortex at Re = 1600 on the full periodic box, whose kinetic-energy dissipation rate follows the 512³ spectral DNS of the [High-Order CFD Workshop](https://cfd.ku.edu/hiocfd/); the Mach 10 double Mach reflection; and the hairpin vortices shed by a sphere at Re = 300, with Strouhal number, drag and lift within 3%, 2% and 6% of Johnson & Patel ([`examples/`](examples)).*
+*Configuration 3 of the 2D Riemann problem on 4096² quadrilaterals (16.8M cells), with Kelvin-Helmholtz roll-ups along the slip lines of the jet; a cellular detonation in 2H2-O2-7Ar in a 3 cm square duct, 19.2M hexahedra in a window that follows the front, whose transverse waves sweep both directions and print their tracks on the numerical soot foils of the walls (front speed within 0.2% of the Chapman-Jouguet speed); the Taylor-Green vortex at Re = 1600 on the full periodic box, whose kinetic energy stays within 2% of the 512³ spectral DNS of the [High-Order CFD Workshop](https://cfd.ku.edu/hiocfd/); and a DNS of the autoignition of thermally stratified lean H2/air at 41 atm (T' = 15 K, after Chen et al.), burning by spontaneous ignition fronts and deflagrations ([`examples/`](examples)).*
 
 > **NOTE:** Mallard is under active development; finite-rate chemistry is new, and its GPU performance is still being tuned.
 

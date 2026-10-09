@@ -26,8 +26,9 @@ curve ("reference": {"label", "file": a CSV of t and y}); "t_end" maps the
 normalized time to t. Detonation panels show a 2D detonation run's pressure
 over the channel and, below it, the numerical soot foil (P_MAX) behind the
 front ("series": the run's .pvd; "xlim" in mesh units). "gif_width" and
-"gif_colors" shrink the GIF, "mp4_width" scales the MP4, and "background"
-sets the figure color (to match pre-rendered frames).
+"gif_colors" shrink the GIF, "gif_dither" sets its dither (ffmpeg paletteuse),
+"mp4_width" scales the MP4, and "background" sets the figure color (to match
+pre-rendered frames).
 
 Every frame is one snapshot of each case: a case with N snapshots is sampled
 at the nearest normalized time, so cases written with the same number of
@@ -340,7 +341,7 @@ def main():
     pattern = os.path.join(tmp, "%05d.png")
     write_mp4(pattern, args.output_stem + ".mp4", config["fps"], config.get("mp4_width"))
     write_gif(pattern, args.output_stem + ".gif", config["fps"], config.get("gif_width"),
-              config.get("gif_colors", 256))
+              config.get("gif_colors", 256), config.get("gif_dither", "bayer:bayer_scale=5"))
     set_last_delay(args.output_stem + ".gif", args.hold)
     shutil.copy(jobs[-1][3], args.output_stem + "_final.png")
     shutil.rmtree(tmp)
