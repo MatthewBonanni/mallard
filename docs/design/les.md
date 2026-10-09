@@ -764,6 +764,37 @@ Findings:
   `Re_tau = 179.8` (+0.9%). The upwind dissipation explains most of that
   DNS's deficit.
 
+#### Results at `Re_tau = 590` (`examples/channel_les/input_590.toml`)
+
+![LES of the channel at Re_tau = 590 against MKM](../images/channel_les_590.png)
+
+96^3 hexahedra (dx+ = 38, dz+ = 19, dy+ = 0.87 at the wall), the numerics
+of the 395 case, `Re_b = 21,907` (MKM's `U_b+ = 18.65`), averaged over t =
+60-200 h/U_b (7.6-8.1 h/u_tau) after the synthetic initial field (the
+figure: Sigma with `V^(1/3)`). MKM's `Re_tau = 587.2`:
+
+| Model | `Re_tau` | `Cf` | `U+(30)` / `U+(100)` (13.53 / 16.54) | peak `u_rms+` (2.77) | peak `v_rms+` (1.04) | numerical / SGS / molecular |
+|---|---|---|---|---|---|---|
+| Sigma, Scotti width (default) | **596.6 (+1.6%)** | +2.9% | 13.33 / 16.43 | 2.84 | 0.95 | 3.3 / 16.2 / 80.6% |
+| Sigma, `V^(1/3)` | 611.0 (+4.1%) | +7.9% | 12.90 / 15.88 | 2.83 | 0.96 | 2.3 / 13.5 / 84.2% |
+| none | 632.7 (+7.8%) | +15.7% | 12.18 / 14.92 | 2.78 | 1.02 | 3.3 / 0 / 96.7% |
+
+- With Scotti's width the targets of this section hold at 590: `Re_tau`
+  within 3% (1.6%), the mean profile within 2% for y+ = 30-100, `u_rms`,
+  `w_rms` and `-u'v'` within 10%. With `V^(1/3)` the model halves the
+  model-off error but misses the `Re_tau` target (+4.1%); the cells are the
+  same in wall units as at 395, and the near-wall ones are the more
+  anisotropic, so the width matters more. `eps_num / eps_sgs` = 0.20 and
+  0.17.
+- **`v_rms+`** is 8-9% low at 590 and 11-12% low at 395 on 64^3 (dx+ = 39,
+  dz+ = 19), 8% low at 395 on 96 x 64 x 96 (dx+ = 26, dz+ = 13; `Re_tau`
+  396.3, +1.0%): it improves with the streamwise and spanwise resolution and
+  barely depends on the model (Scotti 0.88, `V^(1/3)` 0.89, `C = 1.8` 0.85,
+  the dynamic constant 0.91, no model 0.97 at 395), so it is the resolution
+  of the wall-normal motions of the near-wall cycle. Only the resolved part
+  is counted; an isotropic SGS share `2/3 k_sgs` from Yoshizawa's estimate
+  would add about 1%.
+
 ### 8.3 Reacting validation
 
 1. **Laminar flame invariance** (stage 5, H2/air and CH4/air, existing
