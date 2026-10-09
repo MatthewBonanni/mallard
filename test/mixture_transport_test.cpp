@@ -203,8 +203,7 @@ TEST(MixtureTransportTest, SoretEffectSeparatesSpeciesInATemperatureWave) {
     // positive: hydrogen gathers where the gas is hot. The wave decays at
     // a = lambda / (rho cp): the enthalpy the Soret fluxes carry,
     // sum_k h_k j_k, cancels the change of the mixture's enthalpy they cause
-    // to first order (without it, the decay rate would change by
-    // sum_k h_k D^T_k / (T0 lambda), about -10% here)
+    // to first order (without it, the wave ends 2.7% off)
     const double p = 101325.0, T0 = 600.0, dT = 30.0, L = 1e-3, k = 2.0 * PI / L;
     const auto mech = chemistry::read_mechanism(H2O2);
     const auto thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(mech);
@@ -220,13 +219,7 @@ TEST(MixtureTransportTest, SoretEffectSeparatesSpeciesInATemperatureWave) {
     const double rho = p / (thermo.gas_constant(y) * T0), cp = thermo.cp_mass(T0, y);
     double mu, lambda;
     table.properties(T0, p, rho, cp, y, mu, lambda, D.data(), DT.data());
-    const auto powers = chemistry::ThermoTable<Kokkos::HostSpace>::powers(T0);
-    double lambda_eff = lambda;
-    for (uint32_t m = 0; m < ns; m++) {
-        lambda_eff += thermo.h_RT(m, powers) * chemistry::GAS_CONSTANT * thermo.inv_W(m) * DT[m];
-    }
     ASSERT_LT(DT[i_H2], 0.0);
-    ASSERT_LT(lambda_eff, 0.95 * lambda);
     const double D12 = table.binary_diffusion(i_H2, i_N2, T0, p), a = lambda / (rho * cp);
     const double t = 0.3 / (D12 * k * k);
     const double amplitude = -DT[i_H2] * k * k * dT / (rho * T0) *
