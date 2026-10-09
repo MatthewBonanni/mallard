@@ -1127,22 +1127,42 @@ not a modeling difference, but its source has not been isolated.
 
 ![H2/air flame, phi = 1](../images/premixed_flame_h2.png)
 
-CH4/air with GRI-3.0 costs about 15x more per step and needs 4-20x more steps
-per flame time (slower flames, the acoustic time step), so only phi = 1 is
-run here, over 1.5 flame times (three hours on six CPU threads):
+CH4/air with GRI-3.0 (53 species) costs about 15x more per step and needs
+4-20x more steps per flame time (slower flames, the acoustic time step):
+0.4-1.0 million steps for five flame times at 20 cells per `delta_T`. The
+sweep (`tools/flame_sweep.py`, `examples/premixed_flame/ch4` for phi = 1)
+therefore runs on A100s, one 300-cell flame at 16.5 ms per step, or 5-8
+flames sharing a GPU through MPS at 13-28 ms per step each. Every flame runs
+five flame times at CFL 1 (the [time step](../numerics/overview.md#time-step)
+of main); `S_c` and `S_d` are taken over the last flame time:
 
-| CH4/air, phi = 1 | Cantera `S_L` [m/s] | `S_c` error | `S_d` error |
-|---|---|---|---|
-| mixture-averaged (CFL 0.1) | 0.3758 | -0.93% | -1.80% |
-| unity Lewis (CFL 0.2) | 0.2865 | -0.04% | -0.78% |
+| CH4/air, phi | 0.6 | 0.8 | 1.0 | 1.2 | 1.4 |
+|---|---|---|---|---|---|
+| Cantera `S_L` [m/s], mixture-averaged | 0.1144 | 0.2711 | 0.3758 | 0.3325 | 0.1388 |
+| Mallard `S_c` error, 10 cells per `delta_T` | -2.42% | -2.50% | -3.08% | -4.19% | -3.53% |
+| Mallard `S_c` error, 20 cells | -0.97% | -1.17% | -1.31% | -1.82% | -1.11% |
+| Mallard `S_c` error, 40 cells | -0.32% (1.7 flame times) | -0.67% (2.8 flame times) | -0.77% (3.3 flame times) | -0.96% (2.8 flame times) | -0.52% (1.7 flame times) |
+| Mallard `S_d` error, 20 cells | -1.12% | -1.48% | -1.62% | -2.08% | -1.38% |
+| Cantera `S_L` [m/s], unity Lewis | 0.1177 | 0.2460 | 0.2865 | 0.2132 | 0.1048 |
+| Mallard `S_c` error, 10 cells | -2.29% | -1.14% | -1.00% | -2.07% | -2.82% |
+| Mallard `S_c` error, 20 cells | -0.69% | -0.45% | -0.42% | -0.72% | -0.80% |
+| Mallard `S_c` error, 40 cells | -0.61% (3.3 flame times) | -0.40% | -0.30% | -0.35% (4.5 flame times) | -0.30% (2.7 flame times) |
+| Mallard `S_d` error, 20 cells | -0.77% | -0.79% | -0.82% | -1.05% | -0.94% |
 
-Both are within 2%; the mixture-averaged consumption speed was still falling
-(0.4% over the last half flame time, and slowing), and the displacement speed,
-averaged over a longer window, still carries some of the initial transient.
-CFL 0.2 against 0.1 (mixture-averaged, at equal times up to 1.15 flame
-times): within 0.03%. The other equivalence ratios (references in
-`examples/premixed_flame/reference/`) are left as a follow-up for the GPU
-kernels of milestone 10.
+At 20 cells per `delta_T` every consumption speed is within the 2% criterion:
+mixture-averaged 1.0-1.8% slow, unity Lewis 0.4-0.8% slow; 10 cells is not
+enough (1.0-4.2% slow). At 40 cells (runs still in progress) the errors fall to 0.3-1.0%. The displacement speeds are 0.1-0.4% below
+the consumption speeds (mixture-averaged phi = 1.2: 2.1% slow). The flames take about two flame times
+to relax from Cantera's discretization to Mallard's, longer than the H2
+flames' half flame time, which is why the earlier 1.5-flame-time run at
+phi = 1 was still drifting; over the last two flame times the 20-cell
+consumption speeds vary by at most 0.4% (mixture-averaged phi = 1.2 by
+±0.2% around its mean). Peak heat release is within 3.1% of Cantera's and the
+temperature within 6-19 K at 20 cells. CFL 0.5 against 1 (phi 0.6, 1.0 and
+1.4, both models, at equal times over 2.5 flame times): the consumption
+speeds differ by at most 0.05%, against the 0.5% criterion.
+
+![CH4/air flame speeds against phi](../images/premixed_flame_ch4.png)
 
 On a CPU core, chemistry is 68% of the H2 flame's step (h2o2) and 75% of the
 CH4 flame's (GRI-3.0); transport is most of the rest of the latter.
