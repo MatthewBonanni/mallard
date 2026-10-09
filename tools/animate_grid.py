@@ -29,7 +29,9 @@ over the channel and, below it, the numerical soot foil (P_MAX) behind the
 front ("series": the run's .pvd; "xlim" in mesh units). "gif_width" and
 "gif_colors" shrink the GIF, "gif_dither" sets its dither (ffmpeg paletteuse),
 "mp4_width" scales the MP4, and "background" sets the figure color (to match
-pre-rendered frames).
+pre-rendered frames). Field, frames and detonation panels show their time in
+a corner ("show_time": false hides it), formatted by "time_format" (default
+"t = {:.3f}"; frames panels take it from times.txt, in its units).
 
 Every frame is one snapshot of each case: a case with N snapshots is sampled
 at the nearest normalized time, so cases written with the same number of
@@ -288,7 +290,8 @@ def render(args):
         t = obj.draw(ax, k, n)
         fig.text(rect[0], rect[1] + rect[3] + 0.006, p.get("title", ""), fontsize=6, color=FG, ha="left", va="bottom")
         if p.get("show_time", isinstance(obj, (FieldPanel, FramesPanel, DetonationPanel))):
-            ax.text(0.985, 0.975, f"t = {t:.3f}", transform=ax.transAxes, fontsize=4.5, color="white", ha="right",
+            label = p.get("time_format", "t = {:.3f}").format(t)
+            ax.text(0.985, 0.975, label, transform=ax.transAxes, fontsize=4.5, color="white", ha="right",
                     va="top", family="DejaVu Sans Mono",
                     bbox=dict(boxstyle="round,pad=0.25", fc=BG, ec="none", alpha=0.6))
     if config.get("footer"):
