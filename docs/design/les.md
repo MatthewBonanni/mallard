@@ -52,7 +52,7 @@ closure for the filtered reaction rates.
 | 1 | Favre-filtered equations closed by an eddy viscosity mu_t, with `lambda_t = cp mu_t / Pr_t` and `rho D_t = mu_t / Sc_t`; mu_t added to the molecular coefficients | Mixed or scale-similarity models; separate SGS flux kernels | Shares the viscous fluxes, boundary treatment, time step and transport infrastructure; the standard closure of compressible LES (Vreman et al. 1995; Garnier et al. 2009) |
 | 2 | **Sigma model** (Nicoud et al. 2011) as the primary eddy viscosity; WALE, Vreman and Smagorinsky also available | WALE, Vreman, dynamic Smagorinsky as primary | Local, no test filter, positive; vanishes in pure shear, solid rotation, two-component and axisymmetric/isotropic expansion; cubic near walls; insensitive to the one-dimensional dilatation of flames |
 | 3 | Dynamic Smagorinsky deferred | Germano-Lilly with local averaging | Needs a test filter and averaging on unstructured mixed meshes (section 2.5); Sigma gets near-wall and laminar behavior without it |
-| 4 | Filter width `Delta = V^(1/d)` (d = 2 or 3) of each cell, independent of the reconstruction order | Largest cell extent; Scotti's anisotropy correction; `h / (p + 1)` | A finite volume has one degree of freedom per cell at any order; Sigma and WALE vanish where the cells are most anisotropic (walls) |
+| 4 | Filter width `Delta = V^(1/d)` (d = 2 or 3) of each cell, independent of the reconstruction order; in 3D times Scotti's anisotropy factor since stage 7 (section 3) | Largest cell extent; Scotti's anisotropy correction; `h / (p + 1)` | A finite volume has one degree of freedom per cell at any order; Sigma and WALE vanish where the cells are most anisotropic (walls) |
 | 5 | Eddy viscosity per cell from the viscous cell gradients, averaged to faces; zero on wall faces | Per face from face gradients | One evaluation per cell; enters the time step and output; consistent across ranks |
 | 6 | A **kinetic-energy budget diagnostic** that measures the numerical dissipation of resolved kinetic energy against the SGS and molecular dissipation at run time | Inferring numerical dissipation from -dK/dt after the fact | Proves at every output which term dissipates the energy; needs no reference |
 | 7 | A **low-dissipation convective flux**: a kinetic-energy-preserving (KEEP) central flux blended with the Riemann solver by a compression-only Ducros sensor | Lower TENO cutoff; Riemann solvers with scaled dissipation only; artificial viscosity | Upwind Riemann fluxes dissipate resolved energy at the grid scale at a rate comparable to the SGS model; the KEEP flux adds none, and shocks keep the Riemann solver |
@@ -281,14 +281,18 @@ axisymmetric runs), for every cell type and reconstruction order.
   of the aspect ratios; the largest extent (`Delta_max`) is used in DES.
   Both matter most in wall cells, where Sigma and WALE are already small
   (`y^3`); the Scotti factor is 1.2 for an aspect ratio of 5 and 1.4 for 10.
-  **Implemented (stage 7) as the opt-in `filter_width = "scotti"`**, with
+  **Implemented (stage 7) as `filter_width = "scotti"`, the default in 3D**, with
   each cell's extents `h_i = V / lambda_i` from the eigenvalues of its
   projected-area tensor `1/2 sum_f A_f A_f^T / |A_f|` (exact for boxes, face
   data only, so periodic cells need no unwrapping), for the eddy viscosity
   only (TFLES keeps `V^(1/3)`). Channel at `Re_tau = 395`, 64^3, Sigma 1.35:
   `Re_tau` 394.8 (+0.7%, against +2.6% with `V^(1/3)`), `Cf` +0.9%, `U+` at
   y+ = 30 / 100 13.40 / 16.61 (MKM 13.49 / 16.53), `eps_num / eps_sgs` 0.21;
-  peak `v_rms+` 0.882, unchanged. On cubic cells it is `V^(1/3)`.
+  peak `v_rms+` 0.882, unchanged. At `Re_tau = 590` (96^3, section 8.2):
+  `Re_tau` 596.6 (+1.6%) against 611.0 (+4.1%) with `V^(1/3)`, `Cf` +2.9%
+  against +7.9%, `U+` at y+ = 30 / 100 13.33 / 16.43 (MKM 13.53 / 16.54).
+  On cubic cells it is `V^(1/3)`, so the isotropic turbulence and flame cases
+  are unchanged. Hence the default in 3D (2D keeps `V^(1/2)`).
 - **Mixed meshes.** `V^(1/d)` is continuous across hexahedron-prism-
   tetrahedron transitions of equal edge length up to the volume ratio's
   cube root (a regular tetrahedron of edge h has `V^(1/3) = 0.49 h`, a cube

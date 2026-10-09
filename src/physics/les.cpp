@@ -57,7 +57,7 @@ LES LES::from_input(const toml::value & input) {
     les.C = find_real_or(table, "C", default_constant(les.model));
     les.Pr_t = find_real_or(table, "Pr_t", 0.9_r);
     les.Sc_t = find_real_or(table, "Sc_t", 0.9_r);
-    const std::string width = toml::find_or<std::string>(table, "filter_width", "volume");
+    const std::string width = toml::find_or<std::string>(table, "filter_width", N_DIM == 3 ? "scotti" : "volume");
     if (width != "volume" && width != "scotti") {
         throw InputError("les.filter_width = \"" + width + "\" is not one of: volume, scotti.");
     }

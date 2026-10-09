@@ -287,7 +287,7 @@ TEST(LESSolver, EddyViscosityUsesTheCellVolumeAsFilterWidth) {
                      : "u = [\"0.3 * x - 0.7 * y\", \"0.9 * x + 0.1 * y\"]\n")
       << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
       << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 1e-3\n"
-      << "[output]\ncheck_interval = 1000000\n[les]\nmodel = \"wale\"\nC = 0.4\nPr_t = 0.6\n";
+      << "[output]\ncheck_interval = 1000000\n[les]\nmodel = \"wale\"\nC = 0.4\nPr_t = 0.6\nfilter_width = \"volume\"\n";
     for (const char * side : {"left", "right", "bottom", "top", "back", "front"}) {
         if (N_DIM == 2 && (std::string(side) == "back" || std::string(side) == "front")) continue;
         s << "[[boundaries]]\nname = \"" << side << "\"\ntype = \"extrapolation\"\n";
@@ -343,7 +343,7 @@ TEST(LESSolver, ScottiWidthUsesTheExtentsOfEachCell) {
           << "[output]\ncheck_interval = 1000000\n[les]\nmodel = \"vreman\"\n" << width;
         return make_solver(s.str());
     };
-    auto volume = input("");
+    auto volume = input("filter_width = \"volume\"\n");
     auto scotti = input("filter_width = \"scotti\"\n");
     volume->copy_device_to_host();
     scotti->copy_device_to_host();
