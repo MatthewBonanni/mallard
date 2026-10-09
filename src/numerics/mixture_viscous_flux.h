@@ -38,7 +38,10 @@ struct ScalarMassFractions {
  *        species diffusion coefficients as rho D_k W_k / W (for gradients of
  *        mole fractions); and the gradient variables [u, T, X_1 .. X_Ns]. The
  *        temperature is p / (rho R), consistent with W (also when double flux
- *        freezes the thermodynamics).
+ *        freezes the thermodynamics). With thermal diffusion, the thermal
+ *        diffusion coefficients D^T_k follow in the columns Ns .. 2 Ns - 1 of
+ *        diffusion; they leave the time step alone (the Soret flux couples
+ *        the species to T one way, adding no diffusive eigenvalue).
  */
 struct MixtureTransportFunctor {
     Mixture gas;
@@ -57,7 +60,8 @@ struct MixtureTransportFunctor {
         const double cp = gas.thermo.cp_mass(T, y);
         double mu, lambda;
         double * D = &diffusion(c, 0);
-        gas.transport.properties(T, p, rho, cp, y, mu, lambda, D);
+        double * DT = gas.transport.thermal_diffusion ? &diffusion(c, gas.n_species) : nullptr;
+        gas.transport.properties(T, p, rho, cp, y, mu, lambda, D, DT);
         const double W_mean = chemistry::GAS_CONSTANT / R;
         double nu = Kokkos::fmax(4.0 / 3.0 * mu / rho, lambda / (rho * (cp - R)));
         for (uint32_t k = 0; k < gas.n_species; k++) {
@@ -135,7 +139,10 @@ struct MixtureGradientFunctor {
  * velocity, as Cantera's (Kee, Coltrin & Glarborg):
  *   j_k = -rho D_k (W_k / W) grad X_k + Y_k sum_j rho D_j (W_j / W) grad X_j,
  * with Y at the face normalized, so that sum_k j_k = 0 to round-off and rho
- * needs no diffusion term; the energy flux carries sum_k h_k j_k. Walls and
+ * needs no diffusion term; with thermal diffusion, j_k also has the Soret
+ * flux -D^T_k grad T / T (the D^T_k sum to zero, as Cantera's), with the
+ * face's T, gradient and averaged D^T_k. The energy flux carries
+ * sum_k h_k j_k. Walls and
  * symmetry planes carry no heat or species flux (adiabatic, non-catalytic);
  * transmissive faces take their image face's values, gradients and
  * coefficients; outflow faces and transmissive faces without an image have
@@ -334,9 +341,17 @@ struct MixtureViscousFluxFunctor {
             correction /= sum_Y;
             const auto p = chemistry::ThermoTable<>::powers(static_cast<double>(q_f[N_DIM]));
             const double RT = chemistry::GAS_CONSTANT * p.T;
+            // Soret: -D^T_k (dT/dn) / T, molecular
+            const bool soret = gas.transport.thermal_diffusion;
+            const double dlnT_dn =
+                soret ? static_cast<double>(molecular) * static_cast<double>(dot<N_DIM>(g_f[N_DIM], n)) / p.T : 0.0;
+            auto DT_k = [&](const uint32_t k) {
+                return two_cells ? 0.5 * (diffusion(G.c0, ns + k) + diffusion(G.c1, ns + k)) : diffusion(c0, ns + k);
+            };
             double enthalpy = 0.0;
             for (uint32_t k = 0; k < ns; k++) {
-                const double j = -c_k(k) * dX_dn(k) + Y_k(k) * correction;
+                double j = -c_k(k) * dX_dn(k) + Y_k(k) * correction;
+                if (soret) j -= DT_k(k) * dlnT_dn;
                 enthalpy += gas.thermo.h_RT(k, p) * RT * gas.thermo.inv_W(k) * j;
                 slots(i_face, 0, k) += static_cast<rtype>(static_cast<double>(A) * j);
             }

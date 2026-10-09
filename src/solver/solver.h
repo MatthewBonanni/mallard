@@ -512,11 +512,11 @@ class Solver {
         Kokkos::View<rtype ***, Kokkos::LayoutRight> species_slots;  // (face, side, k)
         Kokkos::View<rtype *[3]> cell_transport;                     // viscous: (cell, [mu, lambda, nu_eff])
         Kokkos::View<rtype *[3]>::host_mirror_type h_cell_transport;
-        Kokkos::View<double **, Kokkos::LayoutRight> cell_diffusion;  // (cell, k): rho D_k W_k / W
+        Kokkos::View<double **, Kokkos::LayoutRight> cell_diffusion;  // (cell, k): rho D_k W_k / W, then D^T_k (Soret)
         Kokkos::View<rtype **, Kokkos::LayoutRight> transport_values;      // (cell, [u, T, X_1 .. X_Ns])
         Kokkos::View<rtype ***, Kokkos::LayoutRight> transport_gradients;  // (cell, variable, dimension)
         Kokkos::View<rtype **, Kokkos::LayoutRight> bc_transport_values;   // (condition, [T, X]) of UPT
-        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_D;  // output: D_k
+        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_D;  // output: D_k, then D^T_k (Soret)
         Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_Y, h_X;  // output
 
         // Chemistry (Strang splitting around each flow step)

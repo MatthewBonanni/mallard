@@ -90,6 +90,7 @@ class CollisionIntegrals {
                 log_T[i] = std::log(TSTAR[i + 1]);
                 o22_poly.push_back(polyfit(delta, std::vector<double>(OMEGA22 + 8 * i, OMEGA22 + 8 * i + 8), {}, 6));
                 a_poly.push_back(polyfit(delta, std::vector<double>(ASTAR + 8 * (i + 1), ASTAR + 8 * (i + 2)), {}, 6));
+                c_poly.push_back(polyfit(delta, std::vector<double>(CSTAR + 8 * (i + 1), CSTAR + 8 * (i + 2)), {}, 6));
             }
         }
 
@@ -97,6 +98,32 @@ class CollisionIntegrals {
 
         double omega11(const double ts, const double delta) const {
             return omega22(ts, delta) / interpolate(ts, delta, ASTAR, 1, a_poly);
+        }
+
+        /**
+         * @brief Cantera's fit of C* of degree 8 in ln T* (MMCollisionInt::fit):
+         *        unweighted least squares through the table rows (or their
+         *        fits in delta*) whose T* bracket [ts_min, ts_max].
+         */
+        std::vector<double> fit_cstar(const double ts_min, const double ts_max, const double delta) const {
+            int n_min = -1, n_max = -1;
+            for (int n = 0; n < 37; n++) {
+                if (ts_min > TSTAR[n + 1]) n_min = n;
+                if (ts_max > TSTAR[n + 1]) n_max = n + 1;
+            }
+            if (n_min < 0 || n_min >= 36 || n_max < 0 || n_max > 36) {
+                n_min = 0;
+                n_max = 36;
+            }
+            if (n_max - n_min + 1 < 9) {
+                throw std::runtime_error("the reduced temperature range of the thermal diffusion fits is too narrow.");
+            }
+            std::vector<double> x, y;
+            for (int i = n_min; i <= n_max; i++) {
+                x.push_back(log_T[i]);
+                y.push_back(delta == 0.0 ? CSTAR[8 * (i + 1)] : poly(c_poly[i], delta));
+            }
+            return polyfit(x, y, {}, 8);
         }
 
     private:
@@ -124,7 +151,7 @@ class CollisionIntegrals {
         }
 
         std::vector<double> log_T;
-        std::vector<std::vector<double>> o22_poly, a_poly;
+        std::vector<std::vector<double>> o22_poly, a_poly, c_poly;
 
         static constexpr double DELTA[8] = {0.0, 0.25, 0.50, 0.75, 1.0, 1.5, 2.0, 2.5};
         // T* of the A* table; Omega(2,2)* starts at TSTAR[1]
@@ -210,64 +237,138 @@ class CollisionIntegrals {
             1.1339, 1.1340, 1.1340, 1.1350, 1.1350, 1.1340, 1.1340, 1.1320,
             1.1364, 1.1370, 1.1370, 1.1380, 1.1390, 1.1380, 1.1370, 1.1350,
             1.14187, 1.14187, 1.14187, 1.14187, 1.14187, 1.14187, 1.14187, 1.14187};
+        static constexpr double CSTAR[39 * 8] = {
+            0.8889, 0.77778, 0.77778, 0.77778, 0.77778, 0.77778, 0.77778, 0.77778,
+            0.88575, 0.8988, 0.8378, 0.8029, 0.7876, 0.7805, 0.7799, 0.7801,
+            0.87268, 0.8692, 0.8647, 0.8479, 0.8237, 0.7975, 0.7881, 0.7784,
+            0.85182, 0.8525, 0.8366, 0.8198, 0.8054, 0.7903, 0.7839, 0.782,
+            0.83542, 0.8362, 0.8306, 0.8196, 0.8076, 0.7918, 0.7842, 0.7806,
+            0.82629, 0.8278, 0.8252, 0.8169, 0.8074, 0.7916, 0.7838, 0.7802,
+            0.82299, 0.8249, 0.823, 0.8165, 0.8072, 0.7922, 0.7839, 0.7798,
+            0.82357, 0.8257, 0.8241, 0.8178, 0.8084, 0.7927, 0.7839, 0.7794,
+            0.82657, 0.828, 0.8264, 0.8199, 0.8107, 0.7939, 0.7842, 0.7796,
+            0.8311, 0.8234, 0.8295, 0.8228, 0.8136, 0.796, 0.7854, 0.7798,
+            0.8363, 0.8366, 0.8342, 0.8267, 0.8168, 0.7986, 0.7864, 0.7805,
+            0.84762, 0.8474, 0.8438, 0.8358, 0.825, 0.8041, 0.7904, 0.7822,
+            0.85846, 0.8583, 0.853, 0.8444, 0.8336, 0.8118, 0.7957, 0.7854,
+            0.8684, 0.8674, 0.8619, 0.8531, 0.8423, 0.8186, 0.8011, 0.7898,
+            0.87713, 0.8755, 0.8709, 0.8616, 0.8504, 0.8265, 0.8072, 0.7939,
+            0.88479, 0.8831, 0.8779, 0.8695, 0.8578, 0.8338, 0.8133, 0.799,
+            0.89972, 0.8986, 0.8936, 0.8846, 0.8742, 0.8504, 0.8294, 0.8125,
+            0.91028, 0.9089, 0.9043, 0.8967, 0.8869, 0.8649, 0.8438, 0.8253,
+            0.91793, 0.9166, 0.9125, 0.9058, 0.897, 0.8768, 0.8557, 0.8372,
+            0.92371, 0.9226, 0.9189, 0.9128, 0.905, 0.8861, 0.8664, 0.8484,
+            0.93135, 0.9304, 0.9274, 0.9226, 0.9164, 0.9006, 0.8833, 0.8662,
+            0.93607, 0.9353, 0.9329, 0.9291, 0.924, 0.9109, 0.8958, 0.8802,
+            0.93927, 0.9387, 0.9366, 0.9334, 0.9292, 0.9162, 0.905, 0.8911,
+            0.94149, 0.9409, 0.9393, 0.9366, 0.9331, 0.9236, 0.9122, 0.8997,
+            0.94306, 0.9426, 0.9412, 0.9388, 0.9357, 0.9276, 0.9175, 0.9065,
+            0.94419, 0.9437, 0.9425, 0.9406, 0.938, 0.9308, 0.9219, 0.9119,
+            0.94571, 0.9455, 0.9445, 0.943, 0.9409, 0.9353, 0.9283, 0.9201,
+            0.94662, 0.9464, 0.9456, 0.9444, 0.9428, 0.9382, 0.9325, 0.9258,
+            0.94723, 0.9471, 0.9464, 0.9455, 0.9442, 0.9405, 0.9355, 0.9298,
+            0.94764, 0.9474, 0.9469, 0.9462, 0.945, 0.9418, 0.9378, 0.9328,
+            0.9479, 0.9478, 0.9474, 0.9465, 0.9457, 0.943, 0.9394, 0.9352,
+            0.94827, 0.9481, 0.948, 0.9472, 0.9467, 0.9447, 0.9422, 0.9391,
+            0.94842, 0.9484, 0.9481, 0.9478, 0.9472, 0.9458, 0.9437, 0.9415,
+            0.94852, 0.9484, 0.9483, 0.948, 0.9475, 0.9465, 0.9449, 0.943,
+            0.94861, 0.9487, 0.9484, 0.9481, 0.9479, 0.9468, 0.9455, 0.943,
+            0.94872, 0.9486, 0.9486, 0.9483, 0.9482, 0.9475, 0.9464, 0.9452,
+            0.94881, 0.9488, 0.9489, 0.949, 0.9487, 0.9482, 0.9476, 0.9468,
+            0.94863, 0.9487, 0.9489, 0.9491, 0.9493, 0.9491, 0.9483, 0.9476,
+            0.94444, 0.94444, 0.94444, 0.94444, 0.94444, 0.94444, 0.94444, 0.94444};
 };
 
-} // namespace
+/** @brief Pair parameters of the collision integrals, (i, j) flattened as i * n + j. */
+struct PairParameters {
+    std::vector<double> reduced_mass, diameter, well_depth, delta;
+};
 
-TransportFits fit_transport(const Mechanism & mechanism) {
+/** @brief Pair parameters, with Cantera's polar/nonpolar corrections of the well depth and diameter. */
+PairParameters pair_parameters(const Mechanism & mechanism) {
     constexpr double PI = std::numbers::pi;
     const size_t n = mechanism.n_species();
-    std::vector<double> mw(n), sigma(n), eps(n), dipole(n), alpha(n), zrot(n), crot(n);
-    std::vector<bool> polar(n);
-    double T_min = 0.0, T_max = 1e300;
-    for (size_t k = 0; k < n; k++) {
-        const Species & sp = mechanism.species[k];
-        if (!sp.has_transport) {
-            throw std::runtime_error("Mechanism " + mechanism.file + ": species " + sp.name +
-                                     " has no gas transport data.");
+    PairParameters P;
+    P.reduced_mass.resize(n * n);
+    P.diameter.resize(n * n);
+    P.well_depth.resize(n * n);
+    P.delta.resize(n * n);
+    for (size_t i = 0; i < n; i++) {
+        for (size_t j = i; j < n; j++) {
+            const SpeciesTransport & a = mechanism.species[i].transport;
+            const SpeciesTransport & b = mechanism.species[j].transport;
+            const double mw_i = mechanism.species[i].molecular_weight, mw_j = mechanism.species[j].molecular_weight;
+            const double m = mw_i * mw_j / (AVOGADRO * (mw_i + mw_j));
+            double d = 0.5 * (a.diameter + b.diameter);
+            double e = std::sqrt(a.well_depth * b.well_depth);
+            const double mu = std::sqrt(a.dipole * b.dipole);
+            const double dl = 0.5 * mu * mu / (4.0 * PI * EPSILON_0 * e * d * d * d);
+            const bool polar_i = a.dipole > 0.0, polar_j = b.dipole > 0.0;
+            if (polar_i != polar_j) {
+                const SpeciesTransport & p = polar_i ? a : b;
+                const SpeciesTransport & np = polar_i ? b : a;
+                const double alpha_star = np.polarizability / std::pow(np.diameter, 3);
+                const double mu_p_star = p.dipole / std::sqrt(4.0 * PI * EPSILON_0 * std::pow(p.diameter, 3) * p.well_depth);
+                const double xi = 1.0 + 0.25 * alpha_star * mu_p_star * mu_p_star * std::sqrt(p.well_depth / np.well_depth);
+                d *= std::pow(xi, -1.0 / 6.0);
+                e *= xi * xi;
+            }
+            for (size_t p : {i * n + j, j * n + i}) {
+                P.reduced_mass[p] = m;
+                P.diameter[p] = d;
+                P.well_depth[p] = e;
+                P.delta[p] = dl;
+            }
         }
-        mw[k] = sp.molecular_weight;
-        sigma[k] = sp.transport.diameter;
-        eps[k] = sp.transport.well_depth;
-        dipole[k] = sp.transport.dipole;
-        polar[k] = sp.transport.dipole > 0.0;
-        alpha[k] = sp.transport.polarizability;
-        zrot[k] = sp.transport.rotational_relaxation;
-        crot[k] = sp.transport.geometry == MoleculeGeometry::ATOM ? 0.0
-                  : sp.transport.geometry == MoleculeGeometry::LINEAR ? 1.0 : 1.5;
+    }
+    return P;
+}
+
+/** @brief The common thermo temperature range of a mechanism's species. */
+std::pair<double, double> temperature_range(const Mechanism & mechanism) {
+    double T_min = 0.0, T_max = 1e300;
+    for (const Species & sp : mechanism.species) {
         T_min = std::max(T_min, sp.thermo.T_bounds.front());
         T_max = std::min(T_max, sp.thermo.T_bounds.back());
     }
     if (!(T_min > 0.0 && T_max > T_min && T_max < 1e300)) {
         throw std::runtime_error("Mechanism " + mechanism.file + ": transport fits need a common, finite thermo range.");
     }
+    return {T_min, T_max};
+}
 
-    // Pair parameters, with the polar/nonpolar corrections of the well depth and diameter
-    auto pair = [&](size_t i, size_t j) { return i * n + j; };
-    std::vector<double> reduced_mass(n * n), diam(n * n), epsilon(n * n), delta(n * n);
-    for (size_t i = 0; i < n; i++) {
-        for (size_t j = i; j < n; j++) {
-            const double m = mw[i] * mw[j] / (AVOGADRO * (mw[i] + mw[j]));
-            double d = 0.5 * (sigma[i] + sigma[j]);
-            double e = std::sqrt(eps[i] * eps[j]);
-            const double mu = std::sqrt(dipole[i] * dipole[j]);
-            const double dl = 0.5 * mu * mu / (4.0 * PI * EPSILON_0 * e * d * d * d);
-            if (polar[i] != polar[j]) {
-                const size_t kp = polar[i] ? i : j, knp = polar[i] ? j : i;
-                const double alpha_star = alpha[knp] / std::pow(sigma[knp], 3);
-                const double mu_p_star = dipole[kp] / std::sqrt(4.0 * PI * EPSILON_0 * std::pow(sigma[kp], 3) * eps[kp]);
-                const double xi = 1.0 + 0.25 * alpha_star * mu_p_star * mu_p_star * std::sqrt(eps[kp] / eps[knp]);
-                d *= std::pow(xi, -1.0 / 6.0);
-                e *= xi * xi;
-            }
-            for (size_t p : {pair(i, j), pair(j, i)}) {
-                reduced_mass[p] = m;
-                diam[p] = d;
-                epsilon[p] = e;
-                delta[p] = dl;
-            }
+void check_transport_data(const Mechanism & mechanism) {
+    for (const Species & sp : mechanism.species) {
+        if (!sp.has_transport) {
+            throw std::runtime_error("Mechanism " + mechanism.file + ": species " + sp.name +
+                                     " has no gas transport data.");
         }
     }
+}
+
+} // namespace
+
+TransportFits fit_transport(const Mechanism & mechanism) {
+    constexpr double PI = std::numbers::pi;
+    check_transport_data(mechanism);
+    const size_t n = mechanism.n_species();
+    std::vector<double> mw(n), sigma(n), eps(n), zrot(n), crot(n);
+    for (size_t k = 0; k < n; k++) {
+        const Species & sp = mechanism.species[k];
+        mw[k] = sp.molecular_weight;
+        sigma[k] = sp.transport.diameter;
+        eps[k] = sp.transport.well_depth;
+        zrot[k] = sp.transport.rotational_relaxation;
+        crot[k] = sp.transport.geometry == MoleculeGeometry::ATOM ? 0.0
+                  : sp.transport.geometry == MoleculeGeometry::LINEAR ? 1.0 : 1.5;
+    }
+    const auto [T_min, T_max] = temperature_range(mechanism);
+    auto pair = [&](size_t i, size_t j) { return i * n + j; };
+    const PairParameters P = pair_parameters(mechanism);
+    const std::vector<double> & reduced_mass = P.reduced_mass;
+    const std::vector<double> & diam = P.diameter;
+    const std::vector<double> & epsilon = P.well_depth;
+    const std::vector<double> & delta = P.delta;
 
     const CollisionIntegrals integrals;
     const ThermoTable<Kokkos::HostSpace> thermo = make_thermo_table<Kokkos::HostSpace>(mechanism);
@@ -331,6 +432,42 @@ TransportFits fit_transport(const Mechanism & mechanism) {
                 w[i] = 1.0 / (diff[i] * diff[i]);
             }
             fits.diffusion.push_back(to_array(polyfit(log_T, diff, w, 4)));
+        }
+    }
+    return fits;
+}
+
+ThermalDiffusionFits fit_thermal_diffusion(const Mechanism & mechanism) {
+    check_transport_data(mechanism);
+    const size_t n = mechanism.n_species();
+    const auto [T_min, T_max] = temperature_range(mechanism);
+    const PairParameters P = pair_parameters(mechanism);
+    double ts_min = 1e8, ts_max = 0.0;
+    for (size_t i = 0; i < n; i++) {
+        for (size_t j = i; j < n; j++) {
+            ts_min = std::min(ts_min, BOLTZMANN * T_min / P.well_depth[i * n + j]);
+            ts_max = std::max(ts_max, BOLTZMANN * T_max / P.well_depth[i * n + j]);
+        }
+    }
+    const CollisionIntegrals integrals;
+    ThermalDiffusionFits fits;
+    std::vector<double> deltas;
+    std::vector<std::array<double, 9>> by_delta;
+    for (size_t k = 0; k < n; k++) {
+        for (size_t j = k; j < n; j++) {
+            const double delta = P.delta[k * n + j];
+            const auto found = std::find(deltas.begin(), deltas.end(), delta);
+            if (found == deltas.end()) {
+                std::array<double, 9> c;
+                const std::vector<double> fit = integrals.fit_cstar(ts_min, ts_max, delta);
+                std::copy(fit.begin(), fit.end(), c.begin());
+                deltas.push_back(delta);
+                by_delta.push_back(c);
+                fits.cstar.push_back(c);
+            } else {
+                fits.cstar.push_back(by_delta[found - deltas.begin()]);
+            }
+            fits.well_depth.push_back(P.well_depth[k * n + j]);
         }
     }
     return fits;
