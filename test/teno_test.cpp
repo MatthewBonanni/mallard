@@ -493,9 +493,9 @@ TEST(TENOTest, RebuildingTheCellsWithinReachOfMovedNodesGivesTheTablesOfAFullSet
         return best;
     };
     const uint32_t a = nearest(0.21, 0.42), b = nearest(0.29, 0.0);
-    mesh->h_node_coords(a, 0) += 0.004;
-    mesh->h_node_coords(a, 1) -= 0.003;
-    mesh->h_node_coords(b, 0) += 0.005;
+    mesh->h_node_coords(a, 0) += rtype(0.004);
+    mesh->h_node_coords(a, 1) -= rtype(0.003);
+    mesh->h_node_coords(b, 0) += rtype(0.005);
     mesh->compute_geometry();
     mesh->copy_host_to_device();
     std::vector<uint32_t> changed;

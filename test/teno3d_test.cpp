@@ -431,7 +431,7 @@ std::vector<uint32_t> move_nodes(Mesh & mesh, const std::vector<std::array<doubl
                 best = n;
             }
         }
-        for (int d = 0; d < 3; d++) mesh.h_node_coords(best, d) += m[3 + d];
+        for (int d = 0; d < 3; d++) mesh.h_node_coords(best, d) += rtype(m[3 + d]);
         moved.push_back(best);
     }
     mesh.compute_geometry();
