@@ -79,6 +79,14 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: `[les] model = "vreman"`.
 - <a id="nicoud-2011"></a>F. Nicoud, H. Baya Toda, O. Cabrit, S. Bose and J. Lee, Using singular values to build a subgrid-scale model for large eddy simulations, *Phys. Fluids* 23, 085106 (2011). [doi:10.1063/1.3623274](https://doi.org/10.1063/1.3623274)
   Used in: `[les] model = "sigma"` (the default in 3D), its constant and the closed-form singular values; the table of model properties checked in `test/les_test.cpp`.
+- <a id="germano-1991"></a>M. Germano, U. Piomelli, P. Moin and W. H. Cabot, A dynamic subgrid-scale eddy viscosity model, *Phys. Fluids A* 3, 1760–1765 (1991). [doi:10.1063/1.857955](https://doi.org/10.1063/1.857955)
+  Used in: `[les] dynamic = true`, the identity that sets the constant.
+- <a id="lilly-1992"></a>D. K. Lilly, A proposed modification of the Germano subgrid-scale closure method, *Phys. Fluids A* 4, 633–635 (1992). [doi:10.1063/1.858280](https://doi.org/10.1063/1.858280)
+  Used in: `[les] dynamic = true`, the least-squares constant `<L:M> / <M:M>`.
+- <a id="moin-1991"></a>P. Moin, K. Squires, W. Cabot and S. Lee, A dynamic subgrid-scale model for compressible turbulence and scalar transport, *Phys. Fluids A* 3, 2746–2757 (1991). [doi:10.1063/1.858164](https://doi.org/10.1063/1.858164)
+  Used in: `[les] dynamic = true`, the Favre-weighted test-filtered stresses.
+- <a id="scotti-1993"></a>A. Scotti, C. Meneveau and D. K. Lilly, Generalized Smagorinsky model for anisotropic grids, *Phys. Fluids A* 5, 2306–2308 (1993). [doi:10.1063/1.858537](https://doi.org/10.1063/1.858537)
+  Used in: `[les] filter_width = "scotti"`.
 - <a id="vreman-geurts-kuerten-1995"></a>B. Vreman, B. Geurts and H. Kuerten, Subgrid-modelling in LES of compressible flow, *Appl. Sci. Res.* 54, 191–203 (1995). [doi:10.1007/BF00849116](https://doi.org/10.1007/BF00849116)
   Used in: the SGS terms of the filtered energy equation that are kept and neglected.
 - <a id="garnier-adams-sagaut-2009"></a>E. Garnier, N. Adams and P. Sagaut, *Large Eddy Simulation for Compressible Flows*, Springer (2009). [doi:10.1007/978-90-481-2819-8](https://doi.org/10.1007/978-90-481-2819-8)
@@ -118,6 +126,8 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the relaxation of the transverse terms with `beta` equal to the Mach number (`beta`).
 - <a id="granet-2010"></a>V. Granet, O. Vermorel, T. Leonard, L. Gicquel and T. Poinsot, Comparison of nonreflecting outlet boundary conditions for compressible solvers on unstructured grids, *AIAA J.* 48(10), 2348–2364 (2010). [doi:10.2514/1.J050391](https://doi.org/10.2514/1.J050391)
   Used in: the default `beta` and the vortex-outflow validation of `nscbc_outlet`.
+- <a id="moghadam-2011"></a>M. Esmaily Moghadam, Y. Bazilevs, T.-Y. Hsia, I. E. Vignon-Clementel and A. L. Marsden, A comparison of outlet boundary treatments for prevention of backflow divergence with relevance to blood flow simulations, *Comput. Mech.* 48, 277–291 (2011). [doi:10.1007/s00466-011-0599-0](https://doi.org/10.1007/s00466-011-0599-0)
+  Used in: the backflow stabilization tried, and not adopted, for `nscbc_outlet` (docs/design/nscbc.md).
 - <a id="bodony-2006"></a>D. J. Bodony, Analysis of sponge zones for computational fluid mechanics, *J. Comput. Phys.* 212, 681–702 (2006). [doi:10.1016/j.jcp.2005.07.014](https://doi.org/10.1016/j.jcp.2005.07.014)
   Used in: the sponge layers (`[[sponges]]`; `src/solver/solver_sponge.cpp`).
 - <a id="mani-2012"></a>A. Mani, Analysis and optimization of numerical sponge layers as a nonreflective boundary treatment, *J. Comput. Phys.* 231, 704–716 (2012). [doi:10.1016/j.jcp.2011.10.017](https://doi.org/10.1016/j.jcp.2011.10.017)

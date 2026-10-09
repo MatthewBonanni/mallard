@@ -243,8 +243,9 @@ struct BoundaryData {
     Kokkos::View<rtype *[N_DIM]> char_target;    // Inlets: target velocity of the face at the current stage
     Kokkos::View<rtype *[N_DIM]> char_target_next;  // Inlets: target velocity at the end of the step, for d(w-)/dt
     Kokkos::View<uint32_t *> char_offsets;       // CSR of char_neighbors
-    Kokkos::View<uint32_t *> char_neighbors;     // Characteristic faces sharing a node and the orientation (index into char_*)
+    Kokkos::View<uint32_t *> char_neighbors;     // Characteristic faces of the same orientation sharing an edge (3D) or node (2D)
     Kokkos::View<rtype *[N_DIM]> char_neighbor_dx;  // Center of each neighbor relative to the face, across periodic seams too
+    Kokkos::View<uint8_t *> char_edge;           // Faces sharing a node with a boundary face that is not characteristic (a wall)
     Kokkos::View<BoundaryCondition *> bcs;
     rtype gamma = 1.4;
     rtype R = 1.0;
