@@ -1,59 +1,39 @@
 {
- "_inputs": "Paths are relative to the directory the script runs in; the README animation was made in ~/local/mallard-runs/hero3 (outside the repository): double_mach = the double Mach example's snapshots at Nx = 1920, Ny = 480; detonation_2d = examples/detonation_2d's snapshots; tgv_frames and sphere_frames = the 3D views cropped from the 1920x1080 animations of tools/animate_taylor_green.py --full-box (examples/taylor_green_3d/input_periodic.toml, Nx = 128; frames resampled to uniform t) and tools/animate_sphere_re300.py (examples/sphere_re300, U and Q written every 0.1 D / U over t U / D = 135-150), one PNG per frame with a times.txt; tgv_eps.csv and tgv_eps_dns.csv = -dE/dt of that run's integrals.csv and of the 512^3 spectral DNS, CSV with columns t,y. To use another rendering of a 3D case, replace its frames directory.",
+ "_inputs": "Paths are relative to the directory the script runs in; the README animation was made in ~/local/mallard-runs/hero4 (outside the repository), whose prepare.py crops every panel from the case animations: riemann_frames = the density plot of the 4096^2 run of examples/riemann_2d_quads (tools/animate_cartesian.py, 321 frames over t = 0-0.8); tgv_frames = the 3D view of tools/animate_taylor_green.py --full-box (examples/taylor_green_3d/input_periodic.toml, Nx = 128; frames resampled to uniform t); det_frames = the 3D view of tools/animate_detonation_3d.py (examples/detonation_3d, t = 105-204 us); ai_frames = the T' = 15 K temperature and heat release rate of tools/animate_autoignition.py (examples/autoignition_2d, t / tau_0 = 0.59-1.17). One PNG per frame, with a times.txt. Made with animate_grid.py hero_grid.json hero --frames 150 (6 s at 25 fps, every GIF delay 40 ms). To use another rendering of a case, point its series at that frames directory: for the Taylor-Green vortex at Nx = 256, \"series\": \"tgv256_frames\" (prepare.py --tgv256 MP4 crops it like the 128^3 one).",
  "width": 6,
  "dpi": 300,
- "fps": 30,
+ "fps": 25,
  "background": "#0b1014",
- "footer": "Mallard  |  TENO5-E and MUSCL finite volume  |  finite-rate chemistry  |  2D: 1.2M quads, 1.8M triangles  |  3D: 2.1M hexahedra, 0.85M prisms and tetrahedra",
+ "footer": "Mallard  |  TENO5-E and MUSCL finite volume  |  finite-rate chemistry  |  2D: up to 16.8M quadrilaterals  |  3D: up to 19.2M hexahedra",
  "rows": [
   [
    {
-    "type": "detonation",
-    "series": "detonation_2d/cell.pvd",
-    "xlim": [0.095, 0.44],
-    "p_range": [8, 30],
-    "title": "Cellular detonation in 2H2-O2-7Ar: pressure and numerical soot foil",
-    "show_time": false
+    "type": "frames",
+    "series": "riemann_frames",
+    "title": "2D Riemann problem, 4096² cells"
    },
    {
     "type": "frames",
-    "series": "tgv_frames",
-    "title": "Taylor-Green vortex, Re = 1600"
+    "series": "det_frames",
+    "title": "3D cellular detonation in 2H2-O2-7Ar",
+    "show_time": false
    }
   ],
   [
    {
-    "series": "double_mach",
-    "glob": "dmr_*.vtu",
-    "title": "Double Mach reflection, Mach 10",
-    "xlim": [0, 3]
+    "type": "frames",
+    "series": "tgv_frames",
+    "title": "Taylor-Green vortex, Re = 1600"
    },
    {
     "type": "frames",
-    "series": "sphere_frames",
-    "title": "Sphere wake, Re = 300",
+    "series": "ai_frames",
+    "title": "Autoignition of stratified lean H2/air, T' = 15 K",
     "show_time": false
-   },
-   {
-    "type": "curve",
-    "data": "tgv_eps.csv",
-    "t_end": 20.0,
-    "title": "TGV dissipation vs DNS",
-    "label": "Mallard",
-    "reference": {
-     "label": "DNS 512³",
-     "file": "tgv_eps_dns.csv"
-    },
-    "xlim": [0, 20],
-    "ylim": [0, 0.02],
-    "xlabel": "t",
-    "aspect": 1.45,
-    "legend_loc": "upper right",
-    "margin_left": 0.25
    }
   ]
  ],
- "gif_width": 1500,
- "gif_colors": 96,
+ "gif_width": 900,
+ "gif_colors": 128,
  "mp4_width": 1920
 }
