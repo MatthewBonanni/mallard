@@ -32,6 +32,13 @@
  * crossing the boundary, and on triangles the grid-scale odd-even pattern of
  * the velocity, as a transverse divergence, which reflects acoustic waves;
  * reconstructed face states (TENO) make the correction unstable.
+ *
+ * Faces at an edge of the boundary (sharing a node with a wall or another
+ * non-characteristic boundary, char_edge) get no transverse terms. Their fit
+ * is one-sided, and its transverse divergence has the wrong sign for a
+ * disturbance confined to the edge row: the incoming wave then grows it,
+ * against only the weak relaxation K, until the run diverges
+ * (docs/design/nscbc.md).
  */
 struct CharacteristicTransverseFunctor {
     BoundaryData boundaries;
@@ -64,7 +71,7 @@ struct CharacteristicTransverseFunctor {
         FOR_I_DIM dx_n[i] = ell * n[i];
         lsq.add(dx_n, W_f, W_f);
         const uint32_t n_neighbors = boundaries.char_offsets(k + 1) - boundaries.char_offsets(k);
-        if (n_neighbors + 1 < N_DIM) {
+        if (n_neighbors + 1 < N_DIM || boundaries.char_edge(k)) {
             for (uint8_t m = 0; m < 3; m++) boundaries.char_transverse(k, m) = 0.0_r;
             return;
         }
@@ -107,7 +114,8 @@ struct CharacteristicTransverseFunctor {
  *        with K = sigma c (1 - M^2) / L (K dt capped at 1). The inlet's target
  *        u_n,t may vary in time (synthetic turbulence): its own incoming wave
  *        -rho c du_n,t/dt over the step (char_target_next - char_target) then
- *        enters without reflecting outgoing waves (Guezennec & Poinsot 2009). The face keeps its
+ *        enters without reflecting outgoing waves (Guezennec & Poinsot 2009). On outlet faces with
+ *        reversed flow (u_n < 0), beta = 0. The face keeps its
  *        pressure and normal velocity (char_state), which are continuous at
  *        contacts, and the outgoing wave comes from the reconstructed interior
  *        state averaged over the face. Faces of supersonic outflow follow the
@@ -182,8 +190,10 @@ struct CharacteristicStateFunctor {
         const rtype M2 = dot<N_DIM>(W + 1, W + 1) / c2;
         const rtype K = Kokkos::fmin(bc.relax[Relax::ACOUSTIC] * c * Kokkos::fmax(1.0_r - M2, 0.0_r), 1.0_r / dt);
         const rtype relaxation = inlet ? K * Z * (u_b - dot<N_DIM>(u_target, n)) : -K * (p_b - bc.data[E]);
-        const rtype beta = (bc.relax[Relax::BETA] < 0.0_r) ? Kokkos::fmin(Kokkos::sqrt(M2), 1.0_r)
-                                                            : bc.relax[Relax::BETA];
+        // None on reversed faces of outlets, which nothing leaves through
+        const rtype beta = (!inlet && u_n < 0.0_r)             ? 0.0_r
+                           : (bc.relax[Relax::BETA] < 0.0_r) ? Kokkos::fmin(Kokkos::sqrt(M2), 1.0_r)
+                                                             : bc.relax[Relax::BETA];
         const rtype T_in = boundaries.char_transverse(k, 0) + c2 * boundaries.char_transverse(k, 1) -
                            c * boundaries.char_transverse(k, 2);
         w_in += dt * (relaxation - beta * T_in);

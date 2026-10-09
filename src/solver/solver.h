@@ -29,6 +29,7 @@
 #include "time_integrator.h"
 #include "physics.h"
 #include "les.h"
+#include "pasr.h"
 #include "tfles.h"
 #include "mixture.h"
 #include "cell_chemistry.h"
@@ -69,6 +70,7 @@ struct KineticEnergyBudget {
     rtype convective = 0.0;
     rtype viscous = 0.0;
     rtype sgs = 0.0;
+    rtype pressure_work = 0.0;  // the convective rate of a scheme without numerical dissipation
 };
 
 /**
@@ -108,7 +110,7 @@ class Solver {
         /**
          * @brief Advance the solution by one time step. With chemistry, the
          *        half step that ends it may be deferred (see run) and fused
-         *        with the next step's first half.
+         *        with the next step's first half (Strang splitting).
          */
         void take_step();
 
@@ -254,6 +256,14 @@ class Solver {
          *        exchanged to the halo), once per step in calc_dt.
          */
         void update_thickened_flame();
+        /** @brief PaSR: the reacting fraction kappa of every owned cell (chem_time_scale), once per step in calc_dt. */
+        void update_partially_stirred_reactor();
+        /**
+         * @brief Global dynamic procedure: les.C from the Germano identity of the current state, summed over
+         *        the domain exactly (fixed point), so the constant is independent of the rank count. The
+         *        velocity gradients of the state must be up to date on owned cells.
+         */
+        void update_dynamic_constant();
         /** @brief Thickened flame: multiply the transport of every cell (after update_eddy_viscosity). */
         void thicken_transport();
         /** @brief Overwrite the halo cells of a 3-vector cell field with their owners' values. */
@@ -267,6 +277,16 @@ class Solver {
         void init_chemistry();
         void allocate_chemistry();
         void advance_chemistry(double dt_chem);
+        /**
+         * @brief SIMPLER balanced splitting (Wu, Ma & Ihme 2019): with
+         *        c = -T(U^n), the reaction substep dU/dt = R(U) - c over dt,
+         *        then the transport substep dU/dt = T(U) + c over dt / 2.
+         */
+        void take_simpler_step();
+        /** @brief SIMPLER: rhs -= T(U^n) on the owned cells. */
+        void subtract_transport_rate(const State & rhs);
+        /** @brief Counts the active cells of a chemistry call; throws if any cell failed on any rank. */
+        void check_chemistry(const CellChemistry::Statistics & stats);
         void update_heat_release_rate();
         /** @brief Over all ranks: owned cells advanced in the last chemistry call, max sub-steps of a cell in the last step. */
         std::pair<uint64_t, double> chemistry_statistics();
@@ -278,12 +298,21 @@ class Solver {
          *        was (docs/design/les.md, section 4.2). Planar runs only.
          */
         KineticEnergyBudget kinetic_energy_budget();
+        /** @brief LES: the model constant in use (the dynamic procedure's latest with les.dynamic). */
+        rtype les_constant() const { return les.C; }
+        /** @brief LES: <L:M> / <M:M> of the latest dynamic procedure, before clipping at zero. */
+        double les_dynamic_ratio() const { return dynamic_ratio; }
 
         /** @brief Whether the run is a large-eddy simulation ([les]). */
         bool is_les() const { return les_on; }
         const LES & get_les() const { return les; }
         /** @brief LES: [mu_t, lambda_t, mu_t / (Sc_t W)] of each cell as of the last copy_device_to_host. */
         const Kokkos::View<rtype *[3]>::host_mirror_type & get_les_coefficients() const { return h_les_coefficients; }
+        /** @brief PaSR: the reacting fraction kappa per cell, after copy_device_to_host. */
+        const Kokkos::View<rtype *>::host_mirror_type & get_chem_time_scale() const { return h_chem_time_scale; }
+        /** @brief Thickened flame: [F, E, Omega] per cell, after copy_device_to_host. */
+        const Kokkos::View<rtype *[3]>::host_mirror_type & get_tfles_fields() const { return h_tfles_fields; }
+        const Kokkos::View<rtype *[3]>::host_mirror_type & get_cell_transport() const { return h_cell_transport; }
 
         /** @brief Whether the gas is a mixture (a mechanism is given). */
         bool is_mixture() const { return mixture_model != nullptr; }
@@ -385,6 +414,11 @@ class Solver {
         void update_upwind_sensor();
         /** @brief sum over owned cells of u . R_m - |u|^2 / 2 R_rho for R the sum of face_flux over the cell's faces. */
         rtype kinetic_energy_rate() const;
+        /**
+         * @brief Over owned cells, -u . sum_f mean(p) n_f of the interior faces (Jameson's two-point pressure
+         *        flux with cell values) plus the kinetic_energy_rate of the boundary faces' face_flux.
+         */
+        rtype pressure_work_rate() const;
 
         template <typename T_riemann_solver>
         void launch_flux_functor();
@@ -488,7 +522,8 @@ class Solver {
         // Large-eddy simulation (docs/design/les.md)
         bool les_on = false;
         LES les;
-        Kokkos::View<rtype *> les_delta;               // (cell): filter width
+        Kokkos::View<rtype *> les_delta;               // (cell): filter width V^(1/d)
+        Kokkos::View<rtype *> les_width;               // (cell): the eddy viscosity's width (les_delta or Scotti's)
         Kokkos::View<rtype *[3]> les_coefficients;     // (cell, [mu_t, lambda_t, mu_t / (Sc_t W)]), empty without LES
         Kokkos::View<rtype *[3]>::host_mirror_type h_les_coefficients;
         bool budget_pass = false;                      // calc_rhs evaluates kinetic_energy_budget
@@ -496,10 +531,17 @@ class Solver {
         ThickenedFlame thickened_flame;
         Kokkos::View<rtype *[3]> tfles_fields;         // (cell, [F, E, Omega])
         Kokkos::View<rtype *[3]>::host_mirror_type h_tfles_fields;
-        Kokkos::View<rtype *> chem_time_scale;         // (cell): E / F, the chemistry's rate multiplier
+        Kokkos::View<rtype *> chem_time_scale;         // (cell): E / F or kappa, the chemistry's rate multiplier
+        Kokkos::View<rtype *>::host_mirror_type h_chem_time_scale;
+        bool pasr_on = false;                          // [les.combustion]: partially stirred reactor
+        PartiallyStirredReactor pasr;
         Kokkos::View<rtype *[3]> tfles_vorticity;
         Kokkos::View<rtype *[3][N_DIM]> tfles_gradients;
         State tfles_halo;                              // [F, E, Omega] as species, for the halo exchange
+        State dynamic_halo;                            // [rho, u] as flow, d u_i / d x_j as species, owners' values
+        Kokkos::View<double *[2]> dynamic_terms;       // (owned cell, [L:M, M:M] V)
+        Kokkos::View<double *[6]> dynamic_stresses;    // (cell, rho Delta^2 D(g) S^d)
+        double dynamic_ratio = 0.0;
         KineticEnergyBudget budget;
 
         // Gas mixtures
@@ -516,11 +558,11 @@ class Solver {
         Kokkos::View<rtype ***, Kokkos::LayoutRight> species_slots;  // (face, side, k)
         Kokkos::View<rtype *[3]> cell_transport;                     // viscous: (cell, [mu, lambda, nu_eff])
         Kokkos::View<rtype *[3]>::host_mirror_type h_cell_transport;
-        Kokkos::View<double **, Kokkos::LayoutRight> cell_diffusion;  // (cell, k): rho D_k W_k / W
+        Kokkos::View<double **, Kokkos::LayoutRight> cell_diffusion;  // (cell, k): rho D_k W_k / W, then D^T_k (Soret)
         Kokkos::View<rtype **, Kokkos::LayoutRight> transport_values;      // (cell, [u, T, X_1 .. X_Ns])
         Kokkos::View<rtype ***, Kokkos::LayoutRight> transport_gradients;  // (cell, variable, dimension)
         Kokkos::View<rtype **, Kokkos::LayoutRight> bc_transport_values;   // (condition, [T, X]) of UPT
-        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_D;  // output: D_k
+        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_D;  // output: D_k, then D^T_k (Soret)
         Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_Y, h_X;  // output
 
         // Chemistry (Strang splitting around each flow step)
@@ -541,6 +583,8 @@ class Solver {
         uint64_t chem_active_cells = 0;   // owned cells advanced in the last chemistry call
         double t_wall_chemistry = 0.0;
         bool fuse_chemistry = false;      // run(): fuse consecutive half steps
+        bool simpler = false;             // SIMPLER balanced splitting instead of Strang
+        State transport_rate;             // SIMPLER: -c = T(U^n), the transport tendency at the step's start
         bool defer_chemistry = false;     // take_step leaves its last half step pending
         double chemistry_pending = 0.0;   // chemistry time not yet applied to the state
 

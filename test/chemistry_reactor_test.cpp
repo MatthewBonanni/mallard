@@ -347,11 +347,26 @@ TEST(ChemistryReactorTest, ReactorJacobianMatchesFiniteDifferences) {
         const Table rates = read_table(name + "_rates.csv");
         std::vector<double> scratch(ConstantVolumeReactor<Kokkos::HostSpace>::scratch_size(kinetics));
         std::vector<double> y(n), f(n), J(n * n), yp(n), fp(n), fm(n), D1(n), D2(n);
-        for (size_t s = 0; s < std::min<size_t>(rates.rows.size(), 10); s++) {
-            const ConstantVolumeReactor<Kokkos::HostSpace> reactor{thermo, kinetics, rates.rows[s][1], 1e-10,
-                                                                   scratch.data(), nullptr, nullptr};
+        std::vector<double> g(n);
+        for (size_t i_s = 0; i_s < 2 * std::min<size_t>(rates.rows.size(), 10); i_s++) {
+            // Each state also with a constant forcing (balanced splitting), which enters the T row
+            const size_t s = i_s / 2;
+            const bool forced = i_s % 2 == 1;
             for (uint32_t k = 0; k < ns; k++) y[k] = rates.rows[s][2 + k];
             y[ns] = rates.rows[s][0];
+            if (forced) {
+                // Sources of the size of the chemistry's rates, so that the differences keep their digits
+                const ConstantVolumeReactor<Kokkos::HostSpace> free{thermo, kinetics, rates.rows[s][1], 1e-10,
+                                                                    scratch.data(), nullptr, nullptr};
+                free.rhs(SerialLanes(), y.data(), f.data());
+                double scale = 0.0;
+                for (uint32_t k = 0; k < ns; k++) scale = std::max(scale, std::abs(f[k]));
+                for (uint32_t k = 0; k < ns; k++) g[k] = 0.3 * scale * (0.5 - y[k]);
+                g[ns] = 3e3 * scale;
+            }
+            const ConstantVolumeReactor<Kokkos::HostSpace> reactor{thermo,  kinetics,       rates.rows[s][1],
+                                                                   1e-10,   scratch.data(), nullptr,
+                                                                   nullptr, forced ? g.data() : nullptr, 1e-6};
             reactor.rhs_jacobian(SerialLanes(), y.data(), f.data(), J.data());
             // Centered differences with Richardson extrapolation (one-sided near Y_j = 0)
             std::vector<double> FD(n * n);
@@ -377,7 +392,7 @@ TEST(ChemistryReactorTest, ReactorJacobianMatchesFiniteDifferences) {
                 for (uint32_t j = 0; j < n; j++) row_norm = std::max(row_norm, std::abs(FD[i * n + j]));
                 for (uint32_t j = 0; j < n; j++) {
                     EXPECT_NEAR(J[i * n + j], FD[i * n + j], 1e-6 * row_norm + 1e-300)
-                        << name << " state " << s << " d f_" << i << " / d y_" << j;
+                        << name << " state " << s << (forced ? " forced" : "") << " d f_" << i << " / d y_" << j;
                 }
             }
         }
@@ -447,6 +462,12 @@ TEST(ChemistryReactorTest, FractionalOrdersIgniteToDepletionLikeCantera) {
     }
     std::cout << "propane_2step: max ignition delay error " << worst_tau << ", " << r.steps << " sub-steps\n";
 }
+
+/** @brief One thread taking a wide team's code paths (the sparse LU in stages, levels and its chain). */
+struct StagedLanes : SerialLanes {
+    static constexpr bool parallel = true;
+    static constexpr uint32_t lanes = 512;
+};
 
 TEST(ChemistryReactorTest, SparseLUSolvesLikeTheDenseOne) {
     // J = J_s + u v^T: J_s on the static pattern (in its compact layout), u v^T
@@ -518,9 +539,35 @@ TEST(ChemistryReactorTest, SparseLUSolvesLikeTheDenseOne) {
             double largest = 0.0;
             for (uint32_t i = 0; i < n; i++) largest = std::max(largest, std::abs(b_dense[i]));
             for (uint32_t i = 0; i < n; i++) EXPECT_NEAR(b[i], b_dense[i], 1e-9 * largest) << name << " x_" << i;
+            // Lanes factor in stages of independent pivots: the same bits as pivot by pivot
+            std::vector<double> staged_values(pattern.nnz), staged_z(n), staged_x(n);
+            double staged_beta;
+            const SparseLU<Kokkos::HostSpace> staged{pattern, staged_values.data(), staged_z.data(), u.data(),
+                                                     staged_x.data(), &staged_beta};
+            ASSERT_TRUE(staged.factor(StagedLanes(), compact.data(), diagonal));
+            for (uint32_t e = 0; e < pattern.nnz; e++) ASSERT_EQ(staged_values[e], values[e]) << name << " entry " << e;
+            EXPECT_EQ(staged_beta, beta);
+            // The solves give the bits of substitution column by column with these factors
+            std::vector<double> dense_L(n * n, 0.0), reference(n), solved(n);
+            std::vector<uint32_t> position(n);
+            for (uint32_t i = 0; i < n; i++) position[pattern.perm(i)] = i;
+            for (uint32_t e = 0; e < pattern.nnz; e++) {
+                dense_L[position[pattern.source(e) / n] * n + position[pattern.source(e) % n]] = values[e];
+            }
+            for (uint32_t i = 0; i < n; i++) reference[i] = solved[pattern.perm(i)] = std::cos(2.0 + i);
+            for (uint32_t k = 0; k < n; k++) {
+                for (uint32_t r = k + 1; r < n; r++) reference[r] -= dense_L[r * n + k] * reference[k];
+            }
+            for (uint32_t k = n; k-- > 0;) {
+                reference[k] /= dense_L[k * n + k];
+                for (uint32_t r = 0; r < k; r++) reference[r] -= dense_L[r * n + k] * reference[k];
+            }
+            staged.solve_s(StagedLanes(), solved.data());
+            for (uint32_t i = 0; i < n; i++) ASSERT_EQ(solved[pattern.perm(i)], reference[i]) << name << " x_" << i;
         }
+        EXPECT_LT(pattern.n_stages, n) << name;
         std::cout << name << ": " << pattern.nnz << " entries in L + U of " << n * n << ", "
-                  << pattern.update.extent(0) << " updates\n";
+                  << pattern.pivot_update.extent(0) << " updates in " << pattern.n_stages << " stages\n";
     }
 }
 

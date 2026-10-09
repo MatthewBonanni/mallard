@@ -13,10 +13,13 @@
 #include <Kokkos_Core.hpp>
 
 #include <cmath>
+#include <iomanip>
+#include <memory>
 #include <sstream>
 #include <string>
 
 #include "input.h"
+#include "pasr.h"
 #include "solver.h"
 #include "test_fixtures.h"
 #include "tfles.h"
@@ -76,7 +79,8 @@ TEST(ThickenedFlame, EfficiencyIsOneWithoutSubgridTurbulenceAndSaturatesAtFToThe
 namespace {
 
 /** @brief A uniform reacting H2/air box: no gradients, so only the chemistry changes the state. */
-std::string uniform_box(const std::string & run, const std::string & combustion) {
+std::string uniform_box(const std::string & run, const std::string & combustion,
+                        const std::string & coupling = "strang") {
     std::ostringstream s;
     s << "[run]\n" << run << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 0.04\nLy = 0.04\n"
       << (N_DIM == 3 ? "Nz = 3\nLz = 0.03\nperiodic = [\"x\", \"y\", \"z\"]\n" : "periodic = [\"x\", \"y\"]\n")
@@ -85,7 +89,7 @@ std::string uniform_box(const std::string & run, const std::string & combustion)
       << "X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
       << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
-      << "[chemistry]\n[output]\ncheck_interval = 1000000\n[les]\n" << (N_DIM == 3 ? "model = \"sigma\"\n" : "model = \"wale\"\n")
+      << "[chemistry]\ncoupling = \"" << coupling << "\"\n[output]\ncheck_interval = 1000000\n[les]\n" << (N_DIM == 3 ? "model = \"sigma\"\n" : "model = \"wale\"\n")
       << combustion;
     return s.str();
 }
@@ -96,28 +100,66 @@ TEST(ThickenedFlame, ReactionRatesAreDividedByTheThickening) {
     // Delta = 1 cm everywhere and n_res Delta / delta_L = 4, the sensor is 1
     // throughout the ignition (T_u = 0, T_b = 4000 K) and there is no
     // subgrid turbulence: the chemistry of each step is that of a step 4
-    // times shorter without the model
+    // times shorter without the model (with either splitting)
     const std::string combustion = "[les.combustion]\nmodel = \"tfles\"\ndelta_L = 1.25e-2\ns_L = 2.0\n"
                                    "T_unburnt = 0.0\nT_burnt = 4000.0\nn_res = 5.0\n";
-    Solver thick, plain;
-    thick.init(parse_toml(uniform_box("n_steps = 60\ndt = 2e-6\n", combustion)));
-    plain.init(parse_toml(uniform_box("n_steps = 60\ndt = 5e-7\n", "")));
-    thick.run();
-    plain.run();
-    thick.copy_device_to_host();
-    plain.copy_device_to_host();
-    const uint32_t ns = thick.get_species_names().size();
-    double change = 0.0, diff = 0.0;
-    Solver initial;
-    initial.init(parse_toml(uniform_box("n_steps = 0\ndt = 1e-6\n", "")));
-    initial.copy_device_to_host();
-    for (uint32_t k = 0; k < ns; k++) {
-        change = std::max(change, std::abs(double(plain.h_species(0, k) - initial.h_species(0, k))));
-        diff = std::max(diff, std::abs(double(thick.h_species(0, k) - plain.h_species(0, k))));
+    for (const std::string coupling : {"strang", "simpler"}) {
+        Solver thick, plain;
+        thick.init(parse_toml(uniform_box("n_steps = 60\ndt = 2e-6\n", combustion, coupling)));
+        plain.init(parse_toml(uniform_box("n_steps = 60\ndt = 5e-7\n", "", coupling)));
+        thick.run();
+        plain.run();
+        thick.copy_device_to_host();
+        plain.copy_device_to_host();
+        const uint32_t ns = thick.get_species_names().size();
+        double change = 0.0, diff = 0.0;
+        Solver initial;
+        initial.init(parse_toml(uniform_box("n_steps = 0\ndt = 1e-6\n", "")));
+        initial.copy_device_to_host();
+        for (uint32_t k = 0; k < ns; k++) {
+            change = std::max(change, std::abs(double(plain.h_species(0, k) - initial.h_species(0, k))));
+            diff = std::max(diff, std::abs(double(thick.h_species(0, k) - plain.h_species(0, k))));
+        }
+        EXPECT_GT(change, 1e-4);  // the mixture reacts
+        EXPECT_LT(diff, precision_tol<double>(1e-6, 1e-5) * change);
+        EXPECT_NEAR(double(thick.get_time()), 4.0 * double(plain.get_time()), precision_tol<double>(1e-15, 1e-9));
     }
-    EXPECT_GT(change, 1e-4);  // the mixture reacts
-    EXPECT_LT(diff, precision_tol<double>(1e-6, 1e-5) * change);
-    EXPECT_NEAR(double(thick.get_time()), 4.0 * double(plain.get_time()), precision_tol<double>(1e-15, 1e-9));
+}
+
+TEST(ThickenedFlame, EddyViscosityVelocitySetsTheEfficiency) {
+    // u' = C_u nu_t / Delta in Charlette's efficiency, cell by cell (a swirling field so that nu_t > 0; the
+    // sensor is 1 throughout: T_u = 0, T_b = 4000 K at 1500 K)
+    // One step of 1e-13 s: the fields of the step start and the coefficients of its end agree to ~1e-9
+    std::string input = uniform_box("n_steps = 1\ndt = 1e-13\n",
+                                    "[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\ns_L = 2.0\nT_unburnt = 0.0\n"
+                                    "T_burnt = 4000.0\nsubgrid_velocity = \"eddy_viscosity\"\nC_u = 26.0\n");
+    const std::string still = N_DIM == 3 ? "u = [\"0.0\", \"0.0\", \"0.0\"]\n" : "u = [\"0.0\", \"0.0\"]\n";
+    input.replace(input.find(still), still.size(),
+                  N_DIM == 3 ? "u = [\"30 * sin(157.08 * y) * cos(78.54 * z)\", \"25 * sin(157.08 * z + 0.4) * cos(157.08 * x)\", "
+                               "\"20 * sin(157.08 * x + 1.1)\"]\n"
+                             : "u = [\"30 * sin(157.08 * y)\", \"25 * sin(157.08 * x + 0.4) + 10 * cos(157.08 * y)\"]\n");
+    Solver solver;
+    solver.init(parse_toml(input));
+    solver.run();
+    solver.copy_device_to_host();
+    ThickenedFlame tf = flame();
+    tf.delta_L = 2e-3;
+    tf.T_u = 0.0;
+    tf.T_b = 4000.0;
+    const auto & fields = solver.get_tfles_fields();
+    const auto & sgs = solver.get_les_coefficients();
+    const auto & transport = solver.get_cell_transport();
+    const auto m = solver.get_mesh();
+    uint32_t turbulent = 0;
+    for (uint32_t c = 0; c < m->n_owned(); c++) {
+        const double rho = double(solver.h_conservatives(c, 0)), delta = std::pow(double(m->h_cell_volume(c)), 1.0 / N_DIM);
+        const double F = double(fields(c, 0));
+        const double u_prime = 26.0 * double(sgs(c, 0)) / (rho * delta);
+        EXPECT_NEAR(double(fields(c, 1)), tf.wrinkling(F, u_prime, double(transport(c, 0)) / rho),
+                    precision_tol<double>(1e-7, 1e-5)) << "cell " << c;
+        turbulent += double(fields(c, 1)) > 1.01;
+    }
+    EXPECT_GT(turbulent, m->n_owned() / 2);
 }
 
 TEST(ThickenedFlame, InputErrors) {
@@ -131,4 +173,73 @@ TEST(ThickenedFlame, InputErrors) {
     no_chemistry.replace(no_chemistry.find("[chemistry]\n"), 12, "");
     Solver t;
     EXPECT_THROW(t.init(parse_toml(no_chemistry)), InputError);
+}
+
+TEST(PartiallyStirredReactor, FractionOfTheChemicalAndMixingTimes) {
+    PartiallyStirredReactor pasr;
+    const double rho_cp_T = 5e5, q = 2e9, nu = 2e-4;
+    // kappa = tau_c / (tau_c + tau_mix), tau_c = rho cp T / |q|, tau_mix = Delta^2 / (nu + nu_t)
+    const double tau_c = rho_cp_T / q, tau_mix = 1e-8 / (nu + 3e-4);
+    EXPECT_NEAR(pasr.fraction(rho_cp_T, q, 1e-4, nu, 3e-4), tau_c / (tau_c + tau_mix), 1e-14);
+    EXPECT_EQ(pasr.fraction(rho_cp_T, -q, 1e-4, nu, 3e-4), pasr.fraction(rho_cp_T, q, 1e-4, nu, 3e-4));
+    // Resolved mixing (the DNS limit) or no reaction: the rates of the filtered state
+    EXPECT_GT(pasr.fraction(rho_cp_T, q, 1e-9, nu, 0.0), 1.0 - 1e-9);
+    EXPECT_EQ(pasr.fraction(rho_cp_T, 0.0, 1e-2, nu, 0.0), 1.0);
+    // Fast chemistry: the heat release kappa q tends to the mixing-limited rho cp T / tau_mix
+    const double limited = rho_cp_T / (1e-6 / nu);
+    EXPECT_NEAR(pasr.fraction(rho_cp_T, 1e20, 1e-3, nu, 0.0) * 1e20, limited, 1e-6 * limited);
+    pasr.C_mix = 2.0;
+    EXPECT_NEAR(1.0 / pasr.fraction(rho_cp_T, q, 1e-4, nu, 3e-4) - 1.0, 2.0 * tau_mix / tau_c, 1e-12 * tau_mix / tau_c);
+}
+
+namespace {
+
+/** @brief The uniform box with cells of side h, run as given and copied to the host. */
+std::unique_ptr<Solver> uniform_cells(const double h, const std::string & run, const std::string & combustion) {
+    std::string input = uniform_box(run, combustion);
+    auto set = [&](const std::string & key, const double value) {
+        const size_t at = input.find(key + " = ");
+        const size_t end = input.find('\n', at);
+        std::ostringstream v;
+        v << std::setprecision(17) << key << " = " << value;
+        input.replace(at, end - at, v.str());
+    };
+    set("Lx", 4 * h);
+    set("Ly", 4 * h);
+    if (N_DIM == 3) set("Lz", 3 * h);
+    auto solver = std::make_unique<Solver>();
+    solver->init(parse_toml(input));
+    if (run.find("n_steps = 0") == std::string::npos) solver->run();
+    solver->copy_device_to_host();
+    return solver;
+}
+
+} // namespace
+
+TEST(PartiallyStirredReactor, ReactionRatesAreScaledByTheReactingFraction) {
+    // A step of dt with PaSR is the chemistry of a step of kappa dt without it; kappa follows
+    // tau_mix ~ C_mix Delta^2 / nu (a uniform state has no SGS viscosity) across meshes and constants
+    const std::string pasr = "[les.combustion]\nmodel = \"pasr\"\n";
+    const double h = 0.01;
+    auto mixed = uniform_cells(h, "n_steps = 1\ndt = 2e-6\n", pasr);
+    const double kappa = double(mixed->get_chem_time_scale()(0));
+    EXPECT_GT(kappa, 0.02);
+    EXPECT_LT(kappa, 0.98);
+    auto coarse = uniform_cells(2 * h, "n_steps = 1\ndt = 2e-6\n", pasr);
+    EXPECT_NEAR(1.0 / double(coarse->get_chem_time_scale()(0)) - 1.0, 4.0 * (1.0 / kappa - 1.0),
+                precision_tol<double>(1e-9, 1e-6) / kappa);
+    auto slow = uniform_cells(h, "n_steps = 1\ndt = 2e-6\n", pasr + "C_mix = 2.0\n");
+    EXPECT_NEAR(1.0 / double(slow->get_chem_time_scale()(0)) - 1.0, 2.0 * (1.0 / kappa - 1.0),
+                precision_tol<double>(1e-9, 1e-6) / kappa);
+    std::ostringstream run;
+    run << std::setprecision(17) << "n_steps = 1\ndt = " << 2e-6 * kappa << "\n";
+    auto plain = uniform_cells(h, run.str(), "");
+    auto initial = uniform_cells(h, "n_steps = 0\ndt = 1e-6\n", "");
+    double change = 0.0, diff = 0.0;
+    for (uint32_t k = 0; k < mixed->get_species_names().size(); k++) {
+        change = std::max(change, std::abs(double(plain->h_species(0, k) - initial->h_species(0, k))));
+        diff = std::max(diff, std::abs(double(mixed->h_species(0, k) - plain->h_species(0, k))));
+    }
+    EXPECT_GT(change, 1e-7);
+    EXPECT_LT(diff, precision_tol<double>(1e-6, 1e-4) * change);
 }

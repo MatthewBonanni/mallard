@@ -134,10 +134,19 @@ TEST(MPITest, GasMixtureMatchesSerial) {
                                                   {"double_flux = true\n", "type = \"MUSCL\"\n", "", "euler"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n", "euler"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes"},
-                                                  {"", "type = \"MUSCL\"\n", "[chemistry]\n[radiation]\n", "navier_stokes"}};
+                                                  {"", "type = \"MUSCL\"\n", "[chemistry]\n[radiation]\n", "navier_stokes"},
+                                                  {"", "type = \"MUSCL\"\n", "[chemistry]\ncoupling = \"simpler\"\n",
+                                                   "navier_stokes"}};
     for (const auto & [extra, reconstruction, chemistry, type] : schemes) {
         expect_matches_serial(mixture_input(extra, reconstruction, chemistry, type));
     }
+}
+
+TEST(MPITest, ThermalDiffusionMatchesSerial) {
+    // The halo cells' thermal diffusion coefficients follow their owners'
+    std::string input = mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes");
+    input.insert(input.find("[physics]\n") + 10, "soret = true\n");
+    expect_matches_serial(input);
 }
 
 TEST(MPITest, MUSCLMatchesSerial) {
@@ -246,9 +255,12 @@ TEST(MPITest, LargeEddySimulationMatchesSerial) {
 
 TEST(MPITest, ThickenedFlameMatchesSerial) {
     // The vorticity and the flame fields are exchanged to the halo once per step
-    expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes") +
-                          "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
-                          "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n");
+    for (const std::string coupling : {"strang", "simpler"}) {
+        expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\ncoupling = \"" + coupling + "\"\n",
+                                            "navier_stokes") +
+                              "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
+                              "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n");
+    }
 }
 
 TEST(MPITest, HybridConvectiveFluxMatchesSerial) {

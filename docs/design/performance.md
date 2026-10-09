@@ -94,10 +94,61 @@ and single base addresses; results and step times are unchanged.
 | host peak during setup | 8.55 GB (32.6 KB/cell) | 1.44 GB (5.5 KB/cell) |
 | device peak | 11.6 GB | 11.6 GB |
 
+### 3. MUSCL: per-cell reconstruction, fused, overlapped with the halo exchange
+
+MUSCL reconstructed in three kernels (least-squares gradients and limiters over cells, then face states over
+faces), after the halo exchange. It now also reconstructs per cell: gradient, limiter, then the cell's own side of
+each of its faces, with the same arithmetic. From 2^17 cells (per rank) this runs as one fused kernel, which keeps
+gradients and limiters out of memory, and in distributed runs the cells whose stencils hold no halo cell are
+reconstructed while the exchange is in flight, as TENO's are. Below 2^17 cells the separate kernels stay: with
+fewer cells, more and shorter threads were faster.
+
+| `muscl_2d` (Riemann problem, HLLC), A100s | main | change 3 |
+|---|---|---|
+| 4M cells, 1 GPU | 15.6 ms/step | 13.6 ms/step |
+| 4M cells, 2 GPUs | 8.14 ms/step | 7.22 ms/step |
+| 1M cells, 1 GPU (perf case) | 4.09 ms/step | 3.61 ms/step |
+| 1M cells, 2 GPUs | 2.30 ms/step | 2.06 ms/step |
+| 262k / 65k cells, 1 GPU | 1.21 ms / 475 us | 1.06 ms / 479 us |
+
+## Scaling (one node)
+
+A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step
+(the last progress interval of 200-400 steps, setup excluded); main as of change 2. Efficiency is
+T1 / (n Tn) for strong scaling, T1 / Tn for weak.
+
+**Strong scaling**
+
+| case | cells | 1 GPU | 2 GPUs | 4 GPUs | efficiency 2 / 4 |
+|---|---|---|---|---|---|
+| 2D TENO5, Riemann | 1M | 19.6 ms | 10.6 ms | 6.00 ms | 92% / 82% |
+| 2D TENO5, Riemann | 4M | 74.0 ms | 38.3 ms | 20.4 ms | 97% / 91% |
+| 2D MUSCL, Riemann | 4M | 15.6 ms | 8.13 ms | 4.50 ms | 96% / 87% |
+| 2D MUSCL, Riemann | 262k | 1.22 ms | 786 us | 667 us | 78% / 46% |
+| 3D TENO5, Taylor-Green (viscous) | 885k | 152 ms | 78.7 ms | 40.7 ms | 97% / 93% |
+
+**Weak scaling**
+
+| case | cells per GPU | 1 GPU | 2 GPUs | 4 GPUs | efficiency 4 |
+|---|---|---|---|---|---|
+| 2D TENO5, Riemann (1024^2 / GPU, square domain at 4) | 1M | 19.6 ms | 20.1 ms | 20.4 ms | 96% |
+| 2D MUSCL, Riemann | 4M | 15.6 ms | 16.1 ms | 16.3 ms | 96% |
+
+Notes:
+
+- Weak scaling must keep the cells' shape: refining a direction alone (anisotropic cells) changes TENO's stencils
+  and their cost. 3D TENO5 on 64^3 cells per GPU refined along x and y only gave 47.2 / 52.2 / 69.1 ms on 1 / 2 / 4
+  GPUs; the comparison with the domain grown instead is in progress.
+- At small sizes per GPU (MUSCL, 262k cells on 4 GPUs: 65k per GPU) the step is latency-bound (about 30
+  launches and four exchanges per step); the CUDA graph and NCCL exchange of #217 take it from 667 to 523 us.
+- Multi-node runs (16-32 GPUs over InfiniBand) are pending free GPUs.
+
 ## Verification
 
 Bitwise identity with `main` is checked on restart files (identical MD5) after N steps of: the
 performance cases (2D TENO5 and MUSCL Riemann, 3D TENO5 Taylor-Green), the double Mach reflection
 (triangles, Dirichlet and symmetry mirrors), axisymmetric Sedov, a viscous shock tube, the reactive
 shock tube with MUSCL and TENO5 (2D, and a 3D variant: gas mixtures, primitive reconstruction), the 3D
-explosion on hexahedra and tetrahedra, and the Taylor-Green vortex at orders 3, 4 and 6.
+explosion on hexahedra and tetrahedra, and the Taylor-Green vortex at orders 3, 4 and 6; for MUSCL also the
+wedge, a viscous shock tube, the explosion with MUSCL on hexahedra and tetrahedra and a reacting H2/O2/Ar case
+on 512^2 cells; on 1, 2 and 3 ranks.

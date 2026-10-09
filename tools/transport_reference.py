@@ -13,6 +13,8 @@ Files (one set per mechanism, prefix <name>):
                                 fractions: the mixture-averaged viscosity,
                                 conductivity and diffusion coefficients, and
                                 the unity-Lewis-number diffusion coefficient
+  <name>_thermal_diffusion.csv  at other random states: the mixture-averaged
+                                thermal diffusion coefficients (Soret)
 """
 import os
 
@@ -39,6 +41,7 @@ def write(path, header, columns, rows):
 
 def main():
     rng = np.random.default_rng(20261003)
+    thermal_rng = np.random.default_rng(20261009)
     for name, mech, phase, n_T, n_mix in CASES:
         gas = ct.Solution(os.path.join(ROOT, mech), phase, transport_model="mixture-averaged")
         unity = ct.Solution(os.path.join(ROOT, mech), phase, transport_model="unity-Lewis-number")
@@ -77,6 +80,21 @@ def main():
             rows.append([T, p] + list(Y) + [gas.viscosity, gas.thermal_conductivity] + list(gas.mix_diff_coeffs) +
                         [unity.mix_diff_coeffs[0]])
         write(os.path.join(OUT, f"{name}_mixture_transport.csv"), header, columns, rows)
+
+        columns = ["T", "p"] + [f"Y_{s}" for s in names] + [f"DT_{s}" for s in names]
+        rows = []
+        for i in range(n_mix):
+            T = thermal_rng.uniform(T_lo, T_hi)
+            p = ct.one_atm * 10 ** thermal_rng.uniform(-1, 1)
+            Y = thermal_rng.uniform(0, 1, ns) ** 4
+            Y[thermal_rng.uniform(0, 1, ns) < 0.3] = 0.0
+            if i == 0:
+                Y = np.zeros(ns)
+                Y[ns - 1] = 1.0
+            Y /= Y.sum()
+            gas.TPY = T, p, Y
+            rows.append([T, p] + list(Y) + list(gas.thermal_diff_coeffs))
+        write(os.path.join(OUT, f"{name}_thermal_diffusion.csv"), header, columns, rows)
         print(f"{name}: {ns} species")
 
 

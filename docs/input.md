@@ -13,7 +13,7 @@ The spatial dimension is fixed at build time with the CMake option
 
 | Key | Description |
 |---|---|
-| `cfl` | CFL number in the usual unstructured convention ([Blazek](references.md#blazek-2015) eqs. 6.20-6.21; see [time step](numerics/overview.md)): on a uniform 2D grid of spacing h, `dt = cfl * h / (abs(u) + abs(v) + 2a)`. Measured stability limits for smooth flow are 1.26-1.6 with SSPRK3 and 1.39-1.8 with RK4, depending on reconstruction and cell type ([table](numerics/overview.md#time-step)): use at most 1.2 (SSPRK3) or 1.35 (RK4), and 1.0 with SSPRK3 as a robust default, shocks included (but 0.25 for the Noh problem's infinite-strength shock with `bound_preserving`); with `[chemistry]` the splitting error may call for less (detonations: about 0.35). Mallard 0.5 and earlier inputs give the same time step with half their `cfl`. Exactly one of `cfl` and `dt` is required. |
+| `cfl` | CFL number in the usual unstructured convention ([Blazek](references.md#blazek-2015) eqs. 6.20-6.21; see [time step](numerics/overview.md)): on a uniform 2D grid of spacing h, `dt = cfl * h / (abs(u) + abs(v) + 2a)`. Measured stability limits for smooth flow are 1.26-1.6 with SSPRK3 and 1.39-1.8 with RK4, depending on reconstruction and cell type ([table](numerics/overview.md#time-step)): use at most 1.2 (SSPRK3) or 1.35 (RK4), and 1.0 with SSPRK3 as a robust default, shocks included (but 0.25 for the Noh problem's infinite-strength shock with `bound_preserving`); with `[chemistry]` the splitting error may call for less (detonations: about 0.35 with Strang splitting, 1.0 with `coupling = "simpler"`). Mallard 0.5 and earlier inputs give the same time step with half their `cfl`. Exactly one of `cfl` and `dt` is required. |
 | `dt` | Fixed time step |
 | `t_stop` | Stop at this simulation time (the last step is shortened to land on it) |
 | `n_steps` | Stop after this many steps |
@@ -127,6 +127,7 @@ translation = [1.0, 0.0]
 | `phase` | (`mixture`) Phase of the file to use; default the first |
 | `transport` | (`mixture`, `navier_stokes`) `mixture_averaged` (default: Wilke viscosity, Mathur conductivity, mixture-averaged diffusion coefficients), `unity_lewis` (diffusion coefficients `lambda / (rho cp)`) or `constant_lewis` (`lambda / (rho cp Le_k)`), as Cantera's models, from the species' transport data in the file |
 | `lewis` | (`constant_lewis`) Lewis numbers by species, e.g. `lewis = { H2 = 0.3, H = 0.18 }`; others 1 |
+| `soret` | (`mixture_averaged`) `true` adds thermal diffusion (the Soret effect) with Cantera's mixture-averaged thermal diffusion coefficients, as Cantera's `soret_enabled` (default `false`); output `DT_<species>` |
 | `axisymmetric` | (2D) `true` for flows symmetric about the x axis without swirl (default `false`); see below |
 
 Gas mixtures (`gas = "mixture"`) react when the input has a `[chemistry]`
@@ -180,6 +181,8 @@ eddy viscosity of each cell comes from its least-squares velocity gradient
 | `C` | Model constant; defaults 1.35 (Sigma), 0.5 (WALE), 0.07 (Vreman's `c`), 0.17 (Smagorinsky) |
 | `Pr_t` | Turbulent Prandtl number, default 0.9 |
 | `Sc_t` | Turbulent Schmidt number, default 0.9 |
+| `filter_width` | `scotti` (default in 3D): `V^(1/3) f(a_1, a_2)`, Scotti, Meneveau & Lilly's correction for anisotropic cells, `f = cosh(sqrt(4/27 ((ln a_1)^2 - ln a_1 ln a_2 + (ln a_2)^2)))` of the ratios `a_1 = h_1 / h_3`, `a_2 = h_2 / h_3` of the cell's extents (`V` over the eigenvalues of its projected-area tensor `1/2 sum_f A_f A_f^T / |A_f|`; 1.2 for an aspect ratio of 5, 1.4 for 10; 1 on cubes and regular cells); `volume` (the 2D default): `Delta = V^(1/d)`. For the eddy viscosity only (`[les.combustion]` keeps `V^(1/3)`). Channel at `Re_tau = 395` and 590: `Re_tau` within 0.7% and 1.6% of MKM with `scotti`, 2.6% and 4.1% with `volume` |
+| `dynamic` | `true`: the constant from the global dynamic procedure (Germano et al. 1991; Lilly 1992), once per step from the state: `C^2 = <L^d : M> / <M : M>` (Vreman's `c` without the square) summed over the domain, `L = (rho u u)^ - (rho u)^ (rho u)^ / rho^`, `M = 2 ((rho Delta^2 D(g) S^d)^ - rho^ Delta_hat^2 D(g^) S^d(g^))`, with `^` the volume-weighted average over a cell and its vertex neighbors, of width `Delta_hat^2 = Delta^2 + 12 / d tr(cov)` from the covariance of the neighbors' centroids (`3 Delta` on uniform hexahedra), and filtered gradients for the gradients of the filtered field. Clipped at zero; `C` is the value until the first step. The sums are exact (fixed point), so the constant is independent of the rank count. `integrals.csv` gets the column `les_C`. Default `false` |
 
 | `model` | `nu_t` | Zero for |
 |---|---|---|
@@ -222,6 +225,23 @@ times the half step (exact for the autonomous constant-volume reactor).
 | `n_res` | Cells across the thickened flame, default 5 |
 | `efficiency` | `charlette` (default) or `none` (`E = 1`) |
 | `beta` | Exponent of the Charlette efficiency, default 0.5 |
+| `subgrid_velocity` | The `u'` of the efficiency: `colin` (default), `u' = 2 Delta^3 abs(lap(curl u))`; or `eddy_viscosity`, `u' = C_u nu_t / Delta` from the SGS model. Colin's operator overpredicts `u'` 5-8 times on meshes with `Delta >= 0.4 delta_L` and the flame speed by 2x at `Delta = 1.6 delta_L` (`docs/design/les.md`, section 8.3) |
+| `C_u` | Constant of `subgrid_velocity = "eddy_viscosity"`, default 28 (a priori from a DNS at `Delta = 0.8 delta_L`; 22-39 over `Delta = 0.4-1.6 delta_L`) |
+
+**Experimental: `model = "pasr"`**, the partially stirred reactor (Sabelnikov &
+Fureby 2013) for non-premixed and partially premixed flames: no thickening;
+each cell's rates are those of its filtered state times the reacting fraction
+`kappa = tau_c / (tau_c + tau_mix)`, with the chemical time `tau_c = rho cp T /
+|q|` of the cell's heat release rate `q` and the mixing time `tau_mix = C_mix
+Delta^2 / (nu + nu_t)` of molecular and SGS diffusion across the cell, so
+`kappa -> 1` where the mesh resolves the mixing and the heat release tends to
+`rho cp T / tau_mix` where the chemistry is fast. Applied as the per-cell
+chemistry time scale of TFLES (exact for the Strang reactor), once per step.
+Key `C_mix` (default 1); output `PASR_KAPPA`. Against a DNS of an H2/N2-air
+diffusion flame in decaying turbulence (heat release over 0.2-0.4 ms): -11%
+at `Delta = 0.27 mm` (quasi-laminar +17%), but -50% and a near-extinguished
+flame at 0.53 mm (quasi-laminar +41%). It corrects the right way at moderate
+filter widths and overcorrects on coarse meshes; not validated beyond this case.
 
 ## `[initialize]`
 
@@ -256,7 +276,7 @@ the zone's faces whose centers satisfy the expression.
 | `dirichlet` | Exterior state from expressions in `x`, `y`, `z`, `t`, evaluated at face centers at every stage | `rho`, `u` (one expression per component), `p` |
 | `p_out` | Outlet: imposes `p` if the outflow is subsonic | `p` |
 | `p_out_average` | Outlet for mixed subsonic/supersonic flow: on subsonic faces, shifts the local pressure so that its area average over the boundary equals `p`, preserving the transverse profile | `p` |
-| `nscbc_outlet` | Partially non-reflecting characteristic outlet (Poinsot & Lele): outgoing waves leave, and each face's incoming acoustic wave relaxes its pressure toward `p` at the rate `K = sigma c (1 - M^2) / L`. Waves of frequency `omega` reflect by `1 / sqrt(1 + (2 omega / K)^2)` | `p`, `L` (a length of the domain), `sigma` (default 0.25; 0 is perfectly non-reflecting but lets the mean pressure drift, large values approach `p_out`), `beta` (the weight of the transverse terms in the incoming wave, 0 to 1: default the local Mach number, as Lodato et al.; 1 is Poinsot & Lele's original condition, 0 drops them) |
+| `nscbc_outlet` | Partially non-reflecting characteristic outlet (Poinsot & Lele): outgoing waves leave, and each face's incoming acoustic wave relaxes its pressure toward `p` at the rate `K = sigma c (1 - M^2) / L`. Waves of frequency `omega` reflect by `1 / sqrt(1 + (2 omega / K)^2)` | `p`, `L` (a length of the domain), `sigma` (default 0.25; 0 is perfectly non-reflecting but lets the mean pressure drift, large values approach `p_out`), `beta` (the weight of the transverse terms in the incoming wave, 0 to 1: default the local Mach number, as Lodato et al.; 1 is Poinsot & Lele's original condition, 0 drops them. Faces next to walls and other boundaries, and faces with reversed flow, have none, which keeps eddies that reverse the flow at the outlet from driving it unstable) |
 | `nscbc_inlet` | Partially non-reflecting characteristic inlet: the incoming acoustic wave relaxes the normal velocity toward `u` as `nscbc_outlet` relaxes the pressure; temperature and tangential velocity are imposed, or relaxed with `sigma_T`, `sigma_t`; the composition is imposed. Supersonic inflow imposes `u`, `p`, `T` | `u` (numbers, or expressions in `x`, `y`, `z` evaluated at face centers), `p` (reference pressure, for supersonic inflow), `T`, `L`, `sigma` (default 0.25), `sigma_T`, `sigma_t` (optional), `beta` (default 0 with turbulence, whose own incoming wave carries the transverse terms), `X` or `Y` for mixtures (numbers or expressions, as `upt`), and an optional `[boundaries.turbulence]` table (below) |
 
 Characteristic conditions change only the exterior state of the convective
@@ -322,7 +342,7 @@ Strength and reference are evaluated once at cell centroids.
 
 | Key | Description |
 |---|---|
-| `riemann_solver` | `Rusanov`, `HLL`, `HLLC` (default), `Roe`, or `RHLL` (rotated hybrid HLL-Roe, carbuncle-free) |
+| `riemann_solver` | `Rusanov`, `HLL`, `HLLC` (default), `Roe`, or `RHLL` (rotated hybrid HLL-Roe, carbuncle-free except at shocks at rest on cell faces; see [numerics](numerics/overview.md#stationary-shocks-on-cell-faces)) |
 | `time_integrator` | `FE`, `SSPRK3` (default) or `RK4` |
 | `check_nan` | Stop if the solution becomes non-finite |
 | `double_flux` | (gas mixtures) `true` for the double-flux scheme: each cell's energy is updated with its own `cp / cv` and energy offset frozen over the time step on both sides of its faces, and reset to the true equation of state after the step, so pressure and velocity stay exactly uniform across contacts between different gases. Energy is then not exactly conserved (about 0.2% over a multicomponent shock tube). Default `false` |
@@ -358,11 +378,17 @@ Strength and reference are evaluated once at cell centroids.
 ## `[chemistry]`
 
 Finite-rate chemistry of gas mixtures (`gas = "mixture"` with a mechanism
-that has reactions). Each step is Strang split: every owned cell that needs
-it is advanced as an adiabatic, constant-volume reactor over `dt / 2`, then
-the flow takes its step, then the reactors take another `dt / 2`; the second
-half step is fused with the next step's first (one chemistry call per step)
-except before output, progress rows and the end of the run. The integrator
+that has reactions). By default each step is Strang split: every owned cell
+that needs it is advanced as an adiabatic, constant-volume reactor over
+`dt / 2`, then the flow takes its step, then the reactors take another
+`dt / 2` (with `fuse_half_steps`, the second half step is fused with the
+next step's first). With `coupling = "simpler"` (SIMPLER balanced splitting,
+[Wu, Ma & Ihme 2019](https://doi.org/10.1016/j.cpc.2019.04.016)) each step
+evaluates the flow's right-hand side `T(U^n)` once, advances every owned
+cell over `dt` under its chemistry plus that constant source, then lets
+the flow correct over the second half of the step with `T(U) - T(U^n)`:
+steady states of chemistry and transport stay exactly steady at any `dt`
+(see [chemistry.md](design/chemistry.md#simpler-balanced-splitting-option)). The integrator
 is RODAS, an adaptive Rosenbrock method with the analytical Jacobian, in
 double precision in every build.
 
@@ -370,7 +396,7 @@ double precision in every build.
 |---|---|
 | `enabled` | `false` keeps the mixture non-reacting (default `true`) |
 | `integrator` | `rosenbrock` (the default and only choice so far) |
-| `coupling` | `strang` (the default and only choice so far) |
+| `coupling` | `strang` (default) or `simpler`; `simpler` does not combine with `fuse_half_steps` or `numerics.double_flux` |
 | `rtol` | Relative tolerance on the mass fractions and `T` (default `1e-6`) |
 | `atol` | Absolute tolerance on the mass fractions (default `1e-10`) |
 | `max_steps` | Sub-steps allowed per cell and half step (default 100000); more stop the run |
@@ -450,7 +476,7 @@ rate is `-dE/dt` and its viscous part `2 mu * enstrophy / rho0`.
 |---|---|
 | `interval` | Every this many steps, default 1 |
 | `file` | Output file, default `integrals.csv` |
-| `budget` | `true` adds the kinetic-energy budget (planar runs): `ke_rate_convective`, `ke_rate_viscous` and `ke_rate_sgs`, the rates of change of the resolved kinetic energy `sum V rho |u|^2 / 2` caused by the convective, molecular viscous and SGS fluxes of the current state (each `sum V (u . R_m - |u|^2 / 2 R_rho)` over that part `R` of the right-hand side), and `eps_numerical = pressure_dilatation - ke_rate_convective`, the scheme's dissipation of kinetic energy (the convective terms of the exact equations change the kinetic energy of a periodic or walled domain only by the pressure work). `-ke_rate_viscous` and `-ke_rate_sgs` are the molecular and SGS dissipation. Costs one extra right-hand side per row and leaves the solution unchanged. Default `false` |
+| `budget` | `true` adds the kinetic-energy budget (planar runs): `ke_rate_convective`, `ke_rate_viscous` and `ke_rate_sgs`, the rates of change of the resolved kinetic energy `sum V rho |u|^2 / 2` caused by the convective, molecular viscous and SGS fluxes of the current state (each `sum V (u . R_m - |u|^2 / 2 R_rho)` over that part `R` of the right-hand side), `pressure_work`, the rate a scheme without numerical dissipation would give (the two-point pressure flux `mean(p) n` of the cell values on interior faces, so `sum over faces mean(p) (u_1 - u_0) . n A`, plus the boundary faces' own fluxes), and `eps_numerical = pressure_work - ke_rate_convective`, the scheme's dissipation of kinetic energy on interior faces (the convective terms of the exact equations change the kinetic energy only by the pressure work and the boundary fluxes). `pressure_work` is the discrete counterpart of `pressure_dilatation`; unlike the latter it does not carry the gradients' discretization error, which matters where `p div u` is large (flames: thermal expansion at atmospheric pressure, several orders above the dissipation). `-ke_rate_viscous` and `-ke_rate_sgs` are the molecular and SGS dissipation. Costs one extra right-hand side per row and leaves the solution unchanged. Default `false` |
 
 ## `[statistics]`
 
@@ -546,7 +572,7 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | `prefix` | Output path prefix; directories are created as needed |
 | `format` | `vtu` (with a `.pvd` series next to it), `hdf5` (with XDMF indexes; see below) or `restart` |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
-| `variables` | (`vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m^3 s)]; with `[radiation]` also `QRAD` [W/m^3]), and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>` and `COV_<A>_<B>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
+| `variables` | (`vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m^3 s)]; with `[radiation]` also `QRAD` [W/m^3]), and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>` and `COV_<A>_<B>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
 | `geometry` | (`vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |
 
 `format = "hdf5"` (builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need

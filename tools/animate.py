@@ -130,13 +130,15 @@ def write_mp4(pattern, mp4, fps, width=None):
            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-movflags", "+faststart", mp4)
 
 
-def write_gif(pattern, gif, fps, width=None, colors=256):
+def write_gif(pattern, gif, fps, width=None, colors=256, dither="bayer:bayer_scale=5"):
     """Looping GIF with one palette fitted to the whole animation
     (palettegen/paletteuse), which avoids the banding and noise of per-frame
-    quantization. Fewer colors make a smaller file."""
+    quantization. Fewer colors make a smaller file; an error-diffusion
+    dither (e.g. "sierra2_4a") hides the banding of smooth gradients better
+    than the ordered "bayer" one, for a larger file."""
     scale = f"scale={width}:-2:flags=lanczos," if width else ""
     graph = (f"{scale}split[a][b];[a]palettegen=max_colors={colors}:stats_mode=full[p];"
-             "[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle")
+             f"[b][p]paletteuse=dither={dither}:diff_mode=rectangle")
     ffmpeg("-framerate", str(fps), "-i", pattern, "-vf", graph, "-loop", "0", gif)
 
 

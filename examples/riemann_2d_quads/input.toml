@@ -9,7 +9,7 @@
 #
 # Expected result at t = 0.8: the mushroom-shaped jet along the diagonal with
 # Kelvin-Helmholtz roll-ups on its slip lines. The README animation uses
-# Nx = Ny = 1000.
+# Nx = Ny = 4096 (16.8M cells, rendered with tools/animate_cartesian.py).
 
 [run]
 t_stop = 0.8
