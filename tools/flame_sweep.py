@@ -12,8 +12,8 @@ outputs per flame time delta_T / S_L and a restart file every half flame time
 
 report reads every run in RUNS_DIR and, against Cantera's flame speed S_L
 (examples/premixed_flame/reference/flames.csv), gives the consumption speed
-S_c averaged over the last flame time, its drift (the mean over the last half
-flame time against the mean over the half before), the displacement speed S_d
+S_c averaged over the last flame time, its spread (largest minus smallest
+over the last two flame times, relative to S_c), the displacement speed S_d
 (inflow speed minus the front's drift, fitted over the last flame time), and,
 for the last output, the peak heat release rate against Cantera's and the
 largest temperature difference (tools/plot_flame.py). A run at a CFL other
@@ -74,11 +74,11 @@ def measure(run_dir, ref):
     t, S_c, x_f, u_in = rows.T
     end = t[-1]
     last = t >= end - tau * (1 + 1e-6)
-    late, early = t >= end - 0.5 * tau * (1 + 1e-6), last & (t < end - 0.5 * tau * (1 + 1e-6))
+    recent = S_c[t >= end - 2 * tau * (1 + 1e-6)]
     S_d = u_in[last].mean() - np.polyfit(t[last], x_f[last], 1)[0]
     dT, hrr = compare(run_dir, os.path.join(REF_DIR, ref["case"] + ".csv"))
     return {"flame_times": end / tau, "S_c": S_c[last].mean(),
-            "drift": 100 * (S_c[late].mean() / S_c[early].mean() - 1),
+            "spread": 100 * (recent.max() - recent.min()) / S_c[last].mean(),
             "S_d": S_d, "err_c": 100 * (S_c[last].mean() / S_L - 1), "err_d": 100 * (S_d / S_L - 1),
             "dT_max": dT, "err_hrr": hrr, "tau": tau, "series": (t, S_c)}
 
@@ -104,7 +104,7 @@ def report(args):
             tb, S_b = base[0]["series"]
             window = lambda tt: (tt >= t[-1] - r["tau"] * (1 + 1e-6)) & (tt <= t[-1] * (1 + 1e-6))
             r["vs_cfl1"] = 100 * (S_c[window(t)].mean() / S_b[window(tb)].mean() - 1)
-    keys = ["fuel", "phi", "transport", "cells", "cfl", "flame_times", "S_L", "S_c", "err_c", "drift", "S_d",
+    keys = ["fuel", "phi", "transport", "cells", "cfl", "flame_times", "S_L", "S_c", "err_c", "spread", "S_d",
             "err_d", "err_hrr", "dT_max", "vs_cfl1"]
     print(" ".join(f"{k:>11}" for k in keys))
     for r in results:
