@@ -21,9 +21,10 @@ shaded by a numerical schlieren. Wall panels plot "var" along the first row of
 cells of a Cartesian mesh (y = min) against reference points. Frames panels
 show a sequence of pre-rendered images ("series" holds 00000.png, 00001.png,
 ... and optionally times.txt), e.g. 3D views. Curve panels trace a time series
-("data": CSV with columns t and y) up to the current time over a reference
-curve ("reference": {"label", "file": a CSV of t and y}); "t_end" maps the
-normalized time to t. Detonation panels show a 2D detonation run's pressure
+("data": CSV with columns t and y) up to the current time, marked by a
+vertical line, over reference curves ("reference": {"label", "file": a CSV
+of t and y, optional "color", "alpha", "lw", "ls"}, or a list of them);
+"t_end" maps the normalized time to t. Detonation panels show a 2D detonation run's pressure
 over the channel and, below it, the numerical soot foil (P_MAX) behind the
 front ("series": the run's .pvd; "xlim" in mesh units). "gif_width" and
 "gif_colors" shrink the GIF, "gif_dither" sets its dither (ffmpeg paletteuse),
@@ -204,13 +205,16 @@ class CurvePanel:
         self.p = panel
         d = np.genfromtxt(panel["data"], delimiter=",", names=True)
         self.t, self.y = d["t"], d["y"]
-        ref = panel.get("reference")
-        self.ref = np.genfromtxt(ref["file"], delimiter=",", names=True) if ref else None
+        refs = panel.get("reference") or []
+        self.refs = [(r, np.genfromtxt(r["file"], delimiter=",", names=True))
+                     for r in (refs if isinstance(refs, list) else [refs])]
 
     def draw(self, ax, k, n):
         t_now = self.p["t_end"] * k / max(n - 1, 1)
-        if self.ref is not None:
-            ax.plot(self.ref["t"], self.ref["y"], color=FG, lw=0.8, alpha=0.75, label=self.p["reference"]["label"])
+        for r, d in self.refs:
+            ax.plot(d["t"], d["y"], color=r.get("color", FG), lw=r.get("lw", 0.8), alpha=r.get("alpha", 0.75),
+                    ls=r.get("ls", "-"), label=r["label"])
+        ax.axvline(t_now, color=DIM, lw=0.4, alpha=0.6)
         m = self.t <= t_now + 1e-9
         ax.plot(self.t[m], self.y[m], color="#f2b134", lw=1.0, label=self.p.get("label", "Mallard"))
         if m.any():

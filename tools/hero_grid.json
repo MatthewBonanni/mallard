@@ -1,5 +1,5 @@
 {
- "_inputs": "Paths are relative to the directory the script runs in; the README animation was made in ~/local/mallard-runs/hero4 (outside the repository), whose prepare.py crops every panel from the case animations: riemann_frames = the density plot of the 4096^2 run of examples/riemann_2d_quads (tools/animate_cartesian.py, 321 frames over t = 0-0.8); tgv256_frames = the 3D view of tools/animate_taylor_green.py --full-box (examples/taylor_green_3d/input_periodic.toml at Nx = 256; prepare.py --tgv256 MP4 --tgv256-log RENDER_LOG, frames resampled to uniform t); det_frames = the 3D view of tools/animate_detonation_3d.py (examples/detonation_3d, t = 105-204 us); ai_frames = the T' = 15 K temperature and heat release rate of tools/animate_autoignition.py (examples/autoignition_2d, t / tau_0 = 0.59-1.07). One PNG per frame, with a times.txt. Made with animate_grid.py hero_grid.json hero --frames 150 (6 s at 25 fps, every GIF delay 40 ms). To use another rendering of a case, point its series at that frames directory (tgv_frames: the Nx = 128 run).",
+ "_inputs": "Paths are relative to the directory the script runs in; the README animation was made in ~/local/mallard-runs/hero4 (outside the repository), whose prepare.py crops every panel from the case animations: riemann_frames = the density plot of the 4096^2 run of examples/riemann_2d_quads (tools/animate_cartesian.py, 321 frames over t = 0-0.8); tgv256_frames = the 3D view of tools/animate_taylor_green.py --full-box (examples/taylor_green_3d/input_periodic.toml at Nx = 256; prepare.py --tgv256 MP4 --tgv256-log RENDER_LOG, frames resampled to uniform t); det_frames = the 3D view of tools/animate_detonation_3d.py (examples/detonation_3d, t = 105-204 us); ai_frames = the T' = 15 K temperature and heat release rate of tools/animate_autoignition.py (examples/autoignition_2d, t / tau_0 = 0.59-1.07). One PNG per frame, with a times.txt. tgv256_eps.csv, tgv_eps.csv and tgv_eps_dns.csv = -dE/dt of the 256^3 and 128^3 runs' integrals.csv and of the 512^3 spectral DNS (CSV with columns t,y). Made with animate_grid.py hero_grid.json hero --frames 150 (6 s at 25 fps, every GIF delay 40 ms). To use another rendering of a case, point its series at that frames directory (tgv_frames: the Nx = 128 run).",
  "width": 6,
  "dpi": 300,
  "fps": 25,
@@ -14,16 +14,49 @@
    },
    {
     "type": "frames",
-    "series": "det_frames",
-    "title": "3D cellular detonation in 2H2-O2-7Ar",
-    "show_time": false
+    "series": "tgv256_frames",
+    "title": "Taylor-Green vortex, Re = 1600, 256³ cells"
+   },
+   {
+    "type": "curve",
+    "data": "tgv256_eps.csv",
+    "t_end": 20.0,
+    "title": "Dissipation rate −dE/dt",
+    "label": "Mallard 256³",
+    "reference": [
+     {
+      "label": "spectral DNS 512³",
+      "file": "tgv_eps_dns.csv"
+     },
+     {
+      "label": "Mallard 128³",
+      "file": "tgv_eps.csv",
+      "color": "#f2b134",
+      "alpha": 0.35,
+      "lw": 0.6,
+      "ls": "--"
+     }
+    ],
+    "xlim": [
+     0,
+     20
+    ],
+    "ylim": [
+     0,
+     0.014
+    ],
+    "xlabel": "t",
+    "aspect": 1.2,
+    "legend_loc": "upper right",
+    "margin_left": 0.25
    }
   ],
   [
    {
     "type": "frames",
-    "series": "tgv256_frames",
-    "title": "Taylor-Green vortex, Re = 1600, 256³ cells"
+    "series": "det_frames",
+    "title": "3D cellular detonation in 2H2-O2-7Ar",
+    "show_time": false
    },
    {
     "type": "frames",
@@ -33,7 +66,7 @@
    }
   ]
  ],
- "gif_width": 1000,
+ "gif_width": 1150,
  "gif_colors": 256,
  "gif_dither": "sierra2_4a",
  "mp4_width": 1920
