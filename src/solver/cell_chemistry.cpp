@@ -87,6 +87,7 @@ struct ActivityFunctor {
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i) const {
+        if (keep && active(i)) return;
         const uint32_t c = first + i, ns = gas.n_species;
         double * Y = &work(i, 0);
         double * C = Y + ns;
@@ -114,6 +115,7 @@ struct ActivityFunctor {
     KOKKOS_INLINE_FUNCTION
     void operator()(ActivityTeamTag, const ActivityPolicy::member_type & member) const {
         const uint32_t slot = static_cast<uint32_t>(member.league_rank()), c = first + slot, ns = gas.n_species;
+        if (keep && active(slot)) return;
         const chemistry::TeamLanes<ActivityPolicy::member_type> team(member,
                                                                     lanes * static_cast<uint32_t>(member.team_size()));
         double * Y = &work(slot, 0);
@@ -149,6 +151,7 @@ struct ActivityFunctor {
     }
 
     uint32_t lanes = 1;
+    bool keep = false;  // leave the cells already flagged active (a second state of the same cells)
 };
 
 /** @brief Compacts the flagged cells of a chunk into a queue; the total is the queue length. */
@@ -196,9 +199,31 @@ struct AdvanceFunctor {
     bool sparse;
     uint32_t fast_size;  // doubles of team scratch for the work memory, 0: global memory
     Kokkos::View<rtype *> time_scale;  // see ActivityFunctor
+    // With a forcing (forcing_offset > 0): the species rates, and U + dt rate, which receives the result
+    uint32_t forcing_offset = 0;
+    SpeciesView rate{};
+    StateView U_end{};
+    SpeciesView rhoY_end{};
 
     KOKKOS_INLINE_FUNCTION
     double cell_dt(const uint32_t c) const { return time_scale.extent(0) > 0 ? dt * static_cast<double>(time_scale(c)) : dt; }
+
+    /**
+     * @brief Entry k of the reactor's forcing of cell c (g_k, or g_e for
+     *        k = n_species; see ConstantVolumeReactor): rho Y_k gains its rate
+     *        per unit time and rho e goes linearly to that of U_end, both over
+     *        the time scaled by s.
+     */
+    KOKKOS_INLINE_FUNCTION
+    double cell_forcing(const uint32_t c, const uint32_t k, const double rho, const double e) const {
+        const double s = time_scale.extent(0) > 0 ? static_cast<double>(time_scale(c)) : 1.0;
+        if (k < gas.n_species) return static_cast<double>(rate(c, k)) / (rho * s);
+        const double rho_end = static_cast<double>(U_end(c, 0));
+        double m2 = 0.0;
+        FOR_I_DIM m2 += static_cast<double>(U_end(c, 1 + i)) * static_cast<double>(U_end(c, 1 + i));
+        const double rho_e_end = static_cast<double>(U_end(c, N_DIM + 1)) - 0.5 * m2 / rho_end;
+        return (rho_e_end - rho * e) / (dt * rho * s);
+    }
 
     /** @brief One thread per cell. */
     KOKKOS_INLINE_FUNCTION
@@ -206,13 +231,27 @@ struct AdvanceFunctor {
         const uint32_t c = queue(i), ns = gas.n_species;
         double * Y = &work(i, 0);
         double T;
-        cell_composition(gas, U, rhoY, T_seed, c, Y, T);
+        const double e = cell_composition(gas, U, rhoY, T_seed, c, Y, T);
         const double rho = static_cast<double>(U(c, 0));
         double h = static_cast<double>(chem_h(c));
-        const chemistry::RosenbrockResult r =
-            chemistry::advance_reactor(gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options, Y + ns, &pivot(i, 0),
-                                       chemistry::NoObserver(), sparse ? &pattern : nullptr);
-        for (uint32_t k = 0; k < ns; k++) rhoY(c, k) = static_cast<rtype>(rho * Y[k]);
+        chemistry::RosenbrockResult r;
+        if (forcing_offset > 0) {
+            double * g = &work(i, forcing_offset);
+            for (uint32_t k = 0; k <= ns; k++) g[k] = cell_forcing(c, k, rho, e);
+            const chemistry::SerialLanes one;
+            r = sparse ? chemistry::advance_reactor<true>(one, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options,
+                                                          Y + ns, &pivot(i, 0), chemistry::NoObserver(), &pattern,
+                                                          nullptr, g)
+                       : chemistry::advance_reactor<false>(one, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options,
+                                                           Y + ns, &pivot(i, 0), chemistry::NoObserver(), &pattern,
+                                                           nullptr, g);
+            const double rho_end = static_cast<double>(U_end(c, 0));
+            for (uint32_t k = 0; k < ns; k++) rhoY_end(c, k) = static_cast<rtype>(rho_end * Y[k]);
+        } else {
+            r = chemistry::advance_reactor(gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options, Y + ns, &pivot(i, 0),
+                                           chemistry::NoObserver(), sparse ? &pattern : nullptr);
+            for (uint32_t k = 0; k < ns; k++) rhoY(c, k) = static_cast<rtype>(rho * Y[k]);
+        }
         chem_h(c) = static_cast<rtype>(h);
         chem_cost(c) += static_cast<rtype>(r.steps + r.rejected);
         previous_cost(c) = static_cast<float>(r.steps + r.rejected);
@@ -235,10 +274,21 @@ struct AdvanceFunctor {
         const double e = static_cast<double>(U(c, N_DIM + 1)) / rho - 0.5 * u2 / (rho * rho);
         double T = gas.thermo.T_from_e(e, chemistry::MassFractions{Y}, static_cast<double>(T_seed(c)));
         double h = static_cast<double>(chem_h(c));
+        double * g = nullptr;
+        if (forcing_offset > 0) {
+            g = &work(slot, forcing_offset);
+            team.for_each(ns + 1, [&](const uint32_t k) { g[k] = cell_forcing(c, k, rho, e); });
+            team.sync();
+        }
         const chemistry::RosenbrockResult r =
             chemistry::advance_reactor<Sparse>(team, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options, Y + ns,
-                                               &pivot(slot, 0), chemistry::NoObserver(), &pattern, fast);
-        team.for_each(ns, [&](const uint32_t k) { rhoY(c, k) = static_cast<rtype>(rho * Y[k]); });
+                                               &pivot(slot, 0), chemistry::NoObserver(), &pattern, fast, g);
+        if (forcing_offset > 0) {
+            const double rho_end = static_cast<double>(U_end(c, 0));
+            team.for_each(ns, [&](const uint32_t k) { rhoY_end(c, k) = static_cast<rtype>(rho_end * Y[k]); });
+        } else {
+            team.for_each(ns, [&](const uint32_t k) { rhoY(c, k) = static_cast<rtype>(rho * Y[k]); });
+        }
         team.single([&]() {
             chem_h(c) = static_cast<rtype>(h);
             chem_cost(c) += static_cast<rtype>(r.steps + r.rejected);
@@ -387,7 +437,9 @@ void CellChemistry::init(const Mixture & gas_in, const chemistry::Mechanism & me
         if (bytes + chemistry::TeamLanes<Member>::scratch_bytes(n_lanes * n_threads) + 64 <= room) fast_bytes = bytes;
     }
     // Mass fractions, then the reactor's work memory (also enough for the activity and heat release kernels)
-    const uint32_t work_size = ns + chemistry::reactor_work_size(kinetics, sparse ? &pattern : nullptr);
+    const uint32_t reactor_size = ns + chemistry::reactor_work_size(kinetics, sparse ? &pattern : nullptr);
+    forcing_offset = options.forced ? reactor_size : 0;
+    const uint32_t work_size = reactor_size + (options.forced ? ns + 1 : 0);
     const double per_cell = 8.0 * work_size + 4.0 * (ns + 3) + 8.0;
     const size_t concurrency = static_cast<size_t>(Kokkos::DefaultExecutionSpace().concurrency());
     size_t chunk = std::max<size_t>(4096, 4 * concurrency);
@@ -405,19 +457,47 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
                                                  const Kokkos::View<rtype *> & T_seed,
                                                  const Kokkos::View<rtype *> & chem_h,
                                                  const Kokkos::View<rtype *> & chem_cost, const uint32_t n,
-                                                 const double dt, const Kokkos::View<rtype *> & time_scale) {
+                                                 const double dt, const Kokkos::View<rtype *> & time_scale,
+                                                 const ChemistryForcing * forcing) {
+    if (forcing && forcing_offset == 0) {
+        throw std::logic_error("CellChemistry::advance: a forcing needs options.forced.");
+    }
+    StateView U_end{};
+    SpeciesView rhoY_end{};
+    if (forcing) {
+        U_end = forcing->scratch.flow;
+        rhoY_end = forcing->scratch.species;
+        const StateView F = forcing->rate.flow;
+        const SpeciesView F_Y = forcing->rate.species;
+        const uint32_t ns = gas.n_species;
+        const rtype h = static_cast<rtype>(dt);
+        Kokkos::parallel_for("chemistry_forced_end", n, KOKKOS_LAMBDA(const uint32_t c) {
+            FOR_I_CONSERVATIVE U_end(c, i) = U(c, i) + h * F(c, i);
+            for (uint32_t k = 0; k < ns; k++) rhoY_end(c, k) = rhoY(c, k) + h * F_Y(c, k);
+        });
+    }
     Statistics stats;
     const uint32_t chunk = static_cast<uint32_t>(work.extent(0));
     for (uint32_t first = 0; first < n; first += chunk) {
         const uint32_t m = std::min(chunk, n - first);
-        const ActivityFunctor activity{gas,   kinetics, U,  rhoY,      T_seed, work, active, first,
-                                       dt,    options.T_frozen, 1e-2 * options.reactor.atol_Y, time_scale, n_lanes};
-        if (n_lanes == 1) {
-            Kokkos::parallel_for("chemistry_activity", HeavyRange<>(0, m), activity);
-        } else {
-            const auto policy = ActivityPolicy(static_cast<int>(m), 1, static_cast<int>(n_lanes))
-                                    .set_scratch_size(0, Kokkos::PerTeam(chemistry::TeamLanes<Member>::scratch_bytes(n_lanes)));
-            Kokkos::parallel_for("chemistry_activity_teams", policy, activity);
+        ActivityFunctor activity{gas,   kinetics, U,  rhoY,      T_seed, work, active, first,
+                                 dt,    options.T_frozen, 1e-2 * options.reactor.atol_Y, time_scale, n_lanes};
+        auto flag = [&]() {
+            if (n_lanes == 1) {
+                Kokkos::parallel_for("chemistry_activity", HeavyRange<>(0, m), activity);
+            } else {
+                const auto policy =
+                    ActivityPolicy(static_cast<int>(m), 1, static_cast<int>(n_lanes))
+                        .set_scratch_size(0, Kokkos::PerTeam(chemistry::TeamLanes<Member>::scratch_bytes(n_lanes)));
+                Kokkos::parallel_for("chemistry_activity_teams", policy, activity);
+            }
+        };
+        flag();
+        if (forcing) {
+            activity.U = U_end;
+            activity.rhoY = rhoY_end;
+            activity.keep = true;
+            flag();
         }
         uint32_t n_active = 0;
         Kokkos::parallel_scan("chemistry_queue", m, QueueFunctor{active, queue, cost, previous_cost, first}, n_active);
@@ -435,6 +515,12 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
         AdvanceFunctor functor{gas,  kinetics, U,     rhoY, T_seed,          chem_h, chem_cost, previous_cost,
                                work, pivot,    queue, 0u,   options.reactor, dt,     n_lanes,   pattern,
                                sparse, static_cast<uint32_t>(fast_bytes / sizeof(double)), time_scale};
+        if (forcing) {
+            functor.forcing_offset = forcing_offset;
+            functor.rate = forcing->rate.species;
+            functor.U_end = U_end;
+            functor.rhoY_end = rhoY_end;
+        }
         uint32_t failures = 0;
         if (n_lanes == 1) {
             Kokkos::parallel_reduce("chemistry_advance", HeavyRange<>(0, n_active), functor, Kokkos::Sum<uint32_t>(failures));
@@ -455,6 +541,15 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
             failures = read_failures(team_failures[1]) + (n_active > n_wide ? read_failures(team_failures[0]) : 0u);
         }
         stats.failures += failures;
+    }
+    if (forcing) {
+        const uint32_t ns = gas.n_species;
+        StateView U_out = U;
+        SpeciesView rhoY_out = rhoY;
+        Kokkos::parallel_for("chemistry_forced_copy", n, KOKKOS_LAMBDA(const uint32_t c) {
+            FOR_I_CONSERVATIVE U_out(c, i) = U_end(c, i);
+            for (uint32_t k = 0; k < ns; k++) rhoY_out(c, k) = rhoY_end(c, k);
+        });
     }
     return stats;
 }

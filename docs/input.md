@@ -13,11 +13,12 @@ The spatial dimension is fixed at build time with the CMake option
 
 | Key | Description |
 |---|---|
-| `cfl` | CFL number in the usual unstructured convention ([Blazek](references.md#blazek-2015) eqs. 6.20-6.21; see [time step](numerics/overview.md)): on a uniform 2D grid of spacing h, `dt = cfl * h / (abs(u) + abs(v) + 2a)`. Measured stability limits for smooth flow are 1.26-1.6 with SSPRK3 and 1.39-1.8 with RK4, depending on reconstruction and cell type ([table](numerics/overview.md#time-step)): use at most 1.2 (SSPRK3) or 1.35 (RK4), and 1.0 with SSPRK3 as a robust default, shocks included (but 0.25 for the Noh problem's infinite-strength shock with `bound_preserving`); with `[chemistry]` the splitting error may call for less (detonations: about 0.35). Mallard 0.5 and earlier inputs give the same time step with half their `cfl`. Exactly one of `cfl` and `dt` is required. |
+| `cfl` | CFL number in the usual unstructured convention ([Blazek](references.md#blazek-2015) eqs. 6.20-6.21; see [time step](numerics/overview.md)): on a uniform 2D grid of spacing h, `dt = cfl * h / (abs(u) + abs(v) + 2a)`. Measured stability limits for smooth flow are 1.26-1.6 with SSPRK3 and 1.39-1.8 with RK4, depending on reconstruction and cell type ([table](numerics/overview.md#time-step)): use at most 1.2 (SSPRK3) or 1.35 (RK4), and 1.0 with SSPRK3 as a robust default, shocks included (but 0.25 for the Noh problem's infinite-strength shock with `bound_preserving`); with `[chemistry]` the splitting error may call for less (detonations: about 0.35 with Strang splitting, 1.0 with `coupling = "simpler"`). Mallard 0.5 and earlier inputs give the same time step with half their `cfl`. Exactly one of `cfl` and `dt` is required. |
 | `dt` | Fixed time step |
 | `t_stop` | Stop at this simulation time (the last step is shortened to land on it) |
 | `n_steps` | Stop after this many steps |
 | `t_wall_stop` | Stop after this many seconds of wall time |
+| `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages) as one CUDA graph, so the host launches one graph and waits once per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel where the host takes part in the step: gas mixtures, average-pressure outlets, characteristic boundaries, boundary or source expressions of `t`, and halos exchanged with MPI (`[parallel] halo_exchange`); the run log says which |
 
 At least one stop condition is required.
 
@@ -127,6 +128,7 @@ translation = [1.0, 0.0]
 | `phase` | (`mixture`) Phase of the file to use; default the first |
 | `transport` | (`mixture`, `navier_stokes`) `mixture_averaged` (default: Wilke viscosity, Mathur conductivity, mixture-averaged diffusion coefficients), `unity_lewis` (diffusion coefficients `lambda / (rho cp)`) or `constant_lewis` (`lambda / (rho cp Le_k)`), as Cantera's models, from the species' transport data in the file |
 | `lewis` | (`constant_lewis`) Lewis numbers by species, e.g. `lewis = { H2 = 0.3, H = 0.18 }`; others 1 |
+| `soret` | (`mixture_averaged`) `true` adds thermal diffusion (the Soret effect) with Cantera's mixture-averaged thermal diffusion coefficients, as Cantera's `soret_enabled` (default `false`); output `DT_<species>` |
 | `axisymmetric` | (2D) `true` for flows symmetric about the x axis without swirl (default `false`); see below |
 
 Gas mixtures (`gas = "mixture"`) react when the input has a `[chemistry]`
@@ -377,11 +379,17 @@ Strength and reference are evaluated once at cell centroids.
 ## `[chemistry]`
 
 Finite-rate chemistry of gas mixtures (`gas = "mixture"` with a mechanism
-that has reactions). Each step is Strang split: every owned cell that needs
-it is advanced as an adiabatic, constant-volume reactor over `dt / 2`, then
-the flow takes its step, then the reactors take another `dt / 2`; the second
-half step is fused with the next step's first (one chemistry call per step)
-except before output, progress rows and the end of the run. The integrator
+that has reactions). By default each step is Strang split: every owned cell
+that needs it is advanced as an adiabatic, constant-volume reactor over
+`dt / 2`, then the flow takes its step, then the reactors take another
+`dt / 2` (with `fuse_half_steps`, the second half step is fused with the
+next step's first). With `coupling = "simpler"` (SIMPLER balanced splitting,
+[Wu, Ma & Ihme 2019](https://doi.org/10.1016/j.cpc.2019.04.016)) each step
+evaluates the flow's right-hand side `T(U^n)` once, advances every owned
+cell over `dt` under its chemistry plus that constant source, then lets
+the flow correct over the second half of the step with `T(U) - T(U^n)`:
+steady states of chemistry and transport stay exactly steady at any `dt`
+(see [chemistry.md](design/chemistry.md#simpler-balanced-splitting-option)). The integrator
 is RODAS, an adaptive Rosenbrock method with the analytical Jacobian, in
 double precision in every build.
 
@@ -389,7 +397,7 @@ double precision in every build.
 |---|---|
 | `enabled` | `false` keeps the mixture non-reacting (default `true`) |
 | `integrator` | `rosenbrock` (the default and only choice so far) |
-| `coupling` | `strang` (the default and only choice so far) |
+| `coupling` | `strang` (default) or `simpler`; `simpler` does not combine with `fuse_half_steps` or `numerics.double_flux` |
 | `rtol` | Relative tolerance on the mass fractions and `T` (default `1e-6`) |
 | `atol` | Absolute tolerance on the mass fractions (default `1e-10`) |
 | `max_steps` | Sub-steps allowed per cell and half step (default 100000); more stop the run |
@@ -518,6 +526,7 @@ Used when Mallard runs on several MPI ranks (`mpirun -n N Mallard -i input.toml`
 | Key | Description |
 |---|---|
 | `partitioner` | `graph` (dKaMinPar on the cell connectivity, minimizing the faces between ranks; default when built with `Mallard_ENABLE_KAMINPAR`) or `hilbert` (cells split along a Hilbert curve of their centroids; the default otherwise) |
+| `halo_exchange` | `nccl` (NCCL operations on the GPU's stream: no host synchronization per exchange; default when built with `Mallard_ENABLE_NCCL`) or `mpi` (nonblocking MPI; the default otherwise). Results are the same bit for bit |
 
 ## `[output]`
 
@@ -543,7 +552,7 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | `prefix` | Output path prefix; directories are created as needed |
 | `format` | `vtu` (with a `.pvd` series next to it), `hdf5` (with XDMF indexes; see below) or `restart` |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
-| `variables` | (`vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m^3 s)]), and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>` and `COV_<A>_<B>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
+| `variables` | (`vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m^3 s)]), and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>` and `COV_<A>_<B>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
 | `geometry` | (`vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |
 
 `format = "hdf5"` (builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need

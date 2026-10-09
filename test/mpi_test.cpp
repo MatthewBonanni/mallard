@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "comm.h"
+#include "device_comm.h"
 #include "gmsh_fixtures.h"
 #include "hdf5_output.h"
 #include "mesh_block.h"
@@ -90,26 +91,30 @@ TEST(MPITest, HaloExchangeFillsEveryHaloCellFromItsOwner) {
     if (!solver.is_distributed()) GTEST_SKIP() << "needs more than one rank";
     const auto & dist = solver.get_distribution();
     const uint32_t n_local = solver.get_mesh()->n_cells;
-    HaloExchange halo(dist);
-    // Flow block alone, then with species, through the same exchange object
-    for (const uint32_t n_species : {0u, 3u}) {
-        State U("U", n_local, n_species);
-        auto h_flow = Kokkos::create_mirror_view(U.flow);
-        auto h_species = Kokkos::create_mirror_view(U.species);
-        for (uint32_t c = 0; c < n_local; c++) {
-            const bool owned = c < dist.n_owned;
-            FOR_I_CONSERVATIVE h_flow(c, i) = owned ? dist.global_cell[c] + 0.25 * i : -1.0;
-            for (uint32_t k = 0; k < n_species; k++) h_species(c, k) = owned ? dist.global_cell[c] + 0.125 * k : -1.0;
-        }
-        Kokkos::deep_copy(U.flow, h_flow);
-        Kokkos::deep_copy(U.species, h_species);
-        halo.exchange(U);
-        Kokkos::deep_copy(h_flow, U.flow);
-        Kokkos::deep_copy(h_species, U.species);
-        for (uint32_t c = 0; c < n_local; c++) {
-            FOR_I_CONSERVATIVE EXPECT_EQ(h_flow(c, i), dist.global_cell[c] + 0.25 * i) << "local cell " << c;
-            for (uint32_t k = 0; k < n_species; k++) {
-                EXPECT_EQ(h_species(c, k), dist.global_cell[c] + 0.125 * k) << "local cell " << c;
+    std::vector<bool> backends = {false};
+    if (comm::nccl_available()) backends.push_back(true);
+    for (const bool nccl : backends) {
+        HaloExchange halo(dist, nccl);
+        // Flow block alone, then with species, through the same exchange object
+        for (const uint32_t n_species : {0u, 3u}) {
+            State U("U", n_local, n_species);
+            auto h_flow = Kokkos::create_mirror_view(U.flow);
+            auto h_species = Kokkos::create_mirror_view(U.species);
+            for (uint32_t c = 0; c < n_local; c++) {
+                const bool owned = c < dist.n_owned;
+                FOR_I_CONSERVATIVE h_flow(c, i) = owned ? dist.global_cell[c] + 0.25 * i : -1.0;
+                for (uint32_t k = 0; k < n_species; k++) h_species(c, k) = owned ? dist.global_cell[c] + 0.125 * k : -1.0;
+            }
+            Kokkos::deep_copy(U.flow, h_flow);
+            Kokkos::deep_copy(U.species, h_species);
+            halo.exchange(U);
+            Kokkos::deep_copy(h_flow, U.flow);
+            Kokkos::deep_copy(h_species, U.species);
+            for (uint32_t c = 0; c < n_local; c++) {
+                FOR_I_CONSERVATIVE EXPECT_EQ(h_flow(c, i), dist.global_cell[c] + 0.25 * i) << "local cell " << c;
+                for (uint32_t k = 0; k < n_species; k++) {
+                    EXPECT_EQ(h_species(c, k), dist.global_cell[c] + 0.125 * k) << "local cell " << c;
+                }
             }
         }
     }
@@ -133,10 +138,19 @@ TEST(MPITest, GasMixtureMatchesSerial) {
                                                   {"", "type = \"TENO\"\norder = 3\n", "", "euler"},
                                                   {"double_flux = true\n", "type = \"MUSCL\"\n", "", "euler"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n", "euler"},
-                                                  {"", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes"}};
+                                                  {"", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes"},
+                                                  {"", "type = \"MUSCL\"\n", "[chemistry]\ncoupling = \"simpler\"\n",
+                                                   "navier_stokes"}};
     for (const auto & [extra, reconstruction, chemistry, type] : schemes) {
         expect_matches_serial(mixture_input(extra, reconstruction, chemistry, type));
     }
+}
+
+TEST(MPITest, ThermalDiffusionMatchesSerial) {
+    // The halo cells' thermal diffusion coefficients follow their owners'
+    std::string input = mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes");
+    input.insert(input.find("[physics]\n") + 10, "soret = true\n");
+    expect_matches_serial(input);
 }
 
 TEST(MPITest, MUSCLMatchesSerial) {
@@ -245,9 +259,12 @@ TEST(MPITest, LargeEddySimulationMatchesSerial) {
 
 TEST(MPITest, ThickenedFlameMatchesSerial) {
     // The vorticity and the flame fields are exchanged to the halo once per step
-    expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes") +
-                          "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
-                          "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n");
+    for (const std::string coupling : {"strang", "simpler"}) {
+        expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\ncoupling = \"" + coupling + "\"\n",
+                                            "navier_stokes") +
+                              "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
+                              "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n");
+    }
 }
 
 TEST(MPITest, HybridConvectiveFluxMatchesSerial) {

@@ -371,9 +371,9 @@ struct LimiterFunctor {
 };
 
 /**
- * @brief Linear extrapolation of the limited cell states to face centroids.
- *        Falls back to first order on a face if density or pressure would
- *        become non-positive.
+ * @brief Linear extrapolation of the limited cell states to face centroids,
+ *        one side of a face at a time. Falls back to first order on a face
+ *        side if density or pressure would become non-positive.
  */
 struct MUSCLFaceFunctor {
     Kokkos::View<int32_t *[2]> cells_of_face;
@@ -389,26 +389,101 @@ struct MUSCLFaceFunctor {
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
         for (uint8_t side = 0; side < 2; side++) {
-            const int32_t c = cells_of_face(i_face, side);
-            if (c < 0) continue;
-            // The face centroid is in cell 0's frame
-            const uint8_t s = side ? face_shift(i_face) : 0;
-            rtype r[N_DIM];
-            FOR_I_DIM r[i] = (face_coords(i_face, i) - shifts(s, i)) - cell_coords(c, i);
-            rtype W_f[N_CONSERVATIVE];
-            FOR_I_CONSERVATIVE {
-                rtype grad[N_DIM];
-                for (uint8_t d = 0; d < N_DIM; d++) grad[d] = gradients(c, i, d);
-                W_f[i] = W(c, i) + limiters(c, i) * dot<N_DIM>(grad, r);
-            }
-            const bool admissible = (W_f[0] > 0.0_r) && (W_f[N_CONSERVATIVE - 1] > 0.0_r);
-            FOR_I_CONSERVATIVE face_solution(i_face, 0, side, i) = admissible ? W_f[i] : W(c, i);
+            if (cells_of_face(i_face, side) >= 0) this->side(i_face, side);
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    void side(const uint32_t i_face, const uint8_t side) const {
+        const int32_t c = cells_of_face(i_face, side);
+        // The face centroid is in cell 0's frame
+        const uint8_t s = side ? face_shift(i_face) : 0;
+        rtype r[N_DIM];
+        FOR_I_DIM r[i] = (face_coords(i_face, i) - shifts(s, i)) - cell_coords(c, i);
+        rtype W_f[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE {
+            rtype grad[N_DIM];
+            for (uint8_t d = 0; d < N_DIM; d++) grad[d] = gradients(c, i, d);
+            W_f[i] = W(c, i) + limiters(c, i) * dot<N_DIM>(grad, r);
+        }
+        const bool admissible = (W_f[0] > 0.0_r) && (W_f[N_CONSERVATIVE - 1] > 0.0_r);
+        FOR_I_CONSERVATIVE face_solution(i_face, 0, side, i) = admissible ? W_f[i] : W(c, i);
+    }
+};
+
+/**
+ * @brief Gradient, limiter and face states of each listed cell, on its own
+ *        side of its faces, with the arithmetic of the per-cell gradient and
+ *        limiter kernels and of MUSCLFaceFunctor.
+ */
+struct MUSCLCellFunctor {
+    MUSCLGradientFunctor gradient;
+    LimiterFunctor limiter;
+    MUSCLFaceFunctor face;
+    Kokkos::View<uint32_t *> cells;  // empty: all cells
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t k) const {
+        const uint32_t c = cells.extent(0) ? cells(k) : k;
+        gradient(c);
+        limiter(c);
+        const auto & mesh_faces = limiter.neighbors;
+        for (uint32_t j = mesh_faces.offsets_faces_of_cell(c); j < mesh_faces.offsets_faces_of_cell(c + 1); j++) {
+            const uint32_t f = mesh_faces.faces_of_cell(j);
+            face.side(f, (face.cells_of_face(f, 0) == static_cast<int32_t>(c)) ? 0 : 1);
         }
     }
 };
 
+// Measured on A100s: one fused kernel per cell is faster from about 2^17 cells,
+// separate kernels (more parallel, shorter chains) below
+constexpr uint32_t MUSCL_FUSED_CELLS = 1u << 17;
+
+std::vector<uint32_t> MUSCL::cells_independent_of_halo(const uint32_t n_owned) const {
+    // Subsets run fused; smaller meshes exchange first and reconstruct in separate kernels
+    if (n_owned < MUSCL_FUSED_CELLS) return {};
+    // Gradients read the face or vertex neighbors, limiters the face neighbors
+    std::vector<uint32_t> cells;
+    for (uint32_t c = 0; c < n_owned; c++) {
+        bool independent = true;
+        for (uint32_t k = mesh->h_offsets_cells_of_cell(c); k < mesh->h_offsets_cells_of_cell(c + 1); k++) {
+            independent = independent && mesh->h_cells_of_cell(k) < n_owned;
+        }
+        for (uint32_t k = 0; k < mesh->h_n_faces_of_cell(c); k++) {
+            const uint32_t f = mesh->h_face_of_cell(c, k);
+            for (uint8_t side = 0; side < 2; side++) {
+                independent = independent && mesh->h_cells_of_face(f, side) < static_cast<int32_t>(n_owned);
+            }
+        }
+        if (independent) cells.push_back(c);
+    }
+    return cells;
+}
+
+void MUSCL::calc_cell_face_values(const Kokkos::DefaultExecutionSpace & exec,
+                                  Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                  Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
+                                  Kokkos::View<uint32_t *> cells) {
+    LSQVertexGradientFunctor g = gradient;
+    g.faces = make_gradient(*mesh, boundaries, solution, gradients);
+    MUSCLCellFunctor functor{MUSCLGradientFunctor{g},
+                             LimiterFunctor{g.faces, mesh->cell_volume, limiters, limiter, venkat_K},
+                             MUSCLFaceFunctor{mesh->cells_of_face, mesh->cell_coords, mesh->face_coords, mesh->shifts,
+                                              mesh->face_shift, solution, gradients, limiters, face_solution},
+                             cells};
+    const uint32_t n = cells.extent(0) ? cells.extent(0) : mesh->n_cells;
+    Kokkos::parallel_for("muscl_cells", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace, HeavyBounds>(exec, 0, n),
+                         functor);
+}
+
+void MUSCL::finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]>, Kokkos::View<rtype **[2][N_CONSERVATIVE]>) {}
+
 void MUSCL::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                              Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
+    if (mesh->n_cells >= MUSCL_FUSED_CELLS) {
+        calc_cell_face_values(Kokkos::DefaultExecutionSpace(), solution, face_solution, Kokkos::View<uint32_t *>());
+        return;
+    }
     gradient.faces = make_gradient(*mesh, boundaries, solution, gradients);
     Kokkos::parallel_for("lsq_gradient", HeavyRange<>(0, mesh->n_cells), MUSCLGradientFunctor{gradient});
 
