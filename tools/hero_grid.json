@@ -33,7 +33,8 @@
    }
   ]
  ],
- "gif_width": 900,
- "gif_colors": 128,
+ "gif_width": 1000,
+ "gif_colors": 256,
+ "gif_dither": "sierra2_4a",
  "mp4_width": 1920
 }
