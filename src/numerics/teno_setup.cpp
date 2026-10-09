@@ -1887,20 +1887,41 @@ struct CellTeam {
 
     /**
      * @brief Exclusive scan over k < n of count(k): write(k, offset) for each
-     *        k, and the total, on every thread.
+     *        k, and the total, on every thread. Each thread takes a contiguous
+     *        range of k, so one scan of the threads' sums orders them all;
+     *        space holds team size + 1 words of level-0 scratch.
      */
     template <class Count, class Write>
-    KOKKOS_INLINE_FUNCTION static uint32_t team_scan(const Member & tm, const uint32_t n, Count && count, Write && write) {
-        Kokkos::parallel_scan(Kokkos::TeamThreadRange(tm, n), [&](const uint32_t k, uint32_t & acc, const bool final) {
+    KOKKOS_INLINE_FUNCTION static uint32_t team_scan(const Member & tm, uint32_t * space, const uint32_t n, Count && count,
+                                                     Write && write) {
+        const uint32_t team = tm.team_size(), lane = tm.team_rank();
+        const uint32_t chunk = (n + team - 1) / team;
+        const uint32_t begin = lane * chunk < n ? lane * chunk : n;
+        const uint32_t end = begin + chunk < n ? begin + chunk : n;
+        uint32_t sum = 0;
+        for (uint32_t k = begin; k < end; k++) sum += count(k);
+        space[lane + 1] = sum;
+        tm.team_barrier();
+        if (lane == 0) {
+            space[0] = 0;
+            for (uint32_t t = 1; t <= team; t++) space[t] += space[t - 1];
+        }
+        tm.team_barrier();
+        uint32_t offset = space[lane];
+        for (uint32_t k = begin; k < end; k++) {
             const uint32_t ck = count(k);
-            if (final) write(k, acc);
-            acc += ck;
-        });
-        uint32_t total = 0;
-        Kokkos::parallel_reduce(Kokkos::TeamThreadRange(tm, n), [&](const uint32_t k, uint32_t & sum) { sum += count(k); },
-                                total);
+            write(k, offset);
+            offset += ck;
+        }
+        const uint32_t total = space[team];
         tm.team_barrier();
         return total;
+    }
+
+    /** @brief Scratch of team_scan(): the QR vectors' level-0 space, free outside the fits. */
+    KOKKOS_INLINE_FUNCTION
+    static uint32_t * scan_space(uint32_t * ctl) {
+        return reinterpret_cast<uint32_t *>(reinterpret_cast<char *>(ctl) + 512 + sizeof(double) * teno::MAX_NK);
     }
 
     // ---- the search ---------------------------------------------------------------------------
@@ -1957,7 +1978,7 @@ struct CellTeam {
         const uint32_t last = end[n_end - 1];
         const uint32_t nf = last - begin;
         const uint32_t total = team_scan(
-            tm, nf,
+            tm, scan_space(ctl), nf,
             [&](const uint32_t k) {
                 const uint32_t cl = w.visit_cell[begin + k];
                 return c.g.offsets_cells_of_cell(cl + 1) - c.g.offsets_cells_of_cell(cl);
@@ -1998,7 +2019,7 @@ struct CellTeam {
         tm.team_barrier();
         if (!ctl[SEARCH_OK]) return false;
         const uint32_t added = team_scan(
-            tm, total, [&](const uint32_t p) { return uint32_t(hash_pos[cand_slot[p]] == (tag | p)); },
+            tm, scan_space(ctl), total, [&](const uint32_t p) { return uint32_t(hash_pos[cand_slot[p]] == (tag | p)); },
             [&](const uint32_t p, const uint32_t offset) {
                 if (hash_pos[cand_slot[p]] == (tag | p) && last + offset < caps.visits) {
                     w.visit_cell[last + offset] = cand_cell[p];
@@ -2079,7 +2100,7 @@ struct CellTeam {
             }
             return n;
         };
-        const uint32_t n_pairs = team_scan(tm, n_visits, mirror_faces, [&](const uint32_t v, uint32_t offset) {
+        const uint32_t n_pairs = team_scan(tm, scan_space(ctl), n_visits, mirror_faces, [&](const uint32_t v, uint32_t offset) {
             const uint32_t cl = w.visit_cell[v];
             if (!c.g.has_mirror_face(cl)) return;
             for (uint32_t k = c.g.offsets_faces_of_cell(cl); k < c.g.offsets_faces_of_cell(cl + 1); k++) {
@@ -2203,7 +2224,7 @@ struct CellTeam {
         }
         auto self = [&](const uint32_t v) { return w.visit_cell[v] == i && w.visit_lattice[v] == LATTICE_ZERO; };
         const uint32_t n_entries = team_scan(
-            tm, n_visits,
+            tm, scan_space(ctl), n_visits,
             [&](const uint32_t v) {
                 uint32_t n = self(v) ? 0 : 1;
                 for (uint32_t p = 0; p < n_planes; p++) n += ((w.inside[v * words + p / 32] >> (p % 32)) & 1u) ? 0 : 1;
@@ -2406,7 +2427,7 @@ struct CellTeam {
         const uint32_t n_faces = c.g.offsets_faces_of_cell(i + 1) - f0;
         const uint32_t nq = c.g.quad_weights.extent(1);
         const uint32_t n_psi = team_scan(
-            tm, n_faces * nq,
+            tm, scan_space(ctl), n_faces * nq,
             [&](const uint32_t e) { return uint32_t(c.g.quad_weights(c.g.faces_of_cell(f0 + e / nq), e % nq) != rtype(0)); },
             [&](const uint32_t e, const uint32_t row) {
                 const uint32_t f = c.g.faces_of_cell(f0 + e / nq);
@@ -2629,7 +2650,7 @@ struct CellTeam {
             return w.sector[k * per_face + s];
         };
         const uint32_t n_todo = team_scan(
-            tm, total,
+            tm, scan_space(ctl), total,
             [&](const uint32_t q) {
                 int k, s2;
                 return uint32_t(entry_of(int(q), k, s2) >= n_known);
@@ -3256,6 +3277,7 @@ class Setup3D {
         const Timings & timings() const { return timing; }
 
     private:
+
         /** @brief The host copies of what the device computed, made on first use. */
         void ensure_host() {
             if (host_ready) return;
