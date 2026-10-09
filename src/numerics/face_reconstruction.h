@@ -244,6 +244,13 @@ class MUSCL : public FaceReconstruction {
         uint8_t n_face_quadrature_points() const override;
         void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                               Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) override;
+        std::vector<uint32_t> cells_independent_of_halo(uint32_t n_owned) const override;
+        void calc_cell_face_values(const Kokkos::DefaultExecutionSpace & exec,
+                                   Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                   Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
+                                   Kokkos::View<uint32_t *> cells) override;
+        void finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) override;
 
         LimiterType limiter = LimiterType::VENKATAKRISHNAN;
         rtype venkat_K = 5.0;
