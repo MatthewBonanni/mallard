@@ -146,8 +146,8 @@ void Solver::take_simpler_step() {
         calc_rhs(solution, rhs, t_stage);
         subtract_transport_rate(rhs);
     };
-    const rtype half = 0.5_r * dt;
-    time_integrator->take_step(t + half, half, solution_vec, rhs_vec, corrected);
+    const rtype half_dt = 0.5_r * dt;
+    time_integrator->take_step(t + half_dt, half_dt, solution_vec, rhs_vec, corrected);
 }
 
 void Solver::subtract_transport_rate(const State & rhs) {
