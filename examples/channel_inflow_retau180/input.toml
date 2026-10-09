@@ -16,7 +16,7 @@
 #
 # Results (statistics over t = 40-110, averaged over z; against the periodic
 # channel, docs/design/synthetic_inflow.md):
-#   wall shear C_f            within 5% everywhere, 2% from x = 2h
+#   wall shear C_f            up to 6.5% high near x = 0.7h; within 5% from 1.1h
 #   peak -u'v'+               57% at the inlet, within 5% from x = 4.6h
 #   peak u_rms+, v_rms+       dip to 85% at x = 2-4h; within 5% from 13.7h, 16.6h
 #   all of them               within 5% from about 17h (Keating et al. 2004: about 20h)
