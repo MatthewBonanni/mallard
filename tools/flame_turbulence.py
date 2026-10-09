@@ -270,6 +270,43 @@ def laminar_heat_release(full, mechanism, phase):
     return np.trapezoid(hrr, prof["x"]), np.trapezoid(fuel, prof["x"]), prof
 
 
+def read_npz(path):
+    """The arrays of an uncompressed .npz, also of a truncated one (an interrupted copy): the complete members are
+    read from their local headers, the incomplete last one is dropped."""
+    import io
+    import struct
+    import zipfile
+    try:
+        with np.load(path) as d:
+            return {k: d[k] for k in d.files}
+    except zipfile.BadZipFile:
+        pass
+    raw = open(path, "rb").read()
+    out, pos = {}, 0
+    while True:
+        pos = raw.find(b"PK\x03\x04", pos)
+        if pos < 0:
+            break
+        n_name, n_extra = struct.unpack("<HH", raw[pos + 26:pos + 30])
+        name = raw[pos + 30:pos + 30 + n_name].decode()
+        start = pos + 30 + n_name + n_extra
+        try:
+            buf = io.BytesIO(raw[start:])
+            version = np.lib.format.read_magic(buf)
+            read_header = np.lib.format.read_array_header_1_0 if version == (1, 0) else np.lib.format.read_array_header_2_0
+            shape, fortran, dtype = read_header(buf)
+            count = int(np.prod(shape)) if shape else 1
+            offset = start + buf.tell()
+            if offset + count * dtype.itemsize > len(raw):
+                break
+            a = np.frombuffer(raw, dtype, count, offset).reshape(shape, order="F" if fortran else "C")
+            out[name[:-4] if name.endswith(".npy") else name] = a
+            pos = offset + count * dtype.itemsize
+        except Exception:
+            pos = start
+    return out
+
+
 def snapshots(run):
     """Snapshot groups of RUN/solut: {index: [piece paths]}."""
     groups = {}
@@ -319,8 +356,8 @@ def analyze(args):
     rows, pdf_rows = [], []
     if args.npz:
         def load(path):
-            d = np.load(path)
-            return float(d["t"]), {k: d[k].astype(float) for k in d.files if k not in ("t", "h")}
+            d = read_npz(path)
+            return float(d["t"]), {k: v.astype(float) for k, v in d.items() if k not in ("t", "h")}
         frames = [lambda p=p: load(p) for p in sorted(glob.glob(os.path.join(args.npz, "flame_t*.npz")))]
     else:
         groups = snapshots(args.run)
@@ -341,8 +378,8 @@ def analyze(args):
         i = np.argmax(cbar < 0.5) if cbar[0] >= 0.5 else 0
         x50 = np.interp(0.5, [cbar[i], cbar[i - 1]], [x[i], x[i - 1]]) if i > 0 else np.nan
         brush = 1.0 / np.max(np.abs(np.gradient(cbar, h)))
-        row = {"t": t, "S_c": -f["OMEGA_H2"].sum() * V / (args.fuel_l * area),
-               "S_hrr": f["HRR"].sum() * V / (q_l * area), "A_res": g.sum() * V / area,
+        row = {"t": t, "S_c": -f["OMEGA_H2"].sum() * V / (args.fuel_l * area) if "OMEGA_H2" in f else np.nan,
+               "S_hrr": f["HRR"].sum() * V / (q_l * area) if "HRR" in f else np.nan, "A_res": g.sum() * V / area,
                "A_E": (g * f["TF_E"]).sum() * V / area if "TF_E" in f else np.nan,
                "x_flame": x50, "brush": brush, "T_max": f["T"].max(),
                "fresh": np.clip((T_FRESH - f["T"]) / (T_FRESH - T_U), 0.0, 1.0).sum() * V / area,
@@ -425,8 +462,8 @@ def figure(args):
         rows = np.atleast_2d(np.genfromtxt(path, delimiter=",", skip_header=1))
         pick = rows[(np.abs(rows[:, 0] - float(t_sel)) < 1e-9) & (rows[:, 1] == float(r_sel))]
         if len(pick):
-            ax[3].plot(mid, pick[0, 2:], "k--" if label.startswith("DNS") else "-", label=label,
-                       color=None if label.startswith("DNS") else colors.get(label.split(" (")[0]))
+            color = "k" if label.startswith("DNS") else colors.get(label, f"C{len(ax[3].lines) + 6}")
+            ax[3].plot(mid, pick[0, 2:], "--" if label.startswith("DNS") else "-", label=label, color=color)
     ax[3].set(xlabel=r"$\theta = (T - T_u) / (T_b - T_u)$", ylabel=r"PDF in the brush (0.02 < $\theta$ < 0.98)")
     ax[3].legend(fontsize=7)
     fig.tight_layout()
