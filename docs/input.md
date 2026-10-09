@@ -257,8 +257,8 @@ the zone's faces whose centers satisfy the expression.
 | `dirichlet` | Exterior state from expressions in `x`, `y`, `z`, `t`, evaluated at face centers at every stage | `rho`, `u` (one expression per component), `p` |
 | `p_out` | Outlet: imposes `p` if the outflow is subsonic | `p` |
 | `p_out_average` | Outlet for mixed subsonic/supersonic flow: on subsonic faces, shifts the local pressure so that its area average over the boundary equals `p`, preserving the transverse profile | `p` |
-| `nscbc_outlet` | Partially non-reflecting characteristic outlet (Poinsot & Lele): outgoing waves leave, and each face's incoming acoustic wave relaxes its pressure toward `p` at the rate `K = sigma c (1 - M^2) / L`. Waves of frequency `omega` reflect by `1 / sqrt(1 + (2 omega / K)^2)` | `p`, `L` (a length of the domain), `sigma` (default 0.25; 0 is perfectly non-reflecting but lets the mean pressure drift, large values approach `p_out`), `beta` (the weight of the transverse terms in the incoming wave, 0 to 1: default the local Mach number, as Lodato et al.; 1 is Poinsot & Lele's original condition, 0 drops them) |
-| `nscbc_inlet` | Partially non-reflecting characteristic inlet: the incoming acoustic wave relaxes the normal velocity toward `u` as `nscbc_outlet` relaxes the pressure; temperature and tangential velocity are imposed, or relaxed with `sigma_T`, `sigma_t`; the composition is imposed. Supersonic inflow imposes `u`, `p`, `T` | `u`, `p` (reference pressure, for supersonic inflow), `T`, `L`, `sigma` (default 0.25), `sigma_T`, `sigma_t` (optional), `beta`, and `X` or `Y` for mixtures (numbers or expressions, as `upt`) |
+| `nscbc_outlet` | Partially non-reflecting characteristic outlet (Poinsot & Lele): outgoing waves leave, and each face's incoming acoustic wave relaxes its pressure toward `p` at the rate `K = sigma c (1 - M^2) / L`. Waves of frequency `omega` reflect by `1 / sqrt(1 + (2 omega / K)^2)` | `p`, `L` (a length of the domain), `sigma` (default 0.25; 0 is perfectly non-reflecting but lets the mean pressure drift, large values approach `p_out`), `beta` (the weight of the transverse terms in the incoming wave, 0 to 1: default the local Mach number, as Lodato et al.; 1 is Poinsot & Lele's original condition, 0 drops them. Faces next to walls and other boundaries, and faces with reversed flow, have none, which keeps eddies that reverse the flow at the outlet from driving it unstable) |
+| `nscbc_inlet` | Partially non-reflecting characteristic inlet: the incoming acoustic wave relaxes the normal velocity toward `u` as `nscbc_outlet` relaxes the pressure; temperature and tangential velocity are imposed, or relaxed with `sigma_T`, `sigma_t`; the composition is imposed. Supersonic inflow imposes `u`, `p`, `T` | `u` (numbers, or expressions in `x`, `y`, `z` evaluated at face centers), `p` (reference pressure, for supersonic inflow), `T`, `L`, `sigma` (default 0.25), `sigma_T`, `sigma_t` (optional), `beta` (default 0 with turbulence, whose own incoming wave carries the transverse terms), `X` or `Y` for mixtures (numbers or expressions, as `upt`), and an optional `[boundaries.turbulence]` table (below) |
 
 Characteristic conditions change only the exterior state of the convective
 flux; viscous terms treat them like `extrapolation` (image faces, or zero
@@ -268,6 +268,44 @@ normal velocity between steps, and restart files carry them, so a restarted
 run reproduces an uninterrupted one bitwise, also on a different number of
 ranks (restart files older than version 4 start them afresh from the
 solution). See [docs/design/nscbc.md](design/nscbc.md).
+
+### Synthetic turbulence (`[boundaries.turbulence]`)
+
+An `nscbc_inlet` with a `turbulence` table adds synthetic turbulence to its
+target velocity: the digital filter of Klein, Sadiki & Janicka (Gaussian
+correlations of the given integral lengths across the inlet and, by Taylor's
+hypothesis, in time), scaled to the given Reynolds stress by its Cholesky
+factor (Lund, Wu & Squires). The tangential fluctuations are imposed, the
+normal one enters through the face's incoming acoustic wave, which follows the
+target's change without reflecting outgoing waves. The field depends only on
+the time, the seed and the inlet, so runs are bitwise the same on any number
+of ranks and across restarts. The inlet must be planar and normal to a
+coordinate axis; a periodic direction across it makes the field periodic. See
+[docs/design/synthetic_inflow.md](design/synthetic_inflow.md).
+
+| Key | Description |
+|---|---|
+| `reynolds_stress` | `[R_xx, R_yy, R_zz, R_xy, R_xz, R_yz]` (2D: `[R_xx, R_yy, R_xy]`), numbers or expressions in `x`, `y`, `z`, positive semidefinite |
+| `profile` | Instead of `u` and `reynolds_stress`: a CSV file of plane averages as `tools/plane_average.py` writes them (a first column `x`, `y` or `z`, then `MEAN_U_X`, `MEAN_U_Y`(, `MEAN_U_Z`) and `COV_U_X_U_X`, ...; missing off-diagonal covariances are zero), interpolated linearly along that coordinate: the statistics of a precursor run |
+| `length_scale` | Integral length scales: a number, `[L_x, L_y, L_z]` (along each direction, for all components), or one such list per velocity component. The one along the inlet normal sets the integral time scale `L / U_c` |
+| `convection_velocity` | `U_c` of Taylor's hypothesis (default the area-averaged mean inflow speed) |
+| `seed` | Random seed, a non-negative integer (default 1); inlets also differ by their position in `[[boundaries]]` |
+| `zero_net_flux` | `true` (default) removes the area mean of the normal fluctuation over the inlet at every instant, which would otherwise drive a plane acoustic wave; it also removes about `4 L_y L_z / A` of the normal Reynolds stress for an inlet of area `A` |
+| `points_per_length` | Resolution of the generator's grid on the inlet: points per smallest integral length (default 6, at least 2) |
+
+```toml
+[[boundaries]]
+name = "inlet"
+type = "nscbc_inlet"
+u = [1.0, 0.0, 0.0]
+p = 17.857
+T = 1.0
+L = 6.0
+
+[boundaries.turbulence]
+reynolds_stress = [0.01, 0.01, 0.01, 0.0, 0.0, 0.0]
+length_scale = 0.25
+```
 
 ## `[[sponges]]`
 
@@ -285,7 +323,7 @@ Strength and reference are evaluated once at cell centroids.
 
 | Key | Description |
 |---|---|
-| `riemann_solver` | `Rusanov`, `HLL`, `HLLC` (default), `Roe`, or `RHLL` (rotated hybrid HLL-Roe, carbuncle-free) |
+| `riemann_solver` | `Rusanov`, `HLL`, `HLLC` (default), `Roe`, or `RHLL` (rotated hybrid HLL-Roe, carbuncle-free except at shocks at rest on cell faces; see [numerics](numerics/overview.md#stationary-shocks-on-cell-faces)) |
 | `time_integrator` | `FE`, `SSPRK3` (default) or `RK4` |
 | `check_nan` | Stop if the solution becomes non-finite |
 | `double_flux` | (gas mixtures) `true` for the double-flux scheme: each cell's energy is updated with its own `cp / cv` and energy offset frozen over the time step on both sides of its faces, and reset to the true equation of state after the step, so pressure and velocity stay exactly uniform across contacts between different gases. Energy is then not exactly conserved (about 0.2% over a multicomponent shock tube). Default `false` |
