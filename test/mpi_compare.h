@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <span>
 #include <string>
 #include <vector>
@@ -28,11 +29,13 @@
  * @brief Run the input distributed and serially; every rank compares the
  *        gathered distributed solution with its serial one.
  */
-inline void expect_matches_serial(const std::string & input) {
+inline void expect_matches_serial(const std::string & input,
+                                  const std::function<void(const Solver &)> & check_distributed = {}) {
     Solver distributed;
     distributed.init(parse_toml(input));
     distributed.run();
     distributed.copy_device_to_host();
+    if (check_distributed) check_distributed(distributed);
 
     Solver serial;
     serial.set_distributed(false);
