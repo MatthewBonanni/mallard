@@ -60,14 +60,14 @@
 #   r/delta_L  u'/S_L  Ka(r)  outcome    Q/Q_0      q_min  escaped
 #   1          30      30     no effect  1.00-1.01  0.97   0
 #   1          100     100    wrinkled   1.00-1.25  0.52   0
-#   2          10      5      (running)
+#   2          10      5      no effect  1.00-1.02  0.95   0
 #   2          30      15     wrinkled   1.00-1.21  0.82   0
 #   2          100     50     quenched   1.00-1.83  0.02   0.30
 #   4          3       0.75   no effect  1.00-1.04  0.93   0
 #   4          10      2.5    wrinkled   1.00-1.45  0.80   0
 #   4          30      7.5    quenched   1.00-2.25  0.005  0.30
 #   4          100     25     quenched   1.00-4.36  0.0002 0.88
-#   8          10      1.25   (running)
+#   8          10      1.25   (running; a pocket so far)
 #   8          40      5      quenched   1.00-2.17  0.0000 0.98
 #   8          100     12.5   quenched   1.00-4.50  0.0000 1.00
 #
@@ -113,7 +113,9 @@
 #   optically thin (no reabsorption).
 #
 # Resolution: the r = 4, u' = 30 run at 24 cells per delta_L (552 x 192, over
-# its first 2 flame times) gives (running).
+# its first 2 flame times) quenches too: q_min 0.002 (0.005 at 12 cells), the
+# largest Q / Q_0 2.14 against 2.25 and up to 43% of the inlet's CH4 at the
+# outlet (30%).
 #
 # Cost on one A100 (the flame time delta_L / S_L = 0.112 s is about 520,000
 # steps at 12 cells per delta_L): r = 4 (276 x 96 cells) 1.2-2 hours,

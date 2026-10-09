@@ -691,7 +691,7 @@ as two quartics joined at 750 K (`src/chemistry/radiation.h`).
 
   | Mixture | Cantera S_L adiabatic / radiating [cm/s] | Mallard S_c adiabatic / radiating | S_rad / S_ad: Cantera, Mallard |
   |---|---|---|---|
-  | CH4/air phi = 0.6, GRI-3.0 | 11.436 / 11.136 | (running) | 0.974 / (running) |
+  | CH4/air phi = 0.6, GRI-3.0 | 11.436 / 11.136 | 11.263 / 10.964 | 0.9738 / 0.9735 |
   | CH4/air phi = 0.5, GRI-3.0 | 4.880 / 3.958 | 4.821 / 3.935 (3 flame times, still slowing by 0.5% per 0.3) | 0.811 / 0.816 |
   | CH4/air phi = 0.44, two-step (`ch4_bfer.yaml`) | 4.231 / 3.600 | 4.194 / 3.568 | 0.8509 / 0.8507 |
 
