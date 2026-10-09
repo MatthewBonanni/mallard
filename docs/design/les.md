@@ -342,9 +342,15 @@ periodic or walled domain the exact (continuous) contributions are
 - molecular viscosity: `-eps_mol = -int tau : grad u dV`,
 - SGS: `-eps_sgs = -int tau_sgs : grad u dV`.
 
-The **numerical dissipation** is then `eps_num = Pi - dK/dt|_conv`, with
-`Pi` from the cell gradients, and the run reports `eps_mol`, `eps_sgs`,
-`eps_num` and `Pi` in `[integrals]` (with `budget = true`). The criterion
+The **numerical dissipation** is then `eps_num = Pi_h - dK/dt|_conv`, with
+`Pi_h` the scheme's own pressure work: on interior faces, the work of the
+two-point pressure flux `mean(p) n` of the cell values, `sum_f mean(p) (u_1 -
+u_0) . n A_f` (a central flux with first-order states changes `K` by exactly
+this, section 4.3), plus the whole kinetic-energy rate of the boundary faces'
+fluxes, so that `eps_num` is the dissipation of the interior faces. The run
+reports `eps_mol`, `eps_sgs`, `eps_num`, `Pi_h` (`pressure_work`) and `Pi`
+from the cell gradients (`pressure_dilatation`) in `[integrals]` (with
+`budget = true`). The criterion
 for an LES result to count as explicit-model LES is **`eps_num <= 0.5 eps_sgs`
 averaged over the analysis window**, i.e. the model removes at least two
 thirds of the energy that leaves the resolved scales through the cutoff.
@@ -353,11 +359,19 @@ together (dK/dt of the convective operator, whatever causes it); the time
 integrator's dissipation (SSPRK3's, of order `(lambda dt)^4`) is not
 included and is negligible at the CFL numbers used.
 
-Uncertainty of the diagnostic: `Pi` uses the viscous least-squares (or TENO)
-gradients, so `eps_num` is exact only up to the discretization error of
-`Pi`. In the validation cases (`M_t <= 0.2`) `|Pi|` is a few percent of the
-total dissipation, so this does not affect the criterion; the report gives
-`Pi` alongside.
+Why the discrete pressure work: until #197 `eps_num` was `Pi - dK/dt|_conv`
+with `Pi` from the cell gradients, exact only up to their discretization
+error. That is harmless where `|Pi|` is a few percent of the dissipation
+(isotropic turbulence and the channel at `M_t <= 0.2`: on the 64^3 CBC case
+with Sigma `C = 1.8` the numerical share is -0.9% with `Pi_h` against +0.7%
+with `Pi`), but not in a flame at 1 atm, where thermal expansion makes `p
+div u` 1e3 to 1e4 times the dissipation and the gradient estimate of `Pi`
+then measures its own error (initial state of a coarse run of section 8.3's
+flame: `Pi = 18.6` W from the gradients, dominated by the gas leaving
+through the outlet at 1 atm, against `Pi_h = 0.022` W, `dK/dt|_conv =
+0.024` W and an SGS dissipation of 0.0014 W). `Pi_h` uses the same face pressures and cell velocities as the
+convective operator, so constant pressure cancels exactly and the open
+boundaries' fluxes (an outlet's `p u . n`) drop out.
 
 ### 4.3 Low-dissipation convective flux (decision 7)
 
@@ -850,6 +864,124 @@ figure: Sigma with Scotti's width, the default). MKM's `Re_tau = 587.2`:
    is laminar in most LES studies, so it does **not** need #159; a slot or
    Bunsen flame (Filatyev et al. 2005; Dunn et al. 2010) would, and is listed
    as conditional on #159.
+
+#### Results: premixed flame in decaying turbulence (`examples/flame_turbulence`)
+
+![DNS and TFLES of the H2/air flame in decaying turbulence](../images/flame_turbulence_render.png)
+
+![Flame speed, consumption speed, flame surface and temperature PDFs](../images/flame_turbulence_les.png)
+
+DNS reference (`input.toml`): stoichiometric H2/air, `S_L = 2.332` m/s,
+`delta_L = 0.330` mm, 224 x 128 x 128 cells of `delta_L / 10`, `u' = 2.1
+S_L`, `l_t / delta_L = 2.4`, `Ka = 2.0`; `h / eta = 1.4`, numerical
+dissipation 0.4% of the total. The turbulent flame speed `S_T` is the rate
+at which the fresh-gas volume (`theta < 0.5`, smooth) decreases per unit
+cross-section (the fresh gas is at rest against the closed end), fitted
+over the window. LES (`les.toml`): the same initial field box-filtered to
+`Delta = 4, 8, 16` DNS cells (0.40, 0.80, 1.60 `delta_L`; `F = 2, 4, 8`
+at `n_res = 5`), domains extended on the burnt side so the thickened
+burnt-gas profile is not truncated. Variants: TFLES with Colin's subgrid
+velocity (the default), TFLES with `u' = C_u nu_t / Delta` (`C_u = 28`),
+TFLES with `E = 1`, quasi-laminar (Sigma model, no flame model), and no
+model at all. Laminar check: the thickened laminar flames in the same
+domains give `S_T / S_L` = 0.98-1.03.
+
+`S_T / S_L` and its error against the DNS (1.132 over 0.2-0.4 ms; 1.233
+over 0.3-0.4 ms, when the wrinkling has developed):
+
+| `Delta / delta_L` | Colin (default) | `C_u = 28` | `E = 1` | quasi-laminar | no model |
+|---|---|---|---|---|---|
+| 0.4 (`F = 2`) | 1.056 (-6.7%) / 1.114 (-9.7%) | 1.065 (-5.9%) / 1.126 (-8.7%) | 1.050 (-7.2%) | 1.088 (-3.9%) / 1.156 (-6.2%) | 1.086 (-4.0%) |
+| 0.8 (`F = 4`) | 1.053 (-6.9%) / 1.136 (-7.9%) | 1.034 (-8.6%) / 1.082 (-12%) | 0.985 (-13%) | 1.166 (+3.0%) / 1.265 (+2.6%) | 1.164 (+2.8%) |
+| 1.6 (`F = 8`) | **2.240 (+98%)** / 2.361 (+91%) | 1.008 (-11%) / 1.042 (-16%) | 0.947 (-16%) | 1.051 (-7.1%) / 1.221 (-1.0%) | 1.058 (-6.6%) |
+
+(two numbers: windows 0.2-0.4 / 0.3-0.4 ms.)
+
+- **TFLES** converges to the DNS from below as `Delta` decreases and is
+  smooth in time (rms deviation of `S_T(t)` from the DNS 8-20%), with
+  `|eps_num / eps_sgs| <= 0.14` (Colin r16: 0.20). The thickened flame
+  loses most of the resolved wrinkling at `F = 8` (resolved surface 0.96
+  of the cross-section against the DNS's 1.13), so `E` must supply it.
+- **Colin's subgrid velocity overshoots at `Delta = 1.6 delta_L`**: mean
+  `E = 2.10` and `S_T` +98%. The a priori test on the filtered DNS
+  (`tools/tfles_apriori.py`, t = 0.125-0.2 ms, fresh gas next to the flame)
+  shows why: Colin's `u' = 2 Delta^3 |lap(curl u)|` is 3.3 / 7.0 / 10 `S_L`
+  at `Delta` = 0.4 / 0.8 / 1.6 `delta_L`, while the DNS's velocity
+  fluctuation below `F delta_L` is 0.6 / 1.0 / 1.2 `S_L` (5-8 times less);
+  the wrinkling factor of the DNS's flame surface at the scale `F
+  delta_L` is 1.003 / 1.009 / 1.022, against Colin's `E` = 1.01 / 1.16 /
+  1.80. On coarse meshes the operator is dominated by the largest resolved
+  eddies, which the factor 2 calibration of Colin et al. (at `Delta` well
+  inside the inertial range) does not cover. Lowering `beta` to 0.3 halves
+  the overshoot (`S_T` 1.24 at `F = 8`) but does not fix the operator.
+- **Option `subgrid_velocity = "eddy_viscosity"`**: `u' = C_u nu_t /
+  Delta`. On the same filtered DNS, Mallard's Sigma `nu_t` gives `C_u` =
+  22 / 28 / 39 at the three widths (a priori, `Delta`-dependent).
+  Sensitivity a posteriori, `S_T` over 0.2-0.4 ms: `C_u` = 22 / 28 / 39
+  gives 0.975 / 1.008 / 1.138 at `F = 8` and 1.013 / 1.034 / 1.101 at `F =
+  4`. It removes the overshoot, but `C_u` is calibrated on this DNS.
+- **Quasi-laminar and model-off** runs have the closest mean `S_T` on
+  coarse meshes but are erratic in time (rms deviation 32-36% at `Delta >=
+  0.8 delta_L`): the flame is one or two cells thick, its speed is set by
+  the scheme, and the numerical dissipation is 15% (quasi-laminar, `F =
+  8`; `eps_num / eps_sgs` = 0.39) and 21% (no model) of the total. They
+  are not LES by the criterion of section 4.2 at `Delta = 1.6 delta_L`.
+- Temperature PDFs in the flame brush (DNS box-filtered to the LES
+  width): L1 distance 0.32 / 0.58 / 0.64 for TFLES, 0.04 / 0.12 / 0.33
+  quasi-laminar. TFLES puts the brush at intermediate temperatures, as a
+  thickened flame must; the unthickened flame matches the filtered DNS's
+  bimodal shape better at small `Delta`.
+
+**Independent check (case 2)**, not used for any calibration: a second DNS
+with a different turbulent field (seed 2, `u' = 1.42 S_L`, `l_t = 0.75`
+mm, 176 x 96 x 96 cells of `delta_L / 10`, to 0.35 ms) and the same LES
+variants. The turbulence is weaker and the flame stays nearly flat (DNS
+resolved surface 0.97-1.00, `S_T / S_L` = 0.996 over 0.15-0.35 ms), so the
+case tests whether a model invents wrinkling that is not there:
+
+| `Delta / delta_L` | Colin (default) | `C_u = 28` | `E = 1` | no model |
+|---|---|---|---|---|
+| 0.4 | 0.990 (-0.5%) | 0.991 (-0.5%) | 0.991 (-0.5%) | 0.989 (-0.6%) |
+| 0.8 | 0.960 (-3.6%) | 0.974 (-2.2%) | 0.975 (-2.0%) | 0.989 (-0.7%, rms 46%) |
+| 1.6 | **1.964 (+97%)**, `E = 1.78` | 0.993 (-0.2%), `E = 1.03` | 1.001 (+0.5%) | 0.930 (-6.6%, rms 47%) |
+
+Colin's operator doubles the flame speed at `Delta = 1.6 delta_L` here too,
+with almost no subgrid wrinkling to model; `C_u = 28` stays within 4% at
+every width (over 0.25-0.35 ms as well). This confirms the overshoot and
+that the eddy-viscosity velocity does not add spurious wrinkling, but it
+cannot validate the magnitude of `C_u`: `E = 1` is as good in this case.
+In the weak turbulence the SGS dissipation is small and `eps_num` is
+negative (the scheme adds no dissipation of its own); `eps_num <= 0.5
+eps_sgs` holds for every TFLES run of both cases.
+
+**Decision.** Colin's operator stays the default (it is the published
+model) and `subgrid_velocity = "eddy_viscosity"` (`C_u = 28`) is an
+opt-in. Colin's efficiency overpredicts the turbulent flame speed by about
+a factor of 2 at `Delta = 1.6 delta_L` (`F = 8`) in both cases, and is
+within 10% for `Delta <= 0.8 delta_L`; for coarser meshes use
+`eddy_viscosity` or `efficiency = "none"`. `C_u = 28` is calibrated a
+priori on case 1 and only checked for the absence of overshoot on case 2;
+`S_T` changes by -3% to +13% over the a priori range `C_u` = 22-39 (case 1, `F = 8`).
+
+#### Results: non-premixed flame in decaying turbulence (PaSR, experimental)
+
+DNS: an H2/N2 (25% H2) - air counterflow diffusion flame profile (`K = 160`
+1/s, peak 1544 K, `Z_st = 0.556`) in the box and turbulence of the premixed
+DNS, pressure outlets on both ends, to 0.4 ms (`tools/flame_turbulence.py
+init --x-f`, `analyze --z-fuel --z-st`). LES at `Delta` = 0.27 and 0.53 mm
+(8 and 16 DNS cells) with the Sigma model and `[les.combustion] model =
+"pasr"`, against quasi-laminar chemistry. Heat release over 0.2-0.4 ms
+(DNS: stoichiometric surface 1.58, `T` there 1262 K):
+
+| `Delta` | PaSR | quasi-laminar |
+|---|---|---|
+| 0.27 mm | -10.7% (`kappa` 0.62 at `Z_st`) | +16.6% |
+| 0.53 mm | -50% (`T_st` 892 K: near extinction; `kappa` 0.26) | +41% |
+
+`eps_num / eps_sgs` <= 0.10 (PaSR) and 0.23 (quasi-laminar). PaSR moves the
+heat release the right way at the finer width and overcorrects at the
+coarser one, where `tau_mix = Delta^2 / (nu + nu_t)` with `C_mix = 1`
+overestimates the mixing time; it ships as experimental, not as a default.
 
 ## 9. Stages
 

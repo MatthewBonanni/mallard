@@ -885,7 +885,7 @@ void Solver::init_output() {
                                           "velocity_squared,vorticity_squared,density_squared,temperature,"
                                           "temperature_squared"
                                        << (integral_monitor.budget ? ",ke_rate_convective,ke_rate_viscous,ke_rate_sgs,"
-                                                                     "eps_numerical"
+                                                                     "eps_numerical,pressure_work"
                                                                    : "")
                                        << (les_on && les.dynamic ? ",les_C" : "") << "\n";
             }
@@ -939,12 +939,13 @@ void Solver::allocate_memory() {
     if (is_mixture() && is_viscous()) {
         cell_transport =Kokkos::View<rtype *[3]>("cell_transport", mesh->n_cells);
         h_cell_transport = Kokkos::create_mirror_view(cell_transport);
-        cell_diffusion = Kokkos::View<double **, Kokkos::LayoutRight>("cell_diffusion", mesh->n_cells, n_species);
+        const uint32_t n_diffusion = (mixture.transport.thermal_diffusion ? 2 : 1) * n_species;
+        cell_diffusion = Kokkos::View<double **, Kokkos::LayoutRight>("cell_diffusion", mesh->n_cells, n_diffusion);
         transport_values = Kokkos::View<rtype **, Kokkos::LayoutRight>("transport_values", mesh->n_cells,
                                                                        N_DIM + 1 + n_species);
         transport_gradients = Kokkos::View<rtype ***, Kokkos::LayoutRight>("transport_gradients", mesh->n_cells,
                                                                            N_DIM + 1 + n_species, N_DIM);
-        h_D = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("D", mesh->n_cells, n_species);
+        h_D = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("D", mesh->n_cells, n_diffusion);
     }
     if (is_mixture()) {
         const uint32_t n_quad = face_reconstruction->n_face_quadrature_points();
@@ -1012,6 +1013,7 @@ void Solver::copy_device_to_host() {
                 for (size_t k = 0; k < species_names.size(); k++) {
                     h_D(c, k) = static_cast<rtype>(h_c(c, k) / (rho * mech.species[k].molecular_weight * n));
                 }
+                for (size_t k = species_names.size(); k < h_D.extent(1); k++) h_D(c, k) = static_cast<rtype>(h_c(c, k));
             }
         }
         if (reacting) {
@@ -1040,6 +1042,7 @@ void Solver::copy_device_to_host() {
         Kokkos::deep_copy(h_les_coefficients, les_coefficients);
     }
     if (tfles_on) Kokkos::deep_copy(h_tfles_fields, tfles_fields);
+    if (pasr_on) Kokkos::deep_copy(h_chem_time_scale, chem_time_scale);
     statistics.copy_device_to_host();
     if (p_max.is_allocated()) Kokkos::deep_copy(h_p_max, p_max);
     if (vortex_fields.is_allocated()) {
@@ -1073,6 +1076,13 @@ void Solver::register_data() {
             for (size_t k = 0; k < species_names.size(); k++) {
                 data.push_back(Data("D_" + species_names[k], Kokkos::subview(h_D, Kokkos::ALL(), k)));
             }
+            if (h_D.extent(1) > species_names.size()) {
+                data.reserve(data.size() + species_names.size());
+                for (size_t k = 0; k < species_names.size(); k++) {
+                    data.push_back(Data("DT_" + species_names[k],
+                                        Kokkos::subview(h_D, Kokkos::ALL(), species_names.size() + k)));
+                }
+            }
         }
         if (reacting) {
             data.push_back(Data("CHEM_H", h_chem_h));
@@ -1093,6 +1103,7 @@ void Solver::register_data() {
         data.push_back(Data("TF_E", Kokkos::subview(h_tfles_fields, Kokkos::ALL(), 1)));
         data.push_back(Data("TF_OMEGA", Kokkos::subview(h_tfles_fields, Kokkos::ALL(), 2)));
     }
+    if (pasr_on) data.push_back(Data("PASR_KAPPA", h_chem_time_scale));
     statistics.register_data(data);
     if (p_max.is_allocated()) data.push_back(Data("P_MAX", h_p_max));
     if (vortex_fields.is_allocated()) {
@@ -1332,6 +1343,7 @@ void Solver::print_setup() const {
     if (check_nan) logging::item("NaN check", "every step");
     if (les_on) logging::items(les.summary());
     if (tfles_on) logging::items(thickened_flame.summary());
+    if (pasr_on) logging::items(pasr.summary());
     if (double_flux) logging::item("Double flux", "frozen gamma and e0 per cell and step (not energy conservative)");
     if (reacting) {
         logging::item("Chemistry", std::to_string(kinetics.n_reactions) + " reactions, Strang splitting" +
@@ -1882,9 +1894,9 @@ void Solver::write_integrals() {
     *integral_monitor.out << step << "," << std::setprecision(12) << t;
     for (const rtype s : sums) *integral_monitor.out << "," << s;
     if (integral_monitor.budget) {
-        // The exact convective rate is the pressure-dilatation work; the rest is numerical
+        // The exact convective rate is the pressure work; the rest is numerical
         *integral_monitor.out << "," << rates.convective << "," << rates.viscous << "," << rates.sgs << ","
-                              << sums[3] - rates.convective;
+                              << rates.pressure_work - rates.convective << "," << rates.pressure_work;
     }
     if (les_on && les.dynamic) *integral_monitor.out << "," << les.C;
     *integral_monitor.out << "\n";
