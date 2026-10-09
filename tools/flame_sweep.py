@@ -7,7 +7,8 @@
 setup writes one run per fuel, phi, transport model, resolution and CFL with
 tools/flame_restart.py, from the full solutions of tools/flame_reference.py
 (FULL_DIR/<case>_full.csv), into RUNS_DIR/<case>_c<cells>_cfl<cfl>, with ten
-outputs per flame time delta_T / S_L.
+outputs per flame time delta_T / S_L and a restart file every half flame time
+(RUN_DIR/restart/) to resume from.
 
 report reads every run in RUNS_DIR and, against Cantera's flame speed S_L
 (examples/premixed_flame/reference/flames.csv), gives the consumption speed
@@ -15,8 +16,10 @@ S_c averaged over the last flame time, its drift (the mean over the last half
 flame time against the mean over the half before), the displacement speed S_d
 (inflow speed minus the front's drift, fitted over the last flame time), and,
 for the last output, the peak heat release rate against Cantera's and the
-largest temperature difference (tools/plot_flame.py). With --png it plots the
-flame speeds against phi and their errors for each resolution and CFL.
+largest temperature difference (tools/plot_flame.py). A run at a CFL other
+than 1 is also compared with the CFL 1 run of the same case over the same
+flame time (vs_cfl1, in %). With --png it plots the flame speeds against phi
+and their errors for each resolution and CFL.
 """
 import argparse
 import csv
@@ -46,6 +49,7 @@ def references():
 
 
 def setup(args):
+    refs = references()
     for phi in args.phi:
         for model in args.transport:
             case = case_name(args.fuel, phi, model)
@@ -58,6 +62,10 @@ def setup(args):
                                     f"{cells:g}", run_dir, "--cfl", f"{cfl:g}", "--transport", TRANSPORT[model],
                                     "--flame-times", f"{args.flame_times:g}",
                                     "--outputs", str(int(round(10 * args.flame_times)))], check=True)
+                    tau = float(refs[case]["delta_T"]) / float(refs[case]["S_L"])
+                    with open(os.path.join(run_dir, "input.toml"), "a") as f:
+                        f.write(f'\n[[write_data]]\nprefix = "./restart/flame"\nformat = "restart"\n'
+                                f"time_interval = {tau / 2:.17g}\n")
 
 
 def measure(run_dir, ref):
@@ -72,7 +80,7 @@ def measure(run_dir, ref):
     return {"flame_times": end / tau, "S_c": S_c[last].mean(),
             "drift": 100 * (S_c[late].mean() / S_c[early].mean() - 1),
             "S_d": S_d, "err_c": 100 * (S_c[last].mean() / S_L - 1), "err_d": 100 * (S_d / S_L - 1),
-            "dT_max": dT, "err_hrr": hrr}
+            "dT_max": dT, "err_hrr": hrr, "tau": tau, "series": (t, S_c)}
 
 
 def report(args):
@@ -87,8 +95,17 @@ def report(args):
         r = dict(fuel=m["fuel"], phi=float(m["phi"]), transport=m["model"], cells=float(m["cells"]),
                  cfl=float(m["cfl"]), S_L=float(ref["S_L"]), **measure(run_dir, ref))
         results.append(r)
+    for r in results:
+        r["vs_cfl1"] = float("nan")
+        base = [b for b in results if b["cfl"] == 1.0 and r["cfl"] != 1.0 and
+                all(b[k] == r[k] for k in ("fuel", "phi", "transport", "cells"))]
+        t, S_c = r["series"]
+        if base and base[0]["series"][0][-1] >= t[-1] * (1 - 1e-6):
+            tb, S_b = base[0]["series"]
+            window = lambda tt: (tt >= t[-1] - r["tau"] * (1 + 1e-6)) & (tt <= t[-1] * (1 + 1e-6))
+            r["vs_cfl1"] = 100 * (S_c[window(t)].mean() / S_b[window(tb)].mean() - 1)
     keys = ["fuel", "phi", "transport", "cells", "cfl", "flame_times", "S_L", "S_c", "err_c", "drift", "S_d",
-            "err_d", "err_hrr", "dT_max"]
+            "err_d", "err_hrr", "dT_max", "vs_cfl1"]
     print(" ".join(f"{k:>11}" for k in keys))
     for r in results:
         print(" ".join(f"{r[k]:>11.5g}" if isinstance(r[k], float) else f"{r[k]:>11}" for k in keys))
