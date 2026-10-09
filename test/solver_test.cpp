@@ -428,16 +428,20 @@ TEST(SolverValidation, ObliqueShockOverWedgeMatchesTheory) {
 namespace {
 
 /**
- * @brief Largest transverse velocity after 3000 steps of a standing Mach 6
- *        normal shock on a grid-aligned quad mesh with a tiny density bump
- *        behind it (the setup that triggers the carbuncle instability).
+ * @brief Largest transverse velocity after 10000 steps of a Mach 6 normal
+ *        shock on a grid-aligned quad mesh with a tiny density bump behind
+ *        it (the setup that triggers the carbuncle instability). The shock
+ *        drifts downstream at w, about eight cells over the run, so that no
+ *        face holds it at rest, where Einfeldt's left wave speed is the sonic
+ *        Roe-averaged one and its sign is round-off (docs/numerics/overview.md).
  */
 double carbuncle_growth(const std::string & riemann) {
-    const double rho1 = 1.0, u1 = 6.0, p1 = 1.0 / 1.4;
-    const double rho2 = 5.2682926829268295, u2 = 1.1388888888888888, p2 = 29.880952380952383;
+    const double w = 0.03;
+    const double rho1 = 1.0, u1 = 6.0 + w, p1 = 1.0 / 1.4;
+    const double rho2 = 5.2682926829268295, u2 = 1.1388888888888888 + w, p2 = 29.880952380952383;
     std::ostringstream s;
     s << std::setprecision(17)
-      << "[run]\nn_steps = 3000\ncfl = 0.2\n"
+      << "[run]\nn_steps = 10000\ncfl = 0.2\n"
       << "[mesh]\ntype = \"cartesian\"\nNx = 40\nNy = 40\nLx = 1.0\nLy = 1.0\n"
       << "[initialize]\ntype = \"analytical\"\n"
       << "rho = \"x < 0.5 ? " << rho1 << " : " << rho2
@@ -471,8 +475,8 @@ double carbuncle_growth(const std::string & riemann) {
 TEST(SolverValidation, RotatedHybridRiemannSolverIsCarbuncleFree) {
     SKIP_IN_SINGLE_PRECISION("at Mach 6, p = (gamma - 1) (E - rho u^2 / 2) has relative round-off ~3e-6, "
                              "which this shock amplifies to O(0.1) cross-flow for HLL and HLLC too");
-    EXPECT_GT(carbuncle_growth("Roe"), 0.1);
-    EXPECT_LT(carbuncle_growth("RHLL"), 1e-10);
+    EXPECT_GT(carbuncle_growth("Roe"), 1.0);
+    EXPECT_LT(carbuncle_growth("RHLL"), 1e-4);
 }
 
 TEST(SolverTest, ResultIsIndependentOfThreadCount) {
