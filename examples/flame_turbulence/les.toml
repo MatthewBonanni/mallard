@@ -1,0 +1,107 @@
+# LES of the premixed H2/air flame in decaying turbulence (3D build): the
+# DNS of input.toml on a mesh 8 times coarser, Delta = 0.80 delta_L, with
+# the thickened flame model (TFLES, F = n_res Delta / delta_L = 4) and the
+# Sigma SGS model. Design and results: docs/design/les.md, section 8.3.
+#
+# Mesh: 60 x 16 x 16 cubes of 8 DNS cells (264 um); the DNS box plus 256 DNS
+# cells on the burnt side, so the thickened flame's burnt-gas profile
+# (6 F delta_L) is not cut by the outlet. Initial field: the DNS's
+# turbulence and laminar flame box-filtered to the LES mesh, the flame
+# thickened by F (flame_turbulence.py init --ratio 8 --thicken 4).
+#
+# Results, turbulent flame speed S_T / S_L (rate of fresh-gas consumption
+# per cross-section) against the DNS, t = 0.2-0.4 / 0.3-0.4 ms:
+#   DNS                                   1.132 / 1.233
+#   TFLES, Colin's u' (this input)        1.053 (-6.9%) / 1.136 (-7.9%), E 1.19
+#   TFLES, subgrid_velocity = "eddy_viscosity" (C_u = 28)
+#                                         1.034 (-8.6%) / 1.082 (-12%)
+#   TFLES, efficiency = "none"            0.985 (-13%)
+#   Sigma only (quasi-laminar)            1.166 (+3.0%), but erratic in time (rms 36%)
+# eps_num / eps_sgs = -0.07 (TFLES). At Ny = Nz = 8 (Delta = 1.6 delta_L,
+# F = 8) Colin's u' overshoots: E 2.1, S_T +98%; use subgrid_velocity =
+# "eddy_viscosity" there (S_T -11%).
+#
+# Run (from this directory, after the DNS's hit pre-run and flame profile,
+# see input.toml):
+#   python ../../tools/flame_turbulence.py init h2_phi1.0_T300_mix_full.csv ../../mechanisms/h2o2.yaml ohmech \
+#       restart/hit_<last>.restart les_r8.restart --lt 8e-4 --ratio 8 --thicken 4 --extend 256
+#   ../../build3d/src/Mallard -i les.toml --kokkos-num-threads=4
+#   python ../../tools/flame_turbulence.py analyze . <the options printed by laminar> --pdf-times 4e-4
+# Cost: 6,982 steps, 9 minutes on one A100.
+
+[run]
+t_stop = 4.0e-4
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 60
+Ny = 16
+Nz = 16
+Lx = 0.015846708573358105
+Ly = 0.004225788952895495
+Lz = 0.004225788952895495
+periodic = ["y", "z"]
+
+[initialize]
+type = "restart"
+file = "les_r8.restart"
+
+[[boundaries]]
+name = "left"
+type = "p_out"
+p = 101325.0
+
+[[boundaries]]
+name = "right"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+convective_flux = "hybrid"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+limiter = "none"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+phase = "ohmech"
+transport = "mixture_averaged"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+fuse_half_steps = true
+
+[les]
+model = "sigma"
+
+[les.combustion]
+model = "tfles"
+delta_L = 3.3013976e-4
+s_L = 2.3323744
+T_unburnt = 300.0
+T_burnt = 2384.28
+
+[output]
+check_interval = 500
+
+[integrals]
+interval = 2
+budget = true
+
+[[write_data]]
+prefix = "./solut/les"
+format = "vtu"
+time_interval = 2.5e-5
+variables = ["T", "HRR", "Q", "Y_H2", "OMEGA_H2", "TF_E", "TF_F", "MU_T"]
+
+[[write_data]]
+prefix = "./restart/les"
+format = "restart"
+time_interval = 2.5e-5

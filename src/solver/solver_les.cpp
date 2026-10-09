@@ -119,6 +119,40 @@ struct KineticEnergyRateFunctor {
     }
 };
 
+/**
+ * @brief Pressure work of the convective operator per owned cell: interior faces by the cell values'
+ *        mean(p) n A, boundary faces by their face_flux (their exact share).
+ */
+struct PressureWorkFunctor {
+    Kokkos::View<uint32_t *> offsets_faces_of_cell;
+    Kokkos::View<uint32_t *> faces_of_cell;
+    Kokkos::View<int32_t *[2]> cells_of_face;
+    Kokkos::View<rtype *[N_DIM]> face_normals;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t c, rtype & sum) const {
+        rtype u2 = 0.0_r;
+        FOR_I_DIM u2 += W(c, 1 + i) * W(c, 1 + i);
+        for (uint32_t k = offsets_faces_of_cell(c); k < offsets_faces_of_cell(c + 1); k++) {
+            const uint32_t f = faces_of_cell(k);
+            const bool owner = cells_of_face(f, 0) == static_cast<int32_t>(c);
+            const rtype sign = owner ? 1.0_r : -1.0_r;
+            const int32_t other = cells_of_face(f, owner ? 1 : 0);
+            if (other < 0) {
+                rtype work = 0.0_r;
+                FOR_I_DIM work += W(c, 1 + i) * face_flux(f, 1 + i);
+                sum += sign * (work - 0.5_r * u2 * face_flux(f, 0));
+            } else {
+                rtype u_n = 0.0_r;
+                FOR_I_DIM u_n += W(c, 1 + i) * face_normals(f, i);
+                sum -= sign * 0.5_r * (W(c, N_DIM + 1) + W(other, N_DIM + 1)) * u_n;
+            }
+        }
+    }
+};
+
 /** @brief Vorticity of each cell from the mixture transport gradients (2D: its z component only). */
 struct VorticityFunctor {
     Kokkos::View<rtype ***, Kokkos::LayoutRight> gradients;  // (cell, [u, T, X], dimension)
@@ -183,6 +217,7 @@ struct ThickenedFlameFunctor {
     Kokkos::View<rtype *> delta;
     Kokkos::View<rtype *[3]> fields;
     Kokkos::View<rtype *> time_scale;
+    Kokkos::View<rtype *[3]> sgs;  // [mu_t, ...]
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
@@ -207,10 +242,12 @@ struct ThickenedFlameFunctor {
         }
         const double V = static_cast<double>(cell_volume(c)), D = static_cast<double>(delta(c));
         const double lap_norm = Kokkos::sqrt(lap[0] * lap[0] + lap[1] * lap[1] + lap[2] * lap[2]) / V;
-        const double u_prime = 2.0 * D * D * D * lap_norm;
+        const double rho = static_cast<double>(W(c, 0));
+        const double u_prime = tf.eddy_viscosity_velocity ? tf.C_u * static_cast<double>(sgs(c, 0)) / (rho * D)
+                                                          : 2.0 * D * D * D * lap_norm;
         const double omega = tf.sensor(static_cast<double>(values(c, N_DIM)));
         const double F = tf.thickening(D, omega);
-        const double nu = static_cast<double>(transport(c, MU)) / static_cast<double>(W(c, 0));
+        const double nu = static_cast<double>(transport(c, MU)) / rho;
         const double E = tf.wrinkling(F, u_prime, nu);
         fields(c, 0) = static_cast<rtype>(F);
         fields(c, 1) = static_cast<rtype>(E);
@@ -522,7 +559,8 @@ void Solver::update_thickened_flame() {
                                                mesh->cells_of_face, mesh->face_normals, mesh->face_area,
                                                mesh->cell_volume, mesh->cell_coords, mesh->shifts, mesh->face_shift,
                                                tfles_vorticity, tfles_gradients, W_cells, transport_values,
-                                               cell_transport, les_delta, tfles_fields, chem_time_scale});
+                                               cell_transport, les_delta, tfles_fields, chem_time_scale,
+                                               les_coefficients});
     // Halo cells take their owners' fields: the face diffusivities need them
     exchange_cell_vectors(tfles_fields);
 }
@@ -680,13 +718,22 @@ rtype Solver::kinetic_energy_rate() const {
     return sum;
 }
 
+rtype Solver::pressure_work_rate() const {
+    rtype sum = 0.0_r;
+    Kokkos::parallel_reduce("pressure_work_rate", mesh->n_owned(),
+                            PressureWorkFunctor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
+                                                mesh->face_normals, face_flux, W_cells},
+                            sum);
+    return sum;
+}
+
 KineticEnergyBudget Solver::kinetic_energy_budget() {
     State scratch("budget_rhs", mesh->n_cells, static_cast<uint32_t>(species_names.size()));
     budget = KineticEnergyBudget{};
     budget_pass = true;
     calc_rhs(state(), scratch, t);
     budget_pass = false;
-    const std::array<rtype, 3> local = {budget.convective, budget.viscous, budget.sgs};
-    const std::array<rtype, 3> total = comm::allreduce(local, comm::Op::SUM);
-    return KineticEnergyBudget{total[0], total[1], total[2]};
+    const std::array<rtype, 4> local = {budget.convective, budget.viscous, budget.sgs, budget.pressure_work};
+    const std::array<rtype, 4> total = comm::allreduce(local, comm::Op::SUM);
+    return KineticEnergyBudget{total[0], total[1], total[2], total[3]};
 }

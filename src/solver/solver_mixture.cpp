@@ -422,7 +422,10 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
     const uint32_t n_species = mixture.n_species;
     scalar_reconstruction.species_slots(cell_scalars, face_mdot, face_reconstruction->quadrature_face.weights,
                                         flux_weights, species_slots);
-    if (budget_pass) budget.convective = kinetic_energy_rate();
+    if (budget_pass) {
+        budget.convective = kinetic_energy_rate();
+        budget.pressure_work = pressure_work_rate();
+    }
     MixtureViscousFluxFunctor viscous_functor;
     auto viscous_flux = [&] {
         if (rhs_faces.extent(0) == 0) {

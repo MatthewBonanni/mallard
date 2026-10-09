@@ -885,7 +885,7 @@ void Solver::init_output() {
                                           "velocity_squared,vorticity_squared,density_squared,temperature,"
                                           "temperature_squared"
                                        << (integral_monitor.budget ? ",ke_rate_convective,ke_rate_viscous,ke_rate_sgs,"
-                                                                     "eps_numerical"
+                                                                     "eps_numerical,pressure_work"
                                                                    : "")
                                        << (les_on && les.dynamic ? ",les_C" : "") << "\n";
             }
@@ -1882,9 +1882,9 @@ void Solver::write_integrals() {
     *integral_monitor.out << step << "," << std::setprecision(12) << t;
     for (const rtype s : sums) *integral_monitor.out << "," << s;
     if (integral_monitor.budget) {
-        // The exact convective rate is the pressure-dilatation work; the rest is numerical
+        // The exact convective rate is the pressure work; the rest is numerical
         *integral_monitor.out << "," << rates.convective << "," << rates.viscous << "," << rates.sgs << ","
-                              << sums[3] - rates.convective;
+                              << rates.pressure_work - rates.convective << "," << rates.pressure_work;
     }
     if (les_on && les.dynamic) *integral_monitor.out << "," << les.C;
     *integral_monitor.out << "\n";
