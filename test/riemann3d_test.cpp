@@ -232,7 +232,7 @@ TEST(Riemann3DTest, RotatedHybridIsHLLAcrossFacesThatCarryAShock) {
     // (#80); across a face aligned with the shock it is HLL along the face
     // normal, and it must be so across any face that carries the shock.
     const Frame f;
-    for (const double angle : {0.0, 0.3, 0.7, 1.2}) {
+    for (const rtype angle : {0.0_r, 0.3_r, 0.7_r, 1.2_r}) {
         rtype v[3];
         for (int d = 0; d < 3; d++) v[d] = std::cos(angle) * f.n[d] + std::sin(angle) * f.t1[d];
         rtype W_l[N_CONSERVATIVE], W_r[N_CONSERVATIVE];
@@ -240,7 +240,7 @@ TEST(Riemann3DTest, RotatedHybridIsHLLAcrossFacesThatCarryAShock) {
         rtype F[N_CONSERVATIVE], F_hll[N_CONSERVATIVE];
         riemann::RHLL::calc_flux(F, f.n, W_l, W_r, GAMMA);
         riemann::HLL::calc_flux(F_hll, f.n, W_l, W_r, GAMMA);
-        FOR_I_CONSERVATIVE EXPECT_NEAR(F[i], F_hll[i], 1e-3 * (1.0 + std::abs(F_hll[i]))) << "angle " << angle;
+        FOR_I_CONSERVATIVE EXPECT_NEAR(F[i], F_hll[i], 1e-3 * (1.0 + std::abs(double(F_hll[i])))) << "angle " << angle;
     }
 }
 
@@ -264,7 +264,7 @@ TEST(Riemann3DTest, RotatedHybridDissipatesTheShearOfAShockOnFacesAlongItsNormal
     riemann::Roe::calc_flux(F_roe, f.n, W_l, W_r, GAMMA);
     EXPECT_NEAR(shear_dissipation(F_roe), 0.0, roundoff(1e-12));
     EXPECT_LT(shear_dissipation(F_hll), -1.0);
-    EXPECT_LT(shear_dissipation(F), 0.5 * shear_dissipation(F_hll));
+    EXPECT_LT(shear_dissipation(F), 0.5_r * shear_dissipation(F_hll));
 }
 
 TEST(Riemann3DTest, EigenvectorsDiagonalizeFluxJacobian) {
