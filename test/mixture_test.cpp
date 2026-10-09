@@ -680,6 +680,42 @@ TEST(MixtureTest, RestartedRunMatchesUninterruptedRunExactly) {
     }
 }
 
+TEST(MixtureTest, BudgetWithDoubleFluxLeavesTheSolutionUnchanged) {
+    // The budget's extra right-hand side freezes the thermodynamics as a step does, and must not move the
+    // temperature seeds the next step's freeze starts from
+    const std::string file = (std::filesystem::temp_directory_path() / "mallard_df_budget.csv").string();
+    auto input = [&](bool budget) {
+        return "[run]\nn_steps = 12\ncfl = 0.25\n" +
+               mesh_block(N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", N_DIM == 2 ? 24 : 8, 4, 1.0, 0.2) +
+               "[initialize]\ntype = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\n"
+               "u = " + velocity("0.0", "10.0 * sin(6.283 * x)") +
+               "\nX = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", N2 = \"x < 0.5 ? 0 : 1\" }\n" +
+               boundaries("type = \"extrapolation\"\n", "type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                          "type = \"wall_adiabatic\"\n") +
+               numerics("type = \"MUSCL\"\n", "HLLC", true) + mixture(H2O2, "", "navier_stokes") +
+               (budget ? "[integrals]\ninterval = 1\nbudget = true\nfile = \"" + file + "\"\n" : "");
+    };
+    Solver plain, budgeted;
+    plain.init(parse_toml(input(false)));
+    budgeted.init(parse_toml(input(true)));
+    plain.run();
+    budgeted.run();
+    plain.copy_device_to_host();
+    budgeted.copy_device_to_host();
+    std::ifstream rows(file);
+    std::string line;
+    int n_rows = 0;
+    while (std::getline(rows, line)) n_rows++;
+    std::filesystem::remove(file);
+    EXPECT_GT(n_rows, 12);
+    for (uint32_t c = 0; c < plain.get_mesh()->n_cells; c++) {
+        FOR_I_CONSERVATIVE ASSERT_EQ(budgeted.h_conservatives(c, i), plain.h_conservatives(c, i)) << "cell " << c;
+        for (uint32_t k = 0; k < plain.get_species_names().size(); k++) {
+            ASSERT_EQ(budgeted.h_species(c, k), plain.h_species(c, k)) << "cell " << c;
+        }
+    }
+}
+
 namespace {
 
 /**

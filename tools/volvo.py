@@ -233,14 +233,22 @@ def cmd_budget(a):
     import csv
     rows = list(csv.DictReader(open(a.integrals)))
     t = np.array([float(r["t"]) for r in rows])
-    sel = (t >= a.t0) & (t <= (a.t1 if a.t1 is not None else np.inf))
+    t1 = a.t1 if a.t1 is not None else t[-1]
+    if a.window:
+        for w0 in np.arange(a.t0, t1 - 1e-12, a.window):
+            budget_window(rows, t, w0, min(w0 + a.window, t1), a.integrals)
+    budget_window(rows, t, a.t0, t1, a.integrals)
+
+
+def budget_window(rows, t, t0, t1, name):
+    sel = (t >= t0) & (t <= t1)
     get = lambda k: np.array([float(r[k]) for r in rows])[sel]
     eps_sgs, eps_mol, eps_num = -get("ke_rate_sgs"), -get("ke_rate_viscous"), get("eps_numerical")
     ts = t[sel]
     avg = lambda f: np.trapezoid(f, ts) / (ts[-1] - ts[0])
     s, m, n = avg(eps_sgs), avg(eps_mol), avg(eps_num)
     tot = s + m + n
-    print(f"{a.integrals}: t = {ts[0]:.4g}-{ts[-1]:.4g} s ({sel.sum()} rows): eps_sgs {s:.4g} W, eps_mol {m:.4g} W, "
+    print(f"{name}: t = {ts[0]:.4g}-{ts[-1]:.4g} s ({sel.sum()} rows): eps_sgs {s:.4g} W, eps_mol {m:.4g} W, "
           f"eps_num {n:.4g} W; shares numerical / SGS / molecular {100 * n / tot:.1f} / {100 * s / tot:.1f} / "
           f"{100 * m / tot:.1f}%; eps_num / eps_sgs = {n / s if s > 0 else float('nan'):.3f}")
 
@@ -356,6 +364,7 @@ def main():
     p.add_argument("integrals")
     p.add_argument("--t0", type=float, default=0.0)
     p.add_argument("--t1", type=float)
+    p.add_argument("--window", type=float, default=0.0, help="also print each window of this length")
     p = sub.add_parser("slice")
     p.add_argument("run")
     p.add_argument("--out", required=True)
