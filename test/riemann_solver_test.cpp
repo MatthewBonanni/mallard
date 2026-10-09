@@ -160,8 +160,9 @@ TEST(RiemannSolverTest, RotatedHybridReducesToHLLForNormalVelocityJump) {
 }
 
 TEST(RiemannSolverTest, RotatedHybridReducesToRoeForTangentialVelocityJump) {
+    // A shear layer and contact: no pressure jump
     const rtype W_l[N_CONSERVATIVE] = {1.0, 0.3, 0.5, 1.0};
-    const rtype W_r[N_CONSERVATIVE] = {0.4, 0.3, -0.2, 0.6};
+    const rtype W_r[N_CONSERVATIVE] = {0.4, 0.3, -0.2, 1.0};
     const rtype n[N_DIM] = {1.0, 0.0};
     rtype f[N_CONSERVATIVE], f_roe[N_CONSERVATIVE];
     riemann::RHLL::calc_flux(f, n, W_l, W_r, GAMMA);

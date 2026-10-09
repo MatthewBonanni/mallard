@@ -195,7 +195,7 @@ TEST(Riemann3DTest, RotatedHybridBlendsHLLAndRoeForObliqueVelocityJump) {
     const rtype c = 0.5, s = std::sqrt(3.0) / 2.0;
     rtype W_l[N_CONSERVATIVE], W_r[N_CONSERVATIVE];
     frame_state(f, 1.0, 0.1, 0.2, 0.3, 1.0, W_l);
-    frame_state(f, 1.3_r, 0.1_r + 0.4_r * c, 0.2_r + 0.4_r * s, 0.3_r, 1.4_r, W_r);
+    frame_state(f, 1.3_r, 0.1_r + 0.4_r * c, 0.2_r + 0.4_r * s, 0.3_r, 1.0, W_r);
     rtype n1[3], n2[3];
     for (int d = 0; d < 3; d++) {
         n1[d] = c * f.n[d] + s * f.t1[d];
@@ -206,6 +206,65 @@ TEST(Riemann3DTest, RotatedHybridBlendsHLLAndRoeForObliqueVelocityJump) {
     riemann::HLL::calc_flux(F_hll, n1, W_l, W_r, GAMMA);
     riemann::Roe::calc_flux(F_roe, n2, W_l, W_r, GAMMA);
     FOR_I_CONSERVATIVE EXPECT_NEAR(F[i], c * F_hll[i] + s * F_roe[i], roundoff(1e-12));
+}
+
+namespace {
+
+// The two sides of a Mach 6 normal shock at rest, moving along v
+void shock_states(const rtype * v, rtype * W_l, rtype * W_r) {
+    const rtype u_l = 6.0, u_r = 1.1388888888888888;
+    W_l[0] = 1.0;
+    W_r[0] = 5.2682926829268295;
+    for (int d = 0; d < 3; d++) {
+        W_l[1 + d] = u_l * v[d];
+        W_r[1 + d] = u_r * v[d];
+    }
+    W_l[4] = 1.0 / 1.4;
+    W_r[4] = 29.880952380952383;
+}
+
+} // namespace
+
+TEST(Riemann3DTest, RotatedHybridIsHLLAcrossFacesThatCarryAShock) {
+    // On tetrahedra, faces cross a shock at every angle to its normal. The
+    // rotation took HLL along the shock normal and Roe along the rest of the
+    // face normal, which grew a carbuncle on the stagnation line of a sphere
+    // (#80); across a face aligned with the shock it is HLL along the face
+    // normal, and it must be so across any face that carries the shock.
+    const Frame f;
+    for (const rtype angle : {0.0_r, 0.3_r, 0.7_r, 1.2_r}) {
+        rtype v[3];
+        for (int d = 0; d < 3; d++) v[d] = std::cos(angle) * f.n[d] + std::sin(angle) * f.t1[d];
+        rtype W_l[N_CONSERVATIVE], W_r[N_CONSERVATIVE];
+        shock_states(v, W_l, W_r);
+        rtype F[N_CONSERVATIVE], F_hll[N_CONSERVATIVE];
+        riemann::RHLL::calc_flux(F, f.n, W_l, W_r, GAMMA);
+        riemann::HLL::calc_flux(F_hll, f.n, W_l, W_r, GAMMA);
+        FOR_I_CONSERVATIVE EXPECT_NEAR(F[i], F_hll[i], 1e-3 * (1.0 + std::abs(double(F_hll[i])))) << "angle " << angle;
+    }
+}
+
+TEST(Riemann3DTest, RotatedHybridDissipatesTheShearOfAShockOnFacesAlongItsNormal) {
+    // A face whose normal n is perpendicular to the shock normal t1, with the
+    // two sides of the shock on either side (on tetrahedra, cells at different
+    // depths of the shock): the velocity jump lies along t1, so the rotation
+    // gave pure Roe along n, which sees the jump of u . t1 as a shear wave of
+    // speed u . n = 0 and leaves it undissipated (#80). Measured as the
+    // t1-momentum the flux removes beyond what its mass flux carries at the
+    // Roe-averaged u . t1 (the physical fluxes of both vanish).
+    const Frame f;
+    rtype W_l[N_CONSERVATIVE], W_r[N_CONSERVATIVE];
+    shock_states(f.t1, W_l, W_r);
+    const rtype s_l = std::sqrt(W_l[0]), s_r = std::sqrt(W_r[0]);
+    const rtype v_roe = (s_l * dot<3>(W_l + 1, f.t1) + s_r * dot<3>(W_r + 1, f.t1)) / (s_l + s_r);
+    auto shear_dissipation = [&](const rtype * F) { return -dot<3>(F + 1, f.t1) + v_roe * F[0]; };
+    rtype F[N_CONSERVATIVE], F_hll[N_CONSERVATIVE], F_roe[N_CONSERVATIVE];
+    riemann::RHLL::calc_flux(F, f.n, W_l, W_r, GAMMA);
+    riemann::HLL::calc_flux(F_hll, f.n, W_l, W_r, GAMMA);
+    riemann::Roe::calc_flux(F_roe, f.n, W_l, W_r, GAMMA);
+    EXPECT_NEAR(shear_dissipation(F_roe), 0.0, roundoff(1e-12));
+    EXPECT_LT(shear_dissipation(F_hll), -1.0);
+    EXPECT_LT(shear_dissipation(F), 0.5_r * shear_dissipation(F_hll));
 }
 
 TEST(Riemann3DTest, EigenvectorsDiagonalizeFluxJacobian) {

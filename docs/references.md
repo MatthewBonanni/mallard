@@ -48,6 +48,8 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the Roe and RHLL solvers for gas mixtures: the Roe average of a multicomponent gas, whose composition waves move with the contact.
 - <a id="nishikawa-kitamura-2008"></a>H. Nishikawa and K. Kitamura, Very simple, carbuncle-free, boundary-layer-resolving, rotated-hybrid Riemann solvers, *J. Comput. Phys.* 227, 2560–2581 (2008). [doi:10.1016/j.jcp.2007.11.003](https://doi.org/10.1016/j.jcp.2007.11.003)
   Used in: `riemann_solver = "RHLL"`, the rotated hybrid of HLL and Roe.
+- <a id="kim-kim-rho-2001"></a>K. H. Kim, C. Kim and O.-H. Rho, Methods for the accurate computations of hypersonic flows: I. AUSMPW+ scheme, *J. Comput. Phys.* 174, 38–80 (2001). [doi:10.1006/jcph.2001.6873](https://doi.org/10.1006/jcph.2001.6873)
+  Used in: RHLL's pressure weight min(p_l / p_r, p_r / p_l)^3, which blends the rotated flux toward HLL across faces that carry a shock.
 - <a id="quirk-1994"></a>J. J. Quirk, A contribution to the great Riemann solver debate, *Int. J. Numer. Methods Fluids* 18, 555–574 (1994). [doi:10.1002/fld.1650180603](https://doi.org/10.1002/fld.1650180603)
   Used in: the carbuncle and odd–even decoupling tests that RHLL passes and HLLC and Roe fail (`test/solver_test.cpp`; the Shu–Osher validation).
 
