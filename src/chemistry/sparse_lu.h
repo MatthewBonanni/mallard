@@ -507,51 +507,49 @@ struct SparseLU {
                 });
                 lanes.sync();
             }
-            lanes.for_each(n, [&](const uint32_t i) { b[p.perm(i)] = x[i]; });
-            lanes.sync();
-            return;
-        }
-        for (uint32_t l = 0; l < p.n_lower_levels; l++) {
-            const uint32_t first = p.lower_level_offset(l);
-            lanes.for_each(p.lower_level_offset(l + 1) - first, [&](const uint32_t m) {
-                const uint32_t r = p.lower_level_row(first + m);
-                x[r] = subtract(x[r], p.lower_entry, p.lower_offset(r), p.lower_offset(r + 1), values, x);
-            });
-            lanes.sync();
-        }
-        // The chain's block, by columns: entry (chain + i, chain + j) at block[j * m + i]
-        const uint32_t m = n - p.chain;
-        const double * block = values + p.chain_offset;
-        double * x_chain = x + p.chain;
-        for (uint32_t j = 0; j + 1 < m; j++) {
-            const double x_j = x_chain[j];
-            const double * column = block + j * m;
-            lanes.for_each(m - 1 - j, [&](const uint32_t i) { x_chain[j + 1 + i] -= column[j + 1 + i] * x_j; });
-            lanes.sync();
-        }
-        for (uint32_t j = m; j-- > 0;) {
-            const double * column = block + j * m;
-            const double x_j = x_chain[j] / column[j];
-            lanes.sync();
-            lanes.single([&]() { x_chain[j] = x_j; });
-            const uint32_t first = p.chain_upper_offset(j), before = p.chain_upper_offset(j + 1) - first;
-            lanes.for_each(j + before, [&](const uint32_t i) {
-                if (i < j) {
-                    x_chain[i] -= column[i] * x_j;
-                } else {
-                    x[p.chain_upper_entry(first + i - j, 1)] -= values[p.chain_upper_entry(first + i - j, 0)] * x_j;
-                }
-            });
-            lanes.sync();
-        }
-        for (uint32_t l = 0; l < p.n_upper_levels; l++) {
-            const uint32_t first = p.upper_level_offset(l);
-            lanes.for_each(p.upper_level_offset(l + 1) - first, [&](const uint32_t i) {
-                const uint32_t r = p.upper_level_row(first + i);
-                x[r] = subtract(x[r], p.upper_entry, p.upper_offset(r), p.upper_offset(r + 1), values, x) /
-                       values[p.diagonal(r)];
-            });
-            lanes.sync();
+        } else {
+            for (uint32_t l = 0; l < p.n_lower_levels; l++) {
+                const uint32_t first = p.lower_level_offset(l);
+                lanes.for_each(p.lower_level_offset(l + 1) - first, [&](const uint32_t m) {
+                    const uint32_t r = p.lower_level_row(first + m);
+                    x[r] = subtract(x[r], p.lower_entry, p.lower_offset(r), p.lower_offset(r + 1), values, x);
+                });
+                lanes.sync();
+            }
+            // The chain's block, by columns: entry (chain + i, chain + j) at block[j * m + i]
+            const uint32_t m = n - p.chain;
+            const double * block = values + p.chain_offset;
+            double * x_chain = x + p.chain;
+            for (uint32_t j = 0; j + 1 < m; j++) {
+                const double x_j = x_chain[j];
+                const double * column = block + j * m;
+                lanes.for_each(m - 1 - j, [&](const uint32_t i) { x_chain[j + 1 + i] -= column[j + 1 + i] * x_j; });
+                lanes.sync();
+            }
+            for (uint32_t j = m; j-- > 0;) {
+                const double * column = block + j * m;
+                const double x_j = x_chain[j] / column[j];
+                lanes.sync();
+                lanes.single([&]() { x_chain[j] = x_j; });
+                const uint32_t first = p.chain_upper_offset(j), before = p.chain_upper_offset(j + 1) - first;
+                lanes.for_each(j + before, [&](const uint32_t i) {
+                    if (i < j) {
+                        x_chain[i] -= column[i] * x_j;
+                    } else {
+                        x[p.chain_upper_entry(first + i - j, 1)] -= values[p.chain_upper_entry(first + i - j, 0)] * x_j;
+                    }
+                });
+                lanes.sync();
+            }
+            for (uint32_t l = 0; l < p.n_upper_levels; l++) {
+                const uint32_t first = p.upper_level_offset(l);
+                lanes.for_each(p.upper_level_offset(l + 1) - first, [&](const uint32_t i) {
+                    const uint32_t r = p.upper_level_row(first + i);
+                    x[r] = subtract(x[r], p.upper_entry, p.upper_offset(r), p.upper_offset(r + 1), values, x) /
+                           values[p.diagonal(r)];
+                });
+                lanes.sync();
+            }
         }
         lanes.for_each(n, [&](const uint32_t i) { b[p.perm(i)] = x[i]; });
         lanes.sync();
