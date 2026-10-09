@@ -94,7 +94,11 @@ and single base addresses; results and step times are unchanged.
 | host peak during setup | 8.55 GB (32.6 KB/cell) | 1.44 GB (5.5 KB/cell) |
 | device peak | 11.6 GB | 11.6 GB |
 
-### 3. TENO setup on the device, incremental (AMR stage 0, [amr.md](amr.md))
+### 3. TENO setup on the device
+
+The 3D TENO setup took minutes per million cells on the host (#140): every start without a cache, every
+restart on a different rank count or partition, paid it again, and it bounded the problem size a node
+can set up in reasonable time. Moving it to the device makes it seconds.
 
 **Baseline** (`main` at v0.6.0-80, `numerics` setup phase, A100 node host: EPYC 7763, 16 OpenMP threads,
 symmetry walls on all sides). Per-cell work in thread-seconds (sum over threads):
