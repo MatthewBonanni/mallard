@@ -13,7 +13,7 @@ The spatial dimension is fixed at build time with the CMake option
 
 | Key | Description |
 |---|---|
-| `cfl` | CFL number in the usual unstructured convention ([Blazek](references.md#blazek-2015) eqs. 6.20-6.21; see [time step](numerics/overview.md)): on a uniform 2D grid of spacing h, `dt = cfl * h / (abs(u) + abs(v) + 2a)`. Measured stability limits for smooth flow are 1.26-1.6 with SSPRK3 and 1.39-1.8 with RK4, depending on reconstruction and cell type ([table](numerics/overview.md#time-step)): use at most 1.2 (SSPRK3) or 1.35 (RK4), and 1.0 with SSPRK3 as a robust default, shocks included (but 0.25 for the Noh problem's infinite-strength shock with `bound_preserving`); with `[chemistry]` the splitting error may call for less (detonations: about 0.35). Mallard 0.5 and earlier inputs give the same time step with half their `cfl`. Exactly one of `cfl` and `dt` is required. |
+| `cfl` | CFL number in the usual unstructured convention ([Blazek](references.md#blazek-2015) eqs. 6.20-6.21; see [time step](numerics/overview.md)): on a uniform 2D grid of spacing h, `dt = cfl * h / (abs(u) + abs(v) + 2a)`. Measured stability limits for smooth flow are 1.26-1.6 with SSPRK3 and 1.39-1.8 with RK4, depending on reconstruction and cell type ([table](numerics/overview.md#time-step)): use at most 1.2 (SSPRK3) or 1.35 (RK4), and 1.0 with SSPRK3 as a robust default, shocks included (but 0.25 for the Noh problem's infinite-strength shock with `bound_preserving`); with `[chemistry]` the splitting error may call for less (detonations: about 0.35 with Strang splitting, 1.0 with `coupling = "simpler"`). Mallard 0.5 and earlier inputs give the same time step with half their `cfl`. Exactly one of `cfl` and `dt` is required. |
 | `dt` | Fixed time step |
 | `t_stop` | Stop at this simulation time (the last step is shortened to land on it) |
 | `n_steps` | Stop after this many steps |
@@ -378,11 +378,17 @@ Strength and reference are evaluated once at cell centroids.
 ## `[chemistry]`
 
 Finite-rate chemistry of gas mixtures (`gas = "mixture"` with a mechanism
-that has reactions). Each step is Strang split: every owned cell that needs
-it is advanced as an adiabatic, constant-volume reactor over `dt / 2`, then
-the flow takes its step, then the reactors take another `dt / 2`; the second
-half step is fused with the next step's first (one chemistry call per step)
-except before output, progress rows and the end of the run. The integrator
+that has reactions). By default each step is Strang split: every owned cell
+that needs it is advanced as an adiabatic, constant-volume reactor over
+`dt / 2`, then the flow takes its step, then the reactors take another
+`dt / 2` (with `fuse_half_steps`, the second half step is fused with the
+next step's first). With `coupling = "simpler"` (SIMPLER balanced splitting,
+[Wu, Ma & Ihme 2019](https://doi.org/10.1016/j.cpc.2019.04.016)) each step
+evaluates the flow's right-hand side `T(U^n)` once, advances every owned
+cell over `dt` under its chemistry plus that constant source, then lets
+the flow correct over the second half of the step with `T(U) - T(U^n)`:
+steady states of chemistry and transport stay exactly steady at any `dt`
+(see [chemistry.md](design/chemistry.md#simpler-balanced-splitting-option)). The integrator
 is RODAS, an adaptive Rosenbrock method with the analytical Jacobian, in
 double precision in every build.
 
@@ -390,7 +396,7 @@ double precision in every build.
 |---|---|
 | `enabled` | `false` keeps the mixture non-reacting (default `true`) |
 | `integrator` | `rosenbrock` (the default and only choice so far) |
-| `coupling` | `strang` (the default and only choice so far) |
+| `coupling` | `strang` (default) or `simpler`; `simpler` does not combine with `fuse_half_steps` or `numerics.double_flux` |
 | `rtol` | Relative tolerance on the mass fractions and `T` (default `1e-6`) |
 | `atol` | Absolute tolerance on the mass fractions (default `1e-10`) |
 | `max_steps` | Sub-steps allowed per cell and half step (default 100000); more stop the run |

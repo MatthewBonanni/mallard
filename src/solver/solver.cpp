@@ -745,6 +745,10 @@ void Solver::init_numerics() {
     if (double_flux && !is_mixture()) {
         throw InputError("numerics.double_flux needs gas = \"mixture\".");
     }
+    if (double_flux && simpler) {
+        throw InputError("numerics.double_flux is not available with chemistry.coupling = \"simpler\" (its "
+                         "thermodynamics are frozen over a step, which the reaction substep would leave stale).");
+    }
 
     rhs_func = [this](State solution, State rhs, rtype t_stage) { calc_rhs(solution, rhs, t_stage); };
     check_nan = toml::find_or<bool>(input, "numerics", "check_nan", false);
@@ -1346,7 +1350,8 @@ void Solver::print_setup() const {
     if (pasr_on) logging::items(pasr.summary());
     if (double_flux) logging::item("Double flux", "frozen gamma and e0 per cell and step (not energy conservative)");
     if (reacting) {
-        logging::item("Chemistry", std::to_string(kinetics.n_reactions) + " reactions, Strang splitting" +
+        logging::item("Chemistry", std::to_string(kinetics.n_reactions) + " reactions, " +
+                                       (simpler ? "SIMPLER balanced splitting" : "Strang splitting") +
                                        (fuse_chemistry ? " (half steps fused)" : "") + ", RODAS (rtol " +
                                        real(chemistry_options.integrator.rtol) + ", atol " +
                                        real(chemistry_options.atol_Y) + ")" +
@@ -1466,6 +1471,14 @@ void Solver::write_probes() {
 }
 
 void Solver::take_step() {
+    if (simpler) {
+        take_simpler_step();
+        halo_current = false;
+        Kokkos::fence();
+        step++;
+        t += dt;
+        return;
+    }
     if (reacting) {
         Kokkos::deep_copy(chem_cost, 0.0_r);
         advance_chemistry(chemistry_pending + 0.5 * static_cast<double>(dt));

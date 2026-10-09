@@ -89,7 +89,11 @@ goes to negative pressure at 0.5, while the Sedov blasts run at 1.0. With chemis
 error can bind first: the 1D CJ detonation of `examples/detonation_1d` keeps
 its ZND induction length within 5% up to `cfl` = 0.35 but not at 0.5 (-5.5%) or
 1.0 (-25%), while the premixed flame's speed is the same to 0.001% at 0.2 and
-1.0.
+1.0. SIMPLER balanced splitting (`[chemistry] coupling = "simpler"`) keeps the
+mean induction length within 5% at `cfl` = 1.0 (-0.9% and +3.2% at 10 and
+20 cells per induction length), with a front that oscillates more from output
+to output
+([chemistry.md](../design/chemistry.md#simpler-balanced-splitting-option)).
 
 ## Reconstruction
 

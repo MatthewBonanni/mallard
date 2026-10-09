@@ -426,6 +426,148 @@ U^n --chem(dt/2)--> U* --SSPRK3 flow step(dt)--> U** --chem(dt/2)--> U^{n+1}
   difference to be below the pass tolerance; if it is not, the forcing option
   above is the remedy.
 
+### SIMPLER balanced splitting (option)
+
+`[chemistry] coupling = "simpler"` (#233): the SIMPLER scheme of
+[Wu, Ma & Ihme 2019](https://doi.org/10.1016/j.cpc.2019.04.016) (eqs. 3.18,
+arXiv:1712.00953), with `T` the flow's right-hand side (fluxes, sources,
+sponges) and `R` the chemistry:
+
+```text
+c   = -T(U^n)
+U*  = U(t_n + dt)  of  dU/dt = R(U) - c,  U(t_n) = U^n           (reaction substep, over dt)
+U^{n+1} = U(t_n + dt)  of  dU/dt = T(U) + c,  U(t_n + dt/2) = U*   (transport substep, over dt/2)
+```
+
+- **Second order.** For `U' = (A + B) U` the reaction substep gives
+  `U^n + dt (A + B) U^n + dt^2/2 (A^2 + AB) U^n + O(dt^3)`, and the
+  transport substep of length `tau` adds `tau B dt (A + B) U^n`; matching
+  the exact `dt^2/2 (A + B)^2` needs `tau = dt / 2`, as in the paper (a
+  transport substep over the whole step is first order).
+  `ReactingTest.SimplerSplittingIsSecondOrderInTime` measures error ratios
+  of 3.7 and 4.0 per halving of `dt` on an igniting, advected hot spot.
+- **Steady states are kept.** If `R(U^n) + T(U^n) = 0`, the reaction
+  substep starts at rest and stays there, and the transport substep's
+  right-hand side `T(U) - T(U^n)` vanishes: a steady state of the ODE is a
+  fixed point at every `dt`. Strang splitting's fixed point moves with `dt`.
+  `ReactingTest.SimplerSplittingKeepsASteadyStateThatStrangSplittingMoves`
+  marches a burning stirred reactor (a periodic box with a sponge toward
+  fresh H2/air at 2000 1/s) to steady state with SIMPLER (residual of the
+  ODE 1.6e-12 of the chemical rates), then takes 40 steps of a quarter of
+  the step: SIMPLER moves the state by 2e-16, Strang splitting by 2.3e-3.
+  At `dt = 5e-4 s` the Strang reactor settles 38 K hotter (2908.6 K against
+  2870.3 K) and costs 160 sub-steps per cell and step instead of 1.
+- **The flow's time integrator changes.** Every cell receives `dt T(U^n)`
+  in the reaction substep (cells without chemistry take it as a forward
+  Euler step), so without chemistry a step is `U^n + dt T(U^n)` followed by
+  the configured integrator over `dt/2` on `T(U) - T(U^n)`. With SSPRK3 the
+  stability polynomial becomes `1 + z + z^2/2 + z^3/8 + z^4/48` instead of
+  `1 + z + z^2/2 + z^3/6`: second order, a larger limit for upwind operators
+  (first-order upwind `cfl` 1.60 against 1.26 in the 1D Courant number;
+  Fromm's second-order upwind 0.80 against 0.63) but none on the imaginary
+  axis (`|P(iy)|^2 = 1 + y^4/24 + O(y^6)`). The upwind dissipation of the
+  Riemann solvers keeps TENO5 stable in practice (a smooth acoustic and
+  entropy wave on a periodic strip at `cfl` 0.5 and 1.0).
+- **Cost.** One more evaluation of `T` per step (four with SSPRK3) and one
+  chemistry call per step instead of two half steps (no fused half steps
+  needed, and none to restart).
+
+As implemented: `Solver::take_simpler_step` evaluates `T(U^n)` into one
+extra state (`transport_rate`), then `CellChemistry::advance` with a
+`ChemistryForcing` (the rates and a scratch state), then the configured
+time integrator from `t + dt/2` over `dt/2` with `T(U^n)` subtracted from
+each right-hand side. In the reaction substep every owned cell moves to
+`U^n + dt T(U^n)` in `rho`, `rho u`, `rho E`, and in `rho Y_k` unless it
+reacts; a cell reacts if its chemistry is active (as for Strang splitting)
+at `U^n` or at that end state. A reacting cell is the constant-volume
+reactor with constant sources (`ConstantVolumeReactor::forcing`): with
+`y_k = rho Y_k / rho^n`, `dy_k/dt = W_k omega_k / rho^n + g_k` with
+`g_k = T_k(U^n) / rho^n`, and the internal energy per volume linear in time
+between `U^n` and the end state (`g_e`), which gives
+`dT/dt = (g_e - sum_k e_k g_k - sum_k u_k omega_k / rho^n) / sum_k y_k cv_k`.
+The system stays autonomous; the species rows of the Jacobian are
+unchanged and the `T` row gains `-sum_k cv_k g_k / cv` and the forcing in
+`dT/dt` (checked against finite differences). The end mass fractions are
+clipped and renormalized as before, at the end density `rho^n (1 + dt
+sum_k g_k)`. A forcing that removes a species can make the exact solution
+negative by up to `dt max(0, -g_k)` (the source does not vanish with the
+species, chemistry may not restore it), so sub-steps are rejected only
+below `-atol - dt max(0, -g_k)`. With TFLES's or PaSR's rate multiplier `s` the
+reactor runs over `s dt` with `g / s`, which is the same ODE. Simplified
+SDC ([Zingale et al. 2022](https://arxiv.org/abs/2206.01285)) needs the same
+call with another constant forcing (the advective tendency of the last
+iterate) per iteration. Not combined with `double_flux` (its thermodynamics
+are frozen for the step, which the reaction substep would leave stale) or
+`fuse_half_steps` (rejected as input errors). Strang runs compile to the
+same arithmetic and are bitwise unchanged (restart files of sod, shu_osher,
+double_mach, riemann_2d, wedge, sedov_axisymmetric, viscous_shock_tube,
+poiseuille_pipe, reactive_shock_tube and flame_outflow identical to main's
+after 40 steps); SIMPLER runs are bitwise independent of the rank count
+and across restarts (`MPITest.GasMixtureMatchesSerial`,
+`ThickenedFlameMatchesSerial`, `MixtureTest.RestartedRunMatchesUninterruptedRunExactly`).
+
+Validation against Strang splitting (h2o2, MUSCL, HLLC, SSPRK3):
+
+- **V7 detonation** (`examples/detonation_1d`, 10 and 20 cells per ZND
+  induction length). Induction length against the ZND value, first with
+  `tools/plot_detonation.py` (cell-quantized, as quoted above), then with
+  sub-cell shock and heat-release positions (shock at half its pressure
+  rise, which puts the whole table half a cell to a cell short) and the standard
+  deviation over the outputs of the second half:
+
+  | `cfl` | 0.35 | 0.5 | 0.7 | 1.0 | 1.2 | 1.4 |
+  |---|---|---|---|---|---|---|
+  | Strang, 10 cells | -4.5% | -5.5% | -8.2% | -25.5% | -36.4% | |
+  | SIMPLER, 10 cells | -7.3% | -7.3% | 0.0% | -0.9% | -5.5% | -8.2% |
+  | Strang, 10 cells, sub-cell | -12.0 +- 0.3% | -12.6 +- 0.3% | -14.2 +- 0.2% | -30.9 +- 0.6% | -42.1 +- 0.5% | |
+  | SIMPLER, 10 cells, sub-cell | -10.8 +- 0.5% | -9.8 +- 0.2% | -5.5 +- 0.1% | -6.7 +- 5.5% | -9.4 +- 7.1% | -13.7 +- 9.6% |
+  | Strang, 20 cells | -1.4% | | | -11.4% | | |
+  | SIMPLER, 20 cells | -0.9% | | +2.3% | +3.2% | | |
+  | Strang, 20 cells, sub-cell | -4.0 +- 2.6% | | | -14.6 +- 1.6% | | |
+  | SIMPLER, 20 cells, sub-cell | -3.4 +- 2.2% | | -1.8 +- 3.6% | -0.5 +- 4.5% | | |
+
+  The front speed is within 0.16% of `D_CJ` in every run. SIMPLER removes
+  the shortening of the induction zone with `dt`: at `cfl` = 1.0 its mean is
+  -0.9% (10 cells) and +3.2% (20 cells) off the ZND value, against -25.5%
+  and -11.4% for Strang splitting, so the 5% criterion on the mean holds up
+  to `cfl` 1.0 instead of 0.35. What it does not remove: from `cfl` = 1.0
+  the induction length oscillates from output to output (a sawtooth of
+  period about 70 us at 10 cells, standard deviation 5.5% of `L_ZND`,
+  against 0.3% for Strang splitting at 0.35); at 20 cells both schemes
+  pulsate (2-3%) and SIMPLER's amplitude grows with `cfl` (4.5% at 1.0).
+  Cost (one 8-thread CPU, 3934 cells): Strang 19.9 ms per step (chemistry
+  71%), SIMPLER 15.6 ms (52%: half the chemistry calls, one more right-hand
+  side), so SIMPLER at `cfl` 1.0 takes 60 s where Strang at 0.35 takes 222 s
+  (3.7x).
+- **V8 premixed flames** (H2/air, mixture-averaged, phi 0.6, 1.0, 1.4, 20
+  cells per thermal thickness, two flame times): consumption speeds against
+  Cantera at `cfl` 0.2 / 1.0 / 2.0, Strang +0.60 / +0.53 / +0.50%, +0.24 /
+  +0.24 / +0.24%, -0.20 / -0.20 / -0.21%; SIMPLER +0.53 / +0.48 / +0.46%,
+  +0.24 / +0.24 / +0.23%, -0.20% at all three. Neither splitting error is
+  measurable on these steady flames (at most 0.1%, within the runs' spread),
+  so SIMPLER brings no accuracy here; a step is 9-15% cheaper (chemistry 34%
+  of the step instead of 53%).
+- **Stirred reactor near extinction** (the steady-state test's box, fresh
+  stoichiometric H2/air at 300 K, residence time `tau = 1/s`, started burnt,
+  steady temperature after `max(300, 30 tau / dt)` steps):
+
+  | `tau` | `dt / tau` | SIMPLER | Strang | Strang sub-steps per step |
+  |---|---|---|---|---|
+  | 1 ms | 0.01 / 0.1 / 0.3 / 1 | 2752.6 K at all four | 2754.4 / 2763.6 / 2763.6 K / extinct | 51 / 114 / 153 / - |
+  | 100 us | 0.01 / 0.1 / 0.3 / 1 | 2671.9 K at all four | 2672.0 / 2695.8 K / extinct / extinct | 37 / 91 / - / - |
+  | 67 us | 0.01 / 0.1 / 0.3 | 2636.2 K at all three | 2636.2 / 2655.9 K / extinct | |
+  | 50 us | 0.01 / 0.1 / 0.3 | 2604.7 K at all three | 2604.7 K / extinct / extinct | |
+  | 40 us | 0.01 / 0.1 / 0.3 | extinct | extinct | |
+
+  SIMPLER's reactor is the same at every step (the ODE's steady state) and
+  takes one sub-step per step once steady (the exact extinction residence
+  time lies between 40 and 50 us). Strang splitting runs up to 24 K hot and
+  goes out early: at 50 us with `dt = 0.1 tau`, at 100 us (twice the exact
+  limit) with `dt = 0.3 tau`, and at any residence time with `dt = tau`,
+  where its transport step replaces most of the reactor with fresh gas
+  before the chemistry sees it. A cell whose transport time is a few time
+  steps is in the same position.
+
 ### Stiffness, load imbalance and skipped cells
 
 - **Skipping inactive cells.** A cell is chemically frozen when
