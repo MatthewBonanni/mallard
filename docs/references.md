@@ -79,6 +79,14 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: `[les] model = "vreman"`.
 - <a id="nicoud-2011"></a>F. Nicoud, H. Baya Toda, O. Cabrit, S. Bose and J. Lee, Using singular values to build a subgrid-scale model for large eddy simulations, *Phys. Fluids* 23, 085106 (2011). [doi:10.1063/1.3623274](https://doi.org/10.1063/1.3623274)
   Used in: `[les] model = "sigma"` (the default in 3D), its constant and the closed-form singular values; the table of model properties checked in `test/les_test.cpp`.
+- <a id="germano-1991"></a>M. Germano, U. Piomelli, P. Moin and W. H. Cabot, A dynamic subgrid-scale eddy viscosity model, *Phys. Fluids A* 3, 1760–1765 (1991). [doi:10.1063/1.857955](https://doi.org/10.1063/1.857955)
+  Used in: `[les] dynamic = true`, the identity that sets the constant.
+- <a id="lilly-1992"></a>D. K. Lilly, A proposed modification of the Germano subgrid-scale closure method, *Phys. Fluids A* 4, 633–635 (1992). [doi:10.1063/1.858280](https://doi.org/10.1063/1.858280)
+  Used in: `[les] dynamic = true`, the least-squares constant `<L:M> / <M:M>`.
+- <a id="moin-1991"></a>P. Moin, K. Squires, W. Cabot and S. Lee, A dynamic subgrid-scale model for compressible turbulence and scalar transport, *Phys. Fluids A* 3, 2746–2757 (1991). [doi:10.1063/1.858164](https://doi.org/10.1063/1.858164)
+  Used in: `[les] dynamic = true`, the Favre-weighted test-filtered stresses.
+- <a id="scotti-1993"></a>A. Scotti, C. Meneveau and D. K. Lilly, Generalized Smagorinsky model for anisotropic grids, *Phys. Fluids A* 5, 2306–2308 (1993). [doi:10.1063/1.858537](https://doi.org/10.1063/1.858537)
+  Used in: `[les] filter_width = "scotti"`.
 - <a id="vreman-geurts-kuerten-1995"></a>B. Vreman, B. Geurts and H. Kuerten, Subgrid-modelling in LES of compressible flow, *Appl. Sci. Res.* 54, 191–203 (1995). [doi:10.1007/BF00849116](https://doi.org/10.1007/BF00849116)
   Used in: the SGS terms of the filtered energy equation that are kept and neglected.
 - <a id="garnier-adams-sagaut-2009"></a>E. Garnier, N. Adams and P. Sagaut, *Large Eddy Simulation for Compressible Flows*, Springer (2009). [doi:10.1007/978-90-481-2819-8](https://doi.org/10.1007/978-90-481-2819-8)

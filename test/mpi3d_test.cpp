@@ -88,6 +88,8 @@ TEST(MPI3DTest, LargeEddySimulationOnTetrahedraMatchesSerial) {
     input.replace(input.find(u), u.size(),
                   "u = [\"0.3 + 0.4 * sin(9 * y)\", \"-0.1 + 0.3 * sin(7 * z)\", \"0.2 + 0.3 * sin(8 * x + 3 * y)\"]\n");
     expect_matches_serial(input + "[les]\nmodel = \"sigma\"\nC = 3.0\n");
+    // The dynamic constant is a domain sum: exact in fixed point, so the same on any rank count
+    expect_matches_serial(input + "[les]\nmodel = \"sigma\"\ndynamic = true\n");
 }
 
 TEST(MPI3DTest, CharacteristicBoundariesMatchSerial) {
