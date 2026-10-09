@@ -32,8 +32,10 @@ existing C++20 / Kokkos / CMake / TOML stack.
 - Real-fluid equations of state (cubic EOS, transcritical injection),
   multiphase and spray, soot, radiation, plasma and ionized species, surface
   chemistry and catalytic walls.
-- Full multicomponent (Stefan-Maxwell) transport, Soret and Dufour effects,
-  bulk viscosity. The transport interface leaves room for them.
+- Full multicomponent (Stefan-Maxwell) transport, the Dufour effect and bulk
+  viscosity. The transport interface leaves room for them; thermal diffusion
+  (the Soret effect) was added later (#158, [below](#thermal-diffusion-soret-effect)),
+  with an assessment of multicomponent transport.
 - Turbulence-chemistry interaction models (LES closures such as thickened
   flame, flamelet tables, PaSR). Mallard resolves the flame or detonation.
 - Implicit time stepping of the flow. The flow stays explicit (SSPRK3); only
@@ -1163,6 +1165,138 @@ kernels of milestone 10.
 
 On a CPU core, chemistry is 68% of the H2 flame's step (h2o2) and 75% of the
 CH4 flame's (GRI-3.0); transport is most of the rest of the latter.
+
+### Thermal diffusion (Soret effect)
+
+`physics.soret = true` (mixture-averaged transport only, as in Cantera, whose
+1D flames accept it with the mixture-averaged and multicomponent models) adds
+the thermal diffusion fluxes `-D^T_k grad T / T` to the species fluxes, with
+Cantera's mixture-averaged thermal diffusion coefficients (Cantera 3.2,
+`MixTransport::getThermalDiffCoeffs`): the model of
+[Chapman & Cowling](../references.md#chapman-cowling-1970) as given by
+[Zirwes & Kronenburg 2025](../references.md#zirwes-kronenburg-2025),
+
+```text
+D^T_k  = W_k W D_km sum_(j != k) (1.2 C*_kj - 1) / (D_kj (W_k + W_j)) (Y_k a_j - Y_j a_k),
+a_k    = (15/4) (mu_k / W_k) / (1 + 1.065 sum_(j != k) X_j Phi_kj / X_k)    (0 where Y_k < 1e-20),
+D^T_k <- D^T_k - Y_k sum_j D^T_j                                       (so that they sum to zero)
+```
+
+with `D_km` the mixture-averaged coefficients, `Phi_kj` Wilke's mixing
+operator, and `C*_kj` the reduced collision integral of
+[Monchick & Mason](../references.md#monchick-mason-1961) at
+`T* = k_B T / epsilon_kj`, fitted, as Cantera does, by a polynomial of degree 8
+in `ln T*` over the table rows bracketing the mechanism's `T*` range (with the
+fits in the reduced dipole moment for polar pairs). The model covers every
+species, not only the light ones: in lean H2/air flames H and H2 carry almost
+all of the effect (they diffuse toward hot gas, `D^T < 0`), and the
+normalization moves the balance to the abundant species.
+
+- **Fluxes.** `j_k = -rho D_km (W_k / W) grad X_k + Y_k V_c - D^T_k grad T / T`.
+  The thermal diffusion fluxes sum to zero, so the correction velocity
+  stays that of the Fickian part, as in Cantera's 1D flames; the energy flux
+  carries their enthalpy `sum_k h_k j_k` (without it, the temperature wave
+  of the test below ends 2.7% off the conduction-only solution).
+  `D^T_k` is computed per cell with the other coefficients and averaged to
+  faces; `grad T / T` uses the face's `T` and gradient, as the heat flux.
+  Walls, symmetry planes and outflow faces carry no thermal diffusion flux,
+  as they carry no species flux. No Dufour effect (as Cantera).
+- **Time step.** Unchanged: thermal diffusion couples the species to `T` one
+  way and adds no diffusive eigenvalue.
+- **Cost.** One more pass over the species pairs, with a degree-8
+  polynomial: on one A100 the properties alone go from 3.6 to 11.9 ns per
+  cell for h2o2 (10 species, 1M cells) and from 172 to 424 ns for GRI-3.0;
+  a step of the 2D lean H2 flame (`examples/flame_2d`, 72,576 cells, where
+  chemistry is 90% of the step) from 20.5 to 22.3 ms (+9%).
+- **Off by default**, and runs without it are bitwise identical to before
+  (checked on CPU and GPU on premixed flames with both transport models).
+- TFLES thickens `D^T_k` with the other molecular diffusivities; output
+  `DT_<species>`.
+
+Verification (`test/chemistry_transport_test.cpp`,
+`test/mixture_transport_test.cpp`, `test/mpi_test.cpp`): the coefficients match
+Cantera's at random states of h2o2 and GRI-3.0 (with absent species and a pure
+species) to 6e-13 of their largest magnitude and sum to zero; in an H2/N2
+mixture at uniform composition and pressure with a temperature wave
+(600 +- 30 K, 1 mm), the hydrogen mode grows as the linear solution with
+Fickian relaxation, `-D^T k^2 dT_0 / (rho T_0) (exp(-a k^2 t) - exp(-D_12 k^2 t)) / ((D_12 - a) k^2)`
+(to 0.5%; zero without the option), while the temperature wave decays at
+`lambda / (rho cp)` (to 0.03%); runs are bitwise identical on 1 and 2+ ranks.
+
+Validation against Cantera's `FreeFlame` with the same model
+(`soret_enabled`, mixture-averaged; `tools/flame_reference.py --soret`,
+`examples/premixed_flame/reference/soret_flames.csv`): the V8 setup above
+(20 cells per `delta_T`, CFL 0.2, two flame times, consumption speed over the
+last third), H2/air at 300 K and 1 atm:
+
+| H2/air, phi | 0.4 | 0.5 | 0.6 | 1.0 |
+|---|---|---|---|---|
+| Cantera `S_L` [m/s], mixture-averaged | 0.16013 | 0.42969 | 0.80829 | 2.33237 |
+| Mallard `S_c` error | +0.40% | +0.19% | +0.28% | +0.21% |
+| Cantera `S_L` [m/s], with Soret | 0.15516 | 0.39969 | 0.73527 | 2.13546 |
+| Mallard `S_c` error | -0.58% | -0.07% | +0.34% | +0.41% |
+| Mallard `S_d` error | -0.16% | -0.01% | +0.24% | +0.23% |
+| Soret effect on `S_L`, Cantera | -3.10% | -6.98% | -9.04% | -8.44% |
+| Soret effect on `S_L`, Mallard (`S_c`) | -4.05% | -7.23% | -8.98% | -8.26% |
+| Peak `Y_H` with Soret, Mallard / Cantera | 1.013 | 1.016 | 1.014 | 1.006 |
+
+All within the 2% criterion; the Soret effect, 3-9% here, is reproduced to
+within a point (at phi = 0.4, the slowest flame, over two flame times, its
+two errors of +0.4% and -0.6% add up). Profiles aligned at the maximum of `dT/dx`
+differ from Cantera's by at most 0.3-1.5% of the peak for `T` and `Y_H2`
+and 1.3-5% for H, O and OH at phi = 0.4-0.6, up to 3-9% at phi = 1, where
+the profiles are steepest (as without thermal diffusion, see above). Runs: 300 cells, OpenMP, 3 threads,
+4.3-5.1 ms per step (thermal diffusion +11%), up to 1.3M steps at phi = 0.4.
+
+### Multicomponent transport: assessment
+
+Cantera's `multicomponent` model (`MultiTransport`, the L-matrix formulation of
+[Dixon-Lewis 1968](../references.md#dixon-lewis-1968)) replaces the
+mixture-averaged diffusion coefficients by the full matrix `D_kj`, with fluxes
+`j_k = rho (W_k / W^2) sum_j W_j D_kj grad X_j - D^T_k grad T / T`, and also
+changes the conductivity and the thermal diffusion coefficients. Per state it
+assembles the `3K x 3K` L matrix (A*, B*, C* collision integrals for every
+pair, Parker's rotational relaxation), solves it by LU for the conductivity and
+`D^T_k`, and inverts its `K x K` block for `D_kj`: `O(9 K^3)` work and
+`O(10 K^2)` memory per cell, against `O(K^2)` for the mixture-averaged model.
+
+A device port of it (one cell per thread, local arrays, LU with partial
+pivoting; a prototype, not merged) matches Cantera's `lambda`, `D_kj` and
+`D^T_k` to 1e-14 for h2o2 and GRI-3.0. On one A100:
+
+| Properties per cell | mixture-averaged | with Soret | multicomponent |
+|---|---|---|---|
+| h2o2 (10 species), 1M cells | 3.6 ns | 11.9 ns | 213 ns (59x, 18x) |
+| GRI-3.0 (53 species), 20k cells | 172 ns | 424 ns | 57,700 ns (336x, 136x) |
+
+The 2D lean H2 flame above costs 282 ns per cell and step; the
+multicomponent properties alone, at three RK stages, would add 640 ns
+(3.3x the step), before the `O(K^2)` fluxes per face and the `K^2` matrix
+per cell they need (100 doubles for h2o2, 2,809 for GRI-3.0: 22 GB for a
+million cells). For GRI-3.0 one thread per cell also holds 300 KB of local
+arrays. What it buys, from Cantera's flames (`soret_flames.csv`): flame
+speeds within 0.1-3% of the mixture-averaged ones, and the same Soret effect to
+within a point:
+
+| H2/air, `S_L` [m/s] | phi 0.4 | 0.5 | 0.6 | 1.0 |
+|---|---|---|---|---|
+| mixture-averaged | 0.16013 | 0.42969 | 0.80829 | 2.33237 |
+| + Soret | 0.15516 (-3.1%) | 0.39969 (-7.0%) | 0.73527 (-9.0%) | 2.13546 (-8.4%) |
+| multicomponent | 0.16520 | 0.43639 | 0.80862 | 2.28956 |
+| + Soret | 0.16095 (-2.6%) | 0.40929 (-6.2%) | 0.74458 (-7.9%) | 2.11317 (-7.7%) |
+
+**Decision: not now.** Thermal diffusion is the larger effect (3-9% here)
+and the mixture-averaged model carries it at +9% of a flame's step; the
+multicomponent model's remaining 1-4% (1.1-1.3% at phi = 0.6-1, 3.6% at
+phi = 0.4, a weakly burning flame) would multiply the step cost by about four for hydrogen and is
+out of reach for larger mechanisms with one thread per cell. A later
+implementation should not port the L matrix as is: the iterative algorithms
+of [Ern & Giovangigli](../references.md#ern-giovangigli-1994) (a few
+`O(K^2)` conjugate-gradient or Jacobi iterations from the mixture-averaged
+approximation, which converge to the exact coefficients; see
+[Ern & Giovangigli 1998](../references.md#ern-giovangigli-1998) for their
+thermal diffusion in H2 and CH4 flames) keep the mixture-averaged cost scaling,
+and the fluxes can use the matrix-vector product without storing `D_kj`.
 
 ### Inviscid runs
 

@@ -85,7 +85,8 @@ class MixtureModel {
         /**
          * @brief From the [physics] table: mechanism and optional phase; for
          *        type = "navier_stokes" the transport model ("mixture_averaged",
-         *        "unity_lewis" or "constant_lewis" with lewis = { species = Le }).
+         *        "unity_lewis" or "constant_lewis" with lewis = { species = Le }),
+         *        and soret = true for thermal diffusion (mixture_averaged).
          */
         static MixtureModel from_input(const toml::value & input);
 
