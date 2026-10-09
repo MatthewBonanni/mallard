@@ -48,3 +48,26 @@ void plan_halo_exchange(Distribution & dist, const std::vector<int> & halo_owner
         dist.send_cells.push_back(std::move(send));
     }
 }
+
+void trim_halo_exchange(Distribution & dist, const std::vector<uint8_t> & needed) {
+    // Both sides list a pair's cells in the same order, so a mask of the receiver's
+    // list selects the same cells from the sender's
+    std::vector<std::vector<uint64_t>> masks(comm::size());
+    for (size_t n = 0; n < dist.neighbors.size(); n++) {
+        for (const uint32_t c : dist.recv_cells[n]) masks[dist.neighbors[n]].push_back(needed[c]);
+    }
+    const auto keep = comm::alltoallv(masks);
+    for (size_t n = 0; n < dist.neighbors.size(); n++) {
+        const std::vector<uint64_t> & mask = keep[dist.neighbors[n]];
+        if (mask.size() != dist.send_cells[n].size()) throw std::logic_error("trim_halo_exchange: lists differ");
+        std::vector<uint32_t> send, recv;
+        for (size_t k = 0; k < mask.size(); k++) {
+            if (mask[k]) send.push_back(dist.send_cells[n][k]);
+        }
+        for (const uint32_t c : dist.recv_cells[n]) {
+            if (needed[c]) recv.push_back(c);
+        }
+        dist.send_cells[n] = std::move(send);
+        dist.recv_cells[n] = std::move(recv);
+    }
+}

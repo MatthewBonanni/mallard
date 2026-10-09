@@ -81,6 +81,7 @@ int Solver::init(const toml::value & input_in) {
             init_numerics();
         });
     }
+    trim_halo();
     // The cache describes the local mesh at this halo depth
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) teno->save_cache(halo_layers);
     setup.reset();
@@ -284,6 +285,19 @@ int Solver::base_halo_layers() const {
     // The hybrid flux's sensor reads the velocity gradients of halo-layer-1 cells too
     const bool hybrid = toml::find_or<std::string>(input, "numerics", "convective_flux", "riemann") == "hybrid";
     return (type == "FO" && !viscous && !hybrid) ? 1 : 2;
+}
+
+void Solver::trim_halo() {
+    // The deep TENO halo holds every cell the stencil searches visited, so that
+    // stencils match the serial ones; the time loop needs only the cells the
+    // stencils kept, and the layers the other kernels read
+    const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
+    if (!is_distributed() || teno == nullptr) return;
+    std::vector<uint8_t> needed = teno->stencil_cells();
+    const int base = base_halo_layers();
+    for (uint32_t c = 0; c < mesh->n_cells; c++) needed[c] = needed[c] || distribution.layer[c] <= base;
+    trim_halo_exchange(distribution, needed);
+    halo = HaloExchange(distribution, halo.uses_nccl());
 }
 
 bool Solver::halo_too_shallow() {

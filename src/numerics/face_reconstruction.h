@@ -336,6 +336,9 @@ class TENO : public FaceReconstruction {
         };
         Stencils large_stencils() const;
 
+        /** @brief Local cells that some stencil (central or sector) of a reconstructed cell reads. */
+        std::vector<uint8_t> stencil_cells() const;
+
         /**
          * @brief Metric (3 x 3, row-major) in which the stencil candidates of
          *        cell i are ranked by distance (3D): the identity unless the
