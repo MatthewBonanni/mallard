@@ -14,6 +14,7 @@
 #include "solver.h"
 
 #include <algorithm>
+#include <array>
 #include <limits>
 
 #include <Kokkos_Core.hpp>
@@ -87,16 +88,20 @@ void Solver::advance_chemistry(const double dt_chem) {
     const CellChemistry::Statistics stats =
         cell_chemistry.advance(conservatives, species, T_seed, chem_h, chem_cost, mesh->n_owned(), dt_chem,
                                tfles_on || pasr_on ? chem_time_scale : Kokkos::View<rtype *>());
-    const uint64_t active = stats.active;
-    uint32_t failures = stats.failures;
-    chem_active_cells = active;
-    failures = comm::allreduce(failures, comm::Op::SUM);
+    chem_active_cells = stats.active;
+    Kokkos::fence();
+    const double local = timer.seconds() - start;
+    const auto sums = comm::allreduce(std::array<double, 2>{static_cast<double>(stats.failures), local}, comm::Op::SUM);
+    const uint64_t failures = static_cast<uint64_t>(sums[0]);
+    if (comm::size() > 1) {
+        t_chemistry_slowest += comm::allreduce(local, comm::Op::MAX);
+        t_chemistry_mean += sums[1] / comm::size();
+    }
     if (failures > 0) {
         throw std::runtime_error("the chemistry integrator failed in " + std::to_string(failures) +
                                  " cells at step " + std::to_string(step) + " (more than chemistry.max_steps "
                                  "sub-steps or a vanishing sub-step); try a smaller time step or larger max_steps.");
     }
-    Kokkos::fence();
     t_wall_chemistry += timer.seconds() - start;
 }
 

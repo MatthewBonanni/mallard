@@ -568,6 +568,8 @@ class Solver {
         CellChemistry cell_chemistry;
         uint64_t chem_active_cells = 0;   // owned cells advanced in the last chemistry call
         double t_wall_chemistry = 0.0;
+        double t_chemistry_slowest = 0.0;  // sums over chemistry calls of the slowest rank's time
+        double t_chemistry_mean = 0.0;     // and of the mean of the ranks' times
         bool fuse_chemistry = false;      // run(): fuse consecutive half steps
         bool defer_chemistry = false;     // take_step leaves its last half step pending
         double chemistry_pending = 0.0;   // chemistry time not yet applied to the state

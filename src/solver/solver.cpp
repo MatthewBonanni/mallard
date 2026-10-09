@@ -1390,6 +1390,13 @@ void Solver::print_summary(const std::string & stop) const {
         logging::item("Chemistry", duration(t_wall_chemistry) + " (" +
                                        logging::format("%.0f%%", 100.0 * t_wall_chemistry / t_wall_stepping) +
                                        " of time stepping)");
+        if (t_chemistry_mean > 0.0) {
+            const double waiting = t_chemistry_slowest - t_chemistry_mean;
+            logging::item("Chemistry ranks", "slowest " + duration(t_chemistry_slowest) + ", mean " +
+                                                 duration(t_chemistry_mean) + ": " + duration(waiting) + " waiting (" +
+                                                 logging::format("%.1f%%", 100.0 * waiting / t_wall_stepping) +
+                                                 " of time stepping)");
+        }
     }
     if (steps > 0 && t_wall_stepping > 0.0) {
         logging::item("Throughput", logging::si(n_cells_global * steps / t_wall_stepping) + " cells/s, " +
