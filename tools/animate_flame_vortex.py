@@ -2,7 +2,7 @@
 
     python tools/animate_flame_vortex.py OUT.mp4 RUN_DIR [RUN_DIR ...] [--cols 3] [--fps 15]
         [--gif OUT.gif] [--png OUT.png] [--title TEXT] [--subtitle TEXT] [--t-max T]
-        [--control RUN_DIR ...] [--mechanism M --phase P] [--progress SPECIES]
+        [--control RUN_DIR ...] [--mechanism M --phase P] [--progress SPECIES] [--names LABEL ...]
 
 Each run is a panel: the temperature over the planar flame's burnt-gas
 temperature, mirrored about the pair's axis to show the whole pair, with the
@@ -52,6 +52,7 @@ def main():
     ap.add_argument("--title", default="Premixed flame-vortex interactions")
     ap.add_argument("--subtitle", default="")
     ap.add_argument("--progress", help="as tools/flame_vortex_analysis.py")
+    ap.add_argument("--names", nargs="+", help="a label per run, prefixed to its panel's title (runs keep this order)")
     args = ap.parse_args()
 
     controls = load_controls(args.control, args.mechanism, args.phase, args.progress)
@@ -67,10 +68,11 @@ def main():
         tau = p["delta"] / p["S_L"]
         head = open(os.path.join(d, "input.toml")).read()
         x_v = float(re.search(r"pair at x = ([0-9.]+) mm", head).group(1)) * 1e-3
-        runs.append(dict(dir=d, p=p, files=files, t=times / tau, rows=rows, Qr=relative_Q(rows, control), r=r, u=u,
+        runs.append(dict(name=args.names[len(runs)] + ": " if args.names else "", dir=d, p=p, files=files, t=times / tau, rows=rows, Qr=relative_Q(rows, control), r=r, u=u,
                          tau=tau, x_v=x_v, outcome=classify(rows, control)))
         print(f"{d}: r = {r:g}, u' = {u:g}: {runs[-1]['outcome']}", flush=True)
-    runs.sort(key=lambda q: (q["r"], q["u"]))
+    if not args.names:
+        runs.sort(key=lambda q: (q["r"], q["u"]))
     t_max = args.t_max or max(q["t"][-1] for q in runs)
     clock = np.linspace(0, t_max, args.frames)
     n = len(runs)
@@ -113,7 +115,7 @@ def main():
             for s in ax.spines.values():
                 s.set_color(MARKERS[q["outcome"]][1])
                 s.set_linewidth(2)
-            ax.set_title(f"r = {q['r']:g} delta_L, u' = {q['u']:g} S_L: {q['outcome']}", color=FG, fontsize=10,
+            ax.set_title(f"{q['name']}r = {q['r']:g} delta_L, u' = {q['u']:g} S_L: {q['outcome']}", color=FG, fontsize=10,
                          pad=4)
         axd = fig.add_axes([0.71, 0.47, 0.27, 0.39])
         axd.set_facecolor(BG)
