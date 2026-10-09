@@ -223,6 +223,21 @@ times the half step (exact for the autonomous constant-volume reactor).
 | `efficiency` | `charlette` (default) or `none` (`E = 1`) |
 | `beta` | Exponent of the Charlette efficiency, default 0.5 |
 
+**Experimental: `model = "pasr"`**, the partially stirred reactor (Sabelnikov &
+Fureby 2013) for non-premixed and partially premixed flames: no thickening;
+each cell's rates are those of its filtered state times the reacting fraction
+`kappa = tau_c / (tau_c + tau_mix)`, with the chemical time `tau_c = rho cp T /
+|q|` of the cell's heat release rate `q` and the mixing time `tau_mix = C_mix
+Delta^2 / (nu + nu_t)` of molecular and SGS diffusion across the cell, so
+`kappa -> 1` where the mesh resolves the mixing and the heat release tends to
+`rho cp T / tau_mix` where the chemistry is fast. Applied as the per-cell
+chemistry time scale of TFLES (exact for the Strang reactor), once per step.
+Key `C_mix` (default 1); output `PASR_KAPPA`. Against a DNS of an H2/N2-air
+diffusion flame in decaying turbulence (heat release over 0.2-0.4 ms): -11%
+at `Delta = 0.27 mm` (quasi-laminar +17%), but -50% and a near-extinguished
+flame at 0.53 mm (quasi-laminar +41%). It corrects the right way at moderate
+filter widths and overcorrects on coarse meshes; not validated beyond this case.
+
 ## `[initialize]`
 
 | Key | Description |
