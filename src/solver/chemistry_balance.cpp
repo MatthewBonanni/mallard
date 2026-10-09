@@ -160,6 +160,14 @@ uint32_t ChemistryBalance::send(const ChemistryCells & cells, const Kokkos::View
         MPI_Isend(send_ptr + static_cast<size_t>(t.first - kept) * S, static_cast<int>(t.count * S), rtype_mpi(), t.rank,
                   STATE_TAG, comm::world(), &requests[n++]);
     }
+    // Completed now: large GPU messages progress only inside MPI calls, which the sender would
+    // otherwise make only after integrating its own cells, leaving the receivers idle meanwhile
+    wait(requests);
+    for (const Transfer & t : sends) {
+        requests.push_back(MPI_REQUEST_NULL);
+        MPI_Irecv(send_ptr + static_cast<size_t>(t.first - kept) * result_stride, static_cast<int>(t.count * result_stride),
+                  rtype_mpi(), t.rank, RESULT_TAG, comm::world(), &requests.back());
+    }
 #endif
     return kept;
 }
@@ -169,7 +177,6 @@ uint32_t ChemistryBalance::receive(const ChemistryCells & cells, const Kokkos::V
     uint32_t failures = 0;
 #ifdef Mallard_HAS_MPI
     if (sends.empty() && receives.empty()) return 0;
-    wait(requests);
     const uint32_t S = state_stride, R = result_stride, ns = n_species;
     if (n_guests > 0) {
         reserve_guests(n_guests);
@@ -203,17 +210,11 @@ uint32_t ChemistryBalance::receive(const ChemistryCells & cells, const Kokkos::V
         Kokkos::fence("chemistry_balance_results");
         if constexpr (stage_through_host) Kokkos::deep_copy(h_guest_buffer, guest_buffer);
     }
-    rtype * result_ptr = stage_through_host ? h_send_buffer.data() : send_buffer.data();
     rtype * guest_ptr = stage_through_host ? h_guest_buffer.data() : guest_buffer.data();
-    requests.assign(sends.size() + receives.size(), MPI_REQUEST_NULL);
-    size_t n = 0;
-    for (const Transfer & t : sends) {
-        MPI_Irecv(result_ptr + static_cast<size_t>(t.first - kept) * R, static_cast<int>(t.count * R), rtype_mpi(),
-                  t.rank, RESULT_TAG, comm::world(), &requests[n++]);
-    }
     for (const Transfer & t : receives) {
+        requests.push_back(MPI_REQUEST_NULL);
         MPI_Isend(guest_ptr + static_cast<size_t>(t.first) * R, static_cast<int>(t.count * R), rtype_mpi(), t.rank,
-                  RESULT_TAG, comm::world(), &requests[n++]);
+                  RESULT_TAG, comm::world(), &requests.back());
     }
     wait(requests);
     if (n_sent > 0) {
