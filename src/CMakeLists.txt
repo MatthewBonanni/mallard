@@ -27,6 +27,7 @@ add_library(MallardCore STATIC
     physics/tfles.cpp
     physics/physics.cpp
     solver/cell_chemistry.cpp
+    solver/chemistry_balance.cpp
     solver/chemistry_benchmark.cpp
     solver/solver.cpp
     solver/solver_chemistry.cpp

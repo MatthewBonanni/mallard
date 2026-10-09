@@ -15,6 +15,7 @@
 #define CELL_CHEMISTRY_H
 
 #include <cstdint>
+#include <memory>
 
 #include <Kokkos_Core.hpp>
 
@@ -45,6 +46,23 @@ struct CellChemistryOptions {
 };
 
 /**
+ * @brief The per-cell views a chemistry call reads and writes: the state,
+ *        the temperature seed, the last sub-step, the sub-steps of the step
+ *        and of the last call, and the optional multiplier of dt.
+ */
+struct ChemistryCells {
+    StateView U;
+    SpeciesView rhoY;
+    Kokkos::View<rtype *> T_seed;
+    Kokkos::View<rtype *> chem_h;
+    Kokkos::View<rtype *> chem_cost;
+    Kokkos::View<float *> previous_cost;
+    Kokkos::View<rtype *> time_scale;
+};
+
+class ChemistryBalance;
+
+/**
  * @brief Work memory and kernels that advance the cells of a state as
  *        adiabatic constant-volume reactors at fixed (rho, e).
  *
@@ -67,9 +85,16 @@ class CellChemistry {
                   uint32_t n_cells);
 
         struct Statistics {
-            uint64_t active = 0;    // cells integrated
-            uint32_t failures = 0;  // cells whose integration failed
+            uint64_t active = 0;    // cells that needed chemistry
+            uint32_t failures = 0;  // cells whose integration here failed (sent cells: where they ran)
+            uint64_t sent = 0;      // active cells integrated by another rank
         };
+
+        /**
+         * @brief Balances the integration across ranks from now on (collective:
+         *        every rank of the run, every call): see ChemistryBalance.
+         */
+        void balance_across_ranks(double threshold);
 
         /**
          * @brief Advance cells [0, n) over dt. Partial densities change;
@@ -108,6 +133,11 @@ class CellChemistry {
         uint32_t sparse_entries() const { return sparse ? pattern.nnz : 0; }
 
     private:
+        /** @brief Integrates queued cells [0, n) of `cells` in batches of the work memory; returns failures. */
+        uint32_t integrate(const ChemistryCells & cells, const Kokkos::View<uint32_t *> & queued,
+                           const Kokkos::View<float *> & queued_cost, uint32_t n, double dt);
+
+        std::shared_ptr<ChemistryBalance> balance;
         Mixture gas;
         chemistry::KineticsTable<> kinetics;
         CellChemistryOptions options;
@@ -122,8 +152,8 @@ class CellChemistry {
         chemistry::SparseLUPattern<> pattern;
         Kokkos::View<double **, Kokkos::LayoutRight> work;  // (cell of a chunk, work)
         Kokkos::View<uint32_t **, Kokkos::LayoutRight> pivot;
-        Kokkos::View<uint32_t *> active, queue;
-        Kokkos::View<float *> cost;  // binning: the last cost of each queued cell
+        Kokkos::View<uint32_t *> active, queue;  // (cell): flags, then the cells that need chemistry
+        Kokkos::View<float *> cost;  // binning: minus the last cost of each queued cell
         Kokkos::View<float *> previous_cost;  // (cell)
 };
 

@@ -44,9 +44,7 @@ void Solver::init_chemistry() {
     }
     const std::string coupling = toml::find_or<std::string>(table, "coupling", "strang");
     if (coupling != "strang") throw InputError("chemistry.coupling = \"" + coupling + "\" is not one of: strang.");
-    if (toml::find_or<bool>(table, "load_balance", false)) {
-        throw InputError("chemistry.load_balance is not available yet.");
-    }
+    chemistry_load_balance = toml::find_or<bool>(table, "load_balance", false);
     const chemistry::Mechanism & mech = mixture_model->mechanism();
     if (mech.reactions.empty()) {
         throw InputError("[chemistry]: the mechanism " + mech.file + " has no reactions.");
@@ -81,6 +79,8 @@ void Solver::allocate_chemistry() {
     options.T_frozen = T_frozen;
     options.lanes = chemistry_lanes;
     cell_chemistry.init(mixture, mixture_model->mechanism(), kinetics, options, mesh->n_cells);
+    // Balance when the slowest rank's chemistry work exceeds the mean by 5%
+    if (chemistry_load_balance && is_distributed()) cell_chemistry.balance_across_ranks(0.05);
 }
 
 void Solver::advance_chemistry(const double dt_chem) {
@@ -91,11 +91,16 @@ void Solver::advance_chemistry(const double dt_chem) {
     chem_active_cells = stats.active;
     Kokkos::fence();
     const double local = timer.seconds() - start;
-    const auto sums = comm::allreduce(std::array<double, 2>{static_cast<double>(stats.failures), local}, comm::Op::SUM);
+    const auto sums = comm::allreduce(std::array<double, 4>{static_cast<double>(stats.failures), local,
+                                                            static_cast<double>(stats.active),
+                                                            static_cast<double>(stats.sent)},
+                                      comm::Op::SUM);
     const uint64_t failures = static_cast<uint64_t>(sums[0]);
     if (comm::size() > 1) {
         t_chemistry_slowest += comm::allreduce(local, comm::Op::MAX);
         t_chemistry_mean += sums[1] / comm::size();
+        chem_cells_integrated += sums[2];
+        chem_cells_sent += sums[3];
     }
     if (failures > 0) {
         throw std::runtime_error("the chemistry integrator failed in " + std::to_string(failures) +

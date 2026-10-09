@@ -316,6 +316,9 @@ class Solver {
          */
         void set_distributed(bool on) { distribute = on; }
         bool is_distributed() const { return distribute && comm::size() > 1; }
+
+        /** @brief Cell integrations done by another rank than the owner so far (chemistry load balancing). */
+        double chemistry_cells_sent() const { return chem_cells_sent; }
         const Distribution & get_distribution() const { return distribution; }
 
         /** @brief Body force per unit volume, along the mass flow direction, of the last RHS ([source] mass_flow). */
@@ -570,6 +573,8 @@ class Solver {
         double t_wall_chemistry = 0.0;
         double t_chemistry_slowest = 0.0;  // sums over chemistry calls of the slowest rank's time
         double t_chemistry_mean = 0.0;     // and of the mean of the ranks' times
+        double chem_cells_integrated = 0.0, chem_cells_sent = 0.0;  // over calls and ranks; sent: load balancing
+        bool chemistry_load_balance = false;
         bool fuse_chemistry = false;      // run(): fuse consecutive half steps
         bool defer_chemistry = false;     // take_step leaves its last half step pending
         double chemistry_pending = 0.0;   // chemistry time not yet applied to the state

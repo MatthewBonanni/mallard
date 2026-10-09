@@ -1395,7 +1395,11 @@ void Solver::print_summary(const std::string & stop) const {
             logging::item("Chemistry ranks", "slowest " + duration(t_chemistry_slowest) + ", mean " +
                                                  duration(t_chemistry_mean) + ": " + duration(waiting) + " waiting (" +
                                                  logging::format("%.1f%%", 100.0 * waiting / t_wall_stepping) +
-                                                 " of time stepping)");
+                                                 " of time stepping)" +
+                                                 (chemistry_load_balance && chem_cells_integrated > 0.0
+                                                      ? logging::format(", %.1f%% of the integrations on other ranks",
+                                                                        100.0 * chem_cells_sent / chem_cells_integrated)
+                                                      : std::string()));
         }
     }
     if (steps > 0 && t_wall_stepping > 0.0) {
