@@ -53,10 +53,15 @@ struct SparseLUPattern {
     View1<uint32_t> source;    // (entry): original row * n + column, for the gather from a dense J
     View1<uint32_t> diagonal;  // (row): entry of the diagonal
     using Pairs = Kokkos::View<uint32_t *[2], Kokkos::LayoutRight, MemorySpace>;
-    // Factorization pivot by pivot (one thread): per pivot, the L entries below it and its updates
-    // (target, l, u): a_t -= a_l a_u
+    // One thread, or a narrow team (fewer than STAGED_LANES lanes), factors pivot by pivot and solves column
+    // by column, the work of a pivot across the lanes: per pivot, the L entries below it and its updates
+    // (target, l, u): a_t -= a_l a_u; L's entries below it and U's above it, with their rows. Wide teams
+    // take the stages, levels and chain below, with the same bits
+    static constexpr uint32_t STAGED_LANES = 128;
     View1<uint32_t> pivot_lower_offset, pivot_lower_entry, pivot_update_offset;
     Kokkos::View<uint32_t *[3], Kokkos::LayoutRight, MemorySpace> pivot_update;
+    View1<uint32_t> column_lower_offset, column_upper_offset;
+    Pairs column_lower_entry, column_upper_entry;
     // Factorization in stages of independent pivots: per stage, the L entries of its pivots with their
     // diagonal entries, then the entries it updates (targets), each with its updates a_t -= a_l a_u in
     // pivot order
@@ -227,6 +232,7 @@ SparseLUPattern<MemorySpace> make_sparse_lu_pattern(const Mechanism & mechanism)
         q--;
     }
     const uint32_t m = n - q;
+    const std::vector<Bits> fill = F;  // without the chain's padding
     for (uint32_t r = q; r < n; r++) {
         for (uint32_t c = q; c < n; c++) set(F[r], c);
     }
@@ -249,6 +255,7 @@ SparseLUPattern<MemorySpace> make_sparse_lu_pattern(const Mechanism & mechanism)
         for (uint32_t r = q; r < n; r++) add_entry(r, c);
     }
     auto at = [&](const uint32_t r, const uint32_t c) { return entry[static_cast<size_t>(r) * n + c]; };
+    auto real = [&](const uint32_t r, const uint32_t c) { return test(fill[r], c) != 0; };
     // Each entry's updates a_t -= a_l a_u in pivot order, each in the stage of the latest pivot so far: no
     // earlier than its pivot's (whose column is then scaled) and in the same order as pivot by pivot
     std::vector<std::vector<uint32_t>> scale(n_stages);                       // (stage): L entry, its diagonal
@@ -260,11 +267,11 @@ SparseLUPattern<MemorySpace> make_sparse_lu_pattern(const Mechanism & mechanism)
             if (at(r, k) < 0) continue;
             const uint32_t l = static_cast<uint32_t>(at(r, k));
             if (k < q) scale[stage_of[k]].insert(scale[stage_of[k]].end(), {l, diagonal[k]});
-            pivot_lower_entry.push_back(l);
+            if (real(r, k)) pivot_lower_entry.push_back(l);
             for (uint32_t c = k + 1; c < n; c++) {
                 if (at(k, c) < 0) continue;
                 const uint32_t t = static_cast<uint32_t>(at(r, c)), u = static_cast<uint32_t>(at(k, c));
-                pivot_update.insert(pivot_update.end(), {t, l, u});
+                if (real(r, k) && real(k, c)) pivot_update.insert(pivot_update.end(), {t, l, u});
                 if (k >= q) continue;
                 auto & list = updates[t];
                 const uint32_t s = list.empty() ? stage_of[k] : std::max(stage_of[k], list.back()[0]);
@@ -322,6 +329,18 @@ SparseLUPattern<MemorySpace> make_sparse_lu_pattern(const Mechanism & mechanism)
             if (at(r, c) >= 0) upper_entry.insert(upper_entry.end(), {static_cast<uint32_t>(at(r, c)), c});
         }
         upper_offset.push_back(static_cast<uint32_t>(upper_entry.size() / 2));
+    }
+    // Solves column by column: per pivot, the entries of L below it and of U above it, with their rows
+    std::vector<uint32_t> column_lower_offset{0}, column_lower_entry, column_upper_offset{0}, column_upper_entry;
+    for (uint32_t k = 0; k < n; k++) {
+        for (uint32_t r = k + 1; r < n; r++) {
+            if (real(r, k)) column_lower_entry.insert(column_lower_entry.end(), {static_cast<uint32_t>(at(r, k)), r});
+        }
+        column_lower_offset.push_back(static_cast<uint32_t>(column_lower_entry.size() / 2));
+        for (uint32_t r = 0; r < k; r++) {
+            if (real(r, k)) column_upper_entry.insert(column_upper_entry.end(), {static_cast<uint32_t>(at(r, k)), r});
+        }
+        column_upper_offset.push_back(static_cast<uint32_t>(column_upper_entry.size() / 2));
     }
     // U's entries in the chain's columns, in the rows before it
     std::vector<uint32_t> chain_upper_offset{0}, chain_upper_entry;
@@ -400,6 +419,10 @@ SparseLUPattern<MemorySpace> make_sparse_lu_pattern(const Mechanism & mechanism)
     p.lower_level_row = copy(lower_level_row, "lu_lower_level_row");
     p.upper_level_offset = copy(upper_level_offset, "lu_upper_level_offset");
     p.upper_level_row = copy(upper_level_row, "lu_upper_level_row");
+    p.column_lower_offset = copy(column_lower_offset, "lu_column_lower_offset");
+    p.column_lower_entry = copy2(column_lower_entry, "lu_column_lower_entry");
+    p.column_upper_offset = copy(column_upper_offset, "lu_column_upper_offset");
+    p.column_upper_entry = copy2(column_upper_entry, "lu_column_upper_entry");
     p.chain = q;
     p.chain_offset = chain_offset;
     p.chain_upper_offset = copy(chain_upper_offset, "lu_chain_upper_offset");
@@ -467,6 +490,29 @@ struct SparseLU {
         // Into the elimination order
         lanes.for_each(n, [&](const uint32_t i) { x[i] = b[p.perm(i)]; });
         lanes.sync();
+        if (!(Lanes::parallel && lanes.lanes >= p.STAGED_LANES)) {
+            for (uint32_t k = 0; k < n; k++) {
+                const double x_k = x[k];
+                const uint32_t first = p.column_lower_offset(k);
+                lanes.for_each(p.column_lower_offset(k + 1) - first, [&](const uint32_t a) {
+                    x[p.column_lower_entry(first + a, 1)] -= values[p.column_lower_entry(first + a, 0)] * x_k;
+                });
+                lanes.sync();
+            }
+            for (uint32_t k = n; k-- > 0;) {
+                const double x_k = x[k] / values[p.diagonal(k)];
+                lanes.sync();
+                lanes.single([&]() { x[k] = x_k; });
+                const uint32_t first = p.column_upper_offset(k);
+                lanes.for_each(p.column_upper_offset(k + 1) - first, [&](const uint32_t a) {
+                    x[p.column_upper_entry(first + a, 1)] -= values[p.column_upper_entry(first + a, 0)] * x_k;
+                });
+                lanes.sync();
+            }
+            lanes.for_each(n, [&](const uint32_t i) { b[p.perm(i)] = x[i]; });
+            lanes.sync();
+            return;
+        }
         for (uint32_t l = 0; l < p.n_lower_levels; l++) {
             const uint32_t first = p.lower_level_offset(l);
             lanes.for_each(p.lower_level_offset(l + 1) - first, [&](const uint32_t m) {
@@ -528,19 +574,22 @@ struct SparseLU {
             values[e] = (src >= 0 ? -J[src] : 0.0) + (r == c ? diagonal : 0.0);
         });
         lanes.sync();
-        if constexpr (!Lanes::parallel) {
-            for (uint32_t k = 0; k < n; k++) {
-                const double inv = 1.0 / values[p.diagonal(k)];
-                for (uint32_t a = p.pivot_lower_offset(k); a < p.pivot_lower_offset(k + 1); a++) {
-                    values[p.pivot_lower_entry(a)] *= inv;
-                }
-                for (uint32_t a = p.pivot_update_offset(k); a < p.pivot_update_offset(k + 1); a++) {
-                    values[p.pivot_update(a, 0)] -= values[p.pivot_update(a, 1)] * values[p.pivot_update(a, 2)];
-                }
-            }
+        const bool staged = Lanes::parallel && lanes.lanes >= p.STAGED_LANES;
+        for (uint32_t k = 0; !staged && k < n; k++) {
+            const double inv = 1.0 / values[p.diagonal(k)];
+            const uint32_t first_lower = p.pivot_lower_offset(k);
+            lanes.for_each(p.pivot_lower_offset(k + 1) - first_lower,
+                           [&](const uint32_t a) { values[p.pivot_lower_entry(first_lower + a)] *= inv; });
+            lanes.sync();
+            const uint32_t first_update = p.pivot_update_offset(k);
+            lanes.for_each(p.pivot_update_offset(k + 1) - first_update, [&](const uint32_t a) {
+                const uint32_t e = first_update + a;
+                values[p.pivot_update(e, 0)] -= values[p.pivot_update(e, 1)] * values[p.pivot_update(e, 2)];
+            });
+            lanes.sync();
         }
         const uint32_t m = n - p.chain;
-        for (uint32_t s = 0; Lanes::parallel && s + m < p.n_stages; s++) {
+        for (uint32_t s = 0; staged && s + m < p.n_stages; s++) {
             const uint32_t first_scale = p.scale_offset(s);
             lanes.for_each(p.scale_offset(s + 1) - first_scale, [&](const uint32_t m) {
                 const uint32_t a = first_scale + m;
@@ -560,7 +609,7 @@ struct SparseLU {
         // block's entries across the lanes, a few at a time each
         double * block = values + p.chain_offset;
         const uint32_t L = lanes.lanes;
-        for (uint32_t j = 0; Lanes::parallel && j < m; j++) {
+        for (uint32_t j = 0; staged && j < m; j++) {
             double * column = block + j * m;
             const uint32_t w = m - 1 - j;
             const double inv = 1.0 / column[j];

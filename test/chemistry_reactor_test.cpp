@@ -448,9 +448,10 @@ TEST(ChemistryReactorTest, FractionalOrdersIgniteToDepletionLikeCantera) {
     std::cout << "propane_2step: max ignition delay error " << worst_tau << ", " << r.steps << " sub-steps\n";
 }
 
-/** @brief One thread taking the lanes' code paths (the sparse LU in stages). */
+/** @brief One thread taking a wide team's code paths (the sparse LU in stages, levels and its chain). */
 struct StagedLanes : SerialLanes {
     static constexpr bool parallel = true;
+    static constexpr uint32_t lanes = 512;
 };
 
 TEST(ChemistryReactorTest, SparseLUSolvesLikeTheDenseOne) {
