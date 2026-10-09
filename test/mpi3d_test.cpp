@@ -102,6 +102,20 @@ TEST(MPI3DTest, CharacteristicBoundariesMatchSerial) {
     expect_matches_serial(input);
 }
 
+TEST(MPI3DTest, SyntheticTurbulenceInletMatchesSerial) {
+    // The inflow field is a function of the time and the inlet's geometry alone,
+    // and its zero-net-flux correction sums over the whole inlet in a fixed order
+    std::string input = box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"euler\"\n");
+    const std::string from = "name = \"right\"\ntype = \"symmetry\"\n";
+    input.replace(input.find(from), from.size(), "name = \"right\"\ntype = \"nscbc_outlet\"\np = 1.0\nL = 1.0\n");
+    const std::string left = "name = \"left\"\ntype = \"extrapolation\"\n";
+    input.replace(input.find(left), left.size(),
+                  "name = \"left\"\ntype = \"nscbc_inlet\"\nu = [\"0.3 + 0.1 * y\", 0.0, 0.0]\np = 1.0\nT = 1.0\nL = 1.0\n"
+                  "[boundaries.turbulence]\nreynolds_stress = [0.004, 0.002, 0.002, -0.001, 0.0, 0.0]\n"
+                  "length_scale = [0.3, 0.15, 0.1]\n");
+    expect_matches_serial(input);
+}
+
 TEST(MPI3DTest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
     // Fully periodic: every node class of the box corners spans eight nodes
     const std::string file = write_temp_shared("mallard_mpi3d_periodic.msh", jittered_periodic_mesh_3d(6));

@@ -35,6 +35,7 @@
 #include "scalar_reconstruction.h"
 #include "data_writer.h"
 #include "statistics.h"
+#include "synthetic_inflow.h"
 #include "expression.h"
 #include "comm.h"
 #include "distributed_mesh.h"
@@ -347,6 +348,9 @@ class Solver {
         void init_solution_analytical();
         void init_solution_restart();
         void update_boundary_states(rtype t_eval);
+        void init_inlets(const std::vector<toml::value> & input_boundaries,
+                         const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
+        void update_inflow(rtype t_eval);
         void init_sources();
         void update_source_field(rtype t_eval);
         void init_sponges();
@@ -575,6 +579,9 @@ class Solver {
         bool characteristic_transverse = false;  // Some characteristic boundary has transverse terms
         rtype t_characteristic = -1.0;           // Time the incoming waves were last advanced from
         bool characteristic_state_set = false;   // char_state holds the faces' state (from a step or a restart)
+        // Synthetic turbulence of inlets, and the time of the targets in char_target
+        std::vector<std::unique_ptr<SyntheticInflow>> inflows;
+        rtype t_inflow = -1.0;
 
         // Checks
         uint32_t check_interval;
