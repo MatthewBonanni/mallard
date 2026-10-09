@@ -9,7 +9,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 
 ![Mallard simulations](./docs/images/hero.gif)
 
-*A cellular detonation in 2H2-O2-7Ar with finite-rate chemistry, its numerical soot foil recording the triple-point tracks (front speed within 0.01% of the Chapman-Jouguet speed); the Taylor-Green vortex at Re = 1600 on the full periodic box, whose kinetic-energy dissipation rate follows the 512³ spectral DNS of the [High-Order CFD Workshop](https://cfd.ku.edu/hiocfd/); the Mach 10 double Mach reflection; and the hairpin vortices shed by a sphere at Re = 300, with Strouhal number, drag and lift within 3%, 2% and 6% of Johnson & Patel ([`examples/`](examples)).*
+*Configuration 3 of the 2D Riemann problem on 4096² quadrilaterals (16.8M cells), with Kelvin-Helmholtz roll-ups along the slip lines of the jet; a cellular detonation in 2H2-O2-7Ar in a 3 cm square duct, 19.2M hexahedra in a window that follows the front, whose transverse waves sweep both directions and print their tracks on the numerical soot foils of the walls (front speed within 0.2% of the Chapman-Jouguet speed); the Taylor-Green vortex at Re = 1600 on the full periodic box at 256³ (16.8M hexahedra), whose kinetic-energy dissipation rate, traced beside it, peaks within 0.3% of the 512³ spectral DNS of the [High-Order CFD Workshop](https://cfd.ku.edu/hiocfd/); and a DNS of the autoignition of thermally stratified lean H2/air at 41 atm (T' = 15 K, after Chen et al.), burning by spontaneous ignition fronts and deflagrations ([`examples/`](examples)).*
 
 > **NOTE:** Mallard is under active development; finite-rate chemistry is new, and its GPU performance is still being tuned.
 
@@ -103,6 +103,7 @@ cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 | `Mallard_USE_DOUBLE` | `ON` | Double precision (single precision otherwise) |
 | `Mallard_ENABLE_MPI` | `OFF` | Distributed memory with MPI: `mpirun -n N Mallard -i input.toml` splits the mesh between ranks; with generated meshes or HDF5 mesh files (`mallard-mesh-convert`) no rank ever holds the whole mesh, while Gmsh files are read whole by every rank |
 | `Mallard_GPU_AWARE_MPI` | `OFF` | With MPI on GPUs: hand device buffers to a CUDA- or ROCm-aware MPI (e.g. Open MPI over UCX built with CUDA or ROCm) instead of staging halos through host memory |
+| `Mallard_ENABLE_NCCL` | `OFF` | With MPI on NVIDIA GPUs: exchange halos with NCCL, stream-ordered with the kernels, so the host never waits for a halo (finds NCCL through `NCCL_HOME` or `NCCL_ROOT`); `[parallel] halo_exchange` chooses at run time |
 | `Mallard_ENABLE_KAMINPAR` | `OFF` | With MPI: partition the mesh with the [dKaMinPar](https://github.com/KaHIP/KaMinPar) graph partitioner (fetched at configure time; needs oneTBB) instead of a Hilbert curve. With CUDA, configure with the host compiler (`-DCMAKE_CXX_COMPILER=g++`) instead of `nvcc_wrapper`: Kokkos then compiles the code that uses it through `nvcc_wrapper` itself, and dKaMinPar does not compile with nvcc |
 | `Mallard_ENABLE_HDF5` | `OFF` | HDF5 mesh files and solution output (`format = "hdf5"`, with XDMF for ParaView; parallel HDF5 with MPI, when available) and the `mallard-mesh-convert` tool |
 | `Mallard_WARNINGS_AS_ERRORS` | `OFF` | Treat compiler warnings in Mallard's own code as errors (on in CI) |

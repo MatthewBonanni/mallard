@@ -2950,6 +2950,23 @@ TENO::Stencils TENO::large_stencils() const {
     return out;
 }
 
+std::vector<uint8_t> TENO::stencil_cells() const {
+    std::vector<uint8_t> used(mesh->n_cells, 0);
+    const uint32_t n_reconstructed = scale.extent(0);
+    const auto large_slices = host_slice_start(stencil_large);
+    const auto small_slices = host_slice_start(stencil_small);
+    std::vector<CellTables> chunk;
+    for (uint32_t c0 = 0; c0 < n_reconstructed; c0 += CHUNK_CELLS) {
+        chunk.assign(std::min(CHUNK_CELLS, n_reconstructed - c0), CellTables());
+        download_tables(*this, large_slices, small_slices, c0, chunk);
+        for (const CellTables & t : chunk) {
+            for (const int32_t c : t.large_cells) used[c] = 1;
+            for (const int32_t c : t.small_cells) used[c] = 1;
+        }
+    }
+    return used;
+}
+
 uint64_t TENO::options_key() const {
     Fnv1a hash;
     hash.add(sizeof(rtype));

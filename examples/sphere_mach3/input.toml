@@ -9,9 +9,7 @@
 # and through the shock layer. Generate it first:
 #   python ../../tools/make_sphere_mesh.py sphere.msh
 # (about 800,000 tetrahedra). Free stream rho = 1.4, p = 1, so the sound speed
-# is 1 and u = 3; HLL fluxes with bound-preserving TENO5. (With RHLL a
-# carbuncle grows on the stagnation line, which here is the corner of the two
-# symmetry planes, after t ~ 1.6; see issue #80.)
+# is 1 and u = 3; HLL fluxes with bound-preserving TENO5.
 #
 # Run:
 #   ../../build3d/src/Mallard -i input.toml

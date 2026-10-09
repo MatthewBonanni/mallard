@@ -89,7 +89,11 @@ goes to negative pressure at 0.5, while the Sedov blasts run at 1.0. With chemis
 error can bind first: the 1D CJ detonation of `examples/detonation_1d` keeps
 its ZND induction length within 5% up to `cfl` = 0.35 but not at 0.5 (-5.5%) or
 1.0 (-25%), while the premixed flame's speed is the same to 0.001% at 0.2 and
-1.0.
+1.0. SIMPLER balanced splitting (`[chemistry] coupling = "simpler"`) keeps the
+mean induction length within 5% at `cfl` = 1.0 (-0.9% and +3.2% at 10 and
+20 cells per induction length), with a front that oscillates more from output
+to output
+([chemistry.md](../design/chemistry.md#simpler-balanced-splitting-option)).
 
 ## Reconstruction
 
@@ -116,7 +120,7 @@ its ZND induction length within 5% up to `cfl` = 0.35 but not at 0.5 (-5.5%) or
 | HLL | [Harten, Lax & van Leer 1983](../references.md#harten-lax-van-leer-1983), with Einfeldt wave speeds ([Einfeldt 1988](../references.md#einfeldt-1988); [Einfeldt et al. 1991](../references.md#einfeldt-1991)) |
 | HLLC | [Toro, Spruce & Speares 1994](../references.md#toro-spruce-speares-1994), with the same Einfeldt wave speeds |
 | Roe | [Roe 1981](../references.md#roe-1981), with Harten's entropy fix ([Harten 1983](../references.md#harten-1983)) |
-| RHLL | [Nishikawa & Kitamura 2008](../references.md#nishikawa-kitamura-2008), a rotated hybrid: HLL along the velocity-difference direction, Roe across it. Carbuncle-free, except at a shock at rest on cell faces ([below](#stationary-shocks-on-cell-faces)). |
+| RHLL | [Nishikawa & Kitamura 2008](../references.md#nishikawa-kitamura-2008), a rotated hybrid: HLL along the velocity-difference direction, Roe across it. Blended toward HLL along the face normal by the pressure jump across the face, with the rotated flux's weight min(p_l / p_r, p_r / p_l)^3 (the pressure weight of AUSMPW+, [Kim, Kim & Rho 2001](../references.md#kim-kim-rho-2001)): on tetrahedra the rotation otherwise turns HLL toward the shock normal on every face that crosses a shock, which grows a carbuncle on the stagnation line of blunt bodies with MUSCL or TENO (#80). Contacts and shear layers carry no pressure jump and keep the rotated flux. Carbuncle-free, except at a shock at rest on cell faces ([below](#stationary-shocks-on-cell-faces)). |
 
 All five also solve gas mixtures, on each side's frozen `cp / cv` and energy
 offset ([chemistry design](../design/chemistry.md#riemann-solvers)). The
