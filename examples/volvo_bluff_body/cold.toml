@@ -1,0 +1,130 @@
+# Non-reacting LES of the Volvo bluff-body combustor (3D build): Sjunnesson,
+# Nelsson & Max 1991 (LDA), the configuration of the AIAA Model Validation for
+# Propulsion workshop. Design and results: docs/design/les.md, section 8.3.
+#
+# Physics: air at 288 K and 1 atm enters a channel of height H = 3 D = 0.12 m
+# at U_b = 16.6 m/s (Re_D = 45,000 with Sutherland's viscosity) and passes an
+# equilateral triangle of edge D = 0.04 m, apex upstream, base at x = 0. The
+# rig is 6 D wide; here the span is periodic over 2 D = 0.08 m, as in the
+# workshop's computations. Inlet 5 D upstream of the base (nscbc_inlet with
+# digital-filter turbulence: u' = 5% U_b, isotropic, integral length 10 mm),
+# outlet 17 D downstream (the rig's exit; nscbc_outlet), no-slip adiabatic
+# walls (channel walls and bluff body, not wall-resolved: no wall model).
+#
+# LES: Sigma model with Scotti's filter width, hybrid KEEP / HLLC flux, MUSCL
+# without limiter, SSPRK3. Mesh (tools/make_volvo_mesh.py --ds 1.25e-3 --nz 64):
+# 2.6M hexahedra, Delta = 1.25 mm = D / 32 in the shear layers and the near
+# wake (x < 5 D), 0.6 mm at the separation corners, growing to 5 mm at
+# x = 10 D and 10 mm at the outlet; dz = 1.25 mm.
+#
+# Variants (same mesh, same inflow): no SGS model (delete [les]); HLLC everywhere
+# (convective_flux = "riemann"); laminar inflow (delete [boundaries.turbulence]).
+#
+# Results: see the RESULTS block written into this header by the validation pass.
+#
+# Run:
+#   python ../../tools/make_volvo_mesh.py volvo.msh --ds 1.25e-3 --nz 64
+#   mpirun -n 4 ../../build3d/src/Mallard -i cold.toml --kokkos-map-device-id-by=mpi_rank
+#   python ../../tools/volvo_profiles.py stats/cold_<last>.vtu --u-bulk 16.6 --out profiles.npz
+#   python ../../tools/plot_volvo.py profiles.npz --exp <data dir> --out cold.png
+
+[run]
+t_stop = 0.3
+cfl = 0.8
+
+[mesh]
+type = "file"
+filename = "volvo.msh"
+
+[[periodic]]
+zones = ["back", "front"]
+translation = [0.0, 0.0, 0.08]
+
+[initialize]
+type = "constant"
+u = [16.6, 0.0, 0.0]
+p = 101325.0
+T = 288.0
+
+[[boundaries]]
+name = "inlet"
+type = "nscbc_inlet"
+u = [16.6, 0.0, 0.0]
+p = 101325.0
+T = 288.0
+L = 0.88
+
+[boundaries.turbulence]
+reynolds_stress = [0.6889, 0.6889, 0.6889, 0.0, 0.0, 0.0]
+length_scale = 0.01
+
+[[boundaries]]
+name = "outlet"
+type = "nscbc_outlet"
+p = 101325.0
+L = 0.88
+
+[[boundaries]]
+name = "top"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "bottom"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "bluffbody"
+type = "wall_adiabatic"
+
+[numerics]
+riemann_solver = "HLLC"
+convective_flux = "hybrid"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+limiter = "none"
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 101325.0
+T_ref = 288.0
+rho_ref = 1.2256836
+viscosity_model = "sutherland"
+mu = 1.716e-5
+Pr = 0.71
+
+[les]
+model = "sigma"
+
+[statistics]
+fields = ["RHO", "U_X", "U_Y", "U_Z", "P"]
+products = ["U_X*U_X", "U_Y*U_Y", "U_Z*U_Z", "U_X*U_Y"]
+t_start = 0.08
+interval = 5
+
+[integrals]
+interval = 5
+budget = true
+
+[output]
+check_interval = 2000
+
+[[write_data]]
+prefix = "restart/cold"
+format = "restart"
+time_interval = 0.02
+
+[[write_data]]
+prefix = "stats/cold"
+format = "vtu"
+time_interval = 0.1
+variables = ["MEAN_*", "COV_*", "MU_T"]
+
+[[write_data]]
+prefix = "snap/cold"
+format = "vtu"
+time_interval = 0.15
+variables = ["U", "Q", "MU_T"]
