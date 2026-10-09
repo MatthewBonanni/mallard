@@ -375,9 +375,9 @@ SparseLUPattern<MemorySpace> make_sparse_lu_pattern(const Mechanism & mechanism)
     auto copy = [](const auto & h, const char * label) {
         using T = typename std::decay_t<decltype(h)>::value_type;
         Kokkos::View<T *, MemorySpace> d(label, h.size());
-        auto m = Kokkos::create_mirror_view(d);
-        for (size_t a = 0; a < h.size(); a++) m(a) = h[a];
-        Kokkos::deep_copy(d, m);
+        auto mirror = Kokkos::create_mirror_view(d);
+        for (size_t a = 0; a < h.size(); a++) mirror(a) = h[a];
+        Kokkos::deep_copy(d, mirror);
         return d;
     };
     p.perm = copy(perm, "lu_perm");
@@ -385,12 +385,12 @@ SparseLUPattern<MemorySpace> make_sparse_lu_pattern(const Mechanism & mechanism)
     p.diagonal = copy(diagonal, "lu_diagonal");
     auto copy2 = [](const std::vector<uint32_t> & h, const char * label) {
         Kokkos::View<uint32_t *[2], Kokkos::LayoutRight, MemorySpace> d(label, h.size() / 2);
-        auto m = Kokkos::create_mirror_view(d);
+        auto mirror = Kokkos::create_mirror_view(d);
         for (size_t a = 0; a < h.size() / 2; a++) {
-            m(a, 0) = h[2 * a];
-            m(a, 1) = h[2 * a + 1];
+            mirror(a, 0) = h[2 * a];
+            mirror(a, 1) = h[2 * a + 1];
         }
-        Kokkos::deep_copy(d, m);
+        Kokkos::deep_copy(d, mirror);
         return d;
     };
     p.pivot_lower_offset = copy(pivot_lower_offset, "lu_pivot_lower_offset");
@@ -546,8 +546,8 @@ struct SparseLU {
         }
         for (uint32_t l = 0; l < p.n_upper_levels; l++) {
             const uint32_t first = p.upper_level_offset(l);
-            lanes.for_each(p.upper_level_offset(l + 1) - first, [&](const uint32_t m) {
-                const uint32_t r = p.upper_level_row(first + m);
+            lanes.for_each(p.upper_level_offset(l + 1) - first, [&](const uint32_t i) {
+                const uint32_t r = p.upper_level_row(first + i);
                 x[r] = subtract(x[r], p.upper_entry, p.upper_offset(r), p.upper_offset(r + 1), values, x) /
                        values[p.diagonal(r)];
             });
@@ -589,15 +589,15 @@ struct SparseLU {
         const uint32_t m = n - p.chain;
         for (uint32_t s = 0; staged && s + m < p.n_stages; s++) {
             const uint32_t first_scale = p.scale_offset(s);
-            lanes.for_each(p.scale_offset(s + 1) - first_scale, [&](const uint32_t m) {
-                const uint32_t a = first_scale + m;
+            lanes.for_each(p.scale_offset(s + 1) - first_scale, [&](const uint32_t i) {
+                const uint32_t a = first_scale + i;
                 const double inv = 1.0 / values[p.scale_entry(a, 1)];
                 values[p.scale_entry(a, 0)] *= inv;
             });
             lanes.sync();
             const uint32_t first_target = p.target_offset(s);
-            lanes.for_each(p.target_offset(s + 1) - first_target, [&](const uint32_t m) {
-                const uint32_t t = first_target + m;
+            lanes.for_each(p.target_offset(s + 1) - first_target, [&](const uint32_t i) {
+                const uint32_t t = first_target + i;
                 values[p.target(t)] =
                     subtract(values[p.target(t)], p.update, p.target_update(t), p.target_update(t + 1), values, values);
             });
@@ -616,7 +616,7 @@ struct SparseLU {
             constexpr uint32_t B = 4;
             lanes.for_each(L, [&](const uint32_t lane) {
                 for (uint32_t first = lane; first < w * w; first += B * L) {
-                    double a[B], l[B], u[B];
+                    double a[B], l[B], upper[B];
                     uint32_t at[B];
                     for (uint32_t b = 0; b < B; b++) {
                         const uint32_t i = Kokkos::min(first + b * L, w * w - 1);
@@ -624,10 +624,10 @@ struct SparseLU {
                         at[b] = c * m + r;
                         a[b] = block[at[b]];
                         l[b] = column[r];
-                        u[b] = block[c * m + j];
+                        upper[b] = block[c * m + j];
                     }
                     for (uint32_t b = 0; b < B; b++) {
-                        if (first + b * L < w * w) block[at[b]] = a[b] - l[b] * u[b];
+                        if (first + b * L < w * w) block[at[b]] = a[b] - l[b] * upper[b];
                     }
                 }
             });
