@@ -20,6 +20,7 @@ add_library(MallardCore STATIC
     numerics/quadrature.cpp
     numerics/scalar_reconstruction.cpp
     numerics/teno.cpp
+    numerics/teno_setup.cpp
     numerics/time_integrator.cpp
     physics/mixture.cpp
     physics/les.cpp
@@ -59,6 +60,14 @@ target_include_directories(MallardCore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/parallel
 )
 target_link_libraries(MallardCore PUBLIC Kokkos::kokkos)
+# The TENO setup computes every table with the same operations on the host
+# and on the device, and contracting multiplies and adds into FMAs would
+# change them differently on each: no contraction in that file
+if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
+    set_source_files_properties(numerics/teno_setup.cpp PROPERTIES COMPILE_OPTIONS "--fmad=false;-ffp-contract=off")
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(numerics/teno_setup.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+endif()
 target_link_libraries(MallardCore PRIVATE yaml-cpp::yaml-cpp)
 mallard_target_warnings(MallardCore)
 

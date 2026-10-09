@@ -350,6 +350,27 @@ class TENO : public FaceReconstruction {
          */
         void save_cache(uint8_t halo_layers = 0);
 
+        /**
+         * @brief Recompute the tables of the given reconstructed cells and keep
+         *        every other cell's, after the mesh geometry changed (node
+         *        coordinates moved, geometry recomputed and on the device).
+         *        Each cell's tables are a function of the mesh alone, so with
+         *        the cells of cells_within_reach() the result is bitwise that
+         *        of a full setup.
+         */
+        void rebuild_cells(const std::vector<uint32_t> & cells);
+
+        /**
+         * @brief Reconstructed cells whose stencil searches reach any of the
+         *        given cells (within their gather_depth vertex-neighbor layers),
+         *        i.e. whose tables depend on those cells' geometry.
+         */
+        std::vector<uint32_t> cells_within_reach(const std::vector<uint32_t> & changed) const;
+
+        // 3D setup: on the host only (tests), and the cells per device batch (0: from the device memory)
+        bool setup_on_host = false;
+        uint32_t setup_batch_cells = 0;
+
         // Gas mixtures: the flow block is reconstructed in primitive variables
         // W with characteristic projections on the primitive system, whose
         // sound speed comes from each cell's frozen gamma; troubled cells are
@@ -382,8 +403,8 @@ class TENO : public FaceReconstruction {
                       bool troubled_pass);
 
         void read_options(const toml::value & input);
-        void compute_stencils_and_matrices();
-        void compute_stencils_and_matrices_3d();
+        void compute_stencils_and_matrices(const std::vector<uint32_t> * subset = nullptr);
+        void compute_stencils_and_matrices_3d(const std::vector<uint32_t> * subset);
         void allocate_scratch();
         uint64_t options_key() const;
         uint64_t cache_key() const;
@@ -397,6 +418,8 @@ class TENO : public FaceReconstruction {
         uint32_t largest_stencil = 0;        // Largest central stencil on any rank (cells)
         int64_t n_sector_unavailable = -1;   // Small sector stencils cut by boundaries, -1 if unknown
         std::string cache_status;          // Stencil cache outcome, empty without a cache file
+        std::string setup_status;          // Where and how fast the tables were set up
+        std::string setup_producer = "host";  // Execution space that set up the tables, or "host"
 };
 
 #endif // FACE_RECONSTRUCTION_H
