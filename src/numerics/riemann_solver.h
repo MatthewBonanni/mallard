@@ -335,7 +335,7 @@ struct Roe {
      */
     KOKKOS_INLINE_FUNCTION
     static void calc_flux(rtype * flux, const rtype * n, const rtype * W_l, const rtype * W_r,
-                          const SideThermo & th_l, const SideThermo & th_r) {
+                          const SideThermo & th_l, const SideThermo & th_r, const rtype linear_floor = 0.0_r) {
         constexpr uint8_t E = N_DIM + 1;
         rtype U_l[N_CONSERVATIVE], U_r[N_CONSERVATIVE];
         rtype F_l[N_CONSERVATIVE], F_r[N_CONSERVATIVE];
@@ -359,7 +359,7 @@ struct Roe {
         const rtype dp = W_r[E] - W_l[E];
         const rtype du_n = dot<N_DIM>(W_r + 1, n) - dot<N_DIM>(W_l + 1, n);
         const rtype delta = 0.1_r * a;
-        const rtype l_c = Kokkos::fabs(u_n);
+        const rtype l_c = Kokkos::fmax(Kokkos::fabs(u_n), linear_floor * a);
         FOR_I_CONSERVATIVE flux[i] = l_c * (U_r[i] - U_l[i]);
         for (uint8_t k = 0; k < 2; k++) {
             const rtype sign = k ? 1.0_r : -1.0_r;
@@ -374,8 +374,8 @@ struct Roe {
     }
 
     KOKKOS_INLINE_FUNCTION
-    static void calc_flux(rtype * flux, const rtype * n,
-                          const rtype * W_l, const rtype * W_r, const rtype gamma) {
+    static void calc_flux(rtype * flux, const rtype * n, const rtype * W_l, const rtype * W_r, const rtype gamma,
+                          const rtype linear_floor = 0.0_r) {
         rtype U_l[N_CONSERVATIVE], U_r[N_CONSERVATIVE];
         rtype F_l[N_CONSERVATIVE], F_r[N_CONSERVATIVE];
         physical_flux(W_l, n, gamma, U_l, F_l);
@@ -406,6 +406,7 @@ struct Roe {
         for (uint8_t k = 0; k < N_CONSERVATIVE; k++) {
             rtype l = Kokkos::fabs(lambda[k]);
             if ((k == 0 || k == 2) && l < delta) l = 0.5_r * (l * l + delta * delta) / delta;
+            if (k != 0 && k != 2) l = Kokkos::fmax(l, linear_floor * a);
             lambda[k] = l;
         }
         rtype strength[N_CONSERVATIVE];
@@ -482,8 +483,27 @@ struct RHLL {
         }
         rtype f1[N_CONSERVATIVE], f2[N_CONSERVATIVE];
         HLL::calc_flux(f1, n1, W_l, W_r, th...);
-        Roe::calc_flux(f2, n2, W_l, W_r, th...);
+        along_n2(f2, n2, alpha2, W_l, W_r, th...);
         FOR_I_CONSERVATIVE flux[i] = alpha1 * f1[i] + alpha2 * f2[i];
+    }
+
+    /**
+     * @brief Flux along n2: Roe, which keeps contacts and shear layers sharp,
+     *        but whose entropy and shear waves move at least at (1 - w) times
+     *        the sound speed, w = min(p_l / p_r, p_r / p_l)^3 (the pressure
+     *        weight of RoeM: Kim, Kim & Rho, J. Comput. Phys. 185, 2003).
+     *        Where the two cells of a face sit at different depths of a shock,
+     *        as on faces parallel to its normal in tetrahedra, the jump is the
+     *        shock's own: its velocity jump lies along n1, so plain Roe along
+     *        n2 sees it as entropy and shear waves of speed u . n2 = 0 behind a
+     *        normal shock, with no dissipation: Roe's carbuncle (#80).
+     *        Contacts and shear layers carry no pressure jump and stay Roe.
+     */
+    template <typename... Thermo>
+    KOKKOS_INLINE_FUNCTION static void along_n2(rtype * flux, const rtype * n2, const rtype alpha2, const rtype * W_l,
+                                                const rtype * W_r, const Thermo &... th) {
+        const rtype ratio = Kokkos::fmin(W_l[N_DIM + 1] / W_r[N_DIM + 1], W_r[N_DIM + 1] / W_l[N_DIM + 1]);
+        Roe::calc_flux(flux, n2, W_l, W_r, th..., alpha2 * (1.0_r - ratio * ratio * ratio));
     }
 
     /**
@@ -513,7 +533,7 @@ struct RHLL {
         }
         FOR_I_DIM n2[i] /= alpha2;
         rtype f2[N_CONSERVATIVE];
-        Roe::calc_flux(f2, n2, W_l, W_r, th...);
+        along_n2(f2, n2, alpha2, W_l, W_r, th...);
         FOR_I_CONSERVATIVE flux[i] = alpha1 * f1[i] + alpha2 * f2[i];
     }
 };

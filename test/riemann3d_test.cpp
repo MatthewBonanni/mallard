@@ -195,7 +195,7 @@ TEST(Riemann3DTest, RotatedHybridBlendsHLLAndRoeForObliqueVelocityJump) {
     const rtype c = 0.5, s = std::sqrt(3.0) / 2.0;
     rtype W_l[N_CONSERVATIVE], W_r[N_CONSERVATIVE];
     frame_state(f, 1.0, 0.1, 0.2, 0.3, 1.0, W_l);
-    frame_state(f, 1.3_r, 0.1_r + 0.4_r * c, 0.2_r + 0.4_r * s, 0.3_r, 1.4_r, W_r);
+    frame_state(f, 1.3_r, 0.1_r + 0.4_r * c, 0.2_r + 0.4_r * s, 0.3_r, 1.0, W_r);
     rtype n1[3], n2[3];
     for (int d = 0; d < 3; d++) {
         n1[d] = c * f.n[d] + s * f.t1[d];
@@ -206,6 +206,28 @@ TEST(Riemann3DTest, RotatedHybridBlendsHLLAndRoeForObliqueVelocityJump) {
     riemann::HLL::calc_flux(F_hll, n1, W_l, W_r, GAMMA);
     riemann::Roe::calc_flux(F_roe, n2, W_l, W_r, GAMMA);
     FOR_I_CONSERVATIVE EXPECT_NEAR(F[i], c * F_hll[i] + s * F_roe[i], roundoff(1e-12));
+}
+
+TEST(Riemann3DTest, RotatedHybridDissipatesAShockOnFacesAlongItsNormal) {
+    // A Mach 6 normal shock along t1 whose two states meet at a face with
+    // normal n, perpendicular to the shock normal: on tetrahedra, the faces
+    // parallel to a shock's normal whose cells sit at different depths of it.
+    // The velocity jump lies along t1, so n1 = t1, alpha1 = 0 and the flux
+    // was pure Roe along n: the shock's density and velocity jumps became
+    // shear and entropy waves of speed u . n = 0, with no dissipation at all,
+    // which grew a carbuncle on the stagnation line of a sphere (#80). The
+    // pressure jump makes it HLL along n, which dissipates them.
+    const Frame f;
+    rtype W_l[N_CONSERVATIVE], W_r[N_CONSERVATIVE];
+    frame_state(f, 1.0, 0.0, 6.0, 0.0, 1.0 / 1.4, W_l);
+    frame_state(f, 5.2682926829268295, 0.0, 1.1388888888888888, 0.0, 29.880952380952383, W_r);
+    rtype F[N_CONSERVATIVE], F_hll[N_CONSERVATIVE], F_roe[N_CONSERVATIVE];
+    riemann::RHLL::calc_flux(F, f.n, W_l, W_r, GAMMA);
+    riemann::HLL::calc_flux(F_hll, f.n, W_l, W_r, GAMMA);
+    riemann::Roe::calc_flux(F_roe, f.n, W_l, W_r, GAMMA);
+    EXPECT_NEAR(F_roe[0], 0.0, roundoff(1e-12));
+    EXPECT_LT(F_hll[0], -1.0);
+    FOR_I_CONSERVATIVE EXPECT_NEAR(F[i], F_hll[i], 1e-3 * std::abs(F_hll[i]) + roundoff(1e-12));
 }
 
 TEST(Riemann3DTest, EigenvectorsDiagonalizeFluxJacobian) {
