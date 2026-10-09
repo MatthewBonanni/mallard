@@ -445,3 +445,79 @@ TEST(TENOTest, StencilCacheIsRecomputedForOtherMeshesOrOptionsAndWhenTruncated) 
     expect_bitwise_equal(teno_outputs(mesh, bd, 4, cache), fresh(mesh, bd, 4), "truncated cache");
     std::filesystem::remove(cache);
 }
+
+namespace {
+
+/** @brief Every precomputed table of a TENO, as raw bytes. */
+std::vector<std::vector<char>> teno_tables(const TENO & teno) {
+    std::vector<std::vector<char>> out;
+    auto add = [&](const auto & view) {
+        auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), view);
+        const char * p = reinterpret_cast<const char *>(h.data());
+        out.emplace_back(p, p + h.span() * sizeof(*h.data()));
+    };
+    add(teno.scale);
+    add(teno.basis_mean);
+    add(teno.si_matrix);
+    add(teno.stencil_large_size);
+    add(teno.stencil_small_size);
+    for (const teno::PackedStencils * s : {&teno.stencil_large, &teno.stencil_small}) {
+        add(s->slice_start);
+        add(s->cells);
+        add(s->faces);
+        add(s->pinv);
+    }
+    out.emplace_back(teno.gather_depth.begin(), teno.gather_depth.end());
+    return out;
+}
+
+} // namespace
+
+TEST(TENOTest, RebuildingTheCellsWithinReachOfMovedNodesGivesTheTablesOfAFullSetup) {
+    // An interior node, and a node of the bottom symmetry wall moved along it
+    auto mesh = make_mesh("cartesian_tri", 14, 12);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto incremental = make_teno(mesh, bd, 4);
+    auto changed_only = make_teno(mesh, bd, 4);
+    const auto before = teno_tables(*incremental);
+    auto nearest = [&](double x, double y) {
+        uint32_t best = 0;
+        double best_d2 = 1e300;
+        for (uint32_t n = 0; n < mesh->n_nodes; n++) {
+            const double d2 = std::pow(double(mesh->h_node_coords(n, 0)) - x, 2) + std::pow(double(mesh->h_node_coords(n, 1)) - y, 2);
+            if (d2 < best_d2) {
+                best_d2 = d2;
+                best = n;
+            }
+        }
+        return best;
+    };
+    const uint32_t a = nearest(0.21, 0.42), b = nearest(0.29, 0.0);
+    mesh->h_node_coords(a, 0) += 0.004;
+    mesh->h_node_coords(a, 1) -= 0.003;
+    mesh->h_node_coords(b, 0) += 0.005;
+    mesh->compute_geometry();
+    mesh->copy_host_to_device();
+    std::vector<uint32_t> changed;
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        for (uint32_t k = 0; k < mesh->h_n_nodes_of_cell(c); k++) {
+            const uint32_t node = mesh->h_node_of_cell(c, k);
+            if (node == a || node == b) {
+                changed.push_back(c);
+                break;
+            }
+        }
+    }
+    const std::vector<uint32_t> cells = incremental->cells_within_reach(changed);
+    ASSERT_GT(cells.size(), changed.size());
+    ASSERT_LT(cells.size(), mesh->n_cells);
+    incremental->rebuild_cells(cells);
+    auto full = make_teno(mesh, bd, 4);
+    const auto tables = teno_tables(*full);
+    const auto rebuilt = teno_tables(*incremental);
+    for (size_t k = 0; k < tables.size(); k++) EXPECT_TRUE(rebuilt[k] == tables[k]) << "table " << k;
+    // The move changed tables beyond the moved cells: rebuilding only those is not enough
+    changed_only->rebuild_cells(changed);
+    EXPECT_FALSE(teno_tables(*changed_only) == tables);
+    EXPECT_FALSE(before == tables);
+}

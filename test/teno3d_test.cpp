@@ -370,3 +370,126 @@ TEST(TENO3DStencils, MetricIsTheIdentityOnRegularTilingsOnly) {
         EXPECT_EQ(anisotropic_cells(type, 1.0 / 6.25), mesh->n_cells) << type;
     }
 }
+
+namespace {
+
+/** @brief Every precomputed table of a TENO, as raw bytes, by name. */
+std::vector<std::pair<std::string, std::vector<char>>> teno_tables(const TENO & teno) {
+    std::vector<std::pair<std::string, std::vector<char>>> out;
+    auto add = [&](const std::string & name, const auto & view) {
+        auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), view);
+        const char * p = reinterpret_cast<const char *>(h.data());
+        out.emplace_back(name, std::vector<char>(p, p + h.span() * sizeof(*h.data())));
+    };
+    add("scale", teno.scale);
+    add("basis_mean", teno.basis_mean);
+    add("si_matrix", teno.si_matrix);
+    add("large sizes", teno.stencil_large_size);
+    add("small sizes", teno.stencil_small_size);
+    add("large slices", teno.stencil_large.slice_start);
+    add("large cells", teno.stencil_large.cells);
+    add("large faces", teno.stencil_large.faces);
+    add("large pinv", teno.stencil_large.pinv);
+    add("small slices", teno.stencil_small.slice_start);
+    add("small cells", teno.stencil_small.cells);
+    add("small faces", teno.stencil_small.faces);
+    add("small pinv", teno.stencil_small.pinv);
+    out.emplace_back("gather depth", std::vector<char>(teno.gather_depth.begin(), teno.gather_depth.end()));
+    return out;
+}
+
+void expect_same_tables(const TENO & a, const TENO & b, const std::string & what) {
+    const auto ta = teno_tables(a), tb = teno_tables(b);
+    for (size_t k = 0; k < ta.size(); k++) EXPECT_TRUE(ta[k].second == tb[k].second) << what << ": " << ta[k].first;
+}
+
+/** @brief A TENO whose setup options are set before init(). */
+template <typename F>
+std::unique_ptr<TENO> make_teno_with(std::shared_ptr<Mesh> mesh, const BoundaryData & bd, int order, F && options) {
+    auto teno = std::make_unique<TENO>();
+    teno->set_mesh(mesh);
+    teno->set_boundaries(bd);
+    options(*teno);
+    teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n"));
+    return teno;
+}
+
+/**
+ * @brief Move the nodes nearest to the given points (x, y, z) by the given
+ *        offsets (dx, dy, dz), recompute the geometry; the cells that hold them.
+ */
+std::vector<uint32_t> move_nodes(Mesh & mesh, const std::vector<std::array<double, 6>> & moves) {
+    std::vector<uint32_t> moved;
+    for (const auto & m : moves) {
+        uint32_t best = 0;
+        double best_d2 = 1e300;
+        for (uint32_t n = 0; n < mesh.n_nodes; n++) {
+            double d2 = 0.0;
+            for (int d = 0; d < 3; d++) d2 += std::pow(double(mesh.h_node_coords(n, d)) - m[d], 2);
+            if (d2 < best_d2) {
+                best_d2 = d2;
+                best = n;
+            }
+        }
+        for (int d = 0; d < 3; d++) mesh.h_node_coords(best, d) += m[3 + d];
+        moved.push_back(best);
+    }
+    mesh.compute_geometry();
+    mesh.copy_host_to_device();
+    std::vector<uint32_t> cells;
+    for (uint32_t c = 0; c < mesh.n_cells; c++) {
+        for (uint32_t k = 0; k < mesh.h_n_nodes_of_cell(c); k++) {
+            if (std::find(moved.begin(), moved.end(), mesh.h_node_of_cell(c, k)) != moved.end()) {
+                cells.push_back(c);
+                break;
+            }
+        }
+    }
+    return cells;
+}
+
+using IncrementalParam = std::tuple<std::string, int>;
+class TENO3DIncremental : public ::testing::TestWithParam<IncrementalParam> {};
+
+} // namespace
+
+TEST_P(TENO3DIncremental, RebuildingTheCellsWithinReachOfMovedNodesGivesTheTablesOfAFullSetup) {
+    // An interior node, and a node of the x = 0 symmetry wall moved within the
+    // wall, which changes the mirror images of every stencil that reaches it
+    const auto [type, order] = GetParam();
+    auto mesh = make_mesh_3d(type, 9, 8, 6);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto incremental = make_teno(mesh, bd, order);
+    auto changed_only = make_teno(mesh, bd, order);
+    const auto before = teno_tables(*incremental);
+    const double h = 0.125;
+    const std::vector<uint32_t> changed =
+        move_nodes(*mesh, {{0.22, 0.375, 0.5, 0.06 * h, -0.04 * h, 0.05 * h}, {0.0, 0.25, 0.33, 0.0, 0.05 * h, -0.04 * h}});
+    const std::vector<uint32_t> cells = incremental->cells_within_reach(changed);
+    ASSERT_GT(cells.size(), changed.size());
+    ASSERT_LT(cells.size(), mesh->n_cells);
+    incremental->rebuild_cells(cells);
+    auto full = make_teno(mesh, bd, order);
+    expect_same_tables(*incremental, *full, "rebuilt within reach");
+    // The move changed tables beyond the moved cells: rebuilding only those is not enough
+    changed_only->rebuild_cells(changed);
+    EXPECT_FALSE(teno_tables(*changed_only) == teno_tables(*full));
+    EXPECT_FALSE(before == teno_tables(*full));
+}
+
+INSTANTIATE_TEST_SUITE_P(TENO, TENO3DIncremental,
+    ::testing::Values(IncrementalParam{"cartesian_prism", 4}, IncrementalParam{"cartesian_mixed", 4},
+                      IncrementalParam{"cartesian_tet", 3}));
+
+TEST(TENO3DSetup, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsThemUp) {
+    // Mixed cells with walls: pyramids, tetrahedra and mirror images; small
+    // batches split the cells differently, and the host setup is the fallback
+    // for cells that do not fit the device's scratch
+    auto mesh = make_mesh_3d("cartesian_mixed", 4, 4, 4);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto reference = make_teno(mesh, bd, 5);
+    auto batched = make_teno_with(mesh, bd, 5, [](TENO & t) { t.setup_batch_cells = 64; });
+    auto host = make_teno_with(mesh, bd, 5, [](TENO & t) { t.setup_on_host = true; });
+    expect_same_tables(*reference, *batched, "batches of 64 cells");
+    expect_same_tables(*reference, *host, "host setup");
+}

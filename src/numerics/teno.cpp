@@ -1593,6 +1593,7 @@ void TENO::compute_stencils_and_matrices_3d(const std::vector<uint32_t> * subset
     options.max_condition = double(max_condition);
     options.batch_cells = setup_batch_cells;
     options.host_only = setup_on_host;
+    options.cells = subset;
     teno_setup::Setup3DHandle setup(*mesh, boundaries, face_quad_points, face_quad_weights, options);
 
     // Cells per batch: whole slices of the packed stencils

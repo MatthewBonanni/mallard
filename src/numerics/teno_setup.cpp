@@ -306,6 +306,11 @@ struct Tables {
     uint8_t level_pos[MAX_LOW];
     uint8_t expo[teno::MAX_NK][3];
     double binom[12][12];
+    // Derivatives D^beta, 1 <= |beta| <= r, in the smoothness indicator's order, and
+    // the factor D^beta x^e / x^(e - beta) of each monomial (0 where it vanishes)
+    int n_beta = 0;
+    uint8_t beta[teno::MAX_NK][3];
+    double derivative[teno::MAX_NK][teno::MAX_NK];
 
     explicit Tables(const int r) {
         nm = 2 * r - 1;
@@ -334,6 +339,27 @@ struct Tables {
         });
         for (int g = 0; g < n_low; g++) low_by_degree[g] = order[g];
         for (uint8_t l = 0; l < teno::n_dof(r); l++) teno::exponents(l, expo[l][0], expo[l][1], expo[l][2]);
+        auto falling = [](int a, int p) {
+            double c = 1.0;
+            for (int t = 0; t < p; t++) c *= (a - t);
+            return c;
+        };
+        for (int b0 = 0; b0 <= r; b0++) {
+            for (int b1 = 0; b0 + b1 <= r; b1++) {
+                for (int b2 = 0; b0 + b1 + b2 <= r; b2++) {
+                    if (b0 + b1 + b2 == 0) continue;
+                    beta[n_beta][0] = b0;
+                    beta[n_beta][1] = b1;
+                    beta[n_beta][2] = b2;
+                    for (int l = 0; l < teno::n_dof(r); l++) {
+                        const int e0 = expo[l][0], e1 = expo[l][1], e2 = expo[l][2];
+                        derivative[l][n_beta] = (e0 >= b0 && e1 >= b1 && e2 >= b2)
+                                                    ? falling(e0, b0) * falling(e1, b1) * falling(e2, b2) : 0.0;
+                    }
+                    n_beta++;
+                }
+            }
+        }
         for (int d = 0; d <= teno::MAX_DEGREE; d++) level_count[d] = 0;
         for (int b = 0; b < n_low; b++) {
             const int d = low_exps[b][0] + low_exps[b][1] + low_exps[b][2];
@@ -1775,7 +1801,7 @@ struct TeamLayout {
            cand_off = 0, inside = 0, reach = 0, entry_ref = 0, entry_order = 0, entry_key = 0, planes = 0,
            plane_first = 0, plane_face = 0, plane_face_lattice = 0, plane_face_plane = 0, sector = 0, tried_n = 0,
            tried_lebesgue = 0, means = 0, psi = 0, coef = 0, cone = 0, frame = 0, frame_face = 0, frame_cell = 0, X = 0,
-           plane_start = 0, plane_sorted = 0, plane_x = 0,
+           plane_start = 0, plane_sorted = 0, plane_x = 0, A = 0,
            reflection = 0, bytes = 0;
     uint32_t candidates = 0;   // per layer
     bool x_shared = true;      // X in level-0 scratch
@@ -2422,13 +2448,17 @@ struct CellTeam {
         // X next to A in level-0 scratch when both fit
         const size_t big_bytes = layout.shared_bytes - layout.shared_head;
         double * X_used = X;
+        // A in level-0 scratch, too, unless the system is too large
+        double * A_used = A;
         auto build = [&](const int m) {
             ensure_means(tm, w, base, ctl, uint32_t(m) > means_floor ? uint32_t(m) : means_floor, x0, h);
+            const size_t bytes = sizeof(double) * size_t(m) * nk;
+            A_used = bytes <= big_bytes ? A : reinterpret_cast<double *>(base + layout.A);
+            X_used = A_used == A && 2 * bytes <= big_bytes ? A + size_t(m) * nk : X;
             Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, m * nk),
-                                 [&](const int e) { A[e] = w.means[e] - mean0[e % nk]; });
+                                 [&](const int e) { A_used[e] = w.means[e] - mean0[e % nk]; });
             tm.team_barrier();
-            X_used = 2 * sizeof(double) * size_t(m) * nk <= big_bytes ? A + size_t(m) * nk : X;
-            Kokkos::Array<double *, 1> As = {A};
+            Kokkos::Array<double *, 1> As = {A_used};
             Kokkos::Array<double *, 1> Xs = {X_used};
             Kokkos::Array<int, 1> ms = {m};
             Kokkos::Array<bool, 1> okq;
@@ -2669,26 +2699,13 @@ struct CellTeam {
                 l++;
             }
             const int m = l + idx;
-            const int el0 = c.tables->expo[l][0], el1 = c.tables->expo[l][1], el2 = c.tables->expo[l][2];
-            const int em0 = c.tables->expo[m][0], em1 = c.tables->expo[m][1], em2 = c.tables->expo[m][2];
-            auto falling = [](int a, int p) {
-                double cc = 1.0;
-                for (int t = 0; t < p; t++) cc *= (a - t);
-                return cc;
-            };
+            const Tables & t = *c.tables;
+            const int e0 = t.expo[l][0] + t.expo[m][0], e1 = t.expo[l][1] + t.expo[m][1], e2 = t.expo[l][2] + t.expo[m][2];
             double sum = 0.0;
-            for (int b0 = 0; b0 <= r; b0++) {
-                for (int b1 = 0; b0 + b1 <= r; b1++) {
-                    for (int b2 = 0; b0 + b1 + b2 <= r; b2++) {
-                        if (b0 + b1 + b2 == 0) continue;
-                        const double dl = (el0 >= b0 && el1 >= b1 && el2 >= b2)
-                                              ? falling(el0, b0) * falling(el1, b1) * falling(el2, b2) : 0.0;
-                        const double dm = (em0 >= b0 && em1 >= b1 && em2 >= b2)
-                                              ? falling(em0, b0) * falling(em1, b1) * falling(em2, b2) : 0.0;
-                        if (dl == 0.0 || dm == 0.0) continue;
-                        sum += dl * dm * mom[c.moment(el0 + em0 - 2 * b0, el1 + em1 - 2 * b1, el2 + em2 - 2 * b2)];
-                    }
-                }
+            for (int q = 0; q < t.n_beta; q++) {
+                const double dl = t.derivative[l][q], dm = t.derivative[m][q];
+                if (dl == 0.0 || dm == 0.0) continue;
+                sum += dl * dm * mom[c.moment(e0 - 2 * t.beta[q][0], e1 - 2 * t.beta[q][1], e2 - 2 * t.beta[q][2])];
             }
             o.si[e] = rtype(sum);
         });
@@ -2701,7 +2718,7 @@ struct CellTeam {
 template <int NM, class Space>
 struct MomentsTask {
     Geometry<Space> g;
-    Tables tables;
+    int n_moments = 0;
 
     KOKKOS_INLINE_FUNCTION
     void add(const double w, const double * x, double * m) const {
@@ -2774,7 +2791,7 @@ struct MomentsTask {
             for (int d = 0; d < 3; d++) cf[d] /= double(nf);
             for (int k = 0; k < nf; k++) integrate(o, cf, q[k], q[(k + 1) % nf]);
         }
-        for (int k = 0; k < tables.n_moments; k++) g.moments(c, k) = sums[k] / vol;
+        for (int k = 0; k < n_moments; k++) g.moments(c, k) = sums[k] / vol;
     }
 };
 
@@ -2878,6 +2895,12 @@ void gauss_legendre(int n, std::vector<double> & x, std::vector<double> & w) {
         x[i] = z;
         w[i] = 2.0 / ((1.0 - z * z) * dp * dp);
     }
+}
+
+/** @brief a = b when they have the same type (the host and device geometry of host backends). */
+template <class A, class B>
+void assign_if_same(A & a, const B & b) {
+    if constexpr (std::is_same_v<A, B>) a = b;
 }
 
 /** @brief Copies slots [0, n) of a batch into slots dest(0..n) of another. */
@@ -2999,24 +3022,28 @@ class Setup3D {
             auto h_face_bc = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.face_bc);
             auto h_bcs = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.bcs);
             h.mirror_face = Geometry<HostMem>::R<uint8_t *>("teno_setup_mirror_face", mesh.n_faces);
-            for (uint32_t f = 0; f < mesh.n_faces; f++) {
+            using HostRange = Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>;
+            Kokkos::parallel_for("teno_setup_mirror_faces", HostRange(0, mesh.n_faces), [&](const uint32_t f) {
                 h.mirror_face(f) = mesh.h_cells_of_face(f, 1) < 0 && h_face_bc(f) >= 0 &&
                                    h_bcs(h_face_bc(f)).type != BoundaryType::PARTITION;
-            }
+            });
             h.has_mirror_face = Geometry<HostMem>::R<uint8_t *>("teno_setup_has_mirror_face", n_cells);
-            for (uint32_t c = 0; c < n_cells; c++) {
+            Kokkos::parallel_for("teno_setup_mirror_cells", HostRange(0, n_cells), [&](const uint32_t c) {
                 for (uint32_t k = h.offsets_faces_of_cell(c); k < h.offsets_faces_of_cell(c + 1); k++) {
                     h.has_mirror_face(c) |= h.mirror_face(h.faces_of_cell(k));
                 }
-            }
+            });
             const uint32_t n_rec = mesh.n_reconstructed();
             h.metric = Geometry<HostMem>::R<double *[9]>("teno_setup_metric", n_rec);
+            // Only the cells to set up need theirs
+            const uint32_t n_metric = opt.cells ? uint32_t(opt.cells->size()) : n_rec;
             Kokkos::parallel_for("teno_setup_metric",
                                  Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(
-                                     0, n_rec),
-                                 [&](const uint32_t i) {
+                                     0, n_metric),
+                                 [&](const uint32_t k) {
+                const uint32_t i = opt.cells ? (*opt.cells)[k] : k;
                 const std::array<double, 9> m = ranking_metric(mesh, h_face_bc, h_bcs, i);
-                for (int k = 0; k < 9; k++) h.metric(i, k) = m[k];
+                for (int a = 0; a < 9; a++) h.metric(i, a) = m[a];
             });
             // Collapsed Gauss with n points per direction is exact to degree 2n - 3 on a tet
             {
@@ -3074,15 +3101,17 @@ class Setup3D {
                                                            n_cells);
             using Range = Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace>;
             switch (tables.nm) {
-                case 3: Kokkos::parallel_for("teno_moments", Range(0, n_cells), MomentsTask<3, DefaultMem>{d, tables}); break;
-                case 5: Kokkos::parallel_for("teno_moments", Range(0, n_cells), MomentsTask<5, DefaultMem>{d, tables}); break;
-                case 7: Kokkos::parallel_for("teno_moments", Range(0, n_cells), MomentsTask<7, DefaultMem>{d, tables}); break;
-                case 9: Kokkos::parallel_for("teno_moments", Range(0, n_cells), MomentsTask<9, DefaultMem>{d, tables}); break;
+                case 3: Kokkos::parallel_for("teno_moments", Range(0, n_cells), MomentsTask<3, DefaultMem>{d, tables.n_moments}); break;
+                case 5: Kokkos::parallel_for("teno_moments", Range(0, n_cells), MomentsTask<5, DefaultMem>{d, tables.n_moments}); break;
+                case 7: Kokkos::parallel_for("teno_moments", Range(0, n_cells), MomentsTask<7, DefaultMem>{d, tables.n_moments}); break;
+                case 9: Kokkos::parallel_for("teno_moments", Range(0, n_cells), MomentsTask<9, DefaultMem>{d, tables.n_moments}); break;
                 default: throw std::logic_error("TENO setup: unsupported degree.");
             }
             Kokkos::parallel_for("teno_boxes", Range(0, n_cells), BoxesTask<DefaultMem>{d});
             Kokkos::fence();
 
+            // On host backends the host setup reads the very same geometry
+            assign_if_same(host, device);
             caps.rows = std::max<uint32_t>(ns_max, nss_max);
             d_tables = Kokkos::View<Tables, DefaultMem>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_setup_tables"));
             Kokkos::deep_copy(d_tables, Kokkos::View<const Tables, HostMem, Kokkos::MemoryTraits<Kokkos::Unmanaged>>(&tables));
@@ -3158,7 +3187,9 @@ class Setup3D {
             take(l.frame_cell, 4 * n_frames);
             // A and X hold the central stencil's system, or every face's sector system
             const size_t sector_doubles = size_t(teno::MAX_FACES) * c_nss_max() * teno::NK_SMALL;
-            const size_t a_bytes = 8 * std::max(R * nk, 2 * sector_doubles);
+            // Level 0 holds A when it fits beside two more teams on an A100 (TENO5's largest)
+            const size_t a_bytes = 8 * std::max(std::min<size_t>(R * nk, 6222), 2 * sector_doubles);
+            take(l.A, 8 * R * nk);
             const size_t x_bytes = 8 * std::max(std::max<size_t>(R, nk) * nk, sector_doubles);
             take(l.X, x_bytes);
             l.bytes = at;
@@ -3402,7 +3433,9 @@ std::array<double, 9> ranking_metric(const Mesh & mesh, const Kokkos::View<int32
         Point x0;
         for (int a = 0; a < 3; a++) x0[a] = double(mesh.h_cell_coords(i, a));
         const double h = std::cbrt(double(mesh.h_cell_volume(i)));
-        std::vector<Point> offsets = {{0.0, 0.0, 0.0}};
+        // Reused by each thread: an allocation per cell cost as much as the metric
+        static thread_local std::vector<Point> offsets;
+        offsets.assign(1, Point{0.0, 0.0, 0.0});
         for (uint32_t k = mesh.h_offsets_cells_of_cell(i); k < mesh.h_offsets_cells_of_cell(i + 1); k++) {
             const auto & lattice = mesh.shift_lattice[mesh.h_cells_of_cell_shift(k)];
             Point t = {0.0, 0.0, 0.0};
