@@ -21,6 +21,17 @@ FULL_DIR/<case>_full.csv: the initial state of Mallard's runs
 
 computes only the flames of one mixture at T_U (both transport models, on a
 3 cm domain) and writes their full solutions, e.g. FULL_DIR/h2_phi0.4_T700_mix_full.csv.
+
+    python tools/flame_reference.py --soret [OUT_DIR [FULL_DIR]]
+
+computes the lean-to-stoichiometric H2/air flames of thermal diffusion
+(phi = SORET_PHIS, on a 3 cm domain) with mixture-averaged transport with and
+without the Soret effect ("mix_soret", "mix"), the transport Mallard runs, and
+for comparison with multicomponent transport with and without it ("multi_soret",
+"multi"). Writes OUT_DIR/soret_flames.csv (as flames.csv) and the profiles of
+the mixture-averaged flames with Soret, with species mass fractions
+(<case>.csv, e.g. h2_phi0.5_mix_soret.csv), and with FULL_DIR the full
+solutions of the mixture-averaged flames.
 """
 import os
 import sys
@@ -35,6 +46,10 @@ FUELS = {
 }
 PHIS = [0.6, 0.8, 1.0, 1.2, 1.4]
 MODELS = {"mix": "mixture-averaged", "unity": "unity-Lewis-number"}
+SORET_PHIS = [0.4, 0.5, 0.6, 1.0]
+SORET_MODELS = {"mix": ("mixture-averaged", False), "mix_soret": ("mixture-averaged", True),
+                "multi": ("multicomponent", False), "multi_soret": ("multicomponent", True)}
+PROFILE_SPECIES = ["H2", "O2", "H2O", "H", "O", "OH", "HO2"]
 T_U, P = 300.0, ct.one_atm
 
 
@@ -42,12 +57,13 @@ def case_name(fuel, phi, model):
     return f"{fuel}_phi{phi:.1f}_{model}"
 
 
-def solve(fuel, phi, model, T_u=T_U, width=None):
+def solve(fuel, phi, model, T_u=T_U, width=None, soret=False):
     mech, phase, species, _ = FUELS[fuel]
-    gas = ct.Solution(os.path.join(ROOT, mech), phase, transport_model=MODELS[model])
+    gas = ct.Solution(os.path.join(ROOT, mech), phase, transport_model=MODELS.get(model, model))
     gas.set_equivalence_ratio(phi, species, "O2:1.0, N2:3.76")
     gas.TP = T_u, P
     flame = ct.FreeFlame(gas, width=width or FUELS[fuel][3])
+    flame.soret_enabled = soret
     flame.set_refine_criteria(ratio=2.0, slope=0.02, curve=0.02, prune=0.002)
     flame.solve(loglevel=0, auto=True)
     return flame
@@ -70,7 +86,47 @@ def single(fuel, phi, T_u, full):
         write_full(f, os.path.join(full, name + "_full.csv"))
 
 
+def soret_flames(out, full):
+    os.makedirs(out, exist_ok=True)
+    if full:
+        os.makedirs(full, exist_ok=True)
+    rows = []
+    for phi in SORET_PHIS:
+        for name, (model, soret) in SORET_MODELS.items():
+            f = solve("h2", phi, model, width=0.03, soret=soret)
+            x, T = f.grid, f.T
+            dTdx = np.gradient(T, x)
+            delta = (T[-1] - T[0]) / dTdx.max()
+            case = case_name("h2", phi, name)
+            rows.append(("h2", phi, name, f.velocity[0], T[-1], delta, x.size))
+            print(f"{case}: S_L = {f.velocity[0]:.5f} m/s, T_b = {T[-1]:.1f} K, "
+                  f"delta = {delta * 1e3:.4f} mm, {x.size} points")
+            if not name.startswith("mix"):
+                continue
+            if name == "mix_soret":
+                i_max = np.argmax(dTdx)
+                xs = np.linspace(x[i_max] - 4 * delta, x[i_max] + 8 * delta, 200)
+                columns = [f.velocity, T, f.heat_release_rate] + [f.Y[f.gas.species_index(s)] for s in PROFILE_SPECIES]
+                with open(os.path.join(out, case + ".csv"), "w") as fh:
+                    fh.write(f"# Cantera {ct.__version__} FreeFlame, {FUELS['h2'][0]}, phi = {phi}, "
+                             f"mixture-averaged with the Soret effect; x relative to the max of dT/dx\n")
+                    fh.write("x,u,T,hrr," + ",".join("Y_" + s for s in PROFILE_SPECIES) + "\n")
+                    for xi in xs:
+                        fh.write(f"{xi - x[i_max]:.6e}," + ",".join(f"{np.interp(xi, x, c):.6e}" for c in columns) + "\n")
+            if full:
+                write_full(f, os.path.join(full, case + "_full.csv"))
+    with open(os.path.join(out, "soret_flames.csv"), "w") as fh:
+        fh.write(f"# Cantera {ct.__version__} FreeFlame, T_u = {T_U} K, p = {P} Pa, air O2:N2 = 1:3.76, 3 cm domain\n")
+        fh.write("fuel,phi,transport,S_L,T_b,delta_T,points\n")
+        for r in rows:
+            fh.write(f"{r[0]},{r[1]:.1f},{r[2]},{r[3]:.8f},{r[4]:.4f},{r[5]:.8e},{r[6]}\n")
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--soret":
+        out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(ROOT, "examples", "premixed_flame", "reference")
+        soret_flames(out, sys.argv[3] if len(sys.argv) > 3 else None)
+        return
     if len(sys.argv) > 1 and sys.argv[1] == "--single":
         single(sys.argv[2], float(sys.argv[3]), float(sys.argv[4]), sys.argv[5])
         return

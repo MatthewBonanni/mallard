@@ -274,7 +274,8 @@ struct ThickenFunctor {
         const rtype EF = fields(c, 0) * fields(c, 1), resolved = 1.0_r - fields(c, 2);
         coefficients(c, LAMBDA) *= EF;
         coefficients(c, NU_EFF) *= EF;
-        for (uint32_t k = 0; k < n_species; k++) diffusion(c, k) *= static_cast<double>(EF);
+        // Species and thermal diffusion coefficients
+        for (uint32_t k = 0; k < diffusion.extent(1); k++) diffusion(c, k) *= static_cast<double>(EF);
         if (sgs.extent(0) > 0) {
             sgs(c, 1) *= resolved;
             sgs(c, 2) *= resolved;

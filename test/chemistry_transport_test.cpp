@@ -70,7 +70,8 @@ struct MixtureFunctor {
         const MassFractions y{&states(i, 2)};
         const double rho = p / (thermo.gas_constant(y) * T);
         const double cp = thermo.cp_mass(T, y);
-        transport.properties(T, p, rho, cp, y, out(i, 0), out(i, 1), &out(i, 2));
+        transport.properties(T, p, rho, cp, y, out(i, 0), out(i, 1), &out(i, 2),
+                             transport.thermal_diffusion ? &out(i, 2 + transport.n_species) : nullptr);
     }
 };
 
@@ -160,6 +161,61 @@ TEST(TransportTest, MixturePropertiesMatchCantera) {
             }
         }
     }
+}
+
+TEST(TransportTest, ThermalDiffusionMatchesCantera) {
+    // Cantera's mixture-averaged thermal diffusion coefficients (C* fits in
+    // ln T*, Wilke's mixing operator, the normalization to a zero sum) at
+    // random states with absent species and one pure species, in device
+    // kernels; the other properties are unchanged by computing them
+    for (const Case & c : CASES) {
+        const Mechanism mech = read_mechanism(c.file, c.phase);
+        const uint32_t ns = static_cast<uint32_t>(mech.n_species());
+        const auto rows = read_rows(c.name + "_thermal_diffusion.csv");
+        ASSERT_FALSE(rows.empty()) << c.name;
+        const uint32_t n = static_cast<uint32_t>(rows.size());
+        Kokkos::View<double **, Kokkos::LayoutRight> states("states", n, ns + 2);
+        auto h_states = Kokkos::create_mirror_view(states);
+        for (uint32_t i = 0; i < n; i++) {
+            for (uint32_t m = 0; m < ns + 2; m++) h_states(i, m) = rows[i][m];
+        }
+        Kokkos::deep_copy(states, h_states);
+        const ThermoTable<> thermo = make_thermo_table(mech);
+        Kokkos::View<double **, Kokkos::LayoutRight> out("out", n, 2 * ns + 2), plain("plain", n, ns + 2);
+        Kokkos::parallel_for("thermal_diffusion", n,
+                             MixtureFunctor{thermo, make_transport_table(mech, TransportModel::MIXTURE_AVERAGED, {}, true),
+                                            states, out});
+        Kokkos::parallel_for("mixture_transport", n,
+                             MixtureFunctor{thermo, make_transport_table(mech, TransportModel::MIXTURE_AVERAGED), states,
+                                            plain});
+        auto h_out = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
+        auto h_plain = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), plain);
+        double worst = 0.0;
+        for (uint32_t i = 0; i < n; i++) {
+            const auto & r = rows[i];
+            for (uint32_t m = 0; m < ns + 2; m++) EXPECT_EQ(h_out(i, m), h_plain(i, m)) << c.name << ", row " << i;
+            double scale = 0.0, sum = 0.0;
+            for (uint32_t k = 0; k < ns; k++) scale = std::max(scale, std::abs(r[ns + 2 + k]));
+            for (uint32_t k = 0; k < ns; k++) {
+                const double DT = h_out(i, ns + 2 + k), ref = r[ns + 2 + k];
+                sum += DT;
+                if (scale == 0.0) {
+                    EXPECT_EQ(DT, 0.0) << c.name << " DT_" << mech.species[k].name << ", row " << i;
+                    continue;
+                }
+                worst = std::max(worst, std::abs(DT - ref) / scale);
+                EXPECT_NEAR(DT, ref, 1e-6 * scale) << c.name << " DT_" << mech.species[k].name << ", row " << i;
+            }
+            EXPECT_NEAR(sum, 0.0, 1e-12 * scale) << c.name << ", row " << i;
+        }
+        std::ostringstream text;
+        text << std::scientific << worst;
+        RecordProperty(c.name + "_thermal_diffusion_max_error", text.str());
+    }
+    // Thermal diffusion is a mixture-averaged option
+    const Mechanism mech = read_mechanism(CASES[0].file, CASES[0].phase);
+    EXPECT_THROW(make_transport_table<Kokkos::HostSpace>(mech, TransportModel::UNITY_LEWIS, {}, true),
+                 std::invalid_argument);
 }
 
 TEST(TransportTest, MissingTransportDataIsReported) {

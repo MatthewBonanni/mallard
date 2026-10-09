@@ -62,9 +62,10 @@ std::string velocity(const std::string & uy) {
     return N_DIM == 2 ? "[\"0.0\", \"" + uy + "\"]" : "[\"0.0\", \"" + uy + "\", \"0.0\"]";
 }
 
-std::string viscous_mixture(const std::string & mechanism, const std::string & transport = "mixture_averaged") {
+std::string viscous_mixture(const std::string & mechanism, const std::string & transport = "mixture_averaged",
+                            const bool soret = false) {
     return "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" + mechanism +
-           "\"\ntransport = \"" + transport + "\"\n"
+           "\"\ntransport = \"" + transport + "\"\n" + (soret ? "soret = true\n" : "") +
            "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
            "[output]\ncheck_interval = 1000000\n";
 }
@@ -193,6 +194,60 @@ TEST(MixtureTransportTest, ShearAndThermalWavesDecayAtTheirDiffusionRates) {
     }
 }
 
+TEST(MixtureTransportTest, SoretEffectSeparatesSpeciesInATemperatureWave) {
+    // H2/N2 at uniform composition and pressure with a temperature wave
+    // T0 + dT sin(k x): only thermal diffusion separates the species, driving
+    // the mode of Y_H2 at -D^T k^2 dT(t) / (rho T0) against Fickian relaxation
+    // at D_12 k^2 (a binary mixture), so that its amplitude is
+    //   -D^T k^2 dT_0 / (rho T0) (exp(-a k^2 t) - exp(-D_12 k^2 t)) / ((D_12 - a) k^2),
+    // positive: hydrogen gathers where the gas is hot. The wave decays at
+    // a = lambda / (rho cp): the enthalpy the Soret fluxes carry,
+    // sum_k h_k j_k, cancels the change of the mixture's enthalpy they cause
+    // to first order (without it, the wave ends 2.7% off)
+    const double p = 101325.0, T0 = 600.0, dT = 30.0, L = 1e-3, k = 2.0 * PI / L;
+    const auto mech = chemistry::read_mechanism(H2O2);
+    const auto thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(mech);
+    const auto table = chemistry::make_transport_table<Kokkos::HostSpace>(
+        mech, chemistry::TransportModel::MIXTURE_AVERAGED, {}, true);
+    const uint32_t ns = static_cast<uint32_t>(mech.n_species());
+    const int32_t i_H2 = mech.species_index("H2"), i_N2 = mech.species_index("N2");
+    std::vector<double> Y(ns, 0.0), D(ns), DT(ns);
+    const double W_H2 = mech.species[i_H2].molecular_weight, W_N2 = mech.species[i_N2].molecular_weight;
+    Y[i_H2] = W_H2 / (W_H2 + W_N2);
+    Y[i_N2] = 1.0 - Y[i_H2];
+    const chemistry::MassFractions y{Y.data()};
+    const double rho = p / (thermo.gas_constant(y) * T0), cp = thermo.cp_mass(T0, y);
+    double mu, lambda;
+    table.properties(T0, p, rho, cp, y, mu, lambda, D.data(), DT.data());
+    ASSERT_LT(DT[i_H2], 0.0);
+    const double D12 = table.binary_diffusion(i_H2, i_N2, T0, p), a = lambda / (rho * cp);
+    const double t = 0.3 / (D12 * k * k);
+    const double amplitude = -DT[i_H2] * k * k * dT / (rho * T0) *
+                             (std::exp(-a * k * k * t) - std::exp(-D12 * k * k * t)) / ((D12 - a) * k * k);
+    for (const bool soret : {true, false}) {
+        std::ostringstream input;
+        input << std::setprecision(17) << "[run]\nt_stop = " << t << "\ncfl = 0.25\n" << strip(32, L, true)
+              << "[initialize]\ntype = \"analytical\"\np = \"" << p << "\"\nX = { H2 = 1.0, N2 = 1.0 }\n"
+              << "T = \"" << T0 << " + " << dT << " * sin(2 * pi * x / " << L << ")\"\nu = " << velocity("0.0") << "\n"
+              << viscous_mixture(H2O2, "mixture_averaged", soret);
+        Solver solver;
+        run(solver, input.str());
+        Profile Y_H2 = column(solver, 0, i_H2);
+        for (double & v : Y_H2.value) v -= Y[i_H2];
+        Profile temperature = column(solver, N_DIM + 1);
+        for (double & v : temperature.value) v -= T0;
+        const double A_Y = sine_amplitude(Y_H2, L), A_T = sine_amplitude(temperature, L);
+        if (soret) {
+            RecordProperty("Y_amplitude_ratio", std::to_string(A_Y / amplitude));
+            RecordProperty("T_amplitude_ratio", std::to_string(A_T / (dT * std::exp(-a * k * k * t))));
+            EXPECT_NEAR(A_Y / amplitude, 1.0, tol(0.01, 0.02));
+            EXPECT_NEAR(A_T / (dT * std::exp(-a * k * k * t)), 1.0, 0.01);
+        } else {
+            EXPECT_LT(std::abs(A_Y), tol(1e-3, 0.02) * amplitude);
+        }
+    }
+}
+
 TEST(MixtureTransportTest, InvalidTransportInputsAreRejected) {
     const std::string base = "[run]\nn_steps = 1\ncfl = 0.25\n" + strip(4, 1.0, false) +
                              "[initialize]\ntype = \"constant\"\np = 1.0e5\nT = 300.0\nu = " +
@@ -211,4 +266,6 @@ TEST(MixtureTransportTest, InvalidTransportInputsAreRejected) {
     expect_error("type = \"navier_stokes\"\ntransport = \"multicomponent\"\n", "physics.transport");
     expect_error("type = \"navier_stokes\"\nlewis = { H2 = 0.3 }\n", "constant_lewis");
     expect_error("type = \"navier_stokes\"\ntransport = \"constant_lewis\"\nlewis = { CH4 = 1.0 }\n", "CH4");
+    expect_error("type = \"navier_stokes\"\ntransport = \"unity_lewis\"\nsoret = true\n", "physics.soret");
+    expect_error("type = \"euler\"\nsoret = true\n", "navier_stokes");
 }

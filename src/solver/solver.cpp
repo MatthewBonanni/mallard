@@ -939,12 +939,13 @@ void Solver::allocate_memory() {
     if (is_mixture() && is_viscous()) {
         cell_transport =Kokkos::View<rtype *[3]>("cell_transport", mesh->n_cells);
         h_cell_transport = Kokkos::create_mirror_view(cell_transport);
-        cell_diffusion = Kokkos::View<double **, Kokkos::LayoutRight>("cell_diffusion", mesh->n_cells, n_species);
+        const uint32_t n_diffusion = (mixture.transport.thermal_diffusion ? 2 : 1) * n_species;
+        cell_diffusion = Kokkos::View<double **, Kokkos::LayoutRight>("cell_diffusion", mesh->n_cells, n_diffusion);
         transport_values = Kokkos::View<rtype **, Kokkos::LayoutRight>("transport_values", mesh->n_cells,
                                                                        N_DIM + 1 + n_species);
         transport_gradients = Kokkos::View<rtype ***, Kokkos::LayoutRight>("transport_gradients", mesh->n_cells,
                                                                            N_DIM + 1 + n_species, N_DIM);
-        h_D = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("D", mesh->n_cells, n_species);
+        h_D = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("D", mesh->n_cells, n_diffusion);
     }
     if (is_mixture()) {
         const uint32_t n_quad = face_reconstruction->n_face_quadrature_points();
@@ -1012,6 +1013,7 @@ void Solver::copy_device_to_host() {
                 for (size_t k = 0; k < species_names.size(); k++) {
                     h_D(c, k) = static_cast<rtype>(h_c(c, k) / (rho * mech.species[k].molecular_weight * n));
                 }
+                for (size_t k = species_names.size(); k < h_D.extent(1); k++) h_D(c, k) = static_cast<rtype>(h_c(c, k));
             }
         }
         if (reacting) {
@@ -1073,6 +1075,13 @@ void Solver::register_data() {
             data.push_back(Data("LAMBDA", Kokkos::subview(h_cell_transport, Kokkos::ALL(), 1)));
             for (size_t k = 0; k < species_names.size(); k++) {
                 data.push_back(Data("D_" + species_names[k], Kokkos::subview(h_D, Kokkos::ALL(), k)));
+            }
+            if (h_D.extent(1) > species_names.size()) {
+                data.reserve(data.size() + species_names.size());
+                for (size_t k = 0; k < species_names.size(); k++) {
+                    data.push_back(Data("DT_" + species_names[k],
+                                        Kokkos::subview(h_D, Kokkos::ALL(), species_names.size() + k)));
+                }
             }
         }
         if (reacting) {

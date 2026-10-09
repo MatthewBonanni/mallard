@@ -31,8 +31,8 @@ MixtureModel MixtureModel::from_input(const toml::value & input) {
         throw InputError("physics.type = \"" + type + "\" is not one of: euler, navier_stokes.");
     }
     if (type == "euler") {
-        if (physics.contains("transport") || physics.contains("lewis")) {
-            throw InputError("physics: transport and lewis need type = \"navier_stokes\".");
+        if (physics.contains("transport") || physics.contains("lewis") || physics.contains("soret")) {
+            throw InputError("physics: transport, lewis and soret need type = \"navier_stokes\".");
         }
         return model;
     }
@@ -62,8 +62,12 @@ MixtureModel MixtureModel::from_input(const toml::value & input) {
     } else if (physics.contains("lewis")) {
         throw InputError("physics.lewis needs transport = \"constant_lewis\".");
     }
+    const bool soret = toml::find_or<bool>(physics, "soret", false);
+    if (soret && it->second != chemistry::TransportModel::MIXTURE_AVERAGED) {
+        throw InputError("physics.soret needs transport = \"mixture_averaged\".");
+    }
     try {
-        model.gas.transport = chemistry::make_transport_table(model.mech, it->second, lewis);
+        model.gas.transport = chemistry::make_transport_table(model.mech, it->second, lewis, soret);
     } catch (const std::runtime_error & e) {
         throw InputError(std::string("physics: ") + e.what());
     }
@@ -165,7 +169,9 @@ logging::Items MixtureModel::summary() const {
         {"Gas", "thermally perfect mixture, " + std::to_string(n_species()) + " species"},
         {"Mechanism", mech.file + (mech.phase.empty() ? "" : ", phase " + mech.phase)},
     };
-    if (viscous()) items.emplace_back("Transport", transport_name);
+    if (viscous()) {
+        items.emplace_back("Transport", transport_name + (gas.transport.thermal_diffusion ? ", Soret effect" : ""));
+    }
     return items;
 }
 
