@@ -1044,6 +1044,7 @@ spent waiting for the slowest rank's chemistry):
 | `flame_turbulence` (DNS) | 3.67M | 1,000 | 4 | 384 ms (17.8%) | 349 ms (3.5%) | 1.10 |
 | | | | 8 | 191 ms (18.7%) | 165 ms (0.3%) | 1.16 |
 | `detonation_3d` | 19.2M | 1,142 | 4 | 1.27 s (8.2%) | 1.22 s (1.1%) | 1.04 |
+| | | | 8 | 631 ms (7.1%) | 596 ms (0.4%) | 1.06 |
 | `autoignition_2d` (T' = 15 K, igniting) | 160k | 20,000 | 4 | 10.8 ms (0.8%) | 10.8 ms (0.8%) | 1.00 |
 | | | | 8 | 8.05 ms (0.5%) | 7.85 ms (0.4%) | 1.00 |
 
