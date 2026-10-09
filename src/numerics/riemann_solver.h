@@ -335,7 +335,7 @@ struct Roe {
      */
     KOKKOS_INLINE_FUNCTION
     static void calc_flux(rtype * flux, const rtype * n, const rtype * W_l, const rtype * W_r,
-                          const SideThermo & th_l, const SideThermo & th_r, const rtype linear_floor = 0.0_r) {
+                          const SideThermo & th_l, const SideThermo & th_r) {
         constexpr uint8_t E = N_DIM + 1;
         rtype U_l[N_CONSERVATIVE], U_r[N_CONSERVATIVE];
         rtype F_l[N_CONSERVATIVE], F_r[N_CONSERVATIVE];
@@ -359,7 +359,7 @@ struct Roe {
         const rtype dp = W_r[E] - W_l[E];
         const rtype du_n = dot<N_DIM>(W_r + 1, n) - dot<N_DIM>(W_l + 1, n);
         const rtype delta = 0.1_r * a;
-        const rtype l_c = Kokkos::fmax(Kokkos::fabs(u_n), linear_floor * a);
+        const rtype l_c = Kokkos::fabs(u_n);
         FOR_I_CONSERVATIVE flux[i] = l_c * (U_r[i] - U_l[i]);
         for (uint8_t k = 0; k < 2; k++) {
             const rtype sign = k ? 1.0_r : -1.0_r;
@@ -374,8 +374,8 @@ struct Roe {
     }
 
     KOKKOS_INLINE_FUNCTION
-    static void calc_flux(rtype * flux, const rtype * n, const rtype * W_l, const rtype * W_r, const rtype gamma,
-                          const rtype linear_floor = 0.0_r) {
+    static void calc_flux(rtype * flux, const rtype * n,
+                          const rtype * W_l, const rtype * W_r, const rtype gamma) {
         rtype U_l[N_CONSERVATIVE], U_r[N_CONSERVATIVE];
         rtype F_l[N_CONSERVATIVE], F_r[N_CONSERVATIVE];
         physical_flux(W_l, n, gamma, U_l, F_l);
@@ -406,7 +406,6 @@ struct Roe {
         for (uint8_t k = 0; k < N_CONSERVATIVE; k++) {
             rtype l = Kokkos::fabs(lambda[k]);
             if ((k == 0 || k == 2) && l < delta) l = 0.5_r * (l * l + delta * delta) / delta;
-            if (k != 0 && k != 2) l = Kokkos::fmax(l, linear_floor * a);
             lambda[k] = l;
         }
         rtype strength[N_CONSERVATIVE];
@@ -433,7 +432,7 @@ struct RHLL {
     static void calc_flux(rtype * flux, const rtype * n,
                           const rtype * W_l, const rtype * W_r, const rtype gamma) {
         const rtype a_ref = Kokkos::sqrt(gamma * Kokkos::fmax(W_l[N_DIM + 1] / W_l[0], W_r[N_DIM + 1] / W_r[0]));
-        rotated(flux, n, W_l, W_r, a_ref, gamma);
+        shock_blended(flux, n, W_l, W_r, a_ref, gamma);
     }
 
     /** @brief Mixture flux with per-side thermodynamics. */
@@ -442,7 +441,29 @@ struct RHLL {
                           const SideThermo & th_l, const SideThermo & th_r) {
         const rtype a_ref = Kokkos::sqrt(Kokkos::fmax(th_l.gamma_waves * W_l[N_DIM + 1] / W_l[0],
                                                       th_r.gamma_waves * W_r[N_DIM + 1] / W_r[0]));
-        rotated(flux, n, W_l, W_r, a_ref, th_l, th_r);
+        shock_blended(flux, n, W_l, W_r, a_ref, th_l, th_r);
+    }
+
+    /**
+     * @brief The rotated hybrid, blended toward HLL along the face normal by
+     *        the pressure jump across the face: w F_rotated + (1 - w) F_HLL(n),
+     *        w = min(p_l / p_r, p_r / p_l)^3 (the pressure weight of AUSMPW+:
+     *        Kim, Kim & Rho, J. Comput. Phys. 174, 2001). On faces aligned with a
+     *        shock the rotation is already HLL along n; on tetrahedra it turns
+     *        HLL toward the shock normal, which grows a carbuncle on the
+     *        stagnation line with MUSCL or TENO states (#80). Contacts and shear
+     *        layers carry no pressure jump and keep the rotated flux.
+     */
+    template <typename... Thermo>
+    KOKKOS_INLINE_FUNCTION static void shock_blended(rtype * flux, const rtype * n, const rtype * W_l,
+                                                     const rtype * W_r, const rtype a_ref, const Thermo &... th) {
+        rotated(flux, n, W_l, W_r, a_ref, th...);
+        const rtype ratio = Kokkos::fmin(W_l[N_DIM + 1] / W_r[N_DIM + 1], W_r[N_DIM + 1] / W_l[N_DIM + 1]);
+        const rtype w = ratio * ratio * ratio;
+        if (w >= 1.0_r) return;
+        rtype f_hll[N_CONSERVATIVE];
+        HLL::calc_flux(f_hll, n, W_l, W_r, th...);
+        FOR_I_CONSERVATIVE flux[i] = w * flux[i] + (1.0_r - w) * f_hll[i];
     }
 
     /**
@@ -483,27 +504,8 @@ struct RHLL {
         }
         rtype f1[N_CONSERVATIVE], f2[N_CONSERVATIVE];
         HLL::calc_flux(f1, n1, W_l, W_r, th...);
-        along_n2(f2, n2, alpha2, W_l, W_r, th...);
+        Roe::calc_flux(f2, n2, W_l, W_r, th...);
         FOR_I_CONSERVATIVE flux[i] = alpha1 * f1[i] + alpha2 * f2[i];
-    }
-
-    /**
-     * @brief Flux along n2: Roe, which keeps contacts and shear layers sharp,
-     *        but whose entropy and shear waves move at least at (1 - w) times
-     *        the sound speed, w = min(p_l / p_r, p_r / p_l)^3 (the pressure
-     *        weight of RoeM: Kim, Kim & Rho, J. Comput. Phys. 185, 2003).
-     *        Where the two cells of a face sit at different depths of a shock,
-     *        as on faces parallel to its normal in tetrahedra, the jump is the
-     *        shock's own: its velocity jump lies along n1, so plain Roe along
-     *        n2 sees it as entropy and shear waves of speed u . n2 = 0 behind a
-     *        normal shock, with no dissipation: Roe's carbuncle (#80).
-     *        Contacts and shear layers carry no pressure jump and stay Roe.
-     */
-    template <typename... Thermo>
-    KOKKOS_INLINE_FUNCTION static void along_n2(rtype * flux, const rtype * n2, const rtype alpha2, const rtype * W_l,
-                                                const rtype * W_r, const Thermo &... th) {
-        const rtype ratio = Kokkos::fmin(W_l[N_DIM + 1] / W_r[N_DIM + 1], W_r[N_DIM + 1] / W_l[N_DIM + 1]);
-        Roe::calc_flux(flux, n2, W_l, W_r, th..., alpha2 * (1.0_r - ratio * ratio * ratio));
     }
 
     /**
@@ -533,7 +535,7 @@ struct RHLL {
         }
         FOR_I_DIM n2[i] /= alpha2;
         rtype f2[N_CONSERVATIVE];
-        along_n2(f2, n2, alpha2, W_l, W_r, th...);
+        Roe::calc_flux(f2, n2, W_l, W_r, th...);
         FOR_I_CONSERVATIVE flux[i] = alpha1 * f1[i] + alpha2 * f2[i];
     }
 };
