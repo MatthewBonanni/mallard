@@ -29,12 +29,14 @@
 #include "time_integrator.h"
 #include "physics.h"
 #include "les.h"
+#include "pasr.h"
 #include "tfles.h"
 #include "mixture.h"
 #include "cell_chemistry.h"
 #include "scalar_reconstruction.h"
 #include "data_writer.h"
 #include "statistics.h"
+#include "synthetic_inflow.h"
 #include "expression.h"
 #include "comm.h"
 #include "distributed_mesh.h"
@@ -67,6 +69,7 @@ struct KineticEnergyBudget {
     rtype convective = 0.0;
     rtype viscous = 0.0;
     rtype sgs = 0.0;
+    rtype pressure_work = 0.0;  // the convective rate of a scheme without numerical dissipation
 };
 
 /**
@@ -252,6 +255,14 @@ class Solver {
          *        exchanged to the halo), once per step in calc_dt.
          */
         void update_thickened_flame();
+        /** @brief PaSR: the reacting fraction kappa of every owned cell (chem_time_scale), once per step in calc_dt. */
+        void update_partially_stirred_reactor();
+        /**
+         * @brief Global dynamic procedure: les.C from the Germano identity of the current state, summed over
+         *        the domain exactly (fixed point), so the constant is independent of the rank count. The
+         *        velocity gradients of the state must be up to date on owned cells.
+         */
+        void update_dynamic_constant();
         /** @brief Thickened flame: multiply the transport of every cell (after update_eddy_viscosity). */
         void thicken_transport();
         /** @brief Overwrite the halo cells of a 3-vector cell field with their owners' values. */
@@ -286,12 +297,21 @@ class Solver {
          *        was (docs/design/les.md, section 4.2). Planar runs only.
          */
         KineticEnergyBudget kinetic_energy_budget();
+        /** @brief LES: the model constant in use (the dynamic procedure's latest with les.dynamic). */
+        rtype les_constant() const { return les.C; }
+        /** @brief LES: <L:M> / <M:M> of the latest dynamic procedure, before clipping at zero. */
+        double les_dynamic_ratio() const { return dynamic_ratio; }
 
         /** @brief Whether the run is a large-eddy simulation ([les]). */
         bool is_les() const { return les_on; }
         const LES & get_les() const { return les; }
         /** @brief LES: [mu_t, lambda_t, mu_t / (Sc_t W)] of each cell as of the last copy_device_to_host. */
         const Kokkos::View<rtype *[3]>::host_mirror_type & get_les_coefficients() const { return h_les_coefficients; }
+        /** @brief PaSR: the reacting fraction kappa per cell, after copy_device_to_host. */
+        const Kokkos::View<rtype *>::host_mirror_type & get_chem_time_scale() const { return h_chem_time_scale; }
+        /** @brief Thickened flame: [F, E, Omega] per cell, after copy_device_to_host. */
+        const Kokkos::View<rtype *[3]>::host_mirror_type & get_tfles_fields() const { return h_tfles_fields; }
+        const Kokkos::View<rtype *[3]>::host_mirror_type & get_cell_transport() const { return h_cell_transport; }
 
         /** @brief Whether the gas is a mixture (a mechanism is given). */
         bool is_mixture() const { return mixture_model != nullptr; }
@@ -347,6 +367,9 @@ class Solver {
         void init_solution_analytical();
         void init_solution_restart();
         void update_boundary_states(rtype t_eval);
+        void init_inlets(const std::vector<toml::value> & input_boundaries,
+                         const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
+        void update_inflow(rtype t_eval);
         void init_sources();
         void update_source_field(rtype t_eval);
         void init_sponges();
@@ -387,6 +410,11 @@ class Solver {
         void update_upwind_sensor();
         /** @brief sum over owned cells of u . R_m - |u|^2 / 2 R_rho for R the sum of face_flux over the cell's faces. */
         rtype kinetic_energy_rate() const;
+        /**
+         * @brief Over owned cells, -u . sum_f mean(p) n_f of the interior faces (Jameson's two-point pressure
+         *        flux with cell values) plus the kinetic_energy_rate of the boundary faces' face_flux.
+         */
+        rtype pressure_work_rate() const;
 
         template <typename T_riemann_solver>
         void launch_flux_functor();
@@ -490,7 +518,8 @@ class Solver {
         // Large-eddy simulation (docs/design/les.md)
         bool les_on = false;
         LES les;
-        Kokkos::View<rtype *> les_delta;               // (cell): filter width
+        Kokkos::View<rtype *> les_delta;               // (cell): filter width V^(1/d)
+        Kokkos::View<rtype *> les_width;               // (cell): the eddy viscosity's width (les_delta or Scotti's)
         Kokkos::View<rtype *[3]> les_coefficients;     // (cell, [mu_t, lambda_t, mu_t / (Sc_t W)]), empty without LES
         Kokkos::View<rtype *[3]>::host_mirror_type h_les_coefficients;
         bool budget_pass = false;                      // calc_rhs evaluates kinetic_energy_budget
@@ -498,10 +527,17 @@ class Solver {
         ThickenedFlame thickened_flame;
         Kokkos::View<rtype *[3]> tfles_fields;         // (cell, [F, E, Omega])
         Kokkos::View<rtype *[3]>::host_mirror_type h_tfles_fields;
-        Kokkos::View<rtype *> chem_time_scale;         // (cell): E / F, the chemistry's rate multiplier
+        Kokkos::View<rtype *> chem_time_scale;         // (cell): E / F or kappa, the chemistry's rate multiplier
+        Kokkos::View<rtype *>::host_mirror_type h_chem_time_scale;
+        bool pasr_on = false;                          // [les.combustion]: partially stirred reactor
+        PartiallyStirredReactor pasr;
         Kokkos::View<rtype *[3]> tfles_vorticity;
         Kokkos::View<rtype *[3][N_DIM]> tfles_gradients;
         State tfles_halo;                              // [F, E, Omega] as species, for the halo exchange
+        State dynamic_halo;                            // [rho, u] as flow, d u_i / d x_j as species, owners' values
+        Kokkos::View<double *[2]> dynamic_terms;       // (owned cell, [L:M, M:M] V)
+        Kokkos::View<double *[6]> dynamic_stresses;    // (cell, rho Delta^2 D(g) S^d)
+        double dynamic_ratio = 0.0;
         KineticEnergyBudget budget;
 
         // Gas mixtures
@@ -572,6 +608,9 @@ class Solver {
         bool characteristic_transverse = false;  // Some characteristic boundary has transverse terms
         rtype t_characteristic = -1.0;           // Time the incoming waves were last advanced from
         bool characteristic_state_set = false;   // char_state holds the faces' state (from a step or a restart)
+        // Synthetic turbulence of inlets, and the time of the targets in char_target
+        std::vector<std::unique_ptr<SyntheticInflow>> inflows;
+        rtype t_inflow = -1.0;
 
         // Checks
         uint32_t check_interval;

@@ -1,0 +1,129 @@
+# Spatially developing turbulent channel at Re_tau = 180 with synthetic
+# inflow (3D build): direct numerical simulation, no turbulence model.
+#
+# Physics. Walls at y = 0 and 2h, periodic in z, inflow at x = 0, outflow at
+# x = 8 pi h. Units h = 1, bulk density and velocity 1, Re_b = 5600, bulk
+# Mach 0.2, isothermal walls (as examples/channel_retau180). The nscbc_inlet
+# takes its mean velocity and Reynolds stresses from inflow_profile.csv:
+# the statistics of the periodic channel example (tools/plane_average.py
+# --average x z). [boundaries.turbulence] adds digital-filter turbulence
+# with integral lengths 0.5h (u, streamwise) and 0.1-0.2h otherwise. The
+# outlet is an nscbc_outlet behind a sponge over x > 20h (not analyzed),
+# with beta = 0: with the default beta, near-wall eddies leaving through it
+# reversed the flow in its last cells and the run diverged.
+#
+# Mesh: that of the periodic example twice as long, 384 x 96 x 128.
+#
+# Results (statistics over t = 40-110, averaged over z; against the periodic
+# channel, docs/design/synthetic_inflow.md):
+#   wall shear C_f            up to 6.5% high near x = 0.7h; within 5% from 1.1h
+#   peak -u'v'+               57% at the inlet, within 5% from x = 4.6h
+#   peak u_rms+, v_rms+       dip to 85% at x = 2-4h; within 5% from 13.7h, 16.6h
+#   all of them               within 5% from about 17h (Keating et al. 2004: about 20h)
+#
+# Run:
+#   (the periodic channel example, to its restart files and inflow_profile.csv)
+#   python ../../tools/tile_restart.py ../channel_retau180/restart/channel_<last>.restart 192 2 init.restart
+#   mpirun -n 4 ../../build3d/src/Mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
+#   python ../../tools/plane_average.py stats/channel_000002.pvtu --average z --out profile_xy.csv
+#
+# Cost: 337,000 steps of 3.27e-4 h/U_b, 27 ms each on four A100s (2.5 hours).
+
+[run]
+t_stop = 110.0
+cfl = 0.45
+
+[mesh]
+type = "cartesian"
+Nx = 384
+Ny = 96
+Nz = 128
+Lx = 25.132741228718345
+Ly = 2.0
+Lz = 4.1887902047863905
+stretching = [0.0, 1.7, 0.0]
+periodic = ["z"]
+
+[initialize]
+type = "restart"
+file = "init.restart"
+
+[[boundaries]]
+name = "left"
+type = "nscbc_inlet"
+p = 17.857142857142858
+T = 1.0
+L = 25.132741228718345
+
+[boundaries.turbulence]
+profile = "inflow_profile.csv"
+length_scale = [[0.5, 0.15, 0.15], [0.2, 0.15, 0.1], [0.2, 0.1, 0.15]]
+
+[[boundaries]]
+name = "right"
+type = "nscbc_outlet"
+beta = 0.0
+p = 17.857142857142858
+L = 25.132741228718345
+
+[[boundaries]]
+name = "bottom"
+type = "wall_isothermal"
+T = 1.0
+
+[[boundaries]]
+name = "top"
+type = "wall_isothermal"
+T = 1.0
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+limiter = "none"
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 17.857142857142858
+T_ref = 1.0
+rho_ref = 1.0
+mu = 3.5714285714285714e-4
+Pr = 0.72
+
+[statistics]
+fields = ["RHO", "U_X", "U_Y", "U_Z", "P", "T"]
+products = ["U_X*U_X", "U_Y*U_Y", "U_Z*U_Z", "U_X*U_Y", "P*P"]
+t_start = 40.0
+
+[output]
+check_interval = 2000
+
+[[probes]]
+name = "inlet_p"
+variables = ["P", "U_X", "U_Y"]
+start = [0.02, 1.0, 0.0]
+end = [0.02, 1.0, 4.1887902047863905]
+n_points = 16
+interval = 20
+
+[[write_data]]
+prefix = "restart/channel"
+format = "restart"
+interval = 20000
+
+[[write_data]]
+prefix = "stats/channel"
+format = "vtu"
+time_interval = 35.0
+variables = ["MEAN_*", "COV_*"]
+
+# Turbulence leaving through nscbc_outlet drives its pressure away; damp it over the last 5.1 h (not analyzed)
+[[sponges]]
+strength = "x > 20.0 ? 30.0 * ((x - 20.0) / 5.1327)^2 : 0"
+u = ["8 / 7 * (1 - abs(y - 1))^(1 / 7)", 0.0, 0.0]
+p = 17.857142857142858
+T = 1.0

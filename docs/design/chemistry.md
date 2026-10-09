@@ -490,7 +490,7 @@ clipped and renormalized as before, at the end density `rho^n (1 + dt
 sum_k g_k)`. A forcing that removes a species can make the exact solution
 negative by up to `dt max(0, -g_k)` (the source does not vanish with the
 species, chemistry may not restore it), so sub-steps are rejected only
-below `-atol - dt max(0, -g_k)`. With TFLES's rate multiplier `s` the
+below `-atol - dt max(0, -g_k)`. With TFLES's or PaSR's rate multiplier `s` the
 reactor runs over `s dt` with `g / s`, which is the same ODE. Simplified
 SDC ([Zingale et al. 2022](https://arxiv.org/abs/2206.01285)) needs the same
 call with another constant forcing (the advective tendency of the last

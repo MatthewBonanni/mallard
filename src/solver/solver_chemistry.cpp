@@ -97,7 +97,7 @@ void Solver::advance_chemistry(const double dt_chem) {
     const double start = timer.seconds();
     const CellChemistry::Statistics stats =
         cell_chemistry.advance(conservatives, species, T_seed, chem_h, chem_cost, mesh->n_owned(), dt_chem,
-                               tfles_on ? chem_time_scale : Kokkos::View<rtype *>());
+                               tfles_on || pasr_on ? chem_time_scale : Kokkos::View<rtype *>());
     check_chemistry(stats);
     t_wall_chemistry += timer.seconds() - start;
 }
@@ -117,8 +117,8 @@ void Solver::check_chemistry(const CellChemistry::Statistics & stats) {
 
 void Solver::update_heat_release_rate() {
     cell_chemistry.heat_release(conservatives, species, T_seed, hrr, production, mesh->n_cells);
-    if (!tfles_on) return;
-    // The modeled rates of the thickened flame
+    if (!tfles_on && !pasr_on) return;
+    // The modeled rates of the thickened flame or the partially stirred reactor
     Kokkos::View<rtype *> q = hrr, scale = chem_time_scale;
     Kokkos::View<rtype **, Kokkos::LayoutRight> w = production;
     Kokkos::parallel_for("tfles_rates", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
@@ -137,7 +137,8 @@ void Solver::take_simpler_step() {
     const ChemistryForcing forcing{transport_rate, rhs_vec[0]};
     const CellChemistry::Statistics stats =
         cell_chemistry.advance(conservatives, species, T_seed, chem_h, chem_cost, mesh->n_owned(),
-                               static_cast<double>(dt), tfles_on ? chem_time_scale : Kokkos::View<rtype *>(), &forcing);
+                               static_cast<double>(dt), tfles_on || pasr_on ? chem_time_scale : Kokkos::View<rtype *>(),
+                               &forcing);
     check_chemistry(stats);
     t_wall_chemistry += timer.seconds() - start;
     halo_current = false;

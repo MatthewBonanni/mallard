@@ -79,6 +79,14 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: `[les] model = "vreman"`.
 - <a id="nicoud-2011"></a>F. Nicoud, H. Baya Toda, O. Cabrit, S. Bose and J. Lee, Using singular values to build a subgrid-scale model for large eddy simulations, *Phys. Fluids* 23, 085106 (2011). [doi:10.1063/1.3623274](https://doi.org/10.1063/1.3623274)
   Used in: `[les] model = "sigma"` (the default in 3D), its constant and the closed-form singular values; the table of model properties checked in `test/les_test.cpp`.
+- <a id="germano-1991"></a>M. Germano, U. Piomelli, P. Moin and W. H. Cabot, A dynamic subgrid-scale eddy viscosity model, *Phys. Fluids A* 3, 1760–1765 (1991). [doi:10.1063/1.857955](https://doi.org/10.1063/1.857955)
+  Used in: `[les] dynamic = true`, the identity that sets the constant.
+- <a id="lilly-1992"></a>D. K. Lilly, A proposed modification of the Germano subgrid-scale closure method, *Phys. Fluids A* 4, 633–635 (1992). [doi:10.1063/1.858280](https://doi.org/10.1063/1.858280)
+  Used in: `[les] dynamic = true`, the least-squares constant `<L:M> / <M:M>`.
+- <a id="moin-1991"></a>P. Moin, K. Squires, W. Cabot and S. Lee, A dynamic subgrid-scale model for compressible turbulence and scalar transport, *Phys. Fluids A* 3, 2746–2757 (1991). [doi:10.1063/1.858164](https://doi.org/10.1063/1.858164)
+  Used in: `[les] dynamic = true`, the Favre-weighted test-filtered stresses.
+- <a id="scotti-1993"></a>A. Scotti, C. Meneveau and D. K. Lilly, Generalized Smagorinsky model for anisotropic grids, *Phys. Fluids A* 5, 2306–2308 (1993). [doi:10.1063/1.858537](https://doi.org/10.1063/1.858537)
+  Used in: `[les] filter_width = "scotti"`.
 - <a id="vreman-geurts-kuerten-1995"></a>B. Vreman, B. Geurts and H. Kuerten, Subgrid-modelling in LES of compressible flow, *Appl. Sci. Res.* 54, 191–203 (1995). [doi:10.1007/BF00849116](https://doi.org/10.1007/BF00849116)
   Used in: the SGS terms of the filtered energy equation that are kept and neglected.
 - <a id="garnier-adams-sagaut-2009"></a>E. Garnier, N. Adams and P. Sagaut, *Large Eddy Simulation for Compressible Flows*, Springer (2009). [doi:10.1007/978-90-481-2819-8](https://doi.org/10.1007/978-90-481-2819-8)
@@ -118,10 +126,41 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the relaxation of the transverse terms with `beta` equal to the Mach number (`beta`).
 - <a id="granet-2010"></a>V. Granet, O. Vermorel, T. Leonard, L. Gicquel and T. Poinsot, Comparison of nonreflecting outlet boundary conditions for compressible solvers on unstructured grids, *AIAA J.* 48(10), 2348–2364 (2010). [doi:10.2514/1.J050391](https://doi.org/10.2514/1.J050391)
   Used in: the default `beta` and the vortex-outflow validation of `nscbc_outlet`.
+- <a id="moghadam-2011"></a>M. Esmaily Moghadam, Y. Bazilevs, T.-Y. Hsia, I. E. Vignon-Clementel and A. L. Marsden, A comparison of outlet boundary treatments for prevention of backflow divergence with relevance to blood flow simulations, *Comput. Mech.* 48, 277–291 (2011). [doi:10.1007/s00466-011-0599-0](https://doi.org/10.1007/s00466-011-0599-0)
+  Used in: the backflow stabilization tried, and not adopted, for `nscbc_outlet` (docs/design/nscbc.md).
 - <a id="bodony-2006"></a>D. J. Bodony, Analysis of sponge zones for computational fluid mechanics, *J. Comput. Phys.* 212, 681–702 (2006). [doi:10.1016/j.jcp.2005.07.014](https://doi.org/10.1016/j.jcp.2005.07.014)
   Used in: the sponge layers (`[[sponges]]`; `src/solver/solver_sponge.cpp`).
 - <a id="mani-2012"></a>A. Mani, Analysis and optimization of numerical sponge layers as a nonreflective boundary treatment, *J. Comput. Phys.* 231, 704–716 (2012). [doi:10.1016/j.jcp.2011.10.017](https://doi.org/10.1016/j.jcp.2011.10.017)
   Used in: the sponge layers and the advice to ramp their strength.
+
+## Inflow turbulence
+
+- <a id="klein-2003"></a>M. Klein, A. Sadiki and J. Janicka, A digital filter based generation of inflow data for spatially developing direct numerical or large eddy simulations, *J. Comput. Phys.* 186(2), 652–665 (2003). [doi:10.1016/S0021-9991(03)00090-1](https://doi.org/10.1016/S0021-9991%2803%2900090-1)
+  Used in: the digital filter of `[boundaries.turbulence]` (Gaussian kernels and their widths; `src/boundary/synthetic_inflow.cpp`).
+- <a id="lund-1998"></a>T. S. Lund, X. Wu and K. D. Squires, Generation of turbulent inflow data for spatially-developing boundary layer simulations, *J. Comput. Phys.* 140(2), 233–258 (1998). [doi:10.1006/jcph.1998.5882](https://doi.org/10.1006/jcph.1998.5882)
+  Used in: the Cholesky factor that gives the synthetic fluctuations their Reynolds stress; recycling-rescaling, weighed in [synthetic_inflow.md](design/synthetic_inflow.md).
+- <a id="touber-sandham-2009"></a>E. Touber and N. D. Sandham, Large-eddy simulation of low-frequency unsteadiness in a turbulent shock-induced separation bubble, *Theor. Comput. Fluid Dyn.* 23(2), 79–107 (2009). [doi:10.1007/s00162-009-0103-z](https://doi.org/10.1007/s00162-009-0103-z)
+  Used in: the digital filter in compressible simulations (design comparison).
+- <a id="xie-castro-2008"></a>Z.-T. Xie and I. P. Castro, Efficient generation of inflow conditions for large eddy simulation of street-scale flows, *Flow Turbul. Combust.* 81(3), 449–470 (2008). [doi:10.1007/s10494-008-9151-5](https://doi.org/10.1007/s10494-008-9151-5)
+  Used in: design comparison (the forward-stepwise, exponential time correlation that Mallard does not use).
+- <a id="kempf-2005"></a>A. Kempf, M. Klein and J. Janicka, Efficient generation of initial- and inflow-conditions for transient turbulent flows in arbitrary geometries, *Flow Turbul. Combust.* 74(1), 67–84 (2005). [doi:10.1007/s10494-005-3140-8](https://doi.org/10.1007/s10494-005-3140-8)
+  Used in: design comparison (digital filtering in arbitrary geometries).
+- <a id="jarrin-2006"></a>N. Jarrin, S. Benhamadouche, D. Laurence and R. Prosser, A synthetic-eddy-method for generating inflow conditions for large-eddy simulations, *Int. J. Heat Fluid Flow* 27(4), 585–593 (2006). [doi:10.1016/j.ijheatfluidflow.2006.02.006](https://doi.org/10.1016/j.ijheatfluidflow.2006.02.006)
+  Used in: design comparison (synthetic eddy method).
+- <a id="poletto-2013"></a>R. Poletto, T. Craft and A. Revell, A new divergence free synthetic eddy method for the reproduction of inlet flow conditions for LES, *Flow Turbul. Combust.* 91(3), 519–539 (2013). [doi:10.1007/s10494-013-9488-2](https://doi.org/10.1007/s10494-013-9488-2)
+  Used in: design comparison (divergence-free synthetic eddies).
+- <a id="kim-castro-xie-2013"></a>Y. Kim, I. P. Castro and Z.-T. Xie, Divergence-free turbulence inflow conditions for large-eddy simulations with incompressible flow solvers, *Comput. Fluids* 84, 56–68 (2013). [doi:10.1016/j.compfluid.2013.06.001](https://doi.org/10.1016/j.compfluid.2013.06.001)
+  Used in: design comparison (the dilatation of digital-filter fields and its pressure fluctuations).
+- <a id="guezennec-poinsot-2009"></a>N. Guézennec and T. Poinsot, Acoustically nonreflecting and reflecting boundary conditions for vorticity injection in compressible solvers, *AIAA J.* 47(7), 1709–1722 (2009). [doi:10.2514/1.41749](https://doi.org/10.2514/1.41749)
+  Used in: the incoming wave of an inlet whose target varies in time, `-rho c du_n,t/dt` (`CharacteristicStateFunctor` in `src/numerics/characteristic.h`).
+- <a id="keating-2004"></a>A. Keating, U. Piomelli, E. Balaras and H.-J. Kaltenbach, A priori and a posteriori tests of inflow conditions for large-eddy simulation, *Phys. Fluids* 16(12), 4696–4712 (2004). [doi:10.1063/1.1811672](https://doi.org/10.1063/1.1811672)
+  Used in: the development length of synthetic inflow in a channel, against which the channel validation compares.
+- <a id="wu-2017"></a>X. Wu, Inflow turbulence generation methods, *Annu. Rev. Fluid Mech.* 49, 23–49 (2017). [doi:10.1146/annurev-fluid-010816-060322](https://doi.org/10.1146/annurev-fluid-010816-060322)
+  Used in: the comparison of inflow methods in [synthetic_inflow.md](design/synthetic_inflow.md).
+- <a id="comte-bellot-corrsin-1966"></a>G. Comte-Bellot and S. Corrsin, The use of a contraction to improve the isotropy of grid-generated turbulence, *J. Fluid Mech.* 25(4), 657–682 (1966). [doi:10.1017/S0022112066000338](https://doi.org/10.1017/S0022112066000338)
+  Used in: the decay exponent of grid turbulence, against which the duct validation compares.
+- <a id="batchelor-townsend-1948"></a>G. K. Batchelor and A. A. Townsend, Decay of turbulence in the final period, *Proc. R. Soc. Lond. A* 194(1039), 527–543 (1948). [doi:10.1098/rspa.1948.0095](https://doi.org/10.1098/rspa.1948.0095)
+  Used in: the final-period decay exponent, the low-Reynolds-number bound of the duct validation.
 
 ## Time integration and time step
 

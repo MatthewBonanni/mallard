@@ -646,9 +646,9 @@ TEST(ChemistryReactorTest, LeanIgnitionIsReportedAtTheSteepestTemperatureRise) {
     // Runs that end before ignition, and past the steepest rise while dT/dt
     // is still above half its peak
     const double steepest_rise = T_rows[steepest + 1] - T_rows[steepest];
-    size_t half = steepest;
-    while (T_rows[half + 1] - T_rows[half] > 0.5 * steepest_rise) half++;
-    for (const double end_time : {0.5 * t_steepest, 0.5 * (t_steepest + half * interval)}) {
+    size_t past_half = steepest;
+    while (T_rows[past_half + 1] - T_rows[past_half] > 0.5 * steepest_rise) past_half++;
+    for (const double end_time : {0.5 * t_steepest, 0.5 * (t_steepest + past_half * interval)}) {
         std::vector<double> rows;
         EXPECT_FALSE(run(end_time, rows).ignited()) << "end_time " << end_time;
     }
