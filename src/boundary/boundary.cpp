@@ -14,12 +14,15 @@
 #include "input.h"
 
 #include <algorithm>
+#include <array>
+#include <limits>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include "mesh.h"
+#include "synthetic_inflow.h"
 
 BoundaryCondition BoundaryCondition::from_input(const toml::value & input, const Euler & physics) {
     const std::string name = toml::find<std::string>(input, "name");
@@ -50,17 +53,17 @@ BoundaryCondition BoundaryCondition::from_input(const toml::value & input, const
         FOR_I_DIM bc.data[1 + i] = u[i];
         bc.data[N_DIM + 1] = p;
     } else if (bc.type == BoundaryType::NSCBC_INLET) {
-        require("u");
         require("p");
         require("T");
-        std::vector<rtype> u = find_real_vector(input, "u");
-        if (u.size() != N_DIM) {
-            throw std::runtime_error("Invalid u for boundary: " + name + ".");
-        }
+        // The velocity may vary along the inlet and in time: the solver sets it per face
+        const InletProfile profile(input, "boundaries[name = \"" + name + "\"]");
         const rtype p = find_real(input, "p");
         const rtype T = find_real(input, "T");
         bc.data[0] = physics.get_density_from_pressure_temperature(p, T);
-        FOR_I_DIM bc.data[1 + i] = u[i];
+        if (profile.uniform()) {
+            const std::array<double, N_DIM> u = profile.velocity(Point{});
+            FOR_I_DIM bc.data[1 + i] = static_cast<rtype>(u[i]);
+        }
         bc.data[N_DIM + 1] = p;
         bc.relax[Relax::T_TARGET] = T;
     } else if (bc.type == BoundaryType::P_OUT || bc.type == BoundaryType::P_OUT_AVERAGE ||
@@ -96,7 +99,9 @@ BoundaryCondition BoundaryCondition::from_input(const toml::value & input, const
             return sigma / L;
         };
         bc.relax[Relax::ACOUSTIC] = input.contains("sigma") ? rate("sigma", 0.0_r) : 0.25_r / L;
-        bc.relax[Relax::BETA] = -1.0_r;
+        // A turbulent inlet's incoming wave follows the target's own, which carries the target's
+        // transverse terms: by default it leaves out the face's, which would count them twice
+        bc.relax[Relax::BETA] = (bc.type == BoundaryType::NSCBC_INLET && InletProfile::turbulent(input)) ? 0.0_r : -1.0_r;
         if (input.contains("beta")) {
             bc.relax[Relax::BETA] = find_real(input, "beta");
             if (!(bc.relax[Relax::BETA] >= 0.0_r && bc.relax[Relax::BETA] <= 1.0_r)) {
@@ -315,32 +320,43 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     data.char_depth = Kokkos::View<rtype *>("char_depth", char_faces.size());
     data.char_transverse = Kokkos::View<rtype *[3]>("char_transverse", char_faces.size());
     data.char_state = Kokkos::View<rtype *[2]>("char_state", char_faces.size());
+    data.char_target = Kokkos::View<rtype *[N_DIM]>("char_target", char_faces.size());
+    data.char_target_next = Kokkos::View<rtype *[N_DIM]>("char_target_next", char_faces.size());
     auto h_char_faces = Kokkos::create_mirror_view(data.char_faces);
     auto h_char_depth = Kokkos::create_mirror_view(data.char_depth);
+    auto h_char_target = Kokkos::create_mirror_view(data.char_target);
     for (size_t k = 0; k < char_faces.size(); k++) {
         h_char_faces(k) = char_faces[k];
         h_char_depth(k) = char_depth[k];
+        const BoundaryCondition & bc = h_bcs_vec[h_face_bc_vec[char_faces[k]]];
+        FOR_I_DIM h_char_target(k, i) = (bc.type == BoundaryType::NSCBC_INLET) ? bc.data[1 + i] : 0.0_r;
     }
     Kokkos::deep_copy(data.char_faces, h_char_faces);
     Kokkos::deep_copy(data.char_depth, h_char_depth);
+    Kokkos::deep_copy(data.char_target, h_char_target);
+    Kokkos::deep_copy(data.char_target_next, h_char_target);
 
     // Neighbors along the boundary for the transverse terms: characteristic faces
-    // with nearly the same normal sharing a node (2D) or an edge (3D). Faces
-    // sharing only a corner would make the fit read a grid-scale odd-even
-    // pattern across one direction as a gradient of the opposite sign along
-    // the other, which the incoming wave then amplifies.
+    // with nearly the same normal sharing a node (2D) or an edge (3D), also
+    // across periodic seams. Faces sharing only a corner would make the fit
+    // read a grid-scale odd-even pattern across one direction as a gradient
+    // of the opposite sign along the other, which the incoming wave then
+    // amplifies.
+    auto node_key = [&](uint32_t n) { return mesh.h_node_key.empty() ? n : mesh.h_node_key[n]; };
     std::unordered_map<uint32_t, std::vector<uint32_t>> char_of_node;
     for (size_t k = 0; k < char_faces.size(); k++) {
         for (uint32_t j = 0; j < mesh.h_n_nodes_of_face(char_faces[k]); j++) {
-            char_of_node[mesh.h_node_of_face(char_faces[k], static_cast<uint8_t>(j))].push_back(static_cast<uint32_t>(k));
+            char_of_node[node_key(mesh.h_node_of_face(char_faces[k], static_cast<uint8_t>(j)))].push_back(
+                static_cast<uint32_t>(k));
         }
     }
     std::vector<uint32_t> offsets(char_faces.size() + 1, 0), neighbors;
+    std::vector<std::array<rtype, N_DIM>> neighbor_dx;
     for (size_t k = 0; k < char_faces.size(); k++) {
         const uint32_t f = char_faces[k];
         std::vector<uint32_t> candidates, shared;
         for (uint32_t j = 0; j < mesh.h_n_nodes_of_face(f); j++) {
-            for (uint32_t m : char_of_node[mesh.h_node_of_face(f, static_cast<uint8_t>(j))]) {
+            for (uint32_t m : char_of_node[node_key(mesh.h_node_of_face(f, static_cast<uint8_t>(j)))]) {
                 if (m == k) continue;
                 const auto it = std::find(candidates.begin(), candidates.end(), m);
                 if (it != candidates.end()) {
@@ -361,6 +377,27 @@ BoundaryData make_boundary_data(const Mesh & mesh,
         }
         neighbors.insert(neighbors.end(), list.begin(), list.end());
         offsets[k + 1] = static_cast<uint32_t>(neighbors.size());
+        // Offset of each neighbor's center, the nearest periodic image of it
+        for (uint32_t m : list) {
+            const uint32_t g = char_faces[m];
+            std::array<rtype, N_DIM> best{};
+            rtype best2 = std::numeric_limits<rtype>::infinity();
+            for (uint32_t s = 0; s < mesh.h_shifts.extent(0); s++) {
+                for (const rtype sign : {1.0_r, -1.0_r}) {
+                    std::array<rtype, N_DIM> d;
+                    rtype d2 = 0.0_r;
+                    FOR_I_DIM {
+                        d[i] = (mesh.h_face_coords(g, i) - mesh.h_face_coords(f, i)) + sign * mesh.h_shifts(s, i);
+                        d2 += d[i] * d[i];
+                    }
+                    if (d2 < best2) {
+                        best2 = d2;
+                        best = d;
+                    }
+                }
+            }
+            neighbor_dx.push_back(best);
+        }
     }
     // Edges of the characteristic boundaries: faces sharing a node with another
     // boundary (a wall), where the fit of the transverse terms is one-sided
@@ -390,6 +427,10 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     for (size_t k = 0; k < neighbors.size(); k++) h_neighbors(k) = neighbors[k];
     Kokkos::deep_copy(data.char_offsets, h_offsets);
     Kokkos::deep_copy(data.char_neighbors, h_neighbors);
+    data.char_neighbor_dx = Kokkos::View<rtype *[N_DIM]>("char_neighbor_dx", neighbors.size());
+    auto h_neighbor_dx = Kokkos::create_mirror_view(data.char_neighbor_dx);
+    for (size_t k = 0; k < neighbors.size(); k++) FOR_I_DIM h_neighbor_dx(k, i) = neighbor_dx[k][i];
+    Kokkos::deep_copy(data.char_neighbor_dx, h_neighbor_dx);
     Kokkos::deep_copy(data.bcs, h_bcs);
     return data;
 }

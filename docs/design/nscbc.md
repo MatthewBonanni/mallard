@@ -59,6 +59,13 @@ continues on any other. A file without some face of the run (version 3 and
 earlier, or one written with that boundary not characteristic) starts every
 face afresh from the solution.
 
+An inlet's target velocity is per face, and may vary in time (synthetic
+turbulence, [synthetic_inflow.md](synthetic_inflow.md)). Its change over the
+step enters the incoming wave as the target's own incoming wave,
+`-Z (u_n,t(t + dt) - u_n,t(t))`
+([Guézennec & Poinsot 2009](../references.md#guezennec-poinsot-2009)), so
+that the face follows the target without reflecting outgoing waves.
+
 This is the LODI relation of Poinsot & Lele itself. For a plane wave at
 normal incidence, `dw-/dt = -K p'` gives the reflection coefficient
 `R = -1 / (1 - 2 i omega / K)`
@@ -180,7 +187,11 @@ as finite-difference NSCBC differentiates along the boundary:
 
 - **Data.** The fit uses the states of the cells of the neighboring
   characteristic faces: those with nearly the same normal sharing an edge
-  (3D) or a node (2D). Edge faces have no fit (below).
+  (3D) or a node (2D), also across periodic seams, at the nearest periodic
+  image of their centers. A one-sided fit at a seam biased the transverse
+  terms there: with turbulence leaving through an outlet periodic across,
+  the outlet's pressure along the seam fell and the run diverged after a
+  few flow-through times. Edge faces have no fit (below).
 - **Normal derivatives.** A point along the normal sets them to zero.
 - **Why not the boundary cell's own gradient.** It picks up the normal
   variation of waves crossing the boundary. On triangles it also picks up

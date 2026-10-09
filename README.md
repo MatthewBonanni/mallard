@@ -39,6 +39,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Slip, adiabatic, isothermal and heat-flux walls, optionally moving
 - Inflow, characteristic far field, pressure outlets (local or area-averaged), transmissive, time-dependent expressions
 - Partially non-reflecting characteristic (NSCBC) inlets and outlets with transverse terms (1% of an acoustic pulse reflected, against 97-99% at a fixed-pressure outlet); sponge layers
+- Synthetic turbulent inflow: a digital filter with prescribed Reynolds stresses and length scales, or the statistics of a precursor run, bitwise the same on any number of ranks ([design](docs/design/synthetic_inflow.md))
 - Zones split between conditions by expressions
 
 **Performance and parallelism**
