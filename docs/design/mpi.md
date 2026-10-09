@@ -112,7 +112,7 @@ These are found during per-rank precomputation on owned plus halo cells, and wit
 
 Status: prototyped and measured on A100s (milestone 7); not adopted, because a rebalance does not pay for itself on the cases below. The prototype is kept in draft PRs #103 (weighted partitioners), #104 (runtime migration), #105 (cost model and trigger) and #108 (TENO data migration).
 
-**Why it was tried.** TENO's troubled cells (near shocks) cost several times a smooth cell, cluster on the ranks a shock crosses, and move with the shocks, so a static partition can't balance them. Chemistry will add larger per-cell cost variation, which it balances by moving chemistry states between ranks without touching the mesh (`chemistry.md`, decision 9).
+**Why it was tried.** TENO's troubled cells (near shocks) cost several times a smooth cell, cluster on the ranks a shock crosses, and move with the shocks, so a static partition can't balance them. Chemistry will add larger per-cell cost variation, which it balances by moving chemistry states between ranks without touching the mesh (`chemistry.md`, decision 9; implemented and measured in its milestone 11, where moving states every call recovers half or more of the waiting at a cost of a few milliseconds per call).
 
 **Invariant.** Results must stay bitwise identical with and without rebalancing, as they are on any rank count. The prototype keeps it: stencils, pseudo-inverses and face orders are functions of global ids, reductions are exact or ordered by global keys, and state and per-cell data move as raw bits. Its tests compare rebalanced runs with serial ones bitwise (TENO with mirror faces and periodic seams, MUSCL Navier-Stokes with Dirichlet and average-pressure boundaries, 2D and 3D, 2-4 ranks, CPU and A100).
 

@@ -146,6 +146,27 @@ TEST(MPITest, GasMixtureMatchesSerial) {
     }
 }
 
+TEST(MPITest, ChemistryLoadBalancingMatchesSerial) {
+    // The hot half of the channel reacts and the cold half does not, so ranks
+    // integrate each other's cells; each cell's reactor gives the same bits
+    // wherever it runs, also with fused half steps and the thickened flame's
+    // multiplier of dt
+    const std::string balanced = "[chemistry]\nload_balance = true\n";
+    const std::string tfles = "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
+                              "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n";
+    const std::string inputs[] = {mixture_input("", "type = \"MUSCL\"\n", balanced, "euler"),
+                                  mixture_input("", "type = \"MUSCL\"\n", balanced + "fuse_half_steps = true\n",
+                                                "navier_stokes"),
+                                  mixture_input("", "type = \"MUSCL\"\n", balanced, "navier_stokes") + tfles};
+    for (const std::string & input : inputs) {
+        expect_matches_serial(input, [](const Solver & s) {
+            if (s.is_distributed()) {
+                EXPECT_GT(s.chemistry_cells_sent(), 0.0);
+            }
+        });
+    }
+}
+
 TEST(MPITest, ThermalDiffusionMatchesSerial) {
     // The halo cells' thermal diffusion coefficients follow their owners'
     std::string input = mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes");

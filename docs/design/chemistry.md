@@ -1,7 +1,7 @@
 # Design: finite-rate chemistry
 
 Status: accepted (see [Decisions on the open questions](#decisions-on-the-open-questions)).
-Implementation follows the [milestones](#10-milestones); done: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10.
+Implementation follows the [milestones](#10-milestones); done: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11.
 
 Mallard today solves a single calorically perfect gas. This document adds
 multicomponent, thermally perfect mixtures and finite-rate chemistry with
@@ -595,6 +595,9 @@ Validation against Strang splitting (h2o2, MUSCL, HLLC, SSPRK3):
   flow work (TENO troubled cells, species fluxes) uses the dynamic mesh
   rebalancing prepared in [mpi.md, section 10](mpi.md#10-dynamic-load-balancing),
   with the measured per-cell chemistry cost added to the partition weights.
+  Implemented in milestone 11 ([below](#as-implemented-milestone-11)), with
+  the cost from the cells' last sub-step counts and without partition
+  weights.
 
 ### As implemented (milestone 8)
 
@@ -1152,6 +1155,100 @@ above. The published GPU numbers (Niemeyer & Sung, Curtis et al., Balos et
 al.) use other GPUs, mechanisms or measures (per-reactor wall time of a
 whole ignition) and were not compared.
 
+### As implemented (milestone 11)
+
+`src/solver/chemistry_balance.*`; `[chemistry] load_balance = true` (off
+by default).
+
+**Where the imbalance comes from.** In the reacting examples (h2o2, one
+thread per cell) every active cell takes one or two RODAS sub-steps per call
+at their time steps (1e-9 to 2e-8 s; at most 2-10 in the steepest cells), so
+a rank's chemistry time is its count of active cells: about 155-160 ns per
+cell once the queue fills the A100 (31.6 ms for 200k cells), plus the
+activity check over every owned cell (5-7 ms per 300k-900k cells). Below one
+wave of threads a call costs a fixed ~7 ms whatever the count (autoignition,
+40k cells per rank). Fresh gas is inactive, so the Hilbert slabs of a
+channel put the burnt gas, and all the integration, on some ranks: in the
+first 3,000 steps of `detonation_2d` two of four ranks integrate 200k cells
+each and two none (36.8 ms against 5.9 ms per call).
+
+**Scheme.** `CellChemistry::advance` flags every owned cell first and
+compacts one queue (before: per chunk of the work memory), then integrates it
+in batches of the work memory. Between the two, `ChemistryBalance`:
+
+- gathers each rank's work, the sum over its queued cells of the sub-steps
+  of their last call (at least 1): one `allgatherv` of two numbers per rank
+  and call;
+- if the largest exceeds the mean by more than 5%, pairs ranks above the
+  mean with ranks below it in rank order and turns each pair's share into a
+  count of cells (the sender's mean cost per cell): every rank computes the
+  same plan from the same numbers;
+- each sender packs the end of its queue (the cheapest cells: the queue is
+  ordered by cost on GPUs) as raw bits, `N_CONSERVATIVE + Ns + 4` values per
+  cell (state, partial densities, `T_SEED`, `CHEM_H`, last cost, multiplier
+  of `dt`), and sends them (GPU-aware where available). The transfer is
+  completed before the sender integrates its own cells: large GPU messages
+  progress only inside MPI calls, and a first version that left them pending
+  over the sender's integration made receivers wait for it (det2d on 4 GPUs:
+  45 ms per call instead of 37.5 without balancing);
+- receivers integrate their own queue, then the guests with the same kernel
+  (sorted by cost, in batches), and return `Ns + 3` values per cell
+  (partial densities, `CHEM_H`, sub-steps, last cost).
+
+Each cell's integration reads only its own inputs and takes the same code
+path on every rank (decision 6, [Determinism](#determinism)), so results are
+bitwise those of an unbalanced run and of a serial one;
+`MPITest.ChemistryLoadBalancingMatchesSerial` checks it on 1-4 ranks (Euler,
+Navier-Stokes with fused half steps, the thickened flame's multiplier of
+`dt`) and that cells did move. Restarts are unaffected: the plan uses only
+the last call's costs, which are not restarted, and changes only where cells
+are integrated. The summary reports, for every distributed reacting run,
+the sum over calls of the slowest rank's chemistry time against the mean,
+and with balancing the share of integrations done elsewhere.
+
+**Measurements** (A100-80GB, CUDA-aware Open MPI; 4 GPUs: three on one node
+and one over HDR InfiniBand; 8 GPUs: one node over NVLink; Hilbert
+partition; the production inputs without output, from restarts of the
+production runs; time per step and, in parentheses, the share of stepping
+spent waiting for the slowest rank's chemistry):
+
+| Case | Cells | Steps | GPUs | Without | With | Speedup |
+|---|---|---|---|---|---|---|
+| `detonation_2d` (first 3,000 steps) | 1.2M | 3,000 | 4 | 86.3 ms (35.9%) | 69.4 ms (6.0%) | 1.24 |
+| | | | 8 | 56.5 ms (51.6%) | 35.1 ms (8.0%) | 1.61 |
+| `flame_turbulence` (DNS) | 3.67M | 1,000 | 4 | 384 ms (17.8%) | 349 ms (3.5%) | 1.10 |
+| | | | 8 | 191 ms (18.7%) | 165 ms (0.3%) | 1.16 |
+| `detonation_3d` | 19.2M | 1,142 | 4 | 1.27 s (8.2%) | 1.22 s (1.1%) | 1.04 |
+| | | | 8 | 631 ms (7.1%) | 596 ms (0.4%) | 1.06 |
+| `autoignition_2d` (T' = 15 K, igniting) | 160k | 20,000 | 4 | 10.8 ms (0.8%) | 10.8 ms (0.8%) | 1.00 |
+| | | | 8 | 8.05 ms (0.5%) | 7.85 ms (0.4%) | 1.00 |
+
+- Balancing turns 48-73% of the waiting into saved time: it removes the wait but adds
+  work, seen as a higher mean over ranks of the chemistry time (det2d on 8
+  GPUs: 10.3 to 13.0 ms per call; flame: 43 to 53 ms). That is the
+  transfers (~250 bytes per moved cell and both ways; 0.4M cells per sender
+  in the flame on 4 GPUs), pack and unpack, and partial waves: two ranks with
+  100k cells each take longer than one with 200k (17-18 ms against 31.6 ms
+  per call). The rank across InfiniBand was 3-6 ms per call slower than its
+  on-node peers.
+- `autoignition_2d` is balanced already (every cell ignites, 40k cells per
+  rank are below one wave): the 5% threshold is never reached, and the cost
+  is one `allgatherv` per call.
+- The imbalance grows with the rank count where fronts sit in slabs
+  (det2d: 36% to 52% of the step from 4 to 8 GPUs), which is where the scheme
+  pays most. It shrinks where most of the domain is active (`detonation_3d`
+  late in the window: 76% to 99.6% of the cells react).
+- Not measured: larger mechanisms (a warp per cell, wide teams), where a
+  cell's work grows faster with the species count than its message does.
+
+**Not done.** Chemistry cost in the mesh partition weights: the expensive
+cells (burnt gas behind a front) move with the front, so weights would go
+stale as they did for TENO's troubled cells ([mpi.md, section 10](mpi.md#10-dynamic-load-balancing)),
+while moving states adapts every call at no setup cost. A cheaper activity
+test for near-equilibrium burnt gas (most of the integrated cells in the
+detonations take one sub-step and change little) would cut the work being
+balanced; it is a separate question of accuracy.
+
 ## 6. Transport
 
 ### Models
@@ -1641,6 +1738,9 @@ until milestone 8 (the 0D tool arrives in milestone 7).
     sparse LU for large mechanisms, benchmark suite with recorded baselines.
 11. **MPI.** Chemistry load balancing; chemistry cost in partition weights.
     Tests: rank-count independence with chemistry; imbalance benchmark.
+    Done: state migration (`chemistry.load_balance`), the slowest rank's
+    chemistry time in the summary, and the measurements of
+    [section 5](#as-implemented-milestone-11); partition weights not added.
 12. **Extensions, each optional and driven by need:** Roe/RHLL for mixtures
     (done);
     BDF integrator; SDC coupling; mechanism-specialized (code-generated)

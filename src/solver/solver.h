@@ -294,8 +294,11 @@ class Solver {
         void take_simpler_step();
         /** @brief SIMPLER: rhs -= T(U^n) on the owned cells. */
         void subtract_transport_rate(const State & rhs);
-        /** @brief Counts the active cells of a chemistry call; throws if any cell failed on any rank. */
-        void check_chemistry(const CellChemistry::Statistics & stats);
+        /**
+         * @brief Counts the active cells of a chemistry call begun at `start` (timer), adds its rank
+         *        times to the imbalance sums; throws if any cell failed on any rank.
+         */
+        void check_chemistry(const CellChemistry::Statistics & stats, double start);
         void update_heat_release_rate();
         /** @brief Over all ranks: owned cells advanced in the last chemistry call, max sub-steps of a cell in the last step. */
         std::pair<uint64_t, double> chemistry_statistics();
@@ -336,6 +339,9 @@ class Solver {
          */
         void set_distributed(bool on) { distribute = on; }
         bool is_distributed() const { return distribute && comm::size() > 1; }
+
+        /** @brief Cell integrations done by another rank than the owner so far (chemistry load balancing). */
+        double chemistry_cells_sent() const { return chem_cells_sent; }
         const Distribution & get_distribution() const { return distribution; }
 
         /** @brief Body force per unit volume, along the mass flow direction, of the last RHS ([source] mass_flow). */
@@ -598,6 +604,10 @@ class Solver {
         CellChemistry cell_chemistry;
         uint64_t chem_active_cells = 0;   // owned cells advanced in the last chemistry call
         double t_wall_chemistry = 0.0;
+        double t_chemistry_slowest = 0.0;  // sums over chemistry calls of the slowest rank's time
+        double t_chemistry_mean = 0.0;     // and of the mean of the ranks' times
+        double chem_cells_integrated = 0.0, chem_cells_sent = 0.0;  // over calls and ranks; sent: load balancing
+        bool chemistry_load_balance = false;
         bool fuse_chemistry = false;      // run(): fuse consecutive half steps
         bool simpler = false;             // SIMPLER balanced splitting instead of Strang
         State transport_rate;             // SIMPLER: -c = T(U^n), the transport tendency at the step's start
