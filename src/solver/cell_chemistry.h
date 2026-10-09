@@ -66,12 +66,13 @@ class ChemistryBalance;
  * @brief Work memory and kernels that advance the cells of a state as
  *        adiabatic constant-volume reactors at fixed (rho, e).
  *
- * Cells are processed in chunks that bound the work memory; in each chunk a
- * kernel flags the cells that need chemistry (T >= T_frozen and a mass
+ * A kernel flags the cells that need chemistry (T >= T_frozen and a mass
  * fraction that would change by more than 1e-2 atol over dt at the current
  * rates), a scan compacts them into a queue, and the queued cells are
- * integrated. Each cell's result depends only on its own state, so neither
- * the order of the queue nor the chunking changes it: per mechanism and
+ * integrated in batches that bound the work memory, after the ranks have
+ * balanced the queues if asked to (ChemistryBalance). Each cell's result
+ * depends only on its own state, so neither the order of the queue, the
+ * batches nor the rank that integrates it changes it: per mechanism and
  * build, every cell takes the same code path (one thread per cell, or a
  * fixed number of lanes).
  */
