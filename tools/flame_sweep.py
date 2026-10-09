@@ -19,7 +19,7 @@ for the last output, the peak heat release rate against Cantera's and the
 largest temperature difference (tools/plot_flame.py). A run at a CFL other
 than 1 is also compared with the CFL 1 run of the same case over the same
 flame time (vs_cfl1, in %). With --png it plots the flame speeds against phi
-and their errors for each resolution and CFL.
+and the CFL 1 runs' errors for each resolution.
 """
 import argparse
 import csv
@@ -138,13 +138,13 @@ def plot(results, refs, png):
     ax1.set_ylabel("flame speed [m/s]")
     ax1.legend(fontsize=8)
     markers = {10: "v", 20: "o", 40: "^"}
+    styles = {10: ":", 20: "-", 40: "--"}
     for model in MODELS:
-        for (cells, cfl) in sorted({(r["cells"], r["cfl"]) for r in results if r["transport"] == model}):
+        for cells in sorted({r["cells"] for r in results if r["transport"] == model and r["cfl"] == 1.0}):
             pts = sorted((r["phi"], r["err_c"]) for r in results
-                         if r["transport"] == model and r["cells"] == cells and r["cfl"] == cfl)
-            ax2.plot(*zip(*pts), ("-" if cfl == 1.0 else ":") + markers.get(int(cells), "s"),
-                     color=colors[model], mfc="none" if cfl == 1.0 else colors[model], ms=5,
-                     label=f"{model}, {cells:g} cells, CFL {cfl:g}")
+                         if r["transport"] == model and r["cells"] == cells and r["cfl"] == 1.0)
+            ax2.plot(*zip(*pts), styles.get(int(cells), "-.") + markers.get(int(cells), "s"), color=colors[model],
+                     mfc="none", ms=5, label=f"{model}, {cells:g} cells")
     ax2.axhline(0, color="k", lw=0.5)
     ax2.set_xlabel("equivalence ratio")
     ax2.set_ylabel("consumption speed error vs Cantera [%]")
