@@ -144,6 +144,13 @@ TEST(MPITest, GasMixtureMatchesSerial) {
     }
 }
 
+TEST(MPITest, ThermalDiffusionMatchesSerial) {
+    // The halo cells' thermal diffusion coefficients follow their owners'
+    std::string input = mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes");
+    input.insert(input.find("[physics]\n") + 10, "soret = true\n");
+    expect_matches_serial(input);
+}
+
 TEST(MPITest, MUSCLMatchesSerial) {
     expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
                                     bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",

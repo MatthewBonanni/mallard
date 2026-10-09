@@ -146,7 +146,10 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
             break;
     }
 
-    if (budget_pass) budget.convective = kinetic_energy_rate();
+    if (budget_pass) {
+        budget.convective = kinetic_energy_rate();
+        budget.pressure_work = pressure_work_rate();
+    }
     ViscousFluxFunctor viscous_functor;
     if (physics.is_viscous()) {
         if (!hybrid_flux) Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, mesh->n_cells), viscous_gradient);
