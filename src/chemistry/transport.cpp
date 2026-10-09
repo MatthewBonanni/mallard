@@ -4,7 +4,8 @@
  * @brief Species transport fits: a port of Cantera's GasTransport fitting
  *        (Cantera 3.2.0, src/transport/GasTransport.cpp and MMCollisionInt.cpp,
  *        BSD-3-Clause, Copyright (c) 2001-2025 Cantera Developers), so that
- *        Mallard's mixture-averaged properties are Cantera's.
+ *        Mallard's mixture-averaged properties are Cantera's, with the C*
+ *        fits of its mixture-averaged thermal diffusion (MixTransport.cpp).
  * @version 0.3
  * @date 2026-10-03
  *

@@ -1224,8 +1224,8 @@ last third), H2/air at 300 K and 1 atm:
 All within the 2% criterion; the Soret effect, 3-9% here, is reproduced to
 within a point (at phi = 0.4, the slowest flame, over two flame times, its
 two errors of +0.4% and -0.6% add up). Profiles aligned at the maximum of `dT/dx`
-differ from Cantera's by at most 0.4-1.5% of the peak for `T` and `Y_H2`
-and 1.3-2% for H, O and OH at phi = 0.5-0.6, up to 3-9% at phi = 1, where
+differ from Cantera's by at most 0.3-1.5% of the peak for `T` and `Y_H2`
+and 1.3-5% for H, O and OH at phi = 0.4-0.6, up to 3-9% at phi = 1, where
 the profiles are steepest (as without thermal diffusion, see above). Runs: 300 cells, OpenMP, 3 threads,
 4.3-5.1 ms per step (thermal diffusion +11%), up to 1.3M steps at phi = 0.4.
 
