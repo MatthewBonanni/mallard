@@ -398,11 +398,11 @@ SparseLUPattern<MemorySpace> make_sparse_lu_pattern(const Mechanism & mechanism)
     p.pivot_update_offset = copy(pivot_update_offset, "lu_pivot_update_offset");
     p.pivot_update = Kokkos::View<uint32_t *[3], Kokkos::LayoutRight, MemorySpace>("lu_pivot_update", pivot_update.size() / 3);
     {
-        auto m = Kokkos::create_mirror_view(p.pivot_update);
+        auto mirror = Kokkos::create_mirror_view(p.pivot_update);
         for (size_t a = 0; a < pivot_update.size() / 3; a++) {
-            for (int b = 0; b < 3; b++) m(a, b) = pivot_update[3 * a + b];
+            for (int b = 0; b < 3; b++) mirror(a, b) = pivot_update[3 * a + b];
         }
-        Kokkos::deep_copy(p.pivot_update, m);
+        Kokkos::deep_copy(p.pivot_update, mirror);
     }
     p.n_stages = n_stages;
     p.scale_offset = copy(scale_offset, "lu_scale_offset");
