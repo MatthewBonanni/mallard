@@ -227,6 +227,21 @@ times the half step (exact for the autonomous constant-volume reactor).
 | `subgrid_velocity` | The `u'` of the efficiency: `colin` (default), `u' = 2 Delta^3 abs(lap(curl u))`; or `eddy_viscosity`, `u' = C_u nu_t / Delta` from the SGS model. Colin's operator overpredicts `u'` 5-8 times on meshes with `Delta >= 0.4 delta_L` and the flame speed by 2x at `Delta = 1.6 delta_L` (`docs/design/les.md`, section 8.3) |
 | `C_u` | Constant of `subgrid_velocity = "eddy_viscosity"`, default 28 (a priori from a DNS at `Delta = 0.8 delta_L`; 22-39 over `Delta = 0.4-1.6 delta_L`) |
 
+**Experimental: `model = "pasr"`**, the partially stirred reactor (Sabelnikov &
+Fureby 2013) for non-premixed and partially premixed flames: no thickening;
+each cell's rates are those of its filtered state times the reacting fraction
+`kappa = tau_c / (tau_c + tau_mix)`, with the chemical time `tau_c = rho cp T /
+|q|` of the cell's heat release rate `q` and the mixing time `tau_mix = C_mix
+Delta^2 / (nu + nu_t)` of molecular and SGS diffusion across the cell, so
+`kappa -> 1` where the mesh resolves the mixing and the heat release tends to
+`rho cp T / tau_mix` where the chemistry is fast. Applied as the per-cell
+chemistry time scale of TFLES (exact for the Strang reactor), once per step.
+Key `C_mix` (default 1); output `PASR_KAPPA`. Against a DNS of an H2/N2-air
+diffusion flame in decaying turbulence (heat release over 0.2-0.4 ms): -11%
+at `Delta = 0.27 mm` (quasi-laminar +17%), but -50% and a near-extinguished
+flame at 0.53 mm (quasi-laminar +41%). It corrects the right way at moderate
+filter widths and overcorrects on coarse meshes; not validated beyond this case.
+
 ## `[initialize]`
 
 | Key | Description |
