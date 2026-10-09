@@ -13,6 +13,8 @@
 
 #include <stdexcept>
 
+#include "device_comm.h"
+
 namespace {
 
 Kokkos::View<uint32_t *> flatten(const std::vector<std::vector<uint32_t>> & lists, std::vector<uint32_t> & offsets,
@@ -42,10 +44,16 @@ constexpr bool stage_through_host = !device_is_host_accessible;
 
 } // namespace
 
-HaloExchange::HaloExchange(const Distribution & dist) : ranks(dist.neighbors) {
+HaloExchange::HaloExchange(const Distribution & dist, const bool nccl_) : ranks(dist.neighbors), nccl(nccl_) {
+    if (nccl && !comm::nccl_available()) throw std::logic_error("HaloExchange: built without NCCL");
     send_cells = flatten(dist.send_cells, send_offsets, "halo_send_cells");
     recv_cells = flatten(dist.recv_cells, recv_offsets, "halo_recv_cells");
     allocate_buffers(N_CONSERVATIVE);
+    if (nccl) {
+        // NCCL connects to each peer at its first message: do that during setup
+        exchange(State("halo_warm_up", static_cast<uint32_t>(dist.global_cell.size()), 0));
+        Kokkos::fence("halo_warm_up");
+    }
 }
 
 void HaloExchange::allocate_buffers(const uint32_t n_values_per_cell) {
@@ -71,6 +79,22 @@ void HaloExchange::start(const State & U) {
         FOR_I_CONSERVATIVE s_buf(k * stride + i) = flow(c, i);
         for (uint32_t j = 0; j < n_species; j++) s_buf(k * stride + N_CONSERVATIVE + j) = species(c, j);
     });
+#ifdef Mallard_HAS_NCCL
+    if (nccl) {
+        const ncclDataType_t type = sizeof(rtype) == sizeof(double) ? ncclDouble : ncclFloat;
+        const cudaStream_t stream = Kokkos::DefaultExecutionSpace().cuda_stream();
+        ncclComm_t c = comm::nccl();
+        ncclGroupStart();
+        for (size_t n = 0; n < ranks.size(); n++) {
+            ncclRecv(recv_buffer.data() + recv_offsets[n] * stride, (recv_offsets[n + 1] - recv_offsets[n]) * stride, type,
+                     ranks[n], c, stream);
+            ncclSend(s_buf.data() + send_offsets[n] * stride, (send_offsets[n + 1] - send_offsets[n]) * stride, type,
+                     ranks[n], c, stream);
+        }
+        if (ncclGroupEnd() != ncclSuccess) throw std::runtime_error("HaloExchange: NCCL exchange failed");
+        return;
+    }
+#endif
     Kokkos::fence("halo_pack");
     rtype * send_ptr = s_buf.data();
     rtype * recv_ptr = recv_buffer.data();
@@ -98,7 +122,7 @@ void HaloExchange::start(const State & U) {
 void HaloExchange::finish(const State & U) {
     if (!active()) return;
 #ifdef Mallard_HAS_MPI
-    if (MPI_Waitall(static_cast<int>(requests.size()), requests.data(), MPI_STATUSES_IGNORE) != MPI_SUCCESS) {
+    if (!nccl && MPI_Waitall(static_cast<int>(requests.size()), requests.data(), MPI_STATUSES_IGNORE) != MPI_SUCCESS) {
         throw std::runtime_error("HaloExchange: MPI_Waitall failed");
     }
     const uint32_t stride = n_values;
@@ -107,7 +131,7 @@ void HaloExchange::finish(const State & U) {
     Kokkos::View<rtype *> r_buf = recv_buffer;
     StateView flow = U.flow;
     SpeciesView species = U.species;
-    if constexpr (stage_through_host) Kokkos::deep_copy(r_buf, h_recv_buffer);
+    if (stage_through_host && !nccl) Kokkos::deep_copy(r_buf, h_recv_buffer);
     Kokkos::parallel_for("halo_unpack", r_cells.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
         const uint32_t c = r_cells(k);
         FOR_I_CONSERVATIVE flow(c, i) = r_buf(k * stride + i);

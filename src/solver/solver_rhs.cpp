@@ -13,6 +13,7 @@
 
 #include <Kokkos_Core.hpp>
 
+#include "device_comm.h"
 #include "flux_functor.h"
 #include "gradient.h"
 #include "launch_bounds.h"
@@ -109,6 +110,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
         // one and fill the device as the first ones drain
         Kokkos::parallel_for("rhs_W", Kokkos::RangePolicy<>(0, n_owned), w_functor);
         halo.start(state);
+        comm::enqueue_wait(overlap_space, Kokkos::DefaultExecutionSpace());
         face_reconstruction->calc_cell_face_values(overlap_space, W_cells, face_solution,
                                                    Kokkos::subview(rhs_cells, Kokkos::make_pair(0u, n_early_cells)));
         halo.finish(state);
@@ -116,7 +118,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
         face_reconstruction->calc_cell_face_values(
             Kokkos::DefaultExecutionSpace(), W_cells, face_solution,
             Kokkos::subview(rhs_cells, Kokkos::make_pair(n_early_cells, uint32_t(rhs_cells.extent(0)))));
-        overlap_space.fence("rhs_overlap");
+        comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), overlap_space);
         face_reconstruction->finish_cell_face_values(W_cells, face_solution);
     } else {
         if (exchange) halo.exchange(state);

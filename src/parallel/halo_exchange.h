@@ -30,7 +30,8 @@
 class HaloExchange {
     public:
         HaloExchange() = default;
-        explicit HaloExchange(const Distribution & dist);
+        /** @brief With nccl, messages are NCCL operations on the default execution space's stream. */
+        HaloExchange(const Distribution & dist, bool nccl);
 
         /** @brief Overwrite the halo cells of U with the owners' values (collective among neighbors). */
         void exchange(const State & U) {
@@ -40,19 +41,27 @@ class HaloExchange {
 
         /**
          * @brief Send the owned values of U that neighbors need and post the
-         *        receives; the halo cells of U stay stale until finish().
+         *        receives; the halo cells of U stay stale until finish(). With
+         *        NCCL nothing blocks the host: the messages are ordered after the
+         *        work enqueued so far on the default execution space.
          */
         void start(const State & U);
 
-        /** @brief Wait for the messages of start() and fill the halo cells of U. */
+        /**
+         * @brief Wait for the messages of start() and fill the halo cells of U
+         *        (with NCCL: enqueue the filling after the messages).
+         */
         void finish(const State & U);
 
         bool active() const { return !ranks.empty(); }
+
+        bool uses_nccl() const { return nccl; }
 
     private:
         void allocate_buffers(uint32_t n_values_per_cell);
 
         std::vector<int> ranks;
+        bool nccl = false;
         uint32_t n_values = 0;  // per cell in the buffers: the flow block, then the species
         std::vector<uint32_t> send_offsets, recv_offsets;  // per neighbor, in cells
         Kokkos::View<uint32_t *> send_cells, recv_cells;
