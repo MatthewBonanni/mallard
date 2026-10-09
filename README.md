@@ -23,7 +23,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 
 **Numerics**
 - Reconstruction: first order; MUSCL with Barth-Jespersen or Venkatakrishnan limiting; [TENO-E](https://doi.org/10.1007/s10915-025-02918-w) of orders 3 to 6, optionally bound preserving (measured orders 3-6 on triangles and quadrilaterals)
-- Riemann solvers: Rusanov, HLL, HLLC, Roe and the carbuncle-free rotated-hybrid HLL-Roe (RHLL), all for single gases and mixtures
+- Riemann solvers: Rusanov, HLL, HLLC, Roe and the rotated-hybrid HLL-Roe (RHLL), carbuncle-free except at shocks at rest on cell faces, all for single gases and mixtures
 - Low-Mach correction of the upwind dissipation
 - Explicit time integration (forward Euler, SSPRK3, RK4) at a CFL number or a fixed step
 
@@ -39,6 +39,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Slip, adiabatic, isothermal and heat-flux walls, optionally moving
 - Inflow, characteristic far field, pressure outlets (local or area-averaged), transmissive, time-dependent expressions
 - Partially non-reflecting characteristic (NSCBC) inlets and outlets with transverse terms (1% of an acoustic pulse reflected, against 97-99% at a fixed-pressure outlet); sponge layers
+- Synthetic turbulent inflow: a digital filter with prescribed Reynolds stresses and length scales, or the statistics of a precursor run, bitwise the same on any number of ranks ([design](docs/design/synthetic_inflow.md))
 - Zones split between conditions by expressions
 
 **Performance and parallelism**

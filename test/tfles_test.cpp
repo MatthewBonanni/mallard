@@ -123,6 +123,42 @@ TEST(ThickenedFlame, ReactionRatesAreDividedByTheThickening) {
     EXPECT_NEAR(double(thick.get_time()), 4.0 * double(plain.get_time()), precision_tol<double>(1e-15, 1e-9));
 }
 
+TEST(ThickenedFlame, EddyViscosityVelocitySetsTheEfficiency) {
+    // u' = C_u nu_t / Delta in Charlette's efficiency, cell by cell (a swirling field so that nu_t > 0; the
+    // sensor is 1 throughout: T_u = 0, T_b = 4000 K at 1500 K)
+    // One step of 1e-13 s: the fields of the step start and the coefficients of its end agree to ~1e-9
+    std::string input = uniform_box("n_steps = 1\ndt = 1e-13\n",
+                                    "[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\ns_L = 2.0\nT_unburnt = 0.0\n"
+                                    "T_burnt = 4000.0\nsubgrid_velocity = \"eddy_viscosity\"\nC_u = 26.0\n");
+    const std::string still = N_DIM == 3 ? "u = [\"0.0\", \"0.0\", \"0.0\"]\n" : "u = [\"0.0\", \"0.0\"]\n";
+    input.replace(input.find(still), still.size(),
+                  N_DIM == 3 ? "u = [\"30 * sin(157.08 * y) * cos(78.54 * z)\", \"25 * sin(157.08 * z + 0.4) * cos(157.08 * x)\", "
+                               "\"20 * sin(157.08 * x + 1.1)\"]\n"
+                             : "u = [\"30 * sin(157.08 * y)\", \"25 * sin(157.08 * x + 0.4) + 10 * cos(157.08 * y)\"]\n");
+    Solver solver;
+    solver.init(parse_toml(input));
+    solver.run();
+    solver.copy_device_to_host();
+    ThickenedFlame tf = flame();
+    tf.delta_L = 2e-3;
+    tf.T_u = 0.0;
+    tf.T_b = 4000.0;
+    const auto & fields = solver.get_tfles_fields();
+    const auto & sgs = solver.get_les_coefficients();
+    const auto & transport = solver.get_cell_transport();
+    const auto m = solver.get_mesh();
+    uint32_t turbulent = 0;
+    for (uint32_t c = 0; c < m->n_owned(); c++) {
+        const double rho = double(solver.h_conservatives(c, 0)), delta = std::pow(double(m->h_cell_volume(c)), 1.0 / N_DIM);
+        const double F = double(fields(c, 0));
+        const double u_prime = 26.0 * double(sgs(c, 0)) / (rho * delta);
+        EXPECT_NEAR(double(fields(c, 1)), tf.wrinkling(F, u_prime, double(transport(c, 0)) / rho),
+                    precision_tol<double>(1e-7, 1e-5)) << "cell " << c;
+        turbulent += double(fields(c, 1)) > 1.01;
+    }
+    EXPECT_GT(turbulent, m->n_owned() / 2);
+}
+
 TEST(ThickenedFlame, InputErrors) {
     const std::string bad = "[les.combustion]\nmodel = \"tfles\"\ndelta_L = 1e-3\ns_L = 2.0\nT_unburnt = 2000.0\n"
                             "T_burnt = 300.0\n";
