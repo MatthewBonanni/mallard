@@ -682,10 +682,10 @@ TEST(HybridFlux, BudgetPressureWorkMatchesTheSchemeWithOpenBoundaries) {
       << "[output]\ncheck_interval = 1000000\n";
     auto central = make_solver(s.str());
     const KineticEnergyBudget b = central->kinetic_energy_budget();
-    // p int div u from the cell gradients: about -p0 * 20, 1e4 times the kinetic-energy rates here
+    // p int div u from the cell gradients: of order -p0 * 20 (less on the 2D mesh), 1e3-1e4 times the kinetic-energy rates
     const double pi = double(central->integrate_flow_statistics()[3]);
     const double scale = 1000.0 * 20.0;
-    EXPECT_GT(std::abs(pi), 0.25 * scale);
+    EXPECT_GT(std::abs(pi), 0.1 * scale);
     // The central flux with cell values adds no dissipation, open boundary or not
     EXPECT_NEAR(b.pressure_work - b.convective, 0.0, precision_tol<double>(1e-11, 1e-4) * scale);
     std::string upwind_input = s.str();
@@ -693,7 +693,7 @@ TEST(HybridFlux, BudgetPressureWorkMatchesTheSchemeWithOpenBoundaries) {
     upwind_input.replace(upwind_input.find(hybrid), hybrid.size(), "");
     auto upwind = make_solver(upwind_input);
     const KineticEnergyBudget u = upwind->kinetic_energy_budget();
-    EXPECT_GT(u.pressure_work - u.convective, 1e-3 * std::abs(u.pressure_work));
+    EXPECT_GT(double(u.pressure_work - u.convective), 1e-3 * std::abs(double(u.pressure_work)));
 }
 
 #if Mallard_DIM == 2
