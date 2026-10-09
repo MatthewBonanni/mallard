@@ -418,19 +418,9 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
     const uint32_t chunk = static_cast<uint32_t>(work.extent(0));
     for (uint32_t first = 0; first < n; first += chunk) {
         const uint32_t m = std::min(chunk, n - first);
-        const ActivityFunctor activity{gas,
-                                       kinetics,
-                                       U,
-                                       rhoY,
-                                       T_seed,
-                                       work,
-                                       Kokkos::subview(active, Kokkos::make_pair(first, first + m)),
-                                       first,
-                                       dt,
-                                       options.T_frozen,
-                                       1e-2 * options.reactor.atol_Y,
-                                       time_scale,
-                                       n_lanes};
+        const Kokkos::View<uint32_t *> flags = Kokkos::subview(active, Kokkos::make_pair(first, first + m));
+        const ActivityFunctor activity{gas,   kinetics, U,  rhoY,      T_seed, work, flags, first,
+                                       dt,    options.T_frozen, 1e-2 * options.reactor.atol_Y, time_scale, n_lanes};
         if (n_lanes == 1) {
             Kokkos::parallel_for("chemistry_activity", HeavyRange<>(0, m), activity);
         } else {
