@@ -761,9 +761,21 @@ rtype Solver::pressure_work_rate() const {
 KineticEnergyBudget Solver::kinetic_energy_budget() {
     State scratch("budget_rhs", mesh->n_cells, static_cast<uint32_t>(species_names.size()));
     budget = KineticEnergyBudget{};
+    // Freezing moves the temperature seeds: restored, so that output does not change the solution
+    Kokkos::View<rtype *> seeds;
+    if (double_flux) {
+        seeds = Kokkos::View<rtype *>("budget_T_seed", T_seed.extent(0));
+        Kokkos::deep_copy(seeds, T_seed);
+        freeze_thermodynamics();
+        cells_frozen = true;
+    }
     budget_pass = true;
     calc_rhs(state(), scratch, t);
     budget_pass = false;
+    if (double_flux) {
+        cells_frozen = false;
+        Kokkos::deep_copy(T_seed, seeds);
+    }
     const std::array<rtype, 4> local = {budget.convective, budget.viscous, budget.sgs, budget.pressure_work};
     const std::array<rtype, 4> total = comm::allreduce(local, comm::Op::SUM);
     return KineticEnergyBudget{total[0], total[1], total[2], total[3]};
