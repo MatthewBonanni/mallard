@@ -53,11 +53,9 @@ struct SparseLUPattern {
     View1<uint32_t> source;    // (entry): original row * n + column, for the gather from a dense J
     View1<uint32_t> diagonal;  // (row): entry of the diagonal
     using Pairs = Kokkos::View<uint32_t *[2], Kokkos::LayoutRight, MemorySpace>;
-    // One thread, or a narrow team (fewer than STAGED_LANES lanes), factors pivot by pivot and solves column
-    // by column, the work of a pivot across the lanes: per pivot, the L entries below it and its updates
-    // (target, l, u): a_t -= a_l a_u; L's entries below it and U's above it, with their rows. Wide teams
-    // take the stages, levels and chain below, with the same bits
-    static constexpr uint32_t STAGED_LANES = 128;
+    // One thread factors pivot by pivot and solves column by column: per pivot, the L entries below it and
+    // its updates (target, l, u): a_t -= a_l a_u; L's entries below it and U's above it, with their rows.
+    // Teams take the stages, levels and chain below, with the same bits
     View1<uint32_t> pivot_lower_offset, pivot_lower_entry, pivot_update_offset;
     Kokkos::View<uint32_t *[3], Kokkos::LayoutRight, MemorySpace> pivot_update;
     View1<uint32_t> column_lower_offset, column_upper_offset;
@@ -490,7 +488,7 @@ struct SparseLU {
         // Into the elimination order
         lanes.for_each(n, [&](const uint32_t i) { x[i] = b[p.perm(i)]; });
         lanes.sync();
-        if (!(Lanes::parallel && lanes.lanes >= p.STAGED_LANES)) {
+        if constexpr (!Lanes::parallel) {
             for (uint32_t k = 0; k < n; k++) {
                 const double x_k = x[k];
                 const uint32_t first = p.column_lower_offset(k);
@@ -574,7 +572,7 @@ struct SparseLU {
             values[e] = (src >= 0 ? -J[src] : 0.0) + (r == c ? diagonal : 0.0);
         });
         lanes.sync();
-        const bool staged = Lanes::parallel && lanes.lanes >= p.STAGED_LANES;
+        constexpr bool staged = Lanes::parallel;
         for (uint32_t k = 0; !staged && k < n; k++) {
             const double inv = 1.0 / values[p.diagonal(k)];
             const uint32_t first_lower = p.pivot_lower_offset(k);
