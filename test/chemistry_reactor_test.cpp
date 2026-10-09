@@ -347,11 +347,26 @@ TEST(ChemistryReactorTest, ReactorJacobianMatchesFiniteDifferences) {
         const Table rates = read_table(name + "_rates.csv");
         std::vector<double> scratch(ConstantVolumeReactor<Kokkos::HostSpace>::scratch_size(kinetics));
         std::vector<double> y(n), f(n), J(n * n), yp(n), fp(n), fm(n), D1(n), D2(n);
-        for (size_t s = 0; s < std::min<size_t>(rates.rows.size(), 10); s++) {
-            const ConstantVolumeReactor<Kokkos::HostSpace> reactor{thermo, kinetics, rates.rows[s][1], 1e-10,
-                                                                   scratch.data(), nullptr, nullptr};
+        std::vector<double> g(n);
+        for (size_t i_s = 0; i_s < 2 * std::min<size_t>(rates.rows.size(), 10); i_s++) {
+            // Each state also with a constant forcing (balanced splitting), which enters the T row
+            const size_t s = i_s / 2;
+            const bool forced = i_s % 2 == 1;
             for (uint32_t k = 0; k < ns; k++) y[k] = rates.rows[s][2 + k];
             y[ns] = rates.rows[s][0];
+            if (forced) {
+                // Sources of the size of the chemistry's rates, so that the differences keep their digits
+                const ConstantVolumeReactor<Kokkos::HostSpace> free{thermo, kinetics, rates.rows[s][1], 1e-10,
+                                                                    scratch.data(), nullptr, nullptr};
+                free.rhs(SerialLanes(), y.data(), f.data());
+                double scale = 0.0;
+                for (uint32_t k = 0; k < ns; k++) scale = std::max(scale, std::abs(f[k]));
+                for (uint32_t k = 0; k < ns; k++) g[k] = 0.3 * scale * (0.5 - y[k]);
+                g[ns] = 3e3 * scale;
+            }
+            const ConstantVolumeReactor<Kokkos::HostSpace> reactor{thermo,  kinetics,       rates.rows[s][1],
+                                                                   1e-10,   scratch.data(), nullptr,
+                                                                   nullptr, forced ? g.data() : nullptr, 1e-6};
             reactor.rhs_jacobian(SerialLanes(), y.data(), f.data(), J.data());
             // Centered differences with Richardson extrapolation (one-sided near Y_j = 0)
             std::vector<double> FD(n * n);
@@ -377,7 +392,7 @@ TEST(ChemistryReactorTest, ReactorJacobianMatchesFiniteDifferences) {
                 for (uint32_t j = 0; j < n; j++) row_norm = std::max(row_norm, std::abs(FD[i * n + j]));
                 for (uint32_t j = 0; j < n; j++) {
                     EXPECT_NEAR(J[i * n + j], FD[i * n + j], 1e-6 * row_norm + 1e-300)
-                        << name << " state " << s << " d f_" << i << " / d y_" << j;
+                        << name << " state " << s << (forced ? " forced" : "") << " d f_" << i << " / d y_" << j;
                 }
             }
         }

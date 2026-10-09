@@ -633,6 +633,15 @@ TEST(MixtureTest, InvalidMixtureInputsAreRejected) {
     expect_error(base + init + "X = { H2 = 1.0 }\n" + bcs + mixture(H2O2) + "[chemistry]\nintegrator = \"bdf\"\n",
                  "chemistry.integrator");
     expect_error(base + init + "X = { N2 = 1.0 }\n" + bcs + mixture(PERFECT_AIR) + "[chemistry]\n", "no reactions");
+    expect_error(base + init + "X = { H2 = 1.0 }\n" + bcs + mixture(H2O2) + "[chemistry]\ncoupling = \"sdc\"\n",
+                 "chemistry.coupling");
+    expect_error(base + init + "X = { H2 = 1.0 }\n" + bcs + mixture(H2O2) +
+                     "[chemistry]\ncoupling = \"simpler\"\nfuse_half_steps = true\n",
+                 "fuse_half_steps");
+    expect_error("[run]\nn_steps = 1\ncfl = 0.25\n" + mesh_block("cartesian", 4, 4, 1.0, 1.0) +
+                     numerics("type = \"FO\"\n", "HLLC", true) + init + "X = { H2 = 1.0 }\n" + bcs + mixture(H2O2) +
+                     "[chemistry]\ncoupling = \"simpler\"\n",
+                 "double_flux");
     expect_error(base + init + "[chemistry]\n" + bcs + perfect_air(), "[chemistry] needs");
 }
 
@@ -641,8 +650,10 @@ TEST(MixtureTest, RestartedRunMatchesUninterruptedRunExactly) {
     // elsewhere and the last bits of T, and so of the flow, differ (also with
     // double flux, whose frozen thermodynamics come from the seed); with
     // chemistry so is each cell's last sub-step, which seeds the integrator
-    for (const auto & [double_flux, reacting, viscous] :
-         {std::tuple{false, false, false}, {true, false, false}, {false, true, false}, {false, true, true}}) {
+    // (with Strang or SIMPLER splitting)
+    for (const auto & [double_flux, reacting, viscous, coupling] :
+         {std::tuple{false, false, false, "strang"}, {true, false, false, "strang"}, {false, true, false, "strang"},
+          {false, true, true, "strang"}, {false, true, true, "simpler"}}) {
         const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mixture_restart").string();
         std::filesystem::remove_all(dir);
         auto input = [&](const std::string & init, uint32_t n_steps, const std::string & prefix) {
@@ -653,7 +664,8 @@ TEST(MixtureTest, RestartedRunMatchesUninterruptedRunExactly) {
                               "type = \"wall_adiabatic\"\n") +
                    numerics("type = \"MUSCL\"\n", "HLLC", double_flux) +
                    mixture(H2O2, "", viscous ? "navier_stokes" : "euler") +
-                   (reacting ? "[chemistry]\n" : "") + "[[write_data]]\nprefix = \"" +
+                   (reacting ? "[chemistry]\ncoupling = \"" + std::string(coupling) + "\"\n" : "") +
+                   "[[write_data]]\nprefix = \"" +
                    dir + "/" + prefix + "\"\nformat = \"restart\"\ninterval = 15\n";
         };
         const std::string tube =
@@ -882,4 +894,154 @@ TEST(ReactingTest, UniformMixtureIgnitesLikeTheConstantVolumeReactor) {
         const double T_ref = (*row)[column(name)];
         for (double T : cell_temperatures(solver, thermo)) EXPECT_NEAR(T, T_ref, 1e-2 * T_ref) << name;
     }
+}
+
+namespace {
+
+/**
+ * @brief A perfectly stirred reactor: a uniform periodic box whose sponge
+ *        relaxes it at 2000 1/s toward fresh H2/air at 1000 K; a restart
+ *        file is written at the last step.
+ */
+std::string stirred_reactor(const std::string & init, uint32_t n_steps, double dt, const std::string & coupling,
+                            const std::string & prefix) {
+    const std::string periodic = N_DIM == 2 ? "[\"x\", \"y\"]" : "[\"x\", \"y\", \"z\"]";
+    const std::string zero = N_DIM == 2 ? "[0.0, 0.0]" : "[0.0, 0.0, 0.0]";
+    std::ostringstream s;
+    s << std::setprecision(17) << "[run]\nn_steps = " << n_steps << "\ndt = " << dt << "\n"
+      << mesh_block("cartesian", 3, 3, 100.0, 100.0, periodic) << "[initialize]\n" << init
+      << "[[sponges]]\nstrength = 2000.0\nu = " << zero << "\np = 101325.0\nT = 1000.0\n"
+      << "X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n"
+      << numerics("type = \"FO\"\n", "HLLC") << mixture(H2O2) << "[chemistry]\ncoupling = \"" << coupling << "\"\n"
+      << "[[write_data]]\nprefix = \"" << prefix << "\"\nformat = \"restart\"\ninterval = " << std::max(n_steps, 1u)
+      << "\n";
+    return s.str();
+}
+
+std::string uniform_state(const std::string & T, const std::string & X) {
+    return "type = \"constant\"\np = 101325.0\nT = " + T + "\nu = " +
+           std::string(N_DIM == 2 ? "[0.0, 0.0]" : "[0.0, 0.0, 0.0]") + "\nX = " + X + "\n";
+}
+
+/**
+ * @brief Max |a - b| of a state at rest: over cells, of rho E relative to
+ *        its largest value and of the partial densities relative to rho.
+ */
+double max_change_at_rest(const Solver & a, const Solver & b) {
+    double energy = 0.0, energy_scale = 0.0, species = 0.0, rho = 0.0;
+    for (uint32_t c = 0; c < b.get_mesh()->n_cells; c++) {
+        energy_scale = std::max(energy_scale, std::abs(double(b.h_conservatives(c, N_DIM + 1))));
+        energy = std::max(energy, std::abs(double(a.h_conservatives(c, N_DIM + 1) - b.h_conservatives(c, N_DIM + 1))));
+        rho = std::max(rho, double(b.h_conservatives(c, 0)));
+        for (uint32_t k = 0; k < b.get_species_names().size(); k++) {
+            species = std::max(species, std::abs(double(a.h_species(c, k) - b.h_species(c, k))));
+        }
+    }
+    return std::max(energy / energy_scale, species / rho);
+}
+
+} // namespace
+
+TEST(ReactingTest, SimplerSplittingKeepsASteadyStateThatStrangSplittingMoves) {
+    // A burning stirred reactor marched to its steady state with SIMPLER is an
+    // exact steady state of the reaction-transport ODE: in every species the
+    // chemistry and the sponge's relaxation cancel. SIMPLER keeps it at another
+    // time step; Strang splitting has a steady state of its own at each step
+    SKIP_IN_SINGLE_PRECISION("the steady state holds to the round-off of the state");
+    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_simpler_steady").string();
+    std::filesystem::remove_all(dir);
+    const double dt = 5e-4;
+    Solver steady;
+    steady.init(parse_toml(stirred_reactor(uniform_state("2400.0", "{ H2O = 2.0, N2 = 3.76 }"), 400, dt, "simpler",
+                                           dir + "/a")));
+    steady.run();
+    steady.copy_device_to_host();
+
+    // The residual of the ODE at the reached state, against the chemistry alone
+    const auto mech = chemistry::read_mechanism(H2O2);
+    const auto thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(mech);
+    const auto kinetics = chemistry::make_kinetics_table<Kokkos::HostSpace>(mech);
+    const uint32_t ns = mech.n_species();
+    Solver fresh;
+    fresh.init(parse_toml(stirred_reactor(uniform_state("1000.0", "{ H2 = 2.0, O2 = 1.0, N2 = 3.76 }"), 0, dt,
+                                          "simpler", dir + "/fresh")));
+    fresh.copy_device_to_host();
+    const double rho = double(steady.h_conservatives(0, 0));
+    std::vector<double> y(ns + 1), f(ns + 1);
+    std::vector<double> scratch(chemistry::ConstantVolumeReactor<Kokkos::HostSpace>::scratch_size(kinetics));
+    for (uint32_t k = 0; k < ns; k++) y[k] = double(steady.h_species(0, k)) / rho;
+    y[ns] = cell_temperatures(steady, thermo)[0];
+    const chemistry::ConstantVolumeReactor<Kokkos::HostSpace> reactor{thermo, kinetics, rho, 1e-10, scratch.data(),
+                                                                      nullptr, nullptr};
+    reactor.rhs(chemistry::SerialLanes(), y.data(), f.data());
+    double chemistry_rate = 0.0, residual = 0.0;
+    for (uint32_t k = 0; k < ns; k++) {
+        const double reaction = rho * f[k];
+        const double relaxation = 2000.0 * double(fresh.h_species(0, k) - steady.h_species(0, k));
+        chemistry_rate = std::max(chemistry_rate, std::abs(reaction));
+        residual = std::max(residual, std::abs(reaction + relaxation));
+    }
+    EXPECT_GT(y[ns], 1500.0);  // burning
+    EXPECT_LT(residual, 1e-8 * chemistry_rate) << chemistry_rate;
+
+    const std::string restart = "type = \"restart\"\nfile = \"" + dir + "/a_000400.restart\"\n";
+    Solver simpler, strang;
+    simpler.init(parse_toml(stirred_reactor(restart, 440, dt / 4.0, "simpler", dir + "/b")));
+    strang.init(parse_toml(stirred_reactor(restart, 440, dt / 4.0, "strang", dir + "/c")));
+    simpler.run();
+    strang.run();
+    simpler.copy_device_to_host();
+    strang.copy_device_to_host();
+    const double simpler_drift = max_change_at_rest(simpler, steady);
+    const double strang_drift = max_change_at_rest(strang, steady);
+    std::cout << "drift from the steady state over 40 steps: SIMPLER " << simpler_drift << ", Strang " << strang_drift
+              << "; residual " << residual / chemistry_rate << "\n";
+    EXPECT_LT(simpler_drift, 1e-12);
+    EXPECT_GT(strang_drift, 1e-4);
+    std::filesystem::remove_all(dir);
+}
+
+namespace {
+
+/** @brief A hot spot igniting while it crosses a periodic strip (first order in space, fixed dt). */
+std::vector<double> reacting_wave_temperatures(const std::string & coupling, double dt, uint32_t n_steps) {
+    std::ostringstream s;
+    s << std::setprecision(17) << "[run]\nn_steps = " << n_steps << "\ndt = " << dt << "\n"
+      << mesh_block("cartesian", 32, 1, 0.1, 0.1 / 32, "[\"x\"]")
+      << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+      << (N_DIM == 3 ? "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n"
+                       "[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n"
+                     : "")
+      << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\nT = \"1300 + 200 * sin(62.83185307179586 * x)\"\n"
+      << "u = " << velocity("100.0") << "\nX = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n"
+      << numerics("type = \"FO\"\n", "HLLC") << mixture(H2O2) << "[chemistry]\ncoupling = \"" << coupling << "\"\n";
+    Solver solver;
+    solver.init(parse_toml(s.str()));
+    solver.run();
+    solver.copy_device_to_host();
+    return cell_temperatures(solver, chemistry::make_thermo_table<Kokkos::HostSpace>(chemistry::read_mechanism(H2O2)));
+}
+
+} // namespace
+
+TEST(ReactingTest, SimplerSplittingIsSecondOrderInTime) {
+    // Errors against a run with 16 times smaller steps on the same mesh while
+    // the hottest cells ignite: halving dt divides them by about 4 (by about 2
+    // if the corrective transport substep took the whole step instead of half)
+    SKIP_IN_SINGLE_PRECISION("the temporal errors reach the float round-off of T");
+    const double dt = 1.6e-6, t_end = 6.4e-5;
+    const uint32_t n = static_cast<uint32_t>(std::lround(t_end / dt));
+    const std::vector<double> reference = reacting_wave_temperatures("simpler", dt / 16.0, 16 * n);
+    double errors[3];
+    for (int level = 0; level < 3; level++) {
+        const uint32_t m = 1u << level;
+        const std::vector<double> T = reacting_wave_temperatures("simpler", dt / m, m * n);
+        errors[level] = 0.0;
+        for (size_t c = 0; c < T.size(); c++) errors[level] = std::max(errors[level], std::abs(T[c] - reference[c]));
+    }
+    const double T_max = *std::max_element(reference.begin(), reference.end());
+    std::cout << "max T " << T_max << ", errors " << errors[0] << " " << errors[1] << " " << errors[2] << "\n";
+    EXPECT_GT(T_max, 1600.0);  // ignition is under way
+    EXPECT_GT(errors[0] / errors[1], 3.4);
+    EXPECT_GT(errors[1] / errors[2], 3.4);
 }

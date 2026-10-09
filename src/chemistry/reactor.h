@@ -50,6 +50,17 @@ inline bool use_sparse_lu(const ReactorOptions & options, const Mechanism & mech
  *        dY_k/dt = W_k omega_k / rho,
  *        dT/dt = -sum_k u_k omega_k / (rho cv),
  *        with u_k the molar internal energies. The ODE system of integrate().
+ *
+ * With a forcing g (n_species + 1 values), the reactor also receives the
+ * constant sources rho g_k of its partial densities and rho g_e of its
+ * internal energy per volume, rho being the initial density: y_k = rho_k /
+ * rho then sums to the current density over rho, and
+ *        dy_k/dt = W_k omega_k / rho + g_k,
+ *        dT/dt = (g_e - sum_k e_k g_k - sum_k u_k omega_k / rho) / sum_k y_k cv_k,
+ * still autonomous, with the species rows of the Jacobian unchanged. Over a
+ * call of length forcing_time, the exact solution can fall below zero by
+ * forcing_time max(0, -g_k) at most where the forcing removes a species
+ * faster than chemistry restores it, so that much is admissible.
  */
 template <typename MemorySpace = Kokkos::DefaultExecutionSpace::memory_space>
 struct ConstantVolumeReactor {
@@ -60,6 +71,8 @@ struct ConstantVolumeReactor {
     double * scratch;   // scratch_size(kinetics) doubles
     double * rank_one;  // null: J in full; else (n_species + 1) doubles: J = J_s + u v^T with u here, v_j = 1 / W_j
     const SparseLUPattern<MemorySpace> * sparse = nullptr;  // with rank_one: J_s in the pattern's compact layout
+    const double * forcing = nullptr;  // null, or g_1 .. g_Ns, g_e
+    double forcing_time = 0.0;         // length of the call (with forcing)
 
     KOKKOS_INLINE_FUNCTION
     static uint32_t scratch_size(const KineticsTable<MemorySpace> & kinetics) {
@@ -73,6 +86,12 @@ struct ConstantVolumeReactor {
 
     template <typename Lanes>
     KOKKOS_INLINE_FUNCTION bool admissible(const Lanes & lanes, const double * y) const {
+        if (forcing) {
+            const double negative = lanes.sum(thermo.n_species, [&](const uint32_t k) {
+                return y[k] < -atol_Y - forcing_time * Kokkos::fmax(0.0, -forcing[k]) ? 1.0 : 0.0;
+            });
+            return negative == 0.0 && y[thermo.n_species] > 0.0;
+        }
         const double negative =
             lanes.sum(thermo.n_species, [&](const uint32_t k) { return y[k] < -atol_Y ? 1.0 : 0.0; });
         return negative == 0.0 && y[thermo.n_species] > 0.0;
@@ -86,6 +105,13 @@ struct ConstantVolumeReactor {
     template <typename Lanes>
     KOKKOS_INLINE_FUNCTION void rhs_jacobian(const Lanes & lanes, const double * y, double * f, double * J) const {
         evaluate(lanes, y, f, J);
+    }
+
+    /** @brief d(sum_k e_k g_k) / dT = sum_k cv_k g_k. */
+    template <typename Lanes>
+    KOKKOS_INLINE_FUNCTION double forcing_temperature_derivative(const Lanes & lanes, const double * cp_R) const {
+        return GAS_CONSTANT *
+               lanes.sum(thermo.n_species, [&](const uint32_t k) { return (cp_R[k] - 1.0) * thermo.inv_W(k) * forcing[k]; });
     }
 
     /**
@@ -125,7 +151,12 @@ struct ConstantVolumeReactor {
         });
         const double dcv_dT =
             GAS_CONSTANT * lanes.sum(ns, [&](const uint32_t k) { return y[k] * thermo.inv_W(k) * thermo.dcp_R_dT(k, p); });
-        lanes.single([&]() { T_row[ns] = -d_sum_dT * inv_rho_cv - dT_dt * dcv_dT / cv; });
+        if (forcing) {
+            const double d_forcing_dT = forcing_temperature_derivative(lanes, cp_R);
+            lanes.single([&]() { T_row[ns] = -d_sum_dT * inv_rho_cv - dT_dt * dcv_dT / cv - d_forcing_dT / cv; });
+        } else {
+            lanes.single([&]() { T_row[ns] = -d_sum_dT * inv_rho_cv - dT_dt * dcv_dT / cv; });
+        }
         lanes.for_each(ne, [&](const uint32_t e) {
             J[e] *= thermo.inv_W(sparse->entry_column(e)) / thermo.inv_W(sparse->entry_row(e));
         });
@@ -172,7 +203,14 @@ struct ConstantVolumeReactor {
         const double sum_u_omega =
             lanes.sum(ns, [&](const uint32_t k) { return GAS_CONSTANT * T * (h_RT[k] - 1.0) * omega[k]; });
         const double inv_rho_cv = 1.0 / (rho * cv);
-        const double dT_dt = -sum_u_omega * inv_rho_cv;
+        double dT_dt = -sum_u_omega * inv_rho_cv;
+        if (forcing) {
+            lanes.sync();
+            lanes.for_each(ns, [&](const uint32_t k) { f[k] += forcing[k]; });
+            const double sum_e_g = lanes.sum(
+                ns, [&](const uint32_t k) { return GAS_CONSTANT * T * (h_RT[k] - 1.0) * thermo.inv_W(k) * forcing[k]; });
+            dT_dt += (forcing[ns] - sum_e_g) / cv;
+        }
         lanes.single([&]() { f[ns] = dT_dt; });
         lanes.sync();
         if (!J) return;
@@ -203,7 +241,12 @@ struct ConstantVolumeReactor {
         });
         const double dcv_dT =
             GAS_CONSTANT * lanes.sum(ns, [&](const uint32_t k) { return y[k] * thermo.inv_W(k) * thermo.dcp_R_dT(k, p); });
-        lanes.single([&]() { Jat(ns, ns) = -d_sum_dT * inv_rho_cv - dT_dt * dcv_dT / cv; });
+        if (forcing) {
+            const double d_forcing_dT = forcing_temperature_derivative(lanes, cp_R);
+            lanes.single([&]() { Jat(ns, ns) = -d_sum_dT * inv_rho_cv - dT_dt * dcv_dT / cv - d_forcing_dT / cv; });
+        } else {
+            lanes.single([&]() { Jat(ns, ns) = -d_sum_dT * inv_rho_cv - dT_dt * dcv_dT / cv; });
+        }
 
         // Species rows: df_k/dY_j = W_k / W_j dw_kj, df_k/dT = W_k / rho domega_k/dT
         lanes.for_each(ns, [&](const uint32_t k) {
@@ -255,6 +298,10 @@ KOKKOS_INLINE_FUNCTION uint32_t reactor_work_size(const KineticsTable<MemorySpac
  * @param sparse The pattern of the sparse LU (Sparse = true; else unused).
  * @param fast Null, or reactor_fast_size(kinetics, sparse) doubles of faster
  *        memory for the rest of the work memory.
+ * @param forcing Null, or the constant sources g_1 .. g_Ns, g_e per unit
+ *        initial density (see ConstantVolumeReactor): Y then holds the
+ *        mass fractions at the end, at density rho (1 + dt sum_k g_k), and T
+ *        follows from the internal energy e + dt g_e per unit initial mass.
  */
 template <bool Sparse = false, typename Lanes, typename MemorySpace, typename Observer = NoObserver>
 KOKKOS_INLINE_FUNCTION RosenbrockResult advance_reactor(const Lanes & lanes, const ThermoTable<MemorySpace> & thermo,
@@ -263,7 +310,7 @@ KOKKOS_INLINE_FUNCTION RosenbrockResult advance_reactor(const Lanes & lanes, con
                                                         const ReactorOptions & options, double * work,
                                                         uint32_t * pivot, Observer && observer = Observer(),
                                                         const SparseLUPattern<MemorySpace> * sparse = nullptr,
-                                                        double * fast = nullptr) {
+                                                        double * fast = nullptr, const double * forcing = nullptr) {
     const uint32_t ns = thermo.n_species, n = ns + 1;
     double * J = work;
     double * scratch = J + (Sparse ? sparse->jacobian_size() : n * n);
@@ -294,13 +341,14 @@ KOKKOS_INLINE_FUNCTION RosenbrockResult advance_reactor(const Lanes & lanes, con
         double * z = values + sparse->nnz;
         double * u = z + n;
         double * x = u + n;
-        const ConstantVolumeReactor<MemorySpace> reactor{thermo, kinetics, rho, options.atol_Y, scratch, u, sparse};
+        const ConstantVolumeReactor<MemorySpace> reactor{thermo,  kinetics, rho,    options.atol_Y, scratch,
+                                                         u,       sparse,   forcing, dt};
         const SparseLU<MemorySpace> solver{*sparse, values, z, u, x, x + n};
         result = integrate(lanes, reactor, solver, 0.0, dt, y, h, options.integrator, J, vectors,
                            static_cast<Observer &&>(observer));
     } else {
-        const ConstantVolumeReactor<MemorySpace> reactor{thermo, kinetics, rho, options.atol_Y, scratch, nullptr,
-                                                         nullptr};
+        const ConstantVolumeReactor<MemorySpace> reactor{thermo,  kinetics, rho,     options.atol_Y, scratch,
+                                                         nullptr, nullptr,  forcing, dt};
         const DenseLU solver{n, solver_work, pivot};
         result = integrate(lanes, reactor, solver, 0.0, dt, y, h, options.integrator, J, vectors,
                            static_cast<Observer &&>(observer));
@@ -310,6 +358,11 @@ KOKKOS_INLINE_FUNCTION RosenbrockResult advance_reactor(const Lanes & lanes, con
     const double total = lanes.sum(ns, [&](const uint32_t k) { return y[k]; });
     lanes.for_each(ns, [&](const uint32_t k) { Y[k] = y[k] / total; });
     lanes.sync();
+    if (forcing) {
+        const double growth = 1.0 + dt * lanes.sum(ns, [&](const uint32_t k) { return forcing[k]; });
+        T = thermo.T_from_e((e + dt * forcing[ns]) / growth, MassFractions{Y}, y[ns]);
+        return result;
+    }
     T = thermo.T_from_e(e, MassFractions{Y}, y[ns]);
     return result;
 }
