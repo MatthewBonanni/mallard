@@ -116,7 +116,7 @@ its ZND induction length within 5% up to `cfl` = 0.35 but not at 0.5 (-5.5%) or
 | HLL | [Harten, Lax & van Leer 1983](../references.md#harten-lax-van-leer-1983), with Einfeldt wave speeds ([Einfeldt 1988](../references.md#einfeldt-1988); [Einfeldt et al. 1991](../references.md#einfeldt-1991)) |
 | HLLC | [Toro, Spruce & Speares 1994](../references.md#toro-spruce-speares-1994), with the same Einfeldt wave speeds |
 | Roe | [Roe 1981](../references.md#roe-1981), with Harten's entropy fix ([Harten 1983](../references.md#harten-1983)) |
-| RHLL | [Nishikawa & Kitamura 2008](../references.md#nishikawa-kitamura-2008), a rotated hybrid: HLL along the velocity-difference direction, Roe across it. Carbuncle-free. |
+| RHLL | [Nishikawa & Kitamura 2008](../references.md#nishikawa-kitamura-2008), a rotated hybrid: HLL along the velocity-difference direction, Roe across it. Carbuncle-free, except at a shock at rest on cell faces ([below](#stationary-shocks-on-cell-faces)). |
 
 All five also solve gas mixtures, on each side's frozen `cp / cv` and energy
 offset ([chemistry design](../design/chemistry.md#riemann-solvers)). The
@@ -126,6 +126,41 @@ contact, shear and composition waves, which all move with the flow, carry
 the whole jump of the conservative variables left by the two acoustic waves.
 That makes it exact at contacts between different gases for any averaged
 sound speed, and it reduces to the single-gas Roe solver for one gas.
+
+### Stationary shocks on cell faces
+
+The Roe average of the two sides of a normal shock at rest is exactly sonic.
+On a face that holds such a shock, the Einfeldt left wave speed
+`min(u_L - a_L, u_Roe - a_Roe)` is therefore zero up to round-off, and its
+sign selects the flux:
+
+- If it is positive or zero, HLL is the upwind flux `F_L`.
+- If it is negative, HLL averages the two sides and passes the post-shock
+  perturbations into the upstream cells, with a gain of the full shock jump.
+
+The first case is stable and the second is not. So whether HLL, and RHLL
+(which uses HLL across the shock), stay free of the carbuncle on such a shock
+depends only on how the time integrator rounds:
+
+- From 3000 to 10000 steps of a Mach 6 shock at rest on the faces of a
+  40 x 40 grid, the face-aligned case in `test/solver_test.cpp`, both grow an
+  O(0.1-1) carbuncle with FE, RK4 and SSPRK3. This holds with or without FMA
+  contraction and at CFL 0.18-0.3.
+- Until 0.7.0 the SSPRK3 last stage was `2/3 U2 + 1/3 U`. Its rounded weights
+  sum to 1 - 2^-54, which nudged the state down by an ulp in a fraction of
+  the cells every step and happened to keep that wave speed positive.
+
+A shock that moves, or that sits inside a cell, never puts the sonic speed on
+a face. For example, the same shock drifting at 0.03, as in
+`SolverValidation.RotatedHybridRiemannSolverIsCarbuncleFree`:
+
+- RHLL keeps the transverse velocity below 1e-5 for 10000 steps.
+- HLL damps it.
+- Roe grows it to O(1).
+
+Wave-speed bounds that include the Davis estimates, `u_R - a_R` and
+`u_L + a_L`, would remove the sign dependence but would smear stationary
+shocks. They are under evaluation.
 
 ### Low-Mach correction
 
@@ -175,7 +210,7 @@ the Riemann solver.
 - **Transmissive boundaries**: take the exterior state from an *image face*, the interior face reached by translating the boundary face inward by the depth of the boundary cell. This is exactly what an interior face sees for a solution that does not vary normal to the boundary.
   - A zero-gradient copy of the boundary cell is not used, because at inflow boundaries it feeds the cell back to itself.
   - On triangles, where boundary-cell centroids are offset from the face, the copy creates an O(1) mass imbalance at every moving shock.
-- **Characteristic boundaries** (`nscbc_outlet`, `nscbc_inlet`): outgoing waves come from the interior and the incoming acoustic wave from the face's own pressure and normal velocity, advanced each step by the LODI relations of [Poinsot & Lele (1992)](../references.md#poinsot-lele-1992) with relaxation toward a target and the transverse terms of [Lodato, Domingo & Vervisch (2008)](../references.md#lodato-2008); see `docs/design/nscbc.md`. MUSCL boundary cells reconstruct without the ghosts across them: the zero normal gradient of a ghost leaves a jump at the cell's inner face, which the low-Mach correction turns into a reflected acoustic wave (15 to 34% of a normal pulse through `extrapolation`, with MUSCL or TENO).
+- **Characteristic boundaries** (`nscbc_outlet`, `nscbc_inlet`): outgoing waves come from the interior and the incoming acoustic wave from the face's own pressure and normal velocity, advanced each step by the LODI relations of [Poinsot & Lele (1992)](../references.md#poinsot-lele-1992) with relaxation toward a target and the transverse terms of [Lodato, Domingo & Vervisch (2008)](../references.md#lodato-2008); see `docs/design/nscbc.md`. An inlet's target velocity is per face and may carry synthetic turbulence: the digital filter of [Klein et al. (2003)](../references.md#klein-2003) with the Reynolds stress of [Lund et al. (1998)](../references.md#lund-1998), entering through the incoming wave as [Guézennec & Poinsot (2009)](../references.md#guezennec-poinsot-2009) propose; see `docs/design/synthetic_inflow.md`. MUSCL boundary cells reconstruct without the ghosts across them: the zero normal gradient of a ghost leaves a jump at the cell's inner face, which the low-Mach correction turns into a reflected acoustic wave (15 to 34% of a normal pulse through `extrapolation`, with MUSCL or TENO).
 
 ## Viscous fluxes
 

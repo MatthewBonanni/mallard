@@ -87,7 +87,8 @@ static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
  *   temperature; WALL_HEAT_FLUX: data[N_DIM + 1] = heat flux into the fluid
  * - DIRICHLET: unused; the exterior state is set per face (BoundaryData::face_state)
  * - NSCBC_OUTLET: data[N_DIM + 1] = target pressure
- * - NSCBC_INLET: data = W = [rho, u, p] of the target state
+ * - NSCBC_INLET: data = [rho, -, p] of the target state; the target velocity
+ *   is per face (BoundaryData::char_target)
  *
  * Characteristic conditions (NSCBC_*) also use relax, indexed by Relax. Their
  * exterior state for the Riemann solver is BoundaryData::characteristic_W;
@@ -239,8 +240,12 @@ struct BoundaryData {
     Kokkos::View<rtype *> char_depth;            // Twice the distance from the boundary cell's centroid to the face
     Kokkos::View<rtype *[3]> char_transverse;    // [u_t . grad p, rho div_t u_t, rho u_t . grad u_n] on the face
     Kokkos::View<rtype *[2]> char_state;         // [p, u_n] of the face, whose p - rho c u_n is the incoming acoustic wave
+    Kokkos::View<rtype *[N_DIM]> char_target;    // Inlets: target velocity of the face at the current stage
+    Kokkos::View<rtype *[N_DIM]> char_target_next;  // Inlets: target velocity at the end of the step, for d(w-)/dt
     Kokkos::View<uint32_t *> char_offsets;       // CSR of char_neighbors
-    Kokkos::View<uint32_t *> char_neighbors;     // Characteristic faces sharing a node and the orientation (index into char_*)
+    Kokkos::View<uint32_t *> char_neighbors;     // Characteristic faces of the same orientation sharing an edge (3D) or node (2D)
+    Kokkos::View<rtype *[N_DIM]> char_neighbor_dx;  // Center of each neighbor relative to the face, across periodic seams too
+    Kokkos::View<uint8_t *> char_edge;           // Faces sharing a node with a boundary face that is not characteristic (a wall)
     Kokkos::View<BoundaryCondition *> bcs;
     rtype gamma = 1.4;
     rtype R = 1.0;
@@ -397,7 +402,9 @@ struct BoundaryData {
             return GhostEntropy::INTERIOR;
         }
         if (inlet && u_n <= -c) {
-            for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = bc.data[i];
+            W_g[0] = bc.data[0];
+            FOR_I_DIM W_g[1 + i] = char_target(k, i);
+            W_g[E] = bc.data[E];
             return GhostEntropy::TARGET;
         }
         const rtype Z = rho * c;
@@ -429,10 +436,12 @@ struct BoundaryData {
                               ? 1.0_r : Kokkos::fmin(1.0_r, hc_u * bc.relax[Relax::TANGENTIAL]);
         const rtype T_e = W_e[E] / (W_e[0] * R_t);
         const rtype T_g = T_e + a_T * (T_t - T_e);
-        const rtype u_n_t = dot<N_DIM>(bc.data + 1, n);
+        rtype u_target[N_DIM];
+        FOR_I_DIM u_target[i] = char_target(k, i);
+        const rtype u_n_t = dot<N_DIM>(u_target, n);
         FOR_I_DIM {
             const rtype u_t_e = W_e[1 + i] - u_n_e * n[i];
-            const rtype u_t_t = bc.data[1 + i] - u_n_t * n[i];
+            const rtype u_t_t = u_target[i] - u_n_t * n[i];
             W_g[1 + i] = u_t_e + a_t * (u_t_t - u_t_e) + u_n_g * n[i];
         }
         W_g[0] = p_g / (R_t * T_g);

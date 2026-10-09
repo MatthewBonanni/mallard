@@ -88,6 +88,8 @@ TEST(MPI3DTest, LargeEddySimulationOnTetrahedraMatchesSerial) {
     input.replace(input.find(u), u.size(),
                   "u = [\"0.3 + 0.4 * sin(9 * y)\", \"-0.1 + 0.3 * sin(7 * z)\", \"0.2 + 0.3 * sin(8 * x + 3 * y)\"]\n");
     expect_matches_serial(input + "[les]\nmodel = \"sigma\"\nC = 3.0\n");
+    // The dynamic constant is a domain sum: exact in fixed point, so the same on any rank count
+    expect_matches_serial(input + "[les]\nmodel = \"sigma\"\ndynamic = true\n");
 }
 
 TEST(MPI3DTest, CharacteristicBoundariesMatchSerial) {
@@ -97,6 +99,20 @@ TEST(MPI3DTest, CharacteristicBoundariesMatchSerial) {
     const std::string left = "name = \"left\"\ntype = \"extrapolation\"\n";
     input.replace(input.find(left), left.size(),
                   "name = \"left\"\ntype = \"nscbc_inlet\"\nu = [0.3, 0.0, 0.0]\np = 1.0\nT = 1.0\nL = 1.0\n");
+    expect_matches_serial(input);
+}
+
+TEST(MPI3DTest, SyntheticTurbulenceInletMatchesSerial) {
+    // The inflow field is a function of the time and the inlet's geometry alone,
+    // and its zero-net-flux correction sums over the whole inlet in a fixed order
+    std::string input = box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"euler\"\n");
+    const std::string from = "name = \"right\"\ntype = \"symmetry\"\n";
+    input.replace(input.find(from), from.size(), "name = \"right\"\ntype = \"nscbc_outlet\"\np = 1.0\nL = 1.0\n");
+    const std::string left = "name = \"left\"\ntype = \"extrapolation\"\n";
+    input.replace(input.find(left), left.size(),
+                  "name = \"left\"\ntype = \"nscbc_inlet\"\nu = [\"0.3 + 0.1 * y\", 0.0, 0.0]\np = 1.0\nT = 1.0\nL = 1.0\n"
+                  "[boundaries.turbulence]\nreynolds_stress = [0.004, 0.002, 0.002, -0.001, 0.0, 0.0]\n"
+                  "length_scale = [0.3, 0.15, 0.1]\n");
     expect_matches_serial(input);
 }
 

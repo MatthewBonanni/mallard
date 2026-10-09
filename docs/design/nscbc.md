@@ -59,6 +59,13 @@ continues on any other. A file without some face of the run (version 3 and
 earlier, or one written with that boundary not characteristic) starts every
 face afresh from the solution.
 
+An inlet's target velocity is per face, and may vary in time (synthetic
+turbulence, [synthetic_inflow.md](synthetic_inflow.md)). Its change over the
+step enters the incoming wave as the target's own incoming wave,
+`-Z (u_n,t(t + dt) - u_n,t(t))`
+([Guézennec & Poinsot 2009](../references.md#guezennec-poinsot-2009)), so
+that the face follows the target without reflecting outgoing waves.
+
 This is the LODI relation of Poinsot & Lele itself. For a plane wave at
 normal incidence, `dw-/dt = -K p'` gives the reflection coefficient
 `R = -1 / (1 - 2 i omega / K)`
@@ -179,13 +186,109 @@ The tangential derivatives are a least-squares fit in the plane of the face,
 as finite-difference NSCBC differentiates along the boundary:
 
 - **Data.** The fit uses the states of the cells of the neighboring
-  characteristic faces (those sharing a node with nearly the same normal).
+  characteristic faces: those with nearly the same normal sharing an edge
+  (3D) or a node (2D), also across periodic seams, at the nearest periodic
+  image of their centers. A one-sided fit at a seam biased the transverse
+  terms there: with turbulence leaving through an outlet periodic across,
+  the outlet's pressure along the seam fell and the run diverged after a
+  few flow-through times. Edge faces have no fit (below).
 - **Normal derivatives.** A point along the normal sets them to zero.
 - **Why not the boundary cell's own gradient.** It picks up the normal
   variation of waves crossing the boundary. On triangles it also picks up
   the grid-scale odd-even velocity pattern as a transverse divergence.
 - **Why not reconstructed face states.** With TENO, they made the correction
   unstable.
+
+### Stability: stencil, edges and reversed flow
+
+The incoming wave integrates `-beta T-` every step, and only the weak
+relaxation `K` pulls it back (`K = 0.02` for `L = 12` and `sigma = 0.25`).
+So any mode for which the transverse terms have the wrong sign grows. Where
+the interior acts on it only weakly, the outlet's pressure drifts by up to
+`beta T- / K`, the flow there reverses, and the run diverges. Turbulence
+leaving through an outlet found three such modes:
+
+- **Faces sharing only a corner (3D).** On a structured outlet, a face and
+  its eight neighbors sharing a node hold a grid-scale odd-even pattern
+  across one direction, say `v(y) (-1)^k` along `z`. In their fit, two of the
+  three columns that set `dv/dy` have the opposite sign, so the fit returns
+  `-dv/dy / 3`: a divergence of the wrong sign. The incoming wave then
+  amplifies the pattern, a checkerboard in the outlet's last cell layer. The
+  fit therefore uses the faces sharing an edge (in 2D, a node). For this
+  pattern they give the right sign.
+- **Edges**: faces sharing a node with a wall, symmetry plane or other
+  non-characteristic boundary. There the fit is one-sided. A pressure rise at
+  such a face pushes fluid away from the wall only, so the tangential velocity
+  falls with distance from the wall. The fit reads this as a negative
+  divergence; with the wall's `v = 0` the true one is positive. The incoming
+  wave then raises the face's pressure further. These faces get no
+  transverse terms.
+- **Reversed faces of outlets** (`u_n < 0`). The transverse terms let
+  structures leave without the outlet pushing their pressure back. A
+  reversed face lets nothing out. Its incoming convective waves come from the
+  transmissive state, so `beta T-` integrates the spreading of the reversed
+  jet itself, whose pressure then rises with the jet. These faces have
+  `beta = 0`: they only relax their pressure toward `p_t`, like an inflow at
+  held pressure.
+
+**Test case.** A 3D box `[0, 2] x [0, 1]^2`:
+
+- `nscbc_inlet` at `u = 0.2` (`c = 1`), and `nscbc_outlet` with `L = 12`
+- symmetry planes on the sides, or no-slip walls with cells clustered toward
+  them
+- `mu = 2e-4`, MUSCL without a limiter
+- decaying eddies `A sin(2 pi x) cos(2 pi y) cos(2 pi z)` (plus smaller
+  modes), with `A` up to six times the mean flow, crossing the outlet with
+  reversed flow
+
+The table gives the largest Mach number and the lowest pressure at the end
+(`p_t = 0.714`):
+
+| Case | Before | Now | `beta = 0` |
+|---|---|---|---|
+| `48 x 24 x 24`, symmetry, `A = 0.4`, t = 25 | diverges at t = 11.6 | 0.31, 0.728 | 0.30, 0.703 (t = 20) |
+| `48 x 24 x 24`, walls, `A = 0.4`, t = 25 | diverges at t = 18.5 | 0.35, 0.711 | 0.38, 0.704 |
+| `48 x 24 x 24`, symmetry, `A = 0.8`, t = 25 | diverges at t = 6.0 | 0.43, 0.804 | 0.41, 0.707 |
+| `48 x 24 x 24`, symmetry, `A = 1.2`, t = 25 | diverges at t = 0.7 | 0.50, 0.878 | 0.58, 0.668 |
+| `96 x 48 x 48`, walls, `A = 0.4`, t = 30 | diverges at t = 10.5 | 0.51, 0.710 | 0.53, 0.696 |
+| `96 x 48 x 48`, symmetry, `A = 0.8`, t = 30 | diverges at t = 1.7 | 0.61, 0.810 | 0.45, 0.679 |
+
+Each of the three parts is needed:
+
+- Without the reversed-face rule (and still with the corner neighbors),
+  `A = 1.2` diverged at t = 13.2.
+- With only the reversed-face rule, both `A = 0.4` cases stayed bounded, but
+  at a Mach number of 0.55 to 0.58 instead of 0.3 to 0.35.
+- With the corner neighbors, the finer walled box grew the checkerboard: its
+  lowest pressure fell to 0.607 by t = 29.
+
+The mean pressure still drifts, as it does with `beta = M` on any outlet with
+a small `K` (the vortex test below removes it): `beta T-` averaged over the
+outlet need not vanish, and only `K` holds the mean. In the boxes with
+symmetry sides it rose by 2 to 23% of `p_t` by t = 25. A larger `sigma` or a
+shorter `L` holds it closer.
+
+The spatially developing channel of the synthetic-inflow work
+(Re_tau = 180, outlet `L = 25 h`) showed the same signatures before it
+diverged:
+
+- In the last cell layer, the pressure fluctuation next to both walls was two
+  to three times that of the layer inside. In mid-channel they were equal.
+- Where it diverged, near the top wall, the last layer held a checkerboard.
+
+**Alternatives that did not hold:**
+
+- **Constant `beta = 0.2`** instead of the local Mach number: it still
+  diverged, at t = 16.4 instead of 11.6.
+- **Backflow stabilization**, as for incompressible outlets
+  ([Esmaily Moghadam et al. 2011](../references.md#moghadam-2011)): a
+  traction `rho min(u_n, 0) u / 2` on reversed faces, which removes the
+  kinetic energy they let in. It only delayed the divergence, to t = 21.1
+  instead of 18.5.
+- **Zero tangential velocity entering reversed faces**: no effect.
+- **Mirroring the boundary cell across walls into the fit**, instead of
+  dropping edge faces: bounded, but the mean pressure of the symmetry boxes
+  rose by 6 to 53% of `p_t`.
 
 ## Inlet (`nscbc_inlet`)
 
@@ -265,7 +368,8 @@ front of an `nscbc_outlet` or `farfield`.
   against a domain three times longer. RMS pressure error at t = 3:
   - default: 0.05 times the vortex's pressure deficit, on quadrilaterals,
     triangles and jittered meshes
-  - `beta = 1` (Poinsot & Lele's original condition): 1.2 to 1.3 times
+  - `beta = 1` (Poinsot & Lele's original condition): 1.0 times (1.2 to 1.3
+    before the edges dropped their transverse terms)
 - **Poiseuille flow** driven by a body force through an outlet: the profile
   stays within 1.2% and the pressure within 3.5% of the force balance, on
   quadrilaterals, triangles and jittered meshes.
@@ -276,6 +380,9 @@ front of an `nscbc_outlet` or `farfield`.
     of its dynamic pressure
   - the flame example above
 - **3D**: a plane pulse leaves a box of hexahedra or tetrahedra (under 3%).
+- **Eddies reversing the flow at the outlet** (the box of "Stability",
+  `24 x 12 x 12` cells, symmetry sides, `A = 0.8`): bounded to t = 12. Before
+  these changes it diverged at t = 9.8.
 - **MPI**: runs with characteristic boundaries and sponges are bitwise equal
   to serial ones (MUSCL and TENO, 2D and 3D).
 - **Single precision**: the same tests pass with round-off noise of about
