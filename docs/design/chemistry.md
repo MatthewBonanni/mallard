@@ -686,6 +686,9 @@ as two quartics joined at 750 K (`src/chemistry/radiation.h`).
   - Setup: `tools/flame_restart.py --radiation cantera`, 12 cells per
     thermal thickness of the adiabatic flame, MUSCL, HLLC, SSPRK3, CFL 1.2.
   - S_c is the consumption speed averaged over the last third of each run.
+  - The runs last 3.5 (phi = 0.6), 5 (phi = 0.5) or 3 (phi = 0.44) flame
+    times. Started from Cantera's profile, the GRI-3.0 flames relax for about
+    3 flame times, and shorter runs overestimate their speed by 1-2%.
   - Cantera's flames are on 5-10 cm domains. The radiating speed is the same
     at 5 and 10 cm, so the burnt gas cooling far downstream does not matter.
 
