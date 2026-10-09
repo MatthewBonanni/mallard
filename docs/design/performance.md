@@ -138,7 +138,9 @@ The device peak grows by the batch outputs and the per-team scratch (2 GB at 65,
 Per cell on hexahedra, the device time splits into the fit (30%), the search and sort (35%), the
 sector stencils (15%) and the rest (means, Lebesgue constant, smoothness indicators). On tetrahedra
 the seven fits take 75%: each step of a Householder reflection is a sequential sum over the rows, which
-the bitwise requirement keeps sequential, so the fits are latency-bound.
+the bitwise requirement keeps sequential, so the fits are latency-bound. More teams per SM hide that
+latency best: two teams per SM with the pseudo-inverse in shared memory as well (70 KB each) took
+21.7 s on tetrahedra and 5.1 s on hexahedra, and four teams (128 registers per thread) spill.
 
 `TENO::rebuild_cells()` recomputes a list of cells and repacks the stencils on the device, keeping
 every other cell's tables bitwise; `TENO::cells_within_reach()` gives the cells whose searches see a
