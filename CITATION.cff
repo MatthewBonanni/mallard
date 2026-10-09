@@ -26,6 +26,9 @@ identifiers:
   - type: doi
     value: 10.5281/zenodo.23152577
     description: "Version 0.6.0"
+  - type: doi
+    value: 10.5281/zenodo.23267583
+    description: "Version 0.7.0"
 url: "https://github.com/MatthewBonanni/mallard"
 repository-code: "https://github.com/MatthewBonanni/mallard"
 license: Apache-2.0
