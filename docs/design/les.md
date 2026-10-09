@@ -810,7 +810,7 @@ Findings:
 96^3 hexahedra (dx+ = 38, dz+ = 19, dy+ = 0.87 at the wall), the numerics
 of the 395 case, `Re_b = 21,907` (MKM's `U_b+ = 18.65`), averaged over t =
 60-200 h/U_b (7.6-8.1 h/u_tau) after the synthetic initial field (the
-figure: Sigma with `V^(1/3)`). MKM's `Re_tau = 587.2`:
+figure: Sigma with Scotti's width, the default). MKM's `Re_tau = 587.2`:
 
 | Model | `Re_tau` | `Cf` | `U+(30)` / `U+(100)` (13.53 / 16.54) | peak `u_rms+` (2.77) | peak `v_rms+` (1.04) | numerical / SGS / molecular |
 |---|---|---|---|---|---|---|
