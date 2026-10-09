@@ -3,6 +3,7 @@ add_library(MallardCore STATIC
     common/common_math.cpp
     common/common_io.cpp
     common/build_info.cpp
+    common/growing_buffer.cpp
     common/log.cpp
     mesh/mesh.cpp
     mesh/mesh_io.cpp
@@ -11,6 +12,7 @@ add_library(MallardCore STATIC
     mesh/mesh_block.cpp
     mesh/zone.cpp
     boundary/boundary.cpp
+    boundary/synthetic_inflow.cpp
     chemistry/mechanism.cpp
     chemistry/transport.cpp
     chemistry/units.cpp
@@ -33,6 +35,7 @@ add_library(MallardCore STATIC
     solver/solver_rhs.cpp
     solver/solver_radiation.cpp
     solver/solver_sponge.cpp
+    solver/solver_inflow.cpp
     solver/statistics.cpp
     io/data_writer.cpp
     io/data_writer_hdf5.cpp
