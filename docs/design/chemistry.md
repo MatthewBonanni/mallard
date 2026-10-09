@@ -826,6 +826,25 @@ cell, its bin or its rank, so binning and load balancing only reorder work.
   Sherman-Morrison adds the rank-one part with one more solve per
   factorization. GRI-3.0 fills 1,545 of 2,916 entries; the NUIG n-hexane
   mechanism (1268 species) 56,591 of 1.6 million, 3.5%.
+- **Stages, levels and a dense chain for teams** (#146). Pivot by pivot, a
+  team's factorization takes one barrier per pivot and each solve two, and
+  the igniting cells of n-hexane spent 58% of their time in the solves and
+  33% in the factorization (clock64 timers in the wide teams), each round a
+  barrier behind a few dependent global loads. Teams instead factor in
+  stages of independent pivots (pivot k runs after every j < k with L(k, j)
+  or U(j, k) nonzero): the stage's L entries are scaled, then each entry it
+  updates goes to one lane, which applies its updates in pivot order. The
+  solves take the rows outside the chain by levels of independent rows,
+  each row by one lane with its terms in column order. The chain, the last
+  pivots each alone in its stage (the dense core of radicals, and T), is
+  stored dense by columns (structural zeros padded) and factored and solved
+  a pivot at a time with coalesced updates across the lanes. Every entry
+  thus gets its terms in the order of the elimination pivot by pivot, which
+  one thread still does: the factors and solves are the same bits for any
+  lanes (`SparseLUSolvesLikeTheDenseOne` checks the stages and the solves
+  bitwise against elimination column by column), up to the sign of zeros.
+  n-hexane: 203 stages instead of 1269 pivots, a chain of 145 (573 padded
+  entries), 59 + 58 levels in the solves outside it.
 - **Fused half steps** (`[chemistry] fuse_half_steps`, default off): the
   half steps of consecutive steps are one chemistry call, except where output,
   checks or the end of the run read the state (and the next step's `dt` comes
