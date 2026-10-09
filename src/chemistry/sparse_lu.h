@@ -14,6 +14,8 @@
 #ifndef CHEMISTRY_SPARSE_LU_H
 #define CHEMISTRY_SPARSE_LU_H
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <type_traits>
 #include <vector>
@@ -50,10 +52,34 @@ struct SparseLUPattern {
     View1<uint32_t> perm;      // perm[new] = original index
     View1<uint32_t> source;    // (entry): original row * n + column, for the gather from a dense J
     View1<uint32_t> diagonal;  // (row): entry of the diagonal
-    View1<uint32_t> lower_offset, lower_entry, lower_row;  // per pivot column: entries below it and their rows
-    View1<uint32_t> upper_offset, upper_entry, upper_row;  // per column: entries above the diagonal and their rows
-    View1<uint32_t> update_offset;                          // per pivot: Schur updates
-    Kokkos::View<uint32_t *[3], Kokkos::LayoutRight, MemorySpace> update;  // (target, l, u): a_t -= a_l a_u
+    using Pairs = Kokkos::View<uint32_t *[2], Kokkos::LayoutRight, MemorySpace>;
+    // Factorization pivot by pivot (one thread): per pivot, the L entries below it and its updates
+    // (target, l, u): a_t -= a_l a_u
+    View1<uint32_t> pivot_lower_offset, pivot_lower_entry, pivot_update_offset;
+    Kokkos::View<uint32_t *[3], Kokkos::LayoutRight, MemorySpace> pivot_update;
+    // Factorization in stages of independent pivots: per stage, the L entries of its pivots with their
+    // diagonal entries, then the entries it updates (targets), each with its updates a_t -= a_l a_u in
+    // pivot order
+    uint32_t n_stages = 0;
+    View1<uint32_t> scale_offset;  // (stage + 1)
+    Pairs scale_entry;             // (L entry, diagonal entry)
+    View1<uint32_t> target_offset; // (stage + 1)
+    View1<uint32_t> target;        // (target): entry
+    View1<uint32_t> target_update; // (target + 1)
+    Pairs update;                  // (l, u)
+    // The chain: pivots chain..n-1, each alone in its stage, after all the others (the dense core of
+    // radicals, and T). Its block is dense, by columns, from entry chain_offset on; the factorization and the
+    // solves take its pivots one by one, with the rows or entries of a pivot across the lanes, and the
+    // solves the other columns by levels of independent rows, each row by one lane
+    uint32_t chain = 0, chain_offset = 0;
+    View1<uint32_t> chain_upper_offset;  // (pivot - chain + 1)
+    Pairs chain_upper_entry;             // (entry, row) of U in the chain's columns and the rows before it
+    uint32_t n_lower_levels = 0, n_upper_levels = 0;
+    View1<uint32_t> lower_level_offset, lower_level_row, upper_level_offset, upper_level_row;
+    View1<uint32_t> lower_offset, upper_offset;  // (row + 1)
+    Pairs lower_entry;  // (entry, column) of each row of L in the columns before the chain, by increasing column
+    Pairs upper_entry;  // (entry, column) of each row of U before the chain, above the diagonal and before the
+                        // chain, by decreasing column
     View1<double> v;  // (original index): 1 / W_k, 0 for T
     // The compact Jacobian: the entries of KineticsTable (species block, row-major), then the T column (n - 1)
     // and the T row (n); its entries by column, and the source of each L + U entry in it (-1: zero)
@@ -182,41 +208,147 @@ SparseLUPattern<MemorySpace> make_sparse_lu_pattern(const Mechanism & mechanism)
             for (uint32_t w = w0 + 1; w < words; w++) F[r][w] |= F[k][w];
         }
     }
-    // Entries row by row, and their tables
+    // Stages of the factorization: pivot k depends on the pivots j < k that change its row or column
+    // (L(k, j) or U(j, k) nonzero), and runs in the stage after the last of them
+    std::vector<uint32_t> stage_of(n, 0);
+    for (uint32_t k = 0; k < n; k++) {
+        for (uint32_t j = 0; j < k; j++) {
+            if (test(F[k], j) || test(F[j], k)) stage_of[k] = std::max(stage_of[k], stage_of[j] + 1);
+        }
+    }
+    const uint32_t n_stages = n > 0 ? *std::max_element(stage_of.begin(), stage_of.end()) + 1 : 0;
+    // The chain: the last pivots, from q on, each alone in its stage after all earlier ones (the dense core
+    // of radicals, and T). Its block is stored dense, by columns, after the other entries
+    uint32_t q = n;
+    while (q > 0 && stage_of[q - 1] + (n - q) + 1 == n_stages) {
+        bool alone = true;
+        for (uint32_t j = 0; j + 1 < q && alone; j++) alone = stage_of[j] < stage_of[q - 1];
+        if (!alone) break;
+        q--;
+    }
+    const uint32_t m = n - q;
+    for (uint32_t r = q; r < n; r++) {
+        for (uint32_t c = q; c < n; c++) set(F[r], c);
+    }
     std::vector<int64_t> entry(static_cast<size_t>(n) * n, -1);
     std::vector<uint32_t> source, diagonal(n);
     std::vector<int32_t> jacobian_source;
+    auto add_entry = [&](const uint32_t r, const uint32_t c) {
+        entry[static_cast<size_t>(r) * n + c] = static_cast<int64_t>(source.size());
+        if (r == c) diagonal[r] = static_cast<uint32_t>(source.size());
+        source.push_back(perm[r] * n + perm[c]);
+        jacobian_source.push_back(static_cast<int32_t>(compact[static_cast<size_t>(perm[r]) * n + perm[c]]));
+    };
     for (uint32_t r = 0; r < n; r++) {
         for (uint32_t c = 0; c < n; c++) {
-            if (!test(F[r], c)) continue;
-            entry[static_cast<size_t>(r) * n + c] = static_cast<int64_t>(source.size());
-            if (r == c) diagonal[r] = static_cast<uint32_t>(source.size());
-            source.push_back(perm[r] * n + perm[c]);
-            jacobian_source.push_back(static_cast<int32_t>(compact[static_cast<size_t>(perm[r]) * n + perm[c]]));
+            if (test(F[r], c) && (r < q || c < q)) add_entry(r, c);
         }
     }
-    auto at = [&](const uint32_t r, const uint32_t c) { return static_cast<uint32_t>(entry[static_cast<size_t>(r) * n + c]); };
-    std::vector<uint32_t> lower_offset{0}, lower_entry, lower_row, upper_offset{0}, upper_entry, upper_row, update_offset{0};
-    std::vector<uint32_t> update;
+    const uint32_t chain_offset = static_cast<uint32_t>(source.size());
+    for (uint32_t c = q; c < n; c++) {
+        for (uint32_t r = q; r < n; r++) add_entry(r, c);
+    }
+    auto at = [&](const uint32_t r, const uint32_t c) { return entry[static_cast<size_t>(r) * n + c]; };
+    // Each entry's updates a_t -= a_l a_u in pivot order, each in the stage of the latest pivot so far: no
+    // earlier than its pivot's (whose column is then scaled) and in the same order as pivot by pivot
+    std::vector<std::vector<uint32_t>> scale(n_stages);                       // (stage): L entry, its diagonal
+    std::vector<std::vector<std::array<uint32_t, 3>>> updates(source.size()); // (target): (stage, l, u) in order
+    // One thread eliminates pivot by pivot: per pivot, its L entries and its updates (target, l, u)
+    std::vector<uint32_t> pivot_lower_offset{0}, pivot_lower_entry, pivot_update_offset{0}, pivot_update;
     for (uint32_t k = 0; k < n; k++) {
         for (uint32_t r = k + 1; r < n; r++) {
-            if (entry[static_cast<size_t>(r) * n + k] < 0) continue;
-            lower_entry.push_back(at(r, k));
-            lower_row.push_back(r);
+            if (at(r, k) < 0) continue;
+            const uint32_t l = static_cast<uint32_t>(at(r, k));
+            if (k < q) scale[stage_of[k]].insert(scale[stage_of[k]].end(), {l, diagonal[k]});
+            pivot_lower_entry.push_back(l);
             for (uint32_t c = k + 1; c < n; c++) {
-                if (entry[static_cast<size_t>(k) * n + c] < 0) continue;
-                update.insert(update.end(), {at(r, c), at(r, k), at(k, c)});
+                if (at(k, c) < 0) continue;
+                const uint32_t t = static_cast<uint32_t>(at(r, c)), u = static_cast<uint32_t>(at(k, c));
+                pivot_update.insert(pivot_update.end(), {t, l, u});
+                if (k >= q) continue;
+                auto & list = updates[t];
+                const uint32_t s = list.empty() ? stage_of[k] : std::max(stage_of[k], list.back()[0]);
+                list.push_back({s, l, u});
             }
         }
-        lower_offset.push_back(static_cast<uint32_t>(lower_entry.size()));
-        update_offset.push_back(static_cast<uint32_t>(update.size() / 3));
-        for (uint32_t r = 0; r < k; r++) {
-            if (entry[static_cast<size_t>(r) * n + k] < 0) continue;
-            upper_entry.push_back(at(r, k));
-            upper_row.push_back(r);
-        }
-        upper_offset.push_back(static_cast<uint32_t>(upper_entry.size()));
+        pivot_lower_offset.push_back(static_cast<uint32_t>(pivot_lower_entry.size()));
+        pivot_update_offset.push_back(static_cast<uint32_t>(pivot_update.size() / 3));
     }
+    std::vector<uint32_t> scale_offset{0}, scale_entry, target_offset{0}, target, target_update{0}, update;
+    {
+        std::vector<std::vector<uint32_t>> stage_targets(n_stages - m);  // (stage): target, first and end update
+        for (uint32_t t = 0; t < updates.size(); t++) {
+            const auto & list = updates[t];
+            for (size_t a = 0; a < list.size();) {
+                size_t b = a;
+                while (b < list.size() && list[b][0] == list[a][0]) b++;
+                stage_targets[list[a][0]].insert(stage_targets[list[a][0]].end(),
+                                                 {t, static_cast<uint32_t>(a), static_cast<uint32_t>(b)});
+                a = b;
+            }
+        }
+        for (uint32_t s = 0; s < n_stages - m; s++) {
+            scale_entry.insert(scale_entry.end(), scale[s].begin(), scale[s].end());
+            scale_offset.push_back(static_cast<uint32_t>(scale_entry.size() / 2));
+            for (size_t g = 0; g < stage_targets[s].size(); g += 3) {
+                const uint32_t t = stage_targets[s][g];
+                target.push_back(t);
+                for (uint32_t a = stage_targets[s][g + 1]; a < stage_targets[s][g + 2]; a++) {
+                    update.insert(update.end(), {updates[t][a][1], updates[t][a][2]});
+                }
+                target_update.push_back(static_cast<uint32_t>(update.size() / 2));
+            }
+            target_offset.push_back(static_cast<uint32_t>(target.size()));
+        }
+    }
+    std::vector<uint32_t> lower_level(n, 0), upper_level(n, 0);
+    std::vector<uint32_t> lower_offset{0}, lower_entry, upper_offset{0}, upper_entry;
+    for (uint32_t r = 0; r < n; r++) {
+        for (uint32_t c = 0; c < std::min(r, q); c++) {
+            if (at(r, c) < 0) continue;
+            lower_entry.insert(lower_entry.end(), {static_cast<uint32_t>(at(r, c)), c});
+            lower_level[r] = std::max(lower_level[r], lower_level[c] + 1);
+        }
+        lower_offset.push_back(static_cast<uint32_t>(lower_entry.size() / 2));
+    }
+    for (uint32_t r = q; r-- > 0;) {
+        for (uint32_t c = q; c-- > r + 1;) {
+            if (at(r, c) < 0) continue;
+            upper_level[r] = std::max(upper_level[r], upper_level[c] + 1);
+        }
+    }
+    for (uint32_t r = 0; r < q; r++) {
+        for (uint32_t c = q; c-- > r + 1;) {
+            if (at(r, c) >= 0) upper_entry.insert(upper_entry.end(), {static_cast<uint32_t>(at(r, c)), c});
+        }
+        upper_offset.push_back(static_cast<uint32_t>(upper_entry.size() / 2));
+    }
+    // U's entries in the chain's columns, in the rows before it
+    std::vector<uint32_t> chain_upper_offset{0}, chain_upper_entry;
+    for (uint32_t k = q; k < n; k++) {
+        for (uint32_t r = 0; r < q; r++) {
+            if (at(r, k) >= 0) chain_upper_entry.insert(chain_upper_entry.end(), {static_cast<uint32_t>(at(r, k)), r});
+        }
+        chain_upper_offset.push_back(static_cast<uint32_t>(chain_upper_entry.size() / 2));
+    }
+    // Rows by level: of L those with entries in the other columns, of U those before the chain
+    auto by_level = [&](const std::vector<uint32_t> & level, const uint32_t rows_end, const bool skip_empty,
+                        std::vector<uint32_t> & offset, std::vector<uint32_t> & rows) {
+        uint32_t levels = 0;
+        for (uint32_t r = 0; r < rows_end; r++) {
+            if (!(skip_empty && lower_offset[r + 1] == lower_offset[r])) levels = std::max(levels, level[r] + 1);
+        }
+        offset.assign(1, 0);
+        for (uint32_t l = 0; l < levels; l++) {
+            for (uint32_t r = 0; r < rows_end; r++) {
+                if (level[r] == l && !(skip_empty && lower_offset[r + 1] == lower_offset[r])) rows.push_back(r);
+            }
+            offset.push_back(static_cast<uint32_t>(rows.size()));
+        }
+    };
+    std::vector<uint32_t> lower_level_offset, lower_level_row, upper_level_offset, upper_level_row;
+    by_level(lower_level, n, true, lower_level_offset, lower_level_row);
+    by_level(upper_level, q, false, upper_level_offset, upper_level_row);
     std::vector<double> v(n, 0.0);
     for (uint32_t k = 0; k < ns; k++) v[k] = 1.0 / mechanism.species[k].molecular_weight;
 
@@ -234,19 +366,48 @@ SparseLUPattern<MemorySpace> make_sparse_lu_pattern(const Mechanism & mechanism)
     p.perm = copy(perm, "lu_perm");
     p.source = copy(source, "lu_source");
     p.diagonal = copy(diagonal, "lu_diagonal");
-    p.lower_offset = copy(lower_offset, "lu_lower_offset");
-    p.lower_entry = copy(lower_entry, "lu_lower_entry");
-    p.lower_row = copy(lower_row, "lu_lower_row");
-    p.upper_offset = copy(upper_offset, "lu_upper_offset");
-    p.upper_entry = copy(upper_entry, "lu_upper_entry");
-    p.upper_row = copy(upper_row, "lu_upper_row");
-    p.update_offset = copy(update_offset, "lu_update_offset");
-    p.update = Kokkos::View<uint32_t *[3], Kokkos::LayoutRight, MemorySpace>("lu_update", update.size() / 3);
-    auto h_update = Kokkos::create_mirror_view(p.update);
-    for (size_t a = 0; a < update.size() / 3; a++) {
-        for (int b = 0; b < 3; b++) h_update(a, b) = update[3 * a + b];
+    auto copy2 = [](const std::vector<uint32_t> & h, const char * label) {
+        Kokkos::View<uint32_t *[2], Kokkos::LayoutRight, MemorySpace> d(label, h.size() / 2);
+        auto m = Kokkos::create_mirror_view(d);
+        for (size_t a = 0; a < h.size() / 2; a++) {
+            m(a, 0) = h[2 * a];
+            m(a, 1) = h[2 * a + 1];
+        }
+        Kokkos::deep_copy(d, m);
+        return d;
+    };
+    p.pivot_lower_offset = copy(pivot_lower_offset, "lu_pivot_lower_offset");
+    p.pivot_lower_entry = copy(pivot_lower_entry, "lu_pivot_lower_entry");
+    p.pivot_update_offset = copy(pivot_update_offset, "lu_pivot_update_offset");
+    p.pivot_update = Kokkos::View<uint32_t *[3], Kokkos::LayoutRight, MemorySpace>("lu_pivot_update", pivot_update.size() / 3);
+    {
+        auto m = Kokkos::create_mirror_view(p.pivot_update);
+        for (size_t a = 0; a < pivot_update.size() / 3; a++) {
+            for (int b = 0; b < 3; b++) m(a, b) = pivot_update[3 * a + b];
+        }
+        Kokkos::deep_copy(p.pivot_update, m);
     }
-    Kokkos::deep_copy(p.update, h_update);
+    p.n_stages = n_stages;
+    p.scale_offset = copy(scale_offset, "lu_scale_offset");
+    p.scale_entry = copy2(scale_entry, "lu_scale_entry");
+    p.target_offset = copy(target_offset, "lu_target_offset");
+    p.target = copy(target, "lu_target");
+    p.target_update = copy(target_update, "lu_target_update");
+    p.update = copy2(update, "lu_update");
+    p.n_lower_levels = static_cast<uint32_t>(lower_level_offset.size() - 1);
+    p.n_upper_levels = static_cast<uint32_t>(upper_level_offset.size() - 1);
+    p.lower_level_offset = copy(lower_level_offset, "lu_lower_level_offset");
+    p.lower_level_row = copy(lower_level_row, "lu_lower_level_row");
+    p.upper_level_offset = copy(upper_level_offset, "lu_upper_level_offset");
+    p.upper_level_row = copy(upper_level_row, "lu_upper_level_row");
+    p.chain = q;
+    p.chain_offset = chain_offset;
+    p.chain_upper_offset = copy(chain_upper_offset, "lu_chain_upper_offset");
+    p.chain_upper_entry = copy2(chain_upper_entry, "lu_chain_upper_entry");
+    p.lower_offset = copy(lower_offset, "lu_lower_offset");
+    p.lower_entry = copy2(lower_entry, "lu_lower_entry");
+    p.upper_offset = copy(upper_offset, "lu_upper_offset");
+    p.upper_entry = copy2(upper_entry, "lu_upper_entry");
     p.v = copy(v, "lu_v");
     p.n_entries = n_entries;
     p.entry_row = copy(e_row, "lu_entry_row");
@@ -272,27 +433,79 @@ struct SparseLU {
     double * x;       // (n) scratch
     double * beta;    // one double
 
+    /**
+     * @brief a - sum_e values[entry(e, 0)] x[entry(e, 1)] for e in [begin,
+     *        end), in order; the loads of a few terms go out together.
+     */
+    template <typename Pairs>
+    KOKKOS_INLINE_FUNCTION static double subtract(double a, const Pairs & entry, const uint32_t begin,
+                                                  const uint32_t end, const double * values, const double * x) {
+        constexpr uint32_t B = 8;
+        uint32_t e = begin;
+        for (; e + B <= end; e += B) {
+            double l[B], r[B];
+            for (uint32_t i = 0; i < B; i++) {
+                l[i] = values[entry(e + i, 0)];
+                r[i] = x[entry(e + i, 1)];
+            }
+            for (uint32_t i = 0; i < B; i++) a -= l[i] * r[i];
+        }
+        for (; e < end; e++) a -= values[entry(e, 0)] * x[entry(e, 1)];
+        return a;
+    }
+
+    /**
+     * @brief A_s^-1 b in place, with every entry's terms in the order of the
+     *        elimination column by column (so the result does not depend on
+     *        the lanes): the columns of the chain one by one, the rows of a
+     *        column across the lanes; the others by levels of independent
+     *        rows, each row by one lane.
+     */
     template <typename Lanes>
     KOKKOS_INLINE_FUNCTION void solve_s(const Lanes & lanes, double * b) const {
         const uint32_t n = p.n;
         // Into the elimination order
         lanes.for_each(n, [&](const uint32_t i) { x[i] = b[p.perm(i)]; });
         lanes.sync();
-        for (uint32_t k = 0; k < n; k++) {
-            const double x_k = x[k];
-            lanes.for_each(p.lower_offset(k + 1) - p.lower_offset(k), [&](const uint32_t m) {
-                const uint32_t e = p.lower_offset(k) + m;
-                x[p.lower_row(e)] -= values[p.lower_entry(e)] * x_k;
+        for (uint32_t l = 0; l < p.n_lower_levels; l++) {
+            const uint32_t first = p.lower_level_offset(l);
+            lanes.for_each(p.lower_level_offset(l + 1) - first, [&](const uint32_t m) {
+                const uint32_t r = p.lower_level_row(first + m);
+                x[r] = subtract(x[r], p.lower_entry, p.lower_offset(r), p.lower_offset(r + 1), values, x);
             });
             lanes.sync();
         }
-        for (uint32_t k = n; k-- > 0;) {
-            const double x_k = x[k] / values[p.diagonal(k)];
+        // The chain's block, by columns: entry (chain + i, chain + j) at block[j * m + i]
+        const uint32_t m = n - p.chain;
+        const double * block = values + p.chain_offset;
+        double * x_chain = x + p.chain;
+        for (uint32_t j = 0; j + 1 < m; j++) {
+            const double x_j = x_chain[j];
+            const double * column = block + j * m;
+            lanes.for_each(m - 1 - j, [&](const uint32_t i) { x_chain[j + 1 + i] -= column[j + 1 + i] * x_j; });
             lanes.sync();
-            lanes.single([&]() { x[k] = x_k; });
-            lanes.for_each(p.upper_offset(k + 1) - p.upper_offset(k), [&](const uint32_t m) {
-                const uint32_t e = p.upper_offset(k) + m;
-                x[p.upper_row(e)] -= values[p.upper_entry(e)] * x_k;
+        }
+        for (uint32_t j = m; j-- > 0;) {
+            const double * column = block + j * m;
+            const double x_j = x_chain[j] / column[j];
+            lanes.sync();
+            lanes.single([&]() { x_chain[j] = x_j; });
+            const uint32_t first = p.chain_upper_offset(j), before = p.chain_upper_offset(j + 1) - first;
+            lanes.for_each(j + before, [&](const uint32_t i) {
+                if (i < j) {
+                    x_chain[i] -= column[i] * x_j;
+                } else {
+                    x[p.chain_upper_entry(first + i - j, 1)] -= values[p.chain_upper_entry(first + i - j, 0)] * x_j;
+                }
+            });
+            lanes.sync();
+        }
+        for (uint32_t l = 0; l < p.n_upper_levels; l++) {
+            const uint32_t first = p.upper_level_offset(l);
+            lanes.for_each(p.upper_level_offset(l + 1) - first, [&](const uint32_t m) {
+                const uint32_t r = p.upper_level_row(first + m);
+                x[r] = subtract(x[r], p.upper_entry, p.upper_offset(r), p.upper_offset(r + 1), values, x) /
+                       values[p.diagonal(r)];
             });
             lanes.sync();
         }
@@ -300,6 +513,12 @@ struct SparseLU {
         lanes.sync();
     }
 
+    /**
+     * @brief Factor diagonal I - J_s (see SparseLU): one thread pivot by
+     *        pivot; lanes stage by stage, the stage's L entries scaled by
+     *        their pivots, then each entry it updates by one lane in pivot
+     *        order, so that the factors are the same bits for any lanes.
+     */
     template <typename Lanes>
     KOKKOS_INLINE_FUNCTION bool factor(const Lanes & lanes, const double * J, const double diagonal) const {
         const uint32_t n = p.n;
@@ -309,20 +528,70 @@ struct SparseLU {
             values[e] = (src >= 0 ? -J[src] : 0.0) + (r == c ? diagonal : 0.0);
         });
         lanes.sync();
-        for (uint32_t k = 0; k < n; k++) {
-            const double pivot = values[p.diagonal(k)];
-            if (!(Kokkos::fabs(pivot) > 0.0) || !Kokkos::isfinite(pivot)) return false;
-            const double inv = 1.0 / pivot;
-            lanes.for_each(p.lower_offset(k + 1) - p.lower_offset(k), [&](const uint32_t m) {
-                values[p.lower_entry(p.lower_offset(k) + m)] *= inv;
+        if constexpr (!Lanes::parallel) {
+            for (uint32_t k = 0; k < n; k++) {
+                const double inv = 1.0 / values[p.diagonal(k)];
+                for (uint32_t a = p.pivot_lower_offset(k); a < p.pivot_lower_offset(k + 1); a++) {
+                    values[p.pivot_lower_entry(a)] *= inv;
+                }
+                for (uint32_t a = p.pivot_update_offset(k); a < p.pivot_update_offset(k + 1); a++) {
+                    values[p.pivot_update(a, 0)] -= values[p.pivot_update(a, 1)] * values[p.pivot_update(a, 2)];
+                }
+            }
+        }
+        const uint32_t m = n - p.chain;
+        for (uint32_t s = 0; Lanes::parallel && s + m < p.n_stages; s++) {
+            const uint32_t first_scale = p.scale_offset(s);
+            lanes.for_each(p.scale_offset(s + 1) - first_scale, [&](const uint32_t m) {
+                const uint32_t a = first_scale + m;
+                const double inv = 1.0 / values[p.scale_entry(a, 1)];
+                values[p.scale_entry(a, 0)] *= inv;
             });
             lanes.sync();
-            lanes.for_each(p.update_offset(k + 1) - p.update_offset(k), [&](const uint32_t m) {
-                const uint32_t e = p.update_offset(k) + m;
-                values[p.update(e, 0)] -= values[p.update(e, 1)] * values[p.update(e, 2)];
+            const uint32_t first_target = p.target_offset(s);
+            lanes.for_each(p.target_offset(s + 1) - first_target, [&](const uint32_t m) {
+                const uint32_t t = first_target + m;
+                values[p.target(t)] =
+                    subtract(values[p.target(t)], p.update, p.target_update(t), p.target_update(t + 1), values, values);
             });
             lanes.sync();
         }
+        // The chain's dense block (see solve_s), a pivot at a time: its column scaled, then the trailing
+        // block's entries across the lanes, a few at a time each
+        double * block = values + p.chain_offset;
+        const uint32_t L = lanes.lanes;
+        for (uint32_t j = 0; Lanes::parallel && j < m; j++) {
+            double * column = block + j * m;
+            const uint32_t w = m - 1 - j;
+            const double inv = 1.0 / column[j];
+            lanes.for_each(w, [&](const uint32_t i) { column[j + 1 + i] *= inv; });
+            lanes.sync();
+            constexpr uint32_t B = 4;
+            lanes.for_each(L, [&](const uint32_t lane) {
+                for (uint32_t first = lane; first < w * w; first += B * L) {
+                    double a[B], l[B], u[B];
+                    uint32_t at[B];
+                    for (uint32_t b = 0; b < B; b++) {
+                        const uint32_t i = Kokkos::min(first + b * L, w * w - 1);
+                        const uint32_t r = j + 1 + i % w, c = j + 1 + i / w;
+                        at[b] = c * m + r;
+                        a[b] = block[at[b]];
+                        l[b] = column[r];
+                        u[b] = block[c * m + j];
+                    }
+                    for (uint32_t b = 0; b < B; b++) {
+                        if (first + b * L < w * w) block[at[b]] = a[b] - l[b] * u[b];
+                    }
+                }
+            });
+            lanes.sync();
+        }
+        // A pivot is final from its stage on: one that vanished then fails the factorization
+        const double bad = lanes.sum(n, [&](const uint32_t k) {
+            const double pivot = values[p.diagonal(k)];
+            return !(Kokkos::fabs(pivot) > 0.0) || !Kokkos::isfinite(pivot) ? 1.0 : 0.0;
+        });
+        if (bad > 0.0) return false;
         // Sherman-Morrison: A = A_s - u v^T
         lanes.for_each(n, [&](const uint32_t i) { z[i] = u[i]; });
         lanes.sync();
