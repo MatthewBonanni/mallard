@@ -30,6 +30,7 @@ add_library(MallardCore STATIC
     solver/chemistry_benchmark.cpp
     solver/solver.cpp
     solver/solver_chemistry.cpp
+    solver/solver_graph.cpp
     solver/solver_initialize.cpp
     solver/solver_mixture.cpp
     solver/solver_les.cpp
@@ -40,6 +41,7 @@ add_library(MallardCore STATIC
     io/data_writer.cpp
     io/data_writer_hdf5.cpp
     parallel/comm.cpp
+    parallel/device_comm.cpp
     parallel/distribution.cpp
     parallel/distributed_mesh.cpp
     parallel/global_order.cpp
@@ -74,6 +76,11 @@ if(Mallard_ENABLE_MPI)
     endif()
     if(Mallard_GPU_AWARE_MPI)
         target_compile_definitions(MallardCore PUBLIC Mallard_GPU_AWARE_MPI)
+    endif()
+    if(Mallard_ENABLE_NCCL)
+        target_include_directories(MallardCore SYSTEM PUBLIC ${NCCL_INCLUDE_DIR})
+        target_link_libraries(MallardCore PUBLIC ${NCCL_LIBRARY})
+        target_compile_definitions(MallardCore PUBLIC Mallard_HAS_NCCL)
     endif()
 endif()
 

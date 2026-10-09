@@ -109,7 +109,7 @@ class Solver {
         /**
          * @brief Advance the solution by one time step. With chemistry, the
          *        half step that ends it may be deferred (see run) and fused
-         *        with the next step's first half.
+         *        with the next step's first half (Strang splitting).
          */
         void take_step();
 
@@ -120,9 +120,11 @@ class Solver {
 
         /**
          * @brief Compute the stable time step for the current solution.
+         * @param on_device If given (single gas), the local minimum is left
+         *        there instead, without a host synchronization, and 0 returned.
          * @return dt corresponding to CFL = 1.
          */
-        rtype calc_dt_cfl1();
+        rtype calc_dt_cfl1(Kokkos::View<rtype> on_device = {});
 
         /**
          * @brief Recompute primitives from conservatives on the device.
@@ -206,7 +208,15 @@ class Solver {
         /** @brief Adds the sponge-layer sources to the RHS per unit volume (owned cells). */
         void apply_sponges(const State & solution, const State & rhs);
         void calc_dt();
+        /** @brief The time the next step must not pass: t_stop or the next time-based output. */
+        rtype next_target_time() const;
         void check_fields();
+
+        // A whole step (calc_dt and take_step) as one CUDA graph; see solver_graph.cpp
+        std::string step_graph_unsupported() const;
+        void graph_step();
+        void record_step();
+        void destroy_step_graph();
         void calc_rhs_mixture(State solution, State rhs, rtype t);
         /**
          * @brief Axisymmetric runs: add geometric_source, made high order by the
@@ -276,6 +286,16 @@ class Solver {
         void init_chemistry();
         void allocate_chemistry();
         void advance_chemistry(double dt_chem);
+        /**
+         * @brief SIMPLER balanced splitting (Wu, Ma & Ihme 2019): with
+         *        c = -T(U^n), the reaction substep dU/dt = R(U) - c over dt,
+         *        then the transport substep dU/dt = T(U) + c over dt / 2.
+         */
+        void take_simpler_step();
+        /** @brief SIMPLER: rhs -= T(U^n) on the owned cells. */
+        void subtract_transport_rate(const State & rhs);
+        /** @brief Counts the active cells of a chemistry call; throws if any cell failed on any rank. */
+        void check_chemistry(const CellChemistry::Statistics & stats);
         void update_heat_release_rate();
         /** @brief Over all ranks: owned cells advanced in the last chemistry call, max sub-steps of a cell in the last step. */
         std::pair<uint64_t, double> chemistry_statistics();
@@ -384,6 +404,14 @@ class Solver {
         CellSampler cell_sampler() const { return CellSampler{conservatives, species, primitives}; }
 
     private:
+        // Step graph (solver_graph.cpp)
+        bool cuda_graphs = true;               // [run] cuda_graphs
+        bool use_step_graph = false;
+        void * step_graph_exec = nullptr;      // cudaGraphExec_t
+        Kokkos::View<rtype> step_dt_cfl1;      // device: local, then global minimum
+        Kokkos::View<rtype *> step_scalars;    // device: [t, t_target, dt_scales...]
+        Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> step_io;  // pinned: [t, t_target, dt]
+
         bool distribute = true;
         int halo_layers = 0;
         std::unique_ptr<DistributedMesh> setup;  // during init only
@@ -474,6 +502,7 @@ class Solver {
         Kokkos::View<rtype *[N_DIM + 2]>::host_mirror_type h_face_state;
         Kokkos::View<int32_t *>::host_mirror_type h_face_state_index;
         rtype t_boundary_states;
+        bool boundary_states_steady = false;  // evaluated, and no expression depends on t
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         RiemannSolverType riemann_solver_type;
         rtype low_mach_cutoff = 0.1;
@@ -569,6 +598,8 @@ class Solver {
         uint64_t chem_active_cells = 0;   // owned cells advanced in the last chemistry call
         double t_wall_chemistry = 0.0;
         bool fuse_chemistry = false;      // run(): fuse consecutive half steps
+        bool simpler = false;             // SIMPLER balanced splitting instead of Strang
+        State transport_rate;             // SIMPLER: -c = T(U^n), the transport tendency at the step's start
         bool defer_chemistry = false;     // take_step leaves its last half step pending
         double chemistry_pending = 0.0;   // chemistry time not yet applied to the state
 
