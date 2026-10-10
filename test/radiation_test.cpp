@@ -63,6 +63,13 @@ std::string box(const std::string & radiation, uint32_t n_steps, double dt) {
     return s.str();
 }
 
+// Partial densities for OpticallyThinRadiation::loss, a host-device function, from which nvcc
+// rejects calling a host lambda
+struct PartialDensities {
+    const double * rho_k;
+    KOKKOS_INLINE_FUNCTION double operator()(const uint32_t k) const { return rho_k[k]; }
+};
+
 } // namespace
 
 TEST(RadiationTest, LossMatchesCanteraFlameRadiation) {
@@ -85,7 +92,7 @@ TEST(RadiationTest, LossMatchesCanteraFlameRadiation) {
             const int32_t k = mech.species_index(name);
             rho_k[k] = X * p * mech.species[k].molecular_weight / (chemistry::GAS_CONSTANT * T);
         }
-        EXPECT_NEAR(r.loss(T, [&](uint32_t k) { return rho_k[k]; }), row[4], 1e-9 * row[4]) << "T = " << T;
+        EXPECT_NEAR(r.loss(T, PartialDensities{rho_k.data()}), row[4], 1e-9 * row[4]) << "T = " << T;
     }
 }
 
@@ -123,7 +130,7 @@ TEST(RadiationTest, HomogeneousGasCoolsLikeTheEnergyODE) {
     double T = 2000.0;
     const auto dedt = [&](double e) {
         T = thermo.T_from_e(e, y, T);
-        return -r.loss(T, [&](uint32_t k) { return rho_k[k]; }) / rho;
+        return -r.loss(T, PartialDensities{rho_k.data()}) / rho;
     };
     double e = double(solver.h_conservatives(0, N_DIM + 1)) / rho;
     const double h = dt / 100;
