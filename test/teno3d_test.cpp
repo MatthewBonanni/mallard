@@ -519,7 +519,9 @@ TEST(TENO3DTroubled, FaceValuesDoNotDependOnHowManyTroubledCellsARoundHolds) {
             auto sigma = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->troubled);
             uint32_t n_troubled = 0;
             for (uint32_t c = 0; c < mesh->n_cells; c++) n_troubled += sigma(c) >= teno->sigma_threshold;
-            if (capacity < 1.0_r) EXPECT_GT(n_troubled, 20 * teno->troubled_coeffs.extent(0)) << "order " << order;
+            if (capacity < 1.0_r) {
+                EXPECT_GT(n_troubled, 20 * teno->troubled_coeffs.extent(0)) << "order " << order;
+            }
             auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
             const char * p = reinterpret_cast<const char *>(h.data());
             return std::vector<char>(p, p + h.span() * sizeof(rtype));
