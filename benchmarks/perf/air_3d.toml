@@ -1,0 +1,70 @@
+# Performance set: the flow of flame_3d.toml in air (single gas, Sutherland
+# viscosity, Sigma), the reference of the mixture's cost per cell and step.
+# See benchmarks/README.md.
+
+[run]
+n_steps = 100
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 96
+Ny = 48
+Nz = 48
+Lx = 0.192
+Ly = 0.096
+Lz = 0.096
+periodic = ["z"]
+
+[initialize]
+type = "analytical"
+u = ["17.3", "3.0 * sin(196.35 * x) * cos(65.45 * z)", "3.0 * cos(65.45 * y) * sin(196.35 * x)"]
+p = "101325.0"
+T = "288.0 + 1478.0 * (0.5 * (1 + tanh((x - 0.06) / 0.008)))"
+
+[[boundaries]]
+name = "left"
+type = "nscbc_inlet"
+u = [17.3, 0.0, 0.0]
+p = 101325.0
+T = 288.0
+L = 0.88
+
+[[boundaries]]
+name = "right"
+type = "nscbc_outlet"
+p = 101325.0
+L = 0.88
+
+[[boundaries]]
+name = "bottom"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "top"
+type = "wall_adiabatic"
+
+[numerics]
+riemann_solver = "HLLC"
+convective_flux = "hybrid"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+limiter = "none"
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 101325.0
+T_ref = 288.0
+rho_ref = 1.2256836
+viscosity_model = "sutherland"
+mu = 1.716e-5
+Pr = 0.71
+
+[les]
+model = "sigma"
+
+[output]
+check_interval = 50

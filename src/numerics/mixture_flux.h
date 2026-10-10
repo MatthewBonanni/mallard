@@ -13,6 +13,8 @@
 #ifndef MIXTURE_FLUX_H
 #define MIXTURE_FLUX_H
 
+#include <type_traits>
+
 #include <Kokkos_Core.hpp>
 
 #include "boundary.h"
@@ -358,9 +360,13 @@ struct SpeciesSlotFunctor {
         const uint8_t nq = n_quad();
         // A/2 w_q max(+-mdot_out, 0) at each point of each face
         rtype w_out[teno::MAX_FACES][MAX_Q], w_in[teno::MAX_FACES][MAX_Q];
+        uint32_t faces[teno::MAX_FACES];
+        uint8_t sides[teno::MAX_FACES];
         for (uint8_t i = 0; i < n_faces; i++) {
             const uint32_t f = faces_of_cell(begin + i);
             const bool side_0 = cells_of_face(f, 0) == static_cast<int32_t>(c);
+            faces[i] = f;
+            sides[i] = side_0 ? 0 : 1;
             const rtype scale = 0.5_r * face_area(f);
             for (uint8_t q = 0; q < nq; q++) {
                 rtype w_q;
@@ -374,12 +380,21 @@ struct SpeciesSlotFunctor {
                 w_in[i][q] = scale * w_q * Kokkos::fmax(-m_out, 0.0_r);
             }
         }
+        // Linear reconstruction: the offsets to the faces, shared by all species
+        [[maybe_unused]] rtype r[teno::MAX_FACES][N_DIM];
+        if constexpr (std::is_same_v<Eval, ScalarFaceValues>) {
+            for (uint8_t i = 0; i < n_faces; i++) values.offset(c, faces[i], sides[i], r[i]);
+        }
         for (uint32_t k = 0; k < n_species; k++) {
             FacePointValues Y[teno::MAX_FACES];
-            values.cell_values(c, k, Y);
+            if constexpr (std::is_same_v<Eval, ScalarFaceValues>) {
+                for (uint8_t i = 0; i < n_faces; i++) Y[i][0] = values.value(c, k, r[i]);
+            } else {
+                values.cell_values(c, k, Y);
+            }
             for (uint8_t i = 0; i < n_faces; i++) {
-                const uint32_t f = faces_of_cell(begin + i);
-                const uint8_t side = cells_of_face(f, 0) == static_cast<int32_t>(c) ? 0 : 1;
+                const uint32_t f = faces[i];
+                const uint8_t side = sides[i];
                 rtype out = 0.0_r;
                 for (uint8_t q = 0; q < nq; q++) out += w_out[i][q] * Y[i][q];
                 slots(f, side, k) = out;
@@ -411,13 +426,17 @@ struct SpeciesSumFunctor {
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
         const rtype inv_V = 1.0_r / cell_volume(c);
+        const uint32_t begin = offsets_faces_of_cell(c);
+        const uint8_t n_faces = static_cast<uint8_t>(offsets_faces_of_cell(c + 1) - begin);
+        uint32_t faces[teno::MAX_FACES];
+        uint8_t sides[teno::MAX_FACES];
+        for (uint8_t i = 0; i < n_faces; i++) {
+            faces[i] = faces_of_cell(begin + i);
+            sides[i] = (cells_of_face(faces[i], 0) == static_cast<int32_t>(c)) ? 0 : 1;
+        }
         for (uint32_t k = 0; k < n_species; k++) {
             rtype sum = 0.0_r;
-            for (uint32_t i = offsets_faces_of_cell(c); i < offsets_faces_of_cell(c + 1); i++) {
-                const uint32_t f = faces_of_cell(i);
-                const uint8_t side = (cells_of_face(f, 0) == static_cast<int32_t>(c)) ? 0 : 1;
-                sum += slots(f, 1 - side, k) - slots(f, side, k);
-            }
+            for (uint8_t i = 0; i < n_faces; i++) sum += slots(faces[i], 1 - sides[i], k) - slots(faces[i], sides[i], k);
             rhs(c, k) = sum * inv_V;
         }
     }

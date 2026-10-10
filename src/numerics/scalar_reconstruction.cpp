@@ -106,16 +106,24 @@ struct ScalarLimiterFunctor {
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
-        const uint32_t k_begin = offsets_faces_of_cell(c), k_end = offsets_faces_of_cell(c + 1);
+        const uint32_t k_begin = offsets_faces_of_cell(c);
+        const uint8_t n_faces = static_cast<uint8_t>(offsets_faces_of_cell(c + 1) - k_begin);
+        // Per face: the neighbor, the offset to it with its weight, and the offset to the face centroid
+        uint32_t faces[teno::MAX_FACES];
+        int32_t nbs[teno::MAX_FACES];
+        bool prescribed[teno::MAX_FACES];
+        rtype dx[teno::MAX_FACES][N_DIM], w[teno::MAX_FACES], r[teno::MAX_FACES][N_DIM];
         rtype M[N_DIM * N_DIM] = {};
-        for (uint32_t k = k_begin; k < k_end; k++) {
-            rtype dx[N_DIM];
-            bool prescribed;
-            neighbor(c, faces_of_cell(k), dx, prescribed);
-            const rtype w = 1.0_r / dot<N_DIM>(dx, dx);
+        for (uint8_t m = 0; m < n_faces; m++) {
+            const uint32_t f = faces_of_cell(k_begin + m);
+            faces[m] = f;
+            nbs[m] = neighbor(c, f, dx[m], prescribed[m]);
+            w[m] = 1.0_r / dot<N_DIM>(dx[m], dx[m]);
             for (uint8_t a = 0; a < N_DIM; a++) {
-                for (uint8_t b = 0; b < N_DIM; b++) M[a * N_DIM + b] += w * dx[a] * dx[b];
+                for (uint8_t b = 0; b < N_DIM; b++) M[a * N_DIM + b] += w[m] * dx[m][a] * dx[m][b];
             }
+            const uint8_t s = (cells_of_face(f, 1) == static_cast<int32_t>(c)) ? face_shift(f) : 0;
+            FOR_I_DIM r[m][i] = (face_coords(f, i) - shifts(s, i)) - cell_coords(c, i);
         }
         rtype M_inv[N_DIM * N_DIM];
         invert_matrix<N_DIM>(M, M_inv);
@@ -131,14 +139,9 @@ struct ScalarLimiterFunctor {
             const rtype S_c = scalars(c, j);
             rtype b[N_DIM] = {};
             rtype S_min = S_c, S_max = S_c;
-            for (uint32_t k = k_begin; k < k_end; k++) {
-                const uint32_t f = faces_of_cell(k);
-                rtype dx[N_DIM];
-                bool prescribed;
-                const int32_t nb = neighbor(c, f, dx, prescribed);
-                const rtype S_n = neighbor_value(c, f, nb, prescribed, j);
-                const rtype w = 1.0_r / dot<N_DIM>(dx, dx);
-                FOR_I_DIM b[i] += w * dx[i] * (S_n - S_c);
+            for (uint8_t m = 0; m < n_faces; m++) {
+                const rtype S_n = neighbor_value(c, faces[m], nbs[m], prescribed[m], j);
+                FOR_I_DIM b[i] += w[m] * dx[m][i] * (S_n - S_c);
                 S_min = Kokkos::fmin(S_min, S_n);
                 S_max = Kokkos::fmax(S_max, S_n);
             }
@@ -147,12 +150,8 @@ struct ScalarLimiterFunctor {
             FOR_I_DIM gradients(c, j, i) = g[i];
             if (limiter_type == LimiterType::NONE) continue;
             const rtype scale = j < n_species ? 1.0_r : (j == n_species ? gamma_c : e_scale);
-            for (uint32_t k = k_begin; k < k_end; k++) {
-                const uint32_t f = faces_of_cell(k);
-                const uint8_t s = (cells_of_face(f, 1) == static_cast<int32_t>(c)) ? face_shift(f) : 0;
-                rtype r[N_DIM];
-                FOR_I_DIM r[i] = (face_coords(f, i) - shifts(s, i)) - cell_coords(c, i);
-                const rtype d = dot<N_DIM>(g, r);
+            for (uint8_t m = 0; m < n_faces; m++) {
+                const rtype d = dot<N_DIM>(g, r[m]);
                 const rtype phi_f = limiter_type == LimiterType::BARTH_JESPERSEN
                                         ? barth_jespersen(d, S_max - S_c, S_min - S_c)
                                         : venkatakrishnan(d, S_max - S_c, S_min - S_c, Kh3 * scale * scale);
@@ -161,14 +160,10 @@ struct ScalarLimiterFunctor {
         }
 
         // Physical bounds at every face: 0 <= Y_k <= 1 and gamma above 1
-        for (uint32_t k = k_begin; k < k_end; k++) {
-            const uint32_t f = faces_of_cell(k);
-            const uint8_t s = (cells_of_face(f, 1) == static_cast<int32_t>(c)) ? face_shift(f) : 0;
-            rtype r[N_DIM];
-            FOR_I_DIM r[i] = (face_coords(f, i) - shifts(s, i)) - cell_coords(c, i);
+        for (uint8_t m = 0; m < n_faces; m++) {
             for (uint32_t j = 0; j <= n_species; j++) {
                 rtype d = 0.0_r;
-                FOR_I_DIM d += gradients(c, j, i) * r[i];
+                FOR_I_DIM d += gradients(c, j, i) * r[m][i];
                 const rtype S_c = scalars(c, j);
                 if (j < n_species) {
                     if (d > 0.0_r) phi = Kokkos::fmin(phi, (1.0_r - S_c) / d);

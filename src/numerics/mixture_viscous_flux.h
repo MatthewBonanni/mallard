@@ -93,18 +93,31 @@ struct MixtureGradientFunctor {
     Kokkos::View<rtype **, Kokkos::LayoutRight> bc_values;    // (condition, [T, X_1 .. X_Ns]) of UPT
     uint32_t n_species;
 
+    static constexpr uint32_t CHUNK = 16;  // variables per pass over the stencil
+
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
         const LSQGradientFunctor & f = stencil.faces;
         const uint32_t n_vars = N_DIM + 1 + n_species;
-        for (uint32_t v = 0; v < n_vars; v++) {
-            const rtype q_c = values(c, v);
-            rtype g[N_DIM] = {};
-            for (uint32_t k = stencil.offsets_cells_of_cell(c); k < stencil.offsets_cells_of_cell(c + 1); k++) {
-                const rtype dq = values(stencil.cells_of_cell(k), v) - q_c;
-                FOR_I_DIM g[i] += stencil.weights.cells(k, i) * dq;
+        for (uint32_t v0 = 0; v0 < n_vars; v0 += CHUNK) {
+            const uint32_t n = n_vars - v0 < CHUNK ? n_vars - v0 : CHUNK;
+            rtype q_c[CHUNK], g[CHUNK][N_DIM] = {};
+            for (uint32_t v = 0; v < CHUNK; v++) {
+                if (v < n) q_c[v] = values(c, v0 + v);
             }
-            FOR_I_DIM gradients(c, v, i) = g[i];
+            for (uint32_t k = stencil.offsets_cells_of_cell(c); k < stencil.offsets_cells_of_cell(c + 1); k++) {
+                const uint32_t j = stencil.cells_of_cell(k);
+                rtype w[N_DIM];
+                FOR_I_DIM w[i] = stencil.weights.cells(k, i);
+                for (uint32_t v = 0; v < CHUNK; v++) {
+                    if (v >= n) continue;
+                    const rtype dq = values(j, v0 + v) - q_c[v];
+                    FOR_I_DIM g[v][i] += w[i] * dq;
+                }
+            }
+            for (uint32_t v = 0; v < CHUNK; v++) {
+                if (v < n) FOR_I_DIM gradients(c, v0 + v, i) = g[v][i];
+            }
         }
         rtype W_i[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE W_i[i] = f.W(c, i);
