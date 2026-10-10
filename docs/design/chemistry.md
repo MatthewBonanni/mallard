@@ -894,8 +894,11 @@ decays exponentially instead of vanishing in finite time. `C_reg` is a fixed
 concentration at the scale of the default `atol = 1e-10` on `Y`: the
 concentration `rho Y / W` of a fuel at that mass fraction is about `1e-12`
 kmol/m^3 at 1 atm and above it at higher pressures, so the regularization acts
-where the error control already treats the reactant as zero. The fixed value
-keeps the reaction tables free of the integrator's options. Integer orders,
+where the error control already treats the reactant as zero. It is the
+default of `chemistry.C_reg`: trace fuel that the flow step carries into hot
+burnt gas burns out along `C^0.1` within the step and costs RODAS 20 to 130
+sub-steps (against 2 elsewhere); a larger `C_reg` (opt-in, results change)
+cuts that (performance.md, section 5). Integer orders,
 orders above 1 (bounded slope) and negative orders (whose rates diverge
 themselves) are unchanged. Tests: the Jacobian of the two-step propane
 mechanism against finite differences as each fractional-order reactant goes
