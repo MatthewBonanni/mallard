@@ -168,6 +168,60 @@ every other cell's tables bitwise; `TENO::cells_within_reach()` gives the cells 
 set of changed cells. Rebuilding those after moving nodes reproduces a full setup bitwise (tests on
 prisms, mixed cells and tetrahedra in 3D and triangles in 2D).
 
+### 5. TENO device memory (#58)
+
+Device memory per cell (`cudaMemGetInfo`, everything included) of 3D Taylor-Green runs on one A100 at the setup
+peak and in steady stepping, with a Kokkos Tools library that records every allocation by label. Results are
+bitwise those of `main` (restart files after 20-96 steps of Taylor-Green and of the 3D blast, hexahedra and
+tetrahedra, orders 3, 5 and 6, also with the troubled passes split into 100 rounds).
+
+| bytes per cell, setup peak / steady | cells | main | change 5 | `single_precision_tables` |
+|---|---|---|---|---|
+| TENO5, 100^3 hexahedra | 1.00M | 47.3 K / 47.3 K | 39.8 K / 39.8 K | 25.0 K |
+| TENO5, 55^3 x 6 tetrahedra | 998k | 58.7 K / 58.7 K | 51.2 K / 51.2 K | 30.6 K |
+| TENO3, hexahedra | 1.00M | 18.6 K / 18.6 K | 15.9 K / 15.9 K | |
+| TENO3, tetrahedra | 998k | 17.8 K / 17.8 K | 15.0 K / 15.0 K | |
+| TENO6, 64^3 hexahedra | 262k | 129.6 K / 99.6 K | 77.9 K / 77.9 K | 46.5 K |
+| TENO6, 32^3 x 6 tetrahedra | 197k | 152.0 K / 109.8 K | 85.2 K / 85.2 K | 50.5 K |
+
+What `main` held for TENO5 on hexahedra (1M cells): the packed stencils, 31.7 KB (large-stencil pseudo-inverses
+22.3 KB, sector pseudo-inverses 7.8 KB, stencil cells and mirror faces 1.5 KB), the smoothness-indicator matrices
+(4.8 KB), the troubled passes' scratch for every cell (3.5 KB), the setup's team scratch, which Kokkos sizes for
+every thread the device can hold and keeps (1.7 KB), basis means (0.3 KB), and the solver's fields and mesh (about
+5.5 KB, of which the face states take 2.2 KB). At order 6 the setup's batches (65,536 cells of up to 135 KB of
+outputs) and team scratch set a peak 30% above the steady state.
+
+- The 3D smoothness-indicator matrices are formed in the troubled-cell selection from each cell's central moments
+  (84 values at order 5, 165 at order 6) instead of stored (595 and 1540 values), with the setup's sequence of
+  operations and roundings (no FMA): the selection runs one cell per team, whose threads form the matrix in team
+  scratch, four entries per thread at a time.
+- The troubled passes' scratch holds half the cells (`troubled_capacity`); more troubled cells are done in further
+  rounds, which recompute their central coefficients with the smooth pass's arithmetic.
+- The setup takes its team scratch from a pool with one slot per team that can be resident (0.3 GB instead of
+  1.7-2.2 GB), freed with the setup, bounds its batches by 2 KB per cell, and hands its moments to TENO instead of
+  a copy: the setup peak no longer exceeds the steady state.
+- What remains is mostly the pseudo-inverses (30 KB of the 40 KB per hexahedron). Every cell's are different,
+  bitwise and even at 1e-6 relative, since the equidistant entries of a lattice stencil are ranked in a different
+  order from cell to cell, so tables cannot be shared without changing results. `single_precision_tables`
+  (opt-in) stores them in single precision. Differences from double precision, as a fraction of each field's
+  range: below 1e-7 for Taylor-Green (20 steps) and 2e-8 for the blast on tetrahedra (96 steps), but up to 2.6e-4
+  (order 5), 4.9e-4 (order 6) and 6.9e-3 (order 3) for the blast on hexahedra after 60-80 steps, where the
+  stencil selection near the shock goes the other way in some cells.
+
+Largest Taylor-Green box at TENO5 that runs on one A100-80GB: main fails at 125^3 hexahedra (1.95M cells; out of
+memory allocating the face states), which change 5 runs, as does 145^3 (3.05M) with `single_precision_tables`.
+From the table: about 1.8M, 2.1M and 3.4M hexahedra; 1.45M, 1.65M and 2.75M tetrahedra; at order 6 about 0.65M,
+1.1M and 1.8M hexahedra.
+
+Step times against `main` (A100, best of 2-3): TENO5 Taylor-Green 96^3 151 ms (154), 3D blast 100^3 225 ms (235),
+64^3 blast 67.6 ms (69.9), 32^3 x 6 tetrahedra blast 48.5 ms (51.5), Taylor-Green on 32^3 x 6 tetrahedra 37.1 ms
+(37.9); TENO3 blasts 1-3% faster. At order 6 the step is 0.7-1.1% slower: 75.2 ms (74.7) for the 48^3 blast,
+48.2 ms (47.7) for the 24^3 x 6 tetrahedra blast, where up to 27% of the cells are troubled and forming the
+1540-entry matrices costs more than reading them, and 54.7 ms (54.1) for Taylor-Green on 48^3, where the smooth
+pass, whose code is unchanged, runs 1% slower with this build's memory layout. `single_precision_tables` is
+another 3-8% faster (the smooth pass reads half the bytes). Setup: 4.6 s for 1M hexahedra at order 5 (as on
+main), 21 s for 1M tetrahedra (20 s); at order 6, 7.2 s (6.6 s) and 61 s (58 s), from the smaller batches.
+
 ## Scaling (one node)
 
 A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step

@@ -2040,7 +2040,7 @@ struct TENOFunctor {
     static constexpr uint8_t PARTS = N_CONSERVATIVE;  // threads per cell
     static constexpr uint32_t TEAM_SIZE = TEAM_CELLS * PARTS;
     static constexpr uint8_t CHUNK = (NK + PARTS - 1) / PARTS;
-    static constexpr size_t TEAM_SCRATCH = sizeof(rtype) * NK * N_CONSERVATIVE * TEAM_CELLS + 3 * sizeof(int) * TEAM_CELLS;
+    static constexpr size_t TEAM_SCRATCH = sizeof(rtype) * NK * N_CONSERVATIVE * TEAM_CELLS + 2 * sizeof(int) * TEAM_CELLS;
     uint32_t n_smooth = 0;  // cells to reconstruct when cells is empty
 
     template <typename F>
@@ -2058,13 +2058,13 @@ struct TENOFunctor {
     /**
      * @brief Chunk C of the central coefficients of cell i_cell, into aK_team
      *        (l, var). With QUEUE, chunk 0 also finds sigma, queues the cell if
-     *        troubled and leaves smooth_team[lane] and its place in the queue,
-     *        queue_team[lane].
+     *        troubled and leaves in smooth_team[lane] -1 if smooth, else its
+     *        place in the queue.
      */
     template <uint8_t C, bool QUEUE = true>
     KOKKOS_INLINE_FUNCTION
     void smooth_coefficients(const uint32_t i_cell, const rtype * U0, rtype * aK_team, int * smooth_team,
-                             uint32_t * queue_team, const uint32_t lane) const {
+                             const uint32_t lane) const {
         constexpr uint8_t L0 = C * CHUNK;
         constexpr uint8_t L1 = (L0 + CHUNK < NK) ? L0 + CHUNK : NK;
         const uint16_t ns = stencil_large_size(i_cell);
@@ -2101,12 +2101,9 @@ struct TENOFunctor {
             const rtype sigma = PRIM ? Kokkos::fmax(g_m2, m_m2) / ns : g_m2 / ns;
             sigma_out(i_cell) = sigma;
             const bool smooth = sigma < sigma_threshold;
-            smooth_team[lane] = smooth;
-            if (!smooth) {
-                const uint32_t j = Kokkos::atomic_fetch_add(&n_troubled(), 1u);
-                troubled_cells(j) = i_cell;
-                queue_team[lane] = j;
-            }
+            const uint32_t j = smooth ? 0 : Kokkos::atomic_fetch_add(&n_troubled(), 1u);
+            if (!smooth) troubled_cells(j) = i_cell;
+            smooth_team[lane] = smooth ? -1 : static_cast<int>(j);
         }
     }
 
@@ -2132,7 +2129,6 @@ struct TENOFunctor {
         rtype * aK = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * NK * N_CONSERVATIVE * TEAM_CELLS));
         int * smooth_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
         int * admissible_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
-        uint32_t * queue_team = static_cast<uint32_t *>(team.team_scratch(0).get_shmem(sizeof(uint32_t) * TEAM_CELLS));
 
         const bool active = idx < n;
         const uint32_t i_cell = active ? (cells.extent(0) ? cells(idx) : idx) : 0;
@@ -2145,12 +2141,21 @@ struct TENOFunctor {
         if (active) {
             conservatives(i_cell, U0);
             with_chunk(part, [&](auto C) {
-                smooth_coefficients<decltype(C)::value>(i_cell, U0, aK, smooth_team, queue_team, lane);
+                smooth_coefficients<decltype(C)::value>(i_cell, U0, aK, smooth_team, lane);
             });
         }
         team.team_barrier();
-        const bool smooth = smooth_team[lane];
-        if (active && !smooth && queue_team[lane] < coeffs.extent(0)) store_coefficients(part, queue_team[lane], aK, lane);
+        const int slot = smooth_team[lane];
+        const bool smooth = slot < 0;
+        if (active && !smooth && slot < static_cast<int>(coeffs.extent(0))) {
+            with_chunk(part, [&](auto C) {
+                constexpr uint8_t L0 = decltype(C)::value * CHUNK;
+                constexpr uint8_t L1 = (L0 + CHUNK < NK) ? L0 + CHUNK : NK;
+                for (uint8_t l = L0; l < L1; l++) {
+                    FOR_I_CONSERVATIVE coeffs(slot, l, i) = aK[(l * N_CONSERVATIVE + i) * TEAM_CELLS + lane];
+                }
+            });
+        }
 
         // The cell's face points, shared out among its threads
         const uint8_t n_quad = this->n_quad();
@@ -2475,7 +2480,7 @@ struct TENOFunctor {
                 rtype U0[N_CONSERVATIVE];
                 conservatives(i_cell, U0);
                 with_chunk(part, [&](auto C) {
-                    smooth_coefficients<decltype(C)::value, false>(i_cell, U0, aK, nullptr, nullptr, lane);
+                    smooth_coefficients<decltype(C)::value, false>(i_cell, U0, aK, nullptr, lane);
                 });
                 store_coefficients(part, idx, aK, lane);
             }
