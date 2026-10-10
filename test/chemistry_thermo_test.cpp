@@ -148,7 +148,7 @@ TEST(ChemistryThermoTest, ReaderMatchesCanteraCoefficientsAndMolecularWeights) {
                 ASSERT_EQ(th.model, ThermoModel::NASA7) << what;
                 ASSERT_EQ(th.coeffs.size(), 2u) << what;
                 EXPECT_EQ(th.T_bounds[1], a[0]) << what;
-                for (int j = 0; j < 7; j++) {
+                for (size_t j = 0; j < 7; j++) {
                     EXPECT_EQ(th.coeffs[1][2 + j], a[1 + j]) << what;
                     EXPECT_EQ(th.coeffs[0][2 + j], a[8 + j]) << what;
                 }
@@ -159,13 +159,13 @@ TEST(ChemistryThermoTest, ReaderMatchesCanteraCoefficientsAndMolecularWeights) {
                 for (size_t r = 0; r < th.coeffs.size(); r++) {
                     EXPECT_EQ(th.T_bounds[r], a[1 + 11 * r]) << what;
                     EXPECT_EQ(th.T_bounds[r + 1], a[2 + 11 * r]) << what;
-                    for (int j = 0; j < 9; j++) EXPECT_EQ(th.coeffs[r][j], a[3 + 11 * r + j]) << what;
+                    for (size_t j = 0; j < 9; j++) EXPECT_EQ(th.coeffs[r][j], a[3 + 11 * r + j]) << what;
                 }
             } else {
                 // Cantera: [T0, h0, s0, cp0], SI with kmol
                 ASSERT_EQ(row[2], "ConstantCp") << what;
                 ASSERT_EQ(th.model, ThermoModel::CONSTANT_CP) << what;
-                for (int j = 0; j < 4; j++) expect_close(th.constant_cp[j], a[j], 1e-14, what + " constant-cp");
+                for (size_t j = 0; j < 4; j++) expect_close(th.constant_cp[j], a[j], 1e-14, what + " constant-cp");
             }
         }
     }
@@ -178,7 +178,7 @@ TEST(ChemistryThermoTest, SpeciesPropertiesMatchCanteraIncludingExtrapolation) {
         std::vector<uint32_t> k;
         std::vector<double> T;
         for (const auto & row : ref.rows) {
-            k.push_back(std::stoul(row[0]));
+            k.push_back(static_cast<uint32_t>(std::stoul(row[0])));
             T.push_back(std::stod(row[1]));
         }
         const auto out = species_properties(table, k, T);
@@ -206,7 +206,7 @@ TEST(ChemistryThermoTest, MixturePropertiesMatchCanteraAndTemperatureInvertsEner
             const std::string what = c.name + " state " + std::to_string(i);
             // Energies are compared relative to their scale, h ~ cp T
             const double scale = std::stod(ref.rows[i][1]) * T[i];
-            for (int j = 0; j < 5; j++) {
+            for (size_t j = 0; j < 5; j++) {
                 const double r = std::stod(ref.rows[i][1 + j]);
                 const double s = (j == 2 || j == 3) ? std::max(std::abs(r), scale) : std::abs(r);
                 EXPECT_LE(std::abs(out(i, j) - r), 1e-12 * s) << what << " " << ref.columns[1 + j];

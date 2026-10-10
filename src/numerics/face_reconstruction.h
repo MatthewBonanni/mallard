@@ -296,8 +296,8 @@ class TENO : public FaceReconstruction {
         uint16_t n_stencil_large = 0;
         uint16_t n_stencil_small = 10;
         rtype stencil_factor = 2.0;
-        rtype sigma_threshold = 1.0e-3;
-        rtype sigma_upper = 1.0e-2;
+        rtype sigma_threshold = 1.0e-3_r;
+        rtype sigma_upper = 1.0e-2_r;
         rtype C_T = -1.0;  // Fixed cutoff; negative selects the adaptive cutoff
         bool characteristic = true;
         bool bound_preserving = false;

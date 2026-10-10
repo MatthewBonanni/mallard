@@ -44,7 +44,7 @@ inline std::map<std::string, std::vector<char>> h5_datasets(const std::string & 
             Handle dset(H5Dopen2(group, name, H5P_DEFAULT), H5Dclose, name);
             Handle type(H5Dget_type(dset), H5Tclose, "H5Dget_type");
             Handle space(H5Dget_space(dset), H5Sclose, "H5Dget_space");
-            std::vector<char> bytes(H5Sget_simple_extent_npoints(space) * H5Tget_size(type) + 1);
+            std::vector<char> bytes(static_cast<size_t>(H5Sget_simple_extent_npoints(space)) * H5Tget_size(type) + 1);
             h5::check(H5Dread(dset, type, H5S_ALL, H5S_ALL, H5P_DEFAULT, bytes.data()), name);
             bytes.pop_back();
             datasets[std::string(group_name) + "/" + name] = std::move(bytes);
