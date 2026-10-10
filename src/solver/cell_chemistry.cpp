@@ -513,7 +513,7 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
     Kokkos::parallel_scan("chemistry_queue", n, QueueFunctor{active, queue, cost, previous_cost, 0}, n_active);
     stats.active = n_active;
     if (bin_by_cost && n_active > 0) sort_queue(queue, cost, n_active);
-    const ChemistryCells cells{U,          rhoY, T_seed, chem_h, chem_cost, previous_cost, time_scale,
+    const ChemistryCells cells{U, rhoY, T_seed, chem_h, chem_cost, previous_cost, time_scale,
                                forcing ? forcing->rate.species : SpeciesView(), U_end, rhoY_end};
     const uint32_t kept = balance ? balance->send(cells, queue, n_active) : n_active;
     stats.sent = n_active - kept;
