@@ -1186,21 +1186,24 @@ in batches of the work memory. Between the two, `ChemistryBalance`:
 - each sender packs the end of its queue (the cheapest cells: the queue is
   ordered by cost on GPUs) as raw bits, `N_CONSERVATIVE + Ns + 4` values per
   cell (state, partial densities, `T_SEED`, `CHEM_H`, last cost, multiplier
-  of `dt`), and sends them (GPU-aware where available). The transfer is
+  of `dt`; with SIMPLER also the cell's forcing, its `Ns` species rates
+  `T_k(U^n)` and the `N_CONSERVATIVE` values of its end state
+  `U^n + dt T(U^n)`), and sends them (GPU-aware where available). The transfer is
   completed before the sender integrates its own cells: large GPU messages
   progress only inside MPI calls, and a first version that left them pending
   over the sender's integration made receivers wait for it (det2d on 4 GPUs:
   45 ms per call instead of 37.5 without balancing);
 - receivers integrate their own queue, then the guests with the same kernel
   (sorted by cost, in batches), and return `Ns + 3` values per cell
-  (partial densities, `CHEM_H`, sub-steps, last cost).
+  (partial densities, those of the end state with SIMPLER, `CHEM_H`,
+  sub-steps, last cost).
 
 Each cell's integration reads only its own inputs and takes the same code
 path on every rank (decision 6, [Determinism](#determinism)), so results are
 bitwise those of an unbalanced run and of a serial one;
 `MPITest.ChemistryLoadBalancingMatchesSerial` checks it on 1-4 ranks (Euler,
 Navier-Stokes with fused half steps, the thickened flame's multiplier of
-`dt`) and that cells did move. Restarts are unaffected: the plan uses only
+`dt`, SIMPLER with and without it) and that cells did move. Restarts are unaffected: the plan uses only
 the last call's costs, which are not restarted, and changes only where cells
 are integrated. The summary reports, for every distributed reacting run,
 the sum over calls of the slowest rank's chemistry time against the mean,
