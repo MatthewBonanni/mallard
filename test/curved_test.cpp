@@ -317,7 +317,7 @@ TEST(CurvedGeometry, CurvedFaceRulesCloseEveryCell) {
             }
             if (g.face_is_curved(f)) {
                 const double r = std::hypot(x[q][0], x[q][1]);
-                EXPECT_NEAR(std::min(std::abs(r - R_IN), std::abs(r - R_OUT)), 0.0, 1e-14);
+                EXPECT_NEAR(std::min(std::abs(r - R_IN), std::abs(r - R_OUT)), 0.0, precision_tol<double>(1e-14, 1e-6));
                 // The normal of a circle is radial
                 // (up to the shift that closes the cell, by the quadrature error of the area vector)
                 EXPECT_NEAR(std::abs(n[q][0] * x[q][1] - n[q][1] * x[q][0]) / r, 0.0, 1e-6);

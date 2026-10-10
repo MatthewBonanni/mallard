@@ -98,7 +98,7 @@ TEST(Curved3DGeometry, ShellVolumeAndMomentsAreExactWithProjectedWalls) {
         EXPECT_NEAR(V, exact_V, roundoff(1e-11) * exact_V) << prisms;
         double I = 0.0;
         for (double v : cell_integrals(*mesh, 4, [](const curved::Vec3 & x) { return x[0] * x[0] + x[1] * x[1] + x[2] * x[2]; })) I += v;
-        EXPECT_NEAR(I, 4.0 / 5.0 * M_PI * (std::pow(R_OUT, 5) - std::pow(R_IN, 5)), 1e-10) << prisms;
+        EXPECT_NEAR(I, 4.0 / 5.0 * M_PI * (std::pow(R_OUT, 5) - std::pow(R_IN, 5)), roundoff(1e-10)) << prisms;
         // Straight walls lose O(h^2) of it
         auto straight = shell_mesh(4, 2, prisms, "straight");
         double V_straight = 0.0;
