@@ -133,12 +133,13 @@ TEST(MPITest, GasMixtureMatchesSerial) {
     // as their owners'; with TENO also the troubled cells' stencil choices and
     // the scalars' bound-preserving factors, and with double flux the frozen
     // thermodynamics of each step; with chemistry each cell's reactor; with
-    // transport the halo cells' coefficients and gradients
+    // transport the halo cells' coefficients and gradients; radiation is pointwise
     const std::array<std::string, 4> schemes[] = {{"", "type = \"MUSCL\"\n", "", "euler"},
                                                   {"", "type = \"TENO\"\norder = 3\n", "", "euler"},
                                                   {"double_flux = true\n", "type = \"MUSCL\"\n", "", "euler"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n", "euler"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes"},
+                                                  {"", "type = \"MUSCL\"\n", "[chemistry]\n[radiation]\n", "navier_stokes"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\ncoupling = \"simpler\"\n",
                                                    "navier_stokes"}};
     for (const auto & [extra, reconstruction, chemistry, type] : schemes) {
@@ -149,15 +150,19 @@ TEST(MPITest, GasMixtureMatchesSerial) {
 TEST(MPITest, ChemistryLoadBalancingMatchesSerial) {
     // The hot half of the channel reacts and the cold half does not, so ranks
     // integrate each other's cells; each cell's reactor gives the same bits
-    // wherever it runs, also with fused half steps and the thickened flame's
-    // multiplier of dt
+    // wherever it runs, also with fused half steps, the thickened flame's
+    // multiplier of dt and SIMPLER's forcing
     const std::string balanced = "[chemistry]\nload_balance = true\n";
     const std::string tfles = "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
                               "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n";
     const std::string inputs[] = {mixture_input("", "type = \"MUSCL\"\n", balanced, "euler"),
                                   mixture_input("", "type = \"MUSCL\"\n", balanced + "fuse_half_steps = true\n",
                                                 "navier_stokes"),
-                                  mixture_input("", "type = \"MUSCL\"\n", balanced, "navier_stokes") + tfles};
+                                  mixture_input("", "type = \"MUSCL\"\n", balanced, "navier_stokes") + tfles,
+                                  mixture_input("", "type = \"MUSCL\"\n", balanced + "coupling = \"simpler\"\n",
+                                                "navier_stokes"),
+                                  mixture_input("", "type = \"MUSCL\"\n", balanced + "coupling = \"simpler\"\n",
+                                                "navier_stokes") + tfles};
     for (const std::string & input : inputs) {
         expect_matches_serial(input, [](const Solver & s) {
             if (s.is_distributed()) {

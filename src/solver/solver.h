@@ -33,6 +33,7 @@
 #include "tfles.h"
 #include "mixture.h"
 #include "cell_chemistry.h"
+#include "radiation.h"
 #include "scalar_reconstruction.h"
 #include "data_writer.h"
 #include "statistics.h"
@@ -373,6 +374,9 @@ class Solver {
 
     protected:
         void init_mesh();
+        /** @brief Mixtures: read [radiation]; subtract the optically thin radiative loss from the energy RHS. */
+        void init_radiation();
+        void add_radiation(StateView rhs, SpeciesView rhoY);
         void init_physics();
         void init_numerics();
         void init_boundaries();
@@ -614,6 +618,11 @@ class Solver {
         State transport_rate;             // SIMPLER: -c = T(U^n), the transport tendency at the step's start
         bool defer_chemistry = false;     // take_step leaves its last half step pending
         double chemistry_pending = 0.0;   // chemistry time not yet applied to the state
+
+        // Optically thin radiation ([radiation])
+        bool radiating = false;
+        chemistry::OpticallyThinRadiation radiation;
+        Kokkos::View<rtype *, Kokkos::HostSpace> h_qrad;  // output: radiative loss [W/m^3]
 
         // Source terms
         bool has_gravity = false;
