@@ -73,7 +73,7 @@ void Solver::init_chemistry() {
         chemistry_lanes = static_cast<uint32_t>(v.as_integer());
     }
     reacting = true;
-    kinetics = chemistry::make_kinetics_table(mech);
+    kinetics = chemistry::make_kinetics_table(mech, chemistry_options.C_reg);
 }
 
 void Solver::allocate_chemistry() {

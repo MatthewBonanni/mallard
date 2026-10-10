@@ -184,6 +184,8 @@ chemistry::ReactorOptions reactor_options(const toml::value & input) {
     if (!(options.integrator.rtol > 0.0)) throw InputError("chemistry.rtol must be positive.");
     if (!(options.atol_Y > 0.0)) throw InputError("chemistry.atol must be positive.");
     if (table.contains("sparse")) options.sparse = toml::find<bool>(table, "sparse") ? 1 : 0;
+    options.C_reg = find_double_or(table, "C_reg", options.C_reg);
+    if (!(options.C_reg > 0.0)) throw InputError("chemistry.C_reg must be positive.");
     if (table.contains("max_steps")) {
         const toml::value & v = table.at("max_steps");
         if (!v.is_integer() || v.as_integer() < 1) {
