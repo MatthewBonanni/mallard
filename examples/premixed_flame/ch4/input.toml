@@ -1,0 +1,82 @@
+# Freely propagating stoichiometric CH4/air flame at 300 K and 1 atm with
+# GRI-3.0 and mixture-averaged transport (V8 of docs/design/chemistry.md), in
+# the flame's frame: the fresh mixture enters on the left at Cantera's flame
+# speed, 0.3758 m/s, and leaves through a pressure outlet. 300 cells, 20 per
+# thermal thickness (0.437 mm), from 6 thicknesses upstream of the flame to 9
+# downstream; five flame times. Make the initial state from Cantera's flame
+# first, from this directory (flame_reference.py computes all twenty V8
+# flames, a few minutes):
+#
+#   python ../../../tools/flame_reference.py ../reference full
+#   python ../../../tools/flame_restart.py full/ch4_phi1.0_mix_full.csv \
+#       ../../../mechanisms/gri30.yaml gri30 20 . --flame-times 5 --outputs 50
+#
+# then run (445,000 steps, about 2 hours on one A100) and measure the flame
+# speed with
+#   python ../../../tools/flame_speed.py . 0.375759
+# The consumption speed settles 1.3% below Cantera's after about two flame
+# times. tools/flame_sweep.py runs and reports the whole sweep (phi 0.6-1.4,
+# both transport models, 10-40 cells per thickness, two CFL numbers).
+
+[run]
+t_stop = 0.0058185519446889312
+cfl = 1.0
+
+[mesh]
+type = "cartesian"
+Nx = 300
+Ny = 1
+Lx = 0.0065591162540103382
+Ly = 0.00021863720846701127
+
+[initialize]
+type = "restart"
+file = "flame.restart"
+
+[[boundaries]]
+name = "left"
+type = "upt"
+u = [0.37575879797133949, 0.0]
+p = 101325.0
+T = 300
+X = { "O2" = 0.19011406844156664, "CH4" = 0.095057034220792327, "N2" = 0.71482889733764099 }
+
+[[boundaries]]
+name = "right"
+type = "p_out"
+p = 101325.0
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../../mechanisms/gri30.yaml"
+phase = "gri30"
+transport = "mixture_averaged"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+
+[output]
+check_interval = 2000
+
+[[write_data]]
+prefix = "./solut/flame"
+format = "vtu"
+time_interval = 0.00011637103889377862
+variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"]

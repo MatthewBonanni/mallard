@@ -860,10 +860,9 @@ figure: Sigma with Scotti's width, the default). MKM's `Re_tau = 587.2`:
 3. **Volvo bluff-body flame** (Sjunnesson, Henrikson & Löfström 1992),
    propane/air `phi = 0.65`, non-reacting
    and reacting: mean and RMS axial velocity at `x/h = 0.375, 0.95, 1.53,
-   3.75, 9.4` within 10% of `U_b`, and the recirculation length. Its inflow
-   is laminar in most LES studies, so it does **not** need #159; a slot or
-   Bunsen flame (Filatyev et al. 2005; Dunn et al. 2010) would, and is listed
-   as conditional on #159.
+   3.75, 9.4` within 10% of `U_b`, and the recirculation length. Results
+   below: non-reacting done; reacting set up but not run at an acceptable
+   thickening (see its plan).
 
 #### Results: premixed flame in decaying turbulence (`examples/flame_turbulence`)
 
@@ -983,6 +982,107 @@ heat release the right way at the finer width and overcorrects at the
 coarser one, where `tau_mix = Delta^2 / (nu + nu_t)` with `C_mix = 1`
 overestimates the mixing time; it ships as experimental, not as a default.
 
+#### Results: Volvo bluff body, non-reacting (`examples/volvo_bluff_body`)
+
+![LES of the non-reacting Volvo bluff-body flow against the LDA data](../images/volvo_cold_les.png)
+
+The rig of Sjunnesson et al. at the conditions of the AIAA Model Validation
+for Propulsion workshop: a channel of height `3 D` with an equilateral
+triangle of edge `D = 40` mm, air at 288 K and `U_b = 16.6` m/s
+(`Re_D = 45,000`), span periodic over `2 D` (the workshop's choice; the rig
+is `6 D` wide), inlet `5 D` upstream of the base (`nscbc_inlet` with
+digital-filter turbulence, `u' = 5% U_b`, `L = 10` mm), outlet `17 D`
+downstream (`nscbc_outlet`), no-slip adiabatic walls without a wall model.
+Sigma with Scotti's width, hybrid flux, MUSCL without limiter, 2.7M
+hexahedra (`tools/make_volvo_mesh.py`): `Delta = 1.25` mm `= D / 32` in the
+near wake and shear layers, 0.6 mm at the separation corners. Statistics
+over 0.08-0.30 s (about 26 shedding periods, 4 flow-throughs of the
+domain), averaged over the span. Reference: the LDA data as plotted by Wu
+et al. (2017), digitized from the vector figures
+(`examples/volvo_bluff_body/reference`).
+
+| Quantity | LES | Experiment |
+|---|---|---|
+| Recirculation length `L_r / D` (mean `U = 0` on the centerline) | 1.34 | 1.35 |
+| Centerline minimum of `U / U_b` (at `x / D`) | -0.59 (0.61) | -0.64 (0.75) |
+| Mean `|U - U_exp| / U_b` at `x/D` = 0.375 / 0.95 / 1.53 / 3.75 / 9.4 | 0.13 / 0.14 / 0.11 / 0.07 / 0.08 | |
+| Mean `|u' - u'_exp| / U_b` at the same stations | 0.05 / 0.08 / 0.08 / 0.05 / 0.06 | |
+| Shedding frequency (Strouhal `f D / U_b`) | 118 Hz (0.285) | |
+| `eps_num / eps_sgs`; shares numerical / SGS / molecular | **-0.38**; -52 / 135 / 17% | |
+
+- The recirculation length is within 1% and the RMS velocity within 10% of
+  `U_b` at every station. The mean axial velocity is within 10% at
+  `x/D >= 3.75` but 11-14% off (mean over each profile's points) in the
+  near wake, where the error comes from the steep shear layers and the outer
+  flow (1.6 `U_b` against 1.7 at `x/D = 0.95`); downstream of the bubble
+  the centerline velocity recovers more slowly than measured (0.80 against
+  0.97 `U_b` at `x/D = 5`), which Wu et al. (2017) also report, with other
+  solvers, for this domain and inflow. The statistics at `x/D = 9.4` are not converged
+  (asymmetric).
+- **Budget**: `eps_num` is negative and steady (-0.38 `eps_sgs` in every
+  40 ms window from 0.08 to 0.30 s): the convective operator feeds resolved
+  energy at 38% of the rate the model removes it, rather than dissipating
+  it. The criterion `eps_num <= 0.5 eps_sgs` holds, but the sign means the
+  model's dissipation is partly offset by the scheme, not that the scheme
+  helps. The KEEP flux preserves kinetic energy exactly only for cell values
+  (section 4.3); with the unlimited MUSCL states on this stretched,
+  non-orthogonal mesh it does not, as TENO's stencil selection did not in
+  section 8.1. The source has not been localized (the budget is a global
+  sum). Model-off runs were not made for this case.
+- **Mesh orthogonality matters for the central flux.** A first mesh had
+  vertical mesh lines meeting the slanted faces at 60 degrees: the wall
+  cells there grew grid-scale velocity up to Mach 0.4-0.8 within 15-40 ms
+  (also with `upwind_floor = 0.05`), while the same flow with HLLC stayed
+  below 0.15. With mesh lines normal to the faces the largest Mach number
+  stays at 0.2 (the separation corners). A non-rectangular inlet block
+  (curved mesh lines up to the inlet face) diverged in 230 steps; the inlet
+  half of the upstream block is now Cartesian.
+- Cost: 626,000 steps of 0.48 us (acoustic CFL 0.8 at the 0.54 mm wall
+  cells), 14 ms each on four A100s (2.8 hours).
+
+#### Volvo bluff body, reacting: set up, not validated
+
+`examples/volvo_bluff_body/reacting.toml`: propane-air at `phi = 0.65`, 288
+K, `U_b = 17.3` m/s; `mechanisms/c3h8_2step.yaml`, the two-step mechanism of
+Westbrook & Dryer (1981) with its fuel step tuned to GRI-Mech 3.0's laminar
+flame (`s_L` 0.209 m/s as GRI, `T_b` 1766 K against 1792, thermal thickness
+0.471 mm against 0.552; Mallard's 1D flame on it: `s_L` -1.5%, `T_max` 1767
+K, thickness 0.473 mm). TFLES with the eddy-viscosity efficiency.
+
+What a first attempt on a 2 mm mesh (0.66M cells, `F = 21`) showed before
+it was stopped:
+
+- **Cost**: 85 ms per step on four A100s, 8M cells/s, about 24 times the
+  cost per cell of the non-reacting flow (chemistry about 40% of it); unity
+  Lewis numbers saved nothing and looser integrator tolerances (`rtol` 1e-5,
+  `atol` 1e-8) made the chemistry five times slower.
+- **Ignition**: burnt gas only in the wake was flushed out before the
+  recirculation zone formed, and the flame blew off. Burnt gas filling the
+  channel downstream of the base works, but the fresh/burnt contact the
+  inflow then pushes out overshoots under the central flux (2550 K from a 2
+  mm edge, 1890 K from an 8 mm one); double flux diverged within 700-2800
+  steps.
+
+**Thickening must stay at `F <= 5`**, i.e. `Delta <= delta_L = 0.47` mm
+wherever the flame is, with `n_res = 5`. Estimated cost (0.20 s simulated:
+0.06 s to establish the flame, 0.14 s of statistics; acoustic time step
+proportional to the smallest cell; 2M cells/s per A100):
+
+| Mesh | Cells | `F` | Steps | Time on A100s | GPU hours |
+|---|---|---|---|---|---|
+| 2 mm | 0.66M | 21 | 470k | 11 h on 4 | 45 |
+| 1.25 mm (the non-reacting mesh) | 2.7M | 13 | 800k | 19 h on 16 | 300 |
+| 1.0 mm | 5.3M | 11 | 1.0M | 31 h on 24 | 740 |
+| 0.47 mm in the flame region (x < 10 D), coarser elsewhere, span 2 D | ~28M | 5 | 1.3M | ~220 h on 24 | ~5,000 |
+| the same, span 1 D | ~15M | 5 | 1.3M | ~120 h on 24 | ~2,700 |
+
+The `F <= 5` case is out of reach until the mixture solver is faster per
+cell; the two-step mechanism is already the smallest that gives `s_L`
+and `T_b`, so chemistry is not the lever. The affordable reacting test of
+the inflow-outflow path at `F <= 5` is a premixed slot (Bunsen) jet with
+digital-filter inflow, LES against a Mallard DNS of the same case, as
+for the flame in decaying turbulence.
+
 ## 9. Stages
 
 One pull request each, stacked; the umbrella issue links them.
@@ -1056,3 +1156,5 @@ with the stage that implements them.
 - Vreman 2004, *Phys. Fluids* 16, 3670. [doi:10.1063/1.1785131](https://doi.org/10.1063/1.1785131)
 - Vreman, Geurts & Kuerten 1995, *Appl. Sci. Res.* 54, 191. [doi:10.1007/BF00849116](https://doi.org/10.1007/BF00849116)
 - Wang, Boileau & Veynante 2011, *Combust. Flame* 158, 2199. [doi:10.1016/j.combustflame.2011.04.008](https://doi.org/10.1016/j.combustflame.2011.04.008)
+- Westbrook & Dryer 1981, *Combust. Sci. Technol.* 27, 31. [doi:10.1080/00102208108946970](https://doi.org/10.1080/00102208108946970)
+- Wu, Ma, Lv & Ihme 2017, AIAA Paper 2017-1573 (arXiv:1707.05805). [doi:10.2514/6.2017-1573](https://doi.org/10.2514/6.2017-1573)
