@@ -28,6 +28,7 @@ struct ReactorOptions {
     RosenbrockOptions integrator;
     double atol_Y = 1e-10;
     int sparse = -1;  // linear solver: 0 dense LU, 1 sparse LU, -1 automatic (use_sparse_lu)
+    double C_reg = KineticsTable<Kokkos::HostSpace>::C_REG;  // regularization of fractional orders (KineticsTable)
 };
 
 /**

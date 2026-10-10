@@ -51,6 +51,15 @@ template <bool Sparse>
 using WideTeamPolicy = Kokkos::TeamPolicy<TeamTag<Sparse>, Kokkos::LaunchBounds<MAX_TEAM_LANES, 512 / MAX_TEAM_LANES>>;
 static_assert(std::is_same_v<WideTeamPolicy<false>::member_type, Member>);
 
+/** @brief Tag of the thread-per-cell kernel with at most N doubles of work memory per cell on the stack. */
+template <uint32_t N>
+struct LocalWork {
+    static constexpr uint32_t PIVOTS = N / 16;  // n^2 <= N: n <= sqrt(N) <= N / 16 from N = 256
+};
+// Stack work memory sizes, smallest first; larger reactors use the global work array
+constexpr uint32_t LOCAL_SMALL = 256, LOCAL_LARGE = 1024;
+constexpr bool ON_GPU = !Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace, Kokkos::HostSpace>::accessible;
+
 /**
  * @brief Mass fractions (double) and temperature of a cell; returns its
  *        specific internal energy.
@@ -226,30 +235,44 @@ struct AdvanceFunctor {
         return (rho_e_end - rho * e) / (dt * rho * s);
     }
 
-    /** @brief One thread per cell. */
+    /** @brief One thread per cell, with its work memory in the global work array. */
     KOKKOS_INLINE_FUNCTION
-    void operator()(const uint32_t i, uint32_t & failures) const {
+    void operator()(const uint32_t i, uint32_t & failures) const { advance_cell(i, &work(i, 0), &pivot(i, 0), failures); }
+
+    /**
+     * @brief One thread per cell, with its work memory (at most N doubles) on
+     *        the thread's stack: GPUs interleave the threads' local memory, so
+     *        that the lanes of a warp at the same offset share cache lines.
+     */
+    template <uint32_t N>
+    KOKKOS_INLINE_FUNCTION void operator()(LocalWork<N>, const uint32_t i, uint32_t & failures) const {
+        double buffer[N];
+        uint32_t pivots[LocalWork<N>::PIVOTS];
+        advance_cell(i, buffer, pivots, failures);
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    void advance_cell(const uint32_t i, double * Y, uint32_t * pivots, uint32_t & failures) const {
         const uint32_t c = queue(i), ns = gas.n_species;
-        double * Y = &work(i, 0);
         double T;
         const double e = cell_composition(gas, U, rhoY, T_seed, c, Y, T);
         const double rho = static_cast<double>(U(c, 0));
         double h = static_cast<double>(chem_h(c));
         chemistry::RosenbrockResult r;
         if (forcing_offset > 0) {
-            double * g = &work(i, forcing_offset);
+            double * g = Y + forcing_offset;
             for (uint32_t k = 0; k <= ns; k++) g[k] = cell_forcing(c, k, rho, e);
             const chemistry::SerialLanes one;
             r = sparse ? chemistry::advance_reactor<true>(one, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options,
-                                                          Y + ns, &pivot(i, 0), chemistry::NoObserver(), &pattern,
+                                                          Y + ns, pivots, chemistry::NoObserver(), &pattern,
                                                           nullptr, g)
                        : chemistry::advance_reactor<false>(one, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options,
-                                                           Y + ns, &pivot(i, 0), chemistry::NoObserver(), &pattern,
+                                                           Y + ns, pivots, chemistry::NoObserver(), &pattern,
                                                            nullptr, g);
             const double rho_end = static_cast<double>(U_end(c, 0));
             for (uint32_t k = 0; k < ns; k++) rhoY_end(c, k) = static_cast<rtype>(rho_end * Y[k]);
         } else {
-            r = chemistry::advance_reactor(gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options, Y + ns, &pivot(i, 0),
+            r = chemistry::advance_reactor(gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options, Y + ns, pivots,
                                            chemistry::NoObserver(), sparse ? &pattern : nullptr);
             for (uint32_t k = 0; k < ns; k++) rhoY(c, k) = static_cast<rtype>(rho * Y[k]);
         }
@@ -567,7 +590,16 @@ uint32_t CellChemistry::integrate(const ChemistryCells & cells, const Kokkos::Vi
         }
         if (n_lanes == 1) {
             uint32_t f = 0;
-            Kokkos::parallel_reduce("chemistry_advance", HeavyRange<>(0, m), functor, Kokkos::Sum<uint32_t>(f));
+            const size_t size = work.extent(1);
+            if (ON_GPU && size <= LOCAL_SMALL) {
+                Kokkos::parallel_reduce("chemistry_advance", HeavyRange<LocalWork<LOCAL_SMALL>>(0, m), functor,
+                                        Kokkos::Sum<uint32_t>(f));
+            } else if (ON_GPU && size <= LOCAL_LARGE) {
+                Kokkos::parallel_reduce("chemistry_advance", HeavyRange<LocalWork<LOCAL_LARGE>>(0, m), functor,
+                                        Kokkos::Sum<uint32_t>(f));
+            } else {
+                Kokkos::parallel_reduce("chemistry_advance", HeavyRange<>(0, m), functor, Kokkos::Sum<uint32_t>(f));
+            }
             failures += f;
         } else if (n_wide == 0) {
             launch_teams(Kokkos::DefaultExecutionSpace(), functor, m, n_threads, n_lanes, sparse, fast_bytes,

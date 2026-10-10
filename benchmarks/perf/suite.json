@@ -3,6 +3,8 @@
     {"name": "teno5_2d", "build": "2d", "program": "Mallard", "input": "teno5_2d.toml"},
     {"name": "muscl_2d", "build": "2d", "program": "Mallard", "input": "muscl_2d.toml"},
     {"name": "teno5_3d", "build": "3d", "program": "Mallard", "input": "teno5_3d.toml"},
+    {"name": "air_3d", "build": "3d", "program": "Mallard", "input": "air_3d.toml"},
+    {"name": "flame_3d", "build": "3d", "program": "Mallard", "input": "flame_3d.toml"},
     {"name": "h2o2", "build": "2d", "program": "MallardReactor", "input": "../chemistry/h2o2.toml"},
     {"name": "gri30", "build": "2d", "program": "MallardReactor", "input": "../chemistry/gri30.toml"}
   ]

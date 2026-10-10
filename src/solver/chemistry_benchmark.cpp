@@ -57,7 +57,7 @@ ChemistryBenchmark run_chemistry_benchmark(const toml::value & input) {
     const chemistry::ReactorOptions options = reactor_options(input);
     const chemistry::Mechanism & mech = model.mechanism();
     const auto thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(mech);
-    const auto host_kinetics = chemistry::make_kinetics_table<Kokkos::HostSpace>(mech);
+    const auto host_kinetics = chemistry::make_kinetics_table<Kokkos::HostSpace>(mech, options.C_reg);
     const uint32_t ns = mech.n_species();
     std::vector<double> Y = model.mass_fractions(table, "reactor");
     const double rho = p0 / (thermo.gas_constant(chemistry::MassFractions{Y.data()}) * T0);
@@ -119,7 +119,7 @@ ChemistryBenchmark run_chemistry_benchmark(const toml::value & input) {
     cell_options.threads = static_cast<uint32_t>(threads);
     cell_options.shared = static_cast<int>(toml::find_or<int64_t>(bench, "shared", -1));
     CellChemistry cells;
-    cells.init(model.device(), mech, chemistry::make_kinetics_table(mech), cell_options, n_cells);
+    cells.init(model.device(), mech, chemistry::make_kinetics_table(mech, options.C_reg), cell_options, n_cells);
 
     logging::items(model.summary());
     logging::items({

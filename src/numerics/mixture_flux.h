@@ -13,6 +13,8 @@
 #ifndef MIXTURE_FLUX_H
 #define MIXTURE_FLUX_H
 
+#include <type_traits>
+
 #include <Kokkos_Core.hpp>
 
 #include "boundary.h"
@@ -351,8 +353,66 @@ struct SpeciesSlotFunctor {
         }
     }
 
+    /**
+     * @brief Linear reconstruction (ScalarFaceValues, one point per face):
+     *        the faces' offsets and weights are shared by all species and
+     *        held in registers, the face loops unrolled.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void linear(const uint32_t c) const {
+        constexpr uint8_t NF = teno::MAX_FACES;
+        const uint32_t begin = offsets_faces_of_cell(c);
+        const uint8_t n_faces = static_cast<uint8_t>(offsets_faces_of_cell(c + 1) - begin);
+        rtype w_out[NF] = {}, w_in[NF] = {}, r[NF][N_DIM] = {};
+        uint32_t faces[NF] = {};
+        uint8_t sides[NF] = {};
+        bool boundary = false;
+        for (uint8_t i = 0; i < NF; i++) {
+            if (i >= n_faces) continue;
+            const uint32_t f = faces_of_cell(begin + i);
+            const bool side_0 = cells_of_face(f, 0) == static_cast<int32_t>(c);
+            faces[i] = f;
+            sides[i] = side_0 ? 0 : 1;
+            boundary = boundary || cells_of_face(f, 1) < 0;
+            const rtype scale = 0.5_r * face_area(f);
+            rtype w_q;
+            if constexpr (N_DIM == 2) {
+                w_q = face_weights.extent(0) ? face_weights(f, 0) : quad_weights(0);
+            } else {
+                w_q = face_weights(f, 0);
+            }
+            const rtype m_out = side_0 ? face_mdot(f, 0) : -face_mdot(f, 0);
+            w_out[i] = scale * w_q * Kokkos::fmax(m_out, 0.0_r);
+            w_in[i] = scale * w_q * Kokkos::fmax(-m_out, 0.0_r);
+            values.offset(c, f, sides[i], r[i]);
+        }
+        for (uint32_t k = 0; k < n_species; k++) {
+            for (uint8_t i = 0; i < NF; i++) {
+                if (i >= n_faces) continue;
+                const rtype Y = values.value(c, k, r[i]);
+                rtype out = 0.0_r;
+                out += w_out[i] * Y;
+                slots(faces[i], sides[i], k) = out;
+            }
+            if (!boundary) continue;
+            for (uint8_t i = 0; i < n_faces; i++) {
+                if (cells_of_face(faces[i], 1) >= 0) continue;
+                const rtype Y = values.value(c, k, r[i]);
+                rtype Y_ext[MAX_Q];
+                exterior_Y(faces[i], k, &Y, Y_ext);
+                rtype in = 0.0_r;
+                in += w_in[i] * Y_ext[0];
+                slots(faces[i], 1, k) = in;
+            }
+        }
+    }
+
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
+        if constexpr (std::is_same_v<Eval, ScalarFaceValues>) {
+            linear(c);
+            return;
+        }
         const uint32_t begin = offsets_faces_of_cell(c);
         const uint8_t n_faces = static_cast<uint8_t>(offsets_faces_of_cell(c + 1) - begin);
         const uint8_t nq = n_quad();
@@ -411,12 +471,20 @@ struct SpeciesSumFunctor {
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
         const rtype inv_V = 1.0_r / cell_volume(c);
+        const uint32_t begin = offsets_faces_of_cell(c);
+        const uint8_t n_faces = static_cast<uint8_t>(offsets_faces_of_cell(c + 1) - begin);
+        constexpr uint8_t NF = teno::MAX_FACES;
+        uint32_t faces[NF] = {};
+        uint8_t sides[NF] = {};
+        for (uint8_t i = 0; i < NF; i++) {
+            if (i >= n_faces) continue;
+            faces[i] = faces_of_cell(begin + i);
+            sides[i] = (cells_of_face(faces[i], 0) == static_cast<int32_t>(c)) ? 0 : 1;
+        }
         for (uint32_t k = 0; k < n_species; k++) {
             rtype sum = 0.0_r;
-            for (uint32_t i = offsets_faces_of_cell(c); i < offsets_faces_of_cell(c + 1); i++) {
-                const uint32_t f = faces_of_cell(i);
-                const uint8_t side = (cells_of_face(f, 0) == static_cast<int32_t>(c)) ? 0 : 1;
-                sum += slots(f, 1 - side, k) - slots(f, side, k);
+            for (uint8_t i = 0; i < NF; i++) {
+                if (i < n_faces) sum += slots(faces[i], 1 - sides[i], k) - slots(faces[i], sides[i], k);
             }
             rhs(c, k) = sum * inv_V;
         }
