@@ -346,9 +346,17 @@ struct MixtureViscousFluxFunctor {
                 return two_cells ? 0.5 * (static_cast<double>(scalars(G.c0, k)) + static_cast<double>(scalars(G.c1, k)))
                                  : static_cast<double>(scalars(c0, k));
             };
+            // c_k and dX_k/dn of the first species, for the fluxes
+            constexpr uint32_t KEPT = 16;
+            double kept_c[KEPT] = {}, kept_dX[KEPT] = {};
             double correction = 0.0, sum_Y = 0.0;
             for (uint32_t k = 0; k < ns; k++) {
-                correction += c_k(k) * dX_dn(k);
+                const double c = c_k(k), dX = dX_dn(k);
+                if (k < KEPT) {
+                    kept_c[k] = c;
+                    kept_dX[k] = dX;
+                }
+                correction += c * dX;
                 sum_Y += Y_k(k);
             }
             correction /= sum_Y;
@@ -363,7 +371,8 @@ struct MixtureViscousFluxFunctor {
             };
             double enthalpy = 0.0;
             for (uint32_t k = 0; k < ns; k++) {
-                double j = -c_k(k) * dX_dn(k) + Y_k(k) * correction;
+                const double c = k < KEPT ? kept_c[k] : c_k(k), dX = k < KEPT ? kept_dX[k] : dX_dn(k);
+                double j = -c * dX + Y_k(k) * correction;
                 if (soret) j -= DT_k(k) * dlnT_dn;
                 enthalpy += gas.thermo.h_RT(k, p) * RT * gas.thermo.inv_W(k) * j;
                 slots(i_face, 0, k) += static_cast<rtype>(static_cast<double>(A) * j);
