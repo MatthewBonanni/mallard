@@ -331,7 +331,7 @@ struct WideCountFunctor {
     Kokkos::View<float *> cost;
     float threshold;  // minus the cost
 
-    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t i, uint32_t & count) const { count += cost(i) <= threshold ? 1 : 0; }
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t i, uint32_t & count) const { count += cost(i) <= threshold ? 1u : 0u; }
 };
 
 /**

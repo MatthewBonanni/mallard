@@ -302,12 +302,12 @@ class CompositionExpressions {
             std::vector<double> f(mixture.n_species(), 0.0);
             double sum = 0.0;
             for (size_t i = 0; i < listed.size(); i++) {
-                f[listed[i]] = std::max(values[i].at(x, N_DIM), 0.0);
-                if (listed[i] != balance) sum += f[listed[i]];
+                f[static_cast<size_t>(listed[i])] = std::max(values[i].at(x, N_DIM), 0.0);
+                if (listed[i] != balance) sum += f[static_cast<size_t>(listed[i])];
             }
             if (balance >= 0) {
-                f[balance] = std::max(1.0 - sum, 0.0);
-                sum += f[balance];
+                f[static_cast<size_t>(balance)] = std::max(1.0 - sum, 0.0);
+                sum += f[static_cast<size_t>(balance)];
             }
             if (!(sum > 0.0)) throw InputError(where + ": the composition is zero at a face.");
             for (double & v : f) v /= sum;
@@ -354,7 +354,7 @@ std::array<rtype, 6> Solver::mixture_diagnostics() {
     Kokkos::parallel_reduce("mixture_diagnostics", mesh->n_owned(),
                             MixtureDiagnosticsFunctor{mixture, conservatives, species, T_seed}, result);
     std::array<rtype, 6> m;
-    for (int i = 0; i < 6; i++) m[i] = result.v[i];
+    for (size_t i = 0; i < 6; i++) m[i] = result.v[i];
     return comm::allreduce(m, comm::Op::MIN);
 }
 
