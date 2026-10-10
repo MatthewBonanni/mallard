@@ -1194,7 +1194,8 @@ void TENO::read_options(const toml::value & input) {
         throw std::runtime_error("TENO: troubled_capacity must be in (0, 1].");
     }
     cache_file = toml::find_or<std::string>(input, "cache_file", "");
-    single_tables = toml::find_or<bool>(input, "single_precision_tables", false);
+    // Single-precision builds store their tables so anyway
+    single_tables = toml::find_or<bool>(input, "single_precision_tables", false) && sizeof(rtype) > sizeof(float);
     if (single_tables && N_DIM != 3) throw std::runtime_error("TENO: single_precision_tables is for 3D runs.");
     // The cache then holds the tables as the runs use them
     cache_single = toml::find_or<bool>(input, "cache_single_precision", false) || single_tables;

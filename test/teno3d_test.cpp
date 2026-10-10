@@ -532,6 +532,7 @@ TEST(TENO3DTroubled, FaceValuesDoNotDependOnHowManyTroubledCellsARoundHolds) {
 }
 
 TEST(TENO3DSetup, SinglePrecisionTablesHalveThePseudoInversesAndKeepTheAccuracy) {
+    if (sizeof(rtype) == sizeof(float)) GTEST_SKIP() << "the tables are in single precision anyway";
     auto mesh = make_mesh_3d("cartesian_tet", 6, 6, 6);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
     const std::string single = "single_precision_tables = true\n";
