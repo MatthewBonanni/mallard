@@ -141,6 +141,7 @@ struct Options {
     uint32_t batch_cells = 0;  // cells per device batch; 0 picks one from the device memory
     bool host_only = false;    // run every cell on the host (tests)
     const std::vector<uint32_t> * cells = nullptr;  // the cells that will be set up, if not all reconstructed ones
+    bool curved_mirrors = false;  // mirror images across curved boundary faces (their planes) too
 };
 
 /** @brief Timings of the last setup, in seconds. */

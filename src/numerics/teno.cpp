@@ -1116,7 +1116,7 @@ void TENO::read_options(const toml::value & input) {
     characteristic = toml::find_or<bool>(input, "characteristic", true);
     max_condition = find_real_or(input, "max_condition", 1.0e8);
     bound_preserving = toml::find_or<bool>(input, "bound_preserving", false);
-    curved_mirrors = toml::find_or<bool>(input, "curved_mirrors", true);
+    curved_mirrors = toml::find_or<bool>(input, "curved_mirrors", false);
     cache_file = toml::find_or<std::string>(input, "cache_file", "");
     cache_single = toml::find_or<bool>(input, "cache_single_precision", false);
     // One file per rank, made for this partition
@@ -1640,6 +1640,7 @@ void TENO::compute_stencils_and_matrices_3d(const std::vector<uint32_t> * subset
     options.batch_cells = setup_batch_cells;
     options.host_only = setup_on_host;
     options.cells = subset;
+    options.curved_mirrors = curved_mirrors;
     teno_setup::Setup3DHandle setup(*mesh, boundaries, face_quad_points, face_quad_weights, options);
 
     // Cells per batch: whole slices of the packed stencils

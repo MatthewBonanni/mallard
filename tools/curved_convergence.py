@@ -3,15 +3,16 @@
 
     curved_convergence.py RUN_DIR --mallard BUILD/src/Mallard [--orders 3 4 5 6]
         [--levels 4 8 16] [--geometry straight curved] [--triangles] [--t-stop 12]
-        [--threads 4] [--mpi N] [--extra 'TOML lines']
+        [--mach 2.25] [--threads 4] [--mpi N] [--extra 'TOML lines']
 
 The annulus 1 <= r <= 1.384 holds the irrotational vortex u_theta = M / r
-(M = 2.25 at the inner wall, rho = 1, p = 1 / gamma there), an exact steady
-solution of the Euler equations with slip walls (Aftosmis et al. 1994, here
-around the full circle). Each run starts from the exact cell averages and
-marches to steady state; the error is that of the final density averages
-against the initial ones. Geometries: "straight" (polygonal walls),
-"curved" (walls projected onto the circles), "p2" / "p3" (walls from
+(M = 2.25 at the inner wall by default, rho = 1, p = 1 / gamma there), an
+exact steady solution of the Euler equations with slip walls (Aftosmis et al.
+1994, here around the full circle). Each run starts from the exact cell
+averages and marches to t_stop; the error is that of the final density
+averages against the initial ones. Geometries: "straight" (polygonal walls),
+"curved" (walls projected onto the circles), "curved_mirrors" (the same, with
+TENO mirror images across the curved walls), "p2" / "p3" (walls from
 high-order Gmsh lines). Results go to RUN_DIR/results.json and a table.
 """
 import argparse
@@ -26,7 +27,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mallard_vtu import read_vtu_cells  # noqa: E402
 
 GAMMA = 1.4
-MACH = 2.25
 R_IN, R_OUT = 1.0, 1.384
 
 INPUT = """[run]
@@ -121,9 +121,10 @@ def run_case(case_dir, args, order, level, geometry):
     scheme = "MUSCL" if order == 2 else "TENO"
     text = INPUT.format(
         t_stop=args.t_stop, cfl=args.cfl, curved="false" if geometry == "straight" else "true",
-        shapes=SHAPES.format(r_in=R_IN, r_out=R_OUT) if geometry == "curved" else "",
-        M=MACH, M2=MACH * MACH, scheme=scheme, order="" if order == 2 else f"order = {order}",
-        extra=args.extra.replace("\\n", "\n"), t_out=args.t_stop / 4)
+        shapes=SHAPES.format(r_in=R_IN, r_out=R_OUT) if geometry.startswith("curved") else "",
+        M=args.mach, M2=args.mach * args.mach, scheme=scheme, order="" if order == 2 else f"order = {order}",
+        extra=args.extra.replace("\\n", "\n") + ("\ncurved_mirrors = true" if geometry == "curved_mirrors" else ""),
+        t_out=args.t_stop / 4)
     with open(os.path.join(case_dir, "input.toml"), "w") as f:
         f.write(text)
     run = [args.mallard, "-i", "input.toml", f"--kokkos-num-threads={args.threads}"]
@@ -157,6 +158,7 @@ def main():
     ap.add_argument("--jitter", type=float, default=0.0)
     ap.add_argument("--t-stop", type=float, default=12.0)
     ap.add_argument("--cfl", type=float, default=0.4)
+    ap.add_argument("--mach", type=float, default=2.25)
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--mpi", type=int, default=1)
     ap.add_argument("--extra", default="")

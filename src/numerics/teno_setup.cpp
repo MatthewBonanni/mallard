@@ -3084,7 +3084,8 @@ class Setup3D {
             using HostRange = Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>;
             Kokkos::parallel_for("teno_setup_mirror_faces", HostRange(0, mesh.n_faces), [&](const uint32_t f) {
                 h.mirror_face(f) = mesh.h_cells_of_face(f, 1) < 0 && h_face_bc(f) >= 0 &&
-                                   h_bcs(h_face_bc(f)).type != BoundaryType::PARTITION;
+                                   h_bcs(h_face_bc(f)).type != BoundaryType::PARTITION &&
+                                   !(mesh.curved_geometry && !opt.curved_mirrors && mesh.curved_geometry->face_is_curved(f));
             });
             h.has_mirror_face = Geometry<HostMem>::R<uint8_t *>("teno_setup_has_mirror_face", n_cells);
             Kokkos::parallel_for("teno_setup_mirror_cells", HostRange(0, n_cells), [&](const uint32_t c) {

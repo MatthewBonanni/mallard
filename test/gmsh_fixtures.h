@@ -13,6 +13,8 @@
 #define GMSH_FIXTURES_H
 
 #include <array>
+#include <algorithm>
+#include <map>
 #include <tuple>
 #include <cmath>
 #include <cstdint>
@@ -24,6 +26,8 @@
 #include <vector>
 
 #include "comm.h"
+#include "curved.h"
+#include "mesh.h"
 
 /** @brief Write content to a file in the temp directory; returns its path. */
 inline std::string write_temp(const std::string & name, const std::string & content) {
@@ -272,5 +276,159 @@ inline std::string jittered_periodic_mesh_3d(uint32_t n, double amplitude = 0.15
     s << "$EndElements\n";
     return s.str();
 }
+
+#if N_DIM == 3
+
+constexpr double SHELL_R_IN = 1.0, SHELL_R_OUT = 1.5;
+
+/**
+ * @brief A spherical shell SHELL_R_IN <= r <= SHELL_R_OUT of n_r layers over a cubed
+ *        sphere of n x n quadrilaterals per cube face (equiangular), as
+ *        hexahedra or prisms; nodes on the spheres. With quadratic, the walls
+ *        are quadrilateral8 / triangle6 faces with their extra nodes on the
+ *        spheres (high_order).
+ */
+struct Shell {
+    std::vector<std::array<rtype, N_DIM>> nodes;
+    std::vector<std::vector<uint32_t>> cells;
+    std::vector<Mesh::BoundaryFace> faces;
+    std::vector<curved::SurfaceFace> high_order;
+};
+
+inline curved::Vec3 direction(const std::array<int, 3> & p, int n) {
+    // Equiangular cube-to-sphere map of a cube-surface lattice point
+    curved::Vec3 d;
+    for (int a = 0; a < 3; a++) {
+        const int m = std::max({std::abs(p[0]), std::abs(p[1]), std::abs(p[2])});
+        d[a] = (std::abs(p[a]) == m) ? (p[a] > 0 ? 1.0 : -1.0) : std::tan(0.25 * M_PI * p[a] / double(n));
+    }
+    const double norm = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    for (double & x : d) x /= norm;
+    return d;
+}
+
+inline Shell shell(int n, int n_r, bool prisms, bool quadratic = false) {
+    Shell s;
+    std::map<std::array<int, 3>, uint32_t> surface;  // cube-surface lattice point (coordinates in [-n, n], step 2)
+    std::vector<std::array<int, 3>> points;
+    auto surface_id = [&](const std::array<int, 3> & p) {
+        auto it = surface.find(p);
+        if (it != surface.end()) return it->second;
+        surface[p] = points.size();
+        points.push_back(p);
+        return uint32_t(points.size() - 1);
+    };
+    // Quadrilaterals of each cube face, counterclockwise seen from outside
+    std::vector<std::array<uint32_t, 4>> quads;
+    for (int axis = 0; axis < 3; axis++) {
+        for (int sign : {-1, 1}) {
+            const int u = (axis + 1) % 3, v = (axis + 2) % 3;
+            for (int i = -n; i < n; i += 2) {
+                for (int j = -n; j < n; j += 2) {
+                    std::array<uint32_t, 4> q;
+                    const int di[4] = {0, 2, 2, 0}, dj[4] = {0, 0, 2, 2};
+                    for (int k = 0; k < 4; k++) {
+                        std::array<int, 3> p;
+                        p[axis] = sign * n;
+                        p[u] = i + di[k];
+                        p[v] = j + dj[k];
+                        q[k] = surface_id(p);
+                    }
+                    if (sign < 0) std::swap(q[1], q[3]);
+                    quads.push_back(q);
+                }
+            }
+        }
+    }
+    const uint32_t m = points.size();
+    for (int l = 0; l <= n_r; l++) {
+        const double r = SHELL_R_IN + (SHELL_R_OUT - SHELL_R_IN) * l / n_r;
+        for (const auto & p : points) {
+            const curved::Vec3 d = direction(p, n);
+            s.nodes.push_back({rtype(r * d[0]), rtype(r * d[1]), rtype(r * d[2])});
+        }
+    }
+    auto node = [&](uint32_t k, int l) { return uint32_t(l) * m + k; };
+    for (const auto & q : quads) {
+        for (int l = 0; l < n_r; l++) {
+            if (!prisms) {
+                s.cells.push_back({node(q[0], l), node(q[1], l), node(q[2], l), node(q[3], l), node(q[0], l + 1),
+                                   node(q[1], l + 1), node(q[2], l + 1), node(q[3], l + 1)});
+            } else {
+                for (const auto & t : {std::array<int, 3>{0, 1, 2}, std::array<int, 3>{0, 2, 3}}) {
+                    s.cells.push_back({node(q[t[0]], l), node(q[t[1]], l), node(q[t[2]], l), node(q[t[0]], l + 1),
+                                       node(q[t[1]], l + 1), node(q[t[2]], l + 1)});
+                }
+            }
+        }
+        for (const auto & [l, zone, r] : {std::tuple{0, "inner", SHELL_R_IN}, std::tuple{n_r, "outer", SHELL_R_OUT}}) {
+            std::vector<std::vector<int>> pieces = prisms ? std::vector<std::vector<int>>{{0, 1, 2}, {0, 2, 3}}
+                                                          : std::vector<std::vector<int>>{{0, 1, 2, 3}};
+            for (const auto & piece : pieces) {
+                Mesh::BoundaryFace f;
+                for (int k : piece) f.nodes.push_back(node(q[k], l));
+                f.zone = zone;
+                s.faces.push_back(f);
+                if (!quadratic) continue;
+                // Corners, then edge midpoints projected onto the sphere (triangle6, quadrangle8)
+                curved::SurfaceFace hf;
+                for (uint32_t k : f.nodes) {
+                    hf.corners.push_back(k);
+                    hf.nodes.push_back({double(s.nodes[k][0]), double(s.nodes[k][1]), double(s.nodes[k][2])});
+                }
+                const size_t nc = hf.nodes.size();
+                for (size_t k = 0; k < nc; k++) {
+                    const auto & a = hf.nodes[k];
+                    const auto & b = hf.nodes[(k + 1) % nc];
+                    curved::Vec3 mid = {a[0] + b[0], a[1] + b[1], a[2] + b[2]};
+                    const double norm = std::sqrt(mid[0] * mid[0] + mid[1] * mid[1] + mid[2] * mid[2]);
+                    for (double & x : mid) x *= r / norm;
+                    hf.nodes.push_back(mid);
+                }
+                s.high_order.push_back(hf);
+            }
+        }
+    }
+    return s;
+}
+
+/** @brief The shell as a Gmsh 2.2 file (walls "inner" and "outer"; quadratic: quadrangle8 / triangle6 walls). */
+inline std::string shell_gmsh(int n, int n_r, bool prisms, bool quadratic) {
+    const Shell s = shell(n, n_r, prisms, quadratic);
+    std::ostringstream out;
+    out.precision(17);
+    out << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$PhysicalNames\n2\n2 1 \"inner\"\n2 2 \"outer\"\n$EndPhysicalNames\n";
+    std::vector<curved::Vec3> nodes;
+    for (const auto & x : s.nodes) nodes.push_back({double(x[0]), double(x[1]), double(x[2])});
+    std::vector<std::string> elements;
+    for (size_t f = 0; f < s.faces.size(); f++) {
+        const auto & face = s.faces[f];
+        const std::string tag = face.zone == "inner" ? "1" : "2";
+        const bool tri = face.nodes.size() == 3;
+        std::string e = std::string(quadratic ? (tri ? "9" : "16") : (tri ? "2" : "3")) + " 2 " + tag + " " + tag;
+        for (uint32_t k : face.nodes) e += " " + std::to_string(k + 1);
+        if (quadratic) {
+            const auto & hf = s.high_order[f];
+            for (size_t k = face.nodes.size(); k < hf.nodes.size(); k++) {
+                nodes.push_back(hf.nodes[k]);
+                e += " " + std::to_string(nodes.size());
+            }
+        }
+        elements.push_back(e);
+    }
+    for (const auto & c : s.cells) {
+        std::string e = std::string(c.size() == 8 ? "5" : "6") + " 2 0 1";
+        for (uint32_t k : c) e += " " + std::to_string(k + 1);
+        elements.push_back(e);
+    }
+    out << "$Nodes\n" << nodes.size() << "\n";
+    for (size_t k = 0; k < nodes.size(); k++) out << k + 1 << " " << nodes[k][0] << " " << nodes[k][1] << " " << nodes[k][2] << "\n";
+    out << "$EndNodes\n$Elements\n" << elements.size() << "\n";
+    for (size_t k = 0; k < elements.size(); k++) out << k + 1 << " " << elements[k] << "\n";
+    out << "$EndElements\n";
+    return out.str();
+}
+
+#endif  // N_DIM == 3
 
 #endif // GMSH_FIXTURES_H

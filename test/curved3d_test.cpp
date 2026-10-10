@@ -50,117 +50,6 @@ center = [0.0, 0.0, 0.0]
 radius = 1.5
 )";
 
-/**
- * @brief A spherical shell R_IN <= r <= R_OUT of n_r layers over a cubed
- *        sphere of n x n quadrilaterals per cube face (equiangular), as
- *        hexahedra or prisms; nodes on the spheres. With quadratic, the walls
- *        are quadrilateral8 / triangle6 faces with their extra nodes on the
- *        spheres (high_order).
- */
-struct Shell {
-    std::vector<std::array<rtype, N_DIM>> nodes;
-    std::vector<std::vector<uint32_t>> cells;
-    std::vector<Mesh::BoundaryFace> faces;
-    std::vector<curved::SurfaceFace> high_order;
-};
-
-curved::Vec3 direction(const std::array<int, 3> & p, int n) {
-    // Equiangular cube-to-sphere map of a cube-surface lattice point
-    curved::Vec3 d;
-    for (int a = 0; a < 3; a++) {
-        const int m = std::max({std::abs(p[0]), std::abs(p[1]), std::abs(p[2])});
-        d[a] = (std::abs(p[a]) == m) ? (p[a] > 0 ? 1.0 : -1.0) : std::tan(0.25 * M_PI * p[a] / double(n));
-    }
-    const double norm = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-    for (double & x : d) x /= norm;
-    return d;
-}
-
-Shell shell(int n, int n_r, bool prisms, bool quadratic = false) {
-    Shell s;
-    std::map<std::array<int, 3>, uint32_t> surface;  // cube-surface lattice point (coordinates in [-n, n], step 2)
-    std::vector<std::array<int, 3>> points;
-    auto surface_id = [&](const std::array<int, 3> & p) {
-        auto it = surface.find(p);
-        if (it != surface.end()) return it->second;
-        surface[p] = points.size();
-        points.push_back(p);
-        return uint32_t(points.size() - 1);
-    };
-    // Quadrilaterals of each cube face, counterclockwise seen from outside
-    std::vector<std::array<uint32_t, 4>> quads;
-    for (int axis = 0; axis < 3; axis++) {
-        for (int sign : {-1, 1}) {
-            const int u = (axis + 1) % 3, v = (axis + 2) % 3;
-            for (int i = -n; i < n; i += 2) {
-                for (int j = -n; j < n; j += 2) {
-                    std::array<uint32_t, 4> q;
-                    const int di[4] = {0, 2, 2, 0}, dj[4] = {0, 0, 2, 2};
-                    for (int k = 0; k < 4; k++) {
-                        std::array<int, 3> p;
-                        p[axis] = sign * n;
-                        p[u] = i + di[k];
-                        p[v] = j + dj[k];
-                        q[k] = surface_id(p);
-                    }
-                    if (sign < 0) std::swap(q[1], q[3]);
-                    quads.push_back(q);
-                }
-            }
-        }
-    }
-    const uint32_t m = points.size();
-    for (int l = 0; l <= n_r; l++) {
-        const double r = R_IN + (R_OUT - R_IN) * l / n_r;
-        for (const auto & p : points) {
-            const curved::Vec3 d = direction(p, n);
-            s.nodes.push_back({rtype(r * d[0]), rtype(r * d[1]), rtype(r * d[2])});
-        }
-    }
-    auto node = [&](uint32_t k, int l) { return uint32_t(l) * m + k; };
-    for (const auto & q : quads) {
-        for (int l = 0; l < n_r; l++) {
-            if (!prisms) {
-                s.cells.push_back({node(q[0], l), node(q[1], l), node(q[2], l), node(q[3], l), node(q[0], l + 1),
-                                   node(q[1], l + 1), node(q[2], l + 1), node(q[3], l + 1)});
-            } else {
-                for (const auto & t : {std::array<int, 3>{0, 1, 2}, std::array<int, 3>{0, 2, 3}}) {
-                    s.cells.push_back({node(q[t[0]], l), node(q[t[1]], l), node(q[t[2]], l), node(q[t[0]], l + 1),
-                                       node(q[t[1]], l + 1), node(q[t[2]], l + 1)});
-                }
-            }
-        }
-        for (const auto & [l, zone, r] : {std::tuple{0, "inner", R_IN}, std::tuple{n_r, "outer", R_OUT}}) {
-            std::vector<std::vector<int>> pieces = prisms ? std::vector<std::vector<int>>{{0, 1, 2}, {0, 2, 3}}
-                                                          : std::vector<std::vector<int>>{{0, 1, 2, 3}};
-            for (const auto & piece : pieces) {
-                Mesh::BoundaryFace f;
-                for (int k : piece) f.nodes.push_back(node(q[k], l));
-                f.zone = zone;
-                s.faces.push_back(f);
-                if (!quadratic) continue;
-                // Corners, then edge midpoints projected onto the sphere (triangle6, quadrangle8)
-                curved::SurfaceFace hf;
-                for (uint32_t k : f.nodes) {
-                    hf.corners.push_back(k);
-                    hf.nodes.push_back({double(s.nodes[k][0]), double(s.nodes[k][1]), double(s.nodes[k][2])});
-                }
-                const size_t nc = hf.nodes.size();
-                for (size_t k = 0; k < nc; k++) {
-                    const auto & a = hf.nodes[k];
-                    const auto & b = hf.nodes[(k + 1) % nc];
-                    curved::Vec3 mid = {a[0] + b[0], a[1] + b[1], a[2] + b[2]};
-                    const double norm = std::sqrt(mid[0] * mid[0] + mid[1] * mid[1] + mid[2] * mid[2]);
-                    for (double & x : mid) x *= r / norm;
-                    hf.nodes.push_back(mid);
-                }
-                s.high_order.push_back(hf);
-            }
-        }
-    }
-    return s;
-}
-
 std::shared_ptr<Mesh> shell_mesh(int n, int n_r, bool prisms, const std::string & geometry) {
     const Shell s = shell(n, n_r, prisms, geometry == "quadratic");
     auto mesh = std::make_shared<Mesh>();
@@ -182,43 +71,6 @@ std::vector<double> cell_integrals(const Mesh & mesh, int degree, F && f) {
         for (size_t q = 0; q < w.size(); q++) out[c] += w[q] * f(x[q]);
     }
     return out;
-}
-
-/** @brief The shell as a Gmsh 2.2 file (walls "inner" and "outer"; quadratic: quadrangle8 / triangle6 walls). */
-std::string shell_gmsh(int n, int n_r, bool prisms, bool quadratic) {
-    const Shell s = shell(n, n_r, prisms, quadratic);
-    std::ostringstream out;
-    out.precision(17);
-    out << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$PhysicalNames\n2\n2 1 \"inner\"\n2 2 \"outer\"\n$EndPhysicalNames\n";
-    std::vector<curved::Vec3> nodes;
-    for (const auto & x : s.nodes) nodes.push_back({double(x[0]), double(x[1]), double(x[2])});
-    std::vector<std::string> elements;
-    for (size_t f = 0; f < s.faces.size(); f++) {
-        const auto & face = s.faces[f];
-        const std::string tag = face.zone == "inner" ? "1" : "2";
-        const bool tri = face.nodes.size() == 3;
-        std::string e = std::string(quadratic ? (tri ? "9" : "16") : (tri ? "2" : "3")) + " 2 " + tag + " " + tag;
-        for (uint32_t k : face.nodes) e += " " + std::to_string(k + 1);
-        if (quadratic) {
-            const auto & hf = s.high_order[f];
-            for (size_t k = face.nodes.size(); k < hf.nodes.size(); k++) {
-                nodes.push_back(hf.nodes[k]);
-                e += " " + std::to_string(nodes.size());
-            }
-        }
-        elements.push_back(e);
-    }
-    for (const auto & c : s.cells) {
-        std::string e = std::string(c.size() == 8 ? "5" : "6") + " 2 0 1";
-        for (uint32_t k : c) e += " " + std::to_string(k + 1);
-        elements.push_back(e);
-    }
-    out << "$Nodes\n" << nodes.size() << "\n";
-    for (size_t k = 0; k < nodes.size(); k++) out << k + 1 << " " << nodes[k][0] << " " << nodes[k][1] << " " << nodes[k][2] << "\n";
-    out << "$EndNodes\n$Elements\n" << elements.size() << "\n";
-    for (size_t k = 0; k < elements.size(); k++) out << k + 1 << " " << elements[k] << "\n";
-    out << "$EndElements\n";
-    return out.str();
 }
 
 const std::string REST = "rho = \"1.0\"\nu = [\"0.0\", \"0.0\", \"0.0\"]\np = \"0.7142857142857143\"\n";
@@ -274,13 +126,13 @@ TEST(Curved3DGeometry, FaceQuadratureClosesEveryCell) {
     // side faces, straight faces) sum to zero, so free streams are preserved
     for (bool prisms : {false, true}) {
         for (const std::string geometry : {"curved", "quadratic"}) {
-            auto mesh = shell_mesh(3, 2, prisms, geometry);
+            auto mesh = shell_mesh(4, 3, prisms, geometry);
             Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
             BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
             auto teno = std::make_unique<TENO>();
             teno->set_mesh(mesh);
             teno->set_boundaries(bd);
-            teno->init(parse_toml("type = \"TENO\"\norder = 4\n"));
+            teno->init(parse_toml("type = \"TENO\"\norder = 3\n"));
             auto w = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->face_quad_weights);
             auto n = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->face_quad_normals);
             ASSERT_GT(n.extent(0), 0u);
@@ -307,9 +159,9 @@ TEST(Curved3DSolver, GasAtRestStaysExactlyAtRest) {
     // and runs on any number of ranks match (MPI3DTest covers more ranks)
     for (bool prisms : {false, true}) {
         for (const std::string geometry : {"curved", "quadratic"}) {
-            const std::string file = write_temp("curved_shell.msh", shell_gmsh(3, 2, prisms, geometry == "quadratic"));
+            const std::string file = write_temp("curved_shell.msh", shell_gmsh(4, 3, prisms, geometry == "quadratic"));
             Solver solver;
-            solver.init(parse_toml(shell_input(file, geometry == "curved" ? SHAPES : "", "type = \"TENO\"\norder = 4\n",
+            solver.init(parse_toml(shell_input(file, geometry == "curved" ? SHAPES : "", "type = \"TENO\"\norder = 3\n",
                                                REST, 10)));
             ASSERT_TRUE(solver.get_mesh()->curved_geometry);
             solver.run();
@@ -320,5 +172,135 @@ TEST(Curved3DSolver, GasAtRestStaysExactlyAtRest) {
             }
             EXPECT_LT(u_max, roundoff(1e-13)) << prisms << " " << geometry;
         }
+    }
+}
+
+namespace {
+
+/** @brief Conservative k of a polynomial state of the given degree. */
+double polynomial(int k, const curved::Vec3 & x, int degree) {
+    const double base[5] = {1.0, 0.1, -0.05, 0.08, 2.6};
+    double v = base[k] + 0.05 * (x[0] - 0.3 * x[1] + 0.2 * x[2]);
+    if (degree >= 2) v += 0.05 * (x[0] * x[0] - 0.3 * x[1] * x[2] + 0.1 * x[0] * x[1]);
+    if (degree >= 3) v += 0.02 * (x[0] * x[1] * x[2] - 0.5 * x[2] * x[2] * x[2] + 0.3 * x[0] * x[0] * x[1]);
+    return v;
+}
+
+/**
+ * @brief Max error of reconstructed wall densities at the faces' quadrature
+ *        points, for exact averages over the curved cells (their cell rules at
+ *        high degree) of a polynomial of the reconstruction's degree, seen by
+ *        the scheme on the given geometry.
+ */
+double shell_polynomial_error(int n, const std::string & geometry, int order, bool prisms) {
+    auto truth = shell_mesh(n, n / 2, prisms, "curved");
+    auto mesh = shell_mesh(n, n / 2, prisms, geometry);
+    std::vector<double> avg(5 * mesh->n_cells, 0.0);
+    std::vector<curved::Vec3> x;
+    std::vector<double> w;
+    for (uint32_t c = 0; c < truth->n_cells; c++) {
+        truth->curved_geometry->cell_rule(c, 8, x, w);
+        double vol = 0.0;
+        for (size_t q = 0; q < w.size(); q++) {
+            vol += w[q];
+            for (int k = 0; k < 5; k++) avg[5 * c + k] += w[q] * polynomial(k, x[q], order - 1);
+        }
+        for (int k = 0; k < 5; k++) avg[5 * c + k] /= vol;
+    }
+    Euler euler = Euler::from_reference(GAMMA, 1.0, 1.0, 1.0);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    auto h_W = Kokkos::create_mirror_view(W);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        rtype U[N_CONSERVATIVE], Wc[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE U[i] = rtype(avg[5 * c + i]);
+        euler.compute_W_from_conservatives(Wc, U);
+        FOR_I_CONSERVATIVE h_W(c, i) = Wc[i];
+    }
+    Kokkos::deep_copy(W, h_W);
+    // Faces that take no mirror images (as curved walls do), on either geometry: straight
+    // walls of a sphere would each be a mirror plane of its own
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::PARTITION, GAMMA);
+    auto teno = std::make_unique<TENO>();
+    teno->set_mesh(mesh);
+    teno->set_boundaries(bd);
+    teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n"));
+    const uint8_t n_quad = teno->n_face_quadrature_points();
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, n_quad);
+    teno->calc_face_values(W, face_W);
+    auto h_face_W = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+    auto h_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->face_quad_points);
+    auto h_weights = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->face_quad_weights);
+    double err = 0.0;
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        if (mesh->h_cells_of_face(f, 1) >= 0) continue;
+        for (uint8_t q = 0; q < n_quad; q++) {
+            if (h_weights(f, q) == 0.0_r) continue;
+            const curved::Vec3 p = {double(h_points(f, q, 0)), double(h_points(f, q, 1)), double(h_points(f, q, 2))};
+            err = std::max(err, std::abs(double(h_face_W(f, q, 0, 0)) - polynomial(0, p, order - 1)));
+        }
+    }
+    return err;
+}
+
+}  // namespace
+
+TEST(Curved3DTENO, WallValuesAreExactForPolynomialsOnCurvedCells) {
+    // A polynomial of the reconstruction's degree, averaged over the curved
+    // cells, is reproduced at the curved walls to round-off: the curved cells'
+    // moments, centroids and face points agree. On straight-sided cells the
+    // same averages miss by the geometry's error
+    SKIP_IN_SINGLE_PRECISION("round-off");
+    for (bool prisms : {false, true}) {
+        for (int order : {3, 4}) {
+            EXPECT_LT(shell_polynomial_error(4, "curved", order, prisms), 1e-11) << prisms << " " << order;
+            EXPECT_GT(shell_polynomial_error(4, "straight", order, prisms), 1e-4) << prisms << " " << order;
+        }
+    }
+}
+
+TEST(Curved3DGeometry, CellRulesMatchTheDivergenceOfTheirFaces) {
+    // int_cell x^2 y dV = closed-integral (x^3 y / 3) n_x dS over the cell's
+    // faces (curved walls, blended side faces): the cone rules and the face
+    // maps agree cell by cell. On prisms every straight face is planar; the
+    // straight quadrilaterals of hexahedral shells are not, and their volumes
+    // follow the triangles of the cell's tetrahedra rather than the bilinear face
+    for (bool prisms : {true}) {
+        auto mesh = shell_mesh(4, 2, prisms, "curved");
+        const curved::Geometry & g = *mesh->curved_geometry;
+        std::vector<double> surface(mesh->n_cells, 0.0);
+        std::vector<curved::Vec3> x, n;
+        std::vector<double> w;
+        for (uint32_t f = 0; f < mesh->n_faces; f++) {
+            std::vector<std::array<double, 2>> ref;
+            std::vector<double> ref_w;
+            const int m = 10;
+            std::vector<double> gx = {-0.9739065285171717, -0.8650633666889845, -0.6794095682990244, -0.4333953941292472,
+                                      -0.1488743389816312, 0.1488743389816312, 0.4333953941292472, 0.6794095682990244,
+                                      0.8650633666889845, 0.9739065285171717};
+            std::vector<double> gw = {0.0666713443086881, 0.1494513491505806, 0.2190863625159820, 0.2692667193099963,
+                                      0.2955242247147529, 0.2955242247147529, 0.2692667193099963, 0.2190863625159820,
+                                      0.1494513491505806, 0.0666713443086881};
+            for (int a = 0; a < m; a++) {
+                for (int b = 0; b < m; b++) {
+                    if (mesh->h_n_nodes_of_face(f) == 3) {
+                        const double u = 0.5 * (gx[a] + 1.0), v = 0.5 * (gx[b] + 1.0);
+                        ref.push_back({u, v * (1.0 - u)});
+                        ref_w.push_back(0.25 * gw[a] * gw[b] * (1.0 - u));
+                    } else {
+                        ref.push_back({gx[a], gx[b]});
+                        ref_w.push_back(gw[a] * gw[b]);
+                    }
+                }
+            }
+            g.face_rule(f, ref, ref_w, x, n, w);
+            double flux = 0.0;
+            for (size_t q = 0; q < w.size(); q++) flux += w[q] * n[q][0] * std::pow(x[q][0], 3) * x[q][1] / 3.0;
+            surface[mesh->h_cells_of_face(f, 0)] += flux;
+            if (mesh->h_cells_of_face(f, 1) >= 0) surface[mesh->h_cells_of_face(f, 1)] -= flux;
+        }
+        const auto volume = cell_integrals(*mesh, 6, [](const curved::Vec3 & p) { return p[0] * p[0] * p[1]; });
+        double worst = 0.0;
+        for (uint32_t c = 0; c < mesh->n_cells; c++) worst = std::max(worst, std::abs(volume[c] - surface[c]));
+        EXPECT_LT(worst, 1e-9) << prisms;
     }
 }
