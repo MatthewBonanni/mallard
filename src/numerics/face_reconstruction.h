@@ -303,6 +303,9 @@ class TENO : public FaceReconstruction {
         bool bound_preserving = false;
         rtype max_condition = 1.0e8;
         uint8_t slice_shift = teno::SLICE_SHIFT;  // log2 of the cells per slice of the packed stencils
+        // Pseudo-inverses stored in single precision (opt-in: halves the
+        // largest tables, and changes results at single-precision round-off)
+        bool single_tables = false;
 
         // Per-cell precomputed data, for the reconstructed cells [0, n_reconstructed)
         Kokkos::View<rtype *> scale;                       // h = sqrt(V)
@@ -311,10 +314,16 @@ class TENO : public FaceReconstruction {
         teno::PackedStencils stencil_large;                // pseudo-inverse width: nk
         Kokkos::View<uint16_t **> stencil_small_size;      // (cell, face); 0 if stencil invalid
         teno::PackedStencils stencil_small;                // the faces' stencils one after another; width NK_SMALL
-        Kokkos::View<rtype **> si_matrix;                  // (cell, upper_index(l, m)): symmetric
+        Kokkos::View<rtype **> si_matrix;                  // 2D: (cell, upper_index(l, m)): symmetric
+        teno::Moments moments;                             // 3D: (cell, k), from which the troubled passes form it
+        teno::SmoothnessTerms si_terms;                    // 3D
         Kokkos::View<rtype *> troubled;                    // (local cell): sigma, for diagnostics
-        Kokkos::View<rtype ***> troubled_coeffs;           // (cell, l, var): scratch for the troubled passes
-        Kokkos::View<rtype ****> troubled_small_coeffs;    // (cell, sector, l, var): scratch for the troubled passes
+        Kokkos::View<rtype ***> troubled_coeffs;           // (queue slot, l, var): scratch for the troubled passes
+        Kokkos::View<rtype ****> troubled_small_coeffs;    // (queue slot, sector, l, var): scratch for the troubled passes
+        // Queued cells per round of the troubled passes, as a fraction of the
+        // reconstructed cells (scratch slots); later rounds recompute the
+        // central coefficients the smooth pass could not keep
+        rtype troubled_capacity = N_DIM == 3 ? 0.5 : 1.0;
         Kokkos::View<uint32_t *> troubled_cells;           // queue of troubled cells
         Kokkos::View<uint32_t> n_troubled;
         // Vertex-neighbor layers each reconstructed cell's stencil search visited
@@ -397,13 +406,13 @@ class TENO : public FaceReconstruction {
         void set_mixture(Kokkos::View<rtype *, Kokkos::LayoutStride> gamma, Kokkos::View<rtype *> molar_mass);
 
     private:
-        template <uint8_t DEG, bool PRIM>
+        template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<rtype *, Kokkos::LayoutStride> mu,
                            Kokkos::View<rtype *> source, uint32_t n_cells);
-        template <uint8_t DEG, bool PRIM>
+        template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                               Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells);
-        template <uint8_t DEG, bool PRIM>
+        template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
                                    Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
@@ -422,7 +431,7 @@ class TENO : public FaceReconstruction {
         void round_to_single();
 
         std::string cache_file;  // this rank's
-        bool cache_single = false;  // pseudo-inverses and smoothness-indicator matrices cached in single precision
+        bool cache_single = false;  // pseudo-inverses and smoothness-indicator matrices (3D: moments) cached in single precision
         bool cache_loaded = false;
 
         uint32_t largest_stencil = 0;        // Largest central stencil on any rank (cells)
