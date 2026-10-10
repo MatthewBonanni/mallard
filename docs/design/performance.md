@@ -259,6 +259,55 @@ Notes:
   launches and four exchanges per step); the CUDA graph and NCCL exchange of #217 take it from 667 to 523 us.
 - Multi-node runs (16-32 GPUs over InfiniBand) are pending free GPUs.
 
+## Partitions
+
+3D TENO5 spends what it loses to more GPUs mostly reconstructing halo layer 1 again (owned and layer-1
+cells are reconstructed, so that one exchange per stage suffices; `mpi.md`, section 7), so the parts'
+surface sets its scaling. A100-80GB, 4 GPUs per node, HDR InfiniBand with GPUDirect RDMA between nodes,
+GPU-aware MPI; steady time per step. *Layer 1* is the largest number of halo layer-1 cells of a rank
+(the setup summary's "Partition surface" line). Graph: dKaMinPar with its `strong` preset and 0.1%
+imbalance; its default preset is worse than both others (4 GPUs, 96^3: 44.1 ms, 3% imbalance).
+
+**Strong scaling**, 96^3 hexahedra (1 GPU: 154 ms)
+
+| GPUs | Hilbert | graph | multi-jagged | efficiency (multi-jagged) | layer 1: Hilbert / graph / multi-jagged |
+|---|---|---|---|---|---|
+| 4 | 41.2 ms | | 41.4 ms | 93% | 9,312 / 9,776 / 9,312 |
+| 8 | 23.1 ms | 23.5 ms | 23.1 ms | 83% | 7,057 / 7,958 / 7,057 |
+| 12 | 17.8 ms | 17.2 ms | 16.6 ms | 77% (Hilbert 72%) | 13,038 / 8,954 / 7,906 |
+| 16 | 13.4 ms | 13.3 ms | 13.1 ms | 73% | 7,130 / 9,977 / 7,130 |
+
+**Weak scaling**, 64^3 hexahedra per GPU (1 GPU: 48.1 ms)
+
+| GPUs | mesh | Hilbert | graph | multi-jagged | efficiency (multi-jagged) |
+|---|---|---|---|---|---|
+| 4 | 128 x 128 x 64 | 49.8 ms | | 49.8 ms | 97% |
+| 8 | 128^3 | 50.8 ms | 51.4 ms | 50.5 ms | 95% |
+| 12 | 192 x 128 x 128 | 54.7 ms | 52.7 ms | 51.9 ms | 93% (Hilbert 88%) |
+| 16 | 256 x 128 x 128 | 55.8 ms | 53.9 ms | 52.7 ms | 91% (Hilbert 86%) |
+
+2D at 16 GPUs the two built-in partitioners are within 1-4% of each other (equal parts of a square):
+TENO5 4M cells 6.14 ms, 16M 20.7 ms (1M per GPU: 95% weak efficiency), MUSCL 16M 4.15 ms (Hilbert 4.12 ms).
+
+Notes:
+
+- Multi-jagged parts of a box are its cuboid blocks: the same as Hilbert parts at power-of-two rank counts
+  on cubes, and 30-45% fewer layer-1 cells otherwise (12 and 24 ranks, the weak-scaling boxes from 12 ranks
+  up). On a graded O-mesh around a cylinder (2D) and on tetrahedra they also cut fewer faces than the curve.
+- At equal surface the orientation still matters, because a rank numbers its cells like the global mesh
+  (x first): 4 GPUs, 96^3 split 2 x 2 x 1 take 41.2 ms, 1 x 2 x 2 43.9 ms, 1 x 1 x 4 48.4 ms (TENO +12%,
+  gradients +34% per launch). Multi-jagged breaks ties toward more pieces along x. At 16 GPUs 4 x 4 x 1 (20%
+  more surface) is fastest (12.8 ms): numbering a rank's cells for locality, as section 6 of `mpi.md` plans,
+  should matter more than the partition from here.
+- Multi-jagged numbers its blocks along a Hilbert curve, so that the ranks of a node hold a compact group:
+  16 GPUs, 96^3: 13.0 ms instead of 13.9 ms with the blocks numbered x-major.
+- Exchanging reconstructed face states instead of reconstructing layer 1 (`mpi.md`, section 7) is not worth
+  its second, dependent exchange per stage yet: at 16 GPUs (96^3, an nsys profile of one rank) TENO's
+  reconstruction takes 11.2 of the 13.1 ms the GPU is busy per step, and layer-1 cells are 11% of the
+  reconstructed cells, so it could save at most 1.3 ms (9%), less three exchanges' latency; at 12 GPUs
+  weak (6% layer 1) at most 3 ms (5%). Most of the strong-scaling loss (73% at 16 GPUs, 55k cells per GPU)
+  is the TENO kernel itself running less efficiently on fewer cells.
+
 ## Verification
 
 Bitwise identity with `main` is checked on restart files (identical MD5) after N steps of: the
