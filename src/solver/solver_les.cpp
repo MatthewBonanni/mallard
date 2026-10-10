@@ -180,14 +180,18 @@ struct VorticityGradientFunctor {
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
-        for (uint8_t v = 0; v < 3; v++) {
-            rtype g[N_DIM] = {};
-            for (uint32_t k = stencil.offsets_cells_of_cell(c); k < stencil.offsets_cells_of_cell(c + 1); k++) {
-                const rtype dq = vorticity(stencil.cells_of_cell(k), v) - vorticity(c, v);
-                FOR_I_DIM g[i] += stencil.weights.cells(k, i) * dq;
+        rtype q_c[3], g[3][N_DIM] = {};
+        for (uint8_t v = 0; v < 3; v++) q_c[v] = vorticity(c, v);
+        for (uint32_t k = stencil.offsets_cells_of_cell(c); k < stencil.offsets_cells_of_cell(c + 1); k++) {
+            const uint32_t j = stencil.cells_of_cell(k);
+            rtype w[N_DIM];
+            FOR_I_DIM w[i] = stencil.weights.cells(k, i);
+            for (uint8_t v = 0; v < 3; v++) {
+                const rtype dq = vorticity(j, v) - q_c[v];
+                FOR_I_DIM g[v][i] += w[i] * dq;
             }
-            FOR_I_DIM gradients(c, v, i) = g[i];
         }
+        for (uint8_t v = 0; v < 3; v++) FOR_I_DIM gradients(c, v, i) = g[v][i];
     }
 };
 
