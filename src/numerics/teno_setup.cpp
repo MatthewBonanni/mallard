@@ -3349,8 +3349,7 @@ teno::SmoothnessTerms smoothness_terms(const uint8_t degree) {
     const Tables t(degree);
     const int nk = teno::n_dof(degree);
     std::vector<uint32_t> start = {0};
-    std::vector<double> weight;
-    std::vector<uint16_t> moment;
+    std::vector<uint32_t> term;
     // The setup's order of the terms of each entry, which its sums followed
     for (int l = 0; l < nk; l++) {
         for (int m = l; m < nk; m++) {
@@ -3358,20 +3357,21 @@ teno::SmoothnessTerms smoothness_terms(const uint8_t degree) {
             for (int q = 0; q < t.n_beta; q++) {
                 const double dl = t.derivative[l][q], dm = t.derivative[m][q];
                 if (dl == 0.0 || dm == 0.0) continue;
-                weight.push_back(dl * dm);
-                moment.push_back(uint16_t(
-                    t.moment_slot[((e0 - 2 * t.beta[q][0]) * t.nm + e1 - 2 * t.beta[q][1]) * t.nm + e2 - 2 * t.beta[q][2]]));
+                const double w = dl * dm;
+                const int k = t.moment_slot[((e0 - 2 * t.beta[q][0]) * t.nm + e1 - 2 * t.beta[q][1]) * t.nm + e2 - 2 * t.beta[q][2]];
+                if (!(w > 0.0 && w < 65536.0 && w == std::floor(w)) || k < 0 || k > 0xFFFF) {
+                    throw std::logic_error("TENO: a smoothness-matrix term does not fit its packing.");
+                }
+                term.push_back(uint32_t(w) << 16 | uint32_t(k));
             }
-            start.push_back(uint32_t(weight.size()));
+            start.push_back(uint32_t(term.size()));
         }
     }
     teno::SmoothnessTerms out;
     out.start = Kokkos::View<uint32_t *>("teno_si_term_start", start.size());
-    out.weight = Kokkos::View<double *>("teno_si_term_weight", weight.size());
-    out.moment = Kokkos::View<uint16_t *>("teno_si_term_moment", moment.size());
+    out.term = Kokkos::View<uint32_t *>("teno_si_terms", term.size());
     Kokkos::deep_copy(out.start, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(start.data(), start.size()));
-    Kokkos::deep_copy(out.weight, Kokkos::View<const double *, Kokkos::HostSpace>(weight.data(), weight.size()));
-    Kokkos::deep_copy(out.moment, Kokkos::View<const uint16_t *, Kokkos::HostSpace>(moment.data(), moment.size()));
+    Kokkos::deep_copy(out.term, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(term.data(), term.size()));
     return out;
 }
 

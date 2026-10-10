@@ -120,22 +120,43 @@ using Moments = Kokkos::View<double **, Kokkos::LayoutRight>;
 /**
  * @brief The terms of the smoothness-indicator matrix (3D): entry e
  *        (upper_index(l, m)) is sum_t weight(t) moments(cell, moment(t)) over
- *        t in [start(e), start(e + 1)), with D^beta factors as weights.
+ *        t in [start(e), start(e + 1)), with products of D^beta factors (whole
+ *        numbers below 2^16) as weights; term(t) holds weight(t) << 16 | moment(t).
  */
 struct SmoothnessTerms {
     Kokkos::View<uint32_t *> start;
-    Kokkos::View<double *> weight;
-    Kokkos::View<uint16_t *> moment;
+    Kokkos::View<uint32_t *> term;
 
     /**
-     * @brief Entry e from one cell's moments, rounded as the setup's sum was,
-     *        which contracted no multiply and add into an FMA.
+     * @brief Entries [e0, e0 + G) below n from one cell's moments into out,
+     *        each summed in term order and rounded as the setup's sum was,
+     *        which contracted no multiply and add into an FMA; the G sums are
+     *        interleaved so that their latencies overlap.
      */
+    template <uint32_t G>
     KOKKOS_INLINE_FUNCTION
-    rtype entry(const uint32_t e, const double * moments) const {
-        double sum = 0.0;
-        for (uint32_t t = start(e); t < start(e + 1); t++) sum = add_product_rn(sum, weight(t), moments[moment(t)]);
-        return rtype(sum);
+    void entries(const uint32_t e0, const uint32_t n, const double * moments, rtype * out) const {
+        uint32_t t[G], end[G];
+        double sum[G];
+        uint32_t longest = 0;
+        for (uint32_t g = 0; g < G; g++) {
+            const bool in = e0 + g < n;
+            t[g] = in ? start(e0 + g) : 0;
+            end[g] = in ? start(e0 + g + 1) : 0;
+            sum[g] = 0.0;
+            longest = (end[g] - t[g]) > longest ? end[g] - t[g] : longest;
+        }
+        for (uint32_t k = 0; k < longest; k++) {
+            for (uint32_t g = 0; g < G; g++) {
+                if (t[g] + k < end[g]) {
+                    const uint32_t w = term(t[g] + k);
+                    sum[g] = add_product_rn(sum[g], double(w >> 16), moments[w & 0xFFFFu]);
+                }
+            }
+        }
+        for (uint32_t g = 0; g < G; g++) {
+            if (e0 + g < n) out[e0 + g] = rtype(sum[g]);
+        }
     }
 
     /** @brief s + a b, each rounded, never fused. */

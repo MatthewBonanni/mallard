@@ -2594,15 +2594,23 @@ struct TENOFunctor {
     struct TroubledSelectTeamPass {};
     static constexpr uint32_t SELECT_TEAM = 32;
     static constexpr uint32_t N_SI = uint32_t(NK) * (NK + 1) / 2;
+    static constexpr uint32_t N_MOMENTS = uint32_t(2 * DEG - 1) * (2 * DEG) * (2 * DEG + 1) / 6;
+    static constexpr uint32_t SI_GROUP = 4;  // matrix entries per thread at a time
+    static constexpr size_t SELECT_SCRATCH = sizeof(rtype) * N_SI + sizeof(double) * N_MOMENTS + 16;
 
     template <typename Member>
     KOKKOS_INLINE_FUNCTION
     void operator()(TroubledSelectTeamPass, const Member & team) const {
         rtype * S = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * N_SI));
+        double * mom = static_cast<double *>(team.team_scratch(0).get_shmem(sizeof(double) * N_MOMENTS));
         const uint32_t end = round_end();
         for (uint32_t j = round_begin + team.league_rank(); j < end; j += team.league_size()) {
-            const double * mom = &moments(troubled_cells(j), 0);
-            Kokkos::parallel_for(Kokkos::TeamThreadRange(team, N_SI), [&](const uint32_t e) { S[e] = si_terms.entry(e, mom); });
+            const uint32_t i_cell = troubled_cells(j);
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(team, N_MOMENTS), [&](const uint32_t k) { mom[k] = moments(i_cell, k); });
+            team.team_barrier();
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(team, (N_SI + SI_GROUP - 1) / SI_GROUP), [&](const uint32_t g) {
+                si_terms.entries<SI_GROUP>(g * SI_GROUP, N_SI, mom, S);
+            });
             team.team_barrier();
             Kokkos::parallel_for(Kokkos::TeamThreadRange(team, uint32_t(teno::MAX_FACES) * N_CONSERVATIVE),
                                  [&](const uint32_t r) {
@@ -2816,7 +2824,7 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
                 using Policy = Kokkos::TeamPolicy<Space, typename Functor::TroubledSelectTeamPass, Dynamic>;
                 Kokkos::parallel_for("teno_troubled_select",
                                      Policy(exec, league, team_size)
-                                         .set_scratch_size(0, Kokkos::PerTeam(sizeof(rtype) * Functor::N_SI)),
+                                         .set_scratch_size(0, Kokkos::PerTeam(Functor::SELECT_SCRATCH)),
                                      functor);
             }
             launch("teno_troubled_project", typename Functor::TroubledProjectPass{}, teno::MAX_FACES);
