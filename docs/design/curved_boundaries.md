@@ -168,7 +168,19 @@ mirrored far fields).
 
 ### Mach 3 sphere
 
-See `docs/numerics/teno_e.md` and the PR for the standoff comparison.
+`examples/sphere_mach3` (Euler, Mach 3, `make_sphere_mesh.py` resolution,
+810k tetrahedra) in a quarter box instead of the quarter cylinder, whose
+faceted lateral far field exceeds the 3D setup's 32 mirror planes, at t = 3:
+
+| Scheme | Walls | Delta / R (Billig 0.205) | Cd (pressure) |
+|---|---|---|---|
+| MUSCL | straight | 0.2211 | 0.9716 |
+| MUSCL | curved | 0.2212 | 0.9720 |
+| TENO5, bound-preserving | curved | 0.2213 | 0.9790 |
+
+With 0.02 D cells on the wall the facets sit 1e-4 D inside the sphere, so the
+standoff does not move. TENO5 with straight walls cannot run here: the
+sphere's facets are mirror planes of their own, beyond the setup's limit.
 
 ## Alternatives considered
 
