@@ -493,7 +493,6 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
     if (forcing && forcing_offset == 0) {
         throw std::logic_error("CellChemistry::advance: a forcing needs options.forced.");
     }
-    if (forcing && balance) throw std::logic_error("CellChemistry::advance: no balancing across ranks with a forcing.");
     StateView U_end{};
     SpeciesView rhoY_end{};
     if (forcing) {
@@ -537,15 +536,16 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
     Kokkos::parallel_scan("chemistry_queue", n, QueueFunctor{active, queue, cost, previous_cost, 0}, n_active);
     stats.active = n_active;
     if (bin_by_cost && n_active > 0) sort_queue(queue, cost, n_active);
-    const ChemistryCells cells{U, rhoY, T_seed, chem_h, chem_cost, previous_cost, time_scale};
+    const ChemistryCells cells{U, rhoY, T_seed, chem_h, chem_cost, previous_cost, time_scale,
+                               forcing ? forcing->rate.species : SpeciesView(), U_end, rhoY_end};
     const uint32_t kept = balance ? balance->send(cells, queue, n_active) : n_active;
     stats.sent = n_active - kept;
-    stats.failures = integrate(cells, queue, cost, kept, dt, forcing);
+    stats.failures = integrate(cells, queue, cost, kept, dt);
     if (balance) {
         stats.failures += balance->receive(cells, queue, [&](const ChemistryCells & guests, const Kokkos::View<uint32_t *> & q,
                                                              const Kokkos::View<float *> & c, const uint32_t m) {
             if (bin_by_cost && m > 0) sort_queue(q, c, m);
-            return integrate(guests, q, c, m, dt, nullptr);
+            return integrate(guests, q, c, m, dt);
         });
     }
     if (forcing) {
@@ -565,8 +565,7 @@ void CellChemistry::balance_across_ranks(const double threshold) {
 }
 
 uint32_t CellChemistry::integrate(const ChemistryCells & cells, const Kokkos::View<uint32_t *> & queued,
-                                  const Kokkos::View<float *> & queued_cost, const uint32_t n, const double dt,
-                                  const ChemistryForcing * forcing) {
+                                  const Kokkos::View<float *> & queued_cost, const uint32_t n, const double dt) {
     const uint32_t chunk = static_cast<uint32_t>(work.extent(0));
     uint32_t failures = 0;
     for (uint32_t first = 0; first < n; first += chunk) {
@@ -583,11 +582,11 @@ uint32_t CellChemistry::integrate(const ChemistryCells & cells, const Kokkos::Vi
                                work,    pivot,              q,            0u,
                                options.reactor, dt,         n_lanes,      pattern,
                                sparse,  static_cast<uint32_t>(fast_bytes / sizeof(double)), cells.time_scale};
-        if (forcing) {
+        if (cells.forced()) {
             functor.forcing_offset = forcing_offset;
-            functor.rate = forcing->rate.species;
-            functor.U_end = forcing->scratch.flow;
-            functor.rhoY_end = forcing->scratch.species;
+            functor.rate = cells.rate;
+            functor.U_end = cells.U_end;
+            functor.rhoY_end = cells.rhoY_end;
         }
         if (n_lanes == 1) {
             uint32_t f = 0;
