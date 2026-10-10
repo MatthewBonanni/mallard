@@ -60,7 +60,7 @@ class DistributedMesh {
 
         uint64_t n_global_cells() const { return cell_dist.back(); }
         uint64_t first_cell() const { return block.first_cell; }
-        uint32_t n_block_cells() const { return block.n_cells(); }
+        uint32_t n_block_cells() const { return static_cast<uint32_t>(block.n_cells()); }
 
         /** @brief First block cell of every rank, and the total (ParMETIS vtxdist). */
         const std::vector<uint64_t> & cell_distribution() const { return cell_dist; }
@@ -114,8 +114,8 @@ class DistributedMesh {
         /** @brief Periodic key of a node (the node itself if it is not periodic). */
         uint64_t node_key(uint64_t g) const;
 
-        int rank_of_cell(uint64_t g) const;
-        int rank_of_node(uint64_t g) const;
+        size_t rank_of_cell(uint64_t g) const;
+        size_t rank_of_node(uint64_t g) const;
         void append_record(std::vector<uint64_t> & out, uint32_t i) const;
         void read_records(const std::vector<uint64_t> & in, uint8_t layer);
         std::vector<std::array<double, N_DIM>> fetch_nodes(const std::vector<uint64_t> & sorted_ids) const;

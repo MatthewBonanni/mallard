@@ -40,11 +40,11 @@ GlobalOrder::GlobalOrder(std::span<const uint64_t> ids, uint64_t n_global, bool 
     const int p = distributed ? comm::size() : 1, r = distributed ? comm::rank() : 0;
     first_ = block_begin(n_global, r, p);
     n_block = block_begin(n_global, r + 1, p) - first_;
-    send_items.assign(p, {});
-    std::vector<std::vector<uint64_t>> send(p);
+    send_items.assign(static_cast<size_t>(p), {});
+    std::vector<std::vector<uint64_t>> send(static_cast<size_t>(p));
     for (uint32_t i = 0; i < ids.size(); i++) {
         if (ids[i] >= n_global) throw std::logic_error("GlobalOrder: id out of range.");
-        const int q = block_of(ids[i], n_global, p);
+        const size_t q = static_cast<size_t>(block_of(ids[i], n_global, p));
         send_items[q].push_back(i);
         send[q].push_back(ids[i]);
     }
