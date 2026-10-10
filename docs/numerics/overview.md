@@ -147,9 +147,9 @@ The first case is stable and the second is not. So whether HLL, and RHLL
 depends only on how the time integrator rounds:
 
 - From 3000 to 10000 steps of a Mach 6 shock at rest on the faces of a
-  40 x 40 grid, the face-aligned case in `test/solver_test.cpp`, both grow an
-  O(0.1-1) carbuncle with FE, RK4 and SSPRK3. This holds with or without FMA
-  contraction and at CFL 0.18-0.3.
+  40 x 40 grid (the setup of `carbuncle_growth` in `test/solver_test.cpp`
+  with no drift), both grow an O(0.1-1) carbuncle with FE, RK4 and SSPRK3.
+  This holds with or without FMA contraction and at CFL 0.18-0.3.
 - Until 0.7.0 the SSPRK3 last stage was `2/3 U2 + 1/3 U`. Its rounded weights
   sum to 1 - 2^-54, which nudged the state down by an ulp in a fraction of
   the cells every step and happened to keep that wave speed positive.
@@ -162,9 +162,33 @@ a face. For example, the same shock drifting at 0.03, as in
 - HLL damps it.
 - Roe grows it to O(1).
 
-Wave-speed bounds that include the Davis estimates, `u_R - a_R` and
-`u_L + a_L`, would remove the sign dependence but would smear stationary
-shocks. They are under evaluation.
+RHLL is marginal on slower shocks: drifting at 0.003 to 0.03 in either
+direction, its transverse velocity reaches up to 1e-2 within 20000 steps.
+
+This is a known limitation. None of the following wave-speed changes was
+worth adopting (#244); all were measured on the setup above:
+
+- **Davis bounds**, `S_l = min(u_L - a_L, u_Roe - a_Roe, u_R - a_R)` and
+  `S_r = max(u_R + a_R, u_Roe + a_Roe, u_L + a_L)`:
+  - They remove the sign dependence. At rest on faces, HLL and RHLL decay to
+    1e-11-1e-14 by 10000 steps with FE, RK4 and SSPRK3, for a density bump or
+    a dip behind the shock.
+  - They spread every slow, strong shock over two cells instead of one. The
+    L1 density error at the shock grows 1.7-1.9 times for the Mach 6 shock
+    moving at ±0.5 (first order), and 2 times at rest (MUSCL). On weaker or
+    faster shocks the cost is small: L1 errors grow by 0.1-0.4% for Sod,
+    0.1-0.6% for Shu-Osher, and 0.6-1.4% for the double Mach reflection.
+  - In RHLL the smeared shock grows a carbuncle: 2e-2 to 7e-2 for drifts of
+    0.003 to 0.03, against 1e-5 for the drift of 0.03 with Einfeldt speeds.
+    RHLL would fail its carbuncle test.
+  - HLLC grows a carbuncle on these shocks with either bounds.
+- **Snapping a near-zero `S_l` to 0** (a deterministic tie-break, here
+  `|S_l| < 1e-10 a_Roe`): it keeps the shock at rest at 1e-14 when a density
+  bump behind it pushes `S_l` up. A dip of the same size pushes `S_l` down
+  instead, and the carbuncle grows to 0.2.
+- **Smoothing `min(S_l, 0)` near zero** (a sonic entropy fix of width 1e-3 to
+  0.3 `a_Roe`): the shock at rest still grows a carbuncle, to 0.08-0.25 with
+  RHLL and up to 0.2 with HLL.
 
 ### Low-Mach correction
 
