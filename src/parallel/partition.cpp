@@ -265,7 +265,26 @@ std::vector<int> partition_multijagged(const DistributedMesh & mesh, int n_parts
         }
         n_groups *= f;
     }
-    return std::vector<int>(group.begin(), group.end());
+
+    // Blocks numbered along a Hilbert curve, so that consecutive ranks (one
+    // node's) hold a compact group of blocks
+    std::array<double, N_DIM> grid_lo{}, grid_hi;
+    grid_hi.fill(*std::max_element(shape.begin(), shape.end()));
+    std::vector<std::pair<uint64_t, int>> blocks(n_parts);
+    for (int p = 0; p < n_parts; p++) {
+        std::array<double, N_DIM> center;
+        for (int d = N_DIM - 1, rest = p; d >= 0; d--) {
+            center[d] = rest % shape[d] + 0.5;
+            rest /= shape[d];
+        }
+        blocks[p] = {hilbert_key(center, grid_lo, grid_hi), p};
+    }
+    std::sort(blocks.begin(), blocks.end());
+    std::vector<int> rank_of_block(n_parts);
+    for (int r = 0; r < n_parts; r++) rank_of_block[blocks[r].second] = r;
+    std::vector<int> owner(group.size());
+    for (size_t c = 0; c < group.size(); c++) owner[c] = rank_of_block[group[c]];
+    return owner;
 }
 
 std::vector<int> partition_graph(const DistributedMesh & mesh, int n_parts) {
