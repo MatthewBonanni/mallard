@@ -183,7 +183,7 @@ struct ThermoTable {
 template <typename MemorySpace = Kokkos::DefaultExecutionSpace::memory_space>
 ThermoTable<MemorySpace> make_thermo_table(const Mechanism & mechanism) {
     ThermoTable<MemorySpace> table;
-    const uint32_t n = static_cast<uint32_t>(mechanism.n_species());
+    const uint32_t n = mechanism.n_species();
     table.n_species = n;
     uint32_t n_ranges = 0;
     for (const auto & sp : mechanism.species) n_ranges += static_cast<uint32_t>(sp.thermo.coeffs.size());
@@ -209,7 +209,7 @@ ThermoTable<MemorySpace> make_thermo_table(const Mechanism & mechanism) {
         h_closed(k) = sp.thermo.model == ThermoModel::NASA7;
         for (size_t i = 0; i < sp.thermo.coeffs.size(); i++, r++) {
             h_upper(r) = sp.thermo.T_bounds[i + 1];
-            for (int j = 0; j < 9; j++) h_coeffs(r, j) = sp.thermo.coeffs[i][j];
+            for (size_t j = 0; j < 9; j++) h_coeffs(r, j) = sp.thermo.coeffs[i][j];
         }
         T_min = std::max(T_min, sp.thermo.T_bounds.front());
         T_max = std::min(T_max, sp.thermo.T_bounds.back());

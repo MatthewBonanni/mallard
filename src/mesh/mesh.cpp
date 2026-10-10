@@ -180,15 +180,15 @@ uint32_t Mesh::h_n_nodes_of_face(uint32_t i_face) const {
     return h_offsets_nodes_of_face(i_face + 1) - h_offsets_nodes_of_face(i_face);
 }
 
-uint32_t Mesh::h_node_of_cell(uint32_t i_cell, uint8_t i_node_local) const {
+uint32_t Mesh::h_node_of_cell(uint32_t i_cell, uint32_t i_node_local) const {
     return h_nodes_of_cell(h_offsets_nodes_of_cell(i_cell) + i_node_local);
 }
 
-uint32_t Mesh::h_face_of_cell(uint32_t i_cell, uint8_t i_face_local) const {
+uint32_t Mesh::h_face_of_cell(uint32_t i_cell, uint32_t i_face_local) const {
     return h_faces_of_cell(h_offsets_faces_of_cell(i_cell) + i_face_local);
 }
 
-uint32_t Mesh::h_node_of_face(uint32_t i_face, uint8_t i_node_local) const {
+uint32_t Mesh::h_node_of_face(uint32_t i_face, uint32_t i_node_local) const {
     return h_nodes_of_face(h_offsets_nodes_of_face(i_face) + i_node_local);
 }
 

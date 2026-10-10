@@ -122,16 +122,16 @@ enum class FalloffType {
 struct Reaction {
     std::string equation;
     ReactionType type = ReactionType::ELEMENTARY;
-    std::vector<std::pair<int32_t, double>> reactants;  // species, stoichiometric coefficient
-    std::vector<std::pair<int32_t, double>> products;
-    std::vector<std::pair<int32_t, double>> orders;     // forward reaction orders of the reactants
+    std::vector<std::pair<uint32_t, double>> reactants;  // species, stoichiometric coefficient
+    std::vector<std::pair<uint32_t, double>> products;
+    std::vector<std::pair<uint32_t, double>> orders;     // forward reaction orders of the reactants
     bool reversible = true;
     bool duplicate = false;
     Arrhenius rate;  // falloff: the high-pressure limit
     Arrhenius low;   // falloff: the low-pressure limit
     FalloffType falloff = FalloffType::LINDEMANN;
     std::array<double, 5> falloff_params = {};  // Troe A, T3, T1, T2; SRI a, b, c, d, e
-    std::vector<std::pair<int32_t, double>> efficiencies;  // third-body efficiencies other than the default
+    std::vector<std::pair<uint32_t, double>> efficiencies;  // third-body efficiencies other than the default
     double default_efficiency = 1.0;
     std::vector<std::pair<double, Arrhenius>> plog;  // PLOG: (pressure [Pa], rate), by increasing pressure
     std::array<double, 4> chebyshev_range = {};     // Chebyshev: T_min, T_max [K], p_min, p_max [Pa]
@@ -149,7 +149,7 @@ struct Mechanism {
     std::vector<Species> species;
     std::vector<Reaction> reactions;
 
-    size_t n_species() const { return species.size(); }
+    uint32_t n_species() const { return static_cast<uint32_t>(species.size()); }
 
     /** @brief Index of a species by name, or -1 if the mechanism has none. */
     int32_t species_index(const std::string & name) const;

@@ -209,7 +209,7 @@ TEST(MixtureTransportTest, SoretEffectSeparatesSpeciesInATemperatureWave) {
     const auto thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(mech);
     const auto table = chemistry::make_transport_table<Kokkos::HostSpace>(
         mech, chemistry::TransportModel::MIXTURE_AVERAGED, {}, true);
-    const uint32_t ns = static_cast<uint32_t>(mech.n_species());
+    const uint32_t ns = mech.n_species();
     const int32_t i_H2 = mech.species_index("H2"), i_N2 = mech.species_index("N2");
     std::vector<double> Y(ns, 0.0), D(ns), DT(ns);
     const double W_H2 = mech.species[i_H2].molecular_weight, W_N2 = mech.species[i_N2].molecular_weight;
