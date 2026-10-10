@@ -634,7 +634,7 @@ TEST(MPITest, MultiJaggedPartitionCutsABoxIntoBlocksAndMatchesSerial) {
     if (!solver.is_distributed()) return;
     const uint32_t n_owned = solver.get_distribution().n_owned;
     const uint64_t n_global = solver.get_mesh()->n_global_cells;
-    EXPECT_LE(comm::allreduce(uint64_t(n_owned), comm::Op::MAX), n_global / comm::size() + 2);
+    EXPECT_LE(comm::allreduce(uint64_t(n_owned), comm::Op::MAX), n_global / uint64_t(comm::size()) + 2);
     // 24 x 18 cells: a grid of blocks that divides them is cut by straight lines only
     const auto shape = grid_shape(comm::size(), {1.0 - 1.0 / 24, 0.8 - 0.8 / 18});
     if (24 % shape[0] != 0 || 18 % shape[1] != 0) return;
