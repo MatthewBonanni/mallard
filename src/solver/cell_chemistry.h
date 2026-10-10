@@ -61,7 +61,9 @@ struct ChemistryForcing {
 /**
  * @brief The per-cell views a chemistry call reads and writes: the state,
  *        the temperature seed, the last sub-step, the sub-steps of the step
- *        and of the last call, and the optional multiplier of dt.
+ *        and of the last call, the optional multiplier of dt, and with a
+ *        forcing its species rates and U + dt rate, whose partial densities
+ *        receive the result instead of rhoY (all empty without one).
  */
 struct ChemistryCells {
     StateView U;
@@ -71,6 +73,11 @@ struct ChemistryCells {
     Kokkos::View<rtype *> chem_cost;
     Kokkos::View<float *> previous_cost;
     Kokkos::View<rtype *> time_scale;
+    SpeciesView rate;
+    StateView U_end;
+    SpeciesView rhoY_end;
+
+    bool forced() const { return U_end.extent(0) > 0; }
 };
 
 class ChemistryBalance;
@@ -156,11 +163,10 @@ class CellChemistry {
     private:
         /**
          * @brief Integrates queued cells [0, n) of `cells` in batches of the work memory, with
-         *        the forcing if any (results then go to its scratch state); returns failures.
+         *        their forcing if any; returns failures.
          */
         uint32_t integrate(const ChemistryCells & cells, const Kokkos::View<uint32_t *> & queued,
-                           const Kokkos::View<float *> & queued_cost, uint32_t n, double dt,
-                           const ChemistryForcing * forcing);
+                           const Kokkos::View<float *> & queued_cost, uint32_t n, double dt);
 
         std::shared_ptr<ChemistryBalance> balance;
         Mixture gas;
