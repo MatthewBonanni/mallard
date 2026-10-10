@@ -78,28 +78,28 @@ Kokkos::View<rtype *[N_CONSERVATIVE]>::host_mirror_type cell_averages_3d(const M
         mesh.h_cell_tetrahedra(c, tets);
         for (const auto & t : tets) {
             double e[3][3];
-            for (int a = 0; a < 3; a++) {
-                for (int d = 0; d < 3; d++) e[a][d] = t[a + 1][d] - t[0][d];
+            for (size_t a = 0; a < 3; a++) {
+                for (size_t d = 0; d < 3; d++) e[a][d] = t[a + 1][d] - t[0][d];
             }
             const double det = std::abs(e[0][0] * (e[1][1] * e[2][2] - e[1][2] * e[2][1]) -
                                         e[0][1] * (e[1][0] * e[2][2] - e[1][2] * e[2][0]) +
                                         e[0][2] * (e[1][0] * e[2][1] - e[1][1] * e[2][0]));
-            for (int i = 0; i < 8; i++) {
-                for (int j = 0; j < 8; j++) {
-                    for (int k = 0; k < 8; k++) {
+            for (size_t i = 0; i < 8; i++) {
+                for (size_t j = 0; j < 8; j++) {
+                    for (size_t k = 0; k < 8; k++) {
                         const double u = g[i], v = g[j] * (1.0 - g[i]), w = g[k] * (1.0 - g[i]) * (1.0 - g[j]);
                         const double wt = gw[i] * gw[j] * gw[k] * (1.0 - g[i]) * (1.0 - g[i]) * (1.0 - g[j]) * det;
                         double p[3];
-                        for (int d = 0; d < 3; d++) p[d] = t[0][d] + u * e[0][d] + v * e[1][d] + w * e[2][d];
+                        for (size_t d = 0; d < 3; d++) p[d] = t[0][d] + u * e[0][d] + v * e[1][d] + w * e[2][d];
                         double val[N_CONSERVATIVE] = {};
                         f(p[0], p[1], p[2], val);
-                        for (int q = 0; q < N_CONSERVATIVE; q++) sum[q] += wt * val[q];
+                        for (size_t q = 0; q < N_CONSERVATIVE; q++) sum[q] += wt * val[q];
                         vol += wt;
                     }
                 }
             }
         }
-        FOR_I_CONSERVATIVE avg(c, i) = sum[i] / vol;
+        FOR_I_CONSERVATIVE avg(c, i) = static_cast<rtype>(sum[i] / vol);
     }
     return avg;
 }
@@ -108,7 +108,7 @@ Kokkos::View<rtype *[N_CONSERVATIVE]>::host_mirror_type cell_averages_3d(const M
  * @brief Boundary data assigning the same condition to every boundary face.
  */
 inline BoundaryData make_uniform_boundaries(const Mesh & mesh, BoundaryType type,
-                                            rtype gamma = 1.4) {
+                                            rtype gamma = 1.4_r) {
     std::vector<int32_t> face_bc(mesh.n_faces);
     for (uint32_t i_face = 0; i_face < mesh.n_faces; i_face++) {
         face_bc[i_face] = (mesh.h_cells_of_face(i_face, 1) < 0) ? 0 : -1;
@@ -149,18 +149,18 @@ Kokkos::View<rtype *[N_CONSERVATIVE]>::host_mirror_type cell_averages(const Mesh
             const double ax = double(mesh.h_node_coords(n1, 0)) - x0, ay = double(mesh.h_node_coords(n1, 1)) - y0;
             const double bx = double(mesh.h_node_coords(n2, 0)) - x0, by = double(mesh.h_node_coords(n2, 1)) - y0;
             const double det = std::abs(ax * by - ay * bx);
-            for (int i = 0; i < 8; i++) {
-                for (int j = 0; j < 8; j++) {
+            for (size_t i = 0; i < 8; i++) {
+                for (size_t j = 0; j < 8; j++) {
                     const double s = g[i], t = g[j] * (1.0 - g[i]);
                     const double w = gw[i] * gw[j] * (1.0 - g[i]) * det;
                     double v[N_CONSERVATIVE] = {};
                     f(x0 + s * ax + t * bx, y0 + s * ay + t * by, v);
-                    for (int q = 0; q < N_CONSERVATIVE; q++) sum[q] += w * v[q];
+                    for (size_t q = 0; q < N_CONSERVATIVE; q++) sum[q] += w * v[q];
                     area += w;
                 }
             }
         }
-        FOR_I_CONSERVATIVE avg(c, i) = sum[i] / area;
+        FOR_I_CONSERVATIVE avg(c, i) = static_cast<rtype>(sum[i] / area);
     }
     return avg;
 }

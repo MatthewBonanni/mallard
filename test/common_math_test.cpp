@@ -47,7 +47,7 @@ TEST(CommonMathTest, Norm2) {
 TEST(CommonMathTest, Unit) {
     std::vector<rtype> v = {3.0, 4.0};
 
-    std::vector<rtype> expected_unit = {0.6, 0.8};
+    std::vector<rtype> expected_unit = {0.6_r, 0.8_r};
     std::vector<rtype> actual_unit(2);
     unit<2>(v.data(), actual_unit.data());
 
@@ -58,7 +58,7 @@ TEST(CommonMathTest, Unit) {
 TEST(CommonMathTest, UnitNegative) {
     std::vector<rtype> v = {-3.0, -4.0};
 
-    std::vector<rtype> expected_unit = {-0.6, -0.8};
+    std::vector<rtype> expected_unit = {-0.6_r, -0.8_r};
     std::vector<rtype> actual_unit(2);
     unit<2>(v.data(), actual_unit.data());
 
@@ -116,7 +116,7 @@ TEST(CommonMathTest, InvertMatrix2) {
     std::vector<rtype> actual_A_inv(4);
     invert_matrix<2>(A.data(), actual_A_inv.data());
 
-    rtype tol = 1e-6;
+    rtype tol = 1e-6_r;
     for (uint32_t i = 0; i < 4; ++i) {
         EXPECT_NEAR(expected_A_inv[i], actual_A_inv[i], tol);
     }
@@ -133,7 +133,7 @@ TEST(CommonMathTest, InvertMatrix3) {
     std::vector<rtype> actual_A_inv(9);
     invert_matrix<3>(A.data(), actual_A_inv.data());
 
-    rtype tol = 1e-6;
+    rtype tol = 1e-6_r;
     for (uint32_t i = 0; i < 9; ++i) {
         EXPECT_NEAR(expected_A_inv[i], actual_A_inv[i], tol);
     }
@@ -372,11 +372,11 @@ TEST(CommonMathTest, QRHouseholder3x4) {
 
     std::vector<rtype> expected_R = {-2.0, -1.0, -2.0,
                                       0.0, -1.0,  1.0,
-                                      0.0,  0.0,  3.6055512755,
+                                      0.0,  0.0,  3.6055512755_r,
                                       0.0,  0.0,  0.0};
     QR_householder_noQ(A.data(), R.data(), 4, 3);
 
-    rtype tol = 1e-6;
+    rtype tol = 1e-6_r;
     for (uint32_t i = 0; i < 12; ++i) {
         EXPECT_NEAR(expected_R[i], R[i], tol);
     }
@@ -396,7 +396,7 @@ TEST(CommonMathTest, ForwardSubstitution331) {
                                      0.0};
     forward_substitution(L.data(), b.data(), x.data(), 3, 3, 1, false, false);
 
-    rtype tol = 1e-6;
+    rtype tol = 1e-6_r;
     for (uint32_t i = 0; i < 3; ++i) {
         EXPECT_NEAR(expected_x[i], x[i], tol);
     }
@@ -416,7 +416,7 @@ TEST(CommonMathTest, ForwardSubstitution332) {
                                      0.0, -4.5};
     forward_substitution(L.data(), B.data(), X.data(), 3, 3, 2, false, false);
 
-    rtype tol = 1e-6;
+    rtype tol = 1e-6_r;
     for (uint32_t i = 0; i < 6; ++i) {
         EXPECT_NEAR(expected_X[i], X[i], tol);
     }
@@ -436,7 +436,7 @@ TEST(CommonMathTest, ForwardSubstitution332TransposeL) {
                                      0.0, -4.5};
     forward_substitution(L.data(), B.data(), X.data(), 3, 3, 2, true, false);
 
-    rtype tol = 1e-6;
+    rtype tol = 1e-6_r;
     for (uint32_t i = 0; i < 6; ++i) {
         EXPECT_NEAR(expected_X[i], X[i], tol);
     }
@@ -455,7 +455,7 @@ TEST(CommonMathTest, ForwardSubstitution332TransposeB) {
                                      0.0, -4.5};
     forward_substitution(L.data(), B.data(), X.data(), 3, 3, 2, false, true);
 
-    rtype tol = 1e-6;
+    rtype tol = 1e-6_r;
     for (uint32_t i = 0; i < 6; ++i) {
         EXPECT_NEAR(expected_X[i], X[i], tol);
     }
@@ -474,7 +474,7 @@ TEST(CommonMathTest, ForwardSubstitution332TransposeLB) {
                                      0.0, -4.5};
     forward_substitution(L.data(), B.data(), X.data(), 3, 3, 2, true, true);
 
-    rtype tol = 1e-6;
+    rtype tol = 1e-6_r;
     for (uint32_t i = 0; i < 6; ++i) {
         EXPECT_NEAR(expected_X[i], X[i], tol);
     }
@@ -494,7 +494,7 @@ TEST(CommonMathTest, BackSubstitution331) {
                                      2.0};
     back_substitution(U.data(), b.data(), x.data(), 3, 3, 1, false, false);
 
-    rtype tol = 1e-6;
+    rtype tol = 1e-6_r;
     for (uint32_t i = 0; i < 3; ++i) {
         EXPECT_NEAR(expected_x[i], x[i], tol);
     }
@@ -514,7 +514,7 @@ TEST(CommonMathTest, BackSubstitution332) {
                                      2.0,  8.0};
     back_substitution(U.data(), B.data(), X.data(), 3, 3, 2, false, false);
 
-    rtype tol = 1e-6;
+    rtype tol = 1e-6_r;
     for (uint32_t i = 0; i < 6; ++i) {
         EXPECT_NEAR(expected_X[i], X[i], tol);
     }
@@ -534,7 +534,7 @@ TEST(CommonMathTest, BackSubstitution332TransposeU) {
                                      2.0,  8.0};
     back_substitution(U.data(), B.data(), X.data(), 3, 3, 2, true, false);
 
-    rtype tol = 1e-6;
+    rtype tol = 1e-6_r;
     for (uint32_t i = 0; i < 6; ++i) {
         EXPECT_NEAR(expected_X[i], X[i], tol);
     }
@@ -553,7 +553,7 @@ TEST(CommonMathTest, BackSubstitution332TransposeB) {
                                      2.0,  8.0};
     back_substitution(U.data(), B.data(), X.data(), 3, 3, 2, false, true);
 
-    rtype tol = 1e-6;
+    rtype tol = 1e-6_r;
     for (uint32_t i = 0; i < 6; ++i) {
         EXPECT_NEAR(expected_X[i], X[i], tol);
     }
@@ -572,7 +572,7 @@ TEST(CommonMathTest, BackSubstitution332TransposeUB) {
                                      2.0,  8.0};
     back_substitution(U.data(), B.data(), X.data(), 3, 3, 2, true, true);
 
-    rtype tol = 1e-6;
+    rtype tol = 1e-6_r;
     for (uint32_t i = 0; i < 6; ++i) {
         EXPECT_NEAR(expected_X[i], X[i], tol);
     }

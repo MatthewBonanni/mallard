@@ -58,20 +58,20 @@ std::shared_ptr<Mesh> build_local_mesh_from_global(Mesh & global, const std::vec
     // Owned cells, then halo layers by breadth-first search over vertex neighbors
     std::vector<int32_t> local_of(n_global, -1);
     dist = Distribution();
-    dist.halo_layers = halo_layers;
+    dist.halo_layers = static_cast<uint8_t>(halo_layers);
     for (uint32_t c = 0; c < n_global; c++) {
         if (owner[c] != me) continue;
-        local_of[c] = dist.global_cell.size();
+        local_of[c] = static_cast<int32_t>(dist.global_cell.size());
         dist.global_cell.push_back(c);
         dist.layer.push_back(0);
     }
-    dist.n_owned = dist.global_cell.size();
+    dist.n_owned = static_cast<uint32_t>(dist.global_cell.size());
     size_t layer_begin = 0;
     for (int l = 1; l <= halo_layers; l++) {
         const size_t layer_end = dist.global_cell.size();
         std::vector<uint32_t> next;
         for (size_t i = layer_begin; i < layer_end; i++) {
-            const uint32_t c = dist.global_cell[i];
+            const uint32_t c = static_cast<uint32_t>(dist.global_cell[i]);
             for (uint32_t k = 0; k < global.h_n_nodes_of_cell(c); k++) {
                 for (uint32_t nb : cells_of_node[global.h_node_of_cell(c, k)]) {
                     if (local_of[nb] == -1) {
@@ -83,9 +83,9 @@ std::shared_ptr<Mesh> build_local_mesh_from_global(Mesh & global, const std::vec
         }
         std::sort(next.begin(), next.end());
         for (uint32_t c : next) {
-            local_of[c] = dist.global_cell.size();
+            local_of[c] = static_cast<int32_t>(dist.global_cell.size());
             dist.global_cell.push_back(c);
-            dist.layer.push_back(l);
+            dist.layer.push_back(static_cast<uint8_t>(l));
         }
         layer_begin = layer_end;
     }
@@ -95,13 +95,13 @@ std::shared_ptr<Mesh> build_local_mesh_from_global(Mesh & global, const std::vec
     std::vector<std::array<rtype, N_DIM>> nodes;
     std::vector<std::vector<uint32_t>> cells(dist.global_cell.size());
     for (size_t i = 0; i < dist.global_cell.size(); i++) {
-        const uint32_t c = dist.global_cell[i];
+        const uint32_t c = static_cast<uint32_t>(dist.global_cell[i]);
         for (uint32_t k = 0; k < global.h_n_nodes_of_cell(c); k++) {
             const uint32_t gn = global.h_node_of_cell(c, k);
             auto [it, inserted] = local_node.emplace(gn, nodes.size());
             if (inserted) {
                 std::array<rtype, N_DIM> x;
-                for (int d = 0; d < N_DIM; d++) x[d] = global.h_node_coords(gn, d);
+                for (size_t d = 0; d < N_DIM; d++) x[d] = global.h_node_coords(gn, d);
                 nodes.push_back(x);
             }
             cells[i].push_back(it->second);
@@ -125,7 +125,8 @@ std::shared_ptr<Mesh> build_local_mesh_from_global(Mesh & global, const std::vec
         }
     }
     std::vector<Mesh::BoundaryFace> boundary_faces;
-    for (uint32_t c : dist.global_cell) {
+    for (uint64_t g : dist.global_cell) {
+        const uint32_t c = static_cast<uint32_t>(g);
         for (uint32_t k = 0; k < global.h_n_faces_of_cell(c); k++) {
             const uint32_t f = global.h_face_of_cell(c, k);
             const int32_t c0 = global.h_cells_of_face(f, 0), c1 = global.h_cells_of_face(f, 1);
@@ -133,7 +134,7 @@ std::shared_ptr<Mesh> build_local_mesh_from_global(Mesh & global, const std::vec
             std::string zone;
             if (other < 0) {
                 zone = zone_of_face[f] ? *zone_of_face[f] : "unassigned";
-            } else if (local_of[other] < 0) {
+            } else if (local_of[static_cast<size_t>(other)] < 0) {
                 zone = PARTITION_ZONE;
             } else {
                 continue;
@@ -152,9 +153,10 @@ std::shared_ptr<Mesh> build_local_mesh_from_global(Mesh & global, const std::vec
     local->n_global_cells = n_global;
     local->init_from_connectivity(nodes, cells, boundary_faces);
     local->n_owned_cells = dist.n_owned;
-    local->n_reconstructed_cells = std::count_if(dist.layer.begin(), dist.layer.end(), [](uint8_t l) { return l <= 1; });
+    local->n_reconstructed_cells =
+        static_cast<uint32_t>(std::count_if(dist.layer.begin(), dist.layer.end(), [](uint8_t l) { return l <= 1; }));
     local->n_complete_cells =
-        std::count_if(dist.layer.begin(), dist.layer.end(), [&](uint8_t l) { return l < halo_layers; });
+        static_cast<uint32_t>(std::count_if(dist.layer.begin(), dist.layer.end(), [&](uint8_t l) { return l < halo_layers; }));
 
     std::vector<int> halo_owner;
     for (size_t i = dist.n_owned; i < dist.global_cell.size(); i++) halo_owner.push_back(owner[dist.global_cell[i]]);
@@ -223,13 +225,13 @@ TEST(DistributedMeshTest, LocalMeshesMatchTheSetupFromTheGlobalMesh) {
 
         // The dual graph of each block cell: its face neighbors in the global mesh
         for (uint32_t c = 0; c < distributed.n_block_cells(); c++) {
-            const uint64_t g = distributed.first_cell() + c;
-            std::vector<uint64_t> expected, graph(distributed.graph_neighbors().begin() + distributed.graph_offsets()[c],
-                                                  distributed.graph_neighbors().begin() + distributed.graph_offsets()[c + 1]);
+            const uint32_t g = static_cast<uint32_t>(distributed.first_cell() + c);
+            std::vector<uint64_t> expected, graph(distributed.graph_neighbors().begin() + static_cast<std::ptrdiff_t>(distributed.graph_offsets()[c]),
+                                                  distributed.graph_neighbors().begin() + static_cast<std::ptrdiff_t>(distributed.graph_offsets()[c + 1]));
             for (uint32_t k = 0; k < global.h_n_faces_of_cell(g); k++) {
                 const uint32_t f = global.h_face_of_cell(g, k);
                 const int32_t c0 = global.h_cells_of_face(f, 0), c1 = global.h_cells_of_face(f, 1);
-                if (c1 >= 0) expected.push_back(c0 == int32_t(g) ? c1 : c0);
+                if (c1 >= 0) expected.push_back(static_cast<uint64_t>(c0 == int32_t(g) ? c1 : c0));
             }
             std::sort(expected.begin(), expected.end());
             std::sort(graph.begin(), graph.end());
@@ -265,7 +267,7 @@ TEST(DistributedMeshTest, HilbertPartitionSplitsTheGlobalCurveOrderEvenly) {
     std::vector<double> all;
     {
         // Gather every center (test-only: a global array)
-        std::vector<std::vector<double>> send(comm::size(), flat);
+        std::vector<std::vector<double>> send(static_cast<size_t>(comm::size()), flat);
         for (const auto & from : comm::alltoallv(send)) all.insert(all.end(), from.begin(), from.end());
     }
     const uint64_t n = all.size() / N_DIM;
@@ -287,7 +289,7 @@ TEST(DistributedMeshTest, HilbertPartitionSplitsTheGlobalCurveOrderEvenly) {
     }
     std::sort(order.begin(), order.end());
     std::vector<int> expected(n);
-    for (uint64_t k = 0; k < n; k++) expected[order[k].second] = (k * comm::size()) / n;
+    for (uint64_t k = 0; k < n; k++) expected[order[k].second] = static_cast<int>((k * static_cast<uint64_t>(comm::size())) / n);
     for (uint32_t c = 0; c < distributed.n_block_cells(); c++) {
         ASSERT_EQ(owner[c], expected[distributed.first_cell() + c]) << "cell " << distributed.first_cell() + c;
     }
@@ -310,7 +312,7 @@ TEST(DistributedMeshTest, PeriodicHaloLayersFollowVertexNeighborsAcrossSeams) {
     }
     pairs = comm::allgatherv(pairs);
     std::vector<int> owner(global.n_cells);
-    for (size_t i = 0; i < pairs.size(); i += 2) owner[pairs[i]] = pairs[i + 1];
+    for (size_t i = 0; i < pairs.size(); i += 2) owner[pairs[i]] = static_cast<int>(pairs[i + 1]);
     distributed.distribute(block_owner);
     const int layers = 3;
     Distribution dist;
@@ -349,9 +351,9 @@ namespace {
 std::string periodic_pairs_input(int n_dirs) {
     static const char * zones[3][2] = {{"left", "right"}, {"bottom", "top"}, {"back", "front"}};
     std::string s;
-    for (int d = 0; d < n_dirs; d++) {
+    for (size_t d = 0; d < static_cast<size_t>(n_dirs); d++) {
         s += std::string("[[periodic]]\nzones = [\"") + zones[d][0] + "\", \"" + zones[d][1] + "\"]\ntranslation = [";
-        for (int i = 0; i < N_DIM; i++) s += std::string(i ? ", " : "") + (i == d ? "1.0" : "0.0");
+        for (size_t i = 0; i < N_DIM; i++) s += std::string(i ? ", " : "") + (i == d ? "1.0" : "0.0");
         s += "]\n";
     }
     return s;
@@ -384,17 +386,18 @@ std::pair<PeriodicNodes, std::vector<bool>> serial_classes(const MeshBlock & blo
     for (uint64_t f = 0; f < block.n_faces(); f++) {
         faces.push_back(block.face_zone[f]);
         faces.push_back(block.face_offsets[f + 1] - block.face_offsets[f]);
-        faces.insert(faces.end(), block.face_nodes.begin() + block.face_offsets[f],
-                     block.face_nodes.begin() + block.face_offsets[f + 1]);
+        faces.insert(faces.end(), block.face_nodes.begin() + static_cast<std::ptrdiff_t>(block.face_offsets[f]),
+                     block.face_nodes.begin() + static_cast<std::ptrdiff_t>(block.face_offsets[f + 1]));
     }
     faces = comm::allgatherv(faces);
     std::vector<std::array<rtype, N_DIM>> nodes(coords.size() / N_DIM);
-    for (size_t k = 0; k < nodes.size(); k++) FOR_I_DIM nodes[k][i] = coords[k * N_DIM + i];
+    for (size_t k = 0; k < nodes.size(); k++) FOR_I_DIM nodes[k][i] = static_cast<rtype>(coords[k * N_DIM + i]);
     std::vector<Mesh::BoundaryFace> boundary_faces;
     for (size_t i = 0; i < faces.size(); i += 2 + faces[i + 1]) {
         Mesh::BoundaryFace bf;
         bf.zone = block.zone_names[faces[i]];
-        bf.nodes.assign(faces.begin() + i + 2, faces.begin() + i + 2 + faces[i + 1]);
+        const auto first = faces.begin() + static_cast<std::ptrdiff_t>(i + 2);
+        bf.nodes.assign(first, first + static_cast<std::ptrdiff_t>(faces[i + 1]));
         boundary_faces.push_back(std::move(bf));
     }
     PeriodicNodes classes = match_periodic_nodes(nodes, boundary_faces, pairs);

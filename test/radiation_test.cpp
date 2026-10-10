@@ -40,9 +40,9 @@ chemistry::OpticallyThinRadiation model(const chemistry::Mechanism & mech, const
     const char * names[] = {"H2O", "CO2", "CO", "CH4"};
     chemistry::OpticallyThinRadiation r;
     for (RadiatingSpecies s : species) {
-        const int i = static_cast<int>(s);
+        const size_t i = static_cast<size_t>(s);
         r.index[i] = mech.species_index(names[i]);
-        r.inv_W[i] = 1.0 / mech.species[r.index[i]].molecular_weight;
+        r.inv_W[i] = 1.0 / mech.species[static_cast<size_t>(r.index[i])].molecular_weight;
     }
     r.T_ambient4 = std::pow(T_ambient, 4);
     return r;
@@ -89,7 +89,7 @@ TEST(RadiationTest, LossMatchesCanteraFlameRadiation) {
     for (const auto & row : rows) {
         const double T = row[0], p = row[1];
         for (const auto & [name, X] : {std::pair{"H2O", row[2]}, {"CO2", row[3]}}) {
-            const int32_t k = mech.species_index(name);
+            const size_t k = static_cast<size_t>(mech.species_index(name));
             rho_k[k] = X * p * mech.species[k].molecular_weight / (chemistry::GAS_CONSTANT * T);
         }
         EXPECT_NEAR(r.loss(T, SpeciesDensities{rho_k.data()}), row[4], 1e-9 * row[4]) << "T = " << T;
