@@ -111,7 +111,7 @@ TEST(ThickenedFlame, ReactionRatesAreDividedByTheThickening) {
         plain.run();
         thick.copy_device_to_host();
         plain.copy_device_to_host();
-        const uint32_t ns = thick.get_species_names().size();
+        const uint32_t ns = static_cast<uint32_t>(thick.get_species_names().size());
         double change = 0.0, diff = 0.0;
         Solver initial;
         initial.init(parse_toml(uniform_box("n_steps = 0\ndt = 1e-6\n", "")));

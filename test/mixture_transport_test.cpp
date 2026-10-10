@@ -210,7 +210,7 @@ TEST(MixtureTransportTest, SoretEffectSeparatesSpeciesInATemperatureWave) {
     const auto table = chemistry::make_transport_table<Kokkos::HostSpace>(
         mech, chemistry::TransportModel::MIXTURE_AVERAGED, {}, true);
     const uint32_t ns = mech.n_species();
-    const int32_t i_H2 = mech.species_index("H2"), i_N2 = mech.species_index("N2");
+    const uint32_t i_H2 = static_cast<uint32_t>(mech.species_index("H2")), i_N2 = static_cast<uint32_t>(mech.species_index("N2"));
     std::vector<double> Y(ns, 0.0), D(ns), DT(ns);
     const double W_H2 = mech.species[i_H2].molecular_weight, W_N2 = mech.species[i_N2].molecular_weight;
     Y[i_H2] = W_H2 / (W_H2 + W_N2);
@@ -232,7 +232,7 @@ TEST(MixtureTransportTest, SoretEffectSeparatesSpeciesInATemperatureWave) {
               << viscous_mixture(H2O2, "mixture_averaged", soret);
         Solver solver;
         run(solver, input.str());
-        Profile Y_H2 = column(solver, 0, i_H2);
+        Profile Y_H2 = column(solver, 0, static_cast<int>(i_H2));
         for (double & v : Y_H2.value) v -= Y[i_H2];
         Profile temperature = column(solver, N_DIM + 1);
         for (double & v : temperature.value) v -= T0;

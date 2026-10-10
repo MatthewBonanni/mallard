@@ -51,7 +51,7 @@ struct Case {
 std::string make_input(const Case & c) {
     std::ostringstream s;
     s << "[run]\n" << c.run << "[mesh]\ntype = \"" << c.mesh << "\"\n";
-    for (int d = 0; d < 3; d++) s << "N" << "xyz"[d] << " = " << c.n[d] << "\nL" << "xyz"[d] << " = " << c.L[d] << "\n";
+    for (size_t d = 0; d < 3; d++) s << "N" << "xyz"[d] << " = " << c.n[d] << "\nL" << "xyz"[d] << " = " << c.L[d] << "\n";
     s << "periodic = " << periodic_list(c.dirs) << "\n"
       << "[initialize]\ntype = \"constant\"\nu = [0.0, 0.0, 0.0]\np = 1.0\nT = 1.0\n"
       << c.boundaries
@@ -121,7 +121,7 @@ TEST_P(PeriodicBox3D, PreservesUniformFlowAndConservesMassMomentumAndEnergy) {
     uniform->copy_device_to_host();
     const double U[4] = {1.3, 1.3 * 0.4, -1.3 * 0.25, 1.3 * 0.1};
     for (uint32_t cell = 0; cell < uniform->get_mesh()->n_owned(); cell++) {
-        for (int i = 0; i < 4; i++) EXPECT_NEAR(uniform->h_conservatives(cell, i), U[i], roundoff(1e-12));
+        for (size_t i = 0; i < 4; i++) EXPECT_NEAR(uniform->h_conservatives(cell, i), U[i], roundoff(1e-12));
     }
     // With no boundary at all, momentum is conserved too
     auto blob = start(c, [](double x, double y, double z, double * W) {
@@ -155,7 +155,7 @@ double advection_error(const std::string & recon, int order, uint32_t n) {
     c.extra_recon = recon == "TENO" ? "order = " + std::to_string(order) + "\n" : "limiter = \"none\"\n";
     c.integrator = "RK4";
     const double T = 0.25;
-    const uint32_t steps = std::ceil(T / (0.25 * std::pow(1.0 / n, std::max(1.0, order / 4.0))));
+    const uint32_t steps = static_cast<uint32_t>(std::ceil(T / (0.25 * std::pow(1.0 / n, std::max(1.0, order / 4.0)))));
     c.run = "t_stop = " + std::to_string(T) + "\ndt = " + std::to_string(T / steps) + "\n";
     auto wave = [](double t) {
         return [t](double x, double y, double z, double * W) {
