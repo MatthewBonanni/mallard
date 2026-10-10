@@ -25,7 +25,7 @@ MixtureModel MixtureModel::from_input(const toml::value & input) {
                                            toml::find_or<std::string>(physics, "phase", ""));
     model.host_thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(model.mech);
     model.gas.thermo = chemistry::make_thermo_table(model.mech);
-    model.gas.n_species = static_cast<uint32_t>(model.mech.n_species());
+    model.gas.n_species = model.mech.n_species();
     const std::string type = toml::find_or<std::string>(physics, "type", "euler");
     if (type != "euler" && type != "navier_stokes") {
         throw InputError("physics.type = \"" + type + "\" is not one of: euler, navier_stokes.");
@@ -55,8 +55,8 @@ MixtureModel MixtureModel::from_input(const toml::value & input) {
             for (const auto & [name, value] : entries.as_table()) {
                 const int32_t k = model.mech.species_index(name);
                 if (k < 0) throw InputError("physics.lewis: no species " + name + " in the mechanism.");
-                lewis[k] = static_cast<double>(find_real(entries, name));
-                if (!(lewis[k] > 0.0)) throw InputError("physics.lewis." + name + " must be positive.");
+                lewis[static_cast<size_t>(k)] = static_cast<double>(find_real(entries, name));
+                if (!(lewis[static_cast<size_t>(k)] > 0.0)) throw InputError("physics.lewis." + name + " must be positive.");
             }
         }
     } else if (physics.contains("lewis")) {
@@ -94,7 +94,7 @@ std::vector<double> MixtureModel::mass_fractions(const toml::value & table, cons
         }
         const double x = static_cast<double>(find_real(entries, name));
         if (!(x >= 0.0)) throw InputError(where + "." + key + "." + name + " must not be negative.");
-        f[k] = x;
+        f[static_cast<size_t>(k)] = x;
         sum += x;
     }
     if (!(sum > 0.0)) throw InputError(where + "." + key + " has no positive entry.");

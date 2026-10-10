@@ -199,7 +199,7 @@ rtype DataWriter::next_time() const {
     if (interval > 0) {
         return std::numeric_limits<rtype>::infinity();
     }
-    return n_written * time_interval;
+    return static_cast<rtype>(n_written) * time_interval;
 }
 
 void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttributes & attributes,
@@ -419,7 +419,7 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
     const std::vector<char> header = restart_header(mesh->n_cells, step, double(t), names, attributes, ordered.total);
     out.write(header.data(), static_cast<std::streamsize>(header.size()));
     for (const auto & field : fields) {
-        for (uint64_t i = 0; i < mesh->n_cells; i++) {
+        for (uint32_t i = 0; i < mesh->n_cells; i++) {
             const rtype value = field.value(i, 0);
             out.write(reinterpret_cast<const char *>(&value), sizeof(rtype));
         }
@@ -453,7 +453,7 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
     const uint32_t n_owned = mesh->n_owned();
     const MPI_Datatype real_type = sizeof(rtype) == sizeof(double) ? MPI_DOUBLE : MPI_FLOAT;
     std::vector<MPI_Aint> displacements(n_owned);
-    for (uint32_t i = 0; i < n_owned; i++) displacements[i] = mesh->h_global_cell_id[i] * sizeof(rtype);
+    for (uint32_t i = 0; i < n_owned; i++) displacements[i] = static_cast<MPI_Aint>(mesh->h_global_cell_id[i] * sizeof(rtype));
     MPI_Datatype file_type;
     MPI_Type_create_hindexed_block(static_cast<int>(n_owned), 1, displacements.data(), real_type, &file_type);
     MPI_Type_commit(&file_type);
@@ -674,7 +674,7 @@ void DataWriter::write_vtu_faces(const std::string & filename, rtype t) const {
         out << "format=\"ascii\">\n";
         for (uint32_t f : geometry_faces) {
             for (uint32_t k = 0; k < field.n_vtk_components(); k++) {
-                out << static_cast<double>(field.value(mesh->h_cells_of_face(f, 0), k)) << " ";
+                out << static_cast<double>(field.value(static_cast<uint32_t>(mesh->h_cells_of_face(f, 0)), k)) << " ";
             }
         }
         out << "\n        </DataArray>\n";

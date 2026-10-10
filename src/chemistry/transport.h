@@ -244,7 +244,7 @@ TransportTable<MemorySpace> make_transport_table(const Mechanism & mechanism, co
                                                  const bool thermal_diffusion = false) {
     const TransportFits fits = fit_transport(mechanism);
     TransportTable<MemorySpace> table;
-    const uint32_t n = static_cast<uint32_t>(mechanism.n_species());
+    const uint32_t n = mechanism.n_species();
     table.n_species = n;
     table.model = model;
     table.W = Kokkos::View<double *, MemorySpace>("transport_W", n);
@@ -265,12 +265,12 @@ TransportTable<MemorySpace> make_transport_table(const Mechanism & mechanism, co
     for (uint32_t k = 0; k < n; k++) {
         h_W(k) = mechanism.species[k].molecular_weight;
         h_inv_Le(k) = (model == TransportModel::CONSTANT_LEWIS && !lewis.empty()) ? 1.0 / lewis[k] : 1.0;
-        for (int c = 0; c < 5; c++) {
+        for (size_t c = 0; c < 5; c++) {
             h_visc(k, c) = fits.viscosity[k][c];
             h_cond(k, c) = fits.conductivity[k][c];
         }
         for (uint32_t j = k; j < n; j++, pair++) {
-            for (int c = 0; c < 5; c++) {
+            for (size_t c = 0; c < 5; c++) {
                 h_diff(k, j, c) = fits.diffusion[pair][c];
                 h_diff(j, k, c) = fits.diffusion[pair][c];
             }
@@ -302,7 +302,7 @@ TransportTable<MemorySpace> make_transport_table(const Mechanism & mechanism, co
         size_t p = 0;
         for (uint32_t k = 0; k < n; k++) {
             for (uint32_t j = k; j < n; j++, p++) {
-                for (int c = 0; c < 9; c++) {
+                for (size_t c = 0; c < 9; c++) {
                     h_cstar(k, j, c) = td.cstar[p][c];
                     h_cstar(j, k, c) = td.cstar[p][c];
                 }

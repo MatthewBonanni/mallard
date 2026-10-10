@@ -475,11 +475,11 @@ void forward_substitution(const rtype * L,
         for (uint16_t j = 0; j < p; j++) {
             rtype sum = 0.0;
             for (uint16_t k = 0; k < i; k++) {
-                uint16_t idx_L = tL ? k*m + i : i*n + k;
+                const int idx_L = tL ? k*m + i : i*n + k;
                 sum += L[idx_L] * X[k*p + j];
             }
-            uint16_t idx_B = tB ? j*n + i : i*p + j;
-            uint16_t idx_L = tL ? i*m + i : i*n + i;
+            const int idx_B = tB ? j*n + i : i*p + j;
+            const int idx_L = tL ? i*m + i : i*n + i;
             X[i*p + j] = (B[idx_B] - sum) / L[idx_L];
         }
     }
@@ -506,16 +506,16 @@ void back_substitution(const rtype * U,
                        const uint16_t p,
                        const bool tU,
                        const bool tB) {
-    for (int16_t i = m - 1; i >= 0; i--) {
+    for (int i = m - 1; i >= 0; i--) {
         for (uint16_t j = 0; j < p; j++) {
             rtype sum = 0.0;
             uint16_t end = tU ? n : m;
-            for (uint16_t k = i + 1; k < end; k++) {
-                uint16_t idx_U = tU ? k*m + i : i*n + k;
+            for (int k = i + 1; k < end; k++) {
+                const int idx_U = tU ? k*m + i : i*n + k;
                 sum += U[idx_U] * X[k*p + j];
             }
-            uint16_t idx_B = tB ? j*n + i : i*p + j;
-            uint16_t idx_U = tU ? i*m + i : i*n + i;
+            const int idx_B = tB ? j*n + i : i*p + j;
+            const int idx_U = tU ? i*m + i : i*n + i;
             X[i*p + j] = (B[idx_B] - sum) / U[idx_U];
         }
     }

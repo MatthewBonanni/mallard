@@ -84,7 +84,7 @@ TEST(TransportTest, SpeciesFitsMatchCantera) {
     for (const Case & c : CASES) {
         const Mechanism mech = read_mechanism(c.file, c.phase);
         const auto table = make_transport_table<Kokkos::HostSpace>(mech, TransportModel::MIXTURE_AVERAGED);
-        const uint32_t ns = static_cast<uint32_t>(mech.n_species());
+        const uint32_t ns = mech.n_species();
         const auto rows = read_rows(c.name + "_species_transport.csv");
         ASSERT_FALSE(rows.empty()) << c.name;
         double worst = 0.0;
@@ -120,7 +120,7 @@ TEST(TransportTest, MixturePropertiesMatchCantera) {
     // diffusivity and constant Lewis numbers, in device kernels
     for (const Case & c : CASES) {
         const Mechanism mech = read_mechanism(c.file, c.phase);
-        const uint32_t ns = static_cast<uint32_t>(mech.n_species());
+        const uint32_t ns = mech.n_species();
         const auto rows = read_rows(c.name + "_mixture_transport.csv");
         ASSERT_FALSE(rows.empty()) << c.name;
         const uint32_t n = static_cast<uint32_t>(rows.size());
@@ -170,7 +170,7 @@ TEST(TransportTest, ThermalDiffusionMatchesCantera) {
     // kernels; the other properties are unchanged by computing them
     for (const Case & c : CASES) {
         const Mechanism mech = read_mechanism(c.file, c.phase);
-        const uint32_t ns = static_cast<uint32_t>(mech.n_species());
+        const uint32_t ns = mech.n_species();
         const auto rows = read_rows(c.name + "_thermal_diffusion.csv");
         ASSERT_FALSE(rows.empty()) << c.name;
         const uint32_t n = static_cast<uint32_t>(rows.size());

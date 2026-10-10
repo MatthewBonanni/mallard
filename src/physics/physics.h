@@ -52,16 +52,16 @@ enum class ViscosityModel {
  * Reconstruction layout ("W"): [rho, u_x, u_y, (u_z,) p].
  */
 struct Euler {
-    rtype gamma = 1.4;
+    rtype gamma = 1.4_r;
     rtype R = 287.0;
     rtype cp = 1004.5;
     rtype cv = 717.5;
     ViscosityModel viscosity_model = ViscosityModel::NONE;
     rtype mu_ref = 0.0;      // Viscosity (constant) or at T_mu_ref (Sutherland, power law)
-    rtype T_mu_ref = 273.15;
-    rtype S_mu = 110.4;      // Sutherland temperature
-    rtype n_mu = 0.75;       // Power-law exponent
-    rtype Pr = 0.72;
+    rtype T_mu_ref = 273.15_r;
+    rtype S_mu = 110.4_r;     // Sutherland temperature
+    rtype n_mu = 0.75_r;      // Power-law exponent
+    rtype Pr = 0.72_r;
 
     /**
      * @brief Construct from gamma and a reference state (p_ref = rho_ref * R * T_ref).

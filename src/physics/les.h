@@ -39,9 +39,9 @@ static const std::unordered_map<std::string, SGSModel> SGS_MODELS = {
  */
 struct LES {
     SGSModel model = SGSModel::SIGMA;
-    rtype C = 1.35;
-    rtype Pr_t = 0.9;
-    rtype Sc_t = 0.9;
+    rtype C = 1.35_r;
+    rtype Pr_t = 0.9_r;
+    rtype Sc_t = 0.9_r;
     bool scotti = false;
     bool dynamic = false;  // C from the Germano identity over the whole domain, once per step (see Solver)  // the eddy viscosity's width V^(1/3) f(a_1, a_2) (Scotti, Meneveau & Lilly 1993)
 

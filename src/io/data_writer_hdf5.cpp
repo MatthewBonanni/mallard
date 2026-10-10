@@ -170,8 +170,8 @@ void DataWriter::write_hdf5_mesh() {
         const std::vector<uint64_t> sizes = comm::allgatherv(std::vector<uint64_t>{total});
         total = 0;
         for (int r = 0; r < comm::size(); r++) {
-            if (r < comm::rank()) first += sizes[r];
-            total += sizes[r];
+            if (r < comm::rank()) first += sizes[static_cast<size_t>(r)];
+            total += sizes[static_cast<size_t>(r)];
         }
         last = comm::rank() == comm::size() - 1;
     }

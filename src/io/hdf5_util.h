@@ -143,7 +143,7 @@ inline uint64_t n_rows(hid_t parent, const char * name) {
 
 /** @brief Read rows [first, first + n) of a dataset (cols values each). */
 template <typename T>
-std::vector<T> read_rows(hid_t parent, const char * name, uint64_t first, uint64_t n, int cols, hid_t dxpl) {
+std::vector<T> read_rows(hid_t parent, const char * name, uint64_t first, uint64_t n, uint32_t cols, hid_t dxpl) {
     Handle dset(H5Dopen2(parent, name, H5P_DEFAULT), H5Dclose, std::string("opening ") + name);
     Handle space(H5Dget_space(dset), H5Sclose, "H5Dget_space");
     const int rank = cols > 1 ? 2 : 1;
@@ -203,11 +203,11 @@ inline std::vector<std::string> read_strings_attribute(hid_t object, const char 
     Handle memory_type(H5Tcopy(H5T_C_S1), H5Tclose, "H5Tcopy");
     check(H5Tset_size(memory_type, width), "H5Tset_size");
     check(H5Tset_strpad(memory_type, H5T_STR_NULLPAD), "H5Tset_strpad");
-    std::vector<char> buffer(std::max<hssize_t>(n, 1) * width, '\0');
+    std::vector<char> buffer(static_cast<size_t>(std::max<hssize_t>(n, 1)) * width, '\0');
     check(H5Aread(attr, memory_type, buffer.data()), name);
     std::vector<std::string> strings;
     for (hssize_t i = 0; i < n; i++) {
-        const char * s = &buffer[i * width];
+        const char * s = &buffer[static_cast<size_t>(i) * width];
         strings.emplace_back(s, std::find(s, s + width, '\0'));
     }
     return strings;

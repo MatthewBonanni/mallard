@@ -41,14 +41,14 @@ Euler Euler::from_input(const toml::value & input) {
             throw std::runtime_error("Missing mu for physics: navier_stokes.");
         }
         euler.mu_ref = find_real(input, "physics", "mu");
-        euler.Pr = find_real_or(input, "physics", "Pr", 0.72);
+        euler.Pr = find_real_or(input, "physics", "Pr", 0.72_r);
         const std::string model = toml::find_or<std::string>(input, "physics", "viscosity_model", "constant");
         if (model == "constant") {
             euler.viscosity_model = ViscosityModel::CONSTANT;
         } else if (model == "sutherland") {
             euler.viscosity_model = ViscosityModel::SUTHERLAND;
-            euler.T_mu_ref = find_real_or(input, "physics", "T_mu_ref", 273.15);
-            euler.S_mu = find_real_or(input, "physics", "sutherland_S", 110.4);
+            euler.T_mu_ref = find_real_or(input, "physics", "T_mu_ref", 273.15_r);
+            euler.S_mu = find_real_or(input, "physics", "sutherland_S", 110.4_r);
         } else if (model == "power_law") {
             for (const char * key : {"T_mu_ref", "viscosity_exponent"}) {
                 if (!input.at("physics").contains(key)) {
