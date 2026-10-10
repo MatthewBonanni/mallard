@@ -406,13 +406,13 @@ class TENO : public FaceReconstruction {
         void set_mixture(Kokkos::View<rtype *, Kokkos::LayoutStride> gamma, Kokkos::View<rtype *> molar_mass);
 
     private:
-        template <uint8_t DEG, bool PRIM>
+        template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<rtype *, Kokkos::LayoutStride> mu,
                            Kokkos::View<rtype *> source, uint32_t n_cells);
-        template <uint8_t DEG, bool PRIM>
+        template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                               Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells);
-        template <uint8_t DEG, bool PRIM>
+        template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
                                    Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,

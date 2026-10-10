@@ -3103,15 +3103,15 @@ class Setup3D {
                                       8 * (size_t(nk) + 1) + 32);
             size_t n = std::min(free_bytes / 4, BATCH_BYTES_PER_CELL * n_target) / out_bytes;
             n = std::min<size_t>(n, 65536);
-            n = std::max<size_t>(n / 1024 * 1024, 2048);
+            n = std::max<size_t>(n / 1024 * 1024, 4096);
             return n;
         }
 
         static constexpr int TEAM_SIZE = 128;
-        static constexpr size_t BATCH_BYTES_PER_CELL = 1024;
+        static constexpr size_t BATCH_BYTES_PER_CELL = 2048;
 
         /** @brief Upper bound on the teams of the device kernel resident at once. */
-        static size_t resident_teams(const size_t shared_bytes) {
+        static size_t resident_teams([[maybe_unused]] const size_t shared_bytes) {
             const auto space = Kokkos::DefaultExecutionSpace();
             size_t teams = space.concurrency() / TEAM_SIZE;
 #if defined(KOKKOS_ENABLE_CUDA)

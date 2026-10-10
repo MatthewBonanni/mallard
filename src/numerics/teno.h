@@ -78,13 +78,13 @@ struct PackedStencils {
         return single ? (n * sizeof(float) + sizeof(rtype) - 1) / sizeof(rtype) : n;
     }
 
-    /** @brief One cell's stencil, resolved once per cell. */
-    struct Row {
-        const void * pinv_;
+    /** @brief One cell's stencil, resolved once per cell, for pseudo-inverse entries of type T. */
+    template <typename T>
+    struct RowT {
+        const T * pinv_;
         const int32_t * cells_;
         const int32_t * faces_;
         uint8_t shift;
-        bool single;
 
         KOKKOS_INLINE_FUNCTION
         int32_t cell(const uint32_t s) const { return cells_[s << shift]; }
@@ -95,24 +95,22 @@ struct PackedStencils {
         /** @brief Entry l of slot s, for pseudo-inverses of WIDTH entries per slot. */
         template <uint8_t WIDTH>
         KOKKOS_INLINE_FUNCTION
-        rtype pinv(const uint32_t s, const uint32_t l) const {
-            const uint32_t k = (s * WIDTH + l) << shift;
-            return single ? rtype(static_cast<const float *>(pinv_)[k]) : static_cast<const rtype *>(pinv_)[k];
-        }
+        rtype pinv(const uint32_t s, const uint32_t l) const { return rtype(pinv_[(s * WIDTH + l) << shift]); }
     };
+    using Row = RowT<rtype>;
 
     // The arrays are single allocations whose base pointers reach the kernels
     // as parameters: pointers loaded from device memory (e.g. a table of
     // separately allocated chunks) compile to generic loads, which made the
     // reconstruction up to 30% slower
+    // T: float if single, else rtype
+    template <typename T = rtype>
     KOKKOS_INLINE_FUNCTION
-    Row row(const uint32_t c) const {
+    RowT<T> row(const uint32_t c) const {
         const uint64_t start = slice_start(c >> shift);
         const uint32_t lane = c & ((1u << shift) - 1);
-        const uint64_t k = ((start * width) << shift) + lane;
-        const void * p = single ? static_cast<const void *>(reinterpret_cast<const float *>(pinv.data()) + k)
-                                : static_cast<const void *>(pinv.data() + k);
-        return Row{p, cells.data() + (start << shift) + lane, faces.data() + (start << shift) + lane, shift, single};
+        return RowT<T>{reinterpret_cast<const T *>(pinv.data()) + ((start * width) << shift) + lane,
+                       cells.data() + (start << shift) + lane, faces.data() + (start << shift) + lane, shift};
     }
 };
 
