@@ -93,7 +93,7 @@ struct Received {
     std::vector<T> data;
     std::vector<uint64_t> offsets;
 
-    std::span<const T> from(int r) const { return {data.data() + offsets[r], data.data() + offsets[r + 1]}; }
+    std::span<const T> from(size_t r) const { return {data.data() + offsets[r], data.data() + offsets[r + 1]}; }
 };
 
 /**

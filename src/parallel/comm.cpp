@@ -104,23 +104,23 @@ void allreduce(std::span<T> data, Op op) {
 
 template <typename T>
 std::vector<std::vector<T>> alltoallv(const std::vector<std::vector<T>> & send) {
-    const int p = size();
-    if (static_cast<int>(send.size()) != p) throw std::invalid_argument("comm::alltoallv: one list per rank");
+    const size_t p = static_cast<size_t>(size());
+    if (send.size() != p) throw std::invalid_argument("comm::alltoallv: one list per rank");
     std::vector<int> send_counts(p), recv_counts(p), send_displs(p + 1, 0), recv_displs(p + 1, 0);
-    for (int r = 0; r < p; r++) send_counts[r] = static_cast<int>(send[r].size());
+    for (size_t r = 0; r < p; r++) send_counts[r] = static_cast<int>(send[r].size());
     check(MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD),
           "MPI_Alltoall");
-    for (int r = 0; r < p; r++) {
+    for (size_t r = 0; r < p; r++) {
         send_displs[r + 1] = send_displs[r] + send_counts[r];
         recv_displs[r + 1] = recv_displs[r] + recv_counts[r];
     }
-    std::vector<T> send_flat(send_displs[p]), recv_flat(recv_displs[p]);
-    for (int r = 0; r < p; r++) std::copy(send[r].begin(), send[r].end(), send_flat.begin() + send_displs[r]);
+    std::vector<T> send_flat(static_cast<size_t>(send_displs[p])), recv_flat(static_cast<size_t>(recv_displs[p]));
+    for (size_t r = 0; r < p; r++) std::copy(send[r].begin(), send[r].end(), send_flat.begin() + send_displs[r]);
     check(MPI_Alltoallv(send_flat.data(), send_counts.data(), send_displs.data(), mpi_type<T>(),
                         recv_flat.data(), recv_counts.data(), recv_displs.data(), mpi_type<T>(), MPI_COMM_WORLD),
           "MPI_Alltoallv");
     std::vector<std::vector<T>> recv(p);
-    for (int r = 0; r < p; r++) {
+    for (size_t r = 0; r < p; r++) {
         recv[r].assign(recv_flat.begin() + recv_displs[r], recv_flat.begin() + recv_displs[r + 1]);
     }
     return recv;
@@ -128,10 +128,10 @@ std::vector<std::vector<T>> alltoallv(const std::vector<std::vector<T>> & send) 
 
 template <typename T>
 Received<T> exchange(std::vector<std::vector<T>> && send) {
-    const int p = size();
-    if (static_cast<int>(send.size()) != p) throw std::invalid_argument("comm::exchange: one list per rank");
+    const size_t p = static_cast<size_t>(size());
+    if (send.size() != p) throw std::invalid_argument("comm::exchange: one list per rank");
     std::vector<int> send_counts(p), recv_counts(p), send_displs(p + 1, 0), recv_displs(p + 1, 0);
-    for (int r = 0; r < p; r++) {
+    for (size_t r = 0; r < p; r++) {
         if (send[r].size() > size_t(std::numeric_limits<int>::max())) {
             throw std::length_error("comm::exchange: message too large");
         }
@@ -141,18 +141,18 @@ Received<T> exchange(std::vector<std::vector<T>> && send) {
     check(MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD),
           "MPI_Alltoall");
     std::vector<T> send_flat;
-    send_flat.reserve(send_displs[p]);
-    for (int r = 0; r < p; r++) {
+    send_flat.reserve(static_cast<size_t>(send_displs[p]));
+    for (size_t r = 0; r < p; r++) {
         send_flat.insert(send_flat.end(), send[r].begin(), send[r].end());
         std::vector<T>().swap(send[r]);
     }
     Received<T> received;
     received.offsets.assign(p + 1, 0);
-    for (int r = 0; r < p; r++) {
+    for (size_t r = 0; r < p; r++) {
         recv_displs[r + 1] = recv_displs[r] + recv_counts[r];
-        received.offsets[r + 1] = recv_displs[r + 1];
+        received.offsets[r + 1] = static_cast<uint64_t>(recv_displs[r + 1]);
     }
-    received.data.resize(recv_displs[p]);
+    received.data.resize(static_cast<size_t>(recv_displs[p]));
     check(MPI_Alltoallv(send_flat.data(), send_counts.data(), send_displs.data(), mpi_type<T>(),
                         received.data.data(), recv_counts.data(), recv_displs.data(), mpi_type<T>(), MPI_COMM_WORLD),
           "MPI_Alltoallv");
@@ -161,12 +161,12 @@ Received<T> exchange(std::vector<std::vector<T>> && send) {
 
 template <typename T>
 std::vector<T> allgatherv(const std::vector<T> & local) {
-    const int p = size();
+    const size_t p = static_cast<size_t>(size());
     int n_local = static_cast<int>(local.size());
     std::vector<int> counts(p), displs(p + 1, 0);
     check(MPI_Allgather(&n_local, 1, MPI_INT, counts.data(), 1, MPI_INT, MPI_COMM_WORLD), "MPI_Allgather");
-    for (int r = 0; r < p; r++) displs[r + 1] = displs[r] + counts[r];
-    std::vector<T> all(displs[p]);
+    for (size_t r = 0; r < p; r++) displs[r + 1] = displs[r] + counts[r];
+    std::vector<T> all(static_cast<size_t>(displs[p]));
     check(MPI_Allgatherv(local.data(), n_local, mpi_type<T>(), all.data(), counts.data(), displs.data(),
                          mpi_type<T>(), MPI_COMM_WORLD),
           "MPI_Allgatherv");

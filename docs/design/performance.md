@@ -168,6 +168,65 @@ every other cell's tables bitwise; `TENO::cells_within_reach()` gives the cells 
 set of changed cells. Rebuilding those after moving nodes reproduces a full setup bitwise (tests on
 prisms, mixed cells and tetrahedra in 3D and triangles in 2D).
 
+### 5. Reacting mixtures (#257)
+
+The reacting Volvo LES cost about 24 times air per cell and step. The performance set's `flame_3d`
+reproduces its configuration without the bluff body (96 x 48 x 48 hexahedra of 2 mm, propane-air with
+the two-step mechanism, mixture-averaged transport, Sigma and TFLES, MUSCL without limiter, hybrid
+flux, Strang-split chemistry above 500 K, 72% of the cells reacting) and `air_3d` the same flow of air.
+
+**Baseline** (`main` at 188d169, one A100, kernel times from Nsight Systems per step of 3 stages):
+air 4.20 ms per step, the mixture 64.9 ms (15.5 times).
+
+| kernel | ms/step | why |
+|---|---|---|
+| chemistry (RODAS, one thread per cell) | 27.6 | work memory in rows of a global array: one sector per double per lane |
+| `MixtureGradientFunctor` (u, T, X_k at cells) | 18.3 | loops over the 27-cell stencil once per variable (10 times) |
+| `SpeciesSlotFunctor` (species upwind fluxes) | 6.3 | face geometry recomputed per species; 1.6 KB of stack |
+| `VorticityGradientFunctor` (TFLES) | 2.1 | as the mixture gradient |
+| `SpeciesSumFunctor` | 2.0 | face lists reloaded per species |
+| `MixtureViscousFluxFunctor` | 1.7 | |
+| `ScalarLimiterFunctor` (MUSCL scalar gradients) | 1.5 | neighbors recomputed per scalar |
+| the rest (transport, MUSCL, fluxes, LES) | 5.4 | |
+
+**Changes**, each bitwise identical (restart files after 30 steps of `flame_3d`, identical MD5):
+
+- Stencil kernels take the variables innermost: one pass over the stencil (or the cell's faces) with
+  the variables' sums in registers, the same operations in the same order. The species slots of MUSCL
+  (one point per face) keep the faces' offsets and weights in registers with unrolled face loops.
+- The chemistry's thread-per-cell kernel keeps the cell's work memory (Jacobian, LU, RODAS vectors) on
+  the thread's stack where it fits 256 or 1024 doubles (6 to about 16 species): GPUs interleave the
+  threads' local memory, so a warp's accesses at one offset share cache lines. Larger mechanisms use
+  the global array as before (and lanes from 16 species). The kernel reserves local memory for its
+  resident threads (up to 1.9 GB on an A100 with the 1024-double size).
+- The rate derivatives reuse the reaction's mass-action factors instead of recomputing every other
+  reactant's `C^order` (a `pow` for fractional orders) per reactant.
+- The viscous flux evaluates each species' coefficient and normal gradient once per face.
+
+| `flame_3d` (A100), ms per step | main | now | now, `chemistry.C_reg = 1e-10` |
+|---|---|---|---|
+| step | 64.9 | 32.7 | 24.6 |
+| chemistry | 27.6 | 18.5 | 10.4 |
+| mixture gradients, species slots and sums, vorticity gradient, scalar limiter | 30.2 | 6.5 | 6.5 |
+| the rest | 7.1 | 7.0 | 7.0 |
+| mixture / air (4.18 ms) per cell and step | 15.5 | 7.8 | 5.9 |
+
+The `h2o2` reactor benchmark (`benchmarks/chemistry`) goes from 6.5 to 9.7 M cells/s at dt = 1e-8 s
+and from 3.0 to 5.4 M cells/s at 1e-6 s. Bounding the chemistry kernel's registers for more resident
+threads (launch bounds for 128 or 80 registers instead of 220) made it slower.
+
+**What remains.** About 2% of the reacting cells (burnt gas into which the flow step diffused trace
+fuel, Y_C3H8 1e-10 to 1e-5) take 20 to 130 RODAS sub-steps against 2 for the others: the fuel burns
+out within the step along `C^0.1`, which reaches zero in finite time, through the regularization below
+`C_reg` (chemistry.md). Leaving them out of the chemistry (an experiment only) took the chemistry from
+19.2 to 11.3 ms per step. `chemistry.C_reg` (default 1e-12 kmol/m^3) moves the regularization; larger
+values cut these cells' sub-steps (a burnt cell at 1750 K with Y_C3H8 = 1e-7 over 0.15 us: 32 sub-steps
+at 1e-12, 13 at 1e-9, 5 at 1e-7) but change the rate law below C_reg. Opt-in: on `flame_3d`, 1e-10,
+1e-9 and 1e-8 give 24.6, 23.4 and 22.3 ms per step; against the default after 100 steps, T differs by
+at most 0.54 K, Y_k by 3e-5, p by 90 Pa and u by 0.14 m/s, the integrated heat release by 0.08% (the
+largest pointwise heat release differences are in cells burning out trace fuel). Thread-per-cell remains faster
+than lanes for 6 species (2, 4, 8 or 32 lanes per cell: 1.8 to 5x slower).
+
 ## Scaling (one node)
 
 A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step
