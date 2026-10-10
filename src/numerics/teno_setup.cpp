@@ -108,14 +108,15 @@ struct StaticTables {
     static constexpr int NK = (R + 1) * (R + 2) * (R + 3) / 6 - 1;
     static constexpr int NLOW = (R + 1) * (R + 2) * (R + 3) / 6;
     static constexpr int LEVEL = (R + 1) * (R + 2) / 2;
-    int expo[NK][3] = {};
-    int low_exps[NLOW][3] = {};
-    int low_slot[R + 1][R + 1][R + 1] = {};
-    int level_count[R + 1] = {};
-    int level_member[R + 1][LEVEL] = {};
-    int level_pos[NLOW] = {};
-    int moment_slot[NLOW] = {};  // of each moment up to degree R among those below degree 2 R - 1
-    double binom[R + 1][R + 1] = {};
+    static constexpr size_t R1 = static_cast<size_t>(R + 1);
+    int expo[static_cast<size_t>(NK)][3] = {};
+    int low_exps[static_cast<size_t>(NLOW)][3] = {};
+    int low_slot[R1][R1][R1] = {};
+    int level_count[R1] = {};
+    int level_member[R1][static_cast<size_t>(LEVEL)] = {};
+    int level_pos[static_cast<size_t>(NLOW)] = {};
+    int moment_slot[static_cast<size_t>(NLOW)] = {};  // of each moment up to degree R among those below degree 2 R - 1
+    double binom[R1][R1] = {};
 
     constexpr StaticTables() {
         // Monomials by total degree, then decreasing a, then decreasing b (teno::exponents)
@@ -182,7 +183,7 @@ KOKKOS_FORCEINLINE_FUNCTION void static_reflected_moments(const double (*Q)[3], 
         // The directions from 0 up to g, as reflection() takes them (first nonzero component last)
         constexpr auto path = [] {
             struct Path {
-                int k[R > 0 ? R : 1] = {};
+                int k[R > 0 ? static_cast<size_t>(R) : 1] = {};
             } p{};
             int e[3] = {STATIC_TABLES<R>.low_exps[g][0], STATIC_TABLES<R>.low_exps[g][1], STATIC_TABLES<R>.low_exps[g][2]};
             for (int s = deg - 1; s >= 0; s--) {
@@ -232,7 +233,7 @@ KOKKOS_FORCEINLINE_FUNCTION void static_reflected_moments(const double (*Q)[3], 
 template <int R, int NV, class Write>
 KOKKOS_FORCEINLINE_FUNCTION void static_binomial_means(const double * dd, const double s, const double * mom,
                                                        Write && write) {
-    double spow[R + 1], dpow[3][R + 1];
+    double spow[static_cast<size_t>(R + 1)], dpow[3][static_cast<size_t>(R + 1)];
     spow[0] = 1.0;
     static_for<1, R + 1>([&](auto kc) { spow[decltype(kc)::value] = spow[decltype(kc)::value - 1] * s; });
     static_for<0, 3>([&](auto dc) {
@@ -317,28 +318,28 @@ struct Tables {
         for (int k = 0; k < MAX_NM * MAX_NM * MAX_NM; k++) moment_slot[k] = -1;
         for (int a = 0; a < nm; a++) {
             for (int b = 0; a + b < nm; b++) {
-                for (int c = 0; a + b + c < nm; c++) moment_slot[(a * nm + b) * nm + c] = n_moments++;
+                for (int c = 0; a + b + c < nm; c++) moment_slot[(a * nm + b) * nm + c] = static_cast<int16_t>(n_moments++);
             }
         }
         for (int k = 0; k < (r + 1) * (r + 1) * (r + 1); k++) low_slot[k] = -1;
         for (int a = 0; a <= r; a++) {
             for (int b = 0; a + b <= r; b++) {
                 for (int c = 0; a + b + c <= r; c++) {
-                    low_slot[(a * (r + 1) + b) * (r + 1) + c] = n_low;
-                    low_exps[n_low][0] = a;
-                    low_exps[n_low][1] = b;
-                    low_exps[n_low][2] = c;
+                    low_slot[(a * (r + 1) + b) * (r + 1) + c] = static_cast<int8_t>(n_low);
+                    low_exps[n_low][0] = static_cast<uint8_t>(a);
+                    low_exps[n_low][1] = static_cast<uint8_t>(b);
+                    low_exps[n_low][2] = static_cast<uint8_t>(c);
                     n_low++;
                 }
             }
         }
-        std::vector<int> order(n_low);
-        for (int g = 0; g < n_low; g++) order[g] = g;
+        std::vector<int> order(static_cast<size_t>(n_low));
+        for (size_t g = 0; g < order.size(); g++) order[g] = static_cast<int>(g);
         std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
             return low_exps[a][0] + low_exps[a][1] + low_exps[a][2] < low_exps[b][0] + low_exps[b][1] + low_exps[b][2];
         });
-        for (int g = 0; g < n_low; g++) low_by_degree[g] = order[g];
-        for (uint8_t l = 0; l < teno::n_dof(r); l++) teno::exponents(l, expo[l][0], expo[l][1], expo[l][2]);
+        for (size_t g = 0; g < order.size(); g++) low_by_degree[g] = static_cast<uint8_t>(order[g]);
+        for (uint8_t l = 0; l < teno::n_dof(static_cast<uint8_t>(r)); l++) teno::exponents(l, expo[l][0], expo[l][1], expo[l][2]);
         auto falling = [](int a, int p) {
             double c = 1.0;
             for (int t = 0; t < p; t++) c *= (a - t);
@@ -348,10 +349,10 @@ struct Tables {
             for (int b1 = 0; b0 + b1 <= r; b1++) {
                 for (int b2 = 0; b0 + b1 + b2 <= r; b2++) {
                     if (b0 + b1 + b2 == 0) continue;
-                    beta[n_beta][0] = b0;
-                    beta[n_beta][1] = b1;
-                    beta[n_beta][2] = b2;
-                    for (int l = 0; l < teno::n_dof(r); l++) {
+                    beta[n_beta][0] = static_cast<uint8_t>(b0);
+                    beta[n_beta][1] = static_cast<uint8_t>(b1);
+                    beta[n_beta][2] = static_cast<uint8_t>(b2);
+                    for (int l = 0; l < teno::n_dof(static_cast<uint8_t>(r)); l++) {
                         const int e0 = expo[l][0], e1 = expo[l][1], e2 = expo[l][2];
                         derivative[l][n_beta] = (e0 >= b0 && e1 >= b1 && e2 >= b2)
                                                     ? falling(e0, b0) * falling(e1, b1) * falling(e2, b2) : 0.0;
@@ -364,7 +365,7 @@ struct Tables {
         for (int b = 0; b < n_low; b++) {
             const int d = low_exps[b][0] + low_exps[b][1] + low_exps[b][2];
             level_pos[b] = level_count[d];
-            level_member[d][level_count[d]++] = b;
+            level_member[d][level_count[d]++] = static_cast<uint8_t>(b);
         }
         for (int n = 0; n < 12; n++) {
             for (int k = 0; k < 12; k++) binom[n][k] = 0.0;
@@ -406,7 +407,7 @@ struct Geometry {
     R<double *[4]> tet_rule;       // (q, [x, y, z, w]) for the moments
 
     KOKKOS_INLINE_FUNCTION
-    double face_offset(const uint32_t f, const uint32_t c, const int d) const {
+    double face_offset(const uint32_t f, const uint32_t c, const uint32_t d) const {
         return double((cells_of_face(f, 1) == int32_t(c)) ? shifts(face_shift(f), d) : rtype(0));
     }
 
@@ -414,14 +415,14 @@ struct Geometry {
     void translation(const uint32_t lattice, double * t) const {
         t[0] = t[1] = t[2] = 0.0;
         for (uint32_t j = 0; j < n_translations; j++) {
-            const int l = lattice_component(lattice, j);
-            for (int d = 0; d < 3; d++) t[d] += l * translations(j, d);
+            const int l = lattice_component(lattice, static_cast<int>(j));
+            for (uint32_t d = 0; d < 3; d++) t[d] += l * translations(j, d);
         }
     }
 
     KOKKOS_INLINE_FUNCTION
     void unit_normal(const uint32_t f, double * n) const {
-        for (int d = 0; d < 3; d++) n[d] = double(face_normals(f, d)) / double(face_area(f));
+        for (uint32_t d = 0; d < 3; d++) n[d] = double(face_normals(f, d)) / double(face_area(f));
     }
 
     /** @brief Centroid of the copy of cell c at a lattice offset. */
@@ -429,7 +430,7 @@ struct Geometry {
     void centroid(const uint32_t c, const uint32_t lattice, double * x) const {
         double t[3];
         translation(lattice, t);
-        for (int d = 0; d < 3; d++) x[d] = double(cell_coords(c, d)) + t[d];
+        for (uint32_t d = 0; d < 3; d++) x[d] = double(cell_coords(c, d)) + t[d];
     }
 };
 
@@ -497,7 +498,7 @@ struct Scratch {
           psi("teno_setup_psi", size_t(MAX_PSI_ROWS) * nk, n, interleaved),
           coef("teno_setup_coef", c.rows, n, interleaved),
           tried_lebesgue("teno_setup_tried_lebesgue", c.rows, n, interleaved),
-          reflection("teno_setup_reflection", size_t(n_low) * n_low + 4, n, interleaved),
+          reflection("teno_setup_reflection", size_t(n_low) * size_t(n_low) + 4, n, interleaved),
           planes("teno_setup_planes", size_t(c.planes) * 6, n, interleaved),
           caps(c), slots(n) {}
 };
@@ -676,7 +677,7 @@ struct CellSetup {
     void operator()(const uint32_t t) const {
         if constexpr (ON_HOST) {
             const int id = token.acquire();
-            run(t, lanes_of(scratch, id));
+            run(t, lanes_of(scratch, static_cast<size_t>(id)));
             token.release(id);
         } else {
             run(t, lanes_of(scratch, t));
@@ -793,7 +794,7 @@ struct CellSetup {
             const uint32_t f = g.faces_of_cell(k);
             const double sign = (g.cells_of_face(f, 0) == int32_t(c)) ? 1.0 : -1.0;
             double d = 0.0;
-            for (int a = 0; a < 3; a++) {
+            for (uint32_t a = 0; a < 3; a++) {
                 const double x = double(g.face_coords(f, a)) - g.face_offset(f, c, a);
                 const double n = sign * double(g.face_normals(f, a));
                 d += (q[a] - x) * n;
@@ -811,11 +812,11 @@ struct CellSetup {
         const uint32_t plane = ref >> 24;
         g.centroid(w.visit_cell[v], w.visit_lattice[v], xc);
         if (plane == 0) {
-            for (int d = 0; d < 3; d++) x[d] = xc[d];
+            for (uint32_t d = 0; d < 3; d++) x[d] = xc[d];
             return;
         }
         double n[3], m[3];
-        for (int d = 0; d < 3; d++) {
+        for (uint32_t d = 0; d < 3; d++) {
             n[d] = w.planes[6 * (plane - 1) + d];
             m[d] = w.planes[6 * (plane - 1) + 3 + d];
         }
@@ -854,27 +855,27 @@ struct CellSetup {
                 if (!g.mirror_face(f)) continue;
                 double n[3], x[3];
                 g.unit_normal(f, n);
-                for (int d = 0; d < 3; d++) x[d] = double(g.face_coords(f, d)) + t[d];
+                for (uint32_t d = 0; d < 3; d++) x[d] = double(g.face_coords(f, d)) + t[d];
                 int match = -1;
                 for (uint32_t p = 0; p < n_planes; p++) {
                     double off = 0.0, cos = 0.0;
-                    for (int d = 0; d < 3; d++) {
+                    for (uint32_t d = 0; d < 3; d++) {
                         off += (x[d] - w.planes[6 * p + 3 + d]) * w.planes[6 * p + d];
                         cos += n[d] * w.planes[6 * p + d];
                     }
                     if (Kokkos::fabs(cos - 1.0) < GEOMETRY_TOL && Kokkos::fabs(off) < GEOMETRY_TOL * h) {
-                        match = p;
+                        match = static_cast<int>(p);
                         break;
                     }
                 }
                 if (match < 0) {
                     if (n_planes == caps.planes || n_planes == 32) return -1;
-                    for (int d = 0; d < 3; d++) {
+                    for (uint32_t d = 0; d < 3; d++) {
                         w.planes[6 * n_planes + d] = n[d];
                         w.planes[6 * n_planes + 3 + d] = x[d];
                     }
                     w.plane_first[n_planes] = f;
-                    match = n_planes++;
+                    match = static_cast<int>(n_planes++);
                 }
                 bool known = false;
                 for (uint32_t j = 0; j < n_plane_faces && !known; j++) {
@@ -885,7 +886,7 @@ struct CellSetup {
                 if (n_plane_faces == caps.plane_faces) return -1;
                 w.plane_face[n_plane_faces] = f;
                 w.plane_face_lattice[n_plane_faces] = w.visit_lattice[v];
-                w.plane_face_plane[n_plane_faces] = match;
+                w.plane_face_plane[n_plane_faces] = static_cast<uint32_t>(match);
                 n_plane_faces++;
             }
         }
@@ -895,7 +896,7 @@ struct CellSetup {
         for (uint32_t v = 0; v < n_visits * words; v++) w.inside[v] = 0;
         for (uint32_t p = 0; p < n_planes; p++) {
             double n[3], m[3];
-            for (int d = 0; d < 3; d++) {
+            for (uint32_t d = 0; d < 3; d++) {
                 n[d] = w.planes[6 * p + d];
                 m[d] = w.planes[6 * p + 3 + d];
             }
@@ -1001,13 +1002,13 @@ struct CellSetup {
             g.translation(w.plane_face_lattice[k], t);
             const uint32_t f = w.plane_face[k];
             double d2 = 0.0;
-            for (int d = 0; d < 3; d++) {
+            for (uint32_t d = 0; d < 3; d++) {
                 const double dx = (double(g.face_coords(f, d)) + t[d]) - 0.5 * (x[d] + xc[d]);
                 d2 += dx * dx;
             }
             if (d2 < best) {
                 best = d2;
-                plane_face = k;
+                plane_face = static_cast<int32_t>(k);
             }
         }
         return int32_t(w.plane_face[plane_face]);
@@ -1028,7 +1029,7 @@ struct CellSetup {
         double dpow[3][12], spow[12];
         spow[0] = 1.0;
         for (int k = 1; k < tables->nm; k++) spow[k] = spow[k - 1] * s;
-        for (int d = 0; d < 3; d++) {
+        for (uint32_t d = 0; d < 3; d++) {
             dpow[d][0] = 1.0;
             for (int k = 1; k < tables->nm; k++) dpow[d][k] = dpow[d][k - 1] * dd[d];
         }
@@ -1056,7 +1057,7 @@ struct CellSetup {
     KOKKOS_INLINE_FUNCTION
     void reflection(const Lanes & w, const double * nf) const {
         const int n_low = tables->n_low;
-        const size_t tag = size_t(n_low) * n_low;
+        const size_t tag = size_t(n_low) * size_t(n_low);
         if (w.reflection[tag + 3] == 1.0 && w.reflection[tag] == nf[0] && w.reflection[tag + 1] == nf[1] &&
             w.reflection[tag + 2] == nf[2]) {
             return;
@@ -1085,7 +1086,7 @@ struct CellSetup {
                 }
             }
         }
-        for (int d = 0; d < 3; d++) w.reflection[tag + d] = nf[d];
+        for (uint32_t d = 0; d < 3; d++) w.reflection[tag + d] = nf[d];
         w.reflection[tag + 3] = 1.0;
     }
 
@@ -1209,16 +1210,16 @@ struct CellSetup {
             low[b] = g.moments(c, moment(tables->low_exps[b][0], tables->low_exps[b][1], tables->low_exps[b][2]));
         }
         if (f < 0) {
-            for (int d = 0; d < 3; d++) dd[d] = (xc[d] - x0[d]) / h;
+            for (uint32_t d = 0; d < 3; d++) dd[d] = (xc[d] - x0[d]) / h;
             binomial_means(dd, s, [&](int a, int b, int k) { return low[low_index(a, b, k)]; }, n, means);
             return;
         }
         double nf[3], m[3], t[3], xm[3];
-        g.unit_normal(f, nf);
+        g.unit_normal(static_cast<uint32_t>(f), nf);
         g.translation(face_lattice, t);
-        for (int d = 0; d < 3; d++) m[d] = double(g.face_coords(f, d)) + t[d];
+        for (uint32_t d = 0; d < 3; d++) m[d] = double(g.face_coords(f, d)) + t[d];
         mirror_point(nf, m, xc, xm);
-        for (int d = 0; d < 3; d++) dd[d] = (xm[d] - x0[d]) / h;
+        for (uint32_t d = 0; d < 3; d++) dd[d] = (xm[d] - x0[d]) / h;
         double eta[MAX_LOW];
         if constexpr (CACHED) {
             reflection(w, nf);
@@ -1255,10 +1256,10 @@ struct CellSetup {
     uint8_t cell(const uint32_t i, const Lanes & w, const OutLanes & o, uint8_t & gather_depth, uint8_t & failed,
                  uint8_t & invalid, uint16_t & n_large, uint16_t * small_size, uint16_t & n_small) const {
         double x0[3];
-        for (int d = 0; d < 3; d++) x0[d] = double(g.cell_coords(i, d));
+        for (uint32_t d = 0; d < 3; d++) x0[d] = double(g.cell_coords(i, d));
         const double h = g.cell_h(i);
         o.scale[0] = rtype(h);
-        w.reflection[size_t(tables->n_low) * tables->n_low + 3] = 0.0;
+        w.reflection[size_t(tables->n_low) * size_t(tables->n_low) + 3] = 0.0;
 
         double mean0[teno::MAX_NK];
         monomial_means(w, i, LATTICE_ZERO, -1, 0u, x0, h, nk, mean0);
@@ -1271,7 +1272,7 @@ struct CellSetup {
             for (uint32_t q = 0; q < g.quad_weights.extent(1); q++) {
                 if (g.quad_weights(f, q) == rtype(0)) continue;
                 double xi[3], phi[teno::MAX_NK];
-                for (int d = 0; d < 3; d++) {
+                for (uint32_t d = 0; d < 3; d++) {
                     xi[d] = ((double(g.quad_points(f, q, d)) - g.face_offset(f, i, d)) - x0[d]) / h;
                 }
                 teno::monomials(r, xi[0], xi[1], xi[2], phi);
@@ -1314,7 +1315,7 @@ struct CellSetup {
             for (; n_means < uint32_t(m); n_means++) {
                 double means[teno::MAX_NK];
                 entry_means(w, n_means, n_plane_faces, x0, h, nk, means);
-                for (int l = 0; l < nk; l++) w.means[n_means * nk + l] = means[l];
+                for (uint32_t l = 0; l < nk; l++) w.means[n_means * nk + l] = means[l];
             }
             for (int s = 0; s < m; s++) {
                 for (int l = 0; l < nk; l++) w.A[s * nk + l] = w.means[s * nk + l] - mean0[l];
@@ -1326,14 +1327,14 @@ struct CellSetup {
         uint32_t n_tried = 0;
         const uint32_t try_max = uint32_t(n_entries) < ns_max ? uint32_t(n_entries) : ns_max;
         for (uint32_t n_try = ns; n_try <= try_max; n_try++) {
-            if (splits_tie(n_entries, n_try)) continue;
-            if (!build(n_try)) continue;
-            const double lebesgue = lebesgue_constant(w.psi, n_psi, nk, w.X, n_try, w.coef);
+            if (splits_tie(static_cast<uint32_t>(n_entries), n_try)) continue;
+            if (!build(static_cast<int>(n_try))) continue;
+            const double lebesgue = lebesgue_constant(w.psi, n_psi, nk, w.X, static_cast<int>(n_try), w.coef);
             w.tried_n[n_tried] = n_try;
             w.tried_lebesgue[n_tried] = lebesgue;
             n_tried++;
             if (lebesgue <= MAX_LEBESGUE_3D) {
-                n_used = n_try;
+                n_used = static_cast<uint16_t>(n_try);
                 found = true;
                 break;
             }
@@ -1343,7 +1344,7 @@ struct CellSetup {
             for (uint32_t k = 0; k < n_tried; k++) best = w.tried_lebesgue[k] < best ? w.tried_lebesgue[k] : best;
             for (uint32_t k = 0; k < n_tried; k++) {
                 if (w.tried_lebesgue[k] <= LEBESGUE_SLACK * best) {
-                    n_used = w.tried_n[k];
+                    n_used = static_cast<uint16_t>(w.tried_n[k]);
                     break;
                 }
             }
@@ -1359,7 +1360,7 @@ struct CellSetup {
                 int32_t pf;
                 o.large_cells[s] = int32_t(w.visit_cell[v]);
                 o.large_faces[s] = entry_face(w, s, n_plane_faces, pf);
-                for (int l = 0; l < nk; l++) o.large_pinv[s * nk + l] = rtype(w.X[s * nk + l]);
+                for (uint32_t l = 0; l < nk; l++) o.large_pinv[s * nk + l] = rtype(w.X[s * nk + l]);
             }
         }
 
@@ -1382,7 +1383,7 @@ struct CellSetup {
             double v[4][3];
             for (uint32_t a = 0; a < nv; a++) {
                 const uint32_t node = g.nodes_of_face(g.offsets_nodes_of_face(f) + a);
-                for (int d = 0; d < 3; d++) v[a][d] = (double(g.node_coords(node, d)) - g.face_offset(f, i, d)) - x0[d];
+                for (uint32_t d = 0; d < 3; d++) v[a][d] = (double(g.node_coords(node, d)) - g.face_offset(f, i, d)) - x0[d];
             }
             double dets[4] = {}, cof[4][3] = {};
             for (uint32_t a = 1; a + 1 < nv; a++) {
@@ -1399,7 +1400,7 @@ struct CellSetup {
                 if (count > nss_max) break;
                 double x[3], xc[3], dx[3];
                 entry_position(w, w.entry_order[j], x, xc);
-                for (int d = 0; d < 3; d++) dx[d] = x[d] - x0[d];
+                for (uint32_t d = 0; d < 3; d++) dx[d] = x[d] - x0[d];
                 bool in = false;
                 for (uint32_t a = 1; a + 1 < nv && !in; a++) {
                     const double det = dets[a];
@@ -1407,7 +1408,7 @@ struct CellSetup {
                          det3(v[0], dx, v[a + 1]) / det >= -GEOMETRY_TOL &&
                          det3(v[0], v[a], dx) / det >= -GEOMETRY_TOL;
                 }
-                if (in) w.sector[count++] = j;
+                if (in) w.sector[count++] = static_cast<uint32_t>(j);
             }
             auto splits = [&](const uint32_t n) {
                 return n < count && Kokkos::fabs(key(w, w.sector[n]) - key(w, w.sector[n - 1])) < tie;
@@ -1421,24 +1422,24 @@ struct CellSetup {
             for (uint32_t s = 0; s < n_sector; s++) {
                 double means[teno::NK_SMALL];
                 entry_means(w, w.sector[s], n_plane_faces, x0, h, teno::NK_SMALL, means);
-                for (int l = 0; l < teno::NK_SMALL; l++) w.A[s * teno::NK_SMALL + l] = means[l] - mean0[l];
+                for (uint32_t l = 0; l < teno::NK_SMALL; l++) w.A[s * teno::NK_SMALL + l] = means[l] - mean0[l];
             }
-            if (!pseudo_inverse(w.A, w.X, n_sector, teno::NK_SMALL, max_condition)) {
+            if (!pseudo_inverse(w.A, w.X, static_cast<int>(n_sector), teno::NK_SMALL, max_condition)) {
                 invalid++;
                 continue;
             }
-            small_size[k_face] = n_sector;
+            small_size[k_face] = static_cast<uint16_t>(n_sector);
             for (uint32_t s = 0; s < n_sector; s++) {
                 const uint32_t j = w.sector[s];
                 const uint32_t vv = w.entry_ref[w.entry_order[j]] & 0xFFFFFFu;
                 int32_t pf;
                 o.small_cells[n_small + s] = int32_t(w.visit_cell[vv]);
                 o.small_faces[n_small + s] = entry_face(w, j, n_plane_faces, pf);
-                for (int l = 0; l < teno::NK_SMALL; l++) {
+                for (uint32_t l = 0; l < teno::NK_SMALL; l++) {
                     o.small_pinv[(n_small + s) * teno::NK_SMALL + l] = rtype(w.X[s * teno::NK_SMALL + l]);
                 }
             }
-            n_small += n_sector;
+            n_small = static_cast<uint16_t>(n_small + n_sector);
         }
 
         // Smoothness-indicator matrix: M_lm = sum_{1<=|beta|<=r} int D^beta phi_l D^beta phi_m,
@@ -1461,7 +1462,7 @@ struct CellSetup {
                         const int e0 = tables->expo[l][0], e1 = tables->expo[l][1], e2 = tables->expo[l][2];
                         dv[l] = (e0 >= b0 && e1 >= b1 && e2 >= b2) ? falling(e0, b0) * falling(e1, b1) * falling(e2, b2)
                                                                    : 0.0;
-                        if (dv[l] != 0.0) nonzero[n_nonzero++] = l;
+                        if (dv[l] != 0.0) nonzero[n_nonzero++] = static_cast<uint8_t>(l);
                     }
                     for (int jl = 0; jl < n_nonzero; jl++) {
                         const int l = nonzero[jl];
@@ -2105,7 +2106,7 @@ struct CellTeam {
             double t[3], n[3];
             c.g.translation(w.visit_lattice[pair_visit[p]], t);
             c.g.unit_normal(f, n);
-            for (int d = 0; d < 3; d++) {
+            for (uint32_t d = 0; d < 3; d++) {
                 pair_geometry[6 * p + d] = n[d];
                 pair_geometry[6 * p + 3 + d] = double(c.g.face_coords(f, d)) + t[d];
             }
@@ -2122,12 +2123,12 @@ struct CellTeam {
                 int match = -1;
                 for (uint32_t p = 0; p < n_planes; p++) {
                     double off = 0.0, cos = 0.0;
-                    for (int d = 0; d < 3; d++) {
+                    for (uint32_t d = 0; d < 3; d++) {
                         off += (x[d] - w.planes[6 * p + 3 + d]) * w.planes[6 * p + d];
                         cos += n[d] * w.planes[6 * p + d];
                     }
                     if (Kokkos::fabs(cos - 1.0) < GEOMETRY_TOL && Kokkos::fabs(off) < GEOMETRY_TOL * h) {
-                        match = p;
+                        match = static_cast<int>(p);
                         break;
                     }
                 }
@@ -2136,13 +2137,13 @@ struct CellTeam {
                         ok = false;
                         break;
                     }
-                    for (int d = 0; d < 6; d++) w.planes[6 * n_planes + d] = n[d];
+                    for (uint32_t d = 0; d < 6; d++) w.planes[6 * n_planes + d] = n[d];
                     w.plane_first[n_planes] = pair_face[q];
-                    match = n_planes++;
+                    match = static_cast<int>(n_planes++);
                 }
                 w.plane_face[q] = pair_face[q];
                 w.plane_face_lattice[q] = w.visit_lattice[pair_visit[q]];
-                w.plane_face_plane[q] = match;
+                w.plane_face_plane[q] = static_cast<uint32_t>(match);
             }
             ctl[N_PLANES] = ok ? n_planes : ~0u;
             ctl[N_PLANE_FACES] = n_pairs;
@@ -2164,7 +2165,7 @@ struct CellTeam {
             const uint32_t * sorted = reinterpret_cast<const uint32_t *>(base + layout.plane_sorted);
             double * sorted_x = reinterpret_cast<double *>(base + layout.plane_x);
             Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, ctl[N_PLANES] == ~0u ? 0u : n_pairs), [&](const uint32_t k) {
-                for (int d = 0; d < 3; d++) sorted_x[3 * k + d] = pair_geometry[6 * sorted[k] + 3 + d];
+                for (uint32_t d = 0; d < 3; d++) sorted_x[3 * k + d] = pair_geometry[6 * sorted[k] + 3 + d];
             });
             tm.team_barrier();
         }
@@ -2175,7 +2176,7 @@ struct CellTeam {
         tm.team_barrier();
         for (uint32_t p = 0; p < n_planes; p++) {
             double n[3], m[3];
-            for (int d = 0; d < 3; d++) {
+            for (uint32_t d = 0; d < 3; d++) {
                 n[d] = w.planes[6 * p + d];
                 m[d] = w.planes[6 * p + 3 + d];
             }
@@ -2292,14 +2293,14 @@ struct CellTeam {
             c.g.centroid(cl, w.visit_lattice[v], xc);
             const double s = c.g.cell_h(cl) / h;
             if (f < 0) {
-                for (int d = 0; d < 3; d++) dd[d] = (xc[d] - x0[d]) / h;
+                for (uint32_t d = 0; d < 3; d++) dd[d] = (xc[d] - x0[d]) / h;
             } else {
                 double m[3], t[3], xm[3];
                 c.g.unit_normal(f, nf);
                 c.g.translation(w.plane_face_lattice[pf], t);
-                for (int d = 0; d < 3; d++) m[d] = double(c.g.face_coords(f, d)) + t[d];
+                for (uint32_t d = 0; d < 3; d++) m[d] = double(c.g.face_coords(f, d)) + t[d];
                 mirror_point(nf, m, xc, xm);
-                for (int d = 0; d < 3; d++) dd[d] = (xm[d] - x0[d]) / h;
+                for (uint32_t d = 0; d < 3; d++) dd[d] = (xm[d] - x0[d]) / h;
             }
             auto moment = [&](const int slot) { return c.g.moments(cl, slot); };
             auto emit = [&](const int l, const double value) { write(q, l, value); };
@@ -2340,17 +2341,17 @@ struct CellTeam {
         double x[3], xc[3];
         c.entry_position(w, e, x, xc);
         double mid[3];
-        for (int d = 0; d < 3; d++) mid[d] = 0.5 * (x[d] + xc[d]);
+        for (uint32_t d = 0; d < 3; d++) mid[d] = 0.5 * (x[d] + xc[d]);
         double best = Kokkos::Experimental::finite_max_v<double>;
         for (uint32_t k = start[plane - 1]; k < start[plane]; k++) {
             double d2 = 0.0;
-            for (int d = 0; d < 3; d++) {
+            for (uint32_t d = 0; d < 3; d++) {
                 const double dx = sorted_x[3 * k + d] - mid[d];
                 d2 += dx * dx;
             }
             if (d2 < best) {
                 best = d2;
-                plane_face = sorted[k];
+                plane_face = static_cast<int32_t>(sorted[k]);
             }
         }
         return int32_t(w.plane_face[plane_face]);
@@ -2387,12 +2388,12 @@ struct CellTeam {
         double * X = reinterpret_cast<double *>(base + layout.X);
 
         double x0[3];
-        for (int d = 0; d < 3; d++) x0[d] = double(c.g.cell_coords(i, d));
+        for (uint32_t d = 0; d < 3; d++) x0[d] = double(c.g.cell_coords(i, d));
         const double h = c.g.cell_h(i);
         {
             double xc[3], dd[3];
             c.g.centroid(i, LATTICE_ZERO, xc);
-            for (int d = 0; d < 3; d++) dd[d] = (xc[d] - x0[d]) / h;
+            for (uint32_t d = 0; d < 3; d++) dd[d] = (xc[d] - x0[d]) / h;
             const double s = c.g.cell_h(i) / h;
             Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, nk), [&](const int l) {
                 const double m0 =
@@ -2422,7 +2423,7 @@ struct CellTeam {
                 const uint32_t q = e % nq;
                 if (c.g.quad_weights(f, q) == rtype(0)) return;
                 double xi[3], phi[teno::MAX_NK];
-                for (int d = 0; d < 3; d++) {
+                for (uint32_t d = 0; d < 3; d++) {
                     xi[d] = ((double(c.g.quad_points(f, q, d)) - c.g.face_offset(f, i, d)) - x0[d]) / h;
                 }
                 teno::monomials(r, xi[0], xi[1], xi[2], phi);
@@ -2487,7 +2488,7 @@ struct CellTeam {
             }
             n_tried++;
             if (lebesgue <= MAX_LEBESGUE_3D) {
-                n_used = n_try;
+                n_used = static_cast<uint16_t>(n_try);
                 found = true;
                 break;
             }
@@ -2498,7 +2499,7 @@ struct CellTeam {
             for (uint32_t k = 0; k < n_tried; k++) best = w.tried_lebesgue[k] < best ? w.tried_lebesgue[k] : best;
             for (uint32_t k = 0; k < n_tried; k++) {
                 if (w.tried_lebesgue[k] <= LEBESGUE_SLACK * best) {
-                    n_used = w.tried_n[k];
+                    n_used = static_cast<uint16_t>(w.tried_n[k]);
                     break;
                 }
             }
@@ -2549,7 +2550,7 @@ struct CellTeam {
             cf[0] = nv;
             for (uint32_t a = 0; a < nv; a++) {
                 const uint32_t node = c.g.nodes_of_face(c.g.offsets_nodes_of_face(f) + a);
-                for (int d = 0; d < 3; d++) v[a][d] = (double(c.g.node_coords(node, d)) - c.g.face_offset(f, i, d)) - x0[d];
+                for (uint32_t d = 0; d < 3; d++) v[a][d] = (double(c.g.node_coords(node, d)) - c.g.face_offset(f, i, d)) - x0[d];
             }
             for (uint32_t a = 1; a + 1 < nv; a++) {
                 dets[a] = det3(v[0], v[a], v[a + 1]);
@@ -2573,7 +2574,7 @@ struct CellTeam {
             Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, n_chunk), [&](const uint32_t q) {
                 double x[3], xc[3], dx[3];
                 c.entry_position(w, w.entry_order[j0 + q], x, xc);
-                for (int d = 0; d < 3; d++) dx[d] = x[d] - x0[d];
+                for (uint32_t d = 0; d < 3; d++) dx[d] = x[d] - x0[d];
                 uint32_t mask = 0;
                 for (uint32_t k = 0; k < n_faces; k++) {
                     if (face_count[k] > c.nss_max) continue;
@@ -2731,7 +2732,7 @@ struct MomentsTask {
 
     KOKKOS_INLINE_FUNCTION
     void add(const double w, const double * x, double * m) const {
-        double px[NM], py[NM], pz[NM];
+        double px[static_cast<size_t>(NM)], py[static_cast<size_t>(NM)], pz[static_cast<size_t>(NM)];
         px[0] = py[0] = pz[0] = 1.0;
         for (int k = 1; k < NM; k++) {
             px[k] = px[k - 1] * x[0];
@@ -2749,25 +2750,25 @@ struct MomentsTask {
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
         double xc[3];
-        for (int d = 0; d < 3; d++) xc[d] = double(g.cell_coords(c, d));
+        for (uint32_t d = 0; d < 3; d++) xc[d] = double(g.cell_coords(c, d));
         const double hc = g.cell_h(c);
         const uint32_t n = g.offsets_nodes_of_cell(c + 1) - g.offsets_nodes_of_cell(c);
         double p[8][3];
         for (uint32_t k = 0; k < n; k++) {
             const uint32_t node = g.nodes_of_cell(g.offsets_nodes_of_cell(c) + k);
-            for (int d = 0; d < 3; d++) p[k][d] = (double(g.node_coords(node, d)) - xc[d]) / hc;
+            for (uint32_t d = 0; d < 3; d++) p[k][d] = (double(g.node_coords(node, d)) - xc[d]) / hc;
         }
         // The cell's tetrahedra (cell_tetrahedra in mesh_3d.cpp)
         double o[3] = {0.0, 0.0, 0.0};
         for (uint32_t k = 0; k < n; k++) {
-            for (int d = 0; d < 3; d++) o[d] += p[k][d];
+            for (uint32_t d = 0; d < 3; d++) o[d] += p[k][d];
         }
-        for (int d = 0; d < 3; d++) o[d] /= double(n);
+        for (uint32_t d = 0; d < 3; d++) o[d] /= double(n);
         double sums[MAX_MOMENTS] = {};
         double vol = 0.0;
         auto integrate = [&](const double * t0, const double * t1, const double * t2, const double * t3) {
             double e[3][3];
-            for (int d = 0; d < 3; d++) {
+            for (uint32_t d = 0; d < 3; d++) {
                 e[0][d] = t1[d] - t0[d];
                 e[1][d] = t2[d] - t0[d];
                 e[2][d] = t3[d] - t0[d];
@@ -2777,7 +2778,7 @@ struct MomentsTask {
                                             e[0][2] * (e[1][0] * e[2][1] - e[1][1] * e[2][0]));
             for (uint32_t q = 0; q < g.tet_rule.extent(0); q++) {
                 double x[3];
-                for (int d = 0; d < 3; d++) {
+                for (uint32_t d = 0; d < 3; d++) {
                     x[d] = t0[d] + g.tet_rule(q, 0) * e[0][d] + g.tet_rule(q, 1) * e[1][d] + g.tet_rule(q, 2) * e[2][d];
                 }
                 const double w = g.tet_rule(q, 3) * det;
@@ -2795,9 +2796,9 @@ struct MomentsTask {
             }
             double cf[3] = {0.0, 0.0, 0.0};
             for (int k = 0; k < nf; k++) {
-                for (int d = 0; d < 3; d++) cf[d] += q[k][d];
+                for (uint32_t d = 0; d < 3; d++) cf[d] += q[k][d];
             }
-            for (int d = 0; d < 3; d++) cf[d] /= double(nf);
+            for (uint32_t d = 0; d < 3; d++) cf[d] /= double(nf);
             for (int k = 0; k < nf; k++) integrate(o, cf, q[k], q[(k + 1) % nf]);
         }
         for (int k = 0; k < n_moments; k++) g.moments(c, k) = sums[k] / vol;
@@ -2814,14 +2815,14 @@ struct BoxesTask {
         const uint32_t f0 = g.offsets_faces_of_cell(c);
         const uint32_t n = g.offsets_faces_of_cell(c + 1) - f0;
         double xc[3];
-        for (int d = 0; d < 3; d++) xc[d] = double(g.cell_coords(c, d));
+        for (uint32_t d = 0; d < 3; d++) xc[d] = double(g.cell_coords(c, d));
         const double hc = g.cell_h(c);
         double N[teno::MAX_FACES][3], offset[teno::MAX_FACES], norm[teno::MAX_FACES];
         for (uint32_t k = 0; k < n; k++) {
             const uint32_t f = g.faces_of_cell(f0 + k);
             const double sign = (g.cells_of_face(f, 0) == int32_t(c)) ? 1.0 : -1.0;
             offset[k] = 0.0;
-            for (int d = 0; d < 3; d++) {
+            for (uint32_t d = 0; d < 3; d++) {
                 N[k][d] = sign * double(g.face_normals(f, d));
                 offset[k] += N[k][d] * ((double(g.face_coords(f, d)) - g.face_offset(f, c, d)) - xc[d]);
             }
@@ -2863,7 +2864,7 @@ struct BoxesTask {
                             double value = 0.0;
                             for (uint32_t m = 0; m < n; m++) {
                                 mu[m] += shift;
-                                for (int d = 0; d < 3; d++) residual[d] += mu[m] * N[m][d];
+                                for (uint32_t d = 0; d < 3; d++) residual[d] += mu[m] * N[m][d];
                                 value += mu[m] * offset[m];
                             }
                             if (!(Kokkos::fabs(residual[0]) + Kokkos::fabs(residual[1]) + Kokkos::fabs(residual[2]) <
@@ -2883,8 +2884,8 @@ struct BoxesTask {
 
 /** @brief Gauss-Legendre nodes and weights on [-1, 1] (as in teno.cpp). */
 void gauss_legendre(int n, std::vector<double> & x, std::vector<double> & w) {
-    x.resize(n);
-    w.resize(n);
+    x.resize(static_cast<size_t>(n));
+    w.resize(static_cast<size_t>(n));
     for (int i = 0; i < n; i++) {
         double z = std::cos(M_PI * (i + 0.75) / (n + 0.5));
         double dp = 0.0;
@@ -2901,8 +2902,8 @@ void gauss_legendre(int n, std::vector<double> & x, std::vector<double> & w) {
             z -= dz;
             if (std::abs(dz) < 1e-15) break;
         }
-        x[i] = z;
-        w[i] = 2.0 / ((1.0 - z * z) * dp * dp);
+        x[static_cast<size_t>(i)] = z;
+        w[static_cast<size_t>(i)] = 2.0 / ((1.0 - z * z) * dp * dp);
     }
 }
 
@@ -3016,14 +3017,14 @@ class Setup3D {
             h.face_area = mesh.h_face_area;
             h.face_shift = mesh.h_face_shift;
             h.n_complete = mesh.n_complete();
-            h.n_translations = mesh.periodic_translations.size();
+            h.n_translations = static_cast<uint32_t>(mesh.periodic_translations.size());
             h.shift_lattice = Geometry<HostMem>::R<int8_t *[3]>("teno_setup_shift_lattice", mesh.shift_lattice.size());
             for (size_t s = 0; s < mesh.shift_lattice.size(); s++) {
-                for (int a = 0; a < 3; a++) h.shift_lattice(s, a) = mesh.shift_lattice[s][a];
+                for (size_t a = 0; a < 3; a++) h.shift_lattice(s, a) = mesh.shift_lattice[s][a];
             }
             h.translations = Geometry<HostMem>::R<double *[3]>("teno_setup_translations", 3);
             for (size_t j = 0; j < mesh.periodic_translations.size(); j++) {
-                for (int a = 0; a < N_DIM; a++) h.translations(j, a) = double(mesh.periodic_translations[j][a]);
+                for (size_t a = 0; a < N_DIM; a++) h.translations(j, a) = double(mesh.periodic_translations[j][a]);
             }
             h.cell_h = Geometry<HostMem>::R<double *>("teno_setup_h", n_cells);
             Kokkos::parallel_for("teno_setup_h", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n_cells),
@@ -3052,7 +3053,7 @@ class Setup3D {
                                  [&](const uint32_t k) {
                 const uint32_t i = opt.cells ? (*opt.cells)[k] : k;
                 const std::array<double, 9> m = ranking_metric(mesh, h_face_bc, h_bcs, i);
-                for (int a = 0; a < 9; a++) h.metric(i, a) = m[a];
+                for (size_t a = 0; a < 9; a++) h.metric(i, a) = m[a];
             });
             // Collapsed Gauss with n points per direction is exact to degree 2n - 3 on a tet
             {
@@ -3061,9 +3062,9 @@ class Setup3D {
                 gauss_legendre(n, gx, gw);
                 h.tet_rule = Geometry<HostMem>::R<double *[4]>("teno_setup_tet_rule", n * n * n);
                 int q = 0;
-                for (int a = 0; a < n; a++) {
-                    for (int b = 0; b < n; b++) {
-                        for (int k = 0; k < n; k++) {
+                for (size_t a = 0; a < gx.size(); a++) {
+                    for (size_t b = 0; b < gx.size(); b++) {
+                        for (size_t k = 0; k < gx.size(); k++) {
                             const double u = 0.5 * (gx[a] + 1.0), v = 0.5 * (gx[b] + 1.0), s = 0.5 * (gx[k] + 1.0);
                             h.tet_rule(q, 0) = u;
                             h.tet_rule(q, 1) = v * (1.0 - u);
@@ -3105,7 +3106,7 @@ class Setup3D {
             d.quad_points = quad_points;
             d.quad_weights = quad_weights;
             d.moments = Geometry<DefaultMem>::R<double **>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_moments"),
-                                                           n_cells, tables.n_moments);
+                                                           n_cells, static_cast<size_t>(tables.n_moments));
             d.boxes = Geometry<DefaultMem>::R<double *[6]>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_boxes"),
                                                            n_cells);
             using Range = Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace>;
@@ -3141,12 +3142,12 @@ class Setup3D {
             size_t total = 0;
             cudaMemGetInfo(&free_bytes, &total);
 #endif
-            const size_t out_bytes = (size_t(ns_max) * (8 + 8 * nk) + size_t(max_small()) * (8 + 8 * teno::NK_SMALL) +
+            const size_t out_bytes = (size_t(ns_max) * (8 + 8 * size_t(nk)) + size_t(max_small()) * (8 + 8 * teno::NK_SMALL) +
                                       8 * (size_t(nk) * (nk + 3) / 2 + 1) + 32);
             size_t n = free_bytes / 4 / out_bytes;
             n = std::min<size_t>(n, 65536);
             n = std::max<size_t>(n / 1024 * 1024, 1024);
-            return n;
+            return static_cast<uint32_t>(n);
         }
 
         static constexpr int TEAM_SIZE = 128;
@@ -3206,7 +3207,7 @@ class Setup3D {
             size_t n_sort = 1;
             while (n_sort < E) n_sort <<= 1;
             const size_t sort_bytes = 12 * n_sort;
-            const size_t max_shared = Kokkos::TeamPolicy<>::scratch_size_max(0);
+            const size_t max_shared = static_cast<size_t>(Kokkos::TeamPolicy<>::scratch_size_max(0));
             l.shared_bytes = l.shared_head + std::max(std::max(sort_bytes, a_bytes), 12 * H);
             if (l.shared_bytes > max_shared) throw std::runtime_error("TENO setup: the device has too little shared memory.");
             return l;
@@ -3223,7 +3224,7 @@ class Setup3D {
                 return;
             }
             if constexpr (DEVICE_IS_HOST) {
-                const uint32_t n_threads = Kokkos::DefaultExecutionSpace().concurrency();
+                const uint32_t n_threads = static_cast<uint32_t>(Kokkos::DefaultExecutionSpace().concurrency());
                 if (scratch.slots != n_threads) {
                     scratch = Scratch<DefaultMem>();
                     scratch = Scratch<DefaultMem>(caps, n_threads, nk, false, tables.n_low);
@@ -3237,7 +3238,7 @@ class Setup3D {
                 CellTeam<Exec> task{CellSetup<Exec>{device, d_tables.data(), Scratch<DefaultMem>(), out, cells, {}, r, nk, ns, nss,
                                                     ns_max, nss_max, double(options.max_condition)},
                                     out, cells, layout, caps};
-                Kokkos::TeamPolicy<Exec, Kokkos::LaunchBounds<TEAM_SIZE, 3>> policy(n, TEAM_SIZE);
+                Kokkos::TeamPolicy<Exec, Kokkos::LaunchBounds<TEAM_SIZE, 3>> policy(static_cast<int>(n), TEAM_SIZE);
                 policy.set_scratch_size(0, Kokkos::PerTeam(layout.shared_bytes))
                     .set_scratch_size(1, Kokkos::PerTeam(layout.bytes));
                 Kokkos::parallel_for("teno_setup_cells", policy, task);
@@ -3276,10 +3277,10 @@ class Setup3D {
         /** @brief Tables of the batch slots in which (cells[t]) on the host, growing the scratch until they fit. */
         void on_host(const Kokkos::View<uint32_t *, HostMem> & cells, std::vector<uint32_t> which, TableBatch & out) {
             ensure_host();
-            const uint32_t n_threads = Kokkos::DefaultHostExecutionSpace().concurrency();
+            const uint32_t n_threads = static_cast<uint32_t>(Kokkos::DefaultHostExecutionSpace().concurrency());
             for (uint32_t scale = 1; !which.empty(); scale *= 4) {
                 if (scale > 1024) throw std::runtime_error("TENO setup: a stencil search does not fit in memory.");
-                const uint32_t m = which.size();
+                const uint32_t m = static_cast<uint32_t>(which.size());
                 Kokkos::View<uint32_t *, HostMem> h_cells("teno_setup_host_cells", m);
                 for (uint32_t j = 0; j < m; j++) h_cells(j) = cells(which[j]);
                 TableBatchT<HostMem> h_out(m, nk, ns_max, max_small(), false);
@@ -3301,7 +3302,7 @@ class Setup3D {
                     }
                 }
                 // Compact the finished ones and move them to their slots of out
-                const uint32_t n_done = done.size();
+                const uint32_t n_done = static_cast<uint32_t>(done.size());
                 if (n_done > 0) {
                     Kokkos::View<uint32_t *, HostMem> h_src("teno_setup_src", n_done), h_dst("teno_setup_dst", n_done);
                     for (uint32_t j = 0; j < n_done; j++) {
@@ -3363,28 +3364,28 @@ namespace {
  *        symmetric 3 x 3 matrix a (cyclic Jacobi).
  */
 void symmetric_eigen(std::array<double, 9> a, double w[3], double v[9]) {
-    for (int k = 0; k < 9; k++) v[k] = (k % 4 == 0) ? 1.0 : 0.0;
+    for (size_t k = 0; k < 9; k++) v[k] = (k % 4 == 0) ? 1.0 : 0.0;
     for (int sweep = 0; sweep < 50; sweep++) {
         const double off = a[1] * a[1] + a[2] * a[2] + a[5] * a[5];
         if (off <= 1e-30 * (a[0] * a[0] + a[4] * a[4] + a[8] * a[8])) break;
-        for (int p = 0; p < 2; p++) {
-            for (int q = p + 1; q < 3; q++) {
+        for (size_t p = 0; p < 2; p++) {
+            for (size_t q = p + 1; q < 3; q++) {
                 const double apq = a[3 * p + q];
                 if (apq == 0.0) continue;
                 const double theta = 0.5 * (a[3 * q + q] - a[3 * p + p]) / apq;
                 const double t = (theta >= 0.0 ? 1.0 : -1.0) / (std::abs(theta) + std::sqrt(theta * theta + 1.0));
                 const double c = 1.0 / std::sqrt(t * t + 1.0), s = t * c;
-                for (int k = 0; k < 3; k++) {
+                for (size_t k = 0; k < 3; k++) {
                     const double akp = a[3 * k + p], akq = a[3 * k + q];
                     a[3 * k + p] = c * akp - s * akq;
                     a[3 * k + q] = s * akp + c * akq;
                 }
-                for (int k = 0; k < 3; k++) {
+                for (size_t k = 0; k < 3; k++) {
                     const double apk = a[3 * p + k], aqk = a[3 * q + k];
                     a[3 * p + k] = c * apk - s * aqk;
                     a[3 * q + k] = s * apk + c * aqk;
                 }
-                for (int k = 0; k < 3; k++) {
+                for (size_t k = 0; k < 3; k++) {
                     const double vkp = v[3 * k + p], vkq = v[3 * k + q];
                     v[3 * k + p] = c * vkp - s * vkq;
                     v[3 * k + q] = s * vkp + c * vkq;
@@ -3392,7 +3393,7 @@ void symmetric_eigen(std::array<double, 9> a, double w[3], double v[9]) {
             }
         }
     }
-    for (int k = 0; k < 3; k++) w[k] = a[4 * k];
+    for (size_t k = 0; k < 3; k++) w[k] = a[4 * k];
 }
 
 // Stencil candidates are ranked by distance in the metric of the local mesh
@@ -3415,16 +3416,16 @@ std::array<double, 9> spacing_metric(const double m[9]) {
     if (!(std::min({w[0], w[1], w[2]}) > 0.0)) return identity;
     // Log spacings relative to their mean, and the largest log spacing ratio
     double l[3];
-    for (int k = 0; k < 3; k++) l[k] = 0.5 * std::log(w[k]);
+    for (size_t k = 0; k < 3; k++) l[k] = 0.5 * std::log(w[k]);
     const double mean = (l[0] + l[1] + l[2]) / 3.0;
-    for (int k = 0; k < 3; k++) l[k] -= mean;
+    for (size_t k = 0; k < 3; k++) l[k] -= mean;
     const double spread = std::max({l[0], l[1], l[2]}) - std::min({l[0], l[1], l[2]});
     if (!(spread > std::log(SPACING_ANISOTROPY))) return identity;
     std::array<double, 9> metric = {};
-    for (int k = 0; k < 3; k++) {
+    for (size_t k = 0; k < 3; k++) {
         const double e = std::exp(-2.0 * l[k]);
-        for (int a = 0; a < 3; a++) {
-            for (int b = 0; b < 3; b++) metric[3 * a + b] += v[3 * a + k] * e * v[3 * b + k];
+        for (size_t a = 0; a < 3; a++) {
+            for (size_t b = 0; b < 3; b++) metric[3 * a + b] += v[3 * a + k] * e * v[3 * b + k];
         }
     }
     return metric;
@@ -3438,7 +3439,7 @@ std::array<double, 9> ranking_metric(const Mesh & mesh, const Kokkos::View<int32
     double spread[9] = {};
     if constexpr (N_DIM == 3) {
         Point x0;
-        for (int a = 0; a < 3; a++) x0[a] = double(mesh.h_cell_coords(i, a));
+        for (size_t a = 0; a < 3; a++) x0[a] = double(mesh.h_cell_coords(i, a));
         const double h = std::cbrt(double(mesh.h_cell_volume(i)));
         // Reused by each thread: an allocation per cell cost as much as the metric
         static thread_local std::vector<Point> offsets;
@@ -3447,11 +3448,11 @@ std::array<double, 9> ranking_metric(const Mesh & mesh, const Kokkos::View<int32
             const auto & lattice = mesh.shift_lattice[mesh.h_cells_of_cell_shift(k)];
             Point t = {0.0, 0.0, 0.0};
             for (size_t j = 0; j < mesh.periodic_translations.size(); j++) {
-                for (int a = 0; a < N_DIM; a++) t[a] += lattice[j] * double(mesh.periodic_translations[j][a]);
+                for (size_t a = 0; a < N_DIM; a++) t[a] += lattice[j] * double(mesh.periodic_translations[j][a]);
             }
             const uint32_t c = mesh.h_cells_of_cell(k);
             Point d;
-            for (int a = 0; a < 3; a++) d[a] = double(mesh.h_cell_coords(c, a)) + t[a] - x0[a];
+            for (size_t a = 0; a < 3; a++) d[a] = double(mesh.h_cell_coords(c, a)) + t[a] - x0[a];
             offsets.push_back(d);
         }
         for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(i); k++) {
@@ -3459,22 +3460,22 @@ std::array<double, 9> ranking_metric(const Mesh & mesh, const Kokkos::View<int32
             if (mesh.h_cells_of_face(f, 1) >= 0 || face_bc(f) < 0) continue;
             if (bcs(face_bc(f)).type == BoundaryType::PARTITION) continue;
             Point n;
-            for (int a = 0; a < 3; a++) n[a] = double(mesh.h_face_normals(f, a)) / double(mesh.h_face_area(f));
+            for (size_t a = 0; a < 3; a++) n[a] = double(mesh.h_face_normals(f, a)) / double(mesh.h_face_area(f));
             double d0 = 0.0;
-            for (int a = 0; a < 3; a++) d0 += (double(mesh.h_face_coords(f, a)) - x0[a]) * n[a];
+            for (size_t a = 0; a < 3; a++) d0 += (double(mesh.h_face_coords(f, a)) - x0[a]) * n[a];
             const size_t n_offsets = offsets.size();
             for (size_t s = 0; s < n_offsets; s++) {
                 double d = d0;
-                for (int a = 0; a < 3; a++) d -= offsets[s][a] * n[a];
+                for (size_t a = 0; a < 3; a++) d -= offsets[s][a] * n[a];
                 if (d > d0 + GEOMETRY_TOL * h) continue;
                 Point image;
-                for (int a = 0; a < 3; a++) image[a] = offsets[s][a] + 2.0 * d * n[a];
+                for (size_t a = 0; a < 3; a++) image[a] = offsets[s][a] + 2.0 * d * n[a];
                 offsets.push_back(image);
             }
         }
         for (const Point & d : offsets) {
-            for (int a = 0; a < 3; a++) {
-                for (int b = 0; b < 3; b++) spread[3 * a + b] += d[a] * d[b];
+            for (size_t a = 0; a < 3; a++) {
+                for (size_t b = 0; b < 3; b++) spread[3 * a + b] += d[a] * d[b];
             }
         }
     }
