@@ -122,6 +122,17 @@ struct TableBatchT {
 
 using TableBatch = TableBatchT<Kokkos::DefaultExecutionSpace::memory_space>;
 
+/**
+ * @brief Whether stencils take no mirror images across boundary face f (with
+ *        condition bc): curved wall and symmetry faces, which no reflection
+ *        across a plane matches beyond second order, unless curved_mirrors.
+ *        Curved far fields and inflows keep theirs.
+ */
+inline bool one_sided_face(const Mesh & mesh, const BoundaryCondition & bc, const uint32_t f, const bool curved_mirrors) {
+    return mesh.curved_geometry && !curved_mirrors && mesh.curved_geometry->face_is_curved(f) &&
+           (bc.is_wall() || bc.type == BoundaryType::SYMMETRY);
+}
+
 /** @brief Whether batches interleave their cells (GPUs). */
 bool batch_interleaved();
 
@@ -141,7 +152,7 @@ struct Options {
     uint32_t batch_cells = 0;  // cells per device batch; 0 picks one from the device memory
     bool host_only = false;    // run every cell on the host (tests)
     const std::vector<uint32_t> * cells = nullptr;  // the cells that will be set up, if not all reconstructed ones
-    bool curved_mirrors = false;  // mirror images across curved boundary faces (their planes) too
+    bool curved_mirrors = false;  // mirror images across curved wall and symmetry faces (their planes) too
     uint8_t curved_wall_degree = 3;  // largest central degree of stencils reaching a curved wall without mirrors
     uint16_t wall_ns = 0;            // central stencil size to start from at that degree
 };

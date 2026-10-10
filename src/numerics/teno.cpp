@@ -1232,12 +1232,11 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
         }
         h_face_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_quad_points);
     }
-    // Cells with a curved wall face that takes no mirror images
+    // Cells with a curved wall or symmetry face, which take no mirror images
     std::vector<uint8_t> wall_cell(geometry ? n_cells : 0, 0);
     for (uint32_t f = 0; geometry && f < mesh->n_faces; f++) {
-        if (mesh->h_cells_of_face(f, 1) >= 0 || !geometry->face_is_curved(f) || curved_mirrors) continue;
-        if (h_face_bc(f) >= 0 && h_bcs(h_face_bc(f)).type == BoundaryType::PARTITION) continue;
-        wall_cell[mesh->h_cells_of_face(f, 0)] = 1;
+        if (mesh->h_cells_of_face(f, 1) >= 0 || h_face_bc(f) < 0) continue;
+        if (teno_setup::one_sided_face(*mesh, h_bcs(h_face_bc(f)), f, curved_mirrors)) wall_cell[mesh->h_cells_of_face(f, 0)] = 1;
     }
 
     auto precompute = [&](const uint32_t i, CellTables & out, uint32_t & failed_large, uint32_t & invalid_small) {
@@ -1372,7 +1371,7 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
                     const uint32_t f = mesh->h_face_of_cell(c, k);
                     if (mesh->h_cells_of_face(f, 1) >= 0 || h_face_bc(f) < 0) continue;
                     if (h_bcs(h_face_bc(f)).type == BoundaryType::PARTITION) continue;
-                    if (geometry && !curved_mirrors && geometry->face_is_curved(f)) continue;
+                    if (teno_setup::one_sided_face(*mesh, h_bcs(h_face_bc(f)), f, curved_mirrors)) continue;
                     const double nx = double(mesh->h_face_normals(f, 0)) / double(mesh->h_face_area(f));
                     const double ny = double(mesh->h_face_normals(f, 1)) / double(mesh->h_face_area(f));
                     const LineFace lf{static_cast<int32_t>(f), double(mesh->h_face_coords(f, 0)) + v.t[0], double(mesh->h_face_coords(f, 1)) + v.t[1]};

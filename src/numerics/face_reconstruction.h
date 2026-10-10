@@ -311,8 +311,8 @@ class TENO : public FaceReconstruction {
         rtype C_T = -1.0;  // Fixed cutoff; negative selects the adaptive cutoff
         bool characteristic = true;
         bool bound_preserving = false;
-        // Stencils take mirror images across curved boundary faces too (across
-        // their chord planes); by default they stay one-sided there
+        // Stencils take mirror images across curved wall and symmetry faces too
+        // (across their planes); by default they stay one-sided there
         bool curved_mirrors = false;
         // Largest degree of the central polynomials of cells whose stencils reach a
         // curved wall without mirror images: one-sided fits of higher degree grow there
