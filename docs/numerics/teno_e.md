@@ -132,15 +132,19 @@ for accuracy (expect design order on uniform triangles).
 
 ## Known limitations in Mallard
 
-- Order 5 and up on curved, polygonal boundaries: on the cylinder O-grid
-  (`examples/cylinder`, fine variant with 384 x 128 cells and stretched outer
-  cells) the outermost ring develops a growing odd-even mode along the far
-  field with every far-field condition tried (`upt`, `p_out`, `farfield`).
-  Order 3 and MUSCL are stable there. Dropping the mirror images across the
-  curved boundary makes it worse (noise from t = 1), so the high-degree fit
-  in the stretched boundary cells is the more likely cause; reducing the
-  order near boundaries is the next thing to try. Use `order = 3` near
-  curved boundaries until this is resolved.
+- Order 5 and up on curved boundaries. With straight (polygonal) walls, the
+  fine cylinder O-grid (`examples/cylinder`, 384 x 128 cells, stretched outer
+  cells) blows up at order 5 (drag fluctuations of +-2.9 at Re = 100), and
+  the steady vortex between circular walls does not converge at any order
+  (`docs/design/curved_boundaries.md`). Curved walls (high-order Gmsh faces
+  or `[[mesh.curved]]`) take one-sided stencils, and cells whose central
+  stencil reaches them fit at most degree 3 (`curved_wall_degree`): one-sided
+  fits of degree 4 and 5 grow in time there whatever the Lebesgue bound or
+  stencil depth. Orders 5 and 6 are then stable, fifth order in L1 and
+  fourth at the walls. The fine cylinder at order 5 keeps a small drag noise
+  (rms 7e-4) from the outermost ring's odd-even mode along the far field,
+  which every far-field condition tried (`upt`, `p_out`, `farfield`) shows,
+  mirrored or not.
 
 - Thin cells, before stencils were ranked in the spacing metric: a 1% pressure
   pulse at rest in a 16 x 16 x 4 box of `cartesian_prism` cells
