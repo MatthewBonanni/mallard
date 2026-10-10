@@ -205,7 +205,7 @@ TEST(AxisymmetricTest, ConservesMassAxialMomentumAndEnergy) {
     const auto before = solver.integrate_conservatives();
     solver.run();
     const auto after = solver.integrate_conservatives();
-    for (int i : {0, 1, 3}) {
+    for (size_t i : {0u, 1u, 3u}) {
         EXPECT_NEAR(double(after[i]), double(before[i]), precision_tol<double>(1e-14, 1e-6) * std::abs(double(before[3])));
     }
     EXPECT_GT(std::abs(double(after[2] - before[2])), 1e-6);
@@ -306,11 +306,11 @@ std::vector<std::array<double, 4>> mms_exact_rhs(const Mesh & mesh) {
             const double ax = px[k], ay = py[k], bx = px[(k + 1) % nn], by = py[(k + 1) % nn];
             const double L = std::hypot(bx - ax, by - ay);
             const double nx = orient * (by - ay) / L, nr = -orient * (bx - ax) / L;
-            for (int q = 0; q < 6; q++) {
+            for (size_t q = 0; q < 6; q++) {
                 const double t = 0.5 * (gx[q] + 1.0);
                 const double x = ax + t * (bx - ax), r = ay + t * (by - ay);
                 const auto F = mms_flux(x, r, nx, nr);
-                for (int i = 0; i < 4; i++) flux[i] += 0.5 * gw[q] * L * r * F[i];
+                for (size_t i = 0; i < 4; i++) flux[i] += 0.5 * gw[q] * L * r * F[i];
             }
         }
         // Interior: int p dA and int r dA by a 6 x 6 collapsed Gauss rule on a fan
@@ -318,8 +318,8 @@ std::vector<std::array<double, 4>> mms_exact_rhs(const Mesh & mesh) {
         for (uint32_t k = 1; k + 1 < nn; k++) {
             const double ex = px[k] - px[0], ey = py[k] - py[0], fx = px[k + 1] - px[0], fy = py[k + 1] - py[0];
             const double det = std::abs(ex * fy - ey * fx);
-            for (int i = 0; i < 6; i++) {
-                for (int j = 0; j < 6; j++) {
+            for (size_t i = 0; i < 6; i++) {
+                for (size_t j = 0; j < 6; j++) {
                     const double s = 0.5 * (gx[i] + 1.0), t = 0.5 * (gx[j] + 1.0) * (1.0 - s);
                     const double w = 0.25 * gw[i] * gw[j] * (1.0 - s) * det;
                     const double x = px[0] + s * ex + t * fx, r = py[0] + s * ey + t * fy;
@@ -329,7 +329,7 @@ std::vector<std::array<double, 4>> mms_exact_rhs(const Mesh & mesh) {
             }
         }
         flux[2] -= source;
-        for (int i = 0; i < 4; i++) out[c][i] = -flux[i] / volume;
+        for (size_t i = 0; i < 4; i++) out[c][i] = -flux[i] / volume;
     }
     return out;
 }
@@ -354,7 +354,7 @@ double mms_residual_error(const std::string & mesh, uint32_t n, const std::strin
     uint32_t count = 0;
     for (uint32_t i = 0; i < m.n_cells; i++) {
         if (double(m.h_cell_coords(i, 1)) > 0.6) continue;
-        for (int v = 0; v < 4; v++) sum += std::abs(rhs[i][v] - exact[i][v]);
+        for (size_t v = 0; v < 4; v++) sum += std::abs(rhs[i][v] - exact[i][v]);
         count++;
     }
     return sum / count;

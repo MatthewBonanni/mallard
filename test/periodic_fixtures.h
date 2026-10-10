@@ -60,14 +60,14 @@ inline void expect_shifts_join_cells(const Mesh & mesh) {
     const double tol = 1e-12 * size;
     auto close = [&](const std::array<double, 3> & a, const std::array<double, 3> & b) {
         double d = 0.0;
-        for (int i = 0; i < 3; i++) d = std::max(d, std::abs(a[i] - b[i]));
+        for (size_t i = 0; i < 3; i++) d = std::max(d, std::abs(a[i] - b[i]));
         return d < tol;
     };
     auto average = [&](const std::vector<uint32_t> & nodes, const double * shift) {
         std::array<double, 3> x = {0.0, 0.0, 0.0};
         for (uint32_t n : nodes) {
             const auto p = node_point(mesh, n);
-            for (int i = 0; i < 3; i++) x[i] += p[i] / nodes.size();
+            for (size_t i = 0; i < 3; i++) x[i] += p[i] / static_cast<double>(nodes.size());
         }
         FOR_I_DIM x[i] -= shift[i];
         return x;
@@ -75,8 +75,9 @@ inline void expect_shifts_join_cells(const Mesh & mesh) {
     const double zero[3] = {0.0, 0.0, 0.0};
     uint32_t n_shifted = 0;
     for (uint32_t f = 0; f < mesh.n_faces; f++) {
-        const int32_t c1 = mesh.h_cells_of_face(f, 1);
-        if (c1 < 0) continue;
+        const int32_t c1_index = mesh.h_cells_of_face(f, 1);
+        if (c1_index < 0) continue;
+        const uint32_t c1 = static_cast<uint32_t>(c1_index);
         double shift[3] = {0.0, 0.0, 0.0};
         FOR_I_DIM shift[i] = double(mesh.h_shifts(mesh.h_face_shift(f), i));
         n_shifted += mesh.h_face_shift(f) != 0;

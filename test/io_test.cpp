@@ -194,12 +194,12 @@ TEST(IOTest, ResumedHDF5SeriesKeepsTheSnapshotsUpToTheRestartTime) {
     {
         DataWriter first;
         first.init(parse_toml(input), data, mesh);
-        for (uint64_t step = 0; step < 4; step++) first.write(10 * step, 0.1 * step);
+        for (uint64_t step = 0; step < 4; step++) first.write(10 * step, static_cast<rtype>(0.1 * static_cast<double>(step)));
     }
     DataWriter second;
     second.init(parse_toml(input), data, mesh);
-    second.resume(10, 0.1);
-    second.write(25, 0.2);
+    second.resume(10, 0.1_r);
+    second.write(25, 0.2_r);
 
     std::ifstream in(dir + "/f.xmf");
     std::stringstream buffer;

@@ -103,7 +103,7 @@ TEST(ChemistryKineticsTest, RatesOfProgressAndProductionRatesMatchCantera) {
         const Mechanism mech = read_mechanism(c.file, c.phase);
         const ThermoTable<> thermo = make_thermo_table(mech);
         const KineticsTable<> kinetics = make_kinetics_table(mech);
-        const uint32_t ns = mech.n_species(), nr = mech.reactions.size();
+        const uint32_t ns = mech.n_species(), nr = kinetics.n_reactions;
         const auto rows = read_rows(c.name + "_rates.csv");
         ASSERT_EQ(rows.at(0).size(), 2 + 2 * ns + nr) << c.name;
         Rows<double> states("states", rows.size(), 2 + ns);
@@ -140,11 +140,12 @@ TEST(ChemistryKineticsTest, AnalyticalJacobianMatchesFiniteDifferences) {
         const Mechanism mech = read_mechanism(c.file, c.phase);
         const auto thermo = make_thermo_table<Kokkos::HostSpace>(mech);
         const auto kinetics = make_kinetics_table<Kokkos::HostSpace>(mech);
-        const uint32_t ns = mech.n_species(), nr = mech.reactions.size();
+        const uint32_t ns = mech.n_species(), nr = kinetics.n_reactions;
         const auto rows = read_rows(c.name + "_rates.csv");
         std::vector<double> C(ns), g(ns), h(ns), q(nr), J(ns * ns), omega(ns), derivatives(kinetics.derivatives_size());
         const ReactionDerivatives deriv = ReactionDerivatives::at(
-            derivatives.data(), nr, kinetics.forward_species.extent(0), kinetics.reverse_species.extent(0));
+            derivatives.data(), nr, static_cast<uint32_t>(kinetics.forward_species.extent(0)),
+            static_cast<uint32_t>(kinetics.reverse_species.extent(0)));
         const double * dq_dT = deriv.dq_dT;
         std::vector<double> Cp(ns), gp(ns), hp(ns), qp(nr), wp(ns), wm(ns);
         for (size_t s = 0; s < std::min<size_t>(rows.size(), 10); s++) {
@@ -215,24 +216,24 @@ TEST(ChemistryKineticsTest, FractionalOrdersKeepAFiniteJacobianAsConcentrationsV
     const Mechanism mech = read_mechanism(SOURCE_DIR + "/test/data/chemistry/propane_2step.yaml", "gas");
     const auto thermo = make_thermo_table<Kokkos::HostSpace>(mech);
     const auto kinetics = make_kinetics_table<Kokkos::HostSpace>(mech);
-    const uint32_t ns = mech.n_species(), nr = mech.reactions.size();
+    const uint32_t ns = mech.n_species(), nr = kinetics.n_reactions;
     const double T = 1800.0, C_reg = Kinetics::C_REG;
     std::vector<double> C0(ns), g(ns), h(ns), q(nr), J(ns * ns), derivatives(kinetics.derivatives_size());
     const std::vector<std::pair<std::string, double>> base = {{"C3H8", 1e-4}, {"O2", 2e-3}, {"CO", 1e-3},
                                                               {"H2O", 2e-3}, {"CO2", 1e-3}, {"N2", 2e-2}};
-    for (const auto & [name, value] : base) C0[mech.species_index(name)] = value;
+    for (const auto & [name, value] : base) C0[static_cast<size_t>(mech.species_index(name))] = value;
     const std::vector<double> Y(ns, 1.0 / ns);
     std::vector<double> unused(ns);
     species_state(thermo, T, 1.0, Y.data(), unused.data(), g.data(), h.data());
-    const ReactionDerivatives deriv = ReactionDerivatives::at(derivatives.data(), nr, kinetics.forward_species.extent(0),
-                                                              kinetics.reverse_species.extent(0));
+    const ReactionDerivatives deriv = ReactionDerivatives::at(derivatives.data(), nr, static_cast<uint32_t>(kinetics.forward_species.extent(0)),
+                                                              static_cast<uint32_t>(kinetics.reverse_species.extent(0)));
     auto omega_at = [&](const std::vector<double> & C, std::vector<double> & w) {
         std::vector<double> qq(nr);
         kinetics.rates_of_progress(T, C.data(), g.data(), qq.data());
         kinetics.production_rates(qq.data(), w.data());
     };
     for (const char * name : {"C3H8", "H2O", "O2"}) {
-        const uint32_t j = mech.species_index(name);
+        const uint32_t j = static_cast<uint32_t>(mech.species_index(name));
         for (const double x : {-0.5, 0.0, 1e-3, 0.25, 0.5, 0.75, 1.0, 3.0, 1e3, 1e6}) {
             std::vector<double> C = C0;
             C[j] = x * C_reg;

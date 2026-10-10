@@ -34,8 +34,8 @@ const SGSModel MODELS[] = {SGSModel::SMAGORINSKY, SGSModel::WALE, SGSModel::VREM
 
 double D(const SGSModel model, const Gradient & g) {
     double a[3][3];
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) a[i][j] = g[i][j];
+    for (size_t i = 0; i < 3; i++) {
+        for (size_t j = 0; j < 3; j++) a[i][j] = g[i][j];
     }
     return LES::operator_of(model, a);
 }
@@ -44,9 +44,9 @@ Gradient zero() { return Gradient{}; }
 
 Gradient matmul(const Gradient & a, const Gradient & b) {
     Gradient c{};
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) {
-            for (int k = 0; k < 3; k++) c[i][j] += a[i][k] * b[k][j];
+    for (size_t i = 0; i < 3; i++) {
+        for (size_t j = 0; j < 3; j++) {
+            for (size_t k = 0; k < 3; k++) c[i][j] += a[i][k] * b[k][j];
         }
     }
     return c;
@@ -54,8 +54,8 @@ Gradient matmul(const Gradient & a, const Gradient & b) {
 
 Gradient transpose(const Gradient & a) {
     Gradient t{};
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) t[i][j] = a[j][i];
+    for (size_t i = 0; i < 3; i++) {
+        for (size_t j = 0; j < 3; j++) t[i][j] = a[j][i];
     }
     return t;
 }
@@ -64,9 +64,9 @@ const Gradient GENERIC = {{{-0.7819, -0.2572, 0.0081}, {-0.2756, 1.2941, 1.0067}
 
 /** @brief Eigenvalues of a symmetric 3x3 matrix by cyclic Jacobi rotations, descending. */
 std::array<double, 3> jacobi_eigenvalues(Gradient a) {
-    for (int sweep = 0; sweep < 50; sweep++) {
-        for (int p = 0; p < 2; p++) {
-            for (int q = p + 1; q < 3; q++) {
+    for (size_t sweep = 0; sweep < 50; sweep++) {
+        for (size_t p = 0; p < 2; p++) {
+            for (size_t q = p + 1; q < 3; q++) {
                 if (std::abs(a[p][q]) < 1e-300) continue;
                 const double theta = 0.5 * std::atan2(2.0 * a[p][q], a[q][q] - a[p][p]);
                 const double c = std::cos(theta), s = std::sin(theta);
@@ -111,10 +111,10 @@ TEST(LESModels, SolidRotationHasNoEddyViscosityForSigmaAndSmagorinskyOnly) {
 
 TEST(LESModels, SigmaVanishesForExpansionsAndTwoComponentFlows) {
     Gradient isotropic = zero(), axisymmetric = zero(), planar = GENERIC;
-    for (int i = 0; i < 3; i++) isotropic[i][i] = 1.5;
+    for (size_t i = 0; i < 3; i++) isotropic[i][i] = 1.5;
     axisymmetric[0][0] = axisymmetric[1][1] = -0.8;
     axisymmetric[2][2] = 1.6;
-    for (int i = 0; i < 3; i++) planar[2][i] = planar[i][2] = 0.0;
+    for (size_t i = 0; i < 3; i++) planar[2][i] = planar[i][2] = 0.0;
     const double scale = D(SGSModel::SMAGORINSKY, GENERIC);
     EXPECT_LT(D(SGSModel::SIGMA, isotropic), 1e-12 * scale);
     EXPECT_LT(D(SGSModel::SIGMA, planar), 1e-12 * scale);
@@ -147,8 +147,8 @@ TEST(LESModels, EddyViscosityIsRotationAndFrameInvariant) {
     const double axis[3] = {0.48, -0.64, 0.6}, angle = 1.1;
     Gradient K = {{{0, -axis[2], axis[1]}, {axis[2], 0, -axis[0]}, {-axis[1], axis[0], 0}}};
     Gradient R = matmul(K, K);
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) R[i][j] = (i == j) + std::sin(angle) * K[i][j] + (1 - std::cos(angle)) * R[i][j];
+    for (size_t i = 0; i < 3; i++) {
+        for (size_t j = 0; j < 3; j++) R[i][j] = (i == j) + std::sin(angle) * K[i][j] + (1 - std::cos(angle)) * R[i][j];
     }
     const Gradient rotated = matmul(R, matmul(GENERIC, transpose(R)));
     for (const SGSModel model : MODELS) {
@@ -158,8 +158,8 @@ TEST(LESModels, EddyViscosityIsRotationAndFrameInvariant) {
 
 TEST(LESModels, EddyViscosityScalesWithTheConstantGradientAndFilterWidth) {
     double g[3][3], g2[3][3];
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) {
+    for (size_t i = 0; i < 3; i++) {
+        for (size_t j = 0; j < 3; j++) {
             g[i][j] = GENERIC[i][j];
             g2[i][j] = 2.0 * GENERIC[i][j];
         }
@@ -185,8 +185,8 @@ TEST(LESModels, NearWallEddyViscosityGrowsAsTheCubeOfTheWallDistanceForWALEAndSi
     G0[2][1] = -0.7;
     auto at = [&](double y) {
         Gradient g;
-        for (int i = 0; i < 3; i++) {
-            for (int j = 0; j < 3; j++) g[i][j] = G0[i][j] + y * G1[i][j] + y * y * G2[i][j];
+        for (size_t i = 0; i < 3; i++) {
+            for (size_t j = 0; j < 3; j++) g[i][j] = G0[i][j] + y * G1[i][j] + y * y * G2[i][j];
         }
         return g;
     };
@@ -246,8 +246,8 @@ Gradient box_gradient(const double * x) {
 /** @brief tau : grad u / mu for the deviatoric stress tau = mu (g + g^T - 2/3 div I). */
 double dissipation_per_viscosity(const Gradient & g) {
     double div = g[0][0] + g[1][1] + g[2][2], sum = 0.0;
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) sum += (g[i][j] + g[j][i] - (i == j ? 2.0 / 3.0 * div : 0.0)) * g[i][j];
+    for (size_t i = 0; i < 3; i++) {
+        for (size_t j = 0; j < 3; j++) sum += (g[i][j] + g[j][i] - (i == j ? 2.0 / 3.0 * div : 0.0)) * g[i][j];
     }
     return sum;
 }
@@ -587,7 +587,7 @@ TEST(LESMixture, SchmidtNumberActsOnCompositionGradientsOnly) {
     auto low_s = run("[les]\n" + model + "Sc_t = 0.3\n", STRATIFIED);
     auto high_s = run("[les]\n" + model + "Sc_t = 3.0\n", STRATIFIED);
     double species_effect = 0.0;
-    const uint32_t ns = low_s->get_species_names().size();
+    const uint32_t ns = static_cast<uint32_t>(low_s->get_species_names().size());
     for (uint32_t c = 0; c < n; c++) {
         double sum = 0.0;
         for (uint32_t k = 0; k < ns; k++) {

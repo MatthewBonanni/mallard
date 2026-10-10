@@ -181,7 +181,7 @@ double advection_error(const std::string & mesh, const std::string & recon, int 
     c.integrator = "RK4";
     const double T = 0.25;
     const double h = 1.0 / n;
-    const uint32_t steps = std::ceil(T / (0.25 * std::pow(h, std::max(1.0, order / 4.0))));
+    const uint32_t steps = static_cast<uint32_t>(std::ceil(T / (0.25 * std::pow(h, std::max(1.0, order / 4.0)))));
     c.run = "t_stop = " + std::to_string(T) + "\ndt = " + std::to_string(T / steps) + "\n";
     auto wave = [](double t) {
         return [t](double x, double y, double * W) {

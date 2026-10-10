@@ -18,7 +18,7 @@
 
 namespace {
 
-constexpr rtype GAMMA = 1.4;
+constexpr rtype GAMMA = 1.4_r;
 
 template <typename T>
 class RiemannSolverTest : public ::testing::Test {};
@@ -28,17 +28,17 @@ TYPED_TEST_SUITE(RiemannSolverTest, Solvers);
 
 const rtype STATES[][N_CONSERVATIVE] = {
     {1.0, 0.0, 0.0, 1.0},
-    {0.125, 0.3, -0.7, 0.1},
+    {0.125_r, 0.3_r, -0.7_r, 0.1_r},
     {1.5, -2.0, 0.5, 3.0},
-    {0.5323, 1.206, 0.0, 0.3},
-    {5.99924, 19.5975, 1.0, 460.894},
+    {0.5323_r, 1.206_r, 0.0_r, 0.3_r},
+    {5.99924_r, 19.5975_r, 1.0_r, 460.894_r},
 };
 
 const rtype NORMALS[][N_DIM] = {
     {1.0, 0.0},
     {0.0, -1.0},
-    {0.6, 0.8},
-    {-0.70710678118654752, 0.70710678118654752},
+    {0.6_r, 0.8_r},
+    {-0.70710678118654752_r, 0.70710678118654752_r},
 };
 
 void rotate(const rtype * v, rtype c, rtype s, rtype * out) {
@@ -74,7 +74,7 @@ TYPED_TEST(RiemannSolverTest, ReversingNormalAndStatesNegatesFlux) {
 }
 
 TYPED_TEST(RiemannSolverTest, RotationallyInvariant) {
-    const rtype c = std::cos(0.7), s = std::sin(0.7);
+    const rtype c = std::cos(0.7_r), s = std::sin(0.7_r);
     for (const auto & W_l : STATES) {
         for (const auto & W_r : STATES) {
             for (const auto & n : NORMALS) {
@@ -99,8 +99,8 @@ TYPED_TEST(RiemannSolverTest, RotationallyInvariant) {
 }
 
 TEST(RiemannSolverTest, UpwindSchemesUseLeftFluxForSupersonicFlowToTheRight) {
-    const rtype W_l[N_CONSERVATIVE] = {1.0, 5.0, 0.3, 1.0};
-    const rtype W_r[N_CONSERVATIVE] = {0.8, 4.5, -0.2, 0.9};
+    const rtype W_l[N_CONSERVATIVE] = {1.0_r, 5.0_r, 0.3_r, 1.0_r};
+    const rtype W_r[N_CONSERVATIVE] = {0.8_r, 4.5_r, -0.2_r, 0.9_r};
     const rtype n[N_DIM] = {1.0, 0.0};
     rtype U[N_CONSERVATIVE], F_l[N_CONSERVATIVE], f_hll[N_CONSERVATIVE], f_hllc[N_CONSERVATIVE];
     riemann::physical_flux(W_l, n, GAMMA, U, F_l);
@@ -113,8 +113,8 @@ TEST(RiemannSolverTest, UpwindSchemesUseLeftFluxForSupersonicFlowToTheRight) {
 }
 
 TEST(RiemannSolverTest, HLLCResolvesStationaryContactExactly) {
-    const rtype W_l[N_CONSERVATIVE] = {1.0, 0.0, 0.4, 1.0};
-    const rtype W_r[N_CONSERVATIVE] = {0.1, 0.0, -0.3, 1.0};
+    const rtype W_l[N_CONSERVATIVE] = {1.0_r, 0.0_r, 0.4_r, 1.0_r};
+    const rtype W_r[N_CONSERVATIVE] = {0.1_r, 0.0_r, -0.3_r, 1.0_r};
     const rtype n[N_DIM] = {1.0, 0.0};
     rtype f[N_CONSERVATIVE];
     riemann::HLLC::calc_flux(f, n, W_l, W_r, GAMMA);
@@ -128,7 +128,7 @@ TEST(RiemannSolverTest, HLLCPreservesMovingContact) {
     // A contact moving at u = 0.5 with uniform pressure: the HLLC flux must
     // equal the exact (upwind) flux, so that the contact stays sharp
     const rtype W_l[N_CONSERVATIVE] = {1.0, 0.5, 0.0, 1.0};
-    const rtype W_r[N_CONSERVATIVE] = {0.2, 0.5, 0.0, 1.0};
+    const rtype W_r[N_CONSERVATIVE] = {0.2_r, 0.5_r, 0.0_r, 1.0_r};
     const rtype n[N_DIM] = {1.0, 0.0};
     rtype f[N_CONSERVATIVE], U[N_CONSERVATIVE], F_l[N_CONSERVATIVE];
     riemann::HLLC::calc_flux(f, n, W_l, W_r, GAMMA);
@@ -137,8 +137,8 @@ TEST(RiemannSolverTest, HLLCPreservesMovingContact) {
 }
 
 TEST(RiemannSolverTest, RoeResolvesStationaryContactAndShearExactly) {
-    const rtype W_l[N_CONSERVATIVE] = {1.0, 0.0, 0.4, 1.0};
-    const rtype W_r[N_CONSERVATIVE] = {0.1, 0.0, -0.3, 1.0};
+    const rtype W_l[N_CONSERVATIVE] = {1.0_r, 0.0_r, 0.4_r, 1.0_r};
+    const rtype W_r[N_CONSERVATIVE] = {0.1_r, 0.0_r, -0.3_r, 1.0_r};
     const rtype n[N_DIM] = {1.0, 0.0};
     rtype f[N_CONSERVATIVE];
     riemann::Roe::calc_flux(f, n, W_l, W_r, GAMMA);
@@ -150,8 +150,8 @@ TEST(RiemannSolverTest, RoeResolvesStationaryContactAndShearExactly) {
 
 TEST(RiemannSolverTest, RotatedHybridReducesToHLLForNormalVelocityJump) {
     // Velocity jump along the face normal: n1 = n, so the flux is pure HLL
-    const rtype W_l[N_CONSERVATIVE] = {1.0, 0.5, 0.2, 1.0};
-    const rtype W_r[N_CONSERVATIVE] = {0.4, -0.3, 0.2, 0.6};
+    const rtype W_l[N_CONSERVATIVE] = {1.0_r, 0.5_r, 0.2_r, 1.0_r};
+    const rtype W_r[N_CONSERVATIVE] = {0.4_r, -0.3_r, 0.2_r, 0.6_r};
     const rtype n[N_DIM] = {1.0, 0.0};
     rtype f[N_CONSERVATIVE], f_hll[N_CONSERVATIVE];
     riemann::RHLL::calc_flux(f, n, W_l, W_r, GAMMA);
@@ -161,8 +161,8 @@ TEST(RiemannSolverTest, RotatedHybridReducesToHLLForNormalVelocityJump) {
 
 TEST(RiemannSolverTest, RotatedHybridReducesToRoeForTangentialVelocityJump) {
     // A shear layer and contact: no pressure jump
-    const rtype W_l[N_CONSERVATIVE] = {1.0, 0.3, 0.5, 1.0};
-    const rtype W_r[N_CONSERVATIVE] = {0.4, 0.3, -0.2, 1.0};
+    const rtype W_l[N_CONSERVATIVE] = {1.0_r, 0.3_r, 0.5_r, 1.0_r};
+    const rtype W_r[N_CONSERVATIVE] = {0.4_r, 0.3_r, -0.2_r, 1.0_r};
     const rtype n[N_DIM] = {1.0, 0.0};
     rtype f[N_CONSERVATIVE], f_roe[N_CONSERVATIVE];
     riemann::RHLL::calc_flux(f, n, W_l, W_r, GAMMA);
