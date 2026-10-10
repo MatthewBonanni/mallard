@@ -140,7 +140,7 @@ std::string periodic_point_string(const std::array<rtype, N_DIM> & x) {
 PeriodicNodes match_periodic_nodes(const std::vector<std::array<rtype, N_DIM>> & nodes,
                                    const std::vector<Mesh::BoundaryFace> & boundary_faces,
                                    const std::vector<Mesh::PeriodicPair> & pairs) {
-    const uint32_t n_nodes = nodes.size();
+    const uint32_t n_nodes = static_cast<uint32_t>(nodes.size());
     PeriodicNodes result;
     std::map<std::string, std::vector<const Mesh::BoundaryFace *>> faces_of_zone;
     for (const auto & bf : boundary_faces) faces_of_zone[bf.zone].push_back(&bf);
@@ -222,7 +222,7 @@ PeriodicNodes match_periodic_nodes(const std::vector<std::array<rtype, N_DIM>> &
         const uint32_t key = lowest[classes.find(n)];
         const Lattice L = sub(classes.offset[n], classes.offset[key]);
         result.key[n] = key;
-        for (int j = 0; j < 3; j++) {
+        for (size_t j = 0; j < 3; j++) {
             if (std::abs(L[j]) > 127) throw std::runtime_error("Periodic lattice offset out of range.");
             result.lattice[n][j] = static_cast<int8_t>(L[j]);
         }

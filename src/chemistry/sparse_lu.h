@@ -100,7 +100,7 @@ struct SparseLUPattern {
 /** @brief Build the pattern for a mechanism's reactor Jacobian (see SparseLUPattern). */
 template <typename MemorySpace = Kokkos::DefaultExecutionSpace::memory_space>
 SparseLUPattern<MemorySpace> make_sparse_lu_pattern(const Mechanism & mechanism) {
-    const uint32_t ns = static_cast<uint32_t>(mechanism.n_species()), n = ns + 1;
+    const uint32_t ns = mechanism.n_species(), n = ns + 1;
     const uint32_t words = (n + 63) / 64;
     using Bits = std::vector<uint64_t>;
     auto set = [&](Bits & row, const uint32_t c) { row[c / 64] |= uint64_t(1) << (c % 64); };
@@ -400,7 +400,7 @@ SparseLUPattern<MemorySpace> make_sparse_lu_pattern(const Mechanism & mechanism)
     {
         auto mirror = Kokkos::create_mirror_view(p.pivot_update);
         for (size_t a = 0; a < pivot_update.size() / 3; a++) {
-            for (int b = 0; b < 3; b++) mirror(a, b) = pivot_update[3 * a + b];
+            for (size_t b = 0; b < 3; b++) mirror(a, b) = pivot_update[3 * a + b];
         }
         Kokkos::deep_copy(p.pivot_update, mirror);
     }
