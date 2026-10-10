@@ -60,6 +60,8 @@ constexpr uint8_t SLICE_SHIFT =
  *        cell, its mirror boundary face (or -1) and `width` pseudo-inverse
  *        entries. Consecutive cells form slices of 2^shift cells; a slice is
  *        padded to its largest stencil and interleaves its cells' slots.
+ *        With single, pinv holds the pseudo-inverse entries as floats, two to
+ *        an element, at the same indices.
  */
 struct PackedStencils {
     Kokkos::View<uint64_t *> slice_start;  // (slice): first slot of the slice
@@ -68,13 +70,21 @@ struct PackedStencils {
     Kokkos::View<rtype *> pinv;
     uint8_t shift = SLICE_SHIFT;
     uint8_t width = 0;
+    bool single = false;
+
+    /** @brief Elements of pinv that hold n entries. */
+    KOKKOS_INLINE_FUNCTION
+    static size_t pinv_elements(const size_t n, const bool single) {
+        return single ? (n * sizeof(float) + sizeof(rtype) - 1) / sizeof(rtype) : n;
+    }
 
     /** @brief One cell's stencil, resolved once per cell. */
     struct Row {
-        const rtype * pinv_;
+        const void * pinv_;
         const int32_t * cells_;
         const int32_t * faces_;
         uint8_t shift;
+        bool single;
 
         KOKKOS_INLINE_FUNCTION
         int32_t cell(const uint32_t s) const { return cells_[s << shift]; }
@@ -85,7 +95,10 @@ struct PackedStencils {
         /** @brief Entry l of slot s, for pseudo-inverses of WIDTH entries per slot. */
         template <uint8_t WIDTH>
         KOKKOS_INLINE_FUNCTION
-        rtype pinv(const uint32_t s, const uint32_t l) const { return pinv_[(s * WIDTH + l) << shift]; }
+        rtype pinv(const uint32_t s, const uint32_t l) const {
+            const uint32_t k = (s * WIDTH + l) << shift;
+            return single ? rtype(static_cast<const float *>(pinv_)[k]) : static_cast<const rtype *>(pinv_)[k];
+        }
     };
 
     // The arrays are single allocations whose base pointers reach the kernels
@@ -96,8 +109,10 @@ struct PackedStencils {
     Row row(const uint32_t c) const {
         const uint64_t start = slice_start(c >> shift);
         const uint32_t lane = c & ((1u << shift) - 1);
-        return Row{pinv.data() + ((start * width) << shift) + lane, cells.data() + (start << shift) + lane,
-                   faces.data() + (start << shift) + lane, shift};
+        const uint64_t k = ((start * width) << shift) + lane;
+        const void * p = single ? static_cast<const void *>(reinterpret_cast<const float *>(pinv.data()) + k)
+                                : static_cast<const void *>(pinv.data() + k);
+        return Row{p, cells.data() + (start << shift) + lane, faces.data() + (start << shift) + lane, shift, single};
     }
 };
 

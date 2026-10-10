@@ -181,10 +181,11 @@ class Setup3DHandle {
         const Timings & timings() const;
 
         /**
-         * @brief The central moments of cells [0, out.extent(0)), from which
-         *        the troubled pass forms the smoothness matrices.
+         * @brief The central moments of cells [0, n_rows), from which the
+         *        troubled passes form the smoothness matrices: the setup's own
+         *        array if it has n_rows rows.
          */
-        void copy_moments(const teno::Moments & out) const;
+        teno::Moments moments(uint32_t n_rows) const;
 
     private:
         std::unique_ptr<Setup3D> impl;

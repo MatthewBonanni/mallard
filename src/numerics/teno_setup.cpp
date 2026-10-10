@@ -22,7 +22,6 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
-#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -1777,6 +1776,8 @@ struct CellTeam {
     Kokkos::View<uint32_t *, Space> cells;
     TeamLayout layout;
     Caps caps;
+    Kokkos::View<char *, Space> pool;   // layout.bytes per slot
+    Kokkos::View<int *, Space> locks;   // (slot): taken
 
     // Control words shared by the team (level 0)
     enum Ctl { N_END = 0, EXHAUSTED, TRUNCATED, SEARCH_OK, N_HASH, N_PLANES, N_PLANE_FACES, N_MEANS, N_CTL };
@@ -1815,7 +1816,18 @@ struct CellTeam {
     KOKKOS_INLINE_FUNCTION
     void operator()(const Member & tm) const {
         const uint32_t t = tm.league_rank();
-        char * base = static_cast<char *>(tm.team_scratch(1).get_shmem(layout.bytes));
+        // A free slot of the pool; every slot is held by a running team, so one frees up
+        int slot = 0;
+        Kokkos::single(Kokkos::PerTeam(tm), [&](int & taken) {
+            const int n_slots = static_cast<int>(locks.extent(0));
+            for (int k = int(t % uint32_t(n_slots));; k = (k + 1) % n_slots) {
+                if (Kokkos::atomic_compare_exchange(&locks(k), 0, 1) == 0) {
+                    taken = k;
+                    break;
+                }
+            }
+        }, slot);
+        char * base = pool.data() + size_t(slot) * layout.bytes;
         char * shared = static_cast<char *>(tm.team_scratch(0).get_shmem(layout.shared_bytes));
         const Lanes w = lanes(base);
         uint8_t depth = 0, failed = 0, invalid = 0;
@@ -1833,6 +1845,11 @@ struct CellTeam {
             out.small_total(t) = n_small;
             for (int k = 0; k < teno::MAX_FACES; k++) out.small_size(t, k) = small_size[k];
         }
+        tm.team_barrier();
+        Kokkos::single(Kokkos::PerTeam(tm), [&]() {
+            Kokkos::memory_fence();
+            Kokkos::atomic_store(&locks(slot), 0);
+        });
     }
 
     /**
@@ -2981,6 +2998,7 @@ class Setup3D {
                 }
             });
             const uint32_t n_rec = mesh.n_reconstructed();
+            n_target = opt.cells ? uint32_t(opt.cells->size()) : n_rec;
             h.metric = Geometry<HostMem>::R<double *[9]>("teno_setup_metric", n_rec);
             // Only the cells to set up need theirs
             const uint32_t n_metric = opt.cells ? uint32_t(opt.cells->size()) : n_rec;
@@ -3073,21 +3091,37 @@ class Setup3D {
         uint32_t batch_cells() const {
             if (options.batch_cells > 0) return options.batch_cells;
             if constexpr (DEVICE_IS_HOST) return 8192;
-            // Batch outputs within about a quarter of the free device memory
+            // Batch outputs within about a quarter of the free device memory and
+            // BATCH_BYTES_PER_CELL per cell to set up, so that the setup's peak
+            // stays below the memory the run allocates after it
             size_t free_bytes = size_t(8) << 30;
 #if defined(KOKKOS_ENABLE_CUDA)
             size_t total = 0;
             cudaMemGetInfo(&free_bytes, &total);
 #endif
             const size_t out_bytes = (size_t(ns_max) * (8 + 8 * nk) + size_t(max_small()) * (8 + 8 * teno::NK_SMALL) +
-                                      8 * (size_t(nk) * (nk + 3) / 2 + 1) + 32);
-            size_t n = free_bytes / 4 / out_bytes;
+                                      8 * (size_t(nk) + 1) + 32);
+            size_t n = std::min(free_bytes / 4, BATCH_BYTES_PER_CELL * n_target) / out_bytes;
             n = std::min<size_t>(n, 65536);
-            n = std::max<size_t>(n / 1024 * 1024, 1024);
+            n = std::max<size_t>(n / 1024 * 1024, 2048);
             return n;
         }
 
         static constexpr int TEAM_SIZE = 128;
+        static constexpr size_t BATCH_BYTES_PER_CELL = 1024;
+
+        /** @brief Upper bound on the teams of the device kernel resident at once. */
+        static size_t resident_teams(const size_t shared_bytes) {
+            const auto space = Kokkos::DefaultExecutionSpace();
+            size_t teams = space.concurrency() / TEAM_SIZE;
+#if defined(KOKKOS_ENABLE_CUDA)
+            const cudaDeviceProp & prop = space.cuda_device_prop();
+            const size_t per_sm = std::min<size_t>(prop.maxThreadsPerMultiProcessor / TEAM_SIZE,
+                                                   prop.sharedMemPerMultiprocessor / std::max<size_t>(shared_bytes, 1));
+            teams = std::min(teams, size_t(prop.multiProcessorCount) * std::max<size_t>(per_sm, 1));
+#endif
+            return teams;
+        }
 
         /** @brief Scratch layout of one team (one cell) of the device kernel. */
         TeamLayout team_layout() const {
@@ -3172,15 +3206,17 @@ class Setup3D {
             } else {
                 using Exec = Kokkos::DefaultExecutionSpace;
                 const TeamLayout layout = team_layout();
+                if (pool.extent(0) == 0) {
+                    const size_t slots = resident_teams(layout.shared_bytes);
+                    pool = Kokkos::View<char *, DefaultMem>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_setup_pool"),
+                                                            slots * layout.bytes);
+                    pool_locks = Kokkos::View<int *, DefaultMem>("teno_setup_pool_locks", slots);
+                }
                 CellTeam<Exec> task{CellSetup<Exec>{device, d_tables.data(), Scratch<DefaultMem>(), out, cells, {}, r, nk, ns, nss,
                                                     ns_max, nss_max, double(options.max_condition)},
-                                    out, cells, layout, caps};
-                // On an instance of its own: an instance keeps the largest team scratch any of
-                // its kernels asked for (1.7 KB per cell at 1M cells, TENO5) until it is destroyed
-                if (!team_space) team_space = Kokkos::Experimental::partition_space(Exec(), 1)[0];
-                Kokkos::TeamPolicy<Exec, Kokkos::LaunchBounds<TEAM_SIZE, 3>> policy(*team_space, n, TEAM_SIZE);
-                policy.set_scratch_size(0, Kokkos::PerTeam(layout.shared_bytes))
-                    .set_scratch_size(1, Kokkos::PerTeam(layout.bytes));
+                                    out, cells, layout, caps, pool, pool_locks};
+                Kokkos::TeamPolicy<Exec, Kokkos::LaunchBounds<TEAM_SIZE, 3>> policy(n, TEAM_SIZE);
+                policy.set_scratch_size(0, Kokkos::PerTeam(layout.shared_bytes));
                 Kokkos::parallel_for("teno_setup_cells", policy, task);
             }
             Kokkos::fence();
@@ -3202,9 +3238,11 @@ class Setup3D {
 
         const Timings & timings() const { return timing; }
 
-        void copy_moments(const teno::Moments & out) const {
-            const std::pair<size_t, size_t> rows(0, out.extent(0));
-            Kokkos::deep_copy(out, Kokkos::subview(device.moments, rows, Kokkos::ALL()));
+        teno::Moments moments(const uint32_t n_rows) const {
+            if (n_rows == device.moments.extent(0)) return device.moments;
+            teno::Moments out(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_moments"), n_rows, tables.n_moments);
+            Kokkos::deep_copy(out, Kokkos::subview(device.moments, std::make_pair(0u, n_rows), Kokkos::ALL()));
+            return out;
         }
 
     private:
@@ -3282,7 +3320,11 @@ class Setup3D {
         Geometry<DefaultMem> device;
         bool host_ready = DEVICE_IS_HOST;
         Scratch<DefaultMem> scratch;
-        std::optional<Kokkos::DefaultExecutionSpace> team_space;
+        uint32_t n_target = 0;  // cells to set up
+        // Level-1 scratch of the device kernel, one slot per team that can be
+        // resident at once (Kokkos sizes its own for every thread the device can hold)
+        Kokkos::View<char *, DefaultMem> pool;
+        Kokkos::View<int *, DefaultMem> pool_locks;
         Timings timing;
 };
 
@@ -3301,7 +3343,7 @@ uint16_t Setup3DHandle::max_large() const { return impl->max_large(); }
 uint16_t Setup3DHandle::max_small() const { return impl->max_small(); }
 const Timings & Setup3DHandle::timings() const { return impl->timings(); }
 
-void Setup3DHandle::copy_moments(const teno::Moments & out) const { impl->copy_moments(out); }
+teno::Moments Setup3DHandle::moments(const uint32_t n_rows) const { return impl->moments(n_rows); }
 
 teno::SmoothnessTerms smoothness_terms(const uint8_t degree) {
     const Tables t(degree);
