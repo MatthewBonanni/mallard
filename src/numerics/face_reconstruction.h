@@ -314,6 +314,9 @@ class TENO : public FaceReconstruction {
         // Stencils take mirror images across curved boundary faces too (across
         // their chord planes); by default they stay one-sided there
         bool curved_mirrors = false;
+        // Largest degree of the central polynomials of cells whose stencils reach a
+        // curved wall without mirror images: one-sided fits of higher degree grow there
+        uint8_t curved_wall_degree = 3;
         rtype max_condition = 1.0e8;
         uint8_t slice_shift = teno::SLICE_SHIFT;  // log2 of the cells per slice of the packed stencils
 

@@ -205,7 +205,8 @@ Kokkos::View<rtype *[N_CONSERVATIVE]>::host_mirror_type exact_averages(const Mes
  * @brief Max error of the reconstructed face density at the faces'
  *        quadrature points, from exact averages over the exact curved cells.
  */
-double curved_reconstruction_error(uint32_t n_r, const std::string & geometry, int order, bool triangles = false) {
+double curved_reconstruction_error(uint32_t n_r, const std::string & geometry, int order, bool triangles = false,
+                                   const std::string & extra = "") {
     auto mesh = annulus_mesh(n_r, 16 * n_r, geometry, triangles);
     const Field field;
     // Exact averages over the true cells, whatever geometry the scheme sees
@@ -225,7 +226,8 @@ double curved_reconstruction_error(uint32_t n_r, const std::string & geometry, i
     auto teno = std::make_unique<TENO>();
     teno->set_mesh(mesh);
     teno->set_boundaries(bd);
-    teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\ncurved_mirrors = false\n"));
+    teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\ncurved_mirrors = false\n" +
+                          (extra.empty() ? "curved_wall_degree = " + std::to_string(order - 1) + "\n" : extra)));
     const uint8_t n_quad = teno->n_face_quadrature_points();
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, n_quad);
     teno->calc_face_values(W, face_W);
@@ -426,8 +428,8 @@ class CurvedTENOOrder : public ::testing::TestWithParam<CurvedOrderParam> {};
 
 TEST_P(CurvedTENOOrder, ReconstructionAtCurvedWallsConvergesAtDesignOrder) {
     // From exact averages over the curved cells, wall values converge at the
-    // design order on curved geometry; seen as straight-sided cells, the same
-    // averages give second order at best
+    // design order on curved geometry (fits of full degree at the walls); seen
+    // as straight-sided cells, the same averages give second order at best
     SKIP_IN_SINGLE_PRECISION("errors reach single-precision round-off");
     const auto [triangles, order] = GetParam();
     const double e1 = curved_reconstruction_error(4, "curved", order, triangles);
@@ -542,4 +544,19 @@ TEST(CurvedSolver, RestartedRunMatchesUninterruptedRunExactly) {
     second.run();
     EXPECT_EQ(density(second), density(straight));
     std::filesystem::remove_all(dir);
+}
+
+TEST(CurvedTENO, CellsReachingCurvedWallsFitAtMostTheWallDegree) {
+    // By default orders 5 and 6 fit degree 3 in cells whose stencils reach a
+    // curved wall (one-sided fits of higher degree grow in time there): the
+    // wall values then converge at fourth order, and at fifth with
+    // curved_wall_degree = 4
+    SKIP_IN_SINGLE_PRECISION("errors reach single-precision round-off");
+    const double c1 = curved_reconstruction_error(4, "curved", 5, false, "\n");
+    const double c2 = curved_reconstruction_error(8, "curved", 5, false, "\n");
+    const double f1 = curved_reconstruction_error(4, "curved", 5, false, "curved_wall_degree = 4\n");
+    const double f2 = curved_reconstruction_error(8, "curved", 5, false, "curved_wall_degree = 4\n");
+    EXPECT_NEAR(std::log2(c1 / c2), 4.0, 0.5) << c1 << " " << c2;
+    EXPECT_GT(std::log2(f1 / f2), 4.5) << f1 << " " << f2;
+    EXPECT_THROW(curved_reconstruction_error(4, "curved", 5, false, "curved_wall_degree = 1\n"), std::runtime_error);
 }

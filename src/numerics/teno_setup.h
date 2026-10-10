@@ -142,6 +142,8 @@ struct Options {
     bool host_only = false;    // run every cell on the host (tests)
     const std::vector<uint32_t> * cells = nullptr;  // the cells that will be set up, if not all reconstructed ones
     bool curved_mirrors = false;  // mirror images across curved boundary faces (their planes) too
+    uint8_t curved_wall_degree = 3;  // largest central degree of stencils reaching a curved wall without mirrors
+    uint16_t wall_ns = 0;            // central stencil size to start from at that degree
 };
 
 /** @brief Timings of the last setup, in seconds. */

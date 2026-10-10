@@ -183,6 +183,7 @@ double polynomial(int k, const curved::Vec3 & x, int degree) {
     double v = base[k] + 0.05 * (x[0] - 0.3 * x[1] + 0.2 * x[2]);
     if (degree >= 2) v += 0.05 * (x[0] * x[0] - 0.3 * x[1] * x[2] + 0.1 * x[0] * x[1]);
     if (degree >= 3) v += 0.02 * (x[0] * x[1] * x[2] - 0.5 * x[2] * x[2] * x[2] + 0.3 * x[0] * x[0] * x[1]);
+    if (degree >= 4) v += 0.01 * (x[0] * x[0] * x[1] * x[1] - 0.4 * x[2] * x[2] * x[2] * x[0]);
     return v;
 }
 
@@ -192,7 +193,9 @@ double polynomial(int k, const curved::Vec3 & x, int degree) {
  *        high degree) of a polynomial of the reconstruction's degree, seen by
  *        the scheme on the given geometry.
  */
-double shell_polynomial_error(int n, const std::string & geometry, int order, bool prisms) {
+double shell_polynomial_error(int n, const std::string & geometry, int order, bool prisms, int degree = -1,
+                              const std::string & extra = "") {
+    if (degree < 0) degree = order - 1;
     auto truth = shell_mesh(n, n / 2, prisms, "curved");
     auto mesh = shell_mesh(n, n / 2, prisms, geometry);
     std::vector<double> avg(5 * mesh->n_cells, 0.0);
@@ -203,7 +206,7 @@ double shell_polynomial_error(int n, const std::string & geometry, int order, bo
         double vol = 0.0;
         for (size_t q = 0; q < w.size(); q++) {
             vol += w[q];
-            for (int k = 0; k < 5; k++) avg[5 * c + k] += w[q] * polynomial(k, x[q], order - 1);
+            for (int k = 0; k < 5; k++) avg[5 * c + k] += w[q] * polynomial(k, x[q], degree);
         }
         for (int k = 0; k < 5; k++) avg[5 * c + k] /= vol;
     }
@@ -217,13 +220,14 @@ double shell_polynomial_error(int n, const std::string & geometry, int order, bo
         FOR_I_CONSERVATIVE h_W(c, i) = Wc[i];
     }
     Kokkos::deep_copy(W, h_W);
-    // Faces that take no mirror images (as curved walls do), on either geometry: straight
-    // walls of a sphere would each be a mirror plane of its own
-    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::PARTITION, GAMMA);
+    // Walls take no mirror images: curved ones never do, and straight walls of a sphere
+    // (each a mirror plane of its own) become partition faces
+    const BoundaryType walls = geometry == "straight" ? BoundaryType::PARTITION : BoundaryType::SYMMETRY;
+    BoundaryData bd = make_uniform_boundaries(*mesh, walls, GAMMA);
     auto teno = std::make_unique<TENO>();
     teno->set_mesh(mesh);
     teno->set_boundaries(bd);
-    teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n"));
+    teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n" + extra));
     const uint8_t n_quad = teno->n_face_quadrature_points();
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, n_quad);
     teno->calc_face_values(W, face_W);
@@ -236,7 +240,7 @@ double shell_polynomial_error(int n, const std::string & geometry, int order, bo
         for (uint8_t q = 0; q < n_quad; q++) {
             if (h_weights(f, q) == 0.0_r) continue;
             const curved::Vec3 p = {double(h_points(f, q, 0)), double(h_points(f, q, 1)), double(h_points(f, q, 2))};
-            err = std::max(err, std::abs(double(h_face_W(f, q, 0, 0)) - polynomial(0, p, order - 1)));
+            err = std::max(err, std::abs(double(h_face_W(f, q, 0, 0)) - polynomial(0, p, degree)));
         }
     }
     return err;
@@ -303,4 +307,13 @@ TEST(Curved3DGeometry, CellRulesMatchTheDivergenceOfTheirFaces) {
         for (uint32_t c = 0; c < mesh->n_cells; c++) worst = std::max(worst, std::abs(volume[c] - surface[c]));
         EXPECT_LT(worst, 1e-9) << prisms;
     }
+}
+
+TEST(Curved3DTENO, CellsReachingCurvedWallsFitAtMostTheWallDegree) {
+    // Order 5 fits degree 3 next to curved walls by default: cubics are still
+    // exact at the walls, quartics only with curved_wall_degree = 4
+    SKIP_IN_SINGLE_PRECISION("round-off");
+    EXPECT_LT(shell_polynomial_error(4, "curved", 5, true, 3), 1e-11);
+    EXPECT_GT(shell_polynomial_error(4, "curved", 5, true, 4), 1e-6);
+    EXPECT_LT(shell_polynomial_error(4, "curved", 5, true, 4, "curved_wall_degree = 4\n"), 1e-11);
 }

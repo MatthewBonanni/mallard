@@ -1117,6 +1117,11 @@ void TENO::read_options(const toml::value & input) {
     max_condition = find_real_or(input, "max_condition", 1.0e8);
     bound_preserving = toml::find_or<bool>(input, "bound_preserving", false);
     curved_mirrors = toml::find_or<bool>(input, "curved_mirrors", false);
+    const int wall_degree = toml::find_or<int>(input, "curved_wall_degree", 3);
+    if (wall_degree < 2 || wall_degree > teno::MAX_DEGREE) {
+        throw std::runtime_error("TENO curved_wall_degree must be between 2 and " + std::to_string(teno::MAX_DEGREE) + ".");
+    }
+    curved_wall_degree = uint8_t(wall_degree);
     cache_file = toml::find_or<std::string>(input, "cache_file", "");
     cache_single = toml::find_or<bool>(input, "cache_single_precision", false);
     // One file per rank, made for this partition
@@ -1226,6 +1231,13 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
             geometry->cell_rule(c, 2 * r, rule_x.back(), rule_w.back());
         }
         h_face_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_quad_points);
+    }
+    // Cells with a curved wall face that takes no mirror images
+    std::vector<uint8_t> wall_cell(geometry ? n_cells : 0, 0);
+    for (uint32_t f = 0; geometry && f < mesh->n_faces; f++) {
+        if (mesh->h_cells_of_face(f, 1) >= 0 || !geometry->face_is_curved(f) || curved_mirrors) continue;
+        if (h_face_bc(f) >= 0 && h_bcs(h_face_bc(f)).type == BoundaryType::PARTITION) continue;
+        wall_cell[mesh->h_cells_of_face(f, 0)] = 1;
     }
 
     auto precompute = [&](const uint32_t i, CellTables & out, uint32_t & failed_large, uint32_t & invalid_small) {
@@ -1469,14 +1481,28 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
         auto splits_tie = [&](const std::vector<Entry> & list, size_t n) {
             return n < list.size() && std::abs(dist2(list[n]) - dist2(list[n - 1])) < GEOMETRY_TOL * h * h;
         };
+        // Stencils reaching a curved wall without mirror images (one-sided there)
+        // fit at most curved_wall_degree, from that degree's stencil size
+        uint8_t r_fit = r;
+        uint16_t n_start = ns;
+        if (!wall_cell.empty() && curved_wall_degree < r) {
+            bool near = wall_cell[i];
+            for (size_t k = 0; k < std::min<size_t>(ns, candidates.size()) && !near; k++) near = wall_cell[candidates[k].cell];
+            if (near) {
+                r_fit = curved_wall_degree;
+                n_start = static_cast<uint16_t>(std::ceil(stencil_factor * teno::n_dof(r_fit)));
+            }
+        }
         // The smallest stencil within MAX_LEBESGUE_2D, else the best conditioned one
-        uint16_t n_used = ns;
+        uint16_t n_used = n_start;
         double best_lebesgue = std::numeric_limits<double>::max();
-        for (uint16_t n_try = ns; n_try <= std::min<size_t>(ns_max, candidates.size()); n_try++) {
+        for (uint16_t n_try = n_start; n_try <= std::min<size_t>(ns_max, candidates.size()); n_try++) {
             if (splits_tie(candidates, n_try)) continue;
             std::vector<Entry> stencil(candidates.begin(), candidates.begin() + n_try);
             std::vector<double> P_try;
-            if (!build_pinv(stencil, r, P_try)) continue;
+            if (!build_pinv(stencil, r_fit, P_try)) continue;
+            // Coefficients above the fit's degree are zero
+            P_try.resize(size_t(nk) * n_try, 0.0);
             const double lebesgue = lebesgue_constant(psi_faces, nk, P_try, n_try);
             if (lebesgue < best_lebesgue) {
                 best_lebesgue = lebesgue;
@@ -1641,6 +1667,8 @@ void TENO::compute_stencils_and_matrices_3d(const std::vector<uint32_t> * subset
     options.host_only = setup_on_host;
     options.cells = subset;
     options.curved_mirrors = curved_mirrors;
+    options.curved_wall_degree = curved_wall_degree;
+    options.wall_ns = static_cast<uint16_t>(std::ceil(stencil_factor * teno::n_dof(curved_wall_degree)));
     teno_setup::Setup3DHandle setup(*mesh, boundaries, face_quad_points, face_quad_weights, options);
 
     // Cells per batch: whole slices of the packed stencils
@@ -3057,6 +3085,7 @@ uint64_t TENO::cache_key() const {
     if (mesh->curved_geometry) {
         hash.add(uint8_t(2));
         hash.add(curved_mirrors);
+        hash.add(curved_wall_degree);
         hash.add(mesh->h_cell_coords.data(), mesh->h_cell_coords.span() * sizeof(rtype));
         hash.add(mesh->h_cell_volume.data(), mesh->h_cell_volume.span() * sizeof(rtype));
         auto h_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_quad_points);
