@@ -378,6 +378,7 @@ void Solver::init_physics() {
     species_names = mixture_model->species_names();
     physics = Euler();
     init_chemistry();
+    init_radiation();
 }
 
 void Solver::init_boundaries() {
@@ -1015,6 +1016,7 @@ void Solver::allocate_memory() {
         h_Y = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("Y", mesh->n_cells, n_species);
         h_X = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("X", mesh->n_cells, n_species);
         if (reacting) allocate_chemistry();
+        if (radiating) h_qrad = Kokkos::View<rtype *, Kokkos::HostSpace>("QRAD", mesh->n_cells);
     }
     h_conservatives = Kokkos::create_mirror_view(conservatives);
     h_species = Kokkos::create_mirror_view(species);
@@ -1084,6 +1086,12 @@ void Solver::copy_device_to_host() {
         }
     }
     Kokkos::deep_copy(h_primitives, primitives);
+    if (radiating) {
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            const PartialDensities rho_k{CellSpecies{&h_species(c, 0), h_species.stride(1)}, 1.0};
+            h_qrad(c) = static_cast<rtype>(radiation.loss(static_cast<double>(h_primitives(c, N_DIM + 1)), rho_k));
+        }
+    }
     Kokkos::deep_copy(h_cfl_local, cfl_local);
     if (les_on) {
         halo.exchange(state());
@@ -1141,6 +1149,7 @@ void Solver::register_data() {
                 data.push_back(Data("OMEGA_" + species_names[k], Kokkos::subview(h_production, Kokkos::ALL(), k)));
             }
         }
+        if (radiating) data.push_back(Data("QRAD", h_qrad));
     }
     for (size_t i = 0; i < PRIMITIVE_NAMES.size(); i++) {
         data.push_back(Data(PRIMITIVE_NAMES[i], Kokkos::subview(h_primitives, Kokkos::ALL(), i)));

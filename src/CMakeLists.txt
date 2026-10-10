@@ -38,6 +38,7 @@ add_library(MallardCore STATIC
     solver/solver_mixture.cpp
     solver/solver_les.cpp
     solver/solver_rhs.cpp
+    solver/solver_radiation.cpp
     solver/solver_sponge.cpp
     solver/solver_inflow.cpp
     solver/statistics.cpp
