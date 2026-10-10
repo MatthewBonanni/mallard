@@ -36,6 +36,22 @@ uint64_t hilbert_key(const std::array<double, N_DIM> & x, const std::array<doubl
 std::vector<int> partition_hilbert(const DistributedMesh & mesh, int n_parts);
 
 /**
+ * @brief Parts per axis of the grid of n_parts blocks of a box with these
+ *        extents that has the least total area between blocks.
+ */
+std::array<int, N_DIM> grid_shape(int n_parts, const std::array<double, N_DIM> & extent);
+
+/**
+ * @brief Owner rank of every block cell of a distributed mesh by multi-jagged
+ *        coordinate partitioning (collective): the cells, keyed by the
+ *        coordinates of their vertex averages (ties by global id), are split
+ *        along x into equal slabs, each slab along y, and so on, with the
+ *        number of pieces per axis from grid_shape() on their bounding box.
+ *        A box of cuboid cells gives cuboid parts.
+ */
+std::vector<int> partition_multijagged(const DistributedMesh & mesh, int n_parts);
+
+/**
  * @brief Owner rank of every block cell of a distributed mesh from dKaMinPar
  *        on its dual graph (collective). Requires Mallard_ENABLE_KAMINPAR.
  */

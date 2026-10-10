@@ -82,6 +82,7 @@ int Solver::init(const toml::value & input_in) {
         });
     }
     trim_halo();
+    describe_partition_surface();
     // The cache describes the local mesh at this halo depth
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) teno->save_cache(static_cast<uint8_t>(halo_layers));
     setup.reset();
@@ -212,14 +213,15 @@ void Solver::init_mesh() {
         }
         // Partition once; deeper halos (see halo_too_shallow) grow the existing layers
         if (!setup) {
-            partitioner = toml::find_or<std::string>(input, "parallel", "partitioner",
-                                                     have_graph_partitioner() ? "graph" : "hilbert");
-            if (partitioner != "graph" && partitioner != "hilbert") {
-                throw InputError("parallel.partitioner = \"" + partitioner + "\" is not one of: graph, hilbert.");
+            partitioner = toml::find_or<std::string>(input, "parallel", "partitioner", "multijagged");
+            if (partitioner != "graph" && partitioner != "hilbert" && partitioner != "multijagged") {
+                throw InputError("parallel.partitioner = \"" + partitioner +
+                                 "\" is not one of: graph, hilbert, multijagged.");
             }
             setup = std::make_unique<DistributedMesh>(read_mesh_block(input), Mesh::periodic_pairs(input));
-            setup->distribute(partitioner == "graph" ? partition_graph(*setup, comm::size())
-                                                     : partition_hilbert(*setup, comm::size()));
+            setup->distribute(partitioner == "graph"         ? partition_graph(*setup, comm::size())
+                              : partitioner == "multijagged" ? partition_multijagged(*setup, comm::size())
+                                                             : partition_hilbert(*setup, comm::size()));
         }
         mesh = setup->build_local_mesh(halo_layers, distribution);
         const std::string exchange =
@@ -253,8 +255,9 @@ void Solver::init_mesh() {
         const uint64_t max_halo = comm::allreduce(n_halo, comm::Op::MAX);
         const double mean = static_cast<double>(n_cells_global) / comm::size();
         mesh_summary.emplace_back("Partition", logging::format("%s, %d ranks, %d halo layers exchanged with %s",
-                                                               partitioner == "graph" ? "graph (KaMinPar)"
-                                                                                      : "Hilbert curve",
+                                                               partitioner == "graph"         ? "graph (KaMinPar)"
+                                                               : partitioner == "multijagged" ? "multi-jagged"
+                                                                                              : "Hilbert curve",
                                                                comm::size(), halo_layers,
                                                                halo.uses_nccl() ? "NCCL" : "MPI"));
         mesh_summary.emplace_back("Cells per rank",
@@ -298,6 +301,30 @@ void Solver::trim_halo() {
     for (uint32_t c = 0; c < mesh->n_cells; c++) needed[c] = needed[c] || distribution.layer[c] <= base;
     trim_halo_exchange(distribution, needed);
     halo = HaloExchange(distribution, halo.uses_nccl());
+}
+
+void Solver::describe_partition_surface() {
+    if (!is_distributed()) return;
+    const uint32_t n_owned = distribution.n_owned;
+    uint64_t cut = 0;
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        const int32_t a = mesh->h_cells_of_face(f, 0), b = mesh->h_cells_of_face(f, 1);
+        cut += b >= 0 && (static_cast<uint32_t>(a) < n_owned) != (static_cast<uint32_t>(b) < n_owned);
+    }
+    uint64_t layer1 = 0;
+    for (uint32_t c = n_owned; c < mesh->n_cells; c++) layer1 += distribution.layer[c] == 1;
+    uint64_t received = 0;
+    for (const auto & cells : distribution.recv_cells) received += cells.size();
+    const std::array<uint64_t, 3> local{cut, layer1, received};
+    const auto total = comm::allreduce(local, comm::Op::SUM);
+    const auto most = comm::allreduce(local, comm::Op::MAX);
+    mesh_summary.emplace_back(
+        "Partition surface",
+        logging::format("%s faces between ranks; per rank up to %s halo layer-1 cells (%s in all), %s cells "
+                        "received per exchange (%s in all)",
+                        logging::count(total[0] / 2).c_str(), logging::count(most[1]).c_str(),
+                        logging::count(total[1]).c_str(), logging::count(most[2]).c_str(),
+                        logging::count(total[2]).c_str()));
 }
 
 bool Solver::halo_too_shallow() {

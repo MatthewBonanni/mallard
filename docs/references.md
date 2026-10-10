@@ -188,6 +188,8 @@ The numerical methods Mallard implements and the reference data it is validated 
 
 - <a id="skilling-2004"></a>J. Skilling, Programming the Hilbert curve, *AIP Conf. Proc.* 707, 381–387 (2004). [doi:10.1063/1.1751381](https://doi.org/10.1063/1.1751381)
   Used in: `partitioner = "hilbert"` (`src/parallel/partition.cpp`).
+- <a id="deveci-2016"></a>M. Deveci, S. Rajamanickam, K. D. Devine and Ü. V. Çatalyürek, Multi-jagged: A scalable parallel spatial partitioning algorithm, *IEEE Trans. Parallel Distrib. Syst.* 27, 803–817 (2016). [doi:10.1109/TPDS.2015.2412545](https://doi.org/10.1109/TPDS.2015.2412545)
+  Used in: `partitioner = "multijagged"` (`src/parallel/partition.cpp`).
 - <a id="sanders-seemaier-2023"></a>P. Sanders and D. Seemaier, Distributed deep multilevel graph partitioning, in *Euro-Par 2023: Parallel Processing*, Lecture Notes in Computer Science, Springer, 443–457 (2023). [doi:10.1007/978-3-031-39698-4_30](https://doi.org/10.1007/978-3-031-39698-4_30)
   Used in: `partitioner = "graph"` through dKaMinPar ([KaMinPar](https://github.com/KaHIP/KaMinPar); `Mallard_ENABLE_KAMINPAR`).
 - <a id="trott-2022"></a>C. R. Trott et al., Kokkos 3: Programming model extensions for the exascale era, *IEEE Trans. Parallel Distrib. Syst.* 33, 805–817 (2022). [doi:10.1109/TPDS.2021.3097283](https://doi.org/10.1109/TPDS.2021.3097283)
