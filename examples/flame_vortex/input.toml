@@ -15,10 +15,10 @@
 # the Klimov-Williams criterion Ka = 1 says; their example of quenching is
 # r / l_F = 4.8, u' / S_L = 28.
 #
-# Their quenching is controlled by radiative heat losses, which Mallard does
-# not model: the pocket is quenched after it is pushed into burnt gas that the
-# losses have cooled. This case therefore uses a mixture whose flame stretch
-# alone weakens: rich H2/air, phi = 4, 300 K, 1 atm, mixture-averaged
+# Their quenching is controlled by heat losses: the pocket is quenched after it
+# is pushed into burnt gas that the losses have cooled. This case has none (see
+# examples/flame_vortex_quenching for a radiating flame that quenches) and uses
+# a mixture whose flame stretch alone weakens: rich H2/air, phi = 4, 300 K, 1 atm, mixture-averaged
 # transport (S_L = 1.527 m/s, thermal thickness delta_L = 0.440 mm, burnt gas
 # 1556 K, rho_u / rho_b = 4.78), where the deficient reactant is O2, with a
 # Lewis number of 2.2 (H2: 0.42). Lengths are in delta_L, the thermal

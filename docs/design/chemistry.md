@@ -30,7 +30,8 @@ existing C++20 / Kokkos / CMake / TOML stack.
 ## Non-goals
 
 - Real-fluid equations of state (cubic EOS, transcritical injection),
-  multiphase and spray, soot, radiation, plasma and ionized species, surface
+  multiphase and spray, soot, radiation beyond the optically thin limit, plasma
+  and ionized species, surface
   chemistry and catalytic walls.
 - Full multicomponent (Stefan-Maxwell) transport, the Dufour effect and bulk
   viscosity. The transport interface leaves room for them; thermal diffusion
@@ -645,6 +646,78 @@ Validation (MUSCL, HLLC, SSPRK3, h2o2 mechanism, default tolerances):
   at 0.2-2 M cells/s, latency-bound (4-14 ms per step, 60-90% in chemistry);
   a CPU with 8 threads reaches 0.6 M cells/s on them. Milestone 10's
   team-per-cell kernels and larger meshes are what the GPU needs.
+
+### Radiative heat loss (optically thin; issue #160)
+
+`[radiation]` adds the optically thin model of the TNF workshop. Each cell
+loses `q = 4 sigma sum_i p_i a_i(T) (T^4 - T_amb^4)` [W/m^3], where `p_i` are
+the partial pressures [atm] of H2O, CO2, CO and CH4 and `a_i` their
+Planck-mean absorption coefficients. The coefficients are fits to RADCAL
+([Grosshandler 1993](https://doi.org/10.6028/NIST.TN.1402)) over 300-2500 K,
+distributed with the TNF radiation model
+([Barlow et al. 2001](https://doi.org/10.1016/S0010-2180(01)00313-3)): H2O
+and CO2 as fifth-order polynomials in 1000/T, CH4 as a quartic in T, and CO
+as two quartics joined at 750 K (`src/chemistry/radiation.h`).
+
+- **Where.** The loss is a pointwise sink of `rho E` in the flow RHS
+  (`src/solver/solver_radiation.cpp`, after the other sources). SSPRK3
+  integrates it with the flow, outside the chemistry's half steps, so the
+  constant-volume reactors stay adiabatic. The term is not stiff: the
+  radiative time `rho cp T / q` is 0.1-1 s in flames, against flow steps of
+  about 1e-7 s. `T` is `p / (rho R)` from the cell's state and
+  `p_i = rho_i R_u T / W_i`, all in double precision.
+- **Determinism.** One kernel runs over the owned cells, each from its own
+  state, so runs stay bitwise independent of the rank count (the MPI test
+  covers it). Runs without `[radiation]` launch nothing and are unchanged.
+- **Cantera.** Cantera's flames with `radiation_enabled` use the same H2O and
+  CO2 fits with no background term (its boundary emissivities are zero).
+  `species = ["H2O", "CO2"]` with `T_ambient = 0` reproduces it, to 1e-9 in
+  the unit test.
+- **Limits.**
+  - No absorption: the model holds where the gas is optically thin, such as
+    laboratory-scale flames at 1 atm. With reabsorption, the limits and the
+    limit speeds move ([Ju, Masuya & Ronney 1998](https://doi.org/10.1016/S0082-0784(98)80116-1)).
+  - The fits cover 300-2500 K.
+
+#### Validation
+
+- **Homogeneous gas** (`RadiationTest`): H2O, CO2, CO, CH4 and N2 at 2000 K
+  against a 1000 K background, in a quiescent periodic box without
+  chemistry. After 0.2 s, by which `T` has fallen by more than 100 K, it
+  matches RK4 on `de/dt = -q / rho` to 1e-6.
+- **1D flames against Cantera with the same model.**
+  - Setup: `tools/flame_restart.py --radiation cantera`, 12 cells per
+    thermal thickness of the adiabatic flame, MUSCL, HLLC, SSPRK3, CFL 1.2.
+  - S_c is the consumption speed averaged over the last third of each run.
+  - The runs last 3.5 (phi = 0.6), 5 (phi = 0.5) or 3 (phi = 0.44) flame
+    times. Started from Cantera's profile, the GRI-3.0 flames relax for about
+    3 flame times, and shorter runs overestimate their speed by 1-2%.
+  - Cantera's flames are on 5-10 cm domains. The radiating speed is the same
+    at 5 and 10 cm, so the burnt gas cooling far downstream does not matter.
+
+  | Mixture | Cantera S_L adiabatic / radiating [cm/s] | Mallard S_c adiabatic / radiating | S_rad / S_ad: Cantera, Mallard |
+  |---|---|---|---|
+  | CH4/air phi = 0.6, GRI-3.0 | 11.436 / 11.136 | 11.263 / 10.964 | 0.9738 / 0.9735 |
+  | CH4/air phi = 0.5, GRI-3.0 | 4.880 / 3.958 | 4.772 / 3.855 | 0.811 / 0.808 |
+  | CH4/air phi = 0.44, two-step (`ch4_bfer.yaml`) | 4.231 / 3.600 | 4.194 / 3.568 | 0.8509 / 0.8507 |
+
+  The TNF model (all four species, 300 K background) gives 3.563 cm/s for
+  the two-step flame at phi = 0.44, against 3.568 with Cantera's model.
+  CFL 0.8 gives the same speed to four digits.
+- **Radiative flammability limit.**
+  - Two-step mechanism: Cantera finds a radiating flame at phi = 0.41 and
+    none at 0.405. Mallard's flame at 0.41 burns at 2.152 cm/s (Cantera
+    2.181). At 0.40, started from the adiabatic profile, its speed falls from
+    2.0 to 0.2 cm/s within 17 flame times and the flame dies.
+  - GRI-3.0: Cantera's limit lies between phi = 0.48 and 0.49. At 0.49,
+    S_rad / S_ad = 0.73, near the theoretical e^-1/2 = 0.61 at the turning
+    point that Ju, Masuya & Ronney report for optically thin CH4/air.
+    Mallard's flame at 0.47, started from the adiabatic profile, slows
+    steadily from 3.2 to 1.8 cm/s in 2.7 flame times. That is below Cantera's
+    slowest steady flame (3.19 cm/s at 0.49) and still falling.
+- **Flame-vortex quenching.** `examples/flame_vortex_quenching` reproduces
+  the quenching zone of the spectral diagram of Poinsot, Veynante & Candel
+  (1991) with this model.
 
 ## 5. Chemistry
 
