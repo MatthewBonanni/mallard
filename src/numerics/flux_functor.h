@@ -79,7 +79,7 @@ struct UpwindSensorFunctor {
         } else {
             omega2 = 0.0_r;
             for (uint8_t k = 0; k < 3; k++) {
-                const uint8_t a = (k + 1) % 3, b = (k + 2) % 3;
+                const uint8_t a = static_cast<uint8_t>((k + 1) % 3), b = static_cast<uint8_t>((k + 2) % 3);
                 const rtype w = gradients(c, 1 + b, a) - gradients(c, 1 + a, b);
                 omega2 += w * w;
             }
@@ -121,9 +121,9 @@ struct ConvectiveFluxFunctor {
     void operator()(const uint32_t i_face) const {
         uint8_t n_quad;
         if constexpr (N_DIM == 2) {
-            n_quad = quad_weights.extent(0);
+            n_quad = static_cast<uint8_t>(quad_weights.extent(0));
         } else {
-            n_quad = face_weights.extent(1);
+            n_quad = static_cast<uint8_t>(face_weights.extent(1));
         }
         const int32_t c1 = cells_of_face(i_face, 1);
         rtype n_unit[N_DIM];

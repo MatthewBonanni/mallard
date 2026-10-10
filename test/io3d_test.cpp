@@ -255,7 +255,7 @@ struct CellFields {
         : values(Kokkos::create_mirror_view(Kokkos::View<rtype **>("values", n_cells, names.size()))) {
         for (size_t v = 0; v < names.size(); v++) {
             data.push_back(Data(names[v], Kokkos::subview(values, Kokkos::ALL(), v)));
-            for (uint32_t c = 0; c < n_cells; c++) values(c, v) = 100.0 * v + c;
+            for (uint32_t c = 0; c < n_cells; c++) values(c, v) = static_cast<rtype>(100.0 * static_cast<double>(v) + c);
         }
     }
 };
@@ -322,9 +322,9 @@ TEST(IO3DTest, VolumeOutputFollowsVTKCellConventions) {
     std::map<uint8_t, int> n_of_type;
     for (uint32_t c = 0; c < mesh->n_cells; c++) {
         const int64_t start = c == 0 ? 0 : offsets[c - 1];
-        const uint32_t n = offsets[c] - start;
+        const uint32_t n = static_cast<uint32_t>(offsets[c] - start);
         n_of_type[types[c]]++;
-        auto x = [&](int k, int d) { return static_cast<double>(points[3 * connectivity[start + k] + d]); };
+        auto x = [&](int k, int d) { return static_cast<double>(points[static_cast<size_t>(3 * connectivity[static_cast<size_t>(start + k)] + d)]); };
         for (const auto & conv : conventions) {
             if (conv.n_nodes != n) continue;
             EXPECT_EQ(types[c], conv.type);
@@ -336,8 +336,8 @@ TEST(IO3DTest, VolumeOutputFollowsVTKCellConventions) {
                 e1[d] = x(b[tri ? 1 : 2], d) - x(b[0], d);
                 e2[d] = x(b[tri ? 2 : 3], d) - x(b[tri ? 0 : 1], d);
                 double base_center = 0.0, opposite_center = 0.0;
-                for (int k : b) base_center += x(k, d) / b.size();
-                for (int k : conv.opposite) opposite_center += x(k, d) / conv.opposite.size();
+                for (int k : b) base_center += x(k, d) / static_cast<double>(b.size());
+                for (int k : conv.opposite) opposite_center += x(k, d) / static_cast<double>(conv.opposite.size());
                 to_opposite[d] = opposite_center - base_center;
             }
             for (int d = 0; d < 3; d++) normal[d] = e1[(d + 1) % 3] * e2[(d + 2) % 3] - e1[(d + 2) % 3] * e2[(d + 1) % 3];
@@ -390,8 +390,8 @@ TEST(IO3DTest, HDF5OutputHoldsTheVTUCellsAsAnXDMFMixedTopology) {
     EXPECT_EQ(starts.back(), int64_t(topology.size()));
     for (uint32_t c = 0; c < mesh->n_cells; c++) {
         const int64_t begin = c == 0 ? 0 : offsets[c - 1];
-        ASSERT_TRUE(vtk_of_xdmf.count(topology[starts[c]])) << topology[starts[c]];
-        EXPECT_EQ(vtk_of_xdmf.at(topology[starts[c]]), types[c]);
+        ASSERT_TRUE(vtk_of_xdmf.count(topology[static_cast<size_t>(starts[c])])) << topology[static_cast<size_t>(starts[c])];
+        EXPECT_EQ(vtk_of_xdmf.at(topology[static_cast<size_t>(starts[c])]), types[c]);
         const std::vector<int64_t> nodes(topology.begin() + starts[c] + 1, topology.begin() + starts[c + 1]);
         EXPECT_EQ(nodes, std::vector<int64_t>(connectivity.begin() + begin, connectivity.begin() + offsets[c]));
     }

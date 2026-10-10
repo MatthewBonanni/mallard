@@ -138,7 +138,7 @@ struct IgnitionResults {
 IgnitionResults device_ignition(const Mechanism & mech, const Table & ref) {
     const ThermoTable<> thermo = make_thermo_table(mech);
     const KineticsTable<> kinetics = make_kinetics_table(mech);
-    const uint32_t ns = mech.n_species(), n_cases = ref.rows.size();
+    const uint32_t ns = mech.n_species(), n_cases = static_cast<uint32_t>(ref.rows.size());
     const size_t c_rho = ref.column("rho"), c_Y0 = ref.column("Y0_" + mech.species[0].name);
     const size_t c_T0 = ref.column("T0"), c_tau = ref.column("tau");
     // Per case: rho, T, tau_ref, Y; out: tau, T(tau/2), T(2 tau), steps, failures, T_eq, Y_eq
@@ -240,7 +240,7 @@ struct LanesIgnitionFunctor {
 
 Rows<double>::host_mirror_type lanes_ignition(const Mechanism & mech, const Table & ref, const uint32_t lanes,
                                               const uint32_t threads = 1) {
-    const uint32_t ns = mech.n_species(), n_cases = ref.rows.size();
+    const uint32_t ns = mech.n_species(), n_cases = static_cast<uint32_t>(ref.rows.size());
     const KineticsTable<> kinetics = make_kinetics_table(mech);
     Rows<double> state("state", n_cases, 3 + ns), out("out", n_cases, 2 + ns);
     auto h_state = Kokkos::create_mirror_view(state);
@@ -259,7 +259,7 @@ Rows<double>::host_mirror_type lanes_ignition(const Mechanism & mech, const Tabl
         Kokkos::parallel_for("ignition_threads", n_cases, functor);
     } else {
         const auto policy =
-            Kokkos::TeamPolicy<LanesIgnitionFunctor::TeamTag>(n_cases, static_cast<int>(threads), static_cast<int>(lanes))
+            Kokkos::TeamPolicy<LanesIgnitionFunctor::TeamTag>(static_cast<int>(n_cases), static_cast<int>(threads), static_cast<int>(lanes))
                 .set_scratch_size(0, Kokkos::PerTeam(TeamLanes<LanesIgnitionFunctor::Member>::scratch_bytes(threads * lanes)));
         Kokkos::parallel_for("ignition_teams", policy, functor);
     }
@@ -670,7 +670,7 @@ TEST(ChemistryReactorTest, LeanIgnitionIsReportedAtTheSteepestTemperatureRise) {
     for (size_t i = 1; i + 1 < T_rows.size(); i++) {
         if (T_rows[i + 1] - T_rows[i] > T_rows[steepest + 1] - T_rows[steepest]) steepest = i;
     }
-    const double t_steepest = (steepest + 0.5) * interval;
+    const double t_steepest = (static_cast<double>(steepest) + 0.5) * interval;
     ASSERT_TRUE(lean.ignited());
     EXPECT_NEAR(lean.t_ignition, t_steepest, interval);
     EXPECT_NEAR(lean.t_ignition, 3.650e-3, 5e-3 * 3.650e-3);  // Cantera
@@ -680,7 +680,7 @@ TEST(ChemistryReactorTest, LeanIgnitionIsReportedAtTheSteepestTemperatureRise) {
     const double steepest_rise = T_rows[steepest + 1] - T_rows[steepest];
     size_t past_half = steepest;
     while (T_rows[past_half + 1] - T_rows[past_half] > 0.5 * steepest_rise) past_half++;
-    for (const double end_time : {0.5 * t_steepest, 0.5 * (t_steepest + past_half * interval)}) {
+    for (const double end_time : {0.5 * t_steepest, 0.5 * (t_steepest + static_cast<double>(past_half) * interval)}) {
         std::vector<double> rows;
         EXPECT_FALSE(run(end_time, rows).ignited()) << "end_time " << end_time;
     }

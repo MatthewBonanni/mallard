@@ -138,12 +138,12 @@ namespace {
 struct FarfieldCase {
     BoundaryCondition bc;
     rtype W_g[N_CONSERVATIVE];
-    rtype n[N_DIM] = {0.6, 0.8};
-    static constexpr rtype G = 1.4;
+    rtype n[N_DIM] = {0.6_r, 0.8_r};
+    static constexpr rtype G = 1.4_r;
 
     FarfieldCase(const rtype * W_i) {
         bc.type = BoundaryType::FARFIELD;
-        const rtype W_inf[N_CONSERVATIVE] = {1.0, 0.3, -0.1, 1.0_r / G};
+        const rtype W_inf[N_CONSERVATIVE] = {1.0_r, 0.3_r, -0.1_r, 1.0_r / G};
         FOR_I_CONSERVATIVE bc.data[i] = W_inf[i];
         bc.ghost_W(W_i, n, G, 1.0, false, W_g);
     }
@@ -158,7 +158,7 @@ struct FarfieldCase {
 } // namespace
 
 TEST(BoundaryTest, FarfieldReturnsTheFreeStreamForTheFreeStream) {
-    const rtype W_inf[N_CONSERVATIVE] = {1.0, 0.3, -0.1, 1.0 / 1.4};
+    const rtype W_inf[N_CONSERVATIVE] = {1.0_r, 0.3_r, -0.1_r, 1.0_r / 1.4_r};
     FarfieldCase c(W_inf);
     FOR_I_CONSERVATIVE EXPECT_NEAR(c.W_g[i], W_inf[i], roundoff(1e-14));
 }
@@ -168,7 +168,7 @@ TEST(BoundaryTest, FarfieldTakesEachCharacteristicFromItsUpwindSide) {
     const rtype * W_inf = nullptr;
     // Subsonic outflow (u_n > 0): outgoing invariant, entropy and tangential
     // velocity from the interior; incoming invariant from the free stream
-    const rtype W_out[N_CONSERVATIVE] = {1.1, 0.4, 0.2, 0.8};
+    const rtype W_out[N_CONSERVATIVE] = {1.1_r, 0.4_r, 0.2_r, 0.8_r};
     F out(W_out);
     W_inf = out.bc.data;
     ASSERT_GT(F::u_n(out.W_g, out.n), 0.0);
@@ -178,7 +178,7 @@ TEST(BoundaryTest, FarfieldTakesEachCharacteristicFromItsUpwindSide) {
     EXPECT_NEAR(F::u_t(out.W_g, out.n), F::u_t(W_out, out.n), roundoff(1e-12));
 
     // Subsonic inflow (u_n < 0): entropy and tangential velocity from the free stream
-    const rtype W_in[N_CONSERVATIVE] = {0.9, -0.5, -0.3, 0.6};
+    const rtype W_in[N_CONSERVATIVE] = {0.9_r, -0.5_r, -0.3_r, 0.6_r};
     F in(W_in);
     ASSERT_LT(F::u_n(in.W_g, in.n), 0.0);
     EXPECT_NEAR(F::r_plus(in.W_g, in.n), F::r_plus(W_in, in.n), roundoff(1e-12));
@@ -187,10 +187,10 @@ TEST(BoundaryTest, FarfieldTakesEachCharacteristicFromItsUpwindSide) {
     EXPECT_NEAR(F::u_t(in.W_g, in.n), F::u_t(W_inf, in.n), roundoff(1e-12));
 
     // Supersonic outflow keeps the interior, supersonic inflow takes the free stream
-    const rtype W_sup_out[N_CONSERVATIVE] = {1.0, 1.2, 1.6, 1.0 / 1.4};
+    const rtype W_sup_out[N_CONSERVATIVE] = {1.0_r, 1.2_r, 1.6_r, 1.0_r / 1.4_r};
     F sup_out(W_sup_out);
     FOR_I_CONSERVATIVE EXPECT_EQ(sup_out.W_g[i], W_sup_out[i]);
-    const rtype W_sup_in[N_CONSERVATIVE] = {1.0, -1.2, -1.6, 1.0 / 1.4};
+    const rtype W_sup_in[N_CONSERVATIVE] = {1.0_r, -1.2_r, -1.6_r, 1.0_r / 1.4_r};
     F sup_in(W_sup_in);
     FOR_I_CONSERVATIVE EXPECT_EQ(sup_in.W_g[i], W_inf[i]);
 }
