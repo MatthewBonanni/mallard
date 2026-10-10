@@ -2567,7 +2567,7 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
             functor.n_smooth = n;
             using Policy = Kokkos::TeamPolicy<Space, typename Functor::SmoothTeamPass,
                                               Kokkos::LaunchBounds<Functor::TEAM_SIZE, 2>>;
-            const Policy policy = Policy(exec, (n + Functor::TEAM_CELLS - 1) / Functor::TEAM_CELLS, Functor::TEAM_SIZE)
+            const Policy policy = Policy(exec, static_cast<int>((n + Functor::TEAM_CELLS - 1) / Functor::TEAM_CELLS), Functor::TEAM_SIZE)
                                       .set_scratch_size(0, Kokkos::PerTeam(Functor::TEAM_SCRATCH));
             Kokkos::parallel_for("teno_smooth", policy, functor);
         }
