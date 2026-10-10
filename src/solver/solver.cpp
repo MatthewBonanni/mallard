@@ -215,12 +215,14 @@ void Solver::init_mesh() {
         if (!setup) {
             partitioner = toml::find_or<std::string>(input, "parallel", "partitioner",
                                                      have_graph_partitioner() ? "graph" : "hilbert");
-            if (partitioner != "graph" && partitioner != "hilbert") {
-                throw InputError("parallel.partitioner = \"" + partitioner + "\" is not one of: graph, hilbert.");
+            if (partitioner != "graph" && partitioner != "hilbert" && partitioner != "multijagged") {
+                throw InputError("parallel.partitioner = \"" + partitioner +
+                                 "\" is not one of: graph, hilbert, multijagged.");
             }
             setup = std::make_unique<DistributedMesh>(read_mesh_block(input), Mesh::periodic_pairs(input));
-            setup->distribute(partitioner == "graph" ? partition_graph(*setup, comm::size())
-                                                     : partition_hilbert(*setup, comm::size()));
+            setup->distribute(partitioner == "graph"         ? partition_graph(*setup, comm::size())
+                              : partitioner == "multijagged" ? partition_multijagged(*setup, comm::size())
+                                                             : partition_hilbert(*setup, comm::size()));
         }
         mesh = setup->build_local_mesh(halo_layers, distribution);
         const std::string exchange =
@@ -254,8 +256,9 @@ void Solver::init_mesh() {
         const uint64_t max_halo = comm::allreduce(n_halo, comm::Op::MAX);
         const double mean = static_cast<double>(n_cells_global) / comm::size();
         mesh_summary.emplace_back("Partition", logging::format("%s, %d ranks, %d halo layers exchanged with %s",
-                                                               partitioner == "graph" ? "graph (KaMinPar)"
-                                                                                      : "Hilbert curve",
+                                                               partitioner == "graph"         ? "graph (KaMinPar)"
+                                                               : partitioner == "multijagged" ? "multi-jagged"
+                                                                                              : "Hilbert curve",
                                                                comm::size(), halo_layers,
                                                                halo.uses_nccl() ? "NCCL" : "MPI"));
         mesh_summary.emplace_back("Cells per rank",

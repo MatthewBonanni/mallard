@@ -616,6 +616,32 @@ TEST(MPITest, GraphPartitionIsBalancedAndMatchesSerial) {
     EXPECT_LE(comm::allreduce(n_owned, comm::Op::MAX), 1.03 * n_global / comm::size() + 1);
 }
 
+TEST(MPITest, MultiJaggedPartitionCutsABoxIntoBlocksAndMatchesSerial) {
+    const std::string input =
+        box_input("cartesian", "type = \"TENO\"\norder = 4\n", EULER,
+                  bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n", "type = \"wall_adiabatic\"\n",
+                      "type = \"extrapolation\"\n"),
+                  10) +
+        "[parallel]\npartitioner = \"multijagged\"\n";
+    expect_matches_serial(input);
+    Solver solver;
+    solver.init(parse_toml(input));
+    if (!solver.is_distributed()) return;
+    const uint32_t n_owned = solver.get_distribution().n_owned;
+    const uint64_t n_global = solver.get_mesh()->n_global_cells;
+    EXPECT_LE(comm::allreduce(uint64_t(n_owned), comm::Op::MAX), n_global / comm::size() + 2);
+    // 24 x 18 cells: a grid of blocks that divides them is cut by straight lines only
+    const auto shape = grid_shape(comm::size(), {1.0 - 1.0 / 24, 0.8 - 0.8 / 18});
+    if (24 % shape[0] != 0 || 18 % shape[1] != 0) return;
+    const auto & mesh = *solver.get_mesh();
+    uint64_t cut = 0;
+    for (uint32_t f = 0; f < mesh.n_faces; f++) {
+        const int32_t a = mesh.h_cells_of_face(f, 0), b = mesh.h_cells_of_face(f, 1);
+        cut += b >= 0 && (uint32_t(a) < n_owned) != (uint32_t(b) < n_owned);
+    }
+    EXPECT_EQ(comm::allreduce(cut, comm::Op::SUM) / 2, uint64_t((shape[0] - 1) * 18 + (shape[1] - 1) * 24));
+}
+
 TEST(MPITest, TENOCacheOfEachRankReproducesItsSetupAndHalo) {
     const std::string cache = (std::filesystem::temp_directory_path() / "mallard_mpi_teno_cache.bin").string();
     const std::string rank_file =
