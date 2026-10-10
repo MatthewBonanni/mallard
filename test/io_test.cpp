@@ -62,7 +62,7 @@ TEST(IOTest, BoundaryZoneOutputCarriesAdjacentCellValues) {
         double p;
         values >> p;
         const int32_t c = solver.get_mesh()->h_cells_of_face(zone->h_faces(i), 0);
-        EXPECT_RTYPE_EQ(p, solver.h_primitives(c, 2));
+        EXPECT_RTYPE_EQ(static_cast<rtype>(p), solver.h_primitives(c, 2));
     }
 
     // U is a 3-component vector, zero-padded in 2D
@@ -74,8 +74,8 @@ TEST(IOTest, BoundaryZoneOutputCarriesAdjacentCellValues) {
         double u[3];
         u_values >> u[0] >> u[1] >> u[2];
         const int32_t c = solver.get_mesh()->h_cells_of_face(zone->h_faces(i), 0);
-        EXPECT_RTYPE_EQ(u[0], solver.h_primitives(c, 0));
-        EXPECT_RTYPE_EQ(u[1], solver.h_primitives(c, 1));
+        EXPECT_RTYPE_EQ(static_cast<rtype>(u[0]), solver.h_primitives(c, 0));
+        EXPECT_RTYPE_EQ(static_cast<rtype>(u[1]), solver.h_primitives(c, 1));
         EXPECT_EQ(u[2], 0.0);
     }
     std::filesystem::remove_all(dir);

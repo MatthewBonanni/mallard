@@ -309,7 +309,7 @@ TEST(PeriodicSetup2D, TransmissiveImagesAreFoundAcrossTheSeam) {
     const rtype h = 1.0_r / n;
     std::vector<std::array<rtype, N_DIM>> nodes;
     for (uint32_t j = 0; j <= n; j++) {
-        for (uint32_t i = 0; i <= n; i++) nodes.push_back({i * h + j * h, j * h});
+        for (uint32_t i = 0; i <= n; i++) nodes.push_back({static_cast<rtype>(i) * h + static_cast<rtype>(j) * h, static_cast<rtype>(j) * h});
     }
     auto id = [&](uint32_t i, uint32_t j) { return j * (n + 1) + i; };
     std::vector<std::vector<uint32_t>> cells;
