@@ -1116,6 +1116,12 @@ void TENO::read_options(const toml::value & input) {
     characteristic = toml::find_or<bool>(input, "characteristic", true);
     max_condition = find_real_or(input, "max_condition", 1.0e8);
     bound_preserving = toml::find_or<bool>(input, "bound_preserving", false);
+    curved_mirrors = toml::find_or<bool>(input, "curved_mirrors", false);
+    const int wall_degree = toml::find_or<int>(input, "curved_wall_degree", 3);
+    if (wall_degree < 2 || wall_degree > teno::MAX_DEGREE) {
+        throw std::runtime_error("TENO curved_wall_degree must be between 2 and " + std::to_string(teno::MAX_DEGREE) + ".");
+    }
+    curved_wall_degree = uint8_t(wall_degree);
     cache_file = toml::find_or<std::string>(input, "cache_file", "");
     cache_single = toml::find_or<bool>(input, "cache_single_precision", false);
     // One file per rank, made for this partition
@@ -1130,6 +1136,7 @@ void TENO::init(const toml::value & input) {
     const int n_gp = std::max(1, std::min<int>(teno::MAX_FACE_QUAD, (order + 1) / 2));
     quadrature_face = GaussLegendre(n_gp);
     if constexpr (N_DIM == 3) init_face_quadrature_3d(order);
+    init_face_quadrature_2d_curved();
 
     if (mesh->axisymmetric) {
         // Exact to degree >= the reconstruction's, for the geometric source
@@ -1208,6 +1215,30 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
     uint32_t n_failed_large = 0;
     uint32_t n_invalid_small = 0;
 
+    // Curved meshes: integration rules of the curved cells (exact to the
+    // degree of the smoothness indicators) and the faces' quadrature points
+    const curved::Geometry * geometry = mesh->curved_geometry.get();
+    std::vector<int32_t> rule_of(geometry ? n_cells : 0, -1);
+    std::vector<std::vector<curved::Vec3>> rule_x;
+    std::vector<std::vector<double>> rule_w;
+    Kokkos::View<rtype ***>::host_mirror_type h_face_points;
+    if (geometry) {
+        for (uint32_t c = 0; c < n_cells; c++) {
+            if (!geometry->cell_is_curved(c)) continue;
+            rule_of[c] = int32_t(rule_x.size());
+            rule_x.emplace_back();
+            rule_w.emplace_back();
+            geometry->cell_rule(c, 2 * r, rule_x.back(), rule_w.back());
+        }
+        h_face_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_quad_points);
+    }
+    // Cells with a curved wall or symmetry face, which take no mirror images
+    std::vector<uint8_t> wall_cell(geometry ? n_cells : 0, 0);
+    for (uint32_t f = 0; geometry && f < mesh->n_faces; f++) {
+        if (mesh->h_cells_of_face(f, 1) >= 0 || h_face_bc(f) < 0) continue;
+        if (teno_setup::one_sided_face(*mesh, h_bcs(h_face_bc(f)), f, curved_mirrors)) wall_cell[mesh->h_cells_of_face(f, 0)] = 1;
+    }
+
     auto precompute = [&](const uint32_t i, CellTables & out, uint32_t & failed_large, uint32_t & invalid_small) {
         const double x0 = double(mesh->h_cell_coords(i, 0));
         const double y0 = double(mesh->h_cell_coords(i, 1));
@@ -1242,6 +1273,23 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
 
         // Mean of each monomial over a stencil entry, in the frame of target cell i
         auto monomial_means = [&](const Entry & e, uint8_t deg, std::vector<double> & means) {
+            if (!rule_of.empty() && rule_of[e.cell] >= 0) {
+                const auto & X = rule_x[rule_of[e.cell]];
+                const auto & Wq = rule_w[rule_of[e.cell]];
+                const uint8_t n = teno::n_dof(deg);
+                means.assign(n, 0.0);
+                double area = 0.0;
+                double phi[teno::MAX_NK];
+                for (size_t q = 0; q < X.size(); q++) {
+                    double qx, qy;
+                    mirror(e.face, e.mx, e.my, X[q][0] + e.tx, X[q][1] + e.ty, qx, qy);
+                    teno::monomials(deg, (qx - x0) / h, (qy - y0) / h, phi);
+                    for (uint8_t l = 0; l < n; l++) means[l] += Wq[q] * phi[l];
+                    area += Wq[q];
+                }
+                for (uint8_t l = 0; l < n; l++) means[l] /= area;
+                return;
+            }
             const uint32_t n_nodes = mesh->h_n_nodes_of_cell(e.cell);
             std::vector<double> px(n_nodes), py(n_nodes);
             for (uint32_t k = 0; k < n_nodes; k++) {
@@ -1323,6 +1371,7 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
                     const uint32_t f = mesh->h_face_of_cell(c, k);
                     if (mesh->h_cells_of_face(f, 1) >= 0 || h_face_bc(f) < 0) continue;
                     if (h_bcs(h_face_bc(f)).type == BoundaryType::PARTITION) continue;
+                    if (teno_setup::one_sided_face(*mesh, h_bcs(h_face_bc(f)), f, curved_mirrors)) continue;
                     const double nx = double(mesh->h_face_normals(f, 0)) / double(mesh->h_face_area(f));
                     const double ny = double(mesh->h_face_normals(f, 1)) / double(mesh->h_face_area(f));
                     const LineFace lf{static_cast<int32_t>(f), double(mesh->h_face_coords(f, 0)) + v.t[0], double(mesh->h_face_coords(f, 1)) + v.t[1]};
@@ -1408,8 +1457,9 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
                 const double s_q = 0.5 * double(quadrature_face.h_points(q, 0));
                 double xi[2], phi[teno::MAX_NK];
                 for (int d = 0; d < 2; d++) {
-                    const double x = double(mesh->h_face_coords(f, d)) +
-                                     s_q * (double(mesh->h_node_coords(nb, d)) - double(mesh->h_node_coords(na, d)));
+                    const double x = geometry ? double(h_face_points(f, q, d))
+                                              : double(mesh->h_face_coords(f, d)) +
+                                                    s_q * (double(mesh->h_node_coords(nb, d)) - double(mesh->h_node_coords(na, d)));
                     xi[d] = ((x - double(mesh->h_face_offset(f, i, d))) - (d == 0 ? x0 : y0)) / h;
                 }
                 teno::monomials(r, xi[0], xi[1], phi);
@@ -1430,14 +1480,28 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
         auto splits_tie = [&](const std::vector<Entry> & list, size_t n) {
             return n < list.size() && std::abs(dist2(list[n]) - dist2(list[n - 1])) < GEOMETRY_TOL * h * h;
         };
+        // Stencils reaching a curved wall without mirror images (one-sided there)
+        // fit at most curved_wall_degree, from that degree's stencil size
+        uint8_t r_fit = r;
+        uint16_t n_start = ns;
+        if (!wall_cell.empty() && curved_wall_degree < r) {
+            bool near = wall_cell[i];
+            for (size_t k = 0; k < std::min<size_t>(ns, candidates.size()) && !near; k++) near = wall_cell[candidates[k].cell];
+            if (near) {
+                r_fit = curved_wall_degree;
+                n_start = static_cast<uint16_t>(std::ceil(stencil_factor * teno::n_dof(r_fit)));
+            }
+        }
         // The smallest stencil within MAX_LEBESGUE_2D, else the best conditioned one
-        uint16_t n_used = ns;
+        uint16_t n_used = n_start;
         double best_lebesgue = std::numeric_limits<double>::max();
-        for (uint16_t n_try = ns; n_try <= std::min<size_t>(ns_max, candidates.size()); n_try++) {
+        for (uint16_t n_try = n_start; n_try <= std::min<size_t>(ns_max, candidates.size()); n_try++) {
             if (splits_tie(candidates, n_try)) continue;
             std::vector<Entry> stencil(candidates.begin(), candidates.begin() + n_try);
             std::vector<double> P_try;
-            if (!build_pinv(stencil, r, P_try)) continue;
+            if (!build_pinv(stencil, r_fit, P_try)) continue;
+            // Coefficients above the fit's degree are zero
+            P_try.resize(size_t(nk) * n_try, 0.0);
             const double lebesgue = lebesgue_constant(psi_faces, nk, P_try, n_try);
             if (lebesgue < best_lebesgue) {
                 best_lebesgue = lebesgue;
@@ -1517,7 +1581,7 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
                 for (int t = 0; t < p; t++) c *= (a - t);
                 return c;
             };
-            integrate_polygon(px, py, rule, [&](double x, double y, double w) {
+            auto si_point = [&](double x, double y, double w) {
                 for (int bp = 0; bp <= r; bp++) {
                     for (int bq = 0; bp + bq <= r; bq++) {
                         if (bp + bq == 0) continue;
@@ -1533,7 +1597,14 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
                         }
                     }
                 }
-            });
+            };
+            if (!rule_of.empty() && rule_of[i] >= 0) {
+                const auto & X = rule_x[rule_of[i]];
+                const auto & Wq = rule_w[rule_of[i]];
+                for (size_t q = 0; q < X.size(); q++) si_point((X[q][0] - x0) / h, (X[q][1] - y0) / h, Wq[q] / (h * h));
+            } else {
+                integrate_polygon(px, py, rule, si_point);
+            }
             for (uint8_t l = 0; l < nk; l++) {
                 for (uint8_t m = l; m < nk; m++) out.si.push_back(M[l * nk + m]);
             }
@@ -1594,6 +1665,9 @@ void TENO::compute_stencils_and_matrices_3d(const std::vector<uint32_t> * subset
     options.batch_cells = setup_batch_cells;
     options.host_only = setup_on_host;
     options.cells = subset;
+    options.curved_mirrors = curved_mirrors;
+    options.curved_wall_degree = curved_wall_degree;
+    options.wall_ns = static_cast<uint16_t>(std::ceil(stencil_factor * teno::n_dof(curved_wall_degree)));
     teno_setup::Setup3DHandle setup(*mesh, boundaries, face_quad_points, face_quad_weights, options);
 
     // Cells per batch: whole slices of the packed stencils
@@ -1802,6 +1876,13 @@ struct TENOFunctor {
         // The face's points are in its cell 0's frame
         const uint8_t s = (cells_of_face(f, 1) == static_cast<int32_t>(i_cell)) ? face_shift(f) : 0;
         if constexpr (N_DIM == 2) {
+            if (face_quad_points.extent(0) > 0) {
+                // Curved meshes: the faces' own points
+                teno::monomials(DEG, ((face_quad_points(f, q, 0) - shifts(s, 0)) - cell_coords(i_cell, 0)) / h,
+                                ((face_quad_points(f, q, 1) - shifts(s, 1)) - cell_coords(i_cell, 1)) / h, psi);
+                for (uint8_t l = 0; l < NK; l++) psi[l] -= basis_mean(i_cell, l);
+                return true;
+            }
             const rtype xc = cell_coords(i_cell, 0), yc = cell_coords(i_cell, 1);
             const uint32_t node_0 = nodes_of_face(offsets_nodes_of_face(f));
             const uint32_t node_1 = nodes_of_face(offsets_nodes_of_face(f) + 1);
@@ -2999,6 +3080,16 @@ uint64_t TENO::cache_key() const {
     for (size_t b = 0; b < h_bcs.extent(0); b++) hash.add(h_bcs(b).type);
     // Axisymmetric meshes have r-weighted moments and revolved centroids
     if (mesh->axisymmetric) hash.add(uint8_t(1));
+    // Curved cells have other centroids, volumes and moments, and curved faces other points
+    if (mesh->curved_geometry) {
+        hash.add(uint8_t(2));
+        hash.add(curved_mirrors);
+        hash.add(curved_wall_degree);
+        hash.add(mesh->h_cell_coords.data(), mesh->h_cell_coords.span() * sizeof(rtype));
+        hash.add(mesh->h_cell_volume.data(), mesh->h_cell_volume.span() * sizeof(rtype));
+        auto h_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_quad_points);
+        hash.add(h_points.data(), h_points.span() * sizeof(rtype));
+    }
     if (mesh->is_periodic()) {
         hash.add(mesh->h_shifts.data(), mesh->h_shifts.span() * sizeof(rtype));
         hash.add(mesh->h_face_shift.data(), mesh->h_face_shift.span() * sizeof(uint8_t));

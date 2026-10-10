@@ -304,35 +304,58 @@ namespace {
 constexpr int BOUNDARY_DIM = N_DIM - 1;
 
 /**
- * @brief Contents of a Gmsh file: cells are the N_DIM-dimensional elements;
- *        boundary faces are the elements of physical groups of dimension
- *        N_DIM - 1, named after the group (or "physical_<tag>" if unnamed).
+ * @brief Contents of a Gmsh file: cells are the N_DIM-dimensional elements
+ *        (their corners); boundary faces are the elements of physical groups
+ *        of dimension N_DIM - 1, named after the group (or "physical_<tag>" if
+ *        unnamed). High-order boundary faces keep all their nodes'
+ *        coordinates (corners first, Gmsh order) in boundary_high_order;
+ *        nodes that are no element's corner are dropped.
  */
 struct GmshData {
     std::vector<std::array<rtype, N_DIM>> nodes;
     std::vector<std::vector<uint32_t>> cells;
     std::vector<Mesh::BoundaryFace> boundary_faces;
+    std::vector<std::vector<curved::Vec3>> boundary_high_order;  // per boundary face, empty if linear
 };
 
 struct GmshElementType {
     int dim;
     int n_nodes;
+    int n_corners;
 };
 
 GmshElementType gmsh_element_type(int type, const std::string & filename) {
     switch (type) {
-        case 15: return {0, 1};  // Point
-        case 1: return {1, 2};   // Line
-        case 2: return {2, 3};   // Triangle
-        case 3: return {2, 4};   // Quadrilateral
-        case 4: return {3, 4};   // Tetrahedron
-        case 5: return {3, 8};   // Hexahedron
-        case 6: return {3, 6};   // Prism
-        case 7: return {3, 5};   // Pyramid
+        case 15: return {0, 1, 1};     // Point
+        case 1: return {1, 2, 2};      // Line
+        case 8: return {1, 3, 2};      // Line, order 2
+        case 26: return {1, 4, 2};     // Line, order 3
+        case 2: return {2, 3, 3};      // Triangle
+        case 9: return {2, 6, 3};      // Triangle, order 2
+        case 20: return {2, 9, 3};     // Triangle, order 3 (incomplete)
+        case 21: return {2, 10, 3};    // Triangle, order 3
+        case 3: return {2, 4, 4};      // Quadrilateral
+        case 16: return {2, 8, 4};     // Quadrilateral, order 2 (incomplete)
+        case 10: return {2, 9, 4};     // Quadrilateral, order 2
+        case 36: return {2, 16, 4};    // Quadrilateral, order 3
+        case 4: return {3, 4, 4};      // Tetrahedron
+        case 11: return {3, 10, 4};
+        case 29: return {3, 20, 4};
+        case 5: return {3, 8, 8};      // Hexahedron
+        case 17: return {3, 20, 8};
+        case 12: return {3, 27, 8};
+        case 92: return {3, 64, 8};
+        case 6: return {3, 6, 6};      // Prism
+        case 18: return {3, 15, 6};
+        case 13: return {3, 18, 6};
+        case 90: return {3, 40, 6};
+        case 7: return {3, 5, 5};      // Pyramid
+        case 19: return {3, 13, 5};
+        case 14: return {3, 14, 5};
         default:
             throw std::runtime_error("Gmsh file " + filename + ": unsupported element type " + std::to_string(type) +
-                                     "; only linear points, lines, triangles, quadrilaterals, tetrahedra, "
-                                     "hexahedra, prisms and pyramids are supported.");
+                                     "; points, lines, triangles, quadrilaterals, tetrahedra, hexahedra, prisms "
+                                     "and pyramids of order 1 to 3 are supported.");
     }
 }
 
@@ -371,6 +394,8 @@ GmshData read_gmsh(const std::string & filename) {
     std::map<int, std::string> physical_names;                  // Boundary-dimension groups only
     std::map<int, std::vector<int>> boundary_entity_physicals;  // 4.x: entity -> physical tags
     std::map<size_t, uint32_t> node_index;                      // Gmsh node tag -> index
+    std::vector<curved::Vec3> coords;                           // every node, for high-order faces
+    bool high_order = false;
 
     auto add_element = [&](int type, int physical, const std::vector<size_t> & tags) {
         const GmshElementType et = gmsh_element_type(type, filename);
@@ -380,14 +405,20 @@ GmshData read_gmsh(const std::string & filename) {
                                      std::to_string(N_DIM) + ".");
         }
         if (et.dim < BOUNDARY_DIM || (et.dim == BOUNDARY_DIM && physical == 0)) return;
+        high_order |= et.n_nodes > et.n_corners;
         std::vector<uint32_t> idx;
-        for (size_t t : tags) idx.push_back(node_index.at(t));
+        for (size_t k = 0; k < size_t(et.n_corners); k++) idx.push_back(node_index.at(tags[k]));
         if (et.dim == N_DIM) {
             data.cells.push_back(idx);
         } else {
             auto it = physical_names.find(physical);
             data.boundary_faces.push_back(
                 {idx, it != physical_names.end() ? it->second : "physical_" + std::to_string(physical)});
+            std::vector<curved::Vec3> ho;
+            if (et.n_nodes > et.n_corners) {
+                for (size_t t : tags) ho.push_back(coords[node_index.at(t)]);
+            }
+            data.boundary_high_order.push_back(std::move(ho));
         }
     };
 
@@ -439,6 +470,7 @@ GmshData read_gmsh(const std::string & filename) {
                     in >> tag >> x >> y >> z;
                     node_index[tag] = static_cast<uint32_t>(data.nodes.size());
                     data.nodes.push_back(make_node(x, y, z));
+                    coords.push_back({x, y, N_DIM == 3 ? z : 0.0});
                 }
             } else {
                 size_t n_blocks, n_nodes, min_tag, max_tag;
@@ -457,6 +489,7 @@ GmshData read_gmsh(const std::string & filename) {
                         }
                         node_index[tags[i]] = static_cast<uint32_t>(data.nodes.size());
                         data.nodes.push_back(make_node(x, y, z));
+                        coords.push_back({x, y, N_DIM == 3 ? z : 0.0});
                     }
                 }
             }
@@ -501,7 +534,44 @@ GmshData read_gmsh(const std::string & filename) {
     if (data.cells.empty()) {
         throw std::runtime_error("Gmsh file " + filename + " contains no " + std::to_string(N_DIM) + "D elements.");
     }
+    if (high_order) {
+        // Keep only the corners, in file order
+        std::vector<uint32_t> index(data.nodes.size(), ~uint32_t(0));
+        for (const auto & c : data.cells) {
+            for (uint32_t n : c) index[n] = 0;
+        }
+        for (const auto & f : data.boundary_faces) {
+            for (uint32_t n : f.nodes) index[n] = 0;
+        }
+        std::vector<std::array<rtype, N_DIM>> kept;
+        for (uint32_t n = 0; n < data.nodes.size(); n++) {
+            if (index[n] == 0) {
+                index[n] = uint32_t(kept.size());
+                kept.push_back(data.nodes[n]);
+            }
+        }
+        data.nodes = std::move(kept);
+        for (auto & c : data.cells) {
+            for (uint32_t & n : c) n = index[n];
+        }
+        for (auto & f : data.boundary_faces) {
+            for (uint32_t & n : f.nodes) n = index[n];
+        }
+    }
     return data;
+}
+
+/** @brief The high-order boundary faces of a Gmsh file, for curved::surfaces_of_mesh. */
+std::vector<curved::SurfaceFace> high_order_faces(const GmshData & data) {
+    std::vector<curved::SurfaceFace> out;
+    for (size_t f = 0; f < data.boundary_faces.size(); f++) {
+        if (data.boundary_high_order[f].empty()) continue;
+        curved::SurfaceFace face;
+        face.corners.assign(data.boundary_faces[f].nodes.begin(), data.boundary_faces[f].nodes.end());
+        face.nodes = data.boundary_high_order[f];
+        out.push_back(std::move(face));
+    }
+    return out;
 }
 
 } // namespace
@@ -513,6 +583,7 @@ void Mesh::init_file(const std::string & filename, const std::vector<PeriodicPai
     }
     GmshData data = read_gmsh(filename);
     init_from_connectivity(data.nodes, data.cells, data.boundary_faces, "unassigned", periodic);
+    high_order_faces = ::high_order_faces(data);
 }
 
 void Mesh::init_from_block(const MeshBlock & block, const std::vector<PeriodicPair> & periodic) {
@@ -535,6 +606,21 @@ void Mesh::init_from_block(const MeshBlock & block, const std::vector<PeriodicPa
         boundary_faces[f].zone = block.zone_names[block.face_zone[f]];
     }
     init_from_connectivity(nodes, cells, boundary_faces, "unassigned", periodic);
+    high_order_faces.clear();
+    if (block.face_high_order_offsets.size() == block.n_faces() + 1) {
+        for (uint64_t f = 0; f < block.n_faces(); f++) {
+            if (block.face_high_order_offsets[f + 1] == block.face_high_order_offsets[f]) continue;
+            curved::SurfaceFace face;
+            face.corners.assign(block.face_nodes.begin() + std::ptrdiff_t(block.face_offsets[f]),
+                                block.face_nodes.begin() + std::ptrdiff_t(block.face_offsets[f + 1]));
+            for (uint64_t k = block.face_high_order_offsets[f]; k < block.face_high_order_offsets[f + 1]; k++) {
+                curved::Vec3 x = {0.0, 0.0, 0.0};
+                FOR_I_DIM x[i] = block.face_high_order_nodes[k][i];
+                face.nodes.push_back(x);
+            }
+            high_order_faces.push_back(std::move(face));
+        }
+    }
 }
 
 MeshBlock read_gmsh_block(const std::string & filename) {
@@ -557,8 +643,18 @@ MeshBlock read_gmsh_block(const std::string & filename) {
         if (zone_index.emplace(face.zone, block.zone_names.size()).second) block.zone_names.push_back(face.zone);
     }
     const uint64_t n_faces = data.boundary_faces.size();
+    bool high_order = false;
+    for (const auto & ho : data.boundary_high_order) high_order |= !ho.empty();
+    if (high_order) block.face_high_order_offsets.assign(1, 0);
     for (uint64_t f = block_begin(n_faces, r, p); f < block_begin(n_faces, r + 1, p); f++) {
         block.add_face(data.boundary_faces[f].nodes, zone_index.at(data.boundary_faces[f].zone));
+        if (!high_order) continue;
+        for (const curved::Vec3 & x : data.boundary_high_order[f]) {
+            std::array<double, N_DIM> node;
+            FOR_I_DIM node[i] = x[i];
+            block.face_high_order_nodes.push_back(node);
+        }
+        block.face_high_order_offsets.push_back(block.face_high_order_nodes.size());
     }
     return block;
 }

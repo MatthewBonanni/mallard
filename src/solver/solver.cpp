@@ -232,6 +232,9 @@ void Solver::init_mesh() {
         }
         halo = HaloExchange(distribution, exchange == "nccl");
     }
+    const curved::Surfaces surfaces = is_distributed() ? curved::surfaces_of_block(setup->mesh_block(), input)
+                                                       : curved::surfaces_of_mesh(*mesh, input);
+    mesh->apply_curved(surfaces);
     mesh_summary = describe_mesh(*mesh);
     mesh_summary.insert(mesh_summary.begin(),
                         {"Type", type == "file" ? "file " + toml::find_or<std::string>(input, "mesh", "filename",
@@ -263,8 +266,29 @@ void Solver::init_mesh() {
                                                   logging::count(max_owned).c_str(), max_owned / mean,
                                                   logging::count(max_halo).c_str()));
     }
+    if (mesh->curved_geometry) {
+        // Curved boundary faces of owned cells, and curved faces in all
+        uint64_t counts[2] = {0, 0};
+        for (uint32_t f = 0; f < mesh->n_faces; f++) {
+            if (!mesh->curved_geometry->face_is_curved(f) || uint32_t(mesh->h_cells_of_face(f, 0)) >= mesh->n_owned()) continue;
+            counts[0] += mesh->h_cells_of_face(f, 1) < 0;
+            counts[1]++;
+        }
+        const auto total = comm::allreduce(std::array<uint64_t, 2>{counts[0], counts[1]}, comm::Op::SUM);
+        std::string text = logging::count(total[0]) + " boundary faces";
+        if (N_DIM == 3) text += " (" + logging::count(total[1]) + " curved faces)";
+        uint64_t n_high_order = 0;
+        for (const auto & face : surfaces.faces) n_high_order += face.shape < 0;
+        if (n_high_order > 0) text += ", high-order faces from the mesh file";
+        for (const auto & shape : surfaces.shapes) text += ", " + shape.zone + " projected";
+        mesh_summary.emplace_back("Curved boundary", text);
+    }
     axisymmetric = toml::find_or<bool>(input, "physics", "axisymmetric", false);
     if (axisymmetric) {
+        if (mesh->curved_geometry) {
+            throw InputError("physics.axisymmetric: curved boundaries are not supported in axisymmetric runs yet "
+                             "(set [mesh] curved_geometry = false).");
+        }
         for (const auto & translation : mesh->periodic_translations) {
             if (translation[1] != 0.0_r) {
                 throw InputError("physics.axisymmetric: the mesh cannot be periodic in y (the radius).");

@@ -43,6 +43,18 @@ void low_mach_correction(rtype * W_l, rtype * W_r, const rtype gamma, const rtyp
 }
 
 /**
+ * @brief Unit normal at quadrature point q of face f: the point's own on
+ *        curved meshes (quad_normals, (face, q, dim)), else the face's n_face.
+ */
+KOKKOS_INLINE_FUNCTION
+const rtype * quad_normal(const Kokkos::View<rtype ***> & quad_normals, const uint32_t f, const uint8_t q,
+                          const rtype * n_face, rtype * n_q) {
+    if (quad_normals.extent(0) == 0) return n_face;
+    FOR_I_DIM n_q[i] = quad_normals(f, q, i);
+    return n_q;
+}
+
+/**
  * @brief Upwind fraction of a face of the hybrid convective flux: the larger of
  *        its cells' (boundary faces other than walls and symmetry planes, whose
  *        mirror states make the central flux exact, take the Riemann flux).
@@ -116,6 +128,7 @@ struct ConvectiveFluxFunctor {
     rtype gamma;
     rtype low_mach_cutoff;  // 1 disables the low-Mach correction
     Kokkos::View<rtype *> upwind;  // hybrid flux: upwind fraction of each cell (UpwindSensorFunctor), else empty
+    Kokkos::View<rtype ***> quad_normals;  // curved meshes: (face, q, dim) unit normals; else empty
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
@@ -137,6 +150,8 @@ struct ConvectiveFluxFunctor {
 
         rtype flux[N_CONSERVATIVE] = {};
         for (uint8_t i_quad = 0; i_quad < n_quad; i_quad++) {
+            rtype n_q[N_DIM];
+            const rtype * n_point = quad_normal(quad_normals, i_face, i_quad, n_unit, n_q);
             rtype w_q;
             if constexpr (N_DIM == 2) {
                 w_q = face_weights.extent(0) ? face_weights(i_face, i_quad) : quad_weights(i_quad);
@@ -149,16 +164,16 @@ struct ConvectiveFluxFunctor {
             if (c1 >= 0) {
                 FOR_I_CONSERVATIVE W_r[i] = face_solution(i_face, i_quad, 1, i);
             } else {
-                boundaries.exterior_W(i_face, i_quad, n_quad, W_l, n_unit, W_cells, face_solution, W_r);
+                boundaries.exterior_W(i_face, i_quad, n_quad, W_l, n_point, W_cells, face_solution, W_r);
             }
             rtype central[N_CONSERVATIVE] = {};
-            if (hybrid) riemann::KEEP::calc_flux(central, n_unit, W_l, W_r, gamma);
+            if (hybrid) riemann::KEEP::calc_flux(central, n_point, W_l, W_r, gamma);
             if (phi > 0.0_r) {
                 if (low_mach_cutoff < 1.0_r &&
                     (c1 >= 0 || boundaries.bcs(boundaries.face_bc(i_face)).is_characteristic())) {
                     low_mach_correction(W_l, W_r, gamma, low_mach_cutoff);
                 }
-                T_riemann_solver::calc_flux(flux_q, n_unit, W_l, W_r, gamma);
+                T_riemann_solver::calc_flux(flux_q, n_point, W_l, W_r, gamma);
                 if (hybrid) FOR_I_CONSERVATIVE flux_q[i] = central[i] + phi * (flux_q[i] - central[i]);
             } else {
                 FOR_I_CONSERVATIVE flux_q[i] = central[i];
@@ -166,7 +181,8 @@ struct ConvectiveFluxFunctor {
             FOR_I_CONSERVATIVE flux[i] += w_q * flux_q[i];
         }
 
-        // Weights sum to 2 (Gauss-Legendre on [-1, 1] in 2D)
+        // Weights sum to 2 (Gauss-Legendre on [-1, 1] in 2D), on curved faces
+        // to twice their area over face_area
         const rtype scale = 0.5_r * face_area(i_face);
         FOR_I_CONSERVATIVE face_flux(i_face, i) = -scale * flux[i];
     }

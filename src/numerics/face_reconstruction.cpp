@@ -74,6 +74,8 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
     const TriangleDunavant tri(std::max<uint8_t>(tri_rule, 1));
     const GaussLegendre gl(n_gp);
     size_t n_max = 1;
+    const curved::Geometry * geometry = mesh->curved_geometry.get();
+    std::vector<std::vector<curved::Vec3>> curved_normals(geometry ? n_faces : 0);
     for (uint32_t f = 0; f < n_faces; f++) {
         const uint32_t n = mesh->h_n_nodes_of_face(f);
         std::vector<std::array<double, 3>> v(n);
@@ -82,6 +84,33 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
         }
         auto & pts = points[f];
         auto & w = weights[f];
+        if (geometry && degree > 1 && geometry->face_is_curved(f)) {
+            // The flat rule mapped onto the curved face; weights twice its area elements over face_area
+            std::vector<std::array<double, 2>> ref;
+            std::vector<double> ref_w;
+            if (n == 3) {
+                for (uint32_t q = 0; q < tri.h_weights.extent(0); q++) {
+                    ref.push_back({double(tri.h_points(q, 0)), double(tri.h_points(q, 1))});
+                    ref_w.push_back(0.5 * double(tri.h_weights(q)));
+                }
+            } else {
+                for (int a = 0; a < n_gp; a++) {
+                    for (int b = 0; b < n_gp; b++) {
+                        ref.push_back({double(gl.h_points(a, 0)), double(gl.h_points(b, 0))});
+                        ref_w.push_back(double(gl.h_weights(a)) * double(gl.h_weights(b)));
+                    }
+                }
+            }
+            std::vector<curved::Vec3> x, nq;
+            geometry->face_rule(f, ref, ref_w, x, nq, w);
+            for (size_t q = 0; q < x.size(); q++) {
+                pts.push_back(x[q]);
+                w[q] *= 2.0 / double(mesh->h_face_area(f));
+            }
+            curved_normals[f] = nq;
+            n_max = std::max(n_max, pts.size());
+            continue;
+        }
         if (degree <= 1) {
             std::array<double, 3> c;
             FOR_I_DIM c[i] = double(mesh->h_face_coords(f, i));
@@ -137,6 +166,21 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
     }
     Kokkos::deep_copy(face_quad_points, h_points);
     Kokkos::deep_copy(face_quad_weights, h_weights);
+    if (geometry) {
+        face_quad_normals = Kokkos::View<rtype ***>("face_quad_normals", n_faces, n_max, N_DIM);
+        auto h_normals = Kokkos::create_mirror_view(face_quad_normals);
+        for (uint32_t f = 0; f < n_faces; f++) {
+            for (size_t q = 0; q < n_max; q++) {
+                if (!curved_normals[f].empty()) {
+                    const size_t qq = std::min(q, curved_normals[f].size() - 1);
+                    FOR_I_DIM h_normals(f, q, i) = rtype(curved_normals[f][qq][i]);
+                } else {
+                    FOR_I_DIM h_normals(f, q, i) = mesh->h_face_normals(f, i) / mesh->h_face_area(f);
+                }
+            }
+        }
+        Kokkos::deep_copy(face_quad_normals, h_normals);
+    }
 
     if (boundaries.face_image_quad.extent(0) != n_faces) return;
     auto h_image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_image_face);
@@ -163,6 +207,53 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
     Kokkos::deep_copy(boundaries.face_image_quad, h_image_quad);
 }
 
+void FaceReconstruction::init_face_quadrature_2d_curved() {
+    if (N_DIM != 2 || !mesh->curved_geometry) return;
+    const curved::Geometry & geometry = *mesh->curved_geometry;
+    const uint32_t n_faces = mesh->n_faces;
+    const uint32_t n_q = quadrature_face.h_points.extent(0);
+    std::vector<std::array<double, 2>> ref(n_q);
+    std::vector<double> ref_w(n_q);
+    for (uint32_t q = 0; q < n_q; q++) {
+        ref[q] = {double(quadrature_face.h_points(q, 0)), 0.0};
+        ref_w[q] = double(quadrature_face.h_weights(q));
+    }
+    face_quad_points = Kokkos::View<rtype ***>("face_quad_points", n_faces, n_q, N_DIM);
+    face_quad_weights = Kokkos::View<rtype **>("face_quad_weights", n_faces, n_q);
+    face_quad_normals = Kokkos::View<rtype ***>("face_quad_normals", n_faces, n_q, N_DIM);
+    auto h_points = Kokkos::create_mirror_view(face_quad_points);
+    auto h_weights = Kokkos::create_mirror_view(face_quad_weights);
+    auto h_normals = Kokkos::create_mirror_view(face_quad_normals);
+    std::vector<curved::Vec3> x, n;
+    std::vector<double> w;
+    for (uint32_t f = 0; f < n_faces; f++) {
+        if (geometry.face_is_curved(f)) {
+            geometry.face_rule(f, ref, ref_w, x, n, w);
+            for (uint32_t q = 0; q < n_q; q++) {
+                FOR_I_DIM {
+                    h_points(f, q, i) = rtype(x[q][i]);
+                    h_normals(f, q, i) = rtype(n[q][i]);
+                }
+                h_weights(f, q) = rtype(2.0 * w[q] / double(mesh->h_face_area(f)));
+            }
+            continue;
+        }
+        // Straight faces: the points the schemes compute on the fly
+        const uint32_t a = mesh->h_node_of_face(f, 0), b = mesh->h_node_of_face(f, 1);
+        for (uint32_t q = 0; q < n_q; q++) {
+            const rtype s_q = 0.5_r * quadrature_face.h_points(q, 0);
+            FOR_I_DIM {
+                h_points(f, q, i) = mesh->h_face_coords(f, i) + s_q * (mesh->h_node_coords(b, i) - mesh->h_node_coords(a, i));
+                h_normals(f, q, i) = mesh->h_face_normals(f, i) / mesh->h_face_area(f);
+            }
+            h_weights(f, q) = quadrature_face.h_weights(q);
+        }
+    }
+    Kokkos::deep_copy(face_quad_points, h_points);
+    Kokkos::deep_copy(face_quad_weights, h_weights);
+    Kokkos::deep_copy(face_quad_normals, h_normals);
+}
+
 FirstOrder::FirstOrder() {
     type = FaceReconstructionType::FIRST_ORDER;
     quadrature_face = GaussLegendre(1);
@@ -175,6 +266,7 @@ FirstOrder::~FirstOrder() {
 void FirstOrder::init(const toml::value & input) {
     (void)(input);
     if constexpr (N_DIM == 3) init_face_quadrature_3d(1);
+    init_face_quadrature_2d_curved();
 }
 
 uint8_t FirstOrder::n_face_quadrature_points() const {
@@ -244,6 +336,7 @@ void MUSCL::init(const toml::value & input) {
     limiters = Kokkos::View<rtype *[N_CONSERVATIVE]>("limiters", mesh->n_cells);
     gradient = make_vertex_gradient(make_gradient(*mesh, boundaries, {}, gradients), *mesh, false);
     if constexpr (N_DIM == 3) init_face_quadrature_3d(1);
+    init_face_quadrature_2d_curved();
 }
 
 logging::Items MUSCL::summary() const {

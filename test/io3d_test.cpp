@@ -276,15 +276,25 @@ TEST(IO3DTest, ReadsGmsh41MixedMesh) {
     check_mixed_mesh(write_temp("mallard_mixed3d_41.msh", MSH41));
 }
 
-TEST(IO3DTest, HigherOrderElementsAreRejected) {
-    // A 10-node tetrahedron (type 11) in place of the linear one
+TEST(IO3DTest, HigherOrderCellsKeepTheirCornersAndUnsupportedOrdersAreRejected) {
+    // A 10-node tetrahedron (type 11) in place of the linear one: its corners
+    // make the same mesh (curved walls come from high-order boundary faces)
     std::string msh = MSH22;
-    msh.replace(msh.find("21 4 2 4 1 5 8 9 12"), 19, "21 11 2 4 1 5 8 9 12 1 2 3 4 6 7 10");
+    const std::string linear = "21 4 2 4 1 5 8 9 12";
+    msh.replace(msh.find(linear), linear.size(), "21 11 2 4 1 5 8 9 12 1 2 3 4 6 7 10");
+    Mesh quadratic, reference;
+    quadratic.init_file(write_temp("mallard_tet10.msh", msh));
+    reference.init_file(write_temp("mallard_tet4.msh", MSH22));
+    EXPECT_EQ(quadratic.n_cells, reference.n_cells);
+    EXPECT_EQ(quadratic.n_faces, reference.n_faces);
+    // A 35-node (quartic) tetrahedron is not supported
+    msh = MSH22;
+    msh.replace(msh.find(linear), linear.size(), "21 30 2 4 1 5 8 9 12");
     try {
-        Mesh().init_file(write_temp("mallard_tet10.msh", msh));
-        ADD_FAILURE() << "a 10-node tetrahedron was accepted";
+        Mesh().init_file(write_temp("mallard_tet35.msh", msh));
+        ADD_FAILURE() << "a 35-node tetrahedron was accepted";
     } catch (const std::runtime_error & e) {
-        EXPECT_NE(std::string(e.what()).find("element type 11"), std::string::npos) << e.what();
+        EXPECT_NE(std::string(e.what()).find("element type 30"), std::string::npos) << e.what();
     }
 }
 

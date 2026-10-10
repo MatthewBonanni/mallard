@@ -11,6 +11,9 @@ and through the shock layer in front of it, a shell between the sphere and a
 paraboloid through x = shock-x, and coarsens to h-far outside. Physical
 surfaces: "sphere", "inflow" (x = x-min), "outflow" (x = x-max), "lateral"
 (the outer quarter cylinder), "symmetry_y" (y = 0) and "symmetry_z" (z = 0).
+With --order 2 or 3 the elements are quadratic or cubic, their extra nodes on
+the CAD surfaces: Mallard keeps the corners and curves the sphere from its
+high-order faces.
 Needs the gmsh Python module (pip install gmsh).
 """
 import argparse
@@ -30,6 +33,8 @@ def main():
     ap.add_argument("--shock-x", type=float, default=-0.62,
                     help="Expected shock nose position; the shock layer is refined around it")
     ap.add_argument("--threads", type=int, default=8)
+    ap.add_argument("--order", type=int, default=1, choices=[1, 2, 3],
+                    help="Element order: 2 and 3 place the extra nodes on the sphere, so Mallard curves the wall")
     args = ap.parse_args()
 
     gmsh.initialize()
@@ -94,6 +99,8 @@ def main():
     gmsh.option.setNumber("Mesh.Optimize", 1)
     gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
     gmsh.model.mesh.generate(3)
+    if args.order > 1:
+        gmsh.model.mesh.setOrder(args.order)
     types, tags, _ = gmsh.model.mesh.getElements(3)
     print(f"{sum(len(t) for t in tags)} tetrahedra")
     gmsh.write(args.output)
