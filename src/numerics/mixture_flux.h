@@ -363,9 +363,9 @@ struct SpeciesSlotFunctor {
         constexpr uint8_t NF = teno::MAX_FACES;
         const uint32_t begin = offsets_faces_of_cell(c);
         const uint8_t n_faces = static_cast<uint8_t>(offsets_faces_of_cell(c + 1) - begin);
-        rtype w_out[NF], w_in[NF], r[NF][N_DIM];
-        uint32_t faces[NF];
-        uint8_t sides[NF];
+        rtype w_out[NF] = {}, w_in[NF] = {}, r[NF][N_DIM] = {};
+        uint32_t faces[NF] = {};
+        uint8_t sides[NF] = {};
         bool boundary = false;
         for (uint8_t i = 0; i < NF; i++) {
             if (i >= n_faces) continue;
@@ -474,8 +474,8 @@ struct SpeciesSumFunctor {
         const uint32_t begin = offsets_faces_of_cell(c);
         const uint8_t n_faces = static_cast<uint8_t>(offsets_faces_of_cell(c + 1) - begin);
         constexpr uint8_t NF = teno::MAX_FACES;
-        uint32_t faces[NF];
-        uint8_t sides[NF];
+        uint32_t faces[NF] = {};
+        uint8_t sides[NF] = {};
         for (uint8_t i = 0; i < NF; i++) {
             if (i >= n_faces) continue;
             faces[i] = faces_of_cell(begin + i);

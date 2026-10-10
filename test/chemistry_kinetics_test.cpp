@@ -301,7 +301,9 @@ TEST(ChemistryKineticsTest, RegularizationConcentrationIsAnOption) {
         const double ratio = q[0] / q_plain[0];
         const double expected = x < 1.0 ? Kinetics::power(C[fuel], 0.1, C_reg) / std::pow(C[fuel], 0.1) : 1.0;
         EXPECT_NEAR(ratio, expected, 1e-12) << x;
-        if (x < 1.0) EXPECT_LT(ratio, 0.9) << x;
+        if (x < 1.0) {
+            EXPECT_LT(ratio, 0.9) << x;
+        }
     }
 }
 

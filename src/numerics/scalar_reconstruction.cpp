@@ -109,10 +109,10 @@ struct ScalarLimiterFunctor {
         const uint32_t k_begin = offsets_faces_of_cell(c);
         const uint8_t n_faces = static_cast<uint8_t>(offsets_faces_of_cell(c + 1) - k_begin);
         // Per face: the neighbor, the offset to it with its weight, and the offset to the face centroid
-        uint32_t faces[teno::MAX_FACES];
-        int32_t nbs[teno::MAX_FACES];
-        bool prescribed[teno::MAX_FACES];
-        rtype dx[teno::MAX_FACES][N_DIM], w[teno::MAX_FACES], r[teno::MAX_FACES][N_DIM];
+        uint32_t faces[teno::MAX_FACES] = {};
+        int32_t nbs[teno::MAX_FACES] = {};
+        bool prescribed[teno::MAX_FACES] = {};
+        rtype dx[teno::MAX_FACES][N_DIM] = {}, w[teno::MAX_FACES] = {}, r[teno::MAX_FACES][N_DIM] = {};
         rtype M[N_DIM * N_DIM] = {};
         for (uint8_t m = 0; m < teno::MAX_FACES; m++) {
             if (m >= n_faces) continue;
