@@ -159,7 +159,9 @@ std::array<int, N_DIM> grid_shape(int n_parts, const std::array<double, N_DIM> &
             }
             return;
         }
-        for (int k = 1; k <= rest; k++) {
+        // Ties go to more pieces along earlier axes: cells numbered x first
+        // then sit closer in memory to their neighbors across later axes
+        for (int k = rest; k >= 1; k--) {
             if (rest % k != 0) continue;
             shape[d] = k;
             self(self, d + 1, rest / k);
