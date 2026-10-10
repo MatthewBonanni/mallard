@@ -113,7 +113,7 @@ void Solver::init_solution_restart() {
         if (values == nullptr) {
             throw std::runtime_error("Restart file " + file + " has no variable " + expected[v] + ".");
         }
-        const uint32_t n_species = species_names.size();
+        const uint32_t n_species = static_cast<uint32_t>(species_names.size());
         for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
             if (v < N_CONSERVATIVE) {
                 h_conservatives(i_cell, v) = (*values)[i_cell];
@@ -125,7 +125,7 @@ void Solver::init_solution_restart() {
         }
     }
     step = restart.step;
-    t = restart.t;
+    t = static_cast<rtype>(restart.t);
     statistics.restore(restart, file, t);
     restore_characteristic_state(restart);
     for (auto & writer : data_writers) {
@@ -231,7 +231,7 @@ struct PointState {
 template <typename F>
 void cell_average_2d(const Mesh & mesh, const TriangleDunavant & quad, double weight_sum, uint32_t n_sub,
                      uint32_t i_cell, PointState & s, const F & f) {
-    const uint32_t n_quad = quad.h_weights.extent(0);
+    const uint32_t n_quad = static_cast<uint32_t>(quad.h_weights.extent(0));
     const uint32_t n_nodes = mesh.h_n_nodes_of_cell(i_cell);
     std::fill(s.sum.begin(), s.sum.end(), 0.0);
     double area_sum = 0.0, revolved_sum = 0.0;
@@ -304,7 +304,7 @@ struct TetrahedronRule {
         std::vector<std::array<double, 4>> bary;
         std::vector<double> w;
         for (int i = 0; i < 2; i++) {
-            for (int k = 0; k < 4; k++) {
+            for (size_t k = 0; k < 4; k++) {
                 std::array<double, 4> l;
                 l.fill(a[i]);
                 l[k] = 1.0 - 3.0 * a[i];
@@ -312,8 +312,8 @@ struct TetrahedronRule {
                 w.push_back(wa[i]);
             }
         }
-        for (int j = 0; j < 4; j++) {
-            for (int k = j + 1; k < 4; k++) {
+        for (size_t j = 0; j < 4; j++) {
+            for (size_t k = j + 1; k < 4; k++) {
                 std::array<double, 4> l;
                 l.fill(0.5 - b);
                 l[j] = l[k] = b;
@@ -326,8 +326,8 @@ struct TetrahedronRule {
             const Lattice * v[4] = {&p0, &p1, &p2, &p3};
             for (size_t q = 0; q < w.size(); q++) {
                 std::array<double, 3> x = {0.0, 0.0, 0.0};
-                for (int k = 0; k < 4; k++) {
-                    for (int d = 0; d < 3; d++) x[d] += bary[q][k] * (*v[k])[d];
+                for (size_t k = 0; k < 4; k++) {
+                    for (size_t d = 0; d < 3; d++) x[d] += bary[q][k] * (*v[k])[d];
                 }
                 for (double & xd : x) xd /= n_sub;
                 points.push_back(x);
@@ -361,8 +361,8 @@ void cell_average_3d(const Mesh & mesh, const TetrahedronRule & rule, uint32_t i
     double vol_sum = 0.0;
     for (const auto & tet : s.tets) {
         double e[3][3];
-        for (int k = 0; k < 3; k++) {
-            for (int d = 0; d < 3; d++) e[k][d] = tet[k + 1][d] - tet[0][d];
+        for (size_t k = 0; k < 3; k++) {
+            for (size_t d = 0; d < 3; d++) e[k][d] = tet[k + 1][d] - tet[0][d];
         }
         const double six_vol = std::abs(e[0][0] * (e[1][1] * e[2][2] - e[1][2] * e[2][1]) -
                                         e[0][1] * (e[1][0] * e[2][2] - e[1][2] * e[2][0]) +
@@ -370,7 +370,7 @@ void cell_average_3d(const Mesh & mesh, const TetrahedronRule & rule, uint32_t i
         for (size_t q = 0; q < rule.weights.size(); q++) {
             const std::array<double, 3> & r = rule.points[q];
             double p[3];
-            for (int d = 0; d < 3; d++) p[d] = tet[0][d] + r[0] * e[0][d] + r[1] * e[1][d] + r[2] * e[2][d];
+            for (size_t d = 0; d < 3; d++) p[d] = tet[0][d] + r[0] * e[0][d] + r[1] * e[1][d] + r[2] * e[2][d];
             f(s, p[0], p[1], p[2]);
             const double weight = rule.weights[q] * six_vol;
             for (size_t i = 0; i < s.sum.size(); i++) s.sum[i] += weight * double(s.cons[i]);
@@ -443,7 +443,7 @@ void Solver::init_solution_analytical() {
             if (balance < 0) throw InputError("initialize.balance: no species " + name + " in the mechanism.");
         }
     }
-    const uint32_t n_species = species_names.size();
+    const uint32_t n_species = static_cast<uint32_t>(species_names.size());
     const uint32_t n_vars = N_CONSERVATIVE + n_species;
 
     // Sets s.cons to the conservatives at (px, py, pz)
@@ -457,12 +457,12 @@ void Solver::init_solution_analytical() {
             std::fill(fractions.begin(), fractions.end(), 0.0);
             double sum = 0.0;
             for (size_t i = 0; i < listed.size(); i++) {
-                fractions[listed[i]] = std::max(s.fractions[i].value(), 0.0);
-                if (listed[i] != balance) sum += fractions[listed[i]];
+                fractions[static_cast<size_t>(listed[i])] = std::max(s.fractions[i].value(), 0.0);
+                if (listed[i] != balance) sum += fractions[static_cast<size_t>(listed[i])];
             }
             if (balance >= 0) {
-                fractions[balance] = std::max(1.0 - sum, 0.0);
-                sum += fractions[balance];
+                fractions[static_cast<size_t>(balance)] = std::max(1.0 - sum, 0.0);
+                sum += fractions[static_cast<size_t>(balance)];
             }
             if (!(sum > 0.0)) throw InputError("initialize: the composition is zero at a point.");
             for (double & f : fractions) f /= sum;
@@ -478,9 +478,9 @@ void Solver::init_solution_analytical() {
             mixture_model->conservatives(p_m, T_m, u, Y, cons, cons + N_CONSERVATIVE);
             return;
         }
-        rtype rho = rho_in ? s.rho.value() : 0.0;
-        rtype p = p_in ? s.p.value() : 0.0;
-        const rtype T = T_in ? s.T.value() : 0.0;
+        rtype rho = static_cast<rtype>(rho_in ? s.rho.value() : 0.0);
+        rtype p = static_cast<rtype>(p_in ? s.p.value() : 0.0);
+        const rtype T = static_cast<rtype>(T_in ? s.T.value() : 0.0);
         if (!rho_in) rho = physics.get_density_from_pressure_temperature(p, T);
         if (!p_in) p = physics.get_pressure_from_density_temperature(rho, T);
         rtype W[N_CONSERVATIVE];
@@ -508,14 +508,14 @@ void Solver::init_solution_analytical() {
                          [&](const uint32_t i_cell) {
         if (failed.load(std::memory_order_relaxed)) return;
         const int32_t id = token.acquire();
-        PointState & s = *states[id];
+        PointState & s = *states[static_cast<size_t>(id)];
         try {
             if constexpr (N_DIM == 3) {
                 cell_average_3d(*mesh, tet_rule, i_cell, s, point_conservatives);
             } else {
                 cell_average_2d(*mesh, quad, weight_sum, n_sub, i_cell, s, point_conservatives);
             }
-            FOR_I_CONSERVATIVE h_conservatives(i_cell, i) = s.sum[i];
+            FOR_I_CONSERVATIVE h_conservatives(i_cell, i) = static_cast<rtype>(s.sum[i]);
             for (uint32_t k = 0; k < n_species; k++) {
                 h_species(i_cell, k) = static_cast<rtype>(s.sum[N_CONSERVATIVE + k]);
             }

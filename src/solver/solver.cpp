@@ -83,7 +83,7 @@ int Solver::init(const toml::value & input_in) {
     }
     trim_halo();
     // The cache describes the local mesh at this halo depth
-    if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) teno->save_cache(halo_layers);
+    if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) teno->save_cache(static_cast<uint8_t>(halo_layers));
     setup.reset();
     timed_phase("fields and output", [&] {
         allocate_memory();
@@ -133,7 +133,7 @@ logging::Items describe_mesh(const Mesh & mesh) {
             counts[MAX_NODES]++;
         } else if (owned(a) != owned(b) && distributed) {
             const int32_t mine = owned(a) ? a : b, other = owned(a) ? b : a;
-            counts[MAX_NODES] += mesh.h_global_cell_id[mine] < mesh.h_global_cell_id[other];
+            counts[MAX_NODES] += mesh.h_global_cell_id[static_cast<size_t>(mine)] < mesh.h_global_cell_id[static_cast<size_t>(other)];
         }
     }
     counts = comm::allreduce(counts, comm::Op::SUM);
@@ -141,7 +141,7 @@ logging::Items describe_mesh(const Mesh & mesh) {
     std::array<rtype, 2 * N_DIM + 2> lo_hi;  // -min and max per dimension, -min and max volume
     lo_hi.fill(std::numeric_limits<rtype>::lowest());
     for (uint32_t n = 0; n < mesh.n_nodes; n++) {
-        for (int d = 0; d < N_DIM; d++) {
+        for (size_t d = 0; d < N_DIM; d++) {
             lo_hi[d] = std::max(lo_hi[d], -mesh.h_node_coords(n, d));
             lo_hi[N_DIM + d] = std::max(lo_hi[N_DIM + d], mesh.h_node_coords(n, d));
         }
@@ -158,7 +158,7 @@ logging::Items describe_mesh(const Mesh & mesh) {
     std::string types;
     uint64_t n_cells = 0;
     int n_types = 0;
-    for (int k = 0; k < MAX_NODES; k++) {
+    for (uint32_t k = 0; k < MAX_NODES; k++) {
         if (counts[k] == 0) continue;
         const auto it = names.find(k);
         types += (types.empty() ? "" : ", ") + count(counts[k]) + " " +
@@ -167,7 +167,7 @@ logging::Items describe_mesh(const Mesh & mesh) {
         n_types++;
     }
     std::string extent;
-    for (int d = 0; d < N_DIM; d++) {
+    for (size_t d = 0; d < N_DIM; d++) {
         extent += (d ? " x " : "") +
                   format("[%.4g, %.4g]", static_cast<double>(-lo_hi[d]), static_cast<double>(lo_hi[N_DIM + d]));
     }
@@ -260,7 +260,7 @@ void Solver::init_mesh() {
         mesh_summary.emplace_back("Cells per rank",
                                   logging::format("%s to %s owned (imbalance %.3f), up to %s halo",
                                                   logging::count(min_owned).c_str(),
-                                                  logging::count(max_owned).c_str(), max_owned / mean,
+                                                  logging::count(max_owned).c_str(), static_cast<double>(max_owned) / mean,
                                                   logging::count(max_halo).c_str()));
     }
     axisymmetric = toml::find_or<bool>(input, "physics", "axisymmetric", false);
@@ -332,7 +332,7 @@ void Solver::init_rhs_split() {
 
     std::vector<uint32_t> cells;
     if (halo.active()) cells = face_reconstruction->cells_independent_of_halo(n_owned);
-    n_early_cells = cells.size();
+    n_early_cells = static_cast<uint32_t>(cells.size());
     if (n_early_cells == 0) return;
     std::vector<bool> early(mesh->n_cells, false);
     for (uint32_t c : cells) early[c] = true;
@@ -442,7 +442,7 @@ void Solver::init_boundaries() {
             if (face_bc[i_face] != -1) {
                 throw std::runtime_error("Boundary " + name + " assigned more than once.");
             }
-            face_bc[i_face] = i_bc;
+            face_bc[i_face] = static_cast<int>(i_bc);
             if (profiled) profiled_faces.push_back({static_cast<uint32_t>(i_bc), i_face});
             dirichlet.faces.push_back(i_face);
             n_selected++;
@@ -468,8 +468,8 @@ void Solver::init_boundaries() {
             // the face's position in that cell
             std::vector<uint64_t> keys;
             for (uint32_t f : owned) {
-                const uint32_t c = mesh->h_cells_of_face(f, 0);
-                uint64_t k = 0;
+                const uint32_t c = static_cast<uint32_t>(mesh->h_cells_of_face(f, 0));
+                uint32_t k = 0;
                 while (mesh->h_face_of_cell(c, k) != f) k++;
                 keys.push_back(mesh->h_global_cell(c) * 8 + k);  // No cell has 8 faces
             }
@@ -495,7 +495,7 @@ void Solver::init_boundaries() {
         BoundaryCondition bc;
         bc.type = BoundaryType::PARTITION;
         bcs.push_back(bc);
-        for (uint32_t i = 0; i < partition->n_faces(); i++) face_bc[partition->h_faces(i)] = bcs.size() - 1;
+        for (uint32_t i = 0; i < partition->n_faces(); i++) face_bc[partition->h_faces(i)] = static_cast<int>(bcs.size() - 1);
     }
     for (uint32_t i_face = 0; i_face < mesh->n_faces; i_face++) {
         if (mesh->h_cells_of_face(i_face, 1) < 0 && face_bc[i_face] < 0) {
@@ -505,7 +505,7 @@ void Solver::init_boundaries() {
         // Faces on the axis carry no flux (zero revolved area); their ghost
         // states feed reconstruction and gradients, which need the mirror image
         if (axisymmetric && mesh->h_cells_of_face(i_face, 1) < 0 && mesh->h_face_measure(i_face) == 0.0_r) {
-            const BoundaryType type = bcs[face_bc[i_face]].type;
+            const BoundaryType type = bcs[static_cast<size_t>(face_bc[i_face])].type;
             if (type != BoundaryType::SYMMETRY && type != BoundaryType::PARTITION) {
                 throw InputError("physics.axisymmetric: boundary faces on the axis (y = 0) need type = "
                                  "\"symmetry\", not \"" + BOUNDARY_NAMES.at(type) + "\".");
@@ -660,7 +660,7 @@ void Solver::update_source_field(rtype t_eval) {
     }
     for (uint32_t i_cell = 0; i_cell < mesh->n_cells; i_cell++) {
         const auto x = Kokkos::subview(mesh->h_cell_coords, i_cell, Kokkos::ALL());
-        FOR_I_CONSERVATIVE h_source_field(i_cell, i) = source_expressions[i].at(x, N_DIM, double(t_eval));
+        FOR_I_CONSERVATIVE h_source_field(i_cell, i) = static_cast<rtype>(source_expressions[i].at(x, N_DIM, double(t_eval)));
     }
     Kokkos::deep_copy(source_field, h_source_field);
     t_source = t_eval;
@@ -707,7 +707,7 @@ void Solver::update_boundary_states(rtype t_eval) {
             const auto x = Kokkos::subview(mesh->h_face_coords, i_face, Kokkos::ALL());
             const int32_t k = h_face_state_index(i_face);
             if (k < 0) throw std::logic_error("Dirichlet boundary face " + std::to_string(i_face) + " has no state.");
-            for (uint8_t i = 0; i < N_DIM + 2; i++) h_face_state(k, i) = bc.W[i].at(x, N_DIM, double(t_eval));
+            for (uint8_t i = 0; i < N_DIM + 2; i++) h_face_state(k, i) = static_cast<rtype>(bc.W[i].at(x, N_DIM, double(t_eval)));
         }
     }
     Kokkos::deep_copy(boundary_data.face_state, h_face_state);
@@ -782,7 +782,7 @@ void Solver::init_numerics() {
 
     rhs_func = [this](State solution, State rhs, rtype t_stage) { calc_rhs(solution, rhs, t_stage); };
     check_nan = toml::find_or<bool>(input, "numerics", "check_nan", false);
-    low_mach_cutoff = find_real_or(input, "numerics", "low_mach_cutoff", 0.1);
+    low_mach_cutoff = find_real_or(input, "numerics", "low_mach_cutoff", 0.1_r);
     if (!(low_mach_cutoff > 0.0_r)) {
         throw std::runtime_error("numerics: low_mach_cutoff must be positive (1 disables the low-Mach correction).");
     }
@@ -806,7 +806,7 @@ void Solver::init_axisymmetric_weights() {
     // int_f F r dl = L / 2 sum_q w_q r_q F_q, exact in r for any rule (r is linear along a face)
     const auto & points = face_reconstruction->quadrature_face.h_points;
     const auto & weights = face_reconstruction->quadrature_face.h_weights;
-    const uint32_t n_q = points.extent(0);
+    const uint32_t n_q = static_cast<uint32_t>(points.extent(0));
     flux_weights = Kokkos::View<rtype **>("flux_weights", mesh->n_faces, n_q);
     auto h_weights = Kokkos::create_mirror_view(flux_weights);
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
@@ -938,7 +938,7 @@ void Solver::init_output() {
 }
 
 void Solver::allocate_memory() {
-    const uint32_t n_species = species_names.size();
+    const uint32_t n_species = static_cast<uint32_t>(species_names.size());
     conservatives = StateView("conservatives", mesh->n_cells);
     species = SpeciesView("species", mesh->n_cells, n_species);
     primitives = Kokkos::View<rtype *[N_PRIMITIVE]>("primitives", mesh->n_cells);
@@ -1301,7 +1301,7 @@ bool Solver::state_needed() const {
 
 double Solver::progress() const {
     double f = 0.0;
-    if (n_steps > 0) f = std::max(f, static_cast<double>(step) / n_steps);
+    if (n_steps > 0) f = std::max(f, static_cast<double>(step) / static_cast<double>(n_steps));
     if (t_stop > 0) f = std::max(f, static_cast<double>(t / t_stop));
     if (t_wall_stop > 0) f = std::max(f, timer.seconds() / double(t_wall_stop));
     return std::min(f, 1.0);
@@ -1347,18 +1347,18 @@ void Solver::print_progress() {
     const std::string eta_text = f >= 1.0 ? "0 s" : (eta >= 0.0 && eta < 1.0 ? "<1 s" : logging::duration(eta));
     std::string row = format("%8llu %10.4e %8.2e %5.1f%%  %9s %7s %7s  %9.2e %9.2e %6.3f",
                              static_cast<unsigned long long>(step), static_cast<double>(t), static_cast<double>(dt),
-                             100.0 * f, timed ? logging::duration(stepping / steps).c_str() : "--",
-                             timed ? logging::si(n_cells_global * steps / stepping).c_str() : "--",
+                             100.0 * f, timed ? logging::duration(stepping / static_cast<double>(steps)).c_str() : "--",
+                             timed ? logging::si(static_cast<double>(n_cells_global * steps) / stepping).c_str() : "--",
                              eta_text.c_str(), static_cast<double>(mins[0]),
                              static_cast<double>(mins[1]), static_cast<double>(-mins[2]));
-    if (teno) row += format(" %7.2f%%", 100.0 * n_troubled / n_cells_global);
+    if (teno) row += format(" %7.2f%%", 100.0 * static_cast<double>(n_troubled) / static_cast<double>(n_cells_global));
     if (is_mixture()) {
         row += format(" %8.1f %8.1f %9.2e", static_cast<double>(mix[3]), static_cast<double>(-mix[4]),
                       static_cast<double>(-mix[5]));
     }
     if (reacting) {
         const auto [active, max_cost] = chemistry_statistics();
-        row += format(" %7.2f%% %6.0f", 100.0 * active / n_cells_global, max_cost);
+        row += format(" %7.2f%% %6.0f", 100.0 * static_cast<double>(active) / static_cast<double>(n_cells_global), max_cost);
     }
     logging::line(row);
 
@@ -1459,8 +1459,8 @@ void Solver::print_summary(const std::string & stop) const {
         }
     }
     if (steps > 0 && t_wall_stepping > 0.0) {
-        logging::item("Throughput", logging::si(n_cells_global * steps / t_wall_stepping) + " cells/s, " +
-                                        duration(t_wall_stepping / steps) + " per step over " +
+        logging::item("Throughput", logging::si(static_cast<double>(n_cells_global * steps) / t_wall_stepping) + " cells/s, " +
+                                        duration(t_wall_stepping / static_cast<double>(steps)) + " per step over " +
                                         logging::count(steps) + " steps");
     }
     std::string files;
@@ -1493,7 +1493,7 @@ void Solver::check_fields() {
     n_bad = comm::allreduce(n_bad, comm::Op::SUM);
     if (species.span() > 0) {
         SpeciesView Y = species;
-        const uint32_t n_species = Y.extent(1);
+        const uint32_t n_species = static_cast<uint32_t>(Y.extent(1));
         uint32_t n_bad_species = 0;
         Kokkos::parallel_reduce("check_nan_species", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i_cell, uint32_t & bad) {
             for (uint32_t k = 0; k < n_species; k++) {
@@ -1821,7 +1821,7 @@ std::array<rtype, 2 * N_DIM> Solver::calc_force(const Kokkos::View<uint32_t *> &
     ForceFunctor::value_type result;
     Kokkos::parallel_reduce("force", faces.extent(0), functor, result);
     std::array<rtype, 2 * N_DIM> F;
-    for (int i = 0; i < 2 * N_DIM; i++) F[i] = result.v[i];
+    for (size_t i = 0; i < 2 * N_DIM; i++) F[i] = result.v[i];
     return comm::allreduce(F, comm::Op::SUM);
 }
 
@@ -1893,7 +1893,7 @@ struct FlowStatisticsFunctor {
             omega2 = w * w;
         } else {
             for (uint8_t k = 0; k < 3; k++) {
-                const uint8_t a = (k + 1) % 3, b = (k + 2) % 3;
+                const uint8_t a = static_cast<uint8_t>((k + 1) % 3), b = static_cast<uint8_t>((k + 2) % 3);
                 const rtype w = gradients(c, 1 + b, a) - gradients(c, 1 + a, b);
                 omega2 += w * w;
             }
@@ -1937,7 +1937,7 @@ std::array<rtype, N_FLOW_STATISTICS> Solver::integrate_flow_statistics() {
     FlowStatisticsFunctor::value_type result;
     Kokkos::parallel_reduce("statistics", mesh->n_owned(), functor, result);
     std::array<rtype, N_FLOW_STATISTICS> sums;
-    for (int i = 0; i < N_FLOW_STATISTICS; i++) sums[i] = result.v[i];
+    for (size_t i = 0; i < N_FLOW_STATISTICS; i++) sums[i] = result.v[i];
     return comm::allreduce(sums, comm::Op::SUM);
 }
 
@@ -1963,7 +1963,7 @@ void Solver::update_vortex_fields() {
             out(c, 1) = g(c, 2, 0) - g(c, 1, 1);
         } else {
             for (uint8_t k = 0; k < 3; k++) {
-                const uint8_t a = (k + 1) % 3, b = (k + 2) % 3;
+                const uint8_t a = static_cast<uint8_t>((k + 1) % 3), b = static_cast<uint8_t>((k + 2) % 3);
                 out(c, 1 + k) = g(c, 1 + b, a) - g(c, 1 + a, b);
             }
         }
