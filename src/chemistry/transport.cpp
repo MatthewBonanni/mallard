@@ -87,7 +87,7 @@ class CollisionIntegrals {
         CollisionIntegrals() {
             log_T.resize(37);
             const std::vector<double> delta(DELTA, DELTA + 8);
-            for (int i = 0; i < 37; i++) {
+            for (size_t i = 0; i < 37; i++) {
                 log_T[i] = std::log(TSTAR[i + 1]);
                 o22_poly.push_back(polyfit(delta, std::vector<double>(OMEGA22 + 8 * i, OMEGA22 + 8 * i + 8), {}, 6));
                 a_poly.push_back(polyfit(delta, std::vector<double>(ASTAR + 8 * (i + 1), ASTAR + 8 * (i + 2)), {}, 6));
@@ -120,7 +120,7 @@ class CollisionIntegrals {
                 throw std::runtime_error("the reduced temperature range of the thermal diffusion fits is too narrow.");
             }
             std::vector<double> x, y;
-            for (int i = n_min; i <= n_max; i++) {
+            for (size_t i = static_cast<size_t>(n_min); i <= static_cast<size_t>(n_max); i++) {
                 x.push_back(log_T[i]);
                 y.push_back(delta == 0.0 ? CSTAR[8 * (i + 1)] : poly(c_poly[i], delta));
             }
@@ -141,9 +141,9 @@ class CollisionIntegrals {
             }
             double values[3];
             for (int j = i1; j < i2; j++) {
-                values[j - i1] = delta == 0.0 ? table[8 * (j + row_shift)] : poly(fits[j], delta);
+                values[j - i1] = delta == 0.0 ? table[8 * (j + row_shift)] : poly(fits[static_cast<size_t>(j)], delta);
             }
-            const double * x = &log_T[i1];
+            const double * x = &log_T[static_cast<size_t>(i1)];
             const double x0 = std::log(ts);
             const double dx21 = x[1] - x[0], dx32 = x[2] - x[1], dx31 = dx21 + dx32;
             const double dy32 = values[2] - values[1], dy21 = values[1] - values[0];
@@ -466,7 +466,7 @@ ThermalDiffusionFits fit_thermal_diffusion(const Mechanism & mechanism) {
                 by_delta.push_back(c);
                 fits.cstar.push_back(c);
             } else {
-                fits.cstar.push_back(by_delta[found - deltas.begin()]);
+                fits.cstar.push_back(by_delta[static_cast<size_t>(found - deltas.begin())]);
             }
             fits.well_depth.push_back(P.well_depth[k * n + j]);
         }
