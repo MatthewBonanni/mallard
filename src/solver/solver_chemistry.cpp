@@ -50,9 +50,6 @@ void Solver::init_chemistry() {
     }
     simpler = coupling == "simpler";
     chemistry_load_balance = toml::find_or<bool>(table, "load_balance", false);
-    if (simpler && chemistry_load_balance) {
-        throw InputError("chemistry.load_balance is not available with coupling = \"simpler\" yet.");
-    }
     const chemistry::Mechanism & mech = mixture_model->mechanism();
     if (mech.reactions.empty()) {
         throw InputError("[chemistry]: the mechanism " + mech.file + " has no reactions.");
