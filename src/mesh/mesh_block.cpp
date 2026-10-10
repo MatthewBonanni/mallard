@@ -370,9 +370,9 @@ void write_mesh_h5(const std::string & filename, const MeshBlock & block) {
         const uint64_t n_high = has_high_order ? block.face_high_order_nodes.size() : 0;
         const std::vector<uint64_t> all_high = comm::allgatherv(std::vector<uint64_t>{uint64_t(has_high_order), n_high});
         uint64_t any = 0, total_high = 0, first_high = 0;
-        for (int q = 0; q < p; q++) {
+        for (size_t q = 0; q < size_t(p); q++) {
             any |= all_high[2 * q];
-            if (q < r) first_high += all_high[2 * q + 1];
+            if (q < size_t(r)) first_high += all_high[2 * q + 1];
             total_high += all_high[2 * q + 1];
         }
         if (any) {

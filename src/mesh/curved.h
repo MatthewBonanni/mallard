@@ -109,7 +109,7 @@ class Geometry {
 
         bool face_is_curved(uint32_t f) const { return face_index[f] >= 0; }
         bool cell_is_curved(uint32_t c) const { return curved_cell[c] != 0; }
-        uint32_t n_curved_faces() const { return faces.size(); }
+        uint32_t n_curved_faces() const { return uint32_t(faces.size()); }
 
         /**
          * @brief Largest distance of a node of a projected edge from its
@@ -156,7 +156,7 @@ class Geometry {
             std::vector<Vec3> bubble;                  // interior corrections of high-order elements
         };
 
-        void edge_eval(const Face & face, int k, const Vec3 & a, const Vec3 & b, double t, Vec3 & x, Vec3 & dx) const;
+        void edge_eval(const Face & face, size_t k, const Vec3 & a, const Vec3 & b, double t, Vec3 & x, Vec3 & dx) const;
         void face_eval(const Face & face, const std::vector<Vec3> & v, const double * xi, Vec3 & x, Vec3 * dx) const;
         std::vector<Vec3> face_nodes(uint32_t f) const;
 

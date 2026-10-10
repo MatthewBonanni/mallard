@@ -33,28 +33,30 @@ double dot(const Vec3 & a, const Vec3 & b) { return a[0] * b[0] + a[1] * b[1] + 
 Vec3 cross(const Vec3 & a, const Vec3 & b) {
     return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
 }
-// 2D area vector of a tangent t: (t_y, -t_x), out of the cell on whose left... right the tangent runs
+// 2D area vector of a tangent t: (t_y, -t_x), pointing out of the cell the tangent runs counterclockwise around
 Vec3 rot(const Vec3 & t) { return {t[1], -t[0], 0.0}; }
 Vec3 matvec(const double * J, const Vec3 & a) {
     return {J[0] * a[0] + J[1] * a[1] + J[2] * a[2], J[3] * a[0] + J[4] * a[1] + J[5] * a[2],
             J[6] * a[0] + J[7] * a[1] + J[8] * a[2]};
 }
 
-void gauss_legendre(int n, std::vector<double> & x, std::vector<double> & w) {
+void gauss_legendre(size_t n, std::vector<double> & x, std::vector<double> & w) {
     x.resize(n);
     w.resize(n);
-    for (int i = 0; i < n; i++) {
-        double z = std::cos(M_PI * (i + 0.75) / (n + 0.5));
+    const double nd = double(n);
+    for (size_t i = 0; i < n; i++) {
+        double z = std::cos(M_PI * (double(i) + 0.75) / (nd + 0.5));
         double dp = 0.0;
         for (int it = 0; it < 100; it++) {
             double p0 = 1.0, p1 = z;
-            for (int k = 2; k <= n; k++) {
-                const double p2 = ((2.0 * k - 1.0) * z * p1 - (k - 1.0) * p0) / k;
+            for (size_t k = 2; k <= n; k++) {
+                const double kd = double(k);
+                const double p2 = ((2.0 * kd - 1.0) * z * p1 - (kd - 1.0) * p0) / kd;
                 p0 = p1;
                 p1 = p2;
             }
             if (n == 1) p0 = 1.0;
-            dp = n * (z * p1 - p0) / (z * z - 1.0);
+            dp = nd * (z * p1 - p0) / (z * z - 1.0);
             const double dz = p1 / dp;
             z -= dz;
             if (std::abs(dz) < 1e-16) break;
@@ -65,37 +67,37 @@ void gauss_legendre(int n, std::vector<double> & x, std::vector<double> & w) {
 }
 
 /** @brief Gauss-Legendre rule on [0, 1]. */
-void gauss_unit(int n, std::vector<double> & x, std::vector<double> & w) {
+void gauss_unit(size_t n, std::vector<double> & x, std::vector<double> & w) {
     gauss_legendre(n, x, w);
-    for (int i = 0; i < n; i++) {
+    for (size_t i = 0; i < n; i++) {
         x[i] = 0.5 * (x[i] + 1.0);
         w[i] *= 0.5;
     }
 }
 
 /** @brief Reference rule with n points per direction: 2D [-1, 1]; triangles (collapsed); quadrilaterals [-1, 1]^2. */
-void reference_rule(uint32_t n_nodes, int n, std::vector<std::array<double, 2>> & xi, std::vector<double> & w) {
+void reference_rule(uint32_t n_nodes, size_t n, std::vector<std::array<double, 2>> & xi, std::vector<double> & w) {
     std::vector<double> g, gw;
     xi.clear();
     w.clear();
     if (N_DIM == 2) {
         gauss_legendre(n, g, gw);
-        for (int a = 0; a < n; a++) {
+        for (size_t a = 0; a < n; a++) {
             xi.push_back({g[a], 0.0});
             w.push_back(gw[a]);
         }
     } else if (n_nodes == 3) {
         gauss_unit(n, g, gw);
-        for (int a = 0; a < n; a++) {
-            for (int b = 0; b < n; b++) {
+        for (size_t a = 0; a < n; a++) {
+            for (size_t b = 0; b < n; b++) {
                 xi.push_back({g[a], g[b] * (1.0 - g[a])});
                 w.push_back(gw[a] * gw[b] * (1.0 - g[a]));
             }
         }
     } else {
         gauss_legendre(n, g, gw);
-        for (int a = 0; a < n; a++) {
-            for (int b = 0; b < n; b++) {
+        for (size_t a = 0; a < n; a++) {
+            for (size_t b = 0; b < n; b++) {
                 xi.push_back({g[a], g[b]});
                 w.push_back(gw[a] * gw[b]);
             }
@@ -104,19 +106,20 @@ void reference_rule(uint32_t n_nodes, int n, std::vector<std::array<double, 2>> 
 }
 
 /** @brief Lagrange basis on g + 1 equispaced nodes of [0, 1], and its derivative. */
-void lagrange(int g, double t, double * l, double * dl) {
-    for (int i = 0; i <= g; i++) {
+void lagrange(size_t g, double t, double * l, double * dl) {
+    const double gd = double(g);
+    for (size_t i = 0; i <= g; i++) {
         double num = 1.0, den = 1.0, d = 0.0;
-        const double ti = double(i) / g;
-        for (int j = 0; j <= g; j++) {
+        const double ti = double(i) / gd;
+        for (size_t j = 0; j <= g; j++) {
             if (j == i) continue;
-            const double tj = double(j) / g;
+            const double tj = double(j) / gd;
             den *= ti - tj;
             // d/dt prod_j (t - tj) by the product rule
             double prod = 1.0;
-            for (int k = 0; k <= g; k++) {
+            for (size_t k = 0; k <= g; k++) {
                 if (k == i || k == j) continue;
-                prod *= t - double(k) / g;
+                prod *= t - double(k) / gd;
             }
             d += prod;
             num *= t - tj;
@@ -130,15 +133,15 @@ void lagrange(int g, double t, double * l, double * dl) {
  * @brief Indices into a Gmsh element's nodes of edge k (corner k to corner
  *        k + 1), corners included, for an element of order g with n corners.
  */
-std::vector<uint32_t> element_edge(uint32_t n_corners, int g, uint32_t k) {
+std::vector<uint32_t> element_edge(uint32_t n_corners, uint32_t g, uint32_t k) {
     std::vector<uint32_t> idx = {k};
     if (n_corners == 2) {
         // line3: [a, b, m]; line4: [a, b, 1/3, 2/3]
-        for (int i = 0; i < g - 1; i++) idx.push_back(2 + i);
+        for (uint32_t i = 0; i + 1 < g; i++) idx.push_back(2 + i);
         idx.push_back(1);
         return idx;
     }
-    for (int i = 0; i < g - 1; i++) idx.push_back(n_corners + k * (g - 1) + i);
+    for (uint32_t i = 0; i + 1 < g; i++) idx.push_back(n_corners + k * (g - 1) + i);
     idx.push_back((k + 1) % n_corners);
     return idx;
 }
@@ -164,10 +167,10 @@ void sort_unique(std::vector<SurfaceFace> & faces) {
     faces = std::move(out);
 }
 
-/** @brief Analytic records first, so that a shape overrides a zone's high-order nodes. */
+/** @brief Throws for high-order faces of unsupported element types. */
 void check_high_order(const std::vector<SurfaceFace> & faces) {
     for (const auto & f : faces) {
-        if (f.shape < 0 && element_order(f.corners.size(), f.nodes.size()) < 2) {
+        if (f.shape < 0 && element_order(uint32_t(f.corners.size()), uint32_t(f.nodes.size())) < 2) {
             throw std::runtime_error("curved boundaries: unsupported high-order face with " +
                                      std::to_string(f.corners.size()) + " corners and " +
                                      std::to_string(f.nodes.size()) + " nodes.");
@@ -198,8 +201,8 @@ void Shape::project(const Vec3 & x, Vec3 & p, double * J) const {
     const Vec3 u = scale(1.0 / r, d);
     p = add(add(center, along), scale(radius, u));
     if (kind == Kind::CIRCLE) p[2] = x[2];
-    for (int a = 0; a < 3; a++) {
-        for (int b = 0; b < 3; b++) {
+    for (size_t a = 0; a < 3; a++) {
+        for (size_t b = 0; b < 3; b++) {
             const double I = (a == b) ? 1.0 : 0.0;
             if (kind == Kind::CYLINDER) {
                 J[3 * a + b] = axis[a] * axis[b] + radius / r * (I - axis[a] * axis[b] - u[a] * u[b]);
@@ -209,7 +212,7 @@ void Shape::project(const Vec3 & x, Vec3 & p, double * J) const {
         }
     }
     if (kind == Kind::CIRCLE) {
-        for (int a = 0; a < 3; a++) J[3 * a + 2] = J[3 * 2 + a] = 0.0;
+        for (size_t a = 0; a < 3; a++) J[3 * a + 2] = J[3 * 2 + a] = 0.0;
         J[8] = 1.0;
     }
 }
@@ -251,13 +254,13 @@ std::vector<Shape> read_shapes(const toml::value & input) {
         }
         const auto center = toml::find<std::vector<toml::value>>(entry, "center");
         if (center.size() != N_DIM) throw InputError("mesh.curved: center needs " + std::to_string(N_DIM) + " components.");
-        for (int i = 0; i < N_DIM; i++) s.center[i] = double(as_real(center[i], "mesh.curved.center"));
+        for (size_t i = 0; i < N_DIM; i++) s.center[i] = double(as_real(center[i], "mesh.curved.center"));
         s.radius = double(as_real(toml::find(entry, "radius"), "mesh.curved.radius"));
         if (!(s.radius > 0.0)) throw InputError("mesh.curved: radius must be positive.");
         if (s.kind == Shape::Kind::CYLINDER) {
             const auto axis = toml::find<std::vector<toml::value>>(entry, "axis");
             if (axis.size() != 3) throw InputError("mesh.curved: axis needs 3 components.");
-            for (int i = 0; i < 3; i++) s.axis[i] = double(as_real(axis[i], "mesh.curved.axis"));
+            for (size_t i = 0; i < 3; i++) s.axis[i] = double(as_real(axis[i], "mesh.curved.axis"));
             const double norm = std::sqrt(dot(s.axis, s.axis));
             if (!(norm > 0.0)) throw InputError("mesh.curved: axis must be nonzero.");
             s.axis = scale(1.0 / norm, s.axis);
@@ -321,7 +324,7 @@ Surfaces surfaces_of_block(const MeshBlock & block, const toml::value & input) {
         header.push_back(n_nodes);
         for (uint64_t k = block.face_offsets[f]; k < block.face_offsets[f + 1]; k++) header.push_back(block.face_nodes[k]);
         for (uint64_t k = 0; k < n_nodes; k++) {
-            for (int i = 0; i < 3; i++) coords.push_back(i < N_DIM ? block.face_high_order_nodes[h0 + k][i] : 0.0);
+            for (size_t i = 0; i < 3; i++) coords.push_back(i < N_DIM ? block.face_high_order_nodes[h0 + k][i] : 0.0);
         }
     }
     const std::vector<uint64_t> all_header = comm::allgatherv(header);
@@ -332,7 +335,7 @@ Surfaces surfaces_of_block(const MeshBlock & block, const toml::value & input) {
         const uint64_t n_corners = all_header[h++];
         face.shape = int32_t(all_header[h++]) - 1;
         const uint64_t n_nodes = all_header[h++];
-        face.corners.assign(all_header.begin() + h, all_header.begin() + h + n_corners);
+        face.corners.assign(all_header.begin() + std::ptrdiff_t(h), all_header.begin() + std::ptrdiff_t(h + n_corners));
         h += n_corners;
         for (uint64_t k = 0; k < n_nodes; k++, c += 3) face.nodes.push_back({all_coords[c], all_coords[c + 1], all_coords[c + 2]});
         out.faces.push_back(std::move(face));
@@ -349,8 +352,8 @@ Geometry::Geometry(const Mesh & mesh_in, const Surfaces & surfaces) : mesh(mesh_
     for (size_t r = 0; r < surfaces.faces.size(); r++) {
         const SurfaceFace & sf = surfaces.faces[r];
         surface_of.emplace(sorted_key(sf.corners), r);
-        const uint32_t nc = sf.corners.size();
-        const int g = sf.shape >= 0 ? 1 : int(element_order(nc, sf.nodes.size()));
+        const uint32_t nc = uint32_t(sf.corners.size());
+        const uint32_t g = sf.shape >= 0 ? 1u : element_order(nc, uint32_t(sf.nodes.size()));
         for (uint32_t k = 0; k < (nc == 2 ? 1u : nc); k++) {
             const uint64_t a = sf.corners[k], b = sf.corners[(k + 1) % nc];
             const auto key = std::make_pair(std::min(a, b), std::max(a, b));
@@ -378,7 +381,7 @@ Geometry::Geometry(const Mesh & mesh_in, const Surfaces & surfaces) : mesh(mesh_
         }
     }
     auto edges_of = [&](const std::vector<uint64_t> & g, Face & face) {
-        const uint32_t n = g.size();
+        const uint32_t n = uint32_t(g.size());
         bool any = false;
         for (uint32_t k = 0; k < (n == 2 ? 1u : n); k++) {
             const uint64_t a = g[k], b = g[(k + 1) % n];
@@ -392,7 +395,7 @@ Geometry::Geometry(const Mesh & mesh_in, const Surfaces & surfaces) : mesh(mesh_
     };
     // Interior corrections of high-order elements, from their interior nodes
     auto bubbles = [&](const SurfaceFace & sf, const std::vector<uint64_t> & local) {
-        const uint32_t nc = sf.corners.size(), nn = sf.nodes.size();
+        const uint32_t nc = uint32_t(sf.corners.size()), nn = uint32_t(sf.nodes.size());
         std::vector<std::array<double, 2>> xi;
         double factor = 1.0;
         if (nc == 3 && nn == 10) {
@@ -419,7 +422,7 @@ Geometry::Geometry(const Mesh & mesh_in, const Surfaces & surfaces) : mesh(mesh_
         // Interior node j sits next to corner j: reorder by the local corners
         std::vector<Vec3> out(c.size());
         for (uint32_t m = 0; m < nc; m++) {
-            out[m] = c[std::find(sf.corners.begin(), sf.corners.end(), local[m]) - sf.corners.begin()];
+            out[m] = c[size_t(std::find(sf.corners.begin(), sf.corners.end(), local[m]) - sf.corners.begin())];
         }
         return out;
     };
@@ -449,29 +452,29 @@ Geometry::Geometry(const Mesh & mesh_in, const Surfaces & surfaces) : mesh(mesh_
         }
         face_index[f] = int32_t(faces.size());
         faces.push_back(std::move(face));
-        curved_cell[mesh.h_cells_of_face(f, 0)] = 1;
-        if (mesh.h_cells_of_face(f, 1) >= 0) curved_cell[mesh.h_cells_of_face(f, 1)] = 1;
+        curved_cell[uint32_t(mesh.h_cells_of_face(f, 0))] = 1;
+        if (mesh.h_cells_of_face(f, 1) >= 0) curved_cell[uint32_t(mesh.h_cells_of_face(f, 1))] = 1;
     }
 }
 
 std::vector<Vec3> Geometry::face_nodes(uint32_t f) const {
     std::vector<Vec3> v(mesh.h_n_nodes_of_face(f), Vec3{0.0, 0.0, 0.0});
     for (size_t k = 0; k < v.size(); k++) {
-        FOR_I_DIM v[k][i] = double(mesh.h_node_coords(mesh.h_node_of_face(f, k), i));
+        FOR_I_DIM v[k][i] = double(mesh.h_node_coords(mesh.h_node_of_face(f, uint8_t(k)), i));
     }
     return v;
 }
 
-void Geometry::edge_eval(const Face & face, int k, const Vec3 & a, const Vec3 & b, double t, Vec3 & x,
+void Geometry::edge_eval(const Face & face, size_t k, const Vec3 & a, const Vec3 & b, double t, Vec3 & x,
                          Vec3 & dx) const {
-    const Edge & e = edges[face.edge[k]];
+    const Edge & e = edges[size_t(face.edge[k])];
     const bool flip = face.flip[k];
     const double tc = flip ? 1.0 - t : t;
     const Vec3 & ca = flip ? b : a;
     const Vec3 & cb = flip ? a : b;
     Vec3 dxc;
     if (e.shape >= 0) {
-        const Shape & s = shapes[e.shape];
+        const Shape & s = shapes[size_t(e.shape)];
         double J[9], Ja[9], Jb[9];
         Vec3 p, pa, pb;
         const Vec3 lin = add(ca, scale(tc, sub(cb, ca)));
@@ -482,12 +485,12 @@ void Geometry::edge_eval(const Face & face, int k, const Vec3 & a, const Vec3 & 
         x = sub(sub(p, scale(1.0 - tc, oa)), scale(tc, ob));
         dxc = sub(matvec(J, sub(cb, ca)), sub(ob, oa));
     } else {
-        const int g = int(e.nodes.size()) - 1;
+        const size_t g = e.nodes.size() - 1;
         double l[8], dl[8];
         lagrange(g, tc, l, dl);
         x = {0.0, 0.0, 0.0};
         dxc = {0.0, 0.0, 0.0};
-        for (int i = 0; i <= g; i++) {
+        for (size_t i = 0; i <= g; i++) {
             x = add(x, scale(l[i], e.nodes[i]));
             dxc = add(dxc, scale(dl[i], e.nodes[i]));
         }
@@ -497,7 +500,7 @@ void Geometry::edge_eval(const Face & face, int k, const Vec3 & a, const Vec3 & 
 
 void Geometry::face_eval(const Face & face, const std::vector<Vec3> & v, const double * xi, Vec3 & x,
                          Vec3 * dx) const {
-    const uint32_t n = v.size();
+    const uint32_t n = uint32_t(v.size());
     Vec3 d0 = {0.0, 0.0, 0.0}, d1 = {0.0, 0.0, 0.0};
     if (n == 2) {
         const double t = 0.5 * (xi[0] + 1.0);
@@ -523,7 +526,7 @@ void Geometry::face_eval(const Face & face, const std::vector<Vec3> & v, const d
     } else {
         const double s = xi[0], t = xi[1];
         const double sg[4] = {-1.0, 1.0, 1.0, -1.0}, tg[4] = {-1.0, -1.0, 1.0, 1.0};
-        for (int k = 0; k < 4; k++) {
+        for (size_t k = 0; k < 4; k++) {
             N[k] = 0.25 * (1.0 + sg[k] * s) * (1.0 + tg[k] * t);
             dN[k][0] = 0.25 * sg[k] * (1.0 + tg[k] * t);
             dN[k][1] = 0.25 * tg[k] * (1.0 + sg[k] * s);
@@ -537,7 +540,7 @@ void Geometry::face_eval(const Face & face, const std::vector<Vec3> & v, const d
     }
     if (face.shape >= 0) {
         // Projection of the flat point, less the corners' own projection offsets
-        const Shape & s = shapes[face.shape];
+        const Shape & s = shapes[size_t(face.shape)];
         Vec3 p;
         double J[9], Jk[9];
         s.project(x, p, J);
@@ -555,9 +558,9 @@ void Geometry::face_eval(const Face & face, const std::vector<Vec3> & v, const d
     } else if (n == 3) {
         // Szabo-Babuska blending: lambda_i lambda_j q(t), q = d(t) / (t (1 - t)), t = (1 + lambda_j - lambda_i) / 2
         const double lam[3] = {N[0], N[1], N[2]};
-        for (int k = 0; k < 3; k++) {
+        for (size_t k = 0; k < 3; k++) {
             if (face.edge[k] < 0) continue;
-            const int i = k, j = (k + 1) % 3;
+            const size_t i = k, j = (k + 1) % 3;
             const double t = 0.5 * (1.0 + lam[j] - lam[i]);
             const double den = t * (1.0 - t);
             if (!(den > 1e-300)) continue;
@@ -569,7 +572,7 @@ void Geometry::face_eval(const Face & face, const std::vector<Vec3> & v, const d
             const Vec3 dq = scale(1.0 / den, sub(dd, scale(1.0 - 2.0 * t, q)));
             const double ll = lam[i] * lam[j];
             x = add(x, scale(ll, q));
-            for (int m = 0; m < 2; m++) {
+            for (size_t m = 0; m < 2; m++) {
                 const double dll = dN[i][m] * lam[j] + lam[i] * dN[j][m];
                 const double dt = 0.5 * (dN[j][m] - dN[i][m]);
                 const Vec3 term = add(scale(dll, q), scale(ll * dt, dq));
@@ -583,7 +586,7 @@ void Geometry::face_eval(const Face & face, const std::vector<Vec3> & v, const d
         if (!face.bubble.empty()) {
             const double b = 27.0 * lam[0] * lam[1] * lam[2];
             x = add(x, scale(b, face.bubble[0]));
-            for (int m = 0; m < 2; m++) {
+            for (size_t m = 0; m < 2; m++) {
                 const double db =
                     27.0 * (dN[0][m] * lam[1] * lam[2] + lam[0] * dN[1][m] * lam[2] + lam[0] * lam[1] * dN[2][m]);
                 if (m == 0) {
@@ -597,7 +600,7 @@ void Geometry::face_eval(const Face & face, const std::vector<Vec3> & v, const d
         // Coons patch of the edge deviations D_k (edge k from node k to node k + 1)
         const double s = xi[0], t = xi[1];
         const double a = 0.5 * (s + 1.0), b = 0.5 * (t + 1.0);
-        auto deviation = [&](int k, double tau, Vec3 & D, Vec3 & dD) {
+        auto deviation = [&](size_t k, double tau, Vec3 & D, Vec3 & dD) {
             D = {0.0, 0.0, 0.0};
             dD = {0.0, 0.0, 0.0};
             if (face.edge[k] < 0) return;
@@ -626,7 +629,7 @@ void Geometry::face_eval(const Face & face, const std::vector<Vec3> & v, const d
                 c = face.bubble[0];
             } else {
                 const double sg[4] = {-1.0, 1.0, 1.0, -1.0}, tg[4] = {-1.0, -1.0, 1.0, 1.0};
-                for (int k = 0; k < 4; k++) {
+                for (size_t k = 0; k < 4; k++) {
                     const double Ls = 0.5 + 1.5 * sg[k] * s, Lt = 0.5 + 1.5 * tg[k] * t;
                     c = add(c, scale(Ls * Lt, face.bubble[k]));
                     dcs = add(dcs, scale(1.5 * sg[k] * Lt, face.bubble[k]));
@@ -646,7 +649,7 @@ void Geometry::face_eval(const Face & face, const std::vector<Vec3> & v, const d
 
 void Geometry::eval(uint32_t f, const double * xi, Vec3 & x, Vec3 * dx) const {
     static const Face flat;
-    face_eval(face_index[f] >= 0 ? faces[face_index[f]] : flat, face_nodes(f), xi, x, dx);
+    face_eval(face_index[f] >= 0 ? faces[size_t(face_index[f])] : flat, face_nodes(f), xi, x, dx);
 }
 
 Vec3 Geometry::area_vector(uint32_t f) const {
@@ -659,13 +662,13 @@ Vec3 Geometry::area_vector(uint32_t f) const {
     for (size_t k = 0; k < v.size(); k++) {
         const Vec3 & a = v[k];
         const Vec3 & b = v[(k + 1) % v.size()];
-        if (idx < 0 || faces[idx].edge[k] < 0) {
+        if (idx < 0 || faces[size_t(idx)].edge[k] < 0) {
             A = add(A, scale(0.5, cross(a, b)));
             continue;
         }
         for (size_t q = 0; q < g.size(); q++) {
             Vec3 x, dx;
-            edge_eval(faces[idx], int(k), a, b, g[q], x, dx);
+            edge_eval(faces[size_t(idx)], k, a, b, g[q], x, dx);
             A = add(A, scale(0.5 * gw[q], cross(x, dx)));
         }
     }
@@ -707,10 +710,10 @@ void Geometry::cell_rule(uint32_t c, int degree, std::vector<Vec3> & x, std::vec
     }
     o = scale(1.0 / n_nodes, o);
     std::vector<double> gt, gtw;
-    gauss_unit((degree + N_DIM) / 2 + 1, gt, gtw);
+    gauss_unit(size_t(degree + N_DIM) / 2 + 1, gt, gtw);
     // Curved faces: enough points for maps of order 3, and for analytic ones to round-off
-    const int n_curved = N_DIM == 2 ? std::max((3 * degree + 7) / 2, 12) : std::max(degree + 3, 8);
-    const int n_straight = degree / 2 + 2;
+    const size_t n_curved = size_t(N_DIM == 2 ? std::max((3 * degree + 7) / 2, 12) : std::max(degree + 3, 8));
+    const size_t n_straight = size_t(degree / 2 + 2);
     std::vector<std::array<double, 2>> ref;
     std::vector<double> ref_w;
     // Cone from o over a point F of a face with area vector N (out of the cell) per unit reference measure
@@ -729,7 +732,7 @@ void Geometry::cell_rule(uint32_t c, int degree, std::vector<Vec3> & x, std::vec
         FOR_I_DIM offset[i] = double(mesh.h_face_offset(f, c, i));
         const std::vector<Vec3> v = face_nodes(f);
         if (N_DIM == 2 || face_is_curved(f)) {
-            reference_rule(v.size(), face_is_curved(f) ? n_curved : n_straight, ref, ref_w);
+            reference_rule(uint32_t(v.size()), face_is_curved(f) ? n_curved : n_straight, ref, ref_w);
             for (size_t q = 0; q < ref.size(); q++) {
                 Vec3 F, dF[2];
                 eval(f, ref[q].data(), F, dF);
@@ -743,7 +746,7 @@ void Geometry::cell_rule(uint32_t c, int degree, std::vector<Vec3> & x, std::vec
             tris.push_back({v[0], v[1], v[2]});
         } else {
             Vec3 m = {0.0, 0.0, 0.0};
-            for (const Vec3 & p : v) m = add(m, scale(1.0 / v.size(), p));
+            for (const Vec3 & p : v) m = add(m, scale(1.0 / double(v.size()), p));
             for (size_t j = 0; j < v.size(); j++) tris.push_back({m, v[j], v[(j + 1) % v.size()]});
         }
         reference_rule(3, n_straight, ref, ref_w);
@@ -763,11 +766,11 @@ double Geometry::max_shape_offset() const {
     double out = 0.0;
     for (uint32_t f = 0; f < mesh.n_faces; f++) {
         if (face_index[f] < 0) continue;
-        const Face & face = faces[face_index[f]];
+        const Face & face = faces[size_t(face_index[f])];
         const std::vector<Vec3> v = face_nodes(f);
         for (size_t k = 0; k < (v.size() == 2 ? 1 : v.size()); k++) {
-            if (face.edge[k] < 0 || edges[face.edge[k]].shape < 0) continue;
-            const Shape & s = shapes[edges[face.edge[k]].shape];
+            if (face.edge[k] < 0 || edges[size_t(face.edge[k])].shape < 0) continue;
+            const Shape & s = shapes[size_t(edges[size_t(face.edge[k])].shape)];
             const Vec3 & a = v[k];
             const Vec3 & b = v[(k + 1) % v.size()];
             const double length = std::sqrt(dot(sub(b, a), sub(b, a)));
@@ -808,7 +811,7 @@ void Mesh::apply_curved(const curved::Surfaces & surfaces) {
         curved::Vec3 m = {0.0, 0.0, 0.0};
         for (size_t q = 0; q < w.size(); q++) {
             V += w[q];
-            for (int i = 0; i < 3; i++) m[i] += w[q] * x[q][i];
+            for (size_t i = 0; i < 3; i++) m[i] += w[q] * x[q][i];
         }
         if (!(V > 0.0)) {
             throw std::runtime_error("Mesh: curved cell " + std::to_string(c) + " has non-positive volume.");

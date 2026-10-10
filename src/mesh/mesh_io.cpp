@@ -407,7 +407,7 @@ GmshData read_gmsh(const std::string & filename) {
         if (et.dim < BOUNDARY_DIM || (et.dim == BOUNDARY_DIM && physical == 0)) return;
         high_order |= et.n_nodes > et.n_corners;
         std::vector<uint32_t> idx;
-        for (int k = 0; k < et.n_corners; k++) idx.push_back(node_index.at(tags[k]));
+        for (size_t k = 0; k < size_t(et.n_corners); k++) idx.push_back(node_index.at(tags[k]));
         if (et.dim == N_DIM) {
             data.cells.push_back(idx);
         } else {
@@ -546,7 +546,7 @@ GmshData read_gmsh(const std::string & filename) {
         std::vector<std::array<rtype, N_DIM>> kept;
         for (uint32_t n = 0; n < data.nodes.size(); n++) {
             if (index[n] == 0) {
-                index[n] = kept.size();
+                index[n] = uint32_t(kept.size());
                 kept.push_back(data.nodes[n]);
             }
         }
@@ -611,8 +611,8 @@ void Mesh::init_from_block(const MeshBlock & block, const std::vector<PeriodicPa
         for (uint64_t f = 0; f < block.n_faces(); f++) {
             if (block.face_high_order_offsets[f + 1] == block.face_high_order_offsets[f]) continue;
             curved::SurfaceFace face;
-            face.corners.assign(block.face_nodes.begin() + block.face_offsets[f],
-                                block.face_nodes.begin() + block.face_offsets[f + 1]);
+            face.corners.assign(block.face_nodes.begin() + std::ptrdiff_t(block.face_offsets[f]),
+                                block.face_nodes.begin() + std::ptrdiff_t(block.face_offsets[f + 1]));
             for (uint64_t k = block.face_high_order_offsets[f]; k < block.face_high_order_offsets[f + 1]; k++) {
                 curved::Vec3 x = {0.0, 0.0, 0.0};
                 FOR_I_DIM x[i] = block.face_high_order_nodes[k][i];
