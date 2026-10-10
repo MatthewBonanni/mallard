@@ -195,7 +195,7 @@ class Mesh {
          * @param i_node_local Index of the node.
          * @return Node id.
          */
-        uint32_t h_node_of_cell(uint32_t i_cell, uint8_t i_node_local) const;
+        uint32_t h_node_of_cell(uint32_t i_cell, uint32_t i_node_local) const;
 
         /**
          * @brief Get the id of the i-th face of a cell - host version.
@@ -203,7 +203,7 @@ class Mesh {
          * @param i_face_local Index of the face.
          * @return Face id.
          */
-        uint32_t h_face_of_cell(uint32_t i_cell, uint8_t i_face_local) const;
+        uint32_t h_face_of_cell(uint32_t i_cell, uint32_t i_face_local) const;
 
         /**
          * @brief Get the id of the i-th node of a face - host version.
@@ -211,7 +211,7 @@ class Mesh {
          * @param i_node_local Index of the node.
          * @return Node id.
          */
-        uint32_t h_node_of_face(uint32_t i_face, uint8_t i_node_local) const;
+        uint32_t h_node_of_face(uint32_t i_face, uint32_t i_node_local) const;
 
         /**
          * @brief Get the type of a cell.
