@@ -34,7 +34,8 @@ namespace {
 MeshBlock synthetic_block(const std::vector<double> & split) {
     const uint64_t n_cells = 37, n_nodes = 53, n_faces = 23;
     const int r = comm::rank();
-    auto range = [&](uint64_t n) { return std::pair<uint64_t, uint64_t>(n * split[r], n * split[r + 1]); };
+    auto range = [&](uint64_t n) { return std::pair<uint64_t, uint64_t>(static_cast<uint64_t>(static_cast<double>(n) * split[static_cast<size_t>(r)]),
+                                                                    static_cast<uint64_t>(static_cast<double>(n) * split[static_cast<size_t>(r) + 1])); };
     MeshBlock block;
     block.zone_names = {"inlet", "wall", "outlet"};
     const auto [c0, c1] = range(n_cells);
@@ -50,21 +51,21 @@ MeshBlock synthetic_block(const std::vector<double> & split) {
     }
     for (uint64_t g = n0; g < n1; g++) {
         std::array<double, N_DIM> x;
-        FOR_I_DIM x[i] = (i == 0) ? 0.5 * g : (i == 1) ? 1e-3 * g * g : -double(g);
+        FOR_I_DIM x[i] = (i == 0) ? 0.5 * double(g) : (i == 1) ? 1e-3 * double(g) * double(g) : -double(g);
         block.node_coords.push_back(x);
     }
     for (uint64_t f = f0; f < f1; f++) {
         std::vector<uint64_t> nodes;
         for (uint32_t k = 0; k < (N_DIM == 2 ? 2 : 3 + f % 2); k++) nodes.push_back((f * 5 + k * 3) % n_nodes);
-        block.add_face(nodes, f % 3);
+        block.add_face(nodes, static_cast<uint32_t>(f % 3));
     }
     return block;
 }
 
 std::vector<double> fractions(bool even) {
     const int p = comm::size();
-    std::vector<double> split(p + 1);
-    for (int r = 0; r <= p; r++) split[r] = even ? double(r) / p : double(r * r) / (p * p);
+    std::vector<double> split(static_cast<size_t>(p + 1));
+    for (int r = 0; r <= p; r++) split[static_cast<size_t>(r)] = even ? double(r) / p : double(r * r) / (p * p);
     return split;
 }
 
@@ -124,11 +125,11 @@ TEST(MeshBlockTest, GeneratedBlocksNumberCellsAndNodesAsTheSerialMesh) {
         }
         for (uint64_t c = 0; c < block.n_cells(); c++) {
             // The serial 3D mesh reorients cells, which permutes their nodes
-            std::vector<uint64_t> nodes(block.cell_nodes.begin() + block.cell_offsets[c],
-                                        block.cell_nodes.begin() + block.cell_offsets[c + 1]);
+            std::vector<uint64_t> nodes(block.cell_nodes.begin() + static_cast<std::ptrdiff_t>(block.cell_offsets[c]),
+                                        block.cell_nodes.begin() + static_cast<std::ptrdiff_t>(block.cell_offsets[c + 1]));
             std::vector<uint64_t> expected;
-            for (uint32_t k = 0; k < serial.h_n_nodes_of_cell(block.first_cell + c); k++) {
-                expected.push_back(serial.h_node_of_cell(block.first_cell + c, k));
+            for (uint32_t k = 0; k < serial.h_n_nodes_of_cell(static_cast<uint32_t>(block.first_cell + c)); k++) {
+                expected.push_back(serial.h_node_of_cell(static_cast<uint32_t>(block.first_cell + c), k));
             }
             std::sort(nodes.begin(), nodes.end());
             std::sort(expected.begin(), expected.end());
@@ -151,8 +152,8 @@ TEST(MeshBlockTest, GeneratedBlocksNumberCellsAndNodesAsTheSerialMesh) {
         for (const auto & [name, faces] : serial_faces) n_serial += faces.size();
         EXPECT_EQ(comm::allreduce(block.n_faces(), comm::Op::SUM), n_serial);
         for (uint64_t f = 0; f < block.n_faces(); f++) {
-            std::vector<uint64_t> nodes(block.face_nodes.begin() + block.face_offsets[f],
-                                        block.face_nodes.begin() + block.face_offsets[f + 1]);
+            std::vector<uint64_t> nodes(block.face_nodes.begin() + static_cast<std::ptrdiff_t>(block.face_offsets[f]),
+                                        block.face_nodes.begin() + static_cast<std::ptrdiff_t>(block.face_offsets[f + 1]));
             std::sort(nodes.begin(), nodes.end());
             EXPECT_TRUE(serial_faces[block.zone_names[block.face_zone[f]]].count(nodes))
                 << "boundary face " << f << " of zone " << block.zone_names[block.face_zone[f]];

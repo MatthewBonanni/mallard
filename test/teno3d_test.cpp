@@ -27,7 +27,7 @@
 
 namespace {
 
-constexpr rtype GAMMA = 1.4;
+constexpr rtype GAMMA = 1.4_r;
 
 // Smooth field satisfying symmetry conditions on the unit cube: density,
 // pressure and tangential velocities are even across each wall, normal
@@ -232,7 +232,7 @@ double advection_error(const std::string & mesh, const std::string & recon, uint
     auto m = solver.get_mesh();
     auto exact = cell_averages_3d(*m, [](double x, double y, double z, double * U) {
         U[0] = 1.0 + 0.3 * std::exp(-8.0 * ((x - 1.0) * (x - 1.0) + (y - 1.0) * (y - 1.0) + (z - 1.0) * (z - 1.0)));
-        for (int i = 1; i < N_CONSERVATIVE; i++) U[i] = 0.0;
+        for (size_t i = 1; i < N_CONSERVATIVE; i++) U[i] = 0.0;
     });
     double err = 0.0;
     for (uint32_t i = 0; i < m->n_cells; i++) {
@@ -276,7 +276,7 @@ double largest_speed_at_rest(const std::string & mesh, int order, const std::str
     double speed = 0.0;
     for (uint32_t i = 0; i < solver.get_mesh()->n_cells; i++) {
         double q2 = 0.0;
-        for (int d = 0; d < N_DIM; d++) {
+        for (size_t d = 0; d < N_DIM; d++) {
             q2 += std::pow(double(solver.h_conservatives(i, 1 + d)) / double(solver.h_conservatives(i, 0)), 2);
         }
         speed = std::max(speed, std::sqrt(q2));
@@ -352,7 +352,7 @@ TEST(TENO3DStencils, MetricIsTheIdentityOnRegularTilingsOnly) {
     // Regular tilings keep stencils ranked by physical distance, walls
     // included; stretched ones do not
     auto anisotropic_cells = [](const std::string & type, double lz) {
-        auto mesh = make_mesh_3d(type, 6, 6, 6, 1.0, 1.0, lz);
+        auto mesh = make_mesh_3d(type, 6, 6, 6, 1.0_r, 1.0_r, static_cast<rtype>(lz));
         BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
         TENO teno;
         teno.set_mesh(mesh);
@@ -366,7 +366,7 @@ TEST(TENO3DStencils, MetricIsTheIdentityOnRegularTilingsOnly) {
         EXPECT_EQ(anisotropic_cells(type, 1.0), 0u) << type;
     }
     for (const char * type : {"cartesian", "cartesian_tet", "cartesian_prism"}) {
-        auto mesh = make_mesh_3d(type, 6, 6, 6, 1.0, 1.0, 1.0 / 6.25);
+        auto mesh = make_mesh_3d(type, 6, 6, 6, 1.0_r, 1.0_r, 1.0_r / 6.25_r);
         EXPECT_EQ(anisotropic_cells(type, 1.0 / 6.25), mesh->n_cells) << type;
     }
 }
@@ -425,13 +425,13 @@ std::vector<uint32_t> move_nodes(Mesh & mesh, const std::vector<std::array<doubl
         double best_d2 = 1e300;
         for (uint32_t n = 0; n < mesh.n_nodes; n++) {
             double d2 = 0.0;
-            for (int d = 0; d < 3; d++) d2 += std::pow(double(mesh.h_node_coords(n, d)) - m[d], 2);
+            for (size_t d = 0; d < 3; d++) d2 += std::pow(double(mesh.h_node_coords(n, d)) - m[d], 2);
             if (d2 < best_d2) {
                 best_d2 = d2;
                 best = n;
             }
         }
-        for (int d = 0; d < 3; d++) mesh.h_node_coords(best, d) += rtype(m[3 + d]);
+        for (size_t d = 0; d < 3; d++) mesh.h_node_coords(best, d) += rtype(m[3 + d]);
         moved.push_back(best);
     }
     mesh.compute_geometry();
