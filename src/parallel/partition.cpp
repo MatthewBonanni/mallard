@@ -144,13 +144,13 @@ std::vector<int> partition_hilbert(const DistributedMesh & mesh, int n_parts) {
 std::array<int, N_DIM> grid_shape(int n_parts, const std::array<double, N_DIM> & extent) {
     std::array<int, N_DIM> best{}, shape{};
     double best_area = std::numeric_limits<double>::max();
-    auto search = [&](auto & self, int d, int rest) -> void {
+    auto search = [&](auto & self, size_t d, int rest) -> void {
         if (d == N_DIM - 1) {
             shape[d] = rest;
             double area = 0.0;
-            for (int i = 0; i < N_DIM; i++) {
+            for (size_t i = 0; i < N_DIM; i++) {
                 double face = 1.0;
-                for (int j = 0; j < N_DIM; j++) face *= j == i ? 1.0 : extent[j];
+                for (size_t j = 0; j < N_DIM; j++) face *= j == i ? 1.0 : extent[j];
                 area += (shape[i] - 1) * face;
             }
             if (area < best_area) {
@@ -188,14 +188,14 @@ std::vector<int> partition_multijagged(const DistributedMesh & mesh, int n_parts
     lo.fill(std::numeric_limits<double>::max());
     hi.fill(std::numeric_limits<double>::lowest());
     for (const auto & x : centers) {
-        for (int d = 0; d < N_DIM; d++) {
+        for (size_t d = 0; d < N_DIM; d++) {
             lo[d] = std::min(lo[d], x[d]);
             hi[d] = std::max(hi[d], x[d]);
         }
     }
     lo = comm::allreduce(lo, comm::Op::MIN);
     hi = comm::allreduce(hi, comm::Op::MAX);
-    for (int d = 0; d < N_DIM; d++) extent[d] = std::max(hi[d] - lo[d], 0.0);
+    for (size_t d = 0; d < N_DIM; d++) extent[d] = std::max(hi[d] - lo[d], 0.0);
     const std::array<int, N_DIM> shape = grid_shape(n_parts, extent);
 
     // Each axis splits every group of the previous axes into shape[d] pieces of
@@ -204,8 +204,8 @@ std::vector<int> partition_multijagged(const DistributedMesh & mesh, int n_parts
     constexpr uint64_t MAX_KEY = std::numeric_limits<uint64_t>::max();
     std::vector<uint32_t> group(centers.size(), 0);
     uint32_t n_groups = 1;
-    for (int d = 0; d < N_DIM; d++) {
-        const int f = shape[d];
+    for (size_t d = 0; d < N_DIM; d++) {
+        const auto f = static_cast<uint32_t>(shape[d]);
         if (f == 1) continue;
         std::vector<std::vector<Key>> keys(n_groups);
         for (size_t c = 0; c < centers.size(); c++) {
@@ -217,15 +217,15 @@ std::vector<int> partition_multijagged(const DistributedMesh & mesh, int n_parts
             size[g] = keys[g].size();
         }
         comm::allreduce(std::span<uint64_t>(size), comm::Op::SUM);
-        auto count_le = [&](uint32_t g, const Key & k) {
+        auto count_le = [&](size_t g, const Key & k) {
             return uint64_t(std::upper_bound(keys[g].begin(), keys[g].end(), k) - keys[g].begin());
         };
 
         // Split s of group g is the key with exactly target[s] keys of the group below it
         const size_t n_splits = size_t(n_groups) * (f - 1);
         std::vector<uint64_t> target(n_splits);
-        for (uint32_t g = 0; g < n_groups; g++) {
-            for (int s = 1; s < f; s++) target[g * (f - 1) + s - 1] = size[g] * s / f;
+        for (size_t g = 0; g < n_groups; g++) {
+            for (uint32_t s = 1; s < f; s++) target[g * (f - 1) + s - 1] = size[g] * s / f;
         }
         std::vector<Key> split(n_splits);
         std::vector<uint64_t> a(n_splits), b(n_splits), counts(n_splits);
@@ -260,7 +260,7 @@ std::vector<int> partition_multijagged(const DistributedMesh & mesh, int n_parts
 
         for (size_t c = 0; c < centers.size(); c++) {
             const Key k{ordered_bits(centers[c][d]), mesh.first_cell() + c};
-            const auto first = split.begin() + size_t(group[c]) * (f - 1);
+            const auto first = split.begin() + static_cast<std::ptrdiff_t>(size_t(group[c]) * (f - 1));
             group[c] = group[c] * f + uint32_t(std::upper_bound(first, first + (f - 1), k) - first);
         }
         n_groups *= f;
@@ -268,20 +268,23 @@ std::vector<int> partition_multijagged(const DistributedMesh & mesh, int n_parts
 
     // Blocks numbered along a Hilbert curve, so that consecutive ranks (one
     // node's) hold a compact group of blocks
+    const auto n_blocks = static_cast<size_t>(n_parts);
     std::array<double, N_DIM> grid_lo{}, grid_hi;
     grid_hi.fill(*std::max_element(shape.begin(), shape.end()));
-    std::vector<std::pair<uint64_t, int>> blocks(n_parts);
-    for (int p = 0; p < n_parts; p++) {
+    std::vector<std::pair<uint64_t, uint32_t>> blocks(n_blocks);
+    for (size_t p = 0; p < n_blocks; p++) {
         std::array<double, N_DIM> center;
-        for (int d = N_DIM - 1, rest = p; d >= 0; d--) {
-            center[d] = rest % shape[d] + 0.5;
-            rest /= shape[d];
+        size_t rest = p;
+        for (size_t d = N_DIM; d-- > 0;) {
+            const auto n = static_cast<size_t>(shape[d]);
+            center[d] = static_cast<double>(rest % n) + 0.5;
+            rest /= n;
         }
-        blocks[p] = {hilbert_key(center, grid_lo, grid_hi), p};
+        blocks[p] = {hilbert_key(center, grid_lo, grid_hi), static_cast<uint32_t>(p)};
     }
     std::sort(blocks.begin(), blocks.end());
-    std::vector<int> rank_of_block(n_parts);
-    for (int r = 0; r < n_parts; r++) rank_of_block[blocks[r].second] = r;
+    std::vector<int> rank_of_block(n_blocks);
+    for (size_t r = 0; r < n_blocks; r++) rank_of_block[blocks[r].second] = static_cast<int>(r);
     std::vector<int> owner(group.size());
     for (size_t c = 0; c < group.size(); c++) owner[c] = rank_of_block[group[c]];
     return owner;
