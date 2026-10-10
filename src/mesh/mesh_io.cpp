@@ -52,8 +52,8 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
                                   const std::vector<std::vector<uint32_t>> & cells,
                                   const std::vector<BoundaryFace> & boundary_faces,
                                   const std::string & unlisted_zone, const PeriodicNodes & classes) {
-    n_nodes = nodes.size();
-    n_cells = cells.size();
+    n_nodes = static_cast<uint32_t>(nodes.size());
+    n_cells = static_cast<uint32_t>(cells.size());
 
     // Periodic classes of the nodes; faces are keyed by the classes' keys so a
     // face of zone_a and its image in zone_b become one face
@@ -88,7 +88,7 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
             } else {
                 cell_nodes.insert(cell_nodes.end(), c.begin(), c.end());
             }
-            cell_node_offsets.push_back(cell_nodes.size());
+            cell_node_offsets.push_back(static_cast<uint32_t>(cell_nodes.size()));
         }
     }
 
@@ -96,7 +96,7 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
     std::vector<uint32_t> cell_face_offsets(n_cells + 1, 0);
     for (uint32_t c = 0; c < n_cells; c++) {
         const uint32_t n = cell_node_offsets[c + 1] - cell_node_offsets[c];
-        cell_face_offsets[c + 1] = cell_face_offsets[c] + (N_DIM == 2 ? n : cell_local_faces(n).size());
+        cell_face_offsets[c + 1] = cell_face_offsets[c] + (N_DIM == 2 ? n : static_cast<uint32_t>(cell_local_faces(n).size()));
     }
     const uint32_t n_half = cell_face_offsets[n_cells];
     std::vector<uint32_t> half_nodes;
@@ -147,7 +147,7 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
                     throw std::runtime_error("Mesh: a cell touches itself across a periodic boundary; periodic "
                                              "directions need at least 3 cells.");
                 }
-                face_cells[f][1] = c;
+                face_cells[f][1] = int32_t(c);
                 if (!h_node_key.empty()) {
                     // Cell 1 moves next to cell 0 by L(a) - L(b), for nodes a of
                     // cell 0 and b of cell 1 with the same key
@@ -160,7 +160,7 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
                             if (node_key(face_nodes[i]) == node_key(b)) a = face_nodes[i];
                         }
                         std::array<int8_t, 3> l;
-                        for (int j = 0; j < 3; j++) l[j] = h_node_lattice[a][j] - h_node_lattice[b][j];
+                        for (size_t j = 0; j < 3; j++) l[j] = h_node_lattice[a][j] - h_node_lattice[b][j];
                         if (k > 0 && l != lattice) {
                             throw std::runtime_error("Mesh: inconsistent periodic translation across a face.");
                         }
@@ -170,23 +170,23 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
                 }
                 continue;
             }
-            cell_faces[h] = face_cells.size();
+            cell_faces[h] = static_cast<uint32_t>(face_cells.size());
             face_cells.push_back({int32_t(c), -1});
             face_shifts.push_back(0);
             half_face(c, h - cell_face_offsets[c], half_nodes);
             face_nodes.insert(face_nodes.end(), half_nodes.begin(), half_nodes.end());
-            face_node_offsets.push_back(face_nodes.size());
+            face_node_offsets.push_back(static_cast<uint32_t>(face_nodes.size()));
         }
     }
     partner = {};
-    n_faces = face_cells.size();
+    n_faces = static_cast<uint32_t>(face_cells.size());
 
     // Zones: interior plus one per boundary name
     std::map<std::string, std::vector<uint32_t>> zone_faces;
     std::vector<uint32_t> interior;
     std::vector<bool> zoned(n_faces, false);
     for (const auto & bf : boundary_faces) {
-        half_nodes.assign(bf.nodes.begin(), bf.nodes.begin() + std::min<size_t>(bf.nodes.size(), KEY));
+        half_nodes.assign(bf.nodes.begin(), bf.nodes.begin() + static_cast<std::ptrdiff_t>(std::min<size_t>(bf.nodes.size(), KEY)));
         keyed(half_nodes);
         const FaceKey key = face_key(half_nodes, half_nodes.size());
         const auto it = std::lower_bound(halves.begin(), halves.end(), std::make_pair(key, uint32_t(0)));
@@ -437,7 +437,7 @@ GmshData read_gmsh(const std::string & filename) {
                     size_t tag;
                     double x, y, z;
                     in >> tag >> x >> y >> z;
-                    node_index[tag] = data.nodes.size();
+                    node_index[tag] = static_cast<uint32_t>(data.nodes.size());
                     data.nodes.push_back(make_node(x, y, z));
                 }
             } else {
@@ -455,7 +455,7 @@ GmshData read_gmsh(const std::string & filename) {
                         if (parametric) {
                             throw std::runtime_error("Gmsh file " + filename + ": parametric nodes are not supported.");
                         }
-                        node_index[tags[i]] = data.nodes.size();
+                        node_index[tags[i]] = static_cast<uint32_t>(data.nodes.size());
                         data.nodes.push_back(make_node(x, y, z));
                     }
                 }
@@ -468,9 +468,9 @@ GmshData read_gmsh(const std::string & filename) {
                     size_t tag;
                     int type, n_tags;
                     in >> tag >> type >> n_tags;
-                    std::vector<int> etags(n_tags);
+                    std::vector<int> etags(static_cast<size_t>(n_tags));
                     for (auto & t : etags) in >> t;
-                    std::vector<size_t> nodes(gmsh_element_type(type, filename).n_nodes);
+                    std::vector<size_t> nodes(static_cast<size_t>(gmsh_element_type(type, filename).n_nodes));
                     for (auto & v : nodes) in >> v;
                     add_element(type, n_tags > 0 ? etags[0] : 0, nodes);
                 }
@@ -490,7 +490,7 @@ GmshData read_gmsh(const std::string & filename) {
                     for (size_t i = 0; i < n_in_block; i++) {
                         size_t tag;
                         in >> tag;
-                        std::vector<size_t> nodes(n_nodes_per_element);
+                        std::vector<size_t> nodes(static_cast<size_t>(n_nodes_per_element));
                         for (auto & v : nodes) in >> v;
                         add_element(type, physical, nodes);
                     }
@@ -521,17 +521,17 @@ void Mesh::init_from_block(const MeshBlock & block, const std::vector<PeriodicPa
     }
     std::vector<std::array<rtype, N_DIM>> nodes(block.n_nodes());
     for (uint64_t i = 0; i < block.n_nodes(); i++) {
-        for (int d = 0; d < N_DIM; d++) nodes[i][d] = block.node_coords[i][d];
+        for (size_t d = 0; d < N_DIM; d++) nodes[i][d] = static_cast<rtype>(block.node_coords[i][d]);
     }
     std::vector<std::vector<uint32_t>> cells(block.n_cells());
     for (uint64_t c = 0; c < block.n_cells(); c++) {
-        cells[c].assign(block.cell_nodes.begin() + block.cell_offsets[c],
-                        block.cell_nodes.begin() + block.cell_offsets[c + 1]);
+        cells[c].assign(block.cell_nodes.begin() + static_cast<std::ptrdiff_t>(block.cell_offsets[c]),
+                        block.cell_nodes.begin() + static_cast<std::ptrdiff_t>(block.cell_offsets[c + 1]));
     }
     std::vector<BoundaryFace> boundary_faces(block.n_faces());
     for (uint64_t f = 0; f < block.n_faces(); f++) {
-        boundary_faces[f].nodes.assign(block.face_nodes.begin() + block.face_offsets[f],
-                                       block.face_nodes.begin() + block.face_offsets[f + 1]);
+        boundary_faces[f].nodes.assign(block.face_nodes.begin() + static_cast<std::ptrdiff_t>(block.face_offsets[f]),
+                                       block.face_nodes.begin() + static_cast<std::ptrdiff_t>(block.face_offsets[f + 1]));
         boundary_faces[f].zone = block.zone_names[block.face_zone[f]];
     }
     init_from_connectivity(nodes, cells, boundary_faces, "unassigned", periodic);
