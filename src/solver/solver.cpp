@@ -213,8 +213,7 @@ void Solver::init_mesh() {
         }
         // Partition once; deeper halos (see halo_too_shallow) grow the existing layers
         if (!setup) {
-            partitioner = toml::find_or<std::string>(input, "parallel", "partitioner",
-                                                     have_graph_partitioner() ? "graph" : "hilbert");
+            partitioner = toml::find_or<std::string>(input, "parallel", "partitioner", "multijagged");
             if (partitioner != "graph" && partitioner != "hilbert" && partitioner != "multijagged") {
                 throw InputError("parallel.partitioner = \"" + partitioner +
                                  "\" is not one of: graph, hilbert, multijagged.");

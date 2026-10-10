@@ -46,14 +46,15 @@ Two cells are adjacent if they share a face. Each rank hashes every face of its 
 
 ### 4. Partitioning
 
-A `Partitioner` interface with two backends:
+Three backends:
 
 | Backend | When |
 |---|---|
-| **dKaMinPar** ([KaHIP/KaMinPar](https://github.com/KaHIP/KaMinPar), MIT, C++20; `FetchContent`) | Default when available. Distributed, scales to trillion-edge graphs, guarantees balance. Built with 64-bit ids for hero meshes. New dependency: oneTBB. |
-| **Hilbert curve** (built in) | No-dependency fallback; also used everywhere to order cells within a rank for memory locality. |
+| **Multi-jagged** (built in) | Default. Equal-count slabs along x, each split along y, then z, with the pieces per axis of the grid of blocks of the bounding box that has the least area between blocks: cuboid parts on box meshes at any rank count. |
+| **Hilbert curve** (built in) | Equally compact at power-of-two rank counts on cubes, less at others (12 ranks: 40-80% more halo layer-1 cells per rank). |
+| **dKaMinPar** ([KaHIP/KaMinPar](https://github.com/KaHIP/KaMinPar), MIT, C++20; `FetchContent`) | Opt-in (`Mallard_ENABLE_KAMINPAR`, needs oneTBB). Distributed, scales to trillion-edge graphs. With its default preset its parts are 3% out of balance and cut 40-50% more faces than the multi-jagged parts of a box. |
 
-The Hilbert backend sorts cells by the curve key of their vertex average (not their centroid, which needs the geometry a rank does not have yet) with a distributed sample sort, so its partitions differ from a global-mesh Hilbert partition but are equally valid; dKaMinPar works directly on the distributed dual graph (section 3).
+The Hilbert backend sorts cells by the curve key of their vertex average (not their centroid, which needs the geometry a rank does not have yet) with a distributed sample sort, so its partitions differ from a global-mesh Hilbert partition but are equally valid; the multi-jagged backend finds its cuts by distributed bisection on the same keys, so no cell moves before migration; dKaMinPar works directly on the distributed dual graph (section 3). Measurements: `performance.md`, "Partitions".
 
 Vertex weights model cost: a base weight per cell plus a term for the TENO stencil size. ParMETIS or PT-Scotch can be added behind the same interface if needed.
 
