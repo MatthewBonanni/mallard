@@ -364,6 +364,26 @@ void write_mesh_h5(const std::string & filename, const MeshBlock & block) {
                    block.face_nodes.data(), dxpl);
         write_rows(group, "zone", total[FACES], 1, first[FACES], block.n_faces(), block.face_zone.data(), dxpl);
         write_strings_attribute(group, "zone_names", block.zone_names);
+        // High-order boundary faces (curved walls): all their nodes' coordinates, CSR per face
+        const bool has_high_order = block.face_high_order_offsets.size() == block.n_faces() + 1;
+        const uint64_t n_high = has_high_order ? block.face_high_order_nodes.size() : 0;
+        const std::vector<uint64_t> all_high = comm::allgatherv(std::vector<uint64_t>{uint64_t(has_high_order), n_high});
+        uint64_t any = 0, total_high = 0, first_high = 0;
+        for (int q = 0; q < p; q++) {
+            any |= all_high[2 * q];
+            if (q < r) first_high += all_high[2 * q + 1];
+            total_high += all_high[2 * q + 1];
+        }
+        if (any) {
+            Handle high(H5Gcreate2(group, "high_order", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "H5Gcreate2");
+            std::vector<uint64_t> offsets(block.n_faces() + (last ? 1 : 0), 0);
+            for (size_t f = 0; f < offsets.size(); f++) {
+                offsets[f] = first_high + (has_high_order ? block.face_high_order_offsets[f] : 0);
+            }
+            write_rows(high, "offsets", total[FACES] + 1, 1, first[FACES], offsets.size(), offsets.data(), dxpl);
+            write_rows(high, "coordinates", total_high, N_DIM, first_high, n_high,
+                       n_high ? block.face_high_order_nodes[0].data() : nullptr, dxpl);
+        }
     }
 }
 
@@ -423,6 +443,16 @@ MeshBlock read_mesh_h5(const std::string & filename, bool whole) {
         block.zone_names = read_strings_attribute(group, "zone_names");
         for (uint32_t z : block.face_zone) {
             if (z >= block.zone_names.size()) throw std::runtime_error(filename + ": boundary zone out of range.");
+        }
+        if (H5Lexists(group, "high_order", H5P_DEFAULT) > 0) {
+            Handle high(H5Gopen2(group, "high_order", H5P_DEFAULT), H5Gclose, "opening boundary/high_order");
+            block.face_high_order_offsets = read_rows<uint64_t>(high, "offsets", first, n_local + 1, 1, dxpl);
+            const uint64_t begin = block.face_high_order_offsets.front();
+            const uint64_t n_high = block.face_high_order_offsets.back() - begin;
+            for (uint64_t & o : block.face_high_order_offsets) o -= begin;
+            const std::vector<double> x = read_rows<double>(high, "coordinates", begin, n_high, N_DIM, dxpl);
+            block.face_high_order_nodes.resize(n_high);
+            for (uint64_t k = 0; k < n_high; k++) FOR_I_DIM block.face_high_order_nodes[k][i] = x[k * N_DIM + i];
         }
     }
     return block;

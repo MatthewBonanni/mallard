@@ -685,3 +685,28 @@ TEST(MPITest, RunFromHDF5MeshFileMatchesSerial) {
     expect_matches_serial(input);
     comm::barrier();
 }
+
+TEST(MPITest, CurvedWallsMatchSerial) {
+    // Walls from P3 lines of the file, or projected onto circles; the HDF5
+    // copy of the file keeps the P3 lines
+    const char * shapes = "[[mesh.curved]]\nzone = \"inner\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+                          "[[mesh.curved]]\nzone = \"outer\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n";
+    for (int order : {1, 3}) {
+        const std::string file =
+            write_temp_shared("mallard_mpi_annulus_" + std::to_string(order) + ".msh", annulus_gmsh(5, 60, order, order == 3));
+        std::string input = box_input("cartesian", "type = \"TENO\"\norder = 5\ncurved_mirrors = false\n", EULER,
+                                      "[[boundaries]]\nname = \"inner\"\ntype = \"symmetry\"\n"
+                                      "[[boundaries]]\nname = \"outer\"\ntype = \"wall_adiabatic\"\n", 10);
+        const size_t a = input.find("type = \"cartesian\""), b = input.find("[initialize]");
+        input.replace(a, b - a, "type = \"file\"\nfilename = \"" + file + "\"\n" + (order == 1 ? shapes : ""));
+        expect_matches_serial(input, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
+        if (order == 3 && have_hdf5() && (comm::size() == 1 || have_parallel_hdf5())) {
+            const std::string h5 = (std::filesystem::temp_directory_path() / "mallard_mpi_annulus_3.h5").string();
+            write_mesh_h5(h5, read_gmsh_block(file));
+            std::string from_h5 = input;
+            from_h5.replace(from_h5.find(file), file.size(), h5);
+            expect_matches_serial(from_h5, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
+        }
+    }
+    comm::barrier();
+}

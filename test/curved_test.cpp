@@ -14,6 +14,7 @@
 #include <Kokkos_Core.hpp>
 
 #include <cmath>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <sstream>
@@ -27,6 +28,7 @@
 #include "input.h"
 #include "mesh.h"
 #include "physics.h"
+#include "solver.h"
 #include "test_fixtures.h"
 #include "test_utils.h"
 
@@ -439,3 +441,105 @@ TEST_P(CurvedTENOOrder, ReconstructionAtCurvedWallsConvergesAtDesignOrder) {
 
 INSTANTIATE_TEST_SUITE_P(Curved, CurvedTENOOrder,
                          ::testing::Combine(::testing::Values(false, true), ::testing::Values(3, 4, 5, 6)));
+
+namespace {
+
+/**
+ * @brief The isentropic vortex u_theta = M / r between the walls (an exact
+ *        steady Euler solution), on an annulus Gmsh file; geometry "curved"
+ *        projects the walls onto the circles.
+ */
+std::string vortex_input(const std::string & mesh_file, const std::string & geometry, const std::string & recon,
+                         const std::string & run, const std::string & output = "") {
+    const std::string M = "0.8";
+    return "[run]\n" + run + "cfl = 0.4\n[mesh]\ntype = \"file\"\nfilename = \"" + mesh_file + "\"\n" +
+           (geometry == "straight" ? "curved_geometry = false\n" : "") + (geometry == "curved" ? SHAPES : "") +
+           "[initialize]\ntype = \"analytical\"\n"
+           "rho = \"(1 + 0.2 * " + M + "^2 * (1 - 1 / (x^2 + y^2)))^2.5\"\n"
+           "u = [\"-" + M + " * y / (x^2 + y^2)\", \"" + M + " * x / (x^2 + y^2)\"]\n"
+           "p = \"(1 + 0.2 * " + M + "^2 * (1 - 1 / (x^2 + y^2)))^3.5 / 1.4\"\n"
+           "[[boundaries]]\nname = \"inner\"\ntype = \"symmetry\"\n"
+           "[[boundaries]]\nname = \"outer\"\ntype = \"wall_adiabatic\"\n"
+           "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+           "[numerics.face_reconstruction]\n" + recon +
+           "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+           "[output]\ncheck_interval = 1000000\n" + output;
+}
+
+std::vector<double> density(Solver & solver) {
+    solver.copy_device_to_host();
+    std::vector<double> rho;
+    for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) rho.push_back(double(solver.h_conservatives(c, 0)));
+    return rho;
+}
+
+}  // namespace
+
+TEST(CurvedSolver, SteadyVortexKeepsItsExactAveragesOnlyBetweenCurvedWalls) {
+    // Started from its exact cell averages, the steady vortex drifts by the
+    // scheme's error: at the wall it is the geometry's, O(h^2) for straight
+    // walls, which push the flow off the circles
+    SKIP_IN_SINGLE_PRECISION("the curved drift is near single-precision round-off");
+    const std::string file = write_temp("curved_vortex.msh", annulus_gmsh(6, 96));
+    auto drift = [&](const std::string & geometry, const std::string & recon) {
+        Solver solver;
+        solver.init(parse_toml(vortex_input(file, geometry, recon, "t_stop = 0.5\n")));
+        const std::vector<double> start = density(solver);
+        solver.run();
+        const std::vector<double> end = density(solver);
+        double err = 0.0;
+        for (size_t c = 0; c < start.size(); c++) err = std::max(err, std::abs(end[c] - start[c]));
+        return err;
+    };
+    for (const std::string order : {"3", "5"}) {
+        const std::string recon = "type = \"TENO\"\norder = " + order + "\ncurved_mirrors = false\n";
+        const double straight = drift("straight", recon), curved = drift("curved", recon);
+        EXPECT_LT(curved, 0.1 * straight) << "order " << order << ": " << curved << " vs " << straight;
+    }
+}
+
+TEST(CurvedSolver, GasAtRestStaysExactlyAtRest) {
+    // Uniform gas at rest between curved walls: the face quadrature of every
+    // curved cell closes, so the wall pressures balance to round-off
+    const std::string file = write_temp("curved_rest.msh", annulus_gmsh(3, 40, 3, true));
+    for (const std::string geometry : {"curved", "high_order"}) {
+        for (const std::string recon : {"type = \"MUSCL\"\n", "type = \"TENO\"\norder = 4\n"}) {
+            std::string input = vortex_input(file, geometry, recon, "n_steps = 20\n");
+            const size_t a = input.find("rho = "), b = input.find("[[boundaries]]");
+            input.replace(a, b - a, "rho = \"1.0\"\nu = [\"0.0\", \"0.0\"]\np = \"0.7142857142857143\"\n");
+            Solver solver;
+            solver.init(parse_toml(input));
+            ASSERT_TRUE(solver.get_mesh()->curved_geometry);
+            solver.run();
+            solver.copy_device_to_host();
+            double u_max = 0.0;
+            for (uint32_t c = 0; c < solver.get_mesh()->n_cells; c++) {
+                u_max = std::max({u_max, std::abs(double(solver.h_conservatives(c, 1))),
+                                  std::abs(double(solver.h_conservatives(c, 2)))});
+            }
+            EXPECT_LT(u_max, roundoff(1e-13)) << geometry << " " << recon;
+        }
+    }
+}
+
+TEST(CurvedSolver, RestartedRunMatchesUninterruptedRunExactly) {
+    const std::string file = write_temp("curved_restart.msh", annulus_gmsh(3, 40, 2));
+    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_curved_restart").string();
+    std::filesystem::remove_all(dir);
+    const std::string recon = "type = \"TENO\"\norder = 4\n";
+    const std::string output = "[[write_data]]\nprefix = \"" + dir + "/restart\"\nformat = \"restart\"\ninterval = 10\n";
+    Solver straight;
+    straight.init(parse_toml(vortex_input(file, "high_order", recon, "n_steps = 20\n")));
+    straight.run();
+    Solver first;
+    first.init(parse_toml(vortex_input(file, "high_order", recon, "n_steps = 10\n", output)));
+    first.run();
+    Solver second;
+    std::string input = vortex_input(file, "high_order", recon, "n_steps = 20\n");
+    const size_t a = input.find("type = \"analytical\""), b = input.find("[[boundaries]]");
+    input.replace(a, b - a, "type = \"restart\"\nfile = \"" + dir + "/restart_000010.restart\"\n");
+    second.init(parse_toml(input));
+    second.run();
+    EXPECT_EQ(density(second), density(straight));
+    std::filesystem::remove_all(dir);
+}
