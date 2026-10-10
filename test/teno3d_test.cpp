@@ -532,14 +532,16 @@ TEST(TENO3DTroubled, FaceValuesDoNotDependOnHowManyTroubledCellsARoundHolds) {
 }
 
 TEST(TENO3DSetup, SinglePrecisionTablesHalveThePseudoInversesAndKeepTheAccuracy) {
-    if (sizeof(rtype) == sizeof(float)) GTEST_SKIP() << "the tables are in single precision anyway";
+    if (sizeof(rtype) == sizeof(float)) {
+        GTEST_SKIP() << "the tables are in single precision anyway";
+    }
     auto mesh = make_mesh_3d("cartesian_tet", 6, 6, 6);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
     const std::string single = "single_precision_tables = true\n";
-    auto full = make_teno(mesh, bd, 5);
-    auto half = make_teno(mesh, bd, 5, single);
-    EXPECT_EQ(half->stencil_large.pinv.span(), (full->stencil_large.pinv.span() + 1) / 2);
-    EXPECT_EQ(half->stencil_small.pinv.span(), (full->stencil_small.pinv.span() + 1) / 2);
+    auto in_double = make_teno(mesh, bd, 5);
+    auto in_single = make_teno(mesh, bd, 5, single);
+    EXPECT_EQ(in_single->stencil_large.pinv.span(), (in_double->stencil_large.pinv.span() + 1) / 2);
+    EXPECT_EQ(in_single->stencil_small.pinv.span(), (in_double->stencil_small.pinv.span() + 1) / 2);
     for (const char * mode : {SMOOTH, TROUBLED}) {
         const double e_full = reconstruction_error(mesh, 5, 0.0, mode);
         const double e_half = reconstruction_error(mesh, 5, 0.0, std::string(mode) + single);
