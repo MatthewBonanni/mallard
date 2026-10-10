@@ -165,7 +165,7 @@ struct VorticityFunctor {
             vorticity(c, 2) = gradients(c, 1, 0) - gradients(c, 0, 1);
         } else {
             for (uint8_t k = 0; k < 3; k++) {
-                const uint8_t a = (k + 1) % 3, b = (k + 2) % 3;
+                const uint8_t a = static_cast<uint8_t>((k + 1) % 3), b = static_cast<uint8_t>((k + 2) % 3);
                 vorticity(c, k) = gradients(c, b, a) - gradients(c, a, b);
             }
         }
@@ -458,7 +458,7 @@ struct DynamicProcedureFunctor {
  */
 std::array<double, 2> exact_sums(const Kokkos::View<double *[2]> & terms, const uint32_t n_owned, const bool distributed) {
     std::array<double, 2> largest = {0.0, 0.0};
-    for (int k = 0; k < 2; k++) {
+    for (size_t k = 0; k < 2; k++) {
         double local = 0.0;
         Kokkos::parallel_reduce(
             "dynamic_largest", n_owned,
@@ -472,7 +472,7 @@ std::array<double, 2> exact_sums(const Kokkos::View<double *[2]> & terms, const 
     const int bits = 62 - static_cast<int>(std::ceil(std::log2(static_cast<double>(n_global) + 1.0)));
     std::array<int64_t, 2> sums = {0, 0};
     std::array<double, 2> scale = {0.0, 0.0};
-    for (int k = 0; k < 2; k++) {
+    for (size_t k = 0; k < 2; k++) {
         if (!(largest[k] > 0.0)) continue;
         const double s = std::ldexp(1.0, bits) / largest[k];
         scale[k] = s;
@@ -513,8 +513,8 @@ std::array<double, 3> cell_extents(const Mesh & mesh, const uint32_t c) {
     double a[3][3] = {};
     for (const auto & n : normals) {
         const double norm = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-        for (int i = 0; i < 3; i++) {
-            for (int j = 0; j < 3; j++) a[i][j] += 0.5 * n[i] * n[j] / norm;
+        for (size_t i = 0; i < 3; i++) {
+            for (size_t j = 0; j < 3; j++) a[i][j] += 0.5 * n[i] * n[j] / norm;
         }
     }
     // Cyclic Jacobi rotations of the symmetric tensor

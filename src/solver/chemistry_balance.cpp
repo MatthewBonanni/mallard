@@ -88,20 +88,20 @@ uint32_t ChemistryBalance::send(const ChemistryCells & cells, const Kokkos::View
         sum += Kokkos::fmax(1.0, static_cast<double>(previous(queue(i))));
     }, load);
     const std::vector<double> all = comm::allgatherv(std::vector<double>{load, static_cast<double>(n_queued)});
-    const int n_ranks = comm::size(), me = comm::rank();
+    const size_t n_ranks = static_cast<size_t>(comm::size()), me = static_cast<size_t>(comm::rank());
     double total = 0.0, largest = 0.0;
-    for (int r = 0; r < n_ranks; r++) {
+    for (size_t r = 0; r < n_ranks; r++) {
         total += all[2 * r];
         largest = std::max(largest, all[2 * r]);
     }
-    const double mean = total / n_ranks;
+    const double mean = total / static_cast<double>(n_ranks);
     if (total <= 0.0 || largest <= (1.0 + threshold) * mean) return kept;
 
     // Ranks above the mean give to ranks below it, both taken in rank order
     std::vector<double> excess(n_ranks);
     std::vector<uint32_t> given(n_ranks, 0);
-    for (int r = 0; r < n_ranks; r++) excess[r] = all[2 * r] - mean;
-    for (int s = 0, d = 0;;) {
+    for (size_t r = 0; r < n_ranks; r++) excess[r] = all[2 * r] - mean;
+    for (size_t s = 0, d = 0;;) {
         while (s < n_ranks && excess[s] <= 0.0) s++;
         while (d < n_ranks && excess[d] >= 0.0) d++;
         if (s == n_ranks || d == n_ranks) break;
@@ -110,9 +110,9 @@ uint32_t ChemistryBalance::send(const ChemistryCells & cells, const Kokkos::View
         const uint32_t count = std::min(static_cast<uint32_t>(std::floor(amount * queued / all[2 * s])), queued - given[s]);
         if (count > 0) {
             given[s] += count;
-            if (s == me) sends.push_back({d, queued - given[s], count});
+            if (s == me) sends.push_back({static_cast<int>(d), queued - given[s], count});
             if (d == me) {
-                receives.push_back({s, n_guests, count});
+                receives.push_back({static_cast<int>(s), n_guests, count});
                 n_guests += count;
             }
         }
