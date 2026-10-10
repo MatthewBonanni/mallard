@@ -118,7 +118,7 @@ std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const toml::value & input) 
             if (pair.zone_a == zones[d][0]) throw std::runtime_error("[mesh] periodic lists " + dir + " twice.");
         }
         PeriodicPair pair{zones[d][0], zones[d][1], {}};
-        pair.translation[d] = L[d];
+        pair.translation[static_cast<size_t>(d)] = L[static_cast<size_t>(d)];
         pairs.push_back(pair);
     }
     return pairs;
@@ -133,7 +133,7 @@ void Mesh::set_type(MeshType type_in) {
 }
 
 uint32_t Mesh::n_face_zones() const {
-    return m_face_zones.size();
+    return static_cast<uint32_t>(m_face_zones.size());
 }
 
 std::vector<FaceZone> * Mesh::face_zones() {
@@ -180,15 +180,15 @@ uint32_t Mesh::h_n_nodes_of_face(uint32_t i_face) const {
     return h_offsets_nodes_of_face(i_face + 1) - h_offsets_nodes_of_face(i_face);
 }
 
-uint32_t Mesh::h_node_of_cell(uint32_t i_cell, uint8_t i_node_local) const {
+uint32_t Mesh::h_node_of_cell(uint32_t i_cell, uint32_t i_node_local) const {
     return h_nodes_of_cell(h_offsets_nodes_of_cell(i_cell) + i_node_local);
 }
 
-uint32_t Mesh::h_face_of_cell(uint32_t i_cell, uint8_t i_face_local) const {
+uint32_t Mesh::h_face_of_cell(uint32_t i_cell, uint32_t i_face_local) const {
     return h_faces_of_cell(h_offsets_faces_of_cell(i_cell) + i_face_local);
 }
 
-uint32_t Mesh::h_node_of_face(uint32_t i_face, uint8_t i_node_local) const {
+uint32_t Mesh::h_node_of_face(uint32_t i_face, uint32_t i_node_local) const {
     return h_nodes_of_face(h_offsets_nodes_of_face(i_face) + i_node_local);
 }
 
@@ -214,9 +214,9 @@ void Mesh::h_neighbors_of_cell_helper(uint32_t i_cell, uint8_t n_order, std::vec
             } else {
                 // Recursively call the function for the neighbor cv
                 if (i_cell_0 == static_cast<int32_t>(i_cell)) {
-                    h_neighbors_of_cell_helper(i_cell_1, n_order - 1, neighbors);
+                    h_neighbors_of_cell_helper(static_cast<uint32_t>(i_cell_1), n_order - 1, neighbors);
                 } else {
-                    h_neighbors_of_cell_helper(i_cell_0, n_order - 1, neighbors);
+                    h_neighbors_of_cell_helper(static_cast<uint32_t>(i_cell_0), n_order - 1, neighbors);
                 }
             }
         }
@@ -371,10 +371,10 @@ void Mesh::compute_face_areas() {
     for (uint32_t i_face = 0; i_face < n_faces; ++i_face) {
         uint32_t i_node_0 = h_node_of_face(i_face, 0);
         uint32_t i_node_1 = h_node_of_face(i_face, 1);
-        h_face_area(i_face) = std::sqrt(std::pow(h_node_coords(i_node_1, 0) -
+        h_face_area(i_face) = static_cast<rtype>(std::sqrt(std::pow(h_node_coords(i_node_1, 0) -
                                                  h_node_coords(i_node_0, 0), 2) +
                                         std::pow(h_node_coords(i_node_1, 1) -
-                                                 h_node_coords(i_node_0, 1), 2));
+                                                 h_node_coords(i_node_0, 1), 2)));
     }
 }
 
@@ -431,11 +431,11 @@ std::vector<uint32_t> Mesh::cells_by_global_id() const {
 
 uint8_t Mesh::shift_index(const std::array<int8_t, 3> & lattice) {
     for (size_t i = 0; i < shift_lattice.size(); i++) {
-        if (shift_lattice[i] == lattice) return i;
+        if (shift_lattice[i] == lattice) return static_cast<uint8_t>(i);
     }
     if (shift_lattice.size() == 256) throw std::runtime_error("Mesh: too many periodic translations.");
     shift_lattice.push_back(lattice);
-    return shift_lattice.size() - 1;
+    return static_cast<uint8_t>(shift_lattice.size() - 1);
 }
 
 void Mesh::compute_cell_neighbors() {
@@ -479,7 +479,7 @@ void Mesh::compute_cell_neighbors() {
                 uint8_t shift = 0;
                 if (periodic) {
                     std::array<int8_t, 3> lattice;
-                    for (int j = 0; j < 3; j++) lattice[j] = h_node_lattice[a][j] - h_node_lattice[b][j];
+                    for (size_t j = 0; j < 3; j++) lattice[j] = h_node_lattice[a][j] - h_node_lattice[b][j];
                     shift = shift_index(lattice);
                 }
                 if (other == c && shift == 0) continue;
@@ -492,7 +492,7 @@ void Mesh::compute_cell_neighbors() {
         }
         // By global id, so that neighbor order does not depend on the local numbering
         std::sort(nb.begin(), nb.end(), [&](uint64_t a, uint64_t b) {
-            return std::make_pair(h_global_cell(a >> 8), a & 0xff) < std::make_pair(h_global_cell(b >> 8), b & 0xff);
+            return std::make_pair(h_global_cell(static_cast<uint32_t>(a >> 8)), a & 0xff) < std::make_pair(h_global_cell(static_cast<uint32_t>(b >> 8)), b & 0xff);
         });
         nb.erase(std::unique(nb.begin(), nb.end()), nb.end());
         for (size_t i = 1; i < nb.size(); i++) {
@@ -502,7 +502,7 @@ void Mesh::compute_cell_neighbors() {
             }
         }
         flat.insert(flat.end(), nb.begin(), nb.end());
-        offsets[c + 1] = flat.size();
+        offsets[c + 1] = static_cast<uint32_t>(flat.size());
     }
     offsets_cells_of_cell = Kokkos::View<uint32_t *>("offsets_cells_of_cell", n_cells + 1);
     cells_of_cell = Kokkos::View<uint32_t *>("cells_of_cell", flat.size());
@@ -512,7 +512,7 @@ void Mesh::compute_cell_neighbors() {
     h_cells_of_cell_shift = Kokkos::create_mirror_view(cells_of_cell_shift);
     for (uint32_t i = 0; i <= n_cells; i++) h_offsets_cells_of_cell(i) = offsets[i];
     for (size_t i = 0; i < flat.size(); i++) {
-        h_cells_of_cell(i) = flat[i] >> 8;
+        h_cells_of_cell(i) = static_cast<uint32_t>(flat[i] >> 8);
         h_cells_of_cell_shift(i) = flat[i] & 0xff;
     }
 
@@ -524,7 +524,7 @@ void Mesh::compute_cell_neighbors() {
             for (size_t j = 0; j < periodic_translations.size(); j++) {
                 x += shift_lattice[r][j] * double(periodic_translations[j][i]);
             }
-            h_shifts(r, i) = x;
+            h_shifts(r, i) = static_cast<rtype>(x);
         }
     }
     Kokkos::deep_copy(offsets_cells_of_cell, h_offsets_cells_of_cell);
@@ -592,12 +592,12 @@ void Mesh::copy_device_to_host() {
 }
 
 void Mesh::init_box(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, bool triangles, bool wedge) {
-    const rtype dx = Lx / nx;
-    const rtype dy = Ly / ny;
+    const rtype dx = Lx / static_cast<rtype>(nx);
+    const rtype dy = Ly / static_cast<rtype>(ny);
     std::vector<std::array<rtype, N_DIM>> nodes;
     for (uint32_t i = 0; i < nx + 1; ++i) {
         for (uint32_t j = 0; j < ny + 1; ++j) {
-            std::array<rtype, 2> x = {i * dx, j * dy};
+            std::array<rtype, 2> x = {static_cast<rtype>(i) * dx, static_cast<rtype>(j) * dy};
             if (wedge) x = wedge_node(x[0], x[1], Ly);
             std::array<rtype, N_DIM> p{};
             p[0] = x[0];

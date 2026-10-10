@@ -40,7 +40,7 @@ void stress_entry(uint8_t k, uint8_t & r, uint8_t & c) {
 
 /** @brief Index of the lower-triangle entry (r, c), c <= r, row by row. */
 KOKKOS_INLINE_FUNCTION
-constexpr uint8_t lower(uint8_t r, uint8_t c) { return r * (r + 1) / 2 + c; }
+constexpr uint32_t lower(uint32_t r, uint32_t c) { return r * (r + 1) / 2 + c; }
 
 std::string point_string(const Point & x) {
     std::ostringstream s;
@@ -93,11 +93,12 @@ std::array<double, N_STRESS> cholesky(const std::array<double, N_STRESS> & s, co
  *        and the correlation exp(-pi r^2 / (4 n^2)), whose integral is n.
  */
 std::vector<double> gaussian_kernel(double n, int32_t N) {
-    std::vector<double> b(2 * N + 1);
+    std::vector<double> b(static_cast<size_t>(2 * N + 1));
     double sum2 = 0.0;
     for (int32_t k = -N; k <= N; k++) {
-        b[k + N] = std::exp(-PI * double(k) * double(k) / (2.0 * n * n));
-        sum2 += b[k + N] * b[k + N];
+        double & b_k = b[static_cast<size_t>(k + N)];
+        b_k = std::exp(-PI * double(k) * double(k) / (2.0 * n * n));
+        sum2 += b_k * b_k;
     }
     for (double & v : b) v /= std::sqrt(sum2);
     return b;
@@ -267,7 +268,7 @@ void InletProfile::read_table(const toml::value & turbulence, const std::string 
             throw InputError(key + ": " + file + ": the coordinate must increase from row to row.");
         }
         coordinate.push_back(row[0]);
-        for (size_t c = 0; c < use.size(); c++) columns[c].push_back(use[c] < 0 ? 0.0 : row[use[c]]);
+        for (size_t c = 0; c < use.size(); c++) columns[c].push_back(use[c] < 0 ? 0.0 : row[static_cast<size_t>(use[c])]);
     }
     if (coordinate.size() < 2) throw InputError(key + ": " + file + " needs at least two rows.");
 }
@@ -283,7 +284,7 @@ double InletProfile::table(size_t column, double s) const {
 
 std::array<double, N_DIM> InletProfile::velocity(const Point & x) const {
     std::array<double, N_DIM> v{};
-    FOR_I_DIM v[i] = (axis >= 0) ? table(i, x[axis]) : u[i].at(x);
+    FOR_I_DIM v[i] = (axis >= 0) ? table(i, x[static_cast<size_t>(axis)]) : u[i].at(x);
     return v;
 }
 
@@ -291,7 +292,7 @@ std::array<double, N_STRESS> InletProfile::stress_at(const Point & x) const {
     std::array<double, N_STRESS> s{};
     for (uint8_t k = 0; k < N_STRESS; k++) {
         if (axis >= 0) {
-            s[k] = table(N_DIM + k, x[axis]);
+            s[k] = table(N_DIM + k, x[static_cast<size_t>(axis)]);
         } else if (!stress.empty()) {
             s[k] = stress[k].at(x);
         }
@@ -384,8 +385,8 @@ SyntheticInflow::SyntheticInflow(const toml::value & boundary, const std::string
     if (axis_min != axis_max) {
         throw InputError(tw + ": synthetic turbulence needs a planar inlet normal to a coordinate axis.");
     }
-    normal_axis = axis_min;
-    for (int d = 0, a = 0; a < N_DIM; a++) {
+    normal_axis = static_cast<uint32_t>(axis_min);
+    for (uint32_t d = 0, a = 0; a < N_DIM; a++) {
         if (a != normal_axis) axes[d++] = a;
     }
 
@@ -413,7 +414,7 @@ SyntheticInflow::SyntheticInflow(const toml::value & boundary, const std::string
     std::vector<double> area_global(n_global);
     for (size_t i = 0; i < n_global; i++) {
         const size_t g = order[i];
-        for (int d = 0; d < N_DIM; d++) x_global[i][d] = geometry[g * (N_DIM + 1) + d];
+        for (size_t d = 0; d < N_DIM; d++) x_global[i][d] = geometry[g * (N_DIM + 1) + d];
         area_global[i] = geometry[g * (N_DIM + 1) + N_DIM];
     }
 
@@ -467,14 +468,14 @@ SyntheticInflow::SyntheticInflow(const toml::value & boundary, const std::string
     int32_t max_width = 0;
     std::vector<std::vector<double>> b(N_DIM * N_DIM);
     for (uint8_t j = 0; j < N_DIM; j++) {
-        for (int d = 0; d < N_DIM; d++) {
+        for (uint32_t d = 0; d < N_DIM; d++) {
             const double n = (d < N_T) ? L[j][axes[d]] / spacing[d] : L[j][normal_axis] / (U_c * dt_plane);
             int32_t N = static_cast<int32_t>(std::ceil(2.0 * n));
             if (d < N_T && periodic[d]) N = std::min(N, (n_grid[d] - 2) / 2);
             half_width[j][d] = N;
             b[j * N_DIM + d] = gaussian_kernel(n, N);
             double r = 0.0;
-            for (int32_t k = 0; k < 2 * N; k++) r += b[j * N_DIM + d][k] * b[j * N_DIM + d][k + 1];
+            for (size_t k = 0; k < static_cast<size_t>(2 * N); k++) r += b[j * N_DIM + d][k] * b[j * N_DIM + d][k + 1];
             rho1[j][d] = r;
             max_width = std::max(max_width, N);
         }
@@ -493,7 +494,7 @@ SyntheticInflow::SyntheticInflow(const toml::value & boundary, const std::string
     kernels = Kokkos::View<rtype ***>("inflow_kernels", N_DIM, N_DIM, 2 * max_width + 1);
     auto h_kernels = Kokkos::create_mirror_view(kernels);
     for (uint8_t j = 0; j < N_DIM; j++) {
-        for (int d = 0; d < N_DIM; d++) {
+        for (uint32_t d = 0; d < N_DIM; d++) {
             for (size_t k = 0; k < b[j * N_DIM + d].size(); k++) h_kernels(j, d, k) = static_cast<rtype>(b[j * N_DIM + d][k]);
         }
     }
@@ -535,7 +536,7 @@ SyntheticInflow::SyntheticInflow(const toml::value & boundary, const std::string
     // Weight of each grid point in the area integral of the normal fluctuation, from all faces of the inlet
     if (zero_net_flux && n_faces > 0) {
         flux_weight = Kokkos::View<rtype **>("inflow_flux_weight", N_DIM, n_points);
-        std::vector<double> weight(size_t(N_DIM) * n_points, 0.0);
+        std::vector<double> weight(size_t(N_DIM) * static_cast<size_t>(n_points), 0.0);
         for (size_t i = 0; i < n_global; i++) {
             int32_t corner[N_T][2];
             double fraction[N_T];
@@ -546,13 +547,13 @@ SyntheticInflow::SyntheticInflow(const toml::value & boundary, const std::string
                 for (uint32_t bits = 0; bits < (1u << N_T); bits++) {
                     double w;
                     const int32_t p = corner_point(corner, fraction, bits, w);
-                    weight[size_t(j) * n_points + p] += a * w;
+                    weight[size_t(j) * static_cast<size_t>(n_points) + static_cast<size_t>(p)] += a * w;
                 }
             }
         }
         auto h_weight = Kokkos::create_mirror_view(flux_weight);
         for (uint8_t j = 0; j < N_DIM; j++) {
-            for (int32_t p = 0; p < n_points; p++) h_weight(j, p) = static_cast<rtype>(weight[size_t(j) * n_points + p]);
+            for (int32_t p = 0; p < n_points; p++) h_weight(j, p) = static_cast<rtype>(weight[size_t(j) * static_cast<size_t>(n_points) + static_cast<size_t>(p)]);
         }
         Kokkos::deep_copy(flux_weight, h_weight);
     }
@@ -573,7 +574,7 @@ SyntheticInflow::SyntheticInflow(const toml::value & boundary, const std::string
     for (uint32_t i = 0; i < n_faces; i++) {
         const uint32_t f = faces[i];
         Point x;
-        for (int d = 0; d < N_DIM; d++) x[d] = double(mesh.h_face_coords(f, d));
+        for (size_t d = 0; d < N_DIM; d++) x[d] = double(mesh.h_face_coords(f, d));
         int32_t corner[N_T][2];
         double fraction[N_T];
         locate(x, corner, fraction);
@@ -607,12 +608,12 @@ SyntheticInflow::SyntheticInflow(const toml::value & boundary, const std::string
         random_work = Kokkos::View<rtype **>("inflow_random", N_DIM, n_random);
         filter_work = Kokkos::View<rtype **>("inflow_filter_work", N_DIM, n_first);
         filtered = Kokkos::View<rtype ***>("inflow_filtered", 2 * n_time + 3, N_DIM, n_points);
-        filtered_index.assign(2 * n_time + 3, std::numeric_limits<int64_t>::min());
+        filtered_index.assign(static_cast<size_t>(2 * n_time + 3), std::numeric_limits<int64_t>::min());
         planes = Kokkos::View<rtype ***>("inflow_planes", N_CACHE, N_DIM, n_points);
         plane_index.assign(N_CACHE, std::numeric_limits<int64_t>::min());
         plane_used.assign(N_CACHE, 0);
         if (zero_net_flux) {
-            chunk_sums = Kokkos::View<rtype **>("inflow_chunk_sums", (n_points + CHUNK - 1) / CHUNK, N_DIM);
+            chunk_sums = Kokkos::View<rtype **>("inflow_chunk_sums", (static_cast<uint32_t>(n_points) + CHUNK - 1) / CHUNK, N_DIM);
             plane_flux = Kokkos::View<rtype **>("inflow_plane_flux", N_CACHE, N_DIM);
         }
     }
@@ -658,13 +659,13 @@ void SyntheticInflow::random_plane(int64_t m, uint32_t slot) {
     Kokkos::Array<int32_t, N_T> n, np, pd;
     Kokkos::Array<int32_t, N_T> wrap;
     Kokkos::Array<int32_t, N_DIM> N0, N1;
-    for (int d = 0; d < N_T; d++) {
+    for (uint32_t d = 0; d < N_T; d++) {
         n[d] = n_grid[d];
         np[d] = n_padded[d];
         pd[d] = pad[d];
         wrap[d] = periodic[d] ? 1 : 0;
     }
-    for (int j = 0; j < N_DIM; j++) {
+    for (uint32_t j = 0; j < N_DIM; j++) {
         N0[j] = half_width[j][0];
         N1[j] = half_width[j][N_T - 1];
     }
@@ -682,7 +683,7 @@ void SyntheticInflow::random_plane(int64_t m, uint32_t slot) {
     if constexpr (N_T == 1) {
         Kokkos::parallel_for("inflow_filter_0", Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {int(N_DIM), n[0]}),
                              KOKKOS_LAMBDA(const int j, const int i0) {
-            const int32_t h = N0[j];
+            const int32_t h = N0[static_cast<uint32_t>(j)];
             rtype sum = 0.0_r;
             for (int32_t k = -h; k <= h; k++) {
                 const int64_t i = i0 + k;
@@ -696,7 +697,7 @@ void SyntheticInflow::random_plane(int64_t m, uint32_t slot) {
         Kokkos::parallel_for("inflow_filter_0", Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {int(N_DIM), n_first}),
                              KOKKOS_LAMBDA(const int j, const int q) {
             const int32_t i0 = q / np[N_T - 1], q1 = q % np[N_T - 1];
-            const int32_t h = N0[j];
+            const int32_t h = N0[static_cast<uint32_t>(j)];
             rtype sum = 0.0_r;
             for (int32_t k = -h; k <= h; k++) {
                 const int64_t i = i0 + k;
@@ -709,7 +710,7 @@ void SyntheticInflow::random_plane(int64_t m, uint32_t slot) {
         Kokkos::parallel_for("inflow_filter_1", Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {int(N_DIM), n_out}),
                              KOKKOS_LAMBDA(const int j, const int p) {
             const int32_t i0 = p / n[N_T - 1], i1 = p % n[N_T - 1];
-            const int32_t h = N1[j];
+            const int32_t h = N1[static_cast<uint32_t>(j)];
             rtype sum = 0.0_r;
             for (int32_t k = -h; k <= h; k++) {
                 const int64_t i = i1 + k;
@@ -726,10 +727,10 @@ void SyntheticInflow::time_filter(int64_t m, uint32_t slot) {
     const auto out = Kokkos::subview(planes, slot, Kokkos::ALL(), Kokkos::ALL());
     const int64_t n_slots = static_cast<int64_t>(filtered_index.size());
     Kokkos::Array<int32_t, N_DIM> N;
-    for (int j = 0; j < N_DIM; j++) N[j] = half_width[j][N_T];
+    for (uint32_t j = 0; j < N_DIM; j++) N[j] = half_width[j][N_T];
     Kokkos::parallel_for("inflow_filter_time", Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {int(N_DIM), n_points}),
                          KOKKOS_LAMBDA(const int j, const int p) {
-        const int32_t h = N[j];
+        const int32_t h = N[static_cast<uint32_t>(j)];
         rtype sum = 0.0_r;
         for (int32_t k = -h; k <= h; k++) sum += b(j, N_T, k + h) * in(positive_mod(m + k, n_slots), j, p);
         out(j, p) = sum;
@@ -764,13 +765,13 @@ void SyntheticInflow::fill(double t, const Kokkos::View<rtype *[N_DIM]> & target
     const double a = s - double(m);
     const uint32_t s0 = plane(m), s1 = plane(m + 1);
     Kokkos::Array<rtype, N_DIM> tau;
-    for (int j = 0; j < N_DIM; j++) tau[j] = static_cast<rtype>(1.0 / std::sqrt(interpolated_variance(a, rho1[j][N_T])));
+    for (uint32_t j = 0; j < N_DIM; j++) tau[j] = static_cast<rtype>(1.0 / std::sqrt(interpolated_variance(a, rho1[j][N_T])));
     const rtype a_r = static_cast<rtype>(a);
     const rtype inv_area = static_cast<rtype>(1.0 / area);
     const bool flux = zero_net_flux;
-    const int axis = normal_axis;
+    const uint32_t axis = normal_axis;
     Kokkos::Array<int32_t, N_T> n;
-    for (int d = 0; d < N_T; d++) n[d] = n_grid[d];
+    for (uint32_t d = 0; d < N_T; d++) n[d] = n_grid[d];
     const Kokkos::View<rtype ***> P = planes;
     const Kokkos::View<rtype **> total = plane_flux;
     const Kokkos::View<int32_t *> chars = face_char;
@@ -781,12 +782,12 @@ void SyntheticInflow::fill(double t, const Kokkos::View<rtype *[N_DIM]> & target
     Kokkos::parallel_for("inflow_fill", n_faces, KOKKOS_LAMBDA(const uint32_t i) {
         // Unit-variance fluctuation of each component, interpolated from the grid
         rtype v[N_DIM];
-        for (int j = 0; j < N_DIM; j++) {
+        for (uint32_t j = 0; j < N_DIM; j++) {
             rtype sum = 0.0_r;
             for (uint32_t bits = 0; bits < (1u << N_T); bits++) {
                 int32_t p = 0;
                 rtype w = 1.0_r;
-                for (int d = 0; d < N_T; d++) {
+                for (uint32_t d = 0; d < N_T; d++) {
                     const uint32_t up = (bits >> d) & 1u;
                     p = p * n[d] + corner(i, d, up);
                     w *= up ? fraction(i, d) : 1.0_r - fraction(i, d);
@@ -796,14 +797,14 @@ void SyntheticInflow::fill(double t, const Kokkos::View<rtype *[N_DIM]> & target
             v[j] = sum * scale(i, j) * tau[j];
         }
         rtype u[N_DIM];
-        for (int r = 0; r < N_DIM; r++) {
+        for (uint32_t r = 0; r < N_DIM; r++) {
             u[r] = mean(i, r);
-            for (int c = 0; c <= r; c++) u[r] += chol(i, lower(r, c)) * v[c];
+            for (uint32_t c = 0; c <= r; c++) u[r] += chol(i, lower(r, c)) * v[c];
         }
         if (flux) {
             // Area mean of the normal fluctuation over the whole inlet
             rtype q = 0.0_r;
-            for (int j = 0; j < N_DIM; j++) q += tau[j] * ((1.0_r - a_r) * total(s0, j) + a_r * total(s1, j));
+            for (uint32_t j = 0; j < N_DIM; j++) q += tau[j] * ((1.0_r - a_r) * total(s0, j) + a_r * total(s1, j));
             u[axis] -= q * inv_area;
         }
         const int32_t k = chars(i);
