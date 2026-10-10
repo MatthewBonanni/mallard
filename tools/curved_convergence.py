@@ -3,7 +3,7 @@
 
     curved_convergence.py RUN_DIR --mallard BUILD/src/Mallard [--orders 3 4 5 6]
         [--levels 4 8 16] [--geometry straight curved] [--triangles] [--t-stop 12]
-        [--mach 2.25] [--threads 4] [--mpi N] [--extra 'TOML lines']
+        [--mach 2.25] [--threads 4] [--launcher 'mpirun -n 1'] [--extra 'TOML lines']
 
 The annulus 1 <= r <= 1.384 holds the irrotational vortex u_theta = M / r
 (M = 2.25 at the inner wall by default, rho = 1, p = 1 / gamma there), an
@@ -128,8 +128,8 @@ def run_case(case_dir, args, order, level, geometry):
     with open(os.path.join(case_dir, "input.toml"), "w") as f:
         f.write(text)
     run = [args.mallard, "-i", "input.toml", f"--kokkos-num-threads={args.threads}"]
-    if args.mpi > 1:
-        run = ["mpirun", "-n", str(args.mpi)] + run
+    if args.launcher:
+        run = args.launcher.split() + run
     with open(os.path.join(case_dir, "log.txt"), "w") as log:
         rc = subprocess.run(run, cwd=case_dir, stdout=log, stderr=subprocess.STDOUT).returncode
     if rc != 0:
@@ -160,7 +160,7 @@ def main():
     ap.add_argument("--cfl", type=float, default=0.4)
     ap.add_argument("--mach", type=float, default=2.25)
     ap.add_argument("--threads", type=int, default=4)
-    ap.add_argument("--mpi", type=int, default=1)
+    ap.add_argument("--launcher", default="", help="Command prefix, e.g. 'mpirun -n 1'")
     ap.add_argument("--extra", default="")
     args = ap.parse_args()
     args.mallard = os.path.abspath(args.mallard)

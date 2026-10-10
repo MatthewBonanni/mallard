@@ -360,6 +360,18 @@ Geometry::Geometry(const Mesh & mesh_in, const Surfaces & surfaces) : mesh(mesh_
             if (sf.shape < 0) {
                 for (uint32_t i : element_edge(nc, g, k)) e.nodes.push_back(sf.nodes[i]);
                 if (a > b) std::reverse(e.nodes.begin(), e.nodes.end());
+                // Straight high-order edges (Gmsh writes every boundary face at the mesh's
+                // order, planes included) stay straight
+                const Vec3 & p = e.nodes.front();
+                const Vec3 d = sub(e.nodes.back(), p);
+                const double length2 = dot(d, d);
+                bool straight = true;
+                for (size_t i = 1; i + 1 < e.nodes.size(); i++) {
+                    const Vec3 lin = add(p, scale(double(i) / double(e.nodes.size() - 1), d));
+                    const Vec3 dev = sub(e.nodes[i], lin);
+                    straight &= dot(dev, dev) <= 1e-20 * length2;
+                }
+                if (straight) continue;
             }
             edge_of[key] = int32_t(edges.size());
             edges.push_back(std::move(e));

@@ -267,10 +267,19 @@ void Solver::init_mesh() {
                                                   logging::count(max_halo).c_str()));
     }
     if (mesh->curved_geometry) {
-        uint32_t n_high_order = 0;
+        // Curved boundary faces of owned cells, and curved faces in all
+        uint64_t counts[2] = {0, 0};
+        for (uint32_t f = 0; f < mesh->n_faces; f++) {
+            if (!mesh->curved_geometry->face_is_curved(f) || uint32_t(mesh->h_cells_of_face(f, 0)) >= mesh->n_owned()) continue;
+            counts[0] += mesh->h_cells_of_face(f, 1) < 0;
+            counts[1]++;
+        }
+        const auto total = comm::allreduce(std::array<uint64_t, 2>{counts[0], counts[1]}, comm::Op::SUM);
+        std::string text = logging::count(total[0]) + " boundary faces";
+        if (N_DIM == 3) text += " (" + logging::count(total[1]) + " curved faces)";
+        uint64_t n_high_order = 0;
         for (const auto & face : surfaces.faces) n_high_order += face.shape < 0;
-        std::string text = logging::count(surfaces.faces.size()) + " faces";
-        if (n_high_order > 0) text += ", " + logging::count(n_high_order) + " high-order from the mesh file";
+        if (n_high_order > 0) text += ", high-order faces from the mesh file";
         for (const auto & shape : surfaces.shapes) text += ", " + shape.zone + " projected";
         mesh_summary.emplace_back("Curved boundary", text);
     }

@@ -66,7 +66,10 @@ triangles to the cell's vertex average.
 For Gmsh meshes, each physical curve (2D) or surface (3D) becomes a boundary
 zone named after it (`physical_<tag>` if unnamed); boundary faces not in any
 such group form the zone `unassigned`. Elements of other dimensions (points,
-and curves in 3D) are ignored, and higher-order elements are rejected.
+and curves in 3D) are ignored. Elements of order 2 and 3 are read by their
+corners; high-order boundary elements (`line3`, `line4` in 2D; `triangle6`,
+`triangle9`, `triangle10`, `quadrangle8`, `quadrangle9`, `quadrangle16` in 3D)
+curve their faces (see curved boundaries below).
 
 In a distributed run every rank reads a Gmsh file whole (keeping only its
 share), so large meshes should be converted to Mallard's HDF5 mesh format
@@ -84,7 +87,44 @@ The file holds global arrays, with global ids the row indices:
 count, Gmsh/VTK node order), `/boundary/offsets`, `/boundary/nodes` and
 `/boundary/zone` (boundary faces and their zone index), the attribute
 `/boundary/zone_names`, and the root attributes `format = "mallard-mesh"`,
-`version = 1` and `dimension`.
+`version = 1` and `dimension`. Meshes with high-order boundary faces also have
+`/boundary/high_order/offsets` (per boundary face) and
+`/boundary/high_order/coordinates` (all nodes of each high-order face, corners
+first in Gmsh order; none for linear faces).
+
+### Curved boundaries
+
+Boundary faces follow the true curved geometry where the mesh file has
+high-order boundary elements, or where `[[mesh.curved]]` projects a zone onto
+an analytic shape (any mesh: generated, linear Gmsh, HDF5). Curved faces get
+quadrature points on the curve or surface with their own normals and
+Jacobians, and the cells touching them their exact volumes, centroids and
+TENO moments; in 3D the faces sharing an edge with a curved face (side faces
+of prism layers, symmetry planes meeting the wall) are blended from their
+edges. This brings orders 3 to 6 to their design accuracy at curved walls
+(design: `docs/design/curved_boundaries.md`).
+
+| Key | Description |
+|---|---|
+| `curved_geometry` | (`[mesh]`) `false` ignores high-order nodes and `[[mesh.curved]]`: straight-sided faces everywhere. Default `true` |
+| `zone` | (`[[mesh.curved]]`) Boundary zone to curve |
+| `shape` | `circle` (2D), `sphere` or `cylinder` (3D) |
+| `center` | A point of the shape's center (cylinders: of their axis) |
+| `radius` | Radius |
+| `axis` | (`cylinder`) Direction of the axis |
+
+```toml
+[[mesh.curved]]
+zone = "cylinder"
+shape = "circle"
+center = [0.0, 0.0]
+radius = 0.5
+```
+
+Points of a straight face are projected radially onto the shape, minus the
+linear interpolant of its corners' own offsets, so faces still meet at the
+mesh nodes; zone nodes farther than 5% of an edge length from the shape are
+an error. Curved boundaries are not yet supported with `physics.axisymmetric`.
 
 ## `[[periodic]]`
 
@@ -375,6 +415,7 @@ Strength and reference are evaluated once at cell centroids.
 | `cache_file` | (`TENO`) Save the precomputed stencils and matrices here, and reuse them on later runs of the same mesh, boundary assignment and TENO options; anything else is detected and recomputed. Distributed runs write one file per rank, `<cache_file>.r<rank>-of-<ranks>`, for that rank count and partition, and record the halo depth the stencils need, so a cached run sets up its halo once. Hilbert and graph partitions repeat for the same mesh and rank count. Size per cell: about 2.5 / 4 / 6 / 11 KB in 2D and 10 / 19 / 36 KB (hexahedra) or 9 / 14 / 33 / 74 KB (tetrahedra) in 3D for orders 3 / 4 / 5 / 6, e.g. 9.4 GB for 64^3 hexahedra at order 5; reading it takes seconds; the 3D setup takes about 5 s per million hexahedra and 20 s per million tetrahedra on an A100 (order 5), and minutes on CPUs. The cache records whether the device or the host computed it; both give the same tables |
 | `cache_single_precision` | (`TENO`) Store the pseudo-inverses and smoothness-indicator matrices of `cache_file` in single precision: about half the size (19 instead of 36 KB per cell for hexahedra at order 5). The run that writes the cache rounds them too, so it and the runs that read the cache agree with each other, but no longer with a run without it, whose results differ at single-precision round-off. Default false |
 | `bound_preserving` | (`TENO`) Scale troubled-cell polynomials to keep density and pressure within the neighbors' range, default false |
+| `curved_mirrors` | (`TENO`) Also take mirror images across curved boundary faces (across each face's plane) into the stencils, default false: stencils are one-sided at curved walls, where mirroring is only second-order consistent |
 
 ## `[chemistry]`
 
