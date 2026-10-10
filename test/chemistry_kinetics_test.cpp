@@ -314,7 +314,7 @@ TEST(ChemistryKineticsTest, ReaderKeepsReactionOptionsAndRejectsUnsupportedTypes
     EXPECT_EQ(collider.type, ReactionType::FALLOFF);
     EXPECT_EQ(collider.default_efficiency, 0.0);
     ASSERT_EQ(collider.efficiencies.size(), 1u);
-    EXPECT_EQ(collider.efficiencies[0].first, mech.species_index("AR"));
+    EXPECT_EQ(collider.efficiencies[0].first, static_cast<uint32_t>(mech.species_index("AR")));
     const Reaction & orders = mech.reactions[5];
     EXPECT_FALSE(orders.reversible);
     ASSERT_EQ(orders.orders.size(), 2u);

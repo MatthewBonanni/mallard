@@ -39,7 +39,7 @@ struct ReactorOptions {
  */
 inline bool use_sparse_lu(const ReactorOptions & options, const Mechanism & mechanism) {
     if (options.sparse >= 0) return options.sparse == 1;
-    const uint32_t n = static_cast<uint32_t>(mechanism.n_species()) + 1;
+    const uint32_t n = mechanism.n_species() + 1;
     if (n < 31) return false;
     const SparseLUPattern<Kokkos::HostSpace> pattern = make_sparse_lu_pattern<Kokkos::HostSpace>(mechanism);
     return pattern.nnz <= 0.6 * static_cast<double>(n) * n;

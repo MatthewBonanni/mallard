@@ -78,8 +78,8 @@ std::string format(const char * fmt, ...) {
     va_copy(copy, args);
     const int n = std::vsnprintf(nullptr, 0, fmt, copy);
     va_end(copy);
-    std::string out(n > 0 ? n : 0, '\0');
-    if (n > 0) std::vsnprintf(out.data(), n + 1, fmt, args);
+    std::string out(n > 0 ? static_cast<size_t>(n) : 0, '\0');
+    if (n > 0) std::vsnprintf(out.data(), static_cast<size_t>(n) + 1, fmt, args);
     va_end(args);
     return out;
 }
@@ -108,7 +108,7 @@ void section(std::string_view title, std::string_view right) {
     if (!comm::is_root()) return;
     const int used = 4 + static_cast<int>(title.size()) + (right.empty() ? 0 : 1 + static_cast<int>(right.size()));
     std::string text = style("== ", Style::DIM) + style(title, Style::BOLD) + " ";
-    text += style(std::string(std::max(3, WIDTH - used - 1), '='), Style::DIM);
+    text += style(std::string(static_cast<size_t>(std::max(3, WIDTH - used - 1)), '='), Style::DIM);
     if (!right.empty()) text += " " + std::string(right);
     line();
     line(text);
@@ -167,8 +167,8 @@ void error(std::string_view message) {
 std::string count(uint64_t n) {
     std::string digits = std::to_string(n);
     std::string out;
-    const int len = static_cast<int>(digits.size());
-    for (int i = 0; i < len; i++) {
+    const size_t len = digits.size();
+    for (size_t i = 0; i < len; i++) {
         if (i > 0 && (len - i) % 3 == 0) out += ',';
         out += digits[i];
     }

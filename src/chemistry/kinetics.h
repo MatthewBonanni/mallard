@@ -574,9 +574,10 @@ KineticsTable<MemorySpace> make_kinetics_table(const Mechanism & mechanism,
     using Table = KineticsTable<MemorySpace>;
     Table t;
     t.C_reg = C_reg;
-    t.n_species = static_cast<uint32_t>(mechanism.n_species());
+    t.n_species = mechanism.n_species();
     t.n_reactions = static_cast<uint32_t>(mechanism.reactions.size());
     const uint32_t nr = t.n_reactions;
+    auto u32 = [](size_t n) { return static_cast<uint32_t>(n); };
     std::vector<uint8_t> type(nr), falloff(nr), reversible(nr);
     std::vector<double> rate(3 * nr), low(3 * nr), params(5 * nr), delta_nu(nr), default_eff(nr);
     std::vector<uint32_t> f_off{0}, r_off{0}, n_off{0}, e_off{0}, f_sp, r_sp, n_sp, e_sp;
@@ -587,13 +588,13 @@ KineticsTable<MemorySpace> make_kinetics_table(const Mechanism & mechanism,
         const Reaction & r = mechanism.reactions[i];
         for (size_t e = 0; e < r.plog.size(); e++) {
             if (e == 0 || r.plog[e].first != r.plog[e - 1].first) {
-                if (e > 0) plog_rate_off.push_back(plog_rate.size() / 3);
+                if (e > 0) plog_rate_off.push_back(u32(plog_rate.size() / 3));
                 plog_ln_p.push_back(std::log(r.plog[e].first));
             }
             plog_rate.insert(plog_rate.end(), {r.plog[e].second.A, r.plog[e].second.b, r.plog[e].second.Ea_R});
         }
-        if (!r.plog.empty()) plog_rate_off.push_back(plog_rate.size() / 3);
-        plog_off.push_back(plog_ln_p.size());
+        if (!r.plog.empty()) plog_rate_off.push_back(u32(plog_rate.size() / 3));
+        plog_off.push_back(u32(plog_ln_p.size()));
         if (r.type == ReactionType::CHEBYSHEV) {
             cheb.insert(cheb.end(), r.chebyshev.begin(), r.chebyshev.end());
             cheb_n_p[i] = r.chebyshev_n_p;
@@ -602,7 +603,7 @@ KineticsTable<MemorySpace> make_kinetics_table(const Mechanism & mechanism,
             cheb_range[4 * i + 2] = std::log(r.chebyshev_range[2]);
             cheb_range[4 * i + 3] = std::log(r.chebyshev_range[3]);
         }
-        cheb_off.push_back(cheb.size());
+        cheb_off.push_back(u32(cheb.size()));
         type[i] = static_cast<uint8_t>(r.type);
         falloff[i] = static_cast<uint8_t>(r.falloff);
         reversible[i] = r.reversible;
@@ -613,17 +614,17 @@ KineticsTable<MemorySpace> make_kinetics_table(const Mechanism & mechanism,
             dst[3 * i + 1] = arr[a].b;
             dst[3 * i + 2] = arr[a].Ea_R;
         }
-        for (int p = 0; p < 5; p++) params[5 * i + p] = r.falloff_params[p];
+        for (uint32_t p = 0; p < 5; p++) params[5 * i + p] = r.falloff_params[p];
         for (const auto & [k, order] : r.orders) {
             f_sp.push_back(k);
             f_ord.push_back(order);
         }
-        f_off.push_back(f_sp.size());
+        f_off.push_back(u32(f_sp.size()));
         for (const auto & [k, nu] : r.products) {
             r_sp.push_back(k);
             r_ord.push_back(nu);
         }
-        r_off.push_back(r_sp.size());
+        r_off.push_back(u32(r_sp.size()));
         std::vector<double> net(t.n_species, 0.0);
         for (const auto & [k, nu] : r.products) net[k] += nu;
         for (const auto & [k, nu] : r.reactants) net[k] -= nu;
@@ -634,14 +635,14 @@ KineticsTable<MemorySpace> make_kinetics_table(const Mechanism & mechanism,
             n_nu.push_back(net[k]);
             sum += net[k];
         }
-        n_off.push_back(n_sp.size());
+        n_off.push_back(u32(n_sp.size()));
         delta_nu[i] = sum;
         default_eff[i] = r.default_efficiency;
         for (const auto & [k, eff] : r.efficiencies) {
             e_sp.push_back(k);
             e_extra.push_back(eff - r.default_efficiency);
         }
-        e_off.push_back(e_sp.size());
+        e_off.push_back(u32(e_sp.size()));
     }
     auto copy = [](const auto & v, const char * label) {
         using T = typename std::decay_t<decltype(v)>::value_type;
