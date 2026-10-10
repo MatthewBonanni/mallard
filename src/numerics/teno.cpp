@@ -397,7 +397,8 @@ struct CellTables {
     uint8_t gather_depth = 0;
     rtype scale = 0.0;
     std::vector<rtype> basis_mean;                  // (l)
-    std::vector<rtype> si;                          // upper triangle of (l, m)
+    std::vector<rtype> si;                          // 2D: upper triangle of (l, m)
+    std::vector<double> moments;                    // 3D: central moments
     std::vector<int32_t> large_cells, large_faces;  // (s)
     std::vector<rtype> large_pinv;                  // (s, l)
     std::array<uint16_t, teno::MAX_FACES> small_size = {};
@@ -938,7 +939,11 @@ class TableBuilder {
             const uint8_t nk = scheme.n_dof_large;
             scheme.scale = Kokkos::View<rtype *>("teno_scale", n_cells);
             scheme.basis_mean = Kokkos::View<rtype **>("teno_basis_mean", n_cells, nk);
-            scheme.si_matrix = Kokkos::View<rtype **>("teno_si_matrix", n_cells, nk * (nk + 1) / 2);
+            if constexpr (N_DIM == 2) {
+                scheme.si_matrix = Kokkos::View<rtype **>("teno_si_matrix", n_cells, nk * (nk + 1) / 2);
+            } else {
+                scheme.moments = teno::Moments("teno_moments", n_cells, teno_setup::n_moments(scheme.degree));
+            }
             scheme.stencil_large_size = Kokkos::View<uint16_t *>("teno_stencil_large_size", n_cells);
             scheme.stencil_small_size = Kokkos::View<uint16_t **>("teno_stencil_small_size", n_cells, teno::MAX_FACES);
             scheme.gather_depth.assign(n_cells, 0);
@@ -956,6 +961,7 @@ class TableBuilder {
             Kokkos::View<rtype *>::host_mirror_type h_scale("teno_scale_rows", n);
             Kokkos::View<rtype **>::host_mirror_type h_mean("teno_basis_mean_rows", n, scheme.basis_mean.extent(1));
             Kokkos::View<rtype **>::host_mirror_type h_si("teno_si_rows", n, scheme.si_matrix.extent(1));
+            teno::Moments::host_mirror_type h_moments("teno_moments_rows", n, scheme.moments.extent(1));
             Kokkos::View<uint16_t *>::host_mirror_type h_large_size("teno_large_size_rows", n);
             Kokkos::View<uint16_t **>::host_mirror_type h_small_size("teno_small_size_rows", n, teno::MAX_FACES);
             Kokkos::parallel_for("teno_rows", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n),
@@ -965,12 +971,17 @@ class TableBuilder {
                 h_scale(c) = t.scale;
                 for (size_t l = 0; l < t.basis_mean.size(); l++) h_mean(c, l) = t.basis_mean[l];
                 for (size_t k = 0; k < t.si.size(); k++) h_si(c, k) = t.si[k];
+                for (size_t k = 0; k < t.moments.size(); k++) h_moments(c, k) = t.moments[k];
                 h_large_size(c) = t.large_cells.size();
                 for (uint8_t k = 0; k < teno::MAX_FACES; k++) h_small_size(c, k) = t.small_size[k];
             });
             upload_rows(scheme.scale, c0, h_scale);
             upload_rows(scheme.basis_mean, c0, h_mean);
-            upload_rows(scheme.si_matrix, c0, h_si);
+            if constexpr (N_DIM == 2) {
+                upload_rows(scheme.si_matrix, c0, h_si);
+            } else {
+                upload_rows(scheme.moments, c0, h_moments);
+            }
             upload_rows(scheme.stencil_large_size, c0, h_large_size);
             upload_rows(scheme.stencil_small_size, c0, h_small_size);
             large.add(c0, tables);
@@ -1011,7 +1022,13 @@ void download_tables(const TENO & scheme, const std::vector<uint64_t> & large_sl
     const uint32_t c1 = c0 + tables.size();
     auto h_scale = download_rows(scheme.scale, c0, c1);
     auto h_mean = download_rows(scheme.basis_mean, c0, c1);
-    auto h_si = download_rows(scheme.si_matrix, c0, c1);
+    Kokkos::View<rtype **>::host_mirror_type h_si;
+    teno::Moments::host_mirror_type h_moments;
+    if constexpr (N_DIM == 2) {
+        h_si = download_rows(scheme.si_matrix, c0, c1);
+    } else {
+        h_moments = download_rows(scheme.moments, c0, c1);
+    }
     auto h_large_size = download_rows(scheme.stencil_large_size, c0, c1);
     auto h_small_size = download_rows(scheme.stencil_small_size, c0, c1);
     std::vector<uint16_t> n_large(tables.size()), n_small(tables.size(), 0);
@@ -1023,6 +1040,8 @@ void download_tables(const TENO & scheme, const std::vector<uint64_t> & large_sl
         for (size_t l = 0; l < t.basis_mean.size(); l++) t.basis_mean[l] = h_mean(c, l);
         t.si.resize(h_si.extent(1));
         for (size_t k = 0; k < t.si.size(); k++) t.si[k] = h_si(c, k);
+        t.moments.resize(h_moments.extent(1));
+        for (size_t k = 0; k < t.moments.size(); k++) t.moments[k] = h_moments(c, k);
         n_large[c] = h_large_size(c);
         for (uint8_t k = 0; k < teno::MAX_FACES; k++) {
             t.small_size[k] = h_small_size(c, k);
@@ -1129,7 +1148,10 @@ void TENO::init(const toml::value & input) {
     const int order = degree + 1;
     const int n_gp = std::max(1, std::min<int>(teno::MAX_FACE_QUAD, (order + 1) / 2));
     quadrature_face = GaussLegendre(n_gp);
-    if constexpr (N_DIM == 3) init_face_quadrature_3d(order);
+    if constexpr (N_DIM == 3) {
+        init_face_quadrature_3d(order);
+        si_terms = teno_setup::smoothness_terms(degree);
+    }
 
     if (mesh->axisymmetric) {
         // Exact to degree >= the reconstruction's, for the geometric source
@@ -1637,6 +1659,8 @@ void TENO::compute_stencils_and_matrices_3d(const std::vector<uint32_t> * subset
         if (n_failed_large == 0) builder->finish();
         largest_stencil = largest;
     }
+    // Every cell's moments are a function of its geometry alone
+    if (n_failed_large == 0) setup.copy_moments(moments);
     Kokkos::fence();
     const teno_setup::Timings & t = setup.timings();
     setup_status = logging::format("%s, %.2f s (geometry %.2f s, tables %.2f s, packing %.2f s)",
@@ -1658,24 +1682,20 @@ void TENO::compute_stencils_and_matrices_3d(const std::vector<uint32_t> * subset
 /**
  * @brief Per-cell TENO-E reconstruction of degree DEG to the quadrature points
  *        of all of the cell's faces. SmoothPass finishes the cells below the
- *        troubled threshold and queues the others with their central
- *        coefficients. The troubled passes then work on that queue only, so
- *        the register-heavy path does not slow the smooth cells, and split it
- *        finely, so that the few troubled cells along shocks still fill the
- *        device: sector-stencil coefficients per (cell, sector), stencil
- *        selection per (cell, face, characteristic variable), the projection
- *        back to conservative variables per (cell, face), and admissibility
- *        per cell. Each pass loops over its share of the queue, whose length
- *        never has to be read back to the host.
+ *        troubled threshold and queues the others. The troubled pass then
+ *        works on that queue only, so the register-heavy path does not slow
+ *        the smooth cells, one cell per team, whose threads share the work
+ *        out finely, so that the few troubled cells along shocks still fill
+ *        the device: sector-stencil coefficients per sector, stencil selection
+ *        per (face, characteristic variable), the projection back to
+ *        conservative variables per face, and admissibility per cell. The
+ *        teams loop over the queue, whose length never has to be read back to
+ *        the host.
  */
 template <uint8_t DEG, bool PRIM>
 struct TENOFunctor {
     static constexpr uint8_t NK = teno::n_dof(DEG);
     struct SmoothPass {};
-    struct TroubledSectorPass {};
-    struct TroubledSelectPass {};
-    struct TroubledProjectPass {};
-    struct TroubledFinishPass {};
     struct GradientPass {};
 
     rtype sigma_threshold;
@@ -1707,10 +1727,11 @@ struct TENOFunctor {
     teno::PackedStencils stencil_large;
     Kokkos::View<uint16_t **> stencil_small_size;
     teno::PackedStencils stencil_small;
-    Kokkos::View<rtype **> si_matrix;
+    Kokkos::View<rtype **> si_matrix;         // 2D
+    teno::Moments moments;                    // 3D, with si_terms: the smoothness matrices
+    teno::SmoothnessTerms si_terms;
     Kokkos::View<rtype *> sigma_out;
-    Kokkos::View<rtype ***> coeffs;           // (cell, l, var): central coefficients of queued cells
-    Kokkos::View<rtype ****> small_coeffs;    // (cell, sector, l, var): sector coefficients of queued cells
+    Kokkos::View<rtype ***> coeffs;           // (queue position, l, var): central coefficients of the first queued cells
     Kokkos::View<uint32_t *> troubled_cells;  // queue of troubled cells
     Kokkos::View<uint32_t> n_troubled;
 
@@ -1897,10 +1918,13 @@ struct TENOFunctor {
         const rtype sigma = PRIM ? Kokkos::fmax(g_m2, m_m2) / ns : g_m2 / ns;
         sigma_out(i_cell) = sigma;
         if (sigma >= sigma_threshold) {
-            for (uint8_t l = 0; l < NK; l++) {
-                FOR_I_CONSERVATIVE coeffs(i_cell, l, i) = aK[l][i];
+            const uint32_t j = Kokkos::atomic_fetch_add(&n_troubled(), 1u);
+            troubled_cells(j) = i_cell;
+            if (j < coeffs.extent(0)) {
+                for (uint8_t l = 0; l < NK; l++) {
+                    FOR_I_CONSERVATIVE coeffs(j, l, i) = aK[l][i];
+                }
             }
-            troubled_cells(Kokkos::atomic_fetch_add(&n_troubled(), 1u)) = i_cell;
             return;
         }
 
@@ -1947,10 +1971,13 @@ struct TENOFunctor {
     static constexpr uint32_t TEAM_CELLS = 32;
     // Measured on A100s: faster than SmoothPass only when its coefficients spill
     static constexpr bool USE_TEAM = N_DIM == 3 && DEG >= 4;
+    // Whether SmoothTeamPass runs (GPUs) instead of SmoothPass
+    static constexpr bool TEAM_SMOOTH =
+        USE_TEAM && !Kokkos::SpaceAccessibility<Kokkos::HostSpace, Kokkos::DefaultExecutionSpace::memory_space>::accessible;
     static constexpr uint8_t PARTS = N_CONSERVATIVE;  // threads per cell
     static constexpr uint32_t TEAM_SIZE = TEAM_CELLS * PARTS;
     static constexpr uint8_t CHUNK = (NK + PARTS - 1) / PARTS;
-    static constexpr size_t TEAM_SCRATCH = sizeof(rtype) * NK * N_CONSERVATIVE * TEAM_CELLS + 2 * sizeof(int) * TEAM_CELLS;
+    static constexpr size_t TEAM_SCRATCH = sizeof(rtype) * NK * N_CONSERVATIVE * TEAM_CELLS + 3 * sizeof(int) * TEAM_CELLS;
     uint32_t n_smooth = 0;  // cells to reconstruct when cells is empty
 
     template <typename F>
@@ -1966,14 +1993,15 @@ struct TENOFunctor {
     }
 
     /**
-     * @brief Chunk C of the central coefficients of cell i_cell, into aK_team
-     *        (l, var) and, if troubled, coeffs. Chunk 0 also finds sigma, queues
-     *        the cell if troubled and leaves smooth_team(lane).
+     * @brief Chunk C of the central coefficients of cell i_cell, into
+     *        aK_team[(l * N_CONSERVATIVE + var) * stride + lane]. With QUEUE,
+     *        chunk 0 also finds sigma, queues the cell if troubled and leaves
+     *        smooth_team[lane] and its queue position queue_team[lane].
      */
-    template <uint8_t C>
+    template <uint8_t C, bool QUEUE = true>
     KOKKOS_INLINE_FUNCTION
     void smooth_coefficients(const uint32_t i_cell, const rtype * U0, rtype * aK_team, int * smooth_team,
-                             const uint32_t lane) const {
+                             int * queue_team, const uint32_t lane, const uint32_t stride = TEAM_CELLS) const {
         constexpr uint8_t L0 = C * CHUNK;
         constexpr uint8_t L1 = (L0 + CHUNK < NK) ? L0 + CHUNK : NK;
         const uint16_t ns = stencil_large_size(i_cell);
@@ -1984,7 +2012,7 @@ struct TENOFunctor {
         for (uint16_t s = 0; s < ns; s++) {
             rtype U[N_CONSERVATIVE];
             entry_conservatives(stencil.cell(s), stencil.face(s), U);
-            if constexpr (C == 0) {
+            if constexpr (C == 0 && QUEUE) {
                 const rtype W0_rho = W(i_cell, 0);
                 const rtype g = Kokkos::fabs(U[0] - W0_rho) / W0_rho;
                 const rtype delta = g - g_mean;
@@ -2004,14 +2032,18 @@ struct TENOFunctor {
             }
         }
         for (uint8_t l = L0; l < L1; l++) {
-            FOR_I_CONSERVATIVE aK_team[(l * N_CONSERVATIVE + i) * TEAM_CELLS + lane] = aK[l - L0][i];
+            FOR_I_CONSERVATIVE aK_team[(l * N_CONSERVATIVE + i) * stride + lane] = aK[l - L0][i];
         }
-        if constexpr (C == 0) {
+        if constexpr (C == 0 && QUEUE) {
             const rtype sigma = PRIM ? Kokkos::fmax(g_m2, m_m2) / ns : g_m2 / ns;
             sigma_out(i_cell) = sigma;
             const bool smooth = sigma < sigma_threshold;
             smooth_team[lane] = smooth;
-            if (!smooth) troubled_cells(Kokkos::atomic_fetch_add(&n_troubled(), 1u)) = i_cell;
+            if (!smooth) {
+                const uint32_t j = Kokkos::atomic_fetch_add(&n_troubled(), 1u);
+                troubled_cells(j) = i_cell;
+                queue_team[lane] = j;
+            }
         }
     }
 
@@ -2025,6 +2057,7 @@ struct TENOFunctor {
         rtype * aK = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * NK * N_CONSERVATIVE * TEAM_CELLS));
         int * smooth_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
         int * admissible_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
+        int * queue_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
 
         const bool active = idx < n;
         const uint32_t i_cell = active ? (cells.extent(0) ? cells(idx) : idx) : 0;
@@ -2037,17 +2070,18 @@ struct TENOFunctor {
         if (active) {
             conservatives(i_cell, U0);
             with_chunk(part, [&](auto C) {
-                smooth_coefficients<decltype(C)::value>(i_cell, U0, aK, smooth_team, lane);
+                smooth_coefficients<decltype(C)::value>(i_cell, U0, aK, smooth_team, queue_team, lane);
             });
         }
         team.team_barrier();
         const bool smooth = smooth_team[lane];
-        if (active && !smooth) {
+        if (active && !smooth && queue_team[lane] < static_cast<int>(coeffs.extent(0))) {
+            const int j = queue_team[lane];
             with_chunk(part, [&](auto C) {
                 constexpr uint8_t L0 = decltype(C)::value * CHUNK;
                 constexpr uint8_t L1 = (L0 + CHUNK < NK) ? L0 + CHUNK : NK;
                 for (uint8_t l = L0; l < L1; l++) {
-                    FOR_I_CONSERVATIVE coeffs(i_cell, l, i) = aK[(l * N_CONSERVATIVE + i) * TEAM_CELLS + lane];
+                    FOR_I_CONSERVATIVE coeffs(j, l, i) = aK[(l * N_CONSERVATIVE + i) * TEAM_CELLS + lane];
                 }
             });
         }
@@ -2139,31 +2173,29 @@ struct TENOFunctor {
         return c;
     }
 
-    /** @brief Smoothness indicator c^T S c of the N coefficients c of cell i_cell. */
-    template <uint8_t N>
+    /**
+     * @brief Smoothness indicator c^T S c of the N coefficients c, for S with
+     *        entries S(upper_index(l, m)).
+     */
+    template <uint8_t N, typename Matrix>
     KOKKOS_INLINE_FUNCTION
-    rtype smoothness(const rtype * c, const uint32_t i_cell) const {
+    static rtype smoothness(const rtype * c, const Matrix & S) {
         rtype si = 0.0;
         for (uint8_t l = 0; l < N; l++) {
             rtype row = 0.0;
             for (uint8_t m = 0; m < N; m++) {
-                row += si_matrix(i_cell, (l <= m) ? teno::upper_index(l, m, NK) : teno::upper_index(m, l, NK)) * c[m];
+                row += S((l <= m) ? teno::upper_index(l, m, NK) : teno::upper_index(m, l, NK)) * c[m];
             }
             si += c[l] * row;
         }
         return si;
     }
 
-    /** @brief Coefficients of the sector stencil s of queued cell j. */
+    /** @brief Coefficients of the sector stencil s of cell i_cell into aS_out (l, var), if it has one. */
     KOKKOS_INLINE_FUNCTION
-    void troubled_sector(const uint32_t j, const uint8_t s) const {
-        const uint32_t i_cell = troubled_cells(j);
-        const uint32_t f_begin = offsets_faces_of_cell(i_cell);
-        if (s >= offsets_faces_of_cell(i_cell + 1) - f_begin) return;
+    void sector_coefficients(const uint32_t i_cell, const uint8_t s, const rtype * U0, rtype * aS_out) const {
         const uint16_t n_small = stencil_small_size(i_cell, s);
         if (n_small == 0) return;
-        rtype U0[N_CONSERVATIVE];
-        conservatives(i_cell, U0);
         rtype aS[teno::NK_SMALL][N_CONSERVATIVE] = {};
         // The cell's sector stencils are stored one after another
         uint16_t start = 0;
@@ -2178,21 +2210,23 @@ struct TENOFunctor {
             }
         }
         for (uint8_t l = 0; l < teno::NK_SMALL; l++) {
-            FOR_I_CONSERVATIVE small_coeffs(i_cell, s, l, i) = aS[l][i];
+            FOR_I_CONSERVATIVE aS_out[l * N_CONSERVATIVE + i] = aS[l][i];
         }
     }
 
     /**
      * @brief Stencil selection for characteristic variable var on face k of
-     *        queued cell j, and that variable at the face's quadrature points,
-     *        left in face_solution(f, q, side, var).
+     *        troubled cell i_cell, and that variable at the face's quadrature
+     *        points, left in face_solution(f, q, side, var). aK (l, var) and aS
+     *        (sector, l, var) hold the central and sector coefficients, S the
+     *        smoothness matrix.
      */
+    template <typename Matrix>
     KOKKOS_INLINE_FUNCTION
-    void troubled_select(const uint32_t j, const uint8_t k, const uint8_t var) const {
-        const uint32_t i_cell = troubled_cells(j);
+    void troubled_select(const uint32_t i_cell, const uint8_t k, const uint8_t var, const rtype * aK, const rtype * aS,
+                         const Matrix & S) const {
         const uint32_t f_begin = offsets_faces_of_cell(i_cell);
         const uint8_t n_faces = offsets_faces_of_cell(i_cell + 1) - f_begin;
-        if (k >= n_faces) return;
         constexpr rtype eps = 1.0e-12;
         rtype U0[N_CONSERVATIVE], W0[N_CONSERVATIVE];
         conservatives(i_cell, U0);
@@ -2203,20 +2237,14 @@ struct TENOFunctor {
 
         const rtype c0_char = project(L, var, U0);
         rtype cK[NK];
-        for (uint8_t l = 0; l < NK; l++) {
-            rtype a[N_CONSERVATIVE];
-            FOR_I_CONSERVATIVE a[i] = coeffs(i_cell, l, i);
-            cK[l] = project(L, var, a);
-        }
+        for (uint8_t l = 0; l < NK; l++) cK[l] = project(L, var, aK + l * N_CONSERVATIVE);
         bool valid[teno::MAX_FACES] = {};
         rtype cS[teno::MAX_FACES][teno::NK_SMALL];
         for (uint8_t s = 0; s < n_faces; s++) {
             valid[s] = stencil_small_size(i_cell, s) > 0;
             if (!valid[s]) continue;
             for (uint8_t l = 0; l < teno::NK_SMALL; l++) {
-                rtype a[N_CONSERVATIVE];
-                FOR_I_CONSERVATIVE a[i] = small_coeffs(i_cell, s, l, i);
-                cS[s][l] = project(L, var, a);
+                cS[s][l] = project(L, var, aS + (s * teno::NK_SMALL + l) * N_CONSERVATIVE);
             }
         }
 
@@ -2224,12 +2252,12 @@ struct TENOFunctor {
         // the weights cannot overflow (even in single precision)
         const rtype sigma = sigma_out(i_cell);
         const rtype cutoff = (C_T > 0.0_r) ? C_T : teno::adaptive_CT(sigma, sigma_threshold, sigma_upper);
-        const rtype si_K = smoothness<NK>(cK, i_cell) + eps;
+        const rtype si_K = smoothness<NK>(cK, S) + eps;
         rtype si_small[teno::MAX_FACES] = {};
         rtype si_min = si_K;
         for (uint8_t s = 0; s < n_faces; s++) {
             if (!valid[s]) continue;
-            si_small[s] = smoothness<teno::NK_SMALL>(cS[s], i_cell) + eps;
+            si_small[s] = smoothness<teno::NK_SMALL>(cS[s], S) + eps;
             si_min = Kokkos::fmin(si_min, si_small[s]);
         }
         const rtype gK = Kokkos::pow(si_min / si_K, 6.0_r);
@@ -2280,14 +2308,13 @@ struct TENOFunctor {
     }
 
     /**
-     * @brief Conservative states at the quadrature points of face k of queued
-     *        cell j from the characteristic ones that troubled_select left.
+     * @brief Conservative states at the quadrature points of face k of
+     *        troubled cell i_cell from the characteristic ones that
+     *        troubled_select left.
      */
     KOKKOS_INLINE_FUNCTION
-    void troubled_project(const uint32_t j, const uint8_t k) const {
-        const uint32_t i_cell = troubled_cells(j);
+    void troubled_project(const uint32_t i_cell, const uint8_t k) const {
         const uint32_t f_begin = offsets_faces_of_cell(i_cell);
-        if (k >= offsets_faces_of_cell(i_cell + 1) - f_begin) return;
         rtype W0[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE W0[i] = W(i_cell, i);
         const uint32_t f = faces_of_cell(f_begin + k);
@@ -2307,7 +2334,88 @@ struct TENOFunctor {
         }
     }
 
-    uint32_t stride = 0;  // threads of each troubled pass, which loop over the queue
+    /** @brief Central coefficients of cell i_cell into aK_out (l, var), as SmoothPass computes them. */
+    KOKKOS_INLINE_FUNCTION
+    void central_coefficients(const uint32_t i_cell, const rtype * U0, rtype * aK_out) const {
+        rtype aK[NK][N_CONSERVATIVE] = {};
+        const teno::PackedStencils::Row stencil = stencil_large.row(i_cell);
+        for (uint16_t s = 0; s < stencil_large_size(i_cell); s++) {
+            rtype U[N_CONSERVATIVE];
+            entry_conservatives(stencil.cell(s), stencil.face(s), U);
+            for (uint8_t l = 0; l < NK; l++) {
+                const rtype P = stencil.pinv<NK>(s, l);
+                FOR_I_CONSERVATIVE aK[l][i] += P * (U[i] - U0[i]);
+            }
+        }
+        for (uint8_t l = 0; l < NK; l++) {
+            FOR_I_CONSERVATIVE aK_out[l * N_CONSERVATIVE + i] = aK[l][i];
+        }
+    }
+
+    // TroubledTeamPass: the queued (troubled) cells, one per team. Into team
+    // scratch go the central coefficients (kept by the smooth pass for the
+    // first coeffs.extent(0) cells of the queue, recomputed with the smooth
+    // pass's arithmetic for the others), the sector coefficients and, in 3D,
+    // the smoothness matrix from the cell's moments; then the stencil
+    // selection per (face, characteristic variable), the projection back per
+    // face and the admissibility check per cell. No per-cell scratch remains.
+    struct TroubledTeamPass {};
+    static constexpr uint32_t TROUBLED_TEAM = 32;
+    static constexpr uint32_t N_SI = (N_DIM == 3) ? uint32_t(NK) * (NK + 1) / 2 : 1;
+    static constexpr size_t TROUBLED_SCRATCH =
+        sizeof(rtype) * (NK * N_CONSERVATIVE + teno::MAX_FACES * teno::NK_SMALL * N_CONSERVATIVE + N_SI) + 64;
+
+    template <typename Member>
+    KOKKOS_INLINE_FUNCTION
+    void operator()(TroubledTeamPass, const Member & team) const {
+        constexpr uint32_t N_SECTOR = teno::NK_SMALL * N_CONSERVATIVE;
+        rtype * aK = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * NK * N_CONSERVATIVE));
+        rtype * aS = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * teno::MAX_FACES * N_SECTOR));
+        rtype * S = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * N_SI));
+        const uint32_t n = n_troubled();
+        for (uint32_t j = team.league_rank(); j < n; j += team.league_size()) {
+            const uint32_t i_cell = troubled_cells(j);
+            const uint32_t n_faces = offsets_faces_of_cell(i_cell + 1) - offsets_faces_of_cell(i_cell);
+            rtype U0[N_CONSERVATIVE];
+            conservatives(i_cell, U0);
+            if (j < coeffs.extent(0)) {
+                Kokkos::parallel_for(Kokkos::TeamThreadRange(team, uint32_t(NK) * N_CONSERVATIVE), [&](const uint32_t k) {
+                    aK[k] = coeffs(j, k / N_CONSERVATIVE, k % N_CONSERVATIVE);
+                });
+            } else if constexpr (TEAM_SMOOTH) {
+                Kokkos::parallel_for(Kokkos::TeamThreadRange(team, uint32_t(PARTS)), [&](const uint32_t part) {
+                    with_chunk(part, [&](auto C) {
+                        smooth_coefficients<decltype(C)::value, false>(i_cell, U0, aK, nullptr, nullptr, 0, 1);
+                    });
+                });
+            } else {
+                Kokkos::single(Kokkos::PerTeam(team), [&]() { central_coefficients(i_cell, U0, aK); });
+            }
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(team, n_faces), [&](const uint32_t s) {
+                sector_coefficients(i_cell, s, U0, aS + s * N_SECTOR);
+            });
+            if constexpr (N_DIM == 3) {
+                const double * mom = &moments(i_cell, 0);
+                Kokkos::parallel_for(Kokkos::TeamThreadRange(team, N_SI),
+                                     [&](const uint32_t e) { S[e] = si_terms.entry(e, mom); });
+            }
+            team.team_barrier();
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(team, n_faces * N_CONSERVATIVE), [&](const uint32_t t) {
+                if constexpr (N_DIM == 3) {
+                    troubled_select(i_cell, t / N_CONSERVATIVE, t % N_CONSERVATIVE, aK, aS,
+                                    [&](const uint32_t e) { return S[e]; });
+                } else {
+                    troubled_select(i_cell, t / N_CONSERVATIVE, t % N_CONSERVATIVE, aK, aS,
+                                    [&](const uint32_t e) { return si_matrix(i_cell, e); });
+                }
+            });
+            team.team_barrier();
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(team, n_faces), [&](const uint32_t k) { troubled_project(i_cell, k); });
+            team.team_barrier();
+            Kokkos::single(Kokkos::PerTeam(team), [&]() { troubled_finish(i_cell); });
+            team.team_barrier();
+        }
+    }
 
     // SourcePass (axisymmetric runs)
     struct SourcePass {};
@@ -2394,27 +2502,6 @@ struct TENOFunctor {
         }
     }
 
-    KOKKOS_INLINE_FUNCTION
-    void operator()(TroubledSectorPass, const uint32_t t) const {
-        const uint32_t n = n_troubled() * teno::MAX_FACES;
-        for (uint32_t idx = t; idx < n; idx += stride) troubled_sector(idx / teno::MAX_FACES, idx % teno::MAX_FACES);
-    }
-
-    KOKKOS_INLINE_FUNCTION
-    void operator()(TroubledSelectPass, const uint32_t t) const {
-        constexpr uint32_t per_cell = teno::MAX_FACES * N_CONSERVATIVE;
-        const uint32_t n = n_troubled() * per_cell;
-        for (uint32_t idx = t; idx < n; idx += stride) {
-            const uint32_t r = idx % per_cell;
-            troubled_select(idx / per_cell, r / N_CONSERVATIVE, r % N_CONSERVATIVE);
-        }
-    }
-
-    KOKKOS_INLINE_FUNCTION
-    void operator()(TroubledProjectPass, const uint32_t t) const {
-        const uint32_t n = n_troubled() * teno::MAX_FACES;
-        for (uint32_t idx = t; idx < n; idx += stride) troubled_project(idx / teno::MAX_FACES, idx % teno::MAX_FACES);
-    }
 
     /**
      * @brief Conservative face state left by troubled_project; the cell mean
@@ -2431,16 +2518,11 @@ struct TENOFunctor {
 
     /**
      * @brief Admissibility check and optional bound-preserving limiting of
-     *        queued cell j over all its faces, then the primitive face states.
+     *        troubled cell i_cell over all its faces, then the primitive face
+     *        states.
      */
     KOKKOS_INLINE_FUNCTION
-    void operator()(TroubledFinishPass, const uint32_t t) const {
-        for (uint32_t j = t; j < n_troubled(); j += stride) troubled_finish(j);
-    }
-
-    KOKKOS_INLINE_FUNCTION
-    void troubled_finish(const uint32_t j) const {
-        const uint32_t i_cell = troubled_cells(j);
+    void troubled_finish(const uint32_t i_cell) const {
         rtype U0[N_CONSERVATIVE], W0[N_CONSERVATIVE];
         conservatives(i_cell, U0);
         FOR_I_CONSERVATIVE W0[i] = W(i_cell, i);
@@ -2552,13 +2634,13 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->shifts, mesh->face_shift,
                     quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
                     scale, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
-                    si_matrix, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells, n_troubled,
+                    si_matrix, moments, si_terms, troubled, troubled_coeffs, troubled_cells, n_troubled,
                     solution, face_solution, cells, {}, cell_gamma, cell_molar_mass, selection};
     using Dynamic = Kokkos::Schedule<Kokkos::Dynamic>;
     using Space = Kokkos::DefaultExecutionSpace;
     if (!troubled_pass) {
         const uint32_t n = cells.extent(0) ? cells.extent(0) : mesh->n_reconstructed();
-        if constexpr (!Functor::USE_TEAM || Kokkos::SpaceAccessibility<Kokkos::HostSpace, Space::memory_space>::accessible) {
+        if constexpr (!Functor::TEAM_SMOOTH) {
             Kokkos::parallel_for("teno_smooth",
                                  Kokkos::RangePolicy<Space, typename Functor::SmoothPass, Dynamic, HeavyBounds>(exec, 0, n),
                                  functor);
@@ -2573,19 +2655,17 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
         }
         return;
     }
-    // Each pass loops over the queue with as many threads as it could need,
-    // up to TROUBLED_THREADS, so the queue length stays on the device
+    // The teams loop over the queue, so its length stays on the device
     const uint32_t n = mesh->n_reconstructed();
-    auto launch = [&](const char * label, auto tag, uint32_t per_cell) {
-        functor.stride = std::min<uint64_t>(TROUBLED_THREADS, uint64_t(n) * per_cell);
-        if (functor.stride == 0) return;
-        Kokkos::parallel_for(label, Kokkos::RangePolicy<Space, decltype(tag), Dynamic, HeavyBounds>(exec, 0, functor.stride),
+    if (n > 0) {
+        constexpr bool host = Kokkos::SpaceAccessibility<Kokkos::HostSpace, Space::memory_space>::accessible;
+        const uint32_t team_size = host ? 1 : Functor::TROUBLED_TEAM;
+        const uint32_t league = std::min<uint32_t>(n, TROUBLED_THREADS / team_size);
+        using Policy = Kokkos::TeamPolicy<Space, typename Functor::TroubledTeamPass, Kokkos::Schedule<Kokkos::Dynamic>>;
+        Kokkos::parallel_for("teno_troubled",
+                             Policy(exec, league, team_size).set_scratch_size(0, Kokkos::PerTeam(Functor::TROUBLED_SCRATCH)),
                              functor);
-    };
-    launch("teno_troubled_sectors", typename Functor::TroubledSectorPass{}, teno::MAX_FACES);
-    launch("teno_troubled_select", typename Functor::TroubledSelectPass{}, teno::MAX_FACES * N_CONSERVATIVE);
-    launch("teno_troubled_project", typename Functor::TroubledProjectPass{}, teno::MAX_FACES);
-    launch("teno_troubled_finish", typename Functor::TroubledFinishPass{}, 1);
+    }
     Kokkos::deep_copy(exec, n_troubled, 0u);
 }
 
@@ -2599,7 +2679,7 @@ void TENO::launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->shifts, mesh->face_shift,
                     quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
                     scale, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
-                    si_matrix, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells, n_troubled,
+                    si_matrix, moments, si_terms, troubled, troubled_coeffs, troubled_cells, n_troubled,
                     solution, {}, {}, gradients, cell_gamma, cell_molar_mass, selection};
     Kokkos::parallel_for("teno_gradients", HeavyRange<typename Functor::GradientPass>(0, n_cells), functor);
 }
@@ -2614,7 +2694,7 @@ void TENO::launch_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos:
                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->shifts, mesh->face_shift,
                     quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
                     scale, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
-                    si_matrix, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells, n_troubled,
+                    si_matrix, moments, si_terms, troubled, troubled_coeffs, troubled_cells, n_troubled,
                     solution, {}, {}, {}, cell_gamma, cell_molar_mass, selection};
     functor.offsets_nodes_of_cell = mesh->offsets_nodes_of_cell;
     functor.nodes_of_cell = mesh->nodes_of_cell;
@@ -2731,8 +2811,9 @@ namespace {
 // the round-off-accurate 2D cell centroids, version 7 can hold the pseudo-inverses and
 // smoothness-indicator matrices in single precision and has tables from the faster setup (#140),
 // which differ from version 6 at round-off; version 8 bounds 3D Lebesgue constants by 4 (#126, #229);
-// version 9 records where the tables were set up (the execution space, or "host")
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-9";
+// version 9 records where the tables were set up (the execution space, or "host"); version 10 holds
+// each 3D cell's moments in place of its smoothness-indicator matrix
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-10";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {
@@ -2789,14 +2870,16 @@ bool read_header(std::istream & in, CacheHeader & h) {
 }
 
 /** @brief Round values to single precision in place. */
-void round_values_to_single(const Kokkos::View<rtype *> & values) {
+template <typename T>
+void round_values_to_single(const Kokkos::View<T *> & values) {
     Kokkos::parallel_for("teno_round_to_single", values.extent(0), KOKKOS_LAMBDA(const size_t k) {
-        values(k) = static_cast<rtype>(static_cast<float>(values(k)));
+        values(k) = static_cast<T>(static_cast<float>(values(k)));
     });
 }
 
 /** @brief Append values, in single precision if single. */
-void put_values(std::vector<char> & buf, const std::vector<rtype> & values, const bool single) {
+template <typename T>
+void put_values(std::vector<char> & buf, const std::vector<T> & values, const bool single) {
     if (!single) {
         put(buf, values.data(), values.size());
         return;
@@ -2806,7 +2889,8 @@ void put_values(std::vector<char> & buf, const std::vector<rtype> & values, cons
 }
 
 /** @brief Read values.size() values, stored in single precision if single. */
-bool get_values(std::istream & in, std::vector<rtype> & values, const bool single) {
+template <typename T>
+bool get_values(std::istream & in, std::vector<T> & values, const bool single) {
     if (!single) return get(in, values.data(), values.size());
     std::vector<float> narrow(values.size());
     if (!get(in, narrow.data(), narrow.size())) return false;
@@ -2827,6 +2911,7 @@ void serialize(const CellTables & t, const bool single, std::vector<char> & buf)
     put(buf, t.small_size.data(), t.small_size.size());
     put(buf, t.basis_mean.data(), t.basis_mean.size());
     put_values(buf, t.si, single);
+    put_values(buf, t.moments, single);
     put(buf, t.large_cells.data(), n_large);
     put(buf, t.large_faces.data(), n_large);
     put_values(buf, t.large_pinv, single);
@@ -2835,7 +2920,7 @@ void serialize(const CellTables & t, const bool single, std::vector<char> & buf)
     put_values(buf, t.small_pinv, single);
 }
 
-bool deserialize(std::istream & in, const uint8_t nk, const bool single, CellTables & t) {
+bool deserialize(std::istream & in, const uint8_t nk, const uint16_t n_moments, const bool single, CellTables & t) {
     uint16_t n_large = 0;
     if (!get(in, &t.gather_depth, 1) || !get(in, &t.scale, 1) || !get(in, &n_large, 1) ||
         !get(in, t.small_size.data(), t.small_size.size())) {
@@ -2844,7 +2929,8 @@ bool deserialize(std::istream & in, const uint8_t nk, const bool single, CellTab
     size_t n_small = 0;
     for (uint16_t n : t.small_size) n_small += n;
     t.basis_mean.resize(nk);
-    t.si.resize(nk * (nk + 1) / 2);
+    t.si.resize(N_DIM == 2 ? nk * (nk + 1) / 2 : 0);
+    t.moments.resize(N_DIM == 3 ? n_moments : 0);
     t.large_cells.resize(n_large);
     t.large_faces.resize(n_large);
     t.large_pinv.resize(size_t(n_large) * nk);
@@ -2852,6 +2938,7 @@ bool deserialize(std::istream & in, const uint8_t nk, const bool single, CellTab
     t.small_faces.resize(n_small);
     t.small_pinv.resize(n_small * teno::NK_SMALL);
     return get(in, t.basis_mean.data(), t.basis_mean.size()) && get_values(in, t.si, single) &&
+           get_values(in, t.moments, single) &&
            get(in, t.large_cells.data(), n_large) && get(in, t.large_faces.data(), n_large) &&
            get_values(in, t.large_pinv, single) && get(in, t.small_cells.data(), n_small) &&
            get(in, t.small_faces.data(), n_small) && get_values(in, t.small_pinv, single);
@@ -2862,16 +2949,20 @@ bool deserialize(std::istream & in, const uint8_t nk, const bool single, CellTab
 void TENO::round_to_single() {
     round_values_to_single(stencil_large.pinv);
     round_values_to_single(stencil_small.pinv);
-    round_values_to_single(Kokkos::View<rtype *>(si_matrix.data(), si_matrix.span()));
+    if constexpr (N_DIM == 2) {
+        round_values_to_single(Kokkos::View<rtype *>(si_matrix.data(), si_matrix.span()));
+    } else {
+        round_values_to_single(Kokkos::View<double *>(moments.data(), moments.span()));
+    }
     Kokkos::fence();
 }
 
 void TENO::allocate_scratch() {
     const uint32_t n_reconstructed = mesh->n_reconstructed();
     troubled = Kokkos::View<rtype *>("teno_sigma", mesh->n_cells);
-    troubled_coeffs = Kokkos::View<rtype ***>("teno_troubled_coeffs", n_reconstructed, n_dof_large, N_CONSERVATIVE);
-    troubled_small_coeffs = Kokkos::View<rtype ****>("teno_troubled_small_coeffs", n_reconstructed, teno::MAX_FACES,
-                                                     teno::NK_SMALL, N_CONSERVATIVE);
+    const uint32_t capacity = std::min<uint32_t>(
+        n_reconstructed, static_cast<uint32_t>(std::ceil(double(troubled_capacity) * double(n_reconstructed))));
+    troubled_coeffs = Kokkos::View<rtype ***>("teno_troubled_coeffs", capacity, n_dof_large, N_CONSERVATIVE);
     troubled_cells = Kokkos::View<uint32_t *>("teno_troubled_cells", n_reconstructed);
     n_troubled = Kokkos::View<uint32_t>("teno_n_troubled");
 }
@@ -3078,12 +3169,13 @@ bool TENO::load_cache() {
         return false;
     }
     TableBuilder builder(*this, n_reconstructed);
+    const uint16_t n_moments = N_DIM == 3 ? teno_setup::n_moments(degree) : 0;
     std::vector<CellTables> chunk;
     bool ok = true;
     for (uint32_t c0 = 0; c0 < n_reconstructed && ok; c0 += CHUNK_CELLS) {
         chunk.assign(std::min(CHUNK_CELLS, n_reconstructed - c0), CellTables());
         for (CellTables & t : chunk) {
-            ok = ok && deserialize(in, n_dof_large, cache_single, t);
+            ok = ok && deserialize(in, n_dof_large, n_moments, cache_single, t);
             largest_stencil = std::max<uint32_t>(largest_stencil, t.large_cells.size());
         }
         if (ok) builder.add(c0, chunk);

@@ -101,6 +101,43 @@ struct PackedStencils {
     }
 };
 
+/** @brief (cell, k): central moments of each cell, mean of ((x - x_c) / h_c)^a ... (3D). */
+using Moments = Kokkos::View<double **, Kokkos::LayoutRight>;
+
+/**
+ * @brief The terms of the smoothness-indicator matrix (3D): entry e
+ *        (upper_index(l, m)) is sum_t weight(t) moments(cell, moment(t)) over
+ *        t in [start(e), start(e + 1)), with D^beta factors as weights.
+ */
+struct SmoothnessTerms {
+    Kokkos::View<uint32_t *> start;
+    Kokkos::View<double *> weight;
+    Kokkos::View<uint16_t *> moment;
+
+    /**
+     * @brief Entry e from one cell's moments, rounded as the setup's sum was,
+     *        which contracted no multiply and add into an FMA.
+     */
+    KOKKOS_INLINE_FUNCTION
+    rtype entry(const uint32_t e, const double * moments) const {
+        double sum = 0.0;
+        for (uint32_t t = start(e); t < start(e + 1); t++) sum = add_product_rn(sum, weight(t), moments[moment(t)]);
+        return rtype(sum);
+    }
+
+    /** @brief s + a b, each rounded, never fused. */
+    KOKKOS_INLINE_FUNCTION
+    static double add_product_rn(const double s, const double a, const double b) {
+#if defined(KOKKOS_ENABLE_CUDA) || defined(KOKKOS_ENABLE_HIP)
+        KOKKOS_IF_ON_DEVICE((return __dadd_rn(s, __dmul_rn(a, b));))
+        KOKKOS_IF_ON_HOST((const volatile double p = a * b; return s + p;))
+#else
+        const volatile double p = a * b;
+        return s + p;
+#endif
+    }
+};
+
 /**
  * @brief Exponents (a, b) of the l-th monomial xi^a eta^b, ordered by total
  *        degree: (1,0), (0,1), (2,0), (1,1), (0,2), (3,0), ...

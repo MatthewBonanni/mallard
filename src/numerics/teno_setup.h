@@ -99,7 +99,7 @@ struct TableBatchT {
     V<uint16_t *> large_size;    // (slot)
     V<uint16_t **> small_size;   // (slot, face)
     V<uint16_t *> small_total;   // (slot)
-    SlotArray<rtype, Space> scale, basis_mean, si;
+    SlotArray<rtype, Space> scale, basis_mean, si;  // si: 2D only
     SlotArray<int32_t, Space> large_cells, large_faces, small_cells, small_faces;  // sectors one after another
     SlotArray<rtype, Space> large_pinv, small_pinv;  // (s * width + l)
 
@@ -111,7 +111,7 @@ struct TableBatchT {
           invalid_small("teno_batch_invalid", n), large_size("teno_batch_large_size", n),
           small_size("teno_batch_small_size", n, teno::MAX_FACES), small_total("teno_batch_small_total", n),
           scale("teno_batch_scale", 1, n, interleaved), basis_mean("teno_batch_mean", nk_in, n, interleaved),
-          si("teno_batch_si", size_t(nk_in) * (nk_in + 1) / 2, n, interleaved),
+          si("teno_batch_si", N_DIM == 2 ? size_t(nk_in) * (nk_in + 1) / 2 : 0, n, interleaved),
           large_cells("teno_batch_large_cells", max_large_in, n, interleaved),
           large_faces("teno_batch_large_faces", max_large_in, n, interleaved),
           small_cells("teno_batch_small_cells", max_small_in, n, interleaved),
@@ -180,9 +180,21 @@ class Setup3DHandle {
         uint16_t max_small() const;
         const Timings & timings() const;
 
+        /**
+         * @brief The central moments of cells [0, out.extent(0)), from which
+         *        the troubled pass forms the smoothness matrices.
+         */
+        void copy_moments(const teno::Moments & out) const;
+
     private:
         std::unique_ptr<Setup3D> impl;
 };
+
+/** @brief The terms of every smoothness-matrix entry of the given degree, in the order the setup sums them. */
+teno::SmoothnessTerms smoothness_terms(uint8_t degree);
+
+/** @brief Central moments per cell for the given degree. */
+uint16_t n_moments(uint8_t degree);
 
 /**
  * @brief Metric (3 x 3, row-major) in which the stencil candidates of cell i

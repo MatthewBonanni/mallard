@@ -311,12 +311,16 @@ class TENO : public FaceReconstruction {
         teno::PackedStencils stencil_large;                // pseudo-inverse width: nk
         Kokkos::View<uint16_t **> stencil_small_size;      // (cell, face); 0 if stencil invalid
         teno::PackedStencils stencil_small;                // the faces' stencils one after another; width NK_SMALL
-        Kokkos::View<rtype **> si_matrix;                  // (cell, upper_index(l, m)): symmetric
+        Kokkos::View<rtype **> si_matrix;                  // 2D: (cell, upper_index(l, m)): symmetric
+        teno::Moments moments;                             // 3D: (cell, k), from which the troubled pass forms it
+        teno::SmoothnessTerms si_terms;                    // 3D
         Kokkos::View<rtype *> troubled;                    // (local cell): sigma, for diagnostics
-        Kokkos::View<rtype ***> troubled_coeffs;           // (cell, l, var): scratch for the troubled passes
-        Kokkos::View<rtype ****> troubled_small_coeffs;    // (cell, sector, l, var): scratch for the troubled passes
+        Kokkos::View<rtype ***> troubled_coeffs;           // (queue position, l, var): kept for the troubled pass
         Kokkos::View<uint32_t *> troubled_cells;           // queue of troubled cells
         Kokkos::View<uint32_t> n_troubled;
+        // Fraction of the reconstructed cells whose central coefficients the
+        // smooth pass keeps for the troubled pass; it recomputes the others'
+        rtype troubled_capacity = 0.125;
         // Vertex-neighbor layers each reconstructed cell's stencil search visited
         // (host); a distributed run needs this many complete layers around the cell
         std::vector<uint8_t> gather_depth;
@@ -422,7 +426,7 @@ class TENO : public FaceReconstruction {
         void round_to_single();
 
         std::string cache_file;  // this rank's
-        bool cache_single = false;  // pseudo-inverses and smoothness-indicator matrices cached in single precision
+        bool cache_single = false;  // pseudo-inverses and smoothness-indicator matrices (3D: moments) cached in single precision
         bool cache_loaded = false;
 
         uint32_t largest_stencil = 0;        // Largest central stencil on any rank (cells)

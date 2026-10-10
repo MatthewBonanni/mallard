@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -524,15 +525,15 @@ KOKKOS_INLINE_FUNCTION Lanes lanes_of(const Scratch<Space> & s, const size_t slo
 
 /** @brief One cell's outputs in a batch. */
 struct OutLanes {
-    Lane<rtype> scale, basis_mean, si, large_pinv, small_pinv;
+    Lane<rtype> scale, basis_mean, large_pinv, small_pinv;
     Lane<int32_t> large_cells, large_faces, small_cells, small_faces;
 };
 
 template <class Space>
 KOKKOS_INLINE_FUNCTION OutLanes out_lanes(const TableBatchT<Space> & b, const size_t slot) {
-    return OutLanes{b.scale.lane(slot),       b.basis_mean.lane(slot),  b.si.lane(slot),
-                    b.large_pinv.lane(slot),  b.small_pinv.lane(slot),  b.large_cells.lane(slot),
-                    b.large_faces.lane(slot), b.small_cells.lane(slot), b.small_faces.lane(slot)};
+    return OutLanes{b.scale.lane(slot),       b.basis_mean.lane(slot),  b.large_pinv.lane(slot),
+                    b.small_pinv.lane(slot),  b.large_cells.lane(slot), b.large_faces.lane(slot),
+                    b.small_cells.lane(slot), b.small_faces.lane(slot)};
 }
 
 /**
@@ -1441,45 +1442,6 @@ struct CellSetup {
             n_small += n_sector;
         }
 
-        // Smoothness-indicator matrix: M_lm = sum_{1<=|beta|<=r} int D^beta phi_l D^beta phi_m,
-        // from the cell's central moments (its scaled volume is 1)
-        const Lane<double> & M = w.X;
-        for (int k = 0; k < nk * nk; k++) M[k] = 0.0;
-        auto falling = [](int a, int p) {
-            double c = 1.0;
-            for (int t = 0; t < p; t++) c *= (a - t);
-            return c;
-        };
-        for (int b0 = 0; b0 <= r; b0++) {
-            for (int b1 = 0; b0 + b1 <= r; b1++) {
-                for (int b2 = 0; b0 + b1 + b2 <= r; b2++) {
-                    if (b0 + b1 + b2 == 0) continue;
-                    double dv[teno::MAX_NK];
-                    uint8_t nonzero[teno::MAX_NK];
-                    int n_nonzero = 0;
-                    for (int l = 0; l < nk; l++) {
-                        const int e0 = tables->expo[l][0], e1 = tables->expo[l][1], e2 = tables->expo[l][2];
-                        dv[l] = (e0 >= b0 && e1 >= b1 && e2 >= b2) ? falling(e0, b0) * falling(e1, b1) * falling(e2, b2)
-                                                                   : 0.0;
-                        if (dv[l] != 0.0) nonzero[n_nonzero++] = l;
-                    }
-                    for (int jl = 0; jl < n_nonzero; jl++) {
-                        const int l = nonzero[jl];
-                        for (int jm = jl; jm < n_nonzero; jm++) {
-                            const int m = nonzero[jm];
-                            M[l * nk + m] += dv[l] * dv[m] *
-                                             g.moments(i, moment(tables->expo[l][0] + tables->expo[m][0] - 2 * b0,
-                                                                 tables->expo[l][1] + tables->expo[m][1] - 2 * b1,
-                                                                 tables->expo[l][2] + tables->expo[m][2] - 2 * b2));
-                        }
-                    }
-                }
-            }
-        }
-        int idx = 0;
-        for (int l = 0; l < nk; l++) {
-            for (int m = l; m < nk; m++) o.si[idx++] = rtype(M[l * nk + m]);
-        }
         return OK;
     }
 };
@@ -2695,30 +2657,6 @@ struct CellTeam {
         });
         tm.team_barrier();
 
-        // Smoothness-indicator matrix, entry by entry, over the derivatives in CellSetup's order,
-        // from the cell's moments in level-0 scratch
-        double * mom = A;
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, c.tables->n_moments), [&](const int k) { mom[k] = c.g.moments(i, k); });
-        tm.team_barrier();
-        const int n_si = nk * (nk + 1) / 2;
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, n_si), [&](const int e) {
-            int l = 0, idx = e;
-            while (idx >= nk - l) {
-                idx -= nk - l;
-                l++;
-            }
-            const int m = l + idx;
-            const Tables & t = *c.tables;
-            const int e0 = t.expo[l][0] + t.expo[m][0], e1 = t.expo[l][1] + t.expo[m][1], e2 = t.expo[l][2] + t.expo[m][2];
-            double sum = 0.0;
-            for (int q = 0; q < t.n_beta; q++) {
-                const double dl = t.derivative[l][q], dm = t.derivative[m][q];
-                if (dl == 0.0 || dm == 0.0) continue;
-                sum += dl * dm * mom[c.moment(e0 - 2 * t.beta[q][0], e1 - 2 * t.beta[q][1], e2 - 2 * t.beta[q][2])];
-            }
-            o.si[e] = rtype(sum);
-        });
-        tm.team_barrier();
         return Status::OK;
     }
 };
@@ -3237,7 +3175,10 @@ class Setup3D {
                 CellTeam<Exec> task{CellSetup<Exec>{device, d_tables.data(), Scratch<DefaultMem>(), out, cells, {}, r, nk, ns, nss,
                                                     ns_max, nss_max, double(options.max_condition)},
                                     out, cells, layout, caps};
-                Kokkos::TeamPolicy<Exec, Kokkos::LaunchBounds<TEAM_SIZE, 3>> policy(n, TEAM_SIZE);
+                // On an instance of its own: an instance keeps the largest team scratch any of
+                // its kernels asked for (1.7 KB per cell at 1M cells, TENO5) until it is destroyed
+                if (!team_space) team_space = Kokkos::Experimental::partition_space(Exec(), 1)[0];
+                Kokkos::TeamPolicy<Exec, Kokkos::LaunchBounds<TEAM_SIZE, 3>> policy(*team_space, n, TEAM_SIZE);
                 policy.set_scratch_size(0, Kokkos::PerTeam(layout.shared_bytes))
                     .set_scratch_size(1, Kokkos::PerTeam(layout.bytes));
                 Kokkos::parallel_for("teno_setup_cells", policy, task);
@@ -3260,6 +3201,11 @@ class Setup3D {
         }
 
         const Timings & timings() const { return timing; }
+
+        void copy_moments(const teno::Moments & out) const {
+            const std::pair<size_t, size_t> rows(0, out.extent(0));
+            Kokkos::deep_copy(out, Kokkos::subview(device.moments, rows, Kokkos::ALL()));
+        }
 
     private:
 
@@ -3336,6 +3282,7 @@ class Setup3D {
         Geometry<DefaultMem> device;
         bool host_ready = DEVICE_IS_HOST;
         Scratch<DefaultMem> scratch;
+        std::optional<Kokkos::DefaultExecutionSpace> team_space;
         Timings timing;
 };
 
@@ -3353,6 +3300,40 @@ uint32_t Setup3DHandle::batch_cells() const { return impl->batch_cells(); }
 uint16_t Setup3DHandle::max_large() const { return impl->max_large(); }
 uint16_t Setup3DHandle::max_small() const { return impl->max_small(); }
 const Timings & Setup3DHandle::timings() const { return impl->timings(); }
+
+void Setup3DHandle::copy_moments(const teno::Moments & out) const { impl->copy_moments(out); }
+
+teno::SmoothnessTerms smoothness_terms(const uint8_t degree) {
+    const Tables t(degree);
+    const int nk = teno::n_dof(degree);
+    std::vector<uint32_t> start = {0};
+    std::vector<double> weight;
+    std::vector<uint16_t> moment;
+    // The setup's order of the terms of each entry, which its sums followed
+    for (int l = 0; l < nk; l++) {
+        for (int m = l; m < nk; m++) {
+            const int e0 = t.expo[l][0] + t.expo[m][0], e1 = t.expo[l][1] + t.expo[m][1], e2 = t.expo[l][2] + t.expo[m][2];
+            for (int q = 0; q < t.n_beta; q++) {
+                const double dl = t.derivative[l][q], dm = t.derivative[m][q];
+                if (dl == 0.0 || dm == 0.0) continue;
+                weight.push_back(dl * dm);
+                moment.push_back(uint16_t(
+                    t.moment_slot[((e0 - 2 * t.beta[q][0]) * t.nm + e1 - 2 * t.beta[q][1]) * t.nm + e2 - 2 * t.beta[q][2]]));
+            }
+            start.push_back(uint32_t(weight.size()));
+        }
+    }
+    teno::SmoothnessTerms out;
+    out.start = Kokkos::View<uint32_t *>("teno_si_term_start", start.size());
+    out.weight = Kokkos::View<double *>("teno_si_term_weight", weight.size());
+    out.moment = Kokkos::View<uint16_t *>("teno_si_term_moment", moment.size());
+    Kokkos::deep_copy(out.start, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(start.data(), start.size()));
+    Kokkos::deep_copy(out.weight, Kokkos::View<const double *, Kokkos::HostSpace>(weight.data(), weight.size()));
+    Kokkos::deep_copy(out.moment, Kokkos::View<const uint16_t *, Kokkos::HostSpace>(moment.data(), moment.size()));
+    return out;
+}
+
+uint16_t n_moments(const uint8_t degree) { return uint16_t(Tables(degree).n_moments); }
 
 // ---- ranking metric (host) ----------------------------------------------------------------------
 

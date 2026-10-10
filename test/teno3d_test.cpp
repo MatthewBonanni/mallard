@@ -383,7 +383,7 @@ std::vector<std::pair<std::string, std::vector<char>>> teno_tables(const TENO & 
     };
     add("scale", teno.scale);
     add("basis_mean", teno.basis_mean);
-    add("si_matrix", teno.si_matrix);
+    add("moments", teno.moments);
     add("large sizes", teno.stencil_large_size);
     add("small sizes", teno.stencil_small_size);
     add("large slices", teno.stencil_large.slice_start);
@@ -492,4 +492,38 @@ TEST(TENO3DSetup, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsTh
     auto host = make_teno_with(mesh, bd, 5, [](TENO & t) { t.setup_on_host = true; });
     expect_same_tables(*reference, *batched, "batches of 64 cells");
     expect_same_tables(*reference, *host, "host setup");
+}
+
+TEST(TENO3DTroubled, FaceValuesDoNotDependOnWhetherTheSmoothPassKeptTheCentralCoefficients) {
+    // A blast (density and pressure jumps on a sphere) on mixed cells with walls:
+    // troubled cells beyond the kept coefficients recompute them, with the
+    // smooth pass's arithmetic (its team kernel on GPUs from order 5)
+    auto mesh = make_mesh_3d("cartesian_mixed", 6, 6, 6);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    auto h_W = Kokkos::create_mirror_view(W);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        double r2 = 0.0;
+        for (int d = 0; d < 3; d++) r2 += std::pow(double(mesh->h_cell_coords(c, d)) - 0.3, 2);
+        const bool inside = r2 < 0.16;
+        h_W(c, 0) = inside ? 1.0 : 0.125;
+        for (int d = 0; d < 3; d++) h_W(c, 1 + d) = 0.1 * double(mesh->h_cell_coords(c, d));
+        h_W(c, 4) = inside ? 1.0 : 0.1;
+    }
+    Kokkos::deep_copy(W, h_W);
+    for (const int order : {3, 5}) {
+        auto face_values = [&](const rtype capacity) {
+            auto teno = make_teno_with(mesh, bd, order, [&](TENO & t) { t.troubled_capacity = capacity; });
+            Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, teno->n_face_quadrature_points());
+            teno->calc_face_values(W, face_W);
+            auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+            uint32_t n_troubled = 0;
+            auto sigma = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->troubled);
+            for (uint32_t c = 0; c < mesh->n_cells; c++) n_troubled += sigma(c) >= teno->sigma_threshold;
+            EXPECT_GT(n_troubled, mesh->n_cells / 10) << "order " << order;
+            const char * p = reinterpret_cast<const char *>(h.data());
+            return std::vector<char>(p, p + h.span() * sizeof(rtype));
+        };
+        EXPECT_TRUE(face_values(1.0) == face_values(0.0)) << "order " << order;
+    }
 }
