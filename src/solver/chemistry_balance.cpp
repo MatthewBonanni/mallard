@@ -45,10 +45,8 @@ void reserve(View & v, const size_t n, const char * label) {
 } // namespace
 
 ChemistryBalance::ChemistryBalance(const uint32_t n_species_in, const double threshold_in)
-    : n_species(n_species_in), threshold(threshold_in), state_stride(N_CONSERVATIVE + n_species_in + 4),
-      result_stride(n_species_in + 3) {
+    : n_species(n_species_in), threshold(threshold_in), result_stride(n_species_in + 3) {
 #ifndef Mallard_HAS_MPI
-    (void)state_stride;
     (void)result_stride;
     throw std::logic_error("ChemistryBalance: built without MPI");
 #endif
@@ -68,11 +66,21 @@ void ChemistryBalance::reserve_guests(const uint32_t n) {
         guest_cost = Kokkos::View<float *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "chem_guest_queue_cost"), m);
         guests.time_scale = Kokkos::View<rtype *>();
     }
-    if (scaled && guests.time_scale.extent(0) < guests.U.extent(0)) {
-        guests.time_scale = Kokkos::View<rtype *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "chem_guest_scale"),
-                                                  guests.U.extent(0));
+    const size_t m = guests.U.extent(0);
+    if (scaled && guests.time_scale.extent(0) < m) {
+        guests.time_scale = Kokkos::View<rtype *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "chem_guest_scale"), m);
     }
     if (!scaled) guests.time_scale = Kokkos::View<rtype *>();
+    if (forced && guests.U_end.extent(0) < m) {
+        guests.rate = SpeciesView(Kokkos::view_alloc(Kokkos::WithoutInitializing, "chem_guest_rate"), m, n_species);
+        guests.U_end = StateView(Kokkos::view_alloc(Kokkos::WithoutInitializing, "chem_guest_U_end"), m);
+        guests.rhoY_end = SpeciesView(Kokkos::view_alloc(Kokkos::WithoutInitializing, "chem_guest_rhoY_end"), m, n_species);
+    }
+    if (!forced) {
+        guests.rate = SpeciesView();
+        guests.U_end = StateView();
+        guests.rhoY_end = SpeciesView();
+    }
 }
 
 uint32_t ChemistryBalance::send(const ChemistryCells & cells, const Kokkos::View<uint32_t *> & queue,
@@ -122,10 +130,12 @@ uint32_t ChemistryBalance::send(const ChemistryCells & cells, const Kokkos::View
     kept = n_queued - given[me];
     n_sent = given[me];
     scaled = cells.time_scale.extent(0) > 0;
+    forced = cells.forced();
+    state_stride = N_CONSERVATIVE + n_species + 4 + (forced ? n_species + N_CONSERVATIVE : 0);
 
 #ifdef Mallard_HAS_MPI
     const uint32_t S = state_stride, ns = n_species, first = kept;
-    const bool has_scale = scaled;
+    const bool has_scale = scaled, has_forcing = forced;
     if (n_sent > 0) {
         reserve(send_buffer, static_cast<size_t>(n_sent) * S, "chem_balance_send");
         const Kokkos::View<rtype *> buf = send_buffer;
@@ -139,6 +149,11 @@ uint32_t ChemistryBalance::send(const ChemistryCells & cells, const Kokkos::View
             b[N_CONSERVATIVE + ns + 1] = c.chem_h(cell);
             b[N_CONSERVATIVE + ns + 2] = static_cast<rtype>(c.previous_cost(cell));
             b[N_CONSERVATIVE + ns + 3] = has_scale ? c.time_scale(cell) : rtype(1);
+            if (has_forcing) {
+                rtype * f = b + N_CONSERVATIVE + ns + 4;
+                for (uint32_t j = 0; j < ns; j++) f[j] = c.rate(cell, j);
+                for (uint32_t i = 0; i < N_CONSERVATIVE; i++) f[ns + i] = c.U_end(cell, i);
+            }
         });
         Kokkos::fence("chemistry_balance_pack");
     }
@@ -187,7 +202,7 @@ uint32_t ChemistryBalance::receive(const ChemistryCells & cells, const Kokkos::V
         const ChemistryCells g = guests;
         const Kokkos::View<uint32_t *> q = guest_queue;
         const Kokkos::View<float *> key = guest_cost;
-        const bool has_scale = scaled;
+        const bool has_scale = scaled, has_forcing = forced;
         Kokkos::parallel_for("chemistry_balance_unpack", n_guests, KOKKOS_LAMBDA(const uint32_t k) {
             const rtype * b = &buf(static_cast<size_t>(k) * S);
             for (uint32_t i = 0; i < N_CONSERVATIVE; i++) g.U(k, i) = b[i];
@@ -196,6 +211,11 @@ uint32_t ChemistryBalance::receive(const ChemistryCells & cells, const Kokkos::V
             g.chem_h(k) = b[N_CONSERVATIVE + ns + 1];
             g.previous_cost(k) = static_cast<float>(b[N_CONSERVATIVE + ns + 2]);
             if (has_scale) g.time_scale(k) = b[N_CONSERVATIVE + ns + 3];
+            if (has_forcing) {
+                const rtype * f = b + N_CONSERVATIVE + ns + 4;
+                for (uint32_t j = 0; j < ns; j++) g.rate(k, j) = f[j];
+                for (uint32_t i = 0; i < N_CONSERVATIVE; i++) g.U_end(k, i) = f[ns + i];
+            }
             g.chem_cost(k) = rtype(0);
             q(k) = k;
             key(k) = -g.previous_cost(k);
@@ -204,7 +224,7 @@ uint32_t ChemistryBalance::receive(const ChemistryCells & cells, const Kokkos::V
         // Results in place of the states (each cell's results fit in its state's slot)
         Kokkos::parallel_for("chemistry_balance_results", n_guests, KOKKOS_LAMBDA(const uint32_t k) {
             rtype * b = &buf(static_cast<size_t>(k) * R);
-            for (uint32_t j = 0; j < ns; j++) b[j] = g.rhoY(k, j);
+            for (uint32_t j = 0; j < ns; j++) b[j] = has_forcing ? g.rhoY_end(k, j) : g.rhoY(k, j);
             b[ns] = g.chem_h(k);
             b[ns + 1] = g.chem_cost(k);
             b[ns + 2] = static_cast<rtype>(g.previous_cost(k));
@@ -224,10 +244,11 @@ uint32_t ChemistryBalance::receive(const ChemistryCells & cells, const Kokkos::V
         const Kokkos::View<rtype *> buf = send_buffer;
         const ChemistryCells c = cells;
         const uint32_t first = kept;
+        const SpeciesView out = forced ? c.rhoY_end : c.rhoY;
         Kokkos::parallel_for("chemistry_balance_return", n_sent, KOKKOS_LAMBDA(const uint32_t k) {
             const uint32_t cell = queue(first + k);
             const rtype * b = &buf(static_cast<size_t>(k) * R);
-            for (uint32_t j = 0; j < ns; j++) c.rhoY(cell, j) = b[j];
+            for (uint32_t j = 0; j < ns; j++) out(cell, j) = b[j];
             c.chem_h(cell) = b[ns];
             c.chem_cost(cell) += b[ns + 1];
             c.previous_cost(cell) = static_cast<float>(b[ns + 2]);
