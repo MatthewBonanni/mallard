@@ -2960,14 +2960,18 @@ void assign_if_same(A & a, const B & b) {
     if constexpr (std::is_same_v<A, B>) a = b;
 }
 
-/** @brief Copies slots [0, n) of a batch into slots dest(0..n) of another. */
+/**
+ * @brief Copies slots src(0..n) of a batch into slots dest(0..n) of another;
+ *        an empty src or dest stands for 0..n.
+ */
 template <class Space>
-void copy_slots(const TableBatchT<Space> & from, const TableBatchT<Space> & to, const Kokkos::View<uint32_t *, Space> & dest,
-                const uint32_t n) {
+void copy_slots(const TableBatchT<Space> & from, const TableBatchT<Space> & to, const Kokkos::View<uint32_t *, Space> & src,
+                const Kokkos::View<uint32_t *, Space> & dest, const uint32_t n) {
     using Exec = typename std::conditional<std::is_same_v<Space, HostMem>, Kokkos::DefaultHostExecutionSpace,
                                            Kokkos::DefaultExecutionSpace>::type;
-    Kokkos::parallel_for("teno_setup_copy_slots", Kokkos::RangePolicy<Exec>(0, n), KOKKOS_LAMBDA(const uint32_t j) {
-        const uint32_t t = dest(j);
+    Kokkos::parallel_for("teno_setup_copy_slots", Kokkos::RangePolicy<Exec>(0, n), KOKKOS_LAMBDA(const uint32_t i) {
+        const uint32_t j = src.extent(0) ? src(i) : i;
+        const uint32_t t = dest.extent(0) ? dest(i) : i;
         to.status(t) = from.status(j);
         to.gather_depth(t) = from.gather_depth(j);
         to.failed_large(t) = from.failed_large(j);
@@ -3417,7 +3421,7 @@ class Setup3D {
                         h_dst(j) = done_slot[j];
                     }
                     TableBatchT<HostMem> h_compact(n_done, nk, ns_max, max_small(), out.large_cells.interleaved);
-                    copy_slots<HostMem>(h_out, h_compact, h_src, n_done);
+                    copy_slots<HostMem>(h_out, h_compact, h_src, {}, n_done);
                     Kokkos::fence();
                     // Copies compacted rows to the device, then into place
                     TableBatchT<DefaultMem> d_compact = device_copy(h_compact);
@@ -3431,7 +3435,7 @@ class Setup3D {
 
         static void copy_slots_indirect(const TableBatchT<DefaultMem> & from, const TableBatchT<DefaultMem> & to,
                                         const Kokkos::View<uint32_t *, DefaultMem> & dest, const uint32_t n) {
-            copy_slots<DefaultMem>(from, to, dest, n);
+            copy_slots<DefaultMem>(from, to, {}, dest, n);
         }
 
         Options options;
