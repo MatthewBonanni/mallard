@@ -60,9 +60,9 @@ struct OpticallyThinRadiation {
     KOKKOS_INLINE_FUNCTION double loss(const double T, const F_rho & rho_k) const {
         const double RT_atm = GAS_CONSTANT * T / ONE_ATM;
         double kappa = 0.0;  // 1/m
-        for (int s = 0; s < N_RADIATING_SPECIES; s++) {
+        for (uint32_t s = 0; s < N_RADIATING_SPECIES; s++) {
             if (index[s] < 0) continue;
-            kappa += rho_k(index[s]) * inv_W[s] * RT_atm * planck_mean_absorption(static_cast<RadiatingSpecies>(s), T);
+            kappa += rho_k(static_cast<uint32_t>(index[s])) * inv_W[s] * RT_atm * planck_mean_absorption(static_cast<RadiatingSpecies>(s), T);
         }
         const double T2 = T * T;
         return 4.0 * STEFAN_BOLTZMANN * kappa * (T2 * T2 - T_ambient4);
