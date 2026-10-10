@@ -17,6 +17,8 @@
 
 #include "teno_setup.h"
 
+#include "curved.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -2984,6 +2986,54 @@ TableBatch device_copy(const TableBatchT<Kokkos::HostSpace> & h) {
 
 /** @brief The setup of one mesh. */
 class Setup3D {
+    private:
+        /**
+         * @brief Moments of the curved cells over their curved regions
+         *        (curved::Geometry::cell_rule), on the host, in place of the
+         *        device's from the straight-sided tetrahedra.
+         */
+        void curved_moments(const curved::Geometry & geometry, const uint32_t n_cells) {
+            std::vector<uint32_t> cells;
+            for (uint32_t c = 0; c < n_cells; c++) {
+                if (geometry.cell_is_curved(c)) cells.push_back(c);
+            }
+            if (cells.empty()) return;
+            auto h_moments = Kokkos::create_mirror_view_and_copy(HostMem(), device.moments);
+            const int nm = tables.nm, n_moments = tables.n_moments;
+            const Geometry<HostMem> & h = host;
+            Kokkos::parallel_for("teno_curved_moments",
+                                 Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(
+                                     0, cells.size()),
+                                 [&](const uint32_t j) {
+                const uint32_t c = cells[j];
+                std::vector<curved::Vec3> x;
+                std::vector<double> w;
+                geometry.cell_rule(c, nm - 1, x, w);
+                double xc[3];
+                for (int a = 0; a < 3; a++) xc[a] = double(h.cell_coords(c, a));
+                const double hc = h.cell_h(c);
+                std::vector<double> sums(n_moments, 0.0);
+                double vol = 0.0, px[MAX_NM], py[MAX_NM], pz[MAX_NM];
+                for (size_t q = 0; q < w.size(); q++) {
+                    px[0] = py[0] = pz[0] = 1.0;
+                    for (int k = 1; k < nm; k++) {
+                        px[k] = px[k - 1] * (x[q][0] - xc[0]) / hc;
+                        py[k] = py[k - 1] * (x[q][1] - xc[1]) / hc;
+                        pz[k] = pz[k - 1] * (x[q][2] - xc[2]) / hc;
+                    }
+                    int k = 0;
+                    for (int a = 0; a < nm; a++) {
+                        for (int b = 0; a + b < nm; b++) {
+                            for (int e = 0; a + b + e < nm; e++) sums[k++] += w[q] * px[a] * py[b] * pz[e];
+                        }
+                    }
+                    vol += w[q];
+                }
+                for (int k = 0; k < n_moments; k++) h_moments(c, k) = sums[k] / vol;
+            });
+            Kokkos::deep_copy(device.moments, h_moments);
+        }
+
     public:
         Setup3D(const Mesh & mesh, const BoundaryData & boundaries, Kokkos::View<rtype ***> quad_points,
                 Kokkos::View<rtype **> quad_weights, const Options & opt)
@@ -3118,6 +3168,7 @@ class Setup3D {
             }
             Kokkos::parallel_for("teno_boxes", Range(0, n_cells), BoxesTask<DefaultMem>{d});
             Kokkos::fence();
+            if (mesh.curved_geometry) curved_moments(*mesh.curved_geometry, n_cells);
 
             // On host backends the host setup reads the very same geometry
             assign_if_same(host, device);

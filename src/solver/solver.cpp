@@ -232,6 +232,9 @@ void Solver::init_mesh() {
         }
         halo = HaloExchange(distribution, exchange == "nccl");
     }
+    const curved::Surfaces surfaces = is_distributed() ? curved::surfaces_of_block(setup->mesh_block(), input)
+                                                       : curved::surfaces_of_mesh(*mesh, input);
+    mesh->apply_curved(surfaces);
     mesh_summary = describe_mesh(*mesh);
     mesh_summary.insert(mesh_summary.begin(),
                         {"Type", type == "file" ? "file " + toml::find_or<std::string>(input, "mesh", "filename",
@@ -263,8 +266,20 @@ void Solver::init_mesh() {
                                                   logging::count(max_owned).c_str(), max_owned / mean,
                                                   logging::count(max_halo).c_str()));
     }
+    if (mesh->curved_geometry) {
+        uint32_t n_high_order = 0;
+        for (const auto & face : surfaces.faces) n_high_order += face.shape < 0;
+        std::string text = logging::count(surfaces.faces.size()) + " faces";
+        if (n_high_order > 0) text += ", " + logging::count(n_high_order) + " high-order from the mesh file";
+        for (const auto & shape : surfaces.shapes) text += ", " + shape.zone + " projected";
+        mesh_summary.emplace_back("Curved boundary", text);
+    }
     axisymmetric = toml::find_or<bool>(input, "physics", "axisymmetric", false);
     if (axisymmetric) {
+        if (mesh->curved_geometry) {
+            throw InputError("physics.axisymmetric: curved boundaries are not supported in axisymmetric runs yet "
+                             "(set [mesh] curved_geometry = false).");
+        }
         for (const auto & translation : mesh->periodic_translations) {
             if (translation[1] != 0.0_r) {
                 throw InputError("physics.axisymmetric: the mesh cannot be periodic in y (the radius).");

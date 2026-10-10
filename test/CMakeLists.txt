@@ -22,6 +22,7 @@ set(MALLARD_TEST_SOURCES
 if(Mallard_DIM EQUAL 2)
     list(APPEND MALLARD_TEST_SOURCES
     mesh_test.cpp
+    curved_test.cpp
     physics_test.cpp
     riemann_solver_test.cpp
     reconstruction_test.cpp

@@ -14,6 +14,7 @@
 
 #include <array>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -21,6 +22,7 @@
 #include <Kokkos_Core.hpp>
 #include <toml.hpp>
 
+#include "curved.h"
 #include "zone.h"
 
 enum class MeshType {
@@ -363,6 +365,18 @@ class Mesh {
          */
         void init_from_block(const MeshBlock & block, const std::vector<PeriodicPair> & periodic = {});
 
+        /**
+         * @brief Curve the faces on the given surfaces (see curved::Geometry):
+         *        3D area vectors of the curved faces, and the volumes and
+         *        centroids of the cells touching them, on the host. Nothing
+         *        changes for empty surfaces. Collective (checks the analytic
+         *        shapes against the zones' nodes on every rank).
+         */
+        void apply_curved(const curved::Surfaces & surfaces);
+
+        /** @brief The face zones (host). */
+        const std::vector<FaceZone> & h_face_zones() const { return m_face_zones; }
+
         /** @brief Whether some zones were joined periodically. */
         bool is_periodic() const { return !periodic_translations.empty(); }
 
@@ -402,6 +416,10 @@ class Mesh {
         }
 
         uint32_t n_cells, n_nodes, n_faces;
+        // High-order boundary elements of the mesh file (global node ids), for curved::surfaces_of_mesh
+        std::vector<curved::SurfaceFace> high_order_faces;
+        // Curved geometry, or null for straight-sided meshes; it refers to this mesh
+        std::shared_ptr<const curved::Geometry> curved_geometry;
         // Cells [0, n_owned()) are owned by this rank; the rest are halo cells
         uint32_t n_owned_cells = 0;
         uint32_t n_owned() const { return n_owned_cells ? n_owned_cells : n_cells; }

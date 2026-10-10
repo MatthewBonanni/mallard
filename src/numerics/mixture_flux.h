@@ -62,6 +62,7 @@ struct MixtureFluxFunctor {
     Kokkos::View<rtype **> face_mdot;  // (face, q)
     rtype low_mach_cutoff;
     Kokkos::View<rtype *> upwind;  // hybrid flux: upwind fraction of each cell, else empty
+    Kokkos::View<rtype ***> quad_normals;  // curved meshes: (face, q, dim) unit normals; else empty
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
@@ -82,6 +83,8 @@ struct MixtureFluxFunctor {
 
         rtype flux[N_CONSERVATIVE] = {};
         for (uint8_t i_quad = 0; i_quad < n_quad; i_quad++) {
+            rtype n_q[N_DIM];
+            const rtype * n_point = quad_normal(quad_normals, i_face, i_quad, n_unit, n_q);
             rtype w_q;
             if constexpr (N_DIM == 2) {
                 w_q = face_weights.extent(0) ? face_weights(i_face, i_quad) : quad_weights(i_quad);
@@ -102,18 +105,18 @@ struct MixtureFluxFunctor {
                 th_r[0] = face_thermo(i_face, i_quad, 1, 0);
                 th_r[1] = face_thermo(i_face, i_quad, 1, 1);
             } else {
-                boundaries.exterior_mixture(i_face, i_quad, n_quad, W_l, th_l, n_unit, W_cells, face_solution,
+                boundaries.exterior_mixture(i_face, i_quad, n_quad, W_l, th_l, n_point, W_cells, face_solution,
                                             face_thermo, cell_thermo, W_r, th_r);
             }
             const riemann::SideThermo side_l{th_l[0], th_l[1]}, side_r{th_r[0], th_r[1]};
             rtype central[N_CONSERVATIVE] = {};
-            if (hybrid) riemann::KEEP::calc_flux(central, n_unit, W_l, W_r, side_l, side_r);
+            if (hybrid) riemann::KEEP::calc_flux(central, n_point, W_l, W_r, side_l, side_r);
             if (phi > 0.0_r) {
                 if (low_mach_cutoff < 1.0_r &&
                     (c1 >= 0 || boundaries.bcs(boundaries.face_bc(i_face)).is_characteristic())) {
                     low_mach_correction(W_l, W_r, th_l[0], th_r[0], low_mach_cutoff);
                 }
-                T_riemann_solver::calc_flux(flux_q, n_unit, W_l, W_r, side_l, side_r);
+                T_riemann_solver::calc_flux(flux_q, n_point, W_l, W_r, side_l, side_r);
                 if (hybrid) FOR_I_CONSERVATIVE flux_q[i] = central[i] + phi * (flux_q[i] - central[i]);
             } else {
                 FOR_I_CONSERVATIVE flux_q[i] = central[i];
@@ -158,6 +161,7 @@ struct MixtureDoubleFluxFunctor {
     Kokkos::View<rtype **> face_mdot;
     rtype low_mach_cutoff;
     Kokkos::View<rtype *> upwind;  // hybrid flux: upwind fraction of each cell, else empty
+    Kokkos::View<rtype ***> quad_normals;  // curved meshes: (face, q, dim) unit normals; else empty
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
@@ -182,6 +186,8 @@ struct MixtureDoubleFluxFunctor {
         rtype flux[N_CONSERVATIVE] = {};
         rtype energy_1 = 0.0_r;
         for (uint8_t i_quad = 0; i_quad < n_quad; i_quad++) {
+            rtype n_q[N_DIM];
+            const rtype * n_point = quad_normal(quad_normals, i_face, i_quad, n_unit, n_q);
             rtype w_q;
             if constexpr (N_DIM == 2) {
                 w_q = face_weights.extent(0) ? face_weights(i_face, i_quad) : quad_weights(i_quad);
@@ -199,14 +205,14 @@ struct MixtureDoubleFluxFunctor {
             } else {
                 const rtype th_i[2] = {th_0.gamma, th_0.e0};
                 rtype th_g[2];
-                boundaries.exterior_mixture(i_face, i_quad, n_quad, W_l, th_i, n_unit, W_cells, face_solution,
+                boundaries.exterior_mixture(i_face, i_quad, n_quad, W_l, th_i, n_point, W_cells, face_solution,
                                             face_thermo, cell_thermo, W_r, th_g);
             }
             // Each side's central flux with its own frozen thermodynamics on both sides
             rtype K_0[N_CONSERVATIVE] = {}, K_1[N_CONSERVATIVE] = {};
             if (hybrid) {
-                riemann::KEEP::calc_flux(K_0, n_unit, W_l, W_r, th_0, th_0);
-                riemann::KEEP::calc_flux(K_1, n_unit, W_l, W_r, th_1, th_1);
+                riemann::KEEP::calc_flux(K_0, n_point, W_l, W_r, th_0, th_0);
+                riemann::KEEP::calc_flux(K_1, n_point, W_l, W_r, th_1, th_1);
             }
             if (low_mach_cutoff < 1.0_r) {
                 if (c1 >= 0) {
@@ -216,9 +222,9 @@ struct MixtureDoubleFluxFunctor {
                 }
             }
             rtype F_0[N_CONSERVATIVE], F_1[N_CONSERVATIVE];
-            T_riemann_solver::calc_flux(F_0, n_unit, W_l, W_r, th_0, riemann::SideThermo(th_0, th_1));
+            T_riemann_solver::calc_flux(F_0, n_point, W_l, W_r, th_0, riemann::SideThermo(th_0, th_1));
             if (c1 >= 0) {
-                T_riemann_solver::calc_flux(F_1, n_unit, W_l, W_r, riemann::SideThermo(th_1, th_0), th_1);
+                T_riemann_solver::calc_flux(F_1, n_point, W_l, W_r, riemann::SideThermo(th_1, th_0), th_1);
             } else {
                 FOR_I_CONSERVATIVE F_1[i] = F_0[i];
             }

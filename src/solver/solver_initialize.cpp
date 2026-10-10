@@ -380,6 +380,24 @@ void cell_average_3d(const Mesh & mesh, const TetrahedronRule & rule, uint32_t i
     for (double & v : s.sum) v /= vol_sum;
 }
 
+/**
+ * @brief Average of f over a curved cell, with its cone rule (curved::Geometry::cell_rule).
+ */
+template <typename F>
+void cell_average_curved(const curved::Geometry & geometry, uint32_t i_cell, PointState & s, const F & f) {
+    std::vector<curved::Vec3> x;
+    std::vector<double> w;
+    geometry.cell_rule(i_cell, N_DIM == 2 ? 10 : 8, x, w);
+    std::fill(s.sum.begin(), s.sum.end(), 0.0);
+    double vol_sum = 0.0;
+    for (size_t q = 0; q < w.size(); q++) {
+        f(s, x[q][0], x[q][1], x[q][2]);
+        for (size_t i = 0; i < s.sum.size(); i++) s.sum[i] += w[q] * double(s.cons[i]);
+        vol_sum += w[q];
+    }
+    for (double & v : s.sum) v /= vol_sum;
+}
+
 }  // namespace
 
 /**
@@ -389,7 +407,8 @@ void cell_average_3d(const Mesh & mesh, const TetrahedronRule & rule, uint32_t i
  * Dunavant rule; in 3D, the tetrahedra of Mesh::h_cell_tetrahedra, each
  * subdivided into n_sub^3 sub-tetrahedra with a 14-point degree-5 rule. This resolves
  * discontinuous initial data that do not align with the mesh and is
- * high-order accurate for smooth data. Cells are averaged in parallel on the
+ * high-order accurate for smooth data. Curved cells use their own rule
+ * (curved::Geometry::cell_rule). Cells are averaged in parallel on the
  * host, each thread with its own compiled expressions; every cell's sum runs
  * in the same order as on one thread, so the result does not depend on the
  * thread count.
@@ -510,7 +529,9 @@ void Solver::init_solution_analytical() {
         const int32_t id = token.acquire();
         PointState & s = *states[id];
         try {
-            if constexpr (N_DIM == 3) {
+            if (mesh->curved_geometry && mesh->curved_geometry->cell_is_curved(i_cell)) {
+                cell_average_curved(*mesh->curved_geometry, i_cell, s, point_conservatives);
+            } else if constexpr (N_DIM == 3) {
                 cell_average_3d(*mesh, tet_rule, i_cell, s, point_conservatives);
             } else {
                 cell_average_2d(*mesh, quad, weight_sum, n_sub, i_cell, s, point_conservatives);
