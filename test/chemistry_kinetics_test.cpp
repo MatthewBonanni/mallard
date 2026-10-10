@@ -23,6 +23,8 @@
 
 #include "kinetics.h"
 #include "mechanism.h"
+#include "mixture.h"
+#include "test_fixtures.h"
 #include "thermo.h"
 
 using namespace chemistry;
@@ -276,6 +278,30 @@ TEST(ChemistryKineticsTest, FractionalOrdersKeepAFiniteJacobianAsConcentrationsV
             EXPECT_DOUBLE_EQ(Kinetics::power(x * C_reg, n), std::pow(x * C_reg, n)) << n << " " << x;
             EXPECT_DOUBLE_EQ(Kinetics::power_derivative(x * C_reg, n), n * std::pow(x * C_reg, n - 1.0)) << n << " " << x;
         }
+    }
+}
+
+TEST(ChemistryKineticsTest, RegularizationConcentrationIsAnOption) {
+    // chemistry.C_reg moves the regularization: below it the C3H8 step's rate
+    // follows the regularized law in C3H8, above it the power law
+    using Kinetics = KineticsTable<Kokkos::HostSpace>;
+    const Mechanism mech = read_mechanism(SOURCE_DIR + "/test/data/chemistry/propane_2step.yaml", "gas");
+    const double C_reg = 1e-9;
+    const toml::value input = parse_toml("[chemistry]\nC_reg = 1.0e-9\n");
+    ASSERT_EQ(reactor_options(input).C_reg, C_reg);
+    const auto kinetics = make_kinetics_table<Kokkos::HostSpace>(mech, reactor_options(input).C_reg);
+    const auto plain = make_kinetics_table<Kokkos::HostSpace>(mech);
+    const uint32_t ns = mech.n_species(), nr = mech.reactions.size(), fuel = mech.species_index("C3H8");
+    std::vector<double> C(ns, 1e-3), g(ns, 0.0), q(nr), q_plain(nr);
+    for (const double x : {0.5, 2.0}) {
+        C[fuel] = x * C_reg;
+        kinetics.rates_of_progress(1800.0, C.data(), g.data(), q.data());
+        plain.rates_of_progress(1800.0, C.data(), g.data(), q_plain.data());
+        // Reaction 0 is C3H8 + 3.5 O2 => 3 CO + 4 H2O with [C3H8]^0.1
+        const double ratio = q[0] / q_plain[0];
+        const double expected = x < 1.0 ? Kinetics::power(C[fuel], 0.1, C_reg) / std::pow(C[fuel], 0.1) : 1.0;
+        EXPECT_NEAR(ratio, expected, 1e-12) << x;
+        if (x < 1.0) EXPECT_LT(ratio, 0.9) << x;
     }
 }
 
