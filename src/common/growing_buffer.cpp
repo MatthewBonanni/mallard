@@ -26,16 +26,17 @@
 
 namespace {
 
-// The driver API through the runtime's entry points, so that nothing links libcuda
+// The driver API through the runtime's entry points, so that nothing links libcuda. The versioned
+// typedefs: CUDA 13's cudaTypedefs.h no longer defines the unversioned names
 struct Driver {
-    PFN_cuMemAddressReserve address_reserve = nullptr;
-    PFN_cuMemAddressFree address_free = nullptr;
-    PFN_cuMemCreate create = nullptr;
-    PFN_cuMemRelease release = nullptr;
-    PFN_cuMemMap map = nullptr;
-    PFN_cuMemUnmap unmap = nullptr;
-    PFN_cuMemSetAccess set_access = nullptr;
-    PFN_cuMemGetAllocationGranularity granularity = nullptr;
+    PFN_cuMemAddressReserve_v10020 address_reserve = nullptr;
+    PFN_cuMemAddressFree_v10020 address_free = nullptr;
+    PFN_cuMemCreate_v10020 create = nullptr;
+    PFN_cuMemRelease_v10020 release = nullptr;
+    PFN_cuMemMap_v10020 map = nullptr;
+    PFN_cuMemUnmap_v10020 unmap = nullptr;
+    PFN_cuMemSetAccess_v10020 set_access = nullptr;
+    PFN_cuMemGetAllocationGranularity_v10020 granularity = nullptr;
 };
 
 template <typename F>
