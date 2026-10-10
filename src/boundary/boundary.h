@@ -247,7 +247,7 @@ struct BoundaryData {
     Kokkos::View<rtype *[N_DIM]> char_neighbor_dx;  // Center of each neighbor relative to the face, across periodic seams too
     Kokkos::View<uint8_t *> char_edge;           // Faces sharing a node with a boundary face that is not characteristic (a wall)
     Kokkos::View<BoundaryCondition *> bcs;
-    rtype gamma = 1.4;
+    rtype gamma = 1.4_r;
     rtype R = 1.0;
     bool viscous = false;
     Euler gas;
@@ -284,7 +284,7 @@ struct BoundaryData {
         if (image_face >= 0) {
             uint8_t q;
             if constexpr (N_DIM == 2) {
-                q = face_image_flip(i_face) ? n_quad - 1 - i_quad : i_quad;
+                q = static_cast<uint8_t>(face_image_flip(i_face) ? n_quad - 1 - i_quad : i_quad);
             } else {
                 q = face_image_quad(i_face, i_quad);
             }
@@ -355,7 +355,7 @@ struct BoundaryData {
         if (image_face >= 0) {
             uint8_t q;
             if constexpr (N_DIM == 2) {
-                q = face_image_flip(i_face) ? n_quad - 1 - i_quad : i_quad;
+                q = static_cast<uint8_t>(face_image_flip(i_face) ? n_quad - 1 - i_quad : i_quad);
             } else {
                 q = face_image_quad(i_face, i_quad);
             }

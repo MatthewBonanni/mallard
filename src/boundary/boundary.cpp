@@ -154,7 +154,7 @@ bool point_in_cell(const Mesh & mesh, uint32_t c, const rtype * p) {
  * Face of cell `image` whose centroid is `target` and whose plane is parallel
  * to boundary face f with the same area, or -1.
  */
-[[maybe_unused]] int32_t find_image_face_3d(const Mesh & mesh, uint32_t f, int32_t image, const rtype * target) {
+[[maybe_unused]] int32_t find_image_face_3d(const Mesh & mesh, uint32_t f, uint32_t image, const rtype * target) {
     const rtype A_f = mesh.h_face_area(f);
     for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(image); k++) {
         const uint32_t g = mesh.h_face_of_cell(image, k);
@@ -163,13 +163,13 @@ bool point_in_cell(const Mesh & mesh, uint32_t c, const rtype * p) {
         FOR_I_DIM {
             const rtype d = (mesh.h_face_coords(g, i) - mesh.h_face_offset(g, image, i)) - target[i];
             dist += d * d;
-            const uint8_t j = (i + 1) % 3, l = (i + 2) % 3;
+            const uint8_t j = static_cast<uint8_t>((i + 1) % 3), l = static_cast<uint8_t>((i + 2) % 3);
             const rtype c = mesh.h_face_normals(f, j) * mesh.h_face_normals(g, l) - mesh.h_face_normals(f, l) * mesh.h_face_normals(g, j);
             cross2 += c * c;
         }
         if (dist < precision_tol(1e-12, 1e-8) * A_f && cross2 < precision_tol(1e-20, 1e-10) * A_f * A_f * A_g * A_g &&
             std::abs(A_g - A_f) < precision_tol(1e-10, 1e-5) * A_f) {
-            return g;
+            return static_cast<int32_t>(g);
         }
     }
     return -1;
@@ -227,20 +227,20 @@ BoundaryData make_boundary_data(const Mesh & mesh,
         h_face_image_flip(f) = 0;
         h_face_state_index(f) = -1;
         h_face_char(f) = -1;
-        if (h_face_bc_vec[f] >= 0 && h_bcs_vec[h_face_bc_vec[f]].type == BoundaryType::DIRICHLET) {
+        if (h_face_bc_vec[f] >= 0 && h_bcs_vec[static_cast<size_t>(h_face_bc_vec[f])].type == BoundaryType::DIRICHLET) {
             h_face_state_index(f) = n_dirichlet++;
         }
-        if (h_face_bc_vec[f] < 0 || !h_bcs_vec[h_face_bc_vec[f]].is_transmissive()) continue;
-        if (h_bcs_vec[h_face_bc_vec[f]].is_characteristic()) {
+        if (h_face_bc_vec[f] < 0 || !h_bcs_vec[static_cast<size_t>(h_face_bc_vec[f])].is_transmissive()) continue;
+        if (h_bcs_vec[static_cast<size_t>(h_face_bc_vec[f])].is_characteristic()) {
             h_face_char(f) = static_cast<int32_t>(char_faces.size());
             char_faces.push_back(f);
-            const uint32_t c = mesh.h_cells_of_face(f, 0);
+            const uint32_t c = static_cast<uint32_t>(mesh.h_cells_of_face(f, 0));
             rtype d = 0.0;
             FOR_I_DIM d += (mesh.h_face_coords(f, i) - mesh.h_cell_coords(c, i)) * mesh.h_face_normals(f, i);
             char_depth.push_back(2.0_r * d / mesh.h_face_area(f));
         }
         // Image of the exterior neighbor: translate inward by most of the boundary cell's depth
-        const uint32_t c = mesh.h_cells_of_face(f, 0);
+        const uint32_t c = static_cast<uint32_t>(mesh.h_cells_of_face(f, 0));
         rtype n_in[N_DIM];
         FOR_I_DIM n_in[i] = -mesh.h_face_normals(f, i) / mesh.h_face_area(f);
         rtype depth = 0.0;
@@ -252,8 +252,8 @@ BoundaryData make_boundary_data(const Mesh & mesh,
         }
         rtype p[N_DIM];
         FOR_I_DIM p[i] = mesh.h_face_coords(f, i) + 0.75_r * depth * n_in[i];
-        int32_t image = c;
-        for (uint32_t k = 0; k < mesh.h_n_nodes_of_cell(c) && image == static_cast<int32_t>(c); k++) {
+        uint32_t image = c;
+        for (uint32_t k = 0; k < mesh.h_n_nodes_of_cell(c) && image == c; k++) {
             for (uint32_t nb : cells_of_node[mesh.h_node_of_cell(c, k)]) {
                 if (point_in_cell(mesh, nb, p)) {
                     image = nb;
@@ -264,7 +264,7 @@ BoundaryData make_boundary_data(const Mesh & mesh,
         // Neighbors across periodic boundaries, at the image point moved into their frame
         uint8_t image_shift = 0;
         for (uint32_t k = mesh.h_offsets_cells_of_cell(c);
-             image == static_cast<int32_t>(c) && k < mesh.h_offsets_cells_of_cell(c + 1); k++) {
+             image == c && k < mesh.h_offsets_cells_of_cell(c + 1); k++) {
             const uint8_t s = mesh.h_cells_of_cell_shift(k);
             if (s == 0) continue;
             rtype q[N_DIM];
@@ -274,7 +274,7 @@ BoundaryData make_boundary_data(const Mesh & mesh,
                 image_shift = s;
             }
         }
-        h_face_image(f) = image;
+        h_face_image(f) = static_cast<int32_t>(image);
 
         // Face of the image cell that is the boundary face translated by the cell depth
         rtype target[N_DIM];
@@ -282,7 +282,7 @@ BoundaryData make_boundary_data(const Mesh & mesh,
         if constexpr (N_DIM == 3) {
             h_face_image_face(f) = find_image_face_3d(mesh, f, image, target);
             if (h_face_image_face(f) >= 0) {
-                h_face_image_side(f) = (mesh.h_cells_of_face(h_face_image_face(f), 0) == image) ? 0 : 1;
+                h_face_image_side(f) = (mesh.h_cells_of_face(h_face_image_face(f), 0) == static_cast<int32_t>(image)) ? 0 : 1;
             }
         } else {
             const rtype t_f[N_DIM] = {mesh.h_node_coords(mesh.h_node_of_face(f, 1), 0) - mesh.h_node_coords(mesh.h_node_of_face(f, 0), 0),
@@ -300,8 +300,8 @@ BoundaryData make_boundary_data(const Mesh & mesh,
                 const rtype len2 = t_f[0] * t_f[0] + t_f[1] * t_f[1];
                 if (dist < precision_tol(1e-12, 1e-8) * len2 && std::abs(cross) < precision_tol(1e-10, 1e-5) * len2 &&
                     std::abs(mesh.h_face_area(g) - mesh.h_face_area(f)) < precision_tol(1e-10, 1e-5) * mesh.h_face_area(f)) {
-                    h_face_image_face(f) = g;
-                    h_face_image_side(f) = (mesh.h_cells_of_face(g, 0) == image) ? 0 : 1;
+                    h_face_image_face(f) = static_cast<int32_t>(g);
+                    h_face_image_side(f) = (mesh.h_cells_of_face(g, 0) == static_cast<int32_t>(image)) ? 0 : 1;
                     h_face_image_flip(f) = (t_f[0] * t_g[0] + t_f[1] * t_g[1] < 0.0_r) ? 1 : 0;
                     break;
                 }
@@ -328,7 +328,7 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     for (size_t k = 0; k < char_faces.size(); k++) {
         h_char_faces(k) = char_faces[k];
         h_char_depth(k) = char_depth[k];
-        const BoundaryCondition & bc = h_bcs_vec[h_face_bc_vec[char_faces[k]]];
+        const BoundaryCondition & bc = h_bcs_vec[static_cast<size_t>(h_face_bc_vec[char_faces[k]])];
         FOR_I_DIM h_char_target(k, i) = (bc.type == BoundaryType::NSCBC_INLET) ? bc.data[1 + i] : 0.0_r;
     }
     Kokkos::deep_copy(data.char_faces, h_char_faces);
@@ -346,7 +346,7 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     std::unordered_map<uint32_t, std::vector<uint32_t>> char_of_node;
     for (size_t k = 0; k < char_faces.size(); k++) {
         for (uint32_t j = 0; j < mesh.h_n_nodes_of_face(char_faces[k]); j++) {
-            char_of_node[node_key(mesh.h_node_of_face(char_faces[k], static_cast<uint8_t>(j)))].push_back(
+            char_of_node[node_key(mesh.h_node_of_face(char_faces[k], j))].push_back(
                 static_cast<uint32_t>(k));
         }
     }
@@ -356,11 +356,11 @@ BoundaryData make_boundary_data(const Mesh & mesh,
         const uint32_t f = char_faces[k];
         std::vector<uint32_t> candidates, shared;
         for (uint32_t j = 0; j < mesh.h_n_nodes_of_face(f); j++) {
-            for (uint32_t m : char_of_node[node_key(mesh.h_node_of_face(f, static_cast<uint8_t>(j)))]) {
+            for (uint32_t m : char_of_node[node_key(mesh.h_node_of_face(f, j))]) {
                 if (m == k) continue;
                 const auto it = std::find(candidates.begin(), candidates.end(), m);
                 if (it != candidates.end()) {
-                    shared[it - candidates.begin()]++;
+                    shared[static_cast<size_t>(it - candidates.begin())]++;
                 } else {
                     candidates.push_back(m);
                     shared.push_back(1);
@@ -404,9 +404,9 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     std::unordered_set<uint32_t> other_nodes;
     for (uint32_t g = 0; g < mesh.n_faces; g++) {
         const int32_t b = h_face_bc_vec[g];
-        if (b < 0 || h_bcs_vec[b].is_characteristic() || h_bcs_vec[b].type == BoundaryType::PARTITION) continue;
+        if (b < 0 || h_bcs_vec[static_cast<size_t>(b)].is_characteristic() || h_bcs_vec[static_cast<size_t>(b)].type == BoundaryType::PARTITION) continue;
         for (uint32_t j = 0; j < mesh.h_n_nodes_of_face(g); j++) {
-            other_nodes.insert(mesh.h_node_of_face(g, static_cast<uint8_t>(j)));
+            other_nodes.insert(mesh.h_node_of_face(g, j));
         }
     }
     data.char_edge = Kokkos::View<uint8_t *>("char_edge", char_faces.size());
@@ -414,7 +414,7 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     for (size_t k = 0; k < char_faces.size(); k++) {
         h_char_edge(k) = 0;
         for (uint32_t j = 0; j < mesh.h_n_nodes_of_face(char_faces[k]); j++) {
-            if (other_nodes.count(mesh.h_node_of_face(char_faces[k], static_cast<uint8_t>(j)))) h_char_edge(k) = 1;
+            if (other_nodes.count(mesh.h_node_of_face(char_faces[k], j))) h_char_edge(k) = 1;
         }
     }
     Kokkos::deep_copy(data.char_edge, h_char_edge);

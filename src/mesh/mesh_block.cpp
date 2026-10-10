@@ -24,7 +24,7 @@
 #include "hdf5_util.h"
 
 std::array<rtype, 2> wedge_node(rtype x, rtype y, rtype Ly) {
-    const rtype wedge_theta = 8 * Kokkos::numbers::pi / 180.0;
+    const rtype wedge_theta = static_cast<rtype>(8 * Kokkos::numbers::pi / 180.0);
     const rtype wedge_x = 0.5;
     if (x > wedge_x) {
         const rtype y_bottom = (x - wedge_x) * std::tan(wedge_theta);
@@ -47,7 +47,7 @@ Stretching mesh_stretching(const toml::value & input) {
     if (beta.size() != N_DIM) {
         throw InputError("[mesh] stretching must have " + std::to_string(N_DIM) + " components.");
     }
-    for (int d = 0; d < N_DIM; d++) {
+    for (size_t d = 0; d < N_DIM; d++) {
         if (!(beta[d] >= 0.0_r) || !std::isfinite(beta[d])) {
             throw InputError("[mesh] stretching factors must be finite and non-negative.");
         }
@@ -66,18 +66,18 @@ MeshBlock cartesian_2d_block(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, MeshT
     block.first_node = block_begin(n_nodes, r, p);
     block.zone_names = {"right", "top", "left", "bottom"};
     enum { RIGHT, TOP, LEFT, BOTTOM };
-    const rtype dx = Lx / nx;
-    const rtype dy = Ly / ny;
+    const rtype dx = Lx / static_cast<rtype>(nx);
+    const rtype dy = Ly / static_cast<rtype>(ny);
     for (uint64_t g = block.first_node; g < block_begin(n_nodes, r + 1, p); g++) {
-        const uint32_t i = g / (ny + 1), j = g % (ny + 1);
-        std::array<rtype, 2> x = {stretching[0] > 0.0_r ? stretched_coordinate(i, nx, Lx, stretching[0]) : i * dx,
-                                  stretching[1] > 0.0_r ? stretched_coordinate(j, ny, Ly, stretching[1]) : j * dy};
+        const uint32_t i = static_cast<uint32_t>(g / (ny + 1)), j = static_cast<uint32_t>(g % (ny + 1));
+        std::array<rtype, 2> x = {stretching[0] > 0.0_r ? stretched_coordinate(i, nx, Lx, stretching[0]) : static_cast<rtype>(i) * dx,
+                                  stretching[1] > 0.0_r ? stretched_coordinate(j, ny, Ly, stretching[1]) : static_cast<rtype>(j) * dy};
         if (kind == MeshType::WEDGE) x = wedge_node(x[0], x[1], Ly);
         block.node_coords.push_back({double(x[0]), double(x[1])});
     }
     for (uint64_t c = block.first_cell; c < block_begin(n_cells, r + 1, p); c++) {
         const uint64_t quad = tri ? c / 2 : c;
-        const uint32_t ic = quad / ny, jc = quad % ny;
+        const uint32_t ic = static_cast<uint32_t>(quad / ny), jc = static_cast<uint32_t>(quad % ny);
         const uint64_t tr = uint64_t(ic + 1) * (ny + 1) + jc + 1;
         const uint64_t tl = uint64_t(ic) * (ny + 1) + jc + 1;
         const uint64_t bl = uint64_t(ic) * (ny + 1) + jc;
@@ -154,13 +154,13 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
     auto grid_node = [&](uint32_t i, uint32_t j, uint32_t k) { return (uint64_t(i) * (ny + 1) + j) * (nz + 1) + k; };
     const uint32_t n[3] = {nx, ny, nz};
     const rtype L[3] = {Lx, Ly, Lz};
-    auto node_coordinate = [&](int d, uint32_t i) {
+    auto node_coordinate = [&](uint32_t d, uint32_t i) {
         if (stretching[d] > 0.0_r) return stretched_coordinate(i, n[d], L[d], stretching[d]);
-        return i == n[d] ? L[d] : L[d] * i / n[d];
+        return i == n[d] ? L[d] : L[d] * static_cast<rtype>(i) / static_cast<rtype>(n[d]);
     };
-    auto center_coordinate = [&](int d, uint32_t i) {
+    auto center_coordinate = [&](uint32_t d, uint32_t i) {
         return stretching[d] > 0.0_r ? 0.5_r * (node_coordinate(d, i) + node_coordinate(d, i + 1))
-                                     : L[d] * (i + 0.5_r) / n[d];
+                                     : L[d] * (static_cast<rtype>(i) + 0.5_r) / static_cast<rtype>(n[d]);
     };
     auto grid_coords = [&](uint32_t i, uint32_t j, uint32_t k) {
         return std::array<rtype, 3>{node_coordinate(0, i), node_coordinate(1, j), node_coordinate(2, k)};
@@ -174,13 +174,14 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
     };
     auto coords = [&](uint64_t g) {
         if (g < n_grid) {
-            return grid_coords(g / ((uint64_t(ny) + 1) * (nz + 1)), (g / (nz + 1)) % (ny + 1), g % (nz + 1));
+            return grid_coords(static_cast<uint32_t>(g / ((uint64_t(ny) + 1) * (nz + 1))), static_cast<uint32_t>((g / (nz + 1)) % (ny + 1)),
+                               static_cast<uint32_t>(g % (nz + 1)));
         }
         const uint64_t a = g - n_grid;
-        const uint32_t i = std::upper_bound(layout.apexes_before.begin(), layout.apexes_before.end(), a) -
-                           layout.apexes_before.begin() - 1;
+        const uint32_t i = static_cast<uint32_t>(std::upper_bound(layout.apexes_before.begin(), layout.apexes_before.end(), a) -
+                           layout.apexes_before.begin() - 1);
         const uint64_t local = a - layout.apexes_before[i];
-        return apex_coords(i, local / nz, local % nz);
+        return apex_coords(i, static_cast<uint32_t>(local / nz), static_cast<uint32_t>(local % nz));
     };
 
     MeshBlock block;
@@ -200,11 +201,11 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
         block.add_cell(nodes);
         // Boundary faces: cell faces whose nodes all lie on one side of the box
         cell.assign(nodes);
-        for (const auto & local : cell_local_faces(cell.size())) {
-            for (int d = 0; d < 3; d++) {
-                for (int side = 0; side < 2; side++) {
+        for (const auto & local : cell_local_faces(static_cast<uint32_t>(cell.size()))) {
+            for (uint32_t d = 0; d < 3; d++) {
+                for (uint32_t side = 0; side < 2; side++) {
                     bool on = true;
-                    for (uint8_t k : local) on = on && std::abs(coords(cell[k])[d] - side * L[d]) < 1e-12_r * L[d];
+                    for (uint8_t k : local) on = on && std::abs(coords(cell[k])[d] - static_cast<rtype>(side) * L[d]) < 1e-12_r * L[d];
                     if (!on) continue;
                     std::vector<uint64_t> fn;
                     for (uint8_t k : local) fn.push_back(cell[k]);
@@ -214,15 +215,15 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
         }
     };
     if (first_cell >= end_cell) return block;
-    uint32_t i = std::upper_bound(layout.cells_before.begin(), layout.cells_before.end(), first_cell) -
-                 layout.cells_before.begin() - 1;
+    uint32_t i = static_cast<uint32_t>(std::upper_bound(layout.cells_before.begin(), layout.cells_before.end(), first_cell) -
+                 layout.cells_before.begin() - 1);
     uint64_t b = (first_cell - layout.cells_before[i]) / layout.cells_per_block(i);
     for (; i < nx && layout.cells_before[i] < end_cell; i++, b = 0) {
         const uint32_t per_block = layout.cells_per_block(i);
         for (; b < uint64_t(ny) * nz; b++) {
             const uint64_t g0 = layout.cells_before[i] + b * per_block;
             if (g0 >= end_cell) break;
-            const uint32_t j = b / nz, k = b % nz;
+            const uint32_t j = static_cast<uint32_t>(b / nz), k = static_cast<uint32_t>(b % nz);
             const uint64_t v[8] = {grid_node(i, j, k), grid_node(i + 1, j, k), grid_node(i + 1, j + 1, k),
                                    grid_node(i, j + 1, k), grid_node(i, j, k + 1), grid_node(i + 1, j, k + 1),
                                    grid_node(i + 1, j + 1, k + 1), grid_node(i, j + 1, k + 1)};
@@ -234,7 +235,7 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
                     // Kuhn subdivision along the main diagonal v0-v6: conforming
                     // across blocks because every block uses the same diagonal
                     static const uint8_t paths[6][2] = {{1, 2}, {1, 5}, {3, 2}, {3, 7}, {4, 5}, {4, 7}};
-                    for (int m = 0; m < 6; m++) add(g0 + m, {v[0], v[paths[m][0]], v[paths[m][1]], v[6]});
+                    for (uint32_t m = 0; m < 6; m++) add(g0 + m, {v[0], v[paths[m][0]], v[paths[m][1]], v[6]});
                     break;
                 }
                 case MeshType::CARTESIAN_PRISM:
@@ -243,7 +244,7 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
                     break;
                 case MeshType::CARTESIAN_PYRAMID: {
                     const uint64_t apex = apex_node(i, j, k);
-                    int m = 0;
+                    uint32_t m = 0;
                     for (const auto & face : cell_local_faces(8)) {
                         add(g0 + m++, {v[face[0]], v[face[1]], v[face[2]], v[face[3]], apex});
                     }
@@ -322,8 +323,8 @@ void write_mesh_h5(const std::string & filename, const MeshBlock & block) {
     uint64_t total[N_COUNTS] = {}, first[N_COUNTS] = {};
     for (int q = 0; q < p; q++) {
         for (int k = 0; k < N_COUNTS; k++) {
-            if (q < r) first[k] += all[q * N_COUNTS + k];
-            total[k] += all[q * N_COUNTS + k];
+            if (q < r) first[k] += all[static_cast<size_t>(q * N_COUNTS + k)];
+            total[k] += all[static_cast<size_t>(q * N_COUNTS + k)];
         }
     }
     if (first[CELLS] != block.first_cell || first[NODES] != block.first_node) {
