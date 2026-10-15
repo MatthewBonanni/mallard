@@ -17,6 +17,7 @@
 #include "flux_functor.h"
 #include "gradient.h"
 #include "launch_bounds.h"
+#include "positivity.h"
 #include "viscous_flux.h"
 
 namespace {
@@ -125,6 +126,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
         Kokkos::parallel_for("rhs_W", mesh->n_cells, w_functor);
         face_reconstruction->calc_face_values(W_cells, face_solution);
     }
+    if (positivity) limit_face_states();
 
     if (!budget_pass) update_characteristic_boundaries(t_stage);
     if (hybrid_flux) update_upwind_sensor();
@@ -163,6 +165,36 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
         if (budget_pass) budget.viscous = kinetic_energy_rate() - budget.convective;
     }
 
+    assemble_rhs(state, rhs_state, t_stage);
+    if (positivity && stage_dt > 0.0_r && !budget_pass) {
+        const bool viscous = physics.is_viscous();
+        order_fallback(state, rhs_state, [&](const uint8_t level) {
+            riemann::dispatch(level == positivity::MAX_LEVEL ? RiemannSolverType::RUSANOV : riemann_solver_type,
+                              [&](auto solver) {
+                using Flux = ConvectiveFluxFunctor<decltype(solver)>;
+                Flux convective = flux_functor<decltype(solver)>();
+                convective.upwind = {};
+                convective.low_mach_cutoff = 1.0_r;
+                Kokkos::parallel_for("fallback_flux", HeavyRange<>(0, mesh->n_faces),
+                                     positivity::FallbackFluxFunctor<Flux, positivity::NoSlots, ViscousFluxFunctor>{
+                                         convective, {}, viscous_functor, viscous, face_level, face_changed, level});
+            });
+        }, [&] { assemble_rhs(state, rhs_state, t_stage); });
+    }
+    if (budget_pass && les_on) {
+        // The SGS fluxes alone, into the face fluxes this evaluation no longer needs
+        Kokkos::deep_copy(face_flux, 0.0_r);
+        viscous_functor.sgs_only = true;
+        parallel_for_faces("viscous_flux", viscous_functor, rhs_faces, mesh->n_faces);
+        budget.sgs = kinetic_energy_rate();
+        budget.viscous -= budget.sgs;
+    }
+}
+
+void Solver::assemble_rhs(const State & state, const State & rhs_state, const rtype t_stage) {
+    const uint32_t n_owned = mesh->n_owned();
+    const StateView solution = state.flow;
+    const StateView rhs = rhs_state.flow;
     FaceFluxSumFunctor sum_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                    face_flux, rhs};
     Kokkos::parallel_for("face_flux_sum", n_owned, sum_functor);
@@ -207,14 +239,6 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
         FOR_I_CONSERVATIVE rhs(i_cell, i) /= vol(i_cell);
     });
     apply_sponges(state, rhs_state);
-    if (budget_pass && les_on) {
-        // The SGS fluxes alone, into the face fluxes this evaluation no longer needs
-        Kokkos::deep_copy(face_flux, 0.0_r);
-        viscous_functor.sgs_only = true;
-        parallel_for_faces("viscous_flux", viscous_functor, rhs_faces, mesh->n_faces);
-        budget.sgs = kinetic_energy_rate();
-        budget.viscous -= budget.sgs;
-    }
 }
 
 void Solver::update_upwind_sensor() {
@@ -233,7 +257,12 @@ void Solver::add_geometric_source(StateView rhs, Kokkos::View<rtype *, Kokkos::L
 
 template <typename T_riemann_solver>
 void Solver::launch_flux_functor() {
-    ConvectiveFluxFunctor<T_riemann_solver> functor{mesh->face_normals,
+    parallel_for_faces("convective_flux", flux_functor<T_riemann_solver>(), rhs_faces, mesh->n_faces);
+}
+
+template <typename T_riemann_solver>
+ConvectiveFluxFunctor<T_riemann_solver> Solver::flux_functor() const {
+    return ConvectiveFluxFunctor<T_riemann_solver>{mesh->face_normals,
                                                     mesh->face_area,
                                                     mesh->cells_of_face,
                                                     face_reconstruction->quadrature_face.weights,
@@ -246,5 +275,4 @@ void Solver::launch_flux_functor() {
                                                     low_mach_cutoff,
                                                     cell_upwind,
                                                     face_reconstruction->face_quad_normals};
-    parallel_for_faces("convective_flux", functor, rhs_faces, mesh->n_faces);
 }

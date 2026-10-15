@@ -24,6 +24,7 @@
 #include "launch_bounds.h"
 #include "mixture_flux.h"
 #include "mixture_viscous_flux.h"
+#include "positivity.h"
 
 namespace {
 
@@ -394,6 +395,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
     if (exchange) halo.exchange(state);
     update_cell_states(state, !budget_pass);
     face_reconstruction->calc_face_values(W_cells, face_solution);
+    if (positivity) limit_face_states();
     if (!budget_pass) update_characteristic_boundaries(t_stage);
     if (hybrid_flux) update_upwind_sensor();
     scalar_reconstruction.calc(cell_scalars, W_cells, face_thermo);
@@ -450,8 +452,49 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
         if (budget_pass) budget.viscous = kinetic_energy_rate() - budget.convective;
     }
 
+    assemble_rhs_mixture(state, rhs_state, t_stage);
+    if (positivity && stage_dt > 0.0_r && !budget_pass) {
+        ScalarFaceValues first_order = scalar_reconstruction.face_values(cell_scalars);
+        first_order.gradients = {};
+        const positivity::FirstOrderSlots slots{SpeciesSlotFunctor<ScalarFaceValues>{
+            mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face, mesh->face_area,
+            face_reconstruction->quadrature_face.weights, flux_weights, face_mdot, first_order, boundary_data,
+            species_slots, n_species}};
+        const bool viscous = is_viscous();
+        order_fallback(state, rhs_state, [&](const uint8_t level) {
+            riemann::dispatch(level == positivity::MAX_LEVEL ? RiemannSolverType::RUSANOV : riemann_solver_type,
+                              [&](auto solver) {
+                using T = decltype(solver);
+                auto launch = [&](auto convective) {
+                    convective.upwind = {};
+                    convective.low_mach_cutoff = 1.0_r;
+                    Kokkos::parallel_for("fallback_flux", HeavyRange<>(0, mesh->n_faces),
+                                         positivity::FallbackFluxFunctor<decltype(convective), positivity::FirstOrderSlots,
+                                                                         MixtureViscousFluxFunctor>{
+                                             convective, slots, viscous_functor, viscous, face_level, face_changed, level});
+                };
+                if (double_flux) {
+                    launch(double_flux_functor<T>());
+                } else {
+                    launch(mixture_flux_functor<T>());
+                }
+            });
+        }, [&] { assemble_rhs_mixture(state, rhs_state, t_stage); });
+    }
+    if (budget_pass && les_on) {
+        // The SGS fluxes alone, into the face fluxes this evaluation no longer needs
+        Kokkos::deep_copy(face_flux, 0.0_r);
+        viscous_functor.sgs_only = true;
+        viscous_flux();
+        budget.sgs = kinetic_energy_rate();
+        budget.viscous -= budget.sgs;
+    }
+}
+
+void Solver::assemble_rhs_mixture(const State & state, const State & rhs_state, const rtype t_stage) {
     const uint32_t n_owned = mesh->n_owned();
-    StateView rhs = rhs_state.flow;
+    const uint32_t n_species = mixture.n_species;
+    const StateView rhs = rhs_state.flow;
     if (double_flux) {
         DoubleFluxSumFunctor sum_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                          face_flux, face_energy_1, rhs};
@@ -507,20 +550,12 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
         FOR_I_CONSERVATIVE rhs(i_cell, i) /= vol(i_cell);
     });
     apply_sponges(state, rhs_state);
-    if (budget_pass && les_on) {
-        // The SGS fluxes alone, into the face fluxes this evaluation no longer needs
-        Kokkos::deep_copy(face_flux, 0.0_r);
-        viscous_functor.sgs_only = true;
-        viscous_flux();
-        budget.sgs = kinetic_energy_rate();
-        budget.viscous -= budget.sgs;
-    }
 }
 
 template <typename T_riemann_solver>
-void Solver::launch_mixture_flux_functor() {
+MixtureFluxFunctor<T_riemann_solver> Solver::mixture_flux_functor() const {
     const uint32_t n_species = mixture.n_species;
-    MixtureFluxFunctor<T_riemann_solver> functor{
+    return MixtureFluxFunctor<T_riemann_solver>{
         mesh->face_normals,
         mesh->face_area,
         mesh->cells_of_face,
@@ -536,6 +571,11 @@ void Solver::launch_mixture_flux_functor() {
         low_mach_cutoff,
         cell_upwind,
         face_reconstruction->face_quad_normals};
+}
+
+template <typename T_riemann_solver>
+void Solver::launch_mixture_flux_functor() {
+    const MixtureFluxFunctor<T_riemann_solver> functor = mixture_flux_functor<T_riemann_solver>();
     // Faces of owned cells, as the single-gas flux
     if (rhs_faces.extent(0) == 0) {
         Kokkos::parallel_for("mixture_flux", HeavyRange<>(0, mesh->n_faces), functor);
@@ -546,9 +586,9 @@ void Solver::launch_mixture_flux_functor() {
 }
 
 template <typename T_riemann_solver>
-void Solver::launch_double_flux_functor() {
+MixtureDoubleFluxFunctor<T_riemann_solver> Solver::double_flux_functor() const {
     const uint32_t n_species = mixture.n_species;
-    MixtureDoubleFluxFunctor<T_riemann_solver> functor{
+    return MixtureDoubleFluxFunctor<T_riemann_solver>{
         mesh->face_normals,
         mesh->face_area,
         mesh->cells_of_face,
@@ -566,6 +606,11 @@ void Solver::launch_double_flux_functor() {
         low_mach_cutoff,
         cell_upwind,
         face_reconstruction->face_quad_normals};
+}
+
+template <typename T_riemann_solver>
+void Solver::launch_double_flux_functor() {
+    const MixtureDoubleFluxFunctor<T_riemann_solver> functor = double_flux_functor<T_riemann_solver>();
     if (rhs_faces.extent(0) == 0) {
         Kokkos::parallel_for("double_flux", HeavyRange<>(0, mesh->n_faces), functor);
     } else {

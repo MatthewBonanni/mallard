@@ -858,6 +858,7 @@ void Solver::init_numerics() {
     if (!(hybrid_threshold >= 0.0_r && hybrid_threshold <= 1.0_r) || !(hybrid_floor >= 0.0_r && hybrid_floor <= 1.0_r)) {
         throw InputError("numerics.hybrid: sensor_threshold and upwind_floor must be in [0, 1].");
     }
+    init_positivity();
 }
 
 void Solver::init_axisymmetric_weights() {
@@ -1442,6 +1443,14 @@ void Solver::print_setup() const {
                                              real(double(hybrid_threshold)) + " (upwind floor " +
                                              real(double(hybrid_floor)) + ")");
     }
+    if (positivity) {
+        logging::item("Positivity", std::string("Zhang-Shu face states; fallback to first order, then Rusanov, of "
+                                                "cells failing ") +
+                                        (mood_dmp ? "PAD or the relaxed DMP (" + real(double(mood_dmp_floor)) + ", " +
+                                                        real(double(mood_dmp_range)) + ")"
+                                                  : std::string("PAD")) +
+                                        (use_cfl && cfl > 1.0_r ? " (guaranteed only for cfl <= 1)" : ""));
+    }
     logging::item("Time integrator", TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()));
     logging::item("Time step", use_cfl ? "CFL " + real(double(cfl)) : "dt " + real(double(dt_fixed)) + " (fixed)");
     std::string stop;
@@ -1515,6 +1524,17 @@ void Solver::print_summary(const std::string & stop) const {
                                                                         100.0 * chem_cells_sent / chem_cells_integrated)
                                                       : std::string()));
         }
+    }
+    if (positivity) {
+        uint64_t limited = 0;
+        Kokkos::deep_copy(limited, n_limited_cells);
+        logging::item("Positivity", logging::count(comm::allreduce(limited, comm::Op::SUM)) +
+                                        " cell-stages with limited face states; fallback in " +
+                                        logging::count(n_fallback_stages) + " stages (" +
+                                        logging::count(n_fallback_rounds) + " rounds): " +
+                                        logging::count(n_fallback_cells[0]) + " cell-stages first order, " +
+                                        logging::count(n_fallback_cells[1]) + " Rusanov, " +
+                                        logging::count(n_fallback_failed) + " still inadmissible");
     }
     if (steps > 0 && t_wall_stepping > 0.0) {
         logging::item("Throughput", logging::si(static_cast<double>(n_cells_global * steps) / t_wall_stepping) + " cells/s, " +
@@ -1609,7 +1629,9 @@ void Solver::take_step() {
         freeze_thermodynamics();
         cells_frozen = true;
     }
+    stage_dt = dt;
     time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
+    stage_dt = 0.0;
     if (double_flux) {
         cells_frozen = false;
         reset_energy();

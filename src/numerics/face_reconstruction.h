@@ -175,6 +175,10 @@ class FaceReconstruction {
          */
         void init_face_quadrature_2d_curved();
 
+        // Leave face states with non-positive density or pressure as reconstructed
+        // instead of falling back to the cell mean (the positivity limiter scales them)
+        bool raw_face_states = false;
+
         Quadrature quadrature_face;
         // 3D, and 2D curved meshes: (face, q, dim) and (face, q). Weights sum to 2 per face
         // (twice the area over face_area on curved faces) and are zero on padding points

@@ -479,6 +479,7 @@ struct MUSCLFaceFunctor {
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
     Kokkos::View<rtype *[N_CONSERVATIVE]> limiters;
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
+    bool raw;  // keep inadmissible states (FaceReconstruction::raw_face_states)
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
@@ -501,7 +502,7 @@ struct MUSCLFaceFunctor {
             W_f[i] = W(c, i) + limiters(c, i) * dot<N_DIM>(grad, r);
         }
         const bool admissible = (W_f[0] > 0.0_r) && (W_f[N_CONSERVATIVE - 1] > 0.0_r);
-        FOR_I_CONSERVATIVE face_solution(i_face, 0, side, i) = admissible ? W_f[i] : W(c, i);
+        FOR_I_CONSERVATIVE face_solution(i_face, 0, side, i) = (admissible || raw) ? W_f[i] : W(c, i);
     }
 };
 
@@ -563,7 +564,7 @@ void MUSCL::calc_cell_face_values(const Kokkos::DefaultExecutionSpace & exec,
     MUSCLCellFunctor functor{MUSCLGradientFunctor{g},
                              LimiterFunctor{g.faces, mesh->cell_volume, limiters, limiter, venkat_K},
                              MUSCLFaceFunctor{mesh->cells_of_face, mesh->cell_coords, mesh->face_coords, mesh->shifts,
-                                              mesh->face_shift, solution, gradients, limiters, face_solution},
+                                              mesh->face_shift, solution, gradients, limiters, face_solution, raw_face_states},
                              cells};
     const uint32_t n = cells.extent(0) ? static_cast<uint32_t>(cells.extent(0)) : mesh->n_cells;
     Kokkos::parallel_for("muscl_cells", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace, HeavyBounds>(exec, 0, n),
@@ -592,6 +593,7 @@ void MUSCL::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                   solution,
                                   gradients,
                                   limiters,
-                                  face_solution};
+                                  face_solution,
+                                  raw_face_states};
     Kokkos::parallel_for("muscl_faces", mesh->n_faces, face_functor);
 }

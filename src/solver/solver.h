@@ -82,6 +82,13 @@ struct DirichletBoundary {
     std::vector<Expression> W;
 };
 
+template <typename T_riemann_solver>
+struct ConvectiveFluxFunctor;
+template <typename T_riemann_solver>
+struct MixtureFluxFunctor;
+template <typename T_riemann_solver>
+struct MixtureDoubleFluxFunctor;
+
 class Solver {
     public:
         Solver();
@@ -118,6 +125,15 @@ class Solver {
          * @brief Compute dU/dt for the given conservative state at time t.
          */
         void calc_rhs(State solution, State rhs, rtype t);
+
+        /**
+         * @brief The RHS of the owned cells from the stage's face fluxes: their
+         *        sums, the cell sources, the division by the volume and the
+         *        sponges (calc_rhs, and again after the positivity fallback).
+         */
+        void assemble_rhs(const State & state, const State & rhs_state, rtype t_stage);
+        /** @brief assemble_rhs for gas mixtures, also the species from species_slots. */
+        void assemble_rhs_mixture(const State & state, const State & rhs_state, rtype t_stage);
 
         /**
          * @brief Compute the stable time step for the current solution.
@@ -452,6 +468,24 @@ class Solver {
         void launch_mixture_flux_functor();
         template <typename T_riemann_solver>
         void launch_double_flux_functor();
+        template <typename T_riemann_solver>
+        ConvectiveFluxFunctor<T_riemann_solver> flux_functor() const;
+        template <typename T_riemann_solver>
+        MixtureFluxFunctor<T_riemann_solver> mixture_flux_functor() const;
+        template <typename T_riemann_solver>
+        MixtureDoubleFluxFunctor<T_riemann_solver> double_flux_functor() const;
+
+        /** @brief Positivity: read [numerics] positivity and [numerics.mood], allocate the fallback's arrays. */
+        void init_positivity();
+        /** @brief Positivity: Zhang-Shu scaling of the reconstructed face states (positivity.h). */
+        void limit_face_states();
+        /**
+         * @brief Positivity: the a-posteriori order fallback of a stage (positivity.h) on the RHS just
+         *        computed, with recompute(level) launching the fallback fluxes of the changed faces and
+         *        assemble() the RHS from the face fluxes.
+         */
+        void order_fallback(const State & state, const State & rhs_state,
+                            const std::function<void(uint8_t)> & recompute, const std::function<void()> & assemble);
         void init_mixture_boundaries(const std::vector<toml::value> & input_boundaries,
                                      const std::vector<std::array<uint32_t, 2>> & profiled_faces,
                                      std::vector<BoundaryCondition> & bcs);
@@ -523,6 +557,23 @@ class Solver {
         rtype hybrid_floor = 0.0;
         Kokkos::View<rtype *> cell_upwind;  // hybrid flux: upwind fraction of each cell, else empty
         std::unique_ptr<TimeIntegrator> time_integrator;
+
+        // Positivity preservation ([numerics] positivity; docs/numerics/positivity.md)
+        bool positivity = false;
+        bool mood_dmp = false;                            // relaxed DMP besides the PAD criteria
+        rtype mood_dmp_floor = 1.0e-4_r;
+        rtype mood_dmp_range = 1.0e-3_r;
+        rtype stage_dt = 0.0;                             // forward-Euler step of the stages, 0 outside take_step
+        Kokkos::View<uint8_t *> cell_level;               // fallback level of each cell in this stage
+        Kokkos::View<uint8_t *> face_level;
+        Kokkos::View<uint8_t *> face_changed;             // level changed in the current round
+        bool levels_set = false;                          // some cell left level 0 in the last stage
+        State level_halo;                                 // levels as rtype in flow(c, 0), for the halo exchange
+        Kokkos::View<uint64_t> n_limited_cells;           // cells whose face states the limiter scaled, summed
+        uint64_t n_fallback_stages = 0;                   // stages with any fallback cell
+        uint64_t n_fallback_rounds = 0;
+        uint64_t n_fallback_cells[2] = {};                // cell-stages that ended at levels 1 and 2
+        uint64_t n_fallback_failed = 0;                   // cell-stages still inadmissible after the fallback
 
         // Axisymmetric runs (see docs/design/axisymmetric.md)
         bool axisymmetric = false;

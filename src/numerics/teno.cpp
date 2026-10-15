@@ -1885,6 +1885,7 @@ struct TENOFunctor {
     Kokkos::View<rtype *, Kokkos::LayoutStride> cell_gamma;
     Kokkos::View<rtype *> cell_molar_mass;
     Kokkos::View<uint8_t **> selection;
+    bool raw = false;  // keep inadmissible face states (FaceReconstruction::raw_face_states)
 
     /**
      * @brief State of a stencil entry: cell c, or its mirror across boundary face f.
@@ -2098,7 +2099,7 @@ struct TENOFunctor {
                 FOR_I_CONSERVATIVE face_solution(f, q, side, i) = Wq[i];
             }
         }
-        if (!admissible) {
+        if (!admissible && !raw) {
             for (uint8_t k = 0; k < n_faces; k++) {
                 const uint32_t f = faces_of_cell(f_begin + k);
                 const uint8_t side = (cells_of_face(f, 0) == static_cast<int32_t>(i_cell)) ? 0 : 1;
@@ -2263,7 +2264,7 @@ struct TENOFunctor {
         }
         if (!admissible) admissible_team[lane] = 0;
         team.team_barrier();
-        if (!admissible_team[lane]) {
+        if (!admissible_team[lane] && !raw) {
             rtype W0[N_CONSERVATIVE];
             FOR_I_CONSERVATIVE W0[i] = W(i_cell, i);
             for (uint32_t p = part; p < n_points; p += PARTS) {
@@ -2822,7 +2823,7 @@ struct TENOFunctor {
             const uint8_t side = side_of(f, i_cell);
             for (uint8_t q = 0; q < n_quad; q++) {
                 rtype Wq[N_CONSERVATIVE];
-                if (!admissible) {
+                if (!admissible && !raw) {
                     FOR_I_CONSERVATIVE Wq[i] = W0[i];
                 } else {
                     rtype U_f[N_CONSERVATIVE];
@@ -2859,7 +2860,7 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
                     scale, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
                     si_matrix, moments, si_terms, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells,
                     n_troubled,
-                    solution, face_solution, cells, {}, cell_gamma, cell_molar_mass, selection};
+                    solution, face_solution, cells, {}, cell_gamma, cell_molar_mass, selection, raw_face_states};
     using Dynamic = Kokkos::Schedule<Kokkos::Dynamic>;
     using Space = Kokkos::DefaultExecutionSpace;
     if (!troubled_pass) {
