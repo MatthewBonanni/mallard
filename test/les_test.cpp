@@ -641,22 +641,83 @@ TEST(HybridFlux, CentralFluxChangesKineticEnergyOnlyByThePressureWork) {
     // First-order reconstruction: the face states are the cell values, so
     // KEEP's momentum flux C mean(u) + mean(p) n leaves the pressure work as
     // the whole convective kinetic-energy rate, on any mesh
+    // (also KEEP-PE, whose energy flux differs but mass and momentum fluxes do not)
     const uint32_t n = N_DIM == 2 ? 12 : 6;
     const std::string box = periodic_box(MESH, n, "", "", "n_steps = 0\ncfl = 0.5\n");
-    // A threshold of 1 never selects the Riemann solver
-    auto central = make_solver(with_flux(box, "convective_flux = \"hybrid\"\n", "type = \"FO\"\n") +
-                               "[numerics.hybrid]\nsensor_threshold = 1.0\n");
     auto upwind = make_solver(with_flux(box, "", "type = \"FO\"\n"));
-    central->copy_device_to_host();
-    const double work = pressure_work(*central, 1.4);
-    double scale = 0.0;
-    for (uint32_t c = 0; c < central->get_mesh()->n_owned(); c++) {
-        scale += double(std::abs(central->h_conservatives(c, 1)) * central->get_mesh()->h_cell_measure(c));
+    for (const std::string scheme : {"KEEP", "PEP"}) {
+        // A threshold of 1 never selects the Riemann solver
+        auto central = make_solver(with_flux(box, "convective_flux = \"hybrid\"\n", "type = \"FO\"\n") +
+                                   "[numerics.hybrid]\nsensor_threshold = 1.0\ncentral = \"" + scheme + "\"\n");
+        central->copy_device_to_host();
+        const double work = pressure_work(*central, 1.4);
+        double scale = 0.0;
+        for (uint32_t c = 0; c < central->get_mesh()->n_owned(); c++) {
+            scale += double(std::abs(central->h_conservatives(c, 1)) * central->get_mesh()->h_cell_measure(c));
+        }
+        EXPECT_NEAR(central->kinetic_energy_budget().convective, work, precision_tol<double>(1e-12, 1e-5) * scale)
+            << scheme;
+        EXPECT_NEAR(central->kinetic_energy_budget().pressure_work, work, precision_tol<double>(1e-12, 1e-5) * scale)
+            << scheme;
+        // The Riemann solver dissipates on top of it
+        EXPECT_LT(upwind->kinetic_energy_budget().convective, work - 1e-3 * scale);
     }
-    EXPECT_NEAR(central->kinetic_energy_budget().convective, work, precision_tol<double>(1e-12, 1e-5) * scale);
-    EXPECT_NEAR(central->kinetic_energy_budget().pressure_work, work, precision_tol<double>(1e-12, 1e-5) * scale);
-    // The Riemann solver dissipates on top of it
-    EXPECT_LT(upwind->kinetic_energy_budget().convective, work - 1e-3 * scale);
+}
+
+namespace {
+
+/**
+ * @brief Largest relative deviations of p and u, and the relative change of
+ *        the total energy, after a density wave (rho = 1 + sin(2 pi x) / 2, same
+ *        p and u) crossed a periodic channel once under the central part alone
+ *        of the hybrid flux (Shima et al. 2021, section 4.1); NaN-safe.
+ */
+std::array<double, 3> density_contact(const std::string & central, const std::string & reconstruction) {
+    const uint32_t n = 40;
+    std::ostringstream s;
+    s << "[run]\nt_stop = 1.0\ncfl = 0.4\n[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = 1\nLx = 1.0\nLy = "
+      << 1.0 / n << "\n" << (N_DIM == 3 ? "Nz = 1\nLz = " + std::to_string(1.0 / n) + "\n" : std::string())
+      << "periodic = [\"x\"]\n[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.5 * sin(6.283185307179586 * x)\"\n"
+      << "p = \"1.0\"\nu = " << (N_DIM == 2 ? "[\"1.0\", \"0.0\"]" : "[\"1.0\", \"0.0\", \"0.0\"]") << "\n"
+      << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+      << (N_DIM == 3 ? "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"front\"\n"
+                       "type = \"symmetry\"\n"
+                     : "")
+      << "[numerics]\nriemann_solver = \"HLLC\"\nconvective_flux = \"hybrid\"\n[numerics.hybrid]\nsensor_threshold = 1.0\n"
+      << "central = \"" << central << "\"\n[numerics.face_reconstruction]\n" << reconstruction
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[output]\ncheck_interval = 1000000\n";
+    auto solver = make_solver(s.str());
+    const double E0 = double(solver->integrate_conservatives()[N_DIM + 1]);
+    solver->run();
+    std::array<double, 3> d = {0.0, 0.0, std::abs(double(solver->integrate_conservatives()[N_DIM + 1]) / E0 - 1.0)};
+    solver->update_primitives();
+    solver->copy_device_to_host();
+    for (uint32_t c = 0; c < solver->get_mesh()->n_cells; c++) {
+        const double dp = std::abs(double(solver->h_primitives(c, N_DIM)) - 1.0);
+        const double du = std::abs(double(solver->h_primitives(c, 0)) - 1.0);
+        d[0] = std::isfinite(dp) ? std::max(d[0], dp) : INFINITY;
+        d[1] = std::isfinite(du) ? std::max(d[1], du) : INFINITY;
+    }
+    return d;
+}
+
+} // namespace
+
+TEST(HybridFlux, PressureEquilibriumCentralFluxKeepsADensityWaveInEquilibrium) {
+    // KEEP's internal energy flux mean(rho) mean(e) is not constant across a
+    // density variation at uniform p, so the wave radiates pressure waves (Shima
+    // et al. 2021); KEEP-PE's mean(p) / (gamma - 1) is, and p and u stay uniform
+    for (const std::string reconstruction : {"type = \"FO\"\n", "type = \"MUSCL\"\nlimiter = \"none\"\n"}) {
+        const std::array<double, 3> keep = density_contact("KEEP", reconstruction);
+        const std::array<double, 3> pep = density_contact("PEP", reconstruction);
+        // KEEP's defect is second order in the face jumps: O(h) with FO, O(h^2) with MUSCL
+        EXPECT_GT(keep[0], reconstruction.find("FO") != std::string::npos ? 1e-4 : 1e-9) << reconstruction;
+        EXPECT_LT(pep[0], precision_tol<double>(1e-12, 1e-5)) << reconstruction;
+        EXPECT_LT(pep[1], precision_tol<double>(1e-12, 1e-5)) << reconstruction;
+        EXPECT_LT(pep[2], precision_tol<double>(1e-13, 1e-6)) << reconstruction;
+        std::cout << reconstruction.substr(8, 5) << ": max |p/p0 - 1| KEEP " << keep[0] << ", PEP " << pep[0] << "\n";
+    }
 }
 
 TEST(HybridFlux, BudgetPressureWorkMatchesTheSchemeWithOpenBoundaries) {

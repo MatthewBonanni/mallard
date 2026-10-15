@@ -37,7 +37,12 @@ struct OverFaces {
     void operator()(const uint32_t k) const { f(faces(k)); }
 };
 
-/** @brief W, the scalars [Y, gamma, e0] and (optionally) the temperature seed of each cell. */
+/**
+ * @brief W, the scalars [Y, gamma, e0], (optionally) the temperature seed and,
+ *        for the pressure-equilibrium-preserving hybrid flux, eps_k = d(rho e) /
+ *        d(rho Y_k) at constant p and other partial densities, e_k(T) - R_k T /
+ *        (gamma - 1) = R_k T (h_k / (R_k T) - gamma / (gamma - 1)), of each cell.
+ */
 struct MixtureCellFunctor {
     Mixture gas;
     StateView U;
@@ -48,6 +53,7 @@ struct MixtureCellFunctor {
     Kokkos::View<rtype *> molar_mass;  // empty unless TENO needs it
     Kokkos::View<rtype *[2]> frozen;   // double flux within a step: [gamma, e0] in place of the EOS
     bool update_seed;
+    Kokkos::View<rtype **, Kokkos::LayoutRight> eps;  // (cell, k), else empty
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
@@ -76,6 +82,15 @@ struct MixtureCellFunctor {
         scalars(c, gas.n_species) = gamma;
         scalars(c, gas.n_species + 1) = e0;
         if (update_seed && frozen.extent(0) == 0) T_seed(c) = T;
+        if (eps.extent(0) > 0) {
+            const double T_c = static_cast<double>(T), g = static_cast<double>(gamma);
+            const double cp_R = g / (g - 1.0);
+            const auto powers = gas.thermo.powers(T_c);
+            for (uint32_t k = 0; k < gas.n_species; k++) {
+                const double R_k = chemistry::GAS_CONSTANT * gas.thermo.inv_W(k);
+                eps(c, k) = static_cast<rtype>(R_k * T_c * (gas.thermo.h_RT(k, powers) - cp_R));
+            }
+        }
     }
 };
 
@@ -361,7 +376,7 @@ std::array<rtype, 6> Solver::mixture_diagnostics() {
 void Solver::update_cell_states(const State & solution, const bool update_seed) {
     MixtureCellFunctor functor{mixture, solution.flow, solution.species, T_seed, W_cells, cell_scalars,
                                cell_molar_mass, cells_frozen ? frozen_thermo : Kokkos::View<rtype *[2]>(),
-                               update_seed};
+                               update_seed, cell_epsilon};
     Kokkos::parallel_for("mixture_cells", mesh->n_cells, functor);
 }
 
@@ -422,6 +437,17 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
     const uint32_t n_species = mixture.n_species;
     scalar_reconstruction.species_slots(cell_scalars, face_mdot, face_reconstruction->quadrature_face.weights,
                                         flux_weights, species_slots);
+    if (cell_epsilon.extent(0) > 0) {
+        const MixturePressureEquilibriumFunctor apec{mesh->cells_of_face, cell_upwind, boundary_data,
+                                                     cell_epsilon, species_slots, face_flux, n_species};
+        if (rhs_faces.extent(0) == 0) {
+            Kokkos::parallel_for("pressure_equilibrium_energy", mesh->n_faces, apec);
+        } else {
+            Kokkos::View<uint32_t *> list = rhs_faces;
+            Kokkos::parallel_for("pressure_equilibrium_energy", list.extent(0),
+                                 OverFaces<MixturePressureEquilibriumFunctor>{apec, list});
+        }
+    }
     if (budget_pass) {
         budget.convective = kinetic_energy_rate();
         budget.pressure_work = pressure_work_rate();
@@ -535,7 +561,8 @@ void Solver::launch_mixture_flux_functor() {
         face_mdot,
         low_mach_cutoff,
         cell_upwind,
-        face_reconstruction->face_quad_normals};
+        face_reconstruction->face_quad_normals,
+        hybrid_pressure_equilibrium};
     // Faces of owned cells, as the single-gas flux
     if (rhs_faces.extent(0) == 0) {
         Kokkos::parallel_for("mixture_flux", HeavyRange<>(0, mesh->n_faces), functor);
@@ -565,7 +592,8 @@ void Solver::launch_double_flux_functor() {
         face_mdot,
         low_mach_cutoff,
         cell_upwind,
-        face_reconstruction->face_quad_normals};
+        face_reconstruction->face_quad_normals,
+        hybrid_pressure_equilibrium};
     if (rhs_faces.extent(0) == 0) {
         Kokkos::parallel_for("double_flux", HeavyRange<>(0, mesh->n_faces), functor);
     } else {

@@ -521,6 +521,8 @@ class Solver {
         bool hybrid_flux = false;           // [numerics] convective_flux = "hybrid" (docs/design/les.md, section 4.3)
         rtype hybrid_threshold = 0.65_r;
         rtype hybrid_floor = 0.0;
+        bool hybrid_pressure_equilibrium = false;  // [numerics.hybrid] central = "PEP": KEEP-PE / APEC central part
+        Kokkos::View<rtype **, Kokkos::LayoutRight> cell_epsilon;  // PEP mixtures: (cell, k) d(rho e)/d(rho Y_k) at constant p
         Kokkos::View<rtype *> cell_upwind;  // hybrid flux: upwind fraction of each cell, else empty
         std::unique_ptr<TimeIntegrator> time_integrator;
 

@@ -129,6 +129,7 @@ struct ConvectiveFluxFunctor {
     rtype low_mach_cutoff;  // 1 disables the low-Mach correction
     Kokkos::View<rtype *> upwind;  // hybrid flux: upwind fraction of each cell (UpwindSensorFunctor), else empty
     Kokkos::View<rtype ***> quad_normals;  // curved meshes: (face, q, dim) unit normals; else empty
+    bool pressure_equilibrium = false;     // hybrid flux: KEEP-PE in place of KEEP
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
@@ -167,7 +168,13 @@ struct ConvectiveFluxFunctor {
                 boundaries.exterior_W(i_face, i_quad, n_quad, W_l, n_point, W_cells, face_solution, W_r);
             }
             rtype central[N_CONSERVATIVE] = {};
-            if (hybrid) riemann::KEEP::calc_flux(central, n_point, W_l, W_r, gamma);
+            if (hybrid) {
+                if (pressure_equilibrium) {
+                    riemann::KEEPPE::calc_flux(central, n_point, W_l, W_r, gamma);
+                } else {
+                    riemann::KEEP::calc_flux(central, n_point, W_l, W_r, gamma);
+                }
+            }
             if (phi > 0.0_r) {
                 if (low_mach_cutoff < 1.0_r &&
                     (c1 >= 0 || boundaries.bcs(boundaries.face_bc(i_face)).is_characteristic())) {

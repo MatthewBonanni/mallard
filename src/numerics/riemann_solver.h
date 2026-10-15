@@ -581,6 +581,66 @@ struct KEEP {
     }
 };
 
+/**
+ * @brief Pressure-equilibrium-preserving KEEP (KEEP-PE; Shima, Kuya, Tamaki &
+ *        Kawai, J. Comput. Phys. 427, 2021): KEEP's mass, momentum,
+ *        kinetic-energy and pressure-work fluxes, with the internal energy
+ *        flux mean(u).n mean(rho e) of the internal energy per unit volume in
+ *        place of C mean(e). KEEP's product of means mean(rho) mean(e) is not
+ *        constant across a density jump at uniform pressure, so a contact
+ *        moving at uniform p and u generates pressure waves; mean(rho e) =
+ *        p / (gamma - 1) is. Kinetic energy is preserved as by KEEP (it
+ *        depends only on the mass and momentum fluxes).
+ */
+struct KEEPPE {
+    KOKKOS_INLINE_FUNCTION
+    static void central(rtype * flux, const rtype * n, const rtype * W_l, const rtype * W_r, const rtype rhoe_l,
+                        const rtype rhoe_r) {
+        constexpr uint8_t E = N_DIM + 1;
+        rtype u[N_DIM];
+        FOR_I_DIM u[i] = 0.5_r * (W_l[1 + i] + W_r[1 + i]);
+        const rtype u_n = dot<N_DIM>(u, n);
+        const rtype C = 0.5_r * (W_l[0] + W_r[0]) * u_n;
+        const rtype p = 0.5_r * (W_l[E] + W_r[E]);
+        flux[0] = C;
+        FOR_I_DIM flux[1 + i] = C * u[i] + p * n[i];
+        flux[E] = 0.5_r * C * dot<N_DIM>(W_l + 1, W_r + 1) + 0.5_r * (rhoe_l + rhoe_r) * u_n +
+                  0.5_r * (W_l[E] * dot<N_DIM>(W_r + 1, n) + W_r[E] * dot<N_DIM>(W_l + 1, n));
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    static void calc_flux(rtype * flux, const rtype * n, const rtype * W_l, const rtype * W_r, const rtype gamma) {
+        constexpr uint8_t E = N_DIM + 1;
+        central(flux, n, W_l, W_r, W_l[E] / (gamma - 1.0_r), W_r[E] / (gamma - 1.0_r));
+    }
+
+    /**
+     * @brief One gas of frozen thermodynamics per side, rho e = p / (gamma - 1)
+     *        + rho e0 (double flux: a cell's own on both sides).
+     */
+    KOKKOS_INLINE_FUNCTION
+    static void calc_flux(rtype * flux, const rtype * n, const rtype * W_l, const rtype * W_r,
+                          const SideThermo & th_l, const SideThermo & th_r) {
+        constexpr uint8_t E = N_DIM + 1;
+        central(flux, n, W_l, W_r, W_l[E] / (th_l.gamma - 1.0_r) + W_l[0] * th_l.e0,
+                W_r[E] / (th_r.gamma - 1.0_r) + W_r[0] * th_r.e0);
+    }
+
+    /**
+     * @brief Conservative mixture flux without its composition part: rho e =
+     *        p / (gamma - 1) per side, with each side's cell gamma. The APEC
+     *        internal energy flux (Terashima, Ly & Ihme, J. Comput. Phys. 524,
+     *        2025) adds sum_k mean(eps_k) F_k over the species fluxes F_k
+     *        (MixturePressureEquilibriumFunctor).
+     */
+    KOKKOS_INLINE_FUNCTION
+    static void pressure_part(rtype * flux, const rtype * n, const rtype * W_l, const rtype * W_r,
+                              const rtype gamma_l, const rtype gamma_r) {
+        constexpr uint8_t E = N_DIM + 1;
+        central(flux, n, W_l, W_r, W_l[E] / (gamma_l - 1.0_r), W_r[E] / (gamma_r - 1.0_r));
+    }
+};
+
 } // namespace riemann
 
 #endif // RIEMANN_SOLVER_H

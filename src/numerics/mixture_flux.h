@@ -65,6 +65,7 @@ struct MixtureFluxFunctor {
     rtype low_mach_cutoff;
     Kokkos::View<rtype *> upwind;  // hybrid flux: upwind fraction of each cell, else empty
     Kokkos::View<rtype ***> quad_normals;  // curved meshes: (face, q, dim) unit normals; else empty
+    bool pressure_equilibrium = false;     // hybrid flux: APEC (with MixturePressureEquilibriumFunctor) in place of KEEP
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
@@ -112,7 +113,16 @@ struct MixtureFluxFunctor {
             }
             const riemann::SideThermo side_l{th_l[0], th_l[1]}, side_r{th_r[0], th_r[1]};
             rtype central[N_CONSERVATIVE] = {};
-            if (hybrid) riemann::KEEP::calc_flux(central, n_point, W_l, W_r, side_l, side_r);
+            if (hybrid) {
+                if (pressure_equilibrium) {
+                    // The cells' own gamma: APEC's face value is built from cell states
+                    const rtype gamma_0 = cell_thermo(cells_of_face(i_face, 0), 0);
+                    const rtype gamma_1 = c1 >= 0 ? cell_thermo(c1, 0) : th_r[0];
+                    riemann::KEEPPE::pressure_part(central, n_point, W_l, W_r, gamma_0, gamma_1);
+                } else {
+                    riemann::KEEP::calc_flux(central, n_point, W_l, W_r, side_l, side_r);
+                }
+            }
             if (phi > 0.0_r) {
                 if (low_mach_cutoff < 1.0_r &&
                     (c1 >= 0 || boundaries.bcs(boundaries.face_bc(i_face)).is_characteristic())) {
@@ -164,6 +174,7 @@ struct MixtureDoubleFluxFunctor {
     rtype low_mach_cutoff;
     Kokkos::View<rtype *> upwind;  // hybrid flux: upwind fraction of each cell, else empty
     Kokkos::View<rtype ***> quad_normals;  // curved meshes: (face, q, dim) unit normals; else empty
+    bool pressure_equilibrium = false;     // hybrid flux: KEEP-PE in place of KEEP
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
@@ -213,8 +224,13 @@ struct MixtureDoubleFluxFunctor {
             // Each side's central flux with its own frozen thermodynamics on both sides
             rtype K_0[N_CONSERVATIVE] = {}, K_1[N_CONSERVATIVE] = {};
             if (hybrid) {
-                riemann::KEEP::calc_flux(K_0, n_point, W_l, W_r, th_0, th_0);
-                riemann::KEEP::calc_flux(K_1, n_point, W_l, W_r, th_1, th_1);
+                if (pressure_equilibrium) {
+                    riemann::KEEPPE::calc_flux(K_0, n_point, W_l, W_r, th_0, th_0);
+                    riemann::KEEPPE::calc_flux(K_1, n_point, W_l, W_r, th_1, th_1);
+                } else {
+                    riemann::KEEP::calc_flux(K_0, n_point, W_l, W_r, th_0, th_0);
+                    riemann::KEEP::calc_flux(K_1, n_point, W_l, W_r, th_1, th_1);
+                }
             }
             if (low_mach_cutoff < 1.0_r) {
                 if (c1 >= 0) {
@@ -247,6 +263,44 @@ struct MixtureDoubleFluxFunctor {
         const rtype scale = 0.5_r * face_area(i_face);
         FOR_I_CONSERVATIVE face_flux(i_face, i) = -scale * flux[i];
         face_energy_1(i_face) = -scale * energy_1;
+    }
+};
+
+/**
+ * @brief Composition part of the APEC internal energy flux of the hybrid
+ *        flux's central part (Terashima, Ly & Ihme, J. Comput. Phys. 524,
+ *        2025), added to the energy of each interior face after the species
+ *        slots: (1 - phi) sum_k mean(eps_k) F_k, with F_k the face's species
+ *        mass fluxes and eps_k = (d rho e / d rho Y_k) at constant p and the
+ *        other partial densities, each cell's (MixtureCellFunctor). With
+ *        KEEPPE::pressure_part this is the internal energy flux mean(u).n
+ *        rho e_f of APEC's face value rho e_f = sum_side (rho e + sum_k eps_k
+ *        (rho Y_k,f - rho Y_k)) / 2, written with the Larrouturou species
+ *        fluxes, because sum_k Y_k eps_k = e0: a cell's internal energy then
+ *        changes by sum_k eps_k d(rho Y_k) (pressure equilibrium) up to the
+ *        face residual of the trapezoidal rule, second order in the jump
+ *        of eps across the face (zero when both cells' eps agree).
+ */
+struct MixturePressureEquilibriumFunctor {
+    Kokkos::View<int32_t *[2]> cells_of_face;
+    Kokkos::View<rtype *> upwind;
+    BoundaryData boundaries;
+    Kokkos::View<rtype **, Kokkos::LayoutRight> eps;  // (cell, k)
+    Kokkos::View<rtype ***, Kokkos::LayoutRight> slots;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
+    uint32_t n_species;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t f) const {
+        const int32_t c0 = cells_of_face(f, 0), c1 = cells_of_face(f, 1);
+        if (c1 < 0) return;  // walls and symmetry planes carry no mass; other boundaries are upwind
+        const rtype central = 1.0_r - face_upwind_fraction(upwind, boundaries, c0, c1, f);
+        if (central == 0.0_r) return;
+        rtype sum = 0.0_r;
+        for (uint32_t k = 0; k < n_species; k++) {
+            sum += (eps(c0, k) + eps(c1, k)) * (slots(f, 0, k) - slots(f, 1, k));
+        }
+        face_flux(f, N_DIM + 1) -= 0.5_r * central * sum;
     }
 };
 
