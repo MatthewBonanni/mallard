@@ -152,7 +152,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
     }
     ViscousFluxFunctor viscous_functor;
     if (physics.is_viscous()) {
-        if (!hybrid_flux) Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, mesh->n_cells), viscous_gradient);
+        if (!hybrid_flux) Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
         if (les_on) update_eddy_viscosity(mesh->n_cells);
         viscous_functor = ViscousFluxFunctor{mesh->face_normals, mesh->face_measure, mesh->face_coords,
                                              mesh->cell_coords, mesh->cells_of_face, mesh->shifts, mesh->face_shift,
@@ -218,8 +218,8 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
 }
 
 void Solver::update_upwind_sensor() {
-    Kokkos::parallel_for("upwind_gradients", HeavyRange<>(0, mesh->n_cells), viscous_gradient);
-    Kokkos::parallel_for("upwind_sensor", mesh->n_cells,
+    Kokkos::parallel_for("upwind_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
+    Kokkos::parallel_for("upwind_sensor", n_gradient_cells(),
                          UpwindSensorFunctor{viscous_gradients, cell_upwind, hybrid_threshold, hybrid_floor});
 }
 
