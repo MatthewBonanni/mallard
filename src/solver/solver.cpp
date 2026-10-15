@@ -89,7 +89,7 @@ int Solver::init(const toml::value & input_in) {
     timed_phase("fields and output", [&] {
         allocate_memory();
         init_les();
-        statistics.init(input, species_names, mesh->n_cells);
+        statistics.init(input, species_names, *mesh);
         init_rhs_split();
         init_sources();
         init_sponges();
@@ -1302,7 +1302,7 @@ int Solver::run() {
         if (p_max.is_allocated()) update_p_max();
         if (statistics.due(step, t)) {
             update_primitives();
-            statistics.sample(t, cell_sampler(), mesh->n_owned());
+            statistics.sample(step, t, cell_sampler(), mesh->n_owned());
         }
         check_fields();
         t_wall_stepping += step_timer.seconds();
@@ -1480,7 +1480,7 @@ void Solver::print_setup() const {
         logging::item("integrals", integral_monitor.file + " every " + logging::count(integral_monitor.interval) +
                                        " steps");
     }
-    if (statistics.enabled()) logging::item("statistics", statistics.summary());
+    logging::items(statistics.summary());
     logging::items(probes.summary());
 }
 
@@ -1572,9 +1572,11 @@ void Solver::write_data(bool force) {
     copy_device_to_host();
     const RestartAttributes attributes = statistics.attributes();
     const RestartFaces faces = characteristic_restart_faces();
+    const RestartArrays arrays = statistics.arrays();
     for (auto & writer : data_writers) {
-        writer->write(step, t, force, attributes, faces);
+        writer->write(step, t, force, attributes, faces, arrays);
     }
+    statistics.write(step, t);
 }
 
 void Solver::write_probes() {

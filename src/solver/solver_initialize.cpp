@@ -89,7 +89,8 @@ void Solver::init_solution_restart() {
     };
     for (const auto & name : restart.names) {
         // Averages carry over only into a run that keeps them
-        if (name == "CHEM_H" || name == "P_MAX" || name.rfind("MEAN_", 0) == 0 || name.rfind("COV_", 0) == 0) continue;
+        if (name == "CHEM_H" || name == "P_MAX" || name.rfind("MEAN_", 0) == 0 || name.rfind("COV_", 0) == 0 ||
+            name.rfind("PHASE_", 0) == 0) continue;
         if (std::find(expected.begin(), expected.end(), name) == expected.end()) {
             throw std::runtime_error("Restart file " + file + " has variable " + name + ", which this run does not " +
                                      (name.rfind("RHOY_", 0) == 0 ? "transport." : "know."));

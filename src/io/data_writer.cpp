@@ -203,7 +203,7 @@ rtype DataWriter::next_time() const {
 }
 
 void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttributes & attributes,
-                       const RestartFaces & faces) {
+                       const RestartFaces & faces, const RestartArrays & arrays) {
     if (!(due(step, t) || force) || step == step_last) {
         return;
     }
@@ -211,7 +211,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
     stream << prefix << "_" << std::setw(LEN_STEP) << std::setfill('0')
            << (interval > 0 || format == DataFormat::RESTART ? step : history.size());
     if (format == DataFormat::RESTART) {
-        write_restart(stream.str() + ".restart", step, t, attributes, faces);
+        write_restart(stream.str() + ".restart", step, t, attributes, faces, arrays);
         logging::event(step, double(t), "restart", stream.str() + ".restart");
     } else if (format == DataFormat::HDF5) {
         if (!hdf5_mesh_written) write_hdf5_mesh();
@@ -282,7 +282,7 @@ void DataWriter::resume(uint64_t step, rtype t) {
 namespace {
 
 constexpr char RESTART_MAGIC[16] = "MALLARD-RESTART";
-constexpr uint32_t RESTART_VERSION = 4;
+constexpr uint32_t RESTART_VERSION = 5;
 
 /**
  * @brief Restart header: magic, version, real size, cell count, variable
@@ -291,19 +291,21 @@ constexpr uint32_t RESTART_VERSION = 4;
  *        uint64 and each attribute's name, likewise, and double value, then
  *        (version 4) the face count as a uint64 and the values per face as a
  *        uint32. The values follow, one block of n_cells per variable, then
- *        the face keys in increasing order and the faces' values. Files are
+ *        the face keys in increasing order and the faces' values, then
+ *        (version 5) the array count as a uint64 and each array's name, its
+ *        length as a uint64 and its doubles. Files are
  *        written with the lowest version that holds their contents, which
  *        older builds read.
  */
 std::vector<char> restart_header(uint64_t n_cells, uint64_t step, double t, const std::vector<std::string> & names,
-                                 const RestartAttributes & attributes, uint64_t n_faces) {
+                                 const RestartAttributes & attributes, uint64_t n_faces, bool arrays) {
     std::vector<char> header;
     auto put = [&](const void * p, size_t n) {
         header.insert(header.end(), static_cast<const char *>(p), static_cast<const char *>(p) + n);
     };
     const uint32_t real_size = sizeof(rtype);
     const uint64_t n_vars = names.size();
-    const uint32_t version = n_faces > 0 ? 4 : attributes.empty() ? 2 : 3;
+    const uint32_t version = arrays ? 5 : n_faces > 0 ? 4 : attributes.empty() ? 2 : 3;
     put(RESTART_MAGIC, sizeof(RESTART_MAGIC));
     put(&version, sizeof(version));
     put(&real_size, sizeof(real_size));
@@ -397,6 +399,36 @@ const double * RestartData::attribute(const std::string & name) const {
     return nullptr;
 }
 
+const std::vector<double> * RestartData::array(const std::string & name) const {
+    for (const auto & [key, values] : arrays) {
+        if (key == name) return &values;
+    }
+    return nullptr;
+}
+
+namespace {
+
+/** @brief The array section of a version 5 restart file. */
+std::vector<char> restart_arrays(const RestartArrays & arrays) {
+    std::vector<char> bytes;
+    auto put = [&](const void * p, size_t n) {
+        bytes.insert(bytes.end(), static_cast<const char *>(p), static_cast<const char *>(p) + n);
+    };
+    const uint64_t n_arrays = arrays.size();
+    put(&n_arrays, sizeof(n_arrays));
+    for (const auto & [name, values] : arrays) {
+        const uint32_t length = static_cast<uint32_t>(name.size());
+        put(&length, sizeof(length));
+        put(name.data(), name.size());
+        const uint64_t n = values.size();
+        put(&n, sizeof(n));
+        put(values.data(), n * sizeof(double));
+    }
+    return bytes;
+}
+
+} // namespace
+
 const rtype * RestartData::face(uint64_t key) const {
     const auto it = std::lower_bound(faces.keys.begin(), faces.keys.end(), key);
     if (it == faces.keys.end() || *it != key) return nullptr;
@@ -404,9 +436,10 @@ const rtype * RestartData::face(uint64_t key) const {
 }
 
 void DataWriter::write_restart(const std::string & filename, uint64_t step, rtype t,
-                               const RestartAttributes & attributes, const RestartFaces & faces) const {
+                               const RestartAttributes & attributes, const RestartFaces & faces,
+                               const RestartArrays & arrays) const {
     if (mesh->n_global_cells > 0) {
-        write_restart_distributed(filename, step, t, attributes, faces);
+        write_restart_distributed(filename, step, t, attributes, faces, arrays);
         return;
     }
     const OrderedFaces ordered = order_faces(faces, mesh->n_cells, false);
@@ -416,7 +449,8 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
     }
     std::vector<std::string> names;
     for (const auto & field : fields) names.push_back(field.name);
-    const std::vector<char> header = restart_header(mesh->n_cells, step, double(t), names, attributes, ordered.total);
+    const std::vector<char> header =
+        restart_header(mesh->n_cells, step, double(t), names, attributes, ordered.total, !arrays.empty());
     out.write(header.data(), static_cast<std::streamsize>(header.size()));
     for (const auto & field : fields) {
         for (uint32_t i = 0; i < mesh->n_cells; i++) {
@@ -428,10 +462,15 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
               static_cast<std::streamsize>(ordered.part.keys.size() * sizeof(uint64_t)));
     out.write(reinterpret_cast<const char *>(ordered.part.values.data()),
               static_cast<std::streamsize>(ordered.part.values.size() * sizeof(rtype)));
+    if (!arrays.empty()) {
+        const std::vector<char> section = restart_arrays(arrays);
+        out.write(section.data(), static_cast<std::streamsize>(section.size()));
+    }
 }
 
 void DataWriter::write_restart_distributed(const std::string & filename, uint64_t step, rtype t,
-                                           const RestartAttributes & attributes, const RestartFaces & faces) const {
+                                           const RestartAttributes & attributes, const RestartFaces & faces,
+                                           const RestartArrays & arrays) const {
 #ifdef Mallard_HAS_MPI
     const OrderedFaces ordered = order_faces(faces, mesh->n_global_cells, true);
     // Same layout as a serial restart, cells in global order: each rank writes
@@ -445,7 +484,8 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
     const uint64_t n_global = mesh->n_global_cells;
     std::vector<std::string> names;
     for (const auto & field : fields) names.push_back(field.name);
-    const std::vector<char> header = restart_header(n_global, step, double(t), names, attributes, ordered.total);
+    const std::vector<char> header =
+        restart_header(n_global, step, double(t), names, attributes, ordered.total, !arrays.empty());
     if (comm::is_root()) {
         MPI_File_write_at(fh, 0, header.data(), static_cast<int>(header.size()), MPI_BYTE, MPI_STATUS_IGNORE);
     }
@@ -475,6 +515,11 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
                           faces_at + MPI_Offset(ordered.total * sizeof(uint64_t) + ordered.first * W * sizeof(rtype)),
                           ordered.part.values.data(), static_cast<int>(ordered.part.values.size()), real_type,
                           MPI_STATUS_IGNORE);
+    if (!arrays.empty() && comm::is_root()) {
+        const std::vector<char> section = restart_arrays(arrays);
+        MPI_File_write_at(fh, faces_at + MPI_Offset(ordered.total * (sizeof(uint64_t) + W * sizeof(rtype))),
+                          section.data(), static_cast<int>(section.size()), MPI_BYTE, MPI_STATUS_IGNORE);
+    }
     MPI_File_close(&fh);
 #else
     (void)filename;
@@ -482,6 +527,7 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
     (void)t;
     (void)attributes;
     (void)faces;
+    (void)arrays;
     throw std::logic_error("DataWriter: distributed restart without MPI");
 #endif
 }
@@ -601,6 +647,23 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
             static_cast<std::streamsize>(data.faces.values.size() * sizeof(rtype)));
     if (!std::is_sorted(data.faces.keys.begin(), data.faces.keys.end())) {
         throw std::runtime_error("Restart file " + filename + " has unordered faces.");
+    }
+    if (version >= 5) {
+        uint64_t n_arrays = 0;
+        in.read(reinterpret_cast<char *>(&n_arrays), sizeof(n_arrays));
+        for (uint64_t a = 0; a < n_arrays && in.good(); a++) {
+            uint32_t length = 0;
+            in.read(reinterpret_cast<char *>(&length), sizeof(length));
+            if (!in.good() || length > 256) throw std::runtime_error("Restart file " + filename + " has a corrupt array list.");
+            std::string name(length, '\0');
+            in.read(name.data(), length);
+            uint64_t n = 0;
+            in.read(reinterpret_cast<char *>(&n), sizeof(n));
+            if (!in.good() || n > (uint64_t(1) << 40)) throw std::runtime_error("Restart file " + filename + " has a corrupt array.");
+            std::vector<double> values(n);
+            in.read(reinterpret_cast<char *>(values.data()), static_cast<std::streamsize>(n * sizeof(double)));
+            data.arrays.emplace_back(std::move(name), std::move(values));
+        }
     }
     if (!in.good()) {
         throw std::runtime_error("Restart file " + filename + " is truncated.");

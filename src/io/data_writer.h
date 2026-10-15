@@ -46,6 +46,9 @@ static const std::unordered_map<DataFormat, std::string> FORMAT_NAMES = {
 /** @brief Named scalars of a restart file (version 3), e.g. the statistics' weight. */
 using RestartAttributes = std::vector<std::pair<std::string, double>>;
 
+/** @brief Named arrays of a restart file (version 5), e.g. the averaged spectra; written by rank 0. */
+using RestartArrays = std::vector<std::pair<std::string, std::vector<double>>>;
+
 /** @brief Upper bound on the faces of a cell, for the keys of RestartFaces. */
 constexpr uint64_t RESTART_FACES_PER_CELL = 8;
 
@@ -72,12 +75,16 @@ struct RestartData {
     std::vector<std::vector<rtype>> fields;  // [variable][cell read]
     RestartAttributes attributes;
     RestartFaces faces;                      // every face of the file, in increasing key
+    RestartArrays arrays;
 
     /** @brief Values of the named variable, or nullptr if the file has none. */
     const std::vector<rtype> * find(const std::string & name) const;
 
     /** @brief Value of the named attribute, or nullptr if the file has none. */
     const double * attribute(const std::string & name) const;
+
+    /** @brief Values of the named array, or nullptr if the file has none. */
+    const std::vector<double> * array(const std::string & name) const;
 
     /** @brief The RestartFaces::WIDTH values of the face with this key, or nullptr if the file has none. */
     const rtype * face(uint64_t key) const;
@@ -89,7 +96,8 @@ struct RestartData {
  *        their values in the order of cells).
  *
  * Version 2 files list their variable names, version 3 files also named
- * scalar attributes, version 4 files also face records; version 1 files hold
+ * scalar attributes, version 4 files also face records, version 5 files
+ * also named arrays; version 1 files hold
  * the flow block CONSERVATIVE_NAMES only. Either must contain the flow block of
  * this build's dimension.
  */
@@ -119,10 +127,11 @@ class DataWriter {
 
         /**
          * @brief Write a snapshot if due (or forced); restart files also store
-         *        the attributes and the faces (of the owned cells; collective).
+         *        the attributes, the faces (of the owned cells; collective)
+         *        and rank 0's arrays.
          */
         void write(uint64_t step, rtype t, bool force = false, const RestartAttributes & attributes = {},
-                   const RestartFaces & faces = {});
+                   const RestartFaces & faces = {}, const RestartArrays & arrays = {});
 
         /**
          * @brief Next simulation time at which a snapshot is due
@@ -149,7 +158,8 @@ class DataWriter {
         void write_vtu(const std::string & filename, rtype t) const;
         void write_vtu_faces(const std::string & filename, rtype t) const;
         void write_restart(const std::string & filename, uint64_t step, rtype t,
-                           const RestartAttributes & attributes, const RestartFaces & faces) const;
+                           const RestartAttributes & attributes, const RestartFaces & faces,
+                           const RestartArrays & arrays) const;
         void write_pvd() const;
 
         /**
@@ -191,7 +201,8 @@ class DataWriter {
         uint64_t n_files = 0;
         void write_pvtu(const std::string & filename, const std::string & stem) const;
         void write_restart_distributed(const std::string & filename, uint64_t step, rtype t,
-                                       const RestartAttributes & attributes, const RestartFaces & faces) const;
+                                       const RestartAttributes & attributes, const RestartFaces & faces,
+                                       const RestartArrays & arrays) const;
         std::vector<uint32_t> geometry_faces;  // Empty: write all cells
         // HDF5 output: owned cells in global order, and the sizes of the mesh written
         GlobalOrder cell_order;
