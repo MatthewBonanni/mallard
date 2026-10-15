@@ -851,6 +851,13 @@ void Solver::init_numerics() {
         throw InputError("numerics.convective_flux = \"" + flux + "\" is not one of: riemann, hybrid.");
     }
     hybrid_flux = flux == "hybrid";
+    if (hybrid_flux && simpler) {
+        throw InputError(
+            "numerics.convective_flux = \"hybrid\" is not available with chemistry.coupling = \"simpler\": SIMPLER "
+            "turns the flow integrator into 1 + z + z^2/2 + z^3/8 + z^4/48, which amplifies every mode on the "
+            "imaginary axis, and the hybrid flux's central part has no dissipation to damp them. Use "
+            "chemistry.coupling = \"strang\", or convective_flux = \"riemann\".");
+    }
     const toml::value hybrid_input = toml::find_or(input, "numerics", "hybrid", toml::value(toml::table{}));
     if (!hybrid_flux && !hybrid_input.as_table().empty()) {
         throw InputError("[numerics.hybrid] needs numerics.convective_flux = \"hybrid\".");
