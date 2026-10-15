@@ -330,11 +330,11 @@ struct SpeciesSlotFunctor {
             uint8_t k_image = 0;
             while (faces_of_cell(offsets_faces_of_cell(image) + k_image) != static_cast<uint32_t>(image_face)) k_image++;
             rtype image_values[MAX_Q];
-            values.face_values(image, k, k_image, image_values);
+            values.face_values(static_cast<uint32_t>(image), k, k_image, image_values);
             for (uint8_t q = 0; q < nq; q++) {
                 uint8_t q_image;
                 if constexpr (N_DIM == 2) {
-                    q_image = boundaries.face_image_flip(f) ? nq - 1 - q : q;
+                    q_image = static_cast<uint8_t>(boundaries.face_image_flip(f) ? nq - 1 - q : q);
                 } else {
                     q_image = boundaries.face_image_quad(f, q);
                 }
