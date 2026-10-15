@@ -292,20 +292,25 @@ void DataWriter::finish() {
 
 DataWriter::Values DataWriter::capture(uint32_t n_cells) const {
     Values values(fields.size());
-    for (size_t f = 0; f < fields.size(); f++) {
-        const Field & field = fields[f];
+    for (size_t f = 0; f < fields.size(); f++) values[f].resize(size_t(n_cells) * fields[f].n_vtk_components());
+    // The run waits for this copy: blocks of cells of every field on io_threads threads
+    constexpr uint32_t BLOCK = 1u << 18;
+    const size_t n_blocks = (size_t(n_cells) + BLOCK - 1) / BLOCK;
+    compression::parallel_for(fields.size() * n_blocks, io_threads, [&](size_t task) {
+        const Field & field = fields[task / n_blocks];
         const uint32_t n_comp = field.n_vtk_components();
-        values[f].resize(size_t(n_cells) * n_comp);
-        rtype * out = values[f].data();
+        const uint32_t first = static_cast<uint32_t>(task % n_blocks) * BLOCK;
+        const uint32_t last = std::min(n_cells, first + BLOCK);
+        rtype * out = values[task / n_blocks].data();
         if (n_comp == 1) {
             const Data & data = *field.components[0];
-            for (uint32_t i = 0; i < n_cells; i++) out[i] = data[i];
-            continue;
+            for (uint32_t i = first; i < last; i++) out[i] = data[i];
+            return;
         }
-        for (uint32_t i = 0; i < n_cells; i++) {
+        for (uint32_t i = first; i < last; i++) {
             for (uint32_t k = 0; k < n_comp; k++) out[size_t(i) * n_comp + k] = field.value(i, k);
         }
-    }
+    });
     return values;
 }
 

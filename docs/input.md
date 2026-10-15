@@ -602,7 +602,7 @@ Used when Mallard runs on several MPI ranks (`mpirun -n N Mallard -i input.toml`
 |---|---|
 | `check_interval` | Print a progress row every this many steps (default 1) |
 | `async` | `true` writes the `[[write_data]]` files on background threads while the run continues (default `false`). When a file is due, its values are copied out (on several ranks, regrouped where the file needs it) and the run goes on; a writer's next file first waits for its previous one. The files are the same as without `async`, byte for byte. HDF5 output on several ranks stays synchronous: parallel HDF5 calls MPI, which only the main thread does |
-| `io_threads` | Threads that compress each file (default 1) |
+| `io_threads` | Threads that copy out each snapshot and compress its files (default 1) |
 
 The run's summary reports the size of the files written and the time spent writing them (in the background with `async`); `output` in its wall time is what the run waited for.
 
