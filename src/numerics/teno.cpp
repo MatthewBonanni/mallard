@@ -640,16 +640,17 @@ class PackedRows {
             // A thread per (cell, slot), so that small batches still fill the device
             using Range2 = Kokkos::MDRangePolicy<Kokkos::Rank<2>>;
             Kokkos::parallel_for("teno_pack_batch", Range2({0, 0}, {int64_t(uint64_t(n_slices) << sh), int64_t(longest)}),
-                                 KOKKOS_LAMBDA(const int64_t t, const int64_t s) {
-                const uint32_t sl = t >> sh;
-                const uint32_t lane = t & ((1u << sh) - 1);
+                                 KOKKOS_LAMBDA(const int64_t t_index, const int64_t s_index) {
+                const uint64_t t = static_cast<uint64_t>(t_index), s = static_cast<uint64_t>(s_index);
+                const uint32_t sl = static_cast<uint32_t>(t >> sh);
+                const uint32_t lane = static_cast<uint32_t>(t & ((1u << sh) - 1));
                 const uint64_t start = starts(sl) - starts(0);
                 const uint64_t len = starts(sl + 1) - starts(sl);
                 const uint32_t size = t < n ? sizes(t) : 0;
                 const auto lc = batch_cells.lane(t < n ? t : 0);
                 const auto lf = batch_faces.lane(t < n ? t : 0);
                 const auto lp = batch_pinv.lane(t < n ? t : 0);
-                if (uint64_t(s) < len) {
+                if (s < len) {
                     const uint64_t k = ((start + s) << sh) + lane;
                     dest_cells[k] = s < size ? lc[s] : -1;
                     dest_faces[k] = s < size ? lf[s] : -1;
@@ -1320,7 +1321,7 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
     std::vector<uint8_t> wall_cell(geometry ? n_cells : 0, 0);
     for (uint32_t f = 0; geometry && f < mesh->n_faces; f++) {
         if (mesh->h_cells_of_face(f, 1) >= 0 || h_face_bc(f) < 0) continue;
-        if (teno_setup::one_sided_face(*mesh, h_bcs(h_face_bc(f)), f, curved_mirrors)) wall_cell[mesh->h_cells_of_face(f, 0)] = 1;
+        if (teno_setup::one_sided_face(*mesh, h_bcs(h_face_bc(f)), f, curved_mirrors)) wall_cell[static_cast<uint32_t>(mesh->h_cells_of_face(f, 0))] = 1;
     }
 
     auto precompute = [&](const uint32_t i, CellTables & out, uint32_t & failed_large, uint32_t & invalid_small) {
@@ -1358,8 +1359,8 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
         // Mean of each monomial over a stencil entry, in the frame of target cell i
         auto monomial_means = [&](const Entry & e, uint8_t deg, std::vector<double> & means) {
             if (!rule_of.empty() && rule_of[e.cell] >= 0) {
-                const auto & X = rule_x[rule_of[e.cell]];
-                const auto & Wq = rule_w[rule_of[e.cell]];
+                const auto & X = rule_x[static_cast<size_t>(rule_of[e.cell])];
+                const auto & Wq = rule_w[static_cast<size_t>(rule_of[e.cell])];
                 const uint8_t n = teno::n_dof(deg);
                 means.assign(n, 0.0);
                 double area = 0.0;
@@ -1683,8 +1684,8 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
                 }
             };
             if (!rule_of.empty() && rule_of[i] >= 0) {
-                const auto & X = rule_x[rule_of[i]];
-                const auto & Wq = rule_w[rule_of[i]];
+                const auto & X = rule_x[static_cast<size_t>(rule_of[i])];
+                const auto & Wq = rule_w[static_cast<size_t>(rule_of[i])];
                 for (size_t q = 0; q < X.size(); q++) si_point((X[q][0] - x0) / h, (X[q][1] - y0) / h, Wq[q] / (h * h));
             } else {
                 integrate_polygon(px, py, rule, si_point);
@@ -1796,7 +1797,7 @@ void TENO::compute_stencils_and_matrices_3d(const std::vector<uint32_t> * subset
         largest_stencil = largest;
     }
     // Every cell's moments are a function of its geometry alone
-    if (n_failed_large == 0) moments = setup.moments(scale.extent(0));
+    if (n_failed_large == 0) moments = setup.moments(static_cast<uint32_t>(scale.extent(0)));
     Kokkos::fence();
     const teno_setup::Timings & t = setup.timings();
     setup_status = logging::format("%s, %.2f s (geometry %.2f s, tables %.2f s, packing %.2f s)",
@@ -2692,7 +2693,9 @@ struct TENOFunctor {
         rtype * S = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * N_SI));
         double * mom = static_cast<double *>(team.team_scratch(0).get_shmem(sizeof(double) * N_MOMENTS));
         const uint32_t end = round_end();
-        for (uint32_t j = round_begin + team.league_rank(); j < end; j += team.league_size()) {
+        const uint32_t league_rank = static_cast<uint32_t>(team.league_rank());
+        const uint32_t league_size = static_cast<uint32_t>(team.league_size());
+        for (uint32_t j = round_begin + league_rank; j < end; j += league_size) {
             const uint32_t i_cell = troubled_cells(j);
             Kokkos::parallel_for(Kokkos::TeamThreadRange(team, N_MOMENTS), [&](const uint32_t k) { mom[k] = moments(i_cell, k); });
             team.team_barrier();
@@ -2870,7 +2873,7 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
             functor.n_smooth = n;
             using Policy = Kokkos::TeamPolicy<Space, typename Functor::SmoothTeamPass,
                                               Kokkos::LaunchBounds<Functor::TEAM_SIZE, 2>>;
-            const Policy policy = Policy(exec, (n + Functor::TEAM_CELLS - 1) / Functor::TEAM_CELLS, Functor::TEAM_SIZE)
+            const Policy policy = Policy(exec, static_cast<int>((n + Functor::TEAM_CELLS - 1) / Functor::TEAM_CELLS), Functor::TEAM_SIZE)
                                       .set_scratch_size(0, Kokkos::PerTeam(Functor::TEAM_SCRATCH));
             Kokkos::parallel_for("teno_smooth", policy, functor);
         }
@@ -2897,7 +2900,7 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
                     const uint32_t league = std::min<uint32_t>((capacity + Functor::TEAM_CELLS - 1) / Functor::TEAM_CELLS,
                                                                TROUBLED_THREADS / Functor::TEAM_SIZE);
                     Kokkos::parallel_for("teno_troubled_central",
-                                         Policy(exec, league, Functor::TEAM_SIZE)
+                                         Policy(exec, static_cast<int>(league), Functor::TEAM_SIZE)
                                              .set_scratch_size(0, Kokkos::PerTeam(Functor::TEAM_SCRATCH)),
                                          functor);
                 } else {
@@ -2912,7 +2915,7 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
                 const uint32_t league = std::min<uint32_t>(capacity, TROUBLED_THREADS / team_size);
                 using Policy = Kokkos::TeamPolicy<Space, typename Functor::TroubledSelectTeamPass, Dynamic>;
                 Kokkos::parallel_for("teno_troubled_select",
-                                     Policy(exec, league, team_size)
+                                     Policy(exec, static_cast<int>(league), static_cast<int>(team_size))
                                          .set_scratch_size(0, Kokkos::PerTeam(Functor::SELECT_SCRATCH)),
                                      functor);
             }

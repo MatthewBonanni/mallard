@@ -35,7 +35,7 @@
 namespace {
 
 constexpr double R_IN = 1.0, R_OUT = 1.384;
-constexpr rtype GAMMA = 1.4;
+constexpr rtype GAMMA = 1.4_r;
 
 const char * SHAPES = R"(
 [[mesh.curved]]
@@ -313,7 +313,7 @@ TEST(CurvedGeometry, CurvedFaceRulesCloseEveryCell) {
             for (int side = 0; side < 2; side++) {
                 const int32_t c = mesh->h_cells_of_face(f, side);
                 if (c < 0) continue;
-                for (int i = 0; i < 2; i++) sum[2 * c + i] += (side == 0 ? 1.0 : -1.0) * w[q] * n[q][i];
+                for (size_t i = 0; i < 2; i++) sum[2 * static_cast<size_t>(c) + i] += (side == 0 ? 1.0 : -1.0) * w[q] * n[q][i];
             }
             if (g.face_is_curved(f)) {
                 const double r = std::hypot(x[q][0], x[q][1]);
