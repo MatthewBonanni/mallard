@@ -355,7 +355,8 @@ struct MixtureViscousFluxFunctor {
             const double ratio = gas.transport.conductivity(static_cast<double>(q_f[N_DIM]), y) /
                                  gas.transport.conductivity(static_cast<double>(values(c0, N_DIM)), y);
             const rtype lambda = coefficients(c0, LAMBDA) * static_cast<rtype>(0.5 * (1.0 + ratio));
-            energy += molecular * lambda * dot<N_DIM>(g_f[N_DIM], n);        } else if (wall && bc->type == BoundaryType::WALL_HEAT_FLUX) {
+            energy += molecular * lambda * dot<N_DIM>(g_f[N_DIM], n);
+        } else if (wall && bc->type == BoundaryType::WALL_HEAT_FLUX) {
             energy += molecular * bc->data[N_DIM + 1];
         }
 
