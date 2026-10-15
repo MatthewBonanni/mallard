@@ -505,7 +505,7 @@ TEST(SolverTest, ResultIsIndependentOfThreadCount) {
         solver.run();
         solver.copy_device_to_host();
         std::ofstream(out, std::ios::binary).write(reinterpret_cast<const char *>(solver.h_conservatives.data()),
-                                                   solver.h_conservatives.span() * sizeof(rtype));
+                                                   static_cast<std::streamsize>(solver.h_conservatives.span() * sizeof(rtype)));
         return;
     }
     const std::string exe = ::testing::internal::GetArgvs()[0];

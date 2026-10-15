@@ -26,9 +26,9 @@ constexpr uint8_t MAX_DEGREE = 5;
 KOKKOS_INLINE_FUNCTION
 constexpr uint8_t n_dof(const uint8_t r) {
     if constexpr (N_DIM == 2) {
-        return (r + 1) * (r + 2) / 2 - 1;
+        return static_cast<uint8_t>((r + 1) * (r + 2) / 2 - 1);
     } else {
-        return (r + 1) * (r + 2) * (r + 3) / 6 - 1;
+        return static_cast<uint8_t>((r + 1) * (r + 2) * (r + 3) / 6 - 1);
     }
 }
 
@@ -43,7 +43,7 @@ constexpr uint8_t MAX_FACE_QUAD = (N_DIM == 2) ? 4 : 9;
  */
 KOKKOS_INLINE_FUNCTION
 constexpr uint16_t upper_index(const uint8_t l, const uint8_t m, const uint8_t n) {
-    return l * n - l * (l - 1) / 2 + (m - l);
+    return static_cast<uint16_t>(l * n - l * (l - 1) / 2 + (m - l));
 }
 
 /**
@@ -110,11 +110,11 @@ void exponents(const uint8_t l, uint8_t & a, uint8_t & b) {
     uint8_t d = 1;
     uint8_t first = 0;
     while (l >= first + d + 1) {
-        first += d + 1;
+        first = static_cast<uint8_t>(first + d + 1);
         d++;
     }
-    a = d - (l - first);
-    b = l - first;
+    a = static_cast<uint8_t>(d - (l - first));
+    b = static_cast<uint8_t>(l - first);
 }
 
 /**
@@ -126,12 +126,12 @@ KOKKOS_INLINE_FUNCTION
 void exponents(const uint8_t l, uint8_t & a, uint8_t & b, uint8_t & c) {
     uint8_t idx = 0;
     for (uint8_t d = 1;; d++) {
-        for (int8_t i = d; i >= 0; i--) {
-            for (int8_t j = d - i; j >= 0; j--) {
+        for (int i = d; i >= 0; i--) {
+            for (int j = d - i; j >= 0; j--) {
                 if (idx == l) {
-                    a = i;
-                    b = j;
-                    c = d - i - j;
+                    a = static_cast<uint8_t>(i);
+                    b = static_cast<uint8_t>(j);
+                    c = static_cast<uint8_t>(d - i - j);
                     return;
                 }
                 idx++;
@@ -182,9 +182,10 @@ template <typename T> KOKKOS_INLINE_FUNCTION
 void monomials(const uint8_t r, const T xi, const T eta, const T zeta, T * phi) {
     uint8_t l = 0;
     for (uint8_t d = 1; d <= r; d++) {
-        for (int8_t i = d; i >= 0; i--) {
-            for (int8_t j = d - i; j >= 0; j--) {
-                phi[l++] = ipow(xi, i) * ipow(eta, j) * ipow(zeta, d - i - j);
+        for (int i = d; i >= 0; i--) {
+            for (int j = d - i; j >= 0; j--) {
+                phi[l++] = ipow(xi, static_cast<uint8_t>(i)) * ipow(eta, static_cast<uint8_t>(j)) *
+                           ipow(zeta, static_cast<uint8_t>(d - i - j));
             }
         }
     }

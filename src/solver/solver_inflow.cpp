@@ -30,9 +30,9 @@ void Solver::init_inlets(const std::vector<toml::value> & input_boundaries,
         if (!profile.uniform()) {
             for (size_t i = 0; i < faces.size(); i++) {
                 Point x;
-                for (int d = 0; d < N_DIM; d++) x[d] = double(mesh->h_face_coords(faces[i], d));
+                for (size_t d = 0; d < N_DIM; d++) x[d] = double(mesh->h_face_coords(faces[i], d));
                 const std::array<double, N_DIM> u = profile.velocity(x);
-                for (int d = 0; d < N_DIM; d++) h_target(chars[i], d) = static_cast<rtype>(u[d]);
+                for (size_t d = 0; d < N_DIM; d++) h_target(chars[i], d) = static_cast<rtype>(u[d]);
             }
             profiled = true;
         }

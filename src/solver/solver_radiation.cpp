@@ -79,7 +79,7 @@ void Solver::init_radiation() {
         }
         const auto s = static_cast<size_t>(it - RADIATING_NAMES.begin());
         r.index[s] = k;
-        r.inv_W[s] = 1.0 / mech.species[k].molecular_weight;
+        r.inv_W[s] = 1.0 / mech.species[static_cast<size_t>(k)].molecular_weight;
         present += (present.empty() ? "" : ", ") + name;
     }
     if (present.empty()) throw InputError("[radiation]: the mechanism has none of H2O, CO2, CO, CH4.");

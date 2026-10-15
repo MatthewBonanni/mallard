@@ -100,7 +100,7 @@ ChemistryBenchmark run_chemistry_benchmark(const toml::value & input) {
     uint32_t n_igniting = 0;
     for (uint32_t c = 0; c < n_cells; c++) {
         const uint32_t s = sample_of(c);
-        n_igniting += std::find(igniting.begin(), igniting.end(), s) != igniting.end() ? 1 : 0;
+        n_igniting += std::find(igniting.begin(), igniting.end(), s) != igniting.end() ? 1u : 0u;
         h_U(c, 0) = static_cast<rtype>(rho);
         FOR_I_DIM h_U(c, 1 + i) = 0.0_r;
         h_U(c, N_DIM + 1) = static_cast<rtype>(rho * e);

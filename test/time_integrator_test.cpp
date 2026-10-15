@@ -37,7 +37,7 @@ void negate(State U, State R) {
  *        to t = 1 and return the max error.
  */
 double integrate_error(TimeIntegrator & integrator, uint32_t n_steps) {
-    const rtype lambda[N_CONSERVATIVE] = {-1.0, -2.0, 0.5, -0.3};
+    const rtype lambda[N_CONSERVATIVE] = {-1.0_r, -2.0_r, 0.5_r, -0.3_r};
     std::vector<State> solution_vec, rhs_vec;
     for (uint8_t i = 0; i < integrator.get_n_solution_vectors(); i++) {
         solution_vec.emplace_back("U", 3, 0);
@@ -56,9 +56,9 @@ double integrate_error(TimeIntegrator & integrator, uint32_t n_steps) {
             R(c, 3) = l3 * U(c, 3);
         });
     };
-    const rtype dt = 1.0 / n_steps;
+    const rtype dt = 1.0_r / static_cast<rtype>(n_steps);
     for (uint32_t s = 0; s < n_steps; s++) {
-        integrator.take_step(s * dt, dt, solution_vec, rhs_vec, rhs);
+        integrator.take_step(static_cast<rtype>(s) * dt, dt, solution_vec, rhs_vec, rhs);
     }
     auto h_U = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec[0].flow);
     double err = 0.0;
@@ -96,7 +96,7 @@ TEST(TimeIntegratorTest, SSPRK3KeepsASteadyStateExactly) {
         Kokkos::deep_copy(R.flow, 0.0_r);
         Kokkos::deep_copy(R.species, 0.0_r);
     };
-    for (int s = 0; s < 10; s++) integrator.take_step(s * 0.1_r, 0.1_r, solution_vec, rhs_vec, zero);
+    for (int s = 0; s < 10; s++) integrator.take_step(static_cast<rtype>(s) * 0.1_r, 0.1_r, solution_vec, rhs_vec, zero);
     auto flow = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), U.flow);
     auto species = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), U.species);
     uint32_t n_changed = 0;
@@ -152,7 +152,7 @@ TEST(TimeIntegratorTest, SpeciesBlockAdvancesExactlyLikeTheFlowBlock) {
         Kokkos::deep_copy(solution_vec[0].flow, 1.0);
         Kokkos::deep_copy(solution_vec[0].species, 1.0);
         RHSFunction rhs = [](State U, State R, rtype) { negate(U, R); };
-        for (int s = 0; s < 3; s++) integrator->take_step(0.1 * s, 0.1, solution_vec, rhs_vec, rhs);
+        for (int s = 0; s < 3; s++) integrator->take_step(0.1_r * static_cast<rtype>(s), 0.1_r, solution_vec, rhs_vec, rhs);
         auto h_flow = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec[0].flow);
         auto h_species = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec[0].species);
         EXPECT_LT(h_flow(0, 0), 1.0);
@@ -181,8 +181,8 @@ double nonautonomous_error(TimeIntegrator & integrator, uint32_t n_steps) {
             FOR_I_CONSERVATIVE R(c, i) = Kokkos::cos(t);
         });
     };
-    const rtype dt = 1.0 / n_steps;
-    for (uint32_t s = 0; s < n_steps; s++) integrator.take_step(s * dt, dt, solution_vec, rhs_vec, rhs);
+    const rtype dt = 1.0_r / static_cast<rtype>(n_steps);
+    for (uint32_t s = 0; s < n_steps; s++) integrator.take_step(static_cast<rtype>(s) * dt, dt, solution_vec, rhs_vec, rhs);
     auto h_U = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec[0].flow);
     return std::abs(double(h_U(0, 0)) - std::sin(1.0));
 }
