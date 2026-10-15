@@ -469,6 +469,18 @@ U^{n+1} = U(t_n + dt)  of  dU/dt = T(U) + c,  U(t_n + dt/2) = U*   (transport su
   axis (`|P(iy)|^2 = 1 + y^4/24 + O(y^6)`). The upwind dissipation of the
   Riemann solvers keeps TENO5 stable in practice (a smooth acoustic and
   entropy wave on a periodic strip at `cfl` 0.5 and 1.0).
+  `|P(iy)|^2 = 1 + y^4/24 - y^6/192 + y^8/2304 > 1` for every `y != 0`, so
+  a non-dissipative operator is unstable at any `dt`, and
+  `convective_flux = "hybrid"` (central KEEP flux away from shocks) is
+  rejected as an input error: use Strang splitting or the Riemann flux.
+  On a 2D Taylor-Green vortex (air, 48^2, periodic, `u0` = 50 m/s, 30 m/s
+  vortex, Euler, SSPRK3), the integral of `(div u)^2` stays at 0.01-0.03
+  after 3000 steps for Strang + hybrid and SIMPLER + `riemann`, but
+  SIMPLER + hybrid grows exponentially until the shock sensor caps it in
+  grid-scale acoustic noise: with MUSCL at `cfl` 1.0, 10x per 50 steps to
+  1.4e4 (pressure 6% off); 740 with `upwind_floor` 0.05; 150 at `cfl` 0.5
+  (after 7000 steps); with TENO5 at `cfl` 1.0, 10x per 300 steps, 800 and
+  still growing at step 3000.
 - **Cost.** One more evaluation of `T` per step (four with SSPRK3) and one
   chemistry call per step instead of two half steps (no fused half steps
   needed, and none to restart).
@@ -498,8 +510,8 @@ reactor runs over `s dt` with `g / s`, which is the same ODE. Simplified
 SDC ([Zingale et al. 2022](https://arxiv.org/abs/2206.01285)) needs the same
 call with another constant forcing (the advective tendency of the last
 iterate) per iteration. Not combined with `double_flux` (its thermodynamics
-are frozen for the step, which the reaction substep would leave stale) or
-`fuse_half_steps` (rejected as input errors). Strang runs compile to the
+are frozen for the step, which the reaction substep would leave stale),
+`fuse_half_steps` or the hybrid convective flux (rejected as input errors). Strang runs compile to the
 same arithmetic and are bitwise unchanged (restart files of sod, shu_osher,
 double_mach, riemann_2d, wedge, sedov_axisymmetric, viscous_shock_tube,
 poiseuille_pipe, reactive_shock_tube and flame_outflow identical to main's
