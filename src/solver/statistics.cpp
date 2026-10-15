@@ -120,6 +120,10 @@ void Statistics::init(const toml::value & input, const std::vector<std::string> 
 void Statistics::start(rtype t) {
     spectra.start(t);
     phase.start(t);
+    start_means(t);
+}
+
+void Statistics::start_means(rtype t) {
     if (!means_enabled()) return;
     weight = 0.0_r;
     t_last = std::max(t, t_start);
@@ -197,7 +201,7 @@ void Statistics::restore(const RestartData & restart, const std::string & file, 
     const double * n = restart.attribute(SAMPLES);
     const bool none = std::none_of(values.begin(), values.end(), [](auto v) { return v != nullptr; });
     if (reset || none || !w) {
-        start(t);
+        start_means(t);
         return;
     }
     if (!missing.empty()) {

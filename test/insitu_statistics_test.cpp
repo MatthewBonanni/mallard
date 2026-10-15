@@ -327,19 +327,27 @@ TEST(InSituStatisticsTest, SpectraAndPhaseAveragesRestartBitwise) {
     const auto plain = run(40, "");
     run(20, extra("b"));
     const auto second = run(40, extra("b"), dir + "/b/r_000020.restart");
+    // Means first asked for on the restart start afresh, the spectra continue
+    std::string with_means = extra("c");
+    with_means.replace(0, 13, "[statistics]\nfields = [\"T\"]\n");
+    const auto third = run(40, with_means, dir + "/b/r_000020.restart");
 
     for (uint32_t c = 0; c < straight->get_mesh()->n_cells; c++) {
         FOR_I_CONSERVATIVE EXPECT_EQ(plain->h_conservatives(c, i), straight->h_conservatives(c, i));
     }
     const Spectra & a = straight->get_statistics().get_spectra();
     const Spectra & b = second->get_statistics().get_spectra();
+    const Spectra & m = third->get_statistics().get_spectra();
     EXPECT_GT(a.samples(), 10u);
     EXPECT_EQ(b.samples(), a.samples());
+    EXPECT_EQ(m.samples(), a.samples());
+    EXPECT_EQ(third->get_statistics().samples(), 7u);  // steps 21, 24, ..., 39
     for (uint32_t pos = 0; pos < a.n_positions(); pos++) {
         for (uint32_t p = 0; p < 3; p++) {
             for (uint32_t h = 0; h < N_DIM - 1; h++) {
                 EXPECT_EQ(b.spectrum(pos, p, h), a.spectrum(pos, p, h));
                 EXPECT_EQ(b.correlation(pos, p, h), a.correlation(pos, p, h));
+                EXPECT_EQ(m.spectrum(pos, p, h), a.spectrum(pos, p, h));
             }
         }
     }

@@ -198,6 +198,8 @@ class Statistics {
 
         Spectra spectra;
         PhaseAverage phase;
+
+        void start_means(rtype t);
 };
 
 /**
