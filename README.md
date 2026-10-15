@@ -20,6 +20,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Gmsh 2.2/4.1 or HDF5 mesh files (`mallard-mesh-convert`), or generated boxes
 - Periodic boundaries: generated meshes, or paired zones of mesh files
 - Axisymmetric (r-z) flows in 2D: revolved finite volumes, at design order up to the axis
+- Curved high-order boundaries: Gmsh order-2/3 boundary elements or projection onto a circle, sphere or cylinder; TENO-E orders 3-6 converge at curved walls, where straight-sided faces do not ([design](docs/design/curved_boundaries.md))
 
 **Numerics**
 - Reconstruction: first order; MUSCL with Barth-Jespersen or Venkatakrishnan limiting; [TENO-E](https://doi.org/10.1007/s10915-025-02918-w) of orders 3 to 6, optionally bound preserving (measured orders 3-6 on triangles and quadrilaterals)
@@ -30,8 +31,9 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 **Physics**
 - Compressible Euler and Navier-Stokes; constant, Sutherland or power-law viscosity
 - Thermally perfect multicomponent mixtures from [Cantera](https://cantera.org) YAML files; optional double-flux scheme for interfaces
-- Finite-rate chemistry: elementary, three-body, falloff, PLOG and Chebyshev reactions; a Rosenbrock (RODAS) integrator per cell with analytical Jacobians, Strang-split from the flow; ignition delays match Cantera up to 1268 species
-- Mixture-averaged, unity-Lewis or constant-Lewis transport
+- Finite-rate chemistry: elementary, three-body, falloff, PLOG and Chebyshev reactions; a Rosenbrock (RODAS) integrator per cell with analytical Jacobians, Strang or SIMPLER balanced splitting from the flow; ignition delays match Cantera up to 1268 species
+- Mixture-averaged, unity-Lewis or constant-Lewis transport; optional thermal (Soret) diffusion
+- Optically thin radiation (TNF Planck-mean model)
 - Gravity and arbitrary source terms
 
 **Large-eddy simulation** ([design](docs/design/les.md))
@@ -52,7 +54,8 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - MPI with multi-jagged (cuboid blocks), Hilbert-curve or graph (dKaMinPar) partitions, GPU-aware halo exchange overlapped with computation: 93% weak-scaling efficiency on 16 A100 GPUs
 - No rank holds the whole mesh (HDF5 or generated meshes)
 - Bitwise-identical results on any number of threads or MPI ranks; restarts bit for bit, also on a different number of ranks
-- Stiff chemistry on GPUs: a warp or wider team per cell and a sparse LU for large mechanisms
+- Stiff chemistry on GPUs: a warp or wider team per cell and a sparse LU for large mechanisms, load-balanced across MPI ranks
+- The whole time step as one CUDA graph; optional NCCL halo exchange; TENO-E setup on the GPU
 
 **Input, output and diagnostics**
 - TOML input; initial conditions, boundary states, sources and sponges as analytical expressions
