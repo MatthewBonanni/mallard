@@ -37,7 +37,8 @@ struct MeshFileData {
 
 /**
  * @brief Read a mesh file by its extension: Gmsh or Fluent (.msh, told apart
- *        by their first character), Fluent case (.cas) or CGNS (.cgns).
+ *        by their first character), Fluent case (.cas), CGNS (.cgns), or a
+ *        directory: OpenFOAM.
  */
 MeshFileData read_mesh_file(const std::string & filename);
 
@@ -53,6 +54,14 @@ MeshFileData read_cgns(const std::string & filename);
  *        as the file's zone sections name them.
  */
 MeshFileData read_fluent(const std::string & filename);
+
+/**
+ * @brief An OpenFOAM polyMesh, given as its directory, its parent, or its
+ *        case (constant/polyMesh), ASCII or binary: each patch becomes a
+ *        boundary zone. 2D builds read meshes one cell thick in z between
+ *        empty patches, each cell as its face at the lowest z.
+ */
+MeshFileData read_openfoam(const std::string & path);
 
 /**
  * @brief Corners (Gmsh/VTK order, either orientation) of the cells of a
