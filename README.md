@@ -71,7 +71,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
   - Compressible isotropic turbulence: enstrophy within 2.4% of the filtered DNS of Johnsen et al.
   - CJ detonation speed within 0.01%; H2/air flame speeds within 0.81% of Cantera from φ = 0.6 to 1.4
 - Over 400 unit and regression tests: exact Riemann solutions, design order, conservation, bitwise MPI and restart reproducibility
-- CI on every code change (2D, 3D, MPI on 1-4 ranks, single precision, GCC and Clang, warnings as errors); nightly sanitizers; a performance suite with per-hardware baselines
+- CI on every code change (2D, 3D, MPI on 1-4 ranks, single precision, GCC and Clang, warnings as errors); nightly sanitizers; a GPU performance suite with per-hardware baselines, tracked by merge on the [performance dashboard](https://matthewbonanni.github.io/mallard/docs/dashboard/)
 
 The sources of every method and of the validation data are listed in [docs/references.md](docs/references.md).
 
