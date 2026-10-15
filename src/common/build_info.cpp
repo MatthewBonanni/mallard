@@ -47,12 +47,12 @@ std::string device_name() {
 #if defined(KOKKOS_ENABLE_CUDA)
     cudaDeviceProp prop;
     if (cudaGetDeviceProperties(&prop, Kokkos::device_id()) == cudaSuccess) {
-        return logging::format("%s (%.0f GB)", prop.name, prop.totalGlobalMem / 1.0e9);
+        return logging::format("%s (%.0f GB)", prop.name, static_cast<double>(prop.totalGlobalMem) / 1.0e9);
     }
 #elif defined(KOKKOS_ENABLE_HIP)
     hipDeviceProp_t prop;
     if (hipGetDeviceProperties(&prop, Kokkos::device_id()) == hipSuccess) {
-        return logging::format("%s (%.0f GB)", prop.name, prop.totalGlobalMem / 1.0e9);
+        return logging::format("%s (%.0f GB)", prop.name, static_cast<double>(prop.totalGlobalMem) / 1.0e9);
     }
 #endif
     return cpu_model();
