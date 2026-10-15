@@ -168,9 +168,19 @@ class FaceReconstruction {
          */
         void init_face_quadrature_3d(uint8_t degree);
 
+        /**
+         * @brief Curved meshes in 2D: per-face quadrature points, weights and
+         *        normals for quadrature_face's Gauss rule on every face, the
+         *        curved faces' mapped onto their curves (nothing otherwise).
+         */
+        void init_face_quadrature_2d_curved();
+
         Quadrature quadrature_face;
-        Kokkos::View<rtype ***> face_quad_points;   // 3D: (face, q, dim)
-        Kokkos::View<rtype **> face_quad_weights;   // 3D: (face, q), sum 2 per face, zero on padding
+        // 3D, and 2D curved meshes: (face, q, dim) and (face, q). Weights sum to 2 per face
+        // (twice the area over face_area on curved faces) and are zero on padding points
+        Kokkos::View<rtype ***> face_quad_points;
+        Kokkos::View<rtype **> face_quad_weights;
+        Kokkos::View<rtype ***> face_quad_normals;  // curved meshes: (face, q, dim) unit normals out of cell 0
     protected:
         FaceReconstructionType type;
         std::shared_ptr<Mesh> mesh;
@@ -301,6 +311,12 @@ class TENO : public FaceReconstruction {
         rtype C_T = -1.0;  // Fixed cutoff; negative selects the adaptive cutoff
         bool characteristic = true;
         bool bound_preserving = false;
+        // Stencils take mirror images across curved wall and symmetry faces too
+        // (across their planes); by default they stay one-sided there
+        bool curved_mirrors = false;
+        // Largest degree of the central polynomials of cells whose stencils reach a
+        // curved wall without mirror images: one-sided fits of higher degree grow there
+        uint8_t curved_wall_degree = 3;
         rtype max_condition = 1.0e8;
         uint8_t slice_shift = teno::SLICE_SHIFT;  // log2 of the cells per slice of the packed stencils
 

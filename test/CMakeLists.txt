@@ -23,6 +23,7 @@ set(MALLARD_TEST_SOURCES
 if(Mallard_DIM EQUAL 2)
     list(APPEND MALLARD_TEST_SOURCES
     mesh_test.cpp
+    curved_test.cpp
     physics_test.cpp
     riemann_solver_test.cpp
     reconstruction_test.cpp
@@ -43,6 +44,7 @@ else()
     list(APPEND MALLARD_TEST_SOURCES
     physics3d_test.cpp
     mesh3d_test.cpp
+    curved3d_test.cpp
     teno3d_test.cpp
     riemann3d_test.cpp
     boundary3d_test.cpp
