@@ -34,7 +34,7 @@
 namespace {
 
 constexpr double R_IN = 1.0, R_OUT = 1.5;
-constexpr rtype GAMMA = 1.4;
+constexpr rtype GAMMA = 1.4_r;
 
 const char * SHAPES = R"(
 [[mesh.curved]]
@@ -144,7 +144,7 @@ TEST(Curved3DGeometry, FaceQuadratureClosesEveryCell) {
                     for (int side = 0; side < 2; side++) {
                         const int32_t c = mesh->h_cells_of_face(f, side);
                         if (c < 0) continue;
-                        for (int i = 0; i < 3; i++) sum[3 * c + i] += (side == 0 ? a : -a) * double(n(f, q, i));
+                        for (size_t i = 0; i < 3; i++) sum[3 * static_cast<size_t>(c) + i] += (side == 0 ? a : -a) * double(n(f, q, i));
                     }
                 }
                 scale = std::max(scale, double(mesh->h_face_area(f)));
@@ -178,7 +178,7 @@ TEST(Curved3DSolver, GasAtRestStaysExactlyAtRest) {
 namespace {
 
 /** @brief Conservative k of a polynomial state of the given degree. */
-double polynomial(int k, const curved::Vec3 & x, int degree) {
+double polynomial(size_t k, const curved::Vec3 & x, int degree) {
     const double base[5] = {1.0, 0.1, -0.05, 0.08, 2.6};
     double v = base[k] + 0.05 * (x[0] - 0.3 * x[1] + 0.2 * x[2]);
     if (degree >= 2) v += 0.05 * (x[0] * x[0] - 0.3 * x[1] * x[2] + 0.1 * x[0] * x[1]);
@@ -206,9 +206,9 @@ double shell_polynomial_error(int n, const std::string & geometry, int order, bo
         double vol = 0.0;
         for (size_t q = 0; q < w.size(); q++) {
             vol += w[q];
-            for (int k = 0; k < 5; k++) avg[5 * c + k] += w[q] * polynomial(k, x[q], degree);
+            for (uint32_t k = 0; k < 5; k++) avg[5 * c + k] += w[q] * polynomial(k, x[q], degree);
         }
-        for (int k = 0; k < 5; k++) avg[5 * c + k] /= vol;
+        for (uint32_t k = 0; k < 5; k++) avg[5 * c + k] /= vol;
     }
     Euler euler = Euler::from_reference(GAMMA, 1.0, 1.0, 1.0);
     Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
@@ -277,15 +277,15 @@ TEST(Curved3DGeometry, CellRulesMatchTheDivergenceOfTheirFaces) {
         for (uint32_t f = 0; f < mesh->n_faces; f++) {
             std::vector<std::array<double, 2>> ref;
             std::vector<double> ref_w;
-            const int m = 10;
+            const size_t m = 10;
             std::vector<double> gx = {-0.9739065285171717, -0.8650633666889845, -0.6794095682990244, -0.4333953941292472,
                                       -0.1488743389816312, 0.1488743389816312, 0.4333953941292472, 0.6794095682990244,
                                       0.8650633666889845, 0.9739065285171717};
             std::vector<double> gw = {0.0666713443086881, 0.1494513491505806, 0.2190863625159820, 0.2692667193099963,
                                       0.2955242247147529, 0.2955242247147529, 0.2692667193099963, 0.2190863625159820,
                                       0.1494513491505806, 0.0666713443086881};
-            for (int a = 0; a < m; a++) {
-                for (int b = 0; b < m; b++) {
+            for (size_t a = 0; a < m; a++) {
+                for (size_t b = 0; b < m; b++) {
                     if (mesh->h_n_nodes_of_face(f) == 3) {
                         const double u = 0.5 * (gx[a] + 1.0), v = 0.5 * (gx[b] + 1.0);
                         ref.push_back({u, v * (1.0 - u)});
@@ -299,8 +299,8 @@ TEST(Curved3DGeometry, CellRulesMatchTheDivergenceOfTheirFaces) {
             g.face_rule(f, ref, ref_w, x, n, w);
             double flux = 0.0;
             for (size_t q = 0; q < w.size(); q++) flux += w[q] * n[q][0] * std::pow(x[q][0], 3) * x[q][1] / 3.0;
-            surface[mesh->h_cells_of_face(f, 0)] += flux;
-            if (mesh->h_cells_of_face(f, 1) >= 0) surface[mesh->h_cells_of_face(f, 1)] -= flux;
+            surface[static_cast<uint32_t>(mesh->h_cells_of_face(f, 0))] += flux;
+            if (mesh->h_cells_of_face(f, 1) >= 0) surface[static_cast<uint32_t>(mesh->h_cells_of_face(f, 1))] -= flux;
         }
         const auto volume = cell_integrals(*mesh, 6, [](const curved::Vec3 & p) { return p[0] * p[0] * p[1]; });
         double worst = 0.0;

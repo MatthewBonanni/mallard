@@ -298,7 +298,7 @@ struct Shell {
 inline curved::Vec3 direction(const std::array<int, 3> & p, int n) {
     // Equiangular cube-to-sphere map of a cube-surface lattice point
     curved::Vec3 d;
-    for (int a = 0; a < 3; a++) {
+    for (size_t a = 0; a < 3; a++) {
         const int m = std::max({std::abs(p[0]), std::abs(p[1]), std::abs(p[2])});
         d[a] = (std::abs(p[a]) == m) ? (p[a] > 0 ? 1.0 : -1.0) : std::tan(0.25 * M_PI * p[a] / double(n));
     }
@@ -314,20 +314,20 @@ inline Shell shell(int n, int n_r, bool prisms, bool quadratic = false) {
     auto surface_id = [&](const std::array<int, 3> & p) {
         auto it = surface.find(p);
         if (it != surface.end()) return it->second;
-        surface[p] = points.size();
+        surface[p] = static_cast<uint32_t>(points.size());
         points.push_back(p);
         return uint32_t(points.size() - 1);
     };
     // Quadrilaterals of each cube face, counterclockwise seen from outside
     std::vector<std::array<uint32_t, 4>> quads;
-    for (int axis = 0; axis < 3; axis++) {
+    for (size_t axis = 0; axis < 3; axis++) {
         for (int sign : {-1, 1}) {
-            const int u = (axis + 1) % 3, v = (axis + 2) % 3;
+            const size_t u = (axis + 1) % 3, v = (axis + 2) % 3;
             for (int i = -n; i < n; i += 2) {
                 for (int j = -n; j < n; j += 2) {
                     std::array<uint32_t, 4> q;
                     const int di[4] = {0, 2, 2, 0}, dj[4] = {0, 0, 2, 2};
-                    for (int k = 0; k < 4; k++) {
+                    for (size_t k = 0; k < 4; k++) {
                         std::array<int, 3> p;
                         p[axis] = sign * n;
                         p[u] = i + di[k];
@@ -340,7 +340,7 @@ inline Shell shell(int n, int n_r, bool prisms, bool quadratic = false) {
             }
         }
     }
-    const uint32_t m = points.size();
+    const uint32_t m = static_cast<uint32_t>(points.size());
     for (int l = 0; l <= n_r; l++) {
         const double r = SHELL_R_IN + (SHELL_R_OUT - SHELL_R_IN) * l / n_r;
         for (const auto & p : points) {
@@ -355,18 +355,18 @@ inline Shell shell(int n, int n_r, bool prisms, bool quadratic = false) {
                 s.cells.push_back({node(q[0], l), node(q[1], l), node(q[2], l), node(q[3], l), node(q[0], l + 1),
                                    node(q[1], l + 1), node(q[2], l + 1), node(q[3], l + 1)});
             } else {
-                for (const auto & t : {std::array<int, 3>{0, 1, 2}, std::array<int, 3>{0, 2, 3}}) {
+                for (const auto & t : {std::array<size_t, 3>{0, 1, 2}, std::array<size_t, 3>{0, 2, 3}}) {
                     s.cells.push_back({node(q[t[0]], l), node(q[t[1]], l), node(q[t[2]], l), node(q[t[0]], l + 1),
                                        node(q[t[1]], l + 1), node(q[t[2]], l + 1)});
                 }
             }
         }
         for (const auto & [l, zone, r] : {std::tuple{0, "inner", SHELL_R_IN}, std::tuple{n_r, "outer", SHELL_R_OUT}}) {
-            std::vector<std::vector<int>> pieces = prisms ? std::vector<std::vector<int>>{{0, 1, 2}, {0, 2, 3}}
-                                                          : std::vector<std::vector<int>>{{0, 1, 2, 3}};
+            std::vector<std::vector<size_t>> pieces = prisms ? std::vector<std::vector<size_t>>{{0, 1, 2}, {0, 2, 3}}
+                                                             : std::vector<std::vector<size_t>>{{0, 1, 2, 3}};
             for (const auto & piece : pieces) {
                 Mesh::BoundaryFace f;
-                for (int k : piece) f.nodes.push_back(node(q[k], l));
+                for (size_t k : piece) f.nodes.push_back(node(q[k], l));
                 f.zone = zone;
                 s.faces.push_back(f);
                 if (!quadratic) continue;

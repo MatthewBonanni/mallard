@@ -292,7 +292,8 @@ TEST(ChemistryKineticsTest, RegularizationConcentrationIsAnOption) {
     ASSERT_EQ(reactor_options(input).C_reg, C_reg);
     const auto kinetics = make_kinetics_table<Kokkos::HostSpace>(mech, reactor_options(input).C_reg);
     const auto plain = make_kinetics_table<Kokkos::HostSpace>(mech);
-    const uint32_t ns = mech.n_species(), nr = mech.reactions.size(), fuel = mech.species_index("C3H8");
+    const uint32_t ns = mech.n_species(), nr = static_cast<uint32_t>(mech.reactions.size()),
+                   fuel = static_cast<uint32_t>(mech.species_index("C3H8"));
     std::vector<double> C(ns, 1e-3), g(ns, 0.0), q(nr), q_plain(nr);
     for (const double x : {0.5, 2.0}) {
         C[fuel] = x * C_reg;

@@ -212,7 +212,7 @@ void FaceReconstruction::init_face_quadrature_2d_curved() {
     if (N_DIM != 2 || !mesh->curved_geometry) return;
     const curved::Geometry & geometry = *mesh->curved_geometry;
     const uint32_t n_faces = mesh->n_faces;
-    const uint32_t n_q = quadrature_face.h_points.extent(0);
+    const uint32_t n_q = static_cast<uint32_t>(quadrature_face.h_points.extent(0));
     std::vector<std::array<double, 2>> ref(n_q);
     std::vector<double> ref_w(n_q);
     for (uint32_t q = 0; q < n_q; q++) {

@@ -28,7 +28,8 @@ function(mallard_target_warnings target)
     endif()
     set(warnings
         -Wall -Wextra -Wpedantic -Wshadow -Wnon-virtual-dtor -Wcast-align -Wunused
-        -Woverloaded-virtual -Wdouble-promotion -Wformat=2 -Wimplicit-fallthrough)
+        -Woverloaded-virtual -Wdouble-promotion -Wformat=2 -Wimplicit-fallthrough
+        -Wconversion -Wsign-conversion)
     # nvcc rewrites functional casts such as T(x) into C-style casts before the host compiler sees them
     if(NOT nvcc)
         list(APPEND warnings -Wold-style-cast)
