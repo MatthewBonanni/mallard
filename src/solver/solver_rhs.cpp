@@ -244,6 +244,7 @@ void Solver::launch_flux_functor() {
                                                     face_flux,
                                                     physics.gamma,
                                                     low_mach_cutoff,
-                                                    cell_upwind};
+                                                    cell_upwind,
+                                                    face_reconstruction->face_quad_normals};
     parallel_for_faces("convective_flux", functor, rhs_faces, mesh->n_faces);
 }

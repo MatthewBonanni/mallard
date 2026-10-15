@@ -2,13 +2,15 @@
 """Write a Gmsh 2.2 O-grid of quadrilaterals around a circular cylinder.
 
     make_cylinder_mesh.py OUTPUT.msh [--n-theta 256] [--n-r 128] [--r-far 20] [--dr0 0.004] [--half]
+        [--order 1|2|3]
 
 The cylinder has diameter 1 and is centered at the origin. Radial spacing
 grows geometrically from dr0 at the wall to the far-field radius. Physical
 curves: "cylinder" (the wall) and "farfield" (the outer circle). With --half,
 only the upper half (y >= 0, n-theta cells over 180 degrees) with the two
 cuts along y = 0 as "axis": the meridian plane of a sphere for axisymmetric
-runs.
+runs. With --order 2 or 3 the two circles are written as high-order lines
+(line3, line4) whose extra nodes lie on the circles, so Mallard curves them.
 """
 import argparse
 
@@ -24,6 +26,7 @@ def main():
     ap.add_argument("--r-far", type=float, default=20.0)
     ap.add_argument("--dr0", type=float, default=0.004)
     ap.add_argument("--half", action="store_true")
+    ap.add_argument("--order", type=int, default=1, choices=[1, 2, 3])
     args = ap.parse_args()
 
     r0, n_r, n_t = 0.5, args.n_r, args.n_theta
@@ -52,9 +55,21 @@ def main():
     lines.append("$EndNodes")
 
     elements = []
+    extra_nodes = []
+    n_nodes = (n_r + 1) * n_nodes_t
+    d_theta = (np.pi if args.half else 2.0 * np.pi) / n_t
     for i in range(n_t):
-        elements.append(f"1 2 1 1 {node(i, 0)} {node(i + 1, 0)}")
-        elements.append(f"1 2 2 2 {node(i, n_r)} {node(i + 1, n_r)}")
+        for j, tag in ((0, 1), (n_r, 2)):
+            if args.order == 1:
+                elements.append(f"1 2 {tag} {tag} {node(i, j)} {node(i + 1, j)}")
+                continue
+            ids = []
+            for k in range(1, args.order):
+                t = theta[i] + d_theta * k / args.order
+                extra_nodes.append(f"{n_nodes + len(extra_nodes) + 1} {r[j] * np.cos(t):.15g} {r[j] * np.sin(t):.15g} 0")
+                ids.append(str(n_nodes + len(extra_nodes)))
+            etype = 8 if args.order == 2 else 26
+            elements.append(f"{etype} 2 {tag} {tag} {node(i, j)} {node(i + 1, j)} " + " ".join(ids))
     if args.half:
         for j in range(n_r):
             elements.append(f"1 2 3 3 {node(0, j)} {node(0, j + 1)}")
@@ -62,6 +77,10 @@ def main():
     for j in range(n_r):
         for i in range(n_t):
             elements.append(f"3 2 0 1 {node(i, j)} {node(i, j + 1)} {node(i + 1, j + 1)} {node(i + 1, j)}")
+    if extra_nodes:
+        k = lines.index("$EndNodes")
+        lines[k:k] = extra_nodes
+        lines[lines.index("$Nodes") + 1] = str(n_nodes + len(extra_nodes))
     lines += ["$Elements", str(len(elements))]
     lines += [f"{k + 1} {e}" for k, e in enumerate(elements)]
     lines.append("$EndElements")

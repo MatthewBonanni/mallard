@@ -72,6 +72,9 @@ class DistributedMesh {
         /** @brief Periodic classes of the periodic nodes of the block's cells and boundary faces, and no others. */
         const PeriodicMap & block_periodic_classes() const { return block_periodic; }
 
+        /** @brief This rank's block of the mesh. */
+        const MeshBlock & mesh_block() const { return block; }
+
         /** @brief Vertex average of every block cell (collective). */
         std::vector<std::array<double, N_DIM>> block_cell_centers() const;
 
