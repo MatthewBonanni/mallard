@@ -15,10 +15,12 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <mutex>
 #include <sstream>
 
 #include "comm.h"
 #include "common_io.h"
+#include "compression.h"
 #include "hdf5_util.h"
 
 namespace {
@@ -69,11 +71,11 @@ std::string DataWriter::xdmf_grid(const std::string & stem, double t, const std:
     return out.str();
 }
 
-void DataWriter::write_xdmf(const std::string & stem) const {
-    write_xdmf_file(stem + ".xmf", xdmf_grid(stem, double(history.back().first), "    "));
+void DataWriter::write_xdmf(const std::string & stem, const std::vector<std::pair<rtype, std::string>> & series) const {
+    write_xdmf_file(stem + ".xmf", xdmf_grid(stem, double(series.back().first), "    "));
     std::string grids =
         "    <Grid Name=\"" + file_name(prefix) + "\" GridType=\"Collection\" CollectionType=\"Temporal\">\n";
-    for (const auto & [t, file] : history) {
+    for (const auto & [t, file] : series) {
         grids += xdmf_grid(std::filesystem::path(file).replace_extension().string(), double(t), "      ");
     }
     grids += "    </Grid>\n";
@@ -112,6 +114,9 @@ constexpr const char * MESH_FORMAT = "mallard-solution-mesh";
 constexpr const char * SOLUTION_FORMAT = "mallard-solution";
 constexpr int OUTPUT_VERSION = 1;
 
+// The HDF5 library is not thread-safe, and asynchronous writers call it from their threads
+std::mutex hdf5_mutex;
+
 /** @brief XDMF code of a cell in a Mixed topology, by node count. */
 uint64_t xdmf_type(uint32_t n_nodes) {
     if (N_DIM == 2 && n_nodes == 3) return 4;  // Triangle
@@ -126,11 +131,13 @@ uint64_t xdmf_type(uint32_t n_nodes) {
 
 } // namespace
 
+bool have_hdf5_deflate() { return H5Zfilter_avail(H5Z_FILTER_DEFLATE) > 0 && H5Zfilter_avail(H5Z_FILTER_SHUFFLE) > 0; }
+
+// Serial runs on several ranks (tests) hold the whole mesh on every rank: the root writes alone
 void DataWriter::write_hdf5_mesh() {
+    const std::lock_guard<std::mutex> lock(hdf5_mutex);
     hdf5_mesh_written = true;
     const bool distributed = mesh->n_global_cells > 0;
-    // Serial runs on several ranks (tests) hold the whole mesh on every rank
-    if (!distributed && !comm::is_root()) return;
     const uint32_t n_owned = mesh->n_owned();
     const uint64_t n_cells = distributed ? mesh->n_global_cells : mesh->n_cells;
     const uint64_t n_nodes = distributed ? mesh->n_global_nodes : mesh->n_nodes;
@@ -181,9 +188,10 @@ void DataWriter::write_hdf5_mesh() {
     for (size_t i = 0; i < starts.size(); i++) starts[i] = int64_t(first + block_offsets[i]);
     const std::vector<int64_t> records(block_topology.begin(), block_topology.end());
 
+    const bool deflate = compression == Compression::ZLIB;
+    const std::string filename = mesh_file(prefix);
     Handle fapl(file_access(distributed), H5Pclose, "H5Pcreate");
     Handle dxpl(transfer(distributed), H5Pclose, "H5Pcreate");
-    const std::string filename = mesh_file(prefix);
     Handle file(H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, fapl), H5Fclose, "creating " + filename);
     {
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
@@ -194,34 +202,36 @@ void DataWriter::write_hdf5_mesh() {
     {
         Handle group(H5Gcreate2(file, "nodes", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "H5Gcreate2");
         write_rows(group, "coordinates", n_nodes, N_DIM, node_order.first(), node_order.size(), block_coords.data(),
-                   dxpl);
+                   dxpl, deflate);
     }
     {
         Handle group(H5Gcreate2(file, "cells", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "H5Gcreate2");
-        write_rows(group, "offsets", n_cells + 1, 1, cell_order.first(), starts.size(), starts.data(), dxpl);
-        write_rows(group, "topology", total, 1, first, records.size(), records.data(), dxpl);
+        write_rows(group, "offsets", n_cells + 1, 1, cell_order.first(), starts.size(), starts.data(), dxpl, deflate);
+        write_rows(group, "topology", total, 1, first, records.size(), records.data(), dxpl, deflate);
     }
 }
 
-void DataWriter::write_hdf5(const std::string & stem, uint64_t step, rtype t) const {
+void DataWriter::write_hdf5(const std::string & stem, uint64_t step, rtype t, const Values & snapshot) {
+    const std::lock_guard<std::mutex> lock(hdf5_mutex);
     const bool distributed = mesh->n_global_cells > 0;
-    if (!distributed && !comm::is_root()) return;
     const uint32_t n_owned = mesh->n_owned();
     uint32_t width = 0;
     for (const auto & field : fields) width += field.n_vtk_components();
     std::vector<rtype> values(size_t(n_owned) * width);
     size_t at = 0;
     for (uint32_t i = 0; i < n_owned; i++) {
-        for (const auto & field : fields) {
-            for (uint32_t k = 0; k < field.n_vtk_components(); k++) values[at++] = field.value(i, k);
+        for (size_t f = 0; f < fields.size(); f++) {
+            const uint32_t n_comp = fields[f].n_vtk_components();
+            for (uint32_t k = 0; k < n_comp; k++) values[at++] = snapshot[f][size_t(i) * n_comp + k];
         }
     }
+    if (relative_error > 0.0) compression::round_to_relative_error(values, relative_error);
     const std::vector<rtype> block = cell_order.gather<rtype>(values, width);
     const uint64_t n = cell_order.size();
-
+    const bool deflate = compression == Compression::ZLIB;
+    const std::string filename = stem + ".h5";
     Handle fapl(file_access(distributed), H5Pclose, "H5Pcreate");
     Handle dxpl(transfer(distributed), H5Pclose, "H5Pcreate");
-    const std::string filename = stem + ".h5";
     Handle file(H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, fapl), H5Fclose, "creating " + filename);
     {
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
@@ -242,16 +252,18 @@ void DataWriter::write_hdf5(const std::string & stem, uint64_t step, rtype t) co
             for (uint32_t k = 0; k < n_comp; k++) column[row * n_comp + k] = block[row * width + c0 + k];
         }
         write_rows(group, field.name.c_str(), cell_order.n_global(), int(n_comp), cell_order.first(), n,
-                   column.data(), dxpl);
+                   column.data(), dxpl, deflate);
         c0 += n_comp;
     }
 }
 
 #else
 
+bool have_hdf5_deflate() { return false; }
+
 void DataWriter::write_hdf5_mesh() { throw std::logic_error("DataWriter: HDF5 output without HDF5"); }
 
-void DataWriter::write_hdf5(const std::string &, uint64_t, rtype) const {
+void DataWriter::write_hdf5(const std::string &, uint64_t, rtype, const Values &) {
     throw std::logic_error("DataWriter: HDF5 output without HDF5");
 }
 
