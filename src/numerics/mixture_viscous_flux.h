@@ -105,13 +105,20 @@ struct MixtureGradientFunctor {
             for (uint32_t v = 0; v < CHUNK; v++) {
                 if (v < n) q_c[v] = values(c, v0 + v);
             }
+            // Across periodic rotations the neighbors' velocities (the first chunk's first variables) turn
+            const bool rotated = v0 == 0 && f.periodic.rotated();
             for (uint32_t k = stencil.offsets_cells_of_cell(c); k < stencil.offsets_cells_of_cell(c + 1); k++) {
                 const uint32_t j = stencil.cells_of_cell(k);
                 rtype w[N_DIM];
                 FOR_I_DIM w[i] = stencil.weights.cells(k, i);
+                rtype u_j[N_DIM] = {};
+                if (rotated) {
+                    FOR_I_DIM u_j[i] = values(j, i);
+                    f.periodic.rotate(stencil.cells_of_cell_shift(k), u_j);
+                }
                 for (uint32_t v = 0; v < CHUNK; v++) {
                     if (v >= n) continue;
-                    const rtype dq = values(j, v0 + v) - q_c[v];
+                    const rtype dq = (rotated && v < N_DIM ? u_j[v] : values(j, v0 + v)) - q_c[v];
                     FOR_I_DIM g[v][i] += w[i] * dq;
                 }
             }
@@ -167,7 +174,7 @@ struct MixtureViscousFluxFunctor {
     Kokkos::View<rtype *[N_DIM]> face_coords;
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<int32_t *[2]> cells_of_face;
-    Kokkos::View<rtype *[N_DIM]> shifts;
+    PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
     BoundaryData boundaries;
     Mixture gas;
@@ -190,6 +197,8 @@ struct MixtureViscousFluxFunctor {
     /** @brief Geometry of an interior face: unit normal, centroid offset and its normal component. */
     struct Geometry {
         int32_t c0, c1;
+        uint8_t s;      // shift row of the face
+        bool rotated;   // the row turns vectors
         rtype n[N_DIM], d[N_DIM], d_n;
         rtype t;     // axisymmetric: fraction along d of the face center's projection (see ViscousFluxFunctor)
         rtype dvar;  // axisymmetric: ViscousFluxFunctor::variance_jump
@@ -204,7 +213,12 @@ struct MixtureViscousFluxFunctor {
         FOR_I_DIM n_vec[i] = normals(f, i);
         unit<N_DIM>(n_vec, g.n);
         const uint8_t s = face_shift(f);
-        FOR_I_DIM g.d[i] = (cell_coords(g.c1, i) + shifts(s, i)) - cell_coords(g.c0, i);
+        g.s = s;
+        g.rotated = periodic.rotated();
+        rtype x1[N_DIM];
+        FOR_I_DIM x1[i] = cell_coords(g.c1, i);
+        periodic.forward(s, x1, g.d);
+        FOR_I_DIM g.d[i] = g.d[i] - cell_coords(g.c0, i);
         g.d_n = dot<N_DIM>(g.d, g.n);
         g.t = 0.5_r;
         g.dvar = 0.0_r;
@@ -215,23 +229,44 @@ struct MixtureViscousFluxFunctor {
         return g;
     }
 
+    /**
+     * @brief Variable v of cell 1 and its gradient g1, in cell 0's frame:
+     *        across a periodic rotation the velocity (v < N_DIM) and every
+     *        gradient turn.
+     */
+    KOKKOS_INLINE_FUNCTION
+    rtype cell_1(const Geometry & G, const uint32_t v, rtype * g1) const {
+        FOR_I_DIM g1[i] = gradients(G.c1, v, i);
+        if (!G.rotated) return values(G.c1, v);
+        rtype q1 = values(G.c1, v);
+        if (v < N_DIM) {
+            q1 = 0.0_r;
+            FOR_I_DIM g1[i] = 0.0_r;
+            for (uint8_t b = 0; b < N_DIM; b++) {
+                const rtype Q = periodic.rotations(G.s, v, b);
+                q1 += Q * values(G.c1, b);
+                FOR_I_DIM g1[i] += Q * gradients(G.c1, b, i);
+            }
+        }
+        periodic.rotate(G.s, g1);
+        return q1;
+    }
+
     /** @brief Value and gradient of variable v on an interior face. */
     KOKKOS_INLINE_FUNCTION
     rtype interior(const Geometry & G, const uint32_t v, rtype * g) const {
-        const rtype q0 = values(G.c0, v), q1 = values(G.c1, v);
-        FOR_I_DIM g[i] = 0.5_r * (gradients(G.c0, v, i) + gradients(G.c1, v, i));
+        rtype g1[N_DIM];
+        const rtype q0 = values(G.c0, v), q1 = cell_1(G, v, g1);
+        FOR_I_DIM g[i] = 0.5_r * (gradients(G.c0, v, i) + g1[i]);
         rtype dq = q1 - q0;
         if (axisymmetric) {
-            rtype g0[N_DIM], g1[N_DIM];
-            FOR_I_DIM {
-                g0[i] = gradients(G.c0, v, i);
-                g1[i] = gradients(G.c1, v, i);
-            }
+            rtype g0[N_DIM];
+            FOR_I_DIM g0[i] = gradients(G.c0, v, i);
             dq -= mean_offset(g0, g1, G.d, G.dvar);
         }
         const rtype correction = (dq - dot<N_DIM>(g, G.d)) / G.d_n;
         if (axisymmetric) {
-            FOR_I_DIM g[i] = gradients(G.c0, v, i) + G.t * (gradients(G.c1, v, i) - gradients(G.c0, v, i));
+            FOR_I_DIM g[i] = gradients(G.c0, v, i) + G.t * (g1[i] - gradients(G.c0, v, i));
             FOR_I_DIM g[i] += correction * G.n[i];
             return q0 + G.t * (q1 - q0);
         }
@@ -273,6 +308,8 @@ struct MixtureViscousFluxFunctor {
             G = geometry(f_src);
         } else {
             G.c0 = G.c1 = c0;
+            G.s = 0;
+            G.rotated = false;
         }
 
         // Velocity and temperature with their gradients

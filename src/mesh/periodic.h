@@ -22,21 +22,44 @@
 
 /**
  * @brief Periodic classes of the mesh nodes: the translation of each lattice
- *        direction, and per node its key (the lowest node id of its class) and
- *        its lattice offset L, with x_n = x_key + sum_j L_j translations[j].
+ *        direction (zero for the rotation's) and the rotation, and per node
+ *        its key (the lowest node id of its class) and its lattice offset L,
+ *        with x_n = M(L) x_key (see periodic_lattice_map).
  */
 struct PeriodicNodes {
     std::vector<std::string> zones;  // the zones joined by the pairs
     std::vector<std::array<rtype, N_DIM>> translations;
+    PeriodicRotation rotation;
     std::vector<uint32_t> key;
     std::vector<std::array<int8_t, 3>> lattice;
 };
 
+/** @brief Rotation matrix by angle (radians, right-handed) about the unit vector axis. */
+std::array<std::array<double, 3>, 3> rotation_matrix(const std::array<double, 3> & axis, double angle);
+
 /**
- * @brief Check the pairs (zones used once, nonzero translations, at most three
- *        distinct ones) and fill result.zones and result.translations. Returns
- *        the lattice direction of every pair: pairs with the same translation
- *        share one.
+ * @brief The rigid map x -> Q x + t of lattice offset L: the rotation's
+ *        direction turns by L_r angle about its axis, every other direction
+ *        translates by L_j translations[j]. The maps of the directions
+ *        commute (periodic_directions checks it), so their order does not
+ *        matter. Without a rotation, Q is the identity and t is the sum
+ *        sum_j L_j translations[j] in double, in order of j.
+ */
+void periodic_lattice_map(const std::vector<std::array<rtype, N_DIM>> & translations, const PeriodicRotation & rotation,
+                          const std::array<int, 3> & L, double Q[3][3], double t[3]);
+
+/** @brief The image in zone_b of a point x of zone_a. */
+std::array<rtype, N_DIM> periodic_image(const Mesh::PeriodicPair & pair, const std::array<rtype, N_DIM> & x);
+
+/** @brief "the translation (..)" or "the rotation by .. degrees about (..)", for error messages. */
+std::string periodic_map_string(const Mesh::PeriodicPair & pair);
+
+/**
+ * @brief Check the pairs (zones used once, each a nonzero translation or
+ *        rotation, at most three distinct ones, at most one rotation, and
+ *        translations along its axis, so that the maps commute) and fill
+ *        result.zones, result.translations and result.rotation. Returns the
+ *        lattice direction of every pair: pairs with the same map share one.
  */
 std::vector<size_t> periodic_directions(const std::vector<Mesh::PeriodicPair> & pairs, PeriodicNodes & result);
 
@@ -71,9 +94,9 @@ class PeriodicGrid {
 std::string periodic_point_string(const std::array<rtype, N_DIM> & x);
 
 /**
- * @brief Match the nodes of zone_b of every pair to the nodes of zone_a
- *        translated by the pair's translation (within 1e-6 of the zones'
- *        shortest edge) and join the matches into periodic classes. Pairs with
+ * @brief Match the nodes of zone_b of every pair to the images of the nodes
+ *        of zone_a under the pair's map (within 1e-6 of the zones' shortest
+ *        edge) and join the matches into periodic classes. Pairs with
  *        the same translation share a lattice direction; there are at most
  *        three directions. Throws if a node has no match or several, or if
  *        the matches put a node at two different offsets from its key.

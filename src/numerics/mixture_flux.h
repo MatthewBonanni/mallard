@@ -261,6 +261,8 @@ struct DoubleFluxSumFunctor {
     Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
     Kokkos::View<rtype *> face_energy_1;
     Kokkos::View<rtype *[N_CONSERVATIVE]> rhs;
+    PeriodicMaps periodic;
+    Kokkos::View<uint8_t *> face_shift;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_cell) const {
@@ -271,7 +273,10 @@ struct DoubleFluxSumFunctor {
             if (cells_of_face(i_face, 0) == static_cast<int32_t>(i_cell)) {
                 FOR_I_CONSERVATIVE sum[i] += face_flux(i_face, i);
             } else {
-                for (uint8_t i = 0; i < E; i++) sum[i] -= face_flux(i_face, i);
+                rtype F[N_CONSERVATIVE];
+                for (uint8_t i = 0; i < E; i++) F[i] = face_flux(i_face, i);
+                if (periodic.rotated()) periodic.rotate_state(face_shift(i_face), F, true);
+                for (uint8_t i = 0; i < E; i++) sum[i] -= F[i];
                 sum[E] -= face_energy_1(i_face);
             }
         }

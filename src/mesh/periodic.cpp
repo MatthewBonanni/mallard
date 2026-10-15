@@ -15,6 +15,7 @@
 #include <cmath>
 #include <limits>
 #include <map>
+#include <numbers>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -66,6 +67,92 @@ struct LatticeUnionFind {
 
 } // namespace
 
+std::array<std::array<double, 3>, 3> rotation_matrix(const std::array<double, 3> & axis, const double angle) {
+    const double c = std::cos(angle), s = std::sin(angle);
+    const auto & a = axis;
+    std::array<std::array<double, 3>, 3> Q;
+    for (size_t i = 0; i < 3; i++) {
+        for (size_t j = 0; j < 3; j++) Q[i][j] = (1.0 - c) * a[i] * a[j] + (i == j ? c : 0.0);
+    }
+    Q[0][1] -= s * a[2];
+    Q[0][2] += s * a[1];
+    Q[1][0] += s * a[2];
+    Q[1][2] -= s * a[0];
+    Q[2][0] -= s * a[1];
+    Q[2][1] += s * a[0];
+    return Q;
+}
+
+void periodic_lattice_map(const std::vector<std::array<rtype, N_DIM>> & translations, const PeriodicRotation & rotation,
+                          const std::array<int, 3> & L, double Q[3][3], double t[3]) {
+    for (size_t i = 0; i < 3; i++) {
+        t[i] = 0.0;
+        for (size_t j = 0; j < 3; j++) Q[i][j] = (i == j) ? 1.0 : 0.0;
+    }
+    FOR_I_DIM {
+        for (size_t j = 0; j < translations.size(); j++) t[i] += L[j] * double(translations[j][i]);
+    }
+    if (rotation.direction < 0 || L[static_cast<size_t>(rotation.direction)] == 0) return;
+    const auto R = rotation_matrix(rotation.axis, L[static_cast<size_t>(rotation.direction)] * rotation.angle);
+    for (size_t i = 0; i < 3; i++) {
+        double Rc = 0.0;
+        for (size_t j = 0; j < 3; j++) {
+            Q[i][j] = R[i][j];
+            Rc += R[i][j] * rotation.center[j];
+        }
+        t[i] += rotation.center[i] - Rc;
+    }
+}
+
+namespace {
+
+/** @brief The pair's rotation, its axis normalized and its center moved to the axis point nearest the origin. */
+PeriodicRotation pair_rotation(const Mesh::PeriodicPair & pair) {
+    PeriodicRotation r;
+    r.angle = double(pair.angle);
+    if constexpr (N_DIM == 3) {
+        double norm = 0.0;
+        for (size_t i = 0; i < 3; i++) norm += double(pair.axis[i]) * double(pair.axis[i]);
+        norm = std::sqrt(norm);
+        if (norm == 0.0) throw std::runtime_error("Periodic pair " + pair.zone_a + " / " + pair.zone_b + " has no axis.");
+        for (size_t i = 0; i < 3; i++) r.axis[i] = double(pair.axis[i]) / norm;
+    }
+    FOR_I_DIM r.center[i] = double(pair.center[i]);
+    double along = 0.0;
+    for (size_t i = 0; i < 3; i++) along += r.center[i] * r.axis[i];
+    for (size_t i = 0; i < 3; i++) r.center[i] -= along * r.axis[i];
+    return r;
+}
+
+} // namespace
+
+std::array<rtype, N_DIM> periodic_image(const Mesh::PeriodicPair & pair, const std::array<rtype, N_DIM> & x) {
+    std::array<rtype, N_DIM> y;
+    if (pair.angle == 0.0_r) {
+        FOR_I_DIM y[i] = x[i] + pair.translation[i];
+        return y;
+    }
+    const PeriodicRotation r = pair_rotation(pair);
+    const auto Q = rotation_matrix(r.axis, r.angle);
+    FOR_I_DIM {
+        double v = r.center[i];
+        for (size_t j = 0; j < N_DIM; j++) v += Q[i][j] * (double(x[j]) - r.center[j]);
+        y[i] = static_cast<rtype>(v);
+    }
+    return y;
+}
+
+std::string periodic_map_string(const Mesh::PeriodicPair & pair) {
+    if (pair.angle == 0.0_r) return "the translation " + periodic_point_string(pair.translation);
+    std::string s = "the rotation by " + std::to_string(double(pair.angle) * 180.0 / std::numbers::pi) + " degrees about " +
+                    periodic_point_string(pair.center);
+    if constexpr (N_DIM == 3) {
+        s += " along (" + std::to_string(pair.axis[0]) + ", " + std::to_string(pair.axis[1]) + ", " +
+             std::to_string(pair.axis[2]) + ")";
+    }
+    return s;
+}
+
 std::vector<size_t> periodic_directions(const std::vector<Mesh::PeriodicPair> & pairs, PeriodicNodes & result) {
     std::set<std::string> used_zones;
     std::vector<size_t> dirs;
@@ -76,22 +163,63 @@ std::vector<size_t> periodic_directions(const std::vector<Mesh::PeriodicPair> & 
                 throw std::runtime_error("Periodic zone " + zone + " appears in more than one periodic pair.");
             }
         }
+        const std::string name = "Periodic pair " + pair.zone_a + " / " + pair.zone_b;
         rtype length = 0.0;
         FOR_I_DIM length = std::max(length, std::abs(pair.translation[i]));
-        if (length == 0.0_r) {
-            throw std::runtime_error("Periodic pair " + pair.zone_a + " / " + pair.zone_b + " has no translation.");
+        if (pair.angle != 0.0_r) {
+            if (length > 0.0_r) throw std::runtime_error(name + " has both a translation and a rotation.");
+            if (std::abs(double(pair.angle)) >= 2.0 * std::numbers::pi) {
+                throw std::runtime_error(name + ": the rotation angle must be below 360 degrees.");
+            }
+            const PeriodicRotation r = pair_rotation(pair);
+            if (result.rotation.direction >= 0) {
+                const PeriodicRotation & q = result.rotation;
+                double diff = std::abs(q.angle - r.angle) / std::abs(r.angle);
+                for (size_t i = 0; i < 3; i++) {
+                    diff = std::max(diff, std::abs(q.axis[i] - r.axis[i]));
+                    diff = std::max(diff, std::abs(q.center[i] - r.center[i]));
+                }
+                if (diff > 1e-12) throw std::runtime_error("At most one distinct periodic rotation is supported.");
+                dirs.push_back(static_cast<size_t>(q.direction));
+                continue;
+            }
+            const size_t dir = result.translations.size();
+            if (dir == 3) throw std::runtime_error("At most three distinct periodic maps are supported.");
+            result.rotation = r;
+            result.rotation.direction = static_cast<int>(dir);
+            result.translations.push_back({});
+            dirs.push_back(dir);
+            continue;
         }
+        if (length == 0.0_r) throw std::runtime_error(name + " has no translation.");
         size_t dir = 0;
         for (; dir < result.translations.size(); dir++) {
+            if (static_cast<int>(dir) == result.rotation.direction) continue;
             rtype diff = 0.0;
             FOR_I_DIM diff = std::max(diff, std::abs(result.translations[dir][i] - pair.translation[i]));
             if (diff <= 1e-12_r * length) break;
         }
         if (dir == result.translations.size()) {
-            if (dir == 3) throw std::runtime_error("At most three distinct periodic translations are supported.");
+            if (dir == 3) throw std::runtime_error("At most three distinct periodic maps are supported.");
             result.translations.push_back(pair.translation);
         }
         dirs.push_back(dir);
+    }
+    if (result.rotation.direction >= 0) {
+        // Translations commute with the rotation only along its axis (none in 2D)
+        for (size_t j = 0; j < result.translations.size(); j++) {
+            if (static_cast<int>(j) == result.rotation.direction) continue;
+            const auto & T = result.translations[j];
+            double t2 = 0.0, along = 0.0;
+            FOR_I_DIM {
+                t2 += double(T[i]) * double(T[i]);
+                along += double(T[i]) * result.rotation.axis[i];
+            }
+            if (N_DIM == 2 || t2 - along * along > 1e-20 * t2) {
+                throw std::runtime_error(std::string("A periodic translation must be along the axis of the periodic "
+                                                     "rotation") + (N_DIM == 2 ? " (in 2D, a rotation admits none)." : "."));
+            }
+        }
     }
     return dirs;
 }
@@ -188,15 +316,14 @@ PeriodicNodes match_periodic_nodes(const std::vector<std::array<rtype, N_DIM>> &
         Lattice rel = {0, 0, 0};
         rel[dirs[p]] = 1;
         for (uint32_t a : nodes_a) {
-            std::array<rtype, N_DIM> y;
-            FOR_I_DIM y[i] = nodes[a][i] + pair.translation[i];
+            const std::array<rtype, N_DIM> y = periodic_image(pair, nodes[a]);
             uint32_t match = 0;
             const uint32_t n_found = grid.find(y, match);
             if (n_found != 1) {
                 throw std::runtime_error("Periodic zones " + pair.zone_a + " and " + pair.zone_b + ": node " +
                                          periodic_point_string(nodes[a]) + " of " + pair.zone_a + " has " +
                                          (n_found ? "several matches" : "no match") + " in " + pair.zone_b +
-                                         " after the translation " + periodic_point_string(pair.translation) + ".");
+                                         " after " + periodic_map_string(pair) + ".");
             }
             if (matched[match]) {
                 throw std::runtime_error("Periodic zones " + pair.zone_a + " and " + pair.zone_b + ": node " +

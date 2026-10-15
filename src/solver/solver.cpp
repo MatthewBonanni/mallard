@@ -292,6 +292,9 @@ void Solver::init_mesh() {
             throw InputError("physics.axisymmetric: curved boundaries are not supported in axisymmetric runs yet "
                              "(set [mesh] curved_geometry = false).");
         }
+        if (mesh->is_rotational()) {
+            throw InputError("physics.axisymmetric: rotational periodicity is not supported in axisymmetric runs.");
+        }
         for (const auto & translation : mesh->periodic_translations) {
             if (translation[1] != 0.0_r) {
                 throw InputError("physics.axisymmetric: the mesh cannot be periodic in y (the radius).");
@@ -1705,6 +1708,8 @@ struct TimeStepFunctor {
     Kokkos::View<rtype *[N_DIM]> radius_coords;  // axisymmetric runs: cell_coords, else empty
     Kokkos::View<rtype *[3]> sgs;                // LES: (cell, [mu_t, ...]), else empty
     rtype Pr_t = 1.0_r;
+    PeriodicMaps periodic;
+    Kokkos::View<uint8_t *> face_shift;
 
     KOKKOS_INLINE_FUNCTION
     rtype wave_speed(const int32_t i_cell, const rtype * n) const {
@@ -1728,7 +1733,11 @@ struct TimeStepFunctor {
             const int32_t c0 = cells_of_face(i_face, 0);
             const int32_t c1 = cells_of_face(i_face, 1);
             rtype lambda = wave_speed(c0, n);
-            if (c1 >= 0) lambda = Kokkos::fmax(lambda, wave_speed(c1, n));
+            if (c1 >= 0) {
+                // The normal in cell 1's frame
+                if (periodic.rotated()) periodic.unrotate(face_shift(i_face), n);
+                lambda = Kokkos::fmax(lambda, wave_speed(c1, n));
+            }
             sum += lambda * face_area(i_face);
             sum_area2 += face_area(i_face) * face_area(i_face);
         }
@@ -1770,7 +1779,9 @@ rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
                             physics,
                             axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(),
                             les_coefficients,
-                            les.Pr_t};
+                            les.Pr_t,
+                            mesh->periodic_maps(),
+                            mesh->face_shift};
     if (les_on) {
         eddy_viscosity_of_state(mesh->n_owned());
         if (les.dynamic) {

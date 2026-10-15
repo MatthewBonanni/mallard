@@ -134,6 +134,15 @@ class FaceReconstruction {
                                              Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution);
 
         /**
+         * @brief Turn the velocity of the cell 1 sides of faces across
+         *        rotational periodic boundaries, which the schemes reconstruct
+         *        in cell 1's frame, into the face's (its cell 0's) frame, so
+         *        that the flux sees both sides in one frame. Call once the face
+         *        values are complete; nothing happens without rotational pairs.
+         */
+        void rotate_periodic_faces(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution);
+
+        /**
          * @brief Gradients of W = [rho, u, p] at the centroids of the first n_cells
          *        cells from the reconstruction polynomials, if the scheme has
          *        higher-order ones than least squares on face neighbors.
@@ -186,6 +195,8 @@ class FaceReconstruction {
         std::shared_ptr<Mesh> mesh;
         BoundaryData boundaries;
     private:
+        Kokkos::View<uint32_t *> rotated_faces;  // faces whose shift row rotates
+        bool rotated_faces_found = false;
 };
 
 class FirstOrder : public FaceReconstruction {
@@ -325,6 +336,11 @@ class TENO : public FaceReconstruction {
 
         // Per-cell precomputed data, for the reconstructed cells [0, n_reconstructed)
         Kokkos::View<rtype *> scale;                       // h = sqrt(V)
+        // Rotational periodicity: (turns + teno::TURN_BIAS, i, j) the rotation
+        // by turns times the periodic angle, and the boundary faces in
+        // increasing order, by boundary ordinal (empty otherwise)
+        Kokkos::View<rtype *[N_DIM][N_DIM]> entry_rotations;
+        Kokkos::View<int32_t *> boundary_faces;
         Kokkos::View<rtype **> basis_mean;                 // (cell, l): mean of phi_l over the cell
         Kokkos::View<uint16_t *> stencil_large_size;       // (cell)
         teno::PackedStencils stencil_large;                // pseudo-inverse width: nk

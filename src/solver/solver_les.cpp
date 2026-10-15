@@ -101,6 +101,8 @@ struct KineticEnergyRateFunctor {
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
+    PeriodicMaps periodic;
+    Kokkos::View<uint8_t *> face_shift;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c, rtype & sum) const {
@@ -108,7 +110,11 @@ struct KineticEnergyRateFunctor {
         for (uint32_t k = offsets_faces_of_cell(c); k < offsets_faces_of_cell(c + 1); k++) {
             const uint32_t f = faces_of_cell(k);
             const rtype sign = (cells_of_face(f, 0) == static_cast<int32_t>(c)) ? 1.0_r : -1.0_r;
-            for (uint8_t i = 0; i <= N_DIM; i++) R[i] += sign * face_flux(f, i);
+            rtype F[N_DIM + 1];
+            for (uint8_t i = 0; i <= N_DIM; i++) F[i] = face_flux(f, i);
+            // The flux is in the face's (cell 0's) frame
+            if (sign < 0.0_r && periodic.rotated()) periodic.unrotate(face_shift(f), F + 1);
+            for (uint8_t i = 0; i <= N_DIM; i++) R[i] += sign * F[i];
         }
         rtype u2 = 0.0_r, work = 0.0_r;
         FOR_I_DIM {
@@ -130,6 +136,8 @@ struct PressureWorkFunctor {
     Kokkos::View<rtype *[N_DIM]> face_normals;
     Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
+    PeriodicMaps periodic;
+    Kokkos::View<uint8_t *> face_shift;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c, rtype & sum) const {
@@ -145,8 +153,12 @@ struct PressureWorkFunctor {
                 FOR_I_DIM work += W(c, 1 + i) * face_flux(f, 1 + i);
                 sum += sign * (work - 0.5_r * u2 * face_flux(f, 0));
             } else {
+                // The normal in cell c's frame
+                rtype n[N_DIM];
+                FOR_I_DIM n[i] = face_normals(f, i);
+                if (!owner && periodic.rotated()) periodic.unrotate(face_shift(f), n);
                 rtype u_n = 0.0_r;
-                FOR_I_DIM u_n += W(c, 1 + i) * face_normals(f, i);
+                FOR_I_DIM u_n += W(c, 1 + i) * n[i];
                 sum -= sign * 0.5_r * (W(c, N_DIM + 1) + W(other, N_DIM + 1)) * u_n;
             }
         }
@@ -182,12 +194,16 @@ struct VorticityGradientFunctor {
     void operator()(const uint32_t c) const {
         rtype q_c[3], g[3][N_DIM] = {};
         for (uint8_t v = 0; v < 3; v++) q_c[v] = vorticity(c, v);
+        const PeriodicMaps & periodic = stencil.faces.periodic;
         for (uint32_t k = stencil.offsets_cells_of_cell(c); k < stencil.offsets_cells_of_cell(c + 1); k++) {
             const uint32_t j = stencil.cells_of_cell(k);
             rtype w[N_DIM];
             FOR_I_DIM w[i] = stencil.weights.cells(k, i);
+            rtype q_j[3];
+            for (uint8_t v = 0; v < 3; v++) q_j[v] = vorticity(j, v);
+            if (periodic.rotated()) periodic.rotate(stencil.cells_of_cell_shift(k), q_j);
             for (uint8_t v = 0; v < 3; v++) {
-                const rtype dq = vorticity(j, v) - q_c[v];
+                const rtype dq = q_j[v] - q_c[v];
                 FOR_I_DIM g[v][i] += w[i] * dq;
             }
         }
@@ -211,7 +227,7 @@ struct ThickenedFlameFunctor {
     Kokkos::View<rtype *> face_area;
     Kokkos::View<rtype *> cell_volume;
     Kokkos::View<rtype *[N_DIM]> cell_coords;
-    Kokkos::View<rtype *[N_DIM]> shifts;
+    PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
     Kokkos::View<rtype *[3]> vorticity;
     Kokkos::View<rtype *[3][N_DIM]> gradients;
@@ -230,19 +246,35 @@ struct ThickenedFlameFunctor {
             const uint32_t f = faces_of_cell(k);
             const int32_t c0 = cells_of_face(f, 0), c1 = cells_of_face(f, 1);
             if (c1 < 0) continue;
-            rtype n[N_DIM], n_vec[N_DIM], d[N_DIM];
+            rtype n[N_DIM], n_vec[N_DIM], x1[N_DIM], d[N_DIM];
             FOR_I_DIM n_vec[i] = normals(f, i);
             unit<N_DIM>(n_vec, n);
-            FOR_I_DIM d[i] = (cell_coords(c1, i) + shifts(face_shift(f), i)) - cell_coords(c0, i);
+            const uint8_t s = face_shift(f);
+            FOR_I_DIM x1[i] = cell_coords(c1, i);
+            periodic.forward(s, x1, d);
+            FOR_I_DIM d[i] = d[i] - cell_coords(c0, i);
             const rtype d_n = dot<N_DIM>(d, n);
             const rtype sign = c0 == static_cast<int32_t>(c) ? 1.0_r : -1.0_r;
+            // Cell 1's vorticity and its gradient in the face's (cell 0's) frame
+            rtype q1[3], g1[3][N_DIM];
+            for (uint8_t v = 0; v < 3; v++) {
+                q1[v] = vorticity(c1, v);
+                FOR_I_DIM g1[v][i] = gradients(c1, v, i);
+            }
+            const bool rotated = periodic.rotated();
+            if (rotated) {
+                periodic.rotate(s, q1);
+                periodic.rotate_gradients(s, g1, 3, 0);
+            }
+            rtype g_n[3];
             for (uint8_t v = 0; v < 3; v++) {
                 rtype g[N_DIM];
-                FOR_I_DIM g[i] = 0.5_r * (gradients(c0, v, i) + gradients(c1, v, i));
-                const rtype dq = vorticity(c1, v) - vorticity(c0, v);
-                const rtype g_n = dot<N_DIM>(g, n) + (dq - dot<N_DIM>(g, d)) / d_n;
-                lap[v] += static_cast<double>(sign * face_area(f) * g_n);
+                FOR_I_DIM g[i] = 0.5_r * (gradients(c0, v, i) + g1[v][i]);
+                const rtype dq = q1[v] - vorticity(c0, v);
+                g_n[v] = dot<N_DIM>(g, n) + (dq - dot<N_DIM>(g, d)) / d_n;
             }
+            if (rotated && sign < 0.0_r) periodic.unrotate(s, g_n);
+            for (uint8_t v = 0; v < 3; v++) lap[v] += static_cast<double>(sign * face_area(f) * g_n[v]);
         }
         const double V = static_cast<double>(cell_volume(c)), D = static_cast<double>(delta(c));
         const double lap_norm = Kokkos::sqrt(lap[0] * lap[0] + lap[1] * lap[1] + lap[2] * lap[2]) / V;
@@ -343,7 +375,7 @@ struct DynamicProcedureFunctor {
     Kokkos::View<uint32_t *> offsets;
     Kokkos::View<uint32_t *> neighbors;
     Kokkos::View<uint8_t *> neighbor_shift;
-    Kokkos::View<rtype *[N_DIM]> shifts;
+    PeriodicMaps periodic;
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<rtype *> volume;
     Kokkos::View<rtype *> delta;
@@ -358,8 +390,38 @@ struct DynamicProcedureFunctor {
     KOKKOS_INLINE_FUNCTION
     double relative(const uint32_t c, const uint32_t k, const uint32_t end, const uint8_t i) const {
         if (k == end) return 0.0;
+        if (periodic.rotated()) {
+            rtype x[N_DIM], y[N_DIM];
+            for (uint8_t d = 0; d < N_DIM; d++) x[d] = cell_coords(neighbors(k), d);
+            periodic.forward(neighbor_shift(k), x, y);
+            return static_cast<double>(y[i] - cell_coords(c, i));
+        }
         return static_cast<double>(cell_coords(neighbors(k), i) - cell_coords(c, i)) +
-               static_cast<double>(shifts(neighbor_shift(k), i));
+               static_cast<double>(periodic.shifts(neighbor_shift(k), i));
+    }
+
+    /** @brief A = Q A Q^T for the 3 x 3 tensor A, Q the rotation of shift row s in its first N_DIM rows and columns. */
+    KOKKOS_INLINE_FUNCTION
+    void turn(const uint8_t s, double A[3][3]) const {
+        double B[3][3];
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                double sum = 0.0;
+                for (int a = 0; a < 3; a++) {
+                    for (int b = 0; b < 3; b++) sum += Q(s, i, a) * A[a][b] * Q(s, j, b);
+                }
+                B[i][j] = sum;
+            }
+        }
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) A[i][j] = B[i][j];
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    double Q(const uint8_t s, const int i, const int j) const {
+        if (i < N_DIM && j < N_DIM) return static_cast<double>(periodic.rotations(s, i, j));
+        return i == j ? 1.0 : 0.0;
     }
 
     KOKKOS_INLINE_FUNCTION
@@ -396,13 +458,23 @@ struct DynamicProcedureFunctor {
             packed_gradient(gradients, n, gn);
             FOR_I_DIM {
                 u[i] = static_cast<double>(flow(n, 1 + i));
-                dx[i] = static_cast<double>(cell_coords(n, i) - cell_coords(c, i)) +
-                        (k < end ? static_cast<double>(shifts(neighbor_shift(k), i)) : 0.0);
+                dx[i] = relative(c, k, end, i);
             }
             const double r = static_cast<double>(flow(n, 0));
-            const double q[3][3] = {{model_stresses(n, 0), model_stresses(n, 3), model_stresses(n, 4)},
-                                    {model_stresses(n, 3), model_stresses(n, 1), model_stresses(n, 5)},
-                                    {model_stresses(n, 4), model_stresses(n, 5), model_stresses(n, 2)}};
+            double q[3][3] = {{model_stresses(n, 0), model_stresses(n, 3), model_stresses(n, 4)},
+                              {model_stresses(n, 3), model_stresses(n, 1), model_stresses(n, 5)},
+                              {model_stresses(n, 4), model_stresses(n, 5), model_stresses(n, 2)}};
+            if (k < end && periodic.rotated()) {
+                // The neighbor's velocity and tensors in cell c's frame
+                const uint8_t s = neighbor_shift(k);
+                double v[3] = {u[0], u[1], u[2]};
+                for (int i = 0; i < 3; i++) {
+                    u[i] = 0.0;
+                    for (int j = 0; j < 3; j++) u[i] += Q(s, i, j) * v[j];
+                }
+                turn(s, gn);
+                turn(s, q);
+            }
             w_sum += w;
             rho += w * r;
             for (int i = 0; i < 3; i++) {
@@ -562,7 +634,8 @@ void Solver::update_thickened_flame() {
     Kokkos::parallel_for("tfles_fields", mesh->n_owned(),
                          ThickenedFlameFunctor{thickened_flame, mesh->offsets_faces_of_cell, mesh->faces_of_cell,
                                                mesh->cells_of_face, mesh->face_normals, mesh->face_area,
-                                               mesh->cell_volume, mesh->cell_coords, mesh->shifts, mesh->face_shift,
+                                               mesh->cell_volume, mesh->cell_coords, mesh->periodic_maps(),
+                                               mesh->face_shift,
                                                tfles_vorticity, tfles_gradients, W_cells, transport_values,
                                                cell_transport, les_delta, tfles_fields, chem_time_scale,
                                                les_coefficients});
@@ -618,7 +691,7 @@ void Solver::update_dynamic_constant() {
                          DynamicModelStressFunctor{les.model, flow, g, les_width, dynamic_stresses});
     Kokkos::parallel_for("dynamic_terms", n_owned,
                          DynamicProcedureFunctor{les.model, mesh->offsets_cells_of_cell, mesh->cells_of_cell,
-                                                 mesh->cells_of_cell_shift, mesh->shifts, mesh->cell_coords,
+                                                 mesh->cells_of_cell_shift, mesh->periodic_maps(), mesh->cell_coords,
                                                  mesh->cell_volume, les_width, flow, g, dynamic_stresses,
                                                  dynamic_terms});
     const auto [lm, mm] = exact_sums(dynamic_terms, n_owned, is_distributed());
@@ -748,7 +821,8 @@ rtype Solver::kinetic_energy_rate() const {
     rtype sum = 0.0_r;
     Kokkos::parallel_reduce("kinetic_energy_rate", mesh->n_owned(),
                             KineticEnergyRateFunctor{mesh->offsets_faces_of_cell, mesh->faces_of_cell,
-                                                     mesh->cells_of_face, face_flux, W_cells},
+                                                     mesh->cells_of_face, face_flux, W_cells, mesh->periodic_maps(),
+                                                     mesh->face_shift},
                             sum);
     return sum;
 }
@@ -757,7 +831,8 @@ rtype Solver::pressure_work_rate() const {
     rtype sum = 0.0_r;
     Kokkos::parallel_reduce("pressure_work_rate", mesh->n_owned(),
                             PressureWorkFunctor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
-                                                mesh->face_normals, face_flux, W_cells},
+                                                mesh->face_normals, face_flux, W_cells, mesh->periodic_maps(),
+                                                mesh->face_shift},
                             sum);
     return sum;
 }

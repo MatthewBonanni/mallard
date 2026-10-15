@@ -1,6 +1,7 @@
 # Design: periodic boundaries
 
-Status: implemented for generated meshes and mesh files, serial and distributed. Motivated by the canonical Taylor-Green vortex (the full
+Status: implemented for generated meshes and mesh files, serial and distributed,
+for translations and rotations. Motivated by the canonical Taylor-Green vortex (the full
 box `[-pi L, pi L]^3`) and decaying isotropic turbulence, which need fully
 periodic boxes, and by 2D cases (isentropic vortex, Kelvin-Helmholtz).
 
@@ -132,6 +133,69 @@ cell-to-face distance for the hydrostatic ghost pressure.
   (generated meshes periodic in one to three directions, Gmsh meshes with
   jittered seams), with each rank holding only the classes of its block's
   nodes; mismatched zones rejected on every rank.
+
+## Rotational periodicity
+
+Motivated by sectors of annular combustors and turbomachinery rows: a pair
+`(A, B, R)` says that zone `B` is zone `A` rotated by `R`, an angle about an
+axis (2D: about a point).
+
+![A sector and its rotational periodic pair](../images/rotational_periodicity_light.png#only-light)
+![A sector and its rotational periodic pair](../images/rotational_periodicity_dark.png#only-dark)
+
+- **Lattice.** A rotation is one more lattice direction. Its map, and the
+  translations, are rigid maps `x -> Q x + t` that commute (at most one
+  distinct rotation; 3D translations only along its axis), so a lattice
+  offset `L` still names one map, `M(L)`: `L_r` turns about the axis, then
+  the translations. The union-find, node keys, the distributed matching and
+  every search over `(cell, lattice offset)` pairs are unchanged; only the
+  map applied to a point differs (`periodic_lattice_map`).
+- **Shift rows.** Each row of `shifts` gets a rotation `Q` (`shift_rotations`,
+  allocated only on rotational meshes). Kernels go through `PeriodicMaps`:
+  a neighbor's point is `Q x + t` (`forward`), a face point seen from its
+  cell 1 is `Q^T (x - t)` (`backward`). Without rotational pairs `forward`
+  computes `x + t` and `backward` `x - t`, the expressions they replace, so
+  translation-only meshes stay bitwise unchanged and add one uniform branch.
+- **States.** Cells keep their states in their own frame, halo cells
+  included: the halo exchange copies states as before, and the rotation is
+  applied where a cell reads a neighbor across the seam.
+
+  | Where | Rotation |
+  |---|---|
+  | Face and vertex LSQ gradients, limiter extrema | neighbor velocity by `Q` (`Q^T` from cell 1) |
+  | Face states | each side is reconstructed in its own cell's frame; one pass turns side 1 of the rotated faces into the face's (cell 0's) frame, so every flux sees one frame |
+  | Flux sums | the momentum flux of a face into its cell 1 turns by `Q^T` (also double flux and the kinetic-energy budget) |
+  | Viscous fluxes | cell 1's velocity by `Q`, its gradients by `Q G Q^T` (velocity) and `Q g` (temperature, species) |
+  | TENO | below |
+  | LES | the dynamic procedure's neighbor velocity and tensors (`Q A Q^T`), TFLES vorticity and its gradient |
+  | Time step | the face normal in cell 1's frame |
+
+- **TENO.** A stencil entry is a cell of the stencil search at a lattice
+  offset. The setup (host 2D, CellSetup in 3D) maps node coordinates,
+  centroids, mirror planes and point-in-cell tests through `M(L)`, and turns
+  the cells' central moments by `Q` (`mapped_moments`), so the
+  pseudo-inverses are those of the full annulus. The device must also turn
+  the entry's velocity: entries that turn keep their mirror face in the face
+  field's negative range (`teno::entry_code`), with the turns of the entry
+  and, for a mirror image, the turns of the cell relative to its mirror face,
+  whose ghost state is taken in the face's frame. Entries that do not turn
+  keep `-1` or the face, so translation-only tables, and the cache file, are
+  unchanged; the cache key adds `shift_rotations`. The GPU-resident team
+  setup hands any cell whose search reaches a turned copy to CellSetup on the
+  host (the path it already takes for cells that outgrow their scratch), so
+  only cells within reach of the seam leave the device. The characteristic
+  projection averages the neighbor's state turned into the cell's frame.
+- **Not across rotations.** Transmissive boundary images and the transverse
+  terms of characteristic boundaries are not taken across a rotation (the
+  boundary's edge is treated as one-sided there); gravity under a mirror
+  image of a cell turned relative to its face uses the unmapped cell-to-face
+  distance, as for translations.
+
+Tests: matching through the rotation (and within the tolerance only), exact
+LSQ gradients of a linear swirl in cells whose neighbors cross the seam, mass
+and energy conservation on a sector, and the full annulus against four copies
+of its sector (MUSCL and TENO3/5, Euler and Navier-Stokes, 2D and 3D) to
+rounding (6e-15), serial and on 1-4 ranks with each partitioner.
 
 ## Pull requests
 

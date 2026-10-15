@@ -89,7 +89,7 @@ struct LSQGradientFunctor {
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<rtype *[N_DIM]> face_coords;
     Kokkos::View<rtype *[N_DIM]> face_normals;
-    Kokkos::View<rtype *[N_DIM]> shifts;
+    PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
     BoundaryData boundaries;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
@@ -116,15 +116,20 @@ struct LSQGradientFunctor {
         const int32_t c0 = cells_of_face(i_face, 0);
         const int32_t c1 = cells_of_face(i_face, 1);
         if (c1 >= 0) {
-            // Across a periodic face, cell 1 sits at its centroid plus the shift
+            // Across a periodic face, cell 1 seen from cell 0 is its periodic image
             const uint8_t s = face_shift(i_face);
-            if (c0 == static_cast<int32_t>(i_cell)) {
-                FOR_I_DIM dx[i] = (cell_coords(c1, i) + shifts(s, i)) - cell_coords(i_cell, i);
+            const bool from_0 = c0 == static_cast<int32_t>(i_cell);
+            const int32_t j = from_0 ? c1 : c0;
+            rtype x_j[N_DIM], y[N_DIM];
+            FOR_I_DIM x_j[i] = cell_coords(j, i);
+            if (from_0) {
+                periodic.forward(s, x_j, y);
             } else {
-                FOR_I_DIM dx[i] = (cell_coords(c0, i) - shifts(s, i)) - cell_coords(i_cell, i);
+                periodic.backward(s, x_j, y);
             }
-            const int32_t j = (c0 == static_cast<int32_t>(i_cell)) ? c1 : c0;
+            FOR_I_DIM dx[i] = y[i] - cell_coords(i_cell, i);
             FOR_I_CONSERVATIVE W_j[i] = W(j, i);
+            if (periodic.rotated()) periodic.rotate_state(s, W_j, !from_0);
         } else {
             rtype n[N_DIM];
             rtype n_vec[N_DIM];
@@ -251,9 +256,10 @@ struct LSQVertexGradientFunctor {
     KOKKOS_INLINE_FUNCTION
     void for_each_point(const uint32_t i_cell, F && f) const {
         for (uint32_t k = offsets_cells_of_cell(i_cell); k < offsets_cells_of_cell(i_cell + 1); k++) {
-            rtype dx[N_DIM];
-            const uint8_t s = cells_of_cell_shift(k);
-            FOR_I_DIM dx[i] = (faces.cell_coords(cells_of_cell(k), i) + faces.shifts(s, i)) - faces.cell_coords(i_cell, i);
+            rtype x[N_DIM], dx[N_DIM];
+            FOR_I_DIM x[i] = faces.cell_coords(cells_of_cell(k), i);
+            faces.periodic.forward(cells_of_cell_shift(k), x, dx);
+            FOR_I_DIM dx[i] = dx[i] - faces.cell_coords(i_cell, i);
             f(dx, false, k);
         }
         // The ghost positions do not depend on the states
@@ -365,10 +371,14 @@ struct LSQVertexGradientFunctor {
         rtype W_i[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE W_i[i] = faces.W(i_cell, i);
         rtype g[N_CONSERVATIVE][N_DIM] = {};
+        const bool rotated = faces.periodic.rotated();
         for (uint32_t k = offsets_cells_of_cell(i_cell); k < offsets_cells_of_cell(i_cell + 1); k++) {
             const uint32_t j = cells_of_cell(k);
+            rtype W_j[N_CONSERVATIVE];
+            FOR_I_CONSERVATIVE W_j[i] = faces.W(j, i);
+            if (rotated) faces.periodic.rotate_state(cells_of_cell_shift(k), W_j);
             FOR_I_CONSERVATIVE {
-                const rtype dW = faces.W(j, i) - W_i[i];
+                const rtype dW = W_j[i] - W_i[i];
                 for (uint8_t d = 0; d < N_DIM; d++) g[i][d] += weights.cells(k, d) * dW;
             }
         }
@@ -393,7 +403,7 @@ inline LSQGradientFunctor make_gradient(const Mesh & mesh, const BoundaryData & 
                                         Kokkos::View<rtype *[N_CONSERVATIVE]> W,
                                         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients) {
     return LSQGradientFunctor{mesh.offsets_faces_of_cell, mesh.faces_of_cell, mesh.cells_of_face, mesh.cell_coords,
-                              mesh.face_coords, mesh.face_normals, mesh.shifts, mesh.face_shift,
+                              mesh.face_coords, mesh.face_normals, mesh.periodic_maps(), mesh.face_shift,
                               boundaries, W, gradients};
 }
 

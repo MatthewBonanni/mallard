@@ -125,6 +125,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
         Kokkos::parallel_for("rhs_W", mesh->n_cells, w_functor);
         face_reconstruction->calc_face_values(W_cells, face_solution);
     }
+    face_reconstruction->rotate_periodic_faces(face_solution);
 
     if (!budget_pass) update_characteristic_boundaries(t_stage);
     if (hybrid_flux) update_upwind_sensor();
@@ -155,7 +156,8 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
         if (!hybrid_flux) Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, mesh->n_cells), viscous_gradient);
         if (les_on) update_eddy_viscosity(mesh->n_cells);
         viscous_functor = ViscousFluxFunctor{mesh->face_normals, mesh->face_measure, mesh->face_coords,
-                                             mesh->cell_coords, mesh->cells_of_face, mesh->shifts, mesh->face_shift,
+                                             mesh->cell_coords, mesh->cells_of_face, mesh->periodic_maps(),
+                                             mesh->face_shift,
                                              W_cells,
                                              viscous_gradients, boundary_data, face_flux, physics, axisymmetric,
                                              mesh->cell_covariance, les_coefficients};
@@ -164,7 +166,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
     }
 
     FaceFluxSumFunctor sum_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
-                                   face_flux, rhs};
+                                   face_flux, rhs, mesh->periodic_maps(), mesh->face_shift};
     Kokkos::parallel_for("face_flux_sum", n_owned, sum_functor);
 
     if (axisymmetric) {

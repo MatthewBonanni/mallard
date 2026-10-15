@@ -17,8 +17,8 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 
 **Meshes**
 - 2D (triangles, quadrilaterals) or 3D (tetrahedra, hexahedra, prisms, pyramids, mixed), chosen at build time
-- Gmsh 2.2/4.1 or HDF5 mesh files (`mallard-mesh-convert`), or generated boxes
-- Periodic boundaries: generated meshes, or paired zones of mesh files
+- Gmsh 2.2/4.1 or HDF5 mesh files (`mallard-mesh-convert`), or generated boxes and annuli
+- Periodic boundaries, translational or rotational (annular sectors: vectors turn across the seam): generated meshes, or paired zones of mesh files ([design](docs/design/periodic.md))
 - Axisymmetric (r-z) flows in 2D: revolved finite volumes, at design order up to the axis
 - Curved high-order boundaries: Gmsh order-2/3 boundary elements or projection onto a circle, sphere or cylinder; TENO-E orders 3-6 converge at curved walls, where straight-sided faces do not ([design](docs/design/curved_boundaries.md))
 
