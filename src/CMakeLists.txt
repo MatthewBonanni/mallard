@@ -14,6 +14,7 @@ add_library(MallardCore STATIC
     mesh/zone.cpp
     boundary/boundary.cpp
     boundary/synthetic_inflow.cpp
+    boundary/wall_exchange.cpp
     chemistry/mechanism.cpp
     chemistry/transport.cpp
     chemistry/units.cpp
@@ -37,6 +38,7 @@ add_library(MallardCore STATIC
     solver/solver_initialize.cpp
     solver/solver_mixture.cpp
     solver/solver_les.cpp
+    solver/solver_wall_model.cpp
     solver/solver_rhs.cpp
     solver/solver_radiation.cpp
     solver/solver_sponge.cpp

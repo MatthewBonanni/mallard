@@ -108,6 +108,7 @@ struct BoundaryCondition {
     BoundaryType type = BoundaryType::EXTRAPOLATION;
     rtype data[N_DIM + 2] = {};
     rtype relax[N_RELAX] = {};
+    bool modeled = false;  // walls: a wall model gives the viscous flux, and the ghost is a slip wall's
 
     KOKKOS_INLINE_FUNCTION
     bool is_wall() const {
@@ -155,7 +156,7 @@ struct BoundaryCondition {
             case BoundaryType::WALL_ADIABATIC:
             case BoundaryType::WALL_ISOTHERMAL:
             case BoundaryType::WALL_HEAT_FLUX:
-                if (viscous) {
+                if (viscous && !modeled) {
                     FOR_I_DIM W_g[1 + i] = 2.0_r * data[1 + i] - W_i[1 + i];
                     if (type == BoundaryType::WALL_ISOTHERMAL) {
                         const rtype T_i = W_i[E] / (W_i[0] * R);

@@ -154,11 +154,13 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
     if (physics.is_viscous()) {
         if (!hybrid_flux) Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, mesh->n_cells), viscous_gradient);
         if (les_on) update_eddy_viscosity(mesh->n_cells);
+        if (wall_model_on) update_wall_model();
         viscous_functor = ViscousFluxFunctor{mesh->face_normals, mesh->face_measure, mesh->face_coords,
                                              mesh->cell_coords, mesh->cells_of_face, mesh->shifts, mesh->face_shift,
                                              W_cells,
                                              viscous_gradients, boundary_data, face_flux, physics, axisymmetric,
                                              mesh->cell_covariance, les_coefficients};
+        viscous_functor.wall_model = wall_model.out;
         parallel_for_faces("viscous_flux", viscous_functor, rhs_faces, mesh->n_faces);
         if (budget_pass) budget.viscous = kinetic_energy_rate() - budget.convective;
     }

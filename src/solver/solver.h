@@ -38,6 +38,7 @@
 #include "data_writer.h"
 #include "statistics.h"
 #include "synthetic_inflow.h"
+#include "wall_exchange.h"
 #include "expression.h"
 #include "comm.h"
 #include "distributed_mesh.h"
@@ -51,6 +52,7 @@ struct ForceMonitor {
     Kokkos::View<uint32_t *> faces;
     uint64_t interval = 1;
     std::shared_ptr<std::ofstream> out;
+    bool modeled = false;  // the zone has modeled walls: a column Q, their heat flux into the fluid
 };
 
 constexpr int N_FLOW_STATISTICS = 9;
@@ -149,9 +151,10 @@ class Solver {
 
         /**
          * @brief Force exerted by the fluid on a boundary zone: pressure part
-         *        [Fx, Fy] and viscous part [Fx, Fy].
+         *        [Fx, Fy] and viscous part [Fx, Fy] (the modeled stress on
+         *        modeled walls), then the modeled heat flux into the fluid.
          */
-        std::array<rtype, 2 * N_DIM> calc_force(const Kokkos::View<uint32_t *> & faces);
+        std::array<rtype, 2 * N_DIM + 1> calc_force(const Kokkos::View<uint32_t *> & faces);
 
         /**
          * @brief Sum of each conservative variable integrated over the domain.
@@ -258,6 +261,7 @@ class Solver {
          *        time-step diffusivity NU_EFF also grows).
          */
         void update_eddy_viscosity(uint32_t n);
+        void update_wall_model();  // the modeled walls' flux from W_cells and viscous_gradients
         /** @brief LES: the eddy viscosity of the current state for the time step (owned cells) or output (all). */
         void eddy_viscosity_of_state(uint32_t n);
         /**
@@ -436,6 +440,8 @@ class Solver {
         void init_rhs_split();
         void init_axisymmetric_weights();
         void init_les();
+        /** @brief Exchange points of the modeled walls (after the boundary data). */
+        void init_wall_model(const std::vector<int32_t> & face_bc, const std::vector<BoundaryCondition> & bcs);
         /** @brief Hybrid flux: the upwind fraction of every cell from the gradients of W_cells. */
         void update_upwind_sensor();
         /** @brief sum over owned cells of u . R_m - |u|^2 / 2 R_rho for R the sum of face_flux over the cell's faces. */
@@ -570,6 +576,11 @@ class Solver {
         Kokkos::View<double *[6]> dynamic_stresses;    // (cell, rho Delta^2 D(g) S^d)
         double dynamic_ratio = 0.0;
         KineticEnergyBudget budget;
+
+        // Wall-modeled LES (docs/design/wall_model.md)
+        bool wall_model_on = false;
+        std::vector<WallModelSpec> wall_model_specs;  // by boundary condition (default for unmodeled ones)
+        WallModelData wall_model;
 
         // Gas mixtures
         ScalarView cell_scalars;                              // (cell, [Y_1 .. Y_Ns, gamma, e0])
