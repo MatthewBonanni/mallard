@@ -386,6 +386,13 @@ class Solver {
         void init_solution_constant();
         void init_solution_analytical();
         void init_solution_restart();
+        /** @brief Remaps a restart file of another mesh ([initialize] type = "remap"). */
+        void init_solution_remap();
+        /**
+         * @brief Takes the state, time and statistics of a restart file's data
+         *        for the local cells; resume_output continues the output series.
+         */
+        void apply_restart(const RestartData & restart, const std::string & file, bool resume_output);
         void update_boundary_states(rtype t_eval);
         void init_inlets(const std::vector<toml::value> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);

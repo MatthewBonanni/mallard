@@ -194,3 +194,29 @@ TEST(MPI3DTest, CurvedWallsMatchSerial) {
     }
     comm::barrier();
 }
+
+TEST(MPI3DTest, RemapDoesNotDependOnTheRankCount) {
+    // A prism run's restart file remapped to tetrahedra of another size
+    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mpi3d_remap").string();
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    std::string coarse = box_input("cartesian_prism", "type = \"MUSCL\"\n", "type = \"euler\"\n");
+    coarse.replace(coarse.find("n_steps = 8"), 11, "n_steps = 4");
+    {
+        Solver solver;
+        solver.init(parse_toml(coarse + "[[write_data]]\nprefix = \"" + dir +
+                               "/c\"\nformat = \"restart\"\ninterval = 4\n"));
+        solver.run();
+    }
+    comm::barrier();
+    std::string input = box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"euler\"\n");
+    input.replace(input.find("Nx = 6\nNy = 4\nNz = 3"), 20, "Nx = 5\nNy = 5\nNz = 4");
+    input.replace(input.find("n_steps = 8"), 11, "n_steps = 2");
+    const size_t at = input.find("[initialize]\n");
+    const size_t end = input.find("[[boundaries]]", at);
+    input.replace(at, end - at,
+                  "[initialize]\ntype = \"remap\"\nfile = \"" + dir + "/c_000004.restart\"\ndegree = 3\n"
+                  "[initialize.mesh]\ntype = \"cartesian_prism\"\nNx = 6\nNy = 4\nNz = 3\nLx = 1.0\nLy = 0.8\nLz = 0.6\n");
+    expect_matches_serial(input);
+    comm::barrier();
+}
