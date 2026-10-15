@@ -132,7 +132,7 @@ TEST(RemapTest, IntegralsAreConservedToRounding) {
         const auto target = serial_mesh(mesh_table(TARGET_TYPE, N_DIM == 2 ? 23 : 6));
         const auto out = remap_fields(mesh_table(N_DIM == 2 ? "cartesian" : "cartesian_prism", N_DIM == 2 ? 16 : 5),
                                       {step}, *target, options, report);
-        EXPECT_NEAR(report.target_total[0], report.source_total[0], 1e-14 * std::abs(report.source_total[0]));
+        EXPECT_NEAR(report.target_total[0], report.source_total[0], 1e-14 * report.source_magnitude[0]);
         EXPECT_EQ(report.n_partial + report.n_nearest, 0u);
         if (!limit) continue;
         // Bounded by the source averages
@@ -171,7 +171,7 @@ TEST(RemapTest, SmoothPeriodicFieldsConvergeAtTheDegreePlusOne) {
     const std::string periodic = N_DIM == 2 ? "periodic = [\"x\", \"y\"]\n" : "periodic = [\"x\", \"y\", \"z\"]\n";
     const auto target = serial_mesh(mesh_table(TARGET_TYPE, N_DIM == 2 ? 37 : 7));
     const auto exact = averages(*target, target->n_cells, f);
-    for (uint8_t p : {uint8_t(1), uint8_t(2)}) {
+    for (uint8_t p = 1; p <= (N_DIM == 2 ? 3 : 2); p++) {
         double errors[2];
         for (uint32_t k = 0; k < 2; k++) {
             remap::Options options;

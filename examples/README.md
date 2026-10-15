@@ -14,6 +14,7 @@ python ../../tools/animate.py solut riemann
 | `shu_osher` | Mach 3 shock running into an entropy wave, the standard test for high-order schemes | 800 cells, seconds |
 | `riemann_2d` | 2D Riemann problem, configuration 3, on 320,000 triangles with TENO5 | ~20 minutes |
 | `riemann_2d_quads` | The same problem on 160,000 quadrilaterals | ~9 minutes on 6 threads |
+| `riemann_2d_quads` (`coarse.toml`, `remap.toml`) | The same problem started on 10,000 quadrilaterals and continued from t = 0.5 on 131,072 triangles: `[initialize] type = "remap"` integrates the coarse run's degree-3 polynomials exactly over the triangles, conservatively and without new extrema (docs/design/remap.md) | seconds, then minutes on a few threads |
 | `double_mach` | Double Mach reflection of a Mach 10 shock: a split bottom boundary (inflow, then wall) and an exact moving shock on the top boundary | 460,000 triangles, ~1 hour |
 | `explosion_3d` | Spherical explosion (3D build): one octant with symmetry planes, TENO5 on 64^3 hexahedra; the solution stays spherically symmetric | 262,144 cells, ~5 minutes on 8 threads |
 | `taylor_green_3d` | Taylor-Green vortex at Re = 1600 (3D build): the high-order workshop DNS case on the octant [0, pi]^3 with symmetry planes. At 64^3 per octant (128^3 full box) the dissipation peak is 0.01302 at t = 8.1, against 0.01286 at t = 9.0 for the 512^3 spectral DNS | 262,144 cells, 32,000 steps: ~1 hour on one A100 |

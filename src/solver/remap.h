@@ -47,6 +47,7 @@ struct Report {
     uint64_t n_reduced = 0;      // source cells whose stencils allowed only a lower degree
     uint64_t n_limited = 0;      // source cells whose polynomials the limiter scaled down
     std::vector<double> source_total, target_total;  // integral of each variable
+    std::vector<double> source_magnitude;            // integral of its magnitude
 };
 
 /** @brief Halo layers a source mesh needs for polynomials of this degree. */

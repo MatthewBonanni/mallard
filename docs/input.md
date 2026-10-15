@@ -288,7 +288,7 @@ filter widths and overcorrects on coarse meshes; not validated beyond this case.
 
 | Key | Description |
 |---|---|
-| `type` | `constant`, `analytical` or `restart` |
+| `type` | `constant`, `analytical`, `restart`, or `remap` (a restart file of another mesh) |
 | `u` | `constant`: `[u_x, u_y]`; `analytical`: one expression in `x`, `y`, `z` per component |
 | `rho`, `p`, `T` | `constant`: `p` and `T`; `analytical`: exactly two of the three, as expressions in `x`, `y`, `z` |
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
@@ -297,6 +297,42 @@ filter widths and overcorrects on coarse meshes; not validated beyond this case.
 | `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, 3 when they also hold the weights of `[statistics]` averages, or 4 when they also hold the state of characteristic boundary faces) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read |
 
 Expressions use [exprtk](https://www.partow.net/programming/exprtk/) syntax, e.g. `"x < 0.5 ? 1.0 : 0.125"`.
+
+### Remap from another mesh
+
+`type = "remap"` starts from a restart file written on a different mesh: another
+resolution, cell type, partition or rank count. Every variable of the file (flow,
+species, temperature seeds, `[statistics]` averages) is remapped conservatively
+and to high order, and the run continues from the file's step and time with
+fresh output series. See [docs/design/remap.md](design/remap.md).
+
+| Key | Description |
+|---|---|
+| `file` | Restart file of the source run |
+| `[initialize.mesh]` | The source run's `[mesh]` table (a generated mesh or a mesh file) |
+| `[[initialize.periodic]]` | The source mesh's periodic zone pairs, as `[[periodic]]` (default: the run's `[[periodic]]`) |
+| `degree` | Degree of the source cells' least-squares polynomials, 0 to 5 (default 2) |
+| `limiter` | `bounds` (default): each polynomial is scaled to stay within the averages of its cell and vertex neighbors, with one factor for the density and the species, so no new extrema and no negative partial densities appear; `none` keeps the full order, for smooth fields |
+
+```toml
+[initialize]
+type = "remap"
+file = "coarse/restart_002000.restart"
+degree = 3
+limiter = "none"
+
+[initialize.mesh]
+type = "cartesian"
+Nx = 32
+Ny = 32
+Nz = 32
+Lx = 3.141592653589793
+Ly = 3.141592653589793
+Lz = 3.141592653589793
+```
+
+The log reports the cells remapped, how closely the integrals of the variables
+were kept, and any target cells partly or wholly outside the source mesh.
 
 ## `[[boundaries]]`
 

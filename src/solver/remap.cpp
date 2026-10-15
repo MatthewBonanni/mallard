@@ -255,7 +255,7 @@ void Source::fit(uint32_t c, const std::vector<std::vector<double>> & values) {
         int first = rings;
         for (int r = 1; r <= rings; r++) {
             const auto count = std::count_if(all.begin(), all.end(), [&](const Member & x) { return x.ring <= r; });
-            if (size_t(count) >= 2 * size_t(n)) {
+            if (size_t(count) >= 3 * size_t(n) / 2) {
                 first = r;
                 break;
             }
@@ -443,7 +443,7 @@ std::vector<std::vector<double>> Source::to(const Mesh & target, uint32_t n, Rep
         for (int rank = 0; rank < n_ranks; rank++) {
             bool meets = false;
             for (size_t i = cover_start[size_t(rank)]; i < cover_start[size_t(rank) + 1] && !meets; i++) {
-                meets = cover_box(i).overlaps(box);
+                meets = cover_box(i).overlaps(box, true);
             }
             if (!meets) continue;
             auto & out = send[size_t(rank)];
@@ -480,7 +480,7 @@ std::vector<std::vector<double>> Source::to(const Mesh & target, uint32_t n, Rep
                              }
                              const overlap::Region target_region = overlap::region(nodes);
                              std::vector<uint32_t> candidates;
-                             tree.overlapping(box, candidates);
+                             tree.overlapping(box, candidates, true);
                              std::vector<Simplex> pieces;
                              std::vector<double> values(1 + n_vars);
                              for (uint32_t c : candidates) {
@@ -573,9 +573,13 @@ std::vector<std::vector<double>> Source::to(const Mesh & target, uint32_t n, Rep
     }
 
     // Integrals of each variable over the owned cells of both meshes
-    std::vector<double> totals(2 * size_t(n_vars) + 1, 0.0);
+    // and of their magnitudes, the scale of the rounding
+    std::vector<double> totals(3 * size_t(n_vars) + 1, 0.0);
     for (uint32_t c = 0; c < n_owned; c++) {
-        for (uint32_t v = 0; v < n_vars; v++) totals[v] += mean[size_t(c) * n_vars + v] * measure[c];
+        for (uint32_t v = 0; v < n_vars; v++) {
+            totals[v] += mean[size_t(c) * n_vars + v] * measure[c];
+            totals[2 * size_t(n_vars) + 1 + v] += std::abs(mean[size_t(c) * n_vars + v]) * measure[c];
+        }
     }
     for (uint32_t t = 0; t < n_counted; t++) {
         for (uint32_t v = 0; v < n_vars; v++) totals[n_vars + v] += out[v][t] * target_measure[t];
@@ -584,6 +588,7 @@ std::vector<std::vector<double>> Source::to(const Mesh & target, uint32_t n, Rep
     comm::allreduce(std::span<double>(totals), comm::Op::SUM);
     report.source_total.assign(totals.begin(), totals.begin() + n_vars);
     report.target_total.assign(totals.begin() + n_vars, totals.begin() + 2 * n_vars);
+    report.source_magnitude.assign(totals.begin() + 2 * n_vars + 1, totals.end());
     report.n_reduced = static_cast<uint64_t>(totals[2 * size_t(n_vars)]);
     report.n_source = comm::allreduce(uint64_t(n_owned), comm::Op::SUM);
     report.n_target = comm::allreduce(uint64_t(n_counted), comm::Op::SUM);
@@ -653,7 +658,7 @@ RestartData remap_restart(const toml::value & input, const Mesh & target, bool a
 std::string describe(const Report & report, const std::vector<std::string> & names) {
     double worst = 0.0;
     for (size_t v = 0; v < names.size() && v < report.source_total.size(); v++) {
-        const double scale = std::max(std::abs(report.source_total[v]), std::numeric_limits<double>::min());
+        const double scale = std::max(report.source_magnitude[v], std::numeric_limits<double>::min());
         worst = std::max(worst, std::abs(report.target_total[v] - report.source_total[v]) / scale);
     }
     std::string text = logging::count(report.n_source) + " -> " + logging::count(report.n_target) +

@@ -1,0 +1,78 @@
+# Coarse start of the 2D Riemann problem of input.toml for a finer mesh of
+# another cell type: 100 x 100 quadrilaterals up to t = 0.5, ending with the
+# restart file that remap.toml continues on 131,072 triangles.
+#
+#   ../../build/src/Mallard -i coarse.toml --kokkos-num-threads=8
+#   ../../build/src/Mallard -i remap.toml --kokkos-num-threads=8
+#   python ../../tools/plot_remap.py meshes coarse/riemann_000010.vtu remap/riemann_000000.vtu
+#   python ../../tools/plot_remap.py fields coarse/riemann_000010.vtu remap/riemann_000000.vtu
+
+[run]
+t_stop = 0.5
+cfl = 1.0
+
+[mesh]
+type = "cartesian"
+Nx = 100
+Ny = 100
+Lx = 1.0
+Ly = 1.0
+
+[initialize]
+type = "analytical"
+rho = """\
+    x >= 0.8 ? (y >= 0.8 ? 1.5 : 0.532258064516129) \
+             : (y >= 0.8 ? 0.532258064516129 : 0.137992831541219)"""
+u = [
+    "x >= 0.8 ? 0.0 : 1.206045378311055",
+    "y >= 0.8 ? 0.0 : 1.206045378311055",
+]
+p = """\
+    x >= 0.8 ? (y >= 0.8 ? 1.5 : 0.3) \
+             : (y >= 0.8 ? 0.3 : 0.029032258064516)"""
+
+[[boundaries]]
+name = "left"
+type = "extrapolation"
+
+[[boundaries]]
+name = "right"
+type = "extrapolation"
+
+[[boundaries]]
+name = "top"
+type = "extrapolation"
+
+[[boundaries]]
+name = "bottom"
+type = "extrapolation"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[output]
+check_interval = 200
+
+[[write_data]]
+prefix = "./coarse/riemann"
+format = "vtu"
+time_interval = 0.05
+variables = ["RHO", "U_X", "U_Y", "P"]
+
+[[write_data]]
+prefix = "./coarse/riemann"
+format = "restart"
+interval = 1000000

@@ -53,9 +53,10 @@ struct Box {
         }
     }
 
-    bool overlaps(const Box & b) const {
+    /** @brief Whether the boxes share a point, or with strict an interior point. */
+    bool overlaps(const Box & b, bool strict = false) const {
         for (size_t d = 0; d < N_DIM; d++) {
-            if (b.hi[d] < lo[d] || b.lo[d] > hi[d]) return false;
+            if (strict ? (b.hi[d] <= lo[d] || b.lo[d] >= hi[d]) : (b.hi[d] < lo[d] || b.lo[d] > hi[d])) return false;
         }
         return true;
     }
@@ -89,8 +90,12 @@ class BoxTree {
         BoxTree() = default;
         explicit BoxTree(const std::vector<Box> & boxes);
 
-        /** @brief Every item whose box overlaps b, in increasing id. */
-        void overlapping(const Box & b, std::vector<uint32_t> & items) const;
+        /**
+         * @brief Every item whose box overlaps b, in increasing id; with
+         *        strict, only those sharing interior points with it (e.g. the
+         *        cells a region of positive volume can intersect).
+         */
+        void overlapping(const Box & b, std::vector<uint32_t> & items, bool strict = false) const;
 
         /**
          * @brief Every item whose box contains x, in increasing id (the

@@ -1,0 +1,69 @@
+# The 2D Riemann problem of input.toml continued from t = 0.5 on 131,072
+# triangles (cartesian_tri, 256 x 256), from the 100 x 100 quadrilaterals of
+# coarse.toml: its restart file remapped with degree-3 polynomials under the
+# bounds limiter, which keeps the shocks free of new extrema. The file is the
+# restart that coarse.toml ends with (step 218).
+
+[run]
+t_stop = 0.8
+cfl = 1.0
+
+[mesh]
+type = "cartesian_tri"
+Nx = 256
+Ny = 256
+Lx = 1.0
+Ly = 1.0
+
+[initialize]
+type = "remap"
+file = "coarse/riemann_000218.restart"
+degree = 3
+
+[initialize.mesh]
+type = "cartesian"
+Nx = 100
+Ny = 100
+Lx = 1.0
+Ly = 1.0
+
+[[boundaries]]
+name = "left"
+type = "extrapolation"
+
+[[boundaries]]
+name = "right"
+type = "extrapolation"
+
+[[boundaries]]
+name = "top"
+type = "extrapolation"
+
+[[boundaries]]
+name = "bottom"
+type = "extrapolation"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[output]
+check_interval = 200
+
+[[write_data]]
+prefix = "./remap/riemann"
+format = "vtu"
+time_interval = 0.05
+variables = ["RHO", "U_X", "U_Y", "P"]

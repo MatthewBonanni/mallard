@@ -60,21 +60,21 @@ BoxTree::BoxTree(const std::vector<Box> & boxes) : item_boxes(boxes) {
     }
 }
 
-void BoxTree::overlapping(const Box & b, std::vector<uint32_t> & items) const {
+void BoxTree::overlapping(const Box & b, std::vector<uint32_t> & items, bool strict) const {
     items.clear();
     if (nodes.empty()) return;
     std::vector<uint32_t> stack{0};
     while (!stack.empty()) {
         const Node & node = nodes[stack.back()];
         stack.pop_back();
-        if (!node.box.overlaps(b)) continue;
+        if (!node.box.overlaps(b, strict)) continue;
         if (node.count == 0) {
             stack.push_back(node.first);
             stack.push_back(node.first + 1);
             continue;
         }
         for (uint32_t k = node.first; k < node.first + node.count; k++) {
-            if (item_boxes[order[k]].overlaps(b)) items.push_back(order[k]);
+            if (item_boxes[order[k]].overlaps(b, strict)) items.push_back(order[k]);
         }
     }
     std::sort(items.begin(), items.end());
