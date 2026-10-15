@@ -172,7 +172,16 @@ struct MixtureTimeStepFunctor {
         }
         const rtype dt_c = 2.0_r * cell_volume(c) / sum;
         dt_local(c) = dt_c;
-        dt_min = Kokkos::fmin(dt_min, dt_c);
+        dt_min = Kokkos::fmin(dt_min, valid(c) && dt_c > 0.0_r && Kokkos::isfinite(dt_c) ? dt_c : -1.0_r);
+    }
+
+    /** @brief Finite state and scalars, positive density and pressure; else the run stops. */
+    KOKKOS_INLINE_FUNCTION
+    bool valid(const uint32_t c) const {
+        bool finite = true;
+        FOR_I_CONSERVATIVE finite = finite && Kokkos::isfinite(W(c, i));
+        for (uint32_t k = 0; k <= n_species; k++) finite = finite && Kokkos::isfinite(scalars(c, k));
+        return finite && W(c, 0) > 0.0_r && W(c, N_DIM + 1) > 0.0_r;
     }
 };
 
@@ -602,7 +611,7 @@ rtype Solver::calc_dt_cfl1_mixture() {
                                    axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>()};
     rtype dt_min = std::numeric_limits<rtype>::max();
     Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor, Kokkos::Min<rtype>(dt_min));
-    return comm::allreduce(dt_min, comm::Op::MIN);
+    return reduce_dt(dt_min);
 }
 
 void Solver::update_primitives_mixture() {

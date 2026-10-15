@@ -443,6 +443,15 @@ bool Probes::due(uint64_t step) const {
     return std::any_of(sets.begin(), sets.end(), [&](const Set & s) { return step % s.interval == 0; });
 }
 
+bool Probes::set_interval(const std::string & name, uint64_t interval) {
+    for (auto & set : sets) {
+        if (set.name != name) continue;
+        set.interval = interval;
+        return true;
+    }
+    return false;
+}
+
 void Probes::write(uint64_t step, rtype t, const CellSampler & sampler) {
     for (auto & set : sets) {
         if (step % set.interval != 0) continue;

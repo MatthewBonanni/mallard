@@ -18,6 +18,9 @@ The spatial dimension is fixed at build time with the CMake option
 | `t_stop` | Stop at this simulation time (the last step is shortened to land on it) |
 | `n_steps` | Stop after this many steps |
 | `t_wall_stop` | Stop after this many seconds of wall time |
+| `keep_last_good` | Keep a copy of the state at the start of each step (one copy of the conservatives, and partial densities, per step), so that a diverging run writes the last valid state; see [run control](#run-control) (default `true`) |
+| `control_socket` | Serve `Mallard ctl` on `mallard.sock` in the working directory (default `true`) |
+| `control_file_interval` | Every this many steps, look for the files `STOP` and `CHECKPOINT` in the working directory (default 0: never) |
 | `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages) as one CUDA graph, so the host launches one graph and waits once per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel where the host takes part in the step: gas mixtures, average-pressure outlets, characteristic boundaries, boundary or source expressions of `t`, and halos exchanged with MPI (`[parallel] halo_exchange`); the run log says which |
 
 At least one stop condition is required.
@@ -385,7 +388,7 @@ Strength and reference are evaluated once at cell centroids.
 |---|---|
 | `riemann_solver` | `Rusanov`, `HLL`, `HLLC` (default), `Roe`, or `RHLL` (rotated hybrid HLL-Roe, carbuncle-free except at shocks at rest on cell faces; see [numerics](numerics/overview.md#stationary-shocks-on-cell-faces)) |
 | `time_integrator` | `FE`, `SSPRK3` (default) or `RK4` |
-| `check_nan` | Stop if the solution becomes non-finite |
+| `check_nan` | Check every conservative and partial density for non-finite values right after each step, so a diverging step writes no output (one more reduction per step). Without it the run still stops at the next step, through the time-step reduction; see [run control](#run-control) |
 | `double_flux` | (gas mixtures) `true` for the double-flux scheme: each cell's energy is updated with its own `cp / cv` and energy offset frozen over the time step on both sides of its faces, and reset to the true equation of state after the step, so pressure and velocity stay exactly uniform across contacts between different gases. Energy is then not exactly conserved (about 0.2% over a multicomponent shock tube). Default `false` |
 | `low_mach_cutoff` | Low-Mach correction of the convective flux: the velocity jump across each interior face is scaled by `z = min(1, max(M_L, M_R, low_mach_cutoff))` before the Riemann solver, so that upwind dissipation scales with the flow speed rather than the sound speed. Default 0.1; 1 disables it. See [`numerics/overview.md`](numerics/overview.md) |
 | `convective_flux` | `riemann` (default): the Riemann solver at every face; `hybrid`: the kinetic-energy-preserving central flux of Kuya, Totani & Kawai (2018) on the same reconstructed states, blended into the Riemann solver where a shock sensor fires, `F = F_KEEP + phi (F_Riemann - F_KEEP)`. For large-eddy simulation: the central flux adds no dissipation, so the SGS model does the work (see `[integrals] budget`). `phi` is the larger of the face's two cells': 1 where the Ducros sensor restricted to compressions, `(div u)^2 / ((div u)^2 + |omega|^2)` with `div u < 0`, exceeds `sensor_threshold`, else `upwind_floor`. Boundary faces other than walls and symmetry planes use the Riemann solver. Species stay upwinded with the blended mass flux. Contacts and expansions are central: on Sod's problem the density error is about 1.8 times the Riemann solver's, with a 0.1% overshoot at the contact |
@@ -646,6 +649,52 @@ systems; on one node's local disk, which serializes writes to a file, VTU
 pieces write faster beyond a few ranks (2.1M hexahedra, 16 ranks: 115 ms per
 HDF5 snapshot against 72 ms, 1 rank: 140 ms against 1.1 s). VTU output remains
 the simpler choice for small runs. `tools/mallard_h5.py` reads the files.
+
+## Run control
+
+A running `Mallard` takes requests from signals, from `Mallard ctl` and,
+optionally, from files. Every rank acts on them after the same step: the
+requests travel with the time step's global reduction, so they cost no
+communication of their own.
+
+| Request | Effect |
+|---|---|
+| `SIGUSR1` | Write a restart after the current step and continue |
+| `SIGTERM`, `SIGINT`, `SIGUSR2` | Write a restart and the final output after the current step, then exit with status 3. A second `SIGINT` (Ctrl-C twice) exits at once. Before the time loop starts, these signals end the run at once |
+| `Mallard ctl <run-dir> status` | Step, `t`, `dt`, CFL number, progress, wall time per step, cells per second, ETA, memory of rank 0's host process (and of its GPU), and the diagnostics of the last progress row |
+| `Mallard ctl <run-dir> checkpoint` | As `SIGUSR1`; replies with the restart file once written |
+| `Mallard ctl <run-dir> stop` | As `SIGTERM`; replies with the restart file once the run has ended |
+| `Mallard ctl <run-dir> set <key>=<value> ...` | Change settings from the next step on: `n_steps`, `t_stop`, `t_wall_stop` (0 removes a limit; one must remain), `check_interval`, `write_data.<prefix or index>.interval` or `.time_interval` (whichever the writer has), `probes.<name>.interval`, `forces.<zone>.interval`, `integrals.interval`. Other keys are refused |
+| `STOP`, `CHECKPOINT` files | With `[run] control_file_interval`, as `stop` and `checkpoint`; the file is removed once seen |
+
+Restarts on request go to the `[[write_data]]` restart writers, or to
+`restart_<step>.restart` in the working directory if there is none. `Mallard
+ctl` talks to rank 0 through the Unix-domain socket `mallard.sock` in the
+directory the run was started from, readable and writable by its owner only;
+it must run on rank 0's node (in Kubernetes: `kubectl exec`). Exit statuses
+are 0 at a stop condition, 1 on errors (including divergence) and 3 when
+stopped on request.
+
+**MPI launchers.** `mpirun` and `mpiexec` forward `SIGUSR1` and `SIGUSR2`
+to every rank, but Open MPI ends the job on `SIGTERM` and `SIGINT` without
+letting the ranks finish their step: send `SIGUSR2` to `mpirun` to stop, or
+use `Mallard ctl`. Slurm's `scancel` signals every task directly, so
+`scancel --signal=TERM` works, as does `#SBATCH --signal=USR2@120` for a
+restart before the time limit. In Kubernetes, give the pod a
+`terminationGracePeriodSeconds` longer than a step plus a restart write, and
+with `mpirun` as the container's command a `preStop` hook
+`Mallard ctl <run-dir> stop`, which returns once the restart is written.
+
+**Divergence.** Every step's time-step reduction also tells whether any
+owned cell holds a non-finite value or a non-positive density or pressure.
+The run then stops with the number of such cells and the first ones by global
+cell id (variable, value, cell, centroid and rank), writes the state at the
+start of the step before (all `[[write_data]]` outputs and a restart; see
+`keep_last_good`) and exits with status 1. The invalid state is found one step
+after it appears (right after its step with `check_nan`), so without
+`check_nan` the outputs and `[statistics]` samples of that step may hold it
+(resume from the last valid state with `[statistics] reset = true` if its
+averages are not finite).
 
 ## `MallardReactor`
 

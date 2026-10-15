@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <vector>
 #include <type_traits>
 
@@ -76,6 +77,9 @@ std::array<T, N> allreduce(std::array<T, N> values, Op op) {
     allreduce(std::span<T>(values), op);
     return values;
 }
+
+/** @brief Rank 0's text on every rank. */
+void broadcast(std::string & text);
 
 /**
  * @brief Personalized all-to-all: send[r] goes to rank r; returns what each rank

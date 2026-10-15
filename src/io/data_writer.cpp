@@ -211,12 +211,14 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
     stream << prefix << "_" << std::setw(LEN_STEP) << std::setfill('0')
            << (interval > 0 || format == DataFormat::RESTART ? step : history.size());
     if (format == DataFormat::RESTART) {
-        write_restart(stream.str() + ".restart", step, t, attributes, faces);
-        logging::event(step, double(t), "restart", stream.str() + ".restart");
+        last_file = stream.str() + ".restart";
+        write_restart(last_file, step, t, attributes, faces);
+        logging::event(step, double(t), "restart", last_file);
     } else if (format == DataFormat::HDF5) {
         if (!hdf5_mesh_written) write_hdf5_mesh();
         write_hdf5(stream.str(), step, t);
-        history.emplace_back(t, stream.str() + ".h5");
+        last_file = stream.str() + ".h5";
+        history.emplace_back(t, last_file);
         if (comm::is_root()) write_xdmf(stream.str());
         logging::event(step, double(t), "hdf5", stream.str() + ".h5");
     } else {
@@ -232,6 +234,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
         }
         const std::string filename = stream.str() + (pieces ? ".pvtu" : ".vtu");
         if (pieces && comm::is_root()) write_pvtu(filename, std::filesystem::path(stream.str()).filename().string());
+        last_file = filename;
         history.emplace_back(t, filename);
         if (comm::is_root()) write_pvd();
         logging::event(step, double(t), surface ? "surface" : "vtu", filename);
@@ -247,6 +250,21 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
     step_last = step;
     t_last = t;
     n_files++;
+}
+
+std::string DataWriter::set_interval(uint64_t steps) {
+    if (interval == 0) return "is written every time_interval; set that instead";
+    if (steps == 0) return "interval must be positive";
+    interval = steps;
+    return "";
+}
+
+std::string DataWriter::set_time_interval(rtype value, rtype t) {
+    if (interval > 0) return "is written every interval steps; set that instead";
+    if (!(value > 0.0_r)) return "time_interval must be positive";
+    time_interval = value;
+    n_written = static_cast<uint64_t>(std::floor(t / time_interval + precision_tol(1e-9, 1e-5))) + 1;
+    return "";
 }
 
 void DataWriter::resume(uint64_t step, rtype t) {
