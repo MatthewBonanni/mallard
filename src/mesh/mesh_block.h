@@ -104,7 +104,7 @@ std::array<uint64_t, 2> cartesian_3d_size(uint32_t nx, uint32_t ny, uint32_t nz,
  *        counterclockwise in 2D; {axis, angle} in 3D) and translation t
  *        (`translate`). The identity if absent; an error for generated meshes.
  */
-MeshTransform mesh_transform(const toml::value & input);
+MeshTransform mesh_transform(const Input & input);
 
 /** @brief Map a block's node coordinates (and high-order face nodes) by transform. */
 void transform_block(MeshBlock & block, const MeshTransform & transform);

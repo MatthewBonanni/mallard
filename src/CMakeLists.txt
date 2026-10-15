@@ -70,6 +70,18 @@ target_include_directories(MallardCore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/parallel
 )
 target_link_libraries(MallardCore PUBLIC Kokkos::kokkos)
+
+# Input (common/input.h) records the keys setup reads; a toml::value copy would not
+file(GLOB_RECURSE mallard_sources CONFIGURE_DEPENDS
+    ${CMAKE_SOURCE_DIR}/src/*.h ${CMAKE_SOURCE_DIR}/src/*.cpp ${CMAKE_SOURCE_DIR}/test/*.h ${CMAKE_SOURCE_DIR}/test/*.cpp)
+list(FILTER mallard_sources EXCLUDE REGEX "/src/external/|/src/common/input\\.")
+foreach(source ${mallard_sources})
+    file(STRINGS ${source} toml_values REGEX "toml::(value|table)([^_a-z]|$)")
+    if(toml_values)
+        message(FATAL_ERROR "${source}: use Input (src/common/input.h), not toml::value or toml::table, "
+                            "so that unused input keys are detected.")
+    endif()
+endforeach()
 # The TENO setup computes every table with the same operations on the host
 # and on the device, and contracting multiplies and adds into FMAs would
 # change them differently on each: no contraction in that file

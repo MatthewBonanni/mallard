@@ -59,7 +59,7 @@ Stretching mesh_stretching(const Input & input) {
 
 namespace {
 
-std::vector<double> transform_vector(const toml::value & v, const std::string & key) {
+std::vector<double> transform_vector(const Input & v, const std::string & key) {
     if (!v.is_array() || v.as_array().size() != N_DIM) {
         throw InputError("mesh.transform." + key + " must have " + std::to_string(N_DIM) + " components.");
     }
@@ -79,13 +79,13 @@ std::string vector_text(const std::vector<double> & v) {
 
 } // namespace
 
-MeshTransform mesh_transform(const toml::value & input) {
+MeshTransform mesh_transform(const Input & input) {
     MeshTransform t;
     if (!input.contains("mesh") || !input.at("mesh").contains("transform")) return t;
     if (toml::find_or<std::string>(input, "mesh", "type", "file") != "file") {
         throw InputError("[mesh.transform] applies to mesh files.");
     }
-    const toml::value & table = input.at("mesh").at("transform");
+    const Input & table = input.at("mesh").at("transform");
     if (!table.is_table()) throw InputError("mesh.transform must be a table.");
     for (const auto & entry : table.as_table()) {
         if (entry.first != "scale" && entry.first != "rotate" && entry.first != "translate") {
@@ -96,7 +96,7 @@ MeshTransform mesh_transform(const toml::value & input) {
     std::array<double, N_DIM> scale;
     scale.fill(1.0);
     if (table.contains("scale")) {
-        const toml::value & s = table.at("scale");
+        const Input & s = table.at("scale");
         if (s.is_array()) {
             const std::vector<double> v = transform_vector(s, "scale");
             std::copy(v.begin(), v.end(), scale.begin());
@@ -111,7 +111,7 @@ MeshTransform mesh_transform(const toml::value & input) {
     }
     std::array<std::array<double, 3>, 3> R = {{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}};
     if (table.contains("rotate")) {
-        const toml::value & r = table.at("rotate");
+        const Input & r = table.at("rotate");
         std::array<double, 3> axis = {0.0, 0.0, 1.0};
         double degrees;
         if constexpr (N_DIM == 2) {

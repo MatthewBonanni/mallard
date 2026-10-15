@@ -28,7 +28,9 @@
 /**
  * @brief A TOML table that records which keys the program looked up, present
  *        or not. Copies share the record, so a key read through a copy counts
- *        as read. Iterating the table counts every key as read.
+ *        as read. Iterating the table counts every key as read. Mallard code
+ *        holds the input only as Input: a conversion to toml::value would
+ *        iterate it (src/CMakeLists.txt rejects toml::value).
  */
 template <typename K, typename V>
 class InputTable : public std::unordered_map<K, V> {
