@@ -26,7 +26,7 @@
 
 namespace {
 
-constexpr rtype GAMMA = 1.4;
+constexpr rtype GAMMA = 1.4_r;
 
 // Smooth field satisfying symmetry conditions on the unit square: density,
 // pressure and tangential velocity are even across each wall, normal velocity odd
@@ -121,8 +121,8 @@ INSTANTIATE_TEST_SUITE_P(TENO, TENOOrder,
                        ::testing::Values(3, 4, 5)));
 
 TEST(TENOTest, EigenvectorsAreInverse) {
-    const rtype W[N_CONSERVATIVE] = {1.3, 0.4, -0.7, 2.1};
-    const rtype n[N_DIM] = {0.6, -0.8};
+    const rtype W[N_CONSERVATIVE] = {1.3_r, 0.4_r, -0.7_r, 2.1_r};
+    const rtype n[N_DIM] = {0.6_r, -0.8_r};
     rtype L[N_CONSERVATIVE][N_CONSERVATIVE], R[N_CONSERVATIVE][N_CONSERVATIVE];
     teno::eigenvectors(W, n, GAMMA, L, R);
     FOR_I_CONSERVATIVE {
@@ -145,12 +145,12 @@ TEST(TENOTest, MonomialOrderingByTotalDegree) {
 }
 
 TEST(TENOTest, AdaptiveCutoffSpansDesignRange) {
-    EXPECT_RTYPE_EQ(teno::adaptive_CT(1e-3, 1e-3, 1e-2), 1e-10);
-    EXPECT_RTYPE_EQ(teno::adaptive_CT(5e-2, 1e-3, 1e-2), 1e-6);
+    EXPECT_RTYPE_EQ(teno::adaptive_CT(1e-3_r, 1e-3_r, 1e-2_r), 1e-10_r);
+    EXPECT_RTYPE_EQ(teno::adaptive_CT(5e-2_r, 1e-3_r, 1e-2_r), 1e-6_r);
     // Troubled cells at or beyond the upper bound get the largest cutoff, also
     // when the threshold is not below the upper bound
-    EXPECT_RTYPE_EQ(teno::adaptive_CT(1e-2, 1e-2, 1e-2), 1e-6);
-    EXPECT_RTYPE_EQ(teno::adaptive_CT(5e-2, 5e-2, 1e-2), 1e-6);
+    EXPECT_RTYPE_EQ(teno::adaptive_CT(1e-2_r, 1e-2_r, 1e-2_r), 1e-6_r);
+    EXPECT_RTYPE_EQ(teno::adaptive_CT(5e-2_r, 5e-2_r, 1e-2_r), 1e-6_r);
 }
 
 namespace {
@@ -265,7 +265,7 @@ TEST(TENOTest, MirrorImagesTakeTheConditionOfTheNearestBoundaryFace) {
             // directly beneath that cell
             EXPECT_NEAR(mesh->h_face_coords(f, 0), mesh->h_cell_coords(stencils.cells[s], 0), 1e-12) << "cell " << c;
             if (double(mesh->h_cell_coords(c, 0)) > 0.6) {
-                EXPECT_EQ(face_bc[f], 0) << "cell " << c;
+                EXPECT_EQ(face_bc[static_cast<size_t>(f)], 0) << "cell " << c;
             }
             n_checked++;
         }
@@ -413,7 +413,7 @@ TEST(TENOTest, SinglePrecisionCacheHalvesTheFileAndRunsThatWriteAndReadItAgree) 
     }
     EXPECT_GT(max_diff, 0.0);
     EXPECT_LT(max_diff, 1e-5 * max_value);
-    EXPECT_LT(std::filesystem::file_size(single), 0.6 * std::filesystem::file_size(full));
+    EXPECT_LT(static_cast<double>(std::filesystem::file_size(single)), 0.6 * static_cast<double>(std::filesystem::file_size(full)));
     // A cache in the other precision is recomputed, never reinterpreted
     const auto exact_again = teno_outputs(mesh, bd, 4, single, teno::SLICE_SHIFT, true);
     expect_bitwise_equal(exact, exact_again, "double run given a single-precision cache");

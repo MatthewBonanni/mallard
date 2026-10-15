@@ -20,7 +20,7 @@
 
 namespace {
 
-constexpr rtype GAMMA = 1.4;
+constexpr rtype GAMMA = 1.4_r;
 
 template <typename T>
 class Riemann3DTest : public ::testing::Test {};
@@ -30,27 +30,27 @@ TYPED_TEST_SUITE(Riemann3DTest, Solvers);
 
 const rtype STATES[][N_CONSERVATIVE] = {
     {1.0, 0.0, 0.0, 0.0, 1.0},
-    {0.125, 0.3, -0.7, 0.4, 0.1},
-    {1.5, -2.0, 0.5, 1.1, 3.0},
-    {0.5323, 1.206, 0.0, -0.3, 0.3},
-    {5.99924, 19.5975, 1.0, -2.0, 460.894},
+    {0.125_r, 0.3_r, -0.7_r, 0.4_r, 0.1_r},
+    {1.5_r, -2.0_r, 0.5_r, 1.1_r, 3.0_r},
+    {0.5323_r, 1.206_r, 0.0_r, -0.3_r, 0.3_r},
+    {5.99924_r, 19.5975_r, 1.0_r, -2.0_r, 460.894_r},
 };
 
 const rtype NORMALS[][N_DIM] = {
     {1.0, 0.0, 0.0},
     {0.0, -1.0, 0.0},
     {0.0, 0.0, 1.0},
-    {0.48, 0.64, 0.6},
-    {-0.57735026918962576, 0.57735026918962576, -0.57735026918962576},
+    {0.48_r, 0.64_r, 0.6_r},
+    {-0.57735026918962576_r, 0.57735026918962576_r, -0.57735026918962576_r},
 };
 
 /**
  * Orthonormal frame (n, t1, t2) not aligned with any axis.
  */
 struct Frame {
-    rtype n[3] = {2.0 / 7.0, 3.0 / 7.0, 6.0 / 7.0};
-    rtype t1[3] = {3.0 / 7.0, -6.0 / 7.0, 2.0 / 7.0};
-    rtype t2[3] = {6.0 / 7.0, 2.0 / 7.0, -3.0 / 7.0};
+    rtype n[3] = {2.0_r / 7.0_r, 3.0_r / 7.0_r, 6.0_r / 7.0_r};
+    rtype t1[3] = {3.0_r / 7.0_r, -6.0_r / 7.0_r, 2.0_r / 7.0_r};
+    rtype t2[3] = {6.0_r / 7.0_r, 2.0_r / 7.0_r, -3.0_r / 7.0_r};
 };
 
 /**
@@ -66,8 +66,8 @@ void frame_state(const Frame & f, rtype rho, rtype un, rtype v1, rtype v2, rtype
  * Rotation about the axis (1, 2, 2) / 3 by 0.7 rad.
  */
 void rotate(const rtype * v, rtype * out) {
-    const rtype k[3] = {1.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0};
-    const rtype c = std::cos(0.7), s = std::sin(0.7);
+    const rtype k[3] = {1.0_r / 3.0_r, 2.0_r / 3.0_r, 2.0_r / 3.0_r};
+    const rtype c = std::cos(0.7_r), s = std::sin(0.7_r);
     const rtype kv = k[0] * v[0] + k[1] * v[1] + k[2] * v[2];
     const rtype kxv[3] = {k[1] * v[2] - k[2] * v[1], k[2] * v[0] - k[0] * v[2], k[0] * v[1] - k[1] * v[0]};
     for (int d = 0; d < 3; d++) out[d] = v[d] * c + kxv[d] * s + k[d] * kv * (1.0_r - c);
@@ -135,12 +135,12 @@ TYPED_TEST(Riemann3DTest, UniformTransverseVelocityIsAdvectedWithTheMassFlux) {
     // Adding the same tangential velocity v to both states leaves the normal
     // problem unchanged: the tangential momentum flux is v times the mass flux
     const Frame f;
-    const rtype v1 = 0.8, v2 = -0.5;
+    const rtype v1 = 0.8_r, v2 = -0.5_r;
     rtype W_l0[N_CONSERVATIVE], W_r0[N_CONSERVATIVE], W_l[N_CONSERVATIVE], W_r[N_CONSERVATIVE];
-    frame_state(f, 1.0, 0.2, 0.0, 0.0, 1.0, W_l0);
-    frame_state(f, 0.125, -0.1, 0.0, 0.0, 0.1, W_r0);
-    frame_state(f, 1.0, 0.2, v1, v2, 1.0, W_l);
-    frame_state(f, 0.125, -0.1, v1, v2, 0.1, W_r);
+    frame_state(f, 1.0_r, 0.2_r, 0.0_r, 0.0_r, 1.0_r, W_l0);
+    frame_state(f, 0.125_r, -0.1_r, 0.0_r, 0.0_r, 0.1_r, W_r0);
+    frame_state(f, 1.0_r, 0.2_r, v1, v2, 1.0_r, W_l);
+    frame_state(f, 0.125_r, -0.1_r, v1, v2, 0.1_r, W_r);
     rtype F0[N_CONSERVATIVE], F[N_CONSERVATIVE];
     TypeParam::calc_flux(F0, f.n, W_l0, W_r0, GAMMA);
     TypeParam::calc_flux(F, f.n, W_l, W_r, GAMMA);
@@ -154,9 +154,9 @@ TYPED_TEST(Riemann3DTest, UniformTransverseVelocityIsAdvectedWithTheMassFlux) {
 TEST(Riemann3DTest, HLLCCarriesTransverseVelocityOfTheUpwindSideOfTheContact) {
     const Frame f;
     rtype W_l[N_CONSERVATIVE], W_r[N_CONSERVATIVE];
-    for (const rtype un : {0.4, -0.4}) {
-        frame_state(f, 1.0, un, 0.3, -0.2, 1.0, W_l);
-        frame_state(f, 0.5, un, -0.4, 0.5, 1.0, W_r);
+    for (const rtype un : {0.4_r, -0.4_r}) {
+        frame_state(f, 1.0_r, un, 0.3_r, -0.2_r, 1.0_r, W_l);
+        frame_state(f, 0.5_r, un, -0.4_r, 0.5_r, 1.0_r, W_r);
         rtype F[N_CONSERVATIVE];
         riemann::HLLC::calc_flux(F, f.n, W_l, W_r, GAMMA);
         const rtype * W_up = (un > 0.0_r) ? W_l : W_r;
@@ -169,8 +169,8 @@ TEST(Riemann3DTest, HLLCCarriesTransverseVelocityOfTheUpwindSideOfTheContact) {
 TEST(Riemann3DTest, RotatedHybridReducesToHLLForNormalVelocityJump) {
     const Frame f;
     rtype W_l[N_CONSERVATIVE], W_r[N_CONSERVATIVE];
-    frame_state(f, 1.0, 1.0, 0.3, -0.2, 1.0, W_l);
-    frame_state(f, 1.8, 0.2, 0.3, -0.2, 2.5, W_r);
+    frame_state(f, 1.0_r, 1.0_r, 0.3_r, -0.2_r, 1.0_r, W_l);
+    frame_state(f, 1.8_r, 0.2_r, 0.3_r, -0.2_r, 2.5_r, W_r);
     rtype F[N_CONSERVATIVE], F_hll[N_CONSERVATIVE];
     riemann::RHLL::calc_flux(F, f.n, W_l, W_r, GAMMA);
     riemann::HLL::calc_flux(F_hll, f.n, W_l, W_r, GAMMA);
@@ -180,8 +180,8 @@ TEST(Riemann3DTest, RotatedHybridReducesToHLLForNormalVelocityJump) {
 TEST(Riemann3DTest, RotatedHybridReducesToRoeForTangentialVelocityJump) {
     const Frame f;
     rtype W_l[N_CONSERVATIVE], W_r[N_CONSERVATIVE];
-    frame_state(f, 1.0, 0.3, 0.5, 0.2, 1.0, W_l);
-    frame_state(f, 0.6, 0.3, -0.4, 0.9, 1.0, W_r);
+    frame_state(f, 1.0_r, 0.3_r, 0.5_r, 0.2_r, 1.0_r, W_l);
+    frame_state(f, 0.6_r, 0.3_r, -0.4_r, 0.9_r, 1.0_r, W_r);
     rtype F[N_CONSERVATIVE], F_roe[N_CONSERVATIVE];
     riemann::RHLL::calc_flux(F, f.n, W_l, W_r, GAMMA);
     riemann::Roe::calc_flux(F_roe, f.n, W_l, W_r, GAMMA);
@@ -192,9 +192,9 @@ TEST(Riemann3DTest, RotatedHybridBlendsHLLAndRoeForObliqueVelocityJump) {
     // Velocity jump at 60 degrees to n within the (n, t1) plane: n1 = jump
     // direction, n2 = its normal in that plane, alpha1 = cos 60, alpha2 = sin 60
     const Frame f;
-    const rtype c = 0.5, s = std::sqrt(3.0) / 2.0;
+    const rtype c = 0.5_r, s = std::sqrt(3.0_r) / 2.0_r;
     rtype W_l[N_CONSERVATIVE], W_r[N_CONSERVATIVE];
-    frame_state(f, 1.0, 0.1, 0.2, 0.3, 1.0, W_l);
+    frame_state(f, 1.0_r, 0.1_r, 0.2_r, 0.3_r, 1.0_r, W_l);
     frame_state(f, 1.3_r, 0.1_r + 0.4_r * c, 0.2_r + 0.4_r * s, 0.3_r, 1.0, W_r);
     rtype n1[3], n2[3];
     for (int d = 0; d < 3; d++) {
@@ -212,15 +212,15 @@ namespace {
 
 // The two sides of a Mach 6 normal shock at rest, moving along v
 void shock_states(const rtype * v, rtype * W_l, rtype * W_r) {
-    const rtype u_l = 6.0, u_r = 1.1388888888888888;
+    const rtype u_l = 6.0_r, u_r = 1.1388888888888888_r;
     W_l[0] = 1.0;
-    W_r[0] = 5.2682926829268295;
+    W_r[0] = 5.2682926829268295_r;
     for (int d = 0; d < 3; d++) {
         W_l[1 + d] = u_l * v[d];
         W_r[1 + d] = u_r * v[d];
     }
-    W_l[4] = 1.0 / 1.4;
-    W_r[4] = 29.880952380952383;
+    W_l[4] = 1.0_r / 1.4_r;
+    W_r[4] = 29.880952380952383_r;
 }
 
 } // namespace
@@ -306,8 +306,8 @@ TEST(Riemann3DTest, RoeResolvesStationaryContactAndShearExactly) {
     // other than the pressure
     const Frame f;
     rtype W_l[N_CONSERVATIVE], W_r[N_CONSERVATIVE];
-    frame_state(f, 1.0, 0.0, 0.5, -0.3, 1.0, W_l);
-    frame_state(f, 0.2, 0.0, -0.7, 0.4, 1.0, W_r);
+    frame_state(f, 1.0_r, 0.0_r, 0.5_r, -0.3_r, 1.0_r, W_l);
+    frame_state(f, 0.2_r, 0.0_r, -0.7_r, 0.4_r, 1.0_r, W_r);
     rtype F[N_CONSERVATIVE];
     riemann::Roe::calc_flux(F, f.n, W_l, W_r, GAMMA);
     EXPECT_NEAR(F[0], 0.0, roundoff(1e-12));

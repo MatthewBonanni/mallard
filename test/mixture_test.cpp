@@ -183,10 +183,10 @@ std::array<rtype, N_CONSERVATIVE> primitive(double rho, double ux, double uy, do
 std::vector<std::array<rtype, N_DIM>> unit_normals() {
     std::array<rtype, N_DIM> x{}, oblique{};
     x[0] = 1.0;
-    const rtype scale = N_DIM == 2 ? 1.0 : 0.8;
+    const rtype scale = N_DIM == 2 ? 1.0_r : 0.8_r;
     oblique[0] = 0.6_r * scale;
     oblique[1] = -0.8_r * scale;
-    if constexpr (N_DIM == 3) oblique[N_DIM - 1] = 0.6;
+    if constexpr (N_DIM == 3) oblique[N_DIM - 1] = 0.6_r;
     return {x, oblique};
 }
 
@@ -218,7 +218,7 @@ TEST(MixtureRiemannTest, RoeAndRHLLWithOneGammaAndNoOffsetAreThePerfectGasSolver
     // Shock tube, shear with a contact, and a transonic rarefaction (where
     // the entropy fix acts): the mixture forms average gamma and e0 and
     // take the jump form, the perfect-gas Roe solver its eigenvectors
-    const rtype gamma = 1.4;
+    const rtype gamma = 1.4_r;
     const riemann::SideThermo th{gamma, 0.0};
     const std::array<std::array<rtype, N_CONSERVATIVE>, 2> cases[] = {
         {primitive(1.0, 0.0, 0.0, 1.0), primitive(0.125, 0.0, 0.0, 0.1)},
@@ -239,7 +239,7 @@ TEST(MixtureRiemannTest, RoeUpwindsAContactBetweenDifferentGasesExactly) {
     // Equal p and u, different gamma and e0: whatever the averages, the flux
     // is the upwind side's; with a slip as well, RHLL is Roe along the face
     // normal
-    const riemann::SideThermo th_l{1.4, 0.0}, th_r{1.25, 2.0};
+    const riemann::SideThermo th_l{1.4_r, 0.0_r}, th_r{1.25_r, 2.0_r};
     for (const auto & n : unit_normals()) {
         const std::array<rtype, N_DIM> t = tangent(n);
         for (const double sign : {1.0, -1.0}) {
@@ -266,7 +266,7 @@ TEST(MixtureRiemannTest, RoeAndRHLLAreUpwindOnSupersonicFacesBetweenDifferentGas
     // the velocity jump being at 45 degrees to n), so the Roe property makes
     // the flux F_l exactly: only if the waves carry the whole jump of U,
     // including the energy of the jump in gamma and e0
-    const riemann::SideThermo th_l{1.4, 0.0}, th_r{1.2, 1.5};
+    const riemann::SideThermo th_l{1.4_r, 0.0_r}, th_r{1.2_r, 1.5_r};
     for (const auto & n : unit_normals()) {
         const std::array<rtype, N_DIM> t = tangent(n);
         std::array<rtype, N_CONSERVATIVE> W_l = primitive(1.0, 0.0, 0.0, 1.0), W_r = primitive(0.5, 0.0, 0.0, 0.8);
@@ -413,7 +413,7 @@ std::vector<double> shock_tube_errors(uint32_t n, const std::string & reconstruc
     EXPECT_EQ(ref.size(), n);
     const uint32_t n_cells = solver.get_mesh()->n_cells;
     const auto & names = solver.get_species_names();
-    const size_t k_N2 = std::find(names.begin(), names.end(), "N2") - names.begin();
+    const size_t k_N2 = static_cast<size_t>(std::find(names.begin(), names.end(), "N2") - names.begin());
     std::vector<double> err(5, 0.0), scale(5, 0.0);
     Y_min = 1.0;
     Y_max = 0.0;
@@ -423,7 +423,7 @@ std::vector<double> shock_tube_errors(uint32_t n, const std::string & reconstruc
         const double values[5] = {rho, double(solver.h_primitives(c, 0)), double(solver.h_primitives(c, N_DIM)),
                                   double(solver.h_primitives(c, N_DIM + 1)), double(solver.h_species(c, k_N2)) / rho};
         const double exact[5] = {ref[i][1], ref[i][2], ref[i][3], ref[i][4], ref[i][5 + k_N2]};
-        for (int j = 0; j < 5; j++) {
+        for (size_t j = 0; j < 5; j++) {
             err[j] += std::abs(values[j] - exact[j]) / n_cells;
             scale[j] = std::max(scale[j], std::abs(exact[j]));
         }
@@ -431,7 +431,7 @@ std::vector<double> shock_tube_errors(uint32_t n, const std::string & reconstruc
             Y_min = std::min(Y_min, static_cast<double>(solver.h_species(c, k)) / rho);            Y_max = std::max(Y_max, static_cast<double>(solver.h_species(c, k)) / rho);
         }
     }
-    for (int j = 0; j < 5; j++) err[j] /= scale[j];
+    for (size_t j = 0; j < 5; j++) err[j] /= scale[j];
     return err;
 }
 
@@ -456,14 +456,14 @@ TEST_P(MixtureShockTube, ConvergesToExactSolution) {
     EXPECT_GE(Y_min, -tol(1e-14, 1e-6));
     EXPECT_LE(Y_max, 1.0 + tol(1e-14, 1e-6));
     const char * names[5] = {"rho", "u", "p", "T", "Y_N2"};
-    for (int j = 0; j < 5; j++) {
+    for (size_t j = 0; j < 5; j++) {
         EXPECT_LT(fine[j], 1.2e-2) << names[j];
         EXPECT_GT(std::log2(coarse[j] / fine[j]), teno ? 0.5 : 0.7) << names[j] << ": " << coarse[j] << " -> " << fine[j];
     }
     // Roe and RHLL resolve this 1D problem as sharply as HLLC (within 1% and 4%)
     if (riemann != "HLLC") {
         const std::vector<double> hllc = shock_tube_errors(2 * n, reconstruction, "HLLC", Y_min, Y_max);
-        for (int j = 0; j < 5; j++) EXPECT_LT(fine[j], 1.1 * hllc[j]) << names[j];
+        for (size_t j = 0; j < 5; j++) EXPECT_LT(fine[j], 1.1 * hllc[j]) << names[j];
     }
 }
 
@@ -510,7 +510,7 @@ std::array<double, 2> advection_errors(const std::string & mesh, uint32_t n, con
     Solver exact;
     exact.init(parse_toml(input(1, u * t_end, v * t_end)));
     const auto & names = solver.get_species_names();
-    const size_t k = std::find(names.begin(), names.end(), "H2") - names.begin();
+    const size_t k = static_cast<size_t>(std::find(names.begin(), names.end(), "H2") - names.begin());
     std::array<double, 2> err = {0.0, 0.0};
     const uint32_t n_cells = solver.get_mesh()->n_cells;
     for (uint32_t c = 0; c < n_cells; c++) {
@@ -1069,7 +1069,7 @@ TEST(ReactingTest, SimplerSplittingIsSecondOrderInTime) {
     const uint32_t n = static_cast<uint32_t>(std::lround(t_end / dt));
     const std::vector<double> reference = reacting_wave_temperatures("simpler", dt / 16.0, 16 * n);
     double errors[3];
-    for (int level = 0; level < 3; level++) {
+    for (size_t level = 0; level < 3; level++) {
         const uint32_t m = 1u << level;
         const std::vector<double> T = reacting_wave_temperatures("simpler", dt / m, m * n);
         errors[level] = 0.0;

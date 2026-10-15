@@ -15,8 +15,8 @@
 #include "test_utils.h"
 
 TEST(Physics3DTest, ConservativesCarryAllThreeVelocityComponents) {
-    Euler euler = Euler::from_reference(1.4, 1.0, 1.0, 1.0);
-    const rtype rho = 1.2, u = 0.3, v = -0.4, w = 0.7, p = 2.5;
+    Euler euler = Euler::from_reference(1.4_r, 1.0_r, 1.0_r, 1.0_r);
+    const rtype rho = 1.2_r, u = 0.3_r, v = -0.4_r, w = 0.7_r, p = 2.5_r;
     const rtype W[N_CONSERVATIVE] = {rho, u, v, w, p};
     rtype cons[N_CONSERVATIVE], prim[N_PRIMITIVE], W2[N_CONSERVATIVE];
     euler.compute_conservatives_from_W(cons, W);
