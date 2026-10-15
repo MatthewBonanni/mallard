@@ -131,6 +131,7 @@ void Solver::init_solution_restart() {
     for (auto & writer : data_writers) {
         writer->resume(step, t);
     }
+    probes.resume(step, t);
     initial_state = "restart from " + file + " (step " + std::to_string(step) + ", t = " + logging::real(double(t)) + ")";
 }
 

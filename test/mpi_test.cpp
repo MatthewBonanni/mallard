@@ -546,6 +546,52 @@ TEST(MPITest, StatisticsAndProbesDoNotDependOnTheRankCount) {
     comm::barrier();
 }
 
+TEST(MPITest, PointProbesAndReductionsDoNotDependOnTheRankCount) {
+    // TENO point values (least squares in troubled cells), sample order and
+    // reductions summed on rank 0 in that order: the files match bitwise
+    const std::string dir = io_dir() + "_probes";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    auto probes = [&](const std::string & sub) {
+        const std::string at = "file = \"" + dir + "/" + sub;
+        return "[[probes]]\nname = \"circle\"\n" + at + "/circle.csv\"\nvariables = [\"RHO\", \"U\", \"T\", \"H\"]\n"
+               "sampling = \"point\"\nshape = \"circle\"\ncenter = [0.43, 0.37]\nradius = 0.21\nn_points = 29\n"
+               "interval = 5\nreductions = [\"integral\", \"favre\", \"min\", \"max\", \"rms\"]\nreductions_" + at +
+               "/circle_red.csv\"\n"
+               "[[probes]]\nname = \"line\"\nformat = \"vtp\"\n" + at + "/line.pvd\"\nvariables = [\"P\"]\n"
+               "sampling = \"point\"\nstart = [0.0, 0.4]\nend = [1.0, 0.4]\nn_points = 31\ninterval = 10\n";
+    };
+    auto input = [&](const std::string & sub) {
+        return box_input("cartesian_tri", "type = \"TENO\"\norder = 3\n", EULER,
+                         bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n", "type = \"wall_adiabatic\"\n",
+                             "type = \"extrapolation\"\n"),
+                         20) +
+               probes(sub);
+    };
+    Solver reference;
+    reference.set_distributed(false);
+    reference.init(parse_toml(input("serial")));
+    reference.run();
+    Solver distributed;
+    distributed.init(parse_toml(input("ranks")));
+    distributed.run();
+    comm::barrier();
+    if (comm::is_root()) {
+        auto read = [](const std::string & path) {
+            std::ifstream in(path);
+            std::stringstream ss;
+            ss << in.rdbuf();
+            return ss.str();
+        };
+        for (const char * file : {"circle.csv", "circle_red.csv", "line.pvd", "line_000020.vtp"}) {
+            const std::string a = read(dir + "/serial/" + file);
+            EXPECT_FALSE(a.empty()) << file;
+            EXPECT_EQ(read(dir + "/ranks/" + file), a) << file;
+        }
+    }
+    comm::barrier();
+}
+
 TEST(MPITest, EveryCellIsInExactlyOneOutputPiece) {
     const std::string dir = io_dir() + "_vtu";
     if (comm::is_root()) std::filesystem::remove_all(dir);

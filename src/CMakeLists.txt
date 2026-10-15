@@ -31,6 +31,8 @@ add_library(MallardCore STATIC
     solver/cell_chemistry.cpp
     solver/chemistry_balance.cpp
     solver/chemistry_benchmark.cpp
+    solver/probe_geometry.cpp
+    solver/probes.cpp
     solver/solver.cpp
     solver/solver_chemistry.cpp
     solver/solver_graph.cpp

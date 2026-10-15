@@ -16,6 +16,7 @@ set(MALLARD_TEST_SOURCES
     mesh_block_test.cpp
     distributed_mesh_test.cpp
     statistics_test.cpp
+    probes_test.cpp
     les_test.cpp
     tfles_test.cpp
     synthetic_inflow_test.cpp
