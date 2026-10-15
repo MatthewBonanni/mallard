@@ -784,6 +784,82 @@ TEST(MixtureTest, DoubleFluxKeepsPressureAndVelocityUniformAtContacts) {
     EXPECT_GT(contact_errors("type = \"MUSCL\"\n", false)[0], 1e-3);
 }
 
+namespace {
+
+struct ContactDeviation {
+    double p;       // max |p / p0 - 1|
+    double u;       // max |u / u0 - 1|
+    double energy;  // |E(t) / E(0) - 1| of the total energy
+};
+
+/**
+ * @brief A 300 K slab of H2 or He in air at T_air (x in [0.25, 0.75] of a
+ *        periodic channel, edges tanh profiles of the given width, sharp for
+ *        0), uniform p and u, a quarter flow-through under the hybrid flux with
+ *        the Riemann solver switched off (central everywhere). NaN-safe.
+ */
+ContactDeviation hybrid_contact(const std::string & gas, const std::string & central, bool double_flux,
+                                const std::string & reconstruction, uint32_t n, double width, double T_air = 1200.0,
+                                double cfl = 0.25) {
+    const bool helium = gas == "HE";
+    std::ostringstream s;
+    s << std::setprecision(17);
+    if (width > 0.0) {
+        s << "(0.5 * (tanh((x - 0.25) / " << width << ") - tanh((x - 0.75) / " << width << ")))";
+    } else {
+        s << "(abs(x - 0.5) < 0.25 ? 1 : 0)";
+    }
+    const std::string slab = s.str();
+    const std::string input =
+        "[run]\nt_stop = 2.5e-4\ncfl = " + std::to_string(cfl) + "\n" + mesh_block("cartesian", n, 1, 1.0, 1.0 / n, "[\"x\"]") +
+        "[initialize]\ntype = \"analytical\"\np = \"1.0e5\"\nT = \"" + std::to_string(T_air) + " + (300.0 - " +
+        std::to_string(T_air) + ") * " + slab + "\"\nu = " + velocity("1000.0") + "\n"
+        "X = { " + gas + " = \"" + slab + "\", O2 = \"0.21 * (1 - " + slab + ")\", N2 = \"0.79 * (1 - " + slab +
+        ")\" }\n"
+        "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n" +
+        std::string(N_DIM == 3 ? "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n"
+                                 "[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n"
+                               : "") +
+        "[numerics]\nriemann_solver = \"HLLC\"\nconvective_flux = \"hybrid\"\n" +
+        (double_flux ? "double_flux = true\n" : "") + "[numerics.hybrid]\nsensor_threshold = 1.0\ncentral = \"" +
+        central + "\"\n[numerics.face_reconstruction]\n" + reconstruction +
+        "[output]\ncheck_interval = 1000000\n" + mixture(helium ? SOURCE_DIR + "/mechanisms/he_air.yaml" : H2O2);
+    Solver solver;
+    solver.init(parse_toml(input));
+    const double E0 = double(solver.integrate_conservatives()[N_DIM + 1]);
+    solver.run();
+    ContactDeviation d{0.0, 0.0, std::abs(double(solver.integrate_conservatives()[N_DIM + 1]) / E0 - 1.0)};
+    solver.update_primitives();
+    solver.copy_device_to_host();
+    for (uint32_t c = 0; c < solver.get_mesh()->n_cells; c++) {
+        const double dp = std::abs(double(solver.h_primitives(c, N_DIM)) / 1.0e5 - 1.0);
+        const double du = std::abs(double(solver.h_primitives(c, 0)) / 1000.0 - 1.0);
+        d.p = std::isfinite(dp) ? std::max(d.p, dp) : INFINITY;
+        d.u = std::isfinite(du) ? std::max(d.u, du) : INFINITY;
+    }
+    if (!std::isfinite(d.energy)) d.p = INFINITY;
+    return d;
+}
+
+} // namespace
+
+// WIP (#293): measurements, not yet a test with thresholds
+TEST(MixtureTest, DISABLED_PressureEquilibriumCentralFluxDiagnostics) {
+    for (const std::string gas : {"H2", "HE"}) {
+        for (double T_air : {300.0, 1200.0}) {
+            for (const std::string central : {"KEEP", "PEP"}) {
+                for (double cfl : {0.25}) {
+                    for (uint32_t n : {80u, 160u}) {
+                        const ContactDeviation d = hybrid_contact(gas, central, false, "type = \"MUSCL\"\nlimiter = \"none\"\n", n, 0.02, T_air, cfl);
+                        std::cout << "DIAG " << gas << " Tair=" << T_air << " " << central << " cfl=" << cfl
+                                  << " n=" << n << ": p " << d.p << " u " << d.u << " E " << d.energy << std::endl;
+                    }
+                }
+            }
+        }
+    }
+}
+
 TEST(MixtureTest, DoubleFluxShockTubeStaysAccurateAndReportsItsEnergyError) {
     // Double flux gives up energy conservation in proportion to the jumps of
     // gamma and e0; across the shock tube's waves (all still inside the

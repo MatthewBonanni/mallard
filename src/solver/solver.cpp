@@ -851,6 +851,11 @@ void Solver::init_numerics() {
     if (!(hybrid_threshold >= 0.0_r && hybrid_threshold <= 1.0_r) || !(hybrid_floor >= 0.0_r && hybrid_floor <= 1.0_r)) {
         throw InputError("numerics.hybrid: sensor_threshold and upwind_floor must be in [0, 1].");
     }
+    const std::string central = toml::find_or<std::string>(hybrid_input, "central", "KEEP");
+    if (central != "KEEP" && central != "PEP") {
+        throw InputError("numerics.hybrid.central = \"" + central + "\" is not one of: KEEP, PEP.");
+    }
+    hybrid_pressure_equilibrium = central == "PEP";
 }
 
 void Solver::init_axisymmetric_weights() {
@@ -1041,6 +1046,9 @@ void Solver::allocate_memory() {
         face_thermo = Kokkos::View<rtype **[2][2]>("face_thermo", mesh->n_faces, n_quad);
         face_mdot = Kokkos::View<rtype **>("face_mdot", mesh->n_faces, n_quad);
         species_slots = Kokkos::View<rtype ***, Kokkos::LayoutRight>("species_slots", mesh->n_faces, 2, n_species);
+        if (hybrid_flux && hybrid_pressure_equilibrium && !double_flux) {
+            cell_epsilon = Kokkos::View<rtype **, Kokkos::LayoutRight>("cell_epsilon", mesh->n_cells, n_species);
+        }
         if (double_flux) {
             frozen_thermo = Kokkos::View<rtype *[2]>("frozen_thermo", mesh->n_cells);
             face_energy_1 = Kokkos::View<rtype *>("face_energy_1", mesh->n_faces);
@@ -1431,7 +1439,10 @@ void Solver::print_setup() const {
     logging::items(face_reconstruction->summary());
     logging::item("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
     if (hybrid_flux) {
-        logging::item("Convective flux", "hybrid: KEEP central, Riemann solver where the compression sensor exceeds " +
+        const std::string central = !hybrid_pressure_equilibrium ? "KEEP"
+                                    : (is_mixture() && !double_flux) ? "pressure-equilibrium-preserving (APEC)"
+                                                                     : "pressure-equilibrium-preserving (KEEP-PE)";
+        logging::item("Convective flux", "hybrid: " + central + " central, Riemann solver where the compression sensor exceeds " +
                                              real(double(hybrid_threshold)) + " (upwind floor " +
                                              real(double(hybrid_floor)) + ")");
     }
