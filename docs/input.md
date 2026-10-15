@@ -30,7 +30,7 @@ At least one stop condition is required.
 | `filename` | (`file`) Mallard HDF5 mesh (`.h5` or `.hdf5`, see below), or ASCII Gmsh mesh, format 2.2 or 4.1, of linear triangles and/or quadrilaterals (2D), or tetrahedra, pyramids, prisms and/or hexahedra (3D) |
 | `Nx`, `Ny` | Number of quads in x and y |
 | `Lx`, `Ly` | Domain size; the domain is `[0, Lx] x [0, Ly]` |
-| `cell_order` | How each rank numbers its cells in memory: `hilbert` (default; along a Hilbert curve, owned cells and each halo layer separately), `rcm` (reverse Cuthill-McKee) or `input` (the mesh's order). Results, restart and output files do not depend on it |
+| `cell_order` | How each rank numbers its cells in memory: `hilbert` (default; along a Hilbert curve, owned cells and each halo layer separately) or `input` (the mesh's order, which can be faster on generated meshes, numbered x-first; see `docs/design/performance.md`). Results, restart and output files do not depend on it |
 
 Generated meshes have boundary zones named `left`, `right`, `bottom` and `top`.
 

@@ -65,8 +65,9 @@ One `alltoallv` sends each cell to its owner: its global id, owner, node ids and
 ### 6. Halo
 
 - **Local numbering:**
-  - Cells: `[owned interior | owned near partition boundary | halo layer 1 | ... | halo layer k]`. Owned cells are in Hilbert order within each group. (Implemented so far: owned cells, then each halo layer, each in global id order.)
-  - Faces: faces between owned cells, then faces between an owned and a halo cell, then faces between halo cells that reconstruction needs.
+  - Cells: `[owned | halo layer 1 | ... | halo layer k]`, each group along the Hilbert curve of its cells' vertex averages (`[mesh] cell_order = "hilbert"`, the default; `"input"` keeps global order). Serial runs number their cells the same way, the mesh's order becoming the global ids.
+  - Faces: in the order the local cells reach them, so faces of owned cells come first; each face keeps the orientation of the global numbering (cell 0 is the cell with the lower global id).
+  - Nothing that results depend on follows the local numbering: faces, neighbor lists and stencils are ordered by global ids, and so are the sums that mix cells (characteristic boundaries' transverse fits, the mass-flow force, by fixed-point sums), the image-cell search and the rows of periodic translations. Restart, HDF5 and VTU files are written in global order. Measurements: `performance.md`, "Cell numbering".
   - Every cell and node keeps its global id.
 - **Depth k:** the number of vertex-neighbor layers any reconstruction needs:
 
@@ -78,7 +79,7 @@ One `alltoallv` sends each cell to its owner: its global id, owner, node ids and
 
   TENO's central-stencil gather grows layer by layer until it has enough rows. So the halo is built with a default depth, stencils are computed, and if any stencil reaches the halo frontier the halo is deepened on every rank and the setup after the mesh repeats. This keeps stencils *identical* to the serial ones, which is what makes results rank-count independent.
 - **Construction:** a distributed breadth-first search over vertex neighbors. Layer 1 comes from the node directory (section 5); for each further layer, a rank asks the directory for the cells around the nodes of its previous layer that it has not asked about, then fetches the new cells from the ranks whose blocks hold them. Deepening the halo continues the search from the existing layers rather than starting over.
-- **Exchange plan:** for each neighbor rank, the list of local owned cells to send and of halo cells to receive, sorted by global id on both sides.
+- **Exchange plan:** for each neighbor rank, the list of local owned cells to send and of halo cells to receive, both in the receiver's local order.
 
 ### 7. Time stepping
 

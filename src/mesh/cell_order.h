@@ -24,16 +24,12 @@
 
 /** @brief How a rank numbers its cells (see docs/design/mpi.md, section 6). */
 enum class CellOrder {
-    INPUT,    // as given: global order (owned cells, then each halo layer)
-    HILBERT,  // along the Hilbert curve of the vertex averages
-    RCM,      // reverse Cuthill-McKee on the cells sharing a node
-    RANDOM,   // EXPERIMENT
-    ZFIRST    // EXPERIMENT
+    INPUT,   // as given: global order (owned cells, then each halo layer)
+    HILBERT  // along the Hilbert curve of the vertex averages
 };
 
-static const std::unordered_map<std::string, CellOrder> CELL_ORDERS = {
-    {"input", CellOrder::INPUT}, {"hilbert", CellOrder::HILBERT}, {"rcm", CellOrder::RCM},
-    {"random", CellOrder::RANDOM}, {"zfirst", CellOrder::ZFIRST}};
+static const std::unordered_map<std::string, CellOrder> CELL_ORDERS = {{"input", CellOrder::INPUT},
+                                                                       {"hilbert", CellOrder::HILBERT}};
 
 /** @brief [mesh] cell_order (default hilbert). */
 CellOrder cell_order_of_input(const toml::value & input);

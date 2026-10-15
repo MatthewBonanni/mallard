@@ -288,9 +288,9 @@ TEST(DistributedMeshTest, CellOrdersPermuteEachLayerAndKeepTheMeshByGlobalId) {
         std::set<std::vector<double>> ref_faces;
         for (uint32_t f = 0; f < ref->n_faces; f++) ref_faces.insert(face(*ref, f));
 
-        for (CellOrder order : {CellOrder::HILBERT, CellOrder::RCM}) {
+        {
             Distribution dist;
-            const auto mesh = distributed.build_local_mesh(3, dist, order);
+            const auto mesh = distributed.build_local_mesh(3, dist, CellOrder::HILBERT);
             ASSERT_EQ(mesh->n_cells, ref->n_cells);
             EXPECT_EQ(mesh->n_owned(), ref->n_owned());
             EXPECT_EQ(mesh->n_reconstructed(), ref->n_reconstructed());
