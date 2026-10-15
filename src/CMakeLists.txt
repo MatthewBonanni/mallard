@@ -23,6 +23,7 @@ add_library(MallardCore STATIC
     numerics/teno.cpp
     numerics/teno_setup.cpp
     numerics/time_integrator.cpp
+    numerics/step_control.cpp
     physics/mixture.cpp
     physics/les.cpp
     physics/pasr.cpp
@@ -34,6 +35,7 @@ add_library(MallardCore STATIC
     solver/solver.cpp
     solver/solver_chemistry.cpp
     solver/solver_graph.cpp
+    solver/solver_step_control.cpp
     solver/solver_initialize.cpp
     solver/solver_mixture.cpp
     solver/solver_les.cpp

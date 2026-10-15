@@ -127,6 +127,7 @@ void Solver::init_solution_restart() {
     step = restart.step;
     t = static_cast<rtype>(restart.t);
     statistics.restore(restart, file, t);
+    if (step_controller.enabled()) step_controller.restore(restart.attributes);
     restore_characteristic_state(restart);
     for (auto & writer : data_writers) {
         writer->resume(step, t);
