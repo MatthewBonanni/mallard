@@ -24,10 +24,10 @@ int main(int argc, char * argv[]) {
     if (argc != 3) {
         if (comm::is_root()) {
             std::cerr << "Usage: " << argv[0] << " INPUT OUTPUT.h5\n"
-                      << "  INPUT is a mesh file (Gmsh .msh, CGNS .cgns), or a Mallard input file (.toml)\n"
-                      << "  whose [mesh] table describes the mesh (and its [mesh.transform]). Several\n"
-                      << "  ranks write in parallel (needs parallel HDF5); each reads the whole mesh\n"
-                      << "  file but generates only its block.\n";
+                      << "  INPUT is a mesh file (Gmsh or Fluent .msh, Fluent .cas, CGNS .cgns), or a\n"
+                      << "  Mallard input file (.toml) whose [mesh] table describes the mesh (and its\n"
+                      << "  [mesh.transform]). Several ranks write in parallel (needs parallel HDF5);\n"
+                      << "  each reads the whole mesh file but generates only its block.\n";
         }
         return 1;
     }

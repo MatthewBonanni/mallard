@@ -16,16 +16,24 @@ The geometry is a channel [0, 2] x [0, 1] with a cylinder of radius 0.2 at
   cyl3d_zones.cgns               the 3D mesh as two CGNS zones
   cyl3d_tet.msh, cyl3d_tet.cgns  the 3D geometry in tetrahedra
 
+This script writes the 2D mesh as Fluent (no free tool does; written from
+Gmsh's nodes and elements following the Fluent file format):
+
+  cyl2d_fluent.msh, cyl2d_fluent_bin.msh   ASCII and binary
+
 OpenFOAM (in a container, unless --no-foam) converts Gmsh 2.2 copies with
 gmshToFoam and writes Fluent meshes with foamMeshToFluent:
 
   cyl3d_foam/constant/polyMesh   the 3D mesh
   cyl3d_fluent.msh               the 3D mesh, Fluent ASCII
+  cyl3d_fluent_bin.msh           the same re-encoded as binary sections
   cyl2d_foam/constant/polyMesh   the 2D mesh extruded one cell thick, with
                                  the empty patch "frontAndBack"
 """
 import argparse
 import os
+import re
+import struct
 import shutil
 import subprocess
 import tempfile
@@ -85,6 +93,84 @@ def build(dim, n_layers=2, tets=False, slab=False):
     gmsh.model.mesh.generate(3)
 
 
+def fluent_2d(path):
+    """The current 2D Gmsh mesh as an ASCII Fluent mesh: nodes, cells, and faces (edges) by zone."""
+    tags, xyz, _ = gmsh.model.mesh.getNodes()
+    index = {int(t): i + 1 for i, t in enumerate(tags)}
+    cells = []
+    for etype, _, enodes in zip(*gmsh.model.mesh.getElements(2)):
+        n = gmsh.model.mesh.getElementProperties(etype)[3]
+        cells += [[index[int(t)] for t in enodes[k:k + n]] for k in range(0, len(enodes), n)]
+    edge_cells = {}
+    for c, nodes in enumerate(cells):
+        for k in range(len(nodes)):
+            a, b = nodes[k], nodes[(k + 1) % len(nodes)]
+            edge_cells.setdefault(tuple(sorted((a, b))), []).append((c + 1, (a, b)))
+    edge_zone = {}
+    names = {}
+    for dim, tag in gmsh.model.getPhysicalGroups(1):
+        names[tag] = gmsh.model.getPhysicalName(dim, tag)
+        for entity in gmsh.model.getEntitiesForPhysicalGroup(dim, tag):
+            for etype, _, enodes in zip(*gmsh.model.mesh.getElements(1, entity)):
+                for k in range(0, len(enodes), 2):
+                    edge_zone[tuple(sorted((index[int(enodes[k])], index[int(enodes[k + 1])])))] = tag
+    interior = [e for e, c in edge_cells.items() if len(c) == 2]
+    zones = [(3, "interior", "interior-fluid", 2, interior)]
+    for z, tag in enumerate(sorted(names)):
+        zones.append((4 + z, "wall", names[tag], 3, [e for e, c in edge_cells.items() if len(c) == 1 and edge_zone[e] == tag]))
+    n_faces = sum(len(z[4]) for z in zones)
+    with open(path, "w") as f:
+        f.write('(0 "Mallard test fixture: Fluent 2D mesh written from Gmsh")\n(2 2)\n')
+        f.write(f"(10 (0 1 {len(tags):x} 0 2))\n(10 (1 1 {len(tags):x} 1 2)(\n")
+        for i in range(len(tags)):
+            f.write(f"{xyz[3 * i]:.17g} {xyz[3 * i + 1]:.17g}\n")
+        f.write("))\n")
+        f.write(f"(12 (0 1 {len(cells):x} 0 0))\n(12 (2 1 {len(cells):x} 1 0)(\n")
+        f.write(" ".join("1" if len(c) == 3 else "3" for c in cells) + "\n))\n")
+        f.write(f"(13 (0 1 {n_faces:x} 0 0))\n")
+        first = 1
+        for zid, _, _, bc, edges in zones:
+            f.write(f"(13 ({zid:x} {first:x} {first + len(edges) - 1:x} {bc:x} 2)(\n")
+            for e in edges:
+                (c0, (a, b)), *rest = edge_cells[e]
+                c1 = rest[0][0] if rest else 0
+                f.write(f"{a:x} {b:x} {c0:x} {c1:x}\n")
+            f.write("))\n")
+            first += len(edges)
+        f.write("(45 (2 fluid fluid)())\n")
+        for zid, ztype, name, _, _ in zones:
+            f.write(f"(45 ({zid} {ztype} {name})())\n")
+
+
+def fluent_binary(src, dst):
+    """Re-encode the node (10), cell (12) and face (13) sections of an ASCII Fluent file as binary (3010, 2012, 2013)."""
+    text = open(src).read()
+    out = []
+    pos = 0
+    for m in re.finditer(r"\((1[023]) \(([0-9a-fA-F ]+)\)\s*\(", text):
+        start = m.start()
+        if start < pos:
+            continue
+        index, header = m.group(1), m.group(2)
+        body_end = text.index(")", m.end())
+        values = text[m.end():body_end].split()
+        close = text.index(")", body_end + 1)
+        out.append(text[pos:start])
+        h = header.split()
+        if index == "10":
+            data = struct.pack(f"<{len(values)}d", *map(float, values))
+            out.append(f"(3010 ({header})(".encode().decode("latin-1") + data.decode("latin-1") + ")End of Binary Section 3010)")
+        else:
+            ints = [int(v, 16) for v in values]
+            code = "2012" if index == "12" else "2013"
+            data = struct.pack(f"<{len(ints)}i", *ints)
+            out.append(f"({code} ({header})(" + data.decode("latin-1") + f")End of Binary Section {code})")
+        pos = close + 1
+    out.append(text[pos:])
+    with open(dst, "wb") as f:
+        f.write("".join(out).encode("latin-1"))
+
+
 def write(path, version=4.1):
     gmsh.option.setNumber("Mesh.MshFileVersion", version)
     gmsh.write(path)
@@ -141,6 +227,8 @@ def main():
     build(2)
     write(p("cyl2d.msh"))
     gmsh.write(p("cyl2d.cgns"))
+    fluent_2d(p("cyl2d_fluent.msh"))
+    fluent_binary(p("cyl2d_fluent.msh"), p("cyl2d_fluent_bin.msh"))
     gmsh.model.mesh.partition(2)
     gmsh.write(p("cyl2d_zones.cgns"))
     gmsh.model.mesh.unpartition()
@@ -172,6 +260,7 @@ def main():
         work, fluent = foam(args.engine, args.image, tmp, os.path.join(tmp, "cyl3d_22.msh"), "cyl3d_foam")
         shutil.move(os.path.join(tmp, "cyl3d_foam"), p("cyl3d_foam"))
         shutil.copy(fluent, p("cyl3d_fluent.msh"))
+        fluent_binary(p("cyl3d_fluent.msh"), p("cyl3d_fluent_bin.msh"))
         foam(args.engine, args.image, tmp, os.path.join(tmp, "cyl2d_slab_22.msh"), "cyl2d_foam", "frontAndBack")
         shutil.move(os.path.join(tmp, "cyl2d_foam"), p("cyl2d_foam"))
     shutil.rmtree(tmp)
