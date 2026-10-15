@@ -506,9 +506,9 @@ TEST(TENO3DTroubled, FaceValuesDoNotDependOnHowManyTroubledCellsARoundHolds) {
         double r2 = 0.0;
         for (int d = 0; d < 3; d++) r2 += std::pow(double(mesh->h_cell_coords(c, d)) - 0.3, 2);
         const bool inside = r2 < 0.16;
-        h_W(c, 0) = inside ? 1.0 : 0.125;
-        for (int d = 0; d < 3; d++) h_W(c, 1 + d) = 0.1 * double(mesh->h_cell_coords(c, d));
-        h_W(c, 4) = inside ? 1.0 : 0.1;
+        h_W(c, 0) = inside ? 1.0_r : 0.125_r;
+        for (int d = 0; d < 3; d++) h_W(c, 1 + d) = static_cast<rtype>(0.1 * double(mesh->h_cell_coords(c, d)));
+        h_W(c, 4) = inside ? 1.0_r : 0.1_r;
     }
     Kokkos::deep_copy(W, h_W);
     for (const int order : {3, 5, 6}) {
@@ -526,8 +526,8 @@ TEST(TENO3DTroubled, FaceValuesDoNotDependOnHowManyTroubledCellsARoundHolds) {
             const char * p = reinterpret_cast<const char *>(h.data());
             return std::vector<char>(p, p + h.span() * sizeof(rtype));
         };
-        const auto rounds = face_values(0.001);
-        EXPECT_TRUE(rounds == face_values(1.0)) << "order " << order;
+        const auto rounds = face_values(0.001_r);
+        EXPECT_TRUE(rounds == face_values(1.0_r)) << "order " << order;
     }
 }
 

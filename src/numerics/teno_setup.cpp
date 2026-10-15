@@ -3018,7 +3018,7 @@ class Setup3D {
                 double xc[3];
                 for (int a = 0; a < 3; a++) xc[a] = double(h.cell_coords(c, a));
                 const double hc = h.cell_h(c);
-                std::vector<double> sums(n_moments, 0.0);
+                std::vector<double> sums(static_cast<size_t>(n_moments), 0.0);
                 double vol = 0.0, px[MAX_NM], py[MAX_NM], pz[MAX_NM];
                 for (size_t q = 0; q < w.size(); q++) {
                     px[0] = py[0] = pz[0] = 1.0;
@@ -3027,7 +3027,7 @@ class Setup3D {
                         py[k] = py[k - 1] * (x[q][1] - xc[1]) / hc;
                         pz[k] = pz[k - 1] * (x[q][2] - xc[2]) / hc;
                     }
-                    int k = 0;
+                    size_t k = 0;
                     for (int a = 0; a < nm; a++) {
                         for (int b = 0; a + b < nm; b++) {
                             for (int e = 0; a + b + e < nm; e++) sums[k++] += w[q] * px[a] * py[b] * pz[e];
@@ -3035,7 +3035,7 @@ class Setup3D {
                     }
                     vol += w[q];
                 }
-                for (int k = 0; k < n_moments; k++) h_moments(c, k) = sums[k] / vol;
+                for (size_t k = 0; k < sums.size(); k++) h_moments(c, k) = sums[k] / vol;
             });
             Kokkos::deep_copy(device.moments, h_moments);
         }
@@ -3226,10 +3226,10 @@ class Setup3D {
         /** @brief Upper bound on the teams of the device kernel resident at once. */
         static size_t resident_teams([[maybe_unused]] const size_t shared_bytes) {
             const auto space = Kokkos::DefaultExecutionSpace();
-            size_t teams = space.concurrency() / TEAM_SIZE;
+            size_t teams = static_cast<size_t>(space.concurrency()) / TEAM_SIZE;
 #if defined(KOKKOS_ENABLE_CUDA)
             const cudaDeviceProp & prop = space.cuda_device_prop();
-            const size_t per_sm = std::min<size_t>(prop.maxThreadsPerMultiProcessor / TEAM_SIZE,
+            const size_t per_sm = std::min<size_t>(static_cast<size_t>(prop.maxThreadsPerMultiProcessor) / TEAM_SIZE,
                                                    prop.sharedMemPerMultiprocessor / std::max<size_t>(shared_bytes, 1));
             teams = std::min(teams, size_t(prop.multiProcessorCount) * std::max<size_t>(per_sm, 1));
 #endif
@@ -3353,7 +3353,7 @@ class Setup3D {
 
         teno::Moments moments(const uint32_t n_rows) const {
             if (n_rows == device.moments.extent(0)) return device.moments;
-            teno::Moments out(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_moments"), n_rows, tables.n_moments);
+            teno::Moments out(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_moments"), n_rows, static_cast<size_t>(tables.n_moments));
             Kokkos::deep_copy(out, Kokkos::subview(device.moments, std::make_pair(0u, n_rows), Kokkos::ALL()));
             return out;
         }
