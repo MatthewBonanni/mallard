@@ -36,8 +36,8 @@ struct ThickenedFlame {
     double T_u = 0.0, T_b = 0.0;
     double n_res = 5.0;
     enum class Efficiency : uint8_t { NONE, CHARLETTE, DYNAMIC };
-    Efficiency efficiency = Efficiency::CHARLETTE;
-    double beta = 0.5;  // DYNAMIC: the dynamic procedure's latest exponent
+    Efficiency efficiency = Efficiency::DYNAMIC;
+    double beta = 0.0;  // CHARLETTE: input (default 0.5); DYNAMIC: the dynamic procedure's latest exponent
     bool eddy_viscosity_velocity = false;  // u' = C_u nu_t / Delta instead of Colin et al.'s operator
     double C_u = 28.0;
 

@@ -32,6 +32,8 @@ ThickenedFlame flame() {
     tf.s_L = 2.0;
     tf.T_u = 300.0;
     tf.T_b = 2300.0;
+    tf.efficiency = ThickenedFlame::Efficiency::CHARLETTE;
+    tf.beta = 0.5;
     return tf;
 }
 
@@ -132,7 +134,8 @@ TEST(ThickenedFlame, EddyViscosityVelocitySetsTheEfficiency) {
     // One step of 1e-13 s: the fields of the step start and the coefficients of its end agree to ~1e-9
     std::string input = uniform_box("n_steps = 1\ndt = 1e-13\n",
                                     "[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\ns_L = 2.0\nT_unburnt = 0.0\n"
-                                    "T_burnt = 4000.0\nsubgrid_velocity = \"eddy_viscosity\"\nC_u = 26.0\n");
+                                    "T_burnt = 4000.0\nefficiency = \"charlette\"\n"
+                                    "subgrid_velocity = \"eddy_viscosity\"\nC_u = 26.0\n");
     const std::string still = N_DIM == 3 ? "u = [\"0.0\", \"0.0\", \"0.0\"]\n" : "u = [\"0.0\", \"0.0\"]\n";
     input.replace(input.find(still), still.size(),
                   N_DIM == 3 ? "u = [\"30 * sin(157.08 * y) * cos(78.54 * z)\", \"25 * sin(157.08 * z + 0.4) * cos(157.08 * x)\", "
@@ -167,7 +170,7 @@ namespace {
 /**
  * @brief A periodic box of cubes (squares in 2D) of side h * scale with two flame fronts at rest, x = 16 h and 48 h,
  *        displaced by amplitude * h sin(2 pi y / 12 h) and of thickness 2 h; delta_L = h so that F = n_res = 5.
- *        One step of 1e-13 s computes the efficiency of the initial state.
+ *        One step of 1e-13 s computes the (default, dynamic) efficiency of the initial state.
  */
 std::unique_ptr<Solver> corrugated_flames(const double amplitude, const double scale) {
     const double h = 1e-3 * scale;
@@ -192,8 +195,7 @@ std::unique_ptr<Solver> corrugated_flames(const double amplitude, const double s
       << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
       << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
       << "[chemistry]\n[output]\ncheck_interval = 1000000\n[les]\n" << (N_DIM == 3 ? "model = \"sigma\"\n" : "model = \"vreman\"\n")
-      << "[les.combustion]\nmodel = \"tfles\"\ndelta_L = " << h << "\ns_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2300.0\n"
-      << "efficiency = \"dynamic\"\n";
+      << "[les.combustion]\nmodel = \"tfles\"\ndelta_L = " << h << "\ns_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2300.0\n";
     auto solver = std::make_unique<Solver>();
     solver->init(parse_toml(s.str()));
     solver->run();

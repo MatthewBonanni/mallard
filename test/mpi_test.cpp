@@ -284,18 +284,17 @@ TEST(MPITest, LargeEddySimulationMatchesSerial) {
 }
 
 TEST(MPITest, ThickenedFlameMatchesSerial) {
-    // The vorticity and the flame fields are exchanged to the halo once per step
+    // The dynamic efficiency's test filter passes exchange the filtered field and its exponent is an exact
+    // domain sum; Charlette's efficiency exchanges the vorticity; the flame fields are exchanged once per step
+    const std::string flame = "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
+                              "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n";
     for (const std::string coupling : {"strang", "simpler"}) {
         expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\ncoupling = \"" + coupling + "\"\n",
-                                            "navier_stokes") +
-                              "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
-                              "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n");
+                                            "navier_stokes") + flame,
+                              [](const Solver & s) { EXPECT_GT(s.tfles_beta(), 0.0); });
     }
-    // The dynamic efficiency's test filter passes exchange the filtered field; its exponent is an exact domain sum
-    expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes") +
-                              "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
-                              "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\nefficiency = \"dynamic\"\n",
-                          [](const Solver & s) { EXPECT_GT(s.tfles_beta(), 0.0); });
+    expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes") + flame +
+                          "efficiency = \"charlette\"\n");
 }
 
 TEST(MPITest, HybridConvectiveFluxMatchesSerial) {

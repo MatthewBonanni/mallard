@@ -39,7 +39,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 **Large-eddy simulation** ([design](docs/design/les.md))
 - Explicit LES: Sigma (default), WALE, Vreman or Smagorinsky eddy viscosity for single gases and mixtures, with Scotti's filter width on anisotropic cells and an opt-in dynamic constant
 - Kinetic-energy-preserving hybrid convective flux, with the Riemann solver only at compressions, and a run-time dissipation budget that separates the model's, the scheme's and molecular dissipation
-- Thickened flame (TFLES) with dynamic thickening and Charlette efficiency; partially stirred reactor (PaSR) closure, experimental
+- Thickened flame (TFLES) with dynamic thickening and a dynamic efficiency (no model constant); partially stirred reactor (PaSR) closure, experimental
 - Synthetic turbulent inflow: a digital filter with prescribed Reynolds stresses and length scales, or the statistics of a precursor run, bitwise the same on any number of ranks ([design](docs/design/synthetic_inflow.md))
 - Channel flow at Re<sub>τ</sub> = 395 and 590: Re<sub>τ</sub> within 0.7% and 1.6% of the DNS of Moser, Kim & Mansour
 

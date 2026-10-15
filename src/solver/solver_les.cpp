@@ -712,10 +712,9 @@ void Solver::update_dynamic_efficiency() {
                          DynamicEfficiencyFunctor{tf, les_delta, mesh->cell_volume, tfles_test_width2, a,
                                                   tfles_test_passes, tfles_dynamic_terms});
     const auto [resolved, test, log_gamma] = exact_sums(tfles_dynamic_terms, n_owned, is_distributed());
-    // beta = ln(<hat(|grad c|)> / <|grad hat(c)|>) / <ln gamma>; a field without a flame keeps the previous one
-    if (test > 0.0 && log_gamma > 0.0) {
-        thickened_flame.beta = std::clamp(std::log(resolved / test) / (log_gamma / test), 0.0, 1.0);
-    }
+    // beta = ln(<hat(|grad c|)> / <|grad hat(c)|>) / <ln gamma>, a function of the state alone (restarts reproduce)
+    thickened_flame.beta =
+        test > 0.0 && log_gamma > 0.0 ? std::clamp(std::log(resolved / test) / (log_gamma / test), 0.0, 1.0) : 0.0;
 }
 
 void Solver::init_dynamic_efficiency() {

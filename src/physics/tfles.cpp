@@ -23,7 +23,7 @@ ThickenedFlame ThickenedFlame::from_input(const toml::value & table) {
     tf.T_u = find_double(table, "T_unburnt");
     tf.T_b = find_double(table, "T_burnt");
     tf.n_res = find_double_or(table, "n_res", 5.0);
-    const std::string efficiency = toml::find_or<std::string>(table, "efficiency", "charlette");
+    const std::string efficiency = toml::find_or<std::string>(table, "efficiency", "dynamic");
     if (efficiency == "charlette") {
         tf.efficiency = Efficiency::CHARLETTE;
     } else if (efficiency == "dynamic") {

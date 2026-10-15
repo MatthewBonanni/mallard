@@ -56,7 +56,7 @@ closure for the filtered reaction rates.
 | 5 | Eddy viscosity per cell from the viscous cell gradients, averaged to faces; zero on wall faces | Per face from face gradients | One evaluation per cell; enters the time step and output; consistent across ranks |
 | 6 | A **kinetic-energy budget diagnostic** that measures the numerical dissipation of resolved kinetic energy against the SGS and molecular dissipation at run time | Inferring numerical dissipation from -dK/dt after the fact | Proves at every output which term dissipates the energy; needs no reference |
 | 7 | A **low-dissipation convective flux**: a kinetic-energy-preserving (KEEP) central flux blended with the Riemann solver by a compression-only Ducros sensor | Lower TENO cutoff; Riemann solvers with scaled dissipation only; artificial viscosity | Upwind Riemann fluxes dissipate resolved energy at the grid scale at a rate comparable to the SGS model; the KEEP flux adds none, and shocks keep the Riemann solver |
-| 8 | **Thickened flame (TFLES)** with dynamic thickening and the Charlette efficiency (beta = 0.5), Colin's operator for u'_Delta, as the primary combustion closure | PaSR; quasi-laminar | Works with finite-rate mechanisms and molecular transport unchanged; keeps the laminar flame speed exactly; explicit and well validated for premixed LES |
+| 8 | **Thickened flame (TFLES)** with dynamic thickening as the primary combustion closure; since #294 the **dynamic efficiency** `E = F^beta` (Charlette et al. 2002; Wang et al. 2011) by default, the Charlette efficiency (beta = 0.5) with Colin's u'_Delta as an option | PaSR; quasi-laminar | Works with finite-rate mechanisms and molecular transport unchanged; keeps the laminar flame speed exactly; explicit and well validated for premixed LES. Colin's u' doubles S_T at Delta = 1.6 delta_L; the dynamic exponent needs no u' and no constant (section 8.3) |
 | 9 | PaSR as an optional second closure, later | None; quasi-laminar | Covers non-premixed and MILD regimes; shares TFLES's per-cell rate scaling |
 | 10 | Chemistry rates scaled per cell by advancing each Strang reactor over `s dt` | Scaling the rates inside the kinetics | The constant-volume reactor is autonomous, so this is exact; no change to the kinetics or Jacobian |
 
@@ -567,14 +567,42 @@ the current state, so restarts reproduce):
   `u'_Delta` from the eddy viscosity (`nu_t / (C Delta)`), which with Sigma
   is also dilatation-free for planar flames, local and cheaper; kept as an
   option if the Laplacian proves noisy on tetrahedra.
+- **Dynamic efficiency** (`efficiency = "dynamic"`, the default since
+  #294; Charlette, Meneveau & Veynante 2002, part II; Wang, Boileau &
+  Veynante 2011): Charlette's saturated power law at `Delta_e = F
+  delta_L`, `E = (Delta_e / delta_L)^beta = F^beta`, with `beta` from the
+  flame-surface identity between the combustion filter and a test filter
+  of width `gamma Delta_e`: the total surface is the same at both widths,
+  `<E_Delta |grad c|> = <E_gamma Delta |grad hat(c)|>`, so with `beta`
+  uniform `gamma^beta = <hat(|grad c|)> / <|grad hat(c)|>`. `c` is the
+  sensor's progress variable; `|grad c|` its least-squares gradient on the
+  vertex-neighbor stencil. The test filter is `n` passes of the volume
+  average over the cell and its vertex neighbors (the dynamic SGS
+  procedure's filter, section 2.5), each of squared width `12 / d
+  tr(cov)` (`8 h^2` on cubes); `n` (fixed at setup) is the smallest that
+  makes `n` times that width reach `Delta_e^2` on average over the
+  thickened cells (4 on uniform hexahedra at `n_res = 5`), and each cell's
+  `gamma^2 = 1 + n width^2 / Delta_e^2` (`Delta_e = F_max delta_L`; 1.51 on
+  cubes). The averages `<.>` are global, over the cells the mesh thickens
+  (`F_max > 1`), summed exactly in fixed point like the dynamic SGS
+  constant, so `beta` does not depend on the rank count; `ln gamma` enters
+  `|grad hat(c)|`-weighted. `beta` is clipped to [0, 1] (fractal dimension
+  2 to 3), and 0 when no flame is resolved, so it is a function of the
+  state alone and restarts reproduce. No
+  subgrid velocity and no constant: a flat resolved flame gives `beta = 0`
+  and `E = 1`. Cost per step: one gradient of `c`, `n` filter passes with a
+  halo exchange each, one gradient of `hat(c)` and one fixed-point
+  reduction of three sums (the Colin operator's two vorticity passes are
+  skipped). The integrals file gets a `tf_beta` column.
 - **Transport**: species diffusivities and the conductivity become
   `E F D_k` and `E F lambda`, and the SGS diffusivities `(1 - Omega) D_t`
   (the thickened flame is resolved, so its SGS transport is in `E`);
   viscosity is not thickened.
 - **Chemistry**: rates `E omega / F`, see 6.4.
 - **Inputs** (`[les.combustion]`): `model = "tfles"`, `delta_L`, `s_L`,
-  `T_unburnt`, `T_burnt`, optional `n_res` (5), `beta` (0.5),
-  `efficiency = "charlette" | "none"`.
+  `T_unburnt`, `T_burnt`, optional `n_res` (5),
+  `efficiency = "dynamic" | "charlette" | "none"`; with `charlette`, `beta`
+  (0.5), `subgrid_velocity` and `C_u`.
 
 ### 6.4 Chemistry rate scaling (decision 10)
 
@@ -596,7 +624,8 @@ chemistry stays bitwise independent of rank count and team width.
 - **Determinism**: `F`, `E`, `Omega` are per-cell functions of the state and
   of its gradients over the local stencil, exchanged to the halo by the same
   exchange as the state; the result is bitwise independent of the rank
-  count. No reduction enters the model.
+  count. The only reduction, the dynamic efficiency's three domain sums, is
+  exact in fixed point.
 
 ### 6.6 As implemented (stage 5)
 
@@ -880,7 +909,7 @@ over the window. LES (`les.toml`): the same initial field box-filtered to
 `Delta = 4, 8, 16` DNS cells (0.40, 0.80, 1.60 `delta_L`; `F = 2, 4, 8`
 at `n_res = 5`), domains extended on the burnt side so the thickened
 burnt-gas profile is not truncated. Variants: TFLES with Colin's subgrid
-velocity (the default), TFLES with `u' = C_u nu_t / Delta` (`C_u = 28`),
+velocity (the default until #294), TFLES with `u' = C_u nu_t / Delta` (`C_u = 28`),
 TFLES with `E = 1`, quasi-laminar (Sigma model, no flame model), and no
 model at all. Laminar check: the thickened laminar flames in the same
 domains give `S_T / S_L` = 0.98-1.03.
@@ -888,7 +917,7 @@ domains give `S_T / S_L` = 0.98-1.03.
 `S_T / S_L` and its error against the DNS (1.132 over 0.2-0.4 ms; 1.233
 over 0.3-0.4 ms, when the wrinkling has developed):
 
-| `Delta / delta_L` | Colin (default) | `C_u = 28` | `E = 1` | quasi-laminar | no model |
+| `Delta / delta_L` | Colin (default until #294) | `C_u = 28` | `E = 1` | quasi-laminar | no model |
 |---|---|---|---|---|---|
 | 0.4 (`F = 2`) | 1.056 (-6.7%) / 1.114 (-9.7%) | 1.065 (-5.9%) / 1.126 (-8.7%) | 1.050 (-7.2%) | 1.088 (-3.9%) / 1.156 (-6.2%) | 1.086 (-4.0%) |
 | 0.8 (`F = 4`) | 1.053 (-6.9%) / 1.136 (-7.9%) | 1.034 (-8.6%) / 1.082 (-12%) | 0.985 (-13%) | 1.166 (+3.0%) / 1.265 (+2.6%) | 1.164 (+2.8%) |
@@ -938,7 +967,7 @@ variants. The turbulence is weaker and the flame stays nearly flat (DNS
 resolved surface 0.97-1.00, `S_T / S_L` = 0.996 over 0.15-0.35 ms), so the
 case tests whether a model invents wrinkling that is not there:
 
-| `Delta / delta_L` | Colin (default) | `C_u = 28` | `E = 1` | no model |
+| `Delta / delta_L` | Colin (default until #294) | `C_u = 28` | `E = 1` | no model |
 |---|---|---|---|---|
 | 0.4 | 0.990 (-0.5%) | 0.991 (-0.5%) | 0.991 (-0.5%) | 0.989 (-0.6%) |
 | 0.8 | 0.960 (-3.6%) | 0.974 (-2.2%) | 0.975 (-2.0%) | 0.989 (-0.7%, rms 46%) |
@@ -953,14 +982,80 @@ In the weak turbulence the SGS dissipation is small and `eps_num` is
 negative (the scheme adds no dissipation of its own); `eps_num <= 0.5
 eps_sgs` holds for every TFLES run of both cases.
 
-**Decision.** Colin's operator stays the default (it is the published
-model) and `subgrid_velocity = "eddy_viscosity"` (`C_u = 28`) is an
+**Decision (#222).** Colin's operator stayed the default (the published
+model) and `subgrid_velocity = "eddy_viscosity"` (`C_u = 28`) became an
 opt-in. Colin's efficiency overpredicts the turbulent flame speed by about
 a factor of 2 at `Delta = 1.6 delta_L` (`F = 8`) in both cases, and is
-within 10% for `Delta <= 0.8 delta_L`; for coarser meshes use
-`eddy_viscosity` or `efficiency = "none"`. `C_u = 28` is calibrated a
+within 10% for `Delta <= 0.8 delta_L`. `C_u = 28` is calibrated a
 priori on case 1 and only checked for the absence of overshoot on case 2;
 `S_T` changes by -3% to +13% over the a priori range `C_u` = 22-39 (case 1, `F = 8`).
+Superseded by the dynamic efficiency below.
+
+#### Dynamic efficiency (#294)
+
+`efficiency = "dynamic"` (section 6.3: `E = F^beta`, `beta` from the
+flame-surface identity with a test filter of `gamma = 1.51`, no subgrid
+velocity, no constant), on the same LES of both cases, same initial states
+(case 1: the archived ones; case 2: regenerated from its HIT pre-run, seed
+2 with `u' = 3.4` m/s, whose LES initial kinetic energies match the
+archived runs' to 1e-12). Colin's `F = 8` runs were repeated on the same
+build and reproduce 2.240 and 1.964.
+
+`S_T / S_L` against the DNS (case 1: 1.132 over 0.2-0.4 ms / 1.233 over
+0.3-0.4 ms; case 2: 0.996 over 0.15-0.35 ms / 1.000 over 0.25-0.35 ms),
+with the mean `E` in the flame:
+
+| Case, `Delta / delta_L` | dynamic | Colin | `C_u = 28` | `E = 1` |
+|---|---|---|---|---|
+| 1, 0.4 (`F = 2`) | 1.082 (-4.4%) / 1.151 (-6.7%), `E` 1.03 | -6.7% / -9.7% | -5.9% / -8.7% | -7.2% |
+| 1, 0.8 (`F = 4`) | 1.068 (-5.7%) / 1.119 (-9.2%), `E` 1.07 | -6.9% / -7.9% | -8.6% / -12% | -13% |
+| 1, 1.6 (`F = 8`) | 1.045 (-7.7%) / 1.066 (-14%), `E` 1.09 | **+98%** / +91% | -11% / -16% | -16% |
+| 2, 0.4 | 0.996 (0.0%) / 0.996 (-0.4%), `E` 1.005 | -0.5% | -0.5% | -0.5% |
+| 2, 0.8 | 0.985 (-1.1%) / 0.971 (-2.9%), `E` 1.01 | -3.6% | -2.2% | -2.0% |
+| 2, 1.6 | 1.055 (+5.9%) / 1.107 (+11%), `E` 1.05 | **+97%** | -0.2% | +0.5% |
+
+- The overshoot is gone on both cases without calibration: within 8% of
+  the DNS at every width over the main windows (14% and 11% over the late
+  windows at `F = 8`), against Colin's factor of 2 at `F = 8`. On case 1,
+  where the flame wrinkles, it is closer to the DNS than `C_u = 28` and `E
+  = 1` at every width and window, and than Colin except at `F = 4` over the
+  late window. On the nearly flat case 2 it adds 5-11% at `F = 8`, where
+  `C_u = 28` and `E = 1` add nothing: the remaining bias.
+- `beta` (integrals column `tf_beta`) is 0.01-0.10 on case 1 and
+  0.005-0.04 on case 2, rising as the flame wrinkles; `|eps_num /
+  eps_sgs|` (window means) 0.03 / 0.07 / 0.12 (case 1) and 0.38 / 0.26 /
+  0.46 (case 2; `E = 1` 0.37, `C_u = 28` 0.40 at `F = 8`).
+- **A priori** (`tools/tfles_apriori.py` on the extracted DNS snapshots:
+  the DNS top-hat filtered at `F delta_L` on the LES mesh, the model's test
+  filter and global sums), against the wrinkling factor `Xi` of the DNS
+  surface at the scale `F delta_L`:
+
+  | Snapshot | `Xi` (`F` = 2 / 4 / 8) | dynamic `E` |
+  |---|---|---|
+  | case 1, 0.2 ms | 1.004 / 1.011 / 1.025 | 1.009 / 1.044 / 1.135 |
+  | case 1, 0.4 ms | 1.082 / 1.203 / 1.404 | 1.095 / 1.332 / 1.368 |
+  | case 2, 0.2 ms | 1.002 / 1.004 / 1.007 | 1.006 / 1.026 / 1.114 |
+  | case 2, 0.35 ms | 1.009 / 1.023 / 1.036 | 1.015 / 1.043 / 1.157 |
+
+  It follows the DNS's wrinkling as it grows (Colin's `E` at 0.125-0.2 ms:
+  1.01 / 1.16 / 1.80) but overpredicts by up to 11% at `F = 8` when the
+  flame is nearly flat: `Delta_e = 8 delta_L` exceeds the integral scale
+  (`l_t` = 2.3-2.4 `delta_L`) and the test-filtered width `gamma Delta_e`
+  = 12 `delta_L` is that of the box (9.6-12.8 `delta_L`), so the surface it removes is large-scale tilt of the
+  front, which the power law extrapolates down to `delta_L`. The thickened
+  LES flame resolves less wrinkling than the filtered DNS, so a posteriori
+  `E` is lower (1.05-1.09 at `F = 8`).
+- Cost (the `flame_3d` benchmark, 221,184 hexahedra, one A100, two runs
+  each): 14.7 ms per step outside the chemistry against 13.6 ms with
+  Colin's operator or `eddy_viscosity` (+8%); the chemistry's cost follows
+  `E / F`.
+
+**Decision (#294).** The dynamic efficiency is the default: it removes
+Colin's overshoot on both cases with no constant to calibrate and is
+within 8% of the DNS at `Delta = 0.4-1.6 delta_L`. Colin
+(`efficiency = "charlette"`) and `C_u = 28` (`subgrid_velocity =
+"eddy_viscosity"`) remain available; the Volvo input and the `flame_3d`
+benchmark keep `charlette` with `eddy_viscosity`.
 
 #### Results: non-premixed flame in decaying turbulence (PaSR, experimental)
 
