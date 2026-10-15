@@ -51,7 +51,8 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 
 **Performance and parallelism**
 - [Kokkos](https://github.com/kokkos/kokkos) backends: Serial, Threads, OpenMP, CUDA (NVIDIA) and HIP (AMD); double or single precision
-- MPI with multi-jagged (cuboid blocks), Hilbert-curve or graph (dKaMinPar) partitions, GPU-aware halo exchange overlapped with computation: 93% weak-scaling efficiency on 16 A100 GPUs
+- MPI with multi-jagged (cuboid blocks), Hilbert-curve or graph (dKaMinPar) partitions, GPU-aware halo exchange overlapped with computation: 93% (2D) and 91% (3D) weak-scaling efficiency on 16 A100 GPUs
+- 50 million cell time steps per second on one A100 (fifth-order TENO-E, 2D Euler)
 - No rank holds the whole mesh (HDF5 or generated meshes)
 - Bitwise-identical results on any number of threads or MPI ranks; restarts bit for bit, also on a different number of ranks
 - Stiff chemistry on GPUs: a warp or wider team per cell and a sparse LU for large mechanisms, load-balanced across MPI ranks
@@ -69,7 +70,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
   - Sphere wake at Re = 300: Strouhal number and drag within 3% and 2% of Johnson & Patel
   - Compressible isotropic turbulence: enstrophy within 2.4% of the filtered DNS of Johnsen et al.
   - CJ detonation speed within 0.01%; H2/air flame speeds within 0.81% of Cantera from φ = 0.6 to 1.4
-- Over 300 unit and regression tests: exact Riemann solutions, design order, conservation, bitwise MPI and restart reproducibility
+- Over 400 unit and regression tests: exact Riemann solutions, design order, conservation, bitwise MPI and restart reproducibility
 - CI on every code change (2D, 3D, MPI on 1-4 ranks, single precision, GCC and Clang, warnings as errors); nightly sanitizers; a performance suite with per-hardware baselines
 
 The sources of every method and of the validation data are listed in [docs/references.md](docs/references.md).
