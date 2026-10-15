@@ -205,7 +205,7 @@ void cholesky_solve(const T L[N][N], T * x) {
         x[p] /= L[p][p];
     }
     for (int p = N - 1; p >= 0; p--) {
-        for (uint8_t k = p + 1; k < N; k++) x[p] -= L[k][p] * x[k];
+        for (int k = p + 1; k < N; k++) x[p] -= L[k][p] * x[k];
         x[p] /= L[p][p];
     }
 }

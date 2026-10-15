@@ -190,8 +190,9 @@ struct FaceThermoFunctor {
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t f) const {
         for (uint8_t side = 0; side < 2; side++) {
-            const int32_t c = values.cells_of_face(f, side);
-            if (c < 0) continue;
+            const int32_t c_index = values.cells_of_face(f, side);
+            if (c_index < 0) continue;
+            const uint32_t c = static_cast<uint32_t>(c_index);
             rtype r[N_DIM];
             values.offset(c, f, side, r);
             face_thermo(f, 0, side, 0) = values.value(c, n_species, r);
