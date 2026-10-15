@@ -71,6 +71,31 @@ corners; high-order boundary elements (`line3`, `line4` in 2D; `triangle6`,
 `triangle9`, `triangle10`, `quadrangle8`, `quadrangle9`, `quadrangle16` in 3D)
 curve their faces (see curved boundaries below).
 
+`[mesh.transform]` maps the nodes of a mesh file as it is read,
+`x -> R (S x) + t`: scale first, then rotate about the origin, then translate.
+Boundary zones, high-order nodes and cell types are unchanged; mirroring scales
+(negative factors) are allowed. `[[periodic]]` translations, `[[mesh.curved]]`
+shapes, probes and every other coordinate in the input refer to the
+transformed mesh. `mallard-mesh-convert input.toml mesh.h5` writes the
+transformed mesh.
+
+| Key | Description |
+|---|---|
+| `scale` | A factor for every axis (e.g. `0.001` for a mesh in mm), or one per axis `[s_x, s_y]` (`[s_x, s_y, s_z]` in 3D); nonzero |
+| `rotate` | 2D: angle in degrees, counterclockwise. 3D: `{axis = [a_x, a_y, a_z], angle = degrees}`, right-handed about the axis through the origin |
+| `translate` | `[t_x, t_y]` (`[t_x, t_y, t_z]` in 3D) |
+
+```toml
+[mesh]
+type = "file"
+filename = "nozzle_mm.msh"
+
+[mesh.transform]
+scale = 0.001
+rotate = {axis = [0, 0, 1], angle = 90}
+translate = [0.0, 0.0, 0.05]
+```
+
 In a distributed run every rank reads a Gmsh file whole (keeping only its
 share), so large meshes should be converted to Mallard's HDF5 mesh format
 (builds with `-DMallard_ENABLE_HDF5=ON`), of which each rank reads only its
