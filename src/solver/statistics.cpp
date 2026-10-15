@@ -25,8 +25,8 @@
 int32_t CellSampler::code(const std::string & name, const std::vector<std::string> & species_names,
                           const std::string & key) {
     if (name == "RHO") return RHO;
-    for (int32_t i = 0; i < N_PRIMITIVE; i++) {
-        if (PRIMITIVE_NAMES[i] == name) return FIRST_PRIMITIVE + i;
+    for (size_t i = 0; i < N_PRIMITIVE; i++) {
+        if (PRIMITIVE_NAMES[i] == name) return FIRST_PRIMITIVE + static_cast<int32_t>(i);
     }
     for (size_t k = 0; k < species_names.size(); k++) {
         if ("Y_" + species_names[k] == name) return FIRST_SPECIES + static_cast<int32_t>(k);
@@ -130,7 +130,7 @@ void Statistics::sample(rtype t, const CellSampler & sampler, uint32_t n_owned) 
     const auto C = cov;
     const auto code = codes;
     const auto pair = pairs;
-    const uint32_t n_fields = fields.size(), n_products = products.size();
+    const uint32_t n_fields = static_cast<uint32_t>(fields.size()), n_products = static_cast<uint32_t>(products.size());
     Kokkos::parallel_for("statistics_sample", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         // Covariances first: they need the means before and after the sample
         for (uint32_t p = 0; p < n_products; p++) {
@@ -219,7 +219,7 @@ std::string Statistics::summary() const {
 }
 
 std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::array<double, N_DIM>> & points) {
-    const uint32_t n_points = points.size();
+    const uint32_t n_points = static_cast<uint32_t>(points.size());
     const uint32_t n_owned = mesh.n_owned();
     constexpr double CONTAINED = -1.0;
     constexpr double NONE = std::numeric_limits<double>::infinity();
@@ -234,7 +234,7 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
             cell[p] = static_cast<int32_t>(c);
         }
     };
-    auto node = [&](uint32_t c, uint32_t k, int d) {
+    auto node = [&](uint32_t c, uint32_t k, size_t d) {
         return static_cast<double>(mesh.h_node_coords(mesh.h_node_of_cell(c, k), d));
     };
 
@@ -243,25 +243,25 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
     lo.fill(std::numeric_limits<double>::max());
     hi.fill(std::numeric_limits<double>::lowest());
     for (const auto & x : points) {
-        for (int d = 0; d < N_DIM; d++) {
+        for (size_t d = 0; d < N_DIM; d++) {
             lo[d] = std::min(lo[d], x[d]);
             hi[d] = std::max(hi[d], x[d]);
         }
     }
     const int n_bins = std::max(1, static_cast<int>(std::ceil(std::pow(double(n_points), 1.0 / N_DIM))));
-    auto bin = [&](double x, int d) {
+    auto bin = [&](double x, size_t d) {
         const double h = hi[d] - lo[d];
         return h > 0.0 ? std::clamp(static_cast<int>((x - lo[d]) / h * n_bins), 0, n_bins - 1) : 0;
     };
     std::unordered_map<uint64_t, std::vector<uint32_t>> buckets;
     auto key = [&](const std::array<int, N_DIM> & b) {
         uint64_t k = 0;
-        for (int d = 0; d < N_DIM; d++) k = k * uint64_t(n_bins) + uint64_t(b[d]);
+        for (size_t d = 0; d < N_DIM; d++) k = k * uint64_t(n_bins) + uint64_t(b[d]);
         return k;
     };
     for (uint32_t p = 0; p < n_points; p++) {
         std::array<int, N_DIM> b;
-        for (int d = 0; d < N_DIM; d++) b[d] = bin(points[p][d], d);
+        for (size_t d = 0; d < N_DIM; d++) b[d] = bin(points[p][d], d);
         buckets[key(b)].push_back(p);
     }
 
@@ -271,7 +271,7 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
         c_lo.fill(std::numeric_limits<double>::max());
         c_hi.fill(std::numeric_limits<double>::lowest());
         for (uint32_t k = 0; k < n_nodes; k++) {
-            for (int d = 0; d < N_DIM; d++) {
+            for (size_t d = 0; d < N_DIM; d++) {
                 c_lo[d] = std::min(c_lo[d], node(c, k, d));
                 c_hi[d] = std::max(c_hi[d], node(c, k, d));
             }
@@ -279,14 +279,14 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
         const double size = std::pow(static_cast<double>(mesh.h_cell_volume(c)), 1.0 / N_DIM);
         const double tol = precision_tol<double>(1e-9, 1e-5) * size;
         bool outside = false;
-        for (int d = 0; d < N_DIM; d++) {
+        for (size_t d = 0; d < N_DIM; d++) {
             c_lo[d] -= tol;
             c_hi[d] += tol;
             outside = outside || c_hi[d] < lo[d] || c_lo[d] > hi[d];
         }
         if (outside) continue;
         std::array<int, N_DIM> b0, b1, b;
-        for (int d = 0; d < N_DIM; d++) {
+        for (size_t d = 0; d < N_DIM; d++) {
             b0[d] = bin(c_lo[d], d);
             b1[d] = bin(c_hi[d], d);
         }
@@ -298,7 +298,7 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
                                     mesh.h_cells_of_face(f, 0) != static_cast<int32_t>(c);
                 const uint8_t shift = mesh.h_face_shift.extent(0) > f ? mesh.h_face_shift(f) : 0;
                 double dot = 0.0;
-                for (int d = 0; d < N_DIM; d++) {
+                for (size_t d = 0; d < N_DIM; d++) {
                     double x_f = static_cast<double>(mesh.h_face_coords(f, d));
                     if (side_1 && shift) x_f -= static_cast<double>(mesh.h_shifts(shift, d));
                     dot += (x[d] - x_f) * static_cast<double>(mesh.h_face_normals(f, d));
@@ -313,11 +313,11 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
             if (it != buckets.end()) {
                 for (uint32_t p : it->second) {
                     bool in_box = true;
-                    for (int d = 0; d < N_DIM; d++) in_box = in_box && points[p][d] >= c_lo[d] && points[p][d] <= c_hi[d];
+                    for (size_t d = 0; d < N_DIM; d++) in_box = in_box && points[p][d] >= c_lo[d] && points[p][d] <= c_hi[d];
                     if (in_box && contains(points[p])) offer(p, c, CONTAINED);
                 }
             }
-            int d = 0;
+            size_t d = 0;
             while (d < N_DIM && ++b[d] > b1[d]) {
                 b[d] = b0[d];
                 d++;
@@ -360,7 +360,7 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
     for (uint32_t c = 0; c < n_owned; c++) {
         for (uint32_t p : loose) {
             double s = 0.0;
-            for (int d = 0; d < N_DIM; d++) {
+            for (size_t d = 0; d < N_DIM; d++) {
                 const double dx = points[p][d] - static_cast<double>(mesh.h_cell_coords(c, d));
                 s += dx * dx;
             }
@@ -399,7 +399,7 @@ void Probes::init(const toml::value & input, const Mesh & mesh, const std::vecto
                 throw InputError(key + "." + name + " must have " + std::to_string(N_DIM) + " components.");
             }
             std::array<double, N_DIM> a;
-            for (int d = 0; d < N_DIM; d++) a[d] = static_cast<double>(x[d]);
+            for (size_t d = 0; d < N_DIM; d++) a[d] = static_cast<double>(x[d]);
             return a;
         };
         const bool point = entry.contains("point");
@@ -414,7 +414,7 @@ void Probes::init(const toml::value & input, const Mesh & mesh, const std::vecto
             for (uint64_t i = 0; i < n; i++) {
                 const double s = static_cast<double>(i) / static_cast<double>(n - 1);
                 std::array<double, N_DIM> x;
-                for (int d = 0; d < N_DIM; d++) x[d] = a[d] + s * (b[d] - a[d]);
+                for (size_t d = 0; d < N_DIM; d++) x[d] = a[d] + s * (b[d] - a[d]);
                 set.points.push_back(x);
             }
         }
@@ -431,7 +431,7 @@ void Probes::init(const toml::value & input, const Mesh & mesh, const std::vecto
                                                                  set.variables.size());
         if (comm::is_root()) {
             std::string header = "step,t,point";
-            for (int d = 0; d < N_DIM; d++) header += std::string(",") + "xyz"[d];
+            for (size_t d = 0; d < N_DIM; d++) header += std::string(",") + "xyz"[d];
             for (const auto & v : set.variables) header += "," + v;
             set.out = open_csv(set.file, resume, header);
         }
@@ -449,7 +449,7 @@ void Probes::write(uint64_t step, rtype t, const CellSampler & sampler) {
         const auto cells = set.cells;
         const auto codes = set.codes;
         const auto values = set.values;
-        const uint32_t n_vars = codes.extent(0);
+        const uint32_t n_vars = static_cast<uint32_t>(codes.extent(0));
         Kokkos::parallel_for("probe_values", cells.extent(0), KOKKOS_LAMBDA(const uint32_t i) {
             for (uint32_t v = 0; v < n_vars; v++) values(i, v) = sampler(cells(i), codes(v));
         });
@@ -465,11 +465,11 @@ void Probes::write(uint64_t step, rtype t, const CellSampler & sampler) {
         for (size_t p = 0; p < set.points.size(); p++) {
             out << step << "," << std::setprecision(std::numeric_limits<double>::max_digits10) << double(t) << ","
                 << p;
-            for (int d = 0; d < N_DIM; d++) out << "," << set.points[p][d];
+            for (size_t d = 0; d < N_DIM; d++) out << "," << set.points[p][d];
             out << std::setprecision(std::numeric_limits<rtype>::max_digits10);
             for (uint32_t v = 0; v < n_vars; v++) {
                 if (row_of_point[p] < 0) throw std::logic_error("probe point held by no rank");
-                out << "," << all[row_of_point[p] * n_vars + v];
+                out << "," << all[static_cast<size_t>(row_of_point[p]) * n_vars + v];
             }
             out << "\n";
         }

@@ -22,7 +22,7 @@
 namespace {
 
 // Linear field W(x, y) = c + gx * x + gy * y, positive for x, y in [0, 1]
-constexpr rtype C[N_CONSERVATIVE] = {1.0, 0.3, -0.2, 2.0};
+constexpr rtype C[N_CONSERVATIVE] = {1.0_r, 0.3_r, -0.2_r, 2.0_r};
 constexpr rtype GX[N_CONSERVATIVE] = {0.5, -1.0, 0.25, 0.75};
 constexpr rtype GY[N_CONSERVATIVE] = {-0.25, 0.5, 1.5, -0.5};
 
@@ -78,7 +78,7 @@ TEST_P(MeshTypes, LSQGradientExactForLinearFieldWithDirichletBoundaries) {
     for (uint32_t f = 0; f < mesh->n_faces; f++) face_bc[f] = mesh->h_cells_of_face(f, 1) < 0 ? 0 : -1;
     BoundaryCondition dir;
     dir.type = BoundaryType::DIRICHLET;
-    BoundaryData bd = make_boundary_data(*mesh, face_bc, {dir}, 1.4);
+    BoundaryData bd = make_boundary_data(*mesh, face_bc, {dir}, 1.4_r);
     auto h_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_state_index);
     auto h_state = Kokkos::create_mirror_view(bd.face_state);
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
@@ -111,7 +111,7 @@ TEST_P(MeshTypes, VertexLSQGradientExactForQuadraticFieldWithDirichletBoundaries
     for (uint32_t f = 0; f < mesh->n_faces; f++) face_bc[f] = mesh->h_cells_of_face(f, 1) < 0 ? 0 : -1;
     BoundaryCondition dir;
     dir.type = BoundaryType::DIRICHLET;
-    BoundaryData bd = make_boundary_data(*mesh, face_bc, {dir}, 1.4);
+    BoundaryData bd = make_boundary_data(*mesh, face_bc, {dir}, 1.4_r);
     auto h_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_state_index);
     auto h_state = Kokkos::create_mirror_view(bd.face_state);
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
@@ -149,7 +149,7 @@ TEST_P(MeshTypes, UnlimitedMUSCLReproducesLinearFieldAtInteriorFaces) {
     for (uint32_t i_face = 0; i_face < mesh->n_faces; i_face++) {
         for (uint8_t side = 0; side < 2; side++) {
             const int32_t c = mesh->h_cells_of_face(i_face, side);
-            if (c < 0 || is_boundary_cell(*mesh, c)) continue;
+            if (c < 0 || is_boundary_cell(*mesh, static_cast<uint32_t>(c))) continue;
             FOR_I_CONSERVATIVE {
                 EXPECT_NEAR(h_face_W(i_face, 0, side, i),
                             linear(i, mesh->h_face_coords(i_face, 0), mesh->h_face_coords(i_face, 1)),
@@ -181,8 +181,8 @@ TEST_P(MeshTypes, BarthJespersenFaceValuesStayWithinNeighborBounds) {
             if (c < 0) continue;
             FOR_I_CONSERVATIVE {
                 rtype lo = h_W(c, i), hi = h_W(c, i);
-                for (uint32_t k = 0; k < mesh->h_n_faces_of_cell(c); k++) {
-                    const uint32_t f = mesh->h_face_of_cell(c, k);
+                for (uint32_t k = 0; k < mesh->h_n_faces_of_cell(static_cast<uint32_t>(c)); k++) {
+                    const uint32_t f = mesh->h_face_of_cell(static_cast<uint32_t>(c), k);
                     const int32_t c0 = mesh->h_cells_of_face(f, 0);
                     const int32_t c1 = mesh->h_cells_of_face(f, 1);
                     const int32_t nb = (c0 == c) ? c1 : c0;

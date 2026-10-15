@@ -20,7 +20,7 @@ namespace {
 Kokkos::View<uint32_t *> flatten(const std::vector<std::vector<uint32_t>> & lists, std::vector<uint32_t> & offsets,
                                  const char * label) {
     offsets.assign(1, 0);
-    for (const auto & l : lists) offsets.push_back(offsets.back() + l.size());
+    for (const auto & l : lists) offsets.push_back(offsets.back() + static_cast<uint32_t>(l.size()));
     Kokkos::View<uint32_t *> v(label, offsets.back());
     auto h = Kokkos::create_mirror_view(v);
     size_t k = 0;

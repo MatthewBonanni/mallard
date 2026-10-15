@@ -350,7 +350,7 @@ class Solver {
 
         rtype get_time() const { return t; }
         const Statistics & get_statistics() const { return statistics; }
-        uint32_t get_step() const { return step; }
+        uint64_t get_step() const { return step; }
         const Euler & get_physics() const { return physics; }
         std::shared_ptr<Mesh> get_mesh() const { return mesh; }
 
@@ -432,6 +432,7 @@ class Solver {
         int base_halo_layers() const;
         bool halo_too_shallow();
         void trim_halo();
+        void describe_partition_surface();
         void init_rhs_split();
         void init_axisymmetric_weights();
         void init_les();
@@ -516,9 +517,9 @@ class Solver {
         bool boundary_states_steady = false;  // evaluated, and no expression depends on t
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         RiemannSolverType riemann_solver_type;
-        rtype low_mach_cutoff = 0.1;
+        rtype low_mach_cutoff = 0.1_r;
         bool hybrid_flux = false;           // [numerics] convective_flux = "hybrid" (docs/design/les.md, section 4.3)
-        rtype hybrid_threshold = 0.65;
+        rtype hybrid_threshold = 0.65_r;
         rtype hybrid_floor = 0.0;
         Kokkos::View<rtype *> cell_upwind;  // hybrid flux: upwind fraction of each cell, else empty
         std::unique_ptr<TimeIntegrator> time_integrator;

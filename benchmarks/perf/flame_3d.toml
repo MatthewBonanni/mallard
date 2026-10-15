@@ -1,0 +1,90 @@
+# Performance set: a reacting LES in the configuration of the Volvo bluff-body
+# combustor (examples/volvo_bluff_body/reacting.toml) without the bluff body:
+# a premixed propane-air flame (phi = 0.65, 288 K, 1 atm, Westbrook-Dryer
+# two-step mechanism, mixture-averaged transport) on 96 x 48 x 48 hexahedra
+# of 2 mm (221,184 cells) between adiabatic walls, periodic across z, with
+# the reacting case's numerics (MUSCL without limiter, hybrid HLLC/central
+# flux, SSPRK3), Sigma and TFLES, and Strang-split chemistry above 500 K.
+# The front, wrinkled by a velocity perturbation, burns through 100 steps
+# without output. air_3d.toml is the same flow of air. See
+# benchmarks/README.md.
+
+[run]
+n_steps = 100
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 96
+Ny = 48
+Nz = 48
+Lx = 0.192
+Ly = 0.096
+Lz = 0.096
+periodic = ["z"]
+
+[initialize]
+type = "analytical"
+u = ["17.3", "3.0 * sin(196.35 * x) * cos(65.45 * z)", "3.0 * cos(65.45 * y) * sin(196.35 * x)"]
+p = "101325.0"
+T = "288.0 + 1478.0 * (0.5 * (1 + tanh((x - 0.06) / 0.008)))"
+X = { C3H8 = "0.13 + -0.13 * (0.5 * (1 + tanh((x - 0.06) / 0.008)))", O2 = "1.0 + -0.65 * (0.5 * (1 + tanh((x - 0.06) / 0.008)))", CO2 = "0.0 + 0.39 * (0.5 * (1 + tanh((x - 0.06) / 0.008)))", H2O = "0.0 + 0.52 * (0.5 * (1 + tanh((x - 0.06) / 0.008)))", N2 = "3.76" }
+
+[[boundaries]]
+name = "left"
+type = "nscbc_inlet"
+u = [17.3, 0.0, 0.0]
+p = 101325.0
+T = 288.0
+L = 0.88
+X = { C3H8 = 0.13, O2 = 1.0, N2 = 3.76 }
+
+[[boundaries]]
+name = "right"
+type = "nscbc_outlet"
+p = 101325.0
+L = 0.88
+
+[[boundaries]]
+name = "bottom"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "top"
+type = "wall_adiabatic"
+
+[numerics]
+riemann_solver = "HLLC"
+convective_flux = "hybrid"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+limiter = "none"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../mechanisms/c3h8_2step.yaml"
+phase = "c3h8_2step"
+transport = "mixture_averaged"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+T_frozen = 500.0
+fuse_half_steps = true
+
+[les]
+model = "sigma"
+
+[les.combustion]
+model = "tfles"
+delta_L = 4.71e-4
+s_L = 0.2091
+T_unburnt = 288.0
+T_burnt = 1766.0
+subgrid_velocity = "eddy_viscosity"
+
+[output]
+check_interval = 50

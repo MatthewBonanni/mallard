@@ -74,7 +74,7 @@ void run(const std::string & input_file) {
 
     const chemistry::Mechanism & mech = model.mechanism();
     const auto thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(mech);
-    const auto kinetics = chemistry::make_kinetics_table<Kokkos::HostSpace>(mech);
+    const auto kinetics = chemistry::make_kinetics_table<Kokkos::HostSpace>(mech, options.C_reg);
     const uint32_t ns = mech.n_species();
     const double rho = p0 / (thermo.gas_constant(chemistry::MassFractions{Y.data()}) * T0);
     const bool sparse = chemistry::use_sparse_lu(options, mech);

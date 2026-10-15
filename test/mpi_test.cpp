@@ -102,8 +102,8 @@ TEST(MPITest, HaloExchangeFillsEveryHaloCellFromItsOwner) {
             auto h_species = Kokkos::create_mirror_view(U.species);
             for (uint32_t c = 0; c < n_local; c++) {
                 const bool owned = c < dist.n_owned;
-                FOR_I_CONSERVATIVE h_flow(c, i) = owned ? dist.global_cell[c] + 0.25 * i : -1.0;
-                for (uint32_t k = 0; k < n_species; k++) h_species(c, k) = owned ? dist.global_cell[c] + 0.125 * k : -1.0;
+                FOR_I_CONSERVATIVE h_flow(c, i) = static_cast<rtype>(owned ? static_cast<double>(dist.global_cell[c]) + 0.25 * i : -1.0);
+                for (uint32_t k = 0; k < n_species; k++) h_species(c, k) = static_cast<rtype>(owned ? static_cast<double>(dist.global_cell[c]) + 0.125 * k : -1.0);
             }
             Kokkos::deep_copy(U.flow, h_flow);
             Kokkos::deep_copy(U.species, h_species);
@@ -111,9 +111,9 @@ TEST(MPITest, HaloExchangeFillsEveryHaloCellFromItsOwner) {
             Kokkos::deep_copy(h_flow, U.flow);
             Kokkos::deep_copy(h_species, U.species);
             for (uint32_t c = 0; c < n_local; c++) {
-                FOR_I_CONSERVATIVE EXPECT_EQ(h_flow(c, i), dist.global_cell[c] + 0.25 * i) << "local cell " << c;
+                FOR_I_CONSERVATIVE EXPECT_EQ(h_flow(c, i), static_cast<double>(dist.global_cell[c]) + 0.25 * i) << "local cell " << c;
                 for (uint32_t k = 0; k < n_species; k++) {
-                    EXPECT_EQ(h_species(c, k), dist.global_cell[c] + 0.125 * k) << "local cell " << c;
+                    EXPECT_EQ(h_species(c, k), static_cast<double>(dist.global_cell[c]) + 0.125 * k) << "local cell " << c;
                 }
             }
         }
@@ -484,7 +484,7 @@ std::vector<double> gather_statistics(Solver & solver) {
     const auto mesh = solver.get_mesh();
     const auto & mean = solver.get_statistics().host_means();
     const auto & cov = solver.get_statistics().host_covariances();
-    const uint32_t n_vars = mean.extent(1) + cov.extent(1);
+    const uint32_t n_vars = static_cast<uint32_t>(mean.extent(1) + cov.extent(1));
     const uint64_t n_global = mesh->n_global_cells ? mesh->n_global_cells : mesh->n_cells;
     std::vector<double> values(n_global * n_vars, 0.0);
     for (uint32_t c = 0; c < mesh->n_owned(); c++) {
@@ -618,7 +618,33 @@ TEST(MPITest, GraphPartitionIsBalancedAndMatchesSerial) {
     if (!solver.is_distributed()) return;
     const uint64_t n_owned = solver.get_distribution().n_owned;
     const uint64_t n_global = solver.get_mesh()->n_global_cells;
-    EXPECT_LE(comm::allreduce(n_owned, comm::Op::MAX), 1.03 * n_global / comm::size() + 1);
+    EXPECT_LE(comm::allreduce(n_owned, comm::Op::MAX), 1.03 * static_cast<double>(n_global) / comm::size() + 1);
+}
+
+TEST(MPITest, MultiJaggedPartitionCutsABoxIntoBlocksAndMatchesSerial) {
+    const std::string input =
+        box_input("cartesian", "type = \"TENO\"\norder = 4\n", EULER,
+                  bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n", "type = \"wall_adiabatic\"\n",
+                      "type = \"extrapolation\"\n"),
+                  10) +
+        "[parallel]\npartitioner = \"multijagged\"\n";
+    expect_matches_serial(input);
+    Solver solver;
+    solver.init(parse_toml(input));
+    if (!solver.is_distributed()) return;
+    const uint32_t n_owned = solver.get_distribution().n_owned;
+    const uint64_t n_global = solver.get_mesh()->n_global_cells;
+    EXPECT_LE(comm::allreduce(uint64_t(n_owned), comm::Op::MAX), n_global / uint64_t(comm::size()) + 2);
+    // 24 x 18 cells: a grid of blocks that divides them is cut by straight lines only
+    const auto shape = grid_shape(comm::size(), {1.0 - 1.0 / 24, 0.8 - 0.8 / 18});
+    if (24 % shape[0] != 0 || 18 % shape[1] != 0) return;
+    const auto & mesh = *solver.get_mesh();
+    uint64_t cut = 0;
+    for (uint32_t f = 0; f < mesh.n_faces; f++) {
+        const int32_t a = mesh.h_cells_of_face(f, 0), b = mesh.h_cells_of_face(f, 1);
+        cut += b >= 0 && (uint32_t(a) < n_owned) != (uint32_t(b) < n_owned);
+    }
+    EXPECT_EQ(comm::allreduce(cut, comm::Op::SUM) / 2, uint64_t((shape[0] - 1) * 18 + (shape[1] - 1) * 24));
 }
 
 TEST(MPITest, TENOCacheOfEachRankReproducesItsSetupAndHalo) {

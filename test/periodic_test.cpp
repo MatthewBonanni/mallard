@@ -181,7 +181,7 @@ double advection_error(const std::string & mesh, const std::string & recon, int 
     c.integrator = "RK4";
     const double T = 0.25;
     const double h = 1.0 / n;
-    const uint32_t steps = std::ceil(T / (0.25 * std::pow(h, std::max(1.0, order / 4.0))));
+    const uint32_t steps = static_cast<uint32_t>(std::ceil(T / (0.25 * std::pow(h, std::max(1.0, order / 4.0)))));
     c.run = "t_stop = " + std::to_string(T) + "\ndt = " + std::to_string(T / steps) + "\n";
     auto wave = [](double t) {
         return [t](double x, double y, double * W) {
@@ -309,7 +309,7 @@ TEST(PeriodicSetup2D, TransmissiveImagesAreFoundAcrossTheSeam) {
     const rtype h = 1.0_r / n;
     std::vector<std::array<rtype, N_DIM>> nodes;
     for (uint32_t j = 0; j <= n; j++) {
-        for (uint32_t i = 0; i <= n; i++) nodes.push_back({i * h + j * h, j * h});
+        for (uint32_t i = 0; i <= n; i++) nodes.push_back({static_cast<rtype>(i) * h + static_cast<rtype>(j) * h, static_cast<rtype>(j) * h});
     }
     auto id = [&](uint32_t i, uint32_t j) { return j * (n + 1) + i; };
     std::vector<std::vector<uint32_t>> cells;

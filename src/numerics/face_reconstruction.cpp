@@ -72,7 +72,7 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
     const uint8_t tri_rule = (degree <= 2) ? degree : (degree <= 4 ? 4 : 5);
     const int n_gp = std::min(3, std::max(1, (degree + 1) / 2));
     const TriangleDunavant tri(std::max<uint8_t>(tri_rule, 1));
-    const GaussLegendre gl(n_gp);
+    const GaussLegendre gl(static_cast<uint8_t>(n_gp));
     size_t n_max = 1;
     for (uint32_t f = 0; f < n_faces; f++) {
         const uint32_t n = mesh->h_n_nodes_of_face(f);
@@ -91,7 +91,7 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
             for (uint32_t q = 0; q < tri.h_weights.extent(0); q++) {
                 const double a = double(tri.h_points(q, 0)), b = double(tri.h_points(q, 1));
                 std::array<double, 3> p;
-                for (int i = 0; i < 3; i++) p[i] = v[0][i] + a * (v[1][i] - v[0][i]) + b * (v[2][i] - v[0][i]);
+                for (size_t i = 0; i < 3; i++) p[i] = v[0][i] + a * (v[1][i] - v[0][i]) + b * (v[2][i] - v[0][i]);
                 pts.push_back(p);
                 w.push_back(double(tri.h_weights(q)));
             }
@@ -104,8 +104,8 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
                     const double dNs[4] = {-0.25 * (1 - t), 0.25 * (1 - t), 0.25 * (1 + t), -0.25 * (1 + t)};
                     const double dNt[4] = {-0.25 * (1 - s), -0.25 * (1 + s), 0.25 * (1 + s), 0.25 * (1 - s)};
                     std::array<double, 3> p = {0, 0, 0}, xs = {0, 0, 0}, xt = {0, 0, 0};
-                    for (int k = 0; k < 4; k++) {
-                        for (int i = 0; i < 3; i++) {
+                    for (size_t k = 0; k < 4; k++) {
+                        for (size_t i = 0; i < 3; i++) {
                             p[i] += N[k] * v[k][i];
                             xs[i] += dNs[k] * v[k][i];
                             xt[i] += dNt[k] * v[k][i];
@@ -131,8 +131,8 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
     for (uint32_t f = 0; f < n_faces; f++) {
         for (size_t q = 0; q < n_max; q++) {
             const size_t qq = std::min(q, points[f].size() - 1);
-            FOR_I_DIM h_points(f, q, i) = points[f][qq][i];
-            h_weights(f, q) = (q < points[f].size()) ? weights[f][q] : 0.0;
+            FOR_I_DIM h_points(f, q, i) = static_cast<rtype>(points[f][qq][i]);
+            h_weights(f, q) = static_cast<rtype>((q < points[f].size()) ? weights[f][q] : 0.0);
         }
     }
     Kokkos::deep_copy(face_quad_points, h_points);
@@ -142,9 +142,10 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
     auto h_image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_image_face);
     auto h_image_quad = Kokkos::create_mirror_view(boundaries.face_image_quad);
     for (uint32_t f = 0; f < n_faces; f++) {
-        for (size_t q = 0; q < h_image_quad.extent(1); q++) h_image_quad(f, q) = q;
-        const int32_t g = h_image_face(f);
-        if (g < 0) continue;
+        for (size_t q = 0; q < h_image_quad.extent(1); q++) h_image_quad(f, q) = static_cast<uint8_t>(q);
+        const int32_t g_index = h_image_face(f);
+        if (g_index < 0) continue;
+        const uint32_t g = static_cast<uint32_t>(g_index);
         for (size_t q = 0; q < points[f].size() && q < h_image_quad.extent(1); q++) {
             double best = std::numeric_limits<double>::max();
             for (size_t r = 0; r < points[g].size(); r++) {
@@ -155,7 +156,7 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
                 }
                 if (d2 < best) {
                     best = d2;
-                    h_image_quad(f, q) = r;
+                    h_image_quad(f, q) = static_cast<uint8_t>(r);
                 }
             }
         }
@@ -471,7 +472,7 @@ void MUSCL::calc_cell_face_values(const Kokkos::DefaultExecutionSpace & exec,
                              MUSCLFaceFunctor{mesh->cells_of_face, mesh->cell_coords, mesh->face_coords, mesh->shifts,
                                               mesh->face_shift, solution, gradients, limiters, face_solution},
                              cells};
-    const uint32_t n = cells.extent(0) ? cells.extent(0) : mesh->n_cells;
+    const uint32_t n = cells.extent(0) ? static_cast<uint32_t>(cells.extent(0)) : mesh->n_cells;
     Kokkos::parallel_for("muscl_cells", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace, HeavyBounds>(exec, 0, n),
                          functor);
 }

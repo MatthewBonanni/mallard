@@ -15,6 +15,7 @@
 #include <array>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <Kokkos_Core.hpp>
@@ -50,8 +51,12 @@ struct Lane {
     T * p;
     size_t stride;
 
-    KOKKOS_INLINE_FUNCTION
-    T & operator[](const size_t k) const { return p[k * stride]; }
+    /** @brief Element k, of any integral type like a View's indices (the loops index in int). */
+    template <typename I>
+    KOKKOS_INLINE_FUNCTION T & operator[](const I k) const {
+        static_assert(std::is_integral_v<I>);
+        return p[static_cast<size_t>(k) * stride];
+    }
 
     KOKKOS_INLINE_FUNCTION
     Lane at(const size_t k) const { return Lane{p + k * stride, stride}; }

@@ -23,6 +23,8 @@
 
 #include "kinetics.h"
 #include "mechanism.h"
+#include "mixture.h"
+#include "test_fixtures.h"
 #include "thermo.h"
 
 using namespace chemistry;
@@ -103,7 +105,7 @@ TEST(ChemistryKineticsTest, RatesOfProgressAndProductionRatesMatchCantera) {
         const Mechanism mech = read_mechanism(c.file, c.phase);
         const ThermoTable<> thermo = make_thermo_table(mech);
         const KineticsTable<> kinetics = make_kinetics_table(mech);
-        const uint32_t ns = mech.n_species(), nr = mech.reactions.size();
+        const uint32_t ns = mech.n_species(), nr = kinetics.n_reactions;
         const auto rows = read_rows(c.name + "_rates.csv");
         ASSERT_EQ(rows.at(0).size(), 2 + 2 * ns + nr) << c.name;
         Rows<double> states("states", rows.size(), 2 + ns);
@@ -140,11 +142,12 @@ TEST(ChemistryKineticsTest, AnalyticalJacobianMatchesFiniteDifferences) {
         const Mechanism mech = read_mechanism(c.file, c.phase);
         const auto thermo = make_thermo_table<Kokkos::HostSpace>(mech);
         const auto kinetics = make_kinetics_table<Kokkos::HostSpace>(mech);
-        const uint32_t ns = mech.n_species(), nr = mech.reactions.size();
+        const uint32_t ns = mech.n_species(), nr = kinetics.n_reactions;
         const auto rows = read_rows(c.name + "_rates.csv");
         std::vector<double> C(ns), g(ns), h(ns), q(nr), J(ns * ns), omega(ns), derivatives(kinetics.derivatives_size());
         const ReactionDerivatives deriv = ReactionDerivatives::at(
-            derivatives.data(), nr, kinetics.forward_species.extent(0), kinetics.reverse_species.extent(0));
+            derivatives.data(), nr, static_cast<uint32_t>(kinetics.forward_species.extent(0)),
+            static_cast<uint32_t>(kinetics.reverse_species.extent(0)));
         const double * dq_dT = deriv.dq_dT;
         std::vector<double> Cp(ns), gp(ns), hp(ns), qp(nr), wp(ns), wm(ns);
         for (size_t s = 0; s < std::min<size_t>(rows.size(), 10); s++) {
@@ -215,24 +218,24 @@ TEST(ChemistryKineticsTest, FractionalOrdersKeepAFiniteJacobianAsConcentrationsV
     const Mechanism mech = read_mechanism(SOURCE_DIR + "/test/data/chemistry/propane_2step.yaml", "gas");
     const auto thermo = make_thermo_table<Kokkos::HostSpace>(mech);
     const auto kinetics = make_kinetics_table<Kokkos::HostSpace>(mech);
-    const uint32_t ns = mech.n_species(), nr = mech.reactions.size();
+    const uint32_t ns = mech.n_species(), nr = kinetics.n_reactions;
     const double T = 1800.0, C_reg = Kinetics::C_REG;
     std::vector<double> C0(ns), g(ns), h(ns), q(nr), J(ns * ns), derivatives(kinetics.derivatives_size());
     const std::vector<std::pair<std::string, double>> base = {{"C3H8", 1e-4}, {"O2", 2e-3}, {"CO", 1e-3},
                                                               {"H2O", 2e-3}, {"CO2", 1e-3}, {"N2", 2e-2}};
-    for (const auto & [name, value] : base) C0[mech.species_index(name)] = value;
+    for (const auto & [name, value] : base) C0[static_cast<size_t>(mech.species_index(name))] = value;
     const std::vector<double> Y(ns, 1.0 / ns);
     std::vector<double> unused(ns);
     species_state(thermo, T, 1.0, Y.data(), unused.data(), g.data(), h.data());
-    const ReactionDerivatives deriv = ReactionDerivatives::at(derivatives.data(), nr, kinetics.forward_species.extent(0),
-                                                              kinetics.reverse_species.extent(0));
+    const ReactionDerivatives deriv = ReactionDerivatives::at(derivatives.data(), nr, static_cast<uint32_t>(kinetics.forward_species.extent(0)),
+                                                              static_cast<uint32_t>(kinetics.reverse_species.extent(0)));
     auto omega_at = [&](const std::vector<double> & C, std::vector<double> & w) {
         std::vector<double> qq(nr);
         kinetics.rates_of_progress(T, C.data(), g.data(), qq.data());
         kinetics.production_rates(qq.data(), w.data());
     };
     for (const char * name : {"C3H8", "H2O", "O2"}) {
-        const uint32_t j = mech.species_index(name);
+        const uint32_t j = static_cast<uint32_t>(mech.species_index(name));
         for (const double x : {-0.5, 0.0, 1e-3, 0.25, 0.5, 0.75, 1.0, 3.0, 1e3, 1e6}) {
             std::vector<double> C = C0;
             C[j] = x * C_reg;
@@ -275,6 +278,32 @@ TEST(ChemistryKineticsTest, FractionalOrdersKeepAFiniteJacobianAsConcentrationsV
         for (const double x : {1.0, 1.5, 1e4}) {
             EXPECT_DOUBLE_EQ(Kinetics::power(x * C_reg, n), std::pow(x * C_reg, n)) << n << " " << x;
             EXPECT_DOUBLE_EQ(Kinetics::power_derivative(x * C_reg, n), n * std::pow(x * C_reg, n - 1.0)) << n << " " << x;
+        }
+    }
+}
+
+TEST(ChemistryKineticsTest, RegularizationConcentrationIsAnOption) {
+    // chemistry.C_reg moves the regularization: below it the C3H8 step's rate
+    // follows the regularized law in C3H8, above it the power law
+    using Kinetics = KineticsTable<Kokkos::HostSpace>;
+    const Mechanism mech = read_mechanism(SOURCE_DIR + "/test/data/chemistry/propane_2step.yaml", "gas");
+    const double C_reg = 1e-9;
+    const toml::value input = parse_toml("[chemistry]\nC_reg = 1.0e-9\n");
+    ASSERT_EQ(reactor_options(input).C_reg, C_reg);
+    const auto kinetics = make_kinetics_table<Kokkos::HostSpace>(mech, reactor_options(input).C_reg);
+    const auto plain = make_kinetics_table<Kokkos::HostSpace>(mech);
+    const uint32_t ns = mech.n_species(), nr = mech.reactions.size(), fuel = mech.species_index("C3H8");
+    std::vector<double> C(ns, 1e-3), g(ns, 0.0), q(nr), q_plain(nr);
+    for (const double x : {0.5, 2.0}) {
+        C[fuel] = x * C_reg;
+        kinetics.rates_of_progress(1800.0, C.data(), g.data(), q.data());
+        plain.rates_of_progress(1800.0, C.data(), g.data(), q_plain.data());
+        // Reaction 0 is C3H8 + 3.5 O2 => 3 CO + 4 H2O with [C3H8]^0.1
+        const double ratio = q[0] / q_plain[0];
+        const double expected = x < 1.0 ? Kinetics::power(C[fuel], 0.1, C_reg) / std::pow(C[fuel], 0.1) : 1.0;
+        EXPECT_NEAR(ratio, expected, 1e-12) << x;
+        if (x < 1.0) {
+            EXPECT_LT(ratio, 0.9) << x;
         }
     }
 }

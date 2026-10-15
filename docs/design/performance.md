@@ -168,14 +168,73 @@ every other cell's tables bitwise; `TENO::cells_within_reach()` gives the cells 
 set of changed cells. Rebuilding those after moving nodes reproduces a full setup bitwise (tests on
 prisms, mixed cells and tetrahedra in 3D and triangles in 2D).
 
-### 5. TENO device memory (#58)
+### 5. Reacting mixtures (#257)
+
+The reacting Volvo LES cost about 24 times air per cell and step. The performance set's `flame_3d`
+reproduces its configuration without the bluff body (96 x 48 x 48 hexahedra of 2 mm, propane-air with
+the two-step mechanism, mixture-averaged transport, Sigma and TFLES, MUSCL without limiter, hybrid
+flux, Strang-split chemistry above 500 K, 72% of the cells reacting) and `air_3d` the same flow of air.
+
+**Baseline** (`main` at 188d169, one A100, kernel times from Nsight Systems per step of 3 stages):
+air 4.20 ms per step, the mixture 64.9 ms (15.5 times).
+
+| kernel | ms/step | why |
+|---|---|---|
+| chemistry (RODAS, one thread per cell) | 27.6 | work memory in rows of a global array: one sector per double per lane |
+| `MixtureGradientFunctor` (u, T, X_k at cells) | 18.3 | loops over the 27-cell stencil once per variable (10 times) |
+| `SpeciesSlotFunctor` (species upwind fluxes) | 6.3 | face geometry recomputed per species; 1.6 KB of stack |
+| `VorticityGradientFunctor` (TFLES) | 2.1 | as the mixture gradient |
+| `SpeciesSumFunctor` | 2.0 | face lists reloaded per species |
+| `MixtureViscousFluxFunctor` | 1.7 | |
+| `ScalarLimiterFunctor` (MUSCL scalar gradients) | 1.5 | neighbors recomputed per scalar |
+| the rest (transport, MUSCL, fluxes, LES) | 5.4 | |
+
+**Changes**, each bitwise identical (restart files after 30 steps of `flame_3d`, identical MD5):
+
+- Stencil kernels take the variables innermost: one pass over the stencil (or the cell's faces) with
+  the variables' sums in registers, the same operations in the same order. The species slots of MUSCL
+  (one point per face) keep the faces' offsets and weights in registers with unrolled face loops.
+- The chemistry's thread-per-cell kernel keeps the cell's work memory (Jacobian, LU, RODAS vectors) on
+  the thread's stack where it fits 256 or 1024 doubles (6 to about 16 species): GPUs interleave the
+  threads' local memory, so a warp's accesses at one offset share cache lines. Larger mechanisms use
+  the global array as before (and lanes from 16 species). The kernel reserves local memory for its
+  resident threads (up to 1.9 GB on an A100 with the 1024-double size).
+- The rate derivatives reuse the reaction's mass-action factors instead of recomputing every other
+  reactant's `C^order` (a `pow` for fractional orders) per reactant.
+- The viscous flux evaluates each species' coefficient and normal gradient once per face.
+
+| `flame_3d` (A100), ms per step | main | now | now, `chemistry.C_reg = 1e-10` |
+|---|---|---|---|
+| step | 64.9 | 32.7 | 24.6 |
+| chemistry | 27.6 | 18.5 | 10.4 |
+| mixture gradients, species slots and sums, vorticity gradient, scalar limiter | 30.2 | 6.5 | 6.5 |
+| the rest | 7.1 | 7.0 | 7.0 |
+| mixture / air (4.18 ms) per cell and step | 15.5 | 7.8 | 5.9 |
+
+The `h2o2` reactor benchmark (`benchmarks/chemistry`) goes from 6.5 to 9.7 M cells/s at dt = 1e-8 s
+and from 3.0 to 5.4 M cells/s at 1e-6 s. Bounding the chemistry kernel's registers for more resident
+threads (launch bounds for 128 or 80 registers instead of 220) made it slower.
+
+**What remains.** About 2% of the reacting cells (burnt gas into which the flow step diffused trace
+fuel, Y_C3H8 1e-10 to 1e-5) take 20 to 130 RODAS sub-steps against 2 for the others: the fuel burns
+out within the step along `C^0.1`, which reaches zero in finite time, through the regularization below
+`C_reg` (chemistry.md). Leaving them out of the chemistry (an experiment only) took the chemistry from
+19.2 to 11.3 ms per step. `chemistry.C_reg` (default 1e-12 kmol/m^3) moves the regularization; larger
+values cut these cells' sub-steps (a burnt cell at 1750 K with Y_C3H8 = 1e-7 over 0.15 us: 32 sub-steps
+at 1e-12, 13 at 1e-9, 5 at 1e-7) but change the rate law below C_reg. Opt-in: on `flame_3d`, 1e-10,
+1e-9 and 1e-8 give 24.6, 23.4 and 22.3 ms per step; against the default after 100 steps, T differs by
+at most 0.54 K, Y_k by 3e-5, p by 90 Pa and u by 0.14 m/s, the integrated heat release by 0.08% (the
+largest pointwise heat release differences are in cells burning out trace fuel). Thread-per-cell remains faster
+than lanes for 6 species (2, 4, 8 or 32 lanes per cell: 1.8 to 5x slower).
+
+### 6. TENO device memory (#58)
 
 Device memory per cell (`cudaMemGetInfo`, everything included) of 3D Taylor-Green runs on one A100 at the setup
 peak and in steady stepping, with a Kokkos Tools library that records every allocation by label. Results are
 bitwise those of `main` (restart files after 20-96 steps of Taylor-Green and of the 3D blast, hexahedra and
 tetrahedra, orders 3, 5 and 6, also with the troubled passes split into 100 rounds).
 
-| bytes per cell, setup peak / steady | cells | main | change 5 | `single_precision_tables` |
+| bytes per cell, setup peak / steady | cells | main | change 6 | `single_precision_tables` |
 |---|---|---|---|---|
 | TENO5, 100^3 hexahedra | 1.00M | 47.3 K / 47.3 K | 39.8 K / 39.8 K | 25.0 K |
 | TENO5, 55^3 x 6 tetrahedra | 998k | 58.7 K / 58.7 K | 51.2 K / 51.2 K | 30.6 K |
@@ -209,7 +268,7 @@ outputs) and team scratch set a peak 30% above the steady state.
   stencil selection near the shock goes the other way in some cells.
 
 Largest Taylor-Green box at TENO5 that runs on one A100-80GB: main fails at 125^3 hexahedra (1.95M cells; out of
-memory allocating the face states), which change 5 runs, as does 145^3 (3.05M) with `single_precision_tables`.
+memory allocating the face states), which change 6 runs, as does 145^3 (3.05M) with `single_precision_tables`.
 From the table: about 1.8M, 2.1M and 3.4M hexahedra; 1.45M, 1.65M and 2.75M tetrahedra; at order 6 about 0.65M,
 1.1M and 1.8M hexahedra.
 
@@ -253,6 +312,55 @@ Notes:
 - At small sizes per GPU (MUSCL, 262k cells on 4 GPUs: 65k per GPU) the step is latency-bound (about 30
   launches and four exchanges per step); the CUDA graph and NCCL exchange of #217 take it from 667 to 523 us.
 - Multi-node runs (16-32 GPUs over InfiniBand) are pending free GPUs.
+
+## Partitions
+
+3D TENO5 spends what it loses to more GPUs mostly reconstructing halo layer 1 again (owned and layer-1
+cells are reconstructed, so that one exchange per stage suffices; `mpi.md`, section 7), so the parts'
+surface sets its scaling. A100-80GB, 4 GPUs per node, HDR InfiniBand with GPUDirect RDMA between nodes,
+GPU-aware MPI; steady time per step. *Layer 1* is the largest number of halo layer-1 cells of a rank
+(the setup summary's "Partition surface" line). Graph: dKaMinPar with its `strong` preset and 0.1%
+imbalance; its default preset is worse than both others (4 GPUs, 96^3: 44.1 ms, 3% imbalance).
+
+**Strong scaling**, 96^3 hexahedra (1 GPU: 154 ms)
+
+| GPUs | Hilbert | graph | multi-jagged | efficiency (multi-jagged) | layer 1: Hilbert / graph / multi-jagged |
+|---|---|---|---|---|---|
+| 4 | 41.2 ms | | 41.4 ms | 93% | 9,312 / 9,776 / 9,312 |
+| 8 | 23.1 ms | 23.5 ms | 23.1 ms | 83% | 7,057 / 7,958 / 7,057 |
+| 12 | 17.8 ms | 17.2 ms | 16.6 ms | 77% (Hilbert 72%) | 13,038 / 8,954 / 7,906 |
+| 16 | 13.4 ms | 13.3 ms | 13.1 ms | 73% | 7,130 / 9,977 / 7,130 |
+
+**Weak scaling**, 64^3 hexahedra per GPU (1 GPU: 48.1 ms)
+
+| GPUs | mesh | Hilbert | graph | multi-jagged | efficiency (multi-jagged) |
+|---|---|---|---|---|---|
+| 4 | 128 x 128 x 64 | 49.8 ms | | 49.8 ms | 97% |
+| 8 | 128^3 | 50.8 ms | 51.4 ms | 50.5 ms | 95% |
+| 12 | 192 x 128 x 128 | 54.7 ms | 52.7 ms | 51.9 ms | 93% (Hilbert 88%) |
+| 16 | 256 x 128 x 128 | 55.8 ms | 53.9 ms | 52.7 ms | 91% (Hilbert 86%) |
+
+2D at 16 GPUs the two built-in partitioners are within 1-4% of each other (equal parts of a square):
+TENO5 4M cells 6.14 ms, 16M 20.7 ms (1M per GPU: 95% weak efficiency), MUSCL 16M 4.15 ms (Hilbert 4.12 ms).
+
+Notes:
+
+- Multi-jagged parts of a box are its cuboid blocks: the same as Hilbert parts at power-of-two rank counts
+  on cubes, and 30-45% fewer layer-1 cells otherwise (12 and 24 ranks, the weak-scaling boxes from 12 ranks
+  up). On a graded O-mesh around a cylinder (2D) and on tetrahedra they also cut fewer faces than the curve.
+- At equal surface the orientation still matters, because a rank numbers its cells like the global mesh
+  (x first): 4 GPUs, 96^3 split 2 x 2 x 1 take 41.2 ms, 1 x 2 x 2 43.9 ms, 1 x 1 x 4 48.4 ms (TENO +12%,
+  gradients +34% per launch). Multi-jagged breaks ties toward more pieces along x. At 16 GPUs 4 x 4 x 1 (20%
+  more surface) is fastest (12.8 ms): numbering a rank's cells for locality, as section 6 of `mpi.md` plans,
+  should matter more than the partition from here.
+- Multi-jagged numbers its blocks along a Hilbert curve, so that the ranks of a node hold a compact group:
+  16 GPUs, 96^3: 13.0 ms instead of 13.9 ms with the blocks numbered x-major.
+- Exchanging reconstructed face states instead of reconstructing layer 1 (`mpi.md`, section 7) is not worth
+  its second, dependent exchange per stage yet: at 16 GPUs (96^3, an nsys profile of one rank) TENO's
+  reconstruction takes 11.2 of the 13.1 ms the GPU is busy per step, and layer-1 cells are 11% of the
+  reconstructed cells, so it could save at most 1.3 ms (9%), less three exchanges' latency; at 12 GPUs
+  weak (6% layer 1) at most 3 ms (5%). Most of the strong-scaling loss (73% at 16 GPUs, 55k cells per GPU)
+  is the TENO kernel itself running less efficiently on fewer cells.
 
 ## Verification
 

@@ -132,8 +132,8 @@ class SyntheticInflow {
         std::string summary_;
         uint64_t seed = 1;
         uint64_t stream = 0;
-        int normal_axis = 0;
-        int axes[N_T] = {};  // global axes of the transverse directions
+        uint32_t normal_axis = 0;
+        uint32_t axes[N_T] = {};  // global axes of the transverse directions
         // Auxiliary grid: points, spacing, origin and periodicity per transverse direction
         int32_t n_grid[N_T] = {};
         double spacing[N_T] = {};

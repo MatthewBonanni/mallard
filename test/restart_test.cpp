@@ -137,7 +137,7 @@ TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
         if (a == std::string::npos) continue;
         entries.emplace_back(std::stod(line.substr(a + 10)), line.substr(b + 6, line.find('"', b + 6) - b - 6));
     }
-    EXPECT_EQ(entries.size(), count_entries(dir + "/a/flow.pvd") + 1u);
+    EXPECT_EQ(entries.size(), static_cast<size_t>(count_entries(dir + "/a/flow.pvd")) + 1u);
     std::string stop_file;
     for (size_t i = 0; i < entries.size(); i++) {
         if (entries[i].first == t_stop_first) stop_file = entries[i].second;
@@ -150,7 +150,7 @@ TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
     // ... and still holds the solution at that time
     std::ifstream in(dir + "/b/" + stop_file);
     std::string header(4096, '\0');
-    in.read(header.data(), header.size());
+    in.read(header.data(), static_cast<std::streamsize>(header.size()));
     const size_t k = header.find(">", header.find("Name=\"TIME\"")) + 1;
     EXPECT_EQ(std::stod(header.substr(k)), t_stop_first);
 
@@ -344,7 +344,7 @@ struct RestartFile {
         std::memcpy(bytes.data() + 32, &n_vars, sizeof(n_vars));
         if (version >= 2) {
             for (const auto & name : names) {
-                const uint32_t length = name.size();
+                const uint32_t length = static_cast<uint32_t>(name.size());
                 bytes.append(reinterpret_cast<const char *>(&length), sizeof(length));
                 bytes += name;
             }
