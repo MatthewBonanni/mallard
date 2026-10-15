@@ -24,17 +24,20 @@
  *        flame is thickened by F where Omega = 1 so that it spans n_res cells:
  *        diffusivities and conductivity times E F, reaction rates times E / F
  *        (laminar speed times E, thickness times F). E is the SGS wrinkling of
- *        Charlette, Meneveau & Veynante (Combust. Flame 131, 2002) with
- *        beta = 0.5 at the filter width F delta_L. Plain aggregate, captured
- *        by value in kernels.
+ *        Charlette, Meneveau & Veynante (Combust. Flame 131, 2002) at the
+ *        filter width F delta_L: their saturated power law F^beta with beta
+ *        from the dynamic procedure of Wang, Boileau & Veynante (Combust.
+ *        Flame 158, 2011), or their efficiency function of a subgrid velocity
+ *        with beta = 0.5. Plain aggregate, captured by value in kernels.
  */
 struct ThickenedFlame {
     double delta_L = 0.0;  // laminar thermal thickness (m)
     double s_L = 0.0;      // laminar flame speed (m/s)
     double T_u = 0.0, T_b = 0.0;
     double n_res = 5.0;
-    double beta = 0.5;
-    bool efficiency = true;
+    enum class Efficiency : uint8_t { NONE, CHARLETTE, DYNAMIC };
+    Efficiency efficiency = Efficiency::CHARLETTE;
+    double beta = 0.5;  // DYNAMIC: the dynamic procedure's latest exponent
     bool eddy_viscosity_velocity = false;  // u' = C_u nu_t / Delta instead of Colin et al.'s operator
     double C_u = 28.0;
 
@@ -68,7 +71,7 @@ struct ThickenedFlame {
      */
     KOKKOS_INLINE_FUNCTION
     double wrinkling(const double F, const double u_prime, const double nu) const {
-        if (!efficiency || !(F > 1.0) || !(u_prime > 0.0)) return 1.0;
+        if (efficiency != Efficiency::CHARLETTE || !(F > 1.0) || !(u_prime > 0.0)) return 1.0;
         const double pi43 = Kokkos::pow(Kokkos::numbers::pi, 4.0 / 3.0);
         const double r = u_prime / s_L;
         const double re = u_prime * F * delta_L / nu;
@@ -81,6 +84,10 @@ struct ThickenedFlame {
         const double gamma = Kokkos::pow(Kokkos::pow(inner, -b) + Kokkos::pow(f_re, -b), -1.0 / b);
         return Kokkos::pow(1.0 + Kokkos::fmin(F - 1.0, gamma * r), beta);
     }
+
+    /** @brief Dynamic efficiency F^beta: Charlette et al.'s saturated form at Delta_e / delta_L = F. */
+    KOKKOS_INLINE_FUNCTION
+    double dynamic_wrinkling(const double F) const { return F > 1.0 ? Kokkos::pow(F, beta) : 1.0; }
 };
 
 #endif // TFLES_H

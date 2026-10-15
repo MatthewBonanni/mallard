@@ -291,6 +291,11 @@ TEST(MPITest, ThickenedFlameMatchesSerial) {
                               "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
                               "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n");
     }
+    // The dynamic efficiency's test filter passes exchange the filtered field; its exponent is an exact domain sum
+    expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes") +
+                              "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
+                              "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\nefficiency = \"dynamic\"\n",
+                          [](const Solver & s) { EXPECT_GT(s.tfles_beta(), 0.0); });
 }
 
 TEST(MPITest, HybridConvectiveFluxMatchesSerial) {

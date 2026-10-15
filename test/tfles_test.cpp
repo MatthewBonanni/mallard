@@ -72,7 +72,7 @@ TEST(ThickenedFlame, EfficiencyIsOneWithoutSubgridTurbulenceAndSaturatesAtFToThe
     }
     // Strong subgrid turbulence: the wrinkling of the scales between delta_L and F delta_L is complete
     EXPECT_NEAR(tf.wrinkling(10.0, 500.0, nu), std::sqrt(10.0), 1e-9);
-    tf.efficiency = false;
+    tf.efficiency = ThickenedFlame::Efficiency::NONE;
     EXPECT_EQ(tf.wrinkling(10.0, 5.0, nu), 1.0);
 }
 
@@ -162,6 +162,75 @@ TEST(ThickenedFlame, EddyViscosityVelocitySetsTheEfficiency) {
     EXPECT_GT(turbulent, m->n_owned() / 2);
 }
 
+namespace {
+
+/**
+ * @brief A periodic box of cubes (squares in 2D) of side h * scale with two flame fronts at rest, x = 16 h and 48 h,
+ *        displaced by amplitude * h sin(2 pi y / 12 h) and of thickness 2 h; delta_L = h so that F = n_res = 5.
+ *        One step of 1e-13 s computes the efficiency of the initial state.
+ */
+std::unique_ptr<Solver> corrugated_flames(const double amplitude, const double scale) {
+    const double h = 1e-3 * scale;
+    auto num = [](const double v) {
+        std::ostringstream o;
+        o << std::setprecision(17) << v;
+        return o.str();
+    };
+    std::ostringstream s;
+    s << std::setprecision(17);
+    const std::string wave = num(amplitude * h) + " * sin(" + num(2 * M_PI / (12 * h)) + " * y)";
+    const std::string front = "(x - " + num(16 * h) + " - " + wave + ")";
+    const std::string back = "(" + num(48 * h) + " - x + " + wave + ")";
+    s << "[run]\nn_steps = 1\ndt = 1e-13\n[mesh]\ntype = \"cartesian\"\nNx = 64\nNy = 12\nLx = " << 64 * h
+      << "\nLy = " << 12 * h << "\n"
+      << (N_DIM == 3 ? "Nz = 3\nperiodic = [\"x\", \"y\", \"z\"]\n" : "periodic = [\"x\", \"y\"]\n");
+    if (N_DIM == 3) s << "Lz = " << 3 * h << "\n";
+    s << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\n"
+      << "T = \"300 + 1000 * (tanh(" << front << " / " << h << ") + tanh(" << back << " / " << h << "))\"\n"
+      << (N_DIM == 3 ? "u = [\"0.0\", \"0.0\", \"0.0\"]\n" : "u = [\"0.0\", \"0.0\"]\n")
+      << "X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
+      << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
+      << "[chemistry]\n[output]\ncheck_interval = 1000000\n[les]\n" << (N_DIM == 3 ? "model = \"sigma\"\n" : "model = \"vreman\"\n")
+      << "[les.combustion]\nmodel = \"tfles\"\ndelta_L = " << h << "\ns_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2300.0\n"
+      << "efficiency = \"dynamic\"\n";
+    auto solver = std::make_unique<Solver>();
+    solver->init(parse_toml(s.str()));
+    solver->run();
+    solver->copy_device_to_host();
+    return solver;
+}
+
+} // namespace
+
+TEST(ThickenedFlame, DynamicEfficiencyFollowsTheResolvedWrinkling) {
+    // Planar fronts lose no surface to the test filter: beta = 0 and E = 1. Corrugated fronts lose more the larger
+    // the corrugation, and E = F^beta in every cell
+    auto planar = corrugated_flames(0.0, 1.0);
+    // 12 / d tr(cov) = 8 h^2 per pass of the 3^d stencil; Delta_e^2 = (5 h)^2: ceil(25 / 8) passes
+    EXPECT_EQ(planar->tfles_test_filter_passes(), 4u);
+    EXPECT_LT(planar->tfles_beta(), 1e-8);
+    double last = 0.0;
+    for (const double amplitude : {1.0, 2.0, 4.0}) {
+        auto wrinkled = corrugated_flames(amplitude, 1.0);
+        const double beta = wrinkled->tfles_beta();
+        EXPECT_GT(beta, last + 0.02) << amplitude;
+        EXPECT_LT(beta, 1.0) << amplitude;
+        last = beta;
+        const auto & fields = wrinkled->get_tfles_fields();
+        uint32_t flame = 0;
+        for (uint32_t c = 0; c < wrinkled->get_mesh()->n_owned(); c++) {
+            const double F = double(fields(c, 0));
+            EXPECT_NEAR(double(fields(c, 1)), std::pow(F, beta), 1e-12 * std::pow(F, beta)) << "cell " << c;
+            flame += F > 4.9;
+        }
+        EXPECT_GT(flame, 0u);
+    }
+    // Only ratios of lengths enter
+    auto large = corrugated_flames(2.0, 10.0);
+    EXPECT_NEAR(large->tfles_beta(), corrugated_flames(2.0, 1.0)->tfles_beta(), 1e-9);
+}
+
 TEST(ThickenedFlame, InputErrors) {
     const std::string bad = "[les.combustion]\nmodel = \"tfles\"\ndelta_L = 1e-3\ns_L = 2.0\nT_unburnt = 2000.0\n"
                             "T_burnt = 300.0\n";
@@ -173,6 +242,16 @@ TEST(ThickenedFlame, InputErrors) {
     no_chemistry.replace(no_chemistry.find("[chemistry]\n"), 12, "");
     Solver t;
     EXPECT_THROW(t.init(parse_toml(no_chemistry)), InputError);
+    // The dynamic procedure sets beta and needs no subgrid velocity
+    for (const std::string extra : {"beta = 0.5\n", "subgrid_velocity = \"eddy_viscosity\"\n"}) {
+        Solver d;
+        EXPECT_THROW(d.init(parse_toml(uniform_box("n_steps = 1\ndt = 1e-6\n",
+                                                   "[les.combustion]\nmodel = \"tfles\"\ndelta_L = 1e-3\ns_L = 2.0\n"
+                                                   "T_unburnt = 300.0\nT_burnt = 2000.0\nefficiency = \"dynamic\"\n" +
+                                                       extra))),
+                     InputError)
+            << extra;
+    }
 }
 
 TEST(PartiallyStirredReactor, FractionOfTheChemicalAndMixingTimes) {
