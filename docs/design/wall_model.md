@@ -140,16 +140,15 @@ with `kappa = 0.41`, `A+ = 17`, `Pr_t = 0.9`, the gas's `mu(T)` and `Pr`, and
 tangential speed relative to the wall at the exchange point.
 
 - **Discretization.** 64 nodes, geometrically stretched (ratio 1.1, first
-  spacing `2.2e-4 h`, so `y1+ < 1` for `h+` up to 4500); second-order
-  conservative differences; the momentum and energy equations are two
-  tridiagonal systems for `u` and `T` given `mu_t` and the properties,
-  iterated (fixed point on `tau_w`, the properties and `mu_t`) until
-  `tau_w` changes by less than `1e-10` relatively, at most 100 times. Then
-  `tau_w = (mu + mu_t) du/dy` and `q_w = -[(mu + mu_t) u du/dy + k_eff dT/dy]`
-  (the constant flux of the discrete system).
-- **Cost.** A few tens of iterations of two tridiagonal solves of 64 unknowns
-  per wall face and stage: a few percent of the RHS on coarse WMLES meshes
-  (section 7).
+  spacing `2.2e-4 h`, so `y1+ < 1` for `h+` up to 4500). Both equations say
+  a flux is constant across the layer, `(mu + mu_t) du/dy = tau_w` and
+  `k_eff dT/dy + tau_w u = -q_w`, so for given `mu_t` and properties `u`
+  and `T` follow by quadrature (Simpson's rule on each interval, with
+  midpoint values) and the boundary values fix `tau_w` and `q_w` (or `T_w`
+  on heat-flux walls). `mu_t`, the properties and `tau_w` are iterated to a
+  fixed point, accelerated by secant steps on `tau_w`, until `tau_w`
+  changes by less than `1e-10` relatively: 3-5 iterations from `h+ = 1` to
+  `10^4` (at most 200).
 
 ## 4. Inverse velocity transformation model (stage 2, decision 6)
 
@@ -187,15 +186,21 @@ q_w = s tau_w cp (T_w - T_r) / U_e
 - **Discretization.** On the grid of section 3, from node `j` to `j + 1`
   the transformation is applied in difference form, `S_eq+ = dU+ / (mu+
   dy*)`, `S_TL+ = mu+ dU+ / dy+` with `mu+` the mean of the two nodes and
-  `S_t+` at the mean `y*`: solving for the increment gives `dU+ = S_t+ /
-  [(1 - S_t+) / (mu+ dy*) + S_t+ mu+ / dy+]`. `dy*` depends on the
-  temperature (hence on `U`) at node `j + 1`, so each step iterates on
-  `U_(j+1)` (a fixed point, a few iterations). The differences of `y*`
+  `S_t+` averaged over the interval in `y*` (Simpson's rule): solving for
+  the increment gives `dU+ = S_t+ / [(1 - S_t+) / (mu+ dy*) + S_t+ mu+ /
+  dy+]`. `dy*` depends on the temperature (hence on `U`) at node `j + 1`,
+  so each step predicts `U_(j+1)` from the previous increment and corrects
+  it three times. The differences of `y*`
   carry the density and viscosity derivatives of the differential form
   exactly. With constant properties `dU+ = S_t+ dy+`.
-- **Shooting.** `U(h)` increases with `tau_w`; the root of `U(h; tau_w) =
-  U_m` is bracketed from the laminar estimate `mu_w U_m / h` by factors of 2
-  and found by the Illinois false-position method on `log tau_w` to `1e-10`.
+- **Shooting.** `U(h)` increases with `tau_w`; the root of `log U(h;
+  tau_w) = log U_m`, nearly linear in `log tau_w`, is found by secant steps
+  on `log tau_w` from the larger of the laminar and log-law estimates, to
+  `1e-9`: 5-7 profile evaluations.
+- **Accuracy** (unit tests): with constant properties both models agree
+  with the integral of the incompressible law to `1e-5` from `h+ = 1` to
+  `10^4`; with variable properties each agrees with an RK4 solution of its
+  differential equations on a fine grid to `3e-5` (`tau_w`, `q_w`).
 - **Inputs.** `U_m`, `T_m`, `p` at the exchange point; `T_w`; `U_e`, `T_e` at
   the edge (section 5); the gas's `mu(T)`, `cp`, `Pr`. Adiabatic walls take
   `T_w = T_r` (`q_w = 0`); heat-flux walls are not supported by this model
@@ -290,13 +295,14 @@ Results: section 10.
 
 ## 10. Results
 
-(Filled in with the validation runs.)
+Reported with the validation examples (stage 2's validation PR).
 
 ## 11. Stages
 
 1. **Equilibrium ODE model** with the off-wall exchange point, the coupling
-   (section 1), tests. (This PR.)
-2. **GFM model** (default), edge sampling, channel validation. (This PR.)
+   (section 1), tests. Implemented.
+2. **GFM model** (default), edge sampling: implemented; channel validation
+   (`examples/channel_wmles`) follows.
 3. **Non-equilibrium**: the pressure-gradient (and convection) terms of the
    thin-layer equations, `d/dy[(mu + mu_t) du/dy] = dp/dx` (+ the
    integrated convective terms, Park & Moin 2014 style) for adverse pressure
