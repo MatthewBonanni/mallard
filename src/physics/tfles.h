@@ -14,7 +14,7 @@
 #define TFLES_H
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "common.h"
 #include "log.h"
@@ -42,7 +42,7 @@ struct ThickenedFlame {
     static constexpr double C_K = 1.5;        // Kolmogorov constant of the efficiency function
 
     /** @brief [les.combustion] of an input with one. */
-    static ThickenedFlame from_input(const toml::value & table);
+    static ThickenedFlame from_input(const Input & table);
 
     logging::Items summary() const;
 

@@ -17,7 +17,7 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "common.h"
 #include "physics.h"
@@ -129,7 +129,7 @@ struct BoundaryCondition {
     /**
      * @brief Parse a [[boundaries]] table entry.
      */
-    static BoundaryCondition from_input(const toml::value & input, const Euler & physics);
+    static BoundaryCondition from_input(const Input & input, const Euler & physics);
 
     /**
      * @brief Ghost state W_g = [rho, u, p] given the interior state W_i.

@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-#include <toml.hpp>
+#include "input.h"
 
 #include "common_typedef.h"
 #include "mesh.h"
@@ -75,7 +75,7 @@ struct MeshBlock {
 rtype stretched_coordinate(uint32_t i, uint32_t n, rtype L, rtype beta);
 
 /** @brief [mesh] stretching: the tanh factor of each direction, 0 (uniform) if not given. */
-Stretching mesh_stretching(const toml::value & input);
+Stretching mesh_stretching(const Input & input);
 
 /**
  * @brief Part r of p of a generated 2D mesh (cartesian, cartesian_tri or
@@ -122,7 +122,7 @@ inline uint64_t block_begin(uint64_t n, int r, int p) { return n * uint64_t(r) /
  *        A Gmsh file is read whole by every rank, so large meshes should be
  *        converted to HDF5 first.
  */
-MeshBlock read_mesh_block(const toml::value & input);
+MeshBlock read_mesh_block(const Input & input);
 
 /** @brief This rank's block of a Gmsh file (every rank reads the whole file). */
 MeshBlock read_gmsh_block(const std::string & filename);

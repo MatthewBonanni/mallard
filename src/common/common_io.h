@@ -35,4 +35,8 @@ std::string vtk_float_type();
  */
 uint32_t vtk_local_node(uint32_t n_nodes, uint32_t k);
 
+/** @brief Whether setup creates output files and directories (not in a pre-flight check). */
+bool output_files_enabled();
+void set_output_files_enabled(bool on);
+
 #endif // COMMON_IO_H

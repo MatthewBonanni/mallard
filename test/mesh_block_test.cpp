@@ -114,7 +114,7 @@ TEST(MeshBlockTest, GeneratedBlocksNumberCellsAndNodesAsTheSerialMesh) {
     for (const std::string & type : generated_types()) {
       for (const std::string & stretching : {std::string(), stretched}) {
         SCOPED_TRACE(type + " " + stretching);
-        const toml::value input = parse_toml("[mesh]\ntype = \"" + type +
+        const Input input = parse_toml("[mesh]\ntype = \"" + type +
                                              "\"\nNx = 6\nNy = 5\nNz = 3\nLx = 1.5\nLy = 1.0\nLz = 0.7\n" +
                                              stretching);
         Mesh serial;
@@ -173,7 +173,7 @@ TEST(MeshBlockTest, GeneratedBlocksNumberCellsAndNodesAsTheSerialMesh) {
 TEST(MeshBlockTest, StretchingClustersNodesTowardBothEnds) {
     const double beta = 1.7, Ly = 2.0;
     const uint32_t ny = 8;
-    const toml::value input = parse_toml(
+    const Input input = parse_toml(
         std::string("[mesh]\ntype = \"cartesian\"\nNx = 3\nNy = 8\nNz = 4\nLx = 1.5\nLy = 2.0\nLz = 0.5\n") +
         (N_DIM == 2 ? "stretching = [0.0, 1.7]\nperiodic = [\"x\"]\n" : "stretching = [0.0, 1.7, 0.0]\nperiodic = [\"x\", \"z\"]\n"));
     Mesh mesh;

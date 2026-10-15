@@ -41,7 +41,7 @@ rtype stretched_coordinate(uint32_t i, uint32_t n, rtype L, rtype beta) {
     return 0.5_r * L * (1.0_r + std::tanh(beta * s) / std::tanh(beta));
 }
 
-Stretching mesh_stretching(const toml::value & input) {
+Stretching mesh_stretching(const Input & input) {
     Stretching stretching{};
     if (!input.contains("mesh") || !input.at("mesh").contains("stretching")) return stretching;
     const std::vector<rtype> beta = find_real_vector(input, "mesh", "stretching");
@@ -361,7 +361,7 @@ bool is_hdf5_mesh(const std::string & filename) {
     return ext == ".h5" || ext == ".hdf5";
 }
 
-MeshBlock read_mesh_block(const toml::value & input) {
+MeshBlock read_mesh_block(const Input & input) {
     const std::string type_str = toml::find_or<std::string>(input, "mesh", "type", "file");
     const auto it = MESH_TYPES.find(type_str);
     if (it == MESH_TYPES.end()) throw unknown_option(MESH_TYPES, "mesh.type", type_str);

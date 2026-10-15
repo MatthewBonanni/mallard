@@ -2,6 +2,8 @@
 add_library(MallardCore STATIC
     common/common_math.cpp
     common/common_io.cpp
+    common/input.cpp
+    common/memory_tracker.cpp
     common/build_info.cpp
     common/growing_buffer.cpp
     common/log.cpp
@@ -11,6 +13,7 @@ add_library(MallardCore STATIC
     mesh/periodic.cpp
     mesh/mesh_3d.cpp
     mesh/mesh_block.cpp
+    mesh/mesh_quality.cpp
     mesh/zone.cpp
     boundary/boundary.cpp
     boundary/synthetic_inflow.cpp
@@ -32,6 +35,7 @@ add_library(MallardCore STATIC
     solver/chemistry_balance.cpp
     solver/chemistry_benchmark.cpp
     solver/solver.cpp
+    solver/solver_check.cpp
     solver/solver_chemistry.cpp
     solver/solver_graph.cpp
     solver/solver_initialize.cpp

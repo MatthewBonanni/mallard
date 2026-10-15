@@ -13,7 +13,7 @@
 
 #include "input.h"
 
-ThickenedFlame ThickenedFlame::from_input(const toml::value & table) {
+ThickenedFlame ThickenedFlame::from_input(const Input & table) {
     const std::string model = toml::find_or<std::string>(table, "model", "");
     if (model != "tfles") throw InputError("les.combustion.model = \"" + model + "\" is not one of: tfles, pasr.");
     ThickenedFlame tf;

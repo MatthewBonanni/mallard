@@ -135,7 +135,7 @@ void Solver::init_solution_restart() {
 }
 
 void Solver::init_solution_constant() {
-    const toml::value & init = input.at("initialize");
+    const Input & init = input.at("initialize");
     for (const char * key : {"u", "p", "T"}) {
         if (!init.contains(key)) {
             throw std::runtime_error(std::string("Missing ") + key + " for initialization: constant.");
@@ -414,7 +414,7 @@ void cell_average_curved(const curved::Geometry & geometry, uint32_t i_cell, Poi
  * thread count.
  */
 void Solver::init_solution_analytical() {
-    const toml::value & init = input.at("initialize");
+    const Input & init = input.at("initialize");
     if (!init.contains("u") || init.at("u").as_array().size() != N_DIM) {
         throw std::runtime_error("u must be a " + std::to_string(N_DIM) + "-element array for initialization: analytical.");
     }
