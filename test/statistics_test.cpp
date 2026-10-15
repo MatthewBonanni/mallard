@@ -200,7 +200,7 @@ TEST(StatisticsTest, ProbesReadTheCellHoldingEachPoint) {
     auto expected_cell = [&](const std::vector<double> & x) {
         for (uint32_t c = 0; c < mesh.n_cells; c++) {
             bool inside = true;
-            for (int d = 0; d < N_DIM; d++) {
+            for (size_t d = 0; d < N_DIM; d++) {
                 double lo = std::numeric_limits<double>::max(), hi = std::numeric_limits<double>::lowest();
                 for (uint32_t k = 0; k < mesh.h_n_nodes_of_cell(c); k++) {
                     const double v = double(mesh.h_node_coords(mesh.h_node_of_cell(c, k), d));
@@ -215,7 +215,7 @@ TEST(StatisticsTest, ProbesReadTheCellHoldingEachPoint) {
         double d_best = std::numeric_limits<double>::max();
         for (uint32_t c = 0; c < mesh.n_cells; c++) {
             double d2 = 0.0;
-            for (int d = 0; d < N_DIM; d++) d2 += std::pow(x[d] - double(mesh.h_cell_coords(c, d)), 2);
+            for (size_t d = 0; d < N_DIM; d++) d2 += std::pow(x[d] - double(mesh.h_cell_coords(c, d)), 2);
             if (d2 < d_best) {
                 d_best = d2;
                 best = c;
@@ -228,11 +228,11 @@ TEST(StatisticsTest, ProbesReadTheCellHoldingEachPoint) {
         for (const auto & row : csv_rows(dir + "/" + name + ".csv")) {
             if (std::stoull(row[0]) != solver.get_step()) continue;
             std::vector<double> x;
-            for (int d = 0; d < N_DIM; d++) x.push_back(std::stod(row[3 + d]));
+            for (size_t d = 0; d < N_DIM; d++) x.push_back(std::stod(row[3 + d]));
             const uint32_t c = expected_cell(x);
             const rtype expected[4] = {solver.h_conservatives(c, 0), solver.h_primitives(c, 0),
                                        solver.h_primitives(c, N_DIM), solver.h_primitives(c, N_DIM + 1)};
-            for (int v = 0; v < 4; v++) {
+            for (size_t v = 0; v < 4; v++) {
                 EXPECT_EQ(static_cast<rtype>(std::stod(row[3 + N_DIM + v])), expected[v]) << name << " point " << row[2];
             }
             n_checked++;

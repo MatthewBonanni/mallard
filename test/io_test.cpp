@@ -62,7 +62,7 @@ TEST(IOTest, BoundaryZoneOutputCarriesAdjacentCellValues) {
         double p;
         values >> p;
         const int32_t c = solver.get_mesh()->h_cells_of_face(zone->h_faces(i), 0);
-        EXPECT_RTYPE_EQ(p, solver.h_primitives(c, 2));
+        EXPECT_RTYPE_EQ(static_cast<rtype>(p), solver.h_primitives(c, 2));
     }
 
     // U is a 3-component vector, zero-padded in 2D
@@ -74,8 +74,8 @@ TEST(IOTest, BoundaryZoneOutputCarriesAdjacentCellValues) {
         double u[3];
         u_values >> u[0] >> u[1] >> u[2];
         const int32_t c = solver.get_mesh()->h_cells_of_face(zone->h_faces(i), 0);
-        EXPECT_RTYPE_EQ(u[0], solver.h_primitives(c, 0));
-        EXPECT_RTYPE_EQ(u[1], solver.h_primitives(c, 1));
+        EXPECT_RTYPE_EQ(static_cast<rtype>(u[0]), solver.h_primitives(c, 0));
+        EXPECT_RTYPE_EQ(static_cast<rtype>(u[1]), solver.h_primitives(c, 1));
         EXPECT_EQ(u[2], 0.0);
     }
     std::filesystem::remove_all(dir);
@@ -194,12 +194,12 @@ TEST(IOTest, ResumedHDF5SeriesKeepsTheSnapshotsUpToTheRestartTime) {
     {
         DataWriter first;
         first.init(parse_toml(input), data, mesh);
-        for (uint64_t step = 0; step < 4; step++) first.write(10 * step, 0.1 * step);
+        for (uint64_t step = 0; step < 4; step++) first.write(10 * step, static_cast<rtype>(0.1 * static_cast<double>(step)));
     }
     DataWriter second;
     second.init(parse_toml(input), data, mesh);
-    second.resume(10, 0.1);
-    second.write(25, 0.2);
+    second.resume(10, 0.1_r);
+    second.write(25, 0.2_r);
 
     std::ifstream in(dir + "/f.xmf");
     std::stringstream buffer;

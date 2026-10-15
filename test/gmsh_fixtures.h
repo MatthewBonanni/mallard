@@ -105,7 +105,7 @@ inline std::string jittered_periodic_mesh_2d(uint32_t n, double amplitude = 0.15
             const uint32_t idx[2] = {i, j};
             const auto & d = displacement[(j % n) * n + i % n];
             s << id(i, j);
-            for (int a = 0; a < 2; a++) s << " " << (idx[a] + (idx[a] % n ? d[a] : 0.0)) / n;
+            for (size_t a = 0; a < 2; a++) s << " " << (idx[a] + (idx[a] % n ? d[a] : 0.0)) / n;
             s << " 0\n";
         }
     }
@@ -158,7 +158,7 @@ inline std::string jittered_periodic_mesh_3d(uint32_t n, double amplitude = 0.15
                 const uint32_t idx[3] = {i, j, k};
                 const auto & d = displacement[((k % n) * n + j % n) * n + i % n];
                 s << id(i, j, k);
-                for (int a = 0; a < 3; a++) s << " " << (idx[a] + (idx[a] % n ? d[a] : 0.0)) / n;
+                for (size_t a = 0; a < 3; a++) s << " " << (idx[a] + (idx[a] % n ? d[a] : 0.0)) / n;
                 s << "\n";
             }
         }

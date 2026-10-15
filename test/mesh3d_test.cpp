@@ -102,7 +102,7 @@ TEST_P(Mesh3DInvariants, WarpedFacesKeepCellsClosedAndConserveVolume) {
     auto mesh = make_mesh_3d(GetParam(), NX, NY, NZ, LX, LY, LZ);
     // Move interior nodes so quadrilateral faces become non-planar
     std::mt19937 rng(7);
-    std::uniform_real_distribution<rtype> jitter(-0.12, 0.12);
+    std::uniform_real_distribution<rtype> jitter(-0.12_r, 0.12_r);
     const rtype h[3] = {LX / NX, LY / NY, LZ / NZ};
     const rtype L[3] = {LX, LY, LZ};
     for (uint32_t n = 0; n < mesh->n_nodes; n++) {
