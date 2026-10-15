@@ -1,6 +1,8 @@
 # CMakeLists.txt for Mallard
 add_library(MallardCore STATIC
     common/common_math.cpp
+    common/compiled_expression.cpp
+    common/region.cpp
     common/common_io.cpp
     common/build_info.cpp
     common/growing_buffer.cpp
