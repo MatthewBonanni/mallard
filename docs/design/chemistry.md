@@ -1465,8 +1465,8 @@ double flux; heat-flux wall (2e4 W/m^2) and isothermal wall at 300 K, within
 0.05 K. Closed channels of H2/N2 with the Soret effect between isothermal,
 heat-flux or adiabatic walls keep every species' total to 1e-13 (and the
 total energy, between adiabatic walls), with hydrogen gathering at the hot
-end. Isothermal and heat-flux walls with chemistry, Soret and double flux are
-bitwise identical on 1-4 ranks.
+end. Isothermal and heat-flux walls with chemistry and Soret, and with
+double flux (inert), are bitwise identical on 1-4 ranks.
 
 V8 (`examples/premixed_flame`, `tools/flame_reference.py`,
 `flame_restart.py`, `flame_speed.py`): a 1D strip in
