@@ -65,7 +65,7 @@ Gas power_law_gas(const double mu_w) {
 }
 
 /** @brief Classical fourth-order Runge-Kutta for y' = f(x, y) over n log-spaced steps from 0 to x_end. */
-template <int M, typename F>
+template <size_t M, typename F>
 void integrate(const F & f, const double x_end, double * y, const int n = 8000) {
     double x = 0.0;
     const double x_first = 1e-6 * x_end;
@@ -74,13 +74,13 @@ void integrate(const F & f, const double x_end, double * y, const int n = 8000) 
         const double dx = x_next - x;
         double k1[M], k2[M], k3[M], k4[M], t[M];
         f(x, y, k1);
-        for (int m = 0; m < M; m++) t[m] = y[m] + 0.5 * dx * k1[m];
+        for (size_t m = 0; m < M; m++) t[m] = y[m] + 0.5 * dx * k1[m];
         f(x + 0.5 * dx, t, k2);
-        for (int m = 0; m < M; m++) t[m] = y[m] + 0.5 * dx * k2[m];
+        for (size_t m = 0; m < M; m++) t[m] = y[m] + 0.5 * dx * k2[m];
         f(x + 0.5 * dx, t, k3);
-        for (int m = 0; m < M; m++) t[m] = y[m] + dx * k3[m];
+        for (size_t m = 0; m < M; m++) t[m] = y[m] + dx * k3[m];
         f(x_next, t, k4);
-        for (int m = 0; m < M; m++) y[m] += dx / 6.0 * (k1[m] + 2.0 * k2[m] + 2.0 * k3[m] + k4[m]);
+        for (size_t m = 0; m < M; m++) y[m] += dx / 6.0 * (k1[m] + 2.0 * k2[m] + 2.0 * k3[m] + k4[m]);
         x = x_next;
     }
 }
@@ -335,7 +335,8 @@ TEST(WallModel3D, ExchangePointsOnEveryCellType) {
             const FaceZone * zone = mesh.get_face_zone(zones[b]);
             for (uint32_t i = 0; i < zone->n_faces(); i++) face_bc[zone->h_faces(i)] = b;
         }
-        const WallModelData data = make_wall_model_data(mesh, face_bc, bcs, specs, {}, 0);
+        WallModelPoints points;
+        const WallModelData data = make_wall_model_data(mesh, face_bc, bcs, specs, {}, 0, points);
         auto faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), data.faces);
         auto cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), data.cells);
         auto offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), data.offsets);

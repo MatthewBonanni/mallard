@@ -581,6 +581,7 @@ class Solver {
         bool wall_model_on = false;
         std::vector<WallModelSpec> wall_model_specs;  // by boundary condition (default for unmodeled ones)
         WallModelData wall_model;
+        WallModelPoints wall_model_points;
 
         // Gas mixtures
         ScalarView cell_scalars;                              // (cell, [Y_1 .. Y_Ns, gamma, e0])

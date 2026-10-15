@@ -18,6 +18,7 @@ void Solver::init_wall_model(const std::vector<int32_t> & face_bc, const std::ve
     wall_model_on = std::any_of(bcs.begin(), bcs.end(), [](const BoundaryCondition & bc) { return bc.modeled; });
     if (!wall_model_on) {
         wall_model = WallModelData();
+        wall_model_points = WallModelPoints();
         return;
     }
     if (is_mixture()) throw InputError("boundaries.wall_model: gas mixtures are not supported yet.");
@@ -25,7 +26,8 @@ void Solver::init_wall_model(const std::vector<int32_t> & face_bc, const std::ve
     if (axisymmetric) throw InputError("boundaries.wall_model: axisymmetric runs are not supported.");
     wall_model_specs.resize(bcs.size());
     wall_model = make_wall_model_data(*mesh, face_bc, bcs, wall_model_specs,
-                                      is_distributed() ? distribution.layer : std::vector<uint8_t>(), halo_layers);
+                                      is_distributed() ? distribution.layer : std::vector<uint8_t>(), halo_layers,
+                                      wall_model_points);
 }
 
 void Solver::update_wall_model() {

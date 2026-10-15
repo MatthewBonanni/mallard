@@ -64,12 +64,13 @@ struct WallModelData {
     Kokkos::View<rtype *[2]> heights;            // (row, [h, edge distance])
     Kokkos::View<WallModelParameters *> params;  // (boundary condition)
 
-    // Host
-    std::vector<uint32_t> h_cells;  // local cells holding points, sorted, unique
-    int needed_layers = 0;          // halo depth at which every point lies in a cell with a complete stencil
-    double h_min = 0.0, h_max = 0.0;  // range of the exchange heights on this rank (0 without faces)
-
     bool active() const { return out.active(); }
+};
+
+/** @brief What the setup needs to know of the points of WallModelData (host). */
+struct WallModelPoints {
+    std::vector<uint32_t> cells;  // local cells holding points, sorted, unique
+    int needed_layers = 0;        // halo depth at which every point lies in a cell with a complete stencil
 };
 
 /**
@@ -77,14 +78,14 @@ struct WallModelData {
  *        owned cells by walking through the local mesh from the wall cell.
  *        A point outside the domain is an input error. A point beyond the
  *        halo, or in its outermost layer (whose gradients are incomplete),
- *        raises needed_layers above halo_layers.
+ *        raises points.needed_layers above halo_layers.
  * @param layer Halo layer of each local cell (0 for owned cells); empty for
  *        an undistributed mesh.
  */
 WallModelData make_wall_model_data(const Mesh & mesh, const std::vector<int32_t> & face_bc,
                                    const std::vector<BoundaryCondition> & bcs,
                                    const std::vector<WallModelSpec> & specs, const std::vector<uint8_t> & layer,
-                                   int halo_layers);
+                                   int halo_layers, WallModelPoints & points);
 
 /**
  * @brief Evaluates the wall model of every modeled face (one row of

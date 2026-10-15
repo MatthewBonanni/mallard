@@ -324,7 +324,7 @@ void Solver::trim_halo() {
     const int base = base_halo_layers();
     for (uint32_t c = 0; c < mesh->n_cells; c++) needed[c] = needed[c] || distribution.layer[c] <= base;
     // Wall-model points: their cells and the vertex neighbors their gradients read
-    for (const uint32_t c : wall_model.h_cells) {
+    for (const uint32_t c : wall_model_points.cells) {
         needed[c] = 1;
         for (uint32_t k = mesh->h_offsets_cells_of_cell(c); k < mesh->h_offsets_cells_of_cell(c + 1); k++) {
             needed[mesh->h_cells_of_cell(k)] = 1;
@@ -369,7 +369,7 @@ bool Solver::halo_too_shallow() {
         if (distribution.layer[c] <= 1) needed = std::max(needed, distribution.layer[c] + teno->gather_depth[c] + 1);
     }
     // The wall model's exchange and edge points must lie in cells with complete gradient stencils
-    needed = std::max(needed, wall_model.needed_layers);
+    needed = std::max(needed, wall_model_points.needed_layers);
     needed = comm::allreduce(needed, comm::Op::MAX);
     if (needed <= halo_layers) return false;
     halo_layers = needed;

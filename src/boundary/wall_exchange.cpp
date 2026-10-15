@@ -131,8 +131,9 @@ int32_t locate(const Mesh & mesh, const std::vector<int32_t> & face_bc, const st
 WallModelData make_wall_model_data(const Mesh & mesh, const std::vector<int32_t> & face_bc,
                                    const std::vector<BoundaryCondition> & bcs,
                                    const std::vector<WallModelSpec> & specs, const std::vector<uint8_t> & layer,
-                                   const int halo_layers) {
+                                   const int halo_layers, WallModelPoints & points) {
     WallModelData data;
+    points = WallModelPoints();
     const uint32_t n_owned = mesh.n_owned();
     std::vector<uint32_t> faces;
     for (uint32_t f = 0; f < mesh.n_faces; f++) {
@@ -157,7 +158,6 @@ WallModelData make_wall_model_data(const Mesh & mesh, const std::vector<int32_t>
     Kokkos::deep_copy(h_index, -1);
     for (size_t i = 0; i < bcs.size(); i++) h_params(i) = i < specs.size() ? specs[i].parameters : WallModelParameters();
 
-    data.h_min = n ? std::numeric_limits<double>::max() : 0.0;
     for (size_t k = 0; k < n; k++) {
         const uint32_t f = faces[k];
         const uint32_t c = static_cast<uint32_t>(mesh.h_cells_of_face(f, 0));
@@ -170,8 +170,6 @@ WallModelData make_wall_model_data(const Mesh & mesh, const std::vector<int32_t>
         FOR_I_DIM depth += (mesh.h_cell_coords(c, i) - mesh.h_face_coords(f, i)) * n_in[i];
         const rtype h = spec.exchange_distance > 0.0 ? rtype(spec.exchange_distance)
                                                       : rtype(spec.exchange_cells) * 2.0_r * depth;
-        data.h_min = std::min(data.h_min, double(h));
-        data.h_max = std::max(data.h_max, double(h));
         const rtype heights[2] = {h, rtype(spec.edge_distance)};
         for (uint8_t s = 0; s < 2; s++) {
             h_cells(k, s) = -1;
@@ -190,17 +188,17 @@ WallModelData make_wall_model_data(const Mesh & mesh, const std::vector<int32_t>
                 throw InputError(msg.str());
             }
             if (found == FRONTIER) {
-                data.needed_layers = std::max(data.needed_layers, halo_layers + 1);
+                points.needed_layers = std::max(points.needed_layers, halo_layers + 1);
                 continue;
             }
             h_cells(k, s) = found;
             FOR_I_DIM h_offsets(k, s, i) = p[i] - mesh.h_cell_coords(static_cast<uint32_t>(found), i);
-            data.h_cells.push_back(static_cast<uint32_t>(found));
-            if (!layer.empty()) data.needed_layers = std::max(data.needed_layers, int(layer[static_cast<size_t>(found)]) + 1);
+            points.cells.push_back(static_cast<uint32_t>(found));
+            if (!layer.empty()) points.needed_layers = std::max(points.needed_layers, int(layer[static_cast<size_t>(found)]) + 1);
         }
     }
-    std::sort(data.h_cells.begin(), data.h_cells.end());
-    data.h_cells.erase(std::unique(data.h_cells.begin(), data.h_cells.end()), data.h_cells.end());
+    std::sort(points.cells.begin(), points.cells.end());
+    points.cells.erase(std::unique(points.cells.begin(), points.cells.end()), points.cells.end());
     Kokkos::deep_copy(data.faces, h_faces);
     Kokkos::deep_copy(data.cells, h_cells);
     Kokkos::deep_copy(data.offsets, h_offsets);
