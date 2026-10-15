@@ -104,7 +104,7 @@ struct TableBatchT {
     V<uint16_t *> large_size;    // (slot)
     V<uint16_t **> small_size;   // (slot, face)
     V<uint16_t *> small_total;   // (slot)
-    SlotArray<rtype, Space> scale, basis_mean, si;
+    SlotArray<rtype, Space> scale, basis_mean, si;  // si: 2D only
     SlotArray<int32_t, Space> large_cells, large_faces, small_cells, small_faces;  // sectors one after another
     SlotArray<rtype, Space> large_pinv, small_pinv;  // (s * width + l)
 
@@ -116,7 +116,7 @@ struct TableBatchT {
           invalid_small("teno_batch_invalid", n), large_size("teno_batch_large_size", n),
           small_size("teno_batch_small_size", n, teno::MAX_FACES), small_total("teno_batch_small_total", n),
           scale("teno_batch_scale", 1, n, interleaved), basis_mean("teno_batch_mean", nk_in, n, interleaved),
-          si("teno_batch_si", size_t(nk_in) * (nk_in + 1) / 2, n, interleaved),
+          si("teno_batch_si", N_DIM == 2 ? size_t(nk_in) * (nk_in + 1) / 2 : 0, n, interleaved),
           large_cells("teno_batch_large_cells", max_large_in, n, interleaved),
           large_faces("teno_batch_large_faces", max_large_in, n, interleaved),
           small_cells("teno_batch_small_cells", max_small_in, n, interleaved),
@@ -126,6 +126,17 @@ struct TableBatchT {
 };
 
 using TableBatch = TableBatchT<Kokkos::DefaultExecutionSpace::memory_space>;
+
+/**
+ * @brief Whether stencils take no mirror images across boundary face f (with
+ *        condition bc): curved wall and symmetry faces, which no reflection
+ *        across a plane matches beyond second order, unless curved_mirrors.
+ *        Curved far fields and inflows keep theirs.
+ */
+inline bool one_sided_face(const Mesh & mesh, const BoundaryCondition & bc, const uint32_t f, const bool curved_mirrors) {
+    return mesh.curved_geometry && !curved_mirrors && mesh.curved_geometry->face_is_curved(f) &&
+           (bc.is_wall() || bc.type == BoundaryType::SYMMETRY);
+}
 
 /** @brief Whether batches interleave their cells (GPUs). */
 bool batch_interleaved();
@@ -146,6 +157,9 @@ struct Options {
     uint32_t batch_cells = 0;  // cells per device batch; 0 picks one from the device memory
     bool host_only = false;    // run every cell on the host (tests)
     const std::vector<uint32_t> * cells = nullptr;  // the cells that will be set up, if not all reconstructed ones
+    bool curved_mirrors = false;  // mirror images across curved wall and symmetry faces (their planes) too
+    uint8_t curved_wall_degree = 3;  // largest central degree of stencils reaching a curved wall without mirrors
+    uint16_t wall_ns = 0;            // central stencil size to start from at that degree
 };
 
 /** @brief Timings of the last setup, in seconds. */
@@ -185,9 +199,22 @@ class Setup3DHandle {
         uint16_t max_small() const;
         const Timings & timings() const;
 
+        /**
+         * @brief The central moments of cells [0, n_rows), from which the
+         *        troubled passes form the smoothness matrices: the setup's own
+         *        array if it has n_rows rows.
+         */
+        teno::Moments moments(uint32_t n_rows) const;
+
     private:
         std::unique_ptr<Setup3D> impl;
 };
+
+/** @brief The terms of every smoothness-matrix entry of the given degree, in the order the setup sums them. */
+teno::SmoothnessTerms smoothness_terms(uint8_t degree);
+
+/** @brief Central moments per cell for the given degree. */
+uint16_t n_moments(uint8_t degree);
 
 /**
  * @brief Metric (3 x 3, row-major) in which the stencil candidates of cell i

@@ -621,6 +621,32 @@ TEST(MPITest, GraphPartitionIsBalancedAndMatchesSerial) {
     EXPECT_LE(comm::allreduce(n_owned, comm::Op::MAX), 1.03 * static_cast<double>(n_global) / comm::size() + 1);
 }
 
+TEST(MPITest, MultiJaggedPartitionCutsABoxIntoBlocksAndMatchesSerial) {
+    const std::string input =
+        box_input("cartesian", "type = \"TENO\"\norder = 4\n", EULER,
+                  bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n", "type = \"wall_adiabatic\"\n",
+                      "type = \"extrapolation\"\n"),
+                  10) +
+        "[parallel]\npartitioner = \"multijagged\"\n";
+    expect_matches_serial(input);
+    Solver solver;
+    solver.init(parse_toml(input));
+    if (!solver.is_distributed()) return;
+    const uint32_t n_owned = solver.get_distribution().n_owned;
+    const uint64_t n_global = solver.get_mesh()->n_global_cells;
+    EXPECT_LE(comm::allreduce(uint64_t(n_owned), comm::Op::MAX), n_global / uint64_t(comm::size()) + 2);
+    // 24 x 18 cells: a grid of blocks that divides them is cut by straight lines only
+    const auto shape = grid_shape(comm::size(), {1.0 - 1.0 / 24, 0.8 - 0.8 / 18});
+    if (24 % shape[0] != 0 || 18 % shape[1] != 0) return;
+    const auto & mesh = *solver.get_mesh();
+    uint64_t cut = 0;
+    for (uint32_t f = 0; f < mesh.n_faces; f++) {
+        const int32_t a = mesh.h_cells_of_face(f, 0), b = mesh.h_cells_of_face(f, 1);
+        cut += b >= 0 && (uint32_t(a) < n_owned) != (uint32_t(b) < n_owned);
+    }
+    EXPECT_EQ(comm::allreduce(cut, comm::Op::SUM) / 2, uint64_t((shape[0] - 1) * 18 + (shape[1] - 1) * 24));
+}
+
 TEST(MPITest, TENOCacheOfEachRankReproducesItsSetupAndHalo) {
     const std::string cache = (std::filesystem::temp_directory_path() / "mallard_mpi_teno_cache.bin").string();
     const std::string rank_file =
@@ -687,5 +713,30 @@ TEST(MPITest, RunFromHDF5MeshFileMatchesSerial) {
     const std::string generated = "type = \"cartesian_tri\"\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     expect_matches_serial(input);
+    comm::barrier();
+}
+
+TEST(MPITest, CurvedWallsMatchSerial) {
+    // Walls from P3 lines of the file, or projected onto circles; the HDF5
+    // copy of the file keeps the P3 lines
+    const char * shapes = "[[mesh.curved]]\nzone = \"inner\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+                          "[[mesh.curved]]\nzone = \"outer\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n";
+    for (int order : {1, 3}) {
+        const std::string file =
+            write_temp_shared("mallard_mpi_annulus_" + std::to_string(order) + ".msh", annulus_gmsh(5, 60, order, order == 3));
+        std::string input = box_input("cartesian", "type = \"TENO\"\norder = 5\ncurved_mirrors = false\n", EULER,
+                                      "[[boundaries]]\nname = \"inner\"\ntype = \"symmetry\"\n"
+                                      "[[boundaries]]\nname = \"outer\"\ntype = \"wall_adiabatic\"\n", 10);
+        const size_t a = input.find("type = \"cartesian\""), b = input.find("[initialize]");
+        input.replace(a, b - a, "type = \"file\"\nfilename = \"" + file + "\"\n" + (order == 1 ? shapes : ""));
+        expect_matches_serial(input, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
+        if (order == 3 && have_hdf5() && (comm::size() == 1 || have_parallel_hdf5())) {
+            const std::string h5 = (std::filesystem::temp_directory_path() / "mallard_mpi_annulus_3.h5").string();
+            write_mesh_h5(h5, read_gmsh_block(file));
+            std::string from_h5 = input;
+            from_h5.replace(from_h5.find(file), file.size(), h5);
+            expect_matches_serial(from_h5, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
+        }
+    }
     comm::barrier();
 }

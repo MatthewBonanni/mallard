@@ -17,6 +17,8 @@
 
 #include "teno_setup.h"
 
+#include "curved.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -399,6 +401,7 @@ struct Geometry {
     V<uint8_t *> face_shift;
     R<uint8_t *> mirror_face;      // (face): mirrors stencil entries
     R<uint8_t *> has_mirror_face;  // (cell)
+    R<uint8_t *> wall_cell;        // (cell): has a curved wall face without mirror images (empty if none)
     R<double *[6]> boxes;          // (cell): bounds of the points inside its face planes
     R<double **> moments;          // (cell, moment)
     R<double *[9]> metric;         // (reconstructed cell)
@@ -525,15 +528,15 @@ KOKKOS_INLINE_FUNCTION Lanes lanes_of(const Scratch<Space> & s, const size_t slo
 
 /** @brief One cell's outputs in a batch. */
 struct OutLanes {
-    Lane<rtype> scale, basis_mean, si, large_pinv, small_pinv;
+    Lane<rtype> scale, basis_mean, large_pinv, small_pinv;
     Lane<int32_t> large_cells, large_faces, small_cells, small_faces;
 };
 
 template <class Space>
 KOKKOS_INLINE_FUNCTION OutLanes out_lanes(const TableBatchT<Space> & b, const size_t slot) {
-    return OutLanes{b.scale.lane(slot),       b.basis_mean.lane(slot),  b.si.lane(slot),
-                    b.large_pinv.lane(slot),  b.small_pinv.lane(slot),  b.large_cells.lane(slot),
-                    b.large_faces.lane(slot), b.small_cells.lane(slot), b.small_faces.lane(slot)};
+    return OutLanes{b.scale.lane(slot),       b.basis_mean.lane(slot),  b.large_pinv.lane(slot),
+                    b.small_pinv.lane(slot),  b.large_cells.lane(slot), b.large_faces.lane(slot),
+                    b.small_cells.lane(slot), b.small_faces.lane(slot)};
 }
 
 /**
@@ -628,6 +631,18 @@ bool pseudo_inverse(const Lane<double> & A, const Lane<double> & X, const int m,
 }
 
 /**
+ * @brief Spread a least-squares solution X (m rows of nf columns) over rows
+ *        of n columns, zero in the others, in place.
+ */
+template <typename L>
+KOKKOS_INLINE_FUNCTION void widen(const L & X, const int m, const int nf, const int n) {
+    if (nf == n) return;
+    for (int s = m - 1; s >= 0; s--) {
+        for (int l = n - 1; l >= 0; l--) X[s * n + l] = l < nf ? X[s * nf + l] : 0.0;
+    }
+}
+
+/**
  * @brief Lebesgue constant max_q |1 - sum_s c_qs| + sum_s |c_qs| of the
  *        reconstruction at the rows of psi (zero-mean basis, n per row),
  *        c_qs = psi_q . P(:, s), for P from pseudo_inverse().
@@ -672,6 +687,20 @@ struct CellSetup {
     uint8_t r = 0, nk = 0;
     uint16_t ns = 0, nss = 0, ns_max = 0, nss_max = 0;
     double max_condition = 1e8;
+    // Central fits of cells whose stencils reach a curved wall without mirror
+    // images: nk columns of the lower degree (nk itself: none) and the stencil size
+    uint8_t wall_nk = 0;
+    uint16_t wall_ns = 0;
+
+    /** @brief Whether one of the first n sorted entries is a cell at a curved wall without mirror images. */
+    KOKKOS_INLINE_FUNCTION
+    bool reaches_wall(const Lanes & w, const uint32_t n) const {
+        if (g.wall_cell.extent(0) == 0) return false;
+        for (uint32_t s = 0; s < n; s++) {
+            if (g.wall_cell(w.visit_cell[w.entry_ref[w.entry_order[s]] & 0xFFFFFFu])) return true;
+        }
+        return false;
+    }
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t t) const {
@@ -1311,6 +1340,10 @@ struct CellSetup {
             return n < n_list && Kokkos::fabs(key(w, n) - key(w, n - 1)) < tie;
         };
         uint32_t n_means = 0;
+        // Stencils reaching a curved wall without mirror images fit a lower degree
+        const bool at_wall = wall_nk < nk && reaches_wall(w, uint32_t(n_entries) < ns ? uint32_t(n_entries) : ns);
+        const int nf = at_wall ? wall_nk : nk;
+        const uint16_t n_first = at_wall ? wall_ns : ns;
         auto build = [&](const int m) {
             for (; n_means < uint32_t(m); n_means++) {
                 double means[teno::MAX_NK];
@@ -1318,15 +1351,17 @@ struct CellSetup {
                 for (uint32_t l = 0; l < nk; l++) w.means[n_means * nk + l] = means[l];
             }
             for (int s = 0; s < m; s++) {
-                for (int l = 0; l < nk; l++) w.A[s * nk + l] = w.means[s * nk + l] - mean0[l];
+                for (int l = 0; l < nf; l++) w.A[s * nf + l] = w.means[s * nk + l] - mean0[l];
             }
-            return pseudo_inverse(w.A, w.X, m, nk, max_condition);
+            const bool ok_fit = pseudo_inverse(w.A, w.X, m, nf, max_condition);
+            if (ok_fit) widen(w.X, m, nf, nk);
+            return ok_fit;
         };
-        uint16_t n_used = ns;
+        uint16_t n_used = n_first;
         bool found = false;
         uint32_t n_tried = 0;
         const uint32_t try_max = uint32_t(n_entries) < ns_max ? uint32_t(n_entries) : ns_max;
-        for (uint32_t n_try = ns; n_try <= try_max; n_try++) {
+        for (uint32_t n_try = n_first; n_try <= try_max; n_try++) {
             if (splits_tie(static_cast<uint32_t>(n_entries), n_try)) continue;
             if (!build(static_cast<int>(n_try))) continue;
             const double lebesgue = lebesgue_constant(w.psi, n_psi, nk, w.X, static_cast<int>(n_try), w.coef);
@@ -1442,45 +1477,6 @@ struct CellSetup {
             n_small = static_cast<uint16_t>(n_small + n_sector);
         }
 
-        // Smoothness-indicator matrix: M_lm = sum_{1<=|beta|<=r} int D^beta phi_l D^beta phi_m,
-        // from the cell's central moments (its scaled volume is 1)
-        const Lane<double> & M = w.X;
-        for (int k = 0; k < nk * nk; k++) M[k] = 0.0;
-        auto falling = [](int a, int p) {
-            double c = 1.0;
-            for (int t = 0; t < p; t++) c *= (a - t);
-            return c;
-        };
-        for (int b0 = 0; b0 <= r; b0++) {
-            for (int b1 = 0; b0 + b1 <= r; b1++) {
-                for (int b2 = 0; b0 + b1 + b2 <= r; b2++) {
-                    if (b0 + b1 + b2 == 0) continue;
-                    double dv[teno::MAX_NK];
-                    uint8_t nonzero[teno::MAX_NK];
-                    int n_nonzero = 0;
-                    for (int l = 0; l < nk; l++) {
-                        const int e0 = tables->expo[l][0], e1 = tables->expo[l][1], e2 = tables->expo[l][2];
-                        dv[l] = (e0 >= b0 && e1 >= b1 && e2 >= b2) ? falling(e0, b0) * falling(e1, b1) * falling(e2, b2)
-                                                                   : 0.0;
-                        if (dv[l] != 0.0) nonzero[n_nonzero++] = static_cast<uint8_t>(l);
-                    }
-                    for (int jl = 0; jl < n_nonzero; jl++) {
-                        const int l = nonzero[jl];
-                        for (int jm = jl; jm < n_nonzero; jm++) {
-                            const int m = nonzero[jm];
-                            M[l * nk + m] += dv[l] * dv[m] *
-                                             g.moments(i, moment(tables->expo[l][0] + tables->expo[m][0] - 2 * b0,
-                                                                 tables->expo[l][1] + tables->expo[m][1] - 2 * b1,
-                                                                 tables->expo[l][2] + tables->expo[m][2] - 2 * b2));
-                        }
-                    }
-                }
-            }
-        }
-        int idx = 0;
-        for (int l = 0; l < nk; l++) {
-            for (int m = l; m < nk; m++) o.si[idx++] = rtype(M[l * nk + m]);
-        }
         return OK;
     }
 };
@@ -1816,6 +1812,8 @@ struct CellTeam {
     Kokkos::View<uint32_t *, Space> cells;
     TeamLayout layout;
     Caps caps;
+    Kokkos::View<char *, Space> pool;   // layout.bytes per slot
+    Kokkos::View<int *, Space> locks;   // (slot): taken
 
     // Control words shared by the team (level 0)
     enum Ctl { N_END = 0, EXHAUSTED, TRUNCATED, SEARCH_OK, N_HASH, N_PLANES, N_PLANE_FACES, N_MEANS, N_CTL };
@@ -1854,7 +1852,18 @@ struct CellTeam {
     KOKKOS_INLINE_FUNCTION
     void operator()(const Member & tm) const {
         const uint32_t t = tm.league_rank();
-        char * base = static_cast<char *>(tm.team_scratch(1).get_shmem(layout.bytes));
+        // A free slot of the pool; every slot is held by a running team, so one frees up
+        int slot = 0;
+        Kokkos::single(Kokkos::PerTeam(tm), [&](int & taken) {
+            const int n_slots = static_cast<int>(locks.extent(0));
+            for (int k = int(t % uint32_t(n_slots));; k = (k + 1) % n_slots) {
+                if (Kokkos::atomic_compare_exchange(&locks(k), 0, 1) == 0) {
+                    taken = k;
+                    break;
+                }
+            }
+        }, slot);
+        char * base = pool.data() + size_t(slot) * layout.bytes;
         char * shared = static_cast<char *>(tm.team_scratch(0).get_shmem(layout.shared_bytes));
         const Lanes w = lanes(base);
         uint8_t depth = 0, failed = 0, invalid = 0;
@@ -1872,6 +1881,11 @@ struct CellTeam {
             out.small_total(t) = n_small;
             for (int k = 0; k < teno::MAX_FACES; k++) out.small_size(t, k) = small_size[k];
         }
+        tm.team_barrier();
+        Kokkos::single(Kokkos::PerTeam(tm), [&]() {
+            Kokkos::memory_fence();
+            Kokkos::atomic_store(&locks(slot), 0);
+        });
     }
 
     /**
@@ -2460,25 +2474,38 @@ struct CellTeam {
         double * X_used = X;
         // A in level-0 scratch, too, unless the system is too large
         double * A_used = A;
+        // Stencils reaching a curved wall without mirror images fit a lower degree
+        bool at_wall = false;
+        if (c.wall_nk < nk && c.g.wall_cell.extent(0) > 0) {
+            Kokkos::single(Kokkos::PerTeam(tm), [&](bool & reached) {
+                reached = c.reaches_wall(w, uint32_t(n_entries) < c.ns ? uint32_t(n_entries) : c.ns);
+            }, at_wall);
+        }
+        const int nf = at_wall ? c.wall_nk : nk;
+        const uint16_t n_first = at_wall ? c.wall_ns : c.ns;
         auto build = [&](const int m) {
             ensure_means(tm, w, base, ctl, uint32_t(m) > means_floor ? uint32_t(m) : means_floor, x0, h);
             const size_t bytes = sizeof(double) * size_t(m) * nk;
             A_used = bytes <= big_bytes ? A : reinterpret_cast<double *>(base + layout.A);
             X_used = A_used == A && 2 * bytes <= big_bytes ? A + size_t(m) * nk : X;
-            Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, m * nk),
-                                 [&](const int e) { A_used[e] = w.means[e] - mean0[e % nk]; });
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, m * nf),
+                                 [&](const int e) { A_used[e] = w.means[(e / nf) * nk + e % nf] - mean0[e % nf]; });
             tm.team_barrier();
             Kokkos::Array<double *, 1> As = {A_used};
             Kokkos::Array<double *, 1> Xs = {X_used};
             Kokkos::Array<int, 1> ms = {m};
             Kokkos::Array<bool, 1> okq;
-            okq = team_pseudo_inverse<1>(tm, As, Xs, ms, nk, c.max_condition, qr);
+            okq = team_pseudo_inverse<1>(tm, As, Xs, ms, nf, c.max_condition, qr);
+            if (nf < nk) {
+                Kokkos::single(Kokkos::PerTeam(tm), [&]() { if (okq[0]) widen(X_used, m, nf, nk); });
+                tm.team_barrier();
+            }
             return okq[0];
         };
-        uint16_t n_used = c.ns;
+        uint16_t n_used = n_first;
         bool found = false;
         uint32_t n_tried = 0;
-        for (uint32_t n_try = c.ns; n_try <= try_max; n_try++) {
+        for (uint32_t n_try = n_first; n_try <= try_max; n_try++) {
             if (n_try < uint32_t(n_entries) && Kokkos::fabs(key(n_try) - key(n_try - 1)) < tie) continue;
             if (!build(n_try)) continue;
             const double lebesgue = team_lebesgue_constant(tm, &w.psi[0], n_psi, nk, X_used, n_try, &w.coef[0]);
@@ -2696,30 +2723,6 @@ struct CellTeam {
         });
         tm.team_barrier();
 
-        // Smoothness-indicator matrix, entry by entry, over the derivatives in CellSetup's order,
-        // from the cell's moments in level-0 scratch
-        double * mom = A;
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, c.tables->n_moments), [&](const int k) { mom[k] = c.g.moments(i, k); });
-        tm.team_barrier();
-        const int n_si = nk * (nk + 1) / 2;
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, n_si), [&](const int e) {
-            int l = 0, idx = e;
-            while (idx >= nk - l) {
-                idx -= nk - l;
-                l++;
-            }
-            const int m = l + idx;
-            const Tables & t = *c.tables;
-            const int e0 = t.expo[l][0] + t.expo[m][0], e1 = t.expo[l][1] + t.expo[m][1], e2 = t.expo[l][2] + t.expo[m][2];
-            double sum = 0.0;
-            for (int q = 0; q < t.n_beta; q++) {
-                const double dl = t.derivative[l][q], dm = t.derivative[m][q];
-                if (dl == 0.0 || dm == 0.0) continue;
-                sum += dl * dm * mom[c.moment(e0 - 2 * t.beta[q][0], e1 - 2 * t.beta[q][1], e2 - 2 * t.beta[q][2])];
-            }
-            o.si[e] = rtype(sum);
-        });
-        tm.team_barrier();
         return Status::OK;
     }
 };
@@ -2913,14 +2916,18 @@ void assign_if_same(A & a, const B & b) {
     if constexpr (std::is_same_v<A, B>) a = b;
 }
 
-/** @brief Copies slots [0, n) of a batch into slots dest(0..n) of another. */
+/**
+ * @brief Copies slots src(0..n) of a batch into slots dest(0..n) of another;
+ *        an empty src or dest stands for 0..n.
+ */
 template <class Space>
-void copy_slots(const TableBatchT<Space> & from, const TableBatchT<Space> & to, const Kokkos::View<uint32_t *, Space> & dest,
-                const uint32_t n) {
+void copy_slots(const TableBatchT<Space> & from, const TableBatchT<Space> & to, const Kokkos::View<uint32_t *, Space> & src,
+                const Kokkos::View<uint32_t *, Space> & dest, const uint32_t n) {
     using Exec = typename std::conditional<std::is_same_v<Space, HostMem>, Kokkos::DefaultHostExecutionSpace,
                                            Kokkos::DefaultExecutionSpace>::type;
-    Kokkos::parallel_for("teno_setup_copy_slots", Kokkos::RangePolicy<Exec>(0, n), KOKKOS_LAMBDA(const uint32_t j) {
-        const uint32_t t = dest(j);
+    Kokkos::parallel_for("teno_setup_copy_slots", Kokkos::RangePolicy<Exec>(0, n), KOKKOS_LAMBDA(const uint32_t i) {
+        const uint32_t j = src.extent(0) ? src(i) : i;
+        const uint32_t t = dest.extent(0) ? dest(i) : i;
         to.status(t) = from.status(j);
         to.gather_depth(t) = from.gather_depth(j);
         to.failed_large(t) = from.failed_large(j);
@@ -2985,6 +2992,54 @@ TableBatch device_copy(const TableBatchT<Kokkos::HostSpace> & h) {
 
 /** @brief The setup of one mesh. */
 class Setup3D {
+    private:
+        /**
+         * @brief Moments of the curved cells over their curved regions
+         *        (curved::Geometry::cell_rule), on the host, in place of the
+         *        device's from the straight-sided tetrahedra.
+         */
+        void curved_moments(const curved::Geometry & geometry, const uint32_t n_cells) {
+            std::vector<uint32_t> cells;
+            for (uint32_t c = 0; c < n_cells; c++) {
+                if (geometry.cell_is_curved(c)) cells.push_back(c);
+            }
+            if (cells.empty()) return;
+            auto h_moments = Kokkos::create_mirror_view_and_copy(HostMem(), device.moments);
+            const int nm = tables.nm, n_moments = tables.n_moments;
+            const Geometry<HostMem> & h = host;
+            Kokkos::parallel_for("teno_curved_moments",
+                                 Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(
+                                     0, cells.size()),
+                                 [&](const uint32_t j) {
+                const uint32_t c = cells[j];
+                std::vector<curved::Vec3> x;
+                std::vector<double> w;
+                geometry.cell_rule(c, nm - 1, x, w);
+                double xc[3];
+                for (int a = 0; a < 3; a++) xc[a] = double(h.cell_coords(c, a));
+                const double hc = h.cell_h(c);
+                std::vector<double> sums(n_moments, 0.0);
+                double vol = 0.0, px[MAX_NM], py[MAX_NM], pz[MAX_NM];
+                for (size_t q = 0; q < w.size(); q++) {
+                    px[0] = py[0] = pz[0] = 1.0;
+                    for (int k = 1; k < nm; k++) {
+                        px[k] = px[k - 1] * (x[q][0] - xc[0]) / hc;
+                        py[k] = py[k - 1] * (x[q][1] - xc[1]) / hc;
+                        pz[k] = pz[k - 1] * (x[q][2] - xc[2]) / hc;
+                    }
+                    int k = 0;
+                    for (int a = 0; a < nm; a++) {
+                        for (int b = 0; a + b < nm; b++) {
+                            for (int e = 0; a + b + e < nm; e++) sums[k++] += w[q] * px[a] * py[b] * pz[e];
+                        }
+                    }
+                    vol += w[q];
+                }
+                for (int k = 0; k < n_moments; k++) h_moments(c, k) = sums[k] / vol;
+            });
+            Kokkos::deep_copy(device.moments, h_moments);
+        }
+
     public:
         Setup3D(const Mesh & mesh, const BoundaryData & boundaries, Kokkos::View<rtype ***> quad_points,
                 Kokkos::View<rtype **> quad_weights, const Options & opt)
@@ -2993,6 +3048,8 @@ class Setup3D {
             r = opt.degree;
             nk = opt.nk;
             ns = opt.ns;
+            wall_nk = opt.curved_wall_degree < opt.degree ? teno::n_dof(opt.curved_wall_degree) : nk;
+            wall_ns = opt.wall_ns;
             nss = opt.nss;
             ns_max = static_cast<uint16_t>(std::ceil(3.5 * nk)) + 64;
             nss_max = 2 * nss;
@@ -3035,8 +3092,16 @@ class Setup3D {
             using HostRange = Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>;
             Kokkos::parallel_for("teno_setup_mirror_faces", HostRange(0, mesh.n_faces), [&](const uint32_t f) {
                 h.mirror_face(f) = mesh.h_cells_of_face(f, 1) < 0 && h_face_bc(f) >= 0 &&
-                                   h_bcs(h_face_bc(f)).type != BoundaryType::PARTITION;
+                                   h_bcs(h_face_bc(f)).type != BoundaryType::PARTITION &&
+                                   !one_sided_face(mesh, h_bcs(h_face_bc(f)), f, opt.curved_mirrors);
             });
+            if (mesh.curved_geometry && !opt.curved_mirrors && opt.curved_wall_degree < opt.degree) {
+                h.wall_cell = Geometry<HostMem>::R<uint8_t *>("teno_setup_wall_cell", n_cells);
+                for (uint32_t f = 0; f < mesh.n_faces; f++) {
+                    if (mesh.h_cells_of_face(f, 1) >= 0 || h_face_bc(f) < 0) continue;
+                    if (one_sided_face(mesh, h_bcs(h_face_bc(f)), f, false)) h.wall_cell(mesh.h_cells_of_face(f, 0)) = 1;
+                }
+            }
             h.has_mirror_face = Geometry<HostMem>::R<uint8_t *>("teno_setup_has_mirror_face", n_cells);
             Kokkos::parallel_for("teno_setup_mirror_cells", HostRange(0, n_cells), [&](const uint32_t c) {
                 for (uint32_t k = h.offsets_faces_of_cell(c); k < h.offsets_faces_of_cell(c + 1); k++) {
@@ -3044,6 +3109,7 @@ class Setup3D {
                 }
             });
             const uint32_t n_rec = mesh.n_reconstructed();
+            n_target = opt.cells ? uint32_t(opt.cells->size()) : n_rec;
             h.metric = Geometry<HostMem>::R<double *[9]>("teno_setup_metric", n_rec);
             // Only the cells to set up need theirs
             const uint32_t n_metric = opt.cells ? uint32_t(opt.cells->size()) : n_rec;
@@ -3101,6 +3167,7 @@ class Setup3D {
             d.cell_h = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.cell_h);
             d.mirror_face = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.mirror_face);
             d.has_mirror_face = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.has_mirror_face);
+            if (h.wall_cell.extent(0)) d.wall_cell = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.wall_cell);
             d.metric = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.metric);
             d.tet_rule = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.tet_rule);
             d.quad_points = quad_points;
@@ -3119,6 +3186,7 @@ class Setup3D {
             }
             Kokkos::parallel_for("teno_boxes", Range(0, n_cells), BoxesTask<DefaultMem>{d});
             Kokkos::fence();
+            if (mesh.curved_geometry) curved_moments(*mesh.curved_geometry, n_cells);
 
             // On host backends the host setup reads the very same geometry
             assign_if_same(host, device);
@@ -3136,21 +3204,37 @@ class Setup3D {
         uint32_t batch_cells() const {
             if (options.batch_cells > 0) return options.batch_cells;
             if constexpr (DEVICE_IS_HOST) return 8192;
-            // Batch outputs within about a quarter of the free device memory
+            // Batch outputs within about a quarter of the free device memory and
+            // BATCH_BYTES_PER_CELL per cell to set up, so that the setup's peak
+            // stays below the memory the run allocates after it
             size_t free_bytes = size_t(8) << 30;
 #if defined(KOKKOS_ENABLE_CUDA)
             size_t total = 0;
             cudaMemGetInfo(&free_bytes, &total);
 #endif
             const size_t out_bytes = (size_t(ns_max) * (8 + 8 * size_t(nk)) + size_t(max_small()) * (8 + 8 * teno::NK_SMALL) +
-                                      8 * (size_t(nk) * (nk + 3) / 2 + 1) + 32);
-            size_t n = free_bytes / 4 / out_bytes;
+                                      8 * (size_t(nk) + 1) + 32);
+            size_t n = std::min(free_bytes / 4, BATCH_BYTES_PER_CELL * n_target) / out_bytes;
             n = std::min<size_t>(n, 65536);
-            n = std::max<size_t>(n / 1024 * 1024, 1024);
+            n = std::max<size_t>(n / 1024 * 1024, 4096);
             return static_cast<uint32_t>(n);
         }
 
         static constexpr int TEAM_SIZE = 128;
+        static constexpr size_t BATCH_BYTES_PER_CELL = 2048;
+
+        /** @brief Upper bound on the teams of the device kernel resident at once. */
+        static size_t resident_teams([[maybe_unused]] const size_t shared_bytes) {
+            const auto space = Kokkos::DefaultExecutionSpace();
+            size_t teams = space.concurrency() / TEAM_SIZE;
+#if defined(KOKKOS_ENABLE_CUDA)
+            const cudaDeviceProp & prop = space.cuda_device_prop();
+            const size_t per_sm = std::min<size_t>(prop.maxThreadsPerMultiProcessor / TEAM_SIZE,
+                                                   prop.sharedMemPerMultiprocessor / std::max<size_t>(shared_bytes, 1));
+            teams = std::min(teams, size_t(prop.multiProcessorCount) * std::max<size_t>(per_sm, 1));
+#endif
+            return teams;
+        }
 
         /** @brief Scratch layout of one team (one cell) of the device kernel. */
         TeamLayout team_layout() const {
@@ -3230,17 +3314,22 @@ class Setup3D {
                     scratch = Scratch<DefaultMem>(caps, n_threads, nk, false, tables.n_low);
                 }
                 CellSetup<Kokkos::DefaultExecutionSpace> task{device, d_tables.data(), scratch, out, cells, {}, r, nk, ns, nss,
-                                                              ns_max, nss_max, double(options.max_condition)};
+                                                              ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns};
                 Kokkos::parallel_for("teno_setup_cells", HeavyRange<Kokkos::Schedule<Kokkos::Dynamic>>(0, n), task);
             } else {
                 using Exec = Kokkos::DefaultExecutionSpace;
                 const TeamLayout layout = team_layout();
+                if (pool.extent(0) == 0) {
+                    const size_t slots = resident_teams(layout.shared_bytes);
+                    pool = Kokkos::View<char *, DefaultMem>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_setup_pool"),
+                                                            slots * layout.bytes);
+                    pool_locks = Kokkos::View<int *, DefaultMem>("teno_setup_pool_locks", slots);
+                }
                 CellTeam<Exec> task{CellSetup<Exec>{device, d_tables.data(), Scratch<DefaultMem>(), out, cells, {}, r, nk, ns, nss,
-                                                    ns_max, nss_max, double(options.max_condition)},
-                                    out, cells, layout, caps};
+                                                    ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns},
+                                    out, cells, layout, caps, pool, pool_locks};
                 Kokkos::TeamPolicy<Exec, Kokkos::LaunchBounds<TEAM_SIZE, 3>> policy(static_cast<int>(n), TEAM_SIZE);
-                policy.set_scratch_size(0, Kokkos::PerTeam(layout.shared_bytes))
-                    .set_scratch_size(1, Kokkos::PerTeam(layout.bytes));
+                policy.set_scratch_size(0, Kokkos::PerTeam(layout.shared_bytes));
                 Kokkos::parallel_for("teno_setup_cells", policy, task);
             }
             Kokkos::fence();
@@ -3261,6 +3350,13 @@ class Setup3D {
         }
 
         const Timings & timings() const { return timing; }
+
+        teno::Moments moments(const uint32_t n_rows) const {
+            if (n_rows == device.moments.extent(0)) return device.moments;
+            teno::Moments out(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_moments"), n_rows, tables.n_moments);
+            Kokkos::deep_copy(out, Kokkos::subview(device.moments, std::make_pair(0u, n_rows), Kokkos::ALL()));
+            return out;
+        }
 
     private:
 
@@ -3286,7 +3382,7 @@ class Setup3D {
                 TableBatchT<HostMem> h_out(m, nk, ns_max, max_small(), false);
                 Scratch<HostMem> h_scratch(caps.scaled(scale), n_threads, nk, false, tables.n_low);
                 CellSetup<Kokkos::DefaultHostExecutionSpace> task{host, &tables, h_scratch, h_out, h_cells, {}, r, nk, ns,
-                                                                  nss, ns_max, nss_max, double(options.max_condition)};
+                                                                  nss, ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns};
                 Kokkos::parallel_for("teno_setup_cells_host",
                                      Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, m),
                                      task);
@@ -3310,7 +3406,7 @@ class Setup3D {
                         h_dst(j) = done_slot[j];
                     }
                     TableBatchT<HostMem> h_compact(n_done, nk, ns_max, max_small(), out.large_cells.interleaved);
-                    copy_slots<HostMem>(h_out, h_compact, h_src, n_done);
+                    copy_slots<HostMem>(h_out, h_compact, h_src, {}, n_done);
                     Kokkos::fence();
                     // Copies compacted rows to the device, then into place
                     TableBatchT<DefaultMem> d_compact = device_copy(h_compact);
@@ -3324,12 +3420,14 @@ class Setup3D {
 
         static void copy_slots_indirect(const TableBatchT<DefaultMem> & from, const TableBatchT<DefaultMem> & to,
                                         const Kokkos::View<uint32_t *, DefaultMem> & dest, const uint32_t n) {
-            copy_slots<DefaultMem>(from, to, dest, n);
+            copy_slots<DefaultMem>(from, to, {}, dest, n);
         }
 
         Options options;
         Tables tables;
         Kokkos::View<Tables, DefaultMem> d_tables;
+        uint8_t wall_nk = 0;
+        uint16_t wall_ns = 0;
         uint8_t r = 0, nk = 0;
         uint16_t ns = 0, nss = 0, ns_max = 0, nss_max = 0;
         Caps caps;
@@ -3337,6 +3435,11 @@ class Setup3D {
         Geometry<DefaultMem> device;
         bool host_ready = DEVICE_IS_HOST;
         Scratch<DefaultMem> scratch;
+        uint32_t n_target = 0;  // cells to set up
+        // Level-1 scratch of the device kernel, one slot per team that can be
+        // resident at once (Kokkos sizes its own for every thread the device can hold)
+        Kokkos::View<char *, DefaultMem> pool;
+        Kokkos::View<int *, DefaultMem> pool_locks;
         Timings timing;
 };
 
@@ -3354,6 +3457,40 @@ uint32_t Setup3DHandle::batch_cells() const { return impl->batch_cells(); }
 uint16_t Setup3DHandle::max_large() const { return impl->max_large(); }
 uint16_t Setup3DHandle::max_small() const { return impl->max_small(); }
 const Timings & Setup3DHandle::timings() const { return impl->timings(); }
+
+teno::Moments Setup3DHandle::moments(const uint32_t n_rows) const { return impl->moments(n_rows); }
+
+teno::SmoothnessTerms smoothness_terms(const uint8_t degree) {
+    const Tables t(degree);
+    const int nk = teno::n_dof(degree);
+    std::vector<uint32_t> start = {0};
+    std::vector<uint32_t> term;
+    // The setup's order of the terms of each entry, which its sums followed
+    for (int l = 0; l < nk; l++) {
+        for (int m = l; m < nk; m++) {
+            const int e0 = t.expo[l][0] + t.expo[m][0], e1 = t.expo[l][1] + t.expo[m][1], e2 = t.expo[l][2] + t.expo[m][2];
+            for (int q = 0; q < t.n_beta; q++) {
+                const double dl = t.derivative[l][q], dm = t.derivative[m][q];
+                if (dl == 0.0 || dm == 0.0) continue;
+                const double w = dl * dm;
+                const int k = t.moment_slot[((e0 - 2 * t.beta[q][0]) * t.nm + e1 - 2 * t.beta[q][1]) * t.nm + e2 - 2 * t.beta[q][2]];
+                if (!(w > 0.0 && w < 65536.0 && w == std::floor(w)) || k < 0 || k > 0xFFFF) {
+                    throw std::logic_error("TENO: a smoothness-matrix term does not fit its packing.");
+                }
+                term.push_back(uint32_t(w) << 16 | uint32_t(k));
+            }
+            start.push_back(uint32_t(term.size()));
+        }
+    }
+    teno::SmoothnessTerms out;
+    out.start = Kokkos::View<uint32_t *>("teno_si_term_start", start.size());
+    out.term = Kokkos::View<uint32_t *>("teno_si_terms", term.size());
+    Kokkos::deep_copy(out.start, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(start.data(), start.size()));
+    Kokkos::deep_copy(out.term, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(term.data(), term.size()));
+    return out;
+}
+
+uint16_t n_moments(const uint8_t degree) { return uint16_t(Tables(degree).n_moments); }
 
 // ---- ranking metric (host) ----------------------------------------------------------------------
 

@@ -66,7 +66,10 @@ triangles to the cell's vertex average.
 For Gmsh meshes, each physical curve (2D) or surface (3D) becomes a boundary
 zone named after it (`physical_<tag>` if unnamed); boundary faces not in any
 such group form the zone `unassigned`. Elements of other dimensions (points,
-and curves in 3D) are ignored, and higher-order elements are rejected.
+and curves in 3D) are ignored. Elements of order 2 and 3 are read by their
+corners; high-order boundary elements (`line3`, `line4` in 2D; `triangle6`,
+`triangle9`, `triangle10`, `quadrangle8`, `quadrangle9`, `quadrangle16` in 3D)
+curve their faces (see curved boundaries below).
 
 In a distributed run every rank reads a Gmsh file whole (keeping only its
 share), so large meshes should be converted to Mallard's HDF5 mesh format
@@ -84,7 +87,44 @@ The file holds global arrays, with global ids the row indices:
 count, Gmsh/VTK node order), `/boundary/offsets`, `/boundary/nodes` and
 `/boundary/zone` (boundary faces and their zone index), the attribute
 `/boundary/zone_names`, and the root attributes `format = "mallard-mesh"`,
-`version = 1` and `dimension`.
+`version = 1` and `dimension`. Meshes with high-order boundary faces also have
+`/boundary/high_order/offsets` (per boundary face) and
+`/boundary/high_order/coordinates` (all nodes of each high-order face, corners
+first in Gmsh order; none for linear faces).
+
+### Curved boundaries
+
+Boundary faces follow the true curved geometry where the mesh file has
+high-order boundary elements, or where `[[mesh.curved]]` projects a zone onto
+an analytic shape (any mesh: generated, linear Gmsh, HDF5). Curved faces get
+quadrature points on the curve or surface with their own normals and
+Jacobians, and the cells touching them their exact volumes, centroids and
+TENO moments; in 3D the faces sharing an edge with a curved face (side faces
+of prism layers, symmetry planes meeting the wall) are blended from their
+edges. This brings orders 3 to 6 to their design accuracy at curved walls
+(design: `docs/design/curved_boundaries.md`).
+
+| Key | Description |
+|---|---|
+| `curved_geometry` | (`[mesh]`) `false` ignores high-order nodes and `[[mesh.curved]]`: straight-sided faces everywhere. Default `true` |
+| `zone` | (`[[mesh.curved]]`) Boundary zone to curve |
+| `shape` | `circle` (2D), `sphere` or `cylinder` (3D) |
+| `center` | A point of the shape's center (cylinders: of their axis) |
+| `radius` | Radius |
+| `axis` | (`cylinder`) Direction of the axis |
+
+```toml
+[[mesh.curved]]
+zone = "cylinder"
+shape = "circle"
+center = [0.0, 0.0]
+radius = 0.5
+```
+
+Points of a straight face are projected radially onto the shape, minus the
+linear interpolant of its corners' own offsets, so faces still meet at the
+mesh nodes; zone nodes farther than 5% of an edge length from the shape are
+an error. Curved boundaries are not yet supported with `physics.axisymmetric`.
 
 ## `[[periodic]]`
 
@@ -372,9 +412,13 @@ Strength and reference are evaluated once at cell centroids.
 | `C_T` | (`TENO`) Fixed TENO cutoff; adaptive (1e-10 to 1e-6) if omitted |
 | `characteristic` | (`TENO`) Select stencils on characteristic variables, default true |
 | `max_condition` | (`TENO`) Stencils grow until the least-squares system's condition estimate is below this, default 1e8 |
-| `cache_file` | (`TENO`) Save the precomputed stencils and matrices here, and reuse them on later runs of the same mesh, boundary assignment and TENO options; anything else is detected and recomputed. Distributed runs write one file per rank, `<cache_file>.r<rank>-of-<ranks>`, for that rank count and partition, and record the halo depth the stencils need, so a cached run sets up its halo once. Hilbert and graph partitions repeat for the same mesh and rank count. Size per cell: about 2.5 / 4 / 6 / 11 KB in 2D and 10 / 19 / 36 KB (hexahedra) or 9 / 14 / 33 / 74 KB (tetrahedra) in 3D for orders 3 / 4 / 5 / 6, e.g. 9.4 GB for 64^3 hexahedra at order 5; reading it takes seconds; the 3D setup takes about 5 s per million hexahedra and 20 s per million tetrahedra on an A100 (order 5), and minutes on CPUs. The cache records whether the device or the host computed it; both give the same tables |
-| `cache_single_precision` | (`TENO`) Store the pseudo-inverses and smoothness-indicator matrices of `cache_file` in single precision: about half the size (19 instead of 36 KB per cell for hexahedra at order 5). The run that writes the cache rounds them too, so it and the runs that read the cache agree with each other, but no longer with a run without it, whose results differ at single-precision round-off. Default false |
+| `cache_file` | (`TENO`) Save the precomputed stencils and matrices here, and reuse them on later runs of the same mesh, boundary assignment and TENO options; anything else is detected and recomputed. Distributed runs write one file per rank, `<cache_file>.r<rank>-of-<ranks>`, for that rank count and partition, and record the halo depth the stencils need, so a cached run sets up its halo once. Partitions repeat for the same mesh and rank count. Size per cell: about 2.5 / 4 / 6 / 11 KB in 2D and 10 / 18 / 32 KB (hexahedra) or 9 / 13 / 29 / 63 KB (tetrahedra) in 3D for orders 3 / 4 / 5 / 6, e.g. 8.4 GB for 64^3 hexahedra at order 5; reading it takes seconds; the 3D setup takes about 5 s per million hexahedra and 20 s per million tetrahedra on an A100 (order 5), and minutes on CPUs. The cache records whether the device or the host computed it; both give the same tables |
+| `cache_single_precision` | (`TENO`) Store the pseudo-inverses and smoothness-indicator matrices (3D: the cells' moments, from which the matrices are formed) of `cache_file` in single precision: about half the size (17 instead of 32 KB per cell for hexahedra at order 5). The run that writes the cache rounds them too, so it and the runs that read the cache agree with each other, but no longer with a run without it, whose results differ at single-precision round-off. Default false |
 | `bound_preserving` | (`TENO`) Scale troubled-cell polynomials to keep density and pressure within the neighbors' range, default false |
+| `single_precision_tables` | (`TENO`, 3D, not with gas mixtures) Keep the pseudo-inverses on the device in single precision: about 40% less device memory for 3D TENO5 (25 instead of 40 KB per hexahedron, 31 instead of 51 KB per tetrahedron on an A100, everything included), so about 1.6 times the cells per GPU, and a 3-8% faster step. Results change at single-precision round-off: below 1e-7 of each field's range for smooth flow, but up to 1e-3 (order 3: 7e-3) behind shocks, where the stencil selection of some cells goes the other way (3D blast on hexahedra, 60-80 steps; see docs/design/performance.md); the cache, if any, holds the tables in single precision too. Default false |
+| `troubled_capacity` | (`TENO`) Fraction of the reconstructed cells that the troubled-cell passes take at a time, which sizes their scratch; more troubled cells are done in further rounds, which recompute their central coefficients (same results). Default 0.5 in 3D (1 in 2D) |
+| `curved_mirrors` | (`TENO`) Also take mirror images across curved wall and symmetry faces (across each face's plane) into the stencils, default false: stencils are one-sided at curved walls, where mirroring is only second-order consistent (curved far fields and inflows keep their mirror images) |
+| `curved_wall_degree` | (`TENO`) Largest degree of the central polynomials of cells whose stencils reach a curved wall or symmetry face without mirror images, default 3: one-sided fits of degree 4 and 5 grow in time there, so orders 5 and 6 are fourth order at curved walls and of their order elsewhere |
 
 ## `[chemistry]`
 
@@ -549,7 +593,7 @@ Used when Mallard runs on several MPI ranks (`mpirun -n N Mallard -i input.toml`
 
 | Key | Description |
 |---|---|
-| `partitioner` | `graph` (dKaMinPar on the cell connectivity, minimizing the faces between ranks; default when built with `Mallard_ENABLE_KAMINPAR`) or `hilbert` (cells split along a Hilbert curve of their centroids; the default otherwise) |
+| `partitioner` | `multijagged` (default: cells split into equal slabs along x, each slab along y, and in 3D along z, with the number of pieces per axis that leaves the least area between the blocks of the mesh's bounding box; a box of cuboid cells gets cuboid parts), `hilbert` (cells split along a Hilbert curve of their centroids) or `graph` (dKaMinPar on the cell connectivity, minimizing the faces between ranks; needs a build with `Mallard_ENABLE_KAMINPAR`). Results are the same bit for bit |
 | `halo_exchange` | `nccl` (NCCL operations on the GPU's stream: no host synchronization per exchange; default when built with `Mallard_ENABLE_NCCL`) or `mpi` (nonblocking MPI; the default otherwise). Results are the same bit for bit |
 
 ## `[output]`
