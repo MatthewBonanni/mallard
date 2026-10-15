@@ -456,10 +456,8 @@ struct DynamicProcedureFunctor {
     }
 };
 
-/**
- * @brief Sums over all ranks of the owned cells' terms, exact in fixed point (each term rounded to 2^-b of
- *        the largest, b leaving room for every cell in 63 bits), so independent of the rank count and order.
- */
+} // namespace
+
 std::array<double, 2> exact_sums(const Kokkos::View<double *[2]> & terms, const uint32_t n_owned, const bool distributed) {
     std::array<double, 2> largest = {0.0, 0.0};
     for (size_t k = 0; k < 2; k++) {
@@ -493,6 +491,8 @@ std::array<double, 2> exact_sums(const Kokkos::View<double *[2]> & terms, const 
     return {scale[0] > 0.0 ? static_cast<double>(sums[0]) / scale[0] : 0.0,
             scale[1] > 0.0 ? static_cast<double>(sums[1]) / scale[1] : 0.0};
 }
+
+namespace {
 
 /**
  * @brief Extents h_1 <= h_2 <= h_3 of a 3D cell: V over the eigenvalues of its projected-area tensor

@@ -18,6 +18,7 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "cell_order.h"
 #include "comm.h"
 #include "periodic.h"
 
@@ -49,11 +50,23 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
 }
 
 void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & nodes,
-                                  const std::vector<std::vector<uint32_t>> & cells,
+                                  const std::vector<std::vector<uint32_t>> & input_cells,
                                   const std::vector<BoundaryFace> & boundary_faces,
                                   const std::string & unlisted_zone, const PeriodicNodes & classes) {
     n_nodes = static_cast<uint32_t>(nodes.size());
-    n_cells = static_cast<uint32_t>(cells.size());
+    n_cells = static_cast<uint32_t>(input_cells.size());
+    // A mesh without global ids is whole: its input order becomes the global order
+    std::vector<std::vector<uint32_t>> ordered_cells;
+    if (h_global_cell_id.empty() && cell_order != CellOrder::INPUT && n_cells > 1) {
+        const std::vector<uint32_t> order = locality_order(cell_order, nodes, input_cells, {n_cells});
+        ordered_cells.resize(n_cells);
+        h_global_cell_id.resize(n_cells);
+        for (uint32_t c = 0; c < n_cells; c++) {
+            ordered_cells[c] = input_cells[order[c]];
+            h_global_cell_id[c] = order[c];
+        }
+    }
+    const std::vector<std::vector<uint32_t>> & cells = ordered_cells.empty() ? input_cells : ordered_cells;
 
     // Periodic classes of the nodes; faces are keyed by the classes' keys so a
     // face of zone_a and its image in zone_b become one face
@@ -180,6 +193,35 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
     }
     partner = {};
     n_faces = static_cast<uint32_t>(face_cells.size());
+
+    // Faces renumbered in the order of the local cells, keeping their orientation
+    {
+        std::vector<uint32_t> new_face(n_faces, NO_NODE), old_face;
+        old_face.reserve(n_faces);
+        for (uint32_t & f : cell_faces) {
+            if (new_face[f] == NO_NODE) {
+                new_face[f] = static_cast<uint32_t>(old_face.size());
+                old_face.push_back(f);
+            }
+            f = new_face[f];
+        }
+        std::vector<std::array<int32_t, 2>> cells_new(n_faces);
+        std::vector<uint8_t> shifts_new(n_faces);
+        std::vector<uint32_t> offsets_new{0}, nodes_new;
+        nodes_new.reserve(face_nodes.size());
+        for (uint32_t f = 0; f < n_faces; f++) {
+            const uint32_t g = old_face[f];
+            cells_new[f] = face_cells[g];
+            shifts_new[f] = face_shifts[g];
+            nodes_new.insert(nodes_new.end(), face_nodes.begin() + face_node_offsets[g],
+                             face_nodes.begin() + face_node_offsets[g + 1]);
+            offsets_new.push_back(static_cast<uint32_t>(nodes_new.size()));
+        }
+        face_cells = std::move(cells_new);
+        face_shifts = std::move(shifts_new);
+        face_node_offsets = std::move(offsets_new);
+        face_nodes = std::move(nodes_new);
+    }
 
     // Zones: interior plus one per boundary name
     std::map<std::string, std::vector<uint32_t>> zone_faces;

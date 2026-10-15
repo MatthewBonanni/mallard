@@ -165,6 +165,14 @@ void DataWriter::init(const toml::value & input,
             const uint32_t f = zone->h_faces(i);
             if (static_cast<uint32_t>(mesh->h_cells_of_face(f, 0)) < mesh->n_owned()) geometry_faces.push_back(f);
         }
+        // In global order: by cell 0, then its face slot
+        auto key = [&](uint32_t f) {
+            const uint32_t c = static_cast<uint32_t>(mesh->h_cells_of_face(f, 0));
+            uint32_t slot = 0;
+            while (mesh->h_face_of_cell(c, slot) != f) slot++;
+            return mesh->h_global_cell(c) * 8 + slot;
+        };
+        std::sort(geometry_faces.begin(), geometry_faces.end(), [&](uint32_t a, uint32_t b) { return key(a) < key(b); });
     }
 
     const std::filesystem::path parent = std::filesystem::path(prefix).parent_path();
@@ -418,8 +426,9 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
     for (const auto & field : fields) names.push_back(field.name);
     const std::vector<char> header = restart_header(mesh->n_cells, step, double(t), names, attributes, ordered.total);
     out.write(header.data(), static_cast<std::streamsize>(header.size()));
+    const std::vector<uint32_t> order = mesh->cells_by_global_id();
     for (const auto & field : fields) {
-        for (uint32_t i = 0; i < mesh->n_cells; i++) {
+        for (uint32_t i : order) {
             const rtype value = field.value(i, 0);
             out.write(reinterpret_cast<const char *>(&value), sizeof(rtype));
         }
@@ -452,14 +461,17 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
     const MPI_Offset header_size = static_cast<MPI_Offset>(header.size());
     const uint32_t n_owned = mesh->n_owned();
     const MPI_Datatype real_type = sizeof(rtype) == sizeof(double) ? MPI_DOUBLE : MPI_FLOAT;
+    // File views need increasing displacements: owned cells by global id
+    std::vector<uint32_t> order = mesh->cells_by_global_id();
+    order.erase(std::remove_if(order.begin(), order.end(), [&](uint32_t c) { return c >= n_owned; }), order.end());
     std::vector<MPI_Aint> displacements(n_owned);
-    for (uint32_t i = 0; i < n_owned; i++) displacements[i] = static_cast<MPI_Aint>(mesh->h_global_cell_id[i] * sizeof(rtype));
+    for (uint32_t i = 0; i < n_owned; i++) displacements[i] = static_cast<MPI_Aint>(mesh->h_global_cell_id[order[i]] * sizeof(rtype));
     MPI_Datatype file_type;
     MPI_Type_create_hindexed_block(static_cast<int>(n_owned), 1, displacements.data(), real_type, &file_type);
     MPI_Type_commit(&file_type);
     std::vector<rtype> values(n_owned);
     for (size_t v = 0; v < fields.size(); v++) {
-        for (uint32_t i = 0; i < n_owned; i++) values[i] = fields[v].value(i, 0);
+        for (uint32_t i = 0; i < n_owned; i++) values[i] = fields[v].value(order[i], 0);
         MPI_File_set_view(fh, header_size + MPI_Offset(v * n_global * sizeof(rtype)), real_type, file_type, "native",
                           MPI_INFO_NULL);
         MPI_File_write_all(fh, values.data(), static_cast<int>(n_owned), real_type, MPI_STATUS_IGNORE);
@@ -717,8 +729,10 @@ void DataWriter::write_vtu(const std::string & filename, rtype t) const {
     }
 
     using header_t = uint64_t;
-    // Distributed runs write their owned cells; unused halo nodes are harmless
+    // Distributed runs write their owned cells; unused halo nodes are harmless. Cells in global order
     const uint32_t n_out = mesh->n_owned();
+    std::vector<uint32_t> order = mesh->cells_by_global_id();
+    order.erase(std::remove_if(order.begin(), order.end(), [&](uint32_t c) { return c >= n_out; }), order.end());
     uint64_t len_connectivity = 0;
     for (uint32_t i = 0; i < n_out; i++) {
         len_connectivity += mesh->h_n_nodes_of_cell(i);
@@ -772,7 +786,7 @@ void DataWriter::write_vtu(const std::string & filename, rtype t) const {
 
     for (const auto & field : fields) {
         write_header(n_out * field.n_vtk_components() * sizeof(rtype));
-        for (uint32_t i = 0; i < n_out; i++) {
+        for (uint32_t i : order) {
             for (uint32_t k = 0; k < field.n_vtk_components(); k++) write_value(field.value(i, k));
         }
     }
@@ -784,7 +798,7 @@ void DataWriter::write_vtu(const std::string & filename, rtype t) const {
     }
 
     write_header(len_connectivity * sizeof(int64_t));
-    for (uint32_t i = 0; i < n_out; i++) {
+    for (uint32_t i : order) {
         const uint32_t n_nodes = mesh->h_n_nodes_of_cell(i);
         for (uint32_t j = 0; j < n_nodes; j++) {
             write_value(static_cast<int64_t>(mesh->h_node_of_cell(i, vtk_local_node(n_nodes, j))));
@@ -793,13 +807,13 @@ void DataWriter::write_vtu(const std::string & filename, rtype t) const {
 
     write_header(n_out * sizeof(int64_t));
     int64_t cell_offset = 0;
-    for (uint32_t i = 0; i < n_out; i++) {
+    for (uint32_t i : order) {
         cell_offset += mesh->h_n_nodes_of_cell(i);
         write_value(cell_offset);
     }
 
     write_header(n_out * sizeof(uint8_t));
-    for (uint32_t i = 0; i < n_out; i++) {
+    for (uint32_t i : order) {
         write_value(vtk_type(N_DIM, mesh->h_n_nodes_of_cell(i)));
     }
 

@@ -5,6 +5,7 @@ add_library(MallardCore STATIC
     common/build_info.cpp
     common/growing_buffer.cpp
     common/log.cpp
+    mesh/cell_order.cpp
     mesh/curved.cpp
     mesh/mesh.cpp
     mesh/mesh_io.cpp

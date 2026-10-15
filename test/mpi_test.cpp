@@ -366,7 +366,7 @@ std::vector<double> gather(Solver & solver) {
     const uint64_t n_global = mesh->n_global_cells ? mesh->n_global_cells : mesh->n_cells;
     std::vector<double> U(n_global * N_CONSERVATIVE, 0.0);
     for (uint32_t c = 0; c < mesh->n_owned(); c++) {
-        const uint64_t g = mesh->n_global_cells ? mesh->h_global_cell_id[c] : c;
+        const uint64_t g = mesh->h_global_cell(c);
         FOR_I_CONSERVATIVE U[g * N_CONSERVATIVE + i] = double(solver.h_conservatives(c, i));
     }
     // A serial run holds every cell on every rank already
@@ -488,7 +488,7 @@ std::vector<double> gather_statistics(Solver & solver) {
     const uint64_t n_global = mesh->n_global_cells ? mesh->n_global_cells : mesh->n_cells;
     std::vector<double> values(n_global * n_vars, 0.0);
     for (uint32_t c = 0; c < mesh->n_owned(); c++) {
-        const uint64_t g = mesh->n_global_cells ? mesh->h_global_cell_id[c] : c;
+        const uint64_t g = mesh->h_global_cell(c);
         for (uint32_t i = 0; i < mean.extent(1); i++) values[g * n_vars + i] = double(mean(c, i));
         for (uint32_t p = 0; p < cov.extent(1); p++) values[g * n_vars + mean.extent(1) + p] = double(cov(c, p));
     }

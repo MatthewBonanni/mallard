@@ -198,7 +198,7 @@ TEST(StatisticsTest, ProbesReadTheCellHoldingEachPoint) {
 
     const double tol = precision_tol<double>(1e-12, 1e-6);
     auto expected_cell = [&](const std::vector<double> & x) {
-        for (uint32_t c = 0; c < mesh.n_cells; c++) {
+        for (uint32_t c : mesh.cells_by_global_id()) {
             bool inside = true;
             for (size_t d = 0; d < N_DIM; d++) {
                 double lo = std::numeric_limits<double>::max(), hi = std::numeric_limits<double>::lowest();
@@ -213,7 +213,7 @@ TEST(StatisticsTest, ProbesReadTheCellHoldingEachPoint) {
         }
         uint32_t best = 0;
         double d_best = std::numeric_limits<double>::max();
-        for (uint32_t c = 0; c < mesh.n_cells; c++) {
+        for (uint32_t c : mesh.cells_by_global_id()) {
             double d2 = 0.0;
             for (size_t d = 0; d < N_DIM; d++) d2 += std::pow(x[d] - double(mesh.h_cell_coords(c, d)), 2);
             if (d2 < d_best) {
