@@ -443,6 +443,8 @@ class Solver {
         void start_reconstruction(StateView solution);
         /** @brief Halo exchange of state packed and unpacked on comm_space, ordered with the default instance. */
         void exchange_halo(const State & state);
+        /** @brief Abandon the reconstruction start_reconstruction() began (the state changed). */
+        void discard_reconstruction();
         /** @brief calc_dt's exchange, which the first stage reuses; starts that stage's reconstruction where it can. */
         void exchange_for_first_stage();
         /** @brief Cells whose gradients the face fluxes read: owned and halo layer 1 (all cells with LES filters). */

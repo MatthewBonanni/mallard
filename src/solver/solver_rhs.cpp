@@ -97,8 +97,8 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
     // The first stage reuses the halo that calc_dt filled, and the reconstruction it started
     const bool exchange = halo.active() && !(halo_current && solution.data() == conservatives.data());
     const bool started = reconstruction_started && solution.data() == conservatives.data();
+    if (reconstruction_started && !started) discard_reconstruction();
     halo_current = false;
-    reconstruction_started = false;
     update_boundary_states(t_stage);
     if (!average_pressure_outlets.empty()) {
         update_average_pressure_outlets(solution);
@@ -110,6 +110,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
     if (own_faces) {
         // Owned cells only: the halo sides of partition faces come from their owners
         if (!started) start_reconstruction(solution);
+        reconstruction_started = false;
         if (exchange) exchange_halo(state);
         Kokkos::parallel_for("rhs_W", Kokkos::RangePolicy<>(n_owned, mesh->n_cells), w_functor);
         const uint32_t n_cells_rhs = static_cast<uint32_t>(rhs_cells.extent(0));
@@ -260,6 +261,12 @@ void Solver::start_reconstruction(StateView solution) {
                                                Kokkos::subview(rhs_cells, Kokkos::make_pair(0u, n_early_cells)));
 }
 
+void Solver::discard_reconstruction() {
+    comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), overlap_space);
+    face_reconstruction->discard_cell_face_values();
+    reconstruction_started = false;
+}
+
 void Solver::exchange_halo(const State & state) {
     comm::enqueue_wait(comm_space, Kokkos::DefaultExecutionSpace());
     halo.start(state, comm_space);
@@ -271,6 +278,7 @@ void Solver::exchange_for_first_stage() {
     // The first stage's interior reconstruction does not depend on dt: start it
     // before the exchange and the dt reduction, so that it covers both
     if (halo.active() && exchanges_partition_faces() && inflows.empty() && average_pressure_outlets.empty()) {
+        if (reconstruction_started) discard_reconstruction();
         update_boundary_states(t);
         start_reconstruction(conservatives);
         reconstruction_started = true;

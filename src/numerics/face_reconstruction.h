@@ -142,6 +142,13 @@ class FaceReconstruction {
                                              Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution);
 
         /**
+         * @brief Drop what calc_cell_face_values() left for
+         *        finish_cell_face_values(), on the default instance, when the
+         *        face values will not be completed.
+         */
+        virtual void discard_cell_face_values() {}
+
+        /**
          * @brief Gradients of W = [rho, u, p] at the centroids of the first n_cells
          *        cells from the reconstruction polynomials, if the scheme has
          *        higher-order ones than least squares on face neighbors.
@@ -304,6 +311,7 @@ class TENO : public FaceReconstruction {
         void finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                      Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) override;
         bool exchanges_partition_faces() const override { return true; }
+        void discard_cell_face_values() override;
         bool cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                             Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells) override;
         void axisymmetric_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
