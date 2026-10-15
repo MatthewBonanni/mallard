@@ -480,9 +480,11 @@ void Solver::init_boundaries() {
             FOR_I_DIM dirichlet.W.emplace_back(name + ".u[" + std::to_string(i) + "]", u[i]);
             dirichlet.W.emplace_back(name + ".p", toml::find<std::string>(bound, "p"));
         }
-        const bool profiled = is_mixture() &&
-                              (bcs.back().type == BoundaryType::UPT || bcs.back().type == BoundaryType::NSCBC_INLET) &&
+        const bool profiled = is_mixture() && bcs.back().prescribes_composition() &&
                               MixtureModel::composition_varies(bound);
+        rtype direction[N_DIM];
+        FOR_I_DIM direction[i] = bcs.back().data[1 + i];
+        const bool directed = bcs.back().type == BoundaryType::STAGNATION_INLET && dot<N_DIM>(direction, direction) > 0.0_r;
         uint32_t n_selected = 0;
         uint64_t n_owned_selected = 0;
         for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
@@ -494,6 +496,14 @@ void Solver::init_boundaries() {
                 throw std::runtime_error("Boundary " + name + " assigned more than once.");
             }
             face_bc[i_face] = static_cast<int>(i_bc);
+            if (directed) {
+                rtype inward = 0.0_r;
+                for (uint8_t k = 0; k < N_DIM; k++) inward -= direction[k] * mesh->h_face_normals(i_face, k);
+                if (!(inward > 0.0_r)) {
+                    throw InputError("boundaries[name = \"" + name + "\"].direction must point into the domain at "
+                                     "every face of the boundary.");
+                }
+            }
             if (profiled) profiled_faces.push_back({static_cast<uint32_t>(i_bc), i_face});
             dirichlet.faces.push_back(i_face);
             n_selected++;
@@ -573,6 +583,7 @@ void Solver::init_boundaries() {
     boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics);
     if (is_mixture()) {
         const uint32_t n_species = mixture.n_species;
+        boundary_data.thermo = mixture.thermo;
         boundary_data.bc_Y = Kokkos::View<rtype **, Kokkos::LayoutRight>("bc_Y", bcs.size(), n_species);
         boundary_data.bc_thermo = Kokkos::View<rtype *[2]>("bc_thermo", bcs.size());
         auto h_bc_Y = Kokkos::create_mirror_view(boundary_data.bc_Y);

@@ -641,8 +641,10 @@ void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boun
     // Prescribed state of condition i_bc
     auto prescribe = [&](size_t i_bc, const std::vector<double> & Y, double T) {
         BoundaryCondition & bc = bcs[i_bc];
-        const double p = static_cast<double>(bc.data[N_DIM + 1]);
-        bc.data[0] = static_cast<rtype>(p / (mixture_model->gas_constant(Y) * T));
+        if (bc.type == BoundaryType::UPT || bc.type == BoundaryType::NSCBC_INLET) {
+            const double p = static_cast<double>(bc.data[N_DIM + 1]);
+            bc.data[0] = static_cast<rtype>(p / (mixture_model->gas_constant(Y) * T));
+        }
         bc_mass_fractions[i_bc] = Y;
         bc_temperatures[i_bc] = T;
         mixture_model->surrogates(T, Y, bc_surrogates[i_bc][0], bc_surrogates[i_bc][1]);
@@ -659,8 +661,9 @@ void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boun
             case BoundaryType::NSCBC_OUTLET:
                 break;
             case BoundaryType::UPT:
-            case BoundaryType::NSCBC_INLET: {
-                const double T = static_cast<double>(find_real(bound, "T"));
+            case BoundaryType::NSCBC_INLET:
+            case BoundaryType::STAGNATION_INLET: {
+                const double T = static_cast<double>(find_real(bound, bcs[i_bc].type == BoundaryType::STAGNATION_INLET ? "T0" : "T"));
                 if (!MixtureModel::composition_varies(bound)) {
                     prescribe(i_bc, mixture_model->mass_fractions(bound, where), T);
                     break;
@@ -677,7 +680,7 @@ void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boun
             default:
                 throw InputError(where + ": type \"" + BOUNDARY_NAMES.at(bcs[i_bc].type) +
                                  "\" is not yet supported with gas = \"mixture\" (extrapolation, symmetry, "
-                                 "wall_adiabatic, upt, p_out, nscbc_outlet, nscbc_inlet).");
+                                 "wall_adiabatic, upt, p_out, nscbc_outlet, nscbc_inlet, stagnation_inlet).");
         }
     }
 }

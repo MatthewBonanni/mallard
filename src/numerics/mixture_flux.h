@@ -325,10 +325,9 @@ struct SpeciesSlotFunctor {
     void exterior_Y(const uint32_t f, const uint32_t k, const rtype * interior, rtype * out) const {
         const uint8_t nq = n_quad();
         const int32_t i_bc = boundaries.face_bc(f);
-        const BoundaryType type = boundaries.bcs(i_bc).type;
         const int32_t image_face = boundaries.face_image_face(f);
         const int32_t image = boundaries.face_image(f);
-        if (type == BoundaryType::NSCBC_INLET) {
+        if (boundaries.bcs(i_bc).prescribes_composition()) {
             for (uint8_t q = 0; q < nq; q++) out[q] = boundaries.bc_Y(i_bc, k);
             return;
         }
@@ -351,8 +350,6 @@ struct SpeciesSlotFunctor {
         for (uint8_t q = 0; q < nq; q++) {
             if (image >= 0) {
                 out[q] = values.scalars(image, k);
-            } else if (type == BoundaryType::UPT) {
-                out[q] = boundaries.bc_Y(i_bc, k);
             } else {
                 out[q] = interior[q];
             }
