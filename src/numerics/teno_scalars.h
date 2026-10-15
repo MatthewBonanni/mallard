@@ -97,6 +97,13 @@ struct TENOScalarValues {
         const rtype h = scale(c);
         const uint8_t s = (cells_of_face(f, 1) == static_cast<int32_t>(c)) ? face_shift(f) : 0;
         if constexpr (N_DIM == 2) {
+            if (face_quad_points.extent(0) > 0) {
+                // Curved meshes: the faces' own points
+                teno::monomials(DEG, ((face_quad_points(f, q, 0) - shifts(s, 0)) - cell_coords(c, 0)) / h,
+                                ((face_quad_points(f, q, 1) - shifts(s, 1)) - cell_coords(c, 1)) / h, psi);
+                for (uint8_t l = 0; l < NK; l++) psi[l] -= basis_mean(c, l);
+                return true;
+            }
             const uint32_t node_0 = nodes_of_face(offsets_nodes_of_face(f));
             const uint32_t node_1 = nodes_of_face(offsets_nodes_of_face(f) + 1);
             const rtype s_q = 0.5_r * quad_points(q, 0);

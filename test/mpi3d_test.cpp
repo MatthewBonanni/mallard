@@ -169,3 +169,28 @@ TEST(MPI3DTest, HDF5OutputDoesNotDependOnTheRankCount) {
                                       "interval = 4\nvariables = [\"RHO\", \"U\", \"P\"]\n", dir, {0, 4, 8});
 #endif
 }
+
+TEST(MPI3DTest, CurvedWallsMatchSerial) {
+    // A spherical shell of prisms: walls projected onto the spheres, or from
+    // triangle6 faces of the file
+    const std::string shapes = "[[mesh.curved]]\nzone = \"inner\"\nshape = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\n"
+                               "radius = 1.0\n[[mesh.curved]]\nzone = \"outer\"\nshape = \"sphere\"\n"
+                               "center = [0.0, 0.0, 0.0]\nradius = 1.5\n";
+    for (bool quadratic : {false, true}) {
+        const std::string file = write_temp_shared(std::string("mallard_mpi_shell_") + (quadratic ? "p2" : "p1") + ".msh",
+                                                   shell_gmsh(4, 3, true, quadratic));
+        const std::string input =
+            "[run]\nn_steps = 6\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" +
+            (quadratic ? "" : shapes) +
+            "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.2 * exp(-4 * ((x - 1.2)^2 + y^2 + z^2))\"\n"
+            "u = [\"0.0\", \"0.3 * z\", \"-0.3 * y\"]\np = \"1.0\"\n"
+            "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n"
+            "[[boundaries]]\nname = \"outer\"\ntype = \"symmetry\"\n"
+            "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+            "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n"
+            "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+            "[output]\ncheck_interval = 1000000\n";
+        expect_matches_serial(input, [](const Solver & solver) { EXPECT_TRUE(solver.get_mesh()->curved_geometry); });
+    }
+    comm::barrier();
+}
