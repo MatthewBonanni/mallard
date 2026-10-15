@@ -581,6 +581,28 @@ struct KEEP {
     }
 };
 
+/** @brief Calls f with a value of the Riemann solver type of the given kind. */
+template <typename F>
+void dispatch(const RiemannSolverType type, F && f) {
+    switch (type) {
+        case RiemannSolverType::RUSANOV:
+            f(Rusanov{});
+            break;
+        case RiemannSolverType::HLL:
+            f(HLL{});
+            break;
+        case RiemannSolverType::HLLC:
+            f(HLLC{});
+            break;
+        case RiemannSolverType::ROE:
+            f(Roe{});
+            break;
+        case RiemannSolverType::RHLL:
+            f(RHLL{});
+            break;
+    }
+}
+
 } // namespace riemann
 
 #endif // RIEMANN_SOLVER_H
