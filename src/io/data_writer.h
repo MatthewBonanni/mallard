@@ -251,6 +251,7 @@ class DataWriter {
         // Compression
         Compression compression = Compression::NONE;
         double relative_error = 0.0;  // 0: lossless
+        uint64_t chunk_cells = 65536;  // cells per chunk of compressed restart files
         // Asynchronous writing: the snapshot being written, and the time spent
         bool async = false;
         unsigned io_threads = 1;

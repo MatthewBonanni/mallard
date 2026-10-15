@@ -202,6 +202,13 @@ void DataWriter::init(const toml::value & input,
                                            "Mallard_ENABLE_ZLIB=ON).");
         }
     }
+    if (input.contains("chunk_cells")) {
+        if (format != DataFormat::RESTART || compression == Compression::NONE) {
+            throw InputError("write_data.chunk_cells is for compressed restart files.");
+        }
+        chunk_cells = toml::find<uint64_t>(input, "chunk_cells");
+        if (chunk_cells == 0) throw InputError("write_data.chunk_cells must be positive.");
+    }
     if (input.contains("relative_error")) {
         if (format == DataFormat::RESTART) {
             throw InputError("write_data.relative_error: restart files are lossless.");
@@ -423,8 +430,7 @@ namespace {
 
 constexpr char RESTART_MAGIC[16] = "MALLARD-RESTART";
 constexpr uint32_t RESTART_VERSION = 5;
-// Compressed restart files (version 5): cells per chunk, and the codec of the chunks
-constexpr uint64_t RESTART_CHUNK = 65536;
+// Codec of the chunks of compressed restart files (version 5)
 constexpr uint32_t RESTART_CODEC_ZLIB = 1;
 
 /**
@@ -533,18 +539,18 @@ OrderedFaces order_faces(const RestartFaces & faces, uint64_t n_cells, bool dist
 
 /**
  * @brief The compressed chunks of the cells [first, first + n) of a restart
- *        file, first a multiple of RESTART_CHUNK: chunk c of variable v is
+ *        file, first a multiple of chunk_cells: chunk c of variable v is
  *        data[v * n_chunks + c].
  */
 struct RestartChunks {
     uint64_t n_chunks = 0;
     std::vector<std::vector<char>> data;
 
-    RestartChunks(const std::vector<std::vector<rtype>> & values, uint64_t n, unsigned n_threads)
-        : n_chunks((n + RESTART_CHUNK - 1) / RESTART_CHUNK), data(values.size() * n_chunks) {
+    RestartChunks(const std::vector<std::vector<rtype>> & values, uint64_t n, uint64_t chunk_cells, unsigned n_threads)
+        : n_chunks((n + chunk_cells - 1) / chunk_cells), data(values.size() * n_chunks) {
         compression::parallel_for(data.size(), n_threads, [&](size_t k) {
-            const uint64_t c = k % n_chunks, first = c * RESTART_CHUNK;
-            const uint64_t n_cells = std::min(RESTART_CHUNK, n - first);
+            const uint64_t c = k % n_chunks, first = c * chunk_cells;
+            const uint64_t n_cells = std::min(chunk_cells, n - first);
             data[k] = compression::deflate(values[k / n_chunks].data() + first, n_cells * sizeof(rtype), sizeof(rtype));
         });
     }
@@ -635,9 +641,9 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
             put(header.data(), header.size());
             for (const auto & var : values) put(var.data(), var.size() * sizeof(rtype));
         } else {
-            const RestartChunks chunks(values, n_cells, io_threads);
+            const RestartChunks chunks(values, n_cells, chunk_cells, io_threads);
             const std::vector<char> header =
-                restart_header(n_cells, step, double(t), names, attributes, ordered.total, RESTART_CHUNK);
+                restart_header(n_cells, step, double(t), names, attributes, ordered.total, chunk_cells);
             const std::vector<uint64_t> offsets = chunk_offsets(
                 chunks.sizes(), names.size(), chunks.n_chunks,
                 header.size() + (names.size() * chunks.n_chunks + 1) * sizeof(uint64_t));
@@ -669,7 +675,7 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
         // so that writing needs no MPI
         if (!restart_order_built) {
             const std::vector<uint64_t> ids(mesh->h_global_cell_id.begin(), mesh->h_global_cell_id.begin() + n_owned);
-            restart_order = GlobalOrder(ids, n_global, true, RESTART_CHUNK);
+            restart_order = GlobalOrder(ids, n_global, true, chunk_cells);
             restart_order_built = true;
         }
         std::vector<std::vector<rtype>> block(fields.size());
@@ -689,12 +695,12 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
             for (uint64_t v = 0; v < n_vars; v++) offsets.push_back(header.size() + (v * n_global + first) * sizeof(rtype));
             offsets.push_back(header.size() + n_vars * n_global * sizeof(rtype));
         } else {
-            chunks = std::make_shared<RestartChunks>(block, n, io_threads);
-            const uint64_t n_chunks = (n_global + RESTART_CHUNK - 1) / RESTART_CHUNK;
-            header = restart_header(n_global, step, double(t), names, attributes, ordered.total, RESTART_CHUNK);
+            chunks = std::make_shared<RestartChunks>(block, n, chunk_cells, io_threads);
+            const uint64_t n_chunks = (n_global + chunk_cells - 1) / chunk_cells;
+            header = restart_header(n_global, step, double(t), names, attributes, ordered.total, chunk_cells);
             table = chunk_offsets(comm::allgatherv(chunks->sizes()), n_vars, n_chunks,
                                   header.size() + (n_vars * n_chunks + 1) * sizeof(uint64_t));
-            for (uint64_t v = 0; v < n_vars; v++) offsets.push_back(table[v * n_chunks + first / RESTART_CHUNK]);
+            for (uint64_t v = 0; v < n_vars; v++) offsets.push_back(table[v * n_chunks + first / chunk_cells]);
             offsets.push_back(table.back());
             block.clear();
         }
