@@ -587,6 +587,67 @@ Optional source terms, added per unit volume.
 
 The scheme is not exactly well balanced: hydrostatic states carry small spurious velocities (about 1e-4 of the sound speed on a 32x32 mesh) that vanish at second order under refinement. Wall and symmetry ghost states continue the hydrostatic pressure gradient.
 
+## Regions
+
+A region is a table: a primitive shape, or a boolean of regions, each with
+optional transforms, nested to any depth. Every region has a signed distance
+(negative inside) that never exceeds the distance to its surface, which gives
+smooth edges their width and lets cell volume fractions skip cells away from
+the surface. Volume fractions are cell averages of the region's indicator,
+sampled on each cell's triangles (2D) or tetrahedra (3D), subdivided where the
+surface or the smooth edge crosses them: cells entirely inside get exactly 1.
+In 2D, regions are the z = 0 slices of the 3D shapes (`z` components may be
+left out).
+
+| `type` | Keys | Shape |
+|---|---|---|
+| `sphere` (2D: also `disk`, `circle`) | `center`, `radius` | |
+| `ellipsoid` (`ellipse`) | `center`, `semi_axes` | semi-axes along x, y, z (orient with `rotate`) |
+| `cylinder` | `center`, `axis` (default z in 2D), `radius`, `inner_radius` (default 0: solid), `length` (default infinite) | annular with `inner_radius`; centered on `center` along `axis` |
+| `annulus` (2D) | `center`, `radius`, `inner_radius` | |
+| `cone` (`frustum`) | `base` (center of the base), `axis` (toward the top), `length`, `base_radius`, `top_radius` (default 0) | |
+| `box` (`rectangle`) | `center`, `size` (edge lengths) | axis-aligned before `rotate` |
+| `torus` | `center`, `axis` (default z in 2D), `major_radius`, `minor_radius` | |
+| `half_space` | `point` (default origin), `normal` | the side `(x - point) . normal < 0` |
+| `polygon` (2D) | `vertices` = `[[x, y], ...]` | simple polygon |
+| `implicit` | `f`, an expression in `x`, `y`, `z` | `f < 0`. Smooth edges are in units of `f` (exact when `f` is a distance, e.g. `"sqrt(x^2 + y^2) - 1"`) |
+| `union`, `intersection` | `regions` = `[{...}, ...]` | |
+| `difference` | `a` and `b` (or `regions`, the first minus the others) | `a` without `b` |
+
+Any region, primitive or boolean, may also have, applied in this order:
+
+| Key | Description |
+|---|---|
+| `scale` | A number, or one factor per axis; about `pivot` |
+| `rotate` | 3D: `{axis = [...], angle = degrees}` or `{axes = [[...], [...], [...]]}` (the region's x, y, z axes in world coordinates, orthonormal and right-handed); 2D: an angle in degrees, counterclockwise; about `pivot` |
+| `pivot` | Center of `scale` and `rotate` (default the origin) |
+| `translate` | A displacement |
+
+The outermost region may also have `edge`, the width of a smooth edge: the
+indicator falls from 1 to 0 as the smoothstep `s^2 (3 - 2 s)` across the band
+of that width centered on the surface (default 0, sharp), which keeps the
+volume of a flat surface and changes that of a curved one by the band's second
+moment (e.g. `pi R edge^2 / 5` for a sphere).
+
+```toml
+# A tilted pipe wall with a hole drilled through it
+region = {type = "difference",
+          a = {type = "cylinder", center = [0, 0, 0], axis = [1, 1, 0], radius = 0.3, inner_radius = 0.2, length = 1.0},
+          b = {type = "cylinder", center = [0, 0, 0], axis = [0, 0, 1], radius = 0.05},
+          edge = 0.01}
+
+# A box rotated 30 degrees about z around its own center
+region = {type = "box", center = [1, 0, 0], size = [0.4, 0.2, 0.2], pivot = [1, 0, 0], rotate = {axis = [0, 0, 1], angle = 30}}
+```
+
+Expressions in regions (and, compiled the same way, wherever Mallard
+evaluates them on the device) follow exprtk's syntax and precedences: `+ - * /
+% ^`, comparisons, `and`, `or`, `xor`, `not`, `c ? a : b`, `if(c, a, b)`,
+exprtk's scalar functions (`sin`, `exp`, `log`, `sqrt`, `abs`, `min`, `max`,
+`clamp`, `atan2`, `hypot`, `erf`, ...) and the constants `pi`, `epsilon`,
+`inf`; values are the same as exprtk's to the last bit on the host. Unlike
+exprtk, variable names are case sensitive.
+
 ## `[parallel]`
 
 Used when Mallard runs on several MPI ranks (`mpirun -n N Mallard -i input.toml`).
