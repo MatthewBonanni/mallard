@@ -71,6 +71,9 @@ corners; high-order boundary elements (`line3`, `line4` in 2D; `triangle6`,
 `triangle9`, `triangle10`, `quadrangle8`, `quadrangle9`, `quadrangle16` in 3D)
 curve their faces (see curved boundaries below).
 
+Every format and the transform below are illustrated in
+`docs/design/mesh_import.md`.
+
 `[mesh.transform]` maps the nodes of a mesh file as it is read,
 `x -> R (S x) + t`: scale first, then rotate about the origin, then translate.
 Boundary zones, high-order nodes and cell types are unchanged; mirroring scales
