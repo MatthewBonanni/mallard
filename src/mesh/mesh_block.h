@@ -98,6 +98,17 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
 /** @brief Total cell and node counts of a generated 3D box. */
 std::array<uint64_t, 2> cartesian_3d_size(uint32_t nx, uint32_t ny, uint32_t nz, MeshType kind);
 
+/**
+ * @brief [mesh.transform] of a mesh file: x -> R (S x) + t for scale S
+ *        (`scale`, a number or one per axis), rotation R (`rotate`: degrees
+ *        counterclockwise in 2D; {axis, angle} in 3D) and translation t
+ *        (`translate`). The identity if absent; an error for generated meshes.
+ */
+MeshTransform mesh_transform(const toml::value & input);
+
+/** @brief Map a block's node coordinates (and high-order face nodes) by transform. */
+void transform_block(MeshBlock & block, const MeshTransform & transform);
+
 /** @brief Node (x, y) of the supersonic wedge mesh, moved from the box node (x, y). */
 std::array<rtype, 2> wedge_node(rtype x, rtype y, rtype Ly);
 
