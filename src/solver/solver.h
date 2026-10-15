@@ -438,6 +438,8 @@ class Solver {
         void init_les();
         /** @brief Hybrid flux: the upwind fraction of every cell from the gradients of W_cells. */
         void update_upwind_sensor();
+        /** @brief Cells whose gradients the face fluxes read: owned and halo layer 1 (all cells with LES filters). */
+        uint32_t n_gradient_cells() const { return les_on ? mesh->n_cells : mesh->n_reconstructed(); }
         /** @brief sum over owned cells of u . R_m - |u|^2 / 2 R_rho for R the sum of face_flux over the cell's faces. */
         rtype kinetic_energy_rate() const;
         /**
