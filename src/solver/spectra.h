@@ -91,7 +91,7 @@ class Spectra {
         /** @brief Shell spectrum of pair p (every direction homogeneous). */
         std::vector<double> shell(uint32_t p) const;
 
-    private:
+        // Public for the device lambdas (CUDA)
         /** @brief Planes [first, first + count) normal to axis held by this rank; elements ((plane * F + field) * rest + r). */
         struct Layout {
             size_t axis = 0;
@@ -110,6 +110,8 @@ class Spectra {
         void move(const Route & route, uint32_t width, const rtype * src, rtype * dst) const;
         void fft(const Layout & layout, size_t axis);
         void sum_planes(const Layout & layout);
+
+    private:
         void accumulate(double w);
         std::vector<std::complex<double>> fluctuation(uint32_t pos, uint32_t p, uint32_t h) const;
         void write_file(const std::string & file, uint64_t step, rtype t) const;

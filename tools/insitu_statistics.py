@@ -261,6 +261,8 @@ def phase_bins(cfg, probe_csv):
     t_start = float(table.get("t_start", stats.get("t_start", 0.0)))
     fields = table["fields"]
     data = np.genfromtxt(probe_csv, delimiter=",", names=True)
+    # The solver samples only after steps; a run's first probe row is its initial state
+    data = data[data["step"] > data["step"][0]]
     t = data["t"]
     weight = np.zeros(bins)
     mean = np.zeros((bins, len(fields)))

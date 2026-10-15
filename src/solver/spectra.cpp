@@ -78,6 +78,21 @@ uint32_t block_of(uint64_t index, uint64_t n, int p) {
     return static_cast<uint32_t>(r);
 }
 
+/** @brief The rest axes of a slab layout and the homogeneous directions, for the sum kernels. */
+struct PlaneGeometry {
+    uint32_t n_rest_axes = 0;
+    int rest_axis[2] = {-1, -1};
+    uint32_t rest_n[2] = {1, 1};
+    bool rest_homogeneous[2] = {false, false};
+    uint32_t n_h = 0;
+    int h_axis[3] = {-1, -1, -1};
+    uint32_t h_n[3] = {1, 1, 1};
+    uint32_t h_offset[3] = {0, 0, 0};  // of direction h in a pair's record
+    uint32_t per_pair = 0;
+    uint32_t pa[64] = {}, pb[64] = {};
+    double h_dk[3] = {0, 0, 0};
+};
+
 } // namespace
 
 bool Spectra::homogeneous(size_t axis) const {
@@ -421,19 +436,7 @@ void Spectra::sum_planes(const Layout & layout) {
     const uint32_t n_pairs = static_cast<uint32_t>(pairs.size());
     const uint64_t rest = layout.rest;
     const uint32_t n_rest = static_cast<uint32_t>(layout.rest_axes.size());
-    struct Geometry {
-        uint32_t n_rest_axes = 0;
-        int rest_axis[2] = {-1, -1};
-        uint32_t rest_n[2] = {1, 1};
-        bool rest_homogeneous[2] = {false, false};
-        uint32_t n_h = 0;
-        int h_axis[3] = {-1, -1, -1};
-        uint32_t h_n[3] = {1, 1, 1};
-        uint32_t h_offset[3] = {0, 0, 0};  // of direction h in a pair's record
-        uint32_t per_pair = 0;
-        uint32_t pa[64] = {}, pb[64] = {};
-        double h_dk[3] = {0, 0, 0};
-    } g;
+    PlaneGeometry g;
     if (n_pairs > 64) throw InputError("statistics.spectra: at most 64 pairs.");
     g.n_rest_axes = n_rest;
     for (uint32_t a = 0; a < n_rest; a++) {
