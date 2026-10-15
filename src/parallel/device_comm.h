@@ -45,6 +45,13 @@ void finalize_nccl();
  */
 void enqueue_wait(const Kokkos::DefaultExecutionSpace & waiter, const Kokkos::DefaultExecutionSpace & done);
 
+/**
+ * @brief A new execution space instance whose kernels the device schedules
+ *        ahead of other instances' (CUDA stream priority), for short work that
+ *        communication waits for; the default instance on other backends.
+ */
+Kokkos::DefaultExecutionSpace high_priority_space();
+
 } // namespace comm
 
 #endif // DEVICE_COMM_H

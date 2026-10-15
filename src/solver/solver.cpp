@@ -320,7 +320,7 @@ void Solver::trim_halo() {
     // stencils kept, and the layers the other kernels read
     const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
     if (!is_distributed() || teno == nullptr) return;
-    std::vector<uint8_t> needed = teno->stencil_cells();
+    std::vector<uint8_t> needed = teno->stencil_cells(exchanges_partition_faces() ? mesh->n_owned() : mesh->n_reconstructed());
     const int base = base_halo_layers();
     for (uint32_t c = 0; c < mesh->n_cells; c++) needed[c] = needed[c] || distribution.layer[c] <= base;
     trim_halo_exchange(distribution, needed);
@@ -367,6 +367,10 @@ bool Solver::halo_too_shallow() {
     return true;
 }
 
+bool Solver::exchanges_partition_faces() const {
+    return is_distributed() && !is_mixture() && face_reconstruction->exchanges_partition_faces();
+}
+
 void Solver::init_rhs_split() {
     auto to_device = [](const std::vector<uint32_t> & v, const char * label) {
         Kokkos::View<uint32_t *> d(label, v.size());
@@ -374,20 +378,43 @@ void Solver::init_rhs_split() {
         return d;
     };
     const uint32_t n_owned = mesh->n_owned();
+    auto owned = [&](int32_t c) { return c >= 0 && c < static_cast<int32_t>(n_owned); };
     std::vector<uint32_t> faces;
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
-        const int32_t c0 = mesh->h_cells_of_face(f, 0), c1 = mesh->h_cells_of_face(f, 1);
-        if (c0 < static_cast<int32_t>(n_owned) || (c1 >= 0 && c1 < static_cast<int32_t>(n_owned))) faces.push_back(f);
+        if (owned(mesh->h_cells_of_face(f, 0)) || owned(mesh->h_cells_of_face(f, 1))) faces.push_back(f);
     }
     rhs_faces = to_device(faces.size() < mesh->n_faces ? faces : std::vector<uint32_t>(), "rhs_faces");
+
+    const bool own_faces = exchanges_partition_faces();
+    if (own_faces) {
+        std::vector<uint32_t> local, shared;
+        std::vector<PartitionFace> partition;
+        for (const uint32_t f : faces) {
+            const int32_t c0 = mesh->h_cells_of_face(f, 0), c1 = mesh->h_cells_of_face(f, 1);
+            if (c1 < 0 || owned(c0) == owned(c1)) {
+                local.push_back(f);
+                continue;
+            }
+            shared.push_back(f);
+            uint32_t k = 0;
+            while (mesh->h_face_of_cell(static_cast<uint32_t>(c0), k) != f) k++;
+            const uint8_t side = owned(c0) ? 0 : 1;
+            partition.push_back({f, static_cast<uint32_t>(side == 0 ? c1 : c0), side,
+                                 mesh->h_global_cell_id[static_cast<size_t>(c0)] * 64 + k});
+        }
+        local_faces = to_device(local, "local_faces");
+        partition_faces = to_device(shared, "partition_faces");
+        face_exchange = FaceExchange(plan_face_exchange(distribution, std::move(partition)),
+                                     static_cast<uint8_t>(face_solution.extent(1)), halo.uses_nccl());
+    }
 
     std::vector<uint32_t> cells;
     if (halo.active()) cells = face_reconstruction->cells_independent_of_halo(n_owned);
     n_early_cells = static_cast<uint32_t>(cells.size());
-    if (n_early_cells == 0) return;
+    if (n_early_cells == 0 && !(own_faces && halo.active())) return;
     std::vector<bool> early(mesh->n_cells, false);
     for (uint32_t c : cells) early[c] = true;
-    for (uint32_t c = 0; c < mesh->n_reconstructed(); c++) {
+    for (uint32_t c = 0; c < (own_faces ? n_owned : mesh->n_reconstructed()); c++) {
         if (!early[c]) cells.push_back(c);
     }
     rhs_cells = to_device(cells, "rhs_cells");
@@ -395,6 +422,7 @@ void Solver::init_rhs_split() {
     if constexpr (!Kokkos::SpaceAccessibility<Kokkos::HostSpace,
                                               Kokkos::DefaultExecutionSpace::memory_space>::accessible) {
         overlap_space = Kokkos::Experimental::partition_space(Kokkos::DefaultExecutionSpace(), 1)[0];
+        if (own_faces) comm_space = comm::high_priority_space();
     }
 }
 
@@ -1657,8 +1685,7 @@ rtype Solver::next_target_time() const {
 void Solver::calc_dt() {
     // Halo values are stale after the last stage of the previous step; the
     // first stage of the next one reuses them
-    halo.exchange(state());
-    halo_current = true;
+    exchange_for_first_stage();
     const rtype dt_cfl1 = calc_dt_cfl1();
     dt = use_cfl ? cfl * dt_cfl1 : dt_fixed;
     dt = std::min(dt, sponge_dt_max);
@@ -1771,13 +1798,19 @@ rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
             update_eddy_viscosity(mesh->n_owned());
         }
     }
+    // On comm_space, so that the reduction ahead of the allreduce does not wait
+    // for the reconstruction that exchange_for_first_stage() started
+    comm::enqueue_wait(comm_space, Kokkos::DefaultExecutionSpace());
+    const Kokkos::RangePolicy<> cells(comm_space, 0, mesh->n_owned());
     if (on_device.data()) {
-        Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor,
+        Kokkos::parallel_reduce("time_step", cells, functor,
                                 Kokkos::Min<rtype, Kokkos::DefaultExecutionSpace::memory_space>(on_device));
+        comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
         return 0.0;
     }
     rtype dt_min = std::numeric_limits<rtype>::max();
-    Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor, Kokkos::Min<rtype>(dt_min));
+    Kokkos::parallel_reduce("time_step", cells, functor, Kokkos::Min<rtype>(dt_min));
+    comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
     return comm::allreduce(dt_min, comm::Op::MIN);
 }
 

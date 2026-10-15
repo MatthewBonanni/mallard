@@ -3327,9 +3327,9 @@ TENO::Stencils TENO::large_stencils() const {
     return out;
 }
 
-std::vector<uint8_t> TENO::stencil_cells() const {
+std::vector<uint8_t> TENO::stencil_cells(const uint32_t n_cells) const {
     std::vector<uint8_t> used(mesh->n_cells, 0);
-    const uint32_t n_reconstructed = static_cast<uint32_t>(scale.extent(0));
+    const uint32_t n_reconstructed = std::min(n_cells, static_cast<uint32_t>(scale.extent(0)));
     const auto large_slices = host_slice_start(stencil_large);
     const auto small_slices = host_slice_start(stencil_small);
     std::vector<CellTables> chunk;

@@ -49,6 +49,7 @@ add_library(MallardCore STATIC
     parallel/distribution.cpp
     parallel/distributed_mesh.cpp
     parallel/global_order.cpp
+    parallel/face_exchange.cpp
     parallel/halo_exchange.cpp
     parallel/partition.cpp
 )

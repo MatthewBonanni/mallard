@@ -94,9 +94,11 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
     }
     StateView solution = state.flow;
     StateView rhs = rhs_state.flow;
-    // The first stage reuses the halo that calc_dt filled
+    // The first stage reuses the halo that calc_dt filled, and the reconstruction it started
     const bool exchange = halo.active() && !(halo_current && solution.data() == conservatives.data());
+    const bool started = reconstruction_started && solution.data() == conservatives.data();
     halo_current = false;
+    reconstruction_started = false;
     update_boundary_states(t_stage);
     if (!average_pressure_outlets.empty()) {
         update_average_pressure_outlets(solution);
@@ -104,7 +106,21 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
 
     const uint32_t n_owned = mesh->n_owned();
     const CellWFunctor w_functor{physics, solution, W_cells};
-    if (exchange && n_early_cells > 0) {
+    const bool own_faces = halo.active() && exchanges_partition_faces();
+    if (own_faces) {
+        // Owned cells only: the halo sides of partition faces come from their owners
+        if (!started) start_reconstruction(solution);
+        if (exchange) exchange_halo(state);
+        Kokkos::parallel_for("rhs_W", Kokkos::RangePolicy<>(n_owned, mesh->n_cells), w_functor);
+        const uint32_t n_cells_rhs = static_cast<uint32_t>(rhs_cells.extent(0));
+        if (n_cells_rhs > n_early_cells) {
+            face_reconstruction->calc_cell_face_values(
+                Kokkos::DefaultExecutionSpace(), W_cells, face_solution,
+                Kokkos::subview(rhs_cells, Kokkos::make_pair(n_early_cells, n_cells_rhs)));
+        }
+        comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), overlap_space);
+        face_reconstruction->finish_cell_face_values(W_cells, face_solution);
+    } else if (exchange && n_early_cells > 0) {
         // Cells whose reconstruction reads no halo cell go first, on their own
         // instance, while the halo is exchanged; the rest follow on the default
         // one and fill the device as the first ones drain
@@ -128,22 +144,39 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
 
     if (!budget_pass) update_characteristic_boundaries(t_stage);
     if (hybrid_flux) update_upwind_sensor();
-    switch (riemann_solver_type) {
-        case RiemannSolverType::RUSANOV:
-            launch_flux_functor<riemann::Rusanov>();
-            break;
-        case RiemannSolverType::HLL:
-            launch_flux_functor<riemann::HLL>();
-            break;
-        case RiemannSolverType::HLLC:
-            launch_flux_functor<riemann::HLLC>();
-            break;
-        case RiemannSolverType::ROE:
-            launch_flux_functor<riemann::Roe>();
-            break;
-        case RiemannSolverType::RHLL:
-            launch_flux_functor<riemann::RHLL>();
-            break;
+    auto convective_flux = [&](Kokkos::View<uint32_t *> faces) {
+        switch (riemann_solver_type) {
+            case RiemannSolverType::RUSANOV:
+                launch_flux_functor<riemann::Rusanov>(faces);
+                break;
+            case RiemannSolverType::HLL:
+                launch_flux_functor<riemann::HLL>(faces);
+                break;
+            case RiemannSolverType::HLLC:
+                launch_flux_functor<riemann::HLLC>(faces);
+                break;
+            case RiemannSolverType::ROE:
+                launch_flux_functor<riemann::Roe>(faces);
+                break;
+            case RiemannSolverType::RHLL:
+                launch_flux_functor<riemann::RHLL>(faces);
+                break;
+        }
+    };
+    const bool viscous_gradients_due = physics.is_viscous() && !hybrid_flux;
+    if (own_faces) {
+        // The face states travel while the other faces' fluxes are computed
+        comm::enqueue_wait(comm_space, Kokkos::DefaultExecutionSpace());
+        if (local_faces.extent(0) > 0) convective_flux(local_faces);
+        face_exchange.start(comm_space, face_solution);
+        if (viscous_gradients_due) {
+            Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
+        }
+        face_exchange.finish(comm_space, face_solution);
+        comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
+        if (partition_faces.extent(0) > 0) convective_flux(partition_faces);
+    } else {
+        convective_flux(rhs_faces);
     }
 
     if (budget_pass) {
@@ -152,7 +185,9 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
     }
     ViscousFluxFunctor viscous_functor;
     if (physics.is_viscous()) {
-        if (!hybrid_flux) Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
+        if (viscous_gradients_due && !own_faces) {
+            Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
+        }
         if (les_on) update_eddy_viscosity(mesh->n_cells);
         viscous_functor = ViscousFluxFunctor{mesh->face_normals, mesh->face_measure, mesh->face_coords,
                                              mesh->cell_coords, mesh->cells_of_face, mesh->shifts, mesh->face_shift,
@@ -217,6 +252,35 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
     }
 }
 
+void Solver::start_reconstruction(StateView solution) {
+    Kokkos::parallel_for("rhs_W", Kokkos::RangePolicy<>(0, mesh->n_owned()), CellWFunctor{physics, solution, W_cells});
+    if (n_early_cells == 0) return;
+    comm::enqueue_wait(overlap_space, Kokkos::DefaultExecutionSpace());
+    face_reconstruction->calc_cell_face_values(overlap_space, W_cells, face_solution,
+                                               Kokkos::subview(rhs_cells, Kokkos::make_pair(0u, n_early_cells)));
+}
+
+void Solver::exchange_halo(const State & state) {
+    comm::enqueue_wait(comm_space, Kokkos::DefaultExecutionSpace());
+    halo.start(state, comm_space);
+    halo.finish(state, comm_space);
+    comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
+}
+
+void Solver::exchange_for_first_stage() {
+    // The first stage's interior reconstruction does not depend on dt: start it
+    // before the exchange and the dt reduction, so that it covers both
+    if (halo.active() && exchanges_partition_faces() && inflows.empty() && average_pressure_outlets.empty()) {
+        update_boundary_states(t);
+        start_reconstruction(conservatives);
+        reconstruction_started = true;
+        exchange_halo(state());
+    } else {
+        halo.exchange(state());
+    }
+    halo_current = true;
+}
+
 void Solver::update_upwind_sensor() {
     Kokkos::parallel_for("upwind_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
     Kokkos::parallel_for("upwind_sensor", n_gradient_cells(),
@@ -232,7 +296,7 @@ void Solver::add_geometric_source(StateView rhs, Kokkos::View<rtype *, Kokkos::L
 }
 
 template <typename T_riemann_solver>
-void Solver::launch_flux_functor() {
+void Solver::launch_flux_functor(Kokkos::View<uint32_t *> faces) {
     ConvectiveFluxFunctor<T_riemann_solver> functor{mesh->face_normals,
                                                     mesh->face_area,
                                                     mesh->cells_of_face,
@@ -246,5 +310,5 @@ void Solver::launch_flux_functor() {
                                                     low_mach_cutoff,
                                                     cell_upwind,
                                                     face_reconstruction->face_quad_normals};
-    parallel_for_faces("convective_flux", functor, rhs_faces, mesh->n_faces);
+    parallel_for_faces("convective_flux", functor, faces, mesh->n_faces);
 }
