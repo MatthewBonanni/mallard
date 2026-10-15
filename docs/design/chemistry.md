@@ -1407,9 +1407,11 @@ q    = -lambda grad T + sum_k h_k j_k
   half the `O(Ns^2)` work on hexahedra and a third on triangles, at the same
   order. The gradients of `[u, T, X_1 .. X_Ns]` use the viscous gradient's
   stencil and weights; boundary ghosts take the ghost state's velocity
-  (no-slip walls), and the prescribed `T` and `X` at `upt` faces. Walls and
-  symmetry planes carry no heat or species flux; transmissive faces take
-  their image face's values; outflow faces have zero normal derivatives.
+  (no-slip walls), and the prescribed `T` and `X` at `upt` faces; isothermal
+  walls give the mirror image of the centroid `2 T_w - T`, heat-flux walls
+  `T + 2 d q / lambda`. Symmetry planes carry no heat or species flux;
+  transmissive faces take their image face's values; outflow faces have zero
+  normal derivatives.
   `T = p / (rho R)` from `W`, also under double flux.
 - **Positivity**: explicit diffusion with the correction velocity can make
   mass fractions slightly negative (1e-8 seen next to a contact); the
@@ -1417,8 +1419,28 @@ q    = -lambda grad T + sum_k h_k j_k
   chemistry call (renormalizing at the same energy), since a negative
   starting `Y_k` would reject every sub-step. Cells without negative mass
   fractions integrate exactly as before.
-- Walls of mixture runs are no-slip under `navier_stokes`; isothermal walls
-  (which need `R(Y)` in the ghost state) are still rejected for mixtures.
+- **Walls** are no-slip under `navier_stokes` and non-catalytic: `j_k . n =
+  0` for every species, Soret part included, so the enthalpy flux
+  `sum_k h_k j_k` vanishes there too and the wall's energy flux is the
+  conduction alone (no Dufour effect). Adiabatic walls conduct nothing,
+  heat-flux walls the given `q`; isothermal walls conduct `lambda_w dT/dn`,
+  the one-sided difference from the boundary cell's centroid to `T_w` (as the
+  wall velocity), with `lambda_w = lambda_c (1 + lambda(T_w, Y_c) /
+  lambda(T_c, Y_c)) / 2`: the mean of the two ends, as interior faces average
+  their two cells', and a ratio rather than `lambda(T_w)` itself so that a
+  thickened or otherwise scaled cell conductivity carries over. The mixture
+  conductivity alone is `O(Ns)` (`TransportTable::conductivity`); with the
+  cell's conductivity instead, steady conduction between walls at 300 and
+  900 K is off by 1 K on 16 cells, 0.005 K with the mean. The ghost states of
+  every wall keep the interior density, pressure and composition with the
+  mirrored velocity, so the Riemann solver carries no mass through the wall
+  (a single gas's isothermal ghost density `p / (R T_g)` would need `R(Y)`
+  and lets HLL-type solvers leak mass in proportion to `T_c - T_w`); the wall
+  temperature enters only the diffusive fluxes and the gradients above.
+- **Double flux** with `navier_stokes`: the diffusive energy flux of a face
+  enters both sides' energy fluxes (`face_energy_1` as well as `face_flux`);
+  before, cells on side 1 of a face missed it, which conducted heat one way
+  (steady conduction between walls ended 500 K off).
 - The frozen-coefficient option is not implemented: transport is 25% of the
   GRI-3.0 flame's step on a CPU core, chemistry 75%.
 - Output: `MU`, `LAMBDA`, `D_<species>` (`D_km`), and `OMEGA_<species>`
@@ -1432,6 +1454,19 @@ stays isothermal within 2 K (76 K without the enthalpy flux); periodic shear
 and temperature waves decay at `mu k^2 / rho` (to 3e-6) and
 `lambda k^2 / (rho cp)` (to 3e-3, the coupling to acoustics). Reacting
 viscous runs are bitwise identical on 1-4 ranks and across restarts.
+Walls (O2/N2 and H2/N2 of `test/data/chemistry/test_wall.yaml`, 16 cells
+across 1 mm at 1000 Pa, against variable-property exact solutions from the
+host transport tables): steady conduction between isothermal walls at 300 and
+900 K, `int lambda dT` linear across the gap, within 0.005 K, the same with
+double flux; heat-flux wall (2e4 W/m^2) and isothermal wall at 300 K, within
+0.007 K; Couette flow with heat transfer (walls at 300 K at rest and 500 K at
+300 m/s, 7.7 K of viscous heating) against the shooting solution of
+`(u, T)' = (tau / mu, (C - u tau) / lambda)`: `u` within 0.15 m/s, `T` within
+0.05 K. Closed channels of H2/N2 with the Soret effect between isothermal,
+heat-flux or adiabatic walls keep every species' total to 1e-13 (and the
+total energy, between adiabatic walls), with hydrogen gathering at the hot
+end. Isothermal and heat-flux walls with chemistry, Soret and double flux are
+bitwise identical on 1-4 ranks.
 
 V8 (`examples/premixed_flame`, `tools/flame_reference.py`,
 `flame_restart.py`, `flame_speed.py`): a 1D strip in
@@ -1736,7 +1771,7 @@ surrogate `(gamma, e0)`:
 | Boundary | Species | Thermo |
 |---|---|---|
 | `extrapolation`, image faces | from the image | from the image |
-| `symmetry`, walls | interior `Y` (zero normal diffusive flux) | interior; isothermal walls use `R(Y)` |
+| `symmetry`, walls | interior `Y` (zero normal diffusive flux) | interior (wall temperatures and heat fluxes enter the diffusive fluxes only) |
 | `upt`, `farfield`, `dirichlet` | given `Y`/`X` (expressions for `dirichlet`) | from given `p`, `T`, `Y` |
 | `p_out`, `p_out_average` | interior `Y` | interior `gamma` |
 
