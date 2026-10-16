@@ -25,6 +25,7 @@
 #include "input.h"
 #include "probe_geometry.h"
 #include "solver.h"
+#include "gmsh_fixtures.h"
 #include "test_fixtures.h"
 
 #ifdef Mallard_HAS_HDF5
@@ -330,3 +331,207 @@ TEST(ProbesTest, VtpAndHdf5HoldTheCsvSamplesAndRestartsCutThemBack) {
 #endif
     std::filesystem::remove_all(dir);
 }
+
+namespace {
+
+// Plane Couette flow between an isothermal wall at rest (y = 0, T0) and one
+// moving at U (y = 1, T1), periodic along x (and z): with constant mu and
+// kappa, u = U y and T = T0 + (T1 - T0) y + mu U^2 / (2 kappa) y (1 - y) at
+// uniform pressure solve the compressible equations exactly
+const double COUETTE_U = 0.5, COUETTE_MU = 0.01, COUETTE_T0 = 1.0, COUETTE_T1 = 1.2;
+const double COUETTE_KAPPA = COUETTE_MU * 3.5 / 0.72;  // cp = gamma R / (gamma - 1) with R = 1
+
+std::string couette_case(uint32_t n, const std::string & extra, const std::string & run = "n_steps = 1\ndt = 1.0e-9\n") {
+    std::ostringstream T;
+    T.precision(17);
+    T << COUETTE_T0 << " + " << COUETTE_T1 - COUETTE_T0 << " * y + "
+      << COUETTE_MU * COUETTE_U * COUETTE_U / (2.0 * COUETTE_KAPPA) << " * y * (1 - y)";
+    std::ostringstream s;
+    s << "[run]\n" << run << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = " << n << "\nLx = 1.0\nLy = 1.0\n";
+    if (N_DIM == 3) s << "Nz = 3\nLz = 1.0\nperiodic = [\"x\", \"z\"]\n";
+    else s << "periodic = [\"x\"]\n";
+    s << "[initialize]\ntype = \"analytical\"\nrho = \"1 / (" << T.str() << ")\"\nu = " << vector3("0.5 * y", "0", "0")
+      << "\np = \"1.0\"\n"
+      << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_isothermal\"\nT = " << COUETTE_T0 << "\n"
+      << "[[boundaries]]\nname = \"top\"\ntype = \"wall_isothermal\"\nT = " << COUETTE_T1 << "\nu = "
+      << numbers3("0.5", "0.0", "0.0") << "\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+      << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = "
+      << COUETTE_MU << "\nPr = 0.72\n[output]\ncheck_interval = 1000000\n" << extra;
+    return s.str();
+}
+
+const char * const MEASURE = N_DIM == 2 ? "length" : "area";
+
+} // namespace
+
+TEST(ProbesTest, WallShearAndHeatFluxMatchCouetteFlow) {
+    // The wall shear stress of the linear profile is exact; the heat flux,
+    // from the one-sided wall gradient of the viscous flux, converges at
+    // first order
+    const std::string dir = dir_for("couette");
+    const double q_bottom = -COUETTE_KAPPA * (COUETTE_T1 - COUETTE_T0) - 0.5 * COUETTE_MU * COUETTE_U * COUETTE_U;
+    const double q_top = COUETTE_KAPPA * (COUETTE_T1 - COUETTE_T0) - 0.5 * COUETTE_MU * COUETTE_U * COUETTE_U;
+    const double tau = COUETTE_MU * COUETTE_U, q_ref = 0.5 * COUETTE_U * COUETTE_U;
+    std::vector<double> errors;
+    for (uint32_t n : {8u, 16u, 32u}) {
+        std::filesystem::remove_all(dir);
+        const std::string probe = "[[probes]]\nname = \"walls\"\nfile = \"" + dir + "/walls.csv\"\nboundary_type = \"wall\"\n"
+                                  "variables = [\"CF\", \"TAU_W\", \"TAU_W_X\", \"Q_W\", \"U_TAU\", \"Y_PLUS\", \"T\", \"U_X\"]\n"
+                                  "reference = {rho = 1.0, u = " + numbers3("0.5", "0.0", "0.0") + ", p = 1.0}\n";
+        Solver solver;
+        solver.init(parse_toml(couette_case(n, probe)));
+        solver.run();
+        double error = 0.0;
+        size_t n_faces = 0;
+        for (const auto & row : read_csv(dir + "/walls.csv")) {
+            if (row.at("step") != 0.0) continue;
+            n_faces++;
+            const bool top = row.at("ny") > 0.0;
+            const double sign = top ? -1.0 : 1.0;
+            const double tol = precision_tol<double>(1e-10, 2e-4);
+            EXPECT_NEAR(row.at("TAU_W_X"), sign * tau, tol * tau);
+            EXPECT_NEAR(row.at("TAU_W"), tau, tol * tau);
+            EXPECT_NEAR(row.at("CF"), sign * tau / q_ref, tol * tau / q_ref);
+            EXPECT_NEAR(row.at("T"), top ? COUETTE_T1 : COUETTE_T0, tol);
+            EXPECT_NEAR(row.at("U_X"), top ? COUETTE_U : 0.0, tol);
+            const double rho_w = 1.0 / (top ? COUETTE_T1 : COUETTE_T0), u_tau = std::sqrt(tau / rho_w);
+            EXPECT_NEAR(row.at("U_TAU"), u_tau, tol * u_tau);
+            EXPECT_NEAR(row.at("Y_PLUS"), rho_w * u_tau * (0.5 / n) / COUETTE_MU, tol);
+            const double q = top ? q_top : q_bottom;
+            error = std::max(error, std::fabs(row.at("Q_W") - q) / std::fabs(q));
+        }
+        EXPECT_EQ(n_faces, (N_DIM == 2 ? 2u * 4u : 2u * 12u));
+        errors.push_back(error);
+    }
+    EXPECT_LT(errors.back(), 0.05);
+    EXPECT_GT(std::log2(errors[1] / errors[2]), 0.8) << errors[1] << " " << errors[2];
+    std::filesystem::remove_all(dir);
+}
+
+TEST(ProbesTest, BoundaryTractionsIntegrateToTheForces) {
+    // Cell sampling takes the forces monitor's wall pressure and gradients
+    const std::string dir = dir_for("forces");
+    std::filesystem::remove_all(dir);
+    const std::string extra = "[[forces]]\nzone = \"top\"\nfile = \"" + dir + "/forces.csv\"\n"
+                              "[[probes]]\nname = \"top\"\nboundary = \"top\"\nsamples = false\n"
+                              "variables = [\"TRACTION_PRESSURE\", \"TRACTION_VISCOUS\"]\nreductions = [\"integral\"]\n"
+                              "reductions_file = \"" + dir + "/top.csv\"\n";
+    Solver solver;
+    solver.init(parse_toml(couette_case(8, extra, "n_steps = 4\ncfl = 0.5\n")));
+    solver.run();
+    const auto forces = read_csv(dir + "/forces.csv");
+    const auto probe = read_csv(dir + "/top.csv");
+    ASSERT_EQ(forces.size(), probe.size());
+    const char * const axes[3] = {"x", "y", "z"};
+    const double tol = precision_tol<double>(1e-12, 1e-5);
+    for (size_t r = 0; r < forces.size(); r++) {
+        for (size_t d = 0; d < N_DIM; d++) {
+            const double Fp = forces[r].at(std::string("F") + axes[d] + "_pressure");
+            const double Fv = forces[r].at(std::string("F") + axes[d] + "_viscous");
+            EXPECT_NEAR(probe[r].at(std::string("integral_TRACTION_PRESSURE_") + "XYZ"[d]), Fp, tol * (1.0 + std::fabs(Fp)));
+            EXPECT_NEAR(probe[r].at(std::string("integral_TRACTION_VISCOUS_") + "XYZ"[d]), Fv, tol * 1e-2);
+        }
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST(ProbesTest, InletAndOutletFluxesHaveTheBoundaryStates) {
+    // Uniform flow from an upt inlet to a p_out outlet: the face states are
+    // the prescribed ones, and the normals point out of the domain
+    const std::string dir = dir_for("fluxes");
+    std::filesystem::remove_all(dir);
+    std::ostringstream s;
+    s << "[run]\nn_steps = 1\ndt = 1.0e-9\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 4\nLx = 2.0\nLy = 1.0\n";
+    if (N_DIM == 3) s << "Nz = 3\nLz = 1.0\nperiodic = [\"z\"]\n";
+    s << "[initialize]\ntype = \"constant\"\nu = " << numbers3("0.3", "0", "0") << "\np = 1.0\nT = 1.0\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"upt\"\nu = " << numbers3("0.3", "0", "0") << "\np = 1.0\nT = 1.0\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"p_out\"\np = 1.0\n"
+      << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n" << PERFECT_GAS
+      << "[output]\ncheck_interval = 1000000\n";
+    for (const char * zone : {"left", "right"}) {
+        s << "[[probes]]\nname = \"" << zone << "\"\nboundary = \"" << zone << "\"\nsampling = \"point\"\nsamples = false\n"
+          << "variables = [\"MASS_FLUX\", \"MOMENTUM_FLUX\", \"ENTHALPY_FLUX\"]\nreductions = [\"integral\"]\n"
+          << "reductions_file = \"" << dir << "/" << zone << ".csv\"\n";
+    }
+    Solver solver;
+    solver.init(parse_toml(s.str()));
+    solver.run();
+    const double area = 1.0, mdot = 0.3 * area, h_t = 3.5 + 0.5 * 0.3 * 0.3;
+    const double tol = precision_tol<double>(1e-13, 1e-6);
+    for (const auto & [zone, sign] : {std::pair{"left", -1.0}, std::pair{"right", 1.0}}) {
+        const auto r = read_csv(dir + "/" + zone + ".csv").front();
+        EXPECT_NEAR(r.at(MEASURE), area, tol) << zone;
+        EXPECT_NEAR(r.at("integral_MASS_FLUX"), sign * mdot, tol) << zone;
+        EXPECT_NEAR(r.at("integral_MOMENTUM_FLUX_X"), sign * (0.3 * mdot + area), tol) << zone;
+        EXPECT_NEAR(r.at("integral_MOMENTUM_FLUX_Y"), 0.0, tol) << zone;
+        EXPECT_NEAR(r.at("integral_ENTHALPY_FLUX"), sign * mdot * h_t, tol) << zone;
+    }
+    std::filesystem::remove_all(dir);
+}
+
+#if N_DIM == 2
+TEST(ProbesTest, WallPolylinesFollowCurvedWallsWithTheFluidOnTheirLeft) {
+    // A steady vortex between curved walls (u = M / r, isentropic pressure):
+    // each wall is one closed polyline, counterclockwise around the outer wall
+    // and clockwise around the inner one; the point values of the wall
+    // pressure beat the cell averages
+    const double M = 0.8;
+    auto p_exact = [&](double r) { return std::pow(1.0 + 0.2 * M * M * (1.0 - 1.0 / (r * r)), 3.5) / 1.4; };
+    const std::string file = write_temp("probes_annulus.msh", annulus_gmsh(4, 48));
+    const std::string dir = dir_for("annulus");
+    std::filesystem::remove_all(dir);
+    std::string probes;
+    for (const char * zone : {"inner", "outer"}) {
+        for (const char * sampling : {"cell", "point"}) {
+            probes += std::string("[[probes]]\nname = \"") + zone + "_" + sampling + "\"\nboundary = \"" + zone +
+                      "\"\nsampling = \"" + sampling + "\"\nvariables = [\"P\", \"MASS_FLUX\"]\nfile = \"" + dir + "/" +
+                      zone + "_" + sampling + ".csv\"\n";
+        }
+    }
+    const std::string input =
+        "[run]\nn_steps = 1\ndt = 1.0e-9\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
+        "[[mesh.curved]]\nzone = \"inner\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+        "[[mesh.curved]]\nzone = \"outer\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n"
+        "[initialize]\ntype = \"analytical\"\nrho = \"(1 + 0.2 * 0.8^2 * (1 - 1 / (x^2 + y^2)))^2.5\"\n"
+        "u = [\"-0.8 * y / (x^2 + y^2)\", \"0.8 * x / (x^2 + y^2)\"]\n"
+        "p = \"(1 + 0.2 * 0.8^2 * (1 - 1 / (x^2 + y^2)))^3.5 / 1.4\"\n"
+        "[[boundaries]]\nname = \"inner\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"outer\"\ntype = \"wall_adiabatic\"\n"
+        "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+        "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 4\n" + PERFECT_GAS +
+        "[output]\ncheck_interval = 1000000\n" + probes;
+    Solver solver;
+    solver.init(parse_toml(input));
+    solver.run();
+    for (const auto & [zone, r, turn] : {std::tuple{"inner", 1.0, -1.0}, std::tuple{"outer", 1.384, 1.0}}) {
+        double error[2] = {0.0, 0.0};
+        for (int k = 0; k < 2; k++) {
+            std::vector<std::map<std::string, double>> rows;
+            for (const auto & row : read_csv(dir + "/" + zone + (k ? "_point" : "_cell") + ".csv")) {
+                if (row.at("step") == 0.0) rows.push_back(row);
+            }
+            ASSERT_EQ(rows.size(), 48u) << zone;
+            double total = 0.0;
+            for (size_t i = 0; i < rows.size(); i++) {
+                const auto & a = rows[i];
+                const auto & b = rows[(i + 1) % rows.size()];
+                double turn_ab = std::atan2(b.at("y"), b.at("x")) - std::atan2(a.at("y"), a.at("x"));
+                turn_ab = std::remainder(turn_ab, 2.0 * std::numbers::pi);
+                EXPECT_GT(turn * turn_ab, 0.0) << zone << " face " << i;
+                if (i + 1 < rows.size()) EXPECT_GT(b.at("s"), a.at("s"));
+                // The normal points out of the fluid: outward at the outer wall, inward at the inner one
+                EXPECT_GT(turn * (a.at("nx") * a.at("x") + a.at("ny") * a.at("y")), 0.0);
+                EXPECT_NEAR(a.at("MASS_FLUX"), 0.0, 1e-12);
+                total += a.at("area");
+                error[k] = std::max(error[k], std::fabs(a.at("P") - p_exact(r)));
+            }
+            EXPECT_NEAR(total, 2.0 * std::numbers::pi * r, 1e-3 * r) << zone;
+        }
+        EXPECT_LT(error[1], 0.2 * error[0]) << zone << ": point " << error[1] << ", cell " << error[0];
+    }
+    std::filesystem::remove_all(dir);
+}
+#endif
