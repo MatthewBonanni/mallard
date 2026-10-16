@@ -61,6 +61,7 @@ void Solver::timed_phase(const std::string & name, F && f) {
 
 int Solver::init(const toml::value & input_in) {
     this->input = input_in;
+    preset = numerics_preset::apply(input);
 
     t = 0.0;
     step = 0;
@@ -1446,6 +1447,7 @@ void Solver::print_setup() const {
     logging::item("Initial state", initial_state);
 
     logging::section("Numerics");
+    if (!preset.name.empty()) logging::item("Preset", preset.summary());
     logging::items(face_reconstruction->summary());
     logging::item("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
     if (hybrid_flux) {

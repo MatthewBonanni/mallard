@@ -44,6 +44,7 @@
 #include "distribution.h"
 #include "halo_exchange.h"
 #include "log.h"
+#include "numerics_preset.h"
 
 struct ForceMonitor {
     std::string zone;
@@ -369,6 +370,10 @@ class Solver {
         uint64_t get_step() const { return step; }
         const Euler & get_physics() const { return physics; }
         std::shared_ptr<Mesh> get_mesh() const { return mesh; }
+        /** @brief The input after its numerics preset, if any, filled the keys it leaves unset. */
+        const toml::value & resolved_input() const { return input; }
+        /** @brief The numerics preset and the value and origin of each of its keys. */
+        const numerics_preset::Resolution & get_numerics_preset() const { return preset; }
 
         /** @brief The solution: flow block and species partial densities. */
         State state() const { return State(conservatives, species); }
@@ -486,6 +491,7 @@ class Solver {
         bool halo_current = false;                     // halo of conservatives filled since its last update
 
         toml::value input;
+        numerics_preset::Resolution preset;
 
         // Run parameters
         uint64_t n_steps;
