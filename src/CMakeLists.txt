@@ -10,6 +10,7 @@ add_library(MallardCore STATIC
     mesh/mesh_io.cpp
     mesh/read_cgns.cpp
     mesh/read_fluent.cpp
+    mesh/read_openfoam.cpp
     mesh/cells_from_faces.cpp
     mesh/periodic.cpp
     mesh/mesh_3d.cpp
