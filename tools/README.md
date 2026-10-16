@@ -1,5 +1,7 @@
 # Tools
 
+[`jobs/`](jobs) holds job scripts for Slurm (one node, several nodes), PBS, Kubernetes and plain `mpirun`; see [Running on clusters](../docs/guide/parallel.md#running-on-clusters).
+
 Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the 3D animations also need pyvista.
 
 | Script | Purpose |
