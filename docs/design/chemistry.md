@@ -1965,6 +1965,28 @@ resolution and domain-size variants are in the example's README.
 
 ![Peak temperature against strain](../images/counterflow_strain.png)
 
+Flame-wall interaction (`tools/flame_wall.py`): head-on quenching of the
+stoichiometric H2/air flame (h2o2.yaml, mixture-averaged transport, 300 K,
+1 atm; Cantera: `S_L` = 2.332 m/s, `T_b` = 2379 K, thermal thickness
+`delta_T` = 329 um, `delta_L = lambda_u / (rho_u cp_u S_L)` = 19.9 um)
+against an isothermal wall at 300 K. A 1D strip of 4 um cells, started from
+Cantera's flame 0.4 mm from the wall with the fresh gas at rest and the
+burnt gas leaving through a pressure outlet; MUSCL, HLLC, SSPRK3, CFL 1.
+The wall heat flux is the solver's (the boundary cell's conduction to the
+wall), the flame position the wall distance of the largest H2 consumption
+rate. The flame quenches at `x_q` = 90 um, with a peak wall heat flux of
+2.19 MW/m^2: `Pe_q = x_q / delta_L` = 4.5 (`x_q / delta_T` = 0.27) and
+`phi_q = q_max / (rho_u cp_u S_L (T_b - T_u))` = 0.38. Classical head-on
+quenching gives `phi_q` 0.34-0.4 and `Pe_q` near 3 for hydrocarbon flames
+(Vosen, Greif & Westbrook 1984; Poinsot, Haworth & Bruneaux 1993);
+hydrogen's `delta_L` is several times smaller for a quenching distance
+similar to heptane's (Owston, Magi & Abraham 2007), so its `Pe_q` is larger.
+Conduction across the quenching distance, `int_Tw^Tb lambda dT / x_q`
+(Cantera's burnt-gas conductivity), predicts `phi_q` = 0.45, consistent with
+the measured 0.38 (the gas next to the wall is cooler than `T_b` at
+quenching). A 2 um run is the resolution check. Run: 256k steps, 17 min on
+one A100 (chemistry 89%).
+
 ### Performance benchmarks
 
 - **Chemistry throughput**: cells advanced per second per A100 (and per CPU
