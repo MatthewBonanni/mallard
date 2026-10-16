@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   # First and fast: a branch that changes src/ adds a changelog fragment
-  # (changelog.d/, see docs/design/documentation.md#changelog) unless its pull
+  # (changelog/, see docs/design/documentation.md#changelog) unless its pull
   # request is labeled no-changelog. The other jobs wait for it.
   changelog:
     runs-on: ubuntu-latest

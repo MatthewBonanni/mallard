@@ -73,7 +73,7 @@ Equations are LaTeX, which both GitHub and the website (MathJax 3) render:
 [`CHANGELOG.md`](../../CHANGELOG.md) follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pull requests do not
 edit it, so that the many landing in parallel do not conflict: one that changes
-`src/` adds a fragment `changelog.d/<branch>.<category>.md` (`added`,
+`src/` adds a fragment `changelog/<branch>.<category>.md` (`added`,
 `changed`, `deprecated`, `removed`, `fixed` or `security`) with one `- ` bullet
 per change and its PR or issue number:
 

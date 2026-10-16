@@ -2,7 +2,7 @@
 """Changelog fragments: check them, preview them, fold them into CHANGELOG.md.
 
 Each pull request that changes src/ adds a fragment
-changelog.d/<name>.<category>.md (category: added, changed, deprecated,
+changelog/<name>.<category>.md (category: added, changed, deprecated,
 removed, fixed or security) holding one or more "- " bullets, instead of
 editing CHANGELOG.md, so that parallel pull requests do not conflict.
 
@@ -26,7 +26,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CHANGELOG = ROOT / "CHANGELOG.md"
-FRAGMENTS = ROOT / "changelog.d"
+FRAGMENTS = ROOT / "changelog"
 CATEGORIES = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Security"]
 RELEASE = re.compile(r"^## \[(\d+\.\d+\.\d+)\] - \d{4}-\d{2}-\d{2}$")
 FRAGMENT = re.compile(r"^[A-Za-z0-9_.-]+\.(" + "|".join(c.lower() for c in CATEGORIES) + r")\.md$")
@@ -72,7 +72,7 @@ def fragment_errors(path):
 
 
 def fragments():
-    """{category: [bullet lines]} of changelog.d/, in file-name order."""
+    """{category: [bullet lines]} of changelog/, in file-name order."""
     out = {c: [] for c in CATEGORIES}
     for path in sorted(FRAGMENTS.glob("*.md")):
         if path.name == "README.md":
@@ -155,7 +155,7 @@ def check(base):
     status = [line.split("\t") for line in git("diff", "--name-status", f"{merge_base}...HEAD").splitlines()]
     changed = [entry[-1] for entry in status]
     added = [ROOT / entry[-1] for entry in status
-             if entry[0][0] in "AR" and entry[-1].startswith("changelog.d/") and entry[-1] != "changelog.d/README.md"]
+             if entry[0][0] in "AR" and entry[-1].startswith("changelog/") and entry[-1] != "changelog/README.md"]
     for path in added:
         errors += fragment_errors(path)
     for e in errors:
@@ -166,7 +166,7 @@ def check(base):
         print(f"Changelog fragments: {', '.join(p.name for p in added)}")
     else:
         print("This branch changes src/ but adds no changelog fragment.\n"
-              "Add changelog.d/<branch>.<added|changed|deprecated|removed|fixed|security>.md with one "
+              "Add changelog/<branch>.<added|changed|deprecated|removed|fixed|security>.md with one "
               "\"- \" bullet per change: what a user notices and what to do about it, with the PR or "
               "issue number. If users notice nothing (refactors, tests, comments), label the pull "
               "request \"no-changelog\". See docs/design/documentation.md#changelog.", file=sys.stderr)
