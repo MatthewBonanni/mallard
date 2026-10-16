@@ -1,7 +1,7 @@
 /**
  * @file statistics.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief In-situ running time averages and probes.
+ * @brief In-situ running time averages, phase averages and probes.
  * @version 0.1
  * @date 2026-10-04
  *
@@ -61,13 +61,15 @@ const char * const SAMPLES = "STATISTICS_SAMPLES";
 
 } // namespace
 
-void Statistics::init(const toml::value & input, const std::vector<std::string> & species_names, uint32_t n_cells) {
+void Statistics::init(const toml::value & input, const std::vector<std::string> & species_names, const Mesh & mesh) {
     if (!input.contains("statistics")) return;
     const toml::value & table = input.at("statistics");
     interval = toml::find_or<uint64_t>(table, "interval", 1);
     if (interval == 0) throw InputError("statistics.interval must be positive.");
     t_start = find_real_or(table, "t_start", 0.0);
     reset = toml::find_or<bool>(table, "reset", false);
+    if (table.contains("spectra")) spectra.init(table.at("spectra"), input, species_names, mesh, interval, t_start);
+    if (table.contains("phase")) phase.init(table.at("phase"), mesh, species_names, mesh.n_cells, interval, t_start);
     auto add_field = [&](const std::string & name) {
         const auto it = std::find(fields.begin(), fields.end(), name);
         if (it != fields.end()) return static_cast<uint32_t>(it - fields.begin());
@@ -93,7 +95,11 @@ void Statistics::init(const toml::value & input, const std::vector<std::string> 
         }
         products.push_back(pair);
     }
-    if (fields.empty()) throw InputError("statistics: list at least one of fields and products.");
+    if (fields.empty()) {
+        if (spectra.enabled() || phase.enabled()) return;
+        throw InputError("statistics: list at least one of fields and products (or add spectra or phase).");
+    }
+    const uint32_t n_cells = mesh.n_cells;
 
     std::vector<int32_t> h_codes;
     for (const auto & name : fields) h_codes.push_back(CellSampler::code(name, species_names, "statistics"));
@@ -112,7 +118,13 @@ void Statistics::init(const toml::value & input, const std::vector<std::string> 
 }
 
 void Statistics::start(rtype t) {
-    if (!enabled()) return;
+    spectra.start(t);
+    phase.start(t);
+    start_means(t);
+}
+
+void Statistics::start_means(rtype t) {
+    if (!means_enabled()) return;
     weight = 0.0_r;
     t_last = std::max(t, t_start);
     n_samples = 0;
@@ -120,7 +132,10 @@ void Statistics::start(rtype t) {
     Kokkos::deep_copy(cov, 0.0_r);
 }
 
-void Statistics::sample(rtype t, const CellSampler & sampler, uint32_t n_owned) {
+void Statistics::sample(uint64_t step, rtype t, const CellSampler & sampler, uint32_t n_owned) {
+    if (spectra.due(step, t)) spectra.sample(step, t, sampler);
+    if (phase.due(step, t)) phase.sample(t, sampler, n_owned);
+    if (!(means_enabled() && step % interval == 0 && t > t_start)) return;
     const rtype w = t - t_last;
     weight += w;
     t_last = t;
@@ -148,6 +163,7 @@ std::vector<std::string> Statistics::variables() const {
     std::vector<std::string> names;
     for (const auto & f : fields) names.push_back("MEAN_" + f);
     for (const auto & [i, j] : products) names.push_back("COV_" + fields[i] + "_" + fields[j]);
+    for (const auto & name : phase.variables()) names.push_back(name);
     return names;
 }
 
@@ -157,17 +173,23 @@ void Statistics::register_data(std::vector<Data> & data) const {
     for (size_t p = 0; p < products.size(); p++) {
         data.emplace_back(names[fields.size() + p], Kokkos::subview(h_cov, Kokkos::ALL(), p));
     }
+    phase.register_data(data);
 }
 
 void Statistics::copy_device_to_host() {
-    if (!enabled()) return;
+    phase.copy_device_to_host();
+    if (!means_enabled()) return;
     Kokkos::deep_copy(h_mean, mean);
     Kokkos::deep_copy(h_cov, cov);
 }
 
 void Statistics::restore(const RestartData & restart, const std::string & file, rtype t) {
-    if (!enabled()) return;
-    const std::vector<std::string> names = variables();
+    spectra.restore(restart, file, t, reset);
+    phase.restore(restart, file, t, reset);
+    if (!means_enabled()) return;
+    std::vector<std::string> names;
+    for (const auto & f : fields) names.push_back("MEAN_" + f);
+    for (const auto & [i, j] : products) names.push_back("COV_" + fields[i] + "_" + fields[j]);
     std::vector<const std::vector<rtype> *> values;
     std::string missing;
     for (const auto & name : names) {
@@ -179,7 +201,7 @@ void Statistics::restore(const RestartData & restart, const std::string & file, 
     const double * n = restart.attribute(SAMPLES);
     const bool none = std::none_of(values.begin(), values.end(), [](auto v) { return v != nullptr; });
     if (reset || none || !w) {
-        start(t);
+        start_means(t);
         return;
     }
     if (!missing.empty()) {
@@ -204,16 +226,233 @@ void Statistics::restore(const RestartData & restart, const std::string & file, 
 }
 
 RestartAttributes Statistics::attributes() const {
-    if (!enabled()) return {};
-    return {{WEIGHT, static_cast<double>(weight)},
-            {T_LAST, static_cast<double>(t_last)},
-            {SAMPLES, static_cast<double>(n_samples)}};
+    RestartAttributes all;
+    if (means_enabled()) {
+        all = {{WEIGHT, static_cast<double>(weight)},
+               {T_LAST, static_cast<double>(t_last)},
+               {SAMPLES, static_cast<double>(n_samples)}};
+    }
+    for (auto && a : spectra.attributes()) all.push_back(a);
+    for (auto && a : phase.attributes()) all.push_back(a);
+    return all;
 }
 
-std::string Statistics::summary() const {
-    std::string text = "every " + logging::count(interval) + " steps from t = " + logging::real(double(t_start)) + ": ";
+std::vector<std::pair<std::string, std::string>> Statistics::summary() const {
+    std::vector<std::pair<std::string, std::string>> items;
+    if (means_enabled()) {
+        std::string text = "every " + logging::count(interval) + " steps from t = " + logging::real(double(t_start)) + ": ";
+        for (size_t i = 0; i < fields.size(); i++) text += (i ? ", " : "") + std::string("MEAN_") + fields[i];
+        for (const auto & [i, j] : products) text += ", COV_" + fields[i] + "_" + fields[j];
+        if (n_samples > 0) text += " (" + logging::count(n_samples) + " samples so far)";
+        items.emplace_back("statistics", text);
+    }
+    if (spectra.enabled()) items.emplace_back("spectra", spectra.summary());
+    if (phase.enabled()) items.emplace_back("phase averages", phase.summary());
+    return items;
+}
+
+namespace {
+
+const char * const PHASE_T_LAST = "PHASE_T_LAST";
+const char * const PHASE_SAMPLES = "PHASE_SAMPLES";
+const char * const PHASE_SIGNAL = "PHASE_SIGNAL";    // have, t, value
+const char * const PHASE_CROSSINGS = "PHASE_CROSSINGS";  // count, previous, last
+
+std::string phase_weight_name(uint32_t b) { return "PHASE_WEIGHT_" + std::to_string(b); }
+
+} // namespace
+
+void PhaseAverage::init(const toml::value & table, const Mesh & mesh, const std::vector<std::string> & species_names,
+                        uint32_t n_cells, uint64_t interval_in, rtype t_start_in) {
+    const std::string key = "statistics.phase";
+    interval = toml::find_or<uint64_t>(table, "interval", interval_in);
+    if (interval == 0) throw InputError(key + ".interval must be positive.");
+    t_start = find_real_or(table, "t_start", t_start_in);
+    bins = toml::find_or<uint32_t>(table, "bins", 0);
+    if (bins == 0) throw InputError(key + ".bins must be positive.");
+    fields = toml::find_or<std::vector<std::string>>(table, "fields", {});
+    if (fields.empty()) throw InputError(key + ".fields: list at least one variable.");
+    for (size_t i = 0; i < fields.size(); i++) {
+        if (std::find(fields.begin(), fields.begin() + long(i), fields[i]) != fields.begin() + long(i)) {
+            throw InputError(key + ".fields: \"" + fields[i] + "\" is listed twice.");
+        }
+    }
+    std::vector<int32_t> h_codes;
+    for (const auto & name : fields) h_codes.push_back(CellSampler::code(name, species_names, key + ".fields"));
+    codes = to_device(h_codes, "phase_codes");
+
+    const bool periodic = table.contains("period");
+    const bool triggered = table.contains("probe");
+    if (periodic == triggered) throw InputError(key + ": give either period or probe (with variable and level).");
+    if (periodic) {
+        period = find_double_or(table, "period", 0.0);
+        if (!(period > 0.0)) throw InputError(key + ".period must be positive.");
+        t_reference = find_double_or(table, "t_reference", 0.0);
+    } else {
+        const std::vector<rtype> x = find_real_vector(table, "probe");
+        if (x.size() != N_DIM) throw InputError(key + ".probe must have " + std::to_string(N_DIM) + " components.");
+        for (size_t d = 0; d < N_DIM; d++) trigger_point[d] = static_cast<double>(x[d]);
+        if (!table.contains("variable")) throw InputError(key + ": variable (of the probe) not specified.");
+        trigger_variable = toml::find<std::string>(table, "variable");
+        trigger_code = CellSampler::code(trigger_variable, species_names, key + ".variable");
+        level = find_double_or(table, "level", 0.0);
+        trigger_cell = locate_points(mesh, {trigger_point})[0];
+        distributed = mesh.n_global_cells > 0;
+    }
+    mean = Kokkos::View<rtype **, Kokkos::LayoutLeft>("phase_mean", n_cells, size_t(bins) * fields.size());
+    h_mean = Kokkos::create_mirror_view(mean);
+    weight.assign(bins, 0.0);
+}
+
+void PhaseAverage::start(rtype t) {
+    if (!enabled()) return;
+    std::fill(weight.begin(), weight.end(), 0.0);
+    t_last = std::max(t, t_start);
+    n_samples = 0;
+    have_signal = false;
+    n_crossings = 0;
+    Kokkos::deep_copy(mean, 0.0_r);
+}
+
+void PhaseAverage::sample(rtype t, const CellSampler & sampler, uint32_t n_owned) {
+    double phase = 0.0;
+    bool use = t > t_start;
+    if (trigger_cell != NO_TRIGGER) {
+        Kokkos::View<rtype> value("phase_signal");
+        if (trigger_cell >= 0) {
+            const uint32_t c = static_cast<uint32_t>(trigger_cell);
+            const int32_t code = trigger_code;
+            Kokkos::parallel_for("phase_signal", 1, KOKKOS_LAMBDA(const int) { value() = sampler(c, code); });
+        }
+        rtype v_local = 0.0_r;
+        Kokkos::deep_copy(v_local, value);
+        // Every other rank adds an exact zero
+        const double v = distributed ? comm::allreduce(static_cast<double>(v_local), comm::Op::SUM) : double(v_local);
+        const double tt = static_cast<double>(t);
+        if (have_signal && v_signal < level && v >= level) {
+            crossing[0] = crossing[1];
+            crossing[1] = t_signal + (level - v_signal) / (v - v_signal) * (tt - t_signal);
+            n_crossings++;
+        }
+        have_signal = true;
+        t_signal = tt;
+        v_signal = v;
+        if (n_crossings < 2) {
+            use = false;
+        } else {
+            phase = (tt - crossing[1]) / (crossing[1] - crossing[0]);
+        }
+    } else {
+        const double x = (static_cast<double>(t) - t_reference) / period;
+        phase = x - std::floor(x);
+    }
+    if (!use) {
+        if (t > t_start) t_last = t;
+        return;
+    }
+    const uint32_t b = static_cast<uint32_t>(std::min<double>(std::floor(phase * bins), bins - 1));
+    const double w = static_cast<double>(t - t_last);
+    t_last = t;
+    n_samples++;
+    weight[b] += w;
+    const rtype a = static_cast<rtype>(w / weight[b]);
+    const auto m = mean;
+    const auto code = codes;
+    const uint32_t n_fields = static_cast<uint32_t>(fields.size()), offset = b * n_fields;
+    Kokkos::parallel_for("phase_sample", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+        for (uint32_t i = 0; i < n_fields; i++) m(c, offset + i) += a * (sampler(c, code(i)) - m(c, offset + i));
+    });
+}
+
+std::vector<std::string> PhaseAverage::variables() const {
+    std::vector<std::string> names;
+    const size_t width = std::to_string(bins > 0 ? bins - 1 : 0).size();
+    for (uint32_t b = 0; b < bins; b++) {
+        std::string index = std::to_string(b);
+        index.insert(0, width - index.size(), '0');
+        for (const auto & f : fields) names.push_back("PHASE_" + index + "_" + f);
+    }
+    return names;
+}
+
+void PhaseAverage::register_data(std::vector<Data> & data) const {
     const std::vector<std::string> names = variables();
-    for (size_t i = 0; i < names.size(); i++) text += (i ? ", " : "") + names[i];
+    for (size_t i = 0; i < names.size(); i++) data.emplace_back(names[i], Kokkos::subview(h_mean, Kokkos::ALL(), i));
+}
+
+void PhaseAverage::copy_device_to_host() {
+    if (enabled()) Kokkos::deep_copy(h_mean, mean);
+}
+
+void PhaseAverage::restore(const RestartData & restart, const std::string & file, rtype t, bool reset) {
+    if (!enabled()) return;
+    const std::vector<std::string> names = variables();
+    std::vector<const std::vector<rtype> *> values;
+    std::string missing;
+    for (const auto & name : names) {
+        values.push_back(restart.find(name));
+        if (!values.back()) missing += (missing.empty() ? "" : ", ") + name;
+    }
+    const double * tl = restart.attribute(PHASE_T_LAST);
+    const bool none = std::none_of(values.begin(), values.end(), [](auto v) { return v != nullptr; });
+    if (reset || none || !tl) {
+        start(t);
+        return;
+    }
+    if (!missing.empty()) {
+        throw InputError("statistics.phase: restart file " + file + " holds phase averages but not " + missing +
+                         "; set statistics.reset = true to start them afresh.");
+    }
+    t_last = static_cast<rtype>(*tl);
+    const double * n = restart.attribute(PHASE_SAMPLES);
+    n_samples = n ? static_cast<uint64_t>(*n) : 0;
+    for (uint32_t b = 0; b < bins; b++) {
+        const double * w = restart.attribute(phase_weight_name(b));
+        weight[b] = w ? *w : 0.0;
+    }
+    auto attribute = [&](const std::string & name, double fallback) {
+        const double * a = restart.attribute(name);
+        return a ? *a : fallback;
+    };
+    have_signal = attribute(std::string(PHASE_SIGNAL) + "_HAVE", 0.0) != 0.0;
+    t_signal = attribute(std::string(PHASE_SIGNAL) + "_T", 0.0);
+    v_signal = attribute(std::string(PHASE_SIGNAL) + "_VALUE", 0.0);
+    n_crossings = static_cast<uint64_t>(attribute(std::string(PHASE_CROSSINGS) + "_COUNT", 0.0));
+    crossing[0] = attribute(std::string(PHASE_CROSSINGS) + "_PREVIOUS", 0.0);
+    crossing[1] = attribute(std::string(PHASE_CROSSINGS) + "_LAST", 0.0);
+    for (size_t v = 0; v < names.size(); v++) {
+        for (size_t c = 0; c < values[v]->size(); c++) h_mean(c, v) = (*values[v])[c];
+    }
+    Kokkos::deep_copy(mean, h_mean);
+}
+
+RestartAttributes PhaseAverage::attributes() const {
+    if (!enabled()) return {};
+    RestartAttributes a = {{PHASE_T_LAST, static_cast<double>(t_last)}, {PHASE_SAMPLES, static_cast<double>(n_samples)}};
+    for (uint32_t b = 0; b < bins; b++) a.emplace_back(phase_weight_name(b), weight[b]);
+    if (trigger_cell != NO_TRIGGER) {
+        a.emplace_back(std::string(PHASE_SIGNAL) + "_HAVE", have_signal ? 1.0 : 0.0);
+        a.emplace_back(std::string(PHASE_SIGNAL) + "_T", t_signal);
+        a.emplace_back(std::string(PHASE_SIGNAL) + "_VALUE", v_signal);
+        a.emplace_back(std::string(PHASE_CROSSINGS) + "_COUNT", static_cast<double>(n_crossings));
+        a.emplace_back(std::string(PHASE_CROSSINGS) + "_PREVIOUS", crossing[0]);
+        a.emplace_back(std::string(PHASE_CROSSINGS) + "_LAST", crossing[1]);
+    }
+    return a;
+}
+
+std::string PhaseAverage::summary() const {
+    std::string text = logging::count(bins) + " bins every " + logging::count(interval) + " steps from t = " +
+                       logging::real(double(t_start)) + ", ";
+    if (trigger_cell == NO_TRIGGER) {
+        text += "period " + logging::real(period);
+    } else {
+        text += "upward crossings of " + trigger_variable + " = " + logging::real(level) + " at (";
+        for (size_t d = 0; d < N_DIM; d++) text += (d ? ", " : "") + logging::real(trigger_point[d]);
+        text += ")";
+    }
+    text += ": ";
+    for (size_t i = 0; i < fields.size(); i++) text += (i ? ", " : "") + fields[i];
     if (n_samples > 0) text += " (" + logging::count(n_samples) + " samples so far)";
     return text;
 }

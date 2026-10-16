@@ -17,6 +17,7 @@ set(MALLARD_TEST_SOURCES
     mesh_import_test.cpp
     distributed_mesh_test.cpp
     statistics_test.cpp
+    insitu_statistics_test.cpp
     remap_test.cpp
     les_test.cpp
     numerics_preset_test.cpp

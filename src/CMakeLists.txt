@@ -49,6 +49,7 @@ add_library(MallardCore STATIC
     solver/solver_sponge.cpp
     solver/solver_inflow.cpp
     solver/remap.cpp
+    solver/spectra.cpp
     solver/statistics.cpp
     io/compression.cpp
     io/data_writer.cpp
