@@ -43,6 +43,7 @@ add_library(MallardCore STATIC
     solver/solver_radiation.cpp
     solver/solver_sponge.cpp
     solver/solver_inflow.cpp
+    solver/source_terms.cpp
     solver/statistics.cpp
     io/data_writer.cpp
     io/data_writer_hdf5.cpp

@@ -58,7 +58,7 @@ void FE::take_step(const rtype t, const rtype dt,
                    const RHSFunction & calc_rhs, const rtype * dt_device) {
     State U = solution_vec[0];
     State k1 = rhs_vec[0];
-    calc_rhs(U, k1, t);
+    calc_rhs(U, k1, t, 0.0_r);
     axpby(dt, k1, 1.0, U, scale(dt_device, DT));
 }
 
@@ -79,19 +79,19 @@ void RK4::take_step(const rtype t, const rtype dt,
     State k3 = rhs_vec[2];
     State k4 = rhs_vec[3];
 
-    calc_rhs(U, k1, t);
+    calc_rhs(U, k1, t, 0.0_r);
     deep_copy(Kokkos::DefaultExecutionSpace(), U_temp, U);
     axpby(0.5_r * dt, k1, 1.0_r, U_temp, scale(dt_device, DT_HALF));
 
-    calc_rhs(U_temp, k2, t + 0.5_r * dt);
+    calc_rhs(U_temp, k2, t + 0.5_r * dt, 0.5_r);
     deep_copy(Kokkos::DefaultExecutionSpace(), U_temp, U);
     axpby(0.5_r * dt, k2, 1.0_r, U_temp, scale(dt_device, DT_HALF));
 
-    calc_rhs(U_temp, k3, t + 0.5_r * dt);
+    calc_rhs(U_temp, k3, t + 0.5_r * dt, 0.5_r);
     deep_copy(Kokkos::DefaultExecutionSpace(), U_temp, U);
     axpby(dt, k3, 1.0, U_temp, scale(dt_device, DT));
 
-    calc_rhs(U_temp, k4, t + dt);
+    calc_rhs(U_temp, k4, t + dt, 1.0_r);
     axpby(dt / 6.0_r, k1, 1.0_r, U, scale(dt_device, DT_SIXTH));
     axpby(dt / 3.0_r, k2, 1.0_r, U, scale(dt_device, DT_THIRD));
     axpby(dt / 3.0_r, k3, 1.0_r, U, scale(dt_device, DT_THIRD));
@@ -113,17 +113,17 @@ void SSPRK3::take_step(const rtype t, const rtype dt,
     State k = rhs_vec[0];
 
     // U1 = U + dt L(U)
-    calc_rhs(U, k, t);
+    calc_rhs(U, k, t, 0.0_r);
     deep_copy(Kokkos::DefaultExecutionSpace(), U_temp, U);
     axpby(dt, k, 1.0, U_temp, scale(dt_device, DT));
 
     // U2 = 3/4 U + 1/4 (U1 + dt L(U1))
-    calc_rhs(U_temp, k, t + dt);
+    calc_rhs(U_temp, k, t + dt, 1.0_r);
     axpby(dt, k, 1.0, U_temp, scale(dt_device, DT));
     axpby(0.75, U, 0.25, U_temp);
 
     // U^{n+1} = 1/3 U + 2/3 (U2 + dt L(U2))
-    calc_rhs(U_temp, k, t + 0.5_r * dt);
+    calc_rhs(U_temp, k, t + 0.5_r * dt, 0.5_r);
     axpby(dt, k, 1.0, U_temp, scale(dt_device, DT));
     lerp(2.0_r / 3.0_r, U_temp, U);
 }
