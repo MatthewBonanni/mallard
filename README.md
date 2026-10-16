@@ -17,7 +17,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 
 **Meshes**
 - 2D (triangles, quadrilaterals) or 3D (tetrahedra, hexahedra, prisms, pyramids, mixed), chosen at build time
-- Gmsh 2.2/4.1, CGNS or HDF5 mesh files (`mallard-mesh-convert`), scaled, rotated and translated on read, or generated boxes
+- Gmsh 2.2/4.1, CGNS, Fluent (ASCII and binary) or HDF5 mesh files (`mallard-mesh-convert`), scaled, rotated and translated on read, or generated boxes
 - Periodic boundaries: generated meshes, or paired zones of mesh files
 - Axisymmetric (r-z) flows in 2D: revolved finite volumes, at design order up to the axis
 - Curved high-order boundaries: Gmsh order-2/3 boundary elements or projection onto a circle, sphere or cylinder; TENO-E orders 3-6 converge at curved walls, where straight-sided faces do not ([guide](docs/guide/meshes.md#curved-boundaries))
@@ -121,7 +121,7 @@ cd examples/riemann_2d
 ../../build/src/Mallard -i input.toml --kokkos-num-threads=8
 ```
 
-or start a case of your own from one of the examples: `Mallard new --list` shows the templates, and `Mallard new cylinder` creates a directory with the input, mesh, run and plot scripts ([First simulation](docs/guide/first_simulation.md)). See [`examples/`](examples) for complete input files, the [user guide](docs/guide/input_files.md) for each topic, and [`docs/input.md`](docs/input.md) for every input option.
+or start a case of your own from one of the examples: `Mallard new --list` shows the templates, and `Mallard new cylinder` creates a directory with the input, mesh, run and plot scripts ([First simulation](docs/guide/first_simulation.md)). See the [tutorials](docs/tutorials/index.md) for cases taken from geometry and mesh to the comparison with reference data, [`examples/`](examples) for complete input files, the [user guide](docs/guide/input_files.md) for each topic, and [`docs/input.md`](docs/input.md) for every input option.
 
 ## Testing
 
