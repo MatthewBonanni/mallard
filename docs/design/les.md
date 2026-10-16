@@ -587,12 +587,13 @@ the current state, so restarts reproduce):
   (`F_max > 1`), summed exactly in fixed point like the dynamic SGS
   constant, so `beta` does not depend on the rank count; `ln gamma` enters
   `|grad hat(c)|`-weighted. `beta` is clipped to [0, 1] (fractal dimension
-  2 to 3), and 0 when no flame is resolved, so it is a function of the
+  2 to 3), and 0 when no flame is resolved (resolved surface below 1e-6 of
+  the thickened volume over `Delta_e`: round-off of a uniform field), so it is a function of the
   state alone and restarts reproduce. No
   subgrid velocity and no constant: a flat resolved flame gives `beta = 0`
   and `E = 1`. Cost per step: one gradient of `c`, `n` filter passes with a
   halo exchange each, one gradient of `hat(c)` and one fixed-point
-  reduction of three sums (the Colin operator's two vorticity passes are
+  reduction of four sums (the Colin operator's two vorticity passes are
   skipped). The integrals file gets a `tf_beta` column.
 - **Transport**: species diffusivities and the conductivity become
   `E F D_k` and `E F lambda`, and the SGS diffusivities `(1 - Omega) D_t`
@@ -624,7 +625,7 @@ chemistry stays bitwise independent of rank count and team width.
 - **Determinism**: `F`, `E`, `Omega` are per-cell functions of the state and
   of its gradients over the local stencil, exchanged to the halo by the same
   exchange as the state; the result is bitwise independent of the rank
-  count. The only reduction, the dynamic efficiency's three domain sums, is
+  count. The only reduction, the dynamic efficiency's four domain sums, is
   exact in fixed point.
 
 ### 6.6 As implemented (stage 5)

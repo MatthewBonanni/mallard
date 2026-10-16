@@ -583,7 +583,7 @@ class Solver {
         State tfles_halo;                              // [F, E, Omega] as species, for the halo exchange
         std::array<Kokkos::View<rtype *[3]>, 2> tfles_test;  // dynamic efficiency: [c, |grad c|, .] and their test filter
         Kokkos::View<rtype *> tfles_test_width2;       // (owned cell): squared width of one test filter pass
-        Kokkos::View<double *[3]> tfles_dynamic_terms; // (owned cell): DynamicEfficiencyFunctor's terms
+        Kokkos::View<double *[4]> tfles_dynamic_terms; // (owned cell): DynamicEfficiencyFunctor's terms
         uint32_t tfles_test_passes = 0;
         State dynamic_halo;                            // [rho, u] as flow, d u_i / d x_j as species, owners' values
         Kokkos::View<double *[2]> dynamic_terms;       // (owned cell, [L:M, M:M] V)

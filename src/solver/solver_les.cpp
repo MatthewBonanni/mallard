@@ -345,8 +345,8 @@ struct TestFilterWidthFunctor {
 };
 
 /**
- * @brief Terms [hat(|grad c|) V, |grad hat(c)| V, ln(gamma) |grad hat(c)| V] of an owned cell for the dynamic
- *        efficiency, gamma^2 = 1 + n_passes width^2 / Delta_e^2 the ratio of the test-filtered to the combustion
+ * @brief Terms [hat(|grad c|) V, |grad hat(c)| V, ln(gamma) |grad hat(c)| V, V / Delta_e] of an owned cell for the
+ *        dynamic efficiency, gamma^2 = 1 + n_passes width^2 / Delta_e^2 the ratio of the test-filtered to the combustion
  *        filter width Delta_e = F_max delta_L; zero where the mesh needs no thickening (F_max = 1).
  */
 struct DynamicEfficiencyFunctor {
@@ -356,13 +356,13 @@ struct DynamicEfficiencyFunctor {
     Kokkos::View<rtype *> width2;
     Kokkos::View<rtype *[3]> filtered;  // [hat(c), hat(|grad c|), |grad hat(c)|]
     uint32_t n_passes;
-    Kokkos::View<double *[3]> terms;
+    Kokkos::View<double *[4]> terms;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
         const double F_max = tf.thickening(static_cast<double>(delta(c)), 1.0);
         if (!(F_max > 1.0)) {
-            for (int k = 0; k < 3; k++) terms(c, k) = 0.0;
+            for (int k = 0; k < 4; k++) terms(c, k) = 0.0;
             return;
         }
         const double V = static_cast<double>(volume(c)), delta_e = F_max * tf.delta_L;
@@ -370,6 +370,7 @@ struct DynamicEfficiencyFunctor {
         terms(c, 0) = static_cast<double>(filtered(c, 1)) * V;
         terms(c, 1) = static_cast<double>(filtered(c, 2)) * V;
         terms(c, 2) = 0.5 * Kokkos::log(gamma2) * terms(c, 1);
+        terms(c, 3) = V / delta_e;
     }
 };
 
@@ -711,10 +712,11 @@ void Solver::update_dynamic_efficiency() {
     Kokkos::parallel_for("tfles_dynamic_terms", n_owned,
                          DynamicEfficiencyFunctor{tf, les_delta, mesh->cell_volume, tfles_test_width2, a,
                                                   tfles_test_passes, tfles_dynamic_terms});
-    const auto [resolved, test, log_gamma] = exact_sums(tfles_dynamic_terms, n_owned, is_distributed());
-    // beta = ln(<hat(|grad c|)> / <|grad hat(c)|>) / <ln gamma>, a function of the state alone (restarts reproduce)
-    thickened_flame.beta =
-        test > 0.0 && log_gamma > 0.0 ? std::clamp(std::log(resolved / test) / (log_gamma / test), 0.0, 1.0) : 0.0;
+    const auto [resolved, test, log_gamma, scale] = exact_sums(tfles_dynamic_terms, n_owned, is_distributed());
+    // beta = ln(<hat(|grad c|)> / <|grad hat(c)|>) / <ln gamma>, a function of the state alone (restarts reproduce).
+    // A resolved surface below 1e-6 of the thickened volume over Delta_e is round-off in a uniform field: no flame
+    const bool flame = test > 1e-6 * scale && log_gamma > 0.0;
+    thickened_flame.beta = flame ? std::clamp(std::log(resolved / test) / (log_gamma / test), 0.0, 1.0) : 0.0;
 }
 
 void Solver::init_dynamic_efficiency() {
@@ -724,7 +726,7 @@ void Solver::init_dynamic_efficiency() {
                          TestFilterWidthFunctor{mesh->offsets_cells_of_cell, mesh->cells_of_cell,
                                                 mesh->cells_of_cell_shift, mesh->shifts, mesh->cell_coords,
                                                 mesh->cell_volume, tfles_test_width2});
-    tfles_dynamic_terms = Kokkos::View<double *[3]>("tfles_dynamic_terms", n_owned);
+    tfles_dynamic_terms = Kokkos::View<double *[4]>("tfles_dynamic_terms", n_owned);
     // Passes of the test filter: enough for its width to reach the combustion filter width F_max delta_L on
     // average over the thickened cells (gamma >= sqrt(2); 4 passes on uniform hexahedra at n_res = 5)
     Kokkos::View<double *[2]> ratio("tfles_test_ratio", n_owned);
