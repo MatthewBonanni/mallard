@@ -1,4 +1,5 @@
-"""Draw every figure of the user guide into docs/images/guide/, light and dark.
+"""Draw every figure of the user guide into docs/images/guide/ and of the theory
+manual into docs/images/theory/, light and dark.
 
     python tools/docs/make_figures.py [--mallard build/src/Mallard]
 
@@ -13,6 +14,7 @@ import sys
 import domains
 import runs
 import schematics
+import theory
 
 
 def main():
@@ -22,6 +24,7 @@ def main():
     args = ap.parse_args()
     schematics.figures()
     domains.figures()
+    theory.figures()
     if args.mallard:
         sys.argv = [sys.argv[0], "--mallard", args.mallard, "--mpirun", args.mpirun]
         runs.main()

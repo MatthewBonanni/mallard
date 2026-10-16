@@ -124,6 +124,11 @@ void print_header(const std::string & input_file) {
 #else
     const bool hdf5 = false;
 #endif
+#ifdef Mallard_HAS_CGNS
+    const bool cgns = true;
+#else
+    const bool cgns = false;
+#endif
 
     char host[256] = {};
     gethostname(host, sizeof(host) - 1);
@@ -137,7 +142,7 @@ void print_header(const std::string & input_file) {
         {"Kokkos", kokkos},
         {"Device", device_name()},
         {"MPI", mpi},
-        {"Libraries", "KaMinPar " + yes_no(kaminpar) + ", HDF5 " + yes_no(hdf5)},
+        {"Libraries", "KaMinPar " + yes_no(kaminpar) + ", HDF5 " + yes_no(hdf5) + ", CGNS " + yes_no(cgns)},
         {"Host", host},
         {"Input", input_file},
         {"Started", started},
