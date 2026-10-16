@@ -244,6 +244,8 @@ std::string case_name(const std::string & file) {
     return name;
 }
 
+std::string param_name(const ::testing::TestParamInfo<ExampleCase> & p) { return case_name(p.param.file); }
+
 } // namespace
 
 TEST(ExampleUnderPreset, EveryExampleHasAPreset) {
@@ -272,5 +274,4 @@ TEST_P(ExampleUnderPreset, RunsAFewSteps) {
     EXPECT_EQ(solver.get_step(), 3u);
 }
 
-INSTANTIATE_TEST_SUITE_P(Examples, ExampleUnderPreset, ::testing::ValuesIn(examples_of_this_build()),
-                         [](const ::testing::TestParamInfo<ExampleCase> & info) { return case_name(info.param.file); });
+INSTANTIATE_TEST_SUITE_P(Examples, ExampleUnderPreset, ::testing::ValuesIn(examples_of_this_build()), param_name);
