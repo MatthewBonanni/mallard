@@ -54,6 +54,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - MPI with multi-jagged (cuboid blocks), Hilbert-curve or graph (dKaMinPar) partitions, GPU-aware halo exchange overlapped with computation: 93% (2D) and 91% (3D) weak-scaling efficiency on 16 A100 GPUs
 - 50 million cell time steps per second on one A100 (fifth-order TENO-E, 2D Euler)
 - No rank holds the whole mesh (HDF5 or generated meshes)
+- Each rank finds the GPU next to its cores by itself and reports where it runs; job scripts for Slurm, PBS, Kubernetes and `mpirun` that resume from a restart after a time limit or preemption
 - Bitwise-identical results on any number of threads or MPI ranks; restarts bit for bit, also on a different number of ranks
 - Stiff chemistry on GPUs: a warp or wider team per cell and a sparse LU for large mechanisms, load-balanced across MPI ranks
 - The whole time step as one CUDA graph; optional NCCL halo exchange; TENO-E setup on the GPU
@@ -121,7 +122,7 @@ cd examples/riemann_2d
 ../../build/src/Mallard -i input.toml --kokkos-num-threads=8
 ```
 
-See the [tutorials](docs/tutorials/index.md) for cases taken from geometry and mesh to the comparison with reference data, [`examples/`](examples) for complete input files, the [user guide](docs/guide/input_files.md) for each topic, and [`docs/input.md`](docs/input.md) for every input option.
+See the [tutorials](docs/tutorials/index.md) for cases taken from geometry and mesh to the comparison with reference data, [`examples/`](examples) for complete input files, [Running on clusters](docs/guide/parallel.md#running-on-clusters) for MPI runs and the job scripts in [`tools/jobs/`](tools/jobs), the [user guide](docs/guide/input_files.md) for each topic, and [`docs/input.md`](docs/input.md) for every input option.
 
 ## Testing
 

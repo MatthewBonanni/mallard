@@ -115,6 +115,19 @@ jobs:
           for n in 2 3 4; do
             mpirun -n $n --oversubscribe ./build/test/MallardTest --gtest_filter="$mpi_tests"
           done
+      # Every rank in the report, and no warning about a sensible placement
+      - name: Rank report (MPI)
+        if: matrix.backend.name == 'mpi'
+        run: |
+          dir=$(mktemp -d)
+          sed -e 's/^t_stop = .*/n_steps = 2/' -e '/^\[\[write_data\]\]/,$d' examples/sod/input.toml > "$dir/input.toml"
+          for n in 2 3; do
+            (cd "$dir" && mpirun -n $n "$GITHUB_WORKSPACE/build/src/Mallard" -i input.toml) > "$dir/out.txt" 2>&1
+            cat "$dir/out.txt"
+            rows=$(sed -n '/^== Ranks/,/^$/p' "$dir/out.txt" | grep -cE '^  [0-9]+ ')
+            [ "$rows" -eq "$n" ] || { echo "expected $n rows in the rank report, found $rows"; exit 1; }
+            if grep -q 'warning:' "$dir/out.txt"; then echo "unexpected warning"; exit 1; fi
+          done
 
 
   # The tutorials (tutorials/) at reduced size: Gmsh meshes, runs on two MPI

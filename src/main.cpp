@@ -17,13 +17,14 @@
 #include "build_info.h"
 #include "input.h"
 #include "log.h"
+#include "parallel/binding.h"
 #include "parallel/comm.h"
 #include "solver/solver.h"
 
 namespace {
 
 void usage(const char * program) {
-    std::cerr << "Usage: " << program << " -i input.toml [Kokkos options, e.g. --kokkos-num-threads=8]\n"
+    std::cerr << "Usage: " << program << " -i input.toml [--restart FILE] [Kokkos options, e.g. --kokkos-num-threads=8]\n"
               << "       " << program << " --version\n";
 }
 
@@ -57,10 +58,12 @@ std::string error_text(const std::exception & e) {
  * @return Exit status.
  */
 int main(int argc, char* argv[]) {
-    std::string input_file;
+    std::string input_file, restart_file;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-i") == 0 && i + 1 < argc) {
             input_file = argv[++i];
+        } else if (strcmp(argv[i], "--restart") == 0 && i + 1 < argc) {
+            restart_file = argv[++i];
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             usage(argv[0]);
             return 0;
@@ -78,14 +81,20 @@ int main(int argc, char* argv[]) {
     comm::Session session(argc, argv);
     if (!comm::is_root()) std::cout.rdbuf(nullptr);
 
+    binding::select_device(argc, argv);
     Kokkos::initialize(argc, argv);
     int status = 0;
     {
         std::string error;
         try {
             print_header(input_file);
+            binding::report();
+            toml::value input = toml::parse(input_file);
+            if (!restart_file.empty()) {
+                input.as_table()["initialize"] = toml::table{{"type", "restart"}, {"file", restart_file}};
+            }
             Solver solver;
-            solver.init(input_file);
+            solver.init(input);
             solver.run();
         } catch (const InputError & e) {
             error = input_file + ": " + error_text(e);

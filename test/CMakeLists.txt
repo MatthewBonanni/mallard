@@ -4,6 +4,7 @@ set(MALLARD_TEST_SOURCES
     test_main.cpp
     common_math_test.cpp
     time_integrator_test.cpp
+    binding_test.cpp
     comm_test.cpp
     chemistry_thermo_test.cpp
     chemistry_kinetics_test.cpp

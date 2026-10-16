@@ -1,0 +1,82 @@
+# Mallard as a Kubernetes Job: one pod with several GPUs, one MPI rank per GPU.
+#
+#   (edit the lines marked <...>)
+#   kubectl apply -f kubernetes_job.yaml
+#   kubectl logs -f job/mallard
+#
+# The case directory lives on a persistent volume, so restarts survive the pod.
+# When the pod is evicted or preempted, Mallard writes a restart and stops
+# within the grace period, and the Job starts a new pod, which resumes from it.
+# An error or divergence (exit status 1), or a stop you asked for (status 3,
+# e.g. "kubectl exec job/mallard -- Mallard ctl /work/<case> stop"), ends the Job.
+# Each rank gets the GPU nearest its cores automatically; the "Ranks" table at
+# the top of the log shows where each rank runs.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mallard                                 # <job name>
+spec:
+  backoffLimit: 3                               # other failures (e.g. out of memory) are retried this often
+  podFailurePolicy:
+    rules:
+      - action: Ignore                          # evicted or preempted: start a new pod, not counted as a failure
+        onPodConditions:
+          - type: DisruptionTarget
+      - action: FailJob
+        onExitCodes:
+          containerName: mallard
+          operator: In
+          values: [1, 3]
+  template:
+    spec:
+      restartPolicy: Never                      # required by podFailurePolicy
+      terminationGracePeriodSeconds: 600        # longer than a step plus a restart write
+      containers:
+        - name: mallard
+          image: ghcr.io/matthewbonanni/mallard:0.9.0-cuda   # CPU only: ghcr.io/matthewbonanni/mallard:0.9.0
+          workingDir: /work/case                # <the case directory on the volume>
+          env:
+            - name: MALLARD
+              value: Mallard                    # <Mallard or Mallard3D>
+            - name: INPUT
+              value: input.toml
+            - name: RESTARTS
+              value: restart_*.restart          # <the restart files the run writes; the newest is resumed from>
+            - name: NRANKS
+              value: "4"                        # <GPUs below>
+            - name: THREADS
+              value: "8"                        # <CPUs below / NRANKS>
+          command: [bash, -c]
+          args:
+            - |
+              set -u
+              args=(-i "$INPUT")
+              latest=$(ls -1t $RESTARTS 2>/dev/null | head -n 1)
+              [ -n "$latest" ] && args+=(--restart "$latest")
+              mpirun -n "$NRANKS" --map-by "slot:PE=$THREADS" --bind-to core \
+                  "$MALLARD" "${args[@]}" --kokkos-num-threads="$THREADS" &
+              pid=$!
+              # The pod's TERM: mpirun would end the ranks at once, but it forwards
+              # USR2, which makes Mallard write a restart and stop after the current step
+              trap 'kill -USR2 $pid' TERM
+              wait $pid; status=$?
+              while kill -0 $pid 2>/dev/null; do wait $pid; status=$?; done
+              exit $status
+          resources:
+            limits:
+              nvidia.com/gpu: 4                 # <GPUs>
+              cpu: "32"                         # <CPUs>
+              memory: 128Gi                     # <memory>
+          volumeMounts:
+            - name: work
+              mountPath: /work
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: work
+          persistentVolumeClaim:
+            claimName: mallard-work             # <your persistent volume claim>
+        - name: shm                             # MPI moves data between ranks through shared memory
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Gi
