@@ -173,7 +173,7 @@ TEST(MeshFileTest, HDF5ConversionKeepsCellsNodesAndZones) {
     if (comm::size() > 1) GTEST_SKIP() << "converts on one rank";
     const std::string msh = write_temp("mallard_convert.msh", jittered_mixed_mesh(6));
     const std::string h5 = (std::filesystem::temp_directory_path() / "mallard_convert.h5").string();
-    write_mesh_h5(h5, read_gmsh_block(msh));
+    write_mesh_h5(h5, read_file_block(msh));
     Mesh gmsh, hdf5;
     gmsh.init_file(msh);
     hdf5.init_file(h5);
@@ -283,7 +283,7 @@ TEST(MeshFileTest, PeriodicZonePairsJoinAJitteredGmshMesh) {
 
     if (!have_hdf5() || comm::size() > 1) return;
     const std::string h5 = (std::filesystem::temp_directory_path() / "mallard_jitter_periodic.h5").string();
-    write_mesh_h5(h5, read_gmsh_block(file));
+    write_mesh_h5(h5, read_file_block(file));
     Solver hdf5;
     hdf5.init(parse_toml(periodic_file_input(h5)));
     hdf5.run();

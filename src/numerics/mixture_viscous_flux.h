@@ -84,7 +84,10 @@ struct MixtureTransportFunctor {
  *        the viscous gradient (LSQVertexGradientFunctor). Boundary ghosts
  *        take the velocity of the ghost state W (no-slip at viscous walls),
  *        and the prescribed T and X at UPT boundaries, the cell's own
- *        elsewhere (adiabatic walls, symmetry, zero-gradient outflow).
+ *        elsewhere (adiabatic walls, symmetry, zero-gradient outflow). At the
+ *        mirror image of the centroid across isothermal walls the ghost
+ *        temperature is 2 T_w - T, across heat-flux walls T + 2 d q / lambda
+ *        (d the distance from the centroid to the wall, q into the fluid).
  */
 struct MixtureGradientFunctor {
     LSQVertexGradientFunctor stencil;
@@ -92,6 +95,7 @@ struct MixtureGradientFunctor {
     Kokkos::View<rtype ***, Kokkos::LayoutRight> gradients;  // (cell, variable, dimension)
     Kokkos::View<rtype **, Kokkos::LayoutRight> bc_values;    // (condition, [T, X_1 .. X_Ns]) of UPT
     uint32_t n_species;
+    Kokkos::View<rtype *[3]> coefficients;  // (cell, [mu, lambda, -]), for heat-flux walls
 
     static constexpr uint32_t CHUNK = 16;  // variables per pass over the stencil
 
@@ -131,7 +135,23 @@ struct MixtureGradientFunctor {
                 FOR_I_DIM gradients(c, v, i) += stencil.weights.faces(k, i) * dq;
             }
             const int32_t i_bc = f.boundaries.face_bc(i_face);
-            if (f.boundaries.bcs(i_bc).type != BoundaryType::UPT) continue;
+            const BoundaryCondition & bc = f.boundaries.bcs(i_bc);
+            if (bc.type == BoundaryType::WALL_ISOTHERMAL || bc.type == BoundaryType::WALL_HEAT_FLUX) {
+                rtype dT;
+                if (bc.type == BoundaryType::WALL_ISOTHERMAL) {
+                    dT = 2.0_r * (bc.data[0] - values(c, N_DIM));
+                } else {
+                    rtype n_vec[N_DIM], n[N_DIM];
+                    FOR_I_DIM n_vec[i] = f.face_normals(i_face, i);
+                    unit<N_DIM>(n_vec, n);
+                    rtype d = 0.0_r;
+                    FOR_I_DIM d += (f.face_coords(i_face, i) - f.cell_coords(c, i)) * n[i];
+                    dT = 2.0_r * d * bc.data[N_DIM + 1] / coefficients(c, LAMBDA);
+                }
+                FOR_I_DIM gradients(c, N_DIM, i) += stencil.weights.faces(k, i) * dT;
+                continue;
+            }
+            if (bc.type != BoundaryType::UPT) continue;
             for (uint32_t v = N_DIM; v < n_vars; v++) {
                 const rtype dq = bc_values(i_bc, v - N_DIM) - values(c, v);
                 FOR_I_DIM gradients(c, v, i) += stencil.weights.faces(k, i) * dq;
@@ -155,8 +175,14 @@ struct MixtureGradientFunctor {
  * needs no diffusion term; with thermal diffusion, j_k also has the Soret
  * flux -D^T_k grad T / T (the D^T_k sum to zero, as Cantera's), with the
  * face's T, gradient and averaged D^T_k. The energy flux carries
- * sum_k h_k j_k. Walls and
- * symmetry planes carry no heat or species flux (adiabatic, non-catalytic);
+ * sum_k h_k j_k. Walls are non-catalytic and
+ * symmetry planes carry no heat or species flux. Adiabatic walls carry no
+ * heat flux, heat-flux walls the prescribed one; isothermal walls conduct
+ * lambda dT/dn with the one-sided difference between the cell and the wall
+ * temperature (as the wall velocity) and lambda the cell's times
+ * (1 + lambda(T_w) / lambda(T)) / 2 at the cell's composition, the mean of
+ * the two ends as at interior faces. With no species flux through the wall,
+ * the enthalpy and Soret fluxes vanish there;
  * transmissive faces take their image face's values, gradients and
  * coefficients; outflow faces and transmissive faces without an image have
  * zero normal derivatives; UPT faces take the cell's values and gradients.
@@ -182,6 +208,7 @@ struct MixtureViscousFluxFunctor {
     Kokkos::View<rtype *[3]> covariance;  // axisymmetric: Mesh::cell_covariance
     Kokkos::View<rtype *[3]> sgs;         // LES: (cell, [mu_t, lambda_t, mu_t / (Sc_t W)]), else empty
     bool sgs_only = false;                // LES budget: the SGS fluxes alone
+    Kokkos::View<rtype *> face_energy_1;  // double flux: side 1's energy flux (MixtureDoubleFluxFunctor), else empty
 
     static constexpr uint8_t NQ = N_DIM + 1;  // [u, T]
 
@@ -289,11 +316,14 @@ struct MixtureViscousFluxFunctor {
                 FOR_I_DIM g_f[v][i] -= g_n * n[i];
             }
         }
+        bool isothermal = false;
         if (wall) {
             rtype dn = 0.0;
             FOR_I_DIM dn += (face_coords(i_face, i) - cell_coords(c0, i)) * n[i];
-            for (uint8_t k = 0; k < N_DIM; k++) {
-                q_f[k] = bc->data[1 + k];
+            isothermal = bc->type == BoundaryType::WALL_ISOTHERMAL;
+            if (isothermal) q_f[N_DIM] = bc->data[0];
+            for (uint8_t k = 0; k < (isothermal ? NQ : N_DIM); k++) {
+                if (k < N_DIM) q_f[k] = bc->data[1 + k];
                 const rtype correction = (q_f[k] - values(c0, k)) / dn - dot<N_DIM>(g_f[k], n);
                 FOR_I_DIM g_f[k][i] += correction * n[i];
             }
@@ -320,6 +350,15 @@ struct MixtureViscousFluxFunctor {
         const rtype A = face_area(i_face);
         FOR_I_DIM face_flux(i_face, 1 + i) += A * tau_n[i];
         rtype energy = dot<N_DIM>(q_f, tau_n);
+        if (isothermal) {
+            const ScalarMassFractions y{&scalars(c0, 0)};
+            const double ratio = gas.transport.conductivity(static_cast<double>(q_f[N_DIM]), y) /
+                                 gas.transport.conductivity(static_cast<double>(values(c0, N_DIM)), y);
+            const rtype lambda = coefficients(c0, LAMBDA) * static_cast<rtype>(0.5 * (1.0 + ratio));
+            energy += molecular * lambda * dot<N_DIM>(g_f[N_DIM], n);
+        } else if (wall && bc->type == BoundaryType::WALL_HEAT_FLUX) {
+            energy += molecular * bc->data[N_DIM + 1];
+        }
 
         if (mode != Mode::NONE) {
             const rtype lambda = les ? molecular * coefficient(LAMBDA) + sgs_coefficient(1) : coefficient(LAMBDA);
@@ -380,6 +419,7 @@ struct MixtureViscousFluxFunctor {
             energy -= static_cast<rtype>(enthalpy);
         }
         face_flux(i_face, N_DIM + 1) += A * energy;
+        if (face_energy_1.extent(0) > 0) face_energy_1(i_face) += A * energy;
     }
 };
 
