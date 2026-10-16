@@ -96,10 +96,22 @@ const char * const SINE_RHO = "1.0 + 0.2 * sin(2 * pi * x) * sin(2 * pi * y)";
 double point_error(uint32_t n, const std::string & recon, const std::string & sampling) {
     const std::string dir = dir_for("order");
     std::filesystem::remove_all(dir);
+    // Points near fixed ones at the same place in their cells on every mesh, so
+    // that the error constants do not change with the mesh
+    const double near[3][3] = {{0.137, 0.462, 0.31}, {0.713, 0.291, 0.77}, {0.402, 0.858, 0.53}};
+    const double within[3] = {0.3, 0.7, 0.6};
+    const uint32_t cells[3] = {n, n, std::max(n / 2, 3u)};
+    std::ostringstream points;
+    points.precision(17);
+    for (int k = 0; k < 3; k++) {
+        points << (k ? ", [" : "[");
+        for (size_t d = 0; d < N_DIM; d++) {
+            points << (d ? ", " : "") << (std::floor(near[k][d] * cells[d]) + within[d]) / cells[d];
+        }
+        points << "]";
+    }
     const std::string probe = "[[probes]]\nname = \"p\"\nfile = \"" + dir + "/p.csv\"\nvariables = [\"RHO\", \"T\"]\n"
-                              "sampling = \"" + sampling + "\"\nshape = \"points\"\npoints = [" +
-                              numbers3("0.137", "0.462", "0.31") + ", " + numbers3("0.713", "0.291", "0.77") + ", " +
-                              numbers3("0.402", "0.858", "0.53") + "]\n";
+                              "sampling = \"" + sampling + "\"\nshape = \"points\"\npoints = [" + points.str() + "]\n";
     Solver solver;
     solver.init(parse_toml(box_case(n, SINE_RHO, recon, probe)));
     solver.run();
@@ -250,8 +262,8 @@ TEST(ProbesTest, CurveReductionsAreExactForPolynomialFields) {
     // The extrema bound the written samples
     for (const auto & row : read_csv(dir + "/poly.csv")) {
         if (row.at("step") != 0.0) continue;
-        EXPECT_GE(row.at("RHO"), r.at("min_RHO"));
-        EXPECT_LE(row.at("RHO"), r.at("max_RHO"));
+        EXPECT_GE(rtype(row.at("RHO")), rtype(r.at("min_RHO")));
+        EXPECT_LE(rtype(row.at("RHO")), rtype(r.at("max_RHO")));
     }
     std::filesystem::remove_all(dir);
 }

@@ -14,6 +14,7 @@ set(MALLARD_TEST_SOURCES
     radiation_test.cpp
     mixture_transport_test.cpp
     mesh_block_test.cpp
+    mesh_import_test.cpp
     distributed_mesh_test.cpp
     statistics_test.cpp
     probes_test.cpp
