@@ -20,6 +20,7 @@
 
 #include "comm.h"
 #include "input.h"
+#include "log.h"
 
 #include "hdf5_util.h"
 
@@ -54,6 +55,103 @@ Stretching mesh_stretching(const toml::value & input) {
         stretching[d] = beta[d];
     }
     return stretching;
+}
+
+namespace {
+
+std::vector<double> transform_vector(const toml::value & v, const std::string & key) {
+    if (!v.is_array() || v.as_array().size() != N_DIM) {
+        throw InputError("mesh.transform." + key + " must have " + std::to_string(N_DIM) + " components.");
+    }
+    std::vector<double> out;
+    for (const auto & item : v.as_array()) out.push_back(as_double(item, "mesh.transform." + key));
+    for (double x : out) {
+        if (!std::isfinite(x)) throw InputError("mesh.transform." + key + " must be finite.");
+    }
+    return out;
+}
+
+std::string vector_text(const std::vector<double> & v) {
+    std::string s;
+    for (double x : v) s += (s.empty() ? "[" : ", ") + logging::real(x);
+    return s + "]";
+}
+
+} // namespace
+
+MeshTransform mesh_transform(const toml::value & input) {
+    MeshTransform t;
+    if (!input.contains("mesh") || !input.at("mesh").contains("transform")) return t;
+    if (toml::find_or<std::string>(input, "mesh", "type", "file") != "file") {
+        throw InputError("[mesh.transform] applies to mesh files.");
+    }
+    const toml::value & table = input.at("mesh").at("transform");
+    if (!table.is_table()) throw InputError("mesh.transform must be a table.");
+    for (const auto & entry : table.as_table()) {
+        if (entry.first != "scale" && entry.first != "rotate" && entry.first != "translate") {
+            throw InputError("mesh.transform: unknown key " + entry.first + " (keys: scale, rotate, translate).");
+        }
+    }
+    std::vector<std::string> parts;
+    std::array<double, N_DIM> scale;
+    scale.fill(1.0);
+    if (table.contains("scale")) {
+        const toml::value & s = table.at("scale");
+        if (s.is_array()) {
+            const std::vector<double> v = transform_vector(s, "scale");
+            std::copy(v.begin(), v.end(), scale.begin());
+            parts.push_back("scale " + vector_text(v));
+        } else {
+            scale.fill(as_double(s, "mesh.transform.scale"));
+            parts.push_back("scale " + logging::real(scale[0]));
+        }
+        for (double x : scale) {
+            if (!std::isfinite(x) || x == 0.0) throw InputError("mesh.transform.scale must be finite and nonzero.");
+        }
+    }
+    std::array<std::array<double, 3>, 3> R = {{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}};
+    if (table.contains("rotate")) {
+        const toml::value & r = table.at("rotate");
+        std::array<double, 3> axis = {0.0, 0.0, 1.0};
+        double degrees;
+        if constexpr (N_DIM == 2) {
+            degrees = as_double(r, "mesh.transform.rotate");
+            parts.push_back("rotate " + logging::real(degrees) + " deg");
+        } else {
+            if (!r.is_table() || !r.contains("axis") || !r.contains("angle") || r.as_table().size() != 2) {
+                throw InputError("mesh.transform.rotate must be {axis = [x, y, z], angle = degrees}.");
+            }
+            const std::vector<double> a = transform_vector(r.at("axis"), "rotate.axis");
+            const double norm = std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+            if (!(norm > 0.0)) throw InputError("mesh.transform.rotate.axis must be nonzero.");
+            for (size_t i = 0; i < 3; i++) axis[i] = a[i] / norm;
+            degrees = as_double(r.at("angle"), "mesh.transform.rotate.angle");
+            parts.push_back("rotate " + logging::real(degrees) + " deg about " + vector_text(a));
+        }
+        if (!std::isfinite(degrees)) throw InputError("mesh.transform.rotate must be finite.");
+        // Rodrigues: R = cos I + sin [axis]x + (1 - cos) axis axis^T
+        const double theta = degrees * Kokkos::numbers::pi / 180.0, c = std::cos(theta), s = std::sin(theta);
+        const double cross[3][3] = {{0, -axis[2], axis[1]}, {axis[2], 0, -axis[0]}, {-axis[1], axis[0], 0}};
+        for (size_t i = 0; i < 3; i++) {
+            for (size_t j = 0; j < 3; j++) R[i][j] = (i == j ? c : 0.0) + s * cross[i][j] + (1 - c) * axis[i] * axis[j];
+        }
+    }
+    for (size_t i = 0; i < N_DIM; i++) {
+        for (size_t j = 0; j < N_DIM; j++) t.matrix[i][j] = R[i][j] * scale[j];
+    }
+    if (table.contains("translate")) {
+        const std::vector<double> v = transform_vector(table.at("translate"), "translate");
+        std::copy(v.begin(), v.end(), t.translation.begin());
+        parts.push_back("translate " + vector_text(v));
+    }
+    for (const auto & p : parts) t.description += (t.description.empty() ? "" : ", ") + p;
+    return t;
+}
+
+void transform_block(MeshBlock & block, const MeshTransform & transform) {
+    if (transform.is_identity()) return;
+    for (auto & x : block.node_coords) x = transform(x);
+    for (auto & x : block.face_high_order_nodes) x = transform(x);
 }
 
 MeshBlock cartesian_2d_block(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, MeshType kind, int r, int p,
@@ -268,9 +366,12 @@ MeshBlock read_mesh_block(const toml::value & input) {
     const auto it = MESH_TYPES.find(type_str);
     if (it == MESH_TYPES.end()) throw unknown_option(MESH_TYPES, "mesh.type", type_str);
     const MeshType type = it->second;
+    const MeshTransform transform = mesh_transform(input);
     if (type == MeshType::FROM_FILE) {
         const std::string filename = toml::find_or<std::string>(input, "mesh", "filename", "mesh.msh");
-        return is_hdf5_mesh(filename) ? read_mesh_h5(filename) : read_gmsh_block(filename);
+        MeshBlock block = is_hdf5_mesh(filename) ? read_mesh_h5(filename) : read_file_block(filename);
+        transform_block(block, transform);
+        return block;
     }
     const uint32_t Nx = toml::find_or<uint32_t>(input, "mesh", "Nx", 100);
     const uint32_t Ny = toml::find_or<uint32_t>(input, "mesh", "Ny", 100);

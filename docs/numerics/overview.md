@@ -1,14 +1,28 @@
 # Numerical methods
 
-Mallard solves the 2D compressible Euler or Navier-Stokes equations with a
-cell-centered finite volume method on unstructured meshes of triangles and
-quadrilaterals.
+Mallard solves the compressible Euler or Navier-Stokes equations, for a single
+gas or a reacting mixture, with a cell-centered finite volume method on
+unstructured meshes: triangles and quadrilaterals in 2D (planar or
+axisymmetric), tetrahedra, hexahedra, prisms and pyramids in 3D. This page
+describes the methods and measures them; the [theory manual](../theory/index.md)
+gives every equation as implemented, and the [numerics guide](../guide/numerics.md)
+is about choosing among them.
 
 ## Discretization
 
-For each cell, `dU/dt = -(1/V) sum_faces F(U_L, U_R) . n A + viscous and source terms`.
+For each cell $i$ of volume $V_i$,
+
+$$
+\begin{equation}
+\frac{\mathrm{d} U_i}{\mathrm{d} t} = -\frac{1}{V_i} \sum_{f \in \partial i} A_f \sum_{q} w_q\,
+F\big(U_L(x_q), U_R(x_q)\big) \cdot n_f + \text{viscous and source terms},
+\label{eq:semi-discrete}
+\end{equation}
+$$
+
+where the inner sum runs over the quadrature points $x_q$ (weights $w_q$) of face $f$.
 Each face is integrated with Gauss-Legendre points (one for first order and
-MUSCL, `ceil((order + 1) / 2)` for TENO). At each point the convective flux is
+MUSCL, `floor((order + 1) / 2)` per edge for TENO). At each point the convective flux is
 an approximate Riemann solver applied to the reconstructed left and right
 states. Each face's convective and viscous fluxes are stored once and every
 cell sums its faces in a fixed order, without atomics, so results are bitwise
@@ -17,13 +31,19 @@ independent of the thread count and scheduling.
 ## Time step
 
 Time integration is explicit (SSPRK3 by default; [Shu & Osher 1988](../references.md#shu-osher-1988)). The time step comes
-from per-cell spectral radii ([Blazek 2015](../references.md#blazek-2015), eqs. 6.20-6.21 with C = 4),
-`dt = cfl * min_i dt_i` with
-`dt_i = 2 V / (sum_f (|u_n| + a) A_f + 4 nu_eff sum_f A_f^2 / V)`,
-where `|u_n| + a` is the larger of the two cells' on each face and
-`nu_eff = max(4/3, gamma/Pr) mu / rho` (for gas mixtures, the largest of
-`4/3 mu / rho`, `lambda / (rho cv)` and the species' diffusion coefficients;
-axisymmetric viscous runs add `nu_eff V / r^2` to the denominator).
+from per-cell spectral radii ([Blazek 2015](../references.md#blazek-2015), eqs. 6.20-6.21 with C = 4):
+
+$$
+\begin{align}
+\Delta t &= \mathrm{cfl} \, \min_i \Delta t_i, \label{eq:dt} \\
+\Delta t_i &= \frac{2 V_i}{\sum_f \left(|u_n| + a\right) A_f + 4 \nu_\mathrm{eff} \sum_f A_f^2 / V_i}, \label{eq:dt-cell}
+\end{align}
+$$
+
+where $|u_n| + a$ is the larger of the two cells' on each face and
+$\nu_\mathrm{eff} = \max(4/3, \gamma/\mathrm{Pr})\, \mu / \rho$ (for gas mixtures, the largest of
+$\tfrac{4}{3} \mu / \rho$, $\lambda / (\rho c_v)$ and the species' diffusion coefficients;
+axisymmetric viscous runs add $\nu_\mathrm{eff} V_i / r^2$ to the denominator of $\eqref{eq:dt-cell}$).
 Half the sum over faces stands for the sum over coordinate directions of the
 projected areas, so this is the usual unstructured CFL number: on a uniform
 grid of spacing h it gives `dt = cfl * h / (|u| + |v| + 2a)` in 2D and
@@ -245,7 +265,7 @@ the Riemann solver.
 - Cell gradients come from a weighted least-squares quadratic fit ([Barth & Frederickson 1990](../references.md#barth-frederickson-1990)) over the vertex neighbors and the cell's boundary ghosts. A linear fit is only first-order accurate on one-sided boundary stencils and on triangles, where its errors cancel only in the interior of regular meshes.
 - Face gradients of velocity and temperature average the two cell gradients. They are then corrected along the face normal so that their component along the line between the cell centroids matches the direct difference ([Diskin et al. 2010](../references.md#diskin-2010)).
 - Transmissive faces take the face values and gradients of their image face, as the convective flux does.
-- Stress follows the Stokes hypothesis; heat flux uses a constant Prandtl number. Viscosity is constant or follows Sutherland's law ([Sutherland 1893](../references.md#sutherland-1893)).
+- Stress follows the Stokes hypothesis; heat flux uses a constant Prandtl number. Viscosity is constant, follows Sutherland's law ([Sutherland 1893](../references.md#sutherland-1893)) or a power law.
 
 ## Axisymmetric flows
 
