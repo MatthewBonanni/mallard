@@ -1610,6 +1610,11 @@ void Solver::take_step() {
         halo_current = false;
     }
     if (double_flux) {
+        // The halo cells' [gamma, e0] are frozen from their owners' states after the chemistry
+        if (halo.active() && !halo_current) {
+            halo.exchange(state());
+            halo_current = true;
+        }
         freeze_thermodynamics();
         cells_frozen = true;
     }
