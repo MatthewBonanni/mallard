@@ -46,6 +46,7 @@ def render(draw, out, name):
             fig.savefig(out / f"{name}-{P['name']}.svg", format="svg", bbox_inches="tight", pad_inches=0.04,
                         metadata={"Date": None}, dpi=150)
             if PREVIEW:
+                Path(PREVIEW).mkdir(parents=True, exist_ok=True)
                 bg = "#ffffff" if P["name"] == "light" else "#171114"
                 fig.savefig(Path(PREVIEW) / f"{name}-{P['name']}.png", dpi=90, bbox_inches="tight",
                             pad_inches=0.1, facecolor=bg, transparent=False)
