@@ -119,3 +119,48 @@ jobs:
             mpirun -n $n --oversubscribe ./build/test/MallardTest --gtest_filter="$mpi_tests"
           done
 
+
+  # The tutorials (tutorials/) at reduced size: Gmsh meshes, runs on two MPI
+  # ranks and their post-processing scripts, so they keep working
+  tutorials:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install MPI, ccache and Gmsh's libraries
+        run: >
+          sudo apt-get update -qq && sudo apt-get install -y -qq
+          libopenmpi-dev openmpi-bin ccache libglu1-mesa libxcursor1 libxft2 libxinerama1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python packages
+        run: pip install -r tutorials/requirements.txt
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-tutorials-${{ github.sha }}
+          restore-keys: ccache-tutorials-
+      - name: Build (2D and 3D)
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          CCACHE_MAXSIZE: 500M
+        run: |
+          for dim in 2 3; do
+            cmake -S . -B build-$dim -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+              -DUSE_SYSTEM_KOKKOS=OFF -DMallard_WARNINGS_AS_ERRORS=ON -DKokkos_ENABLE_SERIAL=ON \
+              -DMallard_ENABLE_MPI=ON -DMallard_DIM=$dim
+            cmake --build build-$dim -j $(nproc) --target Mallard
+          done
+      - name: Save compiler cache
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-tutorials-${{ github.sha }}
+      - name: Run the tutorials
+        run: tutorials/ci.sh build-2/src/Mallard build-3/src/Mallard ${{ runner.temp }}/tutorials
