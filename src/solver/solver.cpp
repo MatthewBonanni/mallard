@@ -1504,7 +1504,7 @@ void Solver::print_setup() const {
     logging::item("CUDA graphs", no_graph.empty() ? "one per step" : "no: " + no_graph);
 #endif
     if (check_nan) logging::item("NaN check", "every step");
-    logging::item("Divergence", std::string("stop at the first non-finite or non-positive density or pressure") +
+    logging::item("Divergence", std::string("stop at the first non-finite value") +
                                     (keep_last_good ? ", writing the last valid state" : ""));
     if (les_on) logging::items(les.summary());
     if (tfles_on) logging::items(thickened_flame.summary());
@@ -1766,15 +1766,10 @@ struct TimeStepFunctor {
     }
 
     KOKKOS_INLINE_FUNCTION
-    bool valid(const uint32_t i_cell) const {
-        rtype cons[N_CONSERVATIVE], W[N_CONSERVATIVE];
-        bool finite = true;
-        FOR_I_CONSERVATIVE {
-            cons[i] = conservatives(i_cell, i);
-            finite = finite && Kokkos::isfinite(cons[i]);
-        }
-        physics.compute_W_from_conservatives(W, cons);
-        return finite && W[0] > 0.0_r && W[N_DIM + 1] > 0.0_r;
+    bool finite(const uint32_t i_cell) const {
+        bool all = true;
+        FOR_I_CONSERVATIVE all = all && Kokkos::isfinite(conservatives(i_cell, i));
+        return all;
     }
 
     KOKKOS_INLINE_FUNCTION
@@ -1815,8 +1810,8 @@ struct TimeStepFunctor {
         }
         const rtype dt_i = 2.0_r * cell_volume(i_cell) / sum;
         dt_local(i_cell) = dt_i;
-        // A negative minimum flags an invalid state to the run (non-finite, or non-positive density or pressure)
-        dt_min = Kokkos::fmin(dt_min, valid(i_cell) && dt_i > 0.0_r && Kokkos::isfinite(dt_i) ? dt_i : -1.0_r);
+        // A negative minimum flags a non-finite state to the run
+        dt_min = Kokkos::fmin(dt_min, finite(i_cell) ? dt_i : -1.0_r);
     }
 };
 
@@ -1854,7 +1849,9 @@ rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
 rtype Solver::reduce_dt(rtype local) {
     control_contributed = run_control::pending();
     std::array<rtype, 1 + run_control::N_REQUESTS> values{local};
-    for (int k = 0; k < run_control::N_REQUESTS; k++) values[size_t(k) + 1] = (control_contributed >> k) & 1 ? -1 : 0;
+    for (int k = 0; k < run_control::N_REQUESTS; k++) {
+        values[size_t(k) + 1] = (control_contributed >> k) & 1 ? rtype(-1) : rtype(0);
+    }
     values = comm::allreduce(values, comm::Op::MIN);
     control_reduced = 0;
     for (int k = 0; k < run_control::N_REQUESTS; k++) {

@@ -172,16 +172,16 @@ struct MixtureTimeStepFunctor {
         }
         const rtype dt_c = 2.0_r * cell_volume(c) / sum;
         dt_local(c) = dt_c;
-        dt_min = Kokkos::fmin(dt_min, valid(c) && dt_c > 0.0_r && Kokkos::isfinite(dt_c) ? dt_c : -1.0_r);
+        dt_min = Kokkos::fmin(dt_min, finite(c) ? dt_c : -1.0_r);
     }
 
-    /** @brief Finite state and scalars, positive density and pressure; else the run stops. */
+    /** @brief Whether the cell's state and mass fractions are finite; else the run stops. */
     KOKKOS_INLINE_FUNCTION
-    bool valid(const uint32_t c) const {
-        bool finite = true;
-        FOR_I_CONSERVATIVE finite = finite && Kokkos::isfinite(W(c, i));
-        for (uint32_t k = 0; k <= n_species; k++) finite = finite && Kokkos::isfinite(scalars(c, k));
-        return finite && W(c, 0) > 0.0_r && W(c, N_DIM + 1) > 0.0_r;
+    bool finite(const uint32_t c) const {
+        bool all = true;
+        FOR_I_CONSERVATIVE all = all && Kokkos::isfinite(W(c, i));
+        for (uint32_t k = 0; k <= n_species; k++) all = all && Kokkos::isfinite(scalars(c, k));
+        return all;
     }
 };
 
@@ -403,9 +403,10 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
     if (exchange) halo.exchange(state);
     update_cell_states(state, !budget_pass);
     face_reconstruction->calc_face_values(W_cells, face_solution);
+    // The characteristic faces read the reconstructed gamma of this stage
+    scalar_reconstruction.calc(cell_scalars, W_cells, face_thermo);
     if (!budget_pass) update_characteristic_boundaries(t_stage);
     if (hybrid_flux) update_upwind_sensor();
-    scalar_reconstruction.calc(cell_scalars, W_cells, face_thermo);
 
     if (double_flux && !cells_frozen) {
         throw std::logic_error("Double flux needs the cells' thermodynamics frozen (take_step).");

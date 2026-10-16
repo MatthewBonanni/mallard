@@ -157,7 +157,9 @@ void Solver::graph_step() {
     step_io(IO_T) = t;
     step_io(IO_T_TARGET) = next_target_time();
     control_contributed = run_control::pending();
-    for (int k = 0; k < run_control::N_REQUESTS; k++) step_io(IO_REQUESTS + k) = (control_contributed >> k) & 1 ? -1 : 0;
+    for (int k = 0; k < run_control::N_REQUESTS; k++) {
+        step_io(IO_REQUESTS + k) = (control_contributed >> k) & 1 ? rtype(-1) : rtype(0);
+    }
     if (step_graph_exec) {
         check(cudaGraphLaunch(static_cast<cudaGraphExec_t>(step_graph_exec), stream), "cudaGraphLaunch");
     } else {

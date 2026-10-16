@@ -119,8 +119,7 @@ std::string Solver::describe_invalid_cells() {
         for (uint32_t k = 0; k < n_species && code < 0; k++) {
             if (!std::isfinite(double(Y(i, k)))) code = N_CONSERVATIVE + k, value = double(Y(i, k));
         }
-        if (code < 0 && !(U(i, 0) > 0.0_r)) code = 0, value = double(U(i, 0));
-        if (code < 0 && !(P(i, N_DIM) > 0.0_r)) code = p_code, value = double(P(i, N_DIM));
+        if (code < 0 && !std::isfinite(double(P(i, N_DIM)))) code = p_code, value = double(P(i, N_DIM));
         if (code < 0) continue;
         n_invalid++;
         if (local.size() >= N_SHOWN * WIDTH) continue;
@@ -134,7 +133,7 @@ std::string Solver::describe_invalid_cells() {
     std::iota(order.begin(), order.end(), size_t(0));
     std::sort(order.begin(), order.end(), [&](size_t a, size_t b) { return all[a * WIDTH] < all[b * WIDTH]; });
     std::string text = logging::count(n_invalid) + (n_invalid == 1 ? " cell has" : " cells have") +
-                       " a non-finite value or a non-positive density or pressure";
+                       " a non-finite value";
     for (size_t n = 0; n < std::min(order.size(), N_SHOWN); n++) {
         const double * r = &all[order[n] * WIDTH];
         const uint32_t code = static_cast<uint32_t>(r[1]);

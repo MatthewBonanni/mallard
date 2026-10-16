@@ -686,7 +686,7 @@ with `mpirun` as the container's command a `preStop` hook
 `Mallard ctl <run-dir> stop`, which returns once the restart is written.
 
 **Divergence.** Every step's time-step reduction also tells whether any
-owned cell holds a non-finite value or a non-positive density or pressure.
+owned cell holds a non-finite value.
 The run then stops with the number of such cells and the first ones by global
 cell id (variable, value, cell, centroid and rank), writes the state at the
 start of the step before (all `[[write_data]]` outputs and a restart; see
