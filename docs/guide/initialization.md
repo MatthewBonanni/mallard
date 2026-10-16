@@ -32,7 +32,7 @@ p = """\
 
 | Key | Default | Meaning |
 |---|---|---|
-| `type` | `"constant"` | `constant`, `analytical` or `restart` |
+| `type` | `"constant"` | `constant`, `analytical`, `restart`, or `remap` (a restart file of another mesh) |
 | `u` | required | `constant`: numbers; `analytical`: one expression per component |
 | `p`, `T` (`constant`) | required | Pressure and temperature |
 | `rho`, `p`, `T` (`analytical`) | two of the three | Expressions of x, y, z |
@@ -81,6 +81,7 @@ the total.
   continuing them.
 - Probes and force monitors append to their files on a restart.
 - Restart files of Mallard 0.3 and earlier (version 1) are still read.
+- `compression = "zlib"` writes compressed restart files (version 5, losslessly: they restart bit for bit), about a third smaller for smooth flows; reading them needs a build with `Mallard_ENABLE_ZLIB`, and the Python tools in `tools/` read only uncompressed ones.
 
 ### Initial states from scripts
 
@@ -95,7 +96,7 @@ to copy for your own cases:
 | `channel_init.py` | Turbulent channel: mean profile plus a divergence-free perturbation |
 | `isotropic_turbulence_restart.py` | Isotropic turbulence with a given spectrum |
 | `autoignition_restart.py` | Stratified temperature and velocity fields |
-| `interpolate_restart.py` | A restart file interpolated onto another mesh of the same domain |
+| `interpolate_restart.py` | A restart file interpolated onto another Gmsh mesh (nearest cells; `type = "remap"` below is conservative and high order) |
 | `tile_restart.py` | A restart file of a periodic box tiled into a larger box |
 
 A restart file is binary, little-endian: the 16 bytes `MALLARD-RESTART\0`,
@@ -105,6 +106,62 @@ characters, and finally the values, variable after variable, each over all
 cells in the mesh's global order. The variables are `RHO`, `RHOU_X`, `RHOU_Y`
 (`RHOU_Z`), `RHOE` and, for gas mixtures, `RHOY_<species>` for every species
 and `T_SEED` (a temperature guess); `channel_init.py` has a short writer.
+
+## Remap from another mesh
+
+`type = "remap"` starts from a restart file written on a **different mesh**: a
+finer one (grid convergence, spinning up an LES from a coarse run), another
+cell type, any partition and rank count on either side. Give the source run's
+mesh as `[initialize.mesh]`:
+
+```toml
+# examples/riemann_2d_quads/remap.toml: 10,000 quads at t = 0.5 onto 131,072 triangles
+[initialize]
+type = "remap"
+file = "coarse/riemann_000218.restart"
+degree = 3              # of the source polynomials, 0-5 (default 2)
+# limiter = "none"      # for smooth fields; default "bounds"
+
+[initialize.mesh]       # the source run's [mesh] table
+type = "cartesian"
+Nx = 100
+Ny = 100
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `file` | required | Restart file of the source run |
+| `[initialize.mesh]` | required | The source run's `[mesh]` table |
+| `[[initialize.periodic]]` | the run's `[[periodic]]` | The source mesh's periodic zone pairs |
+| `degree` | 2 | Degree of each source cell's least-squares polynomial |
+| `limiter` | `"bounds"` | `bounds`: no new extrema, no negative partial densities; `none`: full order |
+
+Each source cell's polynomial is integrated **exactly** over its intersection
+with every target cell, so the integrals of all conserved variables are kept
+to rounding and polynomial fields up to `degree` are remapped exactly. Every
+variable of the file is remapped: the flow, species, temperature seeds and
+`[statistics]` averages. The run continues from the file's step and time with
+fresh output series; the log reports how closely the integrals were kept.
+
+![A target triangle cut into pieces by the source quadrilaterals it overlaps](../images/guide/remap-supermesh-light.svg#gh-light-mode-only)
+![A target triangle cut into pieces by the source quadrilaterals it overlaps](../images/guide/remap-supermesh-dark.svg#gh-dark-mode-only)
+
+![Density on quadrilaterals and remapped to triangles, and along a line](../images/guide/remap-fields-light.svg#gh-light-mode-only)
+![Density on quadrilaterals and remapped to triangles, and along a line](../images/guide/remap-fields-dark.svg#gh-dark-mode-only)
+
+Pitfalls:
+
+- `[initialize.mesh]` must be the mesh the restart file was written on (its
+  cell count is checked); a mesh file's `transform` applies to it as usual.
+- Where the meshes cover different domains (a curved wall discretized
+  differently, a shorter box), target cells average over the covered part and
+  cells outside take the nearest source cell; the log counts them, and
+  conservation then holds only over the common part.
+- The default `bounds` limiter flattens smooth extrema slightly; use
+  `limiter = "none"` for smooth flows such as the Taylor-Green vortex.
+- Restarting on the **same** mesh is `type = "restart"`, which is bitwise exact.
+
+Method, accuracy and cost: [docs/design/remap.md](../design/remap.md).
 
 ## See also
 

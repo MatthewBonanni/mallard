@@ -18,10 +18,13 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <span>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include "comm.h"
+#include "compression.h"
 #include "solver.h"
 #include "test_fixtures.h"
 
@@ -304,12 +307,13 @@ TEST(InSituStatisticsTest, SpectraAndPhaseAveragesRestartBitwise) {
     const std::string dir = (std::filesystem::temp_directory_path() / "mallard_insitu_restart").string();
     std::filesystem::remove_all(dir);
     const std::string periodic = N_DIM == 3 ? "[\"x\", \"z\"]" : "[\"x\"]";
-    auto extra = [&](const std::string & sub) {
+    auto extra = [&](const std::string & sub, bool zlib = false) {
         return "[statistics]\nt_start = 0.01\ninterval = 3\n"
                "[statistics.spectra]\nfields = [\"U_X\", \"P\"]\nproducts = [\"U_X*U_Y\"]\nfile = \"" + dir + "/" + sub +
                "/spectra.csv\"\n"
                "[statistics.phase]\nfields = [\"U_Y\"]\nbins = 3\nperiod = 0.01\n"
-               "[[write_data]]\nprefix = \"" + dir + "/" + sub + "/r\"\nformat = \"restart\"\ninterval = 20\n";
+               "[[write_data]]\nprefix = \"" + dir + "/" + sub + "/r\"\nformat = \"restart\"\ninterval = 20\n" +
+               (zlib ? "compression = \"zlib\"\nchunk_cells = 7\n" : "");
     };
     auto run = [&](uint32_t n_steps, const std::string & extra_input, const std::string & from = "") {
         std::string input = box(periodic, 1.2, n_steps, extra_input);
@@ -327,10 +331,13 @@ TEST(InSituStatisticsTest, SpectraAndPhaseAveragesRestartBitwise) {
     const auto plain = run(40, "");
     run(20, extra("b"));
     const auto second = run(40, extra("b"), dir + "/b/r_000020.restart");
-    // Means first asked for on the restart start afresh, the spectra continue
+    // Means first asked for on the restart start afresh, the spectra continue,
+    // also from a compressed restart file (format 6 with chunks)
+    const bool zlib = compression::have_zlib();
+    if (zlib) run(20, extra("d", true));
     std::string with_means = extra("c");
     with_means.replace(0, 13, "[statistics]\nfields = [\"T\"]\n");
-    const auto third = run(40, with_means, dir + "/b/r_000020.restart");
+    const auto third = run(40, with_means, dir + (zlib ? "/d" : "/b") + "/r_000020.restart");
 
     for (uint32_t c = 0; c < straight->get_mesh()->n_cells; c++) {
         FOR_I_CONSERVATIVE EXPECT_EQ(plain->h_conservatives(c, i), straight->h_conservatives(c, i));

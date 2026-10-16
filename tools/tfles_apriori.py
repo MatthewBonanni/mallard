@@ -19,6 +19,16 @@ delta_L):
   u' (F delta_L / Delta)^(1/3) (Kolmogorov scaling from the grid scale).
 
 c = (Y_H2,u - Y_H2) / (Y_H2,u - Y_H2,b). Prints one row per ratio.
+
+    tfles_apriori.py SNAPSHOT.npz ... [--ratios 4,8,16] [--n-res 5]
+
+On snapshots extracted to .npz (flame_turbulence.py extract; any box size),
+the dynamic efficiency of Mallard's efficiency = "dynamic" against Xi, with
+c = (T - T_u) / (T_b - T_u) as in the model: the top-hat filtered DNS on the
+LES mesh is test filtered by passes of the 3^3 volume average until the
+test width reaches F delta_L, beta = ln(sum hat(|grad c|) / sum |grad
+hat(c)|) / ln(gamma), E = F^beta (global sums, as the model). One row per
+snapshot.
 """
 import argparse
 import os
@@ -33,6 +43,7 @@ from isotropic_turbulence_restart import read_restart  # noqa: E402
 DELTA_L, S_L = 3.301397619449605e-04, 2.33237442
 Y_U, Y_B = 2.85223875e-02, 1.16716361e-03
 NU_U = 2.16e-5
+T_U, T_B = 300.0, 2384.28
 C_K = 1.5
 
 
@@ -71,14 +82,53 @@ def laplacian(a, h):
     return lx + ly + lz
 
 
+def dynamic_apriori(path, ratios, n_res):
+    """The dynamic efficiency (efficiency = "dynamic") on one extracted DNS snapshot, as in Mallard."""
+    d = np.load(path)
+    c = np.clip((d["T"] - T_U) / (T_B - T_U), 0.0, 1.0)
+    h = float(d["h"])
+    gx, gy, gz = grad(c, h)
+    mag = np.sqrt(gx ** 2 + gy ** 2 + gz ** 2)
+    modes = ("nearest", "wrap", "wrap")
+    row = [f"{float(d['t']) * 1e3:6.3f}"]
+    for r in ratios:
+        F = max(1.0, n_res * r * h / DELTA_L)
+        width = int(round(F * DELTA_L / h))
+        cf = ndimage.uniform_filter(c, size=width, mode=modes)
+        fx, fy, fz = grad(cf, h)
+        gradf = np.sqrt(fx ** 2 + fy ** 2 + fz ** 2)
+        xi = ndimage.uniform_filter(mag, size=width, mode=modes).sum() / gradf.sum()
+        # The LES-resolved field on the LES mesh; test filter: passes of the 3^3 volume average, each of squared
+        # width 8 H^2, until it reaches (F delta_L)^2
+        H = r * h
+        cl = block(cf, r)
+        passes = int(np.ceil((F * DELTA_L) ** 2 / (8 * H ** 2)))
+        lx, ly, lz = grad(cl, H)
+        g = np.sqrt(lx ** 2 + ly ** 2 + lz ** 2)
+        c_hat, g_hat = cl, g
+        for _ in range(passes):
+            c_hat = ndimage.uniform_filter(c_hat, size=3, mode=modes)
+            g_hat = ndimage.uniform_filter(g_hat, size=3, mode=modes)
+        tx, ty, tz = grad(c_hat, H)
+        gamma = np.sqrt(1.0 + passes * 8 * H ** 2 / (F * DELTA_L) ** 2)
+        beta = np.clip(np.log(g_hat.sum() / np.sqrt(tx ** 2 + ty ** 2 + tz ** 2).sum()) / np.log(gamma), 0.0, 1.0)
+        row.append(f"R{r}: Xi {xi:.3f} beta {beta:.3f} E {F ** beta:.3f}")
+    print("  ".join(row), flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("restart")
+    ap.add_argument("restart", nargs="+", help="a DNS restart, or snapshots extracted to .npz (dynamic efficiency only)")
     ap.add_argument("--ratios", default="4,8,16")
     ap.add_argument("--n-res", type=float, default=5.0)
     ap.add_argument("--beta", type=float, default=0.5)
     ap.add_argument("--shape", default="224,128,128")
     args = ap.parse_args()
+    if args.restart[0].endswith(".npz"):
+        for path in args.restart:
+            dynamic_apriori(path, [int(v) for v in args.ratios.split(",")], args.n_res)
+        return
+    args.restart = args.restart[0]
     f, t, _ = read_restart(args.restart)
     shape = tuple(int(v) for v in args.shape.split(","))
     h = DELTA_L / 10.0

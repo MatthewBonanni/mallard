@@ -45,13 +45,13 @@ AXES = "xyz"
 
 
 def read_restart(path):
-    """(fields by name, t, step, attributes, arrays) of a double-precision restart file, versions 2-5."""
+    """(fields by name, t, step, attributes, arrays) of an uncompressed double-precision restart file, versions 2-6."""
     with open(path, "rb") as f:
         if not f.read(16).startswith(b"MALLARD-RESTART"):
             raise SystemExit(f"{path}: not a Mallard restart file")
         version, real_size, n_cells, n_vars, step, t = struct.unpack("<IIQQQd", f.read(40))
-        if version < 2 or version > 5 or real_size != 8:
-            raise SystemExit(f"{path}: expected a double-precision restart file of version 2-5")
+        if version < 2 or version > 6 or real_size != 8:
+            raise SystemExit(f"{path}: expected a double-precision restart file of version 2-6")
 
         def name():
             (length,) = struct.unpack("<I", f.read(4))
@@ -63,17 +63,19 @@ def read_restart(path):
             for _ in range(n_attr):
                 key = name()
                 attributes[key] = struct.unpack("<d", f.read(8))[0]
-        n_faces, width = 0, 0
         if version >= 4:
-            n_faces, width = struct.unpack("<QI", f.read(12))
-        data = np.fromfile(f, dtype="<f8", count=n_cells * n_vars).reshape(n_vars, n_cells)
-        f.seek(n_faces * (8 + 8 * width), os.SEEK_CUR)
+            f.read(12)  # face count and width
         if version >= 5:
+            _, chunk_cells = struct.unpack("<IQ", f.read(12))
+            if chunk_cells > 0:
+                raise SystemExit(f"{path}: compressed restart files are not supported (write with compression = \"none\")")
+        if version >= 6:
             (n_arrays,) = struct.unpack("<Q", f.read(8))
             for _ in range(n_arrays):
                 key = name()
                 (n,) = struct.unpack("<Q", f.read(8))
                 arrays[key] = np.fromfile(f, dtype="<f8", count=n)
+        data = np.fromfile(f, dtype="<f8", count=n_cells * n_vars).reshape(n_vars, n_cells)
     return dict(zip(names, data)), t, step, attributes, arrays
 
 

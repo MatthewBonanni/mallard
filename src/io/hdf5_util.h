@@ -112,17 +112,28 @@ inline void select_rows(hid_t space, uint64_t first, uint64_t n) {
     check(H5Sselect_hyperslab(space, H5S_SELECT_SET, start, nullptr, count, nullptr), "H5Sselect_hyperslab");
 }
 
+/** @brief Rows per chunk of compressed datasets. */
+inline constexpr hsize_t CHUNK_ROWS = 65536;
+
 /**
  * @brief Create a dataset of n_rows x cols values (one dimension if cols is 1)
- *        and write this rank's rows [first, first + n) from data, with dxpl.
+ *        and write this rank's rows [first, first + n) from data, with dxpl;
+ *        with deflate, chunked, byte-shuffled and deflated.
  */
 template <typename T>
 void write_rows(hid_t parent, const char * name, uint64_t n_rows, int cols, uint64_t first, uint64_t n,
-                const T * data, hid_t dxpl) {
+                const T * data, hid_t dxpl, bool deflate = false) {
     const int rank = cols > 1 ? 2 : 1;
     const hsize_t dims[2] = {n_rows, hsize_t(cols)}, local[2] = {n, hsize_t(cols)};
     Handle space(H5Screate_simple(rank, dims, nullptr), H5Sclose, "H5Screate_simple");
-    Handle dset(H5Dcreate2(parent, name, file_type<T>(), space, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Dclose,
+    Handle dcpl(H5Pcreate(H5P_DATASET_CREATE), H5Pclose, "H5Pcreate");
+    if (deflate && n_rows > 0) {
+        const hsize_t chunk[2] = {std::min<hsize_t>(n_rows, CHUNK_ROWS), hsize_t(cols)};
+        check(H5Pset_chunk(dcpl, rank, chunk), "H5Pset_chunk");
+        check(H5Pset_shuffle(dcpl), "H5Pset_shuffle");
+        check(H5Pset_deflate(dcpl, 1), "H5Pset_deflate");
+    }
+    Handle dset(H5Dcreate2(parent, name, file_type<T>(), space, H5P_DEFAULT, dcpl, H5P_DEFAULT), H5Dclose,
                 std::string("creating ") + name);
     Handle memory(H5Screate_simple(rank, local, nullptr), H5Sclose, "H5Screate_simple");
     select_rows(space, first, n);

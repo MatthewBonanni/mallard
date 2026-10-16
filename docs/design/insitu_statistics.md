@@ -34,7 +34,7 @@ Every line and sum sees the same values in the same order on any rank count,
 and the combination order is fixed by plane indices, so the results are
 bitwise identical on 1-4 ranks (tested) and after restarts on another rank
 count. The time averages (weight t - t_prev, like the means) are kept on the
-host and stored in restart files as named arrays (format version 5). Outputs
+host and stored in restart files as named arrays (format version 6). Outputs
 subtract the product of the averaged plane means from the k = 0 terms, so they
 describe fluctuations about the time-and-plane mean; correlations are the
 inverse transforms of the averaged two-sided spectra (linear in the samples,

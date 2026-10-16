@@ -32,17 +32,20 @@
 #include <exprtk.hpp>
 
 #include "quadrature.h"
+#include "remap.h"
 
 enum class InitType {
     CONSTANT,
     ANALYTICAL,
-    RESTART
+    RESTART,
+    REMAP
 };
 
 static const std::unordered_map<std::string, InitType> INIT_TYPES = {
     {"constant", InitType::CONSTANT},
     {"analytical", InitType::ANALYTICAL},
-    {"restart", InitType::RESTART}
+    {"restart", InitType::RESTART},
+    {"remap", InitType::REMAP}
 };
 
 void Solver::init_solution() {
@@ -56,12 +59,15 @@ void Solver::init_solution() {
         init_solution_constant();
     } else if (it->second == InitType::ANALYTICAL) {
         init_solution_analytical();
-    } else {
+    } else if (it->second == InitType::RESTART) {
         init_solution_restart();
+    } else {
+        init_solution_remap();
     }
     copy_host_to_device();
-    if (it->second != InitType::RESTART) statistics.start(t);
-    if (is_mixture() && it->second != InitType::RESTART) init_temperature_seed();
+    const bool from_file = it->second == InitType::RESTART || it->second == InitType::REMAP;
+    if (!from_file) statistics.start(t);
+    if (is_mixture() && !from_file) init_temperature_seed();
     update_primitives();
     if (p_max.is_allocated()) update_p_max();
 }
@@ -79,6 +85,20 @@ void Solver::init_solution_restart() {
     if (restart.n_cells != n_expected) {
         throw std::runtime_error("Restart file " + file + " does not match the mesh.");
     }
+    apply_restart(restart, file, true);
+    initial_state = "restart from " + file + " (step " + std::to_string(step) + ", t = " + logging::real(double(t)) + ")";
+}
+
+void Solver::init_solution_remap() {
+    remap::Report report;
+    const RestartData restart = remap::remap_restart(input, *mesh, mesh->axisymmetric, report);
+    const std::string file = toml::find<std::string>(input, "initialize", "file");
+    apply_restart(restart, file, false);
+    initial_state = "remap of " + file + " (step " + std::to_string(step) + ", t = " + logging::real(double(t)) +
+                    "): " + remap::describe(report, restart.names);
+}
+
+void Solver::apply_restart(const RestartData & restart, const std::string & file, bool resume_output) {
     // Variables map by name: the flow block, then one RHOY_<name> per species
     // CHEM_H (last chemistry sub-step) only seeds the integrator: a reacting run
     // may start from a non-reacting one, and a non-reacting run ignores it
@@ -129,10 +149,10 @@ void Solver::init_solution_restart() {
     t = static_cast<rtype>(restart.t);
     statistics.restore(restart, file, t);
     restore_characteristic_state(restart);
+    if (!resume_output) return;
     for (auto & writer : data_writers) {
         writer->resume(step, t);
     }
-    initial_state = "restart from " + file + " (step " + std::to_string(step) + ", t = " + logging::real(double(t)) + ")";
 }
 
 void Solver::init_solution_constant() {

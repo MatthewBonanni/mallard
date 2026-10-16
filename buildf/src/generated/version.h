@@ -1,0 +1,9 @@
+#ifndef MALLARD_VERSION_H
+#define MALLARD_VERSION_H
+
+#define MALLARD_VERSION "0.8.0"
+#define MALLARD_GIT_DESCRIBE "v0.8.0-56-gf2fe4f2-dirty"
+#define MALLARD_BUILD_TYPE "Release"
+#define MALLARD_COMPILER "AppleClang 21.0.0.21000334"
+
+#endif // MALLARD_VERSION_H
