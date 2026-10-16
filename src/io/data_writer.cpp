@@ -15,17 +15,22 @@
 #include "input.h"
 
 #include <algorithm>
+#include <chrono>
+#include <cerrno>
 #include <cmath>
 #include <cstring>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <limits>
 #include <numeric>
 #include <sstream>
+#include <unistd.h>
 #include <unordered_map>
 
 #include "common_io.h"
+#include "compression.h"
 #include "log.h"
 #include "mesh_block.h"
 #include "provenance.h"
@@ -45,6 +50,21 @@ uint8_t vtk_type(uint32_t dim, uint32_t n_nodes) {
     if (dim == 3 && n_nodes == 5) return 14;  // VTK_PYRAMID
     throw std::runtime_error("DataWriter: no VTK cell type for a " + std::to_string(dim) + "D element with " +
                              std::to_string(n_nodes) + " nodes.");
+}
+
+const std::unordered_map<std::string, Compression> COMPRESSION_TYPES = {
+    {"none", Compression::NONE},
+    {"zlib", Compression::ZLIB},
+};
+
+double seconds_since(std::chrono::steady_clock::time_point start) {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
+
+uint64_t file_bytes(const std::string & filename) {
+    std::error_code error;
+    const auto size = std::filesystem::file_size(filename, error);
+    return error ? 0 : uint64_t(size);
 }
 
 } // namespace
@@ -168,6 +188,41 @@ void DataWriter::init(const toml::value & input,
         }
     }
 
+    const std::string compression_str = toml::find_or<std::string>(input, "compression", "none");
+    const auto compression_it = COMPRESSION_TYPES.find(compression_str);
+    if (compression_it == COMPRESSION_TYPES.end()) {
+        throw unknown_option(COMPRESSION_TYPES, "write_data.compression", compression_str);
+    }
+    compression = compression_it->second;
+    if (compression != Compression::NONE) {
+        if (surface) throw InputError("write_data.compression: boundary-zone output is ASCII, which is not compressed.");
+        if (format == DataFormat::HDF5 ? !have_hdf5_deflate() : !compression::have_zlib()) {
+            throw std::runtime_error(format == DataFormat::HDF5
+                                         ? "DataWriter: compression = \"zlib\" needs an HDF5 library with the deflate filter."
+                                         : "DataWriter: compression = \"zlib\" needs a build with zlib (configure with "
+                                           "Mallard_ENABLE_ZLIB=ON).");
+        }
+    }
+    if (input.contains("chunk_cells")) {
+        if (format != DataFormat::RESTART || compression == Compression::NONE) {
+            throw InputError("write_data.chunk_cells is for compressed restart files.");
+        }
+        chunk_cells = toml::find<uint64_t>(input, "chunk_cells");
+        if (chunk_cells == 0) throw InputError("write_data.chunk_cells must be positive.");
+    }
+    if (input.contains("relative_error")) {
+        if (format == DataFormat::RESTART) {
+            throw InputError("write_data.relative_error: restart files are lossless.");
+        }
+        if (compression == Compression::NONE) {
+            throw InputError("write_data.relative_error needs compression = \"zlib\".");
+        }
+        relative_error = double(find_real(input, "relative_error"));
+        if (!(relative_error > 0.0 && relative_error < 1.0)) {
+            throw InputError("write_data.relative_error must be between 0 and 1.");
+        }
+    }
+
     const std::filesystem::path parent = std::filesystem::path(prefix).parent_path();
     if (!parent.empty()) {
         std::filesystem::create_directories(parent);
@@ -179,6 +234,9 @@ std::pair<std::string, std::string> DataWriter::summary() const {
                                  : format == DataFormat::HDF5  ? "_*.h5"
                                                                : "_*.vtu");
     if (geometry != "all") text += " (" + geometry + ")";
+    if (compression == Compression::ZLIB) {
+        text += relative_error > 0.0 ? ", zlib to relative error " + logging::real(relative_error) : ", zlib";
+    }
     text += interval > 0 ? " every " + logging::count(interval) + " steps" : " every t = " + logging::real(double(time_interval));
     if (format != DataFormat::RESTART) {
         std::string names;
@@ -203,38 +261,131 @@ rtype DataWriter::next_time() const {
     return static_cast<rtype>(n_written) * time_interval;
 }
 
+DataWriter::~DataWriter() {
+    if (!pending.valid()) return;
+    try {
+        pending.get();
+    } catch (...) {
+        // Unwinding from another error, or the run ended without finish()
+    }
+}
+
+void DataWriter::run(std::function<void()> job, bool allow_async) {
+    auto timed = [this, job = std::move(job)]() {
+        const auto start = std::chrono::steady_clock::now();
+        job();
+        t_writing += seconds_since(start);
+    };
+    if (async && allow_async) {
+        pending = std::async(std::launch::async, std::move(timed));
+    } else {
+        timed();
+    }
+}
+
+void DataWriter::finish() {
+    const auto start = std::chrono::steady_clock::now();
+    if (pending.valid()) pending.get();
+    // Every rank's part of the files is written before any rank reads them
+    if (comm::size() > 1) comm::barrier();
+    t_blocking += seconds_since(start);
+}
+
+DataWriter::Values DataWriter::capture(uint32_t n_cells) const {
+    Values values(fields.size());
+    for (size_t f = 0; f < fields.size(); f++) values[f].resize(size_t(n_cells) * fields[f].n_vtk_components());
+    // The run waits for this copy: blocks of cells of every field on io_threads threads
+    constexpr uint32_t BLOCK = 1u << 18;
+    const size_t n_blocks = (size_t(n_cells) + BLOCK - 1) / BLOCK;
+    compression::parallel_for(fields.size() * n_blocks, io_threads, [&](size_t task) {
+        const Field & field = fields[task / n_blocks];
+        const uint32_t n_comp = field.n_vtk_components();
+        const uint32_t first = static_cast<uint32_t>(task % n_blocks) * BLOCK;
+        const uint32_t last = std::min(n_cells, first + BLOCK);
+        rtype * out = values[task / n_blocks].data();
+        if (n_comp == 1) {
+            const Data & data = *field.components[0];
+            for (uint32_t i = first; i < last; i++) out[i] = data[i];
+            return;
+        }
+        for (uint32_t i = first; i < last; i++) {
+            for (uint32_t k = 0; k < n_comp; k++) out[size_t(i) * n_comp + k] = field.value(i, k);
+        }
+    });
+    return values;
+}
+
+DataWriter::Values DataWriter::capture_faces() const {
+    Values values(fields.size());
+    for (size_t f = 0; f < fields.size(); f++) {
+        for (uint32_t face : geometry_faces) {
+            const uint32_t cell = static_cast<uint32_t>(mesh->h_cells_of_face(face, 0));
+            for (uint32_t k = 0; k < fields[f].n_vtk_components(); k++) values[f].push_back(fields[f].value(cell, k));
+        }
+    }
+    return values;
+}
+
 void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttributes & attributes,
                        const RestartFaces & faces) {
     if (!(due(step, t) || force) || step == step_last) {
         return;
     }
+    const auto start = std::chrono::steady_clock::now();
+    // One snapshot at a time: the previous one is written before the next is taken
+    if (pending.valid()) pending.get();
+    const bool distributed = mesh->n_global_cells > 0;
+    const bool root = comm::is_root();
     std::ostringstream stream;
     stream << prefix << "_" << std::setw(LEN_STEP) << std::setfill('0')
            << (interval > 0 || format == DataFormat::RESTART ? step : history.size());
+    const std::string stem = stream.str();
     if (format == DataFormat::RESTART) {
-        write_restart(stream.str() + ".restart", step, t, attributes, faces);
-        logging::event(step, double(t), "restart", stream.str() + ".restart");
+        write_restart(stem + ".restart", step, t, attributes, faces);
+        logging::event(step, double(t), "restart", stem + ".restart");
     } else if (format == DataFormat::HDF5) {
-        if (!hdf5_mesh_written) write_hdf5_mesh();
-        write_hdf5(stream.str(), step, t);
-        history.emplace_back(t, stream.str() + ".h5");
-        if (comm::is_root()) write_xdmf(stream.str());
-        logging::event(step, double(t), "hdf5", stream.str() + ".h5");
+        history.emplace_back(t, stem + ".h5");
+        // Parallel HDF5 writes collectively through MPI, which only the main thread calls
+        const bool collective = distributed && comm::size() > 1;
+        if (distributed || root) {
+            auto job = [this, stem, step, t, root, values = capture(mesh->n_owned()), series = history]() {
+                if (!hdf5_mesh_written) {
+                    write_hdf5_mesh();
+                    if (root) n_bytes += file_bytes(prefix + "_mesh.h5");
+                }
+                write_hdf5(stem, step, t, values);
+                if (root) {
+                    n_bytes += file_bytes(stem + ".h5");
+                    write_xdmf(stem, series);
+                }
+            };
+            run(std::move(job), !collective);
+        }
+        logging::event(step, double(t), "hdf5", stem + ".h5");
     } else {
         // Distributed runs: one piece per rank and a .pvtu index
-        const bool pieces = mesh->n_global_cells > 0;
         std::ostringstream piece;
-        piece << stream.str();
-        if (pieces) piece << "_p" << std::setw(4) << std::setfill('0') << comm::rank();
-        if (!surface) {
-            write_vtu(piece.str() + ".vtu", t);
-        } else {
-            write_vtu_faces(piece.str() + ".vtu", t);
-        }
-        const std::string filename = stream.str() + (pieces ? ".pvtu" : ".vtu");
-        if (pieces && comm::is_root()) write_pvtu(filename, std::filesystem::path(stream.str()).filename().string());
+        piece << stem;
+        if (distributed) piece << "_p" << std::setw(4) << std::setfill('0') << comm::rank();
+        const std::string filename = stem + (distributed ? ".pvtu" : ".vtu");
         history.emplace_back(t, filename);
-        if (comm::is_root()) write_pvd();
+        const int n_ranks = comm::size();
+        if (distributed || root) {
+            auto job = [this, piece = piece.str() + ".vtu", filename, stem, t, root, distributed, n_ranks,
+                        values = surface ? capture_faces() : capture(mesh->n_owned()), series = history]() mutable {
+                if (!surface) {
+                    write_vtu(piece, t, values);
+                } else {
+                    write_vtu_faces(piece, t, values);
+                }
+                n_bytes += file_bytes(piece);
+                if (distributed && root) {
+                    write_pvtu(filename, std::filesystem::path(stem).filename().string(), n_ranks);
+                }
+                if (root) write_pvd(series);
+            };
+            run(std::move(job));
+        }
         logging::event(step, double(t), surface ? "surface" : "vtu", filename);
     }
     if (interval == 0) {
@@ -248,6 +399,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
     step_last = step;
     t_last = t;
     n_files++;
+    t_blocking += seconds_since(start);
 }
 
 void DataWriter::resume(uint64_t step, rtype t) {
@@ -283,7 +435,9 @@ void DataWriter::resume(uint64_t step, rtype t) {
 namespace {
 
 constexpr char RESTART_MAGIC[16] = "MALLARD-RESTART";
-constexpr uint32_t RESTART_VERSION = 4;
+constexpr uint32_t RESTART_VERSION = 5;
+// Codec of the chunks of compressed restart files (version 5)
+constexpr uint32_t RESTART_CODEC_ZLIB = 1;
 constexpr char PROVENANCE_MAGIC[16] = "MLRD-PROVENANCE";
 
 /**
@@ -328,20 +482,24 @@ std::string read_provenance_trailer(std::ifstream & in) {
  *        length and its characters, then (version 3) the attribute count as a
  *        uint64 and each attribute's name, likewise, and double value, then
  *        (version 4) the face count as a uint64 and the values per face as a
- *        uint32. The values follow, one block of n_cells per variable, then
- *        the face keys in increasing order and the faces' values. Files are
- *        written with the lowest version that holds their contents, which
- *        older builds read.
+ *        uint32, then (version 5) the codec as a uint32 and the cells per
+ *        chunk as a uint64. The values follow, one block of n_cells per
+ *        variable, then the face keys in increasing order and the faces'
+ *        values. In version 5, the blocks are compressed in chunks of
+ *        chunk_cells cells, each byte-shuffled and deflated, and the header is
+ *        followed by the file offset of every chunk (variable by variable) and
+ *        of the faces. Files are written with the lowest version that holds
+ *        their contents, which older builds read.
  */
 std::vector<char> restart_header(uint64_t n_cells, uint64_t step, double t, const std::vector<std::string> & names,
-                                 const RestartAttributes & attributes, uint64_t n_faces) {
+                                 const RestartAttributes & attributes, uint64_t n_faces, uint64_t chunk_cells = 0) {
     std::vector<char> header;
     auto put = [&](const void * p, size_t n) {
         header.insert(header.end(), static_cast<const char *>(p), static_cast<const char *>(p) + n);
     };
     const uint32_t real_size = sizeof(rtype);
     const uint64_t n_vars = names.size();
-    const uint32_t version = n_faces > 0 ? 4 : attributes.empty() ? 2 : 3;
+    const uint32_t version = chunk_cells > 0 ? 5 : n_faces > 0 ? 4 : attributes.empty() ? 2 : 3;
     put(RESTART_MAGIC, sizeof(RESTART_MAGIC));
     put(&version, sizeof(version));
     put(&real_size, sizeof(real_size));
@@ -367,6 +525,9 @@ std::vector<char> restart_header(uint64_t n_cells, uint64_t step, double t, cons
     const uint32_t width = RestartFaces::WIDTH;
     put(&n_faces, sizeof(n_faces));
     put(&width, sizeof(width));
+    if (version < 5) return header;
+    put(&RESTART_CODEC_ZLIB, sizeof(RESTART_CODEC_ZLIB));
+    put(&chunk_cells, sizeof(chunk_cells));
     return header;
 }
 
@@ -419,6 +580,67 @@ OrderedFaces order_faces(const RestartFaces & faces, uint64_t n_cells, bool dist
     return out;
 }
 
+/**
+ * @brief The compressed chunks of the cells [first, first + n) of a restart
+ *        file, first a multiple of chunk_cells: chunk c of variable v is
+ *        data[v * n_chunks + c].
+ */
+struct RestartChunks {
+    uint64_t n_chunks = 0;
+    std::vector<std::vector<char>> data;
+
+    RestartChunks(const std::vector<std::vector<rtype>> & values, uint64_t n, uint64_t chunk_cells, unsigned n_threads)
+        : n_chunks((n + chunk_cells - 1) / chunk_cells), data(values.size() * n_chunks) {
+        compression::parallel_for(data.size(), n_threads, [&](size_t k) {
+            const uint64_t c = k % n_chunks, first = c * chunk_cells;
+            const uint64_t n_cells = std::min(chunk_cells, n - first);
+            data[k] = compression::deflate(values[k / n_chunks].data() + first, n_cells * sizeof(rtype), sizeof(rtype));
+        });
+    }
+
+    /** @brief The chunk count, then each chunk's size, for chunk_offsets. */
+    std::vector<uint64_t> sizes() const {
+        std::vector<uint64_t> out{n_chunks};
+        for (const auto & chunk : data) out.push_back(chunk.size());
+        return out;
+    }
+};
+
+/**
+ * @brief File offsets of every chunk of a restart file (variable by variable)
+ *        and of its faces, from each rank's RestartChunks::sizes in rank order.
+ */
+std::vector<uint64_t> chunk_offsets(const std::vector<uint64_t> & all_sizes, uint64_t n_vars, uint64_t n_chunks,
+                                    uint64_t data_start) {
+    std::vector<uint64_t> size(n_vars * n_chunks, 0);
+    uint64_t c0 = 0;
+    for (size_t at = 0; at < all_sizes.size();) {
+        const uint64_t n = all_sizes[at++];
+        for (uint64_t v = 0; v < n_vars; v++) {
+            for (uint64_t c = 0; c < n; c++) size[v * n_chunks + c0 + c] = all_sizes[at++];
+        }
+        c0 += n;
+    }
+    if (c0 != n_chunks) throw std::logic_error("DataWriter: restart chunks do not cover the cells.");
+    std::vector<uint64_t> offsets{data_start};
+    for (uint64_t s : size) offsets.push_back(offsets.back() + s);
+    return offsets;
+}
+
+#ifdef Mallard_HAS_MPI
+void write_at(int fd, uint64_t offset, const void * data, size_t n, const std::string & filename) {
+    const char * p = static_cast<const char *>(data);
+    while (n > 0) {
+        const ssize_t written = ::pwrite(fd, p, std::min<size_t>(n, size_t(1) << 30), static_cast<off_t>(offset));
+        if (written < 0 && errno == EINTR) continue;
+        if (written <= 0) throw std::runtime_error("DataWriter: could not write " + filename + ".");
+        p += written;
+        n -= static_cast<size_t>(written);
+        offset += static_cast<uint64_t>(written);
+    }
+}
+#endif
+
 } // namespace
 
 const std::vector<rtype> * RestartData::find(const std::string & name) const {
@@ -442,55 +664,156 @@ const rtype * RestartData::face(uint64_t key) const {
 }
 
 void DataWriter::write_restart(const std::string & filename, uint64_t step, rtype t,
-                               const RestartAttributes & attributes, const RestartFaces & faces) const {
+                               const RestartAttributes & attributes, const RestartFaces & faces) {
     if (mesh->n_global_cells > 0) {
         write_restart_distributed(filename, step, t, attributes, faces);
         return;
     }
-    const OrderedFaces ordered = order_faces(faces, mesh->n_cells, false);
-    std::ofstream out(filename, std::ios::binary);
-    if (!out.good()) {
-        throw std::runtime_error("DataWriter::write_restart: Could not open file: " + filename + ".");
-    }
-    std::vector<std::string> names;
-    for (const auto & field : fields) names.push_back(field.name);
-    const std::vector<char> header = restart_header(mesh->n_cells, step, double(t), names, attributes, ordered.total);
-    out.write(header.data(), static_cast<std::streamsize>(header.size()));
-    for (const auto & field : fields) {
-        for (uint32_t i = 0; i < mesh->n_cells; i++) {
-            const rtype value = field.value(i, 0);
-            out.write(reinterpret_cast<const char *>(&value), sizeof(rtype));
+    // Serial runs on several ranks (tests) hold the whole mesh on every rank
+    if (!comm::is_root()) return;
+    auto job = [this, filename, step, t, attributes, ordered = order_faces(faces, mesh->n_cells, false),
+                values = capture(mesh->n_cells), trailer = provenance_trailer()]() {
+        std::ofstream out(filename, std::ios::binary);
+        if (!out.good()) {
+            throw std::runtime_error("DataWriter::write_restart: Could not open file: " + filename + ".");
         }
-    }
-    out.write(reinterpret_cast<const char *>(ordered.part.keys.data()),
-              static_cast<std::streamsize>(ordered.part.keys.size() * sizeof(uint64_t)));
-    out.write(reinterpret_cast<const char *>(ordered.part.values.data()),
-              static_cast<std::streamsize>(ordered.part.values.size() * sizeof(rtype)));
-    const std::vector<char> trailer = provenance_trailer();
-    out.write(trailer.data(), static_cast<std::streamsize>(trailer.size()));
+        std::vector<std::string> names;
+        for (const auto & field : fields) names.push_back(field.name);
+        auto put = [&](const void * data, size_t n) { out.write(static_cast<const char *>(data), std::streamsize(n)); };
+        const uint64_t n_cells = mesh->n_cells;
+        if (compression == Compression::NONE) {
+            const std::vector<char> header = restart_header(n_cells, step, double(t), names, attributes, ordered.total);
+            put(header.data(), header.size());
+            for (const auto & var : values) put(var.data(), var.size() * sizeof(rtype));
+        } else {
+            const RestartChunks chunks(values, n_cells, chunk_cells, io_threads);
+            const std::vector<char> header =
+                restart_header(n_cells, step, double(t), names, attributes, ordered.total, chunk_cells);
+            const std::vector<uint64_t> offsets = chunk_offsets(
+                chunks.sizes(), names.size(), chunks.n_chunks,
+                header.size() + (names.size() * chunks.n_chunks + 1) * sizeof(uint64_t));
+            put(header.data(), header.size());
+            put(offsets.data(), offsets.size() * sizeof(uint64_t));
+            for (const auto & chunk : chunks.data) put(chunk.data(), chunk.size());
+        }
+        put(ordered.part.keys.data(), ordered.part.keys.size() * sizeof(uint64_t));
+        put(ordered.part.values.data(), ordered.part.values.size() * sizeof(rtype));
+        put(trailer.data(), trailer.size());
+        out.close();
+        if (!out) throw std::runtime_error("DataWriter::write_restart: Could not write file: " + filename + ".");
+        n_bytes += file_bytes(filename);
+    };
+    run(std::move(job));
 }
 
 void DataWriter::write_restart_distributed(const std::string & filename, uint64_t step, rtype t,
-                                           const RestartAttributes & attributes, const RestartFaces & faces) const {
+                                           const RestartAttributes & attributes, const RestartFaces & faces) {
 #ifdef Mallard_HAS_MPI
     const OrderedFaces ordered = order_faces(faces, mesh->n_global_cells, true);
+    const uint64_t n_global = mesh->n_global_cells;
+    std::vector<std::string> names;
+    for (const auto & field : fields) names.push_back(field.name);
+    const uint32_t n_owned = mesh->n_owned();
+    constexpr uint32_t W = RestartFaces::WIDTH;
+    if (async || compression != Compression::NONE) {
+        // Each rank gathers a run of whole chunks of cells in global order, and
+        // writes it (and its faces) at offsets that all ranks agree on here,
+        // so that writing needs no MPI
+        if (!restart_order_built) {
+            const std::vector<uint64_t> ids(mesh->h_global_cell_id.begin(), mesh->h_global_cell_id.begin() + n_owned);
+            restart_order = GlobalOrder(ids, n_global, true, chunk_cells);
+            restart_order_built = true;
+        }
+        std::vector<std::vector<rtype>> block(fields.size());
+        std::vector<rtype> owned(n_owned);
+        for (size_t v = 0; v < fields.size(); v++) {
+            for (uint32_t i = 0; i < n_owned; i++) owned[i] = fields[v].value(i, 0);
+            block[v] = restart_order.gather<rtype>(owned, 1);
+        }
+        const uint64_t first = restart_order.first(), n = restart_order.size();
+        const uint64_t n_vars = fields.size();
+        std::shared_ptr<RestartChunks> chunks;
+        std::vector<char> header;
+        std::vector<uint64_t> offsets;  // file offset of each variable's block of this rank, then of the faces
+        std::vector<uint64_t> table;
+        if (compression == Compression::NONE) {
+            header = restart_header(n_global, step, double(t), names, attributes, ordered.total);
+            for (uint64_t v = 0; v < n_vars; v++) offsets.push_back(header.size() + (v * n_global + first) * sizeof(rtype));
+            offsets.push_back(header.size() + n_vars * n_global * sizeof(rtype));
+        } else {
+            chunks = std::make_shared<RestartChunks>(block, n, chunk_cells, io_threads);
+            const uint64_t n_chunks = (n_global + chunk_cells - 1) / chunk_cells;
+            header = restart_header(n_global, step, double(t), names, attributes, ordered.total, chunk_cells);
+            table = chunk_offsets(comm::allgatherv(chunks->sizes()), n_vars, n_chunks,
+                                  header.size() + (n_vars * n_chunks + 1) * sizeof(uint64_t));
+            for (uint64_t v = 0; v < n_vars; v++) offsets.push_back(table[v * n_chunks + first / chunk_cells]);
+            offsets.push_back(table.back());
+            block.clear();
+        }
+        const bool root = comm::is_root();
+        if (root) {
+            const int fd = ::open(filename.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0644);
+            if (fd < 0) throw std::runtime_error("DataWriter::write_restart: Could not open file: " + filename + ".");
+            ::close(fd);
+        }
+        comm::barrier();
+        auto job = [this, filename, root, header = std::move(header), table = std::move(table),
+                    offsets = std::move(offsets), block = std::move(block), chunks, ordered,
+                    trailer = root ? provenance_trailer() : std::vector<char>()]() {
+            const int fd = ::open(filename.c_str(), O_WRONLY);
+            if (fd < 0) throw std::runtime_error("DataWriter::write_restart: Could not open file: " + filename + ".");
+            uint64_t written = 0;
+            auto put = [&](uint64_t at, const void * data, size_t size) {
+                write_at(fd, at, data, size, filename);
+                written += size;
+            };
+            try {
+                if (root) {
+                    put(0, header.data(), header.size());
+                    put(header.size(), table.data(), table.size() * sizeof(uint64_t));
+                }
+                for (size_t v = 0; v + 1 < offsets.size(); v++) {
+                    if (!chunks) {
+                        put(offsets[v], block[v].data(), block[v].size() * sizeof(rtype));
+                        continue;
+                    }
+                    uint64_t at = offsets[v];
+                    for (uint64_t c = 0; c < chunks->n_chunks; c++) {
+                        const auto & chunk = chunks->data[v * chunks->n_chunks + c];
+                        put(at, chunk.data(), chunk.size());
+                        at += chunk.size();
+                    }
+                }
+                const uint64_t faces_at = offsets.back();
+                put(faces_at + ordered.first * sizeof(uint64_t), ordered.part.keys.data(),
+                    ordered.part.keys.size() * sizeof(uint64_t));
+                put(faces_at + ordered.total * sizeof(uint64_t) + ordered.first * W * sizeof(rtype),
+                    ordered.part.values.data(), ordered.part.values.size() * sizeof(rtype));
+                if (root) put(faces_at + ordered.total * (sizeof(uint64_t) + W * sizeof(rtype)), trailer.data(), trailer.size());
+            } catch (...) {
+                ::close(fd);
+                throw;
+            }
+            if (::close(fd) != 0) throw std::runtime_error("DataWriter::write_restart: Could not write " + filename + ".");
+            n_bytes += written;
+        };
+        run(std::move(job));
+        return;
+    }
     // Same layout as a serial restart, cells in global order: each rank writes
     // its owned cells at their global offsets, so any rank count can read it
+    const auto start = std::chrono::steady_clock::now();
     MPI_File fh;
     if (MPI_File_open(comm::world(), filename.c_str(), MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh) !=
         MPI_SUCCESS) {
         throw std::runtime_error("DataWriter::write_restart: Could not open file: " + filename + ".");
     }
     MPI_File_set_size(fh, 0);
-    const uint64_t n_global = mesh->n_global_cells;
-    std::vector<std::string> names;
-    for (const auto & field : fields) names.push_back(field.name);
     const std::vector<char> header = restart_header(n_global, step, double(t), names, attributes, ordered.total);
     if (comm::is_root()) {
         MPI_File_write_at(fh, 0, header.data(), static_cast<int>(header.size()), MPI_BYTE, MPI_STATUS_IGNORE);
     }
     const MPI_Offset header_size = static_cast<MPI_Offset>(header.size());
-    const uint32_t n_owned = mesh->n_owned();
     const MPI_Datatype real_type = sizeof(rtype) == sizeof(double) ? MPI_DOUBLE : MPI_FLOAT;
     std::vector<MPI_Aint> displacements(n_owned);
     for (uint32_t i = 0; i < n_owned; i++) displacements[i] = static_cast<MPI_Aint>(mesh->h_global_cell_id[i] * sizeof(rtype));
@@ -506,7 +829,6 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
     }
     MPI_Type_free(&file_type);
     // Each rank's faces are a contiguous run of the keys and of the values
-    constexpr uint32_t W = RestartFaces::WIDTH;
     const MPI_Offset faces_at = header_size + MPI_Offset(fields.size() * n_global * sizeof(rtype));
     MPI_File_set_view(fh, 0, MPI_BYTE, MPI_BYTE, "native", MPI_INFO_NULL);
     MPI_File_write_at_all(fh, faces_at + MPI_Offset(ordered.first * sizeof(uint64_t)), ordered.part.keys.data(),
@@ -521,6 +843,8 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
                           trailer.data(), static_cast<int>(trailer.size()), MPI_BYTE, MPI_STATUS_IGNORE);
     }
     MPI_File_close(&fh);
+    if (comm::is_root()) n_bytes += file_bytes(filename);
+    t_writing += seconds_since(start);
 #else
     (void)filename;
     (void)step;
@@ -538,7 +862,7 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
     }
     char magic[16];
     uint32_t version, real_size;
-    uint64_t n_vars, n_faces = 0;
+    uint64_t n_vars, n_faces = 0, chunk_cells = 0;
     RestartData data;
     in.read(magic, sizeof(magic));
     in.read(reinterpret_cast<char *>(&version), sizeof(version));
@@ -595,6 +919,18 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
                                          " values per face, not " + std::to_string(RestartFaces::WIDTH) + ".");
             }
         }
+        if (version >= 5) {
+            uint32_t codec = 0;
+            in.read(reinterpret_cast<char *>(&codec), sizeof(codec));
+            in.read(reinterpret_cast<char *>(&chunk_cells), sizeof(chunk_cells));
+            if (in.good() && (codec != RESTART_CODEC_ZLIB || chunk_cells == 0)) {
+                throw std::runtime_error("Restart file " + filename + " has an unknown compression.");
+            }
+            if (!compression::have_zlib()) {
+                throw std::runtime_error("Restart file " + filename +
+                                         " is compressed, which needs a build with zlib (Mallard_ENABLE_ZLIB=ON).");
+            }
+        }
         const bool has_z = std::find(data.names.begin(), data.names.end(), "RHOU_Z") != data.names.end();
         if (has_z != (N_DIM == 3)) {
             throw std::runtime_error("Restart file " + filename + " holds a " + std::string(has_z ? "3" : "2") +
@@ -610,13 +946,45 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
         throw std::runtime_error("Restart file " + filename + " is truncated.");
     }
     const std::streamoff header = in.tellg();
+    std::vector<uint64_t> chunk_at;  // version 5: file offset of each chunk, then of the faces
+    if (chunk_cells > 0) {
+        const uint64_t n_chunks = (data.n_cells + chunk_cells - 1) / chunk_cells;
+        chunk_at.resize(n_vars * n_chunks + 1);
+        in.read(reinterpret_cast<char *>(chunk_at.data()), static_cast<std::streamsize>(chunk_at.size() * sizeof(uint64_t)));
+        if (!in.good() || !std::is_sorted(chunk_at.begin(), chunk_at.end())) {
+            throw std::runtime_error("Restart file " + filename + " has a corrupt chunk table.");
+        }
+    }
+    // Chunk c of variable v of a version 5 file, decompressed
+    std::vector<char> compressed;
+    auto read_chunk = [&](uint64_t v, uint64_t c, std::vector<rtype> & out) {
+        const uint64_t n_chunks = (chunk_at.size() - 1) / n_vars;
+        const uint64_t k = v * n_chunks + c;
+        out.resize(std::min(chunk_cells, data.n_cells - c * chunk_cells));
+        compressed.resize(chunk_at[k + 1] - chunk_at[k]);
+        in.seekg(static_cast<std::streamoff>(chunk_at[k]));
+        in.read(compressed.data(), static_cast<std::streamsize>(compressed.size()));
+        if (!in.good()) throw std::runtime_error("Restart file " + filename + " is truncated.");
+        compression::inflate(compressed.data(), compressed.size(), out.data(), out.size() * sizeof(rtype),
+                             sizeof(rtype));
+    };
     if (!cells) {
         data.fields.assign(n_vars, std::vector<rtype>(data.n_cells));
-        for (auto & var : data.fields) {
-            in.read(reinterpret_cast<char *>(var.data()), static_cast<std::streamsize>(data.n_cells * sizeof(rtype)));
+        if (chunk_cells > 0) {
+            std::vector<rtype> chunk;
+            for (uint64_t v = 0; v < n_vars; v++) {
+                for (uint64_t c = 0; c * chunk_cells < data.n_cells; c++) {
+                    read_chunk(v, c, chunk);
+                    std::copy(chunk.begin(), chunk.end(), data.fields[v].begin() + std::ptrdiff_t(c * chunk_cells));
+                }
+            }
+        } else {
+            for (auto & var : data.fields) {
+                in.read(reinterpret_cast<char *>(var.data()), static_cast<std::streamsize>(data.n_cells * sizeof(rtype)));
+            }
         }
     } else {
-        // Runs of consecutive global ids, read with one seek each
+        // Runs of consecutive global ids, read with one seek each (or one chunk each)
         std::vector<uint32_t> order(cells->size());
         std::iota(order.begin(), order.end(), 0u);
         std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) { return (*cells)[a] < (*cells)[b]; });
@@ -628,6 +996,14 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
         for (uint64_t v = 0; v < n_vars; v++) {
             for (size_t a = 0; a < order.size();) {
                 size_t b = a + 1;
+                if (chunk_cells > 0) {
+                    const uint64_t c = (*cells)[order[a]] / chunk_cells;
+                    while (b < order.size() && (*cells)[order[b]] / chunk_cells == c) b++;
+                    read_chunk(v, c, run);
+                    for (size_t k = a; k < b; k++) data.fields[v][order[k]] = run[(*cells)[order[k]] - c * chunk_cells];
+                    a = b;
+                    continue;
+                }
                 while (b < order.size() && (*cells)[order[b]] == (*cells)[order[b - 1]] + 1) b++;
                 run.resize(b - a);
                 in.seekg(header + static_cast<std::streamoff>((v * data.n_cells + (*cells)[order[a]]) * sizeof(rtype)));
@@ -638,7 +1014,8 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
         }
     }
     // Every rank reads all faces: they are few, and any cell may have one
-    in.seekg(header + static_cast<std::streamoff>(n_vars * data.n_cells * sizeof(rtype)));
+    in.seekg(chunk_cells > 0 ? static_cast<std::streamoff>(chunk_at.back())
+                             : header + static_cast<std::streamoff>(n_vars * data.n_cells * sizeof(rtype)));
     data.faces.keys.resize(n_faces);
     data.faces.values.resize(n_faces * RestartFaces::WIDTH);
     in.read(reinterpret_cast<char *>(data.faces.keys.data()), static_cast<std::streamsize>(n_faces * sizeof(uint64_t)));
@@ -654,7 +1031,7 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
     return data;
 }
 
-void DataWriter::write_pvtu(const std::string & filename, const std::string & stem) const {
+void DataWriter::write_pvtu(const std::string & filename, const std::string & stem, int n_ranks) const {
     std::ofstream out(filename);
     out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n";
     out << "<VTKFile type=\"PUnstructuredGrid\" version=\"1.0\" byte_order=\"" << endianness()
@@ -668,19 +1045,19 @@ void DataWriter::write_pvtu(const std::string & filename, const std::string & st
     }
     out << "    </PCellData>\n";
     out << "    <PPoints>\n      <PDataArray type=\"" << vtk_float_type() << "\" NumberOfComponents=\"3\"/>\n    </PPoints>\n";
-    for (int r = 0; r < comm::size(); r++) {
+    for (int r = 0; r < n_ranks; r++) {
         out << "    <Piece Source=\"" << stem << "_p" << std::setw(4) << std::setfill('0') << r << ".vtu\"/>\n";
     }
     out << "  </PUnstructuredGrid>\n";
     out << "</VTKFile>\n";
 }
 
-void DataWriter::write_pvd() const {
+void DataWriter::write_pvd(const std::vector<std::pair<rtype, std::string>> & series) const {
     std::ofstream out(prefix + ".pvd");
     out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n";
     out << "<VTKFile type=\"Collection\" version=\"0.1\" byte_order=\"" << endianness() << "\">\n";
     out << "  <Collection>\n";
-    for (const auto & [t, filename] : history) {
+    for (const auto & [t, filename] : series) {
         out << "    <DataSet timestep=\"" << std::setprecision(std::numeric_limits<double>::max_digits10) << t << "\" file=\""
             << std::filesystem::path(filename).filename().string() << "\"/>\n";
     }
@@ -688,7 +1065,7 @@ void DataWriter::write_pvd() const {
     out << "</VTKFile>\n";
 }
 
-void DataWriter::write_vtu_faces(const std::string & filename, rtype t) const {
+void DataWriter::write_vtu_faces(const std::string & filename, rtype t, const Values & values) const {
     std::ofstream out(filename);
     if (!out.good()) {
         throw std::runtime_error("DataWriter::write_vtu_faces: Could not open file: " + filename + ".");
@@ -714,15 +1091,12 @@ void DataWriter::write_vtu_faces(const std::string & filename, rtype t) const {
     out << "    </FieldData>\n";
     out << "    <Piece NumberOfPoints=\"" << nodes.size() << "\" NumberOfCells=\"" << geometry_faces.size() << "\">\n";
     out << "      <CellData>\n";
-    for (const auto & field : fields) {
+    for (size_t i_field = 0; i_field < fields.size(); i_field++) {
+        const Field & field = fields[i_field];
         out << "        <DataArray type=\"Float64\" Name=\"" << field.name << "\" ";
         if (field.n_vtk_components() > 1) out << "NumberOfComponents=\"" << field.n_vtk_components() << "\" ";
         out << "format=\"ascii\">\n";
-        for (uint32_t f : geometry_faces) {
-            for (uint32_t k = 0; k < field.n_vtk_components(); k++) {
-                out << static_cast<double>(field.value(static_cast<uint32_t>(mesh->h_cells_of_face(f, 0)), k)) << " ";
-            }
-        }
+        for (rtype value : values[i_field]) out << static_cast<double>(value) << " ";
         out << "\n        </DataArray>\n";
     }
     out << "      </CellData>\n";
@@ -756,7 +1130,38 @@ void DataWriter::write_vtu_faces(const std::string & filename, rtype t) const {
     out << "</VTKFile>\n";
 }
 
-void DataWriter::write_vtu(const std::string & filename, rtype t) const {
+namespace {
+
+/** @brief Bytes of a vector. */
+template <typename T>
+std::vector<char> as_bytes(const std::vector<T> & values) {
+    std::vector<char> bytes(values.size() * sizeof(T));
+    std::memcpy(bytes.data(), values.data(), bytes.size());
+    return bytes;
+}
+
+/**
+ * @brief An appended VTU array compressed as vtkZLibDataCompressor reads it:
+ *        the UInt64 block count, block size and size of the last, partial
+ *        block (0: full), each block's compressed size, then the blocks.
+ */
+std::vector<char> vtu_zlib_array(const void * data, size_t n_bytes, unsigned n_threads) {
+    constexpr size_t BLOCK = size_t(1) << 20;
+    const size_t n_blocks = (n_bytes + BLOCK - 1) / BLOCK;
+    std::vector<std::vector<char>> blocks(n_blocks);
+    compression::parallel_for(n_blocks, n_threads, [&](size_t b) {
+        blocks[b] = compression::deflate(static_cast<const char *>(data) + b * BLOCK, std::min(BLOCK, n_bytes - b * BLOCK));
+    });
+    std::vector<uint64_t> header{n_blocks, BLOCK, n_bytes % BLOCK};
+    for (const auto & block : blocks) header.push_back(block.size());
+    std::vector<char> out = as_bytes(header);
+    for (const auto & block : blocks) out.insert(out.end(), block.begin(), block.end());
+    return out;
+}
+
+} // namespace
+
+void DataWriter::write_vtu(const std::string & filename, rtype t, Values & values) {
     std::ofstream out(filename, std::ios::binary);
     if (!out.good()) {
         throw std::runtime_error("DataWriter::write_vtu: Could not open file: " + filename + ".");
@@ -765,25 +1170,64 @@ void DataWriter::write_vtu(const std::string & filename, rtype t) const {
     using header_t = uint64_t;
     // Distributed runs write their owned cells; unused halo nodes are harmless
     const uint32_t n_out = mesh->n_owned();
-    uint64_t len_connectivity = 0;
-    for (uint32_t i = 0; i < n_out; i++) {
-        len_connectivity += mesh->h_n_nodes_of_cell(i);
+    const bool zlib = compression == Compression::ZLIB;
+
+    // The mesh's arrays (points, connectivity, offsets, types): the same in
+    // every snapshot, so compressed ones are kept
+    std::vector<std::vector<char>> mesh_arrays;
+    std::vector<std::vector<char>> & arrays = zlib ? vtu_mesh : mesh_arrays;
+    if (arrays.empty()) {
+        std::vector<rtype> points;
+        points.reserve(size_t(mesh->n_nodes) * 3);
+        for (uint32_t i_node = 0; i_node < mesh->n_nodes; i_node++) {
+            FOR_I_DIM points.push_back(static_cast<rtype>(mesh->h_node_coords(i_node, i)));
+            for (uint8_t i = N_DIM; i < 3; i++) points.push_back(static_cast<rtype>(0.0));
+        }
+        std::vector<int64_t> connectivity, offsets;
+        std::vector<uint8_t> types;
+        int64_t cell_offset = 0;
+        for (uint32_t i = 0; i < n_out; i++) {
+            const uint32_t n_nodes = mesh->h_n_nodes_of_cell(i);
+            for (uint32_t j = 0; j < n_nodes; j++) {
+                connectivity.push_back(static_cast<int64_t>(mesh->h_node_of_cell(i, vtk_local_node(n_nodes, j))));
+            }
+            cell_offset += n_nodes;
+            offsets.push_back(cell_offset);
+            types.push_back(vtk_type(N_DIM, n_nodes));
+        }
+        arrays = {as_bytes(points), as_bytes(connectivity), as_bytes(offsets), as_bytes(types)};
+        if (zlib) {
+            for (auto & array : arrays) array = vtu_zlib_array(array.data(), array.size(), io_threads);
+        }
+    }
+    if (relative_error > 0.0) {
+        for (auto & field : values) compression::round_to_relative_error(field, relative_error);
+    }
+    std::vector<std::vector<char>> field_arrays;
+    if (zlib) {
+        for (const auto & field : values) {
+            field_arrays.push_back(vtu_zlib_array(field.data(), field.size() * sizeof(rtype), io_threads));
+        }
     }
 
     // Header with appended-data offsets
     uint64_t offset = 0;
-    auto data_array = [&](const std::string & type, const std::string & name,
-                          uint32_t n_comp, uint64_t n_bytes) {
+    auto data_array = [&](const std::string & type, const std::string & name, uint32_t n_comp, uint64_t n_bytes_in) {
         out << "        <DataArray type=\"" << type << "\" ";
         if (!name.empty()) out << "Name=\"" << name << "\" ";
         if (n_comp > 1) out << "NumberOfComponents=\"" << n_comp << "\" ";
         out << "format=\"appended\" offset=\"" << offset << "\"/>\n";
-        offset += sizeof(header_t) + n_bytes;
+        offset += n_bytes_in;
+    };
+    // An array's appended bytes: its size and its values, or its compressed blocks
+    auto appended_size = [&](size_t i_field, const std::vector<char> * mesh_array) -> uint64_t {
+        if (mesh_array) return zlib ? mesh_array->size() : sizeof(header_t) + mesh_array->size();
+        return zlib ? field_arrays[i_field].size() : sizeof(header_t) + values[i_field].size() * sizeof(rtype);
     };
 
     out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n";
     out << "<VTKFile type=\"UnstructuredGrid\" version=\"1.0\" byte_order=\"" << endianness()
-        << "\" header_type=\"UInt64\">\n";
+        << "\" header_type=\"UInt64\"" << (zlib ? " compressor=\"vtkZLibDataCompressor\"" : "") << ">\n";
     out << "  <UnstructuredGrid>\n";
     out << "    <FieldData>\n";
     out << "      <DataArray type=\"Float64\" Name=\"TIME\" NumberOfTuples=\"1\" format=\"ascii\">"
@@ -791,64 +1235,37 @@ void DataWriter::write_vtu(const std::string & filename, rtype t) const {
     out << "    </FieldData>\n";
     out << "    <Piece NumberOfPoints=\"" << mesh->n_nodes << "\" NumberOfCells=\"" << n_out << "\">\n";
     out << "      <CellData>\n";
-    for (const auto & field : fields) {
-        data_array(vtk_float_type(), field.name, field.n_vtk_components(),
-                   n_out * field.n_vtk_components() * sizeof(rtype));
+    for (size_t f = 0; f < fields.size(); f++) {
+        data_array(vtk_float_type(), fields[f].name, fields[f].n_vtk_components(), appended_size(f, nullptr));
     }
     out << "      </CellData>\n";
     out << "      <Points>\n";
-    data_array(vtk_float_type(), "", 3, mesh->n_nodes * 3 * sizeof(rtype));
+    data_array(vtk_float_type(), "", 3, appended_size(0, &arrays[0]));
     out << "      </Points>\n";
     out << "      <Cells>\n";
-    data_array("Int64", "connectivity", 1, len_connectivity * sizeof(int64_t));
-    data_array("Int64", "offsets", 1, n_out * sizeof(int64_t));
-    data_array("UInt8", "types", 1, n_out * sizeof(uint8_t));
+    data_array("Int64", "connectivity", 1, appended_size(0, &arrays[1]));
+    data_array("Int64", "offsets", 1, appended_size(0, &arrays[2]));
+    data_array("UInt8", "types", 1, appended_size(0, &arrays[3]));
     out << "      </Cells>\n";
     out << "    </Piece>\n";
     out << "  </UnstructuredGrid>\n";
     out << "  <AppendedData encoding=\"raw\">\n_";
 
-    auto write_header = [&](uint64_t n_bytes) {
-        header_t h = n_bytes;
-        out.write(reinterpret_cast<const char *>(&h), sizeof(header_t));
+    auto append = [&](const void * data, uint64_t n_bytes_in) {
+        if (!zlib) out.write(reinterpret_cast<const char *>(&n_bytes_in), sizeof(header_t));
+        out.write(static_cast<const char *>(data), static_cast<std::streamsize>(n_bytes_in));
     };
-    auto write_value = [&](auto value) {
-        out.write(reinterpret_cast<const char *>(&value), sizeof(value));
-    };
-
-    for (const auto & field : fields) {
-        write_header(n_out * field.n_vtk_components() * sizeof(rtype));
-        for (uint32_t i = 0; i < n_out; i++) {
-            for (uint32_t k = 0; k < field.n_vtk_components(); k++) write_value(field.value(i, k));
+    for (size_t f = 0; f < fields.size(); f++) {
+        if (zlib) {
+            append(field_arrays[f].data(), field_arrays[f].size());
+        } else {
+            append(values[f].data(), values[f].size() * sizeof(rtype));
         }
     }
-
-    write_header(mesh->n_nodes * 3 * sizeof(rtype));
-    for (uint32_t i_node = 0; i_node < mesh->n_nodes; i_node++) {
-        FOR_I_DIM write_value(static_cast<rtype>(mesh->h_node_coords(i_node, i)));
-        for (uint8_t i = N_DIM; i < 3; i++) write_value(static_cast<rtype>(0.0));
-    }
-
-    write_header(len_connectivity * sizeof(int64_t));
-    for (uint32_t i = 0; i < n_out; i++) {
-        const uint32_t n_nodes = mesh->h_n_nodes_of_cell(i);
-        for (uint32_t j = 0; j < n_nodes; j++) {
-            write_value(static_cast<int64_t>(mesh->h_node_of_cell(i, vtk_local_node(n_nodes, j))));
-        }
-    }
-
-    write_header(n_out * sizeof(int64_t));
-    int64_t cell_offset = 0;
-    for (uint32_t i = 0; i < n_out; i++) {
-        cell_offset += mesh->h_n_nodes_of_cell(i);
-        write_value(cell_offset);
-    }
-
-    write_header(n_out * sizeof(uint8_t));
-    for (uint32_t i = 0; i < n_out; i++) {
-        write_value(vtk_type(N_DIM, mesh->h_n_nodes_of_cell(i)));
-    }
+    for (const auto & array : arrays) append(array.data(), array.size());
 
     out << "\n  </AppendedData>\n";
     out << "</VTKFile>\n";
+    out.close();
+    if (!out) throw std::runtime_error("DataWriter::write_vtu: Could not write file: " + filename + ".");
 }

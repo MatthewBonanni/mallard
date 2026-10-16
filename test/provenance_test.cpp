@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "build_info.h"
+#include "compression.h"
 #include "comm.h"
 #include "data_writer.h"
 #include "json_reader.h"
@@ -215,6 +216,7 @@ TEST(ProvenanceTest, EveryOutputFileCarriesTheRunsProvenance) {
     EXPECT_EQ(p["input"]["sha256"].string, provenance::sha256(read_file(input)));
     EXPECT_EQ(p["mesh"]["type"].string, "cartesian");
     EXPECT_FALSE(p["mesh"].has("sha256")) << "a generated mesh is given by the input";
+    EXPECT_EQ(p["preset"].type, Value::Type::NUL);
     // The setup resolves what the input leaves to defaults, e.g. the time integrator
     bool integrator = false;
     for (const auto & item : p["setup"]["Numerics"].array) integrator |= item.array.at(0).string == "Time integrator";
@@ -270,6 +272,54 @@ TEST(ProvenanceTest, ContinuedRunsAppendTheirProvenance) {
     }
     EXPECT_EQ(starts, (std::vector<std::string>{dir + "/input_4.toml", dir + "/input_8.toml"}));
     EXPECT_EQ(read_restart(dir + "/r_000008.restart").provenance, second);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(ProvenanceTest, RecordsTheResolvedNumericsPreset) {
+    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_provenance_preset").string();
+    std::string input = box(dir, 1, UNIFORM, false);
+    input.replace(input.find("[numerics]\n"), 11, "[numerics]\npreset = \"robust\"\n");
+    Solver solver;
+    solver.init(parse_toml(input));
+    const Value p = json_reader::parse(provenance::json());
+    const auto & resolved = solver.get_numerics_preset();
+    EXPECT_EQ(p["preset"]["name"].string, "robust");
+    ASSERT_EQ(p["preset"]["settings"].array.size(), resolved.settings.size());
+    bool overridden = false;
+    for (size_t i = 0; i < resolved.settings.size(); i++) {
+        const Value & s = p["preset"]["settings"].array[i];
+        EXPECT_EQ(s["key"].string, resolved.settings[i].key);
+        EXPECT_EQ(s["value"].string, resolved.settings[i].value);
+        EXPECT_EQ(s["from_preset"].boolean, resolved.settings[i].from_preset);
+        if (s["key"].string == "numerics.riemann_solver") {
+            overridden = true;
+            EXPECT_EQ(s["value"].string, "HLLC");
+            EXPECT_FALSE(s["from_preset"].boolean) << "the input sets it";
+        }
+    }
+    EXPECT_TRUE(overridden);
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+}
+
+TEST(ProvenanceTest, CompressedFilesCarryTheProvenance) {
+    if (!compression::have_zlib()) GTEST_SKIP() << "no zlib";
+    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_provenance_zlib").string();
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    std::string input = box(dir, 4, UNIFORM, false);
+    for (size_t at = 0; (at = input.find("interval = 4\n", at)) != std::string::npos; at += 13) {
+        input.insert(at, "compression = \"zlib\"\n");
+        at += 21;
+    }
+    Solver solver;
+    solver.init(parse_toml(input));
+    solver.run();
+    comm::barrier();
+    const std::string expected = provenance::json();
+    if (!comm::is_root()) return;
+    EXPECT_EQ(read_restart(dir + "/r_000004.restart").provenance, expected);
+    const std::string vtu = comm::size() > 1 ? "/f_000004_p0000.vtu" : "/f_000004.vtu";
+    EXPECT_NE(read_file(dir + vtu).find("compressor"), std::string::npos) << "compressed";
+    EXPECT_EQ(provenance::parse_comment(read_file(dir + vtu)), expected);
     std::filesystem::remove_all(dir);
 }
 

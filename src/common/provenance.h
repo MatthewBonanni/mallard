@@ -12,6 +12,8 @@
 
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <vector>
 
 #include "log.h"
 
@@ -35,6 +37,9 @@ void set_input(const std::string & file, const std::string & text);
 
 /** @brief The mesh: its type (e.g. "file", "cartesian"), file and file hash (empty if none). */
 void set_mesh(const std::string & type, const std::string & file, const std::string & hash);
+
+/** @brief The numerics preset (empty name: none) and each key it covers: value, and whether the preset set it. */
+void set_preset(const std::string & name, const std::vector<std::tuple<std::string, std::string, bool>> & settings);
 
 /** @brief The resolved setup, as printed to the human log. */
 void set_setup(const logging::Record & setup);

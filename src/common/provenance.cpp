@@ -188,6 +188,7 @@ struct State {
     std::string run;    // JSON object, or empty
     std::string input;  // JSON object, or empty
     std::string mesh;   // JSON object, or empty
+    std::string preset; // JSON object or null, or empty
     std::string setup;  // JSON object, or empty
     std::string text;   // the block
 };
@@ -206,6 +207,7 @@ void rebuild() {
     if (!s.run.empty()) p.raw("run", s.run);
     if (!s.input.empty()) p.raw("input", s.input);
     if (!s.mesh.empty()) p.raw("mesh", s.mesh);
+    if (!s.preset.empty()) p.raw("preset", s.preset);
     if (!s.setup.empty()) p.raw("setup", s.setup);
     s.text = p.str();
 }
@@ -281,6 +283,20 @@ void set_mesh(const std::string & type, const std::string & file, const std::str
     if (!file.empty()) m.add("file", file);
     if (!hash.empty()) m.add("sha256", hash);
     state().mesh = m.str();
+    rebuild();
+}
+
+void set_preset(const std::string & name, const std::vector<std::tuple<std::string, std::string, bool>> & settings) {
+    if (name.empty()) {
+        state().preset = "null";
+    } else {
+        std::string list = "[";
+        for (const auto & [key, value, from_preset] : settings) {
+            if (list.size() > 1) list += ',';
+            list += json::Object().add("key", key).add("value", value).add("from_preset", from_preset).str();
+        }
+        state().preset = json::Object().add("name", name).raw("settings", list + "]").str();
+    }
     rebuild();
 }
 

@@ -32,15 +32,19 @@ def read_vtu_cells(path):
     header = raw[:start].decode("latin-1")
     hdr_type = re.search(r'header_type="(\w+)"', header)
     hdr_dt = np.dtype(_DTYPES[hdr_type.group(1)] if hdr_type else "<u4")
+    zlib_blocks = 'compressor="vtkZLibDataCompressor"' in header
     arrays = {}
     for m in re.finditer(r"<DataArray([^>]*)>", header):
         attrs = dict(re.findall(r'(\w+)="([^"]*)"', m.group(1)))
         if "offset" not in attrs:
             continue
         off = start + int(attrs["offset"])
-        nbytes = int(np.frombuffer(raw, hdr_dt, 1, off)[0])
         dt = np.dtype(_DTYPES[attrs["type"]])
-        data = np.frombuffer(raw, dt, nbytes // dt.itemsize, off + hdr_dt.itemsize)
+        if zlib_blocks:
+            data = np.frombuffer(_inflate_blocks(raw, off, hdr_dt), dt)
+        else:
+            nbytes = int(np.frombuffer(raw, hdr_dt, 1, off)[0])
+            data = np.frombuffer(raw, dt, nbytes // dt.itemsize, off + hdr_dt.itemsize)
         ncomp = int(attrs.get("NumberOfComponents", 1))
         if ncomp > 1:
             data = data.reshape(-1, ncomp)
@@ -53,6 +57,19 @@ def read_vtu_cells(path):
     if tm:
         out["TIME"] = float(tm.group(1))
     return pts, conn, offs, types, out
+
+
+def _inflate_blocks(raw, off, hdr_dt):
+    """An appended array of vtkZLibDataCompressor blocks (compression = "zlib"), decompressed."""
+    import zlib
+    n_blocks = int(np.frombuffer(raw, hdr_dt, 1, off)[0])
+    sizes = np.frombuffer(raw, hdr_dt, 3 + n_blocks, off)[3:]
+    at = off + (3 + n_blocks) * hdr_dt.itemsize
+    chunks = []
+    for size in sizes:
+        chunks.append(zlib.decompress(raw[at:at + int(size)]))
+        at += int(size)
+    return b"".join(chunks)
 
 
 def _read_ascii(text):
