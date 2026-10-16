@@ -133,6 +133,75 @@ homogeneous directions with `tools/plane_average.py` (e.g. over x and z of a
 channel, giving profiles in y; its CSV also feeds
 [synthetic inflow](boundary_conditions.md#synthetic-turbulence)).
 
+### Spectra and two-point correlations: `[statistics.spectra]`
+
+On a generated `cartesian` mesh, spectra and two-point correlations along the
+homogeneous (periodic, unstretched) directions, at each position of the
+others: per y of a channel, or shell spectra of a periodic box. Computed by
+FFTs on the device, bitwise the same on any number of ranks.
+
+```toml
+[statistics]
+t_start = 120.0
+interval = 20
+
+[statistics.spectra]
+fields = ["U_X", "U_Y", "U_Z"]   # autospectra and autocorrelations
+products = ["U_X*U_Y"]           # cross spectra and correlations
+# directions = ["x", "z"]        # default: the mesh's periodic directions
+# average = false                # per-sample files instead of time averages
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `fields`, `products` | none | Variables (as `[statistics]`) and pairs `"A*B"` |
+| `directions` | periodic directions | Homogeneous directions |
+| `average` | `true` | Time averages, written to `file` with every snapshot and carried by restart files; `false`: one `<file stem>_<step>.csv` per sample |
+| `file` | `spectra.csv` | Output CSV (`quantity, a, b, direction, position, <coordinates>, index, abscissa, value`) |
+| `interval`, `t_start` | `[statistics]`'s | Sampling |
+
+The file holds plane means, one-sided spectra (sums, not densities: they
+add up to the covariance `<a'b'>`), correlations `<a'(x) b'(x + r)>` and, in
+a periodic box, shell spectra. `tools/insitu_statistics.py` plots them
+(`plot`) and recomputes them from restart snapshots (`spectra`, `compare`).
+
+- Values are cell averages: at the grid cutoff a spectrum is lower than one
+  of point values by the cell-average factor (sinc^2(k h / 2) per direction,
+  0.41 at k = N/2), as `tools/isotropic_turbulence_stats.py --no-deconvolve`.
+- A sample costs about a third of a step of the Re_tau 180 channel (11 ms
+  on an A100): sample every 10-20 steps, not every step.
+- Correlations are periodic: `R(L - r) = R(-r)`; use `r <= L/2`.
+
+### Phase averages: `[statistics.phase]`
+
+Per-cell means over the samples whose phase in a periodic cycle falls in each
+of `bins` bins, output as `PHASE_<bin>_<field>` (`variables = ["PHASE_*"]`).
+The phase comes from a fixed `period`, or from the upward crossings of a
+level by a variable at a probe point:
+
+```toml
+[statistics.phase]
+fields = ["U_X", "U_Y", "P"]
+bins = 12
+probe = [3.0, 0.0]               # or: period = 30.3 (and t_reference)
+variable = "U_Y"
+level = 0.0
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `fields` | none | Variables to average |
+| `bins` | none | Phase bins |
+| `period`, `t_reference` | none, 0 | Fixed period, phase 0 at `t_reference` |
+| `probe`, `variable`, `level` | none, none, 0 | Trigger point, variable and level |
+| `interval`, `t_start` | `[statistics]`'s | Sampling |
+
+- The trigger needs two crossings before it bins anything, and is sampled
+  only every `interval` steps: keep `interval` well below a period / `bins`.
+- A cycle longer than the previous one puts its tail in the last bin.
+- `examples/cylinder` phase-averages
+  its vortex street this way.
+
 ## Probes: `[[probes]]`
 
 ```toml
@@ -162,10 +231,11 @@ The Python scripts in `tools/` (numpy, matplotlib; see
 | `plot_vtu.py`, `compare_png.py` | A field of one or several snapshots |
 | `animate.py` | MP4/GIF animation of a 2D series with numerical schlieren |
 | `plane_average.py` | Averages over homogeneous directions |
+| `insitu_statistics.py` | Plots `[statistics.spectra]` output; recomputes it, or phase-bins a probe series, to check the in-situ values |
 | `plot_<case>.py` | Each validation case against its reference |
 
 ParaView opens `.pvd` (VTU) and `.xmf` (HDF5) series directly.
 
 ## See also
 
-- [Input reference: `[[write_data]]`](../input.md#write_data), [`[output]`](../input.md#output), [`[[forces]]`](../input.md#forces), [`[integrals]`](../input.md#integrals), [`[statistics]`](../input.md#statistics), [`[[probes]]`](../input.md#probes)
+- [Input reference: `[[write_data]]`](../input.md#write_data), [`[output]`](../input.md#output), [`[[forces]]`](../input.md#forces), [`[integrals]`](../input.md#integrals), [`[statistics]`](../input.md#statistics), [`[statistics.spectra]`](../input.md#statisticsspectra), [`[statistics.phase]`](../input.md#statisticsphase), [`[[probes]]`](../input.md#probes)
