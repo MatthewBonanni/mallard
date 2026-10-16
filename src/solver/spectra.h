@@ -141,6 +141,7 @@ class Spectra {
         Kokkos::View<int32_t *> codes;
         Kokkos::View<rtype *> cell_values;
         Kokkos::View<Complex *> slab, slab2, work;
+        Kokkos::View<rtype *> send_buffer;
         std::array<Kokkos::View<Complex *>, 3> twiddles;
         std::array<std::vector<uint32_t>, 3> factors;
 

@@ -313,6 +313,8 @@ void Spectra::init(const toml::value & table, const toml::value & input, const s
         n_work = std::max(n_work, recv_to.size());
     }
     work = Kokkos::View<Complex *>("spectra_work", n_work);
+    send_buffer = Kokkos::View<rtype *>("spectra_send", std::max(to_first.send_from.extent(0),
+                                                               2 * to_second.send_from.extent(0)));
 
     for (size_t d : directions) {
         factors[d] = prime_factors(N[d]);
@@ -351,7 +353,7 @@ void Spectra::move(const Route & route, uint32_t width, const rtype * src_ptr, r
     const size_t n_send = route.send_from.extent(0), n_recv = route.recv_to.extent(0);
     const auto from = route.send_from;
     const auto to = route.recv_to;
-    Kokkos::View<rtype *> send("spectra_send", n_send * width);
+    const auto send = send_buffer;
     Kokkos::parallel_for("spectra_pack", n_send, KOKKOS_LAMBDA(const size_t i) {
         for (uint32_t k = 0; k < width; k++) send(i * width + k) = src_ptr[size_t(from(i)) * width + k];
     });
@@ -574,8 +576,9 @@ void Spectra::sample(uint64_t step, rtype t, const CellSampler & sampler) {
     Kokkos::parallel_for("spectra_sample", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         for (uint32_t f = 0; f < F; f++) values(size_t(c) * F + f) = sampler(c, code(f));
     });
-    // Real cell values into the real parts of the slab
-    Kokkos::View<rtype *> real("spectra_real", slab.extent(0));
+    // The real cell values land in the work buffer, then in the real parts of the slab
+    const Kokkos::View<rtype *, Kokkos::MemoryTraits<Kokkos::Unmanaged>> real(reinterpret_cast<rtype *>(work.data()),
+                                                                              slab.extent(0));
     move(to_first, 1, cell_values.data(), real.data());
     const auto s = slab;
     Kokkos::parallel_for("spectra_complex", slab.extent(0), KOKKOS_LAMBDA(const size_t i) { s(i) = Complex(real(i), 0.0_r); });
