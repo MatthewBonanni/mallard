@@ -186,6 +186,12 @@ class Solver {
         void update_vortex_fields();
 
         // Public because nvcc rejects device lambdas in non-public member functions
+        /** @brief Gravity and the source terms, added to the volume-integrated rhs. */
+        void add_sources(const State & solution, const State & rhs, rtype t_stage, rtype c);
+        /** @brief W_cells (and for mixtures the cell scalars) of the given state, as the RHS computes them. */
+        void update_cell_fields(const State & solution);
+        /** @brief Inside a captured step: stage_time = t_n + c dt from the step's device scalars. */
+        void record_stage_time(rtype c);
         void update_average_pressure_outlets(StateView solution);
         /**
          * @brief Add the uniform body force along the mass flow direction that
@@ -393,12 +399,6 @@ class Solver {
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
         void update_inflow(rtype t_eval);
         void init_sources();
-        /** @brief Gravity and the source terms, added to the volume-integrated rhs. */
-        void add_sources(const State & solution, const State & rhs, rtype t_stage, rtype c);
-        /** @brief W_cells (and for mixtures the cell scalars) of the given state, as the RHS computes them. */
-        void update_cell_fields(const State & solution);
-        /** @brief Inside a captured step: stage_time = t_n + c dt from the step's device scalars. */
-        void record_stage_time(rtype c);
         void init_sponges();
         /** @brief Mass fractions of a composition table (numbers or expressions) at the centroids of cells. */
         std::vector<std::vector<double>> composition_at_cells(const toml::value & table, const std::string & where,
