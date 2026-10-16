@@ -1,0 +1,65 @@
+# Laminar flow over a NACA 0012 airfoil at Mach 0.5, 1 degree angle of
+# attack and Re = 5000 (chord), case C1.3 of the 1st International Workshop
+# on High-Order CFD Methods. Tutorial: docs/tutorials/airfoil.md.
+#
+# Units: chord 1, free-stream density 1 and sound speed 1, so the free
+# stream is U = 0.5 at 1 degree, p = T = 1 / gamma (gas constant 1) and
+# mu = rho U c / Re = 1e-4. Steady state by time marching from the free
+# stream: lift and drag settle to 0.1% by t = 60 c/U = 120 here.
+
+[run]
+t_stop = 120.0
+cfl = 1.0
+
+[mesh]
+type = "file"
+filename = "naca0012.msh"
+
+[initialize]
+type = "constant"
+u = [0.49992384757819563, 0.008726203218641756]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "airfoil"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "farfield"
+type = "farfield"
+u = [0.49992384757819563, 0.008726203218641756]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+limiter = "venkatakrishnan"
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+mu = 1.0e-4
+Pr = 0.72
+
+[output]
+check_interval = 2000
+
+[[forces]]
+zone = "airfoil"
+interval = 50
+file = "forces_airfoil.csv"
+
+[[write_data]]
+prefix = "./solut/flow"
+format = "vtu"
+time_interval = 20.0
+variables = ["RHO", "U", "P", "T", "VORTICITY"]
