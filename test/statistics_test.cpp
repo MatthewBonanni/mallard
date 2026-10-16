@@ -66,13 +66,14 @@ std::string read_all(const std::string & file) {
     return ss.str();
 }
 
-/** @brief Rows of a CSV file, split at commas, without the header. */
+/** @brief Rows of a CSV file, split at commas, without the header and comments. */
 std::vector<std::vector<std::string>> csv_rows(const std::string & file) {
     std::ifstream in(file);
     std::string line;
     std::getline(in, line);
     std::vector<std::vector<std::string>> rows;
     while (std::getline(in, line)) {
+        if (line[0] == '#') continue;
         std::vector<std::string> row;
         std::stringstream ss(line);
         std::string cell;
@@ -176,7 +177,7 @@ TEST(StatisticsTest, StatisticsLeaveTheSolutionUnchangedAndRestartBitwise) {
             EXPECT_EQ(b.host_covariances()(c, p), a.host_covariances()(c, p));
         }
     }
-    EXPECT_EQ(read_all(dir + "/b/probe.csv"), read_all(dir + "/a/probe.csv"));
+    EXPECT_EQ(without_comment_lines(read_all(dir + "/b/probe.csv")), without_comment_lines(read_all(dir + "/a/probe.csv")));
     std::filesystem::remove_all(dir);
 }
 

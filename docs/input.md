@@ -629,6 +629,8 @@ Used when Mallard runs on several MPI ranks (`mpirun -n N Mallard -i input.toml`
 | Key | Description |
 |---|---|
 | `check_interval` | Print a progress row every this many steps (default 1) |
+| `run_log` | Machine-readable run log, one JSON record per line: a start record with the provenance, a progress record per progress row, file writes, warnings and errors, and an end record ([format](guide/output.md#the-run-log)). Appended to when the run starts from a restart file. `""` writes none. Default `"mallard.jsonl"` |
+| `hash_mesh` | Record the SHA-256 of a mesh file (or directory) in the provenance; `false` skips reading it again for very large meshes. Default `true` |
 
 Each progress row shows the step, time `t`, time step `dt`, the fraction of the run done (by
 whichever of `n_steps`, `t_stop` and `t_wall_stop` comes first), the time-stepping wall time

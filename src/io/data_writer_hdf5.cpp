@@ -20,6 +20,7 @@
 #include "comm.h"
 #include "common_io.h"
 #include "hdf5_util.h"
+#include "provenance.h"
 
 namespace {
 
@@ -31,6 +32,7 @@ void write_xdmf_file(const std::string & filename, const std::string & grids) {
     std::ofstream out(filename);
     if (!out.good()) throw std::runtime_error("DataWriter: Could not open file: " + filename + ".");
     out << "<?xml version=\"1.0\" ?>\n"
+        << provenance::xml_comment() << "\n"
         << "<!DOCTYPE Xdmf SYSTEM \"Xdmf.dtd\" []>\n"
         << "<Xdmf Version=\"3.0\">\n"
         << "  <Domain>\n"
@@ -181,12 +183,15 @@ void DataWriter::write_hdf5_mesh() {
     for (size_t i = 0; i < starts.size(); i++) starts[i] = int64_t(first + block_offsets[i]);
     const std::vector<int64_t> records(block_topology.begin(), block_topology.end());
 
+    const std::string & provenance = provenance::json();
     Handle fapl(file_access(distributed), H5Pclose, "H5Pcreate");
+    Handle fcpl(file_creation(fapl, provenance.size()), H5Pclose, "H5Pcreate");
     Handle dxpl(transfer(distributed), H5Pclose, "H5Pcreate");
     const std::string filename = mesh_file(prefix);
-    Handle file(H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, fapl), H5Fclose, "creating " + filename);
+    Handle file(H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose, "creating " + filename);
     {
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
+        write_strings_attribute(root, "provenance", {provenance});
         write_strings_attribute(root, "format", {MESH_FORMAT});
         write_int_attribute(root, "version", OUTPUT_VERSION);
         write_int_attribute(root, "dimension", N_DIM);
@@ -219,12 +224,15 @@ void DataWriter::write_hdf5(const std::string & stem, uint64_t step, rtype t) co
     const std::vector<rtype> block = cell_order.gather<rtype>(values, width);
     const uint64_t n = cell_order.size();
 
+    const std::string & provenance = provenance::json();
     Handle fapl(file_access(distributed), H5Pclose, "H5Pcreate");
+    Handle fcpl(file_creation(fapl, provenance.size()), H5Pclose, "H5Pcreate");
     Handle dxpl(transfer(distributed), H5Pclose, "H5Pcreate");
     const std::string filename = stem + ".h5";
-    Handle file(H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, fapl), H5Fclose, "creating " + filename);
+    Handle file(H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose, "creating " + filename);
     {
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
+        write_strings_attribute(root, "provenance", {provenance});
         write_strings_attribute(root, "format", {SOLUTION_FORMAT});
         write_int_attribute(root, "version", OUTPUT_VERSION);
         write_int_attribute(root, "dimension", N_DIM);

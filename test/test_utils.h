@@ -13,6 +13,8 @@
 #define TEST_UTILS_H
 
 #include <limits>
+#include <sstream>
+#include <string>
 
 #include <gtest/gtest.h>
 
@@ -39,5 +41,15 @@ constexpr double roundoff(double tol_in_double) {
 #else
     #define SKIP_IN_SINGLE_PRECISION(reason) GTEST_SKIP() << "single precision: " << reason
 #endif
+
+/** @brief Text without its comment lines (starting with '#', e.g. the provenance of CSV files). */
+inline std::string without_comment_lines(const std::string & text) {
+    std::istringstream in(text);
+    std::string out;
+    for (std::string line; std::getline(in, line);) {
+        if (line.empty() || line[0] != '#') out += line + "\n";
+    }
+    return out;
+}
 
 #endif // TEST_UTILS_H

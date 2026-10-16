@@ -72,6 +72,7 @@ struct RestartData {
     std::vector<std::vector<rtype>> fields;  // [variable][cell read]
     RestartAttributes attributes;
     RestartFaces faces;                      // every face of the file, in increasing key
+    std::string provenance;                  // the writing run's provenance block, or empty
 
     /** @brief Values of the named variable, or nullptr if the file has none. */
     const std::vector<rtype> * find(const std::string & name) const;
@@ -91,7 +92,7 @@ struct RestartData {
  * Version 2 files list their variable names, version 3 files also named
  * scalar attributes, version 4 files also face records; version 1 files hold
  * the flow block CONSERVATIVE_NAMES only. Either must contain the flow block of
- * this build's dimension.
+ * this build's dimension. Any version may end with the provenance trailer.
  */
 RestartData read_restart(const std::string & filename, const std::vector<uint64_t> * cells = nullptr);
 

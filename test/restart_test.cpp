@@ -161,7 +161,7 @@ TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
         ss << stream.rdbuf();
         return ss.str();
     };
-    EXPECT_EQ(read_all(dir + "/b/forces.csv"), read_all(dir + "/a/forces.csv"));
+    EXPECT_EQ(without_comment_lines(read_all(dir + "/b/forces.csv")), without_comment_lines(read_all(dir + "/a/forces.csv")));
     std::filesystem::remove_all(dir);
 }
 

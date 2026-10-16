@@ -19,9 +19,40 @@
 #include <vector>
 
 #include "data_writer.h"
+#include "gmsh_fixtures.h"
+#include "json_reader.h"
 #include "mesh_block.h"
+#include "provenance.h"
 #include "test_fixtures.h"
 #include "solver.h"
+
+TEST(IOTest, ProvenanceHashesTheMeshFile) {
+    const std::string file = write_temp("mallard_provenance_mesh.msh", jittered_mixed_mesh(6));
+    auto input = [&](const std::string & output) {
+        std::ostringstream s;
+        s << "[run]\nn_steps = 1\ncfl = 0.25\n[mesh]\ntype = \"file\"\nfilename = \"" << file << "\"\n"
+          << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"0.1\", \"0.0\"]\np = \"1.0\"\n";
+        for (const char * name : {"left", "right", "top", "bottom"}) {
+            s << "[[boundaries]]\nname = \"" << name << "\"\ntype = \"extrapolation\"\n";
+        }
+        s << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
+          << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n[output]\n" << output;
+        return s.str();
+    };
+    Solver hashed;
+    hashed.init(parse_toml(input("")));
+    const auto p = json_reader::parse(provenance::json());
+    EXPECT_EQ(p["mesh"]["type"].string, "file");
+    EXPECT_EQ(p["mesh"]["file"].string, file);
+    std::ifstream in(file, std::ios::binary);
+    EXPECT_EQ(p["mesh"]["sha256"].string, provenance::sha256(std::string(std::istreambuf_iterator<char>(in), {})));
+
+    Solver unhashed;
+    unhashed.init(parse_toml(input("hash_mesh = false\n")));
+    const auto q = json_reader::parse(provenance::json());
+    EXPECT_EQ(q["mesh"]["file"].string, file);
+    EXPECT_FALSE(q["mesh"].has("sha256"));
+}
 
 TEST(IOTest, BoundaryZoneOutputCarriesAdjacentCellValues) {
     const std::string dir = (std::filesystem::temp_directory_path() / "mallard_surface_test").string();
