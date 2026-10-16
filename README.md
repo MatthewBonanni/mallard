@@ -65,6 +65,11 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Heat release, species production rates and detonation soot foils (`P_MAX`)
 - `MallardReactor`, a 0D reactor, and Python tools for plotting, animation and HDF5 output
 
+**Run control** ([docs](docs/guide/running.md))
+- Signals: `SIGUSR1` writes a restart and continues; `SIGTERM`, `SIGINT` or `SIGUSR2` write one and stop, on every rank after the same step and at no communication cost; works under `mpirun`, Slurm and Kubernetes grace periods
+- `Mallard ctl <run-dir> status | checkpoint | stop | set key=value` over a private Unix-domain socket: progress, throughput, ETA, memory and diagnostics; output intervals and stop conditions changed while running
+- Divergence detected every step for free: the first invalid cells (variable, location, rank) are reported and the last valid state written
+
 **Validation and testing**
 - 40 [examples](examples) against exact solutions, theory, DNS or Cantera, e.g.:
   - Sphere wake at Re = 300: Strouhal number and drag within 3% and 2% of Johnson & Patel
@@ -122,6 +127,7 @@ cd examples/riemann_2d
 ```
 
 See the [tutorials](docs/tutorials/index.md) for cases taken from geometry and mesh to the comparison with reference data, [`examples/`](examples) for complete input files, the [user guide](docs/guide/input_files.md) for each topic, and [`docs/input.md`](docs/input.md) for every input option.
+While it runs, `Mallard ctl <run-dir> status` reports its progress and `Mallard ctl <run-dir> stop` ends it with a restart ([run control](docs/guide/running.md)).
 
 ## Testing
 

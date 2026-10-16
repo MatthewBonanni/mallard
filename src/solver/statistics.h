@@ -133,6 +133,8 @@ class Probes {
 
         bool due(uint64_t step) const;
         void write(uint64_t step, rtype t, const CellSampler & sampler);
+        /** @brief Changes the interval of the probe set of that name; false if there is none. */
+        bool set_interval(const std::string & name, uint64_t interval);
 
         std::vector<std::pair<std::string, std::string>> summary() const;
         std::vector<std::string> files() const;

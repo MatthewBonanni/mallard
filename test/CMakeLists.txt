@@ -32,6 +32,7 @@ if(Mallard_DIM EQUAL 2)
     teno_test.cpp
     viscous_test.cpp
     restart_test.cpp
+    run_control_test.cpp
     boundary_test.cpp
     nscbc_test.cpp
     source_test.cpp
@@ -59,7 +60,17 @@ endif()
 add_executable(MallardTest ${MALLARD_TEST_SOURCES})
 
 target_include_directories(MallardTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(MallardTest PRIVATE MALLARD_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_definitions(MallardTest PRIVATE MALLARD_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+                                               MALLARD_EXECUTABLE="$<TARGET_FILE:Mallard>")
+add_dependencies(MallardTest Mallard)
+# The run-control tests start runs on several ranks with the MPI launcher
+if(Mallard_ENABLE_MPI AND MPIEXEC_EXECUTABLE)
+    target_compile_definitions(MallardTest PRIVATE MALLARD_MPIEXEC="${MPIEXEC_EXECUTABLE}")
+    execute_process(COMMAND ${MPIEXEC_EXECUTABLE} --version OUTPUT_VARIABLE mpiexec_version ERROR_QUIET)
+    if(mpiexec_version MATCHES "Open MPI|OpenRTE|PRRTE")
+        target_compile_definitions(MallardTest PRIVATE MALLARD_MPIEXEC_OPEN_MPI)
+    endif()
+endif()
 
 include(FetchContent)
 FetchContent_Declare(

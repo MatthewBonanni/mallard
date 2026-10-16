@@ -18,12 +18,14 @@
 #include "input.h"
 #include "log.h"
 #include "parallel/comm.h"
+#include "run_control.h"
 #include "solver/solver.h"
 
 namespace {
 
 void usage(const char * program) {
     std::cerr << "Usage: " << program << " -i input.toml [Kokkos options, e.g. --kokkos-num-threads=8]\n"
+              << "       " << program << " ctl <run-dir> status | checkpoint | stop | set <key>=<value> ...\n"
               << "       " << program << " --version\n";
 }
 
@@ -57,6 +59,7 @@ std::string error_text(const std::exception & e) {
  * @return Exit status.
  */
 int main(int argc, char* argv[]) {
+    if (argc > 1 && strcmp(argv[1], "ctl") == 0) return run_control::ctl_main(argc - 2, argv + 2);
     std::string input_file;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-i") == 0 && i + 1 < argc) {
@@ -79,14 +82,16 @@ int main(int argc, char* argv[]) {
     if (!comm::is_root()) std::cout.rdbuf(nullptr);
 
     Kokkos::initialize(argc, argv);
+    run_control::install_signal_handlers();
     int status = 0;
     {
         std::string error;
         try {
             print_header(input_file);
             Solver solver;
+            solver.enable_control(true);
             solver.init(input_file);
-            solver.run();
+            status = solver.run();
         } catch (const InputError & e) {
             error = input_file + ": " + error_text(e);
         } catch (const std::exception & e) {

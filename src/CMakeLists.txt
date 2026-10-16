@@ -5,6 +5,7 @@ add_library(MallardCore STATIC
     common/build_info.cpp
     common/growing_buffer.cpp
     common/log.cpp
+    common/run_control.cpp
     mesh/curved.cpp
     mesh/mesh.cpp
     mesh/mesh_io.cpp
@@ -37,6 +38,7 @@ add_library(MallardCore STATIC
     solver/chemistry_benchmark.cpp
     solver/solver.cpp
     solver/solver_chemistry.cpp
+    solver/solver_control.cpp
     solver/solver_graph.cpp
     solver/solver_initialize.cpp
     solver/solver_mixture.cpp
@@ -69,7 +71,8 @@ target_include_directories(MallardCore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/io
     ${CMAKE_CURRENT_SOURCE_DIR}/parallel
 )
-target_link_libraries(MallardCore PUBLIC Kokkos::kokkos)
+find_package(Threads REQUIRED)
+target_link_libraries(MallardCore PUBLIC Kokkos::kokkos Threads::Threads)
 # The TENO setup computes every table with the same operations on the host
 # and on the device, and contracting multiplies and adds into FMAs would
 # change them differently on each: no contraction in that file

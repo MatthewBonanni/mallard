@@ -20,6 +20,9 @@ The spatial dimension is fixed at build time with the CMake option
 | `t_stop` | Stop at this simulation time (the last step is shortened to land on it) |
 | `n_steps` | Stop after this many steps |
 | `t_wall_stop` | Stop after this many seconds of wall time |
+| `keep_last_good` | Keep a copy of the state at the start of each step (one copy of the conservatives, and partial densities, per step), so that a diverging run writes the last valid state; see [run control](guide/running.md) (default `true`) |
+| `control_socket` | Serve `Mallard ctl` on `mallard.sock` in the working directory (default `true`) |
+| `control_file_interval` | Every this many steps, look for the files `STOP` and `CHECKPOINT` in the working directory (default 0: never) |
 | `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages) as one CUDA graph, so the host launches one graph and waits once per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel where the host takes part in the step: gas mixtures, average-pressure outlets, characteristic boundaries, boundary or source expressions of `t`, and halos exchanged with MPI (`[parallel] halo_exchange`); the run log says which |
 
 At least one stop condition is required.
@@ -455,7 +458,7 @@ Strength and reference are evaluated once at cell centroids.
 |---|---|
 | `riemann_solver` | `Rusanov`, `HLL`, `HLLC` (default), `Roe`, or `RHLL` (rotated hybrid HLL-Roe, carbuncle-free except at shocks at rest on cell faces; see [numerics](numerics/overview.md#stationary-shocks-on-cell-faces)) |
 | `time_integrator` | `FE`, `SSPRK3` (default) or `RK4` |
-| `check_nan` | Stop if the solution becomes non-finite (default `false`) |
+| `check_nan` | Check every conservative and partial density for non-finite values right after each step, so a diverging step writes no output (one more reduction per step). Without it the run still stops at the next step, through the time-step reduction; see [run control](guide/running.md) |
 | `double_flux` | (gas mixtures) `true` for the double-flux scheme: each cell's energy is updated with its own `cp / cv` and energy offset frozen over the time step on both sides of its faces, and reset to the true equation of state after the step, so pressure and velocity stay exactly uniform across contacts between different gases. Energy is then not exactly conserved (about 0.2% over a multicomponent shock tube). Default `false` |
 | `low_mach_cutoff` | Low-Mach correction of the convective flux: the velocity jump across each interior face is scaled by `z = min(1, max(M_L, M_R, low_mach_cutoff))` before the Riemann solver, so that upwind dissipation scales with the flow speed rather than the sound speed. Default 0.1; 1 disables it. See [`numerics/overview.md`](numerics/overview.md) |
 | `convective_flux` | `riemann` (default): the Riemann solver at every face; `hybrid`: the kinetic-energy-preserving central flux of Kuya, Totani & Kawai (2018) on the same reconstructed states, blended into the Riemann solver where a shock sensor fires, `F = F_KEEP + phi (F_Riemann - F_KEEP)`. For large-eddy simulation: the central flux adds no dissipation, so the SGS model does the work (see `[integrals] budget`). `phi` is the larger of the face's two cells': 1 where the Ducros sensor restricted to compressions, `(div u)^2 / ((div u)^2 + |omega|^2)` with `div u < 0`, exceeds `sensor_threshold`, else `upwind_floor`. Boundary faces other than walls and symmetry planes use the Riemann solver. Species stay upwinded with the blended mass flux. Contacts and expansions are central: on Sod's problem the density error is about 1.8 times the Riemann solver's, with a 0.1% overshoot at the contact |

@@ -28,12 +28,16 @@
 
 #include "device_comm.h"
 #include "log.h"
+#include "run_control.h"
 
 namespace {
 
-// step_scalars: [t, t_target, dt_scales]; step_io: [t, t_target, dt]
+// step_scalars: [t, t_target, dt_scales]; step_reduce: [dt_cfl1, requests];
+// step_io: [t, t_target, requests of this rank, dt, then step_reduce reduced]
+constexpr int N_REDUCE = 1 + run_control::N_REQUESTS;
 [[maybe_unused]] constexpr int T = 0, T_TARGET = 1, DT_SCALES = 2, STEP_DT = DT_SCALES + int(DT), N_STEP_SCALARS = DT_SCALES + int(N_DT_SCALES);
-[[maybe_unused]] constexpr int IO_T = 0, IO_T_TARGET = 1, IO_DT = 2, N_STEP_IO = 3;
+[[maybe_unused]] constexpr int IO_T = 0, IO_T_TARGET = 1, IO_REQUESTS = 2, IO_DT = IO_REQUESTS + run_control::N_REQUESTS,
+                               IO_REDUCED = IO_DT + 1, N_STEP_IO = IO_REDUCED + N_REDUCE;
 
 #ifdef KOKKOS_ENABLE_CUDA
 void check(const cudaError_t err, const char * what) {
@@ -65,35 +69,42 @@ std::string Solver::step_graph_unsupported() const {
 }
 
 void Solver::record_step() {
-    Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), Kokkos::subview(step_scalars, Kokkos::make_pair(0, 2)),
+    const Kokkos::DefaultExecutionSpace exec;
+    Kokkos::deep_copy(exec, Kokkos::subview(step_scalars, Kokkos::make_pair(0, 2)),
                       Kokkos::subview(step_io, Kokkos::make_pair(0, 2)));
+    // The run-control requests ride along the time-step reduction
+    Kokkos::deep_copy(exec, Kokkos::subview(step_reduce, Kokkos::make_pair(1, N_REDUCE)),
+                      Kokkos::subview(step_io, Kokkos::make_pair(IO_REQUESTS, IO_DT)));
     // calc_dt
     halo.exchange(state());
     halo_current = true;
-    calc_dt_cfl1(step_dt_cfl1);
+    calc_dt_cfl1(Kokkos::View<rtype>(step_reduce.data()));
 #ifdef Mallard_HAS_NCCL
     if (is_distributed()) {
         const ncclDataType_t type = sizeof(rtype) == sizeof(double) ? ncclDouble : ncclFloat;
-        if (ncclAllReduce(step_dt_cfl1.data(), step_dt_cfl1.data(), 1, type, ncclMin, comm::nccl(),
-                          Kokkos::DefaultExecutionSpace().cuda_stream()) != ncclSuccess) {
+        if (ncclAllReduce(step_reduce.data(), step_reduce.data(), N_REDUCE, type, ncclMin, comm::nccl(),
+                          exec.cuda_stream()) != ncclSuccess) {
             throw std::runtime_error("NCCL: time-step reduction failed");
         }
     }
 #endif
-    const Kokkos::View<rtype> dt_cfl1 = step_dt_cfl1;
+    const Kokkos::View<rtype *> r = step_reduce;
     const Kokkos::View<rtype *> s = step_scalars;
     const bool use_cfl_ = use_cfl;
     const rtype cfl_ = cfl, dt_fixed_ = dt_fixed, sponge_dt_max_ = sponge_dt_max;
     Kokkos::parallel_for("step_dt", 1, KOKKOS_LAMBDA(const int) {
         // calc_dt's arithmetic; volatile keeps the compiler from fusing the
         // product into the comparison's sum (one rounding instead of two)
-        volatile rtype dt_v = use_cfl_ ? cfl_ * dt_cfl1() : dt_fixed_;
+        volatile rtype dt_v = use_cfl_ ? cfl_ * r(0) : dt_fixed_;
         rtype dt_ = dt_v;
         dt_ = (sponge_dt_max_ < dt_) ? sponge_dt_max_ : dt_;
         const rtype t_ = s(T), t_target = s(T_TARGET);
         if (t_ + dt_ > t_target && t_target > t_) dt_ = t_target - t_;
+        // An invalid state has no positive stable time step: the host stops after this step
+        if (!(r(0) > 0.0_r)) dt_ = 0.0_r;
         dt_scales(dt_, &s(DT_SCALES));
     });
+    if (last_good.flow.is_allocated()) save_last_good_if_valid(r);
     const Kokkos::View<rtype *> c = cfl_local;
     Kokkos::parallel_for("local_cfl", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i) {
         c(i) = s(STEP_DT) / c(i);
@@ -101,8 +112,8 @@ void Solver::record_step() {
     // take_step
     time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func, step_scalars.data() + DT_SCALES);
     halo_current = false;
-    Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), Kokkos::subview(step_io, IO_DT),
-                      Kokkos::subview(step_scalars, STEP_DT));
+    Kokkos::deep_copy(exec, Kokkos::subview(step_io, IO_DT), Kokkos::subview(step_scalars, STEP_DT));
+    Kokkos::deep_copy(exec, Kokkos::subview(step_io, Kokkos::make_pair(IO_REDUCED, N_STEP_IO)), step_reduce);
 }
 
 void Solver::graph_step() {
@@ -112,7 +123,7 @@ void Solver::graph_step() {
     if (!step_scalars.is_allocated()) {
         // The first step through record_step runs without capture: it sets up
         // what its kernels need at their first launch
-        step_dt_cfl1 = Kokkos::View<rtype>("step_dt_cfl1");
+        step_reduce = Kokkos::View<rtype *>("step_reduce", N_REDUCE);
         step_scalars = Kokkos::View<rtype *>("step_scalars", N_STEP_SCALARS);
         step_io = Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace>("step_io", N_STEP_IO);
     }
@@ -145,12 +156,27 @@ void Solver::graph_step() {
     }
     step_io(IO_T) = t;
     step_io(IO_T_TARGET) = next_target_time();
+    control_contributed = run_control::pending();
+    for (int k = 0; k < run_control::N_REQUESTS; k++) {
+        step_io(IO_REQUESTS + k) = (control_contributed >> k) & 1 ? rtype(-1) : rtype(0);
+    }
     if (step_graph_exec) {
         check(cudaGraphLaunch(static_cast<cudaGraphExec_t>(step_graph_exec), stream), "cudaGraphLaunch");
     } else {
         record_step();
     }
     Kokkos::DefaultExecutionSpace().fence("step_graph");
+    dt_cfl1 = step_io(IO_REDUCED);
+    control_reduced = 0;
+    for (int k = 0; k < run_control::N_REQUESTS; k++) {
+        if (step_io(IO_REDUCED + 1 + k) < 0) control_reduced |= 1 << k;
+    }
+    if (!(dt_cfl1 > 0.0_r)) {
+        // The step went on from the invalid state; diverged() replays it from the last good one
+        stepped_past_divergence = true;
+        throw DivergedError();
+    }
+    if (last_good.flow.is_allocated()) note_last_good();
     dt = step_io(IO_DT);
     if (!(dt > 0.0_r)) {
         throw std::runtime_error("Invalid dt: " + std::to_string(dt) + ".");

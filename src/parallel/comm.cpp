@@ -102,6 +102,13 @@ void allreduce(std::span<T> data, Op op) {
           "MPI_Allreduce");
 }
 
+void broadcast(std::string & text) {
+    uint64_t n = text.size();
+    check(MPI_Bcast(&n, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD), "MPI_Bcast");
+    text.resize(n);
+    check(MPI_Bcast(text.data(), static_cast<int>(n), MPI_CHAR, 0, MPI_COMM_WORLD), "MPI_Bcast");
+}
+
 template <typename T>
 std::vector<std::vector<T>> alltoallv(const std::vector<std::vector<T>> & send) {
     const size_t p = static_cast<size_t>(size());
@@ -183,6 +190,8 @@ int size() { return 1; }
 void barrier() {}
 
 void abort(int code) { std::exit(code); }
+
+void broadcast(std::string &) {}
 
 template <typename T>
 void allreduce(std::span<T>, Op) {}
