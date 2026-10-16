@@ -46,6 +46,7 @@
 #include "log.h"
 #include "check.h"
 #include "memory_tracker.h"
+#include "numerics_preset.h"
 
 struct ForceMonitor {
     std::string zone;
@@ -378,6 +379,10 @@ class Solver {
         uint64_t get_step() const { return step; }
         const Euler & get_physics() const { return physics; }
         std::shared_ptr<Mesh> get_mesh() const { return mesh; }
+        /** @brief The input after its numerics preset, if any, filled the keys it leaves unset. */
+        const Input & resolved_input() const { return input; }
+        /** @brief The numerics preset and the value and origin of each of its keys. */
+        const numerics_preset::Resolution & get_numerics_preset() const { return preset; }
 
         /** @brief The solution: flow block and species partial densities. */
         State state() const { return State(conservatives, species); }
@@ -418,6 +423,13 @@ class Solver {
         void init_solution_constant();
         void init_solution_analytical();
         void init_solution_restart();
+        /** @brief Remaps a restart file of another mesh ([initialize] type = "remap"). */
+        void init_solution_remap();
+        /**
+         * @brief Takes the state, time and statistics of a restart file's data
+         *        for the local cells; resume_output continues the output series.
+         */
+        void apply_restart(const RestartData & restart, const std::string & file, bool resume_output);
         void update_boundary_states(rtype t_eval);
         void init_inlets(const std::vector<Input> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
@@ -496,6 +508,7 @@ class Solver {
 
         Input input;
         bool check_only = false;  // within check()
+        numerics_preset::Resolution preset;
 
         // Run parameters
         uint64_t n_steps;

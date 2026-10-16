@@ -44,7 +44,6 @@
 
 [run]
 t_stop = 0.65532
-cfl = 0.8
 
 [mesh]
 type = "cartesian"
@@ -61,14 +60,8 @@ type = "restart"
 file = "cbc_64.restart"
 
 [numerics]
-riemann_solver = "HLLC"
-convective_flux = "hybrid"
-time_integrator = "SSPRK3"
+preset = "les"  # MUSCL without limiter, hybrid KEEP / HLLC flux, SSPRK3, CFL 0.8
 check_nan = true
-
-[numerics.face_reconstruction]
-type = "MUSCL"
-limiter = "none"
 
 [physics]
 type = "navier_stokes"

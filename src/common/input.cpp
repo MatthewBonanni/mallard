@@ -101,9 +101,10 @@ void collect_unused(const Input & v, const std::string & path, const Lookups & l
                 collect_unused(value, join(path, key), lookups, out);
             } else {
                 const auto location = value.location();
+                if (!location.is_ok()) continue;  // set by the program (e.g. a numerics preset), not the file
                 Diagnostic d;
                 d.key = join(path, key);
-                d.line = location.is_ok() ? location.first_line_number() : 0;
+                d.line = location.first_line_number();
                 d.message = "unknown, or unused with these settings";
                 d.suggestion = suggest(table, path, key, lookups);
                 const std::string section = d.key.substr(0, d.key.find_first_of(".["));
