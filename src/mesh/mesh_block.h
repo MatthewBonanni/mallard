@@ -96,6 +96,20 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
                              uint64_t first_node, uint64_t end_node, const Stretching & stretching = {});
 
 /** @brief Total cell and node counts of a generated 3D box. */
+/**
+ * @brief An annulus r_in <= r <= r_out, or its sector 0 <= theta <= angle
+ *        (radians, angle < 2 pi), of n_theta x n_r quadrilaterals, extruded in
+ *        3D over 0 <= z <= Lz into n_theta x n_r x n_z hexahedra: rank r of p
+ *        holds its share of cells and nodes. Zones: inner, outer, start
+ *        (theta = 0) and end (theta = angle) of a sector, and in 3D back
+ *        (z = 0) and front (z = Lz).
+ */
+MeshBlock annulus_block(uint32_t n_theta, uint32_t n_r, uint32_t n_z, double r_in, double r_out, double angle,
+                        double Lz, int r, int p);
+
+/** @brief annulus_block from the [mesh] table (type = "annulus"), for rank r of p. */
+MeshBlock annulus_block(const toml::value & input, int r, int p);
+
 std::array<uint64_t, 2> cartesian_3d_size(uint32_t nx, uint32_t ny, uint32_t nz, MeshType kind);
 
 /**

@@ -60,6 +60,7 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
     // Periodic classes of the nodes; faces are keyed by the classes' keys so a
     // face of zone_a and its image in zone_b become one face
     periodic_translations = classes.translations;
+    periodic_rotation = classes.rotation;
     periodic_zones = classes.zones;
     h_node_key = classes.key;
     h_node_lattice = classes.lattice;
