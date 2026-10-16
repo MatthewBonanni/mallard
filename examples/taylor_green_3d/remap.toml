@@ -1,0 +1,100 @@
+# The Taylor-Green vortex of input.toml on 32^3 hexahedra, continued from the
+# 16^3 run of coarse.toml at t = 6: its restart file remapped conservatively
+# with degree-3 polynomials (no limiter, the field is smooth). The file is the
+# restart that coarse.toml ends with (step 958). Needs the 3D build.
+#
+#   python ../../tools/docs/remap_tgv.py fine/integrals.csv coarse/integrals.csv remap/integrals.csv
+#
+# with fine/ from input.toml at Nx = 32 to t = 12, for the figure of
+# docs/design/remap.md.
+#
+# Expected result: the remap takes 0.7 s on 6 CPU threads and keeps mass,
+# momentum and energy to 8e-15. The 16^3 run is far too dissipative by t = 6
+# (dE/dt 70% above the 32^3 run's); on the finer mesh the dissipation drops at
+# once to the 32^3 level, then evolves with it: the kinetic energy the coarse
+# run already lost (12% at t = 6) is not recovered, so the peak is 13% lower
+# (0.0113 at t = 8.9 against 0.0130 at t = 8.1) and the dissipation stays 4-8%
+# below the 32^3 run's from t = 9. 32^3 from t = 6 to 12: 27 minutes on 6
+# threads.
+
+[run]
+t_stop = 12.0
+cfl = 1.0
+
+[mesh]
+type = "cartesian"
+Nx = 32
+Ny = 32
+Nz = 32
+Lx = 3.141592653589793
+Ly = 3.141592653589793
+Lz = 3.141592653589793
+
+[initialize]
+type = "remap"
+file = "coarse/tgv_000958.restart"
+degree = 3
+limiter = "none"
+
+[initialize.mesh]
+type = "cartesian"
+Nx = 16
+Ny = 16
+Nz = 16
+Lx = 3.141592653589793
+Ly = 3.141592653589793
+Lz = 3.141592653589793
+
+[[boundaries]]
+name = "left"
+type = "symmetry"
+
+[[boundaries]]
+name = "right"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "back"
+type = "symmetry"
+
+[[boundaries]]
+name = "front"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 71.42857142857143
+T_ref = 1.0
+rho_ref = 1.0
+mu = 0.000625
+Pr = 0.71
+
+[output]
+check_interval = 500
+
+[integrals]
+interval = 5
+file = "remap/integrals.csv"
+
+[[write_data]]
+prefix = "./remap/tgv"
+format = "restart"
+interval = 2000

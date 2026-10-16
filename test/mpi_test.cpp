@@ -819,3 +819,42 @@ TEST(MPITest, CurvedWallsMatchSerial) {
     }
     comm::barrier();
 }
+
+TEST(MPITest, RemapDoesNotDependOnTheRankCount) {
+    // Restart files of a coarse triangle run and of a reacting mixture, each
+    // remapped to a quad mesh of another size: contributions are summed by
+    // source cell id, so no partition of either mesh changes a bit
+    const std::string dir = io_dir() + "_remap";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    {
+        Solver coarse;
+        coarse.init(parse_toml(restart_case(5, "[[write_data]]\nprefix = \"" + dir +
+                                                   "/c\"\nformat = \"restart\"\ninterval = 5\n")));
+        coarse.run();
+    }
+    std::string mixture = mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "euler");
+    mixture.replace(mixture.find("n_steps = 20"), 12, "n_steps = 5");
+    {
+        Solver coarse;
+        coarse.init(parse_toml(mixture + "[[write_data]]\nprefix = \"" + dir +
+                               "/m\"\nformat = \"restart\"\ninterval = 5\n"));
+        coarse.run();
+    }
+    comm::barrier();
+    auto remapped = [](std::string input, const std::string & init, const std::string & source) {
+        const size_t at = input.find("[initialize]\n");
+        const size_t end = input.find("[[boundaries]]", at);
+        input.replace(at, end - at, "[initialize]\n" + init + "[initialize.mesh]\n" + source);
+        input.replace(input.find("type = \"cartesian_tri\""), 22, "type = \"cartesian\"");
+        input.replace(input.find("Nx = 24"), 7, "Nx = 31");
+        return input;
+    };
+    expect_matches_serial(remapped(restart_case(8, ""),
+                                   "type = \"remap\"\nfile = \"" + dir + "/c_000005.restart\"\ndegree = 3\n",
+                                   "type = \"cartesian_tri\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n"));
+    mixture.replace(mixture.find("n_steps = 5"), 11, "n_steps = 7");
+    expect_matches_serial(remapped(mixture, "type = \"remap\"\nfile = \"" + dir + "/m_000005.restart\"\n",
+                                   "type = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n"));
+    comm::barrier();
+}
