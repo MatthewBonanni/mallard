@@ -144,12 +144,13 @@ four times coarser than the example's 384 x 128 cells), with the zones
 ```toml
 [mesh]
 type = "file"
-filename = "wing.cgns"
+filename = "wing.cgns"    # or a Fluent .msh/.cas
 ```
 
 | Format | `filename` | Zones | Build |
 |---|---|---|---|
 | CGNS (unstructured, HDF5-based) | `*.cgns` | `BC_t` by family name (Gmsh's physical names), else by BC name; boundary sections in no BC by section name | `-DMallard_ENABLE_CGNS=ON` |
+| ANSYS Fluent mesh or case, ASCII or binary | `*.msh` starting with `(`, `*.cas` | Non-interior face zones, by name | always |
 
 Every format gives the same mesh as the Gmsh file it was exported from (the
 tests check cells, faces and zones), so a case can switch formats without
@@ -162,6 +163,10 @@ Pitfalls:
   meshes); polyhedral `NGON_n`/`NFACE_n` sections are rejected. Higher-order
   elements are read by their corners, and high-order boundary elements curve
   faces as in Gmsh files.
+- Fluent: cells must be triangles and quadrilaterals (2D) or tetrahedra,
+  pyramids, prisms and hexahedra (3D); polyhedral meshes and adapted meshes
+  (cell and face trees) are rejected. Periodic face zones stay boundary
+  zones: pair them with `[[periodic]]`.
 - A mesh of the other dimension is an error: build with the matching
   `-DMallard_DIM`.
 
