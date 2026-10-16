@@ -80,7 +80,7 @@ the total.
 - `[statistics] reset = true` starts the averages afresh instead of
   continuing them.
 - Probes and force monitors append to their files on a restart.
-- Restart files of Mallard 0.3 and earlier (version 1) are still read.
+- Restart files of every earlier release are read, back to 0.1, and files from a newer Mallard are rejected clearly ([compatibility](output.md#file-formats-and-compatibility)).
 - `compression = "zlib"` writes compressed restart files (version 5, losslessly: they restart bit for bit), about a third smaller for smooth flows; reading them needs a build with `Mallard_ENABLE_ZLIB`, and the Python tools in `tools/` read only uncompressed ones.
 
 ### Initial states from scripts
@@ -100,7 +100,7 @@ to copy for your own cases:
 | `tile_restart.py` | A restart file of a periodic box tiled into a larger box |
 
 A restart file is binary, little-endian: the 16 bytes `MALLARD-RESTART\0`,
-then `uint32` version (2) and real size (8), `uint64` cell count, variable
+then `uint32` version (2; [all versions](output.md#file-formats-and-compatibility)) and real size (8), `uint64` cell count, variable
 count and step, `float64` time, each variable name as a `uint32` length and its
 characters, and finally the values, variable after variable, each over all
 cells in the mesh's global order. The variables are `RHO`, `RHOU_X`, `RHOU_Y`

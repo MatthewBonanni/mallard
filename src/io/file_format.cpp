@@ -18,20 +18,23 @@ namespace file_format {
 
 void check_version(const Format & format, const std::string & file, int64_t version) {
     if (version >= format.oldest && version <= format.version) return;
-    const std::string reads = "Mallard " MALLARD_VERSION " reads " + std::string(format.name) + " files of version " +
-                              std::to_string(format.oldest) + " to " + std::to_string(format.version);
+    const std::string reads =
+        "Mallard " MALLARD_VERSION " reads " + std::string(format.name) + " files of " +
+        (format.oldest == format.version
+             ? "version " + std::to_string(format.version)
+             : "versions " + std::to_string(format.oldest) + " to " + std::to_string(format.version));
     if (version > format.version) {
-        throw std::runtime_error(file + " is a " + format.name + " file of version " + std::to_string(version) +
-                                 ", written by a newer Mallard; " + reads +
+        throw std::runtime_error(file + ": " + format.name + " format version " + std::to_string(version) +
+                                 " is from a newer Mallard; " + reads +
                                  ". Read it with the release that wrote it, or a later one.");
     }
     if (version >= 1) {
-        throw std::runtime_error(file + " is a " + format.name + " file of version " + std::to_string(version) +
-                                 ", which this release no longer reads; " + reads +
+        throw std::runtime_error(file + ": " + format.name + " format version " + std::to_string(version) +
+                                 " is no longer read; " + reads +
                                  ". Restart from it with an earlier release and write a new file.");
     }
-    throw std::runtime_error(file + " has " + format.name + " file version " + std::to_string(version) +
-                             ", which is not a valid version; " + reads + ". The file may be corrupt.");
+    throw std::runtime_error(file + ": " + format.name + " format version " + std::to_string(version) +
+                             " is not a valid version; " + reads + ". The file may be corrupt.");
 }
 
 } // namespace file_format

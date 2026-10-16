@@ -188,6 +188,35 @@ The Python scripts in `tools/` (numpy, matplotlib; see
 
 ParaView opens `.pvd` (VTU) and `.xmf` (HDF5) series directly.
 
+## File formats and compatibility
+
+Every file Mallard writes carries a format version. **The promise:** a release
+reads the restart and mesh files of every earlier release of the same major
+version. In 0.x that means every restart file since 0.1 and every HDF5 mesh since
+0.3. A file from a *newer*
+Mallard is rejected with a message that gives its version and the versions this
+build reads. It is never misread.
+
+| File | Version, where | Versions (written from) | Read by |
+|---|---|---|---|
+| Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9) | Mallard: all |
+| HDF5 mesh (`mallard-mesh-convert`) | root attribute `version` | 1 (0.3) | Mallard: all |
+| HDF5 output (`format = "hdf5"`) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard_h5.py` |
+| VTU output | field data `MALLARD_FORMAT_VERSION` | none before 0.9, 1 (0.9) | ParaView, `tools/mallard_vtu.py` |
+| TENO cache (`cache_file`) | magic `MALLARD-TENO-<n>` | - | Rebuilt automatically when it does not match |
+
+- Restart files are written with the **lowest** version that holds their
+  contents, so a run without statistics, characteristic boundaries or
+  compression still writes version 2, which every release since 0.4 reads.
+- A restart file must also match the build's dimension and precision
+  (`Mallard_DIM`, `Mallard_USE_DOUBLE`); the message says which differs.
+- Output files gain arrays and attributes within a version. A version changes
+  only when existing content changes meaning or layout. The Python tools refuse
+  versions newer than they know; update `tools/` with Mallard.
+- A change to a format adds a version and keeps the reader of every older one,
+  with a fixture in `test/data/formats/` that a test reads (see its
+  [README](../../test/data/formats/README.md)).
+
 ## See also
 
 - [Input reference: `[[write_data]]`](../input.md#write_data), [`[output]`](../input.md#output), [`[[forces]]`](../input.md#forces), [`[integrals]`](../input.md#integrals), [`[statistics]`](../input.md#statistics), [`[[probes]]`](../input.md#probes)
