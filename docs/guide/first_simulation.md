@@ -46,7 +46,7 @@ The input file, `input.toml`, has one table per part of the problem; every key i
 | `[mesh]` | A generated 200 × 4 quadrilateral strip on [0, 1] × [0, 0.02] |
 | `[initialize]` | Density and pressure as expressions in `x`: (1, 1) left of x = 0.5, (0.125, 0.1) right of it, at rest |
 | `[[boundaries]]` | Symmetry (slip walls) on all four sides, which makes the strip one-dimensional |
-| `[numerics]` | HLLC flux, SSPRK3 time integration, fifth-order TENO-E reconstruction |
+| `[numerics]` | HLLC flux, SSPRK3 time integration, fifth-order TENO-E reconstruction: the `accurate` preset, spelled out |
 | `[physics]` | Euler equations, γ = 1.4 |
 | `[[write_data]]` | VTU output of density, velocity, pressure and temperature every 0.02 |
 
@@ -63,6 +63,14 @@ The input file, `input.toml`, has one table per part of the problem; every key i
 Edit `input.toml` and run again:
 
 - **Resolution.** Set `Nx = 400` (and `Ly = 0.01` to keep square cells). The discontinuities become half as wide.
+- **Preset.** Replace the whole `[numerics]` table, its `[numerics.face_reconstruction]` and `[run] cfl` with
+
+    ```toml
+    [numerics]
+    preset = "accurate"
+    ```
+
+    The result is identical: the preset sets exactly the keys the example spells out, and the log lists them. `preset = "robust"` (MUSCL, RHLL, CFL 0.5) is the one to start any new case with; it runs on every mesh and through the strongest shocks. The [Numerics](numerics.md#presets) page lists the four presets and what each is for; any key you set yourself overrides the preset.
 - **Scheme.** Replace the reconstruction with second-order MUSCL,
 
     ```toml

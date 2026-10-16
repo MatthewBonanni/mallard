@@ -18,6 +18,7 @@ set(MALLARD_TEST_SOURCES
     distributed_mesh_test.cpp
     statistics_test.cpp
     les_test.cpp
+    numerics_preset_test.cpp
     tfles_test.cpp
     synthetic_inflow_test.cpp
 )
@@ -40,6 +41,7 @@ if(Mallard_DIM EQUAL 2)
     mesh_file_test.cpp
     mpi_test.cpp
     periodic_test.cpp
+    preset_validation_test.cpp
     )
 else()
     list(APPEND MALLARD_TEST_SOURCES
