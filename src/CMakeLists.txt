@@ -46,6 +46,7 @@ add_library(MallardCore STATIC
     solver/solver_sponge.cpp
     solver/solver_inflow.cpp
     solver/statistics.cpp
+    io/compression.cpp
     io/data_writer.cpp
     io/data_writer_hdf5.cpp
     parallel/comm.cpp
@@ -69,7 +70,7 @@ target_include_directories(MallardCore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/io
     ${CMAKE_CURRENT_SOURCE_DIR}/parallel
 )
-target_link_libraries(MallardCore PUBLIC Kokkos::kokkos)
+target_link_libraries(MallardCore PUBLIC Kokkos::kokkos Threads::Threads)
 # The TENO setup computes every table with the same operations on the host
 # and on the device, and contracting multiplies and adds into FMAs would
 # change them differently on each: no contraction in that file
@@ -98,6 +99,11 @@ if(Mallard_ENABLE_MPI)
         target_link_libraries(MallardCore PUBLIC ${NCCL_LIBRARY})
         target_compile_definitions(MallardCore PUBLIC Mallard_HAS_NCCL)
     endif()
+endif()
+
+if(Mallard_ENABLE_ZLIB)
+    target_link_libraries(MallardCore PUBLIC ZLIB::ZLIB)
+    target_compile_definitions(MallardCore PUBLIC Mallard_HAS_ZLIB)
 endif()
 
 if(Mallard_ENABLE_HDF5)
