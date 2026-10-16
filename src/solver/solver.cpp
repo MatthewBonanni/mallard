@@ -389,24 +389,36 @@ void Solver::init_rhs_split() {
 
     const bool own_faces = exchanges_partition_faces();
     if (own_faces) {
-        std::vector<uint32_t> local, shared;
-        std::vector<PartitionFace> partition;
+        // Fluxes read the halo side of partition faces, and transmissive
+        // boundary faces read a side of their image face, which may be a halo cell's
+        const auto image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_image_face);
+        const auto image_side = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_image_side);
+        std::vector<uint32_t> local, remote;
+        std::vector<RemoteFaceSide> needed;
+        std::vector<bool> requested(2 * size_t(mesh->n_faces), false);
+        auto need = [&](uint32_t f, int32_t c) {
+            const size_t k = 2 * size_t(f) + (mesh->h_cells_of_face(f, 0) == c ? 0 : 1);
+            if (requested[k]) return;
+            requested[k] = true;
+            needed.push_back({f, static_cast<uint32_t>(c)});
+        };
         for (const uint32_t f : faces) {
             const int32_t c0 = mesh->h_cells_of_face(f, 0), c1 = mesh->h_cells_of_face(f, 1);
-            if (c1 < 0 || owned(c0) == owned(c1)) {
-                local.push_back(f);
-                continue;
+            bool waits = c1 >= 0 && owned(c0) != owned(c1);
+            if (waits) need(f, owned(c0) ? c1 : c0);
+            if (c1 < 0 && image_face(f) >= 0) {
+                const uint32_t g = static_cast<uint32_t>(image_face(f));
+                const int32_t c = mesh->h_cells_of_face(g, image_side(f));
+                if (!owned(c)) {
+                    need(g, c);
+                    waits = true;
+                }
             }
-            shared.push_back(f);
-            uint32_t k = 0;
-            while (mesh->h_face_of_cell(static_cast<uint32_t>(c0), k) != f) k++;
-            const uint8_t side = owned(c0) ? 0 : 1;
-            partition.push_back({f, static_cast<uint32_t>(side == 0 ? c1 : c0), side,
-                                 mesh->h_global_cell_id[static_cast<size_t>(c0)] * 64 + k});
+            (waits ? remote : local).push_back(f);
         }
         local_faces = to_device(local, "local_faces");
-        partition_faces = to_device(shared, "partition_faces");
-        face_exchange = FaceExchange(plan_face_exchange(distribution, std::move(partition)),
+        partition_faces = to_device(remote, "partition_faces");
+        face_exchange = FaceExchange(plan_face_exchange(distribution, *mesh, needed),
                                      static_cast<uint8_t>(face_solution.extent(1)), halo.uses_nccl());
     }
 
