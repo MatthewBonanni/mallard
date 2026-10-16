@@ -28,7 +28,7 @@ struct ExampleCase {
     std::string file;    ///< Under examples/
     std::string preset;  ///< Its closest numerics preset
     int dim;             ///< Spatial dimension of the build it needs
-    /// Replaces an [initialize] that restarts from a generated file; empty:
+    /// Replaces an [initialize] that restarts or remaps from a generated file; empty:
     /// the state of the first boundary with p and T (mixtures) or the
     /// reference state (perfect gas), at rest
     std::string init;
@@ -103,7 +103,8 @@ inline Input example_under_preset(const ExampleCase & c, uint64_t n_steps, int64
         }
     }
 
-    if (toml::find_or<std::string>(input, "initialize", "type", "constant") == "restart") {
+    if (const auto type = toml::find_or<std::string>(input, "initialize", "type", "constant");
+        type == "restart" || type == "remap") {
         if (!c.init.empty()) {
             table["initialize"] = parse_toml(c.init);
         } else if (physics.count("mechanism")) {
