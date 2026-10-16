@@ -163,7 +163,9 @@ bool point_in_cell(const Mesh & mesh, uint32_t c, const rtype * p) {
         if (mesh.h_cells_of_face(g, 1) >= 0 && mesh.h_rotated_row(mesh.h_face_shift(g))) continue;
         const rtype A_g = mesh.h_face_area(g);
         const auto x_g = mesh.h_face_point(g, image);
-        const auto n_g = mesh.h_face_normal(g, image);
+        const auto n_face = mesh.h_face_normal(g, image);
+        std::array<rtype, 3> n_g = {0.0_r, 0.0_r, 0.0_r};
+        FOR_I_DIM n_g[i] = n_face[i];
         rtype dist = 0.0, cross2 = 0.0;
         FOR_I_DIM {
             const rtype d = x_g[i] - target[i];

@@ -122,12 +122,13 @@ std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const toml::value & input) 
                 FOR_I_DIM pair.center[i] = c[i];
             }
             if (entry.contains("axis")) {
-                const std::vector<rtype> a = find_real_vector(entry, "axis");
-                if (N_DIM == 2 || a.size() != 3) {
-                    throw InputError(N_DIM == 2 ? "[[periodic]] axis: 2D rotations turn about the point center."
-                                                : "[[periodic]] axis needs 3 components.");
+                if constexpr (N_DIM == 2) {
+                    throw InputError("[[periodic]] axis: 2D rotations turn about the point center.");
+                } else {
+                    const std::vector<rtype> a = find_real_vector(entry, "axis");
+                    if (a.size() != 3) throw InputError("[[periodic]] axis needs 3 components.");
+                    for (size_t i = 0; i < 3; i++) pair.axis[i] = a[i];
                 }
-                for (size_t i = 0; i < 3; i++) pair.axis[i] = a[i];
             }
             pairs.push_back(pair);
         }
