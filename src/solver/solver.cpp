@@ -61,6 +61,7 @@ void Solver::timed_phase(const std::string & name, F && f) {
 
 int Solver::init(const toml::value & input_in) {
     this->input = input_in;
+    preset = numerics_preset::apply(input);
 
     t = 0.0;
     step = 0;
@@ -915,6 +916,11 @@ void Solver::init_output() {
     if (check_interval == 0) {
         throw InputError("output.check_interval must be positive.");
     }
+    const bool async_output = toml::find_or<bool>(input, "output", "async", true);
+    const uint32_t io_threads = toml::find_or<uint32_t>(input, "output", "io_threads", 1);
+    if (io_threads == 0) {
+        throw InputError("output.io_threads must be positive.");
+    }
     if (input.contains("forces")) {
         for (const auto & entry : toml::find<std::vector<toml::value>>(input, "forces")) {
             ForceMonitor monitor;
@@ -999,6 +1005,7 @@ void Solver::init_output() {
     for (const auto & output : outputs) {
         data_writers.push_back(std::make_unique<DataWriter>());
         data_writers.back()->init(output, data, mesh, restart_variables());
+        data_writers.back()->set_async(async_output, io_threads);
     }
 }
 
@@ -1338,6 +1345,7 @@ int Solver::run() {
     Kokkos::Timer output_timer;
     copy_device_to_host();
     write_data(true);
+    for (auto & writer : data_writers) writer->finish();
     t_wall_output += output_timer.seconds();
     print_summary(stop);
     return 0;
@@ -1442,6 +1450,7 @@ void Solver::print_setup() const {
     logging::item("Initial state", initial_state);
 
     logging::section("Numerics");
+    if (!preset.name.empty()) logging::item("Preset", preset.summary());
     logging::items(face_reconstruction->summary());
     logging::item("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
     if (hybrid_flux) {
@@ -1528,6 +1537,19 @@ void Solver::print_summary(const std::string & stop) const {
                                         duration(t_wall_stepping / static_cast<double>(steps)) + " per step over " +
                                         logging::count(steps) + " steps");
     }
+    if (!data_writers.empty()) {
+        double writing = 0.0;
+        uint64_t bytes = 0;
+        for (const auto & writer : data_writers) {
+            writing += writer->writing_seconds();
+            bytes += writer->bytes_written();
+        }
+        // Ranks write their parts at the same time
+        writing = comm::allreduce(writing, comm::Op::MAX);
+        bytes = comm::allreduce(bytes, comm::Op::SUM);
+        logging::item("Writing", logging::si(static_cast<double>(bytes)) + "B of files in " + duration(writing) +
+                                     (data_writers.front()->is_async() ? " (in the background)" : ""));
+    }
     std::string files;
     auto add = [&](const std::string & text) { files += (files.empty() ? "" : ", ") + text; };
     for (const auto & writer : data_writers) {
@@ -1613,6 +1635,11 @@ void Solver::take_step() {
         halo_current = false;
     }
     if (double_flux) {
+        // The halo cells' [gamma, e0] are frozen from their owners' states after the chemistry
+        if (halo.active() && !halo_current) {
+            halo.exchange(state());
+            halo_current = true;
+        }
         freeze_thermodynamics();
         cells_frozen = true;
     }

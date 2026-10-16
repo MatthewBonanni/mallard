@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "launch_bounds.h"
+#include "log.h"
 
 namespace teno_setup {
 
@@ -46,6 +47,9 @@ constexpr int MAX_NM = 2 * teno::MAX_DEGREE - 1;
 constexpr int MAX_MOMENTS = MAX_NM * (MAX_NM + 1) * (MAX_NM + 2) / 6;
 constexpr int MAX_LOW = (teno::MAX_DEGREE + 1) * (teno::MAX_DEGREE + 2) * (teno::MAX_DEGREE + 3) / 6;
 constexpr int MAX_PSI_ROWS = teno::MAX_FACES * teno::MAX_FACE_QUAD;
+
+// Mirror planes of one search: an entry keeps its plane + 1 in the top 8 bits
+constexpr uint32_t MAX_PLANES = 255;
 
 /**
  * @brief Periodic lattice offset of a visited cell, 10 bits per component
@@ -971,8 +975,8 @@ struct CellSetup {
      * @brief Stencil candidates of the first n_visits visits, sorted by
      *        distance (see gather in teno.cpp): the cells, and their mirror
      *        images across the planar boundaries the cells touch, except
-     *        images that land inside the domain. Returns their number, or -1
-     *        when the scratch is full.
+     *        images that land inside the domain. Returns their number, or
+     *        minus the Status that stopped it.
      */
     KOKKOS_INLINE_FUNCTION
     int gather(const Lanes & w, const uint32_t i, const uint32_t n_visits, const double * x0, const double h,
@@ -1004,7 +1008,8 @@ struct CellSetup {
                     }
                 }
                 if (match < 0) {
-                    if (n_planes == caps.planes || n_planes == 32) return -1;
+                    if (n_planes == MAX_PLANES) return -int(TOO_MANY_PLANES);
+                    if (n_planes == caps.planes) return -int(OUT_OF_SCRATCH);
                     for (uint32_t d = 0; d < 3; d++) {
                         w.planes[6 * n_planes + d] = n[d];
                         w.planes[6 * n_planes + 3 + d] = x[d];
@@ -1018,7 +1023,7 @@ struct CellSetup {
                             w.plane_face_lattice[j] == w.visit_lattice[v];
                 }
                 if (known) continue;
-                if (n_plane_faces == caps.plane_faces) return -1;
+                if (n_plane_faces == caps.plane_faces) return -int(OUT_OF_SCRATCH);
                 w.plane_face[n_plane_faces] = f;
                 w.plane_face_lattice[n_plane_faces] = w.visit_lattice[v];
                 w.plane_face_plane[n_plane_faces] = static_cast<uint32_t>(match);
@@ -1083,12 +1088,12 @@ struct CellSetup {
         uint32_t n_entries = 0;
         for (uint32_t v = 0; v < n_visits; v++) {
             if (!(w.visit_cell[v] == i && w.visit_lattice[v] == LATTICE_ZERO)) {
-                if (n_entries == caps.entries) return -1;
+                if (n_entries == caps.entries) return -int(OUT_OF_SCRATCH);
                 w.entry_ref[n_entries++] = v;
             }
             for (uint32_t p = 0; p < n_planes; p++) {
                 if ((w.inside[v * words + p / 32] >> (p % 32)) & 1u) continue;
-                if (n_entries == caps.entries) return -1;
+                if (n_entries == caps.entries) return -int(OUT_OF_SCRATCH);
                 w.entry_ref[n_entries++] = v | ((p + 1) << 24);
             }
         }
@@ -1482,7 +1487,7 @@ struct CellSetup {
         if (depth_large != entries_depth) {
             entries_depth = depth_large;
             n_entries = gather(w, i, end[depth_large], x0, h, n_planes, n_plane_faces);
-            if (n_entries < 0) return OUT_OF_SCRATCH;
+            if (n_entries < 0) return uint8_t(-n_entries);
         }
         const double tie = GEOMETRY_TOL * h * h;
         auto splits_tie = [&](const uint32_t n_list, const uint32_t n) {
@@ -1556,7 +1561,7 @@ struct CellSetup {
         if (depth_wide != entries_depth) {
             entries_depth = depth_wide;
             n_entries = gather(w, i, end[depth_wide], x0, h, n_planes, n_plane_faces);
-            if (n_entries < 0) return OUT_OF_SCRATCH;
+            if (n_entries < 0) return uint8_t(-n_entries);
         }
         uint32_t k_face = 0;
         for (uint32_t kf = g.offsets_faces_of_cell(i); kf < g.offsets_faces_of_cell(i + 1); kf++, k_face++) {
@@ -2238,7 +2243,7 @@ struct CellTeam {
         tm.team_barrier();
     }
 
-    /** @brief CellSetup::gather over the team; the sort runs in level-0 scratch. Returns -1 when the scratch is full. */
+    /** @brief CellSetup::gather over the team; the sort runs in level-0 scratch. Returns minus the Status that stops it. */
     KOKKOS_INLINE_FUNCTION
     int gather(const Member & tm, const Lanes & w, char * base, uint32_t * ctl, char * sort_space, const uint32_t i,
                const uint32_t n_visits, const double * x0, const double h) const {
@@ -2266,7 +2271,7 @@ struct CellTeam {
                 offset++;
             }
         });
-        if (n_pairs > caps.plane_faces) return -1;
+        if (n_pairs > caps.plane_faces) return -int(OUT_OF_SCRATCH);
         Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, n_pairs), [&](const uint32_t p) {
             const uint32_t f = pair_face[p];
             double t[3], n[3];
@@ -2282,8 +2287,8 @@ struct CellTeam {
         // offset come from one visit only, so no face is met twice.
         if (tm.team_rank() == 0) {
             uint32_t n_planes = 0;
-            bool ok = true;
-            for (uint32_t q = 0; q < n_pairs && ok; q++) {
+            uint32_t failure = OK;
+            for (uint32_t q = 0; q < n_pairs && failure == OK; q++) {
                 const double * n = pair_geometry + 6 * q;
                 const double * x = n + 3;
                 int match = -1;
@@ -2299,8 +2304,8 @@ struct CellTeam {
                     }
                 }
                 if (match < 0) {
-                    if (n_planes == caps.planes || n_planes == 32) {
-                        ok = false;
+                    if (n_planes == MAX_PLANES || n_planes == caps.planes) {
+                        failure = n_planes == MAX_PLANES ? TOO_MANY_PLANES : OUT_OF_SCRATCH;
                         break;
                     }
                     for (uint32_t d = 0; d < 6; d++) w.planes[6 * n_planes + d] = n[d];
@@ -2311,10 +2316,11 @@ struct CellTeam {
                 w.plane_face_lattice[q] = w.visit_lattice[pair_visit[q]];
                 w.plane_face_plane[q] = static_cast<uint32_t>(match);
             }
-            ctl[N_PLANES] = ok ? n_planes : ~0u;
+            // A failure as its complement, beyond any plane count
+            ctl[N_PLANES] = failure == OK ? n_planes : ~failure;
             ctl[N_PLANE_FACES] = n_pairs;
             // Each plane's faces together, in their order (a stable counting sort)
-            if (ok) {
+            if (failure == OK) {
                 uint32_t * start = reinterpret_cast<uint32_t *>(base + layout.plane_start);
                 uint32_t * sorted = reinterpret_cast<uint32_t *>(base + layout.plane_sorted);
                 for (uint32_t p = 0; p <= n_planes; p++) start[p] = 0;
@@ -2330,13 +2336,13 @@ struct CellTeam {
         {
             const uint32_t * sorted = reinterpret_cast<const uint32_t *>(base + layout.plane_sorted);
             double * sorted_x = reinterpret_cast<double *>(base + layout.plane_x);
-            Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, ctl[N_PLANES] == ~0u ? 0u : n_pairs), [&](const uint32_t k) {
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, ctl[N_PLANES] > MAX_PLANES ? 0u : n_pairs), [&](const uint32_t k) {
                 for (uint32_t d = 0; d < 3; d++) sorted_x[3 * k + d] = pair_geometry[6 * sorted[k] + 3 + d];
             });
             tm.team_barrier();
         }
         const uint32_t n_planes = ctl[N_PLANES];
-        if (n_planes == ~0u) return -1;
+        if (n_planes > MAX_PLANES) return -int(~n_planes);
         const uint32_t words = caps.flag_words();
         Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, n_visits * words), [&](const uint32_t v) { w.inside[v] = 0; });
         tm.team_barrier();
@@ -2396,7 +2402,7 @@ struct CellTeam {
                     e++;
                 }
             });
-        if (n_entries > caps.entries) return -1;
+        if (n_entries > caps.entries) return -int(OUT_OF_SCRATCH);
         // Sort in level-0 scratch: a bitonic network over (key, position), a total order
         uint32_t n_sort = 1;
         while (n_sort < n_entries) n_sort <<= 1;
@@ -2614,7 +2620,7 @@ struct CellTeam {
         if (depth_large != entries_depth) {
             entries_depth = depth_large;
             n_entries = gather(tm, w, base, ctl, big, i, end[depth_large], x0, h);
-            if (n_entries < 0) return OUT_OF_SCRATCH;
+            if (n_entries < 0) return uint8_t(-n_entries);
         }
         const double tie = GEOMETRY_TOL * h * h;
         auto key = [&](const uint32_t j) { return w.entry_key[w.entry_order[j]]; };
@@ -2709,7 +2715,7 @@ struct CellTeam {
             entries_depth = depth_wide;
             if (tm.team_rank() == 0) ctl[N_MEANS] = 0;
             n_entries = gather(tm, w, base, ctl, big, i, end[depth_wide], x0, h);
-            if (n_entries < 0) return OUT_OF_SCRATCH;
+            if (n_entries < 0) return uint8_t(-n_entries);
         }
         // Sector stencils of all faces at once: the face geometry, then the
         // first nss_max + 1 entries in each face's cone, in sorted order
@@ -3557,12 +3563,26 @@ class Setup3D {
             host_ready = true;
         }
 
+        /** @brief Where cell c is, for errors. */
+        std::string describe(const uint32_t c) const {
+            return logging::format("cell %u at (%.6g, %.6g, %.6g)", c, double(host.cell_coords(c, 0)),
+                                   double(host.cell_coords(c, 1)), double(host.cell_coords(c, 2)));
+        }
+
         /** @brief Tables of the batch slots in which (cells[t]) on the host, growing the scratch until they fit. */
         void on_host(const Kokkos::View<uint32_t *, HostMem> & cells, std::vector<uint32_t> which, TableBatch & out) {
             ensure_host();
             const uint32_t n_threads = static_cast<uint32_t>(Kokkos::DefaultHostExecutionSpace().concurrency());
+            constexpr uint32_t MAX_SCALE = 1024;
             for (uint32_t scale = 1; !which.empty(); scale *= 4) {
-                if (scale > 1024) throw std::runtime_error("TENO setup: a stencil search does not fit in memory.");
+                if (scale > MAX_SCALE) {
+                    const Caps most = caps.scaled(MAX_SCALE);
+                    throw std::runtime_error(logging::format(
+                        "TENO setup: the stencil search of %s (and %zu more) does not fit in memory with %ux the "
+                        "scratch (%u visits, %u entries, %u mirror planes, %u mirror faces).",
+                        describe(cells(which[0])).c_str(), which.size() - 1, MAX_SCALE, most.visits, most.entries,
+                        most.planes, most.plane_faces));
+                }
                 const uint32_t m = static_cast<uint32_t>(which.size());
                 Kokkos::View<uint32_t *, HostMem> h_cells("teno_setup_host_cells", m);
                 for (uint32_t j = 0; j < m; j++) h_cells(j) = cells(which[j]);
@@ -3580,8 +3600,13 @@ class Setup3D {
                     if (h_out.status(j) == OK) {
                         done.push_back(j);
                         done_slot.push_back(which[j]);
-                    } else {
+                    } else if (h_out.status(j) == OUT_OF_SCRATCH) {
                         again.push_back(which[j]);
+                    } else {
+                        throw std::runtime_error(logging::format(
+                            "TENO setup: the stencil search of %s meets more than %u distinct mirror planes (boundary "
+                            "faces with mirror images, e.g. of a faceted curved boundary).",
+                            describe(h_cells(j)).c_str(), MAX_PLANES));
                     }
                 }
                 // Compact the finished ones and move them to their slots of out

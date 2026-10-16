@@ -2,8 +2,9 @@
 CPU build): TENO-E stencils read back from a stencil cache, the Sod shock
 tube with each reconstruction (through a line probe), MPI partitions, a
 MallardReactor ignition, a sector against the full annulus (rotational
-periodicity), and the mesh-import fixtures as Mallard reads them
-(through mallard-mesh-convert, which needs h5py and an HDF5 and CGNS build).
+periodicity), the mesh-import fixtures as Mallard reads them
+(through mallard-mesh-convert, which needs h5py and an HDF5 and CGNS build), and a
+remap from quadrilaterals to triangles.
 
     python tools/docs/runs.py --mallard build/src/Mallard [--mpirun mpirun] [names...]
 
@@ -22,6 +23,7 @@ from pathlib import Path
 import numpy as np
 from matplotlib.collections import LineCollection, PolyCollection
 from matplotlib.patches import Polygon
+import matplotlib.path
 import matplotlib.pyplot as plt
 
 import figstyle
@@ -414,6 +416,156 @@ def mesh_transform(P, args):
     return fig
 
 
+# ------------------------------------------------------------------ remap
+
+REMAP_FIELD = """
+[initialize]
+type = "analytical"
+rho = "1.0 + 0.6 * exp(-30 * ((x - 0.42)^2 + (y - 0.58)^2)) + (y > 0.22 + 0.35 * x ? 0.5 : 0.0)"
+u = ["0.0", "0.0"]
+p = "1.0"
+"""
+REMAP_BCS = "".join(f'[[boundaries]]\nname = "{z}"\ntype = "symmetry"\n' for z in ("left", "right", "top", "bottom"))
+
+
+@functools.cache
+def remap_data(args):
+    """A field on 16 x 16 quads (source), remapped to 2 x 37 x 37 triangles (target)."""
+    work = Path(tempfile.mkdtemp())
+    source_mesh = 'type = "cartesian"\nNx = 16\nNy = 16\n'
+    run(args.mallard, f"""
+[run]
+n_steps = 1
+cfl = 0.5
+[mesh]
+{source_mesh}{REMAP_FIELD}{REMAP_BCS}
+[[write_data]]
+prefix = "source"
+format = "vtu"
+interval = 1
+variables = ["RHO"]
+[[write_data]]
+prefix = "source"
+format = "restart"
+interval = 1
+{PHYSICS}""", work, name="source.toml")
+    run(args.mallard, f"""
+[run]
+n_steps = 1
+cfl = 0.5
+[mesh]
+type = "cartesian_tri"
+Nx = 37
+Ny = 37
+[initialize]
+type = "remap"
+file = "source_000000.restart"
+degree = 3
+[initialize.mesh]
+{source_mesh}{REMAP_BCS}
+[[write_data]]
+prefix = "target"
+format = "vtu"
+interval = 1
+variables = ["RHO"]
+{PHYSICS}""", work, name="target.toml")
+    source, sdata = polygons(work / "source_000000.vtu")
+    target, tdata = polygons(work / "target_000000.vtu")
+    return source, np.asarray(sdata["RHO"]), target, np.asarray(tdata["RHO"])
+
+
+def _clip(subject, a, b):
+    """Part of convex polygon subject left of the directed line a -> b."""
+    out = []
+    for i, p in enumerate(subject):
+        q = subject[(i + 1) % len(subject)]
+        sp = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+        sq = (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0])
+        if sp >= 0:
+            out.append(p)
+        if (sp >= 0) != (sq >= 0):
+            out.append(p + sp / (sp - sq) * (q - p))
+    return out
+
+
+def _area(p):
+    return 0.5 * np.sum(p[:, 0] * np.roll(p[:, 1], -1) - np.roll(p[:, 0], -1) * p[:, 1])
+
+
+def _intersect(target, source):
+    s = source if _area(source) > 0 else source[::-1]
+    piece = list(target)
+    for i in range(len(s)):
+        if not piece:
+            break
+        piece = _clip(piece, s[i], s[(i + 1) % len(s)])
+    return np.array(piece)
+
+
+def remap_supermesh(P, args):
+    source, _, target, _ = remap_data(args)
+    window = (0.30, 0.58, 0.30, 0.58)
+
+    def inside(c):
+        return (c[:, 0].max() > window[0] and c[:, 0].min() < window[1] and c[:, 1].max() > window[2]
+                and c[:, 1].min() < window[3])
+
+    def pieces(t):
+        return [q for q in (_intersect(t, s) for s in source) if len(q) >= 3 and abs(_area(q)) > 0.02 * abs(_area(t))]
+
+    near = [t for t in target if inside(t)]
+    center = np.array([0.5 * (window[0] + window[1]), 0.5 * (window[2] + window[3])])
+    chosen = max(near, key=lambda t: (len(pieces(t)), -np.linalg.norm(t.mean(axis=0) - center)))
+    fig, ax = plt.subplots(figsize=(4.6, 4.6))
+    colors = [P["teal"], P["flame"], P["plum"], P["gold"]]
+    for k, q in enumerate(pieces(chosen)):
+        ax.add_patch(Polygon(q, closed=True, facecolor=colors[k % 4], alpha=0.75, edgecolor="none"))
+    ax.add_collection(PolyCollection(near, facecolors="none", edgecolors=P["mesh"], linewidths=0.8))
+    ax.add_collection(PolyCollection([s for s in source if inside(s)], facecolors="none", edgecolors=P["blue"],
+                                     linewidths=2.0))
+    ax.add_patch(Polygon(chosen, closed=True, facecolor="none", edgecolor=P["fg"], lw=1.8))
+    bare(ax)
+    c0 = chosen.mean(axis=0)
+    ax.set_xlim(c0[0] - 0.07, c0[0] + 0.07)
+    ax.set_ylim(c0[1] - 0.07, c0[1] + 0.07)
+    label(ax, 0.5, -0.04, "source quadrilaterals (blue), target triangles (gray):\n"
+          "one target cell in its pieces, one per source cell it overlaps", P, size=11, va="top",
+          transform=ax.transAxes)
+    return fig
+
+
+def remap_fields(P, args):
+    source, rho_s, target, rho_t = remap_data(args)
+    lo, hi = min(rho_s.min(), rho_t.min()), max(rho_s.max(), rho_t.max())
+    fig = plt.figure(figsize=(10.4, 3.6))
+    grid = fig.add_gridspec(1, 3, width_ratios=[1, 1, 1.25], wspace=0.12)
+    y_cut = 0.58
+    for k, (cells, rho, title) in enumerate([(source, rho_s, "before: 256 quadrilaterals"),
+                                             (target, rho_t, "after: 2,738 triangles")]):
+        ax = fig.add_subplot(grid[k])
+        ax.add_collection(PolyCollection(cells, array=rho, cmap=P["cmap"], clim=(lo, hi), edgecolors="none",
+                                         antialiaseds=False))
+        ax.plot([0, 1], [y_cut, y_cut], color=P["bg"], lw=1.4)
+        bare(ax)
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.set_title(title, fontsize=12)
+    ax = fig.add_subplot(grid[2])
+    x = np.linspace(0.0005, 0.9995, 2000)
+    for cells, rho, name, color, lw in [(source, rho_s, "before", P["blue"], 1.4), (target, rho_t, "after", P["flame"], 2.0)]:
+        values = np.full(x.size, np.nan)
+        for c, v in zip(cells, rho):
+            if c[:, 1].min() <= y_cut <= c[:, 1].max():
+                path = matplotlib.path.Path(c)
+                hit = path.contains_points(np.column_stack([x, np.full(x.size, y_cut)]))
+                values[hit] = v
+        ax.plot(x, values, color=color, lw=lw, label=name)
+    ax.set_xlabel(f"x at y = {y_cut}")
+    ax.set_ylabel("density")
+    ax.legend(loc="upper right")
+    return fig
+
+
 class Args(tuple):
     """Hashable options, so the runs are cached between the light and dark figures."""
 
@@ -427,6 +579,7 @@ class Args(tuple):
 
 FIGURES = {"teno_stencils": teno_stencils, "sod_schemes": sod_schemes, "partitions": partitions,
            "ignition": ignition, "mesh_import": mesh_import, "mesh_transform": mesh_transform,
+           "remap-supermesh": remap_supermesh, "remap-fields": remap_fields,
            "rotational_sector": rotational_sector}
 
 
