@@ -230,13 +230,13 @@ Manifest load_manifest() {
     const toml::value v = toml::parse((m.root / manifest_path).string());
     m.input_docs = toml::find<std::string>(v, "docs", "input");
     m.source_url = toml::find<std::string>(v, "docs", "source");
-    for (const auto & t : toml::find<toml::array>(v, "tables")) {
+    for (const auto & t : v.at("tables").as_array()) {
         m.tables.emplace_back(toml::find<std::string>(t, "table"), toml::find<std::string>(t, "about"));
     }
-    for (const auto & g : toml::find<toml::array>(v, "groups")) {
+    for (const auto & g : v.at("groups").as_array()) {
         m.groups.push_back({toml::find<std::string>(g, "name"), toml::find<std::string>(g, "title")});
     }
-    for (const auto & e : toml::find<toml::array>(v, "templates")) {
+    for (const auto & e : v.at("templates").as_array()) {
         Template t;
         t.name = toml::find<std::string>(e, "name");
         t.group = toml::find<std::string>(e, "group");
