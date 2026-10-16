@@ -367,14 +367,14 @@ const char * const MEASURE = N_DIM == 2 ? "length" : "area";
 } // namespace
 
 TEST(ProbesTest, WallShearAndHeatFluxMatchCouetteFlow) {
-    // The wall shear stress of the linear profile is exact; the heat flux,
-    // from the one-sided wall gradient of the viscous flux, converges at
-    // first order
+    // The wall values are the walls'; the shear stress converges at second
+    // order (its only error is the cell averages' u = <rho u> / <rho>), the
+    // heat flux, from the one-sided wall gradient of the viscous flux, at first
     const std::string dir = dir_for("couette");
     const double q_bottom = -COUETTE_KAPPA * (COUETTE_T1 - COUETTE_T0) - 0.5 * COUETTE_MU * COUETTE_U * COUETTE_U;
     const double q_top = COUETTE_KAPPA * (COUETTE_T1 - COUETTE_T0) - 0.5 * COUETTE_MU * COUETTE_U * COUETTE_U;
     const double tau = COUETTE_MU * COUETTE_U, q_ref = 0.5 * COUETTE_U * COUETTE_U;
-    std::vector<double> errors;
+    std::vector<double> e_tau, e_q;
     for (uint32_t n : {8u, 16u, 32u}) {
         std::filesystem::remove_all(dir);
         const std::string probe = "[[probes]]\nname = \"walls\"\nfile = \"" + dir + "/walls.csv\"\nboundary_type = \"wall\"\n"
@@ -383,30 +383,35 @@ TEST(ProbesTest, WallShearAndHeatFluxMatchCouetteFlow) {
         Solver solver;
         solver.init(parse_toml(couette_case(n, probe)));
         solver.run();
-        double error = 0.0;
+        double error_tau = 0.0, error_q = 0.0;
         size_t n_faces = 0;
+        const double tol = precision_tol<double>(1e-12, 1e-5);
         for (const auto & row : read_csv(dir + "/walls.csv")) {
             if (row.at("step") != 0.0) continue;
             n_faces++;
+            // The fluid drags the wall at rest along the flow, the moving wall against it
             const bool top = row.at("ny") > 0.0;
             const double sign = top ? -1.0 : 1.0;
-            const double tol = precision_tol<double>(1e-10, 2e-4);
-            EXPECT_NEAR(row.at("TAU_W_X"), sign * tau, tol * tau);
-            EXPECT_NEAR(row.at("TAU_W"), tau, tol * tau);
-            EXPECT_NEAR(row.at("CF"), sign * tau / q_ref, tol * tau / q_ref);
             EXPECT_NEAR(row.at("T"), top ? COUETTE_T1 : COUETTE_T0, tol);
             EXPECT_NEAR(row.at("U_X"), top ? COUETTE_U : 0.0, tol);
-            const double rho_w = 1.0 / (top ? COUETTE_T1 : COUETTE_T0), u_tau = std::sqrt(tau / rho_w);
-            EXPECT_NEAR(row.at("U_TAU"), u_tau, tol * u_tau);
-            EXPECT_NEAR(row.at("Y_PLUS"), rho_w * u_tau * (0.5 / n) / COUETTE_MU, tol);
+            EXPECT_GT(sign * row.at("TAU_W_X"), 0.0);
+            EXPECT_NEAR(row.at("TAU_W"), std::fabs(row.at("TAU_W_X")), tol * tau);
+            EXPECT_NEAR(row.at("CF"), row.at("TAU_W_X") / q_ref, tol * tau / q_ref);
+            const double rho_w = 1.0 / (top ? COUETTE_T1 : COUETTE_T0);
+            EXPECT_NEAR(row.at("U_TAU"), std::sqrt(row.at("TAU_W") / rho_w), tol);
+            EXPECT_NEAR(row.at("Y_PLUS"), rho_w * row.at("U_TAU") * (0.5 / n) / COUETTE_MU, tol);
+            error_tau = std::max(error_tau, std::fabs(row.at("TAU_W") - tau) / tau);
             const double q = top ? q_top : q_bottom;
-            error = std::max(error, std::fabs(row.at("Q_W") - q) / std::fabs(q));
+            error_q = std::max(error_q, std::fabs(row.at("Q_W") - q) / std::fabs(q));
         }
         EXPECT_EQ(n_faces, (N_DIM == 2 ? 2u * 4u : 2u * 12u));
-        errors.push_back(error);
+        e_tau.push_back(error_tau);
+        e_q.push_back(error_q);
     }
-    EXPECT_LT(errors.back(), 0.05);
-    EXPECT_GT(std::log2(errors[1] / errors[2]), 0.8) << errors[1] << " " << errors[2];
+    EXPECT_LT(e_tau[0], 0.01);
+    EXPECT_GT(std::log2(e_tau[1] / e_tau[2]), 1.8) << e_tau[1] << " " << e_tau[2];
+    EXPECT_LT(e_q.back(), 0.05);
+    EXPECT_GT(std::log2(e_q[1] / e_q[2]), 0.8) << e_q[1] << " " << e_q[2];
     std::filesystem::remove_all(dir);
 }
 

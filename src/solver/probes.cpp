@@ -423,7 +423,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
             rtype Wf[N_CONSERVATIVE], nv[N_DIM];
             FOR_I_CONSERVATIVE Wf[i] = Ws(s, i);
             FOR_I_DIM nv[i] = normal(s, i);
-            const rtype R_c = sampler.P(c, N_DIM) / (sampler.U(c, 0) * sampler.P(c, N_DIM + 1));
+            const rtype R_c = mixture ? sampler.P(c, N_DIM) / (sampler.U(c, 0) * sampler.P(c, N_DIM + 1)) : physics.R;
             const rtype g = mixture ? cell_gamma(c) : physics.gamma;
             const rtype u_n = dot<N_DIM>(Wf + 1, nv);
             if (bc.is_wall() && viscous) {
@@ -471,7 +471,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
         rtype tau_n[N_DIM] = {}, q_n = 0.0_r, mu = 0.0_r;
         if (need_gradients && on_faces) {
             const BoundaryCondition & bc = boundaries.bcs(ibc);
-            const rtype R_c = p_c / (rho_c * T_c);
+            const rtype R_c = mixture ? p_c / (rho_c * T_c) : physics.R;
             rtype gu[N_DIM][N_DIM], gT[N_DIM];
             FOR_I_DIM {
                 for (uint8_t k = 0; k < N_DIM; k++) gu[k][i] = G(c, 1 + k, i);
