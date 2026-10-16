@@ -18,6 +18,7 @@
 #   post, results         commands of post.sh, and what they produce;
 #                         $(last PREFIX) is the newest snapshot PREFIX_N
 #                         (.vtu, or .pvtu of an MPI run)
+#   packages              Python packages of scripts outside tools/
 #   quick, quick_mesh,    the --quick version: "table.key = value" edits of
 #   quick_init,           the input, and commands replacing the full ones.
 #   quick_post            CI (templates/ci.sh) creates and runs every
@@ -104,6 +105,9 @@ title = "Turbulence"
 [[groups]]
 name = "reacting"
 title = "Reacting flows and mixtures"
+[[groups]]
+name = "tutorials"
+title = "Tutorials (docs/tutorials: each step explained)"
 
 # ---------------------------------------------------------------- shocks
 
@@ -322,7 +326,7 @@ mesh = ["tools/make_sphere_re300_mesh.py sphere.msh"]
 mesh_creates = "sphere.msh"
 quick_mesh = ["tools/make_sphere_re300_mesh.py sphere.msh --h-wall 0.3 --dn0 0.05 --n-layers 2 --h-near 0.4 --h-wake 0.6 --h-far 6 --x-min -6 --x-max 10 --half-width 6"]
 post = ["tools/plot_sphere_re300.py solut/forces_sphere.csv --t-start 450"]
-quick_post = ["tools/plot_vtu.py $(last solut/sphere) sphere.png --var U_X"]
+quick_post = ["tools/plot_vtu.py $(last solut/sphere) sphere.png --var U"]
 results = "sphere_re300.png, drag and lift with the Strouhal number against the literature"
 quick = ["run.t_stop = 0.5", "write_data.time_interval = 0.5"]
 
@@ -363,3 +367,47 @@ cost = "60 cells, about 2 minutes on 3 threads"
 post = ["tools/plot_vtu.py $(last solut/flame) flame.png --line --var T"]
 results = "flame.png, the temperature profile"
 quick = ["run.t_stop = 1.0e-5"]
+
+# ------------------------------------------------------------- tutorials
+# The tutorials' scripts stay in Mallard's tutorials/ ({data}), next to the
+# shared code they import; their figures go to figures/.
+
+[[templates]]
+name = "cone"
+group = "tutorials"
+summary = "Supersonic flow over a cone against the Taylor-Maccoll solution"
+source = "tutorials/cone"
+files = ["input.toml", "cone.geo"]
+dim = 3
+threads = 8
+cost = "100,000 tetrahedra, minutes on 8 threads"
+mesh = ["gmsh cone.geo -3 -o cone.msh"]
+mesh_creates = "cone.msh"
+quick_mesh = ["gmsh cone.geo -3 -setnumber h 0.06 -setnumber h_out 0.12 -o cone.msh"]
+post = ["{data}/tutorials/cone/taylor_maccoll.py --csv taylor_maccoll.csv",
+        "{data}/tutorials/cone/plot_mesh.py cone.msh --out figures",
+        "{data}/tutorials/cone/plot_results.py . --out figures"]
+packages = ["numpy", "scipy", "matplotlib"]
+results = "figures/, the mesh, the flow field and the comparison with Taylor-Maccoll (docs/tutorials/cone.md)"
+quick = ["run.t_stop = 0.5"]
+
+[[templates]]
+name = "channel_les"
+group = "tutorials"
+summary = "Wall-resolved LES of turbulent channel flow at Re_tau = 180 against DNS"
+source = "tutorials/channel_les"
+files = ["input.toml", "channel.geo"]
+dim = 3
+threads = 8
+cost = "300,000 steps: under an hour on one A100, hours on a CPU"
+mesh = ["gmsh channel.geo -3 -o channel.msh"]
+mesh_creates = "channel.msh"
+quick_mesh = ["gmsh channel.geo -3 -setnumber nx 8 -setnumber ny 16 -setnumber nz 8 -o channel.msh"]
+post = ["{data}/tutorials/channel_les/plot_channel_les.py mesh channel.msh --out figures",
+        "{data}/tutorials/channel_les/plot_channel_les.py results . --out figures"]
+quick_post = ["{data}/tutorials/channel_les/plot_channel_les.py mesh channel.msh --out figures",
+              "{data}/tutorials/channel_les/plot_channel_les.py results . --t-start 0.2 --out figures"]
+packages = ["numpy", "scipy", "matplotlib"]
+results = "figures/, the mesh, profiles and spectra against Moser, Kim & Mansour (docs/tutorials/channel_les.md)"
+quick = ["run.t_stop = 0.5", "statistics.t_start = 0.2", "statistics.interval = 1",
+         "integrals.interval = 1", "forces.interval = 1", "write_data.time_interval = 0.25"]

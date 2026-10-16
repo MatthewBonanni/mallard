@@ -133,7 +133,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install Python packages
-        run: pip install -r tutorials/requirements.txt
+        run: pip install -r tutorials/requirements.txt imageio imageio-ffmpeg
       - name: Restore compiler cache
         uses: actions/cache/restore@v4
         with:
@@ -160,3 +160,8 @@ jobs:
           key: ccache-tutorials-${{ github.sha }}
       - name: Run the tutorials
         run: tutorials/ci.sh build-2/src/Mallard build-3/src/Mallard ${{ runner.temp }}/tutorials
+      # Every case template (Mallard new --quick): 2D from an install tree, 3D from the build tree
+      - name: Run the case templates
+        run: |
+          cmake --install build-2 --prefix ${{ runner.temp }}/mallard-2d > /dev/null
+          templates/ci.sh ${{ runner.temp }}/mallard-2d/bin/Mallard build-3/src/Mallard ${{ runner.temp }}/templates

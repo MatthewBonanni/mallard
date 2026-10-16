@@ -57,6 +57,7 @@ struct Template {
     std::vector<std::string> quick_mesh;
     std::vector<std::string> quick_init;
     std::vector<std::string> quick_post;
+    std::vector<std::string> packages;
 };
 
 struct Group {
@@ -225,7 +226,7 @@ fs::path data_dir() {
 
 Manifest load_manifest() {
     Manifest m;
-    m.root = data_dir();
+    m.root = fs::absolute(data_dir());
     const toml::value v = toml::parse((m.root / manifest_path).string());
     m.input_docs = toml::find<std::string>(v, "docs", "input");
     m.source_url = toml::find<std::string>(v, "docs", "source");
@@ -255,6 +256,7 @@ Manifest load_manifest() {
         t.quick_mesh = string_list(e, "quick_mesh");
         t.quick_init = string_list(e, "quick_init");
         t.quick_post = string_list(e, "quick_post");
+        t.packages = string_list(e, "packages");
         m.templates.push_back(std::move(t));
     }
     return m;
@@ -391,7 +393,11 @@ std::string join(const std::set<std::string> & items, const std::string & sep) {
  */
 std::string shell_command(const std::string & command) {
     const std::string first = command.substr(0, command.find(' '));
-    if (first.size() > 3 && first.compare(first.size() - 3, 3, ".py") == 0) return "\"$PYTHON\" " + command;
+    const auto is_script = [](const std::string & w) {
+        return (w.size() > 3 && w.compare(w.size() - 3, 3, ".py") == 0) ||
+               (w.size() > 4 && w.compare(w.size() - 4, 4, ".py\"") == 0);
+    };
+    if (is_script(first)) return "\"$PYTHON\" " + command;
     return command;
 }
 
@@ -415,7 +421,15 @@ std::string step_script(const std::string & name, const std::string & about,
     s += python_check(name, packages);
     if (packages.empty()) s += "PYTHON=\"${PYTHON:-python3}\"\n";
     s += preamble;
-    for (const auto & c : commands) s += shell_command(c) + "\n";
+    for (const auto & c : commands) {
+        if (c.rfind("gmsh ", 0) == 0 && s.find("command -v gmsh") == std::string::npos) {
+            s += "command -v gmsh > /dev/null || {\n"
+                 "    echo \"" + name + ": needs the gmsh command: pip install gmsh, or https://gmsh.info\" >&2\n"
+                 "    exit 1\n"
+                 "}\n";
+        }
+        s += shell_command(c) + "\n";
+    }
     return s;
 }
 
@@ -509,9 +523,15 @@ int create(const Manifest & m, const Template & t, const fs::path & dir, bool qu
     const fs::path source = m.root / t.source;
     const fs::path tools = m.root / "tools";
 
-    const auto & mesh = quick && !t.quick_mesh.empty() ? t.quick_mesh : t.mesh;
-    const auto & init = quick && !t.quick_init.empty() ? t.quick_init : t.init;
-    const auto & post = quick && !t.quick_post.empty() ? t.quick_post : t.post;
+    // {data} in a command is the directory of the templates (tutorial scripts run from there)
+    const auto expand = [&](const std::vector<std::string> & commands) {
+        std::vector<std::string> out;
+        for (const auto & c : commands) out.push_back(replace_all(c, "{data}", "\"" + m.root.string() + "\""));
+        return out;
+    };
+    const auto mesh = expand(quick && !t.quick_mesh.empty() ? t.quick_mesh : t.mesh);
+    const auto init = expand(quick && !t.quick_init.empty() ? t.quick_init : t.init);
+    const auto post = expand(quick && !t.quick_post.empty() ? t.quick_post : t.post);
 
     std::string input = relocate(read_file(source / t.files.front()));
     if (quick) {
@@ -545,9 +565,13 @@ int create(const Manifest & m, const Template & t, const fs::path & dir, bool qu
     std::set<std::string> mesh_tools = tool_scripts(mesh);
     std::set<std::string> init_tools = tool_scripts(init);
     std::set<std::string> post_tools = tool_scripts(post);
-    const auto mesh_packages = close_imports(tools, {}, mesh_tools);
-    const auto init_packages = close_imports(tools, {}, init_tools);
-    const auto post_packages = close_imports(tools, local_scripts, post_tools);
+    auto mesh_packages = close_imports(tools, {}, mesh_tools);
+    auto init_packages = close_imports(tools, {}, init_tools);
+    auto post_packages = close_imports(tools, local_scripts, post_tools);
+    for (const auto & p : t.packages) {
+        if (!post.empty()) post_packages.insert(p);
+        if (!init.empty()) init_packages.insert(p);
+    }
     std::set<std::string> all_tools(mesh_tools);
     all_tools.insert(init_tools.begin(), init_tools.end());
     all_tools.insert(post_tools.begin(), post_tools.end());
