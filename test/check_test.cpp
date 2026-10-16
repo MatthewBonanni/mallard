@@ -176,12 +176,12 @@ TEST(CheckTimeStep, FixedTimeStepReportsItsCflAndWarnsAboveTheIntegratorsLimit) 
 TEST(CheckCost, GivenThroughputSetsWallTimePerUnitTimeAndFlowThrough) {
     CheckOptions options;
     options.throughput = 1e6;
-    options.ranks = 2;
+    options.ranks = comm::size() == 1 ? 2 : comm::size();  // estimates for other counts need a serial check
     const CheckReport r = check(box(), options);
     ASSERT_TRUE(r.ok());
     const double n_cells = N_DIM == 3 ? 16 * 8 * 2 : 16 * 8;
     EXPECT_EQ(r.n_cells, uint64_t(n_cells));
-    EXPECT_NEAR(r.wall_per_time, n_cells / (2 * 1e6 * r.dt), roundoff(1e-12) * r.wall_per_time);
+    EXPECT_NEAR(r.wall_per_time, n_cells / (options.ranks * 1e6 * r.dt), roundoff(1e-12) * r.wall_per_time);
     EXPECT_NEAR(r.flow_through_time, 2.0, roundoff(1e-12));  // Lx / u
 }
 
