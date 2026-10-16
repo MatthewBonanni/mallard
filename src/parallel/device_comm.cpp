@@ -68,4 +68,18 @@ void enqueue_wait(const Kokkos::DefaultExecutionSpace & waiter, const Kokkos::De
 #endif
 }
 
+Kokkos::DefaultExecutionSpace high_priority_space() {
+#ifdef KOKKOS_ENABLE_CUDA
+    int least = 0, greatest = 0;
+    cudaDeviceGetStreamPriorityRange(&least, &greatest);
+    cudaStream_t stream;
+    if (cudaStreamCreateWithPriority(&stream, cudaStreamNonBlocking, greatest) != cudaSuccess) {
+        throw std::runtime_error("comm::high_priority_space: cudaStreamCreateWithPriority failed");
+    }
+    return Kokkos::Cuda(stream, Kokkos::Impl::ManageStream::yes);
+#else
+    return Kokkos::DefaultExecutionSpace();
+#endif
+}
+
 } // namespace comm

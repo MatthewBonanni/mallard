@@ -42,6 +42,7 @@
 #include "comm.h"
 #include "distributed_mesh.h"
 #include "distribution.h"
+#include "face_exchange.h"
 #include "halo_exchange.h"
 #include "log.h"
 #include "numerics_preset.h"
@@ -466,6 +467,16 @@ class Solver {
         void init_les();
         /** @brief Hybrid flux: the upwind fraction of every cell from the gradients of W_cells. */
         void update_upwind_sensor();
+        /** @brief W of the owned cells, and the reconstruction of the cells independent of the halo on overlap_space. */
+        void start_reconstruction(StateView solution);
+        /** @brief Halo exchange of state packed and unpacked on comm_space, ordered with the default instance. */
+        void exchange_halo(const State & state);
+        /** @brief Abandon the reconstruction start_reconstruction() began (the state changed). */
+        void discard_reconstruction();
+        /** @brief calc_dt's exchange, which the first stage reuses; starts that stage's reconstruction where it can. */
+        void exchange_for_first_stage();
+        /** @brief Cells whose gradients the face fluxes read: owned and halo layer 1 (all cells with LES filters). */
+        uint32_t n_gradient_cells() const { return les_on ? mesh->n_cells : mesh->n_reconstructed(); }
         /** @brief sum over owned cells of u . R_m - |u|^2 / 2 R_rho for R the sum of face_flux over the cell's faces. */
         rtype kinetic_energy_rate() const;
         /**
@@ -475,7 +486,9 @@ class Solver {
         rtype pressure_work_rate() const;
 
         template <typename T_riemann_solver>
-        void launch_flux_functor();
+        void launch_flux_functor(Kokkos::View<uint32_t *> faces);
+        /** @brief Distributed reconstructions that receive partition faces from their owners (FaceExchange). */
+        bool exchanges_partition_faces() const;
         template <typename T_riemann_solver>
         void launch_mixture_flux_functor();
         template <typename T_riemann_solver>
@@ -487,8 +500,14 @@ class Solver {
         Kokkos::View<uint32_t *> rhs_cells;  // reconstructed cells, the n_early_cells independent of the halo first
         uint32_t n_early_cells = 0;
         Kokkos::View<uint32_t *> rhs_faces;  // faces of owned cells, whose fluxes are used; empty if all faces
+        // With exchanges_partition_faces(): the faces of owned cells whose fluxes read no face state of
+        // another rank, and those that do (partition faces, transmissive faces with a remote image)
+        FaceExchange face_exchange;
+        Kokkos::View<uint32_t *> local_faces, partition_faces;
         Kokkos::DefaultExecutionSpace overlap_space;  // runs the early cells while the halo is exchanged
         bool halo_current = false;                     // halo of conservatives filled since its last update
+        bool reconstruction_started = false;           // start_reconstruction(conservatives) since its last update
+        Kokkos::DefaultExecutionSpace comm_space;      // high priority: exchanges and the work around them
 
         toml::value input;
         numerics_preset::Resolution preset;

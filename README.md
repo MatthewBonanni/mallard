@@ -51,7 +51,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 
 **Performance and parallelism**
 - [Kokkos](https://github.com/kokkos/kokkos) backends: Serial, Threads, OpenMP, CUDA (NVIDIA) and HIP (AMD); double or single precision
-- MPI with multi-jagged (cuboid blocks), Hilbert-curve or graph (dKaMinPar) partitions, GPU-aware halo exchange overlapped with computation: 93% (2D) and 91% (3D) weak-scaling efficiency on 16 A100 GPUs
+- MPI with multi-jagged (cuboid blocks), Hilbert-curve or graph (dKaMinPar) partitions, GPU-aware halo exchange overlapped with computation: 93% (2D) and 96% (3D) weak-scaling efficiency on 16 A100 GPUs
 - 50 million cell time steps per second on one A100 (fifth-order TENO-E, 2D Euler)
 - No rank holds the whole mesh (HDF5 or generated meshes)
 - Bitwise-identical results on any number of threads or MPI ranks; restarts bit for bit, also on a different number of ranks

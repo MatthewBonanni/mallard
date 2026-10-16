@@ -68,8 +68,7 @@ void Solver::record_step() {
     Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), Kokkos::subview(step_scalars, Kokkos::make_pair(0, 2)),
                       Kokkos::subview(step_io, Kokkos::make_pair(0, 2)));
     // calc_dt
-    halo.exchange(state());
-    halo_current = true;
+    exchange_for_first_stage();
     calc_dt_cfl1(step_dt_cfl1);
 #ifdef Mallard_HAS_NCCL
     if (is_distributed()) {

@@ -3060,6 +3060,10 @@ void TENO::finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solutio
     dispatch(Kokkos::DefaultExecutionSpace(), solution, face_solution, Kokkos::View<uint32_t *>(), true);
 }
 
+void TENO::discard_cell_face_values() {
+    Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), n_troubled, 0u);
+}
+
 void TENO::dispatch(const Kokkos::DefaultExecutionSpace & exec, Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution, Kokkos::View<uint32_t *> cells,
                     bool troubled_pass) {
@@ -3327,9 +3331,9 @@ TENO::Stencils TENO::large_stencils() const {
     return out;
 }
 
-std::vector<uint8_t> TENO::stencil_cells() const {
+std::vector<uint8_t> TENO::stencil_cells(const uint32_t n_cells) const {
     std::vector<uint8_t> used(mesh->n_cells, 0);
-    const uint32_t n_reconstructed = static_cast<uint32_t>(scale.extent(0));
+    const uint32_t n_reconstructed = std::min(n_cells, static_cast<uint32_t>(scale.extent(0)));
     const auto large_slices = host_slice_start(stencil_large);
     const auto small_slices = host_slice_start(stencil_small);
     std::vector<CellTables> chunk;

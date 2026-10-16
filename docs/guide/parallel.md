@@ -108,8 +108,22 @@ The Taylor–Green vortex (viscous) on hexahedra with fifth-order TENO-E and HLL
 | 12 | 192 × 128 × 128 | 54.7 ms | 52.7 ms | 51.9 ms | 93% (Hilbert 88%) |
 | 16 | 256 × 128 × 128 | 55.8 ms | 53.9 ms | 52.7 ms | 91% (Hilbert 86%) |
 
+**Weak scaling since [#319](https://github.com/MatthewBonanni/mallard/pull/319)** (owner-computes partition faces), multi-jagged, the same hardware; the old and new code alternated in one session, median of the steady intervals of 160-step runs (one GPU: 46.8 ms per step):
+
+| GPUs | before | after | efficiency vs 1 GPU | vs 4 GPUs (one node) |
+|---:|---:|---:|---:|---:|
+| 4 | 48.6 ms | 47.0 ms | 99.6% | |
+| 8 | 50.5 ms | 48.6 ms | 96% | 97% |
+| 12 | 51.4 ms | 48.9 ms | 96% | 96% |
+| 16 | 51.4 ms | 48.5 ms | 96.5% | 97% |
+
+With 128³ cells per GPU, 4 GPUs take 346 ms per step against 344 ms on one (99.4%; 351 ms before).
+
+- **No redundant halo reconstruction:** each rank reconstructs only the cells it owns and receives the far side of each partition face from the rank owning it, while the other faces' fluxes are computed. Before, every rank also reconstructed the first halo layer (up to 6% of its cells at 16 GPUs).
+- **Overlapped time step:** the first stage's interior reconstruction starts before the time-step exchange and the time-step reduction, and covers both; halo-dependent cells run on a high-priority stream, so that they fill the device alongside the interior cells instead of in a tail of their own.
+- **What is left at 8–16 GPUs** (busiest rank, about 1.7 ms per step): the halo-dependent cells and the faces are taken from index lists rather than contiguous ranges (TENO and flux kernels 2–8% slower per item), the gradients of halo-layer-1 cells that the viscous fluxes read, and packing face states. Numbering each rank's cells and faces as [interior | near the partition] (#277) would turn the lists into ranges.
 - **Multi-jagged partitions:** the parts of a box are cuboid blocks. These are the same as Hilbert parts at power-of-two rank counts on cubes, and have 30–45% fewer cells in the first halo layer otherwise (12 ranks, and the weak-scaling boxes). In 2D at 16 GPUs the partitioners are within 1–4% of each other.
-- **Strong-scaling loss:** most of what is left at 16 GPUs (55k cells per GPU) is the TENO kernel itself running less efficiently on fewer cells, and the redundant reconstruction of halo layer 1, which grows with the partition surface.
+- **Strong-scaling loss (0.8.0):** most of what is left at 16 GPUs (55k cells per GPU) is the TENO kernel itself running less efficiently on fewer cells, and the redundant reconstruction of halo layer 1, which grows with the partition surface (removed by #319).
 - **Slimmer halo exchanges** ([#258](https://github.com/MatthewBonanni/mallard/pull/258)): 3D TENO5 at 12 GPUs went from 85% to 88% weak and from 68% to 72% strong scaling.
 - **Small meshes per GPU:** there the step is latency-bound. The CUDA graph and NCCL exchange ([#217](https://github.com/MatthewBonanni/mallard/pull/217)) take 262,000 MUSCL cells on 4 GPUs from 667 to 523 µs per step, and a 4,000-cell MUSCL step from 286 to 230 µs.
 

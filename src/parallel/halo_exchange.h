@@ -41,17 +41,18 @@ class HaloExchange {
 
         /**
          * @brief Send the owned values of U that neighbors need and post the
-         *        receives; the halo cells of U stay stale until finish(). With
+         *        receives; the halo cells of U stay stale until finish(). Packs
+         *        on exec; with MPI the host waits for exec's work so far, with
          *        NCCL nothing blocks the host: the messages are ordered after the
-         *        work enqueued so far on the default execution space.
+         *        work enqueued so far on exec.
          */
-        void start(const State & U);
+        void start(const State & U, const Kokkos::DefaultExecutionSpace & exec = Kokkos::DefaultExecutionSpace());
 
         /**
          * @brief Wait for the messages of start() and fill the halo cells of U
-         *        (with NCCL: enqueue the filling after the messages).
+         *        on exec (with NCCL: enqueue the filling after the messages).
          */
-        void finish(const State & U);
+        void finish(const State & U, const Kokkos::DefaultExecutionSpace & exec = Kokkos::DefaultExecutionSpace());
 
         bool active() const { return !ranks.empty(); }
 
