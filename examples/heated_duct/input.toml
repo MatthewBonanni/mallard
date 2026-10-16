@@ -1,0 +1,71 @@
+# Rayleigh flow: air enters a duct through a mass-flow inlet (100 kg/(m^2 s)
+# at 300 K) and is heated by 1e8 W/m^3 between x = 0.4 and 0.6 m on its way
+# to a 1 bar outlet. The steady state is Rayleigh flow, whose inlet pressure
+# and exit state follow from mass, momentum and energy alone; the mass flux
+# stays at its target while the heating changes the density everywhere.
+#
+#   ../../build/src/Mallard -i input.toml
+#   ../../build/src/Mallard -i closed.toml
+#   ../../build/src/Mallard -i closed_upt.toml
+#   python ../../tools/plot_heated_duct.py solut/duct_000001.vtu solut/closed solut/closed_upt
+
+[run]
+t_stop = 0.08
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 200
+Ny = 1
+Lx = 1.0
+Ly = 0.1
+
+[initialize]
+type = "constant"
+u = [0.0, 0.0]
+p = 1.0e5
+T = 300.0
+
+[source]
+rhoE = "x > 0.4 and x < 0.6 ? 1.0e8 : 0.0"
+
+[[boundaries]]
+name = "left"
+type = "mass_flow_inlet"
+mass_flux = 100.0
+T = 300.0
+
+[[boundaries]]
+name = "right"
+type = "p_out"
+p = 1.0e5
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0e5
+T_ref = 300.0
+rho_ref = 1.1614401858304297
+
+[output]
+check_interval = 1000
+
+[[write_data]]
+prefix = "./solut/duct"
+format = "vtu"
+time_interval = 0.08
+variables = ["RHO", "U_X", "P", "T"]

@@ -16,6 +16,7 @@ Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the 3D
 | `make_import_meshes.py` | The mesh-import test fixtures in `test/data/meshes/`: one channel-and-cylinder mesh (2D, extruded 3D, tetrahedral 3D, order 2) written by Gmsh as `.msh` and CGNS (also as two zones joined 1-to-1), and converted by OpenFOAM in a container (`podman` or `docker`, `opencfd/openfoam-default`) to polyMesh (`gmshToFoam`) and Fluent (`foamMeshToFluent`) |
 | `make_nozzle_mesh.py` | Gmsh quad mesh of the upper half of the planar converging-diverging nozzle of `examples/nozzle` |
 | `plot_nozzle.py` | The nozzle example against the quasi-one-dimensional isentropic and normal-shock solution: mass flow, shock position, stagnation pressure; `--figure` draws the guide's figure |
+| `plot_heated_duct.py` | The heated-duct example: the steady run against Rayleigh flow, and the closed duct's mass against `mdot t` for `mass_flow_inlet` and `upt`; `--figure` draws the guide's figures |
 | `make_cylinder_mesh.py` | Gmsh O-grid around a cylinder; `--half` gives the upper half with the axis cuts, the meridian plane of a sphere for axisymmetric runs |
 | `plot_poiseuille.py` | Axisymmetric Hagen-Poiseuille flow: axial velocity against the exact r-weighted cell averages |
 | `plot_noh.py` | Spherical Noh problem from an axisymmetric run: density against the exact solution, shock radius by direction |

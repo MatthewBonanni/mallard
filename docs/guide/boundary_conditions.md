@@ -64,6 +64,7 @@ where = "x >= 1/6"
 | `symmetry` | symmetry | — | Slip wall, symmetry plane, axis of axisymmetric runs |
 | `upt` | inflow | `u`, `p`, `T` (+ `X`/`Y`) | Inflow at a given velocity, pressure and temperature |
 | `stagnation_inlet` | inflow | `p0`, `T0`, `direction` (+ `X`/`Y`) | Subsonic inflow from a plenum: the mass flow follows from the flow ([below](#stagnation-inlet)) |
+| `mass_flow_inlet` | inflow | `mass_flux` or `mdot`, `T`, `direction` (+ `X`/`Y`) | Subsonic inflow at a fixed mass flow, whatever the inlet density ([below](#mass-flow-inlet)) |
 | `farfield` | far field | `u`, `p`, `T` | Free stream around a body: characteristic, works for inflow, outflow and tangential flow |
 | `dirichlet` | inflow | `rho`, `u`, `p` (expressions of x, y, z, t) | Prescribed exterior state, e.g. an exact solution |
 | `extrapolation` | outflow | — | Transmissive: the state from inside; supersonic outflow, or waves leaving a box |
@@ -73,7 +74,7 @@ where = "x >= 1/6"
 | `nscbc_inlet` | inflow | `u`, `p`, `T`, `L`, `sigma`, ... | Partially non-reflecting characteristic inlet, optionally with [synthetic turbulence](#synthetic-turbulence) |
 
 Gas mixtures add the composition (`X` or `Y`, and `balance`) to `upt`,
-`stagnation_inlet` and `nscbc_inlet`, as numbers or expressions of x, y, z. Their walls are
+`stagnation_inlet`, `mass_flow_inlet` and `nscbc_inlet`, as numbers or expressions of x, y, z. Their walls are
 non-catalytic (no species crosses them), and all three `wall_*` types work,
 e.g. a cold wall that quenches a flame:
 
@@ -97,7 +98,8 @@ Choosing:
   and `p_out` are simpler but reflect them (97–99% of a pulse at `p_out`,
   about 1% at `nscbc_outlet`).
 - **Nozzles, ducts and intakes fed from a reservoir:** `stagnation_inlet`, so
-  that the mass flow (and choking) is part of the solution.
+  that the mass flow (and choking) is part of the solution; `mass_flow_inlet`
+  where the mass flow is given (combustors, jets).
 - **Supersonic outflow:** `extrapolation`, or `p_out_average` if part of the
   outlet is subsonic.
 - **Exact or manufactured solutions, moving shocks:** `dirichlet`.
@@ -157,6 +159,66 @@ Pitfalls:
   pair it with `nscbc_outlet` or a sponge where reflections matter.
 
 Design notes: [inlets](../design/inlets.md).
+
+## Mass-flow inlet
+
+`mass_flow_inlet` holds the mass flux through the inlet, whatever the density
+there does: the usual inflow of combustors and jets, where heat release or
+compression downstream changes the density at the inlet. It imposes the mass
+flux, the temperature, the flow direction and the composition; the acoustic
+wave leaving through the inlet sets the pressure, and the density follows.
+The face flux is the physical flux of that boundary state, so the mass
+entering is exactly the target. (`upt` fixes the velocity instead, and its
+mass flow drifts with the inlet density.)
+
+![The mass-flow inlet: what it imposes and what it takes from the interior](../images/guide/inlet_mass_flow-light.svg#gh-light-mode-only)
+![The mass-flow inlet: what it imposes and what it takes from the interior](../images/guide/inlet_mass_flow-dark.svg#gh-dark-mode-only)
+
+```toml
+[[boundaries]]
+name = "inlet"
+type = "mass_flow_inlet"
+mdot = 0.02                 # kg/s through the whole entry (2D: per unit depth)
+T = 300.0
+# profile = "1 - (y / 0.05)^2"  # shape of the mass flux along the inlet
+# mass_flux = 20.0             # or the flux itself [kg/(m^2 s)], a number or an expression of x, y, z
+# direction = [1.0, 0.0]       # default: the inward normal of each face
+# X = { O2 = 0.21, N2 = 0.79 } # mixtures
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `mass_flux` or `mdot` | one required | Mass flux `rho u . n_in` [kg/(m^2 s)] (number or expression of x, y, z), or the total mass flow through the entry's faces [kg/s; per unit depth in 2D, per radian in axisymmetric runs] |
+| `profile` | uniform | With `mdot`: the shape of the mass flux along the inlet (an expression of x, y, z, non-negative), scaled to `mdot` |
+| `T` | required | Inflow temperature |
+| `direction` | inward normal | Flow direction; must point into the domain at every face |
+| `X` / `Y`, `balance` | required for mixtures | Composition, as for `upt` |
+
+![A closed duct fed through a mass-flow inlet and heated: the mass in the duct grows by exactly mdot t, while upt's drifts](../images/guide/mass_flow_held-light.svg#gh-light-mode-only)
+![A closed duct fed through a mass-flow inlet and heated: the mass in the duct grows by exactly mdot t, while upt's drifts](../images/guide/mass_flow_held-dark.svg#gh-dark-mode-only)
+
+*`examples/heated_duct` (`closed.toml`): a duct closed at the far end and
+heated in its middle. The pressure rises and the inlet density with it (by
+45%); the mass in the duct grows by `mdot t` to 1e-14, while `upt` at the
+same initial mass flux holds its pressure and lets the gas back out.*
+
+![Steady heated duct: pressure, velocity and temperature against Rayleigh flow](../images/guide/heated_duct-light.svg#gh-light-mode-only)
+![Steady heated duct: pressure, velocity and temperature against Rayleigh flow](../images/guide/heated_duct-dark.svg#gh-dark-mode-only)
+
+*`examples/heated_duct` (`input.toml`): the same duct open to a 1 bar outlet,
+fed at 100 kg/(m^2 s) and heated between x = 0.4 and 0.6 m, against Rayleigh
+flow: the inlet pressure the flow needs within 1e-5, the exit temperature
+within 1e-6.*
+
+Pitfalls:
+
+- The inlet is for subsonic inflow: it takes the pressure from the
+  interior.
+- `mdot` is divided among the entry's faces by their areas (times `profile`);
+  in 2D it is per unit depth.
+- Like `upt`, it reflects acoustic waves (it holds the mass flux, not the
+  velocity or the pressure); pair it with `nscbc_outlet` or a sponge where
+  reflections matter.
 
 ## Characteristic boundaries
 
