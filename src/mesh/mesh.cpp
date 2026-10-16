@@ -43,9 +43,10 @@ void Mesh::init(const toml::value & input) {
     }
 
     const std::vector<PeriodicPair> periodic = periodic_pairs(input);
+    const MeshTransform transform = mesh_transform(input);
     if (get_type() == MeshType::FROM_FILE) {
         std::string filename = toml::find_or<std::string>(input, "mesh", "filename", "mesh.msh");
-        this->init_file(filename, periodic);
+        this->init_file(filename, periodic, transform);
         return;
     }
     uint32_t Nx = toml::find_or<uint32_t>(input, "mesh", "Nx", 100);
