@@ -34,10 +34,11 @@ latest=$(ls -1t $RESTARTS 2>/dev/null | head -n 1)
 [ -n "$latest" ] && args+=(--restart "$latest")
 
 # Open MPI: each rank on $threads consecutive cores. MPICH: replace the
-# options by "-bind-to core:$threads"
+# options by "-bind-to core:$threads". macOS cannot bind processes to cores.
+bind=(--map-by "slot:PE=$threads" --bind-to core)
+[ "$(uname)" = Darwin ] && bind=(--bind-to none)
 set -m  # mpirun in a process group of its own, so that Ctrl-C reaches only this script
-mpirun -n "$NRANKS" --map-by "slot:PE=$threads" --bind-to core "$MALLARD" "${args[@]}" \
-    --kokkos-num-threads="$threads" &
+mpirun -n "$NRANKS" "${bind[@]}" "$MALLARD" "${args[@]}" --kokkos-num-threads="$threads" &
 pid=$!
 
 # mpirun ends the ranks at once on INT and TERM, but forwards USR2, which

@@ -21,7 +21,7 @@
 ##PBS -A <account>
 
 set -u
-cd "$PBS_O_WORKDIR"
+cd "$PBS_O_WORKDIR" || exit 1
 
 MALLARD=Mallard                    # <Mallard, Mallard3D, or the path to the executable>
 INPUT=input.toml

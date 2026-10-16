@@ -120,14 +120,14 @@ Parallel runs list where each rank runs after the header:
 
 ```text
 == Ranks ===================================================================================
-  rank host  GPU PCI bus      UUID         GPU NUMA CPUs  CPU NUMA threads
-  0    gpu-a 0   0000:07:00.0 GPU-8a1c3f0e 3        48-63 3        16
-  1    gpu-a 1   0000:0b:00.0 GPU-2f9d6b41 3        48-63 3        16
-  2    gpu-a 2   0000:48:00.0 GPU-c03e7a55 1        16-31 1        16
-  3    gpu-a 3   0000:4c:00.0 GPU-71b2d9e8 1        16-31 1        16
+  rank  host    GPU  PCI bus       UUID          GPU NUMA  CPUs   CPU NUMA  threads
+  0     node01  2    0000:c1:00.0  GPU-c03e7a55  0         0-15   0         16
+  1     node01  3    0000:c4:00.0  GPU-71b2d9e8  0         16-31  0         16
+  2     node01  0    0000:41:00.0  GPU-8a1c3f0e  1         32-47  1         16
+  3     node01  1    0000:44:00.0  GPU-2f9d6b41  1         48-63  1         16
 ```
 
-`GPU` is the device's index among those the rank sees, `PCI bus` and `UUID` (its first 8 hex digits, as in `nvidia-smi -L`) identify it on the node, and `GPU NUMA` is the NUMA node it is attached to. `CPUs` are the cores the rank may run on, `CPU NUMA` their NUMA nodes, and `threads` the threads of its host backend. CPU runs show only the CPU columns; without Linux's affinity and NUMA information (macOS) these read `-`. Runs on more than 64 ranks list the first 32.
+Here GPUs 2 and 3 hang off the first socket, so ranks 0 and 1, bound to its cores, got them. `GPU` is the device's index among those the rank sees, `PCI bus` and `UUID` (its first 8 hex digits, as in `nvidia-smi -L`) identify it on the node, and `GPU NUMA` is the NUMA node it is attached to. `CPUs` are the cores the rank may run on, `CPU NUMA` their NUMA nodes, and `threads` the threads of its host backend. CPU runs show only the CPU columns; without Linux's affinity and NUMA information (macOS) these read `-`. Runs on more than 64 ranks list the first 32.
 
 Warnings follow the table when the placement wastes hardware:
 
@@ -135,7 +135,7 @@ Warnings follow the table when the placement wastes hardware:
 |---|---|
 | `N ranks on <host> share its M GPUs` | More ranks than GPUs on a node: run one rank per GPU (`--ntasks-per-node` = GPUs per node) |
 | `ranks ... share GPU ... while GPU ... is idle` | Every rank was given the same device, e.g. `KOKKOS_DEVICE_ID` exported for all: remove it |
-| `ranks ... run on CPUs of NUMA node ... but their GPUs are on node ...` | Ranks bound to cores away from their GPU, e.g. by a launcher that also chose the GPU: bind ranks to cores and leave the GPU to Mallard, or use `srun --gpu-bind=closest` |
+| `ranks ... run on CPUs of NUMA node ... but their GPUs are on node ...` | Ranks bound to cores away from their GPU, e.g. by a launcher that also chose the GPU: bind ranks to cores and leave the GPU to Mallard, or use `srun --gpu-bind=closest`. On nodes whose GPUs all hang off one socket, bind the ranks to that socket's cores (e.g. `srun --cpu-bind=map_ldom:1`, or `numactl --cpunodebind=1` in front of `Mallard`) |
 | `ranks on <host> run T threads on C CPUs` | (CPU runs) Ranks × threads exceed the cores: lower `OMP_NUM_THREADS` or the ranks per node |
 | `OMP_PROC_BIND/OMP_PLACES pin the threads of ranks ... to CPUs other ranks also use` | (CPU runs) Ranks share cores and OpenMP pins every rank's threads to the same ones: bind each rank to its own cores |
 
