@@ -611,7 +611,9 @@ TEST(MassFlowInletTest, ClosedHeatedDuctGainsExactlyTheInflow) {
     const std::string total = "type = \"mass_flow_inlet\"\nT = 300.0\nmdot = " + std::to_string(G * A) +
                               "\nprofile = \"1 + 4 * y\"\n";
     const std::string muscl = "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n";
-    const std::string teno = "[numerics]\nriemann_solver = \"Roe\"\n[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 4\n";
+    // TENO has no full-rank stencils in a 3D duct two cells across
+    const std::string teno = std::string("[numerics]\nriemann_solver = \"Roe\"\n[numerics.face_reconstruction]\n") +
+                             (N_DIM == 2 ? "type = \"TENO\"\norder = 4\n" : "type = \"MUSCL\"\n");
     const std::string double_flux = "[numerics]\nriemann_solver = \"HLLC\"\ndouble_flux = true\n"
                                     "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n";
     for (const auto & [inlet, scheme, gas] : {std::array<std::string, 3>{flux, muscl, PERFECT_GAS_AIR},
