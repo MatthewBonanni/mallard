@@ -157,6 +157,10 @@ if(${PROJECT_NAME}_ENABLE_CGNS)
         set(CGNS_BUILD_SHARED OFF CACHE BOOL "" FORCE)
         set(CGNS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(cgns)
+        # A parallel HDF5's headers include mpi.h
+        if(${PROJECT_NAME}_ENABLE_MPI)
+            target_link_libraries(cgns_static PUBLIC MPI::MPI_CXX)
+        endif()
         set(MALLARD_CGNS_LIBRARY cgns_static)
         message(STATUS "Mallard: CGNS v4.5.0 (built from source)")
     endif()
@@ -171,30 +175,40 @@ else()
 endif()
 
 # Cantera YAML mechanism files
-include(FetchContent)
-FetchContent_Declare(yaml-cpp
-    GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-    GIT_TAG yaml-cpp-0.9.0
-    EXCLUDE_FROM_ALL
-    ${MALLARD_THIRD_PARTY})
-set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
-set(YAML_CPP_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
-set(YAML_CPP_INSTALL OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(yaml-cpp)
-# yaml-cpp has no device code, and nvcc cannot compile its bundled dragonbox:
-# Kokkos' nvcc_wrapper passes it to the host compiler
-if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
-    target_compile_options(yaml-cpp PRIVATE --host-only)
+option(USE_SYSTEM_YAML_CPP "Use system-installed yaml-cpp" OFF)
+if(USE_SYSTEM_YAML_CPP)
+    find_package(yaml-cpp 0.8 REQUIRED)
+else()
+    include(FetchContent)
+    FetchContent_Declare(yaml-cpp
+        GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+        GIT_TAG yaml-cpp-0.9.0
+        EXCLUDE_FROM_ALL
+        ${MALLARD_THIRD_PARTY})
+    set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+    set(YAML_CPP_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
+    set(YAML_CPP_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(yaml-cpp)
+    # yaml-cpp has no device code, and nvcc cannot compile its bundled dragonbox:
+    # Kokkos' nvcc_wrapper passes it to the host compiler
+    if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
+        target_compile_options(yaml-cpp PRIVATE --host-only)
+    endif()
 endif()
 
 # Include other external libraries
 include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/toml11/include")
 include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/exprtk")
 
-# Add your main project source
+set(${PROJECT_NAME}_EXECUTABLE_SUFFIX "" CACHE STRING
+    "Appended to the names of the Mallard and mallard-mesh-convert executables (e.g. 3D, to install both dimensions side by side)")
+option(${PROJECT_NAME}_ENABLE_TESTS "Build the test suite (fetches GoogleTest)" ON)
+
 add_subdirectory(src)
-add_subdirectory(test)
+if(${PROJECT_NAME}_ENABLE_TESTS)
+    add_subdirectory(test)
+endif()
 
 # Documentation setup
 option(BUILD_DOCS "Build documentation" OFF)
@@ -213,15 +227,21 @@ if(BUILD_DOCS)
     endif()
 endif()
 
-# Installation setup
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    set(CMAKE_INSTALL_PREFIX /path/to/install/dir CACHE PATH "Default installation path" FORCE)
+include(GNUInstallDirs)
+install(TARGETS Mallard MallardReactor RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+if(TARGET mallard-mesh-convert)
+    install(TARGETS mallard-mesh-convert RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
+# Examples keep their relative paths to ../../mechanisms
+install(DIRECTORY examples mechanisms tools tutorials
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/mallard
+    USE_SOURCE_PERMISSIONS
+    PATTERN __pycache__ EXCLUDE
+    PATTERN solut EXCLUDE)
+install(FILES LICENSE NOTICE DESTINATION ${CMAKE_INSTALL_DOCDIR})
+install(DIRECTORY licenses DESTINATION ${CMAKE_INSTALL_DOCDIR})
 
-install(TARGETS Mallard
-    DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
-)
-
-# Enable testing
-enable_testing()
-add_test(NAME MallardTest COMMAND MallardTest)
+if(${PROJECT_NAME}_ENABLE_TESTS)
+    enable_testing()
+    add_test(NAME MallardTest COMMAND MallardTest)
+endif()
