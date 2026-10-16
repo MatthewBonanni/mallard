@@ -1,0 +1,104 @@
+# Supersonic flow over a 15 degree sharp cone at Mach 2 and zero incidence
+# (3D build, Euler), against the exact conical flow of Taylor & Maccoll
+# (taylor_maccoll.py). Tutorial: docs/tutorials/cone.md.
+#
+# Units: free-stream density and sound speed 1, so U = 2, p = T = 1 / gamma
+# (gas constant 1). Cone length 1: the flow crosses the domain in 0.6 time
+# units and is steady well before t = 3.
+
+[run]
+t_stop = 3.0
+cfl = 1.0
+
+[mesh]
+type = "file"
+filename = "cone.msh"
+
+[initialize]
+type = "constant"
+u = [2.0, 0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "cone"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "inlet"
+type = "upt"
+u = [2.0, 0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "outer"
+type = "farfield"
+u = [2.0, 0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "outlet"
+type = "extrapolation"
+
+[[boundaries]]
+name = "symmetry_y"
+type = "symmetry"
+
+[[boundaries]]
+name = "symmetry_z"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+limiter = "venkatakrishnan"
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+
+[output]
+check_interval = 100
+
+[[forces]]
+zone = "cone"
+interval = 10
+
+# 40 points across the shock layer at x = 0.8, in the diagonal plane y = z,
+# from 16 to 45 degrees off the axis
+[[probes]]
+name = "layer"
+variables = ["RHO", "P"]
+start = [0.8, 0.16217, 0.16217]
+end = [0.8, 0.56569, 0.56569]
+n_points = 40
+interval = 20
+
+[[write_data]]
+prefix = "./solut/flow"
+format = "vtu"
+time_interval = 0.5
+variables = ["RHO", "U", "P"]
+
+[[write_data]]
+prefix = "./solut/cone"
+format = "vtu"
+geometry = "cone"
+time_interval = 0.5
+variables = ["P"]
+
+[[write_data]]
+prefix = "./solut/plane"
+format = "vtu"
+geometry = "symmetry_z"
+time_interval = 0.5
+variables = ["RHO", "U", "P"]

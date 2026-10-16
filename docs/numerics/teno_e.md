@@ -12,12 +12,12 @@ TENO itself: [Fu, Hu & Adams 2016](../references.md#fu-hu-adams-2016).
 - K = 3 small directional stencils (degree 2), one per face sector of the triangle.
 
 ## k-exact constrained least squares
-- Target-local reference frame: affine map of the target triangle (x = x1 + J xi).
+- Target-local frame: xi = (x - x_c) / h with h = sqrt(V) (3D: V^(1/3)), x_c the target's centroid.
 - Zero-mean basis on target: psi_l = phi_l - mean_{V0}(phi_l), monomials of degree 1..r.
 - A_sl = int_{V_s} psi_l, b_s = |V_s| (U_s - U_0); a = pinv(A) b, pinv precomputed.
 
 ## Smoothness indicator
-SI_k = sum_{1<=|beta|<=r} int_{V0'} (D^beta P_k)^2 (reference coords) = a^T M a.
+SI_k = sum_{1<=|beta|<=r} int_{V0'} (D^beta P_k)^2 (in the scaled frame xi) = a^T M a.
 
 ## Troubled-cell indicator (density only)
 gamma_k = |rho_k - rho_i| / |rho_i| over large-stencil neighbours,

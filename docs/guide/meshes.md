@@ -181,15 +181,63 @@ except where noted):
 four times coarser than the example's 384 x 128 cells), with the zones
 `cylinder` and `farfield`.*
 
+## Other mesh formats
+
+```toml
+[mesh]
+type = "file"
+filename = "wing.cgns"
+```
+
+| Format | `filename` | Zones | Build |
+|---|---|---|---|
+| CGNS (unstructured, HDF5-based) | `*.cgns` | `BC_t` by family name (Gmsh's physical names), else by BC name; boundary sections in no BC by section name | `-DMallard_ENABLE_CGNS=ON` |
+
+Every format gives the same mesh as the Gmsh file it was exported from (the
+tests check cells, faces and zones), so a case can switch formats without
+renaming its `[[boundaries]]`.
+
+Pitfalls:
+
+- CGNS: one base, unstructured zones only; several zones are joined only
+  through `Abutting1to1` vertex connectivity (as Gmsh writes partitioned
+  meshes); polyhedral `NGON_n`/`NFACE_n` sections are rejected. Higher-order
+  elements are read by their corners, and high-order boundary elements curve
+  faces as in Gmsh files.
+- A mesh of the other dimension is an error: build with the matching
+  `-DMallard_DIM`.
+
+## Transform on read
+
+```toml
+[mesh.transform]
+scale = 0.001                            # mm to m; or one factor per axis
+rotate = 90                              # 2D: degrees counterclockwise
+# rotate = {axis = [0, 0, 1], angle = 90}  3D: right-handed about the axis
+translate = [0.1, 0.0]
+```
+
+`[mesh.transform]` maps every node of a mesh file, `x -> R (S x) + t`: scale,
+then rotate about the origin, then translate.
+
+Pitfalls:
+
+- Everything else in the input (`[[periodic]]` translations,
+  `[[mesh.curved]]` shapes, probes, initial conditions) is in the
+  transformed coordinates.
+- Mesh files only: generated meshes reject it.
+- `mallard-mesh-convert input.toml mesh.h5` writes the transformed mesh; do
+  not transform it again when running from `mesh.h5`.
+
 ## HDF5 meshes for large runs
 
-Every rank of a distributed run reads a Gmsh file whole, keeping only its
-share. Large meshes should be converted once to Mallard's HDF5 mesh format, of
+Every rank of a distributed run reads a Gmsh or other mesh file whole,
+keeping only its share. Large meshes should be converted once to Mallard's HDF5 mesh format, of
 which each rank reads only its own part (builds with
 `-DMallard_ENABLE_HDF5=ON`):
 
 ```sh
-mallard-mesh-convert mesh.msh mesh.h5                # from Gmsh
+mallard-mesh-convert mesh.msh mesh.h5                # from any mesh file
 mpirun -n 8 mallard-mesh-convert input.toml mesh.h5  # the mesh of an input, written in parallel
 ```
 

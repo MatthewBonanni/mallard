@@ -432,7 +432,7 @@ MeshBlock read_mesh_block(const toml::value & input) {
     const MeshTransform transform = mesh_transform(input);
     if (type == MeshType::FROM_FILE) {
         const std::string filename = toml::find_or<std::string>(input, "mesh", "filename", "mesh.msh");
-        MeshBlock block = is_hdf5_mesh(filename) ? read_mesh_h5(filename) : read_gmsh_block(filename);
+        MeshBlock block = is_hdf5_mesh(filename) ? read_mesh_h5(filename) : read_file_block(filename);
         transform_block(block, transform);
         return block;
     }
