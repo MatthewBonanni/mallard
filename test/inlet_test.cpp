@@ -334,7 +334,10 @@ void expect_isentropic_duct(const std::string & reconstruction) {
 
 TEST(StagnationInletTest, ThermallyPerfectDuctReachesTheIsentropicExitState) {
     expect_isentropic_duct("type = \"MUSCL\"\n");
-    expect_isentropic_duct("type = \"TENO\"\norder = 3\n");
+    // A duct one cell across has no full-rank TENO stencils in 3D
+    if constexpr (N_DIM == 2) {
+        expect_isentropic_duct("type = \"TENO\"\norder = 3\n");
+    }
 }
 
 TEST(StagnationInletTest, InvalidInputIsRejected) {
