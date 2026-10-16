@@ -242,6 +242,8 @@ void Solver::init_mesh() {
                         {"Type", type == "file" ? "file " + toml::find_or<std::string>(input, "mesh", "filename",
                                                                                          "mesh.msh")
                                                 : type});
+    const MeshTransform transform = mesh_transform(input);
+    if (!transform.is_identity()) mesh_summary.insert(mesh_summary.begin() + 1, {"Transform", transform.description});
     const Stretching stretching = mesh_stretching(input);
     if (stretching != Stretching{}) {
         if (type == "file") throw InputError("[mesh] stretching applies to generated meshes.");
@@ -571,6 +573,7 @@ void Solver::init_boundaries() {
     characteristic_state_set = false;
     if (is_mixture()) init_mixture_boundaries(input_boundaries, profiled_faces, bcs);
     boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics);
+    boundary_data.mixture = is_mixture();
     if (is_mixture()) {
         const uint32_t n_species = mixture.n_species;
         boundary_data.bc_Y = Kokkos::View<rtype **, Kokkos::LayoutRight>("bc_Y", bcs.size(), n_species);
