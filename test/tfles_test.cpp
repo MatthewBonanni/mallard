@@ -211,7 +211,7 @@ TEST(ThickenedFlame, DynamicEfficiencyFollowsTheResolvedWrinkling) {
     auto planar = corrugated_flames(0.0, 1.0);
     // 12 / d tr(cov) = 8 h^2 per pass of the 3^d stencil; Delta_e^2 = (5 h)^2: ceil(25 / 8) passes
     EXPECT_EQ(planar->tfles_test_filter_passes(), 4u);
-    EXPECT_LT(planar->tfles_beta(), 1e-8);
+    EXPECT_LT(planar->tfles_beta(), precision_tol<double>(1e-8, 1e-5));
     double last = 0.0;
     for (const double amplitude : {1.0, 2.0, 4.0}) {
         auto wrinkled = corrugated_flames(amplitude, 1.0);
@@ -223,14 +223,15 @@ TEST(ThickenedFlame, DynamicEfficiencyFollowsTheResolvedWrinkling) {
         uint32_t flame = 0;
         for (uint32_t c = 0; c < wrinkled->get_mesh()->n_owned(); c++) {
             const double F = double(fields(c, 0));
-            EXPECT_NEAR(double(fields(c, 1)), std::pow(F, beta), 1e-12 * std::pow(F, beta)) << "cell " << c;
+            EXPECT_NEAR(double(fields(c, 1)), std::pow(F, beta), precision_tol<double>(1e-12, 1e-6) * std::pow(F, beta))
+                << "cell " << c;
             flame += F > 4.9;
         }
         EXPECT_GT(flame, 0u);
     }
     // Only ratios of lengths enter
     auto large = corrugated_flames(2.0, 10.0);
-    EXPECT_NEAR(large->tfles_beta(), corrugated_flames(2.0, 1.0)->tfles_beta(), 1e-9);
+    EXPECT_NEAR(large->tfles_beta(), corrugated_flames(2.0, 1.0)->tfles_beta(), precision_tol<double>(1e-9, 1e-5));
 }
 
 TEST(ThickenedFlame, InputErrors) {
