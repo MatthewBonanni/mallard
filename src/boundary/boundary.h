@@ -599,9 +599,7 @@ struct BoundaryData {
         } else {
             ghost_W(i_face, W_c, n, W_g);
         }
-        const bool own_gas = bc_thermo.extent(0) > 0 &&
-                             (bc.type == BoundaryType::UPT || bc.type == BoundaryType::NSCBC_INLET);
-        const rtype gamma_g = own_gas ? bc_thermo(i_bc, 0) : gamma_c;
+        const rtype gamma_g = (mixture && bc.prescribes_composition()) ? bc_thermo(i_bc, 0) : gamma_c;
         return Kokkos::fabs(dot<N_DIM>(W_g + 1, n)) + Kokkos::sqrt(gamma_g * W_g[E] / W_g[0]);
     }
 };
