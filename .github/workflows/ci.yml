@@ -122,8 +122,12 @@ jobs:
           dir=$(mktemp -d)
           sed -e 's/^t_stop = .*/n_steps = 2/' -e '/^\[\[write_data\]\]/,$d' examples/sod/input.toml > "$dir/input.toml"
           for n in 2 3; do
-            (cd "$dir" && mpirun -n $n "$GITHUB_WORKSPACE/build/src/Mallard" -i input.toml) > "$dir/out.txt" 2>&1
+            # 3 ranks exceed the runner's 2 cores: unbound, sharing them
+            status=0
+            (cd "$dir" && mpirun -n $n --oversubscribe "$GITHUB_WORKSPACE/build/src/Mallard" -i input.toml) \
+              > "$dir/out.txt" 2>&1 || status=$?
             cat "$dir/out.txt"
+            [ "$status" -eq 0 ] || exit "$status"
             rows=$(sed -n '/^== Ranks/,/^$/p' "$dir/out.txt" | grep -cE '^  [0-9]+ ')
             [ "$rows" -eq "$n" ] || { echo "expected $n rows in the rank report, found $rows"; exit 1; }
             if grep -q 'warning:' "$dir/out.txt"; then echo "unexpected warning"; exit 1; fi
