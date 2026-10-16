@@ -591,6 +591,7 @@ void Solver::init_boundaries() {
     characteristic_state_set = false;
     if (is_mixture()) init_mixture_boundaries(input_boundaries, profiled_faces, bcs);
     boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics);
+    boundary_data.mixture = is_mixture();
     init_wall_model(face_bc, bcs);
     if (is_mixture()) {
         const uint32_t n_species = mixture.n_species;

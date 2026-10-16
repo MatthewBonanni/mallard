@@ -142,7 +142,7 @@ struct LSQGradientFunctor {
                 FOR_I_DIM dx[i] = 2.0_r * d * n[i];
                 boundaries.ghost_W_at(i_face, W_i, n, 2.0_r * d, W_j);
             }
-            if (boundaries.viscous && bc.type == BoundaryType::WALL_HEAT_FLUX && !bc.modeled) {
+            if (boundaries.viscous && !boundaries.mixture && bc.type == BoundaryType::WALL_HEAT_FLUX && !bc.modeled) {
                 // Ghost temperature consistent with the prescribed heat flux into the
                 // fluid: q = kappa dT/dn with n pointing out of the domain
                 const rtype R = boundaries.R;
