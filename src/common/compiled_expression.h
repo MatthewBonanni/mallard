@@ -44,9 +44,10 @@ struct Instr {
 
 namespace detail {
 
+KOKKOS_INLINE_FUNCTION double p3(const double a) { return a * a * a; }
+
 /** @brief exprtk's integer powers (numeric::fast_exp), operation for operation. */
 KOKKOS_INLINE_FUNCTION double ipow(double v, const uint32_t n) {
-    auto p3 = [](const double a) { return a * a * a; };
     switch (n) {
         case 0: return 1.0;
         case 1: return v;
@@ -183,7 +184,7 @@ KOKKOS_INLINE_FUNCTION double binary(const Op op, const double a, const double b
  */
 template <typename Vars>
 KOKKOS_INLINE_FUNCTION double evaluate(const Instr * code, const uint32_t n, const Vars & vars) {
-    double s[MAX_STACK];
+    double s[MAX_STACK] = {};
     int top = -1;
     for (uint32_t i = 0; i < n; i++) {
         const Instr & in = code[i];
@@ -227,6 +228,12 @@ KOKKOS_INLINE_FUNCTION double evaluate(const Instr * code, const uint32_t n, con
     return s[0];
 }
 
+/** @brief Variables read from an array. */
+struct ArrayVariables {
+    const double * values;
+    KOKKOS_INLINE_FUNCTION double operator()(const uint16_t i) const { return values[i]; }
+};
+
 /**
  * @brief An expression compiled from exprtk syntax (the subset of
  *        arithmetic, comparisons, logic, the ternary operator and exprtk's
@@ -254,8 +261,7 @@ class Program {
 
         /** @brief Evaluate on the host with variable values vars[0, n_variables). */
         double operator()(const double * vars) const {
-            return evaluate(m_code.data(), static_cast<uint32_t>(m_code.size()),
-                            [vars](const uint16_t i) { return vars[i]; });
+            return evaluate(m_code.data(), static_cast<uint32_t>(m_code.size()), ArrayVariables{vars});
         }
 
     private:

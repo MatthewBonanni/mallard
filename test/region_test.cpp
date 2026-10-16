@@ -198,6 +198,25 @@ std::shared_ptr<Mesh> coarse_unstructured_mesh() {
     return mesh;
 }
 
+/** @brief Distances of the region at the points, evaluated on the device. */
+std::vector<double> device_distances(const region::Region & r, const std::vector<Point> & points) {
+    const uint32_t n = static_cast<uint32_t>(points.size());
+    Kokkos::View<double *[3]> d_points("points", n);
+    auto h_points = Kokkos::create_mirror_view(d_points);
+    for (uint32_t i = 0; i < n; i++) {
+        for (size_t k = 0; k < 3; k++) h_points(i, k) = points[i][k];
+    }
+    Kokkos::deep_copy(d_points, h_points);
+    const region::RegionView<> device = r.device();
+    Kokkos::View<double *> d_phi("phi", n);
+    Kokkos::parallel_for("region_distance", n, KOKKOS_LAMBDA(const uint32_t i) {
+        const double x[3] = {d_points(i, 0), d_points(i, 1), d_points(i, 2)};
+        d_phi(i) = device.distance(x);
+    });
+    auto h_phi = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_phi);
+    return std::vector<double>(h_phi.data(), h_phi.data() + n);
+}
+
 } // namespace
 
 TEST(RegionTest, MembershipMatchesTheShapes) {
@@ -234,28 +253,15 @@ TEST(RegionTest, DistancesAreOneLipschitzLowerBounds) {
 
 TEST(RegionTest, DeviceMatchesHost) {
     const auto points = random_points(5000, -0.1, 1.1);
-    const uint32_t n = static_cast<uint32_t>(points.size());
-    Kokkos::View<double *[3]> d_points("points", n);
-    auto h_points = Kokkos::create_mirror_view(d_points);
-    for (uint32_t i = 0; i < n; i++) {
-        for (size_t k = 0; k < 3; k++) h_points(i, k) = points[i][k];
-    }
-    Kokkos::deep_copy(d_points, h_points);
     for (const Case & c : cases()) {
         const region::Region r = make_region(c.table);
-        const region::RegionView<> device = r.device();
-        Kokkos::View<double *> d_phi("phi", n);
-        Kokkos::parallel_for("region_distance", n, KOKKOS_LAMBDA(const uint32_t i) {
-            const double x[3] = {d_points(i, 0), d_points(i, 1), d_points(i, 2)};
-            d_phi(i) = device.distance(x);
-        });
-        auto h_phi = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_phi);
-        for (uint32_t i = 0; i < n; i++) {
+        const std::vector<double> phi = device_distances(r, points);
+        for (size_t i = 0; i < points.size(); i++) {
 #ifdef KOKKOS_ENABLE_CUDA
             // Contracted multiply-adds and the device's square roots differ by rounding
-            EXPECT_NEAR(h_phi(i), r.distance(points[i].data()), 1e-14) << c.table;
+            EXPECT_NEAR(phi[i], r.distance(points[i].data()), 1e-14) << c.table;
 #else
-            EXPECT_EQ(h_phi(i), r.distance(points[i].data())) << c.table;
+            EXPECT_EQ(phi[i], r.distance(points[i].data())) << c.table;
 #endif
         }
     }
