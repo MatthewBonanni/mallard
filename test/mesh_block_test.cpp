@@ -25,6 +25,7 @@
 #include "mesh.h"
 #include "mesh_block.h"
 #include "test_fixtures.h"
+#include "scratch.h"
 
 namespace {
 
@@ -76,7 +77,7 @@ std::vector<double> fractions(bool even) {
 TEST(MeshBlockTest, HDF5FileReadsBackInEvenBlocksWhateverTheWrittenSplit) {
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
     if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
-    const std::string file = (std::filesystem::temp_directory_path() / "mallard_block_test.h5").string();
+    const std::string file = (scratch_dir() / "mallard_block_test.h5").string();
     // Written from uneven blocks, so every offset in the file depends on the other ranks
     write_mesh_h5(file, synthetic_block(fractions(false)));
     comm::barrier();

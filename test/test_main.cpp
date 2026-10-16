@@ -13,6 +13,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
+#include "scratch.h"
 
 int main(int argc, char** argv) {
     comm::Session session(argc, argv);
@@ -22,6 +23,7 @@ int main(int argc, char** argv) {
         auto & listeners = ::testing::UnitTest::GetInstance()->listeners();
         delete listeners.Release(listeners.default_result_printer());
     }
+    install_scratch_directories();
     Kokkos::initialize(argc, argv);
     int result = RUN_ALL_TESTS();
     Kokkos::finalize();

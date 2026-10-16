@@ -2,6 +2,7 @@
 # Tests shared by both dimensions, then those specific to one
 set(MALLARD_TEST_SOURCES
     test_main.cpp
+    scratch.cpp
     common_math_test.cpp
     time_integrator_test.cpp
     comm_test.cpp

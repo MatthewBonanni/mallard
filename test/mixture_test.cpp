@@ -28,6 +28,7 @@
 
 #include "solver.h"
 #include "test_fixtures.h"
+#include "scratch.h"
 
 namespace {
 
@@ -658,7 +659,7 @@ TEST(MixtureTest, RestartedRunMatchesUninterruptedRunExactly) {
     for (const auto & [double_flux, reacting, viscous, coupling] :
          {std::tuple{false, false, false, "strang"}, {true, false, false, "strang"}, {false, true, false, "strang"},
           {false, true, true, "strang"}, {false, true, true, "simpler"}}) {
-        const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mixture_restart").string();
+        const std::string dir = (scratch_dir() / "mallard_mixture_restart").string();
         std::filesystem::remove_all(dir);
         auto input = [&](const std::string & init, uint32_t n_steps, const std::string & prefix) {
             return "[run]\nn_steps = " + std::to_string(n_steps) + "\ncfl = 0.25\n" +
@@ -699,7 +700,7 @@ TEST(MixtureTest, RestartedRunMatchesUninterruptedRunExactly) {
 TEST(MixtureTest, BudgetWithDoubleFluxLeavesTheSolutionUnchanged) {
     // The budget's extra right-hand side freezes the thermodynamics as a step does, and must not move the
     // temperature seeds the next step's freeze starts from
-    const std::string file = (std::filesystem::temp_directory_path() / "mallard_df_budget.csv").string();
+    const std::string file = (scratch_dir() / "mallard_df_budget.csv").string();
     auto input = [&](bool budget) {
         return "[run]\nn_steps = 12\ncfl = 0.25\n" +
                mesh_block(N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", N_DIM == 2 ? 24 : 8, 4, 1.0, 0.2) +
@@ -988,7 +989,7 @@ TEST(ReactingTest, SimplerSplittingKeepsASteadyStateThatStrangSplittingMoves) {
     // chemistry and the sponge's relaxation cancel. SIMPLER keeps it at another
     // time step; Strang splitting has a steady state of its own at each step
     SKIP_IN_SINGLE_PRECISION("the steady state holds to the round-off of the state");
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_simpler_steady").string();
+    const std::string dir = (scratch_dir() / "mallard_simpler_steady").string();
     std::filesystem::remove_all(dir);
     const double dt = 5e-4;
     Solver steady;
