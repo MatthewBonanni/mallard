@@ -218,9 +218,12 @@ shocks prone to the carbuncle, e.g. blunt-body detonations). With `type = "navie
 conducting and diffusing: species diffuse along mole-fraction gradients with a
 correction velocity (so the diffusive mass fluxes sum to zero) and carry their
 enthalpy, and the time step includes the largest of `4/3 mu / rho`,
-`lambda / (rho cv)` and the species' diffusion coefficients. Walls are no-slip,
-adiabatic and non-catalytic (`wall_isothermal` is not yet available for
-mixtures). Species thermodynamics are NASA-7, NASA-9 or constant-cp
+`lambda / (rho cv)` and the species' diffusion coefficients. Walls are no-slip
+and non-catalytic: no species crosses them, so their species, Soret and
+enthalpy diffusion fluxes vanish. `wall_adiabatic` conducts no heat,
+`wall_heat_flux` the given `q`, and `wall_isothermal` `lambda dT/dn` from the
+boundary cell to the wall temperature `T`, with the mean of the cell's
+conductivity and that at `T` (and the cell's composition). Species thermodynamics are NASA-7, NASA-9 or constant-cp
 polynomials from the file, evaluated in double precision in every build. Each
 species is transported (`rho Y_k`) with mass-flux upwinding, so mass fractions
 stay in [0, 1] and sum to one; all mass fractions share one stencil and one

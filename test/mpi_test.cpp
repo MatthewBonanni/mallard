@@ -179,6 +179,23 @@ TEST(MPITest, ThermalDiffusionMatchesSerial) {
     expect_matches_serial(input);
 }
 
+TEST(MPITest, MixtureWallsMatchSerial) {
+    // Isothermal and heat-flux walls of a reacting mixture with thermal
+    // diffusion, and of an inert one with double flux
+    std::string input = mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes");
+    input.insert(input.find("[physics]\n") + 10, "soret = true\n");
+    const std::string adiabatic = "type = \"wall_adiabatic\"\n";
+    for (const std::string wall : {"type = \"wall_isothermal\"\nT = 500.0\nu = [10.0, 0.0]\n",
+                                   "type = \"wall_heat_flux\"\nq = 1e6\n"}) {
+        std::string walled = input;
+        walled.replace(walled.find(adiabatic), adiabatic.size(), wall);
+        expect_matches_serial(walled);
+        walled.insert(walled.find("[numerics]\n") + 11, "double_flux = true\n");
+        walled.erase(walled.find("[chemistry]\n"), 12);
+        expect_matches_serial(walled);
+    }
+}
+
 TEST(MPITest, MUSCLMatchesSerial) {
     expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
                                     bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
