@@ -89,7 +89,8 @@ static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
  *   current pressure shift (target minus the average of the adjacent cells),
  *   updated every stage
  * - walls: data[1..N_DIM] = wall velocity; WALL_ISOTHERMAL: data[0] = wall
- *   temperature; WALL_HEAT_FLUX: data[N_DIM + 1] = heat flux into the fluid
+ *   temperature; WALL_HEAT_FLUX: data[N_DIM + 1] = heat flux into the fluid.
+ *   Gas mixtures' walls are non-catalytic (zero species diffusive flux)
  * - DIRICHLET: unused; the exterior state is set per face (BoundaryData::face_state)
  * - NSCBC_OUTLET: data[N_DIM + 1] = target pressure
  * - NSCBC_INLET: data = [rho, -, p] of the target state; the target velocity
@@ -159,10 +160,13 @@ struct BoundaryCondition {
      * @param R Gas constant.
      * @param viscous Whether walls enforce no-slip (else slip) and wall temperature.
      * @param W_g Ghost state (output).
+     * @param wall_temperature Whether isothermal walls impose their temperature
+     *        through the ghost density (single gas); gas mixtures impose it
+     *        through the diffusive fluxes alone.
      */
     KOKKOS_INLINE_FUNCTION
     void ghost_W(const rtype * W_i, const rtype * n, const rtype gamma, const rtype R,
-                 const bool viscous, rtype * W_g) const {
+                 const bool viscous, rtype * W_g, const bool wall_temperature = true) const {
         constexpr uint8_t E = N_DIM + 1;
         for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = W_i[i];
         const rtype u_n = dot<N_DIM>(W_i + 1, n);
@@ -177,7 +181,7 @@ struct BoundaryCondition {
             case BoundaryType::WALL_HEAT_FLUX:
                 if (viscous) {
                     FOR_I_DIM W_g[1 + i] = 2.0_r * data[1 + i] - W_i[1 + i];
-                    if (type == BoundaryType::WALL_ISOTHERMAL) {
+                    if (type == BoundaryType::WALL_ISOTHERMAL && wall_temperature) {
                         const rtype T_i = W_i[E] / (W_i[0] * R);
                         const rtype T_g = Kokkos::fmax(2.0_r * data[0] - T_i, 0.1_r * data[0]);
                         W_g[0] = W_i[E] / (R * T_g);
@@ -283,6 +287,10 @@ struct BoundaryData {
     rtype gamma = 1.4_r;
     rtype R = 1.0;
     bool viscous = false;
+    // Gas mixtures: wall ghosts keep the interior density and composition (no
+    // mass crosses walls); wall temperatures and heat fluxes enter through
+    // MixtureGradientFunctor and MixtureViscousFluxFunctor
+    bool mixture = false;
     Euler gas;
     rtype gravity[N_DIM] = {};
     // Gas mixtures: per condition, the mass fractions and [gamma, e0] of a
@@ -313,7 +321,7 @@ struct BoundaryData {
     /** @brief Whether condition i_bc is a mixture inlet whose state follows from the interior's. */
     KOKKOS_INLINE_FUNCTION
     bool mixture_inflow(const int32_t i_bc) const {
-        return bc_Y.extent(0) > 0 && bcs(i_bc).type == BoundaryType::STAGNATION_INLET;
+        return mixture && bcs(i_bc).type == BoundaryType::STAGNATION_INLET;
     }
 
     /**
@@ -380,7 +388,7 @@ struct BoundaryData {
         } else if (mixture_inflow(i_bc)) {
             mixture_inflow_W(i_bc, W_i, n, W_t, th_t);
         } else {
-            bc.ghost_W(W_i, n, th_i[0], R, viscous, W_t);
+            bc.ghost_W(W_i, n, th_i[0], R, viscous, W_t, false);
             if (bc.type == BoundaryType::UPT) {
                 th_t[0] = bc_thermo(i_bc, 0);
                 th_t[1] = bc_thermo(i_bc, 1);
@@ -563,7 +571,7 @@ struct BoundaryData {
             mixture_inflow_W(i_bc, W_i, n, W_g, th_g);
             return;
         }
-        bcs(i_bc).ghost_W(W_i, n, gamma, R, viscous, W_g);
+        bcs(i_bc).ghost_W(W_i, n, gamma, R, viscous, W_g, !mixture);
     }
 };
 

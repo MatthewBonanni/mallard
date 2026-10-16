@@ -5,7 +5,7 @@ isentropic flow through the throat, a normal shock in the diverging part
 where the subsonic flow behind it leaves at the back pressure, and the
 section-averaged pressure, Mach number and stagnation pressure of the run.
 
-    plot_nozzle.py SNAPSHOT.vtu [OUTPUT.png] [--p-back 0.75]
+    plot_nozzle.py SNAPSHOT.vtu [--p-back 0.75] [--figure]
 
 Prints the mass flow against the choked one, the shock position and the
 stagnation-pressure ratio across the shock.
@@ -15,8 +15,12 @@ import argparse
 import numpy as np
 from scipy.optimize import brentq
 
-import docs_style
-from mallard_vtu import read_vtu_cells
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs"))
+import figstyle  # noqa: E402
+from mallard_vtu import read_vtu_cells  # noqa: E402
 
 G = 1.4
 A_EXIT = 1.6
@@ -64,7 +68,7 @@ def quasi_1d(p_back):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("snapshot")
-    ap.add_argument("output", nargs="?", default="nozzle_validation.png")
+    ap.add_argument("--figure", action="store_true", help="also draw docs/images/guide/nozzle_validation-{light,dark}.svg")
     ap.add_argument("--p-back", type=float, default=0.75)
     args = ap.parse_args()
 
@@ -109,47 +113,46 @@ def main():
     print(f"stagnation pressure: within {ahead:.1e} of p0 ahead of the shock; "
           f"{behind:.4f} behind it, quasi-1D {r:.4f}")
 
-    docs_style.apply()
-    plt = docs_style.plt
-    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(11.0, 4.2), gridspec_kw={"width_ratios": [1.0, 1.7]})
-    # The Mach number in the nozzle, mirrored about the axis
-    from matplotlib.collections import PolyCollection
-    for sign in (1.0, -1.0):
-        polys = xy.copy()
-        polys[..., 1] *= sign
-        pc = PolyCollection(polys, array=np.sqrt(M2), cmap="viridis", edgecolors="face", linewidths=0.2)
-        pc.set_clim(0.0, 1.8)
-        ax0.add_collection(pc)
-    xw = np.linspace(0.0, 4.0, 200)
-    ax0.plot(xw, height(xw), color=docs_style.INK, lw=1.2)
-    ax0.plot(xw, -height(xw), color=docs_style.INK, lw=1.2)
-    ax0.axvline(x_s, color=docs_style.INK, ls=":", lw=1.0)
-    ax0.set_ylim(-1.75, 1.75)
-    ax0.set_xlim(0.0, 4.0)
-    ax0.set_aspect("equal")
-    ax0.set_xlabel("x")
-    ax0.set_ylabel("y")
-    cb = fig.colorbar(pc, ax=ax0, orientation="horizontal", fraction=0.05, pad=0.18)
-    cb.set_label("Mach number")
-    cb.outline.set_edgecolor(docs_style.INK)
+    def draw(P):
+        from matplotlib.collections import PolyCollection
+        plt = figstyle.plt
+        fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(11.0, 4.2), gridspec_kw={"width_ratios": [1.0, 1.7]})
+        # The Mach number in the nozzle, mirrored about the axis
+        for sign in (1.0, -1.0):
+            polys = xy.copy()
+            polys[..., 1] *= sign
+            pc = PolyCollection(polys, array=np.sqrt(M2), cmap=P["cmap"], edgecolors="face", linewidths=0.2)
+            pc.set_clim(0.0, 1.8)
+            pc.set_rasterized(True)
+            ax0.add_collection(pc)
+        xw = np.linspace(0.0, 4.0, 200)
+        ax0.plot(xw, height(xw), color=P["line"], lw=1.2)
+        ax0.plot(xw, -height(xw), color=P["line"], lw=1.2)
+        ax0.axvline(x_s, color=P["muted"], ls=":", lw=1.0)
+        ax0.set_xlim(0.0, 4.0)
+        ax0.set_ylim(-1.75, 1.75)
+        ax0.set_aspect("equal")
+        ax0.set_xlabel("x")
+        ax0.set_ylabel("y")
+        cb = fig.colorbar(pc, ax=ax0, orientation="horizontal", fraction=0.05, pad=0.18)
+        cb.set_label("Mach number")
+        cb.outline.set_edgecolor(P["muted"])
 
-    ax1.plot(x, M_exact, color=docs_style.BLUE, lw=1.4, label="Mach number, quasi-1D")
-    every = slice(None, None, max(1, len(columns) // 80))
-    ax1.plot(columns[every], avg["M"][every], "o", color=docs_style.BLUE, ms=2.5, mfc="none", label="Mallard (section average)")
-    ax1.plot(x, p_exact, color=docs_style.ORANGE, lw=1.4, label="p / p0, quasi-1D")
-    ax1.plot(columns[every], avg["p"][every], "o", color=docs_style.ORANGE, ms=2.5, mfc="none")
-    ax1.plot(x, p0_exact, color=docs_style.GREEN, lw=1.4, label="stagnation pressure, quasi-1D")
-    ax1.plot(columns[every], avg["p0"][every], "o", color=docs_style.GREEN, ms=2.5, mfc="none")
-    ax1.axvline(x_s, color=docs_style.INK, ls=":", lw=1.0)
-    ax1.set_xlabel("x")
-    ax1.set_xlim(0.0, 4.0)
-    ax1.grid(True)
-    ax1.set_ylim(0.0, 1.75)
-    ax1.legend(loc="upper left", fontsize=9, ncol=2)
-    ax1.set_title(f"mass flow {100 * (mdot / mdot_choked - 1):+.2f}% of choked, shock {x_num - x_s:+.3f} "
-                  f"from quasi-1D, p02/p01 {behind:.3f} (quasi-1D {r:.3f})", fontsize=10)
-    docs_style.save(fig, args.output)
+        every = slice(None, None, max(1, len(columns) // 80))
+        for key, exact, color, name in (("M", M_exact, P["blue"], "Mach number"), ("p", p_exact, P["flame"], "p / p0"),
+                                        ("p0", p0_exact, P["teal"], "stagnation pressure / p0")):
+            ax1.plot(x, exact, color=color, lw=1.6, label=name + ", quasi-1D")
+            ax1.plot(columns[every], avg[key][every], "o", color=color, ms=3, mfc="none", mew=1.0,
+                     label="Mallard, section averages" if key == "M" else None)
+        ax1.axvline(x_s, color=P["muted"], ls=":", lw=1.0)
+        ax1.set_xlabel("x")
+        ax1.set_xlim(0.0, 4.0)
+        ax1.set_ylim(0.0, 1.8)
+        ax1.legend(loc="upper left", fontsize=10, ncol=2)
+        return fig
 
+    if args.figure:
+        figstyle.save("nozzle_validation", draw)
 
 if __name__ == "__main__":
     main()

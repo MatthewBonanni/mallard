@@ -20,7 +20,8 @@ solver takes the flux between the two.
 
 ## `stagnation_inlet`
 
-![The stagnation inlet: what it imposes and what it takes from the interior](../images/inlet_stagnation.png)
+![The stagnation inlet: what it imposes and what it takes from the interior](../images/guide/inlet_stagnation-light.svg#gh-light-mode-only)
+![The stagnation inlet: what it imposes and what it takes from the interior](../images/guide/inlet_stagnation-dark.svg#gh-dark-mode-only)
 
 The inlet imposes the stagnation temperature `T0`, the stagnation pressure
 `p0`, the flow direction `d` (by default the inward normal of each face) and,
@@ -109,9 +110,11 @@ The ghost depends on the interior state, as `farfield`'s does:
 The `nozzle` example is a planar converging-diverging nozzle with inlet and
 exit 1.6 throat heights, fed at `p0`, `T0`. The back pressure `0.75 p0` puts
 a normal shock in the diverging part. `tools/plot_nozzle.py` compares the
-section averages with the quasi-one-dimensional solution:
+section averages with the quasi-one-dimensional solution (`--figure` redraws
+this figure):
 
-![Nozzle: Mach number, pressure and stagnation pressure against the quasi-one-dimensional solution](../images/nozzle_validation.png)
+![Nozzle: Mach number, pressure and stagnation pressure against the quasi-one-dimensional solution](../images/guide/nozzle_validation-light.svg#gh-light-mode-only)
+![Nozzle: Mach number, pressure and stagnation pressure against the quasi-one-dimensional solution](../images/guide/nozzle_validation-dark.svg#gh-dark-mode-only)
 
 | | Mallard (320 × 20) | Quasi-1D |
 |---|---|---|
