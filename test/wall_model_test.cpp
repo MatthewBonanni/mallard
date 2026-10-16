@@ -44,10 +44,10 @@ WallModelParameters parameters(const WallModelType type) {
 Gas constant_gas(const double mu, const double cp = 1004.5, const double R = 287.0, const double Pr = 0.72) {
     Gas g;
     g.gas.viscosity_model = ViscosityModel::CONSTANT;
-    g.gas.mu_ref = mu;
-    g.gas.cp = cp;
-    g.gas.R = R;
-    g.gas.Pr = Pr;
+    g.gas.mu_ref = rtype(mu);
+    g.gas.cp = rtype(cp);
+    g.gas.R = rtype(R);
+    g.gas.Pr = rtype(Pr);
     return g;
 }
 
@@ -55,13 +55,13 @@ Gas constant_gas(const double mu, const double cp = 1004.5, const double R = 287
 Gas power_law_gas(const double mu_w) {
     Gas g;
     g.gas.viscosity_model = ViscosityModel::POWER_LAW;
-    g.gas.mu_ref = mu_w;
-    g.gas.T_mu_ref = 1.0;
-    g.gas.n_mu = 0.75;
-    g.gas.R = 1.0;
-    g.gas.gamma = 1.4;
-    g.gas.cp = 3.5;
-    g.gas.Pr = 0.7;
+    g.gas.mu_ref = rtype(mu_w);
+    g.gas.T_mu_ref = 1.0_r;
+    g.gas.n_mu = 0.75_r;
+    g.gas.R = 1.0_r;
+    g.gas.gamma = 1.4_r;
+    g.gas.cp = 3.5_r;
+    g.gas.Pr = 0.7_r;
     return g;
 }
 
@@ -350,10 +350,11 @@ TEST(WallModel3D, ExchangePointsOnEveryCellType) {
             const bool bottom = face_bc[f] == 0;
             double depth = 0.0;
             for (int i = 0; i < 3; i++) {
-                depth += (mesh.h_cell_coords(c0, i) - mesh.h_face_coords(f, i)) * -mesh.h_face_normals(f, i) /
-                         mesh.h_face_area(f);
+                depth += double(mesh.h_cell_coords(c0, i) - mesh.h_face_coords(f, i)) *
+                         double(-mesh.h_face_normals(f, i) / mesh.h_face_area(f));
             }
-            EXPECT_NEAR(heights(k, 0), bottom ? 0.37 : 2.3 * 2.0 * depth, 1e-14) << type;
+            const double tol = precision_tol<double>(1e-12, 1e-5);
+            EXPECT_NEAR(double(heights(k, 0)), bottom ? 0.37 : 2.3 * 2.0 * depth, tol) << type;
             for (int s = 0; s < 2; s++) {
                 ASSERT_GE(cells(k, s), 0) << type;
                 const uint32_t c = static_cast<uint32_t>(cells(k, s));
@@ -365,12 +366,13 @@ TEST(WallModel3D, ExchangePointsOnEveryCellType) {
                     }
                 }
                 for (int i = 0; i < 3; i++) {
-                    const double x = mesh.h_cell_coords(c, i) + offsets(k, s, i);
-                    double target = mesh.h_face_coords(f, i) - heights(k, s) * mesh.h_face_normals(f, i) / mesh.h_face_area(f);
+                    const double x = double(mesh.h_cell_coords(c, i)) + double(offsets(k, s, i));
+                    double target = double(mesh.h_face_coords(f, i)) -
+                                    double(heights(k, s)) * double(mesh.h_face_normals(f, i) / mesh.h_face_area(f));
                     if (i != 1) target -= L[i] * std::round((target - x) / L[i]);
-                    EXPECT_NEAR(x, target, 1e-12) << type << " face " << f << " point " << s;
-                    EXPECT_GE(x, lo[i] - 1e-12) << type;
-                    EXPECT_LE(x, hi[i] + 1e-12) << type;
+                    EXPECT_NEAR(x, target, tol) << type << " face " << f << " point " << s;
+                    EXPECT_GE(x, lo[i] - tol) << type;
+                    EXPECT_LE(x, hi[i] + tol) << type;
                 }
             }
         }
