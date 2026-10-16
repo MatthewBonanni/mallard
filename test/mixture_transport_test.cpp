@@ -95,7 +95,7 @@ Profile column(const Solver & solver, int primitive, int species = -1) {
     Profile p;
     const auto mesh = solver.get_mesh();
     auto coords = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh->cell_coords);
-    for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+    for (uint32_t c : mesh->cells_by_global_id()) {  // along the strip
         p.x.push_back(static_cast<double>(coords(c, 0)));
         p.value.push_back(species >= 0 ? static_cast<double>(solver.h_species(c, species) / solver.h_conservatives(c, 0))
                                        : static_cast<double>(solver.h_primitives(c, primitive)));

@@ -226,7 +226,9 @@ TEST(MeshBlockTest, TransformOnReadMapsNodesAndHighOrderNodes) {
     const double det = 8.0;
 #endif
     const double tol = precision_tol<double>(1e-12, 1e-5);
-    const toml::value input = parse_toml("[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" + transform);
+    // Cells keep the file's order, so that b's cells pair with a's
+    const toml::value input =
+        parse_toml("[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\ncell_order = \"input\"\n" + transform);
 
     const MeshBlock plain = read_gmsh_block(file), moved = read_mesh_block(input);
     ASSERT_EQ(moved.n_nodes(), plain.n_nodes());
