@@ -220,6 +220,16 @@ bool writes_variable(const Input & input, const std::string & name) {
 
 void Solver::init_mesh() {
     const std::string type = toml::find_or<std::string>(input, "mesh", "type", "file");
+    // Read in every run, so that an input runs unchanged on any number of ranks
+    partitioner = toml::find_or<std::string>(input, "parallel", "partitioner", "multijagged");
+    if (partitioner != "graph" && partitioner != "hilbert" && partitioner != "multijagged") {
+        throw InputError("parallel.partitioner = \"" + partitioner + "\" is not one of: graph, hilbert, multijagged.");
+    }
+    const std::string exchange =
+        toml::find_or<std::string>(input, "parallel", "halo_exchange", comm::nccl_available() ? "nccl" : "mpi");
+    if (exchange != "nccl" && exchange != "mpi") {
+        throw InputError("parallel.halo_exchange = \"" + exchange + "\" is not one of: nccl, mpi.");
+    }
     if (!is_distributed()) {
         mesh = std::make_shared<Mesh>();
         mesh->init(input);
@@ -236,22 +246,12 @@ void Solver::init_mesh() {
         }
         // Partition once; deeper halos (see halo_too_shallow) grow the existing layers
         if (!setup) {
-            partitioner = toml::find_or<std::string>(input, "parallel", "partitioner", "multijagged");
-            if (partitioner != "graph" && partitioner != "hilbert" && partitioner != "multijagged") {
-                throw InputError("parallel.partitioner = \"" + partitioner +
-                                 "\" is not one of: graph, hilbert, multijagged.");
-            }
             setup = std::make_unique<DistributedMesh>(read_mesh_block(input), Mesh::periodic_pairs(input));
             setup->distribute(partitioner == "graph"         ? partition_graph(*setup, comm::size())
                               : partitioner == "multijagged" ? partition_multijagged(*setup, comm::size())
                                                              : partition_hilbert(*setup, comm::size()));
         }
         mesh = setup->build_local_mesh(halo_layers, distribution);
-        const std::string exchange =
-            toml::find_or<std::string>(input, "parallel", "halo_exchange", comm::nccl_available() ? "nccl" : "mpi");
-        if (exchange != "nccl" && exchange != "mpi") {
-            throw InputError("parallel.halo_exchange = \"" + exchange + "\" is not one of: nccl, mpi.");
-        }
         if (exchange == "nccl" && !comm::nccl_available()) {
             throw InputError("parallel.halo_exchange = \"nccl\" needs a build with Mallard_ENABLE_NCCL.");
         }

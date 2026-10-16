@@ -212,7 +212,8 @@ TEST(CheckMemory, MeasuresAllocationsAndScalesThemToTheTargetRanks) {
 
 TEST(CheckOutput, CheckCreatesNoFilesAndWritesTheQualityFieldsOnRequest) {
     const std::filesystem::path dir = std::filesystem::temp_directory_path() / "mallard_check_files";
-    std::filesystem::remove_all(dir);
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
     CheckOptions options;
     options.quality_file = (dir / "quality" / "mesh").string();
     const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
@@ -225,7 +226,10 @@ TEST(CheckOutput, CheckCreatesNoFilesAndWritesTheQualityFieldsOnRequest) {
     EXPECT_FALSE(std::filesystem::exists(dir / "out"));
     EXPECT_FALSE(std::filesystem::exists(dir / "forces.csv"));
     EXPECT_FALSE(std::filesystem::exists(dir / "integrals.csv"));
-    std::ifstream vtu(dir / "quality" / (comm::size() > 1 ? "mesh_000000_p0000.vtu" : "mesh_000000.vtu"));
+    std::ostringstream piece;  // each rank's own piece
+    piece << "mesh_000000" << (comm::size() > 1 ? "_p" + std::string(3, '0') + std::to_string(comm::rank()) : "")
+          << ".vtu";
+    std::ifstream vtu(dir / "quality" / piece.str());
     ASSERT_TRUE(vtu.good());
     const std::string text((std::istreambuf_iterator<char>(vtu)), std::istreambuf_iterator<char>());
     for (const char * field : MeshQuality::FIELDS) EXPECT_NE(text.find(field), std::string::npos) << field;
