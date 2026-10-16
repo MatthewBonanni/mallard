@@ -74,3 +74,13 @@ Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the 3D
 | `make_volvo_mesh.py` | Gmsh file of hexahedra for the Volvo bluff-body combustor (`examples/volvo_bluff_body`): four blocks around the triangular flameholder, mesh lines normal to its slanted faces, spanwise extrusion (periodic) |
 | `volvo.py` | Volvo bluff-body LES analysis: `probes` (a mid-span plane of line probes for the input), `profiles` (span and time averages at the measurement stations and on the centerline, recirculation length), `plot` (against the experiment in `examples/volvo_bluff_body/reference`, with the mean errors), `budget` (dissipation shares and `eps_num / eps_sgs` over a window), `slice` / `animate` (mid-span vorticity or temperature movie), `render` (Q-criterion isosurface, needs pyvista) |
 | `tfles_apriori.py` | A priori test of the TFLES efficiency on a filtered DNS: wrinkling factor at the scale `F delta_L`, Colin's and the eddy-viscosity subgrid velocities against the DNS's, and the implied `C_u` |
+| `make_annulus_mesh.py` | Gmsh O-grid of an annulus (quadrilaterals, or triangles with `--triangles`), optionally with high-order boundary lines (`--order 2` or `3`) on the circles and jittered nodes |
+| `curved_convergence.py` | Convergence of the steady isentropic vortex between two circular walls, straight against curved boundaries, over orders and mesh levels (the curved-boundary validation) |
+| `tile_restart.py` | Repeat the flow of a restart file of a generated 3D box along x: starts a spatially developing run from a developed periodic one |
+| `cbc_les.py` | Comte-Bellot & Corrsin grid turbulence for LES (`examples/cbc_les`): initial field, rescaling, spectra of restart files, comparison with the measurements and the dissipation budget |
+| `mixture_riemann.py` | Exact Riemann solution for thermally perfect mixtures of frozen composition: references of the multicomponent shock tube tests |
+| `plot_reactive_shock_tube.py` | Reactive shock tube at several resolutions: reaction front, peak temperature and pressure at 170 and 230 us |
+| `plot_detonation.py` | 1D detonation runs: shock position, front speed, induction length and peak pressure, against the CJ speed and ZND induction length |
+| `cantera_mechanisms.py` | Copy the mechanisms too large for the repository (n-hexane, 1268 species) from Cantera's data into `mechanisms/external/` |
+| `v3_reference.py`, `v3_check.py` | Constant-volume ignition with large mechanisms: Cantera references, and `MallardReactor` against them |
+| `docs/make_figures.py` | The figures of the user guide (`docs/images/guide/`), light and dark, from the formulas, the example inputs and short Mallard runs (`--mallard build/src/Mallard`) |
