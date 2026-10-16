@@ -241,7 +241,9 @@ TEST(ProvenanceTest, EveryOutputFileCarriesTheRunsProvenance) {
         h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
         EXPECT_EQ(h5::read_strings_attribute(root, "provenance").at(0), expected) << h5;
     }
-    if (writes_hdf5()) EXPECT_EQ(provenance::parse_comment(read_file(dir + "/h.xmf")), expected);
+    if (writes_hdf5()) {
+        EXPECT_EQ(provenance::parse_comment(read_file(dir + "/h.xmf")), expected);
+    }
 #endif
     std::filesystem::remove_all(dir);
 }

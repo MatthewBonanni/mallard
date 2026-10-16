@@ -15,7 +15,6 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
 namespace json_reader {
@@ -27,25 +26,22 @@ struct Value {
     double number = 0.0;
     std::string string;
     std::vector<Value> array;
-    std::vector<std::pair<std::string, Value>> object;  // in order
+    std::vector<std::string> names;  // of the object's members, in order
+    std::vector<Value> members;      // (a vector of an incomplete type is allowed, a pair is not)
 
     bool has(const std::string & key) const {
-        for (const auto & [k, v] : object) {
+        for (const auto & k : names) {
             if (k == key) return true;
         }
         return false;
     }
     const Value & operator[](const std::string & key) const {
-        for (const auto & [k, v] : object) {
-            if (k == key) return v;
+        for (size_t i = 0; i < names.size(); i++) {
+            if (names[i] == key) return members[i];
         }
         throw std::out_of_range("no key " + key);
     }
-    std::vector<std::string> keys() const {
-        std::vector<std::string> out;
-        for (const auto & [k, v] : object) out.push_back(k);
-        return out;
-    }
+    std::vector<std::string> keys() const { return names; }
 };
 
 class Parser {
@@ -93,11 +89,10 @@ class Parser {
                 do {
                     space();
                     std::string key = string();
-                    for (const auto & entry : v.object) {
-                        if (entry.first == key) fail("duplicate key " + key);
-                    }
+                    if (v.has(key)) fail("duplicate key " + key);
                     expect(':');
-                    v.object.emplace_back(std::move(key), value());
+                    v.names.push_back(std::move(key));
+                    v.members.push_back(value());
                     space();
                 } while (take(","));
                 expect('}');
