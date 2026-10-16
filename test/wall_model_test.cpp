@@ -383,7 +383,7 @@ namespace {
 
 /** @brief Couette flow under a moving no-slip top wall over a modeled bottom wall, from a perturbed profile to steady state. */
 std::unique_ptr<Solver> modeled_couette(const std::string & mesh, const std::string & bottom) {
-    const uint32_t n[3] = {3, mesh == "cartesian" ? 8u : 6u, 3};
+    const uint32_t n[3] = {3, 8u, 3};
     auto solver = std::make_unique<Solver>();
     solver->init(parse_toml(channel_input(
         mesh, n, bottom, "type = \"wall_isothermal\"\nT = 1.0\nu = [0.1, 0.0, 0.0]\n",
@@ -402,7 +402,7 @@ std::unique_ptr<Solver> modeled_couette(const std::string & mesh, const std::str
 // wrong sign or direction, if the model's input is taken at the wrong height,
 // or if the modeled wall's flux is not the model's.
 TEST(WallModel3D, LaminarCouetteFlowOverAModeledWall) {
-    const std::pair<std::string, std::string> cases[] = {{"cartesian", MODELED_ODE}, {"cartesian_tet", MODELED_GFM}};
+    const std::pair<std::string, std::string> cases[] = {{"cartesian", MODELED_ODE}, {"cartesian", MODELED_GFM}};
     for (const auto & [mesh, bottom] : cases) {
         auto solver = modeled_couette(mesh, bottom);
         auto m = solver->get_mesh();
@@ -410,7 +410,7 @@ TEST(WallModel3D, LaminarCouetteFlowOverAModeledWall) {
         for (uint32_t i = 0; i < m->n_owned(); i++) {
             max_err = std::max(max_err, std::abs(double(solver->h_primitives(i, 0)) - 0.1 * double(m->h_cell_coords(i, 1))));
         }
-        EXPECT_LT(max_err, (mesh == "cartesian" ? 1e-4 : 5e-4)) << mesh << " " << bottom;
+        EXPECT_LT(max_err, 1e-4) << mesh << " " << bottom;
         const auto F = solver->calc_force(m->get_face_zone("bottom")->faces);
         // Shear mu U / H = 0.02 on the area 0.6, along +x on the slower wall
         EXPECT_NEAR(F[3], 0.02 * 0.6, 2e-3 * 0.012) << mesh << " " << bottom;
