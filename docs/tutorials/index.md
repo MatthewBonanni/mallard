@@ -10,6 +10,7 @@ at reduced size on every change, so the commands stay working.
 
 | Tutorial | What it shows | Reference |
 |---|---|---|
+| [Laminar airfoil](airfoil.md) | NACA 0012 at Mach 0.5, Re = 5000: a structured Gmsh C-grid, steady state by time marching, wall forces, Cp and Cf | High-Order CFD Workshop case C1.3 |
 | [Supersonic cone](cone.md) | 3D Euler flow at Mach 2 over a 15° cone: a tetrahedral Gmsh mesh, symmetry planes, probes and surface output | Taylor-Maccoll exact solution |
 | [Channel LES](channel_les.md) | Wall-resolved LES of turbulent channel flow at Re_τ = 180: periodic Gmsh hexahedra, the Sigma model, constant mass flow, running statistics and the dissipation budget | DNS of Moser, Kim & Mansour |
 

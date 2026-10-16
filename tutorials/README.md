@@ -7,6 +7,7 @@ input file and the Python scripts that set it up and draw its figures, and
 
 | Directory | Tutorial |
 |---|---|
+| `airfoil/` | [Laminar airfoil](../docs/tutorials/airfoil.md): NACA 0012 drag and lift against the High-Order CFD Workshop |
 | `cone/` | [Supersonic flow over a cone](../docs/tutorials/cone.md) (3D) against the Taylor-Maccoll solution |
 | `channel_les/` | [Channel LES](../docs/tutorials/channel_les.md): turbulent channel at Re_τ = 180 against DNS |
 
