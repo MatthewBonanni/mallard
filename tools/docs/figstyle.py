@@ -95,13 +95,13 @@ def _rc(P):
     }
 
 
-def save(name, draw):
-    """Draw the figure once per theme and write both SVGs."""
-    OUT.mkdir(parents=True, exist_ok=True)
+def save(name, draw, out=OUT):
+    """Draw the figure once per theme and write both SVGs into out."""
+    out.mkdir(parents=True, exist_ok=True)
     for P in THEMES:
         with plt.rc_context(_rc(P)):
             fig = draw(P)
-            path = OUT / f"{name}-{P['name']}.svg"
+            path = out / f"{name}-{P['name']}.svg"
             fig.savefig(path, format="svg", bbox_inches="tight", pad_inches=0.04, metadata={"Date": None}, dpi=150)
             if PREVIEW:
                 bg = "#ffffff" if P["name"] == "light" else "#171114"
