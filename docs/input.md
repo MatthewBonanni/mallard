@@ -311,9 +311,11 @@ Turbulence-chemistry interaction of reacting LES (a viscous mixture with
 conductivity are multiplied by `E F` and its reaction rates by `E / F`, which
 keeps the laminar flame speed and thickens the flame by `F` so that it spans
 `n_res` cells; the efficiency `E` restores the flame-surface wrinkling of the
-subgrid scales (Charlette, Meneveau & Veynante 2002, `beta = 0.5`, at the
-filter width `F delta_L`, with the subgrid velocity
-`u' = 2 Delta^3 |lap(curl u)|` of Colin et al.). `F = 1 + (max(1, n_res Delta /
+subgrid scales at the filter width `F delta_L`: by default `E = F^beta`
+(Charlette, Meneveau & Veynante 2002) with `beta` from the dynamic procedure
+of Wang, Boileau & Veynante (2011), which compares the resolved flame surface
+`|grad c|` before and after a test filter (global, exact sums; written to the
+integrals file as `tf_beta`). `F = 1 + (max(1, n_res Delta /
 delta_L) - 1) Omega` with the flame sensor `Omega = min(1, c (1 - c) /
 0.0475)` of the progress variable `c = (T - T_unburnt) / (T_burnt -
 T_unburnt)`, so `Omega = 1` across the whole flame (`0.05 <= c <= 0.95`) and 0
@@ -331,10 +333,10 @@ times the half step (exact for the autonomous constant-volume reactor).
 | `s_L` | Laminar flame speed (m/s) |
 | `T_unburnt`, `T_burnt` | Temperatures of the fresh and burnt gas (K) |
 | `n_res` | Cells across the thickened flame, default 5 |
-| `efficiency` | `charlette` (default) or `none` (`E = 1`) |
-| `beta` | Exponent of the Charlette efficiency, default 0.5 |
-| `subgrid_velocity` | The `u'` of the efficiency: `colin` (default), `u' = 2 Delta^3 abs(lap(curl u))`; or `eddy_viscosity`, `u' = C_u nu_t / Delta` from the SGS model. Colin's operator overpredicts `u'` 5-8 times on meshes with `Delta >= 0.4 delta_L` and the flame speed by 2x at `Delta = 1.6 delta_L` ([design notes](design/les.md), section 8.3) |
-| `C_u` | Constant of `subgrid_velocity = "eddy_viscosity"`, default 28 (a priori from a DNS at `Delta = 0.8 delta_L`; 22-39 over `Delta = 0.4-1.6 delta_L`) |
+| `efficiency` | `dynamic` (default): `E = F^beta`, `beta` in [0, 1] from the dynamic procedure, no constant; turbulent flame speed within 8% of two DNS at `Delta = 0.4-1.6 delta_L`. `charlette`: Charlette's efficiency function of a subgrid velocity `u'` (the default until #294; doubles the flame speed at `Delta = 1.6 delta_L`). `none`: `E = 1`. Comparison in the [design notes](design/les.md), section 8.3 |
+| `beta` | `charlette` only: exponent of the efficiency, default 0.5 |
+| `subgrid_velocity` | `charlette` only: the `u'` of the efficiency: `colin` (default), `u' = 2 Delta^3 abs(lap(curl u))`; or `eddy_viscosity`, `u' = C_u nu_t / Delta` from the SGS model. Colin's operator overpredicts `u'` 5-8 times on meshes with `Delta >= 0.4 delta_L` and the flame speed by 2x at `Delta = 1.6 delta_L` |
+| `C_u` | `charlette` only: constant of `subgrid_velocity = "eddy_viscosity"`, default 28 (a priori from a DNS at `Delta = 0.8 delta_L`; 22-39 over `Delta = 0.4-1.6 delta_L`) |
 
 **Experimental: `model = "pasr"`**, the partially stirred reactor (Sabelnikov &
 Fureby 2013) for non-premixed and partially premixed flames: no thickening;
