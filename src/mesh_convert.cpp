@@ -24,16 +24,17 @@ int main(int argc, char * argv[]) {
     if (argc != 3) {
         if (comm::is_root()) {
             std::cerr << "Usage: " << argv[0] << " INPUT OUTPUT.h5\n"
-                      << "  INPUT is a Gmsh file (.msh), or a Mallard input file (.toml) whose [mesh]\n"
-                      << "  table describes the mesh. Several ranks write in parallel (needs parallel\n"
-                      << "  HDF5); each reads the whole Gmsh file but generates only its block.\n";
+                      << "  INPUT is a mesh file (Gmsh or Fluent .msh, Fluent .cas, CGNS .cgns), or a\n"
+                      << "  Mallard input file (.toml) whose [mesh] table describes the mesh (and its\n"
+                      << "  [mesh.transform]). Several ranks write in parallel (needs parallel HDF5);\n"
+                      << "  each reads the whole mesh file but generates only its block.\n";
         }
         return 1;
     }
     try {
         const std::string in = argv[1], out = argv[2];
         const MeshBlock block = std::filesystem::path(in).extension() == ".toml" ? read_mesh_block(parse_input(in))
-                                                                                 : read_gmsh_block(in);
+                                                                                 : read_file_block(in);
         write_mesh_h5(out, block);
         const uint64_t n_cells = comm::allreduce(block.n_cells(), comm::Op::SUM);
         const uint64_t n_nodes = comm::allreduce(block.n_nodes(), comm::Op::SUM);
