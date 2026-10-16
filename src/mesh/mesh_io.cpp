@@ -562,29 +562,48 @@ GmshData read_gmsh(const std::string & filename) {
     return data;
 }
 
-/** @brief The high-order boundary faces of a Gmsh file, for curved::surfaces_of_mesh. */
-std::vector<curved::SurfaceFace> high_order_faces(const GmshData & data) {
-    std::vector<curved::SurfaceFace> out;
-    for (size_t f = 0; f < data.boundary_faces.size(); f++) {
-        if (data.boundary_high_order[f].empty()) continue;
-        curved::SurfaceFace face;
-        face.corners.assign(data.boundary_faces[f].nodes.begin(), data.boundary_faces[f].nodes.end());
-        face.nodes = data.boundary_high_order[f];
-        out.push_back(std::move(face));
+/** @brief Part r of p of a mesh file's contents (see MeshBlock). */
+MeshBlock file_block(const GmshData & data, int r, int p) {
+    MeshBlock block;
+    block.first_cell = block_begin(data.cells.size(), r, p);
+    block.first_node = block_begin(data.nodes.size(), r, p);
+    for (uint64_t c = block.first_cell; c < block_begin(data.cells.size(), r + 1, p); c++) {
+        block.add_cell(data.cells[c]);
     }
-    return out;
+    for (uint64_t n = block.first_node; n < block_begin(data.nodes.size(), r + 1, p); n++) {
+        std::array<double, N_DIM> x;
+        FOR_I_DIM x[i] = double(data.nodes[n][i]);
+        block.node_coords.push_back(x);
+    }
+    // Zones numbered in order of first appearance, the same on every rank
+    std::map<std::string, uint32_t> zone_index;
+    for (const auto & face : data.boundary_faces) {
+        if (zone_index.emplace(face.zone, block.zone_names.size()).second) block.zone_names.push_back(face.zone);
+    }
+    const uint64_t n_faces = data.boundary_faces.size();
+    bool high_order = false;
+    for (const auto & ho : data.boundary_high_order) high_order |= !ho.empty();
+    if (high_order) block.face_high_order_offsets.assign(1, 0);
+    for (uint64_t f = block_begin(n_faces, r, p); f < block_begin(n_faces, r + 1, p); f++) {
+        block.add_face(data.boundary_faces[f].nodes, zone_index.at(data.boundary_faces[f].zone));
+        if (!high_order) continue;
+        for (const curved::Vec3 & x : data.boundary_high_order[f]) {
+            std::array<double, N_DIM> node;
+            FOR_I_DIM node[i] = x[i];
+            block.face_high_order_nodes.push_back(node);
+        }
+        block.face_high_order_offsets.push_back(block.face_high_order_nodes.size());
+    }
+    return block;
 }
 
 } // namespace
 
-void Mesh::init_file(const std::string & filename, const std::vector<PeriodicPair> & periodic) {
-    if (is_hdf5_mesh(filename)) {
-        init_from_block(read_mesh_h5(filename, true), periodic);
-        return;
-    }
-    GmshData data = read_gmsh(filename);
-    init_from_connectivity(data.nodes, data.cells, data.boundary_faces, "unassigned", periodic);
-    high_order_faces = ::high_order_faces(data);
+void Mesh::init_file(const std::string & filename, const std::vector<PeriodicPair> & periodic,
+                     const MeshTransform & transform) {
+    MeshBlock block = is_hdf5_mesh(filename) ? read_mesh_h5(filename, true) : file_block(read_gmsh(filename), 0, 1);
+    transform_block(block, transform);
+    init_from_block(block, periodic);
 }
 
 void Mesh::init_from_block(const MeshBlock & block, const std::vector<PeriodicPair> & periodic) {
@@ -625,37 +644,5 @@ void Mesh::init_from_block(const MeshBlock & block, const std::vector<PeriodicPa
 }
 
 MeshBlock read_gmsh_block(const std::string & filename) {
-    GmshData data = read_gmsh(filename);
-    const int r = comm::rank(), p = comm::size();
-    MeshBlock block;
-    block.first_cell = block_begin(data.cells.size(), r, p);
-    block.first_node = block_begin(data.nodes.size(), r, p);
-    for (uint64_t c = block.first_cell; c < block_begin(data.cells.size(), r + 1, p); c++) {
-        block.add_cell(data.cells[c]);
-    }
-    for (uint64_t n = block.first_node; n < block_begin(data.nodes.size(), r + 1, p); n++) {
-        std::array<double, N_DIM> x;
-        FOR_I_DIM x[i] = double(data.nodes[n][i]);
-        block.node_coords.push_back(x);
-    }
-    // Zones numbered in order of first appearance, the same on every rank
-    std::map<std::string, uint32_t> zone_index;
-    for (const auto & face : data.boundary_faces) {
-        if (zone_index.emplace(face.zone, block.zone_names.size()).second) block.zone_names.push_back(face.zone);
-    }
-    const uint64_t n_faces = data.boundary_faces.size();
-    bool high_order = false;
-    for (const auto & ho : data.boundary_high_order) high_order |= !ho.empty();
-    if (high_order) block.face_high_order_offsets.assign(1, 0);
-    for (uint64_t f = block_begin(n_faces, r, p); f < block_begin(n_faces, r + 1, p); f++) {
-        block.add_face(data.boundary_faces[f].nodes, zone_index.at(data.boundary_faces[f].zone));
-        if (!high_order) continue;
-        for (const curved::Vec3 & x : data.boundary_high_order[f]) {
-            std::array<double, N_DIM> node;
-            FOR_I_DIM node[i] = x[i];
-            block.face_high_order_nodes.push_back(node);
-        }
-        block.face_high_order_offsets.push_back(block.face_high_order_nodes.size());
-    }
-    return block;
+    return file_block(read_gmsh(filename), comm::rank(), comm::size());
 }

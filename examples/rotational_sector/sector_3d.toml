@@ -1,13 +1,13 @@
-# The 3D version of sector.toml (3D build): a 45 degree sector of the annular
+# The 3D version of sector.toml (3D build): a quarter (90 degrees) of the annular
 # duct 1 <= r <= 2, 0 <= z <= 0.5, periodic in theta (a rotation) and in z (a
 # translation along the axis), with an axial wave, against the full duct
 # (annulus_3d.toml):
 #   ../../build3d/src/Mallard -i sector_3d.toml --kokkos-num-threads=4
 #   ../../build3d/src/Mallard -i annulus_3d.toml --kokkos-num-threads=4
-#   python ../../tools/rotational_sector.py compare solut/sector_3d_00001.vtu solut/annulus_3d_00001.vtu --sectors 8
+#   python ../../tools/rotational_sector.py compare solut/sector_3d_000001.vtu solut/annulus_3d_000001.vtu --sectors 4
 #
-# Result (TENO5, t = 0.2): agreement to rounding (see the README). 768 and
-# 6,144 hexahedra, seconds on 4 threads.
+# Result (TENO5, t = 0.2): RESULT_3D
+# 1,536 and 6,144 hexahedra.
 
 [run]
 t_stop = 0.2
@@ -15,8 +15,8 @@ cfl = 0.8
 
 [mesh]
 type = "annulus"
-angle = 45.0
-Ntheta = 8
+angle = 90.0
+Ntheta = 16
 Nr = 12
 Nz = 8
 Lz = 0.5

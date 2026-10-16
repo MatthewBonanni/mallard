@@ -65,6 +65,25 @@ static const std::unordered_map<MeshType, std::string> MESH_NAMES = {
 /** @brief Tanh stretching factor of each direction of a generated mesh, 0 for uniform spacing. */
 using Stretching = std::array<rtype, 3>;
 
+/** @brief Affine map x -> matrix x + translation applied to the nodes of a mesh file on read ([mesh.transform]). */
+struct MeshTransform {
+    std::array<std::array<double, N_DIM>, N_DIM> matrix{};
+    std::array<double, N_DIM> translation{};
+    std::string description;  // empty for the identity
+
+    MeshTransform() {
+        for (size_t i = 0; i < N_DIM; i++) matrix[i][i] = 1.0;
+    }
+    bool is_identity() const { return description.empty(); }
+    std::array<double, N_DIM> operator()(const std::array<double, N_DIM> & x) const {
+        std::array<double, N_DIM> y = translation;
+        for (size_t i = 0; i < N_DIM; i++) {
+            for (size_t j = 0; j < N_DIM; j++) y[i] += matrix[i][j] * x[j];
+        }
+        return y;
+    }
+};
+
 enum class CellType {
     TRIANGLE,
     QUAD,
@@ -430,9 +449,10 @@ class Mesh {
         /**
          * @brief Read a Mallard HDF5 mesh file (.h5, .hdf5), or an ASCII Gmsh
          *        mesh (format 2.2 or 4.1) whose named physical curves (surfaces
-         *        in 3D) become boundary zones.
+         *        in 3D) become boundary zones, and map its nodes by transform.
          */
-        void init_file(const std::string & filename, const std::vector<PeriodicPair> & periodic = {});
+        void init_file(const std::string & filename, const std::vector<PeriodicPair> & periodic = {},
+                       const MeshTransform & transform = MeshTransform());
 
         /**
          * @brief Initialize the supersonic wedge mesh.

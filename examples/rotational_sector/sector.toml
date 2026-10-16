@@ -1,18 +1,23 @@
-# Rotational periodicity: a swirling flow in a 45 degree sector of the annulus
-# 1 <= r <= 2, against the same flow on the full annulus (annulus.toml). The
-# state has the sector's period: a solid-body swirl with azimuthal and radial
-# waves of 8 periods around, between slip walls. The full annulus is eight
-# copies of the sector's mesh, so both runs must agree to rounding, the
-# sector's velocity turned by k 45 degrees in copy k.
+# Rotational periodicity: a swirling flow in a quarter of the annulus
+# 1 <= r <= 2 (a 90 degree sector), against the same flow on the full annulus
+# (annulus.toml). The state has the sector's period: a solid-body swirl with
+# azimuthal and radial waves of 8 periods around, between slip walls. The full
+# annulus is four copies of the sector's mesh, so both runs must agree to
+# rounding, the sector's velocity turned by k 90 degrees in copy k.
+#
+# A quarter, not a smaller sector: MUSCL's limiter acts on each Cartesian
+# velocity component and TENO's smoothness indicators weigh the Cartesian
+# derivatives, so the schemes are invariant under rotations by multiples of
+# 90 degrees only. Sectors of other angles are as accurate, but agree with the
+# full annulus to the truncation error rather than to rounding.
 #
 # Run (2D build), then compare:
 #   ../../build/src/Mallard -i sector.toml --kokkos-num-threads=4
 #   ../../build/src/Mallard -i annulus.toml --kokkos-num-threads=4
-#   python ../../tools/rotational_sector.py compare solut/sector_00001.vtu solut/annulus_00001.vtu --sectors 8
+#   python ../../tools/rotational_sector.py compare solut/sector_000001.vtu solut/annulus_000001.vtu --sectors 4
 #
-# Result (TENO5, t = 0.5): the annulus and the turned sector agree to
-# 5e-15 in density, momentum and energy (max over all cells). 2,048 and 16,384
-# quads, seconds on 4 threads.
+# Result (TENO5, t = 0.5): RESULT_2D
+# 4,096 and 16,384 quads, about a minute on one thread.
 
 [run]
 t_stop = 0.5
@@ -20,8 +25,8 @@ cfl = 0.8
 
 [mesh]
 type = "annulus"
-angle = 45.0
-Ntheta = 32
+angle = 90.0
+Ntheta = 64
 Nr = 64
 r_inner = 1.0
 r_outer = 2.0

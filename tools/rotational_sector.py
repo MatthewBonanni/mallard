@@ -161,7 +161,16 @@ def compare(sector_path, annulus_path, sectors, out):
     d_E = np.abs(E_a - E_s)
     d = np.maximum(d_rho, np.maximum(d_m, d_E))
     print(f"{len(ca)} annulus cells, {len(cs)} sector cells, {sectors} copies")
-    print(f"max |d rho| {d_rho.max():.3e}, max |d rho u| {d_m.max():.3e}, max |d rho E| {d_E.max():.3e}")
+    print(f"all copies: max |d rho| {d_rho.max():.3e}, max |d rho u| {d_m.max():.3e}, max |d rho E| {d_E.max():.3e}")
+    for k in range(sectors):
+        print(f"  copy {k}: max difference {d[copies == k].max():.3e}")
+    # The annulus against itself: each copy against the first, turned
+    first = {match[i]: i for i in range(len(ca)) if copies[i] == 0}
+    ref = np.array([first[m] for m in match])
+    rx, ry = turn(fa["RHOU"][ref, 0], fa["RHOU"][ref, 1], copies * alpha)
+    self_d = np.max(np.abs(np.stack([fa["RHO"] - fa["RHO"][ref], fa["RHOE"] - fa["RHOE"][ref],
+                                     fa["RHOU"][:, 0] - rx, fa["RHOU"][:, 1] - ry])), axis=0)
+    print(f"annulus copies against its first: max difference {self_d.max():.3e}")
     # 3D: the first axial layer
     layer = ca[:, 2] <= ca[:, 2].min() + 1e-9 + 0.5 * h if np.ptp(ca[:, 2]) > 0 else np.ones(len(ca), bool)
     polys_a = [p[:, :2] for p, keep in zip(pa, layer) if keep]
