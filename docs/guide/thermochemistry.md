@@ -66,8 +66,10 @@ and carry their enthalpy; viscosity and conductivity follow the mixture rules
 | `unity_lewis` | `lambda / (rho cp)` for every species | Comparisons with unity-Lewis theory or DNS |
 | `constant_lewis` | `lambda / (rho cp Le_k)` | Simplified chemistry with fitted Lewis numbers |
 
-Walls are no-slip, adiabatic and non-catalytic; `wall_isothermal` is not yet
-available for mixtures.
+Walls are no-slip and non-catalytic: no species crosses them, so their
+species, Soret and enthalpy diffusion fluxes vanish. `wall_adiabatic`,
+`wall_isothermal` and `wall_heat_flux` set the heat flux (see
+[boundary conditions](boundary_conditions.md)).
 
 ### Contacts between different gases
 

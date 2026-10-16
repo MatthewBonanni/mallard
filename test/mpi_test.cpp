@@ -132,13 +132,16 @@ TEST(MPITest, GasMixtureMatchesSerial) {
     // Species and the temperature seeds of halo cells follow the same history
     // as their owners'; with TENO also the troubled cells' stencil choices and
     // the scalars' bound-preserving factors, and with double flux the frozen
-    // thermodynamics of each step; with chemistry each cell's reactor; with
+    // thermodynamics of each step (of halo cells, after their owners'
+    // chemistry); with chemistry each cell's reactor; with
     // transport the halo cells' coefficients and gradients; radiation is pointwise
     const std::array<std::string, 4> schemes[] = {{"", "type = \"MUSCL\"\n", "", "euler"},
                                                   {"", "type = \"TENO\"\norder = 3\n", "", "euler"},
                                                   {"double_flux = true\n", "type = \"MUSCL\"\n", "", "euler"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n", "euler"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes"},
+                                                  {"double_flux = true\n", "type = \"MUSCL\"\n", "[chemistry]\n",
+                                                   "navier_stokes"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n[radiation]\n", "navier_stokes"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\ncoupling = \"simpler\"\n",
                                                    "navier_stokes"}};
@@ -177,6 +180,22 @@ TEST(MPITest, ThermalDiffusionMatchesSerial) {
     std::string input = mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes");
     input.insert(input.find("[physics]\n") + 10, "soret = true\n");
     expect_matches_serial(input);
+}
+
+TEST(MPITest, MixtureWallsMatchSerial) {
+    // Isothermal and heat-flux walls of a reacting mixture with thermal
+    // diffusion, also with double flux
+    std::string input = mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes");
+    input.insert(input.find("[physics]\n") + 10, "soret = true\n");
+    const std::string adiabatic = "type = \"wall_adiabatic\"\n";
+    for (const std::string wall : {"type = \"wall_isothermal\"\nT = 500.0\nu = [10.0, 0.0]\n",
+                                   "type = \"wall_heat_flux\"\nq = 1e6\n"}) {
+        std::string walled = input;
+        walled.replace(walled.find(adiabatic), adiabatic.size(), wall);
+        expect_matches_serial(walled);
+        walled.insert(walled.find("[numerics]\n") + 11, "double_flux = true\n");
+        expect_matches_serial(walled);
+    }
 }
 
 TEST(MPITest, MUSCLMatchesSerial) {
@@ -246,7 +265,7 @@ TEST(MPITest, PeriodicRunsMatchSerialAcrossSeamsCutByThePartition) {
 TEST(MPITest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
     const std::string file = write_temp_shared("mallard_mpi_periodic.msh", jittered_mixed_mesh(16));
     std::string input = box_input("cartesian", "type = \"TENO\"\norder = 4\n", EULER, "", 12);
-    const std::string generated = "type = \"cartesian\"\n";
+    const std::string generated = "type = \"cartesian\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     input += "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0]\n"
              "[[periodic]]\nzones = [\"bottom\", \"top\"]\ntranslation = [0.0, 1.0]\n"
@@ -284,13 +303,17 @@ TEST(MPITest, LargeEddySimulationMatchesSerial) {
 }
 
 TEST(MPITest, ThickenedFlameMatchesSerial) {
-    // The vorticity and the flame fields are exchanged to the halo once per step
+    // The dynamic efficiency's test filter passes exchange the filtered field and its exponent is an exact
+    // domain sum; Charlette's efficiency exchanges the vorticity; the flame fields are exchanged once per step
+    const std::string flame = "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
+                              "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n";
     for (const std::string coupling : {"strang", "simpler"}) {
         expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\ncoupling = \"" + coupling + "\"\n",
-                                            "navier_stokes") +
-                              "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
-                              "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n");
+                                            "navier_stokes") + flame,
+                              [](const Solver & s) { EXPECT_GT(s.tfles_beta(), 0.0); });
     }
+    expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes") + flame +
+                          "efficiency = \"charlette\"\n");
 }
 
 TEST(MPITest, HybridConvectiveFluxMatchesSerial) {
@@ -592,7 +615,7 @@ TEST(MPITest, HDF5OutputDoesNotDependOnTheRankCount) {
     std::string input = box_input("cartesian", "type = \"MUSCL\"\n", EULER,
                                   bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
                                       "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 6);
-    const std::string generated = "type = \"cartesian\"\n";
+    const std::string generated = "type = \"cartesian\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     expect_hdf5_output_matches_serial(input + "[statistics]\ninterval = 2\nfields = [\"P\"]\n",
                                       "interval = 3\nvariables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n",
@@ -710,7 +733,7 @@ TEST(MPITest, RunFromHDF5MeshFileMatchesSerial) {
     std::string input = box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
                                   bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
                                       "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 10);
-    const std::string generated = "type = \"cartesian_tri\"\n";
+    const std::string generated = "type = \"cartesian_tri\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     expect_matches_serial(input);
     comm::barrier();
@@ -732,7 +755,7 @@ TEST(MPITest, CurvedWallsMatchSerial) {
         expect_matches_serial(input, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
         if (order == 3 && have_hdf5() && (comm::size() == 1 || have_parallel_hdf5())) {
             const std::string h5 = (std::filesystem::temp_directory_path() / "mallard_mpi_annulus_3.h5").string();
-            write_mesh_h5(h5, read_gmsh_block(file));
+            write_mesh_h5(h5, read_file_block(file));
             std::string from_h5 = input;
             from_h5.replace(from_h5.find(file), file.size(), h5);
             expect_matches_serial(from_h5, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });

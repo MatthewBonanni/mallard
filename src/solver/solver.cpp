@@ -220,6 +220,16 @@ bool writes_variable(const Input & input, const std::string & name) {
 
 void Solver::init_mesh() {
     const std::string type = toml::find_or<std::string>(input, "mesh", "type", "file");
+    // Read in every run, so that an input runs unchanged on any number of ranks
+    partitioner = toml::find_or<std::string>(input, "parallel", "partitioner", "multijagged");
+    if (partitioner != "graph" && partitioner != "hilbert" && partitioner != "multijagged") {
+        throw InputError("parallel.partitioner = \"" + partitioner + "\" is not one of: graph, hilbert, multijagged.");
+    }
+    const std::string exchange =
+        toml::find_or<std::string>(input, "parallel", "halo_exchange", comm::nccl_available() ? "nccl" : "mpi");
+    if (exchange != "nccl" && exchange != "mpi") {
+        throw InputError("parallel.halo_exchange = \"" + exchange + "\" is not one of: nccl, mpi.");
+    }
     if (!is_distributed()) {
         mesh = std::make_shared<Mesh>();
         mesh->init(input);
@@ -236,22 +246,12 @@ void Solver::init_mesh() {
         }
         // Partition once; deeper halos (see halo_too_shallow) grow the existing layers
         if (!setup) {
-            partitioner = toml::find_or<std::string>(input, "parallel", "partitioner", "multijagged");
-            if (partitioner != "graph" && partitioner != "hilbert" && partitioner != "multijagged") {
-                throw InputError("parallel.partitioner = \"" + partitioner +
-                                 "\" is not one of: graph, hilbert, multijagged.");
-            }
             setup = std::make_unique<DistributedMesh>(read_mesh_block(input), Mesh::periodic_pairs(input));
             setup->distribute(partitioner == "graph"         ? partition_graph(*setup, comm::size())
                               : partitioner == "multijagged" ? partition_multijagged(*setup, comm::size())
                                                              : partition_hilbert(*setup, comm::size()));
         }
         mesh = setup->build_local_mesh(halo_layers, distribution);
-        const std::string exchange =
-            toml::find_or<std::string>(input, "parallel", "halo_exchange", comm::nccl_available() ? "nccl" : "mpi");
-        if (exchange != "nccl" && exchange != "mpi") {
-            throw InputError("parallel.halo_exchange = \"" + exchange + "\" is not one of: nccl, mpi.");
-        }
         if (exchange == "nccl" && !comm::nccl_available()) {
             throw InputError("parallel.halo_exchange = \"nccl\" needs a build with Mallard_ENABLE_NCCL.");
         }
@@ -628,6 +628,7 @@ void Solver::init_boundaries() {
     characteristic_state_set = false;
     if (is_mixture()) init_mixture_boundaries(input_boundaries, profiled_faces, bcs);
     boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics);
+    boundary_data.mixture = is_mixture();
     if (is_mixture()) {
         const uint32_t n_species = mixture.n_species;
         boundary_data.bc_Y = Kokkos::View<rtype **, Kokkos::LayoutRight>("bc_Y", bcs.size(), n_species);
@@ -1039,7 +1040,8 @@ void Solver::init_output() {
                                        << (integral_monitor.budget ? ",ke_rate_convective,ke_rate_viscous,ke_rate_sgs,"
                                                                      "eps_numerical,pressure_work"
                                                                    : "")
-                                       << (les_on && les.dynamic ? ",les_C" : "") << "\n";
+                                       << (les_on && les.dynamic ? ",les_C" : "")
+                                       << (dynamic_efficiency() ? ",tf_beta" : "") << "\n";
             }
         }
     }
@@ -1665,6 +1667,11 @@ void Solver::take_step() {
         halo_current = false;
     }
     if (double_flux) {
+        // The halo cells' [gamma, e0] are frozen from their owners' states after the chemistry
+        if (halo.active() && !halo_current) {
+            halo.exchange(state());
+            halo_current = true;
+        }
         freeze_thermodynamics();
         cells_frozen = true;
     }
@@ -1725,6 +1732,7 @@ void Solver::calc_dt() {
     // first stage of the next one reuses them
     halo.exchange(state());
     halo_current = true;
+    update_boundary_states(t);
     const rtype dt_cfl1 = calc_dt_cfl1();
     dt = use_cfl ? cfl * dt_cfl1 : dt_fixed;
     dt = std::min(dt, sponge_dt_max);
@@ -1748,7 +1756,7 @@ void Solver::calc_dt() {
  * @brief Per-cell stable time step for CFL = 1 (Blazek eqs. 6.20-6.21, C = 4):
  *        dt_i = 2 V_i / (sum_f (|u_n| + a)_f A_f + 4 nu_eff sum_f A_f^2 / V_i),
  *        with the face wave speed taken as the max over the two adjacent cells
- *        and nu_eff = max(4/3, gamma/Pr) mu / rho for viscous flow. Half the
+ *        (at boundary faces, the cell and the exterior state) and nu_eff = max(4/3, gamma/Pr) mu / rho for viscous flow. Half the
  *        sums over faces stand for Blazek's sums of projected areas.
  */
 struct TimeStepFunctor {
@@ -1764,12 +1772,19 @@ struct TimeStepFunctor {
     Kokkos::View<rtype *[N_DIM]> radius_coords;  // axisymmetric runs: cell_coords, else empty
     Kokkos::View<rtype *[3]> sgs;                // LES: (cell, [mu_t, ...]), else empty
     rtype Pr_t = 1.0_r;
+    BoundaryData boundaries;
+
+    KOKKOS_INLINE_FUNCTION
+    void cell_W(const int32_t i_cell, rtype * W) const {
+        rtype cons[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE cons[i] = conservatives(i_cell, i);
+        physics.compute_W_from_conservatives(W, cons);
+    }
 
     KOKKOS_INLINE_FUNCTION
     rtype wave_speed(const int32_t i_cell, const rtype * n) const {
-        rtype cons[N_CONSERVATIVE], W[N_CONSERVATIVE];
-        FOR_I_CONSERVATIVE cons[i] = conservatives(i_cell, i);
-        physics.compute_W_from_conservatives(W, cons);
+        rtype W[N_CONSERVATIVE];
+        cell_W(i_cell, W);
         const rtype u_n = dot<N_DIM>(W + 1, n);
         return Kokkos::fabs(u_n) + physics.get_sound_speed_from_pressure_density(W[N_DIM + 1], W[0]);
     }
@@ -1787,7 +1802,13 @@ struct TimeStepFunctor {
             const int32_t c0 = cells_of_face(i_face, 0);
             const int32_t c1 = cells_of_face(i_face, 1);
             rtype lambda = wave_speed(c0, n);
-            if (c1 >= 0) lambda = Kokkos::fmax(lambda, wave_speed(c1, n));
+            if (c1 >= 0) {
+                lambda = Kokkos::fmax(lambda, wave_speed(c1, n));
+            } else {
+                rtype W[N_CONSERVATIVE];
+                cell_W(c0, W);
+                lambda = Kokkos::fmax(lambda, boundaries.exterior_wave_speed(i_face, W, n, physics.gamma));
+            }
             sum += lambda * face_area(i_face);
             sum_area2 += face_area(i_face) * face_area(i_face);
         }
@@ -1829,7 +1850,8 @@ rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
                             physics,
                             axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(),
                             les_coefficients,
-                            les.Pr_t};
+                            les.Pr_t,
+                            boundary_data};
     if (les_on) {
         eddy_viscosity_of_state(mesh->n_owned());
         if (les.dynamic) {
@@ -2101,6 +2123,7 @@ void Solver::write_integrals() {
                               << rates.pressure_work - rates.convective << "," << rates.pressure_work;
     }
     if (les_on && les.dynamic) *integral_monitor.out << "," << les.C;
+    if (dynamic_efficiency()) *integral_monitor.out << "," << thickened_flame.beta;
     *integral_monitor.out << "\n";
     integral_monitor.out->flush();
 }

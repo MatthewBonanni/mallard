@@ -92,6 +92,27 @@ TEST(MPI3DTest, LargeEddySimulationOnTetrahedraMatchesSerial) {
     expect_matches_serial(input + "[les]\nmodel = \"sigma\"\ndynamic = true\n");
 }
 
+TEST(MPI3DTest, DynamicFlameEfficiencyOnTetrahedraMatchesSerial) {
+    // The test filter passes exchange the filtered progress variable; beta is an exact domain sum
+    std::ostringstream s;
+    s << "[run]\nn_steps = 3\ncfl = 0.25\n"
+      << "[mesh]\ntype = \"cartesian_tet\"\nNx = 8\nNy = 5\nNz = 4\nLx = 0.008\nLy = 0.005\nLz = 0.004\n"
+      << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\n"
+      << "T = \"1300 + 1000 * tanh((x - 0.004 - 0.001 * sin(1200 * y) * cos(900 * z)) / 0.0008)\"\n"
+      << "u = [\"3 * sin(1500 * y)\", \"2 * sin(1300 * z)\", \"0.0\"]\nX = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n";
+    for (int k = 0; k < 6; k++) {
+        s << "[[boundaries]]\nname = \"" << ZONES[k] << "\"\ntype = \"" << (k == 0 ? "p_out\"\np = 101325.0" : "symmetry\"")
+          << "\n";
+    }
+    s << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+      << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR
+         "/mechanisms/h2o2.yaml\"\n"
+      << "[chemistry]\n[output]\ncheck_interval = 1000000\n[les]\nmodel = \"sigma\"\n"
+      << "[les.combustion]\nmodel = \"tfles\"\ndelta_L = 3e-4\ns_L = 2.3\nT_unburnt = 300.0\nT_burnt = 2300.0\n"
+      << "efficiency = \"dynamic\"\n";
+    expect_matches_serial(s.str(), [](const Solver & solver) { EXPECT_GT(solver.tfles_beta(), 0.0); });
+}
+
 TEST(MPI3DTest, CharacteristicBoundariesMatchSerial) {
     std::string input = box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"euler\"\n");
     const std::string from = "name = \"right\"\ntype = \"symmetry\"\n";
@@ -121,7 +142,7 @@ TEST(MPI3DTest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
     const std::string file = write_temp_shared("mallard_mpi3d_periodic.msh", jittered_periodic_mesh_3d(6));
     std::string input = blast_input("cartesian", "type = \"TENO\"\norder = 3\n");
     input = input.substr(0, input.find("[[boundaries]]")) + input.substr(input.find("[numerics]"));
-    const std::string generated = "type = \"cartesian\"\n";
+    const std::string generated = "type = \"cartesian\"\nNx = 12\nNy = 12\nNz = 12\nLx = 1.0\nLy = 1.0\nLz = 1.0\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     for (int d = 0; d < 3; d++) {
         input += std::string("[[periodic]]\nzones = [\"") + ZONES[2 * d] + "\", \"" + ZONES[2 * d + 1] +

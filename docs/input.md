@@ -81,7 +81,7 @@ At least one stop condition is required.
 | Key | Description |
 |---|---|
 | `type` | `file` (the default), `cartesian` (quads), `cartesian_tri` (each quad split into two triangles along its bottom-left to top-right diagonal), or `wedge` (quads over an 8 degree compression ramp starting at x = 0.5) |
-| `filename` | (`file`) Mallard HDF5 mesh (`.h5` or `.hdf5`, see below), or ASCII Gmsh mesh, format 2.2 or 4.1, of linear triangles and/or quadrilaterals (2D), or tetrahedra, pyramids, prisms and/or hexahedra (3D) |
+| `filename` | (`file`) Mallard HDF5 mesh (`.h5` or `.hdf5`, see below), ASCII Gmsh mesh (format 2.2 or 4.1), CGNS file (`.cgns`), ANSYS Fluent mesh or case file (`.msh`, `.cas`; ASCII or binary), or OpenFOAM polyMesh (a directory: the case, its `constant/polyMesh`, or anything between), of triangles and/or quadrilaterals (2D), or tetrahedra, pyramids, prisms and/or hexahedra (3D); see mesh files below |
 | `Nx`, `Ny` | Number of quads in x and y (default 100) |
 | `Lx`, `Ly` | Domain size; the domain is `[0, Lx] x [0, Ly]` (default 1) |
 
@@ -125,6 +125,9 @@ corners; high-order boundary elements (`line3`, `line4` in 2D; `triangle6`,
 `triangle9`, `triangle10`, `quadrangle8`, `quadrangle9`, `quadrangle16` in 3D)
 curve their faces (see curved boundaries below).
 
+Every format and the transform below are illustrated in the user guide
+([meshes](guide/meshes.md#other-mesh-formats)).
+
 `[mesh.transform]` maps the nodes of a mesh file as it is read,
 `x -> R (S x) + t`: scale first, then rotate about the origin, then translate.
 Boundary zones, high-order nodes and cell types are unchanged; mirroring scales
@@ -150,13 +153,47 @@ rotate = {axis = [0, 0, 1], angle = 90}
 translate = [0.0, 0.0, 0.05]
 ```
 
-In a distributed run every rank reads a Gmsh file whole (keeping only its
+CGNS files (builds with `-DMallard_ENABLE_CGNS=ON`) are read from their one
+base, whose cell dimension must match the build. Every zone must be
+unstructured, with element sections of any of Mallard's cell types (`MIXED`
+too, and higher orders by their corners); polyhedral `NGON_n`/`NFACE_n`
+sections and structured zones are rejected. Several zones are joined into one
+mesh where their `Abutting1to1` connectivities (vertex `PointList` and
+`PointListDonor`, as Gmsh writes for partitioned meshes) identify their nodes.
+Each boundary condition (`BC_t`, by element range or list, or by vertices)
+becomes a boundary zone named after its family, or the family's
+`FamilyName` (Gmsh writes physical names there), or else the condition
+itself; boundary elements in no condition take their section's family or
+name. High-order boundary elements (`BAR_3`, `BAR_4`, `TRI_6`, `TRI_9`,
+`TRI_10`, `QUAD_8`, `QUAD_9`, `QUAD_16`) curve their faces like Gmsh's.
+
+Fluent meshes (`.msh` files starting with `(`, and `.cas` files) are read in
+ASCII or binary (single- or double-precision nodes). Every face zone other
+than interior ones becomes a boundary zone named as its zone section (`39` or
+`45`) names it (`zone_<id>` if none does); faces of such zones with cells on
+both sides (internal walls, fans) are interior faces. Cells are rebuilt from
+their faces and must be triangles or quadrilaterals (2D), or tetrahedra,
+pyramids, prisms or hexahedra (3D); polygonal and polyhedral cells and
+adapted meshes (cell and face trees) are rejected. Periodic face zones stay
+boundary zones, to pair with `[[periodic]]`.
+
+OpenFOAM meshes are read from `points`, `faces` (`faceList` or
+`faceCompactList`), `owner`, `neighbour` and `boundary`, ASCII or binary
+(32- or 64-bit labels and scalars); compressed (`.gz`) and decomposed
+(`processor*`) meshes must be decompressed or reconstructed first. Each patch
+becomes a boundary zone of its name (cyclic patches too, to pair with
+`[[periodic]]`). Cells are rebuilt from their faces as for Fluent. The 2D
+build reads a mesh one cell thick in z between `empty` patches (as for 2D
+OpenFOAM runs): each cell is its face at the lowest z, the other patches give
+the boundary edges, and the empty patches disappear.
+
+In a distributed run every rank reads a Gmsh, CGNS, Fluent or OpenFOAM mesh whole (keeping only its
 share), so large meshes should be converted to Mallard's HDF5 mesh format
 (builds with `-DMallard_ENABLE_HDF5=ON`), of which each rank reads only its
 share; generated meshes are also produced per rank:
 
 ```sh
-mallard-mesh-convert mesh.msh mesh.h5               # from Gmsh
+mallard-mesh-convert mesh.msh mesh.h5               # from Gmsh (or CGNS, Fluent, OpenFOAM)
 mpirun -n 8 mallard-mesh-convert input.toml mesh.h5  # a generated mesh, written in parallel
 ```
 
@@ -256,9 +293,12 @@ shocks prone to the carbuncle, e.g. blunt-body detonations). With `type = "navie
 conducting and diffusing: species diffuse along mole-fraction gradients with a
 correction velocity (so the diffusive mass fluxes sum to zero) and carry their
 enthalpy, and the time step includes the largest of `4/3 mu / rho`,
-`lambda / (rho cv)` and the species' diffusion coefficients. Walls are no-slip,
-adiabatic and non-catalytic (`wall_isothermal` is not yet available for
-mixtures). Species thermodynamics are NASA-7, NASA-9 or constant-cp
+`lambda / (rho cv)` and the species' diffusion coefficients. Walls are no-slip
+and non-catalytic: no species crosses them, so their species, Soret and
+enthalpy diffusion fluxes vanish. `wall_adiabatic` conducts no heat,
+`wall_heat_flux` the given `q`, and `wall_isothermal` `lambda dT/dn` from the
+boundary cell to the wall temperature `T`, with the mean of the cell's
+conductivity and that at `T` (and the cell's composition). Species thermodynamics are NASA-7, NASA-9 or constant-cp
 polynomials from the file, evaluated in double precision in every build. Each
 species is transported (`rho Y_k`) with mass-flux upwinding, so mass fractions
 stay in [0, 1] and sum to one; all mass fractions share one stencil and one
@@ -323,9 +363,11 @@ Turbulence-chemistry interaction of reacting LES (a viscous mixture with
 conductivity are multiplied by `E F` and its reaction rates by `E / F`, which
 keeps the laminar flame speed and thickens the flame by `F` so that it spans
 `n_res` cells; the efficiency `E` restores the flame-surface wrinkling of the
-subgrid scales (Charlette, Meneveau & Veynante 2002, `beta = 0.5`, at the
-filter width `F delta_L`, with the subgrid velocity
-`u' = 2 Delta^3 |lap(curl u)|` of Colin et al.). `F = 1 + (max(1, n_res Delta /
+subgrid scales at the filter width `F delta_L`: by default `E = F^beta`
+(Charlette, Meneveau & Veynante 2002) with `beta` from the dynamic procedure
+of Wang, Boileau & Veynante (2011), which compares the resolved flame surface
+`|grad c|` before and after a test filter (global, exact sums; written to the
+integrals file as `tf_beta`). `F = 1 + (max(1, n_res Delta /
 delta_L) - 1) Omega` with the flame sensor `Omega = min(1, c (1 - c) /
 0.0475)` of the progress variable `c = (T - T_unburnt) / (T_burnt -
 T_unburnt)`, so `Omega = 1` across the whole flame (`0.05 <= c <= 0.95`) and 0
@@ -343,10 +385,10 @@ times the half step (exact for the autonomous constant-volume reactor).
 | `s_L` | Laminar flame speed (m/s) |
 | `T_unburnt`, `T_burnt` | Temperatures of the fresh and burnt gas (K) |
 | `n_res` | Cells across the thickened flame, default 5 |
-| `efficiency` | `charlette` (default) or `none` (`E = 1`) |
-| `beta` | Exponent of the Charlette efficiency, default 0.5 |
-| `subgrid_velocity` | The `u'` of the efficiency: `colin` (default), `u' = 2 Delta^3 abs(lap(curl u))`; or `eddy_viscosity`, `u' = C_u nu_t / Delta` from the SGS model. Colin's operator overpredicts `u'` 5-8 times on meshes with `Delta >= 0.4 delta_L` and the flame speed by 2x at `Delta = 1.6 delta_L` ([design notes](design/les.md), section 8.3) |
-| `C_u` | Constant of `subgrid_velocity = "eddy_viscosity"`, default 28 (a priori from a DNS at `Delta = 0.8 delta_L`; 22-39 over `Delta = 0.4-1.6 delta_L`) |
+| `efficiency` | `dynamic` (default): `E = F^beta`, `beta` in [0, 1] from the dynamic procedure, no constant; turbulent flame speed within 8% of two DNS at `Delta = 0.4-1.6 delta_L`. `charlette`: Charlette's efficiency function of a subgrid velocity `u'` (the default until #294; doubles the flame speed at `Delta = 1.6 delta_L`). `none`: `E = 1`. Comparison in the [design notes](design/les.md), section 8.3 |
+| `beta` | `charlette` only: exponent of the efficiency, default 0.5 |
+| `subgrid_velocity` | `charlette` only: the `u'` of the efficiency: `colin` (default), `u' = 2 Delta^3 abs(lap(curl u))`; or `eddy_viscosity`, `u' = C_u nu_t / Delta` from the SGS model. Colin's operator overpredicts `u'` 5-8 times on meshes with `Delta >= 0.4 delta_L` and the flame speed by 2x at `Delta = 1.6 delta_L` |
+| `C_u` | `charlette` only: constant of `subgrid_velocity = "eddy_viscosity"`, default 28 (a priori from a DNS at `Delta = 0.8 delta_L`; 22-39 over `Delta = 0.4-1.6 delta_L`) |
 
 **Experimental: `model = "pasr"`**, the partially stirred reactor (Sabelnikov &
 Fureby 2013) for non-premixed and partially premixed flames: no thickening;

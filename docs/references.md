@@ -68,6 +68,10 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the viscous face gradients, the average of the two cell gradients corrected along the face normal so that their component along the line of centroids equals the direct difference (`src/numerics/viscous_flux.h`).
 - <a id="sutherland-1893"></a>W. Sutherland, The viscosity of gases and molecular force, *Phil. Mag.* (5) 36, 507–531 (1893). [doi:10.1080/14786449308620508](https://doi.org/10.1080/14786449308620508)
   Used in: `viscosity_model = "sutherland"`.
+- <a id="wilke-1950"></a>C. R. Wilke, A viscosity equation for gas mixtures, *J. Chem. Phys.* 18, 517–519 (1950). [doi:10.1063/1.1747673](https://doi.org/10.1063/1.1747673)
+  Used in: the mixture viscosity of the mixture-averaged transport model, and its mixing operator in the thermal diffusion coefficients.
+- <a id="mathur-tondon-saxena-1967"></a>S. Mathur, P. K. Tondon and S. C. Saxena, Thermal conductivity of binary, ternary and quaternary mixtures of rare gases, *Mol. Phys.* 12, 569–579 (1967). [doi:10.1080/00268976700100731](https://doi.org/10.1080/00268976700100731)
+  Used in: the mixture thermal conductivity, the mean of the mole-fraction-weighted arithmetic and harmonic means.
 
 ## Large-eddy simulation
 
@@ -106,7 +110,13 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="colin-2000"></a>O. Colin, F. Ducros, D. Veynante and T. Poinsot, A thickened flame model for large eddy simulations of turbulent premixed combustion, *Phys. Fluids* 12, 1843–1863 (2000). [doi:10.1063/1.870436](https://doi.org/10.1063/1.870436)
   Used in: `[les.combustion] model = "tfles"`, and its subgrid velocity `2 Delta^3 |lap(curl u)|`.
 - <a id="charlette-2002"></a>F. Charlette, C. Meneveau and D. Veynante, A power-law flame wrinkling model for LES of premixed turbulent combustion. Part I: non-dynamic formulation and initial tests, *Combust. Flame* 131, 159–180 (2002). [doi:10.1016/S0010-2180(02)00400-5](https://doi.org/10.1016/S0010-2180%2802%2900400-5)
-  Used in: the efficiency `E` of the thickened flame (`efficiency = "charlette"`).
+  Used in: the efficiency `E` of the thickened flame (`efficiency = "charlette"`), and its saturated power law `E = F^beta` (`efficiency = "dynamic"`, the default).
+- <a id="charlette-2002b"></a>F. Charlette, C. Meneveau and D. Veynante, A power-law flame wrinkling model for LES of premixed turbulent combustion. Part II: dynamic formulation, *Combust. Flame* 131, 181–197 (2002). [doi:10.1016/S0010-2180(02)00401-7](https://doi.org/10.1016/S0010-2180%2802%2900401-7)
+  Used in: the Germano-like identity for the flame surface that sets `beta` (`efficiency = "dynamic"`).
+- <a id="wang-2011"></a>G. Wang, M. Boileau and D. Veynante, Implementation of a dynamic thickened flame model for large eddy simulations of turbulent premixed combustion, *Combust. Flame* 158, 2199–2213 (2011). [doi:10.1016/j.combustflame.2011.04.008](https://doi.org/10.1016/j.combustflame.2011.04.008)
+  Used in: the dynamic efficiency of the thickened flame, with the combustion filter width `F delta_L` and a global `beta` (`efficiency = "dynamic"`; `src/solver/solver_les.cpp`).
+- <a id="volpiani-2016"></a>P. S. Volpiani, T. Schmitt and D. Veynante, A posteriori tests of a dynamic thickened flame model for large eddy simulations of turbulent premixed combustion, *Combust. Flame* 174, 166–178 (2016). [doi:10.1016/j.combustflame.2016.08.007](https://doi.org/10.1016/j.combustflame.2016.08.007)
+  Used in: the dynamic efficiency as the default, and its a posteriori test against filtered DNS over several filter widths ([design/les.md](design/les.md), section 8.3).
 - <a id="legier-2002"></a>J.-P. Légier, T. Poinsot, B. Varoquié, F. Lacas and D. Veynante, Large eddy simulation of a non-premixed turbulent burner using a dynamically thickened flame model, in *Advances in LES of Complex Flows*, Springer, 315–326 (2002). [doi:10.1007/978-94-017-1998-8_27](https://doi.org/10.1007/978-94-017-1998-8_27)
   Used in: thickening only where the flame sensor is on (dynamic thickening).
 - <a id="butler-orourke-1977"></a>T. D. Butler and P. J. O'Rourke, A numerical method for two dimensional unsteady reacting flows, *Proc. Combust. Inst.* 16, 1503–1515 (1977). [doi:10.1016/S0082-0784(77)80432-3](https://doi.org/10.1016/S0082-0784%2877%2980432-3)
@@ -114,6 +124,8 @@ The numerical methods Mallard implements and the reference data it is validated 
 
 ## Boundary conditions
 
+- <a id="sabelnikov-fureby-2013"></a>V. Sabelnikov and C. Fureby, LES combustion modeling for high Re flames using a multi-phase analogy, *Combust. Flame* 160, 83–96 (2013). [doi:10.1016/j.combustflame.2012.09.008](https://doi.org/10.1016/j.combustflame.2012.09.008)
+  Used in: the partially stirred reactor (`[les.combustion] model = "pasr"`), its reacting fraction `kappa = tau_c / (tau_c + tau_mix)`.
 - <a id="poinsot-lele-1992"></a>T. J. Poinsot and S. K. Lele, Boundary conditions for direct simulations of compressible viscous flows, *J. Comput. Phys.* 101, 104–129 (1992). [doi:10.1016/0021-9991(92)90046-2](https://doi.org/10.1016/0021-9991%2892%2990046-2)
   Used in: the LODI relations of the characteristic boundaries (`nscbc_outlet`, `nscbc_inlet`; `BoundaryData::characteristic_W` in `src/boundary/boundary.h`) and their viscous outflow conditions.
 - <a id="rudy-strikwerda-1980"></a>D. H. Rudy and J. C. Strikwerda, A nonreflecting outflow boundary condition for subsonic Navier-Stokes calculations, *J. Comput. Phys.* 36, 55–70 (1980). [doi:10.1016/0021-9991(80)90174-6](https://doi.org/10.1016/0021-9991%2880%2990174-6)
@@ -214,10 +226,14 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in (these three): the assessment of full multicomponent transport (Cantera's L-matrix model) in `docs/design/chemistry.md`.
 - <a id="gilbert-luther-troe-1983"></a>R. G. Gilbert, K. Luther and J. Troe, Theory of thermal unimolecular reactions in the fall-off range. II. Weak collision rate constants, *Ber. Bunsenges. Phys. Chem.* 87, 169–177 (1983). [doi:10.1002/bbpc.19830870218](https://doi.org/10.1002/bbpc.19830870218)
   Used in: Troe falloff reactions.
+- <a id="stewart-larson-golden-1989"></a>P. H. Stewart, C. W. Larson and D. M. Golden, Pressure and temperature dependence of reactions proceeding via a bound complex. 2. Application to 2CH3 → C2H5 + H, *Combust. Flame* 75, 25–31 (1989). [doi:10.1016/0010-2180(89)90084-9](https://doi.org/10.1016/0010-2180%2889%2990084-9)
+  Used in: SRI falloff reactions.
 - <a id="hairer-wanner-1996"></a>E. Hairer and G. Wanner, *Solving Ordinary Differential Equations II: Stiff and Differential-Algebraic Problems*, 2nd ed., Springer (1996). [doi:10.1007/978-3-642-05221-7](https://doi.org/10.1007/978-3-642-05221-7)
   Used in: the RODAS Rosenbrock integrator of the chemistry source and `MallardReactor`.
 - <a id="strang-1968"></a>G. Strang, On the construction and comparison of difference schemes, *SIAM J. Numer. Anal.* 5, 506–517 (1968). [doi:10.1137/0705041](https://doi.org/10.1137/0705041)
   Used in: the Strang splitting of chemistry around the flow step.
+- <a id="wu-ma-ihme-2019"></a>H. Wu, P. C. Ma and M. Ihme, Efficient time-stepping techniques for simulating turbulent reactive flows with stiff chemistry, *Comput. Phys. Commun.* 243, 81–96 (2019). [doi:10.1016/j.cpc.2019.04.016](https://doi.org/10.1016/j.cpc.2019.04.016)
+  Used in: SIMPLER balanced splitting of chemistry and transport (`[chemistry] coupling = "simpler"`).
 - <a id="larrouturou-1991"></a>B. Larrouturou, How to preserve the mass fractions positivity when computing compressible multi-component flows, *J. Comput. Phys.* 95, 59–84 (1991). [doi:10.1016/0021-9991(91)90253-H](https://doi.org/10.1016/0021-9991%2891%2990253-H)
   Used in: the species fluxes (mass-flux upwinding of the reconstructed mass fractions).
 - <a id="abgrall-karni-2001"></a>R. Abgrall and S. Karni, Computations of compressible multifluids, *J. Comput. Phys.* 169, 594–623 (2001). [doi:10.1006/jcph.2000.6685](https://doi.org/10.1006/jcph.2000.6685)

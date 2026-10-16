@@ -155,7 +155,9 @@ TEST(CheckTimeStep, MatchesTheUniformGridFormulaAndFindsTheFastestRegion) {
     const double a = std::sqrt(1.4), h = 2.0 / 16;
     const CheckReport r = check(box("1.0 + 2.0 * (x > 1.5)"));
     ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
-    if (N_DIM == 2) EXPECT_NEAR(r.dt, 0.8 * h / (3.0 + 2.0 * a), roundoff(1e-12));
+    if (N_DIM == 2) {
+        EXPECT_NEAR(r.dt, 0.8 * h / (3.0 + 2.0 * a), roundoff(1e-12));
+    }
     EXPECT_EQ(r.dt_limit, "CFL");
     EXPECT_NEAR(r.cfl, 0.8, roundoff(1e-12));
     EXPECT_GT(r.limiting_x[0], 1.5);
@@ -176,12 +178,12 @@ TEST(CheckTimeStep, FixedTimeStepReportsItsCflAndWarnsAboveTheIntegratorsLimit) 
 TEST(CheckCost, GivenThroughputSetsWallTimePerUnitTimeAndFlowThrough) {
     CheckOptions options;
     options.throughput = 1e6;
-    options.ranks = 2;
+    options.ranks = comm::size() == 1 ? 2 : comm::size();  // estimates for other counts need a serial check
     const CheckReport r = check(box(), options);
     ASSERT_TRUE(r.ok());
     const double n_cells = N_DIM == 3 ? 16 * 8 * 2 : 16 * 8;
     EXPECT_EQ(r.n_cells, uint64_t(n_cells));
-    EXPECT_NEAR(r.wall_per_time, n_cells / (2 * 1e6 * r.dt), roundoff(1e-12) * r.wall_per_time);
+    EXPECT_NEAR(r.wall_per_time, n_cells / (options.ranks * 1e6 * r.dt), roundoff(1e-12) * r.wall_per_time);
     EXPECT_NEAR(r.flow_through_time, 2.0, roundoff(1e-12));  // Lx / u
 }
 
@@ -212,7 +214,8 @@ TEST(CheckMemory, MeasuresAllocationsAndScalesThemToTheTargetRanks) {
 
 TEST(CheckOutput, CheckCreatesNoFilesAndWritesTheQualityFieldsOnRequest) {
     const std::filesystem::path dir = std::filesystem::temp_directory_path() / "mallard_check_files";
-    std::filesystem::remove_all(dir);
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
     CheckOptions options;
     options.quality_file = (dir / "quality" / "mesh").string();
     const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
@@ -225,7 +228,10 @@ TEST(CheckOutput, CheckCreatesNoFilesAndWritesTheQualityFieldsOnRequest) {
     EXPECT_FALSE(std::filesystem::exists(dir / "out"));
     EXPECT_FALSE(std::filesystem::exists(dir / "forces.csv"));
     EXPECT_FALSE(std::filesystem::exists(dir / "integrals.csv"));
-    std::ifstream vtu(dir / "quality" / (comm::size() > 1 ? "mesh_000000_p0000.vtu" : "mesh_000000.vtu"));
+    std::ostringstream piece;  // each rank's own piece
+    piece << "mesh_000000" << (comm::size() > 1 ? "_p" + std::string(3, '0') + std::to_string(comm::rank()) : "")
+          << ".vtu";
+    std::ifstream vtu(dir / "quality" / piece.str());
     ASSERT_TRUE(vtu.good());
     const std::string text((std::istreambuf_iterator<char>(vtu)), std::istreambuf_iterator<char>());
     for (const char * field : MeshQuality::FIELDS) EXPECT_NE(text.find(field), std::string::npos) << field;

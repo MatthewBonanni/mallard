@@ -138,6 +138,7 @@ struct MixtureTimeStepFunctor {
     uint32_t n_species;
     Kokkos::View<rtype *[3]> transport;  // viscous: (cell, [mu, lambda, nu_eff]), else empty
     Kokkos::View<rtype *[N_DIM]> radius_coords;  // axisymmetric runs: cell_coords, else empty
+    BoundaryData boundaries;
 
     KOKKOS_INLINE_FUNCTION
     rtype wave_speed(const int32_t c, const rtype * n) const {
@@ -154,8 +155,15 @@ struct MixtureTimeStepFunctor {
             rtype n_vec[N_DIM], n[N_DIM];
             FOR_I_DIM n_vec[i] = face_normals(f, i);
             unit<N_DIM>(n_vec, n);
-            rtype lambda = wave_speed(cells_of_face(f, 0), n);
-            if (cells_of_face(f, 1) >= 0) lambda = Kokkos::fmax(lambda, wave_speed(cells_of_face(f, 1), n));
+            const int32_t c0 = cells_of_face(f, 0);
+            rtype lambda = wave_speed(c0, n);
+            if (cells_of_face(f, 1) >= 0) {
+                lambda = Kokkos::fmax(lambda, wave_speed(cells_of_face(f, 1), n));
+            } else {
+                rtype W_c[N_CONSERVATIVE];
+                FOR_I_CONSERVATIVE W_c[i] = W(c0, i);
+                lambda = Kokkos::fmax(lambda, boundaries.exterior_wave_speed(f, W_c, n, scalars(c0, n_species)));
+            }
             sum += lambda * face_area(f);
             sum_area2 += face_area(f) * face_area(f);
         }
@@ -363,7 +371,7 @@ void Solver::update_transport() {
                                                  transport_values});
     Kokkos::parallel_for("mixture_gradients", mesh->n_cells,
                          MixtureGradientFunctor{viscous_gradient, transport_values, transport_gradients,
-                                                bc_transport_values, mixture.n_species});
+                                                bc_transport_values, mixture.n_species, cell_transport});
 }
 
 void Solver::freeze_thermodynamics() {
@@ -437,7 +445,8 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
                                                     mesh->face_shift, boundary_data, mixture, cell_scalars,
                                                     transport_values, transport_gradients, cell_transport,
                                                     cell_diffusion, face_flux, species_slots, axisymmetric,
-                                                    mesh->cell_covariance, les_coefficients};
+                                                    mesh->cell_covariance, les_coefficients, false,
+                                                    double_flux ? face_energy_1 : Kokkos::View<rtype *>()};
         viscous_flux();
         if (budget_pass) budget.viscous = kinetic_energy_rate() - budget.convective;
     }
@@ -591,7 +600,7 @@ rtype Solver::calc_dt_cfl1_mixture() {
     MixtureTimeStepFunctor functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                    mesh->face_normals, mesh->face_measure, mesh->cell_measure, W_cells,
                                    cell_scalars, cfl_local, mixture.n_species, cell_transport,
-                                   axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>()};
+                                   axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(), boundary_data};
     rtype dt_min = std::numeric_limits<rtype>::max();
     Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor, Kokkos::Min<rtype>(dt_min));
     return comm::allreduce(dt_min, comm::Op::MIN);
@@ -647,6 +656,8 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
             case BoundaryType::EXTRAPOLATION:
             case BoundaryType::SYMMETRY:
             case BoundaryType::WALL_ADIABATIC:
+            case BoundaryType::WALL_ISOTHERMAL:
+            case BoundaryType::WALL_HEAT_FLUX:
             case BoundaryType::P_OUT:
             case BoundaryType::NSCBC_OUTLET:
                 break;
@@ -669,7 +680,7 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
             default:
                 throw InputError(where + ": type \"" + BOUNDARY_NAMES.at(bcs[i_bc].type) +
                                  "\" is not yet supported with gas = \"mixture\" (extrapolation, symmetry, "
-                                 "wall_adiabatic, upt, p_out, nscbc_outlet, nscbc_inlet).");
+                                 "wall_adiabatic, wall_isothermal, wall_heat_flux, upt, p_out, nscbc_outlet, nscbc_inlet).");
         }
     }
 }
