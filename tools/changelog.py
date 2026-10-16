@@ -61,12 +61,11 @@ def structure_errors(lines):
     return errors
 
 
-def fragment_errors(path):
+def fragment_errors(path, text):
     if not FRAGMENT.match(path.name):
         return [f"{path.name}: name it <name>.<category>.md, category one of "
                 f"{', '.join(c.lower() for c in CATEGORIES)}"]
-    text = path.read_text().strip()
-    if not text.startswith("- "):
+    if not text.strip().startswith("- "):
         return [f"{path.name}: write one or more Markdown bullets starting with \"- \""]
     return []
 
@@ -157,7 +156,7 @@ def check(base):
     added = [ROOT / entry[-1] for entry in status
              if entry[0][0] in "AR" and entry[-1].startswith("changelog/") and entry[-1] != "changelog/README.md"]
     for path in added:
-        errors += fragment_errors(path)
+        errors += fragment_errors(path, git("show", f"HEAD:{path.relative_to(ROOT).as_posix()}"))
     for e in errors:
         print(e, file=sys.stderr)
     if not any(f.startswith("src/") for f in changed):
