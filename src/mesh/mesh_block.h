@@ -117,15 +117,18 @@ inline uint64_t block_begin(uint64_t n, int r, int p) { return n * uint64_t(r) /
 
 /**
  * @brief This rank's block of the mesh described by the [mesh] table
- *        (collective): an HDF5 mesh file (.h5), a Gmsh file, or a generated
- *        mesh. Generated meshes number cells and nodes exactly as Mesh::init.
- *        A Gmsh file is read whole by every rank, so large meshes should be
- *        converted to HDF5 first.
+ *        (collective): an HDF5 mesh file (.h5), another mesh file (see
+ *        read_mesh_file), or a generated mesh. Generated meshes number cells
+ *        and nodes exactly as Mesh::init. Other mesh files are read whole by
+ *        every rank, so large meshes should be converted to HDF5 first.
  */
 MeshBlock read_mesh_block(const toml::value & input);
 
-/** @brief This rank's block of a Gmsh file (every rank reads the whole file). */
-MeshBlock read_gmsh_block(const std::string & filename);
+/**
+ * @brief This rank's block of a mesh file other than HDF5: Gmsh or CGNS
+ *        (every rank reads the whole file).
+ */
+MeshBlock read_file_block(const std::string & filename);
 
 /** @brief Whether a mesh file name denotes an HDF5 mesh file (.h5 or .hdf5). */
 bool is_hdf5_mesh(const std::string & filename);

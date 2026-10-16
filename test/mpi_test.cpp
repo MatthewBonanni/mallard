@@ -732,7 +732,7 @@ TEST(MPITest, CurvedWallsMatchSerial) {
         expect_matches_serial(input, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
         if (order == 3 && have_hdf5() && (comm::size() == 1 || have_parallel_hdf5())) {
             const std::string h5 = (std::filesystem::temp_directory_path() / "mallard_mpi_annulus_3.h5").string();
-            write_mesh_h5(h5, read_gmsh_block(file));
+            write_mesh_h5(h5, read_file_block(file));
             std::string from_h5 = input;
             from_h5.replace(from_h5.find(file), file.size(), h5);
             expect_matches_serial(from_h5, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
