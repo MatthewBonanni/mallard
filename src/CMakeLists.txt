@@ -8,6 +8,9 @@ add_library(MallardCore STATIC
     mesh/curved.cpp
     mesh/mesh.cpp
     mesh/mesh_io.cpp
+    mesh/read_cgns.cpp
+    mesh/read_fluent.cpp
+    mesh/cells_from_faces.cpp
     mesh/periodic.cpp
     mesh/mesh_3d.cpp
     mesh/mesh_block.cpp
@@ -101,6 +104,11 @@ if(Mallard_ENABLE_HDF5)
     target_include_directories(MallardCore SYSTEM PUBLIC ${HDF5_C_INCLUDE_DIRS})
     target_compile_definitions(MallardCore PUBLIC Mallard_HAS_HDF5 ${HDF5_C_DEFINITIONS})
     target_link_libraries(MallardCore PUBLIC ${HDF5_C_LIBRARIES})
+endif()
+
+if(Mallard_ENABLE_CGNS)
+    target_compile_definitions(MallardCore PUBLIC Mallard_HAS_CGNS)
+    target_link_libraries(MallardCore PRIVATE ${MALLARD_CGNS_LIBRARY})
 endif()
 
 add_executable(Mallard main.cpp)
