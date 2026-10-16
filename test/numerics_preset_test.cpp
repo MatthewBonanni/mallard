@@ -142,71 +142,74 @@ namespace {
 
 const std::string DETONATION_INIT =
     "type = \"constant\"\np = 6670.0\nT = 298.0\nX = { H2 = 2.0, O2 = 1.0, AR = 7.0 }\n";
+const std::string H2_AIR_INIT = "type = \"constant\"\np = 101325.0\nT = 300.0\nu = [0.0, 0.0, 0.0]\n"
+                                "X = { H2 = 0.2959, O2 = 0.1479, N2 = 0.5562 }\n";
 
 /** @brief Every solver example, with the preset closest to its numerics and purpose. */
 const std::vector<ExampleCase> EXAMPLES = {
     {"autoignition_2d/input.toml", "reacting", 2,
-     "type = \"constant\"\np = 4.154e6\nT = 1070.0\nu = [0.0, 0.0]\nX = { H2 = 0.04, O2 = 0.2, N2 = 0.76 }\n", {}},
+     "type = \"constant\"\np = 4.154e6\nT = 1070.0\nu = [0.0, 0.0]\nX = { H2 = 0.04, O2 = 0.2, N2 = 0.76 }\n", {}, ""},
     {"cylinder/input.toml", "accurate", 2, "",
-     {{"inlet", "farfield"}, {"outlet", "farfield"}, {"walls", "farfield"}, {"cylinder", "cylinder"}}},
-    {"detonation_1d/input.toml", "reacting", 2, DETONATION_INIT + "u = [0.0, 0.0]\n", {}},
-    {"detonation_2d/input.toml", "reacting", 2, DETONATION_INIT + "u = [0.0, 0.0]\n", {}},
-    {"detonation_3d/input_2d.toml", "reacting", 2, DETONATION_INIT + "u = [0.0, 0.0]\n", {}},
-    {"double_mach/input.toml", "robust", 2, "", {}},
-    {"flame_2d/input.toml", "reacting", 2, "", {}},
-    {"flame_2d/unity/input.toml", "reacting", 2, "", {}},
-    {"flame_outflow/input.toml", "reacting", 2, "", {}},
-    {"flame_vortex/input.toml", "reacting", 2, "", {}},
-    {"flame_vortex_quenching/input.toml", "reacting", 2, "", {}},
+     {{"inlet", "farfield"}, {"outlet", "farfield"}, {"walls", "farfield"}, {"cylinder", "cylinder"}}, ""},
+    {"detonation_1d/input.toml", "reacting", 2, DETONATION_INIT + "u = [0.0, 0.0]\n", {}, ""},
+    {"detonation_2d/input.toml", "reacting", 2, DETONATION_INIT + "u = [0.0, 0.0]\n", {}, ""},
+    {"detonation_3d/input_2d.toml", "reacting", 2, DETONATION_INIT + "u = [0.0, 0.0]\n", {}, ""},
+    {"double_mach/input.toml", "robust", 2, "", {}, ""},
+    {"flame_2d/input.toml", "reacting", 2, "", {}, ""},
+    {"flame_2d/unity/input.toml", "reacting", 2, "", {}, ""},
+    {"flame_outflow/input.toml", "reacting", 2, "", {}, ""},
+    {"flame_vortex/input.toml", "reacting", 2, "", {}, ""},
+    {"flame_vortex_quenching/input.toml", "reacting", 2, "", {}, ""},
     {"mallard/input.toml", "robust", 2, "",
-     {{"inlet", "inflow"}, {"outlet", "outflow"}, {"walls", "top"}, {"cylinder", "duck"}}},
-    {"noh_axisymmetric/input.toml", "robust", 2, "", {}},
-    {"poiseuille_pipe/input.toml", "accurate", 2, "", {}},
-    {"premixed_flame/input.toml", "reacting", 2, "", {}},
-    {"premixed_flame/ch4/input.toml", "reacting", 2, "", {}},
-    {"reactive_shock_tube/input.toml", "reacting", 2, "", {}},
-    {"riemann_2d/input.toml", "accurate", 2, "", {}},
-    {"riemann_2d_quads/input.toml", "accurate", 2, "", {}},
-    {"sedov_axisymmetric/input.toml", "robust", 2, "", {}},
-    {"shu_osher/input.toml", "accurate", 2, "", {}},
-    {"sod/input.toml", "accurate", 2, "", {}},
+     {{"inlet", "inflow"}, {"outlet", "outflow"}, {"walls", "top"}, {"cylinder", "duck"}}, ""},
+    {"noh_axisymmetric/input.toml", "robust", 2, "", {}, ""},
+    {"poiseuille_pipe/input.toml", "accurate", 2, "", {}, ""},
+    {"premixed_flame/input.toml", "reacting", 2, "", {}, ""},
+    {"premixed_flame/ch4/input.toml", "reacting", 2, "", {}, ""},
+    {"reactive_shock_tube/input.toml", "reacting", 2, "", {}, ""},
+    {"riemann_2d/input.toml", "accurate", 2, "", {}, ""},
+    {"riemann_2d_quads/input.toml", "accurate", 2, "", {}, ""},
+    {"sedov_axisymmetric/input.toml", "robust", 2, "", {}, ""},
+    {"shu_osher/input.toml", "accurate", 2, "", {}, ""},
+    {"sod/input.toml", "accurate", 2, "", {}, ""},
     {"sphere_axisymmetric/input.toml", "accurate", 2, "",
-     {{"inlet", "farfield"}, {"outlet", "farfield"}, {"walls", "axis"}, {"cylinder", "cylinder"}}},
-    {"triple_flame/input.toml", "reacting", 2, "", {}},
-    {"triple_flame/thick/input.toml", "reacting", 2, "", {}},
-    {"viscous_shock_tube/input.toml", "robust", 2, "", {}},
-    {"wedge/input.toml", "robust", 2, "", {}},
-    {"cbc_les/input.toml", "les", 3, "", {}},
-    {"channel_inflow_retau180/input.toml", "les", 3, "", {}},
-    {"channel_les/input.toml", "les", 3, "", {}},
-    {"channel_les/input_590.toml", "les", 3, "", {}},
-    {"channel_retau180/input.toml", "les", 3, "", {}},
+     {{"inlet", "farfield"}, {"outlet", "farfield"}, {"walls", "axis"}, {"cylinder", "cylinder"}}, ""},
+    {"triple_flame/input.toml", "reacting", 2, "", {}, ""},
+    {"triple_flame/thick/input.toml", "reacting", 2, "", {}, ""},
+    {"viscous_shock_tube/input.toml", "robust", 2, "", {}, ""},
+    {"wedge/input.toml", "robust", 2, "", {}, ""},
+    {"cbc_les/input.toml", "les", 3, "", {}, ""},
+    {"channel_inflow_retau180/input.toml", "les", 3, "", {}, ""},
+    {"channel_les/input.toml", "les", 3, "", {}, ""},
+    {"channel_les/input_590.toml", "les", 3, "", {}, ""},
+    {"channel_retau180/input.toml", "les", 3, "", {}, ""},
     {"counterflow_diffusion/input.toml", "reacting", 3, "",
      {{"inlet", "fuel"}, {"outlet", "oxidizer"}, {"walls", "side_y"}, {"cylinder", "sym_y"}, {"back", "sym_z"},
-      {"front", "side_z"}}},
-    {"detonation_3d/input.toml", "reacting", 3, DETONATION_INIT + "u = [0.0, 0.0, 0.0]\n", {}},
-    {"explosion_3d/input.toml", "accurate", 3, "", {}},
-    {"flame_turbulence/hit.toml", "les", 3, "", {}},
-    {"flame_turbulence/input.toml", "les", 3, "", {}},
-    {"flame_turbulence/les.toml", "les", 3, "", {}},
-    {"isotropic_turbulence/input.toml", "accurate", 3, "", {}},
-    {"sedov_3d/input.toml", "robust", 3, "", {}},
-    {"shock_bubble_3d/input.toml", "robust", 3, "", {}},
+      {"front", "side_z"}}, ""},
+    {"detonation_3d/input.toml", "reacting", 3, DETONATION_INIT + "u = [0.0, 0.0, 0.0]\n", {}, ""},
+    {"explosion_3d/input.toml", "accurate", 3, "", {}, ""},
+    {"flame_turbulence/hit.toml", "les", 3, "", {}, ""},
+    {"flame_turbulence/input.toml", "les", 3, H2_AIR_INIT, {}, ""},
+    {"flame_turbulence/les.toml", "les", 3, H2_AIR_INIT, {}, ""},
+    {"isotropic_turbulence/input.toml", "accurate", 3, "", {}, ""},
+    {"sedov_3d/input.toml", "robust", 3, "", {}, ""},
+    {"shock_bubble_3d/input.toml", "robust", 3, "", {}, ""},
     {"sphere_mach3/input.toml", "robust", 3, "",
      {{"inlet", "inflow"}, {"outlet", "outflow"}, {"walls", "lateral"}, {"cylinder", "sphere"},
-      {"back", "symmetry_z"}, {"front", "symmetry_y"}}},
+      {"back", "symmetry_z"}, {"front", "symmetry_y"}}, ""},
     {"sphere_re300/input.toml", "accurate", 3, "",
-     {{"inlet", "inflow"}, {"outlet", "outflow"}, {"walls", "lateral"}, {"cylinder", "sphere"},
-      {"back", "lateral"}, {"front", "lateral"}}},
-    {"taylor_green_3d/input.toml", "accurate", 3, "", {}},
-    {"taylor_green_3d/input_periodic.toml", "accurate", 3, "", {}},
-    {"turbulent_inflow_duct/input.toml", "les", 3, "", {}},
+     {{"left", "inflow"}, {"right", "outflow"}, {"bottom", "lateral"}, {"top", "lateral"}, {"back", "lateral"},
+      {"front", "lateral"}},
+     "type = \"cartesian\"\nNx = 8\nNy = 8\nNz = 8\nLx = 2.0\nLy = 2.0\nLz = 2.0\n"},
+    {"taylor_green_3d/input.toml", "accurate", 3, "", {}, ""},
+    {"taylor_green_3d/input_periodic.toml", "accurate", 3, "", {}, ""},
+    {"turbulent_inflow_duct/input.toml", "les", 3, "", {}, ""},
     {"volvo_bluff_body/cold.toml", "les", 3, "",
      {{"inlet", "inlet"}, {"outlet", "outlet"}, {"walls", "top"}, {"cylinder", "bluffbody"}, {"back", "bottom"},
-      {"front", "bottom"}}},
+      {"front", "bottom"}}, ""},
     {"volvo_bluff_body/reacting.toml", "les", 3, "",
      {{"inlet", "inlet"}, {"outlet", "outlet"}, {"walls", "top"}, {"cylinder", "bluffbody"}, {"back", "bottom"},
-      {"front", "bottom"}}},
+      {"front", "bottom"}}, ""},
 };
 
 std::vector<ExampleCase> examples_of_this_build() {
@@ -236,7 +239,8 @@ struct ScratchDirectory {
 
 std::string case_name(const std::string & file) {
     std::string name = file.substr(0, file.size() - 5);
-    std::replace_if(name.begin(), name.end(), [](char ch) { return !std::isalnum(static_cast<unsigned char>(ch)); }, '_');
+    auto other = [](char ch) { return !std::isalnum(static_cast<unsigned char>(ch)); };
+    std::replace_if(name.begin(), name.end(), other, '_');
     return name;
 }
 
@@ -250,7 +254,8 @@ TEST(ExampleUnderPreset, EveryExampleHasAPreset) {
         if (!input.contains("numerics")) continue;  // reactor inputs
         n_inputs++;
         const std::string file = std::filesystem::relative(entry.path(), example_path("")).generic_string();
-        EXPECT_TRUE(std::any_of(EXAMPLES.begin(), EXAMPLES.end(), [&](const ExampleCase & c) { return c.file == file; }))
+        auto listed = [&](const ExampleCase & c) { return c.file == file; };
+        EXPECT_TRUE(std::any_of(EXAMPLES.begin(), EXAMPLES.end(), listed))
             << file << " has no entry in EXAMPLES";
     }
     EXPECT_EQ(n_inputs, EXAMPLES.size());

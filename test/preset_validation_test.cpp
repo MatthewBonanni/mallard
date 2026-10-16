@@ -125,7 +125,7 @@ double taylor_green_excess_decay(const std::string & preset, uint32_t n) {
 TEST(PresetValidation, RobustKeepsTheNohImplosionPositive) {
     // examples/noh_axisymmetric at 60 x 60 to t = 0.6: the shock is at r = 0.2
     // with rho = 64 behind it
-    toml::value input = example_under_preset({"noh_axisymmetric/input.toml", "robust", 2, "", {}}, 1, 60);
+    toml::value input = example_under_preset({"noh_axisymmetric/input.toml", "robust", 2, "", {}, ""}, 1, 60);
     input.as_table()["run"] = toml::table{{"t_stop", 0.6}};
     auto solver = run_input(input);
     const auto & m = *solver->get_mesh();

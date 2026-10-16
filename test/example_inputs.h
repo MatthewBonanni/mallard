@@ -32,8 +32,10 @@ struct ExampleCase {
     /// the state of the first boundary with p and T (mixtures) or the
     /// reference state (perfect gas), at rest
     std::string init;
-    /// File meshes: (zone of test/data/meshes/cyl{2,3}d.msh, example boundary it takes)
+    /// File meshes: (zone of the replacement mesh, example boundary it takes)
     std::vector<std::array<std::string, 2>> zones;
+    /// File meshes: the replacement [mesh] table; empty: test/data/meshes/cyl{2,3}d.msh
+    std::string mesh;
 };
 
 inline void PrintTo(const ExampleCase & c, std::ostream * os) { *os << c.file << " (" << c.preset << ")"; }
@@ -68,8 +70,10 @@ inline toml::value example_under_preset(const ExampleCase & c, uint64_t n_steps,
 
     auto & mesh = input.at("mesh").as_table();
     if (mesh.at("type").as_string() == "file") {
-        const std::string name = c.dim == 3 ? "cyl3d.msh" : "cyl2d.msh";
-        table["mesh"] = toml::table{{"type", "file"}, {"filename", std::string(MALLARD_SOURCE_DIR) + "/test/data/meshes/" + name}};
+        const std::string file =
+            std::string(MALLARD_SOURCE_DIR) + "/test/data/meshes/" + (c.dim == 3 ? "cyl3d.msh" : "cyl2d.msh");
+        table["mesh"] =
+            c.mesh.empty() ? toml::value(toml::table{{"type", "file"}, {"filename", file}}) : parse_toml(c.mesh);
         table.erase("periodic");
         toml::array boundaries;
         for (const auto & [zone, source] : c.zones) {
@@ -77,7 +81,9 @@ inline toml::value example_under_preset(const ExampleCase & c, uint64_t n_steps,
                 if (b.at("name").as_string() != source) continue;
                 toml::value copy = b;
                 copy.as_table()["name"] = zone;
+                copy.as_table().erase("where");
                 boundaries.push_back(copy);
+                break;
             }
         }
         table["boundaries"] = boundaries;
@@ -103,7 +109,9 @@ inline toml::value example_under_preset(const ExampleCase & c, uint64_t n_steps,
         } else if (physics.count("mechanism")) {
             for (const auto & b : input.at("boundaries").as_array()) {
                 if (!b.contains("p") || !b.contains("T") || !(b.contains("X") || b.contains("Y"))) continue;
-                auto expression = [](const toml::value & v) { return v.is_string() ? v : toml::value(toml::format(v)); };
+                auto expression = [](const toml::value & v) {
+                    return v.is_string() ? v : toml::value(toml::format(v));
+                };
                 toml::table init{{"type", "analytical"}, {"p", expression(b.at("p"))}, {"T", expression(b.at("T"))}};
                 init[b.contains("X") ? "X" : "Y"] = b.at(b.contains("X") ? "X" : "Y");
                 init["u"] = toml::array(static_cast<size_t>(c.dim), toml::value("0.0"));
