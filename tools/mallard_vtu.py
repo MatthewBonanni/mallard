@@ -16,12 +16,15 @@ def read_vtu_cells(path):
     """Read a 2D or 3D volume VTU.
 
     Returns points (n, 3), connectivity, offsets (end of each cell), VTK cell
-    types, and the cell arrays (vectors as (n_cells, 3)) plus "TIME". An HDF5
-    snapshot (.h5) is read with mallard_h5.
+    types, and the cell arrays (vectors as (n_cells, 3)) plus "TIME". A PVTU
+    (MPI runs) is read as the union of its pieces; an HDF5 snapshot (.h5) is
+    read with mallard_h5.
     """
     if path.endswith(".h5") or path.endswith(".xmf"):
         from mallard_h5 import read_h5_cells
         return read_h5_cells(path)
+    if path.endswith(".pvtu"):
+        return _read_pvtu(path)
     raw = open(path, "rb").read()
     if b"<AppendedData" not in raw:
         return _read_ascii(raw.decode("latin-1"))
@@ -51,6 +54,34 @@ def read_vtu_cells(path):
     if tm:
         out["TIME"] = float(tm.group(1))
     return pts, conn, offs, types, out
+
+
+def _read_pvtu(path):
+    pieces = re.findall(r'Source="([^"]+)"', open(path).read())
+    parts = [read_vtu_cells(os.path.join(os.path.dirname(path), p)) for p in pieces]
+    n_pts = np.cumsum([0] + [len(p[0]) for p in parts[:-1]])
+    n_conn = np.cumsum([0] + [len(p[1]) for p in parts[:-1]])
+    # Nodes on the boundaries between pieces appear in each: keep one copy
+    pts, inverse = np.unique(np.concatenate([p[0] for p in parts]), axis=0, return_inverse=True)
+    conn = inverse.ravel()[np.concatenate([p[1].astype(np.int64) + n for p, n in zip(parts, n_pts)])]
+    offs = np.concatenate([p[2].astype(np.int64) + n for p, n in zip(parts, n_conn)])
+    types = np.concatenate([p[3] for p in parts])
+    arrays = {k: np.concatenate([p[4][k] for p in parts]) for k in parts[0][4] if k != "TIME"}
+    if "TIME" in parts[0][4]:
+        arrays["TIME"] = parts[0][4]["TIME"]
+    return pts, conn, offs, types, arrays
+
+
+def series(directory, pattern="*"):
+    """The snapshots of a series in a directory, oldest first: the PVTU files
+    of an MPI run (not their pieces), else the VTU (or HDF5) files."""
+    import glob
+    files = sorted(glob.glob(os.path.join(directory, pattern)))
+    parallel = [f for f in files if f.endswith(".pvtu")]
+    if parallel:
+        return parallel
+    return [f for f in files if (f.endswith(".vtu") or f.endswith(".h5"))
+            and not re.search(r"_p\d{4}\.vtu$", f)]
 
 
 def _read_ascii(text):

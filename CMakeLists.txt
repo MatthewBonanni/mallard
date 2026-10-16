@@ -221,6 +221,13 @@ endif()
 install(TARGETS Mallard
     DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
 )
+# Case templates (Mallard new) and what they are made from: bin/../share/mallard
+foreach(dir templates examples tools mechanisms tutorials)
+    if(EXISTS ${CMAKE_SOURCE_DIR}/${dir})
+        install(DIRECTORY ${dir} DESTINATION ${CMAKE_INSTALL_PREFIX}/share/mallard
+            PATTERN __pycache__ EXCLUDE)
+    endif()
+endforeach()
 
 # Enable testing
 enable_testing()

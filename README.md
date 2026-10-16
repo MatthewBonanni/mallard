@@ -121,7 +121,7 @@ cd examples/riemann_2d
 ../../build/src/Mallard -i input.toml --kokkos-num-threads=8
 ```
 
-See [`examples/`](examples) for complete input files, the [user guide](docs/guide/input_files.md) for each topic, and [`docs/input.md`](docs/input.md) for every input option.
+or start a case of your own from one of the examples: `Mallard new --list` shows the templates, and `Mallard new cylinder` creates a directory with the input, mesh, run and plot scripts ([First simulation](docs/guide/first_simulation.md)). See [`examples/`](examples) for complete input files, the [user guide](docs/guide/input_files.md) for each topic, and [`docs/input.md`](docs/input.md) for every input option.
 
 ## Testing
 
