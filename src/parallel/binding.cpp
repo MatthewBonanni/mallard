@@ -123,8 +123,8 @@ std::vector<int> affinity() {
     cpu_set_t set;
     CPU_ZERO(&set);
     if (sched_getaffinity(0, sizeof(set), &set) == 0) {
-        for (int c = 0; c < CPU_SETSIZE; c++) {
-            if (CPU_ISSET(c, &set)) cpus.push_back(c);
+        for (size_t c = 0; c < size_t{CPU_SETSIZE}; c++) {
+            if (CPU_ISSET(c, &set)) cpus.push_back(static_cast<int>(c));
         }
     }
 #endif
