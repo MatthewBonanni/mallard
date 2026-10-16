@@ -32,7 +32,7 @@ PHYSICS = '[physics]\ntype = "euler"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho
 
 # ------------------------------------------------------------------ meshes
 
-def triangle_mesh(path, n=16, jitter=0.3, seed=7):
+def triangle_mesh(path, n=12, jitter=0.3, seed=7):
     """Gmsh 2.2 file of the unit square: Delaunay triangles of jittered points, boundary zone "wall"."""
     rng = np.random.default_rng(seed)
     g = np.linspace(0.0, 1.0, n + 1)
@@ -216,7 +216,7 @@ def panel(ax, P, pts, cells, f, inside, title, polygon=None):
         closed = np.vstack([polygon, polygon[:1]])
         ax.plot(closed[:, 0], closed[:, 1], color=P["fg"], lw=1.4)
     elif inside is not None:
-        g = np.linspace(0, 1, 600)
+        g = np.linspace(0, 1, 300)
         X, Y = np.meshgrid(g, g)
         ax.contour(X, Y, inside(X, Y).astype(float), levels=[0.5], colors=[P["fg"]], linewidths=1.4)
     bare(ax)
@@ -314,8 +314,9 @@ def regions_3d(P, args):
             elif p[:, 1].min() >= 0.5 and fc > 0.5:
                 back += [p[list(t)] for t in tris]
         ax.add_collection3d(Poly3DCollection(back, facecolors=P["faint"], edgecolors=P["mesh"], linewidths=0.1,
-                                             alpha=0.35))
-        ax.add_collection3d(Poly3DCollection(cut, facecolors=colors, edgecolors=P["mesh"], linewidths=0.2))
+                                             alpha=0.35, rasterized=True))
+        ax.add_collection3d(Poly3DCollection(cut, facecolors=colors, edgecolors=P["mesh"], linewidths=0.2,
+                                             rasterized=True))
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
         ax.set_zlim(0, 1)
