@@ -429,7 +429,7 @@ std::vector<std::string> restart_files(const std::string & dir) {
 }
 
 /** @brief Starts a long run in a fresh directory and waits until it answers on its socket. */
-pid_t start_run(const std::string & dir, int ranks) {
+pid_t start_run(const std::string & dir, [[maybe_unused]] int ranks) {
     std::ofstream(dir + "/input.toml") << case_input(".", "n_steps = 100000000\nt_wall_stop = 300\ncfl = 0.25\n",
                                                     100000000);
     std::vector<std::string> args;
