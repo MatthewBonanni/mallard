@@ -213,6 +213,13 @@ Finding option_finding(const OptionRule & rule, const Concrete & key, std::size_
     return f;
 }
 
+/** @brief A value's TOML text, without the comments attached to it. */
+template <typename V>
+std::string bare_text(V value) {
+    value.comments().clear();
+    return toml::format(value);
+}
+
 template <typename V>
 std::size_t line_of(const V & value) {
     return value.location().is_ok() ? value.location().first_line_number() : 0;
@@ -238,7 +245,7 @@ std::vector<Finding> transform(V & root, const Rules & table, const std::string 
                                      to_string(key) + " is the old name of " + to_string(to) + ": remove it.");
                 }
                 if (rule.convert) {
-                    const std::string text = rule.convert(toml::format(value));
+                    const std::string text = rule.convert(bare_text(value));
                     value = toml::parse_str<typename V::config_type>("x = " + text).at("x");
                 }
                 V * new_parent = at(root, parent(to), true);
@@ -281,7 +288,7 @@ bool same(const V & a, const V & b) {
         }
         return true;
     }
-    return toml::format(a) == toml::format(b);
+    return bare_text(a) == bare_text(b);
 }
 
 std::vector<std::string> split_lines(const std::string & text) {
@@ -396,7 +403,7 @@ bool rewrite_one_key(std::vector<std::string> & lines, const KeyRule & rule, boo
     const size_t equals = moved[0].find('=', *column);
     std::string rest = moved[0].substr(equals);  // "= value # comment"
     if (rule.convert) {
-        const std::string old_text = toml::format(value);
+        const std::string old_text = bare_text(value);
         const size_t v = rest.find_first_not_of(" \t", 1);
         if (last != first || v == std::string::npos || rest.compare(v, old_text.size(), old_text) != 0) {
             impossible = true;
@@ -436,7 +443,7 @@ bool rewrite_one_option(std::vector<std::string> & lines, const OptionRule & rul
         if (!value.is_string() || value.as_string() != rule.from) continue;
         const size_t line = value.location().first_line_number() - 1;
         const auto column = key_column(lines[line], key.back().first);
-        const std::string old_text = toml::format(value);
+        const std::string old_text = bare_text(value);
         const size_t v = column ? lines[line].find(old_text, *column) : std::string::npos;
         if (v == std::string::npos) {
             impossible = true;
