@@ -63,7 +63,7 @@ class ScratchDirectories : public testing::EmptyTestEventListener {
 
         void OnTestEnd(const testing::TestInfo & test) override {
             std::filesystem::current_path(previous);
-            const bool passed = comm::allreduce(int32_t(test.result()->Passed()), comm::Op::MIN) == 1;
+            const bool passed = comm::allreduce(int32_t(test.result()->Failed()), comm::Op::MAX) == 0;
             if (comm::is_root()) {
                 if (passed) {
                     std::filesystem::remove_all(current);
