@@ -10,6 +10,7 @@ input file and the Python scripts that set it up and draw its figures, and
 | `wedge/` | [Oblique shock on a ramp](../docs/tutorials/wedge.md) (2D, generated mesh) against the θ-β-M relation |
 | `cylinder/` | [Vortex shedding behind a cylinder](../docs/tutorials/cylinder.md) (2D, Gmsh) at Re = 100 against reference computations |
 | `cone/` | [Supersonic flow over a cone](../docs/tutorials/cone.md) (3D) against the Taylor-Maccoll solution |
+| `premixed_flame/` | [Premixed flame](../docs/tutorials/premixed_flame.md): H2/air flame speeds against Cantera |
 | `channel_les/` | [Channel LES](../docs/tutorials/channel_les.md): turbulent channel at Re_τ = 180 against DNS |
 
 `ci.sh` runs every tutorial at reduced size on two MPI ranks, as CI does, with the steps in each
