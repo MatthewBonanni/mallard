@@ -1,7 +1,7 @@
 """Figures of the user guide drawn from short Mallard runs (seconds each, on a
 CPU build): TENO-E stencils read back from a stencil cache, the Sod shock
-tube with each reconstruction (through a line probe), MPI partitions, and a
-MallardReactor ignition.
+tube with each reconstruction (through a line probe), MPI partitions, a
+MallardReactor ignition, and the mesh quality from Mallard --check.
 
     python tools/docs/runs.py --mallard build/src/Mallard [--mpirun mpirun] [names...]
 
@@ -28,6 +28,7 @@ from figstyle import bare, label
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 from mallard_vtu import read_vtu_cells  # noqa: E402
+from plot_mesh_quality import LABELS, draw_quality, read_quality  # noqa: E402
 from plot_sod import exact_sod  # noqa: E402
 
 PHYSICS = '\n[physics]\ntype = "euler"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n'
@@ -306,6 +307,40 @@ def ignition(P, args):
     return fig
 
 
+# ------------------------------------------------------------- mesh quality
+
+@functools.cache
+def mesh_quality_data(args):
+    """Mallard --check of examples/mallard on a coarse mesh (make_mallard_mesh.py needs the gmsh module)."""
+    work = Path(tempfile.mkdtemp())
+    subprocess.run([sys.executable, str(ROOT / "tools" / "make_mallard_mesh.py"), str(work / "mallard.msh"),
+                    "--h-wall", "0.02", "--h-far", "0.1"], check=True, stdout=subprocess.DEVNULL)
+    (work / "input.toml").write_text((ROOT / "examples" / "mallard" / "input.toml").read_text())
+    subprocess.run([str(args.mallard), "--check", "input.toml", "--quality-vtu", "quality",
+                    "--kokkos-num-threads=2"], cwd=work, check=True, stdout=subprocess.DEVNULL)
+    return read_quality(str(work / "quality_000000.vtu"))
+
+
+def mesh_quality(P, args):
+    polys, arrays = mesh_quality_data(args)
+    xlim, ylim = (-0.3, 1.6), (-0.75, 0.75)
+    centers = np.array([p.mean(axis=0) for p in polys])
+    shown = ((centers[:, 0] > xlim[0] + 0.03) & (centers[:, 0] < xlim[1] - 0.03)
+             & (centers[:, 1] > ylim[0] + 0.03) & (centers[:, 1] < ylim[1] - 0.03))
+    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.6), layout="constrained")
+    for ax, field in zip(axes, ("NON_ORTHOGONALITY", "SKEWNESS")):
+        values = arrays[field]
+        cells = draw_quality(ax, polys, values, 6, P["red"], P["mesh"], cmap=P["cmap"], fontsize=11, among=shown)
+        bar = fig.colorbar(cells, ax=ax, fraction=0.04, pad=0.02)
+        bar.set_label(LABELS[field])
+        bar.outline.set_edgecolor(P["muted"])
+        ax.set_title(f"max {values.max():.3g}, mean {values.mean():.3g}; worst 6 in view circled", fontsize=12)
+        ax.set_xlim(*xlim)
+        ax.set_ylim(*ylim)
+        ax.axis("off")
+    return fig
+
+
 class Args(tuple):
     """Hashable options, so the runs are cached between the light and dark figures."""
 
@@ -318,7 +353,7 @@ class Args(tuple):
 
 
 FIGURES = {"teno_stencils": teno_stencils, "sod_schemes": sod_schemes, "partitions": partitions,
-           "ignition": ignition}
+           "ignition": ignition, "mesh_quality": mesh_quality}
 
 
 def main():

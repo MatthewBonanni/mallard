@@ -85,11 +85,14 @@ Input parse_input(const std::string & filename);
 /** @brief Parse TOML text, with no key counted as read. */
 Input parse_input_string(const std::string & text, const std::string & name = "input");
 
-/** @brief A key of the input that no setup code read. */
-struct UnusedKey {
-    std::string path;        // e.g. "mesh.Nxx" or "boundaries[2].tpye"
-    std::size_t line = 0;    // 0 if unknown
-    std::string suggestion;  // full path of a key read or looked up by setup, or empty
+/** @brief A problem with one key of the input, as normal runs and --check report it. */
+struct Diagnostic {
+    std::string key;                  // e.g. "mesh.Nxx" or "boundaries[2].tpye"
+    std::size_t line = 0;             // 0 if unknown
+    std::string message;              // what is wrong
+    std::vector<std::string> valid;   // accepted values, if a closed set
+    std::string suggestion;           // full path of the likely intended key, or empty
+    std::string docs;                 // page and anchor of the input reference
 };
 
 /**
@@ -97,10 +100,10 @@ struct UnusedKey {
  *        nobody read is reported, not its contents), each with the closest key
  *        the setup looked up, at the same level or (exact name) elsewhere.
  */
-std::vector<UnusedKey> unused_keys(const Input & input);
+std::vector<Diagnostic> unused_keys(const Input & input);
 
 /** @brief "line 12: mesh.Nxx (did you mean mesh.Nx?)". */
-std::string describe(const UnusedKey & key);
+std::string describe(const Diagnostic & key);
 
 /**
  * @brief An invalid or missing input value. The message names the key and the

@@ -29,7 +29,7 @@ struct CheckOptions {
 struct CheckReport {
     std::vector<std::string> errors;
     std::vector<std::string> warnings;
-    std::vector<UnusedKey> unused;
+    std::vector<Diagnostic> unused;
     bool setup_done = false;
 
     logging::Items boundaries;  // zone, condition and faces

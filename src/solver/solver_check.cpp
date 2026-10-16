@@ -72,7 +72,7 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     } catch (const std::exception & e) {
         r.errors.push_back(error_text(e));
     }
-    for (const UnusedKey & key : unused_keys(input)) {
+    for (const Diagnostic & key : unused_keys(input)) {
         if (r.setup_done || !key.suggestion.empty()) r.unused.push_back(key);
     }
     if (!r.setup_done || !mesh) return r;
@@ -314,7 +314,7 @@ void print_check(const CheckReport & r) {
     } else {
         item("Input keys", logging::style(count(r.unused.size()) + " unknown or unused with these settings",
                                           logging::Style::RED));
-        for (const UnusedKey & key : r.unused) item("", describe(key));
+        for (const Diagnostic & key : r.unused) item("", describe(key));
     }
     if (r.setup_done) {
         item("Boundaries", "every boundary face has a condition (" + count(r.boundaries.size()) + " conditions)");

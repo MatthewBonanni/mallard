@@ -123,7 +123,7 @@ cd examples/riemann_2d
 
 See [`examples/`](examples) for complete input files, the [user guide](docs/guide/input_files.md) for each topic, and [`docs/input.md`](docs/input.md) for every input option.
 
-Before a long run, `Mallard --check input.toml [--ranks N] [--throughput CELLS_PER_S]` runs the setup without time stepping and reports misspelled or unused keys, boundary zones without a condition, mesh quality with the worst cells, the stable time step and where it is set, memory per rank and the cost per unit simulated time ([details](docs/input.md#checking-an-input)).
+Before a long run, `Mallard --check input.toml [--ranks N] [--throughput CELLS_PER_S]` runs the setup without time stepping and reports misspelled or unused keys, boundary zones without a condition, mesh quality with the worst cells, the stable time step and where it is set, memory per rank and the cost per unit simulated time ([details](docs/guide/input_files.md#checking-an-input)).
 
 ## Testing
 

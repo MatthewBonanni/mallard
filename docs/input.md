@@ -28,77 +28,9 @@ an error. Under `mpirun -n N` it checks the run on N ranks.
 | `--ranks N` | Memory and cost per rank for a run on N ranks (from a serial check, or one on N ranks) |
 | `--throughput R` | Cost at R cells/s per rank (cell updates per wall second, the `Throughput` of a run's summary) |
 | `--steps N` | Measure the throughput over N steps instead (after one untimed step) |
-| `--quality-vtu PREFIX` | Write the mesh-quality fields to `PREFIX_000000.vtu` |
+| `--quality-vtu PREFIX` | Write the mesh-quality fields to `PREFIX_000000.vtu` (a `.pvtu` and one piece per rank under MPI) |
 
-The report lists:
-
-- **Input keys** that are unknown or unused, with suggestions (an error).
-- **Boundaries**: zones without a condition are an error, named with their face count.
-- **Mesh quality** of every cell, the largest over its faces: *non-orthogonality*,
-  the angle in degrees between the face normal and the line joining the two
-  cell centroids (cell to face centroid at boundaries); *skewness*, the
-  distance from the face centroid to where that line crosses the face, over
-  the centroid distance; *volume ratio* of the two cells; and *aspect ratio*,
-  the largest over the smallest distance from the centroid to the face
-  centroids. Maximum, mean and the worst cells with their location; cells
-  above 70 degrees, 0.5, 10 and 1000 respectively are warnings.
-- **Time step** at the initial state, its CFL number, and the cell and region
-  (cells within 10% of the smallest stable step) that limit it.
-- **Memory** per rank: Kokkos allocations (device memory on GPUs) measured
-  after setup and at their peak, and for `--ranks N` from a serial check,
-  scaled by the cells (owned and halo) of the largest part of the run's
-  partitioner. CUDA's own context (a few hundred MB) is not included.
-- **Cost** with `--throughput` or `--steps`: steps, wall time and GPU-hours
-  (rank-hours on CPUs) per unit simulated time, per flow-through time (the
-  domain's length along the mean initial velocity over its magnitude) and to
-  `t_stop`, assuming the throughput per rank holds at N ranks.
-- **Warnings** for questionable settings: a CFL number above the integrator's
-  stability limit for smooth flow (1.2 with SSPRK3, 1.35 with RK4), TFLES
-  thickening `n_res Delta / delta_L` above 5, poor cells.
-
-```text
-$ Mallard --check input.toml --ranks 4 --throughput 5e7 --quality-vtu quality/mallard
-...
-== Check ==================================================================================
-  Input keys         all used
-  Boundaries         every boundary face has a condition (5 conditions)
-  non-orthogonality  max 23.4, mean 4.66
-                     worst 23.4 at (1.428, 0.09977), 23.4 at (1.448, 0.09361)
-  skewness           max 0.374, mean 0.0489
-                     worst 0.374 at (1.025, -0.6632), 0.374 at (1.022, -0.6803)
-  aspect ratio       max 1.96, mean 1.12
-  volume ratio       max 2.21, mean 1.16
-                     worst 2.21 at (1.095, 0.8271), 2.21 at (1.099, 0.8141)
-  Time step          8.771e-05 (from run.cfl), CFL 0.25 at the initial state
-  CFL-limiting       cell 13,165 at (0.2704, -0.07489)
-                     4 cells within 10% of it, in (0.2617, -0.07529) to (0.9787, 0.5039)
-  Memory             133MB per rank after setup (peak 133MB), 17,297 cells, 1 rank
-                     on 4 ranks: about 46.6MB per rank (peak 46.6MB), largest part 4,325 + 1,729 halo cells
-  Throughput         50.0M cells/s per rank
-  Cost               1.14e+04 steps per unit simulated time
-                     per unit time: 986 ms wall on 4 ranks, 0.0011 rank-hours
-                     per flow-through (0.4375): 431 ms wall on 4 ranks, 0.000479 rank-hours
-                     to t_stop = 0.75: 740 ms wall on 4 ranks, 0.000822 rank-hours
-  Result             ok
-```
-
-and for an input with mistakes:
-
-```text
-== Check ==================================================================================
-  Input keys         3 unknown or unused with these settings
-                     line 8: mesh.Nyy (did you mean mesh.Ny?)
-                     line 11: mesh.t_stop (did you mean run.t_stop?)
-                     line 37: numerics.riemann_solvr (did you mean numerics.riemann_solver?)
-  ...
-  Result             3 errors, 0 warnings
-```
-
-`tools/plot_mesh_quality.py PREFIX_000000.vtu out.png` draws the quality
-fields of a 2D mesh with the worst cells circled (here
-[`examples/mallard`](../examples/mallard) on a coarse mesh):
-
-![Non-orthogonality and skewness of a mesh around the mallard, worst cells circled](numerics/../images/check_mesh_quality.png)
+The report, with an example: [Checking an input](guide/input_files.md#checking-an-input).
 
 ## `[run]`
 

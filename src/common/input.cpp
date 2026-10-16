@@ -92,7 +92,7 @@ std::string suggest(const InputTable<std::string, Input> & table, const std::str
     return "";
 }
 
-void collect_unused(const Input & v, const std::string & path, const Lookups & lookups, std::vector<UnusedKey> & out) {
+void collect_unused(const Input & v, const std::string & path, const Lookups & lookups, std::vector<Diagnostic> & out) {
     if (v.is_table()) {
         const auto & table = v.as_table();
         const auto & made = table.lookups_made();
@@ -101,8 +101,14 @@ void collect_unused(const Input & v, const std::string & path, const Lookups & l
                 collect_unused(value, join(path, key), lookups, out);
             } else {
                 const auto location = value.location();
-                out.push_back({join(path, key), location.is_ok() ? location.first_line_number() : 0,
-                               suggest(table, path, key, lookups)});
+                Diagnostic d;
+                d.key = join(path, key);
+                d.line = location.is_ok() ? location.first_line_number() : 0;
+                d.message = "unknown, or unused with these settings";
+                d.suggestion = suggest(table, path, key, lookups);
+                const std::string section = d.key.substr(0, d.key.find_first_of(".["));
+                d.docs = "docs/input.md" + (section == d.key ? std::string() : "#" + lower(section));
+                out.push_back(std::move(d));
             }
         }
     } else if (v.is_array()) {
@@ -128,18 +134,22 @@ Input parse_input_string(const std::string & text, const std::string & name) {
     return input;
 }
 
-std::vector<UnusedKey> unused_keys(const Input & input) {
+std::vector<Diagnostic> unused_keys(const Input & input) {
     Lookups lookups;
     collect_lookups(input, "", lookups);
-    std::vector<UnusedKey> out;
+    std::vector<Diagnostic> out;
     collect_unused(input, "", lookups, out);
-    std::stable_sort(out.begin(), out.end(), [](const UnusedKey & a, const UnusedKey & b) { return a.line < b.line; });
+    std::stable_sort(out.begin(), out.end(), [](const Diagnostic & a, const Diagnostic & b) { return a.line < b.line; });
     return out;
 }
 
-std::string describe(const UnusedKey & key) {
+std::string describe(const Diagnostic & key) {
     std::string text = key.line > 0 ? "line " + std::to_string(key.line) + ": " : "";
-    text += key.path;
+    text += key.key;
     if (!key.suggestion.empty()) text += " (did you mean " + key.suggestion + "?)";
+    if (!key.valid.empty()) {
+        text += ": one of";
+        for (const auto & v : key.valid) text += " " + v;
+    }
     return text;
 }

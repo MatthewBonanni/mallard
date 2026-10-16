@@ -109,7 +109,7 @@ jobs:
         env:
           FULL: ${{ matrix.backend.full }}
         run: |
-          mpi_tests='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*'
+          mpi_tests='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:Check*.*'
           if [ "$FULL" = true ]; then
             mpirun -n 1 ./build/test/MallardTest
           else

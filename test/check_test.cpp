@@ -72,12 +72,13 @@ TEST(CheckKeys, MisspelledKeysAreReportedWithLineAndSuggestion) {
     input += "[foo]\nbar = 1\n";
     const CheckReport r = check(input);
     ASSERT_EQ(r.unused.size(), 3u);
-    EXPECT_EQ(r.unused[0].path, "mesh.Nyy");
+    EXPECT_EQ(r.unused[0].key, "mesh.Nyy");
     EXPECT_EQ(r.unused[0].suggestion, "mesh.Ny");
     EXPECT_EQ(r.unused[0].line, 7u);
-    EXPECT_EQ(r.unused[1].path, "numerics.riemann_solvr");
+    EXPECT_EQ(r.unused[0].docs, "docs/input.md#mesh");
+    EXPECT_EQ(r.unused[1].key, "numerics.riemann_solvr");
     EXPECT_EQ(r.unused[1].suggestion, "numerics.riemann_solver");
-    EXPECT_EQ(r.unused[2].path, "foo");  // a table nobody read, not its keys
+    EXPECT_EQ(r.unused[2].key, "foo");  // a table nobody read, not its keys
     EXPECT_EQ(r.unused[2].suggestion, "");
     EXPECT_FALSE(r.ok());
 }
@@ -87,7 +88,7 @@ TEST(CheckKeys, KeyInTheWrongTableSuggestsWhereItIsRead) {
     input.replace(input.find("Lx = 2.0\n"), 9, "Lx = 2.0\ncfl = 0.5\n");
     const CheckReport r = check(input);
     ASSERT_EQ(r.unused.size(), 1u);
-    EXPECT_EQ(r.unused[0].path, "mesh.cfl");
+    EXPECT_EQ(r.unused[0].key, "mesh.cfl");
     EXPECT_EQ(r.unused[0].suggestion, "run.cfl");
 }
 
@@ -96,7 +97,7 @@ TEST(CheckKeys, ShortKeysGetNoFarFetchedSuggestion) {
     input.replace(input.find("p = \"1.0\""), 9, "q = \"1.0\"\np = \"1.0\"");
     const CheckReport r = check(input);
     ASSERT_EQ(r.unused.size(), 1u);
-    EXPECT_EQ(r.unused[0].path, "initialize.q");
+    EXPECT_EQ(r.unused[0].key, "initialize.q");
     EXPECT_EQ(r.unused[0].suggestion, "");
 }
 
@@ -224,7 +225,7 @@ TEST(CheckOutput, CheckCreatesNoFilesAndWritesTheQualityFieldsOnRequest) {
     EXPECT_FALSE(std::filesystem::exists(dir / "out"));
     EXPECT_FALSE(std::filesystem::exists(dir / "forces.csv"));
     EXPECT_FALSE(std::filesystem::exists(dir / "integrals.csv"));
-    std::ifstream vtu(dir / "quality" / "mesh_000000.vtu");
+    std::ifstream vtu(dir / "quality" / (comm::size() > 1 ? "mesh_000000_p0000.vtu" : "mesh_000000.vtu"));
     ASSERT_TRUE(vtu.good());
     const std::string text((std::istreambuf_iterator<char>(vtu)), std::istreambuf_iterator<char>());
     for (const char * field : MeshQuality::FIELDS) EXPECT_NE(text.find(field), std::string::npos) << field;

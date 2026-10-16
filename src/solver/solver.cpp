@@ -66,17 +66,17 @@ int Solver::init(const Input & input_in) {
         setup_from_input();
     } catch (const std::exception & e) {
         std::string misspelled;
-        for (const UnusedKey & key : unused_keys(input)) {
+        for (const Diagnostic & key : unused_keys(input)) {
             if (!key.suggestion.empty()) misspelled += "\n  " + describe(key);
         }
         if (misspelled.empty() || check_only) throw;
         throw InputError(std::string(e.what()) + "\npossibly misspelled:" + misspelled);
     }
     if (!check_only) {
-        const std::vector<UnusedKey> unused = unused_keys(input);
+        const std::vector<Diagnostic> unused = unused_keys(input);
         if (!unused.empty()) {
             std::string list;
-            for (const UnusedKey & key : unused) list += "\n  " + describe(key);
+            for (const Diagnostic & key : unused) list += "\n  " + describe(key);
             throw InputError("keys that are unknown or unused with these settings (mallard --check lists them all):" +
                              list);
         }
