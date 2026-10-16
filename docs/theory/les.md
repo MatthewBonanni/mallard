@@ -216,10 +216,39 @@ applied by integrating each cell's chemistry over $(\mathcal{E}/F)\,\tau$
 ([chapter 3](chemistry_radiation.md#strang-splitting)).
 
 The efficiency $\mathcal{E}$ restores the flame surface that thickening
-removes from the subgrid wrinkling. With `efficiency = "charlette"` (the
-default) it is the power-law model of
+removes from the subgrid wrinkling. With `efficiency = "dynamic"` (the
+default) it is the saturated power law of
 [Charlette, Meneveau & Veynante 2002](../references.md#charlette-2002) at
-the filter width $F\delta_L$:
+the filter width $\Delta_e = F\delta_L$, with an exponent from the dynamic
+procedure of [Wang, Boileau & Veynante 2011](../references.md#wang-2011):
+
+$$
+\begin{equation}
+\mathcal{E} = F^{\beta}, \qquad
+\beta = \frac{\ln\left(\sum_c \widehat{\lvert\nabla c\rvert}\,V_c \big/ \sum_c \lvert\nabla\widehat{c}\rvert\,V_c\right)}
+{\sum_c \ln\gamma_c\,\lvert\nabla\widehat{c}\rvert\,V_c \big/ \sum_c \lvert\nabla\widehat{c}\rvert\,V_c},
+\qquad \gamma_c^2 = 1 + \frac{n\,\widehat{\Delta}_c^2}{(F_{max}\delta_L)^2},
+\label{eq:dynamic-efficiency}
+\end{equation}
+$$
+
+from the identity that the total flame surface is the same seen at the
+combustion filter and at the test filter,
+$\langle \mathcal{E}_{\Delta_e}\lvert\nabla c\rvert\rangle =
+\langle \mathcal{E}_{\gamma\Delta_e}\lvert\nabla\widehat{c}\rvert\rangle$.
+$c$ is the sensor's progress variable and gradients are least squares on the
+vertex-neighbor stencil. The test filter $\widehat{\cdot}$ is $n$ passes of
+the volume average over the cell and its vertex neighbors, each of squared
+width $\widehat{\Delta}_c^2 = (12/d)\,\mathrm{tr}(\mathrm{cov})$ of the
+stencil's centroids ($8h^2$ on cubes of side $h$); $n$, fixed at setup, is
+the smallest that makes $n\widehat{\Delta}^2$ reach $(F_{max}\delta_L)^2$ on
+average over the thickened cells (4 on cubes at $n_{res} = 5$, $\gamma =
+1.51$). The sums run over the owned cells with $F_{max} > 1$ and are exact
+in fixed point, so $\beta$ does not depend on the rank count; $\beta$ is
+clipped to $[0, 1]$, and is 0 when the resolved surface
+$\sum_c\lvert\nabla\widehat{c}\rvert V_c$ is below $10^{-6}\sum_c V_c/\Delta_e$
+(no flame). With `efficiency = "charlette"` it is their efficiency function
+of a subgrid velocity at the filter width $F\delta_L$:
 
 $$
 \begin{equation}
