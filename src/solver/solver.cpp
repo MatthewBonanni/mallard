@@ -983,7 +983,8 @@ void Solver::init_output() {
                                        << (integral_monitor.budget ? ",ke_rate_convective,ke_rate_viscous,ke_rate_sgs,"
                                                                      "eps_numerical,pressure_work"
                                                                    : "")
-                                       << (les_on && les.dynamic ? ",les_C" : "") << "\n";
+                                       << (les_on && les.dynamic ? ",les_C" : "")
+                                       << (dynamic_efficiency() ? ",tf_beta" : "") << "\n";
             }
         }
     }
@@ -2060,6 +2061,7 @@ void Solver::write_integrals() {
                               << rates.pressure_work - rates.convective << "," << rates.pressure_work;
     }
     if (les_on && les.dynamic) *integral_monitor.out << "," << les.C;
+    if (dynamic_efficiency()) *integral_monitor.out << "," << thickened_flame.beta;
     *integral_monitor.out << "\n";
     integral_monitor.out->flush();
 }
