@@ -219,7 +219,9 @@ TEST(StagnationInletTest, ThermallyPerfectStateIsOnTheTrueIsentrope) {
         EXPECT_LT(relative_difference(W_g, W_i), tol(1e-8, 2e-4)) << "T = " << T;
 
         const auto W_perfect = perfect_ghost(gamma_c, R, T0, p0, d, W_i, n);
-        if (T < 2300.0) EXPECT_GT(relative_difference(W_perfect, W_i), 1e-3) << "T = " << T;
+        if (T < 2300.0) {
+            EXPECT_GT(relative_difference(W_perfect, W_i), 1e-3) << "T = " << T;
+        }
     }
 }
 
