@@ -78,9 +78,11 @@ Special cases:
 The ghost depends on the interior state, as `farfield`'s does:
 
 - **Flux.** The face's reconstructed interior state goes in.
-- **MUSCL gradients.** The cell state goes in, and the ghost counts as the
-  value at the face centroid, as for `upt`.
-- **TENO mirror cells.** These take the ghost of the mirrored cell.
+- **Gradients and TENO's mirror cells.** These take the cell's own state.
+  The solve then stays out of every kernel but the flux's: computing the
+  ghost there too, even in runs without the inlet, slowed the 3D TENO5
+  benchmark by a third. A uniform flow that is the inlet's own state stays
+  exact.
 - **Mixtures.** The inflow carries the inlet's composition in the species
   fluxes and their reconstruction. The ghost's frozen `[γ, e0]` are those at
   the ghost temperature. The surrogates in the scalar reconstruction stay the

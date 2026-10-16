@@ -20,22 +20,48 @@
 
 namespace inflow {
 
-// The inlets' states stay out of line: inlined into every kernel that builds
-// ghost states (TENO's mirror cells above all), their iterations raise the
-// register pressure of the common paths
-#define MALLARD_INFLOW_NOINLINE __attribute__((noinline))
-
-/** @brief Isentrope of a calorically perfect gas through (T0, p0). */
-struct PerfectGas {
-    double gamma, R;
-
-    KOKKOS_INLINE_FUNCTION double cp(const double) const { return gamma * R / (gamma - 1.0); }
-    KOKKOS_INLINE_FUNCTION double h(const double T) const { return cp(T) * T; }
-    /** @brief ln(p / p0) along the isentrope. */
-    KOKKOS_INLINE_FUNCTION double log_p_ratio(const double T, const double T0) const {
-        return gamma / (gamma - 1.0) * Kokkos::log(T / T0);
+/**
+ * @brief stagnation_state for a calorically perfect gas (gamma, R), in closed
+ *        form: with c^2 = (gamma - 1) (cp T0 - V^2 / 2) the invariant gives a
+ *        quadratic in V. Every kernel that builds ghost states contains it,
+ *        so it stays as light as the far field's.
+ */
+KOKKOS_INLINE_FUNCTION void perfect_stagnation_state(const double gamma, const double R, const double T0,
+                                                     const double p0, const rtype * d, const rtype * W_i,
+                                                     const rtype * n, rtype * W_g) {
+    constexpr uint8_t E = N_DIM + 1;
+    double dir[N_DIM], d2 = 0.0;
+    FOR_I_DIM d2 += double(d[i]) * double(d[i]);
+    FOR_I_DIM dir[i] = (d2 > 0.0) ? double(d[i]) : -double(n[i]);
+    double c_dn = 0.0, u_n = 0.0, u2 = 0.0;
+    FOR_I_DIM {
+        c_dn += dir[i] * double(n[i]);
+        u_n += double(W_i[1 + i]) * double(n[i]);
+        u2 += double(W_i[1 + i]) * double(W_i[1 + i]);
     }
-};
+    c_dn = Kokkos::fmin(c_dn, 0.0);
+    const double a_i = Kokkos::sqrt(gamma * double(W_i[E]) / double(W_i[0]));
+    if (u_n >= a_i) {
+        for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = W_i[i];
+        return;
+    }
+    const double g1 = gamma - 1.0;
+    const double cp = gamma * R / g1;
+    const double H0 = cp * T0;
+    double V;
+    if (u_n <= -a_i) {
+        V = Kokkos::sqrt(Kokkos::fmin(u2, 2.0 * H0 * (1.0 - 1e-3)));
+    } else {
+        const double J = u_n + 2.0 * a_i / g1;
+        const double A = 0.25 * g1 * c_dn * c_dn + 0.5, B = -0.5 * g1 * J * c_dn, C = 0.25 * g1 * J * J - H0;
+        V = Kokkos::fmax((-B + Kokkos::sqrt(Kokkos::fmax(B * B - 4.0 * A * C, 0.0))) / (2.0 * A), 0.0);
+    }
+    const double T = T0 - 0.5 * V * V / cp;
+    const double p = p0 * Kokkos::pow(T / T0, gamma / g1);
+    W_g[0] = static_cast<rtype>(p / (R * T));
+    FOR_I_DIM W_g[1 + i] = static_cast<rtype>(V * dir[i]);
+    W_g[E] = static_cast<rtype>(p);
+}
 
 /** @brief Isentrope of a thermally perfect mixture of fixed composition y. */
 template <typename Table, typename F_Y>
@@ -65,7 +91,7 @@ struct ThermallyPerfectGas {
  * @param T_b Temperature of the boundary state (output).
  */
 template <typename Gas>
-MALLARD_INFLOW_NOINLINE KOKKOS_INLINE_FUNCTION void stagnation_state(const Gas & gas, const double gamma_c, const double T0, const double p0,
+KOKKOS_INLINE_FUNCTION void stagnation_state(const Gas & gas, const double gamma_c, const double T0, const double p0,
                                              const rtype * d, const rtype * W_i, const rtype * n, rtype * W_g,
                                              double & T_b) {
     constexpr uint8_t E = N_DIM + 1;
