@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <toml.hpp>
@@ -105,7 +106,7 @@ std::string error_of(F && f) {
 } // namespace
 
 TEST(FormatCompatTest, RestartFilesOfPastReleasesStartARun) {
-    if constexpr (N_DIM != 2) GTEST_SKIP() << "2D fixtures";
+    if constexpr (N_DIM != 2 || !std::is_same_v<rtype, double>) GTEST_SKIP() << "2D double-precision fixtures";
     for (const Fixture & f : RESTART_FIXTURES) {
         SCOPED_TRACE(f.release + "/" + f.name);
         const fs::path first = FORMATS / f.release / (f.name + "_000000.restart");
@@ -166,10 +167,15 @@ TEST(FormatCompatTest, RestartFilesOfANewerFormatAreRejectedClearly) {
     fs::remove(file);
 }
 
-TEST(FormatCompatTest, PastReleasesRestartFilesNameTheirDimension) {
-    if constexpr (N_DIM == 2) GTEST_SKIP() << "the fixtures are 2D";
+TEST(FormatCompatTest, RestartFilesOfAnotherBuildNameTheDifference) {
     const std::string error = error_of([] { read_restart((FORMATS / "v0.8.0" / "gas_000000.restart").string()); });
-    EXPECT_NE(error.find("holds a 2D run"), std::string::npos) << error;
+    if constexpr (N_DIM != 2) {
+        EXPECT_NE(error.find("holds a 2D run"), std::string::npos) << error;
+    } else if constexpr (!std::is_same_v<rtype, double>) {
+        EXPECT_NE(error.find("different floating-point precision"), std::string::npos) << error;
+    } else {
+        EXPECT_EQ(error, "");
+    }
 }
 
 #ifdef Mallard_HAS_HDF5
@@ -191,7 +197,9 @@ void expect_same_mesh(const MeshBlock & a, const MeshBlock & b) {
 } // namespace
 
 TEST(FormatCompatTest, MeshFilesOfPastReleasesAreRead) {
-    if constexpr (N_DIM != 2) GTEST_SKIP() << "2D fixtures";
+    if constexpr (N_DIM != 2 || !std::is_same_v<rtype, double>) {
+        GTEST_SKIP() << "2D fixtures, compared with double-precision meshes";
+    }
     const MeshBlock generated = read_mesh_block(fixture_input("gas"));
     for (const std::string release : {"v0.6.0", "v0.7.0", "v0.8.0"}) {
         SCOPED_TRACE(release);
