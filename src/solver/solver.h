@@ -478,7 +478,7 @@ class Solver {
         Kokkos::DefaultExecutionSpace overlap_space;  // runs the early cells while the halo is exchanged
         bool halo_current = false;                     // halo of conservatives filled since its last update
         bool reconstruction_started = false;           // start_reconstruction(conservatives) since its last update
-        Kokkos::DefaultExecutionSpace comm_space;      // high priority: packing and unpacking of exchanges
+        Kokkos::DefaultExecutionSpace comm_space;      // high priority: exchanges and the work around them
 
         toml::value input;
 
