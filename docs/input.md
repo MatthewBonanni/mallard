@@ -626,16 +626,12 @@ inhomogeneous axes' cell-center coordinates>, index, abscissa, value`, with
   the two-sided spectrum, so `R_ab(0) = <a'b'>`;
 - `shell`: the shell spectrum (`direction` `k`), sums to `<a'b'>` too.
 
-The cells move to slabs of whole planes (normal to the first inhomogeneous
-axis, or, in a periodic box, to x, then transposed to y slabs for the x
-transforms), whose lines are transformed on the device with a mixed-radix
-FFT (any N; prime factors cost O(N p)). Every line is transformed, and every
-sum taken, in an order fixed by the cells' global indices, and the per-plane
-sums are combined in plane order, so the results are bitwise the same on any
-number of ranks. Restart files (format version 5) carry the averages as named
-arrays; a restart file holding spectra of other fields or directions is an
-error unless `reset = true`. `tools/insitu_statistics.py` recomputes the same
-quantities from restart files, compares two spectra files and plots them.
+The results are bitwise the same on any number of ranks
+([design](design/insitu_statistics.md)). Restart files (format version 5)
+carry the averages as named arrays; a restart file holding spectra of other
+fields or directions is an error unless `reset = true`.
+`tools/insitu_statistics.py` recomputes the same quantities from restart
+files, compares two spectra files and plots them.
 
 ### `[statistics.phase]`
 
