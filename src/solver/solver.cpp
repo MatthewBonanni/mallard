@@ -911,7 +911,7 @@ void Solver::init_output() {
     if (check_interval == 0) {
         throw InputError("output.check_interval must be positive.");
     }
-    const bool async_output = toml::find_or<bool>(input, "output", "async", false);
+    const bool async_output = toml::find_or<bool>(input, "output", "async", true);
     const uint32_t io_threads = toml::find_or<uint32_t>(input, "output", "io_threads", 1);
     if (io_threads == 0) {
         throw InputError("output.io_threads must be positive.");

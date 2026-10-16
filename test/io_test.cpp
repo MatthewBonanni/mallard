@@ -353,8 +353,8 @@ TEST(IOTest, AsynchronousOutputWritesTheSameFiles) {
     }
     for (const auto & [snapshot_keys, restart_keys] : variants) {
         std::filesystem::remove_all(dir);
-        run_case(output_case(dir + "/sync", "", snapshot_keys, restart_keys));
-        run_case(output_case(dir + "/async", "async = true\nio_threads = 3\n", snapshot_keys, restart_keys));
+        run_case(output_case(dir + "/sync", "async = false\n", snapshot_keys, restart_keys));
+        run_case(output_case(dir + "/async", "io_threads = 3\n", snapshot_keys, restart_keys));
         const auto sync = files_under(dir + "/sync"), async = files_under(dir + "/async");
         EXPECT_EQ(sync.size(), have_hdf5() ? 23u : 13u) << snapshot_keys;
         ASSERT_EQ(async.size(), sync.size()) << snapshot_keys;
@@ -369,6 +369,29 @@ TEST(IOTest, AsynchronousOutputWritesTheSameFiles) {
             EXPECT_TRUE(async.at(name) == bytes) << name << " " << snapshot_keys;
         }
     }
+    std::filesystem::remove_all(dir);
+}
+
+TEST(IOTest, AWriterGoingAwayFinishesItsFileFirst) {
+    // A run that stops on an error destroys its writers without finish():
+    // the file being written in the background is still written whole
+    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_async_unwind").string();
+    std::filesystem::remove_all(dir);
+    auto mesh = make_mesh("cartesian_tri", 300, 200);
+    Kokkos::View<rtype **>::host_mirror_type values("values", mesh->n_cells, 1);
+    for (uint32_t i = 0; i < mesh->n_cells; i++) values(i, 0) = rtype(i) / rtype(7);
+    std::vector<Data> data = {Data("RHO", Kokkos::subview(values, Kokkos::ALL(), 0))};
+    for (bool async : {false, true}) {
+        DataWriter writer;
+        writer.init(parse_toml("prefix = \"" + dir + (async ? "/a" : "/s") + "\"\nformat = \"vtu\"\ninterval = 1\n"
+                               "variables = [\"RHO\"]\n"),
+                    data, mesh);
+        writer.set_async(async);
+        writer.write(0, 0.0_r);
+    }
+    const std::string sync = file_contents(dir + "/s_000000.vtu");
+    EXPECT_GT(sync.size(), 120000u * sizeof(rtype));
+    EXPECT_TRUE(file_contents(dir + "/a_000000.vtu") == sync);
     std::filesystem::remove_all(dir);
 }
 
@@ -446,7 +469,9 @@ TEST(IOTest, RoundingKeepsEveryValueWithinTheRelativeError) {
         for (size_t i = 0; i < values.size(); i++) {
             if (!std::isfinite(values[i])) {
                 EXPECT_EQ(std::isnan(rounded[i]), std::isnan(values[i]));
-                if (!std::isnan(values[i])) EXPECT_EQ(rounded[i], values[i]);
+                if (!std::isnan(values[i])) {
+                    EXPECT_EQ(rounded[i], values[i]);
+                }
                 continue;
             }
             EXPECT_LE(std::abs(rounded[i] - values[i]), bound * std::abs(values[i])) << values[i] << " " << bound;
@@ -458,7 +483,9 @@ TEST(IOTest, RoundingKeepsEveryValueWithinTheRelativeError) {
         compression::round_to_relative_error(twice, bound);
         EXPECT_EQ(std::memcmp(twice.data(), rounded.data(), twice.size() * sizeof(double)), 0) << bound;
         // Dropping at least 3 random bits changes 7 values in 8
-        if (bound >= 1e-15) EXPECT_GT(n_changed, values.size() * 3 / 4) << bound;
+        if (bound >= 1e-15) {
+            EXPECT_GT(n_changed, values.size() * 3 / 4) << bound;
+        }
     }
     std::vector<float> floats = {1.0f, 0.3f, -2.5e-30f, 3.0e30f, std::numeric_limits<float>::max()};
     const std::vector<float> exact = floats;

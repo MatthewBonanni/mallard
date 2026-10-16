@@ -589,6 +589,7 @@ std::vector<uint64_t> chunk_offsets(const std::vector<uint64_t> & all_sizes, uin
     return offsets;
 }
 
+#ifdef Mallard_HAS_MPI
 void write_at(int fd, uint64_t offset, const void * data, size_t n, const std::string & filename) {
     const char * p = static_cast<const char *>(data);
     while (n > 0) {
@@ -600,6 +601,7 @@ void write_at(int fd, uint64_t offset, const void * data, size_t n, const std::s
         offset += static_cast<uint64_t>(written);
     }
 }
+#endif
 
 } // namespace
 

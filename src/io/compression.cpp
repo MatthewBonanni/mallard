@@ -29,6 +29,8 @@ namespace compression {
 
 namespace {
 
+#ifdef Mallard_HAS_ZLIB
+
 void shuffle(const char * in, char * out, size_t n_bytes, size_t width) {
     const size_t n = n_bytes / width;
     for (size_t i = 0; i < n; i++) {
@@ -44,6 +46,8 @@ void unshuffle(const char * in, char * out, size_t n_bytes, size_t width) {
     }
     std::memcpy(out + n * width, in + n * width, n_bytes - n * width);
 }
+
+#endif
 
 template <typename Float, typename Bits, int MANTISSA>
 void round_values(std::span<Float> values, double relative_error) {
