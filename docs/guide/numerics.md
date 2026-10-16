@@ -25,7 +25,10 @@ t_stop = 0.2       # and/or n_steps, t_wall_stop
 At least one stop condition is required; the first one reached ends the run.
 `cfl` is the usual unstructured CFL number: on a uniform 2D grid of spacing h,
 `dt = cfl * h / (|u| + |v| + 2a)` (viscous, diffusive and source limits
-included).
+included). Boundary faces count the wave speed of their exterior state too
+(the inflow state of `upt`, `dirichlet` and inlets, the target of
+`nscbc_inlet`), so a fast jet entering a domain at rest runs from the first
+step at the requested `cfl`.
 
 ![Largest stable CFL number with SSPRK3 for each reconstruction and cell type](../images/guide/cfl_limits-light.svg#gh-light-mode-only)
 ![Largest stable CFL number with SSPRK3 for each reconstruction and cell type](../images/guide/cfl_limits-dark.svg#gh-dark-mode-only)
