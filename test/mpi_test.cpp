@@ -622,6 +622,10 @@ TEST(MPITest, BoundaryProbesDoNotDependOnTheRankCount) {
                "[[probes]]\nname = \"walls\"\nboundary_type = \"wall\"\nsampling = \"point\"\nfile = \"" + dir + "/" +
                sub + "/walls.csv\"\nvariables = [\"P\", \"T\", \"CF\", \"Q_W\", \"Y_PLUS\"]\ninterval = 5\n"
                "reference = {rho = 1.0, u = [1.0, 0.0], p = 1.0}\n"
+               "[[probes]]\nname = \"cut\"\nshape = \"cut_plane\"\npoint = [0.5, 0.4]\nnormal = [1.0, 0.7]\n"
+               "sampling = \"point\"\nvariables = [\"RHO\", \"MASS_FLUX\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" + sub +
+               "/cut.pvd\"\ninterval = 10\nreductions = [\"integral\", \"max\"]\nreductions_file = \"" + dir + "/" + sub +
+               "/cut.csv\"\n"
                "[[probes]]\nname = \"open\"\nboundary = [\"left\", \"right\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" +
                sub + "/open.pvd\"\nvariables = [\"MASS_FLUX\", \"MOMENTUM_FLUX\"]\ninterval = 10\n"
                "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/" + sub + "/open.csv\"\n";
@@ -641,7 +645,7 @@ TEST(MPITest, BoundaryProbesDoNotDependOnTheRankCount) {
             ss << in.rdbuf();
             return ss.str();
         };
-        for (const char * file : {"walls.csv", "open.csv", "open.pvd", "open_000010.vtp"}) {
+        for (const char * file : {"walls.csv", "open.csv", "open.pvd", "open_000010.vtp", "cut.csv", "cut_000010.vtp"}) {
             const std::string a = read(dir + "/serial/" + file);
             EXPECT_FALSE(a.empty()) << file;
             EXPECT_EQ(read(dir + "/ranks/" + file), a) << file;

@@ -91,7 +91,8 @@ constexpr int32_t U_TAU = FIRST + 18;
 constexpr int32_t Y_PLUS = FIRST + 19;
 constexpr int32_t SPECIES_FLUX = FIRST + 32;  // + species
 
-constexpr bool on_faces(int32_t k) { return k >= FIRST; }
+constexpr bool on_faces(int32_t k) { return k >= TRACTION_PRESSURE && k < SPECIES_FLUX; }
+constexpr bool normals(int32_t k) { return k >= FIRST; }
 constexpr bool gradients(int32_t k) { return (k >= TRACTION_VISCOUS && k <= Q_W && k != CP) || k == U_TAU || k == Y_PLUS; }
 constexpr bool reference(int32_t k) { return k == CF || k == CP; }
 
@@ -178,8 +179,9 @@ void write_vtp_file(const std::string & file, const probe::Geometry & g, const s
     };
     // Polygons carry the samples as cell data; otherwise the samples are the points
     const bool polygons = !g.polygon_offsets.empty();
+    const bool cell_data = polygons && !g.vertices.empty();
     const size_t n = g.nodes.size();
-    const std::vector<probe::Point> & points = polygons ? g.vertices : g.nodes;
+    const std::vector<probe::Point> & points = cell_data ? g.vertices : g.nodes;
     std::vector<double> xyz(3 * points.size(), 0.0);
     for (size_t p = 0; p < points.size(); p++) {
         for (size_t d = 0; d < N_DIM; d++) xyz[3 * p + d] = points[p][d];
@@ -227,14 +229,14 @@ void write_vtp_file(const std::string & file, const probe::Geometry & g, const s
             << a.components << "\" format=\"appended\" offset=\"" << offset << "\"/>\n";
         offset += sizeof(uint64_t) + a.bytes.size();
     };
-    const char * cells = polygons ? "Polys" : g.dim == 0 ? "Verts" : "Lines";
-    const char * data = polygons ? "CellData" : "PointData";
+    const char * cells = polygons ? (g.dim == 1 ? "Lines" : "Polys") : g.dim == 0 ? "Verts" : "Lines";
+    const char * data = cell_data ? "CellData" : "PointData";
     const size_t n_cells = offsets.size();
     out << "<?xml version=\"1.0\"?>\n<VTKFile type=\"PolyData\" version=\"1.0\" byte_order=\"LittleEndian\" "
            "header_type=\"UInt64\">\n  <PolyData>\n    <Piece NumberOfPoints=\""
-        << points.size() << "\" NumberOfVerts=\"" << (!polygons && g.dim == 0 ? n_cells : 0) << "\" NumberOfLines=\""
-        << (!polygons && g.dim > 0 ? n_cells : 0) << "\" NumberOfStrips=\"0\" NumberOfPolys=\""
-        << (polygons ? n_cells : 0) << "\">\n";
+        << points.size() << "\" NumberOfVerts=\"" << (std::string(cells) == "Verts" ? n_cells : 0) << "\" NumberOfLines=\""
+        << (std::string(cells) == "Lines" ? n_cells : 0) << "\" NumberOfStrips=\"0\" NumberOfPolys=\""
+        << (std::string(cells) == "Polys" ? n_cells : 0) << "\">\n";
     out << "      <Points>\n";
     data_array(arrays[0]);
     out << "      </Points>\n      <" << cells << ">\n";
@@ -291,7 +293,8 @@ void allocate_samples(Probes::Samples & s, const std::vector<uint32_t> & h_cells
 
 } // namespace
 
-void Probes::Samples::locate(const Mesh & mesh, const std::vector<probe::Point> & points, uint32_t n_variables) {
+void Probes::Samples::locate(const Mesh & mesh, const std::vector<probe::Point> & points, uint32_t n_variables,
+                             const std::vector<probe::Point> & point_normals) {
     n_global = points.size();
     std::vector<uint8_t> contained;
     const std::vector<int32_t> located = locate_points(mesh, points, &contained);
@@ -311,6 +314,11 @@ void Probes::Samples::locate(const Mesh & mesh, const std::vector<probe::Point> 
         h_cells.push_back(c);
     }
     allocate_samples(*this, h_cells, h_inside, h_offsets, n_variables);
+    if (!point_normals.empty()) {
+        std::vector<probe::Point> local;
+        for (uint64_t id : ids) local.push_back(point_normals[id]);
+        set_normals(local);
+    }
 
     distributed = mesh.n_global_cells > 0;
     const std::vector<uint64_t> all = distributed ? comm::gatherv(ids) : ids;
@@ -355,6 +363,32 @@ void Probes::Samples::on_faces(const Mesh & mesh, const probe::FaceSet & set, ui
     allocate_samples(*this, h_cells, h_inside, h_offsets, n_variables);
 }
 
+void Probes::Samples::in_cells(const Mesh & mesh, const probe::CellPoints & set, const std::vector<probe::Point> & n,
+                               uint32_t n_variables) {
+    n_global = set.n_global;
+    distributed = mesh.n_global_cells > 0;
+    gathered_row = set.gathered_row;
+    std::vector<uint32_t> h_inside;
+    std::vector<rtype> h_offsets;
+    for (size_t i = 0; i < set.cells.size(); i++) {
+        h_inside.push_back(static_cast<uint32_t>(i));
+        for (size_t d = 0; d < N_DIM; d++) {
+            h_offsets.push_back(static_cast<rtype>(set.points[i][d] - static_cast<double>(mesh.h_cell_coords(set.cells[i], d))));
+        }
+    }
+    allocate_samples(*this, set.cells, h_inside, h_offsets, n_variables);
+    set_normals(std::vector<probe::Point>(set.cells.size(), n.empty() ? probe::Point{} : n[0]));
+}
+
+void Probes::Samples::set_normals(const std::vector<probe::Point> & n) {
+    normals = Kokkos::View<rtype *[N_DIM]>("probe_normals", n.size());
+    auto h = Kokkos::create_mirror_view(normals);
+    for (size_t i = 0; i < n.size(); i++) {
+        for (size_t d = 0; d < N_DIM; d++) h(i, d) = static_cast<rtype>(n[i][d]);
+    }
+    Kokkos::deep_copy(normals, h);
+}
+
 void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes, const ProbeFields & fields,
                                const ProbeReference & reference, bool need_gradients) {
     const uint32_t n = static_cast<uint32_t>(cells.extent(0));
@@ -364,7 +398,8 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
     const auto out = values;
     const CellSampler sampler = fields.cells;
     const bool on_faces = faces.extent(0) > 0;
-    if (sampling == Sampling::CELL && !on_faces) {
+    const bool has_normals = normals.extent(0) > 0;
+    if (sampling == Sampling::CELL && !has_normals) {
         Kokkos::parallel_for("probe_cell_values", n, KOKKOS_LAMBDA(const uint32_t i) {
             for (uint32_t v = 0; v < n_vars; v++) out(i, v) = sampler(cell(i), code(v));
         });
@@ -460,11 +495,11 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
         const rtype h = sampler.P(c, N_DIM + 2) + g / (g - 1.0_r) * (pv - pv_c);
         rtype nv[N_DIM] = {}, u_n = 0.0_r;
         int32_t ibc = -1;
-        if (on_faces) {
+        if (has_normals) {
             FOR_I_DIM nv[i] = normal(s, i);
             u_n = dot<N_DIM>(Wf + 1, nv);
-            ibc = boundaries.face_bc(face(s));
         }
+        if (on_faces) ibc = boundaries.face_bc(face(s));
         // Viscous traction tau . n and heat flux into the fluid, with the
         // viscous flux's wall treatment: the gradients normal to walls from
         // the wall values
@@ -639,10 +674,20 @@ void Probes::init(const toml::value & input, const Mesh & mesh, const std::vecto
         p.codes = to_device(h_codes, "probe_codes");
 
         const bool boundary = entry.contains("boundary") || entry.contains("boundary_type");
+        const std::string shape = toml::find_or<std::string>(entry, "shape", "");
+        const bool cut = shape == "cut_plane";
+        const bool oriented = cut || (N_DIM == 2 && entry.contains("shape") && shape != "point" && shape != "points") ||
+                              (N_DIM == 2 && !entry.contains("shape") && !entry.contains("point")) ||
+                              (N_DIM == 3 && (shape == "rectangle" || shape == "disk" || shape == "sphere" ||
+                                              shape == "cylinder" || shape == "cone" || shape == "surface"));
         for (size_t v = 0; v < p.variables.size(); v++) {
             const int32_t k = h_codes[v];
             if (code::on_faces(k) && !boundary) {
                 throw InputError(key + ".variables: " + p.variables[v] + " is for boundary probes.");
+            }
+            if (code::normals(k) && !boundary && !oriented) {
+                throw InputError(key + ".variables: " + p.variables[v] + " needs a surface (" +
+                                 (N_DIM == 2 ? "a curve, boundary or cut plane)." : "a boundary, cut plane or surface shape)."));
             }
             if (code::gradients(k) && !viscous) {
                 throw InputError(key + ".variables: " + p.variables[v] + " needs a viscous run.");
@@ -710,20 +755,53 @@ void Probes::init(const toml::value & input, const Mesh & mesh, const std::vecto
             p.nodes.on_faces(mesh, set, static_cast<uint32_t>(h_codes.size()));
             p.geometry = std::move(set.geometry);
             p.geometry.shape = zones.size() == 1 ? "boundary " + zones[0] : "boundaries";
+        } else if (cut) {
+            probe::Vec3 x = {0.0, 0.0, 0.0}, n = {0.0, 0.0, 0.0};
+            const std::vector<rtype> xv = find_real_vector(entry, "point"), nv = find_real_vector(entry, "normal");
+            if (xv.size() != N_DIM || nv.size() != N_DIM) {
+                throw InputError(key + ": point and normal must have " + std::to_string(N_DIM) + " components.");
+            }
+            for (size_t d = 0; d < N_DIM; d++) {
+                x[d] = static_cast<double>(xv[d]);
+                n[d] = static_cast<double>(nv[d]);
+            }
+            if (!(n[0] * n[0] + n[1] * n[1] + n[2] * n[2] > 0.0)) throw InputError(key + ".normal must not be zero.");
+            std::array<probe::Vec3, 2> bounds{};
+            const bool bounded = entry.contains("bounds");
+            if (bounded) {
+                const toml::value & b = entry.at("bounds");
+                if (!b.is_array() || b.as_array().size() != 2) throw InputError(key + ".bounds must be [[lo...], [hi...]].");
+                for (size_t k = 0; k < 2; k++) {
+                    const toml::value & corner = b.as_array()[k];
+                    if (!corner.is_array() || corner.as_array().size() != N_DIM) {
+                        throw InputError(key + ".bounds corners must have " + std::to_string(N_DIM) + " components.");
+                    }
+                    for (size_t d = 0; d < N_DIM; d++) bounds[k][d] = as_double(corner.as_array()[d], key + ".bounds");
+                }
+            }
+            probe::CutSet set = probe::cut_plane(mesh, x, n, mesh.n_global_cells > 0, bounded ? &bounds : nullptr);
+            const double l = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+            probe::Point unit_n;
+            for (size_t d = 0; d < N_DIM; d++) unit_n[d] = n[d] / l;
+            p.nodes.in_cells(mesh, set.nodes, {unit_n}, static_cast<uint32_t>(h_codes.size()));
+            if (!p.reductions.empty()) p.quadrature.in_cells(mesh, set.quadrature, {unit_n}, static_cast<uint32_t>(h_codes.size()));
+            p.geometry = std::move(set.geometry);
+            if (p.nodes.n_global == 0) throw InputError(key + ": the plane misses the mesh.");
         } else {
             p.geometry = probe::make_geometry(entry, key);
-            p.nodes.locate(mesh, p.geometry.nodes, static_cast<uint32_t>(h_codes.size()));
+            p.nodes.locate(mesh, p.geometry.nodes, static_cast<uint32_t>(h_codes.size()), p.geometry.normals);
             if (!p.reductions.empty() && p.geometry.dim > 0) {
-                p.quadrature.locate(mesh, p.geometry.quad_points, static_cast<uint32_t>(h_codes.size()));
+                p.quadrature.locate(mesh, p.geometry.quad_points, static_cast<uint32_t>(h_codes.size()),
+                                    p.geometry.quad_normals);
             }
         }
 
         if (comm::is_root()) {
             if (p.write_samples && p.format == Format::CSV) {
-                std::string header = boundary ? "step,t,face" : "step,t,point";
+                std::string header = boundary ? "step,t,face" : cut ? "step,t,cell" : "step,t,point";
                 for (size_t d = 0; d < N_DIM; d++) header += std::string(",") + "xyz"[d];
-                if (boundary) {
-                    if (N_DIM == 2) header += ",s";
+                if (!p.geometry.node_weights.empty()) {
+                    if (!p.geometry.arc_length.empty()) header += ",s";
                     for (size_t d = 0; d < N_DIM; d++) header += std::string(",n") + "xyz"[d];
                     header += ",area";
                 }
@@ -764,7 +842,9 @@ void Probes::init(const toml::value & input, const Mesh & mesh, const std::vecto
                     std::vector<double> normals;
                     for (const auto & x : p.geometry.normals) normals.insert(normals.end(), x.begin(), x.end());
                     h5::write_rows(file, "normals", n, N_DIM, 0, n, normals.data(), H5P_DEFAULT);
-                    h5::write_rows(file, "area", n, 1, 0, n, p.geometry.node_weights.data(), H5P_DEFAULT);
+                    if (!p.geometry.node_weights.empty()) {
+                        h5::write_rows(file, "area", n, 1, 0, n, p.geometry.node_weights.data(), H5P_DEFAULT);
+                    }
                 }
                 if (!p.geometry.polygon_offsets.empty()) {
                     const auto & g = p.geometry;
@@ -773,8 +853,10 @@ void Probes::init(const toml::value & input, const Mesh & mesh, const std::vecto
                     std::vector<uint64_t> vertices(g.polygon_vertices.begin(), g.polygon_vertices.end());
                     h5::Handle group(H5Gcreate2(file, "polygons", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose,
                                      "creating polygons");
-                    h5::write_rows(file, "vertices", g.vertices.size(), N_DIM, 0, g.vertices.size(), xyz_v.data(),
-                                   H5P_DEFAULT);
+                    if (!g.vertices.empty()) {
+                        h5::write_rows(file, "vertices", g.vertices.size(), N_DIM, 0, g.vertices.size(), xyz_v.data(),
+                                       H5P_DEFAULT);
+                    }
                     h5::write_rows(file, "polygons/vertices", vertices.size(), 1, 0, vertices.size(), vertices.data(),
                                    H5P_DEFAULT);
                     h5::write_rows(file, "polygons/offsets", g.polygon_offsets.size(), 1, 0, g.polygon_offsets.size(),
@@ -897,7 +979,8 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields) {
         const bool extrema = std::any_of(p.reductions.begin(), p.reductions.end(),
                                          [](Reduction r) { return r == Reduction::MIN || r == Reduction::MAX; });
         std::vector<double> nodes, quad;
-        const bool own_quadrature = p.geometry.quad_points.empty();
+        // Collective on every rank (the geometry lives on rank 0 for some shapes)
+        const bool own_quadrature = p.quadrature.n_global == 0;
         if (p.write_samples || extrema || own_quadrature) {
             p.nodes.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients);
             nodes = p.nodes.gather();
@@ -915,8 +998,8 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields) {
                     out << step << "," << std::setprecision(std::numeric_limits<double>::max_digits10) << double(t)
                         << "," << i;
                     for (size_t d = 0; d < N_DIM; d++) out << "," << p.geometry.nodes[i][d];
-                    if (!p.geometry.normals.empty()) {
-                        if (N_DIM == 2) out << "," << p.geometry.arc_length[i];
+                    if (!p.geometry.node_weights.empty()) {
+                        if (!p.geometry.arc_length.empty()) out << "," << p.geometry.arc_length[i];
                         for (size_t d = 0; d < N_DIM; d++) out << "," << p.geometry.normals[i][d];
                         out << "," << p.geometry.node_weights[i];
                     }
