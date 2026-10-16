@@ -136,7 +136,7 @@ KOKKOS_INLINE_FUNCTION double primitive(const Node & n, const double * vertices,
             phi = polygon(vertices + 2 * n.first, n.count, q[0], q[1]);
             break;
         case Kind::IMPLICIT:
-            phi = programs(n.first, [&q](const uint16_t i) { return q[i]; });
+            phi = programs(n.first, expr::ArrayVariables{q});
             break;
         default:
             break;
@@ -154,7 +154,7 @@ KOKKOS_INLINE_FUNCTION double primitive(const Node & n, const double * vertices,
 template <typename Programs>
 KOKKOS_INLINE_FUNCTION double distance(const Node * nodes, const uint32_t n, const double * vertices,
                                        const Programs & programs, const double x[3]) {
-    double s[MAX_STACK];
+    double s[MAX_STACK] = {};
     int top = -1;
     for (uint32_t i = 0; i < n; i++) {
         const Node & node = nodes[i];

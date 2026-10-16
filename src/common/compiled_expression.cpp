@@ -106,7 +106,7 @@ double evaluate_constant(const Node & n) {
     std::vector<Instr> code;
     for (const auto & a : n.args) code.push_back(Instr{a->value, 0, Op::CONST});
     code.push_back(Instr{0.0, n.index, n.op});
-    return evaluate(code.data(), static_cast<uint32_t>(code.size()), [](uint16_t) { return 0.0; });
+    return evaluate(code.data(), static_cast<uint32_t>(code.size()), ArrayVariables{nullptr});
 }
 
 /** @brief The node op(args), with exprtk's integer powers and constants folded. */
@@ -151,8 +151,8 @@ double literal_value(const std::string & text) {
 
 class Parser {
     public:
-        Parser(const std::string & name, const std::string & text, const std::vector<std::string> & variables) :
-            name(name), text(text), variables(variables) {
+        Parser(const std::string & name_, const std::string & text_, const std::vector<std::string> & variables_) :
+            name(name_), text(text_), variables(variables_) {
             tokenize();
         }
 
