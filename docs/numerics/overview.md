@@ -1,8 +1,11 @@
 # Numerical methods
 
-Mallard solves the 2D compressible Euler or Navier-Stokes equations with a
-cell-centered finite volume method on unstructured meshes of triangles and
-quadrilaterals.
+Mallard solves the compressible Euler or Navier-Stokes equations, for a single
+gas or a reacting mixture, with a cell-centered finite volume method on
+unstructured meshes: triangles and quadrilaterals in 2D (planar or
+axisymmetric), tetrahedra, hexahedra, prisms and pyramids in 3D. This page
+describes the methods; the [numerics guide](../guide/numerics.md) is about
+choosing among them.
 
 ## Discretization
 
@@ -245,7 +248,7 @@ the Riemann solver.
 - Cell gradients come from a weighted least-squares quadratic fit ([Barth & Frederickson 1990](../references.md#barth-frederickson-1990)) over the vertex neighbors and the cell's boundary ghosts. A linear fit is only first-order accurate on one-sided boundary stencils and on triangles, where its errors cancel only in the interior of regular meshes.
 - Face gradients of velocity and temperature average the two cell gradients. They are then corrected along the face normal so that their component along the line between the cell centroids matches the direct difference ([Diskin et al. 2010](../references.md#diskin-2010)).
 - Transmissive faces take the face values and gradients of their image face, as the convective flux does.
-- Stress follows the Stokes hypothesis; heat flux uses a constant Prandtl number. Viscosity is constant or follows Sutherland's law ([Sutherland 1893](../references.md#sutherland-1893)).
+- Stress follows the Stokes hypothesis; heat flux uses a constant Prandtl number. Viscosity is constant, follows Sutherland's law ([Sutherland 1893](../references.md#sutherland-1893)) or a power law.
 
 ## Axisymmetric flows
 
