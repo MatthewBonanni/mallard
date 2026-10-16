@@ -45,6 +45,7 @@
 #include "halo_exchange.h"
 #include "log.h"
 #include "numerics_preset.h"
+#include "run_status.h"
 
 struct ForceMonitor {
     std::string zone;
@@ -52,6 +53,7 @@ struct ForceMonitor {
     Kokkos::View<uint32_t *> faces;
     uint64_t interval = 1;
     std::shared_ptr<std::ofstream> out;
+    MonitorValues last;
 };
 
 constexpr int N_FLOW_STATISTICS = 9;
@@ -61,6 +63,7 @@ struct IntegralMonitor {
     std::string file;
     std::shared_ptr<std::ofstream> out;
     bool budget = false;  // also the kinetic-energy budget (Solver::kinetic_energy_budget)
+    MonitorValues last;
 };
 
 /**
@@ -433,6 +436,12 @@ class Solver {
         void print_setup() const;
         void print_progress();
         void print_summary(const std::string & stop) const;
+        /** @brief The status at this step, throughput since the last progress row; no diagnostics or memory. */
+        RunStatus run_status() const;
+        void record_mesh_provenance() const;
+        /** @brief Provenance lines of the CSV files and the run log's start record. */
+        void write_provenance();
+        std::vector<std::string> integral_names() const;
         template <typename F>
         void timed_phase(const std::string & name, F && f);
         void write_data(bool force = false);
@@ -499,6 +508,7 @@ class Solver {
         rtype t_wall_stop;
         bool use_cfl;
         rtype dt = 0.0;
+        rtype dt_cfl1 = 0.0;  // stable time step at CFL 1
         rtype dt_fixed = 0.0;
         rtype cfl;
         rtype t;
@@ -521,6 +531,8 @@ class Solver {
         uint64_t step_run_start = 0;
         uint64_t step_last_check = 0;
         uint64_t n_progress_rows = 0;
+        bool input_from_file = false;  // init(file) has recorded the input's provenance
+        bool run_log_on = false;       // [output] run_log is set
 
         // Numerics and physics
         std::shared_ptr<Mesh> mesh;

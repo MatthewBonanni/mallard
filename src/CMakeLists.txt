@@ -4,7 +4,11 @@ add_library(MallardCore STATIC
     common/common_io.cpp
     common/build_info.cpp
     common/growing_buffer.cpp
+    common/json.cpp
     common/log.cpp
+    common/provenance.cpp
+    common/run_log.cpp
+    common/run_status.cpp
     mesh/curved.cpp
     mesh/mesh.cpp
     mesh/mesh_io.cpp
@@ -86,7 +90,19 @@ endif()
 target_link_libraries(MallardCore PRIVATE yaml-cpp::yaml-cpp)
 mallard_target_warnings(MallardCore)
 
+string(TOUPPER "${CMAKE_BUILD_TYPE}" build_type_upper)
+set(Mallard_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${build_type_upper}}")
+string(STRIP "${Mallard_CXX_FLAGS}" Mallard_CXX_FLAGS)
+string(REPLACE "\\" "\\\\" Mallard_CXX_FLAGS "${Mallard_CXX_FLAGS}")
+string(REPLACE "\"" "\\\"" Mallard_CXX_FLAGS "${Mallard_CXX_FLAGS}")
 configure_file(common/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/version.h @ONLY)
+# The git state for provenance, refreshed at every build rather than at configure time
+set(git_version_command ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_SOURCE_DIR} -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
+    -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/generated/git_version.h -P ${CMAKE_SOURCE_DIR}/cmake/git_version.cmake)
+execute_process(COMMAND ${git_version_command})
+add_custom_target(mallard_git_version COMMAND ${git_version_command}
+    BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/generated/git_version.h)
+add_dependencies(MallardCore mallard_git_version)
 target_include_directories(MallardCore PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 if(Mallard_ENABLE_MPI)
     target_link_libraries(MallardCore PUBLIC MPI::MPI_CXX)

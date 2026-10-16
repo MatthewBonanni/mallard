@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <vector>
 #include <type_traits>
 
@@ -103,6 +104,11 @@ struct Received {
  */
 template <typename T>
 Received<T> exchange(std::vector<std::vector<T>> && send);
+
+/**
+ * @brief Rank 0's value, on every rank.
+ */
+std::string broadcast(const std::string & value);
 
 /**
  * @brief Concatenation of every rank's local vector, in rank order.

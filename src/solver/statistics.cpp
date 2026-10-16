@@ -439,6 +439,12 @@ void Probes::init(const toml::value & input, const Mesh & mesh, const std::vecto
     }
 }
 
+void Probes::annotate(const std::string & text) {
+    for (auto & set : sets) {
+        if (set.out) *set.out << text << std::flush;
+    }
+}
+
 bool Probes::due(uint64_t step) const {
     return std::any_of(sets.begin(), sets.end(), [&](const Set & s) { return step % s.interval == 0; });
 }

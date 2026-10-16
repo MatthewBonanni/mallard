@@ -33,7 +33,7 @@ namespace {
 
 // step_scalars: [t, t_target, dt_scales]; step_io: [t, t_target, dt]
 [[maybe_unused]] constexpr int T = 0, T_TARGET = 1, DT_SCALES = 2, STEP_DT = DT_SCALES + int(DT), N_STEP_SCALARS = DT_SCALES + int(N_DT_SCALES);
-[[maybe_unused]] constexpr int IO_T = 0, IO_T_TARGET = 1, IO_DT = 2, N_STEP_IO = 3;
+[[maybe_unused]] constexpr int IO_T = 0, IO_T_TARGET = 1, IO_DT = 2, IO_DT_CFL1 = 3, N_STEP_IO = 4;
 
 #ifdef KOKKOS_ENABLE_CUDA
 void check(const cudaError_t err, const char * what) {
@@ -80,14 +80,14 @@ void Solver::record_step() {
         }
     }
 #endif
-    const Kokkos::View<rtype> dt_cfl1 = step_dt_cfl1;
+    const Kokkos::View<rtype> dt_cfl1_d = step_dt_cfl1;
     const Kokkos::View<rtype *> s = step_scalars;
     const bool use_cfl_ = use_cfl;
     const rtype cfl_ = cfl, dt_fixed_ = dt_fixed, sponge_dt_max_ = sponge_dt_max;
     Kokkos::parallel_for("step_dt", 1, KOKKOS_LAMBDA(const int) {
         // calc_dt's arithmetic; volatile keeps the compiler from fusing the
         // product into the comparison's sum (one rounding instead of two)
-        volatile rtype dt_v = use_cfl_ ? cfl_ * dt_cfl1() : dt_fixed_;
+        volatile rtype dt_v = use_cfl_ ? cfl_ * dt_cfl1_d() : dt_fixed_;
         rtype dt_ = dt_v;
         dt_ = (sponge_dt_max_ < dt_) ? sponge_dt_max_ : dt_;
         const rtype t_ = s(T), t_target = s(T_TARGET);
@@ -103,6 +103,7 @@ void Solver::record_step() {
     halo_current = false;
     Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), Kokkos::subview(step_io, IO_DT),
                       Kokkos::subview(step_scalars, STEP_DT));
+    Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), Kokkos::subview(step_io, IO_DT_CFL1), step_dt_cfl1);
 }
 
 void Solver::graph_step() {
@@ -152,6 +153,7 @@ void Solver::graph_step() {
     }
     Kokkos::DefaultExecutionSpace().fence("step_graph");
     dt = step_io(IO_DT);
+    dt_cfl1 = step_io(IO_DT_CFL1);
     if (!(dt > 0.0_r)) {
         throw std::runtime_error("Invalid dt: " + std::to_string(dt) + ".");
     }

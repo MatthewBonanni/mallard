@@ -30,6 +30,8 @@
 #include "mesh_block.h"
 #include "mpi_compare.h"
 #include "partition.h"
+#include "json_reader.h"
+#include "provenance.h"
 #include "test_fixtures.h"
 #include "solver.h"
 
@@ -487,7 +489,7 @@ TEST(MPITest, AsynchronousAndCompressedRestartFilesDoNotDependOnTheRankCount) {
                 const std::string bytes_d((std::istreambuf_iterator<char>(a)), std::istreambuf_iterator<char>());
                 const std::string bytes_s((std::istreambuf_iterator<char>(b)), std::istreambuf_iterator<char>());
                 EXPECT_FALSE(bytes_s.empty()) << s;
-                EXPECT_TRUE(bytes_d == bytes_s) << d << " on " << comm::size() << " ranks";
+                EXPECT_TRUE(without_provenance(bytes_d) == without_provenance(bytes_s)) << d << " on " << comm::size() << " ranks";
             }
         }
         std::string input = restart_case(20, "");
@@ -618,10 +620,35 @@ TEST(MPITest, StatisticsAndProbesDoNotDependOnTheRankCount) {
             ss << in.rdbuf();
             return ss.str();
         };
-        const std::string a = read(dir + "/reference.csv");
+        const std::string a = without_comment_lines(read(dir + "/reference.csv"));
         EXPECT_FALSE(a.empty());
-        EXPECT_EQ(read(dir + "/distributed.csv"), a);
+        EXPECT_EQ(without_comment_lines(read(dir + "/distributed.csv")), a);
     }
+    comm::barrier();
+}
+
+TEST(MPITest, EveryRankWritesRankZerosProvenance) {
+    const std::string dir = io_dir() + "_provenance";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    Solver solver;
+    solver.init(parse_toml(restart_case(2, "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtu\"\n"
+                                                  "interval = 2\nvariables = [\"RHO\"]\n"
+                                                  "[[write_data]]\nprefix = \"" + dir + "/r\"\nformat = \"restart\"\n"
+                                                  "interval = 2\n")));
+    solver.run();
+    comm::barrier();
+    const std::string expected = provenance::json();
+    EXPECT_EQ(comm::broadcast(expected), expected);
+    EXPECT_EQ(json_reader::parse(expected)["run"]["ranks"].number, comm::size());
+    std::ostringstream piece;
+    piece << dir << "/f_000002";
+    if (comm::size() > 1) piece << "_p" << std::setw(4) << std::setfill('0') << comm::rank();
+    std::ifstream in(piece.str() + ".vtu");
+    std::stringstream ss;
+    ss << in.rdbuf();
+    EXPECT_EQ(provenance::parse_comment(ss.str()), expected) << piece.str();
+    EXPECT_EQ(read_restart(dir + "/r_000002.restart").provenance, expected);
     comm::barrier();
 }
 

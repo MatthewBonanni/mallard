@@ -136,6 +136,8 @@ class Probes {
 
         std::vector<std::pair<std::string, std::string>> summary() const;
         std::vector<std::string> files() const;
+        /** @brief Appends text to every probe file (rank 0). */
+        void annotate(const std::string & text);
 
     private:
         struct Set {
