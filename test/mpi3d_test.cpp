@@ -117,6 +117,27 @@ TEST(MPI3DTest, WallModelsMatchSerial) {
     }
 }
 
+TEST(MPI3DTest, DynamicFlameEfficiencyOnTetrahedraMatchesSerial) {
+    // The test filter passes exchange the filtered progress variable; beta is an exact domain sum
+    std::ostringstream s;
+    s << "[run]\nn_steps = 3\ncfl = 0.25\n"
+      << "[mesh]\ntype = \"cartesian_tet\"\nNx = 8\nNy = 5\nNz = 4\nLx = 0.008\nLy = 0.005\nLz = 0.004\n"
+      << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\n"
+      << "T = \"1300 + 1000 * tanh((x - 0.004 - 0.001 * sin(1200 * y) * cos(900 * z)) / 0.0008)\"\n"
+      << "u = [\"3 * sin(1500 * y)\", \"2 * sin(1300 * z)\", \"0.0\"]\nX = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n";
+    for (int k = 0; k < 6; k++) {
+        s << "[[boundaries]]\nname = \"" << ZONES[k] << "\"\ntype = \"" << (k == 0 ? "p_out\"\np = 101325.0" : "symmetry\"")
+          << "\n";
+    }
+    s << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+      << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR
+         "/mechanisms/h2o2.yaml\"\n"
+      << "[chemistry]\n[output]\ncheck_interval = 1000000\n[les]\nmodel = \"sigma\"\n"
+      << "[les.combustion]\nmodel = \"tfles\"\ndelta_L = 3e-4\ns_L = 2.3\nT_unburnt = 300.0\nT_burnt = 2300.0\n"
+      << "efficiency = \"dynamic\"\n";
+    expect_matches_serial(s.str(), [](const Solver & solver) { EXPECT_GT(solver.tfles_beta(), 0.0); });
+}
+
 TEST(MPI3DTest, CharacteristicBoundariesMatchSerial) {
     std::string input = box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"euler\"\n");
     const std::string from = "name = \"right\"\ntype = \"symmetry\"\n";
