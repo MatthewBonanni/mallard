@@ -16,6 +16,37 @@ in the wrong table, or unused with the chosen settings (for example
 `[numerics.face_reconstruction] order` with `type = "MUSCL"`) is an error,
 listed with its line and the closest key Mallard looked for.
 
+## Units
+
+Numbers are in SI units. Every dimensional key also takes a quantity with a
+unit, as a string converted to SI on read: `p = "1 atm"`, `T = "25 degC"`,
+`Lx = "5 mm"`, `u = ["10 m/s", 0.0]`, `strength = "20 1/s"`. A unit of the
+wrong dimension is an error naming the key and its dimension. Expressions are
+in SI units (a key that takes an expression also takes a single quantity).
+Syntax and the unit table: [Units](guide/input_files.md#units).
+
+| Dimension | Keys |
+|---|---|
+| Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.curved.center`, `radius`; `periodic.translation`; `boundaries.L`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `start`, `end` |
+| Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D) |
+| Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
+| Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
+| Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`; `physics.p_ref` |
+| Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`) and `dirichlet` boundaries |
+| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`; `turbulence.convection_velocity`; `les.combustion.s_L` |
+| Velocity squared (m^2/s^2) | `turbulence.reynolds_stress` |
+| Acceleration (m/s^2) | `source.gravity` |
+| Rate (1/s) | `sponges.strength` |
+| Dynamic viscosity (Pa s) | `physics.mu` |
+| Heat flux (W/m^2) | `boundaries.q` |
+| Mass flux (kg/(m^2 s)) | `source.mass_flow` |
+| Sources (per unit volume) | `source.rho` (kg/(m^3 s)), `rhou` (N/m^3), `rhoE` (W/m^3) |
+| Concentration (plain numbers in kmol/m^3) | `chemistry.C_reg` |
+
+Every other real-valued key (`cfl`, `gamma`, `Pr`, mole fractions, model
+constants, tolerances, ...) is dimensionless.
+
 ## Checking an input
 
 `Mallard --check input.toml` runs the whole setup of a run (mesh, partition,
@@ -107,7 +138,7 @@ transformed mesh.
 
 | Key | Description |
 |---|---|
-| `scale` | A factor for every axis (e.g. `0.001` for a mesh in mm), or one per axis `[s_x, s_y]` (`[s_x, s_y, s_z]` in 3D); nonzero |
+| `scale` | A factor for every axis, the length of one unit of the mesh file (e.g. `0.001` or `"1 mm"` for a mesh in mm), or one per axis `[s_x, s_y]` (`[s_x, s_y, s_z]` in 3D); nonzero |
 | `rotate` | 2D: angle in degrees, counterclockwise. 3D: `{axis = [a_x, a_y, a_z], angle = degrees}`, right-handed about the axis through the origin |
 | `translate` | `[t_x, t_y]` (`[t_x, t_y, t_z]` in 3D) |
 

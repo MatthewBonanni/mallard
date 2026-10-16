@@ -155,7 +155,9 @@ TEST(CheckTimeStep, MatchesTheUniformGridFormulaAndFindsTheFastestRegion) {
     const double a = std::sqrt(1.4), h = 2.0 / 16;
     const CheckReport r = check(box("1.0 + 2.0 * (x > 1.5)"));
     ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
-    if (N_DIM == 2) EXPECT_NEAR(r.dt, 0.8 * h / (3.0 + 2.0 * a), roundoff(1e-12));
+    if (N_DIM == 2) {
+        EXPECT_NEAR(r.dt, 0.8 * h / (3.0 + 2.0 * a), roundoff(1e-12));
+    }
     EXPECT_EQ(r.dt_limit, "CFL");
     EXPECT_NEAR(r.cfl, 0.8, roundoff(1e-12));
     EXPECT_GT(r.limiting_x[0], 1.5);

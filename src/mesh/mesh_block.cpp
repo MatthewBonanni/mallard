@@ -44,7 +44,7 @@ rtype stretched_coordinate(uint32_t i, uint32_t n, rtype L, rtype beta) {
 Stretching mesh_stretching(const Input & input) {
     Stretching stretching{};
     if (!input.contains("mesh") || !input.at("mesh").contains("stretching")) return stretching;
-    const std::vector<rtype> beta = find_real_vector(input, "mesh", "stretching");
+    const std::vector<rtype> beta = find_real_vector(input, "mesh", "stretching", dim::none);
     if (beta.size() != N_DIM) {
         throw InputError("[mesh] stretching must have " + std::to_string(N_DIM) + " components.");
     }
@@ -59,12 +59,12 @@ Stretching mesh_stretching(const Input & input) {
 
 namespace {
 
-std::vector<double> transform_vector(const Input & v, const std::string & key) {
+std::vector<double> transform_vector(const Input & v, const std::string & key, const Dimension & dimension) {
     if (!v.is_array() || v.as_array().size() != N_DIM) {
         throw InputError("mesh.transform." + key + " must have " + std::to_string(N_DIM) + " components.");
     }
     std::vector<double> out;
-    for (const auto & item : v.as_array()) out.push_back(as_double(item, "mesh.transform." + key));
+    for (const auto & item : v.as_array()) out.push_back(as_double(item, "mesh.transform." + key, dimension));
     for (double x : out) {
         if (!std::isfinite(x)) throw InputError("mesh.transform." + key + " must be finite.");
     }
@@ -98,11 +98,11 @@ MeshTransform mesh_transform(const Input & input) {
     if (table.contains("scale")) {
         const Input & s = table.at("scale");
         if (s.is_array()) {
-            const std::vector<double> v = transform_vector(s, "scale");
+            const std::vector<double> v = transform_vector(s, "scale", dim::length);
             std::copy(v.begin(), v.end(), scale.begin());
             parts.push_back("scale " + vector_text(v));
         } else {
-            scale.fill(as_double(s, "mesh.transform.scale"));
+            scale.fill(as_double(s, "mesh.transform.scale", dim::length));
             parts.push_back("scale " + logging::real(scale[0]));
         }
         for (double x : scale) {
@@ -115,17 +115,17 @@ MeshTransform mesh_transform(const Input & input) {
         std::array<double, 3> axis = {0.0, 0.0, 1.0};
         double degrees;
         if constexpr (N_DIM == 2) {
-            degrees = as_double(r, "mesh.transform.rotate");
+            degrees = as_double(r, "mesh.transform.rotate", dim::angle_degrees);
             parts.push_back("rotate " + logging::real(degrees) + " deg");
         } else {
             if (!r.is_table() || !r.contains("axis") || !r.contains("angle") || r.as_table().size() != 2) {
                 throw InputError("mesh.transform.rotate must be {axis = [x, y, z], angle = degrees}.");
             }
-            const std::vector<double> a = transform_vector(r.at("axis"), "rotate.axis");
+            const std::vector<double> a = transform_vector(r.at("axis"), "rotate.axis", dim::none);
             const double norm = std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
             if (!(norm > 0.0)) throw InputError("mesh.transform.rotate.axis must be nonzero.");
             for (size_t i = 0; i < 3; i++) axis[i] = a[i] / norm;
-            degrees = as_double(r.at("angle"), "mesh.transform.rotate.angle");
+            degrees = as_double(r.at("angle"), "mesh.transform.rotate.angle", dim::angle_degrees);
             parts.push_back("rotate " + logging::real(degrees) + " deg about " + vector_text(a));
         }
         if (!std::isfinite(degrees)) throw InputError("mesh.transform.rotate must be finite.");
@@ -140,7 +140,7 @@ MeshTransform mesh_transform(const Input & input) {
         for (size_t j = 0; j < N_DIM; j++) t.matrix[i][j] = R[i][j] * scale[j];
     }
     if (table.contains("translate")) {
-        const std::vector<double> v = transform_vector(table.at("translate"), "translate");
+        const std::vector<double> v = transform_vector(table.at("translate"), "translate", dim::length);
         std::copy(v.begin(), v.end(), t.translation.begin());
         parts.push_back("translate " + vector_text(v));
     }
@@ -375,11 +375,11 @@ MeshBlock read_mesh_block(const Input & input) {
     }
     const uint32_t Nx = toml::find_or<uint32_t>(input, "mesh", "Nx", 100);
     const uint32_t Ny = toml::find_or<uint32_t>(input, "mesh", "Ny", 100);
-    const rtype Lx = find_real_or(input, "mesh", "Lx", 1.0);
-    const rtype Ly = find_real_or(input, "mesh", "Ly", 1.0);
+    const rtype Lx = find_real_or(input, "mesh", "Lx", dim::length, 1.0);
+    const rtype Ly = find_real_or(input, "mesh", "Ly", dim::length, 1.0);
     if constexpr (N_DIM == 3) {
         const uint32_t Nz = toml::find_or<uint32_t>(input, "mesh", "Nz", 100);
-        const rtype Lz = find_real_or(input, "mesh", "Lz", 1.0);
+        const rtype Lz = find_real_or(input, "mesh", "Lz", dim::length, 1.0);
         if (type == MeshType::CARTESIAN_TRI || type == MeshType::WEDGE) {
             throw std::runtime_error("Mesh type " + type_str + " is 2D only.");
         }

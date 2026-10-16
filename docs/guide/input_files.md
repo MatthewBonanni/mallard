@@ -93,10 +93,102 @@ entry each. Every key, with its default, is in the
   `"exp(-((x - 1)^2 + y^2) / 0.01)"`. exprtk also has local variables
   (`var r := sqrt(x^2 + y^2); ...`), `and`, `or`, `if`, the usual functions
   and `pi`. Multi-line strings use TOML's `"""` with a trailing `\`.
-- **Units.** Single gases are scale-free: the reference state
-  (`p_ref`, `T_ref`, `rho_ref`) sets the gas constant, so nondimensional
-  inputs work as they are (`p_ref = T_ref = rho_ref = 1`). Gas mixtures read
-  real thermochemistry and are in SI units (Pa, K, m, s, kg).
+- **Units.** Plain numbers are in SI units (Pa, K, m, s, kg), and any
+  dimensional number can instead be written with its unit, as a string:
+  `p = "1 atm"`. See [Units](#units).
+
+## Units
+
+Mallard computes in SI units. A number without a unit is SI, so existing
+inputs mean what they always did; a quoted number with a unit is converted to
+SI when it is read:
+
+```toml
+[run]
+dt = "0.5 us"
+t_stop = "2 ms"
+t_wall_stop = "11.5 h"
+
+[mesh]
+type = "cartesian"
+Lx = "5 cm"
+Ly = "20 mm"
+
+[initialize]
+u = ["10 m/s", 0.0]       # units and plain numbers mix freely
+p = "1 atm"
+T = "25 degC"
+X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }
+
+[[boundaries]]
+name = "left"
+type = "wall_heat_flux"
+q = "50 kW/m^2"
+
+[[sponges]]
+strength = "20 1/s"       # a constant, or an expression in SI: "x > 0.04 ? 2e4 * (x - 0.04) : 0"
+u = [0.0, 0.0]
+p = "101.325 kPa"
+T = "300 K"
+
+[source]
+gravity = [0.0, "-9.81 m/s^2"]
+```
+
+Each key has a dimension (pressure, temperature, length, velocity, ...),
+listed in the [input reference](../input.md#units), and a unit of another
+dimension stops the run before it starts:
+
+```text
+error: input.toml: line 14: boundaries.p: "300 K" has the dimension of temperature (K). Expected pressure (kg m^-1 s^-2), e.g. in Pa, kPa, MPa, bar, atm, psi; a number without a unit is in SI. See docs/guide/input_files.md#units.
+```
+
+**Writing units.** A number, an optional space, then the unit:
+
+| Form | Examples |
+|---|---|
+| A unit, with an SI prefix (`Y Z E P T G M k h da d c m u n p f a y z`; `u` or `µ` for micro) | `"5 mm"`, `"5mm"`, `"3 MPa"`, `"2 us"`, `"1 kmol"` |
+| Products: a space, `*` or `·` | `"1.8e-5 Pa s"`, `"2 N*m"` |
+| Powers: `^`, `**` or `²` `³`; negative powers too | `"9.81 m/s^2"`, `"1 g/cm³"`, `"9.81 m s^-2"` |
+| Quotients: `/` divides by the next unit or a parenthesized group | `"8.314 J/(mol K)"`, `"20 1/s"`, `"1.2 kg/m^3"` |
+
+`"J/kg K"` is ambiguous (is K in the numerator?) and an error: write
+`"J/(kg K)"`.
+
+| Dimension | Units |
+|---|---|
+| Length | `m`, `in`, `ft` (and `mm`, `cm`, `km`, `um`, ...) |
+| Time | `s`, `min`, `h` (and `ms`, `us`, `ns`, ...) |
+| Mass | `g`, `lb` (and `kg`, `mg`, ...) |
+| Temperature | `K`, `degR`; absolute temperatures also `degC` (or `°C`), `degF` (or `°F`) |
+| Amount of substance | `mol` (and `kmol`, ...) |
+| Angle | `rad`, `deg` (or `°`) |
+| Pressure | `Pa`, `bar`, `atm`, `psi`, `Torr`, `mmHg` (and `kPa`, `MPa`, `mbar`, ...) |
+| Energy, power, force, frequency | `J`, `cal`, `W`, `N`, `lbf`, `Hz` (and `kJ`, `kcal`, `kW`, `kHz`, ...) |
+| Volume | `L` (and `mL`) |
+
+**Temperatures.** `degC` and `degF` are absolute temperatures: `"20 degC"`
+is 293.15 K. They stand alone (`"20 degC/s"` is an error; use K) and are an
+error for the one key that is a temperature difference, `sutherland_S`.
+
+**Keys documented in other units.** Two keys keep plain numbers in their own
+units, and take units like any other: `[mesh.transform] rotate` (degrees:
+`rotate = 90` or `"1.5708 rad"`) and `[chemistry] C_reg` (kmol/m^3, as
+Cantera; `"1e-9 mol/m^3"` is the same as `1e-12`).
+`[mesh.transform] scale` is the length of one unit of the mesh file:
+`scale = "1 mm"` for a mesh drawn in millimeters (the same as `0.001`).
+
+**Expressions are in SI units.** Where a key takes an expression, a quoted
+quantity with a unit is still a single number (`"20 1/s"`), but the
+expressions themselves (`"x < 0.05 ? 1e5 : 2e4"`) are in SI units, `x`, `y`,
+`z` in meters and `t` in seconds, and contain no unit symbols. A unit symbol
+in an expression that fails to parse is pointed out in the error.
+
+**Nondimensional runs.** Single gases are scale-free: the reference state
+(`p_ref`, `T_ref`, `rho_ref`) sets the gas constant, so nondimensional inputs
+(`p_ref = T_ref = rho_ref = 1`) work as plain numbers. Units then make no
+sense; write them only in dimensional inputs. Gas mixtures read real
+thermochemistry and are always dimensional.
 
 ## Unknown and unused keys
 

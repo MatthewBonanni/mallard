@@ -61,9 +61,9 @@ void run(const std::string & input_file) {
     if (type != "constant_volume") {
         throw InputError("reactor.type = \"" + type + "\": only \"constant_volume\" is supported.");
     }
-    const double T0 = find_double(table, "T"), p0 = find_double(table, "p");
-    const double end_time = find_double(table, "end_time");
-    const double interval = find_double_or(table, "output_interval", end_time / 100.0);
+    const double T0 = find_double(table, "T", dim::temperature), p0 = find_double(table, "p", dim::pressure);
+    const double end_time = find_double(table, "end_time", dim::time);
+    const double interval = find_double_or(table, "output_interval", dim::time, end_time / 100.0);
     const std::string output = toml::find_or<std::string>(table, "output", "reactor.csv");
     if (!(T0 > 0.0) || !(p0 > 0.0)) throw InputError("reactor.T and reactor.p must be positive.");
     if (!(end_time > 0.0) || !(interval > 0.0)) {
