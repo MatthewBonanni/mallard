@@ -39,8 +39,8 @@ rtype LES::default_constant(const SGSModel model) {
     }
 }
 
-LES LES::from_input(const toml::value & input) {
-    const toml::value & table = input.at("les");
+LES LES::from_input(const Input & input) {
+    const Input & table = input.at("les");
     if (!table.is_table()) throw InputError("[les] must be a table.");
     if (toml::find_or<std::string>(input, "physics", "type", "euler") != "navier_stokes") {
         throw InputError("[les] needs physics.type = \"navier_stokes\".");

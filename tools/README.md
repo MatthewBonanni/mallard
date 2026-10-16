@@ -7,6 +7,7 @@ Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the 3D
 | `mallard_vtu.py` | Minimal reader for Mallard's VTU files (cells, cell data, time), binary or ASCII (boundary-zone output); also reads HDF5 snapshots (`.h5`), so the scripts below accept them too |
 | `mallard_h5.py` | Reader for `format = "hdf5"` output (needs h5py): mesh, cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf` (`animate.py` takes `--glob "PREFIX_[0-9]*.h5"`) |
 | `plot_vtu.py` | Plot one cell field of a VTU file |
+| `plot_mesh_quality.py` | Mesh-quality fields of `Mallard --check --quality-vtu` (2D) with the worst cells circled, readable on light and dark backgrounds |
 | `compare_png.py` | Side-by-side plots of a field from several VTU files |
 | `plot_sod.py` | Density profiles against the exact Sod solution |
 | `plot_viscous_shock_tube.py` | Viscous shock tube at t = 1 against the grid-converged reference of Zhou et al.: wall density, lambda-shock triple point |

@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-#include <toml.hpp>
+#include "input.h"
 
 #include "test_fixtures.h"
 
@@ -51,10 +51,10 @@ inline std::filesystem::path example_path(const std::string & file) {
  *        `max_cells` cells per direction of a generated mesh, no file output
  *        besides `[integrals]`, and paths made absolute.
  */
-inline toml::value example_under_preset(const ExampleCase & c, uint64_t n_steps, int64_t max_cells) {
+inline Input example_under_preset(const ExampleCase & c, uint64_t n_steps, int64_t max_cells) {
     const std::filesystem::path path = example_path(c.file);
     const std::filesystem::path dir = path.parent_path();
-    toml::value input = toml::parse(path.string());
+    Input input = parse_input(path.string());
     auto & table = input.as_table();
 
     auto & numerics = input.at("numerics").as_table();
@@ -64,8 +64,8 @@ inline toml::value example_under_preset(const ExampleCase & c, uint64_t n_steps,
     numerics["preset"] = c.preset;
     numerics["check_nan"] = true;
 
-    table["run"] = toml::table{{"n_steps", static_cast<toml::value::integer_type>(n_steps)}};
-    table["output"] = toml::table{{"check_interval", 1000000}};
+    table["run"] = Input::table_type{{"n_steps", static_cast<Input::integer_type>(n_steps)}};
+    table["output"] = Input::table_type{{"check_interval", 1000000}};
     for (const char * key : {"write_data", "probes", "statistics", "forces"}) table.erase(key);
 
     auto & mesh = input.at("mesh").as_table();
@@ -73,13 +73,13 @@ inline toml::value example_under_preset(const ExampleCase & c, uint64_t n_steps,
         const std::string file =
             std::string(MALLARD_SOURCE_DIR) + "/test/data/meshes/" + (c.dim == 3 ? "cyl3d.msh" : "cyl2d.msh");
         table["mesh"] =
-            c.mesh.empty() ? toml::value(toml::table{{"type", "file"}, {"filename", file}}) : parse_toml(c.mesh);
+            c.mesh.empty() ? Input(Input::table_type{{"type", "file"}, {"filename", file}}) : parse_toml(c.mesh);
         table.erase("periodic");
-        toml::array boundaries;
+        Input::array_type boundaries;
         for (const auto & [zone, source] : c.zones) {
             for (const auto & b : input.at("boundaries").as_array()) {
                 if (b.at("name").as_string() != source) continue;
-                toml::value copy = b;
+                Input copy = b;
                 copy.as_table()["name"] = zone;
                 copy.as_table().erase("where");
                 boundaries.push_back(copy);
@@ -93,7 +93,7 @@ inline toml::value example_under_preset(const ExampleCase & c, uint64_t n_steps,
         }
     }
 
-    if (!input.contains("boundaries")) table["boundaries"] = toml::array{};
+    if (!input.contains("boundaries")) table["boundaries"] = Input::array_type{};
     auto & physics = input.at("physics").as_table();
     if (physics.count("mechanism")) physics["mechanism"] = (dir / physics.at("mechanism").as_string()).string();
     for (auto & b : input.at("boundaries").as_array()) {
@@ -110,18 +110,18 @@ inline toml::value example_under_preset(const ExampleCase & c, uint64_t n_steps,
         } else if (physics.count("mechanism")) {
             for (const auto & b : input.at("boundaries").as_array()) {
                 if (!b.contains("p") || !b.contains("T") || !(b.contains("X") || b.contains("Y"))) continue;
-                auto expression = [](const toml::value & v) {
-                    return v.is_string() ? v : toml::value(toml::format(v));
+                auto expression = [](const Input & v) {
+                    return v.is_string() ? v : Input(toml::format(v));
                 };
-                toml::table init{{"type", "analytical"}, {"p", expression(b.at("p"))}, {"T", expression(b.at("T"))}};
+                Input::table_type init{{"type", "analytical"}, {"p", expression(b.at("p"))}, {"T", expression(b.at("T"))}};
                 init[b.contains("X") ? "X" : "Y"] = b.at(b.contains("X") ? "X" : "Y");
-                init["u"] = toml::array(static_cast<size_t>(c.dim), toml::value("0.0"));
+                init["u"] = Input::array_type(static_cast<size_t>(c.dim), Input("0.0"));
                 table["initialize"] = init;
                 break;
             }
         } else {
-            toml::table init{{"type", "constant"}, {"p", physics.at("p_ref")}, {"T", physics.at("T_ref")}};
-            init["u"] = toml::array(static_cast<size_t>(c.dim), toml::value(0.0));
+            Input::table_type init{{"type", "constant"}, {"p", physics.at("p_ref")}, {"T", physics.at("T_ref")}};
+            init["u"] = Input::array_type(static_cast<size_t>(c.dim), Input(0.0));
             table["initialize"] = init;
         }
     }
