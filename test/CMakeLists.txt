@@ -69,6 +69,8 @@ FetchContent_Declare(
   GIT_TAG v1.18.0
   ${MALLARD_THIRD_PARTY}
 )
+# Test-only: `cmake --install` leaves GoogleTest out
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 target_link_libraries(MallardTest PRIVATE gtest)
