@@ -122,8 +122,8 @@ jobs:
         with:
           spack_ref: releases/v1.2
           packages_ref: develop
-          spack_path: ${{ runner.temp }}/spack
-          packages_path: ${{ runner.temp }}/spack-packages
+          spack_path: .spack-tool
+          packages_path: .spack-packages
       - name: Install
         run: |
           spack external find --not-buildable openmpi cmake
@@ -133,6 +133,10 @@ jobs:
           spack -e "$RUNNER_TEMP/env" develop --no-clone --path "$GITHUB_WORKSPACE" mallard@main
           spack -e "$RUNNER_TEMP/env" concretize
           spack -e "$RUNNER_TEMP/env" install --fail-fast
+      - name: Concretize the GPU variants
+        run: |
+          spack spec mallard +cuda cuda_arch=80
+          spack spec mallard +rocm amdgpu_target=gfx90a
       - name: Test
         run: |
           spack -e "$RUNNER_TEMP/env" test run mallard

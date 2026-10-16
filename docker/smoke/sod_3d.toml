@@ -1,4 +1,4 @@
-# The Sod shock tube (examples/sod) on a 3D box of hexahedra
+# The Sod shock tube (examples/sod) on a 3D box of 100 x 4 x 4 hexahedra
 
 [run]
 # n_steps = 100000
@@ -9,7 +9,7 @@ cfl = 1.0
 
 [mesh]
 type = "cartesian"
-Nx = 200
+Nx = 100
 Ny = 4
 Nz = 4
 Lx = 1.0

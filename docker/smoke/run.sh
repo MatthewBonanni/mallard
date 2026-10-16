@@ -39,7 +39,8 @@ for exe in Mallard Mallard3D; do
     python3 "$here/check.py" "$tools" sod "$case"/solut/sod_000010.*vtu
 done
 
-if [ -x "$bin/Mallard" ] && command -v mpirun > /dev/null && ldd "$bin/Mallard" 2> /dev/null | grep -q libmpi; then
+links_mpi() { { ldd "$1" || otool -L "$1"; } 2> /dev/null | grep -q libmpi; }
+if [ -x "$bin/Mallard" ] && command -v mpirun > /dev/null && links_mpi "$bin/Mallard"; then
     case="$work/examples/sod_mpi"
     cp -R "$share/examples/sod" "$case"
     (cd "$case" && OMP_NUM_THREADS=1 run mpi mpirun -n 2 --oversubscribe "$bin/Mallard" -i input.toml)
@@ -50,7 +51,7 @@ if [ -x "$bin/MallardReactor" ]; then
     case="$work/examples/h2_ignition"
     cp -R "$share/examples/h2_ignition" "$case"
     (cd "$case" && run reactor "$bin/MallardReactor" -i input.toml)
-    python3 "$here/check.py" "$tools" reactor "$case/reactor.csv"
+    python3 "$here/check.py" "$tools" reactor "$case/reactor.log"
 fi
 
 for exe in mallard-mesh-convert mallard-mesh-convert3D; do

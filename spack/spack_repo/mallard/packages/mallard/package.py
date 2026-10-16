@@ -88,7 +88,6 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
     depends_on("nccl", when="+nccl")
     depends_on("hdf5~mpi", when="+hdf5~mpi")
     depends_on("hdf5+mpi", when="+hdf5+mpi")
-    depends_on("hdf5", when="+cgns")
     depends_on("cgns+hdf5", when="+cgns")
     depends_on("cgns~mpi", when="+cgns~mpi")
 
