@@ -154,9 +154,9 @@ TEST(CheckTimeStep, MatchesTheUniformGridFormulaAndFindsTheFastestRegion) {
     const double a = std::sqrt(1.4), h = 2.0 / 16;
     const CheckReport r = check(box("1.0 + 2.0 * (x > 1.5)"));
     ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
-    if (N_DIM == 2) EXPECT_NEAR(r.dt, 0.8 * h / (3.0 + 2.0 * a), 1e-12);
+    if (N_DIM == 2) EXPECT_NEAR(r.dt, 0.8 * h / (3.0 + 2.0 * a), roundoff(1e-12));
     EXPECT_EQ(r.dt_limit, "CFL");
-    EXPECT_NEAR(r.cfl, 0.8, 1e-12);
+    EXPECT_NEAR(r.cfl, 0.8, roundoff(1e-12));
     EXPECT_GT(r.limiting_x[0], 1.5);
     EXPECT_GT(r.region_lo[0], 1.5);
     EXPECT_GT(r.n_region_cells, 0u);
@@ -164,8 +164,8 @@ TEST(CheckTimeStep, MatchesTheUniformGridFormulaAndFindsTheFastestRegion) {
 
 TEST(CheckTimeStep, FixedTimeStepReportsItsCflAndWarnsAboveTheIntegratorsLimit) {
     const CheckReport ok = check(box("1.0", "t_stop = 0.5\ndt = 1e-3\n"));
-    EXPECT_EQ(ok.dt, 1e-3);
-    EXPECT_NEAR(ok.cfl, 1e-3 / ok.dt_cfl1, 1e-12);
+    EXPECT_NEAR(ok.dt, 1e-3, roundoff(1e-18));
+    EXPECT_NEAR(ok.cfl, 1e-3 / ok.dt_cfl1, roundoff(1e-12));
     EXPECT_FALSE(mentions(ok.warnings, "stability limit"));
     const CheckReport fast = check(box("1.0", "t_stop = 0.5\ncfl = 1.5\n"));
     EXPECT_TRUE(mentions(fast.warnings, "stability limit of SSPRK3"));
@@ -180,8 +180,8 @@ TEST(CheckCost, GivenThroughputSetsWallTimePerUnitTimeAndFlowThrough) {
     ASSERT_TRUE(r.ok());
     const double n_cells = N_DIM == 3 ? 16 * 8 * 2 : 16 * 8;
     EXPECT_EQ(r.n_cells, uint64_t(n_cells));
-    EXPECT_NEAR(r.wall_per_time, n_cells / (2 * 1e6 * r.dt), 1e-12 * r.wall_per_time);
-    EXPECT_NEAR(r.flow_through_time, 2.0, 1e-12);  // Lx / u
+    EXPECT_NEAR(r.wall_per_time, n_cells / (2 * 1e6 * r.dt), roundoff(1e-12) * r.wall_per_time);
+    EXPECT_NEAR(r.flow_through_time, 2.0, roundoff(1e-12));  // Lx / u
 }
 
 TEST(CheckCost, StepsMeasureTheThroughput) {
@@ -258,11 +258,11 @@ TEST(MeshQualityMetrics, UniformQuadsAreIdealAndElongatedOnesHaveTheirAspectRati
     if (N_DIM != 2) GTEST_SKIP() << "2D mesh";
     const auto mesh = make_mesh("cartesian", 10, 2, 1.0, 1.0);  // cells 0.1 x 0.5
     const auto s = summarize(*mesh, mesh_quality(*mesh), 3);
-    EXPECT_NEAR(s[0].max, 0.0, 1e-10);
-    EXPECT_NEAR(s[1].max, 0.0, 1e-12);
-    EXPECT_NEAR(s[2].max, 5.0, 1e-12);
-    EXPECT_NEAR(s[2].mean, 5.0, 1e-12);
-    EXPECT_NEAR(s[3].max, 1.0, 1e-12);
+    EXPECT_NEAR(s[0].max, 0.0, roundoff(1e-10));
+    EXPECT_NEAR(s[1].max, 0.0, roundoff(1e-12));
+    EXPECT_NEAR(s[2].max, 5.0, roundoff(1e-12));
+    EXPECT_NEAR(s[2].mean, 5.0, roundoff(1e-12));
+    EXPECT_NEAR(s[3].max, 1.0, roundoff(1e-12));
     EXPECT_EQ(s[2].worst.size(), 3u);
 }
 
@@ -277,15 +277,15 @@ TEST(MeshQualityMetrics, SkewedPairOfCellsAgainstHandComputedValues) {
     const MeshQuality q = mesh_quality(mesh);
     const uint32_t tri = mesh.h_n_nodes_of_cell(0) == 3 ? 0 : 1, square = 1 - tri;
     const double d = std::sqrt(26.0) / 6.0;
-    EXPECT_NEAR(q.cells[0][square], std::atan(0.2) * 180.0 / std::numbers::pi, 1e-10);
-    EXPECT_NEAR(q.cells[1][square], 0.1 / d, 1e-12);
-    EXPECT_NEAR(q.cells[1][tri], 0.1 / d, 1e-12);
-    EXPECT_NEAR(q.cells[3][tri], 2.0, 1e-12);
-    EXPECT_NEAR(q.cells[2][square], 1.0, 1e-12);
+    EXPECT_NEAR(q.cells[0][square], std::atan(0.2) * 180.0 / std::numbers::pi, roundoff(1e-10));
+    EXPECT_NEAR(q.cells[1][square], 0.1 / d, roundoff(1e-12));
+    EXPECT_NEAR(q.cells[1][tri], 0.1 / d, roundoff(1e-12));
+    EXPECT_NEAR(q.cells[3][tri], 2.0, roundoff(1e-12));
+    EXPECT_NEAR(q.cells[2][square], 1.0, roundoff(1e-12));
     // Triangle: centroid to edge midpoints sqrt(5)/6 (legs) and sqrt(2)/6 (hypotenuse)
-    EXPECT_NEAR(q.cells[2][tri], std::sqrt(5.0) / std::sqrt(2.0), 1e-12);
+    EXPECT_NEAR(q.cells[2][tri], std::sqrt(5.0) / std::sqrt(2.0), roundoff(1e-12));
     // The triangle's bottom leg: its centroid is 1/6 off the leg's midpoint, 1/3 above it
-    EXPECT_NEAR(q.cells[0][tri], std::atan(0.5) * 180.0 / std::numbers::pi, 1e-10);
+    EXPECT_NEAR(q.cells[0][tri], std::atan(0.5) * 180.0 / std::numbers::pi, roundoff(1e-10));
 }
 
 TEST(MeshQualityMetrics, StretchedMeshVolumeRatioIsTheLargestSpacingRatio) {
@@ -302,7 +302,7 @@ TEST(MeshQualityMetrics, StretchedMeshVolumeRatioIsTheLargestSpacingRatio) {
         expected = std::max({expected, a / b, b / a});
     }
     const auto s = summarize(mesh, mesh_quality(mesh), 1);
-    EXPECT_NEAR(s[3].max, expected, 1e-10);
+    EXPECT_NEAR(s[3].max, expected, roundoff(1e-10));
 }
 
 TEST(LargestPart, HaloLayersOfNodeNeighbors) {
