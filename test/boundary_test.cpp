@@ -135,6 +135,69 @@ TEST(BoundaryTest, AveragePressureOutletKeepsTransversePressureProfile) {
 
 namespace {
 
+/** @brief A Mach 5 jet through the left boundary into gas at rest: the first time step and the solution after 40 steps. */
+struct JetStart {
+    double dt_first = 0.0;
+    double min_p = 0.0;
+};
+
+JetStart jet_into_rest(const std::string & left, const std::string & gas) {
+    JetStart r;
+    for (const uint32_t n_steps : {1u, 40u}) {
+        std::ostringstream s;
+        s << "[run]\nn_steps = " << n_steps << "\ncfl = 0.8\n"
+          << "[mesh]\ntype = \"cartesian\"\nNx = 40\nNy = 4\nLx = 1.0\nLy = 0.1\n"
+          << "[initialize]\ntype = \"constant\"\nu = [0.0, 0.0]\np = 1.0e5\nT = 300.0\n" << (gas.empty() ? "" : "Y = { AIR = 1.0 }\n")
+          << "[[boundaries]]\nname = \"left\"\n" << left << (gas.empty() ? "" : "Y = { AIR = 1.0 }\n")
+          << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+          << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+          << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
+          << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+          << "[output]\ncheck_interval = 1000000\n"
+          << (gas.empty() ? "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0e5\nT_ref = 300.0\n"
+                            "rho_ref = 1.1614401858304297\n"
+                          : gas);
+        Solver solver;
+        solver.init(parse_toml(s.str()));
+        solver.run();
+        solver.update_primitives();
+        solver.copy_device_to_host();
+        if (n_steps == 1) {
+            r.dt_first = double(solver.get_time());
+            continue;
+        }
+        r.min_p = 1e300;
+        for (uint32_t c = 0; c < solver.get_mesh()->n_cells; c++) {
+            const double p = double(solver.h_primitives(c, 2));
+            r.min_p = std::isfinite(p) ? std::min(r.min_p, p) : -1.0;
+        }
+    }
+    return r;
+}
+
+} // namespace
+
+TEST(BoundaryTest, FastInflowIntoGasAtRestStartsAtTheTargetCFL) {
+    // The stable step of the boundary cell sees the jet's |u| + c on its
+    // inflow face before the jet has entered: dt = 2 V CFL / sum(lambda A)
+    // with lambda = u + c there and c on its three other faces
+    const double R = 287.0, c = std::sqrt(1.4 * R * 300.0), u = 5.0 * c, h = 0.025;
+    const double dt_expected = 0.8 * 2.0 * h * h / (h * (u + c) + 3.0 * h * c);
+    const std::string jet = "u = [" + std::to_string(u) + ", 0.0]\np = 1.0e5\nT = 300.0\n";
+    const std::string perfect_air =
+        "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR
+        "/test/data/chemistry/perfect_air.yaml\"\nphase = \"air\"\n";
+    for (const auto & [left, gas] : {std::pair<std::string, std::string>{"type = \"upt\"\n" + jet, ""},
+                                     {"type = \"nscbc_inlet\"\nL = 1.0\n" + jet, ""},
+                                     {"type = \"upt\"\n" + jet, perfect_air}}) {
+        const JetStart r = jet_into_rest(left, gas);
+        EXPECT_NEAR(r.dt_first, dt_expected, 1e-4 * dt_expected) << left << gas;
+        EXPECT_GT(r.min_p, 0.5e5) << left << gas;
+    }
+}
+
+namespace {
+
 struct FarfieldCase {
     BoundaryCondition bc;
     rtype W_g[N_CONSERVATIVE];
