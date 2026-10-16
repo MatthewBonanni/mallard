@@ -270,7 +270,7 @@ TEST(WallModel, InverseTransformationThermalBranches) {
     in.p = 1.0;
     in.thermal = WallThermal::HEAT_FLUX;
     const Output adiabatic = wall_model::gfm(P, gas, in);
-    EXPECT_DOUBLE_EQ(adiabatic.T_w, in.T_e + std::cbrt(0.7) * in.U_e * in.U_e / (2.0 * gas.cp()));
+    EXPECT_DOUBLE_EQ(adiabatic.T_w, in.T_e + std::cbrt(gas.Pr()) * in.U_e * in.U_e / (2.0 * gas.cp()));
     EXPECT_EQ(adiabatic.q_w, 0.0);
     EXPECT_GT(adiabatic.tau_w, 0.0);
     in.thermal = WallThermal::ISOTHERMAL;
