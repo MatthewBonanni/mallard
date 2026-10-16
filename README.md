@@ -62,7 +62,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - TOML input; initial conditions, boundary states, sources and sponges as analytical expressions
 - Conservative, high-order remap of a restart onto another mesh (any cell type, resolution or rank count): exact cell intersections, integrals kept to rounding
 - VTU (ParaView) or parallel HDF5 with XDMF; surface output of boundary zones
-- Running means and covariances, point and line probes, domain integrals (kinetic energy, enstrophy, ...), wall forces
+- Running means and covariances; probes on points and curves (cell averages or high-order point values, CSV, HDF5 or VTK, with integrals, means and extrema); domain integrals (kinetic energy, enstrophy, ...), wall forces
 - Heat release, species production rates and detonation soot foils (`P_MAX`)
 - `MallardReactor`, a 0D reactor, and Python tools for plotting, animation and HDF5 output
 
