@@ -59,7 +59,7 @@ where = "x >= 1/6"
 | `type` | Kind | Keys | Use |
 |---|---|---|---|
 | `wall_adiabatic` | wall | `u` (optional) | No-slip (`navier_stokes`) or slip (`euler`) wall without heat flux; `u` moves the wall |
-| `wall_isothermal` | wall | `T`, `u` (optional) | Wall at temperature `T` (not yet for gas mixtures) |
+| `wall_isothermal` | wall | `T`, `u` (optional) | Wall at temperature `T` |
 | `wall_heat_flux` | wall | `q`, `u` (optional) | Wall with heat flux `q` into the fluid |
 | `symmetry` | symmetry | — | Slip wall, symmetry plane, axis of axisymmetric runs |
 | `upt` | inflow | `u`, `p`, `T` (+ `X`/`Y`) | Inflow at a given velocity, pressure and temperature |
@@ -72,7 +72,20 @@ where = "x >= 1/6"
 | `nscbc_inlet` | inflow | `u`, `p`, `T`, `L`, `sigma`, ... | Partially non-reflecting characteristic inlet, optionally with [synthetic turbulence](#synthetic-turbulence) |
 
 Gas mixtures add the composition (`X` or `Y`, and `balance`) to `upt` and
-`nscbc_inlet`, as numbers or expressions of x, y, z.
+`nscbc_inlet`, as numbers or expressions of x, y, z. Their walls are
+non-catalytic (no species crosses them), and all three `wall_*` types work,
+e.g. a cold wall that quenches a flame:
+
+```toml
+[[boundaries]]
+name = "wall"
+type = "wall_isothermal"
+T = 300.0
+```
+
+Pitfall: the wall heat flux is conducted across the half cell next to the
+wall, so it is only as good as the resolution there; a flame quenching
+against a wall needs cells of a fraction of its quenching distance.
 
 Choosing:
 

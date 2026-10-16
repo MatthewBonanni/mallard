@@ -116,6 +116,21 @@ struct TransportTable {
         return Kokkos::sqrt(T) * poly(&cond(k, 0), Kokkos::log(T));
     }
 
+    /** @brief Mixture conductivity [W/(m K)] alone, as properties() gives it. */
+    template <typename F_Y>
+    KOKKOS_INLINE_FUNCTION double conductivity(const double T, const F_Y & y) const {
+        double n = 0.0;
+        for (uint32_t k = 0; k < n_species; k++) n += Kokkos::fmax(0.0, y(k)) / W(k);
+        double sum1 = 0.0, sum2 = 0.0;
+        for (uint32_t k = 0; k < n_species; k++) {
+            const double X = Kokkos::fmax(TINY, Kokkos::fmax(0.0, y(k)) / W(k) / n);
+            const double lambda_k = species_conductivity(k, T);
+            sum1 += X * lambda_k;
+            sum2 += X / lambda_k;
+        }
+        return 0.5 * (sum1 + 1.0 / sum2);
+    }
+
     /** @brief Binary diffusion coefficient D_kj [m^2/s] at T and p. */
     KOKKOS_INLINE_FUNCTION
     double binary_diffusion(const uint32_t k, const uint32_t j, const double T, const double p) const {
