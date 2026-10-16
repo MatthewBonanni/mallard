@@ -98,10 +98,50 @@ entry each. Every key, with its default, is in the
   inputs work as they are (`p_ref = T_ref = rho_ref = 1`). Gas mixtures read
   real thermochemistry and are in SI units (Pa, K, m, s, kg).
 
+## Inputs from older releases
+
+Inputs keep working across releases. When a key is renamed, moved or
+removed, the change goes through two steps:
+
+1. **Deprecated** (at least one minor release): the old key is still read,
+   and the run prints a warning that names the line, the new key and the
+   release that will remove the old one.
+2. **Removed**: the run stops with the same message.
+
+In both steps, one command brings a file up to date:
+
+```sh
+Mallard upgrade-input old.toml > new.toml     # changes listed on stderr
+Mallard upgrade-input --check old.toml        # exit status 1 if anything is out of date
+```
+
+It changes only the lines of those keys. A renamed key keeps its value and its
+comment, a moved key goes to the end of its new table, and a removed key is
+commented out with a note. A file with nothing to change comes back
+unchanged, byte for byte. When a changed key is written as a dotted key
+(`run.cfl = 1`) or in an inline table, the file is reformatted instead: its
+comments are kept, its layout is not. The command is tested on the input
+files of every release (`tools/check_upgrade_input.py`).
+
+Keys and options changed so far:
+
+| Old | New | Deprecated | Removed |
+|---|---|---|---|
+| `[numerics.face_reconstruction]` `basis_order = p` | `order = p + 1` (order of accuracy) | 0.2.0 | 0.2.0 |
+| `basis_type`, `max_stencil_size_factor`, `quadrature_type`, `quadrature_order`, `quadrature_type_cell`, `quadrature_order_cell`, `quadrature_type_face`, `quadrature_order_face` (same table) | none: TENO-E sets them | 0.2.0 | 0.2.0 |
+| `[physics]` `p_min`, `p_max` | none: pressures are not clipped | 0.2.0 | 0.2.0 |
+| `[[write_data]]` `format = "tecplot"` | `"vtu"` | 0.2.0 | 0.2.0 |
+
+Changes before 0.9.0 were not deprecated first. Since 0.9.0, every rename
+appears in this table and in `src/common/input_upgrade.cpp`, which is the
+source of truth. A test fails if a key is removed without a deprecation
+period.
+
 ## The other executables
 
 | Executable | Purpose | Guide |
 |---|---|---|
+| `Mallard upgrade-input old.toml` | Rewrites renamed, moved and removed keys of an input from an older release | [Inputs from older releases](#inputs-from-older-releases) |
 | `MallardReactor -i input.toml` | 0D constant-volume reactor with the solver's chemistry; chemistry benchmarks | [Thermochemistry](thermochemistry.md#0d-reactors-mallardreactor) |
 | `mallard-mesh-convert IN OUT.h5` | Gmsh file, or the mesh of an input file, to Mallard's HDF5 mesh format (builds with HDF5) | [Meshes](meshes.md#hdf5-meshes-for-large-runs) |
 | `MallardTest` | The unit and regression tests (`build/test/MallardTest`) | [Installation](https://matthewbonanni.github.io/mallard/docs/installation/) |

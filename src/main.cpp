@@ -16,6 +16,7 @@
 
 #include "build_info.h"
 #include "input.h"
+#include "input_upgrade.h"
 #include "log.h"
 #include "parallel/comm.h"
 #include "solver/solver.h"
@@ -24,8 +25,21 @@ namespace {
 
 void usage(const char * program) {
     std::cerr << "Usage: " << program << " -i input.toml [Kokkos options, e.g. --kokkos-num-threads=8]\n"
+              << "       " << program << " upgrade-input old.toml > new.toml\n"
               << "       " << program << " --version\n";
 }
+
+/**
+ * @brief Commands given as the first argument, each with the arguments after it.
+ */
+struct Subcommand {
+    const char * name;
+    int (*run)(int argc, char ** argv);
+};
+
+constexpr Subcommand subcommands[] = {
+    {"upgrade-input", input_upgrade::main},
+};
 
 /**
  * @brief Exception text without toml11's "[error] " prefix and trailing newlines.
@@ -57,6 +71,11 @@ std::string error_text(const std::exception & e) {
  * @return Exit status.
  */
 int main(int argc, char* argv[]) {
+    if (argc > 1) {
+        for (const auto & command : subcommands) {
+            if (strcmp(argv[1], command.name) == 0) return command.run(argc - 2, argv + 2);
+        }
+    }
     std::string input_file;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-i") == 0 && i + 1 < argc) {

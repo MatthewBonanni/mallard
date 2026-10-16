@@ -123,6 +123,11 @@ jobs:
         env:
           OMP_NUM_THREADS: 2
         run: ./build/test/MallardTest
+      - name: Upgrade the inputs of every release
+        if: matrix.backend.name == 'openmp'
+        run: |
+          git fetch --quiet --tags --depth=1 origin
+          python3 tools/check_upgrade_input.py build/src/Mallard
       - name: Test (MPI)
         if: matrix.backend.mpi
         env:

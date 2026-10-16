@@ -12,6 +12,7 @@
 #include "solver.h"
 
 #include "input.h"
+#include "input_upgrade.h"
 
 #include <algorithm>
 #include <cmath>
@@ -61,6 +62,9 @@ void Solver::timed_phase(const std::string & name, F && f) {
 
 int Solver::init(const toml::value & input_in) {
     this->input = input_in;
+    for (const auto & finding : input_upgrade::apply(input)) {
+        logging::warning(input_upgrade::describe(finding) + "; `Mallard upgrade-input` rewrites the input");
+    }
     preset = numerics_preset::apply(input);
 
     t = 0.0;
