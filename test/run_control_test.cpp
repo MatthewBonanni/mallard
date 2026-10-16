@@ -170,7 +170,7 @@ TEST(RunControlTest, SettingsOutsideTheRuntimeSafeSetAreRejected) {
     EXPECT_TRUE(solver.apply_setting("t_stop", "0.01").first);
     EXPECT_TRUE(solver.apply_setting("n_steps", "0").first);
     solver.run();
-    EXPECT_GE(double(solver.get_time()), 0.01 * (1.0 - 1e-9));
+    EXPECT_GE(solver.get_time(), static_cast<rtype>(0.01));
 }
 
 TEST(RunControlTest, DivergenceReportsTheCellAndWritesTheLastValidState) {
