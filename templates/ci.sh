@@ -18,7 +18,7 @@ work="$(cd "$work" && pwd)"
 export OMP_NUM_THREADS=1 MPLBACKEND=Agg
 
 field() {
-    python3 - "$here/manifest.toml" "$1" "$2" <<'EOF'
+    python3 - "$here/manifest.toml" "$1" "${2:-}" <<'EOF'
 import sys, tomllib
 templates = tomllib.load(open(sys.argv[1], "rb"))["templates"]
 if sys.argv[2] == "names":
