@@ -17,10 +17,10 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 
 **Meshes**
 - 2D (triangles, quadrilaterals) or 3D (tetrahedra, hexahedra, prisms, pyramids, mixed), chosen at build time
-- Gmsh 2.2/4.1 or HDF5 mesh files (`mallard-mesh-convert`), or generated boxes
+- Gmsh 2.2/4.1, CGNS or HDF5 mesh files (`mallard-mesh-convert`), scaled, rotated and translated on read, or generated boxes
 - Periodic boundaries: generated meshes, or paired zones of mesh files
 - Axisymmetric (r-z) flows in 2D: revolved finite volumes, at design order up to the axis
-- Curved high-order boundaries: Gmsh order-2/3 boundary elements or projection onto a circle, sphere or cylinder; TENO-E orders 3-6 converge at curved walls, where straight-sided faces do not ([design](docs/design/curved_boundaries.md))
+- Curved high-order boundaries: Gmsh order-2/3 boundary elements or projection onto a circle, sphere or cylinder; TENO-E orders 3-6 converge at curved walls, where straight-sided faces do not ([guide](docs/guide/meshes.md#curved-boundaries))
 
 **Numerics**
 - Reconstruction: first order; MUSCL with Barth-Jespersen or Venkatakrishnan limiting; [TENO-E](https://doi.org/10.1007/s10915-025-02918-w) of orders 3 to 6, optionally bound preserving (measured orders 3-6 on triangles and quadrilaterals)
@@ -36,11 +36,11 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Optically thin radiation (TNF Planck-mean model)
 - Gravity and arbitrary source terms
 
-**Large-eddy simulation** ([design](docs/design/les.md))
+**Large-eddy simulation** ([guide](docs/guide/les.md))
 - Explicit LES: Sigma (default), WALE, Vreman or Smagorinsky eddy viscosity for single gases and mixtures, with Scotti's filter width on anisotropic cells and an opt-in dynamic constant
 - Kinetic-energy-preserving hybrid convective flux, with the Riemann solver only at compressions, and a run-time dissipation budget that separates the model's, the scheme's and molecular dissipation
 - Thickened flame (TFLES) with dynamic thickening and Charlette efficiency; partially stirred reactor (PaSR) closure, experimental
-- Synthetic turbulent inflow: a digital filter with prescribed Reynolds stresses and length scales, or the statistics of a precursor run, bitwise the same on any number of ranks ([design](docs/design/synthetic_inflow.md))
+- Synthetic turbulent inflow: a digital filter with prescribed Reynolds stresses and length scales, or the statistics of a precursor run, bitwise the same on any number of ranks ([guide](docs/guide/boundary_conditions.md#synthetic-turbulence))
 - Channel flow at Re<sub>τ</sub> = 395 and 590: Re<sub>τ</sub> within 0.7% and 1.6% of the DNS of Moser, Kim & Mansour
 
 **Boundary conditions**
@@ -71,7 +71,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
   - Compressible isotropic turbulence: enstrophy within 2.4% of the filtered DNS of Johnsen et al.
   - CJ detonation speed within 0.01%; H2/air flame speeds within 0.81% of Cantera from φ = 0.6 to 1.4
 - Over 400 unit and regression tests: exact Riemann solutions, design order, conservation, bitwise MPI and restart reproducibility
-- CI on every code change (2D, 3D, MPI on 1-4 ranks, single precision, GCC and Clang, warnings as errors); nightly sanitizers; a performance suite with per-hardware baselines
+- CI on every code change (2D, 3D, MPI on 1-4 ranks, single precision, GCC and Clang, warnings as errors); nightly sanitizers; a GPU performance suite with per-hardware baselines, tracked by merge on the [performance dashboard](https://matthewbonanni.github.io/mallard/docs/dashboard/)
 
 The sources of every method and of the validation data are listed in [docs/references.md](docs/references.md).
 
@@ -105,11 +105,12 @@ cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 | `USE_SYSTEM_KOKKOS` | `ON` | Use an installed Kokkos instead of the submodule |
 | `Mallard_DIM` | `2` | Spatial dimension, `2` or `3` (one binary per dimension) |
 | `Mallard_USE_DOUBLE` | `ON` | Double precision (single precision otherwise) |
-| `Mallard_ENABLE_MPI` | `OFF` | Distributed memory with MPI: `mpirun -n N Mallard -i input.toml` splits the mesh between ranks; with generated meshes or HDF5 mesh files (`mallard-mesh-convert`) no rank ever holds the whole mesh, while Gmsh files are read whole by every rank |
+| `Mallard_ENABLE_MPI` | `OFF` | Distributed memory with MPI: `mpirun -n N Mallard -i input.toml` splits the mesh between ranks; with generated meshes or HDF5 mesh files (`mallard-mesh-convert`) no rank ever holds the whole mesh, while other mesh files are read whole by every rank |
 | `Mallard_GPU_AWARE_MPI` | `OFF` | With MPI on GPUs: hand device buffers to a CUDA- or ROCm-aware MPI (e.g. Open MPI over UCX built with CUDA or ROCm) instead of staging halos through host memory |
 | `Mallard_ENABLE_NCCL` | `OFF` | With MPI on NVIDIA GPUs: exchange halos with NCCL, stream-ordered with the kernels, so the host never waits for a halo (finds NCCL through `NCCL_HOME` or `NCCL_ROOT`); `[parallel] halo_exchange` chooses at run time |
 | `Mallard_ENABLE_KAMINPAR` | `OFF` | With MPI: the [dKaMinPar](https://github.com/KaHIP/KaMinPar) graph partitioner for `[parallel] partitioner = "graph"` (fetched at configure time; needs [oneTBB](https://github.com/uxlfoundation/oneTBB), found through `CMAKE_PREFIX_PATH`, e.g. built with `cmake -S oneTBB -B build -DTBB_TEST=OFF -DCMAKE_INSTALL_PREFIX=$HOME/tbb && cmake --build build -j && cmake --install build`). The default multi-jagged partitions need no library and cut box meshes at least as well. With CUDA, configure with the host compiler (`-DCMAKE_CXX_COMPILER=g++`) instead of `nvcc_wrapper`: Kokkos then compiles the code that uses it through `nvcc_wrapper` itself, and dKaMinPar does not compile with nvcc |
 | `Mallard_ENABLE_HDF5` | `OFF` | HDF5 mesh files and solution output (`format = "hdf5"`, with XDMF for ParaView; parallel HDF5 with MPI, when available) and the `mallard-mesh-convert` tool |
+| `Mallard_ENABLE_CGNS` | `OFF` | CGNS mesh files, through the [CGNS library](https://cgns.github.io/) (an installed one, found through `CMAKE_PREFIX_PATH`; with `-DUSE_SYSTEM_CGNS=OFF`, v4.5.0 is fetched and built with the HDF5 of `Mallard_ENABLE_HDF5`) |
 | `Mallard_WARNINGS_AS_ERRORS` | `OFF` | Treat compiler warnings in Mallard's own code as errors (on in CI) |
 | `BUILD_DOCS` | `OFF` | Doxygen documentation target |
 
@@ -120,7 +121,7 @@ cd examples/riemann_2d
 ../../build/src/Mallard -i input.toml --kokkos-num-threads=8
 ```
 
-See [`examples/`](examples) for complete input files and [`docs/input.md`](docs/input.md) for every input option.
+See the [tutorials](docs/tutorials/index.md) for cases taken from geometry and mesh to the comparison with reference data, [`examples/`](examples) for complete input files, the [user guide](docs/guide/input_files.md) for each topic, and [`docs/input.md`](docs/input.md) for every input option.
 
 ## Testing
 
