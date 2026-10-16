@@ -132,13 +132,16 @@ TEST(MPITest, GasMixtureMatchesSerial) {
     // Species and the temperature seeds of halo cells follow the same history
     // as their owners'; with TENO also the troubled cells' stencil choices and
     // the scalars' bound-preserving factors, and with double flux the frozen
-    // thermodynamics of each step; with chemistry each cell's reactor; with
+    // thermodynamics of each step (of halo cells, after their owners'
+    // chemistry); with chemistry each cell's reactor; with
     // transport the halo cells' coefficients and gradients; radiation is pointwise
     const std::array<std::string, 4> schemes[] = {{"", "type = \"MUSCL\"\n", "", "euler"},
                                                   {"", "type = \"TENO\"\norder = 3\n", "", "euler"},
                                                   {"double_flux = true\n", "type = \"MUSCL\"\n", "", "euler"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n", "euler"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes"},
+                                                  {"double_flux = true\n", "type = \"MUSCL\"\n", "[chemistry]\n",
+                                                   "navier_stokes"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n[radiation]\n", "navier_stokes"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\ncoupling = \"simpler\"\n",
                                                    "navier_stokes"}};
@@ -181,7 +184,7 @@ TEST(MPITest, ThermalDiffusionMatchesSerial) {
 
 TEST(MPITest, MixtureWallsMatchSerial) {
     // Isothermal and heat-flux walls of a reacting mixture with thermal
-    // diffusion, and of an inert one with double flux
+    // diffusion, also with double flux
     std::string input = mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes");
     input.insert(input.find("[physics]\n") + 10, "soret = true\n");
     const std::string adiabatic = "type = \"wall_adiabatic\"\n";
@@ -191,7 +194,6 @@ TEST(MPITest, MixtureWallsMatchSerial) {
         walled.replace(walled.find(adiabatic), adiabatic.size(), wall);
         expect_matches_serial(walled);
         walled.insert(walled.find("[numerics]\n") + 11, "double_flux = true\n");
-        walled.erase(walled.find("[chemistry]\n"), 12);
         expect_matches_serial(walled);
     }
 }
@@ -301,13 +303,17 @@ TEST(MPITest, LargeEddySimulationMatchesSerial) {
 }
 
 TEST(MPITest, ThickenedFlameMatchesSerial) {
-    // The vorticity and the flame fields are exchanged to the halo once per step
+    // The dynamic efficiency's test filter passes exchange the filtered field and its exponent is an exact
+    // domain sum; Charlette's efficiency exchanges the vorticity; the flame fields are exchanged once per step
+    const std::string flame = "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
+                              "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n";
     for (const std::string coupling : {"strang", "simpler"}) {
         expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\ncoupling = \"" + coupling + "\"\n",
-                                            "navier_stokes") +
-                              "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
-                              "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n");
+                                            "navier_stokes") + flame,
+                              [](const Solver & s) { EXPECT_GT(s.tfles_beta(), 0.0); });
     }
+    expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes") + flame +
+                          "efficiency = \"charlette\"\n");
 }
 
 TEST(MPITest, HybridConvectiveFluxMatchesSerial) {
