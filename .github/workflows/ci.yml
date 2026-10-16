@@ -19,11 +19,33 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # First and fast: a branch that changes src/ adds a changelog fragment
+  # (changelog.d/, see docs/design/documentation.md#changelog) unless its pull
+  # request is labeled no-changelog. The other jobs wait for it.
+  changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for a changelog fragment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ "$BRANCH" != main ] && gh pr list -R "$GITHUB_REPOSITORY" --head "$BRANCH" --state open \
+              --json labels -q '.[].labels[].name' | grep -qx no-changelog; then
+            echo "Labeled no-changelog: skipped."
+          else
+            python3 tools/changelog.py check origin/main
+          fi
+
   # Branches run the full 2D suite (OpenMP, with CGNS), the full 3D suite and the
   # multi-rank tests, the full single-precision suites in 2D and 3D (3D with CGNS), and a
   # Clang build (no tests) for the warnings GCC misses. main also runs the
   # serial-backend and non-MPI 3D builds.
   matrix:
+    needs: changelog
     runs-on: ubuntu-latest
     outputs:
       backends: ${{ steps.pick.outputs.backends }}
@@ -120,6 +142,7 @@ jobs:
   # The tutorials (tutorials/) at reduced size: Gmsh meshes, runs on two MPI
   # ranks and their post-processing scripts, so they keep working
   tutorials:
+    needs: changelog
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
-"""Check CHANGELOG.md and generate release notes from it.
+"""Changelog fragments: check them, preview them, fold them into CHANGELOG.md.
 
-    changelog.py notes 0.9.0       print a release's section (or "Unreleased")
-    changelog.py check [BASE]      exit 1 if the branch changes src/ without
-                                   adding a bullet under "## [Unreleased]"
+Each pull request that changes src/ adds a fragment
+changelog.d/<name>.<category>.md (category: added, changed, deprecated,
+removed, fixed or security) holding one or more "- " bullets, instead of
+editing CHANGELOG.md, so that parallel pull requests do not conflict.
+
+    changelog.py check [BASE]          exit 1 if the branch changes src/ without
+                                       adding a fragment (or a fragment is malformed)
+    changelog.py notes VERSION         print a release's section; "Unreleased"
+                                       previews CHANGELOG.md's Unreleased plus the fragments
+    changelog.py release X.Y.Z [DATE]  fold Unreleased and the fragments into
+                                       "## [X.Y.Z] - DATE" (default today) and delete the fragments
 
 `check` compares HEAD with its merge base with BASE (default origin/main) and
-also checks the file's structure: an Unreleased section, release headings
-`## [X.Y.Z] - YYYY-MM-DD`, and only Keep a Changelog subsections. Standard
-library only.
+also checks CHANGELOG.md's structure. Standard library only.
 """
 
 import argparse
+import datetime
 import re
 import subprocess
 import sys
@@ -19,8 +26,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CHANGELOG = ROOT / "CHANGELOG.md"
-CATEGORIES = {"Added", "Changed", "Deprecated", "Removed", "Fixed", "Security"}
+FRAGMENTS = ROOT / "changelog.d"
+CATEGORIES = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Security"]
 RELEASE = re.compile(r"^## \[(\d+\.\d+\.\d+)\] - \d{4}-\d{2}-\d{2}$")
+FRAGMENT = re.compile(r"^[A-Za-z0-9_.-]+\.(" + "|".join(c.lower() for c in CATEGORIES) + r")\.md$")
+REPO = "https://github.com/MatthewBonanni/mallard"
 
 
 def sections(lines):
@@ -30,12 +40,7 @@ def sections(lines):
     for k, i in enumerate(starts):
         end = starts[k + 1] if k + 1 < len(starts) else len(lines)
         m = RELEASE.match(lines[i])
-        if m:
-            name = m.group(1)
-        elif lines[i] == "## [Unreleased]":
-            name = "Unreleased"
-        else:
-            name = lines[i][3:]
+        name = m.group(1) if m else "Unreleased" if lines[i] == "## [Unreleased]" else lines[i][3:]
         out.append((name, i, end))
     return out
 
@@ -52,77 +57,139 @@ def structure_errors(lines):
             errors.append(f'line {start + 1}: expected "## [X.Y.Z] - YYYY-MM-DD", got "{lines[start]}"')
         for i in range(start + 1, end):
             if lines[i].startswith("### ") and lines[i][4:] not in CATEGORIES:
-                errors.append(f"line {i + 1}: unknown subsection \"{lines[i][4:]}\" "
-                              f"(use {', '.join(sorted(CATEGORIES))})")
+                errors.append(f'line {i + 1}: unknown subsection "{lines[i][4:]}" (use {", ".join(CATEGORIES)})')
     return errors
+
+
+def fragment_errors(path):
+    if not FRAGMENT.match(path.name):
+        return [f"{path.name}: name it <name>.<category>.md, category one of "
+                f"{', '.join(c.lower() for c in CATEGORIES)}"]
+    text = path.read_text().strip()
+    if not text.startswith("- "):
+        return [f"{path.name}: write one or more Markdown bullets starting with \"- \""]
+    return []
+
+
+def fragments():
+    """{category: [bullet lines]} of changelog.d/, in file-name order."""
+    out = {c: [] for c in CATEGORIES}
+    for path in sorted(FRAGMENTS.glob("*.md")):
+        if path.name == "README.md":
+            continue
+        m = FRAGMENT.match(path.name)
+        if m:
+            out[m.group(1).capitalize()] += path.read_text().strip().splitlines()
+    return out
+
+
+def merged_unreleased(lines):
+    """{category: [lines]} of CHANGELOG.md's Unreleased section plus the fragments."""
+    out = {c: [] for c in CATEGORIES}
+    start, end = next((s, e) for n, s, e in sections(lines) if n == "Unreleased")
+    category = None
+    for line in lines[start + 1:end]:
+        if line.startswith("### "):
+            category = line[4:]
+        elif category and line.strip():
+            out[category].append(line)
+    for c, bullets in fragments().items():
+        out[c] += bullets
+    return out
+
+
+def render(categories):
+    body = []
+    for c in CATEGORIES:
+        if categories[c]:
+            body += [f"### {c}", ""] + categories[c] + [""]
+    return body
 
 
 def notes(version):
     lines = CHANGELOG.read_text().splitlines()
+    if version == "Unreleased":
+        print("\n".join(render(merged_unreleased(lines))).rstrip())
+        return 0
     for name, start, end in sections(lines):
         if name == version.removeprefix("v"):
-            body = lines[start + 1:end]
-            while body and not body[-1].strip():
-                body.pop()
-            while body and not body[0].strip():
-                body.pop(0)
-            body = [line for line in body if not re.match(r"^\[[^\]]+\]: ", line)]
-            print("\n".join(body))
+            body = [line for line in lines[start + 1:end] if not re.match(r"^\[[^\]]+\]: ", line)]
+            print("\n".join(body).strip())
             return 0
     print(f"changelog.py: no section for {version} in CHANGELOG.md", file=sys.stderr)
     return 1
 
 
+def release(version, date):
+    lines = CHANGELOG.read_text().splitlines()
+    if any(name == version for name, _, _ in sections(lines)):
+        print(f"changelog.py: CHANGELOG.md already has {version}", file=sys.stderr)
+        return 1
+    body = render(merged_unreleased(lines))
+    if not body:
+        print("changelog.py: nothing to release", file=sys.stderr)
+        return 1
+    start, end = next((s, e) for n, s, e in sections(lines) if n == "Unreleased")
+    new = lines[:start] + ["## [Unreleased]", "", f"## [{version}] - {date}", ""] + body + lines[end:]
+    link = next((i for i, line in enumerate(new) if line.startswith("[Unreleased]: ")), None)
+    if link is not None:
+        previous = re.search(r"compare/(v[\d.]+)\.\.\.HEAD", new[link])
+        new[link] = f"[Unreleased]: {REPO}/compare/v{version}...HEAD"
+        if previous:
+            new.insert(link + 1, f"[{version}]: {REPO}/compare/{previous.group(1)}...v{version}")
+    CHANGELOG.write_text("\n".join(new) + "\n")
+    for path in FRAGMENTS.glob("*.md"):
+        if path.name != "README.md":
+            path.unlink()
+    print(f"CHANGELOG.md: released {version}; fragments removed")
+    return 0
+
+
 def git(*args):
-    return subprocess.run(["git", *args], cwd=ROOT, check=True, capture_output=True,
-                          text=True).stdout
+    return subprocess.run(["git", *args], cwd=ROOT, check=True, capture_output=True, text=True).stdout
 
 
 def check(base):
-    lines = CHANGELOG.read_text().splitlines()
-    errors = structure_errors(lines)
-    for e in errors:
-        print(f"CHANGELOG.md: {e}", file=sys.stderr)
-
+    errors = [f"CHANGELOG.md: {e}" for e in structure_errors(CHANGELOG.read_text().splitlines())]
     merge_base = git("merge-base", base, "HEAD").strip()
-    changed = git("diff", "--name-only", f"{merge_base}...HEAD").split()
+    status = [line.split("\t") for line in git("diff", "--name-status", f"{merge_base}...HEAD").splitlines()]
+    changed = [entry[-1] for entry in status]
+    added = [ROOT / entry[-1] for entry in status
+             if entry[0][0] in "AR" and entry[-1].startswith("changelog.d/") and entry[-1] != "changelog.d/README.md"]
+    for path in added:
+        errors += fragment_errors(path)
+    for e in errors:
+        print(e, file=sys.stderr)
     if not any(f.startswith("src/") for f in changed):
-        print("No changes under src/: no changelog entry needed.")
-        return 1 if errors else 0
-
-    unreleased = next(((s, e) for n, s, e in sections(lines) if n == "Unreleased"), None)
-    added = []
-    line_no = 0
-    for line in git("diff", "-U0", f"{merge_base}...HEAD", "--", "CHANGELOG.md").splitlines():
-        hunk = re.match(r"^@@ -\S+ \+(\d+)", line)
-        if hunk:
-            line_no = int(hunk.group(1))
-        elif line.startswith("+") and not line.startswith("+++"):
-            added.append((line_no - 1, line[1:]))
-            line_no += 1
-    entries = [text for i, text in added
-               if unreleased and unreleased[0] < i < unreleased[1] and text.startswith("- ")]
-    if entries:
-        print(f"Changelog entries under Unreleased: {len(entries)}")
-        return 1 if errors else 0
-    print("This branch changes src/ but adds no bullet under \"## [Unreleased]\" in "
-          "CHANGELOG.md.\nAdd one (Added, Changed, Deprecated, Removed or Fixed; say what a "
-          "user notices and what to do about it), or label the pull request "
-          "\"no-changelog\" if users notice nothing (refactors, tests, comments).",
-          file=sys.stderr)
-    return 1
+        print("No changes under src/: no changelog fragment needed.")
+    elif added:
+        print(f"Changelog fragments: {', '.join(p.name for p in added)}")
+    else:
+        print("This branch changes src/ but adds no changelog fragment.\n"
+              "Add changelog.d/<branch>.<added|changed|deprecated|removed|fixed|security>.md with one "
+              "\"- \" bullet per change: what a user notices and what to do about it, with the PR or "
+              "issue number. If users notice nothing (refactors, tests, comments), label the pull "
+              "request \"no-changelog\". See docs/design/documentation.md#changelog.", file=sys.stderr)
+        return 1
+    return 1 if errors else 0
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("notes")
-    p.add_argument("version")
     p = sub.add_parser("check")
     p.add_argument("base", nargs="?", default="origin/main")
+    p = sub.add_parser("notes")
+    p.add_argument("version")
+    p = sub.add_parser("release")
+    p.add_argument("version")
+    p.add_argument("date", nargs="?", default=datetime.date.today().isoformat())
     args = parser.parse_args()
-    return notes(args.version) if args.cmd == "notes" else check(args.base)
+    if args.cmd == "check":
+        return check(args.base)
+    if args.cmd == "notes":
+        return notes(args.version)
+    return release(args.version, args.date)
 
 
 if __name__ == "__main__":

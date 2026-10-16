@@ -71,20 +71,20 @@ Equations are LaTeX, which both GitHub and the website (MathJax 3) render:
 ## Changelog
 
 [`CHANGELOG.md`](../../CHANGELOG.md) follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). A pull request that
-changes `src/` adds one bullet per user-visible change under `## [Unreleased]`,
-in `Added`, `Changed`, `Deprecated`, `Removed` or `Fixed`, with its PR or issue
-number:
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pull requests do not
+edit it, so that the many landing in parallel do not conflict: one that changes
+`src/` adds a fragment `changelog.d/<branch>.<category>.md` (`added`,
+`changed`, `deprecated`, `removed`, `fixed` or `security`) with one `- ` bullet
+per change and its PR or issue number:
 
 - Say what a user notices and what to do about it, not how the code changed.
-- Anything that changes results, input keys or file formats goes under
-  `Changed` (or `Deprecated`/`Removed`), in bold, with how to get the old
-  behavior back.
-- Refactors, tests and comments that users cannot notice need no entry: label
-  the pull request `no-changelog`.
+- Anything that changes results, input keys or file formats is `changed` (or
+  `deprecated`/`removed`), in bold, with how to get the old behavior back.
+- Refactors, tests and comments that users cannot notice need no fragment:
+  label the pull request `no-changelog`.
 
-The `Changelog` workflow checks this on every pull request
-(`python3 tools/changelog.py check` runs it locally). At a release, rename
-`Unreleased` to `[X.Y.Z] - YYYY-MM-DD`, add an empty `Unreleased` above it and
-its compare link below, and start the GitHub release notes from
-`python3 tools/changelog.py notes X.Y.Z`.
+The first job of `ci.yml` checks this (`python3 tools/changelog.py check`
+runs it locally). At a release, `python3 tools/changelog.py release X.Y.Z`
+folds the Unreleased section and the fragments into `## [X.Y.Z] - date`,
+deletes the fragments and updates the compare links; the GitHub release notes
+start from `python3 tools/changelog.py notes X.Y.Z`.
