@@ -144,8 +144,12 @@ bool batch_interleaved();
 /** @brief The device copy of a batch on the host. */
 TableBatch device_copy(const TableBatchT<Kokkos::HostSpace> & h);
 
-/** @brief Why a cell's device setup must be redone on the host. */
-enum Status : uint8_t { OK = 0, OUT_OF_SCRATCH = 1 };
+/**
+ * @brief Why a cell's setup stopped: OUT_OF_SCRATCH is redone on the host with
+ *        more room; TOO_MANY_PLANES (its search meets more distinct mirror
+ *        planes than an entry can index) is not.
+ */
+enum Status : uint8_t { OK = 0, OUT_OF_SCRATCH = 1, TOO_MANY_PLANES = 2 };
 
 /** @brief Options and sizes of the 3D setup. */
 struct Options {

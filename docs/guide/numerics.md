@@ -5,6 +5,92 @@ an approximate Riemann solver applied to states reconstructed on both sides,
 and Runge–Kutta schemes advance the cell averages. This page is about choosing
 the options; [Numerical methods](../numerics/overview.md) has the formulation.
 
+## Presets
+
+A preset picks a validated combination of every scheme choice on this page,
+so most inputs need one line:
+
+```toml
+[run]
+t_stop = 0.2       # no cfl needed: the preset sets it
+
+[numerics]
+preset = "accurate"
+```
+
+| Preset | Reconstruction | Flux | Time integrator | `cfl` | For |
+|---|---|---|---|---|---|
+| `robust` | MUSCL, Venkatakrishnan limiter | RHLL | SSPRK3 | 0.5 | First runs, complex geometry, strong shocks and blasts |
+| `accurate` | TENO-E, order 5 | HLLC | SSPRK3 | 1.0 | Smooth flow, acoustics, vortices, moderate shocks |
+| `les` | MUSCL, no limiter | hybrid (KEEP central, HLLC at shocks) | SSPRK3 | 0.8 | Turbulence: LES and DNS |
+| `reacting` | MUSCL, Venkatakrishnan limiter | HLLC | SSPRK3 | 0.35 | Flames and detonations with `[chemistry]` |
+
+Why each, and what it passes (each check runs in the test suite,
+`PresetValidation.*`, with the preset alone):
+
+- **`robust`** never needs a stencil setup, works on every cell type and
+  physics, and has the fewest ways to fail. RHLL does not grow carbuncles at
+  strong shocks on blunt bodies or grid-aligned faces. `cfl = 0.5` is the
+  first-order positivity bound of the explicit update in Mallard's CFL
+  convention: the Noh implosion (`examples/noh_axisymmetric`, an
+  infinite-strength shock into gas at `p = 1e-6`) keeps a positive pressure
+  at 0.5 on 40², 60² and 200² cells, but not at 0.8 on 200² (`accurate` goes to
+  negative pressure on it); on 60² the plateau density is within 7% of 64.
+  On Sod's problem the L1 density error is 0.0029 at 200 cells.
+- **`accurate`** is fifth order where the flow is smooth (4.9 measured on a
+  convected density wave on triangles, 16² to 32² cells, at its own `cfl`)
+  and ENO at discontinuities: the examples `sod`, `riemann_2d`,
+  `explosion_3d`, `taylor_green_3d` and `isotropic_turbulence` use exactly
+  these keys ([validation](https://matthewbonanni.github.io/mallard/validation/#accuracy)).
+  It costs a stencil setup (seconds per million cells on a GPU, minutes on
+  CPUs) and memory, and is not bound preserving: add
+  `bound_preserving = true` and a smaller `cfl` for blasts.
+- **`les`** leaves the dissipation to the viscosity and the SGS model: on a
+  viscous 2D Taylor–Green vortex at Mach 0.1 (16² cells) the kinetic energy
+  decays at the exact viscous rate to 0.02%, against 8% too fast with
+  `robust`. TENO with the central flux feeds energy into the resolved field,
+  hence the unlimited MUSCL states
+  ([LES design](../design/les.md#81-decaying-isotropic-turbulence-comte-bellot-corrsin-1971)).
+  These are the keys of `cbc_les` and `channel_les`, within 0.7–1.6% of the
+  DNS ([validation](https://matthewbonanni.github.io/mallard/validation/#les)).
+- **`reacting`**: the scheme of the validated flames and detonations
+  ([validation](https://matthewbonanni.github.io/mallard/validation/#reacting-flow)).
+  `cfl = 0.35` keeps the Strang splitting error of a CJ detonation's
+  induction length within 5% (25% at 1.0). A stoichiometric H2/air flame at
+  700 K, 6 cells per thermal thickness, propagates within 0.7% of Cantera's
+  speed. Steady flames alone are insensitive to `cfl` (0.05% from 0.2 to
+  2.0): set `cfl = 1.0` to run them three times faster, or use
+  `[chemistry] coupling = "simpler"`.
+
+Any key the input sets wins over the preset, so a preset is also a starting
+point:
+
+```toml
+[numerics]
+preset = "accurate"
+riemann_solver = "RHLL"     # grid-aligned strong shocks
+
+[numerics.face_reconstruction]
+order = 3                   # TENO-E 3 instead of 5
+```
+
+Reconstruction options (`order`, `limiter`) apply only when the
+reconstruction type is the preset's: `type = "MUSCL"` under `accurate` gets
+MUSCL's own defaults, not `order = 5`. The preset's `cfl` applies only when
+`[run]` sets neither `cfl` nor `dt`. Without a preset the defaults below
+apply, unchanged (first order). The log names the preset and every key the
+input overrides, and the Numerics section of the log lists what is used:
+
+```
+== Numerics ===========================
+  Preset             accurate (the input sets numerics.riemann_solver = RHLL)
+  Reconstruction     TENO, order 5 (degree 4), 3 face quadrature points
+  Riemann solver     RHLL
+```
+
+Each example's closest preset runs in the test suite
+(`Examples/ExampleUnderPreset.*`).
+
 ## Time step and stopping
 
 ```toml
@@ -22,10 +108,15 @@ t_stop = 0.2       # and/or n_steps, t_wall_stop
 | `t_wall_stop` | none | Stop after this many seconds of wall time |
 | `cuda_graphs` | `true` | CUDA builds: launch each step as one CUDA graph where possible (same results) |
 
+With a [numerics preset](#presets) `cfl` may be left out: the preset sets it.
+
 At least one stop condition is required; the first one reached ends the run.
 `cfl` is the usual unstructured CFL number: on a uniform 2D grid of spacing h,
 `dt = cfl * h / (|u| + |v| + 2a)` (viscous, diffusive and source limits
-included).
+included). Boundary faces count the wave speed of their exterior state too
+(the inflow state of `upt`, `dirichlet` and inlets, the target of
+`nscbc_inlet`), so a fast jet entering a domain at rest runs from the first
+step at the requested `cfl`.
 
 ![Largest stable CFL number with SSPRK3 for each reconstruction and cell type](../images/guide/cfl_limits-light.svg#gh-light-mode-only)
 ![Largest stable CFL number with SSPRK3 for each reconstruction and cell type](../images/guide/cfl_limits-dark.svg#gh-dark-mode-only)
@@ -53,8 +144,8 @@ order = 5          # TENO: 3 to 6
 ```
 
 !!! warning "The default is first order"
-    Without `[numerics.face_reconstruction]` Mallard runs first order. Every
-    example sets the reconstruction explicitly.
+    Without a [preset](#presets) or `[numerics.face_reconstruction]` Mallard
+    runs first order. Every example sets a preset or the reconstruction.
 
 ![Density of the Sod shock tube at t = 0.2 with first order, MUSCL, TENO-E 3 and TENO-E 5 against the exact solution](../images/guide/sod_schemes-light.svg#gh-light-mode-only)
 ![Density of the Sod shock tube at t = 0.2 with first order, MUSCL, TENO-E 3 and TENO-E 5 against the exact solution](../images/guide/sod_schemes-dark.svg#gh-dark-mode-only)

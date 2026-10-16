@@ -15,7 +15,7 @@ The spatial dimension is fixed at build time with the CMake option
 
 | Key | Description |
 |---|---|
-| `cfl` | CFL number in the usual unstructured convention ([Blazek](references.md#blazek-2015) eqs. 6.20-6.21; see [time step](numerics/overview.md)): on a uniform 2D grid of spacing h, `dt = cfl * h / (abs(u) + abs(v) + 2a)`. Measured stability limits for smooth flow are 1.26-1.6 with SSPRK3 and 1.39-1.8 with RK4, depending on reconstruction and cell type ([table](numerics/overview.md#time-step)): use at most 1.2 (SSPRK3) or 1.35 (RK4), and 1.0 with SSPRK3 as a robust default, shocks included (but 0.25 for the Noh problem's infinite-strength shock with `bound_preserving`); with `[chemistry]` the splitting error may call for less (detonations: about 0.35 with Strang splitting, 1.0 with `coupling = "simpler"`). Mallard 0.5 and earlier inputs give the same time step with half their `cfl`. Exactly one of `cfl` and `dt` is required. |
+| `cfl` | CFL number in the usual unstructured convention ([Blazek](references.md#blazek-2015) eqs. 6.20-6.21; see [time step](numerics/overview.md)): on a uniform 2D grid of spacing h, `dt = cfl * h / (abs(u) + abs(v) + 2a)`. Measured stability limits for smooth flow are 1.26-1.6 with SSPRK3 and 1.39-1.8 with RK4, depending on reconstruction and cell type ([table](numerics/overview.md#time-step)): use at most 1.2 (SSPRK3) or 1.35 (RK4), and 1.0 with SSPRK3 as a robust default, shocks included (but 0.25 for the Noh problem's infinite-strength shock with `bound_preserving`); with `[chemistry]` the splitting error may call for less (detonations: about 0.35 with Strang splitting, 1.0 with `coupling = "simpler"`). Mallard 0.5 and earlier inputs give the same time step with half their `cfl`. Exactly one of `cfl` and `dt` is required, except that with `[numerics] preset` and neither of them the preset sets `cfl`. |
 | `dt` | Fixed time step |
 | `t_stop` | Stop at this simulation time (the last step is shortened to land on it) |
 | `n_steps` | Stop after this many steps |
@@ -29,7 +29,7 @@ At least one stop condition is required.
 | Key | Description |
 |---|---|
 | `type` | `file` (the default), `cartesian` (quads), `cartesian_tri` (each quad split into two triangles along its bottom-left to top-right diagonal), or `wedge` (quads over an 8 degree compression ramp starting at x = 0.5) |
-| `filename` | (`file`) Mallard HDF5 mesh (`.h5` or `.hdf5`, see below), ASCII Gmsh mesh (format 2.2 or 4.1), CGNS file (`.cgns`), or ANSYS Fluent mesh or case file (`.msh`, `.cas`; ASCII or binary), of triangles and/or quadrilaterals (2D), or tetrahedra, pyramids, prisms and/or hexahedra (3D); see mesh files below |
+| `filename` | (`file`) Mallard HDF5 mesh (`.h5` or `.hdf5`, see below), ASCII Gmsh mesh (format 2.2 or 4.1), CGNS file (`.cgns`), ANSYS Fluent mesh or case file (`.msh`, `.cas`; ASCII or binary), or OpenFOAM polyMesh (a directory: the case, its `constant/polyMesh`, or anything between), of triangles and/or quadrilaterals (2D), or tetrahedra, pyramids, prisms and/or hexahedra (3D); see mesh files below |
 | `Nx`, `Ny` | Number of quads in x and y (default 100) |
 | `Lx`, `Ly` | Domain size; the domain is `[0, Lx] x [0, Ly]` (default 1) |
 
@@ -72,6 +72,9 @@ and curves in 3D) are ignored. Elements of order 2 and 3 are read by their
 corners; high-order boundary elements (`line3`, `line4` in 2D; `triangle6`,
 `triangle9`, `triangle10`, `quadrangle8`, `quadrangle9`, `quadrangle16` in 3D)
 curve their faces (see curved boundaries below).
+
+Every format and the transform below are illustrated in the user guide
+([meshes](guide/meshes.md#other-mesh-formats)).
 
 `[mesh.transform]` maps the nodes of a mesh file as it is read,
 `x -> R (S x) + t`: scale first, then rotate about the origin, then translate.
@@ -122,13 +125,23 @@ pyramids, prisms or hexahedra (3D); polygonal and polyhedral cells and
 adapted meshes (cell and face trees) are rejected. Periodic face zones stay
 boundary zones, to pair with `[[periodic]]`.
 
-In a distributed run every rank reads a Gmsh, CGNS or Fluent file whole (keeping only its
+OpenFOAM meshes are read from `points`, `faces` (`faceList` or
+`faceCompactList`), `owner`, `neighbour` and `boundary`, ASCII or binary
+(32- or 64-bit labels and scalars); compressed (`.gz`) and decomposed
+(`processor*`) meshes must be decompressed or reconstructed first. Each patch
+becomes a boundary zone of its name (cyclic patches too, to pair with
+`[[periodic]]`). Cells are rebuilt from their faces as for Fluent. The 2D
+build reads a mesh one cell thick in z between `empty` patches (as for 2D
+OpenFOAM runs): each cell is its face at the lowest z, the other patches give
+the boundary edges, and the empty patches disappear.
+
+In a distributed run every rank reads a Gmsh, CGNS, Fluent or OpenFOAM mesh whole (keeping only its
 share), so large meshes should be converted to Mallard's HDF5 mesh format
 (builds with `-DMallard_ENABLE_HDF5=ON`), of which each rank reads only its
 share; generated meshes are also produced per rank:
 
 ```sh
-mallard-mesh-convert mesh.msh mesh.h5               # from Gmsh (or CGNS, Fluent)
+mallard-mesh-convert mesh.msh mesh.h5               # from Gmsh (or CGNS, Fluent, OpenFOAM)
 mpirun -n 8 mallard-mesh-convert input.toml mesh.h5  # a generated mesh, written in parallel
 ```
 
@@ -298,9 +311,11 @@ Turbulence-chemistry interaction of reacting LES (a viscous mixture with
 conductivity are multiplied by `E F` and its reaction rates by `E / F`, which
 keeps the laminar flame speed and thickens the flame by `F` so that it spans
 `n_res` cells; the efficiency `E` restores the flame-surface wrinkling of the
-subgrid scales (Charlette, Meneveau & Veynante 2002, `beta = 0.5`, at the
-filter width `F delta_L`, with the subgrid velocity
-`u' = 2 Delta^3 |lap(curl u)|` of Colin et al.). `F = 1 + (max(1, n_res Delta /
+subgrid scales at the filter width `F delta_L`: by default `E = F^beta`
+(Charlette, Meneveau & Veynante 2002) with `beta` from the dynamic procedure
+of Wang, Boileau & Veynante (2011), which compares the resolved flame surface
+`|grad c|` before and after a test filter (global, exact sums; written to the
+integrals file as `tf_beta`). `F = 1 + (max(1, n_res Delta /
 delta_L) - 1) Omega` with the flame sensor `Omega = min(1, c (1 - c) /
 0.0475)` of the progress variable `c = (T - T_unburnt) / (T_burnt -
 T_unburnt)`, so `Omega = 1` across the whole flame (`0.05 <= c <= 0.95`) and 0
@@ -318,10 +333,10 @@ times the half step (exact for the autonomous constant-volume reactor).
 | `s_L` | Laminar flame speed (m/s) |
 | `T_unburnt`, `T_burnt` | Temperatures of the fresh and burnt gas (K) |
 | `n_res` | Cells across the thickened flame, default 5 |
-| `efficiency` | `charlette` (default) or `none` (`E = 1`) |
-| `beta` | Exponent of the Charlette efficiency, default 0.5 |
-| `subgrid_velocity` | The `u'` of the efficiency: `colin` (default), `u' = 2 Delta^3 abs(lap(curl u))`; or `eddy_viscosity`, `u' = C_u nu_t / Delta` from the SGS model. Colin's operator overpredicts `u'` 5-8 times on meshes with `Delta >= 0.4 delta_L` and the flame speed by 2x at `Delta = 1.6 delta_L` ([design notes](design/les.md), section 8.3) |
-| `C_u` | Constant of `subgrid_velocity = "eddy_viscosity"`, default 28 (a priori from a DNS at `Delta = 0.8 delta_L`; 22-39 over `Delta = 0.4-1.6 delta_L`) |
+| `efficiency` | `dynamic` (default): `E = F^beta`, `beta` in [0, 1] from the dynamic procedure, no constant; turbulent flame speed within 8% of two DNS at `Delta = 0.4-1.6 delta_L`. `charlette`: Charlette's efficiency function of a subgrid velocity `u'` (the default until #294; doubles the flame speed at `Delta = 1.6 delta_L`). `none`: `E = 1`. Comparison in the [design notes](design/les.md), section 8.3 |
+| `beta` | `charlette` only: exponent of the efficiency, default 0.5 |
+| `subgrid_velocity` | `charlette` only: the `u'` of the efficiency: `colin` (default), `u' = 2 Delta^3 abs(lap(curl u))`; or `eddy_viscosity`, `u' = C_u nu_t / Delta` from the SGS model. Colin's operator overpredicts `u'` 5-8 times on meshes with `Delta >= 0.4 delta_L` and the flame speed by 2x at `Delta = 1.6 delta_L` |
+| `C_u` | `charlette` only: constant of `subgrid_velocity = "eddy_viscosity"`, default 28 (a priori from a DNS at `Delta = 0.8 delta_L`; 22-39 over `Delta = 0.4-1.6 delta_L`) |
 
 **Experimental: `model = "pasr"`**, the partially stirred reactor (Sabelnikov &
 Fureby 2013) for non-premixed and partially premixed flames: no thickening;
@@ -342,15 +357,30 @@ filter widths and overcorrects on coarse meshes; not validated beyond this case.
 
 | Key | Description |
 |---|---|
-| `type` | `constant` (default), `analytical` or `restart` |
+| `type` | `constant` (default), `analytical`, `restart`, or `remap` (a restart file of another mesh) |
 | `u` | `constant`: `[u_x, u_y]`; `analytical`: one expression in `x`, `y`, `z` per component |
 | `rho`, `p`, `T` | `constant`: `p` and `T`; `analytical`: exactly two of the three, as expressions in `x`, `y`, `z` |
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
 | `balance` | (mixtures, `analytical`) Species taking `1 - sum` of the listed fractions; without it the listed fractions are normalized |
 | `n_subdivisions` | (`analytical`) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is split into `n_subdivisions`³ sub-tetrahedra, each with a 14-point degree-5 rule (default 1) |
-| `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, 3 when they also hold the weights of `[statistics]` averages, or 4 when they also hold the state of characteristic boundary faces) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read |
+| `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, 3 when they also hold the weights of `[statistics]` averages, or 4 when they also hold the state of characteristic boundary faces, or 5 when compressed) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read |
 
 Expressions use [exprtk](https://www.partow.net/programming/exprtk/) syntax, e.g. `"x < 0.5 ? 1.0 : 0.125"`.
+
+### `type = "remap"`
+
+Starts from a restart file of another mesh (resolution, cell type, partition
+or rank count), remapped conservatively and to high order: see
+[Initialization: remap from another mesh](guide/initialization.md#remap-from-another-mesh)
+and [docs/design/remap.md](design/remap.md).
+
+| Key | Description |
+|---|---|
+| `file` | Restart file of the source run |
+| `[initialize.mesh]` | The source run's `[mesh]` table (a generated mesh or a mesh file) |
+| `[[initialize.periodic]]` | The source mesh's periodic zone pairs, as `[[periodic]]` (default: the run's `[[periodic]]`) |
+| `degree` | Degree of the source cells' least-squares polynomials, 0 to 5 (default 2) |
+| `limiter` | `bounds` (default): each polynomial stays within the averages of its cell and vertex neighbors (one factor for the density and the species); `none` keeps the full order, for smooth fields |
 
 ## `[[boundaries]]`
 
@@ -438,6 +468,7 @@ Strength and reference are evaluated once at cell centroids.
 
 | Key | Description |
 |---|---|
+| `preset` | `robust`, `accurate`, `les` or `reacting`: a validated combination of `face_reconstruction` (`type` and its `order` or `limiter`), `riemann_solver`, `convective_flux`, `time_integrator` and `[run] cfl`, each used only where the input does not set that key (a reconstruction option only when the reconstruction type is the preset's; `cfl` only when `[run]` sets neither `cfl` nor `dt`). What each chooses and why: [Numerics: presets](guide/numerics.md#presets). Default: none (the defaults below) |
 | `riemann_solver` | `Rusanov`, `HLL`, `HLLC` (default), `Roe`, or `RHLL` (rotated hybrid HLL-Roe, carbuncle-free except at shocks at rest on cell faces; see [numerics](numerics/overview.md#stationary-shocks-on-cell-faces)) |
 | `time_integrator` | `FE`, `SSPRK3` (default) or `RK4` |
 | `check_nan` | Stop if the solution becomes non-finite (default `false`) |
@@ -765,6 +796,10 @@ Used when Mallard runs on several MPI ranks (`mpirun -n N Mallard -i input.toml`
 | Key | Description |
 |---|---|
 | `check_interval` | Print a progress row every this many steps (default 1) |
+| `async` | `true` (default) writes the `[[write_data]]` files on background threads while the run continues; `false` writes them before the run goes on. When a file is due, its values are copied out (on several ranks, regrouped where the file needs it) and the run goes on; a writer's next file first waits for its previous one. The files are the same as without `async`, byte for byte. HDF5 output on several ranks stays synchronous: parallel HDF5 calls MPI, which only the main thread does. The run waits for every file before it ends, also when it stops on an error |
+| `io_threads` | Threads that copy out each snapshot and compress its files (default 1) |
+
+The run's summary reports the size of the files written and the time spent writing them (in the background with `async`); `output` in its wall time is what the run waited for.
 
 Each progress row shows the step, time `t`, time step `dt`, the fraction of the run done (by
 whichever of `n_steps`, `t_stop` and `t_wall_stop` comes first), the time-stepping wall time
@@ -786,6 +821,9 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
 | `variables` | (`vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m^3 s)]; with `[radiation]` also `QRAD` [W/m^3]), with `[[sources]]` (or `[source]` expressions) `SOURCE_<conservative>` and `SOURCE_RHOY_<species>`, the sources per unit volume, and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>` and `COV_<A>_<B>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
 | `geometry` | (`vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |
+| `compression` | `none` (default) or `zlib`, lossless: VTU arrays are compressed as ParaView's `vtkZLibDataCompressor` reads them (needs `Mallard_ENABLE_ZLIB`); HDF5 datasets are chunked, byte-shuffled and deflated (HDF5's standard filters, which every HDF5 reader has); restart files become version 5, each variable in byte-shuffled, deflated chunks (`Mallard_ENABLE_ZLIB` to write and to read them), and restart bitwise like uncompressed ones. Not for boundary-zone output (`geometry`) |
+| `relative_error` | (`vtu`, `hdf5`, with `compression = "zlib"`) Error bound of lossy compression: each cell value is rounded to the fewest mantissa bits that keep it within this relative error of itself (\|x' - x\| <= `relative_error` \|x\|; zeros, subnormals, infinities and NaNs are kept), and the zeroed trailing bits compress well. The mesh stays exact. Restart files are always lossless |
+| `chunk_cells` | (`restart`, with `compression = "zlib"`) Cells per compressed chunk (default 65536); a rank reading some cells decompresses only the chunks that hold them |
 
 `format = "hdf5"` (builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need
 parallel HDF5) scales to large runs: every rank writes its part of one file per
@@ -802,6 +840,7 @@ snapshot with collective I/O instead of a VTU piece of its own. It writes
 - `PREFIX_NNNNNN.xmf` per snapshot and `PREFIX.xmf`, the time series, which
   ParaView opens (XDMF reader).
 
+With `compression = "zlib"` the datasets are stored in chunks of 65536 rows.
 Row i of every cell array is global cell i, the cell order of the mesh file and
 of restart files, so the files do not depend on the number of ranks.
 Snapshots are about half the size of VTU pieces (the mesh is not repeated) and

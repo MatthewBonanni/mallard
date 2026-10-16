@@ -8,8 +8,10 @@ input file and the Python scripts that set it up and draw its figures, and
 | Directory | Tutorial |
 |---|---|
 | `cone/` | [Supersonic flow over a cone](../docs/tutorials/cone.md) (3D) against the Taylor-Maccoll solution |
+| `channel_les/` | [Channel LES](../docs/tutorials/channel_les.md): turbulent channel at Re_τ = 180 against DNS |
 
-`ci.sh` runs every tutorial at reduced size on two MPI ranks, as CI does:
+`ci.sh` runs every tutorial at reduced size on two MPI ranks, as CI does, with the steps in each
+tutorial's own `ci.sh`:
 
 ```sh
 tutorials/ci.sh build/src/Mallard build-3d/src/Mallard /tmp/tutorials
