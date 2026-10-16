@@ -554,7 +554,11 @@ void drop_unused_nodes(MeshFileData & data) {
 MeshFileData read_mesh_file(const std::string & filename) {
     const std::string ext = std::filesystem::path(filename).extension().string();
     if (ext == ".cgns") return read_cgns(filename);
-    return read_gmsh(filename);
+    if (ext == ".cas") return read_fluent(filename);
+    std::ifstream in(filename);
+    char first = 0;
+    in >> first;
+    return first == '(' ? read_fluent(filename) : read_gmsh(filename);
 }
 
 namespace {
