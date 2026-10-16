@@ -16,12 +16,14 @@ add_library(MallardCore STATIC
     mesh/mesh_3d.cpp
     mesh/mesh_block.cpp
     mesh/zone.cpp
+    mesh/box_tree.cpp
     boundary/boundary.cpp
     boundary/synthetic_inflow.cpp
     chemistry/mechanism.cpp
     chemistry/transport.cpp
     chemistry/units.cpp
     numerics/face_reconstruction.cpp
+    numerics/overlap.cpp
     numerics/quadrature.cpp
     numerics/scalar_reconstruction.cpp
     numerics/teno.cpp
@@ -45,6 +47,7 @@ add_library(MallardCore STATIC
     solver/solver_radiation.cpp
     solver/solver_sponge.cpp
     solver/solver_inflow.cpp
+    solver/remap.cpp
     solver/statistics.cpp
     io/compression.cpp
     io/data_writer.cpp
