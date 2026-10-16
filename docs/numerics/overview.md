@@ -4,8 +4,9 @@ Mallard solves the compressible Euler or Navier-Stokes equations, for a single
 gas or a reacting mixture, with a cell-centered finite volume method on
 unstructured meshes: triangles and quadrilaterals in 2D (planar or
 axisymmetric), tetrahedra, hexahedra, prisms and pyramids in 3D. This page
-describes the methods; the [numerics guide](../guide/numerics.md) is about
-choosing among them.
+describes the methods and measures them; the [theory manual](../theory/index.md)
+gives every equation as implemented, and the [numerics guide](../guide/numerics.md)
+is about choosing among them.
 
 ## Discretization
 
@@ -21,7 +22,7 @@ $$
 
 where the inner sum runs over the quadrature points $x_q$ (weights $w_q$) of face $f$.
 Each face is integrated with Gauss-Legendre points (one for first order and
-MUSCL, `ceil((order + 1) / 2)` for TENO). At each point the convective flux is
+MUSCL, `floor((order + 1) / 2)` per edge for TENO). At each point the convective flux is
 an approximate Riemann solver applied to the reconstructed left and right
 states. Each face's convective and viscous fluxes are stored once and every
 cell sums its faces in a fixed order, without atomics, so results are bitwise

@@ -11,6 +11,7 @@ image pairs to its own.
 |---|---|
 | A feature's user-facing explanation: when to use it, a minimal TOML snippet, its keys with defaults, pitfalls | `docs/guide/<topic>.md` |
 | Every input key, with its default | `docs/input.md` |
+| The equations and methods as implemented, with their sources | `docs/theory/` (the *Theory manual*; one chapter per file, listed in `docs/theory/index.md`) |
 | Methods and their accuracy | `docs/numerics/` |
 | Design rationale, alternatives, measurements | `docs/design/` (the site's *Developer notes*); link it from user pages only as a small "Design notes" link |
 | Examples | a row in the topic section of `examples/README.md` |
