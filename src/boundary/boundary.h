@@ -349,7 +349,7 @@ struct BoundaryData {
      *        counterpart of BoundaryCondition::ghost_W; bc_thermo holds the
      *        surrogates at the stagnation (or the mass-flow inlet's) temperature.
      */
-    KOKKOS_INLINE_FUNCTION
+    MALLARD_INFLOW_NOINLINE KOKKOS_INLINE_FUNCTION
     void mixture_inflow_W(const int32_t i_bc, const rtype * W_i, const rtype * n, rtype * W_g, rtype * th_g) const {
         constexpr uint8_t E = N_DIM + 1;
         const BoundaryCondition & bc = bcs(i_bc);

@@ -20,6 +20,11 @@
 
 namespace inflow {
 
+// The inlets' states stay out of line: inlined into every kernel that builds
+// ghost states (TENO's mirror cells above all), their iterations raise the
+// register pressure of the common paths
+#define MALLARD_INFLOW_NOINLINE __attribute__((noinline))
+
 /** @brief Isentrope of a calorically perfect gas through (T0, p0). */
 struct PerfectGas {
     double gamma, R;
@@ -60,7 +65,7 @@ struct ThermallyPerfectGas {
  * @param T_b Temperature of the boundary state (output).
  */
 template <typename Gas>
-KOKKOS_INLINE_FUNCTION void stagnation_state(const Gas & gas, const double gamma_c, const double T0, const double p0,
+MALLARD_INFLOW_NOINLINE KOKKOS_INLINE_FUNCTION void stagnation_state(const Gas & gas, const double gamma_c, const double T0, const double p0,
                                              const rtype * d, const rtype * W_i, const rtype * n, rtype * W_g,
                                              double & T_b) {
     constexpr uint8_t E = N_DIM + 1;
