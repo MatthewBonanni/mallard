@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "comm.h"
+#include "compression.h"
 #include "device_comm.h"
 #include "gmsh_fixtures.h"
 #include "hdf5_output.h"
@@ -132,13 +133,16 @@ TEST(MPITest, GasMixtureMatchesSerial) {
     // Species and the temperature seeds of halo cells follow the same history
     // as their owners'; with TENO also the troubled cells' stencil choices and
     // the scalars' bound-preserving factors, and with double flux the frozen
-    // thermodynamics of each step; with chemistry each cell's reactor; with
+    // thermodynamics of each step (of halo cells, after their owners'
+    // chemistry); with chemistry each cell's reactor; with
     // transport the halo cells' coefficients and gradients; radiation is pointwise
     const std::array<std::string, 4> schemes[] = {{"", "type = \"MUSCL\"\n", "", "euler"},
                                                   {"", "type = \"TENO\"\norder = 3\n", "", "euler"},
                                                   {"double_flux = true\n", "type = \"MUSCL\"\n", "", "euler"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n", "euler"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes"},
+                                                  {"double_flux = true\n", "type = \"MUSCL\"\n", "[chemistry]\n",
+                                                   "navier_stokes"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n[radiation]\n", "navier_stokes"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\ncoupling = \"simpler\"\n",
                                                    "navier_stokes"}};
@@ -181,7 +185,7 @@ TEST(MPITest, ThermalDiffusionMatchesSerial) {
 
 TEST(MPITest, MixtureWallsMatchSerial) {
     // Isothermal and heat-flux walls of a reacting mixture with thermal
-    // diffusion, and of an inert one with double flux
+    // diffusion, also with double flux
     std::string input = mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes");
     input.insert(input.find("[physics]\n") + 10, "soret = true\n");
     const std::string adiabatic = "type = \"wall_adiabatic\"\n";
@@ -191,7 +195,6 @@ TEST(MPITest, MixtureWallsMatchSerial) {
         walled.replace(walled.find(adiabatic), adiabatic.size(), wall);
         expect_matches_serial(walled);
         walled.insert(walled.find("[numerics]\n") + 11, "double_flux = true\n");
-        walled.erase(walled.find("[chemistry]\n"), 12);
         expect_matches_serial(walled);
     }
 }
@@ -301,13 +304,17 @@ TEST(MPITest, LargeEddySimulationMatchesSerial) {
 }
 
 TEST(MPITest, ThickenedFlameMatchesSerial) {
-    // The vorticity and the flame fields are exchanged to the halo once per step
+    // The dynamic efficiency's test filter passes exchange the filtered field and its exponent is an exact
+    // domain sum; Charlette's efficiency exchanges the vorticity; the flame fields are exchanged once per step
+    const std::string flame = "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
+                              "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n";
     for (const std::string coupling : {"strang", "simpler"}) {
         expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\ncoupling = \"" + coupling + "\"\n",
-                                            "navier_stokes") +
-                              "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
-                              "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n");
+                                            "navier_stokes") + flame,
+                              [](const Solver & s) { EXPECT_GT(s.tfles_beta(), 0.0); });
     }
+    expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes") + flame +
+                          "efficiency = \"charlette\"\n");
 }
 
 TEST(MPITest, HybridConvectiveFluxMatchesSerial) {
@@ -435,6 +442,61 @@ TEST(MPITest, RestartFilesDoNotDependOnTheRankCount) {
     serial.init(parse_toml(input));
     serial.run();
     EXPECT_EQ(max_rel_diff(gather(serial), U_ref), 0.0);
+    comm::barrier();
+}
+
+TEST(MPITest, AsynchronousAndCompressedRestartFilesDoNotDependOnTheRankCount) {
+    // Each rank writes its runs of cells (or chunks) on its own, at offsets
+    // agreed on beforehand: the file is that of a serial run byte for byte
+    const std::string dir = io_dir() + "_async";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    std::vector<std::string> variants = {""};
+    if (compression::have_zlib()) variants.push_back("compression = \"zlib\"\nchunk_cells = 40\n");
+
+    Solver reference;
+    reference.set_distributed(false);
+    reference.init(parse_toml(restart_case(20, "")));
+    reference.run();
+    const auto U_ref = gather(reference);
+
+    for (size_t k = 0; k < variants.size(); k++) {
+        auto writing = [&](const std::string & name) {
+            std::string input = restart_case(10, "[[write_data]]\nprefix = \"" + dir + "/" + name + std::to_string(k) +
+                                                     "\"\nformat = \"restart\"\ninterval = 10\n" + variants[k]);
+            const std::string output = "[output]\n";
+            input.insert(input.find(output) + output.size(), "async = true\nio_threads = 2\n");
+            return parse_toml(input);
+        };
+        {
+            Solver distributed;
+            distributed.init(writing("d"));
+            distributed.run();
+            Solver serial;
+            serial.set_distributed(false);
+            serial.init(writing("s"));
+            serial.run();
+        }
+        comm::barrier();
+        const std::string file = dir + "/d" + std::to_string(k) + "_000010.restart";
+        if (comm::is_root()) {
+            for (const char * step : {"_000000", "_000010"}) {
+                const std::string d = dir + "/d" + std::to_string(k) + step + ".restart";
+                const std::string s = dir + "/s" + std::to_string(k) + step + ".restart";
+                std::ifstream a(d, std::ios::binary), b(s, std::ios::binary);
+                const std::string bytes_d((std::istreambuf_iterator<char>(a)), std::istreambuf_iterator<char>());
+                const std::string bytes_s((std::istreambuf_iterator<char>(b)), std::istreambuf_iterator<char>());
+                EXPECT_FALSE(bytes_s.empty()) << s;
+                EXPECT_TRUE(bytes_d == bytes_s) << d << " on " << comm::size() << " ranks";
+            }
+        }
+        std::string input = restart_case(20, "");
+        input.replace(input.find("[initialize]\n") + 13, std::strlen(BLAST), "type = \"restart\"\nfile = \"" + file + "\"\n");
+        Solver second;
+        second.init(parse_toml(input));
+        second.run();
+        EXPECT_EQ(max_rel_diff(gather(second), U_ref), 0.0) << variants[k];
+    }
     comm::barrier();
 }
 
@@ -801,5 +863,44 @@ TEST(MPITest, CurvedWallsMatchSerial) {
             expect_matches_serial(from_h5, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
         }
     }
+    comm::barrier();
+}
+
+TEST(MPITest, RemapDoesNotDependOnTheRankCount) {
+    // Restart files of a coarse triangle run and of a reacting mixture, each
+    // remapped to a quad mesh of another size: contributions are summed by
+    // source cell id, so no partition of either mesh changes a bit
+    const std::string dir = io_dir() + "_remap";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    {
+        Solver coarse;
+        coarse.init(parse_toml(restart_case(5, "[[write_data]]\nprefix = \"" + dir +
+                                                   "/c\"\nformat = \"restart\"\ninterval = 5\n")));
+        coarse.run();
+    }
+    std::string mixture = mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "euler");
+    mixture.replace(mixture.find("n_steps = 20"), 12, "n_steps = 5");
+    {
+        Solver coarse;
+        coarse.init(parse_toml(mixture + "[[write_data]]\nprefix = \"" + dir +
+                               "/m\"\nformat = \"restart\"\ninterval = 5\n"));
+        coarse.run();
+    }
+    comm::barrier();
+    auto remapped = [](std::string input, const std::string & init, const std::string & source) {
+        const size_t at = input.find("[initialize]\n");
+        const size_t end = input.find("[[boundaries]]", at);
+        input.replace(at, end - at, "[initialize]\n" + init + "[initialize.mesh]\n" + source);
+        input.replace(input.find("type = \"cartesian_tri\""), 22, "type = \"cartesian\"");
+        input.replace(input.find("Nx = 24"), 7, "Nx = 31");
+        return input;
+    };
+    expect_matches_serial(remapped(restart_case(8, ""),
+                                   "type = \"remap\"\nfile = \"" + dir + "/c_000005.restart\"\ndegree = 3\n",
+                                   "type = \"cartesian_tri\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n"));
+    mixture.replace(mixture.find("n_steps = 5"), 11, "n_steps = 7");
+    expect_matches_serial(remapped(mixture, "type = \"remap\"\nfile = \"" + dir + "/m_000005.restart\"\n",
+                                   "type = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n"));
     comm::barrier();
 }

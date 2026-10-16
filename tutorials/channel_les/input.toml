@@ -1,0 +1,115 @@
+# Wall-resolved large-eddy simulation of turbulent channel flow at
+# Re_tau = 180 (3D build), against the DNS of Moser, Kim & Mansour (1999).
+# Tutorial: docs/tutorials/channel_les.md.
+#
+# Walls at y = 0 and y = 2h, periodic in x and z, box 2 pi h x 2h x pi h.
+# Units h = 1, bulk density and velocity 1, held by [source] mass_flow, so
+# Re_b = 2 h U_b / nu = 5600 as in MKM (Re_tau = 178) and Re_tau comes out of
+# the run. Bulk Mach 0.2, isothermal walls at the bulk temperature, Pr = 0.72.
+# Sigma model with Scotti's filter width, kinetic-energy-preserving hybrid
+# flux on unlimited MUSCL states.
+
+[run]
+t_stop = 300.0
+cfl = 0.9
+
+[mesh]
+type = "file"
+filename = "channel.msh"
+
+[[periodic]]
+zones = ["left", "right"]
+translation = [6.283185307179586, 0.0, 0.0]
+
+[[periodic]]
+zones = ["back", "front"]
+translation = [0.0, 0.0, 3.141592653589793]
+
+# A turbulent mean profile, 8/7 (1 - |y - 1|)^(1/7) (bulk velocity 1), plus
+# divergence-free streamwise and spanwise rolls of about 15% of U_b, which
+# vanish at the walls: g = (1 - (y - 1)^2)^2 and g' = dg/dy. They break down
+# into turbulence within about 30 h/U_b.
+[initialize]
+type = "analytical"
+rho = "1"
+p = "17.857142857142858"
+u = [
+  "8/7 * (1 - abs(y - 1))^(1/7) - 0.4 * (y - 1) * (1 - (y - 1)^2) * (sin(x) * cos(4*z) + sin(2*x + 1) * cos(6*z + 2) + sin(3*x + 2) * cos(2*z + 1))",
+  "(1 - (y - 1)^2)^2 * (-0.1 * (cos(x) * cos(4*z) + 2 * cos(2*x + 1) * cos(6*z + 2) + 3 * cos(3*x + 2) * cos(2*z + 1)) + 0.05 * (6 * cos(6*z) * cos(x + 1) + 2 * cos(2*z + 1) * cos(2*x) + 4 * cos(4*z + 2) * cos(4*x + 1)))",
+  "0.2 * (y - 1) * (1 - (y - 1)^2) * (sin(6*z) * cos(x + 1) + sin(2*z + 1) * cos(2*x) + sin(4*z + 2) * cos(4*x + 1))",
+]
+
+[[boundaries]]
+name = "bottom"
+type = "wall_isothermal"
+T = 17.857142857142858
+
+[[boundaries]]
+name = "top"
+type = "wall_isothermal"
+T = 17.857142857142858
+
+[source]
+mass_flow = [1.0, 0.0, 0.0]
+
+[numerics]
+riemann_solver = "HLLC"
+convective_flux = "hybrid"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+limiter = "none"
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 17.857142857142858
+T_ref = 17.857142857142858
+rho_ref = 1.0
+mu = 3.5714285714285714e-4
+Pr = 0.72
+
+[les]
+model = "sigma"
+
+[statistics]
+fields = ["RHO", "U_X", "U_Y", "U_Z", "P", "T"]
+products = ["U_X*U_X", "U_Y*U_Y", "U_Z*U_Z", "U_X*U_Y"]
+t_start = 100.0
+interval = 10
+
+[output]
+check_interval = 5000
+
+[integrals]
+interval = 1000
+budget = true
+
+[[forces]]
+zone = "bottom"
+interval = 50
+file = "forces_bottom.csv"
+
+[[forces]]
+zone = "top"
+interval = 50
+file = "forces_top.csv"
+
+[[write_data]]
+prefix = "./solut/flow"
+format = "vtu"
+time_interval = 50.0
+variables = ["U", "P", "Q", "MU_T"]
+
+[[write_data]]
+prefix = "./stats/channel"
+format = "vtu"
+time_interval = 50.0
+variables = ["MEAN_*", "COV_*"]
+
+[[write_data]]
+prefix = "./restart/channel"
+format = "restart"
+time_interval = 50.0
