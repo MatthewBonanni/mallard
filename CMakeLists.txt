@@ -151,6 +151,12 @@ if(${PROJECT_NAME}_ENABLE_CGNS)
             EXCLUDE_FROM_ALL
             ${MALLARD_THIRD_PARTY})
         set(CGNS_ENABLE_HDF5 ON CACHE BOOL "" FORCE)
+        # A parallel HDF5's headers include mpi.h
+        if(DEFINED HDF5_IS_PARALLEL)
+            set(CGNS_ENABLE_PARALLEL ${HDF5_IS_PARALLEL} CACHE BOOL "" FORCE)
+        else()
+            set(CGNS_ENABLE_PARALLEL ${${PROJECT_NAME}_ENABLE_MPI} CACHE BOOL "" FORCE)
+        endif()
         set(CGNS_ENABLE_FORTRAN OFF CACHE BOOL "" FORCE)
         set(CGNS_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
         set(CGNS_BUILD_CGNSTOOLS OFF CACHE BOOL "" FORCE)

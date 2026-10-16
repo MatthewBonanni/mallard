@@ -136,6 +136,8 @@ jobs:
             specs: [mallard@main]
             view: false
             concretizer: {reuse: false}
+            # Outside the source tree, which CMake leaves out of installed RPATHs
+            config: {install_tree: {root: $RUNNER_TEMP/spack-opt}}
             develop:
               mallard: {spec: mallard@=main, path: $GITHUB_WORKSPACE}
             packages:
