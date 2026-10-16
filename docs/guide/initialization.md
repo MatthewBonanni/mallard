@@ -81,6 +81,7 @@ the total.
   continuing them.
 - Probes and force monitors append to their files on a restart.
 - Restart files of Mallard 0.3 and earlier (version 1) are still read.
+- `compression = "zlib"` writes compressed restart files (version 5, losslessly: they restart bit for bit), about a third smaller for smooth flows; reading them needs a build with `Mallard_ENABLE_ZLIB`, and the Python tools in `tools/` read only uncompressed ones.
 
 ### Initial states from scripts
 
