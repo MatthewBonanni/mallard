@@ -242,6 +242,8 @@ void Solver::init_mesh() {
                         {"Type", type == "file" ? "file " + toml::find_or<std::string>(input, "mesh", "filename",
                                                                                          "mesh.msh")
                                                 : type});
+    const MeshTransform transform = mesh_transform(input);
+    if (!transform.is_identity()) mesh_summary.insert(mesh_summary.begin() + 1, {"Transform", transform.description});
     const Stretching stretching = mesh_stretching(input);
     if (stretching != Stretching{}) {
         if (type == "file") throw InputError("[mesh] stretching applies to generated meshes.");
