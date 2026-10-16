@@ -108,10 +108,9 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
     const CellWFunctor w_functor{physics, solution, W_cells};
     const bool own_faces = halo.active() && exchanges_partition_faces();
     if (own_faces) {
-        // Owned cells only: the halo sides of partition faces come from their owners
-        // The cells that read the halo go on the high-priority instance: the
-        // device schedules them as soon as the halo arrives, ahead of the rest
-        // of the early cells, rather than in a tail of their own
+        // Owned cells only: the halo sides of partition faces come from their
+        // owners. The cells that read the halo run on the high-priority instance,
+        // as soon as the halo arrives, rather than in a tail after the others
         if (!started) start_reconstruction(solution);
         reconstruction_started = false;
         comm::enqueue_wait(comm_space, Kokkos::DefaultExecutionSpace());
