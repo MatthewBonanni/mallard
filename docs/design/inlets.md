@@ -1,6 +1,6 @@
 # Design: inlets
 
-Status: implemented (`stagnation_inlet`, `mass_flow_inlet`).
+Status: implemented (`stagnation_inlet`, `mass_flow_inlet`, numbers as expressions of x, y, z, t).
 
 `upt` imposes velocity, pressure and temperature, which over-specifies a
 subsonic inflow: one characteristic, the acoustic wave travelling upstream,
@@ -207,3 +207,40 @@ fixed velocity.
   inlet density rises from 1.16 to 1.69 kg/m³. With `upt`, the duct first
   gains less, then loses gas through the inlet once its pressure exceeds the
   inlet's.
+
+## Numbers as expressions of x, y, z and t
+
+The inflow numbers (`u`, `p`, `T` of `upt` and `nscbc_inlet`, `p0`, `T0`,
+`mass_flux`), the wall velocity and the mixture composition may be
+expressions (`BoundaryFields`, `src/boundary/boundary_fields.h`).
+
+- **Per face.** A condition with an expression gets a copy for each of its
+  faces, as composition profiles already did, holding the values at the
+  face center.
+- **Per stage.** Copies with expressions of `t` are re-evaluated on the host
+  at each stage time (`Solver::update_boundary_fields`), and the conditions
+  are copied to the device. For mixtures the composition, gas constant and
+  frozen `[gamma, e0]` are updated too. `nscbc_inlet`'s velocity goes into
+  its faces' targets: at the stage time, and at the end of the step for the
+  target's own incoming wave (`fill_timed_inlets`).
+- **Cost.** Time-independent inputs are evaluated once, and nothing runs per
+  stage for them. With time-dependent ones, CUDA builds step without a graph,
+  as for `dirichlet`.
+
+`test/inlet_test.cpp` (`ForcedInletTest`) checks the stage times. With
+SSPRK3 on a fixed mesh, a temporal-refinement study against `dt / 8`
+converges at:
+
+| Forced input | Order |
+|---|---|
+| `upt` `T(t)` | 2.85 |
+| `upt` `u(t)` | 2.98 |
+| `stagnation_inlet` `p0(t)` | 2.96 |
+| `mass_flow_inlet` `mass_flux(t)` | 3.02 |
+| moving wall `u(t)` | 3.14 |
+| `nscbc_inlet` `u(t)` | 1.20 |
+
+The same study gives 1.23 to 1.25 if the inputs are taken at the start of
+each step instead of at the stage times. `nscbc_inlet` is first order either
+way: its boundary point advances by a forward-Euler step of the LODI
+relation once per step.

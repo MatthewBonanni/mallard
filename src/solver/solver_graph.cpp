@@ -54,6 +54,7 @@ std::string Solver::step_graph_unsupported() const {
     if (!average_pressure_outlets.empty()) return "average-pressure outlets";
     if (boundary_data.char_faces.extent(0) > 0) return "characteristic boundaries";
     if (!inflows.empty()) return "synthetic inflow turbulence";
+    if (!timed_boundary_faces.empty() || !timed_inlets.empty()) return "time-dependent boundary states";
     if (!source_expressions.empty() && source_time_dependent) return "time-dependent sources";
     for (const auto & bc : dirichlet_boundaries) {
         for (const auto & w : bc.W) {

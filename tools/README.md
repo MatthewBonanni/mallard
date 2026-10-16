@@ -17,6 +17,7 @@ Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the 3D
 | `make_nozzle_mesh.py` | Gmsh quad mesh of the upper half of the planar converging-diverging nozzle of `examples/nozzle` |
 | `plot_nozzle.py` | The nozzle example against the quasi-one-dimensional isentropic and normal-shock solution: mass flow, shock position, stagnation pressure; `--figure` draws the guide's figure |
 | `plot_heated_duct.py` | The heated-duct example: the steady run against Rayleigh flow, and the closed duct's mass against `mdot t` for `mass_flow_inlet` and `upt`; `--figure` draws the guide's figures |
+| `plot_forced_inlet.py` | The forced-inlet example: x-t diagrams of the velocity and temperature fluctuations (acoustic and entropy waves) and the inlet cell against the forcing; `--figure` draws the guide's figure |
 | `make_cylinder_mesh.py` | Gmsh O-grid around a cylinder; `--half` gives the upper half with the axis cuts, the meridian plane of a sphere for axisymmetric runs |
 | `plot_poiseuille.py` | Axisymmetric Hagen-Poiseuille flow: axial velocity against the exact r-weighted cell averages |
 | `plot_noh.py` | Spherical Noh problem from an axisymmetric run: density against the exact solution, shock radius by direction |

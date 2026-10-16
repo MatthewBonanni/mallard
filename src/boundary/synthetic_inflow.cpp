@@ -160,9 +160,16 @@ std::string stress_names() {
 
 } // namespace
 
-double InletProfile::Field::at(const Point & x) const {
+double InletProfile::Field::at(const Point & x, const double t) const {
     if (!expression) return value;
-    return (*expression)(x[0], x[1], N_DIM > 2 ? x[N_DIM - 1] : 0.0, 0.0);
+    return (*expression)(x[0], x[1], N_DIM > 2 ? x[N_DIM - 1] : 0.0, t);
+}
+
+bool InletProfile::depends_on_time() const {
+    for (const Field & f : u) {
+        if (f.expression && f.expression->depends_on_time()) return true;
+    }
+    return false;
 }
 
 InletProfile::InletProfile(const toml::value & boundary, const std::string & where) {
@@ -282,9 +289,9 @@ double InletProfile::table(size_t column, double s) const {
     return (1.0 - f) * columns[column][i - 1] + f * columns[column][i];
 }
 
-std::array<double, N_DIM> InletProfile::velocity(const Point & x) const {
+std::array<double, N_DIM> InletProfile::velocity(const Point & x, const double t) const {
     std::array<double, N_DIM> v{};
-    FOR_I_DIM v[i] = (axis >= 0) ? table(i, x[static_cast<size_t>(axis)]) : u[i].at(x);
+    FOR_I_DIM v[i] = (axis >= 0) ? table(i, x[static_cast<size_t>(axis)]) : u[i].at(x, t);
     return v;
 }
 

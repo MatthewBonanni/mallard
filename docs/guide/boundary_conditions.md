@@ -220,6 +220,46 @@ Pitfalls:
   velocity or the pressure); pair it with `nscbc_outlet` or a sponge where
   reflections matter.
 
+## Time-dependent conditions
+
+The velocity, pressure and temperature of `upt` and `nscbc_inlet`, `p0` and
+`T0` of `stagnation_inlet`, `mass_flux` and `T` of `mass_flow_inlet`, the
+wall velocity and, for mixtures, the inflow composition may be expressions of
+`x`, `y`, `z` and `t`. Those of `t` are evaluated at every Runge-Kutta stage,
+so a pulsed or acoustically forced inlet converges at the time integrator's
+order (third with SSPRK3); evaluating them once per step would give first
+order.
+
+```toml
+[[boundaries]]
+name = "inlet"
+type = "nscbc_inlet"
+u = ["50 * (1 + 0.1 * sin(2 * pi * 1000 * t))", "0"]   # 10% at 1 kHz
+T = "300 * (1 + 0.05 * sin(2 * pi * 250 * t))"
+p = 1.0e5
+L = 1.0
+sigma = 100.0     # follow the forcing closely
+```
+
+![A forced characteristic inlet: velocity forcing leaves as acoustic waves, temperature forcing as entropy waves](../images/guide/forced_inlet-light.svg#gh-light-mode-only)
+![A forced characteristic inlet: velocity forcing leaves as acoustic waves, temperature forcing as entropy waves](../images/guide/forced_inlet-dark.svg#gh-dark-mode-only)
+
+*`examples/forced_inlet`: velocity forcing at 1 kHz leaves the inlet as
+acoustic waves at `u + c`, temperature forcing at 250 Hz as entropy waves at
+`u`; the inlet cell follows both targets (`tools/plot_forced_inlet.py`).*
+
+Pitfalls:
+
+- `nscbc_inlet` relaxes its velocity toward the target at the rate
+  `K = sigma c (1 - M^2) / L`. Forcing faster than `K` reaches the domain
+  attenuated (to 56% at 1 kHz with the default `sigma = 0.25` here); raise
+  `sigma` to follow it, at the price of reflecting outgoing waves of lower
+  frequency. `upt` imposes the forcing exactly but reflects everything.
+- `nscbc_inlet` advances its boundary point once per step, so its forcing
+  converges at first order in `dt`; `upt` and the other inlets at the
+  integrator's order.
+- Synthetic turbulence takes a mean velocity of `x`, `y`, `z` only.
+
 ## Characteristic boundaries
 
 `nscbc_outlet` and `nscbc_inlet` let outgoing waves leave and relax the
