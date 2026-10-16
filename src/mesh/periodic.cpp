@@ -215,7 +215,7 @@ std::vector<size_t> periodic_directions(const std::vector<Mesh::PeriodicPair> & 
                 t2 += double(T[i]) * double(T[i]);
                 along += double(T[i]) * result.rotation.axis[i];
             }
-            if (N_DIM == 2 || t2 - along * along > 1e-20 * t2) {
+            if (N_DIM == 2 || t2 - along * along > 1e-12 * t2) {
                 throw std::runtime_error(std::string("A periodic translation must be along the axis of the periodic "
                                                      "rotation") + (N_DIM == 2 ? " (in 2D, a rotation admits none)." : "."));
             }

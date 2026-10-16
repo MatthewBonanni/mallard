@@ -140,8 +140,8 @@ Motivated by sectors of annular combustors and turbomachinery rows: a pair
 `(A, B, R)` says that zone `B` is zone `A` rotated by `R`, an angle about an
 axis (2D: about a point).
 
-![A sector and its rotational periodic pair](../images/rotational_periodicity_light.png#only-light)
-![A sector and its rotational periodic pair](../images/rotational_periodicity_dark.png#only-dark)
+![A sector and its rotational periodic pair](../images/guide/rotational_periodic-light.svg#gh-light-mode-only)
+![A sector and its rotational periodic pair](../images/guide/rotational_periodic-dark.svg#gh-dark-mode-only)
 
 - **Lattice.** A rotation is one more lattice direction. Its map, and the
   translations, are rigid maps `x -> Q x + t` that commute (at most one

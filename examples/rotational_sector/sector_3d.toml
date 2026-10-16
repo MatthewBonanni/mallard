@@ -4,7 +4,7 @@
 # (annulus_3d.toml):
 #   ../../build3d/src/Mallard -i sector_3d.toml --kokkos-num-threads=4
 #   ../../build3d/src/Mallard -i annulus_3d.toml --kokkos-num-threads=4
-#   python ../../tools/rotational_sector.py compare solut/sector_3d_000001.vtu solut/annulus_3d_000001.vtu --sectors 4
+#   python ../../tools/rotational_sector.py solut/sector_3d_000001.vtu solut/annulus_3d_000001.vtu --sectors 4
 #
 # Result (TENO5, t = 0.2): RESULT_3D
 # 1,536 and 6,144 hexahedra.

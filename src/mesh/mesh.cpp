@@ -105,7 +105,8 @@ std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const toml::value & input) 
             if (!rotation) {
                 const std::vector<rtype> t = find_real_vector(entry, "translation");
                 if (t.size() != N_DIM) {
-                    throw InputError("[[periodic]] translation needs " + std::to_string(N_DIM) + " components.");
+                    throw InputError("[[periodic]] needs zones = [A, B] and a translation with " +
+                                     std::to_string(N_DIM) + " components (or an angle).");
                 }
                 FOR_I_DIM pair.translation[i] = t[i];
                 pairs.push_back(pair);

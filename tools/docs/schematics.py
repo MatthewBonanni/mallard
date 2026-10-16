@@ -133,6 +133,67 @@ def periodic(P):
     return fig
 
 
+def rotational_periodic(P):
+    sectors, n_t, n_r, r_in, r_out = 8, 6, 4, 1.0, 2.0
+    alpha = 2 * math.pi / sectors
+    dt = alpha / n_t
+    radii = np.linspace(r_in, r_out, n_r + 1)
+    turn = lambda x, y, a: (math.cos(a) * x - math.sin(a) * y, math.sin(a) * x + math.cos(a) * y)
+    fig, ax = plt.subplots(figsize=(6.6, 5.4))
+
+    def cells(t0, n, color, lw):
+        for i in range(n + 1):
+            t = t0 + i * dt
+            ax.plot([r_in * math.cos(t), r_out * math.cos(t)], [r_in * math.sin(t), r_out * math.sin(t)],
+                    color=color, lw=lw)
+        for r in radii:
+            t = t0 + np.linspace(0, n * dt, 4 * n + 1)
+            ax.plot(r * np.cos(t), r * np.sin(t), color=color, lw=lw)
+
+    cells(alpha, (sectors - 1) * n_t, P["mesh"], 0.5)
+    cells(0.0, n_t, P["line"], 0.9)
+    # The pair
+    ax.plot([r_in, r_out], [0, 0], color=P["blue"], lw=3.2, solid_capstyle="round")
+    ax.plot([r_in * math.cos(alpha), r_out * math.cos(alpha)], [r_in * math.sin(alpha), r_out * math.sin(alpha)],
+            color=P["flame"], lw=3.2, solid_capstyle="round")
+    label(ax, r_out + 0.08, -0.12, "zone A", P, color=P["blue"], ha="left", va="top")
+    label(ax, r_out * math.cos(alpha) - 0.1, r_out * math.sin(alpha) + 0.32, "zone B = R(α) A", P,
+          color=P["flame"], ha="left")
+    # Axis and angle
+    ax.plot(0, 0, marker="o", color=P["fg"], ms=5)
+    label(ax, -0.08, -0.12, "axis", P, ha="right", va="top", size=12)
+    for t in (0.0, alpha):
+        ax.plot([0, r_in * math.cos(t)], [0, r_in * math.sin(t)], color=P["muted"], lw=0.9, ls=(0, (3, 3)))
+    t = np.linspace(0, alpha, 30)
+    ax.plot(0.45 * np.cos(t), 0.45 * np.sin(t), color=P["fg"], lw=1.0)
+    label(ax, 0.52, 0.1, "α", P, ha="left", va="bottom")
+    label(ax, -0.3, 0.45, "α = 360° / N\n(here N = 8)", P, size=11, color=P["muted"])
+    arrow(ax, (2.25, 0.12), (2.25 * math.cos(alpha) + 0.05, 2.25 * math.sin(alpha) - 0.05), P, lw=1.0,
+          connectionstyle="arc3,rad=0.38")
+    label(ax, 2.45, 0.95, "R(α)", P, ha="left")
+    # A cell next to B and its copy beyond A: the velocity turns with it
+    r0, r1 = radii[2], radii[3]
+    quad = lambda t0, t1: [(r0 * math.cos(t0), r0 * math.sin(t0)), (r0 * math.cos(t1), r0 * math.sin(t1)),
+                           (r1 * math.cos(t1), r1 * math.sin(t1)), (r1 * math.cos(t0), r1 * math.sin(t0))]
+    ax.add_patch(Polygon(quad(alpha - dt, alpha), closed=True, facecolor=P["teal"], alpha=0.3, edgecolor="none"))
+    ax.add_patch(Polygon(quad(-dt, 0.0), closed=True, facecolor=P["teal"], alpha=0.12, edgecolor=P["teal"],
+                         lw=1.2, ls=(0, (3, 2))))
+    rc, tc = 0.5 * (r0 + r1), alpha - 0.5 * dt
+    cx, cy = rc * math.cos(tc), rc * math.sin(tc)
+    u = turn(0.25, 0.42, tc)
+    arrow(ax, (cx, cy), (cx + u[0], cy + u[1]), P, color=P["teal"], lw=2.0)
+    label(ax, cx + u[0] + 0.03, cy + u[1], "u", P, color=P["teal"], ha="left", va="bottom")
+    ix, iy = turn(cx, cy, -alpha)
+    v = turn(u[0], u[1], -alpha)
+    arrow(ax, (ix, iy), (ix + v[0], iy + v[1]), P, color=P["teal"], lw=2.0)
+    label(ax, ix - 0.05, iy - 0.3, "R(α)ᵀ u: the same cell\nseen from the cells next to A", P,
+          color=P["teal"], ha="left", va="top", size=11)
+    bare(ax)
+    ax.set_xlim(-2.2, 3.1)
+    ax.set_ylim(-2.15, 2.4)
+    return fig
+
+
 def curved(P):
     """Quarter of an O-grid around a circle: straight faces vs the curve, with quadrature points."""
     fig, ax = plt.subplots(figsize=(5.6, 4.0))
@@ -378,6 +439,7 @@ FIGURES = {
     "mesh_types_3d": mesh_types_3d,
     "stretching": stretching,
     "periodic": periodic,
+    "rotational_periodic": rotational_periodic,
     "curved_faces": curved,
     "axisymmetric": axisymmetric,
     "boundary_state": boundary_state,
