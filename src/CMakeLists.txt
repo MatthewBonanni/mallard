@@ -12,17 +12,20 @@ add_library(MallardCore STATIC
     mesh/mesh_io.cpp
     mesh/read_cgns.cpp
     mesh/read_fluent.cpp
+    mesh/read_openfoam.cpp
     mesh/cells_from_faces.cpp
     mesh/periodic.cpp
     mesh/mesh_3d.cpp
     mesh/mesh_block.cpp
     mesh/zone.cpp
+    mesh/box_tree.cpp
     boundary/boundary.cpp
     boundary/synthetic_inflow.cpp
     chemistry/mechanism.cpp
     chemistry/transport.cpp
     chemistry/units.cpp
     numerics/face_reconstruction.cpp
+    numerics/overlap.cpp
     numerics/quadrature.cpp
     numerics/scalar_reconstruction.cpp
     numerics/teno.cpp
@@ -36,6 +39,7 @@ add_library(MallardCore STATIC
     solver/cell_chemistry.cpp
     solver/chemistry_balance.cpp
     solver/chemistry_benchmark.cpp
+    solver/numerics_preset.cpp
     solver/solver.cpp
     solver/solver_chemistry.cpp
     solver/solver_graph.cpp
@@ -46,7 +50,9 @@ add_library(MallardCore STATIC
     solver/solver_radiation.cpp
     solver/solver_sponge.cpp
     solver/solver_inflow.cpp
+    solver/remap.cpp
     solver/statistics.cpp
+    io/compression.cpp
     io/data_writer.cpp
     io/data_writer_hdf5.cpp
     parallel/comm.cpp
@@ -70,7 +76,7 @@ target_include_directories(MallardCore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/io
     ${CMAKE_CURRENT_SOURCE_DIR}/parallel
 )
-target_link_libraries(MallardCore PUBLIC Kokkos::kokkos)
+target_link_libraries(MallardCore PUBLIC Kokkos::kokkos Threads::Threads)
 # The TENO setup computes every table with the same operations on the host
 # and on the device, and contracting multiplies and adds into FMAs would
 # change them differently on each: no contraction in that file
@@ -99,6 +105,11 @@ if(Mallard_ENABLE_MPI)
         target_link_libraries(MallardCore PUBLIC ${NCCL_LIBRARY})
         target_compile_definitions(MallardCore PUBLIC Mallard_HAS_NCCL)
     endif()
+endif()
+
+if(Mallard_ENABLE_ZLIB)
+    target_link_libraries(MallardCore PUBLIC ZLIB::ZLIB)
+    target_compile_definitions(MallardCore PUBLIC Mallard_HAS_ZLIB)
 endif()
 
 if(Mallard_ENABLE_HDF5)

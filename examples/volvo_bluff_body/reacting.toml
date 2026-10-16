@@ -18,7 +18,8 @@
 # delta_L, so F = n_res Delta / delta_L = 21 (5 cells across the thickened
 # flame, 10 mm). At Delta > 1.6 delta_L Colin's subgrid velocity
 # overpredicts the efficiency (docs/design/les.md, section 8.3), so the
-# efficiency uses u' = C_u nu_t / Delta (C_u = 28).
+# efficiency uses u' = C_u nu_t / Delta (C_u = 28) in Charlette's function
+# (this input predates the dynamic efficiency, the default since).
 #
 # Ignition: burnt gas (complete combustion at phi = 0.65, 1766 K) fills the
 # channel downstream of the base (x > 12 mm, a tanh edge 8 mm wide) at t = 0.
@@ -123,6 +124,7 @@ delta_L = 4.71e-4
 s_L = 0.2091
 T_unburnt = 288.0
 T_burnt = 1766.0
+efficiency = "charlette"
 subgrid_velocity = "eddy_viscosity"
 
 [statistics]
