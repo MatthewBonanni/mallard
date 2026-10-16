@@ -24,6 +24,7 @@
 
 #include "test_fixtures.h"
 #include "solver.h"
+#include "scratch.h"
 
 namespace {
 
@@ -95,7 +96,7 @@ double max_abs_diff(const std::vector<rtype> & a, const std::vector<rtype> & b) 
 } // namespace
 
 TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_test").string();
+    const std::string dir = (scratch_dir() / "mallard_restart_test").string();
     std::filesystem::remove_all(dir);
 
     Solver straight;
@@ -167,7 +168,7 @@ TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
 
 TEST(RestartTest, CharacteristicBoundariesRestartExactly) {
     // The faces' pressure and normal velocity carry over in the restart file
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_nscbc").string();
+    const std::string dir = (scratch_dir() / "mallard_restart_nscbc").string();
     const std::string extrapolation = "type = \"extrapolation\"\n";
     for (const auto & [left, right] : {std::pair{extrapolation, NSCBC_OUTLET}, std::pair{NSCBC_INLET, NSCBC_OUTLET}}) {
         std::filesystem::remove_all(dir);
@@ -189,7 +190,7 @@ TEST(RestartTest, CharacteristicBoundariesRestartExactly) {
 TEST(RestartTest, RunStartedFromARestartFileStartsNewMonitorFilesWithAHeader) {
     // A restart file can be an initial state (e.g. from a tools/ script): a
     // monitor file that does not exist yet gets its header
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_header_test").string();
+    const std::string dir = (scratch_dir() / "mallard_restart_header_test").string();
     std::filesystem::remove_all(dir);
     Solver first;
     first.init(parse_toml(restart_input(dir + "/a", BLAST, 20)));
@@ -209,7 +210,7 @@ TEST(RestartTest, RunStartedFromARestartFileStartsNewMonitorFilesWithAHeader) {
 TEST(RestartTest, ReactingRestartedRunMatchesUninterruptedRunExactly) {
     // Species, the chemistry's last sub-steps and the temperature seeds carry
     // over, so restarted cells integrate exactly as in one run
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_reacting_restart_test").string();
+    const std::string dir = (scratch_dir() / "mallard_reacting_restart_test").string();
     std::filesystem::remove_all(dir);
 
     Solver straight;
@@ -238,7 +239,7 @@ TEST(RestartTest, ReactingRestartedRunMatchesUninterruptedRunExactly) {
 }
 
 TEST(RestartTest, PeakPressureIsARunningMaximumThatSurvivesRestarts) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_p_max").string();
+    const std::string dir = (scratch_dir() / "mallard_restart_p_max").string();
     std::filesystem::remove_all(dir);
     auto input = [&](const std::string & sub, const std::string & init, uint32_t n_steps) {
         std::string s = restart_input(dir + sub, init, n_steps);
@@ -276,7 +277,7 @@ TEST(RestartTest, PeakPressureIsARunningMaximumThatSurvivesRestarts) {
 }
 
 TEST(RestartTest, RejectsMismatchedMesh) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_mismatch").string();
+    const std::string dir = (scratch_dir() / "mallard_restart_mismatch").string();
     std::filesystem::remove_all(dir);
     Solver first;
     first.init(parse_toml(restart_input(dir, BLAST, 20)));
@@ -364,7 +365,7 @@ struct RestartFile {
 } // namespace
 
 TEST(RestartTest, ReadsVersion1FilesAndMapsVersion2VariablesByName) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_versions").string();
+    const std::string dir = (scratch_dir() / "mallard_restart_versions").string();
     std::filesystem::remove_all(dir);
     Solver straight;
     straight.init(parse_toml(restart_input(dir + "/a", BLAST, 40)));
@@ -414,7 +415,7 @@ TEST(RestartTest, ReadsVersion1FilesAndMapsVersion2VariablesByName) {
 TEST(RestartTest, CharacteristicFacesOfOlderFilesStartAfresh) {
     // A file without the faces' state (version 3 and earlier, or one missing a
     // face of this run) starts the characteristic faces from the solution
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_nscbc_versions").string();
+    const std::string dir = (scratch_dir() / "mallard_restart_nscbc_versions").string();
     std::filesystem::remove_all(dir);
     auto input = [&](const std::string & sub, const std::string & init, uint32_t n_steps) {
         return parse_toml(characteristic_input(dir + sub, init, n_steps, NSCBC_INLET, NSCBC_OUTLET));
