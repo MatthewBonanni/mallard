@@ -1984,8 +1984,9 @@ similar to heptane's (Owston, Magi & Abraham 2007), so its `Pe_q` is larger.
 Conduction across the quenching distance, `int_Tw^Tb lambda dT / x_q`
 (Cantera's burnt-gas conductivity), predicts `phi_q` = 0.45, consistent with
 the measured 0.38 (the gas next to the wall is cooler than `T_b` at
-quenching). A 2 um run is the resolution check. Run: 256k steps, 17 min on
-one A100 (chemistry 89%).
+quenching). With 2 um cells: `x_q` = 89 um, 2.22 MW/m^2, `phi_q` = 0.39
+(within 1% of the 4 um run). Runs: 256k steps in 17 min (4 um) and 907k in
+62 min (2 um) on one A100, chemistry 90%.
 
 ### Performance benchmarks
 
