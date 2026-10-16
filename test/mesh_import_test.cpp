@@ -145,3 +145,37 @@ TEST(MeshImportTest, CgnsOfTheOtherDimensionIsRejected) {
         EXPECT_NE(std::string(e.what()).find("Mallard_DIM"), std::string::npos) << e.what();
     }
 }
+
+TEST(MeshImportTest, FluentMatchesGmsh) {
+    // foamMeshToFluent writes 10 significant digits
+    const double tol = precision_tol<double>(1e-9, 1e-5);
+    const std::string gmsh = N_DIM == 2 ? "cyl2d.msh" : "cyl3d.msh";
+    expect_same_mesh(gmsh, N_DIM == 2 ? "cyl2d_fluent.msh" : "cyl3d_fluent.msh", tol);
+    expect_same_mesh(gmsh, N_DIM == 2 ? "cyl2d_fluent_bin.msh" : "cyl3d_fluent_bin.msh", tol);
+}
+
+TEST(MeshImportTest, OpenFoamMatchesGmsh) {
+    // 2D: the Gmsh mesh extruded one cell thick between empty patches
+    const std::string gmsh = N_DIM == 2 ? "cyl2d.msh" : "cyl3d.msh";
+    const std::string foam = N_DIM == 2 ? "cyl2d_foam" : "cyl3d_foam";
+    expect_same_mesh(gmsh, foam, TOL);
+    expect_same_mesh(gmsh, foam + "_bin/constant/polyMesh", TOL);
+}
+
+TEST(MeshImportTest, PolygonsAndPolyhedraAreRejected) {
+    // A pentagon (2D) or pentagonal prism (3D), by its faces
+    std::vector<std::vector<uint32_t>> faces;
+    if constexpr (N_DIM == 2) {
+        for (uint32_t k = 0; k < 5; k++) faces.push_back({k, (k + 1) % 5});
+    } else {
+        faces = {{0, 1, 2, 3, 4}, {5, 6, 7, 8, 9}};
+        for (uint32_t k = 0; k < 5; k++) faces.push_back({k, (k + 1) % 5, (k + 1) % 5 + 5, k + 5});
+    }
+    const std::vector<std::array<int64_t, 2>> face_cells(faces.size(), {0, -1});
+    try {
+        cells_from_faces(1, faces, face_cells, "test");
+        FAIL() << "accepted a polygon or polyhedron";
+    } catch (const std::runtime_error & e) {
+        EXPECT_NE(std::string(e.what()).find("no general polygons or polyhedra"), std::string::npos) << e.what();
+    }
+}

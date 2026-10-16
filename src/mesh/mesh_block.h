@@ -139,8 +139,8 @@ inline uint64_t block_begin(uint64_t n, int r, int p) { return n * uint64_t(r) /
 MeshBlock read_mesh_block(const toml::value & input);
 
 /**
- * @brief This rank's block of a mesh file other than HDF5: Gmsh or CGNS
- *        (every rank reads the whole file).
+ * @brief This rank's block of a mesh file other than HDF5 (see
+ *        read_mesh_file); every rank reads the whole file.
  */
 MeshBlock read_file_block(const std::string & filename);
 

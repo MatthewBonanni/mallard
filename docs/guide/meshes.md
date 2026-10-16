@@ -186,16 +186,21 @@ four times coarser than the example's 384 x 128 cells), with the zones
 ```toml
 [mesh]
 type = "file"
-filename = "wing.cgns"
+filename = "wing.cgns"    # or a Fluent .msh/.cas, or an OpenFOAM case directory
 ```
 
 | Format | `filename` | Zones | Build |
 |---|---|---|---|
 | CGNS (unstructured, HDF5-based) | `*.cgns` | `BC_t` by family name (Gmsh's physical names), else by BC name; boundary sections in no BC by section name | `-DMallard_ENABLE_CGNS=ON` |
+| ANSYS Fluent mesh or case, ASCII or binary | `*.msh` starting with `(`, `*.cas` | Non-interior face zones, by name | always |
+| OpenFOAM polyMesh, ASCII or binary | the case directory (or its `constant/polyMesh`) | Patches (2D: all but `empty`) | always |
 
 Every format gives the same mesh as the Gmsh file it was exported from (the
 tests check cells, faces and zones), so a case can switch formats without
 renaming its `[[boundaries]]`.
+
+![One mesh read from Gmsh, CGNS, Fluent and OpenFOAM, with its boundary zones](../images/guide/mesh_import-light.svg#gh-light-mode-only)
+![One mesh read from Gmsh, CGNS, Fluent and OpenFOAM, with its boundary zones](../images/guide/mesh_import-dark.svg#gh-dark-mode-only)
 
 Pitfalls:
 
@@ -204,6 +209,14 @@ Pitfalls:
   meshes); polyhedral `NGON_n`/`NFACE_n` sections are rejected. Higher-order
   elements are read by their corners, and high-order boundary elements curve
   faces as in Gmsh files.
+- Fluent: cells must be triangles and quadrilaterals (2D) or tetrahedra,
+  pyramids, prisms and hexahedra (3D); polyhedral meshes and adapted meshes
+  (cell and face trees) are rejected. Periodic face zones stay boundary
+  zones: pair them with `[[periodic]]`.
+- OpenFOAM: the 2D build reads a mesh one cell thick in z between `empty`
+  patches (OpenFOAM's 2D convention); compressed (`.gz`) and decomposed
+  (`processor*`) meshes must be decompressed or reconstructed first. Cells
+  must be of Mallard's types, as for Fluent.
 - A mesh of the other dimension is an error: build with the matching
   `-DMallard_DIM`.
 
@@ -219,6 +232,9 @@ translate = [0.1, 0.0]
 
 `[mesh.transform]` maps every node of a mesh file, `x -> R (S x) + t`: scale,
 then rotate about the origin, then translate.
+
+![A mesh as read and with a transform; + marks the origin](../images/guide/mesh_transform-light.svg#gh-light-mode-only)
+![A mesh as read and with a transform; + marks the origin](../images/guide/mesh_transform-dark.svg#gh-dark-mode-only)
 
 Pitfalls:
 

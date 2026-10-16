@@ -1,8 +1,9 @@
 """Figures of the user guide drawn from short Mallard runs (seconds each, on a
 CPU build): TENO-E stencils read back from a stencil cache, the Sod shock
-tube with each reconstruction (through a line probe), MPI partitions, and a
-MallardReactor ignition, and a sector against the full annulus
-(rotational periodicity).
+tube with each reconstruction (through a line probe), MPI partitions, a
+MallardReactor ignition, a sector against the full annulus (rotational
+periodicity), and the mesh-import fixtures as Mallard reads them
+(through mallard-mesh-convert, which needs h5py and an HDF5 and CGNS build).
 
     python tools/docs/runs.py --mallard build/src/Mallard [--mpirun mpirun] [names...]
 
@@ -19,7 +20,7 @@ import tomllib
 from pathlib import Path
 
 import numpy as np
-from matplotlib.collections import PolyCollection
+from matplotlib.collections import LineCollection, PolyCollection
 from matplotlib.patches import Polygon
 import matplotlib.pyplot as plt
 
@@ -343,6 +344,73 @@ def rotational_sector(P, args):
                      lw=2)
     label(axes[1], 0.5, -0.04, f"largest {d.max():.0e}; annulus against itself {own.max():.0e}", P, size=11,
           color=P["muted"], va="top", transform=axes[1].transAxes)
+
+
+# ------------------------------------------------------------- mesh import
+
+IMPORTS = (("Gmsh", "cyl2d.msh"), ("CGNS", "cyl2d.cgns"), ("Fluent", "cyl2d_fluent.msh"),
+           ("OpenFOAM", "cyl2d_foam"))
+TRANSFORM = "[mesh.transform]\nscale = [1.5, 1]\nrotate = 30\ntranslate = [0.5, 0.25]\n"
+
+
+@functools.cache
+def mesh_read(args, name, transform=""):
+    """Mallard's read of a test/data/meshes fixture (through mallard-mesh-convert, which needs an HDF5 and,
+    for CGNS, a CGNS build): nodes, cells and boundary faces by zone."""
+    import h5py
+    work = Path(tempfile.mkdtemp())
+    (work / "in.toml").write_text('[mesh]\ntype = "file"\nfilename = "%s"\n%s'
+                                  % (ROOT / "test" / "data" / "meshes" / name, transform))
+    subprocess.run([str(Path(args.mallard).parent / "mallard-mesh-convert"), "in.toml", "out.h5"], cwd=work,
+                   check=True, stdout=subprocess.DEVNULL)
+    with h5py.File(work / "out.h5", "r") as h:
+        x = h["nodes/coordinates"][:]
+        co, cn = h["cells/offsets"][:], h["cells/nodes"][:]
+        fo, fn, fz = h["boundary/offsets"][:], h["boundary/nodes"][:], h["boundary/zone"][:]
+        names = [z.decode() if isinstance(z, bytes) else str(z) for z in h["boundary"].attrs["zone_names"]]
+    cells = [x[cn[co[c]:co[c + 1]]] for c in range(len(co) - 1)]
+    zones = {n: [x[fn[fo[f]:fo[f + 1]]] for f in range(len(fo) - 1) if fz[f] == z] for z, n in enumerate(names)}
+    return x, cells, zones
+
+
+def draw_import(ax, P, mesh, labels=True):
+    x, cells, zones = mesh
+    colours = {"inlet": P["blue"], "outlet": P["red"], "walls": P["green"], "cylinder": P["flame"]}
+    ax.add_collection(PolyCollection(cells, facecolors=P["panel"], edgecolors=P["mesh"], linewidths=0.6))
+    for name, segs in zones.items():
+        ax.add_collection(LineCollection(segs, colors=colours.get(name, P["plum"]), linewidths=3.0,
+                                         capstyle="round"))
+        if not labels or not segs:
+            continue
+        if name == "walls":
+            segs = [s for s in segs if s[:, 1].mean() > np.median(x[:, 1])] or segs
+        mid = np.concatenate(segs).mean(axis=0)
+        label(ax, *mid, name, P, color=colours.get(name, P["plum"]), size=11, box=True, fontweight="bold")
+    ax.autoscale_view()
+
+
+def mesh_import(P, args):
+    fig, axes = plt.subplots(2, 2, figsize=(9.6, 5.4), gridspec_kw=dict(wspace=0.06, hspace=0.22))
+    for (fmt, name), ax in zip(IMPORTS, axes.flat):
+        mesh = mesh_read(args, name)
+        draw_import(ax, P, mesh)
+        bare(ax)
+        ax.set_title(f"{fmt}: {name}", fontsize=12)
+    return fig
+
+
+def mesh_transform(P, args):
+    fig, axes = plt.subplots(1, 2, figsize=(9.6, 4.0), sharex=True, sharey=True, gridspec_kw=dict(wspace=0.08))
+    meshes = (mesh_read(args, "cyl2d.msh"), mesh_read(args, "cyl2d.msh", TRANSFORM))
+    for ax, mesh, title in zip(axes, meshes, ("as read", "scale = [1.5, 1], rotate = 30, translate = [0.5, 0.25]")):
+        draw_import(ax, P, mesh)
+        ax.plot(0, 0, "+", color=P["fg"], ms=12, mew=1.5)
+        ax.set_aspect("equal")
+        ax.set_title(title, fontsize=12)
+        ax.grid(True, color=P["faint"], lw=0.8)
+    xy = np.concatenate([m[0] for m in meshes])
+    axes[0].set_xlim(xy[:, 0].min() - 0.15, xy[:, 0].max() + 0.15)
+    axes[0].set_ylim(xy[:, 1].min() - 0.15, xy[:, 1].max() + 0.15)
     return fig
 
 
@@ -358,7 +426,8 @@ class Args(tuple):
 
 
 FIGURES = {"teno_stencils": teno_stencils, "sod_schemes": sod_schemes, "partitions": partitions,
-           "ignition": ignition, "rotational_sector": rotational_sector}
+           "ignition": ignition, "mesh_import": mesh_import, "mesh_transform": mesh_transform,
+           "rotational_sector": rotational_sector}
 
 
 def main():
