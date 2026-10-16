@@ -86,7 +86,9 @@ interval = 10        # default 1
 Writes `step, t` and the pressure and viscous force components of the fluid
 on the zone, per unit depth in 2D (per radian in axisymmetric runs). Divide by
 the dynamic pressure and a reference length (or area) for drag and lift
-coefficients.
+coefficients. On walls with a [wall model](les.md#wall-models-wall_model)
+the viscous force is the modeled stress, and a last column `Q` gives the
+modeled heat flux into the fluid.
 
 ## Domain integrals: `[integrals]`
 

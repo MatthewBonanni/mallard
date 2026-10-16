@@ -144,6 +144,40 @@ are scaled by its reacting fraction `kappa = tau_c / (tau_c + tau_mix)`,
 overcorrects on coarse meshes; validated on one case only
 ([validation](https://matthewbonanni.github.io/mallard/validation/#les-pasr)).
 
+## Wall models: `wall_model`
+
+Wall-modeled LES resolves only the outer layer: a wall gets its shear stress
+and heat flux from a model fed by the LES state at an exchange point a height
+`h` above each wall face, so the first cell need not be at y<sup>+</sup> ~ 1.
+
+```toml
+[[boundaries]]
+name = "bottom"
+type = "wall_isothermal"
+T = 1.0
+wall_model = { model = "gfm", exchange_distance = 0.3, edge_distance = 1.0 }
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `model` | `gfm` | `gfm`: Griffin, Fu & Moin (2023), inverse velocity transformation + generalized Reynolds analogy (isothermal and adiabatic walls); `equilibrium`: equilibrium ODE model (any wall) |
+| `exchange_distance` / `exchange_cells` | (one required) | `h`, absolute or in wall-cell heights |
+| `edge_distance` | (required by `gfm`) | Where the edge velocity and temperature are sampled: a channel's half-height, the boundary-layer thickness |
+| `kappa`, `A_plus`, `Pr_t`, `s` | 0.41, 17, 0.9, 1.14 | Model constants |
+
+Pitfalls:
+
+- **Exchange height.** Use `h` of at least about 3 cells and within the inner
+  layer (0.1–0.3 of the boundary-layer thickness): the first cells' state is
+  under-resolved (Kawai & Larsson's log-layer mismatch).
+- **Partitions.** Exchange and edge points must be on the rank that owns the
+  wall face or in its halo; the halo deepens until they are, which is costly
+  when a partition boundary runs parallel to a wall within `h` (or
+  `edge_distance`) of it.
+- Single gases only (mixtures after isothermal mixture walls), not
+  `axisymmetric`. `[[forces]]` of modeled zones report the modeled stress
+  and add a column `Q`, the heat flux into the fluid.
+
 ## Examples
 
 | Example | Shows |
@@ -157,4 +191,4 @@ overcorrects on coarse meshes; validated on one case only
 
 - [Input reference: `[les]`](../input.md#les), [`[les.combustion]`](../input.md#lescombustion), [`[numerics.hybrid]`](../input.md#numericshybrid)
 - [Validation: large-eddy simulation](https://matthewbonanni.github.io/mallard/validation/#les)
-- Design notes: [large-eddy simulation](../design/les.md)
+- Design notes: [large-eddy simulation](../design/les.md), [wall models](../design/wall_model.md)
