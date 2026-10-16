@@ -436,7 +436,9 @@ TEST(MPITest, SpectraAndPhaseAveragesDoNotDependOnTheRankCount) {
                         EXPECT_EQ(s.spectrum(pos, p, h), ref.spectrum(pos, p, h)) << periodic << " on " << comm::size();
                         EXPECT_EQ(s.correlation(pos, p, h), ref.correlation(pos, p, h));
                     }
-                    if (periodic == box_dirs) EXPECT_EQ(s.shell(p), ref.shell(p));
+                    if (periodic == box_dirs) {
+                        EXPECT_EQ(s.shell(p), ref.shell(p));
+                    }
                 }
             }
         }

@@ -104,7 +104,7 @@ void Spectra::init(const toml::value & table, const toml::value & input, const s
     const std::string key = "statistics.spectra";
     interval = toml::find_or<uint64_t>(table, "interval", interval_in);
     if (interval == 0) throw InputError(key + ".interval must be positive.");
-    t_start = find_real_or(table, "t_start", static_cast<double>(t_start_in));
+    t_start = find_real_or(table, "t_start", t_start_in);
     average = toml::find_or<bool>(table, "average", true);
     file = toml::find_or<std::string>(table, "file", average ? "spectra.csv" : "spectra/spectra.csv");
 

@@ -267,7 +267,7 @@ void PhaseAverage::init(const toml::value & table, const Mesh & mesh, const std:
     const std::string key = "statistics.phase";
     interval = toml::find_or<uint64_t>(table, "interval", interval_in);
     if (interval == 0) throw InputError(key + ".interval must be positive.");
-    t_start = find_real_or(table, "t_start", static_cast<double>(t_start_in));
+    t_start = find_real_or(table, "t_start", t_start_in);
     bins = toml::find_or<uint32_t>(table, "bins", 0);
     if (bins == 0) throw InputError(key + ".bins must be positive.");
     fields = toml::find_or<std::vector<std::string>>(table, "fields", {});
@@ -285,9 +285,9 @@ void PhaseAverage::init(const toml::value & table, const Mesh & mesh, const std:
     const bool triggered = table.contains("probe");
     if (periodic == triggered) throw InputError(key + ": give either period or probe (with variable and level).");
     if (periodic) {
-        period = static_cast<double>(find_real_or(table, "period", 0.0));
+        period = find_double_or(table, "period", 0.0);
         if (!(period > 0.0)) throw InputError(key + ".period must be positive.");
-        t_reference = static_cast<double>(find_real_or(table, "t_reference", 0.0));
+        t_reference = find_double_or(table, "t_reference", 0.0);
     } else {
         const std::vector<rtype> x = find_real_vector(table, "probe");
         if (x.size() != N_DIM) throw InputError(key + ".probe must have " + std::to_string(N_DIM) + " components.");
@@ -295,7 +295,7 @@ void PhaseAverage::init(const toml::value & table, const Mesh & mesh, const std:
         if (!table.contains("variable")) throw InputError(key + ": variable (of the probe) not specified.");
         trigger_variable = toml::find<std::string>(table, "variable");
         trigger_code = CellSampler::code(trigger_variable, species_names, key + ".variable");
-        level = static_cast<double>(find_real_or(table, "level", 0.0));
+        level = find_double_or(table, "level", 0.0);
         trigger_cell = locate_points(mesh, {trigger_point})[0];
         distributed = mesh.n_global_cells > 0;
     }
