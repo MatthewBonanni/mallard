@@ -51,7 +51,10 @@ class InletProfile {
         /** @brief Whether the mean velocity is the same everywhere. */
         bool uniform() const { return uniform_; }
 
-        std::array<double, N_DIM> velocity(const Point & x) const;
+        /** @brief Whether the mean velocity depends on t (expressions of t). */
+        bool depends_on_time() const;
+
+        std::array<double, N_DIM> velocity(const Point & x, double t = 0.0) const;
 
         /** @brief Reynolds stress in N_STRESS order (zero without turbulence). */
         std::array<double, N_STRESS> stress_at(const Point & x) const;
@@ -61,7 +64,7 @@ class InletProfile {
         struct Field {
             double value = 0.0;
             std::shared_ptr<Expression> expression;
-            double at(const Point & x) const;
+            double at(const Point & x, double t = 0.0) const;
         };
         bool uniform_ = true;
         std::vector<Field> u;       // per component

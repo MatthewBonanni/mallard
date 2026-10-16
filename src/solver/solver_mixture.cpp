@@ -304,13 +304,18 @@ class CompositionExpressions {
             }
         }
 
-        /** @brief Mass fractions at the point with coordinates x[0..N_DIM). */
+        /** @brief Whether some fraction depends on t. */
+        bool depends_on_time() const {
+            return std::any_of(values.begin(), values.end(), [](const Expression & e) { return e.depends_on_time(); });
+        }
+
+        /** @brief Mass fractions at time t at the point with coordinates x(0..N_DIM). */
         template <typename T>
-        std::vector<double> mass_fractions(const T & x) const {
+        std::vector<double> mass_fractions(const T & x, const double t = 0.0) const {
             std::vector<double> f(mixture.n_species(), 0.0);
             double sum = 0.0;
             for (size_t i = 0; i < listed.size(); i++) {
-                f[static_cast<size_t>(listed[i])] = std::max(values[i].at(x, N_DIM), 0.0);
+                f[static_cast<size_t>(listed[i])] = std::max(values[i].at(x, N_DIM, t), 0.0);
                 if (listed[i] != balance) sum += f[static_cast<size_t>(listed[i])];
             }
             if (balance >= 0) {
@@ -676,22 +681,30 @@ void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boun
             case BoundaryType::STAGNATION_INLET:
             case BoundaryType::MASS_FLOW_INLET: {
                 const char * T_key = bcs[i_bc].type == BoundaryType::STAGNATION_INLET ? "T0" : "T";
-                const double T = static_cast<double>(find_real(bound, T_key));
-                if (!MixtureModel::composition_varies(bound)) {
-                    const std::vector<double> Y = mixture_model->mass_fractions(bound, where);
-                    prescribe(i_bc, Y, T);
-                    // Faces with a condition of their own for their mass flux
-                    for (size_t k = 0; k < profiled_faces.size(); k++) {
-                        if (profiled_faces[k][0] == i_bc) prescribe(input_boundaries.size() + k, Y, T);
+                // The temperature and composition of the condition, or of each face where they are expressions
+                const bool T_varies = bound.at(T_key).is_string();
+                const BoundaryFields * fields = boundary_fields[i_bc].get();
+                const double T_uniform = T_varies ? 0.0 : static_cast<double>(find_real(bound, T_key));
+                std::shared_ptr<CompositionExpressions> composition;
+                std::vector<double> Y_uniform;
+                if (MixtureModel::composition_varies(bound)) {
+                    composition = std::make_shared<CompositionExpressions>(*mixture_model, bound, where);
+                    if (composition->depends_on_time()) {
+                        boundary_composition[i_bc] = [composition](const Point & x, const double t) {
+                            return composition->mass_fractions([&x](const int i) { return x[size_t(i)]; }, t);
+                        };
                     }
-                    break;
+                } else {
+                    Y_uniform = mixture_model->mass_fractions(bound, where);
+                    if (!T_varies) prescribe(i_bc, Y_uniform, T_uniform);
                 }
-                // Each face's own copy of the condition, at the composition of its center
-                const CompositionExpressions composition(*mixture_model, bound, where);
                 for (size_t k = 0; k < profiled_faces.size(); k++) {
                     if (profiled_faces[k][0] != i_bc) continue;
                     const auto center = Kokkos::subview(mesh->h_face_coords, profiled_faces[k][1], Kokkos::ALL());
-                    prescribe(input_boundaries.size() + k, composition.mass_fractions(center), T);
+                    Point x{};
+                    FOR_I_DIM x[i] = static_cast<double>(center(i));
+                    const double T = T_varies ? fields->temperature(x, 0.0) : T_uniform;
+                    prescribe(input_boundaries.size() + k, composition ? composition->mass_fractions(center) : Y_uniform, T);
                 }
                 break;
             }

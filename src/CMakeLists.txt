@@ -16,6 +16,7 @@ add_library(MallardCore STATIC
     mesh/mesh_block.cpp
     mesh/zone.cpp
     boundary/boundary.cpp
+    boundary/boundary_fields.cpp
     boundary/synthetic_inflow.cpp
     chemistry/mechanism.cpp
     chemistry/transport.cpp

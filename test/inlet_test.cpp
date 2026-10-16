@@ -717,3 +717,99 @@ TEST(MassFlowInletTest, InvalidInputIsRejected) {
         EXPECT_THROW(solver.init(parse_toml(head + duct_boundaries(left, outlet))), std::runtime_error) << left;
     }
 }
+
+namespace {
+
+/** @brief A time-dependent boundary case: the left (or top) condition and the rest of the input. */
+struct ForcedCase {
+    std::string name;
+    std::string left;
+    std::string top;
+    std::string physics;
+};
+
+/** @brief Density (or, for a moving wall, x-velocity) of every cell at t = 0.3 with a fixed dt. */
+std::vector<double> forced_run(const ForcedCase & c, double dt) {
+    const bool wall = !c.top.empty();
+    std::ostringstream s;
+    s << "[run]\nt_stop = 0.3\ndt = " << dt << "\n" << mesh_block("cartesian", wall ? 4 : 40, wall ? 8 : 1, 1.0, wall ? 1.0 : 0.1)
+      << "[initialize]\ntype = \"constant\"\np = 1.0\nT = 1.0\nu = " << (N_DIM == 2 ? "[0.5, 0.0]" : "[0.5, 0.0, 0.0]")
+      << "\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+      << "[output]\ncheck_interval = 1000000\n" << c.physics;
+    if (wall) {
+        s << "[[boundaries]]\nname = \"left\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"right\"\ntype = \"symmetry\"\n"
+          << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n[[boundaries]]\nname = \"top\"\n" << c.top;
+        if (N_DIM == 3) {
+            s << "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n";
+        }
+    } else {
+        s << duct_boundaries(c.left, "type = \"p_out\"\np = 1.0\n");
+    }
+    Solver solver;
+    solver.init(parse_toml(s.str()));
+    solver.run();
+    solver.update_primitives();
+    solver.copy_device_to_host();
+    std::vector<double> out;
+    for (uint32_t i = 0; i < solver.get_mesh()->n_cells; i++) {
+        out.push_back(wall ? double(solver.h_primitives(i, 0)) : double(solver.h_conservatives(i, 0)));
+    }
+    return out;
+}
+
+double max_difference(const std::vector<double> & a, const std::vector<double> & b) {
+    double m = 0.0;
+    for (size_t i = 0; i < a.size(); i++) m = std::max(m, std::abs(a[i] - b[i]));
+    return m;
+}
+
+const std::string UNIT_GAS = "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
+
+} // namespace
+
+TEST(ForcedInletTest, TimeDependentConditionsConvergeAtTheIntegratorsOrder) {
+    // Conditions that vary in time are evaluated at every Runge-Kutta stage
+    // time: with SSPRK3 the solution converges in dt at third order on a
+    // fixed mesh (taking them at the start of each step would give first
+    // order). nscbc_inlet advances its boundary point once per step (forward
+    // Euler on the LODI relation), so it converges at first order. Each
+    // forcing must also move the solution well beyond those errors.
+    const std::string u0 = N_DIM == 2 ? "[0.5, 0.0]" : "[0.5, 0.0, 0.0]";
+    const std::string u_t = N_DIM == 2 ? "[\"0.5 + 0.1 * sin(20 * t)\", \"0\"]" : "[\"0.5 + 0.1 * sin(20 * t)\", \"0\", \"0\"]";
+    const std::string wall_0 = N_DIM == 2 ? "[0.0, 0.0]" : "[0.0, 0.0, 0.0]";
+    const std::string wall_u = N_DIM == 2 ? "[\"0.2 * sin(20 * t)\", \"0\"]" : "[\"0.2 * sin(20 * t)\", \"0\", \"0\"]";
+    const std::string viscous =
+        "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 0.02\nPr = 0.72\n";
+    struct Case {
+        ForcedCase forced, steady;
+        double order;
+    };
+    const Case cases[] = {
+        {{"upt T(t)", "type = \"upt\"\nu = " + u0 + "\np = 1.0\nT = \"1 + 0.2 * sin(20 * t)\"\n", "", UNIT_GAS},
+         {"", "type = \"upt\"\nu = " + u0 + "\np = 1.0\nT = 1.0\n", "", UNIT_GAS}, 2.6},
+        {{"upt u(t)", "type = \"upt\"\nu = " + u_t + "\np = 1.0\nT = 1.0\n", "", UNIT_GAS},
+         {"", "type = \"upt\"\nu = " + u0 + "\np = 1.0\nT = 1.0\n", "", UNIT_GAS}, 2.6},
+        {{"nscbc_inlet u(t)", "type = \"nscbc_inlet\"\nu = " + u_t + "\np = 1.0\nT = 1.0\nL = 1.0\n", "", UNIT_GAS},
+         {"", "type = \"nscbc_inlet\"\nu = " + u0 + "\np = 1.0\nT = 1.0\nL = 1.0\n", "", UNIT_GAS}, 0.9},
+        {{"stagnation_inlet p0(t)", "type = \"stagnation_inlet\"\np0 = \"1.3 + 0.1 * sin(20 * t)\"\nT0 = 1.2\n", "", UNIT_GAS},
+         {"", "type = \"stagnation_inlet\"\np0 = 1.3\nT0 = 1.2\n", "", UNIT_GAS}, 2.6},
+        {{"mass_flow_inlet mass_flux(t)", "type = \"mass_flow_inlet\"\nmass_flux = \"0.5 + 0.1 * sin(20 * t)\"\nT = 1.0\n", "",
+          UNIT_GAS},
+         {"", "type = \"mass_flow_inlet\"\nmass_flux = 0.5\nT = 1.0\n", "", UNIT_GAS}, 2.6},
+        {{"moving wall u(t)", "", "type = \"wall_adiabatic\"\nu = " + wall_u + "\n", viscous},
+         {"", "", "type = \"wall_adiabatic\"\nu = " + wall_0 + "\n", viscous}, 2.6},
+    };
+    for (const Case & c : cases) {
+        const std::vector<double> reference = forced_run(c.forced, 0.0005);
+        const std::vector<double> coarse = forced_run(c.forced, 0.004);
+        const double e1 = max_difference(coarse, reference);
+        const double e2 = max_difference(forced_run(c.forced, 0.002), reference);
+        const double forcing = max_difference(coarse, forced_run(c.steady, 0.004));
+        const double order = std::log2(e1 / e2);
+        RecordProperty(c.forced.name, std::to_string(order) + " (errors " + std::to_string(e1) + ", " +
+                                          std::to_string(e2) + "; forcing " + std::to_string(forcing) + ")");
+        EXPECT_GT(forcing, 20.0 * e1) << c.forced.name;
+        EXPECT_GT(order, sizeof(rtype) == sizeof(double) ? c.order : std::min(c.order, 2.0))
+            << c.forced.name << ": errors " << e1 << ", " << e2;
+    }
+}

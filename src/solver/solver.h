@@ -24,6 +24,7 @@
 
 #include "mesh.h"
 #include "boundary.h"
+#include "boundary_fields.h"
 #include "face_reconstruction.h"
 #include "riemann_solver.h"
 #include "time_integrator.h"
@@ -185,6 +186,8 @@ class Solver {
 
         // Public because nvcc rejects device lambdas in non-public member functions
         void update_average_pressure_outlets(StateView solution);
+        /** @brief Target velocities of nscbc_inlet profiles depending on t, at time t, into target. */
+        void fill_timed_inlets(double t, const Kokkos::View<rtype *[N_DIM]> & target);
         /**
          * @brief Add the uniform body force along the mass flow direction that
          *        holds the volume average of rho u at its target: it cancels the
@@ -390,6 +393,8 @@ class Solver {
         void init_inlets(const std::vector<toml::value> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
         void update_inflow(rtype t_eval);
+        /** @brief Numbers of conditions given as expressions of t at t_eval, on the faces' own conditions. */
+        void update_boundary_fields(rtype t_eval);
         /**
          * @brief Mass fluxes of the faces of a mass_flow_inlet entry: per
          *        face for a mass_flux expression or an mdot with a profile,
@@ -462,6 +467,8 @@ class Solver {
         void init_mixture_boundaries(const std::vector<toml::value> & input_boundaries,
                                      const std::vector<std::array<uint32_t, 2>> & profiled_faces,
                                      std::vector<BoundaryCondition> & bcs);
+        /** @brief Write the conditions' bc_Y, bc_thermo and bc_transport_values to the device. */
+        void copy_boundary_gas();
 
         Kokkos::View<uint32_t *> rhs_cells;  // reconstructed cells, the n_early_cells independent of the halo first
         uint32_t n_early_cells = 0;
@@ -522,6 +529,18 @@ class Solver {
         Kokkos::View<int32_t *>::host_mirror_type h_face_state_index;
         rtype t_boundary_states;
         bool boundary_states_steady = false;  // evaluated, and no expression depends on t
+        // Conditions whose numbers are expressions: per input boundary (null if all are numbers), the faces'
+        // own conditions re-evaluated at the stage times, and for mixtures the composition if it depends on t
+        struct TimedBoundaryFace {
+            uint32_t i_bc;  // the face's condition
+            uint32_t base;  // its input boundary
+            Point x;        // face center
+        };
+        std::vector<std::shared_ptr<BoundaryFields>> boundary_fields;
+        std::vector<std::function<std::vector<double>(const Point &, double)>> boundary_composition;
+        std::vector<TimedBoundaryFace> timed_boundary_faces;
+        Kokkos::View<BoundaryCondition *>::host_mirror_type h_bcs;
+        rtype t_boundary_fields = -1.0;
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         RiemannSolverType riemann_solver_type;
         rtype low_mach_cutoff = 0.1_r;
@@ -657,6 +676,14 @@ class Solver {
         bool characteristic_state_set = false;   // char_state holds the faces' state (from a step or a restart)
         // Synthetic turbulence of inlets, and the time of the targets in char_target
         std::vector<std::unique_ptr<SyntheticInflow>> inflows;
+        // nscbc_inlet velocity profiles depending on t: faces and their targets
+        struct TimedInlet {
+            std::shared_ptr<InletProfile> profile;
+            std::vector<Point> x;
+            Kokkos::View<int32_t *> chars;
+            Kokkos::View<rtype *[N_DIM]> targets;
+        };
+        std::vector<TimedInlet> timed_inlets;
         rtype t_inflow = -1.0;
 
         // Checks
