@@ -621,7 +621,7 @@ TEST(MassFlowInletTest, ClosedHeatedDuctGainsExactlyTheInflow) {
     // upt fixes the velocity: its mass flow follows the inlet density
     const double u = G / 1.1614401858304297;
     const ClosedDuct fixed = closed_heated_duct(
-        "type = \"upt\"\nu = " + std::string(N_DIM == 2 ? "[" : "[") + std::to_string(u) + (N_DIM == 2 ? ", 0.0]" : ", 0.0, 0.0]") +
+        "type = \"upt\"\nu = [" + std::to_string(u) + (N_DIM == 2 ? ", 0.0]" : ", 0.0, 0.0]") +
             "\np = 1.0e5\nT = 300.0\n",
         muscl, PERFECT_GAS_AIR, G * A);
     EXPECT_GT(std::abs(fixed.added / fixed.expected - 1.0), 1e-2);
