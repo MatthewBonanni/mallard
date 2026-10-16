@@ -642,6 +642,10 @@ TEST(MixtureTest, InvalidMixtureInputsAreRejected) {
                      numerics("type = \"FO\"\n", "HLLC", true) + init + "X = { H2 = 1.0 }\n" + bcs + mixture(H2O2) +
                      "[chemistry]\ncoupling = \"simpler\"\n",
                  "double_flux");
+    expect_error("[run]\nn_steps = 1\ncfl = 0.25\n" + mesh_block("cartesian", 4, 4, 1.0, 1.0) +
+                     "[numerics]\nconvective_flux = \"hybrid\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n" + init +
+                     "X = { H2 = 1.0 }\n" + bcs + mixture(H2O2) + "[chemistry]\ncoupling = \"simpler\"\n",
+                 "hybrid\" is not available with chemistry.coupling");
     expect_error(base + init + "[chemistry]\n" + bcs + perfect_air(), "[chemistry] needs");
 }
 
