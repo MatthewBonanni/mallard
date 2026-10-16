@@ -305,7 +305,9 @@ TEST(DistributedMeshTest, CellOrdersPermuteEachLayerAndKeepTheMeshByGlobalId) {
                 EXPECT_EQ(mesh->h_cell_volume(c), ref->h_cell_volume(r));
                 FOR_I_DIM EXPECT_EQ(mesh->h_cell_coords(c, i), ref->h_cell_coords(r, i));
             }
-            if (comm::size() == 1) EXPECT_GT(moved, 0u);
+            if (comm::size() == 1) {
+                EXPECT_GT(moved, 0u);
+            }
             // The same cells go to and come from each neighbor (in the receiver's order)
             auto global = [](const Mesh & m, const std::vector<uint32_t> & cells) {
                 std::vector<uint64_t> g;
