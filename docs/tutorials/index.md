@@ -11,6 +11,7 @@ at reduced size on every change, so the commands stay working.
 | Tutorial | What it shows | Reference |
 |---|---|---|
 | [Supersonic cone](cone.md) | 3D Euler flow at Mach 2 over a 15° cone: a tetrahedral Gmsh mesh, symmetry planes, probes and surface output | Taylor-Maccoll exact solution |
+| [Premixed flame](premixed_flame.md) | Freely propagating H2/air flames with detailed chemistry and mixture-averaged transport, φ = 0.6 to 1.4; inputs written by a script | Cantera's `FreeFlame` |
 | [Channel LES](channel_les.md) | Wall-resolved LES of turbulent channel flow at Re_τ = 180: periodic Gmsh hexahedra, the Sigma model, constant mass flow, running statistics and the dissipation budget | DNS of Moser, Kim & Mansour |
 
 The tutorials assume a build of Mallard (see the
