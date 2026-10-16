@@ -1,6 +1,8 @@
 # Input file reference
 
 Mallard reads a single [TOML](https://toml.io) file: `Mallard -i input.toml`.
+This page lists every key; the [user guide](guide/input_files.md) explains
+by topic when to use them, with examples and figures.
 Kokkos options such as `--kokkos-num-threads=N` or `--kokkos-device-id=N` can be appended.
 
 The spatial dimension is fixed at build time with the CMake option
@@ -26,10 +28,10 @@ At least one stop condition is required.
 
 | Key | Description |
 |---|---|
-| `type` | `file`, `cartesian` (quads), `cartesian_tri` (each quad split into two triangles along its bottom-left to top-right diagonal), or `wedge` (quads over an 8 degree compression ramp starting at x = 0.5) |
+| `type` | `file` (the default), `cartesian` (quads), `cartesian_tri` (each quad split into two triangles along its bottom-left to top-right diagonal), or `wedge` (quads over an 8 degree compression ramp starting at x = 0.5) |
 | `filename` | (`file`) Mallard HDF5 mesh (`.h5` or `.hdf5`, see below), ASCII Gmsh mesh (format 2.2 or 4.1), CGNS file (`.cgns`), ANSYS Fluent mesh or case file (`.msh`, `.cas`; ASCII or binary), or OpenFOAM polyMesh (a directory: the case, its `constant/polyMesh`, or anything between), of triangles and/or quadrilaterals (2D), or tetrahedra, pyramids, prisms and/or hexahedra (3D); see mesh files below |
-| `Nx`, `Ny` | Number of quads in x and y |
-| `Lx`, `Ly` | Domain size; the domain is `[0, Lx] x [0, Ly]` |
+| `Nx`, `Ny` | Number of quads in x and y (default 100) |
+| `Lx`, `Ly` | Domain size; the domain is `[0, Lx] x [0, Ly]` (default 1) |
 
 Generated meshes have boundary zones named `left`, `right`, `bottom` and `top`.
 
@@ -71,8 +73,8 @@ corners; high-order boundary elements (`line3`, `line4` in 2D; `triangle6`,
 `triangle9`, `triangle10`, `quadrangle8`, `quadrangle9`, `quadrangle16` in 3D)
 curve their faces (see curved boundaries below).
 
-Every format and the transform below are illustrated in
-`docs/design/mesh_import.md`.
+Every format and the transform below are illustrated in the user guide
+([meshes](guide/meshes.md#other-mesh-formats)).
 
 `[mesh.transform]` maps the nodes of a mesh file as it is read,
 `x -> R (S x) + t`: scale first, then rotate about the origin, then translate.
@@ -164,7 +166,7 @@ Jacobians, and the cells touching them their exact volumes, centroids and
 TENO moments; in 3D the faces sharing an edge with a curved face (side faces
 of prism layers, symmetry planes meeting the wall) are blended from their
 edges. This brings orders 3 to 6 to their design accuracy at curved walls
-(design: `docs/design/curved_boundaries.md`).
+(guide: [curved boundaries](guide/meshes.md#curved-boundaries)).
 
 | Key | Description |
 |---|---|
@@ -217,7 +219,7 @@ translation = [1.0, 0.0]
 
 | Key | Description |
 |---|---|
-| `type` | `euler` or `navier_stokes` |
+| `type` | `euler` (default) or `navier_stokes` |
 | `gamma` | Ratio of specific heats |
 | `p_ref`, `T_ref`, `rho_ref` | A reference state, which sets the gas constant `R = p_ref / (rho_ref T_ref)` |
 | `mu` | (`navier_stokes`) Dynamic viscosity, or its value at `T_mu_ref` for Sutherland's law or the power law |
@@ -263,7 +265,7 @@ and conserved totals are per radian of the revolved domain (multiply forces by
 `2 pi` for the force on the 3D body; only the axial component is meaningful).
 `u` is `[u_x, u_r]`. Every reconstruction, Riemann solver, viscous and
 mixture model, chemistry and MPI work as in planar runs; meshes cannot be
-periodic in y. Method and accuracy: `docs/design/axisymmetric.md`.
+periodic in y. Guide: [axisymmetric flows](guide/physics.md#axisymmetric-flows).
 
 ## `[les]`
 
@@ -276,7 +278,7 @@ diffusive fluxes still sum to zero). Wall faces keep the molecular fluxes. The
 eddy viscosity of each cell comes from its least-squares velocity gradient
 `g_ij = du_i/dx_j`, with the filter width `Delta = V^(1/3)` (3D) or `A^(1/2)`
 (2D) of the cell; the time step includes it. Design, choices and validation:
-[`design/les.md`](design/les.md).
+the [LES guide](guide/les.md) ([design notes](design/les.md)).
 
 | Key | Description |
 |---|---|
@@ -317,7 +319,7 @@ In the flame the SGS heat and species fluxes are multiplied by `1 - Omega`.
 The rates are scaled by integrating each cell's Strang reactor over `E / F`
 times the half step (exact for the autonomous constant-volume reactor).
 `F`, `E` and `Omega` are computed once per step from the state, and written as
-`TF_F`, `TF_E`, `TF_OMEGA`. Design: [`design/les.md`](design/les.md), section 6.
+`TF_F`, `TF_E`, `TF_OMEGA`. Guide: [thickened flames](guide/les.md#thickened-flames-lescombustion).
 
 | Key | Description |
 |---|---|
@@ -328,7 +330,7 @@ times the half step (exact for the autonomous constant-volume reactor).
 | `n_res` | Cells across the thickened flame, default 5 |
 | `efficiency` | `charlette` (default) or `none` (`E = 1`) |
 | `beta` | Exponent of the Charlette efficiency, default 0.5 |
-| `subgrid_velocity` | The `u'` of the efficiency: `colin` (default), `u' = 2 Delta^3 abs(lap(curl u))`; or `eddy_viscosity`, `u' = C_u nu_t / Delta` from the SGS model. Colin's operator overpredicts `u'` 5-8 times on meshes with `Delta >= 0.4 delta_L` and the flame speed by 2x at `Delta = 1.6 delta_L` (`docs/design/les.md`, section 8.3) |
+| `subgrid_velocity` | The `u'` of the efficiency: `colin` (default), `u' = 2 Delta^3 abs(lap(curl u))`; or `eddy_viscosity`, `u' = C_u nu_t / Delta` from the SGS model. Colin's operator overpredicts `u'` 5-8 times on meshes with `Delta >= 0.4 delta_L` and the flame speed by 2x at `Delta = 1.6 delta_L` ([design notes](design/les.md), section 8.3) |
 | `C_u` | Constant of `subgrid_velocity = "eddy_viscosity"`, default 28 (a priori from a DNS at `Delta = 0.8 delta_L`; 22-39 over `Delta = 0.4-1.6 delta_L`) |
 
 **Experimental: `model = "pasr"`**, the partially stirred reactor (Sabelnikov &
@@ -350,7 +352,7 @@ filter widths and overcorrects on coarse meshes; not validated beyond this case.
 
 | Key | Description |
 |---|---|
-| `type` | `constant`, `analytical` or `restart` |
+| `type` | `constant` (default), `analytical` or `restart` |
 | `u` | `constant`: `[u_x, u_y]`; `analytical`: one expression in `x`, `y`, `z` per component |
 | `rho`, `p`, `T` | `constant`: `p` and `T`; `analytical`: exactly two of the three, as expressions in `x`, `y`, `z` |
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
@@ -363,7 +365,8 @@ Expressions use [exprtk](https://www.partow.net/programming/exprtk/) syntax, e.g
 ## `[[boundaries]]`
 
 Every boundary face must be assigned exactly once (a fully periodic mesh has
-none, and needs no `[[boundaries]]`). A zone can be split
+none, and needs no `[[boundaries]]`). Each entry has a `name`, the boundary
+zone, and a `type`, below. A zone can be split
 between several entries with `where = "<expression in x, y, z>"`, which selects
 the zone's faces whose centers satisfy the expression.
 
@@ -389,7 +392,7 @@ cells leave out their ghosts across them, so that waves leave intact. Each face 
 normal velocity between steps, and restart files carry them, so a restarted
 run reproduces an uninterrupted one bitwise, also on a different number of
 ranks (restart files older than version 4 start them afresh from the
-solution). See [docs/design/nscbc.md](design/nscbc.md).
+solution). Guide: [characteristic boundaries](guide/boundary_conditions.md#characteristic-boundaries).
 
 ### Synthetic turbulence (`[boundaries.turbulence]`)
 
@@ -403,7 +406,7 @@ target's change without reflecting outgoing waves. The field depends only on
 the time, the seed and the inlet, so runs are bitwise the same on any number
 of ranks and across restarts. The inlet must be planar and normal to a
 coordinate axis; a periodic direction across it makes the field periodic. See
-[docs/design/synthetic_inflow.md](design/synthetic_inflow.md).
+the [guide](guide/boundary_conditions.md#synthetic-turbulence).
 
 | Key | Description |
 |---|---|
@@ -447,7 +450,7 @@ Strength and reference are evaluated once at cell centroids.
 |---|---|
 | `riemann_solver` | `Rusanov`, `HLL`, `HLLC` (default), `Roe`, or `RHLL` (rotated hybrid HLL-Roe, carbuncle-free except at shocks at rest on cell faces; see [numerics](numerics/overview.md#stationary-shocks-on-cell-faces)) |
 | `time_integrator` | `FE`, `SSPRK3` (default) or `RK4` |
-| `check_nan` | Stop if the solution becomes non-finite |
+| `check_nan` | Stop if the solution becomes non-finite (default `false`) |
 | `double_flux` | (gas mixtures) `true` for the double-flux scheme: each cell's energy is updated with its own `cp / cv` and energy offset frozen over the time step on both sides of its faces, and reset to the true equation of state after the step, so pressure and velocity stay exactly uniform across contacts between different gases. Energy is then not exactly conserved (about 0.2% over a multicomponent shock tube). Default `false` |
 | `low_mach_cutoff` | Low-Mach correction of the convective flux: the velocity jump across each interior face is scaled by `z = min(1, max(M_L, M_R, low_mach_cutoff))` before the Riemann solver, so that upwind dissipation scales with the flow speed rather than the sound speed. Default 0.1; 1 disables it. See [`numerics/overview.md`](numerics/overview.md) |
 | `convective_flux` | `riemann` (default): the Riemann solver at every face; `hybrid`: the kinetic-energy-preserving central flux of Kuya, Totani & Kawai (2018) on the same reconstructed states, blended into the Riemann solver where a shock sensor fires, `F = F_KEEP + phi (F_Riemann - F_KEEP)`. For large-eddy simulation: the central flux adds no dissipation, so the SGS model does the work (see `[integrals] budget`). `phi` is the larger of the face's two cells': 1 where the Ducros sensor restricted to compressions, `(div u)^2 / ((div u)^2 + |omega|^2)` with `div u < 0`, exceeds `sensor_threshold`, else `upwind_floor`. Boundary faces other than walls and symmetry planes use the Riemann solver. Species stay upwinded with the blended mass flux. Contacts and expansions are central: on Sod's problem the density error is about 1.8 times the Riemann solver's, with a 0.1% overshoot at the contact |
@@ -463,7 +466,7 @@ Strength and reference are evaluated once at cell centroids.
 
 | Key | Description |
 |---|---|
-| `type` | `FO` (first order), `MUSCL` or `TENO` |
+| `type` | `FO` (first order; the default, also without this table), `MUSCL` or `TENO` |
 | `limiter` | (`MUSCL`) `venkatakrishnan` (default), `barth_jespersen` or `none` |
 | `venkatakrishnan_K` | (`MUSCL`) Venkatakrishnan threshold constant, default 5 |
 | `order` | (`TENO`) Order of accuracy, 3 to 6, default 5. In 3D, faces use Dunavant (triangles) or Gauss (quadrilaterals) rules exact to this order, capped at degree 5 on triangles |
@@ -477,7 +480,7 @@ Strength and reference are evaluated once at cell centroids.
 | `cache_file` | (`TENO`) Save the precomputed stencils and matrices here, and reuse them on later runs of the same mesh, boundary assignment and TENO options; anything else is detected and recomputed. Distributed runs write one file per rank, `<cache_file>.r<rank>-of-<ranks>`, for that rank count and partition, and record the halo depth the stencils need, so a cached run sets up its halo once. Partitions repeat for the same mesh and rank count. Size per cell: about 2.5 / 4 / 6 / 11 KB in 2D and 10 / 18 / 32 KB (hexahedra) or 9 / 13 / 29 / 63 KB (tetrahedra) in 3D for orders 3 / 4 / 5 / 6, e.g. 8.4 GB for 64^3 hexahedra at order 5; reading it takes seconds; the 3D setup takes about 5 s per million hexahedra and 20 s per million tetrahedra on an A100 (order 5), and minutes on CPUs. The cache records whether the device or the host computed it; both give the same tables |
 | `cache_single_precision` | (`TENO`) Store the pseudo-inverses and smoothness-indicator matrices (3D: the cells' moments, from which the matrices are formed) of `cache_file` in single precision: about half the size (17 instead of 32 KB per cell for hexahedra at order 5). The run that writes the cache rounds them too, so it and the runs that read the cache agree with each other, but no longer with a run without it, whose results differ at single-precision round-off. Default false |
 | `bound_preserving` | (`TENO`) Scale troubled-cell polynomials to keep density and pressure within the neighbors' range, default false |
-| `single_precision_tables` | (`TENO`, 3D, not with gas mixtures) Keep the pseudo-inverses on the device in single precision: about 40% less device memory for 3D TENO5 (25 instead of 40 KB per hexahedron, 31 instead of 51 KB per tetrahedron on an A100, everything included), so about 1.6 times the cells per GPU, and a 3-8% faster step. Results change at single-precision round-off: below 1e-7 of each field's range for smooth flow, but up to 1e-3 (order 3: 7e-3) behind shocks, where the stencil selection of some cells goes the other way (3D blast on hexahedra, 60-80 steps; see docs/design/performance.md); the cache, if any, holds the tables in single precision too. Default false |
+| `single_precision_tables` | (`TENO`, 3D, not with gas mixtures) Keep the pseudo-inverses on the device in single precision: about 40% less device memory for 3D TENO5 (25 instead of 40 KB per hexahedron, 31 instead of 51 KB per tetrahedron on an A100, everything included), so about 1.6 times the cells per GPU, and a 3-8% faster step. Results change at single-precision round-off: below 1e-7 of each field's range for smooth flow, but up to 1e-3 (order 3: 7e-3) behind shocks, where the stencil selection of some cells goes the other way (3D blast on hexahedra, 60-80 steps; [design notes](design/performance.md)); the cache, if any, holds the tables in single precision too. Default false |
 | `troubled_capacity` | (`TENO`) Fraction of the reconstructed cells that the troubled-cell passes take at a time, which sizes their scratch; more troubled cells are done in further rounds, which recompute their central coefficients (same results). Default 0.5 in 3D (1 in 2D) |
 | `curved_mirrors` | (`TENO`) Also take mirror images across curved wall and symmetry faces (across each face's plane) into the stencils, default false: stencils are one-sided at curved walls, where mirroring is only second-order consistent (curved far fields and inflows keep their mirror images) |
 | `curved_wall_degree` | (`TENO`) Largest degree of the central polynomials of cells whose stencils reach a curved wall or symmetry face without mirror images, default 3: one-sided fits of degree 4 and 5 grow in time there, so orders 5 and 6 are fourth order at curved walls and of their order elsewhere |
@@ -495,7 +498,7 @@ evaluates the flow's right-hand side `T(U^n)` once, advances every owned
 cell over `dt` under its chemistry plus that constant source, then lets
 the flow correct over the second half of the step with `T(U) - T(U^n)`:
 steady states of chemistry and transport stay exactly steady at any `dt`
-(see [chemistry.md](design/chemistry.md#simpler-balanced-splitting-option)). The integrator
+(see the [thermochemistry guide](guide/thermochemistry.md#finite-rate-chemistry)). The integrator
 is RODAS, an adaptive Rosenbrock method with the analytical Jacobian, in
 double precision in every build.
 
@@ -503,13 +506,13 @@ double precision in every build.
 |---|---|
 | `enabled` | `false` keeps the mixture non-reacting (default `true`) |
 | `integrator` | `rosenbrock` (the default and only choice so far) |
-| `coupling` | `strang` (default) or `simpler`; `simpler` does not combine with `fuse_half_steps`, `numerics.double_flux` or `numerics.convective_flux = "hybrid"` (SIMPLER's flow integrator amplifies non-dissipative operators such as the hybrid flux's central part; see [chemistry.md](design/chemistry.md#simpler-balanced-splitting-option)) |
+| `coupling` | `strang` (default) or `simpler`; `simpler` does not combine with `fuse_half_steps`, `numerics.double_flux` or `numerics.convective_flux = "hybrid"` (SIMPLER's flow integrator amplifies non-dissipative operators such as the hybrid flux's central part; see the [design notes](design/chemistry.md#simpler-balanced-splitting-option)) |
 | `rtol` | Relative tolerance on the mass fractions and `T` (default `1e-6`) |
 | `atol` | Absolute tolerance on the mass fractions (default `1e-10`) |
 | `max_steps` | Sub-steps allowed per cell and half step (default 100000); more stop the run |
 | `T_frozen` | No chemistry in cells below this temperature (default 0) |
 | `fuse_half_steps` | `true` fuses the closing half step of a step with the next step's opening one, except where output, checks, probes, statistics or the end of the run read the state (default `false`). Faster where cells take few sub-steps, but results then depend on when output is written, and a restart reproduces an uninterrupted run only from a step at which that run also wrote output |
-| `C_reg` | concentration [kmol/m^3] below which reaction orders 0 < n < 1 follow a regularized law (default `1e-12`; design/chemistry.md). Larger values (e.g. `1e-10`) make trace fuel burning out in hot gas much cheaper to integrate (`flame_3d`: chemistry 20 to 11.5 ms per step) but change results: after 100 steps of `flame_3d`, T by up to 0.54 K, Y by up to 3e-5, the integrated heat release by 0.08% |
+| `C_reg` | concentration [kmol/m^3] below which reaction orders 0 < n < 1 follow a regularized law (default `1e-12`). Larger values (e.g. `1e-10`) make trace fuel burning out in hot gas much cheaper to integrate (`flame_3d`: chemistry 20 to 11.5 ms per step) but change results: after 100 steps of `flame_3d`, T by up to 0.54 K, Y by up to 3e-5, the integrated heat release by 0.08% |
 | `load_balance` | `true` moves the integration of cells from ranks with more chemistry work than the mean (sub-steps of their cells' last calls) to ranks with less, in every call where the most loaded rank exceeds the mean by 5%; only the cells' states travel, and results stay bitwise the same (default `false`). The summary reports the time ranks wait for the slowest rank's chemistry with or without it |
 | `sparse` | `true` for the sparse LU (static pattern, with the Jacobian's dense rank-one part by Sherman-Morrison), `false` for the dense one; by default sparse from 30 species when its factors fill at most 60% of the dense matrix (GRI-3.0 and larger) |
 | `lanes` | Vector lanes integrating one cell: 1 for one thread per cell (cells ordered by their last cost), a power of 2 up to 32 for a team per cell on GPUs; default 0, automatic: a warp per cell on GPUs from 16 species (8 warps, 16 from 512 species, for cells whose last call took 16 or more sub-steps), else one thread |
@@ -520,7 +523,7 @@ three-body, falloff (Lindemann, Troe, SRI), `pressure-dependent-Arrhenius`
 (PLOG) and `Chebyshev`, with non-integer reactant `orders` (global
 mechanisms such as Westbrook–Dryer's). Orders between 0 and 1 follow the
 power law down to a concentration of `1e-12` kmol/m^3 and a quadratic with a
-bounded slope below it (see `docs/design/chemistry.md`), so the Jacobian
+bounded slope below it, so the Jacobian
 stays finite where such a reactant runs out. Output variables: `HRR` (heat release rate,
 W/m^3) and `CHEM_COST` (chemistry sub-steps of the cell in the last step);
 restart files also hold `CHEM_H`, each cell's last sub-step, so restarted
@@ -644,7 +647,7 @@ Optional source terms, added per unit volume.
 |---|---|
 | `gravity` | `[g_x, g_y]` (`[g_x, g_y, g_z]` in 3D); adds `rho g` to the momentum and `rho u . g` to the energy equation |
 | `rho`, `rhou`, `rhoE` | Expressions in `x`, `y`, `z`, `t` (`rhou` has one per component) for the mass, momentum and energy sources |
-| `time_dependent` | Re-evaluate the expressions at every Runge-Kutta stage (host-side, so costly on large meshes); otherwise they are evaluated once |
+| `time_dependent` | Re-evaluate the expressions at every Runge-Kutta stage (host-side, so costly on large meshes); otherwise (the default) they are evaluated once |
 | `mass_flow` | `[m_x, m_y]` (`[m_x, m_y, m_z]` in 3D): hold the volume average of `rho u` along this vector at its magnitude with a uniform body force `f` per unit volume along it (constant mass flow, e.g. a periodic channel). At every Runge-Kutta stage `f` cancels the rate of change of that average from all other terms (one global sum) and closes any remaining gap within the time step, so a flow started at the target stays there to rounding. The energy gains the force's work `f . u`. |
 
 The scheme is not exactly well balanced: hydrostatic states carry small spurious velocities (about 1e-4 of the sound speed on a 32x32 mesh) that vanish at second order under refinement. Wall and symmetry ghost states continue the hydrostatic pressure gradient.
@@ -729,7 +732,7 @@ CSV (`t`, `T`, `p`, `Y_<species>`). It reads `[physics]` (`mechanism`,
 | `[chemistry] atol` | Absolute tolerance on `Y` (default `1e-10`) |
 | `[chemistry] max_steps` | Sub-steps allowed per output interval (default 100000) |
 | `[chemistry] sparse` | The linear solver, as in the solver's `[chemistry]` |
-| `[benchmark]` | Instead of the run, a chemistry benchmark: states sampled along this reactor's trajectory, replicated over `cells` cells and advanced by the solver's chemistry kernels over each splitting step of `dt`; see `benchmarks/README.md` |
+| `[benchmark]` | Instead of the run, a chemistry benchmark: states sampled along this reactor's trajectory, replicated over `cells` cells and advanced by the solver's chemistry kernels over each splitting step of `dt`, with results in `output` (default `benchmark.csv`); see `benchmarks/README.md` |
 
 It prints the ignition delay, the time of the maximum of `dT/dt`, once
 `dT/dt` has fallen below half that maximum by `end_time` (the runaway is over,
