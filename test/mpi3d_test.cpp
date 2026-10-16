@@ -211,7 +211,7 @@ TEST(MPI3DTest, RemapDoesNotDependOnTheRankCount) {
     comm::barrier();
     std::string input = box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"euler\"\n");
     input.replace(input.find("Nx = 6\nNy = 4\nNz = 3"), 20, "Nx = 5\nNy = 5\nNz = 4");
-    input.replace(input.find("n_steps = 8"), 11, "n_steps = 2");
+    input.replace(input.find("n_steps = 8"), 11, "n_steps = 6");
     const size_t at = input.find("[initialize]\n");
     const size_t end = input.find("[[boundaries]]", at);
     input.replace(at, end - at,

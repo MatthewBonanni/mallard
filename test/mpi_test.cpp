@@ -771,10 +771,10 @@ TEST(MPITest, RemapDoesNotDependOnTheRankCount) {
         input.replace(input.find("Nx = 24"), 7, "Nx = 31");
         return input;
     };
-    expect_matches_serial(remapped(restart_case(3, ""),
+    expect_matches_serial(remapped(restart_case(8, ""),
                                    "type = \"remap\"\nfile = \"" + dir + "/c_000005.restart\"\ndegree = 3\n",
                                    "type = \"cartesian_tri\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n"));
-    mixture.replace(mixture.find("n_steps = 5"), 11, "n_steps = 2");
+    mixture.replace(mixture.find("n_steps = 5"), 11, "n_steps = 7");
     expect_matches_serial(remapped(mixture, "type = \"remap\"\nfile = \"" + dir + "/m_000005.restart\"\n",
                                    "type = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n"));
     comm::barrier();

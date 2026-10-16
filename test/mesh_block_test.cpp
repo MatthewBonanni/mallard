@@ -20,6 +20,8 @@
 #include <vector>
 
 #include "comm.h"
+#include "gmsh_fixtures.h"
+#include "input.h"
 #include "mesh.h"
 #include "mesh_block.h"
 #include "test_fixtures.h"
@@ -199,4 +201,70 @@ TEST(MeshBlockTest, StretchingClustersNodesTowardBothEnds) {
         if (zone.get_type() == FaceZoneType::BOUNDARY) zones.insert(zone.get_name());
     }
     EXPECT_EQ(zones, (std::set<std::string>{"bottom", "top"}));
+}
+
+TEST(MeshBlockTest, TransformOnReadMapsNodesAndHighOrderNodes) {
+    // 2D: scale [2, 3], rotate 90 deg, translate [1, -1]: (x, y) -> (1 - 3y, 2x - 1).
+    // 3D: scale 2, rotate 120 deg about [1, 1, 1] (cycles the axes), translate [1, 2, 3]: (x, y, z) -> (2z + 1, 2x + 2, 2y + 3)
+#if N_DIM == 2
+    const std::string file = write_temp_shared("mallard_transform.msh", annulus_gmsh(3, 16, 2));
+    const std::string transform = "[mesh.transform]\nscale = [2, 3]\nrotate = 90\ntranslate = [1, -1]\n";
+    auto expected = [](const auto & x) {
+        return std::array<double, N_DIM>{1.0 - 3.0 * double(x[1]), 2.0 * double(x[0]) - 1.0};
+    };
+    const double det = 6.0;
+#else
+    const std::string file = write_temp_shared("mallard_transform_3d.msh", shell_gmsh(2, 2, false, true));
+    const std::string transform =
+        "[mesh.transform]\nscale = 2\nrotate = {axis = [1, 1, 1], angle = 120}\ntranslate = [1, 2, 3]\n";
+    auto expected = [](const auto & x) {
+        return std::array<double, N_DIM>{2.0 * double(x[2]) + 1.0, 2.0 * double(x[0]) + 2.0, 2.0 * double(x[1]) + 3.0};
+    };
+    const double det = 8.0;
+#endif
+    const double tol = precision_tol<double>(1e-12, 1e-5);
+    const toml::value input = parse_toml("[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" + transform);
+
+    const MeshBlock plain = read_gmsh_block(file), moved = read_mesh_block(input);
+    ASSERT_EQ(moved.n_nodes(), plain.n_nodes());
+    for (uint64_t n = 0; n < plain.n_nodes(); n++) {
+        FOR_I_DIM EXPECT_NEAR(moved.node_coords[n][i], expected(plain.node_coords[n])[i], tol);
+    }
+    ASSERT_EQ(moved.face_high_order_nodes.size(), plain.face_high_order_nodes.size());
+    ASSERT_FALSE(plain.face_high_order_nodes.empty());
+    for (size_t k = 0; k < plain.face_high_order_nodes.size(); k++) {
+        FOR_I_DIM EXPECT_NEAR(moved.face_high_order_nodes[k][i], expected(plain.face_high_order_nodes[k])[i], tol);
+    }
+
+    if (comm::size() > 1) return;
+    Mesh a, b;
+    a.init_file(file);
+    b.init(input);
+    ASSERT_EQ(b.n_cells, a.n_cells);
+    ASSERT_EQ(b.n_faces, a.n_faces);
+    for (uint32_t c = 0; c < a.n_cells; c++) {
+        EXPECT_NEAR(double(b.h_cell_volume(c)), det * double(a.h_cell_volume(c)), tol * det);
+        std::array<rtype, N_DIM> x;
+        FOR_I_DIM x[i] = a.h_cell_coords(c, i);
+        FOR_I_DIM EXPECT_NEAR(double(b.h_cell_coords(c, i)), expected(x)[i], 10 * tol);
+    }
+    for (FaceZone & zone : *a.face_zones()) {
+        ASSERT_NE(b.get_face_zone(zone.get_name()), nullptr) << zone.get_name();
+        EXPECT_EQ(b.get_face_zone(zone.get_name())->n_faces(), zone.n_faces()) << zone.get_name();
+    }
+    ASSERT_EQ(b.high_order_faces.size(), a.high_order_faces.size());
+    for (size_t f = 0; f < a.high_order_faces.size(); f++) {
+        for (size_t k = 0; k < a.high_order_faces[f].nodes.size(); k++) {
+            const auto y = expected(a.high_order_faces[f].nodes[k]);
+            FOR_I_DIM EXPECT_NEAR(b.high_order_faces[f].nodes[k][i], y[i], tol);
+        }
+    }
+}
+
+TEST(MeshBlockTest, TransformIsRejectedForGeneratedMeshesAndUnknownKeys) {
+    EXPECT_THROW(mesh_transform(parse_toml("[mesh]\ntype = \"cartesian\"\n[mesh.transform]\nscale = 2\n")),
+                 InputError);
+    EXPECT_THROW(mesh_transform(parse_toml("[mesh]\ntype = \"file\"\n[mesh.transform]\nshift = [1, 1]\n")),
+                 InputError);
+    EXPECT_THROW(mesh_transform(parse_toml("[mesh]\ntype = \"file\"\n[mesh.transform]\nscale = 0\n")), InputError);
 }

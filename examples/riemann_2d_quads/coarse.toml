@@ -4,8 +4,6 @@
 #
 #   ../../build/src/Mallard -i coarse.toml --kokkos-num-threads=8
 #   ../../build/src/Mallard -i remap.toml --kokkos-num-threads=8
-#   python ../../tools/plot_remap.py meshes coarse/riemann_000010.vtu remap/riemann_000000.vtu
-#   python ../../tools/plot_remap.py fields coarse/riemann_000010.vtu remap/riemann_000000.vtu
 
 [run]
 t_stop = 0.5

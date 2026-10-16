@@ -112,7 +112,9 @@ TEST(RemapTest, PolynomialsUpToTheDegreeAreReproducedExactly) {
         const Field exact = random_polynomial(p, 7u + p), higher = random_polynomial(p + 1u, 11u + p);
         const auto out = remap_fields(mesh_table(SOURCE_TYPE, N_DIM == 2 ? 9 : 4), {exact, higher}, *target,
                                       options, report);
-        EXPECT_LT(max_error(out[0], averages(*target, target->n_cells, exact)), 1e-11) << "degree " << int(p);
+        // Single-precision meshes put the nodes of the two meshes' common boundary apart by rounding
+        EXPECT_LT(max_error(out[0], averages(*target, target->n_cells, exact)), precision_tol<double>(1e-11, 1e-5))
+            << "degree " << int(p);
         // One degree more is not: the test can see a lower order
         EXPECT_GT(max_error(out[1], averages(*target, target->n_cells, higher)), 1e-6) << "degree " << int(p);
         EXPECT_EQ(report.n_reduced, 0u);
@@ -132,14 +134,15 @@ TEST(RemapTest, IntegralsAreConservedToRounding) {
         const auto target = serial_mesh(mesh_table(TARGET_TYPE, N_DIM == 2 ? 23 : 6));
         const auto out = remap_fields(mesh_table(N_DIM == 2 ? "cartesian" : "cartesian_prism", N_DIM == 2 ? 16 : 5),
                                       {step}, *target, options, report);
-        EXPECT_NEAR(report.target_total[0], report.source_total[0], 1e-14 * report.source_magnitude[0]);
+        EXPECT_NEAR(report.target_total[0], report.source_total[0],
+                    precision_tol<double>(1e-14, 1e-5) * report.source_magnitude[0]);
         EXPECT_EQ(report.n_partial + report.n_nearest, 0u);
         if (!limit) continue;
         // Bounded by the source averages
         EXPECT_GT(report.n_limited, 0u);
         for (double u : out[0]) {
-            EXPECT_LE(u, 1.1 + 1e-12);
-            EXPECT_GE(u, 0.025 - 1e-12);
+            EXPECT_LE(u, 1.1 + precision_tol<double>(1e-12, 1e-5));
+            EXPECT_GE(u, 0.025 - precision_tol<double>(1e-12, 1e-5));
         }
     }
 }
@@ -159,7 +162,7 @@ TEST(RemapTest, RefiningThenCoarseningRecoversTheCoarseAverages) {
     const auto on_fine = remap_fields(coarse, {f}, *fine_mesh, options, report);
     const remap::Source back(fine_mesh, on_fine, {-1}, options);
     const auto round_trip = back.to(*coarse_mesh, coarse_mesh->n_cells, report);
-    EXPECT_LT(max_error(round_trip[0], averages(*coarse_mesh, coarse_mesh->n_cells, f)), 1e-13);
+    EXPECT_LT(max_error(round_trip[0], averages(*coarse_mesh, coarse_mesh->n_cells, f)), precision_tol<double>(1e-13, 1e-5));
 }
 
 TEST(RemapTest, SmoothPeriodicFieldsConvergeAtTheDegreePlusOne) {
@@ -196,7 +199,7 @@ TEST(RemapTest, TargetCellsOutsideTheSourceMeshAreReported) {
     const auto out = remap_fields(table, {[](const overlap::Point &) { return 2.5; }}, *target, options, report);
     EXPECT_GT(report.n_partial, 0u);
     EXPECT_GT(report.n_nearest, 0u);
-    for (double u : out[0]) EXPECT_NEAR(u, 2.5, 1e-12);
+    for (double u : out[0]) EXPECT_NEAR(u, 2.5, precision_tol<double>(1e-12, 1e-5));
 }
 
 TEST(RemapTest, BoxTreeFindsEveryOverlapAndTheNearestItem) {

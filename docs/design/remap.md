@@ -32,10 +32,8 @@ source cell tile it, the target integrals sum to the source's: conservation
 holds by construction, not by a correction. Since `u_S` is integrated exactly,
 a field the polynomials reproduce is remapped exactly.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../images/remap_meshes_dark.png">
-  <img alt="A target triangle cut into pieces by the source quadrilaterals" src="../images/remap_meshes_light.png">
-</picture>
+![A target triangle cut into pieces by the source quadrilaterals](../images/guide/remap-supermesh-light.svg#gh-light-mode-only)
+![A target triangle cut into pieces by the source quadrilaterals](../images/guide/remap-supermesh-dark.svg#gh-dark-mode-only)
 
 ### Source polynomials
 
@@ -141,17 +139,15 @@ summing 131,072 cells.
 ## Example
 
 `examples/riemann_2d_quads/coarse.toml` runs the 2D Riemann problem on 100 x
-100 quadrilaterals to t = 0.5; `remap.toml` continues it on 131,072 triangles.
-The remapped field (degree 3, bounds limiter) keeps the coarse run's shocks
-without new extrema, and inside each coarse cell it carries the polynomial's
-slopes rather than a constant:
+100 quadrilaterals to t = 0.5; `remap.toml` continues it on 131,072 triangles
+(degree 3, bounds limiter), keeping the shocks without new extrema. The
+figure (from `tools/docs/runs.py`) remaps a smooth bump and a contact from 256
+quadrilaterals to 2,738 triangles: inside each source cell the target cells
+follow the polynomial's slopes rather than a constant.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../images/remap_fields_dark.png">
-  <img alt="Density before and after the remap, and along the diagonal" src="../images/remap_fields_light.png">
-</picture>
+![Density on quadrilaterals and remapped to triangles, and along a line](../images/guide/remap-fields-light.svg#gh-light-mode-only)
+![Density on quadrilaterals and remapped to triangles, and along a line](../images/guide/remap-fields-dark.svg#gh-dark-mode-only)
 
-Figures: `tools/plot_remap.py`.
 
 ## Shared pieces
 

@@ -525,7 +525,7 @@ std::vector<std::vector<double>> Source::to(const Mesh & target, uint32_t n, Rep
             continue;
         }
         for (uint32_t v = 0; v < n_vars; v++) out[v][t] = sums[1 + v] / sums[0];
-        if (t < n_counted && covered < 1.0 - 1e-9) {
+        if (t < n_counted && covered < 1.0 - precision_tol<double>(1e-9, 1e-5)) {
             local.n_partial++;
             local.max_uncovered = std::max(local.max_uncovered, 1.0 - covered);
         }
