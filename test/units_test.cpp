@@ -259,7 +259,7 @@ TEST(Units, RunWithUnitsMatchesTheSameRunInSI) {
         std::ostringstream s;
         s << "[run]\nn_steps = 3\ndt = " << q("0.2 us", "2e-7") << "\nt_stop = " << q("1 s", "1.0") << "\n"
           << "[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 4\nLx = " << q("10 cm", "0.1") << "\nLy = " << q("50 mm", "0.05")
-          << "\n" << (N_DIM == 3 ? "Nz = 2\nLz = " + q("2 cm", "0.02") + "\nperiodic = [\"x\", \"y\", \"z\"]\n"
+          << "\n" << (N_DIM == 3 ? "Nz = 3\nLz = " + q("2 cm", "0.02") + "\nperiodic = [\"x\", \"y\", \"z\"]\n"
                                  : std::string("periodic = [\"x\", \"y\"]\n"))
           << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = " << q("1 atm", "101325")
           << "\nT_ref = " << q("300 K", "300") << "\nrho_ref = " << q("1.1766 kg/m^3", "1.1766")
