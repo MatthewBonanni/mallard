@@ -104,8 +104,8 @@ $$
 \end{equation}
 $$
 
-with the SGS term only in LES and the molecular part multiplied by
-$\mathcal{E}F$ in thickened flames ([chapter 4](les.md#thickened-flame-model)).
+with the SGS term only in LES; in thickened flames the whole of it is
+multiplied by $\mathcal{E}F$ (a bound: the SGS fluxes themselves are scaled by $1 - \Omega$) ([chapter 4](les.md#thickened-flame-model)).
 Half the sum over faces stands for the sum over coordinate directions of the
 projected areas: on a uniform grid of spacing $h$, eq. $\eqref{eq:time-step-1}$ gives
 $\Delta t = \mathrm{CFL}\,h/(\lvert u\rvert + \lvert v\rvert + 2a)$ in 2D
