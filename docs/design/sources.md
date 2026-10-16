@@ -99,10 +99,19 @@ depend on `t` alone, so `W` never changes.
 
 ## Cost
 
-Measured on one A100 (2D Euler, MUSCL, 1M triangles, SSPRK3), a Gaussian
-`rhoE` source of `t` and `x, y`:
+Measured on one A100 (2D Euler, MUSCL, 1M triangles, SSPRK3, 300 steps,
+best of 3), the source `rhoE = 1e-3 sin(50 t) exp(-((x - 1)^2 + (y - 0.5)^2) /
+0.01)`:
 
-PERF_TABLE
+| Case | ms per step | CUDA graph |
+|---|---|---|
+| No source (0.8 / now) | 3.20 / 3.14 | yes |
+| 0.8: `[source]` with `time_dependent = true` (host evaluation, copy per stage) | 173 | no |
+| Now: `[[sources]]`, everywhere | 3.80 (+21%) | yes |
+| Now: `[[sources]]` in a disk of radius 0.3 with a smooth edge | 3.32 (+6%) | yes |
+
+The interpreter runs about 20 instructions, `sin` and `exp` among them, in every cell at
+every stage; cells outside a region skip it.
 
 ## Reuse
 

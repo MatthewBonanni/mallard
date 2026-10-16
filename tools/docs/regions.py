@@ -66,7 +66,7 @@ def triangle_mesh(path, n=16, jitter=0.3, seed=7):
     path.write_text("\n".join(lines) + "\n")
 
 
-def tetrahedron_mesh(path, n=10, jitter=0.25, seed=11):
+def tetrahedron_mesh(path, n=14, jitter=0.25, seed=11):
     """Gmsh 2.2 file of the unit cube: each jittered hexahedron split into 6 tetrahedra, boundary zone "wall"."""
     rng = np.random.default_rng(seed)
     g = np.linspace(0.0, 1.0, n + 1)
@@ -138,7 +138,7 @@ interval = 1
 variables = ["SOURCE_RHOE"]
 {PHYSICS}"""
     (work / f"{name}.toml").write_text(toml)
-    subprocess.run([str(binary), "-i", f"{name}.toml", "--kokkos-num-threads=4"], cwd=work, check=True,
+    subprocess.run([str(binary), "-i", f"{name}.toml", "--kokkos-num-threads=2"], cwd=work, check=True,
                    stdout=subprocess.DEVNULL)
     pts, conn, offs, types, data = read_vtu_cells(str(work / f"{name}_000000.vtu"))
     starts = np.concatenate([[0], offs[:-1]])
@@ -296,28 +296,31 @@ def data_3d(mallard3d):
 
 
 def regions_3d(P, args):
-    """Cells with a nonzero fraction, colored by it, cut open by the plane y = 0.5 toward the viewer."""
+    """The cells cut by the plane y = 0.5, colored by their fraction, in front of the cells behind it that the
+    region fills (faint): a cross-section through the solid."""
     data = data_3d(args.mallard3d)
     fig = plt.figure(figsize=(11.0, 4.0))
     cmap = plt.get_cmap(P["cmap"])
+    tris = ((0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3))
     for k, ((title, _), (pts, cells, f)) in enumerate(zip(REGIONS_3D, data)):
         ax = fig.add_subplot(1, 3, k + 1, projection="3d", computed_zorder=False)
-        faces, colors = [], []
+        back, cut, colors = [], [], []
         for c, fc in zip(cells, f):
-            if fc <= 0.0:
-                continue
             p = pts[c]
-            if p[:, 1].mean() < 0.5:
-                continue
-            for tri in ((0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3)):
-                faces.append(p[list(tri)])
-                colors.append(cmap(fc))
-        ax.add_collection3d(Poly3DCollection(faces, facecolors=colors, edgecolors=P["mesh"], linewidths=0.15))
+            if p[:, 1].min() < 0.5 < p[:, 1].max():
+                if fc > 0.0:
+                    cut += [p[list(t)] for t in tris]
+                    colors += [cmap(fc)] * 4
+            elif p[:, 1].min() >= 0.5 and fc > 0.5:
+                back += [p[list(t)] for t in tris]
+        ax.add_collection3d(Poly3DCollection(back, facecolors=P["faint"], edgecolors=P["mesh"], linewidths=0.1,
+                                             alpha=0.35))
+        ax.add_collection3d(Poly3DCollection(cut, facecolors=colors, edgecolors=P["mesh"], linewidths=0.2))
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
         ax.set_zlim(0, 1)
-        ax.set_box_aspect((1, 1, 1))
-        ax.view_init(elev=22, azim=-60)
+        ax.set_box_aspect((1, 1, 1), zoom=1.35)
+        ax.view_init(elev=18, azim=-75)
         ax.set_axis_off()
         ax.set_title(title, fontsize=12)
     sm = plt.cm.ScalarMappable(cmap=P["cmap"], norm=plt.Normalize(0, 1))
