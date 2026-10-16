@@ -219,12 +219,12 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 
 install(TARGETS Mallard
-    DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
+    DESTINATION bin
 )
 # Case templates (Mallard new) and what they are made from: bin/../share/mallard
 foreach(dir templates examples tools mechanisms tutorials)
     if(EXISTS ${CMAKE_SOURCE_DIR}/${dir})
-        install(DIRECTORY ${dir} DESTINATION ${CMAKE_INSTALL_PREFIX}/share/mallard
+        install(DIRECTORY ${dir} DESTINATION share/mallard
             PATTERN __pycache__ EXCLUDE)
     endif()
 endforeach()
