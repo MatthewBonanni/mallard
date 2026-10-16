@@ -1,0 +1,68 @@
+# Writing documentation
+
+Conventions for the pages in `docs/`, which the website
+(`MatthewBonanni/mallard-website`) builds into its user guide, reference and
+developer notes. Write them for GitHub: the site maps GitHub-style links and
+image pairs to its own.
+
+## Where things go
+
+| What | Where |
+|---|---|
+| A feature's user-facing explanation: when to use it, a minimal TOML snippet, its keys with defaults, pitfalls | `docs/guide/<topic>.md` |
+| Every input key, with its default | `docs/input.md` |
+| Methods and their accuracy | `docs/numerics/` |
+| Design rationale, alternatives, measurements | `docs/design/` (the site's *Developer notes*); link it from user pages only as a small "Design notes" link |
+| Examples | a row in the topic section of `examples/README.md` |
+| Scripts | a row in `tools/README.md` |
+
+## Links
+
+- Between pages of `docs/`: relative links (`../input.md#chemistry`).
+- To other files of the repository: relative links (`../../tools/plane_average.py`);
+  the site turns them into links to GitHub.
+- To pages that only the website has (validation, gallery, dashboard, examples):
+  absolute links, `https://matthewbonanni.github.io/mallard/validation/#sod-shock-tube`;
+  the site turns them into checked relative links.
+
+## Figures
+
+Scripts in `tools/docs/` draw each figure twice, as `<name>-light.svg` and
+`<name>-dark.svg` in `docs/images/guide/`
+(`python tools/docs/make_figures.py --mallard build/src/Mallard`). Show both:
+
+```markdown
+![Alt text](../images/guide/name-light.svg#gh-light-mode-only)
+![Alt text](../images/guide/name-dark.svg#gh-dark-mode-only)
+```
+
+## Equations
+
+Equations are LaTeX, which both GitHub and the website (MathJax 3) render:
+
+- **Inline:** `$...$`, e.g. `$\Delta t_i$`. The opening `$` must be followed and the
+  closing `$` preceded by a non-space, so `$5 and $10` stays text.
+- **Display:** `$$` on lines of their own, with a blank line before and after:
+
+  ```markdown
+  $$
+  \begin{equation}
+  \frac{\mathrm{d} U_i}{\mathrm{d} t} = -\frac{1}{V_i} \sum_f F_f A_f
+  \label{eq:semi-discrete}
+  \end{equation}
+  $$
+  ```
+
+- **Numbering:** AMS rules. `equation` and `align` (and the other AMS
+  environments) are numbered, `$$...$$` alone and the starred environments are
+  not; `\notag` drops the number of one line of an `align`.
+- **References:** `\label{eq:name}` in the equation, `$\eqref{eq:name}$` in the
+  text (inside `$...$`, so that GitHub renders it as math too). Numbering and
+  labels are per page; refer to another page's equation by a link to its section.
+  GitHub renders the equations but may not number them or resolve `\eqref`.
+- **Label names:** `eq:` plus words joined by hyphens, unique within the page.
+- **Where not:** math is not processed in code blocks or inline code, so `$HOME`
+  and shell snippets are safe there. Avoid `$` math in table cells (the `|` of
+  `|u|` ends the cell): write `\lvert u \rvert`, or put the formula below the table.
+- Plain-text formulas in backticks (`dt = cfl * h / (|u| + |v| + 2a)`) remain fine
+  where a formula is simple or reads like code (input keys, expressions).
