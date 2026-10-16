@@ -1138,6 +1138,10 @@ void Solver::copy_device_to_host() {
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
         Kokkos::deep_copy(h_teno_sigma, teno->troubled);
     }
+    if (source_terms) {
+        update_cell_fields(state());
+        Kokkos::deep_copy(h_source_values, source_terms->evaluate(state(), t));
+    }
 }
 
 void Solver::register_data() {
@@ -1184,6 +1188,14 @@ void Solver::register_data() {
         data.push_back(Data(PRIMITIVE_NAMES[i], Kokkos::subview(h_primitives, Kokkos::ALL(), i)));
     }
     data.push_back(Data("CFL", h_cfl_local));
+    if (source_terms) {
+        h_source_values = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>(
+            "SOURCE", mesh->n_cells, N_CONSERVATIVE + species_names.size());
+        for (size_t i = 0; i < h_source_values.extent(1); i++) {
+            const std::string name = i < N_CONSERVATIVE ? CONSERVATIVE_NAMES[i] : "RHOY_" + species_names[i - N_CONSERVATIVE];
+            data.push_back(Data("SOURCE_" + name, Kokkos::subview(h_source_values, Kokkos::ALL(), i)));
+        }
+    }
     if (les_on) data.push_back(Data("MU_T", Kokkos::subview(h_les_coefficients, Kokkos::ALL(), 0)));
     if (tfles_on) {
         data.push_back(Data("TF_F", Kokkos::subview(h_tfles_fields, Kokkos::ALL(), 0)));

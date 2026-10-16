@@ -395,6 +395,8 @@ class Solver {
         void init_sources();
         /** @brief Gravity and the source terms, added to the volume-integrated rhs. */
         void add_sources(const State & solution, const State & rhs, rtype t_stage, rtype c);
+        /** @brief W_cells (and for mixtures the cell scalars) of the given state, as the RHS computes them. */
+        void update_cell_fields(const State & solution);
         /** @brief Inside a captured step: stage_time = t_n + c dt from the step's device scalars. */
         void record_stage_time(rtype c);
         void init_sponges();
@@ -628,6 +630,7 @@ class Solver {
         bool radiating = false;
         chemistry::OpticallyThinRadiation radiation;
         Kokkos::View<rtype *, Kokkos::HostSpace> h_qrad;  // output: radiative loss [W/m^3]
+        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_source_values;  // output: (cell, SOURCE_*)
 
         // Source terms
         bool has_gravity = false;

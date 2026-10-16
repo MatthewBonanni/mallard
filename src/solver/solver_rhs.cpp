@@ -195,6 +195,14 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
     }
 }
 
+void Solver::update_cell_fields(const State & solution) {
+    if (is_mixture()) {
+        update_cell_states(solution, false);
+    } else {
+        Kokkos::parallel_for("cell_W", mesh->n_cells, CellWFunctor{physics, solution.flow, W_cells});
+    }
+}
+
 void Solver::add_sources(const State & solution, const State & rhs_state, const rtype t_stage, const rtype c) {
     const StateView U = solution.flow, rhs = rhs_state.flow;
     if (has_gravity) {
