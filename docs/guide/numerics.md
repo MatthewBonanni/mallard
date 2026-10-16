@@ -227,7 +227,7 @@ shocks grow carbuncles: use `RHLL` there
 
 | `[numerics]` key | Default | Meaning |
 |---|---|---|
-| `time_integrator` | `"SSPRK3"` | `FE` (forward Euler), `SSPRK3` or `RK4` |
+| `time_integrator` | `"SSPRK3"` | `FE` (forward Euler), `SSPRK3`, `RK4`, `SSPRK54`, `CK45` or `RDPK3Sp35` (below) |
 | `low_mach_cutoff` | 0.1 | Low-Mach correction: the upwind dissipation scales with the flow speed down to this Mach number; 1 disables it |
 | `convective_flux` | `"riemann"` | `hybrid`: central kinetic-energy-preserving flux with the Riemann solver at shocks ([LES](les.md#low-dissipation-flux-and-the-budget)) |
 | `double_flux` | `false` | Gas mixtures: no pressure oscillations at contacts between different gases ([Thermochemistry](thermochemistry.md#contacts-between-different-gases)) |
@@ -236,6 +236,37 @@ shocks grow carbuncles: use `RHLL` there
 The low-Mach correction matters below about Mach 0.3: without it, upwind
 dissipation at M = 0.1 removes a third of the resolved enstrophy of an
 under-resolved Taylor–Green vortex. Leave it on except for comparisons.
+
+### Choosing an integrator
+
+| Integrator | Order, stages | Registers | Safe `cfl` (smooth) | Cost per unit time vs SSPRK3 (A100, TENO5) |
+|---|---|---|---|---|
+| `SSPRK3` | 3, 3 | 3 | 1.2 | 1 |
+| `RK4` | 4, 4 | 6 | 1.35 | 1.20 |
+| `SSPRK54` | 4, 5 (SSP) | 4 | 2.2 | 0.78 |
+| `CK45` | 4, 5 (2N) | 3 | 2.2 | 0.89 |
+| `RDPK3Sp35` | 3, 5 (embedded 2) | 5 | 2.2 | 0.84 |
+
+- **`SSPRK54`** is the cheapest per unit time for smooth flow and keeps SSP
+  (monotone forward-Euler steps stay monotone up to `cfl` 1.5 times
+  forward Euler's), with a time error about 45 times smaller than SSPRK3's at
+  the same step. With shocks, `cfl = 1.5` matches SSPRK3 at 1.0 in accuracy.
+- **`CK45`** needs the least memory of the fourth-order methods.
+- **`RDPK3Sp35`** with `[numerics.error_control]` chooses the step itself:
+
+```toml
+[numerics]
+time_integrator = "RDPK3Sp35"
+
+[numerics.error_control]
+tolerance = 1e-4   # absolute and relative; [run] cfl only sizes the first step
+```
+
+Pitfalls: error control is not available with `[chemistry]` or `double_flux`;
+its steps follow the time error, not the stability limit, so a loose
+tolerance can still take steps above the `cfl` you would choose by hand (the
+controller rejects them once the error grows). Measured limits and costs:
+[time integrators](../numerics/overview.md#time-integrators).
 
 ## See also
 
