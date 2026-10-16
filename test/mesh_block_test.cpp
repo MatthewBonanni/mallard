@@ -230,7 +230,7 @@ TEST(MeshBlockTest, TransformOnReadMapsNodesAndHighOrderNodes) {
     const toml::value input =
         parse_toml("[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\ncell_order = \"input\"\n" + transform);
 
-    const MeshBlock plain = read_gmsh_block(file), moved = read_mesh_block(input);
+    const MeshBlock plain = read_file_block(file), moved = read_mesh_block(input);
     ASSERT_EQ(moved.n_nodes(), plain.n_nodes());
     for (uint64_t n = 0; n < plain.n_nodes(); n++) {
         FOR_I_DIM EXPECT_NEAR(moved.node_coords[n][i], expected(plain.node_coords[n])[i], tol);

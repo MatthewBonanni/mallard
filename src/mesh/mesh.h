@@ -413,9 +413,8 @@ class Mesh {
         }
 
         /**
-         * @brief Read a Mallard HDF5 mesh file (.h5, .hdf5), or an ASCII Gmsh
-         *        mesh (format 2.2 or 4.1) whose named physical curves (surfaces
-         *        in 3D) become boundary zones, and map its nodes by transform.
+         * @brief Read a Mallard HDF5 mesh file (.h5, .hdf5) or another mesh
+         *        file (see read_mesh_file), and map its nodes by transform.
          */
         void init_file(const std::string & filename, const std::vector<PeriodicPair> & periodic = {},
                        const MeshTransform & transform = MeshTransform());
