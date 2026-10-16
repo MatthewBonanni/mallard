@@ -209,12 +209,10 @@ struct BoundaryCondition {
             case BoundaryType::UPT:
                 for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = data[i];
                 break;
-            case BoundaryType::STAGNATION_INLET: {
-                double T_b;
-                inflow::stagnation_state(inflow::PerfectGas{double(gamma), double(R)}, double(gamma), double(data[0]),
-                                         double(data[E]), data + 1, W_i, n, W_g, T_b);
+            case BoundaryType::STAGNATION_INLET:
+                inflow::perfect_stagnation_state(double(gamma), double(R), double(data[0]), double(data[E]), data + 1,
+                                                 W_i, n, W_g);
                 break;
-            }
             case BoundaryType::MASS_FLOW_INLET:
                 inflow::mass_flow_state(double(gamma), double(R), double(data[0]), double(data[E]), data + 1, W_i, n,
                                         W_g);
@@ -349,7 +347,7 @@ struct BoundaryData {
      *        counterpart of BoundaryCondition::ghost_W; bc_thermo holds the
      *        surrogates at the stagnation (or the mass-flow inlet's) temperature.
      */
-    MALLARD_INFLOW_NOINLINE KOKKOS_INLINE_FUNCTION
+    KOKKOS_INLINE_FUNCTION
     void mixture_inflow_W(const int32_t i_bc, const rtype * W_i, const rtype * n, rtype * W_g, rtype * th_g) const {
         constexpr uint8_t E = N_DIM + 1;
         const BoundaryCondition & bc = bcs(i_bc);
@@ -482,7 +480,7 @@ struct BoundaryData {
         } else if (image >= 0) {
             for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = W_cells(image, i);
         } else {
-            ghost_W(i_face, W_i, n, W_g);
+            ghost_W(i_face, W_i, n, W_g, true);
         }
     }
 
@@ -583,21 +581,26 @@ struct BoundaryData {
 
     /**
      * @brief Ghost state for boundary face i_face.
+     * @param flux Whether the ghost is the exterior state of the flux. Away
+     *        from the flux (gradients, TENO's mirror cells) stagnation and
+     *        mass-flow inlets take the cell's state: their solve stays out of the kernels of
+     *        every run, gas mixtures need no thermodynamics there, and a
+     *        uniform flow that is the inlet's own state stays exact.
      */
     KOKKOS_INLINE_FUNCTION
-    void ghost_W(const uint32_t i_face, const rtype * W_i, const rtype * n, rtype * W_g) const {
+    void ghost_W(const uint32_t i_face, const rtype * W_i, const rtype * n, rtype * W_g,
+                 const bool flux = false) const {
         const int32_t k = face_state_index(i_face);
         if (k >= 0) {
             for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = face_state(k, i);
             return;
         }
-        const int32_t i_bc = face_bc(i_face);
-        if (mixture_inflow(i_bc)) {
-            rtype th_g[2];
-            mixture_inflow_W(i_bc, W_i, n, W_g, th_g);
+        const BoundaryCondition & bc = bcs(face_bc(i_face));
+        if (!flux && (bc.type == BoundaryType::STAGNATION_INLET || bc.type == BoundaryType::MASS_FLOW_INLET)) {
+            for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = W_i[i];
             return;
         }
-        bcs(i_bc).ghost_W(W_i, n, gamma, R, viscous, W_g, !mixture);
+        bc.ghost_W(W_i, n, gamma, R, viscous, W_g, !mixture);
     }
 
     /**
