@@ -1,5 +1,8 @@
 name: CI
 
+# Pull requests don't run CI on every push: when a PR is ready to land, run
+#   gh workflow run ci.yml --ref <branch>
+# and the results appear as checks on the branch's head commit. main runs on push.
 on:
   push:
     branches: [main]
@@ -9,34 +12,25 @@ on:
       - 'CITATION.cff'
       - 'LICENSE'
       - '.github/workflows/pages.yml'
-  pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - 'CITATION.cff'
-      - 'LICENSE'
-      - '.github/workflows/pages.yml'
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  # Pull requests run the full 2D suite (OpenMP, with CGNS), the full 3D suite and the
+  # Branches run the full 2D suite (OpenMP, with CGNS), the full 3D suite and the
   # multi-rank tests, the full single-precision suites in 2D and 3D (3D with CGNS), and a
   # Clang build (no tests) for the warnings GCC misses. main also runs the
   # serial-backend and non-MPI 3D builds.
   matrix:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     outputs:
       backends: ${{ steps.pick.outputs.backends }}
     steps:
       - id: pick
         env:
-          ALL: ${{ github.event_name != 'pull_request' }}
+          ALL: ${{ github.ref == 'refs/heads/main' }}
         run: |
           backends='[
             {"name": "openmp", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON", "cgns": true, "full": true},
@@ -122,3 +116,47 @@ jobs:
             mpirun -n $n --oversubscribe ./build/test/MallardTest --gtest_filter="$mpi_tests"
           done
 
+
+  # The tutorials (tutorials/) at reduced size: Gmsh meshes, runs on two MPI
+  # ranks and their post-processing scripts, so they keep working
+  tutorials:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install MPI, ccache and Gmsh's libraries
+        run: >
+          sudo apt-get update -qq && sudo apt-get install -y -qq
+          libopenmpi-dev openmpi-bin ccache libglu1-mesa libxcursor1 libxft2 libxinerama1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python packages
+        run: pip install -r tutorials/requirements.txt
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-tutorials-${{ github.sha }}
+          restore-keys: ccache-tutorials-
+      - name: Build (2D and 3D)
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          CCACHE_MAXSIZE: 500M
+        run: |
+          for dim in 2 3; do
+            cmake -S . -B build-$dim -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+              -DUSE_SYSTEM_KOKKOS=OFF -DMallard_WARNINGS_AS_ERRORS=ON -DKokkos_ENABLE_SERIAL=ON \
+              -DMallard_ENABLE_MPI=ON -DMallard_DIM=$dim
+            cmake --build build-$dim -j $(nproc) --target Mallard
+          done
+      - name: Save compiler cache
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-tutorials-${{ github.sha }}
+      - name: Run the tutorials
+        run: tutorials/ci.sh build-2/src/Mallard build-3/src/Mallard ${{ runner.temp }}/tutorials

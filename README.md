@@ -121,7 +121,7 @@ cd examples/riemann_2d
 ../../build/src/Mallard -i input.toml --kokkos-num-threads=8
 ```
 
-See [`examples/`](examples) for complete input files, the [user guide](docs/guide/input_files.md) for each topic, and [`docs/input.md`](docs/input.md) for every input option.
+See the [tutorials](docs/tutorials/index.md) for cases taken from geometry and mesh to the comparison with reference data, [`examples/`](examples) for complete input files, the [user guide](docs/guide/input_files.md) for each topic, and [`docs/input.md`](docs/input.md) for every input option.
 
 ## Testing
 
