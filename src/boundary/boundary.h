@@ -329,9 +329,9 @@ struct BoundaryData {
         const BoundaryComposition y{bc_Y, i_bc};
         const double R_b = thermo.gas_constant(y);
         double T_b;
-        const inflow::ThermallyPerfectGas<chemistry::ThermoTable<>, BoundaryComposition> gas{thermo, y, R_b};
-        inflow::stagnation_state(gas, double(bc_thermo(i_bc, 0)), double(bc.data[0]), double(bc.data[E]), bc.data + 1,
-                                 W_i, n, W_g, T_b);
+        const inflow::ThermallyPerfectGas<chemistry::ThermoTable<>, BoundaryComposition> isentrope{thermo, y, R_b};
+        inflow::stagnation_state(isentrope, double(bc_thermo(i_bc, 0)), double(bc.data[0]), double(bc.data[E]),
+                                 bc.data + 1, W_i, n, W_g, T_b);
         double e, cv;
         thermo.e_cv(T_b, y, e, cv);
         th_g[0] = static_cast<rtype>((cv + R_b) / cv);
