@@ -15,6 +15,7 @@
 #include <cmath>
 #include <map>
 #include <numeric>
+#include <tuple>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -32,6 +33,45 @@ struct Record {
     double measure = 0.0;
     std::vector<Point> coords;
 };
+
+/**
+ * @brief True area (2D: length) of a curved face, by a Gauss rule on its
+ *        reference element: its area vector is that of its chord.
+ */
+double curved_measure(const curved::Geometry & geometry, uint32_t f, uint32_t n_nodes) {
+    std::vector<std::array<double, 2>> ref;
+    std::vector<double> weights;
+    const double g[4] = {-0.8611363115940526, -0.3399810435848563, 0.3399810435848563, 0.8611363115940526};
+    const double w[4] = {0.3478548451374538, 0.6521451548625461, 0.6521451548625461, 0.3478548451374538};
+    if (N_DIM == 2 || n_nodes == 4) {
+        for (int i = 0; i < 4; i++) {
+            if (N_DIM == 2) {
+                ref.push_back({g[i], 0.0});
+                weights.push_back(w[i]);
+                continue;
+            }
+            for (int j = 0; j < 4; j++) {
+                ref.push_back({g[i], g[j]});
+                weights.push_back(w[i] * w[j]);
+            }
+        }
+    } else {
+        // Strang-Fix 6-point rule (degree 4), weights summing to 1 as face_rule takes them
+        const double a = 0.445948490915965, b = 0.091576213509771;
+        const double wa = 0.223381589678011, wb = 0.109951743655322;
+        for (const auto & [u, v, wt] : {std::tuple{a, a, wa}, std::tuple{1 - 2 * a, a, wa}, std::tuple{a, 1 - 2 * a, wa},
+                                        std::tuple{b, b, wb}, std::tuple{1 - 2 * b, b, wb}, std::tuple{b, 1 - 2 * b, wb}}) {
+            ref.push_back({u, v});
+            weights.push_back(wt);
+        }
+    }
+    std::vector<curved::Vec3> x, n;
+    std::vector<double> dA;
+    geometry.face_rule(f, ref, weights, x, n, dA);
+    double area = 0.0;
+    for (double d : dA) area += d;
+    return area;
+}
 
 } // namespace
 
@@ -65,7 +105,9 @@ FaceSet boundary_faces(const Mesh & mesh, const std::vector<std::string> & zones
         area = std::sqrt(area);
         for (size_t d = 0; d < N_DIM; d++) reals.push_back(static_cast<double>(mesh.h_face_coords(f, d)));
         for (size_t d = 0; d < N_DIM; d++) reals.push_back(static_cast<double>(mesh.h_face_normals(f, d)) / area);
-        reals.push_back(static_cast<double>(mesh.h_face_measure(f)));
+        reals.push_back(mesh.curved_geometry && mesh.curved_geometry->face_is_curved(f)
+                            ? curved_measure(*mesh.curved_geometry, f, n_nodes)
+                            : static_cast<double>(mesh.h_face_measure(f)));
         for (uint32_t j = 0; j < n_nodes; j++) {
             const uint32_t node = mesh.h_node_of_face(f, j);
             ids.push_back(mesh.h_global_node_id.empty() ? node : mesh.h_global_node_id[node]);

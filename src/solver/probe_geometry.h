@@ -27,9 +27,10 @@ using Vec3 = std::array<double, 3>;
 using Point = std::array<double, N_DIM>;
 
 /**
- * @brief Affine map x -> A x + t with A = R S: scale (a number or one
- *        factor per axis), then rotate (2D: an angle in degrees; 3D:
- *        {axis, angle}), then translate.
+ * @brief Affine map x -> A x + t with A = R S, as the regions of #317 take
+ *        it: scale (a number or one factor per axis), then rotate (2D: an
+ *        angle in degrees; 3D: {axis, angle} or {axes}), both about `pivot`,
+ *        then translate.
  */
 struct Transform {
     std::array<Vec3, 3> A = {Vec3{1.0, 0.0, 0.0}, Vec3{0.0, 1.0, 0.0}, Vec3{0.0, 0.0, 1.0}};

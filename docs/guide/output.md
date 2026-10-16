@@ -166,6 +166,9 @@ format = "vtp"
 reductions = ["mean", "rms"]
 ```
 
+![Probe shapes over a triangle mesh, colored by their point values of the pressure](../images/guide/probe_shapes-light.svg#gh-light-mode-only)
+![Probe shapes over a triangle mesh, colored by their point values of the pressure](../images/guide/probe_shapes-dark.svg#gh-dark-mode-only)
+
 | Key | Default | Meaning |
 |---|---|---|
 | `name` | required | Names the files |
@@ -176,7 +179,7 @@ reductions = ["mean", "rms"]
 | `format` | `csv` | `csv`, `hdf5` (one extensible file) or `vtp` (one file per output and a `.pvd` series) |
 | `reductions` | none | `integral`, `mean`, `favre`, `min`, `max`, `rms` along the geometry |
 | `samples` | `true` | `false` writes only the reductions |
-| `translate`, `rotate`, `scale` | none | Move the geometry (scale, then rotate about the origin, then translate) |
+| `scale`, `rotate`, `pivot`, `translate` | none | Move the geometry (scale, then rotate, about `pivot`, then translate) |
 
 ### Boundary data
 
@@ -200,6 +203,14 @@ samples = false
 variables = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
 reductions = ["integral"]
 ```
+
+![Boundary probes on the curved walls of an annulus: each wall a closed polyline traversed with the fluid on its left, and the inner wall's pressure against arc length, point values against cell averages and the exact value](../images/guide/probe_walls-light.svg#gh-light-mode-only)
+![Boundary probes on the curved walls of an annulus: each wall a closed polyline traversed with the fluid on its left, and the inner wall's pressure against arc length, point values against cell averages and the exact value](../images/guide/probe_walls-dark.svg#gh-dark-mode-only)
+
+In 3D the faces are polygons; ParaView colors the `.vtp` series by any variable:
+
+![Heat flux into an isothermal wall under a sheared warm blob, from a 3D boundary probe](../images/guide/probe_wall_3d-light.svg#gh-light-mode-only)
+![Heat flux into an isothermal wall under a sheared warm blob, from a 3D boundary probe](../images/guide/probe_wall_3d-dark.svg#gh-dark-mode-only)
 
 | Variable | Meaning |
 |---|---|

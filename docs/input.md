@@ -634,7 +634,7 @@ ranks. A probe that is not due costs nothing.
 | `samples` | `false` writes only the reductions (default `true`) |
 | `reductions` | Any of `integral`, `mean`, `favre`, `min`, `max`, `rms` (below) |
 | `reductions_file` | Default `probe_<name>_reductions.csv` |
-| `translate`, `rotate`, `scale` | Transform of the geometry: scaled (a factor, or one per axis) about the origin, then rotated about it (2D: `rotate = <degrees>`; 3D: `rotate = {axis = [x, y, z], angle = <degrees>}`), then translated |
+| `scale`, `rotate`, `pivot`, `translate` | Transform of the geometry, as for [regions](#regions): scaled (a factor, or one per axis), then rotated (2D: `rotate = <degrees>`; 3D: `rotate = {axis = [x, y, z], angle = <degrees>}` or `{axes = [[...], [...], [...]]}`), both about `pivot` (default the origin), then translated |
 
 Shapes (`[x, y(, z)]` points):
 
