@@ -31,6 +31,7 @@
 
 #include "common_io.h"
 #include "compression.h"
+#include "file_format.h"
 #include "log.h"
 #include "mesh_block.h"
 
@@ -434,7 +435,6 @@ void DataWriter::resume(uint64_t step, rtype t) {
 namespace {
 
 constexpr char RESTART_MAGIC[16] = "MALLARD-RESTART";
-constexpr uint32_t RESTART_VERSION = 5;
 // Codec of the chunks of compressed restart files (version 5)
 constexpr uint32_t RESTART_CODEC_ZLIB = 1;
 
@@ -461,6 +461,7 @@ std::vector<char> restart_header(uint64_t n_cells, uint64_t step, double t, cons
     };
     const uint32_t real_size = sizeof(rtype);
     const uint64_t n_vars = names.size();
+    static_assert(file_format::RESTART.version == 5, "restart_header writes versions 2 to 5");
     const uint32_t version = chunk_cells > 0 ? 5 : n_faces > 0 ? 4 : attributes.empty() ? 2 : 3;
     put(RESTART_MAGIC, sizeof(RESTART_MAGIC));
     put(&version, sizeof(version));
@@ -826,9 +827,10 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
     in.read(reinterpret_cast<char *>(&data.step), sizeof(data.step));
     in.read(reinterpret_cast<char *>(&data.t), sizeof(data.t));
     magic[sizeof(magic) - 1] = '\0';
-    if (!in.good() || std::string(magic) != RESTART_MAGIC || version < 1 || version > RESTART_VERSION) {
+    if (!in.good() || std::string(magic) != RESTART_MAGIC) {
         throw std::runtime_error("Not a Mallard restart file: " + filename + ".");
     }
+    file_format::check_version(file_format::RESTART, filename, version);
     if (real_size != sizeof(rtype)) {
         throw std::runtime_error("Restart file " + filename + " was written with a different floating-point precision.");
     }
@@ -1041,6 +1043,8 @@ void DataWriter::write_vtu_faces(const std::string & filename, rtype t, const Va
     out << "    <FieldData>\n";
     out << "      <DataArray type=\"Float64\" Name=\"TIME\" NumberOfTuples=\"1\" format=\"ascii\">"
         << static_cast<double>(t) << "</DataArray>\n";
+    out << "      <DataArray type=\"Int32\" Name=\"MALLARD_FORMAT_VERSION\" NumberOfTuples=\"1\" format=\"ascii\">"
+        << file_format::VTU_OUTPUT.version << "</DataArray>\n";
     out << "    </FieldData>\n";
     out << "    <Piece NumberOfPoints=\"" << nodes.size() << "\" NumberOfCells=\"" << geometry_faces.size() << "\">\n";
     out << "      <CellData>\n";
@@ -1185,6 +1189,8 @@ void DataWriter::write_vtu(const std::string & filename, rtype t, Values & value
     out << "    <FieldData>\n";
     out << "      <DataArray type=\"Float64\" Name=\"TIME\" NumberOfTuples=\"1\" format=\"ascii\">"
         << std::setprecision(17) << static_cast<double>(t) << "</DataArray>\n";
+    out << "      <DataArray type=\"Int32\" Name=\"MALLARD_FORMAT_VERSION\" NumberOfTuples=\"1\" format=\"ascii\">"
+        << file_format::VTU_OUTPUT.version << "</DataArray>\n";
     out << "    </FieldData>\n";
     out << "    <Piece NumberOfPoints=\"" << mesh->n_nodes << "\" NumberOfCells=\"" << n_out << "\">\n";
     out << "      <CellData>\n";

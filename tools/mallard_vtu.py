@@ -9,7 +9,17 @@ import numpy as np
 _DTYPES = {"Float32": "<f4", "Float64": "<f8", "UInt32": "<u4", "Int32": "<i4",
            "Int64": "<i8", "UInt64": "<u8", "UInt8": "u1"}
 
+# Newest MALLARD_FORMAT_VERSION this reader knows (files before Mallard 0.9 have none)
+VTU_FORMAT_VERSION = 1
+
 VTK_3D_TYPES = {10: "tetra", 12: "hexahedron", 13: "wedge", 14: "pyramid"}
+
+
+def _check_version(path, header):
+    m = re.search(r'Name="MALLARD_FORMAT_VERSION"[^>]*>\s*(-?\d+)\s*<', header)
+    if m and int(m.group(1)) > VTU_FORMAT_VERSION:
+        raise ValueError(f"{path} is a VTU file of Mallard format version {m.group(1)}, written by a newer "
+                         f"Mallard; this script reads versions up to {VTU_FORMAT_VERSION}: update tools/")
 
 
 def read_vtu_cells(path):
@@ -24,10 +34,13 @@ def read_vtu_cells(path):
         return read_h5_cells(path)
     raw = open(path, "rb").read()
     if b"<AppendedData" not in raw:
-        return _read_ascii(raw.decode("latin-1"))
+        text = raw.decode("latin-1")
+        _check_version(path, text)
+        return _read_ascii(text)
     start = raw.index(b"<AppendedData")
     start = raw.index(b"_", start) + 1
     header = raw[:start].decode("latin-1")
+    _check_version(path, header)
     hdr_type = re.search(r'header_type="(\w+)"', header)
     hdr_dt = np.dtype(_DTYPES[hdr_type.group(1)] if hdr_type else "<u4")
     zlib_blocks = 'compressor="vtkZLibDataCompressor"' in header
@@ -79,6 +92,8 @@ def _read_ascii(text):
         name = attrs.get("Name", "Points")
         if name == "TIME":
             time = float(m.group(2))
+            continue
+        if name == "MALLARD_FORMAT_VERSION":
             continue
         data = np.array(m.group(2).split(), dtype=_DTYPES[attrs["type"]])
         ncomp = int(attrs.get("NumberOfComponents", 1))
