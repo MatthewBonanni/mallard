@@ -20,7 +20,7 @@ The spatial dimension is fixed at build time with the CMake option
 | `t_stop` | Stop at this simulation time (the last step is shortened to land on it) |
 | `n_steps` | Stop after this many steps |
 | `t_wall_stop` | Stop after this many seconds of wall time |
-| `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages) as one CUDA graph, so the host launches one graph and waits once per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel where the host takes part in the step: gas mixtures, average-pressure outlets, characteristic boundaries, boundary or source expressions of `t`, and halos exchanged with MPI (`[parallel] halo_exchange`); the run log says which |
+| `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages) as one CUDA graph, so the host launches one graph and waits once per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel where the host takes part in the step: gas mixtures, average-pressure outlets, characteristic boundaries, boundary expressions of `t`, sources of domain averages, and halos exchanged with MPI (`[parallel] halo_exchange`); the run log says which |
 
 At least one stop condition is required.
 
@@ -664,7 +664,9 @@ Expressions ([syntax](#regions)) read the variables `x`, `y`, `z`, `t`,
 become `_`), and the domain averages (volume-weighted over the whole mesh)
 `mean_rho`, `mean_rhou_x`, `mean_rhou_y` (`mean_rhou_z`), `mean_rhoE` and
 `mean_ke` (of `rho |u|^2 / 2`). Values are taken at cell centroids, from the
-cell averages.
+cell averages. Domain averages are sums over ranks and, unlike the rest of a
+run, can differ in the last bits between numbers of ranks; region integrals
+for totals are summed in global cell order and do not.
 
 Sources of the solution are explicit: a source that relaxes a quantity at rate
 `k` (`-k (q - q_ref)`, or linear forcing with rate `A`) needs `k dt` below

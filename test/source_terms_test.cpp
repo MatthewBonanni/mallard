@@ -106,6 +106,7 @@ TEST(SourceTermsTest, TotalsAreExactOverRegionsOfCoarseUnstructuredMeshes) {
         "[[sources]]\nname = \"box\"\ntotal = true\nrhoE = 0.5\nrho = 0.1\nrhou = " + vector_of("0.3") +
         "\nregion = " + ROTATED_BOX + "\n";
     Solver solver;
+    solver.set_distributed(false);  // the sums below are over this rank's cells
     solver.init(parse_toml(closed_box(sources)));
     const Rates r = rates(solver, 0.25_r);
     const double tol = precision_tol<double>(1e-13, 1e-5);
@@ -142,6 +143,7 @@ TEST(SourceTermsTest, SpeciesSourcesAddTheirMass) {
     input.replace(input.find("T = 1.0"), 7, "T = 300.0\nX = {N2 = 1.0}");
     input.replace(input.find("p = 1.0"), 7, "p = 101325.0");
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     const Rates r = rates(solver, 0.0_r);
     const auto & names = solver.get_species_names();

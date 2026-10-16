@@ -11,6 +11,7 @@
 
 #include "source_terms.h"
 
+#include <algorithm>
 #include <array>
 #include <iomanip>
 #include <set>
@@ -42,6 +43,32 @@ std::string text_of(const toml::value & v, const std::string & where) {
     std::ostringstream s;
     s << std::setprecision(17) << as_double(v, where);
     return s.str();
+}
+
+/**
+ * @brief Sum of values over the owned cells of every rank (of this rank's
+ *        cells if the mesh is not distributed) in global cell order, so that
+ *        it is the same bit for bit on any number of ranks.
+ */
+double ordered_sum(const Mesh & mesh, const std::vector<double> & values) {
+    const uint32_t n_owned = mesh.n_owned();
+    std::vector<uint64_t> ids;
+    std::vector<double> local;
+    for (uint32_t c = 0; c < n_owned; c++) {
+        if (values[c] == 0.0) continue;
+        ids.push_back(mesh.h_global_cell(c));
+        local.push_back(values[c]);
+    }
+    if (!mesh.h_global_cell_id.empty()) {
+        ids = comm::allgatherv(ids);
+        local = comm::allgatherv(local);
+    }
+    std::vector<size_t> order(ids.size());
+    for (size_t i = 0; i < order.size(); i++) order[i] = i;
+    std::sort(order.begin(), order.end(), [&ids](const size_t a, const size_t b) { return ids[a] < ids[b]; });
+    double sum = 0.0;
+    for (const size_t i : order) sum += local[i];
+    return sum;
 }
 
 bool reads_solution(const expr::Program & p, const uint16_t n_variables) {
@@ -145,9 +172,9 @@ SourceTerms::SourceTerms(const toml::value & input, const std::shared_ptr<Mesh> 
     m_empty = entries.empty();
     if (m_empty) return;
 
-    double volume = 0.0;
-    for (uint32_t c = 0; c < n_owned; c++) volume += double(mesh->h_cell_measure(c));
-    volume = comm::allreduce(volume, comm::Op::SUM);
+    std::vector<double> measure(n_owned);
+    for (uint32_t c = 0; c < n_owned; c++) measure[c] = double(mesh->h_cell_measure(c));
+    const double volume = ordered_sum(*mesh, measure);
 
     std::vector<Term> static_terms, dyn_terms;
     std::vector<std::vector<double>> weight_rows;
@@ -171,9 +198,9 @@ SourceTerms::SourceTerms(const toml::value & input, const std::shared_ptr<Mesh> 
         if (!legacy && entry->contains("region")) {
             const region::Region r(entry->at("region"), where + ".region");
             std::vector<double> fractions = region::volume_fractions(*mesh, r);
-            double sum = 0.0;
-            for (uint32_t c = 0; c < n_owned; c++) sum += fractions[c] * double(mesh->h_cell_measure(c));
-            integral = comm::allreduce(sum, comm::Op::SUM);
+            std::vector<double> weighted(n_owned);
+            for (uint32_t c = 0; c < n_owned; c++) weighted[c] = fractions[c] * measure[c];
+            integral = ordered_sum(*mesh, weighted);
             if (!(integral > 0.0)) throw InputError(where + ".region contains no part of any cell.");
             row = static_cast<int32_t>(weight_rows.size());
             weight_rows.push_back(std::move(fractions));
@@ -290,7 +317,7 @@ void SourceTerms::update_means(const State & solution) {
         e_sum += double(U(c, N_DIM + 1)) * v;
         k_sum += 0.5 * (m[0] * m[0] + m[1] * m[1] + m[2] * m[2]) / rho * v;
     }, sums[0], sums[1], sums[2], sums[3], sums[4], sums[5], sums[6]);
-    sums = comm::allreduce(sums, comm::Op::SUM);
+    if (!mesh->h_global_cell_id.empty()) sums = comm::allreduce(sums, comm::Op::SUM);
     auto h_means = Kokkos::create_mirror_view(means);
     for (int i = 0; i < N_MEANS; i++) h_means(i) = sums[size_t(i) + 1] / sums[0];
     Kokkos::deep_copy(means, h_means);
