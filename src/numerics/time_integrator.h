@@ -40,7 +40,12 @@ static const std::unordered_map<TimeIntegratorType, std::string> TIME_INTEGRATOR
     {TimeIntegratorType::SSPRK3, "SSPRK3"},
 };
 
-using RHSFunction = std::function<void(State solution, State rhs, rtype t)>;
+/**
+ * @brief dU/dt = rhs(U, t) at the stage time t = t_n + c dt of a step from
+ *        t_n; c lets graph-captured steps, whose t_n and dt live on the
+ *        device, form the stage time there.
+ */
+using RHSFunction = std::function<void(State solution, State rhs, rtype t, rtype c)>;
 
 /**
  * @brief y = a * x + b * y, on both blocks of the state.

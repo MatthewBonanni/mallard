@@ -83,4 +83,5 @@ Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the 3D
 | `plot_detonation.py` | 1D detonation runs: shock position, front speed, induction length and peak pressure, against the CJ speed and ZND induction length |
 | `cantera_mechanisms.py` | Copy the mechanisms too large for the repository (n-hexane, 1268 species) from Cantera's data into `mechanisms/external/` |
 | `v3_reference.py`, `v3_check.py` | Constant-volume ignition with large mechanisms: Cantera references, and `MallardReactor` against them |
-| `docs/make_figures.py` | The figures of the user guide (`docs/images/guide/`) and of the theory manual (`docs/images/theory/`), light and dark, from the formulas, the example inputs and short Mallard runs (`--mallard build/src/Mallard`) |
+| `docs/make_figures.py` | The figures of the user guide (`docs/images/guide/`) and of the theory manual (`docs/images/theory/`), light and dark, from the formulas, the example inputs and short Mallard runs (`--mallard build/src/Mallard`; `--mallard3d` for the 3D region figure) |
+| `docs/regions.py` | The region figures alone: cell volume fractions of every primitive and boolean on coarse unstructured meshes, from one-step runs |

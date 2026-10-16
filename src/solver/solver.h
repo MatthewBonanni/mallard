@@ -38,6 +38,7 @@
 #include "data_writer.h"
 #include "statistics.h"
 #include "synthetic_inflow.h"
+#include "source_terms.h"
 #include "expression.h"
 #include "comm.h"
 #include "distributed_mesh.h"
@@ -116,9 +117,10 @@ class Solver {
         void take_step();
 
         /**
-         * @brief Compute dU/dt for the given conservative state at time t.
+         * @brief Compute dU/dt for the given conservative state at time t,
+         *        stage t_n + c dt of a step (c matters only to captured steps).
          */
-        void calc_rhs(State solution, State rhs, rtype t);
+        void calc_rhs(State solution, State rhs, rtype t, rtype c = 0.0_r);
 
         /**
          * @brief Compute the stable time step for the current solution.
@@ -185,6 +187,12 @@ class Solver {
         void update_vortex_fields();
 
         // Public because nvcc rejects device lambdas in non-public member functions
+        /** @brief Gravity and the source terms, added to the volume-integrated rhs. */
+        void add_sources(const State & solution, const State & rhs, rtype t_stage, rtype c);
+        /** @brief W_cells (and for mixtures the cell scalars) of the given state, as the RHS computes them. */
+        void update_cell_fields(const State & solution);
+        /** @brief Inside a captured step: stage_time = t_n + c dt from the step's device scalars. */
+        void record_stage_time(rtype c);
         void update_average_pressure_outlets(StateView solution);
         /**
          * @brief Add the uniform body force along the mass flow direction that
@@ -219,7 +227,7 @@ class Solver {
         void graph_step();
         void record_step();
         void destroy_step_graph();
-        void calc_rhs_mixture(State solution, State rhs, rtype t);
+        void calc_rhs_mixture(State solution, State rhs, rtype t, rtype c);
         /**
          * @brief Axisymmetric runs: add geometric_source, made high order by the
          *        reconstruction where it can (mu: cell viscosities, empty if inviscid),
@@ -419,7 +427,6 @@ class Solver {
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
         void update_inflow(rtype t_eval);
         void init_sources();
-        void update_source_field(rtype t_eval);
         void init_sponges();
         /** @brief Mass fractions of a composition table (numbers or expressions) at the centroids of cells. */
         std::vector<std::vector<double>> composition_at_cells(const toml::value & table, const std::string & where,
@@ -656,15 +663,14 @@ class Solver {
         bool radiating = false;
         chemistry::OpticallyThinRadiation radiation;
         Kokkos::View<rtype *, Kokkos::HostSpace> h_qrad;  // output: radiative loss [W/m^3]
+        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_source_values;  // output: (cell, SOURCE_*)
 
         // Source terms
         bool has_gravity = false;
         rtype gravity[N_DIM] = {};
-        std::vector<Expression> source_expressions;  // Per conservative variable, empty if none
-        bool source_time_dependent = false;
-        StateView source_field;
-        StateView::host_mirror_type h_source_field;
-        rtype t_source = -1.0;
+        std::unique_ptr<sources::SourceTerms> source_terms;
+        Kokkos::View<rtype> stage_time;  // device: the time of the stage being evaluated
+        bool recording_step = false;     // inside the capture of a step graph
         bool hold_mass_flow = false;
         double mass_flow_target = 0.0;      // volume average of rho u along the direction
         rtype mass_flow_direction[N_DIM] = {};

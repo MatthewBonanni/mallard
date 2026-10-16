@@ -5,6 +5,7 @@ set(MALLARD_TEST_SOURCES
     common_math_test.cpp
     compiled_expression_test.cpp
     region_test.cpp
+    source_terms_test.cpp
     time_integrator_test.cpp
     comm_test.cpp
     chemistry_thermo_test.cpp
