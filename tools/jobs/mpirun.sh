@@ -3,7 +3,7 @@
 #
 #   cp mpirun.sh <case directory> && cd <case directory>
 #   ./mpirun.sh                    # one rank per GPU, or per 8 cores without GPUs
-#   NRANKS=2 ./mpirun.sh           # or choose
+#   NRANKS=2 THREADS=4 ./mpirun.sh # or choose ranks and threads per rank
 #
 # Ctrl-C (or kill -TERM) writes a restart and stops after the current step; run
 # the script again to resume from the newest restart. A second Ctrl-C stops at once.
@@ -16,7 +16,9 @@ MALLARD=${MALLARD:-Mallard}        # <Mallard, Mallard3D, or the path to the exe
 INPUT=${INPUT:-input.toml}
 RESTARTS='restart_*.restart'       # <the restart files the run writes; the newest is resumed from>
 
-cores=$(getconf _NPROCESSORS_ONLN)
+# Physical cores (not hardware threads), which mpirun binds ranks to
+cores=$(lscpu -p=core,socket 2>/dev/null | grep -v '^#' | sort -u | wc -l)
+[ "$cores" -gt 0 ] || cores=$(sysctl -n hw.physicalcpu 2>/dev/null || getconf _NPROCESSORS_ONLN)
 gpus=$(nvidia-smi -L 2>/dev/null | grep -c '^GPU' || true)
 [ "$gpus" -eq 0 ] && gpus=$(rocm-smi --showid 2>/dev/null | grep -c '^GPU\[' || true)
 if [ "$gpus" -gt 0 ]; then
@@ -24,7 +26,7 @@ if [ "$gpus" -gt 0 ]; then
 else
     NRANKS=${NRANKS:-$(( cores >= 8 ? cores / 8 : 1 ))}
 fi
-threads=$(( cores / NRANKS > 0 ? cores / NRANKS : 1 ))
+threads=${THREADS:-$(( cores / NRANKS > 0 ? cores / NRANKS : 1 ))}
 export OMP_NUM_THREADS=$threads OMP_PROC_BIND=spread OMP_PLACES=threads
 
 args=(-i "$INPUT")

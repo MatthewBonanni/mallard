@@ -94,10 +94,13 @@ Placement deserialize(std::string_view line);
 std::vector<std::string> check(const std::vector<Placement> & ranks);
 
 /**
- * @brief Picks this rank's GPU before Kokkos is initialized: the node-local
- *        rank among the ranks with the same device pool, modulo the number of
- *        devices it sees, passed to Kokkos as KOKKOS_DEVICE_ID. Does nothing
- *        for single-rank runs or when the device was chosen explicitly.
+ * @brief Call before Kokkos is initialized: notes the process's CPUs for
+ *        report() (OpenMP then pins the main thread), and picks this rank's
+ *        GPU by assign_devices() among the ranks of its node with the same
+ *        device pool (MPI_COMM_TYPE_SHARED; the launcher's local rank as a
+ *        fallback), passed to Kokkos as KOKKOS_DEVICE_ID. Collective. Chooses
+ *        nothing for single-rank runs, CPU runs, or when the device was chosen
+ *        explicitly.
  */
 void select_device(int argc, char ** argv);
 

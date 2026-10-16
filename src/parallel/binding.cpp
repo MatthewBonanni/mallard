@@ -131,6 +131,12 @@ std::vector<int> affinity() {
     return cpus;
 }
 
+/// The process's CPUs as at startup: OpenMP later pins the main thread to one of them.
+const std::vector<int> & startup_affinity() {
+    static const std::vector<int> cpus = affinity();
+    return cpus;
+}
+
 int pci_numa(const std::string & pci) {
     const std::string node = read_line("/sys/bus/pci/devices/" + pci + "/numa_node");
     if (node.empty()) return -1;
@@ -289,7 +295,7 @@ Placement this_placement() {
     gethostname(host, sizeof(host) - 1);
     p.host = host;
     p.threads = Kokkos::DefaultHostExecutionSpace().concurrency();
-    p.cpus = affinity();
+    p.cpus = startup_affinity();
     p.cpu_numa = numa_nodes(p.cpus);
     const char * bind = std::getenv("OMP_PROC_BIND");
     p.omp_bind = (bind != nullptr && std::string_view(bind) != "false" && std::string_view(bind) != "FALSE") ||
@@ -541,11 +547,12 @@ std::vector<std::string> check(const std::vector<Placement> & ranks) {
 }
 
 void select_device([[maybe_unused]] int argc, [[maybe_unused]] char ** argv) {
+    startup_affinity();
 #ifdef Mallard_HAS_MPI
     if (comm::size() == 1 || !GPU_RUN) return;
     const Getenv env = process_env();
     const std::vector<int> devices = visible_devices();
-    const std::vector<int> my_numa = numa_nodes(affinity());
+    const std::vector<int> my_numa = numa_nodes(startup_affinity());
     // Collective on every rank, whatever each one decides
     MPI_Comm node = MPI_COMM_NULL;
     std::vector<std::string> pools;
