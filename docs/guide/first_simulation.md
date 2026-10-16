@@ -144,10 +144,10 @@ The [validation page](https://matthewbonanni.github.io/mallard/validation/#spher
 Shocks and compressible flow
   sod                  2D  Sod shock tube: shock, contact and rarefaction against the exact solution
   ...
-  sphere_mach3         3D  Mach 3 flow over a sphere on tetrahedra: bow-shock standoff
+  explosion_3d         3D  Spherical explosion: one octant with symmetry planes, on hexahedra
 ```
 
-A case that needs a mesh or an initial state comes with `mesh.sh` or `init.sh`, which `run.sh` calls when the file is missing (`cylinder` writes a Gmsh O-grid with numpy; `sphere_mach3` meshes with the `gmsh` Python module; each script says which packages to install if any are missing). Most examples are sized for validation: `Mallard new cylinder --quick` makes a coarse, short version that runs in under a minute, to try the steps before the full run. The templates are made from the examples when the case is created, so they always match them; CI creates and runs every one with `--quick`.
+A case that needs a mesh or an initial state comes with `mesh.sh` or `init.sh`, which `run.sh` calls when the file is missing (`cylinder` writes a Gmsh O-grid with numpy; `sphere_re300` meshes with the `gmsh` Python module; each script says which packages to install if any are missing). Most examples are sized for validation: `Mallard new cylinder --quick` makes a coarse, short version that runs in under a minute, to try the steps before the full run. The templates are made from the examples when the case is created, so they always match them; CI creates and runs every one with `--quick`.
 
 ## Next steps
 

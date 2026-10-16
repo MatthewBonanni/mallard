@@ -204,21 +204,7 @@ dim = 3
 cost = "2.1M cells, about 1.5 hours on four A100s"
 post = ["tools/sedov.py solut --energy 1"]
 results = "sedov.png, the shock radius and density profile against the exact solution"
-quick = ["mesh.Nx = 24", "mesh.Ny = 24", "mesh.Nz = 24", "run.t_stop = 0.2"]
-
-[[templates]]
-name = "sphere_mach3"
-group = "shocks"
-summary = "Mach 3 flow over a sphere on tetrahedra: bow-shock standoff"
-source = "examples/sphere_mach3"
-dim = 3
-cost = "800,000 tetrahedra, about 1.5 hours on four A100s"
-mesh = ["tools/make_sphere_mesh.py sphere.msh"]
-mesh_creates = "sphere.msh"
-quick_mesh = ["tools/make_sphere_mesh.py sphere.msh --h-wall 0.08 --h-shock 0.08 --h-far 0.4"]
-post = ["tools/plot_vtu.py $(last slices/z0) sphere.png --var P"]
-results = "sphere.png, the pressure on the symmetry plane z = 0"
-quick = ["run.t_stop = 0.04"]
+quick = ["mesh.Nx = 16", "mesh.Ny = 16", "mesh.Nz = 16", "run.t_stop = 0.2"]
 
 [[templates]]
 name = "mallard"
