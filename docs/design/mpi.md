@@ -90,7 +90,9 @@ Per right-hand-side evaluation:
 
 Implemented for TENO, the reconstruction that needs deep halos; FO and MUSCL exchange first and then reconstruct. The first stage of a step reuses the halo that the time-step computation has just filled, so an SSPRK3 step exchanges three times, not four.
 
-Halo layer 1 is reconstructed redundantly so that a single exchange per stage suffices. The alternative, exchanging reconstructed face states at partition faces, would save that layer's work (a surface-to-volume fraction of the TENO cost) but adds a second, dependent message round per stage; at thousands of ranks the extra latency costs more than the redundant work. The choice is contained in the exchange plan and can be revisited with measurements.
+**Owner-computes partition faces (TENO, #305).** Each rank reconstructs only its owned cells. The halo side of a partition face is reconstructed by the rank that owns that cell, which sends it (all quadrature points, 5 states) after its reconstruction: a second, dependent message round per stage (`FaceExchange`). Both ranks list a pair's faces in the same order, keyed by the global id of the face's first cell and the face's index in that cell, which every rank count numbers alike; setup checks that the lists agree. The face messages travel while the fluxes of the other faces and the viscous gradients are computed; the partition faces' fluxes follow. Measured (3D TENO5, 64³ per A100, 16 GPUs): the first halo layer was 6% of the cells and its redundant reconstruction 2.3–2.9 ms of a 51.7 ms step, while the face messages are hidden behind the other faces' fluxes. Results are unchanged bit for bit, since the owner computes the same stencil at the same points. The halo exchange then carries only the cells that owned cells' stencils read. FO and MUSCL keep the redundant layer-1 reconstruction, which is cheaper than a second message round for them.
+
+**Time step and priorities.** The first stage's interior reconstruction does not depend on dt, so it starts before the time-step exchange; the exchange, the reduction for dt and its allreduce then happen under it. Packing, unpacking, the dt reduction and the reconstruction of the cells that read the halo run on a high-priority stream (`comm::high_priority_space`): the device schedules them as soon as their inputs arrive, interleaved with the interior cells, instead of after them as a tail of a partially filled device (which had cost 0.3–0.75 ms per stage).
 
 Faces between an owned and a halo cell are computed by both ranks. Each keeps only its owned side's contribution, since residuals of halo cells are never used. This costs a few redundant face fluxes but needs no reverse exchange.
 
@@ -209,6 +211,6 @@ gathers the periodic zones.
 
 ## Decisions from review
 
-1. One halo exchange per stage with a redundant halo-layer-1 reconstruction (section 7).
+1. One halo exchange per stage with a redundant halo-layer-1 reconstruction (section 7); replaced for TENO by owner-computes partition faces with a second, overlapped exchange of face states (#305).
 2. Optional NCCL backend for the halo exchange and reductions (section 1).
 3. Dynamic load balancing deferred, with the setup structured to allow it (section 10); prototyped and measured in milestone 7, and not adopted.
