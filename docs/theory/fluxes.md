@@ -250,29 +250,29 @@ and the physical flux uses $\rho E = p/(\gamma - 1) + \rho e_0 + \tfrac12\rho\lv
 on that side (`riemann::SideThermo`):
 
 - **Wave speeds** (HLL, HLLC, RHLL) use each side's $a = \sqrt{\gamma p/\rho}$ and the Roe average of eq. $\eqref{eq:hll-2}$ with
-  $\sqrt{\rho}$-weighted $\tilde\gamma$, $\tilde e_0$ and
-  $\tilde a^2 = (\tilde\gamma - 1)(\tilde H - \tilde e_0 - \tfrac12\lvert\tilde{\mathbf{u}}\rvert^2)$,
-  equal to the single-gas estimate when both sides share $\gamma$ and
-  $e_0 = 0$. The HLLC star states $\eqref{eq:hllc-2}$ hold for any equation of state.
+    $\sqrt{\rho}$-weighted $\tilde\gamma$, $\tilde e_0$ and
+    $\tilde a^2 = (\tilde\gamma - 1)(\tilde H - \tilde e_0 - \tfrac12\lvert\tilde{\mathbf{u}}\rvert^2)$,
+    equal to the single-gas estimate when both sides share $\gamma$ and
+    $e_0 = 0$. The HLLC star states $\eqref{eq:hllc-2}$ hold for any equation of state.
 - **Roe** ([Glaister 1988](../references.md#glaister-1988);
-  [Shuen, Liou & van Leer 1990](../references.md#shuen-liou-van-leer-1990))
-  is written in jump form. The entropy, shear and composition waves all move
-  at $\tilde u_n$, so together they carry whatever part of
-  $\Delta\mathbf{U}$ the acoustic waves leave:
+    [Shuen, Liou & van Leer 1990](../references.md#shuen-liou-van-leer-1990))
+    is written in jump form. The entropy, shear and composition waves all move
+    at $\tilde u_n$, so together they carry whatever part of
+    $\Delta\mathbf{U}$ the acoustic waves leave:
 
-  $$
-  \begin{equation}
-  \hat{\mathbf{F}} = \tfrac12\left(\mathbf{F}_n^L + \mathbf{F}_n^R - \lvert\tilde u_n\rvert\,\Delta\mathbf{U}
-  - \sum_\pm\left(\lvert\tilde u_n \pm \tilde a\rvert^{\ast} - \lvert\tilde u_n\rvert\right)\frac{\Delta p \pm \tilde\rho\tilde a\,\Delta u_n}{2\tilde a^2}
-  \begin{bmatrix}1 \\ \tilde{\mathbf{u}} \pm \tilde a\,\mathbf{n} \\ \tilde H \pm \tilde a\,\tilde u_n\end{bmatrix}\right),
-  \label{eq:gas-mixtures}
-  \end{equation}
-  $$
+    $$
+    \begin{equation}
+    \hat{\mathbf{F}} = \tfrac12\left(\mathbf{F}_n^L + \mathbf{F}_n^R - \lvert\tilde u_n\rvert\,\Delta\mathbf{U}
+    - \sum_\pm\left(\lvert\tilde u_n \pm \tilde a\rvert^{\ast} - \lvert\tilde u_n\rvert\right)\frac{\Delta p \pm \tilde\rho\tilde a\,\Delta u_n}{2\tilde a^2}
+    \begin{bmatrix}1 \\ \tilde{\mathbf{u}} \pm \tilde a\,\mathbf{n} \\ \tilde H \pm \tilde a\,\tilde u_n\end{bmatrix}\right),
+    \label{eq:gas-mixtures}
+    \end{equation}
+    $$
 
-  exact at contacts between different gases for any averaged sound speed,
-  and equal to the single-gas Roe solver for one gas.
+    exact at contacts between different gases for any averaged sound speed,
+    and equal to the single-gas Roe solver for one gas.
 - **Rusanov** and **KEEP** use each side's own $a$ and
-  $e = p/((\gamma - 1)\rho) + e_0$.
+    $e = p/((\gamma - 1)\rho) + e_0$.
 - The low-Mach correction uses each side's own $\gamma$ in its Mach number.
 
 With double flux, each face evaluates these fluxes twice, with each cell's
@@ -337,18 +337,18 @@ r-weighted averages due to the cells' different spreads.
 Boundary faces:
 
 - **walls**: a one-sided difference between the cell centroid and the wall
-  replaces the normal component of the cell gradient,
-  $\nabla q_f = \nabla q_i + \left((q_w - q_i)/d - \nabla q_i\cdot\mathbf{n}\right)\mathbf{n}$,
-  with $q_w$ the wall velocity, the wall temperature of isothermal walls, and
-  $d$ the normal distance from the centroid to the face. Adiabatic walls
-  carry no heat flux and heat-flux walls the prescribed one;
+    replaces the normal component of the cell gradient,
+    $\nabla q_f = \nabla q_i + \left((q_w - q_i)/d - \nabla q_i\cdot\mathbf{n}\right)\mathbf{n}$,
+    with $q_w$ the wall velocity, the wall temperature of isothermal walls, and
+    $d$ the normal distance from the centroid to the face. Adiabatic walls
+    carry no heat flux and heat-flux walls the prescribed one;
 - **symmetry planes**: only the normal stress, no work (the normal velocity
-  vanishes), no heat or species flux;
+    vanishes), no heat or species flux;
 - **transmissive faces** with an image face
-  ([chapter 8](boundaries_sources.md#transmissive-boundaries)): the values
-  and gradients of that interior face, eq. $\eqref{eq:face-values-and-gradients}$;
+    ([chapter 8](boundaries_sources.md#transmissive-boundaries)): the values
+    and gradients of that interior face, eq. $\eqref{eq:face-values-and-gradients}$;
 - **outflow, far-field and characteristic faces** (and transmissive faces
-  without an image): the cell's values with the normal derivatives removed;
+    without an image): the cell's values with the normal derivatives removed;
 - **mixture `upt` faces**: the cell's values and gradients.
 
 ### Single gas

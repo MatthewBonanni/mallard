@@ -252,20 +252,20 @@ averages.
 **Stencils.** Each cell has
 
 - one *central stencil* of about $\lceil 2N_r\rceil$ cells
-  (`stencil_factor`, default 2), from vertex-neighbor layers sorted by
-  centroid distance ([Tsoutsanis, Titarev & Drikakis 2011](../references.md#tsoutsanis-2011)),
-  in 3D measured in a metric of the local mesh spacing where the cells are
-  strongly anisotropic. A group of equidistant candidates is never split, so
-  mirror-symmetric meshes give mirror-symmetric reconstructions;
+    (`stencil_factor`, default 2), from vertex-neighbor layers sorted by
+    centroid distance ([Tsoutsanis, Titarev & Drikakis 2011](../references.md#tsoutsanis-2011)),
+    in 3D measured in a metric of the local mesh spacing where the cells are
+    strongly anisotropic. A group of equidistant candidates is never split, so
+    mirror-symmetric meshes give mirror-symmetric reconstructions;
 - one degree-2 *sector stencil* per face, of the nearest cells whose
-  centroid direction lies in the cone spanned by the face's vertices from
-  the cell centroid (default 10 cells in 2D, 18 in 3D);
+    centroid direction lies in the cone spanned by the face's vertices from
+    the cell centroid (default 10 cells in 2D, 18 in 3D);
 - across boundary faces, *mirror images* of interior cells across the
-  face's line or plane, whose state is the boundary condition's ghost state
-  of that cell, so boundary cells get centered stencils instead of
-  one-sided extrapolation. Curved walls and curved symmetry faces take none
-  (one-sided stencils), since a reflection matches a curved wall only to
-  $O(h^2)$.
+    face's line or plane, whose state is the boundary condition's ghost state
+    of that cell, so boundary cells get centered stencils instead of
+    one-sided extrapolation. Curved walls and curved symmetry faces take none
+    (one-sided stencils), since a reflection matches a curved wall only to
+    $O(h^2)$.
 
 **Lebesgue-bound selection.** Full rank is not enough: a stencil that
 resolves one direction only through small centroid offsets has full rank
@@ -358,15 +358,15 @@ shared by all of them (`src/numerics/scalar_reconstruction.cpp`,
 face point:
 
 - MUSCL and first order: eq. $\eqref{eq:muscl-2}$ and one limiter value per cell for all
-  scalars, the smallest of eq. $\eqref{eq:muscl-3}$ over them (thresholds scaled by 1 for
-  $Y_k$, by $\gamma$, and by $\lvert e_0\rvert + p/(\rho(\gamma - 1))$ for
-  $e_0$), further reduced so that every face value keeps $0 \le Y_k \le 1$
-  and $\gamma - 1$ above half its cell value;
+    scalars, the smallest of eq. $\eqref{eq:muscl-3}$ over them (thresholds scaled by 1 for
+    $Y_k$, by $\gamma$, and by $\lvert e_0\rvert + p/(\rho(\gamma - 1))$ for
+    $e_0$), further reduced so that every face value keeps $0 \le Y_k \le 1$
+    and $\gamma - 1$ above half its cell value;
 - TENO-E: the central-stencil weights in smooth cells, and in troubled
-  cells, on each face, the stencils selected for the entropy (contact)
-  characteristic field; a factor $\theta$ per cell then keeps
-  $Y_k\in[0, 1]$, $\gamma - 1$ above half its cell value and, in troubled
-  cells, every scalar within its neighbors' range.
+    cells, on each face, the stencils selected for the entropy (contact)
+    characteristic field; a factor $\theta$ per cell then keeps
+    $Y_k\in[0, 1]$, $\gamma - 1$ above half its cell value and, in troubled
+    cells, every scalar within its neighbors' range.
 
 The face $(\gamma, e_0)$ pairs enter the Riemann solvers
 ([chapter 6](fluxes.md#gas-mixtures)), and the face mass fractions the

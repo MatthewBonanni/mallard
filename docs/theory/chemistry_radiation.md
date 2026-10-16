@@ -50,49 +50,49 @@ Depending on the reaction type, $k_{f,j}$ is
 
 - **elementary**: eq. $\eqref{eq:rate-constants-1}$;
 - **three-body**: eq. $\eqref{eq:rate-constants-1}$ times $[M] = \sum_k \epsilon_{kj} C_k$, with
-  efficiency 1 unless the mechanism gives another (this multiplies both
-  directions);
+    efficiency 1 unless the mechanism gives another (this multiplies both
+    directions);
 - **falloff**: with $k_0$ and $k_\infty$ the low- and high-pressure limits
-  (each eq. $\eqref{eq:rate-constants-1}$) and the reduced pressure $P_r = k_0[M]/k_\infty$,
+    (each eq. $\eqref{eq:rate-constants-1}$) and the reduced pressure $P_r = k_0[M]/k_\infty$,
 
-  $$
-  \begin{equation}
-  k_f = k_\infty\,\frac{P_r}{1 + P_r}\,F(T, P_r),
-  \label{eq:rate-constants-2}
-  \end{equation}
-  $$
+    $$
+    \begin{equation}
+    k_f = k_\infty\,\frac{P_r}{1 + P_r}\,F(T, P_r),
+    \label{eq:rate-constants-2}
+    \end{equation}
+    $$
 
-  where $F = 1$ (Lindemann), or Troe's form
-  ([Gilbert, Luther & Troe 1983](../references.md#gilbert-luther-troe-1983)),
+    where $F = 1$ (Lindemann), or Troe's form
+    ([Gilbert, Luther & Troe 1983](../references.md#gilbert-luther-troe-1983)),
 
-  $$
-  \begin{equation}
-  \begin{aligned}
-  F_\mathrm{cent} &= (1 - \alpha)\,e^{-T/T_3} + \alpha\,e^{-T/T_1} + e^{-T_2/T}, \\
-  \log_{10} F &= \frac{\log_{10} F_\mathrm{cent}}{1 + \left(\dfrac{\log_{10}P_r + c}{n - 0.14\,(\log_{10}P_r + c)}\right)^2},
-  \qquad c = -0.4 - 0.67\log_{10}F_\mathrm{cent}, \quad n = 0.75 - 1.27\log_{10}F_\mathrm{cent},
-  \end{aligned}
-  \label{eq:rate-constants-3}
-  \end{equation}
-  $$
+    $$
+    \begin{equation}
+    \begin{aligned}
+    F_\mathrm{cent} &= (1 - \alpha)\,e^{-T/T_3} + \alpha\,e^{-T/T_1} + e^{-T_2/T}, \\
+    \log_{10} F &= \frac{\log_{10} F_\mathrm{cent}}{1 + \left(\dfrac{\log_{10}P_r + c}{n - 0.14\,(\log_{10}P_r + c)}\right)^2},
+    \qquad c = -0.4 - 0.67\log_{10}F_\mathrm{cent}, \quad n = 0.75 - 1.27\log_{10}F_\mathrm{cent},
+    \end{aligned}
+    \label{eq:rate-constants-3}
+    \end{equation}
+    $$
 
-  where a term is dropped when its $T_3$, $T_1$ or $T_2$ is absent, or the SRI form
-  ([Stewart, Larson & Golden 1989](../references.md#stewart-larson-golden-1989)),
+    where a term is dropped when its $T_3$, $T_1$ or $T_2$ is absent, or the SRI form
+    ([Stewart, Larson & Golden 1989](../references.md#stewart-larson-golden-1989)),
 
-  $$
-  \begin{equation}
-  F = d\left(a\,e^{-b/T} + e^{-T/c}\right)^{X} T^{e}, \qquad X = \frac{1}{1 + (\log_{10}P_r)^2};
-  \label{eq:rate-constants-4}
-  \end{equation}
-  $$
+    $$
+    \begin{equation}
+    F = d\left(a\,e^{-b/T} + e^{-T/c}\right)^{X} T^{e}, \qquad X = \frac{1}{1 + (\log_{10}P_r)^2};
+    \label{eq:rate-constants-4}
+    \end{equation}
+    $$
 
 - **PLOG**: $\ln k$ interpolated linearly in $\ln p$ between the two
-  bracketing pressures of the table (the rates given at one pressure are
-  summed), and held constant beyond its ends;
+    bracketing pressures of the table (the rates given at one pressure are
+    summed), and held constant beyond its ends;
 - **Chebyshev**: $\log_{10}k = \sum_{t}\sum_{q}\alpha_{tq}\,\phi_t(\tilde T)\,\phi_q(\tilde p)$
-  with Chebyshev polynomials $\phi$ of the reduced variables
-  $\tilde T = (2T^{-1} - T_\mathrm{min}^{-1} - T_\mathrm{max}^{-1})/(T_\mathrm{max}^{-1} - T_\mathrm{min}^{-1})$
-  and $\tilde p = (2\ln p - \ln p_\mathrm{min} - \ln p_\mathrm{max})/(\ln p_\mathrm{max} - \ln p_\mathrm{min})$.
+    with Chebyshev polynomials $\phi$ of the reduced variables
+    $\tilde T = (2T^{-1} - T_\mathrm{min}^{-1} - T_\mathrm{max}^{-1})/(T_\mathrm{max}^{-1} - T_\mathrm{min}^{-1})$
+    and $\tilde p = (2\ln p - \ln p_\mathrm{min} - \ln p_\mathrm{max})/(\ln p_\mathrm{max} - \ln p_\mathrm{min})$.
 
 PLOG and Chebyshev reactions use the pressure $p = R_u T\sum_k C_k$.
 

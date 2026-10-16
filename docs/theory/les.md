@@ -63,57 +63,57 @@ and $\mathbf{A} : \mathbf{B} = A_{ij}B_{ij}$, the operators $\mathcal{D}$ and
 the default constants (`[les] model`, `C`) are
 
 - **Smagorinsky** ([Smagorinsky 1963](../references.md#smagorinsky-1963);
-  Lilly's constant $C_s = 0.17$):
+    Lilly's constant $C_s = 0.17$):
 
-  $$
-  \begin{equation}
-  \mathcal{D} = \sqrt{2\,\mathbf{S}:\mathbf{S}};
-  \label{eq:subgrid-scale-models-2}
-  \end{equation}
-  $$
+    $$
+    \begin{equation}
+    \mathcal{D} = \sqrt{2\,\mathbf{S}:\mathbf{S}};
+    \label{eq:subgrid-scale-models-2}
+    \end{equation}
+    $$
 
 - **WALE** ([Nicoud & Ducros 1999](../references.md#nicoud-ducros-1999);
-  $C_w = 0.5$), with $\mathbf{S}^g$ the traceless symmetric part of $\mathbf{g}^2$:
+    $C_w = 0.5$), with $\mathbf{S}^g$ the traceless symmetric part of $\mathbf{g}^2$:
 
-  $$
-  \begin{equation}
-  \mathcal{D} = \frac{(\mathbf{S}^g:\mathbf{S}^g)^{3/2}}{(\mathbf{S}:\mathbf{S})^{5/2} + (\mathbf{S}^g:\mathbf{S}^g)^{5/4}}, \qquad
-  S^g_{ij} = \tfrac12\left(g_{ik}g_{kj} + g_{jk}g_{ki}\right) - \tfrac13\delta_{ij}\,g_{kl}g_{lk};
-  \label{eq:subgrid-scale-models-3}
-  \end{equation}
-  $$
+    $$
+    \begin{equation}
+    \mathcal{D} = \frac{(\mathbf{S}^g:\mathbf{S}^g)^{3/2}}{(\mathbf{S}:\mathbf{S})^{5/2} + (\mathbf{S}^g:\mathbf{S}^g)^{5/4}}, \qquad
+    S^g_{ij} = \tfrac12\left(g_{ik}g_{kj} + g_{jk}g_{ki}\right) - \tfrac13\delta_{ij}\,g_{kl}g_{lk};
+    \label{eq:subgrid-scale-models-3}
+    \end{equation}
+    $$
 
 - **Vreman** ([Vreman 2004](../references.md#vreman-2004); $c = 0.07$),
-  with $\alpha_{ij} = \partial\widetilde{u}_j/\partial x_i$ and
-  $\beta_{ij} = \alpha_{mi}\alpha_{mj}$:
+    with $\alpha_{ij} = \partial\widetilde{u}_j/\partial x_i$ and
+    $\beta_{ij} = \alpha_{mi}\alpha_{mj}$:
 
-  $$
-  \begin{equation}
-  \mathcal{D} = \sqrt{\frac{B_\beta}{\alpha_{ij}\alpha_{ij}}}, \qquad
-  B_\beta = \beta_{11}\beta_{22} - \beta_{12}^2 + \beta_{11}\beta_{33} - \beta_{13}^2 + \beta_{22}\beta_{33} - \beta_{23}^2;
-  \label{eq:subgrid-scale-models-4}
-  \end{equation}
-  $$
+    $$
+    \begin{equation}
+    \mathcal{D} = \sqrt{\frac{B_\beta}{\alpha_{ij}\alpha_{ij}}}, \qquad
+    B_\beta = \beta_{11}\beta_{22} - \beta_{12}^2 + \beta_{11}\beta_{33} - \beta_{13}^2 + \beta_{22}\beta_{33} - \beta_{23}^2;
+    \label{eq:subgrid-scale-models-4}
+    \end{equation}
+    $$
 
 - **Sigma** ([Nicoud et al. 2011](../references.md#nicoud-2011);
-  $C_\sigma = 1.35$; the default in 3D), with $\sigma_1 \ge \sigma_2 \ge \sigma_3 \ge 0$
-  the singular values of $\mathbf{g}$:
+    $C_\sigma = 1.35$; the default in 3D), with $\sigma_1 \ge \sigma_2 \ge \sigma_3 \ge 0$
+    the singular values of $\mathbf{g}$:
 
-  $$
-  \begin{equation}
-  \mathcal{D} = \frac{\sigma_3\,(\sigma_1 - \sigma_2)(\sigma_2 - \sigma_3)}{\sigma_1^2}.
-  \label{eq:subgrid-scale-models-5}
-  \end{equation}
-  $$
+    $$
+    \begin{equation}
+    \mathcal{D} = \frac{\sigma_3\,(\sigma_1 - \sigma_2)(\sigma_2 - \sigma_3)}{\sigma_1^2}.
+    \label{eq:subgrid-scale-models-5}
+    \end{equation}
+    $$
 
-  $\sigma_1^2$ is the largest eigenvalue of $\mathbf{G} = \mathbf{g}^T\mathbf{g}$
-  from the trigonometric solution of its characteristic cubic (Nicoud et al.,
-  appendix); $\sigma_2^2$ and $\sigma_3^2$ follow from
-  $\sigma_2^2 + \sigma_3^2 = (I_2 - \sigma_2^2\sigma_3^2)/\sigma_1^2$ and
-  $\sigma_2^2\sigma_3^2 = \det(\mathbf{g})^2/\sigma_1^2$, with $I_2$ the
-  second invariant of $\mathbf{G}$, which keeps them accurate when small
-  ($\sigma_3 = 0$ exactly for planar gradients). Sigma vanishes for every
-  2D flow, so 2D builds reject it and default to WALE.
+    $\sigma_1^2$ is the largest eigenvalue of $\mathbf{G} = \mathbf{g}^T\mathbf{g}$
+    from the trigonometric solution of its characteristic cubic (Nicoud et al.,
+    appendix); $\sigma_2^2$ and $\sigma_3^2$ follow from
+    $\sigma_2^2 + \sigma_3^2 = (I_2 - \sigma_2^2\sigma_3^2)/\sigma_1^2$ and
+    $\sigma_2^2\sigma_3^2 = \det(\mathbf{g})^2/\sigma_1^2$, with $I_2$ the
+    second invariant of $\mathbf{G}$, which keeps them accurate when small
+    ($\sigma_3 = 0$ exactly for planar gradients). Sigma vanishes for every
+    2D flow, so 2D builds reject it and default to WALE.
 
 ## Filter width
 
@@ -304,47 +304,47 @@ Reynolds stress imposed as
 [chapter 8](boundaries_sources.md#characteristic-boundaries).
 
 1. **Random field.** Independent unit-variance random numbers
-   $r_j(\mathbf{k}, m)$ for each velocity component $j$ live on an auxiliary
-   uniform grid on the inlet plane, one plane per generator time step
-   $\Delta t_p$. They come from a counter-based hash of (seed, inlet,
-   component, grid point, plane index), so the field at a given time does not
-   depend on the number of ranks, on the time steps taken or on restarts.
+    $r_j(\mathbf{k}, m)$ for each velocity component $j$ live on an auxiliary
+    uniform grid on the inlet plane, one plane per generator time step
+    $\Delta t_p$. They come from a counter-based hash of (seed, inlet,
+    component, grid point, plane index), so the field at a given time does not
+    depend on the number of ranks, on the time steps taken or on restarts.
 2. **Filter.** Each component is filtered with Gaussian kernels along the
-   two transverse directions and in time, Klein's third direction by
-   Taylor's hypothesis with the convection velocity $U_c$ (`convection_velocity`,
-   default the area-mean inflow speed). For an integral length of $n$ grid
-   spacings (or planes) the kernel is
+    two transverse directions and in time, Klein's third direction by
+    Taylor's hypothesis with the convection velocity $U_c$ (`convection_velocity`,
+    default the area-mean inflow speed). For an integral length of $n$ grid
+    spacings (or planes) the kernel is
 
-   $$
-   \begin{equation}
-   b_k = \frac{\exp\left(-\pi k^2/(2n^2)\right)}{\left(\sum_{l=-N}^{N}\exp\left(-\pi l^2/n^2\right)\right)^{1/2}}, \qquad \lvert k\rvert \le N = \lceil 2n\rceil,
-   \label{eq:synthetic-inflow-turbulence-1}
-   \end{equation}
-   $$
+    $$
+    \begin{equation}
+    b_k = \frac{\exp\left(-\pi k^2/(2n^2)\right)}{\left(\sum_{l=-N}^{N}\exp\left(-\pi l^2/n^2\right)\right)^{1/2}}, \qquad \lvert k\rvert \le N = \lceil 2n\rceil,
+    \label{eq:synthetic-inflow-turbulence-1}
+    \end{equation}
+    $$
 
-   normalized to $\sum_k b_k^2 = 1$, so that the filtered field has unit
-   variance and the two-point correlation $\exp(-\pi r^2/(4n^2))$, whose
-   integral is $n$ spacings. The length scales $L_{j,d}$ (`length_scale`)
-   set $n$ per component and direction; the grid spacing is the smallest
-   transverse length divided by `points_per_length` (default 6), and
-   $\Delta t_p = L_\mathrm{stream}/(n_p\,U_c)$ likewise, with $n_p$ = `points_per_length` and $L_\mathrm{stream}$ the smallest streamwise length. On periodic directions
-   the grid wraps and the half width is capped at what fits in a period.
+    normalized to $\sum_k b_k^2 = 1$, so that the filtered field has unit
+    variance and the two-point correlation $\exp(-\pi r^2/(4n^2))$, whose
+    integral is $n$ spacings. The length scales $L_{j,d}$ (`length_scale`)
+    set $n$ per component and direction; the grid spacing is the smallest
+    transverse length divided by `points_per_length` (default 6), and
+    $\Delta t_p = L_\mathrm{stream}/(n_p\,U_c)$ likewise, with $n_p$ = `points_per_length` and $L_\mathrm{stream}$ the smallest streamwise length. On periodic directions
+    the grid wraps and the half width is capped at what fits in a period.
 3. **Interpolation.** Face centroids interpolate the filtered planes
-   bilinearly in space and linearly in time, and divide by the exact
-   standard deviation of the interpolated value (from the correlation
-   $\rho_1$ of neighboring grid points), so that every face's fluctuation
-   $\mathbf{v}$ has unit variance.
+    bilinearly in space and linearly in time, and divide by the exact
+    standard deviation of the interpolated value (from the correlation
+    $\rho_1$ of neighboring grid points), so that every face's fluctuation
+    $\mathbf{v}$ has unit variance.
 4. **Reynolds stress.** With $\mathbf{R}$ the Reynolds stress of the inlet
-   (`reynolds_stress`, or from a `profile` of plane averages) and
-   $\mathbf{L}_R$ its lower Cholesky factor,
+    (`reynolds_stress`, or from a `profile` of plane averages) and
+    $\mathbf{L}_R$ its lower Cholesky factor,
 
-   $$
-   \begin{equation}
-   \mathbf{u}' = \mathbf{L}_R\,\mathbf{v}, \qquad \mathbf{L}_R\mathbf{L}_R^T = \mathbf{R}.
-   \label{eq:synthetic-inflow-turbulence-2}
-   \end{equation}
-   $$
+    $$
+    \begin{equation}
+    \mathbf{u}' = \mathbf{L}_R\,\mathbf{v}, \qquad \mathbf{L}_R\mathbf{L}_R^T = \mathbf{R}.
+    \label{eq:synthetic-inflow-turbulence-2}
+    \end{equation}
+    $$
 
 5. **Zero net flux.** With `zero_net_flux = true` (the default), the area
-   mean of the normal fluctuation over the whole inlet is subtracted, so the
-   inlet's mean mass flow is not perturbed.
+    mean of the normal fluctuation over the whole inlet is subtracted, so the
+    inlet's mean mass flow is not perturbed.

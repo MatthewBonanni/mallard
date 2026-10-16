@@ -30,38 +30,38 @@ step, at its first stage.
 `[numerics] time_integrator` (`src/numerics/time_integrator.cpp`):
 
 - **SSPRK3** (default), the three-stage, third-order strong-stability-preserving
-  scheme of [Shu & Osher 1988](../references.md#shu-osher-1988)
-  ([Gottlieb & Shu 1998](../references.md#gottlieb-shu-1998)):
+    scheme of [Shu & Osher 1988](../references.md#shu-osher-1988)
+    ([Gottlieb & Shu 1998](../references.md#gottlieb-shu-1998)):
 
-  $$
-  \begin{equation}
-  \begin{aligned}
-  \mathbf{U}^{(1)} &= \mathbf{U}^n + \Delta t\,\mathbf{L}(\mathbf{U}^n, t_n), \\
-  \mathbf{U}^{(2)} &= \tfrac34\,\mathbf{U}^n + \tfrac14\left(\mathbf{U}^{(1)} + \Delta t\,\mathbf{L}(\mathbf{U}^{(1)}, t_n + \Delta t)\right), \\
-  \mathbf{U}^{n+1} &= \mathbf{U}^n + \tfrac23\left(\mathbf{U}^{(2)} + \Delta t\,\mathbf{L}(\mathbf{U}^{(2)}, t_n + \tfrac12\Delta t) - \mathbf{U}^n\right);
-  \end{aligned}
-  \label{eq:runge-kutta-methods-1}
-  \end{equation}
-  $$
+    $$
+    \begin{equation}
+    \begin{aligned}
+    \mathbf{U}^{(1)} &= \mathbf{U}^n + \Delta t\,\mathbf{L}(\mathbf{U}^n, t_n), \\
+    \mathbf{U}^{(2)} &= \tfrac34\,\mathbf{U}^n + \tfrac14\left(\mathbf{U}^{(1)} + \Delta t\,\mathbf{L}(\mathbf{U}^{(1)}, t_n + \Delta t)\right), \\
+    \mathbf{U}^{n+1} &= \mathbf{U}^n + \tfrac23\left(\mathbf{U}^{(2)} + \Delta t\,\mathbf{L}(\mathbf{U}^{(2)}, t_n + \tfrac12\Delta t) - \mathbf{U}^n\right);
+    \end{aligned}
+    \label{eq:runge-kutta-methods-1}
+    \end{equation}
+    $$
 
-  the last stage is the convex combination
-  $\tfrac13\mathbf{U}^n + \tfrac23(\cdots)$, written as an interpolation so
-  that its weights sum to one exactly in floating point.
+    the last stage is the convex combination
+    $\tfrac13\mathbf{U}^n + \tfrac23(\cdots)$, written as an interpolation so
+    that its weights sum to one exactly in floating point.
 - **RK4**, the classical four-stage, fourth-order method
-  ([Kutta 1901](../references.md#kutta-1901)):
+    ([Kutta 1901](../references.md#kutta-1901)):
 
-  $$
-  \begin{equation}
-  \mathbf{U}^{n+1} = \mathbf{U}^n + \frac{\Delta t}{6}\left(\mathbf{k}_1 + 2\mathbf{k}_2 + 2\mathbf{k}_3 + \mathbf{k}_4\right), \quad
-  \begin{aligned}
-  \mathbf{k}_1 &= \mathbf{L}(\mathbf{U}^n, t_n), &
-  \mathbf{k}_2 &= \mathbf{L}(\mathbf{U}^n + \tfrac12\Delta t\,\mathbf{k}_1, t_n + \tfrac12\Delta t), \\
-  \mathbf{k}_3 &= \mathbf{L}(\mathbf{U}^n + \tfrac12\Delta t\,\mathbf{k}_2, t_n + \tfrac12\Delta t), &
-  \mathbf{k}_4 &= \mathbf{L}(\mathbf{U}^n + \Delta t\,\mathbf{k}_3, t_n + \Delta t).
-  \end{aligned}
-  \label{eq:runge-kutta-methods-2}
-  \end{equation}
-  $$
+    $$
+    \begin{equation}
+    \mathbf{U}^{n+1} = \mathbf{U}^n + \frac{\Delta t}{6}\left(\mathbf{k}_1 + 2\mathbf{k}_2 + 2\mathbf{k}_3 + \mathbf{k}_4\right), \quad
+    \begin{aligned}
+    \mathbf{k}_1 &= \mathbf{L}(\mathbf{U}^n, t_n), &
+    \mathbf{k}_2 &= \mathbf{L}(\mathbf{U}^n + \tfrac12\Delta t\,\mathbf{k}_1, t_n + \tfrac12\Delta t), \\
+    \mathbf{k}_3 &= \mathbf{L}(\mathbf{U}^n + \tfrac12\Delta t\,\mathbf{k}_2, t_n + \tfrac12\Delta t), &
+    \mathbf{k}_4 &= \mathbf{L}(\mathbf{U}^n + \Delta t\,\mathbf{k}_3, t_n + \Delta t).
+    \end{aligned}
+    \label{eq:runge-kutta-methods-2}
+    \end{equation}
+    $$
 
 - **FE**, forward Euler: $\mathbf{U}^{n+1} = \mathbf{U}^n + \Delta t\,\mathbf{L}(\mathbf{U}^n, t_n)$.
 
@@ -117,11 +117,11 @@ in 3D. Mixtures use the frozen sound speed $a = \sqrt{\gamma p/\rho}$.
 A time step of a reacting run is (`Solver::take_step`):
 
 1. Strang splitting: chemistry over $\Delta t/2$ (fused with the previous
-   step's second half with `fuse_half_steps`); SIMPLER: the transport
-   tendency, then chemistry over $\Delta t$ ([chapter 3](chemistry_radiation.md#coupling-with-the-flow));
+    step's second half with `fuse_half_steps`); SIMPLER: the transport
+    tendency, then chemistry over $\Delta t$ ([chapter 3](chemistry_radiation.md#coupling-with-the-flow));
 2. with double flux, freezing each cell's $(\gamma, e_0)$
-   ([chapter 2](thermodynamics_transport.md#double-flux));
+    ([chapter 2](thermodynamics_transport.md#double-flux));
 3. one Runge-Kutta step over $\Delta t$ (SIMPLER: over the second half step,
-   with the frozen transport tendency subtracted);
+    with the frozen transport tendency subtracted);
 4. with double flux, resetting $\rho E$ to the true equation of state;
 5. Strang splitting: chemistry over $\Delta t/2$.

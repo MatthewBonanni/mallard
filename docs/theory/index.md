@@ -11,26 +11,26 @@ limits, accuracy studies and known limitations; the sources are in
 ## Chapters
 
 1. [Governing equations](governing_equations.md): the compressible
-   Navier-Stokes equations, the single-gas constitutive laws and the
-   axisymmetric form.
+    Navier-Stokes equations, the single-gas constitutive laws and the
+    axisymmetric form.
 2. [Thermodynamics and transport of mixtures](thermodynamics_transport.md):
-   thermally perfect mixtures, mixture-averaged transport, thermal
-   diffusion and double flux.
+    thermally perfect mixtures, mixture-averaged transport, thermal
+    diffusion and double flux.
 3. [Chemistry and radiation](chemistry_radiation.md): finite-rate kinetics,
-   the RODAS integrator, Strang and SIMPLER splitting, optically thin
-   radiation.
+    the RODAS integrator, Strang and SIMPLER splitting, optically thin
+    radiation.
 4. [Large-eddy simulation](les.md): the filtered equations, SGS models,
-   the dynamic procedure, thickened flames, the partially stirred reactor
-   and synthetic inflow turbulence.
+    the dynamic procedure, thickened flames, the partially stirred reactor
+    and synthetic inflow turbulence.
 5. [Finite-volume discretization and reconstruction](finite_volume.md):
-   face quadrature, curved boundaries, MUSCL, TENO-E and the gradients of
-   the viscous terms.
+    face quadrature, curved boundaries, MUSCL, TENO-E and the gradients of
+    the viscous terms.
 6. [Numerical fluxes](fluxes.md): the Riemann solvers, the hybrid
-   central-upwind flux, species fluxes and viscous fluxes.
+    central-upwind flux, species fluxes and viscous fluxes.
 7. [Time integration](time_integration.md): Runge-Kutta methods, the time
-   step and the order of operations within a step.
+    step and the order of operations within a step.
 8. [Boundary conditions and sources](boundaries_sources.md): exterior
-   states, characteristic boundaries, body forces and sponges.
+    states, characteristic boundaries, body forces and sponges.
 
 ## Notation
 

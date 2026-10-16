@@ -262,35 +262,35 @@ exact energy conservation (`src/solver/solver_mixture.cpp`,
 `src/numerics/mixture_flux.h`):
 
 1. At the start of each time step, every cell freezes its
-   $(\gamma_i^{\ast}, e_{0,i}^{\ast})$ from the true equation of state, eq. $\eqref{eq:frozen-surrogates}$.
+    $(\gamma_i^{\ast}, e_{0,i}^{\ast})$ from the true equation of state, eq. $\eqref{eq:frozen-surrogates}$.
 2. Within all the stages of the step, cell pressures come from the frozen
-   pair, $p_i = (\gamma_i^{\ast} - 1)\left(\rho E_i - \rho_i e_{0,i}^{\ast} - \tfrac12\rho_i\lvert\mathbf{u}_i\rvert^2\right)$,
-   and each face computes two numerical fluxes from the same reconstructed
-   $\mathbf{W}^L$, $\mathbf{W}^R$: $\hat{\mathbf{F}}^{(L)}$ converts both
-   sides to conservative variables with the left cell's frozen pair, and
-   $\hat{\mathbf{F}}^{(R)}$ with the right cell's. Mass and momentum use their mean, which keeps them
-   conservative; the energy of each cell uses the flux computed with its own
-   pair:
+    pair, $p_i = (\gamma_i^{\ast} - 1)\left(\rho E_i - \rho_i e_{0,i}^{\ast} - \tfrac12\rho_i\lvert\mathbf{u}_i\rvert^2\right)$,
+    and each face computes two numerical fluxes from the same reconstructed
+    $\mathbf{W}^L$, $\mathbf{W}^R$: $\hat{\mathbf{F}}^{(L)}$ converts both
+    sides to conservative variables with the left cell's frozen pair, and
+    $\hat{\mathbf{F}}^{(R)}$ with the right cell's. Mass and momentum use their mean, which keeps them
+    conservative; the energy of each cell uses the flux computed with its own
+    pair:
 
-   $$
-   \begin{equation}
-   \hat F_{\rho} = \tfrac12\left(\hat F^{(L)}_{\rho} + \hat F^{(R)}_{\rho}\right), \qquad
-   \hat{\mathbf{F}}_{\rho\mathbf{u}} = \tfrac12\left(\hat{\mathbf{F}}^{(L)}_{\rho\mathbf{u}} + \hat{\mathbf{F}}^{(R)}_{\rho\mathbf{u}}\right), \qquad
-   \hat F_{\rho E}\big\vert_{\text{cell } L} = \hat F^{(L)}_{\rho E}, \quad
-   \hat F_{\rho E}\big\vert_{\text{cell } R} = \hat F^{(R)}_{\rho E}.
-   \label{eq:double-flux}
-   \end{equation}
-   $$
+    $$
+    \begin{equation}
+    \hat F_{\rho} = \tfrac12\left(\hat F^{(L)}_{\rho} + \hat F^{(R)}_{\rho}\right), \qquad
+    \hat{\mathbf{F}}_{\rho\mathbf{u}} = \tfrac12\left(\hat{\mathbf{F}}^{(L)}_{\rho\mathbf{u}} + \hat{\mathbf{F}}^{(R)}_{\rho\mathbf{u}}\right), \qquad
+    \hat F_{\rho E}\big\vert_{\text{cell } L} = \hat F^{(L)}_{\rho E}, \quad
+    \hat F_{\rho E}\big\vert_{\text{cell } R} = \hat F^{(R)}_{\rho E}.
+    \label{eq:double-flux}
+    \end{equation}
+    $$
 
-   Both fluxes estimate their wave speeds with each side's own frozen pair
-   (`riemann::SideThermo`), so their mass fluxes agree at a contact for every
-   Riemann solver. With the hybrid flux, each of the two is blended with the
-   central flux computed with the same pair ([chapter 6](fluxes.md#hybrid-central-upwind-flux)). The
-   species fluxes use the mean mass flux ([chapter 6](fluxes.md#species-fluxes)).
+    Both fluxes estimate their wave speeds with each side's own frozen pair
+    (`riemann::SideThermo`), so their mass fluxes agree at a contact for every
+    Riemann solver. With the hybrid flux, each of the two is blended with the
+    central flux computed with the same pair ([chapter 6](fluxes.md#hybrid-central-upwind-flux)). The
+    species fluxes use the mean mass flux ([chapter 6](fluxes.md#species-fluxes)).
 3. After the step, $\rho E$ of each cell is reset to the true equation of
-   state at the pressure the frozen pair gives, keeping $\rho$, $\rho\mathbf{u}$
-   and the composition: $T = p/(\rho R)$ and
-   $\rho E = \rho\,e(T; Y) + \tfrac12\rho\lvert\mathbf{u}\rvert^2$.
+    state at the pressure the frozen pair gives, keeping $\rho$, $\rho\mathbf{u}$
+    and the composition: $T = p/(\rho R)$ and
+    $\rho E = \rho\,e(T; Y) + \tfrac12\rho\lvert\mathbf{u}\rvert^2$.
 
 A contact between gases at uniform pressure and velocity then stays exactly
 uniform in $p$ and $\mathbf{u}$. Double flux cannot be combined with SIMPLER
