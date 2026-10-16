@@ -83,10 +83,8 @@ struct TENOScalarValues {
     KOKKOS_INLINE_FUNCTION
     rtype entry_value(const int32_t c, const int32_t f, const uint32_t j) const {
         if (f >= 0) {
-            const int32_t i_bc = boundaries.face_bc(f);
-            if (boundaries.bcs(i_bc).type == BoundaryType::UPT) {
-                return j < n_species ? boundaries.bc_Y(i_bc, j) : boundaries.bc_thermo(i_bc, j - n_species);
-            }
+            rtype value;
+            if (boundaries.prescribed_scalar(boundaries.face_bc(f), j, n_species, value)) return value;
         }
         return scalars(c, j);
     }

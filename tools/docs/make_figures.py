@@ -12,6 +12,7 @@ import argparse
 import sys
 
 import domains
+import inlets
 import runs
 import schematics
 import theory
@@ -24,6 +25,7 @@ def main():
     args = ap.parse_args()
     schematics.figures()
     domains.figures()
+    inlets.figures()
     theory.figures()
     if args.mallard:
         sys.argv = [sys.argv[0], "--mallard", args.mallard, "--mpirun", args.mpirun]

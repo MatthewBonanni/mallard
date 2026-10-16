@@ -62,8 +62,7 @@ struct ScalarLimiterFunctor {
             FOR_I_DIM dx[i] = (cell_coords(c0, i) - shifts(s, i)) - cell_coords(c, i);
             return c0;
         }
-        const BoundaryType type = boundaries.bcs(boundaries.face_bc(f)).type;
-        if (type == BoundaryType::DIRICHLET || type == BoundaryType::UPT || type == BoundaryType::FARFIELD) {
+        if (boundaries.bcs(boundaries.face_bc(f)).ghost_at_face()) {
             prescribed = true;
             FOR_I_DIM dx[i] = face_coords(f, i) - cell_coords(c, i);
         } else {
@@ -82,10 +81,8 @@ struct ScalarLimiterFunctor {
     rtype neighbor_value(const uint32_t c, const uint32_t f, const int32_t nb, const bool prescribed,
                          const uint32_t j) const {
         if (nb >= 0) return scalars(nb, j);
-        if (prescribed && boundaries.bcs(boundaries.face_bc(f)).type == BoundaryType::UPT) {
-            const int32_t i_bc = boundaries.face_bc(f);
-            return j < n_species ? boundaries.bc_Y(i_bc, j) : boundaries.bc_thermo(i_bc, j - n_species);
-        }
+        rtype value;
+        if (prescribed && boundaries.prescribed_scalar(boundaries.face_bc(f), j, n_species, value)) return value;
         return scalars(c, j);
     }
 

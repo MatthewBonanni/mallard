@@ -133,9 +133,7 @@ struct LSQGradientFunctor {
             rtype d = 0.0;
             FOR_I_DIM d += (face_coords(i_face, i) - cell_coords(i_cell, i)) * n[i];
             const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(i_face));
-            if (bc.type == BoundaryType::DIRICHLET || bc.type == BoundaryType::UPT ||
-                bc.type == BoundaryType::FARFIELD) {
-                // A prescribed state is the value at the face centroid
+            if (bc.ghost_at_face()) {
                 FOR_I_DIM dx[i] = face_coords(i_face, i) - cell_coords(i_cell, i);
                 boundaries.ghost_W(i_face, W_i, n, W_j);
             } else {
@@ -284,9 +282,8 @@ struct LSQVertexGradientFunctor {
                 const double C_i = double(covariance(i_cell, m));
                 if (!is_face) return double(covariance(cells_of_cell(k), m)) - C_i;
                 const uint32_t f = faces.faces_of_cell(k);
-                const BoundaryType type = faces.boundaries.bcs(faces.boundaries.face_bc(f)).type;
                 // A prescribed state is a point value at the face; other ghosts mirror cell i
-                if (type == BoundaryType::DIRICHLET || type == BoundaryType::UPT || type == BoundaryType::FARFIELD) {
+                if (faces.boundaries.bcs(faces.boundaries.face_bc(f)).ghost_at_face()) {
                     return -C_i;
                 }
                 double n[2] = {double(faces.face_normals(f, 0)), double(faces.face_normals(f, 1))};
