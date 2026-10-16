@@ -17,12 +17,12 @@ ThickenedFlame ThickenedFlame::from_input(const Input & table) {
     const std::string model = toml::find_or<std::string>(table, "model", "");
     if (model != "tfles") throw InputError("les.combustion.model = \"" + model + "\" is not one of: tfles, pasr.");
     ThickenedFlame tf;
-    tf.delta_L = find_double(table, "delta_L");
-    tf.s_L = find_double(table, "s_L");
-    tf.T_u = find_double(table, "T_unburnt");
-    tf.T_b = find_double(table, "T_burnt");
-    tf.n_res = find_double_or(table, "n_res", 5.0);
-    tf.beta = find_double_or(table, "beta", 0.5);
+    tf.delta_L = find_double(table, "delta_L", dim::length);
+    tf.s_L = find_double(table, "s_L", dim::velocity);
+    tf.T_u = find_double(table, "T_unburnt", dim::temperature);
+    tf.T_b = find_double(table, "T_burnt", dim::temperature);
+    tf.n_res = find_double_or(table, "n_res", dim::none, 5.0);
+    tf.beta = find_double_or(table, "beta", dim::none, 0.5);
     const std::string efficiency = toml::find_or<std::string>(table, "efficiency", "charlette");
     if (efficiency != "charlette" && efficiency != "none") {
         throw InputError("les.combustion.efficiency = \"" + efficiency + "\" is not one of: charlette, none.");
@@ -33,7 +33,7 @@ ThickenedFlame ThickenedFlame::from_input(const Input & table) {
         throw InputError("les.combustion.subgrid_velocity = \"" + velocity + "\" is not one of: colin, eddy_viscosity.");
     }
     tf.eddy_viscosity_velocity = velocity == "eddy_viscosity";
-    tf.C_u = find_double_or(table, "C_u", 28.0);
+    tf.C_u = find_double_or(table, "C_u", dim::none, 28.0);
     if (!(tf.C_u > 0.0)) throw InputError("les.combustion.C_u must be positive.");
     if (!(tf.delta_L > 0.0) || !(tf.s_L > 0.0) || !(tf.n_res > 0.0) || !(tf.beta > 0.0)) {
         throw InputError("les.combustion: delta_L, s_L, n_res and beta must be positive.");

@@ -69,7 +69,7 @@ void DataWriter::init(const Input & input,
             throw std::runtime_error("DataWriter: interval must be positive.");
         }
     } else {
-        time_interval = find_real(input, "time_interval");
+        time_interval = find_real(input, "time_interval", dim::time);
         if (!(time_interval > 0.0_r)) {
             throw std::runtime_error("DataWriter: time_interval must be positive.");
         }
