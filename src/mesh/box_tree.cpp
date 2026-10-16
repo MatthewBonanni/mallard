@@ -44,9 +44,9 @@ BoxTree::BoxTree(const std::vector<Box> & boxes) : item_boxes(boxes) {
         for (size_t d = 1; d < N_DIM; d++) {
             if (box.hi[d] - box.lo[d] > box.hi[axis] - box.lo[axis]) axis = d;
         }
-        const uint32_t half = task.count / 2;
+        const uint32_t n_left = task.count / 2;
         auto begin = order.begin() + task.first;
-        std::nth_element(begin, begin + half, begin + task.count, [&](uint32_t a, uint32_t b) {
+        std::nth_element(begin, begin + n_left, begin + task.count, [&](uint32_t a, uint32_t b) {
             const double ca = center(a, axis), cb = center(b, axis);
             return ca < cb || (ca == cb && a < b);
         });
@@ -55,8 +55,8 @@ BoxTree::BoxTree(const std::vector<Box> & boxes) : item_boxes(boxes) {
         nodes.emplace_back();
         nodes[task.node].first = child;
         nodes[task.node].count = 0;
-        tasks.push_back({child, task.first, half});
-        tasks.push_back({child + 1, task.first + half, task.count - half});
+        tasks.push_back({child, task.first, n_left});
+        tasks.push_back({child + 1, task.first + n_left, task.count - n_left});
     }
 }
 
