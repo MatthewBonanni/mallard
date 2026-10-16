@@ -380,7 +380,7 @@ void Solver::update_transport() {
                                                  transport_values});
     Kokkos::parallel_for("mixture_gradients", mesh->n_cells,
                          MixtureGradientFunctor{viscous_gradient, transport_values, transport_gradients,
-                                                bc_transport_values, mixture.n_species});
+                                                bc_transport_values, mixture.n_species, cell_transport});
 }
 
 void Solver::freeze_thermodynamics() {
@@ -455,7 +455,8 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
                                                     mesh->face_shift, boundary_data, mixture, cell_scalars,
                                                     transport_values, transport_gradients, cell_transport,
                                                     cell_diffusion, face_flux, species_slots, axisymmetric,
-                                                    mesh->cell_covariance, les_coefficients};
+                                                    mesh->cell_covariance, les_coefficients, false,
+                                                    double_flux ? face_energy_1 : Kokkos::View<rtype *>()};
         viscous_flux();
         if (budget_pass) budget.viscous = kinetic_energy_rate() - budget.convective;
     }
@@ -665,6 +666,8 @@ void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boun
             case BoundaryType::EXTRAPOLATION:
             case BoundaryType::SYMMETRY:
             case BoundaryType::WALL_ADIABATIC:
+            case BoundaryType::WALL_ISOTHERMAL:
+            case BoundaryType::WALL_HEAT_FLUX:
             case BoundaryType::P_OUT:
             case BoundaryType::NSCBC_OUTLET:
                 break;
@@ -687,7 +690,7 @@ void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boun
             default:
                 throw InputError(where + ": type \"" + BOUNDARY_NAMES.at(bcs[i_bc].type) +
                                  "\" is not yet supported with gas = \"mixture\" (extrapolation, symmetry, "
-                                 "wall_adiabatic, upt, p_out, nscbc_outlet, nscbc_inlet).");
+                                 "wall_adiabatic, wall_isothermal, wall_heat_flux, upt, p_out, nscbc_outlet, nscbc_inlet).");
         }
     }
 }
