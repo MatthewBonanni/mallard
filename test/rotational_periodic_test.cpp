@@ -369,8 +369,10 @@ TEST(RotationalPeriodicSetup, SectorConservesMassAndEnergy) {
         const auto before = solver->integrate_conservatives();
         solver->run();
         const auto after = solver->integrate_conservatives();
-        EXPECT_NEAR(after[0], before[0], roundoff(1e-12) * std::abs(before[0])) << recon;
-        EXPECT_NEAR(after[N_DIM + 1], before[N_DIM + 1], roundoff(1e-12) * std::abs(before[N_DIM + 1])) << recon;
+        for (const uint8_t i : {uint8_t(0), uint8_t(N_DIM + 1)}) {
+            const double b = double(before[i]), c = double(after[i]);
+            EXPECT_NEAR(c, b, roundoff(1e-12) * std::abs(b)) << recon << ", variable " << int(i);
+        }
     }
 }
 
