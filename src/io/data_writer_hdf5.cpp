@@ -235,7 +235,6 @@ void DataWriter::write_hdf5_mesh() {
     Handle fapl(file_access(distributed), H5Pclose, "H5Pcreate");
     Handle fcpl(file_creation(fapl, provenance.size()), H5Pclose, "H5Pcreate");
     Handle dxpl(transfer(distributed), H5Pclose, "H5Pcreate");
-    const std::string filename = mesh_file(prefix);
     Handle file(H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose, "creating " + filename);
     {
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
@@ -282,7 +281,6 @@ void DataWriter::write_hdf5(const std::string & stem, uint64_t step, rtype t, co
     Handle fapl(file_access(distributed), H5Pclose, "H5Pcreate");
     Handle fcpl(file_creation(fapl, provenance.size()), H5Pclose, "H5Pcreate");
     Handle dxpl(transfer(distributed), H5Pclose, "H5Pcreate");
-    const std::string filename = stem + ".h5";
     Handle file(H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose, "creating " + filename);
     {
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");

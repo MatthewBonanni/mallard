@@ -12,6 +12,7 @@
 #ifndef TEST_UTILS_H
 #define TEST_UTILS_H
 
+#include <cstdint>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -50,6 +51,23 @@ inline std::string without_comment_lines(const std::string & text) {
         if (line.empty() || line[0] != '#') out += line + "\n";
     }
     return out;
+}
+
+/**
+ * @brief An output file's bytes without its provenance (which names the run:
+ *        its input, start time, rank count): the trailer of restart files,
+ *        the XML comment of VTU, PVTU, PVD and XDMF files, CSV comment lines.
+ */
+inline std::string without_provenance(std::string bytes) {
+    static const std::string magic("MLRD-PROVENANCE\0", 16);
+    if (bytes.size() >= 24 && bytes.compare(bytes.size() - 16, 16, magic) == 0) {
+        uint64_t length = 0;
+        bytes.copy(reinterpret_cast<char *>(&length), sizeof(length), bytes.size() - 24);
+        return bytes.substr(0, bytes.size() - 24 - length);
+    }
+    const size_t a = bytes.find("<!-- provenance ");
+    if (a != std::string::npos) return bytes.erase(a, bytes.find(" -->\n", a) + 5 - a);
+    return bytes[0] == '#' || bytes.find("\n# provenance ") != std::string::npos ? without_comment_lines(bytes) : bytes;
 }
 
 #endif // TEST_UTILS_H

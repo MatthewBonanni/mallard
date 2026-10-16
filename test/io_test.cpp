@@ -397,7 +397,7 @@ TEST(IOTest, AsynchronousOutputWritesTheSameFiles) {
                 continue;
             }
 #endif
-            EXPECT_TRUE(async.at(name) == bytes) << name << " " << snapshot_keys;
+            EXPECT_TRUE(without_provenance(async.at(name)) == without_provenance(bytes)) << name << " " << snapshot_keys;
         }
     }
     std::filesystem::remove_all(dir);

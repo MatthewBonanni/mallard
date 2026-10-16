@@ -489,7 +489,7 @@ TEST(MPITest, AsynchronousAndCompressedRestartFilesDoNotDependOnTheRankCount) {
                 const std::string bytes_d((std::istreambuf_iterator<char>(a)), std::istreambuf_iterator<char>());
                 const std::string bytes_s((std::istreambuf_iterator<char>(b)), std::istreambuf_iterator<char>());
                 EXPECT_FALSE(bytes_s.empty()) << s;
-                EXPECT_TRUE(bytes_d == bytes_s) << d << " on " << comm::size() << " ranks";
+                EXPECT_TRUE(without_provenance(bytes_d) == without_provenance(bytes_s)) << d << " on " << comm::size() << " ranks";
             }
         }
         std::string input = restart_case(20, "");
