@@ -907,7 +907,7 @@ void Solver::eddy_viscosity_of_state(const uint32_t n) {
                                                      transport_values});
         Kokkos::parallel_for("mixture_gradients", n,
                              MixtureGradientFunctor{viscous_gradient, transport_values, transport_gradients,
-                                                    bc_transport_values, mixture.n_species});
+                                                    bc_transport_values, mixture.n_species, cell_transport});
     } else {
         const Euler phys = physics;
         StateView U = conservatives;

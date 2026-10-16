@@ -29,7 +29,7 @@ At least one stop condition is required.
 | Key | Description |
 |---|---|
 | `type` | `file` (the default), `cartesian` (quads), `cartesian_tri` (each quad split into two triangles along its bottom-left to top-right diagonal), or `wedge` (quads over an 8 degree compression ramp starting at x = 0.5) |
-| `filename` | (`file`) Mallard HDF5 mesh (`.h5` or `.hdf5`, see below), or ASCII Gmsh mesh, format 2.2 or 4.1, of linear triangles and/or quadrilaterals (2D), or tetrahedra, pyramids, prisms and/or hexahedra (3D) |
+| `filename` | (`file`) Mallard HDF5 mesh (`.h5` or `.hdf5`, see below), ASCII Gmsh mesh (format 2.2 or 4.1), or CGNS file (`.cgns`), of triangles and/or quadrilaterals (2D), or tetrahedra, pyramids, prisms and/or hexahedra (3D); see mesh files below |
 | `Nx`, `Ny` | Number of quads in x and y (default 100) |
 | `Lx`, `Ly` | Domain size; the domain is `[0, Lx] x [0, Ly]` (default 1) |
 
@@ -98,13 +98,27 @@ rotate = {axis = [0, 0, 1], angle = 90}
 translate = [0.0, 0.0, 0.05]
 ```
 
-In a distributed run every rank reads a Gmsh file whole (keeping only its
+CGNS files (builds with `-DMallard_ENABLE_CGNS=ON`) are read from their one
+base, whose cell dimension must match the build. Every zone must be
+unstructured, with element sections of any of Mallard's cell types (`MIXED`
+too, and higher orders by their corners); polyhedral `NGON_n`/`NFACE_n`
+sections and structured zones are rejected. Several zones are joined into one
+mesh where their `Abutting1to1` connectivities (vertex `PointList` and
+`PointListDonor`, as Gmsh writes for partitioned meshes) identify their nodes.
+Each boundary condition (`BC_t`, by element range or list, or by vertices)
+becomes a boundary zone named after its family, or the family's
+`FamilyName` (Gmsh writes physical names there), or else the condition
+itself; boundary elements in no condition take their section's family or
+name. High-order boundary elements (`BAR_3`, `BAR_4`, `TRI_6`, `TRI_9`,
+`TRI_10`, `QUAD_8`, `QUAD_9`, `QUAD_16`) curve their faces like Gmsh's.
+
+In a distributed run every rank reads a Gmsh or CGNS file whole (keeping only its
 share), so large meshes should be converted to Mallard's HDF5 mesh format
 (builds with `-DMallard_ENABLE_HDF5=ON`), of which each rank reads only its
 share; generated meshes are also produced per rank:
 
 ```sh
-mallard-mesh-convert mesh.msh mesh.h5               # from Gmsh
+mallard-mesh-convert mesh.msh mesh.h5               # from Gmsh (or CGNS)
 mpirun -n 8 mallard-mesh-convert input.toml mesh.h5  # a generated mesh, written in parallel
 ```
 
@@ -204,9 +218,12 @@ shocks prone to the carbuncle, e.g. blunt-body detonations). With `type = "navie
 conducting and diffusing: species diffuse along mole-fraction gradients with a
 correction velocity (so the diffusive mass fluxes sum to zero) and carry their
 enthalpy, and the time step includes the largest of `4/3 mu / rho`,
-`lambda / (rho cv)` and the species' diffusion coefficients. Walls are no-slip,
-adiabatic and non-catalytic (`wall_isothermal` is not yet available for
-mixtures). Species thermodynamics are NASA-7, NASA-9 or constant-cp
+`lambda / (rho cv)` and the species' diffusion coefficients. Walls are no-slip
+and non-catalytic: no species crosses them, so their species, Soret and
+enthalpy diffusion fluxes vanish. `wall_adiabatic` conducts no heat,
+`wall_heat_flux` the given `q`, and `wall_isothermal` `lambda dT/dn` from the
+boundary cell to the wall temperature `T`, with the mean of the cell's
+conductivity and that at `T` (and the cell's composition). Species thermodynamics are NASA-7, NASA-9 or constant-cp
 polynomials from the file, evaluated in double precision in every build. Each
 species is transported (`rho Y_k`) with mass-flux upwinding, so mass fractions
 stay in [0, 1] and sum to one; all mass fractions share one stencil and one
