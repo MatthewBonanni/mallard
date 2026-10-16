@@ -14,7 +14,7 @@
 #include <fstream>
 #include <map>
 #include <set>
-#include <sstream>
+#include <stdexcept>
 #include <type_traits>
 
 #include <unistd.h>
@@ -588,16 +588,19 @@ void select_device([[maybe_unused]] int argc, [[maybe_unused]] char ** argv) {
 }
 
 void report() {
-#ifdef Mallard_HAS_MPI
     if (comm::size() == 1) return;
-    const std::vector<std::string> lines = gather(serialize(this_placement()));
+    const std::string mine = serialize(this_placement());
+#ifdef Mallard_HAS_MPI
+    const std::vector<std::string> lines = gather(mine);
+#else
+    const std::vector<std::string> lines = {mine};
+#endif
     if (!comm::is_root()) return;
     std::vector<Placement> ranks;
     for (const std::string & line : lines) ranks.push_back(deserialize(line));
     logging::section("Ranks");
     print_table(ranks);
     for (const std::string & warning : check(ranks)) logging::warning(warning);
-#endif
 }
 
 } // namespace binding
