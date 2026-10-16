@@ -223,7 +223,7 @@ void Solver::init_mesh() {
                               : partitioner == "multijagged" ? partition_multijagged(*setup, comm::size())
                                                              : partition_hilbert(*setup, comm::size()));
         }
-        mesh = setup->build_local_mesh(halo_layers, distribution);
+        mesh = setup->build_local_mesh(halo_layers, distribution, cell_order_of_input(input));
         const std::string exchange =
             toml::find_or<std::string>(input, "parallel", "halo_exchange", comm::nccl_available() ? "nccl" : "mpi");
         if (exchange != "nccl" && exchange != "mpi") {
@@ -641,11 +641,14 @@ void Solver::init_sources() {
         hold_mass_flow = true;
         mass_flow_target = double(norm);
         FOR_I_DIM mass_flow_direction[i] = m[i] / norm;
-        double volume = 0.0;
+        Kokkos::View<double *[2]> volumes("mass_flow_volumes", mesh->n_owned());
+        auto h_volumes = Kokkos::create_mirror_view(volumes);
         for (uint32_t i_cell = 0; i_cell < mesh->n_owned(); i_cell++) {
-            volume += static_cast<double>(mesh->h_cell_volume(i_cell));
+            h_volumes(i_cell, 0) = static_cast<double>(mesh->h_cell_volume(i_cell));
+            h_volumes(i_cell, 1) = 0.0;
         }
-        domain_volume = comm::allreduce(volume, comm::Op::SUM);
+        Kokkos::deep_copy(volumes, h_volumes);
+        domain_volume = exact_sums(volumes, mesh->n_owned(), is_distributed())[0];
         std::string text;
         FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(m[i]));
         source_summary.emplace_back("Mass flow", text + "] (volume average of rho u), held by a uniform body force");
@@ -679,18 +682,18 @@ void Solver::add_mass_flow_force(StateView solution, StateView rhs) {
     Kokkos::Array<rtype, N_DIM> e;
     FOR_I_DIM e[i] = mass_flow_direction[i];
     // Along e: the volume integral of rho u and the rate of change of that integral from all other terms
-    double momentum = 0.0, rate = 0.0;
-    Kokkos::parallel_reduce("mass_flow_sums", n_owned,
-                            KOKKOS_LAMBDA(const uint32_t i_cell, double & sum_momentum, double & sum_rate) {
+    if (mass_flow_terms.extent(0) != n_owned) mass_flow_terms = Kokkos::View<double *[2]>("mass_flow_terms", n_owned);
+    Kokkos::View<double *[2]> terms = mass_flow_terms;
+    Kokkos::parallel_for("mass_flow_terms", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
         rtype m = 0.0_r, r = 0.0_r;
         FOR_I_DIM {
             m += solution(i_cell, 1 + i) * e[i];
             r += rhs(i_cell, 1 + i) * e[i];
         }
-        sum_momentum += static_cast<double>(m * vol(i_cell));
-        sum_rate += static_cast<double>(r);
-    }, momentum, rate);
-    const std::array<double, 2> sums = comm::allreduce(std::array<double, 2>{momentum, rate}, comm::Op::SUM);
+        terms(i_cell, 0) = static_cast<double>(m * vol(i_cell));
+        terms(i_cell, 1) = static_cast<double>(r);
+    });
+    const std::array<double, 2> sums = exact_sums(terms, n_owned, is_distributed());
     // Cancel the other terms, and close the gap to the target within a step
     double force = -sums[1] / domain_volume;
     if (dt > 0.0_r) force += (mass_flow_target - sums[0] / domain_volume) / static_cast<double>(dt);

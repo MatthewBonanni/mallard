@@ -60,6 +60,8 @@ On GPUs, build with `-DMallard_GPU_AWARE_MPI=ON` if your MPI is CUDA-aware: halo
 
 Every rank builds the same stencils as a serial run and sums each cell's face fluxes in a fixed order, so the solution is bitwise identical on any number of ranks: after 100 steps of the 2D Riemann problem on 400 × 400 quadrilaterals with fifth-order TENO-E, the restart files of runs on 1 and 3 ranks are byte for byte the same. Sums over the whole domain that are written to output files, such as force monitors, are reduced across ranks and can differ in the last digits.
 
+Each rank numbers its cells along a Hilbert curve for memory locality ([cell numbering](performance.md#cell-numbering)); restart, HDF5 and VTU files list cells in global order whatever the rank count.
+
 With threads and ranks together, keep ranks × threads at or below the number of cores. On GPUs, use one rank per GPU; Kokkos maps each rank to its own device.
 
 With generated meshes, and with meshes converted to Mallard's HDF5 format (`mallard-mesh-convert`, in builds with `-DMallard_ENABLE_HDF5=ON`; see the [input reference](../input.md)), each rank reads or generates only its share, and no rank ever holds the whole mesh. Gmsh files are still read whole by every rank, so convert large Gmsh meshes to HDF5 first.

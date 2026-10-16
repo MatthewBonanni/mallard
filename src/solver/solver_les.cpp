@@ -610,6 +610,14 @@ std::array<double, N> exact_sums(const Kokkos::View<double *[N]> & terms, const 
     return result;
 }
 
+} // namespace
+
+std::array<double, 2> exact_sums(const Kokkos::View<double *[2]> & terms, const uint32_t n_owned, const bool distributed) {
+    return exact_sums<2>(terms, n_owned, distributed);
+}
+
+namespace {
+
 /**
  * @brief Extents h_1 <= h_2 <= h_3 of a 3D cell: V over the eigenvalues of its projected-area tensor
  *        1/2 sum_f A_f A_f^T / |A_f| (exact for boxes; equal for regular tetrahedra). Faces only, so cells

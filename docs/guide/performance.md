@@ -36,6 +36,19 @@ On tetrahedra the least-squares fits are latency-bound under the bitwise constra
 - **Capacity:** one A100-80GB now holds about 2.1M hexahedra or 1.65M tetrahedra at TENO5 (before: about 1.8M / 1.45M), and 3.4M / 2.75M with `single_precision_tables`. A 125³ Taylor–Green vortex that ran out of memory now runs.
 - **`single_precision_tables`** (opt-in, 3D, single gas) stores the pseudo-inverses in single precision and is another 3–8% faster. It changes results at single-precision round-off: below 10<sup>−7</sup> of each field's range on the Taylor–Green vortex, but up to 6.9 × 10<sup>−3</sup> in shock cells of a blast wave.
 
+## Cell numbering {#cell-numbering}
+
+Each rank (and a serial run) numbers its cells along a Hilbert curve through their centroids, its owned cells and each layer of halo cells separately, so memory locality no longer depends on how the mesh file numbers its cells (`[mesh] cell_order`, default `hilbert`). Results and output files are bitwise the same with either numbering. Milliseconds per step on one A100 (four in parentheses), 0.9.0:
+
+| Case | x-first (generated) | Hilbert | random file numbering, before 0.9.0 |
+|---|---:|---:|---:|
+| 2D TENO5, 1M quadrilaterals | 19.9 (6.39) | 19.3 (6.19) | 52.8 (10.7) |
+| 2D MUSCL, 1M quadrilaterals | 3.61 (1.44) | 3.57 (1.39) | 20.7 (2.90) |
+| 3D TENO5, 96³ hexahedra | 150 (40.9) | 143 (39.6) | 294 (72.2) |
+| 3D MUSCL, 1M tetrahedra | 33.0 (10.4) | 36.8 (11.3) | 198 (32.3) |
+
+On generated boxes, already numbered x first, the curve is within a few percent either way; MUSCL on structured tetrahedra is up to 11% faster with `cell_order = "input"`. Details: [design notes](../design/performance.md#cell-numbering).
+
 ## Chemistry {#chemistry}
 
 Mallard runs the stiff chemistry of reacting flows on GPUs with one thread per cell for small mechanisms. Larger ones use one warp per cell, or a team of up to 16 warps for the few cells that need many sub-steps, and a sparse LU factorization from 30 species up. The benchmark (`benchmarks/chemistry/` in the repository) advances states sampled along a constant-volume ignition (fresh, igniting and burnt gas, replicated over many cells) by one splitting step, as the solver does in every cell. Cells per second, the best of several calls after a warm-up, in double precision:

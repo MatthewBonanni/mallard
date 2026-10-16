@@ -44,6 +44,8 @@ void Mesh::init(const toml::value & input) {
 
     const std::vector<PeriodicPair> periodic = periodic_pairs(input);
     const MeshTransform transform = mesh_transform(input);
+    cell_order = cell_order_of_input(input);
+    h_global_cell_id.clear();
     if (get_type() == MeshType::FROM_FILE) {
         std::string filename = toml::find_or<std::string>(input, "mesh", "filename", "mesh.msh");
         this->init_file(filename, periodic, transform);
@@ -451,7 +453,7 @@ void Mesh::compute_cell_neighbors() {
     // them next to it: L(a) - L(b) for the cell's node a and the other's node b
     const bool periodic = !h_node_key.empty();
     auto key = [&](uint32_t n) { return periodic ? h_node_key[n] : n; };
-    // Cells of every key and their node of that key (CSR, cells in increasing order)
+    // Cells of every key and their node of that key (CSR, cells by global id)
     std::vector<uint32_t> key_offsets(n_nodes + 1, 0);
     std::vector<std::array<uint32_t, 2>> key_cells;
     for (uint32_t c = 0; c < n_cells; c++) {
@@ -461,10 +463,24 @@ void Mesh::compute_cell_neighbors() {
     key_cells.resize(key_offsets[n_nodes]);
     {
         std::vector<uint32_t> fill(key_offsets.begin(), key_offsets.end() - 1);
-        for (uint32_t c = 0; c < n_cells; c++) {
+        for (uint32_t c : cells_by_global_id()) {
             for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) {
                 const uint32_t n = h_node_of_cell(c, k);
                 key_cells[fill[key(n)]++] = {c, n};
+            }
+        }
+    }
+    // Rows of new translations numbered visiting cells by global id, as for the faces
+    if (periodic) {
+        for (uint32_t c : cells_by_global_id()) {
+            for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) {
+                const uint32_t a = h_node_of_cell(c, k);
+                for (uint32_t i = key_offsets[key(a)]; i < key_offsets[key(a) + 1]; i++) {
+                    const uint32_t b = key_cells[i][1];
+                    std::array<int8_t, 3> lattice;
+                    for (size_t j = 0; j < 3; j++) lattice[j] = h_node_lattice[a][j] - h_node_lattice[b][j];
+                    shift_index(lattice);
+                }
             }
         }
     }

@@ -125,13 +125,16 @@ TEST(MeshBlockTest, GeneratedBlocksNumberCellsAndNodesAsTheSerialMesh) {
         for (uint64_t n = 0; n < block.n_nodes(); n++) {
             FOR_I_DIM ASSERT_EQ(rtype(block.node_coords[n][i]), serial.h_node_coords(block.first_node + n, i));
         }
+        std::vector<uint32_t> local(serial.n_cells);
+        for (uint32_t c = 0; c < serial.n_cells; c++) local[serial.h_global_cell(c)] = c;
         for (uint64_t c = 0; c < block.n_cells(); c++) {
             // The serial 3D mesh reorients cells, which permutes their nodes
             std::vector<uint64_t> nodes(block.cell_nodes.begin() + static_cast<std::ptrdiff_t>(block.cell_offsets[c]),
                                         block.cell_nodes.begin() + static_cast<std::ptrdiff_t>(block.cell_offsets[c + 1]));
             std::vector<uint64_t> expected;
-            for (uint32_t k = 0; k < serial.h_n_nodes_of_cell(static_cast<uint32_t>(block.first_cell + c)); k++) {
-                expected.push_back(serial.h_node_of_cell(static_cast<uint32_t>(block.first_cell + c), k));
+            const uint32_t s = local[block.first_cell + c];
+            for (uint32_t k = 0; k < serial.h_n_nodes_of_cell(s); k++) {
+                expected.push_back(serial.h_node_of_cell(s, k));
             }
             std::sort(nodes.begin(), nodes.end());
             std::sort(expected.begin(), expected.end());
@@ -223,7 +226,9 @@ TEST(MeshBlockTest, TransformOnReadMapsNodesAndHighOrderNodes) {
     const double det = 8.0;
 #endif
     const double tol = precision_tol<double>(1e-12, 1e-5);
-    const toml::value input = parse_toml("[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" + transform);
+    // Cells keep the file's order, so that b's cells pair with a's
+    const toml::value input =
+        parse_toml("[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\ncell_order = \"input\"\n" + transform);
 
     const MeshBlock plain = read_file_block(file), moved = read_mesh_block(input);
     ASSERT_EQ(moved.n_nodes(), plain.n_nodes());

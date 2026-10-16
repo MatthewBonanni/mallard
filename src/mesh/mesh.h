@@ -22,6 +22,7 @@
 #include <Kokkos_Core.hpp>
 #include <toml.hpp>
 
+#include "cell_order.h"
 #include "curved.h"
 #include "zone.h"
 
@@ -361,7 +362,10 @@ class Mesh {
          *        zone unlisted_zone. Cells are triangles and quadrilaterals in 2D;
          *        tetrahedra, pyramids, prisms and hexahedra (Gmsh/VTK node
          *        order) in 3D. The zones of each periodic pair are joined into
-         *        interior faces (see docs/design/periodic.md).
+         *        interior faces (see docs/design/periodic.md). Without global
+         *        ids, the cells are numbered by cell_order (their given order
+         *        becoming their global ids); faces are numbered in the order the
+         *        cells reach them and oriented by global ids.
          */
         void init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & nodes,
                                     const std::vector<std::vector<uint32_t>> & cells,
@@ -426,13 +430,17 @@ class Mesh {
         void init_wedge(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly);
 
         /**
-         * @brief Global id of local cell i_cell (i_cell itself unless distributed).
-         *        Connectivity is ordered by global ids, so that every rank count
-         *        builds bitwise identical faces and stencils.
+         * @brief Global id of local cell i_cell (i_cell itself if the cells are
+         *        not renumbered). Connectivity is ordered by global ids, so that
+         *        every rank count and cell order builds bitwise identical faces
+         *        and stencils.
          */
         uint64_t h_global_cell(uint32_t i_cell) const {
             return h_global_cell_id.empty() ? i_cell : h_global_cell_id[i_cell];
         }
+
+        /** @brief Local cells in increasing global id (the first cell to visit a face becomes its cell 0). */
+        std::vector<uint32_t> cells_by_global_id() const;
 
         uint32_t n_cells, n_nodes, n_faces;
         // High-order boundary elements of the mesh file (global node ids), for curved::surfaces_of_mesh
@@ -448,7 +456,11 @@ class Mesh {
         // Cells [0, n_complete()) have all their vertex neighbors: all but the outermost halo layer
         uint32_t n_complete_cells = 0;
         uint32_t n_complete() const { return n_complete_cells ? n_complete_cells : n_cells; }
-        // Distributed runs: global id of every local cell and node, and the global counts (0 otherwise)
+        // Numbering of the cells of a whole mesh (init_from_connectivity); distributed meshes are numbered by
+        // DistributedMesh
+        CellOrder cell_order = CellOrder::INPUT;
+        // Global id of every local cell (empty if the local order is the global one). Distributed runs: also of
+        // every local node, and the global counts (0 otherwise)
         std::vector<uint64_t> h_global_cell_id;
         uint64_t n_global_cells = 0;
         std::vector<uint64_t> h_global_node_id;
@@ -522,8 +534,6 @@ class Mesh {
     protected:
     private:
         void init_box(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, bool triangles, bool wedge);
-        // Local cells in increasing global id: the first cell to visit a face becomes its cell 0
-        std::vector<uint32_t> cells_by_global_id() const;
         /**
          * @brief Positively oriented copy of 3D cells (Gmsh/VTK convention), as
          *        CSR offsets and node lists.

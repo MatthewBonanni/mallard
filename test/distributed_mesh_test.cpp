@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <map>
 #include <memory>
+#include <set>
 #include <unordered_map>
 #include <string>
 #include <vector>
@@ -30,11 +31,14 @@
 
 namespace {
 
+// The serial meshes keep the global numbering, which the references index by
 std::vector<std::string> mesh_inputs() {
     if constexpr (N_DIM == 2) {
-        return {"type = \"cartesian_tri\"\nNx = 9\nNy = 7\n", "type = \"wedge\"\nNx = 11\nNy = 6\n"};
+        return {"type = \"cartesian_tri\"\nNx = 9\nNy = 7\ncell_order = \"input\"\n",
+                "type = \"wedge\"\nNx = 11\nNy = 6\ncell_order = \"input\"\n"};
     }
-    return {"type = \"cartesian_mixed\"\nNx = 6\nNy = 3\nNz = 3\n", "type = \"cartesian_tet\"\nNx = 3\nNy = 3\nNz = 2\n"};
+    return {"type = \"cartesian_mixed\"\nNx = 6\nNy = 3\nNz = 3\ncell_order = \"input\"\n",
+            "type = \"cartesian_tet\"\nNx = 3\nNy = 3\nNz = 2\ncell_order = \"input\"\n"};
 }
 
 /**
@@ -253,6 +257,77 @@ TEST(DistributedMeshTest, LocalMeshesMatchTheSetupFromTheGlobalMesh) {
 }
 
 /**
+ * @brief Numbering a rank's cells by locality permutes the owned cells and
+ *        each halo layer among themselves and renumbers the faces, but every
+ *        cell, face orientation and geometry by global id stays bitwise the
+ *        same, and so do the cells exchanged with each neighbor.
+ */
+TEST(DistributedMeshTest, CellOrdersPermuteEachLayerAndKeepTheMeshByGlobalId) {
+    for (const std::string & mesh_input : mesh_inputs()) {
+        SCOPED_TRACE(mesh_input);
+        DistributedMesh distributed(read_mesh_block(parse_toml("[mesh]\n" + mesh_input)));
+        distributed.distribute(partition_hilbert(distributed, comm::size()));
+        Distribution ref_dist;
+        const auto ref = distributed.build_local_mesh(3, ref_dist, CellOrder::INPUT);
+        std::unordered_map<uint64_t, uint32_t> ref_cell;
+        for (uint32_t c = 0; c < ref->n_cells; c++) ref_cell[ref->h_global_cell(c)] = c;
+        // A face by the global ids of its cells (-1 outside) and its node coordinates
+        auto face = [](const Mesh & m, uint32_t f) {
+            std::vector<double> key;
+            for (int s = 0; s < 2; s++) {
+                const int32_t c = m.h_cells_of_face(f, s);
+                key.push_back(c < 0 ? -1.0 : double(m.h_global_cell(uint32_t(c))));
+            }
+            for (uint32_t j = 0; j < m.h_n_nodes_of_face(f); j++) {
+                FOR_I_DIM key.push_back(double(m.h_node_coords(m.h_node_of_face(f, j), i)));
+            }
+            FOR_I_DIM key.push_back(double(m.h_face_normals(f, i)));
+            key.push_back(double(m.h_face_area(f)));
+            return key;
+        };
+        std::set<std::vector<double>> ref_faces;
+        for (uint32_t f = 0; f < ref->n_faces; f++) ref_faces.insert(face(*ref, f));
+
+        {
+            Distribution dist;
+            const auto mesh = distributed.build_local_mesh(3, dist, CellOrder::HILBERT);
+            ASSERT_EQ(mesh->n_cells, ref->n_cells);
+            EXPECT_EQ(mesh->n_owned(), ref->n_owned());
+            EXPECT_EQ(mesh->n_reconstructed(), ref->n_reconstructed());
+            EXPECT_EQ(mesh->n_complete(), ref->n_complete());
+            EXPECT_EQ(dist.layer, ref_dist.layer);
+            EXPECT_EQ(dist.neighbors, ref_dist.neighbors);
+            uint32_t moved = 0;
+            for (uint32_t c = 0; c < mesh->n_cells; c++) {
+                const uint32_t r = ref_cell.at(mesh->h_global_cell(c));
+                moved += r != c;
+                ASSERT_EQ(dist.layer[c], ref_dist.layer[r]);
+                EXPECT_EQ(mesh->h_cell_volume(c), ref->h_cell_volume(r));
+                FOR_I_DIM EXPECT_EQ(mesh->h_cell_coords(c, i), ref->h_cell_coords(r, i));
+            }
+            if (comm::size() == 1) {
+                EXPECT_GT(moved, 0u);
+            }
+            // The same cells go to and come from each neighbor (in the receiver's order)
+            auto global = [](const Mesh & m, const std::vector<uint32_t> & cells) {
+                std::vector<uint64_t> g;
+                for (uint32_t c : cells) g.push_back(m.h_global_cell(c));
+                std::sort(g.begin(), g.end());
+                return g;
+            };
+            for (size_t k = 0; k < dist.send_cells.size(); k++) {
+                EXPECT_EQ(global(*mesh, dist.send_cells[k]), global(*ref, ref_dist.send_cells[k]));
+                EXPECT_EQ(global(*mesh, dist.recv_cells[k]), global(*ref, ref_dist.recv_cells[k]));
+            }
+            ASSERT_EQ(mesh->n_faces, ref->n_faces);
+            std::set<std::vector<double>> faces;
+            for (uint32_t f = 0; f < mesh->n_faces; f++) faces.insert(face(*mesh, f));
+            EXPECT_EQ(faces, ref_faces);
+        }
+    }
+}
+
+/**
  * @brief The distributed sample sort must give the same order as sorting all
  *        cells along the curve on one rank, and so equal pieces in curve order.
  */
@@ -299,8 +374,8 @@ TEST(DistributedMeshTest, PeriodicHaloLayersFollowVertexNeighborsAcrossSeams) {
     // Each halo layer holds exactly the cells one vertex-neighbor step further,
     // including neighbors across the seams of a fully periodic box
     const std::string input = N_DIM == 2
-        ? "[mesh]\ntype = \"cartesian_tri\"\nNx = 9\nNy = 7\nperiodic = [\"x\", \"y\"]\n"
-        : "[mesh]\ntype = \"cartesian_tet\"\nNx = 4\nNy = 3\nNz = 3\nperiodic = [\"x\", \"y\", \"z\"]\n";
+        ? "[mesh]\ntype = \"cartesian_tri\"\nNx = 9\nNy = 7\nperiodic = [\"x\", \"y\"]\ncell_order = \"input\"\n"
+        : "[mesh]\ntype = \"cartesian_tet\"\nNx = 4\nNy = 3\nNz = 3\nperiodic = [\"x\", \"y\", \"z\"]\ncell_order = \"input\"\n";
     const toml::value parsed = parse_toml(input);
     Mesh global;
     global.init(parsed);

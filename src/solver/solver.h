@@ -82,6 +82,13 @@ struct DirichletBoundary {
     std::vector<Expression> W;
 };
 
+/**
+ * @brief Sums over all ranks of the owned cells' terms, exact in fixed point (each term rounded to 2^-b of
+ *        the largest, b leaving room for every cell in 63 bits), so independent of the rank count and the
+ *        cell order.
+ */
+std::array<double, 2> exact_sums(const Kokkos::View<double *[2]> & terms, uint32_t n_owned, bool distributed);
+
 class Solver {
     public:
         Solver();
@@ -657,6 +664,7 @@ class Solver {
         rtype mass_flow_direction[N_DIM] = {};
         double domain_volume = 0.0;
         double mass_flow_force = 0.0;
+        Kokkos::View<double *[2]> mass_flow_terms;
 
         // Sponge layers: owned cells of positive total strength sum_i sigma_i,
         // and sum_i sigma_i U_ref,i of the conservatives, then the partial densities

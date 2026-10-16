@@ -74,7 +74,7 @@ void Solver::init_solution_restart() {
     // Restart files hold cells in global order, so any number of ranks can read
     // them; each rank reads only its local cells
     const bool distributed = mesh->n_global_cells > 0;
-    RestartData restart = read_restart(file, distributed ? &mesh->h_global_cell_id : nullptr);
+    RestartData restart = read_restart(file, mesh->h_global_cell_id.empty() ? nullptr : &mesh->h_global_cell_id);
     const uint64_t n_expected = distributed ? mesh->n_global_cells : mesh->n_cells;
     if (restart.n_cells != n_expected) {
         throw std::runtime_error("Restart file " + file + " does not match the mesh.");
