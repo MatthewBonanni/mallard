@@ -97,8 +97,10 @@ times the Riemann solver's), and `hybrid` does not combine with
 Premixed flames are thinner than LES cells. The dynamically thickened flame
 model (TFLES; Colin et al. 2000, Légier et al. 2002) multiplies diffusivities
 by `E F` and reaction rates by `E / F` inside the flame, so it spans `n_res`
-cells at the right speed; the efficiency `E` (Charlette et al. 2002) restores
-the subgrid wrinkling. A sensor `Ω` confines it to the flame:
+cells at the right speed; the efficiency `E` restores the subgrid wrinkling:
+by default `E = F^beta` (Charlette et al. 2002) with `beta` computed each step
+by a dynamic procedure (Wang et al. 2011) from how much resolved flame surface
+a test filter removes, so there is no model constant. A sensor `Ω` confines it to the flame:
 
 ![Progress variable of a laminar flame and of the same flame thickened by F = 3, and the flame sensor](../images/guide/tfles-light.svg#gh-light-mode-only)
 ![Progress variable of a laminar flame and of the same flame thickened by F = 3, and the flame sensor](../images/guide/tfles-dark.svg#gh-dark-mode-only)
@@ -119,17 +121,19 @@ T_burnt = 2384.28
 | `delta_L`, `s_L` | required | Laminar thermal thickness [m] and speed [m/s] |
 | `T_unburnt`, `T_burnt` | required | Temperatures of fresh and burnt gas [K], for the progress variable |
 | `n_res` | 5 | Cells across the thickened flame |
-| `efficiency` | `charlette` | `charlette` or `none` (`E = 1`) |
-| `beta` | 0.5 | Exponent of the Charlette efficiency |
-| `subgrid_velocity` | `colin` | `u'` of the efficiency: `colin` or `eddy_viscosity` (`C_u nu_t / Delta`) |
-| `C_u` | 28 | Constant of `subgrid_velocity = "eddy_viscosity"` |
+| `efficiency` | `dynamic` | `dynamic` (`E = F^beta`, `beta` from the flow), `charlette` (efficiency function of a subgrid velocity `u'`) or `none` (`E = 1`) |
+| `beta` | 0.5 | `charlette` only: exponent of the efficiency |
+| `subgrid_velocity` | `colin` | `charlette` only: `u'` of the efficiency, `colin` or `eddy_viscosity` (`C_u nu_t / Delta`) |
+| `C_u` | 28 | `charlette` only: constant of `subgrid_velocity = "eddy_viscosity"` |
 
-Output: `TF_F`, `TF_E`, `TF_OMEGA`. Validated on a premixed H2/air flame in
+Output: `TF_F`, `TF_E`, `TF_OMEGA`, and `tf_beta` in the integrals file. Validated on a premixed H2/air flame in
 decaying turbulence against its DNS
 ([validation](https://matthewbonanni.github.io/mallard/validation/#les-flame)).
-Pitfall: Colin's subgrid velocity overpredicts `u'` 5–8 times when the cells
-are coarser than about 0.4 `delta_L`, and the flame speed by 2x at 1.6
-`delta_L`; prefer `subgrid_velocity = "eddy_viscosity"` there.
+The dynamic efficiency keeps the turbulent flame speed within 8% of two DNS
+at cells of 0.4–1.6 `delta_L`. Pitfalls: `beta`, `subgrid_velocity` and `C_u`
+are input errors with `dynamic` (they belong to `charlette`); with
+`charlette`, Colin's subgrid velocity doubles the flame speed at 1.6
+`delta_L`; on a nearly flat flame at `F = 8` the dynamic `E` still adds 5–10%.
 
 ### PaSR (experimental)
 

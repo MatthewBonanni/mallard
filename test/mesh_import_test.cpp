@@ -154,6 +154,14 @@ TEST(MeshImportTest, FluentMatchesGmsh) {
     expect_same_mesh(gmsh, N_DIM == 2 ? "cyl2d_fluent_bin.msh" : "cyl3d_fluent_bin.msh", tol);
 }
 
+TEST(MeshImportTest, OpenFoamMatchesGmsh) {
+    // 2D: the Gmsh mesh extruded one cell thick between empty patches
+    const std::string gmsh = N_DIM == 2 ? "cyl2d.msh" : "cyl3d.msh";
+    const std::string foam = N_DIM == 2 ? "cyl2d_foam" : "cyl3d_foam";
+    expect_same_mesh(gmsh, foam, TOL);
+    expect_same_mesh(gmsh, foam + "_bin/constant/polyMesh", TOL);
+}
+
 TEST(MeshImportTest, PolygonsAndPolyhedraAreRejected) {
     // A pentagon (2D) or pentagonal prism (3D), by its faces
     std::vector<std::vector<uint32_t>> faces;
