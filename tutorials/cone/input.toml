@@ -1,6 +1,6 @@
 # Supersonic flow over a 15 degree sharp cone at Mach 2 and zero incidence
 # (3D build, Euler), against the exact conical flow of Taylor & Maccoll
-# (taylor_maccoll.py). Tutorial: tutorials/cone/README.md.
+# (taylor_maccoll.py). Tutorial: docs/tutorials/cone.md.
 #
 # Units: free-stream density and sound speed 1, so U = 2, p = T = 1 / gamma
 # (gas constant 1). Cone length 1: the flow crosses the domain in 0.6 time
