@@ -166,6 +166,9 @@ format = "vtp"
 reductions = ["mean", "rms"]
 ```
 
+![Probe shapes over a triangle mesh, colored by their point values of the pressure](../images/guide/probe_shapes-light.svg#gh-light-mode-only)
+![Probe shapes over a triangle mesh, colored by their point values of the pressure](../images/guide/probe_shapes-dark.svg#gh-dark-mode-only)
+
 | Key | Default | Meaning |
 |---|---|---|
 | `name` | required | Names the files |
@@ -176,7 +179,47 @@ reductions = ["mean", "rms"]
 | `format` | `csv` | `csv`, `hdf5` (one extensible file) or `vtp` (one file per output and a `.pvd` series) |
 | `reductions` | none | `integral`, `mean`, `favre`, `min`, `max`, `rms` along the geometry |
 | `samples` | `true` | `false` writes only the reductions |
-| `translate`, `rotate`, `scale` | none | Move the geometry (scale, then rotate about the origin, then translate) |
+| `scale`, `rotate`, `pivot`, `translate` | none | Move the geometry (scale, then rotate, about `pivot`, then translate) |
+
+### Boundary data
+
+`boundary = "<zone>"` (a name or a list) or `boundary_type = "wall"` (every
+wall) turns each face of the zones into a sample: the state the boundary
+condition sets on the face, wall quantities and fluxes. In 2D the faces form
+ordered polylines with their arc length `s`; in 3D, polygons for ParaView.
+
+```toml
+[[probes]]
+name = "cylinder"
+boundary = "cylinder"
+variables = ["P", "CP", "CF", "Q_W", "Y_PLUS"]
+reference = {rho = 1.0, u = [0.2, 0.0], p = 0.7142857142857143}
+time_interval = 1.0
+
+[[probes]]
+name = "inflow"
+boundary = ["inlet", "outlet"]
+samples = false
+variables = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
+reductions = ["integral"]
+```
+
+![Boundary probes on the curved walls of an annulus: each wall a closed polyline traversed with the fluid on its left, and the inner wall's pressure against arc length, point values against cell averages and the exact value](../images/guide/probe_walls-light.svg#gh-light-mode-only)
+![Boundary probes on the curved walls of an annulus: each wall a closed polyline traversed with the fluid on its left, and the inner wall's pressure against arc length, point values against cell averages and the exact value](../images/guide/probe_walls-dark.svg#gh-dark-mode-only)
+
+In 3D the faces are polygons; ParaView colors the `.vtp` series by any variable:
+
+![Heat flux into an isothermal wall under a sheared warm blob, from a 3D boundary probe](../images/guide/probe_wall_3d-light.svg#gh-light-mode-only)
+![Heat flux into an isothermal wall under a sheared warm blob, from a 3D boundary probe](../images/guide/probe_wall_3d-dark.svg#gh-dark-mode-only)
+
+| Variable | Meaning |
+|---|---|
+| `MASS_FLUX`, `MOMENTUM_FLUX`, `ENTHALPY_FLUX`, `SPECIES_FLUX_*` | Convective fluxes through the face, positive out of the domain |
+| `TRACTION_PRESSURE`, `TRACTION_VISCOUS` | Force per unit area on the boundary; their `integral` is the `[[forces]]` force |
+| `TAU_W`, `TAU_W_X`, ... | Wall shear stress (magnitude, components) |
+| `CF`, `CP` | Skin friction and pressure coefficients of `reference` |
+| `Q_W` | Heat flux into the fluid |
+| `U_TAU`, `Y_PLUS` | Friction velocity and first-cell `y+` |
 
 With TENO, `sampling = "point"` reads each cell's reconstruction polynomial at
 the sample, so a probe converges at the scheme's order (fifth order for
@@ -192,6 +235,11 @@ Pitfalls:
   reconstructed `p / rho` at the cell's composition.
 - CSV is for small probes: it repeats the coordinates every output. Use `hdf5`
   or `vtp` for thousands of samples.
+- Wall shear and heat flux use the viscous flux's one-sided wall gradients:
+  second-order shear on smooth meshes, first-order heat flux at isothermal
+  walls. `CF` is signed along `reference.u`.
+- Fluxes of boundary probes are those of the face states, not the scheme's
+  numerical fluxes: they agree as the mesh is refined.
 - Reductions of point sets weigh each point 1 (`integral` is a sum); curves
   integrate with three Gauss points per element between samples.
 

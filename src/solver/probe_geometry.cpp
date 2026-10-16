@@ -33,7 +33,7 @@ Vec3 sub(const Vec3 & a, const Vec3 & b) { return {a[0] - b[0], a[1] - b[1], a[2
 Vec3 mul(double s, const Vec3 & a) { return {s * a[0], s * a[1], s * a[2]}; }
 double dot(const Vec3 & a, const Vec3 & b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 double norm(const Vec3 & a) { return std::sqrt(dot(a, a)); }
-[[maybe_unused]] Vec3 cross(const Vec3 & a, const Vec3 & b) {
+Vec3 cross(const Vec3 & a, const Vec3 & b) {
     return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
 }
 
@@ -209,24 +209,50 @@ Transform Transform::read(const toml::value & entry, const std::string & key) {
         const toml::value & v = entry.at("rotate");
         Vec3 axis = {0.0, 0.0, 1.0};
         double angle = 0.0;
-        if (N_DIM == 2 && !v.is_table()) {
-            angle = as_double(v, key + ".rotate") * DEG;
+        const std::string rkey = key + ".rotate";
+        if (N_DIM == 3 && v.is_table() && v.contains("axes")) {
+            // The rotated x, y, z axes in world coordinates: the columns of R
+            const toml::value & axes = v.at("axes");
+            if (!axes.is_array() || axes.as_array().size() != 3) throw InputError(rkey + ".axes must list 3 axes.");
+            for (size_t j = 0; j < 3; j++) {
+                const Vec3 e = as_vector(axes.as_array()[j], rkey + ".axes");
+                for (size_t i = 0; i < 3; i++) R[i][j] = e[i];
+            }
+            for (size_t i = 0; i < 3; i++) {
+                for (size_t j = 0; j < 3; j++) {
+                    const double d = R[0][i] * R[0][j] + R[1][i] * R[1][j] + R[2][i] * R[2][j];
+                    if (std::fabs(d - (i == j ? 1.0 : 0.0)) > 1e-9) throw InputError(rkey + ".axes must be orthonormal.");
+                }
+            }
+            const Vec3 x = {R[0][0], R[1][0], R[2][0]}, y = {R[0][1], R[1][1], R[2][1]}, z = {R[0][2], R[1][2], R[2][2]};
+            if (dot(cross(x, y), z) < 0.0) throw InputError(rkey + ".axes must be right-handed.");
         } else {
-            if (!v.is_table()) throw InputError(key + ".rotate must be a table {axis = [...], angle = degrees}.");
-            angle = read_number(v, "angle", key + ".rotate") * DEG;
-            if (N_DIM == 3) axis = unit(read_vector(v, "axis", key + ".rotate"), key + ".rotate.axis");
+            if (N_DIM == 2 && !v.is_table()) {
+                angle = as_double(v, rkey) * DEG;
+            } else {
+                if (!v.is_table()) {
+                    throw InputError(rkey + " must be a table {axis = [...], angle = degrees} or {axes = [...]}.");
+                }
+                angle = read_number(v, "angle", rkey) * DEG;
+                if (N_DIM == 3) axis = unit(read_vector(v, "axis", rkey), rkey + ".axis");
+            }
+            // Rodrigues: R = cos I + sin [axis]x + (1 - cos) axis axis^T
+            const double c = std::cos(angle), sn = std::sin(angle);
+            const Vec3 & k = axis;
+            R = {Vec3{c + k[0] * k[0] * (1 - c), k[0] * k[1] * (1 - c) - k[2] * sn, k[0] * k[2] * (1 - c) + k[1] * sn},
+                 Vec3{k[1] * k[0] * (1 - c) + k[2] * sn, c + k[1] * k[1] * (1 - c), k[1] * k[2] * (1 - c) - k[0] * sn},
+                 Vec3{k[2] * k[0] * (1 - c) - k[1] * sn, k[2] * k[1] * (1 - c) + k[0] * sn, c + k[2] * k[2] * (1 - c)}};
         }
-        // Rodrigues: R = cos I + sin [axis]x + (1 - cos) axis axis^T
-        const double c = std::cos(angle), sn = std::sin(angle);
-        const Vec3 & k = axis;
-        R = {Vec3{c + k[0] * k[0] * (1 - c), k[0] * k[1] * (1 - c) - k[2] * sn, k[0] * k[2] * (1 - c) + k[1] * sn},
-             Vec3{k[1] * k[0] * (1 - c) + k[2] * sn, c + k[1] * k[1] * (1 - c), k[1] * k[2] * (1 - c) - k[0] * sn},
-             Vec3{k[2] * k[0] * (1 - c) - k[1] * sn, k[2] * k[1] * (1 - c) + k[0] * sn, c + k[2] * k[2] * (1 - c)}};
     }
     for (size_t i = 0; i < 3; i++) {
         for (size_t j = 0; j < 3; j++) T.A[i][j] = R[i][j] * s[j];
     }
-    if (entry.contains("translate")) T.t = read_vector(entry, "translate", key);
+    // About the pivot: x -> A (x - pivot) + pivot + translate
+    if (entry.contains("pivot")) {
+        const Vec3 pivot = read_vector(entry, "pivot", key);
+        T.t = sub(pivot, T.vector(pivot));
+    }
+    if (entry.contains("translate")) T.t = add(T.t, read_vector(entry, "translate", key));
     return T;
 }
 
