@@ -173,13 +173,37 @@ reductions = ["mean", "rms"]
 |---|---|---|
 | `name` | required | Names the files |
 | `variables` | required | `[statistics]` fields; `U` and `Y_*` expand to all components and species |
-| `shape` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`) |
+| `shape` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`), `cut_plane` (`point`, `normal`, optional `bounds`); 3D surfaces `rectangle`, `disk`, `sphere`, `cylinder`, `cone`, `surface` (`x`, `y`, `z` of `u`, `v`) |
 | `sampling` | `cell` | `cell`: the average of the cell holding each sample; `point`: the reconstruction's value at the sample |
 | `interval` / `time_interval` | 1 step | Output times; `time_interval` shortens the step to land on them |
 | `format` | `csv` | `csv`, `hdf5` (one extensible file) or `vtp` (one file per output and a `.pvd` series) |
 | `reductions` | none | `integral`, `mean`, `favre`, `min`, `max`, `rms` along the geometry |
 | `samples` | `true` | `false` writes only the reductions |
 | `scale`, `rotate`, `pivot`, `translate` | none | Move the geometry (scale, then rotate, about `pivot`, then translate) |
+
+### Cut planes and surfaces
+
+`shape = "cut_plane"` intersects the mesh exactly with a plane: one sample per
+cut cell, and integrals exact for the reconstruction polynomials. Surfaces
+(`sphere`, `cylinder`, ...) are resampled on a grid instead. Both have normals,
+so fluxes through them are variables: a closed sphere's `integral` of
+`MASS_FLUX` is the net outflow.
+
+![An exact cut plane through a tetrahedral mesh, one polygon per cut cell, and a resampled sphere, both colored by point values of the pressure](../images/guide/probe_cut_3d-light.svg#gh-light-mode-only)
+![An exact cut plane through a tetrahedral mesh, one polygon per cut cell, and a resampled sphere, both colored by point values of the pressure](../images/guide/probe_cut_3d-dark.svg#gh-dark-mode-only)
+
+```toml
+[[probes]]
+name = "midplane"
+shape = "cut_plane"
+point = [0.0, 0.0, 0.5]
+normal = [0.0, 0.0, 1.0]
+variables = ["U", "P", "MASS_FLUX"]
+sampling = "point"
+format = "vtp"
+time_interval = 0.01
+reductions = ["integral"]
+```
 
 ### Boundary data
 
@@ -238,6 +262,8 @@ Pitfalls:
 - Wall shear and heat flux use the viscous flux's one-sided wall gradients:
   second-order shear on smooth meshes, first-order heat flux at isothermal
   walls. `CF` is signed along `reference.u`.
+- A cut plane is exact for the mesh's straight-sided cells (curved cells are
+  cut as their straight versions); `bounds` clips it to a box.
 - Fluxes of boundary probes are those of the face states, not the scheme's
   numerical fluxes: they agree as the mesh is refined.
 - Reductions of point sets weigh each point 1 (`integral` is a sum); curves
