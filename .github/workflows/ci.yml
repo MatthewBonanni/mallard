@@ -1,5 +1,8 @@
 name: CI
 
+# Pull requests don't run CI on every push: when a PR is ready to land, run
+#   gh workflow run ci.yml --ref <branch>
+# and the results appear as checks on the branch's head commit. main runs on push.
 on:
   push:
     branches: [main]
@@ -9,34 +12,25 @@ on:
       - 'CITATION.cff'
       - 'LICENSE'
       - '.github/workflows/pages.yml'
-  pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - 'CITATION.cff'
-      - 'LICENSE'
-      - '.github/workflows/pages.yml'
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  # Pull requests run the full 2D suite (OpenMP, with CGNS), the full 3D suite and the
+  # Branches run the full 2D suite (OpenMP, with CGNS), the full 3D suite and the
   # multi-rank tests, the full single-precision suites in 2D and 3D (3D with CGNS), and a
   # Clang build (no tests) for the warnings GCC misses. main also runs the
   # serial-backend and non-MPI 3D builds.
   matrix:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     outputs:
       backends: ${{ steps.pick.outputs.backends }}
     steps:
       - id: pick
         env:
-          ALL: ${{ github.event_name != 'pull_request' }}
+          ALL: ${{ github.ref == 'refs/heads/main' }}
         run: |
           backends='[
             {"name": "openmp", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON", "cgns": true, "full": true},
@@ -126,7 +120,6 @@ jobs:
   # The tutorials (tutorials/) at reduced size: Gmsh meshes, runs on two MPI
   # ranks and their post-processing scripts, so they keep working
   tutorials:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

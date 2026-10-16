@@ -56,6 +56,33 @@ gradients (1.2 ms) and fluxes (0.9 ms).
   and multiply-adds, however few cells there are. This latency floor, not launch overhead, is what
   limits strong scaling of TENO at small sizes.
 
+3D TENO5 (Taylor-Green, symmetry walls) on one GPU, against cells (#304; time per step, CUDA graph, and the
+smooth pass per cell and stage from Nsight Systems):
+
+| cells | hexahedra ms/step | smooth pass ns/cell | tetrahedra ms/step | MUSCL hexahedra ms/step |
+|---|---|---|---|---|
+| 4,096 | 1.83 | 102 | 2.04 (4,374) | 0.367 |
+| 32,768 | 6.41 | 55.5 | 7.50 (34,992) | 0.685 |
+| 64,000 | 12.2 | 54.5 | 13.0 (63,888) | 1.29 |
+| 110,592 | 20.6 | 53.7 | 24.9 (131,712) | 1.92 |
+| 262,144 | 46.8 | 51.9 | 46.9 (257,250) | 4.12 |
+| 1,000,000 | 167 | 48.7 | 173 (998,250) | 14.7 |
+
+- The smooth pass costs within 14% of its 1M-cell rate per cell down to 32k cells (smaller boxes also have more
+  cells with mirrored stencil entries); below that it hits the latency floor (about 420 us per stage).
+- Timing each team with `clock64` (one A100): its stencil loop takes 270-300k cycles for 69 entries, about 4,000
+  cycles per entry, and its face points 150-200k; the same in every chunk, so the loop waits on loads (stencil cell,
+  then its state). Three teams per SM (128 registers), unrolling the loop by 2 or 4, and software-pipelining the
+  loads by hand were all 10-50% slower, from spills.
+- 4 GPUs, 64^3 (65,536 cells per GPU, 88.6% strong efficiency against one GPU): per stage the GPU spends 3.70 ms
+  reconstructing (owned and 4,160 layer-1 cells, 6.3% of them redundant) against 3.40 ms for a quarter of the
+  one-GPU stage, and the rest on fluxes and gradients that also cover halo cells. The overlap already fills the
+  first reconstruction's tail with the halo-dependent cells' kernel, and NCCL with graphs and MPI without are within
+  2% (6.35 / 6.44 ms per step at 48^3).
+- The viscous gradients covered every halo layer (31,808 halo cells per rank at 64^3 on 4 GPUs, 7 layers); the
+  fluxes read owned and layer-1 cells only, so only those are computed now (LES models still read all). Bitwise
+  identical; within noise on 4 GPUs (48^3: 6.43 / 6.40 ms per step), more where halos are a larger share.
+
 ## Changes
 
 ### 1. Cooperative 3D TENO smooth pass
