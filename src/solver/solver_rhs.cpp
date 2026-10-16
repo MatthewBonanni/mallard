@@ -152,7 +152,9 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
     }
     ViscousFluxFunctor viscous_functor;
     if (physics.is_viscous()) {
-        if (!hybrid_flux) Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, mesh->n_cells), viscous_gradient);
+        // The fluxes read the gradients of owned and halo layer-1 cells; LES models read all
+        const uint32_t n_gradients = les_on ? mesh->n_cells : mesh->n_reconstructed();
+        if (!hybrid_flux) Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradients), viscous_gradient);
         if (les_on) update_eddy_viscosity(mesh->n_cells);
         viscous_functor = ViscousFluxFunctor{mesh->face_normals, mesh->face_measure, mesh->face_coords,
                                              mesh->cell_coords, mesh->cells_of_face, mesh->shifts, mesh->face_shift,
