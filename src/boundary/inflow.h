@@ -140,8 +140,9 @@ MALLARD_INFLOW_NOINLINE KOKKOS_INLINE_FUNCTION void stagnation_state(const Gas &
  *        wave p + rho_i c_i u_n of the interior state, with c_i^2 = gamma_c
  *        p_i / rho_i, so p - Z G R T / p = p_i + Z u_n,i.
  */
-KOKKOS_INLINE_FUNCTION void mass_flow_state(const double gamma_c, const double R, const double T, const double G,
-                                            const rtype * d, const rtype * W_i, const rtype * n, rtype * W_g) {
+MALLARD_INFLOW_NOINLINE KOKKOS_INLINE_FUNCTION void mass_flow_state(const double gamma_c, const double R,
+                                                                    const double T, const double G, const rtype * d,
+                                                                    const rtype * W_i, const rtype * n, rtype * W_g) {
     constexpr uint8_t E = N_DIM + 1;
     double dir[N_DIM], d2 = 0.0;
     FOR_I_DIM d2 += double(d[i]) * double(d[i]);
