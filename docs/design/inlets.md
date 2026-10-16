@@ -1,6 +1,6 @@
 # Design: inlets
 
-Status: implemented (`stagnation_inlet`).
+Status: implemented (`stagnation_inlet`, `mass_flow_inlet`).
 
 `upt` imposes velocity, pressure and temperature, which over-specifies a
 subsonic inflow: one characteristic, the acoustic wave travelling upstream,
@@ -128,3 +128,82 @@ nozzle is curved; the quasi-1D theory has it straight. The shock is curved
 too (it stands further upstream at the wall), and its section average is
 weaker than the quasi-1D one: 1.4% less loss of stagnation pressure, which
 moves it two cells upstream.
+
+## `mass_flow_inlet`
+
+![The mass-flow inlet: what it imposes and what it takes from the interior](../images/guide/inlet_mass_flow-light.svg#gh-light-mode-only)
+![The mass-flow inlet: what it imposes and what it takes from the interior](../images/guide/inlet_mass_flow-dark.svg#gh-dark-mode-only)
+
+The inlet imposes the mass flux `G = ρ u · n_in`, the temperature `T`, the
+flow direction `d` and the composition. The interior supplies the outgoing
+acoustic wave, linearized about the interior state:
+
+```
+p + Z u_n = p_i + Z u_n,i,    Z = sqrt(γ_c p_i ρ_i)       (u_n along the outward normal)
+u_n = −G / ρ = −G R T / p
+⇒ p² − (p_i + Z u_n,i) p − Z G R T = 0                     (the positive root)
+ρ = p / (R T),   u = G / (ρ |d · n|) d
+```
+
+`γ_c` is the condition's own frozen ratio of specific heats at `T` for
+mixtures (the gas's `γ` otherwise). The pressure is a closed form, with no
+iteration.
+
+**The flux is the boundary state's.** A ghost state alone does not hold the
+mass flow. The Riemann flux between the interior state and a ghost of mass
+flux `G` carries `G` only where the two states agree. Heat release or
+compression behind the inlet keeps them apart, and the mass flow drifts with
+them. The face flux is therefore the physical flux of the boundary state:
+the Riemann solver gets the boundary state on both sides, and every solver
+returns `F(W_b)` for equal states. Its mass flux is `ρ u · n = −G` to
+round-off, at every quadrature point. Species enter at `G Y_k`. With double
+flux, both sides use the cell's frozen thermodynamics, as at any face.
+
+The pressure still comes from the interior, so the face keeps the outgoing
+acoustic wave's characteristic relation. A boundary-state flux is stable
+where a single wave leaves, which is the subsonic inflow this condition is
+for.
+
+`mdot` is divided among the faces by `profile × face measure`, summed over
+the faces of owned cells on all ranks. The faces' total is then `mdot`
+exactly, with whatever measure the flux integral uses (per unit depth in
+2D, `r L` per radian in axisymmetric runs). A face with a mass flux of its
+own (an expression, or a profile) gets its own copy of the condition, as the
+faces of a composition that varies along `upt` do.
+
+An NSCBC-relaxed variant, relaxing the mass flux like `nscbc_inlet` relaxes
+the velocity, would let acoustic waves leave; it is not implemented.
+`mass_flow_inlet` reflects them like `upt`, at a fixed mass flux instead of a
+fixed velocity.
+
+### Verification
+
+`test/inlet_test.cpp`:
+
+- **Ghost.** The ghost carries `G`, `T` and `d`, and keeps the outgoing
+  acoustic wave, for interior densities from 0.5 to 3.
+- **Closed heated duct.** A duct closed at the far end and heated in its
+  middle gains exactly `mdot t` (to 1e-11 of it, in practice 1e-14). This
+  holds for a single gas with MUSCL/HLLC and TENO/Roe, for mixtures with and
+  without double flux, and for a uniform `mass_flux` as well as an `mdot`
+  with a profile. `upt` at the same initial mass flux misses by more than 1%.
+- **Rayleigh flow.** Steady flow through a heated duct to a pressure outlet
+  matches Rayleigh flow to 1e-4: the inlet pressure the flow needs, and the
+  exit velocity and temperature.
+- **MPI.** An `mdot` with a profile on two to four ranks matches the serial
+  run.
+
+![Steady heated duct: pressure, velocity and temperature against Rayleigh flow](../images/guide/heated_duct-light.svg#gh-light-mode-only)
+![Steady heated duct: pressure, velocity and temperature against Rayleigh flow](../images/guide/heated_duct-dark.svg#gh-dark-mode-only)
+
+![A closed duct fed through a mass-flow inlet and heated: the mass in the duct grows by exactly mdot t, while upt's drifts](../images/guide/mass_flow_held-light.svg#gh-light-mode-only)
+![A closed duct fed through a mass-flow inlet and heated: the mass in the duct grows by exactly mdot t, while upt's drifts](../images/guide/mass_flow_held-dark.svg#gh-dark-mode-only)
+
+`examples/heated_duct` (`tools/plot_heated_duct.py`):
+
+- **Steady duct.** On 200 cells, the inlet pressure is within 1e-5 and the
+  exit temperature within 1e-6 of Rayleigh flow.
+- **Closed duct.** The mass added stays within 1.1e-14 of `mdot t` while the
+  inlet density rises from 1.16 to 1.69 kg/m³. With `upt`, the duct first
+  gains less, then loses gas through the inlet once its pressure exceeds the
+  inlet's.

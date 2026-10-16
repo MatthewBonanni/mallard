@@ -45,7 +45,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 
 **Boundary conditions**
 - Slip, adiabatic, isothermal and heat-flux walls, optionally moving
-- Inflow at a given velocity or at stagnation pressure and temperature (thermally perfect mixtures included; [guide](docs/guide/boundary_conditions.md#stagnation-inlet)), characteristic far field, pressure outlets (local or area-averaged), transmissive, time-dependent expressions
+- Inflow at a given velocity, mass flow, or stagnation pressure and temperature (thermally perfect mixtures included; [guide](docs/guide/boundary_conditions.md#stagnation-inlet)), characteristic far field, pressure outlets (local or area-averaged), transmissive, time-dependent expressions
 - Partially non-reflecting characteristic (NSCBC) inlets and outlets with transverse terms (1% of an acoustic pulse reflected, against 97-99% at a fixed-pressure outlet); sponge layers
 - Zones split between conditions by expressions
 

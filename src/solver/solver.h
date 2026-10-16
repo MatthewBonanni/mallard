@@ -390,6 +390,13 @@ class Solver {
         void init_inlets(const std::vector<toml::value> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
         void update_inflow(rtype t_eval);
+        /**
+         * @brief Mass fluxes of the faces of a mass_flow_inlet entry: per
+         *        face for a mass_flux expression or an mdot with a profile,
+         *        else empty (an mdot without profile sets bc's uniform flux).
+         */
+        std::vector<double> mass_flow_inlet_fluxes(const toml::value & bound, const std::vector<uint32_t> & faces,
+                                                   BoundaryCondition & bc) const;
         void init_sources();
         void update_source_field(rtype t_eval);
         void init_sponges();
