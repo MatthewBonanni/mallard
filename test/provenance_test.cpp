@@ -18,6 +18,7 @@
 #include "comm.h"
 #include "data_writer.h"
 #include "json_reader.h"
+#include "mesh_block.h"
 #include "provenance.h"
 #include "run_log.h"
 #include "solver.h"
@@ -66,19 +67,15 @@ std::string box(const std::string & dir, uint32_t n_steps, const std::string & i
 const std::string UNIFORM = "type = \"analytical\"\nrho = \"1.0\"\np = \"1.0\"\nu = " +
                             std::string(N_DIM == 3 ? "[\"0.5\", \"0.0\", \"0.0\"]" : "[\"0.5\", \"0.0\"]") + "\n";
 
-constexpr bool HAS_HDF5 =
-#ifdef Mallard_HAS_HDF5
-    true;
-#else
-    false;
-#endif
+/** @brief Whether these runs can write HDF5: built with it, and in parallel runs with parallel HDF5. */
+bool writes_hdf5() { return have_hdf5() && (comm::size() == 1 || have_parallel_hdf5()); }
 
 /** @brief Runs the box from an input file in dir, as the executable does; returns the input file's path. */
 std::string run_box(const std::string & dir, uint32_t n_steps, const std::string & initialize) {
     const std::string input = dir + "/input_" + std::to_string(n_steps) + ".toml";
     if (comm::is_root()) {
         std::filesystem::create_directories(dir);
-        std::ofstream(input) << box(dir, n_steps, initialize, HAS_HDF5);
+        std::ofstream(input) << box(dir, n_steps, initialize, writes_hdf5());
     }
     comm::barrier();
     Solver solver;
@@ -211,7 +208,7 @@ TEST(ProvenanceTest, EveryOutputFileCarriesTheRunsProvenance) {
     EXPECT_EQ(p["mallard"]["version"].string, mallard_version());
     EXPECT_EQ(p["build"]["dim"].number, N_DIM);
     EXPECT_EQ(p["build"]["precision"].string, sizeof(rtype) == 8 ? "double" : "single");
-    EXPECT_EQ(p["build"]["hdf5"].boolean, HAS_HDF5);
+    EXPECT_EQ(p["build"]["hdf5"].boolean, have_hdf5());
     EXPECT_EQ(p["run"]["ranks"].number, comm::size());
     EXPECT_EQ(p["input"]["file"].string, input);
     EXPECT_EQ(p["input"]["text"].string, read_file(input));
@@ -224,7 +221,10 @@ TEST(ProvenanceTest, EveryOutputFileCarriesTheRunsProvenance) {
     EXPECT_TRUE(integrator);
 
     EXPECT_EQ(read_restart(dir + "/r_000004.restart").provenance, expected);
-    EXPECT_EQ(provenance::parse_comment(read_file(dir + "/f_000004.vtu")), expected);
+    for (const std::string & vtu : comm::size() > 1 ? std::vector<std::string>{"f_000004.pvtu", "f_000004_p0000.vtu"}
+                                                    : std::vector<std::string>{"f_000004.vtu"}) {
+        EXPECT_EQ(provenance::parse_comment(read_file(dir + "/" + vtu)), expected) << vtu;
+    }
     EXPECT_EQ(provenance::parse_comment(read_file(dir + "/f.pvd")), expected);
     for (const char * csv : {"/integrals.csv", "/probe.csv"}) {
         const auto rows = lines(dir + csv);
@@ -236,11 +236,12 @@ TEST(ProvenanceTest, EveryOutputFileCarriesTheRunsProvenance) {
     EXPECT_NE(lines(dir + "/run.jsonl").front().find(expected), std::string::npos);
 #ifdef Mallard_HAS_HDF5
     for (const char * h5 : {"/h_000004.h5", "/h_mesh.h5"}) {
+        if (!writes_hdf5()) break;
         h5::Handle file(H5Fopen((dir + h5).c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, h5);
         h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
         EXPECT_EQ(h5::read_strings_attribute(root, "provenance").at(0), expected) << h5;
     }
-    EXPECT_EQ(provenance::parse_comment(read_file(dir + "/h.xmf")), expected);
+    if (writes_hdf5()) EXPECT_EQ(provenance::parse_comment(read_file(dir + "/h.xmf")), expected);
 #endif
     std::filesystem::remove_all(dir);
 }
@@ -274,6 +275,7 @@ TEST(ProvenanceTest, LargeProvenanceFitsInHdf5Attributes) {
 #ifndef Mallard_HAS_HDF5
     GTEST_SKIP() << "no HDF5";
 #else
+    if (!writes_hdf5()) GTEST_SKIP() << "no parallel HDF5";
     // An input past HDF5's 64 KiB limit of compact attributes
     const std::string dir = (std::filesystem::temp_directory_path() / "mallard_provenance_large").string();
     if (comm::is_root()) std::filesystem::remove_all(dir);
