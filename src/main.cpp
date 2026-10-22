@@ -15,6 +15,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "build_info.h"
+#include "case_template.h"
 #include "input.h"
 #include "log.h"
 #include "parallel/comm.h"
@@ -26,8 +27,21 @@ void usage(const char * program) {
     std::cerr << "Usage: " << program << " -i input.toml [Kokkos options, e.g. --kokkos-num-threads=8]\n"
               << "       " << program << " --check input.toml [--ranks N] [--throughput CELLS_PER_S | --steps N]"
               << " [--quality-vtu PREFIX]\n"
+              << "       " << program << " new <template> [directory]   (" << program << " new --list)\n"
               << "       " << program << " --version\n";
 }
+
+/**
+ * @brief Commands given as the first argument, each with the arguments after it.
+ */
+struct Subcommand {
+    const char * name;
+    int (*run)(int argc, char ** argv);
+};
+
+constexpr Subcommand subcommands[] = {
+    {"new", case_template::new_main},
+};
 
 /**
  * @brief Exception text without toml11's "[error] " prefix and trailing newlines.
@@ -59,6 +73,11 @@ std::string error_text(const std::exception & e) {
  * @return Exit status.
  */
 int main(int argc, char* argv[]) {
+    if (argc > 1) {
+        for (const auto & command : subcommands) {
+            if (strcmp(argv[1], command.name) == 0) return command.run(argc - 2, argv + 2);
+        }
+    }
     std::string input_file;
     bool check = false;
     CheckOptions options;
