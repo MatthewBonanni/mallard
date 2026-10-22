@@ -132,6 +132,14 @@ struct ConvectiveFluxFunctor {
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
+        rtype out[N_CONSERVATIVE];
+        flux(i_face, out);
+        FOR_I_CONSERVATIVE face_flux(i_face, i) = out[i];
+    }
+
+    /** @brief The face's flux from cell 0 into cell 1 (into the domain at boundary faces), times its area. */
+    KOKKOS_INLINE_FUNCTION
+    void flux(const uint32_t i_face, rtype * out) const {
         uint8_t n_quad;
         if constexpr (N_DIM == 2) {
             n_quad = static_cast<uint8_t>(quad_weights.extent(0));
@@ -148,7 +156,7 @@ struct ConvectiveFluxFunctor {
         const rtype phi =
             hybrid ? face_upwind_fraction(upwind, boundaries, cells_of_face(i_face, 0), c1, i_face) : 1.0_r;
 
-        rtype flux[N_CONSERVATIVE] = {};
+        rtype total[N_CONSERVATIVE] = {};
         for (uint8_t i_quad = 0; i_quad < n_quad; i_quad++) {
             rtype n_q[N_DIM];
             const rtype * n_point = quad_normal(quad_normals, i_face, i_quad, n_unit, n_q);
@@ -178,13 +186,13 @@ struct ConvectiveFluxFunctor {
             } else {
                 FOR_I_CONSERVATIVE flux_q[i] = central[i];
             }
-            FOR_I_CONSERVATIVE flux[i] += w_q * flux_q[i];
+            FOR_I_CONSERVATIVE total[i] += w_q * flux_q[i];
         }
 
         // Weights sum to 2 (Gauss-Legendre on [-1, 1] in 2D), on curved faces
         // to twice their area over face_area
         const rtype scale = 0.5_r * face_area(i_face);
-        FOR_I_CONSERVATIVE face_flux(i_face, i) = -scale * flux[i];
+        FOR_I_CONSERVATIVE out[i] = -scale * total[i];
     }
 };
 

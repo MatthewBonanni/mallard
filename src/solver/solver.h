@@ -38,6 +38,7 @@
 #include "scalar_reconstruction.h"
 #include "data_writer.h"
 #include "statistics.h"
+#include "health_state.h"
 #include "synthetic_inflow.h"
 #include "wall_exchange.h"
 #include "expression.h"
@@ -88,6 +89,10 @@ struct DirichletBoundary {
     std::vector<uint32_t> faces;
     std::vector<Expression> W;
 };
+
+struct ViscousFluxFunctor;
+template <typename T_riemann_solver>
+struct ConvectiveFluxFunctor;
 
 class Solver {
     public:
@@ -393,6 +398,13 @@ class Solver {
         /** @brief The numerics preset and the value and origin of each of its keys. */
         const numerics_preset::Resolution & get_numerics_preset() const { return preset; }
 
+        /** @brief Test-only: errors injected into the update, for the conservation ledger's tests. */
+        void set_ledger_mutation(const LedgerMutation & m) { run_health.mutation = m; }
+        /** @brief The run health of the latest report (empty without [output] health). */
+        const health::Report & get_health() const { return run_health.last; }
+        /** @brief Collects the health report now, as a progress row does (collective). */
+        void report_health();
+
         /** @brief The solution: flow block and species partial densities. */
         State state() const { return State(conservatives, species); }
 
@@ -457,6 +469,15 @@ class Solver {
         /** @brief Provenance lines of the CSV files and the run log's start record. */
         void write_provenance();
         std::vector<std::string> integral_names() const;
+        // Run health (solver_health.cpp)
+        void init_health();
+        /** @brief The ledger's terms of one RHS evaluation (viscous: the single gas's viscous flux, else null). */
+        void ledger_stage(const State & state, const ViscousFluxFunctor * viscous);
+        /** @brief Sampled step: the time since the previous mark goes to phase. */
+        void mark_phase(StepPhase phase);
+        void begin_sample();
+        void end_sample();
+        void health_summary() const;
         template <typename F>
         void timed_phase(const std::string & name, F && f);
         void write_data(bool force = false);
@@ -500,6 +521,8 @@ class Solver {
          */
         rtype pressure_work_rate() const;
 
+        template <typename T_riemann_solver>
+        ConvectiveFluxFunctor<T_riemann_solver> flux_functor() const;
         template <typename T_riemann_solver>
         void launch_flux_functor();
         template <typename T_riemann_solver>
@@ -733,6 +756,7 @@ class Solver {
         IntegralMonitor integral_monitor;
         Statistics statistics;
         Probes probes;
+        HealthState run_health;
 };
 
 #endif // SOLVER_H

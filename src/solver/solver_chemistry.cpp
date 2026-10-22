@@ -95,12 +95,23 @@ void Solver::allocate_chemistry() {
 }
 
 void Solver::advance_chemistry(const double dt_chem) {
+    mark_phase(StepPhase::UPDATE);
+    const bool audit = run_health.clip_site != HealthState::NONE;
+    const Kokkos::View<double *> clipped =
+        audit ? run_health.repairs.recorder(run_health.clip_site).change : Kokkos::View<double *>();
+    if (audit) run_health.ledger.chemistry_begin(species, clipped);
     const double start = timer.seconds();
     const CellChemistry::Statistics stats =
         cell_chemistry.advance(conservatives, species, T_seed, chem_h, chem_cost, mesh->n_owned(), dt_chem,
                                tfles_on || pasr_on ? chem_time_scale : Kokkos::View<rtype *>());
     check_chemistry(stats, start);
     t_wall_chemistry += timer.seconds() - start;
+    if (audit) {
+        run_health.ledger.chemistry_end(species, clipped);
+        run_health.repairs.touch(run_health.clip_site, run_health.clip_flags);
+        Kokkos::deep_copy(run_health.clip_flags, uint8_t(0));
+    }
+    mark_phase(StepPhase::CHEMISTRY);
 }
 
 void Solver::check_chemistry(const CellChemistry::Statistics & stats, const double start) {
@@ -151,6 +162,10 @@ void Solver::take_simpler_step() {
                                &forcing);
     check_chemistry(stats, start);
     t_wall_chemistry += timer.seconds() - start;
+    if (run_health.clip_site != HealthState::NONE) {
+        run_health.repairs.touch(run_health.clip_site, run_health.clip_flags);
+        Kokkos::deep_copy(run_health.clip_flags, uint8_t(0));
+    }
     halo_current = false;
     const RHSFunction corrected = [this](State solution, State rhs, rtype t_stage) {
         calc_rhs(solution, rhs, t_stage);

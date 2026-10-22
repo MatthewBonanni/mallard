@@ -32,6 +32,19 @@ std::string sha256_file(const std::string & path);
 /** @brief Starts the block of a new run: start time, rank count, host and directory. */
 void start_run();
 
+/** @brief {0, 1, 2, 3, 8} -> "0-3,8". */
+std::string format_cpu_list(const std::vector<int> & cpus);
+
+/**
+ * @brief Where every rank runs (collective, after start_run): host, GPU (Kokkos
+ *        device id and PCI bus id), CPU set (Linux) and host threads. The block's
+ *        run gains the host count; placement() holds the per-rank list.
+ */
+void set_placement();
+
+/** @brief The placement of every rank as a JSON array ("[]" before set_placement). */
+const std::string & placement();
+
 /** @brief The input file (empty if given otherwise) and its text. */
 void set_input(const std::string & file, const std::string & text);
 

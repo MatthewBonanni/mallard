@@ -17,8 +17,23 @@
 #include <vector>
 
 #include <unistd.h>
+#ifdef __linux__
+#include <sched.h>
+#endif
 
 #include <Kokkos_Core.hpp>
+#ifdef Mallard_HAS_HDF5
+#include <hdf5.h>
+#endif
+#ifdef Mallard_HAS_CGNS
+#include <cgnslib.h>
+#endif
+#ifdef Mallard_HAS_ZLIB
+#include <zlib.h>
+#endif
+#ifdef Mallard_HAS_NCCL
+#include <nccl.h>
+#endif
 
 #include "build_info.h"
 #include "comm.h"
@@ -172,6 +187,60 @@ std::string build_block() {
     return b.str();
 }
 
+std::string version_or_null(const std::string & v) { return v.empty() ? "null" : json::quote(v); }
+
+std::string dependencies_block() {
+    json::Object d;
+    d.add("compiler", MALLARD_COMPILER)
+        .add("kokkos", logging::format("%d.%d.%d", KOKKOS_VERSION / 10000, KOKKOS_VERSION / 100 % 100,
+                                       KOKKOS_VERSION % 100));
+    std::string mpi;
+#ifdef Mallard_HAS_MPI
+    char library[MPI_MAX_LIBRARY_VERSION_STRING] = {};
+    int length = 0, major = 0, minor = 0;
+    MPI_Get_library_version(library, &length);
+    MPI_Get_version(&major, &minor);
+    mpi = std::string(library, static_cast<size_t>(length));
+    while (!mpi.empty() && (mpi.back() == '\n' || mpi.back() == ' ' || mpi.back() == '\0')) mpi.pop_back();
+    mpi = mpi.substr(0, mpi.find('\n')) + logging::format(" (MPI %d.%d)", major, minor);
+#endif
+    d.raw("mpi", version_or_null(mpi));
+    std::string hdf5;
+#ifdef Mallard_HAS_HDF5
+    unsigned h_major = 0, h_minor = 0, h_release = 0;
+    if (H5get_libversion(&h_major, &h_minor, &h_release) >= 0) hdf5 = logging::format("%u.%u.%u", h_major, h_minor, h_release);
+#endif
+    d.raw("hdf5", version_or_null(hdf5));
+    std::string cgns;
+#ifdef Mallard_HAS_CGNS
+    cgns = CGNS_DOTVERS;
+#endif
+    d.raw("cgns", version_or_null(cgns));
+    std::string zlib;
+#ifdef Mallard_HAS_ZLIB
+    zlib = zlibVersion();
+#endif
+    d.raw("zlib", version_or_null(zlib));
+    std::string nccl;
+#ifdef Mallard_HAS_NCCL
+    int nccl_version = 0;
+    if (ncclGetVersion(&nccl_version) == ncclSuccess) nccl = std::to_string(nccl_version);
+#endif
+    d.raw("nccl", version_or_null(nccl));
+    std::string runtime, driver;
+#if defined(KOKKOS_ENABLE_CUDA)
+    int r = 0, v = 0;
+    if (cudaRuntimeGetVersion(&r) == cudaSuccess) runtime = logging::format("CUDA %d.%d", r / 1000, r % 1000 / 10);
+    if (cudaDriverGetVersion(&v) == cudaSuccess) driver = logging::format("CUDA %d.%d", v / 1000, v % 1000 / 10);
+#elif defined(KOKKOS_ENABLE_HIP)
+    int r = 0, v = 0;
+    if (hipRuntimeGetVersion(&r) == hipSuccess) runtime = "HIP " + std::to_string(r);
+    if (hipDriverGetVersion(&v) == hipSuccess) driver = "HIP " + std::to_string(v);
+#endif
+    d.raw("gpu_runtime", version_or_null(runtime)).raw("gpu_driver", version_or_null(driver));
+    return d.str();
+}
+
 std::string code_block() {
     const std::string sha = MALLARD_GIT_SHA;
     json::Object c;
@@ -191,6 +260,8 @@ struct State {
     std::string preset; // JSON object or null, or empty
     std::string setup;  // JSON object, or empty
     std::string text;   // the block
+    std::string placement = "[]";  // JSON array, one object per rank
+    int n_hosts = 1;
 };
 
 State & state() {
@@ -203,7 +274,9 @@ void rebuild() {
     static const std::string code = code_block();
     static const std::string build = build_block();
     json::Object p;
-    p.add("schema", SCHEMA).add("version", VERSION).raw("mallard", code).raw("build", build);
+    static const std::string dependencies = dependencies_block();
+    p.add("schema", SCHEMA).add("version", VERSION).raw("mallard", code).raw("build", build)
+        .raw("dependencies", dependencies);
     if (!s.run.empty()) p.raw("run", s.run);
     if (!s.input.empty()) p.raw("input", s.input);
     if (!s.mesh.empty()) p.raw("mesh", s.mesh);
@@ -265,6 +338,80 @@ void start_run() {
                 .str();
     rebuild();
 }
+
+std::string format_cpu_list(const std::vector<int> & cpus) {
+    std::string out;
+    for (size_t i = 0; i < cpus.size();) {
+        size_t j = i;
+        while (j + 1 < cpus.size() && cpus[j + 1] == cpus[j] + 1) j++;
+        if (!out.empty()) out += ',';
+        out += std::to_string(cpus[i]);
+        if (j > i) out += "-" + std::to_string(cpus[j]);
+        i = j + 1;
+    }
+    return out;
+}
+
+namespace {
+
+std::string cpu_set() {
+#ifdef __linux__
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    if (sched_getaffinity(0, sizeof(set), &set) != 0) return "";
+    std::vector<int> cpus;
+    for (int c = 0; c < CPU_SETSIZE; c++) {
+        if (CPU_ISSET(c, &set)) cpus.push_back(c);
+    }
+    return format_cpu_list(cpus);
+#else
+    return "";
+#endif
+}
+
+std::string gpu_id() {
+#if defined(KOKKOS_ENABLE_CUDA)
+    char bus[32] = {};
+    if (cudaDeviceGetPCIBusId(bus, sizeof(bus), Kokkos::device_id()) == cudaSuccess) return bus;
+#elif defined(KOKKOS_ENABLE_HIP)
+    char bus[32] = {};
+    if (hipDeviceGetPCIBusId(bus, sizeof(bus), Kokkos::device_id()) == hipSuccess) return bus;
+#endif
+    return "";
+}
+
+} // namespace
+
+void set_placement() {
+    char host[256] = {};
+    gethostname(host, sizeof(host) - 1);
+    json::Object me;
+    me.add("rank", comm::rank()).add("host", host);
+    const std::string gpu = gpu_id();
+    if (gpu.empty()) {
+        me.raw("device", "null").raw("gpu", "null");
+    } else {
+        me.add("device", Kokkos::device_id()).add("gpu", gpu);
+    }
+    const std::string cpus = cpu_set();
+    me.raw("cpus", cpus.empty() ? "null" : json::quote(cpus))
+        .add("threads", Kokkos::DefaultHostExecutionSpace().concurrency());
+    const std::vector<std::string> all = comm::allgather(me.str());
+    std::vector<std::string> hosts = comm::allgather(host);
+    std::sort(hosts.begin(), hosts.end());
+    State & s = state();
+    s.placement = "[";
+    for (const auto & r : all) s.placement += (s.placement.size() > 1 ? "," : "") + r;
+    s.placement += "]";
+    s.n_hosts = static_cast<int>(std::unique(hosts.begin(), hosts.end()) - hosts.begin());
+    if (!s.run.empty()) {
+        s.run.pop_back();
+        s.run += ",\"hosts\":" + std::to_string(s.n_hosts) + "}";
+    }
+    rebuild();
+}
+
+const std::string & placement() { return state().placement; }
 
 void set_input(const std::string & file, const std::string & text) {
     json::Object i;

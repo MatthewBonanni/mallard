@@ -194,26 +194,34 @@ struct ViscousFluxFunctor {
 
     /** @brief Flux of a modeled wall face: the model's traction, its work at the wall velocity, and q_w. */
     KOKKOS_INLINE_FUNCTION
-    void modeled_flux(const uint32_t i_face, const BoundaryCondition & bc) const {
+    void modeled_flux(const uint32_t i_face, const BoundaryCondition & bc, rtype * out) const {
         const int32_t k = wall_model.face_index(i_face);
         if (k < 0 || sgs_only) return;
         const rtype A = face_area(i_face);
         rtype energy = wall_model.flux(k, N_DIM);
         FOR_I_DIM {
-            face_flux(i_face, 1 + i) += A * wall_model.flux(k, i);
+            out[1 + i] = A * wall_model.flux(k, i);
             energy += bc.data[1 + i] * wall_model.flux(k, i);
         }
-        face_flux(i_face, N_DIM + 1) += A * energy;
+        out[N_DIM + 1] = A * energy;
     }
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
+        rtype out[N_CONSERVATIVE] = {};
+        flux(i_face, out);
+        FOR_I_CONSERVATIVE face_flux(i_face, i) += out[i];
+    }
+
+    /** @brief Adds the face's viscous flux (from cell 0 into cell 1, times its area) to out. */
+    KOKKOS_INLINE_FUNCTION
+    void flux(const uint32_t i_face, rtype * out) const {
         const int32_t c0 = cells_of_face(i_face, 0);
         const int32_t c1 = cells_of_face(i_face, 1);
         if (c1 < 0 && wall_model.active()) {
             const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(i_face));
             if (bc.modeled) {
-                modeled_flux(i_face, bc);
+                modeled_flux(i_face, bc, out);
                 return;
             }
         }
@@ -300,13 +308,13 @@ struct ViscousFluxFunctor {
             q_n = heat_flux;
         }
 
-        rtype flux[N_CONSERVATIVE];
-        flux[0] = 0.0;
-        FOR_I_DIM flux[1 + i] = tau_n[i];
-        flux[N_DIM + 1] = dot<N_DIM>(q_f, tau_n) + q_n;
+        rtype face[N_CONSERVATIVE];
+        face[0] = 0.0;
+        FOR_I_DIM face[1 + i] = tau_n[i];
+        face[N_DIM + 1] = dot<N_DIM>(q_f, tau_n) + q_n;
 
         const rtype A = face_area(i_face);
-        FOR_I_CONSERVATIVE face_flux(i_face, i) += A * flux[i];
+        FOR_I_CONSERVATIVE out[i] += A * face[i];
     }
 };
 

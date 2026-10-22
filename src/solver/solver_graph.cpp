@@ -180,6 +180,7 @@ void Solver::graph_step() {
     }
     dt = step_io(IO_DT);
     dt_cfl1 = step_io(IO_DT_CFL1);
+    run_health.ledger.end_step(static_cast<double>(dt));
     if (!(dt > 0.0_r)) {
         throw std::runtime_error("Invalid dt: " + std::to_string(dt) + ".");
     }

@@ -144,7 +144,13 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
 
     // The first record names the format and holds the provenance
     const Value & start = records.front();
-    EXPECT_EQ(key_set(start), (std::set<std::string>{"type", "schema", "version", "provenance"}));
+    EXPECT_EQ(key_set(start),
+              (std::set<std::string>{"type", "schema", "version", "provenance", "placement", "setup_phases"}));
+    EXPECT_EQ(start["placement"].array.size(), static_cast<size_t>(comm::size()));
+    EXPECT_EQ(start["placement"].array[0]["rank"].number, 0.0);
+    EXPECT_TRUE(start["setup_phases"].has("mesh"));
+    EXPECT_TRUE(start["provenance"]["dependencies"].has("kokkos"));
+    EXPECT_EQ(start["provenance"]["run"]["hosts"].number, 1.0);
     EXPECT_EQ(start["type"].string, "start");
     EXPECT_EQ(start["schema"].string, run_log::SCHEMA);
     EXPECT_EQ(start["version"].number, run_log::VERSION);
@@ -152,7 +158,8 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
 
     const std::set<std::string> progress_keys = {
         "type", "step", "t", "dt", "cfl", "progress", "wall", "wall_per_step", "cells_per_second", "eta", "cells",
-        "ranks", "memory_host", "memory_host_peak", "memory_device", "memory_device_total", "monitors", "integrals"};
+        "ranks", "memory_host", "memory_host_peak", "memory_device", "memory_device_total", "monitors", "integrals",
+        "health"};
     std::vector<double> steps;
     double last_progress = 0.0;
     std::set<std::string> events;

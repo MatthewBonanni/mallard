@@ -64,6 +64,7 @@ void Solver::timed_phase(const std::string & name, F && f) {
     f();
     Kokkos::fence();
     const double seconds = phase_timer.seconds();
+    run_health.setup_phases.emplace_back(name, seconds);
     t_wall_setup += seconds;
     logging::end_phase(seconds);
 }
@@ -83,6 +84,7 @@ int Solver::init(const toml::value & input_in) {
     t = 0.0;
     step = 0;
     t_wall_setup = 0.0;
+    run_health.setup_phases.clear();
 
     logging::section("Setup");
     init_run_parameters();
@@ -118,11 +120,13 @@ int Solver::init(const toml::value & input_in) {
         init_output();
     });
     timed_phase("initial solution", [&] { init_solution(); });
+    init_health();
     logging::begin_phase("total");
     logging::end_phase(t_wall_setup);
     logging::begin_record();
     print_setup();
     provenance::set_setup(logging::end_record());
+    provenance::set_placement();
     provenance::share();
     write_provenance();
     return 0;
@@ -147,11 +151,24 @@ void Solver::write_provenance() {
     }
     if (integral_monitor.out) *integral_monitor.out << line << std::flush;
     probes.annotate(line);
+    std::vector<std::string> names;
+    std::vector<double> seconds, ones;
+    for (const auto & [name, s] : run_health.setup_phases) {
+        names.push_back(name);
+        seconds.push_back(s);
+        ones.push_back(1.0);
+    }
+    json::Object setup_phases;
+    for (const auto & phase : health::spread(names, seconds, ones)) {
+        setup_phases.raw(phase.name, json::Object().add("max", phase.max).add("mean", phase.all).str());
+    }
     run_log::write(json::Object()
                        .add("type", "start")
                        .add("schema", run_log::SCHEMA)
                        .add("version", run_log::VERSION)
-                       .raw("provenance", provenance::json()));
+                       .raw("provenance", provenance::json())
+                       .raw("placement", provenance::placement())
+                       .raw("setup_phases", setup_phases.str()));
 }
 
 namespace {
@@ -1416,9 +1433,11 @@ int Solver::run() {
     use_step_graph = step_graph_unsupported().empty();
     while ((stop = stop_reason()).empty()) {
         Kokkos::Timer step_timer;
+        const bool sample = run_health.on && (step + 1) % check_interval == 0;
+        if (sample) begin_sample();
         // The first step runs kernel by kernel, which also sets up what the
-        // kernels allocate on first use
-        if (use_step_graph && step > step_run_start) {
+        // kernels allocate on first use; so do sampled steps, phase by phase
+        if (use_step_graph && step > step_run_start && !sample) {
             graph_step();
         } else {
             calc_dt();
@@ -1435,6 +1454,8 @@ int Solver::run() {
             statistics.sample(t, cell_sampler(), mesh->n_owned());
         }
         check_fields();
+        mark_phase(StepPhase::CHECKS);
+        if (sample) end_sample();
         t_wall_stepping += step_timer.seconds();
         Kokkos::Timer output_timer;
         write_forces();
@@ -1554,6 +1575,10 @@ void Solver::print_progress() {
     }
     logging::line(row);
 
+    if (run_health.on) {
+        report_health();
+        status.health = run_health.last;
+    }
     if (run_log_on) {
         const MemoryUsage m = memory_usage();
         const auto largest = comm::allreduce(std::array<double, 4>{m.host, m.host_peak, m.device, m.device_total},
@@ -1724,6 +1749,7 @@ void Solver::print_summary(const std::string & stop) const {
     if (integral_monitor.interval > 0) add(integral_monitor.file);
     for (const auto & file : probes.files()) add(file);
     if (!files.empty()) logging::item("Files", files);
+    health_summary();
 
     json::Object end;
     end.add("type", "end")
@@ -1831,6 +1857,8 @@ void Solver::take_step() {
         calc_dt();
         time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
     }
+    run_health.ledger.end_step(static_cast<double>(dt));
+    mark_phase(StepPhase::UPDATE);
     if (double_flux) {
         cells_frozen = false;
         reset_energy();
@@ -1887,6 +1915,7 @@ void Solver::calc_dt() {
     // first stage of the next one reuses them
     halo.exchange(state());
     halo_current = true;
+    mark_phase(StepPhase::HALO);
     update_boundary_states(t);
     dt_cfl1 = calc_dt_cfl1();
     dt = use_cfl ? cfl * dt_cfl1 : dt_fixed;
@@ -1910,6 +1939,7 @@ void Solver::calc_dt() {
     Kokkos::parallel_for("local_cfl", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i) {
         c(i) = dt_ / c(i);
     });
+    mark_phase(StepPhase::TIME_STEP);
 }
 
 /**

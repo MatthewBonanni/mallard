@@ -24,6 +24,7 @@ set(MALLARD_TEST_SOURCES
     tfles_test.cpp
     synthetic_inflow_test.cpp
     provenance_test.cpp
+    health_test.cpp
     wall_model_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
