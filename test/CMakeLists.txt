@@ -3,6 +3,7 @@
 set(MALLARD_TEST_SOURCES
     test_main.cpp
     common_math_test.cpp
+    case_template_test.cpp
     time_integrator_test.cpp
     comm_test.cpp
     chemistry_thermo_test.cpp
@@ -21,7 +22,9 @@ set(MALLARD_TEST_SOURCES
     les_test.cpp
     numerics_preset_test.cpp
     tfles_test.cpp
+    check_test.cpp
     synthetic_inflow_test.cpp
+    wall_model_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
     list(APPEND MALLARD_TEST_SOURCES
@@ -72,6 +75,8 @@ FetchContent_Declare(
   GIT_TAG v1.18.0
   ${MALLARD_THIRD_PARTY}
 )
+# Test-only: `cmake --install` leaves GoogleTest out
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 target_link_libraries(MallardTest PRIVATE gtest)
