@@ -3,8 +3,8 @@ name: CI
 # Pull requests don't run CI on every push: when a PR is ready to land, run
 #   gh workflow run ci.yml --ref <branch>
 # The run sets the commit status `CI` on the branch's head commit (pending, then success
-# or failure, linking to the run and its jobs' logs); main requires it to merge, so a
-# new push needs a new run. main runs on every push.
+# or failure, linking to the run) and, when it ends, one status per job linking to its
+# log; main requires `CI` to merge, so a new push needs a new run. main runs on every push.
 on:
   push:
     branches: [main]
@@ -17,6 +17,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   statuses: write
   pull-requests: read
@@ -282,7 +283,8 @@ jobs:
 
 
   # Sets the commit status `CI` that main requires: success when every job passed or was
-  # skipped for a reason (CUDA builds without device code), failure otherwise.
+  # skipped for a reason (CUDA builds without device code), failure otherwise. Each job
+  # also gets its own status, `CI / <job>`, linking to its log.
   result:
     name: CI result
     if: always()
@@ -293,6 +295,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
+            --jq '.jobs[] | select(.name != "CI result") | [.name, (.conclusion // "cancelled"), .html_url] | @tsv' |
+          while IFS=$'\t' read -r name conclusion url; do
+            case "$conclusion" in
+              success) s=success; d=Passed ;;
+              skipped) s=success; d=Skipped ;;
+              failure) s=failure; d=Failed ;;
+              *) s=error; d="$conclusion" ;;
+            esac
+            gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=$s \
+              -f context="CI / $name" -f description="$d" -f target_url="$url" < /dev/null > /dev/null
+          done
           state=success
           for r in $RESULTS; do
             case "$r" in success|skipped) ;; *) state=failure ;; esac
