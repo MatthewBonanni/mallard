@@ -181,7 +181,7 @@ jobs:
           - name: hip
             image: rocm/dev-ubuntu-24.04:7.2.4
             flags: >-
-              -DCMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc -DKokkos_ENABLE_HIP=ON
+              -DCMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc -DCMAKE_PREFIX_PATH=/opt/rocm -DKokkos_ENABLE_HIP=ON
               -DKokkos_ARCH_AMD_GFX90A=ON -DKokkos_ENABLE_ROCTHRUST=OFF
           - name: sycl
             image: intel/oneapi-basekit:2025.3.2-0-devel-ubuntu24.04
