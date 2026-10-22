@@ -13,6 +13,11 @@ on:
       - 'LICENSE'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
+    inputs:
+      cuda:
+        description: Run the CUDA builds even without device-code changes
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -210,7 +215,7 @@ jobs:
   # CUDA builds (no GPU needed), when the changes touch device code (see the device job).
   cuda:
     needs: [changelog, device]
-    if: needs.device.outputs.changed == 'true'
+    if: needs.device.outputs.changed == 'true' || inputs.cuda
     runs-on: ubuntu-latest
     container: nvidia/cuda:12.9.1-devel-ubuntu24.04
     strategy:
