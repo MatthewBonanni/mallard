@@ -163,6 +163,9 @@ jobs:
 
   # Each libFuzzer harness for a minute (2D); fuzz.yml also runs nightly, longer
   fuzz:
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/fuzz.yml
     with:
       dims: '[2, 3]'
