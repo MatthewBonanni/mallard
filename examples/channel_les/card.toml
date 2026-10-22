@@ -2,3 +2,4 @@
 # time come from examples/README.md, its settings from the input file.
 build = "3d"
 demonstrates = ["LES (Sigma)", "stretched mesh", "running statistics"]
+tutorial = "channel_les"
