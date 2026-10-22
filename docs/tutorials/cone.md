@@ -99,7 +99,7 @@ mpirun -n 4 $MALLARD/build-3d/src/Mallard -i input.toml
 ```
 
 On a GPU, with a CUDA build of the 3D solver (`-DMallard_DIM=3`, see the
-[first simulation](../guide/first_simulation.md)), the same input runs
+[first simulation](first_simulation.md)), the same input runs
 unchanged: h = 0.02 takes under 2 minutes on one A100, h = 0.01 (13,800
 steps) about 10.
 

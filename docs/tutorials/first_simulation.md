@@ -36,7 +36,7 @@ cd examples/sod
 ../../build/src/Mallard -i input.toml --kokkos-num-threads=4
 ```
 
-The run takes about a second. Mallard prints a summary of the setup, then a progress row every 100 steps (step, time, time step, throughput, minimum density and pressure, maximum Mach number, share of troubled cells; see [the log](output.md#the-log)), and writes eleven snapshots, `solut/sod_000000.vtu` to `solut/sod_000010.vtu` (t = 0 to 0.2), plus `solut/sod.pvd`, which ParaView opens as a time series.
+The run takes about a second. Mallard prints a summary of the setup, then a progress row every 100 steps (step, time, time step, throughput, minimum density and pressure, maximum Mach number, share of troubled cells; see [the log](../guide/output.md#the-log)), and writes eleven snapshots, `solut/sod_000000.vtu` to `solut/sod_000010.vtu` (t = 0 to 0.2), plus `solut/sod.pvd`, which ParaView opens as a time series.
 
 The input file, `input.toml`, has one table per part of the problem; every key is documented in the [input reference](../input.md):
 
@@ -70,7 +70,7 @@ Edit `input.toml` and run again:
     preset = "accurate"
     ```
 
-    The result is identical: the preset sets exactly the keys the example spells out, and the log lists them. `preset = "robust"` (MUSCL, RHLL, CFL 0.5) is the one to start any new case with; it runs on every mesh and through the strongest shocks. The [Numerics](numerics.md#presets) page lists the four presets and what each is for; any key you set yourself overrides the preset.
+    The result is identical: the preset sets exactly the keys the example spells out, and the log lists them. `preset = "robust"` (MUSCL, RHLL, CFL 0.5) is the one to start any new case with; it runs on every mesh and through the strongest shocks. The [Numerics](../guide/numerics.md#presets) page lists the four presets and what each is for; any key you set yourself overrides the preset.
 - **Scheme.** Replace the reconstruction with second-order MUSCL,
 
     ```toml
@@ -79,7 +79,7 @@ Edit `input.toml` and run again:
     limiter = "venkatakrishnan"
     ```
 
-    or try `order = 3` with TENO. The contact discontinuity is where the schemes differ most. The [Numerics](numerics.md#reconstruction) page compares them on this case.
+    or try `order = 3` with TENO. The contact discontinuity is where the schemes differ most. The [Numerics](../guide/numerics.md#reconstruction) page compares them on this case.
 - **Riemann solver.** `Rusanov`, `HLL`, `HLLC`, `Roe` or `RHLL`. With fifth-order reconstruction the choice changes the error on this case by less than 20%, Rusanov being the most dissipative. It matters more in 2D: for shocks aligned with a quadrilateral grid, use `RHLL` (see [Shu–Osher](https://matthewbonanni.github.io/mallard/validation/#shu-osher-problem)).
 
 ## 5. A 2D case
@@ -127,9 +127,10 @@ The [validation page](https://matthewbonanni.github.io/mallard/validation/#spher
 
 ## Next steps
 
-- [Input files](input_files.md): how an input is organized, expressions, units.
-- The user guide by topic: [meshes](meshes.md), [physics](physics.md),
-  [boundary conditions](boundary_conditions.md), [numerics](numerics.md),
-  [output](output.md), [running in parallel](parallel.md).
+- [Tutorial 2: oblique shock on a ramp](wedge.md): a 2D case on a generated mesh, its boundary
+  conditions, a line probe, ParaView, and a comparison with theory.
+- [Input files](../guide/input_files.md): how an input is organized, expressions, units.
+- The user guide by topic: [meshes](../guide/meshes.md), [physics](../guide/physics.md),
+  [boundary conditions](../guide/boundary_conditions.md), [numerics](../guide/numerics.md),
+  [output](../guide/output.md), [running in parallel](../guide/parallel.md).
 - [Examples](https://matthewbonanni.github.io/mallard/docs/examples/): 40 cases, from shock tubes to turbulent flames, and how long they take.
-- [Validation](https://matthewbonanni.github.io/mallard/validation/): what accuracy to expect, case by case.
