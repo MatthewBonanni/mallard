@@ -287,7 +287,7 @@ can amplify the cell averages, is at most 10 in 2D and 4 in 3D. If no size
 reaches the bound, 2D takes the stencil with the smallest $\Lambda$, and 3D
 the smallest stencil within 1.25 times the smallest $\Lambda$ found. The
 lower 3D bound removes growing modes of the linearized scheme on
-near-degenerate stencils ([TENO-E details](../numerics/teno_e.md#3d-mallard-extension)).
+near-degenerate stencils ([TENO-E details](../numerics/teno_e.md#3d-stability)).
 Cells whose central stencil reaches a curved wall fit at most degree
 `curved_wall_degree` (3).
 
@@ -342,10 +342,9 @@ projected back with the right eigenvectors.
 **Admissibility and bounds.** A cell whose face values have a non-positive
 density or pressure anywhere falls back to first order. With
 `bound_preserving = true`, troubled cells first scale their deviation from
-the cell average by
-$\theta = \min_q\min\left(1, \frac{M - \overline{v}_i}{v_q - \overline{v}_i}, \frac{m - \overline{v}_i}{v_q - \overline{v}_i}\right)$
-over the face points, for $v = \rho, p$ and the extrema $m$, $M$ of the
-cell and its face neighbors
+the cell average by the largest $\theta\in[0, 1]$ that keeps every face value
+$\overline{v}_i + \theta(v_q - \overline{v}_i)$ within $[m, M]$, for $v = \rho, p$
+and the extrema $m$, $M$ of the cell and its face neighbors
 ([Zhang & Shu 2010](../references.md#zhang-shu-2010)).
 
 ### Gas mixtures
