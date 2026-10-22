@@ -2,3 +2,4 @@
 # time come from examples/README.md, its settings from the input file.
 build = "2d"
 demonstrates = ["Gmsh O-grid", "vortex shedding", "wall forces"]
+tutorial = "cylinder"
