@@ -2,6 +2,8 @@
 add_library(MallardCore STATIC
     common/common_math.cpp
     common/common_io.cpp
+    common/input.cpp
+    common/memory_tracker.cpp
     common/build_info.cpp
     common/case_template.cpp
     common/growing_buffer.cpp
@@ -16,6 +18,7 @@ add_library(MallardCore STATIC
     mesh/periodic.cpp
     mesh/mesh_3d.cpp
     mesh/mesh_block.cpp
+    mesh/mesh_quality.cpp
     mesh/zone.cpp
     mesh/box_tree.cpp
     boundary/boundary.cpp
@@ -42,6 +45,7 @@ add_library(MallardCore STATIC
     solver/chemistry_benchmark.cpp
     solver/numerics_preset.cpp
     solver/solver.cpp
+    solver/solver_check.cpp
     solver/solver_chemistry.cpp
     solver/solver_graph.cpp
     solver/solver_step_control.cpp
@@ -80,6 +84,28 @@ target_include_directories(MallardCore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/parallel
 )
 target_link_libraries(MallardCore PUBLIC Kokkos::kokkos Threads::Threads)
+
+# Input (common/input.h) records the keys setup reads; a toml::value copy would not
+file(GLOB_RECURSE mallard_sources CONFIGURE_DEPENDS
+    ${CMAKE_SOURCE_DIR}/src/*.h ${CMAKE_SOURCE_DIR}/src/*.cpp ${CMAKE_SOURCE_DIR}/test/*.h ${CMAKE_SOURCE_DIR}/test/*.cpp)
+list(FILTER mallard_sources EXCLUDE REGEX "/src/external/|/src/common/input\\.")
+foreach(source ${mallard_sources})
+    file(STRINGS ${source} toml_values REGEX "toml::(value|table)([^_a-z]|$)")
+    if(toml_values)
+        file(READ ${source} content)
+        string(REGEX MATCH "toml::(value|table)[^_a-z]" type "${content}")
+        string(FIND "${content}" "${type}" offset)
+        string(REGEX REPLACE ".$" "" type "${type}")
+        string(SUBSTRING "${content}" 0 ${offset} before)
+        string(REGEX MATCHALL "\n" newlines "${before}")
+        list(LENGTH newlines line)
+        math(EXPR line "${line} + 1")
+        file(RELATIVE_PATH path ${CMAKE_SOURCE_DIR} ${source})
+        message(FATAL_ERROR "${path}:${line} uses ${type}; Mallard reads input only as Input (src/common/input.h) so "
+                            "that unused keys are detected: replace toml::value with Input and toml::table with "
+                            "Input::table_type.")
+    endif()
+endforeach()
 # The TENO setup computes every table with the same operations on the host
 # and on the device, and contracting multiplies and adds into FMAs would
 # change them differently on each: no contraction in that file

@@ -19,7 +19,7 @@
 #include "log.h"
 #include "mesh.h"
 
-WallModelSpec WallModelSpec::from_input(const toml::value & table, const BoundaryCondition & bc,
+WallModelSpec WallModelSpec::from_input(const Input & table, const BoundaryCondition & bc,
                                         const std::string & where) {
     if (!table.is_table()) throw InputError(where + " must be a table.");
     if (!bc.is_wall()) throw InputError(where + ": wall models apply to walls only.");

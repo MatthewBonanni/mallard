@@ -22,7 +22,7 @@ void Solver::init_error_control() {
     step_controller = StepController();
     const bool requested = input.contains("numerics") && input.at("numerics").contains("error_control");
     if (!requested) return;
-    const toml::value & table = input.at("numerics").at("error_control");
+    const Input & table = input.at("numerics").at("error_control");
     const std::string name = TIME_INTEGRATOR_NAMES.at(time_integrator->get_type());
     if (time_integrator->get_error_order() == 0) {
         throw InputError("[numerics.error_control] needs a time integrator with an embedded error estimate "

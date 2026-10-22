@@ -133,7 +133,9 @@ TEST_P(MixtureEquivalence, ConstantCpSingleSpeciesReproducesPerfectGas) {
             "\np = 1.0e5\nT = 400.0\nY = { AIR = 1.0 }\n",
         "type = \"p_out\"\np = 3.0e4\n", "type = \"wall_adiabatic\"\n", "type = \"symmetry\"\n");
     Solver perfect;
-    perfect.init(parse_toml(common + scheme + bcs + perfect_air()));
+    std::string perfect_bcs = bcs;  // a perfect gas takes no composition
+    perfect_bcs.erase(perfect_bcs.find("Y = { AIR = 1.0 }\n"), 18);
+    perfect.init(parse_toml(common + scheme + perfect_bcs + perfect_air()));
     perfect.run();
     perfect.copy_device_to_host();
     Solver mixed;
