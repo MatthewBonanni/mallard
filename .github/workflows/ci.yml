@@ -187,6 +187,7 @@ jobs:
   # CUDA builds (no GPU needed): nvcc compiles every source, so host-only changes can
   # still break them (shadowed CUDA types, nvcc-only warnings as errors).
   cuda:
+    needs: changelog
     runs-on: ubuntu-latest
     container: nvidia/cuda:12.9.1-devel-ubuntu24.04
     strategy:
