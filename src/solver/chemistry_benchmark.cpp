@@ -42,8 +42,8 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
     if (!input.contains("reactor")) throw InputError("missing [reactor].");
     const Input & table = input.at("reactor");
     const Input & bench = input.at("benchmark");
-    const double T0 = find_double(table, "T", dim::temperature), p0 = find_double(table, "p", dim::pressure);
-    const double end_time = find_double(table, "end_time", dim::time);
+    const double T0 = find_double(table, "T"), p0 = find_double(table, "p");
+    const double end_time = find_double(table, "end_time");
     const int64_t samples_in = toml::find_or<int64_t>(bench, "samples", 64);
     const int64_t cells_in = toml::find_or<int64_t>(bench, "cells", 65536);
     const int64_t repeats_in = toml::find_or<int64_t>(bench, "repeats", 3);

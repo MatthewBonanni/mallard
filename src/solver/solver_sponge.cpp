@@ -18,9 +18,12 @@
 
 namespace {
 
-/** @brief An expression in x, y, z from a number, a quantity with a unit or an expression. */
-Expression number_or_expression(const Input & value, const std::string & name, const Dimension & dimension) {
-    return Expression(name, quantity_or_expression(value, name, dimension));
+/** @brief An expression in x, y, z from a number or a string. */
+Expression number_or_expression(const Input & value, const std::string & name) {
+    if (value.is_string()) return Expression(name, value.as_string());
+    std::ostringstream text;
+    text << std::setprecision(17) << static_cast<double>(as_real(value, name));
+    return Expression(name, text.str());
 }
 
 } // namespace

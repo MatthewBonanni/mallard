@@ -62,6 +62,7 @@ void Solver::timed_phase(const std::string & name, F && f) {
 
 int Solver::init(const Input & input_in) {
     this->input = input_in;
+    preset = numerics_preset::apply(input);
     try {
         setup_from_input();
     } catch (const std::exception & e) {
@@ -348,6 +349,13 @@ void Solver::trim_halo() {
     std::vector<uint8_t> needed = teno->stencil_cells();
     const int base = base_halo_layers();
     for (uint32_t c = 0; c < mesh->n_cells; c++) needed[c] = needed[c] || distribution.layer[c] <= base;
+    // Wall-model points: their cells and the vertex neighbors their gradients read
+    for (const uint32_t c : wall_model_points.cells) {
+        needed[c] = 1;
+        for (uint32_t k = mesh->h_offsets_cells_of_cell(c); k < mesh->h_offsets_cells_of_cell(c + 1); k++) {
+            needed[mesh->h_cells_of_cell(k)] = 1;
+        }
+    }
     trim_halo_exchange(distribution, needed);
     halo = HaloExchange(distribution, halo.uses_nccl());
 }
@@ -379,13 +387,15 @@ void Solver::describe_partition_surface() {
 bool Solver::halo_too_shallow() {
     if (!is_distributed()) return false;
     auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
-    if (teno == nullptr) return false;
+    if (teno == nullptr && !wall_model_on) return false;
     // Owned and halo-layer-1 cells are reconstructed; their stencil searches must
     // see every layer they visited, so stencils match the serial ones exactly
     int needed = 0;
-    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+    for (uint32_t c = 0; teno && c < mesh->n_cells; c++) {
         if (distribution.layer[c] <= 1) needed = std::max(needed, distribution.layer[c] + teno->gather_depth[c] + 1);
     }
+    // The wall model's exchange and edge points must lie in cells with complete gradient stencils
+    needed = std::max(needed, wall_model_points.needed_layers);
     needed = comm::allreduce(needed, comm::Op::MAX);
     if (needed <= halo_layers) return false;
     halo_layers = needed;
@@ -481,6 +491,7 @@ void Solver::init_boundaries() {
     std::vector<int32_t> face_bc(mesh->n_faces, -1);
     std::vector<BoundaryCondition> bcs;
     boundary_summary.clear();
+    wall_model_specs.clear();
     dirichlet_boundaries.clear();
     average_pressure_outlets.clear();
     // Faces of upt boundaries whose composition varies along them, as (boundary, face):
@@ -516,6 +527,13 @@ void Solver::init_boundaries() {
             throw InputError("boundaries: no boundary zone \"" + name + "\" in the mesh (zones: " + zones + ").");
         }
         bcs.push_back(BoundaryCondition::from_input(bound, physics));
+        WallModelSpec wall_model_spec;
+        if (bound.contains("wall_model")) {
+            wall_model_spec = WallModelSpec::from_input(bound.at("wall_model"), bcs.back(),
+                                                        "boundaries[name = \"" + name + "\"].wall_model");
+            bcs.back().modeled = true;
+        }
+        wall_model_specs.push_back(wall_model_spec);
         // Optional filter selecting part of the zone by face centroid
         std::unique_ptr<Expression> where;
         if (bound.contains("where")) {
@@ -593,6 +611,7 @@ void Solver::init_boundaries() {
         std::string text = BOUNDARY_NAMES.at(bcs.back().type) + ", " + logging::count(n_owned_selected) + " faces";
         if (where) text += ", where " + toml::find<std::string>(bound, "where");
         if (profiled) text += ", varying composition";
+        if (bcs.back().modeled) text += ", " + wall_model_spec.summary();
         boundary_summary.emplace_back(name, text);
     }
     for (const auto & [i_bc, i_face] : profiled_faces) {
@@ -629,6 +648,7 @@ void Solver::init_boundaries() {
     if (is_mixture()) init_mixture_boundaries(input_boundaries, profiled_faces, bcs);
     boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics);
     boundary_data.mixture = is_mixture();
+    init_wall_model(face_bc, bcs);
     if (is_mixture()) {
         const uint32_t n_species = mixture.n_species;
         boundary_data.bc_Y = Kokkos::View<rtype **, Kokkos::LayoutRight>("bc_Y", bcs.size(), n_species);
@@ -872,6 +892,15 @@ void Solver::init_numerics() {
         case TimeIntegratorType::SSPRK3:
             time_integrator = std::make_unique<SSPRK3>();
             break;
+        case TimeIntegratorType::SSPRK54:
+            time_integrator = std::make_unique<SSPRK54>();
+            break;
+        case TimeIntegratorType::CK45:
+            time_integrator = std::make_unique<CK45>();
+            break;
+        case TimeIntegratorType::RDPK3SP35:
+            time_integrator = std::make_unique<RDPK3Sp35>();
+            break;
     }
 
     face_reconstruction->set_mesh(mesh);
@@ -918,6 +947,7 @@ void Solver::init_numerics() {
     if (!(hybrid_threshold >= 0.0_r && hybrid_threshold <= 1.0_r) || !(hybrid_floor >= 0.0_r && hybrid_floor <= 1.0_r)) {
         throw InputError("numerics.hybrid: sensor_threshold and upwind_floor must be in [0, 1].");
     }
+    init_error_control();
 }
 
 void Solver::init_axisymmetric_weights() {
@@ -969,6 +999,11 @@ void Solver::init_output() {
     if (check_interval == 0) {
         throw InputError("output.check_interval must be positive.");
     }
+    const bool async_output = toml::find_or<bool>(input, "output", "async", true);
+    const uint32_t io_threads = toml::find_or<uint32_t>(input, "output", "io_threads", 1);
+    if (io_threads == 0) {
+        throw InputError("output.io_threads must be positive.");
+    }
     if (input.contains("forces")) {
         for (const auto & entry : toml::find<std::vector<Input>>(input, "forces")) {
             ForceMonitor monitor;
@@ -987,6 +1022,16 @@ void Solver::init_output() {
             auto h_faces = Kokkos::create_mirror_view(monitor.faces);
             for (size_t i = 0; i < owned.size(); i++) h_faces(i) = owned[i];
             Kokkos::deep_copy(monitor.faces, h_faces);
+            uint32_t modeled = 0;
+            if (wall_model_on) {
+                const auto h_face_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_bc);
+                for (const uint32_t f : owned) {
+                    const int32_t i_bc = h_face_bc(f);
+                    modeled |= i_bc >= 0 && wall_model_specs[static_cast<size_t>(i_bc)].parameters.type !=
+                                                WallModelType::NONE;
+                }
+            }
+            monitor.modeled = comm::allreduce(modeled, comm::Op::MAX) > 0;
             monitor.interval = toml::find_or<uint64_t>(entry, "interval", 1);
             if (monitor.interval == 0) {
                 throw std::runtime_error("forces: interval must be positive.");
@@ -1005,6 +1050,7 @@ void Solver::init_output() {
                     for (const char * kind : {"pressure", "viscous"}) {
                         FOR_I_DIM *monitor.out << ",F" << "xyz"[i] << "_" << kind;
                     }
+                    if (monitor.modeled) *monitor.out << ",Q";
                     *monitor.out << "\n";
                 }
             }
@@ -1053,6 +1099,7 @@ void Solver::init_output() {
     for (const auto & output : outputs) {
         data_writers.push_back(std::make_unique<DataWriter>());
         data_writers.back()->init(output, data, mesh, restart_variables());
+        data_writers.back()->set_async(async_output, io_threads);
     }
 }
 
@@ -1392,6 +1439,7 @@ int Solver::run() {
     Kokkos::Timer output_timer;
     copy_device_to_host();
     write_data(true);
+    for (auto & writer : data_writers) writer->finish();
     t_wall_output += output_timer.seconds();
     print_summary(stop);
     return 0;
@@ -1496,6 +1544,7 @@ void Solver::print_setup() const {
     logging::item("Initial state", initial_state);
 
     logging::section("Numerics");
+    if (!preset.name.empty()) logging::item("Preset", preset.summary());
     logging::items(face_reconstruction->summary());
     logging::item("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
     if (hybrid_flux) {
@@ -1504,7 +1553,12 @@ void Solver::print_setup() const {
                                              real(double(hybrid_floor)) + ")");
     }
     logging::item("Time integrator", TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()));
-    logging::item("Time step", use_cfl ? "CFL " + real(double(cfl)) : "dt " + real(double(dt_fixed)) + " (fixed)");
+    if (step_controller.enabled()) {
+        logging::item("Time step", step_controller.summary() + "; first step " +
+                                       (use_cfl ? "CFL " + real(double(cfl)) : "dt " + real(double(dt_fixed))));
+    } else {
+        logging::item("Time step", use_cfl ? "CFL " + real(double(cfl)) : "dt " + real(double(dt_fixed)) + " (fixed)");
+    }
     std::string stop;
     if (n_steps > 0) stop += "n_steps = " + logging::count(n_steps);
     if (t_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("t = ") + real(double(t_stop));
@@ -1582,6 +1636,22 @@ void Solver::print_summary(const std::string & stop) const {
                                         duration(t_wall_stepping / static_cast<double>(steps)) + " per step over " +
                                         logging::count(steps) + " steps");
     }
+    if (step_controller.enabled()) {
+        logging::item("Rejected steps", logging::count(n_rejected) + " (error control)");
+    }
+    if (!data_writers.empty()) {
+        double writing = 0.0;
+        uint64_t bytes = 0;
+        for (const auto & writer : data_writers) {
+            writing += writer->writing_seconds();
+            bytes += writer->bytes_written();
+        }
+        // Ranks write their parts at the same time
+        writing = comm::allreduce(writing, comm::Op::MAX);
+        bytes = comm::allreduce(bytes, comm::Op::SUM);
+        logging::item("Writing", logging::si(static_cast<double>(bytes)) + "B of files in " + duration(writing) +
+                                     (data_writers.front()->is_async() ? " (in the background)" : ""));
+    }
     std::string files;
     auto add = [&](const std::string & text) { files += (files.empty() ? "" : ", ") + text; };
     for (const auto & writer : data_writers) {
@@ -1638,7 +1708,10 @@ void Solver::write_data(bool force) {
     }
     update_primitives();
     copy_device_to_host();
-    const RestartAttributes attributes = statistics.attributes();
+    RestartAttributes attributes = statistics.attributes();
+    if (step_controller.enabled()) {
+        for (const auto & a : step_controller.attributes()) attributes.push_back(a);
+    }
     const RestartFaces faces = characteristic_restart_faces();
     for (auto & writer : data_writers) {
         writer->write(step, t, force, attributes, faces);
@@ -1676,6 +1749,12 @@ void Solver::take_step() {
         cells_frozen = true;
     }
     time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
+    for (int tries = 1; step_controller.enabled() && !accept_controlled_step(); tries++) {
+        n_rejected++;
+        check_rejections(tries);
+        calc_dt();
+        time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
+    }
     if (double_flux) {
         cells_frozen = false;
         reset_energy();
@@ -1735,6 +1814,11 @@ void Solver::calc_dt() {
     update_boundary_states(t);
     const rtype dt_cfl1 = calc_dt_cfl1();
     dt = use_cfl ? cfl * dt_cfl1 : dt_fixed;
+    if (step_controller.enabled()) {
+        // The first step takes the cfl or dt of [run], later ones the controller's
+        const rtype dt_next = step_controller.dt_next();
+        if (dt_next > 0.0_r) dt = dt_next;
+    }
     dt = std::min(dt, sponge_dt_max);
     // Land exactly on t_stop and on time-based output times
     const rtype t_target = next_target_time();
@@ -1889,18 +1973,20 @@ struct ForceFunctor {
     Kokkos::View<rtype *[3]> mixture_transport;  // viscous mixtures: (cell, [mu, ...]), else empty
     bool axisymmetric = false;  // per radian: tractions weighted by the face radius
 
+    WallModelFlux wall_model = {};  // modeled walls: their stress and heat flux, else empty
+
     struct value_type {
-        rtype v[2 * N_DIM];
+        rtype v[2 * N_DIM + 1];
     };
 
     KOKKOS_INLINE_FUNCTION
     void init(value_type & sum) const {
-        for (int i = 0; i < 2 * N_DIM; i++) sum.v[i] = 0.0;
+        for (int i = 0; i < 2 * N_DIM + 1; i++) sum.v[i] = 0.0;
     }
 
     KOKKOS_INLINE_FUNCTION
     void join(value_type & dst, const value_type & src) const {
-        for (int i = 0; i < 2 * N_DIM; i++) dst.v[i] += src.v[i];
+        for (int i = 0; i < 2 * N_DIM + 1; i++) dst.v[i] += src.v[i];
     }
 
     KOKKOS_INLINE_FUNCTION
@@ -1915,11 +2001,19 @@ struct ForceFunctor {
         if (axisymmetric) FOR_I_DIM n_A[i] *= face_coords(f, 1);
         FOR_I_DIM sum[i] += W(c, N_DIM + 1) * n_A[i];
         if (!viscous) return;
+        const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(f));
+        if (bc.modeled && wall_model.active()) {
+            const int32_t row = wall_model.face_index(f);
+            if (row < 0) return;
+            const rtype A = Kokkos::sqrt(dot<N_DIM>(n_A, n_A));
+            FOR_I_DIM sum[N_DIM + i] -= A * wall_model.flux(row, i);
+            sum[2 * N_DIM] += A * wall_model.flux(row, N_DIM);
+            return;
+        }
         rtype g[N_DIM][N_DIM];
         for (uint8_t v = 0; v < N_DIM; v++) {
             FOR_I_DIM g[v][i] = gradients(c, 1 + v, i);
         }
-        const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(f));
         if (bc.is_wall()) {
             rtype dn = 0.0;
             FOR_I_DIM dn += (face_coords(f, i) - cell_coords(c, i)) * n[i];
@@ -1938,7 +2032,9 @@ struct ForceFunctor {
     }
 };
 
-std::array<rtype, 2 * N_DIM> Solver::calc_force(const Kokkos::View<uint32_t *> & faces) {
+std::array<rtype, 2 * N_DIM + 1> Solver::calc_force(const Kokkos::View<uint32_t *> & faces) {
+    // The wall model reads exchange cells of the halo, stale after the last stage
+    if (wall_model_on) halo.exchange(state());
     const Euler phys = physics;
     StateView U = conservatives;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
@@ -1953,14 +2049,15 @@ std::array<rtype, 2 * N_DIM> Solver::calc_force(const Kokkos::View<uint32_t *> &
     if (is_viscous()) {
         Kokkos::parallel_for("force_gradients", mesh->n_cells, viscous_gradient);
         if (is_mixture()) update_transport();
+        if (wall_model_on) update_wall_model();
     }
     ForceFunctor functor{faces, mesh->face_normals, mesh->face_coords, mesh->cell_coords, mesh->cells_of_face,
                          W_cells, viscous_gradients, boundary_data, physics, is_viscous(),
-                         is_mixture() ? cell_transport : Kokkos::View<rtype *[3]>(), axisymmetric};
+                         is_mixture() ? cell_transport : Kokkos::View<rtype *[3]>(), axisymmetric, wall_model.out};
     ForceFunctor::value_type result;
     Kokkos::parallel_reduce("force", faces.extent(0), functor, result);
-    std::array<rtype, 2 * N_DIM> F;
-    for (size_t i = 0; i < 2 * N_DIM; i++) F[i] = result.v[i];
+    std::array<rtype, 2 * N_DIM + 1> F;
+    for (size_t i = 0; i < 2 * N_DIM + 1; i++) F[i] = result.v[i];
     return comm::allreduce(F, comm::Op::SUM);
 }
 
@@ -1970,7 +2067,8 @@ void Solver::write_forces() {
         const auto F = calc_force(monitor.faces);
         if (!monitor.out) continue;
         *monitor.out << step << "," << std::setprecision(12) << t;
-        for (const rtype f : F) *monitor.out << "," << f;
+        for (size_t i = 0; i < 2 * N_DIM; i++) *monitor.out << "," << F[i];
+        if (monitor.modeled) *monitor.out << "," << F[2 * N_DIM];
         *monitor.out << "\n";
         monitor.out->flush();
     }

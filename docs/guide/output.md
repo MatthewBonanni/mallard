@@ -28,6 +28,9 @@ variables = ["P", "T"]
 | `interval` / `time_interval` | one required | Every this many steps, or this much simulated time (the step is shortened to land on each output time) |
 | `variables` | required (`vtu`, `hdf5`) | Variables to write, below; `Y_*` selects every variable with that prefix |
 | `geometry` | `"all"` | `vtu`: a boundary zone name writes that zone's faces with the values of their cells (wall pressure, heat flux) |
+| `compression` | `"none"` | `"zlib"`: lossless compression of `vtu`, `hdf5` and `restart` files (below) |
+| `relative_error` | none (lossless) | `vtu`, `hdf5` with `compression = "zlib"`: lossy, each cell value within this relative error |
+| `chunk_cells` | 65536 | Compressed `restart` files: cells per chunk |
 
 **Variables:**
 
@@ -49,6 +52,25 @@ in parallel, assembled by a `.pvtu`). `format = "hdf5"` (builds with
 collective I/O, plus the mesh once, and XDMF indexes that ParaView opens. It
 pays off for large runs on parallel file systems; the files do not depend on
 the rank count. Read them in Python with `tools/mallard_h5.py`.
+
+**Asynchronous and compressed output.** Writing large snapshots can take longer than many steps. By default (`[output] async = true`) each snapshot is copied out and written on a background thread while the run goes on, with the same files byte for byte as `async = false`; `io_threads` copies and compresses on several threads (GPU runs leave the host cores idle):
+
+```toml
+[output]
+io_threads = 8              # async = true is the default
+
+[[write_data]]
+prefix = "solut/flow"
+format = "vtu"
+interval = 500
+variables = ["RHO", "U", "P", "T"]
+compression = "zlib"       # lossless; readable by any ParaView
+relative_error = 1e-4       # optional: lossy, |x' - x| <= 1e-4 |x| per value
+```
+
+Compressed VTU uses VTK's own zlib compressor and compressed HDF5 the standard shuffle and deflate filters, so ParaView and h5py read them unchanged. VTU and restart compression needs a build with `-DMallard_ENABLE_ZLIB=ON`. `relative_error` rounds each value to the fewest mantissa bits within the bound (the mesh stays exact), which compresses smooth fields several times further; restart files are always lossless. On 4.2M quads on an A100, a VTU snapshot of `RHO`, `U`, `P`, `T` is 474 MB, 164 MB with `zlib` and 59 MB with `relative_error = 1e-4`.
+
+Pitfalls: the run's summary reports the time spent writing; if each file takes longer to write than the steps between files, the run waits for the previous file anyway (write less often, or compress with more `io_threads`). Errors writing a file surface at the next file or at the end of the run, which waits for every file; a run killed outright (e.g. `kill -9`) can leave the file being written incomplete, while the files before it are complete. HDF5 output on several ranks stays synchronous (parallel HDF5 calls MPI only from the main thread).
 
 **Restart files** (`format = "restart"`) are described in
 [Initialization and restarts](initialization.md#restarts).
@@ -86,7 +108,9 @@ interval = 10        # default 1
 Writes `step, t` and the pressure and viscous force components of the fluid
 on the zone, per unit depth in 2D (per radian in axisymmetric runs). Divide by
 the dynamic pressure and a reference length (or area) for drag and lift
-coefficients.
+coefficients. On walls with a [wall model](les.md#wall-models-wall_model)
+the viscous force is the modeled stress, and a last column `Q` gives the
+modeled heat flux into the fluid.
 
 ## Domain integrals: `[integrals]`
 

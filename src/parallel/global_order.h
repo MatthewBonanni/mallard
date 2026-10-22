@@ -25,14 +25,16 @@
  *        order. An id may come from several ranks (shared nodes); it then
  *        takes any one of their values, so they should agree. Ids no rank
  *        sends are left zero. Without distributed, this rank holds every id
- *        and the regrouping is a local permutation (not collective).
+ *        and the regrouping is a local permutation (not collective). With
+ *        align, the blocks split the ids in runs of align instead (each
+ *        block starts at a multiple of align).
  */
 class GlobalOrder {
     public:
         GlobalOrder() = default;
 
         /** @brief Plan for the items with these global ids (collective if distributed). */
-        GlobalOrder(std::span<const uint64_t> ids, uint64_t n_global, bool distributed);
+        GlobalOrder(std::span<const uint64_t> ids, uint64_t n_global, bool distributed, uint64_t align = 1);
 
         uint64_t n_global() const { return n_global_; }
         uint64_t first() const { return first_; }

@@ -168,7 +168,7 @@ double InletProfile::Field::at(const Point & x) const {
 InletProfile::InletProfile(const Input & boundary, const std::string & where) {
     const Input * turbulence = turbulent(boundary) ? &boundary.at("turbulence") : nullptr;
     if (turbulence && !turbulence->is_table()) throw InputError(where + ".turbulence must be a table.");
-    auto field = [&](const Input & v, const std::string & name, const Dimension & dimension, bool & varies) {
+    auto field = [&](const Input & v, const std::string & name, bool & varies) {
         Field f;
         if (v.is_string() && !has_unit(v.as_string())) {
             f.expression = std::make_shared<Expression>(name, v.as_string());

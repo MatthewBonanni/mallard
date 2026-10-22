@@ -59,7 +59,7 @@ Stretching mesh_stretching(const Input & input) {
 
 namespace {
 
-std::vector<double> transform_vector(const Input & v, const std::string & key, const Dimension & dimension) {
+std::vector<double> transform_vector(const Input & v, const std::string & key) {
     if (!v.is_array() || v.as_array().size() != N_DIM) {
         throw InputError("mesh.transform." + key + " must have " + std::to_string(N_DIM) + " components.");
     }
