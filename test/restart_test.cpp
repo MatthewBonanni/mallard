@@ -169,7 +169,7 @@ TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
 TEST(RestartTest, ErrorControlledRunRestartsExactly) {
     // The controller's step proposal and error history continue from the
     // restart file; the vtu times clip some steps, which the history includes
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_error_control").string();
+    const std::string dir = (scratch_dir() / "mallard_restart_error_control").string();
     std::filesystem::remove_all(dir);
     auto input = [&](const std::string & sub, const std::string & init, uint32_t n_steps) {
         std::string s = restart_input(dir + "/" + sub, init, n_steps);
