@@ -1,4 +1,0 @@
-# For `spack repo add https://github.com/MatthewBonanni/mallard.git`
-repo_index:
-  paths:
-  - spack/spack_repo/mallard

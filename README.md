@@ -131,7 +131,7 @@ For a GPU, pull `docker://ghcr.io/matthewbonanni/mallard:cuda` and add `--nv`: `
 
 ```sh
 git clone --depth 1 https://github.com/spack/spack.git ~/spack && . ~/spack/share/spack/setup-env.sh
-spack repo add https://github.com/MatthewBonanni/mallard.git
+spack repo add --path spack/spack_repo/mallard https://github.com/MatthewBonanni/mallard.git
 spack install mallard
 spack load mallard
 ```

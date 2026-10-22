@@ -129,7 +129,7 @@ jobs:
       - name: Install
         run: |
           # As documented: the package from this repository on GitHub, at this commit
-          spack repo add "https://github.com/$GITHUB_REPOSITORY.git"
+          spack repo add --path spack/spack_repo/mallard "https://github.com/$GITHUB_REPOSITORY.git"
           spack repo update mallard --commit "$GITHUB_SHA"
           spack info mallard | head -n 3
           spack compiler find
