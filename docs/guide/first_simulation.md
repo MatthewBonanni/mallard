@@ -2,7 +2,7 @@
 
 This walk-through takes about ten minutes: build Mallard on a CPU, run the Sod shock tube, check the result against the exact solution, and then change the case. It assumes a C++20 compiler, CMake 3.22 or newer, git, and Python 3.
 
-With Mallard already installed from a container or Spack (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)), skip the build: copy the examples and mechanisms (`cp -r $MALLARD_SHARE/examples $MALLARD_SHARE/mechanisms .`), and run `Mallard` and `Mallard3D` where the commands below run `../../build/src/Mallard` and `../../build3d/src/Mallard`. The containers have the Python packages, and the tools in `$MALLARD_SHARE/tools`.
+With Mallard already installed from a container or Spack (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)), skip the build: run `Mallard` and `Mallard3D` where the commands below run `build/src/Mallard` and `build3d/src/Mallard` (`Mallard new sod runs/sod`, then `Mallard -i input.toml` in the case). The installed examples, mechanisms and tools are in `$MALLARD_SHARE`; the containers have the Python packages.
 
 ## 1. Build
 
