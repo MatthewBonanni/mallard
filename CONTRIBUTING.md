@@ -135,19 +135,27 @@ fix and a `fixed` fragment; a documentation fix needs neither.
 - Pull requests are squash-merged: the PR title becomes the commit subject on
   `main`, so make it descriptive. Intermediate commits on the branch need not be
   tidy; push new commits rather than rewriting history once a review has started.
-- **CI does not run on every push.** Pull requests run CI on request: when a PR is
-  ready, a maintainer (or you, with write access) runs
-  `gh workflow run ci.yml --ref <branch>` and the results appear as checks on the
-  head commit. `main` runs it on every merge. CI builds with warnings as errors and
-  runs the full suite in 2D and 3D, with OpenMP, serial, MPI on 1 to 4 ranks and
-  single precision, plus Clang and CUDA (2D and 3D) compile-only builds. Changes to
-  documentation alone do not need CI.
-- **Device code** (kernels, Kokkos functors, anything run on the GPU) is also run
-  on NVIDIA A100 GPUs by a maintainer-run GPU CI: the test suite on CUDA and the
-  [performance suite](benchmarks/README.md), compared with per-hardware baselines.
-  You do not need a GPU to contribute; say in the PR template whether device code
-  changed, and a maintainer runs it. Performance claims need numbers from the
-  performance suite or a real case, before and after.
+- **CI does not run on every push.** When a PR is ready to land, a maintainer (or
+  you, with write access) runs `gh workflow run ci.yml --ref <branch>`. The run sets
+  the commit status `CI` on the head commit: pending while it runs, then success or
+  failure, and its *Details* link shows every job and its log. `main` requires a
+  passing `CI` status on the PR's current head, so a new push needs a new run.
+  CI builds with warnings as errors and runs the full suite in 2D and 3D, with
+  OpenMP, serial, MPI on 1 to 4 ranks and single precision, plus a Clang build and
+  the tutorials and case templates. Documentation-only changes skip the build jobs
+  (the run takes about a minute). `main` runs CI on every merge.
+- **CUDA builds** (2D and 3D, compile only) run when the changes touch device code:
+  `tools/device_changes.sh` decides (a changed `src/` file with Kokkos device
+  constructs, or a Kokkos update).
+- **GPU CI.** Device code is also run on NVIDIA A100 GPUs by a maintainer-run GPU
+  CI, outside GitHub Actions: CUDA 12 and 13 builds in 2D and 3D, the full test suite
+  on the GPU (including the CUDA-graph and NCCL paths), the MPI tests on 2 ranks, and
+  the [performance suite](benchmarks/README.md) against per-hardware baselines. It
+  posts the commit statuses `gpu/tests` and `gpu/perf` on the PR's head commit, so
+  its results show on the PR next to `CI`. A PR that changes device code merges only
+  with both passing. You do not need a GPU to contribute: say in the PR template
+  whether device code changed, and a maintainer runs it. Performance claims need
+  numbers from the performance suite or a real case, before and after.
 - Sanitizers (AddressSanitizer and UndefinedBehaviorSanitizer) run nightly on
   `main`.
 
