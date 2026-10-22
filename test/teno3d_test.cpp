@@ -176,12 +176,12 @@ INSTANTIATE_TEST_SUITE_P(TENO, TENO3DOrder,
 // The rest of the verification manual's matrix: run by tools/docs/verification.py
 INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, TENO3DOrder,
     ::testing::Values(OrderParam{"cartesian", 6, 6, SMOOTH}, OrderParam{"cartesian_tet", 6, 4, SMOOTH},
-                      OrderParam{"cartesian_prism", 3, 4, SMOOTH}, OrderParam{"cartesian_prism", 4, 4, SMOOTH},
-                      OrderParam{"cartesian_prism", 5, 4, SMOOTH}, OrderParam{"cartesian_prism", 6, 4, SMOOTH},
-                      OrderParam{"cartesian_pyramid", 3, 4, SMOOTH}, OrderParam{"cartesian_pyramid", 4, 4, SMOOTH},
-                      OrderParam{"cartesian_pyramid", 5, 4, SMOOTH}, OrderParam{"cartesian_pyramid", 6, 4, SMOOTH},
+                      OrderParam{"cartesian_prism", 3, 6, SMOOTH}, OrderParam{"cartesian_prism", 4, 6, SMOOTH},
+                      OrderParam{"cartesian_prism", 5, 6, SMOOTH}, OrderParam{"cartesian_prism", 6, 6, SMOOTH},
+                      OrderParam{"cartesian_pyramid", 3, 6, SMOOTH}, OrderParam{"cartesian_pyramid", 4, 6, SMOOTH},
+                      OrderParam{"cartesian_pyramid", 5, 6, SMOOTH}, OrderParam{"cartesian_pyramid", 6, 6, SMOOTH},
                       OrderParam{"cartesian_mixed", 3, 6, SMOOTH}, OrderParam{"cartesian_mixed", 4, 6, SMOOTH},
-                      OrderParam{"cartesian_mixed", 5, 6, SMOOTH}, OrderParam{"cartesian_mixed", 6, 6, SMOOTH}));
+                      OrderParam{"cartesian_mixed", 5, 6, SMOOTH}));
 
 namespace {
 

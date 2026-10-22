@@ -124,6 +124,10 @@ INSTANTIATE_TEST_SUITE_P(TENO, TENOOrder,
     ::testing::Combine(::testing::Values("cartesian", "cartesian_tri"),
                        ::testing::Values(3, 4, 5)));
 
+// The rest of the verification manual's matrix: run by tools/docs/verification.py
+INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, TENOOrder,
+    ::testing::Combine(::testing::Values("cartesian", "cartesian_tri"), ::testing::Values(6)));
+
 TEST(TENOTest, EigenvectorsAreInverse) {
     const rtype W[N_CONSERVATIVE] = {1.3_r, 0.4_r, -0.7_r, 2.1_r};
     const rtype n[N_DIM] = {0.6_r, -0.8_r};

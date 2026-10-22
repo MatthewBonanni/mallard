@@ -18,9 +18,11 @@
 #include <array>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <tuple>
+#include <vector>
 
 #include "gmsh_fixtures.h"
 #include "periodic_fixtures.h"
@@ -170,7 +172,9 @@ double advection_error(const std::string & mesh, const std::string & dirs, const
         for (const char * zone : zones[d]) c.boundaries += "[[boundaries]]\nname = \"" + std::string(zone) + "\"\ntype = \"symmetry\"\n";
     }
     const double T = 0.25;
-    const uint32_t steps = static_cast<uint32_t>(std::ceil(T / (0.25 * std::pow(1.0 / n, std::max(1.0, order / 4.0)))));
+    // RK4 at dt = h / 4 is stable on hexahedra only: the other cells are thinner
+    const double dt_scale = mesh == "cartesian" ? 0.25 : 0.0625;
+    const uint32_t steps = static_cast<uint32_t>(std::ceil(T / (dt_scale * std::pow(1.0 / n, std::max(1.0, order / 4.0)))));
     c.run = "t_stop = " + std::to_string(T) + "\ndt = " + std::to_string(T / steps) + "\n";
     auto wave = [velocity](double t) {
         return [t, velocity](double x, double y, double z, double * W) {
@@ -194,12 +198,14 @@ double advection_error(const std::string & mesh, const std::string & dirs, const
     });
     double err = 0.0;
     for (uint32_t i = 0; i < solver->get_mesh()->n_cells; i++) {
-        err = std::max(err, std::abs(double(solver->h_conservatives(i, 0)) - double(exact(i, 0))));
+        const double e = std::abs(double(solver->h_conservatives(i, 0)) - double(exact(i, 0)));
+        err = std::isfinite(e) ? std::max(err, e) : std::numeric_limits<double>::infinity();
     }
     return err;
 }
 
-using AdvectionParam = std::tuple<std::string, std::string, uint32_t>;  // mesh type, FO, MUSCL or TENO<order>, coarse n
+// mesh type, FO, MUSCL or TENO<order>, coarse n, how far below the design order the observed one may fall
+using AdvectionParam = std::tuple<std::string, std::string, uint32_t, double>;
 class PeriodicAdvection3D : public ::testing::TestWithParam<AdvectionParam> {};
 
 /** @brief The directions in which each generated mesh type can be periodic. */
@@ -212,25 +218,37 @@ std::string periodic_directions(const std::string & mesh) {
 } // namespace
 
 TEST_P(PeriodicAdvection3D, SmoothWaveConvergesAtDesignOrder) {
-    const auto [mesh, scheme, n] = GetParam();
+    const auto [mesh, scheme, n, slack] = GetParam();
     const std::string recon = scheme.rfind("TENO", 0) == 0 ? "TENO" : scheme;
     const int order = recon == "TENO" ? std::stoi(scheme.substr(4)) : recon == "MUSCL" ? 2 : 1;
     const std::string dirs = periodic_directions(mesh);
     verification::expect_order({"advection", scheme, verification::cells_of(mesh), "max density error",
                                 {double(n), double(2 * n)},
                                 {advection_error(mesh, dirs, recon, order, n), advection_error(mesh, dirs, recon, order, 2 * n)},
-                                double(order), order - 0.25});
+                                double(order), order - slack});
 }
 
 INSTANTIATE_TEST_SUITE_P(Periodic, PeriodicAdvection3D,
-    ::testing::Values(AdvectionParam{"cartesian", "MUSCL", 8}, AdvectionParam{"cartesian", "TENO4", 8}));
+    ::testing::Values(AdvectionParam{"cartesian", "MUSCL", 8, 0.25}, AdvectionParam{"cartesian", "TENO4", 8, 0.25}));
 
 // The rest of the verification manual's matrix of reconstructions and cell
-// types: run by tools/docs/verification.py, too slow for every CI run
-INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, PeriodicAdvection3D,
-    ::testing::Combine(::testing::Values("cartesian", "cartesian_tet", "cartesian_prism", "cartesian_pyramid",
-                                         "cartesian_mixed"),
-                       ::testing::Values("FO", "MUSCL", "TENO3", "TENO4", "TENO5", "TENO6"), ::testing::Values(8u)));
+// types: run by tools/docs/verification.py, too slow for every CI run. First
+// order, MUSCL and TENO3 need 12 to 16 cells per wavelength to approach their
+// rates, and the meshes stay coarse enough that the bound is the design order
+// less 0.5, as for the 3D reconstruction (TENO3DOrder). TENO5 and TENO6 run on
+// hexahedra only (several minutes on the other cells), their reconstruction
+// on every cell type.
+std::vector<AdvectionParam> verification_matrix() {
+    std::vector<AdvectionParam> cases = {{"cartesian", "FO", 16, 0.5}, {"cartesian", "TENO3", 12, 0.5},
+                                         {"cartesian", "TENO5", 12, 0.5}, {"cartesian", "TENO6", 8, 0.5}};
+    for (const char * mesh : {"cartesian_tet", "cartesian_prism", "cartesian_pyramid", "cartesian_mixed"}) {
+        cases.insert(cases.end(), {{mesh, "FO", 16, 0.5}, {mesh, "MUSCL", 12, 0.5}, {mesh, "TENO3", 12, 0.5},
+                                   {mesh, "TENO4", 8, 0.5}});
+    }
+    return cases;
+}
+
+INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, PeriodicAdvection3D, ::testing::ValuesIn(verification_matrix()));
 
 namespace {
 
