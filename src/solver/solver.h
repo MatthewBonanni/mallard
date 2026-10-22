@@ -27,6 +27,7 @@
 #include "face_reconstruction.h"
 #include "riemann_solver.h"
 #include "time_integrator.h"
+#include "step_control.h"
 #include "physics.h"
 #include "les.h"
 #include "pasr.h"
@@ -219,6 +220,14 @@ class Solver {
         /** @brief Adds the sponge-layer sources to the RHS per unit volume (owned cells). */
         void apply_sponges(const State & solution, const State & rhs);
         void calc_dt();
+        /**
+         * @brief Error-controlled steps: whether step_controller accepts the
+         *        step just taken (else the solution is back at U^n).
+         */
+        bool accept_controlled_step();
+        void init_error_control();
+        /** @brief Throws once the same step has been rejected too many times. */
+        void check_rejections(int tries) const;
         /** @brief The time the next step must not pass: t_stop or the next time-based output. */
         rtype next_target_time() const;
         void check_fields();
@@ -377,6 +386,8 @@ class Solver {
         rtype get_time() const { return t; }
         const Statistics & get_statistics() const { return statistics; }
         uint64_t get_step() const { return step; }
+        /** @brief Steps rejected by the error controller in this run. */
+        uint64_t get_rejected_steps() const { return n_rejected; }
         const Euler & get_physics() const { return physics; }
         std::shared_ptr<Mesh> get_mesh() const { return mesh; }
         /** @brief The input after its numerics preset, if any, filled the keys it leaves unset. */
@@ -569,6 +580,8 @@ class Solver {
         rtype hybrid_floor = 0.0;
         Kokkos::View<rtype *> cell_upwind;  // hybrid flux: upwind fraction of each cell, else empty
         std::unique_ptr<TimeIntegrator> time_integrator;
+        StepController step_controller;  // [numerics.error_control], else not enabled
+        uint64_t n_rejected = 0;         // steps rejected by step_controller in this run
 
         // Axisymmetric runs (see docs/design/axisymmetric.md)
         bool axisymmetric = false;
