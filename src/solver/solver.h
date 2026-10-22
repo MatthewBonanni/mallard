@@ -475,6 +475,7 @@ class Solver {
         int base_halo_layers() const;
         bool halo_too_shallow();
         void trim_halo();
+        uint32_t n_gradient_cells() const;
         void describe_partition_surface();
         void init_rhs_split();
         void init_axisymmetric_weights();

@@ -94,8 +94,10 @@ TEST(MPI3DTest, LargeEddySimulationOnTetrahedraMatchesSerial) {
 
 TEST(MPI3DTest, WallModelsMatchSerial) {
     // Exchange and edge points several cells off the walls, in cells that a
-    // partition may leave beyond the default halo, which must then deepen
-    for (const char * partitioner : {"multijagged", "hilbert"}) {
+    // partition may leave beyond the default halo, which must then deepen.
+    // Without LES or the hybrid flux, only the wall model reads the gradients
+    // of the deep halo cells holding its points
+    for (const char * partitioner : {"multijagged", "hilbert"}) for (const bool les : {true, false}) {
         std::ostringstream s;
         s << "[run]\nn_steps = 6\ncfl = 0.4\n"
           << "[mesh]\ntype = \"cartesian_tet\"\nNx = 6\nNy = 8\nNz = 4\nLx = 1.0\nLy = 1.0\nLz = 0.6\n"
@@ -107,11 +109,12 @@ TEST(MPI3DTest, WallModelsMatchSerial) {
           << "wall_model = { model = \"gfm\", exchange_distance = 0.45, edge_distance = 0.9 }\n"
           << "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n"
           << "wall_model = { model = \"equilibrium\", exchange_cells = 3.0 }\n"
-          << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\nconvective_flux = \"hybrid\"\n"
+          << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+          << (les ? "convective_flux = \"hybrid\"\n" : "")
           << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\nlimiter = \"none\"\n"
           << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
           << "mu = 1e-3\nPr = 0.72\n"
-          << "[les]\nmodel = \"sigma\"\n"
+          << (les ? "[les]\nmodel = \"sigma\"\n" : "")
           << "[output]\ncheck_interval = 1000000\n";
         expect_matches_serial(s.str());
     }
