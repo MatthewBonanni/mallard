@@ -57,7 +57,6 @@ jobs:
           path: ${{ github.workspace }}/.ccache
           key: ccache-${{ matrix.toolchain.name }}-${{ matrix.dim }}-${{ github.sha }}
   cuda:
-    needs: changelog
     runs-on: ubuntu-latest
     container: nvidia/cuda:12.9.1-devel-ubuntu24.04
     strategy:
