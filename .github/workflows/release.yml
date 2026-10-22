@@ -11,6 +11,7 @@ name: Release
 on:
   push:
     tags: ['v*']
+    branches: [distribution-spack-containers]  # TEMPORARY: test on the PR branch (images are not pushed)
   workflow_dispatch:
     inputs:
       push:
@@ -106,8 +107,8 @@ jobs:
           docker tag mallard:cuda "$IMAGE:$TAG"
           docker push "$IMAGE:$TAG"
 
-  # spack install of this checkout (CPU: OpenMP, MPI, HDF5, CGNS, 2D and 3D) with the
-  # package in spack/, then its standalone test and the smoke test
+  # spack install of this checkout (CPU: OpenMP, MPI, HDF5, CGNS, zlib, 2D and 3D) with
+  # the package in spack/, then its standalone test and the smoke test
   spack:
     runs-on: ubuntu-24.04
     steps:
@@ -127,7 +128,10 @@ jobs:
       # The system's GCC, CMake and Open MPI; Spack builds the rest
       - name: Install
         run: |
-          spack repo add spack/spack_repo/mallard
+          # As documented: the package from this repository on GitHub, at this commit
+          spack repo add "https://github.com/$GITHUB_REPOSITORY.git"
+          spack repo update mallard --commit "$GITHUB_SHA"
+          spack info mallard | head -n 3
           spack compiler find
           mkdir -p "$RUNNER_TEMP/env"
           cat > "$RUNNER_TEMP/env/spack.yaml" << EOF
@@ -154,10 +158,12 @@ jobs:
           cat "$RUNNER_TEMP/env/spack.yaml"
           spack -e "$RUNNER_TEMP/env" concretize
           spack -e "$RUNNER_TEMP/env" install --fail-fast
-      - name: Concretize the GPU variants
+      - name: Concretize the README's other variants
         run: |
           spack -e "$RUNNER_TEMP/env" spec mallard +cuda cuda_arch=80
           spack -e "$RUNNER_TEMP/env" spec mallard +rocm amdgpu_target=gfx90a
+          spack -e "$RUNNER_TEMP/env" spec mallard +cuda cuda_arch=90 +nccl
+          spack -e "$RUNNER_TEMP/env" spec mallard ~mpi dims=3 precision=single
       - name: Test
         run: |
           spack -e "$RUNNER_TEMP/env" test run mallard

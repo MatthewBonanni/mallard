@@ -14,7 +14,7 @@ for dim in 2 3; do
     [ "$dim" = 3 ] && suffix=3D
     cmake -S "$src" -B "/tmp/build-$dim" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" \
         -DUSE_SYSTEM_KOKKOS=OFF -DMallard_ENABLE_TESTS=OFF \
-        -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DUSE_SYSTEM_CGNS=OFF \
+        -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DUSE_SYSTEM_CGNS=OFF -DMallard_ENABLE_ZLIB=ON \
         -DMallard_DIM="$dim" -DMallard_EXECUTABLE_SUFFIX="$suffix" "$@"
     cmake --build "/tmp/build-$dim" --parallel "${JOBS:-$(nproc)}"
     cmake --install "/tmp/build-$dim"

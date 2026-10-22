@@ -66,6 +66,7 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
     variant("nccl", default=False, when="+mpi+cuda", description="Halo exchanges with NCCL")
     variant("hdf5", default=True, description="HDF5 meshes and output, mallard-mesh-convert")
     variant("cgns", default=True, description="Read CGNS mesh files")
+    variant("zlib", default=True, description="zlib compression of VTU and restart files")
 
     depends_on("c", type="build")
     depends_on("cxx", type="build")
@@ -90,6 +91,7 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
     depends_on("hdf5+mpi", when="+hdf5+mpi")
     depends_on("cgns+hdf5", when="+cgns")
     depends_on("cgns~mpi", when="+cgns~mpi")
+    depends_on("zlib-api", when="+zlib")
 
     conflicts("+openmp", when="+threads", msg="Kokkos builds one parallel host backend")
     conflicts("+cuda", when="+rocm", msg="Kokkos builds one device backend")
@@ -156,6 +158,7 @@ class CMakeBuilder(cmake.CMakeBuilder):
             self.define("USE_SYSTEM_HDF5", True),
             self.define_from_variant("Mallard_ENABLE_CGNS", "cgns"),
             self.define("USE_SYSTEM_CGNS", True),
+            self.define_from_variant("Mallard_ENABLE_ZLIB", "zlib"),
             self.define("Mallard_ENABLE_TESTS", self.pkg.run_tests),
         ]
         if spec.satisfies("+mpi"):

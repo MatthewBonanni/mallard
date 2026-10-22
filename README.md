@@ -90,7 +90,14 @@ Each installs `Mallard` (2D) and `Mallard3D` (3D), `MallardReactor` (0D reactors
 
 ### Container
 
-Images for each release are on the GitHub Container Registry: `ghcr.io/matthewbonanni/mallard` for CPUs (OpenMP and MPI; x86-64 and ARM, so also Apple Silicon) and `ghcr.io/matthewbonanni/mallard:cuda` for NVIDIA GPUs (A100, A40 and RTX 30xx, L40S and RTX 40xx, H100; driver R525 or newer). Both have MPI, HDF5, CGNS and the Python tools; tag a version as `:0.9.0` or `:0.9.0-cuda`.
+Each release, from 0.9.0 on, publishes images to the GitHub Container Registry:
+
+| Image | For |
+|---|---|
+| `ghcr.io/matthewbonanni/mallard` (`:latest`, or a version: `:0.9.0`) | CPUs: OpenMP, MPI with dKaMinPar; x86-64 and ARM (also Apple Silicon) |
+| `ghcr.io/matthewbonanni/mallard:cuda` (or `:0.9.0-cuda`) | NVIDIA GPUs: A100, A40 and RTX 30xx, L40S and RTX 40xx, H100 (driver R525 or newer); MPI with NCCL |
+
+Both have HDF5, CGNS, zlib and the Python tools, and set `MALLARD_SHARE` to the examples' directory.
 
 With Docker, run the Sod shock tube in the current directory:
 
@@ -120,33 +127,35 @@ For a GPU, pull `docker://ghcr.io/matthewbonanni/mallard:cuda` and add `--nv`: `
 
 ### Spack
 
-[Spack](https://spack.io) (1.0 or newer) builds Mallard and its dependencies for your machine. Mallard's package is in this repository until it is in Spack's:
+[Spack](https://spack.io) (1.0 or newer) builds Mallard and its dependencies for your machine, with the package in this repository:
 
 ```sh
 git clone --depth 1 https://github.com/spack/spack.git ~/spack && . ~/spack/share/spack/setup-env.sh
-git clone https://github.com/MatthewBonanni/mallard.git
-spack repo add mallard/spack/spack_repo/mallard
+spack repo add https://github.com/MatthewBonanni/mallard.git
 spack install mallard
 spack load mallard
 ```
 
-The default is OpenMP (C++ threads on macOS), MPI, HDF5 and CGNS, in 2D and 3D. For GPUs, name the architecture:
+`spack repo add` also takes a local checkout's package repository, `spack repo add mallard/spack/spack_repo/mallard`; `spack repo update mallard` pulls a newer package. The default is OpenMP (C++ threads on macOS), MPI, HDF5, CGNS and zlib, in 2D and 3D, double precision. Other builds name their variants:
 
 ```sh
-spack install mallard +cuda cuda_arch=80             # NVIDIA A100 (90: H100)
-spack install mallard +rocm amdgpu_target=gfx90a     # AMD MI250X (gfx942: MI300X)
+spack install mallard +cuda cuda_arch=80                 # NVIDIA A100 (90: H100)
+spack install mallard +cuda cuda_arch=90 +nccl           # H100, halo exchanges with NCCL
+spack install mallard +rocm amdgpu_target=gfx90a         # AMD MI250X (gfx942: MI300X)
+spack install mallard ~mpi dims=3 precision=single       # one workstation, 3D only, single precision
+spack install mallard ^openmpi@5                         # a particular MPI
 ```
 
 | Variant | Default | Description |
 |---|---|---|
-| `dims` | `2,3` | Dimensions to build (`dims=3` for the 3D solver only) |
+| `dims` | `2,3` | Dimensions to build (`dims=3`: the 3D solver only) |
 | `precision` | `double` | `double` or `single` |
 | `openmp`, `threads`, `serial` | `+openmp` (macOS: `+threads`) | Kokkos host backend |
 | `cuda` + `cuda_arch`, `rocm` + `amdgpu_target`, `sycl` | off | Kokkos GPU backend |
 | `mpi`, `gpu_aware_mpi`, `nccl` | `+mpi` | MPI; device buffers to a GPU-aware MPI; halo exchanges with NCCL |
-| `hdf5`, `cgns` | on | HDF5 meshes and output; CGNS meshes |
+| `hdf5`, `cgns`, `zlib` | on | HDF5 meshes and output; CGNS meshes; zlib compression |
 
-Spack builds its own Kokkos to match; a cluster's MPI or CUDA can be registered with `spack external find`.
+Spack builds its own Kokkos to match. A cluster's MPI, CUDA or compilers can be registered with `spack external find` (e.g. `spack external find openmpi cuda`). dKaMinPar is not in the package: build from source for `partitioner = "graph"`.
 
 ### From source
 
@@ -159,9 +168,26 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_
 cmake --build build -j
 ```
 
-The solver is `build/src/Mallard`. Add `-DMallard_DIM=3` (in a separate build directory) for the 3D solver. To install, `cmake --install build --prefix $HOME/mallard` (a 3D build with `-DMallard_EXECUTABLE_SUFFIX=3D` installs next to a 2D one, as in the containers and Spack).
+The solver is `build/src/Mallard`. Add `-DMallard_DIM=3` (in a separate build directory) for the 3D solver.
 
-Pick the Kokkos backend at configure time, for example `-DKokkos_ENABLE_OPENMP=ON`, or `-DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON -DCMAKE_CXX_COMPILER=$PWD/src/external/kokkos/bin/nvcc_wrapper` for NVIDIA A100 GPUs (add `-DKokkos_ENABLE_OPENMP=ON` too, so host-side setup such as TENO's precomputation runs in parallel). To use an installed Kokkos instead, pass `-DUSE_SYSTEM_KOKKOS=ON -DKokkos_DIR=/path/to/kokkos`.
+With everything (MPI with dKaMinPar, HDF5, CGNS and zlib), on Ubuntu 24.04, in 2D and 3D, installed into `~/mallard` (the CPU container is built this way):
+
+```sh
+sudo apt-get install -y build-essential cmake git libopenmpi-dev openmpi-bin libhdf5-openmpi-dev zlib1g-dev libtbb-dev
+for dim in 2 3; do
+    suffix=""; [ $dim = 3 ] && suffix=3D
+    cmake -S . -B build-$dim -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_ENABLE_OPENMP=ON \
+        -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON \
+        -DMallard_ENABLE_CGNS=ON -DUSE_SYSTEM_CGNS=OFF -DMallard_ENABLE_ZLIB=ON \
+        -DMallard_DIM=$dim -DMallard_EXECUTABLE_SUFFIX=$suffix -DCMAKE_INSTALL_PREFIX=$HOME/mallard
+    cmake --build build-$dim -j && cmake --install build-$dim
+done
+export PATH=$HOME/mallard/bin:$PATH MALLARD_SHARE=$HOME/mallard/share/mallard
+```
+
+On macOS with Homebrew, `brew install cmake open-mpi hdf5 cgns` and the same loop with `-DKokkos_ENABLE_THREADS=ON` in place of OpenMP, without dKaMinPar, and `-DUSE_SYSTEM_CGNS=ON`. `-DMallard_EXECUTABLE_SUFFIX=3D` names the 3D executables `Mallard3D` and `mallard-mesh-convert3D`, so both dimensions install side by side.
+
+Pick the Kokkos backend at configure time, for example `-DKokkos_ENABLE_OPENMP=ON`, or `-DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON -DCMAKE_CXX_COMPILER=$PWD/src/external/kokkos/bin/nvcc_wrapper` for NVIDIA A100 GPUs (add `-DKokkos_ENABLE_OPENMP=ON` too, so host-side setup such as TENO's precomputation runs in parallel; with MPI, `-DMallard_ENABLE_NCCL=ON` for halo exchanges with NCCL). The CUDA container is built this way, for several GPUs at once (`docker/Dockerfile.cuda`). To use an installed Kokkos instead, pass `-DUSE_SYSTEM_KOKKOS=ON -DKokkos_DIR=/path/to/kokkos`.
 
 For AMD GPUs, build with ROCm's Clang (ROCm 6.2 or newer, with the HIP development headers):
 
