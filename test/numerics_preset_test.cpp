@@ -36,8 +36,8 @@ Keys resolved(const numerics_preset::Resolution & r, bool from_preset) {
     return keys;
 }
 
-numerics_preset::Resolution resolve(const std::string & text, toml::value * out = nullptr) {
-    toml::value input = parse_toml(text);
+numerics_preset::Resolution resolve(const std::string & text, Input * out = nullptr) {
+    Input input = parse_toml(text);
     auto r = numerics_preset::apply(input);
     if (out) *out = input;
     return r;
@@ -76,14 +76,14 @@ TEST(NumericsPreset, EachPresetResolvesToItsDocumentedKeys) {
     EXPECT_EQ(numerics_preset::names(), (std::vector<std::string>{"robust", "accurate", "les", "reacting"}));
     for (const auto & name : numerics_preset::names()) {
         SCOPED_TRACE(name);
-        toml::value input;
+        Input input;
         const auto r = resolve("[run]\nt_stop = 1.0\n[numerics]\npreset = \"" + name + "\"\n", &input);
         EXPECT_EQ(r.name, name);
         EXPECT_EQ(resolved(r, true), documented.at(name));
         EXPECT_TRUE(resolved(r, false).empty());
         EXPECT_EQ(r.summary(), name);
         // The keys land in the input the rest of the setup reads
-        const toml::value & recon = input.at("numerics").at("face_reconstruction");
+        const Input & recon = input.at("numerics").at("face_reconstruction");
         EXPECT_EQ(recon.at("type").as_string(), documented.at(name).at("numerics.face_reconstruction.type"));
         EXPECT_EQ(input.at("numerics").at("riemann_solver").as_string(),
                   documented.at(name).at("numerics.riemann_solver"));
@@ -92,7 +92,7 @@ TEST(NumericsPreset, EachPresetResolvesToItsDocumentedKeys) {
 }
 
 TEST(NumericsPreset, ExplicitKeysOverrideThePreset) {
-    toml::value input;
+    Input input;
     const auto r = resolve("[run]\nt_stop = 1.0\ndt = 1e-3\n"
                          "[numerics]\npreset = \"accurate\"\nriemann_solver = \"RHLL\"\n"
                          "[numerics.face_reconstruction]\norder = 3\n", &input);
@@ -110,7 +110,7 @@ TEST(NumericsPreset, ExplicitKeysOverrideThePreset) {
 }
 
 TEST(NumericsPreset, AnotherReconstructionTypeGetsNoneOfThePresetsReconstructionOptions) {
-    toml::value input;
+    Input input;
     const auto r = resolve("[run]\nt_stop = 1.0\n[numerics]\npreset = \"accurate\"\n"
                          "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n", &input);
     EXPECT_FALSE(input.at("numerics").at("face_reconstruction").contains("order"));
@@ -120,7 +120,7 @@ TEST(NumericsPreset, AnotherReconstructionTypeGetsNoneOfThePresetsReconstruction
 
 TEST(NumericsPreset, WithoutAPresetTheInputIsUnchanged) {
     const std::string text = "[run]\nt_stop = 1.0\ncfl = 0.7\n[numerics]\nriemann_solver = \"Roe\"\n";
-    toml::value input;
+    Input input;
     const auto r = resolve(text, &input);
     EXPECT_TRUE(r.name.empty());
     EXPECT_TRUE(r.settings.empty());
@@ -184,6 +184,10 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"channel_inflow_retau180/input.toml", "les", 3, "", {}, ""},
     {"channel_les/input.toml", "les", 3, "", {}, ""},
     {"channel_les/input_590.toml", "les", 3, "", {}, ""},
+    {"channel_wmles/lm2000.toml", "les", 3, "type = \"constant\"\np = 17.857142857142858\nT = 1.0\nu = [1.0, 0.0, 0.0]\n", {}, ""},
+    {"channel_wmles/lm5200.toml", "les", 3, "type = \"constant\"\np = 17.857142857142858\nT = 1.0\nu = [1.0, 0.0, 0.0]\n", {}, ""},
+    {"channel_wmles/tl_m1.7.toml", "les", 3, "type = \"constant\"\np = 0.2474487171\nT = 1.0\nu = [1.0, 0.0, 0.0]\n", {}, ""},
+    {"channel_wmles/tl_m3.0.toml", "les", 3, "type = \"constant\"\np = 0.07952404794\nT = 1.0\nu = [1.0, 0.0, 0.0]\n", {}, ""},
     {"channel_retau180/input.toml", "les", 3, "", {}, ""},
     {"counterflow_diffusion/input.toml", "reacting", 3, "",
      {{"inlet", "fuel"}, {"outlet", "oxidizer"}, {"walls", "side_y"}, {"cylinder", "sym_y"}, {"back", "sym_z"},
@@ -255,7 +259,7 @@ TEST(ExampleUnderPreset, EveryExampleHasAPreset) {
     size_t n_inputs = 0;
     for (const auto & entry : std::filesystem::recursive_directory_iterator(example_path(""))) {
         if (entry.path().extension() != ".toml") continue;
-        const toml::value input = toml::parse(entry.path().string());
+        const Input input = parse_input(entry.path().string());
         if (!input.contains("numerics")) continue;  // reactor inputs
         n_inputs++;
         const std::string file = std::filesystem::relative(entry.path(), example_path("")).generic_string();
@@ -268,7 +272,7 @@ TEST(ExampleUnderPreset, EveryExampleHasAPreset) {
 
 TEST_P(ExampleUnderPreset, RunsAFewSteps) {
     const ExampleCase & c = GetParam();
-    const toml::value input = example_under_preset(c, 3, N_DIM == 3 ? 8 : 16);
+    const Input input = example_under_preset(c, 3, N_DIM == 3 ? 8 : 16);
     ScratchDirectory scratch(case_name(c.file));
     Solver solver;
     solver.init(input);

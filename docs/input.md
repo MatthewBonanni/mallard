@@ -11,6 +11,27 @@ The spatial dimension is fixed at build time with the CMake option
 (`z` is 0 in 2D) and, where noted, `t`. Below, `[u_x, u_y]` reads
 `[u_x, u_y, u_z]` in 3D.
 
+Every key in the file must be one the run reads: a key that is misspelled,
+in the wrong table, or unused with the chosen settings (for example
+`[numerics.face_reconstruction] order` with `type = "MUSCL"`) is an error,
+listed with its line and the closest key Mallard looked for.
+
+## Checking an input
+
+`Mallard --check input.toml` runs the whole setup of a run (mesh, partition,
+boundaries, numerics, initial solution) without time stepping and without
+writing any file, and reports on the run. It exits with status 1 if there is
+an error. Under `mpirun -n N` it checks the run on N ranks.
+
+| Option | Description |
+|---|---|
+| `--ranks N` | Memory and cost per rank for a run on N ranks (from a serial check, or one on N ranks) |
+| `--throughput R` | Cost at R cells/s per rank (cell updates per wall second, the `Throughput` of a run's summary) |
+| `--steps N` | Measure the throughput over N steps instead (after one untimed step) |
+| `--quality-vtu PREFIX` | Write the mesh-quality fields to `PREFIX_000000.vtu` (a `.pvtu` and one piece per rank under MPI) |
+
+The report, with an example: [Checking an input](guide/input_files.md#checking-an-input).
+
 ## `[run]`
 
 | Key | Description |
