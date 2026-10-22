@@ -187,7 +187,7 @@ KOKKOS_FORCEINLINE_FUNCTION void static_reflected_moments(const double (*Q)[3], 
         constexpr int g = decltype(gc)::value;
         constexpr int deg = STATIC_TABLES<R>.low_exps[g][0] + STATIC_TABLES<R>.low_exps[g][1] + STATIC_TABLES<R>.low_exps[g][2];
         // The directions from 0 up to g, as reflection() takes them (first nonzero component last)
-        constexpr auto path = [] {
+        constexpr auto path = [=] {
             struct Path {
                 int k[R > 0 ? static_cast<size_t>(R) : 1] = {};
             } p{};
@@ -1856,7 +1856,7 @@ struct CellTeam {
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const Member & tm) const {
-        const uint32_t t = tm.league_rank();
+        const uint32_t t = static_cast<uint32_t>(tm.league_rank());
         // A free slot of the pool; every slot is held by a running team, so one frees up
         int slot = 0;
         Kokkos::single(Kokkos::PerTeam(tm), [&](int & taken) {
@@ -1902,7 +1902,7 @@ struct CellTeam {
     template <class Count, class Write>
     KOKKOS_INLINE_FUNCTION static uint32_t team_scan(const Member & tm, uint32_t * space, const uint32_t n, Count && count,
                                                      Write && write) {
-        const uint32_t team = tm.team_size(), lane = tm.team_rank();
+        const uint32_t team = static_cast<uint32_t>(tm.team_size()), lane = static_cast<uint32_t>(tm.team_rank());
         const uint32_t chunk = (n + team - 1) / team;
         const uint32_t begin = lane * chunk < n ? lane * chunk : n;
         const uint32_t end = begin + chunk < n ? begin + chunk : n;
@@ -2316,7 +2316,7 @@ struct CellTeam {
                 for (uint32_t d = 0; d < 3; d++) dd[d] = (xc[d] - x0[d]) / h;
             } else {
                 double m[3], t[3], xm[3];
-                c.g.unit_normal(f, nf);
+                c.g.unit_normal(uint32_t(f), nf);
                 c.g.translation(w.plane_face_lattice[pf], t);
                 for (uint32_t d = 0; d < 3; d++) m[d] = double(c.g.face_coords(f, d)) + t[d];
                 mirror_point(nf, m, xc, xm);
@@ -2385,7 +2385,7 @@ struct CellTeam {
         if (m <= done) return;
         const int nk = c.nk;
         team_means(tm, w, base, m - done, [&](const uint32_t q) { return done + q; }, nk, x0, h,
-                   [&](const uint32_t q, const int l, const double v) { w.means[(done + q) * nk + l] = v; });
+                   [&](const uint32_t q, const int l, const double v) { w.means[(done + q) * uint32_t(nk) + uint32_t(l)] = v; });
         if (tm.team_rank() == 0) ctl[N_MEANS] = m;
         tm.team_barrier();
     }
@@ -2434,7 +2434,7 @@ struct CellTeam {
         // Zero-mean basis at the cell's face quadrature points, row by row in face and point order
         const uint32_t f0 = c.g.offsets_faces_of_cell(i);
         const uint32_t n_faces = c.g.offsets_faces_of_cell(i + 1) - f0;
-        const uint32_t nq = c.g.quad_weights.extent(1);
+        const uint32_t nq = static_cast<uint32_t>(c.g.quad_weights.extent(1));
         const uint32_t n_psi = team_scan(
             tm, scan_space(ctl), n_faces * nq,
             [&](const uint32_t e) { return uint32_t(c.g.quad_weights(c.g.faces_of_cell(f0 + e / nq), e % nq) != rtype(0)); },
@@ -2446,8 +2446,8 @@ struct CellTeam {
                 for (uint32_t d = 0; d < 3; d++) {
                     xi[d] = ((double(c.g.quad_points(f, q, d)) - c.g.face_offset(f, i, d)) - x0[d]) / h;
                 }
-                teno::monomials(r, xi[0], xi[1], xi[2], phi);
-                for (int l = 0; l < nk; l++) w.psi[row * nk + l] = phi[l] - mean0[l];
+                teno::monomials(uint8_t(r), xi[0], xi[1], xi[2], phi);
+                for (int l = 0; l < nk; l++) w.psi[row * uint32_t(nk) + uint32_t(l)] = phi[l] - mean0[l];
             });
 
         // The search, with its hash set in level-0 scratch
@@ -2491,9 +2491,9 @@ struct CellTeam {
         const uint16_t n_first = at_wall ? c.wall_ns : c.ns;
         auto build = [&](const int m) {
             ensure_means(tm, w, base, ctl, uint32_t(m) > means_floor ? uint32_t(m) : means_floor, x0, h);
-            const size_t bytes = sizeof(double) * size_t(m) * nk;
+            const size_t bytes = sizeof(double) * size_t(m) * size_t(nk);
             A_used = bytes <= big_bytes ? A : reinterpret_cast<double *>(base + layout.A);
-            X_used = A_used == A && 2 * bytes <= big_bytes ? A + size_t(m) * nk : X;
+            X_used = A_used == A && 2 * bytes <= big_bytes ? A + size_t(m) * size_t(nk) : X;
             Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, m * nf),
                                  [&](const int e) { A_used[e] = w.means[(e / nf) * nk + e % nf] - mean0[e % nf]; });
             tm.team_barrier();
@@ -2513,8 +2513,9 @@ struct CellTeam {
         uint32_t n_tried = 0;
         for (uint32_t n_try = n_first; n_try <= try_max; n_try++) {
             if (n_try < uint32_t(n_entries) && Kokkos::fabs(key(n_try) - key(n_try - 1)) < tie) continue;
-            if (!build(n_try)) continue;
-            const double lebesgue = team_lebesgue_constant(tm, &w.psi[0], n_psi, nk, X_used, n_try, &w.coef[0]);
+            if (!build(int(n_try))) continue;
+            const double lebesgue =
+                team_lebesgue_constant(tm, &w.psi[0], int(n_psi), nk, X_used, int(n_try), &w.coef[0]);
             if (tm.team_rank() == 0) {
                 w.tried_n[n_tried] = n_try;
                 w.tried_lebesgue[n_tried] = lebesgue;
@@ -2567,13 +2568,13 @@ struct CellTeam {
         }
         // Sector stencils of all faces at once: the face geometry, then the
         // first nss_max + 1 entries in each face's cone, in sorted order
-        const uint32_t team = tm.team_size();
+        const uint32_t team = static_cast<uint32_t>(tm.team_size());
         const uint32_t per_face = c.nss_max + 1u;
         uint32_t * face_count = ctl + FACE_COUNT;
         double * cone = reinterpret_cast<double *>(base + layout.cone);  // per face: nv, v[4][3], dets[4], cof[4][3]
         constexpr int CONE = 29;
-        if (tm.team_rank() < n_faces) {
-            const uint32_t k_face = tm.team_rank();
+        if (static_cast<uint32_t>(tm.team_rank()) < n_faces) {
+            const uint32_t k_face = static_cast<uint32_t>(tm.team_rank());
             const uint32_t f = c.g.faces_of_cell(f0 + k_face);
             const uint32_t nv = c.g.offsets_nodes_of_face(f + 1) - c.g.offsets_nodes_of_face(f);
             double * cf = cone + CONE * k_face;
@@ -2628,8 +2629,8 @@ struct CellTeam {
                 masks[q] = mask;
             });
             tm.team_barrier();
-            if (tm.team_rank() < n_faces) {
-                const uint32_t k = tm.team_rank();
+            if (static_cast<uint32_t>(tm.team_rank()) < n_faces) {
+                const uint32_t k = static_cast<uint32_t>(tm.team_rank());
                 uint32_t count = face_count[k];
                 for (uint32_t q = 0; q < n_chunk && count <= c.nss_max; q++) {
                     if ((masks[q] >> k) & 1u) w.sector[k * per_face + count++] = j0 + q;
@@ -2659,7 +2660,7 @@ struct CellTeam {
                 invalid++;
                 return;
             }
-            size[k] = n_sector;
+            size[k] = int(n_sector);
         });
         int total = 0;
         static_for<0, int(NF)>([&](auto kc) { total += size[decltype(kc)::value]; });
@@ -2669,10 +2670,10 @@ struct CellTeam {
         uint32_t * todo = reinterpret_cast<uint32_t *>(base + layout.cand_cell);
         auto entry_of = [&](const int q, int & k, int & s) {
             k = pick_item(size, q, s);
-            return w.sector[k * per_face + s];
+            return w.sector[uint32_t(k) * per_face + uint32_t(s)];
         };
         const uint32_t n_todo = team_scan(
-            tm, scan_space(ctl), total,
+            tm, scan_space(ctl), uint32_t(total),
             [&](const uint32_t q) {
                 int k, s2;
                 return uint32_t(entry_of(int(q), k, s2) >= n_known);
@@ -2685,7 +2686,7 @@ struct CellTeam {
                     return;
                 }
                 double * a = pick(As, k) + s2 * teno::NK_SMALL;
-                for (int l = 0; l < teno::NK_SMALL; l++) a[l] = w.means[j * c.nk + l] - mean0[l];
+                for (int l = 0; l < teno::NK_SMALL; l++) a[l] = w.means[j * uint32_t(c.nk) + uint32_t(l)] - mean0[l];
             });
         team_means(
             tm, w, base, n_todo,
@@ -2710,7 +2711,7 @@ struct CellTeam {
                 size[k] = 0;
                 return;
             }
-            small_size[k] = size[k];
+            small_size[k] = uint16_t(size[k]);
             n_small += size[k];
         });
         total = 0;
@@ -2718,7 +2719,7 @@ struct CellTeam {
         Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, total), [&](const int e) {
             int s;
             const int k = pick_item(size, e, s);
-            const uint32_t j = w.sector[k * per_face + s];
+            const uint32_t j = w.sector[uint32_t(k) * per_face + uint32_t(s)];
             const uint32_t vv = w.entry_ref[w.entry_order[j]] & 0xFFFFFFu;
             const int at = pick(start, k) + s;
             int32_t pf;
