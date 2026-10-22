@@ -1,0 +1,1 @@
+- Mallard compiles with Kokkos' SYCL backend (the `_r` literal is `consteval`, so no `long double` reaches the device), and Intel's oneAPI compiler gets Mallard's warnings and the TENO setup's `-ffp-contract=off` (#402).

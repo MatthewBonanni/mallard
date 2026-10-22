@@ -3,6 +3,7 @@ add_library(MallardCore STATIC
     common/common_math.cpp
     common/common_io.cpp
     common/build_info.cpp
+    common/case_template.cpp
     common/growing_buffer.cpp
     common/log.cpp
     mesh/curved.cpp
@@ -19,6 +20,7 @@ add_library(MallardCore STATIC
     mesh/box_tree.cpp
     boundary/boundary.cpp
     boundary/synthetic_inflow.cpp
+    boundary/wall_exchange.cpp
     chemistry/mechanism.cpp
     chemistry/transport.cpp
     chemistry/units.cpp
@@ -46,6 +48,7 @@ add_library(MallardCore STATIC
     solver/solver_initialize.cpp
     solver/solver_mixture.cpp
     solver/solver_les.cpp
+    solver/solver_wall_model.cpp
     solver/solver_rhs.cpp
     solver/solver_radiation.cpp
     solver/solver_sponge.cpp
@@ -87,6 +90,10 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
 endif()
 target_link_libraries(MallardCore PRIVATE yaml-cpp::yaml-cpp)
 mallard_target_warnings(MallardCore)
+
+# Mallard new finds the templates in the source tree when run from the build tree
+set_source_files_properties(common/case_template.cpp PROPERTIES
+    COMPILE_DEFINITIONS "MALLARD_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\"")
 
 configure_file(common/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/version.h @ONLY)
 target_include_directories(MallardCore PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
