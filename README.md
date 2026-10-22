@@ -124,7 +124,7 @@ cd examples/riemann_2d
 ../../build/src/Mallard -i input.toml --kokkos-num-threads=8
 ```
 
-See the [tutorials](docs/tutorials/index.md) for cases taken from geometry and mesh to the comparison with reference data, [`examples/`](examples) for complete input files, the [user guide](docs/guide/input_files.md) for each topic, and [`docs/input.md`](docs/input.md) for every input option.
+or start a case of your own from one of the examples: `Mallard new --list` shows the templates, and `Mallard new cylinder` creates a directory with the input, mesh, run and plot scripts ([First simulation](docs/guide/first_simulation.md)). See the [tutorials](docs/tutorials/index.md) for cases taken from geometry and mesh to the comparison with reference data, [`examples/`](examples) for complete input files, the [user guide](docs/guide/input_files.md) for each topic, and [`docs/input.md`](docs/input.md) for every input option.
 
 Before a long run, `Mallard --check input.toml [--ranks N] [--throughput CELLS_PER_S]` runs the setup without time stepping and reports misspelled or unused keys, boundary zones without a condition, mesh quality with the worst cells, the stable time step and where it is set, memory per rank and the cost per unit simulated time ([details](docs/guide/input_files.md#checking-an-input)).
 

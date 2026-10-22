@@ -330,21 +330,26 @@ Turbulence-chemistry interaction of reacting LES (a viscous mixture with
 `[chemistry]`) by the dynamically thickened flame model (TFLES; Colin et al.
 2000, Légier et al. 2002): where a flame is, its species diffusivities and
 conductivity are multiplied by `E F` and its reaction rates by `E / F`, which
-keeps the laminar flame speed and thickens the flame by `F` so that it spans
-`n_res` cells; the efficiency `E` restores the flame-surface wrinkling of the
-subgrid scales at the filter width `F delta_L`: by default `E = F^beta`
-(Charlette, Meneveau & Veynante 2002) with `beta` from the dynamic procedure
+keeps the laminar flame speed and thickens the flame by $F$ so that it spans
+`n_res` cells; the efficiency $E$ restores the flame-surface wrinkling of the
+subgrid scales at the filter width $F\delta_L$: by default $E = F^\beta$
+(Charlette, Meneveau & Veynante 2002) with $\beta$ from the dynamic procedure
 of Wang, Boileau & Veynante (2011), which compares the resolved flame surface
-`|grad c|` before and after a test filter (global, exact sums; written to the
-integrals file as `tf_beta`). `F = 1 + (max(1, n_res Delta /
-delta_L) - 1) Omega` with the flame sensor `Omega = min(1, c (1 - c) /
-0.0475)` of the progress variable `c = (T - T_unburnt) / (T_burnt -
-T_unburnt)`, so `Omega = 1` across the whole flame (`0.05 <= c <= 0.95`) and 0
-in fresh and burnt gas, where the molecular and SGS transport are unchanged.
-In the flame the SGS heat and species fluxes are multiplied by `1 - Omega`.
-The rates are scaled by integrating each cell's Strang reactor over `E / F`
-times the half step (exact for the autonomous constant-volume reactor).
-`F`, `E` and `Omega` are computed once per step from the state, and written as
+$\lvert\nabla c\rvert$ before and after a test filter (global, exact sums; written to the
+integrals file as `tf_beta`).
+
+$$
+F = 1 + \left(\max\left(1, \frac{n_\mathrm{res}\Delta}{\delta_L}\right) - 1\right)\Omega, \qquad
+\Omega = \min\left(1, \frac{c(1 - c)}{0.0475}\right), \qquad
+c = \frac{T - T_\mathrm{unburnt}}{T_\mathrm{burnt} - T_\mathrm{unburnt}},
+$$
+
+with the flame sensor $\Omega$ of the progress variable $c$, so $\Omega = 1$ across
+the whole flame ($0.05 \le c \le 0.95$) and 0 in fresh and burnt gas, where the
+molecular and SGS transport are unchanged. In the flame the SGS heat and
+species fluxes are multiplied by $1 - \Omega$. The rates are scaled by
+integrating each cell's Strang reactor over $E/F$ times the half step (exact
+for the autonomous constant-volume reactor). $F$, $E$ and $\Omega$ are computed once per step from the state, and written as
 `TF_F`, `TF_E`, `TF_OMEGA`. Guide: [thickened flames](guide/les.md#thickened-flames-lescombustion).
 
 | Key | Description |
@@ -362,11 +367,11 @@ times the half step (exact for the autonomous constant-volume reactor).
 **Experimental: `model = "pasr"`**, the partially stirred reactor (Sabelnikov &
 Fureby 2013) for non-premixed and partially premixed flames: no thickening;
 each cell's rates are those of its filtered state times the reacting fraction
-`kappa = tau_c / (tau_c + tau_mix)`, with the chemical time `tau_c = rho cp T /
-|q|` of the cell's heat release rate `q` and the mixing time `tau_mix = C_mix
-Delta^2 / (nu + nu_t)` of molecular and SGS diffusion across the cell, so
-`kappa -> 1` where the mesh resolves the mixing and the heat release tends to
-`rho cp T / tau_mix` where the chemistry is fast. Applied as the per-cell
+$\kappa = \tau_c/(\tau_c + \tau_\mathrm{mix})$, with the chemical time
+$\tau_c = \rho c_p T/\lvert q\rvert$ of the cell's heat release rate $q$ and the mixing time
+$\tau_\mathrm{mix} = C_\mathrm{mix}\Delta^2/(\nu + \nu_t)$ of molecular and SGS diffusion
+across the cell, so $\kappa \to 1$ where the mesh resolves the mixing and the heat
+release tends to $\rho c_p T/\tau_\mathrm{mix}$ where the chemistry is fast. Applied as the per-cell
 chemistry time scale of TFLES (exact for the Strang reactor), once per step.
 Key `C_mix` (default 1); output `PASR_KAPPA`. Against a DNS of an H2/N2-air
 diffusion flame in decaying turbulence (heat release over 0.2-0.4 ms): -11%
@@ -434,6 +439,35 @@ normal velocity between steps, and restart files carry them, so a restarted
 run reproduces an uninterrupted one bitwise, also on a different number of
 ranks (restart files older than version 4 start them afresh from the
 solution). Guide: [characteristic boundaries](guide/boundary_conditions.md#characteristic-boundaries).
+
+### Wall models (`wall_model`)
+
+A wall (`navier_stokes`, single gas, not axisymmetric) with a `wall_model`
+table takes its shear stress and heat flux from a wall model fed by the LES
+state at an exchange point a height `h` above each wall face, along its
+normal (wall-modeled LES; Kawai & Larsson's exchange point, which avoids the
+log-layer mismatch of the first cell). The state there is the containing
+cell's value plus its gradient times the offset, on any cell type; the rest
+of the LES sees a slip wall. Results do not depend on the number of ranks
+(the halo deepens until every exchange point's cell is local) and restarts
+are exact. `[[forces]]` of a modeled zone report the modeled stress and add
+a column `Q`, the heat flux into the fluid. See
+[docs/design/wall_model.md](design/wall_model.md).
+
+| Key | Description |
+|---|---|
+| `model` | `gfm` (default): Griffin, Fu & Moin's (2023) inverse velocity transformation with the generalized Reynolds analogy, for isothermal and adiabatic walls; `equilibrium`: the equilibrium ODE model (thin-layer momentum and energy with a damped mixing length), for every wall type |
+| `exchange_distance` or `exchange_cells` | `h`, absolute or in heights of the wall cell (twice its centroid's distance to the face); typically `h >= 3` cells and `h <= 0.1-0.3` of the boundary-layer thickness |
+| `edge_distance` | (`gfm`) Height of the boundary-layer edge, where the edge velocity and temperature of the Reynolds analogy are sampled: a channel's half-height, an estimate of `delta` |
+| `kappa`, `A_plus`, `Pr_t`, `s` | Model constants: 0.41, 17, 0.9 (`equilibrium`), Reynolds analogy factor 1.14 (`gfm`) |
+
+```toml
+[[boundaries]]
+name = "bottom"
+type = "wall_isothermal"
+T = 1.0
+wall_model = { model = "gfm", exchange_distance = 0.3, edge_distance = 1.0 }
+```
 
 ### Synthetic turbulence (`[boundaries.turbulence]`)
 
@@ -522,14 +556,14 @@ Error-based time steps ([Ranocha et al. 2022](references.md#ranocha-2022)), with
 | `limiter` | (`MUSCL`) `venkatakrishnan` (default), `barth_jespersen` or `none` |
 | `venkatakrishnan_K` | (`MUSCL`) Venkatakrishnan threshold constant, default 5 |
 | `order` | (`TENO`) Order of accuracy, 3 to 6, default 5. In 3D, faces use Dunavant (triangles) or Gauss (quadrilaterals) rules exact to this order, capped at degree 5 on triangles |
-| `stencil_factor` | (`TENO`) Minimum large-stencil size as a multiple of the number of polynomial coefficients, default 2; a stencil grows past it until its reconstruction's Lebesgue constant is at most 4 in 3D (10 in 2D; see docs/numerics/teno_e.md). Smaller values (e.g. 1.5) are markedly less dissipative for fine smooth structures (Shu-Osher entropy waves: 50% more amplitude at 200 cells) but less robust at discontinuities. |
+| `stencil_factor` | (`TENO`) Minimum large-stencil size as a multiple of the number of polynomial coefficients, default 2; a stencil grows past it until its reconstruction's Lebesgue constant is at most 4 in 3D (10 in 2D; see [TENO-E details](numerics/teno_e.md#central-stencil)). Smaller values (e.g. 1.5) are markedly less dissipative for fine smooth structures (Shu-Osher entropy waves: 50% more amplitude at 200 cells) but less robust at discontinuities. |
 | `small_stencil_size` | (`TENO`) Cells per sector stencil, default 10 (18 in 3D) |
 | `troubled_threshold` | (`TENO`) Troubled-cell threshold on the density-jump variance, default 1e-3 |
 | `troubled_upper` | (`TENO`) Variance at which the adaptive cutoff reaches its largest value (most dissipative), default 1e-2 |
 | `C_T` | (`TENO`) Fixed TENO cutoff; adaptive (1e-10 to 1e-6) if omitted |
 | `characteristic` | (`TENO`) Select stencils on characteristic variables, default true |
 | `max_condition` | (`TENO`) Stencils grow until the least-squares system's condition estimate is below this, default 1e8 |
-| `cache_file` | (`TENO`) Save the precomputed stencils and matrices here, and reuse them on later runs of the same mesh, boundary assignment and TENO options; anything else is detected and recomputed. Distributed runs write one file per rank, `<cache_file>.r<rank>-of-<ranks>`, for that rank count and partition, and record the halo depth the stencils need, so a cached run sets up its halo once. Partitions repeat for the same mesh and rank count. Size per cell: about 2.5 / 4 / 6 / 11 KB in 2D and 10 / 18 / 32 KB (hexahedra) or 9 / 13 / 29 / 63 KB (tetrahedra) in 3D for orders 3 / 4 / 5 / 6, e.g. 8.4 GB for 64^3 hexahedra at order 5; reading it takes seconds; the 3D setup takes about 5 s per million hexahedra and 20 s per million tetrahedra on an A100 (order 5), and minutes on CPUs. The cache records whether the device or the host computed it; both give the same tables |
+| `cache_file` | (`TENO`) Save the precomputed stencils and matrices here, and reuse them on later runs of the same mesh, boundary assignment and TENO options; anything else is detected and recomputed. Distributed runs write one file per rank, `<cache_file>.r<rank>-of-<ranks>`, for that rank count and partition, and record the halo depth the stencils need, so a cached run sets up its halo once. Partitions repeat for the same mesh and rank count. Size per cell: about 2.5 / 4 / 6 / 11 KB in 2D and 10 / 18 / 32 KB (hexahedra) or 9 / 13 / 29 / 63 KB (tetrahedra) in 3D for orders 3 / 4 / 5 / 6, e.g. 8.4 GB for 64³ hexahedra at order 5; reading it takes seconds; the 3D setup takes about 5 s per million hexahedra and 20 s per million tetrahedra on an A100 (order 5), and minutes on CPUs. The cache records whether the device or the host computed it; both give the same tables |
 | `cache_single_precision` | (`TENO`) Store the pseudo-inverses and smoothness-indicator matrices (3D: the cells' moments, from which the matrices are formed) of `cache_file` in single precision: about half the size (17 instead of 32 KB per cell for hexahedra at order 5). The run that writes the cache rounds them too, so it and the runs that read the cache agree with each other, but no longer with a run without it, whose results differ at single-precision round-off. Default false |
 | `bound_preserving` | (`TENO`) Scale troubled-cell polynomials to keep density and pressure within the neighbors' range, default false |
 | `single_precision_tables` | (`TENO`, 3D, not with gas mixtures) Keep the pseudo-inverses on the device in single precision: about 40% less device memory for 3D TENO5 (25 instead of 40 KB per hexahedron, 31 instead of 51 KB per tetrahedron on an A100, everything included), so about 1.6 times the cells per GPU, and a 3-8% faster step. Results change at single-precision round-off: below 1e-7 of each field's range for smooth flow, but up to 1e-3 (order 3: 7e-3) behind shocks, where the stencil selection of some cells goes the other way (3D blast on hexahedra, 60-80 steps; [design notes](design/performance.md)); the cache, if any, holds the tables in single precision too. Default false |
@@ -564,7 +598,7 @@ double precision in every build.
 | `max_steps` | Sub-steps allowed per cell and half step (default 100000); more stop the run |
 | `T_frozen` | No chemistry in cells below this temperature (default 0) |
 | `fuse_half_steps` | `true` fuses the closing half step of a step with the next step's opening one, except where output, checks, probes, statistics or the end of the run read the state (default `false`). Faster where cells take few sub-steps, but results then depend on when output is written, and a restart reproduces an uninterrupted run only from a step at which that run also wrote output |
-| `C_reg` | concentration [kmol/m^3] below which reaction orders 0 < n < 1 follow a regularized law (default `1e-12`). Larger values (e.g. `1e-10`) make trace fuel burning out in hot gas much cheaper to integrate (`flame_3d`: chemistry 20 to 11.5 ms per step) but change results: after 100 steps of `flame_3d`, T by up to 0.54 K, Y by up to 3e-5, the integrated heat release by 0.08% |
+| `C_reg` | concentration [kmol/m³] below which reaction orders 0 < n < 1 follow a regularized law (default `1e-12`). Larger values (e.g. `1e-10`) make trace fuel burning out in hot gas much cheaper to integrate (`flame_3d`: chemistry 20 to 11.5 ms per step) but change results: after 100 steps of `flame_3d`, T by up to 0.54 K, Y by up to 3e-5, the integrated heat release by 0.08% |
 | `load_balance` | `true` moves the integration of cells from ranks with more chemistry work than the mean (sub-steps of their cells' last calls) to ranks with less, in every call where the most loaded rank exceeds the mean by 5%; only the cells' states travel, and results stay bitwise the same (default `false`). The summary reports the time ranks wait for the slowest rank's chemistry with or without it |
 | `sparse` | `true` for the sparse LU (static pattern, with the Jacobian's dense rank-one part by Sherman-Morrison), `false` for the dense one; by default sparse from 30 species when its factors fill at most 60% of the dense matrix (GRI-3.0 and larger) |
 | `lanes` | Vector lanes integrating one cell: 1 for one thread per cell (cells ordered by their last cost), a power of 2 up to 32 for a team per cell on GPUs; default 0, automatic: a warp per cell on GPUs from 16 species (8 warps, 16 from 512 species, for cells whose last call took 16 or more sub-steps), else one thread |
@@ -574,10 +608,10 @@ half step at their current rates are skipped. Reaction types: elementary,
 three-body, falloff (Lindemann, Troe, SRI), `pressure-dependent-Arrhenius`
 (PLOG) and `Chebyshev`, with non-integer reactant `orders` (global
 mechanisms such as Westbrook–Dryer's). Orders between 0 and 1 follow the
-power law down to a concentration of `1e-12` kmol/m^3 and a quadratic with a
+power law down to a concentration of `1e-12` kmol/m³ and a quadratic with a
 bounded slope below it, so the Jacobian
 stays finite where such a reactant runs out. Output variables: `HRR` (heat release rate,
-W/m^3) and `CHEM_COST` (chemistry sub-steps of the cell in the last step);
+W/m³) and `CHEM_COST` (chemistry sub-steps of the cell in the last step);
 restart files also hold `CHEM_H`, each cell's last sub-step, so restarted
 runs repeat the uninterrupted one exactly. The progress rows add the share of
 cells advanced in the last half step and the most sub-steps of a cell in the
@@ -587,8 +621,8 @@ last step, and the summary the chemistry's share of the wall time.
 
 Radiative heat loss of gas mixtures in the optically thin limit (the TNF
 workshop model): every cell loses
-`q = 4 sigma sum_i p_i a_i(T) (T^4 - T_ambient^4)` [W/m^3], with `p_i` the
-partial pressures [atm] of the radiating species and `a_i` their Planck-mean
+$q = 4\sigma\sum_i p_i a_i(T)\,(T^4 - T_\mathrm{ambient}^4)$ [W/m³], with $p_i$ the
+partial pressures [atm] of the radiating species and $a_i(T)$ their Planck-mean
 absorption coefficients (the TNF workshop's fits to RADCAL, 300-2500 K:
 H2O and CO2 polynomials in 1000/T, CH4 and CO in T). Each cell emits but
 absorbs only the background at `T_ambient`, so the model holds where the gas
@@ -601,7 +635,7 @@ the energy equation in the flow step; it needs no `[chemistry]`.
 | `T_ambient` | Background temperature [K] (default 300) |
 | `species` | Radiating species, any of `H2O`, `CO2`, `CO`, `CH4`; default all four that the mechanism has (listing one it lacks is an error) |
 
-Output variable: `QRAD`, the loss [W/m^3]. Cantera's flames with
+Output variable: `QRAD`, the loss [W/m³]. Cantera's flames with
 `radiation_enabled` use the same model with H2O and CO2 only and no
 background term: `species = ["H2O", "CO2"]` and `T_ambient = 0` reproduce it.
 
@@ -611,6 +645,8 @@ Write the force of the fluid on a boundary zone to a CSV file
 (`step, t, Fx_pressure, Fy_pressure, Fx_viscous, Fy_viscous`, per unit depth, or per radian for
 axisymmetric flows; in
 3D `step, t, Fx_pressure, Fy_pressure, Fz_pressure, Fx_viscous, Fy_viscous, Fz_viscous`).
+Zones with a wall model report the modeled shear stress as the viscous force
+and add a column `Q`, the modeled heat flux into the fluid over the zone.
 
 | Key | Description |
 |---|---|
@@ -628,7 +664,7 @@ density_squared, temperature, temperature_squared`): the integrals of
 the mean squared velocity and vorticity and the density and temperature
 variances). With TENO the velocity
 gradients are those of the reconstruction polynomials at the cell centroids
-(order-consistent: on the Taylor-Green vortex at 64^3 per octant they match
+(order-consistent: on the Taylor-Green vortex at $64^3$ per octant they match
 spectral derivatives of the same field to about 1%); otherwise they are the
 second-order least-squares gradients of the viscous fluxes, which
 underestimate the enstrophy of under-resolved turbulence (by about 15% in
@@ -741,24 +777,24 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | `prefix` | Output path prefix; directories are created as needed |
 | `format` | `vtu` (with a `.pvd` series next to it), `hdf5` (with XDMF indexes; see below) or `restart` |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
-| `variables` | (`vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m^3 s)]; with `[radiation]` also `QRAD` [W/m^3]), and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>` and `COV_<A>_<B>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
+| `variables` | (`vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>` and `COV_<A>_<B>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
 | `geometry` | (`vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |
 | `compression` | `none` (default) or `zlib`, lossless: VTU arrays are compressed as ParaView's `vtkZLibDataCompressor` reads them (needs `Mallard_ENABLE_ZLIB`); HDF5 datasets are chunked, byte-shuffled and deflated (HDF5's standard filters, which every HDF5 reader has); restart files become version 5, each variable in byte-shuffled, deflated chunks (`Mallard_ENABLE_ZLIB` to write and to read them), and restart bitwise like uncompressed ones. Not for boundary-zone output (`geometry`) |
-| `relative_error` | (`vtu`, `hdf5`, with `compression = "zlib"`) Error bound of lossy compression: each cell value is rounded to the fewest mantissa bits that keep it within this relative error of itself (\|x' - x\| <= `relative_error` \|x\|; zeros, subnormals, infinities and NaNs are kept), and the zeroed trailing bits compress well. The mesh stays exact. Restart files are always lossless |
+| `relative_error` | (`vtu`, `hdf5`, with `compression = "zlib"`) Error bound of lossy compression: each cell value is rounded to the fewest mantissa bits that keep it within this relative error of itself (\|x′ − x\| ≤ `relative_error` · \|x\|; zeros, subnormals, infinities and NaNs are kept), and the zeroed trailing bits compress well. The mesh stays exact. Restart files are always lossless |
 | `chunk_cells` | (`restart`, with `compression = "zlib"`) Cells per compressed chunk (default 65536); a rank reading some cells decompresses only the chunks that hold them |
 
 `format = "hdf5"` (builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need
 parallel HDF5) scales to large runs: every rank writes its part of one file per
 snapshot with collective I/O instead of a VTU piece of its own. It writes
 
-- `PREFIX_mesh.h5`, once: `nodes/coordinates` (n_nodes x dimension),
+- `PREFIX_mesh.h5`, once: `nodes/coordinates` (nodes × dimension),
   `cells/topology`, an XDMF `Mixed` topology (each cell's XDMF type, then its
   nodes in VTK order: triangle 4, quadrilateral 5, tetrahedron 6, pyramid 7,
   wedge 8, hexahedron 9) and `cells/offsets`, where each cell's record starts
-  (n_cells + 1 entries);
+  (one more entry than cells);
 - `PREFIX_NNNNNN.h5` per snapshot: the attributes `step`, `time` and `mesh`
-  (the mesh file's name), and `fields/<name>` for each variable (n_cells
-  values, or n_cells x 3 for vectors);
+  (the mesh file's name), and `fields/<name>` for each variable (one value per cell,
+  or three for vectors);
 - `PREFIX_NNNNNN.xmf` per snapshot and `PREFIX.xmf`, the time series, which
   ParaView opens (XDMF reader).
 
