@@ -5,16 +5,16 @@ Mallard comes with three executables and a set of Python scripts that cover ever
 ![The tools by step: meshes, set-up, run, post-processing, comparison](../docs/images/tools/workflow-light.svg#gh-light-mode-only)
 ![The tools by step: meshes, set-up, run, post-processing, comparison](../docs/images/tools/workflow-dark.svg#gh-dark-mode-only)
 
-| Step | General tools | |
-|---|---|---|
-| [Executables](#executables) | `Mallard`, `MallardReactor`, `mallard-mesh-convert` | the solver, a 0D reactor, HDF5 meshes |
-| [Meshes](#meshes) | `make_cylinder_mesh.py`, `make_annulus_mesh.py`, `make_mallard_mesh.py` | Gmsh meshes from the command line |
-| [Initial states](#initial-states-and-references) | `isotropic_turbulence_restart.py`, `channel_init.py`, `tile_restart.py`, `interpolate_restart.py`, `flame_restart.py`, `znd_restart.py` | restart files to start runs from |
-| [References](#initial-states-and-references) | `flame_reference.py`, `detonation_reference.py`, `sedov.py`, `cantera_mechanisms.py` | exact and Cantera solutions |
-| [Post-processing](#post-processing) | `mallard_vtu.py`, `mallard_h5.py`, `plot_vtu.py`, `compare_png.py`, `animate.py`, `animate_cartesian.py`, `animate_grid.py`, `plane_average.py` | readers, plots, movies, averages |
-| [Performance](#performance) | `perf_suite.py` | benchmarks and baselines |
-| [Case scripts](#case-scripts) | `plot_<case>.py`, `animate_<case>.py`, ... | set-up and analysis of one example each |
-| [Developer tools](#developer-tools) | `docs/`, `chemistry_reference.py`, ... | figures of these pages, test reference data |
+| Step | General tools |
+|---|---|
+| [Executables](#executables): the solver, a 0D reactor, HDF5 meshes | `Mallard`, `MallardReactor`, `mallard-mesh-convert` |
+| [Meshes](#meshes): Gmsh meshes from the command line | `make_cylinder_mesh.py`, `make_annulus_mesh.py`, `make_mallard_mesh.py` |
+| [Initial states](#initial-states-and-references): restart files to start runs from | `isotropic_turbulence_restart.py`, `channel_init.py`, `tile_restart.py`, `interpolate_restart.py`, `flame_restart.py`, `znd_restart.py` |
+| [References](#initial-states-and-references): exact and Cantera solutions | `flame_reference.py`, `detonation_reference.py`, `sedov.py`, `cantera_mechanisms.py` |
+| [Post-processing](#post-processing): readers, plots, movies, averages | `mallard_vtu.py`, `mallard_h5.py`, `plot_vtu.py`, `compare_png.py`, `animate.py`, `animate_cartesian.py`, `animate_grid.py`, `plane_average.py` |
+| [Performance](#performance): benchmarks and baselines | `perf_suite.py` |
+| [Case scripts](#case-scripts): set-up and analysis of one example each | `plot_<case>.py`, `animate_<case>.py`, ... |
+| [Developer tools](#developer-tools): figures of these pages, test reference data | `docs/`, `chemistry_reference.py`, ... |
 
 The Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the mesh generators also need gmsh, the chemistry scripts cantera, HDF5 output h5py, and the 3D renders pyvista:
 
