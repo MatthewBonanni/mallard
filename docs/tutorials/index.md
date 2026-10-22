@@ -11,7 +11,7 @@ at reduced size on every change, so the commands stay working.
 | Tutorial | What it shows | Reference |
 |---|---|---|
 | [Supersonic cone](cone.md) | 3D Euler flow at Mach 2 over a 15° cone: a tetrahedral Gmsh mesh, symmetry planes, probes and surface output | Taylor-Maccoll exact solution |
-| [Channel LES](channel_les.md) | Wall-resolved LES of turbulent channel flow at Re_τ = 180: periodic Gmsh hexahedra, the Sigma model, constant mass flow, running statistics and the dissipation budget | DNS of Moser, Kim & Mansour |
+| [Channel LES](channel_les.md) | Wall-resolved LES of turbulent channel flow at Re<sub>τ</sub> = 180: periodic Gmsh hexahedra, the Sigma model, constant mass flow, running statistics and the dissipation budget | DNS of Moser, Kim & Mansour |
 
 The tutorials assume a build of Mallard (see the
 [first simulation](../guide/first_simulation.md)), here with MPI for the
