@@ -185,6 +185,7 @@ Pitfalls:
 |---|---|
 | `cbc_les` | Decaying isotropic turbulence, Sigma + hybrid flux, 32³ to 128³ |
 | `channel_les` | Wall-resolved channel at Re<sub>τ</sub> = 395 and 590 |
+| `channel_wmles` | Wall-modeled channels: Re<sub>τ</sub> = 2000, 5200 and supersonic isothermal walls (M<sub>b</sub> = 1.7, 3.0) |
 | `volvo_bluff_body` | Bluff-body combustor with synthetic inflow and NSCBC outlet |
 | `flame_turbulence` | Premixed flame in turbulence: DNS and TFLES |
 

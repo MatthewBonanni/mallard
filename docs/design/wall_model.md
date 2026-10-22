@@ -295,14 +295,64 @@ Results: section 10.
 
 ## 10. Results
 
-Reported with the validation examples (stage 2's validation PR).
+`examples/channel_wmles` (`tools/wmles_channel.py`): the setup of section 9
+on 72 x 24 x 36 uniform hexahedra (`h / 12`), statistics over t = 200 to the
+end (1200 h/U_b: 42-46 h/u_tau for Lee & Moser's cases; 800 h/U_b: 19-26
+h/u_tau for Trettel & Larsson's), both walls, `exchange_distance = 0.3 h`.
+
+Incompressible-like channels (`M_b = 0.2`), against Lee & Moser (2015):
+
+| Case | Model | `Re_tau` | `Cf` | `U+` at y/h = 0.1 / 0.3 / 0.5 |
+|---|---|---|---|---|
+| `Re_tau` = 1995 | GFM | 2021.7 (+1.4%) | +2.1% | 17.51 / 20.69 / 22.45 (18.13 / 21.12 / 22.66) |
+| | ODE | 2018.8 (+1.2%) | +1.8% | 17.55 / 20.72 / 22.46 |
+| `Re_tau` = 5186 | GFM | 5240.9 (+1.1%) | +1.5% | 19.91 / 23.01 / 24.78 (20.57 / 23.48 / 24.95) |
+| | ODE | 5233.2 (+0.9%) | +1.2% | 19.94 / 23.05 / 24.81 |
+
+Isothermal supersonic channels (`Re_tau* ~ 590`), against Trettel & Larsson
+(2016) as tabulated by Griffin et al. (2023); `Re_tau^2 = tau_w rho_w h^2 /
+mu_w^2`:
+
+| Case | Model | `Re_tau` | `Re_tau^2` | `B_q` | `T_c / T_w` |
+|---|---|---|---|---|---|
+| `M_b` = 1.7 | GFM | 991.5 (+2.9%) | +5.9% | -0.0501 (+1.3%) | 1.482 (+0.2%) |
+| | ODE | 977.1 (+1.4%) | +2.8% | -0.0509 (+3.0%) | 1.449 (-2.1%) |
+| `M_b` = 3.0 | GFM | 1914.4 (+3.9%) | +8.0% | -0.1156 (+0.5%) | 2.506 (+0.7%) |
+| | ODE | 1880.1 (+2.1%) | +4.2% | -0.1197 (+4.1%) | 2.402 (-3.4%) |
+
+- **Incompressible limit.** Both models give `Cf` within 2.1% of the DNS at
+  both Reynolds numbers on a mesh of 12 cells per half-height, the same
+  resolution in outer units at 2000 and 5200; the two models agree to 0.3%
+  (they are the same law there). The mean velocity is within 4% of the DNS
+  between 0.1 h and 0.8 h, below it near the exchange point, as is usual in
+  coarse WMLES.
+- **Heat transfer.** GFM's wall heat flux (0.5-1.3%) and centerline
+  temperature (0.2-0.7%) are 3-6 times closer to the DNS than the ODE
+  model's (3.0-4.1%; -2.1 to -3.4%), the improvement Griffin et al. report.
+- **Wall shear.** Here GFM is not better: its `Re_tau` is 2.9% and 3.9% high
+  against the ODE model's 1.4% and 2.1%. `Re_tau` includes the wall
+  density, which follows the temperature profile (GFM's `rho_w / rho_b` is
+  2-5% higher than the ODE's, consistent with its colder near-wall layer
+  relative to the centerline); the DNS's wall density is not tabulated, so
+  `tau_w` alone cannot be separated. Griffin et al.'s WMLES used a different
+  solver, mesh topology and SGS model; a resolution study (24 cells per
+  half-height) is the next check.
+- **Statistics.** The supersonic windows are short (19-26 h/u_tau); block
+  averages over four sub-windows scatter by 0.2% in `Re_tau`.
+- **Cost.** The models run per wall face and stage as single-thread
+  device functions. On this mesh (62,208 cells, 5184 wall faces) a step
+  took 5.4 ms on an A100 shared by two runs (12 M cells/s), against 4.5 ms
+  for the 262,144 cells of the wall-resolved `channel_les` (58 M cells/s):
+  the models' kernel is latency-bound at a few thousand faces. Parallelizing each face's model
+  over a team, or evaluating it once per step, are the options if it
+  matters on production meshes.
 
 ## 11. Stages
 
 1. **Equilibrium ODE model** with the off-wall exchange point, the coupling
    (section 1), tests. Implemented.
-2. **GFM model** (default), edge sampling: implemented; channel validation
-   (`examples/channel_wmles`) follows.
+2. **GFM model** (default), edge sampling, channel validation
+   (`examples/channel_wmles`, section 10). Implemented.
 3. **Non-equilibrium**: the pressure-gradient (and convection) terms of the
    thin-layer equations, `d/dy[(mu + mu_t) du/dy] = dp/dx` (+ the
    integrated convective terms, Park & Moin 2014 style) for adverse pressure
