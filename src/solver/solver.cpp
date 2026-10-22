@@ -50,6 +50,22 @@ Solver::~Solver() {
     destroy_step_graph();
 }
 
+namespace {
+
+/** @brief A copy of an input whose reads (e.g. formatting it) do not count as reads of the original. */
+Input unrecorded(Input value) {
+    if (value.is_table()) {
+        auto & table = value.as_table();
+        table.forget_lookups();
+        for (auto & entry : table.entries()) entry.second = unrecorded(entry.second);
+    } else if (value.is_array()) {
+        for (auto & element : value.as_array()) element = unrecorded(element);
+    }
+    return value;
+}
+
+} // namespace
+
 int Solver::init(const std::string & input_file_name) {
     std::ifstream in(input_file_name, std::ios::binary);
     provenance::start_run();
@@ -73,7 +89,7 @@ int Solver::init(const Input & input_in) {
     this->input = input_in;
     if (!input_from_file) {
         provenance::start_run();
-        provenance::set_input("", toml::format(input));
+        provenance::set_input("", toml::format(unrecorded(input)));
     }
     input_from_file = false;
     preset = numerics_preset::apply(input);
