@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-#include <toml.hpp>
+#include "input.h"
 
 #include "box_tree.h"
 #include "data_writer.h"
@@ -58,7 +58,7 @@ int halo_layers(uint8_t degree);
  *        entries of input, partitioned over the ranks, with halo_layers(degree)
  *        layers (collective).
  */
-std::shared_ptr<Mesh> source_mesh(const toml::value & input, uint8_t degree);
+std::shared_ptr<Mesh> source_mesh(const Input & input, uint8_t degree);
 
 /**
  * @brief Cell averages on a source mesh (owned cells and halo), as
@@ -117,7 +117,7 @@ class Source {
  *        [[periodic]]), remapped to every local cell of target: variables,
  *        step, time and attributes; no face records (collective).
  */
-RestartData remap_restart(const toml::value & input, const Mesh & target, bool axisymmetric, Report & report);
+RestartData remap_restart(const Input & input, const Mesh & target, bool axisymmetric, Report & report);
 
 /** @brief Text of a report for the run log. */
 std::string describe(const Report & report, const std::vector<std::string> & names);

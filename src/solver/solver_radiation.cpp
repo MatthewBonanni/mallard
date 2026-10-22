@@ -50,7 +50,7 @@ void Solver::init_radiation() {
     radiating = false;
     if (!input.contains("radiation")) return;
     if (!is_mixture()) throw InputError("[radiation] needs physics.gas = \"mixture\".");
-    const toml::value & table = input.at("radiation");
+    const Input & table = input.at("radiation");
     const std::string model = toml::find_or<std::string>(table, "model", "optically_thin");
     if (model != "optically_thin") {
         throw InputError("radiation.model = \"" + model + "\" is not one of: optically_thin.");
