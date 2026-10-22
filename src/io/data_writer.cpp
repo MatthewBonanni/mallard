@@ -69,7 +69,7 @@ uint64_t file_bytes(const std::string & filename) {
 
 } // namespace
 
-void DataWriter::init(const toml::value & input,
+void DataWriter::init(const Input & input,
                       std::vector<Data> & data,
                       std::shared_ptr<Mesh> mesh_in,
                       const std::vector<std::string> & restart_variables) {
@@ -224,7 +224,7 @@ void DataWriter::init(const toml::value & input,
     }
 
     const std::filesystem::path parent = std::filesystem::path(prefix).parent_path();
-    if (!parent.empty()) {
+    if (!parent.empty() && output_files_enabled()) {
         std::filesystem::create_directories(parent);
     }
 }

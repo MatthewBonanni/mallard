@@ -22,7 +22,7 @@
 namespace {
 
 /** @brief An expression in x, y, z from a number or a string. */
-Expression number_or_expression(const toml::value & value, const std::string & name) {
+Expression number_or_expression(const Input & value, const std::string & name) {
     if (value.is_string()) return Expression(name, value.as_string());
     std::ostringstream text;
     text << std::setprecision(17) << static_cast<double>(as_real(value, name));
@@ -35,14 +35,14 @@ void Solver::init_sponges() {
     sponge_cells = Kokkos::View<uint32_t *>();
     sponge_dt_max = std::numeric_limits<rtype>::infinity();
     if (!input.contains("sponges")) return;
-    const std::vector<toml::value> sponges = toml::find<std::vector<toml::value>>(input, "sponges");
+    const std::vector<Input> sponges = toml::find<std::vector<Input>>(input, "sponges");
     const uint32_t n_owned = mesh->n_owned();
     const uint32_t n_species = static_cast<uint32_t>(species_names.size());
     const uint32_t n_vars = N_CONSERVATIVE + n_species;
     std::vector<double> strength(n_owned, 0.0);
     std::vector<double> target(size_t(n_owned) * n_vars, 0.0);
     for (size_t i_s = 0; i_s < sponges.size(); i_s++) {
-        const toml::value & sponge = sponges[i_s];
+        const Input & sponge = sponges[i_s];
         const std::string where = "sponges[" + std::to_string(i_s) + "]";
         for (const char * key : {"strength", "u", "p", "T"}) {
             if (!sponge.contains(key)) throw InputError(where + ": missing " + key + ".");

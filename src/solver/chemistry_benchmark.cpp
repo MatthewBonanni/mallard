@@ -37,11 +37,11 @@ std::string brief(const double x) {
 
 } // namespace
 
-ChemistryBenchmark run_chemistry_benchmark(const toml::value & input) {
+ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
     const MixtureModel model = MixtureModel::from_input(input);
     if (!input.contains("reactor")) throw InputError("missing [reactor].");
-    const toml::value & table = input.at("reactor");
-    const toml::value & bench = input.at("benchmark");
+    const Input & table = input.at("reactor");
+    const Input & bench = input.at("benchmark");
     const double T0 = find_double(table, "T"), p0 = find_double(table, "p");
     const double end_time = find_double(table, "end_time");
     const int64_t samples_in = toml::find_or<int64_t>(bench, "samples", 64);

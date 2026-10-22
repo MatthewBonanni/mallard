@@ -20,7 +20,7 @@
 #include <utility>
 #include <vector>
 
-#include <toml.hpp>
+#include "input.h"
 
 #include "common_typedef.h"
 
@@ -70,10 +70,10 @@ struct Surfaces {
 };
 
 /** @brief Analytic shapes of the [[mesh.curved]] entries (none if [mesh] curved = false). */
-std::vector<Shape> read_shapes(const toml::value & input);
+std::vector<Shape> read_shapes(const Input & input);
 
 /** @brief [mesh] curved: whether curved geometry is used at all (default true). */
-bool enabled(const toml::value & input);
+bool enabled(const Input & input);
 
 /**
  * @brief Order of a Gmsh boundary element with n_corners corners and n_nodes
@@ -87,13 +87,13 @@ uint32_t element_order(uint32_t n_corners, uint32_t n_nodes);
  *        faces it was read with (Mesh::high_order_faces) and the faces of the
  *        zones of the analytic shapes.
  */
-Surfaces surfaces_of_mesh(const Mesh & mesh, const toml::value & input);
+Surfaces surfaces_of_mesh(const Mesh & mesh, const Input & input);
 
 /**
  * @brief The curved surfaces of a mesh spread over the ranks as blocks
  *        (collective): every rank gets the faces of every block.
  */
-Surfaces surfaces_of_block(const MeshBlock & block, const toml::value & input);
+Surfaces surfaces_of_block(const MeshBlock & block, const Input & input);
 
 /**
  * @brief Curved geometry of one rank's mesh. Faces are curved where they lie
