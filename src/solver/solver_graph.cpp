@@ -36,7 +36,7 @@ namespace {
 [[maybe_unused]] constexpr int IO_T = 0, IO_T_TARGET = 1, IO_DT = 2, IO_ACCEPTED = 3, N_STEP_IO = 4;
 
 #ifdef KOKKOS_ENABLE_CUDA
-void check(const cudaError_t err, const char * what) {
+void cuda_check(const cudaError_t err, const char * what) {
     if (err != cudaSuccess) throw std::runtime_error(std::string(what) + ": " + cudaGetErrorString(err));
 }
 #endif
@@ -139,16 +139,16 @@ void Solver::graph_step() {
         Kokkos::fence("step_graph");
         cudaGraph_t graph = nullptr;
         try {
-            check(cudaStreamBeginCapture(stream, cudaStreamCaptureModeRelaxed), "cudaStreamBeginCapture");
+            cuda_check(cudaStreamBeginCapture(stream, cudaStreamCaptureModeRelaxed), "cudaStreamBeginCapture");
             try {
                 record_step();
             } catch (...) {
                 cudaStreamEndCapture(stream, &graph);
                 throw;
             }
-            check(cudaStreamEndCapture(stream, &graph), "cudaStreamEndCapture");
+            cuda_check(cudaStreamEndCapture(stream, &graph), "cudaStreamEndCapture");
             cudaGraphExec_t exec = nullptr;
-            check(cudaGraphInstantiate(&exec, graph, 0), "cudaGraphInstantiate");
+            cuda_check(cudaGraphInstantiate(&exec, graph, 0), "cudaGraphInstantiate");
             step_graph_exec = exec;
         } catch (const std::exception & e) {
             if (graph) cudaGraphDestroy(graph);
@@ -170,7 +170,7 @@ void Solver::graph_step() {
             check_rejections(tries);
         }
         if (step_graph_exec) {
-            check(cudaGraphLaunch(static_cast<cudaGraphExec_t>(step_graph_exec), stream), "cudaGraphLaunch");
+            cuda_check(cudaGraphLaunch(static_cast<cudaGraphExec_t>(step_graph_exec), stream), "cudaGraphLaunch");
         } else {
             record_step();
         }

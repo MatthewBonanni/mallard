@@ -13,7 +13,7 @@
 
 #include "input.h"
 
-PartiallyStirredReactor PartiallyStirredReactor::from_input(const toml::value & table) {
+PartiallyStirredReactor PartiallyStirredReactor::from_input(const Input & table) {
     PartiallyStirredReactor pasr;
     pasr.C_mix = find_double_or(table, "C_mix", 1.0);
     if (!(pasr.C_mix > 0.0)) throw InputError("les.combustion.C_mix must be positive.");
