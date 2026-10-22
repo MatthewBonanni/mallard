@@ -145,9 +145,13 @@ TEST(FormatCompatTest, RestartFilesOfPastReleasesStartARun) {
             EXPECT_NE(data.find("COV_P_P"), nullptr);
             EXPECT_FALSE(data.attributes.empty());
         }
-        if (f.name == "mixture") EXPECT_NE(data.find("RHOY_H2"), nullptr);
+        if (f.name == "mixture") {
+            EXPECT_NE(data.find("RHOY_H2"), nullptr);
+        }
         // One face per boundary edge of the inlet and the outlet (Ny = 5 each)
-        if (f.name == "nscbc") EXPECT_EQ(data.faces.keys.size(), 10u);
+        if (f.name == "nscbc") {
+            EXPECT_EQ(data.faces.keys.size(), 10u);
+        }
     }
 }
 
