@@ -87,8 +87,18 @@ list(FILTER mallard_sources EXCLUDE REGEX "/src/external/|/src/common/input\\.")
 foreach(source ${mallard_sources})
     file(STRINGS ${source} toml_values REGEX "toml::(value|table)([^_a-z]|$)")
     if(toml_values)
-        message(FATAL_ERROR "${source}: use Input (src/common/input.h), not toml::value or toml::table, "
-                            "so that unused input keys are detected.")
+        file(READ ${source} content)
+        string(REGEX MATCH "toml::(value|table)[^_a-z]" type "${content}")
+        string(FIND "${content}" "${type}" offset)
+        string(REGEX REPLACE ".$" "" type "${type}")
+        string(SUBSTRING "${content}" 0 ${offset} before)
+        string(REGEX MATCHALL "\n" newlines "${before}")
+        list(LENGTH newlines line)
+        math(EXPR line "${line} + 1")
+        file(RELATIVE_PATH path ${CMAKE_SOURCE_DIR} ${source})
+        message(FATAL_ERROR "${path}:${line} uses ${type}; Mallard reads input only as Input (src/common/input.h) so "
+                            "that unused keys are detected: replace toml::value with Input and toml::table with "
+                            "Input::table_type.")
     endif()
 endforeach()
 # The TENO setup computes every table with the same operations on the host
