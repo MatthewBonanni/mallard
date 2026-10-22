@@ -27,6 +27,7 @@
 #include "face_reconstruction.h"
 #include "riemann_solver.h"
 #include "time_integrator.h"
+#include "step_control.h"
 #include "physics.h"
 #include "les.h"
 #include "pasr.h"
@@ -45,6 +46,7 @@
 #include "distribution.h"
 #include "halo_exchange.h"
 #include "log.h"
+#include "numerics_preset.h"
 
 struct ForceMonitor {
     std::string zone;
@@ -212,6 +214,14 @@ class Solver {
         /** @brief Adds the sponge-layer sources to the RHS per unit volume (owned cells). */
         void apply_sponges(const State & solution, const State & rhs);
         void calc_dt();
+        /**
+         * @brief Error-controlled steps: whether step_controller accepts the
+         *        step just taken (else the solution is back at U^n).
+         */
+        bool accept_controlled_step();
+        void init_error_control();
+        /** @brief Throws once the same step has been rejected too many times. */
+        void check_rejections(int tries) const;
         /** @brief The time the next step must not pass: t_stop or the next time-based output. */
         rtype next_target_time() const;
         void check_fields();
@@ -270,6 +280,15 @@ class Solver {
          *        exchanged to the halo), once per step in calc_dt.
          */
         void update_thickened_flame();
+        /**
+         * @brief Thickened flame, efficiency = "dynamic": beta of E = F^beta from the flame surface of the state
+         *        and of its test-filtered progress variable, summed over the domain exactly (fixed point), so
+         *        beta is independent of the rank count (Wang, Boileau & Veynante 2011). The transport values of
+         *        the state must be up to date on every cell.
+         */
+        void update_dynamic_efficiency();
+        /** @brief Dynamic efficiency: the test filter's width per pass and number of passes. */
+        void init_dynamic_efficiency();
         /** @brief PaSR: the reacting fraction kappa of every owned cell (chem_time_scale), once per step in calc_dt. */
         void update_partially_stirred_reactor();
         /**
@@ -319,6 +338,13 @@ class Solver {
         rtype les_constant() const { return les.C; }
         /** @brief LES: <L:M> / <M:M> of the latest dynamic procedure, before clipping at zero. */
         double les_dynamic_ratio() const { return dynamic_ratio; }
+        /** @brief Thickened flame: the efficiency's exponent beta (the dynamic procedure's latest with efficiency = "dynamic"). */
+        double tfles_beta() const { return thickened_flame.beta; }
+        bool dynamic_efficiency() const {
+            return tfles_on && thickened_flame.efficiency == ThickenedFlame::Efficiency::DYNAMIC;
+        }
+        /** @brief Dynamic efficiency: passes of the test filter (0 if no cell is thickened). */
+        uint32_t tfles_test_filter_passes() const { return tfles_test_passes; }
 
         /** @brief Whether the run is a large-eddy simulation ([les]). */
         bool is_les() const { return les_on; }
@@ -355,8 +381,14 @@ class Solver {
         rtype get_time() const { return t; }
         const Statistics & get_statistics() const { return statistics; }
         uint64_t get_step() const { return step; }
+        /** @brief Steps rejected by the error controller in this run. */
+        uint64_t get_rejected_steps() const { return n_rejected; }
         const Euler & get_physics() const { return physics; }
         std::shared_ptr<Mesh> get_mesh() const { return mesh; }
+        /** @brief The input after its numerics preset, if any, filled the keys it leaves unset. */
+        const toml::value & resolved_input() const { return input; }
+        /** @brief The numerics preset and the value and origin of each of its keys. */
+        const numerics_preset::Resolution & get_numerics_preset() const { return preset; }
 
         /** @brief The solution: flow block and species partial densities. */
         State state() const { return State(conservatives, species); }
@@ -390,6 +422,13 @@ class Solver {
         void init_solution_constant();
         void init_solution_analytical();
         void init_solution_restart();
+        /** @brief Remaps a restart file of another mesh ([initialize] type = "remap"). */
+        void init_solution_remap();
+        /**
+         * @brief Takes the state, time and statistics of a restart file's data
+         *        for the local cells; resume_output continues the output series.
+         */
+        void apply_restart(const RestartData & restart, const std::string & file, bool resume_output);
         void update_boundary_states(rtype t_eval);
         void init_inlets(const std::vector<toml::value> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
@@ -469,6 +508,7 @@ class Solver {
         bool halo_current = false;                     // halo of conservatives filled since its last update
 
         toml::value input;
+        numerics_preset::Resolution preset;
 
         // Run parameters
         uint64_t n_steps;
@@ -529,6 +569,8 @@ class Solver {
         rtype hybrid_floor = 0.0;
         Kokkos::View<rtype *> cell_upwind;  // hybrid flux: upwind fraction of each cell, else empty
         std::unique_ptr<TimeIntegrator> time_integrator;
+        StepController step_controller;  // [numerics.error_control], else not enabled
+        uint64_t n_rejected = 0;         // steps rejected by step_controller in this run
 
         // Axisymmetric runs (see docs/design/axisymmetric.md)
         bool axisymmetric = false;
@@ -571,6 +613,10 @@ class Solver {
         Kokkos::View<rtype *[3]> tfles_vorticity;
         Kokkos::View<rtype *[3][N_DIM]> tfles_gradients;
         State tfles_halo;                              // [F, E, Omega] as species, for the halo exchange
+        std::array<Kokkos::View<rtype *[3]>, 2> tfles_test;  // dynamic efficiency: [c, |grad c|, .] and their test filter
+        Kokkos::View<rtype *> tfles_test_width2;       // (owned cell): squared width of one test filter pass
+        Kokkos::View<double *[4]> tfles_dynamic_terms; // (owned cell): DynamicEfficiencyFunctor's terms
+        uint32_t tfles_test_passes = 0;
         State dynamic_halo;                            // [rho, u] as flow, d u_i / d x_j as species, owners' values
         Kokkos::View<double *[2]> dynamic_terms;       // (owned cell, [L:M, M:M] V)
         Kokkos::View<double *[6]> dynamic_stresses;    // (cell, rho Delta^2 D(g) S^d)

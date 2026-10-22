@@ -19,11 +19,33 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # First and fast: a branch that changes src/ adds a changelog fragment
+  # (changelog/, see docs/design/documentation.md#changelog) unless its pull
+  # request is labeled no-changelog. The other jobs wait for it.
+  changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for a changelog fragment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ "$BRANCH" != main ] && gh pr list -R "$GITHUB_REPOSITORY" --head "$BRANCH" --state open \
+              --json labels -q '.[].labels[].name' | grep -qx no-changelog; then
+            echo "Labeled no-changelog: skipped."
+          else
+            python3 tools/changelog.py check origin/main
+          fi
+
   # Branches run the full 2D suite (OpenMP, with CGNS), the full 3D suite and the
   # multi-rank tests, the full single-precision suites in 2D and 3D (3D with CGNS), and a
   # Clang build (no tests) for the warnings GCC misses. main also runs the
   # serial-backend and non-MPI 3D builds.
   matrix:
+    needs: changelog
     runs-on: ubuntu-latest
     outputs:
       backends: ${{ steps.pick.outputs.backends }}
@@ -33,13 +55,13 @@ jobs:
           ALL: ${{ github.ref == 'refs/heads/main' }}
         run: |
           backends='[
-            {"name": "openmp", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON", "cgns": true, "full": true},
-            {"name": "mpi", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON", "mpi": true},
+            {"name": "openmp", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DMallard_ENABLE_ZLIB=ON", "cgns": true, "full": true},
+            {"name": "mpi", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "mpi": true},
             {"name": "mpi-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "mpi": true, "full": true},
             {"name": "clang", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_HDF5=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++", "hdf5": true, "build_only": true},
             {"name": "serial", "flags": "-DKokkos_ENABLE_SERIAL=ON", "full": true, "main_only": true},
             {"name": "serial-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "hdf5": true, "full": true, "main_only": true},
-            {"name": "float", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF", "full": true},
+            {"name": "float", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_ZLIB=ON", "full": true},
             {"name": "float-3d", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON", "cgns": true, "full": true}
           ]'
           if [ "$ALL" != true ]; then backends=$(jq -c 'map(select(.main_only | not))' <<< "$backends"); fi
@@ -120,6 +142,7 @@ jobs:
   # The tutorials (tutorials/) at reduced size: Gmsh meshes, runs on two MPI
   # ranks and their post-processing scripts, so they keep working
   tutorials:
+    needs: changelog
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -160,3 +183,50 @@ jobs:
           key: ccache-tutorials-${{ github.sha }}
       - name: Run the tutorials
         run: tutorials/ci.sh build-2/src/Mallard build-3/src/Mallard ${{ runner.temp }}/tutorials
+
+  # CUDA builds (no GPU needed): nvcc compiles every source, so host-only changes can
+  # still break them (shadowed CUDA types, nvcc-only warnings as errors).
+  cuda:
+    needs: changelog
+    runs-on: ubuntu-latest
+    container: nvidia/cuda:12.9.1-devel-ubuntu24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        dim: [2, 3]
+    name: cuda-${{ matrix.dim }}d
+    steps:
+      - name: Install tools
+        run: >
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends
+          git cmake make ccache libopenmpi-dev openmpi-bin ca-certificates
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-cuda-${{ matrix.dim }}-${{ github.sha }}
+          restore-keys: ccache-cuda-${{ matrix.dim }}-
+      - name: Configure
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF
+          -DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON -DKokkos_ENABLE_OPENMP=ON
+          -DCMAKE_CXX_COMPILER=$PWD/src/external/kokkos/bin/nvcc_wrapper
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          -DMallard_ENABLE_MPI=ON -DMallard_GPU_AWARE_MPI=ON -DMallard_WARNINGS_AS_ERRORS=ON
+          -DMallard_DIM=${{ matrix.dim }}
+      - name: Build
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          CCACHE_MAXSIZE: 1G
+        run: cmake --build build -j $(nproc)
+      - name: Save compiler cache
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-cuda-${{ matrix.dim }}-${{ github.sha }}

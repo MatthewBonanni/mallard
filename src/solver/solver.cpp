@@ -61,6 +61,7 @@ void Solver::timed_phase(const std::string & name, F && f) {
 
 int Solver::init(const toml::value & input_in) {
     this->input = input_in;
+    preset = numerics_preset::apply(input);
 
     t = 0.0;
     step = 0;
@@ -834,6 +835,15 @@ void Solver::init_numerics() {
         case TimeIntegratorType::SSPRK3:
             time_integrator = std::make_unique<SSPRK3>();
             break;
+        case TimeIntegratorType::SSPRK54:
+            time_integrator = std::make_unique<SSPRK54>();
+            break;
+        case TimeIntegratorType::CK45:
+            time_integrator = std::make_unique<CK45>();
+            break;
+        case TimeIntegratorType::RDPK3SP35:
+            time_integrator = std::make_unique<RDPK3Sp35>();
+            break;
     }
 
     face_reconstruction->set_mesh(mesh);
@@ -880,6 +890,7 @@ void Solver::init_numerics() {
     if (!(hybrid_threshold >= 0.0_r && hybrid_threshold <= 1.0_r) || !(hybrid_floor >= 0.0_r && hybrid_floor <= 1.0_r)) {
         throw InputError("numerics.hybrid: sensor_threshold and upwind_floor must be in [0, 1].");
     }
+    init_error_control();
 }
 
 void Solver::init_axisymmetric_weights() {
@@ -930,6 +941,11 @@ void Solver::init_output() {
     check_interval = toml::find_or<uint32_t>(input, "output", "check_interval", 1);
     if (check_interval == 0) {
         throw InputError("output.check_interval must be positive.");
+    }
+    const bool async_output = toml::find_or<bool>(input, "output", "async", true);
+    const uint32_t io_threads = toml::find_or<uint32_t>(input, "output", "io_threads", 1);
+    if (io_threads == 0) {
+        throw InputError("output.io_threads must be positive.");
     }
     if (input.contains("forces")) {
         for (const auto & entry : toml::find<std::vector<toml::value>>(input, "forces")) {
@@ -1013,7 +1029,8 @@ void Solver::init_output() {
                                        << (integral_monitor.budget ? ",ke_rate_convective,ke_rate_viscous,ke_rate_sgs,"
                                                                      "eps_numerical,pressure_work"
                                                                    : "")
-                                       << (les_on && les.dynamic ? ",les_C" : "") << "\n";
+                                       << (les_on && les.dynamic ? ",les_C" : "")
+                                       << (dynamic_efficiency() ? ",tf_beta" : "") << "\n";
             }
         }
     }
@@ -1025,6 +1042,7 @@ void Solver::init_output() {
     for (const auto & output : outputs) {
         data_writers.push_back(std::make_unique<DataWriter>());
         data_writers.back()->init(output, data, mesh, restart_variables());
+        data_writers.back()->set_async(async_output, io_threads);
     }
 }
 
@@ -1364,6 +1382,7 @@ int Solver::run() {
     Kokkos::Timer output_timer;
     copy_device_to_host();
     write_data(true);
+    for (auto & writer : data_writers) writer->finish();
     t_wall_output += output_timer.seconds();
     print_summary(stop);
     return 0;
@@ -1468,6 +1487,7 @@ void Solver::print_setup() const {
     logging::item("Initial state", initial_state);
 
     logging::section("Numerics");
+    if (!preset.name.empty()) logging::item("Preset", preset.summary());
     logging::items(face_reconstruction->summary());
     logging::item("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
     if (hybrid_flux) {
@@ -1476,7 +1496,12 @@ void Solver::print_setup() const {
                                              real(double(hybrid_floor)) + ")");
     }
     logging::item("Time integrator", TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()));
-    logging::item("Time step", use_cfl ? "CFL " + real(double(cfl)) : "dt " + real(double(dt_fixed)) + " (fixed)");
+    if (step_controller.enabled()) {
+        logging::item("Time step", step_controller.summary() + "; first step " +
+                                       (use_cfl ? "CFL " + real(double(cfl)) : "dt " + real(double(dt_fixed))));
+    } else {
+        logging::item("Time step", use_cfl ? "CFL " + real(double(cfl)) : "dt " + real(double(dt_fixed)) + " (fixed)");
+    }
     std::string stop;
     if (n_steps > 0) stop += "n_steps = " + logging::count(n_steps);
     if (t_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("t = ") + real(double(t_stop));
@@ -1554,6 +1579,22 @@ void Solver::print_summary(const std::string & stop) const {
                                         duration(t_wall_stepping / static_cast<double>(steps)) + " per step over " +
                                         logging::count(steps) + " steps");
     }
+    if (step_controller.enabled()) {
+        logging::item("Rejected steps", logging::count(n_rejected) + " (error control)");
+    }
+    if (!data_writers.empty()) {
+        double writing = 0.0;
+        uint64_t bytes = 0;
+        for (const auto & writer : data_writers) {
+            writing += writer->writing_seconds();
+            bytes += writer->bytes_written();
+        }
+        // Ranks write their parts at the same time
+        writing = comm::allreduce(writing, comm::Op::MAX);
+        bytes = comm::allreduce(bytes, comm::Op::SUM);
+        logging::item("Writing", logging::si(static_cast<double>(bytes)) + "B of files in " + duration(writing) +
+                                     (data_writers.front()->is_async() ? " (in the background)" : ""));
+    }
     std::string files;
     auto add = [&](const std::string & text) { files += (files.empty() ? "" : ", ") + text; };
     for (const auto & writer : data_writers) {
@@ -1610,7 +1651,10 @@ void Solver::write_data(bool force) {
     }
     update_primitives();
     copy_device_to_host();
-    const RestartAttributes attributes = statistics.attributes();
+    RestartAttributes attributes = statistics.attributes();
+    if (step_controller.enabled()) {
+        for (const auto & a : step_controller.attributes()) attributes.push_back(a);
+    }
     const RestartFaces faces = characteristic_restart_faces();
     for (auto & writer : data_writers) {
         writer->write(step, t, force, attributes, faces);
@@ -1639,10 +1683,21 @@ void Solver::take_step() {
         halo_current = false;
     }
     if (double_flux) {
+        // The halo cells' [gamma, e0] are frozen from their owners' states after the chemistry
+        if (halo.active() && !halo_current) {
+            halo.exchange(state());
+            halo_current = true;
+        }
         freeze_thermodynamics();
         cells_frozen = true;
     }
     time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
+    for (int tries = 1; step_controller.enabled() && !accept_controlled_step(); tries++) {
+        n_rejected++;
+        check_rejections(tries);
+        calc_dt();
+        time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
+    }
     if (double_flux) {
         cells_frozen = false;
         reset_energy();
@@ -1699,8 +1754,14 @@ void Solver::calc_dt() {
     // first stage of the next one reuses them
     halo.exchange(state());
     halo_current = true;
+    update_boundary_states(t);
     const rtype dt_cfl1 = calc_dt_cfl1();
     dt = use_cfl ? cfl * dt_cfl1 : dt_fixed;
+    if (step_controller.enabled()) {
+        // The first step takes the cfl or dt of [run], later ones the controller's
+        const rtype dt_next = step_controller.dt_next();
+        if (dt_next > 0.0_r) dt = dt_next;
+    }
     dt = std::min(dt, sponge_dt_max);
     // Land exactly on t_stop and on time-based output times
     const rtype t_target = next_target_time();
@@ -1722,7 +1783,7 @@ void Solver::calc_dt() {
  * @brief Per-cell stable time step for CFL = 1 (Blazek eqs. 6.20-6.21, C = 4):
  *        dt_i = 2 V_i / (sum_f (|u_n| + a)_f A_f + 4 nu_eff sum_f A_f^2 / V_i),
  *        with the face wave speed taken as the max over the two adjacent cells
- *        and nu_eff = max(4/3, gamma/Pr) mu / rho for viscous flow. Half the
+ *        (at boundary faces, the cell and the exterior state) and nu_eff = max(4/3, gamma/Pr) mu / rho for viscous flow. Half the
  *        sums over faces stand for Blazek's sums of projected areas.
  */
 struct TimeStepFunctor {
@@ -1738,12 +1799,19 @@ struct TimeStepFunctor {
     Kokkos::View<rtype *[N_DIM]> radius_coords;  // axisymmetric runs: cell_coords, else empty
     Kokkos::View<rtype *[3]> sgs;                // LES: (cell, [mu_t, ...]), else empty
     rtype Pr_t = 1.0_r;
+    BoundaryData boundaries;
+
+    KOKKOS_INLINE_FUNCTION
+    void cell_W(const int32_t i_cell, rtype * W) const {
+        rtype cons[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE cons[i] = conservatives(i_cell, i);
+        physics.compute_W_from_conservatives(W, cons);
+    }
 
     KOKKOS_INLINE_FUNCTION
     rtype wave_speed(const int32_t i_cell, const rtype * n) const {
-        rtype cons[N_CONSERVATIVE], W[N_CONSERVATIVE];
-        FOR_I_CONSERVATIVE cons[i] = conservatives(i_cell, i);
-        physics.compute_W_from_conservatives(W, cons);
+        rtype W[N_CONSERVATIVE];
+        cell_W(i_cell, W);
         const rtype u_n = dot<N_DIM>(W + 1, n);
         return Kokkos::fabs(u_n) + physics.get_sound_speed_from_pressure_density(W[N_DIM + 1], W[0]);
     }
@@ -1761,7 +1829,13 @@ struct TimeStepFunctor {
             const int32_t c0 = cells_of_face(i_face, 0);
             const int32_t c1 = cells_of_face(i_face, 1);
             rtype lambda = wave_speed(c0, n);
-            if (c1 >= 0) lambda = Kokkos::fmax(lambda, wave_speed(c1, n));
+            if (c1 >= 0) {
+                lambda = Kokkos::fmax(lambda, wave_speed(c1, n));
+            } else {
+                rtype W[N_CONSERVATIVE];
+                cell_W(c0, W);
+                lambda = Kokkos::fmax(lambda, boundaries.exterior_wave_speed(i_face, W, n, physics.gamma));
+            }
             sum += lambda * face_area(i_face);
             sum_area2 += face_area(i_face) * face_area(i_face);
         }
@@ -1803,7 +1877,8 @@ rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
                             physics,
                             axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(),
                             les_coefficients,
-                            les.Pr_t};
+                            les.Pr_t,
+                            boundary_data};
     if (les_on) {
         eddy_viscosity_of_state(mesh->n_owned());
         if (les.dynamic) {
@@ -2089,6 +2164,7 @@ void Solver::write_integrals() {
                               << rates.pressure_work - rates.convective << "," << rates.pressure_work;
     }
     if (les_on && les.dynamic) *integral_monitor.out << "," << les.C;
+    if (dynamic_efficiency()) *integral_monitor.out << "," << thickened_flame.beta;
     *integral_monitor.out << "\n";
     integral_monitor.out->flush();
 }
