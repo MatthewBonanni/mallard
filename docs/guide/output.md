@@ -21,6 +21,8 @@ geometry = "cylinder"         # the faces of one boundary zone
 variables = ["P", "T"]
 ```
 
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 35 more.
+
 | Key | Default | Meaning |
 |---|---|---|
 | `prefix` | required | Output path prefix |
@@ -77,6 +79,13 @@ Pitfalls: the run's summary reports the time spent writing; if each file takes l
 
 ## The log
 
+```toml
+[output]
+check_interval = 100   # a progress row every 100 steps
+```
+
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 35 more.
+
 Rank 0 prints a header (version, build, device), the setup time of each
 stage, summaries of mesh, physics, numerics, boundaries and output, then one
 progress row every `[output] check_interval` steps (default 1):
@@ -105,6 +114,8 @@ interval = 10        # default 1
 # file = "forces_cylinder.csv"
 ```
 
+*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric), [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`sphere_re300`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-re300), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180) and 2 more.
+
 Writes `step, t` and the pressure and viscous force components of the fluid
 on the zone, per unit depth in 2D (per radian in axisymmetric runs). Divide by
 the dynamic pressure and a reference length (or area) for drag and lift
@@ -120,6 +131,8 @@ interval = 1
 budget = true        # kinetic-energy budget (LES), default false
 ```
 
+*Used in:* [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d), [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les) and 3 more.
+
 Writes `integrals.csv` with the volume integrals of the kinetic energy,
 enstrophy, squared dilatation and pressure dilatation, and of `|u|^2`,
 `|omega|^2`, `rho^2`, `T` and `T^2` (from which mean squares and variances
@@ -132,10 +145,6 @@ molecular, SGS and numerical dissipation.
 
 ## Statistics
 
-`[statistics]` keeps running time averages and covariances per cell, on the
-device, without communication: bitwise the same on any number of ranks, and
-carried across restarts.
-
 ```toml
 [statistics]
 fields = ["RHO", "U_X", "U_Y", "U_Z", "P", "T"]
@@ -143,6 +152,12 @@ products = ["U_X*U_X", "U_Y*U_Y", "U_Z*U_Z", "U_X*U_Y"]
 t_start = 40.0
 interval = 10
 ```
+
+*Used in:* [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles) and 1 more.
+
+`[statistics]` keeps running time averages and covariances per cell, on the
+device, without communication: bitwise the same on any number of ranks, and
+carried across restarts.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -168,6 +183,8 @@ end = [1.0, 0.01]
 n_points = 200
 interval = 10
 ```
+
+*Used in:* [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`flame_outflow`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-outflow), [`shock_bubble_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-3d).
 
 Point (`point = [x, y]`) or line (`start`, `end`, `n_points`) probes append
 `step, t, point, x, y, <variables>` to `probe_<name>.csv`, at full precision,

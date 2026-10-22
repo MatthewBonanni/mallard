@@ -26,6 +26,14 @@ image pairs to its own.
   absolute links, `https://matthewbonanni.github.io/mallard/validation/#sod-shock-tube`;
   the site turns them into checked relative links.
 
+## Feature sections of the user guide
+
+Each section of `docs/guide/` that documents an input feature opens with the smallest
+TOML that enables it, then a line `*Used in:* ...` listing the examples whose inputs
+use it. `python tools/docs/used_in.py` writes those lines from the example inputs, with a
+rule per section in its `RULES` (add one for a new feature section);
+`python tools/docs/used_in.py --check` reports stale ones.
+
 ## Figures
 
 Scripts in `tools/docs/` draw each figure twice, as `<name>-light.svg` and
