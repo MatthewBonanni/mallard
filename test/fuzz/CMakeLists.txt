@@ -1,0 +1,18 @@
+# libFuzzer harnesses (Mallard_ENABLE_FUZZING): run one with
+#   build/test/fuzz/fuzz_gmsh -max_total_time=60 corpus/ test/fuzz/corpus/gmsh
+set(harnesses input expression gmsh fluent openfoam)
+if(Mallard_ENABLE_HDF5)
+    list(APPEND harnesses mesh_h5)
+endif()
+if(Mallard_ENABLE_CGNS)
+    list(APPEND harnesses cgns)
+endif()
+foreach(harness ${harnesses})
+    add_executable(fuzz_${harness} fuzz_${harness}.cpp)
+    target_link_libraries(fuzz_${harness} PRIVATE MallardCore)
+    target_link_options(fuzz_${harness} PRIVATE -fsanitize=fuzzer)
+    mallard_target_warnings(fuzz_${harness})
+endforeach()
+if(Mallard_ENABLE_CGNS)
+    target_link_libraries(fuzz_cgns PRIVATE ${MALLARD_CGNS_LIBRARY})
+endif()
