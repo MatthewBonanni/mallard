@@ -419,6 +419,35 @@ run reproduces an uninterrupted one bitwise, also on a different number of
 ranks (restart files older than version 4 start them afresh from the
 solution). Guide: [characteristic boundaries](guide/boundary_conditions.md#characteristic-boundaries).
 
+### Wall models (`wall_model`)
+
+A wall (`navier_stokes`, single gas, not axisymmetric) with a `wall_model`
+table takes its shear stress and heat flux from a wall model fed by the LES
+state at an exchange point a height `h` above each wall face, along its
+normal (wall-modeled LES; Kawai & Larsson's exchange point, which avoids the
+log-layer mismatch of the first cell). The state there is the containing
+cell's value plus its gradient times the offset, on any cell type; the rest
+of the LES sees a slip wall. Results do not depend on the number of ranks
+(the halo deepens until every exchange point's cell is local) and restarts
+are exact. `[[forces]]` of a modeled zone report the modeled stress and add
+a column `Q`, the heat flux into the fluid. See
+[docs/design/wall_model.md](design/wall_model.md).
+
+| Key | Description |
+|---|---|
+| `model` | `gfm` (default): Griffin, Fu & Moin's (2023) inverse velocity transformation with the generalized Reynolds analogy, for isothermal and adiabatic walls; `equilibrium`: the equilibrium ODE model (thin-layer momentum and energy with a damped mixing length), for every wall type |
+| `exchange_distance` or `exchange_cells` | `h`, absolute or in heights of the wall cell (twice its centroid's distance to the face); typically `h >= 3` cells and `h <= 0.1-0.3` of the boundary-layer thickness |
+| `edge_distance` | (`gfm`) Height of the boundary-layer edge, where the edge velocity and temperature of the Reynolds analogy are sampled: a channel's half-height, an estimate of `delta` |
+| `kappa`, `A_plus`, `Pr_t`, `s` | Model constants: 0.41, 17, 0.9 (`equilibrium`), Reynolds analogy factor 1.14 (`gfm`) |
+
+```toml
+[[boundaries]]
+name = "bottom"
+type = "wall_isothermal"
+T = 1.0
+wall_model = { model = "gfm", exchange_distance = 0.3, edge_distance = 1.0 }
+```
+
 ### Synthetic turbulence (`[boundaries.turbulence]`)
 
 An `nscbc_inlet` with a `turbulence` table adds synthetic turbulence to its
@@ -595,6 +624,8 @@ Write the force of the fluid on a boundary zone to a CSV file
 (`step, t, Fx_pressure, Fy_pressure, Fx_viscous, Fy_viscous`, per unit depth, or per radian for
 axisymmetric flows; in
 3D `step, t, Fx_pressure, Fy_pressure, Fz_pressure, Fx_viscous, Fy_viscous, Fz_viscous`).
+Zones with a wall model report the modeled shear stress as the viscous force
+and add a column `Q`, the modeled heat flux into the fluid over the zone.
 
 | Key | Description |
 |---|---|

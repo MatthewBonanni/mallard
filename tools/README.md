@@ -157,6 +157,19 @@ Reads the box, cell counts, stretching and gas from an input with the generated 
 ![Mean streamwise velocity with the perturbation's spread, and the perturbation on a cross-section](../docs/images/tools/channel_init-light.svg#gh-light-mode-only)
 ![Mean streamwise velocity with the perturbation's spread, and the perturbation on a cross-section](../docs/images/tools/channel_init-dark.svg#gh-dark-mode-only)
 
+### `wmles_channel.py`: wall-modeled channel
+
+```sh
+python tools/wmles_channel.py init input.toml OUT.restart [--seed 1] [--perturbation 0.1] [--T-center TC]
+python tools/wmles_channel.py analyze input.toml forces_bottom.csv forces_top.csv --t-start T \
+    --reference {lm2000,lm5200,tl-m1.7,tl-m3.0} [--profile profile.csv]
+```
+
+For `examples/channel_wmles`. `init` writes `channel_init.py`'s field with a temperature profile and the matching density
+for supersonic channels. `analyze` gives Re_tau, Cf, B_q, the centerline temperature and U+ from the force monitors (with
+the heat-flux column of modeled walls) and a `plane_average.py` profile, against Lee & Moser (downloaded on first use) or
+Trettel & Larsson.
+
 ### `tile_restart.py`: repeat a periodic flow along x
 
 ```sh
@@ -348,6 +361,7 @@ These set up or analyze one example each; their figures are on the [Examples](ht
 | [`isotropic_turbulence`](../examples/isotropic_turbulence) | `isotropic_turbulence_restart.py` | `isotropic_turbulence_stats.py`, `plot_isotropic_turbulence.py`: filtered statistics and spectra against Johnsen et al. | `animate_isotropic_turbulence.py` |
 | [`channel_retau180`](../examples/channel_retau180) | `channel_init.py` | `plane_average.py`, `plot_channel.py`: profiles in wall units against Moser, Kim & Mansour | `animate_channel.py` |
 | [`channel_inflow_retau180`](../examples/channel_inflow_retau180) | `tile_restart.py` | `plane_average.py`, `plot_channel.py` | |
+| [`channel_wmles`](../examples/channel_wmles) | `wmles_channel.py init` | `plane_average.py`, `wmles_channel.py analyze`: Cf, Re_tau, B_q, T_c against Lee & Moser and Trettel & Larsson | |
 | [`cbc_les`](../examples/cbc_les) | `cbc_les.py` (initial field, rescaling) | `cbc_les.py`: spectra against Comte-Bellot & Corrsin, dissipation budget | |
 | [`volvo_bluff_body`](../examples/volvo_bluff_body) | `make_volvo_mesh.py`, `volvo.py probes` | `volvo.py profiles`, `plot`, `budget`: against the experiment | `volvo.py slice`, `animate`, `render` |
 | [`flame_turbulence`](../examples/flame_turbulence) | `flame_turbulence.py hit`, `init` | `flame_turbulence.py analyze`, `figure`; `tfles_apriori.py` | `render_flame_turbulence.py` |

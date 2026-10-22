@@ -92,6 +92,31 @@ TEST(MPI3DTest, LargeEddySimulationOnTetrahedraMatchesSerial) {
     expect_matches_serial(input + "[les]\nmodel = \"sigma\"\ndynamic = true\n");
 }
 
+TEST(MPI3DTest, WallModelsMatchSerial) {
+    // Exchange and edge points several cells off the walls, in cells that a
+    // partition may leave beyond the default halo, which must then deepen
+    for (const char * partitioner : {"multijagged", "hilbert"}) {
+        std::ostringstream s;
+        s << "[run]\nn_steps = 6\ncfl = 0.4\n"
+          << "[mesh]\ntype = \"cartesian_tet\"\nNx = 6\nNy = 8\nNz = 4\nLx = 1.0\nLy = 1.0\nLz = 0.6\n"
+          << "periodic = [\"x\", \"z\"]\n"
+          << "[parallel]\npartitioner = \"" << partitioner << "\"\n"
+          << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * sin(6.283 * x)\"\n"
+          << "u = [\"0.5 + 0.1 * sin(6.283 * z)\", \"0.05 * sin(6.283 * x)\", \"0.02\"]\np = \"1.0\"\n"
+          << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_isothermal\"\nT = 1.0\n"
+          << "wall_model = { model = \"gfm\", exchange_distance = 0.45, edge_distance = 0.9 }\n"
+          << "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n"
+          << "wall_model = { model = \"equilibrium\", exchange_cells = 3.0 }\n"
+          << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\nconvective_flux = \"hybrid\"\n"
+          << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\nlimiter = \"none\"\n"
+          << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+          << "mu = 1e-3\nPr = 0.72\n"
+          << "[les]\nmodel = \"sigma\"\n"
+          << "[output]\ncheck_interval = 1000000\n";
+        expect_matches_serial(s.str());
+    }
+}
+
 TEST(MPI3DTest, DynamicFlameEfficiencyOnTetrahedraMatchesSerial) {
     // The test filter passes exchange the filtered progress variable; beta is an exact domain sum
     std::ostringstream s;
