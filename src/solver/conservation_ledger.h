@@ -29,6 +29,67 @@
 #include "state.h"
 #include "time_integrator.h"
 
+namespace ledger_detail {
+
+/** @brief Adds b times the reduced sums to a term of the step's sums. */
+struct Weighted {
+    Kokkos::View<double *> to;
+    uint32_t offset;
+    double b;
+
+    KOKKOS_INLINE_FUNCTION void operator()(const double * sum) const {
+        for (uint32_t i = 0; i < N_CONSERVATIVE; i++) to(offset + i) += b * sum[i];
+    }
+};
+
+/** @brief Sums N doubles per item into an array reduction. */
+template <typename F>
+struct FaceSum {
+    using value_type = double[];
+    using size_type = uint32_t;
+    const uint32_t value_count = N_CONSERVATIVE;
+    F flux;
+    Kokkos::View<uint32_t *> faces;
+    Weighted weighted;
+
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t k, double * sum) const {
+        rtype out[N_CONSERVATIVE] = {};
+        flux(faces(k), out);
+        FOR_I_CONSERVATIVE sum[i] += static_cast<double>(out[i]);
+    }
+    KOKKOS_INLINE_FUNCTION void init(double * sum) const {
+        for (uint32_t i = 0; i < value_count; i++) sum[i] = 0.0;
+    }
+    KOKKOS_INLINE_FUNCTION void join(double * dst, const double * src) const {
+        for (uint32_t i = 0; i < value_count; i++) dst[i] += src[i];
+    }
+    KOKKOS_INLINE_FUNCTION void final(double * sum) const { weighted(sum); }
+};
+
+template <typename F>
+struct CellSum {
+    using value_type = double[];
+    using size_type = uint32_t;
+    const uint32_t value_count = N_CONSERVATIVE;
+    F source;
+    Weighted weighted;
+
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t c, double * sum) const {
+        rtype out[N_CONSERVATIVE] = {};
+        source(c, out);
+        FOR_I_CONSERVATIVE sum[i] += static_cast<double>(out[i]);
+    }
+    KOKKOS_INLINE_FUNCTION void init(double * sum) const {
+        for (uint32_t i = 0; i < value_count; i++) sum[i] = 0.0;
+    }
+    KOKKOS_INLINE_FUNCTION void join(double * dst, const double * src) const {
+        for (uint32_t i = 0; i < value_count; i++) dst[i] += src[i];
+    }
+    KOKKOS_INLINE_FUNCTION void final(double * sum) const { weighted(sum); }
+};
+
+} // namespace ledger_detail
+
 class ConservationLedger {
     public:
         static constexpr uint32_t N = N_CONSERVATIVE;
@@ -97,7 +158,8 @@ class ConservationLedger {
 
     private:
         std::vector<double> totals(const StateView & U, const SpeciesView & rhoY, std::vector<double> & scale) const;
-        void accumulate(Term term);
+        /** @brief The current stage's weighting into a term of the step's sums. */
+        ledger_detail::Weighted weighted(Term term) const;
 
         std::vector<double> weights;
         uint32_t n_stages = 0;
@@ -119,70 +181,21 @@ class ConservationLedger {
         std::vector<double> start_totals, last_totals, first_run, last_run;  // as of the first and the previous report
 };
 
-namespace ledger_detail {
-
-/** @brief Sums N doubles per item into an array reduction. */
-template <typename F>
-struct FaceSum {
-    using value_type = double[];
-    using size_type = uint32_t;
-    const uint32_t value_count = N_CONSERVATIVE;
-    F flux;
-    Kokkos::View<uint32_t *> faces;
-
-    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t k, double * sum) const {
-        rtype out[N_CONSERVATIVE] = {};
-        flux(faces(k), out);
-        FOR_I_CONSERVATIVE sum[i] += static_cast<double>(out[i]);
-    }
-    KOKKOS_INLINE_FUNCTION void init(double * sum) const {
-        for (uint32_t i = 0; i < value_count; i++) sum[i] = 0.0;
-    }
-    KOKKOS_INLINE_FUNCTION void join(double * dst, const double * src) const {
-        for (uint32_t i = 0; i < value_count; i++) dst[i] += src[i];
-    }
-};
-
-template <typename F>
-struct CellSum {
-    using value_type = double[];
-    using size_type = uint32_t;
-    const uint32_t value_count = N_CONSERVATIVE;
-    F source;
-
-    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t c, double * sum) const {
-        rtype out[N_CONSERVATIVE] = {};
-        source(c, out);
-        FOR_I_CONSERVATIVE sum[i] += static_cast<double>(out[i]);
-    }
-    KOKKOS_INLINE_FUNCTION void init(double * sum) const {
-        for (uint32_t i = 0; i < value_count; i++) sum[i] = 0.0;
-    }
-    KOKKOS_INLINE_FUNCTION void join(double * dst, const double * src) const {
-        for (uint32_t i = 0; i < value_count; i++) dst[i] += src[i];
-    }
-};
-
-} // namespace ledger_detail
 
 template <typename F>
 void ConservationLedger::add_boundary(const F & flux) {
     if (!on()) return;
-    if (faces.extent(0) > 0) {
-        Kokkos::parallel_reduce("ledger_boundary", Kokkos::RangePolicy<>(0, faces.extent(0)),
-                                ledger_detail::FaceSum<F>{N_CONSERVATIVE, flux, faces}, stage_sum);
-    } else {
-        Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), stage_sum, 0.0);
-    }
-    accumulate(BOUNDARY);
+    if (faces.extent(0) == 0) return;
+    Kokkos::parallel_reduce("ledger_boundary", Kokkos::RangePolicy<>(0, faces.extent(0)),
+                            ledger_detail::FaceSum<F>{N_CONSERVATIVE, flux, faces, weighted(BOUNDARY)}, stage_sum);
 }
 
 template <typename F>
 void ConservationLedger::add_sources(const F & source, const uint32_t n) {
     if (!on()) return;
+    if (n == 0) return;
     Kokkos::parallel_reduce("ledger_sources", Kokkos::RangePolicy<>(0, n),
-                            ledger_detail::CellSum<F>{N_CONSERVATIVE, source}, stage_sum);
-    accumulate(SOURCES);
+                            ledger_detail::CellSum<F>{N_CONSERVATIVE, source, weighted(SOURCES)}, stage_sum);
 }
 
 #endif // CONSERVATION_LEDGER_H

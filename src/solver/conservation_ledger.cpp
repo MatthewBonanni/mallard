@@ -68,11 +68,8 @@ void ConservationLedger::begin_stage() {
     stage++;
 }
 
-void ConservationLedger::accumulate(const Term term) {
-    const double b = weights[(stage + n_stages - 1) % n_stages];
-    const Kokkos::View<double *> from = stage_sum, to = step_sum;
-    const uint32_t offset = static_cast<uint32_t>(term) * N;
-    Kokkos::parallel_for("ledger_stage_weight", N, KOKKOS_LAMBDA(const uint32_t i) { to(offset + i) += b * from(i); });
+ledger_detail::Weighted ConservationLedger::weighted(const Term term) const {
+    return {step_sum, static_cast<uint32_t>(term) * N, weights[(stage + n_stages - 1) % n_stages]};
 }
 
 void ConservationLedger::end_step(const double dt) {
