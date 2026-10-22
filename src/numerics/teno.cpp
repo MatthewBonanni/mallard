@@ -2205,9 +2205,9 @@ struct TENOFunctor {
     template <typename Member>
     KOKKOS_INLINE_FUNCTION
     void operator()(SmoothTeamPass, const Member & team) const {
-        const uint32_t lane = team.team_rank() % TEAM_CELLS;
-        const uint8_t part = team.team_rank() / TEAM_CELLS;
-        const uint32_t idx = team.league_rank() * TEAM_CELLS + lane;
+        const uint32_t lane = static_cast<uint32_t>(team.team_rank()) % TEAM_CELLS;
+        const uint8_t part = static_cast<uint8_t>(static_cast<uint32_t>(team.team_rank()) / TEAM_CELLS);
+        const uint32_t idx = static_cast<uint32_t>(team.league_rank()) * TEAM_CELLS + lane;
         const uint32_t n = cells.extent(0) ? static_cast<uint32_t>(cells.extent(0)) : n_smooth;
         rtype * aK = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * NK * N_CONSERVATIVE * TEAM_CELLS));
         int * smooth_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
@@ -2552,11 +2552,12 @@ struct TENOFunctor {
     template <typename Member>
     KOKKOS_INLINE_FUNCTION
     void operator()(TroubledCentralTeamPass, const Member & team) const {
-        const uint32_t lane = team.team_rank() % TEAM_CELLS;
-        const uint8_t part = team.team_rank() / TEAM_CELLS;
+        const uint32_t lane = static_cast<uint32_t>(team.team_rank()) % TEAM_CELLS;
+        const uint8_t part = static_cast<uint8_t>(static_cast<uint32_t>(team.team_rank()) / TEAM_CELLS);
         rtype * aK = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * NK * N_CONSERVATIVE * TEAM_CELLS));
         const uint32_t n = round_items(1);
-        for (uint32_t base = team.league_rank() * TEAM_CELLS; base < n; base += team.league_size() * TEAM_CELLS) {
+        for (uint32_t base = static_cast<uint32_t>(team.league_rank()) * TEAM_CELLS; base < n;
+             base += static_cast<uint32_t>(team.league_size()) * TEAM_CELLS) {
             const uint32_t idx = base + lane;
             if (idx < n) {
                 const uint32_t i_cell = troubled_cells(round_begin + idx);
