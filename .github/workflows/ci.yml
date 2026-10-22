@@ -29,7 +29,9 @@ jobs:
         with:
           fetch-depth: 0
       - name: Check workflow triggers
-        run: python3 tools/check_workflow_triggers.py
+        run: |
+          python3 -c 'import yaml' 2>/dev/null || python3 -m pip install -q --break-system-packages pyyaml
+          python3 tools/check_workflow_triggers.py
       - name: Check for a changelog fragment
         env:
           GH_TOKEN: ${{ github.token }}
