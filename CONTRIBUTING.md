@@ -132,7 +132,9 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   request early as a draft if you want feedback. Keep each PR to one change.
 - Fill in the PR template: what and why, the exact commands you ran to validate it
   and their results, and whether it touches device code.
-- Push new commits rather than rewriting history once a review has started.
+- Pull requests are squash-merged: the PR title becomes the commit subject on
+  `main`, so make it descriptive. Intermediate commits on the branch need not be
+  tidy; push new commits rather than rewriting history once a review has started.
 - **CI does not run on every push.** Pull requests run CI on request: when a PR is
   ready, a maintainer (or you, with write access) runs
   `gh workflow run ci.yml --ref <branch>` and the results appear as checks on the
