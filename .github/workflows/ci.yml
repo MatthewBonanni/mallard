@@ -40,6 +40,24 @@ jobs:
             python3 tools/changelog.py check origin/main
           fi
 
+  # Whether the changes touch device code (tools/device_changes.sh); the CUDA builds run only then
+  device:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = push ]; then base=$BEFORE
+          elif [ "$GITHUB_REF_NAME" = main ]; then base=HEAD^
+          else base=$(git merge-base origin/main HEAD); fi
+          echo "changed=$(tools/device_changes.sh "$base")" >> "$GITHUB_OUTPUT"
+
   # Branches run the full 2D suite (OpenMP, with CGNS), the full 3D suite and the
   # multi-rank tests, the full single-precision suites in 2D and 3D (3D with CGNS), and a
   # Clang build (no tests) for the warnings GCC misses. main also runs the
@@ -156,7 +174,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install Python packages
-        run: pip install -r tutorials/requirements.txt
+        run: pip install -r tutorials/requirements.txt imageio imageio-ffmpeg
       - name: Restore compiler cache
         uses: actions/cache/restore@v4
         with:
@@ -183,11 +201,16 @@ jobs:
           key: ccache-tutorials-${{ github.sha }}
       - name: Run the tutorials
         run: tutorials/ci.sh build-2/src/Mallard build-3/src/Mallard ${{ runner.temp }}/tutorials
+      # Every case template (Mallard new --quick): 2D from an install tree, 3D from the build tree
+      - name: Run the case templates
+        run: |
+          cmake --install build-2 --prefix ${{ runner.temp }}/mallard-2d > /dev/null
+          templates/ci.sh ${{ runner.temp }}/mallard-2d/bin/Mallard build-3/src/Mallard ${{ runner.temp }}/templates
 
-  # CUDA builds (no GPU needed): nvcc compiles every source, so host-only changes can
-  # still break them (shadowed CUDA types, nvcc-only warnings as errors).
+  # CUDA builds (no GPU needed), when the changes touch device code (see the device job).
   cuda:
-    needs: changelog
+    needs: [changelog, device]
+    if: needs.device.outputs.changed == 'true'
     runs-on: ubuntu-latest
     container: nvidia/cuda:12.9.1-devel-ubuntu24.04
     strategy:

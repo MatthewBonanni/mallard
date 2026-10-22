@@ -10,7 +10,8 @@ cd examples/sod && ../../build/src/Mallard -i input.toml
 ```
 
 The last line runs the Sod shock tube in about a second and writes `solut/sod.pvd`, which ParaView
-opens. GPU builds (CUDA, HIP), MPI and the other options are in [Installation](https://matthewbonanni.github.io/mallard/docs/installation/).
+opens. `build/src/Mallard new --list` lists ready-to-run cases to copy (`Mallard new cylinder` creates
+one with its mesh, run and post-processing scripts). GPU builds (CUDA, HIP), MPI and the other options are in [Installation](https://matthewbonanni.github.io/mallard/docs/installation/).
 
 ## Where next
 

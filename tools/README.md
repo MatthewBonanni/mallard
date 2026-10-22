@@ -166,7 +166,7 @@ python tools/wmles_channel.py analyze input.toml forces_bottom.csv forces_top.cs
 ```
 
 For `examples/channel_wmles`. `init` writes `channel_init.py`'s field with a temperature profile and the matching density
-for supersonic channels. `analyze` gives Re_tau, Cf, B_q, the centerline temperature and U+ from the force monitors (with
+for supersonic channels. `analyze` gives $Re_\tau$, $C_f$, $B_q$, the centerline temperature and $U^+$ from the force monitors (with
 the heat-flux column of modeled walls) and a `plane_average.py` profile, against Lee & Moser (downloaded on first use) or
 Trettel & Larsson.
 
@@ -361,7 +361,7 @@ These set up or analyze one example each; their figures are on the [Examples](ht
 | [`isotropic_turbulence`](../examples/isotropic_turbulence) | `isotropic_turbulence_restart.py` | `isotropic_turbulence_stats.py`, `plot_isotropic_turbulence.py`: filtered statistics and spectra against Johnsen et al. | `animate_isotropic_turbulence.py` |
 | [`channel_retau180`](../examples/channel_retau180) | `channel_init.py` | `plane_average.py`, `plot_channel.py`: profiles in wall units against Moser, Kim & Mansour | `animate_channel.py` |
 | [`channel_inflow_retau180`](../examples/channel_inflow_retau180) | `tile_restart.py` | `plane_average.py`, `plot_channel.py` | |
-| [`channel_wmles`](../examples/channel_wmles) | `wmles_channel.py init` | `plane_average.py`, `wmles_channel.py analyze`: Cf, Re_tau, B_q, T_c against Lee & Moser and Trettel & Larsson | |
+| [`channel_wmles`](../examples/channel_wmles) | `wmles_channel.py init` | `plane_average.py`, `wmles_channel.py analyze`: C<sub>f</sub>, Re<sub>τ</sub>, B<sub>q</sub>, T<sub>c</sub> against Lee & Moser and Trettel & Larsson | |
 | [`cbc_les`](../examples/cbc_les) | `cbc_les.py` (initial field, rescaling) | `cbc_les.py`: spectra against Comte-Bellot & Corrsin, dissipation budget | |
 | [`volvo_bluff_body`](../examples/volvo_bluff_body) | `make_volvo_mesh.py`, `volvo.py probes` | `volvo.py profiles`, `plot`, `budget`: against the experiment | `volvo.py slice`, `animate`, `render` |
 | [`flame_turbulence`](../examples/flame_turbulence) | `flame_turbulence.py hit`, `init` | `flame_turbulence.py analyze`, `figure`; `tfles_apriori.py` | `render_flame_turbulence.py` |
@@ -385,7 +385,7 @@ These set up or analyze one example each; their figures are on the [Examples](ht
 |---|---|
 | `docs/make_figures.py` | The figures of the user guide (`docs/images/guide/`) and the theory manual (`docs/images/theory/`), light and dark: schematics, domains from the example inputs, and short Mallard runs (`--mallard build/src/Mallard`) |
 | `docs/tools.py` | The figures of this page (`docs/images/tools/`), from running each tool (`--mallard` for those from Mallard runs) |
-| `docs/figstyle.py`, `docs/meshes.py`, `docs/domains.py`, `docs/schematics.py`, `docs/theory.py`, `docs/runs.py`, `docs/remap_tgv.py` | Their shared style (light and dark palettes, SVG output), mesh readers and figure sets |
+| `docs/figstyle.py`, `docs/meshes.py`, `docs/domains.py`, `docs/schematics.py`, `docs/theory.py`, `docs/teno.py`, `docs/runs.py`, `docs/remap_tgv.py` | Their shared style (light and dark palettes, SVG output), mesh readers and figure sets |
 | `../tutorials/common/` | `tutfig.py` (the tutorials' figure style), `gmsh_mesh.py` (Gmsh meshes for plots), `snapshots.py` (VTU and PVTU series) |
 | `make_import_meshes.py` | The mesh-import test fixtures in `test/data/meshes/`: one geometry as Gmsh, CGNS, Fluent and OpenFOAM, 2D and 3D, linear and curved |
 | `chemistry_reference.py`, `transport_reference.py` | Cantera reference data for the chemistry and transport tests (`test/data/chemistry/`, committed so the tests need no Cantera) |

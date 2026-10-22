@@ -115,7 +115,7 @@ The probes and forces are written as the run goes, so they can be plotted
 at any time. `plot_results.py` (next section) draws them over time: the
 pressure at two probe points, one inside the shock layer and one just
 outside the shock, and the cone's pressure drag coefficient,
-(F_x − p∞ A) / (q∞ A) with A the base area of the quarter cone, which for a
+$(F_x - p_\infty A)/(q_\infty A)$ with $A$ the base area of the quarter cone, which for a
 cone of uniform surface pressure equals the surface Cp.
 
 ![Pressure at two probe points and the drag coefficient against time: steady after t = 1](../images/tutorials/cone_history-light.svg#gh-light-mode-only)
