@@ -7,8 +7,6 @@ name: Pages
 on:
   release:
     types: [published]
-  # The site documents main too (under dev/, or alone while the release predates the
-  # user guide), so redeploy when main's documentation changes
   push:
     branches: [main]
     paths:
