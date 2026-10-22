@@ -9,6 +9,9 @@
  *
  */
 
+#include <filesystem>
+#include <string>
+
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
@@ -17,6 +20,10 @@
 
 int main(int argc, char** argv) {
     comm::Session session(argc, argv);
+    // Tests run in their own directories, so tests that rerun this binary need its absolute path
+    std::string self = argv[0];
+    if (self.find('/') != std::string::npos) self = std::filesystem::absolute(self).string();
+    argv[0] = self.data();
     ::testing::InitGoogleTest(&argc, argv);
     if (!comm::is_root()) {
         // One report per run: other ranks stay quiet
