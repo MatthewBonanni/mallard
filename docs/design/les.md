@@ -34,7 +34,8 @@ closure for the filtered reaction rates.
 
 - Implicit LES, or tuning the scheme's dissipation to stand in for a model.
 - Wall models (wall-modeled LES). Walls are resolved (y+ of the first cell
-  about 1).
+  about 1); wall models are designed separately in
+  [wall_model.md](wall_model.md).
 - RANS and hybrid RANS/LES (DES, DDES, WMLES).
 - Synthetic inflow turbulence: that is #159. Cases that need it depend on it.
 - Flamelet / FPV / FGM tabulated chemistry, transported or presumed PDFs,
