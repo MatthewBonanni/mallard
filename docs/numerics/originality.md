@@ -21,6 +21,9 @@ where we were not sure, an item is classed lower.
 Crossref and journal pages, October 2026); it is not proof that no one has
 done it. Corrections are welcome as issues.
 
+The items classed original or original extension were developed for
+Mallard; their class says only whether we found them published.
+
 ## Summary
 
 | Feature | Class | Closest prior work | What Mallard adds | Evidence |
@@ -126,6 +129,8 @@ prisms, pyramids and mixed meshes without splitting the cells, at orders
 the stencil rules above. WENO-type schemes on 3D mixed elements are
 established (Tsoutsanis, Titarev & Drikakis 2011); what is new is TENO-E
 there, with its stability measured and the stencil rules it needed.
+We could not check the full text of Liang, Shyy & Fu 2025, which may
+include 3D tests.
 
 **Evidence.** Measured orders on symmetry-walled boxes: 3.83 and 4.85 for
 orders 4 and 5 on hexahedra, 2.92, 3.90 and 4.84 for orders 3 to 5 on Kuhn
