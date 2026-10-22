@@ -143,7 +143,7 @@ python tools/animate.py examples/riemann_2d/solut riemann
 
 ## Contributing
 
-Mallard uses the [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
+Bug reports, questions and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers building and testing, code style (the [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html), warnings as errors), how CI runs, and what a pull request includes: tests, documentation, an example and a changelog entry. Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Citing
 

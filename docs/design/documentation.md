@@ -3,7 +3,8 @@
 Conventions for the pages in `docs/`, which the website
 (`MatthewBonanni/mallard-website`) builds into its user guide, reference and
 developer notes. Write them for GitHub: the site maps GitHub-style links and
-image pairs to its own.
+image pairs to its own. What a pull request must document is listed in
+[CONTRIBUTING.md](../../CONTRIBUTING.md#adding-a-feature-end-to-end).
 
 ## Where things go
 
