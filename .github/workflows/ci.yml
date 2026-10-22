@@ -3,6 +3,7 @@ name: CI
 # Pull requests don't run CI on every push: when a PR is ready to land, run
 #   gh workflow run ci.yml --ref <branch>
 # and the results appear as checks on the branch's head commit. main runs on push.
+# The HIP and SYCL builds run on main, or on a branch with -f portability=true.
 on:
   push:
     branches: [main]
@@ -13,6 +14,11 @@ on:
       - 'LICENSE'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
+    inputs:
+      portability:
+        description: Also build with HIP and SYCL (compile only)
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -160,3 +166,60 @@ jobs:
           key: ccache-tutorials-${{ github.sha }}
       - name: Run the tutorials
         run: tutorials/ci.sh build-2/src/Mallard build-3/src/Mallard ${{ runner.temp }}/tutorials
+
+  # HIP and SYCL builds (no GPU; never run): every source through the ROCm and oneAPI
+  # compilers, for portability errors and warnings the GCC, Clang and nvcc builds miss.
+  portability:
+    if: github.ref == 'refs/heads/main' || inputs.portability
+    runs-on: ubuntu-latest
+    container: ${{ matrix.toolchain.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        dim: [2, 3]
+        toolchain:
+          - name: hip
+            image: rocm/dev-ubuntu-24.04:7.2.4
+            flags: >-
+              -DCMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc -DKokkos_ENABLE_HIP=ON
+              -DKokkos_ARCH_AMD_GFX90A=ON -DKokkos_ENABLE_ROCTHRUST=OFF
+          - name: sycl
+            image: intel/oneapi-basekit:2025.3.2-0-devel-ubuntu24.04
+            flags: >-
+              -DCMAKE_CXX_COMPILER=icpx -DKokkos_ENABLE_SYCL=ON
+              -DKokkos_ARCH_INTEL_GEN=ON -DKokkos_ENABLE_ONEDPL=OFF
+    name: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
+    steps:
+      - name: Install tools
+        run: >
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends
+          git cmake make ccache libopenmpi-dev openmpi-bin ca-certificates
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ matrix.toolchain.name }}-${{ matrix.dim }}-${{ github.sha }}
+          restore-keys: ccache-${{ matrix.toolchain.name }}-${{ matrix.dim }}-
+      - name: Configure
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF
+          -DKokkos_ENABLE_SERIAL=ON ${{ matrix.toolchain.flags }}
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          -DMallard_ENABLE_MPI=ON -DMallard_GPU_AWARE_MPI=ON -DMallard_WARNINGS_AS_ERRORS=ON
+          -DMallard_DIM=${{ matrix.dim }}
+      - name: Build
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          CCACHE_MAXSIZE: 1G
+        run: cmake --build build -j $(nproc) -- -k
+      - name: Save compiler cache
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ matrix.toolchain.name }}-${{ matrix.dim }}-${{ github.sha }}

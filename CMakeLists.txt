@@ -19,7 +19,7 @@ endif()
 # Warnings for Mallard's own targets; third-party headers are included as SYSTEM
 option(${PROJECT_NAME}_WARNINGS_AS_ERRORS "Treat warnings in Mallard's own code as errors" OFF)
 function(mallard_target_warnings target)
-    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
         return()
     endif()
     # Kokkos builds for CUDA with nvcc_wrapper, which CMake identifies as GNU
