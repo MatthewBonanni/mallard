@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
@@ -52,7 +53,9 @@ inline void read_mesh(const std::filesystem::path & path) {
     try {
         Mesh mesh;
         mesh.init_file(path.string());
-    } catch (const std::exception &) {
+    } catch (const std::exception & e) {
+        // For triage of an input: why the file was rejected
+        if (std::getenv("MALLARD_FUZZ_VERBOSE")) std::fprintf(stderr, "rejected: %s\n", e.what());
     }
 }
 

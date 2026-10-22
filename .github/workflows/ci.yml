@@ -160,3 +160,7 @@ jobs:
           key: ccache-tutorials-${{ github.sha }}
       - name: Run the tutorials
         run: tutorials/ci.sh build-2/src/Mallard build-3/src/Mallard ${{ runner.temp }}/tutorials
+
+  # Each libFuzzer harness for a minute (2D); fuzz.yml also runs nightly, longer
+  fuzz:
+    uses: ./.github/workflows/fuzz.yml

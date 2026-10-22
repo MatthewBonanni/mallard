@@ -37,7 +37,7 @@ if [ "${1:-}" = --one ]; then
         echo "$harness: $(grep -E '^stat::number_of_executed_units' "$log" | awk '{print $2}') runs, no crash"
     else
         echo "$harness: CRASH"
-        grep -A40 -E '^==[0-9]+==|^SUMMARY|runtime error|deadly signal|timeout|out-of-memory' "$log" | head -60
+        grep -m1 -A30 -E 'ERROR|runtime error' "$log"
         exit 1
     fi
     exit 0
