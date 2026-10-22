@@ -36,7 +36,7 @@ Mallard -i input.toml [--kokkos-num-threads=8]
 mpirun -n 4 Mallard -i input.toml
 ```
 
-Runs the simulation an input file describes: see [first simulation](../docs/guide/first_simulation.md), [input files](../docs/guide/input_files.md) and the [input reference](../docs/input.md).
+Runs the simulation an input file describes: see [first simulation](../docs/tutorials/first_simulation.md), [input files](../docs/guide/input_files.md) and the [input reference](../docs/input.md).
 
 ### `MallardReactor`: 0D reactors and chemistry benchmarks
 
@@ -397,6 +397,8 @@ These set up or analyze one example each; their figures are on the [Examples](ht
 
 | Script | Purpose |
 |---|---|
+| `device_changes.sh [BASE]` | Whether the changes since BASE touch device code (a changed `src/` file with Kokkos device constructs, or a Kokkos bump): decides whether CI runs the CUDA builds and whether a PR needs GPU CI |
+| `check_workflow_triggers.py` | Fails if a GitHub workflow runs on pull requests or on pushes to branches other than `main` (CI on branches runs only by hand; releases on tags); the first job of `ci.yml` runs it |
 | `docs/make_figures.py` | The figures of the user guide (`docs/images/guide/`) and the theory manual (`docs/images/theory/`), light and dark: schematics, domains from the example inputs, and short Mallard runs (`--mallard build/src/Mallard`) |
 | `docs/tools.py` | The figures of this page (`docs/images/tools/`), from running each tool (`--mallard` for those from Mallard runs) |
 | `docs/verification.py` | The [verification manual](../docs/verification/index.md) (`docs/verification/`): runs the convergence tests of 2D and 3D `MallardTest` builds (`--test build-2/test/MallardTest build-3/test/MallardTest`) and writes its order-of-accuracy tables, `results.json` and plots (`docs/images/verification/`); without `--test`, redraws them from `results.json` |
