@@ -1,1 +1,1 @@
-- Mallard compiles with Kokkos' SYCL backend (the `_r` literal is `consteval`, so no `long double` reaches the device), and Intel's oneAPI compiler gets Mallard's warnings the TENO setup's `-ffp-contract=off` and the precise floating-point model, so NaN checks work (#402).
+- Mallard compiles with Kokkos' SYCL backend (the `_r` literal is `consteval`, so no `long double` reaches the device), and Intel's oneAPI compiler gets Mallard's warnings, the TENO setup's `-ffp-contract=off` and the precise floating-point model, so NaN checks work (#402).
