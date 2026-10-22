@@ -77,9 +77,6 @@ int main(int argc, char* argv[]) {
         for (const auto & command : subcommands) {
             if (strcmp(argv[1], command.name) == 0) return command.run(argc - 2, argv + 2);
         }
-    } catch (const std::exception &) {
-        usage(argv[0]);
-        return 1;
     }
     std::string input_file;
     bool check = false;

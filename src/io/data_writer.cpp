@@ -216,7 +216,7 @@ void DataWriter::init(const Input & input,
         if (compression == Compression::NONE) {
             throw InputError("write_data.relative_error needs compression = \"zlib\".");
         }
-        relative_error = double(find_real(input, "relative_error"));
+        relative_error = double(find_real(input, "relative_error", dim::none));
         if (!(relative_error > 0.0 && relative_error < 1.0)) {
             throw InputError("write_data.relative_error must be between 0 and 1.");
         }

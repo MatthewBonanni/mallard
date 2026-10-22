@@ -322,7 +322,9 @@ TEST(Units, NoExampleStringIsReadAsAQuantity) {
     size_t n = 0;
     for (const auto & entry : std::filesystem::recursive_directory_iterator(MALLARD_SOURCE_DIR "/examples")) {
         if (entry.path().extension() != ".toml") continue;
-        walk(parse_input(entry.path().string()), entry.path().string());
+        const Input input = parse_input(entry.path().string());
+        if (!input.contains("run") && !input.contains("reactor")) continue;  // e.g. an example's card.toml
+        walk(input, entry.path().string());
         n++;
     }
     EXPECT_GT(n, 40u);
