@@ -69,3 +69,24 @@ Equations are LaTeX, which both GitHub and the website (MathJax 3) render:
   `|u|` ends the cell): write `\lvert u \rvert`, or put the formula below the table.
 - Plain-text formulas in backticks (`dt = cfl * h / (|u| + |v| + 2a)`) remain fine
   where a formula is simple or reads like code (input keys, expressions).
+
+## Changelog
+
+[`CHANGELOG.md`](../../CHANGELOG.md) follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pull requests do not
+edit it, so that the many landing in parallel do not conflict: one that changes
+`src/` adds a fragment `changelog/<branch>.<category>.md` (`added`,
+`changed`, `deprecated`, `removed`, `fixed` or `security`) with one `- ` bullet
+per change and its PR or issue number:
+
+- Say what a user notices and what to do about it, not how the code changed.
+- Anything that changes results, input keys or file formats is `changed` (or
+  `deprecated`/`removed`), in bold, with how to get the old behavior back.
+- Refactors, tests and comments that users cannot notice need no fragment:
+  label the pull request `no-changelog`.
+
+The first job of `ci.yml` checks this (`python3 tools/changelog.py check`
+runs it locally). At a release, `python3 tools/changelog.py release X.Y.Z`
+folds the Unreleased section and the fragments into `## [X.Y.Z] - date`,
+deletes the fragments and updates the compare links; the GitHub release notes
+start from `python3 tools/changelog.py notes X.Y.Z`.
