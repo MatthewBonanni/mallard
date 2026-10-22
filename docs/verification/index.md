@@ -8,7 +8,7 @@ described in the [theory manual](../theory/index.md); stability limits and
 other measurements are in [Numerical methods](../numerics/overview.md).
 
 <!-- BEGIN GENERATED summary -->
-149 convergence studies from commit `ce67c68` (2026-10-22): 147 within their tests' bounds, 2 short of them for known reasons ([#420](https://github.com/MatthewBonanni/mallard/issues/420)).
+149 convergence studies from commit `52ed962` (2026-10-22): 147 within their tests' bounds, 2 short of them for known reasons ([#420](https://github.com/MatthewBonanni/mallard/issues/420)).
 <!-- END GENERATED summary -->
 
 ## How the tables are made
