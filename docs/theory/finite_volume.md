@@ -6,8 +6,8 @@ hexahedra, prisms and pyramids in 3D, with optionally curved boundary
 faces. This chapter covers the semi-discrete equations, face quadrature,
 curved geometry, the reconstruction of face states (first order, MUSCL,
 TENO-E), the low-Mach correction of those states and the cell gradients of
-the viscous terms. The numerical fluxes are in [chapter 6](fluxes.md) and
-the time integration in [chapter 7](time_integration.md). Usage:
+the viscous terms. The numerical fluxes are in [chapter 7](fluxes.md) and
+the time integration in [chapter 8](time_integration.md). Usage:
 [Numerics](../guide/numerics.md); measured stability and accuracy limits:
 [Numerical methods](../numerics/overview.md).
 
@@ -39,13 +39,13 @@ $$
 
 with face weights normalized to $\sum_q w_{f,q} = 2$ (Gauss-Legendre on
 $[-1, 1]$ in 2D; 3D rules rescaled to that sum). The viscous flux uses one
-point per face ([chapter 6](fluxes.md#viscous-fluxes)). Each face's flux is
+point per face ([chapter 7](fluxes.md#viscous-fluxes)). Each face's flux is
 computed and stored once, and every cell sums its faces in a fixed order
 without atomic operations (`FaceFluxSumFunctor`,
 `src/numerics/flux_functor.h`), so the result is bitwise independent of
 thread count and scheduling. Boundary faces use the exterior state of the
 boundary condition as $\mathbf{U}^R$
-([chapter 8](boundaries_sources.md#weak-imposition)). The source term is
+([chapter 9](boundaries_sources.md#weak-imposition)). The source term is
 evaluated at the cell average.
 
 ## Face quadrature
@@ -161,7 +161,7 @@ $$
 $$
 
 The neighbors are the face neighbors. A boundary face contributes its ghost
-state ([chapter 8](boundaries_sources.md#weak-imposition)) at the mirror
+state ([chapter 9](boundaries_sources.md#weak-imposition)) at the mirror
 image of the cell centroid, $\Delta\mathbf{x} = 2 d\,\mathbf{n}_f$ with $d$
 the centroid's distance to the face; prescribed states (`dirichlet`, `upt`,
 `farfield`) sit at the face centroid instead. Tetrahedra, whose four face
@@ -368,8 +368,8 @@ face point:
     cells, every scalar within its neighbors' range.
 
 The face $(\gamma, e_0)$ pairs enter the Riemann solvers
-([chapter 6](fluxes.md#gas-mixtures)), and the face mass fractions the
-species fluxes ([chapter 6](fluxes.md#species-fluxes)).
+([chapter 7](fluxes.md#gas-mixtures)), and the face mass fractions the
+species fluxes ([chapter 7](fluxes.md#species-fluxes)).
 
 ## Low-Mach correction
 
@@ -428,7 +428,7 @@ $\nabla T = (\nabla p - R T\nabla\rho)/(\rho R)$; mixtures differentiate
 $[\mathbf{u}, T, X_1,\dots,X_{N_s}]$ directly, with the wall velocity at
 viscous walls and the prescribed $T$ and $X_k$ at `upt` boundaries
 (the cell's own values elsewhere). The face gradients built from these are
-in [chapter 6](fluxes.md#viscous-fluxes).
+in [chapter 7](fluxes.md#viscous-fluxes).
 
 ## Axisymmetric cells
 
