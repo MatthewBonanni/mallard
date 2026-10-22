@@ -147,6 +147,16 @@ across each straight boundary line (2D) or plane (3D) that a gathered cell
 touches, except:
 
 - images that land inside a gathered cell (non-convex boundaries);
+- in 2D, images of cells whose foot on the line lies beyond the line's
+    gathered faces, of cells behind the line, and, for a target cell behind
+    the line, all of its images (#382). A facet of a straight-sided curved
+    wall, extended, passes inside the next columns of cells, by about a cell
+    height for the thin wall cells of an airfoil mesh; reflections across it
+    put the wall-normal profile there at the wrong distance from the wall. At
+    a closed trailing edge thinner than its wall cells, the cells on one side
+    mirrored across the other side land next to the cells on the first. Both
+    gave an odd-even mode in the wall pressure of the NACA 0012 tutorial mesh
+    at order 3;
 - boundaries between MPI ranks (`PARTITION` faces), which are not boundaries
     of the domain;
 - curved wall and symmetry faces, which take no images unless
@@ -169,7 +179,7 @@ squared distances differ by less than $10^{-10}h_i^2$, so the stencils do
 not depend on the cell numbering and mirror-symmetric meshes give
 mirror-symmetric reconstructions.
 
-**Ranking metric (3D).** On strongly anisotropic cells, the distance is
+**Ranking metric.** On strongly anisotropic cells, the distance is
 measured in the metric of the local mesh spacing,
 $\lVert\mathbf{d}\rVert_\mathbf{M}^2 = \mathbf{d}^T\mathbf{M}\,\mathbf{d}$
 (`teno_setup::ranking_metric`). With $\mathbf{C} = \sum_j \mathbf{d}_j\mathbf{d}_j^T$
@@ -182,7 +192,7 @@ $$
 \begin{equation}
 \mathbf{M} =
 \begin{cases}
-(\det\mathbf{C})^{1/3}\,\mathbf{C}^{-1} & \sqrt{\lambda_{\max}/\lambda_{\min}} > 2.5, \\
+(\det\mathbf{C})^{1/d}\,\mathbf{C}^{-1} & \sqrt{\lambda_{\max}/\lambda_{\min}} > 2.5, \\
 \mathbf{I} & \text{otherwise},
 \end{cases}
 \label{eq:metric}
@@ -190,8 +200,12 @@ $$
 $$
 
 a metric of unit determinant whose unit length is the spacing in every
-direction. 2D cells use physical distance. The reasons and the cut-off of
-2.5 are in [3D stability](#3d-stability).
+direction. The reasons and the cut-off of 2.5 are in
+[3D stability](#3d-stability). 2D meshes need it too (#382): the wall cells
+of the NACA 0012 tutorial mesh (aspect ratios of 10 to 30) took whole
+wall-normal columns by physical distance, and orders 3 to 6 settled into an
+odd-even wall-pressure mode, which at order 4 neither the metric nor the
+mirror-image rules above remove alone.
 
 ### Central stencil
 
@@ -479,7 +493,7 @@ whose entries are interleaved, so that a warp reads consecutive words.
 precision on the device.
 
 **Cache.** `cache_file` writes the tables after the setup and reads them back
-on later runs (format version 10; one file per MPI rank). The file is used
+on later runs (format version 11; one file per MPI rank). The file is used
 only if its key matches: the options that change the tables, the precision,
 the rank count and rank, and a hash of the mesh (nodes, connectivity,
 boundary conditions, partition, curved geometry, periodic shifts,
