@@ -36,7 +36,7 @@ Mallard -i input.toml [--kokkos-num-threads=8]
 mpirun -n 4 Mallard -i input.toml
 ```
 
-Runs the simulation an input file describes: see [first simulation](../docs/guide/first_simulation.md), [input files](../docs/guide/input_files.md) and the [input reference](../docs/input.md).
+Runs the simulation an input file describes: see [first simulation](../docs/tutorials/first_simulation.md), [input files](../docs/guide/input_files.md) and the [input reference](../docs/input.md).
 
 ### `MallardReactor`: 0D reactors and chemistry benchmarks
 
