@@ -165,10 +165,10 @@ double InletProfile::Field::at(const Point & x) const {
     return (*expression)(x[0], x[1], N_DIM > 2 ? x[N_DIM - 1] : 0.0, 0.0);
 }
 
-InletProfile::InletProfile(const toml::value & boundary, const std::string & where) {
-    const toml::value * turbulence = turbulent(boundary) ? &boundary.at("turbulence") : nullptr;
+InletProfile::InletProfile(const Input & boundary, const std::string & where) {
+    const Input * turbulence = turbulent(boundary) ? &boundary.at("turbulence") : nullptr;
     if (turbulence && !turbulence->is_table()) throw InputError(where + ".turbulence must be a table.");
-    auto field = [&](const toml::value & v, const std::string & name, bool & varies) {
+    auto field = [&](const Input & v, const std::string & name, bool & varies) {
         Field f;
         if (v.is_string()) {
             f.expression = std::make_shared<Expression>(name, v.as_string());
@@ -183,7 +183,7 @@ InletProfile::InletProfile(const toml::value & boundary, const std::string & whe
         return;
     }
     if (!boundary.contains("u")) throw InputError(where + ": missing u.");
-    const toml::value & u_in = boundary.at("u");
+    const Input & u_in = boundary.at("u");
     if (!u_in.is_array() || u_in.as_array().size() != N_DIM) {
         throw InputError(where + ".u must have " + std::to_string(N_DIM) + " components (numbers or expressions).");
     }
@@ -194,7 +194,7 @@ InletProfile::InletProfile(const toml::value & boundary, const std::string & whe
     if (!turbulence->contains("reynolds_stress")) {
         throw InputError(where + ".turbulence: missing reynolds_stress (or profile).");
     }
-    const toml::value & r_in = turbulence->at("reynolds_stress");
+    const Input & r_in = turbulence->at("reynolds_stress");
     if (!r_in.is_array() || r_in.as_array().size() != N_STRESS) {
         throw InputError(where + ".turbulence.reynolds_stress must be [" + stress_names() + "].");
     }
@@ -204,7 +204,7 @@ InletProfile::InletProfile(const toml::value & boundary, const std::string & whe
     }
 }
 
-void InletProfile::read_table(const toml::value & turbulence, const std::string & where) {
+void InletProfile::read_table(const Input & turbulence, const std::string & where) {
     const std::string key = where + ".turbulence.profile";
     if (turbulence.contains("reynolds_stress")) {
         throw InputError(where + ".turbulence: give reynolds_stress or profile, not both.");
@@ -300,12 +300,12 @@ std::array<double, N_STRESS> InletProfile::stress_at(const Point & x) const {
     return s;
 }
 
-SyntheticInflow::SyntheticInflow(const toml::value & boundary, const std::string & where, uint64_t stream_,
+SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & where, uint64_t stream_,
                                  const Mesh & mesh, const std::vector<uint32_t> & faces,
                                  const std::vector<int32_t> & char_index) {
     const std::string tw = where + ".turbulence";
     const InletProfile profile(boundary, where);
-    const toml::value & turbulence = boundary.at("turbulence");
+    const Input & turbulence = boundary.at("turbulence");
     static const std::vector<std::string> KEYS = {"reynolds_stress",     "profile",       "length_scale",
                                                   "seed",                "zero_net_flux", "points_per_length",
                                                   "convection_velocity"};
@@ -330,7 +330,7 @@ SyntheticInflow::SyntheticInflow(const toml::value & boundary, const std::string
     if (!turbulence.contains("length_scale")) throw InputError(tw + ": missing length_scale.");
     double L[N_DIM][N_DIM];
     {
-        const toml::value & v = turbulence.at("length_scale");
+        const Input & v = turbulence.at("length_scale");
         const std::string key = tw + ".length_scale";
         const std::string shape = "a number, [L_x, L_y" + std::string(N_DIM == 3 ? ", L_z" : "") +
                                   "] or one such list per velocity component";
@@ -344,7 +344,7 @@ SyntheticInflow::SyntheticInflow(const toml::value & boundary, const std::string
             }
         } else if (v.as_array().size() == N_DIM) {
             for (uint8_t j = 0; j < N_DIM; j++) {
-                const toml::value & row = v.as_array()[j];
+                const Input & row = v.as_array()[j];
                 if (!row.is_array() || row.as_array().size() != N_DIM) throw InputError(key + " must be " + shape + ".");
                 FOR_I_DIM L[j][i] = as_double(row.as_array()[i], key);
             }

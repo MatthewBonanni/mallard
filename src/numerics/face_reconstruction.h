@@ -17,7 +17,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <toml.hpp>
+#include "input.h"
 
 #include "common_typedef.h"
 #include "mesh.h"
@@ -65,7 +65,7 @@ class FaceReconstruction {
         /**
          * @brief Initialize the face reconstruction.
          */
-        virtual void init(const toml::value & input) = 0;
+        virtual void init(const Input & input) = 0;
 
         /**
          * @brief Display lines for the run log.
@@ -203,7 +203,7 @@ class FirstOrder : public FaceReconstruction {
         /**
          * @brief Initialize the first order face reconstruction.
          */
-        void init(const toml::value & input) override;
+        void init(const Input & input) override;
 
         /**
          * @brief Get the number of quadrature points per face.
@@ -249,7 +249,7 @@ class MUSCL : public FaceReconstruction {
     public:
         MUSCL();
         ~MUSCL();
-        void init(const toml::value & input) override;
+        void init(const Input & input) override;
         logging::Items summary() const override;
         uint8_t n_face_quadrature_points() const override;
         void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
@@ -283,7 +283,7 @@ class TENO : public FaceReconstruction {
     public:
         TENO();
         ~TENO();
-        void init(const toml::value & input) override;
+        void init(const Input & input) override;
         logging::Items summary() const override;
         uint8_t n_face_quadrature_points() const override;
         void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
@@ -376,7 +376,7 @@ class TENO : public FaceReconstruction {
          *        none, or it was made with other TENO options or rank count),
          *        so a distributed run can build its halo at that depth at once.
          */
-        static uint8_t cached_halo_layers(const toml::value & input);
+        static uint8_t cached_halo_layers(const Input & input);
 
         /**
          * @brief Write the precomputed data to the cache file, unless init()
@@ -437,7 +437,7 @@ class TENO : public FaceReconstruction {
                       Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution, Kokkos::View<uint32_t *> cells,
                       bool troubled_pass);
 
-        void read_options(const toml::value & input);
+        void read_options(const Input & input);
         void compute_stencils_and_matrices(const std::vector<uint32_t> * subset = nullptr);
         void compute_stencils_and_matrices_3d(const std::vector<uint32_t> * subset);
         void allocate_scratch();

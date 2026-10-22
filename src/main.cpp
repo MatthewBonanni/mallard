@@ -25,6 +25,8 @@ namespace {
 
 void usage(const char * program) {
     std::cerr << "Usage: " << program << " -i input.toml [Kokkos options, e.g. --kokkos-num-threads=8]\n"
+              << "       " << program << " --check input.toml [--ranks N] [--throughput CELLS_PER_S | --steps N]"
+              << " [--quality-vtu PREFIX]\n"
               << "       " << program << " new <template> [directory]   (" << program << " new --list)\n"
               << "       " << program << " --version\n";
 }
@@ -77,18 +79,37 @@ int main(int argc, char* argv[]) {
         }
     }
     std::string input_file;
-    for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "-i") == 0 && i + 1 < argc) {
-            input_file = argv[++i];
-        } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-            usage(argv[0]);
-            return 0;
-        } else if (strcmp(argv[i], "--version") == 0) {
-            std::cout << "Mallard " << mallard_version() << std::endl;
-            return 0;
+    bool check = false;
+    CheckOptions options;
+    try {
+        for (int i = 1; i < argc; ++i) {
+            const bool has_value = i + 1 < argc;
+            if (strcmp(argv[i], "-i") == 0 && has_value) {
+                input_file = argv[++i];
+            } else if (strcmp(argv[i], "--check") == 0) {
+                check = true;
+                if (has_value && argv[i + 1][0] != '-') input_file = argv[++i];
+            } else if (strcmp(argv[i], "--ranks") == 0 && has_value) {
+                options.ranks = std::stoi(argv[++i]);
+            } else if (strcmp(argv[i], "--throughput") == 0 && has_value) {
+                options.throughput = std::stod(argv[++i]);
+            } else if (strcmp(argv[i], "--steps") == 0 && has_value) {
+                options.steps = std::stoull(argv[++i]);
+            } else if (strcmp(argv[i], "--quality-vtu") == 0 && has_value) {
+                options.quality_file = argv[++i];
+            } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+                usage(argv[0]);
+                return 0;
+            } else if (strcmp(argv[i], "--version") == 0) {
+                std::cout << "Mallard " << mallard_version() << std::endl;
+                return 0;
+            }
         }
+    } catch (const std::exception &) {
+        usage(argv[0]);
+        return 1;
     }
-    if (input_file.empty()) {
+    if (input_file.empty() || options.ranks < 0 || options.throughput < 0.0) {
         usage(argv[0]);
         return 1;
     }
@@ -104,8 +125,14 @@ int main(int argc, char* argv[]) {
         try {
             print_header(input_file);
             Solver solver;
-            solver.init(input_file);
-            solver.run();
+            if (check) {
+                const CheckReport report = solver.check(parse_input(input_file), options);
+                print_check(report);
+                status = report.ok() ? 0 : 1;
+            } else {
+                solver.init(input_file);
+                solver.run();
+            }
         } catch (const InputError & e) {
             error = input_file + ": " + error_text(e);
         } catch (const std::exception & e) {
