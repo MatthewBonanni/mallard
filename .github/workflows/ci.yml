@@ -167,5 +167,3 @@ jobs:
       contents: read
       actions: read
     uses: ./.github/workflows/fuzz.yml
-    with:
-      dims: '[2, 3]'
