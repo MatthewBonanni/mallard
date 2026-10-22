@@ -31,16 +31,33 @@ python3 -m venv .venv
 .venv/bin/pip install numpy scipy matplotlib imageio imageio-ffmpeg
 ```
 
-## 2. Run the Sod shock tube
+## 2. Create and run the Sod shock tube
+
+`Mallard new` creates a ready-to-run case from one of the [examples](https://matthewbonanni.github.io/mallard/docs/examples/):
 
 ```bash
-cd examples/sod
-../../build/src/Mallard -i input.toml --kokkos-num-threads=4
+build/src/Mallard new sod runs/sod
 ```
 
-The run takes about a second. Mallard prints a summary of the setup, then a progress row every 100 steps (step, time, time step, throughput, minimum density and pressure, maximum Mach number, share of troubled cells; see [the log](output.md#the-log)), and writes eleven snapshots, `solut/sod_000000.vtu` to `solut/sod_000010.vtu` (t = 0 to 0.2), plus `solut/sod.pvd`, which ParaView opens as a time series.
+```text
+Created runs/sod/ from the sod template (examples/sod):
+  input.toml  the case; a comment above each table links to its keys
+  run.sh      runs it: ./run.sh [-t threads] [-n MPI ranks]
+  post.sh     sod.png, the density against the exact solution
+  README.md   what the case shows, how to run it
+  tools/      mallard_h5.py mallard_vtu.py plot_sod.py
+```
 
-The input file, `input.toml`, has one table per part of the problem; every key is documented in the [input reference](../input.md):
+Run it:
+
+```bash
+cd runs/sod
+./run.sh
+```
+
+`run.sh` runs this build of Mallard on 4 CPU threads (`./run.sh -t 8` for 8; `./run.sh -n 4` for 4 MPI ranks, or 4 GPUs on a GPU build with MPI). The run takes about a second. Mallard prints a summary of the setup, then a progress row every 100 steps (step, time, time step, throughput, minimum density and pressure, maximum Mach number, share of troubled cells; see [the log](output.md#the-log)), and writes eleven snapshots, `solut/sod_000000.vtu` to `solut/sod_000010.vtu` (t = 0 to 0.2), plus `solut/sod.pvd`, which ParaView opens as a time series.
+
+The input file, `input.toml`, has one table per part of the problem; the comment above each table says what it sets and links to its keys in the [input reference](../input.md):
 
 | Table | In this case |
 |---|---|
@@ -55,10 +72,10 @@ The input file, `input.toml`, has one table per part of the problem; every key i
 ## 3. Compare with the exact solution
 
 ```bash
-../../.venv/bin/python ../../tools/plot_sod.py sod.png solut/sod_000010.vtu
+PYTHON=../../.venv/bin/python ./post.sh
 ```
 
-`sod.png` shows the computed density along the strip against the exact Riemann solution at t = 0.2: the rarefaction, the contact discontinuity (spread over about five cells) and the shock (two cells). The [validation page](https://matthewbonanni.github.io/mallard/validation/#sod-shock-tube) has the same comparison for velocity and pressure, and the error under mesh refinement.
+`post.sh` runs the case's plot script (copied into `tools/`) with the Python given by `PYTHON` (default `python3`), and says which packages to install if any are missing. `sod.png` shows the computed density along the strip against the exact Riemann solution at t = 0.2: the rarefaction, the contact discontinuity (spread over about five cells) and the shock (two cells). The [validation page](https://matthewbonanni.github.io/mallard/validation/#sod-shock-tube) has the same comparison for velocity and pressure, and the error under mesh refinement.
 
 ## 4. Change the case
 
@@ -89,12 +106,14 @@ Edit `input.toml` and run again:
 The 2D Riemann problem (configuration 3 of Lax & Liu) is the case in the [gallery](https://matthewbonanni.github.io/mallard/gallery/), on a coarser mesh: 320,000 triangles, about 20 minutes on 12 CPU threads.
 
 ```bash
-cd ../riemann_2d
-../../build/src/Mallard -i input.toml --kokkos-num-threads=8
-../../.venv/bin/python ../../tools/animate.py solut riemann
+cd ../..
+build/src/Mallard new riemann_2d runs/riemann_2d
+cd runs/riemann_2d
+./run.sh -t 8
+PYTHON=../../.venv/bin/python ./post.sh
 ```
 
-`animate.py` writes `riemann.mp4`, `riemann.gif` and the last frame as `riemann_final.png`: density with contours beside a numerical schlieren image, one frame per snapshot. Open `solut/riemann.pvd` in ParaView for anything else.
+`post.sh` plots the final density (`riemann.png`) and runs `animate.py`, which writes `riemann.mp4`, `riemann.gif` and the last frame as `riemann_final.png`: density with contours beside a numerical schlieren image, one frame per snapshot. Open `solut/riemann.pvd` in ParaView for anything else.
 
 ## 6. A 3D case {#6-a-3d-case}
 
@@ -118,14 +137,27 @@ cmake --build build3d -j
 
 Gmsh meshes (format 2.2 or 4.1) work as in 2D, each physical surface becoming a boundary zone. The output is VTU with 3D cells and the velocity as a 3-vector `U`.
 
-The `explosion_3d` example, a spherical explosion on 64³ hexahedra, takes about 11 minutes on 6 threads:
+The `explosion_3d` template, a spherical explosion on 64³ hexahedra, takes about 11 minutes on 6 threads:
 
 ```bash
-cd examples/explosion_3d
-../../build3d/src/Mallard -i input.toml --kokkos-num-threads=6
+build3d/src/Mallard new explosion_3d runs/explosion_3d
+runs/explosion_3d/run.sh -t 6
 ```
 
 The [validation page](https://matthewbonanni.github.io/mallard/validation/#spherical-explosion) compares it with a one-dimensional radial solution, and also shows the Sod shock tube in 3D and the Taylor–Green vortex.
+
+## 7. Templates
+
+`Mallard new --list` shows every template, grouped as the examples are, with whether it needs a 2D or 3D build:
+
+```text
+Shocks and compressible flow
+  sod                  2D  Sod shock tube: shock, contact and rarefaction against the exact solution
+  ...
+  explosion_3d         3D  Spherical explosion: one octant with symmetry planes, on hexahedra
+```
+
+A case that needs a mesh or an initial state comes with `mesh.sh` or `init.sh`, which `run.sh` calls when the file is missing (`cylinder` writes a Gmsh O-grid with numpy; `sphere_re300` meshes with the `gmsh` Python module; each script says which packages to install if any are missing). Most examples are sized for validation: `Mallard new cylinder --quick` makes a coarse, short version that runs in under a minute, to try the steps before the full run. The templates are made from the examples when the case is created, so they always match them; CI creates and runs every one with `--quick`.
 
 ## Next steps
 

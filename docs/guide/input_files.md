@@ -12,6 +12,12 @@ prints the version and `Mallard --help` the usage. Errors in the input stop
 the run before it starts, with the file name, the key and, for options, the
 accepted values.
 
+The quickest way to a working input is a template: `Mallard new --list`
+shows them, and `Mallard new cylinder` creates a directory with the input,
+the scripts that generate its mesh, run it and plot the results, and a README
+([First simulation](first_simulation.md#7-templates)). The input is the
+example's, with a comment above each table that links to its keys.
+
 ## Anatomy of an input
 
 Each table configures one part of the problem. This is the complete input of

@@ -250,7 +250,24 @@ install(DIRECTORY examples mechanisms tools tutorials
 install(FILES LICENSE NOTICE DESTINATION ${CMAKE_INSTALL_DOCDIR})
 install(DIRECTORY licenses DESTINATION ${CMAKE_INSTALL_DOCDIR})
 
+<<<<<<< HEAD
 if(${PROJECT_NAME}_ENABLE_TESTS)
     enable_testing()
     add_test(NAME MallardTest COMMAND MallardTest)
 endif()
+=======
+install(TARGETS Mallard
+    DESTINATION bin
+)
+# Case templates (Mallard new) and what they are made from: bin/../share/mallard
+foreach(dir templates examples tools mechanisms tutorials)
+    if(EXISTS ${CMAKE_SOURCE_DIR}/${dir})
+        install(DIRECTORY ${dir} DESTINATION share/mallard
+            PATTERN __pycache__ EXCLUDE)
+    endif()
+endforeach()
+
+# Enable testing
+enable_testing()
+add_test(NAME MallardTest COMMAND MallardTest)
+>>>>>>> origin/main
