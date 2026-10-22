@@ -119,7 +119,7 @@ Each record has a `type`:
 | `progress` | Every progress row | as below |
 | `event` | A file written (the rows between progress rows) | `step`, `t`, `kind` (`vtu`, `hdf5`, `restart`, ...), `text` |
 | `warning`, `error` | A warning, or the error that ended the run | `message` |
-| `end` | The end of the run | `reason`, `step`, `t`, `steps` (this run's), `wall` and its parts `wall_setup`, `wall_stepping`, `wall_diagnostics`, `wall_output` (and `wall_chemistry`), `cells_per_second` |
+| `end` | The end of the run | `reason`, `step`, `t`, `steps` (this run's), `wall` and its parts `wall_setup`, `wall_stepping`, `wall_diagnostics`, `wall_output` (and `wall_chemistry`), `rejected_steps` (with error control), `cells_per_second` |
 
 Progress records:
 
@@ -186,7 +186,9 @@ interval = 10        # default 1
 Writes `step, t` and the pressure and viscous force components of the fluid
 on the zone, per unit depth in 2D (per radian in axisymmetric runs). Divide by
 the dynamic pressure and a reference length (or area) for drag and lift
-coefficients.
+coefficients. On walls with a [wall model](les.md#wall-models-wall_model)
+the viscous force is the modeled stress, and a last column `Q` gives the
+modeled heat flux into the fluid.
 
 ## Domain integrals: `[integrals]`
 

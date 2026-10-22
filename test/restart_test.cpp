@@ -165,6 +165,32 @@ TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
     std::filesystem::remove_all(dir);
 }
 
+TEST(RestartTest, ErrorControlledRunRestartsExactly) {
+    // The controller's step proposal and error history continue from the
+    // restart file; the vtu times clip some steps, which the history includes
+    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_error_control").string();
+    std::filesystem::remove_all(dir);
+    auto input = [&](const std::string & sub, const std::string & init, uint32_t n_steps) {
+        std::string s = restart_input(dir + "/" + sub, init, n_steps);
+        const std::string ssprk3 = "time_integrator = \"SSPRK3\"\n";
+        s.replace(s.find(ssprk3), ssprk3.size(), "time_integrator = \"RDPK3Sp35\"\n[numerics.error_control]\ntolerance = 1e-3\n");
+        return s;
+    };
+    Solver straight;
+    straight.init(parse_toml(input("a", BLAST, 40)));
+    const std::vector<rtype> U_straight = run_to_end(straight);
+
+    Solver first;
+    first.init(parse_toml(input("b", BLAST, 20)));
+    first.run();
+    Solver second;
+    second.init(parse_toml(input("b", "type = \"restart\"\nfile = \"" + dir + "/b/restart_000020.restart\"\n", 40)));
+    const std::vector<rtype> U_second = run_to_end(second);
+    EXPECT_EQ(second.get_time(), straight.get_time());
+    EXPECT_EQ(max_abs_diff(U_second, U_straight), 0.0);
+    std::filesystem::remove_all(dir);
+}
+
 TEST(RestartTest, CharacteristicBoundariesRestartExactly) {
     // The faces' pressure and normal velocity carry over in the restart file
     const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_nscbc").string();

@@ -121,13 +121,13 @@ Chemistry and flow are split:
 | `max_steps` | 100000 | Sub-steps allowed per cell and call; more stop the run |
 | `T_frozen` | 0 | No chemistry in cells below this temperature |
 | `fuse_half_steps` | `false` | Strang: fuse the closing half step with the next opening one, except where output reads the state (faster; results then depend on output times) |
-| `C_reg` | 1e-12 | Concentration [kmol/m^3] below which orders between 0 and 1 are regularized; 1e-10 speeds up trace-fuel burnout at a small cost in accuracy |
+| `C_reg` | 1e-12 | Concentration [kmol/m³] below which orders between 0 and 1 are regularized; 1e-10 speeds up trace-fuel burnout at a small cost in accuracy |
 | `load_balance` | `false` | MPI: move chemistry work from loaded to idle ranks, bitwise the same results ([performance](performance.md#chemistry-load-balancing)) |
 | `sparse` | automatic | Sparse LU (`true`) or dense (`false`); automatic picks sparse from 30 species when it pays (GRI-3.0 and larger) |
 | `lanes` | 0 (automatic) | GPU lanes per cell; automatic: a warp per cell from 16 species |
 | `integrator` | `"rosenbrock"` | The only choice so far |
 
-Output variables: `HRR` (heat release rate, W/m^3), `OMEGA_<species>`
+Output variables: `HRR` (heat release rate, W/m³), `OMEGA_<species>`
 (production rates), `CHEM_COST` (sub-steps of each cell in the last step).
 Restart files carry each cell's last sub-step, so restarts repeat an
 uninterrupted run exactly. The progress rows show the share of cells advanced
@@ -156,7 +156,7 @@ Optically thin radiative heat loss (the TNF workshop model):
 `q = 4 sigma sum_i p_i a_i(T) (T^4 - T_ambient^4)`, with Planck-mean
 absorption coefficients of H2O, CO2, CO and CH4. It holds for small, lean or
 diluted flames, which emit but barely absorb. It needs no `[chemistry]` and
-outputs `QRAD` [W/m^3].
+outputs `QRAD` [W/m³].
 
 | Key | Default | Meaning |
 |---|---|---|

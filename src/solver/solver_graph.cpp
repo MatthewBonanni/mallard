@@ -31,9 +31,9 @@
 
 namespace {
 
-// step_scalars: [t, t_target, dt_scales]; step_io: [t, t_target, dt]
+// step_scalars: [t, t_target, dt_scales]; step_io: [t, t_target, dt, dt_cfl1, accepted]
 [[maybe_unused]] constexpr int T = 0, T_TARGET = 1, DT_SCALES = 2, STEP_DT = DT_SCALES + int(DT), N_STEP_SCALARS = DT_SCALES + int(N_DT_SCALES);
-[[maybe_unused]] constexpr int IO_T = 0, IO_T_TARGET = 1, IO_DT = 2, IO_DT_CFL1 = 3, N_STEP_IO = 4;
+[[maybe_unused]] constexpr int IO_T = 0, IO_T_TARGET = 1, IO_DT = 2, IO_DT_CFL1 = 3, IO_ACCEPTED = 4, N_STEP_IO = 5;
 
 #ifdef KOKKOS_ENABLE_CUDA
 void check(const cudaError_t err, const char * what) {
@@ -84,11 +84,14 @@ void Solver::record_step() {
     const Kokkos::View<rtype *> s = step_scalars;
     const bool use_cfl_ = use_cfl;
     const rtype cfl_ = cfl, dt_fixed_ = dt_fixed, sponge_dt_max_ = sponge_dt_max;
+    const bool controlled = step_controller.enabled();
+    const Kokkos::View<rtype *> control = step_controller.slots();
     Kokkos::parallel_for("step_dt", 1, KOKKOS_LAMBDA(const int) {
         // calc_dt's arithmetic; volatile keeps the compiler from fusing the
         // product into the comparison's sum (one rounding instead of two)
         volatile rtype dt_v = use_cfl_ ? cfl_ * dt_cfl1_d() : dt_fixed_;
         rtype dt_ = dt_v;
+        if (controlled && control(StepController::DT_NEXT) > 0.0_r) dt_ = control(StepController::DT_NEXT);
         dt_ = (sponge_dt_max_ < dt_) ? sponge_dt_max_ : dt_;
         const rtype t_ = s(T), t_target = s(T_TARGET);
         if (t_ + dt_ > t_target && t_target > t_) dt_ = t_target - t_;
@@ -104,6 +107,22 @@ void Solver::record_step() {
     Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), Kokkos::subview(step_io, IO_DT),
                       Kokkos::subview(step_scalars, STEP_DT));
     Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), Kokkos::subview(step_io, IO_DT_CFL1), step_dt_cfl1);
+    if (controlled) {
+        // accept_controlled_step on the device; a rejected step relaunches the graph
+        step_controller.estimate(solution_vec.back(), state(), rhs_vec.back(), mesh->n_owned());
+#ifdef Mallard_HAS_NCCL
+        if (is_distributed()) {
+            const ncclDataType_t type = sizeof(rtype) == sizeof(double) ? ncclDouble : ncclFloat;
+            if (ncclAllReduce(step_controller.error_device(), step_controller.error_device(), 1, type, ncclMax,
+                              comm::nccl(), Kokkos::DefaultExecutionSpace().cuda_stream()) != ncclSuccess) {
+                throw std::runtime_error("NCCL: step error reduction failed");
+            }
+        }
+#endif
+        step_controller.update(dt, step_scalars.data() + STEP_DT, state(), solution_vec.back());
+        Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), Kokkos::subview(step_io, IO_ACCEPTED),
+                          Kokkos::subview(control, int(StepController::ACCEPTED)));
+    }
 }
 
 void Solver::graph_step() {
@@ -146,12 +165,19 @@ void Solver::graph_step() {
     }
     step_io(IO_T) = t;
     step_io(IO_T_TARGET) = next_target_time();
-    if (step_graph_exec) {
-        check(cudaGraphLaunch(static_cast<cudaGraphExec_t>(step_graph_exec), stream), "cudaGraphLaunch");
-    } else {
-        record_step();
+    for (int tries = 0;; tries++) {
+        if (tries > 0) {
+            n_rejected++;
+            check_rejections(tries);
+        }
+        if (step_graph_exec) {
+            check(cudaGraphLaunch(static_cast<cudaGraphExec_t>(step_graph_exec), stream), "cudaGraphLaunch");
+        } else {
+            record_step();
+        }
+        Kokkos::DefaultExecutionSpace().fence("step_graph");
+        if (!step_controller.enabled() || step_io(IO_ACCEPTED) != 0.0_r) break;
     }
-    Kokkos::DefaultExecutionSpace().fence("step_graph");
     dt = step_io(IO_DT);
     dt_cfl1 = step_io(IO_DT_CFL1);
     if (!(dt > 0.0_r)) {
