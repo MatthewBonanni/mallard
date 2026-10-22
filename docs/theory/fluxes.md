@@ -1,10 +1,10 @@
 # Numerical fluxes
 
-This chapter gives the numerical flux $\hat{\mathbf{F}}$ of eq. (2) of [chapter 5](finite_volume.md#semi-discrete-equations):
+This chapter gives the numerical flux $\hat{\mathbf{F}}$ of eq. (2) of [chapter 6](finite_volume.md#semi-discrete-equations):
 the approximate Riemann solvers, the hybrid central-upwind flux of
 large-eddy simulation, their extension to gas mixtures, the species fluxes,
 and the discrete viscous and diffusive fluxes. Face states come from
-[chapter 5](finite_volume.md). Usage: [Numerics](../guide/numerics.md);
+[chapter 6](finite_volume.md). Usage: [Numerics](../guide/numerics.md);
 the carbuncle and stationary-shock studies:
 [Numerical methods](../numerics/overview.md#stationary-shocks-on-cell-faces).
 
@@ -211,7 +211,7 @@ the Ducros sensor restricted to compressions
 ([Ducros et al. 1999](../references.md#ducros-1999);
 [Bhagatwala & Lele 2009](../references.md#bhagatwala-lele-2009)),
 evaluated at every stage from the viscous cell gradients
-([chapter 5](finite_volume.md#gradients-for-the-viscous-terms)):
+([chapter 6](finite_volume.md#gradients-for-the-viscous-terms)):
 
 $$
 \begin{equation}
@@ -237,7 +237,7 @@ $$
 \end{equation}
 $$
 
-where the low-Mach correction (eq. (14) of [chapter 5](finite_volume.md#low-mach-correction)) applies to the Riemann flux only.
+where the low-Mach correction (eq. (14) of [chapter 6](finite_volume.md#low-mach-correction)) applies to the Riemann flux only.
 The hybrid flux is not available with SIMPLER splitting
 ([chapter 3](chemistry_radiation.md#simpler-balanced-splitting)). Its
 validation: [LES design notes](../design/les.md).
@@ -245,7 +245,7 @@ validation: [LES design notes](../design/les.md).
 ## Gas mixtures
 
 For mixtures each side carries its frozen pair $(\gamma, e_0)$ of
-eq. (5) of [chapter 2](thermodynamics_transport.md#frozen-surrogates), reconstructed to the face ([chapter 5](finite_volume.md#gas-mixtures)),
+eq. (5) of [chapter 2](thermodynamics_transport.md#frozen-surrogates), reconstructed to the face ([chapter 6](finite_volume.md#gas-mixtures)),
 and the physical flux uses $\rho E = p/(\gamma - 1) + \rho e_0 + \tfrac12\rho\lvert\mathbf{u}\rvert^2$
 on that side (`riemann::SideThermo`):
 
@@ -295,7 +295,7 @@ $$
 $$
 
 with $Y_{k,q}^{L,R}$ the reconstructed face mass fractions of each side
-([chapter 5](finite_volume.md#gas-mixtures)). Each cell writes the mass of
+([chapter 6](finite_volume.md#gas-mixtures)). Each cell writes the mass of
 every species leaving it through each of its faces, so no two threads write
 the same entry. On boundary faces the inflowing mass fractions are the
 prescribed ones (`nscbc_inlet`, `upt`), those of the image face or image
@@ -325,7 +325,7 @@ q_f = \tfrac12(q_L + q_R), \qquad
 \end{equation}
 $$
 
-the average of the cell gradients of [chapter 5](finite_volume.md#gradients-for-the-viscous-terms)
+the average of the cell gradients of [chapter 6](finite_volume.md#gradients-for-the-viscous-terms)
 corrected along the face normal so that its component along the line of
 centroids equals the direct difference
 ([Diskin et al. 2010](../references.md#diskin-2010)). This suppresses
@@ -345,7 +345,7 @@ Boundary faces:
 - **symmetry planes**: only the normal stress, no work (the normal velocity
     vanishes), no heat or species flux;
 - **transmissive faces** with an image face
-    ([chapter 8](boundaries_sources.md#transmissive-boundaries)): the values
+    ([chapter 9](boundaries_sources.md#transmissive-boundaries)): the values
     and gradients of that interior face, eq. $\eqref{eq:face-values-and-gradients}$;
 - **outflow, far-field and characteristic faces** (and transmissive faces
     without an image): the cell's values with the normal derivatives removed;

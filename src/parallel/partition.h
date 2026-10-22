@@ -60,4 +60,19 @@ std::vector<int> partition_graph(const DistributedMesh & mesh, int n_parts);
 /** @brief Whether this build has a graph partitioner. */
 bool have_graph_partitioner();
 
+struct MeshBlock;
+
+/** @brief Cells of the part with the most local (owned and halo) cells. */
+struct PartSize {
+    uint64_t owned = 0;
+    uint64_t halo = 0;
+};
+
+/**
+ * @brief The largest part of a partition of a whole mesh (owner of each block
+ *        cell), with halo layers of cells sharing a node as in a distributed
+ *        run; neighbors across periodic seams are not counted.
+ */
+PartSize largest_part(const MeshBlock & block, const std::vector<int> & owner, int n_parts, int halo_layers);
+
 #endif // PARTITION_H

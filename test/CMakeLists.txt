@@ -23,6 +23,7 @@ set(MALLARD_TEST_SOURCES
     les_test.cpp
     numerics_preset_test.cpp
     tfles_test.cpp
+    check_test.cpp
     synthetic_inflow_test.cpp
     wall_model_test.cpp
 )

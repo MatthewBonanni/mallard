@@ -222,7 +222,7 @@ double advection_error(const std::string & mesh, const std::string & recon, uint
         in << "[[boundaries]]\nname = \"" << zone << "\"\ntype = \"extrapolation\"\n";
     }
     in << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\ncheck_nan = true\n"
-       << "[numerics.face_reconstruction]\ntype = \"" << recon << "\"\norder = 5\n"
+       << "[numerics.face_reconstruction]\ntype = \"" << recon << "\"\n" << (recon == "TENO" ? "order = 5\n" : "")
        << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
        << "[output]\ncheck_interval = 1000000\n";
     Solver solver;

@@ -289,7 +289,7 @@ TEST(ChemistryKineticsTest, RegularizationConcentrationIsAnOption) {
     using Kinetics = KineticsTable<Kokkos::HostSpace>;
     const Mechanism mech = read_mechanism(SOURCE_DIR + "/test/data/chemistry/propane_2step.yaml", "gas");
     const double C_reg = 1e-9;
-    const toml::value input = parse_toml("[chemistry]\nC_reg = 1.0e-9\n");
+    const Input input = parse_toml("[chemistry]\nC_reg = 1.0e-9\n");
     ASSERT_EQ(reactor_options(input).C_reg, C_reg);
     const auto kinetics = make_kinetics_table<Kokkos::HostSpace>(mech, reactor_options(input).C_reg);
     const auto plain = make_kinetics_table<Kokkos::HostSpace>(mech);

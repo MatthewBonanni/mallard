@@ -23,6 +23,7 @@
 
 #include "mesh.h"
 #include "solver.h"
+#include "scratch.h"
 #include "test_fixtures.h"
 #include "wall_exchange.h"
 #include "wall_model.h"
@@ -30,7 +31,7 @@
 namespace {
 
 using wall_model::Gas;
-using wall_model::Input;
+using WallInput = wall_model::Input;
 using wall_model::Output;
 
 constexpr double KAPPA = 0.41, A_PLUS = 17.0;
@@ -116,7 +117,7 @@ TEST(WallModel, IncompressibleLimit) {
     const Gas gas = constant_gas(mu, 1.0e7, R);  // large cp: no viscous heating
     for (const double h_plus : {1.0, 10.0, 100.0, 1000.0, 10000.0}) {
         const double u_tau = 0.05, h = h_plus * mu / (rho * u_tau);
-        Input in;
+        WallInput in;
         in.h = h;
         in.U = u_tau * incompressible_U_plus(h_plus);
         in.T = in.T_w = in.T_e = T;
@@ -138,7 +139,7 @@ TEST(WallModel, IncompressibleLimit) {
 TEST(WallModel, LaminarCouetteWithHeating) {
     const double mu = 1.8e-5, cp = 50.0, Pr = 0.72, k = mu * cp / Pr;
     const Gas gas = constant_gas(mu, cp, 287.0, Pr);
-    Input in;
+    WallInput in;
     in.h = 1e-8;
     in.U = 1.0;
     in.T_w = 300.0;
@@ -150,7 +151,7 @@ TEST(WallModel, LaminarCouetteWithHeating) {
     const double q = -(k * (in.T - in.T_w) + 0.5 * mu * in.U * in.U) / in.h;
     EXPECT_NEAR(out.q_w / q, 1.0, 1e-6);
 
-    Input flux = in;
+    WallInput flux = in;
     flux.thermal = WallThermal::HEAT_FLUX;
     flux.q = q;
     const Output out_flux = wall_model::equilibrium(parameters(WallModelType::EQUILIBRIUM), gas, flux);
@@ -166,7 +167,7 @@ TEST(WallModel, EquilibriumCompressible) {
     const double mu_w = 1.0 / 20000.0;
     const Gas gas = power_law_gas(mu_w);
     const WallModelParameters P = parameters(WallModelType::EQUILIBRIUM);
-    Input in;
+    WallInput in;
     in.h = 0.3;
     in.U = 0.8;           // M ~ 0.7 at the wall's sound speed sqrt(1.4)
     in.T_w = 1.0;
@@ -214,7 +215,7 @@ TEST(WallModel, InverseTransformationCompressible) {
     const double mu_w = 1.0 / 20000.0;
     const Gas gas = power_law_gas(mu_w);
     const WallModelParameters P = parameters(WallModelType::GFM);
-    Input in;
+    WallInput in;
     in.h = 0.3;
     in.U = 2.6;   // M_b ~ 3 channel: U_m ~ 0.85 U_c at 0.3 delta, U_c ~ 3 sqrt(1.4 T_w)
     in.T = 2.4;
@@ -261,7 +262,7 @@ TEST(WallModel, InverseTransformationCompressible) {
 TEST(WallModel, InverseTransformationThermalBranches) {
     const Gas gas = power_law_gas(1.0 / 20000.0);
     const WallModelParameters P = parameters(WallModelType::GFM);
-    Input in;
+    WallInput in;
     in.h = 0.3;
     in.U = 2.0;
     in.T = 1.5;
@@ -423,7 +424,7 @@ TEST(WallModel3D, LaminarCouetteFlowOverAModeledWall) {
 // models keep no state. Fails if a model or the exchange data came to depend
 // on anything but the state (e.g. a filtered input without restart data).
 TEST(WallModel3D, RestartIsExact) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_wall_model_restart").string();
+    const std::string dir = (scratch_dir() / "mallard_wall_model_restart").string();
     std::filesystem::remove_all(dir);
     const uint32_t n[3] = {4, 6, 3};
     const std::string init = "type = \"analytical\"\nrho = \"1.0 + 0.1 * sin(6.283 * x)\"\n"

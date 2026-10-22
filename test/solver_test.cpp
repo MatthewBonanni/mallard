@@ -55,7 +55,8 @@ std::string make_input(const CaseConfig & c) {
       << "[[boundaries]]\nname = \"top\"\ntype = \"" << c.bc_tb << "\"\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"" << c.bc_tb << "\"\n"
       << "[numerics]\nriemann_solver = \"" << c.riemann << "\"\ntime_integrator = \"SSPRK3\"\ncheck_nan = true\n"
-      << "[numerics.face_reconstruction]\ntype = \"" << c.recon << "\"\nlimiter = \"" << c.limiter << "\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"" << c.recon << "\"\n"
+      << (c.recon == "MUSCL" ? "limiter = \"" + c.limiter + "\"\n" : "")
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[output]\ncheck_interval = 1000000\n";
     return s.str();
