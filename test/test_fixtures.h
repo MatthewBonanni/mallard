@@ -18,19 +18,19 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "mesh.h"
 #include "boundary.h"
 #include "test_utils.h"
 
-inline toml::value parse_toml(const std::string & str) {
-    return toml::parse_str(str);
+inline Input parse_toml(const std::string & str) {
+    return parse_input_string(str);
 }
 
 inline std::shared_ptr<Mesh> make_mesh(const std::string & type, uint32_t nx, uint32_t ny,
                                        rtype Lx = 1.0, rtype Ly = 1.0) {
-    toml::value input = parse_toml("[mesh]\ntype = \"" + type + "\"\n" +
+    Input input = parse_toml("[mesh]\ntype = \"" + type + "\"\n" +
                                    "Nx = " + std::to_string(nx) + "\n" +
                                    "Ny = " + std::to_string(ny) + "\n" +
                                    "Lx = " + std::to_string(Lx) + "\n" +
@@ -47,7 +47,7 @@ inline std::shared_ptr<Mesh> make_mesh(const std::string & type, uint32_t nx, ui
  */
 inline std::shared_ptr<Mesh> make_mesh_3d(const std::string & type, uint32_t nx, uint32_t ny, uint32_t nz,
                                           rtype Lx = 1.0, rtype Ly = 1.0, rtype Lz = 1.0) {
-    toml::value input = parse_toml("[mesh]\ntype = \"" + type + "\"\n" +
+    Input input = parse_toml("[mesh]\ntype = \"" + type + "\"\n" +
                                    "Nx = " + std::to_string(nx) + "\n" +
                                    "Ny = " + std::to_string(ny) + "\n" +
                                    "Nz = " + std::to_string(nz) + "\n" +

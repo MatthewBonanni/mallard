@@ -303,6 +303,26 @@ Pitfalls:
   (`curved_wall_degree`, default 3), so orders 5 and 6 are fourth order there;
   see [Numerics](numerics.md#teno-e-options).
 
+## Mesh quality
+
+`Mallard --check input.toml` ([Checking an input](input_files.md#checking-an-input))
+measures every cell of the mesh, taking for each the worst of its faces:
+
+| Metric | Definition | Warning above |
+|---|---|---|
+| Non-orthogonality | Angle in degrees between the face normal and the line joining the centroids of the two cells (cell to face centroid at a boundary) | 70 |
+| Skewness | Distance from the face centroid to where that line crosses the face, over the distance between the centroids | 0.5 |
+| Volume ratio | Larger over smaller volume of the two cells | 10 |
+| Aspect ratio | Largest over smallest distance from the cell centroid to its face centroids | 1000 |
+
+It reports the largest and mean value of each and where the worst cells are;
+`--quality-vtu PREFIX` writes the four fields to `PREFIX_000000.vtu` for
+ParaView, and `tools/plot_mesh_quality.py PREFIX_000000.vtu out.png` draws a
+2D mesh's with the worst cells circled.
+
+![Non-orthogonality and skewness of a coarse triangle mesh around the mallard (examples/mallard), the six worst cells of each circled](../images/guide/mesh_quality-light.svg#gh-light-mode-only)
+![Non-orthogonality and skewness of a coarse triangle mesh around the mallard (examples/mallard), the six worst cells of each circled](../images/guide/mesh_quality-dark.svg#gh-dark-mode-only)
+
 ## See also
 
 - [Input reference: `[mesh]`](../input.md#mesh), [`[[periodic]]`](../input.md#periodic)

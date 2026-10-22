@@ -3,7 +3,7 @@
 The equations Mallard solves and the methods it solves them with, as
 implemented on `main`: every model and scheme of the solver, with the
 formulas, constants and defaults of the source code it cites. The
-[user guide](../guide/first_simulation.md) explains how to use them;
+[user guide](../guide/quick_start.md) explains how to use them;
 [Numerical methods](../numerics/overview.md) collects measured stability
 limits, accuracy studies and known limitations; the sources are in
 [References](../references.md).
@@ -22,14 +22,17 @@ limits, accuracy studies and known limitations; the sources are in
 4. [Large-eddy simulation](les.md): the filtered equations, SGS models,
     the dynamic procedure, thickened flames, the partially stirred reactor
     and synthetic inflow turbulence.
-5. [Finite-volume discretization and reconstruction](finite_volume.md):
+5. [Wall models](wall_models.md): wall-modeled LES, the exchange point,
+    the equilibrium ODE and Griffin-Fu-Moin models and their coupling to
+    the wall flux.
+6. [Finite-volume discretization and reconstruction](finite_volume.md):
     face quadrature, curved boundaries, MUSCL, TENO-E and the gradients of
     the viscous terms.
-6. [Numerical fluxes](fluxes.md): the Riemann solvers, the hybrid
+7. [Numerical fluxes](fluxes.md): the Riemann solvers, the hybrid
     central-upwind flux, species fluxes and viscous fluxes.
-7. [Time integration](time_integration.md): Runge-Kutta methods, the time
+8. [Time integration](time_integration.md): Runge-Kutta methods, the time
     step and the order of operations within a step.
-8. [Boundary conditions and sources](boundaries_sources.md): exterior
+9. [Boundary conditions and sources](boundaries_sources.md): exterior
     states, characteristic boundaries, body forces and sponges.
 
 ## Notation
@@ -49,6 +52,7 @@ limits, accuracy studies and known limitations; the sources are in
 - $\mathbf{x}_{f,q}$, $w_{f,q}$: face quadrature points and weights
 - $\Delta t$, $\mathrm{CFL}$: time step, Courant number
 - $\Delta$, $\mu_t$, $\nu_t$, $Pr_t$, $Sc_t$: LES filter width, eddy viscosity (dynamic and kinematic), turbulent Prandtl and Schmidt numbers
+- $\tau_w$, $q_w$, $u_\tau$, $y^+$: wall shear stress, heat flux into the fluid at the wall, friction velocity, wall units
 - $F$, $\mathcal{E}$, $\Omega$: thickening factor, efficiency and flame sensor of the thickened flame model
 
 Vectors and tensors are bold; $\delta_{ij}$ is the Kronecker delta and
