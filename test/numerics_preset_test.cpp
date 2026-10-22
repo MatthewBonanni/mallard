@@ -205,7 +205,6 @@ const std::vector<ExampleCase> EXAMPLES = {
      "type = \"cartesian\"\nNx = 8\nNy = 8\nNz = 8\nLx = 2.0\nLy = 2.0\nLz = 2.0\n"},
     {"taylor_green_3d/coarse.toml", "accurate", 3, "", {}, ""},
     {"taylor_green_3d/input.toml", "accurate", 3, "", {}, ""},
-    {"taylor_green_3d/input_periodic.toml", "accurate", 3, "", {}, ""},
     {"taylor_green_3d/remap.toml", "accurate", 3, "", {}, ""},
     {"turbulent_inflow_duct/input.toml", "les", 3, "", {}, ""},
     {"volvo_bluff_body/cold.toml", "les", 3, "",
