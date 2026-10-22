@@ -223,8 +223,9 @@ jobs:
       matrix:
         dim: [2, 3]
     name: cuda-${{ matrix.dim }}d
-    # sccache caches nvcc compiles (ccache doesn't recognize nvcc_wrapper) in the GitHub
-    # Actions cache, per object, so branches reuse what main compiled
+    # sccache caches the nvcc compiles in the GitHub Actions cache, per object, so branches
+    # reuse what main compiled. Neither ccache nor sccache accepts Kokkos' nvcc_wrapper as a
+    # compiler, so sccache wraps the nvcc that nvcc_wrapper runs (the first one on PATH)
     env:
       SCCACHE_GHA_ENABLED: "true"
     steps:
@@ -236,12 +237,18 @@ jobs:
         with:
           submodules: true
       - uses: mozilla-actions/sccache-action@v0.0.9
+      - name: Put sccache in front of nvcc
+        run: |
+          mkdir -p "$RUNNER_TEMP/nvcc-sccache"
+          printf '#!/bin/sh\nexec sccache /usr/local/cuda/bin/nvcc "$@"\n' > "$RUNNER_TEMP/nvcc-sccache/nvcc"
+          chmod +x "$RUNNER_TEMP/nvcc-sccache/nvcc"
+          echo "$RUNNER_TEMP/nvcc-sccache" >> "$GITHUB_PATH"
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF
           -DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON -DKokkos_ENABLE_OPENMP=ON
           -DCMAKE_CXX_COMPILER=$PWD/src/external/kokkos/bin/nvcc_wrapper
-          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+          -DCUDAToolkit_ROOT=/usr/local/cuda
           -DMallard_ENABLE_MPI=ON -DMallard_GPU_AWARE_MPI=ON -DMallard_WARNINGS_AS_ERRORS=ON
           -DMallard_DIM=${{ matrix.dim }}
       - name: Build
