@@ -1,0 +1,4 @@
+# This example's card on the website's Examples page; its title, results, cells and run
+# time come from examples/README.md, its settings from the input file.
+build = "2d"
+demonstrates = ["flame through a characteristic outlet", "NSCBC with reacting flow"]
