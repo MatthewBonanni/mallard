@@ -816,6 +816,15 @@ void Solver::init_numerics() {
         case TimeIntegratorType::SSPRK3:
             time_integrator = std::make_unique<SSPRK3>();
             break;
+        case TimeIntegratorType::SSPRK54:
+            time_integrator = std::make_unique<SSPRK54>();
+            break;
+        case TimeIntegratorType::CK45:
+            time_integrator = std::make_unique<CK45>();
+            break;
+        case TimeIntegratorType::RDPK3SP35:
+            time_integrator = std::make_unique<RDPK3Sp35>();
+            break;
     }
 
     face_reconstruction->set_mesh(mesh);
@@ -862,6 +871,7 @@ void Solver::init_numerics() {
     if (!(hybrid_threshold >= 0.0_r && hybrid_threshold <= 1.0_r) || !(hybrid_floor >= 0.0_r && hybrid_floor <= 1.0_r)) {
         throw InputError("numerics.hybrid: sensor_threshold and upwind_floor must be in [0, 1].");
     }
+    init_error_control();
 }
 
 void Solver::init_axisymmetric_weights() {
@@ -1456,7 +1466,12 @@ void Solver::print_setup() const {
                                              real(double(hybrid_floor)) + ")");
     }
     logging::item("Time integrator", TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()));
-    logging::item("Time step", use_cfl ? "CFL " + real(double(cfl)) : "dt " + real(double(dt_fixed)) + " (fixed)");
+    if (step_controller.enabled()) {
+        logging::item("Time step", step_controller.summary() + "; first step " +
+                                       (use_cfl ? "CFL " + real(double(cfl)) : "dt " + real(double(dt_fixed))));
+    } else {
+        logging::item("Time step", use_cfl ? "CFL " + real(double(cfl)) : "dt " + real(double(dt_fixed)) + " (fixed)");
+    }
     std::string stop;
     if (n_steps > 0) stop += "n_steps = " + logging::count(n_steps);
     if (t_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("t = ") + real(double(t_stop));
@@ -1534,6 +1549,9 @@ void Solver::print_summary(const std::string & stop) const {
                                         duration(t_wall_stepping / static_cast<double>(steps)) + " per step over " +
                                         logging::count(steps) + " steps");
     }
+    if (step_controller.enabled()) {
+        logging::item("Rejected steps", logging::count(n_rejected) + " (error control)");
+    }
     if (!data_writers.empty()) {
         double writing = 0.0;
         uint64_t bytes = 0;
@@ -1603,7 +1621,10 @@ void Solver::write_data(bool force) {
     }
     update_primitives();
     copy_device_to_host();
-    const RestartAttributes attributes = statistics.attributes();
+    RestartAttributes attributes = statistics.attributes();
+    if (step_controller.enabled()) {
+        for (const auto & a : step_controller.attributes()) attributes.push_back(a);
+    }
     const RestartFaces faces = characteristic_restart_faces();
     for (auto & writer : data_writers) {
         writer->write(step, t, force, attributes, faces);
@@ -1641,6 +1662,12 @@ void Solver::take_step() {
         cells_frozen = true;
     }
     time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
+    for (int tries = 1; step_controller.enabled() && !accept_controlled_step(); tries++) {
+        n_rejected++;
+        check_rejections(tries);
+        calc_dt();
+        time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
+    }
     if (double_flux) {
         cells_frozen = false;
         reset_energy();
@@ -1700,6 +1727,11 @@ void Solver::calc_dt() {
     update_boundary_states(t);
     const rtype dt_cfl1 = calc_dt_cfl1();
     dt = use_cfl ? cfl * dt_cfl1 : dt_fixed;
+    if (step_controller.enabled()) {
+        // The first step takes the cfl or dt of [run], later ones the controller's
+        const rtype dt_next = step_controller.dt_next();
+        if (dt_next > 0.0_r) dt = dt_next;
+    }
     dt = std::min(dt, sponge_dt_max);
     // Land exactly on t_stop and on time-based output times
     const rtype t_target = next_target_time();

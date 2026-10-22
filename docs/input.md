@@ -470,11 +470,21 @@ Strength and reference are evaluated once at cell centroids.
 |---|---|
 | `preset` | `robust`, `accurate`, `les` or `reacting`: a validated combination of `face_reconstruction` (`type` and its `order` or `limiter`), `riemann_solver`, `convective_flux`, `time_integrator` and `[run] cfl`, each used only where the input does not set that key (a reconstruction option only when the reconstruction type is the preset's; `cfl` only when `[run]` sets neither `cfl` nor `dt`). What each chooses and why: [Numerics: presets](guide/numerics.md#presets). Default: none (the defaults below) |
 | `riemann_solver` | `Rusanov`, `HLL`, `HLLC` (default), `Roe`, or `RHLL` (rotated hybrid HLL-Roe, carbuncle-free except at shocks at rest on cell faces; see [numerics](numerics/overview.md#stationary-shocks-on-cell-faces)) |
-| `time_integrator` | `FE`, `SSPRK3` (default) or `RK4` |
+| `time_integrator` | `FE`, `SSPRK3` (default), `RK4`, `SSPRK54` (five-stage fourth-order SSP, low storage), `CK45` (Carpenter-Kennedy five-stage fourth-order, 2N storage) or `RDPK3Sp35` (five-stage third order with an embedded error estimate, for `[numerics.error_control]`). See [time integrators](numerics/overview.md#time-integrators) for their stability limits and cost |
 | `check_nan` | Stop if the solution becomes non-finite (default `false`) |
 | `double_flux` | (gas mixtures) `true` for the double-flux scheme: each cell's energy is updated with its own `cp / cv` and energy offset frozen over the time step on both sides of its faces, and reset to the true equation of state after the step, so pressure and velocity stay exactly uniform across contacts between different gases. Energy is then not exactly conserved (about 0.2% over a multicomponent shock tube). Default `false` |
 | `low_mach_cutoff` | Low-Mach correction of the convective flux: the velocity jump across each interior face is scaled by `z = min(1, max(M_L, M_R, low_mach_cutoff))` before the Riemann solver, so that upwind dissipation scales with the flow speed rather than the sound speed. Default 0.1; 1 disables it. See [`numerics/overview.md`](numerics/overview.md) |
 | `convective_flux` | `riemann` (default): the Riemann solver at every face; `hybrid`: the kinetic-energy-preserving central flux of Kuya, Totani & Kawai (2018) on the same reconstructed states, blended into the Riemann solver where a shock sensor fires, `F = F_KEEP + phi (F_Riemann - F_KEEP)`. For large-eddy simulation: the central flux adds no dissipation, so the SGS model does the work (see `[integrals] budget`). `phi` is the larger of the face's two cells': 1 where the Ducros sensor restricted to compressions, `(div u)^2 / ((div u)^2 + |omega|^2)` with `div u < 0`, exceeds `sensor_threshold`, else `upwind_floor`. Boundary faces other than walls and symmetry planes use the Riemann solver. Species stay upwinded with the blended mass flux. Contacts and expansions are central: on Sod's problem the density error is about 1.8 times the Riemann solver's, with a 0.1% overshoot at the contact |
+
+### `[numerics.error_control]`
+
+Error-based time steps ([Ranocha et al. 2022](references.md#ranocha-2022)), with `time_integrator = "RDPK3Sp35"`. The first step takes `[run] cfl` or `dt`; later steps are sized by a PID controller on the embedded error estimate, and a step whose error is too large is rejected and retried with a smaller one. The CFL number is then an output (`CFL` variable, progress `dt`), not an input. Not available with `[chemistry]` or `double_flux`.
+
+| Key | Description |
+|---|---|
+| `tolerance` | Absolute and relative tolerance: a step's error is the largest over cells and conservative variables (and partial densities) of `abs(e) / (abs_tolerance + rel_tolerance max(abs(U^n), abs(U^n+1)))`, which the controller keeps near 1 |
+| `abs_tolerance`, `rel_tolerance` | Override `tolerance` for either part |
+| `beta` | PID coefficients `[b1, b2, b3]`, default `[0.64, -0.31, 0.04]` (Ranocha et al.'s for RDPK3Sp35) |
 
 ### `[numerics.hybrid]`
 
