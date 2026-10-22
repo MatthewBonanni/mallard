@@ -3,7 +3,7 @@ name: CI
 # Pull requests don't run CI on every push: when a PR is ready to land, run
 #   gh workflow run ci.yml --ref <branch>
 # The run sets the commit status `CI` on the branch's head commit (pending, then success
-# or failure, linking to the run) and, when it ends, one status per job linking to its
+# or failure, linking to the run) and a live status per job, `CI / <job>`, linking to its
 # log; main requires `CI` to merge, so a new push needs a new run. main runs on every push.
 on:
   push:
@@ -282,9 +282,44 @@ jobs:
           key: ccache-cuda-${{ matrix.dim }}-${{ github.sha }}
 
 
+  # Mirrors every job of this run as a commit status `CI / <job>` linking to its log,
+  # updated as it is queued, runs and finishes, so the PR shows each job live.
+  statuses:
+    name: CI statuses
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          declare -A posted
+          while :; do
+            jobs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
+              --jq '.jobs[] | select(.name != "CI statuses")
+                    | [.name, .status, (.conclusion // ""), .html_url] | @tsv') || { sleep 30; continue; }
+            open=0; seen=0
+            while IFS=$'\t' read -r name status conclusion url; do
+              case "$name" in ""|*'${{'*) continue ;; esac
+              if [ "$name" = "CI result" ]; then seen=1; [ "$status" = completed ] || open=1; continue; fi
+              case "$status/$conclusion" in
+                completed/success) s=success; d=Passed ;;
+                completed/skipped) s=success; d=Skipped ;;
+                completed/failure) s=failure; d=Failed ;;
+                completed/*) s=error; d="$conclusion" ;;
+                in_progress/*) s=pending; d=Running; open=1 ;;
+                *) s=pending; d=Queued; open=1 ;;
+              esac
+              [ "${posted[$name]:-}" = "$s/$d" ] && continue
+              gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=$s \
+                -f context="CI / $name" -f description="$d" -f target_url="$url" < /dev/null > /dev/null \
+                && posted[$name]="$s/$d"
+            done <<< "$jobs"
+            [ $seen = 1 ] && [ $open = 0 ] && break
+            sleep 30
+          done
+
   # Sets the commit status `CI` that main requires: success when every job passed or was
-  # skipped for a reason (CUDA builds without device code), failure otherwise. Each job
-  # also gets its own status, `CI / <job>`, linking to its log.
+  # skipped for a reason (CUDA builds without device code), failure otherwise.
   result:
     name: CI result
     if: always()
@@ -295,18 +330,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
-            --jq '.jobs[] | select(.name != "CI result") | [.name, (.conclusion // "cancelled"), .html_url] | @tsv' |
-          while IFS=$'\t' read -r name conclusion url; do
-            case "$conclusion" in
-              success) s=success; d=Passed ;;
-              skipped) s=success; d=Skipped ;;
-              failure) s=failure; d=Failed ;;
-              *) s=error; d="$conclusion" ;;
-            esac
-            gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=$s \
-              -f context="CI / $name" -f description="$d" -f target_url="$url" < /dev/null > /dev/null
-          done
           state=success
           for r in $RESULTS; do
             case "$r" in success|skipped) ;; *) state=failure ;; esac
