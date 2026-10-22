@@ -14,6 +14,8 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <functional>
 #include <sstream>
@@ -24,6 +26,7 @@
 #include "periodic_fixtures.h"
 #include "solver.h"
 #include "test_fixtures.h"
+#include "verification.h"
 
 namespace {
 
@@ -146,24 +149,38 @@ namespace {
 
 /**
  * @brief Max density error after advecting a periodic density wave for a
- *        quarter period with RK4, with dt ~ h^(order / 4).
+ *        quarter period with RK4, with dt ~ h^(order / 4). Along a direction
+ *        that the mesh type cannot make periodic, the wave is uniform and
+ *        bounded by symmetry walls.
  */
-double advection_error(const std::string & recon, int order, uint32_t n) {
+double advection_error(const std::string & mesh, const std::string & dirs, const std::string & recon, int order,
+                       uint32_t n) {
     Case c;
+    c.mesh = mesh;
+    c.dirs = dirs;
     c.n = {n, n, n};
     c.recon = recon;
-    c.extra_recon = recon == "TENO" ? "order = " + std::to_string(order) + "\n" : "limiter = \"none\"\n";
+    c.extra_recon = recon == "TENO" ? "order = " + std::to_string(order) + "\n" : recon == "MUSCL" ? "limiter = \"none\"\n" : "";
     c.integrator = "RK4";
+    const char * zones[3][2] = {{"left", "right"}, {"bottom", "top"}, {"back", "front"}};
+    std::array<double, 3> velocity = {1.0, 0.5, 0.25};
+    for (size_t d = 0; d < 3; d++) {
+        if (dirs.find("xyz"[d]) != std::string::npos) continue;
+        velocity[d] = 0.0;
+        for (const char * zone : zones[d]) c.boundaries += "[[boundaries]]\nname = \"" + std::string(zone) + "\"\ntype = \"symmetry\"\n";
+    }
     const double T = 0.25;
     const uint32_t steps = static_cast<uint32_t>(std::ceil(T / (0.25 * std::pow(1.0 / n, std::max(1.0, order / 4.0)))));
     c.run = "t_stop = " + std::to_string(T) + "\ndt = " + std::to_string(T / steps) + "\n";
-    auto wave = [](double t) {
-        return [t](double x, double y, double z, double * W) {
-            W[0] = 1.0 + 0.2 * std::sin(2.0 * M_PI * (x - t)) * std::sin(2.0 * M_PI * (y - 0.5 * t)) *
-                             std::cos(2.0 * M_PI * (z - 0.25 * t));
-            W[1] = 1.0;
-            W[2] = 0.5;
-            W[3] = 0.25;
+    auto wave = [velocity](double t) {
+        return [t, velocity](double x, double y, double z, double * W) {
+            const double fx = std::sin(2.0 * M_PI * (x - velocity[0] * t));
+            const double fy = velocity[1] != 0.0 ? std::sin(2.0 * M_PI * (y - velocity[1] * t)) : 1.0;
+            const double fz = velocity[2] != 0.0 ? std::cos(2.0 * M_PI * (z - velocity[2] * t)) : 1.0;
+            W[0] = 1.0 + 0.2 * fx * fy * fz;
+            W[1] = velocity[0];
+            W[2] = velocity[1];
+            W[3] = velocity[2];
             W[4] = 1.0;
         };
     };
@@ -182,20 +199,38 @@ double advection_error(const std::string & recon, int order, uint32_t n) {
     return err;
 }
 
-class PeriodicAdvection3D : public ::testing::TestWithParam<std::string> {};
+using AdvectionParam = std::tuple<std::string, std::string, uint32_t>;  // mesh type, FO, MUSCL or TENO<order>, coarse n
+class PeriodicAdvection3D : public ::testing::TestWithParam<AdvectionParam> {};
+
+/** @brief The directions in which each generated mesh type can be periodic. */
+std::string periodic_directions(const std::string & mesh) {
+    if (mesh == "cartesian_prism") return "xz";
+    if (mesh == "cartesian_pyramid") return "xy";
+    return "xyz";
+}
 
 } // namespace
 
-TEST_P(PeriodicAdvection3D, SmoothWaveConvergesAtDesignOrderOnHexahedra) {
-    const std::string scheme = GetParam();
-    const std::string recon = scheme.rfind("TENO", 0) == 0 ? "TENO" : "MUSCL";
-    const int order = recon == "TENO" ? std::stoi(scheme.substr(4)) : 2;
-    const double e1 = advection_error(recon, order, 8);
-    const double e2 = advection_error(recon, order, 16);
-    EXPECT_GT(std::log2(e1 / e2), order - 0.25) << e1 << " " << e2;
+TEST_P(PeriodicAdvection3D, SmoothWaveConvergesAtDesignOrder) {
+    const auto [mesh, scheme, n] = GetParam();
+    const std::string recon = scheme.rfind("TENO", 0) == 0 ? "TENO" : scheme;
+    const int order = recon == "TENO" ? std::stoi(scheme.substr(4)) : recon == "MUSCL" ? 2 : 1;
+    const std::string dirs = periodic_directions(mesh);
+    verification::expect_order({"advection", scheme, verification::cells_of(mesh), "max density error",
+                                {double(n), double(2 * n)},
+                                {advection_error(mesh, dirs, recon, order, n), advection_error(mesh, dirs, recon, order, 2 * n)},
+                                double(order), order - 0.25});
 }
 
-INSTANTIATE_TEST_SUITE_P(Periodic, PeriodicAdvection3D, ::testing::Values("MUSCL", "TENO4"));
+INSTANTIATE_TEST_SUITE_P(Periodic, PeriodicAdvection3D,
+    ::testing::Values(AdvectionParam{"cartesian", "MUSCL", 8}, AdvectionParam{"cartesian", "TENO4", 8}));
+
+// The rest of the verification manual's matrix of reconstructions and cell
+// types: run by tools/docs/verification.py, too slow for every CI run
+INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, PeriodicAdvection3D,
+    ::testing::Combine(::testing::Values("cartesian", "cartesian_tet", "cartesian_prism", "cartesian_pyramid",
+                                         "cartesian_mixed"),
+                       ::testing::Values("FO", "MUSCL", "TENO3", "TENO4", "TENO5", "TENO6"), ::testing::Values(8u)));
 
 namespace {
 

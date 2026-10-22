@@ -5,8 +5,9 @@ gas or a reacting mixture, with a cell-centered finite volume method on
 unstructured meshes: triangles and quadrilaterals in 2D (planar or
 axisymmetric), tetrahedra, hexahedra, prisms and pyramids in 3D. This page
 describes the methods and measures them; the [theory manual](../theory/index.md)
-gives every equation as implemented, and the [numerics guide](../guide/numerics.md)
-is about choosing among them.
+gives every equation as implemented, the [verification manual](../verification/index.md)
+the observed orders of accuracy of each scheme on each cell type, and the
+[numerics guide](../guide/numerics.md) is about choosing among them.
 
 ## Discretization
 

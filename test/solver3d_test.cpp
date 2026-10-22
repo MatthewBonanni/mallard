@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <map>
@@ -25,6 +26,7 @@
 #include "test_fixtures.h"
 #include "exact_riemann.h"
 #include "solver.h"
+#include "verification.h"
 
 namespace {
 
@@ -381,6 +383,45 @@ TEST_P(Couette3D, HeatFluxWallSetsTemperatureGradient) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Solver3D, Couette3D, ::testing::Values("cartesian", "cartesian_tet"));
+
+namespace {
+
+class ForcedChannel3D : public ::testing::TestWithParam<std::string> {};
+
+} // namespace
+
+TEST_P(ForcedChannel3D, SteadyProfileConvergesAtSecondOrder) {
+    // u = 0.05 (z - z^3) between walls at rest, driven by the body force
+    // -mu u'' = 0.06 z, in a column of 2 x 2 cells with transmissive sides
+    auto error = [&](uint32_t nz) {
+        Case3D c;
+        c.mesh = GetParam();
+        c.n[0] = c.n[1] = 2;
+        c.n[2] = nz;
+        c.L[0] = c.L[1] = 2.0 / nz;
+        c.recon = "MUSCL";
+        c.recon_options = "limiter = \"venkatakrishnan\"\n";
+        c.bc[4] = c.bc[5] = "type = \"wall_isothermal\"\nT = 1.0\n";
+        c.init = "type = \"analytical\"\nrho = \"1.0\"\nu = [\"0.05 * (z - z^3)\", \"0.0\", \"0.0\"]\np = \"1.0\"\n";
+        c.run = "t_stop = 3.0\ncfl = 0.4\n";
+        c.physics = "type = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 0.2\nPr = 0.72\n";
+        c.extra = "[source]\nrhou = [\"0.06 * z\", \"0.0\", \"0.0\"]\n";
+        auto solver = run_case(c);
+        auto m = solver->get_mesh();
+        double err = 0.0;
+        for (uint32_t i = 0; i < m->n_cells; i++) {
+            const double z = double(m->h_cell_coords(i, 2));
+            err = std::max(err, std::abs(double(solver->h_primitives(i, 0)) - 0.05 * (z - z * z * z)));
+        }
+        return err;
+    };
+    verification::expect_order({"viscous", "Forced channel, transmissive ends", verification::cells_of(GetParam()),
+                                "max velocity error", {8, 16}, {error(8), error(16)}, 2.0, 1.8});
+}
+
+// Part of the verification manual's matrix: run by tools/docs/verification.py
+INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, ForcedChannel3D,
+    ::testing::Values("cartesian", "cartesian_tet", "cartesian_prism", "cartesian_pyramid", "cartesian_mixed"));
 
 TEST(Solver3DValidation, FlowStatisticsOfALinearVelocityField) {
     // u = (x + 2y, 3z, 5x): div u = 1 and omega = (-3, -5, -2), so the

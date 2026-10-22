@@ -20,6 +20,7 @@
 #include <tuple>
 
 #include "test_fixtures.h"
+#include "verification.h"
 #include "gmsh_fixtures.h"
 #include "face_reconstruction.h"
 #include "physics.h"
@@ -156,12 +157,13 @@ TEST_P(TENO3DOrder, SmoothReconstructionConvergesAtDesignOrder) {
     // Max error at face quadrature points over all faces, with mirrored
     // stencils at the symmetry walls
     const auto [mesh_type, order, n, mode] = GetParam();
-    const double e1 = reconstruction_error(mesh_type, n, order, 0.0, mode);
-    const double e2 = reconstruction_error(mesh_type, 2 * n, order, 0.0, mode);
-    const double rate = std::log2(e1 / e2);
-    std::cout << mesh_type << " order " << order << ": max errors " << e1 << ", " << e2 << ", rate " << rate
-              << std::endl;
-    EXPECT_GT(rate, order - 0.5);
+    const bool smooth = std::string(mode) == SMOOTH;
+    verification::expect_order({"reconstruction", "TENO" + std::to_string(order) + (smooth ? "" : ", troubled"),
+                                verification::cells_of(mesh_type), "max face-value error",
+                                {double(n), double(2 * n)},
+                                {reconstruction_error(mesh_type, n, order, 0.0, mode),
+                                 reconstruction_error(mesh_type, 2 * n, order, 0.0, mode)},
+                                double(order), order - 0.5});
 }
 
 INSTANTIATE_TEST_SUITE_P(TENO, TENO3DOrder,
@@ -170,6 +172,16 @@ INSTANTIATE_TEST_SUITE_P(TENO, TENO3DOrder,
                       OrderParam{"cartesian_tet", 4, 4, SMOOTH}, OrderParam{"cartesian_tet", 5, 4, SMOOTH},
                       OrderParam{"cartesian", 5, 6, TROUBLED},
                       OrderParam{"cartesian_tet", 4, 4, TROUBLED}));
+
+// The rest of the verification manual's matrix: run by tools/docs/verification.py
+INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, TENO3DOrder,
+    ::testing::Values(OrderParam{"cartesian", 6, 6, SMOOTH}, OrderParam{"cartesian_tet", 6, 4, SMOOTH},
+                      OrderParam{"cartesian_prism", 3, 4, SMOOTH}, OrderParam{"cartesian_prism", 4, 4, SMOOTH},
+                      OrderParam{"cartesian_prism", 5, 4, SMOOTH}, OrderParam{"cartesian_prism", 6, 4, SMOOTH},
+                      OrderParam{"cartesian_pyramid", 3, 4, SMOOTH}, OrderParam{"cartesian_pyramid", 4, 4, SMOOTH},
+                      OrderParam{"cartesian_pyramid", 5, 4, SMOOTH}, OrderParam{"cartesian_pyramid", 6, 4, SMOOTH},
+                      OrderParam{"cartesian_mixed", 3, 6, SMOOTH}, OrderParam{"cartesian_mixed", 4, 6, SMOOTH},
+                      OrderParam{"cartesian_mixed", 5, 6, SMOOTH}, OrderParam{"cartesian_mixed", 6, 6, SMOOTH}));
 
 namespace {
 
@@ -247,9 +259,8 @@ TEST(TENO3DSolver, AdvectedPulseConvergesAndBeatsMUSCL) {
     // TENO5 with SSPRK3 (dt ~ h): third order overall once resolved
     const double t1 = advection_error("cartesian", "TENO", 12), t2 = advection_error("cartesian", "TENO", 24);
     const double m2 = advection_error("cartesian", "MUSCL", 24);
-    std::cout << "advection L1: TENO5 " << t1 << " -> " << t2 << " (rate " << std::log2(t1 / t2) << "), MUSCL " << m2
-              << std::endl;
-    EXPECT_GT(std::log2(t1 / t2), 3.0);
+    verification::expect_order({"advection", "TENO5, SSPRK3", "hexahedra", "L1 density error, pulse", {12, 24},
+                                {t1, t2}, 3.0, 3.0});
     EXPECT_LT(t2, 0.25 * m2);
 }
 

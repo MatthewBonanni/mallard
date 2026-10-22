@@ -28,6 +28,7 @@
 
 #include "solver.h"
 #include "test_fixtures.h"
+#include "verification.h"
 
 namespace {
 
@@ -539,8 +540,14 @@ TEST_P(MixtureAdvectionOrder, SmoothCompositionWaveConvergesAtDesignOrder) {
     const OrderCase & c = GetParam();
     const std::array<double, 2> coarse = advection_errors(c.mesh, c.n, c.reconstruction);
     const std::array<double, 2> fine = advection_errors(c.mesh, 2 * c.n, c.reconstruction);
-    EXPECT_GT(std::log2(coarse[0] / fine[0]), c.order) << "rho: " << coarse[0] << " -> " << fine[0];
-    EXPECT_GT(std::log2(coarse[1] / fine[1]), c.order) << "rho Y_H2: " << coarse[1] << " -> " << fine[1];
+    const size_t teno = c.reconstruction.find("order = ");
+    const std::string method = teno == std::string::npos ? "MUSCL" : "TENO" + c.reconstruction.substr(teno + 8, 1);
+    const double design = teno == std::string::npos ? 2.0 : std::stod(c.reconstruction.substr(teno + 8, 1));
+    const char * names[2] = {"L1 density error", "L1 H2 partial density error"};
+    for (size_t j = 0; j < 2; j++) {
+        verification::expect_order({"mixtures", method, verification::cells_of(c.mesh), names[j],
+                                    {double(c.n), double(2 * c.n)}, {coarse[j], fine[j]}, design, c.order});
+    }
 }
 
 // TENO5 in 2D only: on the coarse 3D meshes a test can afford, its large stencils

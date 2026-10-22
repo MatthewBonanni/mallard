@@ -5,7 +5,9 @@ implemented on `main`: every model and scheme of the solver, with the
 formulas, constants and defaults of the source code it cites. The
 [user guide](../guide/first_simulation.md) explains how to use them;
 [Numerical methods](../numerics/overview.md) collects measured stability
-limits, accuracy studies and known limitations; the sources are in
+limits, accuracy studies and known limitations; the
+[verification manual](../verification/index.md) measures the order of
+accuracy of every method, from the convergence tests; the sources are in
 [References](../references.md).
 
 ## Chapters
