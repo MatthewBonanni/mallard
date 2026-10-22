@@ -173,10 +173,11 @@ TEST(FormatCompatTest, RestartFilesOfANewerFormatAreRejectedClearly) {
 
 TEST(FormatCompatTest, RestartFilesOfAnotherBuildNameTheDifference) {
     const std::string error = error_of([] { read_restart((FORMATS / "v0.8.0" / "gas_000000.restart").string()); });
-    if constexpr (N_DIM != 2) {
-        EXPECT_NE(error.find("holds a 2D run"), std::string::npos) << error;
-    } else if constexpr (!std::is_same_v<rtype, double>) {
+    // The precision is checked first
+    if constexpr (!std::is_same_v<rtype, double>) {
         EXPECT_NE(error.find("different floating-point precision"), std::string::npos) << error;
+    } else if constexpr (N_DIM != 2) {
+        EXPECT_NE(error.find("holds a 2D run"), std::string::npos) << error;
     } else {
         EXPECT_EQ(error, "");
     }
