@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-#include <toml.hpp>
+#include "input.h"
 
 #include "common_typedef.h"
 #include "mesh.h"
@@ -75,7 +75,7 @@ struct MeshBlock {
 rtype stretched_coordinate(uint32_t i, uint32_t n, rtype L, rtype beta);
 
 /** @brief [mesh] stretching: the tanh factor of each direction, 0 (uniform) if not given. */
-Stretching mesh_stretching(const toml::value & input);
+Stretching mesh_stretching(const Input & input);
 
 /**
  * @brief Part r of p of a generated 2D mesh (cartesian, cartesian_tri or
@@ -104,7 +104,7 @@ std::array<uint64_t, 2> cartesian_3d_size(uint32_t nx, uint32_t ny, uint32_t nz,
  *        counterclockwise in 2D; {axis, angle} in 3D) and translation t
  *        (`translate`). The identity if absent; an error for generated meshes.
  */
-MeshTransform mesh_transform(const toml::value & input);
+MeshTransform mesh_transform(const Input & input);
 
 /** @brief Map a block's node coordinates (and high-order face nodes) by transform. */
 void transform_block(MeshBlock & block, const MeshTransform & transform);
@@ -122,7 +122,7 @@ inline uint64_t block_begin(uint64_t n, int r, int p) { return n * uint64_t(r) /
  *        and nodes exactly as Mesh::init. Other mesh files are read whole by
  *        every rank, so large meshes should be converted to HDF5 first.
  */
-MeshBlock read_mesh_block(const toml::value & input);
+MeshBlock read_mesh_block(const Input & input);
 
 /**
  * @brief This rank's block of a mesh file other than HDF5 (see

@@ -59,7 +59,8 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - The whole time step as one CUDA graph; optional NCCL halo exchange; TENO-E setup on the GPU
 
 **Input, output and diagnostics**
-- TOML input; initial conditions, boundary states, sources and sponges as analytical expressions
+- TOML input; initial conditions, boundary states, sources and sponges as analytical expressions; misspelled or unused keys are errors, with suggestions
+- Pre-flight check (`Mallard --check`): mesh quality, stable time step, memory per GPU and cost estimate before a run
 - Conservative, high-order remap of a restart onto another mesh (any cell type, resolution or rank count): exact cell intersections, integrals kept to rounding
 - VTU (ParaView) or parallel HDF5 with XDMF; surface output of boundary zones
 - Running means and covariances, point and line probes, domain integrals (kinetic energy, enstrophy, ...), wall forces
@@ -124,6 +125,8 @@ cd examples/riemann_2d
 ```
 
 or start a case of your own from one of the examples: `Mallard new --list` shows the templates, and `Mallard new cylinder` creates a directory with the input, mesh, run and plot scripts ([First simulation](docs/guide/first_simulation.md)). See the [tutorials](docs/tutorials/index.md) for cases taken from geometry and mesh to the comparison with reference data, [`examples/`](examples) for complete input files, the [user guide](docs/guide/input_files.md) for each topic, and [`docs/input.md`](docs/input.md) for every input option.
+
+Before a long run, `Mallard --check input.toml [--ranks N] [--throughput CELLS_PER_S]` runs the setup without time stepping and reports misspelled or unused keys, boundary zones without a condition, mesh quality with the worst cells, the stable time step and where it is set, memory per rank and the cost per unit simulated time ([details](docs/guide/input_files.md#checking-an-input)).
 
 ## Testing
 
