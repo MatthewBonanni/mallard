@@ -62,6 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       changed: ${{ steps.check.outputs.changed }}
+      code: ${{ steps.check.outputs.code }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -74,13 +75,20 @@ jobs:
           elif [ "$GITHUB_REF_NAME" = main ]; then base=HEAD^
           else base=$(git merge-base origin/main HEAD); fi
           echo "changed=$(tools/device_changes.sh "$base")" >> "$GITHUB_OUTPUT"
+          # Documentation alone needs none of the build jobs
+          if git diff --name-only "$base" HEAD | grep -qvE '^docs/|\.md$|^CITATION\.cff$|^LICENSE$'; then
+            echo code=true >> "$GITHUB_OUTPUT"
+          else
+            echo code=false >> "$GITHUB_OUTPUT"
+          fi
 
   # Branches run the full 2D suite (OpenMP, with CGNS), the full 3D suite and the
   # multi-rank tests, the full single-precision suites in 2D and 3D (3D with CGNS), and a
   # Clang build (no tests) for the warnings GCC misses. main also runs the
   # serial-backend and non-MPI 3D builds.
   matrix:
-    needs: changelog
+    needs: [changelog, device]
+    if: needs.device.outputs.code == 'true'
     runs-on: ubuntu-latest
     outputs:
       backends: ${{ steps.pick.outputs.backends }}
@@ -177,7 +185,8 @@ jobs:
   # The tutorials (tutorials/) at reduced size: Gmsh meshes, runs on two MPI
   # ranks and their post-processing scripts, so they keep working
   tutorials:
-    needs: changelog
+    needs: [changelog, device]
+    if: needs.device.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
