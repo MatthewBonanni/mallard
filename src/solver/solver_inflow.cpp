@@ -13,7 +13,7 @@
 
 #include <algorithm>
 
-void Solver::init_inlets(const std::vector<toml::value> & input_boundaries,
+void Solver::init_inlets(const std::vector<Input> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets) {
     inflows.clear();
     t_inflow = -1.0;
@@ -21,7 +21,7 @@ void Solver::init_inlets(const std::vector<toml::value> & input_boundaries,
     auto h_target = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.char_target);
     bool profiled = false;
     for (const auto & [i_bc, faces] : inlets) {
-        const toml::value & bound = input_boundaries[i_bc];
+        const Input & bound = input_boundaries[i_bc];
         const std::string name = toml::find<std::string>(bound, "name");
         const std::string where = "boundaries[name = \"" + name + "\"]";
         const InletProfile profile(bound, where);
