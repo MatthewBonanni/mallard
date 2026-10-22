@@ -183,6 +183,21 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: `time_integrator = "SSPRK3"` (the default; `src/numerics/time_integrator.cpp`).
 - <a id="kutta-1901"></a>W. Kutta, Beitrag zur näherungsweisen Integration totaler Differentialgleichungen, *Z. Math. Phys.* 46, 435–453 (1901).
   Used in: `time_integrator = "RK4"`, the classical fourth-order Runge–Kutta method.
+- <a id="kraaijevanger-1991"></a>J. F. B. M. Kraaijevanger, Contractivity of Runge–Kutta methods, *BIT* 31, 482–528 (1991). [doi:10.1007/BF01933264](https://doi.org/10.1007/BF01933264)
+- <a id="spiteri-ruuth-2002"></a>R. J. Spiteri and S. J. Ruuth, A new class of optimal high-order strong-stability-preserving time discretization methods, *SIAM J. Numer. Anal.* 40, 469–491 (2002). [doi:10.1137/S0036142901389025](https://doi.org/10.1137/S0036142901389025)
+  Used in: `time_integrator = "SSPRK54"`, the five-stage fourth-order SSP method (SSP coefficient 1.508), from Spiteri and Ruuth's Shu–Osher form, re-solved to 50 digits.
+- <a id="ketcheson-2008"></a>D. I. Ketcheson, Highly efficient strong stability-preserving Runge–Kutta methods with low-storage implementations, *SIAM J. Sci. Comput.* 30, 2113–2136 (2008). [doi:10.1137/07070485X](https://doi.org/10.1137/07070485X)
+- <a id="ketcheson-2010"></a>D. I. Ketcheson, Runge–Kutta methods with minimum storage implementations, *J. Comput. Phys.* 229, 1763–1773 (2010). [doi:10.1016/j.jcp.2009.11.006](https://doi.org/10.1016/j.jcp.2009.11.006)
+  Used in: the 3S* low-storage form of `SSPRK54` and `RDPK3Sp35` (`LowStorage3S` in `src/numerics/time_integrator.cpp`), here written for the deviations from U<sup>n</sup>.
+- <a id="carpenter-kennedy-1994"></a>M. H. Carpenter and C. A. Kennedy, Fourth-order 2N-storage Runge–Kutta schemes, NASA TM-109112 (1994). [NTRS 19940028444](https://ntrs.nasa.gov/citations/19940028444)
+  Used in: `time_integrator = "CK45"` (solution 3, five stages, fourth order).
+- <a id="ranocha-2022"></a>H. Ranocha, L. Dalcin, M. Parsani and D. I. Ketcheson, Optimized Runge–Kutta methods with automatic step size control for compressible computational fluid dynamics, *Commun. Appl. Math. Comput.* 4, 1191–1228 (2022). [doi:10.1007/s42967-021-00159-w](https://doi.org/10.1007/s42967-021-00159-w)
+  Used in: `time_integrator = "RDPK3Sp35"` and `[numerics.error_control]`, its PID controller and default coefficients (`src/numerics/step_control.cpp`).
+- <a id="kennedy-carpenter-lewis-2000"></a>C. A. Kennedy, M. H. Carpenter and R. M. Lewis, Low-storage, explicit Runge–Kutta schemes for the compressible Navier–Stokes equations, *Appl. Numer. Math.* 35, 177–219 (2000). [doi:10.1016/S0168-9274(99)00141-5](https://doi.org/10.1016/S0168-9274%2899%2900141-5)
+- <a id="soderlind-wang-2006"></a>G. Söderlind and L. Wang, Adaptive time-stepping and computational stability, *J. Comput. Appl. Math.* 185, 225–243 (2006). [doi:10.1016/j.cam.2005.03.008](https://doi.org/10.1016/j.cam.2005.03.008)
+  Used in: the step-ratio limiter `1 + atan(x - 1)` of the error controller.
+- <a id="ranocha-2020"></a>H. Ranocha, M. Sayyari, L. Dalcin, M. Parsani and D. I. Ketcheson, Relaxation Runge–Kutta methods: fully discrete explicit entropy-stable schemes for the compressible Euler and Navier–Stokes equations, *SIAM J. Sci. Comput.* 42, A612–A638 (2020). [doi:10.1137/19M1263480](https://doi.org/10.1137/19M1263480)
+  Not implemented yet: relaxation needs an entropy-stable spatial discretization (#288) to make the step entropy-conservative or -dissipative ([time step](numerics/overview.md#time-integrators)).
 - <a id="blazek-2015"></a>J. Blazek, *Computational Fluid Dynamics: Principles and Applications*, 3rd ed., Butterworth-Heinemann (2015). [doi:10.1016/C2013-0-19038-1](https://doi.org/10.1016/C2013-0-19038-1)
   Used in: the local time step from convective and viscous spectral radii (`Solver::calc_dt_cfl1`), and the characteristic far-field condition (`type = "farfield"`), which takes the outgoing Riemann invariant from the interior and the incoming one from the free stream.
 
