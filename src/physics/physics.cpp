@@ -25,7 +25,7 @@ Euler Euler::from_reference(rtype gamma, rtype p_ref, rtype T_ref, rtype rho_ref
     return euler;
 }
 
-Euler Euler::from_input(const toml::value & input) {
+Euler Euler::from_input(const Input & input) {
     for (const char * key : {"gamma", "p_ref", "T_ref", "rho_ref"}) {
         if (!input.at("physics").contains(key)) {
             throw std::runtime_error(std::string("Missing ") + key + " for physics: euler.");

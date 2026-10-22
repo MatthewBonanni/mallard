@@ -12,7 +12,6 @@
 #include "solver.h"
 
 #include "input.h"
-#include "input_upgrade.h"
 
 #include <algorithm>
 #include <cmath>
@@ -27,6 +26,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
+#include "common_io.h"
 #include "device_comm.h"
 #include "common.h"
 #include "log.h"
@@ -46,7 +46,7 @@ Solver::~Solver() {
 }
 
 int Solver::init(const std::string & input_file_name) {
-    return init(toml::parse(input_file_name));
+    return init(parse_input(input_file_name));
 }
 
 template <typename F>
@@ -60,13 +60,37 @@ void Solver::timed_phase(const std::string & name, F && f) {
     logging::end_phase(seconds);
 }
 
-int Solver::init(const toml::value & input_in) {
+int Solver::init(const Input & input_in) {
     this->input = input_in;
-    for (const auto & finding : input_upgrade::apply(input)) {
-        logging::warning(input_upgrade::describe(finding) + "; `Mallard upgrade-input` rewrites the input");
+    deprecated_keys = input_upgrade::apply(input);
+    if (!check_only) {
+        for (const auto & finding : deprecated_keys) logging::warning(input_upgrade::advice(finding));
     }
     preset = numerics_preset::apply(input);
+    try {
+        setup_from_input();
+    } catch (const std::exception & e) {
+        std::string misspelled;
+        for (const Diagnostic & key : unused_keys(input)) {
+            if (!key.suggestion.empty()) misspelled += "\n  " + describe(key);
+        }
+        if (misspelled.empty() || check_only) throw;
+        throw InputError(std::string(e.what()) + "\npossibly misspelled:" + misspelled);
+    }
+    if (!check_only) {
+        const std::vector<Diagnostic> unused = unused_keys(input);
+        if (!unused.empty()) {
+            std::string list;
+            for (const Diagnostic & key : unused) list += "\n  " + describe(key);
+            throw InputError("keys that are unknown or unused with these settings (mallard --check lists them all):" +
+                             list);
+        }
+    }
+    print_setup();
+    return 0;
+}
 
+void Solver::setup_from_input() {
     t = 0.0;
     step = 0;
     t_wall_setup = 0.0;
@@ -89,7 +113,8 @@ int Solver::init(const toml::value & input_in) {
     trim_halo();
     describe_partition_surface();
     // The cache describes the local mesh at this halo depth
-    if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) teno->save_cache(static_cast<uint8_t>(halo_layers));
+    auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
+    if (teno && output_files_enabled()) teno->save_cache(static_cast<uint8_t>(halo_layers));
     setup.reset();
     timed_phase("fields and output", [&] {
         allocate_memory();
@@ -104,8 +129,6 @@ int Solver::init(const toml::value & input_in) {
     timed_phase("initial solution", [&] { init_solution(); });
     logging::begin_phase("total");
     logging::end_phase(t_wall_setup);
-    print_setup();
-    return 0;
 }
 
 namespace {
@@ -187,9 +210,9 @@ logging::Items describe_mesh(const Mesh & mesh) {
     };
 }
 
-bool writes_variable(const toml::value & input, const std::string & name) {
+bool writes_variable(const Input & input, const std::string & name) {
     if (!input.contains("write_data")) return false;
-    const auto outputs = toml::find<std::vector<toml::value>>(input, "write_data");
+    const auto outputs = toml::find<std::vector<Input>>(input, "write_data");
     for (const auto & output : outputs) {
         if (!output.contains("variables")) continue;
         const auto variables = toml::find<std::vector<std::string>>(output, "variables");
@@ -202,6 +225,16 @@ bool writes_variable(const toml::value & input, const std::string & name) {
 
 void Solver::init_mesh() {
     const std::string type = toml::find_or<std::string>(input, "mesh", "type", "file");
+    // Read in every run, so that an input runs unchanged on any number of ranks
+    partitioner = toml::find_or<std::string>(input, "parallel", "partitioner", "multijagged");
+    if (partitioner != "graph" && partitioner != "hilbert" && partitioner != "multijagged") {
+        throw InputError("parallel.partitioner = \"" + partitioner + "\" is not one of: graph, hilbert, multijagged.");
+    }
+    const std::string exchange =
+        toml::find_or<std::string>(input, "parallel", "halo_exchange", comm::nccl_available() ? "nccl" : "mpi");
+    if (exchange != "nccl" && exchange != "mpi") {
+        throw InputError("parallel.halo_exchange = \"" + exchange + "\" is not one of: nccl, mpi.");
+    }
     if (!is_distributed()) {
         mesh = std::make_shared<Mesh>();
         mesh->init(input);
@@ -209,8 +242,8 @@ void Solver::init_mesh() {
         if (halo_layers == 0) {
             // A TENO cache records the halo depth its stencils need, which spares
             // the setup pass that would otherwise find it out
-            const toml::value reconstruction =
-                toml::find_or(input, "numerics", "face_reconstruction", toml::value(toml::table{}));
+            const Input reconstruction =
+                toml::find_or(input, "numerics", "face_reconstruction", Input(Input::table_type{}));
             const bool teno = toml::find_or<std::string>(reconstruction, "type", "FO") == "TENO";
             const int cached =
                 comm::allreduce(teno ? int(TENO::cached_halo_layers(reconstruction)) : 0, comm::Op::MAX);
@@ -218,22 +251,12 @@ void Solver::init_mesh() {
         }
         // Partition once; deeper halos (see halo_too_shallow) grow the existing layers
         if (!setup) {
-            partitioner = toml::find_or<std::string>(input, "parallel", "partitioner", "multijagged");
-            if (partitioner != "graph" && partitioner != "hilbert" && partitioner != "multijagged") {
-                throw InputError("parallel.partitioner = \"" + partitioner +
-                                 "\" is not one of: graph, hilbert, multijagged.");
-            }
             setup = std::make_unique<DistributedMesh>(read_mesh_block(input), Mesh::periodic_pairs(input));
             setup->distribute(partitioner == "graph"         ? partition_graph(*setup, comm::size())
                               : partitioner == "multijagged" ? partition_multijagged(*setup, comm::size())
                                                              : partition_hilbert(*setup, comm::size()));
         }
         mesh = setup->build_local_mesh(halo_layers, distribution);
-        const std::string exchange =
-            toml::find_or<std::string>(input, "parallel", "halo_exchange", comm::nccl_available() ? "nccl" : "mpi");
-        if (exchange != "nccl" && exchange != "mpi") {
-            throw InputError("parallel.halo_exchange = \"" + exchange + "\" is not one of: nccl, mpi.");
-        }
         if (exchange == "nccl" && !comm::nccl_available()) {
             throw InputError("parallel.halo_exchange = \"nccl\" needs a build with Mallard_ENABLE_NCCL.");
         }
@@ -312,7 +335,7 @@ void Solver::init_mesh() {
 
 int Solver::base_halo_layers() const {
     const std::string type = toml::find_or<std::string>(
-        toml::find_or(input, "numerics", "face_reconstruction", toml::value(toml::table{})), "type", "FO");
+        toml::find_or(input, "numerics", "face_reconstruction", Input(Input::table_type{})), "type", "FO");
     // Faces between owned and halo-layer-1 cells need the layer-1 reconstruction,
     // which reads one more layer (MUSCL gradients and limiters, viscous gradients)
     const bool viscous = toml::find_or<std::string>(input, "physics", "type", "euler") == "navier_stokes";
@@ -330,6 +353,13 @@ void Solver::trim_halo() {
     std::vector<uint8_t> needed = teno->stencil_cells();
     const int base = base_halo_layers();
     for (uint32_t c = 0; c < mesh->n_cells; c++) needed[c] = needed[c] || distribution.layer[c] <= base;
+    // Wall-model points: their cells and the vertex neighbors their gradients read
+    for (const uint32_t c : wall_model_points.cells) {
+        needed[c] = 1;
+        for (uint32_t k = mesh->h_offsets_cells_of_cell(c); k < mesh->h_offsets_cells_of_cell(c + 1); k++) {
+            needed[mesh->h_cells_of_cell(k)] = 1;
+        }
+    }
     trim_halo_exchange(distribution, needed);
     halo = HaloExchange(distribution, halo.uses_nccl());
 }
@@ -361,13 +391,15 @@ void Solver::describe_partition_surface() {
 bool Solver::halo_too_shallow() {
     if (!is_distributed()) return false;
     auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
-    if (teno == nullptr) return false;
+    if (teno == nullptr && !wall_model_on) return false;
     // Owned and halo-layer-1 cells are reconstructed; their stencil searches must
     // see every layer they visited, so stencils match the serial ones exactly
     int needed = 0;
-    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+    for (uint32_t c = 0; teno && c < mesh->n_cells; c++) {
         if (distribution.layer[c] <= 1) needed = std::max(needed, distribution.layer[c] + teno->gather_depth[c] + 1);
     }
+    // The wall model's exchange and edge points must lie in cells with complete gradient stencils
+    needed = std::max(needed, wall_model_points.needed_layers);
     needed = comm::allreduce(needed, comm::Op::MAX);
     if (needed <= halo_layers) return false;
     halo_layers = needed;
@@ -424,14 +456,46 @@ void Solver::init_physics() {
     init_radiation();
 }
 
+std::string Solver::zones_without_condition(const std::vector<int32_t> & face_bc) const {
+    std::vector<int32_t> local;  // "zone=faces;" of this rank's owned boundary faces, as characters
+    for (const FaceZone & zone : *mesh->face_zones()) {
+        if (zone.get_type() != FaceZoneType::BOUNDARY) continue;
+        uint64_t n = 0;
+        for (uint32_t i = 0; i < zone.n_faces(); i++) {
+            const uint32_t f = zone.h_faces(i);
+            n += face_bc[f] < 0 && static_cast<uint32_t>(mesh->h_cells_of_face(f, 0)) < mesh->n_owned();
+        }
+        if (n == 0) continue;
+        for (const char c : zone.get_name() + "=" + std::to_string(n) + ";") local.push_back(c);
+    }
+    const std::vector<int32_t> all = is_distributed() ? comm::allgatherv(local) : local;
+    std::map<std::string, uint64_t> faces;
+    std::string entry;
+    for (const int32_t c : all) {
+        if (c != ';') {
+            entry += static_cast<char>(c);
+            continue;
+        }
+        const size_t eq = entry.rfind('=');
+        faces[entry.substr(0, eq)] += std::stoull(entry.substr(eq + 1));
+        entry.clear();
+    }
+    std::string text;
+    for (const auto & [zone, n] : faces) {
+        text += (text.empty() ? "zone " : ", zone ") + zone + " (" + logging::count(n) + " faces)";
+    }
+    return text;
+}
+
 void Solver::init_boundaries() {
     // A fully periodic mesh has no boundary faces
-    const std::vector<toml::value> input_boundaries =
-        input.contains("boundaries") ? toml::find<std::vector<toml::value>>(input, "boundaries")
-                                     : std::vector<toml::value>{};
+    const std::vector<Input> input_boundaries =
+        input.contains("boundaries") ? toml::find<std::vector<Input>>(input, "boundaries")
+                                     : std::vector<Input>{};
     std::vector<int32_t> face_bc(mesh->n_faces, -1);
     std::vector<BoundaryCondition> bcs;
     boundary_summary.clear();
+    wall_model_specs.clear();
     dirichlet_boundaries.clear();
     average_pressure_outlets.clear();
     // Faces of upt boundaries whose composition varies along them, as (boundary, face):
@@ -441,7 +505,7 @@ void Solver::init_boundaries() {
     std::vector<std::pair<size_t, std::vector<uint32_t>>> inlets;
 
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
-        const toml::value & bound = input_boundaries[i_bc];
+        const Input & bound = input_boundaries[i_bc];
         if (!bound.contains("name")) {
             throw std::runtime_error("Boundary name not specified.");
         }
@@ -467,6 +531,13 @@ void Solver::init_boundaries() {
             throw InputError("boundaries: no boundary zone \"" + name + "\" in the mesh (zones: " + zones + ").");
         }
         bcs.push_back(BoundaryCondition::from_input(bound, physics));
+        WallModelSpec wall_model_spec;
+        if (bound.contains("wall_model")) {
+            wall_model_spec = WallModelSpec::from_input(bound.at("wall_model"), bcs.back(),
+                                                        "boundaries[name = \"" + name + "\"].wall_model");
+            bcs.back().modeled = true;
+        }
+        wall_model_specs.push_back(wall_model_spec);
         // Optional filter selecting part of the zone by face centroid
         std::unique_ptr<Expression> where;
         if (bound.contains("where")) {
@@ -541,6 +612,7 @@ void Solver::init_boundaries() {
         std::string text = BOUNDARY_NAMES.at(bcs.back().type) + ", " + logging::count(n_owned_selected) + " faces";
         if (where) text += ", where " + toml::find<std::string>(bound, "where");
         if (profiled) text += ", varying composition";
+        if (bcs.back().modeled) text += ", " + wall_model_spec.summary();
         boundary_summary.emplace_back(name, text);
     }
     for (const auto & [i_bc, i_face] : profiled_faces) {
@@ -555,11 +627,9 @@ void Solver::init_boundaries() {
         bcs.push_back(bc);
         for (uint32_t i = 0; i < partition->n_faces(); i++) face_bc[partition->h_faces(i)] = static_cast<int>(bcs.size() - 1);
     }
+    const std::string uncovered = zones_without_condition(face_bc);
+    if (!uncovered.empty()) throw InputError("boundaries: no condition for " + uncovered + ".");
     for (uint32_t i_face = 0; i_face < mesh->n_faces; i_face++) {
-        if (mesh->h_cells_of_face(i_face, 1) < 0 && face_bc[i_face] < 0) {
-            throw std::runtime_error("Boundary face " + std::to_string(i_face) +
-                                     " has no boundary condition.");
-        }
         // Faces on the axis carry no flux (zero revolved area); their ghost
         // states feed reconstruction and gradients, which need the mirror image
         if (axisymmetric && mesh->h_cells_of_face(i_face, 1) < 0 && mesh->h_face_measure(i_face) == 0.0_r) {
@@ -579,6 +649,7 @@ void Solver::init_boundaries() {
     if (is_mixture()) init_mixture_boundaries(input_boundaries, profiled_faces, bcs);
     boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics);
     boundary_data.mixture = is_mixture();
+    init_wall_model(face_bc, bcs);
     if (is_mixture()) {
         const uint32_t n_species = mixture.n_species;
         boundary_data.bc_Y = Kokkos::View<rtype **, Kokkos::LayoutRight>("bc_Y", bcs.size(), n_species);
@@ -618,7 +689,7 @@ void Solver::init_sources() {
     if (!input.contains("source")) {
         return;
     }
-    const toml::value & source = input.at("source");
+    const Input & source = input.at("source");
     if (source.contains("gravity")) {
         std::vector<rtype> g = find_real_vector(input, "source", "gravity");
         if (g.size() != N_DIM) {
@@ -777,8 +848,8 @@ void Solver::update_boundary_states(rtype t_eval) {
 }
 
 void Solver::init_numerics() {
-    const toml::value face_reconstruction_input =
-        toml::find_or(input, "numerics", "face_reconstruction", toml::value(toml::table{}));
+    const Input face_reconstruction_input =
+        toml::find_or(input, "numerics", "face_reconstruction", Input(Input::table_type{}));
     const std::string face_reconstruction_str = toml::find_or<std::string>(face_reconstruction_input, "type", "FO");
     const std::string riemann_solver_str = toml::find_or<std::string>(input, "numerics", "riemann_solver", "HLLC");
     const std::string time_integrator_str = toml::find_or<std::string>(input, "numerics", "time_integrator", "SSPRK3");
@@ -820,6 +891,15 @@ void Solver::init_numerics() {
         case TimeIntegratorType::SSPRK3:
             time_integrator = std::make_unique<SSPRK3>();
             break;
+        case TimeIntegratorType::SSPRK54:
+            time_integrator = std::make_unique<SSPRK54>();
+            break;
+        case TimeIntegratorType::CK45:
+            time_integrator = std::make_unique<CK45>();
+            break;
+        case TimeIntegratorType::RDPK3SP35:
+            time_integrator = std::make_unique<RDPK3Sp35>();
+            break;
     }
 
     face_reconstruction->set_mesh(mesh);
@@ -857,7 +937,7 @@ void Solver::init_numerics() {
             "imaginary axis, and the hybrid flux's central part has no dissipation to damp them. Use "
             "chemistry.coupling = \"strang\", or convective_flux = \"riemann\".");
     }
-    const toml::value hybrid_input = toml::find_or(input, "numerics", "hybrid", toml::value(toml::table{}));
+    const Input hybrid_input = toml::find_or(input, "numerics", "hybrid", Input(Input::table_type{}));
     if (!hybrid_flux && !hybrid_input.as_table().empty()) {
         throw InputError("[numerics.hybrid] needs numerics.convective_flux = \"hybrid\".");
     }
@@ -866,6 +946,7 @@ void Solver::init_numerics() {
     if (!(hybrid_threshold >= 0.0_r && hybrid_threshold <= 1.0_r) || !(hybrid_floor >= 0.0_r && hybrid_floor <= 1.0_r)) {
         throw InputError("numerics.hybrid: sensor_threshold and upwind_floor must be in [0, 1].");
     }
+    init_error_control();
 }
 
 void Solver::init_axisymmetric_weights() {
@@ -892,7 +973,7 @@ void Solver::init_run_parameters() {
     if (!input.contains("run")) {
         throw InputError("missing [run] table.");
     }
-    const toml::value & run = input.at("run");
+    const Input & run = input.at("run");
     if (run.contains("dt") == run.contains("cfl")) {
         throw InputError("run: specify exactly one of dt and cfl.");
     }
@@ -923,7 +1004,7 @@ void Solver::init_output() {
         throw InputError("output.io_threads must be positive.");
     }
     if (input.contains("forces")) {
-        for (const auto & entry : toml::find<std::vector<toml::value>>(input, "forces")) {
+        for (const auto & entry : toml::find<std::vector<Input>>(input, "forces")) {
             ForceMonitor monitor;
             monitor.zone = toml::find<std::string>(entry, "zone");
             FaceZone * zone = mesh->get_face_zone(monitor.zone);
@@ -940,13 +1021,23 @@ void Solver::init_output() {
             auto h_faces = Kokkos::create_mirror_view(monitor.faces);
             for (size_t i = 0; i < owned.size(); i++) h_faces(i) = owned[i];
             Kokkos::deep_copy(monitor.faces, h_faces);
+            uint32_t modeled = 0;
+            if (wall_model_on) {
+                const auto h_face_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_bc);
+                for (const uint32_t f : owned) {
+                    const int32_t i_bc = h_face_bc(f);
+                    modeled |= i_bc >= 0 && wall_model_specs[static_cast<size_t>(i_bc)].parameters.type !=
+                                                WallModelType::NONE;
+                }
+            }
+            monitor.modeled = comm::allreduce(modeled, comm::Op::MAX) > 0;
             monitor.interval = toml::find_or<uint64_t>(entry, "interval", 1);
             if (monitor.interval == 0) {
                 throw std::runtime_error("forces: interval must be positive.");
             }
             const std::string file = toml::find_or<std::string>(entry, "file", "forces_" + monitor.zone + ".csv");
             monitor.file = file;
-            if (comm::is_root()) {
+            if (comm::is_root() && output_files_enabled()) {
                 const std::filesystem::path parent = std::filesystem::path(file).parent_path();
                 if (!parent.empty()) std::filesystem::create_directories(parent);
                 // init_output runs before the restart state is read, so check the input
@@ -958,6 +1049,7 @@ void Solver::init_output() {
                     for (const char * kind : {"pressure", "viscous"}) {
                         FOR_I_DIM *monitor.out << ",F" << "xyz"[i] << "_" << kind;
                     }
+                    if (monitor.modeled) *monitor.out << ",Q";
                     *monitor.out << "\n";
                 }
             }
@@ -980,7 +1072,7 @@ void Solver::init_output() {
         }
         const std::string file = toml::find_or<std::string>(input, "integrals", "file", "integrals.csv");
         integral_monitor.file = file;
-        if (comm::is_root()) {
+        if (comm::is_root() && output_files_enabled()) {
             const std::filesystem::path parent = std::filesystem::path(file).parent_path();
             if (!parent.empty()) std::filesystem::create_directories(parent);
             const bool resume = toml::find_or<std::string>(input, "initialize", "type", "") == "restart" &&
@@ -1002,7 +1094,7 @@ void Solver::init_output() {
     if (!input.contains("write_data")) {
         return;
     }
-    std::vector<toml::value> outputs = toml::find<std::vector<toml::value>>(input, "write_data");
+    std::vector<Input> outputs = toml::find<std::vector<Input>>(input, "write_data");
     for (const auto & output : outputs) {
         data_writers.push_back(std::make_unique<DataWriter>());
         data_writers.back()->init(output, data, mesh, restart_variables());
@@ -1460,7 +1552,12 @@ void Solver::print_setup() const {
                                              real(double(hybrid_floor)) + ")");
     }
     logging::item("Time integrator", TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()));
-    logging::item("Time step", use_cfl ? "CFL " + real(double(cfl)) : "dt " + real(double(dt_fixed)) + " (fixed)");
+    if (step_controller.enabled()) {
+        logging::item("Time step", step_controller.summary() + "; first step " +
+                                       (use_cfl ? "CFL " + real(double(cfl)) : "dt " + real(double(dt_fixed))));
+    } else {
+        logging::item("Time step", use_cfl ? "CFL " + real(double(cfl)) : "dt " + real(double(dt_fixed)) + " (fixed)");
+    }
     std::string stop;
     if (n_steps > 0) stop += "n_steps = " + logging::count(n_steps);
     if (t_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("t = ") + real(double(t_stop));
@@ -1538,6 +1635,9 @@ void Solver::print_summary(const std::string & stop) const {
                                         duration(t_wall_stepping / static_cast<double>(steps)) + " per step over " +
                                         logging::count(steps) + " steps");
     }
+    if (step_controller.enabled()) {
+        logging::item("Rejected steps", logging::count(n_rejected) + " (error control)");
+    }
     if (!data_writers.empty()) {
         double writing = 0.0;
         uint64_t bytes = 0;
@@ -1607,7 +1707,10 @@ void Solver::write_data(bool force) {
     }
     update_primitives();
     copy_device_to_host();
-    const RestartAttributes attributes = statistics.attributes();
+    RestartAttributes attributes = statistics.attributes();
+    if (step_controller.enabled()) {
+        for (const auto & a : step_controller.attributes()) attributes.push_back(a);
+    }
     const RestartFaces faces = characteristic_restart_faces();
     for (auto & writer : data_writers) {
         writer->write(step, t, force, attributes, faces);
@@ -1645,6 +1748,12 @@ void Solver::take_step() {
         cells_frozen = true;
     }
     time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
+    for (int tries = 1; step_controller.enabled() && !accept_controlled_step(); tries++) {
+        n_rejected++;
+        check_rejections(tries);
+        calc_dt();
+        time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
+    }
     if (double_flux) {
         cells_frozen = false;
         reset_energy();
@@ -1704,6 +1813,11 @@ void Solver::calc_dt() {
     update_boundary_states(t);
     const rtype dt_cfl1 = calc_dt_cfl1();
     dt = use_cfl ? cfl * dt_cfl1 : dt_fixed;
+    if (step_controller.enabled()) {
+        // The first step takes the cfl or dt of [run], later ones the controller's
+        const rtype dt_next = step_controller.dt_next();
+        if (dt_next > 0.0_r) dt = dt_next;
+    }
     dt = std::min(dt, sponge_dt_max);
     // Land exactly on t_stop and on time-based output times
     const rtype t_target = next_target_time();
@@ -1858,18 +1972,20 @@ struct ForceFunctor {
     Kokkos::View<rtype *[3]> mixture_transport;  // viscous mixtures: (cell, [mu, ...]), else empty
     bool axisymmetric = false;  // per radian: tractions weighted by the face radius
 
+    WallModelFlux wall_model = {};  // modeled walls: their stress and heat flux, else empty
+
     struct value_type {
-        rtype v[2 * N_DIM];
+        rtype v[2 * N_DIM + 1];
     };
 
     KOKKOS_INLINE_FUNCTION
     void init(value_type & sum) const {
-        for (int i = 0; i < 2 * N_DIM; i++) sum.v[i] = 0.0;
+        for (int i = 0; i < 2 * N_DIM + 1; i++) sum.v[i] = 0.0;
     }
 
     KOKKOS_INLINE_FUNCTION
     void join(value_type & dst, const value_type & src) const {
-        for (int i = 0; i < 2 * N_DIM; i++) dst.v[i] += src.v[i];
+        for (int i = 0; i < 2 * N_DIM + 1; i++) dst.v[i] += src.v[i];
     }
 
     KOKKOS_INLINE_FUNCTION
@@ -1884,11 +2000,19 @@ struct ForceFunctor {
         if (axisymmetric) FOR_I_DIM n_A[i] *= face_coords(f, 1);
         FOR_I_DIM sum[i] += W(c, N_DIM + 1) * n_A[i];
         if (!viscous) return;
+        const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(f));
+        if (bc.modeled && wall_model.active()) {
+            const int32_t row = wall_model.face_index(f);
+            if (row < 0) return;
+            const rtype A = Kokkos::sqrt(dot<N_DIM>(n_A, n_A));
+            FOR_I_DIM sum[N_DIM + i] -= A * wall_model.flux(row, i);
+            sum[2 * N_DIM] += A * wall_model.flux(row, N_DIM);
+            return;
+        }
         rtype g[N_DIM][N_DIM];
         for (uint8_t v = 0; v < N_DIM; v++) {
             FOR_I_DIM g[v][i] = gradients(c, 1 + v, i);
         }
-        const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(f));
         if (bc.is_wall()) {
             rtype dn = 0.0;
             FOR_I_DIM dn += (face_coords(f, i) - cell_coords(c, i)) * n[i];
@@ -1907,7 +2031,9 @@ struct ForceFunctor {
     }
 };
 
-std::array<rtype, 2 * N_DIM> Solver::calc_force(const Kokkos::View<uint32_t *> & faces) {
+std::array<rtype, 2 * N_DIM + 1> Solver::calc_force(const Kokkos::View<uint32_t *> & faces) {
+    // The wall model reads exchange cells of the halo, stale after the last stage
+    if (wall_model_on) halo.exchange(state());
     const Euler phys = physics;
     StateView U = conservatives;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
@@ -1922,14 +2048,15 @@ std::array<rtype, 2 * N_DIM> Solver::calc_force(const Kokkos::View<uint32_t *> &
     if (is_viscous()) {
         Kokkos::parallel_for("force_gradients", mesh->n_cells, viscous_gradient);
         if (is_mixture()) update_transport();
+        if (wall_model_on) update_wall_model();
     }
     ForceFunctor functor{faces, mesh->face_normals, mesh->face_coords, mesh->cell_coords, mesh->cells_of_face,
                          W_cells, viscous_gradients, boundary_data, physics, is_viscous(),
-                         is_mixture() ? cell_transport : Kokkos::View<rtype *[3]>(), axisymmetric};
+                         is_mixture() ? cell_transport : Kokkos::View<rtype *[3]>(), axisymmetric, wall_model.out};
     ForceFunctor::value_type result;
     Kokkos::parallel_reduce("force", faces.extent(0), functor, result);
-    std::array<rtype, 2 * N_DIM> F;
-    for (size_t i = 0; i < 2 * N_DIM; i++) F[i] = result.v[i];
+    std::array<rtype, 2 * N_DIM + 1> F;
+    for (size_t i = 0; i < 2 * N_DIM + 1; i++) F[i] = result.v[i];
     return comm::allreduce(F, comm::Op::SUM);
 }
 
@@ -1939,7 +2066,8 @@ void Solver::write_forces() {
         const auto F = calc_force(monitor.faces);
         if (!monitor.out) continue;
         *monitor.out << step << "," << std::setprecision(12) << t;
-        for (const rtype f : F) *monitor.out << "," << f;
+        for (size_t i = 0; i < 2 * N_DIM; i++) *monitor.out << "," << F[i];
+        if (monitor.modeled) *monitor.out << "," << F[2 * N_DIM];
         *monitor.out << "\n";
         monitor.out->flush();
     }

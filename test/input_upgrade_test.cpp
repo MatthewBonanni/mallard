@@ -122,7 +122,7 @@ TEST(InputUpgradeTest, DottedAndInlineKeysAreReformattedWithTheSameMeaning) {
     const std::string text = "run.old_cfl = 0.5\nnumerics = { steps = 1 }\n[[boundaries]]\nname = 'a'\n";
     bool reformatted = false;
     std::vector<Finding> findings;
-    const toml::value out = toml::parse_str(upgrade(text, reformatted, findings));
+    const Input out = parse_input_string(upgrade(text, reformatted, findings));
     EXPECT_TRUE(reformatted);
     EXPECT_EQ(out.at("run").at("cfl").as_floating(), 0.5);
     EXPECT_FALSE(out.at("run").contains("old_cfl"));
@@ -136,7 +136,7 @@ TEST(InputUpgradeTest, OldAndNewNameTogetherAreAnError) {
 
 TEST(InputUpgradeTest, DeprecatedKeysAreReadWithAWarningUntilTheyAreRemoved) {
     const std::string text = "[run]\nold_cfl = 0.5\nhalf = 2\n[[boundaries]]\ntype = 'outflow'\n";
-    toml::value input = toml::parse_str(text);
+    Input input = parse_input_string(text);
     const std::vector<Finding> findings = input_upgrade::apply(input, "0.9.3", RULES);
     ASSERT_EQ(findings.size(), 3u);
     EXPECT_FALSE(findings[0].removed);
@@ -148,7 +148,7 @@ TEST(InputUpgradeTest, DeprecatedKeysAreReadWithAWarningUntilTheyAreRemoved) {
     EXPECT_FALSE(input.at("run").contains("old_cfl"));
     EXPECT_EQ(input.at("boundaries").at(0).at("type").as_string(), "extrapolation");
 
-    toml::value later = toml::parse_str(text);
+    Input later = parse_input_string(text);
     try {
         input_upgrade::apply(later, "0.10.0", RULES);
         ADD_FAILURE() << "a removed key was accepted";

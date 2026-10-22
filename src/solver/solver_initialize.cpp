@@ -147,6 +147,7 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
     step = restart.step;
     t = static_cast<rtype>(restart.t);
     statistics.restore(restart, file, t);
+    if (step_controller.enabled()) step_controller.restore(restart.attributes);
     restore_characteristic_state(restart);
     if (!resume_output) return;
     for (auto & writer : data_writers) {
@@ -155,7 +156,7 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
 }
 
 void Solver::init_solution_constant() {
-    const toml::value & init = input.at("initialize");
+    const Input & init = input.at("initialize");
     for (const char * key : {"u", "p", "T"}) {
         if (!init.contains(key)) {
             throw std::runtime_error(std::string("Missing ") + key + " for initialization: constant.");
@@ -434,7 +435,7 @@ void cell_average_curved(const curved::Geometry & geometry, uint32_t i_cell, Poi
  * thread count.
  */
 void Solver::init_solution_analytical() {
-    const toml::value & init = input.at("initialize");
+    const Input & init = input.at("initialize");
     if (!init.contains("u") || init.at("u").as_array().size() != N_DIM) {
         throw std::runtime_error("u must be a " + std::to_string(N_DIM) + "-element array for initialization: analytical.");
     }

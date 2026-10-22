@@ -98,16 +98,26 @@ std::string dotted(const Concrete & key) {
     return s;
 }
 
+/** @brief A table's entries; for Input, without counting them as read, so that only setup reads count. */
+template <typename V>
+auto & entries_of(V & node) {
+    if constexpr (requires { node.as_table().entries(); }) {
+        return node.as_table().entries();
+    } else {
+        return node.as_table();
+    }
+}
+
 template <typename V>
 void find_keys(V & node, const Path & path, size_t k, Concrete & at, std::vector<Concrete> & out) {
-    if (!node.is_table() || !node.contains(path[k].key)) return;
+    if (!node.is_table() || !entries_of(node).contains(path[k].key)) return;
     if (k + 1 == path.size()) {
         at.emplace_back(path[k].key, -1);
         out.push_back(at);
         at.pop_back();
         return;
     }
-    V & child = node.at(path[k].key);
+    V & child = entries_of(node).at(path[k].key);
     if (path[k].array) {
         if (!child.is_array()) return;
         for (size_t i = 0; i < child.size(); i++) {
@@ -136,11 +146,11 @@ V * at(V & root, const Concrete & key, bool create = false) {
     V * node = &root;
     for (const auto & [name, index] : key) {
         if (!node->is_table()) return nullptr;
-        if (!node->contains(name)) {
+        if (!entries_of(*node).contains(name)) {
             if (!create || index >= 0) return nullptr;
-            (*node)[name] = V(typename V::table_type{});
+            entries_of(*node)[name] = V(typename V::table_type{});
         }
-        node = &node->at(name);
+        node = &entries_of(*node).at(name);
         if (index >= 0) {
             if (!node->is_array() || static_cast<size_t>(index) >= node->size()) return nullptr;
             node = &node->at(static_cast<size_t>(index));
@@ -252,9 +262,9 @@ std::vector<Finding> transform(V & root, const Rules & table, const std::string 
                 if (new_parent == nullptr || !new_parent->is_table()) {
                     throw InputError("cannot move " + to_string(key) + " to " + to_string(to) + ".");
                 }
-                (*new_parent)[to.back().first] = value;
+                entries_of(*new_parent)[to.back().first] = value;
             }
-            at(root, parent(key))->as_table().erase(key.back().first);
+            entries_of(*at(root, parent(key))).erase(key.back().first);
         }
     }
     for (const OptionRule & rule : table.options) {
@@ -276,8 +286,8 @@ bool same(const V & a, const V & b) {
     if (a.type() != b.type()) return false;
     if (a.is_table()) {
         if (a.size() != b.size()) return false;
-        for (const auto & [k, v] : a.as_table()) {
-            if (!b.contains(k) || !same(v, b.at(k))) return false;
+        for (const auto & [k, v] : entries_of(a)) {
+            if (!entries_of(b).contains(k) || !same(v, entries_of(b).at(k))) return false;
         }
         return true;
     }
@@ -457,11 +467,15 @@ bool rewrite_one_option(std::vector<std::string> & lines, const OptionRule & rul
 
 } // namespace
 
+std::string advice(const Finding & finding) {
+    return describe(finding) + "; `Mallard upgrade-input FILE > NEW_FILE` rewrites the file";
+}
+
 std::string describe(const Finding & finding) {
     return (finding.line ? "line " + std::to_string(finding.line) + ": " : std::string()) + finding.message;
 }
 
-std::vector<Finding> apply(toml::value & input, const std::string & version, const Rules & table) {
+std::vector<Finding> apply(Input & input, const std::string & version, const Rules & table) {
     std::vector<Finding> findings = transform(input, table, version.empty() ? MALLARD_VERSION : version);
     std::string removed;
     for (const Finding & f : findings) {
@@ -477,7 +491,7 @@ std::vector<Finding> apply(toml::value & input, const std::string & version, con
 std::string upgrade_text(const std::string & text, std::vector<Finding> & findings,
                          bool & reformatted, const Rules & table) {
     reformatted = false;
-    toml::value expected = toml::parse_str(text);
+    Input expected = parse_input_string(text);
     findings = transform(expected, table, MALLARD_VERSION);
     if (findings.empty()) return text;
 
@@ -491,7 +505,7 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
     }
     if (!impossible) {
         try {
-            if (same(toml::parse_str(join_lines(lines)), expected)) return join_lines(lines);
+            if (same(parse_input_string(join_lines(lines)), expected)) return join_lines(lines);
         } catch (const std::exception &) {
         }
     }
@@ -528,7 +542,7 @@ int main(int argc, char ** argv) {
     }
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     try {
-        toml::parse(file);  // syntax errors with the file's name
+        parse_input(file);  // syntax errors with the file's name
         std::vector<Finding> findings;
         bool reformatted = false;
         const std::string upgraded = upgrade_text(text, findings, reformatted);

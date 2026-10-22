@@ -12,6 +12,12 @@ prints the version and `Mallard --help` the usage. Errors in the input stop
 the run before it starts, with the file name, the key and, for options, the
 accepted values.
 
+The quickest way to a working input is a template: `Mallard new --list`
+shows them, and `Mallard new cylinder` creates a directory with the input,
+the scripts that generate its mesh, run it and plot the results, and a README
+([First simulation](first_simulation.md#7-templates)). The input is the
+example's, with a comment above each table that links to its keys.
+
 ## Anatomy of an input
 
 Each table configures one part of the problem. This is the complete input of
@@ -108,6 +114,9 @@ removed, the change goes through two steps:
    release that will remove the old one.
 2. **Removed**: the run stops with the same message.
 
+`Mallard --check` lists both kinds, deprecated keys as warnings and removed
+ones as errors.
+
 In both steps, one command brings a file up to date:
 
 ```sh
@@ -136,6 +145,67 @@ Changes before 0.9.0 were not deprecated first. Since 0.9.0, every rename
 appears in this table and in `src/common/input_upgrade.cpp`, which is the
 source of truth. A test fails if a key is removed without a deprecation
 period.
+
+## Unknown and unused keys
+
+Every key in the file must be one the run reads. A misspelled key, a key in
+the wrong table, or one the chosen settings do not use (for example
+`[numerics.face_reconstruction] order` with `type = "MUSCL"`) stops the run,
+listed with its line and the closest key Mallard looked for:
+
+```text
+error: input.toml: keys that are unknown or unused with these settings (mallard --check lists them all):
+  line 8: mesh.Nyy (did you mean mesh.Ny?)
+  line 11: mesh.t_stop (did you mean run.t_stop?)
+```
+
+When another error stops the setup first, the keys with a suggestion are
+listed under it as possible misspellings.
+
+## Checking an input
+
+`Mallard --check input.toml` runs the whole setup of the run (mesh,
+partition, boundaries, numerics, initial solution) without time stepping and
+without writing any file, then reports on it; the exit status is 1 if there
+is an error. Run it under `mpirun -n N` to check a run on N ranks.
+
+```text
+$ Mallard --check input.toml --ranks 4 --throughput 5e7 --quality-vtu quality
+...
+== Check ==================================================================================
+  Input keys         all used
+  Boundaries         every boundary face has a condition (5 conditions)
+  non-orthogonality  max 23.4, mean 4.66
+                     worst 23.4 at (1.428, 0.09977), 23.4 at (1.448, 0.09361)
+  skewness           max 0.374, mean 0.0489
+                     worst 0.374 at (1.025, -0.6632), 0.374 at (1.022, -0.6803)
+  aspect ratio       max 1.96, mean 1.12
+  volume ratio       max 2.21, mean 1.16
+                     worst 2.21 at (1.095, 0.8271), 2.21 at (1.099, 0.8141)
+  Time step          8.771e-05 (from run.cfl), CFL 0.25 at the initial state
+  CFL-limiting       cell 13,165 at (0.2704, -0.07489)
+                     4 cells within 10% of it, in (0.2617, -0.07529) to (0.9787, 0.5039)
+  Memory             133MB per rank after setup (peak 133MB), 17,297 cells, 1 rank
+                     on 4 ranks: about 46.6MB per rank (peak 46.6MB), largest part 4,325 + 1,729 halo cells
+  Throughput         50.0M cells/s per rank
+  Cost               1.14e+04 steps per unit simulated time
+                     per unit time: 986 ms wall on 4 ranks, 0.0011 rank-hours
+                     per flow-through (0.4375): 431 ms wall on 4 ranks, 0.000479 rank-hours
+                     to t_stop = 0.75: 740 ms wall on 4 ranks, 0.000822 rank-hours
+  Result             ok
+```
+
+(`examples/mallard` on a coarse mesh of 17k triangles, on a CPU.) The report covers:
+
+| Line | What it is |
+|---|---|
+| Input keys | Unknown or unused keys, with suggestions (errors) |
+| Boundaries | Zones without a condition are an error, named with their face count |
+| Mesh quality | Largest and mean non-orthogonality, skewness, aspect ratio and volume ratio, and where the worst cells are ([Meshes](meshes.md#mesh-quality)) |
+| Time step | The stable step at the initial state (or `run.dt` and its CFL number), the cell that sets it and the region of the cells within 10% of it |
+| Memory | Kokkos allocations per rank (device memory on GPUs) after setup and at their peak. With `--ranks N` in a serial check, scaled to the owned and halo cells of the largest part the run's partitioner would make. CUDA's own context, a few hundred MB per GPU, is not counted |
+| Cost | With `--throughput R` (cells/s per rank, the `Throughput` of a run's summary divided by its ranks) or `--steps N` (timed over N steps after an untimed one): steps, wall time and GPU-hours (rank-hours on CPUs) per unit simulated time, per flow-through time (domain length along the mean initial velocity over its magnitude) and to `t_stop`, assuming the throughput per rank holds on N ranks |
+| Warnings | A CFL number above the integrator's limit for smooth flow (1.2 for SSPRK3, 1.35 for RK4), TFLES thickening `n_res Delta / delta_L` above 5, poor cells |
 
 ## The other executables
 

@@ -19,6 +19,7 @@
 
 #include "comm.h"
 #include "distributed_mesh.h"
+#include "mesh_block.h"
 
 #ifdef Mallard_HAS_KAMINPAR
 #include <dkaminpar.h>
@@ -311,4 +312,48 @@ std::vector<int> partition_graph(const DistributedMesh & mesh, int n_parts) {
     (void)n_parts;
     throw std::runtime_error("This build has no graph partitioner (configure with Mallard_ENABLE_KAMINPAR=ON).");
 #endif
+}
+
+PartSize largest_part(const MeshBlock & block, const std::vector<int> & owner, const int n_parts,
+                      const int halo_layers) {
+    const uint64_t n_cells = block.n_cells();
+    std::vector<uint64_t> node_offsets(block.n_nodes() + 1, 0);
+    for (const uint64_t node : block.cell_nodes) node_offsets[node - block.first_node + 1]++;
+    std::partial_sum(node_offsets.begin(), node_offsets.end(), node_offsets.begin());
+    std::vector<uint64_t> node_cells(node_offsets.back());
+    std::vector<uint64_t> fill(node_offsets.begin(), node_offsets.end() - 1);
+    for (uint64_t c = 0; c < n_cells; c++) {
+        for (uint64_t k = block.cell_offsets[c]; k < block.cell_offsets[c + 1]; k++) {
+            node_cells[fill[block.cell_nodes[k] - block.first_node]++] = c;
+        }
+    }
+    std::vector<std::vector<uint64_t>> owned(static_cast<size_t>(n_parts));
+    for (uint64_t c = 0; c < n_cells; c++) owned[static_cast<size_t>(owner[c])].push_back(c);
+
+    PartSize largest;
+    std::vector<int> seen(n_cells, -1);
+    for (int p = 0; p < n_parts; p++) {
+        const auto & cells = owned[static_cast<size_t>(p)];
+        for (const uint64_t c : cells) seen[c] = p;
+        std::vector<uint64_t> front = cells, next;
+        uint64_t halo = 0;
+        for (int layer = 0; layer < halo_layers; layer++) {
+            next.clear();
+            for (const uint64_t c : front) {
+                for (uint64_t k = block.cell_offsets[c]; k < block.cell_offsets[c + 1]; k++) {
+                    const uint64_t node = block.cell_nodes[k] - block.first_node;
+                    for (uint64_t j = node_offsets[node]; j < node_offsets[node + 1]; j++) {
+                        const uint64_t other = node_cells[j];
+                        if (seen[other] == p) continue;
+                        seen[other] = p;
+                        next.push_back(other);
+                    }
+                }
+            }
+            halo += next.size();
+            front.swap(next);
+        }
+        if (cells.size() + halo > largest.owned + largest.halo) largest = {cells.size(), halo};
+    }
+    return largest;
 }

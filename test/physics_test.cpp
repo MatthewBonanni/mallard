@@ -11,7 +11,7 @@
 
 #include <gtest/gtest.h>
 
-#include <toml.hpp>
+#include "input.h"
 
 #include "physics.h"
 #include "test_utils.h"
@@ -57,9 +57,9 @@ TEST(PhysicsTest, WRoundTrip) {
 TEST(PhysicsTest, PowerLawViscosity) {
     const std::string physics = "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\n"
                                 "rho_ref = 1.0\nmu = 0.002\nPr = 0.7\nviscosity_model = \"power_law\"\n";
-    const Euler euler = Euler::from_input(toml::parse_str(physics + "T_mu_ref = 0.5\nviscosity_exponent = 0.75\n"));
+    const Euler euler = Euler::from_input(parse_input_string(physics + "T_mu_ref = 0.5\nviscosity_exponent = 0.75\n"));
     EXPECT_NEAR(euler.viscosity(0.5), 0.002, roundoff(1e-15));
     EXPECT_NEAR(euler.viscosity(2.0), 0.002 * std::pow(4.0, 0.75), roundoff(1e-14));
     EXPECT_NEAR(euler.conductivity(euler.viscosity(2.0)), euler.viscosity(2.0) * euler.cp / 0.7_r, roundoff(1e-14));
-    EXPECT_THROW(Euler::from_input(toml::parse_str(physics + "T_mu_ref = 0.5\n")), std::exception);
+    EXPECT_THROW(Euler::from_input(parse_input_string(physics + "T_mu_ref = 0.5\n")), std::exception);
 }

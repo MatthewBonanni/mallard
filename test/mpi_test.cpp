@@ -129,6 +129,20 @@ TEST(MPITest, FirstOrderMatchesSerial) {
                                         "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 30));
 }
 
+TEST(MPITest, LowStorageIntegratorsAndErrorControlMatchSerial) {
+    // The error is a maximum over all ranks' cells, so every rank count takes the same steps
+    const std::string input = box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                                        bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                                            "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 30);
+    const std::string ssprk3 = "time_integrator = \"SSPRK3\"\n";
+    for (const std::string numerics : {"time_integrator = \"SSPRK54\"\n", "time_integrator = \"CK45\"\n",
+                                       "time_integrator = \"RDPK3Sp35\"\n[numerics.error_control]\ntolerance = 1e-4\n"}) {
+        std::string s = input;
+        s.replace(s.find(ssprk3), ssprk3.size(), numerics);
+        expect_matches_serial(s);
+    }
+}
+
 TEST(MPITest, GasMixtureMatchesSerial) {
     // Species and the temperature seeds of halo cells follow the same history
     // as their owners'; with TENO also the troubled cells' stencil choices and
@@ -266,7 +280,7 @@ TEST(MPITest, PeriodicRunsMatchSerialAcrossSeamsCutByThePartition) {
 TEST(MPITest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
     const std::string file = write_temp_shared("mallard_mpi_periodic.msh", jittered_mixed_mesh(16));
     std::string input = box_input("cartesian", "type = \"TENO\"\norder = 4\n", EULER, "", 12);
-    const std::string generated = "type = \"cartesian\"\n";
+    const std::string generated = "type = \"cartesian\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     input += "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0]\n"
              "[[periodic]]\nzones = [\"bottom\", \"top\"]\ntranslation = [0.0, 1.0]\n"
@@ -671,7 +685,7 @@ TEST(MPITest, HDF5OutputDoesNotDependOnTheRankCount) {
     std::string input = box_input("cartesian", "type = \"MUSCL\"\n", EULER,
                                   bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
                                       "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 6);
-    const std::string generated = "type = \"cartesian\"\n";
+    const std::string generated = "type = \"cartesian\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     expect_hdf5_output_matches_serial(input + "[statistics]\ninterval = 2\nfields = [\"P\"]\n",
                                       "interval = 3\nvariables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n",
@@ -789,7 +803,7 @@ TEST(MPITest, RunFromHDF5MeshFileMatchesSerial) {
     std::string input = box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
                                   bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
                                       "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 10);
-    const std::string generated = "type = \"cartesian_tri\"\n";
+    const std::string generated = "type = \"cartesian_tri\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     expect_matches_serial(input);
     comm::barrier();

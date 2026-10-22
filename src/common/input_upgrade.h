@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-#include <toml.hpp>
+#include "input.h"
 
 namespace input_upgrade {
 
@@ -62,13 +62,16 @@ struct Finding {
 /** @brief "line 12: run.foo is deprecated since 0.9.0 ...". */
 std::string describe(const Finding & finding);
 
+/** @brief describe() plus how to update the file, for the run's warnings. */
+std::string advice(const Finding & finding);
+
 /**
  * @brief Rewrites the deprecated keys and options of `input` in place, as the
  *        setup reads them, and returns them. Throws an InputError listing the
  *        removed ones, with what to do (`Mallard upgrade-input`). `version`
  *        is this release's (MALLARD_VERSION when empty).
  */
-std::vector<Finding> apply(toml::value & input, const std::string & version = "", const Rules & table = rules());
+std::vector<Finding> apply(Input & input, const std::string & version = "", const Rules & table = rules());
 
 /**
  * @brief The text of an input file with every rule applied (also removed
