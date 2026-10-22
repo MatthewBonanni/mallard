@@ -12,7 +12,7 @@ TENO-E ([Liang, Shyy & Fu 2025](../references.md#liang-shyy-fu-2025)) is the
 unstructured finite-volume TENO scheme of
 [Ji, Liang & Fu 2022](../references.md#ji-liang-fu-2022), built on TENO
 ([Fu, Hu & Adams 2016](../references.md#fu-hu-adams-2016)), with an adaptive
-cutoff. The papers cover 2D triangles; Mallard runs the same algorithm on
+cutoff. Mallard runs the same algorithm on
 triangles and quadrilaterals in 2D and on tetrahedra, hexahedra, prisms and
 pyramids in 3D (at most 4 and 6 faces per cell), any mix of them, at orders
 $k = 3,\dots,6$, with mirror-image stencils at boundaries, curved boundary

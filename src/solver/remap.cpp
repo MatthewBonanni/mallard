@@ -119,7 +119,7 @@ double weight(const Point & x, bool axisymmetric) { return axisymmetric ? x[1] :
 
 int halo_layers(uint8_t degree) { return std::max((degree + 1) / 2 + 1, int(degree)); }
 
-std::shared_ptr<Mesh> source_mesh(const toml::value & input, uint8_t degree) {
+std::shared_ptr<Mesh> source_mesh(const Input & input, uint8_t degree) {
     DistributedMesh setup(read_mesh_block(input), Mesh::periodic_pairs(input));
     setup.distribute(partition_multijagged(setup, comm::size()));
     Distribution dist;
@@ -599,8 +599,8 @@ std::vector<std::vector<double>> Source::to(const Mesh & target, uint32_t n, Rep
     return out;
 }
 
-RestartData remap_restart(const toml::value & input, const Mesh & target, bool axisymmetric, Report & report) {
-    const toml::value & init = input.at("initialize");
+RestartData remap_restart(const Input & input, const Mesh & target, bool axisymmetric, Report & report) {
+    const Input & init = input.at("initialize");
     if (!init.contains("file")) throw InputError("initialize: type = \"remap\" needs file, the source restart file.");
     if (!init.contains("mesh")) throw InputError("initialize: type = \"remap\" needs [initialize.mesh], the source mesh.");
     const std::string file = toml::find<std::string>(init, "file");
@@ -617,7 +617,7 @@ RestartData remap_restart(const toml::value & input, const Mesh & target, bool a
     options.limit = limiter == "bounds";
     options.axisymmetric = axisymmetric;
 
-    toml::value source_input(toml::table{});
+    Input source_input(Input::table_type{});
     source_input.as_table()["mesh"] = init.at("mesh");
     if (init.contains("periodic")) {
         source_input.as_table()["periodic"] = init.at("periodic");

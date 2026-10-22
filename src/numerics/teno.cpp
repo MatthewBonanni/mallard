@@ -1172,7 +1172,7 @@ TENO::~TENO() {
     // Empty
 }
 
-void TENO::read_options(const toml::value & input) {
+void TENO::read_options(const Input & input) {
     const int order = toml::find_or<int>(input, "order", 5);
     // The small stencils are degree 2, so the central polynomial must be at least degree 2
     if (order < 3 || order > teno::MAX_DEGREE + 1) {
@@ -1212,7 +1212,7 @@ void TENO::read_options(const toml::value & input) {
     }
 }
 
-void TENO::init(const toml::value & input) {
+void TENO::init(const Input & input) {
     read_options(input);
     const int order = degree + 1;
     const int n_gp = std::max(1, std::min<int>(teno::MAX_FACE_QUAD, (order + 1) / 2));
@@ -3426,7 +3426,7 @@ uint64_t TENO::cache_key() const {
     return hash.h;
 }
 
-uint8_t TENO::cached_halo_layers(const toml::value & input) {
+uint8_t TENO::cached_halo_layers(const Input & input) {
     TENO teno;
     teno.read_options(input);
     if (teno.cache_file.empty()) return 0;

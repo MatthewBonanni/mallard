@@ -33,7 +33,7 @@ Mesh::~Mesh() {
     // Empty
 }
 
-void Mesh::init(const toml::value & input) {
+void Mesh::init(const Input & input) {
     std::string type_str = toml::find_or<std::string>(input, "mesh", "type", "file");
     typename std::unordered_map<std::string, MeshType>::const_iterator it = MESH_TYPES.find(type_str);
     if (it == MESH_TYPES.end()) {
@@ -85,10 +85,10 @@ void Mesh::init(const toml::value & input) {
     }
 }
 
-std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const toml::value & input) {
+std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const Input & input) {
     std::vector<PeriodicPair> pairs;
     if (input.contains("periodic")) {
-        const auto entries = toml::find<std::vector<toml::value>>(input, "periodic");
+        const auto entries = toml::find<std::vector<Input>>(input, "periodic");
         for (const auto & entry : entries) {
             const auto zones = toml::find<std::vector<std::string>>(entry, "zones");
             const std::vector<rtype> t = find_real_vector(entry, "translation");

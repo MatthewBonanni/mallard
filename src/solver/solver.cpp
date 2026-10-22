@@ -26,6 +26,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
+#include "common_io.h"
 #include "device_comm.h"
 #include "common.h"
 #include "log.h"
@@ -45,7 +46,7 @@ Solver::~Solver() {
 }
 
 int Solver::init(const std::string & input_file_name) {
-    return init(toml::parse(input_file_name));
+    return init(parse_input(input_file_name));
 }
 
 template <typename F>
@@ -59,10 +60,33 @@ void Solver::timed_phase(const std::string & name, F && f) {
     logging::end_phase(seconds);
 }
 
-int Solver::init(const toml::value & input_in) {
+int Solver::init(const Input & input_in) {
     this->input = input_in;
     preset = numerics_preset::apply(input);
+    try {
+        setup_from_input();
+    } catch (const std::exception & e) {
+        std::string misspelled;
+        for (const Diagnostic & key : unused_keys(input)) {
+            if (!key.suggestion.empty()) misspelled += "\n  " + describe(key);
+        }
+        if (misspelled.empty() || check_only) throw;
+        throw InputError(std::string(e.what()) + "\npossibly misspelled:" + misspelled);
+    }
+    if (!check_only) {
+        const std::vector<Diagnostic> unused = unused_keys(input);
+        if (!unused.empty()) {
+            std::string list;
+            for (const Diagnostic & key : unused) list += "\n  " + describe(key);
+            throw InputError("keys that are unknown or unused with these settings (mallard --check lists them all):" +
+                             list);
+        }
+    }
+    print_setup();
+    return 0;
+}
 
+void Solver::setup_from_input() {
     t = 0.0;
     step = 0;
     t_wall_setup = 0.0;
@@ -85,7 +109,8 @@ int Solver::init(const toml::value & input_in) {
     trim_halo();
     describe_partition_surface();
     // The cache describes the local mesh at this halo depth
-    if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) teno->save_cache(static_cast<uint8_t>(halo_layers));
+    auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
+    if (teno && output_files_enabled()) teno->save_cache(static_cast<uint8_t>(halo_layers));
     setup.reset();
     timed_phase("fields and output", [&] {
         allocate_memory();
@@ -100,8 +125,6 @@ int Solver::init(const toml::value & input_in) {
     timed_phase("initial solution", [&] { init_solution(); });
     logging::begin_phase("total");
     logging::end_phase(t_wall_setup);
-    print_setup();
-    return 0;
 }
 
 namespace {
@@ -183,9 +206,9 @@ logging::Items describe_mesh(const Mesh & mesh) {
     };
 }
 
-bool writes_variable(const toml::value & input, const std::string & name) {
+bool writes_variable(const Input & input, const std::string & name) {
     if (!input.contains("write_data")) return false;
-    const auto outputs = toml::find<std::vector<toml::value>>(input, "write_data");
+    const auto outputs = toml::find<std::vector<Input>>(input, "write_data");
     for (const auto & output : outputs) {
         if (!output.contains("variables")) continue;
         const auto variables = toml::find<std::vector<std::string>>(output, "variables");
@@ -198,6 +221,16 @@ bool writes_variable(const toml::value & input, const std::string & name) {
 
 void Solver::init_mesh() {
     const std::string type = toml::find_or<std::string>(input, "mesh", "type", "file");
+    // Read in every run, so that an input runs unchanged on any number of ranks
+    partitioner = toml::find_or<std::string>(input, "parallel", "partitioner", "multijagged");
+    if (partitioner != "graph" && partitioner != "hilbert" && partitioner != "multijagged") {
+        throw InputError("parallel.partitioner = \"" + partitioner + "\" is not one of: graph, hilbert, multijagged.");
+    }
+    const std::string exchange =
+        toml::find_or<std::string>(input, "parallel", "halo_exchange", comm::nccl_available() ? "nccl" : "mpi");
+    if (exchange != "nccl" && exchange != "mpi") {
+        throw InputError("parallel.halo_exchange = \"" + exchange + "\" is not one of: nccl, mpi.");
+    }
     if (!is_distributed()) {
         mesh = std::make_shared<Mesh>();
         mesh->init(input);
@@ -205,8 +238,8 @@ void Solver::init_mesh() {
         if (halo_layers == 0) {
             // A TENO cache records the halo depth its stencils need, which spares
             // the setup pass that would otherwise find it out
-            const toml::value reconstruction =
-                toml::find_or(input, "numerics", "face_reconstruction", toml::value(toml::table{}));
+            const Input reconstruction =
+                toml::find_or(input, "numerics", "face_reconstruction", Input(Input::table_type{}));
             const bool teno = toml::find_or<std::string>(reconstruction, "type", "FO") == "TENO";
             const int cached =
                 comm::allreduce(teno ? int(TENO::cached_halo_layers(reconstruction)) : 0, comm::Op::MAX);
@@ -214,22 +247,12 @@ void Solver::init_mesh() {
         }
         // Partition once; deeper halos (see halo_too_shallow) grow the existing layers
         if (!setup) {
-            partitioner = toml::find_or<std::string>(input, "parallel", "partitioner", "multijagged");
-            if (partitioner != "graph" && partitioner != "hilbert" && partitioner != "multijagged") {
-                throw InputError("parallel.partitioner = \"" + partitioner +
-                                 "\" is not one of: graph, hilbert, multijagged.");
-            }
             setup = std::make_unique<DistributedMesh>(read_mesh_block(input), Mesh::periodic_pairs(input));
             setup->distribute(partitioner == "graph"         ? partition_graph(*setup, comm::size())
                               : partitioner == "multijagged" ? partition_multijagged(*setup, comm::size())
                                                              : partition_hilbert(*setup, comm::size()));
         }
         mesh = setup->build_local_mesh(halo_layers, distribution);
-        const std::string exchange =
-            toml::find_or<std::string>(input, "parallel", "halo_exchange", comm::nccl_available() ? "nccl" : "mpi");
-        if (exchange != "nccl" && exchange != "mpi") {
-            throw InputError("parallel.halo_exchange = \"" + exchange + "\" is not one of: nccl, mpi.");
-        }
         if (exchange == "nccl" && !comm::nccl_available()) {
             throw InputError("parallel.halo_exchange = \"nccl\" needs a build with Mallard_ENABLE_NCCL.");
         }
@@ -308,7 +331,7 @@ void Solver::init_mesh() {
 
 int Solver::base_halo_layers() const {
     const std::string type = toml::find_or<std::string>(
-        toml::find_or(input, "numerics", "face_reconstruction", toml::value(toml::table{})), "type", "FO");
+        toml::find_or(input, "numerics", "face_reconstruction", Input(Input::table_type{})), "type", "FO");
     // Faces between owned and halo-layer-1 cells need the layer-1 reconstruction,
     // which reads one more layer (MUSCL gradients and limiters, viscous gradients)
     const bool viscous = toml::find_or<std::string>(input, "physics", "type", "euler") == "navier_stokes";
@@ -429,11 +452,42 @@ void Solver::init_physics() {
     init_radiation();
 }
 
+std::string Solver::zones_without_condition(const std::vector<int32_t> & face_bc) const {
+    std::vector<int32_t> local;  // "zone=faces;" of this rank's owned boundary faces, as characters
+    for (const FaceZone & zone : *mesh->face_zones()) {
+        if (zone.get_type() != FaceZoneType::BOUNDARY) continue;
+        uint64_t n = 0;
+        for (uint32_t i = 0; i < zone.n_faces(); i++) {
+            const uint32_t f = zone.h_faces(i);
+            n += face_bc[f] < 0 && static_cast<uint32_t>(mesh->h_cells_of_face(f, 0)) < mesh->n_owned();
+        }
+        if (n == 0) continue;
+        for (const char c : zone.get_name() + "=" + std::to_string(n) + ";") local.push_back(c);
+    }
+    const std::vector<int32_t> all = is_distributed() ? comm::allgatherv(local) : local;
+    std::map<std::string, uint64_t> faces;
+    std::string entry;
+    for (const int32_t c : all) {
+        if (c != ';') {
+            entry += static_cast<char>(c);
+            continue;
+        }
+        const size_t eq = entry.rfind('=');
+        faces[entry.substr(0, eq)] += std::stoull(entry.substr(eq + 1));
+        entry.clear();
+    }
+    std::string text;
+    for (const auto & [zone, n] : faces) {
+        text += (text.empty() ? "zone " : ", zone ") + zone + " (" + logging::count(n) + " faces)";
+    }
+    return text;
+}
+
 void Solver::init_boundaries() {
     // A fully periodic mesh has no boundary faces
-    const std::vector<toml::value> input_boundaries =
-        input.contains("boundaries") ? toml::find<std::vector<toml::value>>(input, "boundaries")
-                                     : std::vector<toml::value>{};
+    const std::vector<Input> input_boundaries =
+        input.contains("boundaries") ? toml::find<std::vector<Input>>(input, "boundaries")
+                                     : std::vector<Input>{};
     std::vector<int32_t> face_bc(mesh->n_faces, -1);
     std::vector<BoundaryCondition> bcs;
     boundary_summary.clear();
@@ -447,7 +501,7 @@ void Solver::init_boundaries() {
     std::vector<std::pair<size_t, std::vector<uint32_t>>> inlets;
 
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
-        const toml::value & bound = input_boundaries[i_bc];
+        const Input & bound = input_boundaries[i_bc];
         if (!bound.contains("name")) {
             throw std::runtime_error("Boundary name not specified.");
         }
@@ -569,11 +623,9 @@ void Solver::init_boundaries() {
         bcs.push_back(bc);
         for (uint32_t i = 0; i < partition->n_faces(); i++) face_bc[partition->h_faces(i)] = static_cast<int>(bcs.size() - 1);
     }
+    const std::string uncovered = zones_without_condition(face_bc);
+    if (!uncovered.empty()) throw InputError("boundaries: no condition for " + uncovered + ".");
     for (uint32_t i_face = 0; i_face < mesh->n_faces; i_face++) {
-        if (mesh->h_cells_of_face(i_face, 1) < 0 && face_bc[i_face] < 0) {
-            throw std::runtime_error("Boundary face " + std::to_string(i_face) +
-                                     " has no boundary condition.");
-        }
         // Faces on the axis carry no flux (zero revolved area); their ghost
         // states feed reconstruction and gradients, which need the mirror image
         if (axisymmetric && mesh->h_cells_of_face(i_face, 1) < 0 && mesh->h_face_measure(i_face) == 0.0_r) {
@@ -633,7 +685,7 @@ void Solver::init_sources() {
     if (!input.contains("source")) {
         return;
     }
-    const toml::value & source = input.at("source");
+    const Input & source = input.at("source");
     if (source.contains("gravity")) {
         std::vector<rtype> g = find_real_vector(input, "source", "gravity");
         if (g.size() != N_DIM) {
@@ -792,8 +844,8 @@ void Solver::update_boundary_states(rtype t_eval) {
 }
 
 void Solver::init_numerics() {
-    const toml::value face_reconstruction_input =
-        toml::find_or(input, "numerics", "face_reconstruction", toml::value(toml::table{}));
+    const Input face_reconstruction_input =
+        toml::find_or(input, "numerics", "face_reconstruction", Input(Input::table_type{}));
     const std::string face_reconstruction_str = toml::find_or<std::string>(face_reconstruction_input, "type", "FO");
     const std::string riemann_solver_str = toml::find_or<std::string>(input, "numerics", "riemann_solver", "HLLC");
     const std::string time_integrator_str = toml::find_or<std::string>(input, "numerics", "time_integrator", "SSPRK3");
@@ -881,7 +933,7 @@ void Solver::init_numerics() {
             "imaginary axis, and the hybrid flux's central part has no dissipation to damp them. Use "
             "chemistry.coupling = \"strang\", or convective_flux = \"riemann\".");
     }
-    const toml::value hybrid_input = toml::find_or(input, "numerics", "hybrid", toml::value(toml::table{}));
+    const Input hybrid_input = toml::find_or(input, "numerics", "hybrid", Input(Input::table_type{}));
     if (!hybrid_flux && !hybrid_input.as_table().empty()) {
         throw InputError("[numerics.hybrid] needs numerics.convective_flux = \"hybrid\".");
     }
@@ -917,7 +969,7 @@ void Solver::init_run_parameters() {
     if (!input.contains("run")) {
         throw InputError("missing [run] table.");
     }
-    const toml::value & run = input.at("run");
+    const Input & run = input.at("run");
     if (run.contains("dt") == run.contains("cfl")) {
         throw InputError("run: specify exactly one of dt and cfl.");
     }
@@ -948,7 +1000,7 @@ void Solver::init_output() {
         throw InputError("output.io_threads must be positive.");
     }
     if (input.contains("forces")) {
-        for (const auto & entry : toml::find<std::vector<toml::value>>(input, "forces")) {
+        for (const auto & entry : toml::find<std::vector<Input>>(input, "forces")) {
             ForceMonitor monitor;
             monitor.zone = toml::find<std::string>(entry, "zone");
             FaceZone * zone = mesh->get_face_zone(monitor.zone);
@@ -981,7 +1033,7 @@ void Solver::init_output() {
             }
             const std::string file = toml::find_or<std::string>(entry, "file", "forces_" + monitor.zone + ".csv");
             monitor.file = file;
-            if (comm::is_root()) {
+            if (comm::is_root() && output_files_enabled()) {
                 const std::filesystem::path parent = std::filesystem::path(file).parent_path();
                 if (!parent.empty()) std::filesystem::create_directories(parent);
                 // init_output runs before the restart state is read, so check the input
@@ -1016,7 +1068,7 @@ void Solver::init_output() {
         }
         const std::string file = toml::find_or<std::string>(input, "integrals", "file", "integrals.csv");
         integral_monitor.file = file;
-        if (comm::is_root()) {
+        if (comm::is_root() && output_files_enabled()) {
             const std::filesystem::path parent = std::filesystem::path(file).parent_path();
             if (!parent.empty()) std::filesystem::create_directories(parent);
             const bool resume = toml::find_or<std::string>(input, "initialize", "type", "") == "restart" &&
@@ -1038,7 +1090,7 @@ void Solver::init_output() {
     if (!input.contains("write_data")) {
         return;
     }
-    std::vector<toml::value> outputs = toml::find<std::vector<toml::value>>(input, "write_data");
+    std::vector<Input> outputs = toml::find<std::vector<Input>>(input, "write_data");
     for (const auto & output : outputs) {
         data_writers.push_back(std::make_unique<DataWriter>());
         data_writers.back()->init(output, data, mesh, restart_variables());
