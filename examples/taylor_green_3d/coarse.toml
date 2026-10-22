@@ -1,0 +1,79 @@
+# Coarse start of the Taylor-Green vortex (input.toml) for a run on a finer
+# mesh: 16^3 hexahedra up to t = 6, before the vortex sheets roll up; the
+# restart file it ends with initializes remap.toml (32^3). Needs the 3D build.
+#
+#   ../../build3d/src/Mallard -i coarse.toml
+#   ../../build3d/src/Mallard -i remap.toml
+
+[run]
+t_stop = 6.0
+cfl = 1.0
+
+[mesh]
+type = "cartesian"
+Nx = 16
+Ny = 16
+Nz = 16
+Lx = 3.141592653589793
+Ly = 3.141592653589793
+Lz = 3.141592653589793
+
+[initialize]
+type = "analytical"
+u = ["sin(x) * cos(y) * cos(z)", "-cos(x) * sin(y) * cos(z)", "0.0"]
+p = "71.42857142857143 + (cos(2 * x) + cos(2 * y)) * (cos(2 * z) + 2) / 16"
+T = "1.0"
+
+[[boundaries]]
+name = "left"
+type = "symmetry"
+
+[[boundaries]]
+name = "right"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "back"
+type = "symmetry"
+
+[[boundaries]]
+name = "front"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 71.42857142857143
+T_ref = 1.0
+rho_ref = 1.0
+mu = 0.000625
+Pr = 0.71
+
+[output]
+check_interval = 500
+
+[integrals]
+interval = 5
+file = "coarse/integrals.csv"
+
+[[write_data]]
+prefix = "./coarse/tgv"
+format = "restart"
+interval = 1000000

@@ -28,18 +28,15 @@ type = "navier_stokes"     # LES needs navier_stokes
 model = "sigma"            # the default in 3D
 
 [numerics]
-riemann_solver = "HLLC"
-convective_flux = "hybrid" # central where smooth, HLLC at shocks
-
-[numerics.face_reconstruction]
-type = "TENO"
-order = 5
+preset = "les"             # hybrid flux: central where smooth, HLLC at
+                           # shocks; unlimited MUSCL states; CFL 0.8
 
 [integrals]
 budget = true              # model vs numerical dissipation in integrals.csv
 ```
 
-This is the setup of the `channel_les` and `cbc_les` examples: the channel at
+The `les` [preset](numerics.md#presets) is the setup of the `channel_les`
+and `cbc_les` examples: the channel at
 Re<sub>τ</sub> = 395 and 590 lands within 0.7% and 1.6% of the DNS
 ([validation](https://matthewbonanni.github.io/mallard/validation/#les-channel)),
 decaying grid turbulence within the measured spectra
