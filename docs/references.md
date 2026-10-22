@@ -49,7 +49,7 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="nishikawa-kitamura-2008"></a>H. Nishikawa and K. Kitamura, Very simple, carbuncle-free, boundary-layer-resolving, rotated-hybrid Riemann solvers, *J. Comput. Phys.* 227, 2560–2581 (2008). [doi:10.1016/j.jcp.2007.11.003](https://doi.org/10.1016/j.jcp.2007.11.003)
   Used in: `riemann_solver = "RHLL"`, the rotated hybrid of HLL and Roe.
 - <a id="kim-kim-rho-2001"></a>K. H. Kim, C. Kim and O.-H. Rho, Methods for the accurate computations of hypersonic flows: I. AUSMPW+ scheme, *J. Comput. Phys.* 174, 38–80 (2001). [doi:10.1006/jcph.2001.6873](https://doi.org/10.1006/jcph.2001.6873)
-  Used in: RHLL's pressure weight min(p_l / p_r, p_r / p_l)^3, which blends the rotated flux toward HLL across faces that carry a shock.
+  Used in: RHLL's pressure weight $\min(p_l/p_r,\, p_r/p_l)^3$, which blends the rotated flux toward HLL across faces that carry a shock.
 - <a id="quirk-1994"></a>J. J. Quirk, A contribution to the great Riemann solver debate, *Int. J. Numer. Methods Fluids* 18, 555–574 (1994). [doi:10.1002/fld.1650180603](https://doi.org/10.1002/fld.1650180603)
   Used in: the carbuncle and odd–even decoupling tests that RHLL passes and HLLC and Roe fail (`test/solver_test.cpp`; the Shu–Osher validation).
 
@@ -121,6 +121,26 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: thickening only where the flame sensor is on (dynamic thickening).
 - <a id="butler-orourke-1977"></a>T. D. Butler and P. J. O'Rourke, A numerical method for two dimensional unsteady reacting flows, *Proc. Combust. Inst.* 16, 1503–1515 (1977). [doi:10.1016/S0082-0784(77)80432-3](https://doi.org/10.1016/S0082-0784%2877%2980432-3)
   Used in: the thickening transformation `D -> F D`, `omega -> omega / F` that keeps the laminar flame speed.
+
+## Wall modeling
+
+- <a id="choi-moin-2012"></a>H. Choi and P. Moin, Grid-point requirements for large eddy simulation: Chapman's estimates revisited, *Phys. Fluids* 24, 011702 (2012). [doi:10.1063/1.3676783](https://doi.org/10.1063/1.3676783)
+  Used in: the cost argument for wall-modeled LES ([Wall models](theory/wall_models.md)).
+- <a id="larsson-2016"></a>J. Larsson, S. Kawai, J. Bodart and I. Bermejo-Moreno, Large eddy simulation with modeled wall-stress: recent progress and future directions, *Mech. Eng. Rev.* 3, 15-00418 (2016). [doi:10.1299/mer.15-00418](https://doi.org/10.1299/mer.15-00418)
+- <a id="bose-park-2018"></a>S. T. Bose and G. I. Park, Wall-modeled large-eddy simulation for complex turbulent flows, *Annu. Rev. Fluid Mech.* 50, 535–561 (2018). [doi:10.1146/annurev-fluid-122316-045241](https://doi.org/10.1146/annurev-fluid-122316-045241)
+  Used in (these two): the wall-stress coupling, in which the model's stress and heat flux replace the wall's viscous flux.
+- <a id="kawai-larsson-2012"></a>S. Kawai and J. Larsson, Wall-modeling in large eddy simulation: Length scales, grid resolution, and accuracy, *Phys. Fluids* 24, 015105 (2012). [doi:10.1063/1.3678331](https://doi.org/10.1063/1.3678331)
+  Used in: the exchange point a height `h` off the wall (the log-layer mismatch); the equilibrium ODE model (`model = "equilibrium"`; `src/physics/wall_model.h`).
+- <a id="van-driest-1956"></a>E. R. van Driest, On turbulent flow near a wall, *J. Aeronaut. Sci.* 23, 1007–1011 (1956). [doi:10.2514/8.3713](https://doi.org/10.2514/8.3713)
+  Used in: the damping of the wall models' mixing length (`A_plus`).
+- <a id="griffin-2021"></a>K. P. Griffin, L. Fu and P. Moin, Velocity transformation for compressible wall-bounded turbulent flows with and without heat transfer, *Proc. Natl. Acad. Sci.* 118, e2111144118 (2021). [doi:10.1073/pnas.2111144118](https://doi.org/10.1073/pnas.2111144118)
+- <a id="griffin-2023"></a>K. P. Griffin, L. Fu and P. Moin, Near-wall model for compressible turbulent boundary layers based on an inverse velocity transformation, *J. Fluid Mech.* 970, A36 (2023). [doi:10.1017/jfm.2023.627](https://doi.org/10.1017/jfm.2023.627)
+  Used in (these two): the default wall model (`model = "gfm"`), the inverse of the 2021 transformation with the Reynolds analogy through the exchange point.
+- <a id="zhang-2014"></a>Y.-S. Zhang, W.-T. Bi, F. Hussain and Z.-S. She, A generalized Reynolds analogy for compressible wall-bounded turbulent flows, *J. Fluid Mech.* 739, 392–420 (2014). [doi:10.1017/jfm.2013.620](https://doi.org/10.1017/jfm.2013.620)
+  Used in: the temperature-velocity relation and heat flux of the `gfm` wall model (`s`).
+- <a id="lee-moser-2015"></a>M. Lee and R. D. Moser, Direct numerical simulation of turbulent channel flow up to Re<sub>τ</sub> ≈ 5200, *J. Fluid Mech.* 774, 395–415 (2015). [doi:10.1017/jfm.2015.268](https://doi.org/10.1017/jfm.2015.268)
+- <a id="trettel-larsson-2016"></a>A. Trettel and J. Larsson, Mean velocity scaling for compressible wall turbulence with heat transfer, *Phys. Fluids* 28, 026102 (2016). [doi:10.1063/1.4942022](https://doi.org/10.1063/1.4942022)
+  Used in (these two): `examples/channel_wmles`, the wall-modeled channels at Re<sub>τ</sub> = 2000 and 5200 and the isothermal supersonic channels ([design notes](design/wall_model.md#10-results)).
 
 ## Boundary conditions
 

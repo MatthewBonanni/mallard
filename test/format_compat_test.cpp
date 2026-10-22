@@ -50,15 +50,15 @@ const std::vector<Fixture> RESTART_FIXTURES = {
 };
 
 /** @brief The fixture's input, without output; from a restart file if one is given. */
-toml::value fixture_input(const std::string & name, const fs::path & restart = {}) {
-    toml::value input = toml::parse((FORMATS / (name + ".toml")).string());
+Input fixture_input(const std::string & name, const fs::path & restart = {}) {
+    Input input = parse_input((FORMATS / (name + ".toml")).string());
     input.as_table().erase("write_data");
     auto & physics = input.at("physics");
     if (physics.contains("mechanism")) {
         physics["mechanism"] = (FORMATS / physics.at("mechanism").as_string()).lexically_normal().string();
     }
     if (!restart.empty()) {
-        toml::value init(toml::table{});
+        Input init(Input::table_type{});
         init["type"] = "restart";
         init["file"] = restart.string();
         input["initialize"] = init;
@@ -67,7 +67,7 @@ toml::value fixture_input(const std::string & name, const fs::path & restart = {
 }
 
 /** @brief Each conserved variable and species density of every cell, after init (and the run's steps if run). */
-std::vector<std::vector<double>> solver_state(const toml::value & input, bool run) {
+std::vector<std::vector<double>> solver_state(const Input & input, bool run) {
     Solver solver;
     solver.init(input);
     if (run) {
