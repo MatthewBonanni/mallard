@@ -115,7 +115,7 @@ Each record has a `type`:
 
 | `type` | When | Fields |
 |---|---|---|
-| `start` | After setup | `schema` (`"mallard-run-log"`), `version` (1), `provenance` (below), `placement` (one object per rank: `rank`, `host`, `device` and `gpu` (Kokkos device id, PCI bus id; `null` on CPUs), `cpus` (the CPU set, Linux; `null` elsewhere), `threads`), `setup_phases` (seconds of each setup phase: `max` and `mean` over ranks) |
+| `start` | After setup | `schema` (`"mallard-run-log"`), `version` (1), `provenance` (below), `placement` (one object per rank: `rank`, `host`, `device` and `gpu` (Kokkos device id, PCI bus id; `null` on CPUs), `cpus` (the CPU set before Kokkos starts, Linux; `null` elsewhere), `threads`), `setup_phases` (seconds of each setup phase: `max` and `mean` over ranks) |
 | `progress` | Every progress row | as below |
 | `event` | A file written (the rows between progress rows) | `step`, `t`, `kind` (`vtu`, `hdf5`, `restart`, ...), `text` |
 | `warning`, `error` | A warning, or the error that ended the run | `message` |

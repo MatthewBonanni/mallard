@@ -18,6 +18,7 @@
 #include "case_template.h"
 #include "input.h"
 #include "log.h"
+#include "provenance.h"
 #include "parallel/comm.h"
 #include "solver/solver.h"
 
@@ -97,6 +98,7 @@ int main(int argc, char* argv[]) {
     comm::Session session(argc, argv);
     if (!comm::is_root()) std::cout.rdbuf(nullptr);
 
+    provenance::capture_cpu_set();
     Kokkos::initialize(argc, argv);
     int status = 0;
     {

@@ -354,7 +354,13 @@ std::string format_cpu_list(const std::vector<int> & cpus) {
 
 namespace {
 
+std::string & captured_cpus() {
+    static std::string cpus;
+    return cpus;
+}
+
 std::string cpu_set() {
+    if (!captured_cpus().empty()) return captured_cpus();
 #ifdef __linux__
     cpu_set_t set;
     CPU_ZERO(&set);
@@ -381,6 +387,8 @@ std::string gpu_id() {
 }
 
 } // namespace
+
+void capture_cpu_set() { captured_cpus() = cpu_set(); }
 
 void set_placement() {
     char host[256] = {};
