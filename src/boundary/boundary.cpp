@@ -24,7 +24,7 @@
 #include "mesh.h"
 #include "synthetic_inflow.h"
 
-BoundaryCondition BoundaryCondition::from_input(const toml::value & input, const Euler & physics) {
+BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler & physics) {
     const std::string name = toml::find<std::string>(input, "name");
     const std::string type_str = toml::find<std::string>(input, "type");
     auto it = BOUNDARY_TYPES.find(type_str);

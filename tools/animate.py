@@ -7,7 +7,6 @@ Frames are rasterized by mapping every pixel to the cell containing it, which
 works for any mesh (triangles, quads, mixed).
 """
 import argparse
-import glob
 import os
 import shutil
 import tempfile
@@ -21,7 +20,7 @@ import numpy as np
 from matplotlib.tri import Triangulation
 from scipy.ndimage import gaussian_filter
 
-from mallard_vtu import read_vtu
+from mallard_vtu import read_vtu, series
 
 
 def pixel_to_cell(pts, tris, tri_cell, res, xlim=None, ylim=None):
@@ -162,7 +161,8 @@ def main():
     ap.add_argument("--cmap", default="turbo")
     ap.add_argument("--vmin", type=float, help="Color range minimum (default: the series minimum)")
     ap.add_argument("--vmax", type=float, help="Color range maximum (default: the series maximum)")
-    ap.add_argument("--glob", default="*.vtu", help="Snapshot file pattern within the series directory")
+    ap.add_argument("--glob", default="*",
+                    help="Snapshot file pattern within the series directory (PVTU files of MPI runs are preferred)")
     ap.add_argument("--width", type=float, default=14.0, help="Figure width in inches; text scales with it")
     ap.add_argument("--dpi", type=int, default=100)
     ap.add_argument("--layout", choices=["auto", "stacked", "side", "single"], default="auto",
@@ -176,7 +176,7 @@ def main():
     ap.add_argument("--frames-dir", help="Keep the PNG frames in this directory")
     args = ap.parse_args()
 
-    all_files = sorted(glob.glob(os.path.join(args.series_dir, args.glob)))
+    all_files = series(args.series_dir, args.glob)
     files = all_files[::-1][::args.every][::-1]
     pts, tris, tri_cell, data = read_vtu(files[0])
     cell, valid, extent = pixel_to_cell(pts, tris, tri_cell, args.res, args.xlim, args.ylim)

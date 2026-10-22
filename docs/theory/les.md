@@ -7,7 +7,7 @@ SGS models, the filter width, the global dynamic procedure, the two
 turbulent combustion models (thickened flame and partially stirred
 reactor) and the synthetic turbulence of characteristic inlets. The
 low-dissipation convective flux used with LES is in
-[chapter 6](fluxes.md#hybrid-central-upwind-flux). Usage:
+[chapter 7](fluxes.md#hybrid-central-upwind-flux). Usage:
 [Large-eddy simulation](../guide/les.md); design and validation:
 [LES design notes](../design/les.md).
 
@@ -39,9 +39,10 @@ of the SGS stress, the SGS diffusion of kinetic energy and the
 subgrid parts of the molecular fluxes are neglected, and without a
 combustion model the filtered reaction rates are those of the filtered
 state. Wall faces keep the molecular fluxes only
-([chapter 8](boundaries_sources.md#walls)). The eddy viscosity is
+([chapter 9](boundaries_sources.md#walls)), or take a wall model's
+([chapter 5](wall_models.md)). The eddy viscosity is
 recomputed at every stage from the cell velocity gradients of the viscous
-terms ([chapter 5](finite_volume.md#gradients-for-the-viscous-terms));
+terms ([chapter 6](finite_volume.md#gradients-for-the-viscous-terms));
 filter symbols are dropped in the other chapters.
 
 ## Subgrid-scale models
@@ -288,7 +289,7 @@ $$
 with $C_u$ = `C_u` (default 28). The Laplacian of the vorticity is the
 divergence of its face gradients, cell gradients averaged to interior faces
 and corrected along the line of centroids as the viscous fluxes are
-([chapter 6](fluxes.md#viscous-fluxes)); boundary faces carry none. Without
+([chapter 7](fluxes.md#viscous-fluxes)); boundary faces carry none. Without
 the efficiency (`efficiency = "none"`) or where $F = 1$ or $u'_\Delta = 0$,
 $\mathcal{E} = 1$. The fields $\Omega$, $F$ and $\mathcal{E}$ are evaluated
 once per time step and held over its stages.
@@ -330,7 +331,7 @@ fluctuation comes from the digital filter of
 Reynolds stress imposed as
 [Lund, Wu & Squires 1998](../references.md#lund-1998) propose
 (`src/boundary/synthetic_inflow.cpp`). How the target enters the flow is in
-[chapter 8](boundaries_sources.md#characteristic-boundaries).
+[chapter 9](boundaries_sources.md#characteristic-boundaries).
 
 1. **Random field.** Independent unit-variance random numbers
     $r_j(\mathbf{k}, m)$ for each velocity component $j$ live on an auxiliary

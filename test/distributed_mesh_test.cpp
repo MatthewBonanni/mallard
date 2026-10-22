@@ -218,7 +218,7 @@ void expect_same(Mesh & mesh, const Distribution & dist, Mesh & ref, const Distr
 TEST(DistributedMeshTest, LocalMeshesMatchTheSetupFromTheGlobalMesh) {
     for (const std::string & mesh_input : mesh_inputs()) {
         SCOPED_TRACE(mesh_input);
-        const toml::value input = parse_toml("[mesh]\n" + mesh_input);
+        const Input input = parse_toml("[mesh]\n" + mesh_input);
         Mesh global;
         global.init(input);
         DistributedMesh distributed(read_mesh_block(input));
@@ -257,7 +257,7 @@ TEST(DistributedMeshTest, LocalMeshesMatchTheSetupFromTheGlobalMesh) {
  *        cells along the curve on one rank, and so equal pieces in curve order.
  */
 TEST(DistributedMeshTest, HilbertPartitionSplitsTheGlobalCurveOrderEvenly) {
-    const toml::value input = parse_toml("[mesh]\n" + mesh_inputs()[0]);
+    const Input input = parse_toml("[mesh]\n" + mesh_inputs()[0]);
     DistributedMesh distributed(read_mesh_block(input));
     const std::vector<int> owner = partition_hilbert(distributed, comm::size());
 
@@ -301,7 +301,7 @@ TEST(DistributedMeshTest, PeriodicHaloLayersFollowVertexNeighborsAcrossSeams) {
     const std::string input = N_DIM == 2
         ? "[mesh]\ntype = \"cartesian_tri\"\nNx = 9\nNy = 7\nperiodic = [\"x\", \"y\"]\n"
         : "[mesh]\ntype = \"cartesian_tet\"\nNx = 4\nNy = 3\nNz = 3\nperiodic = [\"x\", \"y\", \"z\"]\n";
-    const toml::value parsed = parse_toml(input);
+    const Input parsed = parse_toml(input);
     Mesh global;
     global.init(parsed);
     DistributedMesh distributed(read_mesh_block(parsed), Mesh::periodic_pairs(parsed));
@@ -420,7 +420,7 @@ std::pair<PeriodicNodes, std::vector<bool>> serial_classes(const MeshBlock & blo
 TEST(DistributedMeshTest, PeriodicClassesMatchTheSerialMatcherWithoutGatheringTheZones) {
     for (const std::string & input : periodic_inputs()) {
         SCOPED_TRACE(input);
-        const toml::value parsed = parse_toml(input);
+        const Input parsed = parse_toml(input);
         const MeshBlock block = read_mesh_block(parsed);
         const auto pairs = Mesh::periodic_pairs(parsed);
         const auto [expected, on_zone] = serial_classes(block, pairs);
@@ -456,7 +456,7 @@ TEST(DistributedMeshTest, PeriodicZonesThatDoNotMatchAreRejectedOnEveryRank) {
     std::string pairs = periodic_pairs_input(N_DIM);
     const std::string unit = "translation = [1.0";
     pairs.replace(pairs.find(unit), unit.size(), "translation = [0.9");
-    const toml::value parsed = parse_toml("[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" + pairs);
+    const Input parsed = parse_toml("[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" + pairs);
     uint32_t reported = 0;
     try {
         DistributedMesh distributed(read_mesh_block(parsed), Mesh::periodic_pairs(parsed));
