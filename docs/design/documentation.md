@@ -88,4 +88,6 @@ The first job of `ci.yml` checks this (`python3 tools/changelog.py check`
 runs it locally). At a release, `python3 tools/changelog.py release X.Y.Z`
 folds the Unreleased section and the fragments into `## [X.Y.Z] - date`,
 deletes the fragments and updates the compare links; the GitHub release notes
-start from `python3 tools/changelog.py notes X.Y.Z`.
+start from `python3 tools/changelog.py notes X.Y.Z`. Before tagging, regenerate
+the [verification manual](../verification/index.md#how-the-tables-are-made)
+(`tools/docs/verification.py`, or the *Verification* workflow) and commit it.
