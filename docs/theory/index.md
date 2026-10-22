@@ -3,7 +3,7 @@
 The equations Mallard solves and the methods it solves them with, as
 implemented on `main`: every model and scheme of the solver, with the
 formulas, constants and defaults of the source code it cites. The
-[user guide](../guide/first_simulation.md) explains how to use them;
+[user guide](../guide/quick_start.md) explains how to use them;
 [Numerical methods](../numerics/overview.md) collects measured stability
 limits, accuracy studies and known limitations; the sources are in
 [References](../references.md).
