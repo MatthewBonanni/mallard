@@ -205,7 +205,7 @@ void Solver::init_health() {
     if (double_flux) ledger.uncheck(ENERGY, "double flux does not conserve energy (its reset is a repair)");
     if (radiating) ledger.uncheck(ENERGY, "the radiative loss is not re-evaluated");
     if (axisymmetric) ledger.uncheck(2, "the hoop stress source of axisymmetric runs is not re-evaluated");
-    if (sponge_cells.extent(0) > 0 || comm::allreduce(uint32_t(sponge_cells.extent(0)), comm::Op::MAX) > 0) {
+    if (comm::allreduce(static_cast<uint32_t>(sponge_cells.extent(0)), comm::Op::MAX) > 0) {
         for (uint32_t i = N_CONSERVATIVE; i < ledger.n_components(); i++) {
             ledger.uncheck(i, "the sponges' species sources are not re-evaluated");
         }
