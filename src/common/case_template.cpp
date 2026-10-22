@@ -10,6 +10,7 @@
  */
 
 #include "case_template.h"
+#include "input.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -182,7 +183,7 @@ std::string replace_all(std::string text, const std::string & from, const std::s
     return text;
 }
 
-std::vector<std::string> string_list(const toml::value & v, const std::string & key) {
+std::vector<std::string> string_list(const Input & v, const std::string & key) {
     if (!v.contains(key)) return {};
     return toml::find<std::vector<std::string>>(v, key);
 }
@@ -227,7 +228,7 @@ fs::path data_dir() {
 Manifest load_manifest() {
     Manifest m;
     m.root = fs::absolute(data_dir());
-    const toml::value v = toml::parse((m.root / manifest_path).string());
+    const Input v = parse_input((m.root / manifest_path).string());
     m.input_docs = toml::find<std::string>(v, "docs", "input");
     m.source_url = toml::find<std::string>(v, "docs", "source");
     for (const auto & t : v.at("tables").as_array()) {

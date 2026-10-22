@@ -35,3 +35,11 @@ uint32_t vtk_local_node(uint32_t n_nodes, uint32_t k) {
     constexpr uint32_t WEDGE[6] = {0, 2, 1, 3, 5, 4};
     return (N_DIM == 3 && n_nodes == 6) ? WEDGE[k] : k;
 }
+
+namespace {
+bool output_files = true;
+}
+
+bool output_files_enabled() { return output_files; }
+
+void set_output_files_enabled(const bool on) { output_files = on; }
