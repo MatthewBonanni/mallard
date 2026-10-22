@@ -282,7 +282,7 @@ TEST(MPITest, PeriodicRunsMatchSerialAcrossSeamsCutByThePartition) {
 TEST(MPITest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
     const std::string file = write_temp_shared("mallard_mpi_periodic.msh", jittered_mixed_mesh(16));
     std::string input = box_input("cartesian", "type = \"TENO\"\norder = 4\n", EULER, "", 12);
-    const std::string generated = "type = \"cartesian\"\n";
+    const std::string generated = "type = \"cartesian\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     input += "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0]\n"
              "[[periodic]]\nzones = [\"bottom\", \"top\"]\ntranslation = [0.0, 1.0]\n"
@@ -712,7 +712,7 @@ TEST(MPITest, HDF5OutputDoesNotDependOnTheRankCount) {
     std::string input = box_input("cartesian", "type = \"MUSCL\"\n", EULER,
                                   bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
                                       "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 6);
-    const std::string generated = "type = \"cartesian\"\n";
+    const std::string generated = "type = \"cartesian\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     expect_hdf5_output_matches_serial(input + "[statistics]\ninterval = 2\nfields = [\"P\"]\n",
                                       "interval = 3\nvariables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n",
@@ -830,7 +830,7 @@ TEST(MPITest, RunFromHDF5MeshFileMatchesSerial) {
     std::string input = box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
                                   bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
                                       "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 10);
-    const std::string generated = "type = \"cartesian_tri\"\n";
+    const std::string generated = "type = \"cartesian_tri\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     expect_matches_serial(input);
     comm::barrier();

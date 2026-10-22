@@ -18,7 +18,7 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "common.h"
 #include "boundary.h"
@@ -37,7 +37,7 @@ struct WallModelSpec {
      * @brief Parse and check the table for a boundary of condition bc;
      *        where names the entry in messages.
      */
-    static WallModelSpec from_input(const toml::value & table, const BoundaryCondition & bc, const std::string & where);
+    static WallModelSpec from_input(const Input & table, const BoundaryCondition & bc, const std::string & where);
 
     std::string summary() const;
 };

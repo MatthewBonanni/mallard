@@ -1,0 +1,2 @@
+- **Unknown or unused input keys are now errors** in every run, with the line number and the most likely intended key; boundary zones without a condition are named (#362).
+- `[parallel]` is read in every run (#362).

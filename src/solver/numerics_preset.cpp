@@ -23,7 +23,7 @@ namespace {
 
 struct Entry {
     std::vector<std::string> path;
-    toml::value value;
+    Input value;
 };
 
 struct Preset {
@@ -42,36 +42,36 @@ std::vector<std::string> reconstruction(const std::string & key) {
 const std::vector<Preset> & presets() {
     static const std::vector<Preset> list = {
         {"robust", {
-            {reconstruction("type"), toml::value("MUSCL")},
-            {reconstruction("limiter"), toml::value("venkatakrishnan")},
-            {{"numerics", "riemann_solver"}, toml::value("RHLL")},
-            {{"numerics", "convective_flux"}, toml::value("riemann")},
-            {{"numerics", "time_integrator"}, toml::value("SSPRK3")},
-            {{"run", "cfl"}, toml::value(0.5)},
+            {reconstruction("type"), Input("MUSCL")},
+            {reconstruction("limiter"), Input("venkatakrishnan")},
+            {{"numerics", "riemann_solver"}, Input("RHLL")},
+            {{"numerics", "convective_flux"}, Input("riemann")},
+            {{"numerics", "time_integrator"}, Input("SSPRK3")},
+            {{"run", "cfl"}, Input(0.5)},
         }},
         {"accurate", {
-            {reconstruction("type"), toml::value("TENO")},
-            {reconstruction("order"), toml::value(5)},
-            {{"numerics", "riemann_solver"}, toml::value("HLLC")},
-            {{"numerics", "convective_flux"}, toml::value("riemann")},
-            {{"numerics", "time_integrator"}, toml::value("SSPRK3")},
-            {{"run", "cfl"}, toml::value(1.0)},
+            {reconstruction("type"), Input("TENO")},
+            {reconstruction("order"), Input(5)},
+            {{"numerics", "riemann_solver"}, Input("HLLC")},
+            {{"numerics", "convective_flux"}, Input("riemann")},
+            {{"numerics", "time_integrator"}, Input("SSPRK3")},
+            {{"run", "cfl"}, Input(1.0)},
         }},
         {"les", {
-            {reconstruction("type"), toml::value("MUSCL")},
-            {reconstruction("limiter"), toml::value("none")},
-            {{"numerics", "riemann_solver"}, toml::value("HLLC")},
-            {{"numerics", "convective_flux"}, toml::value("hybrid")},
-            {{"numerics", "time_integrator"}, toml::value("SSPRK3")},
-            {{"run", "cfl"}, toml::value(0.8)},
+            {reconstruction("type"), Input("MUSCL")},
+            {reconstruction("limiter"), Input("none")},
+            {{"numerics", "riemann_solver"}, Input("HLLC")},
+            {{"numerics", "convective_flux"}, Input("hybrid")},
+            {{"numerics", "time_integrator"}, Input("SSPRK3")},
+            {{"run", "cfl"}, Input(0.8)},
         }},
         {"reacting", {
-            {reconstruction("type"), toml::value("MUSCL")},
-            {reconstruction("limiter"), toml::value("venkatakrishnan")},
-            {{"numerics", "riemann_solver"}, toml::value("HLLC")},
-            {{"numerics", "convective_flux"}, toml::value("riemann")},
-            {{"numerics", "time_integrator"}, toml::value("SSPRK3")},
-            {{"run", "cfl"}, toml::value(0.35)},
+            {reconstruction("type"), Input("MUSCL")},
+            {reconstruction("limiter"), Input("venkatakrishnan")},
+            {{"numerics", "riemann_solver"}, Input("HLLC")},
+            {{"numerics", "convective_flux"}, Input("riemann")},
+            {{"numerics", "time_integrator"}, Input("SSPRK3")},
+            {{"run", "cfl"}, Input(0.35)},
         }},
     };
     return list;
@@ -83,14 +83,14 @@ std::string join(const std::vector<std::string> & path) {
     return key;
 }
 
-std::string text(const toml::value & v) {
+std::string text(const Input & v) {
     if (v.is_string()) return v.as_string();
     if (v.is_floating()) return logging::real(v.as_floating());
     return toml::format(v);
 }
 
-const toml::value * lookup(const toml::value & input, const std::vector<std::string> & path) {
-    const toml::value * v = &input;
+const Input * lookup(const Input & input, const std::vector<std::string> & path) {
+    const Input * v = &input;
     for (const auto & part : path) {
         if (!v->is_table() || !v->contains(part)) return nullptr;
         v = &v->at(part);
@@ -98,10 +98,10 @@ const toml::value * lookup(const toml::value & input, const std::vector<std::str
     return v;
 }
 
-toml::value & table_at(toml::value & input, const std::vector<std::string> & path) {
-    toml::value * v = &input;
+Input & table_at(Input & input, const std::vector<std::string> & path) {
+    Input * v = &input;
     for (const auto & part : path) {
-        if (!v->contains(part)) v->as_table().emplace(part, toml::table{});
+        if (!v->contains(part)) v->as_table().emplace(part, Input::table_type{});
         v = &v->at(part);
         if (!v->is_table()) throw InputError(join(path) + " must be a table.");
     }
@@ -124,9 +124,9 @@ std::string Resolution::summary() const {
     return overrides.empty() ? name : name + " (the input sets " + overrides + ")";
 }
 
-Resolution apply(toml::value & input) {
+Resolution apply(Input & input) {
     Resolution resolution;
-    const toml::value * name = lookup(input, {"numerics", "preset"});
+    const Input * name = lookup(input, {"numerics", "preset"});
     if (!name) return resolution;
     std::unordered_map<std::string, const Preset *> by_name;
     for (const auto & preset : presets()) by_name.emplace(preset.name, &preset);
@@ -136,7 +136,7 @@ Resolution apply(toml::value & input) {
     const Preset & preset = *it->second;
     resolution.name = preset.name;
 
-    const toml::value * type = lookup(input, reconstruction("type"));
+    const Input * type = lookup(input, reconstruction("type"));
     std::string preset_type;
     for (const auto & entry : preset.entries) {
         if (entry.path == reconstruction("type")) preset_type = entry.value.as_string();
@@ -147,10 +147,10 @@ Resolution apply(toml::value & input) {
         const std::vector<std::string> parent(entry.path.begin(), entry.path.end() - 1);
         const bool reconstruction_option = parent == RECONSTRUCTION && entry.path.back() != "type";
         if (reconstruction_option && !own_reconstruction) continue;
-        const toml::value * set = lookup(input, entry.path);
+        const Input * set = lookup(input, entry.path);
         if (key == "run.cfl" && !set) {
             const std::vector<std::string> dt_path = {"run", "dt"};
-            if (const toml::value * dt = lookup(input, dt_path)) {
+            if (const Input * dt = lookup(input, dt_path)) {
                 resolution.settings.push_back({join(dt_path), text(*dt), false});
                 continue;
             }
