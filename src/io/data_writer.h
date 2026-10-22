@@ -21,7 +21,7 @@
 #include <utility>
 #include <vector>
 
-#include <toml.hpp>
+#include "input.h"
 
 #include "data.h"
 #include "global_order.h"
@@ -130,7 +130,7 @@ class DataWriter {
          * @param restart_variables Variables of a restart file, in order
          *        (default: CONSERVATIVE_NAMES); ignored for other formats.
          */
-        void init(const toml::value & input,
+        void init(const Input & input,
                   std::vector<Data> & data,
                   std::shared_ptr<Mesh> mesh,
                   const std::vector<std::string> & restart_variables = {});
