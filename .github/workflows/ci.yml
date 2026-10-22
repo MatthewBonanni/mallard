@@ -299,7 +299,8 @@ jobs:
                     | [.name, .status, (.conclusion // ""), .html_url] | @tsv') || { sleep 30; continue; }
             open=0; seen=0
             while IFS=$'\t' read -r name status conclusion url; do
-              case "$name" in ""|*'{{'*) continue ;; esac
+              [ -n "$name" ] || continue
+              case "$name" in *'{{'*) name=${name%%'{{'*}; name=${name%-'$'} ;; esac
               if [ "$name" = "CI result" ]; then seen=1; [ "$status" = completed ] || open=1; continue; fi
               case "$status/$conclusion" in
                 completed/success) s=success; d=Passed ;;
