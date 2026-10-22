@@ -244,6 +244,7 @@ TEST(MeshImportTest, MalformedHdf5MeshIsRejected) {
         MeshBlock block;
         block.node_coords.assign(N_DIM + 1, {});
         block.zone_names = {"wall"};
+        block.add_face(std::vector<uint64_t>{0, 1}, 0);
         block.cell_offsets = std::move(offsets);
         block.cell_nodes = std::move(nodes);
         return block;
