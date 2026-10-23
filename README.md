@@ -63,10 +63,13 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 **Input, output and diagnostics**
 - TOML input with units (`p = "1 atm"`, `Lx = "5 mm"`), converted to SI and checked against each key's dimension; initial conditions, boundary states, sources and sponges as analytical expressions; misspelled or unused keys are errors, with suggestions
 - Pre-flight check (`Mallard --check`): mesh quality, stable time step, memory per GPU and cost estimate before a run
+- Case templates (`Mallard new <template>`): a ready-to-run case with mesh, run and post-processing scripts
+- Stable inputs and files across releases: renamed keys keep working with a warning for a release and `Mallard upgrade-input` rewrites old inputs; restart, mesh and output files carry format versions, and files written since 0.6 are read by later releases
 - Conservative, high-order remap of a restart onto another mesh (any cell type, resolution or rank count): exact cell intersections, integrals kept to rounding
 - VTU (ParaView) or parallel HDF5 with XDMF; surface output of boundary zones
 - Running means and covariances; probes on points and curves (cell averages or high-order point values, CSV, HDF5 or VTK, with integrals, means and extrema); domain integrals (kinetic energy, enstrophy, ...), wall forces
 - Heat release, species production rates and detonation soot foils (`P_MAX`)
+- A machine-readable JSON-lines run log, and provenance (code version, build, input and mesh hashes, resolved setup) in every output file
 - `MallardReactor`, a 0D reactor, and Python tools for plotting, animation and HDF5 output
 
 **Validation and testing**
@@ -74,8 +77,8 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
   - Sphere wake at Re = 300: Strouhal number and drag within 3% and 2% of Johnson & Patel
   - Compressible isotropic turbulence: enstrophy within 2.4% of the filtered DNS of Johnsen et al.
   - CJ detonation speed within 0.01%; H2/air flame speeds within 0.81% of Cantera from φ = 0.6 to 1.4
-- Over 400 unit and regression tests: exact Riemann solutions, design order, conservation, bitwise MPI and restart reproducibility
-- CI on every code change (2D, 3D, MPI on 1-4 ranks, single precision, GCC and Clang, warnings as errors); nightly sanitizers; a GPU performance suite with per-hardware baselines, tracked by merge on the [performance dashboard](https://matthewbonanni.github.io/mallard/docs/dashboard/)
+- Over 500 unit and regression tests: exact Riemann solutions, design order, conservation, bitwise MPI and restart reproducibility; the [verification manual](https://matthewbonanni.github.io/mallard/docs/verification/) reports the measured order of 149 convergence studies, regenerated from the tests
+- CI before every merge (2D, 3D, MPI on 1-4 ranks, single precision, GCC and Clang, warnings as errors; CUDA, HIP and SYCL compile checks for device code); fuzzing of the input and mesh readers; nightly sanitizers; a GPU performance suite with per-hardware baselines, tracked by merge on the [performance dashboard](https://matthewbonanni.github.io/mallard/docs/dashboard/)
 
 The sources of every method and of the validation data are listed in [docs/references.md](docs/references.md).
 

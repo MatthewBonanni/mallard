@@ -187,7 +187,7 @@ n_points = {nx}
 interval = 1
 """
         run(args.mallard, text, work)
-        rows = list(csv.DictReader(open(work / "probe_line.csv")))
+        rows = list(csv.DictReader(line for line in open(work / "probe_line.csv") if not line.startswith("#")))
         last = max(float(r["t"]) for r in rows)
         x = np.array([float(r["x"]) for r in rows if float(r["t"]) == last])
         rho = np.array([float(r["RHO"]) for r in rows if float(r["t"]) == last])

@@ -16,6 +16,11 @@
 std::string mallard_version();
 
 /**
+ * @brief The GPU of this process (name and memory), else the CPU model.
+ */
+std::string device_name();
+
+/**
  * @brief Prints the logo and build/run information (rank 0). Call after Kokkos::initialize.
  */
 void print_header(const std::string & input_file);
