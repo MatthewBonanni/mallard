@@ -15,9 +15,12 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <utility>
+#include <vector>
 
 #include "time_integrator.h"
 #include "test_utils.h"
+#include "verification.h"
 
 namespace {
 
@@ -69,10 +72,12 @@ double integrate_error(TimeIntegrator & integrator, uint32_t n_steps) {
     return err;
 }
 
-double observed_order(TimeIntegrator & integrator) {
-    const double e1 = integrate_error(integrator, 20);
-    const double e2 = integrate_error(integrator, 40);
-    return std::log2(e1 / e2);
+/** @brief Steps 20 and 40 of the linear system converge within 0.1 of the design order. */
+void expect_design_order(TimeIntegrator & integrator, double design) {
+    verification::expect_order({"time", TIME_INTEGRATOR_NAMES.at(integrator.get_type()), "",
+                                "max error, linear system", {20, 40},
+                                {integrate_error(integrator, 20), integrate_error(integrator, 40)}, design,
+                                design - 0.1, design + 0.1});
 }
 
 } // namespace
@@ -132,9 +137,9 @@ TEST(TimeIntegratorTest, LowStorageMethodsHaveTheirDesignOrder) {
     SSPRK54 ssprk54;
     CK45 ck45;
     RDPK3Sp35 rdpk;
-    EXPECT_NEAR(observed_order(ssprk54), 4.0, 0.1);
-    EXPECT_NEAR(observed_order(ck45), 4.0, 0.1);
-    EXPECT_NEAR(observed_order(rdpk), 3.0, 0.1);
+    expect_design_order(ssprk54, 4.0);
+    expect_design_order(ck45, 4.0);
+    expect_design_order(rdpk, 3.0);
 }
 
 TEST(TimeIntegratorTest, LowStorageMethodsUseFewRegisters) {
@@ -215,24 +220,25 @@ TEST(TimeIntegratorTest, EmbeddedEstimateIsTheLocalErrorOfTheSecondOrderPair) {
     };
     const double e1 = estimate(0.1_r), e2 = estimate(0.05_r);
     EXPECT_GT(std::abs(e1), 1e-6);
-    EXPECT_NEAR(std::log2(e1 / e2), 3.0, 0.1);
+    verification::expect_order({"time", "RDPK3Sp35 error estimate", "", "estimate after one step", {10, 20},
+                                {std::abs(e1), std::abs(e2)}, 3.0, 2.9, 3.1});
 }
 
 TEST(TimeIntegratorTest, ForwardEulerIsFirstOrder) {
     FE integrator;
-    EXPECT_NEAR(observed_order(integrator), 1.0, 0.1);
+    expect_design_order(integrator, 1.0);
 }
 
 TEST(TimeIntegratorTest, SSPRK3IsThirdOrder) {
     SKIP_IN_SINGLE_PRECISION("the errors after 20 and 40 steps are at round-off");
     SSPRK3 integrator;
-    EXPECT_NEAR(observed_order(integrator), 3.0, 0.1);
+    expect_design_order(integrator, 3.0);
 }
 
 TEST(TimeIntegratorTest, RK4IsFourthOrder) {
     SKIP_IN_SINGLE_PRECISION("the errors after 20 and 40 steps are at round-off");
     RK4 integrator;
-    EXPECT_NEAR(observed_order(integrator), 4.0, 0.1);
+    expect_design_order(integrator, 4.0);
 }
 
 TEST(TimeIntegratorTest, SSPRK3IsConvexCombinationOfEulerSteps) {
@@ -309,12 +315,15 @@ TEST(TimeIntegratorTest, StageTimesGiveDesignOrderForTimeDependentRHS) {
     RK4 rk4;
     // Evaluating every stage at the start of the step drops both to first order.
     // (SSPRK3 reduces to Simpson's rule on this pure quadrature, hence >= 3.)
-    EXPECT_GT(std::log2(nonautonomous_error(ssprk3, 10) / nonautonomous_error(ssprk3, 20)), 2.85);
-    EXPECT_GT(std::log2(nonautonomous_error(rk4, 10) / nonautonomous_error(rk4, 20)), 3.85);
     SSPRK54 ssprk54;
     CK45 ck45;
     RDPK3Sp35 rdpk;
-    EXPECT_GT(std::log2(nonautonomous_error(ssprk54, 10) / nonautonomous_error(ssprk54, 20)), 3.85);
-    EXPECT_GT(std::log2(nonautonomous_error(ck45, 10) / nonautonomous_error(ck45, 20)), 3.85);
-    EXPECT_GT(std::log2(nonautonomous_error(rdpk, 10) / nonautonomous_error(rdpk, 20)), 2.85);
+    const std::vector<std::pair<TimeIntegrator *, double>> integrators = {
+        {&ssprk3, 3.0}, {&rk4, 4.0}, {&ssprk54, 4.0}, {&ck45, 4.0}, {&rdpk, 3.0}};
+    for (const auto & [integrator, design] : integrators) {
+        verification::expect_order({"time", TIME_INTEGRATOR_NAMES.at(integrator->get_type()), "",
+                                    "error, time-dependent right-hand side", {10, 20},
+                                    {nonautonomous_error(*integrator, 10), nonautonomous_error(*integrator, 20)},
+                                    design, design - 0.15});
+    }
 }

@@ -4,6 +4,9 @@ Mallard reads a single [TOML](https://toml.io) file: `Mallard -i input.toml`.
 This page lists every key; the [user guide](guide/input_files.md) explains
 by topic when to use them, with examples and figures.
 Kokkos options such as `--kokkos-num-threads=N` or `--kokkos-device-id=N` can be appended.
+A renamed or removed key is still read, with a warning, for at least one minor
+release, and `Mallard upgrade-input old.toml > new.toml` rewrites old inputs
+([deprecation policy and changed keys](guide/input_files.md#inputs-from-older-releases)).
 
 The spatial dimension is fixed at build time with the CMake option
 `-DMallard_DIM=2` (default) or `3`. Vectors in the input (`u`, `gravity`,

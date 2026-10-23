@@ -62,6 +62,10 @@ void Solver::timed_phase(const std::string & name, F && f) {
 
 int Solver::init(const Input & input_in) {
     this->input = input_in;
+    deprecated_keys = input_upgrade::apply(input);
+    if (!check_only) {
+        for (const auto & finding : deprecated_keys) logging::warning(input_upgrade::advice(finding));
+    }
     preset = numerics_preset::apply(input);
     try {
         setup_from_input();
