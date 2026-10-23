@@ -2,15 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(Mallard VERSION 0.8.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 
-# Version string for the run header, fixed at configure time
-set(Mallard_GIT_DESCRIBE "")
 find_package(Git QUIET)
-if(GIT_FOUND)
-    execute_process(COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        OUTPUT_VARIABLE Mallard_GIT_DESCRIBE
-        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-endif()
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
@@ -19,7 +11,7 @@ endif()
 # Warnings for Mallard's own targets; third-party headers are included as SYSTEM
 option(${PROJECT_NAME}_WARNINGS_AS_ERRORS "Treat warnings in Mallard's own code as errors" OFF)
 function(mallard_target_warnings target)
-    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
         return()
     endif()
     # Kokkos builds for CUDA with nvcc_wrapper, which CMake identifies as GNU
@@ -48,6 +40,12 @@ function(mallard_target_warnings target)
     endif()
     target_compile_options(${target} PRIVATE ${warnings})
 endfunction()
+
+# Intel's oneAPI compiler defaults to -fp-model=fast, which assumes no NaN or
+# infinity; Mallard's NaN checks and IEEE results need the precise model
+if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+    add_compile_options(-fp-model=precise)
+endif()
 
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.25)
     set(MALLARD_THIRD_PARTY SYSTEM)

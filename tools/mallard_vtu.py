@@ -1,8 +1,10 @@
 """Minimal reader for Mallard's raw-appended VTU files, and (through
 mallard_h5, which needs h5py) its HDF5 snapshots: every function also takes a
-snapshot .h5 file."""
+snapshot .h5 file. provenance() reads the provenance block of any output file."""
+import json
 import os
 import re
+import struct
 
 import numpy as np
 
@@ -184,3 +186,31 @@ def grid_fields(path, names):
         f[i, j] = arrays[name]
         out[name] = f
     return time, xs, ys, out
+
+
+_PROVENANCE_MAGIC = b"MLRD-PROVENANCE\0"
+
+
+def provenance(path):
+    """The provenance block (docs/guide/output.md) of any Mallard output file,
+    as a dict: of the first run that wrote to it for CSV files and run logs,
+    None if the file has none."""
+    if path.endswith(".h5"):
+        from mallard_h5 import provenance as h5_provenance
+        return h5_provenance(path)
+    if path.endswith(".jsonl"):
+        for line in open(path):
+            record = json.loads(line)
+            if record["type"] == "start":
+                return record["provenance"]
+        return None
+    raw = open(path, "rb").read()
+    if raw.endswith(_PROVENANCE_MAGIC):
+        (length,) = struct.unpack("<Q", raw[-24:-16])
+        return json.loads(raw[-24 - length:-24])
+    head = raw[:1 << 20].decode("utf-8", "replace")
+    m = re.search(r"<!-- provenance (.*?) -->", head, re.S)
+    if m:
+        return json.loads(m.group(1))
+    m = re.search(r"^# provenance (.*)$", head, re.M)
+    return json.loads(m.group(1)) if m else None

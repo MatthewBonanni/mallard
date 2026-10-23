@@ -17,11 +17,14 @@
 #include <cmath>
 #include <iomanip>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <memory>
 #include <numeric>
 #include <sstream>
+#include <tuple>
 
 #include <Kokkos_Core.hpp>
 
@@ -32,6 +35,8 @@
 #include "log.h"
 #include "mesh_block.h"
 #include "partition.h"
+#include "provenance.h"
+#include "run_log.h"
 #include "expression.h"
 #include "gradient.h"
 #include "viscous_flux.h"
@@ -45,7 +50,27 @@ Solver::~Solver() {
     destroy_step_graph();
 }
 
+namespace {
+
+/** @brief A copy of an input whose reads (e.g. formatting it) do not count as reads of the original. */
+Input unrecorded(Input value) {
+    if (value.is_table()) {
+        auto & table = value.as_table();
+        table.forget_lookups();
+        for (auto & entry : table.entries()) entry.second = unrecorded(entry.second);
+    } else if (value.is_array()) {
+        for (auto & element : value.as_array()) element = unrecorded(element);
+    }
+    return value;
+}
+
+} // namespace
+
 int Solver::init(const std::string & input_file_name) {
+    std::ifstream in(input_file_name, std::ios::binary);
+    provenance::start_run();
+    provenance::set_input(input_file_name, std::string(std::istreambuf_iterator<char>(in), {}));
+    input_from_file = true;
     return init(parse_input(input_file_name));
 }
 
@@ -62,11 +87,19 @@ void Solver::timed_phase(const std::string & name, F && f) {
 
 int Solver::init(const Input & input_in) {
     this->input = input_in;
+    if (!input_from_file) {
+        provenance::start_run();
+        provenance::set_input("", toml::format(unrecorded(input)));
+    }
+    input_from_file = false;
     deprecated_keys = input_upgrade::apply(input);
     if (!check_only) {
         for (const auto & finding : deprecated_keys) logging::warning(input_upgrade::advice(finding));
     }
     preset = numerics_preset::apply(input);
+    std::vector<std::tuple<std::string, std::string, bool>> preset_settings;
+    for (const auto & s : preset.settings) preset_settings.emplace_back(s.key, s.value, s.from_preset);
+    provenance::set_preset(preset.name, preset_settings);
     try {
         setup_from_input();
     } catch (const std::exception & e) {
@@ -86,7 +119,11 @@ int Solver::init(const Input & input_in) {
                              list);
         }
     }
+    logging::begin_record();
     print_setup();
+    provenance::set_setup(logging::end_record());
+    provenance::share();
+    write_provenance();
     return 0;
 }
 
@@ -97,7 +134,10 @@ void Solver::setup_from_input() {
 
     logging::section("Setup");
     init_run_parameters();
-    timed_phase("mesh", [&] { init_mesh(); });
+    timed_phase("mesh", [&] {
+        init_mesh();
+        record_mesh_provenance();
+    });
     timed_phase("physics and boundaries", [&] {
         init_physics();
         init_boundaries();
@@ -129,6 +169,33 @@ void Solver::setup_from_input() {
     timed_phase("initial solution", [&] { init_solution(); });
     logging::begin_phase("total");
     logging::end_phase(t_wall_setup);
+}
+
+void Solver::record_mesh_provenance() const {
+    const std::string type = toml::find_or<std::string>(input, "mesh", "type", "file");
+    std::string file, hash;
+    if (type == "file") {
+        file = toml::find_or<std::string>(input, "mesh", "filename", "mesh.msh");
+        const bool hash_mesh = toml::find_or<bool>(input, "output", "hash_mesh", true);
+        if (comm::is_root() && hash_mesh) {
+            hash = provenance::sha256_file(file);
+        }
+    }
+    provenance::set_mesh(type, file, hash);
+}
+
+void Solver::write_provenance() {
+    const std::string line = provenance::csv_comment() + "\n";
+    for (auto & monitor : force_monitors) {
+        if (monitor.out) *monitor.out << line << std::flush;
+    }
+    if (integral_monitor.out) *integral_monitor.out << line << std::flush;
+    probes.annotate(line);
+    run_log::write(json::Object()
+                       .add("type", "start")
+                       .add("schema", run_log::SCHEMA)
+                       .add("version", run_log::VERSION)
+                       .raw("provenance", provenance::json()));
 }
 
 namespace {
@@ -321,6 +388,9 @@ void Solver::init_mesh() {
         if (mesh->curved_geometry) {
             throw InputError("physics.axisymmetric: curved boundaries are not supported in axisymmetric runs yet "
                              "(set [mesh] curved_geometry = false).");
+        }
+        if (mesh->is_rotational()) {
+            throw InputError("physics.axisymmetric: rotational periodicity is not supported in axisymmetric runs.");
         }
         for (const auto & translation : mesh->periodic_translations) {
             if (translation[1] != 0.0_r) {
@@ -1065,18 +1135,22 @@ void Solver::init_output() {
                                 std::filesystem::exists(file) && std::filesystem::file_size(file) > 0;
             integral_monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
             if (!resume) {
-                *integral_monitor.out << "step,t,kinetic_energy,enstrophy,dilatation_squared,pressure_dilatation,"
-                                          "velocity_squared,vorticity_squared,density_squared,temperature,"
-                                          "temperature_squared"
-                                       << (integral_monitor.budget ? ",ke_rate_convective,ke_rate_viscous,ke_rate_sgs,"
-                                                                     "eps_numerical,pressure_work"
-                                                                   : "")
-                                       << (les_on && les.dynamic ? ",les_C" : "")
-                                       << (dynamic_efficiency() ? ",tf_beta" : "") << "\n";
+                *integral_monitor.out << "step,t";
+                for (const auto & name : integral_names()) *integral_monitor.out << "," << name;
+                *integral_monitor.out << "\n";
             }
         }
     }
     probes.init(input, *mesh, species_names, toml::find_or<std::string>(input, "initialize", "type", "") == "restart");
+    const std::string run_log_file = toml::find_or<std::string>(input, "output", "run_log", "mallard.jsonl");
+    run_log_on = !run_log_file.empty() && output_files_enabled();
+    if (run_log_on) {
+        const bool resume = toml::find_or<std::string>(input, "initialize", "type", "") == "restart" &&
+                            std::filesystem::exists(run_log_file);
+        run_log::open(run_log_file, resume);
+    } else {
+        run_log::close();
+    }
     if (probes.any_point_values() && !viscous_gradients.is_allocated()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
@@ -1090,6 +1164,19 @@ void Solver::init_output() {
         data_writers.back()->init(output, data, mesh, restart_variables());
         data_writers.back()->set_async(async_output, io_threads);
     }
+}
+
+std::vector<std::string> Solver::integral_names() const {
+    std::vector<std::string> names = {"kinetic_energy", "enstrophy", "dilatation_squared", "pressure_dilatation",
+                                      "velocity_squared", "vorticity_squared", "density_squared", "temperature",
+                                      "temperature_squared"};
+    if (integral_monitor.budget) {
+        names.insert(names.end(),
+                     {"ke_rate_convective", "ke_rate_viscous", "ke_rate_sgs", "eps_numerical", "pressure_work"});
+    }
+    if (les_on && les.dynamic) names.emplace_back("les_C");
+    if (dynamic_efficiency()) names.emplace_back("tf_beta");
+    return names;
 }
 
 void Solver::allocate_memory() {
@@ -1386,12 +1473,17 @@ int Solver::run() {
     n_progress_rows = 0;
 
     calc_dt();
+    // Monitors before the progress row, which reports their values
+    if (step == 0) {
+        Kokkos::Timer output_timer;
+        write_integrals();
+        t_wall_output += output_timer.seconds();
+    }
     print_progress();
     if (step == 0) {
         Kokkos::Timer output_timer;
         copy_device_to_host();
         write_data(true);
-        write_integrals();
         write_probes();
         t_wall_output += output_timer.seconds();
     }
@@ -1422,15 +1514,17 @@ int Solver::run() {
         }
         check_fields();
         t_wall_stepping += step_timer.seconds();
+        Kokkos::Timer output_timer;
+        write_forces();
+        write_integrals();
+        t_wall_output += output_timer.seconds();
         if (step % check_interval == 0) {
             Kokkos::Timer check_timer;
             print_progress();
             t_wall_checks += check_timer.seconds();
         }
-        Kokkos::Timer output_timer;
+        output_timer.reset();
         write_data();
-        write_forces();
-        write_integrals();
         write_probes();
         t_wall_output += output_timer.seconds();
     }
@@ -1505,33 +1599,74 @@ void Solver::print_progress() {
     }
     n_progress_rows++;
 
-    const double now = timer.seconds();
-    const uint64_t steps = step - step_last_check;
-    const double stepping = t_wall_stepping - t_stepping_last_check;
-    const bool timed = steps > 0 && stepping > 0.0;
-    const double f = progress();
-    const double df = f - progress_run_start;
-    const double eta = df > 0.0 ? (now - t_wall_run_start) * (1.0 - f) / df : -1.0;
-    const std::string eta_text = f >= 1.0 ? "0 s" : (eta >= 0.0 && eta < 1.0 ? "<1 s" : logging::duration(eta));
+    RunStatus status = run_status();
+    const double eta = status.eta;
+    const std::string eta_text =
+        status.progress >= 1.0 ? "0 s" : (eta >= 0.0 && eta < 1.0 ? "<1 s" : logging::duration(eta));
+    const bool timed = status.wall_per_step >= 0.0;
     std::string row = format("%8llu %10.4e %8.2e %5.1f%%  %9s %7s %7s  %9.2e %9.2e %6.3f",
                              static_cast<unsigned long long>(step), static_cast<double>(t), static_cast<double>(dt),
-                             100.0 * f, timed ? logging::duration(stepping / static_cast<double>(steps)).c_str() : "--",
-                             timed ? logging::si(static_cast<double>(n_cells_global * steps) / stepping).c_str() : "--",
-                             eta_text.c_str(), static_cast<double>(mins[0]),
-                             static_cast<double>(mins[1]), static_cast<double>(-mins[2]));
+                             100.0 * status.progress, timed ? logging::duration(status.wall_per_step).c_str() : "--",
+                             timed ? logging::si(status.cells_per_second).c_str() : "--", eta_text.c_str(),
+                             static_cast<double>(mins[0]), static_cast<double>(mins[1]), static_cast<double>(-mins[2]));
     if (teno) row += format(" %7.2f%%", 100.0 * static_cast<double>(n_troubled) / static_cast<double>(n_cells_global));
     if (is_mixture()) {
         row += format(" %8.1f %8.1f %9.2e", static_cast<double>(mix[3]), static_cast<double>(-mix[4]),
                       static_cast<double>(-mix[5]));
     }
+    status.monitors = {{"min_rho", double(mins[0])}, {"min_p", double(mins[1])}, {"max_mach", double(-mins[2])}};
+    if (teno) {
+        status.monitors.emplace_back("troubled_cells",
+                                     static_cast<double>(n_troubled) / static_cast<double>(n_cells_global));
+    }
+    if (is_mixture()) {
+        status.monitors.insert(status.monitors.end(),
+                               {{"min_T", double(mix[3])}, {"max_T", double(-mix[4])}, {"max_sum_Y_error", double(-mix[5])}});
+    }
     if (reacting) {
         const auto [active, max_cost] = chemistry_statistics();
         row += format(" %7.2f%% %6.0f", 100.0 * static_cast<double>(active) / static_cast<double>(n_cells_global), max_cost);
+        status.monitors.insert(status.monitors.end(),
+                               {{"reacting_cells", static_cast<double>(active) / static_cast<double>(n_cells_global)},
+                                {"max_chemistry_cost", max_cost}});
     }
     logging::line(row);
 
+    if (run_log_on) {
+        const MemoryUsage m = memory_usage();
+        const auto largest = comm::allreduce(std::array<double, 4>{m.host, m.host_peak, m.device, m.device_total},
+                                             comm::Op::MAX);
+        status.memory = {largest[0], largest[1], largest[2], largest[3]};
+        for (const auto & monitor : force_monitors) {
+            if (!monitor.last.name.empty()) status.monitored.push_back(monitor.last);
+        }
+        if (!integral_monitor.last.name.empty()) status.monitored.push_back(integral_monitor.last);
+        run_log::write(status.record());
+    }
+
     step_last_check = step;
     t_stepping_last_check = t_wall_stepping;
+}
+
+RunStatus Solver::run_status() const {
+    RunStatus s;
+    s.step = step;
+    s.t = double(t);
+    s.dt = double(dt);
+    s.cfl = dt_cfl1 > 0.0_r ? double(dt / dt_cfl1) : 0.0;
+    s.progress = progress();
+    s.wall = timer.seconds();
+    const uint64_t steps = step - step_last_check;
+    const double stepping = t_wall_stepping - t_stepping_last_check;
+    if (steps > 0 && stepping > 0.0) {
+        s.wall_per_step = stepping / static_cast<double>(steps);
+        s.cells_per_second = static_cast<double>(n_cells_global * steps) / stepping;
+    }
+    const double df = s.progress - progress_run_start;
+    s.eta = s.progress >= 1.0 ? 0.0 : df > 0.0 ? (s.wall - t_wall_run_start) * (1.0 - s.progress) / df : -1.0;
+    s.n_cells = n_cells_global;
+    s.n_ranks = comm::size();
+    return s;
 }
 
 void Solver::print_setup() const {
@@ -1667,6 +1802,24 @@ void Solver::print_summary(const std::string & stop) const {
     if (integral_monitor.interval > 0) add(integral_monitor.file);
     for (const auto & file : probes.files()) add(file);
     if (!files.empty()) logging::item("Files", files);
+
+    json::Object end;
+    end.add("type", "end")
+        .add("reason", stop)
+        .add("step", step)
+        .add("t", double(t))
+        .add("steps", steps)
+        .add("wall", total)
+        .add("wall_setup", t_wall_setup)
+        .add("wall_stepping", t_wall_stepping)
+        .add("wall_diagnostics", t_wall_checks)
+        .add("wall_output", t_wall_output);
+    if (reacting) end.add("wall_chemistry", t_wall_chemistry);
+    if (step_controller.enabled()) end.add("rejected_steps", n_rejected);
+    end.add_known("cells_per_second", steps > 0 && t_wall_stepping > 0.0
+                                          ? static_cast<double>(n_cells_global * steps) / t_wall_stepping
+                                          : -1.0);
+    run_log::write(end);
 }
 
 void Solver::check_fields() {
@@ -1824,7 +1977,7 @@ void Solver::calc_dt() {
     halo.exchange(state());
     halo_current = true;
     update_boundary_states(t);
-    const rtype dt_cfl1 = calc_dt_cfl1();
+    dt_cfl1 = calc_dt_cfl1();
     dt = use_cfl ? cfl * dt_cfl1 : dt_fixed;
     if (step_controller.enabled()) {
         // The first step takes the cfl or dt of [run], later ones the controller's
@@ -1869,6 +2022,8 @@ struct TimeStepFunctor {
     Kokkos::View<rtype *[3]> sgs;                // LES: (cell, [mu_t, ...]), else empty
     rtype Pr_t = 1.0_r;
     BoundaryData boundaries;
+    PeriodicMaps periodic;
+    Kokkos::View<uint8_t *> face_shift;
 
     KOKKOS_INLINE_FUNCTION
     void cell_W(const int32_t i_cell, rtype * W) const {
@@ -1899,6 +2054,8 @@ struct TimeStepFunctor {
             const int32_t c1 = cells_of_face(i_face, 1);
             rtype lambda = wave_speed(c0, n);
             if (c1 >= 0) {
+                // The normal in cell 1's frame
+                if (periodic.rotated()) periodic.unrotate(face_shift(i_face), n);
                 lambda = Kokkos::fmax(lambda, wave_speed(c1, n));
             } else {
                 rtype W[N_CONSERVATIVE];
@@ -1947,7 +2104,9 @@ rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
                             axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(),
                             les_coefficients,
                             les.Pr_t,
-                            boundary_data};
+                            boundary_data,
+                            mesh->periodic_maps(),
+                            mesh->face_shift};
     if (les_on) {
         eddy_viscosity_of_state(mesh->n_owned());
         if (les.dynamic) {
@@ -2077,6 +2236,12 @@ void Solver::write_forces() {
     for (auto & monitor : force_monitors) {
         if (step % monitor.interval != 0) continue;
         const auto F = calc_force(monitor.faces);
+        monitor.last = {"forces_" + monitor.zone, step, double(t), {}};
+        for (size_t i = 0; i < 2 * N_DIM; i++) {
+            monitor.last.values.emplace_back(std::string("F") + "xyz"[i % N_DIM] + (i < N_DIM ? "_pressure" : "_viscous"),
+                                             double(F[i]));
+        }
+        if (monitor.modeled) monitor.last.values.emplace_back("Q", double(F[2 * N_DIM]));
         if (!monitor.out) continue;
         *monitor.out << step << "," << std::setprecision(12) << t;
         for (size_t i = 0; i < 2 * N_DIM; i++) *monitor.out << "," << F[i];
@@ -2228,16 +2393,20 @@ void Solver::write_integrals() {
     const auto sums = integrate_flow_statistics();
     KineticEnergyBudget rates;
     if (integral_monitor.budget) rates = kinetic_energy_budget();
-    if (!integral_monitor.out) return;
-    *integral_monitor.out << step << "," << std::setprecision(12) << t;
-    for (const rtype s : sums) *integral_monitor.out << "," << s;
+    std::vector<double> values(sums.begin(), sums.end());
     if (integral_monitor.budget) {
         // The exact convective rate is the pressure work; the rest is numerical
-        *integral_monitor.out << "," << rates.convective << "," << rates.viscous << "," << rates.sgs << ","
-                              << rates.pressure_work - rates.convective << "," << rates.pressure_work;
+        values.insert(values.end(), {double(rates.convective), double(rates.viscous), double(rates.sgs),
+                                     double(rates.pressure_work - rates.convective), double(rates.pressure_work)});
     }
-    if (les_on && les.dynamic) *integral_monitor.out << "," << les.C;
-    if (dynamic_efficiency()) *integral_monitor.out << "," << thickened_flame.beta;
+    if (les_on && les.dynamic) values.push_back(double(les.C));
+    if (dynamic_efficiency()) values.push_back(double(thickened_flame.beta));
+    const std::vector<std::string> names = integral_names();
+    integral_monitor.last = {"integrals", step, double(t), {}};
+    for (size_t i = 0; i < values.size(); i++) integral_monitor.last.values.emplace_back(names[i], values[i]);
+    if (!integral_monitor.out) return;
+    *integral_monitor.out << step << "," << std::setprecision(12) << t;
+    for (const double v : values) *integral_monitor.out << "," << v;
     *integral_monitor.out << "\n";
     integral_monitor.out->flush();
 }

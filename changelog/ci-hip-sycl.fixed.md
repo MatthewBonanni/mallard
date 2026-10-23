@@ -1,0 +1,2 @@
+- Mallard compiles with Kokkos' HIP and SYCL backends: the `_r` literal is `consteval` (no `long double` reaches a SYCL device), and the TENO kernels that only GPU builds compile convert their team indices explicitly and capture what their compile-time lambdas use (#402).
+- Intel's oneAPI compiler gets Mallard's warnings, the TENO setup's `-ffp-contract=off` and the precise floating-point model, so NaN checks work (#402).

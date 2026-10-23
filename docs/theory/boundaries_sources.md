@@ -76,8 +76,12 @@ face, create an O(1) mass imbalance at moving shocks.
 ### Periodic boundaries
 
 Periodic zone pairs are joined into interior faces whose second cell is
-translated next to the first (`src/mesh/periodic.cpp`), so every scheme
-treats the seam as interior.
+moved next to the first (`src/mesh/periodic.cpp`), so every scheme
+treats the seam as interior. A pair moves by a translation $\mathbf{t}$ or
+by a rotation $Q$ about an axis: a neighbor's point $\mathbf{x}$ is seen at
+$Q\mathbf{x} + \mathbf{t}$, and across a rotation its velocity (momentum) as
+$Q\mathbf{u}$, its gradients as $Q\,\nabla\phi$ and $Q\,\nabla\mathbf{u}\,Q^T$,
+while scalars carry over unchanged (`src/mesh/periodic_maps.h`).
 
 ### Walls
 
