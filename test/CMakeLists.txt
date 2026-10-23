@@ -94,4 +94,8 @@ FetchContent_MakeAvailable(googletest)
 target_link_libraries(MallardTest PRIVATE gtest)
 
 target_link_libraries(MallardTest PRIVATE MallardCore)
+# Malformed CGNS files written by the tests
+if(Mallard_ENABLE_CGNS)
+    target_link_libraries(MallardTest PRIVATE ${MALLARD_CGNS_LIBRARY})
+endif()
 mallard_target_warnings(MallardTest)
