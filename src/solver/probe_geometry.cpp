@@ -362,7 +362,7 @@ Patch surface_patch(const Input & entry, const std::string & key, const std::str
         for (size_t d = 0; d < 3; d++) {
             const std::string name(1, "xyz"[d]);
             if (!entry.contains(name)) throw InputError(key + ": " + name + " (an expression of u and v) not specified.");
-            f.push_back(std::make_shared<ParameterExpression>(toml::find<std::string>(entry, name), key + "." + name, true));
+            f.push_back(std::make_shared<ParameterExpression>(find_value<std::string>(entry, name), key + "." + name, true));
         }
         auto range = [&](const char * name) {
             if (!entry.contains(name)) return std::pair{0.0, 1.0};

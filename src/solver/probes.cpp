@@ -705,7 +705,7 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
         p.codes = to_device(h_codes, "probe_codes");
 
         const bool boundary = entry.contains("boundary") || entry.contains("boundary_type");
-        const std::string shape = toml::find_or<std::string>(entry, "shape", "");
+        const std::string shape = find_value_or<std::string>(entry, "shape", "");
         const bool cut = shape == "cut_plane";
         const bool oriented = cut || (N_DIM == 2 && entry.contains("shape") && shape != "point" && shape != "points") ||
                               (N_DIM == 2 && !entry.contains("shape") && !entry.contains("point")) ||

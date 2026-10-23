@@ -629,8 +629,7 @@ TEST(ProbesTest, CutPlaneIntegralsAreExactForPolynomialFields) {
     // a box away from the periodic seam, integrates as the field itself
     const char * rho = "2.0 + 0.3 * x - 0.2 * y + 0.25 * x^2 + 0.15 * x * y - 0.1 * y^2";
     auto f = [](double x, double y) { return 2.0 + 0.3 * x - 0.2 * y + 0.25 * x * x + 0.15 * x * y - 0.1 * y * y; };
-    const std::string dir = dir_for("cut_exact");
-    std::filesystem::remove_all(dir);
+    const std::string dir = fresh_dir("cut_exact");
     const std::string plane = N_DIM == 2 ? "point = [0.5, 0.47]\nnormal = [0.3, 1.0]\nbounds = [[0.3, 0.3], [0.7, 0.7]]\n"
                                          : "point = [0.5, 0.5, 0.47]\nnormal = [0.0, 0.0, 1.0]\n"
                                            "bounds = [[0.3, 0.32, 0.3], [0.7, 0.68, 0.7]]\n";
@@ -639,7 +638,7 @@ TEST(ProbesTest, CutPlaneIntegralsAreExactForPolynomialFields) {
                               "reductions = [\"integral\", \"favre\"]\nreductions_file = \"" + dir + "/cut.csv\"\n";
     Solver solver;
     solver.init(parse_toml(box_case(20, rho, "type = \"TENO\"\norder = 3\ntroubled_threshold = 1.0\n", probe)));
-    solver.run();
+    run(solver);
     double measure = 0.0, integral = 0.0, square = 0.0, flux = 0.0;
     if constexpr (N_DIM == 2) {
         // The line through (0.5, 0.47) normal to (0.3, 1) leaves the box at x = 0.3 and 0.7
@@ -662,31 +661,27 @@ TEST(ProbesTest, CutPlaneIntegralsAreExactForPolynomialFields) {
     EXPECT_NEAR(r.at("integral_RHO"), integral, tol * integral);
     EXPECT_NEAR(r.at("favre_RHO"), square / integral, tol * square / integral);
     EXPECT_NEAR(r.at("integral_MASS_FLUX"), flux, tol * std::fabs(integral));
-    std::filesystem::remove_all(dir);
 }
 
 TEST(ProbesTest, CutPlanesTakeFacesOnTheirPlaneOnce) {
     // A plane through mesh faces cuts each column of cells once: the plane's whole area
-    const std::string dir = dir_for("cut_faces");
-    std::filesystem::remove_all(dir);
+    const std::string dir = fresh_dir("cut_faces");
     const std::string probe = "[[probes]]\nname = \"cut\"\nshape = \"cut_plane\"\npoint = " + numbers3("0.5", "0", "0") +
                               "\nnormal = " + numbers3("1", "0", "0") + "\nvariables = [\"P\"]\nfile = \"" + dir +
                               "/cut.csv\"\nreductions = [\"integral\"]\nreductions_file = \"" + dir + "/red.csv\"\n";
     Solver solver;
     solver.init(parse_toml(box_case(8, SINE_RHO, "type = \"MUSCL\"\n", probe)));
-    solver.run();
+    run(solver);
     size_t n = 0;
     for (const auto & row : read_csv(dir + "/cut.csv")) n += row.at("step") == 0.0;
     EXPECT_EQ(n, N_DIM == 2 ? 8u : 8u * 4u);
     EXPECT_NEAR(read_csv(dir + "/red.csv").front().at(MEASURE), 1.0, 1e-13);
-    std::filesystem::remove_all(dir);
 }
 
 TEST(ProbesTest, ClosedSurfaceFluxesFollowTheDivergence) {
     // The outward flux of a linear velocity through a circle (sphere) is the
     // integral of its divergence over the disk (ball)
-    const std::string dir = dir_for("divergence");
-    std::filesystem::remove_all(dir);
+    const std::string dir = fresh_dir("divergence");
     const std::string shape = N_DIM == 2 ? "shape = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 64\n"
                                          : "shape = \"sphere\"\ncenter = [0.5, 0.5, 0.5]\nradius = 0.2\nn_points = [24, 48]\n";
     const std::string probe = "[[probes]]\nname = \"closed\"\n" + shape +
@@ -697,12 +692,11 @@ TEST(ProbesTest, ClosedSurfaceFluxesFollowTheDivergence) {
     input.replace(input.find(u), u.size(), "u = " + vector3("0.1 * (x - 0.5)", "0.2 * (y - 0.5)", "-0.05 * (z - 0.5)"));
     Solver solver;
     solver.init(parse_toml(input));
-    solver.run();
+    run(solver);
     const double r = 0.2, pi = std::numbers::pi;
     const double expected = N_DIM == 2 ? 0.3 * pi * r * r : 0.25 * 4.0 / 3.0 * pi * r * r * r;
     EXPECT_NEAR(read_csv(dir + "/closed.csv").front().at("integral_MASS_FLUX"), expected,
                 precision_tol<double>(1e-9, 1e-5) * expected);
-    std::filesystem::remove_all(dir);
 }
 
 #if N_DIM == 3
