@@ -160,8 +160,8 @@ std::pair<Vec3, Vec3> circle_frame(const Input & entry, const std::string & key)
 class ParameterExpression {
     public:
         ParameterExpression(const std::string & text, const std::string & what) : e(what, text, {"s"}) {}
-        double operator()(double s) const { return e.value(&s); }
-        double derivative(double s) const { return e.derivative(0, &s); }
+        double operator()(double s) const { return e.value({&s, 1}); }
+        double derivative(double s) const { return e.derivative(0, {&s, 1}); }
 
     private:
         Expression e;

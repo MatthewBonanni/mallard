@@ -14,9 +14,11 @@
 #define EXPRESSION_H
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -76,16 +78,16 @@ class Expression {
         /** @brief Whether the value can depend on t. */
         bool depends_on_time() const { return time_dependent; }
 
-        /** @brief Evaluate with the variables' values v[0, n_variables). */
-        double value(const double * v) const {
-            std::copy(v, v + vars->values.size(), vars->values.begin());
+        /** @brief Evaluate with the variables' values v, by index. */
+        double value(std::span<const double> v) const {
+            set(v);
             vars->limit.start();
             return vars->expr.value();
         }
 
-        /** @brief Derivative with respect to variable i at v[0, n_variables). */
-        double derivative(const size_t i, const double * v) const {
-            std::copy(v, v + vars->values.size(), vars->values.begin());
+        /** @brief Derivative with respect to variable i at the values v. */
+        double derivative(const size_t i, std::span<const double> v) const {
+            set(v);
             vars->limit.start();
             return exprtk::derivative(vars->expr, vars->values[i]);
         }
@@ -114,6 +116,11 @@ class Expression {
         }
 
     private:
+        void set(std::span<const double> v) const {
+            const size_t n = std::min(v.size(), vars->values.size());
+            for (size_t i = 0; i < n; i++) vars->values[i] = v[i];
+        }
+
         static expr::Program check(const std::string & name, const std::string & text,
                                    const std::vector<std::string> & variables) {
             try {
