@@ -243,9 +243,9 @@ struct PointState {
 };
 
 /**
- * @brief Average of f over a 2D cell (r-weighted in axisymmetric runs): a fan
- *        of triangles from node 0, each split into n_sub^2 sub-triangles
- *        carrying the rule quad.
+ * @brief Average of f over a 2D cell (r-weighted in axisymmetric runs): a
+ *        triangle, or the fan of triangles of a quadrilateral from its vertex
+ *        average, each split into n_sub^2 sub-triangles carrying the rule quad.
  */
 template <typename F>
 void cell_average_2d(const Mesh & mesh, const TriangleDunavant & quad, double weight_sum, uint32_t n_sub,
@@ -254,15 +254,17 @@ void cell_average_2d(const Mesh & mesh, const TriangleDunavant & quad, double we
     const uint32_t n_nodes = mesh.h_n_nodes_of_cell(i_cell);
     std::fill(s.sum.begin(), s.sum.end(), 0.0);
     double area_sum = 0.0, revolved_sum = 0.0;
-    const uint32_t n0 = mesh.h_node_of_cell(i_cell, 0);
-    for (uint32_t k = 1; k + 1 < n_nodes; k++) {
-        const uint32_t n1 = mesh.h_node_of_cell(i_cell, k);
-        const uint32_t n2 = mesh.h_node_of_cell(i_cell, k + 1);
-        const double v0[2] = {double(mesh.h_node_coords(n0, 0)), double(mesh.h_node_coords(n0, 1))};
-        const double e1[2] = {(double(mesh.h_node_coords(n1, 0)) - v0[0]) / n_sub,
-                              (double(mesh.h_node_coords(n1, 1)) - v0[1]) / n_sub};
-        const double e2[2] = {(double(mesh.h_node_coords(n2, 0)) - v0[0]) / n_sub,
-                              (double(mesh.h_node_coords(n2, 1)) - v0[1]) / n_sub};
+    auto node = [&](uint32_t k, int d) { return double(mesh.h_node_coords(mesh.h_node_of_cell(i_cell, k % n_nodes), d)); };
+    double center[2] = {0.0, 0.0};
+    for (uint32_t k = 0; k < n_nodes; k++) {
+        for (int d = 0; d < 2; d++) center[d] += node(k, d) / n_nodes;
+    }
+    const bool triangle = n_nodes == 3;
+    for (uint32_t k = 0; k < (triangle ? 1 : n_nodes); k++) {
+        const double v0[2] = {triangle ? node(0, 0) : center[0], triangle ? node(0, 1) : center[1]};
+        const uint32_t k1 = triangle ? 1 : k, k2 = triangle ? 2 : k + 1;
+        const double e1[2] = {(node(k1, 0) - v0[0]) / n_sub, (node(k1, 1) - v0[1]) / n_sub};
+        const double e2[2] = {(node(k2, 0) - v0[0]) / n_sub, (node(k2, 1) - v0[1]) / n_sub};
         const double sub_area = 0.5 * std::abs(e1[0] * e2[1] - e1[1] * e2[0]);
         for (uint32_t a = 0; a < n_sub; a++) {
             for (uint32_t b = 0; a + b < n_sub; b++) {

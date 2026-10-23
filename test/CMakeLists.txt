@@ -36,6 +36,7 @@ set(MALLARD_TEST_SOURCES
     wall_model_test.cpp
     units_test.cpp
     rotational_periodic_test.cpp
+    invariance_test.cpp
     inlet_test.cpp
 )
 if(Mallard_DIM EQUAL 2)

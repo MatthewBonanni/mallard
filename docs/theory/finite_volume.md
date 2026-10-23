@@ -203,7 +203,10 @@ $$
 
 with $K$ = `venkatakrishnan_K` (default 5) and the scale $s$ of the
 variable: $\rho_i$ for density, $p_i$ for pressure, the sound speed $a_i$
-for the velocity components.
+for the velocity components. Limiting the velocity components one by one
+makes limited runs depend on the orientation of the axes
+([#459](https://github.com/MatthewBonanni/mallard/issues/459)); without a
+limiter, MUSCL does not.
 
 ### TENO-E
 
@@ -313,14 +316,16 @@ central polynomial $K$ and of the sector polynomials $k$,
 
 $$
 \begin{equation}
-\beta = \sum_{1\le\lvert\boldsymbol{\alpha}\rvert\le r}\int_{\Omega_i}\left(D^{\boldsymbol{\alpha}}u\right)^2\mathrm{d}\boldsymbol{\xi}
+\beta = \sum_{1\le\lvert\boldsymbol{\alpha}\rvert\le r}\frac{\lvert\boldsymbol{\alpha}\rvert!}{\boldsymbol{\alpha}!}\int_{\Omega_i}\left(D^{\boldsymbol{\alpha}}u\right)^2\mathrm{d}\boldsymbol{\xi}
 \quad\text{(in the scaled frame)}, \qquad
 \gamma_m = \left(\frac{\min_n(\beta_n + \epsilon)}{\beta_m + \epsilon}\right)^{6}, \quad \epsilon = 10^{-12},
 \label{eq:teno-e-5}
 \end{equation}
 $$
 
-decide: the central polynomial is used if
+decide (the multinomial weights make each degree's sum the squared norm of
+that derivative tensor, so the indicators do not depend on the orientation of
+the axes): the central polynomial is used if
 $\gamma_K/(\gamma_K + \sum_k\gamma_k) \ge C_T$; otherwise every sector
 stencil with $\gamma_k/\sum_{k'}\gamma_{k'} \ge C_T$ is kept, with equal
 weights (the renormalization over the sector stencils alone guarantees a
