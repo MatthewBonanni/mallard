@@ -55,7 +55,7 @@ void Solver::init_chemistry() {
         throw InputError("[chemistry]: the mechanism " + mech.file + " has no reactions.");
     }
     chemistry_options = reactor_options(input);
-    T_frozen = find_double_or(table, "T_frozen", 0.0);
+    T_frozen = find_double_or(table, "T_frozen", dim::temperature, 0.0);
     fuse_chemistry = find_value_or<bool>(table, "fuse_half_steps", false);
     if (simpler && fuse_chemistry) {
         throw InputError("chemistry.fuse_half_steps applies to Strang splitting; coupling = \"simpler\" makes one "

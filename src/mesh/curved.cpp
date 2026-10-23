@@ -254,13 +254,13 @@ std::vector<Shape> read_shapes(const Input & input) {
         }
         const auto center = find_value<std::vector<Input>>(entry, "center");
         if (center.size() != N_DIM) throw InputError("mesh.curved: center needs " + std::to_string(N_DIM) + " components.");
-        for (size_t i = 0; i < N_DIM; i++) s.center[i] = double(as_real(center[i], "mesh.curved.center"));
-        s.radius = double(as_real(toml::find(entry, "radius"), "mesh.curved.radius"));
+        for (size_t i = 0; i < N_DIM; i++) s.center[i] = double(as_real(center[i], "mesh.curved.center", dim::length));
+        s.radius = double(as_real(toml::find(entry, "radius"), "mesh.curved.radius", dim::length));
         if (!(s.radius > 0.0)) throw InputError("mesh.curved: radius must be positive.");
         if (s.kind == Shape::Kind::CYLINDER) {
             const auto axis = find_value<std::vector<Input>>(entry, "axis");
             if (axis.size() != 3) throw InputError("mesh.curved: axis needs 3 components.");
-            for (size_t i = 0; i < 3; i++) s.axis[i] = double(as_real(axis[i], "mesh.curved.axis"));
+            for (size_t i = 0; i < 3; i++) s.axis[i] = double(as_real(axis[i], "mesh.curved.axis", dim::none));
             const double norm = std::sqrt(dot(s.axis, s.axis));
             if (!(norm > 0.0)) throw InputError("mesh.curved: axis must be nonzero.");
             s.axis = scale(1.0 / norm, s.axis);

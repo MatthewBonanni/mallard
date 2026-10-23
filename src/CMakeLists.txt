@@ -3,6 +3,7 @@ add_library(MallardCore STATIC
     common/common_math.cpp
     common/common_io.cpp
     common/input.cpp
+    common/units.cpp
     common/memory_tracker.cpp
     common/build_info.cpp
     common/case_template.cpp
@@ -60,6 +61,7 @@ add_library(MallardCore STATIC
     solver/remap.cpp
     solver/statistics.cpp
     io/compression.cpp
+    io/file_format.cpp
     io/data_writer.cpp
     io/data_writer_hdf5.cpp
     parallel/comm.cpp
@@ -104,7 +106,7 @@ foreach(source ${mallard_sources})
         file(RELATIVE_PATH path ${CMAKE_SOURCE_DIR} ${source})
         message(FATAL_ERROR "${path}:${line} uses ${type}; Mallard reads input only as Input (src/common/input.h) so "
                             "that unused keys are detected: replace toml::value with Input, toml::table with "
-                            "Input::table_type, toml::find<T> with find_value<T> and toml::find_or<T> with "
+                            "Input::table_type, find_value<T> with find_value<T> and find_value_or<T> with "
                             "find_value_or<T>.")
     endif()
 endforeach()

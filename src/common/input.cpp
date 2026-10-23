@@ -8,6 +8,7 @@
 #include "input.h"
 
 #include <cctype>
+#include <iomanip>
 #include <map>
 #include <mutex>
 #include <sstream>
@@ -126,6 +127,11 @@ std::map<std::string, std::vector<std::string>> & recorded_options() {
     return options;
 }
 
+std::map<std::string, std::pair<std::string, std::string>> & recorded_dimensions() {
+    static std::map<std::string, std::pair<std::string, std::string>> dimensions;
+    return dimensions;
+}
+
 std::mutex & options_mutex() {
     static std::mutex m;
     return m;
@@ -163,6 +169,14 @@ void collect_catalog(const Input & v, const std::string & path, std::map<std::st
 
 } // namespace
 
+/** @brief The dimension of a real value read under this key path (values read directly, not through find_). */
+static void record_dimension(const std::string & key, const Dimension & dimension) {
+    if (dimension.same_as(dim::none)) return;
+    std::lock_guard<std::mutex> lock(options_mutex());
+    recorded_dimensions()[without_indices(key)] = {dimension.describe(),
+                                                  std::string(dimension.plain_unit) == "SI" ? "" : dimension.plain_unit};
+}
+
 void record_options(const std::string & key, std::vector<std::string> names) {
     std::lock_guard<std::mutex> lock(options_mutex());
     recorded_options()[without_indices(key)] = std::move(names);
@@ -175,6 +189,12 @@ std::string key_catalog(const Input & input) {
     {
         std::lock_guard<std::mutex> lock(options_mutex());
         options = recorded_options();
+        for (auto & [path, entry] : keys) {
+            const auto d = recorded_dimensions().find(path);
+            if (d == recorded_dimensions().end() || !entry.use.dimension.empty()) continue;
+            entry.use.dimension = d->second.first;
+            entry.use.unit = d->second.second;
+        }
     }
     std::string out = "{\n";
     bool first = true;
@@ -184,6 +204,8 @@ std::string key_catalog(const Input & input) {
         out += "  " + json_string(path) + ": {\"set\": " + (entry.set ? "true" : "false");
         if (!entry.use.type.empty()) {
             out += ", \"type\": " + json_string(entry.use.type);
+            if (!entry.use.dimension.empty()) out += ", \"dimension\": " + json_string(entry.use.dimension);
+            if (!entry.use.unit.empty()) out += ", \"unit\": " + json_string(entry.use.unit);
             out += entry.use.required ? ", \"required\": true" : ", \"default\": " + json_string(entry.use.fallback);
         }
         const auto allowed = options.find(path);
@@ -230,4 +252,82 @@ std::string describe(const Diagnostic & key) {
         for (const auto & v : key.valid) text += " " + v;
     }
     return text;
+}
+
+std::string explain(const Diagnostic & d) {
+    std::string text = d.line > 0 ? "line " + std::to_string(d.line) + ": " : "";
+    text += d.key.empty() ? d.message : d.key + ": " + d.message;
+    if (!d.suggestion.empty() && d.message.find("did you mean") == std::string::npos) {
+        text += " (did you mean " + d.suggestion + "?)";
+    }
+    if (!text.empty() && text.back() != '.') text += ".";
+    if (!d.expected.empty()) text += " Expected " + d.expected + ".";
+    if (!d.docs.empty()) text += " See " + d.docs + ".";
+    return text;
+}
+
+namespace {
+
+std::string expected_text(const Dimension & d) {
+    if (d.same_as(dim::none)) return "a number";
+    std::string text = d.describe();
+    const std::string examples = d.examples();
+    if (!examples.empty()) text += ", e.g. in " + examples;
+    return text + "; a number without a unit is in " + d.plain_unit;
+}
+
+[[noreturn]] void value_error(const Input & v, const std::string & key, const Dimension & d, const std::string & message,
+                              const std::string & suggestion = "") {
+    Diagnostic diagnostic;
+    diagnostic.key = key;
+    const auto location = v.location();
+    diagnostic.line = location.is_ok() ? location.first_line_number() : 0;
+    diagnostic.message = message;
+    diagnostic.suggestion = suggestion;
+    diagnostic.expected = expected_text(d);
+    diagnostic.docs = "docs/guide/input_files.md#units";
+    throw InputError(diagnostic);
+}
+
+std::string number_text(const double x) {
+    std::ostringstream text;
+    text << std::setprecision(17) << x;
+    return text.str();
+}
+
+} // namespace
+
+double quantity(const Input & v, const std::string & key, const Dimension & dimension) {
+    record_dimension(key, dimension);
+    if (v.is_floating()) return v.as_floating();
+    if (v.is_integer()) return static_cast<double>(v.as_integer());
+    if (!v.is_string()) {
+        value_error(v, key, dimension,
+                    dimension.same_as(dim::none) ? "must be a number" : "must be a number, or a string of a number and a unit");
+    }
+    const std::string & text = v.as_string();
+    Quantity q;
+    try {
+        q = parse_quantity(text);
+    } catch (const UnitError & e) {
+        value_error(v, key, dimension, e.what(), e.suggestion);
+    }
+    if (!q.has_unit) return q.value;
+    if (!q.dimension.same_as(dimension)) {
+        const std::string what = q.dimension.same_as(dim::none) ? "is dimensionless"
+                                                                 : "has the dimension of " + q.dimension.describe();
+        value_error(v, key, dimension, "\"" + text + "\" " + what);
+    }
+    if (q.absolute && dimension.interval) {
+        value_error(v, key, dimension,
+                    "\"" + text + "\" is an absolute temperature, but this key is a temperature difference: use K or degR");
+    }
+    return q.value / dimension.plain;
+}
+
+std::string quantity_or_expression(const Input & v, const std::string & key, const Dimension & dimension) {
+    record_dimension(key, dimension);
+    // Numbers as the solver reads them (in its precision), as expressions always have
+    if (!v.is_string()) return number_text(static_cast<double>(as_real(v, key, dimension)));
+    return has_unit(v.as_string()) ? number_text(quantity(v, key, dimension)) : v.as_string();
 }

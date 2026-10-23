@@ -11,9 +11,6 @@
 
 #include "solver.h"
 
-#include <iomanip>
-#include <sstream>
-
 #include <Kokkos_Core.hpp>
 
 #include "characteristic.h"
@@ -21,12 +18,9 @@
 
 namespace {
 
-/** @brief An expression in x, y, z from a number or a string. */
-Expression number_or_expression(const Input & value, const std::string & name) {
-    if (value.is_string()) return Expression(name, value.as_string());
-    std::ostringstream text;
-    text << std::setprecision(17) << static_cast<double>(as_real(value, name));
-    return Expression(name, text.str());
+/** @brief An expression in x, y, z from a number, a quantity with a unit or an expression. */
+Expression number_or_expression(const Input & value, const std::string & name, const Dimension & dimension) {
+    return Expression(name, quantity_or_expression(value, name, dimension));
 }
 
 } // namespace
@@ -47,13 +41,13 @@ void Solver::init_sponges() {
         for (const char * key : {"strength", "u", "p", "T"}) {
             if (!sponge.contains(key)) throw InputError(where + ": missing " + key + ".");
         }
-        const Expression sigma = number_or_expression(sponge.at("strength"), where + ".strength");
+        const Expression sigma = number_or_expression(sponge.at("strength"), where + ".strength", dim::rate);
         const auto & u_in = sponge.at("u").as_array();
         if (u_in.size() != N_DIM) throw InputError(where + ".u must have " + std::to_string(N_DIM) + " components.");
         std::vector<Expression> u;
-        FOR_I_DIM u.push_back(number_or_expression(u_in[i], where + ".u[" + std::to_string(i) + "]"));
-        const Expression p = number_or_expression(sponge.at("p"), where + ".p");
-        const Expression T = number_or_expression(sponge.at("T"), where + ".T");
+        FOR_I_DIM u.push_back(number_or_expression(u_in[i], where + ".u[" + std::to_string(i) + "]", dim::velocity));
+        const Expression p = number_or_expression(sponge.at("p"), where + ".p", dim::pressure);
+        const Expression T = number_or_expression(sponge.at("T"), where + ".T", dim::temperature);
 
         std::vector<uint32_t> cells;
         std::vector<double> sigma_cells;

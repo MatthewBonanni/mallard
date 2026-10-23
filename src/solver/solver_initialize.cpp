@@ -17,11 +17,9 @@
 #include <array>
 #include <atomic>
 #include <exception>
-#include <iomanip>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -159,12 +157,12 @@ void Solver::init_solution_constant() {
             throw std::runtime_error(std::string("Missing ") + key + " for initialization: constant.");
         }
     }
-    std::vector<rtype> u = find_real_vector(input, "initialize", "u");
+    std::vector<rtype> u = find_real_vector(input, "initialize", "u", dim::velocity);
     if (u.size() != N_DIM) {
         throw std::runtime_error("u must be a " + std::to_string(N_DIM) + "-element array for initialization: constant.");
     }
-    const rtype p = find_real(input, "initialize", "p");
-    const rtype T = find_real(input, "initialize", "T");
+    const rtype p = find_real(input, "initialize", "p", dim::pressure);
+    const rtype T = find_real(input, "initialize", "T", dim::temperature);
     if (is_mixture()) {
         const std::vector<double> Y = mixture_model->mass_fractions(init, "initialize");
         rtype cons[N_CONSERVATIVE];
@@ -216,7 +214,7 @@ struct PointState {
             expr.register_symbol_table(table);
             if (!parser.compile(expr_str, expr)) {
                 throw std::runtime_error("Failed to parse initialization expression for " + name + ": " +
-                                         parser.error());
+                                         parser.error() + expression_unit_hint(expr_str));
             }
         };
         for (size_t i = 0; i < u.size(); i++) compile("u[" + std::to_string(i) + "]", text.u[i], u[i]);
@@ -445,10 +443,10 @@ void Solver::init_solution_analytical() {
     const uint32_t n_sub = find_value_or<uint32_t>(input, "initialize", "n_subdivisions", (N_DIM == 2) ? 4 : 1);
 
     InitialStateText text;
-    text.u = find_value<std::vector<std::string>>(input, "initialize", "u");
-    if (rho_in) text.rho = find_value<std::string>(input, "initialize", "rho");
-    if (p_in) text.p = find_value<std::string>(input, "initialize", "p");
-    if (T_in) text.T = find_value<std::string>(input, "initialize", "T");
+    for (const auto & u : init.at("u").as_array()) text.u.push_back(quantity_or_expression(u, "initialize.u", dim::velocity));
+    if (rho_in) text.rho = quantity_or_expression(init.at("rho"), "initialize.rho", dim::density);
+    if (p_in) text.p = quantity_or_expression(init.at("p"), "initialize.p", dim::pressure);
+    if (T_in) text.T = quantity_or_expression(init.at("T"), "initialize.T", dim::temperature);
 
     // Mixtures: one expression per listed species of X or Y, and optionally a
     // balance species taking the rest; otherwise the listed values are normalized
@@ -466,13 +464,7 @@ void Solver::init_solution_analytical() {
             const int32_t k = mixture_model->mechanism().species_index(name);
             if (k < 0) throw InputError("initialize." + key + ": no species " + name + " in the mechanism.");
             listed.push_back(k);
-            std::ostringstream expr;
-            if (value.is_string()) {
-                expr << value.as_string();
-            } else {
-                expr << std::setprecision(17) << static_cast<double>(as_real(value, name));
-            }
-            text.fractions.emplace_back(key + "." + name, expr.str());
+            text.fractions.emplace_back(key + "." + name, quantity_or_expression(value, name, dim::none));
         }
         if (init.contains("balance")) {
             const std::string name = find_value<std::string>(init, "balance");

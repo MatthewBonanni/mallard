@@ -9,8 +9,9 @@ and tutorials/, in its directory on a temporary copy whose generated mesh is cut
 a few cells per direction (each check takes seconds; inputs whose mesh file is not
 in the repository are skipped) and
 merges what setup recorded into docs/input-keys.json: for each key path, its type,
-default (as TOML text) or that it is required, the accepted values, the dimensions
-whose setup read it, and the inputs that set it. With --check it compares with the
+physical dimension (and the unit of a plain number, when not SI), default (as TOML
+text) or that it is required, the accepted values, the builds (2D, 3D) whose setup
+read it, and the inputs that set it. With --check it compares with the
 committed file instead of writing it, and exits 1 if they differ.
 
 docs: compares the catalog's defaults with the defaults docs/input.md states
@@ -98,6 +99,9 @@ def build(args):
                         m["default"] = entry["default"]
                     else:
                         m.setdefault("defaults_by_dim", {})[str(dim)] = entry["default"]
+                for field in ("dimension", "unit"):
+                    if field in entry:
+                        m[field] = entry[field]
                 if "values" in entry:
                     m["values"] = sorted(set(m.get("values", [])) | set(entry["values"]))
     for m in merged.values():

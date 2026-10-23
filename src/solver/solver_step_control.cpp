@@ -35,9 +35,9 @@ void Solver::init_error_control() {
     if (double_flux) {
         throw InputError("[numerics.error_control] is not available with numerics.double_flux.");
     }
-    const rtype tolerance = find_real_or(table, "tolerance", -1.0_r);
-    const rtype abs_tol = find_real_or(table, "abs_tolerance", tolerance);
-    const rtype rel_tol = find_real_or(table, "rel_tolerance", tolerance);
+    const rtype tolerance = find_real_or(table, "tolerance", dim::none, -1.0_r);
+    const rtype abs_tol = find_real_or(table, "abs_tolerance", dim::none, tolerance);
+    const rtype rel_tol = find_real_or(table, "rel_tolerance", dim::none, tolerance);
     if (!(abs_tol > 0.0_r) || !(rel_tol >= 0.0_r)) {
         throw InputError("numerics.error_control: give tolerance (or abs_tolerance > 0 and rel_tolerance >= 0).");
     }

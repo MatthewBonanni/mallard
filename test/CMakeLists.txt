@@ -2,6 +2,7 @@
 # Tests shared by both dimensions, then those specific to one
 set(MALLARD_TEST_SOURCES
     test_main.cpp
+    scratch.cpp
     common_math_test.cpp
     case_template_test.cpp
     time_integrator_test.cpp
@@ -24,7 +25,9 @@ set(MALLARD_TEST_SOURCES
     tfles_test.cpp
     check_test.cpp
     synthetic_inflow_test.cpp
+    format_compat_test.cpp
     wall_model_test.cpp
+    units_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
     list(APPEND MALLARD_TEST_SOURCES

@@ -68,7 +68,7 @@ void Statistics::init(const Input & input, const std::vector<std::string> & spec
     const Input & table = input.at("statistics");
     interval = find_value_or<uint64_t>(table, "interval", 1);
     if (interval == 0) throw InputError("statistics.interval must be positive.");
-    t_start = find_real_or(table, "t_start", 0.0);
+    t_start = find_real_or(table, "t_start", dim::time, 0.0);
     reset = find_value_or<bool>(table, "reset", false);
     auto add_field = [&](const std::string & name) {
         const auto it = std::find(fields.begin(), fields.end(), name);
@@ -396,7 +396,7 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
         set.codes = to_device(h_codes, "probe_codes");
 
         auto vector = [&](const char * name) {
-            const std::vector<rtype> x = find_real_vector(entry, name);
+            const std::vector<rtype> x = find_real_vector(entry, name, dim::length);
             if (x.size() != N_DIM) {
                 throw InputError(key + "." + name + " must have " + std::to_string(N_DIM) + " components.");
             }
