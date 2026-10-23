@@ -18,8 +18,7 @@
 #include <numbers>
 #include <sstream>
 
-#include <exprtk.hpp>
-
+#include "expression.h"
 #include "input.h"
 
 namespace probe {
@@ -160,29 +159,12 @@ std::pair<Vec3, Vec3> circle_frame(const Input & entry, const std::string & key)
 /** @brief An expression of the curve parameter s. */
 class ParameterExpression {
     public:
-        ParameterExpression(const std::string & text, const std::string & what) : vars(std::make_unique<Vars>()) {
-            vars->table.add_variable("s", vars->s);
-            vars->table.add_constants();
-            vars->expr.register_symbol_table(vars->table);
-            exprtk::parser<double> parser;
-            if (!parser.compile(text, vars->expr)) throw InputError(what + ": " + parser.error());
-        }
-        double operator()(double s) const {
-            vars->s = s;
-            return vars->expr.value();
-        }
-        double derivative(double s) const {
-            vars->s = s;
-            return exprtk::derivative(vars->expr, vars->s);
-        }
+        ParameterExpression(const std::string & text, const std::string & what) : e(what, text, {"s"}) {}
+        double operator()(double s) const { return e.value({&s, 1}); }
+        double derivative(double s) const { return e.derivative(0, {&s, 1}); }
 
     private:
-        struct Vars {
-            double s = 0.0;
-            exprtk::symbol_table<double> table;
-            exprtk::expression<double> expr;
-        };
-        std::unique_ptr<Vars> vars;
+        Expression e;
 };
 
 } // namespace

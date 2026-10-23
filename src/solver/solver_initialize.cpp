@@ -27,8 +27,6 @@
 
 #include <Kokkos_Core.hpp>
 
-#include <exprtk.hpp>
-
 #include "quadrature.h"
 #include "remap.h"
 
@@ -202,40 +200,26 @@ struct InitialStateText {
 
 /**
  * @brief Compiled expressions and scratch of one host thread: exprtk
- *        expressions read the variables of their own symbol table, so threads
- *        cannot share them.
+ *        expressions hold their variables' values, so threads cannot share
+ *        them.
  */
 struct PointState {
     PointState(const InitialStateText & text, uint32_t n_species, uint32_t n_vars) :
-        u(text.u.size()), fractions(text.fractions.size()), fraction_values(n_species), sum(n_vars), cons(n_vars) {
-        table.add_variable("x", x);
-        table.add_variable("y", y);
-        table.add_variable("z", z);
-        table.add_constants();
-        exprtk::parser<double> parser;
-        auto compile = [&](const std::string & name, const std::string & expr_str, exprtk::expression<double> & expr) {
-            expr.register_symbol_table(table);
-            if (!parser.compile(expr_str, expr)) {
-                throw std::runtime_error("Failed to parse initialization expression for " + name + ": " +
-                                         parser.error() + expression_unit_hint(expr_str));
-            }
-        };
-        for (size_t i = 0; i < u.size(); i++) compile("u[" + std::to_string(i) + "]", text.u[i], u[i]);
-        if (text.rho) compile("rho", *text.rho, rho);
-        if (text.p) compile("p", *text.p, p);
-        if (text.T) compile("T", *text.T, T);
-        for (size_t i = 0; i < fractions.size(); i++) {
-            compile(text.fractions[i].first, text.fractions[i].second, fractions[i]);
-        }
+        fraction_values(n_species), sum(n_vars), cons(n_vars) {
+        const std::vector<std::string> xyz = {"x", "y", "z"};
+        for (size_t i = 0; i < text.u.size(); i++) u.emplace_back("initialize.u[" + std::to_string(i) + "]", text.u[i], xyz);
+        if (text.rho) rho.emplace("initialize.rho", *text.rho, xyz);
+        if (text.p) p.emplace("initialize.p", *text.p, xyz);
+        if (text.T) T.emplace("initialize.T", *text.T, xyz);
+        for (const auto & [name, expression] : text.fractions) fractions.emplace_back("initialize." + name, expression, xyz);
     }
     PointState(const PointState &) = delete;
     PointState & operator=(const PointState &) = delete;
 
-    double x = 0.0, y = 0.0, z = 0.0;
-    exprtk::symbol_table<double> table;
-    std::vector<exprtk::expression<double>> u;
-    exprtk::expression<double> rho, p, T;
-    std::vector<exprtk::expression<double>> fractions;
+    double x[3] = {0.0, 0.0, 0.0};
+    std::vector<Expression> u;
+    std::optional<Expression> rho, p, T;
+    std::vector<Expression> fractions;
     std::vector<double> fraction_values;
     std::vector<double> sum;
     std::vector<rtype> cons;
@@ -480,16 +464,16 @@ void Solver::init_solution_analytical() {
 
     // Sets s.cons to the conservatives at (px, py, pz)
     auto point_conservatives = [&](PointState & s, double px, double py, double pz) {
-        s.x = px;
-        s.y = py;
-        s.z = pz;
+        s.x[0] = px;
+        s.x[1] = py;
+        s.x[2] = pz;
         rtype * cons = s.cons.data();
         if (is_mixture()) {
             std::vector<double> & fractions = s.fraction_values;
             std::fill(fractions.begin(), fractions.end(), 0.0);
             double sum = 0.0;
             for (size_t i = 0; i < listed.size(); i++) {
-                fractions[static_cast<size_t>(listed[i])] = std::max(s.fractions[i].value(), 0.0);
+                fractions[static_cast<size_t>(listed[i])] = std::max(s.fractions[i].value(s.x), 0.0);
                 if (listed[i] != balance) sum += fractions[static_cast<size_t>(listed[i])];
             }
             if (balance >= 0) {
@@ -500,24 +484,24 @@ void Solver::init_solution_analytical() {
             for (double & f : fractions) f /= sum;
             const std::vector<double> Y = mole ? mixture_model->mass_fractions_from_mole(fractions) : fractions;
             const double R = mixture_model->gas_constant(Y);
-            const double rho_m = rho_in ? s.rho.value() : 0.0;
-            double p_m = p_in ? s.p.value() : 0.0;
-            double T_m = T_in ? s.T.value() : 0.0;
+            const double rho_m = rho_in ? s.rho->value(s.x) : 0.0;
+            double p_m = p_in ? s.p->value(s.x) : 0.0;
+            double T_m = T_in ? s.T->value(s.x) : 0.0;
             if (!p_in) p_m = rho_m * R * T_m;
             if (!T_in) T_m = p_m / (rho_m * R);
             rtype u[N_DIM];
-            FOR_I_DIM u[i] = static_cast<rtype>(s.u[i].value());
+            FOR_I_DIM u[i] = static_cast<rtype>(s.u[i].value(s.x));
             mixture_model->conservatives(p_m, T_m, u, Y, cons, cons + N_CONSERVATIVE);
             return;
         }
-        rtype rho = static_cast<rtype>(rho_in ? s.rho.value() : 0.0);
-        rtype p = static_cast<rtype>(p_in ? s.p.value() : 0.0);
-        const rtype T = static_cast<rtype>(T_in ? s.T.value() : 0.0);
+        rtype rho = static_cast<rtype>(rho_in ? s.rho->value(s.x) : 0.0);
+        rtype p = static_cast<rtype>(p_in ? s.p->value(s.x) : 0.0);
+        const rtype T = static_cast<rtype>(T_in ? s.T->value(s.x) : 0.0);
         if (!rho_in) rho = physics.get_density_from_pressure_temperature(p, T);
         if (!p_in) p = physics.get_pressure_from_density_temperature(rho, T);
         rtype W[N_CONSERVATIVE];
         W[0] = rho;
-        FOR_I_DIM W[1 + i] = static_cast<rtype>(s.u[i].value());
+        FOR_I_DIM W[1 + i] = static_cast<rtype>(s.u[i].value(s.x));
         W[N_DIM + 1] = p;
         physics.compute_conservatives_from_W(cons, W);
     };
