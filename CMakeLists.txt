@@ -237,9 +237,10 @@ if(BUILD_DOCS)
 endif()
 
 include(GNUInstallDirs)
-install(TARGETS Mallard MallardReactor RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+# OPTIONAL: an install after building only some targets (e.g. --target Mallard)
+install(TARGETS Mallard MallardReactor RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
 if(TARGET mallard-mesh-convert)
-    install(TARGETS mallard-mesh-convert RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(TARGETS mallard-mesh-convert RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
 endif()
 # Case templates (Mallard new) and what they are made from: bin/../share/mallard.
 # Examples keep their relative paths to ../../mechanisms
