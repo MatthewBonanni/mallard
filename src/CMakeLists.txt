@@ -60,6 +60,7 @@ add_library(MallardCore STATIC
     solver/remap.cpp
     solver/statistics.cpp
     io/compression.cpp
+    io/file_format.cpp
     io/data_writer.cpp
     io/data_writer_hdf5.cpp
     parallel/comm.cpp

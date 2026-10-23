@@ -20,6 +20,7 @@
 
 #include "comm.h"
 #include "input.h"
+#include "file_format.h"
 #include "log.h"
 
 #include "hdf5_util.h"
@@ -403,7 +404,6 @@ using namespace h5;
 
 constexpr bool PARALLEL_HDF5 = h5::PARALLEL;
 constexpr const char * FORMAT = "mallard-mesh";
-constexpr int VERSION = 1;
 
 } // namespace
 
@@ -445,7 +445,7 @@ void write_mesh_h5(const std::string & filename, const MeshBlock & block) {
     {
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
         write_strings_attribute(root, "format", {FORMAT});
-        write_int_attribute(root, "version", VERSION);
+        write_int_attribute(root, "version", static_cast<int>(file_format::MESH.version));
         write_int_attribute(root, "dimension", N_DIM);
     }
     {
@@ -502,9 +502,7 @@ MeshBlock read_mesh_h5(const std::string & filename, bool whole) {
         if (format.size() != 1 || format[0] != FORMAT) {
             throw std::runtime_error(filename + " is not a Mallard HDF5 mesh file.");
         }
-        if (read_int_attribute(root, "version") != VERSION) {
-            throw std::runtime_error(filename + ": unsupported mesh file version.");
-        }
+        file_format::check_version(file_format::MESH, filename, read_int_attribute(root, "version"));
         const int dim = read_int_attribute(root, "dimension");
         if (dim != N_DIM) {
             throw std::runtime_error(filename + " is a " + std::to_string(dim) +
