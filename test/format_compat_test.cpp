@@ -44,7 +44,7 @@ struct Fixture {
     uint32_t version;
 };
 
-const std::vector<Fixture> RESTART_FIXTURES = {
+[[maybe_unused]] const std::vector<Fixture> RESTART_FIXTURES = {
     {"v0.6.0", "gas", 2},   {"v0.6.0", "statistics", 3}, {"v0.6.0", "mixture", 2},
     {"v0.7.0", "gas", 2},   {"v0.7.0", "statistics", 3}, {"v0.7.0", "mixture", 2}, {"v0.7.0", "nscbc", 4},
     {"v0.8.0", "gas", 2},   {"v0.8.0", "statistics", 3}, {"v0.8.0", "mixture", 2}, {"v0.8.0", "nscbc", 4},

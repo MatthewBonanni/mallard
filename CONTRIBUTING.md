@@ -147,12 +147,13 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   minute). `main` runs CI on every merge.
 - **After resolving a merge conflict** on a PR whose CI already passed, rerun only
   what the resolution can affect: `gh workflow run ci.yml --ref <branch> -f
-  only=openmp,mpi-3d` (backend names, `tutorials`, `cuda`, `fuzz`). The `CI` status
+  only=openmp,mpi-3d` (backend names, `tutorials`, `device`, `fuzz`). The `CI` status
   records the subset. A resolution in build files, shared headers or anything the
   whole suite exercises needs the full run.
-- **CUDA builds** (2D and 3D, compile only) run on `main` and when a branch's changes
-  touch device code: `tools/device_changes.sh` decides (a changed `src/` file with
-  Kokkos device constructs, or a Kokkos update); `-f cuda=true` forces them.
+- **Device builds**: CUDA, HIP (ROCm) and SYCL (oneAPI), 2D and 3D, compile only,
+  run when a branch's changes touch device code: `tools/device_changes.sh` decides (a
+  changed `src/` file with Kokkos device constructs, or a Kokkos update). `main` also
+  runs the CUDA builds on every push. `-f device=true` forces all three.
 - **GPU CI.** Device code is also run on NVIDIA A100 GPUs by a maintainer-run GPU
   CI, outside GitHub Actions: CUDA 12 and 13 builds in 2D and 3D, the full test suite
   on the GPU (including the CUDA-graph and NCCL paths), the MPI tests on 2 ranks, and
