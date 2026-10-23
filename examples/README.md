@@ -38,6 +38,12 @@ hardware they were measured on.
 | `sedov_axisymmetric` | Sedov-Taylor blast as an axisymmetric run, against the exact solution (`tools/sedov.py`): shock radius 0.6% ahead of R(t) at t = 0.8, spherical to 2% at the density peak | 65,536 quads | 5 minutes on one A100 |
 | `sphere_axisymmetric` | Steady flow past a sphere at Re = 100 and 150 (axisymmetric, Mach 0.2) on a half O-grid from `tools/make_cylinder_mesh.py --half`: drag within 1.2% of the Clift-Grace-Weber correlation, separation angle within 0.2 degrees, wake length 0.885 D and 1.21 D (Johnson & Patel: 0.88, about 1.2); check with `tools/plot_sphere_axisymmetric.py` | 16,384 quads | 285,000 viscous-limited steps: ~30 minutes on one A100 |
 
+## Source terms
+
+| Case | What it shows | Cells | Run time |
+|---|---|---|---|
+| `source_regions` | `[[sources]]` in regions: an annulus with a smooth edge releases a Gaussian heat pulse of exact total energy (`total = true`), a rotated rectangle pushes the gas with a body force and its work | 51,200 triangles | ~2 minutes on 4 CPU threads |
+
 ## Viscous flows
 
 | Case | What it shows | Cells | Run time |
@@ -56,6 +62,7 @@ hardware they were measured on.
 | `channel_retau180` | Turbulent channel flow at Re<sub>τ</sub> = 180 (3D build): DNS at bulk Mach 0.2 between isothermal walls, periodic in x and z, on the 4πh × 2h × 4πh/3 box of Moser, Kim & Mansour (1999), with the mass flow held by `[source] mass_flow` and a tanh-stretched generated mesh (`[mesh] stretching`); MUSCL with the kinetic-energy-preserving `hybrid` convective flux, and the kinetic-energy budget of `[integrals]` (numerical dissipation 0.9% of the total). Generate the initial state with `tools/channel_init.py`; `[statistics]`, `tools/plane_average.py` and `tools/plot_channel.py` compare the profiles with MKM, `tools/animate_channel.py` animates the near-wall vortices. Over 12.9 h/u<sub>τ</sub>: Re<sub>τ</sub> = 180.8 against 178.1 (Cf 2.0% high), the RMS velocity and -u'v' peaks within 2%. The input's header lists the alternatives: HLLC at every face gives Cf 7% low on this mesh (its upwind dissipation is 7% of the total) and reaches MKM only on a mesh twice as fine in x and z | 2.36M hexahedra (dx+ = 11.8, dz+ = 5.9, dy+ = 0.88 at the wall) | 489,000 steps: 2.3 hours on two A100s |
 | `channel_inflow_retau180` | Spatially developing turbulent channel at Re<sub>τ</sub> = 180 (3D build): DNS with digital-filter synthetic turbulence at an `nscbc_inlet`, its mean profile and Reynolds stresses taken from the periodic `channel_retau180` statistics (`inflow_profile.csv`). Wall shear, -u'v' and the RMS peaks recover to within 5% of the periodic channel by about 17h (Keating et al. 2004: about 20h); the outlet uses `beta = 0` behind a sponge. Start from the periodic example's restart with `tools/tile_restart.py` (see the input's header) | 4.7M hexahedra | 337,000 steps: 2.5 hours on four A100s |
 | `turbulent_inflow_duct` | Isotropic digital-filter turbulence (u′ = 0.1 U, L = 0.25, Re_L = 100) entering a duct periodic across and decaying downstream (3D build): inlet Reynolds stresses within 6% of target, and `zero_net_flux` removing the plane acoustic wave (spurious p′<sub>rms</sub> = 7.8 ρu′² without it, 1.1 by x = 20L with it) | 6.3M hexahedra | 65,000 steps: 1.5 hours on one A100 |
+| `forced_isotropic_turbulence` | Linear forcing of turbulence held at a target kinetic energy (3D build): a `[[sources]]` entry reading the domain average `mean_ke` controls the forcing rate, so the kinetic energy stays within 1.3% of its target (0.1234-0.1248 for 0.125) through t = 20 while the Taylor-Green vortex it starts from breaks down; unforced it falls to 0.012 | 32³ = 32,768 hexahedra | 3,266 steps: 20 s on one A100 |
 
 ## Large-eddy simulation
 

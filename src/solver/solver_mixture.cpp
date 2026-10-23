@@ -391,7 +391,7 @@ void Solver::init_temperature_seed() {
     Kokkos::parallel_for("temperature_seed", mesh->n_cells, TemperatureFunctor{mixture, conservatives, species, T_seed});
 }
 
-void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
+void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype c) {
     const bool exchange = halo.active() && !(halo_current && state.flow.data() == conservatives.data());
     halo_current = false;
     update_boundary_states(t_stage);
@@ -484,28 +484,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
 
     StateView solution = state.flow;
     Kokkos::View<rtype *> vol = mesh->cell_measure;
-    if (has_gravity || !source_expressions.empty()) {
-        update_source_field(t_stage);
-        const bool gravity_on = has_gravity;
-        const bool field_on = !source_expressions.empty();
-        Kokkos::Array<rtype, N_DIM> g;
-        FOR_I_DIM g[i] = gravity[i];
-        StateView S = source_field;
-        Kokkos::parallel_for("rhs_sources", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
-            const rtype V = vol(i_cell);
-            if (gravity_on) {
-                rtype rhou[N_DIM];
-                FOR_I_DIM {
-                    rhs(i_cell, 1 + i) += solution(i_cell, 0) * g[i] * V;
-                    rhou[i] = solution(i_cell, 1 + i);
-                }
-                rhs(i_cell, N_DIM + 1) += dot<N_DIM>(rhou, g.data()) * V;
-            }
-            if (field_on) {
-                FOR_I_CONSERVATIVE rhs(i_cell, i) += S(i_cell, i) * V;
-            }
-        });
-    }
+    add_sources(state, rhs_state, t_stage, c);
     if (hold_mass_flow) add_mass_flow_force(solution, rhs);
     if (radiating) add_radiation(rhs, state.species);
 
