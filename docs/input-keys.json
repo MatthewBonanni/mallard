@@ -3001,6 +3001,15 @@
   ],
   "type": "integer"
  },
+ "output.health": {
+  "default": "true",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "bool"
+ },
  "output.io_threads": {
   "default": "1",
   "dims": [
