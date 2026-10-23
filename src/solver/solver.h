@@ -507,7 +507,6 @@ class Solver {
         void init_output();
         void init_solution();
         void init_solution_constant();
-        void init_solution_analytical();
         void init_solution_restart();
         /** @brief Remaps a restart file of another mesh ([initialize] type = "remap"). */
         void init_solution_remap();
