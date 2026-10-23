@@ -4,7 +4,7 @@
 # reaches). The hemisphere holds E / 2 of the blast energy E = 1, deposited as
 # pressure in the ball R < 0.05; the ambient pressure is 1e-5. A 2D run of the
 # 3D blast at twice the resolution of examples/sedov_3d:
-#   python ../../tools/sedov.py solut --energy 1
+#   python ../../tools/setup/sedov.py solut --energy 1
 #
 # 256 x 256 quads, bound-preserving TENO5 (about a minute on one A100, or
 # Nx = Ny = 128 on a laptop): the shock (where the shell-averaged density

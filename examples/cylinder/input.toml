@@ -3,7 +3,7 @@
 # St = 0.164, mean Cd = 1.36, lift amplitude 0.33 (references for
 # incompressible flow: St 0.164-0.166, Cd 1.33-1.35, Cl' 0.33).
 # Generate the mesh first (384 x 128 quads):
-#   python ../../tools/make_cylinder_mesh.py cylinder.msh --n-theta 384 --n-r 128 --r-far 25 --dr0 0.01
+#   python ../../tools/mesh/make_cylinder_mesh.py cylinder.msh --n-theta 384 --n-r 128 --r-far 25 --dr0 0.01
 # Nondimensionalization: cylinder diameter 1, free-stream density and sound
 # speed 1, so U = M = 0.2 and mu = U D / Re.
 
@@ -105,7 +105,7 @@ reductions_file = "./solut/probe_wake_arc_reductions.csv"
 # set by the upward zero crossings of U_Y on the wake axis at x = 3: the
 # PHASE_<bin>_<field> output of the last snapshot. Over t = 100..400 the
 # crossings give St = 0.1651 (period 30.29 +- 0.05), the bins equal the
-# probe series binned by tools/insitu_statistics.py phase bitwise, and the
+# probe series binned by tools/post/insitu_statistics.py phase bitwise, and the
 # phase-averaged U_Y at the probe keeps 0.991 of the signal's amplitude (a
 # sinusoid averaged over 1/12 of a period keeps 0.989): no phase jitter.
 [statistics]

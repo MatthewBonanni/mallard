@@ -6,11 +6,11 @@
 # positive.
 #
 # Generate the mesh first (needs the gmsh Python module, pip install gmsh):
-#   python ../../tools/make_mallard_mesh.py mallard.msh     # 1.07M triangles
+#   python make_mallard_mesh.py mallard.msh     # 1.07M triangles
 # Run (75,000 steps, about 1.5 hours on one data-center GPU; 251 snapshots,
 # 20 GB), then animate:
 #   mallard -i input.toml
-#   python ../../tools/animate.py solut mallard --var MACH --cmap inferno_r \
+#   python ../../tools/post/animate.py solut mallard --var MACH --cmap inferno_r \
 #       --vmin 0 --vmax 8.5 --interp linear --layout single --overlay \
 #       --body-color "#2a2f3a" --res 2400 --dpi 300 --width 7 \
 #       --xlim -0.35 3.0 --ylim -0.85 1.2 --fps 18 --title "Mach 8 mallard"

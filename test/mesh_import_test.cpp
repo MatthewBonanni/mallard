@@ -2,7 +2,7 @@
  * @file mesh_import_test.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Third-party mesh formats against the Gmsh export of the same mesh
- *        (fixtures from tools/make_import_meshes.py).
+ *        (fixtures from tools/dev/make_import_meshes.py).
  * @version 0.9
  * @date 2026-10-15
  *

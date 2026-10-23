@@ -23,8 +23,10 @@
 #include <map>
 #include <memory>
 #include <numeric>
+#include <span>
 #include <sstream>
 #include <tuple>
+#include <type_traits>
 
 #include <Kokkos_Core.hpp>
 
@@ -300,11 +302,13 @@ void Solver::init_mesh() {
     const std::string type = find_value_or<std::string>(input, "mesh", "type", "file");
     // Read in every run, so that an input runs unchanged on any number of ranks
     partitioner = find_value_or<std::string>(input, "parallel", "partitioner", "multijagged");
+    record_options("parallel.partitioner", {"graph", "hilbert", "multijagged"});
     if (partitioner != "graph" && partitioner != "hilbert" && partitioner != "multijagged") {
         throw InputError("parallel.partitioner = \"" + partitioner + "\" is not one of: graph, hilbert, multijagged.");
     }
     const std::string exchange =
         find_value_or<std::string>(input, "parallel", "halo_exchange", comm::nccl_available() ? "nccl" : "mpi");
+    record_options("parallel.halo_exchange", {"nccl", "mpi"});
     if (exchange != "nccl" && exchange != "mpi") {
         throw InputError("parallel.halo_exchange = \"" + exchange + "\" is not one of: nccl, mpi.");
     }
@@ -516,6 +520,7 @@ void Solver::init_rhs_split() {
 void Solver::init_physics() {
     if (!input.contains("physics")) throw InputError("missing [physics] table.");
     const std::string gas = find_value_or<std::string>(input, "physics", "gas", "perfect");
+    record_options("physics.gas", {"perfect", "mixture"});
     if (gas == "perfect") {
         if (input.contains("chemistry")) throw InputError("[chemistry] needs physics.gas = \"mixture\".");
         physics = Euler::from_input(input);
@@ -823,42 +828,105 @@ void Solver::init_sources() {
         hold_mass_flow = true;
         mass_flow_target = double(norm);
         FOR_I_DIM mass_flow_direction[i] = m[i] / norm;
-        double volume = 0.0;
-        for (uint32_t i_cell = 0; i_cell < mesh->n_owned(); i_cell++) {
-            volume += static_cast<double>(mesh->h_cell_volume(i_cell));
-        }
-        domain_volume = comm::allreduce(volume, comm::Op::SUM);
+        const uint64_t n_global = is_distributed() ? n_cells_global : mesh->n_owned();
+        const int bits = 62 - static_cast<int>(std::ceil(std::log2(static_cast<double>(n_global) + 1.0)));
+        mass_flow_unit = std::ldexp(1.0, bits);
+        mass_flow_terms = Kokkos::View<double *[2]>("mass_flow_terms", mesh->n_owned());
+        mass_flow_largest = Kokkos::View<double *>("mass_flow_largest", 2);
+        mass_flow_sums = Kokkos::View<int64_t *>("mass_flow_sums", 2);
+        mass_flow_totals = Kokkos::View<double *>("mass_flow_totals", 3);
+        init_mass_flow_volume();
         std::string text;
         FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(m[i]));
         source_summary.emplace_back("Mass flow", text + "] (volume average of rho u), held by a uniform body force");
     }
 }
 
+void Solver::init_mass_flow_volume() {
+    const Kokkos::View<double *[2]> terms = mass_flow_terms;
+    const Kokkos::View<rtype *> vol = mesh->cell_volume;
+    Kokkos::parallel_for("mass_flow_volume", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i_cell) {
+        terms(i_cell, 0) = static_cast<double>(vol(i_cell));
+        terms(i_cell, 1) = 0.0;
+    });
+    sum_mass_flow_terms();
+    Kokkos::deep_copy(domain_volume, Kokkos::subview(mass_flow_totals, 0));
+}
+
+void Solver::sum_mass_flow_terms() {
+    const uint32_t n_owned = mesh->n_owned();
+    const Kokkos::View<double *[2]> terms = mass_flow_terms;
+    using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
+    for (int k = 0; k < 2; k++) {
+        Kokkos::parallel_reduce("mass_flow_largest", n_owned, KOKKOS_LAMBDA(const uint32_t c, double & m) {
+            m = Kokkos::fmax(m, Kokkos::fabs(terms(c, k)));
+        }, Kokkos::Max<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(mass_flow_largest.data() + k)));
+    }
+    reduce_mass_flow(mass_flow_largest, true);
+    const Kokkos::View<double *> largest = mass_flow_largest;
+    const double unit = mass_flow_unit;
+    for (int k = 0; k < 2; k++) {
+        Kokkos::parallel_reduce("mass_flow_sum", n_owned, KOKKOS_LAMBDA(const uint32_t c, int64_t & sum) {
+            if (largest(k) > 0.0) sum += static_cast<int64_t>(Kokkos::round(terms(c, k) * (unit / largest(k))));
+        }, Kokkos::Sum<int64_t, DeviceMemory>(Kokkos::View<int64_t, DeviceMemory>(mass_flow_sums.data() + k)));
+    }
+    reduce_mass_flow(mass_flow_sums, false);
+    const Kokkos::View<int64_t *> sums = mass_flow_sums;
+    const Kokkos::View<double *> totals = mass_flow_totals;
+    Kokkos::parallel_for("mass_flow_totals", 1, KOKKOS_LAMBDA(const int) {
+        for (int k = 0; k < 2; k++) totals(k) = largest(k) > 0.0 ? static_cast<double>(sums(k)) / (unit / largest(k)) : 0.0;
+    });
+}
+
+template <typename T>
+void Solver::reduce_mass_flow(const Kokkos::View<T *> values, const bool max) {
+    if (!is_distributed()) return;
+    if (recording_step) {
+#ifdef Mallard_HAS_NCCL
+        const ncclDataType_t type = std::is_same_v<T, double> ? ncclDouble : ncclInt64;
+        if (ncclAllReduce(values.data(), values.data(), values.extent(0), type, max ? ncclMax : ncclSum, comm::nccl(),
+                          Kokkos::DefaultExecutionSpace().cuda_stream()) != ncclSuccess) {
+            throw std::runtime_error("NCCL: mass flow reduction failed");
+        }
+        return;
+#endif
+    }
+    const auto host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), values);
+    comm::allreduce(std::span<T>(host.data(), host.extent(0)), max ? comm::Op::MAX : comm::Op::SUM);
+    Kokkos::deep_copy(values, host);
+}
+
 void Solver::add_mass_flow_force(StateView solution, StateView rhs) {
     const uint32_t n_owned = mesh->n_owned();
-    Kokkos::View<rtype *> vol = mesh->cell_volume;
+    const Kokkos::View<rtype *> vol = mesh->cell_volume;
     Kokkos::Array<rtype, N_DIM> e;
     FOR_I_DIM e[i] = mass_flow_direction[i];
     // Along e: the volume integral of rho u and the rate of change of that integral from all other terms
-    double momentum = 0.0, rate = 0.0;
-    Kokkos::parallel_reduce("mass_flow_sums", n_owned,
-                            KOKKOS_LAMBDA(const uint32_t i_cell, double & sum_momentum, double & sum_rate) {
+    const Kokkos::View<double *[2]> terms = mass_flow_terms;
+    Kokkos::parallel_for("mass_flow_terms", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
         rtype m = 0.0_r, r = 0.0_r;
         FOR_I_DIM {
             m += solution(i_cell, 1 + i) * e[i];
             r += rhs(i_cell, 1 + i) * e[i];
         }
-        sum_momentum += static_cast<double>(m * vol(i_cell));
-        sum_rate += static_cast<double>(r);
-    }, momentum, rate);
-    const std::array<double, 2> sums = comm::allreduce(std::array<double, 2>{momentum, rate}, comm::Op::SUM);
-    // Cancel the other terms, and close the gap to the target within a step
-    double force = -sums[1] / domain_volume;
-    if (dt > 0.0_r) force += (mass_flow_target - sums[0] / domain_volume) / static_cast<double>(dt);
-    mass_flow_force = force;
-    Kokkos::Array<rtype, N_DIM> f;
-    FOR_I_DIM f[i] = static_cast<rtype>(force) * e[i];
+        terms(i_cell, 0) = static_cast<double>(m * vol(i_cell));
+        terms(i_cell, 1) = static_cast<double>(r);
+    });
+    sum_mass_flow_terms();
+    // Cancel the other terms, and close the gap to the target within the step, whose dt a captured step has only on the device
+    const Kokkos::View<double *> totals = mass_flow_totals;
+    const double target = mass_flow_target, volume = domain_volume;
+    const rtype * dt_device = recording_step ? step_dt_device() : nullptr;
+    const rtype dt_host = dt;
+    Kokkos::parallel_for("mass_flow_force", 1, KOKKOS_LAMBDA(const int) {
+        const rtype dt_ = dt_device ? *dt_device : dt_host;
+        double force = -totals(1) / volume;
+        if (dt_ > 0.0_r) force += (target - totals(0) / volume) / static_cast<double>(dt_);
+        totals(2) = force;
+    });
     Kokkos::parallel_for("rhs_mass_flow_force", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
+        Kokkos::Array<rtype, N_DIM> f;
+        FOR_I_DIM f[i] = static_cast<rtype>(totals(2)) * e[i];
         const rtype V = vol(i_cell);
         rtype work = 0.0_r;
         FOR_I_DIM {
@@ -867,6 +935,13 @@ void Solver::add_mass_flow_force(StateView solution, StateView rhs) {
         }
         rhs(i_cell, N_DIM + 1) += work / solution(i_cell, 0) * V;
     });
+}
+
+double Solver::get_mass_flow_force() const {
+    if (!hold_mass_flow) return 0.0;
+    double force = 0.0;
+    Kokkos::deep_copy(force, Kokkos::subview(mass_flow_totals, 2));
+    return force;
 }
 
 void Solver::update_average_pressure_outlets(StateView solution) {
@@ -990,6 +1065,7 @@ void Solver::init_numerics() {
         throw std::runtime_error("numerics: low_mach_cutoff must be positive (1 disables the low-Mach correction).");
     }
     const std::string flux = find_value_or<std::string>(input, "numerics", "convective_flux", "riemann");
+    record_options("numerics.convective_flux", {"riemann", "hybrid"});
     if (flux != "riemann" && flux != "hybrid") {
         throw InputError("numerics.convective_flux = \"" + flux + "\" is not one of: riemann, hybrid.");
     }

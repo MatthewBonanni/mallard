@@ -10,18 +10,18 @@
 # states from Cantera's flames first, from this directory (this rewrites
 # both input files with the default output list):
 #
-#   python ../../tools/flame_reference.py --single h2 0.4 700 .
-#   python ../../tools/flame_restart.py h2_phi0.4_T700_mix_full.csv ../../mechanisms/h2o2.yaml ohmech 12 . \
+#   python ../../tools/setup/flame_reference.py --single h2 0.4 700 .
+#   python ../../tools/setup/flame_restart.py h2_phi0.4_T700_mix_full.csv ../../mechanisms/h2o2.yaml ohmech 12 . \
 #       --ref-delta 4.343e-4 --ny 216 --upstream 12 --downstream 16 --perturb 0.5 --t-stop 2.4e-3 \
 #       --outputs 150 --cfl 1.0 --inlet-factor 1.25
-#   python ../../tools/flame_restart.py h2_phi0.4_T700_unity_full.csv ../../mechanisms/h2o2.yaml ohmech 12 unity \
+#   python ../../tools/setup/flame_restart.py h2_phi0.4_T700_unity_full.csv ../../mechanisms/h2o2.yaml ohmech 12 unity \
 #       --ref-delta 4.343e-4 --ny 216 --upstream 12 --downstream 16 --perturb 0.5 --t-stop 2.4e-3 \
 #       --outputs 150 --cfl 1.0 --transport unity_lewis
 #
 # then run both (72,576 cells each; 151,000 and 120,000 viscous-limited steps:
 # about 35 and 30 minutes on one A100 each) and animate them side by side with
 #
-#   python ../../tools/animate_flame_2d.py flame_2d.mp4 \
+#   python animate_flame_2d.py flame_2d.mp4 \
 #       --run "Mixture-averaged transport" solut/flame.pvd h2_phi0.4_T700_mix_full.csv \
 #       --run "Unity Lewis numbers" unity/solut/flame.pvd h2_phi0.4_T700_unity_full.csv
 #

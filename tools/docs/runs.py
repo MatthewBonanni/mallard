@@ -30,8 +30,9 @@ import figstyle
 from figstyle import bare, label
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tools"))
-from mallard_vtu import read_vtu_cells  # noqa: E402
+sys.path[:0] = [str(ROOT / "tools"), str(ROOT / "tools" / "mesh"), str(ROOT / "examples" / "sod"),
+                str(ROOT / "examples" / "rotational_sector")]
+from mallard.vtu import read_vtu_cells  # noqa: E402
 from plot_mesh_quality import LABELS, draw_quality, read_quality  # noqa: E402
 from plot_sod import exact_sod  # noqa: E402
 
@@ -220,7 +221,7 @@ def sod_schemes(P, args):
 @functools.cache
 def partition_data(args):
     work = Path(tempfile.mkdtemp())
-    subprocess.run([sys.executable, str(ROOT / "tools" / "make_cylinder_mesh.py"), str(work / "cyl.msh"),
+    subprocess.run([sys.executable, str(ROOT / "tools" / "mesh" / "make_cylinder_mesh.py"), str(work / "cyl.msh"),
                     "--n-theta", "96", "--n-r", "40", "--r-far", "6", "--dr0", "0.03"], check=True,
                    stdout=subprocess.DEVNULL)
     cases = []
@@ -355,7 +356,7 @@ def rotational_sector(P, args):
 def mesh_quality_data(args):
     """mallard check of examples/mallard on a coarse mesh (make_mallard_mesh.py needs the gmsh module)."""
     work = Path(tempfile.mkdtemp())
-    subprocess.run([sys.executable, str(ROOT / "tools" / "make_mallard_mesh.py"), str(work / "mallard.msh"),
+    subprocess.run([sys.executable, str(ROOT / "examples" / "mallard" / "make_mallard_mesh.py"), str(work / "mallard.msh"),
                     "--h-wall", "0.02", "--h-far", "0.1"], check=True, stdout=subprocess.DEVNULL)
     (work / "input.toml").write_text((ROOT / "examples" / "mallard" / "input.toml").read_text())
     subprocess.run([str(args.mallard), "check", "input.toml", "--quality-vtu", "quality",

@@ -42,10 +42,11 @@ build/src/mallard new sod runs/sod
 ```text
 Created runs/sod/ from the sod template (examples/sod):
   input.toml  the case; a comment above each table links to its keys
+  plot_sod.py the example's script
   run.sh      runs it: ./run.sh [-t threads] [-n MPI ranks]
   post.sh     sod.png, the density against the exact solution
   README.md   what the case shows, how to run it
-  tools/      mallard_h5.py mallard_vtu.py plot_sod.py
+  tools/      mallard/__init__.py mallard/h5.py mallard/vtu.py
 ```
 
 Run it:

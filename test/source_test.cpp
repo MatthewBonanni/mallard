@@ -16,6 +16,7 @@
 #include <sstream>
 #include <string>
 
+#include "scratch.h"
 #include "test_fixtures.h"
 #include "solver.h"
 
@@ -122,7 +123,8 @@ namespace {
  *        periodic in x, with nu = 0.01 and sound speed 1; with hold, the bulk
  *        momentum is held at 0.1 by the mass flow forcing.
  */
-std::string channel_input(const std::string & u, const std::string & run, bool hold = true) {
+std::string channel_input(const std::string & u, const std::string & run, bool hold = true,
+                          const std::string & extra = "") {
     std::ostringstream s;
     s << "[run]\n" << run
       << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 32\nLx = 0.5\nLy = 2.0\nperiodic = [\"x\"]\n"
@@ -136,6 +138,7 @@ std::string channel_input(const std::string & u, const std::string & run, bool h
       << "rho_ref = 1.0\nmu = 0.01\n"
       << "[output]\ncheck_interval = 1000000\n";
     if (hold) s << "[source]\nmass_flow = [0.1, 0.0]\n";
+    s << extra;
     return s.str();
 }
 
@@ -171,4 +174,41 @@ TEST(SourceTest, MassFlowForcingBalancesTheWallShearOfPoiseuilleFlow) {
     // f settles from the start-up transient
     const double dE = double(solver.integrate_conservatives()[N_DIM + 1]) - E0;
     EXPECT_NEAR(dE, f * 0.1 * 1.0 * 2.0, f * 0.1 * 2.0 * precision_tol<double>(0.01, 0.1));  // single: rho E rounds at 1e-7 of 1.8
+}
+
+TEST(SourceTest, MassFlowForcingRestartIsExact) {
+    // The force is a domain sum in every RK stage; on CUDA builds steps after
+    // the first run as one captured graph, so the sum and dt must be computed
+    // on the device. Fails if the force is frozen at capture or depends on the
+    // step the run started from
+    const std::string dir = scratch_dir().string();
+    auto input = [&](const std::string & sub, const std::string & extra_init, const uint32_t steps) {
+        std::string s = channel_input("0.15 * (1 - (y - 1)^2) + 0.02 * sin(12.566 * x)",
+                                      "n_steps = " + std::to_string(steps) + "\ncfl = 0.5\n", true,
+                                      "[[write_data]]\nprefix = \"" + dir + "/" + sub +
+                                          "/restart\"\nformat = \"restart\"\ninterval = 5\n");
+        if (!extra_init.empty()) {
+            const size_t a = s.find("[initialize]\n"), b = s.find("[[boundaries]]");
+            s.replace(a, b - a, "[initialize]\n" + extra_init);
+        }
+        return s;
+    };
+    Solver straight;
+    straight.init(parse_toml(input("a", "", 12)));
+    straight.run();
+    straight.copy_device_to_host();
+    Solver first;
+    first.init(parse_toml(input("b", "", 5)));
+    first.run();
+    Solver second;
+    second.init(parse_toml(input("b", "type = \"restart\"\nfile = \"" + dir + "/b/restart_000005.restart\"\n", 12)));
+    second.run();
+    second.copy_device_to_host();
+    ASSERT_EQ(second.get_step(), straight.get_step());
+    EXPECT_EQ(second.get_mass_flow_force(), straight.get_mass_flow_force());
+    for (uint32_t i = 0; i < straight.get_mesh()->n_owned(); i++) {
+        for (uint8_t v = 0; v < N_CONSERVATIVE; v++) {
+            ASSERT_EQ(second.h_conservatives(i, v), straight.h_conservatives(i, v)) << "cell " << i;
+        }
+    }
 }

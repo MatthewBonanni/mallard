@@ -394,7 +394,7 @@ std::vector<std::vector<double>> read_reference(const std::string & file, std::v
 /**
  * @brief L1 errors (relative to the reference maximum) of rho, u, p, T and
  *        Y_N2 against the exact solution of the multicomponent shock tube
- *        (tools/mixture_riemann.py), and the extreme mass fractions.
+ *        (tools/dev/mixture_riemann.py), and the extreme mass fractions.
  */
 std::vector<double> shock_tube_errors(uint32_t n, const std::string & reconstruction, const std::string & riemann,
                                       double & Y_min, double & Y_max) {

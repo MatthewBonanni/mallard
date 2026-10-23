@@ -40,6 +40,39 @@ host to a few ulp; arithmetic is bitwise the same.
 
 Unlike exprtk, variables are case sensitive: sources need both `T` and `t`.
 
+### Statements and control flow (#450)
+
+The engine also compiles exprtk's statements: `;` sequences, `var` locals and
+assignments (`:=`, `+=`, ...), `if`/`else` and `switch`, `while`, `for`,
+`repeat ... until`, `break[v]` and `continue`. The parser builds a tree and
+emits it with jumps (`JUMP`, `JUMP_IF_NOT`, and `ITERATE`/`UNTIL` for loop
+conditions), reproducing exprtk's semantics node by node: a loop's value is
+its body's last complete value (0 if it never ran; `continue` keeps the
+previous one), `break` without a value gives NaN, an `if` without `else` gives
+NaN, a sequence drops statements without effects and everything after a
+`break` or `continue`. Conditionals whose branches have no effects stay a
+`SELECT` of both, as before, so expressions without statements compile to the
+same instructions as in 0.8 and run the same code.
+
+Locals live in the bottom slots of the evaluation stack (`LOCALS n` moves the
+stack above them; block scopes reuse slots), so a thread's storage is still the
+one `double[32]` array, and a loop's value sits in a stack slot that `break`
+and `continue` cut the stack back to (`KEEP`, `DROP`). The only new
+per-thread state is an iteration counter: after `expr::MAX_ITERATIONS`
+(100000) loop iterations in all, an evaluation returns NaN and records which
+program stopped in a device flag of its `ProgramTable`. The flag is read only
+where the host already waits (setup, output, a diverged step), and only for
+tables that have loops, so a runaway loop becomes an input error instead of a
+hung kernel without a synchronization per stage. Host sites that still
+evaluate exprtk (`Expression`) first compile the text with `expr::Program`,
+so every section accepts the same language with the same messages, and give
+exprtk a loop check with the same cap.
+
+Measured on the host (Apple M4 Pro, 2 threads, 2M points, best of 7), the
+expressions of the tests and the source below compile to the same
+instructions as before and evaluate 10–25% faster (the source: 40.5 → 36.4 ns
+per evaluation), from the interpreter's reordered dispatch.
+
 ## Stage times in captured steps
 
 A graph-captured step replays kernels whose time and time step live on the
@@ -116,6 +149,6 @@ every stage; cells outside a region skip it.
 ## Reuse
 
 Boundary expressions (#316), sponges and `[initialize]` still evaluate exprtk
-on the host where they are evaluated once; adopting `expr::Program` is a
-matter of binding their variables. Regions are meant for sponge and
+on the host where they are evaluated once (checked by `expr::Program`);
+adopting it for evaluation is a matter of binding their variables (#449). Regions are meant for sponge and
 initialization regions and for probes (#318).
