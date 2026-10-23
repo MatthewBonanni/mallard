@@ -145,15 +145,16 @@ std::string bytes(double b) {
 
 std::string memory_lines(int device) {
     // The device of rank 0's solver, not this thread's default
+    bool on_device = device >= 0;
 #if defined(KOKKOS_ENABLE_CUDA)
-    if (device >= 0) cudaSetDevice(device);
+    on_device = on_device && cudaSetDevice(device) == cudaSuccess;
 #elif defined(KOKKOS_ENABLE_HIP)
-    if (device >= 0) hipSetDevice(device);
+    on_device = on_device && hipSetDevice(device) == hipSuccess;
 #endif
     const MemoryUsage m = memory_usage();
     std::string text;
     if (m.host >= 0.0) text += "memory_host: " + bytes(m.host) + " (peak " + bytes(m.host_peak) + ", rank 0)\n";
-    if (device >= 0 && m.device >= 0.0) {
+    if (on_device && m.device >= 0.0) {
         text += "memory_device: " + bytes(m.device) + " of " + bytes(m.device_total) + " (device " +
                 std::to_string(device) + ", all processes)\n";
     }
