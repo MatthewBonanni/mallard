@@ -274,6 +274,7 @@ std::string reacting_step(const std::string & extra, bool double_flux, const std
 } // namespace
 
 TEST(HealthRepairs, ClippingInAReactingRunIsWhatTheAuditRecords) {
+    SKIP_IN_SINGLE_PRECISION("a clipping of 1e-6 of a cell's mass is below the round-off of the element totals");
     // A negative OH mass fraction in one cell of each rank: the first chemistry call clips and
     // renormalizes it, a change the audit must record exactly and the element balance must explain
     auto solver_ptr = std::make_unique<Solver>();
@@ -318,6 +319,7 @@ TEST(HealthRepairs, ClippingInAReactingRunIsWhatTheAuditRecords) {
 }
 
 TEST(HealthRepairs, DoubleFluxEnergyResetIsTheEnergyChangeAtRest) {
+    SKIP_IN_SINGLE_PRECISION("the reset's change is of the order of the energy fluxes' round-off");
     // A temperature and composition step at rest: the pressure and velocity stay uniform, so no flux
     // changes the energy, and its total changes only by the reset to the true equation of state
     const auto solver_ptr = run(reacting_step("", true, "0.0"));
