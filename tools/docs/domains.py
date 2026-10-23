@@ -153,7 +153,7 @@ def save_generated(name, example, coarsen, title, file="input.toml", figsize=(6.
 
 def make_cylinder_mesh(args):
     tmp = Path(tempfile.mkdtemp()) / "mesh.msh"
-    subprocess.run([sys.executable, str(ROOT / "tools" / "make_cylinder_mesh.py"), str(tmp), *args], check=True,
+    subprocess.run([sys.executable, str(ROOT / "tools" / "mesh" / "make_cylinder_mesh.py"), str(tmp), *args], check=True,
                    stdout=subprocess.DEVNULL)
     return meshes.read_gmsh22(tmp)
 

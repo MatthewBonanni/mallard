@@ -22,7 +22,7 @@ image pairs to its own. What a pull request must document is listed in
 ## Links
 
 - Between pages of `docs/`: relative links (`../input.md#chemistry`).
-- To other files of the repository: relative links (`../../tools/plane_average.py`);
+- To other files of the repository: relative links (`../../tools/post/plane_average.py`);
   the site turns them into links to GitHub.
 - To pages that only the website has (validation, gallery, dashboard, examples):
   absolute links, `https://matthewbonanni.github.io/mallard/validation/#sod-shock-tube`;
@@ -95,10 +95,10 @@ per change and its PR or issue number:
 - Refactors, tests and comments that users cannot notice need no fragment:
   label the pull request `no-changelog`.
 
-The first job of `ci.yml` checks this (`python3 tools/changelog.py check`
-runs it locally). At a release, `python3 tools/changelog.py release X.Y.Z`
+The first job of `ci.yml` checks this (`python3 tools/dev/changelog.py check`
+runs it locally). At a release, `python3 tools/dev/changelog.py release X.Y.Z`
 folds the Unreleased section and the fragments into `## [X.Y.Z] - date`,
 deletes the fragments and updates the compare links; the GitHub release notes
-start from `python3 tools/changelog.py notes X.Y.Z`. Before tagging, regenerate
+start from `python3 tools/dev/changelog.py notes X.Y.Z`. Before tagging, regenerate
 the [verification manual](../verification/index.md#how-the-tables-are-made)
 (`tools/docs/verification.py`, or the *Verification* workflow) and commit it.

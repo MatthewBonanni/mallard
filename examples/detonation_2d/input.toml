@@ -7,9 +7,9 @@
 # 1.4 mm induction length). P_MAX records the numerical soot foil. Make the
 # initial state first, from this directory:
 #
-#   python ../../tools/detonation_reference.py ../../mechanisms/h2o2.yaml ohmech \
+#   python ../../tools/setup/detonation_reference.py ../../mechanisms/h2o2.yaml ohmech \
 #       "H2:2, O2:1, AR:7" 298 6670 znd.csv
-#   python ../../tools/znd_restart.py znd.csv ../../mechanisms/h2o2.yaml ohmech 3000 0.45 0.1 \
+#   python ../../tools/setup/znd_restart.py znd.csv ../../mechanisms/h2o2.yaml ohmech 3000 0.45 0.1 \
 #       cell.restart --ny 400 --ly 0.06 --fresh-pocket \
 #       --pocket 0.097 0.006 0.002 --pocket 0.0965 0.017 0.002 --pocket 0.0975 0.026 0.002 \
 #       --pocket 0.096 0.038 0.002 --pocket 0.097 0.047 0.002 --pocket 0.0968 0.055 0.002
@@ -17,8 +17,8 @@
 # then run (1.2M cells, 18,900 steps: 39 minutes on two A100s, chemistry 71% of
 # the time) and analyze and animate it with
 #
-#   python ../../tools/soot_foil.py solut/cell.pvd 1616.93 --png foil.png
-#   python ../../tools/animate_detonation_2d.py solut/cell.pvd detonation_2d.mp4
+#   python soot_foil.py solut/cell.pvd 1616.93 --png foil.png
+#   python animate_detonation_2d.py solut/cell.pvd detonation_2d.mp4
 #
 # Results: the front runs 328 mm at a mean speed over the second half of
 # 1617.0 m/s (D_CJ to 0.01%). The pockets start eight strong triple points

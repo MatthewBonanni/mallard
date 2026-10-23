@@ -89,7 +89,7 @@ as they are.
 **Python.** Mallard's [tools](../../tools/README.md) read the same files without ParaView:
 
 ```bash
-python3 $MALLARD/tools/plot_vtu.py solut/wedge_000010.vtu pressure.png --var P --contours 20
+python3 $MALLARD/tools/post/plot_vtu.py solut/wedge_000010.vtu pressure.png --var P --contours 20
 ```
 
 **The probe.** `probe_line.csv` holds the pressure on the line x = 1.5 m every 10 steps, one row per

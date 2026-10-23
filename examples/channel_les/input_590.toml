@@ -25,7 +25,7 @@
 # Cost: about 900,000 steps of 2.3e-4 h/U_b, 14 ms each on one A100: 3.5 hours.
 #
 # Run:
-#   python ../../tools/channel_init.py input_590.toml init.restart
+#   python ../../tools/setup/channel_init.py input_590.toml init.restart
 #   ../../build3d/src/mallard -i input_590.toml
 
 [run]

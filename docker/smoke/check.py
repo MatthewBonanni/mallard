@@ -20,7 +20,7 @@ IGNITION_DELAY_RTOL = 0.02
 
 def cells(path):
     """Cell-center x and density of a snapshot, or of all pieces of a PVTU."""
-    from mallard_vtu import read_vtu_cells
+    from mallard.vtu import read_vtu_cells
     if path.endswith(".pvtu"):
         pieces = re.findall(r'Source="([^"]+)"', open(path).read())
         parts = [cells(os.path.join(os.path.dirname(path), p)) for p in pieces]
@@ -52,7 +52,7 @@ def check_reactor(path):
 
 
 def main():
-    sys.path.insert(0, sys.argv[1])
+    sys.path[:0] = [sys.argv[1], os.path.join(sys.argv[1], "..", "examples", "sod")]
     kind, files = sys.argv[2], sys.argv[3:]
     ok = check_sod(files) if kind == "sod" else check_reactor(files[0])
     sys.exit(0 if ok else 1)

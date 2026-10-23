@@ -26,7 +26,7 @@
 # their flame, whereas here delta_L = 19.3 nu_u / S_L, so placing these runs
 # by nu_u / S_L instead would move them 5 times further right.
 #
-# Setup (tools/flame_vortex.py): the planar Cantera flame in its frame (fresh
+# Setup (examples/flame_vortex/flame_vortex.py): the planar Cantera flame in its frame (fresh
 # gas entering on the left at S_L, p_out on the right) and, 3 R_c + delta_L
 # upstream of it, two Gaussian vortices (stream function C exp(-d^2 / 2 R_c^2),
 # centers 2 R_c apart, so r = 4 R_c) with their cyclostrophic pressure. Only
@@ -43,16 +43,16 @@
 # Make the initial state (this file is the r = 4, u' = 30 run, next to
 # Poinsot et al.'s quenching example), from this directory, and run it:
 #
-#   python ../../tools/flame_reference.py --single h2 4.0 300 .
-#   python ../../tools/flame_vortex.py h2_phi4.0_T300_mix_full.csv ../../mechanisms/h2o2.yaml ohmech . \
+#   python ../../tools/setup/flame_reference.py --single h2 4.0 300 .
+#   python flame_vortex.py h2_phi4.0_T300_mix_full.csv ../../mechanisms/h2o2.yaml ohmech . \
 #       --r 4 --u 30 --cfl 0.8
 #
 # For the sweep, the same with --r R --u U into run directories (and --cells 24
 # for r = 1), plus the controls --r 4 --u 0 --flame-times 5.2 and --r 1 --u 0
 # --cells 24 --flame-times 4; then
 #
-#   python ../../tools/flame_vortex_analysis.py RUN_DIR... --control CONTROL_DIR... --plot fv.png
-#   python ../../tools/animate_flame_vortex.py flame_vortex.mp4 RUN_DIR... --control CONTROL_DIR... --cols 4
+#   python flame_vortex_analysis.py RUN_DIR... --control CONTROL_DIR... --plot fv.png
+#   python animate_flame_vortex.py flame_vortex.mp4 RUN_DIR... --control CONTROL_DIR... --cols 4
 #
 # Results (Q / Q_0: heat release over the control's at the same time):
 #
@@ -91,7 +91,7 @@
 # the same outcome, the largest Q / Q_0 1.785 against 1.797, the longest front
 # 2.68 against 2.66 channel heights and q_min 0.378 against 0.389.
 #
-# 1D checks (planar flame, tools/flame_restart.py and tools/flame_speed.py):
+# 1D checks (planar flame, tools/setup/flame_restart.py and tools/post/flame_speed.py):
 # consumption speed against Cantera's -1.44%, -1.46%, -0.93% and -0.70% at
 # 10, 12, 16 and 24 cells per delta_L (CFL 0.4), and at 12 cells the same to
 # 5 digits at CFL 0.4, 0.6 and 0.8 (half the steps at 0.8).

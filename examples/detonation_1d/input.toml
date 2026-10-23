@@ -3,16 +3,16 @@
 # mechanism the recombination zone is about 0.8 m long, so a detonation
 # started by a driver runs well below D_CJ over any practical tube; started
 # from the ZND profile it must keep D_CJ = 1617 m/s and the ZND induction
-# length, 1.53 mm (tools/detonation_reference.py). 152.5 um cells: 10 per
+# length, 1.53 mm (tools/setup/detonation_reference.py). 152.5 um cells: 10 per
 # induction length. Make the initial state first, from this directory:
 #
-#   python ../../tools/detonation_reference.py ../../mechanisms/h2o2.yaml ohmech \
+#   python ../../tools/setup/detonation_reference.py ../../mechanisms/h2o2.yaml ohmech \
 #       "H2:2, O2:1, AR:7" 298 6670 znd.csv
-#   python ../../tools/znd_restart.py znd.csv ../../mechanisms/h2o2.yaml ohmech 3934 0.6 0.25 znd.restart
+#   python ../../tools/setup/znd_restart.py znd.csv ../../mechanisms/h2o2.yaml ohmech 3934 0.6 0.25 znd.restart
 #
 # (Nx = 7868 or 15736 in both places for 20 or 40 cells per induction length),
 # then run and check the front with
-#   python ../../tools/plot_detonation.py solut/detonation.pvd 1616.93 1.5251
+#   python plot_detonation.py solut/detonation.pvd 1616.93 1.5251
 
 [run]
 t_stop = 2.0e-4
