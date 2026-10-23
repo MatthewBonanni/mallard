@@ -50,6 +50,7 @@
 #include "check.h"
 #include "memory_tracker.h"
 #include "numerics_preset.h"
+#include "input_upgrade.h"
 
 struct ForceMonitor {
     std::string zone;
@@ -536,6 +537,7 @@ class Solver {
         Input input;
         bool check_only = false;  // within check()
         numerics_preset::Resolution preset;
+        std::vector<input_upgrade::Finding> deprecated_keys;  // read under their new names
 
         // Run parameters
         uint64_t n_steps;

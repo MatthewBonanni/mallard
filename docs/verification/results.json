@@ -1,0 +1,3135 @@
+{
+ "commit": "52ed962",
+ "date": "2026-10-22",
+ "studies": [
+  {
+   "section": "time",
+   "method": "RODAS (chemistry)",
+   "cells": "",
+   "error": "error, Van der Pol oscillator",
+   "dim": 3,
+   "test": "ChemistryReactorTest.RodasIsFourthOrderWithThirdOrderEmbeddedSolution",
+   "n": [
+    32.0,
+    64.0
+   ],
+   "errors": [
+    3.861866e-09,
+    2.38949e-10
+   ],
+   "design": 4.0,
+   "min_order": 3.8,
+   "max_order": 4.3,
+   "order": 4.014524,
+   "pass": true
+  },
+  {
+   "section": "time",
+   "method": "CK45",
+   "cells": "",
+   "error": "error, time-dependent right-hand side",
+   "dim": 3,
+   "test": "TimeIntegratorTest.StageTimesGiveDesignOrderForTimeDependentRHS",
+   "n": [
+    10.0,
+    20.0
+   ],
+   "errors": [
+    3.68568e-10,
+    2.170253e-11
+   ],
+   "design": 4.0,
+   "min_order": 3.85,
+   "max_order": null,
+   "order": 4.085996,
+   "pass": true
+  },
+  {
+   "section": "time",
+   "method": "RDPK3Sp35",
+   "cells": "",
+   "error": "error, time-dependent right-hand side",
+   "dim": 3,
+   "test": "TimeIntegratorTest.StageTimesGiveDesignOrderForTimeDependentRHS",
+   "n": [
+    10.0,
+    20.0
+   ],
+   "errors": [
+    5.225191e-09,
+    3.251873e-10
+   ],
+   "design": 3.0,
+   "min_order": 2.85,
+   "max_order": null,
+   "order": 4.006141,
+   "pass": true
+  },
+  {
+   "section": "time",
+   "method": "RK4",
+   "cells": "",
+   "error": "error, time-dependent right-hand side",
+   "dim": 3,
+   "test": "TimeIntegratorTest.StageTimesGiveDesignOrderForTimeDependentRHS",
+   "n": [
+    10.0,
+    20.0
+   ],
+   "errors": [
+    2.922644e-08,
+    1.826245e-09
+   ],
+   "design": 4.0,
+   "min_order": 3.85,
+   "max_order": null,
+   "order": 4.000322,
+   "pass": true
+  },
+  {
+   "section": "time",
+   "method": "SSPRK3",
+   "cells": "",
+   "error": "error, time-dependent right-hand side",
+   "dim": 3,
+   "test": "TimeIntegratorTest.StageTimesGiveDesignOrderForTimeDependentRHS",
+   "n": [
+    10.0,
+    20.0
+   ],
+   "errors": [
+    2.922644e-08,
+    1.826245e-09
+   ],
+   "design": 3.0,
+   "min_order": 2.85,
+   "max_order": null,
+   "order": 4.000322,
+   "pass": true
+  },
+  {
+   "section": "time",
+   "method": "SSPRK54",
+   "cells": "",
+   "error": "error, time-dependent right-hand side",
+   "dim": 3,
+   "test": "TimeIntegratorTest.StageTimesGiveDesignOrderForTimeDependentRHS",
+   "n": [
+    10.0,
+    20.0
+   ],
+   "errors": [
+    1.690694e-08,
+    1.055159e-09
+   ],
+   "design": 4.0,
+   "min_order": 3.85,
+   "max_order": null,
+   "order": 4.002082,
+   "pass": true
+  },
+  {
+   "section": "time",
+   "method": "RDPK3Sp35 error estimate",
+   "cells": "",
+   "error": "estimate after one step",
+   "dim": 3,
+   "test": "TimeIntegratorTest.EmbeddedEstimateIsTheLocalErrorOfTheSecondOrderPair",
+   "n": [
+    10.0,
+    20.0
+   ],
+   "errors": [
+    2.673843e-06,
+    3.408247e-07
+   ],
+   "design": 3.0,
+   "min_order": 2.9,
+   "max_order": 3.1,
+   "order": 2.971813,
+   "pass": true
+  },
+  {
+   "section": "time",
+   "method": "RODAS error estimate",
+   "cells": "",
+   "error": "local error estimate, Van der Pol oscillator",
+   "dim": 3,
+   "test": "ChemistryReactorTest.RodasIsFourthOrderWithThirdOrderEmbeddedSolution",
+   "n": [
+    32.0,
+    64.0
+   ],
+   "errors": [
+    5.984521e-07,
+    4.073117e-08
+   ],
+   "design": 4.0,
+   "min_order": 3.8,
+   "max_order": 4.3,
+   "order": 3.877031,
+   "pass": true
+  },
+  {
+   "section": "time",
+   "method": "CK45",
+   "cells": "",
+   "error": "max error, linear system",
+   "dim": 3,
+   "test": "TimeIntegratorTest.LowStorageMethodsHaveTheirDesignOrder",
+   "n": [
+    20.0,
+    40.0
+   ],
+   "errors": [
+    9.561638e-08,
+    5.805461e-09
+   ],
+   "design": 4.0,
+   "min_order": 3.9,
+   "max_order": 4.1,
+   "order": 4.041775,
+   "pass": true
+  },
+  {
+   "section": "time",
+   "method": "FE",
+   "cells": "",
+   "error": "max error, linear system",
+   "dim": 3,
+   "test": "TimeIntegratorTest.ForwardEulerIsFirstOrder",
+   "n": [
+    20.0,
+    40.0
+   ],
+   "errors": [
+    0.01375863,
+    0.006823127
+   ],
+   "design": 1.0,
+   "min_order": 0.9,
+   "max_order": 1.1,
+   "order": 1.011832,
+   "pass": true
+  },
+  {
+   "section": "time",
+   "method": "RDPK3Sp35",
+   "cells": "",
+   "error": "max error, linear system",
+   "dim": 3,
+   "test": "TimeIntegratorTest.LowStorageMethodsHaveTheirDesignOrder",
+   "n": [
+    20.0,
+    40.0
+   ],
+   "errors": [
+    2.807112e-06,
+    3.43348e-07
+   ],
+   "design": 3.0,
+   "min_order": 2.9,
+   "max_order": 3.1,
+   "order": 3.031343,
+   "pass": true
+  },
+  {
+   "section": "time",
+   "method": "RK4",
+   "cells": "",
+   "error": "max error, linear system",
+   "dim": 3,
+   "test": "TimeIntegratorTest.RK4IsFourthOrder",
+   "n": [
+    20.0,
+    40.0
+   ],
+   "errors": [
+    2.451852e-07,
+    1.469759e-08
+   ],
+   "design": 4.0,
+   "min_order": 3.9,
+   "max_order": 4.1,
+   "order": 4.06022,
+   "pass": true
+  },
+  {
+   "section": "time",
+   "method": "SSPRK3",
+   "cells": "",
+   "error": "max error, linear system",
+   "dim": 3,
+   "test": "TimeIntegratorTest.SSPRK3IsThirdOrder",
+   "n": [
+    20.0,
+    40.0
+   ],
+   "errors": [
+    1.221834e-05,
+    1.467316e-06
+   ],
+   "design": 3.0,
+   "min_order": 2.9,
+   "max_order": 3.1,
+   "order": 3.057797,
+   "pass": true
+  },
+  {
+   "section": "time",
+   "method": "SSPRK54",
+   "cells": "",
+   "error": "max error, linear system",
+   "dim": 3,
+   "test": "TimeIntegratorTest.LowStorageMethodsHaveTheirDesignOrder",
+   "n": [
+    20.0,
+    40.0
+   ],
+   "errors": [
+    1.112398e-07,
+    6.734301e-09
+   ],
+   "design": 4.0,
+   "min_order": 3.9,
+   "max_order": 4.1,
+   "order": 4.046001,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO3",
+   "cells": "hexahedra",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "TENO/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/0",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.02886058,
+    0.004367528
+   ],
+   "design": 3.0,
+   "min_order": 2.5,
+   "max_order": null,
+   "order": 2.724212,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO4",
+   "cells": "hexahedra",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "TENO/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/1",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.01119129,
+    0.0008219081
+   ],
+   "design": 4.0,
+   "min_order": 3.5,
+   "max_order": null,
+   "order": 3.767256,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO5",
+   "cells": "hexahedra",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "TENO/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/2",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.0134139,
+    0.0004392211
+   ],
+   "design": 5.0,
+   "min_order": 4.5,
+   "max_order": null,
+   "order": 4.932638,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO5, troubled",
+   "cells": "hexahedra",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "TENO/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/6",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.0134139,
+    0.0004392211
+   ],
+   "design": 5.0,
+   "min_order": 4.5,
+   "max_order": null,
+   "order": 4.932638,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO6",
+   "cells": "hexahedra",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "DISABLED_Verification/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/0",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.007836296,
+    0.0001476506
+   ],
+   "design": 6.0,
+   "min_order": 5.5,
+   "max_order": null,
+   "order": 5.729913,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO3",
+   "cells": "tetrahedra",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "TENO/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/3",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.05177712,
+    0.008087725
+   ],
+   "design": 3.0,
+   "min_order": 2.5,
+   "max_order": null,
+   "order": 2.678509,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO4",
+   "cells": "tetrahedra",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "TENO/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/4",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.02581248,
+    0.002199724
+   ],
+   "design": 4.0,
+   "min_order": 3.5,
+   "max_order": null,
+   "order": 3.552674,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO4, troubled",
+   "cells": "tetrahedra",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "TENO/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/7",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.02581248,
+    0.002199724
+   ],
+   "design": 4.0,
+   "min_order": 3.5,
+   "max_order": null,
+   "order": 3.552674,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO5",
+   "cells": "tetrahedra",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "TENO/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/5",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.01801189,
+    0.0006769473
+   ],
+   "design": 5.0,
+   "min_order": 4.5,
+   "max_order": null,
+   "order": 4.733762,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO6",
+   "cells": "tetrahedra",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "DISABLED_Verification/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/1",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.007304075,
+    0.0001524034
+   ],
+   "design": 6.0,
+   "min_order": 5.5,
+   "max_order": null,
+   "order": 5.582735,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO3",
+   "cells": "prisms",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "DISABLED_Verification/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/2",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.01867236,
+    0.002655193
+   ],
+   "design": 3.0,
+   "min_order": 2.5,
+   "max_order": null,
+   "order": 2.814016,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO4",
+   "cells": "prisms",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "DISABLED_Verification/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/3",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.009429046,
+    0.0008065872
+   ],
+   "design": 4.0,
+   "min_order": 3.5,
+   "max_order": null,
+   "order": 3.547209,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO5",
+   "cells": "prisms",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "DISABLED_Verification/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/4",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.005905206,
+    0.0001757568
+   ],
+   "design": 5.0,
+   "min_order": 4.5,
+   "max_order": null,
+   "order": 5.070335,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO6",
+   "cells": "prisms",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "DISABLED_Verification/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/5",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.005200988,
+    0.000108675
+   ],
+   "design": 6.0,
+   "min_order": 5.5,
+   "max_order": null,
+   "order": 5.580694,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO3",
+   "cells": "pyramids",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "DISABLED_Verification/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/6",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.01367927,
+    0.001856926
+   ],
+   "design": 3.0,
+   "min_order": 2.5,
+   "max_order": null,
+   "order": 2.881003,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO4",
+   "cells": "pyramids",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "DISABLED_Verification/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/7",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.003386089,
+    0.0002457369
+   ],
+   "design": 4.0,
+   "min_order": 3.5,
+   "max_order": null,
+   "order": 3.784434,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO5",
+   "cells": "pyramids",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "DISABLED_Verification/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/8",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.001697323,
+    5.930972e-05
+   ],
+   "design": 5.0,
+   "min_order": 4.5,
+   "max_order": null,
+   "order": 4.838848,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO6",
+   "cells": "pyramids",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "DISABLED_Verification/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/9",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.000439532,
+    9.032072e-06
+   ],
+   "design": 6.0,
+   "min_order": 5.5,
+   "max_order": null,
+   "order": 5.604768,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO3",
+   "cells": "mixed",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "DISABLED_Verification/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/10",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.02292023,
+    0.003947026
+   ],
+   "design": 3.0,
+   "min_order": 2.5,
+   "max_order": null,
+   "order": 2.537784,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO4",
+   "cells": "mixed",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "DISABLED_Verification/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/11",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.009687556,
+    0.0008219081
+   ],
+   "design": 4.0,
+   "min_order": 3.5,
+   "max_order": null,
+   "order": 3.559084,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO5",
+   "cells": "mixed",
+   "error": "max face-value error",
+   "dim": 3,
+   "test": "DISABLED_Verification/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/12",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.01190809,
+    0.0003608138
+   ],
+   "design": 5.0,
+   "min_order": 4.5,
+   "max_order": null,
+   "order": 5.044543,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO3",
+   "cells": "quadrilaterals",
+   "error": "max face-value error, interior",
+   "dim": 2,
+   "test": "TENO/TENOOrder.SmoothReconstructionConvergesAtDesignOrderInInterior/0",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.001860725,
+    0.0002504558
+   ],
+   "design": 3.0,
+   "min_order": 2.8,
+   "max_order": null,
+   "order": 2.893237,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO4",
+   "cells": "quadrilaterals",
+   "error": "max face-value error, interior",
+   "dim": 2,
+   "test": "TENO/TENOOrder.SmoothReconstructionConvergesAtDesignOrderInInterior/1",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.0001914598,
+    1.12876e-05
+   ],
+   "design": 4.0,
+   "min_order": 3.8,
+   "max_order": null,
+   "order": 4.084231,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO5",
+   "cells": "quadrilaterals",
+   "error": "max face-value error, interior",
+   "dim": 2,
+   "test": "TENO/TENOOrder.SmoothReconstructionConvergesAtDesignOrderInInterior/2",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.0001316318,
+    4.415711e-06
+   ],
+   "design": 5.0,
+   "min_order": 4.8,
+   "max_order": null,
+   "order": 4.897719,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO6",
+   "cells": "quadrilaterals",
+   "error": "max face-value error, interior",
+   "dim": 2,
+   "test": "DISABLED_Verification/TENOOrder.SmoothReconstructionConvergesAtDesignOrderInInterior/0",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    2.388758e-05,
+    3.613788e-07
+   ],
+   "design": 6.0,
+   "min_order": 5.8,
+   "max_order": null,
+   "order": 6.046605,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO3",
+   "cells": "triangles",
+   "error": "max face-value error, interior",
+   "dim": 2,
+   "test": "TENO/TENOOrder.SmoothReconstructionConvergesAtDesignOrderInInterior/3",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.000677343,
+    8.918849e-05
+   ],
+   "design": 3.0,
+   "min_order": 2.8,
+   "max_order": null,
+   "order": 2.924957,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO4",
+   "cells": "triangles",
+   "error": "max face-value error, interior",
+   "dim": 2,
+   "test": "TENO/TENOOrder.SmoothReconstructionConvergesAtDesignOrderInInterior/4",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.0001256407,
+    7.994203e-06
+   ],
+   "design": 4.0,
+   "min_order": 3.8,
+   "max_order": null,
+   "order": 3.974206,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO5",
+   "cells": "triangles",
+   "error": "max face-value error, interior",
+   "dim": 2,
+   "test": "TENO/TENOOrder.SmoothReconstructionConvergesAtDesignOrderInInterior/5",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    4.806602e-05,
+    1.519002e-06
+   ],
+   "design": 5.0,
+   "min_order": 4.8,
+   "max_order": null,
+   "order": 4.983822,
+   "pass": true
+  },
+  {
+   "section": "reconstruction",
+   "method": "TENO6",
+   "cells": "triangles",
+   "error": "max face-value error, interior",
+   "dim": 2,
+   "test": "DISABLED_Verification/TENOOrder.SmoothReconstructionConvergesAtDesignOrderInInterior/1",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    4.533069e-06,
+    7.32869e-08
+   ],
+   "design": 6.0,
+   "min_order": 5.8,
+   "max_order": null,
+   "order": 5.950789,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO5, SSPRK3",
+   "cells": "quadrilaterals",
+   "error": "L1 density error, pulse",
+   "dim": 2,
+   "test": "Solver/SodMesh.TENOConvergesFasterThanMUSCLForSmoothFlow/0",
+   "n": [
+    32.0,
+    64.0
+   ],
+   "errors": [
+    0.0002967723,
+    1.333003e-05
+   ],
+   "design": 3.0,
+   "min_order": 2.7,
+   "max_order": null,
+   "order": 4.476604,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO5, SSPRK3",
+   "cells": "triangles",
+   "error": "L1 density error, pulse",
+   "dim": 2,
+   "test": "Solver/SodMesh.TENOConvergesFasterThanMUSCLForSmoothFlow/1",
+   "n": [
+    32.0,
+    64.0
+   ],
+   "errors": [
+    6.890088e-05,
+    3.461605e-06
+   ],
+   "design": 3.0,
+   "min_order": 2.7,
+   "max_order": null,
+   "order": 4.31501,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO5, SSPRK3",
+   "cells": "hexahedra",
+   "error": "L1 density error, pulse",
+   "dim": 3,
+   "test": "TENO3DSolver.AdvectedPulseConvergesAndBeatsMUSCL",
+   "n": [
+    12.0,
+    24.0
+   ],
+   "errors": [
+    0.001483063,
+    0.0001132056
+   ],
+   "design": 3.0,
+   "min_order": 3.0,
+   "max_order": null,
+   "order": 3.711562,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "FO",
+   "cells": "quadrilaterals",
+   "error": "max density error",
+   "dim": 2,
+   "test": "Periodic/PeriodicAdvection2D.SmoothWaveConvergesAtDesignOrder/0",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.0711897,
+    0.04090151
+   ],
+   "design": 1.0,
+   "min_order": 0.75,
+   "max_order": null,
+   "order": 0.7995142,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "MUSCL",
+   "cells": "quadrilaterals",
+   "error": "max density error",
+   "dim": 2,
+   "test": "Periodic/PeriodicAdvection2D.SmoothWaveConvergesAtDesignOrder/1",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.005013543,
+    0.001092703
+   ],
+   "design": 2.0,
+   "min_order": 1.75,
+   "max_order": null,
+   "order": 2.197929,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO3",
+   "cells": "quadrilaterals",
+   "error": "max density error",
+   "dim": 2,
+   "test": "Periodic/PeriodicAdvection2D.SmoothWaveConvergesAtDesignOrder/2",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.007769341,
+    0.001040916
+   ],
+   "design": 3.0,
+   "min_order": 2.75,
+   "max_order": null,
+   "order": 2.899939,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO4",
+   "cells": "quadrilaterals",
+   "error": "max density error",
+   "dim": 2,
+   "test": "Periodic/PeriodicAdvection2D.SmoothWaveConvergesAtDesignOrder/3",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.0006109695,
+    2.872787e-05
+   ],
+   "design": 4.0,
+   "min_order": 3.75,
+   "max_order": null,
+   "order": 4.410577,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO5",
+   "cells": "quadrilaterals",
+   "error": "max density error",
+   "dim": 2,
+   "test": "Periodic/PeriodicAdvection2D.SmoothWaveConvergesAtDesignOrder/4",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.0009385115,
+    3.20645e-05
+   ],
+   "design": 5.0,
+   "min_order": 4.75,
+   "max_order": null,
+   "order": 4.871326,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO6",
+   "cells": "quadrilaterals",
+   "error": "max density error",
+   "dim": 2,
+   "test": "Periodic/PeriodicAdvection2D.SmoothWaveConvergesAtDesignOrder/5",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.0001021154,
+    1.211536e-06
+   ],
+   "design": 6.0,
+   "min_order": 5.75,
+   "max_order": null,
+   "order": 6.39722,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "FO",
+   "cells": "triangles",
+   "error": "max density error",
+   "dim": 2,
+   "test": "Periodic/PeriodicAdvection2D.SmoothWaveConvergesAtDesignOrder/6",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.04598096,
+    0.02519245
+   ],
+   "design": 1.0,
+   "min_order": 0.75,
+   "max_order": null,
+   "order": 0.8680449,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "MUSCL",
+   "cells": "triangles",
+   "error": "max density error",
+   "dim": 2,
+   "test": "Periodic/PeriodicAdvection2D.SmoothWaveConvergesAtDesignOrder/7",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.003065577,
+    0.0007283489
+   ],
+   "design": 2.0,
+   "min_order": 1.75,
+   "max_order": null,
+   "order": 2.073457,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO3",
+   "cells": "triangles",
+   "error": "max density error",
+   "dim": 2,
+   "test": "Periodic/PeriodicAdvection2D.SmoothWaveConvergesAtDesignOrder/8",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.001590503,
+    0.0002009249
+   ],
+   "design": 3.0,
+   "min_order": 2.75,
+   "max_order": null,
+   "order": 2.984755,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO4",
+   "cells": "triangles",
+   "error": "max density error",
+   "dim": 2,
+   "test": "Periodic/PeriodicAdvection2D.SmoothWaveConvergesAtDesignOrder/9",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.0001522301,
+    9.159427e-06
+   ],
+   "design": 4.0,
+   "min_order": 3.75,
+   "max_order": null,
+   "order": 4.054853,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO5",
+   "cells": "triangles",
+   "error": "max density error",
+   "dim": 2,
+   "test": "Periodic/PeriodicAdvection2D.SmoothWaveConvergesAtDesignOrder/10",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.0002647889,
+    8.506215e-06
+   ],
+   "design": 5.0,
+   "min_order": 4.75,
+   "max_order": null,
+   "order": 4.960181,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO6",
+   "cells": "triangles",
+   "error": "max density error",
+   "dim": 2,
+   "test": "Periodic/PeriodicAdvection2D.SmoothWaveConvergesAtDesignOrder/11",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    9.538448e-06,
+    1.520046e-07
+   ],
+   "design": 6.0,
+   "min_order": 5.75,
+   "max_order": null,
+   "order": 5.971568,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "FO",
+   "cells": "hexahedra",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/0",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.07807405,
+    0.04654063
+   ],
+   "design": 1.0,
+   "min_order": 0.5,
+   "max_order": null,
+   "order": 0.7463523,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "MUSCL",
+   "cells": "hexahedra",
+   "error": "max density error",
+   "dim": 3,
+   "test": "Periodic/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/0",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.0264699,
+    0.00546391
+   ],
+   "design": 2.0,
+   "min_order": 1.75,
+   "max_order": null,
+   "order": 2.276347,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO3",
+   "cells": "hexahedra",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/1",
+   "n": [
+    12.0,
+    24.0
+   ],
+   "errors": [
+    0.01857203,
+    0.002680221
+   ],
+   "design": 3.0,
+   "min_order": 2.5,
+   "max_order": null,
+   "order": 2.792707,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO4",
+   "cells": "hexahedra",
+   "error": "max density error",
+   "dim": 3,
+   "test": "Periodic/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/1",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.01325806,
+    0.0006921194
+   ],
+   "design": 4.0,
+   "min_order": 3.75,
+   "max_order": null,
+   "order": 4.259705,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO5",
+   "cells": "hexahedra",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/2",
+   "n": [
+    12.0,
+    24.0
+   ],
+   "errors": [
+    0.005017438,
+    0.0001887574
+   ],
+   "design": 5.0,
+   "min_order": 4.5,
+   "max_order": null,
+   "order": 4.732346,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO6",
+   "cells": "hexahedra",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/3",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.007776257,
+    0.0001158139
+   ],
+   "design": 6.0,
+   "min_order": 5.5,
+   "max_order": null,
+   "order": 6.069195,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "FO",
+   "cells": "tetrahedra",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/4",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.04252755,
+    0.0224673
+   ],
+   "design": 1.0,
+   "min_order": 0.5,
+   "max_order": null,
+   "order": 0.9205706,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "MUSCL",
+   "cells": "tetrahedra",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/5",
+   "n": [
+    12.0,
+    24.0
+   ],
+   "errors": [
+    0.009781374,
+    0.001969724
+   ],
+   "design": 2.0,
+   "min_order": 1.5,
+   "max_order": null,
+   "order": 2.312043,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO3",
+   "cells": "tetrahedra",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/6",
+   "n": [
+    12.0,
+    24.0
+   ],
+   "errors": [
+    0.003458794,
+    0.0004493197
+   ],
+   "design": 3.0,
+   "min_order": 2.5,
+   "max_order": null,
+   "order": 2.944455,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO4",
+   "cells": "tetrahedra",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/7",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.001661809,
+    9.911749e-05
+   ],
+   "design": 4.0,
+   "min_order": 3.5,
+   "max_order": null,
+   "order": 4.067471,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "FO",
+   "cells": "prisms",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/8",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.04071031,
+    0.02199718
+   ],
+   "design": 1.0,
+   "min_order": 0.5,
+   "max_order": null,
+   "order": 0.8880753,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "MUSCL",
+   "cells": "prisms",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/9",
+   "n": [
+    12.0,
+    24.0
+   ],
+   "errors": [
+    0.004426786,
+    0.001095184
+   ],
+   "design": 2.0,
+   "min_order": 1.5,
+   "max_order": null,
+   "order": 2.015086,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO3",
+   "cells": "prisms",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/10",
+   "n": [
+    12.0,
+    24.0
+   ],
+   "errors": [
+    0.004745401,
+    0.0006257851
+   ],
+   "design": 3.0,
+   "min_order": 2.5,
+   "max_order": null,
+   "order": 2.922791,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO4",
+   "cells": "prisms",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/11",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.002984531,
+    0.000162771
+   ],
+   "design": 4.0,
+   "min_order": 3.5,
+   "max_order": null,
+   "order": 4.196589,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "FO",
+   "cells": "pyramids",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/12",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.04225249,
+    0.02279681
+   ],
+   "design": 1.0,
+   "min_order": 0.5,
+   "max_order": null,
+   "order": 0.8902046,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "MUSCL",
+   "cells": "pyramids",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/13",
+   "n": [
+    12.0,
+    24.0
+   ],
+   "errors": [
+    0.006746982,
+    0.0018023
+   ],
+   "design": 2.0,
+   "min_order": 1.5,
+   "max_order": null,
+   "order": 1.904403,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO3",
+   "cells": "pyramids",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/14",
+   "n": [
+    12.0,
+    24.0
+   ],
+   "errors": [
+    0.003209266,
+    0.0004074795
+   ],
+   "design": 3.0,
+   "min_order": 2.5,
+   "max_order": null,
+   "order": 2.977444,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO4",
+   "cells": "pyramids",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/15",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.0009536885,
+    5.263599e-05
+   ],
+   "design": 4.0,
+   "min_order": 3.5,
+   "max_order": null,
+   "order": 4.179397,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "FO",
+   "cells": "mixed",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/16",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.07394771,
+    0.04202774
+   ],
+   "design": 1.0,
+   "min_order": 0.5,
+   "max_order": null,
+   "order": 0.8151636,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "MUSCL",
+   "cells": "mixed",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/17",
+   "n": [
+    12.0,
+    24.0
+   ],
+   "errors": [
+    0.01437471,
+    0.003390014
+   ],
+   "design": 2.0,
+   "min_order": 1.5,
+   "max_order": null,
+   "order": 2.084169,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO3",
+   "cells": "mixed",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/18",
+   "n": [
+    12.0,
+    24.0
+   ],
+   "errors": [
+    0.01419078,
+    0.002276428
+   ],
+   "design": 3.0,
+   "min_order": 2.5,
+   "max_order": null,
+   "order": 2.64011,
+   "pass": true
+  },
+  {
+   "section": "advection",
+   "method": "TENO4",
+   "cells": "mixed",
+   "error": "max density error",
+   "dim": 3,
+   "test": "DISABLED_Verification/PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder/19",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.009819672,
+    0.0007295685
+   ],
+   "design": 4.0,
+   "min_order": 3.5,
+   "max_order": null,
+   "order": 3.750559,
+   "pass": true
+  },
+  {
+   "section": "viscous",
+   "method": "Forced channel, transmissive ends",
+   "cells": "quadrilaterals",
+   "error": "max velocity error",
+   "dim": 2,
+   "test": "Viscous/ViscousMesh.ForcedChannelFlowWithTransmissiveEndsConvergesAtSecondOrder/0",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.000549034,
+    0.0001418734
+   ],
+   "design": 2.0,
+   "min_order": 1.8,
+   "max_order": null,
+   "order": 1.952292,
+   "pass": true
+  },
+  {
+   "section": "viscous",
+   "method": "Stokes' first problem",
+   "cells": "quadrilaterals",
+   "error": "max velocity error",
+   "dim": 2,
+   "test": "Viscous/ViscousMesh.StokesFirstProblemMatchesErfcProfile/0",
+   "n": [
+    32.0,
+    64.0
+   ],
+   "errors": [
+    7.919553e-05,
+    1.983083e-05
+   ],
+   "design": 2.0,
+   "min_order": 1.8,
+   "max_order": null,
+   "order": 1.997674,
+   "pass": true
+  },
+  {
+   "section": "viscous",
+   "method": "Forced channel, transmissive ends",
+   "cells": "triangles",
+   "error": "max velocity error",
+   "dim": 2,
+   "test": "Viscous/ViscousMesh.ForcedChannelFlowWithTransmissiveEndsConvergesAtSecondOrder/1",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.0002406635,
+    6.325252e-05
+   ],
+   "design": 2.0,
+   "min_order": 1.8,
+   "max_order": null,
+   "order": 1.927822,
+   "pass": true
+  },
+  {
+   "section": "viscous",
+   "method": "Stokes' first problem",
+   "cells": "triangles",
+   "error": "max velocity error",
+   "dim": 2,
+   "test": "Viscous/ViscousMesh.StokesFirstProblemMatchesErfcProfile/1",
+   "n": [
+    32.0,
+    64.0
+   ],
+   "errors": [
+    3.602378e-05,
+    8.040652e-06
+   ],
+   "design": 2.0,
+   "min_order": 1.8,
+   "max_order": null,
+   "order": 2.163565,
+   "pass": true
+  },
+  {
+   "section": "viscous",
+   "method": "Forced channel",
+   "cells": "hexahedra",
+   "error": "max velocity error",
+   "dim": 3,
+   "test": "DISABLED_Verification/ForcedChannel3D.SteadyProfileConvergesAtSecondOrder/1",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.000549034,
+    0.0001418734
+   ],
+   "design": 2.0,
+   "min_order": 1.8,
+   "max_order": null,
+   "order": 1.952292,
+   "pass": true
+  },
+  {
+   "section": "viscous",
+   "method": "Forced channel",
+   "cells": "tetrahedra",
+   "error": "max velocity error",
+   "dim": 3,
+   "test": "DISABLED_Verification/ForcedChannel3D.SteadyProfileConvergesAtSecondOrder/3",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.0001597743,
+    4.245878e-05
+   ],
+   "design": 2.0,
+   "min_order": 1.8,
+   "max_order": null,
+   "order": 1.911901,
+   "pass": true
+  },
+  {
+   "section": "viscous",
+   "method": "Forced channel",
+   "cells": "prisms",
+   "error": "max velocity error",
+   "dim": 3,
+   "test": "DISABLED_Verification/ForcedChannel3D.SteadyProfileConvergesAtSecondOrder/5",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.0002418393,
+    6.273512e-05
+   ],
+   "design": 2.0,
+   "min_order": 1.8,
+   "max_order": null,
+   "order": 1.946704,
+   "pass": true
+  },
+  {
+   "section": "viscous",
+   "method": "Forced channel",
+   "cells": "pyramids",
+   "error": "max velocity error",
+   "dim": 3,
+   "test": "DISABLED_Verification/ForcedChannel3D.SteadyProfileConvergesAtSecondOrder/7",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.0002642536,
+    6.857849e-05
+   ],
+   "design": 2.0,
+   "min_order": 1.8,
+   "max_order": null,
+   "order": 1.946095,
+   "pass": true
+  },
+  {
+   "section": "viscous",
+   "method": "Forced channel",
+   "cells": "mixed",
+   "error": "max velocity error",
+   "dim": 3,
+   "test": "DISABLED_Verification/ForcedChannel3D.SteadyProfileConvergesAtSecondOrder/9",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.0005242397,
+    0.000136186
+   ],
+   "design": 2.0,
+   "min_order": 1.8,
+   "max_order": null,
+   "order": 1.944648,
+   "pass": true
+  },
+  {
+   "section": "boundaries",
+   "method": "TENO3",
+   "cells": "quadrilaterals",
+   "error": "max face-value error, symmetry walls",
+   "dim": 2,
+   "test": "TENO/TENOOrder.SmoothReconstructionConvergesAtDesignOrderWithMirroredBoundaries/0",
+   "n": [
+    32.0,
+    64.0
+   ],
+   "errors": [
+    0.0003648456,
+    4.603975e-05
+   ],
+   "design": 3.0,
+   "min_order": 2.6,
+   "max_order": null,
+   "order": 2.986334,
+   "pass": true
+  },
+  {
+   "section": "boundaries",
+   "method": "TENO4",
+   "cells": "quadrilaterals",
+   "error": "max face-value error, symmetry walls",
+   "dim": 2,
+   "test": "TENO/TENOOrder.SmoothReconstructionConvergesAtDesignOrderWithMirroredBoundaries/1",
+   "n": [
+    32.0,
+    64.0
+   ],
+   "errors": [
+    2.688222e-05,
+    1.732765e-06
+   ],
+   "design": 4.0,
+   "min_order": 3.6,
+   "max_order": null,
+   "order": 3.955504,
+   "pass": true
+  },
+  {
+   "section": "boundaries",
+   "method": "TENO5",
+   "cells": "quadrilaterals",
+   "error": "max face-value error, symmetry walls",
+   "dim": 2,
+   "test": "TENO/TENOOrder.SmoothReconstructionConvergesAtDesignOrderWithMirroredBoundaries/2",
+   "n": [
+    32.0,
+    64.0
+   ],
+   "errors": [
+    6.567393e-06,
+    2.080809e-07
+   ],
+   "design": 5.0,
+   "min_order": 4.6,
+   "max_order": null,
+   "order": 4.980104,
+   "pass": true
+  },
+  {
+   "section": "boundaries",
+   "method": "TENO6",
+   "cells": "quadrilaterals",
+   "error": "max face-value error, symmetry walls",
+   "dim": 2,
+   "test": "DISABLED_Verification/TENOOrder.SmoothReconstructionConvergesAtDesignOrderWithMirroredBoundaries/0",
+   "n": [
+    32.0,
+    64.0
+   ],
+   "errors": [
+    7.358195e-07,
+    1.185106e-08
+   ],
+   "design": 6.0,
+   "min_order": 5.6,
+   "max_order": null,
+   "order": 5.956264,
+   "pass": true
+  },
+  {
+   "section": "boundaries",
+   "method": "TENO3",
+   "cells": "triangles",
+   "error": "max face-value error, symmetry walls",
+   "dim": 2,
+   "test": "TENO/TENOOrder.SmoothReconstructionConvergesAtDesignOrderWithMirroredBoundaries/3",
+   "n": [
+    32.0,
+    64.0
+   ],
+   "errors": [
+    0.0001284122,
+    1.624588e-05
+   ],
+   "design": 3.0,
+   "min_order": 2.6,
+   "max_order": null,
+   "order": 2.982636,
+   "pass": true
+  },
+  {
+   "section": "boundaries",
+   "method": "TENO4",
+   "cells": "triangles",
+   "error": "max face-value error, symmetry walls",
+   "dim": 2,
+   "test": "TENO/TENOOrder.SmoothReconstructionConvergesAtDesignOrderWithMirroredBoundaries/4",
+   "n": [
+    32.0,
+    64.0
+   ],
+   "errors": [
+    1.215947e-05,
+    7.735526e-07
+   ],
+   "design": 4.0,
+   "min_order": 3.6,
+   "max_order": null,
+   "order": 3.974437,
+   "pass": true
+  },
+  {
+   "section": "boundaries",
+   "method": "TENO5",
+   "cells": "triangles",
+   "error": "max face-value error, symmetry walls",
+   "dim": 2,
+   "test": "TENO/TENOOrder.SmoothReconstructionConvergesAtDesignOrderWithMirroredBoundaries/5",
+   "n": [
+    32.0,
+    64.0
+   ],
+   "errors": [
+    2.086895e-06,
+    6.691432e-08
+   ],
+   "design": 5.0,
+   "min_order": 4.6,
+   "max_order": null,
+   "order": 4.962899,
+   "pass": true
+  },
+  {
+   "section": "boundaries",
+   "method": "TENO6",
+   "cells": "triangles",
+   "error": "max face-value error, symmetry walls",
+   "dim": 2,
+   "test": "DISABLED_Verification/TENOOrder.SmoothReconstructionConvergesAtDesignOrderWithMirroredBoundaries/1",
+   "n": [
+    32.0,
+    64.0
+   ],
+   "errors": [
+    1.264114e-07,
+    2.022015e-09
+   ],
+   "design": 6.0,
+   "min_order": 5.6,
+   "max_order": null,
+   "order": 5.966189,
+   "pass": true
+  },
+  {
+   "section": "boundaries",
+   "method": "Forced channel, transmissive sides",
+   "cells": "hexahedra",
+   "error": "max velocity error",
+   "dim": 3,
+   "test": "DISABLED_Verification/ForcedChannel3D.SteadyProfileConvergesAtSecondOrder/0",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.000549034,
+    0.0001418734
+   ],
+   "design": 2.0,
+   "min_order": 1.8,
+   "max_order": null,
+   "order": 1.952292,
+   "pass": true
+  },
+  {
+   "section": "boundaries",
+   "method": "Forced channel, transmissive sides",
+   "cells": "tetrahedra",
+   "error": "max velocity error",
+   "dim": 3,
+   "test": "DISABLED_Verification/ForcedChannel3D.SteadyProfileConvergesAtSecondOrder/2",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.0002179192,
+    7.258247e-05
+   ],
+   "design": 2.0,
+   "min_order": 1.8,
+   "max_order": null,
+   "order": 1.5861,
+   "pass": false
+  },
+  {
+   "section": "boundaries",
+   "method": "Forced channel, transmissive sides",
+   "cells": "prisms",
+   "error": "max velocity error",
+   "dim": 3,
+   "test": "DISABLED_Verification/ForcedChannel3D.SteadyProfileConvergesAtSecondOrder/4",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.0002408004,
+    6.086853e-05
+   ],
+   "design": 2.0,
+   "min_order": 1.8,
+   "max_order": null,
+   "order": 1.98407,
+   "pass": true
+  },
+  {
+   "section": "boundaries",
+   "method": "Forced channel, transmissive sides",
+   "cells": "pyramids",
+   "error": "max velocity error",
+   "dim": 3,
+   "test": "DISABLED_Verification/ForcedChannel3D.SteadyProfileConvergesAtSecondOrder/6",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.009046555,
+    0.004596818
+   ],
+   "design": 2.0,
+   "min_order": 1.8,
+   "max_order": null,
+   "order": 0.976733,
+   "pass": false
+  },
+  {
+   "section": "boundaries",
+   "method": "Forced channel, transmissive sides",
+   "cells": "mixed",
+   "error": "max velocity error",
+   "dim": 3,
+   "test": "DISABLED_Verification/ForcedChannel3D.SteadyProfileConvergesAtSecondOrder/8",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.001003925,
+    0.0002031877
+   ],
+   "design": 2.0,
+   "min_order": 1.8,
+   "max_order": null,
+   "order": 2.304766,
+   "pass": true
+  },
+  {
+   "section": "axisymmetric",
+   "method": "Poiseuille pipe flow",
+   "cells": "quadrilaterals",
+   "error": "mean axial momentum residual",
+   "dim": 2,
+   "test": "AxisymmetricTest.PoiseuilleResidualConvergesAtSecondOrderUpToTheAxis",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    6.097222e-07,
+    1.276233e-07
+   ],
+   "design": 2.0,
+   "min_order": 1.8,
+   "max_order": null,
+   "order": 2.25626,
+   "pass": true
+  },
+  {
+   "section": "axisymmetric",
+   "method": "TENO3",
+   "cells": "quadrilaterals",
+   "error": "mean residual error, manufactured solution",
+   "dim": 2,
+   "test": "Axisymmetric/AxisymmetricOrder.ManufacturedResidualConvergesAtDesignOrder/0",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.02917629,
+    0.003420812
+   ],
+   "design": 2.0,
+   "min_order": 1.7,
+   "max_order": null,
+   "order": 3.092386,
+   "pass": true
+  },
+  {
+   "section": "axisymmetric",
+   "method": "TENO4",
+   "cells": "quadrilaterals",
+   "error": "mean residual error, manufactured solution",
+   "dim": 2,
+   "test": "Axisymmetric/AxisymmetricOrder.ManufacturedResidualConvergesAtDesignOrder/1",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.005404057,
+    0.0002451064
+   ],
+   "design": 3.0,
+   "min_order": 2.7,
+   "max_order": null,
+   "order": 4.462563,
+   "pass": true
+  },
+  {
+   "section": "axisymmetric",
+   "method": "TENO5",
+   "cells": "quadrilaterals",
+   "error": "mean residual error, manufactured solution",
+   "dim": 2,
+   "test": "Axisymmetric/AxisymmetricOrder.ManufacturedResidualConvergesAtDesignOrder/2",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.0050592,
+    0.000122088
+   ],
+   "design": 4.0,
+   "min_order": 3.7,
+   "max_order": null,
+   "order": 5.372916,
+   "pass": true
+  },
+  {
+   "section": "axisymmetric",
+   "method": "TENO3",
+   "cells": "triangles",
+   "error": "mean residual error, manufactured solution",
+   "dim": 2,
+   "test": "Axisymmetric/AxisymmetricOrder.ManufacturedResidualConvergesAtDesignOrder/3",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.02328754,
+    0.004827124
+   ],
+   "design": 2.0,
+   "min_order": 1.7,
+   "max_order": null,
+   "order": 2.270323,
+   "pass": true
+  },
+  {
+   "section": "axisymmetric",
+   "method": "TENO4",
+   "cells": "triangles",
+   "error": "mean residual error, manufactured solution",
+   "dim": 2,
+   "test": "Axisymmetric/AxisymmetricOrder.ManufacturedResidualConvergesAtDesignOrder/4",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.007914165,
+    0.0007377102
+   ],
+   "design": 3.0,
+   "min_order": 2.7,
+   "max_order": null,
+   "order": 3.423311,
+   "pass": true
+  },
+  {
+   "section": "axisymmetric",
+   "method": "TENO5",
+   "cells": "triangles",
+   "error": "mean residual error, manufactured solution",
+   "dim": 2,
+   "test": "Axisymmetric/AxisymmetricOrder.ManufacturedResidualConvergesAtDesignOrder/5",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.008726628,
+    5.943246e-05
+   ],
+   "design": 4.0,
+   "min_order": 3.7,
+   "max_order": null,
+   "order": 7.198029,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "P2 walls",
+   "cells": "quadrilaterals",
+   "error": "annulus area error",
+   "dim": 2,
+   "test": "CurvedGeometry.StraightWallsAreSecondOrderAndHighOrderLinesConverge",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.0001418379,
+    8.895438e-06
+   ],
+   "design": 4.0,
+   "min_order": 3.8,
+   "max_order": null,
+   "order": 3.995034,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "P3 walls",
+   "cells": "quadrilaterals",
+   "error": "annulus area error",
+   "dim": 2,
+   "test": "CurvedGeometry.StraightWallsAreSecondOrderAndHighOrderLinesConverge",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    2.088642e-05,
+    1.31586e-06
+   ],
+   "design": 4.0,
+   "min_order": 3.8,
+   "max_order": null,
+   "order": 3.988488,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "straight walls",
+   "cells": "quadrilaterals",
+   "error": "annulus area error",
+   "dim": 2,
+   "test": "CurvedGeometry.StraightWallsAreSecondOrderAndHighOrderLinesConverge",
+   "n": [
+    32.0,
+    64.0
+   ],
+   "errors": [
+    0.01844415,
+    0.004617709
+   ],
+   "design": 2.0,
+   "min_order": 1.95,
+   "max_order": 2.05,
+   "order": 1.997914,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO3, curved walls",
+   "cells": "quadrilaterals",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/0",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.003272529,
+    0.000434309
+   ],
+   "design": 3.0,
+   "min_order": 2.5,
+   "max_order": null,
+   "order": 2.913612,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO3, straight-sided cells",
+   "cells": "quadrilaterals",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/0",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.0208543,
+    0.009350103
+   ],
+   "design": 2.0,
+   "min_order": null,
+   "max_order": 2.3,
+   "order": 1.157291,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO4, curved walls",
+   "cells": "quadrilaterals",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/1",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.001365178,
+    7.224297e-05
+   ],
+   "design": 4.0,
+   "min_order": 3.5,
+   "max_order": null,
+   "order": 4.240089,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO4, straight-sided cells",
+   "cells": "quadrilaterals",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/1",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.02299109,
+    0.01255776
+   ],
+   "design": 2.0,
+   "min_order": null,
+   "max_order": 2.3,
+   "order": 0.8724959,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO5, curved walls",
+   "cells": "quadrilaterals",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/2",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.0007002312,
+    9.724377e-06
+   ],
+   "design": 5.0,
+   "min_order": 4.5,
+   "max_order": null,
+   "order": 6.170082,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO5, curved walls, wall degree 3",
+   "cells": "quadrilaterals",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "CurvedTENO.CellsReachingCurvedWallsFitAtMostTheWallDegree",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.001415528,
+    7.517902e-05
+   ],
+   "design": 4.0,
+   "min_order": 3.5,
+   "max_order": 4.5,
+   "order": 4.234867,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO5, curved walls, wall degree 4",
+   "cells": "quadrilaterals",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "CurvedTENO.CellsReachingCurvedWallsFitAtMostTheWallDegree",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.0007002312,
+    9.724377e-06
+   ],
+   "design": 5.0,
+   "min_order": 4.5,
+   "max_order": null,
+   "order": 6.170082,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO5, straight-sided cells",
+   "cells": "quadrilaterals",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/2",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.04903529,
+    0.01819432
+   ],
+   "design": 2.0,
+   "min_order": null,
+   "max_order": 2.3,
+   "order": 1.430332,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO6, curved walls",
+   "cells": "quadrilaterals",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/3",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.002127706,
+    1.432043e-05
+   ],
+   "design": 6.0,
+   "min_order": 5.5,
+   "max_order": null,
+   "order": 7.21508,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO6, straight-sided cells",
+   "cells": "quadrilaterals",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/3",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.05417622,
+    0.01245328
+   ],
+   "design": 2.0,
+   "min_order": null,
+   "max_order": 2.3,
+   "order": 2.121133,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO3, curved walls",
+   "cells": "triangles",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/4",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.002472733,
+    0.0003300297
+   ],
+   "design": 3.0,
+   "min_order": 2.5,
+   "max_order": null,
+   "order": 2.905439,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO3, straight-sided cells",
+   "cells": "triangles",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/4",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.03246561,
+    0.01500241
+   ],
+   "design": 2.0,
+   "min_order": null,
+   "max_order": 2.3,
+   "order": 1.113718,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO4, curved walls",
+   "cells": "triangles",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/5",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.0005678998,
+    4.265091e-05
+   ],
+   "design": 4.0,
+   "min_order": 3.5,
+   "max_order": null,
+   "order": 3.734988,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO4, straight-sided cells",
+   "cells": "triangles",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/5",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.03390559,
+    0.01621444
+   ],
+   "design": 2.0,
+   "min_order": null,
+   "max_order": 2.3,
+   "order": 1.064244,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO5, curved walls",
+   "cells": "triangles",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/6",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.0001908024,
+    7.509521e-06
+   ],
+   "design": 5.0,
+   "min_order": 4.5,
+   "max_order": null,
+   "order": 4.667215,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO5, straight-sided cells",
+   "cells": "triangles",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/6",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.03423267,
+    0.0162946
+   ],
+   "design": 2.0,
+   "min_order": null,
+   "max_order": 2.3,
+   "order": 1.07098,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO6, curved walls",
+   "cells": "triangles",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/7",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.0002811234,
+    1.402736e-06
+   ],
+   "design": 6.0,
+   "min_order": 5.5,
+   "max_order": null,
+   "order": 7.646816,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO6, straight-sided cells",
+   "cells": "triangles",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/7",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.0462052,
+    0.02350847
+   ],
+   "design": 2.0,
+   "min_order": null,
+   "max_order": 2.3,
+   "order": 0.9748746,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "quadratic walls",
+   "cells": "hexahedra",
+   "error": "spherical shell volume error",
+   "dim": 3,
+   "test": "Curved3DGeometry.QuadraticWallsConvergeAtFourthOrder",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.009634988,
+    0.0006065741
+   ],
+   "design": 4.0,
+   "min_order": 3.7,
+   "max_order": null,
+   "order": 3.989527,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "straight walls",
+   "cells": "hexahedra",
+   "error": "spherical shell volume error",
+   "dim": 3,
+   "test": "Curved3DGeometry.QuadraticWallsConvergeAtFourthOrder",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.6475847,
+    0.166489
+   ],
+   "design": 2.0,
+   "min_order": 1.85,
+   "max_order": 2.15,
+   "order": 1.959642,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "quadratic walls",
+   "cells": "prisms",
+   "error": "spherical shell volume error",
+   "dim": 3,
+   "test": "Curved3DGeometry.QuadraticWallsConvergeAtFourthOrder",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.004629835,
+    0.0002909097
+   ],
+   "design": 4.0,
+   "min_order": 3.7,
+   "max_order": null,
+   "order": 3.992318,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "straight walls",
+   "cells": "prisms",
+   "error": "spherical shell volume error",
+   "dim": 3,
+   "test": "Curved3DGeometry.QuadraticWallsConvergeAtFourthOrder",
+   "n": [
+    4.0,
+    8.0
+   ],
+   "errors": [
+    0.6475847,
+    0.166489
+   ],
+   "design": 2.0,
+   "min_order": 1.85,
+   "max_order": 2.15,
+   "order": 1.959642,
+   "pass": true
+  },
+  {
+   "section": "remap",
+   "method": "degree 1",
+   "cells": "quadrilaterals",
+   "error": "max error of the target averages",
+   "dim": 2,
+   "test": "RemapTest.SmoothPeriodicFieldsConvergeAtTheDegreePlusOne",
+   "n": [
+    10.0,
+    20.0
+   ],
+   "errors": [
+    0.05561899,
+    0.006973717
+   ],
+   "design": 2.0,
+   "min_order": 1.6,
+   "max_order": null,
+   "order": 2.995578,
+   "pass": true
+  },
+  {
+   "section": "remap",
+   "method": "degree 2",
+   "cells": "quadrilaterals",
+   "error": "max error of the target averages",
+   "dim": 2,
+   "test": "RemapTest.SmoothPeriodicFieldsConvergeAtTheDegreePlusOne",
+   "n": [
+    10.0,
+    20.0
+   ],
+   "errors": [
+    0.03948282,
+    0.004304866
+   ],
+   "design": 3.0,
+   "min_order": 2.6,
+   "max_order": null,
+   "order": 3.197185,
+   "pass": true
+  },
+  {
+   "section": "remap",
+   "method": "degree 3",
+   "cells": "quadrilaterals",
+   "error": "max error of the target averages",
+   "dim": 2,
+   "test": "RemapTest.SmoothPeriodicFieldsConvergeAtTheDegreePlusOne",
+   "n": [
+    10.0,
+    20.0
+   ],
+   "errors": [
+    0.01734242,
+    0.0006533087
+   ],
+   "design": 4.0,
+   "min_order": 3.6,
+   "max_order": null,
+   "order": 4.730396,
+   "pass": true
+  },
+  {
+   "section": "remap",
+   "method": "degree 1",
+   "cells": "hexahedra",
+   "error": "max error of the target averages",
+   "dim": 3,
+   "test": "RemapTest.SmoothPeriodicFieldsConvergeAtTheDegreePlusOne",
+   "n": [
+    5.0,
+    10.0
+   ],
+   "errors": [
+    0.1976312,
+    0.02044335
+   ],
+   "design": 2.0,
+   "min_order": 1.6,
+   "max_order": null,
+   "order": 3.273107,
+   "pass": true
+  },
+  {
+   "section": "remap",
+   "method": "degree 2",
+   "cells": "hexahedra",
+   "error": "max error of the target averages",
+   "dim": 3,
+   "test": "RemapTest.SmoothPeriodicFieldsConvergeAtTheDegreePlusOne",
+   "n": [
+    5.0,
+    10.0
+   ],
+   "errors": [
+    0.1853747,
+    0.01641299
+   ],
+   "design": 3.0,
+   "min_order": 2.6,
+   "max_order": null,
+   "order": 3.497534,
+   "pass": true
+  },
+  {
+   "section": "mixtures",
+   "method": "MUSCL",
+   "cells": "quadrilaterals",
+   "error": "L1 H2 partial density error",
+   "dim": 2,
+   "test": "Mixture/MixtureAdvectionOrder.SmoothCompositionWaveConvergesAtDesignOrder/0",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    8.146797e-06,
+    1.861906e-06
+   ],
+   "design": 2.0,
+   "min_order": 1.8,
+   "max_order": null,
+   "order": 2.129452,
+   "pass": true
+  },
+  {
+   "section": "mixtures",
+   "method": "TENO3",
+   "cells": "quadrilaterals",
+   "error": "L1 H2 partial density error",
+   "dim": 2,
+   "test": "Mixture/MixtureAdvectionOrder.SmoothCompositionWaveConvergesAtDesignOrder/1",
+   "n": [
+    32.0,
+    64.0
+   ],
+   "errors": [
+    1.907928e-06,
+    2.804015e-07
+   ],
+   "design": 3.0,
+   "min_order": 2.6,
+   "max_order": null,
+   "order": 2.766441,
+   "pass": true
+  },
+  {
+   "section": "mixtures",
+   "method": "TENO5",
+   "cells": "triangles",
+   "error": "L1 H2 partial density error",
+   "dim": 2,
+   "test": "Mixture/MixtureAdvectionOrder.SmoothCompositionWaveConvergesAtDesignOrder/2",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    5.374736e-05,
+    4.272037e-07
+   ],
+   "design": 5.0,
+   "min_order": 4.0,
+   "max_order": null,
+   "order": 6.975126,
+   "pass": true
+  },
+  {
+   "section": "mixtures",
+   "method": "MUSCL",
+   "cells": "hexahedra",
+   "error": "L1 H2 partial density error",
+   "dim": 3,
+   "test": "Mixture/MixtureAdvectionOrder.SmoothCompositionWaveConvergesAtDesignOrder/0",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    3.540356e-05,
+    8.146797e-06
+   ],
+   "design": 2.0,
+   "min_order": 1.8,
+   "max_order": null,
+   "order": 2.11959,
+   "pass": true
+  },
+  {
+   "section": "mixtures",
+   "method": "TENO3",
+   "cells": "hexahedra",
+   "error": "L1 H2 partial density error",
+   "dim": 3,
+   "test": "Mixture/MixtureAdvectionOrder.SmoothCompositionWaveConvergesAtDesignOrder/1",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.0001268559,
+    1.142494e-05
+   ],
+   "design": 3.0,
+   "min_order": 2.4,
+   "max_order": null,
+   "order": 3.472931,
+   "pass": true
+  },
+  {
+   "section": "mixtures",
+   "method": "MUSCL",
+   "cells": "quadrilaterals",
+   "error": "L1 density error",
+   "dim": 2,
+   "test": "Mixture/MixtureAdvectionOrder.SmoothCompositionWaveConvergesAtDesignOrder/0",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    0.000263082,
+    6.439274e-05
+   ],
+   "design": 2.0,
+   "min_order": 1.8,
+   "max_order": null,
+   "order": 2.030542,
+   "pass": true
+  },
+  {
+   "section": "mixtures",
+   "method": "TENO3",
+   "cells": "quadrilaterals",
+   "error": "L1 density error",
+   "dim": 2,
+   "test": "Mixture/MixtureAdvectionOrder.SmoothCompositionWaveConvergesAtDesignOrder/1",
+   "n": [
+    32.0,
+    64.0
+   ],
+   "errors": [
+    5.510851e-05,
+    7.02163e-06
+   ],
+   "design": 3.0,
+   "min_order": 2.6,
+   "max_order": null,
+   "order": 2.972397,
+   "pass": true
+  },
+  {
+   "section": "mixtures",
+   "method": "TENO5",
+   "cells": "triangles",
+   "error": "L1 density error",
+   "dim": 2,
+   "test": "Mixture/MixtureAdvectionOrder.SmoothCompositionWaveConvergesAtDesignOrder/2",
+   "n": [
+    16.0,
+    32.0
+   ],
+   "errors": [
+    7.278499e-05,
+    2.551167e-06
+   ],
+   "design": 5.0,
+   "min_order": 4.0,
+   "max_order": null,
+   "order": 4.834412,
+   "pass": true
+  },
+  {
+   "section": "mixtures",
+   "method": "MUSCL",
+   "cells": "hexahedra",
+   "error": "L1 density error",
+   "dim": 3,
+   "test": "Mixture/MixtureAdvectionOrder.SmoothCompositionWaveConvergesAtDesignOrder/0",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.001168289,
+    0.000263082
+   ],
+   "design": 2.0,
+   "min_order": 1.8,
+   "max_order": null,
+   "order": 2.150813,
+   "pass": true
+  },
+  {
+   "section": "mixtures",
+   "method": "TENO3",
+   "cells": "hexahedra",
+   "error": "L1 density error",
+   "dim": 3,
+   "test": "Mixture/MixtureAdvectionOrder.SmoothCompositionWaveConvergesAtDesignOrder/1",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.001504622,
+    0.0002490256
+   ],
+   "design": 3.0,
+   "min_order": 2.4,
+   "max_order": null,
+   "order": 2.595035,
+   "pass": true
+  }
+ ]
+}

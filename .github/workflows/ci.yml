@@ -172,6 +172,11 @@ jobs:
         env:
           OMP_NUM_THREADS: 2
         run: ./build/test/MallardTest
+      - name: Upgrade the inputs of every release
+        if: matrix.backend.name == 'openmp'
+        run: |
+          git fetch --quiet --tags --depth=1 origin
+          python3 tools/check_upgrade_input.py build/src/Mallard
       # Two copies of the suite at once, so tests that share a file path collide
       - name: Test (two at once)
         if: matrix.backend.concurrent
@@ -250,10 +255,11 @@ jobs:
           cmake --install build-2 --prefix ${{ runner.temp }}/mallard-2d > /dev/null
           templates/ci.sh ${{ runner.temp }}/mallard-2d/bin/Mallard build-3/src/Mallard ${{ runner.temp }}/templates
 
-  # CUDA builds (no GPU needed), when the changes touch device code (see the device job).
+  # CUDA builds (no GPU needed): on main, and on branches whose changes touch device code
+  # (see the device job); host code compiles with nvcc too, so main catches what branches skip.
   cuda:
     needs: [changelog, device]
-    if: needs.device.outputs.changed == 'true' || inputs.cuda
+    if: needs.device.outputs.changed == 'true' || github.ref == 'refs/heads/main' || inputs.cuda
     runs-on: ubuntu-latest
     container: nvidia/cuda:12.9.1-devel-ubuntu24.04
     strategy:
@@ -295,6 +301,14 @@ jobs:
         if: always()
         run: sccache --show-stats
 
+  # Each libFuzzer harness for a minute (2D); fuzz.yml also runs nightly, longer
+  fuzz:
+    needs: [changelog, device]
+    if: needs.device.outputs.code == 'true'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/fuzz.yml
 
   # Mirrors every job of this run as a commit status `CI / <job>` linking to its log,
   # updated as it is queued, runs and finishes, so the PR shows each job live.
@@ -338,7 +352,7 @@ jobs:
   result:
     name: CI result
     if: always()
-    needs: [changelog, device, matrix, build-and-test, tutorials, cuda]
+    needs: [changelog, device, matrix, build-and-test, tutorials, cuda, fuzz]
     runs-on: ubuntu-latest
     steps:
       - env:
