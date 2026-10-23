@@ -366,7 +366,7 @@ class TENO : public FaceReconstruction {
 
         /**
          * @brief Metric (3 x 3, row-major) in which the stencil candidates of
-         *        cell i are ranked by distance (3D): the identity unless the
+         *        cell i are ranked by distance: the identity unless the
          *        mesh spacing around the cell is markedly anisotropic.
          */
         std::array<double, 9> stencil_metric(uint32_t i) const;
