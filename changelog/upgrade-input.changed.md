@@ -1,0 +1,1 @@
+- Keys that 0.2.0 removed (`basis_order`, the TENO quadrature and stencil keys, `physics.p_min`/`p_max`, `format = "tecplot"`) now stop the run with what to use instead; they used to be ignored silently (#332).

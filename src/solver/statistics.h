@@ -1,7 +1,7 @@
 /**
  * @file statistics.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief In-situ running time averages and probes.
+ * @brief In-situ running time averages, phase averages and probes.
  * @version 0.1
  * @date 2026-10-04
  *
@@ -21,12 +21,13 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "common_typedef.h"
 #include "data.h"
 #include "data_writer.h"
 #include "mesh.h"
+#include "spectra.h"
 #include "state.h"
 
 /**
@@ -56,6 +57,74 @@ struct CellSampler {
 };
 
 /**
+ * @brief Phase averages per owned cell: means of fields over the samples whose
+ *        phase in a periodic signal falls in each of `bins` equal bins. The
+ *        phase is (t - t_reference) / period modulo 1, or, with a trigger
+ *        probe, (t - t_n) / (t_n - t_{n-1}) from the last two upward crossings
+ *        of a level by a variable at a point (crossing times interpolated
+ *        linearly between samples; phases past 1 fall in the last bin;
+ *        samples before the second crossing are skipped). Each bin is a
+ *        time-weighted running mean like Statistics; restart files carry the
+ *        bins, their weights and the trigger state.
+ */
+class PhaseAverage {
+    public:
+        /** @brief Read [statistics.phase] (table), sampling every interval steps from t_start. */
+        void init(const Input & table, const Mesh & mesh, const std::vector<std::string> & species_names,
+                  uint32_t n_cells, uint64_t interval, rtype t_start);
+
+        bool enabled() const { return !fields.empty(); }
+        /** @brief Triggered phases follow the signal before t_start too. */
+        bool due(uint64_t step, rtype t) const {
+            return enabled() && step % interval == 0 && (trigger_cell != NO_TRIGGER || t > t_start);
+        }
+        void sample(rtype t, const CellSampler & sampler, uint32_t n_owned);
+
+        /** @brief PHASE_<bin>_<field>, bins zero-padded, bin-major. */
+        std::vector<std::string> variables() const;
+        void register_data(std::vector<Data> & data) const;
+        void copy_device_to_host();
+        void start(rtype t);
+        void restore(const RestartData & restart, const std::string & file, rtype t, bool reset);
+        RestartAttributes attributes() const;
+        std::string summary() const;
+
+        uint64_t samples() const { return n_samples; }
+        uint32_t n_bins() const { return bins; }
+        const std::vector<double> & bin_weights() const { return weight; }
+        /** @brief Host copy (see copy_device_to_host): (cell, bin * n_fields + field). */
+        const auto & host_means() const { return h_mean; }
+
+    private:
+        static constexpr int32_t NO_TRIGGER = -2;
+
+        std::vector<std::string> fields;
+        uint32_t bins = 0;
+        uint64_t interval = 1;
+        rtype t_start = 0.0;
+        double period = 0.0, t_reference = 0.0;
+        std::string trigger_variable;
+        std::array<double, N_DIM> trigger_point{};
+        double level = 0.0;
+        int32_t trigger_cell = NO_TRIGGER;  // owned cell of this rank, -1 if another rank's
+        int32_t trigger_code = 0;
+        bool distributed = false;
+
+        Kokkos::View<int32_t *> codes;
+        Kokkos::View<rtype **, Kokkos::LayoutLeft> mean;
+        Kokkos::View<rtype **, Kokkos::LayoutLeft>::host_mirror_type h_mean;
+
+        std::vector<double> weight;
+        rtype t_last = 0.0;
+        uint64_t n_samples = 0;
+        // Trigger: the previous sample of the signal and the last two crossings
+        bool have_signal = false;
+        double t_signal = 0.0, v_signal = 0.0;
+        double crossing[2] = {0.0, 0.0};
+        uint64_t n_crossings = 0;
+};
+
+/**
  * @brief Running time averages per owned cell: means of fields and
  *        covariances <a'b'> of pairs of them, updated on the device every
  *        `interval` steps once t > t_start. A sample at time t has weight
@@ -65,20 +134,25 @@ struct CellSampler {
  *            cov_ab += a (d_a (b_new - mean_b,new) - cov_ab),
  *        so each output field is the current average itself. Restart files
  *        carry the averages and the weights, so a restarted run continues them
- *        bitwise.
+ *        bitwise. [statistics.spectra] adds spectra and two-point correlations
+ *        along homogeneous directions (Spectra), [statistics.phase] phase
+ *        averages (PhaseAverage).
  */
 class Statistics {
     public:
-        /** @brief Read [statistics] (if any) and allocate n_cells. */
-        void init(const toml::value & input, const std::vector<std::string> & species_names, uint32_t n_cells);
+        /** @brief Read [statistics] (if any) and allocate the mesh's cells. */
+        void init(const Input & input, const std::vector<std::string> & species_names, const Mesh & mesh);
 
-        bool enabled() const { return !fields.empty(); }
-        bool due(uint64_t step, rtype t) const { return enabled() && step % interval == 0 && t > t_start; }
+        bool enabled() const { return means_enabled() || spectra.enabled() || phase.enabled(); }
+        bool means_enabled() const { return !fields.empty(); }
+        bool due(uint64_t step, rtype t) const {
+            return (means_enabled() && step % interval == 0 && t > t_start) || spectra.due(step, t) || phase.due(step, t);
+        }
 
-        /** @brief Add the sample of time t of cells [0, n_owned). */
-        void sample(rtype t, const CellSampler & sampler, uint32_t n_owned);
+        /** @brief Add the sample at (step, t) of cells [0, n_owned) to whatever is due (collective). */
+        void sample(uint64_t step, rtype t, const CellSampler & sampler, uint32_t n_owned);
 
-        /** @brief Output variables: MEAN_<field>..., COV_<a>_<b>... */
+        /** @brief Output variables: MEAN_<field>..., COV_<a>_<b>..., PHASE_<bin>_<field>... */
         std::vector<std::string> variables() const;
         void register_data(std::vector<Data> & data) const;
         void copy_device_to_host();
@@ -92,9 +166,14 @@ class Statistics {
         /** @brief Start afresh at time t (first sample weighted from max(t, t_start)). */
         void start(rtype t);
         RestartAttributes attributes() const;
+        RestartArrays arrays() const { return spectra.arrays(); }
+        /** @brief Write the averaged spectra (rank 0), with the other output. */
+        void write(uint64_t step, rtype t) const { spectra.write(step, t); }
 
-        std::string summary() const;
+        std::vector<std::pair<std::string, std::string>> summary() const;
         uint64_t samples() const { return n_samples; }
+        const Spectra & get_spectra() const { return spectra; }
+        const PhaseAverage & get_phase() const { return phase; }
         /** @brief Host copies (see copy_device_to_host): (cell, field) means, (cell, product) covariances. */
         const auto & host_means() const { return h_mean; }
         const auto & host_covariances() const { return h_cov; }
@@ -116,48 +195,20 @@ class Statistics {
         rtype weight = 0.0;
         rtype t_last = 0.0;
         uint64_t n_samples = 0;
-};
 
-/**
- * @brief Point and line probes: the values of the cells holding a set of
- *        points, written every `interval` steps by rank 0 as rows
- *        step,t,point,x,y(,z),variables... Each point takes the cell average
- *        of the cell containing it (the lowest global id on a shared face),
- *        or of the nearest cell centroid if no cell contains it.
- */
-class Probes {
-    public:
-        /** @brief Read [[probes]] and locate the points; resume appends to existing files. */
-        void init(const toml::value & input, const Mesh & mesh, const std::vector<std::string> & species_names,
-                  bool resume);
+        Spectra spectra;
+        PhaseAverage phase;
 
-        bool due(uint64_t step) const;
-        void write(uint64_t step, rtype t, const CellSampler & sampler);
-
-        std::vector<std::pair<std::string, std::string>> summary() const;
-        std::vector<std::string> files() const;
-
-    private:
-        struct Set {
-            std::string name;
-            std::string file;
-            uint64_t interval = 1;
-            std::vector<std::string> variables;
-            std::vector<std::array<double, N_DIM>> points;
-            std::vector<uint32_t> local_points;  // points held by owned cells of this rank
-            Kokkos::View<uint32_t *> cells;      // their cells
-            Kokkos::View<int32_t *> codes;
-            Kokkos::View<rtype **, Kokkos::LayoutRight> values;  // (local point, variable)
-            std::shared_ptr<std::ofstream> out;
-        };
-        std::vector<Set> sets;
+        void start_means(rtype t);
 };
 
 /**
  * @brief Owned cell of each point on this rank, or -1 where another rank (or
  *        none) holds it: the cell containing the point, the lowest global id
- *        among several, else the nearest cell centroid over all ranks.
+ *        among several, else the nearest cell centroid over all ranks. If
+ *        given, contained(p) tells whether a cell contains point p.
  */
-std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::array<double, N_DIM>> & points);
+std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::array<double, N_DIM>> & points,
+                                   std::vector<uint8_t> * contained = nullptr);
 
 #endif // STATISTICS_H

@@ -28,7 +28,7 @@ DG).
    3D) in the physical groups. Cells may be of order 1 to 3; only their
    corners are kept, so interior faces are straight unless they share a
    curved edge. High-order edges whose nodes lie on their chord stay straight
-   (Gmsh writes planes at the mesh's order too). `mallard-mesh-convert` keeps
+   (Gmsh writes planes at the mesh's order too). `mallard mesh convert` keeps
    the high-order boundary faces in the HDF5 file (`boundary/high_order`).
 2. **Analytic projection** for meshes without high-order nodes (generated, P1
    Gmsh, HDF5): `[[mesh.curved]]` names a zone and a shape (`circle` in 2D;
@@ -90,8 +90,7 @@ operations, so the geometry does not depend on the partition.
 - **No mirror images across curved walls and symmetry faces.** A reflection
   across the face's plane matches a curved wall only to `O(h^2)`; in the
   vortex below, mirrored stencils do not converge (orders 3-6, errors 1e-2 to
-  1e-1). In 3D every face of a curved wall would also be a mirror plane of its
-  own, beyond the setup's 32 planes per stencil search. Stencils are one-sided
+  1e-1). Stencils are one-sided
   there (`curved_mirrors = false`). Curved far fields and inflows keep their
   mirror images: one-sided far fields made the order-5 cylinder's drag noisy
   (high-frequency rms 2.5e-3 against 6e-5).
@@ -161,7 +160,7 @@ digits at every level. With mirror images across the curved walls
 
 At Re = 100 the viscous layer is resolved by many cells, so curving the wall
 moves the drag by 0.1-0.3% (toward the incompressible 1.33-1.35). On the fine
-mesh, order 5 with straight walls is unstable (drag fluctuations of +-2.9);
+mesh, order 5 with straight walls is unstable (drag fluctuations of ±2.9);
 with curved walls it runs, with residual drag noise of rms 7e-4 from the far
 field (the instability noted in `docs/numerics/teno_e.md`, also there with
 mirrored far fields).
@@ -170,7 +169,8 @@ mirrored far fields).
 
 `examples/sphere_mach3` (Euler, Mach 3, `make_sphere_mesh.py` resolution,
 810k tetrahedra) in a quarter box instead of the quarter cylinder, whose
-faceted lateral far field exceeds the 3D setup's 32 mirror planes, at t = 3:
+faceted lateral far field exceeded the 3D setup's former limit of 32 mirror
+planes per stencil search (#388), at t = 3:
 
 | Scheme | Walls | Delta / R (Billig 0.205) | Cd (pressure) |
 |---|---|---|---|
@@ -179,8 +179,8 @@ faceted lateral far field exceeds the 3D setup's 32 mirror planes, at t = 3:
 | TENO5, bound-preserving | curved | 0.2213 | 0.9790 |
 
 With 0.02 D cells on the wall the facets sit 1e-4 D inside the sphere, so the
-standoff does not move. TENO5 with straight walls cannot run here: the
-sphere's facets are mirror planes of their own, beyond the setup's limit.
+standoff does not move. TENO5 with straight walls could not run here then:
+the sphere's facets are mirror planes of their own, beyond that limit.
 
 ## Alternatives considered
 
@@ -205,7 +205,8 @@ sphere's facets are mirror planes of their own, beyond the setup's limit.
 - An edge shared by two different analytic shapes takes the first shape's
   curve; the other face's own projection then differs along that edge (the
   closure shift keeps every cell closed).
-- Main's 3D TENO setup accepts at most 32 mirror planes per stencil search:
-  faceted curved far fields (e.g. the quarter-cylinder domain of
-  `examples/sphere_mach3`, or a straight-walled sphere) exceed it. Curved
-  walls take no mirror images, so they do not.
+- Every facet of a straight-sided curved boundary with mirror images (a
+  faceted far field, or a straight-walled sphere) is a mirror plane of its
+  own: stencil searches next to it meet 20-60 planes, and image every visited
+  cell across each, which doubles the setup time per cell on the coarse
+  `make_sphere_mesh.py` meshes. A 3D search holds at most 255 planes.

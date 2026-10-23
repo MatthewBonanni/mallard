@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Convergence of the steady isentropic vortex between two circular walls.
 
-    curved_convergence.py RUN_DIR --mallard BUILD/src/Mallard [--orders 3 4 5 6]
+    curved_convergence.py RUN_DIR --mallard BUILD/src/mallard [--orders 3 4 5 6]
         [--levels 4 8 16] [--geometry straight curved] [--triangles] [--t-stop 12]
         [--mach 2.25] [--threads 4] [--launcher 'mpirun -n 1'] [--extra 'TOML lines']
 

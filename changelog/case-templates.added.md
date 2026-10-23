@@ -1,0 +1,1 @@
+- `mallard new <template> [dir]`: a ready-to-run case (input with comments, mesh, run and post-processing scripts, README) from 23 examples and tutorials; `--list`, `--quick` for a coarse short version, suggestions for mistyped names (#368, #387).

@@ -30,6 +30,7 @@
 #include "solver.h"
 #include "test_fixtures.h"
 #include "test_utils.h"
+#include "verification.h"
 
 namespace {
 
@@ -116,8 +117,11 @@ TEST(Curved3DGeometry, QuadraticWallsConvergeAtFourthOrder) {
             for (uint32_t c = 0; c < mesh->n_cells; c++) V += double(mesh->h_cell_volume(c));
             return std::abs(V - exact_V);
         };
-        EXPECT_NEAR(std::log2(error(4, "straight") / error(8, "straight")), 2.0, 0.15) << prisms;
-        EXPECT_GT(std::log2(error(4, "quadratic") / error(8, "quadratic")), 3.7) << prisms;
+        const std::string cells = prisms ? "prisms" : "hexahedra";
+        verification::expect_order({"curved", "straight walls", cells, "spherical shell volume error", {4, 8},
+                                    {error(4, "straight"), error(8, "straight")}, 2.0, 1.85, 2.15});
+        verification::expect_order({"curved", "quadratic walls", cells, "spherical shell volume error", {4, 8},
+                                    {error(4, "quadratic"), error(8, "quadratic")}, 4.0, 3.7});
     }
 }
 

@@ -1,6 +1,6 @@
 # Chemistry throughput, n-dodecane/air at 20 atm with the reduced mechanism of
 # Wang et al. (100 species, 432 reactions): run with
-#   MallardReactor -i ndodecane.toml
+#   mallard reactor -i ndodecane.toml
 # States sampled along the constant-volume ignition below (ignition delay
 # 0.925 ms, as Cantera's), replicated over the cells and advanced over each
 # splitting step dt; writes ndodecane.csv. See README.md.

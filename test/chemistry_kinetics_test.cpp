@@ -21,17 +21,19 @@
 #include <string>
 #include <vector>
 
+#include "data_paths.h"
 #include "kinetics.h"
 #include "mechanism.h"
 #include "mixture.h"
 #include "test_fixtures.h"
 #include "thermo.h"
+#include "scratch.h"
 
 using namespace chemistry;
 
 namespace {
 
-const std::string SOURCE_DIR = MALLARD_SOURCE_DIR;
+const std::string SOURCE_DIR = source_dir();
 
 // Row-major on every backend: kernels take pointers to rows
 template <typename T>
@@ -288,7 +290,7 @@ TEST(ChemistryKineticsTest, RegularizationConcentrationIsAnOption) {
     using Kinetics = KineticsTable<Kokkos::HostSpace>;
     const Mechanism mech = read_mechanism(SOURCE_DIR + "/test/data/chemistry/propane_2step.yaml", "gas");
     const double C_reg = 1e-9;
-    const toml::value input = parse_toml("[chemistry]\nC_reg = 1.0e-9\n");
+    const Input input = parse_toml("[chemistry]\nC_reg = 1.0e-9\n");
     ASSERT_EQ(reactor_options(input).C_reg, C_reg);
     const auto kinetics = make_kinetics_table<Kokkos::HostSpace>(mech, reactor_options(input).C_reg);
     const auto plain = make_kinetics_table<Kokkos::HostSpace>(mech);
@@ -322,7 +324,7 @@ TEST(ChemistryKineticsTest, ReaderKeepsReactionOptionsAndRejectsUnsupportedTypes
     ASSERT_EQ(orders.orders.size(), 2u);
     EXPECT_EQ(orders.orders[0].second, 0.5);
 
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_kinetics_errors").string();
+    const std::string dir = (scratch_dir() / "mallard_kinetics_errors").string();
     std::filesystem::create_directories(dir);
     const std::string file = dir + "/mech.yaml";
     std::ofstream(file) << "phases:\n- name: gas\n  thermo: ideal-gas\n  elements: [H]\n  species: [H2, H]\n"

@@ -15,18 +15,18 @@
 
 #include "input.h"
 
-MixtureModel MixtureModel::from_input(const toml::value & input) {
-    const toml::value & physics = input.at("physics");
+MixtureModel MixtureModel::from_input(const Input & input) {
+    const Input & physics = input.at("physics");
     if (!physics.contains("mechanism")) {
         throw InputError("physics: gas = \"mixture\" needs a mechanism file.");
     }
     MixtureModel model;
-    model.mech = chemistry::read_mechanism(toml::find<std::string>(physics, "mechanism"),
-                                           toml::find_or<std::string>(physics, "phase", ""));
+    model.mech = chemistry::read_mechanism(find_value<std::string>(physics, "mechanism"),
+                                           find_value_or<std::string>(physics, "phase", ""));
     model.host_thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(model.mech);
     model.gas.thermo = chemistry::make_thermo_table(model.mech);
     model.gas.n_species = model.mech.n_species();
-    const std::string type = toml::find_or<std::string>(physics, "type", "euler");
+    const std::string type = find_value_or<std::string>(physics, "type", "euler");
     if (type != "euler" && type != "navier_stokes") {
         throw InputError("physics.type = \"" + type + "\" is not one of: euler, navier_stokes.");
     }
@@ -36,7 +36,7 @@ MixtureModel MixtureModel::from_input(const toml::value & input) {
         }
         return model;
     }
-    model.transport_name = toml::find_or<std::string>(physics, "transport", "mixture_averaged");
+    model.transport_name = find_value_or<std::string>(physics, "transport", "mixture_averaged");
     const std::map<std::string, chemistry::TransportModel> models = {
         {"mixture_averaged", chemistry::TransportModel::MIXTURE_AVERAGED},
         {"unity_lewis", chemistry::TransportModel::UNITY_LEWIS},
@@ -50,19 +50,19 @@ MixtureModel MixtureModel::from_input(const toml::value & input) {
     if (it->second == chemistry::TransportModel::CONSTANT_LEWIS) {
         lewis.assign(model.mech.n_species(), 1.0);
         if (physics.contains("lewis")) {
-            const toml::value & entries = physics.at("lewis");
+            const Input & entries = physics.at("lewis");
             if (!entries.is_table()) throw InputError("physics.lewis must be a table of species and Lewis numbers.");
             for (const auto & [name, value] : entries.as_table()) {
                 const int32_t k = model.mech.species_index(name);
                 if (k < 0) throw InputError("physics.lewis: no species " + name + " in the mechanism.");
-                lewis[static_cast<size_t>(k)] = static_cast<double>(find_real(entries, name));
+                lewis[static_cast<size_t>(k)] = static_cast<double>(find_real(entries, name, dim::none));
                 if (!(lewis[static_cast<size_t>(k)] > 0.0)) throw InputError("physics.lewis." + name + " must be positive.");
             }
         }
     } else if (physics.contains("lewis")) {
         throw InputError("physics.lewis needs transport = \"constant_lewis\".");
     }
-    const bool soret = toml::find_or<bool>(physics, "soret", false);
+    const bool soret = find_value_or<bool>(physics, "soret", false);
     if (soret && it->second != chemistry::TransportModel::MIXTURE_AVERAGED) {
         throw InputError("physics.soret needs transport = \"mixture_averaged\".");
     }
@@ -75,13 +75,13 @@ MixtureModel MixtureModel::from_input(const toml::value & input) {
     return model;
 }
 
-std::vector<double> MixtureModel::mass_fractions(const toml::value & table, const std::string & where) const {
+std::vector<double> MixtureModel::mass_fractions(const Input & table, const std::string & where) const {
     const bool has_X = table.contains("X"), has_Y = table.contains("Y");
     if (has_X == has_Y) {
         throw InputError(where + ": give the composition as exactly one of X and Y.");
     }
     const std::string key = has_X ? "X" : "Y";
-    const toml::value & entries = table.at(key);
+    const Input & entries = table.at(key);
     if (!entries.is_table()) {
         throw InputError(where + "." + key + " must be a table of species and values, e.g. { O2 = 1.0, N2 = 3.76 }.");
     }
@@ -92,7 +92,7 @@ std::vector<double> MixtureModel::mass_fractions(const toml::value & table, cons
         if (k < 0) {
             throw InputError(where + "." + key + ": no species " + name + " in the mechanism.");
         }
-        const double x = static_cast<double>(find_real(entries, name));
+        const double x = static_cast<double>(find_real(entries, name, dim::none));
         if (!(x >= 0.0)) throw InputError(where + "." + key + "." + name + " must not be negative.");
         f[static_cast<size_t>(k)] = x;
         sum += x;
@@ -102,7 +102,7 @@ std::vector<double> MixtureModel::mass_fractions(const toml::value & table, cons
     return has_X ? mass_fractions_from_mole(f) : f;
 }
 
-bool MixtureModel::composition_varies(const toml::value & table) {
+bool MixtureModel::composition_varies(const Input & table) {
     if (table.contains("balance")) return true;
     for (const char * key : {"X", "Y"}) {
         if (!table.contains(key) || !table.at(key).is_table()) continue;
@@ -175,19 +175,19 @@ logging::Items MixtureModel::summary() const {
     return items;
 }
 
-chemistry::ReactorOptions reactor_options(const toml::value & input) {
+chemistry::ReactorOptions reactor_options(const Input & input) {
     chemistry::ReactorOptions options;
     if (!input.contains("chemistry")) return options;
-    const toml::value & table = input.at("chemistry");
-    options.integrator.rtol = find_double_or(table, "rtol", options.integrator.rtol);
-    options.atol_Y = find_double_or(table, "atol", options.atol_Y);
+    const Input & table = input.at("chemistry");
+    options.integrator.rtol = find_double_or(table, "rtol", dim::none, options.integrator.rtol);
+    options.atol_Y = find_double_or(table, "atol", dim::none, options.atol_Y);
     if (!(options.integrator.rtol > 0.0)) throw InputError("chemistry.rtol must be positive.");
     if (!(options.atol_Y > 0.0)) throw InputError("chemistry.atol must be positive.");
-    if (table.contains("sparse")) options.sparse = toml::find<bool>(table, "sparse") ? 1 : 0;
-    options.C_reg = find_double_or(table, "C_reg", options.C_reg);
+    if (table.contains("sparse")) options.sparse = find_value<bool>(table, "sparse") ? 1 : 0;
+    options.C_reg = find_double_or(table, "C_reg", dim::concentration_kmol, options.C_reg);
     if (!(options.C_reg > 0.0)) throw InputError("chemistry.C_reg must be positive.");
     if (table.contains("max_steps")) {
-        const toml::value & v = table.at("max_steps");
+        const Input & v = table.at("max_steps");
         if (!v.is_integer() || v.as_integer() < 1) {
             throw InputError(toml::format_error("chemistry.max_steps must be a positive integer", v, "here"));
         }

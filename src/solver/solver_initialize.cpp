@@ -17,11 +17,9 @@
 #include <array>
 #include <atomic>
 #include <exception>
-#include <iomanip>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -32,36 +30,39 @@
 #include <exprtk.hpp>
 
 #include "quadrature.h"
+#include "remap.h"
 
 enum class InitType {
     CONSTANT,
     ANALYTICAL,
-    RESTART
+    RESTART,
+    REMAP
 };
 
 static const std::unordered_map<std::string, InitType> INIT_TYPES = {
     {"constant", InitType::CONSTANT},
     {"analytical", InitType::ANALYTICAL},
-    {"restart", InitType::RESTART}
+    {"restart", InitType::RESTART},
+    {"remap", InitType::REMAP}
 };
 
 void Solver::init_solution() {
-    const std::string type_str = toml::find_or<std::string>(input, "initialize", "type", "constant");
-    auto it = INIT_TYPES.find(type_str);
-    if (it == INIT_TYPES.end()) {
-        throw unknown_option(INIT_TYPES, "initialize.type", type_str);
-    }
+    const std::string type_str = find_value_or<std::string>(input, "initialize", "type", "constant");
+    auto it = find_option(INIT_TYPES, "initialize.type", type_str);
     initial_state = type_str;
     if (it->second == InitType::CONSTANT) {
         init_solution_constant();
     } else if (it->second == InitType::ANALYTICAL) {
         init_solution_analytical();
-    } else {
+    } else if (it->second == InitType::RESTART) {
         init_solution_restart();
+    } else {
+        init_solution_remap();
     }
     copy_host_to_device();
-    if (it->second != InitType::RESTART) statistics.start(t);
-    if (is_mixture() && it->second != InitType::RESTART) init_temperature_seed();
+    const bool from_file = it->second == InitType::RESTART || it->second == InitType::REMAP;
+    if (!from_file) statistics.start(t);
+    if (is_mixture() && !from_file) init_temperature_seed();
     update_primitives();
     if (p_max.is_allocated()) update_p_max();
 }
@@ -70,7 +71,7 @@ void Solver::init_solution_restart() {
     if (!input.at("initialize").contains("file")) {
         throw std::runtime_error("Missing file for initialization: restart.");
     }
-    const std::string file = toml::find<std::string>(input, "initialize", "file");
+    const std::string file = find_value<std::string>(input, "initialize", "file");
     // Restart files hold cells in global order, so any number of ranks can read
     // them; each rank reads only its local cells
     const bool distributed = mesh->n_global_cells > 0;
@@ -79,6 +80,20 @@ void Solver::init_solution_restart() {
     if (restart.n_cells != n_expected) {
         throw std::runtime_error("Restart file " + file + " does not match the mesh.");
     }
+    apply_restart(restart, file, true);
+    initial_state = "restart from " + file + " (step " + std::to_string(step) + ", t = " + logging::real(double(t)) + ")";
+}
+
+void Solver::init_solution_remap() {
+    remap::Report report;
+    const RestartData restart = remap::remap_restart(input, *mesh, mesh->axisymmetric, report);
+    const std::string file = find_value<std::string>(input, "initialize", "file");
+    apply_restart(restart, file, false);
+    initial_state = "remap of " + file + " (step " + std::to_string(step) + ", t = " + logging::real(double(t)) +
+                    "): " + remap::describe(report, restart.names);
+}
+
+void Solver::apply_restart(const RestartData & restart, const std::string & file, bool resume_output) {
     // Variables map by name: the flow block, then one RHOY_<name> per species
     // CHEM_H (last chemistry sub-step) only seeds the integrator: a reacting run
     // may start from a non-reacting one, and a non-reacting run ignores it
@@ -89,7 +104,8 @@ void Solver::init_solution_restart() {
     };
     for (const auto & name : restart.names) {
         // Averages carry over only into a run that keeps them
-        if (name == "CHEM_H" || name == "P_MAX" || name.rfind("MEAN_", 0) == 0 || name.rfind("COV_", 0) == 0) continue;
+        if (name == "CHEM_H" || name == "P_MAX" || name.rfind("MEAN_", 0) == 0 || name.rfind("COV_", 0) == 0 ||
+            name.rfind("PHASE_", 0) == 0) continue;
         if (std::find(expected.begin(), expected.end(), name) == expected.end()) {
             throw std::runtime_error("Restart file " + file + " has variable " + name + ", which this run does not " +
                                      (name.rfind("RHOY_", 0) == 0 ? "transport." : "know."));
@@ -127,26 +143,29 @@ void Solver::init_solution_restart() {
     step = restart.step;
     t = static_cast<rtype>(restart.t);
     statistics.restore(restart, file, t);
+    if (step_controller.enabled()) step_controller.restore(restart.attributes);
     restore_characteristic_state(restart);
+    if (!resume_output) return;
     for (auto & writer : data_writers) {
         writer->resume(step, t);
     }
-    initial_state = "restart from " + file + " (step " + std::to_string(step) + ", t = " + logging::real(double(t)) + ")";
+    if (checkpoint_writer) checkpoint_writer->resume(step, t);
+    probes.resume(step, t);
 }
 
 void Solver::init_solution_constant() {
-    const toml::value & init = input.at("initialize");
+    const Input & init = input.at("initialize");
     for (const char * key : {"u", "p", "T"}) {
         if (!init.contains(key)) {
             throw std::runtime_error(std::string("Missing ") + key + " for initialization: constant.");
         }
     }
-    std::vector<rtype> u = find_real_vector(input, "initialize", "u");
+    std::vector<rtype> u = find_real_vector(input, "initialize", "u", dim::velocity);
     if (u.size() != N_DIM) {
         throw std::runtime_error("u must be a " + std::to_string(N_DIM) + "-element array for initialization: constant.");
     }
-    const rtype p = find_real(input, "initialize", "p");
-    const rtype T = find_real(input, "initialize", "T");
+    const rtype p = find_real(input, "initialize", "p", dim::pressure);
+    const rtype T = find_real(input, "initialize", "T", dim::temperature);
     if (is_mixture()) {
         const std::vector<double> Y = mixture_model->mass_fractions(init, "initialize");
         rtype cons[N_CONSERVATIVE];
@@ -198,7 +217,7 @@ struct PointState {
             expr.register_symbol_table(table);
             if (!parser.compile(expr_str, expr)) {
                 throw std::runtime_error("Failed to parse initialization expression for " + name + ": " +
-                                         parser.error());
+                                         parser.error() + expression_unit_hint(expr_str));
             }
         };
         for (size_t i = 0; i < u.size(); i++) compile("u[" + std::to_string(i) + "]", text.u[i], u[i]);
@@ -414,7 +433,7 @@ void cell_average_curved(const curved::Geometry & geometry, uint32_t i_cell, Poi
  * thread count.
  */
 void Solver::init_solution_analytical() {
-    const toml::value & init = input.at("initialize");
+    const Input & init = input.at("initialize");
     if (!init.contains("u") || init.at("u").as_array().size() != N_DIM) {
         throw std::runtime_error("u must be a " + std::to_string(N_DIM) + "-element array for initialization: analytical.");
     }
@@ -424,13 +443,13 @@ void Solver::init_solution_analytical() {
     if (rho_in + p_in + T_in != 2) {
         throw std::runtime_error("Exactly two of rho, p, and T must be specified for initialization: analytical.");
     }
-    const uint32_t n_sub = toml::find_or<uint32_t>(input, "initialize", "n_subdivisions", (N_DIM == 2) ? 4 : 1);
+    const uint32_t n_sub = find_value_or<uint32_t>(input, "initialize", "n_subdivisions", (N_DIM == 2) ? 4 : 1);
 
     InitialStateText text;
-    text.u = toml::find<std::vector<std::string>>(input, "initialize", "u");
-    if (rho_in) text.rho = toml::find<std::string>(input, "initialize", "rho");
-    if (p_in) text.p = toml::find<std::string>(input, "initialize", "p");
-    if (T_in) text.T = toml::find<std::string>(input, "initialize", "T");
+    for (const auto & u : init.at("u").as_array()) text.u.push_back(quantity_or_expression(u, "initialize.u", dim::velocity));
+    if (rho_in) text.rho = quantity_or_expression(init.at("rho"), "initialize.rho", dim::density);
+    if (p_in) text.p = quantity_or_expression(init.at("p"), "initialize.p", dim::pressure);
+    if (T_in) text.T = quantity_or_expression(init.at("T"), "initialize.T", dim::temperature);
 
     // Mixtures: one expression per listed species of X or Y, and optionally a
     // balance species taking the rest; otherwise the listed values are normalized
@@ -448,16 +467,10 @@ void Solver::init_solution_analytical() {
             const int32_t k = mixture_model->mechanism().species_index(name);
             if (k < 0) throw InputError("initialize." + key + ": no species " + name + " in the mechanism.");
             listed.push_back(k);
-            std::ostringstream expr;
-            if (value.is_string()) {
-                expr << value.as_string();
-            } else {
-                expr << std::setprecision(17) << static_cast<double>(as_real(value, name));
-            }
-            text.fractions.emplace_back(key + "." + name, expr.str());
+            text.fractions.emplace_back(key + "." + name, quantity_or_expression(value, name, dim::none));
         }
         if (init.contains("balance")) {
-            const std::string name = toml::find<std::string>(init, "balance");
+            const std::string name = find_value<std::string>(init, "balance");
             balance = mixture_model->mechanism().species_index(name);
             if (balance < 0) throw InputError("initialize.balance: no species " + name + " in the mechanism.");
         }

@@ -22,8 +22,10 @@
 #include <string>
 #include <vector>
 
+#include "data_paths.h"
 #include "test_fixtures.h"
 #include "solver.h"
+#include "scratch.h"
 
 namespace {
 
@@ -58,8 +60,8 @@ const std::string BLAST =
 const std::string IGNITION =
     "type = \"analytical\"\np = \"101325.0\"\nT = \"x < 0.5 ? 1200.0 : 300.0\"\nu = [\"0.0\", \"0.0\"]\n"
     "X = { H2 = \"2\", O2 = \"1\", N2 = \"3.76\" }\n";
-const std::string REACTING = "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR
-                             "/mechanisms/h2o2.yaml\"\n[chemistry]\n";
+const std::string REACTING = "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() +
+"/mechanisms/h2o2.yaml\"\n[chemistry]\n";
 
 const std::string NSCBC_OUTLET = "type = \"nscbc_outlet\"\np = 1.0\nL = 1.0\nsigma = 2.0\nbeta = 0.5\n";
 const std::string NSCBC_INLET = "type = \"nscbc_inlet\"\nu = [0.2, 0.1]\np = 1.0\nT = 1.0\nL = 1.0\nsigma = 2.0\n";
@@ -95,7 +97,7 @@ double max_abs_diff(const std::vector<rtype> & a, const std::vector<rtype> & b) 
 } // namespace
 
 TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_test").string();
+    const std::string dir = (scratch_dir() / "mallard_restart_test").string();
     std::filesystem::remove_all(dir);
 
     Solver straight;
@@ -161,13 +163,39 @@ TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
         ss << stream.rdbuf();
         return ss.str();
     };
-    EXPECT_EQ(read_all(dir + "/b/forces.csv"), read_all(dir + "/a/forces.csv"));
+    EXPECT_EQ(without_comment_lines(read_all(dir + "/b/forces.csv")), without_comment_lines(read_all(dir + "/a/forces.csv")));
+    std::filesystem::remove_all(dir);
+}
+
+TEST(RestartTest, ErrorControlledRunRestartsExactly) {
+    // The controller's step proposal and error history continue from the
+    // restart file; the vtu times clip some steps, which the history includes
+    const std::string dir = (scratch_dir() / "mallard_restart_error_control").string();
+    std::filesystem::remove_all(dir);
+    auto input = [&](const std::string & sub, const std::string & init, uint32_t n_steps) {
+        std::string s = restart_input(dir + "/" + sub, init, n_steps);
+        const std::string ssprk3 = "time_integrator = \"SSPRK3\"\n";
+        s.replace(s.find(ssprk3), ssprk3.size(), "time_integrator = \"RDPK3Sp35\"\n[numerics.error_control]\ntolerance = 1e-3\n");
+        return s;
+    };
+    Solver straight;
+    straight.init(parse_toml(input("a", BLAST, 40)));
+    const std::vector<rtype> U_straight = run_to_end(straight);
+
+    Solver first;
+    first.init(parse_toml(input("b", BLAST, 20)));
+    first.run();
+    Solver second;
+    second.init(parse_toml(input("b", "type = \"restart\"\nfile = \"" + dir + "/b/restart_000020.restart\"\n", 40)));
+    const std::vector<rtype> U_second = run_to_end(second);
+    EXPECT_EQ(second.get_time(), straight.get_time());
+    EXPECT_EQ(max_abs_diff(U_second, U_straight), 0.0);
     std::filesystem::remove_all(dir);
 }
 
 TEST(RestartTest, CharacteristicBoundariesRestartExactly) {
     // The faces' pressure and normal velocity carry over in the restart file
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_nscbc").string();
+    const std::string dir = (scratch_dir() / "mallard_restart_nscbc").string();
     const std::string extrapolation = "type = \"extrapolation\"\n";
     for (const auto & [left, right] : {std::pair{extrapolation, NSCBC_OUTLET}, std::pair{NSCBC_INLET, NSCBC_OUTLET}}) {
         std::filesystem::remove_all(dir);
@@ -189,7 +217,7 @@ TEST(RestartTest, CharacteristicBoundariesRestartExactly) {
 TEST(RestartTest, RunStartedFromARestartFileStartsNewMonitorFilesWithAHeader) {
     // A restart file can be an initial state (e.g. from a tools/ script): a
     // monitor file that does not exist yet gets its header
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_header_test").string();
+    const std::string dir = (scratch_dir() / "mallard_restart_header_test").string();
     std::filesystem::remove_all(dir);
     Solver first;
     first.init(parse_toml(restart_input(dir + "/a", BLAST, 20)));
@@ -209,7 +237,7 @@ TEST(RestartTest, RunStartedFromARestartFileStartsNewMonitorFilesWithAHeader) {
 TEST(RestartTest, ReactingRestartedRunMatchesUninterruptedRunExactly) {
     // Species, the chemistry's last sub-steps and the temperature seeds carry
     // over, so restarted cells integrate exactly as in one run
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_reacting_restart_test").string();
+    const std::string dir = (scratch_dir() / "mallard_reacting_restart_test").string();
     std::filesystem::remove_all(dir);
 
     Solver straight;
@@ -238,7 +266,7 @@ TEST(RestartTest, ReactingRestartedRunMatchesUninterruptedRunExactly) {
 }
 
 TEST(RestartTest, PeakPressureIsARunningMaximumThatSurvivesRestarts) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_p_max").string();
+    const std::string dir = (scratch_dir() / "mallard_restart_p_max").string();
     std::filesystem::remove_all(dir);
     auto input = [&](const std::string & sub, const std::string & init, uint32_t n_steps) {
         std::string s = restart_input(dir + sub, init, n_steps);
@@ -276,7 +304,7 @@ TEST(RestartTest, PeakPressureIsARunningMaximumThatSurvivesRestarts) {
 }
 
 TEST(RestartTest, RejectsMismatchedMesh) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_mismatch").string();
+    const std::string dir = (scratch_dir() / "mallard_restart_mismatch").string();
     std::filesystem::remove_all(dir);
     Solver first;
     first.init(parse_toml(restart_input(dir, BLAST, 20)));
@@ -364,7 +392,7 @@ struct RestartFile {
 } // namespace
 
 TEST(RestartTest, ReadsVersion1FilesAndMapsVersion2VariablesByName) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_versions").string();
+    const std::string dir = (scratch_dir() / "mallard_restart_versions").string();
     std::filesystem::remove_all(dir);
     Solver straight;
     straight.init(parse_toml(restart_input(dir + "/a", BLAST, 40)));
@@ -414,7 +442,7 @@ TEST(RestartTest, ReadsVersion1FilesAndMapsVersion2VariablesByName) {
 TEST(RestartTest, CharacteristicFacesOfOlderFilesStartAfresh) {
     // A file without the faces' state (version 3 and earlier, or one missing a
     // face of this run) starts the characteristic faces from the solution
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart_nscbc_versions").string();
+    const std::string dir = (scratch_dir() / "mallard_restart_nscbc_versions").string();
     std::filesystem::remove_all(dir);
     auto input = [&](const std::string & sub, const std::string & init, uint32_t n_steps) {
         return parse_toml(characteristic_input(dir + sub, init, n_steps, NSCBC_INLET, NSCBC_OUTLET));

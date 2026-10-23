@@ -49,7 +49,7 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="nishikawa-kitamura-2008"></a>H. Nishikawa and K. Kitamura, Very simple, carbuncle-free, boundary-layer-resolving, rotated-hybrid Riemann solvers, *J. Comput. Phys.* 227, 2560–2581 (2008). [doi:10.1016/j.jcp.2007.11.003](https://doi.org/10.1016/j.jcp.2007.11.003)
   Used in: `riemann_solver = "RHLL"`, the rotated hybrid of HLL and Roe.
 - <a id="kim-kim-rho-2001"></a>K. H. Kim, C. Kim and O.-H. Rho, Methods for the accurate computations of hypersonic flows: I. AUSMPW+ scheme, *J. Comput. Phys.* 174, 38–80 (2001). [doi:10.1006/jcph.2001.6873](https://doi.org/10.1006/jcph.2001.6873)
-  Used in: RHLL's pressure weight min(p_l / p_r, p_r / p_l)^3, which blends the rotated flux toward HLL across faces that carry a shock.
+  Used in: RHLL's pressure weight $\min(p_l/p_r,\, p_r/p_l)^3$, which blends the rotated flux toward HLL across faces that carry a shock.
 - <a id="quirk-1994"></a>J. J. Quirk, A contribution to the great Riemann solver debate, *Int. J. Numer. Methods Fluids* 18, 555–574 (1994). [doi:10.1002/fld.1650180603](https://doi.org/10.1002/fld.1650180603)
   Used in: the carbuncle and odd–even decoupling tests that RHLL passes and HLLC and Roe fail (`test/solver_test.cpp`; the Shu–Osher validation).
 
@@ -68,6 +68,10 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the viscous face gradients, the average of the two cell gradients corrected along the face normal so that their component along the line of centroids equals the direct difference (`src/numerics/viscous_flux.h`).
 - <a id="sutherland-1893"></a>W. Sutherland, The viscosity of gases and molecular force, *Phil. Mag.* (5) 36, 507–531 (1893). [doi:10.1080/14786449308620508](https://doi.org/10.1080/14786449308620508)
   Used in: `viscosity_model = "sutherland"`.
+- <a id="wilke-1950"></a>C. R. Wilke, A viscosity equation for gas mixtures, *J. Chem. Phys.* 18, 517–519 (1950). [doi:10.1063/1.1747673](https://doi.org/10.1063/1.1747673)
+  Used in: the mixture viscosity of the mixture-averaged transport model, and its mixing operator in the thermal diffusion coefficients.
+- <a id="mathur-tondon-saxena-1967"></a>S. Mathur, P. K. Tondon and S. C. Saxena, Thermal conductivity of binary, ternary and quaternary mixtures of rare gases, *Mol. Phys.* 12, 569–579 (1967). [doi:10.1080/00268976700100731](https://doi.org/10.1080/00268976700100731)
+  Used in: the mixture thermal conductivity, the mean of the mole-fraction-weighted arithmetic and harmonic means.
 
 ## Large-eddy simulation
 
@@ -106,14 +110,42 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="colin-2000"></a>O. Colin, F. Ducros, D. Veynante and T. Poinsot, A thickened flame model for large eddy simulations of turbulent premixed combustion, *Phys. Fluids* 12, 1843–1863 (2000). [doi:10.1063/1.870436](https://doi.org/10.1063/1.870436)
   Used in: `[les.combustion] model = "tfles"`, and its subgrid velocity `2 Delta^3 |lap(curl u)|`.
 - <a id="charlette-2002"></a>F. Charlette, C. Meneveau and D. Veynante, A power-law flame wrinkling model for LES of premixed turbulent combustion. Part I: non-dynamic formulation and initial tests, *Combust. Flame* 131, 159–180 (2002). [doi:10.1016/S0010-2180(02)00400-5](https://doi.org/10.1016/S0010-2180%2802%2900400-5)
-  Used in: the efficiency `E` of the thickened flame (`efficiency = "charlette"`).
+  Used in: the efficiency `E` of the thickened flame (`efficiency = "charlette"`), and its saturated power law `E = F^beta` (`efficiency = "dynamic"`, the default).
+- <a id="charlette-2002b"></a>F. Charlette, C. Meneveau and D. Veynante, A power-law flame wrinkling model for LES of premixed turbulent combustion. Part II: dynamic formulation, *Combust. Flame* 131, 181–197 (2002). [doi:10.1016/S0010-2180(02)00401-7](https://doi.org/10.1016/S0010-2180%2802%2900401-7)
+  Used in: the Germano-like identity for the flame surface that sets `beta` (`efficiency = "dynamic"`).
+- <a id="wang-2011"></a>G. Wang, M. Boileau and D. Veynante, Implementation of a dynamic thickened flame model for large eddy simulations of turbulent premixed combustion, *Combust. Flame* 158, 2199–2213 (2011). [doi:10.1016/j.combustflame.2011.04.008](https://doi.org/10.1016/j.combustflame.2011.04.008)
+  Used in: the dynamic efficiency of the thickened flame, with the combustion filter width `F delta_L` and a global `beta` (`efficiency = "dynamic"`; `src/solver/solver_les.cpp`).
+- <a id="volpiani-2016"></a>P. S. Volpiani, T. Schmitt and D. Veynante, A posteriori tests of a dynamic thickened flame model for large eddy simulations of turbulent premixed combustion, *Combust. Flame* 174, 166–178 (2016). [doi:10.1016/j.combustflame.2016.08.007](https://doi.org/10.1016/j.combustflame.2016.08.007)
+  Used in: the dynamic efficiency as the default, and its a posteriori test against filtered DNS over several filter widths ([design/les.md](design/les.md), section 8.3).
 - <a id="legier-2002"></a>J.-P. Légier, T. Poinsot, B. Varoquié, F. Lacas and D. Veynante, Large eddy simulation of a non-premixed turbulent burner using a dynamically thickened flame model, in *Advances in LES of Complex Flows*, Springer, 315–326 (2002). [doi:10.1007/978-94-017-1998-8_27](https://doi.org/10.1007/978-94-017-1998-8_27)
   Used in: thickening only where the flame sensor is on (dynamic thickening).
 - <a id="butler-orourke-1977"></a>T. D. Butler and P. J. O'Rourke, A numerical method for two dimensional unsteady reacting flows, *Proc. Combust. Inst.* 16, 1503–1515 (1977). [doi:10.1016/S0082-0784(77)80432-3](https://doi.org/10.1016/S0082-0784%2877%2980432-3)
   Used in: the thickening transformation `D -> F D`, `omega -> omega / F` that keeps the laminar flame speed.
 
+## Wall modeling
+
+- <a id="choi-moin-2012"></a>H. Choi and P. Moin, Grid-point requirements for large eddy simulation: Chapman's estimates revisited, *Phys. Fluids* 24, 011702 (2012). [doi:10.1063/1.3676783](https://doi.org/10.1063/1.3676783)
+  Used in: the cost argument for wall-modeled LES ([Wall models](theory/wall_models.md)).
+- <a id="larsson-2016"></a>J. Larsson, S. Kawai, J. Bodart and I. Bermejo-Moreno, Large eddy simulation with modeled wall-stress: recent progress and future directions, *Mech. Eng. Rev.* 3, 15-00418 (2016). [doi:10.1299/mer.15-00418](https://doi.org/10.1299/mer.15-00418)
+- <a id="bose-park-2018"></a>S. T. Bose and G. I. Park, Wall-modeled large-eddy simulation for complex turbulent flows, *Annu. Rev. Fluid Mech.* 50, 535–561 (2018). [doi:10.1146/annurev-fluid-122316-045241](https://doi.org/10.1146/annurev-fluid-122316-045241)
+  Used in (these two): the wall-stress coupling, in which the model's stress and heat flux replace the wall's viscous flux.
+- <a id="kawai-larsson-2012"></a>S. Kawai and J. Larsson, Wall-modeling in large eddy simulation: Length scales, grid resolution, and accuracy, *Phys. Fluids* 24, 015105 (2012). [doi:10.1063/1.3678331](https://doi.org/10.1063/1.3678331)
+  Used in: the exchange point a height `h` off the wall (the log-layer mismatch); the equilibrium ODE model (`model = "equilibrium"`; `src/physics/wall_model.h`).
+- <a id="van-driest-1956"></a>E. R. van Driest, On turbulent flow near a wall, *J. Aeronaut. Sci.* 23, 1007–1011 (1956). [doi:10.2514/8.3713](https://doi.org/10.2514/8.3713)
+  Used in: the damping of the wall models' mixing length (`A_plus`).
+- <a id="griffin-2021"></a>K. P. Griffin, L. Fu and P. Moin, Velocity transformation for compressible wall-bounded turbulent flows with and without heat transfer, *Proc. Natl. Acad. Sci.* 118, e2111144118 (2021). [doi:10.1073/pnas.2111144118](https://doi.org/10.1073/pnas.2111144118)
+- <a id="griffin-2023"></a>K. P. Griffin, L. Fu and P. Moin, Near-wall model for compressible turbulent boundary layers based on an inverse velocity transformation, *J. Fluid Mech.* 970, A36 (2023). [doi:10.1017/jfm.2023.627](https://doi.org/10.1017/jfm.2023.627)
+  Used in (these two): the default wall model (`model = "gfm"`), the inverse of the 2021 transformation with the Reynolds analogy through the exchange point.
+- <a id="zhang-2014"></a>Y.-S. Zhang, W.-T. Bi, F. Hussain and Z.-S. She, A generalized Reynolds analogy for compressible wall-bounded turbulent flows, *J. Fluid Mech.* 739, 392–420 (2014). [doi:10.1017/jfm.2013.620](https://doi.org/10.1017/jfm.2013.620)
+  Used in: the temperature-velocity relation and heat flux of the `gfm` wall model (`s`).
+- <a id="lee-moser-2015"></a>M. Lee and R. D. Moser, Direct numerical simulation of turbulent channel flow up to Re<sub>τ</sub> ≈ 5200, *J. Fluid Mech.* 774, 395–415 (2015). [doi:10.1017/jfm.2015.268](https://doi.org/10.1017/jfm.2015.268)
+- <a id="trettel-larsson-2016"></a>A. Trettel and J. Larsson, Mean velocity scaling for compressible wall turbulence with heat transfer, *Phys. Fluids* 28, 026102 (2016). [doi:10.1063/1.4942022](https://doi.org/10.1063/1.4942022)
+  Used in (these two): `examples/channel_wmles`, the wall-modeled channels at Re<sub>τ</sub> = 2000 and 5200 and the isothermal supersonic channels ([design notes](design/wall_model.md#10-results)).
+
 ## Boundary conditions
 
+- <a id="sabelnikov-fureby-2013"></a>V. Sabelnikov and C. Fureby, LES combustion modeling for high Re flames using a multi-phase analogy, *Combust. Flame* 160, 83–96 (2013). [doi:10.1016/j.combustflame.2012.09.008](https://doi.org/10.1016/j.combustflame.2012.09.008)
+  Used in: the partially stirred reactor (`[les.combustion] model = "pasr"`), its reacting fraction `kappa = tau_c / (tau_c + tau_mix)`.
 - <a id="poinsot-lele-1992"></a>T. J. Poinsot and S. K. Lele, Boundary conditions for direct simulations of compressible viscous flows, *J. Comput. Phys.* 101, 104–129 (1992). [doi:10.1016/0021-9991(92)90046-2](https://doi.org/10.1016/0021-9991%2892%2990046-2)
   Used in: the LODI relations of the characteristic boundaries (`nscbc_outlet`, `nscbc_inlet`; `BoundaryData::characteristic_W` in `src/boundary/boundary.h`) and their viscous outflow conditions.
 - <a id="rudy-strikwerda-1980"></a>D. H. Rudy and J. C. Strikwerda, A nonreflecting outflow boundary condition for subsonic Navier-Stokes calculations, *J. Comput. Phys.* 36, 55–70 (1980). [doi:10.1016/0021-9991(80)90174-6](https://doi.org/10.1016/0021-9991%2880%2990174-6)
@@ -171,6 +203,21 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: `time_integrator = "SSPRK3"` (the default; `src/numerics/time_integrator.cpp`).
 - <a id="kutta-1901"></a>W. Kutta, Beitrag zur näherungsweisen Integration totaler Differentialgleichungen, *Z. Math. Phys.* 46, 435–453 (1901).
   Used in: `time_integrator = "RK4"`, the classical fourth-order Runge–Kutta method.
+- <a id="kraaijevanger-1991"></a>J. F. B. M. Kraaijevanger, Contractivity of Runge–Kutta methods, *BIT* 31, 482–528 (1991). [doi:10.1007/BF01933264](https://doi.org/10.1007/BF01933264)
+- <a id="spiteri-ruuth-2002"></a>R. J. Spiteri and S. J. Ruuth, A new class of optimal high-order strong-stability-preserving time discretization methods, *SIAM J. Numer. Anal.* 40, 469–491 (2002). [doi:10.1137/S0036142901389025](https://doi.org/10.1137/S0036142901389025)
+  Used in: `time_integrator = "SSPRK54"`, the five-stage fourth-order SSP method (SSP coefficient 1.508), from Spiteri and Ruuth's Shu–Osher form, re-solved to 50 digits.
+- <a id="ketcheson-2008"></a>D. I. Ketcheson, Highly efficient strong stability-preserving Runge–Kutta methods with low-storage implementations, *SIAM J. Sci. Comput.* 30, 2113–2136 (2008). [doi:10.1137/07070485X](https://doi.org/10.1137/07070485X)
+- <a id="ketcheson-2010"></a>D. I. Ketcheson, Runge–Kutta methods with minimum storage implementations, *J. Comput. Phys.* 229, 1763–1773 (2010). [doi:10.1016/j.jcp.2009.11.006](https://doi.org/10.1016/j.jcp.2009.11.006)
+  Used in: the 3S* low-storage form of `SSPRK54` and `RDPK3Sp35` (`LowStorage3S` in `src/numerics/time_integrator.cpp`), here written for the deviations from U<sup>n</sup>.
+- <a id="carpenter-kennedy-1994"></a>M. H. Carpenter and C. A. Kennedy, Fourth-order 2N-storage Runge–Kutta schemes, NASA TM-109112 (1994). [NTRS 19940028444](https://ntrs.nasa.gov/citations/19940028444)
+  Used in: `time_integrator = "CK45"` (solution 3, five stages, fourth order).
+- <a id="ranocha-2022"></a>H. Ranocha, L. Dalcin, M. Parsani and D. I. Ketcheson, Optimized Runge–Kutta methods with automatic step size control for compressible computational fluid dynamics, *Commun. Appl. Math. Comput.* 4, 1191–1228 (2022). [doi:10.1007/s42967-021-00159-w](https://doi.org/10.1007/s42967-021-00159-w)
+  Used in: `time_integrator = "RDPK3Sp35"` and `[numerics.error_control]`, its PID controller and default coefficients (`src/numerics/step_control.cpp`).
+- <a id="kennedy-carpenter-lewis-2000"></a>C. A. Kennedy, M. H. Carpenter and R. M. Lewis, Low-storage, explicit Runge–Kutta schemes for the compressible Navier–Stokes equations, *Appl. Numer. Math.* 35, 177–219 (2000). [doi:10.1016/S0168-9274(99)00141-5](https://doi.org/10.1016/S0168-9274%2899%2900141-5)
+- <a id="soderlind-wang-2006"></a>G. Söderlind and L. Wang, Adaptive time-stepping and computational stability, *J. Comput. Appl. Math.* 185, 225–243 (2006). [doi:10.1016/j.cam.2005.03.008](https://doi.org/10.1016/j.cam.2005.03.008)
+  Used in: the step-ratio limiter `1 + atan(x - 1)` of the error controller.
+- <a id="ranocha-2020"></a>H. Ranocha, M. Sayyari, L. Dalcin, M. Parsani and D. I. Ketcheson, Relaxation Runge–Kutta methods: fully discrete explicit entropy-stable schemes for the compressible Euler and Navier–Stokes equations, *SIAM J. Sci. Comput.* 42, A612–A638 (2020). [doi:10.1137/19M1263480](https://doi.org/10.1137/19M1263480)
+  Not implemented yet: relaxation needs an entropy-stable spatial discretization (#288) to make the step entropy-conservative or -dissipative ([time step](numerics/overview.md#time-integrators)).
 - <a id="blazek-2015"></a>J. Blazek, *Computational Fluid Dynamics: Principles and Applications*, 3rd ed., Butterworth-Heinemann (2015). [doi:10.1016/C2013-0-19038-1](https://doi.org/10.1016/C2013-0-19038-1)
   Used in: the local time step from convective and viscous spectral radii (`Solver::calc_dt_cfl1`), and the characteristic far-field condition (`type = "farfield"`), which takes the outgoing Riemann invariant from the interior and the incoming one from the free stream.
 
@@ -214,10 +261,14 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in (these three): the assessment of full multicomponent transport (Cantera's L-matrix model) in `docs/design/chemistry.md`.
 - <a id="gilbert-luther-troe-1983"></a>R. G. Gilbert, K. Luther and J. Troe, Theory of thermal unimolecular reactions in the fall-off range. II. Weak collision rate constants, *Ber. Bunsenges. Phys. Chem.* 87, 169–177 (1983). [doi:10.1002/bbpc.19830870218](https://doi.org/10.1002/bbpc.19830870218)
   Used in: Troe falloff reactions.
+- <a id="stewart-larson-golden-1989"></a>P. H. Stewart, C. W. Larson and D. M. Golden, Pressure and temperature dependence of reactions proceeding via a bound complex. 2. Application to 2CH3 → C2H5 + H, *Combust. Flame* 75, 25–31 (1989). [doi:10.1016/0010-2180(89)90084-9](https://doi.org/10.1016/0010-2180%2889%2990084-9)
+  Used in: SRI falloff reactions.
 - <a id="hairer-wanner-1996"></a>E. Hairer and G. Wanner, *Solving Ordinary Differential Equations II: Stiff and Differential-Algebraic Problems*, 2nd ed., Springer (1996). [doi:10.1007/978-3-642-05221-7](https://doi.org/10.1007/978-3-642-05221-7)
-  Used in: the RODAS Rosenbrock integrator of the chemistry source and `MallardReactor`.
+  Used in: the RODAS Rosenbrock integrator of the chemistry source and `mallard reactor`.
 - <a id="strang-1968"></a>G. Strang, On the construction and comparison of difference schemes, *SIAM J. Numer. Anal.* 5, 506–517 (1968). [doi:10.1137/0705041](https://doi.org/10.1137/0705041)
   Used in: the Strang splitting of chemistry around the flow step.
+- <a id="wu-ma-ihme-2019"></a>H. Wu, P. C. Ma and M. Ihme, Efficient time-stepping techniques for simulating turbulent reactive flows with stiff chemistry, *Comput. Phys. Commun.* 243, 81–96 (2019). [doi:10.1016/j.cpc.2019.04.016](https://doi.org/10.1016/j.cpc.2019.04.016)
+  Used in: SIMPLER balanced splitting of chemistry and transport (`[chemistry] coupling = "simpler"`).
 - <a id="larrouturou-1991"></a>B. Larrouturou, How to preserve the mass fractions positivity when computing compressible multi-component flows, *J. Comput. Phys.* 95, 59–84 (1991). [doi:10.1016/0021-9991(91)90253-H](https://doi.org/10.1016/0021-9991%2891%2990253-H)
   Used in: the species fluxes (mass-flux upwinding of the reconstructed mass fractions).
 - <a id="abgrall-karni-2001"></a>R. Abgrall and S. Karni, Computations of compressible multifluids, *J. Comput. Phys.* 169, 594–623 (2001). [doi:10.1006/jcph.2000.6685](https://doi.org/10.1006/jcph.2000.6685)

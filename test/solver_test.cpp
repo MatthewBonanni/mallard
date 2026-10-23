@@ -26,8 +26,10 @@
 #include <vector>
 
 #include "test_fixtures.h"
+#include "verification.h"
 #include "exact_riemann.h"
 #include "solver.h"
+#include "scratch.h"
 
 namespace {
 
@@ -54,7 +56,8 @@ std::string make_input(const CaseConfig & c) {
       << "[[boundaries]]\nname = \"top\"\ntype = \"" << c.bc_tb << "\"\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"" << c.bc_tb << "\"\n"
       << "[numerics]\nriemann_solver = \"" << c.riemann << "\"\ntime_integrator = \"SSPRK3\"\ncheck_nan = true\n"
-      << "[numerics.face_reconstruction]\ntype = \"" << c.recon << "\"\nlimiter = \"" << c.limiter << "\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"" << c.recon << "\"\n"
+      << (c.recon == "MUSCL" ? "limiter = \"" + c.limiter + "\"\n" : "")
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[output]\ncheck_interval = 1000000\n";
     return s.str();
@@ -343,8 +346,9 @@ TEST_P(SodMesh, TENOConvergesFasterThanMUSCLForSmoothFlow) {
     // Time integration (SSPRK3, dt ~ h) caps the observed order at 3
     const double m1 = advection_error(GetParam(), "MUSCL", 32), m2 = advection_error(GetParam(), "MUSCL", 64);
     const double t1 = advection_error(GetParam(), "TENO", 32), t2 = advection_error(GetParam(), "TENO", 64);
-    std::cout << "advection L1: MUSCL " << m1 << " -> " << m2 << ", TENO " << t1 << " -> " << t2 << std::endl;
-    EXPECT_GT(std::log2(t1 / t2), 2.7);
+    std::cout << "advection L1: MUSCL " << m1 << " -> " << m2 << std::endl;
+    verification::expect_order({"advection", "TENO5, SSPRK3", verification::cells_of(GetParam()),
+                                "L1 density error, pulse", {32, 64}, {t1, t2}, 3.0, 2.7});
     EXPECT_LT(t2, 0.2 * m2);
 }
 
@@ -509,7 +513,7 @@ TEST(SolverTest, ResultIsIndependentOfThreadCount) {
         return;
     }
     const std::string exe = ::testing::internal::GetArgvs()[0];
-    const auto dir = std::filesystem::temp_directory_path();
+    const auto dir = scratch_dir();
     auto run = [&](int threads) {
         const std::string out = (dir / ("mallard_threads_" + std::to_string(threads) + ".bin")).string();
         std::filesystem::remove(out);
@@ -549,7 +553,7 @@ double vortex_energy_loss(double low_mach_cutoff) {
       << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = " << p0 << "\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[output]\ncheck_interval = 1000000\n"
-      << "[integrals]\nfile = \"" << (std::filesystem::temp_directory_path() / "mallard_vortex.csv").string()
+      << "[integrals]\nfile = \"" << (scratch_dir() / "mallard_vortex.csv").string()
       << "\"\ninterval = 1000000\n";
     Solver solver;
     solver.init(parse_toml(s.str()));

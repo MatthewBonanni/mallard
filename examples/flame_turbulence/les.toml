@@ -12,22 +12,25 @@
 # Results, turbulent flame speed S_T / S_L (rate of fresh-gas consumption
 # per cross-section) against the DNS, t = 0.2-0.4 / 0.3-0.4 ms:
 #   DNS                                   1.132 / 1.233
-#   TFLES, Colin's u' (this input)        1.053 (-6.9%) / 1.136 (-7.9%), E 1.19
-#   TFLES, subgrid_velocity = "eddy_viscosity" (C_u = 28)
+#   TFLES, dynamic efficiency (this input)
+#                                         1.068 (-5.7%) / 1.119 (-9.2%), E 1.07
+#   TFLES, efficiency = "charlette" (Colin's u')
+#                                         1.053 (-6.9%) / 1.136 (-7.9%), E 1.19
+#   TFLES, "charlette" with subgrid_velocity = "eddy_viscosity" (C_u = 28)
 #                                         1.034 (-8.6%) / 1.082 (-12%)
 #   TFLES, efficiency = "none"            0.985 (-13%)
 #   Sigma only (quasi-laminar)            1.166 (+3.0%), but erratic in time (rms 36%)
-# eps_num / eps_sgs = -0.07 (TFLES). At Ny = Nz = 8 (Delta = 1.6 delta_L,
-# F = 8) Colin's u' overshoots: E 2.1, S_T +98%; use subgrid_velocity =
-# "eddy_viscosity" there (S_T -11%).
+# eps_num / eps_sgs = 0.07 (dynamic). At Ny = Nz = 8 (Delta = 1.6 delta_L,
+# F = 8) the dynamic efficiency gives S_T -7.7%, where Colin's u'
+# overshoots (E 2.1, S_T +98%).
 #
 # Run (from this directory, after the DNS's hit pre-run and flame profile,
 # see input.toml):
 #   python ../../tools/flame_turbulence.py init h2_phi1.0_T300_mix_full.csv ../../mechanisms/h2o2.yaml ohmech \
 #       restart/hit_<last>.restart les_r8.restart --lt 8e-4 --ratio 8 --thicken 4 --extend 256
-#   ../../build3d/src/Mallard -i les.toml --kokkos-num-threads=4
+#   ../../build3d/src/mallard -i les.toml --kokkos-num-threads=4
 #   python ../../tools/flame_turbulence.py analyze . <the options printed by laminar> --pdf-times 4e-4
-# Cost: 6,982 steps, 9 minutes on one A100.
+# Cost: 7,044 steps, 46 s on one A100.
 
 [run]
 t_stop = 4.0e-4

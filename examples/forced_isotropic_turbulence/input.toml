@@ -1,0 +1,69 @@
+# Forced turbulence in a periodic box (3D build): linear forcing f = A rho u
+# (Lundgren 2003; Rosales & Meneveau 2005) with its rate controlled so that
+# the mean kinetic energy per unit mass k stays at its initial value k0 =
+# 0.125 (Carroll & Blanquart 2013 control k the same way):
+#   A = G (k0 - k) / k,  G = 10 (a relaxation rate, 1/s),
+# where k = mean_ke / mean_rho, the domain averages of rho |u|^2 / 2 and rho
+# that [[sources]] expressions can read. The energy equation gains the
+# force's work f . u. The Taylor-Green vortex it starts from breaks down into
+# turbulence: k stays between 0.1234 and 0.1248 through t = 20 (it starts at
+# 0.1238, the cell averages of the initial field); unforced it falls to 0.012.
+# integrals.csv logs the kinetic energy integrated over the box (divide
+# kinetic_energy by (2 pi)^3). 20 s on one A100.
+#
+# The domain averages need one global sum per Runge-Kutta stage, so steps run
+# kernel by kernel on GPUs (no CUDA graph).
+
+[run]
+t_stop = 20.0
+cfl = 1.0
+
+[mesh]
+type = "cartesian"
+Nx = 32
+Ny = 32
+Nz = 32
+Lx = 6.283185307179586
+Ly = 6.283185307179586
+Lz = 6.283185307179586
+periodic = ["x", "y", "z"]
+
+[initialize]
+type = "analytical"
+rho = "1"
+p = "71.42857142857143"  # Mach 0.1 at |u| = 1
+u = ["sin(x) * cos(y) * cos(z)", "-cos(x) * sin(y) * cos(z)", "0"]
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 71.42857142857143
+T_ref = 1.0
+rho_ref = 1.0
+mu = 0.005
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "TENO"
+
+[[sources]]
+name = "linear forcing"
+rhou = ["10 * (0.125 - mean_ke / mean_rho) / (mean_ke / mean_rho) * rho * u_x",
+        "10 * (0.125 - mean_ke / mean_rho) / (mean_ke / mean_rho) * rho * u_y",
+        "10 * (0.125 - mean_ke / mean_rho) / (mean_ke / mean_rho) * rho * u_z"]
+rhoE = "10 * (0.125 - mean_ke / mean_rho) / (mean_ke / mean_rho) * rho * (u_x^2 + u_y^2 + u_z^2)"
+
+[output]
+check_interval = 100
+
+[integrals]
+interval = 10
+
+[[write_data]]
+prefix = "solut/forced"
+format = "vtu"
+time_interval = 1.0
+variables = ["RHO", "U", "P", "Q", "SOURCE_RHOE"]

@@ -17,6 +17,7 @@
 #include "common.h"
 #include "boundary.h"
 #include "physics.h"
+#include "wall_exchange.h"
 
 /**
  * @brief Viscous traction tau . n of a Newtonian fluid under Stokes' hypothesis,
@@ -123,7 +124,7 @@ struct ViscousFluxFunctor {
     Kokkos::View<rtype *[N_DIM]> face_coords;
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<int32_t *[2]> cells_of_face;
-    Kokkos::View<rtype *[N_DIM]> shifts;
+    PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
@@ -134,6 +135,7 @@ struct ViscousFluxFunctor {
     Kokkos::View<rtype *[3]> covariance;  // axisymmetric: Mesh::cell_covariance
     Kokkos::View<rtype *[3]> sgs;         // LES: (cell, [mu_t, lambda_t, -]), else empty
     bool sgs_only = false;                // LES budget: the SGS stress and heat flux alone
+    WallModelFlux wall_model = {};        // wall-modeled LES: the modeled walls' flux, else empty
 
     static constexpr uint8_t NQ = N_DIM + 1;  // [u, T]
 
@@ -167,9 +169,15 @@ struct ViscousFluxFunctor {
         rtype q0[NQ], g0[NQ][N_DIM], q1[NQ], g1[NQ][N_DIM];
         cell_state(c0, q0, g0);
         cell_state(c1, q1, g1);
-        rtype d[N_DIM];
         const uint8_t s = face_shift(i_face);
-        FOR_I_DIM d[i] = (cell_coords(c1, i) + shifts(s, i)) - cell_coords(c0, i);
+        if (periodic.rotated()) {
+            periodic.rotate(s, q1);
+            periodic.rotate_gradients(s, g1, NQ, 0);
+        }
+        rtype x1[N_DIM], d[N_DIM];
+        FOR_I_DIM x1[i] = cell_coords(c1, i);
+        periodic.forward(s, x1, d);
+        FOR_I_DIM d[i] = d[i] - cell_coords(c0, i);
         const rtype d_n = dot<N_DIM>(d, n);
         // Axisymmetric cell centers are not symmetric about the faces: interpolate
         // to the face, at fraction t along the line between them
@@ -190,10 +198,31 @@ struct ViscousFluxFunctor {
     }
 
 
+    /** @brief Flux of a modeled wall face: the model's traction, its work at the wall velocity, and q_w. */
+    KOKKOS_INLINE_FUNCTION
+    void modeled_flux(const uint32_t i_face, const BoundaryCondition & bc) const {
+        const int32_t k = wall_model.face_index(i_face);
+        if (k < 0 || sgs_only) return;
+        const rtype A = face_area(i_face);
+        rtype energy = wall_model.flux(k, N_DIM);
+        FOR_I_DIM {
+            face_flux(i_face, 1 + i) += A * wall_model.flux(k, i);
+            energy += bc.data[1 + i] * wall_model.flux(k, i);
+        }
+        face_flux(i_face, N_DIM + 1) += A * energy;
+    }
+
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
         const int32_t c0 = cells_of_face(i_face, 0);
         const int32_t c1 = cells_of_face(i_face, 1);
+        if (c1 < 0 && wall_model.active()) {
+            const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(i_face));
+            if (bc.modeled) {
+                modeled_flux(i_face, bc);
+                return;
+            }
+        }
         rtype n[N_DIM];
         rtype n_vec[N_DIM];
         FOR_I_DIM n_vec[i] = normals(i_face, i);

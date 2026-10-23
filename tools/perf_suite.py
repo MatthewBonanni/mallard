@@ -79,14 +79,15 @@ def stage_input(case_input, work):
 
 def run_once(case, binary, launcher, work, log=None):
     staged = stage_input((PERF_DIR / case["input"]).resolve(), work)
-    cmd = launcher + [str(binary), "-i", staged.name]
+    command = [case["command"]] if "command" in case else []
+    cmd = launcher + [str(binary), *command, "-i", staged.name]
     out = subprocess.run(cmd, cwd=work, capture_output=True, text=True)
     if log:
         log.write_text(out.stdout + out.stderr)
     if out.returncode != 0:
         raise RuntimeError(f"{case['name']}: {shlex.join(cmd)} exited with {out.returncode}\n"
                            f"{out.stdout[-3000:]}\n{out.stderr[-3000:]}")
-    if case["program"] == "Mallard":
+    if "command" not in case:
         m = re.search(r"Throughput\s+([0-9.]+)([kMGT]?) cells/s", out.stdout)
         if not m:
             raise RuntimeError(f"{case['name']}: no throughput in the output\n{out.stdout[-3000:]}")
@@ -122,7 +123,7 @@ def cmd_run(args):
         if build is None:
             print(f"skip {case['name']}: no --build-{case['build']}", flush=True)
             continue
-        binary = Path(build).resolve() / "src" / case["program"]
+        binary = Path(build).resolve() / "src" / "mallard"
         with tempfile.TemporaryDirectory(prefix=f"perf-{case['name']}-") as tmp:
             for i in range(args.repeats + 1):
                 log = logs / f"{case['name']}-{i}.log" if logs else None

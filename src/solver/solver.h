@@ -20,13 +20,14 @@
 #include <string>
 #include <vector>
 
-#include <toml.hpp>
+#include "input.h"
 
 #include "mesh.h"
 #include "boundary.h"
 #include "face_reconstruction.h"
 #include "riemann_solver.h"
 #include "time_integrator.h"
+#include "step_control.h"
 #include "physics.h"
 #include "les.h"
 #include "pasr.h"
@@ -36,14 +37,23 @@
 #include "radiation.h"
 #include "scalar_reconstruction.h"
 #include "data_writer.h"
+#include "probes.h"
 #include "statistics.h"
 #include "synthetic_inflow.h"
+#include "source_terms.h"
+#include "wall_exchange.h"
 #include "expression.h"
 #include "comm.h"
 #include "distributed_mesh.h"
 #include "distribution.h"
 #include "halo_exchange.h"
 #include "log.h"
+#include "run_control.h"
+#include "check.h"
+#include "memory_tracker.h"
+#include "numerics_preset.h"
+#include "run_status.h"
+#include "input_upgrade.h"
 
 struct ForceMonitor {
     std::string zone;
@@ -51,6 +61,8 @@ struct ForceMonitor {
     Kokkos::View<uint32_t *> faces;
     uint64_t interval = 1;
     std::shared_ptr<std::ofstream> out;
+    MonitorValues last;
+    bool modeled = false;  // the zone has modeled walls: a column Q, their heat flux into the fluid
 };
 
 constexpr int N_FLOW_STATISTICS = 9;
@@ -60,6 +72,7 @@ struct IntegralMonitor {
     std::string file;
     std::shared_ptr<std::ofstream> out;
     bool budget = false;  // also the kinetic-energy budget (Solver::kinetic_energy_budget)
+    MonitorValues last;
 };
 
 /**
@@ -82,6 +95,14 @@ struct DirichletBoundary {
     std::vector<Expression> W;
 };
 
+/** @brief Thrown inside the time loop when the state stops being valid; run() handles it. */
+struct DivergedError : std::exception {
+    const char * what() const noexcept override { return "solution diverged"; }
+};
+
+/** @brief Exit status of a run stopped on request (signal, `mallard ctl stop`, STOP file) after writing a restart. */
+constexpr int EXIT_STOPPED = 3;
+
 class Solver {
     public:
         Solver();
@@ -99,13 +120,30 @@ class Solver {
          * @param input Parsed TOML input.
          * @return Exit status.
          */
-        int init(const toml::value & input);
+        int init(const Input & input);
+
+        /**
+         * @brief Pre-flight check: the setup of init, without the error for
+         *        unused keys and without creating output files, then what it
+         *        tells about the run (see check.h).
+         */
+        CheckReport check(const Input & input, const CheckOptions & options);
 
         /**
          * @brief Run until a stop condition is reached.
          * @return Exit status.
          */
         int run();
+
+        /**
+         * @brief Whether run() takes requests from signals and serves the
+         *        control socket (the executable does; tests drive run_control
+         *        directly).
+         */
+        void enable_control(bool on) { control_enabled = on; }
+
+        /** @brief Applies one runtime setting on every rank: whether it was accepted, and what changed or why not. */
+        std::pair<bool, std::string> apply_setting(const std::string & key, const std::string & value);
 
         /**
          * @brief Advance the solution by one time step. With chemistry, the
@@ -115,9 +153,10 @@ class Solver {
         void take_step();
 
         /**
-         * @brief Compute dU/dt for the given conservative state at time t.
+         * @brief Compute dU/dt for the given conservative state at time t,
+         *        stage t_n + c dt of a step (c matters only to captured steps).
          */
-        void calc_rhs(State solution, State rhs, rtype t);
+        void calc_rhs(State solution, State rhs, rtype t, rtype c = 0.0_r);
 
         /**
          * @brief Compute the stable time step for the current solution.
@@ -149,9 +188,10 @@ class Solver {
 
         /**
          * @brief Force exerted by the fluid on a boundary zone: pressure part
-         *        [Fx, Fy] and viscous part [Fx, Fy].
+         *        [Fx, Fy] and viscous part [Fx, Fy] (the modeled stress on
+         *        modeled walls), then the modeled heat flux into the fluid.
          */
-        std::array<rtype, 2 * N_DIM> calc_force(const Kokkos::View<uint32_t *> & faces);
+        std::array<rtype, 2 * N_DIM + 1> calc_force(const Kokkos::View<uint32_t *> & faces);
 
         /**
          * @brief Sum of each conservative variable integrated over the domain.
@@ -180,10 +220,23 @@ class Solver {
          */
         void update_velocity_gradients();
 
+        /**
+         * @brief W = [rho, u, p] in W_cells of every local cell, from halo
+         *        values and boundary states brought up to date, and the
+         *        primitives.
+         */
+        void update_cell_W();
+
         /** @brief Q = (|Omega|^2 - |S|^2) / 2 and the vorticity of each owned cell, into vortex_fields. */
         void update_vortex_fields();
 
         // Public because nvcc rejects device lambdas in non-public member functions
+        /** @brief Gravity and the source terms, added to the volume-integrated rhs. */
+        void add_sources(const State & solution, const State & rhs, rtype t_stage, rtype c);
+        /** @brief W_cells (and for mixtures the cell scalars) of the given state, as the RHS computes them. */
+        void update_cell_fields(const State & solution);
+        /** @brief Inside a captured step: stage_time = t_n + c dt from the step's device scalars. */
+        void record_stage_time(rtype c);
         void update_average_pressure_outlets(StateView solution);
         /**
          * @brief Add the uniform body force along the mass flow direction that
@@ -209,16 +262,42 @@ class Solver {
         /** @brief Adds the sponge-layer sources to the RHS per unit volume (owned cells). */
         void apply_sponges(const State & solution, const State & rhs);
         void calc_dt();
+        rtype reduce_dt(rtype local);
+        /**
+         * @brief Error-controlled steps: whether step_controller accepts the
+         *        step just taken (else the solution is back at U^n).
+         */
+        bool accept_controlled_step();
+        void init_error_control();
+        /** @brief Throws once the same step has been rejected too many times. */
+        void check_rejections(int tries) const;
         /** @brief The time the next step must not pass: t_stop or the next time-based output. */
         rtype next_target_time() const;
         void check_fields();
+
+        // Run control and divergence (see run_control.h)
+        void save_last_good();
+        void save_last_good_if_valid(const Kokkos::View<rtype *> & reduced);
+        void note_last_good();
+        void restore_last_good();
+        std::string describe_invalid_cells();
+        [[noreturn]] void diverged();
+        void act_on_requests();
+        void apply_commands();
+        std::string write_restarts();
+        /** @brief What restart files carry besides the cells: statistics weights, step-control state. */
+        RestartAttributes restart_attributes() const;
+        void write_checkpoint();
+        void poll_control_files();
+        void publish_status();
+        std::string stop_conditions() const;
 
         // A whole step (calc_dt and take_step) as one CUDA graph; see solver_graph.cpp
         std::string step_graph_unsupported() const;
         void graph_step();
         void record_step();
         void destroy_step_graph();
-        void calc_rhs_mixture(State solution, State rhs, rtype t);
+        void calc_rhs_mixture(State solution, State rhs, rtype t, rtype c);
         /**
          * @brief Axisymmetric runs: add geometric_source, made high order by the
          *        reconstruction where it can (mu: cell viscosities, empty if inviscid),
@@ -258,6 +337,7 @@ class Solver {
          *        time-step diffusivity NU_EFF also grows).
          */
         void update_eddy_viscosity(uint32_t n);
+        void update_wall_model();  // the modeled walls' flux from W_cells and viscous_gradients
         /** @brief LES: the eddy viscosity of the current state for the time step (owned cells) or output (all). */
         void eddy_viscosity_of_state(uint32_t n);
         /**
@@ -266,6 +346,15 @@ class Solver {
          *        exchanged to the halo), once per step in calc_dt.
          */
         void update_thickened_flame();
+        /**
+         * @brief Thickened flame, efficiency = "dynamic": beta of E = F^beta from the flame surface of the state
+         *        and of its test-filtered progress variable, summed over the domain exactly (fixed point), so
+         *        beta is independent of the rank count (Wang, Boileau & Veynante 2011). The transport values of
+         *        the state must be up to date on every cell.
+         */
+        void update_dynamic_efficiency();
+        /** @brief Dynamic efficiency: the test filter's width per pass and number of passes. */
+        void init_dynamic_efficiency();
         /** @brief PaSR: the reacting fraction kappa of every owned cell (chem_time_scale), once per step in calc_dt. */
         void update_partially_stirred_reactor();
         /**
@@ -315,6 +404,13 @@ class Solver {
         rtype les_constant() const { return les.C; }
         /** @brief LES: <L:M> / <M:M> of the latest dynamic procedure, before clipping at zero. */
         double les_dynamic_ratio() const { return dynamic_ratio; }
+        /** @brief Thickened flame: the efficiency's exponent beta (the dynamic procedure's latest with efficiency = "dynamic"). */
+        double tfles_beta() const { return thickened_flame.beta; }
+        bool dynamic_efficiency() const {
+            return tfles_on && thickened_flame.efficiency == ThickenedFlame::Efficiency::DYNAMIC;
+        }
+        /** @brief Dynamic efficiency: passes of the test filter (0 if no cell is thickened). */
+        uint32_t tfles_test_filter_passes() const { return tfles_test_passes; }
 
         /** @brief Whether the run is a large-eddy simulation ([les]). */
         bool is_les() const { return les_on; }
@@ -351,8 +447,14 @@ class Solver {
         rtype get_time() const { return t; }
         const Statistics & get_statistics() const { return statistics; }
         uint64_t get_step() const { return step; }
+        /** @brief Steps rejected by the error controller in this run. */
+        uint64_t get_rejected_steps() const { return n_rejected; }
         const Euler & get_physics() const { return physics; }
         std::shared_ptr<Mesh> get_mesh() const { return mesh; }
+        /** @brief The input after its numerics preset, if any, filled the keys it leaves unset. */
+        const Input & resolved_input() const { return input; }
+        /** @brief The numerics preset and the value and origin of each of its keys. */
+        const numerics_preset::Resolution & get_numerics_preset() const { return preset; }
 
         /** @brief The solution: flow block and species partial densities. */
         State state() const { return State(conservatives, species); }
@@ -380,21 +482,34 @@ class Solver {
         void init_physics();
         void init_numerics();
         void init_boundaries();
+        std::string zones_without_condition(const std::vector<int32_t> & face_bc) const;
+        void setup_from_input();
+        void check_mesh_quality(CheckReport & report, const CheckOptions & options) const;
+        void check_time_step(CheckReport & report);
+        void check_memory(CheckReport & report, const CheckOptions & options, const memory::Tracker & tracker) const;
+        void check_cost(CheckReport & report, const CheckOptions & options, const memory::Tracker & tracker);
+        void check_settings(CheckReport & report) const;
         void init_run_parameters();
         void init_output();
         void init_solution();
         void init_solution_constant();
         void init_solution_analytical();
         void init_solution_restart();
+        /** @brief Remaps a restart file of another mesh ([initialize] type = "remap"). */
+        void init_solution_remap();
+        /**
+         * @brief Takes the state, time and statistics of a restart file's data
+         *        for the local cells; resume_output continues the output series.
+         */
+        void apply_restart(const RestartData & restart, const std::string & file, bool resume_output);
         void update_boundary_states(rtype t_eval);
-        void init_inlets(const std::vector<toml::value> & input_boundaries,
+        void init_inlets(const std::vector<Input> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
         void update_inflow(rtype t_eval);
         void init_sources();
-        void update_source_field(rtype t_eval);
         void init_sponges();
         /** @brief Mass fractions of a composition table (numbers or expressions) at the centroids of cells. */
-        std::vector<std::vector<double>> composition_at_cells(const toml::value & table, const std::string & where,
+        std::vector<std::vector<double>> composition_at_cells(const Input & table, const std::string & where,
                                                               const std::vector<uint32_t> & cells) const;
         void allocate_memory();
         void register_data();
@@ -405,6 +520,12 @@ class Solver {
         void print_setup() const;
         void print_progress();
         void print_summary(const std::string & stop) const;
+        /** @brief The status at this step, throughput since the last progress row; no diagnostics or memory. */
+        RunStatus run_status() const;
+        void record_mesh_provenance() const;
+        /** @brief Provenance lines of the CSV files and the run log's start record. */
+        void write_provenance();
+        std::vector<std::string> integral_names() const;
         template <typename F>
         void timed_phase(const std::string & name, F && f);
         void write_data(bool force = false);
@@ -412,15 +533,40 @@ class Solver {
         void write_integrals();
         void write_probes();
         CellSampler cell_sampler() const { return CellSampler{conservatives, species, primitives}; }
+        ProbeFields probe_fields();
 
     private:
         // Step graph (solver_graph.cpp)
         bool cuda_graphs = true;               // [run] cuda_graphs
         bool use_step_graph = false;
         void * step_graph_exec = nullptr;      // cudaGraphExec_t
-        Kokkos::View<rtype> step_dt_cfl1;      // device: local, then global minimum
+        Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests], local, then reduced
         Kokkos::View<rtype *> step_scalars;    // device: [t, t_target, dt_scales...]
-        Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> step_io;  // pinned: [t, t_target, dt]
+        Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> step_io;  // pinned: [t, t_target, requests, dt, reduced]
+
+        // Run control
+        bool control_enabled = false;
+        bool control_socket = true;              // [run] control_socket
+        uint64_t control_file_interval = 0;      // [run] control_file_interval
+        int control_contributed = 0;             // this rank's requests in the last time-step reduction
+        int control_reduced = 0;                 // every rank's
+        bool checkpoint_requested = false;
+        std::string control_stop;                // why a request stopped the run, else empty
+        std::string stop_file_note;
+        std::vector<run_control::Command> checkpoint_replies, stop_replies;
+        std::unique_ptr<DataWriter> checkpoint_writer;  // restarts on request if no [[write_data]] writes them
+        bool publishing = false;
+        std::vector<std::pair<std::string, std::string>> monitor_values;
+
+        // Divergence: the state at the start of the last step whose state was valid
+        bool keep_last_good = true;              // [run] keep_last_good
+        State last_good;
+        Kokkos::View<rtype *> last_good_T_seed;
+        bool last_good_set = false;
+        uint64_t last_good_step = 0;
+        rtype last_good_t = 0.0;
+        double last_good_pending = 0.0;
+        bool stepped_past_divergence = false;    // a step graph went on from the invalid state
 
         bool distribute = true;
         int halo_layers = 0;
@@ -432,10 +578,13 @@ class Solver {
         int base_halo_layers() const;
         bool halo_too_shallow();
         void trim_halo();
+        uint32_t n_gradient_cells() const;
         void describe_partition_surface();
         void init_rhs_split();
         void init_axisymmetric_weights();
         void init_les();
+        /** @brief Exchange points of the modeled walls (after the boundary data). */
+        void init_wall_model(const std::vector<int32_t> & face_bc, const std::vector<BoundaryCondition> & bcs);
         /** @brief Hybrid flux: the upwind fraction of every cell from the gradients of W_cells. */
         void update_upwind_sensor();
         /** @brief sum over owned cells of u . R_m - |u|^2 / 2 R_rho for R the sum of face_flux over the cell's faces. */
@@ -452,7 +601,7 @@ class Solver {
         void launch_mixture_flux_functor();
         template <typename T_riemann_solver>
         void launch_double_flux_functor();
-        void init_mixture_boundaries(const std::vector<toml::value> & input_boundaries,
+        void init_mixture_boundaries(const std::vector<Input> & input_boundaries,
                                      const std::vector<std::array<uint32_t, 2>> & profiled_faces,
                                      std::vector<BoundaryCondition> & bcs);
 
@@ -462,7 +611,10 @@ class Solver {
         Kokkos::DefaultExecutionSpace overlap_space;  // runs the early cells while the halo is exchanged
         bool halo_current = false;                     // halo of conservatives filled since its last update
 
-        toml::value input;
+        Input input;
+        bool check_only = false;  // within check()
+        numerics_preset::Resolution preset;
+        std::vector<input_upgrade::Finding> deprecated_keys;  // read under their new names
 
         // Run parameters
         uint64_t n_steps;
@@ -470,6 +622,7 @@ class Solver {
         rtype t_wall_stop;
         bool use_cfl;
         rtype dt = 0.0;
+        rtype dt_cfl1 = 0.0;  // stable time step at CFL 1
         rtype dt_fixed = 0.0;
         rtype cfl;
         rtype t;
@@ -492,6 +645,8 @@ class Solver {
         uint64_t step_run_start = 0;
         uint64_t step_last_check = 0;
         uint64_t n_progress_rows = 0;
+        bool input_from_file = false;  // init(file) has recorded the input's provenance
+        bool run_log_on = false;       // [output] run_log is set
 
         // Numerics and physics
         std::shared_ptr<Mesh> mesh;
@@ -523,6 +678,8 @@ class Solver {
         rtype hybrid_floor = 0.0;
         Kokkos::View<rtype *> cell_upwind;  // hybrid flux: upwind fraction of each cell, else empty
         std::unique_ptr<TimeIntegrator> time_integrator;
+        StepController step_controller;  // [numerics.error_control], else not enabled
+        uint64_t n_rejected = 0;         // steps rejected by step_controller in this run
 
         // Axisymmetric runs (see docs/design/axisymmetric.md)
         bool axisymmetric = false;
@@ -565,11 +722,21 @@ class Solver {
         Kokkos::View<rtype *[3]> tfles_vorticity;
         Kokkos::View<rtype *[3][N_DIM]> tfles_gradients;
         State tfles_halo;                              // [F, E, Omega] as species, for the halo exchange
+        std::array<Kokkos::View<rtype *[3]>, 2> tfles_test;  // dynamic efficiency: [c, |grad c|, .] and their test filter
+        Kokkos::View<rtype *> tfles_test_width2;       // (owned cell): squared width of one test filter pass
+        Kokkos::View<double *[4]> tfles_dynamic_terms; // (owned cell): DynamicEfficiencyFunctor's terms
+        uint32_t tfles_test_passes = 0;
         State dynamic_halo;                            // [rho, u] as flow, d u_i / d x_j as species, owners' values
         Kokkos::View<double *[2]> dynamic_terms;       // (owned cell, [L:M, M:M] V)
         Kokkos::View<double *[6]> dynamic_stresses;    // (cell, rho Delta^2 D(g) S^d)
         double dynamic_ratio = 0.0;
         KineticEnergyBudget budget;
+
+        // Wall-modeled LES (docs/design/wall_model.md)
+        bool wall_model_on = false;
+        std::vector<WallModelSpec> wall_model_specs;  // by boundary condition (default for unmodeled ones)
+        WallModelData wall_model;
+        WallModelPoints wall_model_points;
 
         // Gas mixtures
         ScalarView cell_scalars;                              // (cell, [Y_1 .. Y_Ns, gamma, e0])
@@ -623,15 +790,14 @@ class Solver {
         bool radiating = false;
         chemistry::OpticallyThinRadiation radiation;
         Kokkos::View<rtype *, Kokkos::HostSpace> h_qrad;  // output: radiative loss [W/m^3]
+        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_source_values;  // output: (cell, SOURCE_*)
 
         // Source terms
         bool has_gravity = false;
         rtype gravity[N_DIM] = {};
-        std::vector<Expression> source_expressions;  // Per conservative variable, empty if none
-        bool source_time_dependent = false;
-        StateView source_field;
-        StateView::host_mirror_type h_source_field;
-        rtype t_source = -1.0;
+        std::unique_ptr<sources::SourceTerms> source_terms;
+        Kokkos::View<rtype> stage_time;  // device: the time of the stage being evaluated
+        bool recording_step = false;     // inside the capture of a step graph
         bool hold_mass_flow = false;
         double mass_flow_target = 0.0;      // volume average of rho u along the direction
         rtype mass_flow_direction[N_DIM] = {};

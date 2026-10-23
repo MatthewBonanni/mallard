@@ -16,6 +16,7 @@
  */
 
 #include "teno_setup.h"
+#include "periodic.h"
 
 #include "curved.h"
 
@@ -28,6 +29,7 @@
 #include <vector>
 
 #include "launch_bounds.h"
+#include "log.h"
 
 namespace teno_setup {
 
@@ -46,11 +48,17 @@ constexpr int MAX_MOMENTS = MAX_NM * (MAX_NM + 1) * (MAX_NM + 2) / 6;
 constexpr int MAX_LOW = (teno::MAX_DEGREE + 1) * (teno::MAX_DEGREE + 2) * (teno::MAX_DEGREE + 3) / 6;
 constexpr int MAX_PSI_ROWS = teno::MAX_FACES * teno::MAX_FACE_QUAD;
 
+// Mirror planes of one search: an entry keeps its plane + 1 in the top 8 bits
+constexpr uint32_t MAX_PLANES = 255;
+
 /**
  * @brief Periodic lattice offset of a visited cell, 10 bits per component
  *        (searches stop at 64 layers, and each layer moves it by at most 1).
  */
 constexpr uint32_t LATTICE_ZERO = 512u | (512u << 10) | (512u << 20);
+
+/** @brief Most turns about a periodic rotation's axis a search can make (one per layer). */
+constexpr int MAX_TURNS = 64;
 
 KOKKOS_INLINE_FUNCTION
 int lattice_component(const uint32_t lattice, const int a) { return int((lattice >> (10 * a)) & 1023u) - 512; }
@@ -183,7 +191,7 @@ KOKKOS_FORCEINLINE_FUNCTION void static_reflected_moments(const double (*Q)[3], 
         constexpr int g = decltype(gc)::value;
         constexpr int deg = STATIC_TABLES<R>.low_exps[g][0] + STATIC_TABLES<R>.low_exps[g][1] + STATIC_TABLES<R>.low_exps[g][2];
         // The directions from 0 up to g, as reflection() takes them (first nonzero component last)
-        constexpr auto path = [] {
+        constexpr auto path = [=] {
             struct Path {
                 int k[R > 0 ? static_cast<size_t>(R) : 1] = {};
             } p{};
@@ -392,6 +400,13 @@ struct Geometry {
     R<int8_t *[3]> shift_lattice;
     R<double *[3]> translations;  // periodic translation of each lattice direction
     uint32_t n_translations = 0;
+    // Rotational periodicity: the rotating lattice direction (-1: none), the
+    // rotations by k times its angle at row k + MAX_TURNS, and its axis point
+    int rotation_dir = -1;
+    R<double *[9]> turn_rotations;
+    R<int32_t *> boundary_ordinal;  // (face): teno::entry_code, rotational meshes only
+    double rotation_center[3] = {0.0, 0.0, 0.0};
+    V<rtype *[N_DIM][N_DIM]> shift_rotations;
     uint32_t n_complete = 0;
     V<uint32_t *> offsets_faces_of_cell, faces_of_cell, offsets_nodes_of_face, nodes_of_face;
     V<uint32_t *> offsets_nodes_of_cell, nodes_of_cell;
@@ -414,6 +429,99 @@ struct Geometry {
         return double((cells_of_face(f, 1) == int32_t(c)) ? shifts(face_shift(f), d) : rtype(0));
     }
 
+    /** @brief Whether face f, seen from its cell c, turns: c is its cell 1 across a periodic rotation. */
+    KOKKOS_INLINE_FUNCTION
+    bool face_turns(const uint32_t f, const uint32_t c) const {
+        return rotation_dir >= 0 && cells_of_face(f, 1) == int32_t(c) && shift_lattice(face_shift(f), rotation_dir) != 0;
+    }
+
+    /** @brief Point x of face f's frame (its cell 0's) in the frame of its cell c. */
+    KOKKOS_INLINE_FUNCTION
+    void face_point(const uint32_t f, const uint32_t c, const double * x, double * y) const {
+        for (uint32_t d = 0; d < 3; d++) y[d] = x[d] - face_offset(f, c, d);
+        if (face_turns(f, c)) face_vector(f, c, y, y);
+    }
+
+    /** @brief Vector v of face f's frame in the frame of its cell c. */
+    KOKKOS_INLINE_FUNCTION
+    void face_vector(const uint32_t f, const uint32_t c, const double * v, double * w) const {
+        double u[3] = {v[0], v[1], v[2]};
+        if (!face_turns(f, c)) {
+            for (uint32_t d = 0; d < 3; d++) w[d] = u[d];
+            return;
+        }
+        const uint8_t s = face_shift(f);
+        for (uint32_t a = 0; a < 3; a++) {
+            w[a] = 0.0;
+            for (uint32_t b = 0; b < N_DIM; b++) w[a] += double(shift_rotations(s, b, a)) * u[b];
+        }
+    }
+
+    /** @brief Turns of a lattice offset about the rotation's axis. */
+    KOKKOS_INLINE_FUNCTION
+    int turns(const uint32_t lattice) const { return rotation_dir < 0 ? 0 : lattice_component(lattice, rotation_dir); }
+
+    /** @brief Rotation Q of a lattice offset that turns (turns(lattice) != 0). */
+    KOKKOS_INLINE_FUNCTION
+    void rotation(const uint32_t lattice, double Q[3][3]) const {
+        const int k = turns(lattice) + MAX_TURNS;
+        for (int a = 0; a < 3; a++) {
+            for (int b = 0; b < 3; b++) Q[a][b] = turn_rotations(k, 3 * a + b);
+        }
+    }
+
+    /** @brief Image of point x in the copy at a lattice offset: x + t, or Q x + t if it turns. */
+    KOKKOS_INLINE_FUNCTION
+    void to_copy(const uint32_t lattice, const double * x, double * y) const {
+        double t[3];
+        translation(lattice, t);
+        if (turns(lattice) == 0) {
+            for (uint32_t d = 0; d < 3; d++) y[d] = x[d] + t[d];
+            return;
+        }
+        double Q[3][3], r[3];
+        rotation(lattice, Q);
+        for (int a = 0; a < 3; a++) {
+            r[a] = 0.0;
+            for (int b = 0; b < 3; b++) r[a] += Q[a][b] * (x[b] - rotation_center[b]);
+        }
+        for (uint32_t d = 0; d < 3; d++) y[d] = (rotation_center[d] + r[d]) + t[d];
+    }
+
+    /** @brief Preimage of point p of the copy at a lattice offset. */
+    KOKKOS_INLINE_FUNCTION
+    void from_copy(const uint32_t lattice, const double * p, double * x) const {
+        double t[3];
+        translation(lattice, t);
+        if (turns(lattice) == 0) {
+            for (uint32_t d = 0; d < 3; d++) x[d] = p[d] - t[d];
+            return;
+        }
+        double Q[3][3], r[3];
+        rotation(lattice, Q);
+        for (uint32_t d = 0; d < 3; d++) r[d] = (p[d] - t[d]) - rotation_center[d];
+        for (int a = 0; a < 3; a++) {
+            x[a] = rotation_center[a];
+            for (int b = 0; b < 3; b++) x[a] += Q[b][a] * r[b];
+        }
+    }
+
+    /** @brief Image of vector v in the copy at a lattice offset. */
+    KOKKOS_INLINE_FUNCTION
+    void copy_vector(const uint32_t lattice, const double * v, double * w) const {
+        double u[3] = {v[0], v[1], v[2]};
+        if (turns(lattice) == 0) {
+            for (uint32_t d = 0; d < 3; d++) w[d] = u[d];
+            return;
+        }
+        double Q[3][3];
+        rotation(lattice, Q);
+        for (int a = 0; a < 3; a++) {
+            w[a] = 0.0;
+            for (int b = 0; b < 3; b++) w[a] += Q[a][b] * u[b];
+        }
+    }
+
     KOKKOS_INLINE_FUNCTION
     void translation(const uint32_t lattice, double * t) const {
         t[0] = t[1] = t[2] = 0.0;
@@ -431,9 +539,9 @@ struct Geometry {
     /** @brief Centroid of the copy of cell c at a lattice offset. */
     KOKKOS_INLINE_FUNCTION
     void centroid(const uint32_t c, const uint32_t lattice, double * x) const {
-        double t[3];
-        translation(lattice, t);
-        for (uint32_t d = 0; d < 3; d++) x[d] = double(cell_coords(c, d)) + t[d];
+        double xc[3];
+        for (uint32_t d = 0; d < 3; d++) xc[d] = double(cell_coords(c, d));
+        to_copy(lattice, xc, x);
     }
 };
 
@@ -810,9 +918,8 @@ struct CellSetup {
     KOKKOS_INLINE_FUNCTION
     bool inside_cell(const Lanes & w, const uint32_t v, const double * p, const double h) const {
         const uint32_t c = w.visit_cell[v];
-        double t[3], q[3];
-        g.translation(w.visit_lattice[v], t);
-        for (int a = 0; a < 3; a++) q[a] = p[a] - t[a];
+        double q[3];
+        g.from_copy(w.visit_lattice[v], p, q);
         if (q[0] < g.boxes(c, 0) || q[1] < g.boxes(c, 1) || q[2] < g.boxes(c, 2) || q[0] > g.boxes(c, 3) ||
             q[1] > g.boxes(c, 4) || q[2] > g.boxes(c, 5)) {
             return false;
@@ -822,12 +929,15 @@ struct CellSetup {
         for (uint32_t k = g.offsets_faces_of_cell(c); k < g.offsets_faces_of_cell(c + 1) && inside; k++) {
             const uint32_t f = g.faces_of_cell(k);
             const double sign = (g.cells_of_face(f, 0) == int32_t(c)) ? 1.0 : -1.0;
-            double d = 0.0;
+            double x_f[3], n_f[3], x[3], n[3];
             for (uint32_t a = 0; a < 3; a++) {
-                const double x = double(g.face_coords(f, a)) - g.face_offset(f, c, a);
-                const double n = sign * double(g.face_normals(f, a));
-                d += (q[a] - x) * n;
+                x_f[a] = double(g.face_coords(f, a));
+                n_f[a] = double(g.face_normals(f, a));
             }
+            g.face_point(f, c, x_f, x);
+            g.face_vector(f, c, n_f, n);
+            double d = 0.0;
+            for (uint32_t a = 0; a < 3; a++) d += (q[a] - x[a]) * (sign * n[a]);
             inside = !(d > inside_tol * double(g.face_area(f)));
         }
         return inside;
@@ -865,8 +975,8 @@ struct CellSetup {
      * @brief Stencil candidates of the first n_visits visits, sorted by
      *        distance (see gather in teno.cpp): the cells, and their mirror
      *        images across the planar boundaries the cells touch, except
-     *        images that land inside the domain. Returns their number, or -1
-     *        when the scratch is full.
+     *        images that land inside the domain. Returns their number, or
+     *        minus the Status that stopped it.
      */
     KOKKOS_INLINE_FUNCTION
     int gather(const Lanes & w, const uint32_t i, const uint32_t n_visits, const double * x0, const double h,
@@ -877,14 +987,14 @@ struct CellSetup {
         for (uint32_t v = 0; v < n_visits; v++) {
             const uint32_t c = w.visit_cell[v];
             if (!g.has_mirror_face(c)) continue;
-            double t[3];
-            g.translation(w.visit_lattice[v], t);
             for (uint32_t k = g.offsets_faces_of_cell(c); k < g.offsets_faces_of_cell(c + 1); k++) {
                 const uint32_t f = g.faces_of_cell(k);
                 if (!g.mirror_face(f)) continue;
-                double n[3], x[3];
-                g.unit_normal(f, n);
-                for (uint32_t d = 0; d < 3; d++) x[d] = double(g.face_coords(f, d)) + t[d];
+                double n_f[3], x_f[3], n[3], x[3];
+                g.unit_normal(f, n_f);
+                for (uint32_t d = 0; d < 3; d++) x_f[d] = double(g.face_coords(f, d));
+                g.copy_vector(w.visit_lattice[v], n_f, n);
+                g.to_copy(w.visit_lattice[v], x_f, x);
                 int match = -1;
                 for (uint32_t p = 0; p < n_planes; p++) {
                     double off = 0.0, cos = 0.0;
@@ -898,7 +1008,8 @@ struct CellSetup {
                     }
                 }
                 if (match < 0) {
-                    if (n_planes == caps.planes || n_planes == 32) return -1;
+                    if (n_planes == MAX_PLANES) return -int(TOO_MANY_PLANES);
+                    if (n_planes == caps.planes) return -int(OUT_OF_SCRATCH);
                     for (uint32_t d = 0; d < 3; d++) {
                         w.planes[6 * n_planes + d] = n[d];
                         w.planes[6 * n_planes + 3 + d] = x[d];
@@ -912,7 +1023,7 @@ struct CellSetup {
                             w.plane_face_lattice[j] == w.visit_lattice[v];
                 }
                 if (known) continue;
-                if (n_plane_faces == caps.plane_faces) return -1;
+                if (n_plane_faces == caps.plane_faces) return -int(OUT_OF_SCRATCH);
                 w.plane_face[n_plane_faces] = f;
                 w.plane_face_lattice[n_plane_faces] = w.visit_lattice[v];
                 w.plane_face_plane[n_plane_faces] = static_cast<uint32_t>(match);
@@ -931,9 +1042,25 @@ struct CellSetup {
             }
             for (uint32_t v = 0; v < n_visits; v++) {
                 const uint32_t c = w.visit_cell[v];
-                double t[3];
-                g.translation(w.visit_lattice[v], t);
+                const uint32_t lattice = w.visit_lattice[v];
                 double cell_reach = 0.0;
+                if (g.turns(lattice) != 0) {
+                    // The plane in the frame of the cell's box
+                    double n_c[3], m_c[3], Q[3][3];
+                    g.rotation(lattice, Q);
+                    for (int a = 0; a < 3; a++) {
+                        n_c[a] = 0.0;
+                        for (int b = 0; b < 3; b++) n_c[a] += Q[b][a] * n[b];
+                    }
+                    g.from_copy(lattice, m, m_c);
+                    for (int a = 0; a < 3; a++) {
+                        cell_reach += n_c[a] * ((n_c[a] > 0.0 ? g.boxes(c, 3 + a) : g.boxes(c, a)) - m_c[a]);
+                    }
+                    w.reach[v] = cell_reach;
+                    continue;
+                }
+                double t[3];
+                g.translation(lattice, t);
                 for (int a = 0; a < 3; a++) {
                     if (n[a] == 0.0) continue;
                     cell_reach += n[a] * ((n[a] > 0.0 ? g.boxes(c, 3 + a) : g.boxes(c, a)) + t[a] - m[a]);
@@ -961,12 +1088,12 @@ struct CellSetup {
         uint32_t n_entries = 0;
         for (uint32_t v = 0; v < n_visits; v++) {
             if (!(w.visit_cell[v] == i && w.visit_lattice[v] == LATTICE_ZERO)) {
-                if (n_entries == caps.entries) return -1;
+                if (n_entries == caps.entries) return -int(OUT_OF_SCRATCH);
                 w.entry_ref[n_entries++] = v;
             }
             for (uint32_t p = 0; p < n_planes; p++) {
                 if ((w.inside[v * words + p / 32] >> (p % 32)) & 1u) continue;
-                if (n_entries == caps.entries) return -1;
+                if (n_entries == caps.entries) return -int(OUT_OF_SCRATCH);
                 w.entry_ref[n_entries++] = v | ((p + 1) << 24);
             }
         }
@@ -1027,12 +1154,13 @@ struct CellSetup {
         double best = Kokkos::Experimental::finite_max_v<double>;
         for (uint32_t k = 0; k < n_plane_faces; k++) {
             if (w.plane_face_plane[k] != plane - 1) continue;
-            double t[3];
-            g.translation(w.plane_face_lattice[k], t);
             const uint32_t f = w.plane_face[k];
+            double x_f[3], y[3];
+            for (uint32_t d = 0; d < 3; d++) x_f[d] = double(g.face_coords(f, d));
+            g.to_copy(w.plane_face_lattice[k], x_f, y);
             double d2 = 0.0;
             for (uint32_t d = 0; d < 3; d++) {
-                const double dx = (double(g.face_coords(f, d)) + t[d]) - 0.5 * (x[d] + xc[d]);
+                const double dx = y[d] - 0.5 * (x[d] + xc[d]);
                 d2 += dx * dx;
             }
             if (d2 < best) {
@@ -1041,6 +1169,18 @@ struct CellSetup {
             }
         }
         return int32_t(w.plane_face[plane_face]);
+    }
+
+    /** @brief Face field (teno::entry_code) of the j-th sorted entry, of visit v. */
+    KOKKOS_INLINE_FUNCTION
+    int32_t code(const Lanes & w, const uint32_t j, const uint32_t v, const uint32_t n_plane_faces) const {
+        int32_t pf;
+        const int32_t f = entry_face(w, j, n_plane_faces, pf);
+        const int turns = g.turns(w.visit_lattice[v]);
+        if (f < 0) return teno::entry_code(-1, -1, turns, 0);
+        const int face_turns = g.turns(w.plane_face_lattice[pf]);
+        if (turns == 0 && face_turns == 0) return f;
+        return teno::entry_code(f, g.boundary_ordinal(f), face_turns, turns - face_turns);
     }
 
     // ---- monomial means -------------------------------------------------------------------------
@@ -1186,6 +1326,12 @@ struct CellSetup {
         for (int a = 0; a < 3; a++) {
             for (int b = 0; b < 3; b++) Q[a][b] = (a == b ? 1.0 : 0.0) - 2.0 * nf[a] * nf[b];
         }
+        mapped_moments(Q, low, eta);
+    }
+
+    /** @brief The moments eta of the image of a cell with moments low under the linear map Q. */
+    KOKKOS_INLINE_FUNCTION
+    void mapped_moments(const double (*Q)[3], const double * low, double * eta) const {
         constexpr int LEVEL = (teno::MAX_DEGREE + 1) * (teno::MAX_DEGREE + 2) / 2;
         for (int gg = 0; gg < tables->n_low; gg++) {
             int e[3] = {tables->low_exps[gg][0], tables->low_exps[gg][1], tables->low_exps[gg][2]};
@@ -1238,15 +1384,23 @@ struct CellSetup {
         for (int b = 0; b < n_low; b++) {
             low[b] = g.moments(c, moment(tables->low_exps[b][0], tables->low_exps[b][1], tables->low_exps[b][2]));
         }
+        if (g.turns(lattice) != 0) {
+            // The turned copy's moments
+            double Q[3][3], turned[MAX_LOW];
+            g.rotation(lattice, Q);
+            mapped_moments(Q, low, turned);
+            for (int b = 0; b < n_low; b++) low[b] = turned[b];
+        }
         if (f < 0) {
             for (uint32_t d = 0; d < 3; d++) dd[d] = (xc[d] - x0[d]) / h;
             binomial_means(dd, s, [&](int a, int b, int k) { return low[low_index(a, b, k)]; }, n, means);
             return;
         }
-        double nf[3], m[3], t[3], xm[3];
-        g.unit_normal(static_cast<uint32_t>(f), nf);
-        g.translation(face_lattice, t);
-        for (uint32_t d = 0; d < 3; d++) m[d] = double(g.face_coords(f, d)) + t[d];
+        double nf[3], m[3], xm[3], n_f[3], x_f[3];
+        g.unit_normal(static_cast<uint32_t>(f), n_f);
+        for (uint32_t d = 0; d < 3; d++) x_f[d] = double(g.face_coords(f, d));
+        g.copy_vector(face_lattice, n_f, nf);
+        g.to_copy(face_lattice, x_f, m);
         mirror_point(nf, m, xc, xm);
         for (uint32_t d = 0; d < 3; d++) dd[d] = (xm[d] - x0[d]) / h;
         double eta[MAX_LOW];
@@ -1300,10 +1454,10 @@ struct CellSetup {
             const uint32_t f = g.faces_of_cell(k);
             for (uint32_t q = 0; q < g.quad_weights.extent(1); q++) {
                 if (g.quad_weights(f, q) == rtype(0)) continue;
-                double xi[3], phi[teno::MAX_NK];
-                for (uint32_t d = 0; d < 3; d++) {
-                    xi[d] = ((double(g.quad_points(f, q, d)) - g.face_offset(f, i, d)) - x0[d]) / h;
-                }
+                double xi[3], phi[teno::MAX_NK], x_q[3], y[3];
+                for (uint32_t d = 0; d < 3; d++) x_q[d] = double(g.quad_points(f, q, d));
+                g.face_point(f, i, x_q, y);
+                for (uint32_t d = 0; d < 3; d++) xi[d] = (y[d] - x0[d]) / h;
                 teno::monomials(r, xi[0], xi[1], xi[2], phi);
                 for (int l = 0; l < nk; l++) w.psi[n_psi * nk + l] = phi[l] - mean0[l];
                 n_psi++;
@@ -1333,7 +1487,7 @@ struct CellSetup {
         if (depth_large != entries_depth) {
             entries_depth = depth_large;
             n_entries = gather(w, i, end[depth_large], x0, h, n_planes, n_plane_faces);
-            if (n_entries < 0) return OUT_OF_SCRATCH;
+            if (n_entries < 0) return uint8_t(-n_entries);
         }
         const double tie = GEOMETRY_TOL * h * h;
         auto splits_tie = [&](const uint32_t n_list, const uint32_t n) {
@@ -1392,9 +1546,8 @@ struct CellSetup {
             n_large = n_used;
             for (uint32_t s = 0; s < n_used; s++) {
                 const uint32_t v = w.entry_ref[w.entry_order[s]] & 0xFFFFFFu;
-                int32_t pf;
                 o.large_cells[s] = int32_t(w.visit_cell[v]);
-                o.large_faces[s] = entry_face(w, s, n_plane_faces, pf);
+                o.large_faces[s] = code(w, s, v, n_plane_faces);
                 for (uint32_t l = 0; l < nk; l++) o.large_pinv[s * nk + l] = rtype(w.X[s * nk + l]);
             }
         }
@@ -1408,7 +1561,7 @@ struct CellSetup {
         if (depth_wide != entries_depth) {
             entries_depth = depth_wide;
             n_entries = gather(w, i, end[depth_wide], x0, h, n_planes, n_plane_faces);
-            if (n_entries < 0) return OUT_OF_SCRATCH;
+            if (n_entries < 0) return uint8_t(-n_entries);
         }
         uint32_t k_face = 0;
         for (uint32_t kf = g.offsets_faces_of_cell(i); kf < g.offsets_faces_of_cell(i + 1); kf++, k_face++) {
@@ -1418,7 +1571,10 @@ struct CellSetup {
             double v[4][3];
             for (uint32_t a = 0; a < nv; a++) {
                 const uint32_t node = g.nodes_of_face(g.offsets_nodes_of_face(f) + a);
-                for (uint32_t d = 0; d < 3; d++) v[a][d] = (double(g.node_coords(node, d)) - g.face_offset(f, i, d)) - x0[d];
+                double x_n[3];
+                for (uint32_t d = 0; d < 3; d++) x_n[d] = double(g.node_coords(node, d));
+                g.face_point(f, i, x_n, v[a]);
+                for (uint32_t d = 0; d < 3; d++) v[a][d] = v[a][d] - x0[d];
             }
             double dets[4] = {}, cof[4][3] = {};
             for (uint32_t a = 1; a + 1 < nv; a++) {
@@ -1467,9 +1623,8 @@ struct CellSetup {
             for (uint32_t s = 0; s < n_sector; s++) {
                 const uint32_t j = w.sector[s];
                 const uint32_t vv = w.entry_ref[w.entry_order[j]] & 0xFFFFFFu;
-                int32_t pf;
                 o.small_cells[n_small + s] = int32_t(w.visit_cell[vv]);
-                o.small_faces[n_small + s] = entry_face(w, j, n_plane_faces, pf);
+                o.small_faces[n_small + s] = code(w, j, vv, n_plane_faces);
                 for (uint32_t l = 0; l < teno::NK_SMALL; l++) {
                     o.small_pinv[(n_small + s) * teno::NK_SMALL + l] = rtype(w.X[s * teno::NK_SMALL + l]);
                 }
@@ -1851,7 +2006,7 @@ struct CellTeam {
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const Member & tm) const {
-        const uint32_t t = tm.league_rank();
+        const uint32_t t = static_cast<uint32_t>(tm.league_rank());
         // A free slot of the pool; every slot is held by a running team, so one frees up
         int slot = 0;
         Kokkos::single(Kokkos::PerTeam(tm), [&](int & taken) {
@@ -1897,7 +2052,7 @@ struct CellTeam {
     template <class Count, class Write>
     KOKKOS_INLINE_FUNCTION static uint32_t team_scan(const Member & tm, uint32_t * space, const uint32_t n, Count && count,
                                                      Write && write) {
-        const uint32_t team = tm.team_size(), lane = tm.team_rank();
+        const uint32_t team = static_cast<uint32_t>(tm.team_size()), lane = static_cast<uint32_t>(tm.team_rank());
         const uint32_t chunk = (n + team - 1) / team;
         const uint32_t begin = lane * chunk < n ? lane * chunk : n;
         const uint32_t end = begin + chunk < n ? begin + chunk : n;
@@ -2009,6 +2164,8 @@ struct CellTeam {
                     lattice_add(lattice, c.g.shift_lattice(s, 0), c.g.shift_lattice(s, 1), c.g.shift_lattice(s, 2));
                 cand_cell[p] = nb;
                 cand_lattice[p] = nb_lattice;
+                // Copies turned about a periodic rotation's axis: the host's setup handles them
+                if (c.g.turns(nb_lattice) != 0) ctl[SEARCH_OK] = 0;
                 const int64_t slot = find_or_insert(w, ctl, visit_key(nb, nb_lattice));
                 if (slot < 0) {
                     ctl[SEARCH_OK] = 0;
@@ -2086,7 +2243,7 @@ struct CellTeam {
         tm.team_barrier();
     }
 
-    /** @brief CellSetup::gather over the team; the sort runs in level-0 scratch. Returns -1 when the scratch is full. */
+    /** @brief CellSetup::gather over the team; the sort runs in level-0 scratch. Returns minus the Status that stops it. */
     KOKKOS_INLINE_FUNCTION
     int gather(const Member & tm, const Lanes & w, char * base, uint32_t * ctl, char * sort_space, const uint32_t i,
                const uint32_t n_visits, const double * x0, const double h) const {
@@ -2114,7 +2271,7 @@ struct CellTeam {
                 offset++;
             }
         });
-        if (n_pairs > caps.plane_faces) return -1;
+        if (n_pairs > caps.plane_faces) return -int(OUT_OF_SCRATCH);
         Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, n_pairs), [&](const uint32_t p) {
             const uint32_t f = pair_face[p];
             double t[3], n[3];
@@ -2130,8 +2287,8 @@ struct CellTeam {
         // offset come from one visit only, so no face is met twice.
         if (tm.team_rank() == 0) {
             uint32_t n_planes = 0;
-            bool ok = true;
-            for (uint32_t q = 0; q < n_pairs && ok; q++) {
+            uint32_t failure = OK;
+            for (uint32_t q = 0; q < n_pairs && failure == OK; q++) {
                 const double * n = pair_geometry + 6 * q;
                 const double * x = n + 3;
                 int match = -1;
@@ -2147,8 +2304,8 @@ struct CellTeam {
                     }
                 }
                 if (match < 0) {
-                    if (n_planes == caps.planes || n_planes == 32) {
-                        ok = false;
+                    if (n_planes == MAX_PLANES || n_planes == caps.planes) {
+                        failure = n_planes == MAX_PLANES ? TOO_MANY_PLANES : OUT_OF_SCRATCH;
                         break;
                     }
                     for (uint32_t d = 0; d < 6; d++) w.planes[6 * n_planes + d] = n[d];
@@ -2159,10 +2316,11 @@ struct CellTeam {
                 w.plane_face_lattice[q] = w.visit_lattice[pair_visit[q]];
                 w.plane_face_plane[q] = static_cast<uint32_t>(match);
             }
-            ctl[N_PLANES] = ok ? n_planes : ~0u;
+            // A failure as its complement, beyond any plane count
+            ctl[N_PLANES] = failure == OK ? n_planes : ~failure;
             ctl[N_PLANE_FACES] = n_pairs;
             // Each plane's faces together, in their order (a stable counting sort)
-            if (ok) {
+            if (failure == OK) {
                 uint32_t * start = reinterpret_cast<uint32_t *>(base + layout.plane_start);
                 uint32_t * sorted = reinterpret_cast<uint32_t *>(base + layout.plane_sorted);
                 for (uint32_t p = 0; p <= n_planes; p++) start[p] = 0;
@@ -2178,13 +2336,13 @@ struct CellTeam {
         {
             const uint32_t * sorted = reinterpret_cast<const uint32_t *>(base + layout.plane_sorted);
             double * sorted_x = reinterpret_cast<double *>(base + layout.plane_x);
-            Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, ctl[N_PLANES] == ~0u ? 0u : n_pairs), [&](const uint32_t k) {
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, ctl[N_PLANES] > MAX_PLANES ? 0u : n_pairs), [&](const uint32_t k) {
                 for (uint32_t d = 0; d < 3; d++) sorted_x[3 * k + d] = pair_geometry[6 * sorted[k] + 3 + d];
             });
             tm.team_barrier();
         }
         const uint32_t n_planes = ctl[N_PLANES];
-        if (n_planes == ~0u) return -1;
+        if (n_planes > MAX_PLANES) return -int(~n_planes);
         const uint32_t words = caps.flag_words();
         Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, n_visits * words), [&](const uint32_t v) { w.inside[v] = 0; });
         tm.team_barrier();
@@ -2244,7 +2402,7 @@ struct CellTeam {
                     e++;
                 }
             });
-        if (n_entries > caps.entries) return -1;
+        if (n_entries > caps.entries) return -int(OUT_OF_SCRATCH);
         // Sort in level-0 scratch: a bitonic network over (key, position), a total order
         uint32_t n_sort = 1;
         while (n_sort < n_entries) n_sort <<= 1;
@@ -2310,7 +2468,7 @@ struct CellTeam {
                 for (uint32_t d = 0; d < 3; d++) dd[d] = (xc[d] - x0[d]) / h;
             } else {
                 double m[3], t[3], xm[3];
-                c.g.unit_normal(f, nf);
+                c.g.unit_normal(uint32_t(f), nf);
                 c.g.translation(w.plane_face_lattice[pf], t);
                 for (uint32_t d = 0; d < 3; d++) m[d] = double(c.g.face_coords(f, d)) + t[d];
                 mirror_point(nf, m, xc, xm);
@@ -2379,7 +2537,7 @@ struct CellTeam {
         if (m <= done) return;
         const int nk = c.nk;
         team_means(tm, w, base, m - done, [&](const uint32_t q) { return done + q; }, nk, x0, h,
-                   [&](const uint32_t q, const int l, const double v) { w.means[(done + q) * nk + l] = v; });
+                   [&](const uint32_t q, const int l, const double v) { w.means[(done + q) * uint32_t(nk) + uint32_t(l)] = v; });
         if (tm.team_rank() == 0) ctl[N_MEANS] = m;
         tm.team_barrier();
     }
@@ -2428,7 +2586,7 @@ struct CellTeam {
         // Zero-mean basis at the cell's face quadrature points, row by row in face and point order
         const uint32_t f0 = c.g.offsets_faces_of_cell(i);
         const uint32_t n_faces = c.g.offsets_faces_of_cell(i + 1) - f0;
-        const uint32_t nq = c.g.quad_weights.extent(1);
+        const uint32_t nq = static_cast<uint32_t>(c.g.quad_weights.extent(1));
         const uint32_t n_psi = team_scan(
             tm, scan_space(ctl), n_faces * nq,
             [&](const uint32_t e) { return uint32_t(c.g.quad_weights(c.g.faces_of_cell(f0 + e / nq), e % nq) != rtype(0)); },
@@ -2440,8 +2598,8 @@ struct CellTeam {
                 for (uint32_t d = 0; d < 3; d++) {
                     xi[d] = ((double(c.g.quad_points(f, q, d)) - c.g.face_offset(f, i, d)) - x0[d]) / h;
                 }
-                teno::monomials(r, xi[0], xi[1], xi[2], phi);
-                for (int l = 0; l < nk; l++) w.psi[row * nk + l] = phi[l] - mean0[l];
+                teno::monomials(uint8_t(r), xi[0], xi[1], xi[2], phi);
+                for (int l = 0; l < nk; l++) w.psi[row * uint32_t(nk) + uint32_t(l)] = phi[l] - mean0[l];
             });
 
         // The search, with its hash set in level-0 scratch
@@ -2462,7 +2620,7 @@ struct CellTeam {
         if (depth_large != entries_depth) {
             entries_depth = depth_large;
             n_entries = gather(tm, w, base, ctl, big, i, end[depth_large], x0, h);
-            if (n_entries < 0) return OUT_OF_SCRATCH;
+            if (n_entries < 0) return uint8_t(-n_entries);
         }
         const double tie = GEOMETRY_TOL * h * h;
         auto key = [&](const uint32_t j) { return w.entry_key[w.entry_order[j]]; };
@@ -2485,9 +2643,9 @@ struct CellTeam {
         const uint16_t n_first = at_wall ? c.wall_ns : c.ns;
         auto build = [&](const int m) {
             ensure_means(tm, w, base, ctl, uint32_t(m) > means_floor ? uint32_t(m) : means_floor, x0, h);
-            const size_t bytes = sizeof(double) * size_t(m) * nk;
+            const size_t bytes = sizeof(double) * size_t(m) * size_t(nk);
             A_used = bytes <= big_bytes ? A : reinterpret_cast<double *>(base + layout.A);
-            X_used = A_used == A && 2 * bytes <= big_bytes ? A + size_t(m) * nk : X;
+            X_used = A_used == A && 2 * bytes <= big_bytes ? A + size_t(m) * size_t(nk) : X;
             Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, m * nf),
                                  [&](const int e) { A_used[e] = w.means[(e / nf) * nk + e % nf] - mean0[e % nf]; });
             tm.team_barrier();
@@ -2507,8 +2665,9 @@ struct CellTeam {
         uint32_t n_tried = 0;
         for (uint32_t n_try = n_first; n_try <= try_max; n_try++) {
             if (n_try < uint32_t(n_entries) && Kokkos::fabs(key(n_try) - key(n_try - 1)) < tie) continue;
-            if (!build(n_try)) continue;
-            const double lebesgue = team_lebesgue_constant(tm, &w.psi[0], n_psi, nk, X_used, n_try, &w.coef[0]);
+            if (!build(int(n_try))) continue;
+            const double lebesgue =
+                team_lebesgue_constant(tm, &w.psi[0], int(n_psi), nk, X_used, int(n_try), &w.coef[0]);
             if (tm.team_rank() == 0) {
                 w.tried_n[n_tried] = n_try;
                 w.tried_lebesgue[n_tried] = lebesgue;
@@ -2557,17 +2716,17 @@ struct CellTeam {
             entries_depth = depth_wide;
             if (tm.team_rank() == 0) ctl[N_MEANS] = 0;
             n_entries = gather(tm, w, base, ctl, big, i, end[depth_wide], x0, h);
-            if (n_entries < 0) return OUT_OF_SCRATCH;
+            if (n_entries < 0) return uint8_t(-n_entries);
         }
         // Sector stencils of all faces at once: the face geometry, then the
         // first nss_max + 1 entries in each face's cone, in sorted order
-        const uint32_t team = tm.team_size();
+        const uint32_t team = static_cast<uint32_t>(tm.team_size());
         const uint32_t per_face = c.nss_max + 1u;
         uint32_t * face_count = ctl + FACE_COUNT;
         double * cone = reinterpret_cast<double *>(base + layout.cone);  // per face: nv, v[4][3], dets[4], cof[4][3]
         constexpr int CONE = 29;
-        if (tm.team_rank() < n_faces) {
-            const uint32_t k_face = tm.team_rank();
+        if (static_cast<uint32_t>(tm.team_rank()) < n_faces) {
+            const uint32_t k_face = static_cast<uint32_t>(tm.team_rank());
             const uint32_t f = c.g.faces_of_cell(f0 + k_face);
             const uint32_t nv = c.g.offsets_nodes_of_face(f + 1) - c.g.offsets_nodes_of_face(f);
             double * cf = cone + CONE * k_face;
@@ -2622,8 +2781,8 @@ struct CellTeam {
                 masks[q] = mask;
             });
             tm.team_barrier();
-            if (tm.team_rank() < n_faces) {
-                const uint32_t k = tm.team_rank();
+            if (static_cast<uint32_t>(tm.team_rank()) < n_faces) {
+                const uint32_t k = static_cast<uint32_t>(tm.team_rank());
                 uint32_t count = face_count[k];
                 for (uint32_t q = 0; q < n_chunk && count <= c.nss_max; q++) {
                     if ((masks[q] >> k) & 1u) w.sector[k * per_face + count++] = j0 + q;
@@ -2653,7 +2812,7 @@ struct CellTeam {
                 invalid++;
                 return;
             }
-            size[k] = n_sector;
+            size[k] = int(n_sector);
         });
         int total = 0;
         static_for<0, int(NF)>([&](auto kc) { total += size[decltype(kc)::value]; });
@@ -2663,10 +2822,10 @@ struct CellTeam {
         uint32_t * todo = reinterpret_cast<uint32_t *>(base + layout.cand_cell);
         auto entry_of = [&](const int q, int & k, int & s) {
             k = pick_item(size, q, s);
-            return w.sector[k * per_face + s];
+            return w.sector[uint32_t(k) * per_face + uint32_t(s)];
         };
         const uint32_t n_todo = team_scan(
-            tm, scan_space(ctl), total,
+            tm, scan_space(ctl), uint32_t(total),
             [&](const uint32_t q) {
                 int k, s2;
                 return uint32_t(entry_of(int(q), k, s2) >= n_known);
@@ -2679,7 +2838,7 @@ struct CellTeam {
                     return;
                 }
                 double * a = pick(As, k) + s2 * teno::NK_SMALL;
-                for (int l = 0; l < teno::NK_SMALL; l++) a[l] = w.means[j * c.nk + l] - mean0[l];
+                for (int l = 0; l < teno::NK_SMALL; l++) a[l] = w.means[j * uint32_t(c.nk) + uint32_t(l)] - mean0[l];
             });
         team_means(
             tm, w, base, n_todo,
@@ -2704,7 +2863,7 @@ struct CellTeam {
                 size[k] = 0;
                 return;
             }
-            small_size[k] = size[k];
+            small_size[k] = uint16_t(size[k]);
             n_small += size[k];
         });
         total = 0;
@@ -2712,7 +2871,7 @@ struct CellTeam {
         Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, total), [&](const int e) {
             int s;
             const int k = pick_item(size, e, s);
-            const uint32_t j = w.sector[k * per_face + s];
+            const uint32_t j = w.sector[uint32_t(k) * per_face + uint32_t(s)];
             const uint32_t vv = w.entry_ref[w.entry_order[j]] & 0xFFFFFFu;
             const int at = pick(start, k) + s;
             int32_t pf;
@@ -2825,9 +2984,23 @@ struct BoxesTask {
             const uint32_t f = g.faces_of_cell(f0 + k);
             const double sign = (g.cells_of_face(f, 0) == int32_t(c)) ? 1.0 : -1.0;
             offset[k] = 0.0;
-            for (uint32_t d = 0; d < 3; d++) {
-                N[k][d] = sign * double(g.face_normals(f, d));
-                offset[k] += N[k][d] * ((double(g.face_coords(f, d)) - g.face_offset(f, c, d)) - xc[d]);
+            if (g.face_turns(f, c)) {
+                double n_f[3], x_f[3], n_c[3], x_c[3];
+                for (uint32_t d = 0; d < 3; d++) {
+                    n_f[d] = double(g.face_normals(f, d));
+                    x_f[d] = double(g.face_coords(f, d));
+                }
+                g.face_vector(f, c, n_f, n_c);
+                g.face_point(f, c, x_f, x_c);
+                for (uint32_t d = 0; d < 3; d++) {
+                    N[k][d] = sign * n_c[d];
+                    offset[k] += N[k][d] * (x_c[d] - xc[d]);
+                }
+            } else {
+                for (uint32_t d = 0; d < 3; d++) {
+                    N[k][d] = sign * double(g.face_normals(f, d));
+                    offset[k] += N[k][d] * ((double(g.face_coords(f, d)) - g.face_offset(f, c, d)) - xc[d]);
+                }
             }
             norm[k] = Kokkos::sqrt(N[k][0] * N[k][0] + N[k][1] * N[k][1] + N[k][2] * N[k][2]);
         }
@@ -3083,6 +3256,22 @@ class Setup3D {
             for (size_t j = 0; j < mesh.periodic_translations.size(); j++) {
                 for (size_t a = 0; a < N_DIM; a++) h.translations(j, a) = double(mesh.periodic_translations[j][a]);
             }
+            h.shift_rotations = mesh.h_shift_rotations;
+            h.turn_rotations = Geometry<HostMem>::R<double *[9]>("teno_setup_turn_rotations", mesh.is_rotational() ? 2 * MAX_TURNS + 1 : 0);
+            h.boundary_ordinal = Geometry<HostMem>::R<int32_t *>("teno_setup_boundary_ordinal", mesh.is_rotational() ? mesh.n_faces : 0);
+            if (mesh.is_rotational()) {
+                for (uint32_t f = 0, b = 0; f < mesh.n_faces; f++) {
+                    h.boundary_ordinal(f) = mesh.h_cells_of_face(f, 1) < 0 ? int32_t(b++) : -1;
+                }
+                h.rotation_dir = mesh.periodic_rotation.direction;
+                for (size_t a = 0; a < 3; a++) h.rotation_center[a] = mesh.periodic_rotation.center[a];
+                for (int k = -MAX_TURNS; k <= MAX_TURNS; k++) {
+                    const auto Q = rotation_matrix(mesh.periodic_rotation.axis, k * mesh.periodic_rotation.angle);
+                    for (size_t a = 0; a < 3; a++) {
+                        for (size_t b = 0; b < 3; b++) h.turn_rotations(k + MAX_TURNS, 3 * a + b) = Q[a][b];
+                    }
+                }
+            }
             h.cell_h = Geometry<HostMem>::R<double *>("teno_setup_h", n_cells);
             Kokkos::parallel_for("teno_setup_h", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n_cells),
                                  [&](const uint32_t c) { h.cell_h(c) = std::cbrt(double(mesh.h_cell_volume(c))); });
@@ -3164,6 +3353,11 @@ class Setup3D {
             d.n_translations = h.n_translations;
             d.shift_lattice = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.shift_lattice);
             d.translations = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.translations);
+            d.shift_rotations = mesh.shift_rotations;
+            d.turn_rotations = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.turn_rotations);
+            d.boundary_ordinal = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.boundary_ordinal);
+            d.rotation_dir = h.rotation_dir;
+            for (size_t a = 0; a < 3; a++) d.rotation_center[a] = h.rotation_center[a];
             d.cell_h = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.cell_h);
             d.mirror_face = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.mirror_face);
             d.has_mirror_face = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.has_mirror_face);
@@ -3370,12 +3564,26 @@ class Setup3D {
             host_ready = true;
         }
 
+        /** @brief Where cell c is, for errors. */
+        std::string describe(const uint32_t c) const {
+            return logging::format("cell %u at (%.6g, %.6g, %.6g)", c, double(host.cell_coords(c, 0)),
+                                   double(host.cell_coords(c, 1)), double(host.cell_coords(c, 2)));
+        }
+
         /** @brief Tables of the batch slots in which (cells[t]) on the host, growing the scratch until they fit. */
         void on_host(const Kokkos::View<uint32_t *, HostMem> & cells, std::vector<uint32_t> which, TableBatch & out) {
             ensure_host();
             const uint32_t n_threads = static_cast<uint32_t>(Kokkos::DefaultHostExecutionSpace().concurrency());
+            constexpr uint32_t MAX_SCALE = 1024;
             for (uint32_t scale = 1; !which.empty(); scale *= 4) {
-                if (scale > 1024) throw std::runtime_error("TENO setup: a stencil search does not fit in memory.");
+                if (scale > MAX_SCALE) {
+                    const Caps most = caps.scaled(MAX_SCALE);
+                    throw std::runtime_error(logging::format(
+                        "TENO setup: the stencil search of %s (and %zu more) does not fit in memory with %ux the "
+                        "scratch (%u visits, %u entries, %u mirror planes, %u mirror faces).",
+                        describe(cells(which[0])).c_str(), which.size() - 1, MAX_SCALE, most.visits, most.entries,
+                        most.planes, most.plane_faces));
+                }
                 const uint32_t m = static_cast<uint32_t>(which.size());
                 Kokkos::View<uint32_t *, HostMem> h_cells("teno_setup_host_cells", m);
                 for (uint32_t j = 0; j < m; j++) h_cells(j) = cells(which[j]);
@@ -3393,8 +3601,13 @@ class Setup3D {
                     if (h_out.status(j) == OK) {
                         done.push_back(j);
                         done_slot.push_back(which[j]);
-                    } else {
+                    } else if (h_out.status(j) == OUT_OF_SCRATCH) {
                         again.push_back(which[j]);
+                    } else {
+                        throw std::runtime_error(logging::format(
+                            "TENO setup: the stencil search of %s meets more than %u distinct mirror planes (boundary "
+                            "faces with mirror images, e.g. of a faceted curved boundary).",
+                            describe(h_cells(j)).c_str(), MAX_PLANES));
                     }
                 }
                 // Compact the finished ones and move them to their slots of out
@@ -3574,48 +3787,57 @@ std::array<double, 9> ranking_metric(const Mesh & mesh, const Kokkos::View<int32
                                      const Kokkos::View<BoundaryCondition *>::host_mirror_type & bcs, const uint32_t i) {
     using Point = std::array<double, 3>;
     double spread[9] = {};
-    if constexpr (N_DIM == 3) {
-        Point x0;
-        for (size_t a = 0; a < 3; a++) x0[a] = double(mesh.h_cell_coords(i, a));
-        const double h = std::cbrt(double(mesh.h_cell_volume(i)));
-        // Reused by each thread: an allocation per cell cost as much as the metric
-        static thread_local std::vector<Point> offsets;
-        offsets.assign(1, Point{0.0, 0.0, 0.0});
-        for (uint32_t k = mesh.h_offsets_cells_of_cell(i); k < mesh.h_offsets_cells_of_cell(i + 1); k++) {
-            const auto & lattice = mesh.shift_lattice[mesh.h_cells_of_cell_shift(k)];
-            Point t = {0.0, 0.0, 0.0};
-            for (size_t j = 0; j < mesh.periodic_translations.size(); j++) {
-                for (size_t a = 0; a < N_DIM; a++) t[a] += lattice[j] * double(mesh.periodic_translations[j][a]);
-            }
-            const uint32_t c = mesh.h_cells_of_cell(k);
-            Point d;
-            for (size_t a = 0; a < 3; a++) d[a] = double(mesh.h_cell_coords(c, a)) + t[a] - x0[a];
+    Point x0 = {0.0, 0.0, 0.0};
+    for (size_t a = 0; a < N_DIM; a++) x0[a] = double(mesh.h_cell_coords(i, a));
+    const double h = N_DIM == 3 ? std::cbrt(double(mesh.h_cell_volume(i))) : std::sqrt(double(mesh.h_cell_volume(i)));
+    // Reused by each thread: an allocation per cell cost as much as the metric
+    static thread_local std::vector<Point> offsets;
+    offsets.assign(1, Point{0.0, 0.0, 0.0});
+    for (uint32_t k = mesh.h_offsets_cells_of_cell(i); k < mesh.h_offsets_cells_of_cell(i + 1); k++) {
+        const uint8_t s = mesh.h_cells_of_cell_shift(k);
+        const uint32_t c = mesh.h_cells_of_cell(k);
+        Point d = {0.0, 0.0, 0.0};
+        if (mesh.h_rotated_row(s)) {
+            rtype x[N_DIM], y[N_DIM];
+            for (size_t a = 0; a < N_DIM; a++) x[a] = mesh.h_cell_coords(c, a);
+            mesh.h_forward(s, x, y);
+            for (size_t a = 0; a < N_DIM; a++) d[a] = double(y[a]) - x0[a];
             offsets.push_back(d);
+            continue;
         }
-        for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(i); k++) {
-            const uint32_t f = mesh.h_face_of_cell(i, k);
-            if (mesh.h_cells_of_face(f, 1) >= 0 || face_bc(f) < 0) continue;
-            if (bcs(face_bc(f)).type == BoundaryType::PARTITION) continue;
-            Point n;
-            for (size_t a = 0; a < 3; a++) n[a] = double(mesh.h_face_normals(f, a)) / double(mesh.h_face_area(f));
-            double d0 = 0.0;
-            for (size_t a = 0; a < 3; a++) d0 += (double(mesh.h_face_coords(f, a)) - x0[a]) * n[a];
-            const size_t n_offsets = offsets.size();
-            for (size_t s = 0; s < n_offsets; s++) {
-                double d = d0;
-                for (size_t a = 0; a < 3; a++) d -= offsets[s][a] * n[a];
-                if (d > d0 + GEOMETRY_TOL * h) continue;
-                Point image;
-                for (size_t a = 0; a < 3; a++) image[a] = offsets[s][a] + 2.0 * d * n[a];
-                offsets.push_back(image);
-            }
+        const auto & lattice = mesh.shift_lattice[s];
+        Point t = {0.0, 0.0, 0.0};
+        for (size_t j = 0; j < mesh.periodic_translations.size(); j++) {
+            for (size_t a = 0; a < N_DIM; a++) t[a] += lattice[j] * double(mesh.periodic_translations[j][a]);
         }
-        for (const Point & d : offsets) {
-            for (size_t a = 0; a < 3; a++) {
-                for (size_t b = 0; b < 3; b++) spread[3 * a + b] += d[a] * d[b];
-            }
+        for (size_t a = 0; a < N_DIM; a++) d[a] = double(mesh.h_cell_coords(c, a)) + t[a] - x0[a];
+        offsets.push_back(d);
+    }
+    for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(i); k++) {
+        const uint32_t f = mesh.h_face_of_cell(i, k);
+        if (mesh.h_cells_of_face(f, 1) >= 0 || face_bc(f) < 0) continue;
+        if (bcs(face_bc(f)).type == BoundaryType::PARTITION) continue;
+        Point n = {0.0, 0.0, 0.0};
+        for (size_t a = 0; a < N_DIM; a++) n[a] = double(mesh.h_face_normals(f, a)) / double(mesh.h_face_area(f));
+        double d0 = 0.0;
+        for (size_t a = 0; a < N_DIM; a++) d0 += (double(mesh.h_face_coords(f, a)) - x0[a]) * n[a];
+        const size_t n_offsets = offsets.size();
+        for (size_t s = 0; s < n_offsets; s++) {
+            double d = d0;
+            for (size_t a = 0; a < 3; a++) d -= offsets[s][a] * n[a];
+            if (d > d0 + GEOMETRY_TOL * h) continue;
+            Point image;
+            for (size_t a = 0; a < 3; a++) image[a] = offsets[s][a] + 2.0 * d * n[a];
+            offsets.push_back(image);
         }
     }
+    for (const Point & d : offsets) {
+        for (size_t a = 0; a < 3; a++) {
+            for (size_t b = 0; b < 3; b++) spread[3 * a + b] += d[a] * d[b];
+        }
+    }
+    // 2D: a third spacing at the geometric mean of the other two changes neither their ratio nor the metric
+    if constexpr (N_DIM == 2) spread[8] = std::sqrt(std::max(0.0, spread[0] * spread[4] - spread[1] * spread[3]));
     return spacing_metric(spread);
 }
 

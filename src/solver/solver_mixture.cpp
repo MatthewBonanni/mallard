@@ -13,9 +13,7 @@
 #include "solver.h"
 
 #include <algorithm>
-#include <iomanip>
 #include <limits>
-#include <sstream>
 
 #include <Kokkos_Core.hpp>
 
@@ -140,6 +138,9 @@ struct MixtureTimeStepFunctor {
     uint32_t n_species;
     Kokkos::View<rtype *[3]> transport;  // viscous: (cell, [mu, lambda, nu_eff]), else empty
     Kokkos::View<rtype *[N_DIM]> radius_coords;  // axisymmetric runs: cell_coords, else empty
+    BoundaryData boundaries;
+    PeriodicMaps periodic;
+    Kokkos::View<uint8_t *> face_shift;
 
     KOKKOS_INLINE_FUNCTION
     rtype wave_speed(const int32_t c, const rtype * n) const {
@@ -156,8 +157,17 @@ struct MixtureTimeStepFunctor {
             rtype n_vec[N_DIM], n[N_DIM];
             FOR_I_DIM n_vec[i] = face_normals(f, i);
             unit<N_DIM>(n_vec, n);
-            rtype lambda = wave_speed(cells_of_face(f, 0), n);
-            if (cells_of_face(f, 1) >= 0) lambda = Kokkos::fmax(lambda, wave_speed(cells_of_face(f, 1), n));
+            const int32_t c0 = cells_of_face(f, 0);
+            rtype lambda = wave_speed(c0, n);
+            if (cells_of_face(f, 1) >= 0) {
+                // The normal in cell 1's frame
+                if (periodic.rotated()) periodic.unrotate(face_shift(f), n);
+                lambda = Kokkos::fmax(lambda, wave_speed(cells_of_face(f, 1), n));
+            } else {
+                rtype W_c[N_CONSERVATIVE];
+                FOR_I_CONSERVATIVE W_c[i] = W(c0, i);
+                lambda = Kokkos::fmax(lambda, boundaries.exterior_wave_speed(f, W_c, n, scalars(c0, n_species)));
+            }
             sum += lambda * face_area(f);
             sum_area2 += face_area(f) * face_area(f);
         }
@@ -172,7 +182,16 @@ struct MixtureTimeStepFunctor {
         }
         const rtype dt_c = 2.0_r * cell_volume(c) / sum;
         dt_local(c) = dt_c;
-        dt_min = Kokkos::fmin(dt_min, dt_c);
+        dt_min = Kokkos::fmin(dt_min, finite(c) ? dt_c : -1.0_r);
+    }
+
+    /** @brief Whether the cell's state and mass fractions are finite; else the run stops. */
+    KOKKOS_INLINE_FUNCTION
+    bool finite(const uint32_t c) const {
+        bool all = true;
+        FOR_I_CONSERVATIVE all = all && Kokkos::isfinite(W(c, i));
+        for (uint32_t k = 0; k <= n_species; k++) all = all && Kokkos::isfinite(scalars(c, k));
+        return all;
     }
 };
 
@@ -269,7 +288,7 @@ struct MixtureDiagnosticsFunctor {
  */
 class CompositionExpressions {
     public:
-        CompositionExpressions(const MixtureModel & mixture_model, const toml::value & table, const std::string & name) :
+        CompositionExpressions(const MixtureModel & mixture_model, const Input & table, const std::string & name) :
             mixture(mixture_model), where(name) {
             if (table.contains("X") == table.contains("Y")) {
                 throw InputError(where + ": give the composition as exactly one of X and Y.");
@@ -281,16 +300,10 @@ class CompositionExpressions {
                 const int32_t k = mixture.mechanism().species_index(species);
                 if (k < 0) throw InputError(where + "." + key + ": no species " + species + " in the mechanism.");
                 listed.push_back(k);
-                std::ostringstream text;
-                if (value.is_string()) {
-                    text << value.as_string();
-                } else {
-                    text << std::setprecision(17) << static_cast<double>(as_real(value, species));
-                }
-                values.emplace_back(where + "." + key + "." + species, text.str());
+                values.emplace_back(where + "." + key + "." + species, quantity_or_expression(value, species, dim::none));
             }
             if (table.contains("balance")) {
-                const std::string species = toml::find<std::string>(table, "balance");
+                const std::string species = find_value<std::string>(table, "balance");
                 balance = mixture.mechanism().species_index(species);
                 if (balance < 0) throw InputError(where + ".balance: no species " + species + " in the mechanism.");
             }
@@ -371,7 +384,7 @@ void Solver::update_transport() {
                                                  transport_values});
     Kokkos::parallel_for("mixture_gradients", mesh->n_cells,
                          MixtureGradientFunctor{viscous_gradient, transport_values, transport_gradients,
-                                                bc_transport_values, mixture.n_species});
+                                                bc_transport_values, mixture.n_species, cell_transport});
 }
 
 void Solver::freeze_thermodynamics() {
@@ -387,16 +400,18 @@ void Solver::init_temperature_seed() {
     Kokkos::parallel_for("temperature_seed", mesh->n_cells, TemperatureFunctor{mixture, conservatives, species, T_seed});
 }
 
-void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
+void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype c) {
     const bool exchange = halo.active() && !(halo_current && state.flow.data() == conservatives.data());
     halo_current = false;
     update_boundary_states(t_stage);
     if (exchange) halo.exchange(state);
     update_cell_states(state, !budget_pass);
     face_reconstruction->calc_face_values(W_cells, face_solution);
+    face_reconstruction->rotate_periodic_faces(face_solution);
+    // The characteristic faces read the reconstructed gamma of this stage
+    scalar_reconstruction.calc(cell_scalars, W_cells, face_thermo);
     if (!budget_pass) update_characteristic_boundaries(t_stage);
     if (hybrid_flux) update_upwind_sensor();
-    scalar_reconstruction.calc(cell_scalars, W_cells, face_thermo);
 
     if (double_flux && !cells_frozen) {
         throw std::logic_error("Double flux needs the cells' thermodynamics frozen (take_step).");
@@ -441,11 +456,12 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
         if (les_on) update_eddy_viscosity(mesh->n_cells);
         if (tfles_on) thicken_transport();
         viscous_functor = MixtureViscousFluxFunctor{mesh->face_normals, mesh->face_measure, mesh->face_coords,
-                                                    mesh->cell_coords, mesh->cells_of_face, mesh->shifts,
+                                                    mesh->cell_coords, mesh->cells_of_face, mesh->periodic_maps(),
                                                     mesh->face_shift, boundary_data, mixture, cell_scalars,
                                                     transport_values, transport_gradients, cell_transport,
                                                     cell_diffusion, face_flux, species_slots, axisymmetric,
-                                                    mesh->cell_covariance, les_coefficients};
+                                                    mesh->cell_covariance, les_coefficients, false,
+                                                    double_flux ? face_energy_1 : Kokkos::View<rtype *>()};
         viscous_flux();
         if (budget_pass) budget.viscous = kinetic_energy_rate() - budget.convective;
     }
@@ -454,11 +470,11 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
     StateView rhs = rhs_state.flow;
     if (double_flux) {
         DoubleFluxSumFunctor sum_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
-                                         face_flux, face_energy_1, rhs};
+                                         face_flux, face_energy_1, rhs, mesh->periodic_maps(), mesh->face_shift};
         Kokkos::parallel_for("face_flux_sum", n_owned, sum_functor);
     } else {
         FaceFluxSumFunctor sum_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
-                                       face_flux, rhs};
+                                       face_flux, rhs, mesh->periodic_maps(), mesh->face_shift};
         Kokkos::parallel_for("face_flux_sum", n_owned, sum_functor);
     }
     SpeciesSumFunctor species_sum{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
@@ -478,28 +494,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage) {
 
     StateView solution = state.flow;
     Kokkos::View<rtype *> vol = mesh->cell_measure;
-    if (has_gravity || !source_expressions.empty()) {
-        update_source_field(t_stage);
-        const bool gravity_on = has_gravity;
-        const bool field_on = !source_expressions.empty();
-        Kokkos::Array<rtype, N_DIM> g;
-        FOR_I_DIM g[i] = gravity[i];
-        StateView S = source_field;
-        Kokkos::parallel_for("rhs_sources", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
-            const rtype V = vol(i_cell);
-            if (gravity_on) {
-                rtype rhou[N_DIM];
-                FOR_I_DIM {
-                    rhs(i_cell, 1 + i) += solution(i_cell, 0) * g[i] * V;
-                    rhou[i] = solution(i_cell, 1 + i);
-                }
-                rhs(i_cell, N_DIM + 1) += dot<N_DIM>(rhou, g.data()) * V;
-            }
-            if (field_on) {
-                FOR_I_CONSERVATIVE rhs(i_cell, i) += S(i_cell, i) * V;
-            }
-        });
-    }
+    add_sources(state, rhs_state, t_stage, c);
     if (hold_mass_flow) add_mass_flow_force(solution, rhs);
     if (radiating) add_radiation(rhs, state.species);
 
@@ -599,10 +594,11 @@ rtype Solver::calc_dt_cfl1_mixture() {
     MixtureTimeStepFunctor functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                    mesh->face_normals, mesh->face_measure, mesh->cell_measure, W_cells,
                                    cell_scalars, cfl_local, mixture.n_species, cell_transport,
-                                   axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>()};
+                                   axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(), boundary_data,
+                                   mesh->periodic_maps(), mesh->face_shift};
     rtype dt_min = std::numeric_limits<rtype>::max();
     Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor, Kokkos::Min<rtype>(dt_min));
-    return comm::allreduce(dt_min, comm::Op::MIN);
+    return reduce_dt(dt_min);
 }
 
 void Solver::update_primitives_mixture() {
@@ -623,7 +619,7 @@ std::vector<rtype> Solver::integrate_species() {
     return total;
 }
 
-std::vector<std::vector<double>> Solver::composition_at_cells(const toml::value & table, const std::string & where,
+std::vector<std::vector<double>> Solver::composition_at_cells(const Input & table, const std::string & where,
                                                               const std::vector<uint32_t> & cells) const {
     const CompositionExpressions composition(*mixture_model, table, where);
     std::vector<std::vector<double>> Y;
@@ -632,7 +628,7 @@ std::vector<std::vector<double>> Solver::composition_at_cells(const toml::value 
     return Y;
 }
 
-void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boundaries,
+void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries,
                                      const std::vector<std::array<uint32_t, 2>> & profiled_faces,
                                      std::vector<BoundaryCondition> & bcs) {
     bc_mass_fractions.assign(bcs.size(), {});
@@ -641,26 +637,32 @@ void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boun
     // Prescribed state of condition i_bc
     auto prescribe = [&](size_t i_bc, const std::vector<double> & Y, double T) {
         BoundaryCondition & bc = bcs[i_bc];
-        const double p = static_cast<double>(bc.data[N_DIM + 1]);
-        bc.data[0] = static_cast<rtype>(p / (mixture_model->gas_constant(Y) * T));
+        if (bc.type == BoundaryType::UPT || bc.type == BoundaryType::NSCBC_INLET) {
+            const double p = static_cast<double>(bc.data[N_DIM + 1]);
+            bc.data[0] = static_cast<rtype>(p / (mixture_model->gas_constant(Y) * T));
+        }
         bc_mass_fractions[i_bc] = Y;
         bc_temperatures[i_bc] = T;
         mixture_model->surrogates(T, Y, bc_surrogates[i_bc][0], bc_surrogates[i_bc][1]);
     };
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
-        const toml::value & bound = input_boundaries[i_bc];
-        const std::string name = toml::find<std::string>(bound, "name");
+        const Input & bound = input_boundaries[i_bc];
+        const std::string name = find_value<std::string>(bound, "name");
         const std::string where = "boundaries[name = \"" + name + "\"]";
         switch (bcs[i_bc].type) {
             case BoundaryType::EXTRAPOLATION:
             case BoundaryType::SYMMETRY:
             case BoundaryType::WALL_ADIABATIC:
+            case BoundaryType::WALL_ISOTHERMAL:
+            case BoundaryType::WALL_HEAT_FLUX:
             case BoundaryType::P_OUT:
             case BoundaryType::NSCBC_OUTLET:
                 break;
             case BoundaryType::UPT:
-            case BoundaryType::NSCBC_INLET: {
-                const double T = static_cast<double>(find_real(bound, "T"));
+            case BoundaryType::NSCBC_INLET:
+            case BoundaryType::STAGNATION_INLET: {
+                const double T = static_cast<double>(
+                    find_real(bound, bcs[i_bc].type == BoundaryType::STAGNATION_INLET ? "T0" : "T", dim::temperature));
                 if (!MixtureModel::composition_varies(bound)) {
                     prescribe(i_bc, mixture_model->mass_fractions(bound, where), T);
                     break;
@@ -677,7 +679,8 @@ void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boun
             default:
                 throw InputError(where + ": type \"" + BOUNDARY_NAMES.at(bcs[i_bc].type) +
                                  "\" is not yet supported with gas = \"mixture\" (extrapolation, symmetry, "
-                                 "wall_adiabatic, upt, p_out, nscbc_outlet, nscbc_inlet).");
+                                 "wall_adiabatic, wall_isothermal, wall_heat_flux, upt, p_out, nscbc_outlet, "
+                                 "nscbc_inlet, stagnation_inlet).");
         }
     }
 }

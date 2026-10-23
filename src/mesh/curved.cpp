@@ -230,18 +230,18 @@ uint32_t element_order(uint32_t n_corners, uint32_t n_nodes) {
     }
 }
 
-bool enabled(const toml::value & input) {
+bool enabled(const Input & input) {
     if (!input.contains("mesh")) return true;
-    return toml::find_or<bool>(input, "mesh", "curved_geometry", true);
+    return find_value_or<bool>(input, "mesh", "curved_geometry", true);
 }
 
-std::vector<Shape> read_shapes(const toml::value & input) {
+std::vector<Shape> read_shapes(const Input & input) {
     std::vector<Shape> shapes;
     if (!enabled(input) || !input.contains("mesh") || !input.at("mesh").contains("curved")) return shapes;
-    for (const auto & entry : toml::find<std::vector<toml::value>>(input, "mesh", "curved")) {
+    for (const auto & entry : find_value<std::vector<Input>>(input, "mesh", "curved")) {
         Shape s;
-        s.zone = toml::find<std::string>(entry, "zone");
-        const std::string kind = toml::find<std::string>(entry, "shape");
+        s.zone = find_value<std::string>(entry, "zone");
+        const std::string kind = find_value<std::string>(entry, "shape");
         if (kind == "circle" && N_DIM == 2) {
             s.kind = Shape::Kind::CIRCLE;
         } else if (kind == "sphere" && N_DIM == 3) {
@@ -252,15 +252,15 @@ std::vector<Shape> read_shapes(const toml::value & input) {
             throw InputError("mesh.curved: shape = \"" + kind + "\" is not one of: " +
                              (N_DIM == 2 ? "circle" : "sphere, cylinder") + ".");
         }
-        const auto center = toml::find<std::vector<toml::value>>(entry, "center");
+        const auto center = find_value<std::vector<Input>>(entry, "center");
         if (center.size() != N_DIM) throw InputError("mesh.curved: center needs " + std::to_string(N_DIM) + " components.");
-        for (size_t i = 0; i < N_DIM; i++) s.center[i] = double(as_real(center[i], "mesh.curved.center"));
-        s.radius = double(as_real(toml::find(entry, "radius"), "mesh.curved.radius"));
+        for (size_t i = 0; i < N_DIM; i++) s.center[i] = double(as_real(center[i], "mesh.curved.center", dim::length));
+        s.radius = double(as_real(toml::find(entry, "radius"), "mesh.curved.radius", dim::length));
         if (!(s.radius > 0.0)) throw InputError("mesh.curved: radius must be positive.");
         if (s.kind == Shape::Kind::CYLINDER) {
-            const auto axis = toml::find<std::vector<toml::value>>(entry, "axis");
+            const auto axis = find_value<std::vector<Input>>(entry, "axis");
             if (axis.size() != 3) throw InputError("mesh.curved: axis needs 3 components.");
-            for (size_t i = 0; i < 3; i++) s.axis[i] = double(as_real(axis[i], "mesh.curved.axis"));
+            for (size_t i = 0; i < 3; i++) s.axis[i] = double(as_real(axis[i], "mesh.curved.axis", dim::none));
             const double norm = std::sqrt(dot(s.axis, s.axis));
             if (!(norm > 0.0)) throw InputError("mesh.curved: axis must be nonzero.");
             s.axis = scale(1.0 / norm, s.axis);
@@ -271,7 +271,7 @@ std::vector<Shape> read_shapes(const toml::value & input) {
     return shapes;
 }
 
-Surfaces surfaces_of_mesh(const Mesh & mesh, const toml::value & input) {
+Surfaces surfaces_of_mesh(const Mesh & mesh, const Input & input) {
     Surfaces out;
     if (!enabled(input)) return out;
     out.shapes = read_shapes(input);
@@ -298,7 +298,7 @@ Surfaces surfaces_of_mesh(const Mesh & mesh, const toml::value & input) {
     return out;
 }
 
-Surfaces surfaces_of_block(const MeshBlock & block, const toml::value & input) {
+Surfaces surfaces_of_block(const MeshBlock & block, const Input & input) {
     Surfaces out;
     if (!enabled(input)) return out;
     out.shapes = read_shapes(input);
@@ -728,15 +728,28 @@ void Geometry::cell_rule(uint32_t c, int degree, std::vector<Vec3> & x, std::vec
     for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
         const uint32_t f = mesh.h_face_of_cell(c, k);
         const double sign = (mesh.h_cells_of_face(f, 0) == int32_t(c)) ? 1.0 : -1.0;
-        Vec3 offset = {0.0, 0.0, 0.0};
-        FOR_I_DIM offset[i] = double(mesh.h_face_offset(f, c, i));
+        // The face is in its cell 0's frame
+        const uint8_t s = sign < 0.0 ? mesh.h_face_shift(f) : 0;
+        const bool turn = sign < 0.0 && mesh.h_rotated_row(s);
+        auto vector = [&](const Vec3 & u) {
+            if (!turn) return u;
+            Vec3 r = {0.0, 0.0, 0.0};
+            FOR_I_DIM {
+                for (uint8_t j = 0; j < N_DIM; j++) r[i] += double(mesh.h_shift_rotations(s, j, i)) * u[j];
+            }
+            return r;
+        };
+        auto point = [&](Vec3 p) {
+            FOR_I_DIM p[i] -= double(mesh.h_shifts(s, i));
+            return vector(p);
+        };
         const std::vector<Vec3> v = face_nodes(f);
         if (N_DIM == 2 || face_is_curved(f)) {
             reference_rule(uint32_t(v.size()), face_is_curved(f) ? n_curved : n_straight, ref, ref_w);
             for (size_t q = 0; q < ref.size(); q++) {
                 Vec3 F, dF[2];
                 eval(f, ref[q].data(), F, dF);
-                cone(sub(F, offset), N_DIM == 2 ? rot(dF[0]) : cross(dF[0], dF[1]), sign * ref_w[q]);
+                cone(point(F), vector(N_DIM == 2 ? rot(dF[0]) : cross(dF[0], dF[1])), sign * ref_w[q]);
             }
             continue;
         }
@@ -755,7 +768,7 @@ void Geometry::cell_rule(uint32_t c, int degree, std::vector<Vec3> & x, std::vec
             const Vec3 N = cross(e1, e2);
             for (size_t q = 0; q < ref.size(); q++) {
                 const Vec3 F = add(tri[0], add(scale(ref[q][0], e1), scale(ref[q][1], e2)));
-                cone(sub(F, offset), N, sign * ref_w[q]);
+                cone(point(F), vector(N), sign * ref_w[q]);
             }
         }
     }

@@ -17,7 +17,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <toml.hpp>
+#include "input.h"
 
 #include "common_typedef.h"
 #include "mesh.h"
@@ -65,7 +65,7 @@ class FaceReconstruction {
         /**
          * @brief Initialize the face reconstruction.
          */
-        virtual void init(const toml::value & input) = 0;
+        virtual void init(const Input & input) = 0;
 
         /**
          * @brief Display lines for the run log.
@@ -134,6 +134,15 @@ class FaceReconstruction {
                                              Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution);
 
         /**
+         * @brief Turn the velocity of the cell 1 sides of faces across
+         *        rotational periodic boundaries, which the schemes reconstruct
+         *        in cell 1's frame, into the face's (its cell 0's) frame, so
+         *        that the flux sees both sides in one frame. Call once the face
+         *        values are complete; nothing happens without rotational pairs.
+         */
+        void rotate_periodic_faces(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution);
+
+        /**
          * @brief Gradients of W = [rho, u, p] at the centroids of the first n_cells
          *        cells from the reconstruction polynomials, if the scheme has
          *        higher-order ones than least squares on face neighbors.
@@ -145,6 +154,21 @@ class FaceReconstruction {
             return false;
         }
         
+        /**
+         * @brief Values of W = [rho, u, p] at points inside cells from the
+         *        reconstruction polynomials: out(i) = W of cells(i) at offset
+         *        offsets(i) from its centroid, for cells the scheme deems
+         *        smooth and where the value is admissible; out(i) of other
+         *        points is left as it is.
+         * @return Whether the scheme has polynomials of higher order than
+         *         least squares on face neighbors (nothing written otherwise).
+         */
+        virtual bool point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> /*solution*/,
+                                  Kokkos::View<uint32_t *> /*cells*/, Kokkos::View<rtype *[N_DIM]> /*offsets*/,
+                                  Kokkos::View<rtype *[N_CONSERVATIVE]> /*out*/) {
+            return false;
+        }
+
         /**
          * @brief Axisymmetric runs: for each of the first n_cells cells whose
          *        reconstruction has a smooth polynomial, replace source(c) by
@@ -186,6 +210,8 @@ class FaceReconstruction {
         std::shared_ptr<Mesh> mesh;
         BoundaryData boundaries;
     private:
+        Kokkos::View<uint32_t *> rotated_faces;  // faces whose shift row rotates
+        bool rotated_faces_found = false;
 };
 
 class FirstOrder : public FaceReconstruction {
@@ -203,7 +229,7 @@ class FirstOrder : public FaceReconstruction {
         /**
          * @brief Initialize the first order face reconstruction.
          */
-        void init(const toml::value & input) override;
+        void init(const Input & input) override;
 
         /**
          * @brief Get the number of quadrature points per face.
@@ -249,7 +275,7 @@ class MUSCL : public FaceReconstruction {
     public:
         MUSCL();
         ~MUSCL();
-        void init(const toml::value & input) override;
+        void init(const Input & input) override;
         logging::Items summary() const override;
         uint8_t n_face_quadrature_points() const override;
         void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
@@ -283,7 +309,7 @@ class TENO : public FaceReconstruction {
     public:
         TENO();
         ~TENO();
-        void init(const toml::value & input) override;
+        void init(const Input & input) override;
         logging::Items summary() const override;
         uint8_t n_face_quadrature_points() const override;
         void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
@@ -300,6 +326,8 @@ class TENO : public FaceReconstruction {
         void axisymmetric_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                  Kokkos::View<rtype *, Kokkos::LayoutStride> mu, Kokkos::View<rtype *> source,
                                  uint32_t n_cells) override;
+        bool point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
+                          Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out) override;
 
         uint8_t degree = 4;
         uint8_t n_dof_large = 0;
@@ -325,6 +353,11 @@ class TENO : public FaceReconstruction {
 
         // Per-cell precomputed data, for the reconstructed cells [0, n_reconstructed)
         Kokkos::View<rtype *> scale;                       // h = sqrt(V)
+        // Rotational periodicity: (turns + teno::TURN_BIAS, i, j) the rotation
+        // by turns times the periodic angle, and the boundary faces in
+        // increasing order, by boundary ordinal (empty otherwise)
+        Kokkos::View<rtype *[N_DIM][N_DIM]> entry_rotations;
+        Kokkos::View<int32_t *> boundary_faces;
         Kokkos::View<rtype **> basis_mean;                 // (cell, l): mean of phi_l over the cell
         Kokkos::View<uint16_t *> stencil_large_size;       // (cell)
         teno::PackedStencils stencil_large;                // pseudo-inverse width: nk
@@ -366,7 +399,7 @@ class TENO : public FaceReconstruction {
 
         /**
          * @brief Metric (3 x 3, row-major) in which the stencil candidates of
-         *        cell i are ranked by distance (3D): the identity unless the
+         *        cell i are ranked by distance: the identity unless the
          *        mesh spacing around the cell is markedly anisotropic.
          */
         std::array<double, 9> stencil_metric(uint32_t i) const;
@@ -376,7 +409,7 @@ class TENO : public FaceReconstruction {
          *        none, or it was made with other TENO options or rank count),
          *        so a distributed run can build its halo at that depth at once.
          */
-        static uint8_t cached_halo_layers(const toml::value & input);
+        static uint8_t cached_halo_layers(const Input & input);
 
         /**
          * @brief Write the precomputed data to the cache file, unless init()
@@ -426,6 +459,9 @@ class TENO : public FaceReconstruction {
         void launch_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<rtype *, Kokkos::LayoutStride> mu,
                            Kokkos::View<rtype *> source, uint32_t n_cells);
         template <uint8_t DEG, bool PRIM, typename TABLE>
+        void launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
+                           Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out);
+        template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                               Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells);
         template <uint8_t DEG, bool PRIM, typename TABLE>
@@ -437,7 +473,7 @@ class TENO : public FaceReconstruction {
                       Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution, Kokkos::View<uint32_t *> cells,
                       bool troubled_pass);
 
-        void read_options(const toml::value & input);
+        void read_options(const Input & input);
         void compute_stencils_and_matrices(const std::vector<uint32_t> * subset = nullptr);
         void compute_stencils_and_matrices_3d(const std::vector<uint32_t> * subset);
         void allocate_scratch();
