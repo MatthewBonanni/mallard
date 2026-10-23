@@ -1,8 +1,8 @@
-"""V3 with the large mechanism: MallardReactor's ignition against Cantera's.
+"""V3 with the large mechanism: `mallard reactor`'s ignition against Cantera's.
 
-    python tools/v3_check.py MALLARD_REACTOR [WORK_DIR]
+    python tools/v3_check.py MALLARD [WORK_DIR]
 
-Runs MallardReactor (sparse LU) for each n-hexane/air case of
+Runs `MALLARD reactor` (sparse LU) for each n-hexane/air case of
 benchmarks/chemistry/nhexane_ignition.csv (tools/v3_reference.py; the
 mechanism from tools/cantera_mechanisms.py) and compares the ignition delay
 (within 0.5%) and T at 0.5 and 2 delays (within 1%).
@@ -37,7 +37,7 @@ def main():
                     f"[reactor]\ntype = \"constant_volume\"\nT = {T0}\np = {p0}\n"
                     f"X = {{ NC6H14 = {phi}, O2 = 9.5, N2 = 35.72 }}\nend_time = {2.0 * tau:.17g}\n"
                     f"output_interval = {0.5 * tau:.17g}\noutput = \"{out}\"\n")
-        log = subprocess.run([exe, "-i", os.path.join(work, name + ".toml")], capture_output=True, text=True).stdout
+        log = subprocess.run([exe, "reactor", "-i", os.path.join(work, name + ".toml")], capture_output=True, text=True).stdout
         delay = float([line for line in log.splitlines() if "Ignition delay" in line][0].split()[2])
         wall = [line for line in log.splitlines() if "Wall time" in line][0].split()[2]
         data = np.loadtxt(out, delimiter=",", skiprows=1, usecols=(0, 1))

@@ -2,7 +2,7 @@
 
 This walk-through takes about ten minutes: build Mallard on a CPU, run the Sod shock tube, check the result against the exact solution, and then change the case. It assumes a C++20 compiler, CMake 3.22 or newer, git, and Python 3.
 
-With Mallard already installed from a container or Spack (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)), skip the build: run `Mallard` and `Mallard3D` where the commands below run `build/src/Mallard` and `build3d/src/Mallard` (`Mallard new sod runs/sod`, then `Mallard --check input.toml` and `Mallard -i input.toml` in the case). The installed examples, mechanisms and tools are in `$MALLARD_SHARE`; the containers have the Python packages.
+With Mallard already installed from a container or Spack (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)), skip the build: run `mallard` and `mallard3d` where the commands below run `build/src/mallard` and `build3d/src/mallard` (`mallard new sod runs/sod`, then `mallard check input.toml` and `mallard -i input.toml` in the case). The installed examples, mechanisms and tools are in `$MALLARD_SHARE`; the containers have the Python packages.
 
 ## 1. Build
 
@@ -13,7 +13,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_
 cmake --build build -j
 ```
 
-This builds Kokkos from the bundled submodule with its `Threads` backend, which works on Linux and macOS. The solver is `build/src/Mallard`; `build/test/MallardTest` runs the test suite. For OpenMP, use `-DKokkos_ENABLE_OPENMP=ON` instead (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)). For an NVIDIA GPU, enable CUDA with the architecture of your GPU (here an A100), compile through Kokkos' `nvcc_wrapper`, and enable OpenMP as the host backend so that the setup work done on the CPU (TENO's stencil precomputation, which takes minutes for a million cells on one thread) runs in parallel:
+This builds Kokkos from the bundled submodule with its `Threads` backend, which works on Linux and macOS. The solver is `build/src/mallard`; `build/test/mallard-test` runs the test suite. For OpenMP, use `-DKokkos_ENABLE_OPENMP=ON` instead (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)). For an NVIDIA GPU, enable CUDA with the architecture of your GPU (here an A100), compile through Kokkos' `nvcc_wrapper`, and enable OpenMP as the host backend so that the setup work done on the CPU (TENO's stencil precomputation, which takes minutes for a million cells on one thread) runs in parallel:
 
 ```bash
 cmake -S . -B build-cuda -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
@@ -22,7 +22,7 @@ cmake -S . -B build-cuda -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 cmake --build build-cuda -j
 ```
 
-The commands below use the CPU build; the CUDA build runs the same inputs with `build-cuda/src/Mallard -i input.toml`.
+The commands below use the CPU build; the CUDA build runs the same inputs with `build-cuda/src/mallard -i input.toml`.
 
 The post-processing scripts in `tools/` need a few Python packages:
 
@@ -33,10 +33,10 @@ python3 -m venv .venv
 
 ## 2. Create and run the Sod shock tube
 
-`Mallard new` creates a ready-to-run case from one of the [examples](https://matthewbonanni.github.io/mallard/docs/examples/):
+`mallard new` creates a ready-to-run case from one of the [examples](https://matthewbonanni.github.io/mallard/docs/examples/):
 
 ```bash
-build/src/Mallard new sod runs/sod
+build/src/mallard new sod runs/sod
 ```
 
 ```text
@@ -107,7 +107,7 @@ The 2D Riemann problem (configuration 3 of Lax & Liu) is the case in the [galler
 
 ```bash
 cd ../..
-build/src/Mallard new riemann_2d runs/riemann_2d
+build/src/mallard new riemann_2d runs/riemann_2d
 cd runs/riemann_2d
 ./run.sh -t 8
 PYTHON=../../.venv/bin/python ./post.sh
@@ -140,7 +140,7 @@ Gmsh meshes (format 2.2 or 4.1) work as in 2D, each physical surface becoming a 
 The `explosion_3d` template, a spherical explosion on 64³ hexahedra, takes about 11 minutes on 6 threads:
 
 ```bash
-build3d/src/Mallard new explosion_3d runs/explosion_3d
+build3d/src/mallard new explosion_3d runs/explosion_3d
 runs/explosion_3d/run.sh -t 6
 ```
 
@@ -148,7 +148,7 @@ The [validation page](https://matthewbonanni.github.io/mallard/validation/#spher
 
 ## 7. Templates
 
-`Mallard new --list` shows every template, grouped as the examples are, with whether it needs a 2D or 3D build:
+`mallard new --list` shows every template, grouped as the examples are, with whether it needs a 2D or 3D build:
 
 ```text
 Shocks and compressible flow
@@ -157,7 +157,7 @@ Shocks and compressible flow
   explosion_3d         3D  Spherical explosion: one octant with symmetry planes, on hexahedra
 ```
 
-A case that needs a mesh or an initial state comes with `mesh.sh` or `init.sh`, which `run.sh` calls when the file is missing (`cylinder` writes a Gmsh O-grid with numpy; `sphere_re300` meshes with the `gmsh` Python module; each script says which packages to install if any are missing). Most examples are sized for validation: `Mallard new cylinder --quick` makes a coarse, short version that runs in under a minute, to try the steps before the full run. The templates are made from the examples when the case is created, so they always match them; CI creates and runs every one with `--quick`.
+A case that needs a mesh or an initial state comes with `mesh.sh` or `init.sh`, which `run.sh` calls when the file is missing (`cylinder` writes a Gmsh O-grid with numpy; `sphere_re300` meshes with the `gmsh` Python module; each script says which packages to install if any are missing). Most examples are sized for validation: `mallard new cylinder --quick` makes a coarse, short version that runs in under a minute, to try the steps before the full run. The templates are made from the examples when the case is created, so they always match them; CI creates and runs every one with `--quick`.
 
 ## Next steps
 

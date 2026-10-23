@@ -3,17 +3,17 @@
 Everything about a run is in one [TOML](https://toml.io) file, read by
 
 ```sh
-Mallard -i input.toml [Kokkos options]
+mallard -i input.toml [Kokkos options]
 ```
 
 Kokkos options such as `--kokkos-num-threads=8` (CPU threads) or
-`--kokkos-device-id=1` (which GPU) follow the input file. `Mallard --version`
+`--kokkos-device-id=1` (which GPU) follow the input file. `mallard --version`
 prints the version and `Mallard --help` the usage. Errors in the input stop
 the run before it starts, with the file name, the key and, for options, the
 accepted values.
 
-The quickest way to a working input is a template: `Mallard new --list`
-shows them, and `Mallard new cylinder` creates a directory with the input,
+The quickest way to a working input is a template: `mallard new --list`
+shows them, and `mallard new cylinder` creates a directory with the input,
 the scripts that generate its mesh, run it and plot the results, and a README
 ([First simulation](../tutorials/first_simulation.md#7-templates)). The input is the
 example's, with a comment above each table that links to its keys.
@@ -206,14 +206,14 @@ removed, the change goes through two steps:
    release that will remove the old one.
 2. **Removed**: the run stops with the same message.
 
-`Mallard --check` lists both kinds, deprecated keys as warnings and removed
+`mallard check` lists both kinds, deprecated keys as warnings and removed
 ones as errors.
 
 In both steps, one command brings a file up to date:
 
 ```sh
-Mallard upgrade-input old.toml > new.toml     # changes listed on stderr
-Mallard upgrade-input --check old.toml        # exit status 1 if anything is out of date
+mallard upgrade-input old.toml > new.toml     # changes listed on stderr
+mallard upgrade-input --check old.toml        # exit status 1 if anything is out of date
 ```
 
 It changes only the lines of those keys. A renamed key keeps its value and its
@@ -246,7 +246,7 @@ the wrong table, or one the chosen settings do not use (for example
 listed with its line and the closest key Mallard looked for:
 
 ```text
-error: input.toml: keys that are unknown or unused with these settings (mallard --check lists them all):
+error: input.toml: keys that are unknown or unused with these settings (mallard check lists them all):
   line 8: mesh.Nyy (did you mean mesh.Ny?)
   line 11: mesh.t_stop (did you mean run.t_stop?)
 ```
@@ -256,13 +256,13 @@ listed under it as possible misspellings.
 
 ## Checking an input
 
-`Mallard --check input.toml` runs the whole setup of the run (mesh,
+`mallard check input.toml` runs the whole setup of the run (mesh,
 partition, boundaries, numerics, initial solution) without time stepping and
 without writing any file, then reports on it; the exit status is 1 if there
 is an error. Run it under `mpirun -n N` to check a run on N ranks.
 
 ```text
-$ Mallard --check input.toml --ranks 4 --throughput 5e7 --quality-vtu quality
+$ mallard check input.toml --ranks 4 --throughput 5e7 --quality-vtu quality
 ...
 == Check ==================================================================================
   Input keys         all used
@@ -315,14 +315,14 @@ tutorial, in 2D and 3D, into
 reads; CI checks that it is up to date, and `tools/input_catalog.py docs`
 that the defaults this reference states match it.
 
-## The other executables
+## The other commands
 
-| Executable | Purpose | Guide |
+| Command | Purpose | Guide |
 |---|---|---|
-| `Mallard upgrade-input old.toml` | Rewrites renamed, moved and removed keys of an input from an older release | [Inputs from older releases](#inputs-from-older-releases) |
-| `MallardReactor -i input.toml` | 0D constant-volume reactor with the solver's chemistry; chemistry benchmarks | [Thermochemistry](thermochemistry.md#0d-reactors-mallardreactor) |
-| `mallard-mesh-convert IN OUT.h5` | Gmsh file, or the mesh of an input file, to Mallard's HDF5 mesh format (builds with HDF5) | [Meshes](meshes.md#hdf5-meshes-for-large-runs) |
-| `MallardTest` | The unit and regression tests (`build/test/MallardTest`) | [Installation](https://matthewbonanni.github.io/mallard/docs/installation/) |
+| `mallard upgrade-input old.toml` | Rewrites renamed, moved and removed keys of an input from an older release | [Inputs from older releases](#inputs-from-older-releases) |
+| `mallard reactor -i input.toml` | 0D constant-volume reactor with the solver's chemistry; chemistry benchmarks | [Thermochemistry](thermochemistry.md#0d-reactors-mallard-reactor) |
+| `mallard mesh convert IN OUT.h5` | Gmsh file, or the mesh of an input file, to Mallard's HDF5 mesh format (builds with HDF5) | [Meshes](meshes.md#hdf5-meshes-for-large-runs) |
+| `mallard test` | The unit and regression tests: `mallard-test` (`build/test/mallard-test`), from a build or an install tree | [Installation](https://matthewbonanni.github.io/mallard/docs/installation/) |
 
 The Python scripts in `tools/` prepare meshes and restart files and post-process
 output; [Tools](https://matthewbonanni.github.io/mallard/docs/tools/) lists them.

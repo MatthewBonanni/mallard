@@ -29,7 +29,7 @@
 # (docs/numerics/teno_e.md), but has not been validated on this case.
 #
 # Run:
-#   mpirun -n 4 ../../build3d/src/Mallard -i input.toml
+#   mpirun -n 4 ../../build3d/src/mallard -i input.toml
 #   python ../../tools/plot_sphere_re300.py solut/forces_sphere.csv --t-start 450
 #
 # Cost: 4.7 hours on four A100 GPUs (1.04M steps). The 2.06M-cell run started

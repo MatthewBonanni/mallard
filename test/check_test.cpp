@@ -1,6 +1,6 @@
 /**
  * @file check_test.cpp
- * @brief Pre-flight check (mallard --check): unused keys, boundary coverage,
+ * @brief Pre-flight check (mallard check): unused keys, boundary coverage,
  *        mesh quality, time step, memory, cost and warnings.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
