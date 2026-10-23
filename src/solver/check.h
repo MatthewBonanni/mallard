@@ -25,6 +25,7 @@ struct CheckOptions {
     size_t n_worst = 5;         // worst cells listed per quality metric
     std::string quality_file;   // VTU of the quality fields, or empty
     std::string catalog_file;   // JSON of the keys setup read (key_catalog), or empty
+    std::string input_file;     // named before input errors, as a run names it, or empty
 };
 
 struct CheckReport {

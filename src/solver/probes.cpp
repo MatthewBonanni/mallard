@@ -380,13 +380,13 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
         } else if (format == "vtp") {
             p.format = Format::VTP;
         } else if (format != "csv") {
-            throw InputError(key + ".format = \"" + format + "\" is not one of: csv, hdf5, vtp.");
+            throw not_accepted(entry, key + ".format", format, {"csv", "hdf5", "vtp"});
         }
         const char * extension = p.format == Format::CSV ? ".csv" : p.format == Format::HDF5 ? ".h5" : ".pvd";
         p.file = find_value_or<std::string>(entry, "file", "probe_" + p.name + extension);
         p.write_samples = find_value_or<bool>(entry, "samples", true);
         for (const auto & r : find_value_or<std::vector<std::string>>(entry, "reductions", {})) {
-            const auto it = find_option(REDUCTIONS, key + ".reductions", r);
+            const auto it = find_option(REDUCTIONS, key + ".reductions", r, line_of(entry, "reductions"));
             if (std::find(p.reductions.begin(), p.reductions.end(), it->second) != p.reductions.end()) {
                 throw InputError(key + ".reductions: \"" + r + "\" is listed twice.");
             }

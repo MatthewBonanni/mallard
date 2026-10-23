@@ -23,6 +23,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include "common_io.h"
 #include "units.h"
 
 namespace chemistry {
@@ -153,7 +154,7 @@ std::shared_ptr<Source> Reader::load(const std::string & path) {
         source->root = YAML::LoadFile(path);
         source->units = UnitSystem(source->root["units"]);
     } catch (const YAML::BadFile &) {
-        throw std::runtime_error("Could not open mechanism file " + path + ".");
+        throw cannot_read("the mechanism file", path);
     } catch (const YAML::Exception & e) {
         throw std::runtime_error("Mechanism file " + path + ": " + e.what());
     }

@@ -33,7 +33,7 @@ std::string file_name(const std::string & path) { return std::filesystem::path(p
 
 void write_xdmf_file(const std::string & filename, const std::string & grids) {
     std::ofstream out(filename);
-    if (!out.good()) throw std::runtime_error("DataWriter: Could not open file: " + filename + ".");
+    if (!out.good()) throw cannot_write("the XDMF file", filename);
     out << "<?xml version=\"1.0\" ?>\n"
         << provenance::xml_comment() << "\n"
         << "<!DOCTYPE Xdmf SYSTEM \"Xdmf.dtd\" []>\n"

@@ -34,7 +34,7 @@ WallModelSpec WallModelSpec::from_input(const Input & table, const BoundaryCondi
     }
     WallModelSpec spec;
     const std::string model = find_value_or<std::string>(table, "model", "gfm");
-    const auto it = find_option(WALL_MODEL_TYPES, where + ".model", model);
+    const auto it = find_option(WALL_MODEL_TYPES, where + ".model", model, line_of(table, "model"));
     WallModelParameters & P = spec.parameters;
     P.type = it->second;
     P.kappa = find_real_or(table, "kappa", dim::none, rtype(P.kappa));

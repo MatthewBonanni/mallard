@@ -12,6 +12,7 @@
 #include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <new>
 #include <thread>
 #include <vector>
 
@@ -92,6 +93,10 @@ std::string error_text(const std::exception & e) {
     std::string text = e.what();
     if (text.rfind("[error] ", 0) == 0) text.erase(0, 8);
     while (!text.empty() && text.back() == '\n') text.pop_back();
+    if (dynamic_cast<const std::bad_alloc *>(&e) || text.find("failed to allocate memory") != std::string::npos) {
+        text += "\nThe run is out of memory. mallard check input.toml --ranks N estimates the memory per rank: "
+                "run on more ranks or GPUs, or on a coarser mesh. See docs/guide/input_files.md#checking-an-input.";
+    }
     return text;
 }
 
@@ -152,6 +157,16 @@ int main(int argc, char* argv[]) {
         usage();
         return 1;
     }
+    if (input_file.empty() && argc > 1 && argv[1][0] != '-' && !check) {
+        std::vector<std::string> names = {"check"};
+        for (const auto & command : subcommands) names.emplace_back(command.name);
+        const std::string near = suggest_value(argv[1], names);
+        if (!near.empty()) {
+            std::cerr << "mallard: unknown command \"" << argv[1] << "\" (did you mean " << near << "?)\n";
+        } else {
+            std::cerr << "mallard: to run " << argv[1] << ", give it with -i: mallard -i " << argv[1] << "\n";
+        }
+    }
     if (input_file.empty() || options.ranks < 0 || options.throughput < 0.0) {
         usage();
         return 1;
@@ -171,6 +186,7 @@ int main(int argc, char* argv[]) {
             print_header(input_file);
             Solver solver;
             if (check) {
+                options.input_file = input_file;
                 const CheckReport report = solver.check(parse_input(input_file), options);
                 print_check(report);
                 status = report.ok() ? 0 : 1;

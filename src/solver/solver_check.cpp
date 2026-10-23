@@ -70,6 +70,8 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     try {
         init(input_in);
         r.setup_done = true;
+    } catch (const InputError & e) {
+        r.errors.push_back((options.input_file.empty() ? "" : options.input_file + ": ") + error_text(e));
     } catch (const std::exception & e) {
         r.errors.push_back(error_text(e));
     }
@@ -80,7 +82,7 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     if (!options.catalog_file.empty() && comm::is_root()) {
         std::ofstream file(options.catalog_file);
         file << key_catalog(input);
-        if (!file) r.errors.push_back("cannot write " + options.catalog_file);
+        if (!file) r.errors.push_back(cannot_write("the key catalog", options.catalog_file).what());
     }
     if (!r.setup_done || !mesh) return r;
 

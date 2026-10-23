@@ -1,0 +1,1 @@
+- Error messages teach: input errors name the key, its line, what is wrong, the accepted values or the closest one, what to do and the docs section; mesh, boundary, output-path, divergence, NCCL and out-of-memory errors say where (file, zone, face or cell location) and what to check. `mallard check` reports input errors exactly as a run does.
