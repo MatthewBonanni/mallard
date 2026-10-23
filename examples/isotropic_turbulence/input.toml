@@ -16,11 +16,11 @@
 # compressive regions, with local Mach numbers up to 1.9.
 #
 # Run (N = 64, 128 or 256: set Nx, Ny, Nz to N and the initial file):
-#   python ../../tools/isotropic_turbulence_restart.py 256 hit_256.restart
+#   python ../../tools/setup/isotropic_turbulence_restart.py 256 hit_256.restart
 #   mpirun -n 12 ../../build3d/src/mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
-#   python ../../tools/isotropic_turbulence_stats.py restart/hit_*.restart -o stats.csv \
+#   python isotropic_turbulence_stats.py restart/hit_*.restart -o stats.csv \
 #       --spectra spectra --fields fields
-#   python ../../tools/plot_isotropic_turbulence.py RUN_64 RUN_128 RUN_256
+#   python plot_isotropic_turbulence.py RUN_64 RUN_128 RUN_256
 # The restart snapshots (every tau / 20, 671 MB each at 256^3) feed the
 # statistics; the initial state is the same band-limited field on every mesh.
 # Build with the OpenMP host backend (-DKokkos_ENABLE_OPENMP=ON): TENO's setup
@@ -31,7 +31,7 @@
 # differentiated with sixth-order central differences; Subramaniam, Wong &
 # Lele (J. Comput. Phys. 397, 2019, 108822) against a 512^3 DNS filtered to
 # 64^3 with spectral derivatives (reference/ holds both, read from the vector
-# figures). tools/isotropic_turbulence_stats.py applies the same filters to
+# figures). examples/isotropic_turbulence/isotropic_turbulence_stats.py applies the same filters to
 # every snapshot (after turning cell averages into point values), besides the
 # unfiltered statistics on the full mesh. Samtaney, Pullin & Kosovic (Phys.
 # Fluids 13, 2001, 1415) describe the regime with DNS at Mt ~ 0.1-0.5 and

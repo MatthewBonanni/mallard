@@ -25,11 +25,11 @@
 # no visible pressure oscillation and makes the mixing layer 3 K too cold).
 #
 # Make the initial state and run (writes bubble.json, used by the tools):
-#   python ../../tools/shock_bubble.py init input.toml init.restart --d 1.8e-4 --xb 2.16e-4
+#   python shock_bubble.py init input.toml init.restart --d 1.8e-4 --xb 2.16e-4
 #   mpirun -n 4 ../../build3d/src/mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
-#   python ../../tools/shock_bubble.py frames input.toml restart frames
-#   python ../../tools/shock_bubble.py compare input.toml probe_axis.csv frames --png xt.png
-#   python ../../tools/animate_shock_bubble.py input.toml frames probe_axis.csv shock_bubble_3d
+#   python shock_bubble.py frames input.toml restart frames
+#   python shock_bubble.py compare input.toml probe_axis.csv frames --png xt.png
+#   python animate_shock_bubble.py input.toml frames probe_axis.csv shock_bubble_3d
 #
 # Results (experiment time, from the shock's arrival at the bubble, to 1 ms):
 # velocities (m/s) from straight-line fits to the axis x-t diagram (probe)
