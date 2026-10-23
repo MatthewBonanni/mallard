@@ -155,6 +155,21 @@ class FaceReconstruction {
         }
         
         /**
+         * @brief Values of W = [rho, u, p] at points inside cells from the
+         *        reconstruction polynomials: out(i) = W of cells(i) at offset
+         *        offsets(i) from its centroid, for cells the scheme deems
+         *        smooth and where the value is admissible; out(i) of other
+         *        points is left as it is.
+         * @return Whether the scheme has polynomials of higher order than
+         *         least squares on face neighbors (nothing written otherwise).
+         */
+        virtual bool point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> /*solution*/,
+                                  Kokkos::View<uint32_t *> /*cells*/, Kokkos::View<rtype *[N_DIM]> /*offsets*/,
+                                  Kokkos::View<rtype *[N_CONSERVATIVE]> /*out*/) {
+            return false;
+        }
+
+        /**
          * @brief Axisymmetric runs: for each of the first n_cells cells whose
          *        reconstruction has a smooth polynomial, replace source(c) by
          *        int (p - tau_thetatheta) dA over the planar cell, with p and the
@@ -311,6 +326,8 @@ class TENO : public FaceReconstruction {
         void axisymmetric_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                  Kokkos::View<rtype *, Kokkos::LayoutStride> mu, Kokkos::View<rtype *> source,
                                  uint32_t n_cells) override;
+        bool point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
+                          Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out) override;
 
         uint8_t degree = 4;
         uint8_t n_dof_large = 0;
@@ -441,6 +458,9 @@ class TENO : public FaceReconstruction {
         template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<rtype *, Kokkos::LayoutStride> mu,
                            Kokkos::View<rtype *> source, uint32_t n_cells);
+        template <uint8_t DEG, bool PRIM, typename TABLE>
+        void launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
+                           Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out);
         template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                               Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells);

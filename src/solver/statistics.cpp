@@ -47,16 +47,6 @@ Kokkos::View<T *> to_device(const std::vector<T> & v, const char * label) {
     return d;
 }
 
-std::shared_ptr<std::ofstream> open_csv(const std::string & file, bool resume, const std::string & header) {
-    if (!output_files_enabled()) return std::make_shared<std::ofstream>();
-    const std::filesystem::path parent = std::filesystem::path(file).parent_path();
-    if (!parent.empty()) std::filesystem::create_directories(parent);
-    auto out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
-    if (!out->good()) throw std::runtime_error("Could not open " + file + ".");
-    if (!resume) *out << header << "\n";
-    return out;
-}
-
 const char * const WEIGHT = "STATISTICS_WEIGHT";
 const char * const T_LAST = "STATISTICS_T_LAST";
 const char * const SAMPLES = "STATISTICS_SAMPLES";
@@ -220,7 +210,8 @@ std::string Statistics::summary() const {
     return text;
 }
 
-std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::array<double, N_DIM>> & points) {
+std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::array<double, N_DIM>> & points,
+                                   std::vector<uint8_t> * contained) {
     const uint32_t n_points = static_cast<uint32_t>(points.size());
     const uint32_t n_owned = mesh.n_owned();
     constexpr double CONTAINED = -1.0;
@@ -359,6 +350,10 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
     for (uint32_t p = 0; p < n_points; p++) {
         if (score[p] != CONTAINED) loose.push_back(p);
     }
+    if (contained) {
+        contained->assign(n_points, 1);
+        for (uint32_t p : loose) (*contained)[p] = 0;
+    }
     if (loose.empty()) return cell;
     for (uint32_t p : loose) {
         score[p] = NONE;
@@ -377,128 +372,4 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
     }
     agree();
     return cell;
-}
-
-void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std::string> & species_names,
-                  bool resume) {
-    if (!input.contains("probes")) return;
-    const auto entries = toml::find<std::vector<Input>>(input, "probes");
-    for (const auto & entry : entries) {
-        Set set;
-        if (!entry.contains("name")) throw InputError("probes: every probe needs a name.");
-        set.name = toml::find<std::string>(entry, "name");
-        const std::string key = "probes[name = \"" + set.name + "\"]";
-        for (const auto & other : sets) {
-            if (other.name == set.name) throw InputError(key + ": name is used twice.");
-        }
-        set.file = toml::find_or<std::string>(entry, "file", "probe_" + set.name + ".csv");
-        set.interval = toml::find_or<uint64_t>(entry, "interval", 1);
-        if (set.interval == 0) throw InputError(key + ".interval must be positive.");
-        if (!entry.contains("variables")) throw InputError(key + ": variables not specified.");
-        set.variables = toml::find<std::vector<std::string>>(entry, "variables");
-        if (set.variables.empty()) throw InputError(key + ".variables is empty.");
-        std::vector<int32_t> h_codes;
-        for (const auto & v : set.variables) h_codes.push_back(CellSampler::code(v, species_names, key + ".variables"));
-        set.codes = to_device(h_codes, "probe_codes");
-
-        auto vector = [&](const char * name) {
-            const std::vector<rtype> x = find_real_vector(entry, name, dim::length);
-            if (x.size() != N_DIM) {
-                throw InputError(key + "." + name + " must have " + std::to_string(N_DIM) + " components.");
-            }
-            std::array<double, N_DIM> a;
-            for (size_t d = 0; d < N_DIM; d++) a[d] = static_cast<double>(x[d]);
-            return a;
-        };
-        const bool point = entry.contains("point");
-        const bool line = entry.contains("start") || entry.contains("end") || entry.contains("n_points");
-        if (point == line) throw InputError(key + ": specify either point or start, end and n_points.");
-        if (point) {
-            set.points.push_back(vector("point"));
-        } else {
-            const auto a = vector("start"), b = vector("end");
-            const uint64_t n = toml::find_or<uint64_t>(entry, "n_points", 0);
-            if (n < 2) throw InputError(key + ".n_points must be at least 2.");
-            for (uint64_t i = 0; i < n; i++) {
-                const double s = static_cast<double>(i) / static_cast<double>(n - 1);
-                std::array<double, N_DIM> x;
-                for (size_t d = 0; d < N_DIM; d++) x[d] = a[d] + s * (b[d] - a[d]);
-                set.points.push_back(x);
-            }
-        }
-
-        const std::vector<int32_t> cells = locate_points(mesh, set.points);
-        std::vector<uint32_t> local_cells;
-        for (uint32_t p = 0; p < cells.size(); p++) {
-            if (cells[p] < 0) continue;
-            set.local_points.push_back(p);
-            local_cells.push_back(static_cast<uint32_t>(cells[p]));
-        }
-        set.cells = to_device(local_cells, "probe_cells");
-        set.values = Kokkos::View<rtype **, Kokkos::LayoutRight>("probe_values", local_cells.size(),
-                                                                 set.variables.size());
-        if (comm::is_root()) {
-            std::string header = "step,t,point";
-            for (size_t d = 0; d < N_DIM; d++) header += std::string(",") + "xyz"[d];
-            for (const auto & v : set.variables) header += "," + v;
-            set.out = open_csv(set.file, resume, header);
-        }
-        sets.push_back(std::move(set));
-    }
-}
-
-bool Probes::due(uint64_t step) const {
-    return std::any_of(sets.begin(), sets.end(), [&](const Set & s) { return step % s.interval == 0; });
-}
-
-void Probes::write(uint64_t step, rtype t, const CellSampler & sampler) {
-    for (auto & set : sets) {
-        if (step % set.interval != 0) continue;
-        const auto cells = set.cells;
-        const auto codes = set.codes;
-        const auto values = set.values;
-        const uint32_t n_vars = static_cast<uint32_t>(codes.extent(0));
-        Kokkos::parallel_for("probe_values", cells.extent(0), KOKKOS_LAMBDA(const uint32_t i) {
-            for (uint32_t v = 0; v < n_vars; v++) values(i, v) = sampler(cells(i), codes(v));
-        });
-        const auto h_values = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), values);
-        std::vector<rtype> local(h_values.data(), h_values.data() + h_values.size());
-        std::vector<uint64_t> local_points(set.local_points.begin(), set.local_points.end());
-        const std::vector<rtype> all = comm::allgatherv(local);
-        const std::vector<uint64_t> all_points = comm::allgatherv(local_points);
-        if (!set.out) continue;
-        std::vector<int64_t> row_of_point(set.points.size(), -1);
-        for (size_t r = 0; r < all_points.size(); r++) row_of_point[all_points[r]] = static_cast<int64_t>(r);
-        std::ostream & out = *set.out;
-        for (size_t p = 0; p < set.points.size(); p++) {
-            out << step << "," << std::setprecision(std::numeric_limits<double>::max_digits10) << double(t) << ","
-                << p;
-            for (size_t d = 0; d < N_DIM; d++) out << "," << set.points[p][d];
-            out << std::setprecision(std::numeric_limits<rtype>::max_digits10);
-            for (uint32_t v = 0; v < n_vars; v++) {
-                if (row_of_point[p] < 0) throw std::logic_error("probe point held by no rank");
-                out << "," << all[static_cast<size_t>(row_of_point[p]) * n_vars + v];
-            }
-            out << "\n";
-        }
-        out.flush();
-    }
-}
-
-std::vector<std::pair<std::string, std::string>> Probes::summary() const {
-    std::vector<std::pair<std::string, std::string>> items;
-    for (const auto & set : sets) {
-        std::string vars;
-        for (const auto & v : set.variables) vars += (vars.empty() ? "" : ", ") + v;
-        items.emplace_back("probe " + set.name, set.file + ", " + logging::count(set.points.size()) +
-                                                    (set.points.size() == 1 ? " point" : " points") + " every " +
-                                                    logging::count(set.interval) + " steps: " + vars);
-    }
-    return items;
-}
-
-std::vector<std::string> Probes::files() const {
-    std::vector<std::string> files;
-    for (const auto & set : sets) files.push_back(set.file);
-    return files;
 }
