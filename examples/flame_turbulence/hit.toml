@@ -1,10 +1,10 @@
 # Pre-run of examples/flame_turbulence (3D build): the turbulence of the
 # fresh gas, as a single gas with the density (0.849 kg/m^3), viscosity
 # (1.835e-5 Pa s) and ratio of specific heats (1.401) of H2/air at phi = 1,
-# 300 K and 1 atm, decaying from random phases (tools/flame_turbulence.py
+# 300 K and 1 atm, decaying from random phases (examples/flame_turbulence/flame_turbulence.py
 # hit) for 0.08 ms (half an eddy turnover) on the DNS mesh, so that the
 # flame meets a developed field. The run's end state is the HIT.restart of
-# tools/flame_turbulence.py init.
+# examples/flame_turbulence/flame_turbulence.py init.
 
 [run]
 t_stop = 8.0e-5

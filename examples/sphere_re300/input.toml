@@ -19,7 +19,7 @@
 # Mesh: prism boundary layer (10 layers from 0.005 D) and tetrahedra refined
 # through the near wake, on the full box x = -15..30, |y|, |z| < 15 (the wake
 # is not axisymmetric, so no symmetry planes). Generate it first:
-#   python ../../tools/make_sphere_re300_mesh.py sphere.msh
+#   python make_sphere_re300_mesh.py sphere.msh
 # Nondimensionalization: sphere diameter 1, free-stream density and sound
 # speed 1, so U = M = 0.2, mu = U D / Re, and t = 750 is t U / D = 150.
 # Shedding sets in by t U / D = 50 (period 7.5 D / U).
@@ -30,11 +30,11 @@
 #
 # Run:
 #   mpirun -n 4 ../../build3d/src/mallard -i input.toml
-#   python ../../tools/plot_sphere_re300.py solut/forces_sphere.csv --t-start 450
+#   python plot_sphere_re300.py solut/forces_sphere.csv --t-start 450
 #
 # Cost: 4.7 hours on four A100 GPUs (1.04M steps). The 2.06M-cell run started
-# at t = 244 from this one (tools/interpolate_restart.py) and took 6.7 hours on
-# eight A100s. tools/animate_sphere_re300.py animates the wake from the Q
+# at t = 244 from this one (tools/setup/interpolate_restart.py) and took 6.7 hours on
+# eight A100s. examples/sphere_re300/animate_sphere_re300.py animates the wake from the Q
 # output (for an animation, write U and Q every 0.5 over the last periods).
 
 [run]

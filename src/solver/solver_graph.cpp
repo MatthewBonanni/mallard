@@ -143,6 +143,8 @@ void Solver::record_stage_time(const rtype c) {
     Kokkos::parallel_for("stage_time", 1, KOKKOS_LAMBDA(const int) { st() = s(T) + c * s(STEP_DT); });
 }
 
+const rtype * Solver::step_dt_device() const { return step_scalars.data() + STEP_DT; }
+
 void Solver::graph_step() {
 #ifdef KOKKOS_ENABLE_CUDA
     const cudaStream_t stream = Kokkos::DefaultExecutionSpace().cuda_stream();

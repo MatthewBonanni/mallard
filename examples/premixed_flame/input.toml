@@ -7,12 +7,12 @@
 # first, from this directory (flame_reference.py computes all twenty V8
 # flames, a few minutes):
 #
-#   python ../../tools/flame_reference.py reference full
-#   python ../../tools/flame_restart.py full/h2_phi1.0_mix_full.csv \
+#   python ../../tools/setup/flame_reference.py reference full
+#   python ../../tools/setup/flame_restart.py full/h2_phi1.0_mix_full.csv \
 #       ../../mechanisms/h2o2.yaml ohmech 20 . --flame-times 2
 #
 # then run and measure the flame speed with
-#   python ../../tools/flame_speed.py . 2.33170
+#   python ../../tools/post/flame_speed.py . 2.33170
 
 [run]
 t_stop = 0.00028228726308100434

@@ -138,7 +138,7 @@ the generator has no state, so turbulent inlets restart bitwise.
 
 `u` of `nscbc_inlet` takes expressions in `x`, `y`, `z`. For turbulence,
 `reynolds_stress` takes numbers or expressions, or `profile` reads a CSV of
-plane averages as `tools/plane_average.py` writes it from a precursor's
+plane averages as `tools/post/plane_average.py` writes it from a precursor's
 `[statistics]` (`MEAN_U_*`, `COV_U_*_U_*`), interpolated along its
 coordinate. Pivots of the Cholesky factor that round-off makes slightly
 negative (next to walls) become zero.
@@ -206,7 +206,7 @@ negative (next to walls) become zero.
 - Box `8 pi h x 2h x 4 pi / 3 h`, periodic in z, isothermal walls, 384 x 96 x 128 hexahedra (the mesh of the periodic channel example, repeated twice along x).
 - `Re_b = 5600`, `M_b = 0.2`. MUSCL (no limiter), HLLC, SSPRK3.
 - The inlet's `profile` holds the statistics of Mallard's periodic channel (`Re_tau = 172`). The length scales are `0.5h, 0.15h, 0.15h` for `u` and `0.1-0.2h` for `v`, `w`.
-- The flow starts from the periodic channel repeated twice along x (`tools/tile_restart.py`). Statistics run over `t = 40-110 h / U_b` (2.8 flow-throughs), averaged over z.
+- The flow starts from the periodic channel repeated twice along x (`tools/setup/tile_restart.py`). Statistics run over `t = 40-110 h / U_b` (2.8 flow-throughs), averaged over z.
 - **Outlet.** A sponge covers `x > 20h` (not analyzed), and the `nscbc_outlet` runs with `beta = 0`. With the default `beta` (the local Mach number), a near-wall eddy reversed the flow in the outlet's last cells at `t = 18-19 h / U_b` and the run diverged, also with the sponge. That is a property of the outlet, not of the inflow.
 
 **Development.** Quantities against the precursor, smoothed over `+-0.5h`:

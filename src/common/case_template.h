@@ -28,7 +28,7 @@ std::string set_key(const std::string & text, const std::string & path, const st
 
 /**
  * @brief Rewrites an example's paths relative to the repository
- * (../../tools/, ../../mechanisms/, ../../build/src/mallard) for a case
+ * (../../tools, ../../mechanisms/, ../../build/src/mallard) for a case
  * directory holding its own tools/ and mechanisms/.
  */
 std::string relocate(const std::string & text);
