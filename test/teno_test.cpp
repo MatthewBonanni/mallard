@@ -427,7 +427,7 @@ TEST(TENOTest, StencilsOfThinCellsSpanTheirLongDirection) {
     // next columns, which amplifies grid-scale modes (#382). In the metric of
     // the mesh spacing the stencils span two columns either side.
     const uint32_t n = 16;
-    auto mesh = make_mesh("cartesian", n, n, 1.0, 0.1);
+    auto mesh = make_mesh("cartesian", n, n, 1.0_r, 0.1_r);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
     auto teno = make_teno(mesh, bd, 4);
     const TENO::Stencils stencils = teno->large_stencils();
