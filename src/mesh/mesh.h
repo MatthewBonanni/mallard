@@ -23,6 +23,7 @@
 #include "input.h"
 
 #include "curved.h"
+#include "periodic_maps.h"
 #include "zone.h"
 
 enum class MeshType {
@@ -33,7 +34,8 @@ enum class MeshType {
     CARTESIAN_TET,
     CARTESIAN_PRISM,
     CARTESIAN_PYRAMID,
-    CARTESIAN_MIXED
+    CARTESIAN_MIXED,
+    ANNULUS
 };
 
 static const std::unordered_map<std::string, MeshType> MESH_TYPES = {
@@ -44,7 +46,8 @@ static const std::unordered_map<std::string, MeshType> MESH_TYPES = {
     {"cartesian_tet", MeshType::CARTESIAN_TET},
     {"cartesian_prism", MeshType::CARTESIAN_PRISM},
     {"cartesian_pyramid", MeshType::CARTESIAN_PYRAMID},
-    {"cartesian_mixed", MeshType::CARTESIAN_MIXED}
+    {"cartesian_mixed", MeshType::CARTESIAN_MIXED},
+    {"annulus", MeshType::ANNULUS}
 };
 
 static const std::unordered_map<MeshType, std::string> MESH_NAMES = {
@@ -55,7 +58,8 @@ static const std::unordered_map<MeshType, std::string> MESH_NAMES = {
     {MeshType::CARTESIAN_TET, "cartesian_tet"},
     {MeshType::CARTESIAN_PRISM, "cartesian_prism"},
     {MeshType::CARTESIAN_PYRAMID, "cartesian_pyramid"},
-    {MeshType::CARTESIAN_MIXED, "cartesian_mixed"}
+    {MeshType::CARTESIAN_MIXED, "cartesian_mixed"},
+    {MeshType::ANNULUS, "annulus"}
 };
 
 /** @brief Tanh stretching factor of each direction of a generated mesh, 0 for uniform spacing. */
@@ -108,6 +112,18 @@ static const std::unordered_map<CellType, std::string> CELL_NAMES = {
 };
 
 /**
+ * @brief The rotation of a periodic lattice: lattice direction `direction`
+ *        (-1 if no pair rotates) turns by angle (radians, right-handed) about
+ *        the axis through center along axis (the z axis in 2D).
+ */
+struct PeriodicRotation {
+    int direction = -1;
+    double angle = 0.0;
+    std::array<double, 3> center = {0.0, 0.0, 0.0};
+    std::array<double, 3> axis = {0.0, 0.0, 1.0};
+};
+
+/**
  * @brief Local faces of a positively oriented 3D cell with n_nodes nodes
  *        (4 tetrahedron, 5 pyramid, 6 prism, 8 hexahedron; Gmsh/VTK node
  *        order), each ordered so its right-hand normal points out of the cell.
@@ -141,11 +157,16 @@ class Mesh {
 
         /**
          * @brief A periodic pair of boundary zones: zone_b is zone_a translated
-         *        by translation.
+         *        by translation, or, with a nonzero angle, zone_a rotated by
+         *        angle (radians, right-handed about axis) about the axis
+         *        through center (2D: about the point center).
          */
         struct PeriodicPair {
             std::string zone_a, zone_b;
-            std::array<rtype, N_DIM> translation;
+            std::array<rtype, N_DIM> translation{};
+            rtype angle = 0.0;
+            std::array<rtype, N_DIM> center{};
+            std::array<rtype, 3> axis = {0.0, 0.0, 1.0};
         };
 
         /**
@@ -399,14 +420,31 @@ class Mesh {
         /** @brief Whether some zones were joined periodically. */
         bool is_periodic() const { return !periodic_translations.empty(); }
 
-        /**
-         * @brief Component i of the translation from face f's frame (that of
-         *        its cell 0) to cell c's frame: the face seen from c is at
-         *        h_face_coords(f) - h_face_offset(f, c, i).
-         */
-        rtype h_face_offset(uint32_t f, uint32_t c, int i) const {
-            return (h_cells_of_face(f, 1) == int32_t(c)) ? h_shifts(h_face_shift(f), i) : rtype(0);
+        /** @brief Whether some periodic pair rotates, so that vectors turn across it. */
+        bool is_rotational() const { return periodic_rotation.direction >= 0; }
+
+        /** @brief Whether shift row s turns vectors. */
+        bool h_rotated_row(uint8_t s) const {
+            return is_rotational() && shift_lattice[s][static_cast<size_t>(periodic_rotation.direction)] != 0;
         }
+
+        /** @brief The device maps of the shift rows. */
+        PeriodicMaps periodic_maps() const { return PeriodicMaps{shifts, shift_rotations}; }
+
+        /** @brief Host point x of the frame of cell 1 of face f seen from cell 0 (Q x + t). */
+        void h_forward(uint8_t s, const rtype * x, rtype * y) const;
+
+        /** @brief Host inverse of h_forward: Q^T (y - t). */
+        void h_backward(uint8_t s, const rtype * x, rtype * y) const;
+
+        /**
+         * @brief Face f's centroid in the frame of cell c, one of its cells
+         *        (the face is stored in its cell 0's frame).
+         */
+        std::array<rtype, N_DIM> h_face_point(uint32_t f, uint32_t c) const;
+
+        /** @brief Face f's (area-weighted, out of cell 0) normal in the frame of cell c, one of its cells. */
+        std::array<rtype, N_DIM> h_face_normal(uint32_t f, uint32_t c) const;
 
         /**
          * @brief Read a Mallard HDF5 mesh file (.h5, .hdf5) or another mesh
@@ -480,10 +518,13 @@ class Mesh {
         Kokkos::View<int32_t *[2]> cells_of_face;
         Kokkos::View<uint32_t *> cells_of_cell;            // Vertex neighbors (CSR)
         Kokkos::View<uint32_t *> offsets_cells_of_cell;
-        // Periodic translations: row 0 of shifts is zero. Cell 1 of face f, seen
-        // from cell 0, is at cell_coords(c1) + shifts(face_shift(f)); vertex
-        // neighbor k of a cell is at cell_coords(cells_of_cell(k)) + shifts(cells_of_cell_shift(k))
+        // Periodic maps: row 0 is the identity. Cell 1 of face f, seen from
+        // cell 0, is at Q cell_coords(c1) + shifts(face_shift(f)); vertex
+        // neighbor k of a cell is at Q cell_coords(cells_of_cell(k)) +
+        // shifts(cells_of_cell_shift(k)), with Q that row of shift_rotations
+        // (empty, and Q the identity, without rotational pairs)
         Kokkos::View<rtype *[N_DIM]> shifts;
+        Kokkos::View<rtype *[N_DIM][N_DIM]> shift_rotations;
         Kokkos::View<uint8_t *> face_shift;
         Kokkos::View<uint8_t *> cells_of_cell_shift;
 
@@ -503,14 +544,17 @@ class Mesh {
         Kokkos::View<uint32_t *>::host_mirror_type h_cells_of_cell;
         Kokkos::View<uint32_t *>::host_mirror_type h_offsets_cells_of_cell;
         Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_shifts;
+        Kokkos::View<rtype *[N_DIM][N_DIM]>::host_mirror_type h_shift_rotations;
         Kokkos::View<uint8_t *>::host_mirror_type h_face_shift;
         Kokkos::View<uint8_t *>::host_mirror_type h_cells_of_cell_shift;
 
-        // Periodicity (host): the translation of each periodic pair, the zones
-        // the pairs joined, and per node its key (the lowest node id of its
-        // periodic class) and lattice offset, x_n = x_key + sum_j L_j T_j
-        // (empty for meshes without periodic pairs)
+        // Periodicity (host): the translation of each lattice direction (zero
+        // for the rotation's), the rotation, the zones the pairs joined, and
+        // per node its key (the lowest node id of its periodic class) and
+        // lattice offset L, x_n = M(L) x_key with M the composed rigid maps
+        // (see periodic_lattice_map; empty for meshes without periodic pairs)
         std::vector<std::array<rtype, N_DIM>> periodic_translations;
+        PeriodicRotation periodic_rotation;
         std::vector<std::string> periodic_zones;
         std::vector<uint32_t> h_node_key;
         std::vector<std::array<int8_t, 3>> h_node_lattice;

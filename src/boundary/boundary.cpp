@@ -123,8 +123,10 @@ namespace {
     for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
         const uint32_t f = mesh.h_face_of_cell(c, k);
         const rtype sign = (mesh.h_cells_of_face(f, 1) == static_cast<int32_t>(c)) ? -1.0 : 1.0;
+        const auto x_f = mesh.h_face_point(f, c);
+        const auto n_f = mesh.h_face_normal(f, c);
         rtype d = 0.0;
-        FOR_I_DIM d += (p[i] - (mesh.h_face_coords(f, i) - mesh.h_face_offset(f, c, i))) * sign * mesh.h_face_normals(f, i);
+        FOR_I_DIM d += (p[i] - x_f[i]) * sign * n_f[i];
         if (d > precision_tol(1e-10, 1e-5) * size2 * std::sqrt(size2)) return false;
     }
     return true;
@@ -155,13 +157,18 @@ bool point_in_cell(const Mesh & mesh, uint32_t c, const rtype * p) {
     const rtype A_f = mesh.h_face_area(f);
     for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(image); k++) {
         const uint32_t g = mesh.h_face_of_cell(image, k);
+        if (mesh.h_cells_of_face(g, 1) >= 0 && mesh.h_rotated_row(mesh.h_face_shift(g))) continue;
         const rtype A_g = mesh.h_face_area(g);
+        const auto x_g = mesh.h_face_point(g, image);
+        const auto n_face = mesh.h_face_normal(g, image);
+        std::array<rtype, 3> n_g = {0.0_r, 0.0_r, 0.0_r};
+        FOR_I_DIM n_g[i] = n_face[i];
         rtype dist = 0.0, cross2 = 0.0;
         FOR_I_DIM {
-            const rtype d = (mesh.h_face_coords(g, i) - mesh.h_face_offset(g, image, i)) - target[i];
+            const rtype d = x_g[i] - target[i];
             dist += d * d;
             const uint8_t j = static_cast<uint8_t>((i + 1) % 3), l = static_cast<uint8_t>((i + 2) % 3);
-            const rtype c = mesh.h_face_normals(f, j) * mesh.h_face_normals(g, l) - mesh.h_face_normals(f, l) * mesh.h_face_normals(g, j);
+            const rtype c = mesh.h_face_normals(f, j) * n_g[l] - mesh.h_face_normals(f, l) * n_g[j];
             cross2 += c * c;
         }
         if (dist < precision_tol(1e-12, 1e-8) * A_f && cross2 < precision_tol(1e-20, 1e-10) * A_f * A_f * A_g * A_g &&
@@ -258,12 +265,14 @@ BoundaryData make_boundary_data(const Mesh & mesh,
                 }
             }
         }
-        // Neighbors across periodic boundaries, at the image point moved into their frame
+        // Neighbors across periodic translations, at the image point moved into
+        // their frame (images do not cross rotations: the exterior state would
+        // need turning)
         uint8_t image_shift = 0;
         for (uint32_t k = mesh.h_offsets_cells_of_cell(c);
              image == c && k < mesh.h_offsets_cells_of_cell(c + 1); k++) {
             const uint8_t s = mesh.h_cells_of_cell_shift(k);
-            if (s == 0) continue;
+            if (s == 0 || mesh.h_rotated_row(s)) continue;
             rtype q[N_DIM];
             FOR_I_DIM q[i] = p[i] - mesh.h_shifts(s, i);
             if (point_in_cell(mesh, mesh.h_cells_of_cell(k), q)) {
@@ -286,9 +295,11 @@ BoundaryData make_boundary_data(const Mesh & mesh,
                                       mesh.h_node_coords(mesh.h_node_of_face(f, 1), 1) - mesh.h_node_coords(mesh.h_node_of_face(f, 0), 1)};
             for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(image); k++) {
                 const uint32_t g = mesh.h_face_of_cell(image, k);
+                if (mesh.h_cells_of_face(g, 1) >= 0 && mesh.h_rotated_row(mesh.h_face_shift(g))) continue;
+                const auto x_g = mesh.h_face_point(g, image);
                 rtype dist = 0.0;
                 FOR_I_DIM {
-                    const rtype d = (mesh.h_face_coords(g, i) - mesh.h_face_offset(g, image, i)) - target[i];
+                    const rtype d = x_g[i] - target[i];
                     dist += d * d;
                 }
                 const rtype t_g[N_DIM] = {mesh.h_node_coords(mesh.h_node_of_face(g, 1), 0) - mesh.h_node_coords(mesh.h_node_of_face(g, 0), 0),
@@ -364,10 +375,23 @@ BoundaryData make_boundary_data(const Mesh & mesh,
                 }
             }
         }
+        // Neighbors across a periodic rotation are left out: their states would need turning
+        auto across_rotation = [&](uint32_t g) {
+            if (!mesh.is_rotational()) return false;
+            const size_t r = static_cast<size_t>(mesh.periodic_rotation.direction);
+            for (uint32_t a = 0; a < mesh.h_n_nodes_of_face(f); a++) {
+                for (uint32_t b = 0; b < mesh.h_n_nodes_of_face(g); b++) {
+                    const uint32_t na = mesh.h_node_of_face(f, a), nb = mesh.h_node_of_face(g, b);
+                    if (node_key(na) == node_key(nb)) return mesh.h_node_lattice[na][r] != mesh.h_node_lattice[nb][r];
+                }
+            }
+            return false;
+        };
         std::vector<uint32_t> list;
         for (size_t c = 0; c < candidates.size(); c++) {
             if (shared[c] < N_DIM - 1) continue;
             const uint32_t g = char_faces[candidates[c]];
+            if (across_rotation(g)) continue;
             rtype cos = 0.0;
             FOR_I_DIM cos += mesh.h_face_normals(f, i) * mesh.h_face_normals(g, i);
             if (cos > 0.9_r * mesh.h_face_area(f) * mesh.h_face_area(g)) list.push_back(candidates[c]);
@@ -380,6 +404,7 @@ BoundaryData make_boundary_data(const Mesh & mesh,
             std::array<rtype, N_DIM> best{};
             rtype best2 = std::numeric_limits<rtype>::infinity();
             for (uint32_t s = 0; s < mesh.h_shifts.extent(0); s++) {
+                if (mesh.h_rotated_row(static_cast<uint8_t>(s))) continue;
                 for (const rtype sign : {1.0_r, -1.0_r}) {
                     std::array<rtype, N_DIM> d;
                     rtype d2 = 0.0_r;

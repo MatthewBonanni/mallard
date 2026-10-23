@@ -625,6 +625,10 @@ RestartData remap_restart(const Input & input, const Mesh & target, bool axisymm
         source_input.as_table()["periodic"] = input.at("periodic");
     }
     const std::shared_ptr<Mesh> source = source_mesh(source_input, options.degree);
+    if (source->is_rotational()) {
+        throw InputError("initialize: type = \"remap\" takes a source mesh with translational periodicity only; "
+                         "its fit across a rotational pair would need the neighbors' moments and vectors turned.");
+    }
     std::vector<uint64_t> cells(source->n_cells);
     for (uint32_t c = 0; c < source->n_cells; c++) cells[c] = source->h_global_cell(c);
     RestartData data = read_restart(file, &cells);

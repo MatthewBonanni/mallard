@@ -46,7 +46,7 @@ struct TENOScalarValues {
     Kokkos::View<rtype *[N_DIM]> node_coords;
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<rtype *[N_DIM]> face_coords;
-    Kokkos::View<rtype *[N_DIM]> shifts;
+    PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
     Kokkos::View<rtype **> quad_points;
     Kokkos::View<rtype ***> face_quad_points;
@@ -64,6 +64,7 @@ struct TENOScalarValues {
     Kokkos::View<rtype **, Kokkos::LayoutRight> scalars;
     Kokkos::View<rtype *> theta;  // (cell); empty: no scaling
     uint32_t n_species;
+    Kokkos::View<int32_t *> boundary_faces;  // TENO::boundary_faces
 
     KOKKOS_INLINE_FUNCTION
     uint8_t n_quad() const {
@@ -81,7 +82,9 @@ struct TENOScalarValues {
 
     /** @brief Scalar j of a stencil entry: cell c, or its mirror across boundary face f. */
     KOKKOS_INLINE_FUNCTION
-    rtype entry_value(const int32_t c, const int32_t f, const uint32_t j) const {
+    rtype entry_value(const int32_t c, const int32_t code, const uint32_t j) const {
+        int32_t row, rel_row;
+        const int32_t f = teno::entry_face(code, boundary_faces, row, rel_row);
         if (f >= 0) {
             const int32_t i_bc = boundaries.face_bc(f);
             if (boundaries.bcs(i_bc).type == BoundaryType::UPT) {
@@ -96,25 +99,29 @@ struct TENOScalarValues {
     bool face_point_basis(const uint32_t f, const uint8_t q, const uint32_t c, rtype * psi) const {
         const rtype h = scale(c);
         const uint8_t s = (cells_of_face(f, 1) == static_cast<int32_t>(c)) ? face_shift(f) : 0;
+        rtype x[N_DIM], p[N_DIM];
         if constexpr (N_DIM == 2) {
             if (face_quad_points.extent(0) > 0) {
                 // Curved meshes: the faces' own points
-                teno::monomials(DEG, ((face_quad_points(f, q, 0) - shifts(s, 0)) - cell_coords(c, 0)) / h,
-                                ((face_quad_points(f, q, 1) - shifts(s, 1)) - cell_coords(c, 1)) / h, psi);
+                FOR_I_DIM x[i] = face_quad_points(f, q, i);
+                periodic.backward(s, x, p);
+                teno::monomials(DEG, (p[0] - cell_coords(c, 0)) / h, (p[1] - cell_coords(c, 1)) / h, psi);
                 for (uint8_t l = 0; l < NK; l++) psi[l] -= basis_mean(c, l);
                 return true;
             }
             const uint32_t node_0 = nodes_of_face(offsets_nodes_of_face(f));
             const uint32_t node_1 = nodes_of_face(offsets_nodes_of_face(f) + 1);
             const rtype s_q = 0.5_r * quad_points(q, 0);
-            const rtype x = face_coords(f, 0) + s_q * (node_coords(node_1, 0) - node_coords(node_0, 0));
-            const rtype y = face_coords(f, 1) + s_q * (node_coords(node_1, 1) - node_coords(node_0, 1));
-            teno::monomials(DEG, ((x - shifts(s, 0)) - cell_coords(c, 0)) / h,
-                            ((y - shifts(s, 1)) - cell_coords(c, 1)) / h, psi);
+            x[0] = face_coords(f, 0) + s_q * (node_coords(node_1, 0) - node_coords(node_0, 0));
+            x[1] = face_coords(f, 1) + s_q * (node_coords(node_1, 1) - node_coords(node_0, 1));
+            periodic.backward(s, x, p);
+            teno::monomials(DEG, (p[0] - cell_coords(c, 0)) / h, (p[1] - cell_coords(c, 1)) / h, psi);
         } else {
             if (face_quad_weights(f, q) == 0.0_r) return false;
+            FOR_I_DIM x[i] = face_quad_points(f, q, i);
+            periodic.backward(s, x, p);
             rtype xi[N_DIM];
-            FOR_I_DIM xi[i] = ((face_quad_points(f, q, i) - shifts(s, i)) - cell_coords(c, i)) / h;
+            FOR_I_DIM xi[i] = (p[i] - cell_coords(c, i)) / h;
             teno::monomials(DEG, xi, psi);
         }
         for (uint8_t l = 0; l < NK; l++) psi[l] -= basis_mean(c, l);
@@ -225,11 +232,12 @@ TENOScalarValues<DEG> make_teno_scalar_values(const TENO & teno, const Mesh & me
                                               Kokkos::View<rtype *> theta, uint32_t n_species) {
     return TENOScalarValues<DEG>{mesh.offsets_faces_of_cell, mesh.faces_of_cell, mesh.cells_of_face,
                                  mesh.offsets_nodes_of_face, mesh.nodes_of_face, mesh.node_coords,
-                                 mesh.cell_coords, mesh.face_coords, mesh.shifts, mesh.face_shift,
+                                 mesh.cell_coords, mesh.face_coords, mesh.periodic_maps(), mesh.face_shift,
                                  teno.quadrature_face.points, teno.face_quad_points, teno.face_quad_weights,
                                  teno.scale, teno.basis_mean, teno.stencil_large_size, teno.stencil_large,
                                  teno.stencil_small_size, teno.stencil_small, teno.troubled,
-                                 teno.selection, teno.sigma_threshold, boundaries, scalars, theta, n_species};
+                                 teno.selection, teno.sigma_threshold, boundaries, scalars, theta, n_species,
+                                 teno.boundary_faces};
 }
 
 #endif // TENO_SCALARS_H

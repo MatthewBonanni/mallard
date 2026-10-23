@@ -34,6 +34,7 @@ set(MALLARD_TEST_SOURCES
     format_compat_test.cpp
     wall_model_test.cpp
     units_test.cpp
+    rotational_periodic_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
     list(APPEND MALLARD_TEST_SOURCES

@@ -389,6 +389,9 @@ void Solver::init_mesh() {
             throw InputError("physics.axisymmetric: curved boundaries are not supported in axisymmetric runs yet "
                              "(set [mesh] curved_geometry = false).");
         }
+        if (mesh->is_rotational()) {
+            throw InputError("physics.axisymmetric: rotational periodicity is not supported in axisymmetric runs.");
+        }
         for (const auto & translation : mesh->periodic_translations) {
             if (translation[1] != 0.0_r) {
                 throw InputError("physics.axisymmetric: the mesh cannot be periodic in y (the radius).");
@@ -2010,6 +2013,8 @@ struct TimeStepFunctor {
     Kokkos::View<rtype *[3]> sgs;                // LES: (cell, [mu_t, ...]), else empty
     rtype Pr_t = 1.0_r;
     BoundaryData boundaries;
+    PeriodicMaps periodic;
+    Kokkos::View<uint8_t *> face_shift;
 
     KOKKOS_INLINE_FUNCTION
     void cell_W(const int32_t i_cell, rtype * W) const {
@@ -2040,6 +2045,8 @@ struct TimeStepFunctor {
             const int32_t c1 = cells_of_face(i_face, 1);
             rtype lambda = wave_speed(c0, n);
             if (c1 >= 0) {
+                // The normal in cell 1's frame
+                if (periodic.rotated()) periodic.unrotate(face_shift(i_face), n);
                 lambda = Kokkos::fmax(lambda, wave_speed(c1, n));
             } else {
                 rtype W[N_CONSERVATIVE];
@@ -2088,7 +2095,9 @@ rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
                             axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(),
                             les_coefficients,
                             les.Pr_t,
-                            boundary_data};
+                            boundary_data,
+                            mesh->periodic_maps(),
+                            mesh->face_shift};
     if (les_on) {
         eddy_viscosity_of_state(mesh->n_owned());
         if (les.dynamic) {

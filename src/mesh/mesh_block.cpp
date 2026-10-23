@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <filesystem>
 #include <stdexcept>
 
@@ -200,6 +201,69 @@ MeshBlock cartesian_2d_block(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, MeshT
     return block;
 }
 
+MeshBlock annulus_block(uint32_t n_theta, uint32_t n_r, uint32_t n_z, double r_in, double r_out, double angle,
+                        double Lz, int r, int p) {
+    const bool full = angle >= 2.0 * std::numbers::pi;
+    const uint64_t layers = N_DIM == 3 ? uint64_t(n_z) + 1 : 1;
+    const uint64_t n_t_nodes = full ? n_theta : uint64_t(n_theta) + 1;
+    const uint64_t per_layer = n_t_nodes * (n_r + 1);
+    const uint64_t n_cells = uint64_t(n_theta) * n_r * (N_DIM == 3 ? n_z : 1);
+    const uint64_t n_nodes = per_layer * layers;
+    MeshBlock block;
+    block.first_cell = block_begin(n_cells, r, p);
+    block.first_node = block_begin(n_nodes, r, p);
+    block.zone_names = {"inner", "outer", "start", "end", "back", "front"};
+    enum { INNER, OUTER, START, END, BACK, FRONT };
+    const double sweep = full ? 2.0 * std::numbers::pi : angle;
+    for (uint64_t g = block.first_node; g < block_begin(n_nodes, r + 1, p); g++) {
+        const uint64_t k = g / per_layer, in_layer = g % per_layer;
+        const uint64_t i = in_layer / (n_r + 1), j = in_layer % (n_r + 1);
+        const double theta = sweep * double(i) / double(n_theta);
+        const double radius = r_in + (r_out - r_in) * double(j) / double(n_r);
+        std::array<double, N_DIM> x;
+        x[0] = radius * std::cos(theta);
+        x[1] = radius * std::sin(theta);
+        if constexpr (N_DIM == 3) x[2] = Lz * double(k) / double(n_z);
+        block.node_coords.push_back(x);
+    }
+    auto node = [&](uint64_t i, uint64_t j, uint64_t k) { return k * per_layer + (i % n_t_nodes) * (n_r + 1) + j; };
+    for (uint64_t c = block.first_cell; c < block_begin(n_cells, r + 1, p); c++) {
+        const uint64_t k = c / (uint64_t(n_theta) * n_r), in_layer = c % (uint64_t(n_theta) * n_r);
+        const uint64_t i = in_layer / n_r, j = in_layer % n_r;
+        const std::array<uint64_t, 4> q0 = {node(i, j, k), node(i + 1, j, k), node(i + 1, j + 1, k), node(i, j + 1, k)};
+        if constexpr (N_DIM == 2) {
+            block.add_cell(q0);
+            if (j == 0) block.add_face(std::array{q0[0], q0[1]}, INNER);
+            if (j + 1 == n_r) block.add_face(std::array{q0[2], q0[3]}, OUTER);
+            if (!full && i == 0) block.add_face(std::array{q0[3], q0[0]}, START);
+            if (!full && i + 1 == n_theta) block.add_face(std::array{q0[1], q0[2]}, END);
+        } else {
+            const std::array<uint64_t, 4> q1 = {node(i, j, k + 1), node(i + 1, j, k + 1), node(i + 1, j + 1, k + 1),
+                                                node(i, j + 1, k + 1)};
+            block.add_cell({q0[0], q0[1], q0[2], q0[3], q1[0], q1[1], q1[2], q1[3]});
+            if (j == 0) block.add_face(std::array{q0[0], q0[1], q1[1], q1[0]}, INNER);
+            if (j + 1 == n_r) block.add_face(std::array{q0[3], q0[2], q1[2], q1[3]}, OUTER);
+            if (!full && i == 0) block.add_face(std::array{q0[0], q0[3], q1[3], q1[0]}, START);
+            if (!full && i + 1 == n_theta) block.add_face(std::array{q0[1], q0[2], q1[2], q1[1]}, END);
+            if (k == 0) block.add_face(q0, BACK);
+            if (k + 1 == n_z) block.add_face(q1, FRONT);
+        }
+    }
+    return block;
+}
+
+MeshBlock annulus_block(const Input & input, int r, int p) {
+    const double angle = double(find_real_or(input, "mesh", "angle", dim::angle_degrees, 360.0_r));
+    if (!(angle > 0.0 && angle <= 360.0)) throw InputError("[mesh] angle must be in (0, 360] degrees.");
+    const double r_in = double(find_real_or(input, "mesh", "r_inner", dim::length, 1.0_r));
+    const double r_out = double(find_real_or(input, "mesh", "r_outer", dim::length, 2.0_r));
+    if (!(r_in > 0.0 && r_out > r_in)) throw InputError("[mesh] annulus needs 0 < r_inner < r_outer.");
+    return annulus_block(find_value_or<uint32_t>(input, "mesh", "Ntheta", 64),
+                         find_value_or<uint32_t>(input, "mesh", "Nr", 16), find_value_or<uint32_t>(input, "mesh", "Nz", 16),
+                         r_in, r_out, angle * std::numbers::pi / 180.0,
+                         double(find_real_or(input, "mesh", "Lz", dim::length, 1.0_r)), r, p);
+}
+
 namespace {
 
 /** @brief Cells and pyramid apex nodes of each hexahedral block of slab i. */
@@ -373,6 +437,7 @@ MeshBlock read_mesh_block(const Input & input) {
         transform_block(block, transform);
         return block;
     }
+    if (type == MeshType::ANNULUS) return annulus_block(input, comm::rank(), comm::size());
     const uint32_t Nx = find_value_or<uint32_t>(input, "mesh", "Nx", 100);
     const uint32_t Ny = find_value_or<uint32_t>(input, "mesh", "Ny", 100);
     const rtype Lx = find_real_or(input, "mesh", "Lx", dim::length, 1.0);
