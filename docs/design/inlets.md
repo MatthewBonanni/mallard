@@ -236,19 +236,21 @@ expressions (`BoundaryFields`, `src/boundary/boundary_fields.h`).
   reporting a divergence, and stops with an input error.
 
 `test/inlet_test.cpp` (`ForcedInletTest`) checks the stage times. With
-SSPRK3 on a fixed mesh, a temporal-refinement study against `dt / 8`
-converges at:
+SSPRK3 on a fixed mesh, a temporal-refinement study (steps `dt` and `dt / 2`
+against `dt / 8`, forcing at 40 rad/s with `dt = 0.0075`, and at 20 rad/s with
+`dt = 0.004` for `nscbc_inlet`) converges at:
 
 | Forced input | Order |
 |---|---|
-| `upt` `T(t)` | 2.85 |
-| `upt` `u(t)` | 2.98 |
-| `stagnation_inlet` `p0(t)` | 2.96 |
-| `mass_flow_inlet` `mass_flux(t)` | 3.02 |
-| moving wall `u(t)` | 3.14 |
+| `upt` `T(t)` | 2.75 |
+| `upt` `u(t)` | 2.91 |
+| `stagnation_inlet` `p0(t)` | 3.00 |
+| `mass_flow_inlet` `mass_flux(t)` | 2.91 |
+| moving wall `u(t)` | 3.02 |
 | `nscbc_inlet` `u(t)` | 1.20 |
 
-The same study gives 1.23 to 1.25 if the inputs are taken at the start of
-each step instead of at the stage times. `nscbc_inlet` is first order either
-way: its boundary point advances by a forward-Euler step of the LODI
-relation once per step.
+The same study gives 1.21 to 1.28 if the inputs are taken at the start of
+each step instead of at the stage times. In single precision the moving
+wall's errors reach round-off; the test then checks that they fall to it.
+`nscbc_inlet` is first order either way: its boundary point advances by a
+forward-Euler step of the LODI relation once per step.

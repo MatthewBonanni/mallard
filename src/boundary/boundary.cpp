@@ -45,7 +45,7 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         require("u");
         require("p");
         require("T");
-        fields.apply(bc, Point{}, 0.0, physics.R, true);
+        fields.apply(bc, Point{}, 0.0, double(physics.R), true);
     } else if (bc.type == BoundaryType::FARFIELD) {
         require("u");
         require("p");
@@ -64,7 +64,7 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         require("T");
         // The velocity may vary along the inlet and in time: the solver sets it per face
         const InletProfile profile(input, where);
-        fields.apply(bc, Point{}, 0.0, physics.R, true);
+        fields.apply(bc, Point{}, 0.0, double(physics.R), true);
         if (profile.uniform()) {
             const std::array<double, N_DIM> u = profile.velocity(Point{});
             FOR_I_DIM bc.data[1 + i] = static_cast<rtype>(u[i]);
@@ -79,7 +79,7 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
             if (flux == total) throw InputError(where + ": give exactly one of mass_flux and mdot.");
             if (input.contains("profile") && !total) throw InputError(where + ".profile goes with mdot.");
         }
-        fields.apply(bc, Point{}, 0.0, physics.R, true);
+        fields.apply(bc, Point{}, 0.0, double(physics.R), true);
         if (input.contains("direction")) {
             const std::vector<rtype> d = find_real_vector(input, "direction", dim::none);
             rtype norm = 0.0_r;
@@ -96,7 +96,7 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         require("p");
         bc.data[N_DIM + 1] = find_real(input, "p", dim::pressure);
     } else if (bc.is_wall()) {
-        fields.apply(bc, Point{}, 0.0, physics.R, true);
+        fields.apply(bc, Point{}, 0.0, double(physics.R), true);
         if (bc.type == BoundaryType::WALL_ISOTHERMAL) {
             require("T");
             bc.data[0] = find_real(input, "T", dim::temperature);

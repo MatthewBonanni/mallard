@@ -15,6 +15,7 @@
 #include <array>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -778,42 +779,52 @@ TEST(ForcedInletTest, TimeDependentConditionsConvergeAtTheIntegratorsOrder) {
     // Euler on the LODI relation), so it converges at first order. Each
     // forcing must also move the solution well beyond those errors.
     const std::string u0 = N_DIM == 2 ? "[0.5, 0.0]" : "[0.5, 0.0, 0.0]";
-    const std::string u_t = N_DIM == 2 ? "[\"0.5 + 0.1 * sin(20 * t)\", \"0\"]" : "[\"0.5 + 0.1 * sin(20 * t)\", \"0\", \"0\"]";
+    const std::string u_t = N_DIM == 2 ? "[\"0.5 + 0.1 * sin(40 * t)\", \"0\"]" : "[\"0.5 + 0.1 * sin(40 * t)\", \"0\", \"0\"]";
+    // nscbc_inlet, first order, at a lower frequency and smaller steps so that its error stays well below its
+    // forcing; the others at steps whose errors stand well above single-precision round-off
+    const std::string u_slow = N_DIM == 2 ? "[\"0.5 + 0.1 * sin(20 * t)\", \"0\"]" : "[\"0.5 + 0.1 * sin(20 * t)\", \"0\", \"0\"]";
     const std::string wall_0 = N_DIM == 2 ? "[0.0, 0.0]" : "[0.0, 0.0, 0.0]";
-    const std::string wall_u = N_DIM == 2 ? "[\"0.2 * sin(20 * t)\", \"0\"]" : "[\"0.2 * sin(20 * t)\", \"0\", \"0\"]";
+    const std::string wall_u = N_DIM == 2 ? "[\"0.2 * sin(40 * t)\", \"0\"]" : "[\"0.2 * sin(40 * t)\", \"0\", \"0\"]";
     const std::string viscous =
         "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 0.02\nPr = 0.72\n";
     struct Case {
         ForcedCase forced, steady;
         double order;
+        double dt = 0.0075;  // coarse; then dt / 2, and dt / 8 as the reference
     };
     const Case cases[] = {
-        {{"upt T(t)", "type = \"upt\"\nu = " + u0 + "\np = 1.0\nT = \"1 + 0.2 * sin(20 * t)\"\n", "", UNIT_GAS},
+        {{"upt T(t)", "type = \"upt\"\nu = " + u0 + "\np = 1.0\nT = \"1 + 0.2 * sin(40 * t)\"\n", "", UNIT_GAS},
          {"", "type = \"upt\"\nu = " + u0 + "\np = 1.0\nT = 1.0\n", "", UNIT_GAS}, 2.6},
         {{"upt u(t)", "type = \"upt\"\nu = " + u_t + "\np = 1.0\nT = 1.0\n", "", UNIT_GAS},
          {"", "type = \"upt\"\nu = " + u0 + "\np = 1.0\nT = 1.0\n", "", UNIT_GAS}, 2.6},
-        {{"nscbc_inlet u(t)", "type = \"nscbc_inlet\"\nu = " + u_t + "\np = 1.0\nT = 1.0\nL = 1.0\n", "", UNIT_GAS},
-         {"", "type = \"nscbc_inlet\"\nu = " + u0 + "\np = 1.0\nT = 1.0\nL = 1.0\n", "", UNIT_GAS}, 0.9},
-        {{"stagnation_inlet p0(t)", "type = \"stagnation_inlet\"\np0 = \"1.3 + 0.1 * sin(20 * t)\"\nT0 = 1.2\n", "", UNIT_GAS},
+        {{"nscbc_inlet u(t)", "type = \"nscbc_inlet\"\nu = " + u_slow + "\np = 1.0\nT = 1.0\nL = 1.0\n", "", UNIT_GAS},
+         {"", "type = \"nscbc_inlet\"\nu = " + u0 + "\np = 1.0\nT = 1.0\nL = 1.0\n", "", UNIT_GAS}, 0.9, 0.004},
+        {{"stagnation_inlet p0(t)", "type = \"stagnation_inlet\"\np0 = \"1.3 + 0.1 * sin(40 * t)\"\nT0 = 1.2\n", "", UNIT_GAS},
          {"", "type = \"stagnation_inlet\"\np0 = 1.3\nT0 = 1.2\n", "", UNIT_GAS}, 2.6},
-        {{"mass_flow_inlet mass_flux(t)", "type = \"mass_flow_inlet\"\nmass_flux = \"0.5 + 0.1 * sin(20 * t)\"\nT = 1.0\n", "",
+        {{"mass_flow_inlet mass_flux(t)", "type = \"mass_flow_inlet\"\nmass_flux = \"0.5 + 0.1 * sin(40 * t)\"\nT = 1.0\n", "",
           UNIT_GAS},
          {"", "type = \"mass_flow_inlet\"\nmass_flux = 0.5\nT = 1.0\n", "", UNIT_GAS}, 2.6},
         {{"moving wall u(t)", "", "type = \"wall_adiabatic\"\nu = " + wall_u + "\n", viscous},
          {"", "", "type = \"wall_adiabatic\"\nu = " + wall_0 + "\n", viscous}, 2.6},
     };
     for (const Case & c : cases) {
-        const std::vector<double> reference = forced_run(c.forced, 0.0005);
-        const std::vector<double> coarse = forced_run(c.forced, 0.004);
+        const std::vector<double> reference = forced_run(c.forced, c.dt / 8);
+        const std::vector<double> coarse = forced_run(c.forced, c.dt);
         const double e1 = max_difference(coarse, reference);
-        const double e2 = max_difference(forced_run(c.forced, 0.002), reference);
-        const double forcing = max_difference(coarse, forced_run(c.steady, 0.004));
+        const double e2 = max_difference(forced_run(c.forced, c.dt / 2), reference);
+        const double forcing = max_difference(coarse, forced_run(c.steady, c.dt));
         const double order = std::log2(e1 / e2);
         RecordProperty(c.forced.name, std::to_string(order) + " (errors " + std::to_string(e1) + ", " +
                                           std::to_string(e2) + "; forcing " + std::to_string(forcing) + ")");
         EXPECT_GT(forcing, 20.0 * e1) << c.forced.name;
-        EXPECT_GT(order, sizeof(rtype) == sizeof(double) ? c.order : std::min(c.order, 2.0))
-            << c.forced.name << ": errors " << e1 << ", " << e2;
+        // Below the round-off of the accumulated steps, convergence shows as errors that fall to that floor
+        // from at most what the order allows (taking the conditions at the start of the step gives far more)
+        const double floor = 50.0 * double(std::numeric_limits<rtype>::epsilon());
+        if (e2 > floor) {
+            EXPECT_GT(order, c.order) << c.forced.name << ": errors " << e1 << ", " << e2;
+        } else {
+            EXPECT_LT(e1, std::exp2(c.order) * floor) << c.forced.name << ": errors " << e1 << ", " << e2;
+        }
     }
 }
 
