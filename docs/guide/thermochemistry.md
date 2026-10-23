@@ -43,7 +43,7 @@ constant-cp; reactions may be elementary, three-body, falloff (Lindemann,
 Troe, SRI), pressure-dependent Arrhenius (PLOG) and Chebyshev, with
 non-integer reactant orders.
 
-**Compositions.** Everywhere a state is given (`[initialize]`, `upt` and
+**Compositions.** Everywhere a state is given (`[initialize]`, `upt`, `stagnation_inlet` and
 `nscbc_inlet` boundaries, sponges, `MallardReactor`), give exactly one of `X`
 (mole fractions) or `Y` (mass fractions), as a table by species; listed values
 are normalized and unlisted species are zero. Analytical initial conditions

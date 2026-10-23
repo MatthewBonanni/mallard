@@ -20,6 +20,7 @@
 
 #include "comm.h"
 #include "common_typedef.h"
+#include "git_version.h"
 #include "log.h"
 #include "version.h"
 
@@ -43,6 +44,8 @@ std::string cpu_model() {
     return "";
 }
 
+} // namespace
+
 std::string device_name() {
 #if defined(KOKKOS_ENABLE_CUDA)
     cudaDeviceProp prop;
@@ -57,6 +60,8 @@ std::string device_name() {
 #endif
     return cpu_model();
 }
+
+namespace {
 
 template <typename Space>
 std::string describe_space() {

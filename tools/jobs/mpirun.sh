@@ -41,14 +41,16 @@ set -m  # mpirun in a process group of its own, so that Ctrl-C reaches only this
 mpirun -n "$NRANKS" "${bind[@]}" "$MALLARD" "${args[@]}" --kokkos-num-threads="$threads" &
 pid=$!
 
-# mpirun ends the ranks at once on INT and TERM, but forwards USR2, which
-# makes Mallard write a restart and stop after the current step
+# Ask Mallard to write a restart and stop after the current step: through its
+# control socket, as mpirun ends the ranks at once on INT and TERM and some
+# mpirun wrappers (the NVIDIA HPC SDK's) pass no signal on; else (before the
+# time loop opens the socket) with USR2, which mpirun forwards
 stops=0
 stop() {
     stops=$((stops + 1))
     if [ "$stops" -eq 1 ]; then
         echo "Stopping after the current step (Ctrl-C again to stop now)" >&2
-        kill -USR2 $pid 2>/dev/null
+        ( "$MALLARD" ctl . stop >/dev/null 2>&1 || kill -USR2 $pid 2>/dev/null ) &
     else
         kill -TERM $pid 2>/dev/null
     fi

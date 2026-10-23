@@ -35,14 +35,16 @@ Euler Euler::from_input(const Input & input) {
                                  find_real(input, "physics", "p_ref", dim::pressure),
                                  find_real(input, "physics", "T_ref", dim::temperature),
                                  find_real(input, "physics", "rho_ref", dim::density));
-    const std::string type = toml::find_or<std::string>(input, "physics", "type", "euler");
+    const std::string type = find_value_or<std::string>(input, "physics", "type", "euler");
+    find_option(PHYSICS_TYPES, "physics.type", type);
     if (type == "navier_stokes") {
         if (!input.at("physics").contains("mu")) {
             throw std::runtime_error("Missing mu for physics: navier_stokes.");
         }
         euler.mu_ref = find_real(input, "physics", "mu", dim::dynamic_viscosity);
         euler.Pr = find_real_or(input, "physics", "Pr", dim::none, 0.72_r);
-        const std::string model = toml::find_or<std::string>(input, "physics", "viscosity_model", "constant");
+        const std::string model = find_value_or<std::string>(input, "physics", "viscosity_model", "constant");
+        record_options("physics.viscosity_model", {"constant", "power_law", "sutherland"});
         if (model == "constant") {
             euler.viscosity_model = ViscosityModel::CONSTANT;
         } else if (model == "sutherland") {
@@ -61,8 +63,6 @@ Euler Euler::from_input(const Input & input) {
         } else {
             throw InputError("physics.viscosity_model = \"" + model + "\" is not one of: constant, sutherland, power_law.");
         }
-    } else if (type != "euler") {
-        throw unknown_option(PHYSICS_TYPES, "physics.type", type);
     }
     return euler;
 }

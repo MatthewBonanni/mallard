@@ -196,6 +196,48 @@ in an expression that fails to parse is pointed out in the error.
 sense; write them only in dimensional inputs. Gas mixtures read real
 thermochemistry and are always dimensional.
 
+## Inputs from older releases
+
+Inputs keep working across releases. When a key is renamed, moved or
+removed, the change goes through two steps:
+
+1. **Deprecated** (at least one minor release): the old key is still read,
+   and the run prints a warning that names the line, the new key and the
+   release that will remove the old one.
+2. **Removed**: the run stops with the same message.
+
+`Mallard --check` lists both kinds, deprecated keys as warnings and removed
+ones as errors.
+
+In both steps, one command brings a file up to date:
+
+```sh
+Mallard upgrade-input old.toml > new.toml     # changes listed on stderr
+Mallard upgrade-input --check old.toml        # exit status 1 if anything is out of date
+```
+
+It changes only the lines of those keys. A renamed key keeps its value and its
+comment, a moved key goes to the end of its new table, and a removed key is
+commented out with a note. A file with nothing to change comes back
+unchanged, byte for byte. When a changed key is written as a dotted key
+(`run.cfl = 1`) or in an inline table, the file is reformatted instead: its
+comments are kept, its layout is not. The command is tested on the input
+files of every release (`tools/check_upgrade_input.py`).
+
+Keys and options changed so far:
+
+| Old | New | Deprecated | Removed |
+|---|---|---|---|
+| `[numerics.face_reconstruction]` `basis_order = p` | `order = p + 1` (order of accuracy) | 0.2.0 | 0.2.0 |
+| `basis_type`, `max_stencil_size_factor`, `quadrature_type`, `quadrature_order`, `quadrature_type_cell`, `quadrature_order_cell`, `quadrature_type_face`, `quadrature_order_face` (same table) | none: TENO-E sets them | 0.2.0 | 0.2.0 |
+| `[physics]` `p_min`, `p_max` | none: pressures are not clipped | 0.2.0 | 0.2.0 |
+| `[[write_data]]` `format = "tecplot"` | `"vtu"` | 0.2.0 | 0.2.0 |
+
+Changes before 0.9.0 were not deprecated first. Since 0.9.0, every rename
+appears in this table and in `src/common/input_upgrade.cpp`, which is the
+source of truth. A test fails if a key is removed without a deprecation
+period.
+
 ## Unknown and unused keys
 
 Every key in the file must be one the run reads. A misspelled key, a key in
@@ -257,10 +299,27 @@ $ Mallard --check input.toml --ranks 4 --throughput 5e7 --quality-vtu quality
 | Cost | With `--throughput R` (cells/s per rank, the `Throughput` of a run's summary divided by its ranks) or `--steps N` (timed over N steps after an untimed one): steps, wall time and GPU-hours (rank-hours on CPUs) per unit simulated time, per flow-through time (domain length along the mean initial velocity over its magnitude) and to `t_stop`, assuming the throughput per rank holds on N ranks |
 | Warnings | A CFL number above the integrator's limit for smooth flow (1.2 for SSPRK3, 1.35 for RK4), TFLES thickening `n_res Delta / delta_L` above 5, poor cells |
 
+### The key catalog
+
+`--catalog keys.json` also writes, as JSON, every key the setup looked up for
+this input: whether the input set it, the type the setup reads it as, its
+physical dimension (see [units](#units)), its default (as TOML) or that it is
+required, and the values it accepts, by path
+(`numerics.riemann_solver`, `boundaries.type`). It is written even when the
+setup stops on an error, with the keys read up to there. The setup's accessors
+(`find_value`, `find_value_or`, `find_real_or` and `find_option` in
+`src/common/input.h`) record these, so the catalog is what the code does.
+`tools/input_catalog.py build` merges the catalogs of every example and
+tutorial, in 2D and 3D, into
+[`docs/input-keys.json`](../input-keys.json), which the website's input builder
+reads; CI checks that it is up to date, and `tools/input_catalog.py docs`
+that the defaults this reference states match it.
+
 ## The other executables
 
 | Executable | Purpose | Guide |
 |---|---|---|
+| `Mallard upgrade-input old.toml` | Rewrites renamed, moved and removed keys of an input from an older release | [Inputs from older releases](#inputs-from-older-releases) |
 | `MallardReactor -i input.toml` | 0D constant-volume reactor with the solver's chemistry; chemistry benchmarks | [Thermochemistry](thermochemistry.md#0d-reactors-mallardreactor) |
 | `mallard-mesh-convert IN OUT.h5` | Gmsh file, or the mesh of an input file, to Mallard's HDF5 mesh format (builds with HDF5) | [Meshes](meshes.md#hdf5-meshes-for-large-runs) |
 | `MallardTest` | The unit and regression tests (`build/test/MallardTest`) | [Installation](https://matthewbonanni.github.io/mallard/docs/installation/) |

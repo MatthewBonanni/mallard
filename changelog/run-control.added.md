@@ -1,0 +1,2 @@
+- Run control: `SIGUSR1` writes a restart and continues; `SIGTERM`, `SIGINT` and `SIGUSR2` write a restart after the current step and exit with status 3; `Mallard ctl <run-dir> status | checkpoint | stop | set <key>=<value>` talks to a running job through a private socket; optional `STOP` and `CHECKPOINT` files (`[run] control_socket`, `control_file_interval`) (#322, #355).
+- Divergence detection: every step's time-step reduction flags non-finite states, and the run stops naming the first bad cells and writing the last valid state (`[run] keep_last_good`) (#355).

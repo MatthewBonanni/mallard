@@ -16,10 +16,12 @@
 
 #include "build_info.h"
 #include "case_template.h"
+#include "input_upgrade.h"
 #include "input.h"
 #include "log.h"
 #include "parallel/binding.h"
 #include "parallel/comm.h"
+#include "run_control.h"
 #include "solver/solver.h"
 
 namespace {
@@ -27,8 +29,10 @@ namespace {
 void usage(const char * program) {
     std::cerr << "Usage: " << program << " -i input.toml [--restart FILE] [Kokkos options, e.g. --kokkos-num-threads=8]\n"
               << "       " << program << " --check input.toml [--ranks N] [--throughput CELLS_PER_S | --steps N]"
-              << " [--quality-vtu PREFIX]\n"
+              << " [--quality-vtu PREFIX] [--catalog KEYS.json]\n"
+              << "       " << program << " ctl <run-dir> status | checkpoint | stop | set <key>=<value> ...\n"
               << "       " << program << " new <template> [directory]   (" << program << " new --list)\n"
+              << "       " << program << " upgrade-input old.toml > new.toml\n"
               << "       " << program << " --version\n";
 }
 
@@ -42,6 +46,8 @@ struct Subcommand {
 
 constexpr Subcommand subcommands[] = {
     {"new", case_template::new_main},
+    {"ctl", run_control::ctl_main},
+    {"upgrade-input", input_upgrade::main},
 };
 
 /**
@@ -100,6 +106,8 @@ int main(int argc, char* argv[]) {
                 options.steps = std::stoull(argv[++i]);
             } else if (strcmp(argv[i], "--quality-vtu") == 0 && has_value) {
                 options.quality_file = argv[++i];
+            } else if (strcmp(argv[i], "--catalog") == 0 && has_value) {
+                options.catalog_file = argv[++i];
             } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
                 usage(argv[0]);
                 return 0;
@@ -117,6 +125,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // A checkpoint requested while MPI and the device start up is kept for the first step
+    run_control::install_signal_handlers();
     // MPI before Kokkos, so Kokkos can map each rank to its own device
     comm::Session session(argc, argv);
     if (!comm::is_root()) std::cout.rdbuf(nullptr);
@@ -128,19 +138,18 @@ int main(int argc, char* argv[]) {
         std::string error;
         try {
             print_header(input_file);
-            Input input = parse_input(input_file);
-            if (!restart_file.empty()) {
-                input.as_table()["initialize"] = Input(Input::table_type{{"type", "restart"}, {"file", restart_file}});
-            }
             Solver solver;
             if (check) {
+                Input input = parse_input(input_file);
+                if (!restart_file.empty()) Solver::start_from_restart(input, restart_file);
                 const CheckReport report = solver.check(input, options);
                 print_check(report);
                 status = report.ok() ? 0 : 1;
             } else {
                 binding::report();
-                solver.init(input);
-                solver.run();
+                solver.enable_control(true);
+                solver.init(input_file, restart_file);
+                status = solver.run();
             }
         } catch (const InputError & e) {
             error = input_file + ": " + error_text(e);

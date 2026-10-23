@@ -185,7 +185,7 @@ std::string replace_all(std::string text, const std::string & from, const std::s
 
 std::vector<std::string> string_list(const Input & v, const std::string & key) {
     if (!v.contains(key)) return {};
-    return toml::find<std::vector<std::string>>(v, key);
+    return find_value<std::vector<std::string>>(v, key);
 }
 
 fs::path executable_path() {
@@ -229,30 +229,30 @@ Manifest load_manifest() {
     Manifest m;
     m.root = fs::absolute(data_dir());
     const Input v = parse_input((m.root / manifest_path).string());
-    m.input_docs = toml::find<std::string>(v, "docs", "input");
-    m.source_url = toml::find<std::string>(v, "docs", "source");
+    m.input_docs = find_value<std::string>(v, "docs", "input");
+    m.source_url = find_value<std::string>(v, "docs", "source");
     for (const auto & t : v.at("tables").as_array()) {
-        m.tables.emplace_back(toml::find<std::string>(t, "table"), toml::find<std::string>(t, "about"));
+        m.tables.emplace_back(find_value<std::string>(t, "table"), find_value<std::string>(t, "about"));
     }
     for (const auto & g : v.at("groups").as_array()) {
-        m.groups.push_back({toml::find<std::string>(g, "name"), toml::find<std::string>(g, "title")});
+        m.groups.push_back({find_value<std::string>(g, "name"), find_value<std::string>(g, "title")});
     }
     for (const auto & e : v.at("templates").as_array()) {
         Template t;
-        t.name = toml::find<std::string>(e, "name");
-        t.group = toml::find<std::string>(e, "group");
-        t.summary = toml::find<std::string>(e, "summary");
-        t.cost = toml::find<std::string>(e, "cost");
-        t.source = toml::find<std::string>(e, "source");
+        t.name = find_value<std::string>(e, "name");
+        t.group = find_value<std::string>(e, "group");
+        t.summary = find_value<std::string>(e, "summary");
+        t.cost = find_value<std::string>(e, "cost");
+        t.source = find_value<std::string>(e, "source");
         t.files = e.contains("files") ? string_list(e, "files") : std::vector<std::string>{"input.toml"};
-        t.dim = toml::find_or<int>(e, "dim", 2);
-        t.threads = toml::find_or<int>(e, "threads", 4);
+        t.dim = find_value_or<int>(e, "dim", 2);
+        t.threads = find_value_or<int>(e, "threads", 4);
         t.mesh = string_list(e, "mesh");
-        t.mesh_creates = toml::find_or<std::string>(e, "mesh_creates", "");
+        t.mesh_creates = find_value_or<std::string>(e, "mesh_creates", "");
         t.init = string_list(e, "init");
-        t.init_creates = toml::find_or<std::string>(e, "init_creates", "");
+        t.init_creates = find_value_or<std::string>(e, "init_creates", "");
         t.post = string_list(e, "post");
-        t.results = toml::find_or<std::string>(e, "results", "");
+        t.results = find_value_or<std::string>(e, "results", "");
         t.quick = string_list(e, "quick");
         t.quick_mesh = string_list(e, "quick_mesh");
         t.quick_init = string_list(e, "quick_init");

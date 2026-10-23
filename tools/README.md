@@ -12,7 +12,7 @@ Mallard comes with three executables and a set of Python scripts that cover ever
 | [Meshes](#meshes): Gmsh meshes from the command line | `make_cylinder_mesh.py`, `make_annulus_mesh.py`, `make_mallard_mesh.py` |
 | [Initial states](#initial-states-and-references): restart files to start runs from | `isotropic_turbulence_restart.py`, `channel_init.py`, `tile_restart.py`, `interpolate_restart.py`, `flame_restart.py`, `znd_restart.py` |
 | [References](#initial-states-and-references): exact and Cantera solutions | `flame_reference.py`, `detonation_reference.py`, `sedov.py`, `cantera_mechanisms.py` |
-| [Post-processing](#post-processing): readers, plots, movies, averages | `mallard_vtu.py`, `mallard_h5.py`, `plot_vtu.py`, `compare_png.py`, `animate.py`, `animate_cartesian.py`, `animate_grid.py`, `plane_average.py` |
+| [Post-processing](#post-processing): readers, plots, movies, averages | `mallard_vtu.py`, `mallard_h5.py`, `plot_vtu.py`, `compare_png.py`, `animate.py`, `animate_cartesian.py`, `animate_grid.py`, `plane_average.py`, `insitu_statistics.py` |
 | [Performance](#performance): benchmarks and baselines | `perf_suite.py` |
 | [Case scripts](#case-scripts): set-up and analysis of one example each | `plot_<case>.py`, `animate_<case>.py`, ... |
 | [Developer tools](#developer-tools): figures of these pages, test reference data | `docs/`, `chemistry_reference.py`, ... |
@@ -142,6 +142,7 @@ The figure is in [Meshes](../docs/guide/meshes.md#mesh-quality).
 | `make_sphere_mesh.py` | Tetrahedra of the quarter domain around a sphere (symmetry planes `symmetry_y`, `symmetry_z`), refined on the sphere and through the bow-shock layer; `--order 2`/`3` curves the sphere | [`sphere_mach3`](../examples/sphere_mach3) |
 | `make_sphere_re300_mesh.py` | The full domain around a sphere: a prism boundary layer, tetrahedra refined through the near wake; `--scale` refines everything for mesh studies | [`sphere_re300`](../examples/sphere_re300) |
 | `make_volvo_mesh.py` | Hexahedra of the Volvo bluff-body combustor: four blocks around the triangular flameholder, mesh lines normal to its faces, periodic in span | [`volvo_bluff_body`](../examples/volvo_bluff_body) |
+| `make_nozzle_mesh.py` | Quadrilaterals of the upper half of a planar converging-diverging nozzle | [`nozzle`](../examples/nozzle) |
 
 ![make_volvo_mesh.py around the flameholder, and the symmetry plane of make_sphere_mesh.py](../docs/images/tools/case_meshes-light.svg#gh-light-mode-only)
 ![make_volvo_mesh.py around the flameholder, and the symmetry plane of make_sphere_mesh.py](../docs/images/tools/case_meshes-dark.svg#gh-dark-mode-only)
@@ -274,7 +275,7 @@ rho = arrays["RHO"]                       # one value per cell; arrays["TIME"] i
 pts, conn, offsets, types, arrays = read_vtu_cells("solut/flow_000010.vtu")  # 2D or 3D cells
 ```
 
-`mallard_vtu.py` reads binary or ASCII VTU (boundary-zone output too) and takes `.h5` snapshots as well; `mallard_h5.py` (needs h5py) reads `format = "hdf5"` output: the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`.
+`mallard_vtu.py` reads binary or ASCII VTU (boundary-zone output too) and takes `.h5` snapshots as well; `mallard_h5.py` (needs h5py) reads `format = "hdf5"` output: the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard_vtu.provenance(path)` reads the provenance block of any output file.
 
 ### `plot_vtu.py`: one field of a snapshot
 
@@ -343,6 +344,17 @@ Averages the `[statistics]` output (`MEAN_<field>`, `COV_<a>_<b>`) of an axis-al
 ![Mean velocity and resolved Reynolds stresses in wall units against the DNS](../docs/images/tutorials/channel_profiles-light.svg#gh-light-mode-only)
 ![Mean velocity and resolved Reynolds stresses in wall units against the DNS](../docs/images/tutorials/channel_profiles-dark.svg#gh-dark-mode-only)
 
+### `insitu_statistics.py`: spectra, correlations and phase averages
+
+```sh
+python tools/insitu_statistics.py plot spectra.csv --pair U_X,U_X -o spectra.png
+python tools/insitu_statistics.py spectra input.toml restart_*.restart -o reference.csv
+python tools/insitu_statistics.py compare spectra.csv reference.csv
+python tools/insitu_statistics.py phase input.toml probe_wake.csv -o phase.npz
+```
+
+Reads and checks the output of `[statistics.spectra]` and `[statistics.phase]` ([output guide](../docs/guide/output.md)): `plot` draws the spectra and correlations of one pair along each direction; `spectra` recomputes a run's spectra, correlations and plane means from restart files taken at the sampling steps (numpy FFTs, the solver's time weights) in the solver's CSV format, and `compare` gives the largest difference between two such files; `phase` phase-bins a `[[probes]]` series with the solver's phase rule, to compare with the in-situ `PHASE_` fields at the probe point.
+
 ## Performance
 
 ### `perf_suite.py`: benchmarks and baselines
@@ -366,6 +378,7 @@ These set up or analyze one example each; their figures are on the [Examples](ht
 |---|---|---|---|
 | [`sod`](../examples/sod) | | `plot_sod.py`: density profiles against the exact solution | |
 | [`viscous_shock_tube`](../examples/viscous_shock_tube) | | `plot_viscous_shock_tube.py`: wall density and lambda-shock triple point against Zhou et al. | |
+| [`nozzle`](../examples/nozzle) | `make_nozzle_mesh.py` | `plot_nozzle.py`: mass flow, shock position and stagnation pressure against the quasi-one-dimensional solution; `--figure` draws the guide's figure | |
 | [`poiseuille_pipe`](../examples/poiseuille_pipe) | | `plot_poiseuille.py`: axial velocity against the exact cell averages | |
 | [`noh_axisymmetric`](../examples/noh_axisymmetric) | | `plot_noh.py`: density and shock radius by direction against the exact solution | |
 | [`sphere_axisymmetric`](../examples/sphere_axisymmetric) | `make_cylinder_mesh.py --half` | `plot_sphere_axisymmetric.py`: drag, separation angle and wake length | |
@@ -400,12 +413,16 @@ These set up or analyze one example each; their figures are on the [Examples](ht
 |---|---|
 | `device_changes.sh [BASE]` | Whether the changes since BASE touch device code (a changed `src/` file with Kokkos device constructs, or a Kokkos bump): decides whether CI runs the CUDA builds and whether a PR needs GPU CI |
 | `check_workflow_triggers.py` | Fails if a GitHub workflow runs on pull requests or on pushes to branches other than `main` (CI on branches runs only by hand; releases on tags); the first job of `ci.yml` runs it |
-| `docs/make_figures.py` | The figures of the user guide (`docs/images/guide/`) and the theory manual (`docs/images/theory/`), light and dark: schematics, domains from the example inputs, and short Mallard runs (`--mallard build/src/Mallard`) |
+| `docs/make_figures.py` | The figures of the user guide (`docs/images/guide/`) and the theory manual (`docs/images/theory/`), light and dark: schematics, domains from the example inputs, and short Mallard runs (`--mallard build/src/Mallard`; `--mallard3d` for the 3D region figure) |
+| `docs/regions.py` | The region figures alone: cell volume fractions of every primitive and boolean on coarse unstructured meshes, from one-step runs |
 | `docs/tools.py` | The figures of this page (`docs/images/tools/`), from running each tool (`--mallard` for those from Mallard runs) |
+| `docs/verification.py` | The [verification manual](../docs/verification/index.md) (`docs/verification/`): runs the convergence tests of 2D and 3D `MallardTest` builds (`--test build-2/test/MallardTest build-3/test/MallardTest`) and writes its order-of-accuracy tables, `results.json` and plots (`docs/images/verification/`); without `--test`, redraws them from `results.json` |
 | `docs/figstyle.py`, `docs/meshes.py`, `docs/domains.py`, `docs/schematics.py`, `docs/theory.py`, `docs/teno.py`, `docs/runs.py`, `docs/remap_tgv.py` | Their shared style (light and dark palettes, SVG output), mesh readers and figure sets |
 | `../tutorials/common/` | `tutfig.py` (the tutorials' figure style), `gmsh_mesh.py` (Gmsh meshes for plots), `snapshots.py` (VTU and PVTU series) |
 | `make_import_meshes.py` | The mesh-import test fixtures in `test/data/meshes/`: one geometry as Gmsh, CGNS, Fluent and OpenFOAM, 2D and 3D, linear and curved |
 | `chemistry_reference.py`, `transport_reference.py` | Cantera reference data for the chemistry and transport tests (`test/data/chemistry/`, committed so the tests need no Cantera) |
 | `v3_reference.py`, `v3_check.py` | Constant-volume ignition with large mechanisms: Cantera references, and `MallardReactor` against them |
+| `input_catalog.py` | The key catalog `docs/input-keys.json` (every input key with its type, default or requiredness and accepted values, as setup records them): `build` runs `Mallard --check --catalog` on every example and tutorial in 2D and 3D and merges them (`--check` compares with the committed file); `docs` checks the defaults `docs/input.md` states against it. Both run in `ci.yml`; standard library only |
+| `check_upgrade_input.py` | Runs `Mallard upgrade-input` on every input file of every release tag: it must succeed, leave nothing to upgrade, and return up-to-date files byte for byte (CI, openmp job); standard library only |
 | `changelog.py` | Changelog fragments (`changelog/`): `check` fails when a branch changes `src/` without adding one (first job of `ci.yml`); `notes X.Y.Z` / `notes Unreleased` prints a release's section or previews the next; `release X.Y.Z` folds the fragments into `CHANGELOG.md`; standard library only |
 | `hero_grid.json` | The configuration of the README animation (`animate_grid.py`) |

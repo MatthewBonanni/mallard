@@ -48,16 +48,22 @@ mpirun -n $((nodes * ranks_per_node)) --map-by "ppr:$ranks_per_node:node:PE=$thr
     "$MALLARD" "${args[@]}" &
 pid=$!
 
+# Ask Mallard to write a restart and stop after the current step: through its
+# control socket (rank 0 runs on this node), as some mpirun wrappers (the NVIDIA
+# HPC SDK's) pass no signal on; else (before the time loop opens the socket)
+# with USR2, which mpirun forwards
+stop() { "$MALLARD" ctl . stop >/dev/null 2>&1 || kill -USR2 $pid 2>/dev/null; }
+
 # PBS sends TERM only seconds before it kills the job, too late for a restart:
-# send USR2 (write a restart and stop after the current step) ahead of the walltime
+# stop ahead of the walltime
 walltime=$(qstat -f "$PBS_JOBID" 2>/dev/null | sed -n 's/^ *Resource_List.walltime = //p')
 if [ -n "$walltime" ]; then
     IFS=: read -r h m s <<< "$walltime"
-    ( sleep $(( 10#$h * 3600 + 10#$m * 60 + 10#$s - STOP_BEFORE )) && touch .at_limit && kill -USR2 $pid ) \
+    ( sleep $(( 10#$h * 3600 + 10#$m * 60 + 10#$s - STOP_BEFORE )) && touch .at_limit && stop ) \
         2>/dev/null &
     timer=$!
 fi
-trap 'kill -USR2 $pid 2>/dev/null' TERM
+trap 'stop &' TERM
 wait $pid
 status=$?
 while kill -0 $pid 2>/dev/null; do

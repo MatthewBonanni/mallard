@@ -1,0 +1,78 @@
+# The Sod shock tube (examples/sod) on a 3D box of 100 x 4 x 4 hexahedra
+
+[run]
+# n_steps = 100000
+t_stop = 0.2
+# t_wall_stop = 3.0
+# dt = 1.0e-3
+cfl = 1.0
+
+[mesh]
+type = "cartesian"
+Nx = 100
+Ny = 4
+Nz = 4
+Lx = 1.0
+Ly = 0.02
+Lz = 0.02
+
+[initialize]
+type = "analytical"
+rho = """\
+    var l := x <  0.5; \
+    var r := x >= 0.5; \
+    1.0 * l + 0.125 * r"""
+u = ["0.0", "0.0", "0.0"]
+p = """\
+    var l := x <  0.5; \
+    var r := x >= 0.5; \
+    1.0 * l + 0.1 * r"""
+
+[[boundaries]]
+name = "left"
+type = "symmetry"
+
+[[boundaries]]
+name = "right"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "back"
+type = "symmetry"
+
+[[boundaries]]
+name = "front"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[output]
+check_interval = 100
+
+[[write_data]]
+prefix = "./solut/sod"
+format = "vtu"
+time_interval = 0.02
+variables = ["RHO", "U_X", "P", "T"]

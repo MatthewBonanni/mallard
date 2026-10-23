@@ -24,6 +24,7 @@ struct CheckOptions {
     uint64_t steps = 0;         // steps to time for a measured throughput
     size_t n_worst = 5;         // worst cells listed per quality metric
     std::string quality_file;   // VTU of the quality fields, or empty
+    std::string catalog_file;   // JSON of the keys setup read (key_catalog), or empty
 };
 
 struct CheckReport {

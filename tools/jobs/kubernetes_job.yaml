@@ -56,9 +56,10 @@ spec:
               mpirun -n "$NRANKS" --map-by "slot:PE=$THREADS" --bind-to core \
                   "$MALLARD" "${args[@]}" --kokkos-num-threads="$THREADS" &
               pid=$!
-              # The pod's TERM: mpirun would end the ranks at once, but it forwards
-              # USR2, which makes Mallard write a restart and stop after the current step
-              trap 'kill -USR2 $pid' TERM
+              # The pod's TERM: write a restart and stop after the current step, asked
+              # through Mallard's control socket (mpirun would end the ranks at once),
+              # or before the time loop opens it with USR2, which mpirun forwards
+              trap '( "$MALLARD" ctl . stop >/dev/null 2>&1 || kill -USR2 $pid ) &' TERM
               wait $pid; status=$?
               while kill -0 $pid 2>/dev/null; do wait $pid; status=$?; done
               exit $status
