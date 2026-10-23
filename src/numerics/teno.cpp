@@ -1172,7 +1172,7 @@ TENO::~TENO() {
     // Empty
 }
 
-void TENO::read_options(const toml::value & input) {
+void TENO::read_options(const Input & input) {
     const int order = toml::find_or<int>(input, "order", 5);
     // The small stencils are degree 2, so the central polynomial must be at least degree 2
     if (order < 3 || order > teno::MAX_DEGREE + 1) {
@@ -1181,16 +1181,16 @@ void TENO::read_options(const toml::value & input) {
     }
     degree = static_cast<uint8_t>(order - 1);
     n_dof_large = teno::n_dof(degree);
-    stencil_factor = find_real_or(input, "stencil_factor", 2.0);
+    stencil_factor = find_real_or(input, "stencil_factor", dim::none, 2.0);
     n_stencil_large = static_cast<uint16_t>(std::ceil(stencil_factor * n_dof_large));
     n_stencil_small = static_cast<uint16_t>(toml::find_or<int>(input, "small_stencil_size", (N_DIM == 2) ? 10 : 2 * teno::NK_SMALL));
-    sigma_threshold = find_real_or(input, "troubled_threshold", 1.0e-3_r);
-    sigma_upper = find_real_or(input, "troubled_upper", 1.0e-2_r);
-    C_T = find_real_or(input, "C_T", -1.0);
+    sigma_threshold = find_real_or(input, "troubled_threshold", dim::none, 1.0e-3_r);
+    sigma_upper = find_real_or(input, "troubled_upper", dim::none, 1.0e-2_r);
+    C_T = find_real_or(input, "C_T", dim::none, -1.0);
     characteristic = toml::find_or<bool>(input, "characteristic", true);
-    max_condition = find_real_or(input, "max_condition", 1.0e8);
+    max_condition = find_real_or(input, "max_condition", dim::none, 1.0e8);
     bound_preserving = toml::find_or<bool>(input, "bound_preserving", false);
-    troubled_capacity = find_real_or(input, "troubled_capacity", troubled_capacity);
+    troubled_capacity = find_real_or(input, "troubled_capacity", dim::none, troubled_capacity);
     if (!(troubled_capacity > 0.0_r && troubled_capacity <= 1.0_r)) {
         throw std::runtime_error("TENO: troubled_capacity must be in (0, 1].");
     }
@@ -1212,7 +1212,7 @@ void TENO::read_options(const toml::value & input) {
     }
 }
 
-void TENO::init(const toml::value & input) {
+void TENO::init(const Input & input) {
     read_options(input);
     const int order = degree + 1;
     const int n_gp = std::max(1, std::min<int>(teno::MAX_FACE_QUAD, (order + 1) / 2));
@@ -3499,7 +3499,7 @@ uint64_t TENO::cache_key() const {
     return hash.h;
 }
 
-uint8_t TENO::cached_halo_layers(const toml::value & input) {
+uint8_t TENO::cached_halo_layers(const Input & input) {
     TENO teno;
     teno.read_options(input);
     if (teno.cache_file.empty()) return 0;

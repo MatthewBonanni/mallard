@@ -22,6 +22,7 @@
 #include "hdf5_output.h"
 #include "mesh_block.h"
 #include "mpi_compare.h"
+#include "scratch.h"
 
 namespace {
 
@@ -92,6 +93,55 @@ TEST(MPI3DTest, LargeEddySimulationOnTetrahedraMatchesSerial) {
     expect_matches_serial(input + "[les]\nmodel = \"sigma\"\ndynamic = true\n");
 }
 
+TEST(MPI3DTest, WallModelsMatchSerial) {
+    // Exchange and edge points several cells off the walls, in cells that a
+    // partition may leave beyond the default halo, which must then deepen.
+    // Without LES or the hybrid flux, only the wall model reads the gradients
+    // of the deep halo cells holding its points
+    for (const char * partitioner : {"multijagged", "hilbert"}) for (const bool les : {true, false}) {
+        std::ostringstream s;
+        s << "[run]\nn_steps = 6\ncfl = 0.4\n"
+          << "[mesh]\ntype = \"cartesian_tet\"\nNx = 6\nNy = 8\nNz = 4\nLx = 1.0\nLy = 1.0\nLz = 0.6\n"
+          << "periodic = [\"x\", \"z\"]\n"
+          << "[parallel]\npartitioner = \"" << partitioner << "\"\n"
+          << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * sin(6.283 * x)\"\n"
+          << "u = [\"0.5 + 0.1 * sin(6.283 * z)\", \"0.05 * sin(6.283 * x)\", \"0.02\"]\np = \"1.0\"\n"
+          << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_isothermal\"\nT = 1.0\n"
+          << "wall_model = { model = \"gfm\", exchange_distance = 0.45, edge_distance = 0.9 }\n"
+          << "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n"
+          << "wall_model = { model = \"equilibrium\", exchange_cells = 3.0 }\n"
+          << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+          << (les ? "convective_flux = \"hybrid\"\n" : "")
+          << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\nlimiter = \"none\"\n"
+          << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+          << "mu = 1e-3\nPr = 0.72\n"
+          << (les ? "[les]\nmodel = \"sigma\"\n" : "")
+          << "[output]\ncheck_interval = 1000000\n";
+        expect_matches_serial(s.str());
+    }
+}
+
+TEST(MPI3DTest, DynamicFlameEfficiencyOnTetrahedraMatchesSerial) {
+    // The test filter passes exchange the filtered progress variable; beta is an exact domain sum
+    std::ostringstream s;
+    s << "[run]\nn_steps = 3\ncfl = 0.25\n"
+      << "[mesh]\ntype = \"cartesian_tet\"\nNx = 8\nNy = 5\nNz = 4\nLx = 0.008\nLy = 0.005\nLz = 0.004\n"
+      << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\n"
+      << "T = \"1300 + 1000 * tanh((x - 0.004 - 0.001 * sin(1200 * y) * cos(900 * z)) / 0.0008)\"\n"
+      << "u = [\"3 * sin(1500 * y)\", \"2 * sin(1300 * z)\", \"0.0\"]\nX = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n";
+    for (int k = 0; k < 6; k++) {
+        s << "[[boundaries]]\nname = \"" << ZONES[k] << "\"\ntype = \"" << (k == 0 ? "p_out\"\np = 101325.0" : "symmetry\"")
+          << "\n";
+    }
+    s << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+      << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR
+         "/mechanisms/h2o2.yaml\"\n"
+      << "[chemistry]\n[output]\ncheck_interval = 1000000\n[les]\nmodel = \"sigma\"\n"
+      << "[les.combustion]\nmodel = \"tfles\"\ndelta_L = 3e-4\ns_L = 2.3\nT_unburnt = 300.0\nT_burnt = 2300.0\n"
+      << "efficiency = \"dynamic\"\n";
+    expect_matches_serial(s.str(), [](const Solver & solver) { EXPECT_GT(solver.tfles_beta(), 0.0); });
+}
+
 TEST(MPI3DTest, CharacteristicBoundariesMatchSerial) {
     std::string input = box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"euler\"\n");
     const std::string from = "name = \"right\"\ntype = \"symmetry\"\n";
@@ -121,7 +171,7 @@ TEST(MPI3DTest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
     const std::string file = write_temp_shared("mallard_mpi3d_periodic.msh", jittered_periodic_mesh_3d(6));
     std::string input = blast_input("cartesian", "type = \"TENO\"\norder = 3\n");
     input = input.substr(0, input.find("[[boundaries]]")) + input.substr(input.find("[numerics]"));
-    const std::string generated = "type = \"cartesian\"\n";
+    const std::string generated = "type = \"cartesian\"\nNx = 12\nNy = 12\nNz = 12\nLx = 1.0\nLy = 1.0\nLz = 1.0\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     for (int d = 0; d < 3; d++) {
         input += std::string("[[periodic]]\nzones = [\"") + ZONES[2 * d] + "\", \"" + ZONES[2 * d + 1] +
@@ -134,7 +184,7 @@ TEST(MPI3DTest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
 
 TEST(MPI3DTest, SurfaceOutputOfAZoneMissingFromSomeRanks) {
     // Ranks whose part of the mesh does not touch the zone write empty pieces
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mpi3d_faces").string();
+    const std::string dir = (scratch_dir() / "mallard_mpi3d_faces").string();
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
     Solver solver;
@@ -161,7 +211,7 @@ TEST(MPI3DTest, SurfaceOutputOfAZoneMissingFromSomeRanks) {
 
 TEST(MPI3DTest, BoundaryProbesDoNotDependOnTheRankCount) {
     // Faces in the order of their cells' global ids, polygons over shared vertices
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mpi3d_probes").string();
+    const std::string dir = (scratch_dir() / "mallard_mpi3d_probes").string();
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
     auto input = [&](const std::string & sub) {
@@ -205,7 +255,7 @@ TEST(MPI3DTest, HDF5OutputDoesNotDependOnTheRankCount) {
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
     if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
 #ifdef Mallard_HAS_HDF5
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mpi3d_hdf5").string();
+    const std::string dir = (scratch_dir() / "mallard_mpi3d_hdf5").string();
     expect_hdf5_output_matches_serial(box_input("cartesian_mixed", "type = \"MUSCL\"\n", "type = \"euler\"\n"),
                                       "interval = 4\nvariables = [\"RHO\", \"U\", \"P\"]\n", dir, {0, 4, 8});
 #endif
@@ -233,5 +283,31 @@ TEST(MPI3DTest, CurvedWallsMatchSerial) {
             "[output]\ncheck_interval = 1000000\n";
         expect_matches_serial(input, [](const Solver & solver) { EXPECT_TRUE(solver.get_mesh()->curved_geometry); });
     }
+    comm::barrier();
+}
+
+TEST(MPI3DTest, RemapDoesNotDependOnTheRankCount) {
+    // A prism run's restart file remapped to tetrahedra of another size
+    const std::string dir = (scratch_dir() / "mallard_mpi3d_remap").string();
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    std::string coarse = box_input("cartesian_prism", "type = \"MUSCL\"\n", "type = \"euler\"\n");
+    coarse.replace(coarse.find("n_steps = 8"), 11, "n_steps = 4");
+    {
+        Solver solver;
+        solver.init(parse_toml(coarse + "[[write_data]]\nprefix = \"" + dir +
+                               "/c\"\nformat = \"restart\"\ninterval = 4\n"));
+        solver.run();
+    }
+    comm::barrier();
+    std::string input = box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"euler\"\n");
+    input.replace(input.find("Nx = 6\nNy = 4\nNz = 3"), 20, "Nx = 5\nNy = 5\nNz = 4");
+    input.replace(input.find("n_steps = 8"), 11, "n_steps = 6");
+    const size_t at = input.find("[initialize]\n");
+    const size_t end = input.find("[[boundaries]]", at);
+    input.replace(at, end - at,
+                  "[initialize]\ntype = \"remap\"\nfile = \"" + dir + "/c_000004.restart\"\ndegree = 3\n"
+                  "[initialize.mesh]\ntype = \"cartesian_prism\"\nNx = 6\nNy = 4\nNz = 3\nLx = 1.0\nLy = 0.8\nLz = 0.6\n");
+    expect_matches_serial(input);
     comm::barrier();
 }

@@ -7,7 +7,7 @@ SGS models, the filter width, the global dynamic procedure, the two
 turbulent combustion models (thickened flame and partially stirred
 reactor) and the synthetic turbulence of characteristic inlets. The
 low-dissipation convective flux used with LES is in
-[chapter 6](fluxes.md#hybrid-central-upwind-flux). Usage:
+[chapter 7](fluxes.md#hybrid-central-upwind-flux). Usage:
 [Large-eddy simulation](../guide/les.md); design and validation:
 [LES design notes](../design/les.md).
 
@@ -39,9 +39,10 @@ of the SGS stress, the SGS diffusion of kinetic energy and the
 subgrid parts of the molecular fluxes are neglected, and without a
 combustion model the filtered reaction rates are those of the filtered
 state. Wall faces keep the molecular fluxes only
-([chapter 8](boundaries_sources.md#walls)). The eddy viscosity is
+([chapter 9](boundaries_sources.md#walls)), or take a wall model's
+([chapter 5](wall_models.md)). The eddy viscosity is
 recomputed at every stage from the cell velocity gradients of the viscous
-terms ([chapter 5](finite_volume.md#gradients-for-the-viscous-terms));
+terms ([chapter 6](finite_volume.md#gradients-for-the-viscous-terms));
 filter symbols are dropped in the other chapters.
 
 ## Subgrid-scale models
@@ -216,10 +217,39 @@ applied by integrating each cell's chemistry over $(\mathcal{E}/F)\,\tau$
 ([chapter 3](chemistry_radiation.md#strang-splitting)).
 
 The efficiency $\mathcal{E}$ restores the flame surface that thickening
-removes from the subgrid wrinkling. With `efficiency = "charlette"` (the
-default) it is the power-law model of
+removes from the subgrid wrinkling. With `efficiency = "dynamic"` (the
+default) it is the saturated power law of
 [Charlette, Meneveau & Veynante 2002](../references.md#charlette-2002) at
-the filter width $F\delta_L$:
+the filter width $\Delta_e = F\delta_L$, with an exponent from the dynamic
+procedure of [Wang, Boileau & Veynante 2011](../references.md#wang-2011):
+
+$$
+\begin{equation}
+\mathcal{E} = F^{\beta}, \qquad
+\beta = \frac{\ln\left(\sum_c \widehat{\lvert\nabla c\rvert}\,V_c \big/ \sum_c \lvert\nabla\widehat{c}\rvert\,V_c\right)}
+{\sum_c \ln\gamma_c\,\lvert\nabla\widehat{c}\rvert\,V_c \big/ \sum_c \lvert\nabla\widehat{c}\rvert\,V_c},
+\qquad \gamma_c^2 = 1 + \frac{n\,\widehat{\Delta}_c^2}{(F_{max}\delta_L)^2},
+\label{eq:dynamic-efficiency}
+\end{equation}
+$$
+
+from the identity that the total flame surface is the same seen at the
+combustion filter and at the test filter,
+$\langle \mathcal{E}_{\Delta_e}\lvert\nabla c\rvert\rangle =
+\langle \mathcal{E}_{\gamma\Delta_e}\lvert\nabla\widehat{c}\rvert\rangle$.
+$c$ is the sensor's progress variable and gradients are least squares on the
+vertex-neighbor stencil. The test filter $\widehat{\cdot}$ is $n$ passes of
+the volume average over the cell and its vertex neighbors, each of squared
+width $\widehat{\Delta}_c^2 = (12/d)\,\mathrm{tr}(\mathrm{cov})$ of the
+stencil's centroids ($8h^2$ on cubes of side $h$); $n$, fixed at setup, is
+the smallest that makes $n\widehat{\Delta}^2$ reach $(F_{max}\delta_L)^2$ on
+average over the thickened cells (4 on cubes at $n_{res} = 5$, $\gamma =
+1.51$). The sums run over the owned cells with $F_{max} > 1$ and are exact
+in fixed point, so $\beta$ does not depend on the rank count; $\beta$ is
+clipped to $[0, 1]$, and is 0 when the resolved surface
+$\sum_c\lvert\nabla\widehat{c}\rvert V_c$ is below $10^{-6}\sum_c V_c/\Delta_e$
+(no flame). With `efficiency = "charlette"` it is their efficiency function
+of a subgrid velocity at the filter width $F\delta_L$:
 
 $$
 \begin{equation}
@@ -259,7 +289,7 @@ $$
 with $C_u$ = `C_u` (default 28). The Laplacian of the vorticity is the
 divergence of its face gradients, cell gradients averaged to interior faces
 and corrected along the line of centroids as the viscous fluxes are
-([chapter 6](fluxes.md#viscous-fluxes)); boundary faces carry none. Without
+([chapter 7](fluxes.md#viscous-fluxes)); boundary faces carry none. Without
 the efficiency (`efficiency = "none"`) or where $F = 1$ or $u'_\Delta = 0$,
 $\mathcal{E} = 1$. The fields $\Omega$, $F$ and $\mathcal{E}$ are evaluated
 once per time step and held over its stages.
@@ -301,7 +331,7 @@ fluctuation comes from the digital filter of
 Reynolds stress imposed as
 [Lund, Wu & Squires 1998](../references.md#lund-1998) propose
 (`src/boundary/synthetic_inflow.cpp`). How the target enters the flow is in
-[chapter 8](boundaries_sources.md#characteristic-boundaries).
+[chapter 9](boundaries_sources.md#characteristic-boundaries).
 
 1. **Random field.** Independent unit-variance random numbers
     $r_j(\mathbf{k}, m)$ for each velocity component $j$ live on an auxiliary

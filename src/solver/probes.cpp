@@ -22,6 +22,8 @@
 #include <unordered_map>
 
 #include "comm.h"
+#include "common_io.h"
+#include "file_format.h"
 #include "input.h"
 #include "log.h"
 #include "viscous_flux.h"
@@ -47,6 +49,7 @@ void make_parent(const std::string & file) {
 }
 
 std::shared_ptr<std::ofstream> open_csv(const std::string & file, bool resume, const std::string & header) {
+    if (!output_files_enabled()) return std::make_shared<std::ofstream>();
     make_parent(file);
     auto out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
     if (!out->good()) throw std::runtime_error("Could not open " + file + ".");
@@ -237,6 +240,9 @@ void write_vtp_file(const std::string & file, const probe::Geometry & g, const s
         << points.size() << "\" NumberOfVerts=\"" << (std::string(cells) == "Verts" ? n_cells : 0) << "\" NumberOfLines=\""
         << (std::string(cells) == "Lines" ? n_cells : 0) << "\" NumberOfStrips=\"0\" NumberOfPolys=\""
         << (std::string(cells) == "Polys" ? n_cells : 0) << "\">\n";
+    out << "      <FieldData>\n        <DataArray type=\"Int32\" Name=\"MALLARD_FORMAT_VERSION\" NumberOfTuples=\"1\" "
+           "format=\"ascii\">"
+        << file_format::PROBE_OUTPUT.version << "</DataArray>\n      </FieldData>\n";
     out << "      <Points>\n";
     data_array(arrays[0]);
     out << "      </Points>\n      <" << cells << ">\n";
@@ -604,11 +610,11 @@ std::vector<double> Probes::Samples::gather() const {
     return ordered;
 }
 
-void Probes::init(const toml::value & input, const Mesh & mesh, const std::vector<std::string> & species_names,
+void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std::string> & species_names,
                   bool resume, bool viscous) {
     resumed = resume;
     if (!input.contains("probes")) return;
-    const auto entries = toml::find<std::vector<toml::value>>(input, "probes");
+    const auto entries = toml::find<std::vector<Input>>(input, "probes");
     for (const auto & entry : entries) {
         auto probe_ptr = std::make_unique<Probe>();
         Probe & p = *probe_ptr;
@@ -622,7 +628,7 @@ void Probes::init(const toml::value & input, const Mesh & mesh, const std::vecto
         const bool steps = entry.contains("interval"), times = entry.contains("time_interval");
         if (steps && times) throw InputError(key + ": give interval or time_interval, not both.");
         if (times) {
-            p.time_interval = find_real(entry, "time_interval");
+            p.time_interval = find_real(entry, "time_interval", dim::time);
             if (!(p.time_interval > 0.0_r)) throw InputError(key + ".time_interval must be positive.");
         } else {
             p.interval = toml::find_or<uint64_t>(entry, "interval", 1);
@@ -699,20 +705,20 @@ void Probes::init(const toml::value & input, const Mesh & mesh, const std::vecto
         }
         p.transport = p.gradients && !species_names.empty();
         if (entry.contains("reference")) {
-            const toml::value & ref = entry.at("reference");
+            const Input & ref = entry.at("reference");
             const std::string rkey = key + ".reference";
             if (!ref.is_table() || !ref.contains("rho") || !ref.contains("u") || !ref.contains("p")) {
                 throw InputError(rkey + " must be a table {rho, u = [...], p}.");
             }
-            const std::vector<rtype> u = find_real_vector(ref, "u");
+            const std::vector<rtype> u = find_real_vector(ref, "u", dim::velocity);
             if (u.size() != N_DIM) throw InputError(rkey + ".u must have " + std::to_string(N_DIM) + " components.");
             double speed = 0.0;
             for (rtype x : u) speed += static_cast<double>(x) * static_cast<double>(x);
             speed = std::sqrt(speed);
             if (!(speed > 0.0)) throw InputError(rkey + ".u must not be zero.");
             for (size_t d = 0; d < N_DIM; d++) p.reference.e[d] = static_cast<rtype>(static_cast<double>(u[d]) / speed);
-            p.reference.q = static_cast<rtype>(0.5 * static_cast<double>(find_real(ref, "rho")) * speed * speed);
-            p.reference.p = find_real(ref, "p");
+            p.reference.q = static_cast<rtype>(0.5 * static_cast<double>(find_real(ref, "rho", dim::density)) * speed * speed);
+            p.reference.p = find_real(ref, "p", dim::pressure);
         }
 
         if (boundary) {
@@ -721,7 +727,7 @@ void Probes::init(const toml::value & input, const Mesh & mesh, const std::vecto
             }
             std::vector<std::string> zones;
             if (entry.contains("boundary")) {
-                const toml::value & b = entry.at("boundary");
+                const Input & b = entry.at("boundary");
                 if (b.is_string()) {
                     zones.push_back(b.as_string());
                 } else {
@@ -733,7 +739,7 @@ void Probes::init(const toml::value & input, const Mesh & mesh, const std::vecto
                 if (type != "wall" && BOUNDARY_TYPES.find(type) == BOUNDARY_TYPES.end()) {
                     throw InputError(key + ".boundary_type = \"" + type + "\" is not wall or a boundary type.");
                 }
-                for (const auto & b : toml::find_or<std::vector<toml::value>>(input, "boundaries", {})) {
+                for (const auto & b : toml::find_or<std::vector<Input>>(input, "boundaries", {})) {
                     const std::string t = toml::find_or<std::string>(b, "type", "");
                     const auto it = BOUNDARY_TYPES.find(t);
                     const bool wall = it != BOUNDARY_TYPES.end() && BoundaryCondition{it->second}.is_wall();
@@ -757,7 +763,8 @@ void Probes::init(const toml::value & input, const Mesh & mesh, const std::vecto
             p.geometry.shape = zones.size() == 1 ? "boundary " + zones[0] : "boundaries";
         } else if (cut) {
             probe::Vec3 x = {0.0, 0.0, 0.0}, n = {0.0, 0.0, 0.0};
-            const std::vector<rtype> xv = find_real_vector(entry, "point"), nv = find_real_vector(entry, "normal");
+            const std::vector<rtype> xv = find_real_vector(entry, "point", dim::length),
+                                     nv = find_real_vector(entry, "normal", dim::none);
             if (xv.size() != N_DIM || nv.size() != N_DIM) {
                 throw InputError(key + ": point and normal must have " + std::to_string(N_DIM) + " components.");
             }
@@ -769,14 +776,14 @@ void Probes::init(const toml::value & input, const Mesh & mesh, const std::vecto
             std::array<probe::Vec3, 2> bounds{};
             const bool bounded = entry.contains("bounds");
             if (bounded) {
-                const toml::value & b = entry.at("bounds");
+                const Input & b = entry.at("bounds");
                 if (!b.is_array() || b.as_array().size() != 2) throw InputError(key + ".bounds must be [[lo...], [hi...]].");
                 for (size_t k = 0; k < 2; k++) {
-                    const toml::value & corner = b.as_array()[k];
+                    const Input & corner = b.as_array()[k];
                     if (!corner.is_array() || corner.as_array().size() != N_DIM) {
                         throw InputError(key + ".bounds corners must have " + std::to_string(N_DIM) + " components.");
                     }
-                    for (size_t d = 0; d < N_DIM; d++) bounds[k][d] = as_double(corner.as_array()[d], key + ".bounds");
+                    for (size_t d = 0; d < N_DIM; d++) bounds[k][d] = as_double(corner.as_array()[d], key + ".bounds", dim::length);
                 }
             }
             probe::CutSet set = probe::cut_plane(mesh, x, n, mesh.n_global_cells > 0, bounded ? &bounds : nullptr);
@@ -816,10 +823,15 @@ void Probes::init(const toml::value & input, const Mesh & mesh, const std::vecto
                 p.out_reductions = open_csv(p.reductions_file, resume, header);
             }
 #ifdef Mallard_HAS_HDF5
-            if (p.write_samples && p.format == Format::HDF5 && !(resume && std::filesystem::exists(p.file))) {
+            if (p.write_samples && p.format == Format::HDF5 && output_files_enabled() &&
+                !(resume && std::filesystem::exists(p.file))) {
                 make_parent(p.file);
                 h5::Handle file(H5Fcreate(p.file.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT), H5Fclose,
                                 "creating " + p.file);
+                {
+                    h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /");
+                    h5::write_int_attribute(root, "version", static_cast<int>(file_format::PROBE_OUTPUT.version));
+                }
                 const uint64_t n = p.geometry.nodes.size();
                 std::vector<double> xyz;
                 for (const auto & x : p.geometry.nodes) xyz.insert(xyz.end(), x.begin(), x.end());
@@ -891,7 +903,7 @@ void Probes::resume(uint64_t step, rtype t) {
         if (p.time_interval > 0.0_r) {
             p.n_written = static_cast<uint64_t>(std::floor(t / p.time_interval + tol)) + 1;
         }
-        if (!comm::is_root() || !p.write_samples) continue;
+        if (!comm::is_root() || !p.write_samples || !output_files_enabled()) continue;
         if (p.format == Format::VTP && std::filesystem::exists(p.file)) {
             // Keep the series up to the restart time
             std::ifstream in(p.file);
@@ -908,6 +920,10 @@ void Probes::resume(uint64_t step, rtype t) {
         if (p.format == Format::HDF5 && std::filesystem::exists(p.file)) {
             // Drop the rows after the restart step
             h5::Handle file(H5Fopen(p.file.c_str(), H5F_ACC_RDWR, H5P_DEFAULT), H5Fclose, "opening " + p.file);
+            {
+                h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /");
+                file_format::check_version(file_format::PROBE_OUTPUT, p.file, h5::read_int_attribute(root, "version"));
+            }
             const uint64_t n_rows = h5::n_rows(file, "step");
             const std::vector<uint64_t> steps = h5::read_rows<uint64_t>(file, "step", 0, n_rows, 1, H5P_DEFAULT);
             uint64_t keep = 0;

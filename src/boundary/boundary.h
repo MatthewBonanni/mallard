@@ -17,7 +17,7 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "common.h"
 #include "physics.h"
@@ -109,6 +109,7 @@ struct BoundaryCondition {
     BoundaryType type = BoundaryType::EXTRAPOLATION;
     rtype data[N_DIM + 2] = {};
     rtype relax[N_RELAX] = {};
+    bool modeled = false;  // walls: a wall model gives the viscous flux, and the ghost is a slip wall's
 
     KOKKOS_INLINE_FUNCTION
     bool is_wall() const {
@@ -130,7 +131,7 @@ struct BoundaryCondition {
     /**
      * @brief Parse a [[boundaries]] table entry.
      */
-    static BoundaryCondition from_input(const toml::value & input, const Euler & physics);
+    static BoundaryCondition from_input(const Input & input, const Euler & physics);
 
     /**
      * @brief Ghost state W_g = [rho, u, p] given the interior state W_i.
@@ -159,7 +160,7 @@ struct BoundaryCondition {
             case BoundaryType::WALL_ADIABATIC:
             case BoundaryType::WALL_ISOTHERMAL:
             case BoundaryType::WALL_HEAT_FLUX:
-                if (viscous) {
+                if (viscous && !modeled) {
                     FOR_I_DIM W_g[1 + i] = 2.0_r * data[1 + i] - W_i[1 + i];
                     if (type == BoundaryType::WALL_ISOTHERMAL && wall_temperature) {
                         const rtype T_i = W_i[E] / (W_i[0] * R);
@@ -483,6 +484,37 @@ struct BoundaryData {
             return;
         }
         bcs(face_bc(i_face)).ghost_W(W_i, n, gamma, R, viscous, W_g, !mixture);
+    }
+
+    /**
+     * @brief Wave speed |u_n| + c of the exterior state of boundary face
+     *        i_face for the stable time step, so that a fast inflow limits
+     *        the step before it has entered the domain: the ghost of the cell
+     *        state W_c, or the target of characteristic inlets; zero for
+     *        transmissive faces, whose exterior state is interior.
+     * @param gamma_c Ratio of specific heats of W_c, also the ghost's unless
+     *        the condition prescribes its own gas (mixtures).
+     */
+    KOKKOS_INLINE_FUNCTION
+    rtype exterior_wave_speed(const uint32_t i_face, const rtype * W_c, const rtype * n, const rtype gamma_c) const {
+        constexpr uint8_t E = N_DIM + 1;
+        const int32_t i_bc = face_bc(i_face);
+        const BoundaryCondition & bc = bcs(i_bc);
+        rtype W_g[N_DIM + 2];
+        if (bc.type == BoundaryType::NSCBC_INLET) {
+            const int32_t k = face_char(i_face);
+            W_g[0] = bc.data[0];
+            FOR_I_DIM W_g[1 + i] = char_target(k, i);
+            W_g[E] = bc.data[E];
+        } else if (bc.is_transmissive() || bc.type == BoundaryType::PARTITION) {
+            return 0.0_r;
+        } else {
+            ghost_W(i_face, W_c, n, W_g);
+        }
+        const bool own_gas = bc_thermo.extent(0) > 0 &&
+                             (bc.type == BoundaryType::UPT || bc.type == BoundaryType::NSCBC_INLET);
+        const rtype gamma_g = own_gas ? bc_thermo(i_bc, 0) : gamma_c;
+        return Kokkos::fabs(dot<N_DIM>(W_g + 1, n)) + Kokkos::sqrt(gamma_g * W_g[E] / W_g[0]);
     }
 };
 

@@ -6,6 +6,9 @@
 #
 # MALLARD_2D and MALLARD_3D are the solvers of 2D and 3D builds with MPI;
 # gmsh and python3 (with tutorials/requirements.txt) must be on the PATH.
+# Each tutorial's steps are the function of the same name in
+# tutorials/<name>/ci.sh, run in WORK_DIR/<name>; without TUTORIAL
+# arguments, every tutorial runs.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 m2d="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
@@ -20,17 +23,15 @@ mpi() { mpirun -n 2 --oversubscribe "$@"; }
 # set_key FILE KEY VALUE: replace the value of every line "KEY = ..." of FILE
 set_key() { sed -i.bak "s|^$2 = .*|$2 = $3|" "$1" && rm -f "$1.bak"; }
 
-cone() {
-    cp "$here/cone/input.toml" .
-    gmsh "$here/cone/cone.geo" -3 -setnumber h 0.06 -setnumber h_out 0.12 -o cone.msh > gmsh.log
-    mpi "$m3d" -i input.toml > run.log
-    python3 "$here/cone/taylor_maccoll.py" --csv taylor_maccoll.csv
-    python3 "$here/cone/plot_mesh.py" cone.msh --out figures
-    python3 "$here/cone/plot_results.py" . --out figures
-}
+all=()
+for f in "$here"/*/ci.sh; do
+    # shellcheck source=/dev/null
+    source "$f"
+    all+=("$(basename "$(dirname "$f")")")
+done
 
 tutorials=("$@")
-[ ${#tutorials[@]} -gt 0 ] || tutorials=(cone)
+[ ${#tutorials[@]} -gt 0 ] || tutorials=("${all[@]}")
 for t in "${tutorials[@]}"; do
     echo "== $t"
     mkdir -p "$work/$t"

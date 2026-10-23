@@ -1,86 +1,410 @@
 # Tools
 
-Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the 3D animations also need pyvista.
+Mallard comes with three executables and a set of Python scripts that cover every step around a run: making a mesh, setting up an initial state, running, looking at the output, and comparing it with references.
+
+![The tools by step: meshes, set-up, run, post-processing, comparison](../docs/images/tools/workflow-light.svg#gh-light-mode-only)
+![The tools by step: meshes, set-up, run, post-processing, comparison](../docs/images/tools/workflow-dark.svg#gh-dark-mode-only)
+
+| Step | General tools |
+|---|---|
+| [Executables](#executables): the solver, a 0D reactor, HDF5 meshes | `Mallard`, `MallardReactor`, `mallard-mesh-convert` |
+| [Meshes](#meshes): Gmsh meshes from the command line | `make_cylinder_mesh.py`, `make_annulus_mesh.py`, `make_mallard_mesh.py` |
+| [Initial states](#initial-states-and-references): restart files to start runs from | `isotropic_turbulence_restart.py`, `channel_init.py`, `tile_restart.py`, `interpolate_restart.py`, `flame_restart.py`, `znd_restart.py` |
+| [References](#initial-states-and-references): exact and Cantera solutions | `flame_reference.py`, `detonation_reference.py`, `sedov.py`, `cantera_mechanisms.py` |
+| [Post-processing](#post-processing): readers, plots, movies, averages | `mallard_vtu.py`, `mallard_h5.py`, `plot_vtu.py`, `compare_png.py`, `animate.py`, `animate_cartesian.py`, `animate_grid.py`, `plane_average.py` |
+| [Performance](#performance): benchmarks and baselines | `perf_suite.py` |
+| [Case scripts](#case-scripts): set-up and analysis of one example each | `plot_<case>.py`, `animate_<case>.py`, ... |
+| [Developer tools](#developer-tools): figures of these pages, test reference data | `docs/`, `chemistry_reference.py`, ... |
+
+The Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the mesh generators also need gmsh, the chemistry scripts cantera, HDF5 output h5py, and the 3D renders pyvista:
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install numpy scipy matplotlib imageio imageio-ffmpeg gmsh cantera h5py pyvista
+```
+
+`python tools/NAME.py --help` lists a script's options. Every figure on this page comes from running the tool it shows: [`docs/tools.py`](docs/tools.py) runs them and draws what they wrote.
+
+## Executables
+
+`cmake --build build` builds them in `build/src/`.
+
+### `Mallard`: the solver
+
+```sh
+Mallard -i input.toml [--kokkos-num-threads=8]
+mpirun -n 4 Mallard -i input.toml
+```
+
+Runs the simulation an input file describes: see [first simulation](../docs/tutorials/first_simulation.md), [input files](../docs/guide/input_files.md) and the [input reference](../docs/input.md).
+
+### `MallardReactor`: 0D reactors and chemistry benchmarks
+
+Integrates one adiabatic, constant-volume reactor with the solver's chemistry (the same stiff integrator, rates and thermodynamics), writes its state over time and prints the ignition delay. Use it to check a mechanism, its tolerances and its ignition delays before a reacting run; with a `[benchmark]` table it measures the chemistry's throughput instead.
+
+```toml
+[physics]
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+
+[reactor]
+type = "constant_volume"
+T = 1200.0
+p = 101325.0
+X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }
+end_time = 2.0e-4
+output_interval = 1.0e-6
+output = "reactor.csv"
+```
+
+```sh
+cd examples/h2_ignition
+../../build/src/MallardReactor -i input.toml    # writes reactor.csv, prints the ignition delay
+```
+
+![Temperature and mass fractions of H2, O2, H2O and OH over time in the constant-volume ignition of H2/air](../docs/images/guide/ignition-light.svg#gh-light-mode-only)
+![Temperature and mass fractions of H2, O2, H2O and OH over time in the constant-volume ignition of H2/air](../docs/images/guide/ignition-dark.svg#gh-dark-mode-only)
+
+More: [Thermochemistry](../docs/guide/thermochemistry.md#0d-reactors-mallardreactor).
+
+### `mallard-mesh-convert`: meshes for large parallel runs
+
+Writes a mesh file (Gmsh, Fluent, CGNS or OpenFOAM), or the mesh of an input file with its `[mesh.transform]`, in Mallard's HDF5 format, which every rank of a parallel run reads only its share of. Builds with `-DMallard_ENABLE_HDF5=ON`; use it once the mesh is too large for each rank to read whole.
+
+```sh
+mallard-mesh-convert mesh.msh mesh.h5                # from any mesh file
+mpirun -n 8 mallard-mesh-convert input.toml mesh.h5  # the mesh of an input, written in parallel
+```
+
+The same geometry in each format, as Mallard reads it through the converter:
+
+![The test geometry, a channel with a cylinder, read from each mesh format](../docs/images/guide/mesh_import-light.svg#gh-light-mode-only)
+![The test geometry, a channel with a cylinder, read from each mesh format](../docs/images/guide/mesh_import-dark.svg#gh-dark-mode-only)
+
+More: [Meshes](../docs/guide/meshes.md#hdf5-meshes-for-large-runs).
+
+## Meshes
+
+Each script writes an ASCII Gmsh 2.2 file whose physical groups become Mallard's boundary zones: name them in `[[boundaries]]` and point `[mesh] filename` at the file. For any other geometry, write a `.geo` script for Gmsh, as the [tutorials](../docs/tutorials/index.md) do.
+
+### `make_cylinder_mesh.py`: O-grid around a cylinder
+
+```sh
+python tools/make_cylinder_mesh.py OUTPUT.msh [--n-theta 256] [--n-r 128] [--r-far 20] [--dr0 0.004] [--half] [--order 1|2|3]
+```
+
+Quadrilaterals around a cylinder of diameter 1, radial spacing growing geometrically from `--dr0` at the wall; zones `cylinder` and `farfield`. `--half` keeps the upper half with the cuts along y = 0 as `axis`, the meridian plane of a sphere for axisymmetric runs; `--order 2` or `3` writes the circles as high-order lines, so Mallard curves them. Used by [`cylinder`](../examples/cylinder) and [`sphere_axisymmetric`](../examples/sphere_axisymmetric).
+
+![The cylinder O-grid and its boundary zones](../docs/images/guide/domain_cylinder-light.svg#gh-light-mode-only)
+![The cylinder O-grid and its boundary zones](../docs/images/guide/domain_cylinder-dark.svg#gh-dark-mode-only)
+
+### `make_annulus_mesh.py`: annulus, for curved-wall tests
+
+```sh
+python tools/make_annulus_mesh.py OUTPUT.msh [--n-r 8] [--n-theta 128] [--r-in 1] [--r-out 1.384] [--triangles] [--order 1|2|3] [--jitter 0]
+```
+
+An O-grid between two circles (zones `inner` and `outer`): quadrilaterals, triangles along alternating diagonals (`--triangles`), interior nodes moved at random by `--jitter` times the radial spacing, and curved walls with `--order 2` or `3`. The curved-boundary convergence study (`curved_convergence.py`) runs on it.
+
+![make_annulus_mesh.py with quadrilaterals, --triangles and --jitter 0.3](../docs/images/tools/annulus_mesh-light.svg#gh-light-mode-only)
+![make_annulus_mesh.py with quadrilaterals, --triangles and --jitter 0.3](../docs/images/tools/annulus_mesh-dark.svg#gh-dark-mode-only)
+
+### `make_mallard_mesh.py`: a flying mallard
+
+```sh
+python tools/make_mallard_mesh.py OUTPUT.msh [--h-wall 0.0015] [--h-far 0.0045] [--preview duck.png]
+```
+
+Triangles around a duck silhouette (a periodic spline), refined linearly from `--h-wall` on the body to `--h-far`; zones `duck`, `inflow`, `outflow`, `top` and `bottom`. The mesh of the [`mallard`](../examples/mallard) example, and a template for meshing any spline outline with the gmsh Python module.
+
+![The triangle mesh around the mallard, near field](../docs/images/tools/mallard_mesh-light.svg#gh-light-mode-only)
+![The triangle mesh around the mallard, near field](../docs/images/tools/mallard_mesh-dark.svg#gh-dark-mode-only)
+
+### `plot_mesh_quality.py`: mesh quality
+
+The quality fields that `Mallard --check --quality-vtu PREFIX` writes for a 2D
+mesh (non-orthogonality, skewness, aspect ratio, volume ratio), with the worst
+cells circled; readable on light and dark backgrounds. Use it before a long run
+to find the cells that limit the time step or the accuracy.
+
+```bash
+Mallard -i input.toml --check --quality-vtu quality
+python tools/plot_mesh_quality.py quality.vtu quality.png --fields NON_ORTHOGONALITY SKEWNESS --worst 10
+```
+
+The figure is in [Meshes](../docs/guide/meshes.md#mesh-quality).
+
+### Meshes of single examples
+
+| Script | Mesh | Example |
+|---|---|---|
+| `make_sphere_mesh.py` | Tetrahedra of the quarter domain around a sphere (symmetry planes `symmetry_y`, `symmetry_z`), refined on the sphere and through the bow-shock layer; `--order 2`/`3` curves the sphere | [`sphere_mach3`](../examples/sphere_mach3) |
+| `make_sphere_re300_mesh.py` | The full domain around a sphere: a prism boundary layer, tetrahedra refined through the near wake; `--scale` refines everything for mesh studies | [`sphere_re300`](../examples/sphere_re300) |
+| `make_volvo_mesh.py` | Hexahedra of the Volvo bluff-body combustor: four blocks around the triangular flameholder, mesh lines normal to its faces, periodic in span | [`volvo_bluff_body`](../examples/volvo_bluff_body) |
+
+![make_volvo_mesh.py around the flameholder, and the symmetry plane of make_sphere_mesh.py](../docs/images/tools/case_meshes-light.svg#gh-light-mode-only)
+![make_volvo_mesh.py around the flameholder, and the symmetry plane of make_sphere_mesh.py](../docs/images/tools/case_meshes-dark.svg#gh-dark-mode-only)
+
+## Initial states and references
+
+Mallard starts from a uniform state, expressions or a restart file (`[initialize] type = "restart"`). These scripts write restart files for states expressions can't describe, and compute the references runs are compared against; the file format is in [Initialization and restarts](../docs/guide/initialization.md#initial-states-from-scripts).
+
+### `isotropic_turbulence_restart.py`: decaying isotropic turbulence
+
+```sh
+python tools/isotropic_turbulence_restart.py N OUT.restart [--seed 1] [--k0 4] [--mt 0.6] [--re-lambda 100]
+```
+
+A random solenoidal velocity field on the periodic box [0, 2π]³ of N³ cells with spectrum E(k) ~ k⁴ exp(-2 (k/k0)²) and turbulent Mach number `--mt`, as exact cell averages of the same band-limited field on any N (so the meshes of a convergence study start alike). Prints the `[physics]` values (viscosity for `--re-lambda`) and the eddy turnover time to put in the input. Used by [`isotropic_turbulence`](../examples/isotropic_turbulence).
+
+![A plane of the initial velocity and its shell spectrum against the prescribed one](../docs/images/tools/isotropic_turbulence_restart-light.svg#gh-light-mode-only)
+![A plane of the initial velocity and its shell spectrum against the prescribed one](../docs/images/tools/isotropic_turbulence_restart-dark.svg#gh-dark-mode-only)
+
+### `channel_init.py`: turbulent channel
+
+```sh
+python tools/channel_init.py input.toml OUT.restart [--seed 1] [--perturbation 0.15]
+```
+
+Reads the box, cell counts, stretching and gas from an input with the generated `cartesian` mesh, walls at y = 0 and 2h and bulk velocity 1, and writes a 1/7-power mean profile plus a random, divergence-free perturbation that vanishes at the walls. Turbulence develops within about one h/u_τ, far sooner than from a laminar start. Used by [`channel_retau180`](../examples/channel_retau180) and the [channel LES tutorial](../docs/tutorials/channel_les.md).
+
+![Mean streamwise velocity with the perturbation's spread, and the perturbation on a cross-section](../docs/images/tools/channel_init-light.svg#gh-light-mode-only)
+![Mean streamwise velocity with the perturbation's spread, and the perturbation on a cross-section](../docs/images/tools/channel_init-dark.svg#gh-dark-mode-only)
+
+### `wmles_channel.py`: wall-modeled channel
+
+```sh
+python tools/wmles_channel.py init input.toml OUT.restart [--seed 1] [--perturbation 0.1] [--T-center TC]
+python tools/wmles_channel.py analyze input.toml forces_bottom.csv forces_top.csv --t-start T \
+    --reference {lm2000,lm5200,tl-m1.7,tl-m3.0} [--profile profile.csv]
+```
+
+For `examples/channel_wmles`. `init` writes `channel_init.py`'s field with a temperature profile and the matching density
+for supersonic channels. `analyze` gives $Re_\tau$, $C_f$, $B_q$, the centerline temperature and $U^+$ from the force monitors (with
+the heat-flux column of modeled walls) and a `plane_average.py` profile, against Lee & Moser (downloaded on first use) or
+Trettel & Larsson.
+
+### `tile_restart.py`: repeat a periodic flow along x
+
+```sh
+python tools/tile_restart.py IN.restart NX_IN COPIES OUT.restart
+```
+
+The developed flow of a periodic box (generated 3D `cartesian` mesh, NX_IN cells along x) repeated COPIES times along x, at step 0 and time 0: starts a spatially developing run (e.g. a channel with an inflow) from a periodic precursor. Run it on a mesh of COPIES × NX_IN cells along x with the same Ny, Nz and spacing. Used by [`channel_inflow_retau180`](../examples/channel_inflow_retau180).
+
+![A periodic field of 32 cells along x, and the same field tiled three times](../docs/images/tools/tile_restart-light.svg#gh-light-mode-only)
+![A periodic field of 32 cells along x, and the same field tiled three times](../docs/images/tools/tile_restart-dark.svg#gh-dark-mode-only)
+
+### `interpolate_restart.py`: move a 3D flow to another mesh
+
+```sh
+python tools/interpolate_restart.py OLD.msh OLD.restart NEW.msh NEW.restart [--neighbors 8]
+```
+
+Each cell of the new Gmsh mesh takes the inverse-distance weighted average of the nearest old cells: starts a refined run from a flow developed on a coarse mesh. Reads ASCII Gmsh 2.2 files of 3D cells; keeps the old step and time. For a conservative, high-order transfer between any two meshes (2D too), use `[initialize] type = "remap"` instead ([Remap from another mesh](../docs/guide/initialization.md#remap-from-another-mesh)).
+
+![A coarse and a fine make_volvo_mesh.py mesh: the field on the coarse one, and interpolated onto the fine one](../docs/images/tools/interpolate_restart-light.svg#gh-light-mode-only)
+![A coarse and a fine make_volvo_mesh.py mesh: the field on the coarse one, and interpolated onto the fine one](../docs/images/tools/interpolate_restart-dark.svg#gh-dark-mode-only)
+
+### `flame_reference.py` and `flame_restart.py`: premixed flames
+
+```sh
+python tools/flame_reference.py --single h2 1.0 300 full/        # Cantera FreeFlame: full/h2_phi1_T300_{mix,unity}_full.csv
+python tools/flame_restart.py full/h2_phi1_T300_mix_full.csv mechanisms/h2o2.yaml ohmech 8 run/
+    [--ny 48 --perturb 1.5]                                       # a 2D channel with a wrinkled front
+cd run && ../build/src/Mallard -i input.toml && cd ..
+python tools/flame_speed.py run/ 2.332                            # consumption and displacement speeds
+python tools/plot_flame.py run/ examples/premixed_flame/reference/h2_phi1.0_mix.csv out.png
+```
+
+`flame_reference.py` computes freely propagating flames with Cantera (without `--single`, the H2/air and CH4/air sweep of [`premixed_flame`](../examples/premixed_flame)); `flame_restart.py` turns one into a Mallard run (input and restart) in the flame's frame at a given number of cells per thermal thickness, as a 1D strip or, with `--ny`, a periodic 2D channel whose front is displaced by random modes; `flame_speed.py` and `plot_flame.py` compare the run with Cantera. Used by [`premixed_flame`](../examples/premixed_flame) and [`flame_2d`](../examples/flame_2d).
+
+![The restart file's mass fractions on the cells against Cantera's profiles, and a 2D wrinkled start](../docs/images/tools/flame_restart-light.svg#gh-light-mode-only)
+![The restart file's mass fractions on the cells against Cantera's profiles, and a 2D wrinkled start](../docs/images/tools/flame_restart-dark.svg#gh-dark-mode-only)
+
+### `detonation_reference.py` and `znd_restart.py`: detonations
+
+```sh
+python tools/detonation_reference.py mechanisms/h2o2.yaml ohmech "H2:2, O2:1, AR:7" 298 6670 znd.csv
+python tools/znd_restart.py znd.csv mechanisms/h2o2.yaml ohmech 400 0.08 0.05 det.restart 2 \
+    --ny 100 --ly 0.02 --pocket 0.045 0.006 0.0015 --pocket 0.044 0.014 0.0012
+```
+
+`detonation_reference.py` prints the Chapman-Jouguet speed, the von Neumann state and the induction length, and writes the ZND profile; `znd_restart.py` puts that profile behind a shock at X_SHOCK on a generated box, in 1D, 2D (`--ny`) or a 3D duct (`--nz`), with `--pocket` disks or spheres of unreacted gas behind the front to trigger cellular instability. Used by [`detonation_1d`](../examples/detonation_1d), [`detonation_2d`](../examples/detonation_2d) and [`detonation_3d`](../examples/detonation_3d).
+
+![The ZND temperature and pressure behind the shock, and the 2D initial state with two pockets of unreacted gas](../docs/images/tools/znd_restart-light.svg#gh-light-mode-only)
+![The ZND temperature and pressure behind the shock, and the 2D initial state with two pockets of unreacted gas](../docs/images/tools/znd_restart-dark.svg#gh-dark-mode-only)
+
+### `sedov.py`: exact Sedov-Taylor blast
+
+```sh
+python tools/sedov.py [--gamma 1.4]                        # xi0 of R = xi0 (E t^2 / rho0)^(1/5)
+python tools/sedov.py solut/ --energy E [-o sedov.png]     # a run's shock radius and density against it
+```
+
+The similarity solution behind a strong spherical shock, from its ODEs: the reference of [`sedov_3d`](../examples/sedov_3d) and [`sedov_axisymmetric`](../examples/sedov_axisymmetric).
+
+![Density, velocity and pressure of the Sedov-Taylor similarity solution](../docs/images/tools/sedov-light.svg#gh-light-mode-only)
+![Density, velocity and pressure of the Sedov-Taylor similarity solution](../docs/images/tools/sedov-dark.svg#gh-dark-mode-only)
+
+### Other references
+
+| Script | Reference |
+|---|---|
+| `counterflow_reference.py` | Counterflow diffusion flames (Cantera): H2/N2 against air swept in strain rate up to extinction, and full solutions at given nozzle velocities (`--profile`) or local strain rates (`--match`) |
+| `autoignition_reference.py` | 0D references of the autoignition runs: homogeneous constant-volume reactor, ignition delay against temperature, multizone model of each run's initial temperatures |
+| `mixture_riemann.py` | Exact Riemann solution for thermally perfect mixtures of frozen composition (the multicomponent shock-tube tests) |
+| `cantera_mechanisms.py` | Copies the mechanisms too large for the repository (n-hexane, 1268 species) from Cantera's data into `mechanisms/external/` |
+
+## Post-processing
+
+Mallard writes VTU files that ParaView opens (the `.pvd` file is the series), or HDF5 files with XDMF indexes; these scripts read either.
+
+### `mallard_vtu.py` and `mallard_h5.py`: readers
+
+A small Python API over Mallard's output, used by every script below:
+
+```python
+import sys; sys.path.insert(0, "tools")
+from mallard_vtu import read_vtu, read_vtu_cells
+
+pts, tris, tri_cell, arrays = read_vtu("solut/riemann_000080.vtu")   # 2D: triangles of every cell
+rho = arrays["RHO"]                       # one value per cell; arrays["TIME"] is the time
+pts, conn, offsets, types, arrays = read_vtu_cells("solut/flow_000010.vtu")  # 2D or 3D cells
+```
+
+`mallard_vtu.py` reads binary or ASCII VTU (boundary-zone output too) and takes `.h5` snapshots as well; `mallard_h5.py` (needs h5py) reads `format = "hdf5"` output: the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`.
+
+### `plot_vtu.py`: one field of a snapshot
+
+```sh
+python tools/plot_vtu.py solut/riemann_000080.vtu rho.png [--var RHO] [--contours 24]
+```
+
+A quick look at a 2D snapshot without ParaView: one cell field (any array of the file) with its range and optional contours.
+
+![Density of the 2D Riemann problem at t = 0.8 on 200 x 200 quadrilaterals, with contours](../docs/images/tools/plot_vtu-light.svg#gh-light-mode-only)
+![Density of the 2D Riemann problem at t = 0.8 on 200 x 200 quadrilaterals, with contours](../docs/images/tools/plot_vtu-dark.svg#gh-dark-mode-only)
+
+### `compare_png.py`: runs side by side
+
+```sh
+python tools/compare_png.py compare.png RHO fo/solut/riemann_000080.vtu teno5/solut/riemann_000080.vtu
+```
+
+The same field of several snapshots side by side, each titled with its run directory and range: compare schemes, meshes or settings at a glance.
+
+![The same 2D Riemann problem with first-order and TENO5 reconstruction](../docs/images/tools/compare_png-light.svg#gh-light-mode-only)
+![The same 2D Riemann problem with first-order and TENO5 reconstruction](../docs/images/tools/compare_png-dark.svg#gh-dark-mode-only)
+
+### `animate.py`: movies of a 2D run
+
+```sh
+python tools/animate.py solut riemann [--var RHO] [--res 1000] [--fps 20] [--xlim 0 1] [--glob "flow_[0-9]*.h5"]
+```
+
+An MP4 and a GIF of a 2D series: the field (density, or `--var`, including the derived `VORTICITY` and `MACH`) with contours, beside a numerical schlieren. Frames map every pixel to the cell holding it, so any mesh works; `--frames-dir` keeps the PNG frames, and `--help` lists the layout, color and size options.
+
+![The last frame: density and numerical schlieren](../docs/images/tools/animate-light.svg#gh-light-mode-only)
+![The last frame: density and numerical schlieren](../docs/images/tools/animate-dark.svg#gh-dark-mode-only)
+
+### `animate_cartesian.py`: very large runs on generated quad meshes
+
+```sh
+python tools/animate_cartesian.py extract solut grid [--delete] [--follow]   # each snapshot to grid/NAME.npy
+python tools/animate_cartesian.py render grid movie [--width 3840 --height 2160]
+python tools/animate_cartesian.py still grid/NAME.npy still                  # one pixel per cell
+```
+
+For millions of cells: `extract` turns each (P)VTU snapshot into a float32 grid, optionally deleting the snapshot and following a running case (`--follow`) so disk use stays bounded; `render` makes pixel-exact 4K frames (density shaded by the schlieren, area-averaged from the full grid so nothing aliases) and the MP4; `still` writes the density and the schlieren at one pixel per cell, like the [gallery](https://matthewbonanni.github.io/mallard/gallery/)'s 4096² still.
+
+![still_density.png and still_schlieren.png of the 200 x 200 run](../docs/images/tools/animate_cartesian-light.svg#gh-light-mode-only)
+![still_density.png and still_schlieren.png of the 200 x 200 run](../docs/images/tools/animate_cartesian-dark.svg#gh-dark-mode-only)
+
+### `animate_grid.py`: several cases in one movie
+
+```sh
+python tools/animate_grid.py tools/hero_grid.json hero [--workers 4]
+```
+
+Several cases side by side, synchronized in normalized time t / t_end, from a JSON configuration of rows of panels: fields, wall profiles against reference data, detonation soot foils, pre-rendered frame sequences (e.g. 3D views) and time series traced over a reference curve. `hero_grid.json` makes the animation at the top of Mallard's README (its `_inputs` lists where each input comes from).
+
+![Double Mach reflection, 2D Riemann problem, detonation, Taylor-Green vortex and sphere wake in one animation](../docs/images/hero.gif)
+
+### `plane_average.py`: profiles from running statistics
+
+```sh
+python tools/plane_average.py solut/flow_000100.pvtu --average x z --out profile.csv
+```
+
+Averages the `[statistics]` output (`MEAN_<field>`, `COV_<a>_<b>`) of an axis-aligned quad or hex mesh over homogeneous directions as a function of the others, e.g. a channel's profiles in y (stretched meshes too), adding the dispersive part to the covariances. Reads VTU or PVTU, writes a CSV; in Python, `plane_average(centers, volumes, fields, "xz")` does the same on arrays. The [channel LES tutorial](../docs/tutorials/channel_les.md) draws these profiles from it:
+
+![Mean velocity and resolved Reynolds stresses in wall units against the DNS](../docs/images/tutorials/channel_profiles-light.svg#gh-light-mode-only)
+![Mean velocity and resolved Reynolds stresses in wall units against the DNS](../docs/images/tutorials/channel_profiles-dark.svg#gh-dark-mode-only)
+
+## Performance
+
+### `perf_suite.py`: benchmarks and baselines
+
+```sh
+python tools/perf_suite.py run --build-2d build --build-3d build-3d [--repeats 3] [--cases teno5_2d,h2o2] --out perf.json
+python tools/perf_suite.py compare perf.json [--hardware NAME] [--threshold 0.05]
+python tools/perf_suite.py update-baselines perf.json
+```
+
+Runs the performance set of `benchmarks/perf/` (flow solver in 2D and 3D, reacting mixtures, chemistry): a warm-up, then the best of several runs with their spread, as JSON or CSV. `compare` fails when a case is slower than the baseline for that hardware by more than both the threshold and the spread. Standard library only. See [Performance](../docs/guide/performance.md) for the measured numbers.
+
+![Baseline throughput of each benchmark on each GPU](../docs/images/tools/perf_baselines-light.svg#gh-light-mode-only)
+![Baseline throughput of each benchmark on each GPU](../docs/images/tools/perf_baselines-dark.svg#gh-dark-mode-only)
+
+## Case scripts
+
+These set up or analyze one example each; their figures are on the [Examples](https://matthewbonanni.github.io/mallard/docs/examples/) and [Validation](https://matthewbonanni.github.io/mallard/validation/) pages, and `--help` gives each one's usage.
+
+| Example | Set-up | Analysis against references | Animation |
+|---|---|---|---|
+| [`sod`](../examples/sod) | | `plot_sod.py`: density profiles against the exact solution | |
+| [`viscous_shock_tube`](../examples/viscous_shock_tube) | | `plot_viscous_shock_tube.py`: wall density and lambda-shock triple point against Zhou et al. | |
+| [`poiseuille_pipe`](../examples/poiseuille_pipe) | | `plot_poiseuille.py`: axial velocity against the exact cell averages | |
+| [`noh_axisymmetric`](../examples/noh_axisymmetric) | | `plot_noh.py`: density and shock radius by direction against the exact solution | |
+| [`sphere_axisymmetric`](../examples/sphere_axisymmetric) | `make_cylinder_mesh.py --half` | `plot_sphere_axisymmetric.py`: drag, separation angle and wake length | |
+| [`sedov_3d`](../examples/sedov_3d) | | `sedov.py` | `animate_sedov.py` |
+| [`sphere_mach3`](../examples/sphere_mach3) | `make_sphere_mesh.py` | `plot_sphere.py`: bow-shock standoff against Billig | `animate_sphere.py` |
+| [`sphere_re300`](../examples/sphere_re300) | `make_sphere_re300_mesh.py` | `plot_sphere_re300.py`: Strouhal number, drag and lift | `animate_sphere_re300.py` |
+| [`taylor_green_3d`](../examples/taylor_green_3d) | | `plot_taylor_green.py`: kinetic energy and dissipation rate against the spectral DNS | `animate_taylor_green.py` |
+| [`isotropic_turbulence`](../examples/isotropic_turbulence) | `isotropic_turbulence_restart.py` | `isotropic_turbulence_stats.py`, `plot_isotropic_turbulence.py`: filtered statistics and spectra against Johnsen et al. | `animate_isotropic_turbulence.py` |
+| [`channel_retau180`](../examples/channel_retau180) | `channel_init.py` | `plane_average.py`, `plot_channel.py`: profiles in wall units against Moser, Kim & Mansour | `animate_channel.py` |
+| [`channel_inflow_retau180`](../examples/channel_inflow_retau180) | `tile_restart.py` | `plane_average.py`, `plot_channel.py` | |
+| [`channel_wmles`](../examples/channel_wmles) | `wmles_channel.py init` | `plane_average.py`, `wmles_channel.py analyze`: C<sub>f</sub>, Re<sub>τ</sub>, B<sub>q</sub>, T<sub>c</sub> against Lee & Moser and Trettel & Larsson | |
+| [`cbc_les`](../examples/cbc_les) | `cbc_les.py` (initial field, rescaling) | `cbc_les.py`: spectra against Comte-Bellot & Corrsin, dissipation budget | |
+| [`volvo_bluff_body`](../examples/volvo_bluff_body) | `make_volvo_mesh.py`, `volvo.py probes` | `volvo.py profiles`, `plot`, `budget`: against the experiment | `volvo.py slice`, `animate`, `render` |
+| [`flame_turbulence`](../examples/flame_turbulence) | `flame_turbulence.py hit`, `init` | `flame_turbulence.py analyze`, `figure`; `tfles_apriori.py` | `render_flame_turbulence.py` |
+| [`reactive_shock_tube`](../examples/reactive_shock_tube) | | `plot_reactive_shock_tube.py`: reaction front, peak temperature and pressure | |
+| [`detonation_1d`](../examples/detonation_1d) | `detonation_reference.py`, `znd_restart.py` | `plot_detonation.py`: front speed and induction length against CJ and ZND | |
+| [`detonation_2d`](../examples/detonation_2d) | `znd_restart.py --ny` | `soot_foil.py`: front speed, triple points, cell width, soot foil | `animate_detonation_2d.py` |
+| [`detonation_3d`](../examples/detonation_3d) | `detonation_window.py` (moving window, `extrude` from 2D) | `soot_foil_3d.py`: the four wall foils and track spacings | `animate_detonation_3d.py` |
+| [`premixed_flame`](../examples/premixed_flame) | `flame_reference.py`, `flame_restart.py`, `flame_sweep.py setup` | `flame_speed.py`, `plot_flame.py`, `flame_sweep.py report`: flame speeds and profiles against Cantera | |
+| [`flame_2d`](../examples/flame_2d) | `flame_restart.py --ny` | `flame_speed.py` | `animate_flame_2d.py` |
+| [`counterflow_diffusion`](../examples/counterflow_diffusion) | `counterflow_reference.py`, `counterflow_setup.py` (mesh, initial state and input) | `plot_counterflow.py`: peak temperature against strain rate, profiles | |
+| [`triple_flame`](../examples/triple_flame) | `triple_flame.py` | `triple_flame_analysis.py`: propagation speed against Ruetsch et al. | `animate_triple_flame.py` |
+| [`flame_vortex`](../examples/flame_vortex), [`flame_vortex_quenching`](../examples/flame_vortex_quenching) | `flame_vortex.py` | `flame_vortex_analysis.py`: regimes on the spectral diagram of Poinsot et al. | `animate_flame_vortex.py` |
+| [`autoignition_2d`](../examples/autoignition_2d) | `autoignition_restart.py`, `autoignition_reference.py` | `autoignition_deflagration.py`, `autoignition_analysis.py`: heat release against the 0D references, deflagration share | `animate_autoignition.py` |
+| [`shock_bubble_3d`](../examples/shock_bubble_3d) | `shock_bubble.py` (initial state) | `shock_bubble.py`: x-t diagram velocities against Haas & Sturtevant | `animate_shock_bubble.py` |
+| Head-on flame-wall quenching | `flame_wall.py setup` (Cantera flame, 1D strip to a cold wall) | `flame_wall.py analyze`: wall heat flux and flame position over time | |
+| Curved boundaries | `make_annulus_mesh.py` | `curved_convergence.py`: orders of accuracy, straight against curved walls | |
+
+## Developer tools
 
 | Script | Purpose |
 |---|---|
-| `mallard_vtu.py` | Minimal reader for Mallard's VTU files (cells, cell data, time), binary or ASCII (boundary-zone output); also reads HDF5 snapshots (`.h5`), so the scripts below accept them too |
-| `mallard_h5.py` | Reader for `format = "hdf5"` output (needs h5py): mesh, cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf` (`animate.py` takes `--glob "PREFIX_[0-9]*.h5"`) |
-| `plot_vtu.py` | Plot one cell field of a VTU file |
-| `compare_png.py` | Side-by-side plots of a field from several VTU files |
-| `plot_sod.py` | Density profiles against the exact Sod solution |
-| `plot_viscous_shock_tube.py` | Viscous shock tube at t = 1 against the grid-converged reference of Zhou et al.: wall density, lambda-shock triple point |
-| `animate.py` | MP4/GIF animation of a VTU series: density (or `--var`, including derived `VORTICITY` and `MACH`) with contours, plus numerical schlieren |
-| `animate_cartesian.py` | Large runs on generated quad meshes (millions of cells): `extract` turns each (P)VTU snapshot into a float32 grid (`.npy`), optionally deleting the snapshot and following a running case so disk use stays bounded; `render` makes pixel-exact 4K frames (shaded density beside the numerical schlieren, area-averaged from the full grid, so nothing aliases) and the MP4; `still` writes the density and schlieren at one pixel per cell |
-| `animate_grid.py` | Several cases side by side in one animation, synchronized in normalized time: field panels, wall profiles against reference data, 2D detonations with their soot foil, pre-rendered frame sequences (e.g. 3D views) and time series traced over a reference curve. `hero_grid.json` makes the README animation from the 4096² Riemann problem, 3D detonation, Taylor-Green (full box) and 2D autoignition examples, frames cropped from the case animations plus the TGV dissipation rate traced over the DNS (the config's `_inputs` lists where each input comes from); `detonation` panels show a 2D detonation run's pressure and numerical soot foil |
-| `make_import_meshes.py` | The mesh-import test fixtures in `test/data/meshes/`: one channel-and-cylinder mesh (2D, extruded 3D, tetrahedral 3D, order 2) written by Gmsh as `.msh` and CGNS (also as two zones joined 1-to-1), and converted by OpenFOAM in a container (`podman` or `docker`, `opencfd/openfoam-default`) to polyMesh (`gmshToFoam`) and Fluent (`foamMeshToFluent`) |
-| `make_cylinder_mesh.py` | Gmsh O-grid around a cylinder; `--half` gives the upper half with the axis cuts, the meridian plane of a sphere for axisymmetric runs |
-| `plot_poiseuille.py` | Axisymmetric Hagen-Poiseuille flow: axial velocity against the exact r-weighted cell averages |
-| `plot_noh.py` | Spherical Noh problem from an axisymmetric run: density against the exact solution, shock radius by direction |
-| `plot_sphere_axisymmetric.py` | Steady axisymmetric flow past a sphere: drag, separation angle and wake length against the literature |
-| `make_mallard_mesh.py` | Triangle mesh (via the gmsh Python module) around a flying mallard silhouette |
-| `plot_taylor_green.py` | Taylor-Green vortex: kinetic energy and dissipation rate (`-dE/dt` and enstrophy-based) from `[integrals]` output against the spectral DNS reference |
-| `animate_taylor_green.py` | Taylor-Green vortex animation: Q-criterion isosurfaces on the box mirrored from the computed octant, orbiting camera, and the dissipation rate tracing the reference |
-| `chemistry_reference.py` | Reference data for the chemistry tests from Cantera (`pip install cantera`): writes the CSV files in `test/data/chemistry/`, which are committed so the tests need no Cantera |
-| `transport_reference.py` | Transport reference data from Cantera: species viscosities, conductivities and binary diffusion coefficients, and mixture-averaged and unity-Lewis mixture properties, as CSV files in `test/data/chemistry/` |
-| `flame_reference.py` | Freely propagating premixed flames (Cantera `FreeFlame`) of H2/air and CH4/air at 300 K and 1 atm, phi 0.6-1.4, mixture-averaged and unity Lewis: flame speeds, thermal thicknesses and profiles in `examples/premixed_flame/reference/`, and optionally each flame's full solution; `--single FUEL PHI T_U DIR` computes only one mixture's flames (both transport models, any fresh-gas temperature) |
-| `flame_restart.py` | A premixed-flame run (input and restart file) in the flame's frame from a Cantera flame's full solution, at a given number of cells per thermal thickness: a 1D strip, or with `--ny` a periodic 2D channel whose front is wrinkled by random modes (`--perturb`); `--ref-delta` gives flames of different transport the same mesh |
-| `flame_speed.py` | Consumption and displacement speeds of a premixed-flame run over time, against a reference flame speed |
-| `flame_sweep.py` | Sweeps of 1D premixed-flame runs over equivalence ratio, transport model, resolution and CFL (`setup`, with `flame_restart.py`, a restart file every half flame time), and their report against Cantera (`report`): consumption speed over the last flame time and its drift, displacement speed, peak heat release and temperature profile errors, the change from CFL 1 at equal times, as a table, CSV and plot |
-| `plot_flame.py` | Temperature and heat release profiles of a premixed-flame run against Cantera's, aligned at the maximum of dT/dx |
-| `counterflow_reference.py` | Counterflow diffusion flames (V10) from Cantera's `CounterflowDiffusionFlame`: H2/N2 against air swept in strain rate up to extinction (peak temperature against the local strain rates ahead of the flame and the spread rate at the flame), and full solutions at given nozzle velocities (`--profile`) or local strain rates (`--match`), in `examples/counterflow_diffusion/reference/` |
-| `counterflow_setup.py` | A 3D counterflow run from a Cantera solution: the quarter domain of two opposed round jets with N2 coflows, as a Gmsh file of hexahedra refined through the flame, the initial state (Cantera's solution with radial velocity `r V(x)`) and the input file |
-| `plot_counterflow.py` | Counterflow runs against Cantera on the stagnation line: peak temperature against the local strain rate and against the spread rate at the flame, temperature, velocity and species profiles at matched strain rate, histories, and a still of the flame |
-| `isotropic_turbulence_restart.py` | Initial state of `examples/isotropic_turbulence` as a restart file: random solenoidal velocity with E(k) ~ k^4 exp(-2 (k / k0)^2) at a given Mt, uniform density and pressure, as exact cell averages of the same band-limited field on any N^3 mesh; prints the derived viscosity and tau |
-| `isotropic_turbulence_stats.py` | Statistics of isotropic turbulence snapshots (restart files of a uniform hexahedral box): kinetic energy, enstrophy, dilatation, temperature, density and pressure variances on the full mesh and filtered to 64^3 (sixth-order or spectral derivatives, the references' protocols), Mt, Re_lambda, k_max eta; shell spectra and fields for the animation |
-| `plot_isotropic_turbulence.py` | Isotropic turbulence runs against the filtered DNS of Johnsen et al. (2010) and Subramaniam et al. (2019): filtered and unfiltered histories (grid convergence) and spectra |
-| `animate_isotropic_turbulence.py` | Isotropic turbulence animation: Q-criterion isosurfaces colored by dilatation, orbiting camera, the dilatation on a plane (shocklets) and the enstrophy and dilatation variance tracing the reference |
-| `make_sphere_mesh.py` | Gmsh tetrahedral mesh of the quarter domain around a sphere (symmetry planes y = 0 and z = 0), refined on the sphere and through the bow-shock layer |
-| `plot_sphere.py` | Bow-shock standoff of supersonic flow over a sphere, from the meridian-plane output, against Billig's correlation |
-| `animate_sphere.py` | Sphere animation: Mach number on the horizontal meridian plane, schlieren on the vertical one, the bow shock revolved into a 3D surface, and the standoff history against Billig |
-| `sedov.py` | Exact 3D Sedov-Taylor blast (similarity ODEs): the constant xi0 of R = xi0 (E t^2 / rho0)^(1/5), and a run's shock radius and density profile against it |
-| `animate_sedov.py` | Sedov-Taylor animation: density on the three symmetry planes (mirrored to full disks) with the exact shock sphere, orbiting camera, shock radius and density profile against the exact solution |
-| `make_sphere_re300_mesh.py` | Gmsh mesh of the full domain around a sphere for viscous flow: prism boundary layer, tetrahedra refined through the near wake; `--scale` refines every size for mesh studies |
-| `plot_sphere_re300.py` | Sphere at Re = 300: Strouhal number from the lift, mean drag and lift over whole shedding periods, against Johnson & Patel and other simulations |
-| `animate_sphere_re300.py` | Sphere wake animation: Q-criterion isosurfaces colored by streamwise velocity, orbiting camera, and the drag and lift histories |
-| `plane_average.py` | Average `[statistics]` output (`MEAN_`, `COV_`) of a quad or hex mesh over homogeneous directions as a function of the others (e.g. a channel's profiles in y), grouping equal cell-center coordinates (stretched meshes included) and adding the dispersive part to the covariances; reads VTU or PVTU |
-| `channel_init.py` | Initial state of the turbulent channel (`examples/channel_retau180`) as a restart file: a turbulent-like mean profile at bulk velocity 1 plus a random, divergence-free perturbation (the curl of a random vector potential) that vanishes at the walls |
-| `plot_channel.py` | Turbulent channel against Moser, Kim & Mansour (1999): mean velocity, RMS velocities and Reynolds shear stress in wall units from `plane_average.py` profiles, wall shear history, Re_tau and skin friction (downloads the MKM profiles on first use) |
-| `animate_channel.py` | Turbulent channel animation from restart files: Q-criterion isosurfaces colored by streamwise velocity over the near-wall streaks |
-| `interpolate_restart.py` | Interpolate a restart file onto another Gmsh mesh of the same domain (inverse-distance weighting of the nearest cells), to start a refined run from a developed flow |
-| `znd_restart.py` | Initial state of a detonation run from a ZND profile (`detonation_reference.py`): 1D, 2D (`--ny`, `--ly`) or a 3D duct (`--nz`, `--lz` too) with disks or spheres of unreacted gas behind the front (`--pocket`, repeatable; `--fresh-pocket` for fresh gas at rest) to trigger cells |
-| `detonation_window.py` | Moving window for detonation runs on generated boxes: alternates Mallard runs and shifts of the restart file that keep a fixed stretch of burnt gas behind the front, saving the soot foil (P_MAX) of the dropped columns and animation frames; also turns a 2D cellular detonation into a 3D initial state (`extrude`, `--superpose` for both transverse directions in phase) |
-| `soot_foil_3d.py` | 3D detonation in a duct: the four wall soot foils of a `detonation_window.py` run, mean front speed against D_CJ and the track spacings along and across each wall |
-| `animate_detonation_3d.py` | 3D detonation animation: the leading shock colored by the pressure behind it in a cut-away duct whose far walls carry the soot foil, and the four foils unrolled |
-| `shock_bubble.py` | Shock / helium-bubble interaction: initial state (Rankine-Hugoniot shock, contaminated helium bubble with a tanh interface), frames reduced from restart files, and the axis x-t diagram's velocities against Haas & Sturtevant (1987) |
-| `animate_shock_bubble.py` | Shock / helium-bubble animation: helium and vortex-ring isosurfaces, schlieren on the symmetry plane and the x-t diagram against the experiment's velocities |
-| `soot_foil.py` | 2D cellular detonation: mean front speed against D_CJ, triple points on the front and the cell width they imply, and the numerical soot foil (`P_MAX`) as an image |
-| `animate_detonation_2d.py` | Cellular detonation animation: pressure and the soot foil building up in a window that follows the front, and the whole foil so far |
-| `animate_flame_2d.py` | Side-by-side animation of 2D flame runs (`flame_restart.py --ny`): temperature over the adiabatic flame temperature with heat-release contours, and the consumption speeds against time |
-| `perf_suite.py` | The performance set (`benchmarks/perf/`): runs it on 2D and 3D builds (best of several runs after a warm-up, with the spread), writes JSON/CSV, compares with the baselines for the hardware (fails when slower by more than the threshold and the spread) and updates them; standard library only |
-| `triple_flame.py` | A triple-flame run: a planar premixed front (Cantera's flame at the stoichiometric mixture fraction) meeting a tanh mixing layer of fuel and air that enters through a `upt` inlet with a composition varying across it |
-| `triple_flame_analysis.py` | Triple flames: leading-edge position, propagation speed U_F = u_in - dx_tip/dt, local mixing thickness D_TF through the strongest heat release, and U_F / S_L against D_TF beside Ruetsch, Vervisch & Linan (1995) |
-| `animate_triple_flame.py` | Side-by-side triple-flame animation: heat release with the stoichiometric and equivalence-ratio lines, fresh-gas streamlines and the leading edge, and each run's U_F / S_L against the heat-release limit |
-| `flame_vortex.py` | A premixed flame-vortex run in the half channel above the pair's axis: a counter-rotating Gaussian vortex pair of size r and velocity u' upstream of a planar flame (`flame_restart.py`) |
-| `flame_vortex_analysis.py` | Flame-vortex runs: total heat release, flame length, weakest burning along the front and cut-off fresh-gas pockets over time; each run classified as Poinsot, Veynante & Candel (1991) do and placed on their spectral diagram |
-| `animate_flame_vortex.py` | Flame-vortex animation: every run's temperature, heat release and vorticity on one clock (mirrored to the full pair), with the spectral diagram and the heat-release histories |
-| `autoignition_restart.py` | Initial state of a stratified autoignition run (input and restart file): a periodic square of lean H2/air at uniform pressure with Passot-Pouquet random fields of temperature (`--t-rms`, `--l-T`) and solenoidal velocity (`--u-rms`, `--l-e`); the same `--seed` gives the same field shapes at every amplitude |
-| `autoignition_reference.py` | 0D references of the autoignition runs with Cantera: the homogeneous constant-volume reactor (`tau_0`), the ignition delay against temperature, and the multizone model of each run's initial temperatures (equal-mass zones at a common pressure, no transport) |
-| `autoignition_deflagration.py` | 1D Mallard runs of the deflagration speed `S_L` and thickness of an autoigniting mixture, with the fresh gas frozen (`[chemistry] T_frozen`) so that it cannot autoignite; `measure` gives the consumption speed over time |
-| `autoignition_analysis.py` | Autoignition runs against their 0D references: mean heat release rate, its peak time and width, and the share of heat released by deflagrations (displacement speed of the H2O isolines against `S_L`) next to the a priori criterion of Sankaran et al. (2005); history CSVs and figures |
-| `animate_autoignition.py` | Side-by-side animation of autoignition runs: temperature and heat release rate of each, and the mean heat release rate traced over the multizone and homogeneous predictions |
-| `flame_turbulence.py` | Flame in decaying turbulence (`examples/flame_turbulence`): isotropic initial field (`hit`), premixed or diffusion flame placed in it, box-filtered and thickened for LES (`init`), laminar reference rates (`laminar`), snapshots to npz (`extract`), flame speed, consumption speed, flame surface and filtered temperature PDFs (`analyze`), comparison figure (`figure`) |
-| `render_flame_turbulence.py` | 3D render of the flame surface (colored by heat release) and the vortices of the fresh gas from `extract` snapshots; side-by-side stills and movies (needs pyvista) |
-| `make_volvo_mesh.py` | Gmsh file of hexahedra for the Volvo bluff-body combustor (`examples/volvo_bluff_body`): four blocks around the triangular flameholder, mesh lines normal to its slanted faces, spanwise extrusion (periodic) |
-| `volvo.py` | Volvo bluff-body LES analysis: `probes` (a mid-span plane of line probes for the input), `profiles` (span and time averages at the measurement stations and on the centerline, recirculation length), `plot` (against the experiment in `examples/volvo_bluff_body/reference`, with the mean errors), `budget` (dissipation shares and `eps_num / eps_sgs` over a window), `slice` / `animate` (mid-span vorticity or temperature movie), `render` (Q-criterion isosurface, needs pyvista) |
-| `tfles_apriori.py` | A priori test of the TFLES efficiency on a filtered DNS: wrinkling factor at the scale `F delta_L`, Colin's and the eddy-viscosity subgrid velocities against the DNS's, and the implied `C_u` |
-| `make_annulus_mesh.py` | Gmsh O-grid of an annulus (quadrilaterals, or triangles with `--triangles`), optionally with high-order boundary lines (`--order 2` or `3`) on the circles and jittered nodes |
-| `curved_convergence.py` | Convergence of the steady isentropic vortex between two circular walls, straight against curved boundaries, over orders and mesh levels (the curved-boundary validation) |
-| `tile_restart.py` | Repeat the flow of a restart file of a generated 3D box along x: starts a spatially developing run from a developed periodic one |
-| `cbc_les.py` | Comte-Bellot & Corrsin grid turbulence for LES (`examples/cbc_les`): initial field, rescaling, spectra of restart files, comparison with the measurements and the dissipation budget |
-| `mixture_riemann.py` | Exact Riemann solution for thermally perfect mixtures of frozen composition: references of the multicomponent shock tube tests |
-| `plot_reactive_shock_tube.py` | Reactive shock tube at several resolutions: reaction front, peak temperature and pressure at 170 and 230 us |
-| `plot_detonation.py` | 1D detonation runs: shock position, front speed, induction length and peak pressure, against the CJ speed and ZND induction length |
-| `cantera_mechanisms.py` | Copy the mechanisms too large for the repository (n-hexane, 1268 species) from Cantera's data into `mechanisms/external/` |
+| `device_changes.sh [BASE]` | Whether the changes since BASE touch device code (a changed `src/` file with Kokkos device constructs, or a Kokkos bump): decides whether CI runs the CUDA builds and whether a PR needs GPU CI |
+| `check_workflow_triggers.py` | Fails if a GitHub workflow runs on pull requests or on pushes to branches other than `main` (CI on branches runs only by hand; releases on tags); the first job of `ci.yml` runs it |
+| `docs/make_figures.py` | The figures of the user guide (`docs/images/guide/`) and the theory manual (`docs/images/theory/`), light and dark: schematics, domains from the example inputs, and short Mallard runs (`--mallard build/src/Mallard`) |
+| `docs/tools.py` | The figures of this page (`docs/images/tools/`), from running each tool (`--mallard` for those from Mallard runs) |
+| `docs/figstyle.py`, `docs/meshes.py`, `docs/domains.py`, `docs/schematics.py`, `docs/theory.py`, `docs/teno.py`, `docs/runs.py`, `docs/remap_tgv.py` | Their shared style (light and dark palettes, SVG output), mesh readers and figure sets |
+| `../tutorials/common/` | `tutfig.py` (the tutorials' figure style), `gmsh_mesh.py` (Gmsh meshes for plots), `snapshots.py` (VTU and PVTU series) |
+| `make_import_meshes.py` | The mesh-import test fixtures in `test/data/meshes/`: one geometry as Gmsh, CGNS, Fluent and OpenFOAM, 2D and 3D, linear and curved |
+| `chemistry_reference.py`, `transport_reference.py` | Cantera reference data for the chemistry and transport tests (`test/data/chemistry/`, committed so the tests need no Cantera) |
 | `v3_reference.py`, `v3_check.py` | Constant-volume ignition with large mechanisms: Cantera references, and `MallardReactor` against them |
-| `docs/make_figures.py` | The figures of the user guide (`docs/images/guide/`) and of the theory manual (`docs/images/theory/`), light and dark, from the formulas, the example inputs and short Mallard runs (`--mallard build/src/Mallard`) |
+| `changelog.py` | Changelog fragments (`changelog/`): `check` fails when a branch changes `src/` without adding one (first job of `ci.yml`); `notes X.Y.Z` / `notes Unreleased` prints a release's section or previews the next; `release X.Y.Z` folds the fragments into `CHANGELOG.md`; standard library only |
+| `hero_grid.json` | The configuration of the README animation (`animate_grid.py`) |
