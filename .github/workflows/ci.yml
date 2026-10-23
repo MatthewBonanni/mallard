@@ -15,6 +15,11 @@ on:
       - 'LICENSE'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
+    inputs:
+      cuda:
+        description: Run the CUDA builds even without device-code changes
+        type: boolean
+        default: false
 
 permissions:
   actions: read
@@ -248,7 +253,7 @@ jobs:
   # CUDA builds (no GPU needed), when the changes touch device code (see the device job).
   cuda:
     needs: [changelog, device]
-    if: needs.device.outputs.changed == 'true'
+    if: needs.device.outputs.changed == 'true' || inputs.cuda
     runs-on: ubuntu-latest
     container: nvidia/cuda:12.9.1-devel-ubuntu24.04
     strategy:
@@ -256,41 +261,39 @@ jobs:
       matrix:
         dim: [2, 3]
     name: cuda-${{ matrix.dim }}d
+    # sccache caches the nvcc compiles in the GitHub Actions cache, per object, so branches
+    # reuse what main compiled. Neither ccache nor sccache accepts Kokkos' nvcc_wrapper as a
+    # compiler, so sccache wraps the nvcc that nvcc_wrapper runs (the first one on PATH)
+    env:
+      SCCACHE_GHA_ENABLED: "true"
     steps:
       - name: Install tools
         run: >
           apt-get update -qq && apt-get install -y -qq --no-install-recommends
-          git cmake make ccache libopenmpi-dev openmpi-bin ca-certificates
+          git cmake make libopenmpi-dev openmpi-bin ca-certificates
       - uses: actions/checkout@v4
         with:
           submodules: true
-      - name: Restore compiler cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ github.workspace }}/.ccache
-          key: ccache-cuda-${{ matrix.dim }}-${{ github.sha }}
-          restore-keys: ccache-cuda-${{ matrix.dim }}-
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - name: Put sccache in front of nvcc
+        run: |
+          mkdir -p "$RUNNER_TEMP/nvcc-sccache"
+          printf '#!/bin/sh\nexec sccache /usr/local/cuda/bin/nvcc "$@"\n' > "$RUNNER_TEMP/nvcc-sccache/nvcc"
+          chmod +x "$RUNNER_TEMP/nvcc-sccache/nvcc"
+          echo "$RUNNER_TEMP/nvcc-sccache" >> "$GITHUB_PATH"
       - name: Configure
-        env:
-          CCACHE_DIR: ${{ github.workspace }}/.ccache
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF
           -DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON -DKokkos_ENABLE_OPENMP=ON
           -DCMAKE_CXX_COMPILER=$PWD/src/external/kokkos/bin/nvcc_wrapper
-          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          -DCUDAToolkit_ROOT=/usr/local/cuda
           -DMallard_ENABLE_MPI=ON -DMallard_GPU_AWARE_MPI=ON -DMallard_WARNINGS_AS_ERRORS=ON
           -DMallard_DIM=${{ matrix.dim }}
       - name: Build
-        env:
-          CCACHE_DIR: ${{ github.workspace }}/.ccache
-          CCACHE_MAXSIZE: 1G
         run: cmake --build build -j $(nproc)
-      - name: Save compiler cache
-        if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ github.workspace }}/.ccache
-          key: ccache-cuda-${{ matrix.dim }}-${{ github.sha }}
+      - name: Cache statistics
+        if: always()
+        run: sccache --show-stats
 
 
   # Mirrors every job of this run as a commit status `CI / <job>` linking to its log,
