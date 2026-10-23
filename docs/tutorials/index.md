@@ -51,5 +51,5 @@ export MALLARD=$PWD
 `tutorials/ci.sh` runs the same steps at reduced size, as CI does:
 
 ```bash
-tutorials/ci.sh build/src/Mallard build-3d/src/Mallard /tmp/tutorials
+tutorials/ci.sh build/src/mallard build-3d/src/mallard /tmp/tutorials
 ```

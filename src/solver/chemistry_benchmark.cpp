@@ -1,7 +1,7 @@
 /**
  * @file chemistry_benchmark.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Chemistry throughput benchmark (MallardReactor's [benchmark] mode).
+ * @brief Chemistry throughput benchmark (`mallard reactor`'s [benchmark] mode).
  * @version 0.3
  * @date 2026-10-03
  *

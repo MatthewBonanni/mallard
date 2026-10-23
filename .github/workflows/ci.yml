@@ -246,20 +246,20 @@ jobs:
         if: ${{ !matrix.backend.mpi && !matrix.backend.build_only && !matrix.backend.concurrent }}
         env:
           OMP_NUM_THREADS: 2
-        run: ./build/test/MallardTest
+        run: ./build/src/mallard test
       - name: Upgrade the inputs of every release
         if: matrix.backend.name == 'openmp'
         run: |
           git fetch --quiet --tags --depth=1 origin
-          python3 tools/check_upgrade_input.py build/src/Mallard
+          python3 tools/check_upgrade_input.py build/src/mallard
       # Two copies of the suite at once, so tests that share a file path collide
       - name: Test (two at once)
         if: matrix.backend.concurrent
         env:
           OMP_NUM_THREADS: 2
         run: |
-          ./build/test/MallardTest & first=$!
-          ./build/test/MallardTest --gtest_brief=1 & second=$!
+          ./build/test/mallard-test & first=$!
+          ./build/test/mallard-test --gtest_brief=1 & second=$!
           ok=true; wait $first || ok=false; wait $second || ok=false; $ok
       - name: Test (MPI)
         if: matrix.backend.mpi
@@ -268,15 +268,15 @@ jobs:
         run: |
           mpi_tests='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:Check*.*:ProbesTest.*'
           if [ "$FULL" = true ]; then
-            mpirun -n 1 ./build/test/MallardTest
+            mpirun -n 1 ./build/test/mallard-test
           else
-            mpirun -n 1 ./build/test/MallardTest --gtest_filter="$mpi_tests"
+            mpirun -n 1 ./build/test/mallard-test --gtest_filter="$mpi_tests"
           fi
           # Two rank counts at once, so tests that share a file path collide
-          mpirun -n 2 --oversubscribe ./build/test/MallardTest --gtest_filter="$mpi_tests" & two=$!
-          mpirun -n 3 --oversubscribe ./build/test/MallardTest --gtest_filter="$mpi_tests" --gtest_brief=1 & three=$!
+          mpirun -n 2 --oversubscribe ./build/test/mallard-test --gtest_filter="$mpi_tests" & two=$!
+          mpirun -n 3 --oversubscribe ./build/test/mallard-test --gtest_filter="$mpi_tests" --gtest_brief=1 & three=$!
           ok=true; wait $two || ok=false; wait $three || ok=false; $ok
-          mpirun -n 4 --oversubscribe ./build/test/MallardTest --gtest_filter="$mpi_tests"
+          mpirun -n 4 --oversubscribe ./build/test/mallard-test --gtest_filter="$mpi_tests"
       - name: Report the job's result
         if: always()
         env:
@@ -326,7 +326,7 @@ jobs:
               -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
               -DUSE_SYSTEM_KOKKOS=OFF -DMallard_WARNINGS_AS_ERRORS=ON -DKokkos_ENABLE_SERIAL=ON \
               -DMallard_ENABLE_MPI=ON -DMallard_DIM=$dim
-            cmake --build build-$dim -j $(nproc) --target Mallard
+            cmake --build build-$dim -j $(nproc) --target mallard
           done
       - name: Save compiler cache
         if: github.ref == 'refs/heads/main'
@@ -335,15 +335,15 @@ jobs:
           path: ${{ github.workspace }}/.ccache
           key: ccache-tutorials-${{ github.sha }}
       - name: Run the tutorials
-        run: tutorials/ci.sh build-2/src/Mallard build-3/src/Mallard ${{ runner.temp }}/tutorials
+        run: tutorials/ci.sh build-2/src/mallard build-3/src/mallard ${{ runner.temp }}/tutorials
       # docs/input-keys.json is what setup reads from the examples and tutorials
       - name: Check the key catalog
-        run: python3 tools/input_catalog.py build --mallard-2d build-2/src/Mallard --mallard-3d build-3/src/Mallard --check
-      # Every case template (Mallard new --quick): 2D from an install tree, 3D from the build tree
+        run: python3 tools/input_catalog.py build --mallard-2d build-2/src/mallard --mallard-3d build-3/src/mallard --check
+      # Every case template (mallard new --quick): 2D from an install tree, 3D from the build tree
       - name: Run the case templates
         run: |
           cmake --install build-2 --prefix ${{ runner.temp }}/mallard-2d > /dev/null
-          templates/ci.sh ${{ runner.temp }}/mallard-2d/bin/Mallard build-3/src/Mallard ${{ runner.temp }}/templates
+          templates/ci.sh ${{ runner.temp }}/mallard-2d/bin/mallard build-3/src/mallard ${{ runner.temp }}/templates
       - name: Report the job's result
         if: always()
         env:

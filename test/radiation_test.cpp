@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include "data_paths.h"
 #include "input.h"
 #include "mechanism.h"
 #include "radiation.h"
@@ -29,7 +30,7 @@
 
 namespace {
 
-const std::string SOURCE_DIR = MALLARD_SOURCE_DIR;
+const std::string SOURCE_DIR = source_dir();
 const std::string GRI30 = SOURCE_DIR + "/mechanisms/gri30.yaml";
 const std::string H2O2 = SOURCE_DIR + "/mechanisms/h2o2.yaml";
 

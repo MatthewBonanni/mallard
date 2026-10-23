@@ -33,11 +33,11 @@
 #   python ../../tools/znd_restart.py znd.csv ../../mechanisms/h2o2.yaml ohmech 680 0.102 0.08 \
 #       window_2d.restart --ny 200 --ly 0.03 --fresh-pocket --pocket 0.077 0.01 0.002
 #   python ../../tools/detonation_window.py run input_2d.toml --keep 0.08 --segment 6e-6 --t-end 9.6e-5 \
-#       --frames frames_2d -- ../../build/src/Mallard -i input_2d.toml
+#       --frames frames_2d -- ../../build/src/mallard -i input_2d.toml
 #   python ../../tools/detonation_window.py extrude input_2d.toml window_2d.restart input.toml \
 #       window.restart --superpose
 #   python ../../tools/detonation_window.py run input.toml --keep 0.05 --segment 6e-6 --t-end 2.04e-4 \
-#       --frames frames -- mpirun -n 4 ../../build3d/src/Mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
+#       --frames frames -- mpirun -n 4 ../../build3d/src/mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
 #   python ../../tools/soot_foil_3d.py input.toml frames --png foils.png
 #   python ../../tools/animate_detonation_3d.py input.toml frames detonation_3d
 #

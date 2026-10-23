@@ -67,7 +67,7 @@ RULES = {
     ("meshes.md", "## Transform on read"): (lambda t: "transform" in mesh(t), "the mesh-import tests"),
     ("meshes.md", "## HDF5 meshes for large runs"):
         (lambda t: str(mesh(t).get("filename", "")).endswith(".h5"),
-         "any example, after `mallard-mesh-convert input.toml mesh.h5`"),
+         "any example, after `mallard mesh convert input.toml mesh.h5`"),
     ("meshes.md", "## Curved boundaries"):
         (lambda t: "curved" in mesh(t), "the curved-boundary validation (`tools/curved_convergence.py`)"),
     ("numerics.md", "## Presets"): (lambda t: "preset" in num(t), None),
@@ -100,7 +100,7 @@ RULES = {
         (lambda t: num(t).get("double_flux", False), "the multicomponent shock-tube tests"),
     ("thermochemistry.md", "## Finite-rate chemistry"): (lambda t: "chemistry" in t, None),
     ("thermochemistry.md", "## Radiation"): (lambda t: "radiation" in t, None),
-    ("thermochemistry.md", "## 0D reactors: `MallardReactor`"): (lambda t: "reactor" in t, None),
+    ("thermochemistry.md", "## 0D reactors: `mallard reactor`"): (lambda t: "reactor" in t, None),
 }
 
 

@@ -26,7 +26,7 @@
 #
 # Run:
 #   python ../../tools/channel_init.py input_590.toml init.restart
-#   ../../build3d/src/Mallard -i input_590.toml
+#   ../../build3d/src/mallard -i input_590.toml
 
 [run]
 t_stop = 200.0

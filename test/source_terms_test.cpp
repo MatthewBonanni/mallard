@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "data_paths.h"
 #include "gmsh_fixtures.h"
 #include "region.h"
 #include "solver.h"
@@ -26,7 +27,7 @@
 
 namespace {
 
-const std::string SOURCE_DIR = MALLARD_SOURCE_DIR;
+const std::string SOURCE_DIR = source_dir();
 
 /** @brief Gas at rest in the unit square or cube of a coarse jittered unstructured mesh, closed by symmetry planes. */
 std::string closed_box(const std::string & sources, const std::string & physics = "") {
