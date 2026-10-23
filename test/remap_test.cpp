@@ -23,6 +23,7 @@
 #include "overlap.h"
 #include "remap.h"
 #include "test_fixtures.h"
+#include "verification.h"
 
 namespace {
 
@@ -175,7 +176,7 @@ TEST(RemapTest, SmoothPeriodicFieldsConvergeAtTheDegreePlusOne) {
     const auto target = serial_mesh(mesh_table(TARGET_TYPE, N_DIM == 2 ? 37 : 7));
     const auto exact = averages(*target, target->n_cells, f);
     for (uint8_t p = 1; p <= (N_DIM == 2 ? 3 : 2); p++) {
-        double errors[2];
+        std::vector<double> errors(2);
         for (uint32_t k = 0; k < 2; k++) {
             remap::Options options;
             options.degree = p;
@@ -185,7 +186,9 @@ TEST(RemapTest, SmoothPeriodicFieldsConvergeAtTheDegreePlusOne) {
             errors[k] = max_error(remap_fields(mesh_table(SOURCE_TYPE, n, periodic), {f}, *target, options, report)[0],
                                   exact);
         }
-        EXPECT_GT(std::log2(errors[0] / errors[1]), p + 0.6) << "degree " << int(p);
+        const double n = N_DIM == 2 ? 10 : 5;
+        verification::expect_order({"remap", "degree " + std::to_string(p), verification::cells_of(SOURCE_TYPE),
+                                    "max error of the target averages", {n, 2 * n}, errors, p + 1.0, p + 0.6});
     }
 }
 

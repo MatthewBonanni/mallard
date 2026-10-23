@@ -16,6 +16,7 @@
 
 #include "build_info.h"
 #include "case_template.h"
+#include "input_upgrade.h"
 #include "input.h"
 #include "log.h"
 #include "provenance.h"
@@ -29,6 +30,7 @@ void usage(const char * program) {
               << "       " << program << " --check input.toml [--ranks N] [--throughput CELLS_PER_S | --steps N]"
               << " [--quality-vtu PREFIX]\n"
               << "       " << program << " new <template> [directory]   (" << program << " new --list)\n"
+              << "       " << program << " upgrade-input old.toml > new.toml\n"
               << "       " << program << " --version\n";
 }
 
@@ -42,6 +44,7 @@ struct Subcommand {
 
 constexpr Subcommand subcommands[] = {
     {"new", case_template::new_main},
+    {"upgrade-input", input_upgrade::main},
 };
 
 /**

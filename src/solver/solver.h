@@ -37,6 +37,7 @@
 #include "radiation.h"
 #include "scalar_reconstruction.h"
 #include "data_writer.h"
+#include "probes.h"
 #include "statistics.h"
 #include "health_state.h"
 #include "synthetic_inflow.h"
@@ -51,6 +52,7 @@
 #include "memory_tracker.h"
 #include "numerics_preset.h"
 #include "run_status.h"
+#include "input_upgrade.h"
 
 struct ForceMonitor {
     std::string zone;
@@ -201,6 +203,13 @@ class Solver {
          *        polynomials (TENO), else least squares.
          */
         void update_velocity_gradients();
+
+        /**
+         * @brief W = [rho, u, p] in W_cells of every local cell, from halo
+         *        values and boundary states brought up to date, and the
+         *        primitives.
+         */
+        void update_cell_W();
 
         /** @brief Q = (|Omega|^2 - |S|^2) / 2 and the vorticity of each owned cell, into vortex_fields. */
         void update_vortex_fields();
@@ -501,6 +510,7 @@ class Solver {
         void write_integrals();
         void write_probes();
         CellSampler cell_sampler() const { return CellSampler{conservatives, species, primitives}; }
+        ProbeFields probe_fields();
 
     private:
         // Step graph (solver_graph.cpp)
@@ -559,6 +569,7 @@ class Solver {
         Input input;
         bool check_only = false;  // within check()
         numerics_preset::Resolution preset;
+        std::vector<input_upgrade::Finding> deprecated_keys;  // read under their new names
 
         // Run parameters
         uint64_t n_steps;

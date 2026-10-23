@@ -1,0 +1,61 @@
+# Mallard for NVIDIA GPUs: CUDA with an OpenMP host backend, MPI with NCCL, HDF5, CGNS and zlib;
+# 2D (Mallard) and 3D (Mallard3D).
+#
+#   docker build -f docker/Dockerfile.cuda -t mallard:cuda .
+#
+# from a checkout with the Kokkos and toml11 submodules (NCCL comes with the CUDA
+# images). CUDA_ARCHS lists the GPU compute capabilities to build for, lowest first
+# (80 A100, 86 RTX 30xx/A40, 89 L40S/RTX 40xx, 90 H100): one fat binary with machine
+# code for each, and PTX of the lowest for newer GPUs.
+ARG CUDA=12.9.1
+FROM nvidia/cuda:${CUDA}-devel-ubuntu24.04 AS build
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential cmake git ca-certificates libopenmpi-dev openmpi-bin libhdf5-openmpi-dev zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY . /src
+ARG CUDA_ARCHS="80 86 89 90"
+ARG JOBS
+# Kokkos builds for one architecture (the lowest, which sets its compile-time
+# tuning); nvcc adds machine code for the others through NVCC_APPEND_FLAGS
+RUN set -eu; \
+    first=${CUDA_ARCHS%% *}; \
+    case $first in \
+        70) arch=VOLTA70 ;; 75) arch=TURING75 ;; 80) arch=AMPERE80 ;; 86) arch=AMPERE86 ;; \
+        89) arch=ADA89 ;; 90) arch=HOPPER90 ;; 100) arch=BLACKWELL100 ;; 120) arch=BLACKWELL120 ;; \
+        *) echo "unsupported CUDA architecture $first" >&2; exit 1 ;; \
+    esac; \
+    NVCC_APPEND_FLAGS=""; \
+    for cc in ${CUDA_ARCHS#"$first"}; do \
+        NVCC_APPEND_FLAGS="$NVCC_APPEND_FLAGS -gencode=arch=compute_$cc,code=sm_$cc"; \
+    done; \
+    export NVCC_APPEND_FLAGS; \
+    JOBS=${JOBS} /src/docker/build.sh /src /opt/mallard \
+        -DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_$arch=ON -DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_NCCL=ON \
+        -DCMAKE_CXX_COMPILER=/src/src/external/kokkos/bin/nvcc_wrapper; \
+    for exe in Mallard Mallard3D; do \
+        built=$(cuobjdump --list-elf /opt/mallard/bin/$exe | grep -o 'sm_[0-9]*' | sort -u | tr '\n' ' '); \
+        echo "$exe: $built"; \
+        for cc in $CUDA_ARCHS; do \
+            case " $built" in *" sm_$cc "*) ;; *) echo "$exe has no sm_$cc code" >&2; exit 1 ;; esac; \
+        done; \
+    done
+
+FROM nvidia/cuda:${CUDA}-runtime-ubuntu24.04
+LABEL org.opencontainers.image.title="Mallard" \
+      org.opencontainers.image.description="High-order finite volume solver for compressible reacting flows (NVIDIA GPUs: CUDA + MPI)" \
+      org.opencontainers.image.source="https://github.com/MatthewBonanni/mallard" \
+      org.opencontainers.image.licenses="Apache-2.0"
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libgomp1 openmpi-bin libopenmpi3t64 libhdf5-openmpi-103-1t64 \
+        python3 python3-numpy python3-scipy python3-matplotlib python3-h5py \
+    && rm -rf /var/lib/apt/lists/*
+# Mallard's executables only, not the bundled Kokkos's tools
+COPY --from=build /opt/mallard/bin/Mallard* /opt/mallard/bin/mallard-* /opt/mallard/bin/
+COPY --from=build /opt/mallard/share /opt/mallard/share
+ENV PATH=/opt/mallard/bin:$PATH \
+    MALLARD_SHARE=/opt/mallard/share/mallard \
+    OMP_PROC_BIND=spread \
+    OMP_PLACES=threads \
+    OMPI_ALLOW_RUN_AS_ROOT=1 \
+    OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+WORKDIR /work

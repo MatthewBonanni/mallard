@@ -4,6 +4,9 @@ Mallard reads a single [TOML](https://toml.io) file: `Mallard -i input.toml`.
 This page lists every key; the [user guide](guide/input_files.md) explains
 by topic when to use them, with examples and figures.
 Kokkos options such as `--kokkos-num-threads=N` or `--kokkos-device-id=N` can be appended.
+A renamed or removed key is still read, with a warning, for at least one minor
+release, and `Mallard upgrade-input old.toml > new.toml` rewrites old inputs
+([deprecation policy and changed keys](guide/input_files.md#inputs-from-older-releases)).
 
 The spatial dimension is fixed at build time with the CMake option
 `-DMallard_DIM=2` (default) or `3`. Vectors in the input (`u`, `gravity`,
@@ -27,9 +30,9 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 
 | Dimension | Keys |
 |---|---|
-| Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
-| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.curved.center`, `radius`; `periodic.translation`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `start`, `end` |
-| Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D) |
+| Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`; `probes.time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.curved.center`, `radius`; `periodic.translation`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `translate`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
+| Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D) |
 | Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
 | Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`; `physics.p_ref` |
@@ -741,22 +744,84 @@ only some of them is an error unless `reset = true`. With
 
 ## `[[probes]]`
 
-Point and line probes: the values of the cells holding a set of points, every
-`interval` steps, appended by rank 0 to a CSV file with rows
-`step, t, point, x, y(, z), <variables>` (one per point and step; a restarted run
-appends). Each point reads the cell average of the cell containing it (on a
-face between cells, the one with the lowest global id, so any number of ranks
-picks the same cell), or of the nearest cell centroid if no cell contains it.
-Values are written to full precision.
+Samples of the solution on a geometry (points or curves), every `interval`
+steps or `time_interval` of simulation time, written raw and/or reduced. Setup
+locates the samples in the cells of each rank; a write evaluates them on the
+device of the ranks that own them and gathers them on rank 0, which writes them
+in a fixed order, so the files are the same bit for bit on any number of
+ranks. A probe that is not due costs nothing.
 
 | Key | Description |
 |---|---|
 | `name` | Probe name |
-| `variables` | Any of the `[statistics]` fields |
-| `point` | One point `[x, y(, z)]`, or |
-| `start`, `end`, `n_points` | `n_points` (at least 2) evenly spaced points from `start` to `end` |
-| `interval` | Every this many steps, default 1 |
-| `file` | Output file, default `probe_<name>.csv` |
+| `variables` | Any of the `[statistics]` fields, `U` for all velocity components, `Y_*` for every species |
+| `shape` | `point`, `points`, `line`, `polyline`, `circle`, `arc` or `curve` (below); without it, `point` or `start`/`end` select a point or a line |
+| `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below) |
+| `interval` / `time_interval` | Every this many steps (default 1) / this much simulation time; with `time_interval` the time step is shortened to land on each output time, as for `[[write_data]]` |
+| `format` | `csv` (default), `hdf5` (builds with `-DMallard_ENABLE_HDF5=ON`) or `vtp` |
+| `file` | Output file, default `probe_<name>.csv`, `.h5` or `.pvd` |
+| `samples` | `false` writes only the reductions (default `true`) |
+| `reductions` | Any of `integral`, `mean`, `favre`, `min`, `max`, `rms` (below) |
+| `reductions_file` | Default `probe_<name>_reductions.csv` |
+| `translate`, `rotate`, `scale` | Transform of the geometry: scaled (a factor, or one per axis) about the origin, then rotated about it (2D: `rotate = <degrees>`; 3D: `rotate = {axis = [x, y, z], angle = <degrees>}`), then translated |
+
+Shapes (`[x, y(, z)]` points):
+
+| `shape` | Keys |
+|---|---|
+| `point` | `point` |
+| `points` | `points = [[...], ...]`, or `points_file`: a text file of one point per row (numbers split by commas or blanks; `#` starts a comment, a header row is skipped) |
+| `line` | `start`, `end`, `n_points` (at least 2) evenly spaced points |
+| `polyline` | `vertices` (at least 2), `n_points` per segment, ends included |
+| `circle` | `center`, `radius`, `n_points` (at least 3); 3D: `normal`, and optionally `reference`, the direction of the first point (default: the axis least aligned with the normal, projected) |
+| `arc` | as `circle`, with `angles = [start, end]` in degrees from the x axis (3D: from `reference`) and `n_points` from start to end, ends included |
+| `curve` | `x`, `y`(, `z`): expressions of the parameter `s` over `s_range = [s0, s1]` (default `[0, 1]`), `n_points` evenly spaced in `s` |
+
+**Point values.** With TENO, `sampling = "point"` evaluates each cell's
+central reconstruction polynomial at the sample (order-consistent: the error
+falls at the scheme's order, e.g. fifth order for `order = 5`); cells that the
+TENO indicator flags troubled, schemes without such polynomials (FO, MUSCL),
+and values with a nonpositive density or pressure take the linear
+least-squares reconstruction (second order), and failing that the cell
+average. `RHO`, `U_*` and `P` are reconstructed; `T` and `H` follow `p / rho`
+at the cell's composition (exact for a perfect gas), and mass fractions are
+cell averages. A sample on a face between cells belongs to the cell with the lowest global
+id, so any number of ranks pick the same cell; samples outside the domain take
+the nearest cell's average in both modes.
+
+**Output.** `csv` appends rows `step, t, point, x, y(, z), <variables>` (one per
+sample and step; a restarted run appends). `hdf5` holds `coordinates`
+(samples x dimension), for curves `arc_length` and `polylines/nodes` with
+`polylines/offsets`, and the extensible `step`, `time` and `fields/<variable>`
+(steps x samples); `vtp` writes one VTK PolyData file per output,
+`<stem>_<step>.vtp` (vertices for point sets, polylines with `arc_length`
+for curves), indexed by the `.pvd` series. A restarted run cuts the HDF5 rows
+and the `.pvd` entries after the restart back and continues them.
+
+**Reductions.** Rows `step, t, length` (curves) or `count` (point sets), then
+`<reduction>_<variable>` for each reduction and variable: `integral` is
+`int q ds`, `mean` `int q ds / int ds`, `favre` the density-weighted mean
+`int rho q ds / int rho ds`, `rms` `sqrt(int q^2 ds / int ds)`, and `min`, `max`
+the extrema over the samples and the integration points. Curves integrate
+with three Gauss points on each element between consecutive samples (exact for
+polynomials of degree 5 along straight elements), point sets with unit weights
+(`integral` is the sum, `mean` the arithmetic mean). Rank 0 sums them in a
+fixed order, so they too are the same bit for bit on any number of ranks.
+
+```toml
+[[probes]]
+name = "wake"
+variables = ["U", "P"]
+sampling = "point"
+shape = "arc"
+center = [0.0, 0.0]
+radius = 2.0
+angles = [-60.0, 60.0]
+n_points = 121
+time_interval = 1.0e-4
+format = "vtp"
+reductions = ["mean", "rms"]
+```
 
 ## `[source]`
 
@@ -770,6 +835,68 @@ Optional source terms, added per unit volume.
 | `mass_flow` | `[m_x, m_y]` (`[m_x, m_y, m_z]` in 3D): hold the volume average of `rho u` along this vector at its magnitude with a uniform body force `f` per unit volume along it (constant mass flow, e.g. a periodic channel). At every Runge-Kutta stage `f` cancels the rate of change of that average from all other terms (one global sum) and closes any remaining gap within the time step, so a flow started at the target stays there to rounding. The energy gains the force's work `f . u`. |
 
 The scheme is not exactly well balanced: hydrostatic states carry small spurious velocities (about 1e-4 of the sound speed on a 32x32 mesh) that vanish at second order under refinement. Wall and symmetry ghost states continue the hydrostatic pressure gradient.
+
+## Regions
+
+A region is a table: a primitive shape, or a boolean of regions, each with
+optional transforms, nested to any depth. Every region has a signed distance
+(negative inside) that never exceeds the distance to its surface, which gives
+smooth edges their width and lets cell volume fractions skip cells away from
+the surface. Volume fractions are cell averages of the region's indicator,
+sampled on each cell's triangles (2D) or tetrahedra (3D), subdivided where the
+surface or the smooth edge crosses them: cells entirely inside get exactly 1.
+In 2D, regions are the z = 0 slices of the 3D shapes (`z` components may be
+left out). Lengths take units (`radius = "5 mm"`) and angles are in degrees
+unless given a unit; `axis`, `normal`, `axes` and `scale` are plain numbers.
+
+| `type` | Keys | Shape |
+|---|---|---|
+| `sphere` (2D: also `disk`, `circle`) | `center`, `radius` | |
+| `ellipsoid` (`ellipse`) | `center`, `semi_axes` | semi-axes along x, y, z (orient with `rotate`) |
+| `cylinder` | `center`, `axis` (default z in 2D), `radius`, `inner_radius` (default 0: solid), `length` (default infinite) | annular with `inner_radius`; centered on `center` along `axis` |
+| `annulus` (2D) | `center`, `radius`, `inner_radius` | |
+| `cone` (`frustum`) | `base` (center of the base), `axis` (toward the top), `length`, `base_radius`, `top_radius` (default 0) | |
+| `box` (`rectangle`) | `center`, `size` (edge lengths) | axis-aligned before `rotate` |
+| `torus` | `center`, `axis` (default z in 2D), `major_radius`, `minor_radius` | |
+| `half_space` | `point` (default origin), `normal` | the side `(x - point) . normal < 0` |
+| `polygon` (2D) | `vertices` = `[[x, y], ...]` | simple polygon |
+| `implicit` | `f`, an expression in `x`, `y`, `z` | `f < 0`. Smooth edges are in units of `f` (exact when `f` is a distance, e.g. `"sqrt(x^2 + y^2) - 1"`) |
+| `union`, `intersection` | `regions` = `[{...}, ...]` | |
+| `difference` | `a` and `b` (or `regions`, the first minus the others) | `a` without `b` |
+
+Any region, primitive or boolean, may also have, applied in this order:
+
+| Key | Description |
+|---|---|
+| `scale` | A number, or one factor per axis; about `pivot` |
+| `rotate` | 3D: `{axis = [...], angle = degrees}` or `{axes = [[...], [...], [...]]}` (the region's x, y, z axes in world coordinates, orthonormal and right-handed); 2D: an angle in degrees, counterclockwise; about `pivot` |
+| `pivot` | Center of `scale` and `rotate` (default the origin) |
+| `translate` | A displacement |
+
+The outermost region may also have `edge`, the width of a smooth edge: the
+indicator falls from 1 to 0 as the smoothstep `s^2 (3 - 2 s)` across the band
+of that width centered on the surface (default 0, sharp), which keeps the
+volume of a flat surface and changes that of a curved one by the band's second
+moment (e.g. `pi R edge^2 / 5` for a sphere).
+
+```toml
+# A tilted pipe wall with a hole drilled through it
+region = {type = "difference",
+          a = {type = "cylinder", center = [0, 0, 0], axis = [1, 1, 0], radius = 0.3, inner_radius = 0.2, length = 1.0},
+          b = {type = "cylinder", center = [0, 0, 0], axis = [0, 0, 1], radius = 0.05},
+          edge = 0.01}
+
+# A box rotated 30 degrees about z around its own center
+region = {type = "box", center = [1, 0, 0], size = [0.4, 0.2, 0.2], pivot = [1, 0, 0], rotate = {axis = [0, 0, 1], angle = 30}}
+```
+
+Expressions in regions (and, compiled the same way, wherever Mallard
+evaluates them on the device) follow exprtk's syntax and precedences: `+ - * /
+% ^`, comparisons, `and`, `or`, `xor`, `not`, `c ? a : b`, `if(c, a, b)`,
+exprtk's scalar functions (`sin`, `exp`, `log`, `sqrt`, `abs`, `min`, `max`,
+`clamp`, `atan2`, `hypot`, `erf`, ...) and the constants `pi`, `epsilon`,
+`inf`; values are the same as exprtk's to the last bit on the host. Unlike
+exprtk, variable names are case sensitive.
 
 ## `[parallel]`
 
