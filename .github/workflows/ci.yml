@@ -255,10 +255,11 @@ jobs:
           cmake --install build-2 --prefix ${{ runner.temp }}/mallard-2d > /dev/null
           templates/ci.sh ${{ runner.temp }}/mallard-2d/bin/Mallard build-3/src/Mallard ${{ runner.temp }}/templates
 
-  # CUDA builds (no GPU needed), when the changes touch device code (see the device job).
+  # CUDA builds (no GPU needed): on main, and on branches whose changes touch device code
+  # (see the device job); host code compiles with nvcc too, so main catches what branches skip.
   cuda:
     needs: [changelog, device]
-    if: needs.device.outputs.changed == 'true' || inputs.cuda
+    if: needs.device.outputs.changed == 'true' || github.ref == 'refs/heads/main' || inputs.cuda
     runs-on: ubuntu-latest
     container: nvidia/cuda:12.9.1-devel-ubuntu24.04
     strategy:
