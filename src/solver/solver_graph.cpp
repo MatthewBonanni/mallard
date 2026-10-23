@@ -76,9 +76,13 @@ void Solver::record_step() {
     // The run-control requests ride along the time-step reduction
     Kokkos::deep_copy(exec, Kokkos::subview(step_reduce, Kokkos::make_pair(1, N_REDUCE)),
                       Kokkos::subview(step_io, Kokkos::make_pair(IO_REQUESTS, IO_DT)));
-    // calc_dt
+    // calc_dt, with the boundary conditions of t at the step's start as calc_dt has them
     halo.exchange(state());
     halo_current = true;
+    if (!timed_fields.empty()) {
+        record_stage_time(0.0_r);
+        apply_boundary_fields();
+    }
     calc_dt_cfl1(Kokkos::View<rtype>(step_reduce.data()));
 #ifdef Mallard_HAS_NCCL
     if (is_distributed()) {

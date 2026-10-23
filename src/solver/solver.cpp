@@ -1015,6 +1015,10 @@ void Solver::copy_boundary_gas() {
 void Solver::update_boundary_fields(const rtype t_eval, const rtype c) {
     if (timed_fields.empty()) return;
     set_stage_time(t_eval, c);
+    apply_boundary_fields();
+}
+
+void Solver::apply_boundary_fields() {
     TimedBoundaryFields::Gas gas;
     gas.R = double(physics.R);
     if (is_mixture()) {

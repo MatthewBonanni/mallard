@@ -732,11 +732,11 @@ struct ForcedCase {
     std::string physics;
 };
 
-/** @brief Density (or, for a moving wall, x-velocity) of every cell at t = 0.3 with a fixed dt. */
-std::vector<double> forced_run(const ForcedCase & c, double dt) {
+/** @brief The input of a forced case to t = 0.3, with `run` the rest of its [run] table. */
+std::string forced_input(const ForcedCase & c, const std::string & run) {
     const bool wall = !c.top.empty();
     std::ostringstream s;
-    s << "[run]\nt_stop = 0.3\ndt = " << dt << "\n" << mesh_block("cartesian", wall ? 4 : 40, wall ? 8 : 1, 1.0, wall ? 1.0 : 0.1)
+    s << "[run]\nt_stop = 0.3\n" << run << mesh_block("cartesian", wall ? 4 : 40, wall ? 8 : 1, 1.0, wall ? 1.0 : 0.1)
       << "[initialize]\ntype = \"constant\"\np = 1.0\nT = 1.0\nu = " << (N_DIM == 2 ? "[0.5, 0.0]" : "[0.5, 0.0, 0.0]")
       << "\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
       << "[output]\ncheck_interval = 1000000\n" << c.physics;
@@ -749,8 +749,16 @@ std::vector<double> forced_run(const ForcedCase & c, double dt) {
     } else {
         s << duct_boundaries(c.left, "type = \"p_out\"\np = 1.0\n");
     }
+    return s.str();
+}
+
+/** @brief Density (or, for a moving wall, x-velocity) of every cell at t = 0.3 with a fixed dt. */
+std::vector<double> forced_run(const ForcedCase & c, double dt) {
+    const bool wall = !c.top.empty();
+    std::ostringstream run;
+    run << "dt = " << dt << "\n";
     Solver solver;
-    solver.init(parse_toml(s.str()));
+    solver.init(parse_toml(forced_input(c, run.str())));
     solver.run();
     solver.update_primitives();
     solver.copy_device_to_host();
@@ -861,34 +869,38 @@ TEST(ForcedInletTest, NumberOfTThatTurnsNegativeIsAnInputErrorWithFaceAndTime) {
 }
 
 TEST(ForcedInletTest, ConditionsOfTKeepTheStepGraph) {
-    // A single-gas upt inlet whose T and u depend on t runs as one CUDA graph
-    // per step, which replays the device evaluation at each stage time: the
-    // same solution as stepping kernel by kernel
+    // Single-gas conditions of t (an upt inlet, a moving wall) run as one
+    // CUDA graph per step, which replays their device evaluation at each
+    // stage time and, for the CFL time step, at the step's start: the same
+    // solution as stepping kernel by kernel
 #ifndef KOKKOS_ENABLE_CUDA
     GTEST_SKIP() << "CUDA builds only";
 #else
     const std::string u = N_DIM == 2 ? "[\"0.5 + 0.1 * sin(20 * t)\", \"0\"]" : "[\"0.5 + 0.1 * sin(20 * t)\", \"0\", \"0\"]";
-    const std::string left = "type = \"upt\"\nu = " + u + "\np = 1.0\nT = \"1 + 0.2 * sin(20 * t)\"\n";
-    auto run = [&](const bool graphs) {
-        std::ostringstream s;
-        s << "[run]\nt_stop = 0.3\ndt = 0.004\ncuda_graphs = " << (graphs ? "true" : "false") << "\n"
-          << mesh_block("cartesian", 40, 1, 1.0, 0.1) << "[initialize]\ntype = \"constant\"\np = 1.0\nT = 1.0\nu = "
-          << (N_DIM == 2 ? "[0.5, 0.0]" : "[0.5, 0.0, 0.0]")
-          << "\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
-          << "[output]\ncheck_interval = 1000000\n" << UNIT_GAS << duct_boundaries(left, "type = \"p_out\"\np = 1.0\n");
-        auto solver = std::make_unique<Solver>();
-        solver->init(parse_toml(s.str()));
-        EXPECT_EQ(solver->step_graph_unsupported(), graphs ? "" : "off ([run] cuda_graphs)");
-        solver->run();
-        solver->copy_device_to_host();
-        return solver;
+    const std::string wall_u = N_DIM == 2 ? "[\"0.2 * sin(20 * t)\", \"0\"]" : "[\"0.2 * sin(20 * t)\", \"0\", \"0\"]";
+    const std::string viscous =
+        "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 0.02\nPr = 0.72\n";
+    const ForcedCase cases[] = {
+        {"upt u(t), T(t)", "type = \"upt\"\nu = " + u + "\np = 1.0\nT = \"1 + 0.2 * sin(20 * t)\"\n", "", UNIT_GAS},
+        {"moving wall u(t)", "", "type = \"wall_adiabatic\"\nu = " + wall_u + "\n", viscous},
     };
-    const auto graph = run(true), kernels = run(false);
-    EXPECT_GT(graph->get_graph_steps(), 50u);
-    EXPECT_EQ(kernels->get_graph_steps(), 0u);
-    for (uint32_t c = 0; c < graph->get_mesh()->n_cells; c++) {
-        for (uint8_t i = 0; i < N_CONSERVATIVE; i++) {
-            ASSERT_EQ(graph->h_conservatives(c, i), kernels->h_conservatives(c, i)) << "cell " << c;
+    for (const ForcedCase & c : cases) {
+        auto run = [&](const bool graphs) {
+            auto solver = std::make_unique<Solver>();
+            solver->init(parse_toml(forced_input(c, std::string("cfl = 0.5\ncuda_graphs = ") + (graphs ? "true" : "false") + "\n")));
+            EXPECT_EQ(solver->step_graph_unsupported(), graphs ? "" : "off ([run] cuda_graphs)") << c.name;
+            solver->run();
+            solver->copy_device_to_host();
+            return solver;
+        };
+        const auto graph = run(true), kernels = run(false);
+        EXPECT_GT(graph->get_graph_steps(), 10u) << c.name;
+        EXPECT_EQ(kernels->get_graph_steps(), 0u) << c.name;
+        EXPECT_EQ(graph->get_time(), kernels->get_time()) << c.name;
+        for (uint32_t i = 0; i < graph->get_mesh()->n_cells; i++) {
+            for (uint8_t v = 0; v < N_CONSERVATIVE; v++) {
+                ASSERT_EQ(graph->h_conservatives(i, v), kernels->h_conservatives(i, v)) << c.name << ", cell " << i;
+            }
         }
     }
 #endif

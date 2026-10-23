@@ -523,6 +523,8 @@ class Solver {
         void update_inflow(rtype t_eval);
         /** @brief The faces' own conditions whose numbers depend on t, on the device at the stage time. */
         void update_boundary_fields(rtype t_eval, rtype c);
+        /** @brief The faces' own conditions that depend on t, at the time in stage_time. */
+        void apply_boundary_fields();
         /**
          * @brief Mass fluxes of the faces of a mass_flow_inlet entry: per
          *        face for a mass_flux expression or an mdot with a profile,
