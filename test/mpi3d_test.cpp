@@ -237,9 +237,9 @@ TEST(MPI3DTest, BoundaryProbesDoNotDependOnTheRankCount) {
             return ss.str();
         };
         for (const char * file : {"walls.csv", "walls.pvd", "walls_000008.vtp"}) {
-            const std::string a = read(dir + "/serial/" + file);
+            const std::string a = without_provenance(read(dir + "/serial/" + file));
             EXPECT_FALSE(a.empty()) << file;
-            EXPECT_EQ(read(dir + "/ranks/" + file), a) << file;
+            EXPECT_EQ(without_provenance(read(dir + "/ranks/" + file)), a) << file;
         }
         // Each hexahedral block's face splits into two triangles: 6 x 3 at the bottom, 4 x 3 on the left
         EXPECT_NE(read(dir + "/serial/walls_000008.vtp").find("NumberOfPolys=\"" + std::to_string(2 * (18 + 12)) + "\""),

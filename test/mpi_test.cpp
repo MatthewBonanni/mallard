@@ -775,9 +775,9 @@ TEST(MPITest, BoundaryProbesDoNotDependOnTheRankCount) {
             return ss.str();
         };
         for (const char * file : {"walls.csv", "open.csv", "open.pvd", "open_000010.vtp"}) {
-            const std::string a = read(dir + "/serial/" + file);
+            const std::string a = without_provenance(read(dir + "/serial/" + file));
             EXPECT_FALSE(a.empty()) << file;
-            EXPECT_EQ(read(dir + "/ranks/" + file), a) << file;
+            EXPECT_EQ(without_provenance(read(dir + "/ranks/" + file)), a) << file;
         }
     }
     comm::barrier();
