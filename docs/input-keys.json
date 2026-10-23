@@ -479,6 +479,7 @@
    "nscbc_outlet",
    "p_out",
    "p_out_average",
+   "stagnation_inlet",
    "symmetry",
    "upt",
    "wall_adiabatic",
@@ -4265,6 +4266,12 @@
   ],
   "type": "integer"
  },
+ "statistics.phase": {
+  "dims": [
+   3
+  ],
+  "set_in": []
+ },
  "statistics.products": {
   "default": "[]",
   "dims": [
@@ -4290,6 +4297,12 @@
   ],
   "set_in": [],
   "type": "bool"
+ },
+ "statistics.spectra": {
+  "dims": [
+   3
+  ],
+  "set_in": []
  },
  "statistics.t_start": {
   "default": "0.0",
