@@ -51,7 +51,7 @@ const std::vector<Fixture> RESTART_FIXTURES = {
 };
 
 /** @brief The fixture's input, without output; from a restart file if one is given. */
-Input fixture_input(const std::string & name, const fs::path & restart = {}) {
+[[maybe_unused]] Input fixture_input(const std::string & name, const fs::path & restart = {}) {
     Input input = parse_input((FORMATS / (name + ".toml")).string());
     input.as_table().erase("write_data");
     auto & physics = input.at("physics");
@@ -68,7 +68,7 @@ Input fixture_input(const std::string & name, const fs::path & restart = {}) {
 }
 
 /** @brief Each conserved variable and species density of every cell, after init (and the run's steps if run). */
-std::vector<std::vector<double>> solver_state(const Input & input, bool run) {
+[[maybe_unused]] std::vector<std::vector<double>> solver_state(const Input & input, bool run) {
     Solver solver;
     solver.init(input);
     if (run) {
@@ -85,7 +85,7 @@ std::vector<std::vector<double>> solver_state(const Input & input, bool run) {
     return state;
 }
 
-uint32_t restart_version(const fs::path & file) {
+[[maybe_unused]] uint32_t restart_version(const fs::path & file) {
     std::ifstream in(file, std::ios::binary);
     char header[20];
     in.read(header, sizeof(header));
@@ -194,7 +194,7 @@ TEST(FormatCompatTest, RestartFilesOfAnotherBuildNameTheDifference) {
 
 namespace {
 
-void expect_same_mesh(const MeshBlock & a, const MeshBlock & b) {
+[[maybe_unused]] void expect_same_mesh(const MeshBlock & a, const MeshBlock & b) {
     EXPECT_EQ(a.cell_offsets, b.cell_offsets);
     EXPECT_EQ(a.cell_nodes, b.cell_nodes);
     EXPECT_EQ(a.node_coords, b.node_coords);
