@@ -4,6 +4,8 @@ set(MALLARD_TEST_SOURCES
     test_main.cpp
     scratch.cpp
     common_math_test.cpp
+    compiled_expression_test.cpp
+    region_test.cpp
     case_template_test.cpp
     time_integrator_test.cpp
     comm_test.cpp
@@ -25,6 +27,7 @@ set(MALLARD_TEST_SOURCES
     tfles_test.cpp
     check_test.cpp
     synthetic_inflow_test.cpp
+    input_upgrade_test.cpp
     format_compat_test.cpp
     wall_model_test.cpp
     units_test.cpp
@@ -69,6 +72,12 @@ else()
 endif()
 add_executable(MallardTest ${MALLARD_TEST_SOURCES})
 
+# exprtk, the reference of the compiled expressions, rounds every operation on its own there
+if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
+    set_source_files_properties(compiled_expression_test.cpp PROPERTIES COMPILE_OPTIONS "--fmad=false;-ffp-contract=off")
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(compiled_expression_test.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+endif()
 target_include_directories(MallardTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(MallardTest PRIVATE MALLARD_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
                                                MALLARD_EXECUTABLE="$<TARGET_FILE:Mallard>")
