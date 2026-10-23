@@ -33,6 +33,7 @@
 #include "partition.h"
 #include "json_reader.h"
 #include "provenance.h"
+#include "renumbered_mesh.h"
 #include "test_fixtures.h"
 #include "solver.h"
 #include "scratch.h"
@@ -293,6 +294,23 @@ TEST(MPITest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
         EXPECT_GT(seam_faces_cut_by_partition(input), 0u);
     }
     expect_matches_serial(input);
+    comm::barrier();
+}
+
+TEST(MPITest, RenumberedMeshesMatchSerialWithEveryPartitioner) {
+    // Global ids in random order carry no locality: partitions, halos and the
+    // global orders of faces and stencils must not lean on them
+    const RenumberedMesh mesh = renumbered_gmsh(jittered_box(MeshType::CARTESIAN_TRI, {24, 18}, {1.0, 0.8}), 2026);
+    const std::string file = write_temp_shared("mallard_mpi_renumbered.msh", mesh.gmsh);
+    std::string input = box_input("cartesian_tri", "type = \"TENO\"\norder = 4\n", EULER,
+                                  bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                                      "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 10);
+    const std::string generated = "type = \"cartesian_tri\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
+    input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
+    for (const std::string partitioner : {"hilbert", "multijagged", "graph"}) {
+        if (partitioner == "graph" && !have_graph_partitioner()) continue;
+        expect_matches_serial(input + "[parallel]\npartitioner = \"" + partitioner + "\"\n");
+    }
     comm::barrier();
 }
 
