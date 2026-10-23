@@ -575,13 +575,25 @@ MeshBlock read_mesh_h5(const std::string & filename, bool whole) {
         }
     }
     MeshBlock block;
-    // A CSR block: rows [first, first + n) of offsets and the values they span
+    const uint64_t n_nodes = [&] {
+        Handle group(H5Gopen2(file, "nodes", H5P_DEFAULT), H5Gclose, "opening nodes");
+        return n_rows(group, "coordinates");
+    }();
+    auto read_offsets = [&](hid_t group, uint64_t first, uint64_t n) {
+        std::vector<uint64_t> offsets = read_rows<uint64_t>(group, "offsets", first, n + 1, 1, dxpl);
+        if (!std::is_sorted(offsets.begin(), offsets.end())) throw std::runtime_error(filename + ": offsets decrease.");
+        return offsets;
+    };
+    // A CSR block of node ids: rows [first, first + n) of offsets and the values they span
     auto read_csr = [&](hid_t group, uint64_t first, uint64_t n, std::vector<uint64_t> & offsets,
                         std::vector<uint64_t> & values) {
-        offsets = read_rows<uint64_t>(group, "offsets", first, n + 1, 1, dxpl);
+        offsets = read_offsets(group, first, n);
         const uint64_t begin = offsets.front();
         values = read_rows<uint64_t>(group, "nodes", begin, offsets.back() - begin, 1, dxpl);
         for (uint64_t & o : offsets) o -= begin;
+        for (uint64_t v : values) {
+            if (v >= n_nodes) throw std::runtime_error(filename + ": node id out of range.");
+        }
     };
     {
         Handle group(H5Gopen2(file, "cells", H5P_DEFAULT), H5Gclose, "opening cells");
@@ -611,7 +623,7 @@ MeshBlock read_mesh_h5(const std::string & filename, bool whole) {
         }
         if (H5Lexists(group, "high_order", H5P_DEFAULT) > 0) {
             Handle high(H5Gopen2(group, "high_order", H5P_DEFAULT), H5Gclose, "opening boundary/high_order");
-            block.face_high_order_offsets = read_rows<uint64_t>(high, "offsets", first, n_local + 1, 1, dxpl);
+            block.face_high_order_offsets = read_offsets(high, first, n_local);
             const uint64_t begin = block.face_high_order_offsets.front();
             const uint64_t n_high = block.face_high_order_offsets.back() - begin;
             for (uint64_t & o : block.face_high_order_offsets) o -= begin;

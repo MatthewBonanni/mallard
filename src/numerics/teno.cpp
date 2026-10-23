@@ -1464,6 +1464,12 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
             for (uint8_t l = 0; l < n; l++) means[l] /= area;
         };
 
+        // Candidates are ranked by distance in the metric of the local mesh spacing
+        const std::array<double, 9> metric = teno_setup::ranking_metric(*mesh, h_face_bc, h_bcs, i);
+        auto dist2 = [&](const Entry & e) {
+            const double dx = e.x - x0, dy = e.y - y0;
+            return metric[0] * dx * dx + (metric[1] + metric[3]) * dx * dy + metric[4] * dy * dy;
+        };
         std::vector<double> mean0;
         monomial_means(Entry{i, -1, x0, y0, {}, 0.0, 0.0, 0.0, 0.0, 0}, r, mean0);
         out.basis_mean.assign(mean0.begin(), mean0.end());
@@ -1510,9 +1516,12 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
                 double nx, ny;  // unit normal, mapped with its cell
                 int turns;      // of its cell's copy
             };
+            // (nx, ny) points into the domain; [s_min, s_max] is the extent of
+            // the line's faces along its tangent (-ny, nx), from faces[0]
             struct Line {
                 double nx, ny;
                 std::vector<LineFace> faces;
+                double s_min, s_max;
             };
             std::vector<Line> lines;
             for (const Visit & v : cells) {
@@ -1522,9 +1531,16 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
                     if (mesh->h_cells_of_face(f, 1) >= 0 || h_face_bc(f) < 0) continue;
                     if (h_bcs(h_face_bc(f)).type == BoundaryType::PARTITION) continue;
                     if (teno_setup::one_sided_face(*mesh, h_bcs(h_face_bc(f)), f, curved_mirrors)) continue;
+                    double fx = double(mesh->h_face_normals(f, 0)) / double(mesh->h_face_area(f));
+                    double fy = double(mesh->h_face_normals(f, 1)) / double(mesh->h_face_area(f));
+                    if ((double(mesh->h_cell_coords(c, 0)) - double(mesh->h_face_coords(f, 0))) * fx +
+                            (double(mesh->h_cell_coords(c, 1)) - double(mesh->h_face_coords(f, 1))) * fy <
+                        0.0) {
+                        fx = -fx;
+                        fy = -fy;
+                    }
                     double nx, ny;
-                    v.map.vector(double(mesh->h_face_normals(f, 0)) / double(mesh->h_face_area(f)),
-                                 double(mesh->h_face_normals(f, 1)) / double(mesh->h_face_area(f)), nx, ny);
+                    v.map.vector(fx, fy, nx, ny);
                     LineFace lf{static_cast<int32_t>(f), 0.0, 0.0, nx, ny, v.map.turns};
                     v.map.point(double(mesh->h_face_coords(f, 0)), double(mesh->h_face_coords(f, 1)), lf.x, lf.y);
                     Line * match = nullptr;
@@ -1537,13 +1553,23 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
                         }
                     }
                     if (match == nullptr) {
-                        lines.push_back(Line{nx, ny, {}});
+                        lines.push_back(Line{nx, ny, {lf}, std::numeric_limits<double>::max(), std::numeric_limits<double>::lowest()});
                         match = &lines.back();
+                    } else {
+                        const bool known = std::any_of(match->faces.begin(), match->faces.end(), [&](const LineFace & g) {
+                            return g.face == lf.face && g.x == lf.x && g.y == lf.y && g.turns == lf.turns;
+                        });
+                        if (known) continue;
+                        match->faces.push_back(lf);
                     }
-                    const bool known = std::any_of(match->faces.begin(), match->faces.end(), [&](const LineFace & g) {
-                        return g.face == lf.face && g.x == lf.x && g.y == lf.y && g.turns == lf.turns;
-                    });
-                    if (!known) match->faces.push_back(lf);
+                    for (uint32_t a = 0; a < 2; a++) {
+                        const uint32_t node = mesh->h_node_of_face(f, a);
+                        double qx, qy;
+                        v.map.point(double(mesh->h_node_coords(node, 0)), double(mesh->h_node_coords(node, 1)), qx, qy);
+                        const double s = -(qx - match->faces[0].x) * match->ny + (qy - match->faces[0].y) * match->nx;
+                        match->s_min = std::min(match->s_min, s);
+                        match->s_max = std::max(match->s_max, s);
+                    }
                 }
             }
             for (const Visit & v : cells) {
@@ -1554,7 +1580,19 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
                     entries.push_back(Entry{c, -1, cx, cy, v.map, 0.0, 0.0, 0.0, 0.0, 0});
                 }
                 for (const Line & line : lines) {
+                    // A reflection stands for the flow beyond the boundary only
+                    // where it crosses the line's faces, from the side of the
+                    // domain that the target cell is on: across the extension
+                    // of a facet of a curved wall, or across the far side of a
+                    // thin body, it lands on another part of the flow
                     const LineFace & first = line.faces[0];
+                    const double s = -(cx - first.x) * line.ny + (cy - first.y) * line.nx;
+                    const double tol = GEOMETRY_TOL * h;
+                    if ((cx - first.x) * line.nx + (cy - first.y) * line.ny <= 0.0 ||
+                        (x0 - first.x) * line.nx + (y0 - first.y) * line.ny <= 0.0 || s < line.s_min - tol ||
+                        s > line.s_max + tol) {
+                        continue;
+                    }
                     Entry e{c, first.face, 0.0, 0.0, v.map, first.x, first.y, line.nx, line.ny, first.turns};
                     mirror(e, cx, cy, e.x, e.y);
                     // Images that land inside the domain (non-convex boundaries) are not ghosts
@@ -1584,9 +1622,6 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
                     entries.push_back(e);
                 }
             }
-            auto dist2 = [&](const Entry & e) {
-                return (e.x - x0) * (e.x - x0) + (e.y - y0) * (e.y - y0);
-            };
             sort_by_key(entries, dist2);
             return entries;
         };
@@ -1650,7 +1685,6 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
         // Never split a group of equidistant candidates: keeps stencils
         // independent of cell numbering, so mirror-symmetric meshes give
         // mirror-symmetric reconstructions
-        auto dist2 = [&](const Entry & e) { return (e.x - x0) * (e.x - x0) + (e.y - y0) * (e.y - y0); };
         auto splits_tie = [&](const std::vector<Entry> & list, size_t n) {
             return n < list.size() && std::abs(dist2(list[n]) - dist2(list[n - 1])) < GEOMETRY_TOL * h * h;
         };
@@ -3223,8 +3257,9 @@ namespace {
 // smoothness-indicator matrices in single precision and has tables from the faster setup (#140),
 // which differ from version 6 at round-off; version 8 bounds 3D Lebesgue constants by 4 (#126, #229);
 // version 9 records where the tables were set up (the execution space, or "host"); version 10 holds
-// each 3D cell's moments in place of its smoothness-indicator matrix
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-10";
+// each 3D cell's moments in place of its smoothness-indicator matrix; version 11 ranks 2D candidates
+// in the mesh-spacing metric and mirrors them only across the boundary faces beneath them (#382)
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-11";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {

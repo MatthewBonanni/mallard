@@ -19,6 +19,7 @@
 #include <map>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 #include "comm.h"
 #include "periodic.h"
@@ -354,6 +355,12 @@ std::array<rtype, N_DIM> make_node(double x, double y, double z) {
     return node;
 }
 
+/** @brief Read values from a Gmsh file, failing if it is malformed or ends early. */
+template <typename... T>
+void read_values(std::istream & in, const std::string & filename, T &... values) {
+    if (!(in >> ... >> values)) throw std::runtime_error("Gmsh file " + filename + " is malformed or ends early.");
+}
+
 void expect_section(std::istream & in, const std::string & name) {
     std::string line;
     while (std::getline(in, line)) {
@@ -373,7 +380,15 @@ MeshFileData read_gmsh(const std::string & filename) {
     double version = 0.0;
     int file_type = 0, data_size = 0;
     expect_section(in, "$MeshFormat");
-    in >> version >> file_type >> data_size;
+    read_values(in, filename, version, file_type, data_size);
+    // Every item a count announces takes at least a byte of the file
+    const uintmax_t file_size = std::filesystem::file_size(filename);
+    auto read_count = [&](auto & n) {
+        read_values(in, filename, n);
+        if (std::cmp_less(n, 0) || std::cmp_greater(n, file_size)) {
+            throw std::runtime_error("Gmsh file " + filename + ": bad count " + std::to_string(n) + ".");
+        }
+    };
     if (file_type != 0) {
         throw std::runtime_error("Gmsh file " + filename + ": only ASCII files are supported.");
     }
@@ -416,11 +431,11 @@ MeshFileData read_gmsh(const std::string & filename) {
     while (in >> token) {
         if (token == "$PhysicalNames") {
             int n;
-            in >> n;
+            read_count(n);
             for (int i = 0; i < n; i++) {
                 int dim, tag;
                 std::string name;
-                in >> dim >> tag;
+                read_values(in, filename, dim, tag);
                 std::getline(in, name);
                 const size_t a = name.find('"'), b = name.rfind('"');
                 if (dim == BOUNDARY_DIM) {
@@ -429,7 +444,7 @@ MeshFileData read_gmsh(const std::string & filename) {
             }
         } else if (token == "$Entities") {
             size_t n_entities[4];
-            for (size_t & n : n_entities) in >> n;
+            for (size_t & n : n_entities) read_count(n);
             std::string line;
             std::getline(in, line);
             for (int dim = 0; dim < 4; dim++) {
@@ -440,12 +455,11 @@ MeshFileData read_gmsh(const std::string & filename) {
                     int tag;
                     double bounds[6];
                     size_t n_phys;
-                    ls >> tag;
-                    for (double & b : bounds) ls >> b;
-                    ls >> n_phys;
+                    read_values(ls, filename, tag, bounds[0], bounds[1], bounds[2], bounds[3], bounds[4], bounds[5],
+                                n_phys);
                     for (size_t k = 0; k < n_phys; k++) {
                         int p;
-                        ls >> p;
+                        read_values(ls, filename, p);
                         boundary_entity_physicals[tag].push_back(std::abs(p));
                     }
                 }
@@ -453,27 +467,29 @@ MeshFileData read_gmsh(const std::string & filename) {
         } else if (token == "$Nodes") {
             if (version == 2.2) {
                 size_t n;
-                in >> n;
+                read_count(n);
                 for (size_t i = 0; i < n; i++) {
                     size_t tag;
                     double x, y, z;
-                    in >> tag >> x >> y >> z;
+                    read_values(in, filename, tag, x, y, z);
                     node_index[tag] = static_cast<uint32_t>(data.nodes.size());
                     data.nodes.push_back(make_node(x, y, z));
                     coords.push_back({x, y, N_DIM == 3 ? z : 0.0});
                 }
             } else {
                 size_t n_blocks, n_nodes, min_tag, max_tag;
-                in >> n_blocks >> n_nodes >> min_tag >> max_tag;
+                read_count(n_blocks);
+                read_values(in, filename, n_nodes, min_tag, max_tag);
                 for (size_t b = 0; b < n_blocks; b++) {
                     int dim, entity, parametric;
                     size_t n_in_block;
-                    in >> dim >> entity >> parametric >> n_in_block;
+                    read_values(in, filename, dim, entity, parametric);
+                    read_count(n_in_block);
                     std::vector<size_t> tags(n_in_block);
-                    for (auto & t : tags) in >> t;
+                    for (auto & t : tags) read_values(in, filename, t);
                     for (size_t i = 0; i < n_in_block; i++) {
                         double x, y, z;
-                        in >> x >> y >> z;
+                        read_values(in, filename, x, y, z);
                         if (parametric) {
                             throw std::runtime_error("Gmsh file " + filename + ": parametric nodes are not supported.");
                         }
@@ -486,24 +502,27 @@ MeshFileData read_gmsh(const std::string & filename) {
         } else if (token == "$Elements") {
             if (version == 2.2) {
                 size_t n;
-                in >> n;
+                read_count(n);
                 for (size_t i = 0; i < n; i++) {
                     size_t tag;
                     int type, n_tags;
-                    in >> tag >> type >> n_tags;
+                    read_values(in, filename, tag, type);
+                    read_count(n_tags);
                     std::vector<int> etags(static_cast<size_t>(n_tags));
-                    for (auto & t : etags) in >> t;
+                    for (auto & t : etags) read_values(in, filename, t);
                     std::vector<size_t> nodes(static_cast<size_t>(gmsh_element_type(type, filename).n_nodes));
-                    for (auto & v : nodes) in >> v;
+                    for (auto & v : nodes) read_values(in, filename, v);
                     add_element(type, n_tags > 0 ? etags[0] : 0, nodes);
                 }
             } else {
                 size_t n_blocks, n_elements, min_tag, max_tag;
-                in >> n_blocks >> n_elements >> min_tag >> max_tag;
+                read_count(n_blocks);
+                read_values(in, filename, n_elements, min_tag, max_tag);
                 for (size_t b = 0; b < n_blocks; b++) {
                     int dim, entity, type;
                     size_t n_in_block;
-                    in >> dim >> entity >> type >> n_in_block;
+                    read_values(in, filename, dim, entity, type);
+                    read_count(n_in_block);
                     int physical = 0;
                     if (dim == BOUNDARY_DIM) {
                         auto it = boundary_entity_physicals.find(entity);
@@ -512,9 +531,9 @@ MeshFileData read_gmsh(const std::string & filename) {
                     const int n_nodes_per_element = gmsh_element_type(type, filename).n_nodes;
                     for (size_t i = 0; i < n_in_block; i++) {
                         size_t tag;
-                        in >> tag;
+                        read_values(in, filename, tag);
                         std::vector<size_t> nodes(static_cast<size_t>(n_nodes_per_element));
-                        for (auto & v : nodes) in >> v;
+                        for (auto & v : nodes) read_values(in, filename, v);
                         add_element(type, physical, nodes);
                     }
                 }
