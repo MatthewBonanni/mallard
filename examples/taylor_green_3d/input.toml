@@ -15,8 +15,8 @@
 # (owned plus halo), so use enough ranks: on 4 A100s (16 host threads each),
 # Nx = 128 takes 1m 15s of setup, then 0.21 s per step:
 #   mpirun -n 4 --bind-to none ../../build3d/src/mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
-#   python ../../tools/plot_taylor_green.py integrals.csv --ref spectral_Re1600_512.gdiag
-#   python ../../tools/animate_taylor_green.py solut integrals.csv tgv --ref spectral_Re1600_512.gdiag
+#   python plot_taylor_green.py integrals.csv --ref spectral_Re1600_512.gdiag
+#   python animate_taylor_green.py solut integrals.csv tgv --ref spectral_Re1600_512.gdiag
 # with the workshop's 512^3 pseudo-spectral reference
 # (https://cfd.ku.edu/hiocfd/spectral_Re1600_512.gdiag). Nx = 128 is
 # 2,097,152 cells and 12,900 steps: about 45 minutes on 4 A100s (25 on 8).

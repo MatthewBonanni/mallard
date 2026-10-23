@@ -12,7 +12,7 @@
 # walls (channel walls and bluff body, not wall-resolved: no wall model).
 #
 # LES: Sigma model with Scotti's filter width, hybrid KEEP / HLLC flux, MUSCL
-# without limiter, SSPRK3. Mesh (tools/make_volvo_mesh.py --ds 1.25e-3 --nz 64):
+# without limiter, SSPRK3. Mesh (examples/volvo_bluff_body/make_volvo_mesh.py --ds 1.25e-3 --nz 64):
 # 2.7M hexahedra, Delta = 1.25 mm = D / 32 in the shear layers and the near
 # wake (x < 5 D), 0.6 mm at the separation corners, growing to 5 mm at
 # x = 10 D and 10 mm at the outlet; dz = 1.25 mm. The mesh lines leave the
@@ -33,12 +33,12 @@
 #                                       feeds energy, the model removes it)
 #
 # Run:
-#   python ../../tools/make_volvo_mesh.py volvo.msh --ds 1.25e-3 --nz 64
-#   python ../../tools/volvo.py probes >> cold.toml   # optional: mid-span plane for a movie
+#   python make_volvo_mesh.py volvo.msh --ds 1.25e-3 --nz 64
+#   python volvo.py probes >> cold.toml   # optional: mid-span plane for a movie
 #   mpirun -n 4 ../../build3d/src/mallard -i cold.toml --kokkos-map-device-id-by=mpi_rank
-#   python ../../tools/volvo.py profiles stats/cold_000003.pvtu --u-bulk 16.6 --out cold.npz
-#   python ../../tools/volvo.py plot cold.npz --exp reference --out cold.png
-#   python ../../tools/volvo.py budget integrals.csv --t0 0.08
+#   python volvo.py profiles stats/cold_000003.pvtu --u-bulk 16.6 --out cold.npz
+#   python volvo.py plot cold.npz --exp reference --out cold.png
+#   python volvo.py budget integrals.csv --t0 0.08
 # Cost: 626,000 steps, 14 ms each on four A100s (2.8 hours).
 
 [run]

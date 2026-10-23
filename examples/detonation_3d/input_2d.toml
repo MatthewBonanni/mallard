@@ -1,6 +1,6 @@
 # Stage 1 of examples/detonation_3d (see input.toml): the 2D cellular
 # detonation in a 3 cm channel that starts the 3D run, in a window that
-# follows the front (tools/detonation_window.py). 2D build.
+# follows the front (examples/detonation_3d/detonation_window.py). 2D build.
 
 [run]
 t_stop = 6.0e-6

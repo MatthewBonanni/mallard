@@ -257,7 +257,7 @@ The test suite checks mesh geometry, the Riemann solvers against an exact Rieman
 `tools/` contains Python scripts (numpy, matplotlib, scipy, imageio) for reading Mallard's VTU files, plotting profiles against exact solutions, and rendering animations:
 
 ```sh
-python tools/animate.py examples/riemann_2d/solut riemann
+python tools/post/animate.py examples/riemann_2d/solut riemann
 ```
 
 ## Contributing

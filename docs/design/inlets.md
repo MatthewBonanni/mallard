@@ -111,7 +111,7 @@ The ghost depends on the interior state, as `farfield`'s does:
 
 The `nozzle` example is a planar converging-diverging nozzle with inlet and
 exit 1.6 throat heights, fed at `p0`, `T0`. The back pressure `0.75 p0` puts
-a normal shock in the diverging part. `tools/plot_nozzle.py` compares the
+a normal shock in the diverging part. `examples/nozzle/plot_nozzle.py` compares the
 section averages with the quasi-one-dimensional solution (`--figure` redraws
 this figure):
 

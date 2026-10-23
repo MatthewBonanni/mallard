@@ -12,25 +12,25 @@
 # conduction and diffusion), the more so the steeper the temperature
 # gradients. DNS, no turbulence model: 400 x 400 cells of 10.25 um, 11-15 per
 # thermal thickness of the deflagration (114-149 um, measured with
-# tools/autoignition_deflagration.py; its speed is the same to 0.1% at 2.5,
+# examples/autoignition_2d/autoignition_deflagration.py; its speed is the same to 0.1% at 2.5,
 # 5, 10 and 20 um), the h2o2 mechanism (GRI-Mech 3.0's H2/O2 subset; the
 # papers used Li et al.'s) and mixture-averaged transport. This file is
 # T' = 15 K; make it, its initial state and the other amplitudes with
 #
-#   python ../../tools/autoignition_restart.py . --t-rms 15
-#   python ../../tools/autoignition_restart.py RUN_DIR --t-rms 3.75 --t-stop 4.2e-3 --outputs 168
+#   python autoignition_restart.py . --t-rms 15
+#   python autoignition_restart.py RUN_DIR --t-rms 3.75 --t-stop 4.2e-3 --outputs 168
 #   (7.5 K: --t-stop 4.4e-3 --outputs 176; 30 K: --t-stop 5.5e-3 --outputs 220)
 #
 # (one seed: the same field shapes at every amplitude), the 0D references
 # (homogeneous reactor, ignition delays, multizone model of each initial
 # field; reactor.toml checks mallard reactor's delay against Cantera's) with
 #
-#   python ../../tools/autoignition_reference.py reference --restart RUN_DIR/autoignition.restart ...
+#   python autoignition_reference.py reference --restart RUN_DIR/autoignition.restart ...
 #
 # and compare the runs with them and classify their fronts with
 #
-#   python ../../tools/autoignition_analysis.py reference deflagration.csv --run "T' = 15 K" RUN_DIR ...
-#   python ../../tools/animate_autoignition.py autoignition_2d.mp4 reference --run "T' = 15 K" RUN_DIR ...
+#   python autoignition_analysis.py reference deflagration.csv --run "T' = 15 K" RUN_DIR ...
+#   python animate_autoignition.py autoignition_2d.mp4 reference --run "T' = 15 K" RUN_DIR ...
 #
 # Results (tau_0 = 3.650 ms, the homogeneous delay; mean heat release rate
 # peak time and full width at half maximum over tau_0, peak over the

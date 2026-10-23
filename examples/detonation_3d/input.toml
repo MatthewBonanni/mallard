@@ -13,7 +13,7 @@
 # 0.15 mm hexahedra, 10 per induction length (the resolution of
 # examples/detonation_2d, whose track pattern is the same at 20): 200 x 200
 # across the duct. A window 7.2 cm long follows the front
-# (tools/detonation_window.py): every 6 us the run stops, the box drops the
+# (examples/detonation_3d/detonation_window.py): every 6 us the run stops, the box drops the
 # columns more than 5 cm behind the front and appends fresh gas ahead, and
 # the P_MAX of the dropped wall cells goes to the foil; the transmissive
 # left boundary cuts the burnt gas 5 cm behind the front. 480 x 200 x 200 =
@@ -28,18 +28,18 @@
 # (x, y) or, turned into z, at (x, z), whichever is hotter), i.e. the 2D
 # transverse waves in both directions in phase. From this directory:
 #
-#   python ../../tools/detonation_reference.py ../../mechanisms/h2o2.yaml ohmech \
+#   python ../../tools/setup/detonation_reference.py ../../mechanisms/h2o2.yaml ohmech \
 #       "H2:2, O2:1, AR:7" 298 6670 znd.csv
-#   python ../../tools/znd_restart.py znd.csv ../../mechanisms/h2o2.yaml ohmech 680 0.102 0.08 \
+#   python ../../tools/setup/znd_restart.py znd.csv ../../mechanisms/h2o2.yaml ohmech 680 0.102 0.08 \
 #       window_2d.restart --ny 200 --ly 0.03 --fresh-pocket --pocket 0.077 0.01 0.002
-#   python ../../tools/detonation_window.py run input_2d.toml --keep 0.08 --segment 6e-6 --t-end 9.6e-5 \
+#   python detonation_window.py run input_2d.toml --keep 0.08 --segment 6e-6 --t-end 9.6e-5 \
 #       --frames frames_2d -- ../../build/src/mallard -i input_2d.toml
-#   python ../../tools/detonation_window.py extrude input_2d.toml window_2d.restart input.toml \
+#   python detonation_window.py extrude input_2d.toml window_2d.restart input.toml \
 #       window.restart --superpose
-#   python ../../tools/detonation_window.py run input.toml --keep 0.05 --segment 6e-6 --t-end 2.04e-4 \
+#   python detonation_window.py run input.toml --keep 0.05 --segment 6e-6 --t-end 2.04e-4 \
 #       --frames frames -- mpirun -n 4 ../../build3d/src/mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
-#   python ../../tools/soot_foil_3d.py input.toml frames --png foils.png
-#   python ../../tools/animate_detonation_3d.py input.toml frames detonation_3d
+#   python soot_foil_3d.py input.toml frames --png foils.png
+#   python animate_detonation_3d.py input.toml frames detonation_3d
 #
 # Results (t = 96 to 204 us, 17 cm of 3D travel): the front runs at
 # 1620.6 m/s over the second half (D_CJ to 0.2%). Its transverse waves stay

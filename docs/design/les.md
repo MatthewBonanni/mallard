@@ -934,7 +934,7 @@ over 0.3-0.4 ms, when the wrinkling has developed):
   of the cross-section against the DNS's 1.13), so `E` must supply it.
 - **Colin's subgrid velocity overshoots at `Delta = 1.6 delta_L`**: mean
   `E = 2.10` and `S_T` +98%. The a priori test on the filtered DNS
-  (`tools/tfles_apriori.py`, t = 0.125-0.2 ms, fresh gas next to the flame)
+  (`examples/flame_turbulence/tfles_apriori.py`, t = 0.125-0.2 ms, fresh gas next to the flame)
   shows why: Colin's `u' = 2 Delta^3 |lap(curl u)|` is 3.3 / 7.0 / 10 `S_L`
   at `Delta` = 0.4 / 0.8 / 1.6 `delta_L`, while the DNS's velocity
   fluctuation below `F delta_L` is 0.6 / 1.0 / 1.2 `S_L` (5-8 times less);
@@ -1027,7 +1027,7 @@ with the mean `E` in the flame:
   0.005-0.04 on case 2, rising as the flame wrinkles; `|eps_num /
   eps_sgs|` (window means) 0.03 / 0.07 / 0.12 (case 1) and 0.38 / 0.26 /
   0.46 (case 2; `E = 1` 0.37, `C_u = 28` 0.40 at `F = 8`).
-- **A priori** (`tools/tfles_apriori.py` on the extracted DNS snapshots:
+- **A priori** (`examples/flame_turbulence/tfles_apriori.py` on the extracted DNS snapshots:
   the DNS top-hat filtered at `F delta_L` on the LES mesh, the model's test
   filter and global sums), against the wrinkling factor `Xi` of the DNS
   surface at the scale `F delta_L`:
@@ -1063,7 +1063,7 @@ benchmark keep `charlette` with `eddy_viscosity`.
 
 DNS: an H2/N2 (25% H2) - air counterflow diffusion flame profile (`K = 160`
 1/s, peak 1544 K, `Z_st = 0.556`) in the box and turbulence of the premixed
-DNS, pressure outlets on both ends, to 0.4 ms (`tools/flame_turbulence.py
+DNS, pressure outlets on both ends, to 0.4 ms (`examples/flame_turbulence/flame_turbulence.py
 init --x-f`, `analyze --z-fuel --z-st`). LES at `Delta` = 0.27 and 0.53 mm
 (8 and 16 DNS cells) with the Sigma model and `[les.combustion] model =
 "pasr"`, against quasi-laminar chemistry. Heat release over 0.2-0.4 ms
@@ -1091,7 +1091,7 @@ is `6 D` wide), inlet `5 D` upstream of the base (`nscbc_inlet` with
 digital-filter turbulence, `u' = 5% U_b`, `L = 10` mm), outlet `17 D`
 downstream (`nscbc_outlet`), no-slip adiabatic walls without a wall model.
 Sigma with Scotti's width, hybrid flux, MUSCL without limiter, 2.7M
-hexahedra (`tools/make_volvo_mesh.py`): `Delta = 1.25` mm `= D / 32` in the
+hexahedra (`examples/volvo_bluff_body/make_volvo_mesh.py`): `Delta = 1.25` mm `= D / 32` in the
 near wake and shear layers, 0.6 mm at the separation corners. Statistics
 over 0.08-0.30 s (about 26 shedding periods, 4 flow-throughs of the
 domain), averaged over the span. Reference: the LDA data as plotted by Wu

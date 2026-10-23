@@ -567,7 +567,7 @@ the [guide](guide/boundary_conditions.md#synthetic-turbulence).
 | Key | Description |
 |---|---|
 | `reynolds_stress` | `[R_xx, R_yy, R_zz, R_xy, R_xz, R_yz]` (2D: `[R_xx, R_yy, R_xy]`), numbers or expressions in `x`, `y`, `z`, positive semidefinite |
-| `profile` | Instead of `u` and `reynolds_stress`: a CSV file of plane averages as `tools/plane_average.py` writes them (a first column `x`, `y` or `z`, then `MEAN_U_X`, `MEAN_U_Y`(, `MEAN_U_Z`) and `COV_U_X_U_X`, ...; missing off-diagonal covariances are zero), interpolated linearly along that coordinate: the statistics of a precursor run |
+| `profile` | Instead of `u` and `reynolds_stress`: a CSV file of plane averages as `tools/post/plane_average.py` writes them (a first column `x`, `y` or `z`, then `MEAN_U_X`, `MEAN_U_Y`(, `MEAN_U_Z`) and `COV_U_X_U_X`, ...; missing off-diagonal covariances are zero), interpolated linearly along that coordinate: the statistics of a precursor run |
 | `length_scale` | Integral length scales: a number, `[L_x, L_y, L_z]` (along each direction, for all components), or one such list per velocity component. The one along the inlet normal sets the integral time scale `L / U_c` |
 | `convection_velocity` | `U_c` of Taylor's hypothesis (default the area-averaged mean inflow speed) |
 | `seed` | Random seed, a non-negative integer (default 1); inlets also differ by their position in `[[boundaries]]` |
@@ -786,7 +786,7 @@ to round-off when they are small), e.g. `MEAN_U` (a vector), `COV_U_X_U_Y`, or
 number of ranks; a restart file without them starts them afresh, and one with
 only some of them is an error unless `reset = true`. With
 `chemistry.fuse_half_steps`, sampling steps read the state like output does.
-`tools/plane_average.py` averages them further over homogeneous directions
+`tools/post/plane_average.py` averages them further over homogeneous directions
 (e.g. over x and z of a channel, as a function of y). `fields` and
 `products` may be left out when `[statistics.spectra]` or
 `[statistics.phase]` is given; both take `interval` and `t_start` from
@@ -836,7 +836,7 @@ The results are bitwise the same on any number of ranks
 ([design](design/insitu_statistics.md)). Restart files (format version 6)
 carry the averages as named arrays; a restart file holding spectra of other
 fields or directions is an error unless `reset = true`.
-`tools/insitu_statistics.py` recomputes the same quantities from restart
+`tools/post/insitu_statistics.py` recomputes the same quantities from restart
 files, compares two spectra files and plots them.
 
 ### `[statistics.phase]`
@@ -1129,7 +1129,7 @@ two files instead of one per rank. A shared file pays off on parallel file
 systems; on one node's local disk, which serializes writes to a file, VTU
 pieces write faster beyond a few ranks (2.1M hexahedra, 16 ranks: 115 ms per
 HDF5 snapshot against 72 ms, 1 rank: 140 ms against 1.1 s). VTU output remains
-the simpler choice for small runs. `tools/mallard_h5.py` reads the files.
+the simpler choice for small runs. `tools/mallard/h5.py` reads the files.
 
 ## `mallard reactor`
 
