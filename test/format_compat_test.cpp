@@ -173,7 +173,7 @@ TEST(FormatCompatTest, RestartFilesOfANewerFormatAreRejectedClearly) {
         }
         const std::string error = error_of([&] { read_restart(file.string()); });
         EXPECT_NE(error.find("format version 99 is from a newer Mallard"), std::string::npos) << error;
-        EXPECT_NE(error.find("reads restart files of versions 1 to 5"), std::string::npos) << error;
+        EXPECT_NE(error.find("reads restart files of versions 1 to 6"), std::string::npos) << error;
         fs::remove(file);
     }
 }

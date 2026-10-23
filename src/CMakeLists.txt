@@ -69,6 +69,7 @@ add_library(MallardCore STATIC
     solver/solver_inflow.cpp
     solver/source_terms.cpp
     solver/remap.cpp
+    solver/spectra.cpp
     solver/statistics.cpp
     io/compression.cpp
     io/file_format.cpp

@@ -11,7 +11,7 @@ Mallard comes with three executables and a set of Python scripts that cover ever
 | [Meshes](#meshes): Gmsh meshes from the command line | `make_cylinder_mesh.py`, `make_annulus_mesh.py`, `make_mallard_mesh.py` |
 | [Initial states](#initial-states-and-references): restart files to start runs from | `isotropic_turbulence_restart.py`, `channel_init.py`, `tile_restart.py`, `interpolate_restart.py`, `flame_restart.py`, `znd_restart.py` |
 | [References](#initial-states-and-references): exact and Cantera solutions | `flame_reference.py`, `detonation_reference.py`, `sedov.py`, `cantera_mechanisms.py` |
-| [Post-processing](#post-processing): readers, plots, movies, averages | `mallard_vtu.py`, `mallard_h5.py`, `plot_vtu.py`, `compare_png.py`, `animate.py`, `animate_cartesian.py`, `animate_grid.py`, `plane_average.py` |
+| [Post-processing](#post-processing): readers, plots, movies, averages | `mallard_vtu.py`, `mallard_h5.py`, `plot_vtu.py`, `compare_png.py`, `animate.py`, `animate_cartesian.py`, `animate_grid.py`, `plane_average.py`, `insitu_statistics.py` |
 | [Performance](#performance): benchmarks and baselines | `perf_suite.py` |
 | [Case scripts](#case-scripts): set-up and analysis of one example each | `plot_<case>.py`, `animate_<case>.py`, ... |
 | [Developer tools](#developer-tools): figures of these pages, test reference data | `docs/`, `chemistry_reference.py`, ... |
@@ -342,6 +342,17 @@ Averages the `[statistics]` output (`MEAN_<field>`, `COV_<a>_<b>`) of an axis-al
 
 ![Mean velocity and resolved Reynolds stresses in wall units against the DNS](../docs/images/tutorials/channel_profiles-light.svg#gh-light-mode-only)
 ![Mean velocity and resolved Reynolds stresses in wall units against the DNS](../docs/images/tutorials/channel_profiles-dark.svg#gh-dark-mode-only)
+
+### `insitu_statistics.py`: spectra, correlations and phase averages
+
+```sh
+python tools/insitu_statistics.py plot spectra.csv --pair U_X,U_X -o spectra.png
+python tools/insitu_statistics.py spectra input.toml restart_*.restart -o reference.csv
+python tools/insitu_statistics.py compare spectra.csv reference.csv
+python tools/insitu_statistics.py phase input.toml probe_wake.csv -o phase.npz
+```
+
+Reads and checks the output of `[statistics.spectra]` and `[statistics.phase]` ([output guide](../docs/guide/output.md)): `plot` draws the spectra and correlations of one pair along each direction; `spectra` recomputes a run's spectra, correlations and plane means from restart files taken at the sampling steps (numpy FFTs, the solver's time weights) in the solver's CSV format, and `compare` gives the largest difference between two such files; `phase` phase-bins a `[[probes]]` series with the solver's phase rule, to compare with the in-situ `PHASE_` fields at the probe point.
 
 ## Performance
 
