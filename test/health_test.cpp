@@ -43,14 +43,14 @@ std::string mesh(uint32_t nx, uint32_t ny, double lx, double ly, const std::stri
 }
 
 /** @brief The run's balance of a component, from the last report. */
-const health::Balance & balance(const Solver & solver, const std::string & name) {
+health::Balance balance(const Solver & solver, const std::string & name) {
     for (const auto & b : solver.get_health().balance_run) {
         if (b.name == name) return b;
     }
     throw std::runtime_error("no balance of " + name);
 }
 
-const health::Repair & repair(const Solver & solver, const std::string & site) {
+health::Repair repair(const Solver & solver, const std::string & site) {
     for (const auto & r : solver.get_health().repairs_run) {
         if (r.site == site) return r;
     }
@@ -148,7 +148,7 @@ std::unique_ptr<Solver> run(const std::string & input, const LedgerMutation & mu
 
 void expect_closed(const Solver & solver, double tol) {
     for (const auto & name : flow_components()) {
-        const health::Balance & b = balance(solver, name);
+        const health::Balance b = balance(solver, name);
         EXPECT_TRUE(b.checked) << name << ": " << b.note;
         EXPECT_LT(std::fabs(b.relative()), roundoff(tol)) << name << " residual " << b.residual();
     }
@@ -298,14 +298,14 @@ TEST(HealthRepairs, ClippingInAReactingRunIsWhatTheAuditRecords) {
     comm::allreduce(std::span<double>(expected), comm::Op::SUM);
     solver.run();
 
-    const health::Repair & clip = repair(solver, "composition_clip");
+    const health::Repair clip = repair(solver, "composition_clip");
     EXPECT_EQ(clip.activations, static_cast<uint64_t>(comm::size()));
     EXPECT_EQ(clip.cells, static_cast<uint64_t>(comm::size()));
     for (uint32_t k = 0; k < ns; k++) {
         EXPECT_NEAR(change(clip, "species_" + mech.species[k].name), expected[k], 1e-12 * rho * V) << mech.species[k].name;
     }
-    for (const std::string & e : {"element_H", "element_O", "element_N"}) {
-        const health::Balance & b = balance(solver, e);
+    for (const char * e : {"element_H", "element_O", "element_N"}) {
+        const health::Balance b = balance(solver, e);
         EXPECT_TRUE(b.checked) << e << ": " << b.note;
         EXPECT_DOUBLE_EQ(b.repairs, change(clip, e)) << e;
         EXPECT_LT(std::fabs(b.relative()), roundoff(1e-13)) << e;
@@ -322,9 +322,9 @@ TEST(HealthRepairs, DoubleFluxEnergyResetIsTheEnergyChangeAtRest) {
     // changes the energy, and its total changes only by the reset to the true equation of state
     const auto solver_ptr = run(reacting_step("", true, "0.0"));
     const Solver & solver = *solver_ptr;
-    const health::Repair & reset = repair(solver, "energy_reset");
+    const health::Repair reset = repair(solver, "energy_reset");
     EXPECT_GT(reset.activations, 0u);
-    const health::Balance & energy = balance(solver, "energy");
+    const health::Balance energy = balance(solver, "energy");
     EXPECT_FALSE(energy.checked);
     EXPECT_NE(change(reset, "energy"), 0.0);
     EXPECT_NEAR(energy.change, change(reset, "energy"), 1e-13 * std::fabs(energy.total));

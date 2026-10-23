@@ -213,7 +213,7 @@ std::string dependencies_block() {
     d.raw("hdf5", version_or_null(hdf5));
     std::string cgns;
 #ifdef Mallard_HAS_CGNS
-    cgns = CGNS_DOTVERS;
+    cgns = logging::format("%d.%d.%d", CGNS_VERSION / 1000, CGNS_VERSION / 100 % 10, CGNS_VERSION / 10 % 10);
 #endif
     d.raw("cgns", version_or_null(cgns));
     std::string zlib;
