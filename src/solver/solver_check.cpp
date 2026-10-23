@@ -76,6 +76,7 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     for (const Diagnostic & key : unused_keys(input)) {
         if (r.setup_done || !key.suggestion.empty()) r.unused.push_back(key);
     }
+    for (const auto & finding : deprecated_keys) r.warnings.push_back(input_upgrade::advice(finding));
     if (!options.catalog_file.empty() && comm::is_root()) {
         std::ofstream file(options.catalog_file);
         file << key_catalog(input);

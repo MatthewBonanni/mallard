@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "test_fixtures.h"
+#include "verification.h"
 #include "face_reconstruction.h"
 #include "physics.h"
 #include "scratch.h"
@@ -103,23 +104,30 @@ class TENOOrder : public ::testing::TestWithParam<OrderParam> {};
 
 TEST_P(TENOOrder, SmoothReconstructionConvergesAtDesignOrderInInterior) {
     const auto [mesh_type, order] = GetParam();
-    const double e1 = reconstruction_error(mesh_type, 16, order, "", 0.25);
-    const double e2 = reconstruction_error(mesh_type, 32, order, "", 0.25);
-    EXPECT_GT(std::log2(e1 / e2), order - 0.2);
+    verification::expect_order({"reconstruction", "TENO" + std::to_string(order), verification::cells_of(mesh_type),
+                                "max face-value error, interior", {16, 32},
+                                {reconstruction_error(mesh_type, 16, order, "", 0.25),
+                                 reconstruction_error(mesh_type, 32, order, "", 0.25)},
+                                double(order), order - 0.2});
 }
 
 TEST_P(TENOOrder, SmoothReconstructionConvergesAtDesignOrderWithMirroredBoundaries) {
     // Mirror ghost cells at symmetry walls keep boundary stencils centered
     const auto [mesh_type, order] = GetParam();
     if (order == 5) SKIP_IN_SINGLE_PRECISION("the order-5 error on the 64-cell mesh is at round-off");
-    const double e1 = reconstruction_error(mesh_type, 32, order);
-    const double e2 = reconstruction_error(mesh_type, 64, order);
-    EXPECT_GT(std::log2(e1 / e2), order - 0.4);
+    verification::expect_order({"boundaries", "TENO" + std::to_string(order), verification::cells_of(mesh_type),
+                                "max face-value error, symmetry walls", {32, 64},
+                                {reconstruction_error(mesh_type, 32, order), reconstruction_error(mesh_type, 64, order)},
+                                double(order), order - 0.4});
 }
 
 INSTANTIATE_TEST_SUITE_P(TENO, TENOOrder,
     ::testing::Combine(::testing::Values("cartesian", "cartesian_tri"),
                        ::testing::Values(3, 4, 5)));
+
+// The rest of the verification manual's matrix: run by tools/docs/verification.py
+INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, TENOOrder,
+    ::testing::Combine(::testing::Values("cartesian", "cartesian_tri"), ::testing::Values(6)));
 
 TEST(TENOTest, EigenvectorsAreInverse) {
     const rtype W[N_CONSERVATIVE] = {1.3_r, 0.4_r, -0.7_r, 2.1_r};
