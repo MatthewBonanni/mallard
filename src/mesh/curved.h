@@ -16,6 +16,7 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -27,25 +28,39 @@
 class Mesh;
 struct MeshBlock;
 
+namespace region {
+class Region;
+}
+
 namespace curved {
 
 using Vec3 = std::array<double, 3>;
 
 /**
- * @brief An analytic surface onto which the faces of a boundary zone are
- *        projected: a circle (2D) or a sphere or circular cylinder (3D).
+ * @brief The surface of a region (docs/input.md#regions) onto which the faces
+ *        of a boundary zone are projected. Circles, spheres and infinite
+ *        circular cylinders are projected in closed form; every other surface
+ *        by closest-point iterations on the region's level-set function.
  */
 struct Shape {
-    enum class Kind : uint8_t { CIRCLE, SPHERE, CYLINDER };
+    enum class Kind : uint8_t { CIRCLE, SPHERE, CYLINDER, SURFACE };
     Kind kind = Kind::CIRCLE;
     std::string zone;
     Vec3 center = {0.0, 0.0, 0.0};
     Vec3 axis = {0.0, 0.0, 1.0};  // cylinder: unit vector
     double radius = 1.0;
+    std::shared_ptr<const region::Region> surface;  // SURFACE: its zero level set
 
-    /** @brief Radial projection p of x onto the shape, and dp/dx (row-major 3 x 3). */
-    void project(const Vec3 & x, Vec3 & p, double * J) const;
+    /**
+     * @brief Closest point p of x on the shape, and dp/dx (row-major 3 x 3).
+     *        length is the size of the edge or face that x belongs to, which
+     *        sets the finite-difference steps and tolerances of SURFACE shapes.
+     */
+    void project(const Vec3 & x, double length, Vec3 & p, double * J) const;
 };
+
+/** @brief The shape of a region's surface: closed form where it is a circle, sphere or infinite cylinder. */
+Shape shape_of(std::shared_ptr<const region::Region> surface, const std::string & zone);
 
 /**
  * @brief A curved boundary face of the whole mesh: its corners (global node
@@ -69,7 +84,7 @@ struct Surfaces {
     bool empty() const { return faces.empty(); }
 };
 
-/** @brief Analytic shapes of the [[mesh.curved]] entries (none if [mesh] curved = false). */
+/** @brief Shapes of the [[mesh.curved]] entries (none if [mesh] curved_geometry = false). */
 std::vector<Shape> read_shapes(const Input & input);
 
 /** @brief [mesh] curved: whether curved geometry is used at all (default true). */
@@ -154,8 +169,12 @@ class Geometry {
             std::array<int32_t, 4> edge = {-1, -1, -1, -1};  // local edge k (node k to k + 1), or -1 if straight
             std::array<uint8_t, 4> flip = {0, 0, 0, 0};      // edge k runs from its higher global node id
             std::vector<Vec3> bubble;                  // interior corrections of high-order elements
+            std::vector<Vec3> offset;                  // shape faces: projection offsets of the corners
+            std::array<std::array<Vec3, 2>, 4> edge_offset{};  // shape edges: of their ends, in the edge's order
         };
 
+        /** @brief The projection offsets of the face's corners v and of its shape edges' ends. */
+        void project_corners(Face & face, const std::vector<Vec3> & v) const;
         void edge_eval(const Face & face, size_t k, const Vec3 & a, const Vec3 & b, double t, Vec3 & x, Vec3 & dx) const;
         void face_eval(const Face & face, const std::vector<Vec3> & v, const double * xi, Vec3 & x, Vec3 * dx) const;
         std::vector<Vec3> face_nodes(uint32_t f) const;
