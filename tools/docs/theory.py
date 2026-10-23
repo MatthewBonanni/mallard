@@ -1,6 +1,7 @@
 """Figures of the theory manual (docs/theory/), drawn into docs/images/theory/:
 reconstruction stencils on an unstructured mesh, quadrature on a curved
-face, the splitting sequences, characteristic boundaries and Riemann fans."""
+face, the splitting sequences, characteristic boundaries, Riemann fans and
+the exchange point of a modeled wall."""
 import math
 
 import numpy as np
@@ -274,7 +275,80 @@ def wave_fan(P):
     return fig
 
 
+# ------------------------------------------------------------ wall models
+
+def _walk(nodes, cells, c, p):
+    """Cells visited by the exchange-point walk of src/boundary/wall_exchange.cpp: from cell c across the
+    face beyond which p lies farthest, until p is inside."""
+    owner = {}
+    for k, cell in enumerate(cells):
+        for e in ((cell[0], cell[1]), (cell[1], cell[2]), (cell[2], cell[0])):
+            owner.setdefault(frozenset(e), []).append(k)
+    path = [c]
+    while True:
+        cell = cells[c]
+        centroid = nodes[cell].mean(axis=0)
+        worst, across = 1e-12, None
+        for e in ((cell[0], cell[1]), (cell[1], cell[2]), (cell[2], cell[0])):
+            pa, pb = nodes[e[0]], nodes[e[1]]
+            n = np.array([pb[1] - pa[1], pa[0] - pb[0]])
+            n /= np.linalg.norm(n)
+            if np.dot(n, centroid - pa) > 0:
+                n = -n
+            d = np.dot(p - 0.5 * (pa + pb), n)
+            if d > worst:
+                worst, across = d, frozenset(e)
+        if across is None:
+            return path
+        c = next(k for k in owner[across] if k != c)
+        path.append(c)
+
+
+def wall_exchange(P):
+    """The exchange point of a modeled wall face (exchange_cells = 3) and the walk that locates it."""
+    nodes, cells = triangle_mesh(nx=9, ny=5, L=(4.0, 2.0), seed=3)
+    fig, ax = plt.subplots(figsize=(7.2, 4.0))
+    wall_faces = [c for c in range(len(cells)) if np.sum(nodes[cells[c], 1] == 0.0) == 2]
+    wall_cell = min(wall_faces, key=lambda c: abs(nodes[cells[c]].mean(axis=0)[0] - 2.3))
+    a, b = [v for v in cells[wall_cell] if nodes[v, 1] == 0.0]
+    x_f = 0.5 * (nodes[a] + nodes[b])
+    depth = nodes[cells[wall_cell]].mean(axis=0)[1]
+    h = 3.0 * 2.0 * depth
+    x_e = x_f + np.array([0.0, h])
+    path = _walk(nodes, cells, wall_cell, x_e)
+    for c in range(len(cells)):
+        tri_poly(ax, nodes[cells[c]], P)
+    for c in path[:-1]:
+        tri_poly(ax, nodes[cells[c]], P, fill=P["teal"], alpha=0.14, edge="none")
+    tri_poly(ax, nodes[cells[path[-1]]], P, fill=P["teal"], alpha=0.45, edge="none")
+    ax.plot([0, 4.0], [0, 0], color=P["fg"], lw=3, zorder=3)
+    for x in np.linspace(0.05, 4.0, 40):
+        ax.plot([x, x - 0.08], [0, -0.1], color=P["muted"], lw=0.8)
+    ax.plot([nodes[a, 0], nodes[b, 0]], [0, 0], color=P["flame"], lw=5, solid_capstyle="butt", zorder=4)
+    cent = np.array([nodes[cells[c]].mean(axis=0) for c in path])
+    ax.plot(cent[:, 0], cent[:, 1], color=P["teal"], lw=1.3, ls=":", marker="o", ms=3.5, zorder=4)
+    arrow(ax, tuple(x_f), tuple(x_e), P, color=P["fg"], lw=1.4, ms=10, zorder=5)
+    x_c = cent[-1]
+    arrow(ax, tuple(x_c), tuple(x_e), P, color=P["blue"], lw=1.6, ms=9, zorder=5)
+    ax.plot(*x_e, "o", color=P["flame"], ms=7, zorder=6)
+    label(ax, x_f[0] + 0.07, 0.4 * h, "$h$", P, ha="left", size=13, box=True)
+    label(ax, x_e[0] - 0.1, x_e[1] + 0.12, r"exchange point $\mathbf{x}_e = \mathbf{x}_f + h\,\mathbf{n}$", P,
+          ha="right", va="bottom", size=11.5, box=True)
+    label(ax, x_e[0] + 0.25, x_e[1] - 0.05,
+          r"$\phi_e = \overline{\phi}_c + \nabla\phi_c \cdot (\mathbf{x}_e - \mathbf{x}_c)$", P, color=P["blue"],
+          ha="left", size=11.5, box=True)
+    label(ax, x_c[0] - 0.06, x_c[1] - 0.04, r"$\mathbf{x}_c$", P, color=P["blue"], ha="right", va="top", size=12)
+    label(ax, x_f[0], -0.2, r"modeled wall face $f$, centroid $\mathbf{x}_f$", P, color=P["flame"], va="top",
+          size=11.5)
+    label(ax, cent[1][0] - 0.25, cent[1][1], "walk", P, color=P["teal"], ha="right", size=11.5, box=True)
+    bare(ax)
+    ax.set_xlim(-0.05, 4.05)
+    ax.set_ylim(-0.5, 2.15)
+    return fig
+
+
 FIGURES = {
+    "wall_exchange": wall_exchange,
     "stencils": stencils,
     "curved_quadrature": curved_quadrature,
     "splitting_sequence": splitting_sequence,

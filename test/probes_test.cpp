@@ -22,8 +22,10 @@
 #include <string>
 #include <vector>
 
+#include "file_format.h"
 #include "input.h"
 #include "probe_geometry.h"
+#include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
 
@@ -44,7 +46,7 @@ std::string vector3(const char * x, const char * y, const char * z) {
 }
 
 std::string dir_for(const std::string & name) {
-    return (std::filesystem::temp_directory_path() / ("mallard_probes_" + name)).string();
+    return (scratch_dir() / ("probes_" + name)).string();
 }
 
 /** @brief A periodic box of n cells per side (n / 2 along z) with the given initial fields and reconstruction. */
@@ -327,6 +329,9 @@ TEST(ProbesTest, VtpAndHdf5HoldTheCsvSamplesAndRestartsCutThemBack) {
     EXPECT_NE(vtp.find("NumberOfPoints=\"12\""), std::string::npos);
     EXPECT_NE(vtp.find("NumberOfLines=\"1\""), std::string::npos);
     EXPECT_NE(vtp.find("Name=\"U_X\""), std::string::npos);
+    EXPECT_NE(vtp.find("Name=\"MALLARD_FORMAT_VERSION\" NumberOfTuples=\"1\" format=\"ascii\">" +
+                       std::to_string(file_format::PROBE_OUTPUT.version) + "<"),
+              std::string::npos);
 #ifdef Mallard_HAS_HDF5
     for (const char * sub : {"a", "b"}) {
         const std::string h5file = dir + "/" + sub + "/h.h5";
@@ -338,6 +343,20 @@ TEST(ProbesTest, VtpAndHdf5HoldTheCsvSamplesAndRestartsCutThemBack) {
         for (size_t k = 0; k < 4; k++) {
             for (size_t p = 0; p < 12; p++) EXPECT_EQ(rtype(rho[k * 12 + p]), rtype(csv[k * 12 + p].at("RHO")));
         }
+    }
+    {
+        h5::Handle file(H5Fopen((dir + "/b/h.h5").c_str(), H5F_ACC_RDWR, H5P_DEFAULT), H5Fclose, "opening");
+        h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /");
+        EXPECT_EQ(h5::read_int_attribute(root, "version"), file_format::PROBE_OUTPUT.version);
+        h5::check(H5Adelete(root, "version"), "H5Adelete");
+        h5::write_int_attribute(root, "version", static_cast<int>(file_format::PROBE_OUTPUT.version + 1));
+    }
+    try {
+        Solver newer;
+        newer.init(parse_toml(input));
+        ADD_FAILURE() << "a probe file of a newer format version was appended to";
+    } catch (const std::runtime_error & e) {
+        EXPECT_NE(std::string(e.what()).find("is from a newer Mallard"), std::string::npos) << e.what();
     }
 #endif
     std::filesystem::remove_all(dir);

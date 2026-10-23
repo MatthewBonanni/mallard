@@ -22,6 +22,8 @@
 #include <unordered_map>
 
 #include "comm.h"
+#include "common_io.h"
+#include "file_format.h"
 #include "input.h"
 #include "log.h"
 
@@ -46,6 +48,7 @@ void make_parent(const std::string & file) {
 }
 
 std::shared_ptr<std::ofstream> open_csv(const std::string & file, bool resume, const std::string & header) {
+    if (!output_files_enabled()) return std::make_shared<std::ofstream>();
     make_parent(file);
     auto out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
     if (!out->good()) throw std::runtime_error("Could not open " + file + ".");
@@ -150,6 +153,9 @@ void write_vtp_file(const std::string & file, const probe::Geometry & g, const s
            "header_type=\"UInt64\">\n  <PolyData>\n    <Piece NumberOfPoints=\""
         << n << "\" NumberOfVerts=\"" << (g.dim == 0 ? offsets.size() : 0) << "\" NumberOfLines=\""
         << (g.dim == 0 ? 0 : offsets.size()) << "\" NumberOfStrips=\"0\" NumberOfPolys=\"0\">\n";
+    out << "      <FieldData>\n        <DataArray type=\"Int32\" Name=\"MALLARD_FORMAT_VERSION\" NumberOfTuples=\"1\" "
+           "format=\"ascii\">"
+        << file_format::PROBE_OUTPUT.version << "</DataArray>\n      </FieldData>\n";
     out << "      <Points>\n";
     data_array(arrays[0]);
     out << "      </Points>\n      <" << cells << ">\n";
@@ -308,11 +314,11 @@ std::vector<double> Probes::Samples::gather() const {
     return ordered;
 }
 
-void Probes::init(const toml::value & input, const Mesh & mesh, const std::vector<std::string> & species_names,
+void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std::string> & species_names,
                   bool resume) {
     resumed = resume;
     if (!input.contains("probes")) return;
-    const auto entries = toml::find<std::vector<toml::value>>(input, "probes");
+    const auto entries = toml::find<std::vector<Input>>(input, "probes");
     for (const auto & entry : entries) {
         auto probe_ptr = std::make_unique<Probe>();
         Probe & p = *probe_ptr;
@@ -326,7 +332,7 @@ void Probes::init(const toml::value & input, const Mesh & mesh, const std::vecto
         const bool steps = entry.contains("interval"), times = entry.contains("time_interval");
         if (steps && times) throw InputError(key + ": give interval or time_interval, not both.");
         if (times) {
-            p.time_interval = find_real(entry, "time_interval");
+            p.time_interval = find_real(entry, "time_interval", dim::time);
             if (!(p.time_interval > 0.0_r)) throw InputError(key + ".time_interval must be positive.");
         } else {
             p.interval = toml::find_or<uint64_t>(entry, "interval", 1);
@@ -398,10 +404,15 @@ void Probes::init(const toml::value & input, const Mesh & mesh, const std::vecto
                 p.out_reductions = open_csv(p.reductions_file, resume, header);
             }
 #ifdef Mallard_HAS_HDF5
-            if (p.write_samples && p.format == Format::HDF5 && !(resume && std::filesystem::exists(p.file))) {
+            if (p.write_samples && p.format == Format::HDF5 && output_files_enabled() &&
+                !(resume && std::filesystem::exists(p.file))) {
                 make_parent(p.file);
                 h5::Handle file(H5Fcreate(p.file.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT), H5Fclose,
                                 "creating " + p.file);
+                {
+                    h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /");
+                    h5::write_int_attribute(root, "version", static_cast<int>(file_format::PROBE_OUTPUT.version));
+                }
                 const uint64_t n = p.geometry.nodes.size();
                 std::vector<double> xyz;
                 for (const auto & x : p.geometry.nodes) xyz.insert(xyz.end(), x.begin(), x.end());
@@ -449,7 +460,7 @@ void Probes::resume(uint64_t step, rtype t) {
         if (p.time_interval > 0.0_r) {
             p.n_written = static_cast<uint64_t>(std::floor(t / p.time_interval + tol)) + 1;
         }
-        if (!comm::is_root() || !p.write_samples) continue;
+        if (!comm::is_root() || !p.write_samples || !output_files_enabled()) continue;
         if (p.format == Format::VTP && std::filesystem::exists(p.file)) {
             // Keep the series up to the restart time
             std::ifstream in(p.file);
@@ -466,6 +477,10 @@ void Probes::resume(uint64_t step, rtype t) {
         if (p.format == Format::HDF5 && std::filesystem::exists(p.file)) {
             // Drop the rows after the restart step
             h5::Handle file(H5Fopen(p.file.c_str(), H5F_ACC_RDWR, H5P_DEFAULT), H5Fclose, "opening " + p.file);
+            {
+                h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /");
+                file_format::check_version(file_format::PROBE_OUTPUT, p.file, h5::read_int_attribute(root, "version"));
+            }
             const uint64_t n_rows = h5::n_rows(file, "step");
             const std::vector<uint64_t> steps = h5::read_rows<uint64_t>(file, "step", 0, n_rows, 1, H5P_DEFAULT);
             uint64_t keep = 0;

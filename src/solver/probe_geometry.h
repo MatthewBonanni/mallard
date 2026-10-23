@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-#include <toml.hpp>
+#include "input.h"
 
 #include "common_typedef.h"
 
@@ -39,7 +39,7 @@ struct Transform {
     Vec3 vector(const Vec3 & v) const;
 
     /** @brief The transform of a [[probes]] entry (identity without the keys). */
-    static Transform read(const toml::value & entry, const std::string & key);
+    static Transform read(const Input & entry, const std::string & key);
 };
 
 /**
@@ -58,7 +58,7 @@ struct Geometry {
 };
 
 /** @brief The geometry of a [[probes]] entry (key names it in errors). */
-Geometry make_geometry(const toml::value & entry, const std::string & key);
+Geometry make_geometry(const Input & entry, const std::string & key);
 
 /** @brief Points of a text file: rows of N_DIM coordinates split by commas or blanks; '#' starts a comment. */
 std::vector<Point> read_points(const std::string & file, const std::string & key);
