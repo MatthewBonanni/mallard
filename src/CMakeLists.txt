@@ -3,6 +3,7 @@ add_library(MallardCore STATIC
     common/common_math.cpp
     common/compiled_expression.cpp
     common/region.cpp
+    common/tabulated.cpp
     common/common_io.cpp
     common/input.cpp
     common/units.cpp
@@ -61,6 +62,7 @@ add_library(MallardCore STATIC
     solver/solver_control.cpp
     solver/solver_graph.cpp
     solver/solver_step_control.cpp
+    solver/initial_state.cpp
     solver/solver_initialize.cpp
     solver/solver_mixture.cpp
     solver/solver_les.cpp
