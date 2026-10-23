@@ -3305,20 +3305,17 @@
   "type": "array"
  },
  "probes.end": {
-  "dimension": "length (m)",
   "dims": [
    2,
    3
   ],
-  "required": true,
   "set_in": [
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "tutorials/wedge/input.toml"
-  ],
-  "type": "array"
+  ]
  },
  "probes.file": {
   "default": "\"probe_inlet_p.csv\"",
@@ -3332,6 +3329,20 @@
   ],
   "set_in": [],
   "type": "string"
+ },
+ "probes.format": {
+  "default": "\"csv\"",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "string",
+  "values": [
+   "csv",
+   "hdf5",
+   "vtp"
+  ]
  },
  "probes.interval": {
   "default": "1",
@@ -3385,21 +3396,108 @@
   ],
   "set_in": []
  },
- "probes.start": {
-  "dimension": "length (m)",
+ "probes.reductions": {
+  "default": "[]",
   "dims": [
    2,
    3
   ],
-  "required": true,
+  "set_in": [],
+  "type": "array"
+ },
+ "probes.reductions_file": {
+  "default": "\"probe_inlet_p_reductions.csv\"",
+  "defaults_by_dim": {
+   "2": "\"probe_line_reductions.csv\"",
+   "3": "\"probe_x5_reductions.csv\""
+  },
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "string"
+ },
+ "probes.rotate": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
+ "probes.samples": {
+  "default": "true",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "bool"
+ },
+ "probes.sampling": {
+  "default": "\"cell\"",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "string",
+  "values": [
+   "cell",
+   "point"
+  ]
+ },
+ "probes.scale": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
+ "probes.shape": {
+  "default": "\"\"",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "string",
+  "values": [
+   "arc",
+   "circle",
+   "curve",
+   "line",
+   "point",
+   "points",
+   "polyline"
+  ]
+ },
+ "probes.start": {
+  "dims": [
+   2,
+   3
+  ],
   "set_in": [
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "tutorials/wedge/input.toml"
+  ]
+ },
+ "probes.time_interval": {
+  "dims": [
+   2,
+   3
   ],
-  "type": "array"
+  "set_in": []
+ },
+ "probes.translate": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
  },
  "probes.variables": {
   "dims": [
