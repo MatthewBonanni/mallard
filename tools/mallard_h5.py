@@ -5,6 +5,7 @@ fields per snapshot, every array in global cell order, with the XDMF indexes
 PREFIX_NNNNNN.xmf and PREFIX.xmf (the time series) for ParaView.
 """
 import functools
+import json
 import os
 import re
 
@@ -73,3 +74,13 @@ def read_series(path):
     entries = re.findall(r'<Grid Name="([^"]+)" GridType="Uniform">\s*<Time Value="([^"]+)"/>', text)
     base = os.path.dirname(path)
     return [(float(t), os.path.join(base, name + ".h5")) for name, t in entries]
+
+
+def provenance(path):
+    """The provenance block of an HDF5 file (the root group's attribute), as a dict; None if it has none."""
+    with h5py.File(path, "r") as f:
+        value = f["/"].attrs.get("provenance")
+    if value is None:
+        return None
+    value = value[0]
+    return json.loads(value.decode() if isinstance(value, bytes) else value)
