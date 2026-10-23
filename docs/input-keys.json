@@ -41,6 +41,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
@@ -274,6 +275,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
@@ -454,6 +456,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
@@ -889,6 +892,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -911,6 +915,7 @@
    "examples/flame_outflow/input.toml",
    "examples/poiseuille_pipe/input.toml",
    "examples/reactive_shock_tube/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
@@ -1158,6 +1163,7 @@
    "examples/sedov_axisymmetric/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
@@ -1236,6 +1242,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -1274,6 +1281,7 @@
    "examples/sedov_axisymmetric/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
@@ -1571,6 +1579,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_isotropic_turbulence/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -1586,6 +1595,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -1629,6 +1639,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_isotropic_turbulence/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -1644,6 +1655,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -1688,6 +1700,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_isotropic_turbulence/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -1703,6 +1716,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -1737,6 +1751,7 @@
    "examples/flame_turbulence/hit.toml",
    "examples/flame_turbulence/input.toml",
    "examples/flame_turbulence/les.toml",
+   "examples/forced_isotropic_turbulence/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/sedov_3d/input.toml",
    "examples/shock_bubble_3d/input.toml",
@@ -1793,6 +1808,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -1851,6 +1867,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -1931,6 +1948,7 @@
    "examples/flame_turbulence/hit.toml",
    "examples/flame_turbulence/input.toml",
    "examples/flame_turbulence/les.toml",
+   "examples/forced_isotropic_turbulence/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/poiseuille_pipe/input.toml",
    "examples/taylor_green_3d/coarse.toml",
@@ -1992,6 +2010,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_isotropic_turbulence/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -2007,6 +2026,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -2059,6 +2079,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_isotropic_turbulence/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -2074,6 +2095,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -2206,6 +2228,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -2453,6 +2476,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -2555,6 +2579,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -2618,6 +2643,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -2681,6 +2707,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -2745,6 +2772,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -2825,6 +2853,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -2907,6 +2936,7 @@
    "examples/sedov_axisymmetric/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -2960,6 +2990,7 @@
    "examples/sedov_axisymmetric/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -3092,6 +3123,7 @@
    "examples/sedov_axisymmetric/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -3155,6 +3187,7 @@
    "examples/sedov_axisymmetric/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -3243,6 +3276,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -3576,6 +3610,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_isotropic_turbulence/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -3591,6 +3626,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -3633,6 +3669,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_isotropic_turbulence/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -3648,6 +3685,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -3717,6 +3755,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_isotropic_turbulence/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -3732,6 +3771,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -3820,6 +3860,173 @@
    3
   ],
   "set_in": []
+ },
+ "sources": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "sources.name": {
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ],
+  "type": "string"
+ },
+ "sources.region": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "sources.region.center": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "sources.region.edge": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "sources.region.inner_radius": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "sources.region.length": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "sources.region.pivot": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "sources.region.radius": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "sources.region.rotate": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "sources.region.scale": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "sources.region.size": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "sources.region.translate": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "sources.region.type": {
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ],
+  "type": "string",
+  "values": [
+   "annulus",
+   "box",
+   "cone",
+   "cylinder",
+   "difference",
+   "disk",
+   "ellipse",
+   "ellipsoid",
+   "half_space",
+   "implicit",
+   "intersection",
+   "polygon",
+   "rectangle",
+   "sphere",
+   "torus",
+   "union"
+  ]
+ },
+ "sources.rho": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "sources.rhoE": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "sources.rhoY": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "sources.rhou": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "sources.total": {
+  "default": "false",
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ],
+  "type": "bool"
  },
  "sponges": {
   "dims": [
@@ -4004,6 +4211,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -4080,6 +4288,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -4176,6 +4385,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -4240,6 +4450,7 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
@@ -4290,6 +4501,7 @@
    "examples/sedov_axisymmetric/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
+   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
