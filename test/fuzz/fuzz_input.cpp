@@ -1,5 +1,5 @@
-// TOML input files: parsing, the lookups setup makes, number conversions with
-// their error messages, and the unused-key report (with suggestions) of --check
+// TOML input files: parsing, the lookups setup makes, number and unit conversions
+// with their error messages, and the unused-key report (with suggestions) of --check
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -25,7 +25,8 @@ void read_some(const Input & v, const std::string & path) {
         for (const auto & item : v.as_array()) read_some(item, path + "[]");
     } else {
         try {
-            static_cast<void>(as_real(v, path));
+            const Dimension dims[] = {dim::none, dim::length, dim::temperature};
+            static_cast<void>(as_real(v, path, dims[std::hash<std::string>{}(path) % 3]));
             static_cast<void>(toml::get<uint32_t>(v));
         } catch (const std::exception &) {
         }
