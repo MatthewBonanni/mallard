@@ -576,6 +576,8 @@ void Solver::init_boundaries() {
     // Faces of upt boundaries whose composition varies along them, as (boundary, face):
     // each face gets its own copy of the condition, appended after the input's
     std::vector<std::array<uint32_t, 2>> profiled_faces;
+    // Mass-flow inlets with a mass flux varying along them: the flux of each profiled face, else NaN
+    std::vector<double> profiled_flux;
     // Faces of each nscbc_inlet on this rank, by input boundary
     std::vector<std::pair<size_t, std::vector<uint32_t>>> inlets;
 
@@ -640,7 +642,9 @@ void Solver::init_boundaries() {
                               MixtureModel::composition_varies(bound);
         rtype direction[N_DIM];
         FOR_I_DIM direction[i] = bcs.back().data[1 + i];
-        const bool directed = bcs.back().type == BoundaryType::STAGNATION_INLET && dot<N_DIM>(direction, direction) > 0.0_r;
+        const bool directed = (bcs.back().type == BoundaryType::STAGNATION_INLET ||
+                               bcs.back().type == BoundaryType::MASS_FLOW_INLET) &&
+                              dot<N_DIM>(direction, direction) > 0.0_r;
         uint32_t n_selected = 0;
         uint64_t n_owned_selected = 0;
         for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
@@ -660,13 +664,19 @@ void Solver::init_boundaries() {
                                      "every face of the boundary.");
                 }
             }
-            if (profiled) profiled_faces.push_back({static_cast<uint32_t>(i_bc), i_face});
+
             dirichlet.faces.push_back(i_face);
             n_selected++;
             n_owned_selected += static_cast<uint32_t>(mesh->h_cells_of_face(i_face, 0)) < mesh->n_owned();
         }
         if (comm::allreduce(n_selected, comm::Op::SUM) == 0) {
             throw std::runtime_error("Boundary " + name + " selects no faces.");
+        }
+        const std::vector<double> flux = mass_flow_inlet_fluxes(bound, dirichlet.faces, bcs.back());
+        for (size_t k = 0; k < dirichlet.faces.size(); k++) {
+            if (!profiled && flux.empty()) break;
+            profiled_faces.push_back({static_cast<uint32_t>(i_bc), dirichlet.faces[k]});
+            profiled_flux.push_back(flux.empty() ? std::nan("") : flux[k]);
         }
         if (bcs.back().type == BoundaryType::NSCBC_INLET) inlets.emplace_back(i_bc, dirichlet.faces);
         if (bcs.back().type == BoundaryType::DIRICHLET) {
@@ -703,8 +713,10 @@ void Solver::init_boundaries() {
         if (bcs.back().modeled) text += ", " + wall_model_spec.summary();
         boundary_summary.emplace_back(name, text);
     }
-    for (const auto & [i_bc, i_face] : profiled_faces) {
-        const BoundaryCondition copy = bcs[i_bc];
+    for (size_t k = 0; k < profiled_faces.size(); k++) {
+        const auto [i_bc, i_face] = profiled_faces[k];
+        BoundaryCondition copy = bcs[i_bc];
+        if (!std::isnan(profiled_flux[k])) copy.data[N_DIM + 1] = static_cast<rtype>(profiled_flux[k]);
         face_bc[i_face] = static_cast<int32_t>(bcs.size());
         bcs.push_back(copy);
     }
