@@ -56,6 +56,19 @@ hardware they were measured on.
 | `channel_inflow_retau180` | Spatially developing turbulent channel at Re<sub>τ</sub> = 180 (3D build): DNS with digital-filter synthetic turbulence at an `nscbc_inlet`, its mean profile and Reynolds stresses taken from the periodic `channel_retau180` statistics (`inflow_profile.csv`). Wall shear, -u'v' and the RMS peaks recover to within 5% of the periodic channel by about 17h (Keating et al. 2004: about 20h); the outlet uses `beta = 0` behind a sponge. Start from the periodic example's restart with `tools/tile_restart.py` (see the input's header) | 4.7M hexahedra | 337,000 steps: 2.5 hours on four A100s |
 | `turbulent_inflow_duct` | Isotropic digital-filter turbulence (u′ = 0.1 U, L = 0.25, Re_L = 100) entering a duct periodic across and decaying downstream (3D build): inlet Reynolds stresses within 6% of target, and `zero_net_flux` removing the plane acoustic wave (spurious p′<sub>rms</sub> = 7.8 ρu′² without it, 1.1 by x = 20L with it) | 6.3M hexahedra | 65,000 steps: 1.5 hours on one A100 |
 
+### Isotropic turbulence: filtered statistics
+
+![Filtered statistics of the isotropic turbulence runs against the references](../docs/images/isotropic_turbulence_validation.png)
+
+`isotropic_turbulence` on $64^3$, $128^3$ and $256^3$, filtered to $64^3$ as the
+references: top, sixth-order differences against Johnsen et al. (2010,
+circles); bottom, spectral derivatives against Subramaniam et al. (2019,
+grey). $64^3$ is under-resolved ($k_\mathrm{max}\eta \approx 0.7$) and misses 15% of the
+enstrophy; $128^3$ and $256^3$ agree within 2%. The remaining differences from
+the references (kinetic energy +2%, temperature variance -5%) are of the size
+of the spread between random initial fields, whose realizations the
+references do not publish.
+
 ## Large-eddy simulation
 
 | Case | What it shows | Cells | Run time |
@@ -87,15 +100,3 @@ hardware they were measured on.
 | `autoignition_2d` | Autoignition of a thermally stratified lean H2/air mixture at constant volume (φ 0.1, 1070 K, 41 atm; Chen et al. and Hawkes et al. 2006, Sankaran et al. 2005): a 4.1 mm periodic square with random temperature fluctuations T' of 3.75-30 K and decaying turbulence, mixture-averaged transport, 11-15 cells per deflagration thickness. Generate the initial state and the 0D references first (see the input's header). Larger T' ignites earlier (mean heat release peak at 0.99 down to 0.82 tau_0) and burns longer (width 0.06 to 0.16 tau_0), and the fronts slow from spontaneous ignition (median 17 S<sub>L</sub>) towards deflagration (2.4 S<sub>L</sub>, a quarter of the heat release below 1.5 S<sub>L</sub>); the multizone model without transport predicts 2-4 times wider bursts, since mixing halves T' before ignition. `tools/autoignition_analysis.py` and `tools/animate_autoignition.py` compare and animate the runs | 160,000 | 1.4-2.0M steps per T': 4.7-5.5 hours on four A100s |
 | `shock_bubble_3d` | Mach 1.25 shock on a helium bubble in air (3D build; Haas & Sturtevant 1987): Navier-Stokes with mixture-averaged transport at Re = 1.5e3 (the bubble scaled down to 0.18 mm), a quarter of the square shock tube at 128 cells per diameter; the kidney-shaped bubble, the air jet and the vortex ring. Refracted and transmitted shocks, ring and late downstream face within 0-8% of the measured velocities (961, 359, 178, 166 m/s against 960, 365, 165, 165), all within 1.2% at 96 cells per diameter; generate the initial state first (see the input's header); `tools/shock_bubble.py` compares, `tools/animate_shock_bubble.py` animates | 11.4M hexahedra | 52,091 steps: 3.4 hours on four A100s |
 
-## Isotropic turbulence
-
-![Filtered statistics of the isotropic turbulence runs against the references](../docs/images/isotropic_turbulence_validation.png)
-
-`isotropic_turbulence` on $64^3$, $128^3$ and $256^3$, filtered to $64^3$ as the
-references: top, sixth-order differences against Johnsen et al. (2010,
-circles); bottom, spectral derivatives against Subramaniam et al. (2019,
-grey). $64^3$ is under-resolved ($k_\mathrm{max}\eta \approx 0.7$) and misses 15% of the
-enstrophy; $128^3$ and $256^3$ agree within 2%. The remaining differences from
-the references (kinetic energy +2%, temperature variance -5%) are of the size
-of the spread between random initial fields, whose realizations the
-references do not publish.
