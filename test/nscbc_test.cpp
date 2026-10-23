@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include "data_paths.h"
 #include "gmsh_fixtures.h"
 #include "solver.h"
 #include "test_fixtures.h"
@@ -357,7 +358,7 @@ TEST(NSCBCTest, PoiseuilleFlowLeavesUndisturbed) {
 
 namespace {
 
-const std::string H2O2_MECHANISM = std::string(MALLARD_SOURCE_DIR) + "/mechanisms/h2o2.yaml";
+const std::string H2O2_MECHANISM = source_dir() + "/mechanisms/h2o2.yaml";
 
 /**
  * @brief Air at 300 K enters at 50 m/s through [0, 1] (m) and pushes a front

@@ -118,7 +118,7 @@ if(${PROJECT_NAME}_ENABLE_MPI)
 endif()
 
 # HDF5 mesh files (parallel HDF5 when MPI is on and the library supports it)
-option(${PROJECT_NAME}_ENABLE_HDF5 "HDF5 mesh files and the mallard-mesh-convert tool" OFF)
+option(${PROJECT_NAME}_ENABLE_HDF5 "HDF5 mesh files and mallard mesh convert" OFF)
 option(USE_SYSTEM_HDF5 "Use system-installed HDF5" ON)
 if(${PROJECT_NAME}_ENABLE_HDF5)
     if(USE_SYSTEM_HDF5)
@@ -222,8 +222,9 @@ include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/toml11/include")
 include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/exprtk")
 
 set(${PROJECT_NAME}_EXECUTABLE_SUFFIX "" CACHE STRING
-    "Appended to the names of the Mallard and mallard-mesh-convert executables (e.g. 3D, to install both dimensions side by side)")
+    "Appended to the names of mallard and mallard-test (e.g. 3d, to install both dimensions side by side)")
 option(${PROJECT_NAME}_ENABLE_TESTS "Build the test suite (fetches GoogleTest)" ON)
+option(${PROJECT_NAME}_INSTALL_TESTS "Install mallard-test and its data, for mallard test on an installed build" ON)
 
 add_subdirectory(src)
 if(${PROJECT_NAME}_ENABLE_TESTS)
@@ -244,19 +245,20 @@ if(BUILD_DOCS)
             COMMENT "Generating documentation with Doxygen"
             VERBATIM
         )
-        add_dependencies(Mallard docs)
+        add_dependencies(mallard docs)
     else()
         message(WARNING "Doxygen not found. Documentation won't be generated.")
     endif()
 endif()
 
 include(GNUInstallDirs)
-# OPTIONAL: an install after building only some targets (e.g. --target Mallard)
-install(TARGETS Mallard MallardReactor RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
-if(TARGET mallard-mesh-convert)
-    install(TARGETS mallard-mesh-convert RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
+# OPTIONAL: an install after building only some targets (e.g. --target mallard)
+install(TARGETS mallard RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
+if(${PROJECT_NAME}_ENABLE_TESTS AND ${PROJECT_NAME}_INSTALL_TESTS)
+    install(TARGETS mallard-test RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
+    install(DIRECTORY test/data DESTINATION ${CMAKE_INSTALL_DATADIR}/mallard/test)
 endif()
-# Case templates (Mallard new) and what they are made from: bin/../share/mallard.
+# Case templates (mallard new) and what they are made from: bin/../share/mallard.
 # Examples keep their relative paths to ../../mechanisms
 install(DIRECTORY templates examples mechanisms tools tutorials
     DESTINATION ${CMAKE_INSTALL_DATADIR}/mallard
@@ -268,5 +270,5 @@ install(DIRECTORY licenses DESTINATION ${CMAKE_INSTALL_DOCDIR})
 
 if(${PROJECT_NAME}_ENABLE_TESTS)
     enable_testing()
-    add_test(NAME MallardTest COMMAND MallardTest)
+    add_test(NAME mallard-test COMMAND mallard-test)
 endif()

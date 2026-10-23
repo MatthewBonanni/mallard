@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include "data_paths.h"
 #include "kinetics.h"
 #include "mechanism.h"
 #include "mixture.h"
@@ -32,7 +33,7 @@ using namespace chemistry;
 
 namespace {
 
-const std::string SOURCE_DIR = MALLARD_SOURCE_DIR;
+const std::string SOURCE_DIR = source_dir();
 
 // Row-major on every backend: kernels take pointers to rows
 template <typename T>
