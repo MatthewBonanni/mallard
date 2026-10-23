@@ -122,7 +122,7 @@ def workflow(P):
 def annulus(P):
     variants = [("quadrilaterals", []), ("--triangles", ["--triangles"]), ("--jitter 0.3", ["--jitter", "0.3"])]
     ms = [meshes.read_gmsh22(once(f"annulus{k}.msh", lambda p, a=a: tool(
-        "make_annulus_mesh.py", p, "--n-r", 6, "--n-theta", 48, "--r-out", 2, *a))) for k, (_, a) in enumerate(variants)]
+        "tools/mesh/make_annulus_mesh.py", p, "--n-r", 6, "--n-theta", 48, "--r-out", 2, *a))) for k, (_, a) in enumerate(variants)]
     fig, axs = plt.subplots(1, 3, figsize=(10.5, 3.6))
     for ax, (title, _), m in zip(axs, variants, ms):
         edges(ax, m, P, lw=0.6, color=P["muted"])

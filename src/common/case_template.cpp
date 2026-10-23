@@ -588,6 +588,9 @@ int create(const Manifest & m, const Template & t, const fs::path & dir, bool qu
 
     std::vector<std::pair<std::string, std::string>> written = {
         {"input.toml", "the case; a comment above each table links to its keys"}};
+    for (size_t i = 1; i < t.files.size(); ++i) {
+        if (fs::path(t.files[i]).extension() == ".py") written.emplace_back(t.files[i], "the example's script");
+    }
     if (!mesh.empty()) {
         write_file(dir / "mesh.sh", step_script("mesh.sh", "Generates the mesh, " + t.mesh_creates + ".", mesh,
                                                 mesh_packages), true);
