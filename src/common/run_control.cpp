@@ -52,6 +52,8 @@ std::atomic<int> requests{0};
 std::atomic<int> stop_signo{0};
 std::atomic<int> n_interrupts{0};
 std::atomic<bool> accepting{false};
+bool installed = false;
+constexpr int HANDLED[] = {SIGTERM, SIGINT, SIGUSR1, SIGUSR2};
 
 std::mutex queue_mutex;
 std::vector<Command> queue;
@@ -214,10 +216,26 @@ void install_signal_handlers() {
     action.sa_handler = on_signal;
     sigemptyset(&action.sa_mask);
     action.sa_flags = SA_RESTART;
-    for (int signo : {SIGTERM, SIGINT, SIGUSR1, SIGUSR2}) sigaction(signo, &action, nullptr);
+    for (int signo : HANDLED) sigaction(signo, &action, nullptr);
+    installed = true;
 }
 
-void set_accepting(bool on) { accepting.store(on); }
+void set_accepting(bool on) {
+    if (on && installed) {
+        // MPI, CUDA and their libraries may take a signal over during setup
+        std::string replaced;
+        for (int signo : HANDLED) {
+            struct sigaction current {};
+            sigaction(signo, nullptr, &current);
+            if (current.sa_handler != on_signal) replaced += (replaced.empty() ? "" : ", ") + signal_name(signo);
+        }
+        if (!replaced.empty()) {
+            install_signal_handlers();
+            logging::warning("the handlers of " + replaced + " were replaced during setup; Mallard's are restored");
+        }
+    }
+    accepting.store(on);
+}
 
 void request(int bits) { requests.fetch_or(bits); }
 

@@ -39,7 +39,10 @@ inline constexpr const char * SOCKET_NAME = "mallard.sock";
  */
 void install_signal_handlers();
 
-/** @brief Whether stop signals are deferred to the time loop. */
+/**
+ * @brief Whether stop signals are deferred to the time loop. Turning it on
+ *        restores the handlers if a library replaced them during setup.
+ */
 void set_accepting(bool on);
 
 /** @brief Records requests as a signal would. */

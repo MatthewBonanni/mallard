@@ -120,12 +120,13 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // A checkpoint requested while MPI and the device start up is kept for the first step
+    run_control::install_signal_handlers();
     // MPI before Kokkos, so Kokkos can map each rank to its own device
     comm::Session session(argc, argv);
     if (!comm::is_root()) std::cout.rdbuf(nullptr);
 
     Kokkos::initialize(argc, argv);
-    run_control::install_signal_handlers();
     int status = 0;
     {
         std::string error;

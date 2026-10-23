@@ -279,6 +279,15 @@ TEST(RunControlTest, StopSignalsAreDeferredWhileRunningAndASecondInterruptEndsAt
                               run_control::stop_signal() == SIGTERM;
         return deferred ? 0 : 1;
     }), 0);
+    // A library that takes a signal over during setup loses it when the loop starts
+    EXPECT_EQ(in_child([] {
+        run_control::install_signal_handlers();
+        run_control::clear(run_control::STOP | run_control::CHECKPOINT);
+        signal(SIGUSR1, SIG_DFL);
+        run_control::set_accepting(true);
+        raise(SIGUSR1);
+        return run_control::pending() == run_control::CHECKPOINT ? 0 : 1;
+    }), 0);
     EXPECT_EQ(in_child([] {
         run_control::install_signal_handlers();
         run_control::set_accepting(true);
@@ -340,7 +349,7 @@ std::vector<std::string> child_environment() {
     for (char ** e = environ; *e; e++) {
         const std::string var = *e;
         bool launcher = false;
-        for (const char * prefix : {"OMPI_", "PMIX_", "PRTE_", "OPAL_", "PMI_", "HYDRA_", "MPIR_", "I_MPI_"}) {
+        for (const char * prefix : {"OMPI_", "PMIX_", "PRTE_", "PMI_", "HYDRA_", "MPIR_", "I_MPI_"}) {
             launcher = launcher || var.rfind(prefix, 0) == 0;
         }
         if (!launcher) env.push_back(var);
@@ -431,19 +440,22 @@ pid_t start_run(const std::string & dir, [[maybe_unused]] int ranks) {
                                                     100000000);
     std::vector<std::string> args;
 #ifdef MALLARD_MPIEXEC
-    if (ranks > 1) {
-        args = {MALLARD_MPIEXEC, "-n", std::to_string(ranks)};
+    // An MPI library need not start a process without its launcher (a singleton)
+    args = {MALLARD_MPIEXEC, "-n", std::to_string(ranks)};
 #ifdef MALLARD_MPIEXEC_OPEN_MPI
-        args.push_back("--oversubscribe");
+    args.push_back("--oversubscribe");
 #endif
-    }
 #endif
     args.insert(args.end(), {MALLARD_EXECUTABLE, "-i", "input.toml"});
     const pid_t pid = spawn(args, dir);
+    int status = 0;
+    pid_t ended = 0;
     const bool up = wait_until([&] {
-        return status_step(status_of(dir)) > 2 || waitpid(pid, nullptr, WNOHANG) != 0;
+        ended = waitpid(pid, &status, WNOHANG);
+        return ended != 0 || status_step(status_of(dir)) > 2;
     });
-    EXPECT_TRUE(up) << read_text(dir + "/run.log");
+    EXPECT_TRUE(up && ended == 0) << (ended == 0 ? "no status after 120 s" : "ended with status " + std::to_string(status))
+                                  << "\n" << read_text(dir + "/run.log");
     return pid;
 }
 
@@ -452,7 +464,7 @@ void signals_checkpoint_and_stop(const std::string & name, int ranks, int stop_s
     const pid_t pid = start_run(dir, ranks);
     const size_t before = restart_files(dir).size();  // the one of step 0
     ASSERT_EQ(kill(pid, SIGUSR1), 0);
-    EXPECT_TRUE(wait_until([&] { return restart_files(dir).size() > before; })) << read_text(dir + "/run.log");
+    ASSERT_TRUE(wait_until([&] { return restart_files(dir).size() > before; })) << read_text(dir + "/run.log");
     const std::string checkpoint = restart_files(dir).back();
     const uint64_t checkpoint_step = read_restart(checkpoint).step;
     EXPECT_GT(status_step(status_of(dir)), 0u);
@@ -501,7 +513,12 @@ TEST(RunControlProcessTest, SignalsCheckpointAndStopARun) {
     GTEST_SKIP() << "no solver executable";
 #else
     if (comm::size() > 1) GTEST_SKIP() << "starts its own run";
+#ifdef MALLARD_MPIEXEC
+    // Launched by mpiexec, as an MPI build is; Open MPI ends the job on SIGTERM
+    signals_checkpoint_and_stop("process_signals", 1, SIGUSR2);
+#else
     signals_checkpoint_and_stop("process_signals", 1, SIGTERM);
+#endif
 #endif
 }
 

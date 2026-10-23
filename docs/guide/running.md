@@ -32,7 +32,7 @@ Exit statuses are 0 at a stop condition (`n_steps`, `t_stop`, `t_wall_stop`), 1 
 
 ## MPI launchers, Slurm and Kubernetes
 
-`mpirun` and `mpiexec` forward `SIGUSR1` and `SIGUSR2` to every rank, but Open MPI ends the job on `SIGTERM` and `SIGINT` without letting the ranks finish their step: send `SIGUSR2` to `mpirun` to stop, or use `Mallard ctl`. Slurm's `scancel` signals every task directly, so `scancel --signal=TERM` works, as does `#SBATCH --signal=USR2@120` for a restart two minutes before the time limit.
+`mpirun` and `mpiexec` forward `SIGUSR1` and `SIGUSR2` to every rank, but Open MPI ends the job on `SIGTERM` and `SIGINT` without letting the ranks finish their step: send `SIGUSR2` to `mpirun` to stop, or use `Mallard ctl`. Some MPI distributions start the real launcher from a wrapper that does not pass signals on: the NVIDIA HPC SDK's `mpirun` runs HPC-X's `ompi/bin/.bin/mpirun` from a script, and a signal to the wrapper ends the wrapper and leaves the run going. Signal the launcher it starts, or use `Mallard ctl`. Slurm's `scancel` signals every task directly, so `scancel --signal=TERM` works, as does `#SBATCH --signal=USR2@120` for a restart two minutes before the time limit.
 
 In Kubernetes, give the pod a `terminationGracePeriodSeconds` longer than a step plus a restart write. A single `Mallard` process receives the pod's `SIGTERM` itself; with `mpirun` as the container's command, add a `preStop` hook running `Mallard ctl <run-dir> stop`, which returns once the restart is written.
 
