@@ -60,7 +60,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - The whole time step as one CUDA graph; optional NCCL halo exchange; TENO-E setup on the GPU
 
 **Input, output and diagnostics**
-- TOML input; initial conditions, boundary states, sources and sponges as analytical expressions; misspelled or unused keys are errors, with suggestions
+- TOML input with units (`p = "1 atm"`, `Lx = "5 mm"`), converted to SI and checked against each key's dimension; initial conditions, boundary states, sources and sponges as analytical expressions; misspelled or unused keys are errors, with suggestions
 - Pre-flight check (`Mallard --check`): mesh quality, stable time step, memory per GPU and cost estimate before a run
 - Conservative, high-order remap of a restart onto another mesh (any cell type, resolution or rank count): exact cell intersections, integrals kept to rounding
 - VTU (ParaView) or parallel HDF5 with XDMF; surface output of boundary zones
@@ -148,8 +148,8 @@ python tools/animate.py examples/riemann_2d/solut riemann
 
 ## Contributing
 
-Mallard uses the [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
-Pull requests that change `src/` add a [changelog fragment](changelog/README.md) for [CHANGELOG.md](CHANGELOG.md).
+Bug reports, questions and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers building and testing, code style (the [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html), warnings as errors), how CI runs, and what a pull request includes: tests, documentation, an example and a [changelog fragment](changelog/README.md) for [CHANGELOG.md](CHANGELOG.md). Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Citing
 
 If you use Mallard, please cite it ([doi:10.5281/zenodo.23112953](https://doi.org/10.5281/zenodo.23112953), or the DOI of the version you used on Zenodo) with the metadata in [CITATION.cff](CITATION.cff) (GitHub's "Cite this repository" button), and the papers behind the methods you use ([docs/references.md](docs/references.md)).

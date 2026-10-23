@@ -24,6 +24,7 @@
 #include <toml.hpp>
 
 #include "common_typedef.h"
+#include "units.h"
 
 /**
  * @brief A TOML table that records which keys the program looked up, present
@@ -91,7 +92,8 @@ struct Diagnostic {
     std::size_t line = 0;             // 0 if unknown
     std::string message;              // what is wrong
     std::vector<std::string> valid;   // accepted values, if a closed set
-    std::string suggestion;           // full path of the likely intended key, or empty
+    std::string suggestion;           // full path of the likely intended key (or the unit), or empty
+    std::string expected;             // what the key takes, e.g. "pressure (kg m^-1 s^-2): Pa, kPa, bar, atm, psi"
     std::string docs;                 // page and anchor of the input reference
 };
 
@@ -106,11 +108,19 @@ std::vector<Diagnostic> unused_keys(const Input & input);
 std::string describe(const Diagnostic & key);
 
 /**
+ * @brief The message of an invalid value: "line 12: boundaries[0].p = \"300 K\":
+ *        a temperature where a pressure is expected (expected: ...; see ...)".
+ */
+std::string explain(const Diagnostic & d);
+
+/**
  * @brief An invalid or missing input value. The message names the key and the
  *        offending value; the caller adds the input file name.
  */
 struct InputError : std::runtime_error {
     using std::runtime_error::runtime_error;
+    explicit InputError(const Diagnostic & d) : std::runtime_error(explain(d)), diagnostic(d) {}
+    Diagnostic diagnostic;  // empty key for errors given as text only
 };
 
 /**
@@ -128,67 +138,82 @@ InputError unknown_option(const std::unordered_map<std::string, T> & options, co
 }
 
 /**
- * TOML distinguishes integers from floats, so `cfl = 1` is not a float and
- * toml::find_or<double> silently falls back to its default for it. These
- * helpers accept either and reject anything else.
+ * Real-valued lookups. Each names the key's Dimension: a value is a plain
+ * number (SI, or the unit the key documents: Dimension::plain) or a string
+ * with a unit ("1 atm", "300 K", "5 mm"), converted on read; a unit of the
+ * wrong dimension is an error naming the key and the expected dimension.
+ * Integers count as numbers: TOML tells them from floats, and
+ * toml::find_or<double> would silently fall back to its default for `cfl = 1`.
  */
 
-inline rtype as_real(const Input & v, const std::string & key) {
-    if (v.is_floating()) return static_cast<rtype>(v.as_floating());
-    if (v.is_integer()) return static_cast<rtype>(v.as_integer());
-    throw InputError(toml::format_error(key + " must be a number", v, "here"));
+/** @brief The value of v in the units the key reads (SI unless the dimension says otherwise). */
+double quantity(const Input & v, const std::string & key, const Dimension & dimension);
+
+/**
+ * @brief The text of an expression in x, y, z (and t) for a value that is a
+ *        number or a quantity with a unit (converted as quantity() does), or
+ *        else an expression, which is in SI units.
+ */
+std::string quantity_or_expression(const Input & v, const std::string & key, const Dimension & dimension);
+
+inline rtype as_real(const Input & v, const std::string & key, const Dimension & dimension) {
+    return static_cast<rtype>(quantity(v, key, dimension));
 }
 
 /** @brief Double-precision lookups, for inputs of the chemistry (double in every build). */
-inline double as_double(const Input & v, const std::string & key) {
-    if (v.is_floating()) return v.as_floating();
-    if (v.is_integer()) return static_cast<double>(v.as_integer());
-    throw InputError(toml::format_error(key + " must be a number", v, "here"));
+inline double as_double(const Input & v, const std::string & key, const Dimension & dimension) {
+    return quantity(v, key, dimension);
 }
 
-inline double find_double(const Input & v, const std::string & key) {
+inline double find_double(const Input & v, const std::string & key, const Dimension & dimension) {
     if (!v.contains(key)) throw InputError("missing " + key + ".");
-    return as_double(v.at(key), key);
+    return as_double(v.at(key), key, dimension);
 }
 
-inline double find_double_or(const Input & v, const std::string & key, const double fallback) {
-    return v.contains(key) ? as_double(v.at(key), key) : fallback;
+inline double find_double_or(const Input & v, const std::string & key, const Dimension & dimension,
+                             const double fallback) {
+    return v.contains(key) ? as_double(v.at(key), key, dimension) : fallback;
 }
 
-inline rtype find_real(const Input & v, const std::string & key) {
+inline rtype find_real(const Input & v, const std::string & key, const Dimension & dimension) {
     if (!v.contains(key)) throw InputError("missing " + key + ".");
-    return as_real(v.at(key), key);
+    return as_real(v.at(key), key, dimension);
 }
 
-inline rtype find_real(const Input & v, const std::string & table, const std::string & key) {
+inline rtype find_real(const Input & v, const std::string & table, const std::string & key,
+                       const Dimension & dimension) {
     if (!v.contains(table)) throw InputError("missing [" + table + "].");
     if (!v.at(table).contains(key)) throw InputError("missing " + table + "." + key + ".");
-    return as_real(v.at(table).at(key), table + "." + key);
+    return as_real(v.at(table).at(key), table + "." + key, dimension);
 }
 
-inline rtype find_real_or(const Input & v, const std::string & key, const rtype fallback) {
-    return v.contains(key) ? as_real(v.at(key), key) : fallback;
+inline rtype find_real_or(const Input & v, const std::string & key, const Dimension & dimension,
+                          const rtype fallback) {
+    return v.contains(key) ? as_real(v.at(key), key, dimension) : fallback;
 }
 
 inline rtype find_real_or(const Input & v, const std::string & table, const std::string & key,
-                          const rtype fallback) {
+                          const Dimension & dimension, const rtype fallback) {
     if (!v.contains(table) || !v.at(table).contains(key)) return fallback;
-    return as_real(v.at(table).at(key), table + "." + key);
+    return as_real(v.at(table).at(key), table + "." + key, dimension);
 }
 
-inline std::vector<rtype> find_real_vector(const Input & v, const std::string & key) {
-    if (!v.contains(key)) throw InputError("missing " + key + ".");
+inline std::vector<rtype> as_real_vector(const Input & v, const std::string & key, const Dimension & dimension) {
     std::vector<rtype> out;
-    for (const auto & item : v.at(key).as_array()) out.push_back(as_real(item, key));
+    for (const auto & item : v.as_array()) out.push_back(as_real(item, key, dimension));
     return out;
 }
 
-inline std::vector<rtype> find_real_vector(const Input & v, const std::string & table, const std::string & key) {
+inline std::vector<rtype> find_real_vector(const Input & v, const std::string & key, const Dimension & dimension) {
+    if (!v.contains(key)) throw InputError("missing " + key + ".");
+    return as_real_vector(v.at(key), key, dimension);
+}
+
+inline std::vector<rtype> find_real_vector(const Input & v, const std::string & table, const std::string & key,
+                                           const Dimension & dimension) {
     if (!v.contains(table)) throw InputError("missing [" + table + "].");
     if (!v.at(table).contains(key)) throw InputError("missing " + table + "." + key + ".");
-    std::vector<rtype> out;
-    for (const auto & item : v.at(table).at(key).as_array()) out.push_back(as_real(item, table + "." + key));
-    return out;
+    return as_real_vector(v.at(table).at(key), table + "." + key, dimension);
 }
 
 #endif // INPUT_H

@@ -1,0 +1,36 @@
+name: Feature request
+description: A capability Mallard lacks, or a better way to do something it does.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What do you want to simulate or measure, and what stops you today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: The method, input keys or output you have in mind. Include references (papers, other codes) if there are any.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: How would we know it works?
+      description: An exact solution, a reference case or data set it should match.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you like to implement it?
+      description: See CONTRIBUTING.md; for larger changes, agree on the design here first.
+      options:
+        - "No"
+        - Yes, with guidance
+        - "Yes"

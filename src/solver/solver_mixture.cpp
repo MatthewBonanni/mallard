@@ -13,9 +13,7 @@
 #include "solver.h"
 
 #include <algorithm>
-#include <iomanip>
 #include <limits>
-#include <sstream>
 
 #include <Kokkos_Core.hpp>
 
@@ -303,13 +301,7 @@ class CompositionExpressions {
                 const int32_t k = mixture.mechanism().species_index(species);
                 if (k < 0) throw InputError(where + "." + key + ": no species " + species + " in the mechanism.");
                 listed.push_back(k);
-                std::ostringstream text;
-                if (value.is_string()) {
-                    text << value.as_string();
-                } else {
-                    text << std::setprecision(17) << static_cast<double>(as_real(value, species));
-                }
-                values.emplace_back(where + "." + key + "." + species, text.str());
+                values.emplace_back(where + "." + key + "." + species, quantity_or_expression(value, species, dim::none));
             }
             if (table.contains("balance")) {
                 const std::string species = toml::find<std::string>(table, "balance");
@@ -706,7 +698,7 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
                 break;
             case BoundaryType::UPT:
             case BoundaryType::NSCBC_INLET: {
-                const double T = static_cast<double>(find_real(bound, "T"));
+                const double T = static_cast<double>(find_real(bound, "T", dim::temperature));
                 if (!MixtureModel::composition_varies(bound)) {
                     prescribe(i_bc, mixture_model->mass_fractions(bound, where), T);
                     break;

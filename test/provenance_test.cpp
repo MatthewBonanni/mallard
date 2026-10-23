@@ -22,6 +22,7 @@
 #include "mesh_block.h"
 #include "provenance.h"
 #include "run_log.h"
+#include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
 #ifdef Mallard_HAS_HDF5
@@ -105,7 +106,7 @@ TEST(ProvenanceTest, Sha256MatchesTheStandardDigests) {
 
 TEST(ProvenanceTest, FileHashesCoverContentsAndDirectoryLayout) {
     if (!comm::is_root()) return;
-    const auto dir = std::filesystem::temp_directory_path() / "mallard_provenance_hash";
+    const auto dir = scratch_dir() / "mallard_provenance_hash";
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir / "mesh");
     const std::string content(3 << 20, 'x');  // several read buffers
@@ -133,7 +134,7 @@ TEST(ProvenanceTest, XmlCommentsHoldNoDoubleDashAndReadBack) {
 }
 
 TEST(RunLogTest, RecordsFollowTheSchema) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_run_log_schema").string();
+    const std::string dir = (scratch_dir() / "mallard_run_log_schema").string();
     if (comm::is_root()) std::filesystem::remove_all(dir);
     run_box(dir, 4, UNIFORM);
     if (!comm::is_root()) return;
@@ -203,7 +204,7 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
 }
 
 TEST(ProvenanceTest, EveryOutputFileCarriesTheRunsProvenance) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_provenance_files").string();
+    const std::string dir = (scratch_dir() / "mallard_provenance_files").string();
     if (comm::is_root()) std::filesystem::remove_all(dir);
     const std::string input = run_box(dir, 4, UNIFORM);
     const std::string expected = provenance::json();
@@ -258,7 +259,7 @@ TEST(ProvenanceTest, EveryOutputFileCarriesTheRunsProvenance) {
 }
 
 TEST(ProvenanceTest, ContinuedRunsAppendTheirProvenance) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_provenance_restart").string();
+    const std::string dir = (scratch_dir() / "mallard_provenance_restart").string();
     if (comm::is_root()) std::filesystem::remove_all(dir);
     run_box(dir, 4, UNIFORM);
     const std::string first = provenance::json();
@@ -283,7 +284,7 @@ TEST(ProvenanceTest, ContinuedRunsAppendTheirProvenance) {
 }
 
 TEST(ProvenanceTest, RecordsTheResolvedNumericsPreset) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_provenance_preset").string();
+    const std::string dir = (scratch_dir() / "mallard_provenance_preset").string();
     std::string input = box(dir, 1, UNIFORM, false);
     input.replace(input.find("[numerics]\n"), 11, "[numerics]\npreset = \"robust\"\n");
     Solver solver;
@@ -310,7 +311,7 @@ TEST(ProvenanceTest, RecordsTheResolvedNumericsPreset) {
 
 TEST(ProvenanceTest, CompressedFilesCarryTheProvenance) {
     if (!compression::have_zlib()) GTEST_SKIP() << "no zlib";
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_provenance_zlib").string();
+    const std::string dir = (scratch_dir() / "mallard_provenance_zlib").string();
     if (comm::is_root()) std::filesystem::remove_all(dir);
     std::string input = box(dir, 4, UNIFORM, false);
     for (size_t at = 0; (at = input.find("interval = 4\n", at)) != std::string::npos; at += 13) {
@@ -336,7 +337,7 @@ TEST(ProvenanceTest, LargeProvenanceFitsInHdf5Attributes) {
 #else
     if (!writes_hdf5()) GTEST_SKIP() << "no parallel HDF5";
     // An input past HDF5's 64 KiB limit of compact attributes
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_provenance_large").string();
+    const std::string dir = (scratch_dir() / "mallard_provenance_large").string();
     if (comm::is_root()) std::filesystem::remove_all(dir);
     const std::string input = dir + "/input.toml";
     if (comm::is_root()) {
