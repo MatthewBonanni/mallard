@@ -294,11 +294,13 @@ void Solver::init_mesh() {
     const std::string type = find_value_or<std::string>(input, "mesh", "type", "file");
     // Read in every run, so that an input runs unchanged on any number of ranks
     partitioner = find_value_or<std::string>(input, "parallel", "partitioner", "multijagged");
+    record_options("parallel.partitioner", {"graph", "hilbert", "multijagged"});
     if (partitioner != "graph" && partitioner != "hilbert" && partitioner != "multijagged") {
         throw InputError("parallel.partitioner = \"" + partitioner + "\" is not one of: graph, hilbert, multijagged.");
     }
     const std::string exchange =
         find_value_or<std::string>(input, "parallel", "halo_exchange", comm::nccl_available() ? "nccl" : "mpi");
+    record_options("parallel.halo_exchange", {"nccl", "mpi"});
     if (exchange != "nccl" && exchange != "mpi") {
         throw InputError("parallel.halo_exchange = \"" + exchange + "\" is not one of: nccl, mpi.");
     }
@@ -510,6 +512,7 @@ void Solver::init_rhs_split() {
 void Solver::init_physics() {
     if (!input.contains("physics")) throw InputError("missing [physics] table.");
     const std::string gas = find_value_or<std::string>(input, "physics", "gas", "perfect");
+    record_options("physics.gas", {"perfect", "mixture"});
     if (gas == "perfect") {
         if (input.contains("chemistry")) throw InputError("[chemistry] needs physics.gas = \"mixture\".");
         physics = Euler::from_input(input);
@@ -984,6 +987,7 @@ void Solver::init_numerics() {
         throw std::runtime_error("numerics: low_mach_cutoff must be positive (1 disables the low-Mach correction).");
     }
     const std::string flux = find_value_or<std::string>(input, "numerics", "convective_flux", "riemann");
+    record_options("numerics.convective_flux", {"riemann", "hybrid"});
     if (flux != "riemann" && flux != "hybrid") {
         throw InputError("numerics.convective_flux = \"" + flux + "\" is not one of: riemann, hybrid.");
     }

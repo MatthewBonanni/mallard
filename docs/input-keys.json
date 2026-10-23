@@ -2262,7 +2262,11 @@
    "examples/flame_turbulence/input.toml",
    "examples/flame_turbulence/les.toml"
   ],
-  "type": "string"
+  "type": "string",
+  "values": [
+   "hybrid",
+   "riemann"
+  ]
  },
  "numerics.double_flux": {
   "default": "false",
@@ -3153,7 +3157,11 @@
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml"
   ],
-  "type": "string"
+  "type": "string",
+  "values": [
+   "mixture",
+   "perfect"
+  ]
  },
  "physics.lewis": {
   "dims": [
