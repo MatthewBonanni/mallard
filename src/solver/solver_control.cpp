@@ -159,8 +159,10 @@ void Solver::diverged() {
         calc_dt();
         take_step();
     }
+    const std::string invalid = describe_invalid_cells();
+    logging::event(step, double(t), "diverged", invalid);
     std::string message = "Solution diverged at step " + std::to_string(step) + ", t = " + logging::real(double(t)) +
-                          ": " + describe_invalid_cells() + ".";
+                          ": " + invalid + ".";
     if (last_good_set && last_good_step < step) {
         restore_last_good();
         if (chemistry_pending > 0.0) {
@@ -204,7 +206,7 @@ void Solver::apply_commands() {
         commands = run_control::take_commands();
         for (const auto & command : commands) text += command.text + "\n";
     }
-    comm::broadcast(text);
+    text = comm::broadcast(text);
     const std::vector<std::string> lines = split(text, '\n');
     for (size_t i = 0; i < lines.size(); i++) {
         const std::string & line = lines[i];
@@ -365,24 +367,11 @@ std::string Solver::stop_conditions() const {
 void Solver::publish_status() {
     if (!publishing) return;
     run_control::Status s;
-    s.step = step;
-    s.t = double(t);
-    s.dt = double(dt);
-    s.cfl = dt_cfl1 > 0.0_r ? double(dt / dt_cfl1) : 0.0;
-    s.progress = progress();
-    const uint64_t steps = step - step_run_start;
-    if (steps > 0 && t_wall_stepping > 0.0) {
-        s.wall_per_step = t_wall_stepping / static_cast<double>(steps);
-        s.cells_per_second = static_cast<double>(n_cells_global * steps) / t_wall_stepping;
-    }
-    const double now = timer.seconds();
-    const double df = s.progress - progress_run_start;
-    s.eta = s.progress >= 1.0 ? 0.0 : df > 0.0 ? (now - t_wall_run_start) * (1.0 - s.progress) / df : -1.0;
-    s.wall = now;
-    s.n_cells = n_cells_global;
-    s.n_ranks = comm::size();
-#ifdef KOKKOS_ENABLE_CUDA
+    s.run = run_status();
+#if defined(KOKKOS_ENABLE_CUDA)
     s.device = Kokkos::DefaultExecutionSpace().cuda_device();
+#elif defined(KOKKOS_ENABLE_HIP)
+    s.device = Kokkos::DefaultExecutionSpace().hip_device();
 #endif
     s.stop_conditions = stop_conditions();
     s.monitors = monitor_values;

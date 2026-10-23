@@ -236,7 +236,7 @@ TEST(RunControlTest, ControlSocketIsPrivateAnswersStatusAndQueuesCommands) {
 
         EXPECT_EQ(run_control::send(dir, "status"), "state: starting\n");
         run_control::Status status;
-        status.step = 42;
+        status.run.step = 42;
         status.monitors = {{"min_p", "0.5"}};
         run_control::publish(status);
         const std::string text = run_control::send(dir, "status");
@@ -347,7 +347,7 @@ TEST(MPITest, DivergenceIsReportedAlikeOnEveryRank) {
     }
     ASSERT_NE(message.find("diverged at step"), std::string::npos) << message;
     std::string root = message;
-    comm::broadcast(root);
+    root = comm::broadcast(root);
     EXPECT_EQ(message, root);
 }
 

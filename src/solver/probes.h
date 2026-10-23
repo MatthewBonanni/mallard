@@ -78,6 +78,11 @@ class Probes {
 
         std::vector<std::pair<std::string, std::string>> summary() const;
         std::vector<std::string> files() const;
+        /**
+         * @brief Rank 0 adds the provenance to the files written so far: csv_line to every CSV file,
+         *        the block as the root attribute of HDF5 files (VTP and PVD files carry it as they are written).
+         */
+        void annotate(const std::string & csv_line);
 
         enum class Sampling { CELL, POINT };
         enum class Format { CSV, HDF5, VTP };

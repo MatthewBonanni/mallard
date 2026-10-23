@@ -21,6 +21,8 @@
 #include <thread>
 #include <vector>
 
+#include "run_status.h"
+
 namespace run_control {
 
 /** @brief Requests, as bits: write a restart and continue, write one and stop, commands queued. */
@@ -79,18 +81,8 @@ void reply(Command & command, const std::string & text);
  * @brief What `status` reports, published by the time loop at each step.
  */
 struct Status {
-    uint64_t step = 0;
-    double t = 0.0;
-    double dt = 0.0;
-    double cfl = 0.0;              // dt over the stable time step at CFL 1
-    double progress = 0.0;         // fraction of the run, by the first stop condition to hit
-    double wall_per_step = 0.0;    // stepping wall time per step since the run started
-    double cells_per_second = 0.0;
-    double eta = -1.0;             // seconds, -1: unknown
-    double wall = 0.0;             // since the solver started
-    uint64_t n_cells = 0;
-    int n_ranks = 1;
-    int device = -1;               // CUDA device of rank 0, -1 for other backends
+    RunStatus run;                 // memory and monitored values are not used
+    int device = -1;               // CUDA or HIP device of rank 0, -1 for other backends
     std::string stop_conditions;
     std::vector<std::pair<std::string, std::string>> monitors;  // last progress row's diagnostics
 };

@@ -78,9 +78,6 @@ std::array<T, N> allreduce(std::array<T, N> values, Op op) {
     return values;
 }
 
-/** @brief Rank 0's text on every rank. */
-void broadcast(std::string & text);
-
 /**
  * @brief Personalized all-to-all: send[r] goes to rank r; returns what each rank
  *        sent to this one, indexed by source rank.
@@ -107,6 +104,11 @@ struct Received {
  */
 template <typename T>
 Received<T> exchange(std::vector<std::vector<T>> && send);
+
+/**
+ * @brief Rank 0's value, on every rank.
+ */
+std::string broadcast(const std::string & value);
 
 /**
  * @brief Concatenation of every rank's local vector, in rank order.

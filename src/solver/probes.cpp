@@ -26,6 +26,7 @@
 #include "file_format.h"
 #include "input.h"
 #include "log.h"
+#include "provenance.h"
 
 #ifdef Mallard_HAS_HDF5
 #include "hdf5_util.h"
@@ -149,7 +150,7 @@ void write_vtp_file(const std::string & file, const probe::Geometry & g, const s
         offset += sizeof(uint64_t) + a.bytes.size();
     };
     const char * cells = g.dim == 0 ? "Verts" : "Lines";
-    out << "<?xml version=\"1.0\"?>\n<VTKFile type=\"PolyData\" version=\"1.0\" byte_order=\"LittleEndian\" "
+    out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n<VTKFile type=\"PolyData\" version=\"1.0\" byte_order=\"LittleEndian\" "
            "header_type=\"UInt64\">\n  <PolyData>\n    <Piece NumberOfPoints=\""
         << n << "\" NumberOfVerts=\"" << (g.dim == 0 ? offsets.size() : 0) << "\" NumberOfLines=\""
         << (g.dim == 0 ? 0 : offsets.size()) << "\" NumberOfStrips=\"0\" NumberOfPolys=\"0\">\n";
@@ -175,7 +176,7 @@ void write_vtp_file(const std::string & file, const probe::Geometry & g, const s
 void write_pvd_file(const std::string & file, const std::vector<std::pair<double, std::string>> & series) {
     make_parent(file);
     std::ofstream out(file, std::ios::trunc);
-    out << "<?xml version=\"1.0\"?>\n<VTKFile type=\"Collection\" version=\"1.0\">\n  <Collection>\n";
+    out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n<VTKFile type=\"Collection\" version=\"1.0\">\n  <Collection>\n";
     out << std::setprecision(std::numeric_limits<double>::max_digits10);
     for (const auto & [t, name] : series) {
         out << "    <DataSet timestep=\"" << t << "\" file=\"" << name << "\"/>\n";
@@ -407,8 +408,10 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
             if (p.write_samples && p.format == Format::HDF5 && output_files_enabled() &&
                 !(resume && std::filesystem::exists(p.file))) {
                 make_parent(p.file);
-                h5::Handle file(H5Fcreate(p.file.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT), H5Fclose,
-                                "creating " + p.file);
+                // Room for a provenance attribute of any size (annotate)
+                h5::Handle fapl(H5Pcreate(H5P_FILE_ACCESS), H5Pclose, "H5Pcreate");
+                h5::Handle fcpl(h5::file_creation(fapl, std::numeric_limits<size_t>::max()), H5Pclose, "H5Pcreate");
+                h5::Handle file(H5Fcreate(p.file.c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose, "creating " + p.file);
                 {
                     h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /");
                     h5::write_int_attribute(root, "version", static_cast<int>(file_format::PROBE_OUTPUT.version));
@@ -710,6 +713,22 @@ std::vector<std::pair<std::string, std::string>> Probes::summary() const {
         items.emplace_back("probe " + p.name, text);
     }
     return items;
+}
+
+void Probes::annotate(const std::string & csv_line) {
+    if (!comm::is_root() || !output_files_enabled()) return;
+    for (auto & p : probes) {
+        if (p->out) *p->out << csv_line << std::flush;
+        if (p->out_reductions) *p->out_reductions << csv_line << std::flush;
+#ifdef Mallard_HAS_HDF5
+        if (p->write_samples && p->format == Format::HDF5 && std::filesystem::exists(p->file)) {
+            h5::Handle file(H5Fopen(p->file.c_str(), H5F_ACC_RDWR, H5P_DEFAULT), H5Fclose, "opening " + p->file);
+            h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /");
+            if (H5Aexists(root, "provenance") > 0) h5::check(H5Adelete(root, "provenance"), "H5Adelete");
+            h5::write_strings_attribute(root, "provenance", {provenance::json()});
+        }
+#endif
+    }
 }
 
 std::vector<std::string> Probes::files() const {

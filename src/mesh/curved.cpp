@@ -728,15 +728,28 @@ void Geometry::cell_rule(uint32_t c, int degree, std::vector<Vec3> & x, std::vec
     for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
         const uint32_t f = mesh.h_face_of_cell(c, k);
         const double sign = (mesh.h_cells_of_face(f, 0) == int32_t(c)) ? 1.0 : -1.0;
-        Vec3 offset = {0.0, 0.0, 0.0};
-        FOR_I_DIM offset[i] = double(mesh.h_face_offset(f, c, i));
+        // The face is in its cell 0's frame
+        const uint8_t s = sign < 0.0 ? mesh.h_face_shift(f) : 0;
+        const bool turn = sign < 0.0 && mesh.h_rotated_row(s);
+        auto vector = [&](const Vec3 & u) {
+            if (!turn) return u;
+            Vec3 r = {0.0, 0.0, 0.0};
+            FOR_I_DIM {
+                for (uint8_t j = 0; j < N_DIM; j++) r[i] += double(mesh.h_shift_rotations(s, j, i)) * u[j];
+            }
+            return r;
+        };
+        auto point = [&](Vec3 p) {
+            FOR_I_DIM p[i] -= double(mesh.h_shifts(s, i));
+            return vector(p);
+        };
         const std::vector<Vec3> v = face_nodes(f);
         if (N_DIM == 2 || face_is_curved(f)) {
             reference_rule(uint32_t(v.size()), face_is_curved(f) ? n_curved : n_straight, ref, ref_w);
             for (size_t q = 0; q < ref.size(); q++) {
                 Vec3 F, dF[2];
                 eval(f, ref[q].data(), F, dF);
-                cone(sub(F, offset), N_DIM == 2 ? rot(dF[0]) : cross(dF[0], dF[1]), sign * ref_w[q]);
+                cone(point(F), vector(N_DIM == 2 ? rot(dF[0]) : cross(dF[0], dF[1])), sign * ref_w[q]);
             }
             continue;
         }
@@ -755,7 +768,7 @@ void Geometry::cell_rule(uint32_t c, int degree, std::vector<Vec3> & x, std::vec
             const Vec3 N = cross(e1, e2);
             for (size_t q = 0; q < ref.size(); q++) {
                 const Vec3 F = add(tri[0], add(scale(ref[q][0], e1), scale(ref[q][1], e2)));
-                cone(sub(F, offset), N, sign * ref_w[q]);
+                cone(point(F), vector(N), sign * ref_w[q]);
             }
         }
     }

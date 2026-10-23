@@ -1,7 +1,8 @@
 """Figures of the user guide drawn from short Mallard runs (seconds each, on a
 CPU build): TENO-E stencils read back from a stencil cache, the Sod shock
 tube with each reconstruction (through a line probe), MPI partitions, a
-MallardReactor ignition, the mesh-import fixtures as Mallard reads them
+MallardReactor ignition, a sector against the full annulus (rotational
+periodicity), the mesh-import fixtures as Mallard reads them
 (through mallard-mesh-convert, which needs h5py and an HDF5 and CGNS build), a
 remap from quadrilaterals to triangles, and the mesh quality from Mallard --check.
 
@@ -187,7 +188,7 @@ n_points = {nx}
 interval = 1
 """
         run(args.mallard, text, work)
-        rows = list(csv.DictReader(open(work / "probe_line.csv")))
+        rows = list(csv.DictReader(line for line in open(work / "probe_line.csv") if not line.startswith("#")))
         last = max(float(r["t"]) for r in rows)
         x = np.array([float(r["x"]) for r in rows if float(r["t"]) == last])
         rho = np.array([float(r["RHO"]) for r in rows if float(r["t"]) == last])
@@ -307,6 +308,45 @@ def ignition(P, args):
     label(ax, t_ig + 4, 2050, f"ignition delay\n{t_ig:.0f} $\\mu$s", P, ha="left", size=11, color=P["muted"])
     ax2.legend(loc="center right", fontsize=11)
     ax.set_xlim(0, 100)
+    return fig
+
+
+# ------------------------------------------------------- rotational periodicity
+
+@functools.cache
+def rotational_data(args):
+    """The 2D example's sector and full annulus, run to t = 0.25, compared copy by copy."""
+    from rotational_sector import compare
+    work = Path(tempfile.mkdtemp())
+    for name in ("sector", "annulus"):
+        text = (ROOT / "examples" / "rotational_sector" / f"{name}.toml").read_text()
+        text = text.replace("t_stop = 0.5", "t_stop = 0.25").replace("time_interval = 0.5", "time_interval = 0.25")
+        run(args.mallard, text, work, name=f"{name}.toml")
+    return compare(str(work / "solut" / "sector_000001.vtu"), str(work / "solut" / "annulus_000001.vtu"), 4)
+
+
+def rotational_sector(P, args):
+    polys, fields, copies, d, own = rotational_data(args)
+    polys = [p[:, :2] for p in polys]
+    fig, axes = plt.subplots(1, 2, figsize=(7.6, 3.6), gridspec_kw=dict(wspace=0.32))
+    rho = PolyCollection(polys, array=fields["RHO"], cmap=P["cmap"], edgecolors="face", linewidths=0.2,
+                         rasterized=True)
+    axes[0].add_collection(rho)
+    err = PolyCollection(polys, array=np.log10(np.maximum(d, 1e-17)), cmap="magma", edgecolors="face", linewidths=0.2,
+                         rasterized=True)
+    axes[1].add_collection(err)
+    for ax, coll, title in ((axes[0], rho, "full annulus: density"),
+                            (axes[1], err, "log$_{10}$ |sector $-$ annulus|")):
+        bare(ax)
+        ax.autoscale_view()
+        ax.set_title(title, fontsize=12, color=P["muted"])
+        cb = fig.colorbar(coll, ax=ax, shrink=0.75)
+        cb.outline.set_visible(False)
+    for t in (0.0, np.pi / 2):
+        axes[0].plot([0.95 * np.cos(t), 2.05 * np.cos(t)], [0.95 * np.sin(t), 2.05 * np.sin(t)], color=P["flame"],
+                     lw=2)
+    label(axes[1], 0.5, -0.04, f"largest {d.max():.0e}; annulus against itself {own.max():.0e}", P, size=11,
+          color=P["muted"], va="top", transform=axes[1].transAxes)
     return fig
 
 
@@ -575,7 +615,8 @@ class Args(tuple):
 
 FIGURES = {"teno_stencils": teno_stencils, "sod_schemes": sod_schemes, "partitions": partitions,
            "ignition": ignition, "mesh_import": mesh_import, "mesh_transform": mesh_transform,
-           "remap-supermesh": remap_supermesh, "remap-fields": remap_fields, "mesh_quality": mesh_quality}
+           "remap-supermesh": remap_supermesh, "remap-fields": remap_fields, "mesh_quality": mesh_quality,
+           "rotational_sector": rotational_sector}
 
 
 def main():

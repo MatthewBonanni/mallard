@@ -28,6 +28,7 @@
 #include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
+#include "test_utils.h"
 
 #ifdef Mallard_HAS_HDF5
 #include "hdf5_util.h"
@@ -73,6 +74,7 @@ std::vector<std::map<std::string, double>> read_csv(const std::string & file) {
     while (std::getline(hs, cell, ',')) names.push_back(cell);
     std::vector<std::map<std::string, double>> rows;
     while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#') continue;
         std::stringstream ss(line);
         std::map<std::string, double> row;
         for (size_t i = 0; std::getline(ss, cell, ','); i++) row[names.at(i)] = std::stod(cell);
@@ -323,8 +325,8 @@ TEST(ProbesTest, VtpAndHdf5HoldTheCsvSamplesAndRestartsCutThemBack) {
     size_t n_sets = 0;
     for (size_t at = pvd.find("<DataSet"); at != std::string::npos; at = pvd.find("<DataSet", at + 1)) n_sets++;
     EXPECT_EQ(n_sets, 4u);
-    EXPECT_EQ(pvd, read_all(dir + "/a/v.pvd"));
-    EXPECT_EQ(read_all(dir + "/b/v_000006.vtp"), read_all(dir + "/a/v_000006.vtp"));
+    EXPECT_EQ(without_provenance(pvd), without_provenance(read_all(dir + "/a/v.pvd")));
+    EXPECT_EQ(without_provenance(read_all(dir + "/b/v_000006.vtp")), without_provenance(read_all(dir + "/a/v_000006.vtp")));
     const std::string vtp = read_all(dir + "/a/v_000006.vtp");
     EXPECT_NE(vtp.find("NumberOfPoints=\"12\""), std::string::npos);
     EXPECT_NE(vtp.find("NumberOfLines=\"1\""), std::string::npos);

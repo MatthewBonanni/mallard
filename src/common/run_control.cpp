@@ -16,7 +16,6 @@
 #include <csignal>
 #include <cstdio>
 #include <cstring>
-#include <fstream>
 #include <iostream>
 #include <mutex>
 #include <stdexcept>
@@ -24,20 +23,17 @@
 
 #include <fcntl.h>
 #include <poll.h>
-#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/un.h>
 #include <unistd.h>
 
-#ifdef __APPLE__
-#include <mach/mach.h>
-#endif
-
 #include <Kokkos_Macros.hpp>
-#ifdef KOKKOS_ENABLE_CUDA
+#if defined(KOKKOS_ENABLE_CUDA)
 #include <cuda_runtime_api.h>
+#elif defined(KOKKOS_ENABLE_HIP)
+#include <hip/hip_runtime_api.h>
 #endif
 
 #include "log.h"
@@ -148,37 +144,19 @@ std::string bytes(double b) {
 }
 
 std::string memory_lines(int device) {
+    // The device of rank 0's solver, not this thread's default
+#if defined(KOKKOS_ENABLE_CUDA)
+    if (device >= 0) cudaSetDevice(device);
+#elif defined(KOKKOS_ENABLE_HIP)
+    if (device >= 0) hipSetDevice(device);
+#endif
+    const MemoryUsage m = memory_usage();
     std::string text;
-    double resident = -1.0;
-#if defined(__APPLE__)
-    mach_task_basic_info_data_t info {};
-    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
-    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, reinterpret_cast<task_info_t>(&info), &count) ==
-        KERN_SUCCESS) {
-        resident = static_cast<double>(info.resident_size);
+    if (m.host >= 0.0) text += "memory_host: " + bytes(m.host) + " (peak " + bytes(m.host_peak) + ", rank 0)\n";
+    if (device >= 0 && m.device >= 0.0) {
+        text += "memory_device: " + bytes(m.device) + " of " + bytes(m.device_total) + " (device " +
+                std::to_string(device) + ", all processes)\n";
     }
-#else
-    std::ifstream statm("/proc/self/statm");
-    unsigned long long size = 0, pages = 0;
-    if (statm >> size >> pages) resident = static_cast<double>(pages) * static_cast<double>(sysconf(_SC_PAGESIZE));
-#endif
-    rusage usage {};
-    getrusage(RUSAGE_SELF, &usage);
-#if defined(__APPLE__)
-    const double peak = static_cast<double>(usage.ru_maxrss);
-#else
-    const double peak = static_cast<double>(usage.ru_maxrss) * 1024.0;
-#endif
-    if (resident >= 0.0) text += "memory_host: " + bytes(resident) + " (peak " + bytes(peak) + ", rank 0)\n";
-#ifdef KOKKOS_ENABLE_CUDA
-    size_t free_bytes = 0, total_bytes = 0;
-    if (device >= 0 && cudaSetDevice(device) == cudaSuccess && cudaMemGetInfo(&free_bytes, &total_bytes) == cudaSuccess) {
-        text += "memory_device: " + bytes(static_cast<double>(total_bytes - free_bytes)) + " of " +
-                bytes(static_cast<double>(total_bytes)) + " (device " + std::to_string(device) + ", all processes)\n";
-    }
-#else
-    (void)device;
-#endif
     return text;
 }
 
@@ -191,19 +169,19 @@ std::string status_text() {
     }
     using logging::format;
     std::string text = "state: running\n";
-    text += format("step: %llu\n", static_cast<unsigned long long>(s.step));
-    text += format("t: %.10g\n", s.t);
-    text += format("dt: %.6g\n", s.dt);
-    text += format("cfl: %.4g\n", s.cfl);
-    text += format("progress: %.2f%%\n", 100.0 * s.progress);
+    text += format("step: %llu\n", static_cast<unsigned long long>(s.run.step));
+    text += format("t: %.10g\n", s.run.t);
+    text += format("dt: %.6g\n", s.run.dt);
+    text += format("cfl: %.4g\n", s.run.cfl);
+    text += format("progress: %.2f%%\n", 100.0 * s.run.progress);
     text += "stop_at: " + s.stop_conditions + "\n";
-    text += "wall: " + logging::duration(s.wall) + "\n";
-    if (s.wall_per_step > 0.0) {
-        text += "wall_per_step: " + logging::duration(s.wall_per_step) + "\n";
-        text += "cells_per_second: " + logging::si(s.cells_per_second) + "\n";
+    text += "wall: " + logging::duration(s.run.wall) + "\n";
+    if (s.run.wall_per_step > 0.0) {
+        text += "wall_per_step: " + logging::duration(s.run.wall_per_step) + "\n";
+        text += "cells_per_second: " + logging::si(s.run.cells_per_second) + "\n";
     }
-    text += "eta: " + (s.eta >= 0.0 ? logging::duration(s.eta) : std::string("--")) + "\n";
-    text += format("cells: %llu\nranks: %d\n", static_cast<unsigned long long>(s.n_cells), s.n_ranks);
+    text += "eta: " + (s.run.eta >= 0.0 ? logging::duration(s.run.eta) : std::string("--")) + "\n";
+    text += format("cells: %llu\nranks: %d\n", static_cast<unsigned long long>(s.run.n_cells), s.run.n_ranks);
     text += memory_lines(s.device);
     for (const auto & [key, value] : s.monitors) text += key + ": " + value + "\n";
     return text;
