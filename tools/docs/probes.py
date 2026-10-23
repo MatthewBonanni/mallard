@@ -2,7 +2,7 @@
 (seconds each on a CPU build): probe shapes over a 2D mesh, boundary probes on
 curved walls (polylines with arc length), and a 3D wall's heat flux.
 
-    python tools/docs/probes.py --mallard build/src/Mallard [--mallard3d build-3d/src/Mallard] [names...]
+    python tools/docs/probes.py --mallard build/src/mallard [--mallard3d build-3d/src/mallard] [names...]
 """
 import argparse
 import csv

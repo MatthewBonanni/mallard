@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create every case template with `Mallard new --quick` and run it as a user
+# Create every case template with `mallard new --quick` and run it as a user
 # would: mesh.sh, init.sh, run.sh on two MPI ranks, post.sh. Checks that each
 # step works, not the accuracy.
 #

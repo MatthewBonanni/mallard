@@ -30,7 +30,7 @@ REFERENCES = [
 def load(path, u):
     # step, t, pressure force (3), viscous force (3); a run resumed from a
     # restart appends rows without a header
-    data = np.loadtxt(path, delimiter=",", comments="step")
+    data = np.loadtxt(path, delimiter=",", comments=["step", "#"])
     q = 0.5 * u ** 2 * np.pi / 4.0
     t = data[:, 1]
     F = data[:, 2:5] + data[:, 5:8]

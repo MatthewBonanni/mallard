@@ -16,12 +16,16 @@
 #include <unistd.h>
 
 #include "comm.h"
+#include "json.h"
+#include "run_log.h"
 
 namespace logging {
 
 namespace {
 
 bool phase_open = false;
+bool recording = false;
+Record record;
 
 bool env_set(const char * name) {
     const char * value = std::getenv(name);
@@ -110,6 +114,7 @@ void section(std::string_view title, std::string_view right) {
     std::string text = style("== ", Style::DIM) + style(title, Style::BOLD) + " ";
     text += style(std::string(static_cast<size_t>(std::max(3, WIDTH - used - 1)), '='), Style::DIM);
     if (!right.empty()) text += " " + std::string(right);
+    if (recording) record.emplace_back(std::string(title), Items{});
     line();
     line(text);
 }
@@ -119,10 +124,24 @@ void item(std::string_view key, std::string_view value) {
     std::string padded(key);
     if (padded.size() < KEY_WIDTH) padded.resize(KEY_WIDTH, ' ');
     line("  " + padded + " " + std::string(value));
+    if (recording) {
+        if (record.empty()) record.emplace_back("", Items{});
+        record.back().second.emplace_back(std::string(key), std::string(value));
+    }
 }
 
 void items(const Items & list) {
     for (const auto & [key, value] : list) item(key, value);
+}
+
+void begin_record() {
+    record.clear();
+    recording = comm::is_root();
+}
+
+Record end_record() {
+    recording = false;
+    return std::move(record);
 }
 
 void begin_phase(std::string_view name) {
@@ -148,6 +167,7 @@ void event(uint64_t step, double t, std::string_view kind, std::string_view text
     if (padded.size() < 8) padded.resize(8, ' ');
     line(format("%8llu %10.4e  ", static_cast<unsigned long long>(step), t) + style(padded, Style::CYAN) + " " +
          std::string(text));
+    run_log::write(json::Object().add("type", "event").add("step", step).add("t", t).add("kind", kind).add("text", text));
 }
 
 void warning(std::string_view message) {
@@ -155,6 +175,7 @@ void warning(std::string_view message) {
     close_phase();
     std::cout << std::flush;
     std::cerr << paint("warning:", Style::YELLOW, color_stderr()) << " " << message << std::endl;
+    run_log::write(json::Object().add("type", "warning").add("message", message));
 }
 
 void error(std::string_view message) {
@@ -162,6 +183,7 @@ void error(std::string_view message) {
     std::cout << std::flush;
     std::string prefix = comm::size() > 1 ? format("[rank %d] ", comm::rank()) : "";
     std::cerr << prefix << paint("error:", Style::RED, color_stderr()) << " " << message << std::endl;
+    run_log::write(json::Object().add("type", "error").add("message", message));
 }
 
 std::string count(uint64_t n) {

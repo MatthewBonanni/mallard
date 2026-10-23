@@ -43,8 +43,8 @@ constant-cp; reactions may be elementary, three-body, falloff (Lindemann,
 Troe, SRI), pressure-dependent Arrhenius (PLOG) and Chebyshev, with
 non-integer reactant orders.
 
-**Compositions.** Everywhere a state is given (`[initialize]`, `upt` and
-`nscbc_inlet` boundaries, sponges, `MallardReactor`), give exactly one of `X`
+**Compositions.** Everywhere a state is given (`[initialize]`, `upt`, `stagnation_inlet` and
+`nscbc_inlet` boundaries, sponges, `mallard reactor`), give exactly one of `X`
 (mole fractions) or `Y` (mass fractions), as a table by species; listed values
 are normalized and unlisted species are zero. Analytical initial conditions
 and inflows take expressions per species, and `balance = "N2"` gives one
@@ -180,7 +180,7 @@ outputs `QRAD` [W/m³].
 Cantera's `radiation_enabled` flames are `species = ["H2O", "CO2"]` with
 `T_ambient = 0` ([validation](https://matthewbonanni.github.io/mallard/validation/#radiation)).
 
-## 0D reactors: `MallardReactor`
+## 0D reactors: `mallard reactor`
 
 ```toml
 # examples/h2_ignition/input.toml
@@ -202,20 +202,20 @@ atol = 1.0e-10
 
 *Used in:* [`h2_ignition`](https://matthewbonanni.github.io/mallard/docs/examples/#h2-ignition), [`autoignition_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#autoignition-2d).
 
-`MallardReactor` integrates one adiabatic, constant-volume reactor with the
+`mallard reactor` integrates one adiabatic, constant-volume reactor with the
 solver's own chemistry, and writes `t`, `T`, `p` and the mass fractions as
 CSV. Use it to check a mechanism and tolerances before a run, or to get an
 ignition delay.
 
 ```sh
 cd examples/h2_ignition
-../../build/src/MallardReactor -i input.toml    # writes reactor.csv, prints the ignition delay
+../../build/src/mallard reactor -i input.toml    # writes reactor.csv, prints the ignition delay
 ```
 
 ![Temperature and mass fractions of the constant-volume ignition of stoichiometric H2/air at 1200 K](../images/guide/ignition-light.svg#gh-light-mode-only)
 ![Temperature and mass fractions of the constant-volume ignition of stoichiometric H2/air at 1200 K](../images/guide/ignition-dark.svg#gh-dark-mode-only)
 
-*`examples/h2_ignition` with `MallardReactor`: the ignition delay (maximum of
+*`examples/h2_ignition` with `mallard reactor`: the ignition delay (maximum of
 dT/dt) is 44.2 µs, as Cantera's
 ([validation](https://matthewbonanni.github.io/mallard/validation/#ignition)).*
 
@@ -238,7 +238,7 @@ solver's chemistry kernels, which prints cells per second (see
 
 | Example | Shows |
 |---|---|
-| `h2_ignition` | `MallardReactor` |
+| `h2_ignition` | `mallard reactor` |
 | `reactive_shock_tube` | Ignition behind a reflected shock, Strang splitting |
 | `detonation_1d`, `detonation_2d`, `detonation_3d` | CJ and cellular detonations, numerical soot foils (`P_MAX`) |
 | `premixed_flame` | Freely propagating H2/air and CH4/air (GRI-3.0) flames against Cantera |
@@ -255,7 +255,7 @@ composition) and leaves through `p_out`, periodic across the channel.*
 
 ## See also
 
-- [Input reference: `[chemistry]`](../input.md#chemistry), [`[radiation]`](../input.md#radiation), [`MallardReactor`](../input.md#mallardreactor)
+- [Input reference: `[chemistry]`](../input.md#chemistry), [`[radiation]`](../input.md#radiation), [`mallard reactor`](../input.md#mallard-reactor)
 - [Validation: reacting flow](https://matthewbonanni.github.io/mallard/validation/#reacting-flow)
 - [Large-eddy simulation](les.md): thickened flames and PaSR
 - Design notes: [finite-rate chemistry](../design/chemistry.md)

@@ -46,6 +46,6 @@ jobs:
           ASAN_OPTIONS: detect_leaks=0
           UBSAN_OPTIONS: print_stacktrace=1
         run: |
-          mpirun -n 1 ./build/test/MallardTest
-          mpirun -n 2 --oversubscribe -x ASAN_OPTIONS -x UBSAN_OPTIONS ./build/test/MallardTest \
+          mpirun -n 1 ./build/test/mallard-test
+          mpirun -n 2 --oversubscribe -x ASAN_OPTIONS -x UBSAN_OPTIONS ./build/test/mallard-test \
             --gtest_filter='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*'

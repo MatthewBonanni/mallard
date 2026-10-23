@@ -23,6 +23,7 @@
 
 #include <toml.hpp>
 
+#include "data_paths.h"
 #include "data_writer.h"
 #include "mesh_block.h"
 #include "scratch.h"
@@ -36,7 +37,7 @@ namespace {
 
 namespace fs = std::filesystem;
 
-const fs::path FORMATS = fs::path(MALLARD_SOURCE_DIR) / "test" / "data" / "formats";
+const fs::path FORMATS = fs::path(source_dir()) / "test" / "data" / "formats";
 
 /** @brief Releases with fixtures, and the restart format version each case was written in. */
 struct Fixture {
@@ -44,7 +45,7 @@ struct Fixture {
     uint32_t version;
 };
 
-const std::vector<Fixture> RESTART_FIXTURES = {
+[[maybe_unused]] const std::vector<Fixture> RESTART_FIXTURES = {
     {"v0.6.0", "gas", 2},   {"v0.6.0", "statistics", 3}, {"v0.6.0", "mixture", 2},
     {"v0.7.0", "gas", 2},   {"v0.7.0", "statistics", 3}, {"v0.7.0", "mixture", 2}, {"v0.7.0", "nscbc", 4},
     {"v0.8.0", "gas", 2},   {"v0.8.0", "statistics", 3}, {"v0.8.0", "mixture", 2}, {"v0.8.0", "nscbc", 4},
@@ -173,7 +174,7 @@ TEST(FormatCompatTest, RestartFilesOfANewerFormatAreRejectedClearly) {
         }
         const std::string error = error_of([&] { read_restart(file.string()); });
         EXPECT_NE(error.find("format version 99 is from a newer Mallard"), std::string::npos) << error;
-        EXPECT_NE(error.find("reads restart files of versions 1 to 5"), std::string::npos) << error;
+        EXPECT_NE(error.find("reads restart files of versions 1 to 6"), std::string::npos) << error;
         fs::remove(file);
     }
 }

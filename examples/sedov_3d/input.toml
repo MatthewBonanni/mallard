@@ -15,7 +15,7 @@
 #
 # Run, then compare the shock radius and density profile with the exact
 # solution (tools/sedov.py integrates the similarity ODEs):
-#   ../../build3d/src/Mallard -i input.toml
+#   ../../build3d/src/mallard -i input.toml
 #   python ../../tools/sedov.py solut --energy 1
 #
 # Expected result at t = 0.8: the shock at R = 0.945 (exact), the density

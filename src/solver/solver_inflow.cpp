@@ -22,7 +22,7 @@ void Solver::init_inlets(const std::vector<Input> & input_boundaries,
     bool profiled = false;
     for (const auto & [i_bc, faces] : inlets) {
         const Input & bound = input_boundaries[i_bc];
-        const std::string name = toml::find<std::string>(bound, "name");
+        const std::string name = find_value<std::string>(bound, "name");
         const std::string where = "boundaries[name = \"" + name + "\"]";
         const InletProfile profile(bound, where);
         std::vector<int32_t> chars;

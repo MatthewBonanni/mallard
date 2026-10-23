@@ -264,7 +264,7 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="stewart-larson-golden-1989"></a>P. H. Stewart, C. W. Larson and D. M. Golden, Pressure and temperature dependence of reactions proceeding via a bound complex. 2. Application to 2CH3 → C2H5 + H, *Combust. Flame* 75, 25–31 (1989). [doi:10.1016/0010-2180(89)90084-9](https://doi.org/10.1016/0010-2180%2889%2990084-9)
   Used in: SRI falloff reactions.
 - <a id="hairer-wanner-1996"></a>E. Hairer and G. Wanner, *Solving Ordinary Differential Equations II: Stiff and Differential-Algebraic Problems*, 2nd ed., Springer (1996). [doi:10.1007/978-3-642-05221-7](https://doi.org/10.1007/978-3-642-05221-7)
-  Used in: the RODAS Rosenbrock integrator of the chemistry source and `MallardReactor`.
+  Used in: the RODAS Rosenbrock integrator of the chemistry source and `mallard reactor`.
 - <a id="strang-1968"></a>G. Strang, On the construction and comparison of difference schemes, *SIAM J. Numer. Anal.* 5, 506–517 (1968). [doi:10.1137/0705041](https://doi.org/10.1137/0705041)
   Used in: the Strang splitting of chemistry around the flow step.
 - <a id="wu-ma-ihme-2019"></a>H. Wu, P. C. Ma and M. Ihme, Efficient time-stepping techniques for simulating turbulent reactive flows with stiff chemistry, *Comput. Phys. Commun.* 243, 81–96 (2019). [doi:10.1016/j.cpc.2019.04.016](https://doi.org/10.1016/j.cpc.2019.04.016)
