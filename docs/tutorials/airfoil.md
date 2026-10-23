@@ -84,8 +84,8 @@ over), so reaching t = 120 takes 800,000 steps on the first mesh and 2.6
 million on the second:
 
 ```bash
-$MALLARD/build/src/Mallard -i input.toml --kokkos-num-threads=8    # CPU threads
-mpirun -n 4 $MALLARD/build/src/Mallard -i input.toml               # MPI ranks
+$MALLARD/build/src/mallard -i input.toml --kokkos-num-threads=8    # CPU threads
+mpirun -n 4 $MALLARD/build/src/mallard -i input.toml               # MPI ranks
 ```
 
 This is a case for a GPU: on one A100 the first mesh takes about 25 minutes
