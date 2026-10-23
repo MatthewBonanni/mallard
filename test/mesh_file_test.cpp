@@ -23,6 +23,7 @@
 #include "periodic_fixtures.h"
 #include "test_fixtures.h"
 #include "solver.h"
+#include "scratch.h"
 
 namespace {
 
@@ -172,7 +173,7 @@ TEST(MeshFileTest, HDF5ConversionKeepsCellsNodesAndZones) {
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
     if (comm::size() > 1) GTEST_SKIP() << "converts on one rank";
     const std::string msh = write_temp("mallard_convert.msh", jittered_mixed_mesh(6));
-    const std::string h5 = (std::filesystem::temp_directory_path() / "mallard_convert.h5").string();
+    const std::string h5 = (scratch_dir() / "mallard_convert.h5").string();
     write_mesh_h5(h5, read_file_block(msh));
     Mesh gmsh, hdf5;
     gmsh.init_file(msh);
@@ -282,7 +283,7 @@ TEST(MeshFileTest, PeriodicZonePairsJoinAJitteredGmshMesh) {
     FOR_I_CONSERVATIVE EXPECT_NEAR(after[i], before[i], roundoff(1e-12)) << "variable " << int(i);
 
     if (!have_hdf5() || comm::size() > 1) return;
-    const std::string h5 = (std::filesystem::temp_directory_path() / "mallard_jitter_periodic.h5").string();
+    const std::string h5 = (scratch_dir() / "mallard_jitter_periodic.h5").string();
     write_mesh_h5(h5, read_file_block(file));
     Solver hdf5;
     hdf5.init(parse_toml(periodic_file_input(h5)));

@@ -23,6 +23,7 @@
 #include "test_fixtures.h"
 #include "face_reconstruction.h"
 #include "physics.h"
+#include "scratch.h"
 
 namespace {
 
@@ -315,6 +316,136 @@ TEST(TENOTest, MirrorImagesNeverLandInsideNonConvexDomains) {
     }
 }
 
+std::shared_ptr<Mesh> mesh_from(const std::vector<std::array<rtype, N_DIM>> & nodes,
+                                const std::vector<std::vector<uint32_t>> & cells) {
+    Mesh mesh;
+    mesh.init_from_connectivity(nodes, cells, {});
+    auto ptr = std::make_shared<Mesh>(std::move(mesh));
+    ptr->copy_host_to_device();
+    return ptr;
+}
+
+/**
+ * @brief Checks that every mirror image in the central stencils is the image
+ *        of a cell in front of its face, across that face (the foot of the
+ *        cell on the face's line lies on the face), for a target cell in front
+ *        of the face. Returns the number of images checked.
+ */
+uint32_t expect_images_across_their_faces(const std::shared_ptr<Mesh> & mesh_ptr, int order) {
+    const Mesh & m = *mesh_ptr;
+    std::vector<int32_t> face_bc(m.n_faces, -1);
+    for (uint32_t f = 0; f < m.n_faces; f++) face_bc[f] = m.h_cells_of_face(f, 1) < 0 ? 0 : -1;
+    BoundaryCondition sym;
+    sym.type = BoundaryType::SYMMETRY;
+    BoundaryData bd = make_boundary_data(m, face_bc, {sym}, GAMMA);
+    auto teno = make_teno(mesh_ptr, bd, order);
+    const TENO::Stencils stencils = teno->large_stencils();
+    uint32_t n_checked = 0;
+    for (uint32_t c = 0; c < m.n_cells; c++) {
+        for (uint64_t s = stencils.offsets[c]; s < stencils.offsets[c + 1]; s++) {
+            const int32_t f = stencils.faces[s];
+            if (f < 0) continue;
+            const double fx = double(m.h_face_coords(f, 0)), fy = double(m.h_face_coords(f, 1));
+            double nx = double(m.h_face_normals(f, 0)), ny = double(m.h_face_normals(f, 1));
+            const uint32_t inner = static_cast<uint32_t>(m.h_cells_of_face(f, 0));
+            if ((double(m.h_cell_coords(inner, 0)) - fx) * nx + (double(m.h_cell_coords(inner, 1)) - fy) * ny < 0) {
+                nx = -nx;
+                ny = -ny;
+            }
+            auto in_front = [&](uint32_t cell) {
+                return (double(m.h_cell_coords(cell, 0)) - fx) * nx + (double(m.h_cell_coords(cell, 1)) - fy) * ny > 0;
+            };
+            const uint32_t image_of = static_cast<uint32_t>(stencils.cells[s]);
+            EXPECT_TRUE(in_front(c)) << "cell " << c << " takes an image across face " << f << " from behind it";
+            EXPECT_TRUE(in_front(image_of)) << "cell " << c << " takes the image of cell " << image_of << ", behind face " << f;
+            // Foot on the face's line, as a fraction of the way from node a to node b
+            const uint32_t a = m.h_node_of_face(static_cast<uint32_t>(f), 0), b = m.h_node_of_face(static_cast<uint32_t>(f), 1);
+            const double ax = double(m.h_node_coords(a, 0)), ay = double(m.h_node_coords(a, 1));
+            const double tx = double(m.h_node_coords(b, 0)) - ax, ty = double(m.h_node_coords(b, 1)) - ay;
+            const double foot = ((double(m.h_cell_coords(image_of, 0)) - ax) * tx + (double(m.h_cell_coords(image_of, 1)) - ay) * ty) /
+                                (tx * tx + ty * ty);
+            EXPECT_GE(foot, -1e-9) << "cell " << c << " takes the image of cell " << image_of << " across the extension of face " << f;
+            EXPECT_LE(foot, 1 + 1e-9) << "cell " << c << " takes the image of cell " << image_of << " across the extension of face " << f;
+            n_checked++;
+        }
+    }
+    return n_checked;
+}
+
+TEST(TENOTest, MirrorImagesOfAFacetedCurvedWallAreAcrossTheFacetUnderTheirCell) {
+    // Annulus of thin quadrilaterals (aspect ratio 10 at the inner circle) with
+    // straight faces: the line of a facet, extended, passes a cell height
+    // inside the next column of cells, so reflections across it misplace the
+    // flow there (#382)
+    const uint32_t n_theta = 32, n_r = 8;
+    const double r0 = 0.5, dr0 = 2.0 * M_PI * r0 / n_theta / 10.0, q = 1.5;
+    std::vector<std::array<rtype, N_DIM>> nodes;
+    double r = r0, dr = dr0;
+    for (uint32_t j = 0; j <= n_r; j++, r += dr, dr *= q) {
+        for (uint32_t i = 0; i < n_theta; i++) {
+            const double t = 2.0 * M_PI * i / n_theta;
+            nodes.push_back({rtype(r * std::cos(t)), rtype(r * std::sin(t))});
+        }
+    }
+    std::vector<std::vector<uint32_t>> cells;
+    for (uint32_t j = 0; j < n_r; j++) {
+        for (uint32_t i = 0; i < n_theta; i++) {
+            const uint32_t i1 = (i + 1) % n_theta;
+            cells.push_back({j * n_theta + i, j * n_theta + i1, (j + 1) * n_theta + i1, (j + 1) * n_theta + i});
+        }
+    }
+    const auto mesh = mesh_from(nodes, cells);
+    for (int order : {3, 5}) EXPECT_GT(expect_images_across_their_faces(mesh, order), 0u) << "order " << order;
+}
+
+TEST(TENOTest, MirrorImagesAcrossAThinBodyStayOnTheTargetsSide) {
+    // Square with a slot-shaped hole three quarters of a cell thick (as at a
+    // closed trailing edge): a cell below it mirrored across its lower side
+    // lands inside the hole, a quarter cell from its upper side, next to the
+    // cells above it (#382)
+    const uint32_t n = 8;
+    const double h = 1.0 / n;
+    std::vector<std::array<rtype, N_DIM>> nodes;
+    for (uint32_t j = 0; j <= n; j++) {
+        const double y = j <= 4 ? j * h : (j - 0.25) * h;
+        for (uint32_t i = 0; i <= n; i++) nodes.push_back({rtype(i * h), rtype(y)});
+    }
+    std::vector<std::vector<uint32_t>> cells;
+    for (uint32_t j = 0; j < n; j++) {
+        for (uint32_t i = 0; i < n; i++) {
+            if (j == 4 && i >= 2 && i < 6) continue;
+            const uint32_t k = j * (n + 1) + i;
+            cells.push_back({k, k + 1, k + n + 2, k + n + 1});
+        }
+    }
+    const auto mesh = mesh_from(nodes, cells);
+    for (int order : {3, 5}) EXPECT_GT(expect_images_across_their_faces(mesh, order), 0u) << "order " << order;
+}
+
+TEST(TENOTest, StencilsOfThinCellsSpanTheirLongDirection) {
+    // Cells ten times wider than tall: by physical distance the nearest cells
+    // are whole columns above and below, and the fit resolves x only from the
+    // next columns, which amplifies grid-scale modes (#382). In the metric of
+    // the mesh spacing the stencils span two columns either side.
+    const uint32_t n = 16;
+    auto mesh = make_mesh("cartesian", n, n, 1.0_r, 0.1_r);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto teno = make_teno(mesh, bd, 4);
+    const TENO::Stencils stencils = teno->large_stencils();
+    const double dx = 1.0 / n;
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        const double x = double(mesh->h_cell_coords(c, 0));
+        if (x < 3 * dx || x > 1 - 3 * dx) continue;
+        double left = 0.0, right = 0.0;
+        for (uint64_t s = stencils.offsets[c]; s < stencils.offsets[c + 1]; s++) {
+            const double d = double(mesh->h_cell_coords(stencils.cells[s], 0)) - x;
+            left = std::max(left, -d);
+            right = std::max(right, d);
+        }
+        EXPECT_GT(std::min(left, right), 1.5 * dx) << "cell " << c;
+    }
+}
+
 /**
  * @brief Face values (every cell troubled, so the large, sector and smoothness
  *        tables all take part) and centroid gradients of a TENO on a smooth field.
@@ -359,7 +490,7 @@ void expect_bitwise_equal(const std::vector<double> & a, const std::vector<doubl
 }
 
 std::string temp_cache(const std::string & name) {
-    const std::string path = (std::filesystem::temp_directory_path() / name).string();
+    const std::string path = (scratch_dir() / name).string();
     std::filesystem::remove(path);
     return path;
 }

@@ -53,6 +53,19 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.25)
     set(MALLARD_THIRD_PARTY SYSTEM)
 endif()
 
+# libFuzzer harnesses of the input and mesh readers (test/fuzz), with every
+# target built with the sanitizers of Mallard_FUZZ_SANITIZERS
+option(${PROJECT_NAME}_ENABLE_FUZZING "Build the libFuzzer harnesses (Clang)" OFF)
+set(${PROJECT_NAME}_FUZZ_SANITIZERS "address,undefined" CACHE STRING "Sanitizers of the fuzzing build")
+if(${PROJECT_NAME}_ENABLE_FUZZING)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "Mallard_ENABLE_FUZZING needs Clang (libFuzzer).")
+    endif()
+    add_compile_options(-fsanitize=fuzzer-no-link,${${PROJECT_NAME}_FUZZ_SANITIZERS}
+                        -fno-sanitize-recover=all -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=${${PROJECT_NAME}_FUZZ_SANITIZERS})
+endif()
+
 # Compile-time options
 option(${PROJECT_NAME}_USE_DOUBLE "Use double precision" ON)
 message(STATUS "Mallard: Double precision: ${${PROJECT_NAME}_USE_DOUBLE}")
@@ -217,6 +230,9 @@ option(${PROJECT_NAME}_ENABLE_TESTS "Build the test suite (fetches GoogleTest)" 
 add_subdirectory(src)
 if(${PROJECT_NAME}_ENABLE_TESTS)
     add_subdirectory(test)
+endif()
+if(${PROJECT_NAME}_ENABLE_FUZZING)
+    add_subdirectory(test/fuzz)
 endif()
 
 # Documentation setup

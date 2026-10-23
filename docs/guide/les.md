@@ -35,6 +35,8 @@ preset = "les"             # hybrid flux: central where smooth, HLLC at
 budget = true              # model vs numerical dissipation in integrals.csv
 ```
 
+*Used in:* [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
+
 The `les` [preset](numerics.md#presets) is the setup of the `channel_les`
 and `cbc_les` examples: the channel at
 Re<sub>τ</sub> = 395 and 590 lands within 0.7% and 1.6% of the DNS
@@ -43,6 +45,13 @@ decaying grid turbulence within the measured spectra
 ([validation](https://matthewbonanni.github.io/mallard/validation/#les-cbc)).
 
 ## Subgrid-scale models: `[les]`
+
+```toml
+[les]
+model = "wale"     # sigma (default in 3D), wale, vreman or smagorinsky
+```
+
+*Used in:* [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
 
 | `model` | Eddy viscosity vanishes for | Use |
 |---|---|---|
@@ -71,6 +80,16 @@ Pitfalls:
 
 ## Low-dissipation flux and the budget
 
+```toml
+[numerics]
+convective_flux = "hybrid"
+
+[integrals]
+budget = true      # the model's, the scheme's and molecular dissipation
+```
+
+*Used in:* [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
+
 Upwind Riemann solvers dissipate kinetic energy at the grid scale, the very
 scales the SGS model is meant to handle. `convective_flux = "hybrid"` uses the
 kinetic-energy-preserving central flux of Kuya, Totani & Kawai (2018) on the
@@ -94,6 +113,18 @@ times the Riemann solver's), and `hybrid` does not combine with
 
 ## Thickened flames: `[les.combustion]`
 
+```toml
+[les.combustion]          # examples/flame_turbulence/les.toml: stoichiometric H2/air
+model = "tfles"
+delta_L = 3.3013976e-4    # laminar thermal thickness [m], from Cantera
+s_L = 2.3323744           # laminar flame speed [m/s]
+T_unburnt = 300.0
+T_burnt = 2384.28
+# n_res = 5               # cells across the thickened flame (default)
+```
+
+*Used in:* [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
+
 Premixed flames are thinner than LES cells. The dynamically thickened flame
 model (TFLES; Colin et al. 2000, Légier et al. 2002) multiplies diffusivities
 by `E F` and reaction rates by `E / F` inside the flame, so it spans `n_res`
@@ -104,16 +135,6 @@ a test filter removes, so there is no model constant. A sensor `Ω` confines it 
 
 ![Progress variable of a laminar flame and of the same flame thickened by F = 3, and the flame sensor](../images/guide/tfles-light.svg#gh-light-mode-only)
 ![Progress variable of a laminar flame and of the same flame thickened by F = 3, and the flame sensor](../images/guide/tfles-dark.svg#gh-dark-mode-only)
-
-```toml
-[les.combustion]          # examples/flame_turbulence/les.toml: stoichiometric H2/air
-model = "tfles"
-delta_L = 3.3013976e-4    # laminar thermal thickness [m], from Cantera
-s_L = 2.3323744           # laminar flame speed [m/s]
-T_unburnt = 300.0
-T_burnt = 2384.28
-# n_res = 5               # cells across the thickened flame (default)
-```
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -137,6 +158,13 @@ are input errors with `dynamic` (they belong to `charlette`); with
 
 ### PaSR (experimental)
 
+```toml
+[les.combustion]
+model = "pasr"
+```
+
+*Used in:* no example yet.
+
 `model = "pasr"`: the partially stirred reactor (Sabelnikov & Fureby 2013) for
 non-premixed and partially premixed flames. No thickening; each cell's rates
 are scaled by its reacting fraction `kappa = tau_c / (tau_c + tau_mix)`,
@@ -147,10 +175,6 @@ overcorrects on coarse meshes; validated on one case only
 
 ## Wall models: `wall_model`
 
-Wall-modeled LES resolves only the outer layer: a wall gets its shear stress
-and heat flux from a model fed by the LES state at an exchange point a height
-`h` above each wall face, so the first cell need not be at y<sup>+</sup> ~ 1.
-
 ```toml
 [[boundaries]]
 name = "bottom"
@@ -158,6 +182,12 @@ type = "wall_isothermal"
 T = 1.0
 wall_model = { model = "gfm", exchange_distance = 0.3, edge_distance = 1.0 }
 ```
+
+*Used in:* [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
+
+Wall-modeled LES resolves only the outer layer: a wall gets its shear stress
+and heat flux from a model fed by the LES state at an exchange point a height
+`h` above each wall face, so the first cell need not be at y<sup>+</sup> ~ 1.
 
 | Key | Default | Meaning |
 |---|---|---|

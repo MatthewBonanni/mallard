@@ -17,6 +17,8 @@ mu = 1.0e-3              # navier_stokes: dynamic viscosity
 Pr = 0.72
 ```
 
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 35 more.
+
 | Key | Default | Meaning |
 |---|---|---|
 | `type` | `"euler"` | `euler` (inviscid) or `navier_stokes` (viscous, heat-conducting) |
@@ -48,6 +50,15 @@ instance, takes the cylinder diameter and free-stream sound speed as units, so
 
 ### Viscosity laws
 
+```toml
+[physics]
+type = "navier_stokes"
+viscosity_model = "sutherland"
+mu = 1.716e-5
+```
+
+*Used in:* [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body).
+
 ![Viscosity against temperature for the constant, Sutherland and power laws](../images/guide/viscosity-light.svg#gh-light-mode-only)
 ![Viscosity against temperature for the constant, Sutherland and power laws](../images/guide/viscosity-dark.svg#gh-dark-mode-only)
 
@@ -63,20 +74,21 @@ comparisons with incompressible references.
 
 ## Gas mixtures
 
+```toml
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+```
+
+*Used in:* [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence), [`h2_ignition`](https://matthewbonanni.github.io/mallard/docs/examples/#h2-ignition), [`reactive_shock_tube`](https://matthewbonanni.github.io/mallard/docs/examples/#reactive-shock-tube), [`detonation_1d`](https://matthewbonanni.github.io/mallard/docs/examples/#detonation-1d) and 11 more.
+
 `gas = "mixture"` replaces `gamma` and the reference state with the species
 of a Cantera mechanism: thermally perfect thermodynamics, mixture-averaged or
 simpler transport, and finite-rate chemistry with `[chemistry]`. See
 [Thermochemistry](thermochemistry.md).
 
 ## Axisymmetric flows
-
-With `axisymmetric = true` (2D builds), the mesh is the meridian half-plane of
-a body of revolution: x is the axis and y the radius, so every node needs
-`y >= 0`. Each cell stands for the solid it sweeps around the axis; there is
-no swirl.
-
-![The 2D mesh as the meridian half-plane of a body of revolution about the x axis](../images/guide/axisymmetric-light.svg#gh-light-mode-only)
-![The 2D mesh as the meridian half-plane of a body of revolution about the x axis](../images/guide/axisymmetric-dark.svg#gh-dark-mode-only)
 
 ```toml
 [physics]
@@ -88,6 +100,16 @@ axisymmetric = true
 name = "axis"            # every boundary face on y = 0
 type = "symmetry"
 ```
+
+*Used in:* [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`noh_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#noh-axisymmetric), [`sedov_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sedov-axisymmetric), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric).
+
+With `axisymmetric = true` (2D builds), the mesh is the meridian half-plane of
+a body of revolution: x is the axis and y the radius, so every node needs
+`y >= 0`. Each cell stands for the solid it sweeps around the axis; there is
+no swirl.
+
+![The 2D mesh as the meridian half-plane of a body of revolution about the x axis](../images/guide/axisymmetric-light.svg#gh-light-mode-only)
+![The 2D mesh as the meridian half-plane of a body of revolution about the x axis](../images/guide/axisymmetric-dark.svg#gh-dark-mode-only)
 
 ![The meridian half-plane of the axisymmetric sphere example with its zones](../images/guide/domain_sphere_axisymmetric-light.svg#gh-light-mode-only)
 ![The meridian half-plane of the axisymmetric sphere example with its zones](../images/guide/domain_sphere_axisymmetric-dark.svg#gh-dark-mode-only)
