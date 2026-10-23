@@ -85,7 +85,7 @@ std::string vector_text(const std::vector<double> & v) {
 MeshTransform mesh_transform(const Input & input) {
     MeshTransform t;
     if (!input.contains("mesh") || !input.at("mesh").contains("transform")) return t;
-    if (toml::find_or<std::string>(input, "mesh", "type", "file") != "file") {
+    if (find_value_or<std::string>(input, "mesh", "type", "file") != "file") {
         throw InputError("[mesh.transform] applies to mesh files.");
     }
     const Input & table = input.at("mesh").at("transform");
@@ -259,8 +259,8 @@ MeshBlock annulus_block(const Input & input, int r, int p) {
     const double r_in = double(find_real_or(input, "mesh", "r_inner", dim::length, 1.0_r));
     const double r_out = double(find_real_or(input, "mesh", "r_outer", dim::length, 2.0_r));
     if (!(r_in > 0.0 && r_out > r_in)) throw InputError("[mesh] annulus needs 0 < r_inner < r_outer.");
-    return annulus_block(toml::find_or<uint32_t>(input, "mesh", "Ntheta", 64),
-                         toml::find_or<uint32_t>(input, "mesh", "Nr", 16), toml::find_or<uint32_t>(input, "mesh", "Nz", 16),
+    return annulus_block(find_value_or<uint32_t>(input, "mesh", "Ntheta", 64),
+                         find_value_or<uint32_t>(input, "mesh", "Nr", 16), find_value_or<uint32_t>(input, "mesh", "Nz", 16),
                          r_in, r_out, angle * std::numbers::pi / 180.0,
                          double(find_real_or(input, "mesh", "Lz", dim::length, 1.0_r)), r, p);
 }
@@ -428,24 +428,23 @@ bool is_hdf5_mesh(const std::string & filename) {
 }
 
 MeshBlock read_mesh_block(const Input & input) {
-    const std::string type_str = toml::find_or<std::string>(input, "mesh", "type", "file");
-    const auto it = MESH_TYPES.find(type_str);
-    if (it == MESH_TYPES.end()) throw unknown_option(MESH_TYPES, "mesh.type", type_str);
+    const std::string type_str = find_value_or<std::string>(input, "mesh", "type", "file");
+    const auto it = find_option(MESH_TYPES, "mesh.type", type_str);
     const MeshType type = it->second;
     const MeshTransform transform = mesh_transform(input);
     if (type == MeshType::FROM_FILE) {
-        const std::string filename = toml::find_or<std::string>(input, "mesh", "filename", "mesh.msh");
+        const std::string filename = find_value_or<std::string>(input, "mesh", "filename", "mesh.msh");
         MeshBlock block = is_hdf5_mesh(filename) ? read_mesh_h5(filename) : read_file_block(filename);
         transform_block(block, transform);
         return block;
     }
     if (type == MeshType::ANNULUS) return annulus_block(input, comm::rank(), comm::size());
-    const uint32_t Nx = toml::find_or<uint32_t>(input, "mesh", "Nx", 100);
-    const uint32_t Ny = toml::find_or<uint32_t>(input, "mesh", "Ny", 100);
+    const uint32_t Nx = find_value_or<uint32_t>(input, "mesh", "Nx", 100);
+    const uint32_t Ny = find_value_or<uint32_t>(input, "mesh", "Ny", 100);
     const rtype Lx = find_real_or(input, "mesh", "Lx", dim::length, 1.0);
     const rtype Ly = find_real_or(input, "mesh", "Ly", dim::length, 1.0);
     if constexpr (N_DIM == 3) {
-        const uint32_t Nz = toml::find_or<uint32_t>(input, "mesh", "Nz", 100);
+        const uint32_t Nz = find_value_or<uint32_t>(input, "mesh", "Nz", 100);
         const rtype Lz = find_real_or(input, "mesh", "Lz", dim::length, 1.0);
         if (type == MeshType::CARTESIAN_TRI || type == MeshType::WEDGE) {
             throw std::runtime_error("Mesh type " + type_str + " is 2D only.");

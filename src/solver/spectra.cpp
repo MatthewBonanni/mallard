@@ -103,11 +103,11 @@ bool Spectra::homogeneous(size_t axis) const {
 void Spectra::init(const Input & table, const Input & input, const std::vector<std::string> & species_names,
                    const Mesh & mesh, uint64_t interval_in, rtype t_start_in) {
     const std::string key = "statistics.spectra";
-    interval = toml::find_or<uint64_t>(table, "interval", interval_in);
+    interval = find_value_or<uint64_t>(table, "interval", interval_in);
     if (interval == 0) throw InputError(key + ".interval must be positive.");
     t_start = find_real_or(table, "t_start", dim::time, t_start_in);
-    average = toml::find_or<bool>(table, "average", true);
-    file = toml::find_or<std::string>(table, "file", average ? "spectra.csv" : "spectra/spectra.csv");
+    average = find_value_or<bool>(table, "average", true);
+    file = find_value_or<std::string>(table, "file", average ? "spectra.csv" : "spectra/spectra.csv");
 
     auto add_field = [&](const std::string & name) {
         const auto it = std::find(fields.begin(), fields.end(), name);
@@ -123,11 +123,11 @@ void Spectra::init(const Input & table, const Input & input, const std::vector<s
         }
         pairs.emplace_back(a, b);
     };
-    for (const auto & name : toml::find_or<std::vector<std::string>>(table, "fields", {})) {
+    for (const auto & name : find_value_or<std::vector<std::string>>(table, "fields", {})) {
         const uint32_t a = add_field(name);
         add_pair(a, a, name);
     }
-    for (const auto & product : toml::find_or<std::vector<std::string>>(table, "products", {})) {
+    for (const auto & product : find_value_or<std::vector<std::string>>(table, "products", {})) {
         const size_t star = product.find('*');
         if (star == std::string::npos || product.find('*', star + 1) != std::string::npos) {
             throw InputError(key + ".products: \"" + product + "\" is not of the form \"A*B\".");
@@ -140,20 +140,20 @@ void Spectra::init(const Input & table, const Input & input, const std::vector<s
     codes = to_device(h_codes, "spectra_codes");
 
     // The mesh: a generated box of quadrilaterals or hexahedra
-    if (toml::find_or<std::string>(input, "mesh", "type", "file") != "cartesian") {
+    if (find_value_or<std::string>(input, "mesh", "type", "file") != "cartesian") {
         throw InputError(key + " needs a generated mesh of type \"cartesian\".");
     }
     const char * n_keys[3] = {"Nx", "Ny", "Nz"};
     const char * l_keys[3] = {"Lx", "Ly", "Lz"};
     for (size_t d = 0; d < N_DIM; d++) {
-        N[d] = toml::find_or<uint32_t>(input, "mesh", n_keys[d], 100);
+        N[d] = find_value_or<uint32_t>(input, "mesh", n_keys[d], 100);
         L[d] = static_cast<double>(find_real_or(input, "mesh", l_keys[d], dim::length, 1.0));
     }
     const Stretching stretching = mesh_stretching(input);
     std::vector<std::string> periodic;
-    if (input.at("mesh").contains("periodic")) periodic = toml::find<std::vector<std::string>>(input, "mesh", "periodic");
+    if (input.at("mesh").contains("periodic")) periodic = find_value<std::vector<std::string>>(input, "mesh", "periodic");
     std::vector<std::string> names =
-        toml::find_or<std::vector<std::string>>(table, "directions", periodic);
+        find_value_or<std::vector<std::string>>(table, "directions", periodic);
     for (const auto & name : names) {
         const size_t d = name == "x" ? 0 : name == "y" ? 1 : name == "z" ? 2 : 3;
         if (d >= N_DIM) throw InputError(key + ".directions: unknown direction \"" + name + "\".");

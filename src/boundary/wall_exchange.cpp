@@ -33,9 +33,8 @@ WallModelSpec WallModelSpec::from_input(const Input & table, const BoundaryCondi
         }
     }
     WallModelSpec spec;
-    const std::string model = toml::find_or<std::string>(table, "model", "gfm");
-    const auto it = WALL_MODEL_TYPES.find(model);
-    if (it == WALL_MODEL_TYPES.end()) throw unknown_option(WALL_MODEL_TYPES, where + ".model", model);
+    const std::string model = find_value_or<std::string>(table, "model", "gfm");
+    const auto it = find_option(WALL_MODEL_TYPES, where + ".model", model);
     WallModelParameters & P = spec.parameters;
     P.type = it->second;
     P.kappa = find_real_or(table, "kappa", dim::none, rtype(P.kappa));

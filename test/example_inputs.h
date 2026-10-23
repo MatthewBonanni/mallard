@@ -103,7 +103,7 @@ inline Input example_under_preset(const ExampleCase & c, uint64_t n_steps, int64
         }
     }
 
-    if (const auto type = toml::find_or<std::string>(input, "initialize", "type", "constant");
+    if (const auto type = find_value_or<std::string>(input, "initialize", "type", "constant");
         type == "restart" || type == "remap") {
         if (!c.init.empty()) {
             table["initialize"] = parse_toml(c.init);
