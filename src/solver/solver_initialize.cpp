@@ -47,11 +47,8 @@ static const std::unordered_map<std::string, InitType> INIT_TYPES = {
 };
 
 void Solver::init_solution() {
-    const std::string type_str = toml::find_or<std::string>(input, "initialize", "type", "constant");
-    auto it = INIT_TYPES.find(type_str);
-    if (it == INIT_TYPES.end()) {
-        throw unknown_option(INIT_TYPES, "initialize.type", type_str);
-    }
+    const std::string type_str = find_value_or<std::string>(input, "initialize", "type", "constant");
+    auto it = find_option(INIT_TYPES, "initialize.type", type_str);
     initial_state = type_str;
     if (it->second == InitType::CONSTANT) {
         init_solution_constant();
@@ -74,7 +71,7 @@ void Solver::init_solution_restart() {
     if (!input.at("initialize").contains("file")) {
         throw std::runtime_error("Missing file for initialization: restart.");
     }
-    const std::string file = toml::find<std::string>(input, "initialize", "file");
+    const std::string file = find_value<std::string>(input, "initialize", "file");
     // Restart files hold cells in global order, so any number of ranks can read
     // them; each rank reads only its local cells
     const bool distributed = mesh->n_global_cells > 0;
@@ -90,7 +87,7 @@ void Solver::init_solution_restart() {
 void Solver::init_solution_remap() {
     remap::Report report;
     const RestartData restart = remap::remap_restart(input, *mesh, mesh->axisymmetric, report);
-    const std::string file = toml::find<std::string>(input, "initialize", "file");
+    const std::string file = find_value<std::string>(input, "initialize", "file");
     apply_restart(restart, file, false);
     initial_state = "remap of " + file + " (step " + std::to_string(step) + ", t = " + logging::real(double(t)) +
                     "): " + remap::describe(report, restart.names);
@@ -446,7 +443,7 @@ void Solver::init_solution_analytical() {
     if (rho_in + p_in + T_in != 2) {
         throw std::runtime_error("Exactly two of rho, p, and T must be specified for initialization: analytical.");
     }
-    const uint32_t n_sub = toml::find_or<uint32_t>(input, "initialize", "n_subdivisions", (N_DIM == 2) ? 4 : 1);
+    const uint32_t n_sub = find_value_or<uint32_t>(input, "initialize", "n_subdivisions", (N_DIM == 2) ? 4 : 1);
 
     InitialStateText text;
     for (const auto & u : init.at("u").as_array()) text.u.push_back(quantity_or_expression(u, "initialize.u", dim::velocity));
@@ -473,7 +470,7 @@ void Solver::init_solution_analytical() {
             text.fractions.emplace_back(key + "." + name, quantity_or_expression(value, name, dim::none));
         }
         if (init.contains("balance")) {
-            const std::string name = toml::find<std::string>(init, "balance");
+            const std::string name = find_value<std::string>(init, "balance");
             balance = mixture_model->mechanism().species_index(name);
             if (balance < 0) throw InputError("initialize.balance: no species " + name + " in the mechanism.");
         }

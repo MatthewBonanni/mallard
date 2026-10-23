@@ -100,15 +100,16 @@ target_include_directories(MallardCore PUBLIC
 )
 target_link_libraries(MallardCore PUBLIC Kokkos::kokkos Threads::Threads)
 
-# Input (common/input.h) records the keys setup reads; a toml::value copy would not
+# Input (common/input.h) records the keys setup reads, and its accessors how it reads
+# them (type, default); a toml::value copy, toml::find or toml::find_or would not
 file(GLOB_RECURSE mallard_sources CONFIGURE_DEPENDS
     ${CMAKE_SOURCE_DIR}/src/*.h ${CMAKE_SOURCE_DIR}/src/*.cpp ${CMAKE_SOURCE_DIR}/test/*.h ${CMAKE_SOURCE_DIR}/test/*.cpp)
 list(FILTER mallard_sources EXCLUDE REGEX "/src/external/|/src/common/input\\.")
 foreach(source ${mallard_sources})
-    file(STRINGS ${source} toml_values REGEX "toml::(value|table)([^_a-z]|$)")
+    file(STRINGS ${source} toml_values REGEX "toml::(value|table)([^_a-z]|$)|toml::find(_or)?<")
     if(toml_values)
         file(READ ${source} content)
-        string(REGEX MATCH "toml::(value|table)[^_a-z]" type "${content}")
+        string(REGEX MATCH "toml::(value|table)[^_a-z]|toml::find(_or)?<" type "${content}")
         string(FIND "${content}" "${type}" offset)
         string(REGEX REPLACE ".$" "" type "${type}")
         string(SUBSTRING "${content}" 0 ${offset} before)
@@ -117,8 +118,9 @@ foreach(source ${mallard_sources})
         math(EXPR line "${line} + 1")
         file(RELATIVE_PATH path ${CMAKE_SOURCE_DIR} ${source})
         message(FATAL_ERROR "${path}:${line} uses ${type}; Mallard reads input only as Input (src/common/input.h) so "
-                            "that unused keys are detected: replace toml::value with Input and toml::table with "
-                            "Input::table_type.")
+                            "that unused keys are detected: replace toml::value with Input, toml::table with "
+                            "Input::table_type, find_value<T> with find_value<T> and find_value_or<T> with "
+                            "find_value_or<T>.")
     endif()
 endforeach()
 # The TENO setup computes every table with the same operations on the host

@@ -14,9 +14,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <iomanip>
 #include <limits>
+#include <mutex>
 #include <regex>
 #include <sstream>
 #include <unordered_map>
@@ -55,6 +57,26 @@ std::shared_ptr<std::ofstream> open_csv(const std::string & file, bool resume, c
     if (!out->good()) throw std::runtime_error("Could not open " + file + ".");
     if (!resume) *out << header << "\n";
     return out;
+}
+
+/**
+ * @brief Runs f, the file work of rank 0, so that every rank throws if it
+ *        throws and none waits in a later collective. Ranks that each run
+ *        alone (not distributed) do not communicate.
+ */
+template <typename F>
+void on_root(bool distributed, F && f) {
+    std::exception_ptr error;
+    if (comm::is_root()) {
+        try {
+            f();
+        } catch (...) {
+            error = std::current_exception();
+        }
+    }
+    const uint32_t failed = distributed ? comm::allreduce(uint32_t(error != nullptr), comm::Op::MAX) : 0;
+    if (error) std::rethrow_exception(error);
+    if (failed) throw std::runtime_error("[[probes]]: rank 0 could not set up the probe files.");
 }
 
 const std::unordered_map<std::string, Reduction> REDUCTIONS = {
@@ -318,13 +340,14 @@ std::vector<double> Probes::Samples::gather() const {
 void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std::string> & species_names,
                   bool resume) {
     resumed = resume;
+    distributed = mesh.n_global_cells > 0;
     if (!input.contains("probes")) return;
-    const auto entries = toml::find<std::vector<Input>>(input, "probes");
+    const auto entries = find_value<std::vector<Input>>(input, "probes");
     for (const auto & entry : entries) {
         auto probe_ptr = std::make_unique<Probe>();
         Probe & p = *probe_ptr;
         if (!entry.contains("name")) throw InputError("probes: every probe needs a name.");
-        p.name = toml::find<std::string>(entry, "name");
+        p.name = find_value<std::string>(entry, "name");
         const std::string key = "probes[name = \"" + p.name + "\"]";
         for (const auto & other : probes) {
             if (other->name == p.name) throw InputError(key + ": name is used twice.");
@@ -336,17 +359,19 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
             p.time_interval = find_real(entry, "time_interval", dim::time);
             if (!(p.time_interval > 0.0_r)) throw InputError(key + ".time_interval must be positive.");
         } else {
-            p.interval = toml::find_or<uint64_t>(entry, "interval", 1);
+            p.interval = find_value_or<uint64_t>(entry, "interval", 1);
             if (p.interval == 0) throw InputError(key + ".interval must be positive.");
         }
 
-        const std::string sampling = toml::find_or<std::string>(entry, "sampling", "cell");
+        const std::string sampling = find_value_or<std::string>(entry, "sampling", "cell");
+        record_options(key + ".sampling", {"cell", "point"});
         if (sampling == "point") {
             p.sampling = Sampling::POINT;
         } else if (sampling != "cell") {
             throw InputError(key + ".sampling = \"" + sampling + "\" is not one of: cell, point.");
         }
-        const std::string format = toml::find_or<std::string>(entry, "format", "csv");
+        const std::string format = find_value_or<std::string>(entry, "format", "csv");
+        record_options(key + ".format", {"csv", "hdf5", "vtp"});
         if (format == "hdf5") {
 #ifndef Mallard_HAS_HDF5
             throw InputError(key + ".format = \"hdf5\" needs a build with -DMallard_ENABLE_HDF5=ON.");
@@ -358,21 +383,20 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
             throw InputError(key + ".format = \"" + format + "\" is not one of: csv, hdf5, vtp.");
         }
         const char * extension = p.format == Format::CSV ? ".csv" : p.format == Format::HDF5 ? ".h5" : ".pvd";
-        p.file = toml::find_or<std::string>(entry, "file", "probe_" + p.name + extension);
-        p.write_samples = toml::find_or<bool>(entry, "samples", true);
-        for (const auto & r : toml::find_or<std::vector<std::string>>(entry, "reductions", {})) {
-            const auto it = REDUCTIONS.find(r);
-            if (it == REDUCTIONS.end()) throw unknown_option(REDUCTIONS, key + ".reductions", r);
+        p.file = find_value_or<std::string>(entry, "file", "probe_" + p.name + extension);
+        p.write_samples = find_value_or<bool>(entry, "samples", true);
+        for (const auto & r : find_value_or<std::vector<std::string>>(entry, "reductions", {})) {
+            const auto it = find_option(REDUCTIONS, key + ".reductions", r);
             if (std::find(p.reductions.begin(), p.reductions.end(), it->second) != p.reductions.end()) {
                 throw InputError(key + ".reductions: \"" + r + "\" is listed twice.");
             }
             p.reductions.push_back(it->second);
         }
         if (!p.write_samples && p.reductions.empty()) throw InputError(key + ": samples = false needs reductions.");
-        p.reductions_file = toml::find_or<std::string>(entry, "reductions_file", "probe_" + p.name + "_reductions.csv");
+        p.reductions_file = find_value_or<std::string>(entry, "reductions_file", "probe_" + p.name + "_reductions.csv");
 
         if (!entry.contains("variables")) throw InputError(key + ": variables not specified.");
-        p.variables = expand_variables(toml::find<std::vector<std::string>>(entry, "variables"), species_names, key);
+        p.variables = expand_variables(find_value<std::vector<std::string>>(entry, "variables"), species_names, key);
         if (p.variables.empty()) throw InputError(key + ".variables is empty.");
         std::vector<int32_t> h_codes;
         for (const auto & v : p.variables) h_codes.push_back(CellSampler::code(v, species_names, key + ".variables"));
@@ -390,7 +414,7 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
             p.quadrature.locate(mesh, p.geometry.quad_points, static_cast<uint32_t>(h_codes.size()));
         }
 
-        if (comm::is_root()) {
+        on_root(distributed, [&] {
             if (p.write_samples && p.format == Format::CSV) {
                 std::string header = "step,t,point";
                 for (size_t d = 0; d < N_DIM; d++) header += std::string(",") + "xyz"[d];
@@ -408,6 +432,7 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
             if (p.write_samples && p.format == Format::HDF5 && output_files_enabled() &&
                 !(resume && std::filesystem::exists(p.file))) {
                 make_parent(p.file);
+                const std::lock_guard<std::mutex> lock(h5::mutex());
                 // Room for a provenance attribute of any size (annotate)
                 h5::Handle fapl(H5Pcreate(H5P_FILE_ACCESS), H5Pclose, "H5Pcreate");
                 h5::Handle fcpl(h5::file_creation(fapl, std::numeric_limits<size_t>::max()), H5Pclose, "H5Pcreate");
@@ -451,7 +476,7 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
                 for (const auto & v : p.variables) extensible("fields/" + v, H5T_IEEE_F64LE, n);
             }
 #endif
-        }
+        });
         probes.push_back(std::move(probe_ptr));
     }
 }
@@ -479,49 +504,59 @@ std::string Probes::set_time_interval(const std::string & name, rtype value, rty
     return "no [[probes]] named " + name;
 }
 
-void Probes::resume(uint64_t step, rtype t) {
+void Probes::resume([[maybe_unused]] uint64_t step, rtype t) {
     const rtype tol = precision_tol(1e-9, 1e-5);
     for (auto & pp : probes) {
         Probe & p = *pp;
         if (p.time_interval > 0.0_r) {
             p.n_written = static_cast<uint64_t>(std::floor(t / p.time_interval + tol)) + 1;
         }
-        if (!comm::is_root() || !p.write_samples || !output_files_enabled()) continue;
-        if (p.format == Format::VTP && std::filesystem::exists(p.file)) {
-            // Keep the series up to the restart time
-            std::ifstream in(p.file);
-            std::stringstream ss;
-            ss << in.rdbuf();
-            const std::string text = ss.str();
-            const std::regex entry_re("timestep=\"([^\"]+)\" file=\"([^\"]+)\"");
-            for (auto it = std::sregex_iterator(text.begin(), text.end(), entry_re); it != std::sregex_iterator(); ++it) {
-                const double t_entry = std::stod((*it)[1].str());
-                if (t_entry <= static_cast<double>(t) * (1.0 + 1e-12)) p.series.emplace_back(t_entry, (*it)[2].str());
-            }
-        }
-#ifdef Mallard_HAS_HDF5
-        if (p.format == Format::HDF5 && std::filesystem::exists(p.file)) {
-            // Drop the rows after the restart step
-            h5::Handle file(H5Fopen(p.file.c_str(), H5F_ACC_RDWR, H5P_DEFAULT), H5Fclose, "opening " + p.file);
-            {
-                h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /");
-                file_format::check_version(file_format::PROBE_OUTPUT, p.file, h5::read_int_attribute(root, "version"));
-            }
-            const uint64_t n_rows = h5::n_rows(file, "step");
-            const std::vector<uint64_t> steps = h5::read_rows<uint64_t>(file, "step", 0, n_rows, 1, H5P_DEFAULT);
-            uint64_t keep = 0;
-            while (keep < steps.size() && steps[keep] <= step) keep++;
-            std::vector<std::string> names = {"step", "time"};
-            for (const auto & v : p.variables) names.push_back("fields/" + v);
-            for (const auto & name : names) {
-                h5::Handle dset(H5Dopen2(file, name.c_str(), H5P_DEFAULT), H5Dclose, "opening " + name);
-                hsize_t dims[2] = {keep, p.geometry.nodes.size()};
-                h5::check(H5Dset_extent(dset, dims), "H5Dset_extent");
-            }
-        }
-#endif
     }
-    (void)step;
+    if (!output_files_enabled()) return;
+    on_root(distributed, [&] {
+        for (auto & pp : probes) {
+            Probe & p = *pp;
+            if (!p.write_samples) continue;
+            if (p.format == Format::VTP && std::filesystem::exists(p.file)) {
+                // Keep the series up to the restart time
+                std::ifstream in(p.file);
+                std::stringstream ss;
+                ss << in.rdbuf();
+                const std::string text = ss.str();
+                const std::regex entry_re("timestep=\"([^\"]+)\" file=\"([^\"]+)\"");
+                for (auto it = std::sregex_iterator(text.begin(), text.end(), entry_re); it != std::sregex_iterator();
+                     ++it) {
+                    const double t_entry = std::stod((*it)[1].str());
+                    if (t_entry <= static_cast<double>(t) * (1.0 + 1e-12)) {
+                        p.series.emplace_back(t_entry, (*it)[2].str());
+                    }
+                }
+            }
+#ifdef Mallard_HAS_HDF5
+            if (p.format == Format::HDF5 && std::filesystem::exists(p.file)) {
+                // Drop the rows after the restart step
+                const std::lock_guard<std::mutex> lock(h5::mutex());
+                h5::Handle file(H5Fopen(p.file.c_str(), H5F_ACC_RDWR, H5P_DEFAULT), H5Fclose, "opening " + p.file);
+                {
+                    h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /");
+                    file_format::check_version(file_format::PROBE_OUTPUT, p.file,
+                                               h5::read_int_attribute(root, "version"));
+                }
+                const uint64_t n_rows = h5::n_rows(file, "step");
+                const std::vector<uint64_t> steps = h5::read_rows<uint64_t>(file, "step", 0, n_rows, 1, H5P_DEFAULT);
+                uint64_t keep = 0;
+                while (keep < steps.size() && steps[keep] <= step) keep++;
+                std::vector<std::string> names = {"step", "time"};
+                for (const auto & v : p.variables) names.push_back("fields/" + v);
+                for (const auto & name : names) {
+                    h5::Handle dset(H5Dopen2(file, name.c_str(), H5P_DEFAULT), H5Dclose, "opening " + name);
+                    hsize_t dims[2] = {keep, p.geometry.nodes.size()};
+                    h5::check(H5Dset_extent(dset, dims), "H5Dset_extent");
+                }
+            }
+#endif
+        }
+    });
 }
 
 bool Probes::Probe::due(uint64_t step, rtype t) const {
@@ -602,6 +637,7 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields) {
 void Probes::Probe::write_hdf5([[maybe_unused]] uint64_t step, [[maybe_unused]] rtype t,
                                [[maybe_unused]] const std::vector<double> & values) const {
 #ifdef Mallard_HAS_HDF5
+    const std::lock_guard<std::mutex> lock(h5::mutex());
     h5::Handle h5file(H5Fopen(file.c_str(), H5F_ACC_RDWR, H5P_DEFAULT), H5Fclose, "opening " + file);
     const uint64_t n = geometry.nodes.size();
     const size_t n_cols = n_evaluated();
@@ -722,6 +758,7 @@ void Probes::annotate(const std::string & csv_line) {
         if (p->out_reductions) *p->out_reductions << csv_line << std::flush;
 #ifdef Mallard_HAS_HDF5
         if (p->write_samples && p->format == Format::HDF5 && std::filesystem::exists(p->file)) {
+            const std::lock_guard<std::mutex> lock(h5::mutex());
             h5::Handle file(H5Fopen(p->file.c_str(), H5F_ACC_RDWR, H5P_DEFAULT), H5Fclose, "opening " + p->file);
             h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /");
             if (H5Aexists(root, "provenance") > 0) h5::check(H5Adelete(root, "provenance"), "H5Adelete");

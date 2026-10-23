@@ -141,6 +141,7 @@ class Probes {
         };
         std::vector<std::unique_ptr<Probe>> probes;
         bool resumed = false;
+        bool distributed = false;  // samples split over the ranks, which set up and write together
 };
 
 #endif // PROBES_H

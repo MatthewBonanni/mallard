@@ -28,7 +28,7 @@ namespace {
 void usage(const char * program) {
     std::cerr << "Usage: " << program << " -i input.toml [Kokkos options, e.g. --kokkos-num-threads=8]\n"
               << "       " << program << " --check input.toml [--ranks N] [--throughput CELLS_PER_S | --steps N]"
-              << " [--quality-vtu PREFIX]\n"
+              << " [--quality-vtu PREFIX] [--catalog KEYS.json]\n"
               << "       " << program << " ctl <run-dir> status | checkpoint | stop | set <key>=<value> ...\n"
               << "       " << program << " new <template> [directory]   (" << program << " new --list)\n"
               << "       " << program << " upgrade-input old.toml > new.toml\n"
@@ -103,6 +103,8 @@ int main(int argc, char* argv[]) {
                 options.steps = std::stoull(argv[++i]);
             } else if (strcmp(argv[i], "--quality-vtu") == 0 && has_value) {
                 options.quality_file = argv[++i];
+            } else if (strcmp(argv[i], "--catalog") == 0 && has_value) {
+                options.catalog_file = argv[++i];
             } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
                 usage(argv[0]);
                 return 0;

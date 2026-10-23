@@ -14,10 +14,14 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <iomanip>
+#include <map>
 #include <memory>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -25,6 +29,20 @@
 
 #include "common_typedef.h"
 #include "units.h"
+
+/**
+ * @brief How setup reads a key, as the accessors below record it: the type it
+ *        asks for, its physical dimension, and the value it uses when the key is
+ *        absent, or that it is required. The key catalog (Mallard --check
+ *        --catalog) is made of these.
+ */
+struct KeyUse {
+    std::string type;       // bool, integer, number, string, array, or empty if not recorded
+    std::string dimension;  // of a number: "pressure (kg m^-1 s^-2)", or empty
+    std::string unit;       // of a plain number, when not SI (Dimension::plain_unit)
+    std::string fallback;   // the value used when absent, as TOML would write it
+    bool required = false;
+};
 
 /**
  * @brief A TOML table that records which keys the program looked up, present
@@ -40,6 +58,7 @@ class InputTable : public std::unordered_map<K, V> {
     public:
         struct Lookups {
             std::set<K> keys;
+            std::map<K, KeyUse> uses;
             bool all = false;
         };
 
@@ -62,6 +81,10 @@ class InputTable : public std::unordered_map<K, V> {
         const Base & entries() const { return *this; }
         Base & entries() { return *this; }
         const Lookups & lookups_made() const { return *lookups; }
+        void record_use(const K & k, KeyUse use) const {
+            note(k);
+            lookups->uses[k] = std::move(use);
+        }
         void forget_lookups() { lookups = std::make_shared<Lookups>(); }
 
     private:
@@ -123,18 +146,119 @@ struct InputError : std::runtime_error {
     Diagnostic diagnostic;  // empty key for errors given as text only
 };
 
+/** @brief Record the values a key accepts, by its path ("numerics.riemann_solver"; indices are dropped). */
+void record_options(const std::string & key, std::vector<std::string> names);
+
 /**
- * @brief Error for a value not among the accepted options, listing them.
+ * @brief The key catalog of an input after setup read it: every key setup looked
+ *        up (by path, without array indices), whether the input set it, and its
+ *        KeyUse and accepted values where the accessors recorded them, as JSON.
+ */
+std::string key_catalog(const Input & input);
+
+/**
+ * @brief The entry of options named by value, or an error listing the accepted
+ *        values; records them for the key catalog.
  */
 template <typename T>
-InputError unknown_option(const std::unordered_map<std::string, T> & options, const std::string & key,
-                          const std::string & value) {
+auto find_option(const std::unordered_map<std::string, T> & options, const std::string & key,
+                 const std::string & value) {
     std::vector<std::string> names;
     for (const auto & entry : options) names.push_back(entry.first);
     std::sort(names.begin(), names.end());
-    std::string list;
-    for (const auto & name : names) list += (list.empty() ? "" : ", ") + name;
-    return InputError(key + " = \"" + value + "\" is not one of: " + list + ".");
+    record_options(key, names);
+    const auto it = options.find(value);
+    if (it == options.end()) {
+        std::string list;
+        for (const auto & name : names) list += (list.empty() ? "" : ", ") + name;
+        throw InputError(key + " = \"" + value + "\" is not one of: " + list + ".");
+    }
+    return it;
+}
+
+namespace input_detail {
+
+template <typename T> struct is_vector : std::false_type {};
+template <typename T, typename A> struct is_vector<std::vector<T, A>> : std::true_type {};
+
+template <typename T> std::string type_name() {
+    if constexpr (std::is_same_v<T, bool>) return "bool";
+    else if constexpr (std::is_integral_v<T>) return "integer";
+    else if constexpr (std::is_floating_point_v<T>) return "number";
+    else if constexpr (std::is_convertible_v<T, std::string>) return "string";
+    else if constexpr (is_vector<T>::value) return "array";
+    else return "";
+}
+
+template <typename T> std::string toml_text(const T & x) {
+    if constexpr (std::is_same_v<T, bool>) {
+        return x ? "true" : "false";
+    } else if constexpr (std::is_integral_v<T>) {
+        return std::to_string(x);
+    } else if constexpr (std::is_floating_point_v<T>) {
+        std::ostringstream os;
+        os << std::setprecision(15) << x;
+        std::string t = os.str();
+        if (t.find_first_of(".eEn") == std::string::npos) t += ".0";
+        return t;
+    } else if constexpr (std::is_convertible_v<T, std::string>) {
+        return "\"" + std::string(x) + "\"";
+    } else if constexpr (is_vector<T>::value) {
+        std::string t;
+        for (const auto & item : x) t += (t.empty() ? "" : ", ") + toml_text(item);
+        return "[" + t + "]";
+    } else {
+        return "";
+    }
+}
+
+/** @brief The table holding the key, if every enclosing table is in the input. */
+inline const InputTable<std::string, Input> * table_of(const Input & v) {
+    return v.is_table() ? &v.as_table() : nullptr;
+}
+inline const InputTable<std::string, Input> * table_of(const Input & v, const std::string & table) {
+    return v.is_table() && v.contains(table) && v.at(table).is_table() ? &v.at(table).as_table() : nullptr;
+}
+
+/** @brief The KeyUse of a real-valued key of this dimension, with this fallback text or required. */
+inline KeyUse real_use(const std::string & type, const Dimension & dimension, std::string fallback, bool required) {
+    KeyUse use{type, "", "", std::move(fallback), required};
+    if (!dimension.same_as(dim::none)) use.dimension = dimension.describe();
+    if (std::string(dimension.plain_unit) != "SI") use.unit = dimension.plain_unit;
+    return use;
+}
+
+} // namespace input_detail
+
+/**
+ * Lookups of typed values, the way setup reads every key that is not a real
+ * number: like toml::find and toml::find_or (whose semantics they keep), and
+ * recording the type and the fallback (or that the key is required) for the
+ * key catalog. src/CMakeLists.txt rejects toml::find and toml::find_or.
+ */
+template <typename T, typename... Tables>
+T find_value(const Input & v, const Tables &... keys) {
+    static_assert(sizeof...(Tables) == 1 || sizeof...(Tables) == 2, "find_value(v, [table,] key)");
+    const std::string path[] = {keys...};
+    const auto * table = sizeof...(Tables) == 1 ? input_detail::table_of(v) : input_detail::table_of(v, path[0]);
+    if (table) table->record_use(path[sizeof...(Tables) - 1], {input_detail::type_name<T>(), "", "", "", true});
+    return toml::find<T>(v, keys...);
+}
+
+template <typename T>
+T find_value_or(const Input & v, const std::string & key, const T & fallback) {
+    if (const auto * table = input_detail::table_of(v)) {
+        table->record_use(key, {input_detail::type_name<T>(), "", "", input_detail::toml_text(fallback), false});
+    }
+    return toml::find_or<T>(v, key, fallback);
+}
+
+template <typename T>
+T find_value_or(const Input & v, const std::string & table_name, const std::string & key, const T & fallback) {
+    if (const auto * table = input_detail::table_of(v, table_name)) {
+        table->record_use(key, {input_detail::type_name<T>(), "", "", input_detail::toml_text(fallback), false});
+    }
+    return toml::find_or<T>(v, table_name, key, fallback);
 }
 
 /**
@@ -143,7 +267,9 @@ InputError unknown_option(const std::unordered_map<std::string, T> & options, co
  * with a unit ("1 atm", "300 K", "5 mm"), converted on read; a unit of the
  * wrong dimension is an error naming the key and the expected dimension.
  * Integers count as numbers: TOML tells them from floats, and
- * toml::find_or<double> would silently fall back to its default for `cfl = 1`.
+ * find_value_or<double> would silently fall back to its default for `cfl = 1`.
+ * The find_ helpers record each key's dimension, default or requiredness for
+ * the key catalog.
  */
 
 /** @brief The value of v in the units the key reads (SI unless the dimension says otherwise). */
@@ -166,22 +292,34 @@ inline double as_double(const Input & v, const std::string & key, const Dimensio
 }
 
 inline double find_double(const Input & v, const std::string & key, const Dimension & dimension) {
+    if (const auto * t = input_detail::table_of(v)) {
+        t->record_use(key, input_detail::real_use("number", dimension, "", true));
+    }
     if (!v.contains(key)) throw InputError("missing " + key + ".");
     return as_double(v.at(key), key, dimension);
 }
 
 inline double find_double_or(const Input & v, const std::string & key, const Dimension & dimension,
                              const double fallback) {
+    if (const auto * t = input_detail::table_of(v)) {
+        t->record_use(key, input_detail::real_use("number", dimension, input_detail::toml_text(fallback), false));
+    }
     return v.contains(key) ? as_double(v.at(key), key, dimension) : fallback;
 }
 
 inline rtype find_real(const Input & v, const std::string & key, const Dimension & dimension) {
+    if (const auto * t = input_detail::table_of(v)) {
+        t->record_use(key, input_detail::real_use("number", dimension, "", true));
+    }
     if (!v.contains(key)) throw InputError("missing " + key + ".");
     return as_real(v.at(key), key, dimension);
 }
 
 inline rtype find_real(const Input & v, const std::string & table, const std::string & key,
                        const Dimension & dimension) {
+    if (const auto * t = input_detail::table_of(v, table)) {
+        t->record_use(key, input_detail::real_use("number", dimension, "", true));
+    }
     if (!v.contains(table)) throw InputError("missing [" + table + "].");
     if (!v.at(table).contains(key)) throw InputError("missing " + table + "." + key + ".");
     return as_real(v.at(table).at(key), table + "." + key, dimension);
@@ -189,11 +327,17 @@ inline rtype find_real(const Input & v, const std::string & table, const std::st
 
 inline rtype find_real_or(const Input & v, const std::string & key, const Dimension & dimension,
                           const rtype fallback) {
+    if (const auto * t = input_detail::table_of(v)) {
+        t->record_use(key, input_detail::real_use("number", dimension, input_detail::toml_text(fallback), false));
+    }
     return v.contains(key) ? as_real(v.at(key), key, dimension) : fallback;
 }
 
 inline rtype find_real_or(const Input & v, const std::string & table, const std::string & key,
                           const Dimension & dimension, const rtype fallback) {
+    if (const auto * t = input_detail::table_of(v, table)) {
+        t->record_use(key, input_detail::real_use("number", dimension, input_detail::toml_text(fallback), false));
+    }
     if (!v.contains(table) || !v.at(table).contains(key)) return fallback;
     return as_real(v.at(table).at(key), table + "." + key, dimension);
 }
@@ -205,12 +349,18 @@ inline std::vector<rtype> as_real_vector(const Input & v, const std::string & ke
 }
 
 inline std::vector<rtype> find_real_vector(const Input & v, const std::string & key, const Dimension & dimension) {
+    if (const auto * t = input_detail::table_of(v)) {
+        t->record_use(key, input_detail::real_use("array", dimension, "", true));
+    }
     if (!v.contains(key)) throw InputError("missing " + key + ".");
     return as_real_vector(v.at(key), key, dimension);
 }
 
 inline std::vector<rtype> find_real_vector(const Input & v, const std::string & table, const std::string & key,
                                            const Dimension & dimension) {
+    if (const auto * t = input_detail::table_of(v, table)) {
+        t->record_use(key, input_detail::real_use("array", dimension, "", true));
+    }
     if (!v.contains(table)) throw InputError("missing [" + table + "].");
     if (!v.at(table).contains(key)) throw InputError("missing " + table + "." + key + ".");
     return as_real_vector(v.at(table).at(key), table + "." + key, dimension);

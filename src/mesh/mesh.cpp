@@ -36,18 +36,13 @@ Mesh::~Mesh() {
 }
 
 void Mesh::init(const Input & input) {
-    std::string type_str = toml::find_or<std::string>(input, "mesh", "type", "file");
-    typename std::unordered_map<std::string, MeshType>::const_iterator it = MESH_TYPES.find(type_str);
-    if (it == MESH_TYPES.end()) {
-        throw unknown_option(MESH_TYPES, "mesh.type", type_str);
-    } else {
-        set_type(it->second);
-    }
+    std::string type_str = find_value_or<std::string>(input, "mesh", "type", "file");
+    set_type(find_option(MESH_TYPES, "mesh.type", type_str)->second);
 
     const std::vector<PeriodicPair> periodic = periodic_pairs(input);
     const MeshTransform transform = mesh_transform(input);
     if (get_type() == MeshType::FROM_FILE) {
-        std::string filename = toml::find_or<std::string>(input, "mesh", "filename", "mesh.msh");
+        std::string filename = find_value_or<std::string>(input, "mesh", "filename", "mesh.msh");
         this->init_file(filename, periodic, transform);
         return;
     }
@@ -55,13 +50,13 @@ void Mesh::init(const Input & input) {
         init_from_block(annulus_block(input, 0, 1), periodic);
         return;
     }
-    uint32_t Nx = toml::find_or<uint32_t>(input, "mesh", "Nx", 100);
-    uint32_t Ny = toml::find_or<uint32_t>(input, "mesh", "Ny", 100);
+    uint32_t Nx = find_value_or<uint32_t>(input, "mesh", "Nx", 100);
+    uint32_t Ny = find_value_or<uint32_t>(input, "mesh", "Ny", 100);
     rtype Lx = find_real_or(input, "mesh", "Lx", dim::length, 1.0);
     rtype Ly = find_real_or(input, "mesh", "Ly", dim::length, 1.0);
     const Stretching stretching = mesh_stretching(input);
     if constexpr (N_DIM == 3) {
-        const uint32_t Nz = toml::find_or<uint32_t>(input, "mesh", "Nz", 100);
+        const uint32_t Nz = find_value_or<uint32_t>(input, "mesh", "Nz", 100);
         const rtype Lz = find_real_or(input, "mesh", "Lz", dim::length, 1.0);
         if (get_type() == MeshType::CARTESIAN_TRI || get_type() == MeshType::WEDGE) {
             throw std::runtime_error("Mesh type " + type_str + " is 2D only.");
@@ -94,9 +89,9 @@ void Mesh::init(const Input & input) {
 std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const Input & input) {
     std::vector<PeriodicPair> pairs;
     if (input.contains("periodic")) {
-        const auto entries = toml::find<std::vector<Input>>(input, "periodic");
+        const auto entries = find_value<std::vector<Input>>(input, "periodic");
         for (const auto & entry : entries) {
-            const auto zones = toml::find<std::vector<std::string>>(entry, "zones");
+            const auto zones = find_value<std::vector<std::string>>(entry, "zones");
             const bool rotation = entry.contains("angle");
             if (zones.size() != 2 || rotation == entry.contains("translation")) {
                 throw InputError("[[periodic]] needs zones = [A, B] and either a translation or an angle.");
@@ -134,14 +129,14 @@ std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const Input & input) {
         }
     }
     if (!input.contains("mesh") || !input.at("mesh").contains("periodic")) return pairs;
-    const std::string type = toml::find_or<std::string>(input, "mesh", "type", "file");
+    const std::string type = find_value_or<std::string>(input, "mesh", "type", "file");
     if (type == "file") {
         throw InputError("[mesh] periodic applies to generated meshes; pair the zones of a mesh file with "
                          "[[periodic]].");
     }
     if (type == "annulus") {
         // theta: the sector's start and end; z (3D): back and front
-        for (const std::string & dir : toml::find<std::vector<std::string>>(input, "mesh", "periodic")) {
+        for (const std::string & dir : find_value<std::vector<std::string>>(input, "mesh", "periodic")) {
             PeriodicPair pair;
             if (dir == "theta") {
                 pair = PeriodicPair{"start", "end"};
@@ -165,7 +160,7 @@ std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const Input & input) {
                         find_real_or(input, "mesh", "Ly", dim::length, 1.0),
                         find_real_or(input, "mesh", "Lz", dim::length, 1.0)};
     const char * zones[3][2] = {{"left", "right"}, {"bottom", "top"}, {"back", "front"}};
-    for (const std::string & dir : toml::find<std::vector<std::string>>(input, "mesh", "periodic")) {
+    for (const std::string & dir : find_value<std::vector<std::string>>(input, "mesh", "periodic")) {
         const int d = (dir == "x") ? 0 : (dir == "y") ? 1 : (dir == "z") ? 2 : -1;
         if (d < 0 || d >= N_DIM) {
             throw std::runtime_error("[mesh] periodic: unknown direction " + dir + " (one of x, y" +

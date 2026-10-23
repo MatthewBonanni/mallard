@@ -1,0 +1,2 @@
+- A run with an HDF5 `[[probes]]` file and HDF5 `[[write_data]]` output (written in the background by default) could crash: the probe and the background writer called the HDF5 library at the same time. Every HDF5 call now takes one shared lock.
+- On several ranks, a probe file that rank 0 cannot create or continue (for example one from a newer Mallard on a restart) now stops every rank with the error, instead of leaving the others waiting. `ProbesTest` runs on 1 to 4 ranks in CI.

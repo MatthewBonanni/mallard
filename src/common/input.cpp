@@ -10,6 +10,7 @@
 #include <cctype>
 #include <iomanip>
 #include <map>
+#include <mutex>
 #include <sstream>
 
 namespace {
@@ -121,7 +122,104 @@ void collect_unused(const Input & v, const std::string & path, const Lookups & l
     }
 }
 
+std::map<std::string, std::vector<std::string>> & recorded_options() {
+    static std::map<std::string, std::vector<std::string>> options;
+    return options;
+}
+
+std::map<std::string, std::pair<std::string, std::string>> & recorded_dimensions() {
+    static std::map<std::string, std::pair<std::string, std::string>> dimensions;
+    return dimensions;
+}
+
+std::mutex & options_mutex() {
+    static std::mutex m;
+    return m;
+}
+
+std::string json_string(const std::string & s) {
+    std::string out = "\"";
+    for (const char c : s) {
+        if (c == '"' || c == '\\') out += '\\';
+        if (static_cast<unsigned char>(c) < 0x20) continue;
+        out += c;
+    }
+    return out + "\"";
+}
+
+struct CatalogEntry {
+    KeyUse use;
+    bool set = false;
+};
+
+void collect_catalog(const Input & v, const std::string & path, std::map<std::string, CatalogEntry> & out) {
+    if (v.is_table()) {
+        const auto & table = v.as_table();
+        for (const auto & key : table.lookups_made().keys) {
+            auto & entry = out[join(path, key)];
+            const auto use = table.lookups_made().uses.find(key);
+            if (use != table.lookups_made().uses.end() && !use->second.type.empty()) entry.use = use->second;
+            if (table.entries().count(key)) entry.set = true;
+        }
+        for (const auto & [key, value] : table.entries()) collect_catalog(value, join(path, key), out);
+    } else if (v.is_array()) {
+        for (const auto & item : v.as_array()) collect_catalog(item, path, out);
+    }
+}
+
 } // namespace
+
+/** @brief The dimension of a real value read under this key path (values read directly, not through find_). */
+static void record_dimension(const std::string & key, const Dimension & dimension) {
+    if (dimension.same_as(dim::none)) return;
+    std::lock_guard<std::mutex> lock(options_mutex());
+    recorded_dimensions()[without_indices(key)] = {dimension.describe(),
+                                                  std::string(dimension.plain_unit) == "SI" ? "" : dimension.plain_unit};
+}
+
+void record_options(const std::string & key, std::vector<std::string> names) {
+    std::lock_guard<std::mutex> lock(options_mutex());
+    recorded_options()[without_indices(key)] = std::move(names);
+}
+
+std::string key_catalog(const Input & input) {
+    std::map<std::string, CatalogEntry> keys;
+    collect_catalog(input, "", keys);
+    std::map<std::string, std::vector<std::string>> options;
+    {
+        std::lock_guard<std::mutex> lock(options_mutex());
+        options = recorded_options();
+        for (auto & [path, entry] : keys) {
+            const auto d = recorded_dimensions().find(path);
+            if (d == recorded_dimensions().end() || !entry.use.dimension.empty()) continue;
+            entry.use.dimension = d->second.first;
+            entry.use.unit = d->second.second;
+        }
+    }
+    std::string out = "{\n";
+    bool first = true;
+    for (const auto & [path, entry] : keys) {
+        out += first ? "" : ",\n";
+        first = false;
+        out += "  " + json_string(path) + ": {\"set\": " + (entry.set ? "true" : "false");
+        if (!entry.use.type.empty()) {
+            out += ", \"type\": " + json_string(entry.use.type);
+            if (!entry.use.dimension.empty()) out += ", \"dimension\": " + json_string(entry.use.dimension);
+            if (!entry.use.unit.empty()) out += ", \"unit\": " + json_string(entry.use.unit);
+            out += entry.use.required ? ", \"required\": true" : ", \"default\": " + json_string(entry.use.fallback);
+        }
+        const auto allowed = options.find(path);
+        if (allowed != options.end()) {
+            out += ", \"values\": [";
+            for (size_t i = 0; i < allowed->second.size(); i++) {
+                out += (i ? ", " : "") + json_string(allowed->second[i]);
+            }
+            out += "]";
+        }
+        out += "}";
+    }
+    return out + "\n}\n";
+}
 
 Input parse_input(const std::string & filename) {
     Input input = toml::parse<InputConfig>(filename);
@@ -200,6 +298,7 @@ std::string number_text(const double x) {
 } // namespace
 
 double quantity(const Input & v, const std::string & key, const Dimension & dimension) {
+    record_dimension(key, dimension);
     if (v.is_floating()) return v.as_floating();
     if (v.is_integer()) return static_cast<double>(v.as_integer());
     if (!v.is_string()) {
@@ -227,6 +326,7 @@ double quantity(const Input & v, const std::string & key, const Dimension & dime
 }
 
 std::string quantity_or_expression(const Input & v, const std::string & key, const Dimension & dimension) {
+    record_dimension(key, dimension);
     // Numbers as the solver reads them (in its precision), as expressions always have
     if (!v.is_string()) return number_text(static_cast<double>(as_real(v, key, dimension)));
     return has_unit(v.as_string()) ? number_text(quantity(v, key, dimension)) : v.as_string();
