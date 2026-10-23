@@ -5,16 +5,6 @@ probe samples, which faces are curved. This page explains the shapes they share
 and how Mallard puts them on a mesh. Every key, with its default, is in the
 [input reference](../input.md#regions).
 
-- [Who uses what](#who-uses-what)
-- [Coordinates and units](#coordinates-and-units)
-- [Regions](#regions): [primitives](#primitives), [booleans](#booleans),
-  [transforms](#transforms), [smooth edges](#smooth-edges),
-  [implicit regions](#implicit-regions), [on a mesh](#regions-on-a-mesh)
-- [Point sets and curves](#point-sets-and-curves): [placement](#where-the-samples-go),
-  [sampling](#cell-averages-or-point-values)
-- [Boundary zones](#boundary-zones) and [surfaces](#surfaces)
-- [Reading probe output](#reading-probe-output)
-
 ## Who uses what
 
 | Feature | Geometry | Guide |

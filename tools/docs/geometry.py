@@ -296,7 +296,9 @@ def transforms(P, args):
         ("all, in order", "scale, rotate,\nthen translate",
          dict(scale=(1.4, 0.8), rotate=-30, pivot=(0.45, 0.3), translate=(0.25, 0.35)), (0.45, 0.3)),
     ]
-    fig, axes = plt.subplots(1, 5, figsize=(12.0, 3.4), gridspec_kw=dict(wspace=0.06))
+    fig, grid_axes = plt.subplots(2, 3, figsize=(9.0, 6.6), gridspec_kw=dict(wspace=0.06, hspace=0.32))
+    axes = grid_axes.flat
+    key = grid_axes[1, 2]
     for ax, (title, keys, t, pivot) in zip(axes, panels):
         for v in np.arange(-0.2, 1.21, 0.2):
             ax.plot([v, v], [-0.08, 1.05], color=P["faint"], lw=0.8, zorder=0)
@@ -318,7 +320,20 @@ def transforms(P, args):
         ax.set_xlim(-0.3, 1.25)
         ax.set_ylim(-0.1, 1.05)
         ax.set_title(title, fontsize=13)
-        label(ax, 0.47, -0.16, keys, P, size=10, color=P["muted"], va="top", linespacing=1.3, **MONO)
+        label(ax, 0.47, -0.16, keys, P, size=11, color=P["muted"], va="top", linespacing=1.3, **MONO)
+    bare(key)
+    key.set_xlim(0, 1)
+    key.set_ylim(0, 1)
+    key.add_patch(Polygon([(0.05, 0.78), (0.2, 0.78), (0.2, 0.9), (0.05, 0.9)], closed=True, facecolor="none",
+                          edgecolor=P["muted"], lw=1.3, ls="--"))
+    key.add_patch(Polygon([(0.05, 0.56), (0.2, 0.56), (0.2, 0.68), (0.05, 0.68)], closed=True,
+                          facecolor=P["teal"], alpha=0.55, edgecolor=P["fg"], lw=1.6))
+    key.plot(0.125, 0.4, marker="+", color=P["flame"], ms=13, mew=2.2)
+    key.add_patch(FancyArrowPatch((0.05, 0.18), (0.2, 0.18), arrowstyle="-|>", mutation_scale=11, color=P["flame"],
+                                  lw=1.3))
+    for y, text in ((0.84, "the region as written"), (0.62, "after the transforms"), (0.4, "pivot"),
+                    (0.18, "where one corner goes")):
+        label(key, 0.27, y, text, P, size=12, ha="left")
     return fig
 
 
