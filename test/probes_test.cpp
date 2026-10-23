@@ -581,7 +581,9 @@ TEST(ProbesTest, WallPolylinesFollowCurvedWallsWithTheFluidOnTheirLeft) {
                 double turn_ab = std::atan2(b.at("y"), b.at("x")) - std::atan2(a.at("y"), a.at("x"));
                 turn_ab = std::remainder(turn_ab, 2.0 * std::numbers::pi);
                 EXPECT_GT(turn * turn_ab, 0.0) << zone << " face " << i;
-                if (i + 1 < rows.size()) EXPECT_GT(b.at("s"), a.at("s"));
+                if (i + 1 < rows.size()) {
+                    EXPECT_GT(b.at("s"), a.at("s"));
+                }
                 // The normal points out of the fluid: outward at the outer wall, inward at the inner one
                 EXPECT_GT(turn * (a.at("nx") * a.at("x") + a.at("ny") * a.at("y")), 0.0);
                 EXPECT_NEAR(a.at("MASS_FLUX"), 0.0, 1e-12);
