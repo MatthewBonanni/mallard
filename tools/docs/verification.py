@@ -43,10 +43,7 @@ FILTER = ":".join([
 ])
 
 # Studies that fail their bounds for a known, filed reason: (section, method, cells) -> issue number
-KNOWN = {
-    ("boundaries", "Forced channel, transmissive sides", "tetrahedra"): 420,
-    ("boundaries", "Forced channel, transmissive sides", "pyramids"): 420,
-}
+KNOWN = {}
 
 SECTIONS = ["time", "reconstruction", "advection", "viscous", "boundaries", "axisymmetric", "curved", "remap",
             "mixtures"]
