@@ -12,9 +12,10 @@
 #   threads, cost         run.sh's default thread count, and the size and
 #                         run time for the README and the summary
 #   mesh, init            commands of mesh.sh and init.sh, which run.sh calls
-#   mesh_creates,         when the file they create is missing; tools/X.py
-#   init_creates          names a script of tools/, copied into the case
-#                         with the tools it imports
+#   mesh_creates,         when the file they create is missing; tools/DIR/X.py
+#   init_creates          names a script of tools/, copied into the case's
+#                         tools/ with the modules of tools/mallard it imports;
+#                         X.py alone, a script of the example listed in files
 #   post, results         commands of post.sh, and what they produce;
 #                         $(last PREFIX) is the newest snapshot PREFIX_N
 #                         (.vtu, or .pvtu of an MPI run)
@@ -116,9 +117,10 @@ name = "sod"
 group = "shocks"
 summary = "Sod shock tube: shock, contact and rarefaction against the exact solution"
 source = "examples/sod"
+files = ["input.toml", "plot_sod.py"]
 dim = 2
 cost = "800 cells, about a second on 4 threads"
-post = ["tools/plot_sod.py sod.png $(last solut/sod)"]
+post = ["plot_sod.py sod.png $(last solut/sod)"]
 results = "sod.png, the density against the exact solution"
 quick = ["mesh.Nx = 100"]
 
@@ -129,7 +131,7 @@ summary = "Mach 3 shock running into an entropy wave, the test for high-order sc
 source = "examples/shu_osher"
 dim = 2
 cost = "800 cells, seconds on 4 threads"
-post = ["tools/plot_vtu.py $(last solut/shu_osher) shu_osher.png --line"]
+post = ["tools/post/plot_vtu.py $(last solut/shu_osher) shu_osher.png --line"]
 results = "shu_osher.png, the density along the tube"
 quick = ["mesh.Nx = 100"]
 
@@ -141,8 +143,8 @@ source = "examples/riemann_2d"
 dim = 2
 threads = 8
 cost = "320,000 triangles, about 20 minutes on 8 threads"
-post = ["tools/plot_vtu.py $(last solut/riemann) riemann.png",
-        "tools/animate.py solut riemann"]
+post = ["tools/post/plot_vtu.py $(last solut/riemann) riemann.png",
+        "tools/post/animate.py solut riemann"]
 results = "riemann.png, the final density, and the animation riemann.mp4"
 quick = ["mesh.Nx = 50", "mesh.Ny = 50", "run.t_stop = 0.1", "write_data.time_interval = 0.05"]
 
@@ -154,8 +156,8 @@ source = "examples/riemann_2d_quads"
 dim = 2
 threads = 8
 cost = "160,000 quadrilaterals, about 9 minutes on 6 threads"
-post = ["tools/plot_vtu.py $(last solut/riemann) riemann.png",
-        "tools/animate.py solut riemann"]
+post = ["tools/post/plot_vtu.py $(last solut/riemann) riemann.png",
+        "tools/post/animate.py solut riemann"]
 results = "riemann.png, the final density, and the animation riemann.mp4"
 quick = ["mesh.Nx = 50", "mesh.Ny = 50", "run.t_stop = 0.1", "write_data.time_interval = 0.05"]
 
@@ -167,8 +169,8 @@ source = "examples/double_mach"
 dim = 2
 threads = 8
 cost = "460,000 triangles, about an hour on 12 threads"
-post = ["tools/plot_vtu.py $(last solut/dmr) dmr.png",
-        "tools/animate.py solut dmr --title \"Double Mach reflection\" --xlim 0 3"]
+post = ["tools/post/plot_vtu.py $(last solut/dmr) dmr.png",
+        "tools/post/animate.py solut dmr --title \"Double Mach reflection\" --xlim 0 3"]
 results = "dmr.png, the final density, and the animation dmr.mp4"
 quick = ["mesh.Nx = 96", "mesh.Ny = 24", "run.t_stop = 0.02", "write_data.time_interval = 0.01"]
 
@@ -179,7 +181,7 @@ summary = "Mach 1.76 flow over an 8 degree ramp: oblique shock against theory"
 source = "examples/wedge"
 dim = 2
 cost = "19,200 quadrilaterals, minutes on 4 threads"
-post = ["tools/plot_vtu.py $(last solut/wedge) wedge.png --var P"]
+post = ["tools/post/plot_vtu.py $(last solut/wedge) wedge.png --var P"]
 results = "wedge.png, the pressure of the last snapshot"
 quick = ["mesh.Nx = 40", "mesh.Ny = 30", "run.t_stop = 0.002"]
 
@@ -191,7 +193,7 @@ source = "examples/explosion_3d"
 dim = 3
 threads = 8
 cost = "262,144 cells, about 5 minutes on 8 threads"
-post = ["tools/plot_vtu.py $(last solut/explosion) explosion.png --slice z --at 0"]
+post = ["tools/post/plot_vtu.py $(last solut/explosion) explosion.png --slice z --at 0"]
 results = "explosion.png, the density on the symmetry plane z = 0"
 quick = ["mesh.Nx = 16", "mesh.Ny = 16", "mesh.Nz = 16", "run.t_stop = 0.05"]
 
@@ -202,7 +204,7 @@ summary = "Sedov-Taylor point blast against the exact similarity solution"
 source = "examples/sedov_3d"
 dim = 3
 cost = "2.1M cells, about 1.5 hours on four A100s"
-post = ["tools/sedov.py solut --energy 1"]
+post = ["tools/setup/sedov.py solut --energy 1"]
 results = "sedov.png, the shock radius and density profile against the exact solution"
 quick = ["mesh.Nx = 16", "mesh.Ny = 16", "mesh.Nz = 16", "run.t_stop = 0.2"]
 
@@ -211,12 +213,13 @@ name = "sphere_mach3"
 group = "shocks"
 summary = "Mach 3 flow over a sphere on tetrahedra: bow-shock standoff"
 source = "examples/sphere_mach3"
+files = ["input.toml", "make_sphere_mesh.py"]
 dim = 3
 cost = "800,000 tetrahedra, about 1.5 hours on four A100s"
-mesh = ["tools/make_sphere_mesh.py sphere.msh"]
+mesh = ["make_sphere_mesh.py sphere.msh"]
 mesh_creates = "sphere.msh"
-quick_mesh = ["tools/make_sphere_mesh.py sphere.msh --h-wall 0.08 --h-shock 0.08 --h-far 0.4"]
-post = ["tools/plot_vtu.py $(last slices/z0) sphere.png --var P"]
+quick_mesh = ["make_sphere_mesh.py sphere.msh --h-wall 0.08 --h-shock 0.08 --h-far 0.4"]
+post = ["tools/post/plot_vtu.py $(last slices/z0) sphere.png --var P"]
 results = "sphere.png, the pressure on the symmetry plane z = 0"
 quick = ["run.t_stop = 0.04"]
 
@@ -225,14 +228,15 @@ name = "mallard"
 group = "shocks"
 summary = "Mach 8 flow over a flying mallard"
 source = "examples/mallard"
+files = ["input.toml", "make_mallard_mesh.py"]
 dim = 2
 threads = 8
 cost = "1.07M triangles, about 1.5 hours on a GPU"
-mesh = ["tools/make_mallard_mesh.py mallard.msh"]
+mesh = ["make_mallard_mesh.py mallard.msh"]
 mesh_creates = "mallard.msh"
-quick_mesh = ["tools/make_mallard_mesh.py mallard.msh --h-wall 0.02 --h-far 0.1 --growth 0.5"]
-post = ["tools/plot_vtu.py $(last solut/mallard) mallard.png",
-        "tools/animate.py solut mallard --var MACH --cmap inferno_r --title \"Mach 8 mallard\""]
+quick_mesh = ["make_mallard_mesh.py mallard.msh --h-wall 0.02 --h-far 0.1 --growth 0.5"]
+post = ["tools/post/plot_vtu.py $(last solut/mallard) mallard.png",
+        "tools/post/animate.py solut mallard --var MACH --cmap inferno_r --title \"Mach 8 mallard\""]
 results = "mallard.png, the final density, and the animation mallard.mp4"
 quick = ["run.t_stop = 0.01", "write_data.time_interval = 0.005"]
 
@@ -243,10 +247,11 @@ name = "poiseuille_pipe"
 group = "axisymmetric"
 summary = "Hagen-Poiseuille flow in a round pipe against the exact profile"
 source = "examples/poiseuille_pipe"
+files = ["input.toml", "plot_poiseuille.py"]
 dim = 2
 threads = 1
 cost = "128 quadrilaterals, a minute on one thread"
-post = ["tools/plot_poiseuille.py poiseuille.png $(last solut/pipe)"]
+post = ["plot_poiseuille.py poiseuille.png $(last solut/pipe)"]
 results = "poiseuille.png, the axial velocity against the exact profile"
 quick = ["run.t_stop = 1.0", "write_data.time_interval = 1.0"]
 
@@ -255,9 +260,10 @@ name = "noh_axisymmetric"
 group = "axisymmetric"
 summary = "Spherical Noh implosion on the meridian plane"
 source = "examples/noh_axisymmetric"
+files = ["input.toml", "plot_noh.py"]
 dim = 2
 cost = "40,000 quadrilaterals, about 2 minutes on 4 threads"
-post = ["tools/plot_noh.py noh.png $(last solut/noh)"]
+post = ["plot_noh.py noh.png $(last solut/noh)"]
 results = "noh.png, the density against the exact solution"
 quick = ["mesh.Nx = 40", "mesh.Ny = 40", "run.t_stop = 0.1"]
 
@@ -268,7 +274,7 @@ summary = "Sedov-Taylor blast as an axisymmetric run, against the exact solution
 source = "examples/sedov_axisymmetric"
 dim = 2
 cost = "65,536 quadrilaterals, 5 minutes on one A100"
-post = ["tools/sedov.py solut --energy 1"]
+post = ["tools/setup/sedov.py solut --energy 1"]
 results = "sedov.png, the shock radius and density profile against the exact solution"
 quick = ["mesh.Nx = 48", "mesh.Ny = 48", "run.t_stop = 0.2"]
 
@@ -277,12 +283,13 @@ name = "sphere_axisymmetric"
 group = "axisymmetric"
 summary = "Steady flow past a sphere at Re = 100: drag, separation, wake length"
 source = "examples/sphere_axisymmetric"
+files = ["input.toml", "plot_sphere_axisymmetric.py"]
 dim = 2
 cost = "16,384 quadrilaterals, about 30 minutes on one A100"
-mesh = ["tools/make_cylinder_mesh.py sphere.msh --half --n-theta 128 --n-r 128 --r-far 25 --dr0 0.01"]
+mesh = ["tools/mesh/make_cylinder_mesh.py sphere.msh --half --n-theta 128 --n-r 128 --r-far 25 --dr0 0.01"]
 mesh_creates = "sphere.msh"
-quick_mesh = ["tools/make_cylinder_mesh.py sphere.msh --half --n-theta 32 --n-r 24 --r-far 10 --dr0 0.05"]
-post = ["tools/plot_sphere_axisymmetric.py sphere.png solut --re 100"]
+quick_mesh = ["tools/mesh/make_cylinder_mesh.py sphere.msh --half --n-theta 32 --n-r 24 --r-far 10 --dr0 0.05"]
+post = ["plot_sphere_axisymmetric.py sphere.png solut --re 100"]
 results = "sphere.png, drag history, separation angle and wake length against the literature"
 quick = ["run.t_stop = 2.0", "write_data.time_interval = 1.0"]
 
@@ -293,10 +300,11 @@ name = "viscous_shock_tube"
 group = "viscous"
 summary = "Daru-Tenaud viscous shock tube: shock / boundary-layer interaction"
 source = "examples/viscous_shock_tube"
+files = ["input.toml", "plot_viscous_shock_tube.py"]
 dim = 2
 cost = "500,000 quadrilaterals; use a GPU, or Nx = 500, Ny = 250 for 20 minutes on 6 threads"
-post = ["tools/plot_viscous_shock_tube.py $(last solut/vst) vst.png"]
-quick_post = ["tools/plot_vtu.py $(last solut/vst) vst.png"]
+post = ["plot_viscous_shock_tube.py $(last solut/vst) vst.png"]
+quick_post = ["tools/post/plot_vtu.py $(last solut/vst) vst.png"]
 results = "vst.png, the density and wall density against the reference"
 quick = ["mesh.Nx = 100", "mesh.Ny = 50", "run.t_stop = 0.05"]
 
@@ -307,11 +315,11 @@ summary = "Flow past a cylinder at Re = 100: vortex shedding"
 source = "examples/cylinder"
 dim = 2
 cost = "49,152 quadrilaterals, about 50 minutes on a laptop CPU"
-mesh = ["tools/make_cylinder_mesh.py cylinder.msh --n-theta 384 --n-r 128 --r-far 25 --dr0 0.01"]
+mesh = ["tools/mesh/make_cylinder_mesh.py cylinder.msh --n-theta 384 --n-r 128 --r-far 25 --dr0 0.01"]
 mesh_creates = "cylinder.msh"
-quick_mesh = ["tools/make_cylinder_mesh.py cylinder.msh --n-theta 64 --n-r 24 --r-far 10 --dr0 0.05"]
-post = ["tools/plot_vtu.py $(last solut/cylinder) cylinder.png --var U_Y",
-        "tools/animate.py solut cylinder --glob \"cylinder_*\" --var VORTICITY --cmap RdBu_r --xlim -2 12 --ylim -4 4 --title \"Cylinder, Re = 100\""]
+quick_mesh = ["tools/mesh/make_cylinder_mesh.py cylinder.msh --n-theta 64 --n-r 24 --r-far 10 --dr0 0.05"]
+post = ["tools/post/plot_vtu.py $(last solut/cylinder) cylinder.png --var U_Y",
+        "tools/post/animate.py solut cylinder --glob \"cylinder_*\" --var VORTICITY --cmap RdBu_r --xlim -2 12 --ylim -4 4 --title \"Cylinder, Re = 100\""]
 results = "cylinder.png, the transverse velocity, and the animation cylinder.mp4 (forces in solut/forces_cylinder.csv)"
 quick = ["run.t_stop = 2.0", "write_data.time_interval = 1.0"]
 
@@ -320,13 +328,14 @@ name = "sphere_re300"
 group = "viscous"
 summary = "Flow past a sphere at Re = 300: hairpin vortex shedding, prisms and tetrahedra"
 source = "examples/sphere_re300"
+files = ["input.toml", "make_sphere_re300_mesh.py", "plot_sphere_re300.py"]
 dim = 3
 cost = "850,000 cells, about 4.7 hours on four A100s"
-mesh = ["tools/make_sphere_re300_mesh.py sphere.msh"]
+mesh = ["make_sphere_re300_mesh.py sphere.msh"]
 mesh_creates = "sphere.msh"
-quick_mesh = ["tools/make_sphere_re300_mesh.py sphere.msh --h-wall 0.3 --dn0 0.05 --n-layers 2 --h-near 0.4 --h-wake 0.6 --h-far 6 --x-min -6 --x-max 10 --half-width 6"]
-post = ["tools/plot_sphere_re300.py solut/forces_sphere.csv --t-start 450"]
-quick_post = ["tools/plot_vtu.py $(last solut/sphere) sphere.png --var U"]
+quick_mesh = ["make_sphere_re300_mesh.py sphere.msh --h-wall 0.3 --dn0 0.05 --n-layers 2 --h-near 0.4 --h-wake 0.6 --h-far 6 --x-min -6 --x-max 10 --half-width 6"]
+post = ["plot_sphere_re300.py solut/forces_sphere.csv --t-start 450"]
+quick_post = ["tools/post/plot_vtu.py $(last solut/sphere) sphere.png --var U"]
 results = "sphere_re300.png, drag and lift with the Strouhal number against the literature"
 quick = ["run.t_stop = 0.5", "write_data.time_interval = 0.5"]
 
@@ -337,9 +346,10 @@ name = "taylor_green_3d"
 group = "turbulence"
 summary = "Taylor-Green vortex at Re = 1600: transition and decay, against DNS"
 source = "examples/taylor_green_3d"
+files = ["input.toml", "plot_taylor_green.py"]
 dim = 3
 cost = "262,144 cells, about an hour on one A100"
-post = ["tools/plot_taylor_green.py integrals.csv"]
+post = ["plot_taylor_green.py integrals.csv"]
 results = "tgv.png, kinetic energy and dissipation rate"
 quick = ["mesh.Nx = 16", "mesh.Ny = 16", "mesh.Nz = 16", "run.t_stop = 0.5"]
 
@@ -352,7 +362,7 @@ summary = "Reactive shock tube in H2-O2-Ar: ignition behind the reflected shock"
 source = "examples/reactive_shock_tube"
 dim = 2
 cost = "2,400 cells, minutes on 4 threads"
-post = ["tools/plot_vtu.py $(last solut/rst) rst.png --line --var T"]
+post = ["tools/post/plot_vtu.py $(last solut/rst) rst.png --line --var T"]
 results = "rst.png, the temperature along the tube"
 quick = ["mesh.Nx = 300", "run.t_stop = 2.0e-5"]
 
@@ -364,7 +374,7 @@ source = "examples/flame_outflow"
 dim = 2
 threads = 3
 cost = "60 cells, about 2 minutes on 3 threads"
-post = ["tools/plot_vtu.py $(last solut/flame) flame.png --line --var T"]
+post = ["tools/post/plot_vtu.py $(last solut/flame) flame.png --line --var T"]
 results = "flame.png, the temperature profile"
 quick = ["run.t_stop = 1.0e-5"]
 

@@ -893,3 +893,17 @@ TEST(ForcedInletTest, ConditionsOfTKeepTheStepGraph) {
     }
 #endif
 }
+
+TEST(ForcedInletTest, ExpressionThatLoopsForeverIsAnInputError) {
+    // Evaluated on the device at the stage times, a loop that never ends past
+    // t = 0.01 stops at the iteration limit and the run reports it
+    try {
+        forced_run({"T(t) loops", "type = \"upt\"\nu = " + std::string(N_DIM == 2 ? "[0.5, 0.0]" : "[0.5, 0.0, 0.0]") +
+                                      "\np = 1.0\nT = \"var i := 0; while (t > 0.01 and i >= 0) { i += 1 }; 1 + t\"\n",
+                    "", UNIT_GAS},
+                   0.004);
+        FAIL() << "no error";
+    } catch (const InputError & e) {
+        EXPECT_NE(std::string(e.what()).find("loop iterations"), std::string::npos) << e.what();
+    }
+}

@@ -6,17 +6,17 @@
 # coflows at the same velocity, pressure outlets at y, z = 7.5 mm. Reference:
 # Cantera's CounterflowDiffusionFlame (the axisymmetric similarity
 # solution), reference/strain.csv and K711.csv from
-# tools/counterflow_reference.py. Hexahedra of 57 um along x through the
+# examples/counterflow_diffusion/counterflow_reference.py. Hexahedra of 57 um along x through the
 # flame (15 per FWHM of the temperature profile), 229 um across near the
 # axis. Make the mesh and the initial state (Cantera's solution with radial
 # velocity r V(x)) first, from this directory; this rewrites this file
 # without this header:
 #
-#   python ../../tools/counterflow_setup.py reference/U2.csv . --cells-per-width 15
+#   python counterflow_setup.py reference/U2.csv . --cells-per-width 15
 #
 # then run, and compare on the stagnation line with
 #
-#   python ../../tools/plot_counterflow.py counterflow --run "U_o = 2 m/s" . --history --still 5e-3
+#   python plot_counterflow.py counterflow --run "U_o = 2 m/s" . --history --still 5e-3
 #
 # Results (README.md): steady after about 4 / K_ox; local strain rate K_ox =
 # 711 1/s (Cantera 730 at the same nozzle velocities) and peak temperature

@@ -111,7 +111,7 @@ The ghost depends on the interior state, as `farfield`'s does:
 
 The `nozzle` example is a planar converging-diverging nozzle with inlet and
 exit 1.6 throat heights, fed at `p0`, `T0`. The back pressure `0.75 p0` puts
-a normal shock in the diverging part. `tools/plot_nozzle.py` compares the
+a normal shock in the diverging part. `examples/nozzle/plot_nozzle.py` compares the
 section averages with the quasi-one-dimensional solution (`--figure` redraws
 this figure):
 
@@ -201,7 +201,7 @@ fixed velocity.
 ![A closed duct fed through a mass-flow inlet and heated: the mass in the duct grows by exactly mdot t, while upt's drifts](../images/guide/mass_flow_held-light.svg#gh-light-mode-only)
 ![A closed duct fed through a mass-flow inlet and heated: the mass in the duct grows by exactly mdot t, while upt's drifts](../images/guide/mass_flow_held-dark.svg#gh-dark-mode-only)
 
-`examples/heated_duct` (`tools/plot_heated_duct.py`):
+`examples/heated_duct` (`examples/heated_duct/plot_heated_duct.py`):
 
 - **Steady duct.** On 200 cells, the inlet pressure is within 1e-5 and the
   exit temperature within 1e-6 of Rayleigh flow.

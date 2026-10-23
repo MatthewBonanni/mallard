@@ -25,7 +25,7 @@ from figstyle import bare, label
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
-from mallard_vtu import read_vtu_cells  # noqa: E402
+from mallard.vtu import read_vtu_cells  # noqa: E402
 
 PHYSICS = '[physics]\ntype = "euler"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n'
 

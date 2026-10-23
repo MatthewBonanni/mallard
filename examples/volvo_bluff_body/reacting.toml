@@ -2,7 +2,7 @@
 # propane-air flame of Sjunnesson et al. (LDA 1991, CARS 1992) at the
 # conditions of the AIAA Model Validation for Propulsion workshop.
 # Geometry, inflow turbulence and numerics as cold.toml, on a coarser mesh
-# (tools/make_volvo_mesh.py --ds 2e-3 --nz 40: 0.66M hexahedra, 2 mm = D / 20
+# (examples/volvo_bluff_body/make_volvo_mesh.py --ds 2e-3 --nz 40: 0.66M hexahedra, 2 mm = D / 20
 # in the flame region; the cost of the reacting mixture, about 15 times that
 # of air per cell and step, rules out the cold flow's 1.25 mm). Design and
 # results: docs/design/les.md, section 8.3.
@@ -37,10 +37,10 @@
 # ~470,000 steps for 0.2 s.
 #
 # Run:
-#   python ../../tools/make_volvo_mesh.py volvo.msh --ds 2e-3 --nz 40
+#   python make_volvo_mesh.py volvo.msh --ds 2e-3 --nz 40
 #   mpirun -n 4 ../../build3d/src/mallard -i reacting.toml --kokkos-map-device-id-by=mpi_rank
-#   python ../../tools/volvo.py profiles stats/reacting_<last>.pvtu --u-bulk 17.3 --temperature --out reacting.npz
-#   python ../../tools/volvo.py plot reacting.npz --kind reacting --exp reference --out reacting.png
+#   python volvo.py profiles stats/reacting_<last>.pvtu --u-bulk 17.3 --temperature --out reacting.npz
+#   python volvo.py plot reacting.npz --kind reacting --exp reference --out reacting.png
 
 [run]
 t_stop = 0.2

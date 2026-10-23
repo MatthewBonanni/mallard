@@ -19,7 +19,7 @@ The jets are momentum-balanced (`rho_f U_f^2 = rho_o U_o^2`). A finite jet
 only approximates the similarity solution, so the comparison is made where
 it holds best, on the stagnation line, at matched strain rate.
 
-The mesh (`tools/counterflow_setup.py`) is a tensor product of hexahedra:
+The mesh (`examples/counterflow_diffusion/counterflow_setup.py`) is a tensor product of hexahedra:
 along `x`, 15 cells per FWHM of the temperature profile through the flame
 and mixing layer (57 um at `U_o = 2 m/s`), growing by 8% per cell towards
 the nozzles; across, four times that out to `r = 2 mm`, then growing. The
@@ -30,15 +30,15 @@ run starts from Cantera's solution at the same nozzle velocities.
 From this directory (3D build):
 
 ```sh
-python ../../tools/counterflow_setup.py reference/U2.csv . --cells-per-width 15
+python counterflow_setup.py reference/U2.csv . --cells-per-width 15
 mpirun -n 1 ../../build/src/mallard -i input.toml
-python ../../tools/plot_counterflow.py counterflow --run "U_o = 2 m/s" . --history --still 5e-3
+python plot_counterflow.py counterflow --run "U_o = 2 m/s" . --history --still 5e-3
 ```
 
 The first command writes the mesh, the initial state and `input.toml`
 (replacing this one, without its header). 46,464 cells; 4 / `K_ox` = 5.5 ms
 is 312,000 steps, 75 minutes on one A100. The references are made by
-`tools/counterflow_reference.py`: the strain sweep (`strain.csv`), full
+`examples/counterflow_diffusion/counterflow_reference.py`: the strain sweep (`strain.csv`), full
 solutions at given oxidizer velocities (`--profile 2` writes `U2.csv`, the
 initial state) and at given strain rates (`--match 711` writes `K711.csv`,
 the profile overlay).

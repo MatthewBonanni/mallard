@@ -142,7 +142,8 @@ class TimedBoundaryFields {
         void apply(const Kokkos::View<rtype> & time, const Kokkos::View<BoundaryCondition *> & bcs,
                    const Gas & gas) const;
 
-        /** @brief Throw the InputError of the first number that was not positive, if any was. */
+        /** @brief Throw the InputError of the first number that was not positive, or of an expression stopped
+         *         at the iteration limit, if any. */
         void check() const;
 
     private:
@@ -164,6 +165,7 @@ class TimedBoundaryFields {
         Kokkos::View<uint32_t *> composition_species;
         Kokkos::View<uint32_t *> composition_program;
         expr::ProgramTable<> programs;
+        std::vector<const expr::Program *> program_list;  // host, in the table's order
         Kokkos::View<int32_t> error_face;   // 1 + the first face whose number was not positive, 0 if none
         Kokkos::View<double[3]> error;      // its time, value and slot
 };
@@ -187,6 +189,9 @@ class TimedInletTargets {
         bool empty() const { return host_chars.empty(); }
 
         void fill(double t, const Kokkos::View<rtype *[N_DIM]> & target) const;
+
+        /** @brief Throw the InputError of an expression stopped at the iteration limit, if any was. */
+        void check() const;
 
     private:
         std::vector<std::shared_ptr<expr::Program>> host_programs;

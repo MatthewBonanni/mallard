@@ -7,7 +7,7 @@
 #   ../../build/src/mallard -i input.toml
 #   ../../build/src/mallard -i closed.toml
 #   ../../build/src/mallard -i closed_upt.toml
-#   python ../../tools/plot_heated_duct.py solut/duct_000001.vtu solut/closed solut/closed_upt
+#   python plot_heated_duct.py solut/duct_000001.vtu solut/closed solut/closed_upt
 
 [run]
 t_stop = 0.08

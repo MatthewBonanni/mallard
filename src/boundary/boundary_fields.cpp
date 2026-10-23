@@ -239,6 +239,7 @@ void TimedBoundaryFields::finish() {
     Kokkos::deep_copy(composition_species, h_species);
     Kokkos::deep_copy(composition_program, h_program);
     programs = expr::ProgramTable<>(all);
+    program_list = all;
     error_face = Kokkos::View<int32_t>("timed_error_face");
     error = Kokkos::View<double[3]>("timed_error");
 }
@@ -383,6 +384,9 @@ void TimedBoundaryFields::apply(const Kokkos::View<rtype> & time, const Kokkos::
 
 void TimedBoundaryFields::check() const {
     if (faces_host.empty()) return;
+    if (const uint32_t stopped = programs.stopped(); stopped > 0) {
+        throw InputError(program_list[stopped - 1]->runaway_error());
+    }
     int32_t face = 0;
     Kokkos::deep_copy(face, error_face);
     if (face == 0) return;
@@ -446,6 +450,13 @@ void TimedInletTargets::finish() {
     std::vector<const expr::Program *> all;
     for (const auto & p : host_programs) all.push_back(p.get());
     programs = expr::ProgramTable<>(all);
+}
+
+void TimedInletTargets::check() const {
+    if (host_chars.empty()) return;
+    if (const uint32_t stopped = programs.stopped(); stopped > 0) {
+        throw InputError(host_programs[stopped - 1]->runaway_error());
+    }
 }
 
 void TimedInletTargets::fill(const double t, const Kokkos::View<rtype *[N_DIM]> & target) const {

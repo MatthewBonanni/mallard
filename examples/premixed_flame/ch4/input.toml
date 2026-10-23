@@ -7,15 +7,15 @@
 # first, from this directory (flame_reference.py computes all twenty V8
 # flames, a few minutes):
 #
-#   python ../../../tools/flame_reference.py ../reference full
-#   python ../../../tools/flame_restart.py full/ch4_phi1.0_mix_full.csv \
+#   python ../../../tools/setup/flame_reference.py ../reference full
+#   python ../../../tools/setup/flame_restart.py full/ch4_phi1.0_mix_full.csv \
 #       ../../../mechanisms/gri30.yaml gri30 20 . --flame-times 5 --outputs 50
 #
 # then run (445,000 steps, about 2 hours on one A100) and measure the flame
 # speed with
-#   python ../../../tools/flame_speed.py . 0.375759
+#   python ../../../tools/post/flame_speed.py . 0.375759
 # The consumption speed settles 1.3% below Cantera's after about two flame
-# times. tools/flame_sweep.py runs and reports the whole sweep (phi 0.6-1.4,
+# times. examples/premixed_flame/flame_sweep.py runs and reports the whole sweep (phi 0.6-1.4,
 # both transport models, 10-40 cells per thickness, two CFL numbers).
 
 [run]

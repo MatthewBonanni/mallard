@@ -304,11 +304,11 @@ std::string annotate(const std::string & text, const Manifest & m) {
 }
 
 /**
- * @brief The tools/X.py scripts a list of commands runs.
+ * @brief The scripts of tools/ (as paths in it, e.g. post/plot_vtu.py) a list of commands runs.
  */
 std::set<std::string> tool_scripts(const std::vector<std::string> & commands) {
     std::set<std::string> scripts;
-    const std::regex re(R"(tools/([A-Za-z0-9_]+\.py))");
+    const std::regex re(R"(tools/((?:[a-z]+/)?[A-Za-z0-9_]+\.py))");
     for (const auto & c : commands) {
         for (std::sregex_iterator it(c.begin(), c.end(), re), end; it != end; ++it) scripts.insert((*it)[1]);
     }
@@ -316,9 +316,10 @@ std::set<std::string> tool_scripts(const std::vector<std::string> & commands) {
 }
 
 /**
- * @brief Adds the tools the scripts import, and returns the third-party
- * Python packages they need. A tool imported only inside a function (such as
- * mallard_h5 for HDF5 snapshots) is copied, but its packages are optional.
+ * @brief Adds the tools the scripts import (the mallard package, and scripts
+ * next to them), and returns the third-party Python packages they need. The
+ * packages of a module imported only inside a function (such as mallard.h5,
+ * for HDF5 snapshots) are optional.
  */
 std::set<std::string> close_imports(const fs::path & tools, const std::vector<fs::path> & extra_scripts,
                                     std::set<std::string> & scripts) {
@@ -326,7 +327,7 @@ std::set<std::string> close_imports(const fs::path & tools, const std::vector<fs
         {"numpy", "numpy"}, {"scipy", "scipy"}, {"matplotlib", "matplotlib"}, {"gmsh", "gmsh"},
         {"cantera", "cantera"}, {"h5py", "h5py"}, {"pyvista", "pyvista"}, {"imageio", "imageio"},
         {"imageio_ffmpeg", "imageio-ffmpeg"}};
-    const std::regex re(R"(^(\s*)(?:import|from)\s+([A-Za-z0-9_]+))");
+    const std::regex re(R"(^(\s*)(?:import|from)\s+([A-Za-z0-9_]+)(?:\.([A-Za-z0-9_]+))?(?:\s+import\s+([A-Za-z0-9_]+))?)");
     std::set<std::string> packages;
     std::vector<std::pair<fs::path, bool>> pending;
     for (const auto & s : extra_scripts) pending.emplace_back(s, true);
@@ -342,9 +343,20 @@ std::set<std::string> close_imports(const fs::path & tools, const std::vector<fs
             std::smatch match;
             if (!std::regex_search(line, match, re)) continue;
             const std::string module = match[2];
-            if (fs::exists(tools / (module + ".py"))) {
-                scripts.insert(module + ".py");
-                pending.emplace_back(tools / (module + ".py"), needed && match[1].length() == 0);
+            const bool top_level = needed && match[1].length() == 0;
+            const fs::path sibling = script.parent_path() / (module + ".py");
+            if (module == "mallard") {
+                // The whole package (its modules import each other); only those imported here need their packages
+                for (const auto & entry : fs::directory_iterator(tools / "mallard")) {
+                    if (entry.path().extension() == ".py") scripts.insert("mallard/" + entry.path().filename().string());
+                }
+                for (const std::string & sub : {match[3].str(), match[4].str()}) {
+                    if (sub.empty() || !fs::exists(tools / "mallard" / (sub + ".py"))) continue;
+                    pending.emplace_back(tools / "mallard" / (sub + ".py"), top_level);
+                }
+            } else if (script.parent_path().parent_path() == tools && fs::exists(sibling)) {
+                scripts.insert(fs::relative(sibling, tools).generic_string());
+                pending.emplace_back(sibling, top_level);
             } else if (needed) {
                 for (const auto & [mod, pkg] : known) {
                     if (mod == module) packages.insert(pkg);
@@ -517,13 +529,30 @@ int create(const Manifest & m, const Template & t, const fs::path & dir, bool qu
 
     fs::create_directories(dir);
     write_file(dir / "input.toml", input_header(t, m, quick) + annotate(input, m));
-    std::vector<fs::path> local_scripts;
     for (size_t i = 1; i < t.files.size(); ++i) {
         const fs::path target = dir / t.files[i];
         fs::create_directories(target.parent_path());
-        fs::copy_file(source / t.files[i], target, fs::copy_options::overwrite_existing);
-        if (target.extension() == ".py") local_scripts.push_back(source / t.files[i]);
+        if (target.extension() == ".py") {
+            // The example's own scripts find tools/ next to them in the case
+            write_file(target, relocate(read_file(source / t.files[i])));
+        } else {
+            fs::copy_file(source / t.files[i], target, fs::copy_options::overwrite_existing);
+        }
     }
+    // The example's scripts a list of commands runs
+    const auto local_scripts = [&](const std::vector<std::string> & commands) {
+        std::vector<fs::path> scripts;
+        for (const auto & f : t.files) {
+            if (fs::path(f).extension() != ".py") continue;
+            for (const auto & c : commands) {
+                if (c.rfind(f + " ", 0) == 0 || c == f) {
+                    scripts.push_back(source / f);
+                    break;
+                }
+            }
+        }
+        return scripts;
+    };
 
     std::set<std::string> mechanisms;
     const std::regex mech_re(R"(mechanisms/([A-Za-z0-9_.-]+\.yaml))");
@@ -538,9 +567,9 @@ int create(const Manifest & m, const Template & t, const fs::path & dir, bool qu
     std::set<std::string> mesh_tools = tool_scripts(mesh);
     std::set<std::string> init_tools = tool_scripts(init);
     std::set<std::string> post_tools = tool_scripts(post);
-    auto mesh_packages = close_imports(tools, {}, mesh_tools);
-    auto init_packages = close_imports(tools, {}, init_tools);
-    auto post_packages = close_imports(tools, local_scripts, post_tools);
+    auto mesh_packages = close_imports(tools, local_scripts(mesh), mesh_tools);
+    auto init_packages = close_imports(tools, local_scripts(init), init_tools);
+    auto post_packages = close_imports(tools, local_scripts(post), post_tools);
     for (const auto & p : t.packages) {
         if (!post.empty()) post_packages.insert(p);
         if (!init.empty()) init_packages.insert(p);
@@ -550,6 +579,7 @@ int create(const Manifest & m, const Template & t, const fs::path & dir, bool qu
     all_tools.insert(post_tools.begin(), post_tools.end());
     if (!all_tools.empty()) fs::create_directories(dir / "tools");
     for (const auto & s : all_tools) {
+        fs::create_directories((dir / "tools" / s).parent_path());
         fs::copy_file(tools / s, dir / "tools" / s, fs::copy_options::overwrite_existing);
     }
     std::set<std::string> packages(mesh_packages);
@@ -558,6 +588,9 @@ int create(const Manifest & m, const Template & t, const fs::path & dir, bool qu
 
     std::vector<std::pair<std::string, std::string>> written = {
         {"input.toml", "the case; a comment above each table links to its keys"}};
+    for (size_t i = 1; i < t.files.size(); ++i) {
+        if (fs::path(t.files[i]).extension() == ".py") written.emplace_back(t.files[i], "the example's script");
+    }
     if (!mesh.empty()) {
         write_file(dir / "mesh.sh", step_script("mesh.sh", "Generates the mesh, " + t.mesh_creates + ".", mesh,
                                                 mesh_packages), true);
@@ -649,7 +682,7 @@ std::string relocate(const std::string & text) {
     for (const char * build : {"../../build3d/src/mallard", "../../build-3d/src/mallard", "../../build/src/mallard"}) {
         out = replace_all(out, build, "mallard");
     }
-    out = replace_all(out, "../../tools/", "tools/");
+    out = replace_all(out, "../../tools", "tools");
     out = replace_all(out, "../../mechanisms/", "mechanisms/");
     return out;
 }

@@ -14,7 +14,7 @@ each release reads the restart and mesh files of the earlier releases.
 Each `vX.Y.Z/` holds `<case>_000000.restart` (the initial state) and
 `<case>_000002.restart` (two steps later), and `mesh.h5`, the mesh of
 `gas.toml` from `mallard mesh convert`; `v0.8.0/curved_mesh.h5` is
-`annulus.msh` (second-order walls, from `tools/make_annulus_mesh.py
+`annulus.msh` (second-order walls, from `tools/mesh/make_annulus_mesh.py
 --n-r 2 --n-theta 8 --order 2`).
 
 Each set was written by that tag's own 2D double-precision build

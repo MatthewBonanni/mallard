@@ -7,7 +7,7 @@
 # relax it far more slowly than the forcing).
 #
 #   ../../build/src/mallard -i input.toml
-#   python ../../tools/plot_forced_inlet.py solut/duct
+#   python plot_forced_inlet.py solut/duct
 
 [run]
 t_stop = 0.02

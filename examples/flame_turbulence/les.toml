@@ -26,10 +26,10 @@
 #
 # Run (from this directory, after the DNS's hit pre-run and flame profile,
 # see input.toml):
-#   python ../../tools/flame_turbulence.py init h2_phi1.0_T300_mix_full.csv ../../mechanisms/h2o2.yaml ohmech \
+#   python flame_turbulence.py init h2_phi1.0_T300_mix_full.csv ../../mechanisms/h2o2.yaml ohmech \
 #       restart/hit_<last>.restart les_r8.restart --lt 8e-4 --ratio 8 --thicken 4 --extend 256
 #   ../../build3d/src/mallard -i les.toml --kokkos-num-threads=4
-#   python ../../tools/flame_turbulence.py analyze . <the options printed by laminar> --pdf-times 4e-4
+#   python flame_turbulence.py analyze . <the options printed by laminar> --pdf-times 4e-4
 # Cost: 7,044 steps, 46 s on one A100.
 
 [run]

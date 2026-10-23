@@ -4,9 +4,9 @@
 # h(x) = 1 + 0.6 (x / 2 - 1)^2: throat at x = 2, inlet and exit 1.6 throat
 # heights. Generate the mesh first:
 #
-#   python ../../tools/make_nozzle_mesh.py nozzle.msh
+#   python make_nozzle_mesh.py nozzle.msh
 #   ../../build/src/mallard -i input.toml
-#   python ../../tools/plot_nozzle.py solut/nozzle_000001.vtu
+#   python plot_nozzle.py solut/nozzle_000001.vtu
 #
 # The quasi-one-dimensional solution has the choked mass flow, the shock at
 # x = 3.409 (Mach 1.66 ahead of it) and a stagnation pressure ratio of 0.874
