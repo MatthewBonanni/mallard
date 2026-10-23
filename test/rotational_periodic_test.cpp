@@ -14,7 +14,10 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <numbers>
 #include <sstream>
@@ -23,6 +26,7 @@
 
 #include "gradient.h"
 #include "mesh_block.h"
+#include "mesh_quality.h"
 #include "mpi_compare.h"
 #include "partition.h"
 #include "periodic.h"
@@ -226,6 +230,30 @@ TEST(RotationalPeriodicSetup, SeamFacesMeetThroughTheRotation) {
         EXPECT_GT(into, 0.0) << "face " << f;
     }
     EXPECT_EQ(n_turned, a.n_r * (N_DIM == 3 ? a.n_z : 1));
+}
+
+TEST(RotationalPeriodicSetup, SectorHasTheMeshQualityOfTheFullAnnulus) {
+    // Quality metrics across the seam see the neighbor through the rotation:
+    // the sector's worst cells are the full annulus's
+    auto worst = [](bool full) {
+        Annulus a;
+        a.full = full;
+        Mesh mesh;
+        mesh.init(parse_toml(annulus_input(a)));
+        const MeshQuality q = mesh_quality(mesh);
+        std::array<double, MeshQuality::N_METRICS> m{};
+        for (int k = 0; k < MeshQuality::N_METRICS; k++) {
+            m[size_t(k)] = *std::max_element(q.cells[size_t(k)].begin(), q.cells[size_t(k)].end());
+        }
+        return m;
+    };
+    const auto sector = worst(false), annulus = worst(true);
+    // Angles near zero come from acos, which turns rounding into its square root
+    const double tol = 10.0 * std::sqrt(double(std::numeric_limits<rtype>::epsilon())) * 180.0 / PI;
+    for (int k = 0; k < MeshQuality::N_METRICS; k++) {
+        EXPECT_NEAR(sector[size_t(k)], annulus[size_t(k)], tol * (1.0 + annulus[size_t(k)]))
+            << MeshQuality::NAMES[size_t(k)];
+    }
 }
 
 TEST(RotationalPeriodicSetup, NodesMatchWithinTheToleranceOnly) {
