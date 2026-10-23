@@ -129,7 +129,7 @@ follow them further.
 ![Vorticity in the wake: alternating vortices shed from the cylinder](../images/tutorials/cylinder_field-dark.svg#gh-dark-mode-only)
 
 In ParaView, open `solut/cylinder.pvd` and color by `VORTICITY` to watch the street form.
-`python3 $MALLARD/tools/animate.py solut cylinder --var VORTICITY --xlim -2 16 --ylim -3 3` makes a movie
+`python3 $MALLARD/tools/post/animate.py solut cylinder --var VORTICITY --xlim -2 16 --ylim -3 3` makes a movie
 of it.
 
 ## 7. Things to try

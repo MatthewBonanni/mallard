@@ -523,7 +523,7 @@ Validation against Strang splitting (h2o2, MUSCL, HLLC, SSPRK3):
 
 - **V7 detonation** (`examples/detonation_1d`, 10 and 20 cells per ZND
   induction length). Induction length against the ZND value, first with
-  `tools/plot_detonation.py` (cell-quantized, as quoted above), then with
+  `examples/detonation_1d/plot_detonation.py` (cell-quantized, as quoted above), then with
   sub-cell shock and heat-release positions (shock at half its pressure
   rise, which puts the whole table half a cell to a cell short) and the standard
   deviation over the outputs of the second half:
@@ -641,7 +641,7 @@ Validation (MUSCL, HLLC, SSPRK3, h2o2 mechanism, default tolerances):
   of 2H2-O2-7Ar at 6.67 kPa is about 0.8 m (ZND), so a detonation started by
   a driver at a closed end stays under-supported over practical tubes (it
   ran steadily 9% below $D_\mathrm{CJ}$ over 0.6 m). The case therefore starts from the
-  ZND profile (`tools/znd_restart.py`) instead of an overdriven start. Front
+  ZND profile (`tools/setup/znd_restart.py`) instead of an overdriven start. Front
   speed against $D_\mathrm{CJ}$ = 1616.9 m/s: +0.11%, +0.01%, 0.00% at 10, 20, 40 cells
   per ZND induction length (1.525 mm); induction length -4.5%, -1.8%, +2.7%
   (one cell at 40 is 2.5%); peak pressure 174.8 kPa against the von
@@ -698,7 +698,7 @@ as two quartics joined at 750 K (`src/chemistry/radiation.h`).
   chemistry. After 0.2 s, by which `T` has fallen by more than 100 K, it
   matches RK4 on `de/dt = -q / rho` to 1e-6.
 - **1D flames against Cantera with the same model.**
-  - Setup: `tools/flame_restart.py --radiation cantera`, 12 cells per
+  - Setup: `tools/setup/flame_restart.py --radiation cantera`, 12 cells per
     thermal thickness of the adiabatic flame, MUSCL, HLLC, SSPRK3, CFL 1.2.
   - $S_c$ is the consumption speed averaged over the last third of each run.
   - The runs last 3.5 ($\phi = 0.6$), 5 ($\phi = 0.5$) or 3 ($\phi = 0.44$) flame
@@ -1112,7 +1112,7 @@ Validation: V3 at 100 species (n-dodecane/air, 20 atm, $\phi$ 0.5-2, 1000-1400 K
 of Cantera's with the dense and the sparse LU, `T` at 0.5 and 2 delays within
 1% (the mechanism's irreversible soot-precursor reactions keep it from its UV
 equilibrium, which is therefore not compared). At 1268 species
-(`tools/v3_check.py`, 10 atm, $\phi$ 1, 1000-1400 K): delays within 4e-6, about a
+(`tools/dev/v3_check.py`, 10 atm, $\phi$ 1, 1000-1400 K): delays within 4e-6, about a
 second per case on one CPU core with the sparse LU (128 s with the dense one).
 V1/V2/V6/V7 unchanged within their tolerances.
 
@@ -1409,7 +1409,7 @@ q    = -lambda grad T + sum_k h_k j_k
   4 in `ln T` over 50 points of the common thermo range). Species viscosities,
   conductivities and binary diffusion coefficients match Cantera's to 1e-6
   relative (worst seen: 2e-12) for h2o2 and GRI-3.0
-  (`tools/transport_reference.py`).
+  (`tools/dev/transport_reference.py`).
 - **Mixture rules** as Cantera's `mixture-averaged` and `unity-Lewis-number`
   models, including its floor of 1e-20 on mole fractions in the mixing rules,
   with two deviations that only matter where Cantera's formula breaks down:
@@ -1486,7 +1486,7 @@ total energy, between adiabatic walls), with hydrogen gathering at the hot
 end. Isothermal and heat-flux walls with chemistry and Soret, and with
 double flux (inert), are bitwise identical on 1-4 ranks.
 
-V8 (`examples/premixed_flame`, `tools/flame_reference.py`,
+V8 (`examples/premixed_flame`, `tools/setup/flame_reference.py`,
 `flame_restart.py`, `flame_speed.py`): a 1D strip in
 the flame's frame, started from Cantera's flame (`FreeFlame`, same mechanism
 and transport model, refined to `slope = curve = 0.02`) shifted to 6 thermal
@@ -1522,7 +1522,7 @@ All within the 2% criterion at 20 cells per `delta_T`. CFL 0.1 against 0.2
 ($\phi$ 0.6, 1.0, 1.4, both models): the consumption speeds differ by at most
 0.01%, against the 0.5% criterion, so Strang splitting adds no measurable
 error at these steps. Temperature and heat-release profiles overlay
-Cantera's (`tools/plot_flame.py`; below, $\phi = 1$, mixture-averaged): peak heat
+Cantera's (`examples/premixed_flame/plot_flame.py`; below, $\phi = 1$, mixture-averaged): peak heat
 release within 2%, temperature within 10-30 K where the profile is steepest
 (a fraction of a cell of offset). The unity-Lewis flames are consistently
 0.6-0.8% slow; Cantera's "unity-Lewis-number" model with its default
@@ -1534,7 +1534,7 @@ not a modeling difference, but its source has not been isolated.
 CH4/air with GRI-3.0 (53 species) costs about 15x more per step and needs
 4-20x more steps per flame time (slower flames, the acoustic time step):
 0.4-1.0 million steps for five flame times at 20 cells per `delta_T`. The
-sweep (`tools/flame_sweep.py`, `examples/premixed_flame/ch4` for $\phi = 1$)
+sweep (`examples/premixed_flame/flame_sweep.py`, `examples/premixed_flame/ch4` for $\phi = 1$)
 therefore runs on A100s, one 300-cell flame at 16.5 ms per step, or 5-8
 flames sharing a GPU through MPS at 13-28 ms per step each. Every flame runs
 five flame times at CFL 1 (the [time step](../numerics/overview.md#time-step)
@@ -1633,7 +1633,7 @@ Fickian relaxation, `-D^T k^2 dT_0 / (rho T_0) (exp(-a k^2 t) - exp(-D_12 k^2 t)
 `lambda / (rho cp)` (to 0.03%); runs are bitwise identical on 1 and 2+ ranks.
 
 Validation against Cantera's `FreeFlame` with the same model
-(`soret_enabled`, mixture-averaged; `tools/flame_reference.py --soret`,
+(`soret_enabled`, mixture-averaged; `tools/setup/flame_reference.py --soret`,
 `examples/premixed_flame/reference/soret_flames.csv`): the V8 setup above
 (20 cells per `delta_T`, CFL 0.2, two flame times, consumption speed over the
 last third), H2/air at 300 K and 1 atm:
@@ -1940,7 +1940,7 @@ Species counts are taken from the files when they are added.
 | V10 | **Counterflow diffusion flame**, H2/N2 vs air, strain-rate sweep | Cantera `CounterflowDiffusionFlame` | Peak `T` vs strain within 2% near the axis, accepting that a 2D/3D opposed-jet run only approximates the similarity solution | 12 |
 | V11 | **Shock/H2-bubble interaction** with detailed transport, or a reacting mixing layer | [Billet, Giovangigli & de Gassowski 2008](https://doi.org/10.1080/13647830701545875) | Code-to-code: interface and shock positions; grid convergence | 12 |
 
-V10 (`examples/counterflow_diffusion`, `tools/counterflow_reference.py`,
+V10 (`examples/counterflow_diffusion`, `examples/counterflow_diffusion/counterflow_reference.py`,
 `counterflow_setup.py`, `plot_counterflow.py`): H2/N2 (1:3) against air at
 300 K and 1 atm, nozzles 10 mm apart, momentum-balanced, against Cantera's
 `CounterflowDiffusionFlame` swept in strain up to extinction. Cantera's is
@@ -1971,7 +1971,7 @@ resolution and domain-size variants are in the example's README.
 
 ![Peak temperature against strain](../images/counterflow_strain.png)
 
-Flame-wall interaction (`tools/flame_wall.py`): head-on quenching of the
+Flame-wall interaction (`tools/dev/flame_wall.py`): head-on quenching of the
 stoichiometric H2/air flame (h2o2.yaml, mixture-averaged transport, 300 K,
 1 atm; Cantera: `S_L` = 2.332 m/s, `T_b` = 2379 K, thermal thickness
 `delta_T` = 329 um, `delta_L = lambda_u / (rho_u cp_u S_L)` = 19.9 um)

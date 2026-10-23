@@ -32,16 +32,16 @@ from figstyle import bare, label
 ROOT = Path(__file__).resolve().parents[2]
 TOOLS = ROOT / "tools"
 OUT = ROOT / "docs" / "images" / "tools"
-sys.path.insert(0, str(TOOLS))
-from mallard_vtu import read_vtu  # noqa: E402
+sys.path[:0] = [str(TOOLS), str(TOOLS / "setup")]
+from mallard.vtu import read_vtu  # noqa: E402
 
 WORK = None
 MALLARD = None
 
 
 def tool(name, *args, cwd=None):
-    """Run tools/NAME with ARGS in the work directory; returns its stdout."""
-    cmd = [sys.executable, str(TOOLS / name), *map(str, args)]
+    """Run the script NAME (a path in the repository) with ARGS in the work directory; returns its stdout."""
+    cmd = [sys.executable, str(ROOT / name), *map(str, args)]
     return subprocess.run(cmd, cwd=cwd or WORK, check=True, capture_output=True, text=True).stdout
 
 
@@ -167,7 +167,7 @@ def tri_edges(xyz, tri, a=0, b=1):
 
 
 def mallard_mesh(P):
-    path = once("duck.msh", lambda p: tool("make_mallard_mesh.py", p, "--h-wall", 0.01, "--h-far", 0.06))
+    path = once("duck.msh", lambda p: tool("examples/mallard/make_mallard_mesh.py", p, "--h-wall", 0.01, "--h-far", 0.06))
     xyz, tri = gmsh_triangles(path)
     fig, ax = plt.subplots(figsize=(8, 3.9))
     ax.add_collection(LineCollection(tri_edges(xyz, tri), colors=P["muted"], linewidths=0.25, rasterized=True))
@@ -180,8 +180,8 @@ def mallard_mesh(P):
 
 
 def case_meshes(P):
-    volvo = once("volvo.msh", lambda p: tool("make_volvo_mesh.py", p, "--ds", 2.5e-3, "--nz", 2))
-    sphere = once("sphere.msh", lambda p: tool("make_sphere_mesh.py", p, "--h-wall", 0.04, "--h-shock", 0.045,
+    volvo = once("volvo.msh", lambda p: tool("examples/volvo_bluff_body/make_volvo_mesh.py", p, "--ds", 2.5e-3, "--nz", 2))
+    sphere = once("sphere.msh", lambda p: tool("examples/sphere_mach3/make_sphere_mesh.py", p, "--h-wall", 0.04, "--h-shock", 0.045,
                                                "--h-far", 0.25))
     v = meshes.read_gmsh22(volvo, plane_zone="back")
     xyz, tri = gmsh_triangles(sphere, "symmetry_z")
@@ -208,7 +208,7 @@ def case_meshes(P):
 # -------------------------------------------------------------- initial states
 
 def isotropic(P):
-    path = once("hit.restart", lambda p: tool("isotropic_turbulence_restart.py", 64, p))
+    path = once("hit.restart", lambda p: tool("tools/setup/isotropic_turbulence_restart.py", 64, p))
     f = read_restart(path)
     n = 64
     u = np.stack([f[c] / f["RHO"] for c in ("RHOU_X", "RHOU_Y", "RHOU_Z")]).reshape(3, n, n, n)
@@ -250,7 +250,7 @@ def channel(P):
                 f"{k} = {v!r}".replace("'", '"').replace("True", "true").replace("False", "false")
                 for k, v in inp[table].items() if not isinstance(v, dict)) + "\n"
     (WORK / "channel.toml").write_text(toml)
-    path = once("channel.restart", lambda p: tool("channel_init.py", WORK / "channel.toml", p))
+    path = once("channel.restart", lambda p: tool("tools/setup/channel_init.py", WORK / "channel.toml", p))
     f = read_restart(path)
     nx, ny, nz = small["Nx"], small["Ny"], small["Nz"]
     u = (f["RHOU_X"] / f["RHO"]).reshape(nx, ny, nz)
@@ -279,8 +279,8 @@ def channel(P):
 
 
 def tile(P):
-    src = once("hit32.restart", lambda p: tool("isotropic_turbulence_restart.py", 32, p))
-    out = once("tiled.restart", lambda p: tool("tile_restart.py", src, 32, 3, p))
+    src = once("hit32.restart", lambda p: tool("tools/setup/isotropic_turbulence_restart.py", 32, p))
+    out = once("tiled.restart", lambda p: tool("tools/setup/tile_restart.py", src, 32, 3, p))
     a, b = read_restart(src), read_restart(out)
     ua = (a["RHOU_X"] / a["RHO"]).reshape(32, 32, 32)[:, :, 0]
     ub = (b["RHOU_X"] / b["RHO"]).reshape(96, 32, 32)[:, :, 0]
@@ -320,8 +320,8 @@ def hex_layer(path):
 def interpolate(P):
     from matplotlib.collections import PolyCollection
     from interpolate_restart import cell_centroids, write_restart
-    coarse = once("volvo_coarse.msh", lambda p: tool("make_volvo_mesh.py", p, "--ds", 6e-3, "--nz", 2))
-    fine = once("volvo_fine.msh", lambda p: tool("make_volvo_mesh.py", p, "--ds", 2e-3, "--nz", 2))
+    coarse = once("volvo_coarse.msh", lambda p: tool("examples/volvo_bluff_body/make_volvo_mesh.py", p, "--ds", 6e-3, "--nz", 2))
+    fine = once("volvo_fine.msh", lambda p: tool("examples/volvo_bluff_body/make_volvo_mesh.py", p, "--ds", 2e-3, "--nz", 2))
     cc = cell_centroids(coarse)
 
     def make_old(p):
@@ -332,7 +332,7 @@ def interpolate(P):
         write_restart(p, {"version": 2, "step": 0, "t": 0.0, "names": ["RHO", "RHOU_X", "RHOU_Y", "RHOU_Z", "RHOE"],
                           "attributes": []}, np.stack([rho, u, 0 * u, 0 * u, 2.5 + 0.5 * u ** 2]))
     old = once("volvo_coarse.restart", make_old)
-    new = once("volvo_fine.restart", lambda p: tool("interpolate_restart.py", coarse, old, fine, p))
+    new = once("volvo_fine.restart", lambda p: tool("tools/setup/interpolate_restart.py", coarse, old, fine, p))
     fig, axs = plt.subplots(2, 1, figsize=(10, 5.6))
     for ax, msh, rs, title in ((axs[0], coarse, old, "OLD.msh and OLD.restart"),
                                (axs[1], fine, new, "interpolate_restart.py OLD.msh OLD.restart NEW.msh NEW.restart")):
@@ -351,12 +351,12 @@ def interpolate(P):
 
 def flame(P):
     full = WORK / "flame_full"
-    once("flame_full/done", lambda p: (tool("flame_reference.py", "--single", "h2", 1.0, 300, full), p.write_text("")))
+    once("flame_full/done", lambda p: (tool("tools/setup/flame_reference.py", "--single", "h2", 1.0, 300, full), p.write_text("")))
     ref_csv = full / "h2_phi1_T300_mix_full.csv"
     mech = ROOT / "mechanisms" / "h2o2.yaml"
     run, run2 = WORK / "flame_run", WORK / "flame_run2d"
-    once("flame_run/flame.restart", lambda p: tool("flame_restart.py", ref_csv, mech, "ohmech", 8, run))
-    once("flame_run2d/flame.restart", lambda p: tool("flame_restart.py", ref_csv, mech, "ohmech", 8, run2,
+    once("flame_run/flame.restart", lambda p: tool("tools/setup/flame_restart.py", ref_csv, mech, "ohmech", 8, run))
+    once("flame_run2d/flame.restart", lambda p: tool("tools/setup/flame_restart.py", ref_csv, mech, "ohmech", 8, run2,
                                                      "--ny", 48, "--perturb", 1.5))
     ref = np.genfromtxt(ref_csv, delimiter=",", names=True)
     m = tomllib.loads((run / "input.toml").read_text())["mesh"]
@@ -394,12 +394,12 @@ def flame(P):
 
 def znd(P):
     mech = ROOT / "mechanisms" / "h2o2.yaml"
-    zcsv = once("znd.csv", lambda p: tool("detonation_reference.py", mech, "ohmech", "H2:2, O2:1, AR:7", 298, 6670, p))
+    zcsv = once("znd.csv", lambda p: tool("tools/setup/detonation_reference.py", mech, "ohmech", "H2:2, O2:1, AR:7", 298, 6670, p))
     rows = [r for r in csv.reader(open(zcsv)) if r and not r[0].startswith("#")]
     head, data = rows[0], np.array(rows[1:], float)
     col = {h: k for k, h in enumerate(head)}
     nx, ny, lx, ly = 400, 100, 0.08, 0.02
-    out = once("znd2d.restart", lambda p: tool("znd_restart.py", zcsv, mech, "ohmech", nx, lx, 0.05, p, 2,
+    out = once("znd2d.restart", lambda p: tool("tools/setup/znd_restart.py", zcsv, mech, "ohmech", nx, lx, 0.05, p, 2,
                                                "--ny", ny, "--ly", ly, "--pocket", 0.045, 0.006, 0.0015,
                                                "--pocket", 0.044, 0.014, 0.0012))
     f = read_restart(out)
@@ -508,7 +508,7 @@ def animate_frame(P):
     d, _ = riemann("TENO")
     frames = d / "frames"
     if not frames.exists():
-        tool("animate.py", d / "solut", d / "riemann", "--res", 500, "--frames-dir", frames, cwd=d)
+        tool("tools/post/animate.py", d / "solut", d / "riemann", "--res", 500, "--frames-dir", frames, cwd=d)
     pngs = sorted(frames.glob("*.png"))
     img = plt.imread(pngs[-1])
     img = img[::max(1, img.shape[1] // 1100), ::max(1, img.shape[1] // 1100)]
@@ -522,9 +522,9 @@ def cartesian_still(P):
     d, _ = riemann("TENO")
     grid = d / "grid"
     if not grid.exists():
-        tool("animate_cartesian.py", "extract", d / "solut", grid, cwd=d)
+        tool("tools/post/animate_cartesian.py", "extract", d / "solut", grid, cwd=d)
     last = sorted(p for p in grid.glob("*.npy"))[-1]
-    tool("animate_cartesian.py", "still", last, d / "still", cwd=d)
+    tool("tools/post/animate_cartesian.py", "still", last, d / "still", cwd=d)
     a, b = plt.imread(d / "still_density.png"), plt.imread(d / "still_schlieren.png")
     fig, axs = plt.subplots(1, 2, figsize=(10, 5))
     for ax, img, title in ((axs[0], a, "still_density.png"), (axs[1], b, "still_schlieren.png")):

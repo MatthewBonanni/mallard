@@ -5,7 +5,7 @@
 # x = 8 pi h. Units h = 1, bulk density and velocity 1, Re_b = 5600, bulk
 # Mach 0.2, isothermal walls (as examples/channel_retau180). The nscbc_inlet
 # takes its mean velocity and Reynolds stresses from inflow_profile.csv:
-# the statistics of the periodic channel example (tools/plane_average.py
+# the statistics of the periodic channel example (tools/post/plane_average.py
 # --average x z). [boundaries.turbulence] adds digital-filter turbulence
 # with integral lengths 0.5h (u, streamwise) and 0.1-0.2h otherwise. The
 # outlet is an nscbc_outlet behind a sponge over x > 20h (not analyzed),
@@ -23,9 +23,9 @@
 #
 # Run:
 #   (the periodic channel example, to its restart files and inflow_profile.csv)
-#   python ../../tools/tile_restart.py ../channel_retau180/restart/channel_<last>.restart 192 2 init.restart
+#   python ../../tools/setup/tile_restart.py ../channel_retau180/restart/channel_<last>.restart 192 2 init.restart
 #   mpirun -n 4 ../../build3d/src/mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
-#   python ../../tools/plane_average.py stats/channel_000002.pvtu --average z --out profile_xy.csv
+#   python ../../tools/post/plane_average.py stats/channel_000002.pvtu --average z --out profile_xy.csv
 #
 # Cost: 337,000 steps of 3.27e-4 h/U_b, 27 ms each on four A100s (2.5 hours).
 

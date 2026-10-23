@@ -110,7 +110,7 @@ operations, so the geometry does not depend on the partition.
 
 ### Steady vortex between circular walls
 
-`tools/curved_convergence.py`: the irrotational vortex `u_theta = M / r` in
+`tools/dev/curved_convergence.py`: the irrotational vortex `u_theta = M / r` in
 the annulus `1 <= r <= 1.384` (`M` at the inner wall), an exact steady Euler
 solution, with slip walls (`symmetry`) on both circles and no other boundary.
 Quadrilateral O-grids of `n_r x 16 n_r` cells (triangles: each split in two),

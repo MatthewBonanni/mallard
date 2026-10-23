@@ -222,7 +222,7 @@ commented out with a note. A file with nothing to change comes back
 unchanged, byte for byte. When a changed key is written as a dotted key
 (`run.cfl = 1`) or in an inline table, the file is reformatted instead: its
 comments are kept, its layout is not. The command is tested on the input
-files of every release (`tools/check_upgrade_input.py`).
+files of every release (`tools/dev/check_upgrade_input.py`).
 
 Keys and options changed so far:
 
@@ -309,10 +309,10 @@ required, and the values it accepts, by path
 setup stops on an error, with the keys read up to there. The setup's accessors
 (`find_value`, `find_value_or`, `find_real_or` and `find_option` in
 `src/common/input.h`) record these, so the catalog is what the code does.
-`tools/input_catalog.py build` merges the catalogs of every example and
+`tools/dev/input_catalog.py build` merges the catalogs of every example and
 tutorial, in 2D and 3D, into
 [`docs/input-keys.json`](../input-keys.json), which the website's input builder
-reads; CI checks that it is up to date, and `tools/input_catalog.py docs`
+reads; CI checks that it is up to date, and `tools/dev/input_catalog.py docs`
 that the defaults this reference states match it.
 
 ## The other commands
