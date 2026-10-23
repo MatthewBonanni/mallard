@@ -78,7 +78,7 @@ def build(args):
     merged = {}
     with tempfile.TemporaryDirectory() as tmp:
         for path, dim in inputs():
-            mallard = args.mallard_2d if dim == 2 else args.mallard_3d
+            mallard = Path(args.mallard_2d if dim == 2 else args.mallard_3d).resolve()
             keys = check(mallard, path, Path(tmp))
             if keys is None:
                 continue
