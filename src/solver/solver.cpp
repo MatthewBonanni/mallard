@@ -418,14 +418,16 @@ void Solver::trim_halo() {
     // The deep halo of TENO or of image neighbors holds every cell the stencil
     // searches visited, so that stencils match the serial ones; the time loop
     // needs only the cells the stencils kept, and the layers the other kernels read
+    if (!is_distributed()) return;
     const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
-    const bool images = boundary_data.image_neighbors.extent(0) > 0;
-    if (!is_distributed() || (teno == nullptr && !images)) return;
+    // Every rank takes part in the exchange below, also those without image neighbors
+    const bool images = comm::allreduce(int(boundary_data.image_neighbors.extent(0) > 0), comm::Op::MAX) > 0;
+    if (teno == nullptr && !images) return;
     std::vector<uint8_t> needed = teno ? teno->stencil_cells() : std::vector<uint8_t>(mesh->n_cells, 0);
     const int base = base_halo_layers();
     for (uint32_t c = 0; c < mesh->n_cells; c++) needed[c] = needed[c] || distribution.layer[c] <= base;
     // Image neighbors of the cells whose gradients are read
-    if (images) {
+    if (boundary_data.image_neighbors.extent(0) > 0) {
         auto offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.image_neighbor_offsets);
         auto neighbors = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.image_neighbors);
         for (uint32_t c = 0; c < mesh->n_cells; c++) {
@@ -471,7 +473,8 @@ void Solver::describe_partition_surface() {
 bool Solver::halo_too_shallow() {
     if (!is_distributed()) return false;
     auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
-    const bool images = boundary_data.image_neighbors.extent(0) > 0;
+    // Every rank takes part in the reduction below, also those without image neighbors
+    const bool images = comm::allreduce(int(boundary_data.image_neighbors.extent(0) > 0), comm::Op::MAX) > 0;
     if (teno == nullptr && !wall_model_on && !images) return false;
     // Owned and halo-layer-1 cells are reconstructed; their stencil searches must
     // see every layer they visited, so stencils match the serial ones exactly
@@ -480,7 +483,7 @@ bool Solver::halo_too_shallow() {
         if (distribution.layer[c] <= 1) needed = std::max(needed, distribution.layer[c] + teno->gather_depth[c] + 1);
     }
     // The same for the gradient stencils that continue across extrapolation boundaries
-    for (uint32_t c = 0; images && c < mesh->n_cells; c++) {
+    for (uint32_t c = 0; !image_reach.empty() && c < mesh->n_cells; c++) {
         if (distribution.layer[c] <= 1) needed = std::max(needed, distribution.layer[c] + image_reach[c]);
     }
     // The wall model's exchange and edge points must lie in cells with complete gradient stencils
