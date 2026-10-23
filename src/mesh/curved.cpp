@@ -18,8 +18,10 @@
 
 #include "comm.h"
 #include "input.h"
+#include "log.h"
 #include "mesh.h"
 #include "mesh_block.h"
+#include "region.h"
 #include "zone.h"
 
 namespace curved {
@@ -178,6 +180,16 @@ void check_high_order(const std::vector<SurfaceFace> & faces) {
     }
 }
 
+/** @brief Length of the longest side of the polygon v (of the segment, for two points). */
+double size_of(const std::vector<Vec3> & v) {
+    double l2 = 0.0;
+    for (size_t k = 0; k < (v.size() == 2 ? 1 : v.size()); k++) {
+        const Vec3 d = sub(v[(k + 1) % v.size()], v[k]);
+        l2 = std::max(l2, dot(d, d));
+    }
+    return std::sqrt(l2);
+}
+
 int32_t shape_of_zone(const std::vector<Shape> & shapes, const std::string & zone) {
     for (size_t s = 0; s < shapes.size(); s++) {
         if (shapes[s].zone == zone) return int32_t(s);
@@ -185,9 +197,140 @@ int32_t shape_of_zone(const std::vector<Shape> & shapes, const std::string & zon
     return -1;
 }
 
+/** @brief Inverse of the symmetric 3 x 3 matrix A (row-major). */
+void inverse(const double * A, double * B) {
+    B[0] = A[4] * A[8] - A[5] * A[7];
+    B[1] = A[2] * A[7] - A[1] * A[8];
+    B[2] = A[1] * A[5] - A[2] * A[4];
+    B[3] = A[5] * A[6] - A[3] * A[8];
+    B[4] = A[0] * A[8] - A[2] * A[6];
+    B[5] = A[2] * A[3] - A[0] * A[5];
+    B[6] = A[3] * A[7] - A[4] * A[6];
+    B[7] = A[1] * A[6] - A[0] * A[7];
+    B[8] = A[0] * A[4] - A[1] * A[3];
+    const double det = A[0] * B[0] + A[1] * B[3] + A[2] * B[6];
+    for (size_t k = 0; k < 9; k++) B[k] /= det;
+}
+
+/** @brief Fourth-order central differences of step h: weights of x + k h e_i for k = -2, -1, 1, 2. */
+constexpr double FD_OFFSET[4] = {-2.0, -1.0, 1.0, 2.0};
+constexpr double FD_WEIGHT[4] = {1.0 / 12.0, -8.0 / 12.0, 8.0 / 12.0, -1.0 / 12.0};
+
+/**
+ * @brief Closest point p of x on the zero level set of a SURFACE shape's
+ *        function phi, and dp/dx = (I + lambda K)^-1 (I - n n^T), with n the
+ *        unit normal and lambda the signed distance at p, and K the
+ *        tangential Hessian of phi over |grad phi| (the shape operator).
+ *        Derivatives are fourth-order central differences of step 1e-2
+ *        length; in 2D the shape is the z = 0 slice.
+ */
+void closest_point(const Shape & s, const Vec3 & x, double length, Vec3 & p, double * J) {
+    const region::Region & r = *s.surface;
+    auto phi = [&](const Vec3 & y) {
+        const double v = r.distance(y.data());
+        if (!std::isfinite(v)) {
+            throw InputError("mesh.curved: the shape of zone " + s.zone + " is not finite near (" +
+                             std::to_string(y[0]) + ", " + std::to_string(y[1]) + ", " + std::to_string(y[2]) + ").");
+        }
+        return v;
+    };
+    auto shifted = [](Vec3 y, size_t i, double d) {
+        y[i] += d;
+        return y;
+    };
+    auto central = [&](const Vec3 & y, double h) {
+        Vec3 g = {0.0, 0.0, 0.0};
+        for (size_t i = 0; i < N_DIM; i++) {
+            for (size_t k = 0; k < 4; k++) g[i] += FD_WEIGHT[k] * phi(shifted(y, i, FD_OFFSET[k] * h));
+            g[i] /= h;
+        }
+        return g;
+    };
+    // Steps of 1e-2 length, divided by 4 until two agree, so that stencils do not straddle
+    // the creases of booleans and polygons
+    double h = 1e-2 * length;
+    auto gradient = [&](const Vec3 & y) {
+        h = 1e-2 * length;
+        Vec3 g = central(y, h);
+        for (int k = 0; k < 4; k++) {
+            const Vec3 finer = central(y, 0.25 * h);
+            h *= 0.25;
+            const Vec3 d = sub(finer, g);
+            g = finer;
+            if (dot(d, d) <= 1e-16 * dot(g, g)) break;
+        }
+        return g;
+    };
+    auto fail = [&](const std::string & why) {
+        throw InputError("mesh.curved: a point of zone " + s.zone + " at (" + std::to_string(x[0]) + ", " +
+                         std::to_string(x[1]) + ", " + std::to_string(x[2]) + ") " + why +
+                         ": the zone must lie on the shape's surface, where it is smooth with a nonzero gradient.");
+    };
+    // Onto the surface along the gradient, then along the surface toward x
+    const double tol = 1e-13 * length + 1e-14 * std::sqrt(dot(x, x));
+    p = x;
+    for (int it = 0;; it++) {
+        const Vec3 g = gradient(p);
+        const double g2 = dot(g, g);
+        if (!(g2 > 0.0)) fail("has a zero gradient");
+        Vec3 step = scale(-phi(p) / g2, g);
+        const Vec3 d = sub(x, add(p, step));
+        step = add(step, sub(d, scale(dot(d, g) / g2, g)));
+        p = add(p, step);
+        if (std::sqrt(dot(step, step)) <= tol) break;
+        if (it == 100 || std::sqrt(dot(sub(p, x), sub(p, x))) > length) fail("does not converge onto its shape");
+    }
+    // dp/dx from the gradient and Hessian at p, with the gradient's step
+    const Vec3 g = gradient(p);
+    const double f0 = phi(p);
+    double H[9] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    for (size_t i = 0; i < N_DIM; i++) {
+        for (size_t j = i; j < N_DIM; j++) {
+            double v = 0.0;
+            if (i == j) {
+                v = -2.5 * f0;
+                for (size_t k = 0; k < 4; k++) {
+                    v += (k == 0 || k == 3 ? -1.0 / 12.0 : 4.0 / 3.0) * phi(shifted(p, i, FD_OFFSET[k] * h));
+                }
+            } else {
+                for (size_t a = 0; a < 4; a++) {
+                    for (size_t b = 0; b < 4; b++) {
+                        v += FD_WEIGHT[a] * FD_WEIGHT[b] * phi(shifted(shifted(p, i, FD_OFFSET[a] * h), j, FD_OFFSET[b] * h));
+                    }
+                }
+            }
+            H[3 * i + j] = H[3 * j + i] = v / (h * h);
+        }
+    }
+    const double gn = std::sqrt(dot(g, g));
+    const Vec3 n = scale(1.0 / gn, g);
+    const double lambda = dot(sub(x, p), n);
+    double T[9], TH[9], A[9], Ai[9];
+    for (size_t a = 0; a < 3; a++) {
+        for (size_t b = 0; b < 3; b++) T[3 * a + b] = (a == b ? 1.0 : 0.0) - n[a] * n[b];
+    }
+    for (size_t a = 0; a < 3; a++) {
+        for (size_t b = 0; b < 3; b++) TH[3 * a + b] = T[3 * a] * H[b] + T[3 * a + 1] * H[3 + b] + T[3 * a + 2] * H[6 + b];
+    }
+    for (size_t a = 0; a < 3; a++) {
+        for (size_t b = 0; b < 3; b++) {
+            const double K = TH[3 * a] * T[b] + TH[3 * a + 1] * T[3 + b] + TH[3 * a + 2] * T[6 + b];
+            A[3 * a + b] = (a == b ? 1.0 : 0.0) + lambda * K / gn;
+        }
+    }
+    inverse(A, Ai);
+    for (size_t a = 0; a < 3; a++) {
+        for (size_t b = 0; b < 3; b++) J[3 * a + b] = Ai[3 * a] * T[b] + Ai[3 * a + 1] * T[3 + b] + Ai[3 * a + 2] * T[6 + b];
+    }
+}
+
 }  // namespace
 
-void Shape::project(const Vec3 & x, Vec3 & p, double * J) const {
+void Shape::project(const Vec3 & x, double length, Vec3 & p, double * J) const {
+    if (kind == Kind::SURFACE) {
+        closest_point(*this, x, length, p, J);
+        return;
+    }
     Vec3 d = sub(x, center);
     Vec3 along = {0.0, 0.0, 0.0};
     if (kind == Kind::CIRCLE) {
@@ -217,6 +360,45 @@ void Shape::project(const Vec3 & x, Vec3 & p, double * J) const {
     }
 }
 
+Shape shape_of(std::shared_ptr<const region::Region> surface, const std::string & zone) {
+    Shape s;
+    s.zone = zone;
+    s.kind = Shape::Kind::SURFACE;
+    const auto & nodes = surface->host().nodes;
+    if (nodes.extent(0) == 1) {
+        // A sphere or an infinite solid cylinder seen through a rotation and a uniform scale, M = sigma Q
+        const region::Node & n = nodes(0);
+        double MMt[9];
+        for (size_t a = 0; a < 3; a++) {
+            for (size_t b = 0; b < 3; b++) {
+                MMt[3 * a + b] = n.m[3 * a] * n.m[3 * b] + n.m[3 * a + 1] * n.m[3 * b + 1] + n.m[3 * a + 2] * n.m[3 * b + 2];
+            }
+        }
+        const double s2 = MMt[0];
+        bool conformal = s2 > 0.0;
+        for (size_t a = 0; a < 3; a++) {
+            for (size_t b = 0; b < 3; b++) conformal &= std::abs(MMt[3 * a + b] - (a == b ? s2 : 0.0)) <= 1e-14 * s2;
+        }
+        const double sigma = std::sqrt(s2);
+        Vec3 center;
+        for (size_t j = 0; j < 3; j++) center[j] = -(n.m[j] * n.d[0] + n.m[3 + j] * n.d[1] + n.m[6 + j] * n.d[2]) / s2;
+        const Vec3 axis = {n.m[6] / sigma, n.m[7] / sigma, n.m[8] / sigma};
+        const bool sphere = n.kind == region::Kind::SPHERE;
+        const bool cylinder = n.kind == region::Kind::CYLINDER && n.p[1] == 0.0 && std::isinf(n.p[2]);
+        // In 2D, the z = 0 slice must be a circle about a center in the plane
+        const bool planar = N_DIM == 3 || (center[2] == 0.0 && (sphere || (axis[0] == 0.0 && axis[1] == 0.0)));
+        if (conformal && planar && (sphere || cylinder)) {
+            s.kind = N_DIM == 2 ? Shape::Kind::CIRCLE : (sphere ? Shape::Kind::SPHERE : Shape::Kind::CYLINDER);
+            s.center = center;
+            s.radius = n.p[0] / sigma;
+            if (s.kind == Shape::Kind::CYLINDER) s.axis = axis;
+            return s;
+        }
+    }
+    s.surface = std::move(surface);
+    return s;
+}
+
 uint32_t element_order(uint32_t n_corners, uint32_t n_nodes) {
     switch (n_corners) {
         case 2:
@@ -238,35 +420,29 @@ bool enabled(const Input & input) {
 std::vector<Shape> read_shapes(const Input & input) {
     std::vector<Shape> shapes;
     if (!enabled(input) || !input.contains("mesh") || !input.at("mesh").contains("curved")) return shapes;
-    for (const auto & entry : find_value<std::vector<Input>>(input, "mesh", "curved")) {
-        Shape s;
-        s.zone = find_value<std::string>(entry, "zone");
-        const std::string kind = find_value<std::string>(entry, "shape");
-        if (kind == "circle" && N_DIM == 2) {
-            s.kind = Shape::Kind::CIRCLE;
-        } else if (kind == "sphere" && N_DIM == 3) {
-            s.kind = Shape::Kind::SPHERE;
-        } else if (kind == "cylinder" && N_DIM == 3) {
-            s.kind = Shape::Kind::CYLINDER;
-        } else {
-            throw InputError("mesh.curved: shape = \"" + kind + "\" is not one of: " +
-                             (N_DIM == 2 ? "circle" : "sphere, cylinder") + ".");
+    const auto entries = find_value<std::vector<Input>>(input, "mesh", "curved");
+    for (size_t i = 0; i < entries.size(); i++) {
+        const Input & entry = entries[i];
+        const std::string where = "mesh.curved[" + std::to_string(i) + "]";
+        const std::string zone = find_value<std::string>(entry, "zone");
+        if (!entry.contains("shape")) throw InputError(where + " needs shape = {type = \"...\", ...} (a region).");
+        Input table = entry.at("shape");
+        if (table.is_string()) {
+            // Before 0.9: shape = "circle" | "sphere" | "cylinder" with center, radius and axis beside it
+            Input::table_type t;
+            t.entries()["type"] = Input(table.as_string());
+            for (const char * key : {"center", "radius", "axis"}) {
+                if (entry.contains(key)) t.entries()[key] = entry.at(key);
+            }
+            table = Input(std::move(t));
+            logging::warning(where + ": shape = \"" + table.at("type").as_string() + "\" with center and radius "
+                             "beside it is deprecated; write shape = {type = \"" + table.at("type").as_string() +
+                             "\", center = [...], radius = ...} (the shape is a region: docs/input.md#regions).");
         }
-        const auto center = find_value<std::vector<Input>>(entry, "center");
-        if (center.size() != N_DIM) throw InputError("mesh.curved: center needs " + std::to_string(N_DIM) + " components.");
-        for (size_t i = 0; i < N_DIM; i++) s.center[i] = double(as_real(center[i], "mesh.curved.center", dim::length));
-        s.radius = double(as_real(toml::find(entry, "radius"), "mesh.curved.radius", dim::length));
-        if (!(s.radius > 0.0)) throw InputError("mesh.curved: radius must be positive.");
-        if (s.kind == Shape::Kind::CYLINDER) {
-            const auto axis = find_value<std::vector<Input>>(entry, "axis");
-            if (axis.size() != 3) throw InputError("mesh.curved: axis needs 3 components.");
-            for (size_t i = 0; i < 3; i++) s.axis[i] = double(as_real(axis[i], "mesh.curved.axis", dim::none));
-            const double norm = std::sqrt(dot(s.axis, s.axis));
-            if (!(norm > 0.0)) throw InputError("mesh.curved: axis must be nonzero.");
-            s.axis = scale(1.0 / norm, s.axis);
-        }
-        if (shape_of_zone(shapes, s.zone) >= 0) throw InputError("mesh.curved: zone " + s.zone + " is listed twice.");
-        shapes.push_back(s);
+        if (table.is_table() && table.contains("edge")) throw InputError(where + ".shape takes no edge.");
+        auto surface = std::make_shared<const region::Region>(table, where + ".shape");
+        if (shape_of_zone(shapes, zone) >= 0) throw InputError("mesh.curved: zone " + zone + " is listed twice.");
+        shapes.push_back(shape_of(std::move(surface), zone));
     }
     return shapes;
 }
@@ -412,6 +588,7 @@ Geometry::Geometry(const Mesh & mesh_in, const Surfaces & surfaces) : mesh(mesh_
         Face element;
         edges_of(sf.corners, element);
         const std::vector<Vec3> v(sf.nodes.begin(), sf.nodes.begin() + nc);
+        project_corners(element, v);
         std::vector<Vec3> c(xi.size());
         for (size_t j = 0; j < xi.size(); j++) {
             Vec3 x;
@@ -450,6 +627,7 @@ Geometry::Geometry(const Mesh & mesh_in, const Surfaces & surfaces) : mesh(mesh_
                 }
             }
         }
+        project_corners(face, face_nodes(f));
         face_index[f] = int32_t(faces.size());
         faces.push_back(std::move(face));
         curved_cell[uint32_t(mesh.h_cells_of_face(f, 0))] = 1;
@@ -465,6 +643,30 @@ std::vector<Vec3> Geometry::face_nodes(uint32_t f) const {
     return v;
 }
 
+void Geometry::project_corners(Face & face, const std::vector<Vec3> & v) const {
+    double J[9];
+    Vec3 p;
+    if (face.shape >= 0) {
+        const double length = size_of(v);
+        face.offset.resize(v.size());
+        for (size_t k = 0; k < v.size(); k++) {
+            shapes[size_t(face.shape)].project(v[k], length, p, J);
+            face.offset[k] = sub(p, v[k]);
+        }
+    }
+    for (size_t k = 0; k < (v.size() == 2 ? 1 : v.size()); k++) {
+        if (face.edge[k] < 0 || edges[size_t(face.edge[k])].shape < 0) continue;
+        const Shape & s = shapes[size_t(edges[size_t(face.edge[k])].shape)];
+        const Vec3 & ca = face.flip[k] ? v[(k + 1) % v.size()] : v[k];
+        const Vec3 & cb = face.flip[k] ? v[k] : v[(k + 1) % v.size()];
+        const double length = std::sqrt(dot(sub(cb, ca), sub(cb, ca)));
+        s.project(ca, length, p, J);
+        face.edge_offset[k][0] = sub(p, ca);
+        s.project(cb, length, p, J);
+        face.edge_offset[k][1] = sub(p, cb);
+    }
+}
+
 void Geometry::edge_eval(const Face & face, size_t k, const Vec3 & a, const Vec3 & b, double t, Vec3 & x,
                          Vec3 & dx) const {
     const Edge & e = edges[size_t(face.edge[k])];
@@ -475,13 +677,12 @@ void Geometry::edge_eval(const Face & face, size_t k, const Vec3 & a, const Vec3
     Vec3 dxc;
     if (e.shape >= 0) {
         const Shape & s = shapes[size_t(e.shape)];
-        double J[9], Ja[9], Jb[9];
-        Vec3 p, pa, pb;
+        double J[9];
+        Vec3 p;
         const Vec3 lin = add(ca, scale(tc, sub(cb, ca)));
-        s.project(lin, p, J);
-        s.project(ca, pa, Ja);
-        s.project(cb, pb, Jb);
-        const Vec3 oa = sub(pa, ca), ob = sub(pb, cb);
+        s.project(lin, std::sqrt(dot(sub(cb, ca), sub(cb, ca))), p, J);
+        const Vec3 & oa = face.edge_offset[k][0];
+        const Vec3 & ob = face.edge_offset[k][1];
         x = sub(sub(p, scale(1.0 - tc, oa)), scale(tc, ob));
         dxc = sub(matvec(J, sub(cb, ca)), sub(ob, oa));
     } else {
@@ -542,15 +743,13 @@ void Geometry::face_eval(const Face & face, const std::vector<Vec3> & v, const d
         // Projection of the flat point, less the corners' own projection offsets
         const Shape & s = shapes[size_t(face.shape)];
         Vec3 p;
-        double J[9], Jk[9];
-        s.project(x, p, J);
+        double J[9];
+        s.project(x, size_of(v), p, J);
         d0 = matvec(J, d0);
         d1 = matvec(J, d1);
         x = p;
         for (uint32_t k = 0; k < n; k++) {
-            Vec3 pk;
-            s.project(v[k], pk, Jk);
-            const Vec3 o = sub(pk, v[k]);
+            const Vec3 & o = face.offset[k];
             x = sub(x, scale(N[k], o));
             d0 = sub(d0, scale(dN[k][0], o));
             d1 = sub(d1, scale(dN[k][1], o));
@@ -790,7 +989,7 @@ double Geometry::max_shape_offset() const {
             for (const Vec3 * p : {&a, &b}) {
                 Vec3 q;
                 double J[9];
-                s.project(*p, q, J);
+                s.project(*p, length, q, J);
                 out = std::max(out, std::sqrt(dot(sub(q, *p), sub(q, *p))) / length);
             }
         }
