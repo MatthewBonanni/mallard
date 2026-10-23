@@ -1,12 +1,13 @@
 # Coarse start of the Taylor-Green vortex (input.toml) for a run on a finer
-# mesh: 16^3 hexahedra up to t = 6, before the vortex sheets roll up; the
-# restart file it ends with initializes remap.toml (32^3). Needs the 3D build.
+# mesh: the periodic box on 16^3 hexahedra up to t = 3, while the vortex
+# sheets are still forming; the restart file it ends with initializes
+# remap.toml (32^3). Needs the 3D build. 239 steps: 8 s on 2 CPU threads.
 #
-#   ../../build3d/src/Mallard -i coarse.toml
-#   ../../build3d/src/Mallard -i remap.toml
+#   ../../build3d/src/Mallard -i coarse.toml --kokkos-num-threads=2
+#   ../../build3d/src/Mallard -i remap.toml --kokkos-num-threads=2
 
 [run]
-t_stop = 6.0
+t_stop = 3.0
 cfl = 1.0
 
 [mesh]
@@ -14,39 +15,16 @@ type = "cartesian"
 Nx = 16
 Ny = 16
 Nz = 16
-Lx = 3.141592653589793
-Ly = 3.141592653589793
-Lz = 3.141592653589793
+Lx = 6.283185307179586
+Ly = 6.283185307179586
+Lz = 6.283185307179586
+periodic = ["x", "y", "z"]
 
 [initialize]
 type = "analytical"
 u = ["sin(x) * cos(y) * cos(z)", "-cos(x) * sin(y) * cos(z)", "0.0"]
 p = "71.42857142857143 + (cos(2 * x) + cos(2 * y)) * (cos(2 * z) + 2) / 16"
 T = "1.0"
-
-[[boundaries]]
-name = "left"
-type = "symmetry"
-
-[[boundaries]]
-name = "right"
-type = "symmetry"
-
-[[boundaries]]
-name = "bottom"
-type = "symmetry"
-
-[[boundaries]]
-name = "top"
-type = "symmetry"
-
-[[boundaries]]
-name = "back"
-type = "symmetry"
-
-[[boundaries]]
-name = "front"
-type = "symmetry"
 
 [numerics]
 riemann_solver = "HLLC"

@@ -21,6 +21,7 @@
 #include "comm.h"
 #include "common_io.h"
 #include "compression.h"
+#include "file_format.h"
 #include "hdf5_util.h"
 #include "provenance.h"
 
@@ -114,7 +115,6 @@ namespace {
 
 constexpr const char * MESH_FORMAT = "mallard-solution-mesh";
 constexpr const char * SOLUTION_FORMAT = "mallard-solution";
-constexpr int OUTPUT_VERSION = 1;
 
 // The HDF5 library is not thread-safe, and asynchronous writers call it from their threads
 std::mutex hdf5_mutex;
@@ -240,7 +240,7 @@ void DataWriter::write_hdf5_mesh() {
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
         write_strings_attribute(root, "provenance", {provenance});
         write_strings_attribute(root, "format", {MESH_FORMAT});
-        write_int_attribute(root, "version", OUTPUT_VERSION);
+        write_int_attribute(root, "version", static_cast<int>(file_format::HDF5_OUTPUT.version));
         write_int_attribute(root, "dimension", N_DIM);
     }
     {
@@ -286,7 +286,7 @@ void DataWriter::write_hdf5(const std::string & stem, uint64_t step, rtype t, co
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
         write_strings_attribute(root, "provenance", {provenance});
         write_strings_attribute(root, "format", {SOLUTION_FORMAT});
-        write_int_attribute(root, "version", OUTPUT_VERSION);
+        write_int_attribute(root, "version", static_cast<int>(file_format::HDF5_OUTPUT.version));
         write_int_attribute(root, "dimension", N_DIM);
         write_attribute(root, "step", step);
         write_attribute(root, "time", double(t));

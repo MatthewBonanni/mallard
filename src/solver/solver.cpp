@@ -613,13 +613,16 @@ void Solver::init_boundaries() {
                     throw std::runtime_error(std::string("Missing ") + key + " for boundary: " + name + ".");
                 }
             }
-            std::vector<std::string> u = toml::find<std::vector<std::string>>(bound, "u");
-            if (u.size() != N_DIM) {
+            if (!bound.at("u").is_array() || bound.at("u").as_array().size() != N_DIM) {
                 throw std::runtime_error("Invalid u for boundary: " + name + ".");
             }
-            dirichlet.W.emplace_back(name + ".rho", toml::find<std::string>(bound, "rho"));
-            FOR_I_DIM dirichlet.W.emplace_back(name + ".u[" + std::to_string(i) + "]", u[i]);
-            dirichlet.W.emplace_back(name + ".p", toml::find<std::string>(bound, "p"));
+            const auto & u = bound.at("u").as_array();
+            dirichlet.W.emplace_back(name + ".rho", quantity_or_expression(bound.at("rho"), name + ".rho", dim::density));
+            FOR_I_DIM {
+                const std::string key = name + ".u[" + std::to_string(i) + "]";
+                dirichlet.W.emplace_back(key, quantity_or_expression(u[i], key, dim::velocity));
+            }
+            dirichlet.W.emplace_back(name + ".p", quantity_or_expression(bound.at("p"), name + ".p", dim::pressure));
         }
         const bool profiled = is_mixture() &&
                               (bcs.back().type == BoundaryType::UPT || bcs.back().type == BoundaryType::NSCBC_INLET) &&
@@ -754,7 +757,7 @@ void Solver::init_sources() {
     }
     const Input & source = input.at("source");
     if (source.contains("gravity")) {
-        std::vector<rtype> g = find_real_vector(input, "source", "gravity");
+        std::vector<rtype> g = find_real_vector(input, "source", "gravity", dim::acceleration);
         if (g.size() != N_DIM) {
             throw std::runtime_error("source.gravity must have " + std::to_string(N_DIM) + " components.");
         }
@@ -767,7 +770,7 @@ void Solver::init_sources() {
         source_summary.emplace_back("Gravity", text + "]");
     }
     if (source.contains("mass_flow")) {
-        const std::vector<rtype> m = find_real_vector(input, "source", "mass_flow");
+        const std::vector<rtype> m = find_real_vector(input, "source", "mass_flow", dim::mass_flux);
         if (m.size() != N_DIM) {
             throw InputError("source.mass_flow must have " + std::to_string(N_DIM) + " components.");
         }
@@ -794,14 +797,16 @@ void Solver::init_sources() {
         return;
     }
     std::vector<std::string> texts(N_CONSERVATIVE, "0");
-    texts[0] = toml::find_or<std::string>(input, "source", "rho", "0");
-    texts[N_DIM + 1] = toml::find_or<std::string>(input, "source", "rhoE", "0");
+    if (source.contains("rho")) texts[0] = quantity_or_expression(source.at("rho"), "source.rho", dim::mass_source);
+    if (source.contains("rhoE")) {
+        texts[N_DIM + 1] = quantity_or_expression(source.at("rhoE"), "source.rhoE", dim::power_density);
+    }
     if (source.contains("rhou")) {
-        std::vector<std::string> rhou = toml::find<std::vector<std::string>>(input, "source", "rhou");
-        if (rhou.size() != N_DIM) {
+        const Input & rhou = source.at("rhou");
+        if (!rhou.is_array() || rhou.as_array().size() != N_DIM) {
             throw std::runtime_error("source.rhou must have " + std::to_string(N_DIM) + " components.");
         }
-        FOR_I_DIM texts[1 + i] = rhou[i];
+        FOR_I_DIM texts[1 + i] = quantity_or_expression(rhou.as_array()[i], "source.rhou", dim::momentum_source);
     }
     for (size_t i = 0; i < texts.size(); i++) {
         source_expressions.emplace_back("source[" + CONSERVATIVE_NAMES[i] + "]", texts[i]);
@@ -984,7 +989,7 @@ void Solver::init_numerics() {
 
     rhs_func = [this](State solution, State rhs, rtype t_stage) { calc_rhs(solution, rhs, t_stage); };
     check_nan = toml::find_or<bool>(input, "numerics", "check_nan", false);
-    low_mach_cutoff = find_real_or(input, "numerics", "low_mach_cutoff", 0.1_r);
+    low_mach_cutoff = find_real_or(input, "numerics", "low_mach_cutoff", dim::none, 0.1_r);
     if (!(low_mach_cutoff > 0.0_r)) {
         throw std::runtime_error("numerics: low_mach_cutoff must be positive (1 disables the low-Mach correction).");
     }
@@ -1004,8 +1009,8 @@ void Solver::init_numerics() {
     if (!hybrid_flux && !hybrid_input.as_table().empty()) {
         throw InputError("[numerics.hybrid] needs numerics.convective_flux = \"hybrid\".");
     }
-    hybrid_threshold = find_real_or(hybrid_input, "sensor_threshold", 0.65_r);
-    hybrid_floor = find_real_or(hybrid_input, "upwind_floor", 0.0_r);
+    hybrid_threshold = find_real_or(hybrid_input, "sensor_threshold", dim::none, 0.65_r);
+    hybrid_floor = find_real_or(hybrid_input, "upwind_floor", dim::none, 0.0_r);
     if (!(hybrid_threshold >= 0.0_r && hybrid_threshold <= 1.0_r) || !(hybrid_floor >= 0.0_r && hybrid_floor <= 1.0_r)) {
         throw InputError("numerics.hybrid: sensor_threshold and upwind_floor must be in [0, 1].");
     }
@@ -1045,15 +1050,15 @@ void Solver::init_run_parameters() {
     }
     use_cfl = run.contains("cfl");
     if (use_cfl) {
-        cfl = find_real(input, "run", "cfl");
+        cfl = find_real(input, "run", "cfl", dim::none);
     } else {
-        dt_fixed = find_real(input, "run", "dt");
+        dt_fixed = find_real(input, "run", "dt", dim::time);
         dt = dt_fixed;
     }
     n_steps = toml::find_or<uint64_t>(input, "run", "n_steps", 0);
     cuda_graphs = toml::find_or<bool>(input, "run", "cuda_graphs", true);
-    t_stop = find_real_or(input, "run", "t_stop", -1.0);
-    t_wall_stop = find_real_or(input, "run", "t_wall_stop", -1.0);
+    t_stop = find_real_or(input, "run", "t_stop", dim::time, -1.0);
+    t_wall_stop = find_real_or(input, "run", "t_wall_stop", dim::time, -1.0);
 }
 
 void Solver::init_output() {

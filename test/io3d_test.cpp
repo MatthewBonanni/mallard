@@ -29,6 +29,7 @@
 #include "data_writer.h"
 #include "hdf5_output.h"
 #include "mesh_block.h"
+#include "scratch.h"
 
 namespace {
 
@@ -299,7 +300,7 @@ TEST(IO3DTest, HigherOrderCellsKeepTheirCornersAndUnsupportedOrdersAreRejected) 
 }
 
 TEST(IO3DTest, VolumeOutputFollowsVTKCellConventions) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_vtu3d").string();
+    const std::string dir = (scratch_dir() / "mallard_vtu3d").string();
     std::filesystem::remove_all(dir);
     auto mesh = mixed_mesh();
     CellFields fields(mesh->n_cells, {"RHO", "U_X", "U_Y", "U_Z"});
@@ -370,7 +371,7 @@ TEST(IO3DTest, VolumeOutputFollowsVTKCellConventions) {
 TEST(IO3DTest, HDF5OutputHoldsTheVTUCellsAsAnXDMFMixedTopology) {
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
 #ifdef Mallard_HAS_HDF5
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_h5_3d").string();
+    const std::string dir = (scratch_dir() / "mallard_h5_3d").string();
     std::filesystem::remove_all(dir);
     auto mesh = mixed_mesh();
     CellFields fields(mesh->n_cells, {"RHO", "U_X", "U_Y", "U_Z"});
@@ -416,7 +417,7 @@ TEST(IO3DTest, HDF5OutputHoldsTheVTUCellsAsAnXDMFMixedTopology) {
 }
 
 TEST(IO3DTest, BoundaryZoneOutputWritesTrianglesAndQuads) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_vtu3d_faces").string();
+    const std::string dir = (scratch_dir() / "mallard_vtu3d_faces").string();
     std::filesystem::remove_all(dir);
     auto mesh = mixed_mesh();
     CellFields fields(mesh->n_cells, {"RHO"});
@@ -450,7 +451,7 @@ TEST(IO3DTest, BoundaryZoneOutputWritesTrianglesAndQuads) {
 }
 
 TEST(IO3DTest, RestartRoundTripCarriesAllConservatives) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart3d").string();
+    const std::string dir = (scratch_dir() / "mallard_restart3d").string();
     std::filesystem::remove_all(dir);
     auto mesh = mixed_mesh();
     std::vector<std::string> names(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());

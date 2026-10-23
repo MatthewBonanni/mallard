@@ -3,6 +3,7 @@ add_library(MallardCore STATIC
     common/common_math.cpp
     common/common_io.cpp
     common/input.cpp
+    common/units.cpp
     common/memory_tracker.cpp
     common/build_info.cpp
     common/case_template.cpp
@@ -64,6 +65,7 @@ add_library(MallardCore STATIC
     solver/remap.cpp
     solver/statistics.cpp
     io/compression.cpp
+    io/file_format.cpp
     io/data_writer.cpp
     io/data_writer_hdf5.cpp
     parallel/comm.cpp

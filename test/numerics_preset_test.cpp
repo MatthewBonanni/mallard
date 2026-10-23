@@ -209,7 +209,6 @@ const std::vector<ExampleCase> EXAMPLES = {
      "type = \"cartesian\"\nNx = 8\nNy = 8\nNz = 8\nLx = 2.0\nLy = 2.0\nLz = 2.0\n"},
     {"taylor_green_3d/coarse.toml", "accurate", 3, "", {}, ""},
     {"taylor_green_3d/input.toml", "accurate", 3, "", {}, ""},
-    {"taylor_green_3d/input_periodic.toml", "accurate", 3, "", {}, ""},
     {"taylor_green_3d/remap.toml", "accurate", 3, "", {}, ""},
     {"turbulent_inflow_duct/input.toml", "les", 3, "", {}, ""},
     {"volvo_bluff_body/cold.toml", "les", 3, "",
@@ -229,21 +228,6 @@ std::vector<ExampleCase> examples_of_this_build() {
 }
 
 class ExampleUnderPreset : public ::testing::TestWithParam<ExampleCase> {};
-
-/** @brief A fresh working directory for the files a run writes, left on destruction. */
-struct ScratchDirectory {
-    std::filesystem::path previous = std::filesystem::current_path();
-    std::filesystem::path path;
-    explicit ScratchDirectory(const std::string & name)
-        : path(std::filesystem::temp_directory_path() / ("mallard_preset_" + name)) {
-        std::filesystem::create_directories(path);
-        std::filesystem::current_path(path);
-    }
-    ~ScratchDirectory() {
-        std::filesystem::current_path(previous);
-        std::filesystem::remove_all(path);
-    }
-};
 
 std::string case_name(const std::string & file) {
     std::string name = file.substr(0, file.size() - 5);
@@ -274,7 +258,6 @@ TEST(ExampleUnderPreset, EveryExampleHasAPreset) {
 TEST_P(ExampleUnderPreset, RunsAFewSteps) {
     const ExampleCase & c = GetParam();
     const Input input = example_under_preset(c, 3, N_DIM == 3 ? 8 : 16);
-    ScratchDirectory scratch(case_name(c.file));
     Solver solver;
     solver.init(input);
     EXPECT_EQ(solver.get_numerics_preset().name, c.preset);

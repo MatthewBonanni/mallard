@@ -34,6 +34,7 @@
 #include "provenance.h"
 #include "test_fixtures.h"
 #include "solver.h"
+#include "scratch.h"
 
 namespace {
 
@@ -389,7 +390,7 @@ namespace {
 
 std::string io_dir() {
     // Same path on every rank (they share a file system)
-    return (std::filesystem::temp_directory_path() / "mallard_mpi_io").string();
+    return (scratch_dir() / "mallard_mpi_io").string();
 }
 
 std::string restart_case(uint32_t n_steps, const std::string & output) {
@@ -768,7 +769,7 @@ TEST(MPITest, MultiJaggedPartitionCutsABoxIntoBlocksAndMatchesSerial) {
 }
 
 TEST(MPITest, TENOCacheOfEachRankReproducesItsSetupAndHalo) {
-    const std::string cache = (std::filesystem::temp_directory_path() / "mallard_mpi_teno_cache.bin").string();
+    const std::string cache = (scratch_dir() / "mallard_mpi_teno_cache.bin").string();
     const std::string rank_file =
         comm::size() > 1 ? cache + ".r" + std::to_string(comm::rank()) + "-of-" + std::to_string(comm::size()) : cache;
     std::filesystem::remove(rank_file);
@@ -823,7 +824,7 @@ TEST(MPITest, TENOCacheOfEachRankReproducesItsSetupAndHalo) {
 TEST(MPITest, RunFromHDF5MeshFileMatchesSerial) {
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
     if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5 to write the mesh";
-    const std::string file = (std::filesystem::temp_directory_path() / "mallard_mpi_mesh.h5").string();
+    const std::string file = (scratch_dir() / "mallard_mpi_mesh.h5").string();
     write_mesh_h5(file, read_mesh_block(parse_toml("[mesh]\ntype = \"cartesian_tri\"\nNx = 24\nNy = 18\n"
                                                    "Lx = 1.0\nLy = 0.8\n")));
     comm::barrier();
@@ -851,7 +852,7 @@ TEST(MPITest, CurvedWallsMatchSerial) {
         input.replace(a, b - a, "type = \"file\"\nfilename = \"" + file + "\"\n" + (order == 1 ? shapes : ""));
         expect_matches_serial(input, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
         if (order == 3 && have_hdf5() && (comm::size() == 1 || have_parallel_hdf5())) {
-            const std::string h5 = (std::filesystem::temp_directory_path() / "mallard_mpi_annulus_3.h5").string();
+            const std::string h5 = (scratch_dir() / "mallard_mpi_annulus_3.h5").string();
             write_mesh_h5(h5, read_file_block(file));
             std::string from_h5 = input;
             from_h5.replace(from_h5.find(file), file.size(), h5);
