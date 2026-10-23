@@ -2794,6 +2794,15 @@
   "set_in": [],
   "type": "integer"
  },
+ "output.run_log": {
+  "default": "\"mallard.jsonl\"",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "string"
+ },
  "parallel": {
   "dims": [
    2,
