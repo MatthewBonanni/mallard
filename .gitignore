@@ -53,3 +53,5 @@ runs/
 build-*/
 .venv/
 __pycache__/
+# Spack development-build links (build-<platform>-<os>-<target>-<hash>)
+/build-*-*-*-*

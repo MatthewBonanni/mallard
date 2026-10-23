@@ -92,6 +92,10 @@ int Solver::init(const Input & input_in) {
         provenance::set_input("", toml::format(unrecorded(input)));
     }
     input_from_file = false;
+    deprecated_keys = input_upgrade::apply(input);
+    if (!check_only) {
+        for (const auto & finding : deprecated_keys) logging::warning(input_upgrade::advice(finding));
+    }
     preset = numerics_preset::apply(input);
     std::vector<std::tuple<std::string, std::string, bool>> preset_settings;
     for (const auto & s : preset.settings) preset_settings.emplace_back(s.key, s.value, s.from_preset);

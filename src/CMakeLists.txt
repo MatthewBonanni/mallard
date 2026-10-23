@@ -1,6 +1,8 @@
 # CMakeLists.txt for Mallard
 add_library(MallardCore STATIC
     common/common_math.cpp
+    common/compiled_expression.cpp
+    common/region.cpp
     common/common_io.cpp
     common/input.cpp
     common/units.cpp
@@ -13,6 +15,7 @@ add_library(MallardCore STATIC
     common/provenance.cpp
     common/run_log.cpp
     common/run_status.cpp
+    common/input_upgrade.cpp
     mesh/curved.cpp
     mesh/mesh.cpp
     mesh/mesh_io.cpp
@@ -176,6 +179,7 @@ endif()
 
 add_executable(Mallard main.cpp)
 target_link_libraries(Mallard PRIVATE MallardCore)
+set_target_properties(Mallard PROPERTIES OUTPUT_NAME Mallard${Mallard_EXECUTABLE_SUFFIX})
 mallard_target_warnings(Mallard)
 
 add_executable(MallardReactor reactor_main.cpp)
@@ -185,5 +189,6 @@ mallard_target_warnings(MallardReactor)
 if(Mallard_ENABLE_HDF5)
     add_executable(mallard-mesh-convert mesh_convert.cpp)
     target_link_libraries(mallard-mesh-convert PRIVATE MallardCore)
+    set_target_properties(mallard-mesh-convert PROPERTIES OUTPUT_NAME mallard-mesh-convert${Mallard_EXECUTABLE_SUFFIX})
     mallard_target_warnings(mallard-mesh-convert)
 endif()
