@@ -1,0 +1,2 @@
+- Each MPI rank picks the GPU nearest its cores by itself (or shares out the GPUs the launcher made visible), and parallel runs print where every rank runs (host, GPU, CPUs, NUMA nodes) with warnings for wasteful placements (#330, #386).
+- Job scripts in `tools/jobs/` for Slurm (one node, several nodes), PBS, Kubernetes and `mpirun` that resume from the newest restart, stop cleanly before time limits and resubmit themselves; `Mallard -i input.toml --restart FILE` starts from a restart file without editing the input (#330, #386).
