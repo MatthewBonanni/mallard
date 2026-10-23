@@ -20,7 +20,7 @@
 #include <unordered_map>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "curved.h"
 #include "periodic_maps.h"
@@ -173,14 +173,14 @@ class Mesh {
          * @brief Initialize the mesh.
          * @param input TOML input data.
          */
-        void init(const toml::value & input);
+        void init(const Input & input);
 
         /**
          * @brief Periodic pairs from [[periodic]] entries, and for generated
          *        meshes from [mesh] periodic: left/right for x, bottom/top for
          *        y, back/front for z.
          */
-        static std::vector<PeriodicPair> periodic_pairs(const toml::value & input);
+        static std::vector<PeriodicPair> periodic_pairs(const Input & input);
 
         /**
          * @brief Get the type of mesh.

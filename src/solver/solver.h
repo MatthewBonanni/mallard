@@ -20,13 +20,14 @@
 #include <string>
 #include <vector>
 
-#include <toml.hpp>
+#include "input.h"
 
 #include "mesh.h"
 #include "boundary.h"
 #include "face_reconstruction.h"
 #include "riemann_solver.h"
 #include "time_integrator.h"
+#include "step_control.h"
 #include "physics.h"
 #include "les.h"
 #include "pasr.h"
@@ -38,12 +39,15 @@
 #include "data_writer.h"
 #include "statistics.h"
 #include "synthetic_inflow.h"
+#include "wall_exchange.h"
 #include "expression.h"
 #include "comm.h"
 #include "distributed_mesh.h"
 #include "distribution.h"
 #include "halo_exchange.h"
 #include "log.h"
+#include "check.h"
+#include "memory_tracker.h"
 #include "numerics_preset.h"
 
 struct ForceMonitor {
@@ -52,6 +56,7 @@ struct ForceMonitor {
     Kokkos::View<uint32_t *> faces;
     uint64_t interval = 1;
     std::shared_ptr<std::ofstream> out;
+    bool modeled = false;  // the zone has modeled walls: a column Q, their heat flux into the fluid
 };
 
 constexpr int N_FLOW_STATISTICS = 9;
@@ -100,7 +105,14 @@ class Solver {
          * @param input Parsed TOML input.
          * @return Exit status.
          */
-        int init(const toml::value & input);
+        int init(const Input & input);
+
+        /**
+         * @brief Pre-flight check: the setup of init, without the error for
+         *        unused keys and without creating output files, then what it
+         *        tells about the run (see check.h).
+         */
+        CheckReport check(const Input & input, const CheckOptions & options);
 
         /**
          * @brief Run until a stop condition is reached.
@@ -150,9 +162,10 @@ class Solver {
 
         /**
          * @brief Force exerted by the fluid on a boundary zone: pressure part
-         *        [Fx, Fy] and viscous part [Fx, Fy].
+         *        [Fx, Fy] and viscous part [Fx, Fy] (the modeled stress on
+         *        modeled walls), then the modeled heat flux into the fluid.
          */
-        std::array<rtype, 2 * N_DIM> calc_force(const Kokkos::View<uint32_t *> & faces);
+        std::array<rtype, 2 * N_DIM + 1> calc_force(const Kokkos::View<uint32_t *> & faces);
 
         /**
          * @brief Sum of each conservative variable integrated over the domain.
@@ -210,6 +223,14 @@ class Solver {
         /** @brief Adds the sponge-layer sources to the RHS per unit volume (owned cells). */
         void apply_sponges(const State & solution, const State & rhs);
         void calc_dt();
+        /**
+         * @brief Error-controlled steps: whether step_controller accepts the
+         *        step just taken (else the solution is back at U^n).
+         */
+        bool accept_controlled_step();
+        void init_error_control();
+        /** @brief Throws once the same step has been rejected too many times. */
+        void check_rejections(int tries) const;
         /** @brief The time the next step must not pass: t_stop or the next time-based output. */
         rtype next_target_time() const;
         void check_fields();
@@ -259,6 +280,7 @@ class Solver {
          *        time-step diffusivity NU_EFF also grows).
          */
         void update_eddy_viscosity(uint32_t n);
+        void update_wall_model();  // the modeled walls' flux from W_cells and viscous_gradients
         /** @brief LES: the eddy viscosity of the current state for the time step (owned cells) or output (all). */
         void eddy_viscosity_of_state(uint32_t n);
         /**
@@ -368,10 +390,12 @@ class Solver {
         rtype get_time() const { return t; }
         const Statistics & get_statistics() const { return statistics; }
         uint64_t get_step() const { return step; }
+        /** @brief Steps rejected by the error controller in this run. */
+        uint64_t get_rejected_steps() const { return n_rejected; }
         const Euler & get_physics() const { return physics; }
         std::shared_ptr<Mesh> get_mesh() const { return mesh; }
         /** @brief The input after its numerics preset, if any, filled the keys it leaves unset. */
-        const toml::value & resolved_input() const { return input; }
+        const Input & resolved_input() const { return input; }
         /** @brief The numerics preset and the value and origin of each of its keys. */
         const numerics_preset::Resolution & get_numerics_preset() const { return preset; }
 
@@ -401,6 +425,13 @@ class Solver {
         void init_physics();
         void init_numerics();
         void init_boundaries();
+        std::string zones_without_condition(const std::vector<int32_t> & face_bc) const;
+        void setup_from_input();
+        void check_mesh_quality(CheckReport & report, const CheckOptions & options) const;
+        void check_time_step(CheckReport & report);
+        void check_memory(CheckReport & report, const CheckOptions & options, const memory::Tracker & tracker) const;
+        void check_cost(CheckReport & report, const CheckOptions & options, const memory::Tracker & tracker);
+        void check_settings(CheckReport & report) const;
         void init_run_parameters();
         void init_output();
         void init_solution();
@@ -415,14 +446,14 @@ class Solver {
          */
         void apply_restart(const RestartData & restart, const std::string & file, bool resume_output);
         void update_boundary_states(rtype t_eval);
-        void init_inlets(const std::vector<toml::value> & input_boundaries,
+        void init_inlets(const std::vector<Input> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
         void update_inflow(rtype t_eval);
         void init_sources();
         void update_source_field(rtype t_eval);
         void init_sponges();
         /** @brief Mass fractions of a composition table (numbers or expressions) at the centroids of cells. */
-        std::vector<std::vector<double>> composition_at_cells(const toml::value & table, const std::string & where,
+        std::vector<std::vector<double>> composition_at_cells(const Input & table, const std::string & where,
                                                               const std::vector<uint32_t> & cells) const;
         void allocate_memory();
         void register_data();
@@ -460,10 +491,13 @@ class Solver {
         int base_halo_layers() const;
         bool halo_too_shallow();
         void trim_halo();
+        uint32_t n_gradient_cells() const;
         void describe_partition_surface();
         void init_rhs_split();
         void init_axisymmetric_weights();
         void init_les();
+        /** @brief Exchange points of the modeled walls (after the boundary data). */
+        void init_wall_model(const std::vector<int32_t> & face_bc, const std::vector<BoundaryCondition> & bcs);
         /** @brief Hybrid flux: the upwind fraction of every cell from the gradients of W_cells. */
         void update_upwind_sensor();
         /** @brief sum over owned cells of u . R_m - |u|^2 / 2 R_rho for R the sum of face_flux over the cell's faces. */
@@ -480,7 +514,7 @@ class Solver {
         void launch_mixture_flux_functor();
         template <typename T_riemann_solver>
         void launch_double_flux_functor();
-        void init_mixture_boundaries(const std::vector<toml::value> & input_boundaries,
+        void init_mixture_boundaries(const std::vector<Input> & input_boundaries,
                                      const std::vector<std::array<uint32_t, 2>> & profiled_faces,
                                      std::vector<BoundaryCondition> & bcs);
 
@@ -490,7 +524,8 @@ class Solver {
         Kokkos::DefaultExecutionSpace overlap_space;  // runs the early cells while the halo is exchanged
         bool halo_current = false;                     // halo of conservatives filled since its last update
 
-        toml::value input;
+        Input input;
+        bool check_only = false;  // within check()
         numerics_preset::Resolution preset;
 
         // Run parameters
@@ -552,6 +587,8 @@ class Solver {
         rtype hybrid_floor = 0.0;
         Kokkos::View<rtype *> cell_upwind;  // hybrid flux: upwind fraction of each cell, else empty
         std::unique_ptr<TimeIntegrator> time_integrator;
+        StepController step_controller;  // [numerics.error_control], else not enabled
+        uint64_t n_rejected = 0;         // steps rejected by step_controller in this run
 
         // Axisymmetric runs (see docs/design/axisymmetric.md)
         bool axisymmetric = false;
@@ -603,6 +640,12 @@ class Solver {
         Kokkos::View<double *[6]> dynamic_stresses;    // (cell, rho Delta^2 D(g) S^d)
         double dynamic_ratio = 0.0;
         KineticEnergyBudget budget;
+
+        // Wall-modeled LES (docs/design/wall_model.md)
+        bool wall_model_on = false;
+        std::vector<WallModelSpec> wall_model_specs;  // by boundary condition (default for unmodeled ones)
+        WallModelData wall_model;
+        WallModelPoints wall_model_points;
 
         // Gas mixtures
         ScalarView cell_scalars;                              // (cell, [Y_1 .. Y_Ns, gamma, e0])

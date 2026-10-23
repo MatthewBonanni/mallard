@@ -15,9 +15,9 @@ flux is the Riemann solver applied to the interior face state
 $\mathbf{W}^L$ and an exterior state $\mathbf{W}^b$
 (`BoundaryData::exterior_W`, `src/boundary/boundary.h`), with the unit
 normal $\mathbf{n}$ pointing out of the domain. Ghost states also feed the
-least-squares gradients ([chapter 5](finite_volume.md#muscl)) and the
+least-squares gradients ([chapter 6](finite_volume.md#muscl)) and the
 mirror images of TENO-E stencils. The viscous fluxes of each boundary type
-are in [chapter 6](fluxes.md#face-values-and-gradients). With
+are in [chapter 7](fluxes.md#face-values-and-gradients). With
 $u_n = \mathbf{u}^L\cdot\mathbf{n}$, the exterior states $\mathbf{W}^b = [\rho, \mathbf{u}, p]^b$ are:
 
 - `symmetry`, inviscid walls: $[\rho^L,\ \mathbf{u}^L - 2u_n\mathbf{n},\ p^L]$;
@@ -86,9 +86,11 @@ while scalars carry over unchanged (`src/mesh/periodic_maps.h`).
 ### Walls
 
 The ghost states above, together with the viscous wall fluxes of
-[chapter 6](fluxes.md#face-values-and-gradients), give no-slip walls with
+[chapter 7](fluxes.md#face-values-and-gradients), give no-slip walls with
 one-sided wall gradients. In LES the wall faces carry the molecular fluxes
-only, with no SGS stress, heat or species flux.
+only, with no SGS stress, heat or species flux. Walls with a wall model
+take a slip wall's exterior state and the model's stress and heat flux
+([chapter 5](wall_models.md#coupling-to-the-les)).
 
 ## Characteristic boundaries
 
@@ -171,7 +173,7 @@ $a = 1$, by default), and $\rho^b = p^b/(R_t T^b)$ at the target's gas
 constant. Supersonic outflow takes $\mathbf{W}^L$, supersonic inflow the
 target. The low-Mach correction applies at characteristic faces, and
 MUSCL boundary cells there reconstruct without the zero-gradient ghosts
-([chapter 5](finite_volume.md#muscl)). An inlet's target velocity is per
+([chapter 6](finite_volume.md#muscl)). An inlet's target velocity is per
 face and may carry synthetic turbulence ([chapter 4](les.md#synthetic-inflow-turbulence)).
 
 ![Waves at characteristic boundaries](../images/theory/characteristics-light.svg#gh-light-mode-only)
@@ -240,4 +242,4 @@ by strength. The time step is limited to $\Delta t \le 1/\max_i\sigma_i$.
 
 Axisymmetric runs add the radial momentum source of
 [chapter 1](governing_equations.md#axisymmetric-flows), integrated as in
-[chapter 5](finite_volume.md#axisymmetric-cells).
+[chapter 6](finite_volume.md#axisymmetric-cells).

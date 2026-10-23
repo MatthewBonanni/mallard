@@ -24,6 +24,7 @@
 #include "solver.h"
 #include "synthetic_inflow.h"
 #include "test_fixtures.h"
+#include "scratch.h"
 
 namespace {
 
@@ -286,7 +287,7 @@ TEST(SyntheticInflowTest, FieldDependsOnlyOnTimeAndSeed) {
 
 TEST(SyntheticInflowTest, RestartedRunMatchesUninterruptedRunExactly) {
     // The generator has no state; the characteristic faces' state goes into the restart file
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_inflow_restart_test").string();
+    const std::string dir = (scratch_dir() / "mallard_inflow_restart_test").string();
     std::filesystem::remove_all(dir);
     Solver straight;
     straight.init(parse_toml(duct_input(dir + "/a", duct_constant(), 40)));

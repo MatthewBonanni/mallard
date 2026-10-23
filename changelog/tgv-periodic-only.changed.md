@@ -1,0 +1,1 @@
+- `examples/taylor_green_3d` uses only the full periodic box: `input.toml` is the former `input_periodic.toml` (128³, the workshop's resolution), the remap demo (`coarse.toml`, `remap.toml`) runs on the periodic box, and `tools/plot_taylor_green.py` and `tools/animate_taylor_green.py` take full-box runs without `--full-box`; the symmetry-plane octant is gone.

@@ -230,15 +230,15 @@ uint32_t element_order(uint32_t n_corners, uint32_t n_nodes) {
     }
 }
 
-bool enabled(const toml::value & input) {
+bool enabled(const Input & input) {
     if (!input.contains("mesh")) return true;
     return toml::find_or<bool>(input, "mesh", "curved_geometry", true);
 }
 
-std::vector<Shape> read_shapes(const toml::value & input) {
+std::vector<Shape> read_shapes(const Input & input) {
     std::vector<Shape> shapes;
     if (!enabled(input) || !input.contains("mesh") || !input.at("mesh").contains("curved")) return shapes;
-    for (const auto & entry : toml::find<std::vector<toml::value>>(input, "mesh", "curved")) {
+    for (const auto & entry : toml::find<std::vector<Input>>(input, "mesh", "curved")) {
         Shape s;
         s.zone = toml::find<std::string>(entry, "zone");
         const std::string kind = toml::find<std::string>(entry, "shape");
@@ -252,15 +252,15 @@ std::vector<Shape> read_shapes(const toml::value & input) {
             throw InputError("mesh.curved: shape = \"" + kind + "\" is not one of: " +
                              (N_DIM == 2 ? "circle" : "sphere, cylinder") + ".");
         }
-        const auto center = toml::find<std::vector<toml::value>>(entry, "center");
+        const auto center = toml::find<std::vector<Input>>(entry, "center");
         if (center.size() != N_DIM) throw InputError("mesh.curved: center needs " + std::to_string(N_DIM) + " components.");
-        for (size_t i = 0; i < N_DIM; i++) s.center[i] = double(as_real(center[i], "mesh.curved.center"));
-        s.radius = double(as_real(toml::find(entry, "radius"), "mesh.curved.radius"));
+        for (size_t i = 0; i < N_DIM; i++) s.center[i] = double(as_real(center[i], "mesh.curved.center", dim::length));
+        s.radius = double(as_real(toml::find(entry, "radius"), "mesh.curved.radius", dim::length));
         if (!(s.radius > 0.0)) throw InputError("mesh.curved: radius must be positive.");
         if (s.kind == Shape::Kind::CYLINDER) {
-            const auto axis = toml::find<std::vector<toml::value>>(entry, "axis");
+            const auto axis = toml::find<std::vector<Input>>(entry, "axis");
             if (axis.size() != 3) throw InputError("mesh.curved: axis needs 3 components.");
-            for (size_t i = 0; i < 3; i++) s.axis[i] = double(as_real(axis[i], "mesh.curved.axis"));
+            for (size_t i = 0; i < 3; i++) s.axis[i] = double(as_real(axis[i], "mesh.curved.axis", dim::none));
             const double norm = std::sqrt(dot(s.axis, s.axis));
             if (!(norm > 0.0)) throw InputError("mesh.curved: axis must be nonzero.");
             s.axis = scale(1.0 / norm, s.axis);
@@ -271,7 +271,7 @@ std::vector<Shape> read_shapes(const toml::value & input) {
     return shapes;
 }
 
-Surfaces surfaces_of_mesh(const Mesh & mesh, const toml::value & input) {
+Surfaces surfaces_of_mesh(const Mesh & mesh, const Input & input) {
     Surfaces out;
     if (!enabled(input)) return out;
     out.shapes = read_shapes(input);
@@ -298,7 +298,7 @@ Surfaces surfaces_of_mesh(const Mesh & mesh, const toml::value & input) {
     return out;
 }
 
-Surfaces surfaces_of_block(const MeshBlock & block, const toml::value & input) {
+Surfaces surfaces_of_block(const MeshBlock & block, const Input & input) {
     Surfaces out;
     if (!enabled(input)) return out;
     out.shapes = read_shapes(input);

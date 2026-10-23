@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-#include <toml.hpp>
+#include "input.h"
 
 namespace numerics_preset {
 
@@ -48,7 +48,7 @@ std::vector<std::string> names();
  *        is unchanged and the resolution is empty.
  * @throws InputError for a preset that is not a string or not a known name.
  */
-Resolution apply(toml::value & input);
+Resolution apply(Input & input);
 
 } // namespace numerics_preset
 

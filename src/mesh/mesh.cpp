@@ -35,7 +35,7 @@ Mesh::~Mesh() {
     // Empty
 }
 
-void Mesh::init(const toml::value & input) {
+void Mesh::init(const Input & input) {
     std::string type_str = toml::find_or<std::string>(input, "mesh", "type", "file");
     typename std::unordered_map<std::string, MeshType>::const_iterator it = MESH_TYPES.find(type_str);
     if (it == MESH_TYPES.end()) {
@@ -57,12 +57,12 @@ void Mesh::init(const toml::value & input) {
     }
     uint32_t Nx = toml::find_or<uint32_t>(input, "mesh", "Nx", 100);
     uint32_t Ny = toml::find_or<uint32_t>(input, "mesh", "Ny", 100);
-    rtype Lx = find_real_or(input, "mesh", "Lx", 1.0);
-    rtype Ly = find_real_or(input, "mesh", "Ly", 1.0);
+    rtype Lx = find_real_or(input, "mesh", "Lx", dim::length, 1.0);
+    rtype Ly = find_real_or(input, "mesh", "Ly", dim::length, 1.0);
     const Stretching stretching = mesh_stretching(input);
     if constexpr (N_DIM == 3) {
         const uint32_t Nz = toml::find_or<uint32_t>(input, "mesh", "Nz", 100);
-        const rtype Lz = find_real_or(input, "mesh", "Lz", 1.0);
+        const rtype Lz = find_real_or(input, "mesh", "Lz", dim::length, 1.0);
         if (get_type() == MeshType::CARTESIAN_TRI || get_type() == MeshType::WEDGE) {
             throw std::runtime_error("Mesh type " + type_str + " is 2D only.");
         }
@@ -91,10 +91,10 @@ void Mesh::init(const toml::value & input) {
     }
 }
 
-std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const toml::value & input) {
+std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const Input & input) {
     std::vector<PeriodicPair> pairs;
     if (input.contains("periodic")) {
-        const auto entries = toml::find<std::vector<toml::value>>(input, "periodic");
+        const auto entries = toml::find<std::vector<Input>>(input, "periodic");
         for (const auto & entry : entries) {
             const auto zones = toml::find<std::vector<std::string>>(entry, "zones");
             const bool rotation = entry.contains("angle");
@@ -103,7 +103,7 @@ std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const toml::value & input) 
             }
             PeriodicPair pair{zones[0], zones[1]};
             if (!rotation) {
-                const std::vector<rtype> t = find_real_vector(entry, "translation");
+                const std::vector<rtype> t = find_real_vector(entry, "translation", dim::length);
                 if (t.size() != N_DIM) {
                     throw InputError("[[periodic]] needs zones = [A, B] and a translation with " +
                                      std::to_string(N_DIM) + " components (or an angle).");
@@ -112,10 +112,10 @@ std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const toml::value & input) 
                 pairs.push_back(pair);
                 continue;
             }
-            pair.angle = find_real_or(entry, "angle", 0.0) * rtype(std::numbers::pi / 180.0);
+            pair.angle = find_real_or(entry, "angle", dim::angle_degrees, 0.0_r) * rtype(std::numbers::pi / 180.0);
             if (pair.angle == 0.0_r) throw InputError("[[periodic]] angle must be nonzero.");
             if (entry.contains("center")) {
-                const std::vector<rtype> c = find_real_vector(entry, "center");
+                const std::vector<rtype> c = find_real_vector(entry, "center", dim::length);
                 if (c.size() != N_DIM) {
                     throw InputError("[[periodic]] center needs " + std::to_string(N_DIM) + " components.");
                 }
@@ -125,7 +125,7 @@ std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const toml::value & input) 
                 if constexpr (N_DIM == 2) {
                     throw InputError("[[periodic]] axis: 2D rotations turn about the point center.");
                 } else {
-                    const std::vector<rtype> a = find_real_vector(entry, "axis");
+                    const std::vector<rtype> a = find_real_vector(entry, "axis", dim::none);
                     if (a.size() != 3) throw InputError("[[periodic]] axis needs 3 components.");
                     for (size_t i = 0; i < 3; i++) pair.axis[i] = a[i];
                 }
@@ -145,10 +145,11 @@ std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const toml::value & input) 
             PeriodicPair pair;
             if (dir == "theta") {
                 pair = PeriodicPair{"start", "end"};
-                pair.angle = find_real_or(input, "mesh", "angle", 360.0) * rtype(std::numbers::pi / 180.0);
+                pair.angle = find_real_or(input, "mesh", "angle", dim::angle_degrees, 360.0_r) *
+                             rtype(std::numbers::pi / 180.0);
             } else if (dir == "z" && N_DIM == 3) {
                 pair = PeriodicPair{"back", "front"};
-                pair.translation[N_DIM - 1] = find_real_or(input, "mesh", "Lz", 1.0);
+                pair.translation[N_DIM - 1] = find_real_or(input, "mesh", "Lz", dim::length, 1.0_r);
             } else {
                 throw InputError("[mesh] periodic: the annulus is periodic in theta" +
                                  std::string(N_DIM == 3 ? " or z." : "."));
@@ -160,8 +161,9 @@ std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const toml::value & input) 
         }
         return pairs;
     }
-    const rtype L[3] = {find_real_or(input, "mesh", "Lx", 1.0), find_real_or(input, "mesh", "Ly", 1.0),
-                        find_real_or(input, "mesh", "Lz", 1.0)};
+    const rtype L[3] = {find_real_or(input, "mesh", "Lx", dim::length, 1.0),
+                        find_real_or(input, "mesh", "Ly", dim::length, 1.0),
+                        find_real_or(input, "mesh", "Lz", dim::length, 1.0)};
     const char * zones[3][2] = {{"left", "right"}, {"bottom", "top"}, {"back", "front"}};
     for (const std::string & dir : toml::find<std::vector<std::string>>(input, "mesh", "periodic")) {
         const int d = (dir == "x") ? 0 : (dir == "y") ? 1 : (dir == "z") ? 2 : -1;

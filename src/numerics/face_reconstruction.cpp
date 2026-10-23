@@ -22,7 +22,7 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "common.h"
 #include "quadrature.h"
@@ -291,7 +291,7 @@ FirstOrder::~FirstOrder() {
     // Empty
 }
 
-void FirstOrder::init(const toml::value & input) {
+void FirstOrder::init(const Input & input) {
     (void)(input);
     if constexpr (N_DIM == 3) init_face_quadrature_3d(1);
     init_face_quadrature_2d_curved();
@@ -352,14 +352,14 @@ MUSCL::~MUSCL() {
     // Empty
 }
 
-void MUSCL::init(const toml::value & input) {
+void MUSCL::init(const Input & input) {
     const std::string limiter_str = toml::find_or<std::string>(input, "limiter", "venkatakrishnan");
     auto it = LIMITER_TYPES.find(limiter_str);
     if (it == LIMITER_TYPES.end()) {
         throw unknown_option(LIMITER_TYPES, "numerics.face_reconstruction.limiter", limiter_str);
     }
     limiter = it->second;
-    venkat_K = find_real_or(input, "venkatakrishnan_K", 5.0);
+    venkat_K = find_real_or(input, "venkatakrishnan_K", dim::none, 5.0);
     gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("gradients", mesh->n_cells);
     limiters = Kokkos::View<rtype *[N_CONSERVATIVE]>("limiters", mesh->n_cells);
     gradient = make_vertex_gradient(make_gradient(*mesh, boundaries, {}, gradients), *mesh, false);

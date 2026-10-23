@@ -936,7 +936,7 @@ void Solver::init_les() {
     if (!reacting || !is_viscous()) {
         throw InputError("[les.combustion] needs a reacting viscous mixture (gas = \"mixture\", navier_stokes, [chemistry]).");
     }
-    const toml::value & combustion = input.at("les").at("combustion");
+    const Input & combustion = input.at("les").at("combustion");
     if (toml::find_or<std::string>(combustion, "model", "") == "pasr") {
         pasr = PartiallyStirredReactor::from_input(combustion);
         pasr_on = true;

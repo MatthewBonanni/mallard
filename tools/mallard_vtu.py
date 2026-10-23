@@ -9,25 +9,41 @@ import numpy as np
 _DTYPES = {"Float32": "<f4", "Float64": "<f8", "UInt32": "<u4", "Int32": "<i4",
            "Int64": "<i8", "UInt64": "<u8", "UInt8": "u1"}
 
+# Newest MALLARD_FORMAT_VERSION this reader knows (files before Mallard 0.9 have none)
+VTU_FORMAT_VERSION = 1
+
 VTK_3D_TYPES = {10: "tetra", 12: "hexahedron", 13: "wedge", 14: "pyramid"}
+
+
+def _check_version(path, header):
+    m = re.search(r'Name="MALLARD_FORMAT_VERSION"[^>]*>\s*(-?\d+)\s*<', header)
+    if m and int(m.group(1)) > VTU_FORMAT_VERSION:
+        raise ValueError(f"{path} is a VTU file of Mallard format version {m.group(1)}, written by a newer "
+                         f"Mallard; this script reads versions up to {VTU_FORMAT_VERSION}: update tools/")
 
 
 def read_vtu_cells(path):
     """Read a 2D or 3D volume VTU.
 
     Returns points (n, 3), connectivity, offsets (end of each cell), VTK cell
-    types, and the cell arrays (vectors as (n_cells, 3)) plus "TIME". An HDF5
-    snapshot (.h5) is read with mallard_h5.
+    types, and the cell arrays (vectors as (n_cells, 3)) plus "TIME". A PVTU
+    (MPI runs) is read as the union of its pieces; an HDF5 snapshot (.h5) is
+    read with mallard_h5.
     """
     if path.endswith(".h5") or path.endswith(".xmf"):
         from mallard_h5 import read_h5_cells
         return read_h5_cells(path)
+    if path.endswith(".pvtu"):
+        return _read_pvtu(path)
     raw = open(path, "rb").read()
     if b"<AppendedData" not in raw:
-        return _read_ascii(raw.decode("latin-1"))
+        text = raw.decode("latin-1")
+        _check_version(path, text)
+        return _read_ascii(text)
     start = raw.index(b"<AppendedData")
     start = raw.index(b"_", start) + 1
     header = raw[:start].decode("latin-1")
+    _check_version(path, header)
     hdr_type = re.search(r'header_type="(\w+)"', header)
     hdr_dt = np.dtype(_DTYPES[hdr_type.group(1)] if hdr_type else "<u4")
     zlib_blocks = 'compressor="vtkZLibDataCompressor"' in header
@@ -57,6 +73,34 @@ def read_vtu_cells(path):
     return pts, conn, offs, types, out
 
 
+def _read_pvtu(path):
+    pieces = re.findall(r'Source="([^"]+)"', open(path).read())
+    parts = [read_vtu_cells(os.path.join(os.path.dirname(path), p)) for p in pieces]
+    n_pts = np.cumsum([0] + [len(p[0]) for p in parts[:-1]])
+    n_conn = np.cumsum([0] + [len(p[1]) for p in parts[:-1]])
+    # Nodes on the boundaries between pieces appear in each: keep one copy
+    pts, inverse = np.unique(np.concatenate([p[0] for p in parts]), axis=0, return_inverse=True)
+    conn = inverse.ravel()[np.concatenate([p[1].astype(np.int64) + n for p, n in zip(parts, n_pts)])]
+    offs = np.concatenate([p[2].astype(np.int64) + n for p, n in zip(parts, n_conn)])
+    types = np.concatenate([p[3] for p in parts])
+    arrays = {k: np.concatenate([p[4][k] for p in parts]) for k in parts[0][4] if k != "TIME"}
+    if "TIME" in parts[0][4]:
+        arrays["TIME"] = parts[0][4]["TIME"]
+    return pts, conn, offs, types, arrays
+
+
+def series(directory, pattern="*"):
+    """The snapshots of a series in a directory, oldest first: the PVTU files
+    of an MPI run (not their pieces), else the VTU (or HDF5) files."""
+    import glob
+    files = sorted(glob.glob(os.path.join(directory, pattern)))
+    parallel = [f for f in files if f.endswith(".pvtu")]
+    if parallel:
+        return parallel
+    return [f for f in files if (f.endswith(".vtu") or f.endswith(".h5"))
+            and not re.search(r"_p\d{4}\.vtu$", f)]
+
+
 def _inflate_blocks(raw, off, hdr_dt):
     """An appended array of vtkZLibDataCompressor blocks (compression = "zlib"), decompressed."""
     import zlib
@@ -79,6 +123,8 @@ def _read_ascii(text):
         name = attrs.get("Name", "Points")
         if name == "TIME":
             time = float(m.group(2))
+            continue
+        if name == "MALLARD_FORMAT_VERSION":
             continue
         data = np.array(m.group(2).split(), dtype=_DTYPES[attrs["type"]])
         ncomp = int(attrs.get("NumberOfComponents", 1))
