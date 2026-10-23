@@ -14,6 +14,7 @@
 
 #include <cmath>
 #include <string>
+#include <vector>
 
 #include "test_fixtures.h"
 #include "face_reconstruction.h"
@@ -82,6 +83,7 @@ void expect_exact_gradient(const Mesh & mesh, Kokkos::View<rtype *[N_CONSERVATIV
 }
 
 class MeshTypes3D : public ::testing::TestWithParam<std::string> {};
+class ExtrapolationColumn3D : public ::testing::TestWithParam<std::string> {};
 
 } // namespace
 
@@ -122,13 +124,88 @@ TEST_P(MeshTypes3D, UnlimitedMUSCLReproducesLinearFieldAtInteriorFaces) {
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, 1);
     muscl->calc_face_values(W, face_W);
     auto h_face_W = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+    // Stencils that reach across the extrapolation boundary, also through a node,
+    // continue the field unchanged along the normal
+    std::vector<bool> on_boundary(mesh->n_nodes, false);
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        if (mesh->h_cells_of_face(f, 1) >= 0) continue;
+        for (uint32_t j = 0; j < mesh->h_n_nodes_of_face(f); j++) on_boundary[mesh->h_node_of_face(f, j)] = true;
+    }
+    auto touches_boundary = [&](uint32_t c) {
+        for (uint32_t k = 0; k < mesh->h_n_nodes_of_cell(c); k++) {
+            if (on_boundary[mesh->h_node_of_cell(c, k)]) return true;
+        }
+        return false;
+    };
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
         for (uint8_t side = 0; side < 2; side++) {
             const int32_t c = mesh->h_cells_of_face(f, side);
-            if (c < 0 || is_boundary_cell(*mesh, static_cast<uint32_t>(c))) continue;
+            if (c < 0 || touches_boundary(static_cast<uint32_t>(c))) continue;
             FOR_I_CONSERVATIVE {
                 ASSERT_NEAR(h_face_W(f, 0, side, i), linear_at(i, mesh->h_face_coords, f), roundoff(1e-10))
                     << "face " << f << " side " << static_cast<int>(side);
+            }
+        }
+    }
+}
+
+TEST_P(ExtrapolationColumn3D, GradientsMatchThoseOfAPeriodicColumn) {
+    // A field of z alone, in a column of 3 x 3 cells whose sides are either
+    // extrapolation boundaries or periodic: the image neighbors continue every
+    // stencil across the boundary as across the periodic seam, so the
+    // gradients agree (one-sided stencils are off by O(h) on tetrahedra)
+    auto column = [&](bool periodic) {
+        Input input = parse_toml("[mesh]\ntype = \"" + GetParam() + "\"\nNx = 3\nNy = 3\nNz = 4\nLx = 0.75\nLy = 0.75\n" +
+                                 (periodic ? "periodic = [\"x\", \"y\"]\n" : ""));
+        auto mesh = std::make_shared<Mesh>();
+        mesh->init(input);
+        mesh->copy_host_to_device();
+        return mesh;
+    };
+    auto field = [](uint8_t i, rtype z) { return C[i] + G[i][2] * z + 0.5_r * z * z - 0.75_r * z * z * z; };
+    auto gradients = [&](const Mesh & mesh) {
+        std::vector<int32_t> face_bc(mesh.n_faces, -1);
+        for (uint32_t f = 0; f < mesh.n_faces; f++) {
+            if (mesh.h_cells_of_face(f, 1) >= 0) continue;
+            face_bc[f] = std::abs(mesh.h_face_normals(f, 2)) > 0.5_r * mesh.h_face_area(f) ? 1 : 0;
+        }
+        BoundaryCondition extrapolation, dirichlet;
+        extrapolation.type = BoundaryType::EXTRAPOLATION;
+        dirichlet.type = BoundaryType::DIRICHLET;
+        BoundaryData bd = make_boundary_data(mesh, face_bc, {extrapolation, dirichlet}, 1.4_r);
+        auto h_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_state_index);
+        auto h_state = Kokkos::create_mirror_view(bd.face_state);
+        for (uint32_t f = 0; f < mesh.n_faces; f++) {
+            if (h_index(f) >= 0) FOR_I_CONSERVATIVE h_state(h_index(f), i) = field(i, mesh.h_face_coords(f, 2));
+        }
+        Kokkos::deep_copy(bd.face_state, h_state);
+        Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh.n_cells);
+        auto h_W = Kokkos::create_mirror_view(W);
+        for (uint32_t c = 0; c < mesh.n_cells; c++) FOR_I_CONSERVATIVE h_W(c, i) = field(i, mesh.h_cell_coords(c, 2));
+        Kokkos::deep_copy(W, h_W);
+        std::vector<Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>::host_mirror_type> out;
+        LSQGradientFunctor faces = make_gradient(mesh, bd, W, Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("grad", mesh.n_cells));
+        Kokkos::parallel_for(mesh.n_cells, faces);
+        out.push_back(Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), faces.gradients));
+        for (const bool quadratic : {true, false}) {
+            faces.gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("grad", mesh.n_cells);
+            Kokkos::parallel_for(mesh.n_cells, make_vertex_gradient(faces, mesh, quadratic));
+            out.push_back(Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), faces.gradients));
+        }
+        return out;
+    };
+    auto open = column(false), closed = column(true);
+    ASSERT_EQ(open->n_cells, closed->n_cells);
+    const auto g_open = gradients(*open), g_closed = gradients(*closed);
+    const char * names[3] = {"face", "vertex quadratic", "vertex linear"};
+    for (size_t k = 0; k < g_open.size(); k++) {
+        for (uint32_t c = 0; c < open->n_cells; c++) {
+            for (int d = 0; d < 3; d++) ASSERT_EQ(open->h_cell_coords(c, d), closed->h_cell_coords(c, d));
+            FOR_I_CONSERVATIVE {
+                for (int d = 0; d < 3; d++) {
+                    ASSERT_NEAR(g_open[k](c, i, d), g_closed[k](c, i, d), roundoff(1e-11))
+                        << names[k] << " gradient, cell " << c << " var " << static_cast<int>(i) << " dir " << d;
+                }
             }
         }
     }
@@ -165,3 +242,7 @@ TEST(ViscousTraction3DTest, SimpleShearGivesTangentialTraction) {
     EXPECT_NEAR(tau_n[0], 0.0, 1e-15);
     EXPECT_NEAR(tau_n[2], mu * s, 1e-15);
 }
+
+// Meshes that repeat along x and y (the mixed mesh changes cell type along x)
+INSTANTIATE_TEST_SUITE_P(Gradient3D, ExtrapolationColumn3D,
+                         ::testing::Values("cartesian", "cartesian_tet", "cartesian_prism", "cartesian_pyramid"));

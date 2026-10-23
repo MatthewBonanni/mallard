@@ -243,12 +243,10 @@ chemistry, runs the Van der Pol oscillator.
 
 The TENO face values next to symmetry walls, where the stencils include the
 mirror images of the cells, and the 3D forced channel of the previous section
-with transmissive sides (2 x 2 cells) in place of periodic ones. On
-tetrahedra and pyramids the transmissive sides drop the channel to first
-order ([#420](https://github.com/MatthewBonanni/mallard/issues/420)); with
-periodic sides the same cells converge at second order. The viscous studies
-also verify isothermal no-slip and moving walls; the axisymmetric studies
-below, the axis.
+with transmissive sides (2 x 2 cells) in place of periodic ones, where the
+fluxes and gradient stencils continue across the sides through the image
+cells as they would across a periodic seam. The viscous studies also verify
+isothermal no-slip and moving walls; the axisymmetric studies below, the axis.
 
 <!-- BEGIN GENERATED table-boundaries -->
 | Method | Cells | Error | Resolutions | Errors | Design | Observed | Asserted | Result |

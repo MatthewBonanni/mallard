@@ -659,6 +659,7 @@ class Solver {
         std::vector<std::array<double, 2>> bc_surrogates;    // [gamma, e0] of prescribed states
         std::vector<double> bc_temperatures;                  // T of prescribed states
         BoundaryData boundary_data;
+        std::vector<uint8_t> image_reach;  // Halo depth each cell's image neighbors need (make_boundary_data)
         std::vector<DirichletBoundary> dirichlet_boundaries;
         struct AveragePressureOutlet {
             int32_t i_bc;

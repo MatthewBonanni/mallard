@@ -415,14 +415,24 @@ int Solver::base_halo_layers() const {
 }
 
 void Solver::trim_halo() {
-    // The deep TENO halo holds every cell the stencil searches visited, so that
-    // stencils match the serial ones; the time loop needs only the cells the
-    // stencils kept, and the layers the other kernels read
+    // The deep halo of TENO or of image neighbors holds every cell the stencil
+    // searches visited, so that stencils match the serial ones; the time loop
+    // needs only the cells the stencils kept, and the layers the other kernels read
     const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
-    if (!is_distributed() || teno == nullptr) return;
-    std::vector<uint8_t> needed = teno->stencil_cells();
+    const bool images = boundary_data.image_neighbors.extent(0) > 0;
+    if (!is_distributed() || (teno == nullptr && !images)) return;
+    std::vector<uint8_t> needed = teno ? teno->stencil_cells() : std::vector<uint8_t>(mesh->n_cells, 0);
     const int base = base_halo_layers();
     for (uint32_t c = 0; c < mesh->n_cells; c++) needed[c] = needed[c] || distribution.layer[c] <= base;
+    // Image neighbors of the cells whose gradients are read
+    if (images) {
+        auto offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.image_neighbor_offsets);
+        auto neighbors = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.image_neighbors);
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            if (distribution.layer[c] > 1) continue;
+            for (uint32_t k = offsets(c); k < offsets(c + 1); k++) needed[neighbors(k)] = 1;
+        }
+    }
     // Wall-model points: their cells and the vertex neighbors their gradients read
     for (const uint32_t c : wall_model_points.cells) {
         needed[c] = 1;
@@ -461,12 +471,17 @@ void Solver::describe_partition_surface() {
 bool Solver::halo_too_shallow() {
     if (!is_distributed()) return false;
     auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
-    if (teno == nullptr && !wall_model_on) return false;
+    const bool images = boundary_data.image_neighbors.extent(0) > 0;
+    if (teno == nullptr && !wall_model_on && !images) return false;
     // Owned and halo-layer-1 cells are reconstructed; their stencil searches must
     // see every layer they visited, so stencils match the serial ones exactly
     int needed = 0;
     for (uint32_t c = 0; teno && c < mesh->n_cells; c++) {
         if (distribution.layer[c] <= 1) needed = std::max(needed, distribution.layer[c] + teno->gather_depth[c] + 1);
+    }
+    // The same for the gradient stencils that continue across extrapolation boundaries
+    for (uint32_t c = 0; images && c < mesh->n_cells; c++) {
+        if (distribution.layer[c] <= 1) needed = std::max(needed, distribution.layer[c] + image_reach[c]);
     }
     // The wall model's exchange and edge points must lie in cells with complete gradient stencils
     needed = std::max(needed, wall_model_points.needed_layers);
@@ -730,7 +745,7 @@ void Solver::init_boundaries() {
     t_characteristic = -1.0;
     characteristic_state_set = false;
     if (is_mixture()) init_mixture_boundaries(input_boundaries, profiled_faces, bcs);
-    boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics);
+    boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics, &image_reach);
     boundary_data.mixture = is_mixture();
     init_wall_model(face_bc, bcs);
     if (is_mixture()) {

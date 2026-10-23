@@ -269,6 +269,13 @@ struct BoundaryData {
     Kokkos::View<uint8_t *> face_image_side;  // Side of face_image_face belonging to the image cell
     Kokkos::View<uint8_t *> face_image_flip;  // 2D: whether the image face runs opposite to the boundary face
     Kokkos::View<uint8_t **> face_image_quad; // 3D: quadrature point of the image face matching each point
+    Kokkos::View<rtype *[N_DIM]> face_image_offset;  // Image faces: offset moving the image face onto the boundary face
+    // Vertex neighbors of each cell beyond extrapolation boundaries with image
+    // faces: cells translated outward by their image offsets, as the cell would
+    // see them in a flow continued unchanged across the boundary (empty without)
+    Kokkos::View<uint32_t *> image_neighbor_offsets;   // CSR over cells of image_neighbors
+    Kokkos::View<uint32_t *> image_neighbors;
+    Kokkos::View<rtype *[N_DIM]> image_neighbor_shift;  // Offset from each one's centroid to its position
     Kokkos::View<int32_t *> face_state_index; // Dirichlet faces: index into face_state, else -1
     Kokkos::View<rtype *[N_DIM + 2]> face_state; // Exterior W of Dirichlet faces
     Kokkos::View<int32_t *> face_char;           // Characteristic faces: index into char_*, else -1
@@ -432,6 +439,16 @@ struct BoundaryData {
             return;
         }
         transmissive_W(i_face, i_quad, n_quad, W_i, n, W_cells, face_solution, W_g);
+    }
+
+    /**
+     * @brief Whether gradient stencils continue across boundary face i_face
+     *        through image_neighbors rather than through a ghost state.
+     */
+    KOKKOS_INLINE_FUNCTION
+    bool image_stencil(const uint32_t i_face) const {
+        return image_neighbor_offsets.extent(0) > 0 && face_image_face(i_face) >= 0 &&
+               bcs(face_bc(i_face)).type == BoundaryType::EXTRAPOLATION;
     }
 
     /** @brief Exterior state of exterior_W before the characteristic treatment. */
@@ -620,11 +637,13 @@ class Mesh;
  * @param R Gas constant.
  * @param viscous Whether walls enforce no-slip.
  * @param gas Gas model (transport properties for heat-flux walls).
+ * @param image_reach If given, receives for every cell the halo depth that
+ *        its image neighbors need (0 without), to compare with its halo layer.
  */
 BoundaryData make_boundary_data(const Mesh & mesh,
                                 const std::vector<int32_t> & h_face_bc,
                                 const std::vector<BoundaryCondition> & h_bcs,
                                 rtype gamma, rtype R = 1.0, bool viscous = false,
-                                const Euler & gas = Euler());
+                                const Euler & gas = Euler(), std::vector<uint8_t> * image_reach = nullptr);
 
 #endif // BOUNDARY_H
