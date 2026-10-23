@@ -79,14 +79,14 @@ The strip is small, so one thread is enough (73,000 steps, about 15 minutes
 on one core; the chemistry takes 60% of the time):
 
 ```bash
-$MALLARD/build/src/Mallard -i input.toml --kokkos-num-threads=1
+$MALLARD/build/src/mallard -i input.toml --kokkos-num-threads=1
 ```
 
 On two MPI ranks each takes half the strip, with the same results bit for
 bit:
 
 ```bash
-mpirun -n 2 $MALLARD/build/src/Mallard -i input.toml
+mpirun -n 2 $MALLARD/build/src/mallard -i input.toml
 ```
 
 The progress rows add, for mixtures, the minimum and maximum temperature,
@@ -141,7 +141,7 @@ cd ..
 for phi in 0.6 0.8 1.2 1.4; do
   times=$(case $phi in 0.6) echo 10;; 0.8) echo 8;; *) echo 4;; esac)
   python3 $MALLARD/tutorials/premixed_flame/flame_setup.py $phi phi$phi --flame-times $times
-  (cd phi$phi && sh mesh.sh && $MALLARD/build/src/Mallard -i input.toml --kokkos-num-threads=1 > run.log)
+  (cd phi$phi && sh mesh.sh && $MALLARD/build/src/mallard -i input.toml --kokkos-num-threads=1 > run.log)
 done
 python3 $MALLARD/tutorials/premixed_flame/plot_flame.py results premixed_flame phi0.6 phi0.8 phi1.2 phi1.4 --out .
 ```
