@@ -1,0 +1,1 @@
+- Malformed mesh files are rejected with an error instead of crashing, hanging or exhausting memory: Gmsh files that end early or announce counts past their end, Fluent ids from 0, OpenFOAM files with NUL bytes, oversized lists or faces of missing cells, Mallard HDF5 meshes with bad offsets or node ids, and CGNS sections with bad element ranges or offsets (#412).
