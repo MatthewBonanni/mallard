@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot the mesh-quality fields of `Mallard --check --quality-vtu PREFIX` (2D).
+"""Plot the mesh-quality fields of `mallard check --quality-vtu PREFIX` (2D).
 
     plot_mesh_quality.py PREFIX_000000.vtu OUT.png [--fields NON_ORTHOGONALITY SKEWNESS] [--worst 10]
         [--xlim X0 X1] [--ylim Y0 Y1]

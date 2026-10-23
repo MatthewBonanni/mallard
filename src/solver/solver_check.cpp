@@ -1,6 +1,6 @@
 /**
  * @file solver_check.cpp
- * @brief Pre-flight check (mallard --check): the setup of a real run, without
+ * @brief Pre-flight check (mallard check): the setup of a real run, without
  *        time stepping, and what it says about the run.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
@@ -9,6 +9,7 @@
 #include "solver.h"
 
 #include <algorithm>
+#include <fstream>
 #include <cmath>
 #include <limits>
 
@@ -76,6 +77,11 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
         if (r.setup_done || !key.suggestion.empty()) r.unused.push_back(key);
     }
     for (const auto & finding : deprecated_keys) r.warnings.push_back(input_upgrade::advice(finding));
+    if (!options.catalog_file.empty() && comm::is_root()) {
+        std::ofstream file(options.catalog_file);
+        file << key_catalog(input);
+        if (!file) r.errors.push_back("cannot write " + options.catalog_file);
+    }
     if (!r.setup_done || !mesh) return r;
 
     check_memory(r, options, tracker);
@@ -198,7 +204,7 @@ void Solver::check_memory(CheckReport & r, const CheckOptions & options, const m
         r.target_bytes_peak = r.bytes_peak;
     } else if (r.ranks == 1) {
         const DistributedMesh whole(read_mesh_block(input), Mesh::periodic_pairs(input));
-        const std::string method = toml::find_or<std::string>(input, "parallel", "partitioner", "multijagged");
+        const std::string method = find_value_or<std::string>(input, "parallel", "partitioner", "multijagged");
         const std::vector<int> owner = method == "graph" && have_graph_partitioner()
                                            ? partition_graph(whole, r.target_ranks)
                                        : method == "hilbert" ? partition_hilbert(whole, r.target_ranks)

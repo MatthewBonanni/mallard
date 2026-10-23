@@ -100,14 +100,13 @@ struct LedgerBoundaryFlux {
     }
 };
 
-/** @brief The volume sources of a cell re-evaluated from its state: gravity, the source field, the mass flow force. */
+/** @brief The volume sources of a cell re-evaluated from its state: gravity and the mass flow force. */
 struct LedgerSources {
     StateView U;
     Kokkos::View<rtype *> measure;
     Kokkos::View<rtype *> volume;
     Kokkos::Array<double, N_DIM> g;
     bool gravity;
-    StateView field;
     Kokkos::Array<double, N_DIM> force;
     bool mass_flow;
 
@@ -120,7 +119,6 @@ struct LedgerSources {
                 s[N_DIM + 1] += static_cast<double>(U(c, 1 + i)) * g[i] * V;
             }
         }
-        if (field.extent(0) > 0) FOR_I_CONSERVATIVE s[i] += static_cast<double>(field(c, i)) * V;
         if (mass_flow) {
             const double V_m = static_cast<double>(volume(c));
             FOR_I_DIM {
@@ -129,6 +127,15 @@ struct LedgerSources {
             }
         }
         FOR_I_CONSERVATIVE out[i] = static_cast<rtype>(s[i]);
+    }
+};
+
+/** @brief A cell's flow block of a separate evaluation of the source terms (already times its measure). */
+struct LedgerSourceTerms {
+    StateView S;
+
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t c, rtype * out) const {
+        FOR_I_CONSERVATIVE out[i] = S(c, i);
     }
 };
 
@@ -174,14 +181,24 @@ void Solver::ledger_stage(const State & state, const ViscousFluxFunctor * viscou
                 break;
         }
     }
-    if (has_gravity || !source_expressions.empty() || hold_mass_flow) {
-        LedgerSources sources{state.flow, mesh->cell_measure, mesh->cell_volume, {}, has_gravity,
-                              source_expressions.empty() ? StateView() : source_field, {}, hold_mass_flow};
+    if (has_gravity || hold_mass_flow) {
+        LedgerSources sources{state.flow, mesh->cell_measure, mesh->cell_volume, {}, has_gravity, {}, hold_mass_flow};
         FOR_I_DIM {
             sources.g[i] = static_cast<double>(gravity[i]);
             sources.force[i] = mass_flow_force * static_cast<double>(mass_flow_direction[i]);
         }
         ledger.add_sources(sources, mesh->n_owned());
+    }
+    if (source_terms) {
+        // Into a buffer of their own, at the stage time and domain averages the RHS just set
+        State & scratch = run_health.source_scratch;
+        if (scratch.flow.extent(0) != mesh->n_cells) {
+            scratch = State("ledger_sources", mesh->n_cells, static_cast<uint32_t>(species_names.size()));
+        }
+        Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), scratch.flow, 0.0_r);
+        Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), scratch.species, 0.0_r);
+        source_terms->add(state, scratch, stage_time);
+        ledger.add_sources(LedgerSourceTerms{scratch.flow}, mesh->n_owned());
     }
     if (sponge_cells.extent(0) > 0) {
         ledger.add_sources(LedgerSponges{state.flow, mesh->cell_measure, sponge_cells, sponge_strength, sponge_target},
@@ -189,9 +206,9 @@ void Solver::ledger_stage(const State & state, const ViscousFluxFunctor * viscou
     }
 }
 
-void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
+void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
     if (is_mixture()) {
-        calc_rhs_mixture(state, rhs_state, t_stage);
+        calc_rhs_mixture(state, rhs_state, t_stage, c);
         return;
     }
     StateView solution = state.flow;
@@ -228,6 +245,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
         Kokkos::parallel_for("rhs_W", mesh->n_cells, w_functor);
         face_reconstruction->calc_face_values(W_cells, face_solution);
     }
+    face_reconstruction->rotate_periodic_faces(face_solution);
     mark_phase(StepPhase::RECONSTRUCTION);
 
     if (!budget_pass) update_characteristic_boundaries(t_stage);
@@ -270,7 +288,8 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
         if (les_on) update_eddy_viscosity(mesh->n_cells);
         if (wall_model_on) update_wall_model();
         viscous_functor = ViscousFluxFunctor{mesh->face_normals, mesh->face_measure, mesh->face_coords,
-                                             mesh->cell_coords, mesh->cells_of_face, mesh->shifts, mesh->face_shift,
+                                             mesh->cell_coords, mesh->cells_of_face, mesh->periodic_maps(),
+                                             mesh->face_shift,
                                              W_cells,
                                              viscous_gradients, boundary_data, face_flux, physics, axisymmetric,
                                              mesh->cell_covariance, les_coefficients};
@@ -281,7 +300,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
     }
 
     FaceFluxSumFunctor sum_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
-                                   face_flux, rhs};
+                                   face_flux, rhs, mesh->periodic_maps(), mesh->face_shift};
     Kokkos::parallel_for("face_flux_sum", n_owned, sum_functor);
 
     if (axisymmetric) {
@@ -295,29 +314,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
     }
 
     Kokkos::View<rtype *> vol = mesh->cell_measure;
-    if (has_gravity || !source_expressions.empty()) {
-        update_source_field(t_stage);
-        const bool gravity_on = has_gravity;
-        const bool field_on = !source_expressions.empty();
-        Kokkos::Array<rtype, N_DIM> g;
-        FOR_I_DIM g[i] = gravity[i] * static_cast<rtype>(run_health.mutation.gravity_sign);
-        StateView S = source_field;
-        Kokkos::parallel_for("rhs_sources", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
-            const rtype V = vol(i_cell);
-            if (gravity_on) {
-                rtype rhou[N_DIM];
-                FOR_I_DIM {
-                    rhs(i_cell, 1 + i) += solution(i_cell, 0) * g[i] * V;
-                    rhou[i] = solution(i_cell, 1 + i);
-                }
-                rhs(i_cell, N_DIM + 1) += dot<N_DIM>(rhou, g.data()) * V;
-            }
-            if (field_on) {
-                FOR_I_CONSERVATIVE rhs(i_cell, i) += S(i_cell, i) * V;
-            }
-        });
-    }
-
+    add_sources(state, rhs_state, t_stage, c);
     if (hold_mass_flow) add_mass_flow_force(solution, rhs);
 
     Kokkos::parallel_for("rhs_divide_volume", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
@@ -343,6 +340,42 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage) {
         budget.sgs = kinetic_energy_rate();
         budget.viscous -= budget.sgs;
     }
+}
+
+void Solver::update_cell_fields(const State & solution) {
+    if (is_mixture()) {
+        update_cell_states(solution, false);
+    } else {
+        Kokkos::parallel_for("cell_W", mesh->n_cells, CellWFunctor{physics, solution.flow, W_cells});
+    }
+}
+
+void Solver::add_sources(const State & solution, const State & rhs_state, const rtype t_stage, const rtype c) {
+    const StateView U = solution.flow, rhs = rhs_state.flow;
+    if (has_gravity) {
+        const Kokkos::View<rtype *> vol = mesh->cell_measure;
+        Kokkos::Array<rtype, N_DIM> g;
+        FOR_I_DIM g[i] = gravity[i] * static_cast<rtype>(run_health.mutation.gravity_sign);
+        Kokkos::parallel_for("rhs_gravity", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i_cell) {
+            const rtype V = vol(i_cell);
+            rtype rhou[N_DIM];
+            FOR_I_DIM {
+                rhs(i_cell, 1 + i) += U(i_cell, 0) * g[i] * V;
+                rhou[i] = U(i_cell, 1 + i);
+            }
+            rhs(i_cell, N_DIM + 1) += dot<N_DIM>(rhou, g.data()) * V;
+        });
+    }
+    if (!source_terms) return;
+    if (source_terms->time_dependent()) {
+        if (recording_step) {
+            record_stage_time(c);
+        } else {
+            const Kokkos::View<rtype> st = stage_time;
+            Kokkos::parallel_for("stage_time", 1, KOKKOS_LAMBDA(const int) { st() = t_stage; });
+        }
+    }
+    source_terms->add(solution, rhs_state, stage_time);
 }
 
 uint32_t Solver::n_gradient_cells() const {

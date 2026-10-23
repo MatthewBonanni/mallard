@@ -19,6 +19,7 @@
 #include "conservation_ledger.h"
 #include "repair_audit.h"
 #include "run_health.h"
+#include "state.h"
 
 /** @brief Test-only errors injected into the update, which the ledger must flag. */
 struct LedgerMutation {
@@ -52,6 +53,7 @@ struct HealthState {
     Kokkos::View<uint8_t *> clip_flags;
     Kokkos::View<double> reset_change;  // of one call of reset_energy
     Kokkos::View<uint64_t> reset_cells;
+    State source_scratch;  // the ledger's evaluation of [[sources]]
     LedgerMutation mutation;
 
     std::vector<health::Extremum> margins_run;

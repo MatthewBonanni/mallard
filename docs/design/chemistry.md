@@ -983,7 +983,7 @@ each call, negative `Y_k` are clipped, `Y` renormalized and `T` recomputed
 from the initial `e`. The reactor Jacobian in `(Y, T)` includes the `T`
 dependence of `cv` (a new `d cp / dT` in the thermo tables); it matches
 finite differences to 1e-6 of the row norm for the three test mechanisms.
-`MallardReactor` is constant volume only; constant pressure (another
+`mallard reactor` is constant volume only; constant pressure (another
 Jacobian, no solver use) is left until a case needs it. V1/V2 at the
 default tolerances, in device kernels, with each run split into three
 calls as splitting steps would: ignition delays within 1.4e-4 (H2/air,
@@ -1826,7 +1826,7 @@ are unchanged.
 - **Diagnostics**: `check_interval` prints min/max `T`, `max |sum Y - 1|`,
   the number of active chemistry cells and the max/mean sub-steps, and the
   chemistry wall time fraction.
-- **0D tool**: `MallardReactor`, a small executable built from the same
+- **0D tool**: `mallard reactor`, a subcommand built from the same
   kernels, runs constant-volume or constant-pressure reactors from TOML and
   writes CSV. It backs the 0D validation and the chemistry benchmarks without
   a mesh.
@@ -1858,7 +1858,7 @@ until milestone 8 (the 0D tool arrives in milestone 7).
 6. **Kinetics.** Rate tables, elementary/three-body/falloff, production
    rates and analytical Jacobian. Tests: rates vs Cantera at random states;
    Jacobian vs finite differences.
-7. **0D reactor and integrator.** Rosenbrock with dense LU; `MallardReactor`.
+7. **0D reactor and integrator.** Rosenbrock with dense LU; `mallard reactor`.
    Tests: ignition delays and equilibrium end states vs Cantera.
 8. **Coupling.** Strang splitting in the solver; `[chemistry]` input;
    active-cell queue; PLOG and Chebyshev. Tests: reactive shock tube, 1D
@@ -1928,7 +1928,7 @@ Species counts are taken from the files when they are added.
 
 | # | Case | Reference | Pass criterion | Milestone |
 |---|---|---|---|---|
-| V1 | **0D constant-volume ignition delay**, H2/air (Burke) and CH4/air (GRI-3.0), `T0` 1000-1500 K, `phi` 0.5-2, 1 and 10 atm (`MallardReactor` and a single-cell solver run) | Cantera `IdealGasReactor` at tight tolerances | Ignition delay (max `dT/dt`) within 0.5%; `T(t)` and major species within 1% over the trajectory | 7 |
+| V1 | **0D constant-volume ignition delay**, H2/air (Burke) and CH4/air (GRI-3.0), `T0` 1000-1500 K, `phi` 0.5-2, 1 and 10 atm (`mallard reactor` and a single-cell solver run) | Cantera `IdealGasReactor` at tight tolerances | Ignition delay (max `dT/dt`) within 0.5%; `T(t)` and major species within 1% over the trajectory | 7 |
 | V2 | **Equilibrium end states** of V1 | Cantera `equilibrate("UV")` | `T` within 0.1 K, major species within 1e-4 absolute | 7 |
 | V3 | **Large-mechanism ignition** (~100 and ~500+ species) | Cantera | As V1; also the performance baseline | 7, 10 |
 | V4 | **Species interface advection**, 1D and 2D (skewed triangles), H2 or He into air at different `T`, uniform `p` and `u` | Exact: uniform `p`, `u` | Conservative scheme: report max `|p - p0| / p0` and require it to converge under refinement; double flux: `p`, `u` uniform to 1e-12 after 10 flow-throughs | 3, 5 |

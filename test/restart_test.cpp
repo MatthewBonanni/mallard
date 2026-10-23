@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "data_paths.h"
 #include "test_fixtures.h"
 #include "solver.h"
 #include "scratch.h"
@@ -59,8 +60,8 @@ const std::string BLAST =
 const std::string IGNITION =
     "type = \"analytical\"\np = \"101325.0\"\nT = \"x < 0.5 ? 1200.0 : 300.0\"\nu = [\"0.0\", \"0.0\"]\n"
     "X = { H2 = \"2\", O2 = \"1\", N2 = \"3.76\" }\n";
-const std::string REACTING = "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR
-                             "/mechanisms/h2o2.yaml\"\n[chemistry]\n";
+const std::string REACTING = "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() +
+"/mechanisms/h2o2.yaml\"\n[chemistry]\n";
 
 const std::string NSCBC_OUTLET = "type = \"nscbc_outlet\"\np = 1.0\nL = 1.0\nsigma = 2.0\nbeta = 0.5\n";
 const std::string NSCBC_INLET = "type = \"nscbc_inlet\"\nu = [0.2, 0.1]\np = 1.0\nT = 1.0\nL = 1.0\nsigma = 2.0\n";
@@ -149,9 +150,8 @@ TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
     }
     ASSERT_FALSE(stop_file.empty());
     // ... and still holds the solution at that time
-    std::ifstream in(dir + "/b/" + stop_file);
-    std::string header(4096, '\0');
-    in.read(header.data(), static_cast<std::streamsize>(header.size()));
+    std::ifstream in(dir + "/b/" + stop_file, std::ios::binary);
+    const std::string header((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     const size_t k = header.find(">", header.find("Name=\"TIME\"")) + 1;
     EXPECT_EQ(std::stod(header.substr(k)), t_stop_first);
 

@@ -1,0 +1,10 @@
+- One lowercase `mallard` executable with subcommands replaces the separate executables (#414). Everything typed is lowercase; the project, its prose and the CMake `Mallard_*` options keep the name Mallard. Old → new:
+  - `Mallard -i input.toml` → `mallard -i input.toml`
+  - `Mallard --check input.toml [--catalog keys.json]` → `mallard check input.toml [--catalog keys.json]`
+  - `Mallard new`, `Mallard ctl`, `Mallard upgrade-input`, `Mallard --version` → `mallard new`, `mallard ctl`, `mallard upgrade-input`, `mallard --version`
+  - `MallardReactor -i reactor.toml` → `mallard reactor -i reactor.toml`
+  - `mallard-mesh-convert INPUT OUTPUT.h5` → `mallard mesh convert INPUT OUTPUT.h5`
+  - `MallardTest` → `mallard-test`, also run as `mallard test [GoogleTest options]`
+  - `-DMallard_EXECUTABLE_SUFFIX=3D` (`Mallard3D`, `mallard-mesh-convert3D`) → `-DMallard_EXECUTABLE_SUFFIX=3d` (`mallard3d`, `mallard-test3d`)
+  - CMake targets `Mallard`, `MallardReactor`, `mallard-mesh-convert`, `MallardTest` → `mallard`, `mallard-test`
+- `cmake --install` also installs `mallard-test` and its data, so `mallard test` checks an installed build; `-DMallard_INSTALL_TESTS=OFF` leaves them out (#414).

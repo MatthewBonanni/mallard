@@ -41,6 +41,7 @@
 #include "statistics.h"
 #include "health_state.h"
 #include "synthetic_inflow.h"
+#include "source_terms.h"
 #include "wall_exchange.h"
 #include "expression.h"
 #include "comm.h"
@@ -48,6 +49,7 @@
 #include "distribution.h"
 #include "halo_exchange.h"
 #include "log.h"
+#include "run_control.h"
 #include "check.h"
 #include "memory_tracker.h"
 #include "numerics_preset.h"
@@ -94,6 +96,14 @@ struct DirichletBoundary {
     std::vector<Expression> W;
 };
 
+/** @brief Thrown inside the time loop when the state stops being valid; run() handles it. */
+struct DivergedError : std::exception {
+    const char * what() const noexcept override { return "solution diverged"; }
+};
+
+/** @brief Exit status of a run stopped on request (signal, `mallard ctl stop`, STOP file) after writing a restart. */
+constexpr int EXIT_STOPPED = 3;
+
 struct ViscousFluxFunctor;
 template <typename T_riemann_solver>
 struct ConvectiveFluxFunctor;
@@ -131,6 +141,16 @@ class Solver {
         int run();
 
         /**
+         * @brief Whether run() takes requests from signals and serves the
+         *        control socket (the executable does; tests drive run_control
+         *        directly).
+         */
+        void enable_control(bool on) { control_enabled = on; }
+
+        /** @brief Applies one runtime setting on every rank: whether it was accepted, and what changed or why not. */
+        std::pair<bool, std::string> apply_setting(const std::string & key, const std::string & value);
+
+        /**
          * @brief Advance the solution by one time step. With chemistry, the
          *        half step that ends it may be deferred (see run) and fused
          *        with the next step's first half (Strang splitting).
@@ -138,9 +158,10 @@ class Solver {
         void take_step();
 
         /**
-         * @brief Compute dU/dt for the given conservative state at time t.
+         * @brief Compute dU/dt for the given conservative state at time t,
+         *        stage t_n + c dt of a step (c matters only to captured steps).
          */
-        void calc_rhs(State solution, State rhs, rtype t);
+        void calc_rhs(State solution, State rhs, rtype t, rtype c = 0.0_r);
 
         /**
          * @brief Compute the stable time step for the current solution.
@@ -215,6 +236,12 @@ class Solver {
         void update_vortex_fields();
 
         // Public because nvcc rejects device lambdas in non-public member functions
+        /** @brief Gravity and the source terms, added to the volume-integrated rhs. */
+        void add_sources(const State & solution, const State & rhs, rtype t_stage, rtype c);
+        /** @brief W_cells (and for mixtures the cell scalars) of the given state, as the RHS computes them. */
+        void update_cell_fields(const State & solution);
+        /** @brief Inside a captured step: stage_time = t_n + c dt from the step's device scalars. */
+        void record_stage_time(rtype c);
         void update_average_pressure_outlets(StateView solution);
         /**
          * @brief Add the uniform body force along the mass flow direction that
@@ -240,6 +267,7 @@ class Solver {
         /** @brief Adds the sponge-layer sources to the RHS per unit volume (owned cells). */
         void apply_sponges(const State & solution, const State & rhs);
         void calc_dt();
+        rtype reduce_dt(rtype local);
         /**
          * @brief Error-controlled steps: whether step_controller accepts the
          *        step just taken (else the solution is back at U^n).
@@ -252,12 +280,29 @@ class Solver {
         rtype next_target_time() const;
         void check_fields();
 
+        // Run control and divergence (see run_control.h)
+        void save_last_good();
+        void save_last_good_if_valid(const Kokkos::View<rtype *> & reduced);
+        void note_last_good();
+        void restore_last_good();
+        std::string describe_invalid_cells();
+        [[noreturn]] void diverged();
+        void act_on_requests();
+        void apply_commands();
+        std::string write_restarts();
+        /** @brief What restart files carry besides the cells: statistics weights, step-control state. */
+        RestartAttributes restart_attributes() const;
+        void write_checkpoint();
+        void poll_control_files();
+        void publish_status();
+        std::string stop_conditions() const;
+
         // A whole step (calc_dt and take_step) as one CUDA graph; see solver_graph.cpp
         std::string step_graph_unsupported() const;
         void graph_step();
         void record_step();
         void destroy_step_graph();
-        void calc_rhs_mixture(State solution, State rhs, rtype t);
+        void calc_rhs_mixture(State solution, State rhs, rtype t, rtype c);
         /**
          * @brief Axisymmetric runs: add geometric_source, made high order by the
          *        reconstruction where it can (mu: cell viscosities, empty if inviscid),
@@ -474,7 +519,6 @@ class Solver {
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
         void update_inflow(rtype t_eval);
         void init_sources();
-        void update_source_field(rtype t_eval);
         void init_sponges();
         /** @brief Mass fractions of a composition table (numbers or expressions) at the centroids of cells. */
         std::vector<std::vector<double>> composition_at_cells(const Input & table, const std::string & where,
@@ -517,9 +561,33 @@ class Solver {
         bool cuda_graphs = true;               // [run] cuda_graphs
         bool use_step_graph = false;
         void * step_graph_exec = nullptr;      // cudaGraphExec_t
-        Kokkos::View<rtype> step_dt_cfl1;      // device: local, then global minimum
+        Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests], local, then reduced
         Kokkos::View<rtype *> step_scalars;    // device: [t, t_target, dt_scales...]
-        Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> step_io;  // pinned: [t, t_target, dt, dt_cfl1, accepted]
+        Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> step_io;  // pinned: [t, t_target, requests, dt, reduced]
+
+        // Run control
+        bool control_enabled = false;
+        bool control_socket = true;              // [run] control_socket
+        uint64_t control_file_interval = 0;      // [run] control_file_interval
+        int control_contributed = 0;             // this rank's requests in the last time-step reduction
+        int control_reduced = 0;                 // every rank's
+        bool checkpoint_requested = false;
+        std::string control_stop;                // why a request stopped the run, else empty
+        std::string stop_file_note;
+        std::vector<run_control::Command> checkpoint_replies, stop_replies;
+        std::unique_ptr<DataWriter> checkpoint_writer;  // restarts on request if no [[write_data]] writes them
+        bool publishing = false;
+        std::vector<std::pair<std::string, std::string>> monitor_values;
+
+        // Divergence: the state at the start of the last step whose state was valid
+        bool keep_last_good = true;              // [run] keep_last_good
+        State last_good;
+        Kokkos::View<rtype *> last_good_T_seed;
+        bool last_good_set = false;
+        uint64_t last_good_step = 0;
+        rtype last_good_t = 0.0;
+        double last_good_pending = 0.0;
+        bool stepped_past_divergence = false;    // a step graph went on from the invalid state
 
         bool distribute = true;
         int halo_layers = 0;
@@ -745,15 +813,14 @@ class Solver {
         bool radiating = false;
         chemistry::OpticallyThinRadiation radiation;
         Kokkos::View<rtype *, Kokkos::HostSpace> h_qrad;  // output: radiative loss [W/m^3]
+        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_source_values;  // output: (cell, SOURCE_*)
 
         // Source terms
         bool has_gravity = false;
         rtype gravity[N_DIM] = {};
-        std::vector<Expression> source_expressions;  // Per conservative variable, empty if none
-        bool source_time_dependent = false;
-        StateView source_field;
-        StateView::host_mirror_type h_source_field;
-        rtype t_source = -1.0;
+        std::unique_ptr<sources::SourceTerms> source_terms;
+        Kokkos::View<rtype> stage_time;  // device: the time of the stage being evaluated
+        bool recording_step = false;     // inside the capture of a step graph
         bool hold_mass_flow = false;
         double mass_flow_target = 0.0;      // volume average of rho u along the direction
         rtype mass_flow_direction[N_DIM] = {};

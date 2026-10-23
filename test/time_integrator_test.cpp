@@ -51,7 +51,7 @@ double integrate_error(TimeIntegrator & integrator, uint32_t n_steps) {
     }
     Kokkos::deep_copy(solution_vec[0].flow, 1.0);
     const rtype l0 = lambda[0], l1 = lambda[1], l2 = lambda[2], l3 = lambda[3];
-    RHSFunction rhs = [=](State U_state, State R_state, rtype) {
+    RHSFunction rhs = [=](State U_state, State R_state, rtype, rtype) {
         StateView U = U_state.flow, R = R_state.flow;
         Kokkos::parallel_for(U.extent(0), KOKKOS_LAMBDA(const uint32_t c) {
             R(c, 0) = l0 * U(c, 0);
@@ -97,7 +97,7 @@ uint32_t steady_state_changes(TimeIntegrator & integrator) {
     }
     Kokkos::deep_copy(U.flow, h_flow);
     Kokkos::deep_copy(U.species, h_species);
-    RHSFunction zero = [](State, State R, rtype) {
+    RHSFunction zero = [](State, State R, rtype, rtype) {
         Kokkos::deep_copy(R.flow, 0.0_r);
         Kokkos::deep_copy(R.species, 0.0_r);
     };
@@ -179,7 +179,7 @@ double square_wave_overshoot(TimeIntegrator & integrator, const double courant) 
     for (uint32_t c = 0; c < n; c++) FOR_I_CONSERVATIVE h_U(c, i) = (c >= 16 && c < 32) ? 1.0 : 0.0;
     Kokkos::deep_copy(solution_vec[0].flow, h_U);
     const rtype h = 1.0_r / n;
-    RHSFunction rhs = [=](State U, State R, rtype) { upwind_rhs(U, R, 1.0_r / h); };
+    RHSFunction rhs = [=](State U, State R, rtype, rtype) { upwind_rhs(U, R, 1.0_r / h); };
     double overshoot = 0.0;
     for (int s = 0; s < 100; s++) {
         integrator.take_step(0.0, static_cast<rtype>(courant) * h, solution_vec, rhs_vec, rhs);
@@ -211,7 +211,7 @@ TEST(TimeIntegratorTest, EmbeddedEstimateIsTheLocalErrorOfTheSecondOrderPair) {
         for (uint8_t i = 0; i < integrator.get_n_solution_vectors(); i++) solution_vec.emplace_back("U", 1, 0);
         for (uint8_t i = 0; i < integrator.get_n_rhs_vectors(); i++) rhs_vec.emplace_back("rhs", 1, 0);
         Kokkos::deep_copy(solution_vec[0].flow, 1.0);
-        RHSFunction rhs = [](State U, State R, rtype) { negate(U, R); };
+        RHSFunction rhs = [](State U, State R, rtype, rtype) { negate(U, R); };
         integrator.take_step(0.0, dt, solution_vec, rhs_vec, rhs);
         auto h_U0 = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec.back().flow);
         auto h_e = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), rhs_vec.back().flow);
@@ -247,7 +247,7 @@ TEST(TimeIntegratorTest, SSPRK3IsConvexCombinationOfEulerSteps) {
     std::vector<State> solution_vec = {State("U", 1, 0), State("U1", 1, 0)};
     std::vector<State> rhs_vec = {State("k", 1, 0)};
     Kokkos::deep_copy(solution_vec[0].flow, 1.0);
-    RHSFunction rhs = [](State U, State R, rtype) { negate(U, R); };
+    RHSFunction rhs = [](State U, State R, rtype, rtype) { negate(U, R); };
     integrator.take_step(0.0, 1.0, solution_vec, rhs_vec, rhs);
     auto h_U = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec[0].flow);
     FOR_I_CONSERVATIVE EXPECT_NEAR(h_U(0, i), 1.0 / 3.0, roundoff(1e-15));
@@ -271,7 +271,7 @@ TEST(TimeIntegratorTest, SpeciesBlockAdvancesExactlyLikeTheFlowBlock) {
         for (uint8_t i = 0; i < integrator->get_n_rhs_vectors(); i++) rhs_vec.emplace_back("rhs", n_cells, n_species);
         Kokkos::deep_copy(solution_vec[0].flow, 1.0);
         Kokkos::deep_copy(solution_vec[0].species, 1.0);
-        RHSFunction rhs = [](State U, State R, rtype) { negate(U, R); };
+        RHSFunction rhs = [](State U, State R, rtype, rtype) { negate(U, R); };
         for (int s = 0; s < 3; s++) integrator->take_step(0.1_r * static_cast<rtype>(s), 0.1_r, solution_vec, rhs_vec, rhs);
         auto h_flow = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec[0].flow);
         auto h_species = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec[0].species);
@@ -295,7 +295,7 @@ double nonautonomous_error(TimeIntegrator & integrator, uint32_t n_steps) {
     std::vector<State> solution_vec, rhs_vec;
     for (uint8_t i = 0; i < integrator.get_n_solution_vectors(); i++) solution_vec.emplace_back("U", 1, 0);
     for (uint8_t i = 0; i < integrator.get_n_rhs_vectors(); i++) rhs_vec.emplace_back("rhs", 1, 0);
-    RHSFunction rhs = [](State, State R_state, rtype t) {
+    RHSFunction rhs = [](State, State R_state, rtype t, rtype) {
         StateView R = R_state.flow;
         Kokkos::parallel_for(R.extent(0), KOKKOS_LAMBDA(const uint32_t c) {
             FOR_I_CONSERVATIVE R(c, i) = Kokkos::cos(t);

@@ -124,7 +124,7 @@ struct ViscousFluxFunctor {
     Kokkos::View<rtype *[N_DIM]> face_coords;
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<int32_t *[2]> cells_of_face;
-    Kokkos::View<rtype *[N_DIM]> shifts;
+    PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
@@ -169,9 +169,15 @@ struct ViscousFluxFunctor {
         rtype q0[NQ], g0[NQ][N_DIM], q1[NQ], g1[NQ][N_DIM];
         cell_state(c0, q0, g0);
         cell_state(c1, q1, g1);
-        rtype d[N_DIM];
         const uint8_t s = face_shift(i_face);
-        FOR_I_DIM d[i] = (cell_coords(c1, i) + shifts(s, i)) - cell_coords(c0, i);
+        if (periodic.rotated()) {
+            periodic.rotate(s, q1);
+            periodic.rotate_gradients(s, g1, NQ, 0);
+        }
+        rtype x1[N_DIM], d[N_DIM];
+        FOR_I_DIM x1[i] = cell_coords(c1, i);
+        periodic.forward(s, x1, d);
+        FOR_I_DIM d[i] = d[i] - cell_coords(c0, i);
         const rtype d_n = dot<N_DIM>(d, n);
         // Axisymmetric cell centers are not symmetric about the faces: interpolate
         // to the face, at fraction t along the line between them

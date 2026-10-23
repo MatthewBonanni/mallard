@@ -19,6 +19,7 @@
 #include <sstream>
 
 #include "input.h"
+#include "log.h"
 #include "mesh.h"
 
 namespace region {
@@ -82,7 +83,10 @@ class Parser {
         std::string parse(const Input & t, const std::string & where, const Frame & parent) {
             if (!t.is_table()) throw InputError(where + " must be a table, e.g. {type = \"sphere\", ...}.");
             if (!t.contains("type")) throw InputError(where + " has no type.");
-            const std::string type = toml::find<std::string>(t, "type");
+            const std::string type = find_value<std::string>(t, "type");
+            record_options(where + ".type", {"sphere", "ellipsoid", "cylinder", "cone", "box", "torus", "half_space",
+                                             "implicit", "polygon", "disk", "annulus", "ellipse", "rectangle",
+                                             "union", "intersection", "difference"});
             const Frame frame = transformed(t, where, parent);
             if (type == "union" || type == "intersection" || type == "difference") {
                 return boolean(t, where, type, frame);
@@ -317,7 +321,7 @@ class Parser {
                 n.kind = Kind::IMPLICIT;
                 if (!t.contains("f")) throw InputError(where + " needs f, an expression in x, y, z (inside: f < 0).");
                 n.first = static_cast<uint32_t>(programs.size());
-                programs.emplace_back(where + ".f", toml::find<std::string>(t, "f"),
+                programs.emplace_back(where + ".f", find_value<std::string>(t, "f"),
                                       std::vector<std::string>{"x", "y", "z"});
                 bounded = false;
             } else {
@@ -351,7 +355,7 @@ Region::Region(const Input & table, const std::string & where) {
         if (!(m_host.edge >= 0.0) || !std::isfinite(m_host.edge)) {
             throw InputError(where + ".edge must be a non-negative width.");
         }
-        m_summary += ", edge " + std::to_string(m_host.edge);
+        m_summary += ", edge " + logging::real(m_host.edge);
     }
     m_host.nodes = Kokkos::View<const Node *, Kokkos::HostSpace>(m_nodes.data(), m_nodes.size());
     m_host.vertices = Kokkos::View<const double *, Kokkos::HostSpace>(m_vertices.data(), m_vertices.size());

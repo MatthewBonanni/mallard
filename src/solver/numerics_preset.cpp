@@ -131,8 +131,7 @@ Resolution apply(Input & input) {
     std::unordered_map<std::string, const Preset *> by_name;
     for (const auto & preset : presets()) by_name.emplace(preset.name, &preset);
     if (!name->is_string()) throw InputError(toml::format_error("numerics.preset must be a string", *name, "here"));
-    const auto it = by_name.find(name->as_string());
-    if (it == by_name.end()) throw unknown_option(by_name, "numerics.preset", name->as_string());
+    const auto it = find_option(by_name, "numerics.preset", name->as_string());
     const Preset & preset = *it->second;
     resolution.name = preset.name;
 

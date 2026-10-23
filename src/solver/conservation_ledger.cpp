@@ -18,7 +18,7 @@ std::vector<double> ConservationLedger::stage_weights(TimeIntegrator & integrato
     for (uint8_t i = 0; i < integrator.get_n_solution_vectors(); i++) solution.emplace_back("ledger_probe", 1, 0);
     for (uint8_t i = 0; i < integrator.get_n_rhs_vectors(); i++) rhs.emplace_back("ledger_probe_rhs", 1, 0);
     int calls = 0, target = -1;
-    const RHSFunction unit = [&](State, State out, rtype) {
+    const RHSFunction unit = [&](State, State out, rtype, rtype) {
         Kokkos::deep_copy(out.flow, calls == target ? 1.0_r : 0.0_r);
         calls++;
     };

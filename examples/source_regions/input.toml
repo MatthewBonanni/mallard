@@ -1,0 +1,82 @@
+# Sources in regions: gas at rest in a closed box is heated in a ring and
+# pushed by a tilted "fan".
+#
+# - The ring (an annulus with a smooth edge) releases a Gaussian pulse of heat
+#   whose integral over the ring is exactly Q(t) = 10 exp(-((t - 0.05) /
+#   0.02)^2) per unit depth, whatever the mesh: with total = true the value is
+#   the integrated rate, spread over the region by its cell volume fractions.
+# - The fan (a rectangle rotated by 30 degrees) is a body force of 2 per unit
+#   volume along its long side; its work f . u, an expression of the local
+#   velocity, goes into the energy.
+#
+# The run log lists each source with its region and measure. SOURCE_RHOE and
+# SOURCE_RHOU_X/Y in the snapshots show where they act. The total energy
+# rises by the integral of Q, 10 sqrt(pi) 0.02 = 0.3545, plus the fan's work.
+
+[run]
+t_stop = 0.3
+cfl = 1.0
+
+[mesh]
+type = "cartesian_tri"
+Nx = 160
+Ny = 160
+Lx = 1.0
+Ly = 1.0
+
+[initialize]
+type = "constant"
+u = [0.0, 0.0]
+p = 1.0
+T = 1.0
+
+[[boundaries]]
+name = "left"
+type = "symmetry"
+
+[[boundaries]]
+name = "right"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[[sources]]
+name = "ring"
+total = true
+rhoE = "10 * exp(-((t - 0.05) / 0.02)^2)"
+region = {type = "annulus", center = [0.3, 0.5], radius = 0.12, inner_radius = 0.06, edge = 0.02}
+
+[[sources]]
+name = "fan"
+rhou = ["2 * cos(pi / 6)", "2 * sin(pi / 6)"]
+rhoE = "2 * (cos(pi / 6) * u_x + sin(pi / 6) * u_y)"
+region = {type = "rectangle", center = [0, 0], size = [0.3, 0.1], rotate = 30, translate = [0.7, 0.4], edge = 0.01}
+
+[output]
+check_interval = 100
+
+[[write_data]]
+prefix = "solut/sources"
+format = "vtu"
+time_interval = 0.05
+variables = ["RHO", "U", "P", "SOURCE_RHOE", "SOURCE_RHOU_X", "SOURCE_RHOU_Y"]

@@ -21,6 +21,7 @@
 
 #include "comm.h"
 #include "conservation_ledger.h"
+#include "data_paths.h"
 #include "mechanism.h"
 #include "reactor.h"
 #include "solver.h"
@@ -31,7 +32,7 @@
 
 namespace {
 
-const std::string H2O2 = std::string(MALLARD_SOURCE_DIR) + "/mechanisms/h2o2.yaml";
+const std::string H2O2 = source_dir() + "/mechanisms/h2o2.yaml";
 
 std::string mesh(uint32_t nx, uint32_t ny, double lx, double ly, const std::string & periodic) {
     std::ostringstream s;

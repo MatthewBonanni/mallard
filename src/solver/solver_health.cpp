@@ -111,7 +111,7 @@ struct ActivityFunctor {
 } // namespace
 
 void Solver::init_health() {
-    run_health.on = toml::find_or<bool>(input, "output", "health", true);
+    run_health.on = find_value_or<bool>(input, "output", "health", true);
     run_health.margins_run.clear();
     run_health.warned.clear();
     run_health.last = health::Report{};
@@ -205,6 +205,9 @@ void Solver::init_health() {
     if (double_flux) ledger.uncheck(ENERGY, "double flux does not conserve energy (its reset is a repair)");
     if (radiating) ledger.uncheck(ENERGY, "the radiative loss is not re-evaluated");
     if (axisymmetric) ledger.uncheck(2, "the hoop stress source of axisymmetric runs is not re-evaluated");
+    if (mesh->is_rotational()) {
+        for (uint32_t i = 1; i <= N_DIM; i++) ledger.uncheck(i, "rotational periodicity turns momentum across the periodic faces");
+    }
     if (comm::allreduce(static_cast<uint32_t>(sponge_cells.extent(0)), comm::Op::MAX) > 0) {
         for (uint32_t i = N_CONSERVATIVE; i < ledger.n_components(); i++) {
             ledger.uncheck(i, "the sponges' species sources are not re-evaluated");
