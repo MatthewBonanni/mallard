@@ -15,16 +15,25 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
+#ifdef Mallard_HAS_CGNS
+#include <cgnslib.h>
+#endif
+
 #include "comm.h"
+#include "data_paths.h"
+#include "gmsh_fixtures.h"
 #include "mesh.h"
+#include "mesh_block.h"
 #include "mesh_file.h"
 
 namespace {
 
-std::string fixture(const std::string & name) { return std::string(MALLARD_SOURCE_DIR) + "/test/data/meshes/" + name; }
+std::string fixture(const std::string & name) { return source_dir() + "/test/data/meshes/" + name; }
 
 using Key = std::array<double, N_DIM + 1>;  // centroid, then volume or area
 
@@ -179,3 +188,101 @@ TEST(MeshImportTest, PolygonsAndPolyhedraAreRejected) {
         EXPECT_NE(std::string(e.what()).find("no general polygons or polyhedra"), std::string::npos) << e.what();
     }
 }
+
+// Malformed files found by the fuzzers (test/fuzz): each is rejected with an
+// error instead of being read out of bounds, looping or exhausting memory
+
+namespace {
+
+void expect_rejected(const std::string & path) {
+    EXPECT_THROW(Mesh().init_file(path), std::runtime_error) << path;
+}
+
+const std::string FOAM_HEADER = "FoamFile\n{\n    format ascii;\n}\n";
+
+/** @brief An OpenFOAM polyMesh directory of the given files' data (after their header). */
+std::string write_foam(const std::string & name, const std::array<std::string, 5> & data) {
+    const auto dir = std::filesystem::temp_directory_path() / name / "constant" / "polyMesh";
+    std::filesystem::create_directories(dir);
+    const char * files[5] = {"points", "faces", "owner", "neighbour", "boundary"};
+    for (size_t k = 0; k < 5; k++) {
+        std::ofstream(dir / files[k]) << (data[k].rfind("FoamFile", 0) == 0 ? "" : FOAM_HEADER) << data[k];
+    }
+    return dir.string();
+}
+
+} // namespace
+
+TEST(MeshImportTest, GmshCountsPastTheEndAreRejected) {
+    expect_rejected(write_temp("mallard_fuzz_count.msh",
+                               "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$Nodes\n1000000000000\n1 0 0 0\n"));
+    expect_rejected(write_temp("mallard_fuzz_tags.msh", "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$Nodes\n1\n1 0 0 0\n"
+                                                        "$EndNodes\n$Elements\n1\n1 2 -1 1 1 1\n$EndElements\n"));
+}
+
+TEST(MeshImportTest, FluentIdsOutOfRangeAreRejected) {
+    expect_rejected(write_temp("mallard_fuzz_node0.cas", "(2 2)\n(10 (1 0 1 1 2)(\n0 0\n1 1\n))\n"));
+    expect_rejected(write_temp("mallard_fuzz_face0.cas", "(2 2)\n(13 (3 0 0 3 2)(\n1 2 1 0\n))\n"));
+    expect_rejected(write_temp("mallard_fuzz_nodes.cas", "(2 2)\n(10 (0 1 ffffffffff 0 2))\n"));
+}
+
+TEST(MeshImportTest, MalformedOpenFoamIsRejected) {
+    const std::string points = "3\n(\n(0 0 0)\n(1 0 0)\n(0 1 0)\n)\n";
+    const std::string boundary = "1\n(\nback\n{\n    type empty;\n    nFaces 2;\n    startFace 0;\n}\n)\n";
+    // A NUL byte in the header (read as an empty token, forever)
+    const std::string nul = std::string("FoamFile\n{\n    format") + '\0' + " ascii;\n}\n" + points;
+    expect_rejected(write_foam("mallard_fuzz_nul", {nul, "", "", "", ""}));
+    // A list longer than the file
+    expect_rejected(write_foam("mallard_fuzz_list", {"1000000000000\n(\n)\n", "", "", "", ""}));
+    // Faces owned by a negative cell
+    expect_rejected(write_foam("mallard_fuzz_owner",
+                               {points, "2\n(\n3(0 1 2)\n3(0 2 1)\n)\n", "2\n(\n0\n-5\n)\n", "0\n(\n)\n", boundary}));
+}
+
+TEST(MeshImportTest, MalformedHdf5MeshIsRejected) {
+    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    auto block_with = [](std::vector<uint64_t> offsets, std::vector<uint64_t> nodes) {
+        MeshBlock block;
+        block.node_coords.assign(N_DIM + 1, {});
+        block.zone_names = {"wall"};
+        block.add_face(std::vector<uint64_t>{0, 1}, 0);
+        block.cell_offsets = std::move(offsets);
+        block.cell_nodes = std::move(nodes);
+        return block;
+    };
+    std::vector<uint64_t> cell(N_DIM + 1);
+    for (size_t k = 0; k < cell.size(); k++) cell[k] = k;
+    std::vector<uint64_t> missing_node = cell;
+    missing_node.back() = 99;
+    const std::string h5 = (std::filesystem::temp_directory_path() / "mallard_fuzz.h5").string();
+    const std::vector<MeshBlock> blocks = {
+        block_with({0, cell.size()}, missing_node),     // a node that is not there
+        block_with({0, cell.size(), 1}, cell),          // decreasing offsets
+        block_with({0, uint64_t(1) << 40}, cell),       // offsets past the cells' nodes
+    };
+    for (const MeshBlock & block : blocks) {
+        write_mesh_h5(h5, block);
+        expect_rejected(h5);
+    }
+}
+
+#ifdef Mallard_HAS_CGNS
+TEST(MeshImportTest, CgnsBadElementRangeIsRejected) {
+    const std::string file = (std::filesystem::temp_directory_path() / "mallard_fuzz_range.cgns").string();
+    int fn = 0, B = 0, Z = 0, C = 0, S = 0;
+    ASSERT_EQ(cg_open(file.c_str(), CG_MODE_WRITE, &fn), CG_OK);
+    ASSERT_EQ(cg_base_write(fn, "base", N_DIM, 3, &B), CG_OK);
+    const cgsize_t size[3] = {N_DIM + 1, 1, 0};
+    ASSERT_EQ(cg_zone_write(fn, B, "zone", size, CGNS_ENUMV(Unstructured), &Z), CG_OK);
+    const double x[4] = {0.0, 1.0, 0.0, 0.0}, y[4] = {0.0, 0.0, 1.0, 0.0}, z[4] = {0.0, 0.0, 0.0, 1.0};
+    ASSERT_EQ(cg_coord_write(fn, B, Z, CGNS_ENUMV(RealDouble), "CoordinateX", x, &C), CG_OK);
+    ASSERT_EQ(cg_coord_write(fn, B, Z, CGNS_ENUMV(RealDouble), "CoordinateY", y, &C), CG_OK);
+    ASSERT_EQ(cg_coord_write(fn, B, Z, CGNS_ENUMV(RealDouble), "CoordinateZ", z, &C), CG_OK);
+    // The one cell numbered -2
+    const cgsize_t conn[4] = {1, 2, 3, 4};
+    const auto type = N_DIM == 2 ? CGNS_ENUMV(TRI_3) : CGNS_ENUMV(TETRA_4);
+    ASSERT_EQ(cg_section_write(fn, B, Z, "cells", type, -2, -2, 0, conn, &S), CG_OK);
+    cg_close(fn);
+    expect_rejected(file);
+}
+#endif

@@ -172,6 +172,9 @@ Pitfalls:
 
 - `[initialize.mesh]` must be the mesh the restart file was written on (its
   cell count is checked); a mesh file's `transform` applies to it as usual.
+- The source mesh may be periodic by translation only; a source with a
+  rotational pair (`[[periodic]] angle`, or an `annulus` periodic in `theta`)
+  is an error.
 - Where the meshes cover different domains (a curved wall discretized
   differently, a shorter box), target cells average over the covered part and
   cells outside take the nearest source cell; the log counts them, and

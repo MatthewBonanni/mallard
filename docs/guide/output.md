@@ -101,9 +101,87 @@ progress row every `[output] check_interval` steps (default 1):
 Chemistry adds the share of cells advanced and the largest sub-step count.
 Written files appear as rows with their step and time. The run ends with a
 summary of wall time (setup, time stepping, diagnostics, output) and
-throughput. Errors go to stderr from any rank. Colors are off when the output
+throughput. The same information, in machine-readable form, goes to the
+[run log](#the-run-log). Errors go to stderr from any rank. Colors are off when the output
 is not a terminal or `NO_COLOR` is set (`CLICOLOR_FORCE=1` forces them, e.g.
 under `mpirun`).
+
+## The run log
+
+Next to the human log, rank 0 writes `mallard.jsonl` (`[output] run_log`):
+one JSON object per line ([JSON Lines](https://jsonlines.org)), flushed as
+it is written, so scripts and dashboards can follow a running case:
+
+```python
+import json
+records = [json.loads(line) for line in open("mallard.jsonl")]
+progress = [r for r in records if r["type"] == "progress"]
+```
+
+A run starting from a restart file appends to the log, so a case continued
+several times keeps one history, each part led by its own `start` record.
+Each record has a `type`:
+
+| `type` | When | Fields |
+|---|---|---|
+| `start` | After setup | `schema` (`"mallard-run-log"`), `version` (1), `provenance` (below) |
+| `progress` | Every progress row | as below |
+| `event` | A file written, or a request acted on (the rows between progress rows) | `step`, `t`, `kind` (`vtu`, `hdf5`, `restart`, ...; `checkpoint`, `stop`, `set` and `diverged` from [run control](running.md)), `text` |
+| `warning`, `error` | A warning, or the error that ended the run | `message` |
+| `end` | The end of the run | `reason`, `step`, `t`, `steps` (this run's), `wall` and its parts `wall_setup`, `wall_stepping`, `wall_diagnostics`, `wall_output` (and `wall_chemistry`), `rejected_steps` (with error control), `cells_per_second` |
+
+Progress records:
+
+| Field | Meaning |
+|---|---|
+| `step`, `t`, `dt` | Step, time, time step |
+| `cfl` | `dt` over the stable time step at CFL 1 |
+| `progress` | Fraction of the run, by the first stop condition to be reached |
+| `wall` | Seconds since the solver started |
+| `wall_per_step`, `cells_per_second` | Time stepping since the previous progress record; `null` before any step |
+| `eta` | Seconds remaining, `null` until known |
+| `cells`, `ranks` | Global cell count and rank count |
+| `memory_host`, `memory_host_peak` | Resident memory of the largest rank, and its peak, in bytes |
+| `memory_device`, `memory_device_total` | GPU memory in use (by all processes) on the fullest device, and its size; `null` without a GPU |
+| `monitors` | The progress row's diagnostics: `min_rho`, `min_p`, `max_mach`; TENO: `troubled_cells` (fraction); mixtures: `min_T`, `max_T`, `max_sum_Y_error`; chemistry: `reacting_cells` (fraction), `max_chemistry_cost` |
+| `integrals` | The latest `[integrals]` (`step`, `t` and the columns of `integrals.csv`) |
+| `forces_<zone>` | The latest `[[forces]]` of each zone (`step`, `t` and the columns of its file) |
+
+Numbers are in SI units (seconds, bytes) and read back exactly; unknown
+values are `null`. Within a `version`, records only gain fields; renaming,
+removing or changing the meaning of one increments it.
+
+## Provenance
+
+Every output file records where it came from: the provenance block, one
+JSON object, is written into restart files (a trailer after the data, also of
+compressed files, which older readers skip), VTU, `.pvtu`, `.pvd`, XDMF and probe `.vtp` files (an XML comment
+`<!-- provenance {...} -->` after the XML declaration), HDF5 files, probe files included (the
+string attribute `provenance` of the root group; a continued run's probe file holds the latest run's), CSV files of forces,
+integrals and probes (a line `# provenance {...}` after the header, and
+another where a continued run starts appending), and the run log's `start`
+record.
+
+| Field | Contents |
+|---|---|
+| `schema`, `version` | `"mallard-provenance"`, 1 |
+| `mallard` | `version` (`git describe`), `git_sha`, `git_dirty` (uncommitted changes in the build); `null` outside a git checkout. Taken at build time |
+| `build` | `dim`, `precision`, `build_type`, `compiler`, `cxx_flags`, `kokkos` (version), `backend` and `host_backend` (Kokkos execution spaces), `mpi`, `gpu_aware_mpi`, `nccl`, `hdf5`, `kaminpar`, `species_layout` |
+| `run` | `start_time` (UTC, ISO 8601), `ranks`, `host`, `device` (rank 0's), `directory` |
+| `input` | `file`, `sha256` of its bytes, and its `text` |
+| `mesh` | `type`; for mesh files `file` and the `sha256` of its bytes (of a directory: of each file's relative path and bytes, by path; skipped with `[output] hash_mesh = false`) |
+| `preset` | The `[numerics] preset` (`null` without one): `name`, and per key it covers its `key`, resolved `value` and `from_preset` (`false` where the input overrides it) |
+| `setup` | The resolved setup, defaults included: each section of the log's setup summary (`Mesh`, `Physics`, `Numerics`, `Boundaries`, `Output`) as `[key, value]` pairs |
+
+Check that a file belongs to a given input with `sha256sum input.toml`; read
+the block in Python:
+
+```python
+import json, h5py
+json.loads(h5py.File("solut/flow_000100.h5")["/"].attrs["provenance"][0])
+```
+
+or, from any other file, `mallard_vtu.py`'s `provenance(path)`.
 
 ## Wall forces: `[[forces]]`
 
@@ -153,7 +231,7 @@ t_start = 40.0
 interval = 10
 ```
 
-*Used in:* [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles) and 1 more.
+*Used in:* [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les) and 2 more.
 
 `[statistics]` keeps running time averages and covariances per cell, on the
 device, without communication: bitwise the same on any number of ranks, and
@@ -171,6 +249,79 @@ Write them with `variables = ["MEAN_*", "COV_*"]`, and average further over
 homogeneous directions with `tools/plane_average.py` (e.g. over x and z of a
 channel, giving profiles in y; its CSV also feeds
 [synthetic inflow](boundary_conditions.md#synthetic-turbulence)).
+
+### Spectra and two-point correlations: `[statistics.spectra]`
+
+```toml
+[statistics]
+t_start = 120.0
+interval = 20
+
+[statistics.spectra]
+fields = ["U_X", "U_Y", "U_Z"]   # autospectra and autocorrelations
+products = ["U_X*U_Y"]           # cross spectra and correlations
+# directions = ["x", "z"]        # default: the mesh's periodic directions
+# average = false                # per-sample files instead of time averages
+```
+
+*Used in:* the in-situ statistics tests.
+
+On a generated `cartesian` mesh, spectra and two-point correlations along the
+homogeneous (periodic, unstretched) directions, at each position of the
+others: per y of a channel, or shell spectra of a periodic box. Computed by
+FFTs on the device, bitwise the same on any number of ranks.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `fields`, `products` | none | Variables (as `[statistics]`) and pairs `"A*B"` |
+| `directions` | periodic directions | Homogeneous directions |
+| `average` | `true` | Time averages, written to `file` with every snapshot and carried by restart files; `false`: one `<file stem>_<step>.csv` per sample |
+| `file` | `spectra.csv` | Output CSV (`quantity, a, b, direction, position, <coordinates>, index, abscissa, value`) |
+| `interval`, `t_start` | `[statistics]`'s | Sampling |
+
+The file holds plane means, one-sided spectra (sums, not densities: they
+add up to the covariance `<a'b'>`), correlations `<a'(x) b'(x + r)>` and, in
+a periodic box, shell spectra. `tools/insitu_statistics.py` plots them
+(`plot`) and recomputes them from restart snapshots (`spectra`, `compare`).
+
+- Values are cell averages: at the grid cutoff a spectrum is lower than one
+  of point values by the cell-average factor (sinc^2(k h / 2) per direction,
+  0.41 at k = N/2), as `tools/isotropic_turbulence_stats.py --no-deconvolve`.
+- A sample costs about a third of a step of the Re_tau 180 channel (11 ms
+  on an A100): sample every 10-20 steps, not every step.
+- Correlations are periodic: `R(L - r) = R(-r)`; use `r <= L/2`.
+
+### Phase averages: `[statistics.phase]`
+
+```toml
+[statistics.phase]
+fields = ["U_X", "U_Y", "P"]
+bins = 12
+probe = [3.0, 0.0]               # or: period = 30.3 (and t_reference)
+variable = "U_Y"
+level = 0.0
+```
+
+*Used in:* [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder).
+
+Per-cell means over the samples whose phase in a periodic cycle falls in each
+of `bins` bins, output as `PHASE_<bin>_<field>` (`variables = ["PHASE_*"]`).
+The phase comes from a fixed `period`, or from the upward crossings of a
+level by a variable at a probe point.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `fields` | none | Variables to average |
+| `bins` | none | Phase bins |
+| `period`, `t_reference` | none, 0 | Fixed period, phase 0 at `t_reference` |
+| `probe`, `variable`, `level` | none, none, 0 | Trigger point, variable and level |
+| `interval`, `t_start` | `[statistics]`'s | Sampling |
+
+- The trigger needs two crossings before it bins anything, and is sampled
+  only every `interval` steps: keep `interval` well below a period / `bins`.
+- A cycle longer than the previous one puts its tail in the last bin.
+- `examples/cylinder` phase-averages
+  its vortex street this way.
 
 ## Probes: `[[probes]]`
 
@@ -322,6 +473,7 @@ The Python scripts in `tools/` (numpy, matplotlib; see
 | `plot_vtu.py`, `compare_png.py` | A field of one or several snapshots |
 | `animate.py` | MP4/GIF animation of a 2D series with numerical schlieren |
 | `plane_average.py` | Averages over homogeneous directions |
+| `insitu_statistics.py` | Plots `[statistics.spectra]` output; recomputes it, or phase-bins a probe series, to check the in-situ values |
 | `plot_<case>.py` | Each validation case against its reference |
 
 ParaView opens `.pvd` (VTU) and `.xmf` (HDF5) series directly.
@@ -337,10 +489,12 @@ build reads. It is never misread.
 
 | File | Version, where | Versions (written from) | Read by |
 |---|---|---|---|
-| Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9) | Mallard: all |
-| HDF5 mesh (`mallard-mesh-convert`) | root attribute `version` | 1 (0.3) | Mallard: all |
+| Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9) | Mallard: all |
+| HDF5 mesh (`mallard mesh convert`) | root attribute `version` | 1 (0.3) | Mallard: all |
 | HDF5 output (`format = "hdf5"`) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard_h5.py` |
 | VTU output | field data `MALLARD_FORMAT_VERSION` | none before 0.9, 1 (0.9) | ParaView, `tools/mallard_vtu.py` |
+| Run log (`[output] run_log`) | `version` of each `start` record | 1 (0.9) | Your scripts (records only gain fields within a version) |
+| Provenance block (every output file) | its `version` | 1 (0.9) | `tools/mallard_vtu.py` (`provenance()`); in restart files a trailer that every restart reader skips, so it changes no restart version |
 | Probe output (`[[probes]]` `format = "hdf5"`, `"vtp"`) | root attribute `version` (HDF5), field data `MALLARD_FORMAT_VERSION` (VTP) | 1 (0.9) | Mallard (restarts append to HDF5), ParaView |
 | TENO cache (`cache_file`) | magic `MALLARD-TENO-<n>` | - | Rebuilt automatically when it does not match |
 
@@ -358,4 +512,4 @@ build reads. It is never misread.
 
 ## See also
 
-- [Input reference: `[[write_data]]`](../input.md#write_data), [`[output]`](../input.md#output), [`[[forces]]`](../input.md#forces), [`[integrals]`](../input.md#integrals), [`[statistics]`](../input.md#statistics), [`[[probes]]`](../input.md#probes)
+- [Input reference: `[[write_data]]`](../input.md#write_data), [`[output]`](../input.md#output), [`[[forces]]`](../input.md#forces), [`[integrals]`](../input.md#integrals), [`[statistics]`](../input.md#statistics), [`[statistics.spectra]`](../input.md#statisticsspectra), [`[statistics.phase]`](../input.md#statisticsphase), [`[[probes]]`](../input.md#probes)

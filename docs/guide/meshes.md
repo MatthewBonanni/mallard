@@ -32,6 +32,7 @@ Ly = 1.0
 | `cartesian_tri` | Each quadrilateral split into two triangles along its bottom-left to top-right diagonal |
 | `wedge` | Quadrilaterals over an 8 degree compression ramp starting at x = 0.5 (the `wedge` example) |
 | `cartesian_tet`, `cartesian_prism`, `cartesian_pyramid`, `cartesian_mixed` | 3D only, see below |
+| `annulus` | The annulus `r_inner <= r <= r_outer` (default 1, 2) about the z axis, or its sector of `angle` degrees (default 360), of `Ntheta x Nr` quadrilaterals (default 64 x 16); in 3D extruded over `[0, Lz]` into `Nz` layers of hexahedra. Zones `inner`, `outer`, for a sector `start` and `end`, in 3D `back` and `front` |
 
 The zones of a generated mesh are `left` (x = 0), `right` (x = Lx), `bottom`
 (y = 0), `top` (y = Ly) and, in 3D, `back` (z = 0) and `front` (z = Lz).
@@ -49,7 +50,7 @@ hexahedra, pyramids and prisms in successive thirds of x):
 | `Nx`, `Ny`, `Nz` | 100 | Cells (2D) or blocks (3D) along each axis |
 | `Lx`, `Ly`, `Lz` | 1.0 | Domain size |
 | `stretching` | zeros | One factor per axis clustering nodes toward both ends |
-| `periodic` | none | Directions joined periodically, e.g. `["x", "z"]` |
+| `periodic` | none | Directions joined periodically, e.g. `["x", "z"]`; `annulus`: `"theta"`, `"z"` |
 
 ### Stretching
 
@@ -126,6 +127,47 @@ translation = [1.0, 0.0]     # B = A + translation
 Each periodic direction needs at least 3 cells, and each zone joins at most
 one pair. Periodic meshes work in distributed runs, and with every
 reconstruction ([design order across seams](https://matthewbonanni.github.io/mallard/validation/#periodic-seams)).
+
+### Rotational periodicity
+
+Sectors of annular combustors or blade rows are periodic through a rotation:
+zone B is zone A turned by `angle` degrees about an axis. Give `angle`
+instead of `translation` (with `center`, a point of the axis, and in 3D
+`axis`); the generated `annulus` mesh takes `periodic = ["theta"]`.
+Velocity, momentum and gradients turn across the seam; density, pressure,
+temperature, species and scalars carry over unchanged.
+
+![A sector of an annulus: zone B is zone A turned by alpha about the axis, and the velocity of a cell next to B, seen from the cells next to A, turns with it](../images/guide/rotational_periodic-light.svg#gh-light-mode-only)
+![A sector of an annulus: zone B is zone A turned by alpha about the axis, and the velocity of a cell next to B, seen from the cells next to A, turns with it](../images/guide/rotational_periodic-dark.svg#gh-dark-mode-only)
+
+| Key | Default | Meaning |
+|---|---|---|
+| `angle` | none | Degrees from A to B, right-handed about `axis` (counterclockwise in 2D) |
+| `center` | origin | A point of the axis (2D: the center of rotation) |
+| `axis` | `[0, 0, 1]` | (3D) The axis direction |
+
+```toml
+[[periodic]]
+zones = ["side_a", "side_b"]   # a 30 degree sector about the z axis
+angle = 30.0
+```
+
+Pitfalls:
+
+- One rotation per mesh; in 3D it combines with translations along its axis
+  only (an annular sector periodic in z), in 2D with none.
+- The sector must not reach the axis, and needs at least 3 cells around.
+- MUSCL limits each Cartesian velocity component and TENO-E weighs Cartesian
+  derivatives, so a sector reproduces the full annulus to rounding only for
+  multiples of 90 degrees; other angles agree to the truncation error.
+- Transmissive boundary images and the transverse terms of characteristic
+  boundaries do not reach across the rotation; axisymmetric runs take none.
+
+![The full annulus and a quarter run with rotational periodicity agree to rounding](../images/guide/rotational_sector-light.svg#gh-light-mode-only)
+![The full annulus and a quarter run with rotational periodicity agree to rounding](../images/guide/rotational_sector-dark.svg#gh-dark-mode-only)
+
+The quarter of `examples/rotational_sector` against its full annulus: the
+largest difference over all cells is that of the annulus with its own copies.
 
 ## Mesh files (Gmsh)
 
@@ -230,7 +272,7 @@ Pitfalls:
   `[[mesh.curved]]` shapes, probes, initial conditions) is in the
   transformed coordinates.
 - Mesh files only: generated meshes reject it.
-- `mallard-mesh-convert input.toml mesh.h5` writes the transformed mesh; do
+- `mallard mesh convert input.toml mesh.h5` writes the transformed mesh; do
   not transform it again when running from `mesh.h5`.
 
 ## HDF5 meshes for large runs
@@ -238,10 +280,10 @@ Pitfalls:
 ```toml
 [mesh]
 type = "file"
-filename = "mesh.h5"   # from mallard-mesh-convert
+filename = "mesh.h5"   # from mallard mesh convert
 ```
 
-*Used in:* any example, after `mallard-mesh-convert input.toml mesh.h5`.
+*Used in:* any example, after `mallard mesh convert input.toml mesh.h5`.
 
 Every rank of a distributed run reads a Gmsh or other mesh file whole,
 keeping only its share. Large meshes should be converted once to Mallard's HDF5 mesh format, of
@@ -249,8 +291,8 @@ which each rank reads only its own part (builds with
 `-DMallard_ENABLE_HDF5=ON`):
 
 ```sh
-mallard-mesh-convert mesh.msh mesh.h5                # from any mesh file
-mpirun -n 8 mallard-mesh-convert input.toml mesh.h5  # the mesh of an input, written in parallel
+mallard mesh convert mesh.msh mesh.h5                # from any mesh file
+mpirun -n 8 mallard mesh convert input.toml mesh.h5  # the mesh of an input, written in parallel
 ```
 
 and then `filename = "mesh.h5"`. Generated meshes are always produced per
@@ -306,7 +348,7 @@ Pitfalls:
 
 ## Mesh quality
 
-`Mallard --check input.toml` ([Checking an input](input_files.md#checking-an-input))
+`mallard check input.toml` ([Checking an input](input_files.md#checking-an-input))
 measures every cell of the mesh, taking for each the worst of its faces:
 
 | Metric | Definition | Warning above |

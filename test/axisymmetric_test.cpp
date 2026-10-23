@@ -20,8 +20,10 @@
 #include <tuple>
 #include <vector>
 
+#include "data_paths.h"
 #include "input.h"
 #include "test_fixtures.h"
+#include "verification.h"
 #include "solver.h"
 
 namespace {
@@ -170,7 +172,7 @@ TEST(AxisymmetricTest, GasMixtureAtRestStaysAtRest) {
     // The mixture flux, its pressure in the geometric source and, viscous, its
     // transport. (Cell averages of a gas whose temperature or composition varies
     // are not at uniform pressure, in planar runs too.)
-    const std::string mechanism = "gas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n";
+    const std::string mechanism = "gas = \"mixture\"\nmechanism = \"" + source_dir() + "/mechanisms/h2o2.yaml\"\n";
     for (const std::string type : {"euler", "navier_stokes"}) {
         for (const std::string reconstruction : {"type = \"MUSCL\"", "type = \"TENO\"\norder = 3"}) {
             Case c;
@@ -259,7 +261,8 @@ TEST(AxisymmetricTest, PoiseuilleResidualConvergesAtSecondOrderUpToTheAxis) {
     const double forcing = 4.0 * 0.01 * 0.1;
     const auto e1 = poiseuille_residual(8);
     const auto e2 = poiseuille_residual(16);
-    EXPECT_GT(std::log2(e1[0] / e2[0]), 1.8);
+    verification::expect_order({"axisymmetric", "Poiseuille pipe flow", "quadrilaterals",
+                                "mean axial momentum residual", {8, 16}, {e1[0], e2[0]}, 2.0, 1.8});
     EXPECT_LT(e2[0], 1e-3 * forcing);
     EXPECT_LT(e2[1], 1e-3 * forcing);
 }
@@ -370,9 +373,10 @@ TEST_P(AxisymmetricOrder, ManufacturedResidualConvergesAtDesignOrder) {
     // manufactured state, up to and including the axis cells
     const auto [mesh, order] = GetParam();
     const std::string teno = "type = \"TENO\"\norder = " + std::to_string(order);
-    const double e1 = mms_residual_error(mesh, 16, teno);
-    const double e2 = mms_residual_error(mesh, 32, teno);
-    EXPECT_GT(std::log2(e1 / e2), order - 1 - 0.3) << e1 << " " << e2;
+    verification::expect_order({"axisymmetric", "TENO" + std::to_string(order), verification::cells_of(mesh),
+                                "mean residual error, manufactured solution", {16, 32},
+                                {mms_residual_error(mesh, 16, teno), mms_residual_error(mesh, 32, teno)},
+                                order - 1.0, order - 1 - 0.3});
 }
 
 INSTANTIATE_TEST_SUITE_P(Axisymmetric, AxisymmetricOrder,

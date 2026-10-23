@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include "data_paths.h"
 #include "input.h"
 
 #include "test_fixtures.h"
@@ -41,7 +42,7 @@ struct ExampleCase {
 inline void PrintTo(const ExampleCase & c, std::ostream * os) { *os << c.file << " (" << c.preset << ")"; }
 
 inline std::filesystem::path example_path(const std::string & file) {
-    return std::filesystem::path(MALLARD_SOURCE_DIR) / "examples" / file;
+    return std::filesystem::path(source_dir()) / "examples" / file;
 }
 
 /**
@@ -71,7 +72,7 @@ inline Input example_under_preset(const ExampleCase & c, uint64_t n_steps, int64
     auto & mesh = input.at("mesh").as_table();
     if (mesh.at("type").as_string() == "file") {
         const std::string file =
-            std::string(MALLARD_SOURCE_DIR) + "/test/data/meshes/" + (c.dim == 3 ? "cyl3d.msh" : "cyl2d.msh");
+            source_dir() + "/test/data/meshes/" + (c.dim == 3 ? "cyl3d.msh" : "cyl2d.msh");
         table["mesh"] =
             c.mesh.empty() ? Input(Input::table_type{{"type", "file"}, {"filename", file}}) : parse_toml(c.mesh);
         table.erase("periodic");
@@ -103,7 +104,7 @@ inline Input example_under_preset(const ExampleCase & c, uint64_t n_steps, int64
         }
     }
 
-    if (const auto type = toml::find_or<std::string>(input, "initialize", "type", "constant");
+    if (const auto type = find_value_or<std::string>(input, "initialize", "type", "constant");
         type == "restart" || type == "remap") {
         if (!c.init.empty()) {
             table["initialize"] = parse_toml(c.init);

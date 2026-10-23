@@ -22,13 +22,15 @@
 #include <string>
 #include <vector>
 
+#include "comm.h"
 #include "file_format.h"
 #include "input.h"
 #include "probe_geometry.h"
 #include "scratch.h"
-#include "solver.h"
 #include "gmsh_fixtures.h"
+#include "solver.h"
 #include "test_fixtures.h"
+#include "test_utils.h"
 
 #ifdef Mallard_HAS_HDF5
 #include "hdf5_util.h"
@@ -46,8 +48,19 @@ std::string vector3(const char * x, const char * y, const char * z) {
     return std::string("[\"") + x + "\", \"" + y + "\"" + (N_DIM == 3 ? std::string(", \"") + z + "\"" : "") + "]";
 }
 
-std::string dir_for(const std::string & name) {
-    return (scratch_dir() / ("probes_" + name)).string();
+/** @brief An empty directory of the test, the same on every rank. */
+std::string fresh_dir(const std::string & name) {
+    const std::string dir = (scratch_dir() / ("probes_" + name)).string();
+    comm::barrier();
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    return dir;
+}
+
+/** @brief Runs a solver; afterwards every rank can read the files rank 0 wrote. */
+void run(Solver & solver) {
+    solver.run();
+    comm::barrier();
 }
 
 /** @brief A periodic box of n cells per side (n / 2 along z) with the given initial fields and reconstruction. */
@@ -74,6 +87,7 @@ std::vector<std::map<std::string, double>> read_csv(const std::string & file) {
     while (std::getline(hs, cell, ',')) names.push_back(cell);
     std::vector<std::map<std::string, double>> rows;
     while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#') continue;
         std::stringstream ss(line);
         std::map<std::string, double> row;
         for (size_t i = 0; std::getline(ss, cell, ','); i++) row[names.at(i)] = std::stod(cell);
@@ -96,8 +110,7 @@ const char * const SINE_RHO = "1.0 + 0.2 * sin(2 * pi * x) * sin(2 * pi * y)";
 
 /** @brief Largest error of RHO and T = p / rho at the step-0 point values of probe points off the cell centroids. */
 double point_error(uint32_t n, const std::string & recon, const std::string & sampling) {
-    const std::string dir = dir_for("order");
-    std::filesystem::remove_all(dir);
+    const std::string dir = fresh_dir("order");
     // Points near fixed ones at the same place in their cells on every mesh, so
     // that the error constants do not change with the mesh
     const double near[3][3] = {{0.137, 0.462, 0.31}, {0.713, 0.291, 0.77}, {0.402, 0.858, 0.53}};
@@ -116,14 +129,13 @@ double point_error(uint32_t n, const std::string & recon, const std::string & sa
                               "sampling = \"" + sampling + "\"\nshape = \"points\"\npoints = [" + points.str() + "]\n";
     Solver solver;
     solver.init(parse_toml(box_case(n, SINE_RHO, recon, probe)));
-    solver.run();
+    run(solver);
     double error = 0.0;
     for (const auto & row : read_csv(dir + "/p.csv")) {
         if (row.at("step") != 0.0) continue;
         const double rho = sine_rho(row.at("x"), row.at("y"));
         error = std::max({error, std::fabs(row.at("RHO") - rho), std::fabs(row.at("T") - 1.0 / rho)});
     }
-    std::filesystem::remove_all(dir);
     return error;
 }
 
@@ -201,9 +213,7 @@ TEST(ProbesTest, CurvesHaveTheirLengthsAndFollowTheirTransforms) {
 }
 
 TEST(ProbesTest, PointFilesSkipHeadersAndComments) {
-    const std::string dir = dir_for("points_file");
-    std::filesystem::create_directories(dir);
-    const std::string file = dir + "/cloud.csv";
+    const std::string file = "cloud_" + std::to_string(comm::rank()) + ".csv";
     std::ofstream(file) << "x, y, z\n# a comment\n0.1, 0.2, 0.3\n\n0.4 0.5 0.6  # trailing\n";
     const auto points = probe::read_points(file, "test");
     ASSERT_EQ(points.size(), 2u);
@@ -211,7 +221,6 @@ TEST(ProbesTest, PointFilesSkipHeadersAndComments) {
     EXPECT_EQ(points[1][1], 0.5);
     std::ofstream(file) << "0.1, 0.2, 0.3\nx, y\n";
     EXPECT_THROW(probe::read_points(file, "test"), InputError);
-    std::filesystem::remove_all(dir);
 }
 
 TEST(ProbesTest, PointValuesConvergeAtTheSchemesOrder) {
@@ -245,8 +254,7 @@ TEST(ProbesTest, CurveReductionsAreExactForPolynomialFields) {
     // element integrate their squares along straight elements exactly
     const char * rho = "2.0 + 0.3 * x - 0.2 * y + 0.25 * x^2 + 0.15 * x * y - 0.1 * y^2";
     auto f = [](double x, double y) { return 2.0 + 0.3 * x - 0.2 * y + 0.25 * x * x + 0.15 * x * y - 0.1 * y * y; };
-    const std::string dir = dir_for("exact");
-    std::filesystem::remove_all(dir);
+    const std::string dir = fresh_dir("exact");
     const std::string probe = "[[probes]]\nname = \"poly\"\nfile = \"" + dir + "/poly.csv\"\nvariables = [\"RHO\", \"P\"]\n"
                               "sampling = \"point\"\nshape = \"polyline\"\nvertices = [" +
                               numbers3("0.35", "0.42", "0.45") + ", " + numbers3("0.62", "0.57", "0.45") + ", " +
@@ -255,7 +263,7 @@ TEST(ProbesTest, CurveReductionsAreExactForPolynomialFields) {
                               "reductions_file = \"" + dir + "/poly_reductions.csv\"\n";
     Solver solver;
     solver.init(parse_toml(box_case(20, rho, "type = \"TENO\"\norder = 3\ntroubled_threshold = 1.0\n", probe)));
-    solver.run();
+    run(solver);
 
     const double v[3][2] = {{0.35, 0.42}, {0.62, 0.57}, {0.48, 0.66}};
     double length = 0.0, integral = 0.0, square = 0.0;
@@ -284,26 +292,22 @@ TEST(ProbesTest, CurveReductionsAreExactForPolynomialFields) {
         EXPECT_GE(rtype(row.at("RHO")), rtype(r.at("min_RHO")));
         EXPECT_LE(rtype(row.at("RHO")), rtype(r.at("max_RHO")));
     }
-    std::filesystem::remove_all(dir);
 }
 
 TEST(ProbesTest, TimeIntervalsLandOnTheirTimes) {
-    const std::string dir = dir_for("times");
-    std::filesystem::remove_all(dir);
+    const std::string dir = fresh_dir("times");
     const std::string probe = "[[probes]]\nname = \"t\"\nfile = \"" + dir + "/t.csv\"\nvariables = [\"P\"]\n"
                               "point = " + numbers3("0.5", "0.5", "0.5") + "\ntime_interval = 0.0123\n";
     Solver solver;
     solver.init(parse_toml(box_case(8, SINE_RHO, "type = \"MUSCL\"\n", probe, "t_stop = 0.05\ncfl = 0.5\n")));
-    solver.run();
+    run(solver);
     const auto rows = read_csv(dir + "/t.csv");
     ASSERT_EQ(rows.size(), 5u);
     for (size_t k = 0; k < rows.size(); k++) EXPECT_NEAR(rows[k].at("t"), 0.0123 * double(k), precision_tol<double>(1e-12, 1e-6));
-    std::filesystem::remove_all(dir);
 }
 
 TEST(ProbesTest, VtpAndHdf5HoldTheCsvSamplesAndRestartsCutThemBack) {
-    const std::string dir = dir_for("formats");
-    std::filesystem::remove_all(dir);
+    const std::string dir = fresh_dir("formats");
     const std::string geometry = "shape = \"circle\"\ncenter = " + numbers3("0.5", "0.5", "0.5") +
                                  "\nradius = 0.3\nn_points = 12\n" + (N_DIM == 3 ? "normal = [1.0, 1.0, 1.0]\n" : "") +
                                  "variables = [\"RHO\", \"U\"]\nsampling = \"point\"\ninterval = 2\n";
@@ -320,20 +324,20 @@ TEST(ProbesTest, VtpAndHdf5HoldTheCsvSamplesAndRestartsCutThemBack) {
     const std::string run6 = "n_steps = 6\ncfl = 0.3\n";
     Solver whole;
     whole.init(parse_toml(box_case(10, SINE_RHO, recon, probes("a"), run6)));
-    whole.run();
+    run(whole);
     {
         // Steps 0 to 6 of an interrupted run, continued from step 4: the
         // series lose the rows after step 4 before the continuation adds its own
         Solver first;
         first.init(parse_toml(box_case(10, SINE_RHO, recon, probes("b"), run6)));
-        first.run();
+        run(first);
     }
     std::string input = box_case(10, SINE_RHO, recon, probes("b"), run6);
     const size_t init = input.find("[initialize]\n") + 13;
     input.replace(init, input.find("[numerics]") - init, "type = \"restart\"\nfile = \"" + dir + "/b/r_000004.restart\"\n");
     Solver second;
     second.init(parse_toml(input));
-    second.run();
+    run(second);
 
     const auto csv = read_csv(dir + "/a/c.csv");
     ASSERT_EQ(csv.size(), 4u * 12u);
@@ -341,8 +345,8 @@ TEST(ProbesTest, VtpAndHdf5HoldTheCsvSamplesAndRestartsCutThemBack) {
     size_t n_sets = 0;
     for (size_t at = pvd.find("<DataSet"); at != std::string::npos; at = pvd.find("<DataSet", at + 1)) n_sets++;
     EXPECT_EQ(n_sets, 4u);
-    EXPECT_EQ(pvd, read_all(dir + "/a/v.pvd"));
-    EXPECT_EQ(read_all(dir + "/b/v_000006.vtp"), read_all(dir + "/a/v_000006.vtp"));
+    EXPECT_EQ(without_provenance(pvd), without_provenance(read_all(dir + "/a/v.pvd")));
+    EXPECT_EQ(without_provenance(read_all(dir + "/b/v_000006.vtp")), without_provenance(read_all(dir + "/a/v_000006.vtp")));
     const std::string vtp = read_all(dir + "/a/v_000006.vtp");
     EXPECT_NE(vtp.find("NumberOfPoints=\"12\""), std::string::npos);
     EXPECT_NE(vtp.find("NumberOfLines=\"1\""), std::string::npos);
@@ -351,10 +355,13 @@ TEST(ProbesTest, VtpAndHdf5HoldTheCsvSamplesAndRestartsCutThemBack) {
                        std::to_string(file_format::PROBE_OUTPUT.version) + "<"),
               std::string::npos);
 #ifdef Mallard_HAS_HDF5
+    // HDF5 files are read by rank 0 alone (the library locks them)
     for (const char * sub : {"a", "b"}) {
+        if (!comm::is_root()) break;
         const std::string h5file = dir + "/" + sub + "/h.h5";
         h5::Handle file(H5Fopen(h5file.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening");
-        ASSERT_EQ(h5::n_rows(file, "step"), 4u);
+        EXPECT_EQ(h5::n_rows(file, "step"), 4u);
+        if (h5::n_rows(file, "step") != 4u) continue;
         const auto steps = h5::read_rows<uint64_t>(file, "step", 0, 4, 1, H5P_DEFAULT);
         EXPECT_EQ(steps, (std::vector<uint64_t>{0, 2, 4, 6}));
         const auto rho = h5::read_rows<double>(file, "fields/RHO", 0, 4, 12, H5P_DEFAULT);
@@ -362,22 +369,25 @@ TEST(ProbesTest, VtpAndHdf5HoldTheCsvSamplesAndRestartsCutThemBack) {
             for (size_t p = 0; p < 12; p++) EXPECT_EQ(rtype(rho[k * 12 + p]), rtype(csv[k * 12 + p].at("RHO")));
         }
     }
-    {
+    if (comm::is_root()) {
         h5::Handle file(H5Fopen((dir + "/b/h.h5").c_str(), H5F_ACC_RDWR, H5P_DEFAULT), H5Fclose, "opening");
         h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /");
         EXPECT_EQ(h5::read_int_attribute(root, "version"), file_format::PROBE_OUTPUT.version);
         h5::check(H5Adelete(root, "version"), "H5Adelete");
         h5::write_int_attribute(root, "version", static_cast<int>(file_format::PROBE_OUTPUT.version + 1));
     }
+    comm::barrier();
+    // Rank 0 refuses the file and every rank stops with it
     try {
         Solver newer;
         newer.init(parse_toml(input));
         ADD_FAILURE() << "a probe file of a newer format version was appended to";
     } catch (const std::runtime_error & e) {
-        EXPECT_NE(std::string(e.what()).find("is from a newer Mallard"), std::string::npos) << e.what();
+        if (comm::is_root()) {
+            EXPECT_NE(std::string(e.what()).find("is from a newer Mallard"), std::string::npos) << e.what();
+        }
     }
 #endif
-    std::filesystem::remove_all(dir);
 }
 
 namespace {
@@ -418,19 +428,18 @@ TEST(ProbesTest, WallShearAndHeatFluxMatchCouetteFlow) {
     // The wall values are the walls'; the shear stress and the heat flux,
     // from the one-sided wall gradients of the viscous flux, converge at first
     // order (the shear stress's only error is u = <rho u> / <rho> of the cells)
-    const std::string dir = dir_for("couette");
     const double q_bottom = -COUETTE_KAPPA * (COUETTE_T1 - COUETTE_T0) - 0.5 * COUETTE_MU * COUETTE_U * COUETTE_U;
     const double q_top = COUETTE_KAPPA * (COUETTE_T1 - COUETTE_T0) - 0.5 * COUETTE_MU * COUETTE_U * COUETTE_U;
     const double tau = COUETTE_MU * COUETTE_U, q_ref = 0.5 * COUETTE_U * COUETTE_U;
     std::vector<double> e_tau, e_q;
     for (uint32_t n : {8u, 16u, 32u}) {
-        std::filesystem::remove_all(dir);
+        const std::string dir = fresh_dir("couette");
         const std::string probe = "[[probes]]\nname = \"walls\"\nfile = \"" + dir + "/walls.csv\"\nboundary_type = \"wall\"\n"
                                   "variables = [\"CF\", \"TAU_W\", \"TAU_W_X\", \"Q_W\", \"U_TAU\", \"Y_PLUS\", \"T\", \"U_X\", \"RHO\"]\n"
                                   "reference = {rho = 1.0, u = " + numbers3("0.5", "0.0", "0.0") + ", p = 1.0}\n";
         Solver solver;
         solver.init(parse_toml(couette_case(n, probe)));
-        solver.run();
+        run(solver);
         double error_tau = 0.0, error_q = 0.0;
         size_t n_faces = 0;
         const double tol = precision_tol<double>(1e-12, 1e-5);
@@ -461,20 +470,18 @@ TEST(ProbesTest, WallShearAndHeatFluxMatchCouetteFlow) {
     EXPECT_GT(std::log2(e_tau[1] / e_tau[2]), 0.8) << e_tau[1] << " " << e_tau[2];
     EXPECT_LT(e_q.back(), 0.05);
     EXPECT_GT(std::log2(e_q[1] / e_q[2]), 0.8) << e_q[1] << " " << e_q[2];
-    std::filesystem::remove_all(dir);
 }
 
 TEST(ProbesTest, BoundaryTractionsIntegrateToTheForces) {
     // Cell sampling takes the forces monitor's wall pressure and gradients
-    const std::string dir = dir_for("forces");
-    std::filesystem::remove_all(dir);
+    const std::string dir = fresh_dir("forces");
     const std::string extra = "[[forces]]\nzone = \"top\"\nfile = \"" + dir + "/forces.csv\"\n"
                               "[[probes]]\nname = \"top\"\nboundary = \"top\"\nsamples = false\n"
                               "variables = [\"TRACTION_PRESSURE\", \"TRACTION_VISCOUS\"]\nreductions = [\"integral\"]\n"
                               "reductions_file = \"" + dir + "/top.csv\"\n";
     Solver solver;
     solver.init(parse_toml(couette_case(8, extra, "n_steps = 4\ncfl = 0.5\n")));
-    solver.run();
+    run(solver);
     const auto forces = read_csv(dir + "/forces.csv");
     std::map<double, std::map<std::string, double>> probe;
     for (const auto & row : read_csv(dir + "/top.csv")) probe[row.at("step")] = row;
@@ -491,14 +498,12 @@ TEST(ProbesTest, BoundaryTractionsIntegrateToTheForces) {
             EXPECT_NEAR(row.at(std::string("integral_TRACTION_VISCOUS_") + "XYZ"[d]), Fv, tol * 1e-2);
         }
     }
-    std::filesystem::remove_all(dir);
 }
 
 TEST(ProbesTest, InletAndOutletFluxesHaveTheBoundaryStates) {
     // Uniform flow from an upt inlet to a p_out outlet: the face states are
     // the prescribed ones, and the normals point out of the domain
-    const std::string dir = dir_for("fluxes");
-    std::filesystem::remove_all(dir);
+    const std::string dir = fresh_dir("fluxes");
     std::ostringstream s;
     s << "[run]\nn_steps = 1\ndt = 1.0e-9\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 4\nLx = 2.0\nLy = 1.0\n";
     if (N_DIM == 3) s << "Nz = 3\nLz = 1.0\nperiodic = [\"z\"]\n";
@@ -516,7 +521,7 @@ TEST(ProbesTest, InletAndOutletFluxesHaveTheBoundaryStates) {
     }
     Solver solver;
     solver.init(parse_toml(s.str()));
-    solver.run();
+    run(solver);
     const double area = 1.0, mdot = 0.3 * area, h_t = 3.5 + 0.5 * 0.3 * 0.3;
     const double tol = precision_tol<double>(1e-13, 1e-6);
     for (const auto & [zone, sign] : {std::pair{"left", -1.0}, std::pair{"right", 1.0}}) {
@@ -527,7 +532,6 @@ TEST(ProbesTest, InletAndOutletFluxesHaveTheBoundaryStates) {
         EXPECT_NEAR(r.at("integral_MOMENTUM_FLUX_Y"), 0.0, tol) << zone;
         EXPECT_NEAR(r.at("integral_ENTHALPY_FLUX"), sign * mdot * h_t, tol) << zone;
     }
-    std::filesystem::remove_all(dir);
 }
 
 #if N_DIM == 2
@@ -538,9 +542,8 @@ TEST(ProbesTest, WallPolylinesFollowCurvedWallsWithTheFluidOnTheirLeft) {
     // pressure beat the cell averages
     const double M = 0.8;
     auto p_exact = [&](double r) { return std::pow(1.0 + 0.2 * M * M * (1.0 - 1.0 / (r * r)), 3.5) / 1.4; };
-    const std::string file = write_temp("probes_annulus.msh", annulus_gmsh(4, 48));
-    const std::string dir = dir_for("annulus");
-    std::filesystem::remove_all(dir);
+    const std::string file = write_temp_shared("probes_annulus.msh", annulus_gmsh(4, 48));
+    const std::string dir = fresh_dir("annulus");
     std::string probes;
     for (const char * zone : {"inner", "outer"}) {
         for (const char * sampling : {"cell", "point"}) {
@@ -562,7 +565,7 @@ TEST(ProbesTest, WallPolylinesFollowCurvedWallsWithTheFluidOnTheirLeft) {
         "[output]\ncheck_interval = 1000000\n" + probes;
     Solver solver;
     solver.init(parse_toml(input));
-    solver.run();
+    run(solver);
     for (const auto & [zone, r, turn] : {std::tuple{"inner", 1.0, -1.0}, std::tuple{"outer", 1.384, 1.0}}) {
         double error[2] = {0.0, 0.0};
         for (int k = 0; k < 2; k++) {
@@ -589,7 +592,35 @@ TEST(ProbesTest, WallPolylinesFollowCurvedWallsWithTheFluidOnTheirLeft) {
         }
         EXPECT_LT(error[1], 0.2 * error[0]) << zone << ": point " << error[1] << ", cell " << error[0];
     }
-    std::filesystem::remove_all(dir);
+}
+#endif
+
+#ifdef Mallard_HAS_HDF5
+TEST(ProbesTest, Hdf5ProbesAndAsynchronousHdf5OutputShareTheLibrary) {
+    // The probe writes its file on the main thread while the writer's
+    // background thread writes snapshots: HDF5 is not thread-safe
+    if (comm::size() > 1 && !h5::PARALLEL) GTEST_SKIP() << "HDF5 output on several ranks needs parallel HDF5";
+    const std::string dir = fresh_dir("async");
+    const uint64_t n_steps = 40;
+    const std::string extra = "[[probes]]\nname = \"h5\"\nformat = \"hdf5\"\nfile = \"" + dir + "/h.h5\"\n"
+                              "variables = [\"RHO\", \"U\", \"P\"]\nshape = \"circle\"\ncenter = " +
+                              numbers3("0.5", "0.5", "0.5") + "\nradius = 0.3\nn_points = 64\n" +
+                              (N_DIM == 3 ? "normal = [0.0, 0.0, 1.0]\n" : "") +
+                              "[[write_data]]\nprefix = \"" + dir + "/s\"\nformat = \"hdf5\"\ninterval = 1\n"
+                              "variables = [\"RHO\", \"P\"]\n";
+    std::string input = box_case(12, SINE_RHO, "type = \"MUSCL\"\n", extra,
+                                 "n_steps = " + std::to_string(n_steps) + "\ncfl = 0.3\n");
+    input.replace(input.find("check_interval"), 0, "async = true\n");
+    Solver solver;
+    solver.init(parse_toml(input));
+    run(solver);
+    if (comm::is_root()) {
+        h5::Handle file(H5Fopen((dir + "/h.h5").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening");
+        const uint64_t n = h5::n_rows(file, "step");
+        EXPECT_EQ(n, n_steps + 1);
+        const auto steps = h5::read_rows<uint64_t>(file, "step", 0, n, 1, H5P_DEFAULT);
+        for (uint64_t k = 0; k < n; k++) EXPECT_EQ(steps[k], k);
+    }
 }
 #endif
 

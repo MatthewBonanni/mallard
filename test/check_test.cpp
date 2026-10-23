@@ -1,6 +1,6 @@
 /**
  * @file check_test.cpp
- * @brief Pre-flight check (mallard --check): unused keys, boundary coverage,
+ * @brief Pre-flight check (mallard check): unused keys, boundary coverage,
  *        mesh quality, time step, memory, cost and warnings.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
@@ -16,6 +16,7 @@
 #include <sstream>
 #include <string>
 
+#include "data_paths.h"
 #include "test_fixtures.h"
 #include "check.h"
 #include "comm.h"
@@ -82,6 +83,15 @@ TEST(CheckKeys, MisspelledKeysAreReportedWithLineAndSuggestion) {
     EXPECT_EQ(r.unused[2].key, "foo");  // a table nobody read, not its keys
     EXPECT_EQ(r.unused[2].suggestion, "");
     EXPECT_FALSE(r.ok());
+}
+
+TEST(CheckKeys, RemovedKeysNameWhatReplacedThem) {
+    std::string input = box();
+    input.replace(input.find("rho_ref = 1.0\n"), 14, "rho_ref = 1.0\np_min = 0.0\n");
+    const CheckReport r = check(input);
+    EXPECT_FALSE(r.ok());
+    EXPECT_TRUE(mentions(r.errors, "physics.p_min was removed in 0.2.0")) << r.errors.front();
+    EXPECT_TRUE(mentions(r.errors, "mallard upgrade-input"));
 }
 
 TEST(CheckKeys, KeyInTheWrongTableSuggestsWhereItIsRead) {
@@ -248,8 +258,8 @@ TEST(CheckSettings, TflesThickeningAboveFiveIsAWarning) {
           << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\nT = \"300.0\"\nu = " << U_ZERO << "\n"
           << "X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n"
           << "[numerics]\nriemann_solver = \"HLLC\"\n"
-          << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR
-             "/mechanisms/h2o2.yaml\"\n[chemistry]\n[les]\nmodel = \""
+          << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() +
+"/mechanisms/h2o2.yaml\"\n[chemistry]\n[les]\nmodel = \""
           << (N_DIM == 3 ? "sigma" : "wale") << "\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = " << delta_L
           << "\ns_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\nn_res = 5.0\n";
         return s.str();

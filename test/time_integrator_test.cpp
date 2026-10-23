@@ -15,9 +15,12 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <utility>
+#include <vector>
 
 #include "time_integrator.h"
 #include "test_utils.h"
+#include "verification.h"
 
 namespace {
 
@@ -48,7 +51,7 @@ double integrate_error(TimeIntegrator & integrator, uint32_t n_steps) {
     }
     Kokkos::deep_copy(solution_vec[0].flow, 1.0);
     const rtype l0 = lambda[0], l1 = lambda[1], l2 = lambda[2], l3 = lambda[3];
-    RHSFunction rhs = [=](State U_state, State R_state, rtype) {
+    RHSFunction rhs = [=](State U_state, State R_state, rtype, rtype) {
         StateView U = U_state.flow, R = R_state.flow;
         Kokkos::parallel_for(U.extent(0), KOKKOS_LAMBDA(const uint32_t c) {
             R(c, 0) = l0 * U(c, 0);
@@ -69,10 +72,12 @@ double integrate_error(TimeIntegrator & integrator, uint32_t n_steps) {
     return err;
 }
 
-double observed_order(TimeIntegrator & integrator) {
-    const double e1 = integrate_error(integrator, 20);
-    const double e2 = integrate_error(integrator, 40);
-    return std::log2(e1 / e2);
+/** @brief Steps 20 and 40 of the linear system converge within 0.1 of the design order. */
+void expect_design_order(TimeIntegrator & integrator, double design) {
+    verification::expect_order({"time", TIME_INTEGRATOR_NAMES.at(integrator.get_type()), "",
+                                "max error, linear system", {20, 40},
+                                {integrate_error(integrator, 20), integrate_error(integrator, 40)}, design,
+                                design - 0.1, design + 0.1});
 }
 
 } // namespace
@@ -92,7 +97,7 @@ uint32_t steady_state_changes(TimeIntegrator & integrator) {
     }
     Kokkos::deep_copy(U.flow, h_flow);
     Kokkos::deep_copy(U.species, h_species);
-    RHSFunction zero = [](State, State R, rtype) {
+    RHSFunction zero = [](State, State R, rtype, rtype) {
         Kokkos::deep_copy(R.flow, 0.0_r);
         Kokkos::deep_copy(R.species, 0.0_r);
     };
@@ -132,9 +137,9 @@ TEST(TimeIntegratorTest, LowStorageMethodsHaveTheirDesignOrder) {
     SSPRK54 ssprk54;
     CK45 ck45;
     RDPK3Sp35 rdpk;
-    EXPECT_NEAR(observed_order(ssprk54), 4.0, 0.1);
-    EXPECT_NEAR(observed_order(ck45), 4.0, 0.1);
-    EXPECT_NEAR(observed_order(rdpk), 3.0, 0.1);
+    expect_design_order(ssprk54, 4.0);
+    expect_design_order(ck45, 4.0);
+    expect_design_order(rdpk, 3.0);
 }
 
 TEST(TimeIntegratorTest, LowStorageMethodsUseFewRegisters) {
@@ -174,7 +179,7 @@ double square_wave_overshoot(TimeIntegrator & integrator, const double courant) 
     for (uint32_t c = 0; c < n; c++) FOR_I_CONSERVATIVE h_U(c, i) = (c >= 16 && c < 32) ? 1.0 : 0.0;
     Kokkos::deep_copy(solution_vec[0].flow, h_U);
     const rtype h = 1.0_r / n;
-    RHSFunction rhs = [=](State U, State R, rtype) { upwind_rhs(U, R, 1.0_r / h); };
+    RHSFunction rhs = [=](State U, State R, rtype, rtype) { upwind_rhs(U, R, 1.0_r / h); };
     double overshoot = 0.0;
     for (int s = 0; s < 100; s++) {
         integrator.take_step(0.0, static_cast<rtype>(courant) * h, solution_vec, rhs_vec, rhs);
@@ -206,7 +211,7 @@ TEST(TimeIntegratorTest, EmbeddedEstimateIsTheLocalErrorOfTheSecondOrderPair) {
         for (uint8_t i = 0; i < integrator.get_n_solution_vectors(); i++) solution_vec.emplace_back("U", 1, 0);
         for (uint8_t i = 0; i < integrator.get_n_rhs_vectors(); i++) rhs_vec.emplace_back("rhs", 1, 0);
         Kokkos::deep_copy(solution_vec[0].flow, 1.0);
-        RHSFunction rhs = [](State U, State R, rtype) { negate(U, R); };
+        RHSFunction rhs = [](State U, State R, rtype, rtype) { negate(U, R); };
         integrator.take_step(0.0, dt, solution_vec, rhs_vec, rhs);
         auto h_U0 = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec.back().flow);
         auto h_e = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), rhs_vec.back().flow);
@@ -215,24 +220,25 @@ TEST(TimeIntegratorTest, EmbeddedEstimateIsTheLocalErrorOfTheSecondOrderPair) {
     };
     const double e1 = estimate(0.1_r), e2 = estimate(0.05_r);
     EXPECT_GT(std::abs(e1), 1e-6);
-    EXPECT_NEAR(std::log2(e1 / e2), 3.0, 0.1);
+    verification::expect_order({"time", "RDPK3Sp35 error estimate", "", "estimate after one step", {10, 20},
+                                {std::abs(e1), std::abs(e2)}, 3.0, 2.9, 3.1});
 }
 
 TEST(TimeIntegratorTest, ForwardEulerIsFirstOrder) {
     FE integrator;
-    EXPECT_NEAR(observed_order(integrator), 1.0, 0.1);
+    expect_design_order(integrator, 1.0);
 }
 
 TEST(TimeIntegratorTest, SSPRK3IsThirdOrder) {
     SKIP_IN_SINGLE_PRECISION("the errors after 20 and 40 steps are at round-off");
     SSPRK3 integrator;
-    EXPECT_NEAR(observed_order(integrator), 3.0, 0.1);
+    expect_design_order(integrator, 3.0);
 }
 
 TEST(TimeIntegratorTest, RK4IsFourthOrder) {
     SKIP_IN_SINGLE_PRECISION("the errors after 20 and 40 steps are at round-off");
     RK4 integrator;
-    EXPECT_NEAR(observed_order(integrator), 4.0, 0.1);
+    expect_design_order(integrator, 4.0);
 }
 
 TEST(TimeIntegratorTest, SSPRK3IsConvexCombinationOfEulerSteps) {
@@ -241,7 +247,7 @@ TEST(TimeIntegratorTest, SSPRK3IsConvexCombinationOfEulerSteps) {
     std::vector<State> solution_vec = {State("U", 1, 0), State("U1", 1, 0)};
     std::vector<State> rhs_vec = {State("k", 1, 0)};
     Kokkos::deep_copy(solution_vec[0].flow, 1.0);
-    RHSFunction rhs = [](State U, State R, rtype) { negate(U, R); };
+    RHSFunction rhs = [](State U, State R, rtype, rtype) { negate(U, R); };
     integrator.take_step(0.0, 1.0, solution_vec, rhs_vec, rhs);
     auto h_U = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec[0].flow);
     FOR_I_CONSERVATIVE EXPECT_NEAR(h_U(0, i), 1.0 / 3.0, roundoff(1e-15));
@@ -265,7 +271,7 @@ TEST(TimeIntegratorTest, SpeciesBlockAdvancesExactlyLikeTheFlowBlock) {
         for (uint8_t i = 0; i < integrator->get_n_rhs_vectors(); i++) rhs_vec.emplace_back("rhs", n_cells, n_species);
         Kokkos::deep_copy(solution_vec[0].flow, 1.0);
         Kokkos::deep_copy(solution_vec[0].species, 1.0);
-        RHSFunction rhs = [](State U, State R, rtype) { negate(U, R); };
+        RHSFunction rhs = [](State U, State R, rtype, rtype) { negate(U, R); };
         for (int s = 0; s < 3; s++) integrator->take_step(0.1_r * static_cast<rtype>(s), 0.1_r, solution_vec, rhs_vec, rhs);
         auto h_flow = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec[0].flow);
         auto h_species = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec[0].species);
@@ -289,7 +295,7 @@ double nonautonomous_error(TimeIntegrator & integrator, uint32_t n_steps) {
     std::vector<State> solution_vec, rhs_vec;
     for (uint8_t i = 0; i < integrator.get_n_solution_vectors(); i++) solution_vec.emplace_back("U", 1, 0);
     for (uint8_t i = 0; i < integrator.get_n_rhs_vectors(); i++) rhs_vec.emplace_back("rhs", 1, 0);
-    RHSFunction rhs = [](State, State R_state, rtype t) {
+    RHSFunction rhs = [](State, State R_state, rtype t, rtype) {
         StateView R = R_state.flow;
         Kokkos::parallel_for(R.extent(0), KOKKOS_LAMBDA(const uint32_t c) {
             FOR_I_CONSERVATIVE R(c, i) = Kokkos::cos(t);
@@ -309,12 +315,15 @@ TEST(TimeIntegratorTest, StageTimesGiveDesignOrderForTimeDependentRHS) {
     RK4 rk4;
     // Evaluating every stage at the start of the step drops both to first order.
     // (SSPRK3 reduces to Simpson's rule on this pure quadrature, hence >= 3.)
-    EXPECT_GT(std::log2(nonautonomous_error(ssprk3, 10) / nonautonomous_error(ssprk3, 20)), 2.85);
-    EXPECT_GT(std::log2(nonautonomous_error(rk4, 10) / nonautonomous_error(rk4, 20)), 3.85);
     SSPRK54 ssprk54;
     CK45 ck45;
     RDPK3Sp35 rdpk;
-    EXPECT_GT(std::log2(nonautonomous_error(ssprk54, 10) / nonautonomous_error(ssprk54, 20)), 3.85);
-    EXPECT_GT(std::log2(nonautonomous_error(ck45, 10) / nonautonomous_error(ck45, 20)), 3.85);
-    EXPECT_GT(std::log2(nonautonomous_error(rdpk, 10) / nonautonomous_error(rdpk, 20)), 2.85);
+    const std::vector<std::pair<TimeIntegrator *, double>> integrators = {
+        {&ssprk3, 3.0}, {&rk4, 4.0}, {&ssprk54, 4.0}, {&ck45, 4.0}, {&rdpk, 3.0}};
+    for (const auto & [integrator, design] : integrators) {
+        verification::expect_order({"time", TIME_INTEGRATOR_NAMES.at(integrator->get_type()), "",
+                                    "error, time-dependent right-hand side", {10, 20},
+                                    {nonautonomous_error(*integrator, 10), nonautonomous_error(*integrator, 20)},
+                                    design, design - 0.15});
+    }
 }

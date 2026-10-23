@@ -66,7 +66,7 @@ double read_number(const Input & entry, const std::string & name, const std::str
 }
 
 uint64_t read_count(const Input & entry, const std::string & name, const std::string & key, uint64_t min) {
-    const uint64_t n = toml::find_or<uint64_t>(entry, name, 0);
+    const uint64_t n = find_value_or<uint64_t>(entry, name, 0);
     if (n < min) throw InputError(key + "." + name + " must be at least " + std::to_string(min) + ".");
     return n;
 }
@@ -503,7 +503,8 @@ std::vector<Point> read_points(const std::string & file, const std::string & key
 }
 
 Geometry make_geometry(const Input & entry, const std::string & key) {
-    std::string shape = toml::find_or<std::string>(entry, "shape", "");
+    std::string shape = find_value_or<std::string>(entry, "shape", "");
+    record_options(key + ".shape", {"point", "points", "line", "polyline", "circle", "arc", "curve"});
     if (shape.empty()) {
         const bool point = entry.contains("point");
         const bool line = entry.contains("start") || entry.contains("end");
@@ -534,7 +535,7 @@ Geometry make_geometry(const Input & entry, const std::string & key) {
                 points.push_back(as_vector(list.as_array()[i], key + ".points[" + std::to_string(i) + "]"));
             }
         } else {
-            for (const auto & p : read_points(toml::find<std::string>(entry, "points_file"), key)) {
+            for (const auto & p : read_points(find_value<std::string>(entry, "points_file"), key)) {
                 Vec3 x = {0.0, 0.0, 0.0};
                 for (size_t d = 0; d < N_DIM; d++) x[d] = p[d];
                 points.push_back(x);
@@ -591,7 +592,7 @@ Geometry make_geometry(const Input & entry, const std::string & key) {
         for (size_t d = 0; d < N_DIM; d++) {
             const std::string name(1, "xyz"[d]);
             if (!entry.contains(name)) throw InputError(key + ": " + name + " (an expression of s) not specified.");
-            f.push_back(std::make_shared<ParameterExpression>(toml::find<std::string>(entry, name), key + "." + name));
+            f.push_back(std::make_shared<ParameterExpression>(find_value<std::string>(entry, name), key + "." + name));
         }
         double s0 = 0.0, s1 = 1.0;
         if (entry.contains("s_range")) {

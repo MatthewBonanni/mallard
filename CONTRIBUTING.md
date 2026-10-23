@@ -42,15 +42,17 @@ cd mallard
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
     -DKokkos_ENABLE_THREADS=ON -DMallard_WARNINGS_AS_ERRORS=ON
 cmake --build build -j
-./build/test/MallardTest
+./build/test/mallard-test
 ```
 
 - Build 3D in a separate directory with `-DMallard_DIM=3`; code that is not
   dimension specific must build and pass in both.
-- Run a subset while iterating: `./build/test/MallardTest --gtest_filter='TENO*'`.
+- Run a subset while iterating: `./build/test/mallard-test --gtest_filter='TENO*'`.
+  `mallard test` runs the same binary from a build or an install tree
+  (`./build/src/mallard test --gtest_filter='TENO*'`).
   Run the whole suite, 2D and 3D, before asking for review.
 - With MPI (`-DMallard_ENABLE_MPI=ON`), run the multi-rank tests on 2 to 4 ranks:
-  `mpirun -n 3 ./build/test/MallardTest --gtest_filter='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*'`.
+  `mpirun -n 3 ./build/test/mallard-test --gtest_filter='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:ProbesTest.*'`.
 - Python tools (`tools/`) need numpy, scipy, matplotlib, imageio and
   imageio-ffmpeg; a virtual environment works.
 
@@ -106,7 +108,7 @@ that adds or changes behavior includes:
    - equations and sources in `docs/theory/`, design rationale and measurements in
      `docs/design/`, and new references in [docs/references.md](docs/references.md);
    - figures drawn by a script in `tools/docs/` as a light/dark SVG pair
-     (`python tools/docs/make_figures.py --mallard build/src/Mallard`), never
+     (`python tools/docs/make_figures.py --mallard build/src/mallard`), never
      hand-edited images.
 4. **An example** in `examples/<case>/` with its `input.toml` and a row in
    [examples/README.md](examples/README.md), ideally compared with a reference
@@ -142,11 +144,18 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   passing `CI` status on the PR's current head, so a new push needs a new run.
   CI builds with warnings as errors and runs the full suite in 2D and 3D, with
   OpenMP, serial, MPI on 1 to 4 ranks and single precision, plus a Clang build and
-  the tutorials and case templates. Documentation-only changes skip the build jobs
-  (the run takes about a minute). `main` runs CI on every merge.
-- **CUDA builds** (2D and 3D, compile only) run when the changes touch device code:
-  `tools/device_changes.sh` decides (a changed `src/` file with Kokkos device
-  constructs, or a Kokkos update).
+  the tutorials and case templates. Each job also shows on the PR as its own status,
+  `CI / <job>`. Documentation-only changes skip the build jobs (the run takes about a
+  minute). `main` runs CI on every merge.
+- **After resolving a merge conflict** on a PR whose CI already passed, rerun only
+  what the resolution can affect: `gh workflow run ci.yml --ref <branch> -f
+  only=openmp,mpi-3d` (backend names, `tutorials`, `device`, `fuzz`). The `CI` status
+  records the subset. A resolution in build files, shared headers or anything the
+  whole suite exercises needs the full run.
+- **Device builds**: CUDA, HIP (ROCm) and SYCL (oneAPI), 2D and 3D, compile only,
+  run when a branch's changes touch device code: `tools/device_changes.sh` decides (a
+  changed `src/` file with Kokkos device constructs, or a Kokkos update). `main` also
+  runs the CUDA builds on every push. `-f device=true` forces all three.
 - **GPU CI.** Device code is also run on NVIDIA A100 GPUs by a maintainer-run GPU
   CI, outside GitHub Actions: CUDA 12 and 13 builds in 2D and 3D, the full test suite
   on the GPU (including the CUDA-graph and NCCL paths), the MPI tests on 2 ranks, and

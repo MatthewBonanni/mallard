@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -33,6 +34,15 @@ inline constexpr bool PARALLEL = true;
 #else
 inline constexpr bool PARALLEL = false;
 #endif
+
+/**
+ * @brief Held around every HDF5 call: the library is not thread-safe, and
+ *        asynchronous output writers call it from their own threads.
+ */
+inline std::mutex & mutex() {
+    static std::mutex m;
+    return m;
+}
 
 /** @brief Owns an HDF5 identifier. */
 class Handle {
@@ -86,6 +96,24 @@ inline hid_t file_access(bool collective = true) {
     (void)collective;
 #endif
     return fapl;
+}
+
+/**
+ * @brief File creation, for attributes of up to largest_attribute bytes:
+ *        those over 64 KiB need dense attribute storage, of the HDF5 1.8
+ *        file format, set on fapl.
+ */
+inline hid_t file_creation(hid_t fapl, size_t largest_attribute) {
+    const hid_t fcpl = H5Pcreate(H5P_FILE_CREATE);
+    if (largest_attribute > 60000) {
+        check(H5Pset_attr_phase_change(fcpl, 0, 0), "H5Pset_attr_phase_change");
+#if H5_VERSION_GE(1, 10, 0)
+        check(H5Pset_libver_bounds(fapl, H5F_LIBVER_V18, H5F_LIBVER_LATEST), "H5Pset_libver_bounds");
+#else
+        check(H5Pset_libver_bounds(fapl, H5F_LIBVER_LATEST, H5F_LIBVER_LATEST), "H5Pset_libver_bounds");
+#endif
+    }
+    return fcpl;
 }
 
 /** @brief Dataset transfer: collective MPI-IO (parallel HDF5), or independent. */
@@ -158,6 +186,11 @@ std::vector<T> read_rows(hid_t parent, const char * name, uint64_t first, uint64
     Handle dset(H5Dopen2(parent, name, H5P_DEFAULT), H5Dclose, std::string("opening ") + name);
     Handle space(H5Dget_space(dset), H5Sclose, "H5Dget_space");
     const int rank = cols > 1 ? 2 : 1;
+    hsize_t dims[2] = {0, 0};
+    if (H5Sget_simple_extent_ndims(space) != rank || H5Sget_simple_extent_dims(space, dims, nullptr) != rank ||
+        (rank == 2 && dims[1] != cols) || n > dims[0] || first > dims[0] - n) {
+        throw std::runtime_error(std::string("reading ") + name + ": rows out of range.");
+    }
     const hsize_t local[2] = {n, hsize_t(cols)};
     Handle memory(H5Screate_simple(rank, local, nullptr), H5Sclose, "H5Screate_simple");
     select_rows(space, first, n);
