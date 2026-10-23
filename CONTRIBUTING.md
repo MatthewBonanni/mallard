@@ -50,7 +50,7 @@ cmake --build build -j
 - Run a subset while iterating: `./build/test/MallardTest --gtest_filter='TENO*'`.
   Run the whole suite, 2D and 3D, before asking for review.
 - With MPI (`-DMallard_ENABLE_MPI=ON`), run the multi-rank tests on 2 to 4 ranks:
-  `mpirun -n 3 ./build/test/MallardTest --gtest_filter='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*'`.
+  `mpirun -n 3 ./build/test/MallardTest --gtest_filter='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:ProbesTest.*'`.
 - Python tools (`tools/`) need numpy, scipy, matplotlib, imageio and
   imageio-ffmpeg; a virtual environment works.
 
