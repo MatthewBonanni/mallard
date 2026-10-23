@@ -137,6 +137,15 @@ void Solver::record_step() {
     }
 }
 
+void Solver::set_stage_time(const rtype t_stage, const rtype c) {
+    const Kokkos::View<rtype> st = stage_time;
+    if (recording_step) {
+        record_stage_time(c);
+    } else {
+        Kokkos::parallel_for("stage_time", 1, KOKKOS_LAMBDA(const int) { st() = t_stage; });
+    }
+}
+
 void Solver::record_stage_time(const rtype c) {
     const Kokkos::View<rtype> st = stage_time;
     const Kokkos::View<rtype *> s = step_scalars;

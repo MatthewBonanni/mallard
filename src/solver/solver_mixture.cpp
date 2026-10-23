@@ -300,7 +300,8 @@ class CompositionExpressions {
                 const int32_t k = mixture.mechanism().species_index(species);
                 if (k < 0) throw InputError(where + "." + key + ": no species " + species + " in the mechanism.");
                 listed.push_back(k);
-                values.emplace_back(where + "." + key + "." + species, quantity_or_expression(value, species, dim::none));
+                texts.push_back(quantity_or_expression(value, species, dim::none));
+                values.emplace_back(where + "." + key + "." + species, texts.back());
             }
             if (table.contains("balance")) {
                 const std::string species = find_value<std::string>(table, "balance");
@@ -309,18 +310,26 @@ class CompositionExpressions {
             }
         }
 
-        /** @brief Whether some fraction depends on t. */
-        bool depends_on_time() const {
-            return std::any_of(values.begin(), values.end(), [](const Expression & e) { return e.depends_on_time(); });
+        /** @brief The fractions compiled as expressions of x, y, z, t, for the device. */
+        std::shared_ptr<CompositionPrograms> compiled() const {
+            auto c = std::make_shared<CompositionPrograms>();
+            for (size_t i = 0; i < listed.size(); i++) {
+                c->species.push_back(static_cast<uint32_t>(listed[i]));
+                c->fractions.push_back(std::make_shared<expr::Program>(where + ".composition", texts[i],
+                                                                       BoundaryValue::variables()));
+            }
+            c->balance = balance;
+            c->mole = mole;
+            return c;
         }
 
-        /** @brief Mass fractions at time t at the point with coordinates x(0..N_DIM). */
+        /** @brief Mass fractions at the point with coordinates x[0..N_DIM). */
         template <typename T>
-        std::vector<double> mass_fractions(const T & x, const double t = 0.0) const {
+        std::vector<double> mass_fractions(const T & x) const {
             std::vector<double> f(mixture.n_species(), 0.0);
             double sum = 0.0;
             for (size_t i = 0; i < listed.size(); i++) {
-                f[static_cast<size_t>(listed[i])] = std::max(values[i].at(x, N_DIM, t), 0.0);
+                f[static_cast<size_t>(listed[i])] = std::max(values[i].at(x, N_DIM), 0.0);
                 if (listed[i] != balance) sum += f[static_cast<size_t>(listed[i])];
             }
             if (balance >= 0) {
@@ -338,6 +347,7 @@ class CompositionExpressions {
         bool mole = false;
         int32_t balance = -1;
         std::vector<int32_t> listed;
+        std::vector<std::string> texts;
         std::vector<Expression> values;
 };
 
@@ -408,7 +418,7 @@ void Solver::init_temperature_seed() {
 void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype c) {
     const bool exchange = halo.active() && !(halo_current && state.flow.data() == conservatives.data());
     halo_current = false;
-    update_boundary_states(t_stage);
+    update_boundary_states(t_stage, c);
     if (exchange) halo.exchange(state);
     update_cell_states(state, !budget_pass);
     face_reconstruction->calc_face_values(W_cells, face_solution);
@@ -676,11 +686,8 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
                 std::vector<double> Y_uniform;
                 if (MixtureModel::composition_varies(bound)) {
                     composition = std::make_shared<CompositionExpressions>(*mixture_model, bound, where);
-                    if (composition->depends_on_time()) {
-                        boundary_composition[i_bc] = [composition](const Point & x, const double t) {
-                            return composition->mass_fractions([&x](const int i) { return x[size_t(i)]; }, t);
-                        };
-                    }
+                    const auto programs = composition->compiled();
+                    if (programs->depends_on_time()) boundary_composition[i_bc] = programs;
                 } else {
                     Y_uniform = mixture_model->mass_fractions(bound, where);
                     if (!T_varies) prescribe(i_bc, Y_uniform, T_uniform);

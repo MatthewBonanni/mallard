@@ -577,7 +577,8 @@ void Solver::init_boundaries() {
     std::vector<std::pair<size_t, std::vector<uint32_t>>> inlets;
     boundary_fields.assign(input_boundaries.size(), nullptr);
     boundary_composition.assign(input_boundaries.size(), nullptr);
-    timed_boundary_faces.clear();
+    field_faces.clear();
+    timed_fields = TimedBoundaryFields();
 
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
         const Input & bound = input_boundaries[i_bc];
@@ -637,7 +638,7 @@ void Solver::init_boundaries() {
             dirichlet.W.emplace_back(name + ".p", quantity_or_expression(bound.at("p"), name + ".p", dim::pressure));
         }
         auto fields = std::make_shared<BoundaryFields>(bound, bcs.back().type, "boundaries[name = \"" + name + "\"]");
-        if (fields->varies()) boundary_fields[i_bc] = fields;
+        boundary_fields[i_bc] = fields;
         const bool composition = is_mixture() && bcs.back().prescribes_composition() &&
                                  MixtureModel::composition_varies(bound);
         const bool profiled = composition || fields->varies();
@@ -722,11 +723,9 @@ void Solver::init_boundaries() {
         Point x{};
         FOR_I_DIM x[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
         // Single gases: the numbers at t = 0; mixtures complete them in init_mixture_boundaries
-        if (boundary_fields[i_bc]) boundary_fields[i_bc]->apply(copy, x, 0.0, double(physics.R));
+        if (boundary_fields[i_bc]->varies()) boundary_fields[i_bc]->apply(copy, x, 0.0, double(physics.R));
         face_bc[i_face] = static_cast<int32_t>(bcs.size());
-        if (boundary_fields[i_bc] && boundary_fields[i_bc]->depends_on_time()) {
-            timed_boundary_faces.push_back({static_cast<uint32_t>(bcs.size()), i_bc, x});
-        }
+        field_faces.push_back({i_bc, i_face, static_cast<uint32_t>(bcs.size())});
         bcs.push_back(copy);
         wall_model_specs.push_back(wall_model_specs[i_bc]);
     }
@@ -760,8 +759,6 @@ void Solver::init_boundaries() {
     boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics);
     boundary_data.mixture = is_mixture();
     init_wall_model(face_bc, bcs);
-    h_bcs = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.bcs);
-    t_boundary_fields = -1.0;
     if (is_mixture()) {
         const uint32_t n_species = mixture.n_species;
         boundary_data.thermo = mixture.thermo;
@@ -772,6 +769,17 @@ void Solver::init_boundaries() {
                                                                               n_species + 1);
         }
         copy_boundary_gas();
+    }
+    for (const auto & [base, i_face, i_bc] : field_faces) {
+        const auto & composition = boundary_composition[base];
+        if (!boundary_fields[base]->depends_on_time() && !composition) continue;
+        Point x{};
+        FOR_I_DIM x[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
+        timed_fields.add(i_bc, x, boundary_fields[base], composition);
+    }
+    if (!timed_fields.empty()) {
+        timed_fields.finish();
+        if (!stage_time.is_allocated()) stage_time = Kokkos::View<rtype>("stage_time");
     }
     h_face_state = Kokkos::create_mirror_view(boundary_data.face_state);
     h_face_state_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_state_index);
@@ -929,30 +937,23 @@ void Solver::copy_boundary_gas() {
     Kokkos::deep_copy(bc_transport_values, h_values);
 }
 
-void Solver::update_boundary_fields(rtype t_eval) {
-    if (timed_boundary_faces.empty() || t_eval == t_boundary_fields) return;
-    for (const TimedBoundaryFace & face : timed_boundary_faces) {
-        BoundaryCondition & bc = h_bcs(face.i_bc);
-        const BoundaryFields & fields = *boundary_fields[face.base];
-        if (!is_mixture()) {
-            fields.apply(bc, face.x, double(t_eval), double(physics.R));
-            continue;
-        }
-        std::vector<double> & Y = bc_mass_fractions[face.i_bc];
-        if (boundary_composition[face.base]) Y = boundary_composition[face.base](face.x, double(t_eval));
-        fields.apply(bc, face.x, double(t_eval), mixture_model->gas_constant(Y));
-        const double T = fields.temperature(face.x, double(t_eval));
-        if (T > 0.0) bc_temperatures[face.i_bc] = T;
-        mixture_model->surrogates(bc_temperatures[face.i_bc], Y, bc_surrogates[face.i_bc][0],
-                                  bc_surrogates[face.i_bc][1]);
+void Solver::update_boundary_fields(const rtype t_eval, const rtype c) {
+    if (timed_fields.empty()) return;
+    set_stage_time(t_eval, c);
+    TimedBoundaryFields::Gas gas;
+    gas.R = double(physics.R);
+    if (is_mixture()) {
+        gas.mixture = true;
+        gas.thermo = boundary_data.thermo;
+        gas.bc_Y = boundary_data.bc_Y;
+        gas.bc_thermo = boundary_data.bc_thermo;
+        gas.transport = bc_transport_values;
     }
-    Kokkos::deep_copy(boundary_data.bcs, h_bcs);
-    if (is_mixture()) copy_boundary_gas();
-    t_boundary_fields = t_eval;
+    timed_fields.apply(stage_time, boundary_data.bcs, gas);
 }
 
-void Solver::update_boundary_states(rtype t_eval) {
-    update_boundary_fields(t_eval);
+void Solver::update_boundary_states(const rtype t_eval, const rtype c) {
+    update_boundary_fields(t_eval, c);
     update_inflow(t_eval);
     if (dirichlet_boundaries.empty() || t_eval == t_boundary_states || boundary_states_steady) {
         return;
@@ -1602,6 +1603,7 @@ int Solver::run() {
             t_wall_output += output_timer.seconds();
             if (step % check_interval == 0) {
                 Kokkos::Timer check_timer;
+                timed_fields.check();
                 print_progress();
                 t_wall_checks += check_timer.seconds();
             }
@@ -1616,10 +1618,12 @@ int Solver::run() {
     } catch (const DivergedError &) {
         defer_chemistry = false;
         destroy_step_graph();
+        timed_fields.check();
         diverged();
     }
     defer_chemistry = false;
     destroy_step_graph();
+    timed_fields.check();
     if (step != step_last_check) print_progress();
     Kokkos::Timer output_timer;
     copy_device_to_host();

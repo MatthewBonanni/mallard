@@ -831,3 +831,19 @@ TEST(ForcedInletTest, QuantitiesWithUnitsAreNumbersNotExpressions) {
     EXPECT_TRUE(expression.varies());
     EXPECT_FALSE(expression.depends_on_time());
 }
+
+TEST(ForcedInletTest, NumberOfTThatTurnsNegativeIsAnInputErrorWithFaceAndTime) {
+    // T(t) crosses zero at t = 0.1: the run stops at the next check with the
+    // key, the value, the time and the face
+    try {
+        forced_run({"T(t) < 0", "type = \"upt\"\nu = " + std::string(N_DIM == 2 ? "[0.5, 0.0]" : "[0.5, 0.0, 0.0]") +
+                                    "\np = 1.0\nT = \"1 - 10 * t\"\n", "", UNIT_GAS},
+                   0.004);
+        FAIL() << "no error";
+    } catch (const InputError & e) {
+        const std::string what = e.what();
+        EXPECT_NE(what.find("boundaries[name = \"left\"].T must be positive (-"), std::string::npos) << what;
+        EXPECT_NE(what.find("at t = 0.1"), std::string::npos) << what;
+        EXPECT_NE(what.find(", face (0, "), std::string::npos) << what;
+    }
+}

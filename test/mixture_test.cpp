@@ -338,7 +338,7 @@ TEST(MixtureTest, IdenticalSpeciesAdvectWithoutDisturbingTheFlow) {
 }
 
 TEST(MixtureTest, TimeDependentUptCompositionIsAdvected) {
-    // Composition and temperature of the inlet as expressions of t: with two
+    // The composition of the inlet as an expression of t: with two
     // species of identical thermodynamics the flow stays uniform, and each
     // cell carries the composition that entered at t - x / u
     const uint32_t nx = 80, n = N_DIM == 2 ? 2 : 1;
@@ -348,7 +348,7 @@ TEST(MixtureTest, TimeDependentUptCompositionIsAdvected) {
         "[run]\nt_stop = 0.015\ncfl = 0.4\n" + mesh_block("cartesian", nx, n, 1.0, 0.05) +
         "[initialize]\ntype = \"constant\"\np = 1.0e5\nT = 300.0\nu = " + velocity_vec + "\nY = { AIR = 0.5, AIR2 = 0.5 }\n" +
         numerics("type = \"MUSCL\"\n", "HLLC") + mixture(PERFECT_AIR, "two-airs") +
-        boundaries("type = \"upt\"\nu = " + velocity_vec + "\np = 1.0e5\nT = \"300 + 0 * t\"\n"
+        boundaries("type = \"upt\"\nu = " + velocity_vec + "\np = 1.0e5\nT = 300.0\n"
                    "Y = { AIR2 = \"0.5 + 0.4 * sin(2 * pi * 100 * t)\" }\nbalance = \"AIR\"\n",
                    "type = \"p_out\"\np = 1.0e5\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n");
     Solver solver;

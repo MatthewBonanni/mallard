@@ -239,8 +239,8 @@ class Solver {
         /** @brief Inside a captured step: stage_time = t_n + c dt from the step's device scalars. */
         void record_stage_time(rtype c);
         void update_average_pressure_outlets(StateView solution);
-        /** @brief Target velocities of nscbc_inlet profiles depending on t, at time t, into target. */
-        void fill_timed_inlets(double t, const Kokkos::View<rtype *[N_DIM]> & target);
+        /** @brief stage_time = t_stage, or inside a captured step t_n + c dt (record_stage_time). */
+        void set_stage_time(rtype t_stage, rtype c);
         /**
          * @brief Add the uniform body force along the mass flow direction that
          *        holds the volume average of rho u at its target: it cancels the
@@ -505,12 +505,12 @@ class Solver {
          *        for the local cells; resume_output continues the output series.
          */
         void apply_restart(const RestartData & restart, const std::string & file, bool resume_output);
-        void update_boundary_states(rtype t_eval);
+        void update_boundary_states(rtype t_eval, rtype c = 0.0_r);
         void init_inlets(const std::vector<Input> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
         void update_inflow(rtype t_eval);
-        /** @brief Numbers of conditions given as expressions of t at t_eval, on the faces' own conditions. */
-        void update_boundary_fields(rtype t_eval);
+        /** @brief The faces' own conditions whose numbers depend on t, on the device at the stage time. */
+        void update_boundary_fields(rtype t_eval, rtype c);
         /**
          * @brief Mass fluxes of the faces of a mass_flow_inlet entry: per
          *        face for a mass_flux expression or an mdot with a profile,
@@ -684,18 +684,12 @@ class Solver {
         Kokkos::View<int32_t *>::host_mirror_type h_face_state_index;
         rtype t_boundary_states;
         bool boundary_states_steady = false;  // evaluated, and no expression depends on t
-        // Conditions whose numbers are expressions: per input boundary (null if all are numbers), the faces'
-        // own conditions re-evaluated at the stage times, and for mixtures the composition if it depends on t
-        struct TimedBoundaryFace {
-            uint32_t i_bc;  // the face's condition
-            uint32_t base;  // its input boundary
-            Point x;        // face center
-        };
+        // The numbers of each input boundary, per face where they vary; for mixtures, the composition per input
+        // boundary where it depends on t; the faces' own conditions that depend on t, evaluated on the device
         std::vector<std::shared_ptr<BoundaryFields>> boundary_fields;
-        std::vector<std::function<std::vector<double>(const Point &, double)>> boundary_composition;
-        std::vector<TimedBoundaryFace> timed_boundary_faces;
-        Kokkos::View<BoundaryCondition *>::host_mirror_type h_bcs;
-        rtype t_boundary_fields = -1.0;
+        std::vector<std::shared_ptr<CompositionPrograms>> boundary_composition;
+        std::vector<std::array<uint32_t, 3>> field_faces;  // (input boundary, face, its own condition)
+        TimedBoundaryFields timed_fields;
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         RiemannSolverType riemann_solver_type;
         rtype low_mach_cutoff = 0.1_r;
@@ -842,14 +836,8 @@ class Solver {
         bool characteristic_state_set = false;   // char_state holds the faces' state (from a step or a restart)
         // Synthetic turbulence of inlets, and the time of the targets in char_target
         std::vector<std::unique_ptr<SyntheticInflow>> inflows;
-        // nscbc_inlet velocity profiles depending on t: faces and their targets
-        struct TimedInlet {
-            std::shared_ptr<InletProfile> profile;
-            std::vector<Point> x;
-            Kokkos::View<int32_t *> chars;
-            Kokkos::View<rtype *[N_DIM]> targets;
-        };
-        std::vector<TimedInlet> timed_inlets;
+        // nscbc_inlet velocities depending on t
+        TimedInletTargets timed_inlets;
         rtype t_inflow = -1.0;
 
         // Checks

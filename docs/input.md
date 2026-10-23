@@ -80,7 +80,7 @@ The report, with an example: [Checking an input](guide/input_files.md#checking-a
 | `keep_last_good` | Keep a copy of the state at the start of each step (one copy of the conservatives, and partial densities, per step), so that a diverging run writes the last valid state; see [run control](guide/running.md) (default `true`) |
 | `control_socket` | Serve `mallard ctl` on `mallard.sock` in the working directory (default `true`) |
 | `control_file_interval` | Every this many steps, look for the files `STOP` and `CHECKPOINT` in the working directory (default 0: never) |
-| `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages) as one CUDA graph, so the host launches one graph and waits once per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel where the host takes part in the step: gas mixtures, average-pressure outlets, characteristic boundaries, boundary expressions of `t`, sources of domain averages, and halos exchanged with MPI (`[parallel] halo_exchange`); the run log says which |
+| `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages) as one CUDA graph, so the host launches one graph and waits once per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel where the host takes part in the step: gas mixtures, average-pressure outlets, characteristic boundaries, `dirichlet` states of `t`, sources of domain averages, and halos exchanged with MPI (`[parallel] halo_exchange`); the run log says which |
 
 At least one stop condition is required.
 
@@ -529,7 +529,10 @@ its own, and those of `t` at every Runge-Kutta stage time, as `dirichlet`'s:
 pulsed or acoustically forced inlets converge at the time integrator's order
 (`nscbc_inlet` at first order, since its boundary point advances once per step).
 Inputs that do not depend on `t` are evaluated once and cost nothing per
-stage; with any that do, CUDA builds run the step kernel by kernel. A string
+stage; those that do are evaluated on the device at the stage time, inside the
+step's CUDA graph. A number of `t` that leaves its range (`p`, `T`, `p0`, `T0`
+not positive, `mass_flux` negative) stops the run at the next progress check
+with the face, time and value. A string
 with a unit (`"300 K"`) is a quantity, not an expression; expressions are in SI
 units. Guide:
 [time-dependent conditions](guide/boundary_conditions.md#time-dependent-conditions).

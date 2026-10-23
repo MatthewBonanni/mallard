@@ -66,7 +66,7 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         const InletProfile profile(input, where);
         fields.apply(bc, Point{}, 0.0, physics.R, true);
         if (profile.uniform()) {
-            const std::array<double, N_DIM> u = profile.velocity(Point{}, 0.0);
+            const std::array<double, N_DIM> u = profile.velocity(Point{});
             FOR_I_DIM bc.data[1 + i] = static_cast<rtype>(u[i]);
         }
     } else if (bc.type == BoundaryType::STAGNATION_INLET || bc.type == BoundaryType::MASS_FLOW_INLET) {

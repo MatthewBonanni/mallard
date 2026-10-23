@@ -219,15 +219,21 @@ expressions (`BoundaryFields`, `src/boundary/boundary_fields.h`).
 - **Per face.** A condition with an expression gets a copy for each of its
   faces, as composition profiles already did, holding the values at the
   face center.
-- **Per stage.** Copies with expressions of `t` are re-evaluated on the host
-  at each stage time (`Solver::update_boundary_fields`), and the conditions
-  are copied to the device. For mixtures the composition, gas constant and
-  frozen `[gamma, e0]` are updated too. `nscbc_inlet`'s velocity goes into
-  its faces' targets: at the stage time, and at the end of the step for the
-  target's own incoming wave (`fill_timed_inlets`).
+- **Per stage.** The expressions are compiled (`expr::Program`). Copies with
+  expressions of `t` are re-evaluated by one kernel at each stage time
+  (`TimedBoundaryFields`), which reads the time from the device scalar
+  `stage_time`, so the step's CUDA graph replays it. For mixtures the kernel
+  also sets the composition, gas constant, frozen `[gamma, e0]` and the
+  transport values. `nscbc_inlet`'s velocity goes into its faces' targets:
+  at the stage time, and at the end of the step for the target's own
+  incoming wave (`TimedInletTargets`).
 - **Cost.** Time-independent inputs are evaluated once, and nothing runs per
-  stage for them. With time-dependent ones, CUDA builds step without a graph,
-  as for `dirichlet`.
+  stage for them. Time-dependent ones cost one small kernel per stage and
+  keep the CUDA graph (mixtures and characteristic boundaries step without
+  one anyway).
+- **Range.** A device flag records the first number of `t` out of its range
+  (face, time, value); the host checks it at each progress check and before
+  reporting a divergence, and stops with an input error.
 
 `test/inlet_test.cpp` (`ForcedInletTest`) checks the stage times. With
 SSPRK3 on a fixed mesh, a temporal-refinement study against `dt / 8`

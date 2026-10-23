@@ -21,7 +21,7 @@
 void Solver::init_inlets(const std::vector<Input> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets) {
     inflows.clear();
-    timed_inlets.clear();
+    timed_inlets = TimedInletTargets();
     t_inflow = -1.0;
     auto h_face_char = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_char);
     auto h_target = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.char_target);
@@ -33,22 +33,15 @@ void Solver::init_inlets(const std::vector<Input> & input_boundaries,
         const InletProfile profile(bound, where);
         std::vector<int32_t> chars;
         for (uint32_t f : faces) chars.push_back(h_face_char(f));
-        if (profile.depends_on_time()) {
+        if (bound.contains("u") && TimedInletTargets::depends_on_time(bound.at("u"), where)) {
             if (InletProfile::turbulent(bound)) {
                 throw InputError(where + ": a velocity depending on t cannot have turbulence.");
             }
-            TimedInlet timed{std::make_shared<InletProfile>(profile), {},
-                             Kokkos::View<int32_t *>("timed_inlet_chars", faces.size()),
-                             Kokkos::View<rtype *[N_DIM]>("timed_inlet_targets", faces.size())};
-            auto h_chars = Kokkos::create_mirror_view(timed.chars);
+            std::vector<Point> x(faces.size());
             for (size_t i = 0; i < faces.size(); i++) {
-                Point x;
-                for (size_t d = 0; d < N_DIM; d++) x[d] = double(mesh->h_face_coords(faces[i], d));
-                timed.x.push_back(x);
-                h_chars(i) = chars[i];
+                for (size_t d = 0; d < N_DIM; d++) x[i][d] = double(mesh->h_face_coords(faces[i], d));
             }
-            Kokkos::deep_copy(timed.chars, h_chars);
-            timed_inlets.push_back(std::move(timed));
+            timed_inlets.add(bound.at("u"), where, chars, x);
         }
         if (!profile.uniform()) {
             for (size_t i = 0; i < faces.size(); i++) {
@@ -68,6 +61,7 @@ void Solver::init_inlets(const std::vector<Input> & input_boundaries,
         Kokkos::deep_copy(boundary_data.char_target, h_target);
         Kokkos::deep_copy(boundary_data.char_target_next, h_target);
     }
+    if (!timed_inlets.empty()) timed_inlets.finish();
 }
 
 std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const std::vector<uint32_t> & faces,
@@ -111,23 +105,7 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
 void Solver::update_inflow(rtype t_eval) {
     if ((inflows.empty() && timed_inlets.empty()) || t_eval == t_inflow) return;
     for (auto & inflow : inflows) inflow->fill(double(t_eval), boundary_data.char_target);
-    fill_timed_inlets(double(t_eval), boundary_data.char_target);
+    timed_inlets.fill(double(t_eval), boundary_data.char_target);
     t_inflow = t_eval;
-}
-
-void Solver::fill_timed_inlets(const double t_eval, const Kokkos::View<rtype *[N_DIM]> & target) {
-    for (const TimedInlet & inlet : timed_inlets) {
-        auto h_targets = Kokkos::create_mirror_view(inlet.targets);
-        for (size_t i = 0; i < inlet.x.size(); i++) {
-            const std::array<double, N_DIM> u = inlet.profile->velocity(inlet.x[i], t_eval);
-            for (size_t d = 0; d < N_DIM; d++) h_targets(i, d) = static_cast<rtype>(u[d]);
-        }
-        Kokkos::deep_copy(inlet.targets, h_targets);
-        const Kokkos::View<int32_t *> chars = inlet.chars;
-        const Kokkos::View<rtype *[N_DIM]> targets = inlet.targets;
-        Kokkos::parallel_for("timed_inlet_targets", chars.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
-            for (uint8_t d = 0; d < N_DIM; d++) target(chars(k), d) = targets(k, d);
-        });
-    }
 }
 
