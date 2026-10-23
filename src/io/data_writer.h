@@ -48,6 +48,9 @@ static const std::unordered_map<DataFormat, std::string> FORMAT_NAMES = {
 /** @brief Named scalars of a restart file (version 3), e.g. the statistics' weight. */
 using RestartAttributes = std::vector<std::pair<std::string, double>>;
 
+/** @brief Named arrays of a restart file (version 6), e.g. the averaged spectra; written by rank 0. */
+using RestartArrays = std::vector<std::pair<std::string, std::vector<double>>>;
+
 /** @brief Upper bound on the faces of a cell, for the keys of RestartFaces. */
 constexpr uint64_t RESTART_FACES_PER_CELL = 8;
 
@@ -73,6 +76,7 @@ struct RestartData {
     std::vector<std::string> names;          // [variable]
     std::vector<std::vector<rtype>> fields;  // [variable][cell read]
     RestartAttributes attributes;
+    RestartArrays arrays;
     RestartFaces faces;                      // every face of the file, in increasing key
     std::string provenance;                  // the writing run's provenance block, or empty
 
@@ -81,6 +85,9 @@ struct RestartData {
 
     /** @brief Value of the named attribute, or nullptr if the file has none. */
     const double * attribute(const std::string & name) const;
+
+    /** @brief Values of the named array, or nullptr if the file has none. */
+    const std::vector<double> * array(const std::string & name) const;
 
     /** @brief The RestartFaces::WIDTH values of the face with this key, or nullptr if the file has none. */
     const rtype * face(uint64_t key) const;
@@ -93,7 +100,8 @@ struct RestartData {
  *
  * Version 2 files list their variable names, version 3 files also named
  * scalar attributes, version 4 files also face records, version 5 files hold
- * the values compressed (compression = "zlib"); version 1 files hold the flow
+ * the values compressed (compression = "zlib"), version 6 files also named
+ * arrays (compressed or not); version 1 files hold the flow
  * block CONSERVATIVE_NAMES only. Either must contain the flow block of this
  * build's dimension. Any version may end with the provenance trailer.
  */
@@ -162,7 +170,7 @@ class DataWriter {
          *        the attributes and the faces (of the owned cells; collective).
          */
         void write(uint64_t step, rtype t, bool force = false, const RestartAttributes & attributes = {},
-                   const RestartFaces & faces = {});
+                   const RestartFaces & faces = {}, const RestartArrays & arrays = {});
 
         /**
          * @brief Next simulation time at which a snapshot is due
@@ -206,9 +214,11 @@ class DataWriter {
 
         /** @brief Submit a restart file: written by this rank alone, or by every rank (distributed). */
         void write_restart(const std::string & filename, uint64_t step, rtype t,
-                           const RestartAttributes & attributes, const RestartFaces & faces);
+                           const RestartAttributes & attributes, const RestartFaces & faces,
+                           const RestartArrays & arrays);
         void write_restart_distributed(const std::string & filename, uint64_t step, rtype t,
-                                       const RestartAttributes & attributes, const RestartFaces & faces);
+                                       const RestartAttributes & attributes, const RestartFaces & faces,
+                                       const RestartArrays & arrays);
 
         /**
          * @brief HDF5 output: the mesh once (<prefix>_mesh.h5), then per

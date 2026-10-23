@@ -71,6 +71,7 @@ type = "wall_adiabatic"
 | `wall_heat_flux` | wall | `q`, `u` (optional) | Wall with heat flux `q` into the fluid |
 | `symmetry` | symmetry | — | Slip wall, symmetry plane, axis of axisymmetric runs |
 | `upt` | inflow | `u`, `p`, `T` (+ `X`/`Y`) | Inflow at a given velocity, pressure and temperature |
+| `stagnation_inlet` | inflow | `p0`, `T0`, `direction` (+ `X`/`Y`) | Subsonic inflow from a plenum: the mass flow follows from the flow ([below](#stagnation-inlet)) |
 | `farfield` | far field | `u`, `p`, `T` | Free stream around a body: characteristic, works for inflow, outflow and tangential flow |
 | `dirichlet` | inflow | `rho`, `u`, `p` (expressions of x, y, z, t) | Prescribed exterior state, e.g. an exact solution |
 | `extrapolation` | outflow | — | Transmissive: the state from inside; supersonic outflow, or waves leaving a box |
@@ -79,8 +80,8 @@ type = "wall_adiabatic"
 | `nscbc_outlet` | outflow | `p`, `L`, `sigma`, `beta` | Partially non-reflecting characteristic outlet ([below](#characteristic-boundaries)) |
 | `nscbc_inlet` | inflow | `u`, `p`, `T`, `L`, `sigma`, ... | Partially non-reflecting characteristic inlet, optionally with [synthetic turbulence](#synthetic-turbulence) |
 
-Gas mixtures add the composition (`X` or `Y`, and `balance`) to `upt` and
-`nscbc_inlet`, as numbers or expressions of x, y, z. Their walls are
+Gas mixtures add the composition (`X` or `Y`, and `balance`) to `upt`,
+`stagnation_inlet` and `nscbc_inlet`, as numbers or expressions of x, y, z. Their walls are
 non-catalytic (no species crosses them), and all three `wall_*` types work,
 e.g. a cold wall that quenches a flame:
 
@@ -103,6 +104,8 @@ Choosing:
   from reflecting into the domain (`flame_outflow`, `volvo_bluff_body`); `upt`
   and `p_out` are simpler but reflect them (97–99% of a pulse at `p_out`,
   about 1% at `nscbc_outlet`).
+- **Nozzles, ducts and intakes fed from a reservoir:** `stagnation_inlet`, so
+  that the mass flow (and choking) is part of the solution.
 - **Supersonic outflow:** `extrapolation`, or `p_out_average` if part of the
   outlet is subsonic.
 - **Exact or manufactured solutions, moving shocks:** `dirichlet`.
@@ -116,6 +119,52 @@ Choosing:
 *`examples/wedge` (Mach 1.76 over an 8° ramp) and
 `examples/viscous_shock_tube` (shock / boundary-layer interaction in a closed
 box), drawn on their generated meshes.*
+
+## Stagnation inlet
+
+`stagnation_inlet` feeds the domain from a reservoir at stagnation pressure
+`p0` and temperature `T0`. It imposes these, the flow direction and the
+composition; the acoustic wave leaving through the inlet sets the speed, and
+the inflow state lies on the isentrope through (`T0`, `p0`). Mixtures use their
+own `h(T)` and `s(T, p)`, not a constant `gamma`.
+
+![The stagnation inlet: what it imposes and what it takes from the interior](../images/guide/inlet_stagnation-light.svg#gh-light-mode-only)
+![The stagnation inlet: what it imposes and what it takes from the interior](../images/guide/inlet_stagnation-dark.svg#gh-dark-mode-only)
+
+```toml
+[[boundaries]]
+name = "inlet"
+type = "stagnation_inlet"
+p0 = 2.0e5
+T0 = 600.0
+# direction = [1.0, 0.2]       # default: the inward normal of each face
+# X = { O2 = 0.21, N2 = 0.79 } # mixtures
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `p0`, `T0` | required | Stagnation pressure and temperature |
+| `direction` | inward normal | Flow direction; must point into the domain at every face |
+| `X` / `Y`, `balance` | required for mixtures | Composition, as for `upt` |
+
+![Nozzle: Mach number, pressure and stagnation pressure against the quasi-one-dimensional solution](../images/guide/nozzle_validation-light.svg#gh-light-mode-only)
+![Nozzle: Mach number, pressure and stagnation pressure against the quasi-one-dimensional solution](../images/guide/nozzle_validation-dark.svg#gh-dark-mode-only)
+
+*`examples/nozzle`: a converging-diverging nozzle fed at `p0`, `T0` with a
+normal shock in the diverging part, against the quasi-one-dimensional
+solution: choked mass flow within 0.2%, the shock within two cells.*
+
+Pitfalls:
+
+- The inlet is for subsonic inflow. Supersonic inflow keeps the interior
+  speed: start such runs from a field that is subsonic at the inlet.
+- Where the interior pressure exceeds `p0` (a start-up transient, a back
+  pressure above `p0`), the inlet sees the reservoir at rest and lets the
+  flow out against `p0`; it does not hold a mass flow.
+- It reflects acoustic waves like `upt` does (the mass flow follows them);
+  pair it with `nscbc_outlet` or a sponge where reflections matter.
+
+Design notes: [inlets](../design/inlets.md).
 
 ## Characteristic boundaries
 

@@ -11,7 +11,7 @@ Mallard comes with three executables and a set of Python scripts that cover ever
 | [Meshes](#meshes): Gmsh meshes from the command line | `make_cylinder_mesh.py`, `make_annulus_mesh.py`, `make_mallard_mesh.py` |
 | [Initial states](#initial-states-and-references): restart files to start runs from | `isotropic_turbulence_restart.py`, `channel_init.py`, `tile_restart.py`, `interpolate_restart.py`, `flame_restart.py`, `znd_restart.py` |
 | [References](#initial-states-and-references): exact and Cantera solutions | `flame_reference.py`, `detonation_reference.py`, `sedov.py`, `cantera_mechanisms.py` |
-| [Post-processing](#post-processing): readers, plots, movies, averages | `mallard_vtu.py`, `mallard_h5.py`, `plot_vtu.py`, `compare_png.py`, `animate.py`, `animate_cartesian.py`, `animate_grid.py`, `plane_average.py` |
+| [Post-processing](#post-processing): readers, plots, movies, averages | `mallard_vtu.py`, `mallard_h5.py`, `plot_vtu.py`, `compare_png.py`, `animate.py`, `animate_cartesian.py`, `animate_grid.py`, `plane_average.py`, `insitu_statistics.py` |
 | [Performance](#performance): benchmarks and baselines | `perf_suite.py` |
 | [Case scripts](#case-scripts): set-up and analysis of one example each | `plot_<case>.py`, `animate_<case>.py`, ... |
 | [Developer tools](#developer-tools): figures of these pages, test reference data | `docs/`, `chemistry_reference.py`, ... |
@@ -141,6 +141,7 @@ The figure is in [Meshes](../docs/guide/meshes.md#mesh-quality).
 | `make_sphere_mesh.py` | Tetrahedra of the quarter domain around a sphere (symmetry planes `symmetry_y`, `symmetry_z`), refined on the sphere and through the bow-shock layer; `--order 2`/`3` curves the sphere | [`sphere_mach3`](../examples/sphere_mach3) |
 | `make_sphere_re300_mesh.py` | The full domain around a sphere: a prism boundary layer, tetrahedra refined through the near wake; `--scale` refines everything for mesh studies | [`sphere_re300`](../examples/sphere_re300) |
 | `make_volvo_mesh.py` | Hexahedra of the Volvo bluff-body combustor: four blocks around the triangular flameholder, mesh lines normal to its faces, periodic in span | [`volvo_bluff_body`](../examples/volvo_bluff_body) |
+| `make_nozzle_mesh.py` | Quadrilaterals of the upper half of a planar converging-diverging nozzle | [`nozzle`](../examples/nozzle) |
 
 ![make_volvo_mesh.py around the flameholder, and the symmetry plane of make_sphere_mesh.py](../docs/images/tools/case_meshes-light.svg#gh-light-mode-only)
 ![make_volvo_mesh.py around the flameholder, and the symmetry plane of make_sphere_mesh.py](../docs/images/tools/case_meshes-dark.svg#gh-dark-mode-only)
@@ -342,6 +343,17 @@ Averages the `[statistics]` output (`MEAN_<field>`, `COV_<a>_<b>`) of an axis-al
 ![Mean velocity and resolved Reynolds stresses in wall units against the DNS](../docs/images/tutorials/channel_profiles-light.svg#gh-light-mode-only)
 ![Mean velocity and resolved Reynolds stresses in wall units against the DNS](../docs/images/tutorials/channel_profiles-dark.svg#gh-dark-mode-only)
 
+### `insitu_statistics.py`: spectra, correlations and phase averages
+
+```sh
+python tools/insitu_statistics.py plot spectra.csv --pair U_X,U_X -o spectra.png
+python tools/insitu_statistics.py spectra input.toml restart_*.restart -o reference.csv
+python tools/insitu_statistics.py compare spectra.csv reference.csv
+python tools/insitu_statistics.py phase input.toml probe_wake.csv -o phase.npz
+```
+
+Reads and checks the output of `[statistics.spectra]` and `[statistics.phase]` ([output guide](../docs/guide/output.md)): `plot` draws the spectra and correlations of one pair along each direction; `spectra` recomputes a run's spectra, correlations and plane means from restart files taken at the sampling steps (numpy FFTs, the solver's time weights) in the solver's CSV format, and `compare` gives the largest difference between two such files; `phase` phase-bins a `[[probes]]` series with the solver's phase rule, to compare with the in-situ `PHASE_` fields at the probe point.
+
 ## Performance
 
 ### `perf_suite.py`: benchmarks and baselines
@@ -365,6 +377,7 @@ These set up or analyze one example each; their figures are on the [Examples](ht
 |---|---|---|---|
 | [`sod`](../examples/sod) | | `plot_sod.py`: density profiles against the exact solution | |
 | [`viscous_shock_tube`](../examples/viscous_shock_tube) | | `plot_viscous_shock_tube.py`: wall density and lambda-shock triple point against Zhou et al. | |
+| [`nozzle`](../examples/nozzle) | `make_nozzle_mesh.py` | `plot_nozzle.py`: mass flow, shock position and stagnation pressure against the quasi-one-dimensional solution; `--figure` draws the guide's figure | |
 | [`poiseuille_pipe`](../examples/poiseuille_pipe) | | `plot_poiseuille.py`: axial velocity against the exact cell averages | |
 | [`noh_axisymmetric`](../examples/noh_axisymmetric) | | `plot_noh.py`: density and shock radius by direction against the exact solution | |
 | [`sphere_axisymmetric`](../examples/sphere_axisymmetric) | `make_cylinder_mesh.py --half` | `plot_sphere_axisymmetric.py`: drag, separation angle and wake length | |

@@ -23,6 +23,7 @@ set(MALLARD_TEST_SOURCES
     distributed_mesh_test.cpp
     statistics_test.cpp
     probes_test.cpp
+    insitu_statistics_test.cpp
     remap_test.cpp
     les_test.cpp
     numerics_preset_test.cpp
@@ -35,6 +36,7 @@ set(MALLARD_TEST_SOURCES
     wall_model_test.cpp
     units_test.cpp
     rotational_periodic_test.cpp
+    inlet_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
     list(APPEND MALLARD_TEST_SOURCES

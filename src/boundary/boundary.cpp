@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <unordered_map>
@@ -63,6 +64,26 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         }
         bc.data[N_DIM + 1] = p;
         bc.relax[Relax::T_TARGET] = T;
+    } else if (bc.type == BoundaryType::STAGNATION_INLET) {
+        const std::string where = "boundaries[name = \"" + name + "\"]";
+        require("p0");
+        require("T0");
+        const rtype p0 = find_real(input, "p0", dim::pressure);
+        const rtype T0 = find_real(input, "T0", dim::temperature);
+        if (!(p0 > 0.0_r) || !(T0 > 0.0_r)) throw InputError(where + ": p0 and T0 must be positive.");
+        bc.data[0] = T0;
+        bc.data[N_DIM + 1] = p0;
+        if (input.contains("direction")) {
+            const std::vector<rtype> d = find_real_vector(input, "direction", dim::none);
+            rtype norm = 0.0_r;
+            for (const rtype c : d) norm += c * c;
+            norm = std::sqrt(norm);
+            if (d.size() != N_DIM || !(norm > 0.0_r)) {
+                throw InputError(where + ".direction must be a nonzero vector of " + std::to_string(N_DIM) +
+                                 " components.");
+            }
+            FOR_I_DIM bc.data[1 + i] = d[i] / norm;
+        }
     } else if (bc.type == BoundaryType::P_OUT || bc.type == BoundaryType::P_OUT_AVERAGE ||
                bc.type == BoundaryType::NSCBC_OUTLET) {
         require("p");

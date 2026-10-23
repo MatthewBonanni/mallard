@@ -305,6 +305,14 @@ TEST(MPITest, NavierStokesWithBoundaryConditionsMatchesSerial) {
         25));
 }
 
+TEST(MPITest, InletsMatchSerial) {
+    expect_matches_serial(box_input("cartesian_tri", "type = \"TENO\"\norder = 4\n", EULER,
+                                    bcs("type = \"stagnation_inlet\"\np0 = 1.5\nT0 = 1.1\ndirection = [1.0, 0.3]\n",
+                                        "type = \"p_out\"\np = 1.0\n", "type = \"symmetry\"\n",
+                                        "type = \"wall_adiabatic\"\n"),
+                                    25));
+}
+
 TEST(MPITest, LargeEddySimulationMatchesSerial) {
     // Eddy viscosity of halo cells from their own gradients, as their owners'
     for (const char * model : {"wale", "vreman"}) {

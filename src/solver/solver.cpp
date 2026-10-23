@@ -159,7 +159,7 @@ void Solver::setup_from_input() {
     timed_phase("fields and output", [&] {
         allocate_memory();
         init_les();
-        statistics.init(input, species_names, mesh->n_cells);
+        statistics.init(input, species_names, *mesh);
         init_rhs_split();
         init_sources();
         init_sponges();
@@ -631,9 +631,11 @@ void Solver::init_boundaries() {
             }
             dirichlet.W.emplace_back(name + ".p", quantity_or_expression(bound.at("p"), name + ".p", dim::pressure));
         }
-        const bool profiled = is_mixture() &&
-                              (bcs.back().type == BoundaryType::UPT || bcs.back().type == BoundaryType::NSCBC_INLET) &&
+        const bool profiled = is_mixture() && bcs.back().prescribes_composition() &&
                               MixtureModel::composition_varies(bound);
+        rtype direction[N_DIM];
+        FOR_I_DIM direction[i] = bcs.back().data[1 + i];
+        const bool directed = bcs.back().type == BoundaryType::STAGNATION_INLET && dot<N_DIM>(direction, direction) > 0.0_r;
         uint32_t n_selected = 0;
         uint64_t n_owned_selected = 0;
         for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
@@ -645,6 +647,14 @@ void Solver::init_boundaries() {
                 throw std::runtime_error("Boundary " + name + " assigned more than once.");
             }
             face_bc[i_face] = static_cast<int>(i_bc);
+            if (directed) {
+                rtype inward = 0.0_r;
+                for (uint8_t k = 0; k < N_DIM; k++) inward -= direction[k] * mesh->h_face_normals(i_face, k);
+                if (!(inward > 0.0_r)) {
+                    throw InputError("boundaries[name = \"" + name + "\"].direction must point into the domain at "
+                                     "every face of the boundary.");
+                }
+            }
             if (profiled) profiled_faces.push_back({static_cast<uint32_t>(i_bc), i_face});
             dirichlet.faces.push_back(i_face);
             n_selected++;
@@ -725,6 +735,7 @@ void Solver::init_boundaries() {
     init_wall_model(face_bc, bcs);
     if (is_mixture()) {
         const uint32_t n_species = mixture.n_species;
+        boundary_data.thermo = mixture.thermo;
         boundary_data.bc_Y = Kokkos::View<rtype **, Kokkos::LayoutRight>("bc_Y", bcs.size(), n_species);
         boundary_data.bc_thermo = Kokkos::View<rtype *[2]>("bc_thermo", bcs.size());
         auto h_bc_Y = Kokkos::create_mirror_view(boundary_data.bc_Y);
@@ -1501,7 +1512,7 @@ int Solver::run() {
         if (p_max.is_allocated()) update_p_max();
         if (statistics.due(step, t)) {
             update_primitives();
-            statistics.sample(t, cell_sampler(), mesh->n_owned());
+            statistics.sample(step, t, cell_sampler(), mesh->n_owned());
         }
         check_fields();
         t_wall_stepping += step_timer.seconds();
@@ -1729,7 +1740,7 @@ void Solver::print_setup() const {
         logging::item("integrals", integral_monitor.file + " every " + logging::count(integral_monitor.interval) +
                                        " steps");
     }
-    if (statistics.enabled()) logging::item("statistics", statistics.summary());
+    logging::items(statistics.summary());
     logging::items(probes.summary());
 }
 
@@ -1858,9 +1869,11 @@ void Solver::write_data(bool force) {
         for (const auto & a : step_controller.attributes()) attributes.push_back(a);
     }
     const RestartFaces faces = characteristic_restart_faces();
+    const RestartArrays arrays = statistics.arrays();
     for (auto & writer : data_writers) {
-        writer->write(step, t, force, attributes, faces);
+        writer->write(step, t, force, attributes, faces, arrays);
     }
+    statistics.write(step, t);
 }
 
 void Solver::write_probes() {
