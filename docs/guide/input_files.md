@@ -208,7 +208,7 @@ rho = "var r2 := (x - 0.5)^2 + (y - 0.5)^2; 1 + 0.2 * exp(-r2 / 0.01)"
 Wherever a key takes an expression, Mallard compiles it once when it reads
 the input, with the syntax of [exprtk](https://www.partow.net/programming/exprtk/).
 Every section accepts the same language and reports the same errors, with the
-expression and the position of the problem, and `Mallard --check` reports them
+expression and the position of the problem, and `mallard check` reports them
 before a run. The values are exprtk's to the last bit on CPUs, and the same
 on GPUs up to the last bits of library functions such as `sin` and `exp`.
 
