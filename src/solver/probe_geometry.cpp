@@ -44,26 +44,28 @@ Vec3 unit(const Vec3 & a, const std::string & what) {
 }
 
 /** @brief A vector of N_DIM numbers (z = 0 in 2D); full names it in errors. */
-Vec3 as_vector(const toml::value & v, const std::string & full) {
+Vec3 as_vector(const Input & v, const std::string & full, const Dimension & dimension = dim::length) {
     if (!v.is_array() || v.as_array().size() != N_DIM) {
         throw InputError(full + " must have " + std::to_string(N_DIM) + " components.");
     }
     Vec3 x = {0.0, 0.0, 0.0};
-    for (size_t d = 0; d < N_DIM; d++) x[d] = as_double(v.as_array()[d], full);
+    for (size_t d = 0; d < N_DIM; d++) x[d] = as_double(v.as_array()[d], full, dimension);
     return x;
 }
 
-Vec3 read_vector(const toml::value & entry, const std::string & name, const std::string & key) {
+Vec3 read_vector(const Input & entry, const std::string & name, const std::string & key,
+                 const Dimension & dimension = dim::length) {
     if (!entry.contains(name)) throw InputError(key + ": " + name + " not specified.");
-    return as_vector(entry.at(name), key + "." + name);
+    return as_vector(entry.at(name), key + "." + name, dimension);
 }
 
-double read_number(const toml::value & entry, const std::string & name, const std::string & key) {
+double read_number(const Input & entry, const std::string & name, const std::string & key,
+                   const Dimension & dimension) {
     if (!entry.contains(name)) throw InputError(key + ": " + name + " not specified.");
-    return as_double(entry.at(name), key + "." + name);
+    return as_double(entry.at(name), key + "." + name, dimension);
 }
 
-uint64_t read_count(const toml::value & entry, const std::string & name, const std::string & key, uint64_t min) {
+uint64_t read_count(const Input & entry, const std::string & name, const std::string & key, uint64_t min) {
     const uint64_t n = toml::find_or<uint64_t>(entry, name, 0);
     if (n < min) throw InputError(key + "." + name + " must be at least " + std::to_string(min) + ".");
     return n;
@@ -135,14 +137,14 @@ Piece segment(const Vec3 & a, const Vec3 & b, uint64_t n) {
 }
 
 /** @brief In-plane unit vectors (e1, e2) of a circle: the x-y plane in 2D, else normal to `normal`. */
-std::pair<Vec3, Vec3> circle_frame(const toml::value & entry, const std::string & key) {
+std::pair<Vec3, Vec3> circle_frame(const Input & entry, const std::string & key) {
     if constexpr (N_DIM == 2) {
         return {Vec3{1.0, 0.0, 0.0}, Vec3{0.0, 1.0, 0.0}};
     } else {
-        const Vec3 n = unit(read_vector(entry, "normal", key), key + ".normal");
+        const Vec3 n = unit(read_vector(entry, "normal", key, dim::none), key + ".normal");
         Vec3 a;
         if (entry.contains("reference")) {
-            a = read_vector(entry, "reference", key);
+            a = read_vector(entry, "reference", key, dim::none);
         } else {
             const int d = (std::fabs(n[0]) <= std::fabs(n[1]) && std::fabs(n[0]) <= std::fabs(n[2])) ? 0
                           : (std::fabs(n[1]) <= std::fabs(n[2]))                                    ? 1
@@ -189,16 +191,16 @@ Vec3 Transform::point(const Vec3 & x) const { return add(vector(x), t); }
 
 Vec3 Transform::vector(const Vec3 & v) const { return {dot(A[0], v), dot(A[1], v), dot(A[2], v)}; }
 
-Transform Transform::read(const toml::value & entry, const std::string & key) {
+Transform Transform::read(const Input & entry, const std::string & key) {
     Transform T;
     Vec3 s = {1.0, 1.0, 1.0};
     if (entry.contains("scale")) {
-        const toml::value & v = entry.at("scale");
+        const Input & v = entry.at("scale");
         if (v.is_array()) {
-            s = read_vector(entry, "scale", key);
+            s = read_vector(entry, "scale", key, dim::none);
             if (N_DIM == 2) s[2] = 1.0;
         } else {
-            s.fill(as_double(v, key + ".scale"));
+            s.fill(as_double(v, key + ".scale", dim::none));
         }
         for (double f : s) {
             if (!(f > 0.0)) throw InputError(key + ".scale must be positive.");
@@ -206,16 +208,16 @@ Transform Transform::read(const toml::value & entry, const std::string & key) {
     }
     std::array<Vec3, 3> R = T.A;
     if (entry.contains("rotate")) {
-        const toml::value & v = entry.at("rotate");
+        const Input & v = entry.at("rotate");
         Vec3 axis = {0.0, 0.0, 1.0};
         double angle = 0.0;
         const std::string rkey = key + ".rotate";
         if (N_DIM == 3 && v.is_table() && v.contains("axes")) {
             // The rotated x, y, z axes in world coordinates: the columns of R
-            const toml::value & axes = v.at("axes");
+            const Input & axes = v.at("axes");
             if (!axes.is_array() || axes.as_array().size() != 3) throw InputError(rkey + ".axes must list 3 axes.");
             for (size_t j = 0; j < 3; j++) {
-                const Vec3 e = as_vector(axes.as_array()[j], rkey + ".axes");
+                const Vec3 e = as_vector(axes.as_array()[j], rkey + ".axes", dim::none);
                 for (size_t i = 0; i < 3; i++) R[i][j] = e[i];
             }
             for (size_t i = 0; i < 3; i++) {
@@ -228,13 +230,13 @@ Transform Transform::read(const toml::value & entry, const std::string & key) {
             if (dot(cross(x, y), z) < 0.0) throw InputError(rkey + ".axes must be right-handed.");
         } else {
             if (N_DIM == 2 && !v.is_table()) {
-                angle = as_double(v, rkey) * DEG;
+                angle = as_double(v, rkey, dim::angle_degrees) * DEG;
             } else {
                 if (!v.is_table()) {
                     throw InputError(rkey + " must be a table {axis = [...], angle = degrees} or {axes = [...]}.");
                 }
-                angle = read_number(v, "angle", rkey) * DEG;
-                if (N_DIM == 3) axis = unit(read_vector(v, "axis", rkey), rkey + ".axis");
+                angle = read_number(v, "angle", rkey, dim::angle_degrees) * DEG;
+                if (N_DIM == 3) axis = unit(read_vector(v, "axis", rkey, dim::none), rkey + ".axis");
             }
             // Rodrigues: R = cos I + sin [axis]x + (1 - cos) axis axis^T
             const double c = std::cos(angle), sn = std::sin(angle);
@@ -298,7 +300,7 @@ std::vector<Point> read_points(const std::string & file, const std::string & key
     return points;
 }
 
-Geometry make_geometry(const toml::value & entry, const std::string & key) {
+Geometry make_geometry(const Input & entry, const std::string & key) {
     std::string shape = toml::find_or<std::string>(entry, "shape", "");
     if (shape.empty()) {
         const bool point = entry.contains("point");
@@ -324,7 +326,7 @@ Geometry make_geometry(const toml::value & entry, const std::string & key) {
         const bool listed = entry.contains("points"), from_file = entry.contains("points_file");
         if (listed == from_file) throw InputError(key + ": give either points or points_file.");
         if (listed) {
-            const toml::value & list = entry.at("points");
+            const Input & list = entry.at("points");
             if (!list.is_array() || list.as_array().empty()) throw InputError(key + ".points must be a list of points.");
             for (size_t i = 0; i < list.as_array().size(); i++) {
                 points.push_back(as_vector(list.as_array()[i], key + ".points[" + std::to_string(i) + "]"));
@@ -360,7 +362,7 @@ Geometry make_geometry(const toml::value & entry, const std::string & key) {
     } else if (shape == "circle" || shape == "arc") {
         g.dim = 1;
         const Vec3 c = read_vector(entry, "center", key);
-        const double r = read_number(entry, "radius", key);
+        const double r = read_number(entry, "radius", key, dim::length);
         if (!(r > 0.0)) throw InputError(key + ".radius must be positive.");
         const auto [e1, e2] = circle_frame(entry, key);
         Piece piece{[c, r, e1, e2](double a) { return add(c, add(mul(r * std::cos(a), e1), mul(r * std::sin(a), e2))); },
@@ -371,12 +373,12 @@ Geometry make_geometry(const toml::value & entry, const std::string & key) {
             piece.s = linspace(0.0, 2.0 * std::numbers::pi, n + 1);
             piece.closed = true;
         } else {
-            const toml::value & angles = entry.contains("angles") ? entry.at("angles") : toml::value();
+            const Input & angles = entry.contains("angles") ? entry.at("angles") : Input();
             if (!angles.is_array() || angles.as_array().size() != 2) {
                 throw InputError(key + ".angles must be [start, end] in degrees.");
             }
-            const double a0 = as_double(angles.as_array()[0], key + ".angles") * DEG;
-            const double a1 = as_double(angles.as_array()[1], key + ".angles") * DEG;
+            const double a0 = as_double(angles.as_array()[0], key + ".angles", dim::angle_degrees) * DEG;
+            const double a1 = as_double(angles.as_array()[1], key + ".angles", dim::angle_degrees) * DEG;
             if (a0 == a1) throw InputError(key + ".angles must differ.");
             piece.s = linspace(a0, a1, read_count(entry, "n_points", key, 2));
         }
@@ -391,10 +393,10 @@ Geometry make_geometry(const toml::value & entry, const std::string & key) {
         }
         double s0 = 0.0, s1 = 1.0;
         if (entry.contains("s_range")) {
-            const toml::value & range = entry.at("s_range");
+            const Input & range = entry.at("s_range");
             if (!range.is_array() || range.as_array().size() != 2) throw InputError(key + ".s_range must be [s0, s1].");
-            s0 = as_double(range.as_array()[0], key + ".s_range");
-            s1 = as_double(range.as_array()[1], key + ".s_range");
+            s0 = as_double(range.as_array()[0], key + ".s_range", dim::none);
+            s1 = as_double(range.as_array()[1], key + ".s_range", dim::none);
         }
         if (!(s1 > s0)) throw InputError(key + ".s_range must be increasing.");
         Piece piece{[f](double s) {

@@ -2,7 +2,9 @@
 # Tests shared by both dimensions, then those specific to one
 set(MALLARD_TEST_SOURCES
     test_main.cpp
+    scratch.cpp
     common_math_test.cpp
+    case_template_test.cpp
     time_integrator_test.cpp
     comm_test.cpp
     chemistry_thermo_test.cpp
@@ -18,9 +20,15 @@ set(MALLARD_TEST_SOURCES
     distributed_mesh_test.cpp
     statistics_test.cpp
     probes_test.cpp
+    remap_test.cpp
     les_test.cpp
+    numerics_preset_test.cpp
     tfles_test.cpp
+    check_test.cpp
     synthetic_inflow_test.cpp
+    format_compat_test.cpp
+    wall_model_test.cpp
+    units_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
     list(APPEND MALLARD_TEST_SOURCES
@@ -33,6 +41,7 @@ if(Mallard_DIM EQUAL 2)
     teno_test.cpp
     viscous_test.cpp
     restart_test.cpp
+    step_control_test.cpp
     boundary_test.cpp
     nscbc_test.cpp
     source_test.cpp
@@ -41,6 +50,7 @@ if(Mallard_DIM EQUAL 2)
     mesh_file_test.cpp
     mpi_test.cpp
     periodic_test.cpp
+    preset_validation_test.cpp
     )
 else()
     list(APPEND MALLARD_TEST_SOURCES
@@ -69,6 +79,8 @@ FetchContent_Declare(
   GIT_TAG v1.18.0
   ${MALLARD_THIRD_PARTY}
 )
+# Test-only: `cmake --install` leaves GoogleTest out
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 target_link_libraries(MallardTest PRIVATE gtest)

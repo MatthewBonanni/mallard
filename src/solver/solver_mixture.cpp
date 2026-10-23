@@ -13,9 +13,7 @@
 #include "solver.h"
 
 #include <algorithm>
-#include <iomanip>
 #include <limits>
-#include <sstream>
 
 #include <Kokkos_Core.hpp>
 
@@ -140,6 +138,7 @@ struct MixtureTimeStepFunctor {
     uint32_t n_species;
     Kokkos::View<rtype *[3]> transport;  // viscous: (cell, [mu, lambda, nu_eff]), else empty
     Kokkos::View<rtype *[N_DIM]> radius_coords;  // axisymmetric runs: cell_coords, else empty
+    BoundaryData boundaries;
 
     KOKKOS_INLINE_FUNCTION
     rtype wave_speed(const int32_t c, const rtype * n) const {
@@ -156,8 +155,15 @@ struct MixtureTimeStepFunctor {
             rtype n_vec[N_DIM], n[N_DIM];
             FOR_I_DIM n_vec[i] = face_normals(f, i);
             unit<N_DIM>(n_vec, n);
-            rtype lambda = wave_speed(cells_of_face(f, 0), n);
-            if (cells_of_face(f, 1) >= 0) lambda = Kokkos::fmax(lambda, wave_speed(cells_of_face(f, 1), n));
+            const int32_t c0 = cells_of_face(f, 0);
+            rtype lambda = wave_speed(c0, n);
+            if (cells_of_face(f, 1) >= 0) {
+                lambda = Kokkos::fmax(lambda, wave_speed(cells_of_face(f, 1), n));
+            } else {
+                rtype W_c[N_CONSERVATIVE];
+                FOR_I_CONSERVATIVE W_c[i] = W(c0, i);
+                lambda = Kokkos::fmax(lambda, boundaries.exterior_wave_speed(f, W_c, n, scalars(c0, n_species)));
+            }
             sum += lambda * face_area(f);
             sum_area2 += face_area(f) * face_area(f);
         }
@@ -269,7 +275,7 @@ struct MixtureDiagnosticsFunctor {
  */
 class CompositionExpressions {
     public:
-        CompositionExpressions(const MixtureModel & mixture_model, const toml::value & table, const std::string & name) :
+        CompositionExpressions(const MixtureModel & mixture_model, const Input & table, const std::string & name) :
             mixture(mixture_model), where(name) {
             if (table.contains("X") == table.contains("Y")) {
                 throw InputError(where + ": give the composition as exactly one of X and Y.");
@@ -281,13 +287,7 @@ class CompositionExpressions {
                 const int32_t k = mixture.mechanism().species_index(species);
                 if (k < 0) throw InputError(where + "." + key + ": no species " + species + " in the mechanism.");
                 listed.push_back(k);
-                std::ostringstream text;
-                if (value.is_string()) {
-                    text << value.as_string();
-                } else {
-                    text << std::setprecision(17) << static_cast<double>(as_real(value, species));
-                }
-                values.emplace_back(where + "." + key + "." + species, text.str());
+                values.emplace_back(where + "." + key + "." + species, quantity_or_expression(value, species, dim::none));
             }
             if (table.contains("balance")) {
                 const std::string species = toml::find<std::string>(table, "balance");
@@ -600,7 +600,7 @@ rtype Solver::calc_dt_cfl1_mixture() {
     MixtureTimeStepFunctor functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                    mesh->face_normals, mesh->face_measure, mesh->cell_measure, W_cells,
                                    cell_scalars, cfl_local, mixture.n_species, cell_transport,
-                                   axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>()};
+                                   axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(), boundary_data};
     rtype dt_min = std::numeric_limits<rtype>::max();
     Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor, Kokkos::Min<rtype>(dt_min));
     return comm::allreduce(dt_min, comm::Op::MIN);
@@ -624,7 +624,7 @@ std::vector<rtype> Solver::integrate_species() {
     return total;
 }
 
-std::vector<std::vector<double>> Solver::composition_at_cells(const toml::value & table, const std::string & where,
+std::vector<std::vector<double>> Solver::composition_at_cells(const Input & table, const std::string & where,
                                                               const std::vector<uint32_t> & cells) const {
     const CompositionExpressions composition(*mixture_model, table, where);
     std::vector<std::vector<double>> Y;
@@ -633,7 +633,7 @@ std::vector<std::vector<double>> Solver::composition_at_cells(const toml::value 
     return Y;
 }
 
-void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boundaries,
+void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries,
                                      const std::vector<std::array<uint32_t, 2>> & profiled_faces,
                                      std::vector<BoundaryCondition> & bcs) {
     bc_mass_fractions.assign(bcs.size(), {});
@@ -649,7 +649,7 @@ void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boun
         mixture_model->surrogates(T, Y, bc_surrogates[i_bc][0], bc_surrogates[i_bc][1]);
     };
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
-        const toml::value & bound = input_boundaries[i_bc];
+        const Input & bound = input_boundaries[i_bc];
         const std::string name = toml::find<std::string>(bound, "name");
         const std::string where = "boundaries[name = \"" + name + "\"]";
         switch (bcs[i_bc].type) {
@@ -663,7 +663,7 @@ void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boun
                 break;
             case BoundaryType::UPT:
             case BoundaryType::NSCBC_INLET: {
-                const double T = static_cast<double>(find_real(bound, "T"));
+                const double T = static_cast<double>(find_real(bound, "T", dim::temperature));
                 if (!MixtureModel::composition_varies(bound)) {
                     prescribe(i_bc, mixture_model->mass_fractions(bound, where), T);
                     break;

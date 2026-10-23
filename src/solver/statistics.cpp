@@ -19,6 +19,7 @@
 #include <unordered_map>
 
 #include "comm.h"
+#include "common_io.h"
 #include "input.h"
 #include "log.h"
 
@@ -52,12 +53,12 @@ const char * const SAMPLES = "STATISTICS_SAMPLES";
 
 } // namespace
 
-void Statistics::init(const toml::value & input, const std::vector<std::string> & species_names, uint32_t n_cells) {
+void Statistics::init(const Input & input, const std::vector<std::string> & species_names, uint32_t n_cells) {
     if (!input.contains("statistics")) return;
-    const toml::value & table = input.at("statistics");
+    const Input & table = input.at("statistics");
     interval = toml::find_or<uint64_t>(table, "interval", 1);
     if (interval == 0) throw InputError("statistics.interval must be positive.");
-    t_start = find_real_or(table, "t_start", 0.0);
+    t_start = find_real_or(table, "t_start", dim::time, 0.0);
     reset = toml::find_or<bool>(table, "reset", false);
     auto add_field = [&](const std::string & name) {
         const auto it = std::find(fields.begin(), fields.end(), name);

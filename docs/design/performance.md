@@ -29,7 +29,7 @@ lists its measured effect. Results stay bitwise identical to `main` (checked on 
 | `rhs_W`, `rhs_divide_volume`, `axpby` (per stage) | 0.18 | 3% | |
 | `time_step` (reduction, per step) | 0.27 | 1.4% | one host synchronization per step |
 
-### 3D TENO5, 96^3 hexahedra, HLLC + viscous (`teno5_3d`)
+### 3D TENO5, $96^3$ hexahedra, HLLC + viscous (`teno5_3d`)
 
 335 ms per step. `teno_smooth` takes 106 ms per stage, 95% of the step: 255 registers and a 1136 B
 stack. Its 34 x 5 central coefficients (`aK[NK][N_CONSERVATIVE]`) do not fit in registers, so every
@@ -74,20 +74,20 @@ smooth pass per cell and stage from Nsight Systems):
   cycles per entry, and its face points 150-200k; the same in every chunk, so the loop waits on loads (stencil cell,
   then its state). Three teams per SM (128 registers), unrolling the loop by 2 or 4, and software-pipelining the
   loads by hand were all 10-50% slower, from spills.
-- 4 GPUs, 64^3 (65,536 cells per GPU, 88.6% strong efficiency against one GPU): per stage the GPU spends 3.70 ms
+- 4 GPUs, $64^3$ (65,536 cells per GPU, 88.6% strong efficiency against one GPU): per stage the GPU spends 3.70 ms
   reconstructing (owned and 4,160 layer-1 cells, 6.3% of them redundant) against 3.40 ms for a quarter of the
   one-GPU stage, and the rest on fluxes and gradients that also cover halo cells. The overlap already fills the
   first reconstruction's tail with the halo-dependent cells' kernel, and NCCL with graphs and MPI without are within
-  2% (6.35 / 6.44 ms per step at 48^3).
-- The viscous gradients covered every halo layer (31,808 halo cells per rank at 64^3 on 4 GPUs, 7 layers); the
+  2% (6.35 / 6.44 ms per step at $48^3$).
+- The viscous gradients covered every halo layer (31,808 halo cells per rank at $64^3$ on 4 GPUs, 7 layers); the
   fluxes read owned and layer-1 cells only, so only those are computed now (LES models still read all). Bitwise
-  identical; within noise on 4 GPUs (48^3: 6.43 / 6.40 ms per step), more where halos are a larger share.
+  identical; within noise on 4 GPUs ($48^3$: 6.43 / 6.40 ms per step), more where halos are a larger share.
 
 ## Changes
 
 ### 1. Cooperative 3D TENO smooth pass
 
-`teno_smooth` in 3D (degree >= 4, i.e. TENO5 and TENO6) runs as a team kernel: 32 cells x
+`teno_smooth` in 3D (degree ≥ 4, i.e. TENO5 and TENO6) runs as a team kernel: 32 cells x
 `N_CONSERVATIVE` threads. Over the stencil each thread accumulates a chunk of 7 of the 34 coefficients
 for all variables (35 registers' worth instead of 170); the coefficients then go through shared memory,
 and the cell's face points are shared out among its five threads. On CPUs and in 2D (where the
@@ -101,10 +101,10 @@ its coefficients.
 
 | case (A100) | main | change 1 |
 |---|---|---|
-| `teno_smooth`, 96^3 hexahedra, first stage | 111.8 ms | 44.9 ms |
-| TENO5 Taylor-Green 96^3 (`teno5_3d`) | 335 ms/step (2.64M cells/s) | 151 ms/step (5.85M cells/s) |
-| TENO6 Taylor-Green 32^3 | 47.3 ms/step | 20.7 ms/step |
-| TENO5 explosion, 20^3 x 6 tetrahedra | 17.5 ms/step | 11.0 ms/step |
+| `teno_smooth`, 96³ hexahedra, first stage | 111.8 ms | 44.9 ms |
+| TENO5 Taylor-Green 96³ (`teno5_3d`) | 335 ms/step (2.64M cells/s) | 151 ms/step (5.85M cells/s) |
+| TENO6 Taylor-Green 32³ | 47.3 ms/step | 20.7 ms/step |
+| TENO5 explosion, 20³ x 6 tetrahedra | 17.5 ms/step | 11.0 ms/step |
 | TENO3/TENO4 (degrees 2-3) | unchanged (per-thread kernel kept) | |
 
 ### 2. TENO setup: stencil tables streamed to the device (host memory)
@@ -116,7 +116,7 @@ now goes straight to the device, into a reserved address range whose pages are m
 memory management), so the host holds one chunk of 8192 cells at a time. The device arrays keep their exact sizes
 and single base addresses; results and step times are unchanged.
 
-| 3D TENO5, 64^3 hexahedra, one A100 | main | change 2 |
+| 3D TENO5, 64³ hexahedra, one A100 | main | change 2 |
 |---|---|---|
 | host peak during setup | 8.55 GB (32.6 KB/cell) | 1.44 GB (5.5 KB/cell) |
 | device peak | 11.6 GB | 11.6 GB |
@@ -125,9 +125,9 @@ and single base addresses; results and step times are unchanged.
 
 MUSCL reconstructed in three kernels (least-squares gradients and limiters over cells, then face states over
 faces), after the halo exchange. It now also reconstructs per cell: gradient, limiter, then the cell's own side of
-each of its faces, with the same arithmetic. From 2^17 cells (per rank) this runs as one fused kernel, which keeps
+each of its faces, with the same arithmetic. From $2^{17}$ cells (per rank) this runs as one fused kernel, which keeps
 gradients and limiters out of memory, and in distributed runs the cells whose stencils hold no halo cell are
-reconstructed while the exchange is in flight, as TENO's are. Below 2^17 cells the separate kernels stay: with
+reconstructed while the exchange is in flight, as TENO's are. Below $2^{17}$ cells the separate kernels stay: with
 fewer cells, more and shorter threads were faster.
 
 | `muscl_2d` (Riemann problem, HLLC), A100s | main | change 3 |
@@ -147,7 +147,7 @@ can set up in reasonable time. Moving it to the device makes it seconds.
 **Baseline** (`main` at v0.6.0-80, `numerics` setup phase, A100 node host: EPYC 7763, 16 OpenMP threads,
 symmetry walls on all sides). Per-cell work in thread-seconds (sum over threads):
 
-| 3D TENO5 | 100^3 hexahedra (1M) | 55^3 x 6 tetrahedra (998k) |
+| 3D TENO5 | 100³ hexahedra (1M) | 55³ x 6 tetrahedra (998k) |
 |---|---|---|
 | setup | **43.5 s** | **123.2 s** |
 | moments (wall) | 7.5 s | 1.3 s |
@@ -174,7 +174,7 @@ to 91 rows, its pseudo-inverse) is in shared memory; three teams fit an SM. Mono
 per degree with their operands in registers. Moments, bounding boxes and packing run on the device;
 cube roots and the ranking metric (log, exp) stay on the host.
 
-| 3D TENO5, one A100 | 100^3 hexahedra | 55^3 x 6 tetrahedra |
+| 3D TENO5, one A100 | 100³ hexahedra | 55³ x 6 tetrahedra |
 |---|---|---|
 | setup | **4.56 s (9.5x)** | **20.0 s (6.2x)** |
 | geometry (host metric and cube roots, device moments and boxes) | 0.50 s | 0.31 s |
@@ -243,14 +243,14 @@ and from 3.0 to 5.4 M cells/s at 1e-6 s. Bounding the chemistry kernel's registe
 threads (launch bounds for 128 or 80 registers instead of 220) made it slower.
 
 **What remains.** About 2% of the reacting cells (burnt gas into which the flow step diffused trace
-fuel, Y_C3H8 1e-10 to 1e-5) take 20 to 130 RODAS sub-steps against 2 for the others: the fuel burns
+fuel, $Y_\mathrm{C_3H_8}$ 1e-10 to 1e-5) take 20 to 130 RODAS sub-steps against 2 for the others: the fuel burns
 out within the step along `C^0.1`, which reaches zero in finite time, through the regularization below
 `C_reg` (chemistry.md). Leaving them out of the chemistry (an experiment only) took the chemistry from
-19.2 to 11.3 ms per step. `chemistry.C_reg` (default 1e-12 kmol/m^3) moves the regularization; larger
-values cut these cells' sub-steps (a burnt cell at 1750 K with Y_C3H8 = 1e-7 over 0.15 us: 32 sub-steps
-at 1e-12, 13 at 1e-9, 5 at 1e-7) but change the rate law below C_reg. Opt-in: on `flame_3d`, 1e-10,
+19.2 to 11.3 ms per step. `chemistry.C_reg` (default 1e-12 kmol/m³) moves the regularization; larger
+values cut these cells' sub-steps (a burnt cell at 1750 K with $Y_\mathrm{C_3H_8}$ = 1e-7 over 0.15 us: 32 sub-steps
+at 1e-12, 13 at 1e-9, 5 at 1e-7) but change the rate law below `C_reg`. Opt-in: on `flame_3d`, 1e-10,
 1e-9 and 1e-8 give 24.6, 23.4 and 22.3 ms per step; against the default after 100 steps, T differs by
-at most 0.54 K, Y_k by 3e-5, p by 90 Pa and u by 0.14 m/s, the integrated heat release by 0.08% (the
+at most 0.54 K, $Y_k$ by 3e-5, p by 90 Pa and u by 0.14 m/s, the integrated heat release by 0.08% (the
 largest pointwise heat release differences are in cells burning out trace fuel). Thread-per-cell remains faster
 than lanes for 6 species (2, 4, 8 or 32 lanes per cell: 1.8 to 5x slower).
 
@@ -263,12 +263,12 @@ tetrahedra, orders 3, 5 and 6, also with the troubled passes split into 100 roun
 
 | bytes per cell, setup peak / steady | cells | main | change 6 | `single_precision_tables` |
 |---|---|---|---|---|
-| TENO5, 100^3 hexahedra | 1.00M | 47.3 K / 47.3 K | 39.8 K / 39.8 K | 25.0 K |
-| TENO5, 55^3 x 6 tetrahedra | 998k | 58.7 K / 58.7 K | 51.2 K / 51.2 K | 30.6 K |
+| TENO5, 100³ hexahedra | 1.00M | 47.3 K / 47.3 K | 39.8 K / 39.8 K | 25.0 K |
+| TENO5, 55³ x 6 tetrahedra | 998k | 58.7 K / 58.7 K | 51.2 K / 51.2 K | 30.6 K |
 | TENO3, hexahedra | 1.00M | 18.6 K / 18.6 K | 15.9 K / 15.9 K | |
 | TENO3, tetrahedra | 998k | 17.8 K / 17.8 K | 15.0 K / 15.0 K | |
-| TENO6, 64^3 hexahedra | 262k | 129.6 K / 99.6 K | 77.9 K / 77.9 K | 46.5 K |
-| TENO6, 32^3 x 6 tetrahedra | 197k | 152.0 K / 109.8 K | 85.2 K / 85.2 K | 50.5 K |
+| TENO6, 64³ hexahedra | 262k | 129.6 K / 99.6 K | 77.9 K / 77.9 K | 46.5 K |
+| TENO6, 32³ x 6 tetrahedra | 197k | 152.0 K / 109.8 K | 85.2 K / 85.2 K | 50.5 K |
 
 What `main` held for TENO5 on hexahedra (1M cells): the packed stencils, 31.7 KB (large-stencil pseudo-inverses
 22.3 KB, sector pseudo-inverses 7.8 KB, stencil cells and mirror faces 1.5 KB), the smoothness-indicator matrices
@@ -294,16 +294,16 @@ outputs) and team scratch set a peak 30% above the steady state.
   (order 5), 4.9e-4 (order 6) and 6.9e-3 (order 3) for the blast on hexahedra after 60-80 steps, where the
   stencil selection near the shock goes the other way in some cells.
 
-Largest Taylor-Green box at TENO5 that runs on one A100-80GB: main fails at 125^3 hexahedra (1.95M cells; out of
-memory allocating the face states), which change 6 runs, as does 145^3 (3.05M) with `single_precision_tables`.
+Largest Taylor-Green box at TENO5 that runs on one A100-80GB: main fails at $125^3$ hexahedra (1.95M cells; out of
+memory allocating the face states), which change 6 runs, as does $145^3$ (3.05M) with `single_precision_tables`.
 From the table: about 1.8M, 2.1M and 3.4M hexahedra; 1.45M, 1.65M and 2.75M tetrahedra; at order 6 about 0.65M,
 1.1M and 1.8M hexahedra.
 
-Step times against `main` (A100, best of 2-3): TENO5 Taylor-Green 96^3 151 ms (154), 3D blast 100^3 225 ms (235),
-64^3 blast 67.6 ms (69.9), 32^3 x 6 tetrahedra blast 48.5 ms (51.5), Taylor-Green on 32^3 x 6 tetrahedra 37.1 ms
-(37.9); TENO3 blasts 1-3% faster. At order 6 the step is 0.7-1.1% slower: 75.2 ms (74.7) for the 48^3 blast,
-48.2 ms (47.7) for the 24^3 x 6 tetrahedra blast, where up to 27% of the cells are troubled and forming the
-1540-entry matrices costs more than reading them, and 54.7 ms (54.1) for Taylor-Green on 48^3, where the smooth
+Step times against `main` (A100, best of 2-3): TENO5 Taylor-Green $96^3$ 151 ms (154), 3D blast $100^3$ 225 ms (235),
+$64^3$ blast 67.6 ms (69.9), $32^3 \times 6$ tetrahedra blast 48.5 ms (51.5), Taylor-Green on $32^3 \times 6$ tetrahedra 37.1 ms
+(37.9); TENO3 blasts 1-3% faster. At order 6 the step is 0.7-1.1% slower: 75.2 ms (74.7) for the $48^3$ blast,
+48.2 ms (47.7) for the $24^3 \times 6$ tetrahedra blast, where up to 27% of the cells are troubled and forming the
+1540-entry matrices costs more than reading them, and 54.7 ms (54.1) for Taylor-Green on $48^3$, where the smooth
 pass, whose code is unchanged, runs 1% slower with this build's memory layout. `single_precision_tables` is
 another 3-8% faster (the smooth pass reads half the bytes). Setup: 4.6 s for 1M hexahedra at order 5 (as on
 main), 21 s for 1M tetrahedra (20 s); at order 6, 7.2 s (6.6 s) and 61 s (58 s), from the smaller batches.
@@ -328,13 +328,13 @@ T1 / (n Tn) for strong scaling, T1 / Tn for weak.
 
 | case | cells per GPU | 1 GPU | 2 GPUs | 4 GPUs | efficiency 4 |
 |---|---|---|---|---|---|
-| 2D TENO5, Riemann (1024^2 / GPU, square domain at 4) | 1M | 19.6 ms | 20.1 ms | 20.4 ms | 96% |
+| 2D TENO5, Riemann (1024² / GPU, square domain at 4) | 1M | 19.6 ms | 20.1 ms | 20.4 ms | 96% |
 | 2D MUSCL, Riemann | 4M | 15.6 ms | 16.1 ms | 16.3 ms | 96% |
 
 Notes:
 
 - Weak scaling must keep the cells' shape: refining a direction alone (anisotropic cells) changes TENO's stencils
-  and their cost. 3D TENO5 on 64^3 cells per GPU refined along x and y only gave 47.2 / 52.2 / 69.1 ms on 1 / 2 / 4
+  and their cost. 3D TENO5 on $64^3$ cells per GPU refined along x and y only gave 47.2 / 52.2 / 69.1 ms on 1 / 2 / 4
   GPUs; the comparison with the domain grown instead is in progress.
 - At small sizes per GPU (MUSCL, 262k cells on 4 GPUs: 65k per GPU) the step is latency-bound (about 30
   launches and four exchanges per step); the CUDA graph and NCCL exchange of #217 take it from 667 to 523 us.
@@ -347,9 +347,9 @@ cells are reconstructed, so that one exchange per stage suffices; `mpi.md`, sect
 surface sets its scaling. A100-80GB, 4 GPUs per node, HDR InfiniBand with GPUDirect RDMA between nodes,
 GPU-aware MPI; steady time per step. *Layer 1* is the largest number of halo layer-1 cells of a rank
 (the setup summary's "Partition surface" line). Graph: dKaMinPar with its `strong` preset and 0.1%
-imbalance; its default preset is worse than both others (4 GPUs, 96^3: 44.1 ms, 3% imbalance).
+imbalance; its default preset is worse than both others (4 GPUs, $96^3$: 44.1 ms, 3% imbalance).
 
-**Strong scaling**, 96^3 hexahedra (1 GPU: 154 ms)
+**Strong scaling**, $96^3$ hexahedra (1 GPU: 154 ms)
 
 | GPUs | Hilbert | graph | multi-jagged | efficiency (multi-jagged) | layer 1: Hilbert / graph / multi-jagged |
 |---|---|---|---|---|---|
@@ -358,12 +358,12 @@ imbalance; its default preset is worse than both others (4 GPUs, 96^3: 44.1 ms, 
 | 12 | 17.8 ms | 17.2 ms | 16.6 ms | 77% (Hilbert 72%) | 13,038 / 8,954 / 7,906 |
 | 16 | 13.4 ms | 13.3 ms | 13.1 ms | 73% | 7,130 / 9,977 / 7,130 |
 
-**Weak scaling**, 64^3 hexahedra per GPU (1 GPU: 48.1 ms)
+**Weak scaling**, $64^3$ hexahedra per GPU (1 GPU: 48.1 ms)
 
 | GPUs | mesh | Hilbert | graph | multi-jagged | efficiency (multi-jagged) |
 |---|---|---|---|---|---|
 | 4 | 128 x 128 x 64 | 49.8 ms | | 49.8 ms | 97% |
-| 8 | 128^3 | 50.8 ms | 51.4 ms | 50.5 ms | 95% |
+| 8 | 128³ | 50.8 ms | 51.4 ms | 50.5 ms | 95% |
 | 12 | 192 x 128 x 128 | 54.7 ms | 52.7 ms | 51.9 ms | 93% (Hilbert 88%) |
 | 16 | 256 x 128 x 128 | 55.8 ms | 53.9 ms | 52.7 ms | 91% (Hilbert 86%) |
 
@@ -376,14 +376,14 @@ Notes:
   on cubes, and 30-45% fewer layer-1 cells otherwise (12 and 24 ranks, the weak-scaling boxes from 12 ranks
   up). On a graded O-mesh around a cylinder (2D) and on tetrahedra they also cut fewer faces than the curve.
 - At equal surface the orientation still matters, because a rank numbers its cells like the global mesh
-  (x first): 4 GPUs, 96^3 split 2 x 2 x 1 take 41.2 ms, 1 x 2 x 2 43.9 ms, 1 x 1 x 4 48.4 ms (TENO +12%,
+  (x first): 4 GPUs, $96^3$ split 2 x 2 x 1 take 41.2 ms, 1 x 2 x 2 43.9 ms, 1 x 1 x 4 48.4 ms (TENO +12%,
   gradients +34% per launch). Multi-jagged breaks ties toward more pieces along x. At 16 GPUs 4 x 4 x 1 (20%
   more surface) is fastest (12.8 ms): numbering a rank's cells for locality, as section 6 of `mpi.md` plans,
   should matter more than the partition from here.
 - Multi-jagged numbers its blocks along a Hilbert curve, so that the ranks of a node hold a compact group:
-  16 GPUs, 96^3: 13.0 ms instead of 13.9 ms with the blocks numbered x-major.
+  16 GPUs, $96^3$: 13.0 ms instead of 13.9 ms with the blocks numbered x-major.
 - Exchanging reconstructed face states instead of reconstructing layer 1 (`mpi.md`, section 7) is not worth
-  its second, dependent exchange per stage yet: at 16 GPUs (96^3, an nsys profile of one rank) TENO's
+  its second, dependent exchange per stage yet: at 16 GPUs ($96^3$, an nsys profile of one rank) TENO's
   reconstruction takes 11.2 of the 13.1 ms the GPU is busy per step, and layer-1 cells are 11% of the
   reconstructed cells, so it could save at most 1.3 ms (9%), less three exchanges' latency; at 12 GPUs
   weak (6% layer 1) at most 3 ms (5%). Most of the strong-scaling loss (73% at 16 GPUs, 55k cells per GPU)
@@ -397,4 +397,4 @@ performance cases (2D TENO5 and MUSCL Riemann, 3D TENO5 Taylor-Green), the doubl
 shock tube with MUSCL and TENO5 (2D, and a 3D variant: gas mixtures, primitive reconstruction), the 3D
 explosion on hexahedra and tetrahedra, and the Taylor-Green vortex at orders 3, 4 and 6; for MUSCL also the
 wedge, a viscous shock tube, the explosion with MUSCL on hexahedra and tetrahedra and a reacting H2/O2/Ar case
-on 512^2 cells; on 1, 2 and 3 ranks.
+on $512^2$ cells; on 1, 2 and 3 ranks.

@@ -22,7 +22,7 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "common_typedef.h"
 #include "face_reconstruction.h"
@@ -75,7 +75,7 @@ struct ProbeReference {
 class Probes {
     public:
         /** @brief Read [[probes]] and locate the samples; resume appends to existing files. */
-        void init(const toml::value & input, const Mesh & mesh, const std::vector<std::string> & species_names,
+        void init(const Input & input, const Mesh & mesh, const std::vector<std::string> & species_names,
                   bool resume, bool viscous);
         /** @brief A restarted run at (step, t): next output times, and series cut back to t. */
         void resume(uint64_t step, rtype t);

@@ -1,0 +1,60 @@
+# Format fixture: perfect gas with [statistics] averages (restart version 3).
+# See README.md.
+[run]
+n_steps = 2
+cfl = 0.2
+
+[mesh]
+type = "cartesian"
+Nx = 6
+Ny = 5
+Lx = 1.0
+Ly = 1.0
+
+[initialize]
+type = "analytical"
+rho = "1.0 + 0.3 * x + 0.2 * y * y"
+u = ["0.1 + 0.2 * y", "-0.1 * x"]
+p = "1.0 + 0.1 * x * y"
+
+[[boundaries]]
+name = "left"
+type = "extrapolation"
+
+[[boundaries]]
+name = "right"
+type = "extrapolation"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "wall_adiabatic"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[output]
+check_interval = 1000
+
+[[write_data]]
+prefix = "statistics"
+format = "restart"
+interval = 1
+
+[statistics]
+fields = ["RHO", "P"]
+products = ["P*P"]

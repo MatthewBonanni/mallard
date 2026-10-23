@@ -84,6 +84,7 @@ delta_L = 4.71e-4
 s_L = 0.2091
 T_unburnt = 288.0
 T_burnt = 1766.0
+efficiency = "charlette"
 subgrid_velocity = "eddy_viscosity"
 
 [output]
