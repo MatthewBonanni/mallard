@@ -22,6 +22,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "boundary_fields.h"
 #include "mesh.h"
 #include "synthetic_inflow.h"
 
@@ -37,7 +38,15 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
             throw std::runtime_error(std::string("Missing ") + key + " for boundary: " + name + ".");
         }
     };
-    if (bc.type == BoundaryType::UPT || bc.type == BoundaryType::FARFIELD) {
+    const std::string where = "boundaries[name = \"" + name + "\"]";
+    // Numbers that are expressions of x, y, z, t are set per face by the solver
+    const BoundaryFields fields(input, bc.type, where);
+    if (bc.type == BoundaryType::UPT) {
+        require("u");
+        require("p");
+        require("T");
+        fields.apply(bc, Point{}, 0.0, double(physics.R), true);
+    } else if (bc.type == BoundaryType::FARFIELD) {
         require("u");
         require("p");
         require("T");
@@ -54,40 +63,23 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         require("p");
         require("T");
         // The velocity may vary along the inlet and in time: the solver sets it per face
-        const InletProfile profile(input, "boundaries[name = \"" + name + "\"]");
-        const rtype p = find_real(input, "p", dim::pressure);
-        const rtype T = find_real(input, "T", dim::temperature);
-        bc.data[0] = physics.get_density_from_pressure_temperature(p, T);
+        const InletProfile profile(input, where);
+        fields.apply(bc, Point{}, 0.0, double(physics.R), true);
         if (profile.uniform()) {
             const std::array<double, N_DIM> u = profile.velocity(Point{});
             FOR_I_DIM bc.data[1 + i] = static_cast<rtype>(u[i]);
         }
-        bc.data[N_DIM + 1] = p;
-        bc.relax[Relax::T_TARGET] = T;
     } else if (bc.type == BoundaryType::STAGNATION_INLET || bc.type == BoundaryType::MASS_FLOW_INLET) {
-        const std::string where = "boundaries[name = \"" + name + "\"]";
         if (bc.type == BoundaryType::STAGNATION_INLET) {
             require("p0");
             require("T0");
-            const rtype p0 = find_real(input, "p0", dim::pressure);
-            const rtype T0 = find_real(input, "T0", dim::temperature);
-            if (!(p0 > 0.0_r) || !(T0 > 0.0_r)) throw InputError(where + ": p0 and T0 must be positive.");
-            bc.data[0] = T0;
-            bc.data[N_DIM + 1] = p0;
         } else {
             require("T");
-            const rtype T = find_real(input, "T", dim::temperature);
-            if (!(T > 0.0_r)) throw InputError(where + ".T must be positive.");
-            bc.data[0] = T;
             const bool flux = input.contains("mass_flux"), total = input.contains("mdot");
             if (flux == total) throw InputError(where + ": give exactly one of mass_flux and mdot.");
             if (input.contains("profile") && !total) throw InputError(where + ".profile goes with mdot.");
-            // A number is the flux of every face; expressions and mdot are set per face by the solver
-            if (flux && !input.at("mass_flux").is_string()) {
-                bc.data[N_DIM + 1] = find_real(input, "mass_flux", dim::mass_flux);
-                if (!(bc.data[N_DIM + 1] > 0.0_r)) throw InputError(where + ".mass_flux must be positive.");
-            }
         }
+        fields.apply(bc, Point{}, 0.0, double(physics.R), true);
         if (input.contains("direction")) {
             const std::vector<rtype> d = find_real_vector(input, "direction", dim::none);
             rtype norm = 0.0_r;
@@ -104,13 +96,7 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         require("p");
         bc.data[N_DIM + 1] = find_real(input, "p", dim::pressure);
     } else if (bc.is_wall()) {
-        if (input.contains("u")) {
-            std::vector<rtype> u = find_real_vector(input, "u", dim::velocity);
-            if (u.size() != N_DIM) {
-                throw std::runtime_error("Invalid u for boundary: " + name + ".");
-            }
-            FOR_I_DIM bc.data[1 + i] = u[i];
-        }
+        fields.apply(bc, Point{}, 0.0, double(physics.R), true);
         if (bc.type == BoundaryType::WALL_ISOTHERMAL) {
             require("T");
             bc.data[0] = find_real(input, "T", dim::temperature);
@@ -120,7 +106,6 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         }
     }
     if (bc.is_characteristic()) {
-        const std::string where = "boundaries[name = \"" + name + "\"]";
         require("L");
         const rtype L = find_real(input, "L", dim::length);
         if (!(L > 0.0_r)) throw InputError(where + ".L must be positive.");
