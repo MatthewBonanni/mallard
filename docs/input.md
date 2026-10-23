@@ -664,7 +664,7 @@ density_squared, temperature, temperature_squared`): the integrals of
 the mean squared velocity and vorticity and the density and temperature
 variances). With TENO the velocity
 gradients are those of the reconstruction polynomials at the cell centroids
-(order-consistent: on the Taylor-Green vortex at $64^3$ per octant they match
+(order-consistent: on the Taylor-Green vortex at $128^3$ they match
 spectral derivatives of the same field to about 1%); otherwise they are the
 second-order least-squares gradients of the viscous fluxes, which
 underestimate the enstrophy of under-resolved turbulence (by about 15% in
