@@ -32,6 +32,7 @@
 #include "test_fixtures.h"
 #include "test_utils.h"
 #include "scratch.h"
+#include "verification.h"
 
 namespace {
 
@@ -289,10 +290,12 @@ TEST(CurvedGeometry, StraightWallsAreSecondOrderAndHighOrderLinesConverge) {
         for (uint32_t c = 0; c < mesh->n_cells; c++) total += double(mesh->h_cell_volume(c));
         return std::abs(total - exact);
     };
-    EXPECT_NEAR(std::log2(area_error(32, "straight", 1) / area_error(64, "straight", 1)), 2.0, 0.05);
+    verification::expect_order({"curved", "straight walls", "quadrilaterals", "annulus area error", {32, 64},
+                                {area_error(32, "straight", 1), area_error(64, "straight", 1)}, 2.0, 1.95, 2.05});
     for (int order : {2, 3}) {
         const double e1 = area_error(16, "high_order", order), e2 = area_error(32, "high_order", order);
-        EXPECT_GT(std::log2(e1 / e2), 3.8) << order;
+        verification::expect_order({"curved", order == 2 ? "P2 walls" : "P3 walls", "quadrilaterals",
+                                    "annulus area error", {16, 32}, {e1, e2}, 4.0, 3.8});
         EXPECT_LT(e2, 1e-3 * area_error(32, "straight", 1)) << order;
     }
 }
@@ -433,12 +436,16 @@ TEST_P(CurvedTENOOrder, ReconstructionAtCurvedWallsConvergesAtDesignOrder) {
     // as straight-sided cells, the same averages give second order at best
     SKIP_IN_SINGLE_PRECISION("errors reach single-precision round-off");
     const auto [triangles, order] = GetParam();
+    const std::string method = "TENO" + std::to_string(order);
+    const std::string cells = triangles ? "triangles" : "quadrilaterals";
     const double e1 = curved_reconstruction_error(4, "curved", order, triangles);
     const double e2 = curved_reconstruction_error(8, "curved", order, triangles);
-    EXPECT_GT(std::log2(e1 / e2), order - 0.5) << e1 << " " << e2;
+    verification::expect_order({"curved", method + ", curved walls", cells, "max wall-value error", {4, 8}, {e1, e2},
+                                double(order), order - 0.5});
     const double s1 = curved_reconstruction_error(4, "straight", order, triangles);
     const double s2 = curved_reconstruction_error(8, "straight", order, triangles);
-    EXPECT_LT(std::log2(s1 / s2), 2.3) << s1 << " " << s2;
+    verification::expect_order({"curved", method + ", straight-sided cells", cells, "max wall-value error", {4, 8},
+                                {s1, s2}, 2.0, -verification::UNBOUNDED, 2.3});
     EXPECT_LT(e2, 0.1 * s2);
 }
 
@@ -557,7 +564,9 @@ TEST(CurvedTENO, CellsReachingCurvedWallsFitAtMostTheWallDegree) {
     const double c2 = curved_reconstruction_error(8, "curved", 5, false, "\n");
     const double f1 = curved_reconstruction_error(4, "curved", 5, false, "curved_wall_degree = 4\n");
     const double f2 = curved_reconstruction_error(8, "curved", 5, false, "curved_wall_degree = 4\n");
-    EXPECT_NEAR(std::log2(c1 / c2), 4.0, 0.5) << c1 << " " << c2;
-    EXPECT_GT(std::log2(f1 / f2), 4.5) << f1 << " " << f2;
+    verification::expect_order({"curved", "TENO5, curved walls, wall degree 3", "quadrilaterals",
+                                "max wall-value error", {4, 8}, {c1, c2}, 4.0, 3.5, 4.5});
+    verification::expect_order({"curved", "TENO5, curved walls, wall degree 4", "quadrilaterals",
+                                "max wall-value error", {4, 8}, {f1, f2}, 5.0, 4.5});
     EXPECT_THROW(curved_reconstruction_error(4, "curved", 5, false, "curved_wall_degree = 1\n"), std::runtime_error);
 }

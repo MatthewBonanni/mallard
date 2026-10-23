@@ -151,6 +151,7 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
     for (auto & writer : data_writers) {
         writer->resume(step, t);
     }
+    probes.resume(step, t);
 }
 
 void Solver::init_solution_constant() {

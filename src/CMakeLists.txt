@@ -1,6 +1,8 @@
 # CMakeLists.txt for Mallard
 add_library(MallardCore STATIC
     common/common_math.cpp
+    common/compiled_expression.cpp
+    common/region.cpp
     common/common_io.cpp
     common/input.cpp
     common/units.cpp
@@ -8,7 +10,12 @@ add_library(MallardCore STATIC
     common/build_info.cpp
     common/case_template.cpp
     common/growing_buffer.cpp
+    common/json.cpp
     common/log.cpp
+    common/provenance.cpp
+    common/run_log.cpp
+    common/run_status.cpp
+    common/input_upgrade.cpp
     mesh/curved.cpp
     mesh/mesh.cpp
     mesh/mesh_io.cpp
@@ -45,6 +52,8 @@ add_library(MallardCore STATIC
     solver/chemistry_balance.cpp
     solver/chemistry_benchmark.cpp
     solver/numerics_preset.cpp
+    solver/probe_geometry.cpp
+    solver/probes.cpp
     solver/solver.cpp
     solver/solver_check.cpp
     solver/solver_chemistry.cpp
@@ -58,6 +67,7 @@ add_library(MallardCore STATIC
     solver/solver_radiation.cpp
     solver/solver_sponge.cpp
     solver/solver_inflow.cpp
+    solver/source_terms.cpp
     solver/remap.cpp
     solver/statistics.cpp
     io/compression.cpp
@@ -113,6 +123,9 @@ endforeach()
 # change them differently on each: no contraction in that file
 if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
     set_source_files_properties(numerics/teno_setup.cpp PROPERTIES COMPILE_OPTIONS "--fmad=false;-ffp-contract=off")
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+    # -ffp-contract=off overrides the -fp-model=precise of every file, as intended
+    set_source_files_properties(numerics/teno_setup.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-Wno-overriding-option")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set_source_files_properties(numerics/teno_setup.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 endif()
@@ -123,7 +136,19 @@ mallard_target_warnings(MallardCore)
 set_source_files_properties(common/case_template.cpp PROPERTIES
     COMPILE_DEFINITIONS "MALLARD_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\"")
 
+string(TOUPPER "${CMAKE_BUILD_TYPE}" build_type_upper)
+set(Mallard_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${build_type_upper}}")
+string(STRIP "${Mallard_CXX_FLAGS}" Mallard_CXX_FLAGS)
+string(REPLACE "\\" "\\\\" Mallard_CXX_FLAGS "${Mallard_CXX_FLAGS}")
+string(REPLACE "\"" "\\\"" Mallard_CXX_FLAGS "${Mallard_CXX_FLAGS}")
 configure_file(common/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/version.h @ONLY)
+# The git state for provenance, refreshed at every build rather than at configure time
+set(git_version_command ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_SOURCE_DIR} -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
+    -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/generated/git_version.h -P ${CMAKE_SOURCE_DIR}/cmake/git_version.cmake)
+execute_process(COMMAND ${git_version_command})
+add_custom_target(mallard_git_version COMMAND ${git_version_command}
+    BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/generated/git_version.h)
+add_dependencies(MallardCore mallard_git_version)
 target_include_directories(MallardCore PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 if(Mallard_ENABLE_MPI)
     target_link_libraries(MallardCore PUBLIC MPI::MPI_CXX)
@@ -160,6 +185,7 @@ endif()
 
 add_executable(Mallard main.cpp)
 target_link_libraries(Mallard PRIVATE MallardCore)
+set_target_properties(Mallard PROPERTIES OUTPUT_NAME Mallard${Mallard_EXECUTABLE_SUFFIX})
 mallard_target_warnings(Mallard)
 
 add_executable(MallardReactor reactor_main.cpp)
@@ -169,5 +195,6 @@ mallard_target_warnings(MallardReactor)
 if(Mallard_ENABLE_HDF5)
     add_executable(mallard-mesh-convert mesh_convert.cpp)
     target_link_libraries(mallard-mesh-convert PRIVATE MallardCore)
+    set_target_properties(mallard-mesh-convert PROPERTIES OUTPUT_NAME mallard-mesh-convert${Mallard_EXECUTABLE_SUFFIX})
     mallard_target_warnings(mallard-mesh-convert)
 endif()

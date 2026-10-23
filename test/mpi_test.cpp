@@ -30,6 +30,8 @@
 #include "mesh_block.h"
 #include "mpi_compare.h"
 #include "partition.h"
+#include "json_reader.h"
+#include "provenance.h"
 #include "test_fixtures.h"
 #include "solver.h"
 #include "scratch.h"
@@ -375,6 +377,26 @@ TEST(MPITest, CharacteristicBoundariesAndSpongesMatchSerial) {
     }
 }
 
+TEST(MPITest, SourcesInRegionsMatchSerial) {
+    // Totals over regions are normalized by integrals summed in global cell
+    // order; sources of t and of the solution are local to each cell
+    const std::string ring =
+        "[[sources]]\ntotal = true\nrhoE = \"2 + sin(20 * t)\"\n"
+        "region = {type = \"annulus\", center = [0.4, 0.4], radius = 0.25, inner_radius = 0.1, edge = 0.05}\n";
+    const std::string relax =
+        "[[sources]]\nrho = \"-0.5 * (rho - 1)\"\n"
+        "region = {type = \"rectangle\", center = [0, 0], size = [0.5, 0.2], rotate = 30, translate = [0.6, 0.4]}\n";
+    const std::string plain = "[[sources]]\nrhoE = \"0.1 * x\"\n";
+    for (const std::string & sources : {plain, ring, relax}) {
+        SCOPED_TRACE(sources);
+        expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", "type = \"euler\"\n",
+                                        bcs("type = \"symmetry\"\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n",
+                                            "type = \"symmetry\"\n"),
+                                        20) +
+                              sources);
+    }
+}
+
 TEST(MPITest, AxisymmetricRunsMatchSerial) {
     // Revolved geometry, r-weighted stencils, the high-order geometric source
     // and the axis-corrected viscous gradients of halo cells
@@ -516,7 +538,7 @@ TEST(MPITest, AsynchronousAndCompressedRestartFilesDoNotDependOnTheRankCount) {
                 const std::string bytes_d((std::istreambuf_iterator<char>(a)), std::istreambuf_iterator<char>());
                 const std::string bytes_s((std::istreambuf_iterator<char>(b)), std::istreambuf_iterator<char>());
                 EXPECT_FALSE(bytes_s.empty()) << s;
-                EXPECT_TRUE(bytes_d == bytes_s) << d << " on " << comm::size() << " ranks";
+                EXPECT_TRUE(without_provenance(bytes_d) == without_provenance(bytes_s)) << d << " on " << comm::size() << " ranks";
             }
         }
         std::string input = restart_case(20, "");
@@ -647,9 +669,80 @@ TEST(MPITest, StatisticsAndProbesDoNotDependOnTheRankCount) {
             ss << in.rdbuf();
             return ss.str();
         };
-        const std::string a = read(dir + "/reference.csv");
+        const std::string a = without_comment_lines(read(dir + "/reference.csv"));
         EXPECT_FALSE(a.empty());
-        EXPECT_EQ(read(dir + "/distributed.csv"), a);
+        EXPECT_EQ(without_comment_lines(read(dir + "/distributed.csv")), a);
+    }
+    comm::barrier();
+}
+
+TEST(MPITest, EveryRankWritesRankZerosProvenance) {
+    const std::string dir = io_dir() + "_provenance";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    Solver solver;
+    solver.init(parse_toml(restart_case(2, "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtu\"\n"
+                                                  "interval = 2\nvariables = [\"RHO\"]\n"
+                                                  "[[write_data]]\nprefix = \"" + dir + "/r\"\nformat = \"restart\"\n"
+                                                  "interval = 2\n")));
+    solver.run();
+    comm::barrier();
+    const std::string expected = provenance::json();
+    EXPECT_EQ(comm::broadcast(expected), expected);
+    EXPECT_EQ(json_reader::parse(expected)["run"]["ranks"].number, comm::size());
+    std::ostringstream piece;
+    piece << dir << "/f_000002";
+    if (comm::size() > 1) piece << "_p" << std::setw(4) << std::setfill('0') << comm::rank();
+    std::ifstream in(piece.str() + ".vtu");
+    std::stringstream ss;
+    ss << in.rdbuf();
+    EXPECT_EQ(provenance::parse_comment(ss.str()), expected) << piece.str();
+    EXPECT_EQ(read_restart(dir + "/r_000002.restart").provenance, expected);
+    comm::barrier();
+}
+
+TEST(MPITest, PointProbesAndReductionsDoNotDependOnTheRankCount) {
+    // TENO point values (least squares in troubled cells), sample order and
+    // reductions summed on rank 0 in that order: the files match bitwise
+    const std::string dir = io_dir() + "_probes";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    auto probes = [&](const std::string & sub) {
+        const std::string at = "file = \"" + dir + "/" + sub;
+        return "[[probes]]\nname = \"circle\"\n" + at + "/circle.csv\"\nvariables = [\"RHO\", \"U\", \"T\", \"H\"]\n"
+               "sampling = \"point\"\nshape = \"circle\"\ncenter = [0.43, 0.37]\nradius = 0.21\nn_points = 29\n"
+               "interval = 5\nreductions = [\"integral\", \"favre\", \"min\", \"max\", \"rms\"]\nreductions_" + at +
+               "/circle_red.csv\"\n"
+               "[[probes]]\nname = \"line\"\nformat = \"vtp\"\n" + at + "/line.pvd\"\nvariables = [\"P\"]\n"
+               "sampling = \"point\"\nstart = [0.0, 0.4]\nend = [1.0, 0.4]\nn_points = 31\ninterval = 10\n";
+    };
+    auto input = [&](const std::string & sub) {
+        return box_input("cartesian_tri", "type = \"TENO\"\norder = 3\n", EULER,
+                         bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n", "type = \"wall_adiabatic\"\n",
+                             "type = \"extrapolation\"\n"),
+                         20) +
+               probes(sub);
+    };
+    Solver reference;
+    reference.set_distributed(false);
+    reference.init(parse_toml(input("serial")));
+    reference.run();
+    Solver distributed;
+    distributed.init(parse_toml(input("ranks")));
+    distributed.run();
+    comm::barrier();
+    if (comm::is_root()) {
+        auto read = [](const std::string & path) {
+            std::ifstream in(path);
+            std::stringstream ss;
+            ss << in.rdbuf();
+            return ss.str();
+        };
+        for (const char * file : {"circle.csv", "circle_red.csv", "line.pvd", "line_000020.vtp"}) {
+            const std::string a = without_provenance(read(dir + "/serial/" + file));
+            EXPECT_FALSE(a.empty()) << file;
+            EXPECT_EQ(without_provenance(read(dir + "/ranks/" + file)), a) << file;
+        }
     }
     comm::barrier();
 }

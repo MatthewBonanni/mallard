@@ -40,8 +40,8 @@
 #endif
 
 /** @brief rtype literal, e.g. 0.5_r, so constants do not promote float expressions to double. */
-KOKKOS_INLINE_FUNCTION constexpr rtype operator""_r(long double x) { return static_cast<rtype>(x); }
-KOKKOS_INLINE_FUNCTION constexpr rtype operator""_r(unsigned long long x) { return static_cast<rtype>(x); }
+KOKKOS_INLINE_FUNCTION consteval rtype operator""_r(long double x) { return static_cast<rtype>(x); }
+KOKKOS_INLINE_FUNCTION consteval rtype operator""_r(unsigned long long x) { return static_cast<rtype>(x); }
 
 /**
  * @brief A tolerance that depends on rtype's precision: double_tol in double

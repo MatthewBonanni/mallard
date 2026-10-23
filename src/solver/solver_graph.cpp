@@ -12,9 +12,10 @@
  * device (computed there with the host's arithmetic), the halo exchanges and
  * the dt reduction are NCCL operations on the same stream, and the host waits
  * once per step, for dt. Steps whose host work depends on the time (boundary
- * or source expressions of t, characteristic boundaries, average-pressure
- * outlets) or that need host decisions inside the step (gas mixtures,
- * chemistry) run kernel by kernel as before.
+ * expressions of t, characteristic boundaries, average-pressure outlets),
+ * that sum over the domain on the host (sources of domain averages) or that
+ * need host decisions inside the step (gas mixtures, chemistry) run kernel by
+ * kernel as before.
  *
  */
 
@@ -31,9 +32,9 @@
 
 namespace {
 
-// step_scalars: [t, t_target, dt_scales]; step_io: [t, t_target, dt, accepted]
+// step_scalars: [t, t_target, dt_scales]; step_io: [t, t_target, dt, dt_cfl1, accepted]
 [[maybe_unused]] constexpr int T = 0, T_TARGET = 1, DT_SCALES = 2, STEP_DT = DT_SCALES + int(DT), N_STEP_SCALARS = DT_SCALES + int(N_DT_SCALES);
-[[maybe_unused]] constexpr int IO_T = 0, IO_T_TARGET = 1, IO_DT = 2, IO_ACCEPTED = 3, N_STEP_IO = 4;
+[[maybe_unused]] constexpr int IO_T = 0, IO_T_TARGET = 1, IO_DT = 2, IO_DT_CFL1 = 3, IO_ACCEPTED = 4, N_STEP_IO = 5;
 
 #ifdef KOKKOS_ENABLE_CUDA
 void cuda_check(const cudaError_t err, const char * what) {
@@ -54,7 +55,7 @@ std::string Solver::step_graph_unsupported() const {
     if (!average_pressure_outlets.empty()) return "average-pressure outlets";
     if (boundary_data.char_faces.extent(0) > 0) return "characteristic boundaries";
     if (!inflows.empty()) return "synthetic inflow turbulence";
-    if (!source_expressions.empty() && source_time_dependent) return "time-dependent sources";
+    if (source_terms && source_terms->uses_means()) return "sources of domain averages";
     for (const auto & bc : dirichlet_boundaries) {
         for (const auto & w : bc.W) {
             if (w.depends_on_time()) return "time-dependent boundary states";
@@ -80,7 +81,7 @@ void Solver::record_step() {
         }
     }
 #endif
-    const Kokkos::View<rtype> dt_cfl1 = step_dt_cfl1;
+    const Kokkos::View<rtype> dt_cfl1_d = step_dt_cfl1;
     const Kokkos::View<rtype *> s = step_scalars;
     const bool use_cfl_ = use_cfl;
     const rtype cfl_ = cfl, dt_fixed_ = dt_fixed, sponge_dt_max_ = sponge_dt_max;
@@ -89,7 +90,7 @@ void Solver::record_step() {
     Kokkos::parallel_for("step_dt", 1, KOKKOS_LAMBDA(const int) {
         // calc_dt's arithmetic; volatile keeps the compiler from fusing the
         // product into the comparison's sum (one rounding instead of two)
-        volatile rtype dt_v = use_cfl_ ? cfl_ * dt_cfl1() : dt_fixed_;
+        volatile rtype dt_v = use_cfl_ ? cfl_ * dt_cfl1_d() : dt_fixed_;
         rtype dt_ = dt_v;
         if (controlled && control(StepController::DT_NEXT) > 0.0_r) dt_ = control(StepController::DT_NEXT);
         dt_ = (sponge_dt_max_ < dt_) ? sponge_dt_max_ : dt_;
@@ -102,10 +103,13 @@ void Solver::record_step() {
         c(i) = s(STEP_DT) / c(i);
     });
     // take_step
+    recording_step = true;
     time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func, step_scalars.data() + DT_SCALES);
+    recording_step = false;
     halo_current = false;
     Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), Kokkos::subview(step_io, IO_DT),
                       Kokkos::subview(step_scalars, STEP_DT));
+    Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), Kokkos::subview(step_io, IO_DT_CFL1), step_dt_cfl1);
     if (controlled) {
         // accept_controlled_step on the device; a rejected step relaunches the graph
         step_controller.estimate(solution_vec.back(), state(), rhs_vec.back(), mesh->n_owned());
@@ -122,6 +126,12 @@ void Solver::record_step() {
         Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), Kokkos::subview(step_io, IO_ACCEPTED),
                           Kokkos::subview(control, int(StepController::ACCEPTED)));
     }
+}
+
+void Solver::record_stage_time(const rtype c) {
+    const Kokkos::View<rtype> st = stage_time;
+    const Kokkos::View<rtype *> s = step_scalars;
+    Kokkos::parallel_for("stage_time", 1, KOKKOS_LAMBDA(const int) { st() = s(T) + c * s(STEP_DT); });
 }
 
 void Solver::graph_step() {
@@ -155,6 +165,7 @@ void Solver::graph_step() {
             cudaGetLastError();
             use_step_graph = false;
             halo_current = false;
+            recording_step = false;
             logging::warning(std::string("no CUDA graph of the step (") + e.what() + "); steps run kernel by kernel");
             calc_dt();
             take_step();
@@ -178,6 +189,7 @@ void Solver::graph_step() {
         if (!step_controller.enabled() || step_io(IO_ACCEPTED) != 0.0_r) break;
     }
     dt = step_io(IO_DT);
+    dt_cfl1 = step_io(IO_DT_CFL1);
     if (!(dt > 0.0_r)) {
         throw std::runtime_error("Invalid dt: " + std::to_string(dt) + ".");
     }

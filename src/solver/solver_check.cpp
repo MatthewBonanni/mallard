@@ -75,6 +75,7 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     for (const Diagnostic & key : unused_keys(input)) {
         if (r.setup_done || !key.suggestion.empty()) r.unused.push_back(key);
     }
+    for (const auto & finding : deprecated_keys) r.warnings.push_back(input_upgrade::advice(finding));
     if (!r.setup_done || !mesh) return r;
 
     check_memory(r, options, tracker);

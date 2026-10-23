@@ -87,6 +87,14 @@ int size() {
 
 void barrier() { check(MPI_Barrier(MPI_COMM_WORLD), "MPI_Barrier"); }
 
+std::string broadcast(const std::string & value) {
+    uint64_t n = value.size();
+    check(MPI_Bcast(&n, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD), "MPI_Bcast");
+    std::string out = is_root() ? value : std::string(n, '\0');
+    check(MPI_Bcast(out.data(), static_cast<int>(n), MPI_CHAR, 0, MPI_COMM_WORLD), "MPI_Bcast");
+    return out;
+}
+
 void abort(int code) {
     int initialized = 0, finalized = 0;
     MPI_Initialized(&initialized);
@@ -173,6 +181,20 @@ std::vector<T> allgatherv(const std::vector<T> & local) {
     return all;
 }
 
+template <typename T>
+std::vector<T> gatherv(const std::vector<T> & local) {
+    const size_t p = static_cast<size_t>(size());
+    int n_local = static_cast<int>(local.size());
+    std::vector<int> counts(p), displs(p + 1, 0);
+    check(MPI_Gather(&n_local, 1, MPI_INT, counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD), "MPI_Gather");
+    for (size_t r = 0; r < p; r++) displs[r + 1] = displs[r] + counts[r];
+    std::vector<T> all(is_root() ? static_cast<size_t>(displs[p]) : 0);
+    check(MPI_Gatherv(local.data(), n_local, mpi_type<T>(), all.data(), counts.data(), displs.data(), mpi_type<T>(),
+                      0, MPI_COMM_WORLD),
+          "MPI_Gatherv");
+    return all;
+}
+
 #else
 
 Session::Session(int &, char **&) {}
@@ -181,6 +203,7 @@ Session::~Session() {}
 int rank() { return 0; }
 int size() { return 1; }
 void barrier() {}
+std::string broadcast(const std::string & value) { return value; }
 
 void abort(int code) { std::exit(code); }
 
@@ -189,6 +212,11 @@ void allreduce(std::span<T>, Op) {}
 
 template <typename T>
 std::vector<T> allgatherv(const std::vector<T> & local) {
+    return local;
+}
+
+template <typename T>
+std::vector<T> gatherv(const std::vector<T> & local) {
     return local;
 }
 
@@ -220,6 +248,9 @@ template std::vector<int32_t> allgatherv(const std::vector<int32_t> &);
 template std::vector<uint64_t> allgatherv(const std::vector<uint64_t> &);
 template std::vector<double> allgatherv(const std::vector<double> &);
 template std::vector<float> allgatherv(const std::vector<float> &);
+template std::vector<uint64_t> gatherv(const std::vector<uint64_t> &);
+template std::vector<double> gatherv(const std::vector<double> &);
+template std::vector<float> gatherv(const std::vector<float> &);
 template std::vector<std::vector<double>> alltoallv(const std::vector<std::vector<double>> &);
 template std::vector<std::vector<float>> alltoallv(const std::vector<std::vector<float>> &);
 template Received<uint64_t> exchange(std::vector<std::vector<uint64_t>> &&);

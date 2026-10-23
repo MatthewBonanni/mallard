@@ -37,8 +37,10 @@
 #include "radiation.h"
 #include "scalar_reconstruction.h"
 #include "data_writer.h"
+#include "probes.h"
 #include "statistics.h"
 #include "synthetic_inflow.h"
+#include "source_terms.h"
 #include "wall_exchange.h"
 #include "expression.h"
 #include "comm.h"
@@ -49,6 +51,8 @@
 #include "check.h"
 #include "memory_tracker.h"
 #include "numerics_preset.h"
+#include "run_status.h"
+#include "input_upgrade.h"
 
 struct ForceMonitor {
     std::string zone;
@@ -56,6 +60,7 @@ struct ForceMonitor {
     Kokkos::View<uint32_t *> faces;
     uint64_t interval = 1;
     std::shared_ptr<std::ofstream> out;
+    MonitorValues last;
     bool modeled = false;  // the zone has modeled walls: a column Q, their heat flux into the fluid
 };
 
@@ -66,6 +71,7 @@ struct IntegralMonitor {
     std::string file;
     std::shared_ptr<std::ofstream> out;
     bool budget = false;  // also the kinetic-energy budget (Solver::kinetic_energy_budget)
+    MonitorValues last;
 };
 
 /**
@@ -128,9 +134,10 @@ class Solver {
         void take_step();
 
         /**
-         * @brief Compute dU/dt for the given conservative state at time t.
+         * @brief Compute dU/dt for the given conservative state at time t,
+         *        stage t_n + c dt of a step (c matters only to captured steps).
          */
-        void calc_rhs(State solution, State rhs, rtype t);
+        void calc_rhs(State solution, State rhs, rtype t, rtype c = 0.0_r);
 
         /**
          * @brief Compute the stable time step for the current solution.
@@ -194,10 +201,23 @@ class Solver {
          */
         void update_velocity_gradients();
 
+        /**
+         * @brief W = [rho, u, p] in W_cells of every local cell, from halo
+         *        values and boundary states brought up to date, and the
+         *        primitives.
+         */
+        void update_cell_W();
+
         /** @brief Q = (|Omega|^2 - |S|^2) / 2 and the vorticity of each owned cell, into vortex_fields. */
         void update_vortex_fields();
 
         // Public because nvcc rejects device lambdas in non-public member functions
+        /** @brief Gravity and the source terms, added to the volume-integrated rhs. */
+        void add_sources(const State & solution, const State & rhs, rtype t_stage, rtype c);
+        /** @brief W_cells (and for mixtures the cell scalars) of the given state, as the RHS computes them. */
+        void update_cell_fields(const State & solution);
+        /** @brief Inside a captured step: stage_time = t_n + c dt from the step's device scalars. */
+        void record_stage_time(rtype c);
         void update_average_pressure_outlets(StateView solution);
         /**
          * @brief Add the uniform body force along the mass flow direction that
@@ -240,7 +260,7 @@ class Solver {
         void graph_step();
         void record_step();
         void destroy_step_graph();
-        void calc_rhs_mixture(State solution, State rhs, rtype t);
+        void calc_rhs_mixture(State solution, State rhs, rtype t, rtype c);
         /**
          * @brief Axisymmetric runs: add geometric_source, made high order by the
          *        reconstruction where it can (mu: cell viscosities, empty if inviscid),
@@ -457,7 +477,6 @@ class Solver {
         std::vector<double> mass_flow_inlet_fluxes(const Input & bound, const std::vector<uint32_t> & faces,
                                                    BoundaryCondition & bc) const;
         void init_sources();
-        void update_source_field(rtype t_eval);
         void init_sponges();
         /** @brief Mass fractions of a composition table (numbers or expressions) at the centroids of cells. */
         std::vector<std::vector<double>> composition_at_cells(const Input & table, const std::string & where,
@@ -471,6 +490,12 @@ class Solver {
         void print_setup() const;
         void print_progress();
         void print_summary(const std::string & stop) const;
+        /** @brief The status at this step, throughput since the last progress row; no diagnostics or memory. */
+        RunStatus run_status() const;
+        void record_mesh_provenance() const;
+        /** @brief Provenance lines of the CSV files and the run log's start record. */
+        void write_provenance();
+        std::vector<std::string> integral_names() const;
         template <typename F>
         void timed_phase(const std::string & name, F && f);
         void write_data(bool force = false);
@@ -478,6 +503,7 @@ class Solver {
         void write_integrals();
         void write_probes();
         CellSampler cell_sampler() const { return CellSampler{conservatives, species, primitives}; }
+        ProbeFields probe_fields();
 
     private:
         // Step graph (solver_graph.cpp)
@@ -486,7 +512,7 @@ class Solver {
         void * step_graph_exec = nullptr;      // cudaGraphExec_t
         Kokkos::View<rtype> step_dt_cfl1;      // device: local, then global minimum
         Kokkos::View<rtype *> step_scalars;    // device: [t, t_target, dt_scales...]
-        Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> step_io;  // pinned: [t, t_target, dt]
+        Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> step_io;  // pinned: [t, t_target, dt, dt_cfl1, accepted]
 
         bool distribute = true;
         int halo_layers = 0;
@@ -534,6 +560,7 @@ class Solver {
         Input input;
         bool check_only = false;  // within check()
         numerics_preset::Resolution preset;
+        std::vector<input_upgrade::Finding> deprecated_keys;  // read under their new names
 
         // Run parameters
         uint64_t n_steps;
@@ -541,6 +568,7 @@ class Solver {
         rtype t_wall_stop;
         bool use_cfl;
         rtype dt = 0.0;
+        rtype dt_cfl1 = 0.0;  // stable time step at CFL 1
         rtype dt_fixed = 0.0;
         rtype cfl;
         rtype t;
@@ -563,6 +591,8 @@ class Solver {
         uint64_t step_run_start = 0;
         uint64_t step_last_check = 0;
         uint64_t n_progress_rows = 0;
+        bool input_from_file = false;  // init(file) has recorded the input's provenance
+        bool run_log_on = false;       // [output] run_log is set
 
         // Numerics and physics
         std::shared_ptr<Mesh> mesh;
@@ -706,15 +736,14 @@ class Solver {
         bool radiating = false;
         chemistry::OpticallyThinRadiation radiation;
         Kokkos::View<rtype *, Kokkos::HostSpace> h_qrad;  // output: radiative loss [W/m^3]
+        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_source_values;  // output: (cell, SOURCE_*)
 
         // Source terms
         bool has_gravity = false;
         rtype gravity[N_DIM] = {};
-        std::vector<Expression> source_expressions;  // Per conservative variable, empty if none
-        bool source_time_dependent = false;
-        StateView source_field;
-        StateView::host_mirror_type h_source_field;
-        rtype t_source = -1.0;
+        std::unique_ptr<sources::SourceTerms> source_terms;
+        Kokkos::View<rtype> stage_time;  // device: the time of the stage being evaluated
+        bool recording_step = false;     // inside the capture of a step graph
         bool hold_mass_flow = false;
         double mass_flow_target = 0.0;      // volume average of rho u along the direction
         rtype mass_flow_direction[N_DIM] = {};

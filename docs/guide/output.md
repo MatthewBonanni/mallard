@@ -101,9 +101,87 @@ progress row every `[output] check_interval` steps (default 1):
 Chemistry adds the share of cells advanced and the largest sub-step count.
 Written files appear as rows with their step and time. The run ends with a
 summary of wall time (setup, time stepping, diagnostics, output) and
-throughput. Errors go to stderr from any rank. Colors are off when the output
+throughput. The same information, in machine-readable form, goes to the
+[run log](#the-run-log). Errors go to stderr from any rank. Colors are off when the output
 is not a terminal or `NO_COLOR` is set (`CLICOLOR_FORCE=1` forces them, e.g.
 under `mpirun`).
+
+## The run log
+
+Next to the human log, rank 0 writes `mallard.jsonl` (`[output] run_log`):
+one JSON object per line ([JSON Lines](https://jsonlines.org)), flushed as
+it is written, so scripts and dashboards can follow a running case:
+
+```python
+import json
+records = [json.loads(line) for line in open("mallard.jsonl")]
+progress = [r for r in records if r["type"] == "progress"]
+```
+
+A run starting from a restart file appends to the log, so a case continued
+several times keeps one history, each part led by its own `start` record.
+Each record has a `type`:
+
+| `type` | When | Fields |
+|---|---|---|
+| `start` | After setup | `schema` (`"mallard-run-log"`), `version` (1), `provenance` (below) |
+| `progress` | Every progress row | as below |
+| `event` | A file written (the rows between progress rows) | `step`, `t`, `kind` (`vtu`, `hdf5`, `restart`, ...), `text` |
+| `warning`, `error` | A warning, or the error that ended the run | `message` |
+| `end` | The end of the run | `reason`, `step`, `t`, `steps` (this run's), `wall` and its parts `wall_setup`, `wall_stepping`, `wall_diagnostics`, `wall_output` (and `wall_chemistry`), `rejected_steps` (with error control), `cells_per_second` |
+
+Progress records:
+
+| Field | Meaning |
+|---|---|
+| `step`, `t`, `dt` | Step, time, time step |
+| `cfl` | `dt` over the stable time step at CFL 1 |
+| `progress` | Fraction of the run, by the first stop condition to be reached |
+| `wall` | Seconds since the solver started |
+| `wall_per_step`, `cells_per_second` | Time stepping since the previous progress record; `null` before any step |
+| `eta` | Seconds remaining, `null` until known |
+| `cells`, `ranks` | Global cell count and rank count |
+| `memory_host`, `memory_host_peak` | Resident memory of the largest rank, and its peak, in bytes |
+| `memory_device`, `memory_device_total` | GPU memory in use (by all processes) on the fullest device, and its size; `null` without a GPU |
+| `monitors` | The progress row's diagnostics: `min_rho`, `min_p`, `max_mach`; TENO: `troubled_cells` (fraction); mixtures: `min_T`, `max_T`, `max_sum_Y_error`; chemistry: `reacting_cells` (fraction), `max_chemistry_cost` |
+| `integrals` | The latest `[integrals]` (`step`, `t` and the columns of `integrals.csv`) |
+| `forces_<zone>` | The latest `[[forces]]` of each zone (`step`, `t` and the columns of its file) |
+
+Numbers are in SI units (seconds, bytes) and read back exactly; unknown
+values are `null`. Within a `version`, records only gain fields; renaming,
+removing or changing the meaning of one increments it.
+
+## Provenance
+
+Every output file records where it came from: the provenance block, one
+JSON object, is written into restart files (a trailer after the data, also of
+compressed files, which older readers skip), VTU, `.pvtu`, `.pvd`, XDMF and probe `.vtp` files (an XML comment
+`<!-- provenance {...} -->` after the XML declaration), HDF5 files, probe files included (the
+string attribute `provenance` of the root group; a continued run's probe file holds the latest run's), CSV files of forces,
+integrals and probes (a line `# provenance {...}` after the header, and
+another where a continued run starts appending), and the run log's `start`
+record.
+
+| Field | Contents |
+|---|---|
+| `schema`, `version` | `"mallard-provenance"`, 1 |
+| `mallard` | `version` (`git describe`), `git_sha`, `git_dirty` (uncommitted changes in the build); `null` outside a git checkout. Taken at build time |
+| `build` | `dim`, `precision`, `build_type`, `compiler`, `cxx_flags`, `kokkos` (version), `backend` and `host_backend` (Kokkos execution spaces), `mpi`, `gpu_aware_mpi`, `nccl`, `hdf5`, `kaminpar`, `species_layout` |
+| `run` | `start_time` (UTC, ISO 8601), `ranks`, `host`, `device` (rank 0's), `directory` |
+| `input` | `file`, `sha256` of its bytes, and its `text` |
+| `mesh` | `type`; for mesh files `file` and the `sha256` of its bytes (of a directory: of each file's relative path and bytes, by path; skipped with `[output] hash_mesh = false`) |
+| `preset` | The `[numerics] preset` (`null` without one): `name`, and per key it covers its `key`, resolved `value` and `from_preset` (`false` where the input overrides it) |
+| `setup` | The resolved setup, defaults included: each section of the log's setup summary (`Mesh`, `Physics`, `Numerics`, `Boundaries`, `Output`) as `[key, value]` pairs |
+
+Check that a file belongs to a given input with `sha256sum input.toml`; read
+the block in Python:
+
+```python
+import json, h5py
+json.loads(h5py.File("solut/flow_000100.h5")["/"].attrs["provenance"][0])
+```
+
+or, from any other file, `mallard_vtu.py`'s `provenance(path)`.
 
 ## Wall forces: `[[forces]]`
 
@@ -174,6 +252,10 @@ channel, giving profiles in y; its CSV also feeds
 
 ## Probes: `[[probes]]`
 
+A probe samples the solution on a geometry every `interval` steps (or
+`time_interval` of simulation time) and writes the samples, reductions over
+them, or both. The files are the same bit for bit on any number of ranks.
+
 ```toml
 [[probes]]
 name = "centerline"
@@ -186,11 +268,52 @@ interval = 10
 
 *Used in:* [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`flame_outflow`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-outflow), [`shock_bubble_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-3d).
 
-Point (`point = [x, y]`) or line (`start`, `end`, `n_points`) probes append
-`step, t, point, x, y, <variables>` to `probe_<name>.csv`, at full precision,
-from the cell containing each point. The [Sod comparison](numerics.md#reconstruction)
-on the Numerics page was read from such a line probe. Variables are those of
-`[statistics]`.
+```toml
+# Wake survey: high-order point values on an arc, a VTK series for ParaView,
+# and the arc's mean and RMS in probe_wake_reductions.csv
+[[probes]]
+name = "wake"
+variables = ["U", "P"]
+sampling = "point"
+shape = "arc"
+center = [0.0, 0.0]
+radius = 5.0
+angles = [-45.0, 45.0]
+n_points = 91
+time_interval = 1.0
+format = "vtp"
+reductions = ["mean", "rms"]
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `name` | required | Names the files |
+| `variables` | required | `[statistics]` fields; `U` and `Y_*` expand to all components and species |
+| `shape` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`) |
+| `sampling` | `cell` | `cell`: the average of the cell holding each sample; `point`: the reconstruction's value at the sample |
+| `interval` / `time_interval` | 1 step | Output times; `time_interval` shortens the step to land on them |
+| `format` | `csv` | `csv`, `hdf5` (one extensible file) or `vtp` (one file per output and a `.pvd` series) |
+| `reductions` | none | `integral`, `mean`, `favre`, `min`, `max`, `rms` along the geometry |
+| `samples` | `true` | `false` writes only the reductions |
+| `translate`, `rotate`, `scale` | none | Move the geometry (scale, then rotate about the origin, then translate) |
+
+With TENO, `sampling = "point"` reads each cell's reconstruction polynomial at
+the sample, so a probe converges at the scheme's order (fifth order for
+`order = 5`) instead of the first order of cell averages at points off the
+centroids. The [Sod comparison](numerics.md#reconstruction) on the Numerics
+page was read from a line probe. The full key list is in the [input reference](../input.md#probes).
+
+Pitfalls:
+
+- Point values fall back to the linear least-squares reconstruction in cells
+  the TENO indicator flags troubled (shocks, and coarse meshes of smooth
+  fields), and to the cell average outside the domain.
+- Mass fractions are cell averages in both modes; `T` and `H` follow the
+  reconstructed `p / rho` at the cell's composition.
+- CSV is for small probes: it repeats the coordinates every output. Use `hdf5`
+  or `vtp` for thousands of samples.
+- Reductions of point sets weigh each point 1 (`integral` is a sum); curves
+  integrate with three Gauss points per element between samples.
 
 ## Post-processing
 
@@ -222,6 +345,9 @@ build reads. It is never misread.
 | HDF5 mesh (`mallard-mesh-convert`) | root attribute `version` | 1 (0.3) | Mallard: all |
 | HDF5 output (`format = "hdf5"`) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard_h5.py` |
 | VTU output | field data `MALLARD_FORMAT_VERSION` | none before 0.9, 1 (0.9) | ParaView, `tools/mallard_vtu.py` |
+| Run log (`[output] run_log`) | `version` of each `start` record | 1 (0.9) | Your scripts (records only gain fields within a version) |
+| Provenance block (every output file) | its `version` | 1 (0.9) | `tools/mallard_vtu.py` (`provenance()`); in restart files a trailer that every restart reader skips, so it changes no restart version |
+| Probe output (`[[probes]]` `format = "hdf5"`, `"vtp"`) | root attribute `version` (HDF5), field data `MALLARD_FORMAT_VERSION` (VTP) | 1 (0.9) | Mallard (restarts append to HDF5), ParaView |
 | TENO cache (`cache_file`) | magic `MALLARD-TENO-<n>` | - | Rebuilt automatically when it does not match |
 
 - Restart files are written with the **lowest** version that holds their
