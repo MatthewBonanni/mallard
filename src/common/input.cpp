@@ -9,6 +9,7 @@
 
 #include <cctype>
 #include <map>
+#include <mutex>
 #include <sstream>
 
 namespace {
@@ -120,7 +121,83 @@ void collect_unused(const Input & v, const std::string & path, const Lookups & l
     }
 }
 
+std::map<std::string, std::vector<std::string>> & recorded_options() {
+    static std::map<std::string, std::vector<std::string>> options;
+    return options;
+}
+
+std::mutex & options_mutex() {
+    static std::mutex m;
+    return m;
+}
+
+std::string json_string(const std::string & s) {
+    std::string out = "\"";
+    for (const char c : s) {
+        if (c == '"' || c == '\\') out += '\\';
+        if (static_cast<unsigned char>(c) < 0x20) continue;
+        out += c;
+    }
+    return out + "\"";
+}
+
+struct CatalogEntry {
+    KeyUse use;
+    bool set = false;
+};
+
+void collect_catalog(const Input & v, const std::string & path, std::map<std::string, CatalogEntry> & out) {
+    if (v.is_table()) {
+        const auto & table = v.as_table();
+        for (const auto & key : table.lookups_made().keys) {
+            auto & entry = out[join(path, key)];
+            const auto use = table.lookups_made().uses.find(key);
+            if (use != table.lookups_made().uses.end() && !use->second.type.empty()) entry.use = use->second;
+            if (table.entries().count(key)) entry.set = true;
+        }
+        for (const auto & [key, value] : table.entries()) collect_catalog(value, join(path, key), out);
+    } else if (v.is_array()) {
+        for (const auto & item : v.as_array()) collect_catalog(item, path, out);
+    }
+}
+
 } // namespace
+
+void record_options(const std::string & key, std::vector<std::string> names) {
+    std::lock_guard<std::mutex> lock(options_mutex());
+    recorded_options()[without_indices(key)] = std::move(names);
+}
+
+std::string key_catalog(const Input & input) {
+    std::map<std::string, CatalogEntry> keys;
+    collect_catalog(input, "", keys);
+    std::map<std::string, std::vector<std::string>> options;
+    {
+        std::lock_guard<std::mutex> lock(options_mutex());
+        options = recorded_options();
+    }
+    std::string out = "{\n";
+    bool first = true;
+    for (const auto & [path, entry] : keys) {
+        out += first ? "" : ",\n";
+        first = false;
+        out += "  " + json_string(path) + ": {\"set\": " + (entry.set ? "true" : "false");
+        if (!entry.use.type.empty()) {
+            out += ", \"type\": " + json_string(entry.use.type);
+            out += entry.use.required ? ", \"required\": true" : ", \"default\": " + json_string(entry.use.fallback);
+        }
+        const auto allowed = options.find(path);
+        if (allowed != options.end()) {
+            out += ", \"values\": [";
+            for (size_t i = 0; i < allowed->second.size(); i++) {
+                out += (i ? ", " : "") + json_string(allowed->second[i]);
+            }
+            out += "]";
+        }
+        out += "}";
+    }
+    return out + "\n}\n";
+}
 
 Input parse_input(const std::string & filename) {
     Input input = toml::parse<InputConfig>(filename);

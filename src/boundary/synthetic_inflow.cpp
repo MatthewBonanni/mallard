@@ -210,7 +210,7 @@ void InletProfile::read_table(const Input & turbulence, const std::string & wher
         throw InputError(where + ".turbulence: give reynolds_stress or profile, not both.");
     }
     uniform_ = false;
-    const std::string file = toml::find<std::string>(turbulence, "profile");
+    const std::string file = find_value<std::string>(turbulence, "profile");
     std::ifstream in(file);
     if (!in.good()) throw InputError(key + ": cannot open " + file + ".");
     std::string line;
@@ -318,11 +318,11 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
     }
     stream = stream_;
     if (turbulence.contains("seed")) {
-        const int64_t s = toml::find<int64_t>(turbulence, "seed");
+        const int64_t s = find_value<int64_t>(turbulence, "seed");
         if (s < 0) throw InputError(tw + ".seed must be non-negative.");
         seed = static_cast<uint64_t>(s);
     }
-    zero_net_flux = toml::find_or<bool>(turbulence, "zero_net_flux", true);
+    zero_net_flux = find_value_or<bool>(turbulence, "zero_net_flux", true);
     const double points_per_length = find_double_or(turbulence, "points_per_length", 6.0);
     if (!(points_per_length >= 2.0)) throw InputError(tw + ".points_per_length must be at least 2.");
 

@@ -326,11 +326,8 @@ MUSCL::~MUSCL() {
 }
 
 void MUSCL::init(const Input & input) {
-    const std::string limiter_str = toml::find_or<std::string>(input, "limiter", "venkatakrishnan");
-    auto it = LIMITER_TYPES.find(limiter_str);
-    if (it == LIMITER_TYPES.end()) {
-        throw unknown_option(LIMITER_TYPES, "numerics.face_reconstruction.limiter", limiter_str);
-    }
+    const std::string limiter_str = find_value_or<std::string>(input, "limiter", "venkatakrishnan");
+    auto it = find_option(LIMITER_TYPES, "numerics.face_reconstruction.limiter", limiter_str);
     limiter = it->second;
     venkat_K = find_real_or(input, "venkatakrishnan_K", 5.0);
     gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("gradients", mesh->n_cells);

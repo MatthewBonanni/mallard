@@ -66,23 +66,23 @@ const char * const SAMPLES = "STATISTICS_SAMPLES";
 void Statistics::init(const Input & input, const std::vector<std::string> & species_names, uint32_t n_cells) {
     if (!input.contains("statistics")) return;
     const Input & table = input.at("statistics");
-    interval = toml::find_or<uint64_t>(table, "interval", 1);
+    interval = find_value_or<uint64_t>(table, "interval", 1);
     if (interval == 0) throw InputError("statistics.interval must be positive.");
     t_start = find_real_or(table, "t_start", 0.0);
-    reset = toml::find_or<bool>(table, "reset", false);
+    reset = find_value_or<bool>(table, "reset", false);
     auto add_field = [&](const std::string & name) {
         const auto it = std::find(fields.begin(), fields.end(), name);
         if (it != fields.end()) return static_cast<uint32_t>(it - fields.begin());
         fields.push_back(name);
         return static_cast<uint32_t>(fields.size() - 1);
     };
-    for (const auto & name : toml::find_or<std::vector<std::string>>(table, "fields", {})) {
+    for (const auto & name : find_value_or<std::vector<std::string>>(table, "fields", {})) {
         if (std::find(fields.begin(), fields.end(), name) != fields.end()) {
             throw InputError("statistics.fields: \"" + name + "\" is listed twice.");
         }
         add_field(name);
     }
-    for (const auto & product : toml::find_or<std::vector<std::string>>(table, "products", {})) {
+    for (const auto & product : find_value_or<std::vector<std::string>>(table, "products", {})) {
         const size_t star = product.find('*');
         if (star == std::string::npos || product.find('*', star + 1) != std::string::npos) {
             throw InputError("statistics.products: \"" + product + "\" is not of the form \"A*B\".");
@@ -376,20 +376,20 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
 void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std::string> & species_names,
                   bool resume) {
     if (!input.contains("probes")) return;
-    const auto entries = toml::find<std::vector<Input>>(input, "probes");
+    const auto entries = find_value<std::vector<Input>>(input, "probes");
     for (const auto & entry : entries) {
         Set set;
         if (!entry.contains("name")) throw InputError("probes: every probe needs a name.");
-        set.name = toml::find<std::string>(entry, "name");
+        set.name = find_value<std::string>(entry, "name");
         const std::string key = "probes[name = \"" + set.name + "\"]";
         for (const auto & other : sets) {
             if (other.name == set.name) throw InputError(key + ": name is used twice.");
         }
-        set.file = toml::find_or<std::string>(entry, "file", "probe_" + set.name + ".csv");
-        set.interval = toml::find_or<uint64_t>(entry, "interval", 1);
+        set.file = find_value_or<std::string>(entry, "file", "probe_" + set.name + ".csv");
+        set.interval = find_value_or<uint64_t>(entry, "interval", 1);
         if (set.interval == 0) throw InputError(key + ".interval must be positive.");
         if (!entry.contains("variables")) throw InputError(key + ": variables not specified.");
-        set.variables = toml::find<std::vector<std::string>>(entry, "variables");
+        set.variables = find_value<std::vector<std::string>>(entry, "variables");
         if (set.variables.empty()) throw InputError(key + ".variables is empty.");
         std::vector<int32_t> h_codes;
         for (const auto & v : set.variables) h_codes.push_back(CellSampler::code(v, species_names, key + ".variables"));
@@ -411,7 +411,7 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
             set.points.push_back(vector("point"));
         } else {
             const auto a = vector("start"), b = vector("end");
-            const uint64_t n = toml::find_or<uint64_t>(entry, "n_points", 0);
+            const uint64_t n = find_value_or<uint64_t>(entry, "n_points", 0);
             if (n < 2) throw InputError(key + ".n_points must be at least 2.");
             for (uint64_t i = 0; i < n; i++) {
                 const double s = static_cast<double>(i) / static_cast<double>(n - 1);

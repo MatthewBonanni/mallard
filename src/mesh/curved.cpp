@@ -232,16 +232,16 @@ uint32_t element_order(uint32_t n_corners, uint32_t n_nodes) {
 
 bool enabled(const Input & input) {
     if (!input.contains("mesh")) return true;
-    return toml::find_or<bool>(input, "mesh", "curved_geometry", true);
+    return find_value_or<bool>(input, "mesh", "curved_geometry", true);
 }
 
 std::vector<Shape> read_shapes(const Input & input) {
     std::vector<Shape> shapes;
     if (!enabled(input) || !input.contains("mesh") || !input.at("mesh").contains("curved")) return shapes;
-    for (const auto & entry : toml::find<std::vector<Input>>(input, "mesh", "curved")) {
+    for (const auto & entry : find_value<std::vector<Input>>(input, "mesh", "curved")) {
         Shape s;
-        s.zone = toml::find<std::string>(entry, "zone");
-        const std::string kind = toml::find<std::string>(entry, "shape");
+        s.zone = find_value<std::string>(entry, "zone");
+        const std::string kind = find_value<std::string>(entry, "shape");
         if (kind == "circle" && N_DIM == 2) {
             s.kind = Shape::Kind::CIRCLE;
         } else if (kind == "sphere" && N_DIM == 3) {
@@ -252,13 +252,13 @@ std::vector<Shape> read_shapes(const Input & input) {
             throw InputError("mesh.curved: shape = \"" + kind + "\" is not one of: " +
                              (N_DIM == 2 ? "circle" : "sphere, cylinder") + ".");
         }
-        const auto center = toml::find<std::vector<Input>>(entry, "center");
+        const auto center = find_value<std::vector<Input>>(entry, "center");
         if (center.size() != N_DIM) throw InputError("mesh.curved: center needs " + std::to_string(N_DIM) + " components.");
         for (size_t i = 0; i < N_DIM; i++) s.center[i] = double(as_real(center[i], "mesh.curved.center"));
         s.radius = double(as_real(toml::find(entry, "radius"), "mesh.curved.radius"));
         if (!(s.radius > 0.0)) throw InputError("mesh.curved: radius must be positive.");
         if (s.kind == Shape::Kind::CYLINDER) {
-            const auto axis = toml::find<std::vector<Input>>(entry, "axis");
+            const auto axis = find_value<std::vector<Input>>(entry, "axis");
             if (axis.size() != 3) throw InputError("mesh.curved: axis needs 3 components.");
             for (size_t i = 0; i < 3; i++) s.axis[i] = double(as_real(axis[i], "mesh.curved.axis"));
             const double norm = std::sqrt(dot(s.axis, s.axis));

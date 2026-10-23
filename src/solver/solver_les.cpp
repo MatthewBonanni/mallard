@@ -864,7 +864,7 @@ void Solver::init_les() {
         throw InputError("[les.combustion] needs a reacting viscous mixture (gas = \"mixture\", navier_stokes, [chemistry]).");
     }
     const Input & combustion = input.at("les").at("combustion");
-    if (toml::find_or<std::string>(combustion, "model", "") == "pasr") {
+    if (find_value_or<std::string>(combustion, "model", "") == "pasr") {
         pasr = PartiallyStirredReactor::from_input(combustion);
         pasr_on = true;
         chem_time_scale = Kokkos::View<rtype *>("chem_time_scale", mesh->n_cells);

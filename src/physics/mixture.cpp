@@ -21,12 +21,12 @@ MixtureModel MixtureModel::from_input(const Input & input) {
         throw InputError("physics: gas = \"mixture\" needs a mechanism file.");
     }
     MixtureModel model;
-    model.mech = chemistry::read_mechanism(toml::find<std::string>(physics, "mechanism"),
-                                           toml::find_or<std::string>(physics, "phase", ""));
+    model.mech = chemistry::read_mechanism(find_value<std::string>(physics, "mechanism"),
+                                           find_value_or<std::string>(physics, "phase", ""));
     model.host_thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(model.mech);
     model.gas.thermo = chemistry::make_thermo_table(model.mech);
     model.gas.n_species = model.mech.n_species();
-    const std::string type = toml::find_or<std::string>(physics, "type", "euler");
+    const std::string type = find_value_or<std::string>(physics, "type", "euler");
     if (type != "euler" && type != "navier_stokes") {
         throw InputError("physics.type = \"" + type + "\" is not one of: euler, navier_stokes.");
     }
@@ -36,7 +36,7 @@ MixtureModel MixtureModel::from_input(const Input & input) {
         }
         return model;
     }
-    model.transport_name = toml::find_or<std::string>(physics, "transport", "mixture_averaged");
+    model.transport_name = find_value_or<std::string>(physics, "transport", "mixture_averaged");
     const std::map<std::string, chemistry::TransportModel> models = {
         {"mixture_averaged", chemistry::TransportModel::MIXTURE_AVERAGED},
         {"unity_lewis", chemistry::TransportModel::UNITY_LEWIS},
@@ -62,7 +62,7 @@ MixtureModel MixtureModel::from_input(const Input & input) {
     } else if (physics.contains("lewis")) {
         throw InputError("physics.lewis needs transport = \"constant_lewis\".");
     }
-    const bool soret = toml::find_or<bool>(physics, "soret", false);
+    const bool soret = find_value_or<bool>(physics, "soret", false);
     if (soret && it->second != chemistry::TransportModel::MIXTURE_AVERAGED) {
         throw InputError("physics.soret needs transport = \"mixture_averaged\".");
     }
@@ -183,7 +183,7 @@ chemistry::ReactorOptions reactor_options(const Input & input) {
     options.atol_Y = find_double_or(table, "atol", options.atol_Y);
     if (!(options.integrator.rtol > 0.0)) throw InputError("chemistry.rtol must be positive.");
     if (!(options.atol_Y > 0.0)) throw InputError("chemistry.atol must be positive.");
-    if (table.contains("sparse")) options.sparse = toml::find<bool>(table, "sparse") ? 1 : 0;
+    if (table.contains("sparse")) options.sparse = find_value<bool>(table, "sparse") ? 1 : 0;
     options.C_reg = find_double_or(table, "C_reg", options.C_reg);
     if (!(options.C_reg > 0.0)) throw InputError("chemistry.C_reg must be positive.");
     if (table.contains("max_steps")) {

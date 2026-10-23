@@ -165,6 +165,21 @@ $ Mallard --check input.toml --ranks 4 --throughput 5e7 --quality-vtu quality
 | Cost | With `--throughput R` (cells/s per rank, the `Throughput` of a run's summary divided by its ranks) or `--steps N` (timed over N steps after an untimed one): steps, wall time and GPU-hours (rank-hours on CPUs) per unit simulated time, per flow-through time (domain length along the mean initial velocity over its magnitude) and to `t_stop`, assuming the throughput per rank holds on N ranks |
 | Warnings | A CFL number above the integrator's limit for smooth flow (1.2 for SSPRK3, 1.35 for RK4), TFLES thickening `n_res Delta / delta_L` above 5, poor cells |
 
+### The key catalog
+
+`--catalog keys.json` also writes, as JSON, every key the setup looked up for
+this input: whether the input set it, the type the setup reads it as, its
+default (as TOML) or that it is required, and the values it accepts, by path
+(`numerics.riemann_solver`, `boundaries.type`). It is written even when the
+setup stops on an error, with the keys read up to there. The setup's accessors
+(`find_value`, `find_value_or`, `find_real_or` and `find_option` in
+`src/common/input.h`) record these, so the catalog is what the code does.
+`tools/input_catalog.py build` merges the catalogs of every example and
+tutorial, in 2D and 3D, into
+[`docs/input-keys.json`](../input-keys.json), which the website's input builder
+reads; CI checks that it is up to date, and `tools/input_catalog.py docs`
+that the defaults this reference states match it.
+
 ## The other executables
 
 | Executable | Purpose | Guide |

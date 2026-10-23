@@ -298,7 +298,7 @@ class CompositionExpressions {
                 values.emplace_back(where + "." + key + "." + species, text.str());
             }
             if (table.contains("balance")) {
-                const std::string species = toml::find<std::string>(table, "balance");
+                const std::string species = find_value<std::string>(table, "balance");
                 balance = mixture.mechanism().species_index(species);
                 if (balance < 0) throw InputError(where + ".balance: no species " + species + " in the mechanism.");
             }
@@ -658,7 +658,7 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
     };
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
         const Input & bound = input_boundaries[i_bc];
-        const std::string name = toml::find<std::string>(bound, "name");
+        const std::string name = find_value<std::string>(bound, "name");
         const std::string where = "boundaries[name = \"" + name + "\"]";
         switch (bcs[i_bc].type) {
             case BoundaryType::EXTRAPOLATION:

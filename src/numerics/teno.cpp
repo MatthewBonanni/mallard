@@ -1173,7 +1173,7 @@ TENO::~TENO() {
 }
 
 void TENO::read_options(const Input & input) {
-    const int order = toml::find_or<int>(input, "order", 5);
+    const int order = find_value_or<int>(input, "order", 5);
     // The small stencils are degree 2, so the central polynomial must be at least degree 2
     if (order < 3 || order > teno::MAX_DEGREE + 1) {
         throw std::runtime_error("TENO order must be between 3 and " +
@@ -1183,29 +1183,30 @@ void TENO::read_options(const Input & input) {
     n_dof_large = teno::n_dof(degree);
     stencil_factor = find_real_or(input, "stencil_factor", 2.0);
     n_stencil_large = static_cast<uint16_t>(std::ceil(stencil_factor * n_dof_large));
-    n_stencil_small = static_cast<uint16_t>(toml::find_or<int>(input, "small_stencil_size", (N_DIM == 2) ? 10 : 2 * teno::NK_SMALL));
+    n_stencil_small = static_cast<uint16_t>(
+        find_value_or<int>(input, "small_stencil_size", (N_DIM == 2) ? 10 : 2 * teno::NK_SMALL));
     sigma_threshold = find_real_or(input, "troubled_threshold", 1.0e-3_r);
     sigma_upper = find_real_or(input, "troubled_upper", 1.0e-2_r);
     C_T = find_real_or(input, "C_T", -1.0);
-    characteristic = toml::find_or<bool>(input, "characteristic", true);
+    characteristic = find_value_or<bool>(input, "characteristic", true);
     max_condition = find_real_or(input, "max_condition", 1.0e8);
-    bound_preserving = toml::find_or<bool>(input, "bound_preserving", false);
+    bound_preserving = find_value_or<bool>(input, "bound_preserving", false);
     troubled_capacity = find_real_or(input, "troubled_capacity", troubled_capacity);
     if (!(troubled_capacity > 0.0_r && troubled_capacity <= 1.0_r)) {
         throw std::runtime_error("TENO: troubled_capacity must be in (0, 1].");
     }
-    curved_mirrors = toml::find_or<bool>(input, "curved_mirrors", false);
-    const int wall_degree = toml::find_or<int>(input, "curved_wall_degree", 3);
+    curved_mirrors = find_value_or<bool>(input, "curved_mirrors", false);
+    const int wall_degree = find_value_or<int>(input, "curved_wall_degree", 3);
     if (wall_degree < 2 || wall_degree > teno::MAX_DEGREE) {
         throw std::runtime_error("TENO curved_wall_degree must be between 2 and " + std::to_string(teno::MAX_DEGREE) + ".");
     }
     curved_wall_degree = uint8_t(wall_degree);
-    cache_file = toml::find_or<std::string>(input, "cache_file", "");
+    cache_file = find_value_or<std::string>(input, "cache_file", "");
     // Single-precision builds store their tables so anyway
-    single_tables = toml::find_or<bool>(input, "single_precision_tables", false) && sizeof(rtype) > sizeof(float);
+    single_tables = find_value_or<bool>(input, "single_precision_tables", false) && sizeof(rtype) > sizeof(float);
     if (single_tables && N_DIM != 3) throw std::runtime_error("TENO: single_precision_tables is for 3D runs.");
     // The cache then holds the tables as the runs use them
-    cache_single = toml::find_or<bool>(input, "cache_single_precision", false) || single_tables;
+    cache_single = find_value_or<bool>(input, "cache_single_precision", false) || single_tables;
     // One file per rank, made for this partition
     if (!cache_file.empty() && comm::size() > 1) {
         cache_file += ".r" + std::to_string(comm::rank()) + "-of-" + std::to_string(comm::size());

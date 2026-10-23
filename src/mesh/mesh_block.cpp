@@ -82,7 +82,7 @@ std::string vector_text(const std::vector<double> & v) {
 MeshTransform mesh_transform(const Input & input) {
     MeshTransform t;
     if (!input.contains("mesh") || !input.at("mesh").contains("transform")) return t;
-    if (toml::find_or<std::string>(input, "mesh", "type", "file") != "file") {
+    if (find_value_or<std::string>(input, "mesh", "type", "file") != "file") {
         throw InputError("[mesh.transform] applies to mesh files.");
     }
     const Input & table = input.at("mesh").at("transform");
@@ -362,23 +362,22 @@ bool is_hdf5_mesh(const std::string & filename) {
 }
 
 MeshBlock read_mesh_block(const Input & input) {
-    const std::string type_str = toml::find_or<std::string>(input, "mesh", "type", "file");
-    const auto it = MESH_TYPES.find(type_str);
-    if (it == MESH_TYPES.end()) throw unknown_option(MESH_TYPES, "mesh.type", type_str);
+    const std::string type_str = find_value_or<std::string>(input, "mesh", "type", "file");
+    const auto it = find_option(MESH_TYPES, "mesh.type", type_str);
     const MeshType type = it->second;
     const MeshTransform transform = mesh_transform(input);
     if (type == MeshType::FROM_FILE) {
-        const std::string filename = toml::find_or<std::string>(input, "mesh", "filename", "mesh.msh");
+        const std::string filename = find_value_or<std::string>(input, "mesh", "filename", "mesh.msh");
         MeshBlock block = is_hdf5_mesh(filename) ? read_mesh_h5(filename) : read_file_block(filename);
         transform_block(block, transform);
         return block;
     }
-    const uint32_t Nx = toml::find_or<uint32_t>(input, "mesh", "Nx", 100);
-    const uint32_t Ny = toml::find_or<uint32_t>(input, "mesh", "Ny", 100);
+    const uint32_t Nx = find_value_or<uint32_t>(input, "mesh", "Nx", 100);
+    const uint32_t Ny = find_value_or<uint32_t>(input, "mesh", "Ny", 100);
     const rtype Lx = find_real_or(input, "mesh", "Lx", 1.0);
     const rtype Ly = find_real_or(input, "mesh", "Ly", 1.0);
     if constexpr (N_DIM == 3) {
-        const uint32_t Nz = toml::find_or<uint32_t>(input, "mesh", "Nz", 100);
+        const uint32_t Nz = find_value_or<uint32_t>(input, "mesh", "Nz", 100);
         const rtype Lz = find_real_or(input, "mesh", "Lz", 1.0);
         if (type == MeshType::CARTESIAN_TRI || type == MeshType::WEDGE) {
             throw std::runtime_error("Mesh type " + type_str + " is 2D only.");

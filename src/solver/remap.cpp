@@ -603,14 +603,14 @@ RestartData remap_restart(const Input & input, const Mesh & target, bool axisymm
     const Input & init = input.at("initialize");
     if (!init.contains("file")) throw InputError("initialize: type = \"remap\" needs file, the source restart file.");
     if (!init.contains("mesh")) throw InputError("initialize: type = \"remap\" needs [initialize.mesh], the source mesh.");
-    const std::string file = toml::find<std::string>(init, "file");
+    const std::string file = find_value<std::string>(init, "file");
     Options options;
-    const int degree = toml::find_or<int>(init, "degree", 2);
+    const int degree = find_value_or<int>(init, "degree", 2);
     if (degree < 0 || degree > MAX_DEGREE) {
         throw InputError("initialize.degree must be between 0 and " + std::to_string(MAX_DEGREE) + ".");
     }
     options.degree = static_cast<uint8_t>(degree);
-    const std::string limiter = toml::find_or<std::string>(init, "limiter", "bounds");
+    const std::string limiter = find_value_or<std::string>(init, "limiter", "bounds");
     if (limiter != "bounds" && limiter != "none") {
         throw InputError("initialize.limiter = \"" + limiter + "\" is not one of: bounds, none.");
     }

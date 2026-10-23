@@ -42,13 +42,12 @@ rtype LES::default_constant(const SGSModel model) {
 LES LES::from_input(const Input & input) {
     const Input & table = input.at("les");
     if (!table.is_table()) throw InputError("[les] must be a table.");
-    if (toml::find_or<std::string>(input, "physics", "type", "euler") != "navier_stokes") {
+    if (find_value_or<std::string>(input, "physics", "type", "euler") != "navier_stokes") {
         throw InputError("[les] needs physics.type = \"navier_stokes\".");
     }
     LES les;
-    const std::string name = toml::find_or<std::string>(table, "model", N_DIM == 3 ? "sigma" : "wale");
-    const auto it = SGS_MODELS.find(name);
-    if (it == SGS_MODELS.end()) throw unknown_option(SGS_MODELS, "les.model", name);
+    const std::string name = find_value_or<std::string>(table, "model", N_DIM == 3 ? "sigma" : "wale");
+    const auto it = find_option(SGS_MODELS, "les.model", name);
     les.model = it->second;
     if (N_DIM == 2 && les.model == SGSModel::SIGMA) {
         throw InputError("les.model = \"sigma\" vanishes for every two-dimensional flow; use \"wale\" or \"vreman\" in "
@@ -57,12 +56,12 @@ LES LES::from_input(const Input & input) {
     les.C = find_real_or(table, "C", default_constant(les.model));
     les.Pr_t = find_real_or(table, "Pr_t", 0.9_r);
     les.Sc_t = find_real_or(table, "Sc_t", 0.9_r);
-    const std::string width = toml::find_or<std::string>(table, "filter_width", N_DIM == 3 ? "scotti" : "volume");
+    const std::string width = find_value_or<std::string>(table, "filter_width", N_DIM == 3 ? "scotti" : "volume");
     if (width != "volume" && width != "scotti") {
         throw InputError("les.filter_width = \"" + width + "\" is not one of: volume, scotti.");
     }
     les.scotti = width == "scotti";
-    les.dynamic = toml::find_or<bool>(table, "dynamic", false);
+    les.dynamic = find_value_or<bool>(table, "dynamic", false);
     if (N_DIM == 2 && les.scotti) throw InputError("les.filter_width = \"scotti\" is for 3D builds.");
     for (const auto & [key, value] : std::initializer_list<std::pair<const char *, rtype>>{
              {"C", les.C}, {"Pr_t", les.Pr_t}, {"Sc_t", les.Sc_t}}) {

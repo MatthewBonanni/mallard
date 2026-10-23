@@ -43,7 +43,7 @@ void Solver::init_error_control() {
     }
     std::array<rtype, 3> beta = time_integrator->get_controller_beta();
     if (table.contains("beta")) {
-        const std::vector<double> b = toml::find<std::vector<double>>(table, "beta");
+        const std::vector<double> b = find_value<std::vector<double>>(table, "beta");
         if (b.size() != 3) throw InputError("numerics.error_control.beta must have three entries.");
         for (size_t i = 0; i < 3; i++) beta[i] = static_cast<rtype>(b[i]);
     }
