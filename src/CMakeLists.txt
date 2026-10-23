@@ -9,6 +9,7 @@ add_library(MallardCore STATIC
     common/case_template.cpp
     common/growing_buffer.cpp
     common/log.cpp
+    common/input_upgrade.cpp
     mesh/curved.cpp
     mesh/mesh.cpp
     mesh/mesh_io.cpp
