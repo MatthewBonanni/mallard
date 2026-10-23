@@ -125,6 +125,13 @@ class SourceTerms {
         /** @brief The total sources per unit volume (cell, [conservatives, species]) of the given state at time t. */
         Kokkos::View<rtype **, Kokkos::LayoutRight> evaluate(const State & solution, rtype t);
 
+        /**
+         * @brief Throws the error of an expression whose evaluation on any
+         *        rank stopped at expr::MAX_ITERATIONS (and gave NaN), if any.
+         *        Collective; copies from the device only if some expression has loops.
+         */
+        void check_loops() const;
+
     private:
         std::shared_ptr<Mesh> mesh;
         CellFields fields;
