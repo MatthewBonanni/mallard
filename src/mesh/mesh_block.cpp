@@ -15,6 +15,7 @@
 #include <cmath>
 #include <numbers>
 #include <filesystem>
+#include <mutex>
 #include <stdexcept>
 
 #include <Kokkos_Core.hpp>
@@ -477,6 +478,7 @@ bool have_hdf5() { return true; }
 bool have_parallel_hdf5() { return PARALLEL_HDF5; }
 
 void write_mesh_h5(const std::string & filename, const MeshBlock & block) {
+    const std::lock_guard<std::mutex> lock(h5::mutex());
     const int p = comm::size(), r = comm::rank();
     if (p > 1 && !PARALLEL_HDF5) {
         throw std::runtime_error("Writing an HDF5 mesh from several ranks needs parallel HDF5.");
@@ -555,6 +557,7 @@ void write_mesh_h5(const std::string & filename, const MeshBlock & block) {
 }
 
 MeshBlock read_mesh_h5(const std::string & filename, bool whole) {
+    const std::lock_guard<std::mutex> lock(h5::mutex());
     const int p = whole ? 1 : comm::size(), r = whole ? 0 : comm::rank();
     Handle fapl(whole ? H5Pcreate(H5P_FILE_ACCESS) : file_access(), H5Pclose, "H5Pcreate");
     Handle dxpl(whole ? H5Pcreate(H5P_DATASET_XFER) : transfer(), H5Pclose, "H5Pcreate");
