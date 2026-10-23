@@ -153,7 +153,7 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   records the subset. A resolution in build files, shared headers or anything the
   whole suite exercises needs the full run.
 - **Device builds**: CUDA, HIP (ROCm) and SYCL (oneAPI), 2D and 3D, compile only,
-  run when a branch's changes touch device code: `tools/device_changes.sh` decides (a
+  run when a branch's changes touch device code: `tools/dev/device_changes.sh` decides (a
   changed `src/` file with Kokkos device constructs, or a Kokkos update). `main` also
   runs the CUDA builds on every push. `-f device=true` forces all three.
 - **GPU CI.** Device code is also run on NVIDIA A100 GPUs by a maintainer-run GPU

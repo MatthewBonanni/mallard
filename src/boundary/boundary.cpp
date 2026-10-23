@@ -64,15 +64,30 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         }
         bc.data[N_DIM + 1] = p;
         bc.relax[Relax::T_TARGET] = T;
-    } else if (bc.type == BoundaryType::STAGNATION_INLET) {
+    } else if (bc.type == BoundaryType::STAGNATION_INLET || bc.type == BoundaryType::MASS_FLOW_INLET) {
         const std::string where = "boundaries[name = \"" + name + "\"]";
-        require("p0");
-        require("T0");
-        const rtype p0 = find_real(input, "p0", dim::pressure);
-        const rtype T0 = find_real(input, "T0", dim::temperature);
-        if (!(p0 > 0.0_r) || !(T0 > 0.0_r)) throw InputError(where + ": p0 and T0 must be positive.");
-        bc.data[0] = T0;
-        bc.data[N_DIM + 1] = p0;
+        if (bc.type == BoundaryType::STAGNATION_INLET) {
+            require("p0");
+            require("T0");
+            const rtype p0 = find_real(input, "p0", dim::pressure);
+            const rtype T0 = find_real(input, "T0", dim::temperature);
+            if (!(p0 > 0.0_r) || !(T0 > 0.0_r)) throw InputError(where + ": p0 and T0 must be positive.");
+            bc.data[0] = T0;
+            bc.data[N_DIM + 1] = p0;
+        } else {
+            require("T");
+            const rtype T = find_real(input, "T", dim::temperature);
+            if (!(T > 0.0_r)) throw InputError(where + ".T must be positive.");
+            bc.data[0] = T;
+            const bool flux = input.contains("mass_flux"), total = input.contains("mdot");
+            if (flux == total) throw InputError(where + ": give exactly one of mass_flux and mdot.");
+            if (input.contains("profile") && !total) throw InputError(where + ".profile goes with mdot.");
+            // A number is the flux of every face; expressions and mdot are set per face by the solver
+            if (flux && !input.at("mass_flux").is_string()) {
+                bc.data[N_DIM + 1] = find_real(input, "mass_flux", dim::mass_flux);
+                if (!(bc.data[N_DIM + 1] > 0.0_r)) throw InputError(where + ".mass_flux must be positive.");
+            }
+        }
         if (input.contains("direction")) {
             const std::vector<rtype> d = find_real_vector(input, "direction", dim::none);
             rtype norm = 0.0_r;

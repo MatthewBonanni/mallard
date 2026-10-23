@@ -2,10 +2,10 @@
 # Re = 210 the wake is a steady axisymmetric recirculation ring. Generate the
 # meridian-plane mesh first (128 x 128 quads, the upper half of an O-grid with
 # the two cuts along the axis):
-#   python ../../tools/make_cylinder_mesh.py sphere.msh --half --n-theta 128 --n-r 128 --r-far 25 --dr0 0.01
+#   python ../../tools/mesh/make_cylinder_mesh.py sphere.msh --half --n-theta 128 --n-r 128 --r-far 25 --dr0 0.01
 # then run and compare drag, separation angle and wake length with the
 # literature (set mu = 0.2 / 150 for Re = 150):
-#   python ../../tools/plot_sphere_axisymmetric.py sphere.png solut --re 100
+#   python plot_sphere_axisymmetric.py sphere.png solut --re 100
 # Nondimensionalization: sphere diameter 1, free-stream density and sound
 # speed 1, so U = M = 0.2 and mu = U D / Re.
 #

@@ -17,7 +17,7 @@ CSV.
 | `h2o2.toml` | H2/air, h2o2 | 10 | 29 |
 | `gri30.toml` | CH4/air, GRI-Mech 3.0 | 53 | 325 |
 | `ndodecane.toml` | n-dodecane/air, Wang et al. (2014) | 100 | 432 |
-| `nhexane.toml` | n-hexane/air, NUIG (Zhang et al. 2015); copy it first with `python tools/cantera_mechanisms.py` | 1268 | 5336 |
+| `nhexane.toml` | n-hexane/air, NUIG (Zhang et al. 2015); copy it first with `python tools/setup/cantera_mechanisms.py` | 1268 | 5336 |
 
 `[benchmark]` keys: `cells`, `samples` (trajectory states), `dt` (list),
 `repeats` (the best is reported, after a warm-up call), `igniting_fraction`
@@ -29,7 +29,7 @@ cells whose last call took 16 or more sub-steps), `shared` (-1 automatic, 0: wor
 and `bin_by_cost` (GPUs: order the queue by the cells' last cost, most
 expensive first; default true, ignored on CPUs).
 `[chemistry] sparse = true/false` chooses the LU (by default sparse from 30 species
-when it pays: GRI-3.0 and larger). V3 with the large mechanism: `python tools/v3_check.py
+when it pays: GRI-3.0 and larger). V3 with the large mechanism: `python tools/dev/v3_check.py
 <build>/src/mallard reactor` against `chemistry/nhexane_ignition.csv`.
 
 ## `perf/`: performance set
@@ -51,9 +51,9 @@ The solver cases report the throughput over the time stepping (the run's
 summary), the chemistry cases `mallard reactor`'s cells per second.
 
 ```bash
-python tools/perf_suite.py run --build-2d build --build-3d build3d --out perf.json --csv perf.csv
-python tools/perf_suite.py compare perf.json            # exit 1 on a regression
-python tools/perf_suite.py update-baselines perf.json   # record new baselines
+python tools/perf/perf_suite.py run --build-2d build --build-3d build3d --out perf.json --csv perf.csv
+python tools/perf/perf_suite.py compare perf.json            # exit 1 on a regression
+python tools/perf/perf_suite.py update-baselines perf.json   # record new baselines
 ```
 
 `run` runs each case once to warm up, then `--repeats` times (default 3),

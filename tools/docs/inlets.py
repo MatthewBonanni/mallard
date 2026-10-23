@@ -17,6 +17,15 @@ INLETS = {
                r"$p$: $s(T, p) = s(T_0, p_0)$"],
         waves={"u": "imposed", "u+c": "imposed", "u-c": "interior"},
     ),
+    "inlet_mass_flow": dict(
+        title="mass_flow_inlet",
+        imposed=[r"mass flux $\rho u$ ($\dot m$ / area)", r"$T$, flow direction", "composition (mixtures)"],
+        interior=["outgoing acoustic wave", r"$p - \rho c\, u$"],
+        state=[r"$p$ from the wave with $u = \rho u / \rho$",
+               r"$\rho = p / (R T)$",
+               r"face flux = flux of this state: $\rho u$ exact"],
+        waves={"u": "imposed", "u+c": "imposed", "u-c": "interior"},
+    ),
 }
 
 

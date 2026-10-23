@@ -69,7 +69,7 @@ RULES = {
         (lambda t: str(mesh(t).get("filename", "")).endswith(".h5"),
          "any example, after `mallard mesh convert input.toml mesh.h5`"),
     ("meshes.md", "## Curved boundaries"):
-        (lambda t: "curved" in mesh(t), "the curved-boundary validation (`tools/curved_convergence.py`)"),
+        (lambda t: "curved" in mesh(t), "the curved-boundary validation (`tools/dev/curved_convergence.py`)"),
     ("numerics.md", "## Presets"): (lambda t: "preset" in num(t), None),
     ("numerics.md", "## Time step and stopping"): (lambda t: "cfl" in t.get("run", {}), None),
     ("numerics.md", "## Reconstruction"): (lambda t: "type" in recon(t), None),

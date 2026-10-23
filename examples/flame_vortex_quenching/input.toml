@@ -26,7 +26,7 @@
 # burns at -1.3% of Cantera's speed). delta_L S_L / nu_u = 5.1 (Poinsot et
 # al.'s l_F = 3.7 nu / S_L), so r / delta_L is about r / l_F / 1.4.
 #
-# Setup (tools/flame_vortex.py, as examples/flame_vortex): the planar Cantera
+# Setup (examples/flame_vortex/flame_vortex.py, as examples/flame_vortex): the planar Cantera
 # flame in its frame, the pair 3 R_c + delta_L upstream of it (r = 4 R_c),
 # symmetry planes at the pair's axis and at the top, 12 cells per delta_L
 # (24 for r = 1), MUSCL, HLLC, SSPRK3, CFL 1.2 (1D: CFL 0.8 and 1.2 give the
@@ -37,8 +37,8 @@
 #
 # Make the initial state, from this directory, and run it:
 #
-#   python ../../tools/flame_reference.py --single ch4_bfer 0.42 300 . --radiation --width 0.08
-#   python ../../tools/flame_vortex.py ch4_bfer_phi0.42_T300_mix_rad_full.csv ../../mechanisms/ch4_bfer.yaml gas . \
+#   python ../../tools/setup/flame_reference.py --single ch4_bfer 0.42 300 . --radiation --width 0.08
+#   python ../flame_vortex/flame_vortex.py ch4_bfer_phi0.42_T300_mix_rad_full.csv ../../mechanisms/ch4_bfer.yaml gas . \
 #       --r 4 --u 30 --cfl 1.2 --radiation tnf
 #
 # For the sweep, the same with --r R --u U into run directories (--cells 24
@@ -47,9 +47,9 @@
 # flame_reference.py --single ch4_bfer 0.42 300 DIR --width 0.05 without
 # --radiation (flame_vortex.py ... --r 4 --u 30 without --radiation); then
 #
-#   python ../../tools/flame_vortex_analysis.py RUN_DIR... --control CONTROL_DIR... --mechanism ../../mechanisms/ch4_bfer.yaml \
+#   python ../flame_vortex/flame_vortex_analysis.py RUN_DIR... --control CONTROL_DIR... --mechanism ../../mechanisms/ch4_bfer.yaml \
 #       --phase gas --progress CH4 --plot fv.png --csv fv.csv
-#   python ../../tools/animate_flame_vortex.py OUT.mp4 RUN_DIR... --control CONTROL_DIR... --mechanism ../../mechanisms/ch4_bfer.yaml \
+#   python ../flame_vortex/animate_flame_vortex.py OUT.mp4 RUN_DIR... --control CONTROL_DIR... --mechanism ../../mechanisms/ch4_bfer.yaml \
 #       --phase gas --progress CH4 --cols 4
 #
 # Results (phi = 0.42, radiating; Q / Q_0: heat release over the control's
