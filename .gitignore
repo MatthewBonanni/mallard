@@ -37,6 +37,7 @@ bin/
 
 # Ignore any files generated during the build process
 *.cmake
+!/cmake/*.cmake
 CMakeFiles/
 CMakeCache.txt
 compile_commands.json
@@ -47,6 +48,7 @@ docs/html/
 docs/latex/
 # Solver output and local runs
 solut/
+mallard.jsonl
 runs/
 build-*/
 .venv/

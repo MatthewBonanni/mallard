@@ -24,6 +24,7 @@ hardware they were measured on.
 | `double_mach` | Double Mach reflection of a Mach 10 shock: a split bottom boundary (inflow, then wall) and an exact moving shock on the top boundary | 460,000 triangles | ~1 hour on 12 CPU threads |
 | `wedge` | Mach 1.76 flow over an 8 degree ramp; the oblique shock matches theory (p2/p1 = 1.498) | 19,200 quads | minutes on 12 CPU threads |
 | `explosion_3d` | Spherical explosion (3D build): one octant with symmetry planes, TENO5 on 64³ hexahedra; the solution stays spherically symmetric | 262,144 hexahedra | ~5 minutes on 8 CPU threads |
+| `rotational_sector` | Rotational periodicity: a swirling flow with azimuthal and radial waves in a quarter (90 degree sector) of an annulus (`sector.toml`), against the full annulus (`annulus.toml`), TENO5 between slip walls; `sector_3d.toml` and `annulus_3d.toml` are the 3D duct, also periodic along the axis. `tools/rotational_sector.py` turns the sector into its four copies: the runs agree to rounding (TENO5 1e-10 after 110 steps with shocks, as the annulus agrees with itself; MUSCL 5e-14) | 4,096 and 16,384 quads (3D: 1,536 and 6,144 hexahedra) | about a minute on one CPU thread |
 | `sedov_3d` | Sedov-Taylor point blast (3D build): one octant, bound-preserving TENO5 on 128³ hexahedra, against the exact similarity solution (`tools/sedov.py`). The shock radius stays within 1-3% of `R = 1.0328 (E t^2 / rho0)^(1/5)` | 2.1M hexahedra | ~1.5 hours on four A100s |
 | `sphere_mach3` | Mach 3 flow over a sphere (3D build) on an unstructured Gmsh tetrahedral mesh of the quarter domain (generate it with `tools/make_sphere_mesh.py`): HLL with bound-preserving TENO5. The bow-shock standoff settles at Delta / R = 0.226, 10% above Billig's correlation (0.205): 0.01 D, under half the tetrahedron edge length (0.025 D) in the shock layer | 800,000 tetrahedra | ~1.5 hours on four A100s |
 | `mallard` | Mach 8 flow over a flying mallard from an impulsive start: RHLL with bound-preserving TENO5 on a Gmsh triangle mesh; generate the mesh with `tools/make_mallard_mesh.py` first | 1.07M triangles | ~1.5 hours on one GPU |
@@ -63,6 +64,19 @@ hardware they were measured on.
 | `turbulent_inflow_duct` | Isotropic digital-filter turbulence (u′ = 0.1 U, L = 0.25, Re_L = 100) entering a duct periodic across and decaying downstream (3D build): inlet Reynolds stresses within 6% of target, and `zero_net_flux` removing the plane acoustic wave (spurious p′<sub>rms</sub> = 7.8 ρu′² without it, 1.1 by x = 20L with it) | 6.3M hexahedra | 65,000 steps: 1.5 hours on one A100 |
 | `forced_isotropic_turbulence` | Linear forcing of turbulence held at a target kinetic energy (3D build): a `[[sources]]` entry reading the domain average `mean_ke` controls the forcing rate, so the kinetic energy stays within 1.3% of its target (0.1234-0.1248 for 0.125) through t = 20 while the Taylor-Green vortex it starts from breaks down; unforced it falls to 0.012 | 32³ = 32,768 hexahedra | 3,266 steps: 20 s on one A100 |
 
+### Isotropic turbulence: filtered statistics
+
+![Filtered statistics of the isotropic turbulence runs against the references](../docs/images/isotropic_turbulence_validation.png)
+
+`isotropic_turbulence` on $64^3$, $128^3$ and $256^3$, filtered to $64^3$ as the
+references: top, sixth-order differences against Johnsen et al. (2010,
+circles); bottom, spectral derivatives against Subramaniam et al. (2019,
+grey). $64^3$ is under-resolved ($k_\mathrm{max}\eta \approx 0.7$) and misses 15% of the
+enstrophy; $128^3$ and $256^3$ agree within 2%. The remaining differences from
+the references (kinetic energy +2%, temperature variance -5%) are of the size
+of the spread between random initial fields, whose realizations the
+references do not publish.
+
 ## Large-eddy simulation
 
 | Case | What it shows | Cells | Run time |
@@ -94,15 +108,3 @@ hardware they were measured on.
 | `autoignition_2d` | Autoignition of a thermally stratified lean H2/air mixture at constant volume (φ 0.1, 1070 K, 41 atm; Chen et al. and Hawkes et al. 2006, Sankaran et al. 2005): a 4.1 mm periodic square with random temperature fluctuations T' of 3.75-30 K and decaying turbulence, mixture-averaged transport, 11-15 cells per deflagration thickness. Generate the initial state and the 0D references first (see the input's header). Larger T' ignites earlier (mean heat release peak at 0.99 down to 0.82 tau_0) and burns longer (width 0.06 to 0.16 tau_0), and the fronts slow from spontaneous ignition (median 17 S<sub>L</sub>) towards deflagration (2.4 S<sub>L</sub>, a quarter of the heat release below 1.5 S<sub>L</sub>); the multizone model without transport predicts 2-4 times wider bursts, since mixing halves T' before ignition. `tools/autoignition_analysis.py` and `tools/animate_autoignition.py` compare and animate the runs | 160,000 | 1.4-2.0M steps per T': 4.7-5.5 hours on four A100s |
 | `shock_bubble_3d` | Mach 1.25 shock on a helium bubble in air (3D build; Haas & Sturtevant 1987): Navier-Stokes with mixture-averaged transport at Re = 1.5e3 (the bubble scaled down to 0.18 mm), a quarter of the square shock tube at 128 cells per diameter; the kidney-shaped bubble, the air jet and the vortex ring. Refracted and transmitted shocks, ring and late downstream face within 0-8% of the measured velocities (961, 359, 178, 166 m/s against 960, 365, 165, 165), all within 1.2% at 96 cells per diameter; generate the initial state first (see the input's header); `tools/shock_bubble.py` compares, `tools/animate_shock_bubble.py` animates | 11.4M hexahedra | 52,091 steps: 3.4 hours on four A100s |
 
-## Isotropic turbulence
-
-![Filtered statistics of the isotropic turbulence runs against the references](../docs/images/isotropic_turbulence_validation.png)
-
-`isotropic_turbulence` on $64^3$, $128^3$ and $256^3$, filtered to $64^3$ as the
-references: top, sixth-order differences against Johnsen et al. (2010,
-circles); bottom, spectral derivatives against Subramaniam et al. (2019,
-grey). $64^3$ is under-resolved ($k_\mathrm{max}\eta \approx 0.7$) and misses 15% of the
-enstrophy; $128^3$ and $256^3$ agree within 2%. The remaining differences from
-the references (kinetic energy +2%, temperature variance -5%) are of the size
-of the spread between random initial fields, whose realizations the
-references do not publish.

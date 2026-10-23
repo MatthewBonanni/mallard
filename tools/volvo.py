@@ -235,7 +235,7 @@ def cmd_plot(a):
 
 def cmd_budget(a):
     import csv
-    rows = list(csv.DictReader(open(a.integrals)))
+    rows = list(csv.DictReader(line for line in open(a.integrals) if not line.startswith("#")))
     t = np.array([float(r["t"]) for r in rows])
     t1 = a.t1 if a.t1 is not None else t[-1]
     if a.window:

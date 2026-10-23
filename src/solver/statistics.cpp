@@ -539,10 +539,16 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
                                     mesh.h_cells_of_face(f, 0) != static_cast<int32_t>(c);
                 const uint8_t shift = mesh.h_face_shift.extent(0) > f ? mesh.h_face_shift(f) : 0;
                 double dot = 0.0;
-                for (size_t d = 0; d < N_DIM; d++) {
-                    double x_f = static_cast<double>(mesh.h_face_coords(f, d));
-                    if (side_1 && shift) x_f -= static_cast<double>(mesh.h_shifts(shift, d));
-                    dot += (x[d] - x_f) * static_cast<double>(mesh.h_face_normals(f, d));
+                if (side_1 && mesh.h_rotated_row(shift)) {
+                    const auto x_f = mesh.h_face_point(f, c);
+                    const auto n_f = mesh.h_face_normal(f, c);
+                    for (size_t d = 0; d < N_DIM; d++) dot += (x[d] - double(x_f[d])) * double(n_f[d]);
+                } else {
+                    for (size_t d = 0; d < N_DIM; d++) {
+                        double x_f = static_cast<double>(mesh.h_face_coords(f, d));
+                        if (side_1 && shift) x_f -= static_cast<double>(mesh.h_shifts(shift, d));
+                        dot += (x[d] - x_f) * static_cast<double>(mesh.h_face_normals(f, d));
+                    }
                 }
                 if ((side_1 ? -dot : dot) > tol * static_cast<double>(mesh.h_face_area(f))) return false;
             }

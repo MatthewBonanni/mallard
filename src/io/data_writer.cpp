@@ -34,6 +34,7 @@
 #include "file_format.h"
 #include "log.h"
 #include "mesh_block.h"
+#include "provenance.h"
 
 namespace {
 
@@ -437,6 +438,43 @@ namespace {
 constexpr char RESTART_MAGIC[16] = "MALLARD-RESTART";
 // Codec of the chunks of compressed restart files (version 5)
 constexpr uint32_t RESTART_CODEC_ZLIB = 1;
+constexpr char PROVENANCE_MAGIC[16] = "MLRD-PROVENANCE";
+
+/**
+ * @brief Provenance trailer, after everything else in a restart file of any
+ *        version: the provenance JSON, its length as a uint64, and
+ *        PROVENANCE_MAGIC. Readers that stop after the faces skip it.
+ */
+std::vector<char> provenance_trailer() {
+    const std::string & text = provenance::json();
+    std::vector<char> out(text.begin(), text.end());
+    const uint64_t length = text.size();
+    out.insert(out.end(), reinterpret_cast<const char *>(&length), reinterpret_cast<const char *>(&length) + 8);
+    out.insert(out.end(), PROVENANCE_MAGIC, PROVENANCE_MAGIC + sizeof(PROVENANCE_MAGIC));
+    return out;
+}
+
+/** @brief The provenance trailer's JSON, or "" if the file has none. */
+std::string read_provenance_trailer(std::ifstream & in) {
+    constexpr std::streamoff TAIL = sizeof(uint64_t) + sizeof(PROVENANCE_MAGIC);
+    in.clear();
+    in.seekg(0, std::ios::end);
+    const std::streamoff size = in.tellg();
+    if (size < TAIL) return "";
+    in.seekg(size - TAIL);
+    uint64_t length = 0;
+    char magic[sizeof(PROVENANCE_MAGIC)] = {};
+    in.read(reinterpret_cast<char *>(&length), sizeof(length));
+    in.read(magic, sizeof(magic));
+    if (!in.good() || std::memcmp(magic, PROVENANCE_MAGIC, sizeof(magic)) != 0 ||
+        length > static_cast<uint64_t>(size - TAIL)) {
+        return "";
+    }
+    std::string text(length, '\0');
+    in.seekg(size - TAIL - static_cast<std::streamoff>(length));
+    in.read(text.data(), static_cast<std::streamsize>(length));
+    return in.good() ? text : "";
+}
 
 /**
  * @brief Restart header: magic, version, real size, cell count, variable
@@ -659,7 +697,7 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
     // Serial runs on several ranks (tests) hold the whole mesh on every rank
     if (!comm::is_root()) return;
     auto job = [this, filename, step, t, attributes, arrays, ordered = order_faces(faces, mesh->n_cells, false),
-                values = capture(mesh->n_cells)]() {
+                values = capture(mesh->n_cells), trailer = provenance_trailer()]() {
         std::ofstream out(filename, std::ios::binary);
         if (!out.good()) {
             throw std::runtime_error("DataWriter::write_restart: Could not open file: " + filename + ".");
@@ -686,6 +724,7 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
         }
         put(ordered.part.keys.data(), ordered.part.keys.size() * sizeof(uint64_t));
         put(ordered.part.values.data(), ordered.part.values.size() * sizeof(rtype));
+        put(trailer.data(), trailer.size());
         out.close();
         if (!out) throw std::runtime_error("DataWriter::write_restart: Could not write file: " + filename + ".");
         n_bytes += file_bytes(filename);
@@ -746,7 +785,8 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
         }
         comm::barrier();
         auto job = [this, filename, root, header = std::move(header), table = std::move(table),
-                    offsets = std::move(offsets), block = std::move(block), chunks, ordered]() {
+                    offsets = std::move(offsets), block = std::move(block), chunks, ordered,
+                    trailer = root ? provenance_trailer() : std::vector<char>()]() {
             const int fd = ::open(filename.c_str(), O_WRONLY);
             if (fd < 0) throw std::runtime_error("DataWriter::write_restart: Could not open file: " + filename + ".");
             uint64_t written = 0;
@@ -776,6 +816,7 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
                     ordered.part.keys.size() * sizeof(uint64_t));
                 put(faces_at + ordered.total * sizeof(uint64_t) + ordered.first * W * sizeof(rtype),
                     ordered.part.values.data(), ordered.part.values.size() * sizeof(rtype));
+                if (root) put(faces_at + ordered.total * (sizeof(uint64_t) + W * sizeof(rtype)), trailer.data(), trailer.size());
             } catch (...) {
                 ::close(fd);
                 throw;
@@ -824,6 +865,11 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
                           faces_at + MPI_Offset(ordered.total * sizeof(uint64_t) + ordered.first * W * sizeof(rtype)),
                           ordered.part.values.data(), static_cast<int>(ordered.part.values.size()), real_type,
                           MPI_STATUS_IGNORE);
+    if (comm::is_root()) {
+        const std::vector<char> trailer = provenance_trailer();
+        MPI_File_write_at(fh, faces_at + MPI_Offset(ordered.total * (sizeof(uint64_t) + W * sizeof(rtype))),
+                          trailer.data(), static_cast<int>(trailer.size()), MPI_BYTE, MPI_STATUS_IGNORE);
+    }
     MPI_File_close(&fh);
     if (comm::is_root()) n_bytes += file_bytes(filename);
     t_writing += seconds_since(start);
@@ -1027,12 +1073,13 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
     if (!in.good()) {
         throw std::runtime_error("Restart file " + filename + " is truncated.");
     }
+    data.provenance = read_provenance_trailer(in);
     return data;
 }
 
 void DataWriter::write_pvtu(const std::string & filename, const std::string & stem, int n_ranks) const {
     std::ofstream out(filename);
-    out << "<?xml version=\"1.0\"?>\n";
+    out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n";
     out << "<VTKFile type=\"PUnstructuredGrid\" version=\"1.0\" byte_order=\"" << endianness()
         << "\" header_type=\"UInt64\">\n";
     out << "  <PUnstructuredGrid GhostLevel=\"0\">\n";
@@ -1053,7 +1100,7 @@ void DataWriter::write_pvtu(const std::string & filename, const std::string & st
 
 void DataWriter::write_pvd(const std::vector<std::pair<rtype, std::string>> & series) const {
     std::ofstream out(prefix + ".pvd");
-    out << "<?xml version=\"1.0\"?>\n";
+    out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n";
     out << "<VTKFile type=\"Collection\" version=\"0.1\" byte_order=\"" << endianness() << "\">\n";
     out << "  <Collection>\n";
     for (const auto & [t, filename] : series) {
@@ -1081,7 +1128,7 @@ void DataWriter::write_vtu_faces(const std::string & filename, rtype t, const Va
     }
 
     out << std::setprecision(std::numeric_limits<rtype>::max_digits10);
-    out << "<?xml version=\"1.0\"?>\n";
+    out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n";
     out << "<VTKFile type=\"UnstructuredGrid\" version=\"1.0\" byte_order=\"" << endianness() << "\">\n";
     out << "  <UnstructuredGrid>\n";
     out << "    <FieldData>\n";
@@ -1226,7 +1273,7 @@ void DataWriter::write_vtu(const std::string & filename, rtype t, Values & value
         return zlib ? field_arrays[i_field].size() : sizeof(header_t) + values[i_field].size() * sizeof(rtype);
     };
 
-    out << "<?xml version=\"1.0\"?>\n";
+    out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n";
     out << "<VTKFile type=\"UnstructuredGrid\" version=\"1.0\" byte_order=\"" << endianness()
         << "\" header_type=\"UInt64\"" << (zlib ? " compressor=\"vtkZLibDataCompressor\"" : "") << ">\n";
     out << "  <UnstructuredGrid>\n";

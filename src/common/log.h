@@ -66,6 +66,16 @@ void section(std::string_view title, std::string_view right = "");
 void item(std::string_view key, std::string_view value);
 void items(const Items & list);
 
+/** @brief Sections and their key-value lines, as printed while recording. */
+using Record = std::vector<std::pair<std::string, Items>>;
+
+/**
+ * @brief Keeps the sections and items printed from now on (rank 0) until
+ *        end_record(), which returns them.
+ */
+void begin_record();
+Record end_record();
+
 /**
  * @brief Starts a line naming a setup phase; end_phase() completes it with the elapsed time.
  *        Anything printed in between first ends the open line.
@@ -75,17 +85,19 @@ void end_phase(double seconds);
 
 /**
  * @brief One-line event during the run (e.g. a file written), led by the step and time
- *        so it lines up with the progress table.
+ *        so it lines up with the progress table; also an event record of the run log.
  */
 void event(uint64_t step, double t, std::string_view kind, std::string_view text);
 
 /**
- * @brief Warning on stderr from rank 0, for conditions every rank sees alike.
+ * @brief Warning on stderr from rank 0, for conditions every rank sees alike; also a
+ *        record of the run log.
  */
 void warning(std::string_view message);
 
 /**
- * @brief Error on stderr from the calling rank, prefixed with the rank in parallel runs.
+ * @brief Error on stderr from the calling rank, prefixed with the rank in parallel runs;
+ *        also a record of the run log (rank 0).
  */
 void error(std::string_view message);
 

@@ -25,6 +25,7 @@
 #include "input.h"
 #include "log.h"
 #include "mesh_block.h"
+#include "provenance.h"
 #include "statistics.h"
 
 namespace {
@@ -730,6 +731,7 @@ void Spectra::write_file(const std::string & name, uint64_t step, rtype t) const
     if (!parent.empty()) std::filesystem::create_directories(parent);
     std::ofstream out(name);
     if (!out.good()) throw std::runtime_error("Could not open " + name + ".");
+    out << provenance::csv_comment() << "\n";
     out << std::setprecision(std::numeric_limits<double>::max_digits10);
     out << "# step = " << step << ", t = " << double(t) << ", samples = " << n_samples << ", weight = " << weight
         << ", t_last = " << double(t_last) << "\n";

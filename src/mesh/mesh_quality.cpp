@@ -55,11 +55,14 @@ MeshQuality mesh_quality(const Mesh & mesh) {
         for (double & x : n) x /= n_norm;
 
         auto to_face = [&](int32_t c, const std::array<double, N_DIM> & xc) {
-            std::array<double, N_DIM> r{};
-            for (size_t i = 0; i < N_DIM; i++) {
-                const double offset = mesh.is_periodic() ? static_cast<double>(mesh.h_face_offset(f, uint32_t(c), int(i))) : 0.0;
-                r[i] = xf[i] - offset - xc[i];
+            std::array<rtype, N_DIM> point{};
+            if (mesh.is_periodic()) {
+                point = mesh.h_face_point(f, uint32_t(c));
+            } else {
+                for (size_t i = 0; i < N_DIM; i++) point[i] = mesh.h_face_coords(f, i);
             }
+            std::array<double, N_DIM> r{};
+            for (size_t i = 0; i < N_DIM; i++) r[i] = static_cast<double>(point[i]) - xc[i];
             return norm(r);
         };
         auto extent = [&](int32_t c, const std::array<double, N_DIM> & xc) {
@@ -76,10 +79,11 @@ MeshQuality mesh_quality(const Mesh & mesh) {
             const double length = norm(d);
             if (length > 0.0) non_orthogonality = std::acos(std::clamp(dot(n, d) / length, -1.0, 1.0));
         } else {
-            for (size_t i = 0; i < N_DIM; i++) {
-                const double offset = mesh.is_periodic() ? static_cast<double>(mesh.h_face_offset(f, uint32_t(c1), int(i))) : 0.0;
-                x1[i] = static_cast<double>(mesh.h_cell_coords(c1, i)) + offset;
-            }
+            std::array<rtype, N_DIM> c1_coords{}, x1_seen{};
+            for (size_t i = 0; i < N_DIM; i++) c1_coords[i] = mesh.h_cell_coords(c1, i);
+            x1_seen = c1_coords;
+            if (mesh.is_periodic()) mesh.h_forward(mesh.h_face_shift(f), c1_coords.data(), x1_seen.data());
+            for (size_t i = 0; i < N_DIM; i++) x1[i] = static_cast<double>(x1_seen[i]);
             if (own1) {
                 std::array<double, N_DIM> x1_own{};
                 for (size_t i = 0; i < N_DIM; i++) x1_own[i] = static_cast<double>(mesh.h_cell_coords(c1, i));

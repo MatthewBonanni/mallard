@@ -78,6 +78,7 @@ struct RestartData {
     RestartAttributes attributes;
     RestartArrays arrays;
     RestartFaces faces;                      // every face of the file, in increasing key
+    std::string provenance;                  // the writing run's provenance block, or empty
 
     /** @brief Values of the named variable, or nullptr if the file has none. */
     const std::vector<rtype> * find(const std::string & name) const;
@@ -102,7 +103,7 @@ struct RestartData {
  * the values compressed (compression = "zlib"), version 6 files also named
  * arrays (compressed or not); version 1 files hold the flow
  * block CONSERVATIVE_NAMES only. Either must contain the flow block of this
- * build's dimension.
+ * build's dimension. Any version may end with the provenance trailer.
  */
 RestartData read_restart(const std::string & filename, const std::vector<uint64_t> * cells = nullptr);
 

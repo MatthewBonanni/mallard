@@ -26,6 +26,7 @@
 #include "comm.h"
 #include "compression.h"
 #include "solver.h"
+#include "provenance.h"
 #include "scratch.h"
 #include "test_fixtures.h"
 
@@ -359,14 +360,19 @@ TEST(InSituStatisticsTest, SpectraAndPhaseAveragesRestartBitwise) {
             }
         }
     }
-    auto read = [](const std::string & path) {
+    // The values; the provenance line names each run's own input
+    auto read = [](const std::string & path, std::string & provenance_line) {
         std::ifstream in(path);
+        std::getline(in, provenance_line);
         std::stringstream ss;
         ss << in.rdbuf();
         return ss.str();
     };
-    EXPECT_FALSE(read(dir + "/a/spectra.csv").empty());
-    EXPECT_EQ(read(dir + "/b/spectra.csv"), read(dir + "/a/spectra.csv"));
+    std::string provenance_a, provenance_b;
+    const std::string values_a = read(dir + "/a/spectra.csv", provenance_a);
+    EXPECT_FALSE(values_a.empty());
+    EXPECT_EQ(read(dir + "/b/spectra.csv", provenance_b), values_a);
+    EXPECT_FALSE(provenance::parse_comment(provenance_a).empty()) << provenance_a;
     const PhaseAverage & pa = straight->get_statistics().get_phase();
     const PhaseAverage & pb = second->get_statistics().get_phase();
     EXPECT_GT(pa.samples(), 0u);
