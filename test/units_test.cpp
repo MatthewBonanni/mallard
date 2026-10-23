@@ -15,6 +15,7 @@
 #include <sstream>
 #include <string>
 
+#include "data_paths.h"
 #include "expression.h"
 #include "input.h"
 #include "mesh_block.h"
@@ -320,7 +321,7 @@ TEST(Units, NoExampleStringIsReadAsAQuantity) {
         }
     };
     size_t n = 0;
-    for (const auto & entry : std::filesystem::recursive_directory_iterator(MALLARD_SOURCE_DIR "/examples")) {
+    for (const auto & entry : std::filesystem::recursive_directory_iterator(source_dir() + "/examples")) {
         if (entry.path().extension() != ".toml") continue;
         const Input input = parse_input(entry.path().string());
         if (!input.contains("run") && !input.contains("reactor")) continue;  // e.g. an example's card.toml

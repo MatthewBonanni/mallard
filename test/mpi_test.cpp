@@ -24,6 +24,7 @@
 
 #include "comm.h"
 #include "compression.h"
+#include "data_paths.h"
 #include "device_comm.h"
 #include "gmsh_fixtures.h"
 #include "hdf5_output.h"
@@ -78,7 +79,7 @@ std::string mixture_input(const std::string & extra, const std::string & reconst
            "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
            "[[boundaries]]\nname = \"top\"\ntype = \"p_out\"\np = 3.0e4\n"
            "[numerics]\nriemann_solver = \"HLLC\"\n" + extra + "[numerics.face_reconstruction]\n" + reconstruction +
-           "[physics]\ntype = \"" + type + "\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
+           "[physics]\ntype = \"" + type + "\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() + "/mechanisms/h2o2.yaml\"\n"
            "[output]\ncheck_interval = 1000000\n" + chemistry;
 }
 

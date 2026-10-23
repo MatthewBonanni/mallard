@@ -1,6 +1,6 @@
 /**
  * @file case_template.cpp
- * @brief `Mallard new`: ready-to-run case directories from the examples and tutorials.
+ * @brief `mallard new`: ready-to-run case directories from the examples and tutorials.
  *
  * The templates are listed in templates/manifest.toml, which points at the
  * files of an example or tutorial; a case is assembled from those files when
@@ -24,10 +24,6 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-
-#if defined(__APPLE__)
-#include <mach-o/dyld.h>
-#endif
 
 #include <toml.hpp>
 
@@ -188,35 +184,11 @@ std::vector<std::string> string_list(const Input & v, const std::string & key) {
     return find_value<std::vector<std::string>>(v, key);
 }
 
-fs::path executable_path() {
-#if defined(__APPLE__)
-    uint32_t size = 0;
-    _NSGetExecutablePath(nullptr, &size);
-    std::string buffer(size, '\0');
-    if (_NSGetExecutablePath(buffer.data(), &size) == 0) {
-        std::error_code ec;
-        const fs::path p = fs::canonical(buffer.c_str(), ec);
-        if (!ec) return p;
-    }
-#else
-    std::error_code ec;
-    const fs::path p = fs::read_symlink("/proc/self/exe", ec);
-    if (!ec) return p;
-#endif
-    return "Mallard";
-}
-
 /**
- * @brief Where the examples, tools and manifest are: $MALLARD_DATA_DIR, the
- * install tree (bin/../share/mallard) or the source tree of this build.
+ * @brief Where the examples, tools and manifest are (data_dirs()).
  */
 fs::path data_dir() {
-    std::vector<fs::path> candidates;
-    if (const char * env = std::getenv("MALLARD_DATA_DIR")) candidates.emplace_back(env);
-    candidates.push_back(executable_path().parent_path().parent_path() / "share" / "mallard");
-#ifdef MALLARD_SOURCE_DIR
-    candidates.emplace_back(MALLARD_SOURCE_DIR);
-#endif
+    const std::vector<fs::path> candidates = data_dirs();
     for (const auto & c : candidates) {
         if (fs::exists(c / manifest_path)) return c;
     }
@@ -279,8 +251,8 @@ size_t edit_distance(const std::string & a, const std::string & b) {
 }
 
 void print_usage(std::ostream & out) {
-    out << "Usage: Mallard new <template> [directory] [--quick] [--force]\n"
-           "       Mallard new --list\n"
+    out << "Usage: mallard new <template> [directory] [--quick] [--force]\n"
+           "       mallard new --list\n"
            "\n"
            "Creates a ready-to-run case from one of Mallard's examples or tutorials:\n"
            "input.toml, run.sh, the mesh or initial-state script it needs, post.sh and\n"
@@ -295,7 +267,7 @@ void print_usage(std::ostream & out) {
 void print_list(const Manifest & m) {
     size_t width = 0;
     for (const auto & t : m.templates) width = std::max(width, t.name.size());
-    std::cout << "Case templates: Mallard new <template> [directory]\n";
+    std::cout << "Case templates: mallard new <template> [directory]\n";
     for (const auto & g : m.groups) {
         std::cout << "\n" << g.title << "\n";
         for (const auto & t : m.templates) {
@@ -443,7 +415,7 @@ std::string run_script(const Template & t, const fs::path & mallard, bool mesh, 
         "#   ./run.sh -t 8      8 CPU threads\n"
         "#   ./run.sh -n 4      4 MPI ranks (MPI builds; on GPU builds, one GPU per rank)\n"
         "# Another Mallard build (this case needs a " + std::to_string(t.dim) + "D one):\n"
-        "#   MALLARD=/path/to/build/src/Mallard ./run.sh\n"
+        "#   MALLARD=/path/to/build/src/mallard ./run.sh\n"
         "set -e\n"
         "cd \"$(dirname \"$0\")\"\n"
         "MALLARD=\"${MALLARD:-" + mallard.string() + "}\"\n"
@@ -470,12 +442,12 @@ std::string run_script(const Template & t, const fs::path & mallard, bool mesh, 
 std::string readme(const Template & t, const Manifest & m, bool mesh, bool init, bool quick,
                    const std::set<std::string> & packages) {
     std::string r = "# " + t.name + "\n\n" + t.summary + ".\n\n";
-    r += "Created by `Mallard new " + t.name + (quick ? " --quick" : "") + "` (Mallard " + mallard_version() +
+    r += "Created by `mallard new " + t.name + (quick ? " --quick" : "") + "` (Mallard " + mallard_version() +
          ") from [`" + t.source + "`](" + m.source_url + t.source + "), " + std::to_string(t.dim) +
          "D build. Size and cost: " + t.cost + ".\n";
     if (quick) {
         r += "\nThis is the quick version: a coarse mesh and a short run, to try the steps. "
-             "`Mallard new " + t.name + "` gives the full case.\n";
+             "`mallard new " + t.name + "` gives the full case.\n";
     }
     r += "\n## Run it\n\n```sh\n";
     if (mesh) r += "./mesh.sh     # the mesh, " + t.mesh_creates + " (run.sh calls it if the file is missing)\n";
@@ -483,7 +455,7 @@ std::string readme(const Template & t, const Manifest & m, bool mesh, bool init,
     r += "./run.sh      # " + std::to_string(t.threads) + " CPU threads; -t N for N threads, -n N for N MPI ranks or GPUs\n";
     if (!t.post.empty()) r += "./post.sh     # " + t.results + "\n";
     r += "```\n\n";
-    r += "`MALLARD=/path/to/Mallard ./run.sh` runs another build of Mallard";
+    r += "`MALLARD=/path/to/mallard ./run.sh` runs another build of Mallard";
     if (!packages.empty()) {
         r += "; the Python scripts need " + join(packages, ", ") + " (`pip install " + join(packages, " ") +
              "`), and `PYTHON=/path/to/python` picks the interpreter";
@@ -504,7 +476,7 @@ std::string input_header(const Template & t, const Manifest & m, bool quick) {
     std::string h =
         "# ----------------------------------------------------------------------------\n"
         "# " + t.name + ": " + t.summary + ".\n"
-        "# Created by `Mallard new " + t.name + (quick ? " --quick" : "") + "` from " + t.source + " (" +
+        "# Created by `mallard new " + t.name + (quick ? " --quick" : "") + "` from " + t.source + " (" +
         std::to_string(t.dim) + "D build).\n";
     if (quick) {
         h += "# Quick version, a coarse mesh and a short run to try the steps:\n";
@@ -623,7 +595,7 @@ int create(const Manifest & m, const Template & t, const fs::path & dir, bool qu
     if (t.dim != Mallard_DIM) {
         std::cout << "\nNote: this case needs a " << t.dim << "D build of Mallard (cmake -DMallard_DIM=" << t.dim
                   << "); this one is " << Mallard_DIM << "D. Run it with\n"
-                  << "  MALLARD=/path/to/build" << t.dim << "d/src/Mallard ./run.sh\n";
+                  << "  MALLARD=/path/to/build" << t.dim << "d/src/mallard ./run.sh\n";
     }
     std::cout << "\nNext:\n  cd " << dir.string() << "\n";
     if (!mesh.empty()) std::cout << "  ./mesh.sh\n";
@@ -674,8 +646,8 @@ std::string set_key(const std::string & text, const std::string & path, const st
 
 std::string relocate(const std::string & text) {
     std::string out = text;
-    for (const char * build : {"../../build3d/src/Mallard", "../../build-3d/src/Mallard", "../../build/src/Mallard"}) {
-        out = replace_all(out, build, "Mallard");
+    for (const char * build : {"../../build3d/src/mallard", "../../build-3d/src/mallard", "../../build/src/mallard"}) {
+        out = replace_all(out, build, "mallard");
     }
     out = replace_all(out, "../../tools/", "tools/");
     out = replace_all(out, "../../mechanisms/", "mechanisms/");
@@ -699,7 +671,7 @@ int new_main(int argc, char ** argv) {
             print_usage(std::cout);
             return 0;
         } else if (arg.rfind('-', 0) == 0) {
-            std::cerr << "Mallard new: unknown option " << arg << "\n\n";
+            std::cerr << "mallard new: unknown option " << arg << "\n\n";
             print_usage(std::cerr);
             return 2;
         } else {
@@ -710,11 +682,11 @@ int new_main(int argc, char ** argv) {
         if (list || positional.empty()) {
             const Manifest m = load_manifest();
             print_list(m);
-            if (!list) std::cout << "\nCreate one with: Mallard new <template> [directory]\n";
+            if (!list) std::cout << "\nCreate one with: mallard new <template> [directory]\n";
             return list ? 0 : 2;
         }
         if (positional.size() > 2) {
-            std::cerr << "Mallard new: too many arguments\n\n";
+            std::cerr << "mallard new: too many arguments\n\n";
             print_usage(std::cerr);
             return 2;
         }
@@ -723,17 +695,17 @@ int new_main(int argc, char ** argv) {
         for (const auto & t : m.templates) {
             if (t.name == name) return create(m, t, positional.size() > 1 ? positional[1] : name, quick, force);
         }
-        std::cerr << "Mallard new: no template named " << name << ".";
+        std::cerr << "mallard new: no template named " << name << ".";
         const auto best = std::min_element(m.templates.begin(), m.templates.end(), [&](const auto & a, const auto & b) {
             return edit_distance(a.name, name) < edit_distance(b.name, name);
         });
         if (best != m.templates.end() && edit_distance(best->name, name) <= 3) {
             std::cerr << " Did you mean " << best->name << "?";
         }
-        std::cerr << "\n`Mallard new --list` shows them all.\n";
+        std::cerr << "\n`mallard new --list` shows them all.\n";
         return 2;
     } catch (const std::exception & e) {
-        std::cerr << "Mallard new: " << e.what() << "\n";
+        std::cerr << "mallard new: " << e.what() << "\n";
         return 1;
     }
 }

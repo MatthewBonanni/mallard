@@ -117,7 +117,7 @@ int Solver::init(const Input & input_in) {
         if (!unused.empty()) {
             std::string list;
             for (const Diagnostic & key : unused) list += "\n  " + describe(key);
-            throw InputError("keys that are unknown or unused with these settings (mallard --check lists them all):" +
+            throw InputError("keys that are unknown or unused with these settings (mallard check lists them all):" +
                              list);
         }
     }

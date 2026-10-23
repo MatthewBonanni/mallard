@@ -33,7 +33,7 @@
 /**
  * @brief How setup reads a key, as the accessors below record it: the type it
  *        asks for, its physical dimension, and the value it uses when the key is
- *        absent, or that it is required. The key catalog (Mallard --check
+ *        absent, or that it is required. The key catalog (mallard check
  *        --catalog) is made of these.
  */
 struct KeyUse {

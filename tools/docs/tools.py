@@ -1,7 +1,7 @@
 """Figures of the tools page (tools/README.md): what each tool produces, drawn
 from its own output, light and dark, into docs/images/tools/.
 
-    python tools/docs/tools.py [--mallard build/src/Mallard] [--work DIR] [names...]
+    python tools/docs/tools.py [--mallard build/src/mallard] [--work DIR] [names...]
 
 Every figure runs the tool it shows (as a command, like a user would) and
 draws what it wrote. Needs numpy, scipy, matplotlib, gmsh and cantera
@@ -93,9 +93,9 @@ def zones(ax, mesh, P, colors, lw=1.6):
 
 def workflow(P):
     stages = [
-        ("Mesh", P["teal"], ["make_*_mesh.py", "mesh-convert"]),
+        ("Mesh", P["teal"], ["make_*_mesh.py", "mesh convert"]),
         ("Set up", P["blue"], ["*_restart.py", "*_reference.py"]),
-        ("Run", P["flame"], ["Mallard", "MallardReactor"]),
+        ("Run", P["flame"], ["mallard -i", "mallard reactor"]),
         ("Post-process", P["plum"], ["plot_vtu.py", "animate*.py"]),
         ("Compare", P["green"], ["plot_<case>.py", "perf_suite.py"]),
     ]

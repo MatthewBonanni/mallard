@@ -1,7 +1,7 @@
 """The verification manual (docs/verification/index.md): its order-of-accuracy
-tables and convergence plots, from the convergence tests of MallardTest.
+tables and convergence plots, from the convergence tests of mallard-test.
 
-    python tools/docs/verification.py --test build-2/test/MallardTest build-3/test/MallardTest
+    python tools/docs/verification.py --test build-2/test/mallard-test build-3/test/mallard-test
     python tools/docs/verification.py            # redraw from docs/verification/results.json
 
 The tests check each order with verification::expect_order (test/verification.h),
@@ -304,7 +304,7 @@ def figures(data):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--test", nargs="+", help="MallardTest executables (a 2D and a 3D double-precision build)")
+    ap.add_argument("--test", nargs="+", help="mallard-test executables (a 2D and a 3D double-precision build)")
     ap.add_argument("--jobs", type=int, default=4, help="test processes at a time")
     ap.add_argument("--threads", type=int, default=1, help="OpenMP threads per test process")
     args = ap.parse_args()
