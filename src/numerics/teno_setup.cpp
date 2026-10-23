@@ -3599,48 +3599,48 @@ std::array<double, 9> ranking_metric(const Mesh & mesh, const Kokkos::View<int32
                                      const Kokkos::View<BoundaryCondition *>::host_mirror_type & bcs, const uint32_t i) {
     using Point = std::array<double, 3>;
     double spread[9] = {};
-    if constexpr (N_DIM == 3) {
-        Point x0;
-        for (size_t a = 0; a < 3; a++) x0[a] = double(mesh.h_cell_coords(i, a));
-        const double h = std::cbrt(double(mesh.h_cell_volume(i)));
-        // Reused by each thread: an allocation per cell cost as much as the metric
-        static thread_local std::vector<Point> offsets;
-        offsets.assign(1, Point{0.0, 0.0, 0.0});
-        for (uint32_t k = mesh.h_offsets_cells_of_cell(i); k < mesh.h_offsets_cells_of_cell(i + 1); k++) {
-            const auto & lattice = mesh.shift_lattice[mesh.h_cells_of_cell_shift(k)];
-            Point t = {0.0, 0.0, 0.0};
-            for (size_t j = 0; j < mesh.periodic_translations.size(); j++) {
-                for (size_t a = 0; a < N_DIM; a++) t[a] += lattice[j] * double(mesh.periodic_translations[j][a]);
-            }
-            const uint32_t c = mesh.h_cells_of_cell(k);
-            Point d;
-            for (size_t a = 0; a < 3; a++) d[a] = double(mesh.h_cell_coords(c, a)) + t[a] - x0[a];
-            offsets.push_back(d);
+    Point x0 = {0.0, 0.0, 0.0};
+    for (size_t a = 0; a < N_DIM; a++) x0[a] = double(mesh.h_cell_coords(i, a));
+    const double h = N_DIM == 3 ? std::cbrt(double(mesh.h_cell_volume(i))) : std::sqrt(double(mesh.h_cell_volume(i)));
+    // Reused by each thread: an allocation per cell cost as much as the metric
+    static thread_local std::vector<Point> offsets;
+    offsets.assign(1, Point{0.0, 0.0, 0.0});
+    for (uint32_t k = mesh.h_offsets_cells_of_cell(i); k < mesh.h_offsets_cells_of_cell(i + 1); k++) {
+        const auto & lattice = mesh.shift_lattice[mesh.h_cells_of_cell_shift(k)];
+        Point t = {0.0, 0.0, 0.0};
+        for (size_t j = 0; j < mesh.periodic_translations.size(); j++) {
+            for (size_t a = 0; a < N_DIM; a++) t[a] += lattice[j] * double(mesh.periodic_translations[j][a]);
         }
-        for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(i); k++) {
-            const uint32_t f = mesh.h_face_of_cell(i, k);
-            if (mesh.h_cells_of_face(f, 1) >= 0 || face_bc(f) < 0) continue;
-            if (bcs(face_bc(f)).type == BoundaryType::PARTITION) continue;
-            Point n;
-            for (size_t a = 0; a < 3; a++) n[a] = double(mesh.h_face_normals(f, a)) / double(mesh.h_face_area(f));
-            double d0 = 0.0;
-            for (size_t a = 0; a < 3; a++) d0 += (double(mesh.h_face_coords(f, a)) - x0[a]) * n[a];
-            const size_t n_offsets = offsets.size();
-            for (size_t s = 0; s < n_offsets; s++) {
-                double d = d0;
-                for (size_t a = 0; a < 3; a++) d -= offsets[s][a] * n[a];
-                if (d > d0 + GEOMETRY_TOL * h) continue;
-                Point image;
-                for (size_t a = 0; a < 3; a++) image[a] = offsets[s][a] + 2.0 * d * n[a];
-                offsets.push_back(image);
-            }
-        }
-        for (const Point & d : offsets) {
-            for (size_t a = 0; a < 3; a++) {
-                for (size_t b = 0; b < 3; b++) spread[3 * a + b] += d[a] * d[b];
-            }
+        const uint32_t c = mesh.h_cells_of_cell(k);
+        Point d = {0.0, 0.0, 0.0};
+        for (size_t a = 0; a < N_DIM; a++) d[a] = double(mesh.h_cell_coords(c, a)) + t[a] - x0[a];
+        offsets.push_back(d);
+    }
+    for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(i); k++) {
+        const uint32_t f = mesh.h_face_of_cell(i, k);
+        if (mesh.h_cells_of_face(f, 1) >= 0 || face_bc(f) < 0) continue;
+        if (bcs(face_bc(f)).type == BoundaryType::PARTITION) continue;
+        Point n = {0.0, 0.0, 0.0};
+        for (size_t a = 0; a < N_DIM; a++) n[a] = double(mesh.h_face_normals(f, a)) / double(mesh.h_face_area(f));
+        double d0 = 0.0;
+        for (size_t a = 0; a < N_DIM; a++) d0 += (double(mesh.h_face_coords(f, a)) - x0[a]) * n[a];
+        const size_t n_offsets = offsets.size();
+        for (size_t s = 0; s < n_offsets; s++) {
+            double d = d0;
+            for (size_t a = 0; a < 3; a++) d -= offsets[s][a] * n[a];
+            if (d > d0 + GEOMETRY_TOL * h) continue;
+            Point image;
+            for (size_t a = 0; a < 3; a++) image[a] = offsets[s][a] + 2.0 * d * n[a];
+            offsets.push_back(image);
         }
     }
+    for (const Point & d : offsets) {
+        for (size_t a = 0; a < 3; a++) {
+            for (size_t b = 0; b < 3; b++) spread[3 * a + b] += d[a] * d[b];
+        }
+    }
+    // 2D: a third spacing at the geometric mean of the other two changes neither their ratio nor the metric
+    if constexpr (N_DIM == 2) spread[8] = std::sqrt(std::max(0.0, spread[0] * spread[4] - spread[1] * spread[3]));
     return spacing_metric(spread);
 }
 
