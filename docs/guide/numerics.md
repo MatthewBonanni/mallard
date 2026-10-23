@@ -7,9 +7,6 @@ the options; [Numerical methods](../numerics/overview.md) has the formulation.
 
 ## Presets
 
-A preset picks a validated combination of every scheme choice on this page,
-so most inputs need one line:
-
 ```toml
 [run]
 t_stop = 0.2       # no cfl needed: the preset sets it
@@ -17,6 +14,11 @@ t_stop = 0.2       # no cfl needed: the preset sets it
 [numerics]
 preset = "accurate"
 ```
+
+*Used in:* [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les), [`detonation_1d`](https://matthewbonanni.github.io/mallard/docs/examples/#detonation-1d).
+
+A preset picks a validated combination of every scheme choice on this page,
+so most inputs need one line.
 
 | Preset | Reconstruction | Flux | Time integrator | `cfl` | For |
 |---|---|---|---|---|---|
@@ -99,6 +101,8 @@ cfl = 1.0          # or dt = 1.0e-4 (exactly one of the two)
 t_stop = 0.2       # and/or n_steps, t_wall_stop
 ```
 
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 33 more.
+
 | Key | Default | Meaning |
 |---|---|---|
 | `cfl` | — | CFL number: the time step adapts to it every step |
@@ -143,6 +147,8 @@ type = "TENO"      # "FO", "MUSCL" or "TENO"; the default is "FO"
 order = 5          # TENO: 3 to 6
 ```
 
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 33 more.
+
 !!! warning "The default is first order"
     Without a [preset](#presets) or `[numerics.face_reconstruction]` Mallard
     runs first order. Every example sets a preset or the reconstruction.
@@ -174,6 +180,15 @@ sector stencils where a troubled-cell indicator detects a discontinuity:
 Mallard's stencil cache.*
 
 ### TENO-E options
+
+```toml
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+bound_preserving = true   # for very strong shocks
+```
+
+*Used in:* [`sedov_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#sedov-3d), [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`noh_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#noh-axisymmetric), [`sedov_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sedov-axisymmetric).
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -210,6 +225,8 @@ Pitfalls:
 riemann_solver = "HLLC"   # default
 ```
 
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 33 more.
+
 | `riemann_solver` | Use |
 |---|---|
 | `HLLC` | Default: resolves contacts and shear layers; all-round choice |
@@ -224,6 +241,13 @@ shocks grow carbuncles: use `RHLL` there
 ([stationary shocks](../numerics/overview.md#stationary-shocks-on-cell-faces)).
 
 ## Time integration and other options
+
+```toml
+[numerics]
+time_integrator = "RK4"
+```
+
+*Used in:* every example keeps the default, `SSPRK3`; the others are in the time-integration tests.
 
 | `[numerics]` key | Default | Meaning |
 |---|---|---|
