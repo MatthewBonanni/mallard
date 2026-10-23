@@ -22,6 +22,7 @@
 #include "hdf5_output.h"
 #include "mesh_block.h"
 #include "mpi_compare.h"
+#include "scratch.h"
 
 namespace {
 
@@ -94,8 +95,10 @@ TEST(MPI3DTest, LargeEddySimulationOnTetrahedraMatchesSerial) {
 
 TEST(MPI3DTest, WallModelsMatchSerial) {
     // Exchange and edge points several cells off the walls, in cells that a
-    // partition may leave beyond the default halo, which must then deepen
-    for (const char * partitioner : {"multijagged", "hilbert"}) {
+    // partition may leave beyond the default halo, which must then deepen.
+    // Without LES or the hybrid flux, only the wall model reads the gradients
+    // of the deep halo cells holding its points
+    for (const char * partitioner : {"multijagged", "hilbert"}) for (const bool les : {true, false}) {
         std::ostringstream s;
         s << "[run]\nn_steps = 6\ncfl = 0.4\n"
           << "[mesh]\ntype = \"cartesian_tet\"\nNx = 6\nNy = 8\nNz = 4\nLx = 1.0\nLy = 1.0\nLz = 0.6\n"
@@ -107,11 +110,12 @@ TEST(MPI3DTest, WallModelsMatchSerial) {
           << "wall_model = { model = \"gfm\", exchange_distance = 0.45, edge_distance = 0.9 }\n"
           << "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n"
           << "wall_model = { model = \"equilibrium\", exchange_cells = 3.0 }\n"
-          << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\nconvective_flux = \"hybrid\"\n"
+          << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+          << (les ? "convective_flux = \"hybrid\"\n" : "")
           << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\nlimiter = \"none\"\n"
           << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
           << "mu = 1e-3\nPr = 0.72\n"
-          << "[les]\nmodel = \"sigma\"\n"
+          << (les ? "[les]\nmodel = \"sigma\"\n" : "")
           << "[output]\ncheck_interval = 1000000\n";
         expect_matches_serial(s.str());
     }
@@ -180,7 +184,7 @@ TEST(MPI3DTest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
 
 TEST(MPI3DTest, SurfaceOutputOfAZoneMissingFromSomeRanks) {
     // Ranks whose part of the mesh does not touch the zone write empty pieces
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mpi3d_faces").string();
+    const std::string dir = (scratch_dir() / "mallard_mpi3d_faces").string();
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
     Solver solver;
@@ -210,7 +214,7 @@ TEST(MPI3DTest, HDF5OutputDoesNotDependOnTheRankCount) {
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
     if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
 #ifdef Mallard_HAS_HDF5
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mpi3d_hdf5").string();
+    const std::string dir = (scratch_dir() / "mallard_mpi3d_hdf5").string();
     expect_hdf5_output_matches_serial(box_input("cartesian_mixed", "type = \"MUSCL\"\n", "type = \"euler\"\n"),
                                       "interval = 4\nvariables = [\"RHO\", \"U\", \"P\"]\n", dir, {0, 4, 8});
 #endif
@@ -243,7 +247,7 @@ TEST(MPI3DTest, CurvedWallsMatchSerial) {
 
 TEST(MPI3DTest, RemapDoesNotDependOnTheRankCount) {
     // A prism run's restart file remapped to tetrahedra of another size
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mpi3d_remap").string();
+    const std::string dir = (scratch_dir() / "mallard_mpi3d_remap").string();
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
     std::string coarse = box_input("cartesian_prism", "type = \"MUSCL\"\n", "type = \"euler\"\n");
