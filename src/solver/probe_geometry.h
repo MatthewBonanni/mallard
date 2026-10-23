@@ -56,11 +56,14 @@ struct Geometry {
     std::vector<std::vector<uint32_t>> polylines;  // curves: node indices in order, closed ones end at their start
     std::vector<Point> quad_points;
     std::vector<double> quad_weights;
+    std::vector<Point> quad_normals;  // surfaces and 2D curves: unit normals of the quadrature points
     // Samples that are their own quadrature points (no quad_points): the
-    // measure of each one's element (empty: unit weights), and their unit normals
+    // measure of each one's element (empty: unit weights); unit normals of
+    // the samples of surfaces and 2D curves
     std::vector<double> node_weights;
     std::vector<Point> normals;
-    // Surfaces of mesh faces (3D): each sample a polygon over these vertices
+    // Surfaces: polygons over the vertices, each a sample (cell data), or
+    // without vertices over the nodes (point data)
     std::vector<Point> vertices;
     std::vector<uint64_t> polygon_offsets;  // polygons + 1
     std::vector<uint32_t> polygon_vertices;
