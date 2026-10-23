@@ -139,6 +139,8 @@ struct MixtureTimeStepFunctor {
     Kokkos::View<rtype *[3]> transport;  // viscous: (cell, [mu, lambda, nu_eff]), else empty
     Kokkos::View<rtype *[N_DIM]> radius_coords;  // axisymmetric runs: cell_coords, else empty
     BoundaryData boundaries;
+    PeriodicMaps periodic;
+    Kokkos::View<uint8_t *> face_shift;
 
     KOKKOS_INLINE_FUNCTION
     rtype wave_speed(const int32_t c, const rtype * n) const {
@@ -158,6 +160,8 @@ struct MixtureTimeStepFunctor {
             const int32_t c0 = cells_of_face(f, 0);
             rtype lambda = wave_speed(c0, n);
             if (cells_of_face(f, 1) >= 0) {
+                // The normal in cell 1's frame
+                if (periodic.rotated()) periodic.unrotate(face_shift(f), n);
                 lambda = Kokkos::fmax(lambda, wave_speed(cells_of_face(f, 1), n));
             } else {
                 rtype W_c[N_CONSERVATIVE];
@@ -394,6 +398,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
     if (exchange) halo.exchange(state);
     update_cell_states(state, !budget_pass);
     face_reconstruction->calc_face_values(W_cells, face_solution);
+    face_reconstruction->rotate_periodic_faces(face_solution);
     if (!budget_pass) update_characteristic_boundaries(t_stage);
     if (hybrid_flux) update_upwind_sensor();
     scalar_reconstruction.calc(cell_scalars, W_cells, face_thermo);
@@ -441,7 +446,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
         if (les_on) update_eddy_viscosity(mesh->n_cells);
         if (tfles_on) thicken_transport();
         viscous_functor = MixtureViscousFluxFunctor{mesh->face_normals, mesh->face_measure, mesh->face_coords,
-                                                    mesh->cell_coords, mesh->cells_of_face, mesh->shifts,
+                                                    mesh->cell_coords, mesh->cells_of_face, mesh->periodic_maps(),
                                                     mesh->face_shift, boundary_data, mixture, cell_scalars,
                                                     transport_values, transport_gradients, cell_transport,
                                                     cell_diffusion, face_flux, species_slots, axisymmetric,
@@ -455,11 +460,11 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
     StateView rhs = rhs_state.flow;
     if (double_flux) {
         DoubleFluxSumFunctor sum_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
-                                         face_flux, face_energy_1, rhs};
+                                         face_flux, face_energy_1, rhs, mesh->periodic_maps(), mesh->face_shift};
         Kokkos::parallel_for("face_flux_sum", n_owned, sum_functor);
     } else {
         FaceFluxSumFunctor sum_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
-                                       face_flux, rhs};
+                                       face_flux, rhs, mesh->periodic_maps(), mesh->face_shift};
         Kokkos::parallel_for("face_flux_sum", n_owned, sum_functor);
     }
     SpeciesSumFunctor species_sum{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
@@ -579,7 +584,8 @@ rtype Solver::calc_dt_cfl1_mixture() {
     MixtureTimeStepFunctor functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                    mesh->face_normals, mesh->face_measure, mesh->cell_measure, W_cells,
                                    cell_scalars, cfl_local, mixture.n_species, cell_transport,
-                                   axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(), boundary_data};
+                                   axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(), boundary_data,
+                                   mesh->periodic_maps(), mesh->face_shift};
     rtype dt_min = std::numeric_limits<rtype>::max();
     Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor, Kokkos::Min<rtype>(dt_min));
     return comm::allreduce(dt_min, comm::Op::MIN);
