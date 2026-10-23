@@ -18,6 +18,7 @@
 #include <optional>
 #include <sstream>
 
+#include "comm.h"
 #include "input.h"
 #include "log.h"
 #include "mesh.h"
@@ -488,6 +489,11 @@ std::vector<double> volume_fractions(const Mesh & mesh, const Region & region) {
         }
         fractions[i_cell] = total > 0.0 ? inside / total : 0.0;
     });
+    const auto & programs = region.host().programs;
+    if (programs.loops) {
+        const uint32_t stopped = comm::allreduce(programs.stopped(), comm::Op::MAX);
+        if (stopped > 0) throw InputError(region.programs()[stopped - 1].runaway_error());
+    }
     return fractions;
 }
 
