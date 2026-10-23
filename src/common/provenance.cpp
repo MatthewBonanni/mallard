@@ -17,9 +17,6 @@
 #include <vector>
 
 #include <unistd.h>
-#ifdef __linux__
-#include <sched.h>
-#endif
 
 #include <Kokkos_Core.hpp>
 #ifdef Mallard_HAS_HDF5
@@ -35,6 +32,7 @@
 #include <nccl.h>
 #endif
 
+#include "binding.h"
 #include "build_info.h"
 #include "comm.h"
 #include "common_typedef.h"
@@ -339,73 +337,25 @@ void start_run() {
     rebuild();
 }
 
-std::string format_cpu_list(const std::vector<int> & cpus) {
-    std::string out;
-    for (size_t i = 0; i < cpus.size();) {
-        size_t j = i;
-        while (j + 1 < cpus.size() && cpus[j + 1] == cpus[j] + 1) j++;
-        if (!out.empty()) out += ',';
-        out += std::to_string(cpus[i]);
-        if (j > i) out += "-" + std::to_string(cpus[j]);
-        i = j + 1;
-    }
-    return out;
-}
-
-namespace {
-
-std::string & captured_cpus() {
-    static std::string cpus;
-    return cpus;
-}
-
-std::string cpu_set() {
-    if (!captured_cpus().empty()) return captured_cpus();
-#ifdef __linux__
-    cpu_set_t set;
-    CPU_ZERO(&set);
-    if (sched_getaffinity(0, sizeof(set), &set) != 0) return "";
-    std::vector<int> cpus;
-    for (size_t c = 0; c < static_cast<size_t>(CPU_SETSIZE); c++) {
-        if (CPU_ISSET(c, &set)) cpus.push_back(static_cast<int>(c));
-    }
-    return format_cpu_list(cpus);
-#else
-    return "";
-#endif
-}
-
-std::string gpu_id() {
-#if defined(KOKKOS_ENABLE_CUDA)
-    char bus[32] = {};
-    if (cudaDeviceGetPCIBusId(bus, sizeof(bus), Kokkos::device_id()) == cudaSuccess) return bus;
-#elif defined(KOKKOS_ENABLE_HIP)
-    char bus[32] = {};
-    if (hipDeviceGetPCIBusId(bus, sizeof(bus), Kokkos::device_id()) == hipSuccess) return bus;
-#endif
-    return "";
-}
-
-} // namespace
-
-void capture_cpu_set() { captured_cpus() = cpu_set(); }
-
 void set_placement() {
-    char host[256] = {};
-    gethostname(host, sizeof(host) - 1);
+    const binding::Placement p = binding::this_placement();
+    const auto numbers = [](const std::vector<int> & v) {
+        std::string out = "[";
+        for (size_t i = 0; i < v.size(); i++) out += (i ? "," : "") + std::to_string(v[i]);
+        return out + "]";
+    };
+    const auto known = [](int value) { return value < 0 ? std::string("null") : std::to_string(value); };
     json::Object me;
-    me.add("rank", comm::rank()).add("host", host);
-    const std::string gpu = gpu_id();
-    if (gpu.empty()) {
-        me.raw("device", "null").raw("gpu", "null");
-    } else {
-        me.add("device", Kokkos::device_id()).add("gpu", gpu);
-    }
-    const std::string cpus = cpu_set();
-    me.raw("cpus", cpus.empty() ? "null" : json::quote(cpus))
-        .add("threads", Kokkos::DefaultHostExecutionSpace().concurrency());
+    me.add("rank", p.rank).add("host", p.host).add("threads", p.threads);
+    me.raw("cpus", p.cpus.empty() ? "null" : json::quote(binding::format_cpu_list(p.cpus)))
+        .raw("cpu_numa", numbers(p.cpu_numa))
+        .add("omp_bind", p.omp_bind)
+        .raw("gpu", p.gpu.empty() ? "null" : json::quote(p.gpu))
+        .raw("gpu_uuid", p.gpu_uuid.empty() ? "null" : json::quote(p.gpu_uuid))
+        .raw("gpu_index", known(p.gpu_index))
+        .raw("gpu_numa", known(p.gpu_numa));
     const std::vector<std::string> all = comm::allgather(me.str());
-    std::vector<std::string> hosts = comm::allgather(host);
+    std::vector<std::string> hosts = comm::allgather(p.host);
     std::sort(hosts.begin(), hosts.end());
     State & s = state();
     s.placement = "[";

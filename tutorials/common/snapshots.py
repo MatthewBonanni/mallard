@@ -8,7 +8,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tools"))
-from mallard_vtu import read_vtu_cells  # noqa: E402
+from mallard.vtu import read_vtu_cells  # noqa: E402
 
 
 def series(pvd):

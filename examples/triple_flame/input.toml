@@ -25,7 +25,7 @@
 # the midline, mixing thickness 4 delta_L here and 12 delta_L in thick/), the
 # sides are symmetry planes 3 delta_M + 24 delta_L apart and the burnt gas
 # leaves through p_out. The run starts from a planar front 12 delta_L from the
-# inlet with each row's equilibrium products behind it (tools/triple_flame.py).
+# inlet with each row's equilibrium products behind it (examples/triple_flame/triple_flame.py).
 # 12 cells per delta_L (32 um; 384 x 432 cells, thick/: 384 x 720), MUSCL,
 # HLLC, SSPRK3, CFL 0.8.
 #
@@ -39,13 +39,13 @@
 # whose [initialize] file points to that restart (Mallard resumes at its time
 # and stops at the same t_stop, after 6 more flame times). From this directory:
 #
-#   python ../../tools/triple_flame.py ../../mechanisms/h2o2.yaml ohmech . --mixing 4 --fuel H2:0.5,N2:0.5 \
+#   python triple_flame.py ../../mechanisms/h2o2.yaml ohmech . --mixing 4 --fuel H2:0.5,N2:0.5 \
 #       --u-in 1.35 --upstream 12 --downstream 20 --flame-times 10 --cfl 0.8
-#   python ../../tools/triple_flame.py ../../mechanisms/h2o2.yaml ohmech thick --mixing 12 --fuel H2:0.5,N2:0.5 \
+#   python triple_flame.py ../../mechanisms/h2o2.yaml ohmech thick --mixing 12 --fuel H2:0.5,N2:0.5 \
 #       --u-in 1.6 --upstream 12 --downstream 20 --flame-times 10 --cfl 0.8 --planar planar_full.csv
 #   (run both; then the continuations, e.g. in matched/ and thick/matched/)
-#   python ../../tools/triple_flame_analysis.py matched thick/matched --fuel H2:0.5,N2:0.5 --fit 5 10 --plot speed.png
-#   python ../../tools/animate_triple_flame.py triple_flame.mp4 --fuel H2:0.5,N2:0.5 \
+#   python triple_flame_analysis.py matched thick/matched --fuel H2:0.5,N2:0.5 --fit 5 10 --plot speed.png
+#   python animate_triple_flame.py triple_flame.mp4 --fuel H2:0.5,N2:0.5 \
 #       --run "Inlet mixing thickness 4 delta_L" .,matched --run "Inlet mixing thickness 12 delta_L" thick,thick/matched
 #
 # (A continuation in a subdirectory needs planar_full.csv copied in and the
@@ -74,8 +74,8 @@
 # Ruetsch et al.'s numbers, which hold for one-step, unity-Lewis chemistry.
 # D_TF and the mixture fraction come from N2 (inert, Lewis number near 1).
 #
-# 1D checks (planar flame at Z_st, tools/flame_restart.py and
-# tools/flame_speed.py): consumption speed against Cantera's -1.08%, -0.28%,
+# 1D checks (planar flame at Z_st, tools/setup/flame_restart.py and
+# tools/post/flame_speed.py): consumption speed against Cantera's -1.08%, -0.28%,
 # -0.17% and +0.18% at 10, 12, 16 and 24 cells per delta_L (CFL 0.4); at
 # 12 cells the same to 5 digits at CFL 0.4, 0.6 and 0.8. The 2D runs were not
 # repeated on a finer mesh.

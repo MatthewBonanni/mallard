@@ -695,11 +695,17 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
                 break;
             case BoundaryType::UPT:
             case BoundaryType::NSCBC_INLET:
-            case BoundaryType::STAGNATION_INLET: {
-                const double T = static_cast<double>(
-                    find_real(bound, bcs[i_bc].type == BoundaryType::STAGNATION_INLET ? "T0" : "T", dim::temperature));
+            case BoundaryType::STAGNATION_INLET:
+            case BoundaryType::MASS_FLOW_INLET: {
+                const char * T_key = bcs[i_bc].type == BoundaryType::STAGNATION_INLET ? "T0" : "T";
+                const double T = static_cast<double>(find_real(bound, T_key, dim::temperature));
                 if (!MixtureModel::composition_varies(bound)) {
-                    prescribe(i_bc, mixture_model->mass_fractions(bound, where), T);
+                    const std::vector<double> Y = mixture_model->mass_fractions(bound, where);
+                    prescribe(i_bc, Y, T);
+                    // Faces with a condition of their own for their mass flux
+                    for (size_t k = 0; k < profiled_faces.size(); k++) {
+                        if (profiled_faces[k][0] == i_bc) prescribe(input_boundaries.size() + k, Y, T);
+                    }
                     break;
                 }
                 // Each face's own copy of the condition, at the composition of its center
@@ -715,7 +721,7 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
                 throw InputError(where + ": type \"" + BOUNDARY_NAMES.at(bcs[i_bc].type) +
                                  "\" is not yet supported with gas = \"mixture\" (extrapolation, symmetry, "
                                  "wall_adiabatic, wall_isothermal, wall_heat_flux, upt, p_out, nscbc_outlet, "
-                                 "nscbc_inlet, stagnation_inlet).");
+                                 "nscbc_inlet, stagnation_inlet, mass_flow_inlet).");
         }
     }
 }

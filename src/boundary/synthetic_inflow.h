@@ -38,7 +38,7 @@ using Point = std::array<double, N_DIM>;
  *        `u` (numbers or expressions in x, y, z), and with a
  *        `[boundaries.turbulence]` table its `reynolds_stress` (numbers or
  *        expressions), or both from its `profile`, a CSV file of plane
- *        averages (tools/plane_average.py: a coordinate column, `MEAN_U_*` and
+ *        averages (tools/post/plane_average.py: a coordinate column, `MEAN_U_*` and
  *        `COV_U_*_U_*`) interpolated linearly along that coordinate.
  */
 class InletProfile {

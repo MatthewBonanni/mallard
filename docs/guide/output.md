@@ -21,7 +21,7 @@ geometry = "cylinder"         # the faces of one boundary zone
 variables = ["P", "T"]
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 35 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 39 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -53,7 +53,7 @@ in parallel, assembled by a `.pvtu`). `format = "hdf5"` (builds with
 `-DMallard_ENABLE_HDF5=ON`) writes one file per snapshot from all ranks with
 collective I/O, plus the mesh once, and XDMF indexes that ParaView opens. It
 pays off for large runs on parallel file systems; the files do not depend on
-the rank count. Read them in Python with `tools/mallard_h5.py`.
+the rank count. Read them in Python with `tools/mallard/h5.py`.
 
 **Asynchronous and compressed output.** Writing large snapshots can take longer than many steps. By default (`[output] async = true`) each snapshot is copied out and written on a background thread while the run goes on, with the same files byte for byte as `async = false`; `io_threads` copies and compresses on several threads (GPU runs leave the host cores idle):
 
@@ -84,7 +84,7 @@ Pitfalls: the run's summary reports the time spent writing; if each file takes l
 check_interval = 100   # a progress row every 100 steps
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 35 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 39 more.
 
 Rank 0 prints a header (version, build, device), the setup time of each
 stage, summaries of mesh, physics, numerics, boundaries and output, then one
@@ -124,7 +124,7 @@ Each record has a `type`:
 
 | `type` | When | Fields |
 |---|---|---|
-| `start` | After setup | `schema` (`"mallard-run-log"`), `version` (1), `provenance` (below), `placement` (one object per rank: `rank`, `host`, `device` and `gpu` (Kokkos device id, PCI bus id; `null` on CPUs), `cpus` (the CPU set before Kokkos starts, Linux; `null` elsewhere), `threads`), `setup_phases` (seconds of each setup phase: `max` and `mean` over ranks) |
+| `start` | After setup | `schema` (`"mallard-run-log"`), `version` (1), `provenance` (below), `placement` (one object per rank, as the [rank report](parallel.md#the-rank-report) finds it: `rank`, `host`, `threads`, `cpus` (the CPU set before Kokkos starts, e.g. `"0-15"`; `null` where unknown), `cpu_numa`, `omp_bind`, and on GPUs `gpu` (PCI address), `gpu_uuid`, `gpu_index`, `gpu_numa`; `null` where unknown or on CPUs), `setup_phases` (seconds of each setup phase: `max` and `mean` over ranks) |
 | `progress` | Every progress row | as below |
 | `event` | A file written, or a request acted on (the rows between progress rows) | `step`, `t`, `kind` (`vtu`, `hdf5`, `restart`, ...; `checkpoint`, `stop`, `set` and `diverged` from [run control](running.md)), `text` |
 | `warning`, `error` | A warning, or the error that ended the run | `message` |
@@ -183,7 +183,7 @@ import json, h5py
 json.loads(h5py.File("solut/flow_000100.h5")["/"].attrs["provenance"][0])
 ```
 
-or, from any other file, `mallard_vtu.py`'s `provenance(path)`.
+or, from any other file, `provenance(path)` of `tools/mallard/vtu.py`.
 
 ## Run health
 
@@ -293,7 +293,7 @@ interval = 1
 budget = true        # kinetic-energy budget (LES), default false
 ```
 
-*Used in:* [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d), [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les) and 3 more.
+*Used in:* [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d), [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`forced_isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-isotropic-turbulence), [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les) and 4 more.
 
 Writes `integrals.csv` with the volume integrals of the kinetic energy,
 enstrophy, squared dilatation and pressure dilatation, and of `|u|^2`,
@@ -330,7 +330,7 @@ carried across restarts.
 | `reset` | `false` | Start afresh on a restart |
 
 Write them with `variables = ["MEAN_*", "COV_*"]`, and average further over
-homogeneous directions with `tools/plane_average.py` (e.g. over x and z of a
+homogeneous directions with `tools/post/plane_average.py` (e.g. over x and z of a
 channel, giving profiles in y; its CSV also feeds
 [synthetic inflow](boundary_conditions.md#synthetic-turbulence)).
 
@@ -365,12 +365,12 @@ FFTs on the device, bitwise the same on any number of ranks.
 
 The file holds plane means, one-sided spectra (sums, not densities: they
 add up to the covariance `<a'b'>`), correlations `<a'(x) b'(x + r)>` and, in
-a periodic box, shell spectra. `tools/insitu_statistics.py` plots them
+a periodic box, shell spectra. `tools/post/insitu_statistics.py` plots them
 (`plot`) and recomputes them from restart snapshots (`spectra`, `compare`).
 
 - Values are cell averages: at the grid cutoff a spectrum is lower than one
   of point values by the cell-average factor (sinc^2(k h / 2) per direction,
-  0.41 at k = N/2), as `tools/isotropic_turbulence_stats.py --no-deconvolve`.
+  0.41 at k = N/2), as `examples/isotropic_turbulence/isotropic_turbulence_stats.py --no-deconvolve`.
 - A sample costs about a third of a step of the Re_tau 180 channel (11 ms
   on an A100): sample every 10-20 steps, not every step.
 - Correlations are periodic: `R(L - r) = R(-r)`; use `r <= L/2`.
@@ -423,7 +423,7 @@ n_points = 200
 interval = 10
 ```
 
-*Used in:* [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`flame_outflow`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-outflow), [`shock_bubble_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-3d).
+*Used in:* [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`flame_outflow`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-outflow), [`shock_bubble_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-3d).
 
 ```toml
 # Wake survey: high-order point values on an arc, a VTK series for ParaView,
@@ -479,11 +479,11 @@ The Python scripts in `tools/` (numpy, matplotlib; see
 
 | Script | Use |
 |---|---|
-| `mallard_vtu.py`, `mallard_h5.py` | Readers for VTU and HDF5 output, for your own scripts |
-| `plot_vtu.py`, `compare_png.py` | A field of one or several snapshots |
-| `animate.py` | MP4/GIF animation of a 2D series with numerical schlieren |
-| `plane_average.py` | Averages over homogeneous directions |
-| `insitu_statistics.py` | Plots `[statistics.spectra]` output; recomputes it, or phase-bins a probe series, to check the in-situ values |
+| `mallard/vtu.py`, `mallard/h5.py` | Readers for VTU and HDF5 output, for your own scripts (`from mallard.vtu import read_vtu_cells` with `tools/` on `sys.path`) |
+| `post/plot_vtu.py`, `post/compare_png.py` | A field of one or several snapshots |
+| `post/animate.py` | MP4/GIF animation of a 2D series with numerical schlieren |
+| `post/plane_average.py` | Averages over homogeneous directions |
+| `post/insitu_statistics.py` | Plots `[statistics.spectra]` output; recomputes it, or phase-bins a probe series, to check the in-situ values |
 | `plot_<case>.py` | Each validation case against its reference |
 
 ParaView opens `.pvd` (VTU) and `.xmf` (HDF5) series directly.
@@ -501,10 +501,10 @@ build reads. It is never misread.
 |---|---|---|---|
 | Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9) | Mallard: all |
 | HDF5 mesh (`mallard mesh convert`) | root attribute `version` | 1 (0.3) | Mallard: all |
-| HDF5 output (`format = "hdf5"`) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard_h5.py` |
-| VTU output | field data `MALLARD_FORMAT_VERSION` | none before 0.9, 1 (0.9) | ParaView, `tools/mallard_vtu.py` |
+| HDF5 output (`format = "hdf5"`) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard/h5.py` |
+| VTU output | field data `MALLARD_FORMAT_VERSION` | none before 0.9, 1 (0.9) | ParaView, `tools/mallard/vtu.py` |
 | Run log (`[output] run_log`) | `version` of each `start` record | 1 (0.9) | Your scripts (records only gain fields within a version) |
-| Provenance block (every output file) | its `version` | 1 (0.9) | `tools/mallard_vtu.py` (`provenance()`); in restart files a trailer that every restart reader skips, so it changes no restart version |
+| Provenance block (every output file) | its `version` | 1 (0.9) | `tools/mallard/vtu.py` (`provenance()`); in restart files a trailer that every restart reader skips, so it changes no restart version |
 | Probe output (`[[probes]]` `format = "hdf5"`, `"vtp"`) | root attribute `version` (HDF5), field data `MALLARD_FORMAT_VERSION` (VTP) | 1 (0.9) | Mallard (restarts append to HDF5), ParaView |
 | TENO cache (`cache_file`) | magic `MALLARD-TENO-<n>` | - | Rebuilt automatically when it does not match |
 

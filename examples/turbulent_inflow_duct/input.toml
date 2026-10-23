@@ -9,7 +9,7 @@
 #
 # Mesh: 384 x 128 x 128 hexahedra (dx = L / 16). Statistics over
 # t = 8-30 (3.7 flow-through times), averaged over y and z with
-# tools/plane_average.py.
+# tools/post/plane_average.py.
 #
 # Results (docs/design/synthetic_inflow.md):
 #   cells at the inlet       R_uu, R_vv, R_ww = 0.0097, 0.0106, 0.0094 (target 0.01)
@@ -19,7 +19,7 @@
 #
 # Run:
 #   mpirun -n 1 ../../build3d/src/mallard -i input.toml
-#   python ../../tools/plane_average.py stats/duct_000003.vtu --average y z --out profile.csv
+#   python ../../tools/post/plane_average.py stats/duct_000003.vtu --average y z --out profile.csv
 #
 # Cost: 65,000 steps, 85 ms each on one A100 (1.5 hours).
 

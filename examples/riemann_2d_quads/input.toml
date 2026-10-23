@@ -5,11 +5,11 @@
 #
 # Run:
 #   ../../build/src/mallard -i input.toml --kokkos-num-threads=8
-#   python ../../tools/animate.py solut riemann
+#   python ../../tools/post/animate.py solut riemann
 #
 # Expected result at t = 0.8: the mushroom-shaped jet along the diagonal with
 # Kelvin-Helmholtz roll-ups on its slip lines. The README animation uses
-# Nx = Ny = 4096 (16.8M cells, rendered with tools/animate_cartesian.py).
+# Nx = Ny = 4096 (16.8M cells, rendered with tools/post/animate_cartesian.py).
 
 [run]
 t_stop = 0.8

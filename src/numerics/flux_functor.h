@@ -174,6 +174,7 @@ struct ConvectiveFluxFunctor {
                 FOR_I_CONSERVATIVE W_r[i] = face_solution(i_face, i_quad, 1, i);
             } else {
                 boundaries.exterior_W(i_face, i_quad, n_quad, W_l, n_point, W_cells, face_solution, W_r);
+                if (boundaries.bcs(boundaries.face_bc(i_face)).flux_of_ghost()) FOR_I_CONSERVATIVE W_l[i] = W_r[i];
             }
             rtype central[N_CONSERVATIVE] = {};
             if (hybrid) riemann::KEEP::calc_flux(central, n_point, W_l, W_r, gamma);

@@ -1,8 +1,9 @@
 /**
  * @file compiled_expression.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Expressions compiled once on the host into a stack program that
- *        kernels evaluate on the device (and the host) with the same code.
+ * @brief Expressions compiled once on the host into a stack program with
+ *        jumps that kernels evaluate on the device (and the host) with the
+ *        same code.
  * @version 0.1
  * @date 2026-10-15
  *
@@ -21,8 +22,11 @@
 
 namespace expr {
 
-/** @brief Deepest evaluation stack a program may need. */
+/** @brief Slots for a program's local variables and its deepest evaluation stack. */
 constexpr int MAX_STACK = 32;
+
+/** @brief Loop iterations an evaluation may run before it stops with an error. */
+constexpr uint32_t MAX_ITERATIONS = 100000;
 
 enum class Op : uint8_t {
     CONST, VAR,
@@ -33,12 +37,18 @@ enum class Op : uint8_t {
     ABS, ACOS, ACOSH, ASIN, ASINH, ATAN, ATANH, CEIL, COS, COSH, COT, CSC, SEC, ERF, ERFC, EXP, EXPM1,
     FLOOR, FRAC, LOG, LOG10, LOG1P, LOG2, NCDF, ROUND, SGN, SIN, SINC, SINH, SQRT, TAN, TANH, TRUNC,
     DEG2RAD, RAD2DEG,
+    LOCALS, LOAD, STORE, POP, KEEP, DROP, JUMP, JUMP_IF_NOT, ITERATE, UNTIL,
 };
 
-/** @brief One instruction: push a constant or variable, or apply an operation to the top of the stack. */
+/**
+ * @brief One instruction: push a constant or variable, apply an operation to
+ *        the top of the stack, or jump. Local variables occupy the bottom
+ *        slots of the stack.
+ */
 struct Instr {
     double value = 0.0;   // CONST
-    uint16_t index = 0;   // VAR: the variable; IPOW, IPOWINV: the exponent
+    uint16_t index = 0;   // VAR: the variable; IPOW, IPOWINV: the exponent; LOCALS: their number; LOAD, STORE,
+                          // KEEP, DROP: a slot; JUMP, JUMP_IF_NOT, ITERATE, UNTIL: the target
     Op op = Op::CONST;
 };
 
@@ -180,14 +190,18 @@ KOKKOS_INLINE_FUNCTION double binary(const Op op, const double a, const double b
 
 /**
  * @brief Evaluate the program code[0, n) with variables vars(i) (any
- *        callable from a variable index to its value).
+ *        callable from a variable index to its value). An evaluation whose
+ *        loops run more than MAX_ITERATIONS iterations in all stops, sets
+ *        runaway and returns NaN.
  */
 template <typename Vars>
-KOKKOS_INLINE_FUNCTION double evaluate(const Instr * code, const uint32_t n, const Vars & vars) {
+KOKKOS_INLINE_FUNCTION double evaluate(const Instr * code, const uint32_t n, const Vars & vars, bool & runaway) {
     double s[MAX_STACK] = {};
     int top = -1;
-    for (uint32_t i = 0; i < n; i++) {
-        const Instr & in = code[i];
+    uint32_t iterations = 0;
+    uint32_t i = 0;
+    while (i < n) {
+        const Instr & in = code[i++];
         switch (in.op) {
             case Op::CONST: s[++top] = in.value; break;
             case Op::VAR: s[++top] = vars(in.index); break;
@@ -204,6 +218,38 @@ KOKKOS_INLINE_FUNCTION double evaluate(const Instr * code, const uint32_t n, con
             case Op::INRANGE:
                 top -= 2;
                 s[top] = detail::truth(s[top] <= s[top + 1] && s[top + 1] <= s[top + 2]);
+                break;
+            case Op::LOCALS: top = in.index - 1; break;
+            case Op::LOAD:
+                top++;
+                s[top] = s[in.index];
+                break;
+            case Op::STORE: s[in.index] = s[top]; break;
+            case Op::POP: top--; break;
+            case Op::KEEP:
+                s[in.index] = s[top];
+                top = in.index;
+                break;
+            case Op::DROP: top = in.index; break;
+            case Op::JUMP: i = in.index; break;
+            case Op::JUMP_IF_NOT:
+                if (s[top--] == 0.0) i = in.index;
+                break;
+            case Op::ITERATE:
+                if (s[top--] == 0.0) {
+                    i = in.index;
+                } else if (++iterations > MAX_ITERATIONS) {
+                    runaway = true;
+                    return Kokkos::nan("");
+                }
+                break;
+            case Op::UNTIL:
+                if (s[top--] != 0.0) break;
+                if (++iterations > MAX_ITERATIONS) {
+                    runaway = true;
+                    return Kokkos::nan("");
+                }
+                i = in.index;
                 break;
             default:
                 if (in.op >= Op::NEG && in.op <= Op::POW) {
@@ -225,7 +271,13 @@ KOKKOS_INLINE_FUNCTION double evaluate(const Instr * code, const uint32_t n, con
                 break;
         }
     }
-    return s[0];
+    return s[top];
+}
+
+template <typename Vars>
+KOKKOS_INLINE_FUNCTION double evaluate(const Instr * code, const uint32_t n, const Vars & vars) {
+    bool runaway = false;
+    return evaluate(code, n, vars, runaway);
 }
 
 /** @brief Variables read from an array. */
@@ -235,12 +287,14 @@ struct ArrayVariables {
 };
 
 /**
- * @brief An expression compiled from exprtk syntax (the subset of
- *        arithmetic, comparisons, logic, the ternary operator and exprtk's
- *        scalar functions), evaluated as exprtk evaluates it with strength
- *        reduction off: the same operations in the same order, integer powers
- *        by exprtk's multiplications, constants folded. Unlike exprtk,
- *        variable names are case sensitive (T is not t).
+ * @brief An expression compiled from exprtk syntax: arithmetic, comparisons,
+ *        logic, the ternary operator, exprtk's scalar functions, local
+ *        variables and control flow (if/else, switch, while, for,
+ *        repeat-until, break, continue), evaluated as exprtk evaluates it
+ *        with strength reduction off: the same operations in the same order,
+ *        integer powers by exprtk's multiplications, constants folded.
+ *        Unlike exprtk, names are case sensitive (T is not t). See
+ *        docs/guide/input_files.md#expressions.
  */
 class Program {
     public:
@@ -259,14 +313,20 @@ class Program {
         /** @brief Whether the value is a constant (no variables). */
         bool is_constant() const { return m_code.size() == 1 && m_code[0].op == Op::CONST; }
 
+        /** @brief Whether the expression has loops, which may reach MAX_ITERATIONS. */
+        bool has_loops() const { return m_loops; }
+
+        /** @brief The error of an evaluation stopped at MAX_ITERATIONS. */
+        std::string runaway_error() const;
+
         /** @brief Evaluate on the host with variable values vars[0, n_variables). */
-        double operator()(const double * vars) const {
-            return evaluate(m_code.data(), static_cast<uint32_t>(m_code.size()), ArrayVariables{vars});
-        }
+        double operator()(const double * vars) const;
 
     private:
+        std::string m_name, m_text;
         std::vector<Instr> m_code;
         std::vector<bool> m_uses;
+        bool m_loops = false;
 };
 
 /**
@@ -277,6 +337,8 @@ template <typename MemorySpace = Kokkos::DefaultExecutionSpace::memory_space>
 struct ProgramTable {
     Kokkos::View<const Instr *, MemorySpace> code;
     Kokkos::View<const uint32_t *, MemorySpace> offsets;  // program p is code[offsets(p), offsets(p + 1))
+    Kokkos::View<uint32_t, MemorySpace> runaway;          // 1 + a program stopped at MAX_ITERATIONS, or 0
+    bool loops = false;
 
     ProgramTable() = default;
 
@@ -286,6 +348,7 @@ struct ProgramTable {
         for (const Program * p : programs) {
             all.insert(all.end(), p->code().begin(), p->code().end());
             off.push_back(static_cast<uint32_t>(all.size()));
+            loops = loops || p->has_loops();
         }
         Kokkos::View<Instr *, MemorySpace> c("expr_code", all.size());
         Kokkos::View<uint32_t *, MemorySpace> o("expr_offsets", off.size());
@@ -293,6 +356,7 @@ struct ProgramTable {
         Kokkos::deep_copy(o, Kokkos::View<const uint32_t *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(off.data(), off.size()));
         code = c;
         offsets = o;
+        runaway = Kokkos::View<uint32_t, MemorySpace>("expr_runaway");
     }
 
     KOKKOS_INLINE_FUNCTION uint32_t size() const {
@@ -302,7 +366,18 @@ struct ProgramTable {
     template <typename Vars>
     KOKKOS_INLINE_FUNCTION double operator()(const uint32_t p, const Vars & vars) const {
         const uint32_t begin = offsets(p);
-        return evaluate(code.data() + begin, offsets(p + 1) - begin, vars);
+        bool stopped = false;
+        const double v = evaluate(code.data() + begin, offsets(p + 1) - begin, vars, stopped);
+        if (stopped) Kokkos::atomic_store(&runaway(), p + 1);
+        return v;
+    }
+
+    /** @brief 1 + the index of a program whose evaluation stopped at MAX_ITERATIONS, or 0 (no programs with loops: 0 without a copy). */
+    uint32_t stopped() const {
+        if (!loops) return 0;
+        uint32_t r = 0;
+        Kokkos::deep_copy(r, runaway);
+        return r;
     }
 };
 

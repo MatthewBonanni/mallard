@@ -107,8 +107,8 @@ struct LedgerSources {
     Kokkos::View<rtype *> volume;
     Kokkos::Array<double, N_DIM> g;
     bool gravity;
-    Kokkos::Array<double, N_DIM> force;
-    bool mass_flow;
+    Kokkos::Array<double, N_DIM> direction;  // of the mass flow force
+    Kokkos::View<double *> mass_flow;        // [2] is the force of this stage; empty without mass flow
 
     KOKKOS_INLINE_FUNCTION void operator()(const uint32_t c, rtype * out) const {
         const double V = static_cast<double>(measure(c)), rho = static_cast<double>(U(c, 0));
@@ -119,11 +119,11 @@ struct LedgerSources {
                 s[N_DIM + 1] += static_cast<double>(U(c, 1 + i)) * g[i] * V;
             }
         }
-        if (mass_flow) {
-            const double V_m = static_cast<double>(volume(c));
+        if (mass_flow.extent(0) > 0) {
+            const double V_m = static_cast<double>(volume(c)), f = mass_flow(2);
             FOR_I_DIM {
-                s[1 + i] += force[i] * V_m;
-                s[N_DIM + 1] += force[i] * static_cast<double>(U(c, 1 + i)) / rho * V_m;
+                s[1 + i] += f * direction[i] * V_m;
+                s[N_DIM + 1] += f * direction[i] * static_cast<double>(U(c, 1 + i)) / rho * V_m;
             }
         }
         FOR_I_CONSERVATIVE out[i] = static_cast<rtype>(s[i]);
@@ -182,10 +182,11 @@ void Solver::ledger_stage(const State & state, const ViscousFluxFunctor * viscou
         }
     }
     if (has_gravity || hold_mass_flow) {
-        LedgerSources sources{state.flow, mesh->cell_measure, mesh->cell_volume, {}, has_gravity, {}, hold_mass_flow};
+        LedgerSources sources{state.flow, mesh->cell_measure, mesh->cell_volume, {}, has_gravity, {},
+                              hold_mass_flow ? mass_flow_totals : Kokkos::View<double *>()};
         FOR_I_DIM {
             sources.g[i] = static_cast<double>(gravity[i]);
-            sources.force[i] = mass_flow_force * static_cast<double>(mass_flow_direction[i]);
+            sources.direction[i] = static_cast<double>(mass_flow_direction[i]);
         }
         ledger.add_sources(sources, mesh->n_owned());
     }

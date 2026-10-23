@@ -23,14 +23,14 @@
 #
 # Run (from this directory; the LES, les.toml, differs in the mesh, [les] and
 # [les.combustion], see section 8.3):
-#   python ../../tools/flame_turbulence.py hit hit_random.restart --length 0.004225788952895495 --urms 5 --lt 8e-4
+#   python flame_turbulence.py hit hit_random.restart --length 0.004225788952895495 --urms 5 --lt 8e-4
 #   ../../build3d/src/mallard -i hit.toml                      # writes restart/hit_<step>.restart at 0.08 ms
-#   python ../../tools/flame_reference.py --single h2 1.0 300 .  # h2_phi1.0_T300_mix_full.csv
-#   python ../../tools/flame_turbulence.py init h2_phi1.0_T300_mix_full.csv ../../mechanisms/h2o2.yaml ohmech \
+#   python ../../tools/setup/flame_reference.py --single h2 1.0 300 .  # h2_phi1.0_T300_mix_full.csv
+#   python flame_turbulence.py init h2_phi1.0_T300_mix_full.csv ../../mechanisms/h2o2.yaml ohmech \
 #       restart/hit_<last>.restart flame.restart --lt 8e-4
 #   mpirun -n 3 ../../build3d/src/mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
-#   python ../../tools/flame_turbulence.py laminar h2_phi1.0_T300_mix_full.csv ../../mechanisms/h2o2.yaml ohmech
-#   python ../../tools/flame_turbulence.py analyze . <the printed options> --pdf-times 4e-4 --filter 4,8,16
+#   python flame_turbulence.py laminar h2_phi1.0_T300_mix_full.csv ../../mechanisms/h2o2.yaml ohmech
+#   python flame_turbulence.py analyze . <the printed options> --pdf-times 4e-4 --filter 4,8,16
 
 [run]
 t_stop = 4.0e-4

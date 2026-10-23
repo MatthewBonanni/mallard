@@ -14,9 +14,9 @@
 # pressure is 1e-5 (shock Mach number above 100 at the end).
 #
 # Run, then compare the shock radius and density profile with the exact
-# solution (tools/sedov.py integrates the similarity ODEs):
+# solution (tools/setup/sedov.py integrates the similarity ODEs):
 #   ../../build3d/src/mallard -i input.toml
-#   python ../../tools/sedov.py solut --energy 1
+#   python ../../tools/setup/sedov.py solut --energy 1
 #
 # Expected result at t = 0.8: the shock at R = 0.945 (exact), the density
 # jumping to (gamma + 1) / (gamma - 1) = 6 behind it and falling to vacuum at

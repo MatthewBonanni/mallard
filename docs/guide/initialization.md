@@ -14,7 +14,7 @@ T = 1.0
 # X = { O2 = 1.0, N2 = 3.76 }   gas mixtures: the composition
 ```
 
-*Used in:* [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct) and 1 more.
+*Used in:* [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions) and 2 more.
 
 ## Expressions
 
@@ -32,7 +32,7 @@ p = """\
              : (y >= 0.8 ? 0.3 : 0.029032258064516)"""
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 12 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 15 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -55,8 +55,8 @@ features smaller than a cell.
 ![A triangle with one and with sixteen sub-triangles for the cell average of an analytical state](../images/guide/subdivisions-light.svg#gh-light-mode-only)
 ![A triangle with one and with sixteen sub-triangles for the cell average of an analytical state](../images/guide/subdivisions-dark.svg#gh-dark-mode-only)
 
-Expressions use [exprtk](https://www.partow.net/programming/exprtk/) syntax
-(see [Input files](input_files.md#numbers-vectors-and-expressions)). Pitfall:
+Expressions may use local variables, conditionals and loops
+([Expressions](input_files.md#expressions)). Pitfall:
 TOML requires the expressions to be strings, also for constants: `u =
 ["0.0", "0.0"]` with `analytical`.
 

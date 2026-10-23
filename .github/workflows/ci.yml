@@ -4,7 +4,7 @@ name: CI
 #   gh workflow run ci.yml --ref <branch>
 # The run sets the commit status `CI` on the branch's head commit (pending, then success
 # or failure, linking to the run) and a status per job, `CI / <job>`, as it is queued,
-# runs and ends (tools/ci_status.sh), linking to its log. main requires `CI` to merge,
+# runs and ends (tools/dev/ci_status.sh), linking to its log. main requires `CI` to merge,
 # so a new push needs a new run. main runs on every push.
 on:
   push:
@@ -59,13 +59,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: changelog
-        run: sh tools/ci_status.sh running
+        run: sh tools/dev/ci_status.sh running
       - name: Check workflow triggers
         run: |
           python3 -c 'import yaml' 2>/dev/null || python3 -m pip install -q --break-system-packages pyyaml
-          python3 tools/check_workflow_triggers.py
+          python3 tools/dev/check_workflow_triggers.py
       - name: Check the documented input defaults against the key catalog
-        run: python3 tools/input_catalog.py docs
+        run: python3 tools/dev/input_catalog.py docs
       - name: Check for a changelog fragment
         env:
           GH_TOKEN: ${{ github.token }}
@@ -75,7 +75,7 @@ jobs:
               --json labels -q '.[].labels[].name' | grep -qx no-changelog; then
             echo "Labeled no-changelog: skipped."
           else
-            python3 tools/changelog.py check origin/main
+            python3 tools/dev/changelog.py check origin/main
           fi
       - name: Report the job's result
         if: always()
@@ -83,9 +83,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: changelog
-        run: sh tools/ci_status.sh ${{ job.status }}
+        run: sh tools/dev/ci_status.sh ${{ job.status }}
 
-  # Whether the changes touch device code (tools/device_changes.sh); the CUDA, HIP and SYCL
+  # Whether the changes touch device code (tools/dev/device_changes.sh); the CUDA, HIP and SYCL
   # builds run only then (CUDA also on main)
   device:
     runs-on: ubuntu-latest
@@ -101,7 +101,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: device
-        run: sh tools/ci_status.sh running
+        run: sh tools/dev/ci_status.sh running
       - id: check
         env:
           BEFORE: ${{ github.event.before }}
@@ -109,7 +109,7 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = push ]; then base=$BEFORE
           elif [ "$GITHUB_REF_NAME" = main ]; then base=HEAD^
           else base=$(git merge-base origin/main HEAD); fi
-          echo "changed=$(tools/device_changes.sh "$base")" >> "$GITHUB_OUTPUT"
+          echo "changed=$(tools/dev/device_changes.sh "$base")" >> "$GITHUB_OUTPUT"
           # Documentation alone needs none of the build jobs
           if git diff --name-only "$base" HEAD | grep -qvE '^docs/|\.md$|^CITATION\.cff$|^LICENSE$'; then
             echo code=true >> "$GITHUB_OUTPUT"
@@ -136,14 +136,14 @@ jobs:
           if { [ "$CHANGED" = true ] || [ "$FORCE_DEVICE" = true ]; } && want device; then
             names="$names hip-2d hip-3d sycl-2d sycl-3d"
           fi
-          if [ -n "$names" ]; then sh tools/ci_status.sh queued $names; fi
+          if [ -n "$names" ]; then sh tools/dev/ci_status.sh queued $names; fi
       - name: Report the job's result
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: device
-        run: sh tools/ci_status.sh ${{ job.status }}
+        run: sh tools/dev/ci_status.sh ${{ job.status }}
 
   # Branches run the full 2D suite (OpenMP, with CGNS), the full 3D suite and the
   # multi-rank tests, the full single-precision suites in 2D and 3D (3D with CGNS), and a
@@ -182,7 +182,7 @@ jobs:
           fi
           echo "any=$(jq 'length > 0' <<< "$backends")" >> "$GITHUB_OUTPUT"
           echo "backends=$(jq -c . <<< "$backends")" >> "$GITHUB_OUTPUT"
-          sh tools/ci_status.sh queued $(jq -r '.[].name' <<< "$backends")
+          sh tools/dev/ci_status.sh queued $(jq -r '.[].name' <<< "$backends")
 
   build-and-test:
     needs: matrix
@@ -202,7 +202,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: ${{ matrix.backend.name }}
-        run: sh tools/ci_status.sh running
+        run: sh tools/dev/ci_status.sh running
       - name: Install MPI
         if: matrix.backend.mpi
         run: >
@@ -251,7 +251,7 @@ jobs:
         if: matrix.backend.name == 'openmp'
         run: |
           git fetch --quiet --tags --depth=1 origin
-          python3 tools/check_upgrade_input.py build/src/mallard
+          python3 tools/dev/check_upgrade_input.py build/src/mallard
       # Two copies of the suite at once, so tests that share a file path collide
       - name: Test (two at once)
         if: matrix.backend.concurrent
@@ -277,13 +277,30 @@ jobs:
           mpirun -n 3 --oversubscribe ./build/test/mallard-test --gtest_filter="$mpi_tests" --gtest_brief=1 & three=$!
           ok=true; wait $two || ok=false; wait $three || ok=false; $ok
           mpirun -n 4 --oversubscribe ./build/test/mallard-test --gtest_filter="$mpi_tests"
+      # Every rank in the report, and no warning about a sensible placement
+      - name: Rank report (MPI)
+        if: matrix.backend.name == 'mpi'
+        run: |
+          dir=$(mktemp -d)
+          sed -e 's/^t_stop = .*/n_steps = 2/' -e '/^\[\[write_data\]\]/,$d' examples/sod/input.toml > "$dir/input.toml"
+          for n in 2 3; do
+            # 3 ranks exceed the runner's 2 cores: unbound, sharing them
+            status=0
+            (cd "$dir" && mpirun -n $n --oversubscribe "$GITHUB_WORKSPACE/build/src/mallard" -i input.toml) \
+              > "$dir/out.txt" 2>&1 || status=$?
+            cat "$dir/out.txt"
+            [ "$status" -eq 0 ] || exit "$status"
+            rows=$(sed -n '/^== Ranks/,/^$/p' "$dir/out.txt" | grep -cE '^  [0-9]+ ')
+            [ "$rows" -eq "$n" ] || { echo "expected $n rows in the rank report, found $rows"; exit 1; }
+            if grep -q 'warning:' "$dir/out.txt"; then echo "unexpected warning"; exit 1; fi
+          done
       - name: Report the job's result
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: ${{ matrix.backend.name }}
-        run: sh tools/ci_status.sh ${{ job.status }}
+        run: sh tools/dev/ci_status.sh ${{ job.status }}
 
   # The tutorials (tutorials/) at reduced size: Gmsh meshes, runs on two MPI
   # ranks and their post-processing scripts, so they keep working
@@ -300,7 +317,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: tutorials
-        run: sh tools/ci_status.sh running
+        run: sh tools/dev/ci_status.sh running
       - name: Install MPI, ccache and Gmsh's libraries
         run: >
           sudo apt-get update -qq && sudo apt-get install -y -qq
@@ -338,7 +355,7 @@ jobs:
         run: tutorials/ci.sh build-2/src/mallard build-3/src/mallard ${{ runner.temp }}/tutorials
       # docs/input-keys.json is what setup reads from the examples and tutorials
       - name: Check the key catalog
-        run: python3 tools/input_catalog.py build --mallard-2d build-2/src/mallard --mallard-3d build-3/src/mallard --check
+        run: python3 tools/dev/input_catalog.py build --mallard-2d build-2/src/mallard --mallard-3d build-3/src/mallard --check
       # Every case template (mallard new --quick): 2D from an install tree, 3D from the build tree
       - name: Run the case templates
         run: |
@@ -350,7 +367,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: tutorials
-        run: sh tools/ci_status.sh ${{ job.status }}
+        run: sh tools/dev/ci_status.sh ${{ job.status }}
 
   # CUDA builds (no GPU needed): on main, on branches whose changes touch device code (see
   # the device job), and when the dispatch asks for them (-f device=true); host code
@@ -385,7 +402,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: cuda-${{ matrix.dim }}d
-        run: sh tools/ci_status.sh running
+        run: sh tools/dev/ci_status.sh running
       - uses: mozilla-actions/sccache-action@v0.0.9
       - name: Put sccache in front of nvcc
         run: |
@@ -412,7 +429,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: cuda-${{ matrix.dim }}d
-        run: sh tools/ci_status.sh ${{ job.status }}
+        run: sh tools/dev/ci_status.sh ${{ job.status }}
 
   # HIP and SYCL builds (no GPU; never run), when the changes touch device code or the
   # dispatch asks for them (-f device=true): every source through the ROCm and oneAPI
@@ -457,7 +474,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
-        run: sh tools/ci_status.sh running
+        run: sh tools/dev/ci_status.sh running
       - uses: mozilla-actions/sccache-action@v0.0.9
       - name: Configure
         run: >
@@ -477,7 +494,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
-        run: sh tools/ci_status.sh ${{ job.status }}
+        run: sh tools/dev/ci_status.sh ${{ job.status }}
 
   # Each libFuzzer harness for a minute (2D); fuzz.yml also runs nightly, longer
   fuzz:

@@ -32,16 +32,9 @@ std::string sha256_file(const std::string & path);
 /** @brief Starts the block of a new run: start time, rank count, host and directory. */
 void start_run();
 
-/** @brief Notes the CPUs this process may run on; call before Kokkos::initialize, which may pin the main thread. */
-void capture_cpu_set();
-
-/** @brief {0, 1, 2, 3, 8} -> "0-3,8". */
-std::string format_cpu_list(const std::vector<int> & cpus);
-
 /**
- * @brief Where every rank runs (collective, after start_run): host, GPU (Kokkos
- *        device id and PCI bus id), CPU set (Linux) and host threads. The block's
- *        run gains the host count; placement() holds the per-rank list.
+ * @brief Where every rank runs (collective, after start_run): binding::Placement of
+ *        each rank. The block's run gains the host count; placement() holds the list.
  */
 void set_placement();
 
