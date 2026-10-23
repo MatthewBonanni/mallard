@@ -19,7 +19,7 @@ endif()
 # Warnings for Mallard's own targets; third-party headers are included as SYSTEM
 option(${PROJECT_NAME}_WARNINGS_AS_ERRORS "Treat warnings in Mallard's own code as errors" OFF)
 function(mallard_target_warnings target)
-    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
         return()
     endif()
     # Kokkos builds for CUDA with nvcc_wrapper, which CMake identifies as GNU
@@ -48,6 +48,12 @@ function(mallard_target_warnings target)
     endif()
     target_compile_options(${target} PRIVATE ${warnings})
 endfunction()
+
+# Intel's oneAPI compiler defaults to -fp-model=fast, which assumes no NaN or
+# infinity; Mallard's NaN checks and IEEE results need the precise model
+if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+    add_compile_options(-fp-model=precise)
+endif()
 
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.25)
     set(MALLARD_THIRD_PARTY SYSTEM)

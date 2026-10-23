@@ -17,13 +17,13 @@ on:
       - '.github/workflows/pages.yml'
   workflow_dispatch:
     inputs:
-      cuda:
-        description: Run the CUDA builds even without device-code changes
+      device:
+        description: Run the device builds (CUDA, HIP, SYCL) even without device-code changes
         type: boolean
         default: false
       only:
         description: >-
-          Run only these jobs, comma-separated (backend names, tutorials, cuda, fuzz),
+          Run only these jobs, comma-separated (backend names, tutorials, device, fuzz),
           e.g. after resolving a conflict that can affect only them; empty runs all
         type: string
         default: ''
@@ -83,7 +83,8 @@ jobs:
           STATUS_NAME: changelog
         run: sh tools/ci_status.sh ${{ job.status }}
 
-  # Whether the changes touch device code (tools/device_changes.sh); the CUDA builds run only then
+  # Whether the changes touch device code (tools/device_changes.sh); the CUDA, HIP and SYCL
+  # builds run only then (CUDA also on main)
   device:
     runs-on: ubuntu-latest
     outputs:
@@ -118,7 +119,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CODE: ${{ steps.check.outputs.code }}
           CHANGED: ${{ steps.check.outputs.changed }}
-          FORCE_CUDA: ${{ inputs.cuda }}
+          FORCE_DEVICE: ${{ inputs.device }}
           ONLY: ${{ inputs.only }}
         run: |
           want() { [ -z "$ONLY" ] || case ",$ONLY," in *",$1,"*) true ;; *) false ;; esac; }
@@ -127,8 +128,11 @@ jobs:
             if want tutorials; then names="tutorials"; fi
             if want fuzz; then names="$names fuzz-2d"; fi
           fi
-          if { [ "$CHANGED" = true ] || [ "$GITHUB_REF" = refs/heads/main ] || [ "$FORCE_CUDA" = true ]; } && want cuda; then
+          if { [ "$CHANGED" = true ] || [ "$GITHUB_REF" = refs/heads/main ] || [ "$FORCE_DEVICE" = true ]; } && want device; then
             names="$names cuda-2d cuda-3d"
+          fi
+          if { [ "$CHANGED" = true ] || [ "$FORCE_DEVICE" = true ]; } && want device; then
+            names="$names hip-2d hip-3d sycl-2d sycl-3d"
           fi
           if [ -n "$names" ]; then sh tools/ci_status.sh queued $names; fi
       - name: Report the job's result
@@ -343,13 +347,14 @@ jobs:
           STATUS_NAME: tutorials
         run: sh tools/ci_status.sh ${{ job.status }}
 
-  # CUDA builds (no GPU needed): on main, and on branches whose changes touch device code
-  # (see the device job); host code compiles with nvcc too, so main catches what branches skip.
+  # CUDA builds (no GPU needed): on main, on branches whose changes touch device code (see
+  # the device job), and when the dispatch asks for them (-f device=true); host code
+  # compiles with nvcc too, so main catches what branches skip.
   cuda:
     needs: [changelog, device]
     if: >-
-      (needs.device.outputs.changed == 'true' || github.ref == 'refs/heads/main' || inputs.cuda)
-      && (!inputs.only || contains(format(',{0},', inputs.only), ',cuda,'))
+      (needs.device.outputs.changed == 'true' || github.ref == 'refs/heads/main' || inputs.device)
+      && (!inputs.only || contains(format(',{0},', inputs.only), ',device,'))
     runs-on: ubuntu-latest
     container: nvidia/cuda:12.9.1-devel-ubuntu24.04
     strategy:
@@ -404,6 +409,71 @@ jobs:
           STATUS_NAME: cuda-${{ matrix.dim }}d
         run: sh tools/ci_status.sh ${{ job.status }}
 
+  # HIP and SYCL builds (no GPU; never run), when the changes touch device code or the
+  # dispatch asks for them (-f device=true): every source through the ROCm and oneAPI
+  # compilers, for portability errors and warnings the GCC, Clang and nvcc builds miss.
+  # sccache caches the compiles that it can (hipcc and icpx calls it does not recognize
+  # run uncached).
+  portability:
+    needs: [changelog, device]
+    if: >-
+      (needs.device.outputs.changed == 'true' || inputs.device)
+      && (!inputs.only || contains(format(',{0},', inputs.only), ',device,'))
+    runs-on: ubuntu-latest
+    container: ${{ matrix.toolchain.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        dim: [2, 3]
+        toolchain:
+          - name: hip
+            image: rocm/dev-ubuntu-24.04:7.2.4
+            flags: >-
+              -DCMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc -DCMAKE_PREFIX_PATH=/opt/rocm -DKokkos_ENABLE_HIP=ON
+              -DKokkos_ARCH_AMD_GFX90A=ON -DKokkos_ENABLE_ROCTHRUST=OFF
+          - name: sycl
+            image: intel/oneapi-basekit:2025.3.2-0-devel-ubuntu24.04
+            flags: >-
+              -DCMAKE_CXX_COMPILER=icpx -DKokkos_ENABLE_SYCL=ON
+              -DKokkos_ARCH_INTEL_GEN=ON -DKokkos_ENABLE_ONEDPL=OFF
+    name: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - name: Install tools
+        run: >
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends
+          git cmake make curl libopenmpi-dev openmpi-bin ca-certificates
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Report the job as running
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_ID: ${{ job.check_run_id }}
+          STATUS_NAME: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
+        run: sh tools/ci_status.sh running
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - name: Configure
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF
+          -DKokkos_ENABLE_SERIAL=ON ${{ matrix.toolchain.flags }}
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+          -DMallard_ENABLE_MPI=ON -DMallard_GPU_AWARE_MPI=ON -DMallard_WARNINGS_AS_ERRORS=ON
+          -DMallard_DIM=${{ matrix.dim }}
+      - name: Build
+        run: cmake --build build -j $(nproc) -- -k
+      - name: Cache statistics
+        if: always()
+        run: sccache --show-stats
+      - name: Report the job's result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_ID: ${{ job.check_run_id }}
+          STATUS_NAME: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
+        run: sh tools/ci_status.sh ${{ job.status }}
+
   # Each libFuzzer harness for a minute (2D); fuzz.yml also runs nightly, longer
   fuzz:
     needs: [changelog, device]
@@ -415,11 +485,11 @@ jobs:
     uses: ./.github/workflows/fuzz.yml
 
   # Sets the commit status `CI` that main requires: success when every job passed or was
-  # skipped for a reason (CUDA builds without device code), failure otherwise.
+  # skipped for a reason (device builds without device code), failure otherwise.
   result:
     name: CI result
     if: always()
-    needs: [changelog, device, matrix, build-and-test, tutorials, cuda, fuzz]
+    needs: [changelog, device, matrix, build-and-test, tutorials, cuda, portability, fuzz]
     runs-on: ubuntu-latest
     steps:
       - env:
