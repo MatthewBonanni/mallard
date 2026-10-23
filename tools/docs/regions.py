@@ -3,7 +3,7 @@ that Mallard computes on coarse unstructured meshes, read back from runs of
 one step whose source is 1 per unit volume over the region (SOURCE_RHOE is
 then the fraction), with the exact outline drawn over them.
 
-    python tools/docs/regions.py --mallard build/src/Mallard [--mallard3d build-3d/src/Mallard] [names...]
+    python tools/docs/regions.py --mallard build/src/mallard [--mallard3d build-3d/src/mallard] [names...]
 
 Without --mallard3d the 3D figure is skipped.
 """

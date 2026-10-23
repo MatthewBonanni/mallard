@@ -1,7 +1,7 @@
 """Draw every figure of the user guide into docs/images/guide/ and of the theory
 manual and TENO-E reference into docs/images/theory/, light and dark.
 
-    python tools/docs/make_figures.py [--mallard build/src/Mallard] [--mallard3d build-3d/src/Mallard]
+    python tools/docs/make_figures.py [--mallard build/src/mallard] [--mallard3d build-3d/src/mallard]
 
 Schematics and domain diagrams need numpy, scipy and matplotlib only; with
 --mallard (a 2D build; an MPI build for the partitions) the figures from

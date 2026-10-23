@@ -18,6 +18,7 @@
 #include <sstream>
 #include <string>
 
+#include "data_paths.h"
 #include "input.h"
 #include "pasr.h"
 #include "solver.h"
@@ -90,7 +91,7 @@ std::string uniform_box(const std::string & run, const std::string & combustion,
       << (N_DIM == 3 ? "u = [\"0.0\", \"0.0\", \"0.0\"]\n" : "u = [\"0.0\", \"0.0\"]\n")
       << "X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
-      << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
+      << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() + "/mechanisms/h2o2.yaml\"\n"
       << "[chemistry]\ncoupling = \"" << coupling << "\"\n[output]\ncheck_interval = 1000000\n[les]\n" << (N_DIM == 3 ? "model = \"sigma\"\n" : "model = \"wale\"\n")
       << combustion;
     return s.str();
@@ -193,7 +194,7 @@ std::unique_ptr<Solver> corrugated_flames(const double amplitude, const double s
       << (N_DIM == 3 ? "u = [\"0.0\", \"0.0\", \"0.0\"]\n" : "u = [\"0.0\", \"0.0\"]\n")
       << "X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
-      << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
+      << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() + "/mechanisms/h2o2.yaml\"\n"
       << "[chemistry]\n[output]\ncheck_interval = 1000000\n[les]\n" << (N_DIM == 3 ? "model = \"sigma\"\n" : "model = \"vreman\"\n")
       << "[les.combustion]\nmodel = \"tfles\"\ndelta_L = " << h << "\ns_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2300.0\n";
     auto solver = std::make_unique<Solver>();

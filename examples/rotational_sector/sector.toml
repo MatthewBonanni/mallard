@@ -12,8 +12,8 @@
 # full annulus to the truncation error rather than to rounding.
 #
 # Run (2D build), then compare:
-#   ../../build/src/Mallard -i sector.toml --kokkos-num-threads=4
-#   ../../build/src/Mallard -i annulus.toml --kokkos-num-threads=4
+#   ../../build/src/mallard -i sector.toml --kokkos-num-threads=4
+#   ../../build/src/mallard -i annulus.toml --kokkos-num-threads=4
 #   python ../../tools/rotational_sector.py solut/sector_000001.vtu solut/annulus_000001.vtu --sectors 4
 #
 # Result at t = 0.5, 110 steps through steepening waves: with TENO5 the sector

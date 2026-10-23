@@ -5,7 +5,7 @@
 # heights. Generate the mesh first:
 #
 #   python ../../tools/make_nozzle_mesh.py nozzle.msh
-#   ../../build/src/Mallard -i input.toml
+#   ../../build/src/mallard -i input.toml
 #   python ../../tools/plot_nozzle.py solut/nozzle_000001.vtu
 #
 # The quasi-one-dimensional solution has the choked mass flow, the shock at

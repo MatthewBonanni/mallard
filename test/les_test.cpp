@@ -20,6 +20,7 @@
 #include <sstream>
 #include <string>
 
+#include "data_paths.h"
 #include "exact_riemann.h"
 #include "input.h"
 #include "les.h"
@@ -549,7 +550,7 @@ std::string mixture_box(const std::string & les, const std::string & composition
       << (N_DIM == 3 ? ", \"10 * cos(628.3185307179586 * (x + y))\"]\n" : "]\n")
       << composition
       << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
-      << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
+      << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() + "/mechanisms/h2o2.yaml\"\n"
       << "[output]\ncheck_interval = 1000000\n" << les;
     return s.str();
 }

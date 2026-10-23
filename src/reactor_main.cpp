@@ -1,7 +1,7 @@
 /**
  * @file reactor_main.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief MallardReactor: adiabatic constant-volume reactor from TOML input,
+ * @brief `mallard reactor`: adiabatic constant-volume reactor from TOML input,
  *        integrated with the solver's chemistry kernels, written as CSV.
  * @version 0.3
  * @date 2026-10-03
@@ -21,10 +21,9 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include "input.h"
 
-#include "build_info.h"
 #include "chemistry_benchmark.h"
+#include "commands.h"
 #include "input.h"
 #include "kinetics.h"
 #include "log.h"
@@ -35,9 +34,8 @@
 
 namespace {
 
-void usage(const char * program) {
-    std::cerr << "Usage: " << program << " -i input.toml   (a [reactor] run, or with [benchmark] a chemistry benchmark)\n"
-              << "       " << program << " --version\n";
+void usage() {
+    std::cerr << "Usage: mallard reactor -i input.toml   (a [reactor] run, or with [benchmark] a chemistry benchmark)\n";
 }
 
 std::string format(const double x) {
@@ -159,26 +157,23 @@ void benchmark(const Input & input) {
 
 } // namespace
 
-int main(int argc, char * argv[]) {
+int reactor_main(int argc, char ** argv) {
     std::string input_file;
-    for (int i = 1; i < argc; ++i) {
+    for (int i = 0; i < argc; ++i) {
         if (strcmp(argv[i], "-i") == 0 && i + 1 < argc) {
             input_file = argv[++i];
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-            usage(argv[0]);
-            return 0;
-        } else if (strcmp(argv[i], "--version") == 0) {
-            std::cout << "MallardReactor " << mallard_version() << std::endl;
+            usage();
             return 0;
         }
     }
     if (input_file.empty()) {
-        usage(argv[0]);
+        usage();
         return 1;
     }
     comm::Session session(argc, argv);
     if (comm::size() > 1) {
-        std::cerr << "MallardReactor runs on one rank.\n";
+        std::cerr << "mallard reactor runs on one rank.\n";
         return 1;
     }
     Kokkos::ScopeGuard kokkos(argc, argv);

@@ -7,7 +7,7 @@ Mallard has two levels of parallelism: Kokkos inside each process (CPU threads o
 The Kokkos backend is chosen when Mallard is built (see [Getting started](https://matthewbonanni.github.io/mallard/docs/installation/)). With `Threads` or `OpenMP`, set the number of threads on the command line:
 
 ```bash
-Mallard -i input.toml --kokkos-num-threads=8
+mallard -i input.toml --kokkos-num-threads=8
 ```
 
 With CUDA, Mallard runs on one GPU; `--kokkos-device-id=N` picks which.
@@ -25,7 +25,7 @@ cmake --build build -j
 and launch with `mpirun`; the input file is unchanged:
 
 ```bash
-mpirun -n 4 build/src/Mallard -i input.toml --kokkos-num-threads=2
+mpirun -n 4 build/src/mallard -i input.toml --kokkos-num-threads=2
 ```
 
 Each rank owns a piece of the mesh, plus as many layers of halo cells as its reconstruction needs (one for first order, two for MUSCL and viscous terms, more for TENO, which Mallard determines from the stencils themselves). The log reports the split:
@@ -62,7 +62,7 @@ Every rank builds the same stencils as a serial run and sums each cell's face fl
 
 With threads and ranks together, keep ranks × threads at or below the number of cores. On GPUs, use one rank per GPU; Kokkos maps each rank to its own device.
 
-With generated meshes, and with meshes converted to Mallard's HDF5 format (`mallard-mesh-convert`, in builds with `-DMallard_ENABLE_HDF5=ON`; see the [input reference](../input.md)), each rank reads or generates only its share, and no rank ever holds the whole mesh. Gmsh files are still read whole by every rank, so convert large Gmsh meshes to HDF5 first.
+With generated meshes, and with meshes converted to Mallard's HDF5 format (`mallard mesh convert`, in builds with `-DMallard_ENABLE_HDF5=ON`; see the [input reference](../input.md)), each rank reads or generates only its share, and no rank ever holds the whole mesh. Gmsh files are still read whole by every rank, so convert large Gmsh meshes to HDF5 first.
 
 ### Output
 

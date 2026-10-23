@@ -2,7 +2,7 @@
 """Checks the smoke-test runs against reference solutions.
 
     check.py TOOLS sod SNAPSHOT [SNAPSHOT...]   L1 density error against the exact Sod solution at t = 0.2
-    check.py TOOLS reactor LOG                   MallardReactor's ignition delay against Cantera's
+    check.py TOOLS reactor LOG                   `mallard reactor`'s ignition delay against Cantera's
 
 TOOLS is the directory of Mallard's Python tools (share/mallard/tools). A SNAPSHOT is a
 2D or 3D .vtu file, or the .pvtu index of a distributed run.

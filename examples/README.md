@@ -4,7 +4,7 @@ Run each case from its own directory, e.g.
 
 ```sh
 cd examples/riemann_2d
-../../build/src/Mallard -i input.toml --kokkos-num-threads=8
+../../build/src/mallard -i input.toml --kokkos-num-threads=8
 python ../../tools/animate.py solut riemann
 ```
 
@@ -93,7 +93,7 @@ references do not publish.
 
 | Case | What it shows | Cells | Run time |
 |---|---|---|---|
-| `h2_ignition` | Constant-volume ignition of stoichiometric H2/air at 1200 K, 1 atm with `MallardReactor` (`../../build/src/MallardReactor -i input.toml`, writes `reactor.csv`); ignition delay 44.2 us as Cantera | 0D | milliseconds on one CPU thread |
+| `h2_ignition` | Constant-volume ignition of stoichiometric H2/air at 1200 K, 1 atm with `mallard reactor` (`../../build/src/mallard reactor -i input.toml`, writes `reactor.csv`); ignition delay 44.2 us as Cantera | 0D | milliseconds on one CPU thread |
 | `reactive_shock_tube` | Reactive shock tube in 2H2-O2-7Ar (Fedkiw et al. 1997; Martinez Ferrer et al. 2014): the gas behind the reflected shock ignites and a detonation overtakes the reflected shock; the front at 230 us converges to 99.6 mm under refinement | 2,400 (50 um); 4,800 and 9,600 for the convergence check | minutes on a few CPU threads |
 | `detonation_1d` | Planar CJ detonation in 2H2-O2-7Ar at 6.67 kPa, started from its ZND structure (generate it with `tools/detonation_reference.py` and `tools/znd_restart.py`, see the input's header): the front keeps D_CJ = 1617 m/s within 0.01% at 20 cells per induction length, and the von Neumann pressure | 3,934 (10 per induction length); 7,868 and 15,736 for 20 and 40 | minutes on a few CPU threads |
 | `detonation_2d` | Cellular detonation in 2H2-O2-7Ar at 6.67 kPa (V9): the ZND detonation of `detonation_1d` in a 6 cm channel, perturbed by six pockets of fresh gas, with the numerical soot foil (`P_MAX`); generate the initial state first (see the input's header). Front speed 1617.0 m/s (D_CJ to 0.01%); eight triple points (15 mm cells) thin out to 3 cm cells and fainter tracks over 33 cm of travel; the track pattern is the same at 10 and 20 cells per induction length. `tools/soot_foil.py` and `tools/animate_detonation_2d.py` analyze and animate it | 1.2M | 18,900 steps: 39 minutes on two A100s |

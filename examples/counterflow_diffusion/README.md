@@ -31,7 +31,7 @@ From this directory (3D build):
 
 ```sh
 python ../../tools/counterflow_setup.py reference/U2.csv . --cells-per-width 15
-mpirun -n 1 ../../build/src/Mallard -i input.toml
+mpirun -n 1 ../../build/src/mallard -i input.toml
 python ../../tools/plot_counterflow.py counterflow --run "U_o = 2 m/s" . --history --still 5e-3
 ```
 
