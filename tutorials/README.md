@@ -16,7 +16,7 @@ input file and the Python scripts that set it up and draw its figures, and
 tutorial's own `ci.sh`:
 
 ```sh
-tutorials/ci.sh build/src/Mallard build-3d/src/Mallard /tmp/tutorials
+tutorials/ci.sh build/src/mallard build-3d/src/mallard /tmp/tutorials
 ```
 
 Python packages: `pip install -r tutorials/requirements.txt` (which also

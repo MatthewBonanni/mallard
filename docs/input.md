@@ -1,11 +1,11 @@
 # Input file reference
 
-Mallard reads a single [TOML](https://toml.io) file: `Mallard -i input.toml`.
+Mallard reads a single [TOML](https://toml.io) file: `mallard -i input.toml`.
 This page lists every key; the [user guide](guide/input_files.md) explains
 by topic when to use them, with examples and figures.
 Kokkos options such as `--kokkos-num-threads=N` or `--kokkos-device-id=N` can be appended.
 A renamed or removed key is still read, with a warning, for at least one minor
-release, and `Mallard upgrade-input old.toml > new.toml` rewrites old inputs
+release, and `mallard upgrade-input old.toml > new.toml` rewrites old inputs
 ([deprecation policy and changed keys](guide/input_files.md#inputs-from-older-releases)).
 
 The spatial dimension is fixed at build time with the CMake option
@@ -30,8 +30,8 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 
 | Dimension | Keys |
 |---|---|
-| Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`; `probes.time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
-| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.curved.center`, `radius`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `translate`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
+| Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `probes.time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.curved.center`, `radius`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `translate`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
 | Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
@@ -49,11 +49,12 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Concentration (plain numbers in kmol/m^3) | `chemistry.C_reg` |
 
 Every other real-valued key (`cfl`, `gamma`, `Pr`, mole fractions, model
-constants, tolerances, ...) is dimensionless.
+constants, tolerances, ...) is dimensionless. `statistics.phase.level` has the dimension of its
+`variable` (`P`: pressure, `T`: temperature, `U_X`: velocity, ...).
 
 ## Checking an input
 
-`Mallard --check input.toml` runs the whole setup of a run (mesh, partition,
+`mallard check input.toml` runs the whole setup of a run (mesh, partition,
 boundaries, numerics, initial solution) without time stepping and without
 writing any file, and reports on the run. It exits with status 1 if there is
 an error. Under `mpirun -n N` it checks the run on N ranks.
@@ -76,6 +77,9 @@ The report, with an example: [Checking an input](guide/input_files.md#checking-a
 | `t_stop` | Stop at this simulation time (the last step is shortened to land on it) |
 | `n_steps` | Stop after this many steps |
 | `t_wall_stop` | Stop after this many seconds of wall time |
+| `keep_last_good` | Keep a copy of the state at the start of each step (one copy of the conservatives, and partial densities, per step), so that a diverging run writes the last valid state; see [run control](guide/running.md) (default `true`) |
+| `control_socket` | Serve `mallard ctl` on `mallard.sock` in the working directory (default `true`) |
+| `control_file_interval` | Every this many steps, look for the files `STOP` and `CHECKPOINT` in the working directory (default 0: never) |
 | `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages) as one CUDA graph, so the host launches one graph and waits once per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel where the host takes part in the step: gas mixtures, average-pressure outlets, characteristic boundaries, boundary expressions of `t`, sources of domain averages, and halos exchanged with MPI (`[parallel] halo_exchange`); the run log says which |
 
 At least one stop condition is required.
@@ -153,7 +157,7 @@ Every format and the transform below are illustrated in the user guide
 Boundary zones, high-order nodes and cell types are unchanged; mirroring scales
 (negative factors) are allowed. `[[periodic]]` translations, `[[mesh.curved]]`
 shapes, probes and every other coordinate in the input refer to the
-transformed mesh. `mallard-mesh-convert input.toml mesh.h5` writes the
+transformed mesh. `mallard mesh convert input.toml mesh.h5` writes the
 transformed mesh.
 
 | Key | Description |
@@ -213,8 +217,8 @@ share), so large meshes should be converted to Mallard's HDF5 mesh format
 share; generated meshes are also produced per rank:
 
 ```sh
-mallard-mesh-convert mesh.msh mesh.h5               # from Gmsh (or CGNS, Fluent, OpenFOAM)
-mpirun -n 8 mallard-mesh-convert input.toml mesh.h5  # a generated mesh, written in parallel
+mallard mesh convert mesh.msh mesh.h5               # from Gmsh (or CGNS, Fluent, OpenFOAM)
+mpirun -n 8 mallard mesh convert input.toml mesh.h5  # a generated mesh, written in parallel
 ```
 
 The file holds global arrays, with global ids the row indices:
@@ -465,7 +469,7 @@ filter widths and overcorrects on coarse meshes; not validated beyond this case.
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
 | `balance` | (mixtures, `analytical`) Species taking `1 - sum` of the listed fractions; without it the listed fractions are normalized |
 | `n_subdivisions` | (`analytical`) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is split into `n_subdivisions`³ sub-tetrahedra, each with a 14-point degree-5 rule (default 1) |
-| `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, 3 when they also hold the weights of `[statistics]` averages, or 4 when they also hold the state of characteristic boundary faces, or 5 when compressed) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read, and files of a newer version are rejected ([compatibility](guide/output.md#file-formats-and-compatibility)) |
+| `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, 3 when they also hold the weights of `[statistics]` averages, 4 when they also hold the state of characteristic boundary faces, 5 when compressed, or 6 when they also hold averaged `[statistics.spectra]`) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read, and files of a newer version are rejected ([compatibility](guide/output.md#file-formats-and-compatibility)) |
 
 Expressions use [exprtk](https://www.partow.net/programming/exprtk/) syntax, e.g. `"x < 0.5 ? 1.0 : 0.125"`.
 
@@ -604,7 +608,7 @@ Strength and reference are evaluated once at cell centroids.
 | `preset` | `robust`, `accurate`, `les` or `reacting`: a validated combination of `face_reconstruction` (`type` and its `order` or `limiter`), `riemann_solver`, `convective_flux`, `time_integrator` and `[run] cfl`, each used only where the input does not set that key (a reconstruction option only when the reconstruction type is the preset's; `cfl` only when `[run]` sets neither `cfl` nor `dt`). What each chooses and why: [Numerics: presets](guide/numerics.md#presets). Default: none (the defaults below) |
 | `riemann_solver` | `Rusanov`, `HLL`, `HLLC` (default), `Roe`, or `RHLL` (rotated hybrid HLL-Roe, carbuncle-free except at shocks at rest on cell faces; see [numerics](numerics/overview.md#stationary-shocks-on-cell-faces)) |
 | `time_integrator` | `FE`, `SSPRK3` (default), `RK4`, `SSPRK54` (five-stage fourth-order SSP, low storage), `CK45` (Carpenter-Kennedy five-stage fourth-order, 2N storage) or `RDPK3Sp35` (five-stage third order with an embedded error estimate, for `[numerics.error_control]`). See [time integrators](numerics/overview.md#time-integrators) for their stability limits and cost |
-| `check_nan` | Stop if the solution becomes non-finite (default `false`) |
+| `check_nan` | Check every conservative and partial density for non-finite values right after each step, so a diverging step writes no output (one more reduction per step). Without it the run still stops at the next step, through the time-step reduction; see [run control](guide/running.md). Default `false` |
 | `double_flux` | (gas mixtures) `true` for the double-flux scheme: each cell's energy is updated with its own `cp / cv` and energy offset frozen over the time step on both sides of its faces, and reset to the true equation of state after the step, so pressure and velocity stay exactly uniform across contacts between different gases. Energy is then not exactly conserved (about 0.2% over a multicomponent shock tube). Default `false` |
 | `low_mach_cutoff` | Low-Mach correction of the convective flux: the velocity jump across each interior face is scaled by `z = min(1, max(M_L, M_R, low_mach_cutoff))` before the Riemann solver, so that upwind dissipation scales with the flow speed rather than the sound speed. Default 0.1; 1 disables it. See [`numerics/overview.md`](numerics/overview.md) |
 | `convective_flux` | `riemann` (default): the Riemann solver at every face; `hybrid`: the kinetic-energy-preserving central flux of Kuya, Totani & Kawai (2018) on the same reconstructed states, blended into the Riemann solver where a shock sensor fires, `F = F_KEEP + phi (F_Riemann - F_KEEP)`. For large-eddy simulation: the central flux adds no dissipation, so the SGS model does the work (see `[integrals] budget`). `phi` is the larger of the face's two cells': 1 where the Ducros sensor restricted to compressions, `(div u)^2 / ((div u)^2 + |omega|^2)` with `div u < 0`, exceeds `sensor_threshold`, else `upwind_floor`. Boundary faces other than walls and symmetry planes use the Riemann solver. Species stay upwinded with the blended mass flux. Contacts and expansions are central: on Sod's problem the density error is about 1.8 times the Riemann solver's, with a 0.1% overshoot at the contact |
@@ -784,7 +788,80 @@ number of ranks; a restart file without them starts them afresh, and one with
 only some of them is an error unless `reset = true`. With
 `chemistry.fuse_half_steps`, sampling steps read the state like output does.
 `tools/plane_average.py` averages them further over homogeneous directions
-(e.g. over x and z of a channel, as a function of y).
+(e.g. over x and z of a channel, as a function of y). `fields` and
+`products` may be left out when `[statistics.spectra]` or
+`[statistics.phase]` is given; both take `interval` and `t_start` from
+`[statistics]` unless they set their own, and `reset` applies to them too.
+
+### `[statistics.spectra]`
+
+Spectra and two-point correlations along homogeneous directions of a
+generated `cartesian` mesh (quadrilaterals or hexahedra): directions that are
+periodic and not stretched. At each position of the other (inhomogeneous)
+directions, e.g. at each y of a channel, a sample takes the discrete Fourier
+transform over the homogeneous directions H of every field,
+`a_hat(k) = sum_x a(x) exp(-i k.x) / N_H`, and of every pair the cross
+spectrum `a_hat conj(b_hat)` summed over the wavenumbers of all directions
+of H but one, `h`: the one-dimensional spectrum along `h`. With every
+direction homogeneous (a periodic box), also the shell spectrum, sums of the
+real part over `|k|` in shells of width `dk = 2 pi / L_max` around `s dk`.
+These and the plane means are time-averaged like the `[statistics]` means
+(weight `t - t_prev`); the outputs subtract the product of the averaged plane
+means, so they describe the fluctuations `a' = a - <a>`. The values are those
+of the cells (cell averages, no deconvolution).
+
+| Key | Description |
+|---|---|
+| `fields` | Variables whose spectra (autospectra) to keep: any of the `[statistics]` fields |
+| `products` | Pairs `"A*B"` whose cross spectra (co-spectra) and cross correlations to keep |
+| `directions` | Homogeneous directions, default all periodic directions of the mesh |
+| `average` | `true` (default): running time averages, written to `file` with the other output (`[[write_data]]`) and at the end, and carried by restart files; `false`: each sample's spectra, written to `<file stem>_<step>.csv` (e.g. the instantaneous spectra of decaying turbulence) |
+| `file` | Output file, default `spectra.csv` (`spectra/spectra.csv` with `average = false`) |
+| `interval`, `t_start` | Sampling, default those of `[statistics]` |
+
+The output CSV starts with a comment line (step, time, samples, total
+weight), then the columns `quantity, a, b, direction, position, <the
+inhomogeneous axes' cell-center coordinates>, index, abscissa, value`, with
+`quantity`
+
+- `mean`: the plane mean of `a`;
+- `spectrum`: the one-sided spectrum `E_ab(k_n)`, `n = 0 .. N/2`, `k_n = 2 pi n / L`
+  (abscissa), the real part (co-spectrum) of the two-sided one folded onto
+  `n >= 0`; it sums (it is not a density) to the covariance `<a'b'>`;
+- `correlation`: `R_ab(r_m) = <a'(x) b'(x + r_m e_h)>`, `r_m = m L / N`,
+  `m = 0 .. N - 1` (periodic; `R(-r) = R(L - r)`), the inverse transform of
+  the two-sided spectrum, so `R_ab(0) = <a'b'>`;
+- `shell`: the shell spectrum (`direction` `k`), sums to `<a'b'>` too.
+
+The results are bitwise the same on any number of ranks
+([design](design/insitu_statistics.md)). Restart files (format version 6)
+carry the averages as named arrays; a restart file holding spectra of other
+fields or directions is an error unless `reset = true`.
+`tools/insitu_statistics.py` recomputes the same quantities from restart
+files, compares two spectra files and plots them.
+
+### `[statistics.phase]`
+
+Phase averages: per cell, the time-weighted means of `fields` over the
+samples whose phase falls in each of `bins` equal bins, output as
+`PHASE_<bin>_<field>` (bins zero-padded, `PHASE_*` selects them all). The
+phase is either `(t - t_reference) / period` modulo 1, or set by a trigger:
+with the upward crossings of `level` by `variable` in the cell holding
+`probe` (located like a probe point), detected between consecutive samples
+and interpolated linearly in time, the phase of a sample at `t` is
+`(t - t_n) / (t_n - t_{n-1})` for the last two crossings `t_{n-1} < t_n`;
+phases past 1 (a period longer than the last) fall in the last bin, and
+samples before the second crossing are skipped. The trigger is read at every
+sampling step, also before `t_start`. Restart files carry the bins, their
+weights and the trigger state.
+
+| Key | Description |
+|---|---|
+| `fields` | Variables to average: any of the `[statistics]` fields |
+| `bins` | Number of phase bins |
+| `period`, `t_reference` | A fixed period, phase 0 at `t_reference` (default 0), or |
+| `probe`, `variable`, `level` | The trigger point `[x, y(, z)]`, its variable and the level of its upward crossings (default 0) |
+| `interval`, `t_start` | Sampling, default those of `[statistics]` |
 
 ## `[[probes]]`
 
@@ -992,7 +1069,7 @@ exprtk, variable names are case sensitive.
 
 ## `[parallel]`
 
-Used when Mallard runs on several MPI ranks (`mpirun -n N Mallard -i input.toml`).
+Used when Mallard runs on several MPI ranks (`mpirun -n N mallard -i input.toml`).
 
 | Key | Description |
 |---|---|
@@ -1029,9 +1106,9 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | `prefix` | Output path prefix; directories are created as needed |
 | `format` | `vtu` (with a `.pvd` series next to it), `hdf5` (with XDMF indexes; see below) or `restart` |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
-| `variables` | (`vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), with `[[sources]]` (or `[source]` expressions) `SOURCE_<conservative>` and `SOURCE_RHOY_<species>`, the sources per unit volume, and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>` and `COV_<A>_<B>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
+| `variables` | (`vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), with `[[sources]]` (or `[source]` expressions) `SOURCE_<conservative>` and `SOURCE_RHOY_<species>`, the sources per unit volume, and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>`, `COV_<A>_<B>` and `PHASE_<bin>_<A>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
 | `geometry` | (`vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |
-| `compression` | `none` (default) or `zlib`, lossless: VTU arrays are compressed as ParaView's `vtkZLibDataCompressor` reads them (needs `Mallard_ENABLE_ZLIB`); HDF5 datasets are chunked, byte-shuffled and deflated (HDF5's standard filters, which every HDF5 reader has); restart files become version 5, each variable in byte-shuffled, deflated chunks (`Mallard_ENABLE_ZLIB` to write and to read them), and restart bitwise like uncompressed ones. Not for boundary-zone output (`geometry`) |
+| `compression` | `none` (default) or `zlib`, lossless: VTU arrays are compressed as ParaView's `vtkZLibDataCompressor` reads them (needs `Mallard_ENABLE_ZLIB`); HDF5 datasets are chunked, byte-shuffled and deflated (HDF5's standard filters, which every HDF5 reader has); restart files become version 5 (6 with averaged spectra), each variable in byte-shuffled, deflated chunks (`Mallard_ENABLE_ZLIB` to write and to read them), and restart bitwise like uncompressed ones. Not for boundary-zone output (`geometry`) |
 | `relative_error` | (`vtu`, `hdf5`, with `compression = "zlib"`) Error bound of lossy compression: each cell value is rounded to the fewest mantissa bits that keep it within this relative error of itself (\|x′ − x\| ≤ `relative_error` · \|x\|; zeros, subnormals, infinities and NaNs are kept), and the zeroed trailing bits compress well. The mesh stays exact. Restart files are always lossless |
 | `chunk_cells` | (`restart`, with `compression = "zlib"`) Cells per compressed chunk (default 65536); a rank reading some cells decompresses only the chunks that hold them |
 
@@ -1060,9 +1137,9 @@ pieces write faster beyond a few ranks (2.1M hexahedra, 16 ranks: 115 ms per
 HDF5 snapshot against 72 ms, 1 rank: 140 ms against 1.1 s). VTU output remains
 the simpler choice for small runs. `tools/mallard_h5.py` reads the files.
 
-## `MallardReactor`
+## `mallard reactor`
 
-`MallardReactor -i input.toml` integrates one adiabatic, constant-volume
+`mallard reactor -i input.toml` integrates one adiabatic, constant-volume
 reactor with the solver's chemistry kernels (the RODAS Rosenbrock integrator
 with the analytical Jacobian, in double precision) and writes its history as
 CSV (`t`, `T`, `p`, `Y_<species>`). It reads `[physics]` (`mechanism`,

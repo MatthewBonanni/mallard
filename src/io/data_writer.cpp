@@ -84,9 +84,9 @@ void DataWriter::init(const Input & input,
     if (has_interval == has_time_interval) {
         throw std::runtime_error("DataWriter: specify exactly one of interval or time_interval.");
     }
-    prefix = toml::find<std::string>(input, "prefix");
+    prefix = find_value<std::string>(input, "prefix");
     if (has_interval) {
-        interval = toml::find<uint64_t>(input, "interval");
+        interval = find_value<uint64_t>(input, "interval");
         if (interval == 0) {
             throw std::runtime_error("DataWriter: interval must be positive.");
         }
@@ -97,11 +97,8 @@ void DataWriter::init(const Input & input,
         }
     }
 
-    const std::string format_str = toml::find<std::string>(input, "format");
-    auto it = FORMAT_TYPES.find(format_str);
-    if (it == FORMAT_TYPES.end()) {
-        throw unknown_option(FORMAT_TYPES, "write_data.format", format_str);
-    }
+    const std::string format_str = find_value<std::string>(input, "format");
+    auto it = find_option(FORMAT_TYPES, "write_data.format", format_str);
     format = it->second;
 
     std::vector<std::string> variables;
@@ -115,7 +112,7 @@ void DataWriter::init(const Input & input,
         if (!input.contains("variables")) {
             throw std::runtime_error("DataWriter: variables not specified.");
         }
-        variables = toml::find<std::vector<std::string>>(input, "variables");
+        variables = find_value<std::vector<std::string>>(input, "variables");
     }
     if (variables.empty()) {
         throw std::runtime_error("DataWriter: No variables specified.");
@@ -172,7 +169,7 @@ void DataWriter::init(const Input & input,
         }
     }
 
-    geometry = toml::find_or<std::string>(input, "geometry", "all");
+    geometry = find_value_or<std::string>(input, "geometry", "all");
     if (geometry != "all") {
         if (format != DataFormat::VTU) {
             throw std::runtime_error("DataWriter: geometry can only be set for vtu output.");
@@ -189,11 +186,8 @@ void DataWriter::init(const Input & input,
         }
     }
 
-    const std::string compression_str = toml::find_or<std::string>(input, "compression", "none");
-    const auto compression_it = COMPRESSION_TYPES.find(compression_str);
-    if (compression_it == COMPRESSION_TYPES.end()) {
-        throw unknown_option(COMPRESSION_TYPES, "write_data.compression", compression_str);
-    }
+    const std::string compression_str = find_value_or<std::string>(input, "compression", "none");
+    const auto compression_it = find_option(COMPRESSION_TYPES, "write_data.compression", compression_str);
     compression = compression_it->second;
     if (compression != Compression::NONE) {
         if (surface) throw InputError("write_data.compression: boundary-zone output is ASCII, which is not compressed.");
@@ -208,7 +202,7 @@ void DataWriter::init(const Input & input,
         if (format != DataFormat::RESTART || compression == Compression::NONE) {
             throw InputError("write_data.chunk_cells is for compressed restart files.");
         }
-        chunk_cells = toml::find<uint64_t>(input, "chunk_cells");
+        chunk_cells = find_value<uint64_t>(input, "chunk_cells");
         if (chunk_cells == 0) throw InputError("write_data.chunk_cells must be positive.");
     }
     if (input.contains("relative_error")) {
@@ -328,7 +322,7 @@ DataWriter::Values DataWriter::capture_faces() const {
 }
 
 void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttributes & attributes,
-                       const RestartFaces & faces) {
+                       const RestartFaces & faces, const RestartArrays & arrays) {
     if (!(due(step, t) || force) || step == step_last) {
         return;
     }
@@ -342,10 +336,12 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
            << (interval > 0 || format == DataFormat::RESTART ? step : history.size());
     const std::string stem = stream.str();
     if (format == DataFormat::RESTART) {
-        write_restart(stem + ".restart", step, t, attributes, faces);
+        last_file = stem + ".restart";
+        write_restart(last_file, step, t, attributes, faces, arrays);
         logging::event(step, double(t), "restart", stem + ".restart");
     } else if (format == DataFormat::HDF5) {
-        history.emplace_back(t, stem + ".h5");
+        last_file = stem + ".h5";
+        history.emplace_back(t, last_file);
         // Parallel HDF5 writes collectively through MPI, which only the main thread calls
         const bool collective = distributed && comm::size() > 1;
         if (distributed || root) {
@@ -369,6 +365,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
         piece << stem;
         if (distributed) piece << "_p" << std::setw(4) << std::setfill('0') << comm::rank();
         const std::string filename = stem + (distributed ? ".pvtu" : ".vtu");
+        last_file = filename;
         history.emplace_back(t, filename);
         const int n_ranks = comm::size();
         if (distributed || root) {
@@ -401,6 +398,21 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
     t_last = t;
     n_files++;
     t_blocking += seconds_since(start);
+}
+
+std::string DataWriter::set_interval(uint64_t steps) {
+    if (interval == 0) return "is written every time_interval; set that instead";
+    if (steps == 0) return "interval must be positive";
+    interval = steps;
+    return "";
+}
+
+std::string DataWriter::set_time_interval(rtype value, rtype t) {
+    if (interval > 0) return "is written every interval steps; set that instead";
+    if (!(value > 0.0_r)) return "time_interval must be positive";
+    time_interval = value;
+    n_written = static_cast<uint64_t>(std::floor(t / time_interval + precision_tol(1e-9, 1e-5))) + 1;
+    return "";
 }
 
 void DataWriter::resume(uint64_t step, rtype t) {
@@ -488,19 +500,23 @@ std::string read_provenance_trailer(std::ifstream & in) {
  *        values. In version 5, the blocks are compressed in chunks of
  *        chunk_cells cells, each byte-shuffled and deflated, and the header is
  *        followed by the file offset of every chunk (variable by variable) and
- *        of the faces. Files are written with the lowest version that holds
- *        their contents, which older builds read.
+ *        of the faces. Version 6 always has the codec and the cells per chunk
+ *        (both 0 when uncompressed), then the array count as a uint64 and
+ *        each array's name, its length as a uint64 and its doubles. Files are
+ *        written with the lowest version that holds their contents, which
+ *        older builds read.
  */
 std::vector<char> restart_header(uint64_t n_cells, uint64_t step, double t, const std::vector<std::string> & names,
-                                 const RestartAttributes & attributes, uint64_t n_faces, uint64_t chunk_cells = 0) {
+                                 const RestartAttributes & attributes, uint64_t n_faces, uint64_t chunk_cells = 0,
+                                 const RestartArrays & arrays = {}) {
     std::vector<char> header;
     auto put = [&](const void * p, size_t n) {
         header.insert(header.end(), static_cast<const char *>(p), static_cast<const char *>(p) + n);
     };
     const uint32_t real_size = sizeof(rtype);
     const uint64_t n_vars = names.size();
-    static_assert(file_format::RESTART.version == 5, "restart_header writes versions 2 to 5");
-    const uint32_t version = chunk_cells > 0 ? 5 : n_faces > 0 ? 4 : attributes.empty() ? 2 : 3;
+    static_assert(file_format::RESTART.version == 6, "restart_header writes versions 2 to 6");
+    const uint32_t version = !arrays.empty() ? 6 : chunk_cells > 0 ? 5 : n_faces > 0 ? 4 : attributes.empty() ? 2 : 3;
     put(RESTART_MAGIC, sizeof(RESTART_MAGIC));
     put(&version, sizeof(version));
     put(&real_size, sizeof(real_size));
@@ -527,8 +543,20 @@ std::vector<char> restart_header(uint64_t n_cells, uint64_t step, double t, cons
     put(&n_faces, sizeof(n_faces));
     put(&width, sizeof(width));
     if (version < 5) return header;
-    put(&RESTART_CODEC_ZLIB, sizeof(RESTART_CODEC_ZLIB));
+    const uint32_t codec = chunk_cells > 0 ? RESTART_CODEC_ZLIB : 0;
+    put(&codec, sizeof(codec));
     put(&chunk_cells, sizeof(chunk_cells));
+    if (version < 6) return header;
+    const uint64_t n_arrays = arrays.size();
+    put(&n_arrays, sizeof(n_arrays));
+    for (const auto & [name, values] : arrays) {
+        const uint32_t length = static_cast<uint32_t>(name.size());
+        put(&length, sizeof(length));
+        put(name.data(), name.size());
+        const uint64_t n = values.size();
+        put(&n, sizeof(n));
+        put(values.data(), n * sizeof(double));
+    }
     return header;
 }
 
@@ -658,6 +686,13 @@ const double * RestartData::attribute(const std::string & name) const {
     return nullptr;
 }
 
+const std::vector<double> * RestartData::array(const std::string & name) const {
+    for (const auto & [key, values] : arrays) {
+        if (key == name) return &values;
+    }
+    return nullptr;
+}
+
 const rtype * RestartData::face(uint64_t key) const {
     const auto it = std::lower_bound(faces.keys.begin(), faces.keys.end(), key);
     if (it == faces.keys.end() || *it != key) return nullptr;
@@ -665,14 +700,15 @@ const rtype * RestartData::face(uint64_t key) const {
 }
 
 void DataWriter::write_restart(const std::string & filename, uint64_t step, rtype t,
-                               const RestartAttributes & attributes, const RestartFaces & faces) {
+                               const RestartAttributes & attributes, const RestartFaces & faces,
+                               const RestartArrays & arrays) {
     if (mesh->n_global_cells > 0) {
-        write_restart_distributed(filename, step, t, attributes, faces);
+        write_restart_distributed(filename, step, t, attributes, faces, arrays);
         return;
     }
     // Serial runs on several ranks (tests) hold the whole mesh on every rank
     if (!comm::is_root()) return;
-    auto job = [this, filename, step, t, attributes, ordered = order_faces(faces, mesh->n_cells, false),
+    auto job = [this, filename, step, t, attributes, arrays, ordered = order_faces(faces, mesh->n_cells, false),
                 values = capture(mesh->n_cells), trailer = provenance_trailer()]() {
         std::ofstream out(filename, std::ios::binary);
         if (!out.good()) {
@@ -683,13 +719,14 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
         auto put = [&](const void * data, size_t n) { out.write(static_cast<const char *>(data), std::streamsize(n)); };
         const uint64_t n_cells = mesh->n_cells;
         if (compression == Compression::NONE) {
-            const std::vector<char> header = restart_header(n_cells, step, double(t), names, attributes, ordered.total);
+            const std::vector<char> header =
+                restart_header(n_cells, step, double(t), names, attributes, ordered.total, 0, arrays);
             put(header.data(), header.size());
             for (const auto & var : values) put(var.data(), var.size() * sizeof(rtype));
         } else {
             const RestartChunks chunks(values, n_cells, chunk_cells, io_threads);
             const std::vector<char> header =
-                restart_header(n_cells, step, double(t), names, attributes, ordered.total, chunk_cells);
+                restart_header(n_cells, step, double(t), names, attributes, ordered.total, chunk_cells, arrays);
             const std::vector<uint64_t> offsets = chunk_offsets(
                 chunks.sizes(), names.size(), chunks.n_chunks,
                 header.size() + (names.size() * chunks.n_chunks + 1) * sizeof(uint64_t));
@@ -708,7 +745,8 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
 }
 
 void DataWriter::write_restart_distributed(const std::string & filename, uint64_t step, rtype t,
-                                           const RestartAttributes & attributes, const RestartFaces & faces) {
+                                           const RestartAttributes & attributes, const RestartFaces & faces,
+                                           const RestartArrays & arrays) {
 #ifdef Mallard_HAS_MPI
     const OrderedFaces ordered = order_faces(faces, mesh->n_global_cells, true);
     const uint64_t n_global = mesh->n_global_cells;
@@ -738,13 +776,13 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
         std::vector<uint64_t> offsets;  // file offset of each variable's block of this rank, then of the faces
         std::vector<uint64_t> table;
         if (compression == Compression::NONE) {
-            header = restart_header(n_global, step, double(t), names, attributes, ordered.total);
+            header = restart_header(n_global, step, double(t), names, attributes, ordered.total, 0, arrays);
             for (uint64_t v = 0; v < n_vars; v++) offsets.push_back(header.size() + (v * n_global + first) * sizeof(rtype));
             offsets.push_back(header.size() + n_vars * n_global * sizeof(rtype));
         } else {
             chunks = std::make_shared<RestartChunks>(block, n, chunk_cells, io_threads);
             const uint64_t n_chunks = (n_global + chunk_cells - 1) / chunk_cells;
-            header = restart_header(n_global, step, double(t), names, attributes, ordered.total, chunk_cells);
+            header = restart_header(n_global, step, double(t), names, attributes, ordered.total, chunk_cells, arrays);
             table = chunk_offsets(comm::allgatherv(chunks->sizes()), n_vars, n_chunks,
                                   header.size() + (n_vars * n_chunks + 1) * sizeof(uint64_t));
             for (uint64_t v = 0; v < n_vars; v++) offsets.push_back(table[v * n_chunks + first / chunk_cells]);
@@ -810,7 +848,8 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
         throw std::runtime_error("DataWriter::write_restart: Could not open file: " + filename + ".");
     }
     MPI_File_set_size(fh, 0);
-    const std::vector<char> header = restart_header(n_global, step, double(t), names, attributes, ordered.total);
+    const std::vector<char> header =
+        restart_header(n_global, step, double(t), names, attributes, ordered.total, 0, arrays);
     if (comm::is_root()) {
         MPI_File_write_at(fh, 0, header.data(), static_cast<int>(header.size()), MPI_BYTE, MPI_STATUS_IGNORE);
     }
@@ -852,6 +891,7 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
     (void)t;
     (void)attributes;
     (void)faces;
+    (void)arrays;
     throw std::logic_error("DataWriter: distributed restart without MPI");
 #endif
 }
@@ -925,12 +965,28 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
             uint32_t codec = 0;
             in.read(reinterpret_cast<char *>(&codec), sizeof(codec));
             in.read(reinterpret_cast<char *>(&chunk_cells), sizeof(chunk_cells));
-            if (in.good() && (codec != RESTART_CODEC_ZLIB || chunk_cells == 0)) {
+            const bool uncompressed = version >= 6 && codec == 0 && chunk_cells == 0;
+            if (in.good() && !uncompressed && (codec != RESTART_CODEC_ZLIB || chunk_cells == 0)) {
                 throw std::runtime_error("Restart file " + filename + " has an unknown compression.");
             }
-            if (!compression::have_zlib()) {
+            if (chunk_cells > 0 && !compression::have_zlib()) {
                 throw std::runtime_error("Restart file " + filename +
                                          " is compressed, which needs a build with zlib (Mallard_ENABLE_ZLIB=ON).");
+            }
+        }
+        if (version >= 6) {
+            uint64_t n_arrays = 0;
+            in.read(reinterpret_cast<char *>(&n_arrays), sizeof(n_arrays));
+            for (uint64_t a = 0; a < n_arrays && in.good(); a++) {
+                std::string name = read_name();
+                uint64_t n = 0;
+                in.read(reinterpret_cast<char *>(&n), sizeof(n));
+                if (!in.good() || n > (uint64_t(1) << 32)) {
+                    throw std::runtime_error("Restart file " + filename + " has a corrupt array.");
+                }
+                std::vector<double> values(n);
+                in.read(reinterpret_cast<char *>(values.data()), static_cast<std::streamsize>(n * sizeof(double)));
+                data.arrays.emplace_back(std::move(name), std::move(values));
             }
         }
         const bool has_z = std::find(data.names.begin(), data.names.end(), "RHOU_Z") != data.names.end();

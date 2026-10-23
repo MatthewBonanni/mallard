@@ -2,7 +2,7 @@
  * @file input_upgrade_test.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Deprecated input keys: warnings, errors once removed, and the
- *        rewrite of `Mallard upgrade-input`, which keeps comments and layout.
+ *        rewrite of `mallard upgrade-input`, which keeps comments and layout.
  * @version 0.9
  * @date 2026-10-16
  *
@@ -155,7 +155,7 @@ TEST(InputUpgradeTest, DeprecatedKeysAreReadWithAWarningUntilTheyAreRemoved) {
     } catch (const InputError & e) {
         const std::string what = e.what();
         EXPECT_NE(what.find("run.old_cfl was removed in 0.10.0: use run.cfl"), std::string::npos) << what;
-        EXPECT_NE(what.find("Mallard upgrade-input"), std::string::npos) << what;
+        EXPECT_NE(what.find("mallard upgrade-input"), std::string::npos) << what;
     }
 }
 

@@ -23,7 +23,7 @@
 #
 # (one seed: the same field shapes at every amplitude), the 0D references
 # (homogeneous reactor, ignition delays, multizone model of each initial
-# field; reactor.toml checks MallardReactor's delay against Cantera's) with
+# field; reactor.toml checks mallard reactor's delay against Cantera's) with
 #
 #   python ../../tools/autoignition_reference.py reference --restart RUN_DIR/autoignition.restart ...
 #

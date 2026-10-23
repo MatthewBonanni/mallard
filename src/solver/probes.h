@@ -71,6 +71,11 @@ class Probes {
         rtype next_time() const;
         void write(uint64_t step, rtype t, const ProbeFields & fields);
 
+        /** @brief Changes the step interval of the probe of that name; an error message, or empty. */
+        std::string set_interval(const std::string & name, uint64_t steps);
+        /** @brief Changes the time interval of the probe of that name, the next output due after t. */
+        std::string set_time_interval(const std::string & name, rtype value, rtype t);
+
         std::vector<std::pair<std::string, std::string>> summary() const;
         std::vector<std::string> files() const;
         /**
@@ -136,6 +141,7 @@ class Probes {
         };
         std::vector<std::unique_ptr<Probe>> probes;
         bool resumed = false;
+        bool distributed = false;  // samples split over the ranks, which set up and write together
 };
 
 #endif // PROBES_H

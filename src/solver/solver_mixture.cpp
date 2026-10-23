@@ -182,7 +182,16 @@ struct MixtureTimeStepFunctor {
         }
         const rtype dt_c = 2.0_r * cell_volume(c) / sum;
         dt_local(c) = dt_c;
-        dt_min = Kokkos::fmin(dt_min, dt_c);
+        dt_min = Kokkos::fmin(dt_min, finite(c) ? dt_c : -1.0_r);
+    }
+
+    /** @brief Whether the cell's state and mass fractions are finite; else the run stops. */
+    KOKKOS_INLINE_FUNCTION
+    bool finite(const uint32_t c) const {
+        bool all = true;
+        FOR_I_CONSERVATIVE all = all && Kokkos::isfinite(W(c, i));
+        for (uint32_t k = 0; k <= n_species; k++) all = all && Kokkos::isfinite(scalars(c, k));
+        return all;
     }
 };
 
@@ -294,7 +303,7 @@ class CompositionExpressions {
                 values.emplace_back(where + "." + key + "." + species, quantity_or_expression(value, species, dim::none));
             }
             if (table.contains("balance")) {
-                const std::string species = toml::find<std::string>(table, "balance");
+                const std::string species = find_value<std::string>(table, "balance");
                 balance = mixture.mechanism().species_index(species);
                 if (balance < 0) throw InputError(where + ".balance: no species " + species + " in the mechanism.");
             }
@@ -399,9 +408,10 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
     update_cell_states(state, !budget_pass);
     face_reconstruction->calc_face_values(W_cells, face_solution);
     face_reconstruction->rotate_periodic_faces(face_solution);
+    // The characteristic faces read the reconstructed gamma of this stage
+    scalar_reconstruction.calc(cell_scalars, W_cells, face_thermo);
     if (!budget_pass) update_characteristic_boundaries(t_stage);
     if (hybrid_flux) update_upwind_sensor();
-    scalar_reconstruction.calc(cell_scalars, W_cells, face_thermo);
 
     if (double_flux && !cells_frozen) {
         throw std::logic_error("Double flux needs the cells' thermodynamics frozen (take_step).");
@@ -588,7 +598,7 @@ rtype Solver::calc_dt_cfl1_mixture() {
                                    mesh->periodic_maps(), mesh->face_shift};
     rtype dt_min = std::numeric_limits<rtype>::max();
     Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor, Kokkos::Min<rtype>(dt_min));
-    return comm::allreduce(dt_min, comm::Op::MIN);
+    return reduce_dt(dt_min);
 }
 
 void Solver::update_primitives_mixture() {
@@ -637,7 +647,7 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
     };
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
         const Input & bound = input_boundaries[i_bc];
-        const std::string name = toml::find<std::string>(bound, "name");
+        const std::string name = find_value<std::string>(bound, "name");
         const std::string where = "boundaries[name = \"" + name + "\"]";
         switch (bcs[i_bc].type) {
             case BoundaryType::EXTRAPOLATION:

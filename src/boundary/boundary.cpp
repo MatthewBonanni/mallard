@@ -26,12 +26,9 @@
 #include "synthetic_inflow.h"
 
 BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler & physics) {
-    const std::string name = toml::find<std::string>(input, "name");
-    const std::string type_str = toml::find<std::string>(input, "type");
-    auto it = BOUNDARY_TYPES.find(type_str);
-    if (it == BOUNDARY_TYPES.end()) {
-        throw unknown_option(BOUNDARY_TYPES, "boundaries[name = \"" + name + "\"].type", type_str);
-    }
+    const std::string name = find_value<std::string>(input, "name");
+    const std::string type_str = find_value<std::string>(input, "type");
+    auto it = find_option(BOUNDARY_TYPES, "boundaries[name = \"" + name + "\"].type", type_str);
     using Relax = BoundaryCondition::Relax;
     BoundaryCondition bc;
     bc.type = it->second;

@@ -25,6 +25,7 @@
 #endif
 
 #include "comm.h"
+#include "data_paths.h"
 #include "gmsh_fixtures.h"
 #include "mesh.h"
 #include "mesh_block.h"
@@ -32,7 +33,7 @@
 
 namespace {
 
-std::string fixture(const std::string & name) { return std::string(MALLARD_SOURCE_DIR) + "/test/data/meshes/" + name; }
+std::string fixture(const std::string & name) { return source_dir() + "/test/data/meshes/" + name; }
 
 using Key = std::array<double, N_DIM + 1>;  // centroid, then volume or area
 

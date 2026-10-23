@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -33,6 +34,15 @@ inline constexpr bool PARALLEL = true;
 #else
 inline constexpr bool PARALLEL = false;
 #endif
+
+/**
+ * @brief Held around every HDF5 call: the library is not thread-safe, and
+ *        asynchronous output writers call it from their own threads.
+ */
+inline std::mutex & mutex() {
+    static std::mutex m;
+    return m;
+}
 
 /** @brief Owns an HDF5 identifier. */
 class Handle {

@@ -1,6 +1,6 @@
 /**
  * @file check.h
- * @brief Pre-flight check of an input (mallard --check): the setup of a real
+ * @brief Pre-flight check of an input (mallard check): the setup of a real
  *        run without time stepping, and what it tells about the run.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
@@ -24,6 +24,7 @@ struct CheckOptions {
     uint64_t steps = 0;         // steps to time for a measured throughput
     size_t n_worst = 5;         // worst cells listed per quality metric
     std::string quality_file;   // VTU of the quality fields, or empty
+    std::string catalog_file;   // JSON of the keys setup read (key_catalog), or empty
 };
 
 struct CheckReport {

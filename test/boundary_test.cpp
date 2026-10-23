@@ -16,6 +16,7 @@
 #include <sstream>
 #include <string>
 
+#include "data_paths.h"
 #include "test_fixtures.h"
 #include "solver.h"
 
@@ -185,8 +186,8 @@ TEST(BoundaryTest, FastInflowIntoGasAtRestStartsAtTheTargetCFL) {
     const double dt_expected = 0.8 * 2.0 * h * h / (h * (u + c) + 3.0 * h * c);
     const std::string jet = "u = [" + std::to_string(u) + ", 0.0]\np = 1.0e5\nT = 300.0\n";
     const std::string perfect_air =
-        "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR
-        "/test/data/chemistry/perfect_air.yaml\"\nphase = \"air\"\n";
+        "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() +
+"/test/data/chemistry/perfect_air.yaml\"\nphase = \"air\"\n";
     for (const auto & [left, gas] : {std::pair<std::string, std::string>{"type = \"upt\"\n" + jet, ""},
                                      {"type = \"nscbc_inlet\"\nL = 1.0\n" + jet, ""},
                                      {"type = \"upt\"\n" + jet, perfect_air}}) {

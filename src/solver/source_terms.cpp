@@ -176,8 +176,8 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
             if (!entry->at("time_dependent").is_boolean()) throw InputError("source.time_dependent must be true or false.");
             logging::warning("source.time_dependent is ignored: expressions of t are re-evaluated at every stage.");
         }
-        const std::string label = !legacy && entry->contains("name") ? toml::find<std::string>(*entry, "name") : where;
-        const bool total = !legacy && toml::find_or<bool>(*entry, "total", false);
+        const std::string label = !legacy && entry->contains("name") ? find_value<std::string>(*entry, "name") : where;
+        const bool total = !legacy && find_value_or<bool>(*entry, "total", false);
         // A total is integrated over the region: per unit volume times a volume
         const auto per = [total](const Dimension & d) { return total ? d.times(dim::length, 3) : d; };
         int32_t row = -1;

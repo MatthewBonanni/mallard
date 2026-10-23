@@ -1,10 +1,10 @@
-# Case templates for `Mallard new`.
+# Case templates for `mallard new`.
 #
 # Each [[templates]] entry points at an example (or tutorial) directory;
-# `Mallard new` assembles the case from its files when it is created, so a
+# `mallard new` assembles the case from its files when it is created, so a
 # template is always its example. The keys:
 #
-#   name, group, summary  as `Mallard new --list` shows them (groups below,
+#   name, group, summary  as `mallard new --list` shows them (groups below,
 #                         in the order of examples/README.md)
 #   source, files         the directory and the files copied from it; the
 #                         first is the input, written as input.toml

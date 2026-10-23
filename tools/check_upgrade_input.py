@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Run `Mallard upgrade-input` on every input file of every release.
+"""Run `mallard upgrade-input` on every input file of every release.
 
-    check_upgrade_input.py build/src/Mallard [--tags v0.1.0,v0.8.0]
+    check_upgrade_input.py build/src/mallard [--tags v0.1.0,v0.8.0]
 
 For each tag v* (git show TAG:path) and each .toml under examples/,
 tutorials/ and benchmarks/, checks that upgrade-input succeeds, that its

@@ -116,9 +116,6 @@ namespace {
 constexpr const char * MESH_FORMAT = "mallard-solution-mesh";
 constexpr const char * SOLUTION_FORMAT = "mallard-solution";
 
-// The HDF5 library is not thread-safe, and asynchronous writers call it from their threads
-std::mutex hdf5_mutex;
-
 /** @brief XDMF code of a cell in a Mixed topology, by node count. */
 uint64_t xdmf_type(uint32_t n_nodes) {
     if (N_DIM == 2 && n_nodes == 3) return 4;  // Triangle
@@ -172,11 +169,14 @@ void write_dataset(hid_t parent, const char * name, uint64_t n_rows, int cols, u
 
 } // namespace
 
-bool have_hdf5_deflate() { return H5Zfilter_avail(H5Z_FILTER_DEFLATE) > 0 && H5Zfilter_avail(H5Z_FILTER_SHUFFLE) > 0; }
+bool have_hdf5_deflate() {
+    const std::lock_guard<std::mutex> lock(h5::mutex());
+    return H5Zfilter_avail(H5Z_FILTER_DEFLATE) > 0 && H5Zfilter_avail(H5Z_FILTER_SHUFFLE) > 0;
+}
 
 // Serial runs on several ranks (tests) hold the whole mesh on every rank: the root writes alone
 void DataWriter::write_hdf5_mesh() {
-    const std::lock_guard<std::mutex> lock(hdf5_mutex);
+    const std::lock_guard<std::mutex> lock(h5::mutex());
     hdf5_mesh_written = true;
     const bool distributed = mesh->n_global_cells > 0;
     const uint32_t n_owned = mesh->n_owned();
@@ -258,7 +258,7 @@ void DataWriter::write_hdf5_mesh() {
 }
 
 void DataWriter::write_hdf5(const std::string & stem, uint64_t step, rtype t, const Values & snapshot) {
-    const std::lock_guard<std::mutex> lock(hdf5_mutex);
+    const std::lock_guard<std::mutex> lock(h5::mutex());
     const bool distributed = mesh->n_global_cells > 0;
     const uint32_t n_owned = mesh->n_owned();
     uint32_t width = 0;

@@ -1,4 +1,4 @@
-# Mallard for CPUs: OpenMP and MPI (with dKaMinPar), HDF5, CGNS and zlib; 2D (Mallard) and 3D (Mallard3D).
+# Mallard for CPUs: OpenMP and MPI (with dKaMinPar), HDF5, CGNS and zlib; 2D (mallard) and 3D (mallard3d).
 #
 #   docker build -f docker/Dockerfile -t mallard .
 #
@@ -21,7 +21,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         python3 python3-numpy python3-scipy python3-matplotlib python3-h5py \
     && rm -rf /var/lib/apt/lists/*
 # Mallard's executables only, not the bundled Kokkos's tools
-COPY --from=build /opt/mallard/bin/Mallard* /opt/mallard/bin/mallard-* /opt/mallard/bin/
+COPY --from=build /opt/mallard/bin/mallard* /opt/mallard/bin/
 COPY --from=build /opt/mallard/share /opt/mallard/share
 ENV PATH=/opt/mallard/bin:$PATH \
     MALLARD_SHARE=/opt/mallard/share/mallard \

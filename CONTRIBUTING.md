@@ -42,15 +42,17 @@ cd mallard
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
     -DKokkos_ENABLE_THREADS=ON -DMallard_WARNINGS_AS_ERRORS=ON
 cmake --build build -j
-./build/test/MallardTest
+./build/test/mallard-test
 ```
 
 - Build 3D in a separate directory with `-DMallard_DIM=3`; code that is not
   dimension specific must build and pass in both.
-- Run a subset while iterating: `./build/test/MallardTest --gtest_filter='TENO*'`.
+- Run a subset while iterating: `./build/test/mallard-test --gtest_filter='TENO*'`.
+  `mallard test` runs the same binary from a build or an install tree
+  (`./build/src/mallard test --gtest_filter='TENO*'`).
   Run the whole suite, 2D and 3D, before asking for review.
 - With MPI (`-DMallard_ENABLE_MPI=ON`), run the multi-rank tests on 2 to 4 ranks:
-  `mpirun -n 3 ./build/test/MallardTest --gtest_filter='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*'`.
+  `mpirun -n 3 ./build/test/mallard-test --gtest_filter='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:ProbesTest.*'`.
 - Python tools (`tools/`) need numpy, scipy, matplotlib, imageio and
   imageio-ffmpeg; a virtual environment works.
 
@@ -106,7 +108,7 @@ that adds or changes behavior includes:
    - equations and sources in `docs/theory/`, design rationale and measurements in
      `docs/design/`, and new references in [docs/references.md](docs/references.md);
    - figures drawn by a script in `tools/docs/` as a light/dark SVG pair
-     (`python tools/docs/make_figures.py --mallard build/src/Mallard`), never
+     (`python tools/docs/make_figures.py --mallard build/src/mallard`), never
      hand-edited images.
 4. **An example** in `examples/<case>/` with its `input.toml` and a row in
    [examples/README.md](examples/README.md), ideally compared with a reference
