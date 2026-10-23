@@ -64,6 +64,8 @@ jobs:
         run: |
           python3 -c 'import yaml' 2>/dev/null || python3 -m pip install -q --break-system-packages pyyaml
           python3 tools/check_workflow_triggers.py
+      - name: Check the documented input defaults against the key catalog
+        run: python3 tools/input_catalog.py docs
       - name: Check for a changelog fragment
         env:
           GH_TOKEN: ${{ github.token }}
@@ -334,6 +336,9 @@ jobs:
           key: ccache-tutorials-${{ github.sha }}
       - name: Run the tutorials
         run: tutorials/ci.sh build-2/src/Mallard build-3/src/Mallard ${{ runner.temp }}/tutorials
+      # docs/input-keys.json is what setup reads from the examples and tutorials
+      - name: Check the key catalog
+        run: python3 tools/input_catalog.py build --mallard-2d build-2/src/Mallard --mallard-3d build-3/src/Mallard --check
       # Every case template (Mallard new --quick): 2D from an install tree, 3D from the build tree
       - name: Run the case templates
         run: |

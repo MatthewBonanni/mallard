@@ -84,9 +84,9 @@ void DataWriter::init(const Input & input,
     if (has_interval == has_time_interval) {
         throw std::runtime_error("DataWriter: specify exactly one of interval or time_interval.");
     }
-    prefix = toml::find<std::string>(input, "prefix");
+    prefix = find_value<std::string>(input, "prefix");
     if (has_interval) {
-        interval = toml::find<uint64_t>(input, "interval");
+        interval = find_value<uint64_t>(input, "interval");
         if (interval == 0) {
             throw std::runtime_error("DataWriter: interval must be positive.");
         }
@@ -97,11 +97,8 @@ void DataWriter::init(const Input & input,
         }
     }
 
-    const std::string format_str = toml::find<std::string>(input, "format");
-    auto it = FORMAT_TYPES.find(format_str);
-    if (it == FORMAT_TYPES.end()) {
-        throw unknown_option(FORMAT_TYPES, "write_data.format", format_str);
-    }
+    const std::string format_str = find_value<std::string>(input, "format");
+    auto it = find_option(FORMAT_TYPES, "write_data.format", format_str);
     format = it->second;
 
     std::vector<std::string> variables;
@@ -115,7 +112,7 @@ void DataWriter::init(const Input & input,
         if (!input.contains("variables")) {
             throw std::runtime_error("DataWriter: variables not specified.");
         }
-        variables = toml::find<std::vector<std::string>>(input, "variables");
+        variables = find_value<std::vector<std::string>>(input, "variables");
     }
     if (variables.empty()) {
         throw std::runtime_error("DataWriter: No variables specified.");
@@ -172,7 +169,7 @@ void DataWriter::init(const Input & input,
         }
     }
 
-    geometry = toml::find_or<std::string>(input, "geometry", "all");
+    geometry = find_value_or<std::string>(input, "geometry", "all");
     if (geometry != "all") {
         if (format != DataFormat::VTU) {
             throw std::runtime_error("DataWriter: geometry can only be set for vtu output.");
@@ -189,11 +186,8 @@ void DataWriter::init(const Input & input,
         }
     }
 
-    const std::string compression_str = toml::find_or<std::string>(input, "compression", "none");
-    const auto compression_it = COMPRESSION_TYPES.find(compression_str);
-    if (compression_it == COMPRESSION_TYPES.end()) {
-        throw unknown_option(COMPRESSION_TYPES, "write_data.compression", compression_str);
-    }
+    const std::string compression_str = find_value_or<std::string>(input, "compression", "none");
+    const auto compression_it = find_option(COMPRESSION_TYPES, "write_data.compression", compression_str);
     compression = compression_it->second;
     if (compression != Compression::NONE) {
         if (surface) throw InputError("write_data.compression: boundary-zone output is ASCII, which is not compressed.");
@@ -208,7 +202,7 @@ void DataWriter::init(const Input & input,
         if (format != DataFormat::RESTART || compression == Compression::NONE) {
             throw InputError("write_data.chunk_cells is for compressed restart files.");
         }
-        chunk_cells = toml::find<uint64_t>(input, "chunk_cells");
+        chunk_cells = find_value<uint64_t>(input, "chunk_cells");
         if (chunk_cells == 0) throw InputError("write_data.chunk_cells must be positive.");
     }
     if (input.contains("relative_error")) {

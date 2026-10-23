@@ -56,10 +56,10 @@ const char * const SAMPLES = "STATISTICS_SAMPLES";
 void Statistics::init(const Input & input, const std::vector<std::string> & species_names, const Mesh & mesh) {
     if (!input.contains("statistics")) return;
     const Input & table = input.at("statistics");
-    interval = toml::find_or<uint64_t>(table, "interval", 1);
+    interval = find_value_or<uint64_t>(table, "interval", 1);
     if (interval == 0) throw InputError("statistics.interval must be positive.");
     t_start = find_real_or(table, "t_start", dim::time, 0.0);
-    reset = toml::find_or<bool>(table, "reset", false);
+    reset = find_value_or<bool>(table, "reset", false);
     if (table.contains("spectra")) spectra.init(table.at("spectra"), input, species_names, mesh, interval, t_start);
     if (table.contains("phase")) phase.init(table.at("phase"), mesh, species_names, mesh.n_cells, interval, t_start);
     auto add_field = [&](const std::string & name) {
@@ -68,13 +68,13 @@ void Statistics::init(const Input & input, const std::vector<std::string> & spec
         fields.push_back(name);
         return static_cast<uint32_t>(fields.size() - 1);
     };
-    for (const auto & name : toml::find_or<std::vector<std::string>>(table, "fields", {})) {
+    for (const auto & name : find_value_or<std::vector<std::string>>(table, "fields", {})) {
         if (std::find(fields.begin(), fields.end(), name) != fields.end()) {
             throw InputError("statistics.fields: \"" + name + "\" is listed twice.");
         }
         add_field(name);
     }
-    for (const auto & product : toml::find_or<std::vector<std::string>>(table, "products", {})) {
+    for (const auto & product : find_value_or<std::vector<std::string>>(table, "products", {})) {
         const size_t star = product.find('*');
         if (star == std::string::npos || product.find('*', star + 1) != std::string::npos) {
             throw InputError("statistics.products: \"" + product + "\" is not of the form \"A*B\".");
@@ -266,12 +266,12 @@ Dimension variable_dimension(const std::string & name) {
 void PhaseAverage::init(const Input & table, const Mesh & mesh, const std::vector<std::string> & species_names,
                         uint32_t n_cells, uint64_t interval_in, rtype t_start_in) {
     const std::string key = "statistics.phase";
-    interval = toml::find_or<uint64_t>(table, "interval", interval_in);
+    interval = find_value_or<uint64_t>(table, "interval", interval_in);
     if (interval == 0) throw InputError(key + ".interval must be positive.");
     t_start = find_real_or(table, "t_start", dim::time, t_start_in);
-    bins = toml::find_or<uint32_t>(table, "bins", 0);
+    bins = find_value_or<uint32_t>(table, "bins", 0);
     if (bins == 0) throw InputError(key + ".bins must be positive.");
-    fields = toml::find_or<std::vector<std::string>>(table, "fields", {});
+    fields = find_value_or<std::vector<std::string>>(table, "fields", {});
     if (fields.empty()) throw InputError(key + ".fields: list at least one variable.");
     for (size_t i = 0; i < fields.size(); i++) {
         if (std::find(fields.begin(), fields.begin() + long(i), fields[i]) != fields.begin() + long(i)) {
@@ -294,7 +294,7 @@ void PhaseAverage::init(const Input & table, const Mesh & mesh, const std::vecto
         if (x.size() != N_DIM) throw InputError(key + ".probe must have " + std::to_string(N_DIM) + " components.");
         for (size_t d = 0; d < N_DIM; d++) trigger_point[d] = static_cast<double>(x[d]);
         if (!table.contains("variable")) throw InputError(key + ": variable (of the probe) not specified.");
-        trigger_variable = toml::find<std::string>(table, "variable");
+        trigger_variable = find_value<std::string>(table, "variable");
         trigger_code = CellSampler::code(trigger_variable, species_names, key + ".variable");
         level = find_double_or(table, "level", variable_dimension(trigger_variable), 0.0);
         trigger_cell = locate_points(mesh, {trigger_point})[0];

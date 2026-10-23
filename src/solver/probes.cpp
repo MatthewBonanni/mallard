@@ -342,12 +342,12 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
     resumed = resume;
     distributed = mesh.n_global_cells > 0;
     if (!input.contains("probes")) return;
-    const auto entries = toml::find<std::vector<Input>>(input, "probes");
+    const auto entries = find_value<std::vector<Input>>(input, "probes");
     for (const auto & entry : entries) {
         auto probe_ptr = std::make_unique<Probe>();
         Probe & p = *probe_ptr;
         if (!entry.contains("name")) throw InputError("probes: every probe needs a name.");
-        p.name = toml::find<std::string>(entry, "name");
+        p.name = find_value<std::string>(entry, "name");
         const std::string key = "probes[name = \"" + p.name + "\"]";
         for (const auto & other : probes) {
             if (other->name == p.name) throw InputError(key + ": name is used twice.");
@@ -359,17 +359,19 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
             p.time_interval = find_real(entry, "time_interval", dim::time);
             if (!(p.time_interval > 0.0_r)) throw InputError(key + ".time_interval must be positive.");
         } else {
-            p.interval = toml::find_or<uint64_t>(entry, "interval", 1);
+            p.interval = find_value_or<uint64_t>(entry, "interval", 1);
             if (p.interval == 0) throw InputError(key + ".interval must be positive.");
         }
 
-        const std::string sampling = toml::find_or<std::string>(entry, "sampling", "cell");
+        const std::string sampling = find_value_or<std::string>(entry, "sampling", "cell");
+        record_options(key + ".sampling", {"cell", "point"});
         if (sampling == "point") {
             p.sampling = Sampling::POINT;
         } else if (sampling != "cell") {
             throw InputError(key + ".sampling = \"" + sampling + "\" is not one of: cell, point.");
         }
-        const std::string format = toml::find_or<std::string>(entry, "format", "csv");
+        const std::string format = find_value_or<std::string>(entry, "format", "csv");
+        record_options(key + ".format", {"csv", "hdf5", "vtp"});
         if (format == "hdf5") {
 #ifndef Mallard_HAS_HDF5
             throw InputError(key + ".format = \"hdf5\" needs a build with -DMallard_ENABLE_HDF5=ON.");
@@ -381,21 +383,20 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
             throw InputError(key + ".format = \"" + format + "\" is not one of: csv, hdf5, vtp.");
         }
         const char * extension = p.format == Format::CSV ? ".csv" : p.format == Format::HDF5 ? ".h5" : ".pvd";
-        p.file = toml::find_or<std::string>(entry, "file", "probe_" + p.name + extension);
-        p.write_samples = toml::find_or<bool>(entry, "samples", true);
-        for (const auto & r : toml::find_or<std::vector<std::string>>(entry, "reductions", {})) {
-            const auto it = REDUCTIONS.find(r);
-            if (it == REDUCTIONS.end()) throw unknown_option(REDUCTIONS, key + ".reductions", r);
+        p.file = find_value_or<std::string>(entry, "file", "probe_" + p.name + extension);
+        p.write_samples = find_value_or<bool>(entry, "samples", true);
+        for (const auto & r : find_value_or<std::vector<std::string>>(entry, "reductions", {})) {
+            const auto it = find_option(REDUCTIONS, key + ".reductions", r);
             if (std::find(p.reductions.begin(), p.reductions.end(), it->second) != p.reductions.end()) {
                 throw InputError(key + ".reductions: \"" + r + "\" is listed twice.");
             }
             p.reductions.push_back(it->second);
         }
         if (!p.write_samples && p.reductions.empty()) throw InputError(key + ": samples = false needs reductions.");
-        p.reductions_file = toml::find_or<std::string>(entry, "reductions_file", "probe_" + p.name + "_reductions.csv");
+        p.reductions_file = find_value_or<std::string>(entry, "reductions_file", "probe_" + p.name + "_reductions.csv");
 
         if (!entry.contains("variables")) throw InputError(key + ": variables not specified.");
-        p.variables = expand_variables(toml::find<std::vector<std::string>>(entry, "variables"), species_names, key);
+        p.variables = expand_variables(find_value<std::vector<std::string>>(entry, "variables"), species_names, key);
         if (p.variables.empty()) throw InputError(key + ".variables is empty.");
         std::vector<int32_t> h_codes;
         for (const auto & v : p.variables) h_codes.push_back(CellSampler::code(v, species_names, key + ".variables"));

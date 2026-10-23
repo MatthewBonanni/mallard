@@ -44,9 +44,9 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
     const Input & bench = input.at("benchmark");
     const double T0 = find_double(table, "T", dim::temperature), p0 = find_double(table, "p", dim::pressure);
     const double end_time = find_double(table, "end_time", dim::time);
-    const int64_t samples_in = toml::find_or<int64_t>(bench, "samples", 64);
-    const int64_t cells_in = toml::find_or<int64_t>(bench, "cells", 65536);
-    const int64_t repeats_in = toml::find_or<int64_t>(bench, "repeats", 3);
+    const int64_t samples_in = find_value_or<int64_t>(bench, "samples", 64);
+    const int64_t cells_in = find_value_or<int64_t>(bench, "cells", 65536);
+    const int64_t repeats_in = find_value_or<int64_t>(bench, "repeats", 3);
     if (samples_in < 1 || cells_in < 1 || repeats_in < 1) {
         throw InputError("benchmark: samples, cells and repeats must be positive.");
     }
@@ -114,14 +114,14 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
 
     CellChemistryOptions cell_options;
     cell_options.reactor = options;
-    const int64_t lanes = toml::find_or<int64_t>(bench, "lanes", 0);
+    const int64_t lanes = find_value_or<int64_t>(bench, "lanes", 0);
     if (lanes < 0) throw InputError("benchmark.lanes must not be negative.");
     cell_options.lanes = static_cast<uint32_t>(lanes);
-    cell_options.bin_by_cost = toml::find_or<bool>(bench, "bin_by_cost", true);
-    const int64_t threads = toml::find_or<int64_t>(bench, "threads", 0);
+    cell_options.bin_by_cost = find_value_or<bool>(bench, "bin_by_cost", true);
+    const int64_t threads = find_value_or<int64_t>(bench, "threads", 0);
     if (threads < 0) throw InputError("benchmark.threads must not be negative.");
     cell_options.threads = static_cast<uint32_t>(threads);
-    cell_options.shared = static_cast<int>(toml::find_or<int64_t>(bench, "shared", -1));
+    cell_options.shared = static_cast<int>(find_value_or<int64_t>(bench, "shared", -1));
     CellChemistry cells;
     cells.init(model.device(), mech, chemistry::make_kinetics_table(mech, options.C_reg), cell_options, n_cells);
 
