@@ -654,6 +654,7 @@ void Solver::init_boundaries() {
             timed_boundary_faces.push_back({static_cast<uint32_t>(bcs.size()), i_bc, x});
         }
         bcs.push_back(copy);
+        wall_model_specs.push_back(wall_model_specs[i_bc]);
     }
 
     if (FaceZone * partition = mesh->get_face_zone(PARTITION_ZONE)) {

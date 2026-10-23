@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "boundary.h"
+#include "boundary_fields.h"
 #include "gmsh_fixtures.h"
 #include "inflow.h"
 #include "mechanism.h"
@@ -812,4 +813,20 @@ TEST(ForcedInletTest, TimeDependentConditionsConvergeAtTheIntegratorsOrder) {
         EXPECT_GT(order, sizeof(rtype) == sizeof(double) ? c.order : std::min(c.order, 2.0))
             << c.forced.name << ": errors " << e1 << ", " << e2;
     }
+}
+
+TEST(ForcedInletTest, QuantitiesWithUnitsAreNumbersNotExpressions) {
+    // "1 bar" and "300 K" are the numbers 1e5 and 300, uniform along the inlet;
+    // the expression of y varies along it
+    const std::string u = N_DIM == 2 ? "u = [\"10 m/s\", 0.0]\n" : "u = [\"10 m/s\", 0.0, 0.0]\n";
+    const BoundaryFields with_units(parse_toml("p = \"1 bar\"\nT = \"300 K\"\n" + u), BoundaryType::UPT, "b");
+    EXPECT_FALSE(with_units.varies());
+    BoundaryCondition bc;
+    with_units.apply(bc, Point{}, 0.0, 287.0);
+    EXPECT_DOUBLE_EQ(double(bc.data[N_DIM + 1]), double(rtype(1e5)));
+    EXPECT_DOUBLE_EQ(double(bc.data[1]), 10.0);
+    EXPECT_DOUBLE_EQ(with_units.temperature(Point{}, 0.0), 300.0);
+    const BoundaryFields expression(parse_toml("p = 1.0e5\nT = \"300 + y\"\n" + u), BoundaryType::UPT, "b");
+    EXPECT_TRUE(expression.varies());
+    EXPECT_FALSE(expression.depends_on_time());
 }
