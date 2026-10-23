@@ -35,7 +35,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Finite-rate chemistry: elementary, three-body, falloff, PLOG and Chebyshev reactions; a Rosenbrock (RODAS) integrator per cell with analytical Jacobians, Strang or SIMPLER balanced splitting from the flow; ignition delays match Cantera up to 1268 species
 - Mixture-averaged, unity-Lewis or constant-Lewis transport; optional thermal (Soret) diffusion
 - Optically thin radiation (TNF Planck-mean model)
-- Gravity and arbitrary source terms
+- Gravity and any number of source terms: expressions of position, time and the local or domain-averaged solution (species too), compiled for the GPU, in regions built from spheres, cylinders, cones, boxes, tori, polygons or implicit shapes with unions, intersections and differences, with exact integrated totals on any mesh ([guide](docs/guide/sources.md))
 
 **Large-eddy simulation** ([guide](docs/guide/les.md))
 - Explicit LES: Sigma (default), WALE, Vreman or Smagorinsky eddy viscosity for single gases and mixtures, with Scotti's filter width on anisotropic cells and an opt-in dynamic constant
@@ -43,6 +43,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Thickened flame (TFLES) with dynamic thickening and a dynamic efficiency (no model constant); partially stirred reactor (PaSR) closure, experimental
 - Synthetic turbulent inflow: a digital filter with prescribed Reynolds stresses and length scales, or the statistics of a precursor run, bitwise the same on any number of ranks ([guide](docs/guide/boundary_conditions.md#synthetic-turbulence))
 - Channel flow at Re<sub>τ</sub> = 395 and 590: Re<sub>τ</sub> within 0.7% and 1.6% of the DNS of Moser, Kim & Mansour
+- Wall-modeled LES: the Griffin-Fu-Moin compressible model (isothermal and adiabatic walls) or an equilibrium ODE model, fed from an exchange point a few cells off the wall ([guide](docs/guide/les.md#wall-models-wall_model)); channels at Re<sub>τ</sub> = 2000 and 5200 on 12 cells per half-height with C<sub>f</sub> within 2.1% of Lee & Moser, and supersonic isothermal channels at M<sub>b</sub> = 1.7 and 3.0 with wall heat flux within 1.3% of Trettel & Larsson
 
 **Boundary conditions**
 - Slip, adiabatic, isothermal and heat-flux walls, optionally moving

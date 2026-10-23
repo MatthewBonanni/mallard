@@ -19,6 +19,7 @@
 #include <sstream>
 
 #include "input.h"
+#include "log.h"
 #include "mesh.h"
 
 namespace region {
@@ -354,7 +355,7 @@ Region::Region(const Input & table, const std::string & where) {
         if (!(m_host.edge >= 0.0) || !std::isfinite(m_host.edge)) {
             throw InputError(where + ".edge must be a non-negative width.");
         }
-        m_summary += ", edge " + std::to_string(m_host.edge);
+        m_summary += ", edge " + logging::real(m_host.edge);
     }
     m_host.nodes = Kokkos::View<const Node *, Kokkos::HostSpace>(m_nodes.data(), m_nodes.size());
     m_host.vertices = Kokkos::View<const double *, Kokkos::HostSpace>(m_vertices.data(), m_vertices.size());

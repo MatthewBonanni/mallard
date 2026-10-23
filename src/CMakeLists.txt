@@ -63,6 +63,7 @@ add_library(MallardCore STATIC
     solver/solver_radiation.cpp
     solver/solver_sponge.cpp
     solver/solver_inflow.cpp
+    solver/source_terms.cpp
     solver/remap.cpp
     solver/statistics.cpp
     io/compression.cpp
@@ -120,6 +121,9 @@ endforeach()
 # change them differently on each: no contraction in that file
 if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
     set_source_files_properties(numerics/teno_setup.cpp PROPERTIES COMPILE_OPTIONS "--fmad=false;-ffp-contract=off")
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+    # -ffp-contract=off overrides the -fp-model=precise of every file, as intended
+    set_source_files_properties(numerics/teno_setup.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-Wno-overriding-option")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set_source_files_properties(numerics/teno_setup.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 endif()
