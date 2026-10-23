@@ -97,7 +97,7 @@ Three ways to install Mallard, quickest first:
 | [Spack](#spack) | Clusters: your compilers, MPI and GPUs | Automatic |
 | [From source](#from-source) | Development; options the others lack | CMake |
 
-Each installs `mallard` (2D) and `mallard3d` (3D), and, under `share/mallard`, the `examples`, `mechanisms`, `tools` and `tutorials`. One command does everything: `mallard -i input.toml` runs a case, `mallard check`, `new`, `ctl` and `upgrade-input` help set it up and run it, `mallard reactor` integrates 0D reactors and `mallard mesh convert` writes meshes to HDF5; `mallard --help` lists them.
+Each installs the solvers `mallard2d` and `mallard3d`, the `mallard` command that runs whichever a case needs (by its mesh: a generated mesh is 3D when `[mesh]` sets `Nz` or `Lz`; `mallard --dim 2|3` states it), and, under `share/mallard`, the `examples`, `mechanisms`, `tools` and `tutorials`. One command does everything: `mallard -i input.toml` runs a case, `mallard check`, `new`, `ctl` and `upgrade-input` help set it up and run it, `mallard reactor` integrates 0D reactors and `mallard mesh convert` writes meshes to HDF5; `mallard --help` lists them.
 
 ### Container
 
@@ -179,24 +179,23 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_
 cmake --build build -j
 ```
 
-The solver is `build/src/mallard`. Add `-DMallard_DIM=3` (in a separate build directory) for the 3D solver.
+This builds the 2D solver, `build/src/mallard2d`, and `build/src/mallard`, which runs it. Add `-DMallard_DIM=3` (in a separate build directory) for the 3D solver, `mallard3d`; installed to the same prefix, one `mallard` runs both.
 
 With everything (MPI with dKaMinPar, HDF5, CGNS and zlib), on Ubuntu 24.04, in 2D and 3D, installed into `~/mallard` (the CPU container is built this way):
 
 ```sh
 sudo apt-get install -y build-essential cmake git libopenmpi-dev openmpi-bin libhdf5-openmpi-dev zlib1g-dev libtbb-dev
 for dim in 2 3; do
-    suffix=""; [ $dim = 3 ] && suffix=3d
     cmake -S . -B build-$dim -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_ENABLE_OPENMP=ON \
         -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON \
         -DMallard_ENABLE_CGNS=ON -DUSE_SYSTEM_CGNS=OFF -DMallard_ENABLE_ZLIB=ON \
-        -DMallard_DIM=$dim -DMallard_EXECUTABLE_SUFFIX=$suffix -DCMAKE_INSTALL_PREFIX=$HOME/mallard
+        -DMallard_DIM=$dim -DCMAKE_INSTALL_PREFIX=$HOME/mallard
     cmake --build build-$dim -j && cmake --install build-$dim
 done
 export PATH=$HOME/mallard/bin:$PATH MALLARD_SHARE=$HOME/mallard/share/mallard
 ```
 
-On macOS with Homebrew, `brew install cmake open-mpi hdf5 cgns` and the same loop with `-DKokkos_ENABLE_THREADS=ON` in place of OpenMP, without dKaMinPar, and `-DUSE_SYSTEM_CGNS=ON`. `-DMallard_EXECUTABLE_SUFFIX=3d` names the 3D executables `mallard3d` and `mallard-test3d`, so both dimensions install side by side. `mallard test` (`mallard3d test`) runs the test suite of a build or an install, e.g. `mallard test --gtest_filter='Sod*'`.
+On macOS with Homebrew, `brew install cmake open-mpi hdf5 cgns` and the same loop with `-DKokkos_ENABLE_THREADS=ON` in place of OpenMP, without dKaMinPar, and `-DUSE_SYSTEM_CGNS=ON`. `mallard test` runs the test suites of a build or an install (`mallard-test2d` and `mallard-test3d`, `--dim 2|3` for one), e.g. `mallard test --gtest_filter='Sod*'`.
 
 Pick the Kokkos backend at configure time, for example `-DKokkos_ENABLE_OPENMP=ON`, or `-DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON -DCMAKE_CXX_COMPILER=$PWD/src/external/kokkos/bin/nvcc_wrapper` for NVIDIA A100 GPUs (add `-DKokkos_ENABLE_OPENMP=ON` too, so host-side setup such as TENO's precomputation runs in parallel; with MPI, `-DMallard_ENABLE_NCCL=ON` for halo exchanges with NCCL). The CUDA container is built this way, for several GPUs at once (`docker/Dockerfile.cuda`). To use an installed Kokkos instead, pass `-DUSE_SYSTEM_KOKKOS=ON -DKokkos_DIR=/path/to/kokkos`.
 
@@ -213,7 +212,7 @@ cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 | CMake option | Default | Description |
 |---|---|---|
 | `USE_SYSTEM_KOKKOS` | `ON` | Use an installed Kokkos instead of the submodule |
-| `Mallard_DIM` | `2` | Spatial dimension, `2` or `3` (one binary per dimension) |
+| `Mallard_DIM` | `2` | Spatial dimension, `2` or `3`: the solver `mallard2d` or `mallard3d` (one per build; `mallard` runs either) |
 | `Mallard_USE_DOUBLE` | `ON` | Double precision (single precision otherwise) |
 | `Mallard_ENABLE_MPI` | `OFF` | Distributed memory with MPI: `mpirun -n N mallard -i input.toml` splits the mesh between ranks; with generated meshes or HDF5 mesh files (`mallard mesh convert`) no rank ever holds the whole mesh, while other mesh files are read whole by every rank |
 | `Mallard_GPU_AWARE_MPI` | `OFF` | With MPI on GPUs: hand device buffers to a CUDA- or ROCm-aware MPI (e.g. Open MPI over UCX built with CUDA or ROCm) instead of staging halos through host memory |
@@ -222,9 +221,8 @@ cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 | `Mallard_ENABLE_HDF5` | `OFF` | HDF5 mesh files and solution output (`format = "hdf5"`, with XDMF for ParaView; parallel HDF5 with MPI, when available) and `mallard mesh convert` |
 | `Mallard_ENABLE_ZLIB` | `OFF` | zlib compression of VTU and restart files (`[[write_data]] compression = "zlib"`; HDF5 output compresses with HDF5's own deflate filter and needs no option) |
 | `Mallard_ENABLE_CGNS` | `OFF` | CGNS mesh files, through the [CGNS library](https://cgns.github.io/) (an installed one, found through `CMAKE_PREFIX_PATH`; with `-DUSE_SYSTEM_CGNS=OFF`, v4.5.0 is fetched and built with the HDF5 of `Mallard_ENABLE_HDF5`) |
-| `Mallard_EXECUTABLE_SUFFIX` | (none) | Appended to the names of `mallard` and `mallard-test`, e.g. `3d` |
-| `Mallard_ENABLE_TESTS` | `ON` | Build the test suite, `mallard-test` (fetches GoogleTest) |
-| `Mallard_INSTALL_TESTS` | `ON` | Install `mallard-test` and its data, so that `mallard test` checks an installed build |
+| `Mallard_ENABLE_TESTS` | `ON` | Build the test suite, `mallard-test2d` or `mallard-test3d` (fetches GoogleTest) |
+| `Mallard_INSTALL_TESTS` | `ON` | Install the test suite and its data, so that `mallard test` checks an installed build |
 | `USE_SYSTEM_YAML_CPP` | `OFF` | Use an installed yaml-cpp (0.8 or newer) instead of fetching it |
 | `Mallard_WARNINGS_AS_ERRORS` | `OFF` | Treat compiler warnings in Mallard's own code as errors (on in CI) |
 | `BUILD_DOCS` | `OFF` | Doxygen documentation target |
@@ -246,8 +244,8 @@ While it runs, `mallard ctl <run-dir> status` reports its progress and `mallard 
 ## Testing
 
 ```sh
-mallard test                    # an install (or ./build/src/mallard test)
-./build/test/mallard-test       # the same, in a build tree
+mallard test                    # an install: every dimension installed (--dim 2|3 for one)
+./build/src/mallard test        # a build tree (./build/test/mallard-test2d)
 ```
 
 The test suite checks mesh geometry, the Riemann solvers against an exact Riemann solver, time integrator convergence orders, gradient and limiter properties, TENO design order on triangles and quadrilaterals and on 3D tetrahedra and hexahedra (with polynomial exactness on prisms, pyramids and mixed meshes), free-stream preservation, discrete conservation, symmetry preservation, shock tubes against exact solutions, viscous flows against exact solutions (Couette, Stokes' first problem, conduction), axisymmetric well balance and design order (manufactured solution, Hagen-Poiseuille), and bit-for-bit restarts.

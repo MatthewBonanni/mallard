@@ -42,7 +42,7 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
         values=("2", "3"),
         multi=True,
         description="Spatial dimensions to build: one solver per dimension "
-        "(the 3D one is named mallard3d)",
+        "(mallard2d, mallard3d), both run as mallard",
     )
     variant(
         "precision",
@@ -108,16 +108,11 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
 
     @run_after("install")
     def check_install(self):
-        """The solvers start and report their version."""
-        for name in self._executables():
+        """mallard and the solvers start and report their version."""
+        for name in ["mallard"] + [f"mallard{dim}d" for dim in self.spec.variants["dims"].value]:
             Executable(join_path(self.prefix.bin, name))("--version", output=str, error=str)
 
-    def _executables(self):
-        return [
-            "mallard" + ("3d" if dim == "3" else "") for dim in self.spec.variants["dims"].value
-        ]
-
-    def _run_example(self, exe, example, *command):
+    def _run_example(self, example, *command):
         share = join_path(self.prefix.share, "mallard")
         work = join_path(self.test_suite.stage, example)
         if os.path.exists(work):
@@ -126,17 +121,17 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
         case = join_path(work, "examples", example)
         shutil.copytree(join_path(share, "examples", example), case)
         with working_dir(case):
-            Executable(join_path(self.prefix.bin, exe))(*command, "-i", "input.toml")
+            Executable(join_path(self.prefix.bin, "mallard"))(*command, "-i", "input.toml")
 
     def test_sod(self):
         """Run the Sod shock tube example in 2D"""
         if not self.spec.satisfies("dims=2"):
             raise SkipTest("Mallard was built without dims=2")
-        self._run_example("mallard", "sod")
+        self._run_example("sod")
 
     def test_reactor(self):
         """Run the hydrogen ignition example with mallard reactor"""
-        self._run_example(self._executables()[0], "h2_ignition", "reactor")
+        self._run_example("h2_ignition", "reactor")
 
 
 class CMakeBuilder(cmake.CMakeBuilder):
@@ -180,7 +175,6 @@ class CMakeBuilder(cmake.CMakeBuilder):
             args = self.std_cmake_args + self.cmake_args()
             args += [
                 self.define("Mallard_DIM", dim),
-                self.define("Mallard_EXECUTABLE_SUFFIX", "3d" if dim == "3" else ""),
                 os.path.abspath(self.root_cmakelists_dir),
             ]
             with working_dir(self._build_dir(dim), create=True):
@@ -197,5 +191,4 @@ class CMakeBuilder(cmake.CMakeBuilder):
     def check(self):
         for dim in self._dims():
             with working_dir(self._build_dir(dim)):
-                suffix = "3d" if dim == "3" else ""
-                Executable(join_path(self._build_dir(dim), "test", "mallard-test" + suffix))()
+                Executable(join_path(self._build_dir(dim), "test", "mallard-test" + dim + "d"))()

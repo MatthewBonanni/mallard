@@ -297,7 +297,8 @@ int main(int argc, char ** argv) {
         std::cerr << "mallard: neither mallard2d nor mallard3d is in " << bin.string() << ".\n";
         return 1;
     }
-    const Need need = dim ? Need{{dim, ""}, "--dim " + std::to_string(dim)} : command_need(args);
+    const bool stated = dim != 0;
+    const Need need = stated ? Need{{dim, ""}, "", false} : command_need(args);
     dim = need.dimension.dim;
     if (dim == 0) {
         if (!need.dimension_free && installed.size() > 1) {
@@ -308,9 +309,9 @@ int main(int argc, char ** argv) {
         dim = installed[0];
     }
     if (!fs::exists(solver(bin, dim))) {
-        std::cerr << "mallard: " << need.what << " is " << dim << "D, which needs mallard" << dim << "d, but it is not in "
-                  << bin.string() << ".\nBuild it with -DMallard_DIM=" << dim << " and install it to the same prefix ("
-                  << "cmake --install); the " << installed[0] << "D solver is mallard" << installed[0] << "d.\n";
+        std::cerr << "mallard: " << (stated ? "--dim " + std::to_string(dim) : need.what + " is " + std::to_string(dim) + "D and")
+                  << " needs mallard" << dim << "d, which is not in " << bin.string() << ".\nBuild it with -DMallard_DIM="
+                  << dim << " and install it to the same prefix as mallard" << installed[0] << "d (cmake --install).\n";
         return 1;
     }
     return exec(solver(bin, dim), args);
