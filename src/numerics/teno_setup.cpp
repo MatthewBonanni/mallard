@@ -3685,7 +3685,9 @@ teno::SmoothnessTerms smoothness_terms(const uint8_t degree) {
             for (int q = 0; q < t.n_beta; q++) {
                 const double dl = t.derivative[l][q], dm = t.derivative[m][q];
                 if (dl == 0.0 || dm == 0.0) continue;
-                const double w = dl * dm;
+                // The multinomial weight makes each degree's sum the squared norm of the derivative tensor
+                const int b0 = t.beta[q][0], b1 = t.beta[q][1], b2 = t.beta[q][2];
+                const double w = dl * dm * t.binom[b0 + b1 + b2][b0] * t.binom[b1 + b2][b1];
                 const int k = t.moment_slot[((e0 - 2 * t.beta[q][0]) * t.nm + e1 - 2 * t.beta[q][1]) * t.nm + e2 - 2 * t.beta[q][2]];
                 if (!(w > 0.0 && w < 65536.0 && w == std::floor(w)) || k < 0 || k > 0xFFFF) {
                     throw std::logic_error("TENO: a smoothness-matrix term does not fit its packing.");

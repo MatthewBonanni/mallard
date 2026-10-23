@@ -11,7 +11,8 @@ release, and `mallard upgrade-input old.toml > new.toml` rewrites old inputs
 The spatial dimension is fixed at build time with the CMake option
 `-DMallard_DIM=2` (default) or `3`. Vectors in the input (`u`, `gravity`,
 `rhou`) have that many components, and expressions are in `x`, `y`, `z`
-(`z` is 0 in 2D) and, where noted, `t`. Below, `[u_x, u_y]` reads
+(`z` is 0 in 2D) and, where noted, `t`, in one language for every section:
+[Expressions](guide/input_files.md#expressions). Below, `[u_x, u_y]` reads
 `[u_x, u_y, u_z]` in 3D.
 
 Every key in the file must be one the run reads: a key that is misspelled,
@@ -470,7 +471,7 @@ filter widths and overcorrects on coarse meshes; not validated beyond this case.
 | `n_subdivisions` | (`analytical`) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is split into `n_subdivisions`³ sub-tetrahedra, each with a 14-point degree-5 rule (default 1) |
 | `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, 3 when they also hold the weights of `[statistics]` averages, 4 when they also hold the state of characteristic boundary faces, 5 when compressed, or 6 when they also hold averaged `[statistics.spectra]`) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read, and files of a newer version are rejected ([compatibility](guide/output.md#file-formats-and-compatibility)) |
 
-Expressions use [exprtk](https://www.partow.net/programming/exprtk/) syntax, e.g. `"x < 0.5 ? 1.0 : 0.125"`.
+Expressions, e.g. `"x < 0.5 ? 1.0 : 0.125"`: [Expressions](guide/input_files.md#expressions).
 
 ### `type = "remap"`
 
@@ -951,7 +952,7 @@ Optional source terms, added per unit volume.
 | `gravity` | `[g_x, g_y]` (`[g_x, g_y, g_z]` in 3D); adds `rho g` to the momentum and `rho u . g` to the energy equation |
 | `rho`, `rhou`, `rhoE` | Expressions (default none) for the mass, momentum and energy sources, as in `[[sources]]` without a region (they read the same variables) |
 | `time_dependent` | Ignored, with a warning: expressions of `t` are re-evaluated at every stage on the device, others once (Mallard 0.8 and earlier evaluated every expression once unless this was `true`) |
-| `mass_flow` | `[m_x, m_y]` (`[m_x, m_y, m_z]` in 3D): hold the volume average of `rho u` along this vector at its magnitude with a uniform body force `f` per unit volume along it (constant mass flow, e.g. a periodic channel). At every Runge-Kutta stage `f` cancels the rate of change of that average from all other terms (one global sum) and closes any remaining gap within the time step, so a flow started at the target stays there to rounding. The energy gains the force's work `f . u`. |
+| `mass_flow` | `[m_x, m_y]` (`[m_x, m_y, m_z]` in 3D): hold the volume average of `rho u` along this vector at its magnitude with a uniform body force `f` per unit volume along it (constant mass flow, e.g. a periodic channel). At every Runge-Kutta stage `f` cancels the rate of change of that average from all other terms (one global sum, exact, so the same on any number of ranks) and closes any remaining gap within the time step, so a flow started at the target stays there to rounding. The energy gains the force's work `f . u`. |
 
 The scheme is not exactly well balanced: hydrostatic states carry small spurious velocities (about 1e-4 of the sound speed on a 32x32 mesh) that vanish at second order under refinement. Wall and symmetry ghost states continue the hydrostatic pressure gradient.
 
@@ -1057,13 +1058,8 @@ region = {type = "difference",
 region = {type = "box", center = [1, 0, 0], size = [0.4, 0.2, 0.2], pivot = [1, 0, 0], rotate = {axis = [0, 0, 1], angle = 30}}
 ```
 
-Expressions in regions (and, compiled the same way, wherever Mallard
-evaluates them on the device) follow exprtk's syntax and precedences: `+ - * /
-% ^`, comparisons, `and`, `or`, `xor`, `not`, `c ? a : b`, `if(c, a, b)`,
-exprtk's scalar functions (`sin`, `exp`, `log`, `sqrt`, `abs`, `min`, `max`,
-`clamp`, `atan2`, `hypot`, `erf`, ...) and the constants `pi`, `epsilon`,
-`inf`; values are the same as exprtk's to the last bit on the host. Unlike
-exprtk, variable names are case sensitive.
+Expressions in regions are those of every section:
+[Expressions](guide/input_files.md#expressions).
 
 ## `[parallel]`
 

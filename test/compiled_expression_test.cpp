@@ -17,11 +17,13 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <exprtk.hpp>
 
 #include "compiled_expression.h"
+#include "expression.h"
 
 namespace {
 
@@ -55,6 +57,34 @@ const std::vector<std::string> FUNCTIONS = {
     "erf(x) + erfc(y) + ncdf(z) + expm1(x / 10) + log1p(y^2) + log2(3 + x) + logn(5 + y, 3) + root(x, 3)",
     "x^0.5 + pow(abs(y), 1.7) + sinc(x) + cot(1 + x^2) + sec(y) + csc(1 + z^2) + asinh(x) + acosh(2 + y^2) + atanh(z / 2)",
     "1e5 * exp(-((x - 0.5)^2 + (y - 0.5)^2) / 0.01) * (t < 0.1 ? sin(10 * pi * t) : 0)",
+};
+
+// Locals, control flow and loops, of arithmetic only: bitwise equal everywhere
+const std::vector<std::string> CONTROL_FLOW = {
+    "var a := x * y; var b := a + z; a * b - t",
+    "var a; var b; a := b := x * 2; a + b",
+    "var a := x; a += y; a -= z; a *= t; a /= 3; a %= 0.7; a",
+    "var a := 2; a(x + 1)",
+    "if (x < 0) y; else z;",
+    "if (x < 0) y",
+    "if (x > 0, y, z) + if (y > 0) { 3 } else { 4 } * t",
+    "if (x < 0) { var a := y * 2; a + 1 } else { var b := z; b - 1 }",
+    "if (x < -0.5) 1; else if (x < 0) 2; else if (x < 0.5) 3; else 4;",
+    "var a := 0; x > 0 ? a := 1 : a := 2; a",
+    "var a := 0; if (x > 0, a := y, a := z); a * t",
+    "switch { case x < -0.3 : y; case x < 0.3 : { var q := z * z; q - t }; default : x * t; }",
+    "switch { case y < 0 : x; }",
+    "var s := 0; var p := 1; for (var i := 0; i < 10; i += 1) { s += p / (i + 1); p *= x }; s",
+    "var s := 0; for (var i := 0; i < 10; i += 1) { if (i % 3 == 0) continue; s += i * z }",
+    "for (var i := 0; i < 20; i += 1) { if (i * 0.1 > abs(x)) break[i * y]; i * t }",
+    "var k := 0; var v := x; while (abs(v) > 1e-3) { v *= 0.5; k += 1 }; k + v",
+    "var i := 0; while (i < 5) { i += 1; if (i * 0.2 > t) break; i * x }",
+    "var i := 0; var p := 1; repeat p *= 1 + x / 7; i += 1 until (i >= 7); p",
+    "var i := 0; var s := 0; repeat i += 1; if (i == 2) continue; s += i * x until (i >= 5); s",
+    "var s := 0; for (var i := 0; i < 4; i += 1) { for (var j := 0; j < 4; j += 1) { if (j > i) break; "
+    "s += x * i - y * j } }; s",
+    "var a := x; ~{ var b := a + 1; b * 2 } + ~(a * y, a + z)",
+    "var i := 0; 1 + while (x > 0.5 and i < 3) { i += 1 } + t",
 };
 
 double exprtk_value(const std::string & text, const std::vector<double> & point) {
@@ -149,6 +179,18 @@ std::vector<double> device_ulps(const std::vector<std::string> & texts) {
     return ulps;
 }
 
+/** @brief Values of the table's programs at the point p, evaluated on the device. */
+std::vector<double> device_values(const expr::ProgramTable<> & table, const double p[4]) {
+    Kokkos::View<double *> values("values", table.size());
+    const double x = p[0], y = p[1], z = p[2], t = p[3];
+    Kokkos::parallel_for("evaluate", 1, KOKKOS_LAMBDA(const int) {
+        const double v[4] = {x, y, z, t};
+        for (uint32_t k = 0; k < table.size(); k++) values(k) = table(k, expr::ArrayVariables{v});
+    });
+    auto h_values = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), values);
+    return std::vector<double>(h_values.data(), h_values.data() + h_values.extent(0));
+}
+
 } // namespace
 
 TEST(CompiledExpressionTest, ArithmeticMatchesExprtkBitwise) {
@@ -159,8 +201,14 @@ TEST(CompiledExpressionTest, FunctionsMatchExprtkBitwise) {
     expect_matches_exprtk(FUNCTIONS);
 }
 
+TEST(CompiledExpressionTest, ControlFlowMatchesExprtkBitwise) {
+    expect_matches_exprtk(CONTROL_FLOW);
+}
+
 TEST(CompiledExpressionTest, DeviceMatchesHost) {
     for (const double ulp : device_ulps(ARITHMETIC)) EXPECT_EQ(ulp, 0.0);
+    const std::vector<double> control_ulps = device_ulps(CONTROL_FLOW);
+    for (size_t i = 0; i < control_ulps.size(); i++) EXPECT_EQ(control_ulps[i], 0.0) << CONTROL_FLOW[i];
     const std::vector<double> function_ulps = device_ulps(FUNCTIONS);
     for (size_t i = 0; i < function_ulps.size(); i++) {
 #ifdef KOKKOS_ENABLE_CUDA
@@ -184,8 +232,82 @@ TEST(CompiledExpressionTest, VariablesAreCaseSensitiveAndTracked) {
 }
 
 TEST(CompiledExpressionTest, RejectsInvalidExpressions) {
-    for (const std::string text : {"x +", "foo(x)", "q * 2", "sin(x, y)", "(x + 1", "x y", "atan2(x)", "x := 2",
-                                   "x ? 1"}) {
-        EXPECT_THROW(expr::Program("test", text, VARIABLES), std::invalid_argument) << text;
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {"x +", "unexpected end of expression"},
+        {"foo(x)", "unknown symbol 'foo'"},
+        {"sin(x, y)", "wrong number of arguments"},
+        {"(x + 1", "expected ')'"},
+        {"x y", "expected ';'"},
+        {"x ? 1", "':' of the ternary operator"},
+        {"'abc' == 'abc'", "strings are not supported"},
+        {"var v[3] := {1, 2, 3}; v[0]", "vectors are not supported"},
+        {"x := 2", "cannot assign to the input variable 'x'"},
+        {"(x + 1) := 2", "assigns only to local variables"},
+        {"break", "break outside a loop"},
+        {"var i := 0; if (i < 1) continue; i", "continue outside a loop"},
+        {"while (1) { x }", "always true and its body has no break"},
+        {"var i := 0; repeat i += 1 until (false)", "always false and its body has no break"},
+        {"var a := 1; { var a := 2 }", "'a' is already defined"},
+        {"var a := 1; var A := 2", "'A' is already defined"},
+        {"var sin := 1", "reserved word"},
+        {"var X := 1", "would hide 'x'"},
+        {"if (x > 0) { var b := 1 }; b", "unknown symbol 'b'"},
+        {"return [x]", "return is not supported"},
+        {"if (x) y else z", "expected ';' after the consequent of if"},
+        {"while (x < 1) x;", "expected '{' to begin the body of while"},
+        {"var i := 0; repeat i += 1", "expected until"},
+        {"switch { }", "empty switch"},
+        {"switch { case x < 0 : 1 default : 2; }", "expected ';' after the case"},
+    };
+    for (const auto & [text, error] : cases) {
+        try {
+            const expr::Program program("test", text, VARIABLES);
+            ADD_FAILURE() << text << " compiled";
+        } catch (const std::invalid_argument & e) {
+            EXPECT_NE(std::string(e.what()).find(error), std::string::npos) << text << ": " << e.what();
+        }
     }
+}
+
+TEST(CompiledExpressionTest, HostExpressionsAcceptTheSameLanguage) {
+    for (const std::string text : {"'abc' == 'abc'", "var v[3] := {1, 2, 3}; v[0]", "X + 1", "x := 2"}) {
+        std::string compiled, host;
+        try {
+            const expr::Program program("e", text, VARIABLES);
+        } catch (const std::invalid_argument & e) {
+            compiled = e.what();
+        }
+        try {
+            const Expression expression("e", text);
+        } catch (const std::runtime_error & e) {
+            host = e.what();
+        }
+        EXPECT_FALSE(compiled.empty()) << text;
+        EXPECT_EQ(host, compiled) << text;
+    }
+    const std::string text = CONTROL_FLOW[13];
+    const Expression host("e", text);
+    const expr::Program program("e", text, VARIABLES);
+    const double p[4] = {0.3, -0.7, 0.25, 0.5};
+    EXPECT_EQ(host(p[0], p[1], p[2], p[3]), program(p));
+}
+
+TEST(CompiledExpressionTest, LoopsStopAtTheIterationCap) {
+    const std::string cap = std::to_string(expr::MAX_ITERATIONS);
+    const double p[4] = {0.3, -0.7, 0.25, 0.5};
+    EXPECT_EQ(expr::Program("test", "var i := 0; while (i < " + cap + ") { i += 1 }", VARIABLES)(p),
+              double(expr::MAX_ITERATIONS));
+    const std::string runaway = "var i := 0; while (i <= " + cap + ") { i += 1 }";
+    const expr::Program stopped("test", runaway, VARIABLES);
+    EXPECT_TRUE(stopped.has_loops());
+    EXPECT_THROW(stopped(p), std::invalid_argument);
+    EXPECT_THROW(Expression("test", runaway)(0.3, -0.7, 0.25, 0.5), std::runtime_error);
+
+    const expr::Program fine("test", "x + y", VARIABLES);
+    EXPECT_FALSE(fine.has_loops());
+    const expr::ProgramTable<> table({&fine, &stopped});
+    const std::vector<double> values = device_values(table, p);
+    EXPECT_EQ(values[0], fine(p));
+    EXPECT_TRUE(std::isnan(values[1]));
+    EXPECT_EQ(table.stopped(), 2u);
 }

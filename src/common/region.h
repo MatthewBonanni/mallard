@@ -240,6 +240,9 @@ class Region {
         /** @brief One-line description for the run log. */
         const std::string & summary() const { return m_summary; }
 
+        /** @brief The compiled functions of implicit regions, by index. */
+        const std::vector<expr::Program> & programs() const { return m_programs; }
+
     private:
         std::vector<Node> m_nodes;
         std::vector<double> m_vertices;

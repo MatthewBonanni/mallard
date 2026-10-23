@@ -116,7 +116,8 @@ TEST(MPI3DTest, WallModelsMatchSerial) {
     // Exchange and edge points several cells off the walls, in cells that a
     // partition may leave beyond the default halo, which must then deepen.
     // Without LES or the hybrid flux, only the wall model reads the gradients
-    // of the deep halo cells holding its points
+    // of the deep halo cells holding its points. The mass flow forcing's
+    // domain sums are exact, so the same on any rank count
     for (const char * partitioner : {"multijagged", "hilbert"}) for (const bool les : {true, false}) {
         std::ostringstream s;
         s << "[run]\nn_steps = 6\ncfl = 0.4\n"
@@ -135,7 +136,8 @@ TEST(MPI3DTest, WallModelsMatchSerial) {
           << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
           << "mu = 1e-3\nPr = 0.72\n"
           << (les ? "[les]\nmodel = \"sigma\"\n" : "")
-          << "[output]\ncheck_interval = 1000000\n";
+          << "[output]\ncheck_interval = 1000000\n"
+          << "[source]\nmass_flow = [0.5, 0.0, 0.0]\n";
         expect_matches_serial(s.str());
     }
 }

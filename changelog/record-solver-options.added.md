@@ -1,0 +1,1 @@
+- The key catalog (`Mallard --check --catalog`) lists the accepted values of `parallel.partitioner`, `parallel.halo_exchange`, `physics.gas` and `numerics.convective_flux`.
