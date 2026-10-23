@@ -11,6 +11,7 @@
 
 #include "mesh_file.h"
 
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <map>
@@ -103,6 +104,12 @@ class Reader {
         }
         if (depth > 0) fail("unbalanced parentheses.");
     }
+    /** @brief Check the ids first..last of a section: from 1, and no more than the file can define. */
+    void check_ids(uint64_t first, uint64_t last, const std::string & what) const {
+        if (first < 1 || last > s.size()) {
+            fail(what + " ids " + std::to_string(first) + " to " + std::to_string(last) + " out of range.");
+        }
+    }
     template <typename T>
     T binary() {
         if (pos + sizeof(T) > s.size()) fail("binary section ends early.");
@@ -155,12 +162,14 @@ MeshFileData read_fluent(const std::string & filename) {
             if (h.size() < 4) r.fail("short node section header.");
             const uint64_t first = h[1], last = h[2];
             const int nd = h.size() > 4 ? int(h[4]) : dim;
+            r.check_ids(std::max<uint64_t>(first, 1), last, "node");
             if (last > nodes.size()) nodes.resize(last, {0.0, 0.0, 0.0});
             if (h[0] == 0 || r.peek(')')) {
                 r.expect(')');
                 continue;
             }
             if (nd != 2 && nd != 3) r.fail("nodes of dimension " + std::to_string(nd) + ".");
+            r.check_ids(first, last, "node");
             r.expect('(');
             for (uint64_t n = first; n <= last; n++) {
                 for (int d = 0; d < nd; d++) {
@@ -172,6 +181,7 @@ MeshFileData read_fluent(const std::string & filename) {
         } else if (kind == 12 && (index == 12 || index == 2012 || index == 3012)) {
             const auto h = r.header();
             if (h.size() < 3) r.fail("short cell section header.");
+            r.check_ids(std::max<uint64_t>(h[1], 1), h[2], "cell");
             if (h[2] > n_cells) n_cells = h[2];
             if (h.size() > 4 && h[0] != 0 && h[4] == 7) r.fail("polyhedral cell zone " + std::to_string(h[0]) + "; Mallard reads tetrahedra, pyramids, prisms and hexahedra (triangles and quadrilaterals in 2D).");
             r.skip_to_close();
@@ -180,10 +190,12 @@ MeshFileData read_fluent(const std::string & filename) {
             if (h.size() < 5) r.fail("short face section header.");
             const uint64_t zone = h[0], first = h[1], last = h[2];
             const int bc_type = int(h[3]), face_type = int(h[4]);
+            r.check_ids(std::max<uint64_t>(first, 1), last, "face");
             if (zone == 0 || r.peek(')')) {
                 r.expect(')');
                 continue;
             }
+            r.check_ids(first, last, "face");
             if (last > faces.size()) {
                 faces.resize(last);
                 face_cells.resize(last, {-1, -1});

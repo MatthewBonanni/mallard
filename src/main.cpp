@@ -15,6 +15,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "build_info.h"
+#include "case_template.h"
 #include "input.h"
 #include "log.h"
 #include "parallel/binding.h"
@@ -25,8 +26,23 @@ namespace {
 
 void usage(const char * program) {
     std::cerr << "Usage: " << program << " -i input.toml [--restart FILE] [Kokkos options, e.g. --kokkos-num-threads=8]\n"
+              << "       " << program << " --check input.toml [--ranks N] [--throughput CELLS_PER_S | --steps N]"
+              << " [--quality-vtu PREFIX]\n"
+              << "       " << program << " new <template> [directory]   (" << program << " new --list)\n"
               << "       " << program << " --version\n";
 }
+
+/**
+ * @brief Commands given as the first argument, each with the arguments after it.
+ */
+struct Subcommand {
+    const char * name;
+    int (*run)(int argc, char ** argv);
+};
+
+constexpr Subcommand subcommands[] = {
+    {"new", case_template::new_main},
+};
 
 /**
  * @brief Exception text without toml11's "[error] " prefix and trailing newlines.
@@ -58,21 +74,45 @@ std::string error_text(const std::exception & e) {
  * @return Exit status.
  */
 int main(int argc, char* argv[]) {
-    std::string input_file, restart_file;
-    for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "-i") == 0 && i + 1 < argc) {
-            input_file = argv[++i];
-        } else if (strcmp(argv[i], "--restart") == 0 && i + 1 < argc) {
-            restart_file = argv[++i];
-        } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-            usage(argv[0]);
-            return 0;
-        } else if (strcmp(argv[i], "--version") == 0) {
-            std::cout << "Mallard " << mallard_version() << std::endl;
-            return 0;
+    if (argc > 1) {
+        for (const auto & command : subcommands) {
+            if (strcmp(argv[1], command.name) == 0) return command.run(argc - 2, argv + 2);
         }
     }
-    if (input_file.empty()) {
+    std::string input_file, restart_file;
+    bool check = false;
+    CheckOptions options;
+    try {
+        for (int i = 1; i < argc; ++i) {
+            const bool has_value = i + 1 < argc;
+            if (strcmp(argv[i], "-i") == 0 && has_value) {
+                input_file = argv[++i];
+            } else if (strcmp(argv[i], "--restart") == 0 && has_value) {
+                restart_file = argv[++i];
+            } else if (strcmp(argv[i], "--check") == 0) {
+                check = true;
+                if (has_value && argv[i + 1][0] != '-') input_file = argv[++i];
+            } else if (strcmp(argv[i], "--ranks") == 0 && has_value) {
+                options.ranks = std::stoi(argv[++i]);
+            } else if (strcmp(argv[i], "--throughput") == 0 && has_value) {
+                options.throughput = std::stod(argv[++i]);
+            } else if (strcmp(argv[i], "--steps") == 0 && has_value) {
+                options.steps = std::stoull(argv[++i]);
+            } else if (strcmp(argv[i], "--quality-vtu") == 0 && has_value) {
+                options.quality_file = argv[++i];
+            } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+                usage(argv[0]);
+                return 0;
+            } else if (strcmp(argv[i], "--version") == 0) {
+                std::cout << "Mallard " << mallard_version() << std::endl;
+                return 0;
+            }
+        }
+    } catch (const std::exception &) {
+        usage(argv[0]);
+        return 1;
+    }
+    if (input_file.empty() || options.ranks < 0 || options.throughput < 0.0) {
         usage(argv[0]);
         return 1;
     }
@@ -88,14 +128,20 @@ int main(int argc, char* argv[]) {
         std::string error;
         try {
             print_header(input_file);
-            binding::report();
-            toml::value input = toml::parse(input_file);
+            Input input = parse_input(input_file);
             if (!restart_file.empty()) {
-                input.as_table()["initialize"] = toml::table{{"type", "restart"}, {"file", restart_file}};
+                input.as_table()["initialize"] = Input(Input::table_type{{"type", "restart"}, {"file", restart_file}});
             }
             Solver solver;
-            solver.init(input);
-            solver.run();
+            if (check) {
+                const CheckReport report = solver.check(input, options);
+                print_check(report);
+                status = report.ok() ? 0 : 1;
+            } else {
+                binding::report();
+                solver.init(input);
+                solver.run();
+            }
         } catch (const InputError & e) {
             error = input_file + ": " + error_text(e);
         } catch (const std::exception & e) {

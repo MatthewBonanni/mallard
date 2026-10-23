@@ -3,7 +3,8 @@
 Conventions for the pages in `docs/`, which the website
 (`MatthewBonanni/mallard-website`) builds into its user guide, reference and
 developer notes. Write them for GitHub: the site maps GitHub-style links and
-image pairs to its own.
+image pairs to its own. What a pull request must document is listed in
+[CONTRIBUTING.md](../../CONTRIBUTING.md#adding-a-feature-end-to-end).
 
 ## Where things go
 
@@ -26,11 +27,21 @@ image pairs to its own.
   absolute links, `https://matthewbonanni.github.io/mallard/validation/#sod-shock-tube`;
   the site turns them into checked relative links.
 
+## Feature sections of the user guide
+
+Each section of `docs/guide/` that documents an input feature opens with the smallest
+TOML that enables it, then a line `*Used in:* ...` listing the examples whose inputs
+use it. `python tools/docs/used_in.py` writes those lines from the example inputs, with a
+rule per section in its `RULES` (add one for a new feature section);
+`python tools/docs/used_in.py --check` reports stale ones.
+
 ## Figures
 
 Scripts in `tools/docs/` draw each figure twice, as `<name>-light.svg` and
 `<name>-dark.svg` in `docs/images/guide/`
-(`python tools/docs/make_figures.py --mallard build/src/Mallard`). Show both:
+(`python tools/docs/make_figures.py --mallard build/src/Mallard`); the tools
+page's figures, in `docs/images/tools/`, come from running each tool
+(`python tools/docs/tools.py --mallard build/src/Mallard`). Show both:
 
 ```markdown
 ![Alt text](../images/guide/name-light.svg#gh-light-mode-only)
@@ -67,3 +78,24 @@ Equations are LaTeX, which both GitHub and the website (MathJax 3) render:
   `|u|` ends the cell): write `\lvert u \rvert`, or put the formula below the table.
 - Plain-text formulas in backticks (`dt = cfl * h / (|u| + |v| + 2a)`) remain fine
   where a formula is simple or reads like code (input keys, expressions).
+
+## Changelog
+
+[`CHANGELOG.md`](../../CHANGELOG.md) follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pull requests do not
+edit it, so that the many landing in parallel do not conflict: one that changes
+`src/` adds a fragment `changelog/<branch>.<category>.md` (`added`,
+`changed`, `deprecated`, `removed`, `fixed` or `security`) with one `- ` bullet
+per change and its PR or issue number:
+
+- Say what a user notices and what to do about it, not how the code changed.
+- Anything that changes results, input keys or file formats is `changed` (or
+  `deprecated`/`removed`), in bold, with how to get the old behavior back.
+- Refactors, tests and comments that users cannot notice need no fragment:
+  label the pull request `no-changelog`.
+
+The first job of `ci.yml` checks this (`python3 tools/changelog.py check`
+runs it locally). At a release, `python3 tools/changelog.py release X.Y.Z`
+folds the Unreleased section and the fragments into `## [X.Y.Z] - date`,
+deletes the fragments and updates the compare links; the GitHub release notes
+start from `python3 tools/changelog.py notes X.Y.Z`.
