@@ -142,13 +142,18 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   passing `CI` status on the PR's current head, so a new push needs a new run.
   CI builds with warnings as errors and runs the full suite in 2D and 3D, with
   OpenMP, serial, MPI on 1 to 4 ranks and single precision, plus a Clang build and
-  the tutorials and case templates. Documentation-only changes skip the build jobs
-  (the run takes about a minute). `main` runs CI on every merge.
+  the tutorials and case templates. Each job also shows on the PR as its own status,
+  `CI / <job>`. Documentation-only changes skip the build jobs (the run takes about a
+  minute). `main` runs CI on every merge.
+- **After resolving a merge conflict** on a PR whose CI already passed, rerun only
+  what the resolution can affect: `gh workflow run ci.yml --ref <branch> -f
+  only=openmp,mpi-3d` (backend names, `tutorials`, `device`, `fuzz`). The `CI` status
+  records the subset. A resolution in build files, shared headers or anything the
+  whole suite exercises needs the full run.
 - **Device builds**: CUDA, HIP (ROCm) and SYCL (oneAPI), 2D and 3D, compile only,
-  run when the changes touch device code: `tools/device_changes.sh` decides (a
-  changed `src/` file with Kokkos device constructs, or a Kokkos update); `main`
-  also runs the CUDA builds on every push.
-  `gh workflow run ci.yml --ref <branch> -f device=true` runs them regardless.
+  run when a branch's changes touch device code: `tools/device_changes.sh` decides (a
+  changed `src/` file with Kokkos device constructs, or a Kokkos update). `main` also
+  runs the CUDA builds on every push. `-f device=true` forces all three.
 - **GPU CI.** Device code is also run on NVIDIA A100 GPUs by a maintainer-run GPU
   CI, outside GitHub Actions: CUDA 12 and 13 builds in 2D and 3D, the full test suite
   on the GPU (including the CUDA-graph and NCCL paths), the MPI tests on 2 ranks, and

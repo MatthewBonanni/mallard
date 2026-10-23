@@ -1,0 +1,55 @@
+name: Verification
+
+# The verification manual (docs/verification/): runs the convergence tests of
+# 2D and 3D builds and uploads the regenerated tables, results.json and plots,
+# to commit before a release. Fails if a study is outside its test's bounds.
+#   gh workflow run verification.yml --ref <branch>
+on:
+  workflow_dispatch:
+
+jobs:
+  verification:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install packages
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ccache
+          pip install numpy matplotlib
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-verification-${{ github.sha }}
+          restore-keys: ccache-verification-
+      - name: Build (2D and 3D)
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          CCACHE_MAXSIZE: 500M
+        run: |
+          for dim in 2 3; do
+            cmake -S . -B build-$dim -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+              -DUSE_SYSTEM_KOKKOS=OFF -DMallard_WARNINGS_AS_ERRORS=ON -DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=$dim
+            cmake --build build-$dim -j $(nproc) --target MallardTest
+          done
+      - name: Save compiler cache
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-verification-${{ github.sha }}
+      - name: Run the convergence studies
+        run: python tools/docs/verification.py --jobs $(nproc) --test build-2/test/MallardTest build-3/test/MallardTest
+      - name: Upload the manual
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-manual
+          path: |
+            docs/verification/
+            docs/images/verification/
