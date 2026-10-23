@@ -23,6 +23,7 @@
 
 #include <toml.hpp>
 
+#include "data_paths.h"
 #include "data_writer.h"
 #include "mesh_block.h"
 #include "scratch.h"
@@ -36,7 +37,7 @@ namespace {
 
 namespace fs = std::filesystem;
 
-const fs::path FORMATS = fs::path(MALLARD_SOURCE_DIR) / "test" / "data" / "formats";
+const fs::path FORMATS = fs::path(source_dir()) / "test" / "data" / "formats";
 
 /** @brief Releases with fixtures, and the restart format version each case was written in. */
 struct Fixture {

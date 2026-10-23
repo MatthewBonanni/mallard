@@ -2,7 +2,7 @@
  * @file run_control.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Control of a running solver: signals, the control socket served to
- *        `Mallard ctl`, and the requests they leave for the time loop.
+ *        `mallard ctl`, and the requests they leave for the time loop.
  * @version 0.1
  * @date 2026-10-15
  *
@@ -114,7 +114,7 @@ class Server {
 };
 
 /**
- * @brief `Mallard ctl <run-dir> <command>`: sends the command to the run's
+ * @brief `mallard ctl <run-dir> <command>`: sends the command to the run's
  *        socket and prints the reply. Returns the exit status.
  */
 int ctl_main(int argc, char ** argv);

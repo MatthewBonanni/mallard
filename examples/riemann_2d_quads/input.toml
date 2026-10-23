@@ -4,7 +4,7 @@
 # transmissive boundaries. examples/riemann_2d is the same case on triangles.
 #
 # Run:
-#   ../../build/src/Mallard -i input.toml --kokkos-num-threads=8
+#   ../../build/src/mallard -i input.toml --kokkos-num-threads=8
 #   python ../../tools/animate.py solut riemann
 #
 # Expected result at t = 0.8: the mushroom-shaped jet along the diagonal with

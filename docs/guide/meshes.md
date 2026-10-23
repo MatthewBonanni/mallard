@@ -272,7 +272,7 @@ Pitfalls:
   `[[mesh.curved]]` shapes, probes, initial conditions) is in the
   transformed coordinates.
 - Mesh files only: generated meshes reject it.
-- `mallard-mesh-convert input.toml mesh.h5` writes the transformed mesh; do
+- `mallard mesh convert input.toml mesh.h5` writes the transformed mesh; do
   not transform it again when running from `mesh.h5`.
 
 ## HDF5 meshes for large runs
@@ -280,10 +280,10 @@ Pitfalls:
 ```toml
 [mesh]
 type = "file"
-filename = "mesh.h5"   # from mallard-mesh-convert
+filename = "mesh.h5"   # from mallard mesh convert
 ```
 
-*Used in:* any example, after `mallard-mesh-convert input.toml mesh.h5`.
+*Used in:* any example, after `mallard mesh convert input.toml mesh.h5`.
 
 Every rank of a distributed run reads a Gmsh or other mesh file whole,
 keeping only its share. Large meshes should be converted once to Mallard's HDF5 mesh format, of
@@ -291,8 +291,8 @@ which each rank reads only its own part (builds with
 `-DMallard_ENABLE_HDF5=ON`):
 
 ```sh
-mallard-mesh-convert mesh.msh mesh.h5                # from any mesh file
-mpirun -n 8 mallard-mesh-convert input.toml mesh.h5  # the mesh of an input, written in parallel
+mallard mesh convert mesh.msh mesh.h5                # from any mesh file
+mpirun -n 8 mallard mesh convert input.toml mesh.h5  # the mesh of an input, written in parallel
 ```
 
 and then `filename = "mesh.h5"`. Generated meshes are always produced per
@@ -348,7 +348,7 @@ Pitfalls:
 
 ## Mesh quality
 
-`Mallard --check input.toml` ([Checking an input](input_files.md#checking-an-input))
+`mallard check input.toml` ([Checking an input](input_files.md#checking-an-input))
 measures every cell of the mesh, taking for each the worst of its faces:
 
 | Metric | Definition | Warning above |

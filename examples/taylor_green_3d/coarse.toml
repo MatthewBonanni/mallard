@@ -3,8 +3,8 @@
 # sheets are still forming; the restart file it ends with initializes
 # remap.toml (32^3). Needs the 3D build. 239 steps: 8 s on 2 CPU threads.
 #
-#   ../../build3d/src/Mallard -i coarse.toml --kokkos-num-threads=2
-#   ../../build3d/src/Mallard -i remap.toml --kokkos-num-threads=2
+#   ../../build3d/src/mallard -i coarse.toml --kokkos-num-threads=2
+#   ../../build3d/src/mallard -i remap.toml --kokkos-num-threads=2
 
 [run]
 t_stop = 3.0

@@ -75,8 +75,8 @@ $h/U_b$), so 300 $h/U_b$ is 300,000 steps: under an hour on one A100, and
 hours on a CPU.
 
 ```bash
-$MALLARD/build-3d/src/Mallard -i input.toml --kokkos-num-threads=8    # CPU threads
-mpirun -n 4 $MALLARD/build-3d/src/Mallard -i input.toml               # MPI ranks
+$MALLARD/build-3d/src/mallard -i input.toml --kokkos-num-threads=8    # CPU threads
+mpirun -n 4 $MALLARD/build-3d/src/mallard -i input.toml               # MPI ranks
 ```
 
 A run that stops (a time limit, `t_wall_stop`, or a crash) continues from

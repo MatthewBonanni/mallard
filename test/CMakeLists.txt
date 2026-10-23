@@ -1,4 +1,4 @@
-# CMakeLists.txt for MallardTest
+# CMakeLists.txt for mallard-test
 # Tests shared by both dimensions, then those specific to one
 set(MALLARD_TEST_SOURCES
     test_main.cpp
@@ -77,7 +77,8 @@ else()
     periodic3d_test.cpp
     )
 endif()
-add_executable(MallardTest ${MALLARD_TEST_SOURCES})
+add_executable(mallard-test ${MALLARD_TEST_SOURCES})
+set_target_properties(mallard-test PROPERTIES OUTPUT_NAME mallard-test${Mallard_EXECUTABLE_SUFFIX})
 
 # exprtk, the reference of the compiled expressions, rounds every operation on its own there
 if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
@@ -85,16 +86,16 @@ if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set_source_files_properties(compiled_expression_test.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 endif()
-target_include_directories(MallardTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(MallardTest PRIVATE MALLARD_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-                                               MALLARD_EXECUTABLE="$<TARGET_FILE:Mallard>")
-add_dependencies(MallardTest Mallard)
+target_include_directories(mallard-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mallard-test PRIVATE MALLARD_EXECUTABLE="$<TARGET_FILE:mallard>"
+                                                MALLARD_EXECUTABLE_SUFFIX="${Mallard_EXECUTABLE_SUFFIX}")
+add_dependencies(mallard-test mallard)
 # The run-control tests start runs on several ranks with the MPI launcher
 if(Mallard_ENABLE_MPI AND MPIEXEC_EXECUTABLE)
-    target_compile_definitions(MallardTest PRIVATE MALLARD_MPIEXEC="${MPIEXEC_EXECUTABLE}")
+    target_compile_definitions(mallard-test PRIVATE MALLARD_MPIEXEC="${MPIEXEC_EXECUTABLE}")
     execute_process(COMMAND ${MPIEXEC_EXECUTABLE} --version OUTPUT_VARIABLE mpiexec_version ERROR_QUIET)
     if(mpiexec_version MATCHES "Open MPI|OpenRTE|PRRTE")
-        target_compile_definitions(MallardTest PRIVATE MALLARD_MPIEXEC_OPEN_MPI)
+        target_compile_definitions(mallard-test PRIVATE MALLARD_MPIEXEC_OPEN_MPI)
     endif()
 endif()
 
@@ -109,11 +110,11 @@ FetchContent_Declare(
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-target_link_libraries(MallardTest PRIVATE gtest)
+target_link_libraries(mallard-test PRIVATE gtest)
 
-target_link_libraries(MallardTest PRIVATE MallardCore)
+target_link_libraries(mallard-test PRIVATE MallardCore)
 # Malformed CGNS files written by the tests
 if(Mallard_ENABLE_CGNS)
-    target_link_libraries(MallardTest PRIVATE ${MALLARD_CGNS_LIBRARY})
+    target_link_libraries(mallard-test PRIVATE ${MALLARD_CGNS_LIBRARY})
 endif()
-mallard_target_warnings(MallardTest)
+mallard_target_warnings(mallard-test)

@@ -1,7 +1,7 @@
 /**
  * @file input_upgrade.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Renamed, moved and removed input keys and options, and `Mallard upgrade-input`.
+ * @brief Renamed, moved and removed input keys and options, and `mallard upgrade-input`.
  * @version 0.9
  * @date 2026-10-16
  *
@@ -468,7 +468,7 @@ bool rewrite_one_option(std::vector<std::string> & lines, const OptionRule & rul
 } // namespace
 
 std::string advice(const Finding & finding) {
-    return describe(finding) + "; `Mallard upgrade-input FILE > NEW_FILE` rewrites the file";
+    return describe(finding) + "; `mallard upgrade-input FILE > NEW_FILE` rewrites the file";
 }
 
 std::string describe(const Finding & finding) {
@@ -483,7 +483,7 @@ std::vector<Finding> apply(Input & input, const std::string & version, const Rul
     }
     if (!removed.empty()) {
         throw InputError("the input uses keys or options that this release no longer reads:" + removed +
-                         "\n`Mallard upgrade-input FILE > NEW_FILE` rewrites them.");
+                         "\n`mallard upgrade-input FILE > NEW_FILE` rewrites them.");
     }
     return findings;
 }
@@ -529,15 +529,15 @@ int main(int argc, char ** argv) {
         }
     }
     if (file.empty()) {
-        std::cerr << "Usage: Mallard upgrade-input old.toml > new.toml\n"
-                  << "       Mallard upgrade-input --check old.toml   (exit status 1 if anything is out of date)\n"
+        std::cerr << "Usage: mallard upgrade-input old.toml > new.toml\n"
+                  << "       mallard upgrade-input --check old.toml   (exit status 1 if anything is out of date)\n"
                   << "Rewrites renamed, moved and removed input keys and options for Mallard " MALLARD_VERSION
                      ", keeping comments and layout.\n";
         return 1;
     }
     std::ifstream in(file, std::ios::binary);
     if (!in) {
-        std::cerr << "Mallard upgrade-input: cannot open " << file << "\n";
+        std::cerr << "mallard upgrade-input: cannot open " << file << "\n";
         return 1;
     }
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
@@ -554,7 +554,7 @@ int main(int argc, char ** argv) {
         if (check) return findings.empty() ? 0 : 1;
         std::cout << upgraded;
     } catch (const std::exception & e) {
-        std::cerr << "Mallard upgrade-input: " << file << ": " << e.what() << "\n";
+        std::cerr << "mallard upgrade-input: " << file << ": " << e.what() << "\n";
         return 1;
     }
     return 0;

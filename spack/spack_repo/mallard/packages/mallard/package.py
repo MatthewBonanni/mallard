@@ -42,7 +42,7 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
         values=("2", "3"),
         multi=True,
         description="Spatial dimensions to build: one solver per dimension "
-        "(3D executables are named Mallard3D and mallard-mesh-convert3D)",
+        "(the 3D one is named mallard3d)",
     )
     variant(
         "precision",
@@ -64,7 +64,7 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
         description="Pass device buffers to MPI directly (CUDA- or ROCm-aware MPI)",
     )
     variant("nccl", default=False, when="+mpi+cuda", description="Halo exchanges with NCCL")
-    variant("hdf5", default=True, description="HDF5 meshes and output, mallard-mesh-convert")
+    variant("hdf5", default=True, description="HDF5 meshes and output, mallard mesh convert")
     variant("cgns", default=True, description="Read CGNS mesh files")
     variant("zlib", default=True, description="zlib compression of VTU and restart files")
 
@@ -87,6 +87,8 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
     depends_on("yaml-cpp@0.8:")
     depends_on("mpi", when="+mpi")
     depends_on("nccl", when="+nccl")
+    for _arch in CudaPackage.cuda_arch_values:
+        depends_on(f"nccl cuda_arch={_arch}", when=f"+nccl cuda_arch={_arch}")
     depends_on("hdf5~mpi", when="+hdf5~mpi")
     depends_on("hdf5+mpi", when="+hdf5+mpi")
     depends_on("cgns+hdf5", when="+cgns")
@@ -112,29 +114,29 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
 
     def _executables(self):
         return [
-            "Mallard" + ("3D" if dim == "3" else "") for dim in self.spec.variants["dims"].value
+            "mallard" + ("3d" if dim == "3" else "") for dim in self.spec.variants["dims"].value
         ]
 
-    def _run_example(self, exe, example):
+    def _run_example(self, exe, example, *command):
         share = join_path(self.prefix.share, "mallard")
-        work = join_path(self.test_suite.stage, exe)
+        work = join_path(self.test_suite.stage, example)
         if os.path.exists(work):
             shutil.rmtree(work)
         shutil.copytree(join_path(share, "mechanisms"), join_path(work, "mechanisms"))
         case = join_path(work, "examples", example)
         shutil.copytree(join_path(share, "examples", example), case)
         with working_dir(case):
-            Executable(join_path(self.prefix.bin, exe))("-i", "input.toml")
+            Executable(join_path(self.prefix.bin, exe))(*command, "-i", "input.toml")
 
     def test_sod(self):
         """Run the Sod shock tube example in 2D"""
         if not self.spec.satisfies("dims=2"):
             raise SkipTest("Mallard was built without dims=2")
-        self._run_example("Mallard", "sod")
+        self._run_example("mallard", "sod")
 
     def test_reactor(self):
-        """Run the hydrogen ignition example with MallardReactor"""
-        self._run_example("MallardReactor", "h2_ignition")
+        """Run the hydrogen ignition example with mallard reactor"""
+        self._run_example(self._executables()[0], "h2_ignition", "reactor")
 
 
 class CMakeBuilder(cmake.CMakeBuilder):
@@ -178,7 +180,7 @@ class CMakeBuilder(cmake.CMakeBuilder):
             args = self.std_cmake_args + self.cmake_args()
             args += [
                 self.define("Mallard_DIM", dim),
-                self.define("Mallard_EXECUTABLE_SUFFIX", "3D" if dim == "3" else ""),
+                self.define("Mallard_EXECUTABLE_SUFFIX", "3d" if dim == "3" else ""),
                 os.path.abspath(self.root_cmakelists_dir),
             ]
             with working_dir(self._build_dir(dim), create=True):
@@ -195,4 +197,5 @@ class CMakeBuilder(cmake.CMakeBuilder):
     def check(self):
         for dim in self._dims():
             with working_dir(self._build_dir(dim)):
-                Executable(join_path(self._build_dir(dim), "test", "MallardTest"))()
+                suffix = "3d" if dim == "3" else ""
+                Executable(join_path(self._build_dir(dim), "test", "mallard-test" + suffix))()

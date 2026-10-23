@@ -40,9 +40,9 @@ rule per section in its `RULES` (add one for a new feature section);
 
 Scripts in `tools/docs/` draw each figure twice, as `<name>-light.svg` and
 `<name>-dark.svg` in `docs/images/guide/`
-(`python tools/docs/make_figures.py --mallard build/src/Mallard`); the tools
+(`python tools/docs/make_figures.py --mallard build/src/mallard`); the tools
 page's figures, in `docs/images/tools/`, come from running each tool
-(`python tools/docs/tools.py --mallard build/src/Mallard`). Show both:
+(`python tools/docs/tools.py --mallard build/src/mallard`). Show both:
 
 ```markdown
 ![Alt text](../images/guide/name-light.svg#gh-light-mode-only)
