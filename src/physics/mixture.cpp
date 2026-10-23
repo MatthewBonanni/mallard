@@ -55,7 +55,7 @@ MixtureModel MixtureModel::from_input(const Input & input) {
             for (const auto & [name, value] : entries.as_table()) {
                 const int32_t k = model.mech.species_index(name);
                 if (k < 0) throw InputError("physics.lewis: no species " + name + " in the mechanism.");
-                lewis[static_cast<size_t>(k)] = static_cast<double>(find_real(entries, name));
+                lewis[static_cast<size_t>(k)] = static_cast<double>(find_real(entries, name, dim::none));
                 if (!(lewis[static_cast<size_t>(k)] > 0.0)) throw InputError("physics.lewis." + name + " must be positive.");
             }
         }
@@ -92,7 +92,7 @@ std::vector<double> MixtureModel::mass_fractions(const Input & table, const std:
         if (k < 0) {
             throw InputError(where + "." + key + ": no species " + name + " in the mechanism.");
         }
-        const double x = static_cast<double>(find_real(entries, name));
+        const double x = static_cast<double>(find_real(entries, name, dim::none));
         if (!(x >= 0.0)) throw InputError(where + "." + key + "." + name + " must not be negative.");
         f[static_cast<size_t>(k)] = x;
         sum += x;
@@ -179,12 +179,12 @@ chemistry::ReactorOptions reactor_options(const Input & input) {
     chemistry::ReactorOptions options;
     if (!input.contains("chemistry")) return options;
     const Input & table = input.at("chemistry");
-    options.integrator.rtol = find_double_or(table, "rtol", options.integrator.rtol);
-    options.atol_Y = find_double_or(table, "atol", options.atol_Y);
+    options.integrator.rtol = find_double_or(table, "rtol", dim::none, options.integrator.rtol);
+    options.atol_Y = find_double_or(table, "atol", dim::none, options.atol_Y);
     if (!(options.integrator.rtol > 0.0)) throw InputError("chemistry.rtol must be positive.");
     if (!(options.atol_Y > 0.0)) throw InputError("chemistry.atol must be positive.");
     if (table.contains("sparse")) options.sparse = toml::find<bool>(table, "sparse") ? 1 : 0;
-    options.C_reg = find_double_or(table, "C_reg", options.C_reg);
+    options.C_reg = find_double_or(table, "C_reg", dim::concentration_kmol, options.C_reg);
     if (!(options.C_reg > 0.0)) throw InputError("chemistry.C_reg must be positive.");
     if (table.contains("max_steps")) {
         const Input & v = table.at("max_steps");

@@ -60,7 +60,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - The whole time step as one CUDA graph; optional NCCL halo exchange; TENO-E setup on the GPU
 
 **Input, output and diagnostics**
-- TOML input; initial conditions, boundary states, sources and sponges as analytical expressions; misspelled or unused keys are errors, with suggestions
+- TOML input with units (`p = "1 atm"`, `Lx = "5 mm"`), converted to SI and checked against each key's dimension; initial conditions, boundary states, sources and sponges as analytical expressions; misspelled or unused keys are errors, with suggestions
 - Pre-flight check (`Mallard --check`): mesh quality, stable time step, memory per GPU and cost estimate before a run
 - Conservative, high-order remap of a restart onto another mesh (any cell type, resolution or rank count): exact cell intersections, integrals kept to rounding
 - VTU (ParaView) or parallel HDF5 with XDMF; surface output of boundary zones
