@@ -15,6 +15,7 @@
 #include <array>
 #include <cmath>
 #include <functional>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -846,4 +847,38 @@ TEST(ForcedInletTest, NumberOfTThatTurnsNegativeIsAnInputErrorWithFaceAndTime) {
         EXPECT_NE(what.find("at t = 0.1"), std::string::npos) << what;
         EXPECT_NE(what.find(", face (0, "), std::string::npos) << what;
     }
+}
+
+TEST(ForcedInletTest, ConditionsOfTKeepTheStepGraph) {
+    // A single-gas upt inlet whose T and u depend on t runs as one CUDA graph
+    // per step, which replays the device evaluation at each stage time: the
+    // same solution as stepping kernel by kernel
+#ifndef KOKKOS_ENABLE_CUDA
+    GTEST_SKIP() << "CUDA builds only";
+#else
+    const std::string u = N_DIM == 2 ? "[\"0.5 + 0.1 * sin(20 * t)\", \"0\"]" : "[\"0.5 + 0.1 * sin(20 * t)\", \"0\", \"0\"]";
+    const std::string left = "type = \"upt\"\nu = " + u + "\np = 1.0\nT = \"1 + 0.2 * sin(20 * t)\"\n";
+    auto run = [&](const bool graphs) {
+        std::ostringstream s;
+        s << "[run]\nt_stop = 0.3\ndt = 0.004\ncuda_graphs = " << (graphs ? "true" : "false") << "\n"
+          << mesh_block("cartesian", 40, 1, 1.0, 0.1) << "[initialize]\ntype = \"constant\"\np = 1.0\nT = 1.0\nu = "
+          << (N_DIM == 2 ? "[0.5, 0.0]" : "[0.5, 0.0, 0.0]")
+          << "\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+          << "[output]\ncheck_interval = 1000000\n" << UNIT_GAS << duct_boundaries(left, "type = \"p_out\"\np = 1.0\n");
+        auto solver = std::make_unique<Solver>();
+        solver->init(parse_toml(s.str()));
+        EXPECT_EQ(solver->step_graph_unsupported(), graphs ? "" : "off ([run] cuda_graphs)");
+        solver->run();
+        solver->copy_device_to_host();
+        return solver;
+    };
+    const auto graph = run(true), kernels = run(false);
+    EXPECT_GT(graph->get_graph_steps(), 50u);
+    EXPECT_EQ(kernels->get_graph_steps(), 0u);
+    for (uint32_t c = 0; c < graph->get_mesh()->n_cells; c++) {
+        for (uint8_t i = 0; i < N_CONSERVATIVE; i++) {
+            ASSERT_EQ(graph->h_conservatives(c, i), kernels->h_conservatives(c, i)) << "cell " << c;
+        }
+    }
+#endif
 }

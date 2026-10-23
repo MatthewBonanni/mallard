@@ -450,6 +450,8 @@ class Solver {
         rtype get_time() const { return t; }
         const Statistics & get_statistics() const { return statistics; }
         uint64_t get_step() const { return step; }
+        /** @brief Steps launched as a captured CUDA graph so far. */
+        uint64_t get_graph_steps() const { return graph_steps; }
         /** @brief Steps rejected by the error controller in this run. */
         uint64_t get_rejected_steps() const { return n_rejected; }
         const Euler & get_physics() const { return physics; }
@@ -552,6 +554,7 @@ class Solver {
         bool cuda_graphs = true;               // [run] cuda_graphs
         bool use_step_graph = false;
         void * step_graph_exec = nullptr;      // cudaGraphExec_t
+        uint64_t graph_steps = 0;
         Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests], local, then reduced
         Kokkos::View<rtype *> step_scalars;    // device: [t, t_target, dt_scales...]
         Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> step_io;  // pinned: [t, t_target, requests, dt, reduced]

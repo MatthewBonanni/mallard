@@ -204,6 +204,7 @@ void Solver::graph_step() {
         }
         if (step_graph_exec) {
             cuda_check(cudaGraphLaunch(static_cast<cudaGraphExec_t>(step_graph_exec), stream), "cudaGraphLaunch");
+            graph_steps++;
         } else {
             record_step();
         }
