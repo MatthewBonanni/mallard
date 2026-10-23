@@ -45,14 +45,14 @@ double curved_measure(const curved::Geometry & geometry, uint32_t f, uint32_t n_
     const double w[4] = {0.3478548451374538, 0.6521451548625461, 0.6521451548625461, 0.3478548451374538};
     if (N_DIM == 2 || n_nodes == 4) {
         for (int i = 0; i < 4; i++) {
-            if (N_DIM == 2) {
+            if constexpr (N_DIM == 2) {
                 ref.push_back({g[i], 0.0});
                 weights.push_back(w[i]);
-                continue;
-            }
-            for (int j = 0; j < 4; j++) {
-                ref.push_back({g[i], g[j]});
-                weights.push_back(w[i] * w[j]);
+            } else {
+                for (int j = 0; j < 4; j++) {
+                    ref.push_back({g[i], g[j]});
+                    weights.push_back(w[i] * w[j]);
+                }
             }
         }
     } else {
