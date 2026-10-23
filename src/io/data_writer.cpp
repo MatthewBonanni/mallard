@@ -90,7 +90,7 @@ void DataWriter::init(const Input & input,
             throw std::runtime_error("DataWriter: interval must be positive.");
         }
     } else {
-        time_interval = find_real(input, "time_interval");
+        time_interval = find_real(input, "time_interval", dim::time);
         if (!(time_interval > 0.0_r)) {
             throw std::runtime_error("DataWriter: time_interval must be positive.");
         }
@@ -217,7 +217,7 @@ void DataWriter::init(const Input & input,
         if (compression == Compression::NONE) {
             throw InputError("write_data.relative_error needs compression = \"zlib\".");
         }
-        relative_error = double(find_real(input, "relative_error"));
+        relative_error = double(find_real(input, "relative_error", dim::none));
         if (!(relative_error > 0.0 && relative_error < 1.0)) {
             throw InputError("write_data.relative_error must be between 0 and 1.");
         }
