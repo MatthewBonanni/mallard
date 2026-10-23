@@ -56,7 +56,8 @@ features smaller than a cell.
 ![A triangle with one and with sixteen sub-triangles for the cell average of an analytical state](../images/guide/subdivisions-dark.svg#gh-dark-mode-only)
 
 Expressions may use local variables, conditionals and loops
-([Expressions](input_files.md#expressions)). Pitfall:
+([Expressions](input_files.md#expressions)); a comparison such as
+`hypot(x, y) < 0.2` draws a shape ([Geometry](geometry.md#who-uses-what)). Pitfall:
 TOML requires the expressions to be strings, also for constants: `u =
 ["0.0", "0.0"]` with `analytical`.
 
@@ -188,4 +189,5 @@ Method, accuracy and cost: [docs/design/remap.md](../design/remap.md).
 ## See also
 
 - [Input reference: `[initialize]`](../input.md#initialize)
+- [Geometry](geometry.md): shapes, and how cells average them
 - [Output and diagnostics](output.md): writing restart files and snapshots

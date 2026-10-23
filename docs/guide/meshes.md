@@ -337,6 +337,9 @@ The geometry comes from either
 | `center`, `radius` | required | The shape (for a cylinder, a point of its axis) |
 | `axis` | required for `cylinder` | Direction of the cylinder's axis |
 
+These shapes are curved boundaries' own; [#407](https://github.com/MatthewBonanni/mallard/issues/407)
+plans to take them from the [region engine](geometry.md#regions) instead.
+
 Pitfalls:
 
 - Zone nodes farther than 5% of an edge length from the shape are an error:
@@ -371,5 +374,6 @@ ParaView, and `tools/mesh/plot_mesh_quality.py PREFIX_000000.vtu out.png` draws 
 - [Input reference: `[mesh]`](../input.md#mesh), [`[[periodic]]`](../input.md#periodic)
 - [Boundary conditions](boundary_conditions.md): what to put on each zone
 - [Running in parallel](parallel.md): partitions and halos
+- [Geometry](geometry.md): shapes shared by sources, probes and other features
 - Design notes: [periodic boundaries](../design/periodic.md),
   [curved boundaries](../design/curved_boundaries.md)

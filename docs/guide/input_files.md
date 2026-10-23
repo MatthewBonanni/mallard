@@ -81,6 +81,9 @@ variables = ["RHO", "U_X", "P", "T"]
 | `[[write_data]]`, `[output]`, `[[forces]]`, `[integrals]`, `[statistics]`, `[[probes]]` | no | [Output and diagnostics](output.md) |
 | `[parallel]` | no | [Running in parallel](parallel.md) |
 
+Shapes that several tables use (regions, probe points and curves) are on
+[Geometry](geometry.md).
+
 Double brackets (`[[boundaries]]`) are TOML arrays of tables: repeat them, one
 entry each. Every key, with its default, is in the
 [input reference](../input.md).
