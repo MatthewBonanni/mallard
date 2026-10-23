@@ -6,11 +6,11 @@ newer and git are all it needs):
 ```bash
 git clone --recursive https://github.com/MatthewBonanni/mallard.git && cd mallard
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_ENABLE_THREADS=ON && cmake --build build -j
-cd examples/sod && ../../build/src/Mallard -i input.toml
+cd examples/sod && ../../build/src/mallard -i input.toml
 ```
 
 The last line runs the Sod shock tube in about a second and writes `solut/sod.pvd`, which ParaView
-opens. `build/src/Mallard new --list` lists ready-to-run cases to copy (`Mallard new cylinder` creates
+opens. `build/src/mallard new --list` lists ready-to-run cases to copy (`mallard new cylinder` creates
 one with its mesh, run and post-processing scripts). GPU builds (CUDA, HIP), MPI and the other options are in [Installation](https://matthewbonanni.github.io/mallard/docs/installation/).
 
 ## Where next

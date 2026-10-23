@@ -28,7 +28,7 @@ void Solver::init_inlets(const std::vector<Input> & input_boundaries,
     bool profiled = false;
     for (const auto & [i_bc, faces] : inlets) {
         const Input & bound = input_boundaries[i_bc];
-        const std::string name = toml::find<std::string>(bound, "name");
+        const std::string name = find_value<std::string>(bound, "name");
         const std::string where = "boundaries[name = \"" + name + "\"]";
         const InletProfile profile(bound, where);
         std::vector<int32_t> chars;
@@ -73,7 +73,7 @@ void Solver::init_inlets(const std::vector<Input> & input_boundaries,
 std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const std::vector<uint32_t> & faces,
                                                    BoundaryCondition & bc) const {
     if (bc.type != BoundaryType::MASS_FLOW_INLET) return {};
-    const std::string name = toml::find<std::string>(bound, "name");
+    const std::string name = find_value<std::string>(bound, "name");
     const std::string where = "boundaries[name = \"" + name + "\"]";
     // An expression for mass_flux is BoundaryFields'
     if (!bound.contains("mdot")) return {};

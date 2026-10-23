@@ -80,7 +80,7 @@ saturates by t = 60. Expressions accept the usual functions and operators; see
 ## 4. Run
 
 ```bash
-$MALLARD/build/src/Mallard -i input.toml --kokkos-num-threads=4
+$MALLARD/build/src/mallard -i input.toml --kokkos-num-threads=4
 ```
 
 This is about 70,000 steps: viscous flow on a fine wall mesh makes the time step small. The run takes

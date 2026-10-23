@@ -4,7 +4,7 @@ Run each case from its own directory, e.g.
 
 ```sh
 cd examples/riemann_2d
-../../build/src/Mallard -i input.toml --kokkos-num-threads=8
+../../build/src/mallard -i input.toml --kokkos-num-threads=8
 python ../../tools/animate.py solut riemann
 ```
 
@@ -24,6 +24,7 @@ hardware they were measured on.
 | `double_mach` | Double Mach reflection of a Mach 10 shock: a split bottom boundary (inflow, then wall) and an exact moving shock on the top boundary | 460,000 triangles | ~1 hour on 12 CPU threads |
 | `wedge` | Mach 1.76 flow over an 8 degree ramp; the oblique shock matches theory (p2/p1 = 1.498) | 19,200 quads | minutes on 12 CPU threads |
 | `explosion_3d` | Spherical explosion (3D build): one octant with symmetry planes, TENO5 on 64³ hexahedra; the solution stays spherically symmetric | 262,144 hexahedra | ~5 minutes on 8 CPU threads |
+| `rotational_sector` | Rotational periodicity: a swirling flow with azimuthal and radial waves in a quarter (90 degree sector) of an annulus (`sector.toml`), against the full annulus (`annulus.toml`), TENO5 between slip walls; `sector_3d.toml` and `annulus_3d.toml` are the 3D duct, also periodic along the axis. `tools/rotational_sector.py` turns the sector into its four copies: the runs agree to rounding (TENO5 1e-10 after 110 steps with shocks, as the annulus agrees with itself; MUSCL 5e-14) | 4,096 and 16,384 quads (3D: 1,536 and 6,144 hexahedra) | about a minute on one CPU thread |
 | `sedov_3d` | Sedov-Taylor point blast (3D build): one octant, bound-preserving TENO5 on 128³ hexahedra, against the exact similarity solution (`tools/sedov.py`). The shock radius stays within 1-3% of `R = 1.0328 (E t^2 / rho0)^(1/5)` | 2.1M hexahedra | ~1.5 hours on four A100s |
 | `sphere_mach3` | Mach 3 flow over a sphere (3D build) on an unstructured Gmsh tetrahedral mesh of the quarter domain (generate it with `tools/make_sphere_mesh.py`): HLL with bound-preserving TENO5. The bow-shock standoff settles at Delta / R = 0.226, 10% above Billig's correlation (0.205): 0.01 D, under half the tetrahedron edge length (0.025 D) in the shock layer | 800,000 tetrahedra | ~1.5 hours on four A100s |
 | `mallard` | Mach 8 flow over a flying mallard from an impulsive start: RHLL with bound-preserving TENO5 on a Gmsh triangle mesh; generate the mesh with `tools/make_mallard_mesh.py` first | 1.07M triangles | ~1.5 hours on one GPU |
@@ -39,6 +40,12 @@ hardware they were measured on.
 | `noh_axisymmetric` | Spherical Noh implosion on the meridian plane (axisymmetric, bound-preserving TENO5): shock radius within 1% of t / 3 in every direction, post-shock density 62-63 of the exact 64 (higher in the first cells along the axis, the usual overshoot at symmetry lines) | 40,000 quads | ~2 minutes on 4 CPU threads |
 | `sedov_axisymmetric` | Sedov-Taylor blast as an axisymmetric run, against the exact solution (`tools/sedov.py`): shock radius 0.6% ahead of R(t) at t = 0.8, spherical to 2% at the density peak | 65,536 quads | 5 minutes on one A100 |
 | `sphere_axisymmetric` | Steady flow past a sphere at Re = 100 and 150 (axisymmetric, Mach 0.2) on a half O-grid from `tools/make_cylinder_mesh.py --half`: drag within 1.2% of the Clift-Grace-Weber correlation, separation angle within 0.2 degrees, wake length 0.885 D and 1.21 D (Johnson & Patel: 0.88, about 1.2); check with `tools/plot_sphere_axisymmetric.py` | 16,384 quads | 285,000 viscous-limited steps: ~30 minutes on one A100 |
+
+## Source terms
+
+| Case | What it shows | Cells | Run time |
+|---|---|---|---|
+| `source_regions` | `[[sources]]` in regions: an annulus with a smooth edge releases a Gaussian heat pulse of exact total energy (`total = true`), a rotated rectangle pushes the gas with a body force and its work | 51,200 triangles | ~2 minutes on 4 CPU threads |
 
 ## Viscous flows
 
@@ -58,6 +65,20 @@ hardware they were measured on.
 | `channel_retau180` | Turbulent channel flow at Re<sub>τ</sub> = 180 (3D build): DNS at bulk Mach 0.2 between isothermal walls, periodic in x and z, on the 4πh × 2h × 4πh/3 box of Moser, Kim & Mansour (1999), with the mass flow held by `[source] mass_flow` and a tanh-stretched generated mesh (`[mesh] stretching`); MUSCL with the kinetic-energy-preserving `hybrid` convective flux, and the kinetic-energy budget of `[integrals]` (numerical dissipation 0.9% of the total). Generate the initial state with `tools/channel_init.py`; `[statistics]`, `tools/plane_average.py` and `tools/plot_channel.py` compare the profiles with MKM, `tools/animate_channel.py` animates the near-wall vortices. Over 12.9 h/u<sub>τ</sub>: Re<sub>τ</sub> = 180.8 against 178.1 (Cf 2.0% high), the RMS velocity and -u'v' peaks within 2%. The input's header lists the alternatives: HLLC at every face gives Cf 7% low on this mesh (its upwind dissipation is 7% of the total) and reaches MKM only on a mesh twice as fine in x and z | 2.36M hexahedra (dx+ = 11.8, dz+ = 5.9, dy+ = 0.88 at the wall) | 489,000 steps: 2.3 hours on two A100s |
 | `channel_inflow_retau180` | Spatially developing turbulent channel at Re<sub>τ</sub> = 180 (3D build): DNS with digital-filter synthetic turbulence at an `nscbc_inlet`, its mean profile and Reynolds stresses taken from the periodic `channel_retau180` statistics (`inflow_profile.csv`). Wall shear, -u'v' and the RMS peaks recover to within 5% of the periodic channel by about 17h (Keating et al. 2004: about 20h); the outlet uses `beta = 0` behind a sponge. Start from the periodic example's restart with `tools/tile_restart.py` (see the input's header) | 4.7M hexahedra | 337,000 steps: 2.5 hours on four A100s |
 | `turbulent_inflow_duct` | Isotropic digital-filter turbulence (u′ = 0.1 U, L = 0.25, Re_L = 100) entering a duct periodic across and decaying downstream (3D build): inlet Reynolds stresses within 6% of target, and `zero_net_flux` removing the plane acoustic wave (spurious p′<sub>rms</sub> = 7.8 ρu′² without it, 1.1 by x = 20L with it) | 6.3M hexahedra | 65,000 steps: 1.5 hours on one A100 |
+| `forced_isotropic_turbulence` | Linear forcing of turbulence held at a target kinetic energy (3D build): a `[[sources]]` entry reading the domain average `mean_ke` controls the forcing rate, so the kinetic energy stays within 1.3% of its target (0.1234-0.1248 for 0.125) through t = 20 while the Taylor-Green vortex it starts from breaks down; unforced it falls to 0.012 | 32³ = 32,768 hexahedra | 3,266 steps: 20 s on one A100 |
+
+### Isotropic turbulence: filtered statistics
+
+![Filtered statistics of the isotropic turbulence runs against the references](../docs/images/isotropic_turbulence_validation.png)
+
+`isotropic_turbulence` on $64^3$, $128^3$ and $256^3$, filtered to $64^3$ as the
+references: top, sixth-order differences against Johnsen et al. (2010,
+circles); bottom, spectral derivatives against Subramaniam et al. (2019,
+grey). $64^3$ is under-resolved ($k_\mathrm{max}\eta \approx 0.7$) and misses 15% of the
+enstrophy; $128^3$ and $256^3$ agree within 2%. The remaining differences from
+the references (kinetic energy +2%, temperature variance -5%) are of the size
+of the spread between random initial fields, whose realizations the
+references do not publish.
 
 ## Large-eddy simulation
 
@@ -74,7 +95,7 @@ hardware they were measured on.
 
 | Case | What it shows | Cells | Run time |
 |---|---|---|---|
-| `h2_ignition` | Constant-volume ignition of stoichiometric H2/air at 1200 K, 1 atm with `MallardReactor` (`../../build/src/MallardReactor -i input.toml`, writes `reactor.csv`); ignition delay 44.2 us as Cantera | 0D | milliseconds on one CPU thread |
+| `h2_ignition` | Constant-volume ignition of stoichiometric H2/air at 1200 K, 1 atm with `mallard reactor` (`../../build/src/mallard reactor -i input.toml`, writes `reactor.csv`); ignition delay 44.2 us as Cantera | 0D | milliseconds on one CPU thread |
 | `reactive_shock_tube` | Reactive shock tube in 2H2-O2-7Ar (Fedkiw et al. 1997; Martinez Ferrer et al. 2014): the gas behind the reflected shock ignites and a detonation overtakes the reflected shock; the front at 230 us converges to 99.6 mm under refinement | 2,400 (50 um); 4,800 and 9,600 for the convergence check | minutes on a few CPU threads |
 | `detonation_1d` | Planar CJ detonation in 2H2-O2-7Ar at 6.67 kPa, started from its ZND structure (generate it with `tools/detonation_reference.py` and `tools/znd_restart.py`, see the input's header): the front keeps D_CJ = 1617 m/s within 0.01% at 20 cells per induction length, and the von Neumann pressure | 3,934 (10 per induction length); 7,868 and 15,736 for 20 and 40 | minutes on a few CPU threads |
 | `detonation_2d` | Cellular detonation in 2H2-O2-7Ar at 6.67 kPa (V9): the ZND detonation of `detonation_1d` in a 6 cm channel, perturbed by six pockets of fresh gas, with the numerical soot foil (`P_MAX`); generate the initial state first (see the input's header). Front speed 1617.0 m/s (D_CJ to 0.01%); eight triple points (15 mm cells) thin out to 3 cm cells and fainter tracks over 33 cm of travel; the track pattern is the same at 10 and 20 cells per induction length. `tools/soot_foil.py` and `tools/animate_detonation_2d.py` analyze and animate it | 1.2M | 18,900 steps: 39 minutes on two A100s |
@@ -90,15 +111,3 @@ hardware they were measured on.
 | `autoignition_2d` | Autoignition of a thermally stratified lean H2/air mixture at constant volume (φ 0.1, 1070 K, 41 atm; Chen et al. and Hawkes et al. 2006, Sankaran et al. 2005): a 4.1 mm periodic square with random temperature fluctuations T' of 3.75-30 K and decaying turbulence, mixture-averaged transport, 11-15 cells per deflagration thickness. Generate the initial state and the 0D references first (see the input's header). Larger T' ignites earlier (mean heat release peak at 0.99 down to 0.82 tau_0) and burns longer (width 0.06 to 0.16 tau_0), and the fronts slow from spontaneous ignition (median 17 S<sub>L</sub>) towards deflagration (2.4 S<sub>L</sub>, a quarter of the heat release below 1.5 S<sub>L</sub>); the multizone model without transport predicts 2-4 times wider bursts, since mixing halves T' before ignition. `tools/autoignition_analysis.py` and `tools/animate_autoignition.py` compare and animate the runs | 160,000 | 1.4-2.0M steps per T': 4.7-5.5 hours on four A100s |
 | `shock_bubble_3d` | Mach 1.25 shock on a helium bubble in air (3D build; Haas & Sturtevant 1987): Navier-Stokes with mixture-averaged transport at Re = 1.5e3 (the bubble scaled down to 0.18 mm), a quarter of the square shock tube at 128 cells per diameter; the kidney-shaped bubble, the air jet and the vortex ring. Refracted and transmitted shocks, ring and late downstream face within 0-8% of the measured velocities (961, 359, 178, 166 m/s against 960, 365, 165, 165), all within 1.2% at 96 cells per diameter; generate the initial state first (see the input's header); `tools/shock_bubble.py` compares, `tools/animate_shock_bubble.py` animates | 11.4M hexahedra | 52,091 steps: 3.4 hours on four A100s |
 
-## Isotropic turbulence
-
-![Filtered statistics of the isotropic turbulence runs against the references](../docs/images/isotropic_turbulence_validation.png)
-
-`isotropic_turbulence` on $64^3$, $128^3$ and $256^3$, filtered to $64^3$ as the
-references: top, sixth-order differences against Johnsen et al. (2010,
-circles); bottom, spectral derivatives against Subramaniam et al. (2019,
-grey). $64^3$ is under-resolved ($k_\mathrm{max}\eta \approx 0.7$) and misses 15% of the
-enstrophy; $128^3$ and $256^3$ agree within 2%. The remaining differences from
-the references (kinetic energy +2%, temperature variance -5%) are of the size
-of the spread between random initial fields, whose realizations the
-references do not publish.

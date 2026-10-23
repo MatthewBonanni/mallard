@@ -41,7 +41,7 @@ struct ChemistryBenchmark {
 };
 
 /**
- * @brief The [benchmark] mode of MallardReactor: states sampled along the
+ * @brief The [benchmark] mode of `mallard reactor`: states sampled along the
  *        trajectory of [reactor] (fresh, igniting and burnt), replicated
  *        over the cells and advanced over each splitting step dt, every call
  *        from the sampled states; logs and returns cells per second and the

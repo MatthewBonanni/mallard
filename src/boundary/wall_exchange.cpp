@@ -11,6 +11,7 @@
 #include "wall_exchange.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <sstream>
@@ -32,9 +33,8 @@ WallModelSpec WallModelSpec::from_input(const Input & table, const BoundaryCondi
         }
     }
     WallModelSpec spec;
-    const std::string model = toml::find_or<std::string>(table, "model", "gfm");
-    const auto it = WALL_MODEL_TYPES.find(model);
-    if (it == WALL_MODEL_TYPES.end()) throw unknown_option(WALL_MODEL_TYPES, where + ".model", model);
+    const std::string model = find_value_or<std::string>(table, "model", "gfm");
+    const auto it = find_option(WALL_MODEL_TYPES, where + ".model", model);
     WallModelParameters & P = spec.parameters;
     P.type = it->second;
     P.kappa = find_real_or(table, "kappa", dim::none, rtype(P.kappa));
@@ -82,13 +82,14 @@ std::string WallModelSpec::summary() const {
 
 namespace {
 
-enum Walk : int32_t { OUTSIDE = -1, FRONTIER = -2 };
+enum Walk : int32_t { OUTSIDE = -1, FRONTIER = -2, ROTATED = -3 };
 
 /**
  * @brief Local cell containing p (in cell c's frame), by walking from c across
  *        the face beyond which p lies farthest; p is moved into the frame of
  *        each cell entered across a periodic seam. OUTSIDE if the walk leaves
- *        the domain, FRONTIER if it reaches the edge of the halo.
+ *        the domain, FRONTIER if it reaches the edge of the halo, ROTATED if
+ *        it crosses a rotational seam (the sampled velocity would need turning).
  */
 int32_t locate(const Mesh & mesh, const std::vector<int32_t> & face_bc, const std::vector<BoundaryCondition> & bcs,
                uint32_t c, rtype * p) {
@@ -100,7 +101,17 @@ int32_t locate(const Mesh & mesh, const std::vector<int32_t> & face_bc, const st
             const uint32_t f = mesh.h_face_of_cell(c, k);
             const rtype sign = (mesh.h_cells_of_face(f, 1) == static_cast<int32_t>(c)) ? -1.0_r : 1.0_r;
             rtype d = 0.0;
-            FOR_I_DIM d += (p[i] - (mesh.h_face_coords(f, i) - mesh.h_face_offset(f, c, i))) * mesh.h_face_normals(f, i);
+            std::array<rtype, N_DIM> x_f, n_f;
+            if (mesh.is_periodic()) {
+                x_f = mesh.h_face_point(f, c);
+                n_f = mesh.h_face_normal(f, c);
+            } else {
+                FOR_I_DIM {
+                    x_f[i] = mesh.h_face_coords(f, i);
+                    n_f[i] = mesh.h_face_normals(f, i);
+                }
+            }
+            FOR_I_DIM d += (p[i] - x_f[i]) * n_f[i];
             d *= sign / mesh.h_face_area(f);
             if (d > worst) {
                 worst = d;
@@ -115,6 +126,7 @@ int32_t locate(const Mesh & mesh, const std::vector<int32_t> & face_bc, const st
             return (i_bc >= 0 && bcs[static_cast<size_t>(i_bc)].type == BoundaryType::PARTITION) ? FRONTIER : OUTSIDE;
         }
         const uint8_t s = mesh.h_face_shift(f);
+        if (mesh.h_rotated_row(s)) return ROTATED;
         if (c0 == static_cast<int32_t>(c)) {
             FOR_I_DIM p[i] -= mesh.h_shifts(s, i);
             c = static_cast<uint32_t>(c1);
@@ -185,6 +197,15 @@ WallModelData make_wall_model_data(const Mesh & mesh, const std::vector<int32_t>
                     << " above the wall face at (";
                 FOR_I_DIM msg << (i ? ", " : "") << mesh.h_face_coords(f, i);
                 msg << ") is outside the domain; lower " << (s == 0 ? "the exchange height" : "edge_distance") << ".";
+                throw InputError(msg.str());
+            }
+            if (found == ROTATED) {
+                std::ostringstream msg;
+                msg << "wall model: the " << (s == 0 ? "exchange" : "edge") << " point at height " << heights[s]
+                    << " above the wall face at (";
+                FOR_I_DIM msg << (i ? ", " : "") << mesh.h_face_coords(f, i);
+                msg << ") lies across a rotational periodic seam; lower "
+                    << (s == 0 ? "the exchange height" : "edge_distance") << ".";
                 throw InputError(msg.str());
             }
             if (found == FRONTIER) {

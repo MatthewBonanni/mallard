@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "data_paths.h"
 #include "example_inputs.h"
 #include "exact_riemann.h"
 #include "solver.h"
@@ -187,7 +188,7 @@ TEST(PresetValidation, ReactingPropagatesAPremixedFlameAtCanterasSpeed) {
        << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
        << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
        << numerics("reacting")
-       << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" << MALLARD_SOURCE_DIR
+       << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" << source_dir()
        << "/mechanisms/h2o2.yaml\"\nphase = \"ohmech\"\ntransport = \"mixture_averaged\"\n"
        << "[chemistry]\nrtol = 1.0e-6\natol = 1.0e-10\n"
        << "[output]\ncheck_interval = 1000000\n";

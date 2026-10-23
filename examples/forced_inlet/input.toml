@@ -6,7 +6,7 @@
 # the inlet's velocity follow its target closely (the default 0.25 would
 # relax it far more slowly than the forcing).
 #
-#   ../../build/src/Mallard -i input.toml
+#   ../../build/src/mallard -i input.toml
 #   python ../../tools/plot_forced_inlet.py solut/duct
 
 [run]

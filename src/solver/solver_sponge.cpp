@@ -29,7 +29,7 @@ void Solver::init_sponges() {
     sponge_cells = Kokkos::View<uint32_t *>();
     sponge_dt_max = std::numeric_limits<rtype>::infinity();
     if (!input.contains("sponges")) return;
-    const std::vector<Input> sponges = toml::find<std::vector<Input>>(input, "sponges");
+    const std::vector<Input> sponges = find_value<std::vector<Input>>(input, "sponges");
     const uint32_t n_owned = mesh->n_owned();
     const uint32_t n_species = static_cast<uint32_t>(species_names.size());
     const uint32_t n_vars = N_CONSERVATIVE + n_species;

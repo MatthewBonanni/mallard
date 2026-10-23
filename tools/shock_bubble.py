@@ -229,7 +229,7 @@ def read_probe(path):
         if first[0] != "step":
             rows.setdefault(float(first[1]), []).append((float(first[ix]), float(first[iy]), float(first[ip])))
         for row in r:
-            if row[0] == "step" or len(row) < len(header):
+            if row[0] == "step" or row[0].startswith("#") or len(row) < len(header):
                 continue
             rows.setdefault(float(row[1]), []).append((float(row[ix]), float(row[iy]), float(row[ip])))
     out = {}

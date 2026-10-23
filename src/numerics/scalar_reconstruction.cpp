@@ -31,7 +31,7 @@ struct ScalarLimiterFunctor {
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<rtype *[N_DIM]> face_coords;
     Kokkos::View<rtype *[N_DIM]> face_normals;
-    Kokkos::View<rtype *[N_DIM]> shifts;
+    PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
     Kokkos::View<rtype *> cell_volume;
     BoundaryData boundaries;
@@ -55,12 +55,17 @@ struct ScalarLimiterFunctor {
         prescribed = false;
         if (c1 >= 0) {
             const uint8_t s = face_shift(f);
-            if (c0 == static_cast<int32_t>(c)) {
-                FOR_I_DIM dx[i] = (cell_coords(c1, i) + shifts(s, i)) - cell_coords(c, i);
-                return c1;
+            const bool from_0 = c0 == static_cast<int32_t>(c);
+            const int32_t nb = from_0 ? c1 : c0;
+            rtype x[N_DIM];
+            FOR_I_DIM x[i] = cell_coords(nb, i);
+            if (from_0) {
+                periodic.forward(s, x, dx);
+            } else {
+                periodic.backward(s, x, dx);
             }
-            FOR_I_DIM dx[i] = (cell_coords(c0, i) - shifts(s, i)) - cell_coords(c, i);
-            return c0;
+            FOR_I_DIM dx[i] = dx[i] - cell_coords(c, i);
+            return nb;
         }
         if (boundaries.bcs(boundaries.face_bc(f)).ghost_at_face()) {
             prescribed = true;
@@ -121,7 +126,10 @@ struct ScalarLimiterFunctor {
                 for (uint8_t b = 0; b < N_DIM; b++) M[a * N_DIM + b] += w[m] * dx[m][a] * dx[m][b];
             }
             const uint8_t s = (cells_of_face(f, 1) == static_cast<int32_t>(c)) ? face_shift(f) : 0;
-            FOR_I_DIM r[m][i] = (face_coords(f, i) - shifts(s, i)) - cell_coords(c, i);
+            rtype x_f[N_DIM];
+            FOR_I_DIM x_f[i] = face_coords(f, i);
+            periodic.backward(s, x_f, r[m]);
+            FOR_I_DIM r[m][i] = r[m][i] - cell_coords(c, i);
         }
         rtype M_inv[N_DIM * N_DIM];
         invert_matrix<N_DIM>(M, M_inv);
@@ -299,7 +307,7 @@ void ScalarReconstruction::init(std::shared_ptr<Mesh> mesh_in, const BoundaryDat
 
 ScalarFaceValues ScalarReconstruction::face_values(ScalarView scalars) const {
     return ScalarFaceValues{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face, mesh->cell_coords,
-                            mesh->face_coords, mesh->shifts, mesh->face_shift, scalars, gradients, limiter};
+                            mesh->face_coords, mesh->periodic_maps(), mesh->face_shift, scalars, gradients, limiter};
 }
 
 template <uint8_t DEG>
@@ -324,8 +332,8 @@ void ScalarReconstruction::calc(ScalarView scalars, Kokkos::View<rtype *[N_CONSE
     }
     if (linear) {
         ScalarLimiterFunctor functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
-                                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->shifts,
-                                     mesh->face_shift, mesh->cell_volume, boundaries, scalars, W, gradients,
+                                     mesh->cell_coords, mesh->face_coords, mesh->face_normals,
+                                     mesh->periodic_maps(), mesh->face_shift, mesh->cell_volume, boundaries, scalars, W, gradients,
                                      limiter, limiter_type, venkat_K, n_species};
         Kokkos::parallel_for("scalar_limiter", HeavyRange<>(0, mesh->n_cells), functor);
     }

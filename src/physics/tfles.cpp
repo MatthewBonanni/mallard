@@ -15,7 +15,7 @@
 
 ThickenedFlame ThickenedFlame::from_input(const Input & table) {
     using Efficiency = ThickenedFlame::Efficiency;
-    const std::string model = toml::find_or<std::string>(table, "model", "");
+    const std::string model = find_value_or<std::string>(table, "model", "");
     if (model != "tfles") throw InputError("les.combustion.model = \"" + model + "\" is not one of: tfles, pasr.");
     ThickenedFlame tf;
     tf.delta_L = find_double(table, "delta_L", dim::length);
@@ -23,7 +23,7 @@ ThickenedFlame ThickenedFlame::from_input(const Input & table) {
     tf.T_u = find_double(table, "T_unburnt", dim::temperature);
     tf.T_b = find_double(table, "T_burnt", dim::temperature);
     tf.n_res = find_double_or(table, "n_res", dim::none, 5.0);
-    const std::string efficiency = toml::find_or<std::string>(table, "efficiency", "dynamic");
+    const std::string efficiency = find_value_or<std::string>(table, "efficiency", "dynamic");
     if (efficiency == "charlette") {
         tf.efficiency = Efficiency::CHARLETTE;
     } else if (efficiency == "dynamic") {
@@ -42,7 +42,7 @@ ThickenedFlame ThickenedFlame::from_input(const Input & table) {
         }
     }
     tf.beta = tf.efficiency == Efficiency::DYNAMIC ? 0.0 : find_double_or(table, "beta", dim::none, 0.5);
-    const std::string velocity = toml::find_or<std::string>(table, "subgrid_velocity", "colin");
+    const std::string velocity = find_value_or<std::string>(table, "subgrid_velocity", "colin");
     if (velocity != "colin" && velocity != "eddy_viscosity") {
         throw InputError("les.combustion.subgrid_velocity = \"" + velocity + "\" is not one of: colin, eddy_viscosity.");
     }

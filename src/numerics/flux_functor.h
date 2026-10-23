@@ -16,6 +16,7 @@
 
 #include "common.h"
 #include "boundary.h"
+#include "periodic_maps.h"
 #include "riemann_solver.h"
 
 /**
@@ -199,13 +200,24 @@ struct FaceFluxSumFunctor {
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
     Kokkos::View<rtype *[N_CONSERVATIVE]> rhs;
+    PeriodicMaps periodic;
+    Kokkos::View<uint8_t *> face_shift;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_cell) const {
         rtype sum[N_CONSERVATIVE] = {};
+        const bool rotated = periodic.rotated();
         for (uint32_t k = offsets_faces_of_cell(i_cell); k < offsets_faces_of_cell(i_cell + 1); k++) {
             const uint32_t i_face = faces_of_cell(k);
             const rtype sign = (cells_of_face(i_face, 0) == static_cast<int32_t>(i_cell)) ? 1.0 : -1.0;
+            if (rotated && sign < 0.0_r) {
+                // The flux is in the face's (cell 0's) frame
+                rtype F[N_CONSERVATIVE];
+                FOR_I_CONSERVATIVE F[i] = face_flux(i_face, i);
+                periodic.rotate_state(face_shift(i_face), F, true);
+                FOR_I_CONSERVATIVE sum[i] -= F[i];
+                continue;
+            }
             FOR_I_CONSERVATIVE sum[i] += sign * face_flux(i_face, i);
         }
         FOR_I_CONSERVATIVE rhs(i_cell, i) = sum[i];

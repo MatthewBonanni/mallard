@@ -1,6 +1,6 @@
 # Constant-volume ignition of stoichiometric H2/air at 1200 K and 1 atm.
-# Run with MallardReactor (not Mallard):
-#   ../../build/src/MallardReactor -i input.toml
+# Run with mallard reactor (not mallard -i):
+#   ../../build/src/mallard reactor -i input.toml
 # Cantera's IdealGasReactor gives an ignition delay of 44.2 us.
 
 [physics]
