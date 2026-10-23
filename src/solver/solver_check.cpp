@@ -1,6 +1,6 @@
 /**
  * @file solver_check.cpp
- * @brief Pre-flight check (mallard --check): the setup of a real run, without
+ * @brief Pre-flight check (mallard check): the setup of a real run, without
  *        time stepping, and what it says about the run.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni

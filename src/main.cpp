@@ -7,15 +7,21 @@
  * @copyright Copyright (c) 2023 Matthew Bonanni
  */
 
+#include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <thread>
+#include <vector>
+
+#include <unistd.h>
 
 #include <Kokkos_Core.hpp>
 
 #include "build_info.h"
 #include "case_template.h"
+#include "commands.h"
 #include "input_upgrade.h"
 #include "input.h"
 #include "log.h"
@@ -25,14 +31,41 @@
 
 namespace {
 
-void usage(const char * program) {
-    std::cerr << "Usage: " << program << " -i input.toml [Kokkos options, e.g. --kokkos-num-threads=8]\n"
-              << "       " << program << " --check input.toml [--ranks N] [--throughput CELLS_PER_S | --steps N]"
+void usage() {
+    std::cerr << "Usage: mallard -i input.toml [Kokkos options, e.g. --kokkos-num-threads=8]\n"
+              << "       mallard check input.toml [--ranks N] [--throughput CELLS_PER_S | --steps N]"
               << " [--quality-vtu PREFIX] [--catalog KEYS.json]\n"
-              << "       " << program << " ctl <run-dir> status | checkpoint | stop | set <key>=<value> ...\n"
-              << "       " << program << " new <template> [directory]   (" << program << " new --list)\n"
-              << "       " << program << " upgrade-input old.toml > new.toml\n"
-              << "       " << program << " --version\n";
+              << "       mallard new <template> [directory]   (mallard new --list)\n"
+              << "       mallard ctl <run-dir> status | checkpoint | stop | set <key>=<value> ...\n"
+              << "       mallard upgrade-input old.toml > new.toml\n"
+              << "       mallard reactor -i input.toml\n"
+              << "       mallard mesh convert INPUT OUTPUT.h5\n"
+              << "       mallard test [GoogleTest options, e.g. --gtest_filter='Sod*']\n"
+              << "       mallard --version\n";
+}
+
+/**
+ * @brief `mallard test`: runs mallard-test from the same build or install tree.
+ */
+int test_main(int argc, char ** argv) {
+    const std::string name = std::string("mallard-test") + MALLARD_EXECUTABLE_SUFFIX;
+    const std::filesystem::path bin = executable_path().parent_path();
+    const std::vector<std::filesystem::path> candidates = {bin / name, bin.parent_path() / "test" / name};
+    for (const auto & path : candidates) {
+        if (!std::filesystem::exists(path)) continue;
+        std::string program = path.string();
+        std::vector<char *> args = {program.data()};
+        for (int i = 0; i < argc; ++i) args.push_back(argv[i]);
+        args.push_back(nullptr);
+        execv(program.c_str(), args.data());
+        std::cerr << "mallard test: cannot run " << program << ": " << std::strerror(errno) << "\n";
+        return 1;
+    }
+    std::cerr << "mallard test: no " << name << " in";
+    for (const auto & path : candidates) std::cerr << "\n  " << path.parent_path().string();
+    std::cerr << "\nBuild it with -DMallard_ENABLE_TESTS=ON and install it with -DMallard_INSTALL_TESTS=ON"
+                 " (both the default).\n";
+    return 1;
 }
 
 /**
@@ -47,6 +80,9 @@ constexpr Subcommand subcommands[] = {
     {"new", case_template::new_main},
     {"ctl", run_control::ctl_main},
     {"upgrade-input", input_upgrade::main},
+    {"reactor", reactor_main},
+    {"mesh", mesh_main},
+    {"test", test_main},
 };
 
 /**
@@ -85,16 +121,15 @@ int main(int argc, char* argv[]) {
         }
     }
     std::string input_file;
-    bool check = false;
+    const bool check = argc > 1 && strcmp(argv[1], "check") == 0;
     CheckOptions options;
     try {
-        for (int i = 1; i < argc; ++i) {
+        for (int i = check ? 2 : 1; i < argc; ++i) {
             const bool has_value = i + 1 < argc;
             if (strcmp(argv[i], "-i") == 0 && has_value) {
                 input_file = argv[++i];
-            } else if (strcmp(argv[i], "--check") == 0) {
-                check = true;
-                if (has_value && argv[i + 1][0] != '-') input_file = argv[++i];
+            } else if (check && input_file.empty() && argv[i][0] != '-') {
+                input_file = argv[i];
             } else if (strcmp(argv[i], "--ranks") == 0 && has_value) {
                 options.ranks = std::stoi(argv[++i]);
             } else if (strcmp(argv[i], "--throughput") == 0 && has_value) {
@@ -106,7 +141,7 @@ int main(int argc, char* argv[]) {
             } else if (strcmp(argv[i], "--catalog") == 0 && has_value) {
                 options.catalog_file = argv[++i];
             } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-                usage(argv[0]);
+                usage();
                 return 0;
             } else if (strcmp(argv[i], "--version") == 0) {
                 std::cout << "Mallard " << mallard_version() << std::endl;
@@ -114,11 +149,11 @@ int main(int argc, char* argv[]) {
             }
         }
     } catch (const std::exception &) {
-        usage(argv[0]);
+        usage();
         return 1;
     }
     if (input_file.empty() || options.ranks < 0 || options.throughput < 0.0) {
-        usage(argv[0]);
+        usage();
         return 1;
     }
 

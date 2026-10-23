@@ -4,7 +4,7 @@
 # top boundary follows the exact shock motion.
 #
 # Run (460,000 triangles):
-#   ../../build/src/Mallard -i input.toml --kokkos-num-threads=8
+#   ../../build/src/mallard -i input.toml --kokkos-num-threads=8
 #   python ../../tools/animate.py solut dmr --title "Double Mach reflection" --xlim 0 3
 #
 # Expected result at t = 0.2: the two Mach stems and triple points, and the
