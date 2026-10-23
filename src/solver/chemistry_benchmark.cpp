@@ -37,13 +37,13 @@ std::string brief(const double x) {
 
 } // namespace
 
-ChemistryBenchmark run_chemistry_benchmark(const toml::value & input) {
+ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
     const MixtureModel model = MixtureModel::from_input(input);
     if (!input.contains("reactor")) throw InputError("missing [reactor].");
-    const toml::value & table = input.at("reactor");
-    const toml::value & bench = input.at("benchmark");
-    const double T0 = find_double(table, "T"), p0 = find_double(table, "p");
-    const double end_time = find_double(table, "end_time");
+    const Input & table = input.at("reactor");
+    const Input & bench = input.at("benchmark");
+    const double T0 = find_double(table, "T", dim::temperature), p0 = find_double(table, "p", dim::pressure);
+    const double end_time = find_double(table, "end_time", dim::time);
     const int64_t samples_in = toml::find_or<int64_t>(bench, "samples", 64);
     const int64_t cells_in = toml::find_or<int64_t>(bench, "cells", 65536);
     const int64_t repeats_in = toml::find_or<int64_t>(bench, "repeats", 3);
@@ -52,8 +52,12 @@ ChemistryBenchmark run_chemistry_benchmark(const toml::value & input) {
     }
     const uint32_t n_samples = static_cast<uint32_t>(samples_in), n_cells = static_cast<uint32_t>(cells_in);
     const uint32_t repeats = static_cast<uint32_t>(repeats_in);
-    const double igniting_fraction = find_double_or(bench, "igniting_fraction", -1.0);
-    const std::vector<double> dts = toml::find_or<std::vector<double>>(bench, "dt", std::vector<double>{1e-8, 1e-6});
+    const double igniting_fraction = find_double_or(bench, "igniting_fraction", dim::none, -1.0);
+    std::vector<double> dts = {1e-8, 1e-6};
+    if (bench.contains("dt")) {
+        dts.clear();
+        for (const auto & dt : bench.at("dt").as_array()) dts.push_back(as_double(dt, "benchmark.dt", dim::time));
+    }
     const chemistry::ReactorOptions options = reactor_options(input);
     const chemistry::Mechanism & mech = model.mechanism();
     const auto thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(mech);

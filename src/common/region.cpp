@@ -16,7 +16,6 @@
 #include <cmath>
 #include <limits>
 #include <optional>
-#include <set>
 #include <sstream>
 
 #include "input.h"
@@ -80,7 +79,7 @@ class Parser {
         bool bounded = true;
         int depth = 0, max_depth = 0;
 
-        std::string parse(const toml::value & t, const std::string & where, const Frame & parent) {
+        std::string parse(const Input & t, const std::string & where, const Frame & parent) {
             if (!t.is_table()) throw InputError(where + " must be a table, e.g. {type = \"sphere\", ...}.");
             if (!t.contains("type")) throw InputError(where + " has no type.");
             const std::string type = toml::find<std::string>(t, "type");
@@ -92,52 +91,42 @@ class Parser {
         }
 
     private:
-        static void check_keys(const toml::value & t, const std::string & where, std::set<std::string> keys) {
-            for (const char * k : {"type", "translate", "rotate", "scale", "pivot", "edge"}) keys.insert(k);
-            for (const auto & [key, value] : t.as_table()) {
-                if (!keys.count(key)) {
-                    std::string list;
-                    for (const auto & k : keys) list += (list.empty() ? "" : ", ") + k;
-                    throw InputError(where + ": unknown key " + key + " (expected " + list + ").");
-                }
-            }
-        }
-
-        static double number(const toml::value & t, const std::string & key, const std::string & where) {
+        static double number(const Input & t, const std::string & key, const std::string & where,
+                             const Dimension & dimension = dim::length) {
             if (!t.contains(key)) throw InputError(where + " needs " + key + ".");
-            return as_double(t.at(key), where + "." + key);
+            return as_double(t.at(key), where + "." + key, dimension);
         }
 
-        static double positive(const toml::value & t, const std::string & key, const std::string & where) {
+        static double positive(const Input & t, const std::string & key, const std::string & where) {
             const double v = number(t, key, where);
             if (!(v > 0.0)) throw InputError(where + "." + key + " must be positive.");
             return v;
         }
 
-        static Vec vec(const toml::value & v, const std::string & where) {
+        static Vec vec(const Input & v, const std::string & where, const Dimension & dimension = dim::length) {
             if (!v.is_array()) throw InputError(where + " must be an array of numbers.");
             const auto & a = v.as_array();
             if (a.size() != 3 && !(N_DIM == 2 && a.size() == 2)) {
                 throw InputError(where + " must have " + std::string(N_DIM == 2 ? "2 or 3" : "3") + " components.");
             }
             Vec r = {0.0, 0.0, 0.0};
-            for (size_t i = 0; i < a.size(); i++) r[i] = as_double(a[i], where);
+            for (size_t i = 0; i < a.size(); i++) r[i] = as_double(a[i], where, dimension);
             return r;
         }
 
-        static Vec vec(const toml::value & t, const std::string & key, const std::string & where,
-                       const std::optional<Vec> & fallback = std::nullopt) {
+        static Vec vec(const Input & t, const std::string & key, const std::string & where,
+                       const std::optional<Vec> & fallback = std::nullopt, const Dimension & dimension = dim::length) {
             if (!t.contains(key)) {
                 if (fallback) return *fallback;
                 throw InputError(where + " needs " + key + ".");
             }
-            return vec(t.at(key), where + "." + key);
+            return vec(t.at(key), where + "." + key, dimension);
         }
 
-        static Vec direction(const toml::value & t, const std::string & key, const std::string & where,
+        static Vec direction(const Input & t, const std::string & key, const std::string & where,
                              const bool z_in_2d = false) {
             if (!t.contains(key) && !(N_DIM == 2 && z_in_2d)) throw InputError(where + " needs " + key + ".");
-            Vec a = vec(t, key, where, Vec{0.0, 0.0, 1.0});
+            Vec a = vec(t, key, where, Vec{0.0, 0.0, 1.0}, dim::none);
             const double n = norm(a);
             if (!(n > 0.0) || !std::isfinite(n)) throw InputError(where + "." + key + " must be a nonzero vector.");
             for (double & v : a) v /= n;
@@ -145,7 +134,7 @@ class Parser {
         }
 
         /** @brief The frame inside t's transforms: scale, then rotate (both about pivot), then translate. */
-        static Frame transformed(const toml::value & t, const std::string & where, const Frame & parent) {
+        static Frame transformed(const Input & t, const std::string & where, const Frame & parent) {
             Frame f = parent;
             const std::array<double, 9> I = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
             if (t.contains("translate")) f = f.then(I, vec(t.at("translate"), where + ".translate"));
@@ -153,13 +142,13 @@ class Parser {
             const Vec minus_pivot = {-pivot[0], -pivot[1], -pivot[2]};
             if (t.contains("rotate")) f = f.then(rotation(t.at("rotate"), where + ".rotate"), pivot).then(I, minus_pivot);
             if (t.contains("scale")) {
-                const toml::value & s = t.at("scale");
+                const Input & s = t.at("scale");
                 Vec v;
                 if (s.is_array()) {
-                    v = vec(s, where + ".scale");
+                    v = vec(s, where + ".scale", dim::none);
                     if (N_DIM == 2 && s.as_array().size() == 2) v[2] = 1.0;
                 } else {
-                    const double a = as_double(s, where + ".scale");
+                    const double a = as_double(s, where + ".scale", dim::none);
                     v = {a, a, a};
                 }
                 for (const double c : v) {
@@ -173,7 +162,7 @@ class Parser {
         }
 
         /** @brief Rows of the inverse rotation (world to rotated coordinates). */
-        static std::array<double, 9> rotation(const toml::value & r, const std::string & where) {
+        static std::array<double, 9> rotation(const Input & r, const std::string & where) {
             Vec axis = {0.0, 0.0, 1.0};
             double angle = 0.0;
             if (r.is_table() && r.contains("axes")) {
@@ -182,7 +171,7 @@ class Parser {
                     throw InputError(where + ".axes must list " + std::to_string(N_DIM) + " orthonormal vectors.");
                 }
                 std::array<Vec, 3> e;
-                for (size_t i = 0; i < size_t(N_DIM); i++) e[i] = vec(rows.as_array()[i], where + ".axes");
+                for (size_t i = 0; i < size_t(N_DIM); i++) e[i] = vec(rows.as_array()[i], where + ".axes", dim::none);
                 if (N_DIM == 2) e[2] = {0.0, 0.0, 1.0};
                 for (size_t i = 0; i < 3; i++) {
                     for (size_t j = 0; j < 3; j++) {
@@ -195,10 +184,10 @@ class Parser {
                 return {e[0][0], e[0][1], e[0][2], e[1][0], e[1][1], e[1][2], e[2][0], e[2][1], e[2][2]};
             }
             if (r.is_table()) {
-                if (N_DIM == 3 || r.contains("axis")) axis = vec(r, "axis", where);
-                angle = number(r, "angle", where);
+                if (N_DIM == 3 || r.contains("axis")) axis = vec(r, "axis", where, std::nullopt, dim::none);
+                angle = number(r, "angle", where, dim::angle_degrees);
             } else if (N_DIM == 2) {
-                angle = as_double(r, where);
+                angle = as_double(r, where, dim::angle_degrees);
             } else {
                 throw InputError(where + " must be {axis = [...], angle = degrees} or {axes = [[...], [...], [...]]}.");
             }
@@ -223,15 +212,13 @@ class Parser {
             max_depth = std::max(max_depth, depth);
         }
 
-        std::string boolean(const toml::value & t, const std::string & where, const std::string & type,
+        std::string boolean(const Input & t, const std::string & where, const std::string & type,
                             const Frame & frame) {
-            std::vector<std::pair<const toml::value *, std::string>> parts;
+            std::vector<std::pair<const Input *, std::string>> parts;
             if (type == "difference" && (t.contains("a") || t.contains("b"))) {
-                check_keys(t, where, {"a", "b"});
                 if (!t.contains("a") || !t.contains("b")) throw InputError(where + " needs both a and b.");
                 parts = {{&t.at("a"), where + ".a"}, {&t.at("b"), where + ".b"}};
             } else {
-                check_keys(t, where, {"regions"});
                 if (!t.contains("regions") || !t.at("regions").is_array() || t.at("regions").as_array().empty()) {
                     throw InputError(where + " needs regions = [{...}, ...]" +
                                      (type == "difference" ? " (or a and b)." : "."));
@@ -251,7 +238,7 @@ class Parser {
             return text + ")";
         }
 
-        std::string primitive(const toml::value & t, const std::string & where, const std::string & type,
+        std::string primitive(const Input & t, const std::string & where, const std::string & type,
                               Frame frame) {
             Node n;
             const Vec zero = {0.0, 0.0, 0.0};
@@ -259,12 +246,10 @@ class Parser {
             std::ostringstream text;
             text << type;
             if (type == "sphere" || type == "disk" || type == "circle") {
-                check_keys(t, where, {"center", "radius"});
                 n.kind = Kind::SPHERE;
                 frame = frame.then(I, vec(t, "center", where));
                 n.p[0] = positive(t, "radius", where);
             } else if (type == "ellipsoid" || type == "ellipse") {
-                check_keys(t, where, {"center", "semi_axes"});
                 n.kind = Kind::ELLIPSOID;
                 frame = frame.then(I, vec(t, "center", where));
                 const Vec a = vec(t, "semi_axes", where);
@@ -275,9 +260,6 @@ class Parser {
                 }
                 n.p[3] = n_axes == 2 ? std::min(a[0], a[1]) : std::min({a[0], a[1], a[2]});
             } else if (type == "cylinder" || type == "annulus") {
-                check_keys(t, where, type == "annulus" ? std::set<std::string>{"center", "radius", "inner_radius"}
-                                                       : std::set<std::string>{"center", "axis", "radius",
-                                                                               "inner_radius", "length"});
                 n.kind = Kind::CYLINDER;
                 const Vec axis = type == "annulus" ? Vec{0.0, 0.0, 1.0} : direction(t, "axis", where, true);
                 frame = frame.then(basis_along(axis), vec(t, "center", where));
@@ -289,7 +271,6 @@ class Parser {
                 }
                 n.p[2] = t.contains("length") ? 0.5 * positive(t, "length", where) : INF;
             } else if (type == "cone" || type == "frustum") {
-                check_keys(t, where, {"base", "axis", "length", "base_radius", "top_radius"});
                 n.kind = Kind::CONE;
                 const Vec axis = direction(t, "axis", where);
                 const double L = positive(t, "length", where);
@@ -303,7 +284,6 @@ class Parser {
                     throw InputError(where + ": the radii must be non-negative, and not both zero.");
                 }
             } else if (type == "box" || type == "rectangle") {
-                check_keys(t, where, {"center", "size"});
                 n.kind = Kind::BOX;
                 frame = frame.then(I, vec(t, "center", where));
                 const Vec s = vec(t, "size", where);
@@ -313,17 +293,14 @@ class Parser {
                     if (!(s[i] > 0.0)) throw InputError(where + ".size must be positive.");
                 }
             } else if (type == "torus") {
-                check_keys(t, where, {"center", "axis", "major_radius", "minor_radius"});
                 n.kind = Kind::TORUS;
                 frame = frame.then(basis_along(direction(t, "axis", where, true)), vec(t, "center", where));
                 n.p[0] = positive(t, "major_radius", where);
                 n.p[1] = positive(t, "minor_radius", where);
             } else if (type == "half_space") {
-                check_keys(t, where, {"point", "normal"});
                 n.kind = Kind::HALF_SPACE;
                 frame = frame.then(basis_along(direction(t, "normal", where)), vec(t, "point", where, zero));
             } else if (type == "polygon") {
-                check_keys(t, where, {"vertices"});
                 if (N_DIM != 2) throw InputError(where + ": polygons are 2D regions.");
                 n.kind = Kind::POLYGON;
                 if (!t.contains("vertices") || !t.at("vertices").is_array() || t.at("vertices").as_array().size() < 3) {
@@ -337,7 +314,6 @@ class Parser {
                 }
                 n.count = static_cast<uint32_t>(t.at("vertices").as_array().size());
             } else if (type == "implicit") {
-                check_keys(t, where, {"f"});
                 n.kind = Kind::IMPLICIT;
                 if (!t.contains("f")) throw InputError(where + " needs f, an expression in x, y, z (inside: f < 0).");
                 n.first = static_cast<uint32_t>(programs.size());
@@ -359,7 +335,7 @@ class Parser {
 
 } // namespace
 
-Region::Region(const toml::value & table, const std::string & where) {
+Region::Region(const Input & table, const std::string & where) {
     Parser parser;
     m_summary = parser.parse(table, where, Frame());
     if (parser.max_depth > MAX_STACK) {
@@ -371,7 +347,7 @@ Region::Region(const toml::value & table, const std::string & where) {
     m_programs = std::move(parser.programs);
     m_bounded = parser.bounded;
     if (table.contains("edge")) {
-        m_host.edge = as_double(table.at("edge"), where + ".edge");
+        m_host.edge = as_double(table.at("edge"), where + ".edge", dim::length);
         if (!(m_host.edge >= 0.0) || !std::isfinite(m_host.edge)) {
             throw InputError(where + ".edge must be a non-negative width.");
         }

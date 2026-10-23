@@ -149,18 +149,19 @@ follow the polynomial's slopes rather than a constant.
 ![Density on quadrilaterals and remapped to triangles, and along a line](../images/guide/remap-fields-dark.svg#gh-dark-mode-only)
 
 
-`examples/taylor_green_3d/coarse.toml` runs the Taylor-Green vortex on 16^3
-hexahedra to t = 6, and `remap.toml` continues it on 32^3 (degree 3, no
-limiter; the remap takes 0.7 s on 6 threads). The coarse run is far too
-dissipative by then; on the finer mesh the dissipation drops at once to the
-fine run's level and evolves with it, carrying the energy the coarse run had
-already lost (12%): the peak is 13% lower and later than that of the 32^3 run
-from t = 0, and the dissipation stays within 4-8% of it from t = 9. A remap
+`examples/taylor_green_3d/coarse.toml` runs the Taylor-Green vortex on $16^3$
+hexahedra of the periodic box to t = 3, and `remap.toml` continues it on
+$32^3$ (degree 3, no limiter; the remap takes 0.6 s on 2 threads and keeps the
+integrals to 4e-14). By then the coarse run dissipates 3x as fast as the fine
+run from t = 0 and has lost 10% more energy. On the finer mesh the dissipation
+drops at once, to two thirds of the fine run's: the coarse run has already
+damped the small scales the fine mesh would carry. It catches up, peaking 7%
+lower and 0.6 later, and stays within 6% of the fine run from t = 7. A remap
 keeps what the coarse run computed, errors included; it does not undo them.
 Figure: `tools/docs/remap_tgv.py`.
 
-![Dissipation rate of the Taylor-Green vortex: 16^3, 32^3 and 32^3 remapped from 16^3 at t = 6](../images/guide/remap-tgv-light.svg#gh-light-mode-only)
-![Dissipation rate of the Taylor-Green vortex: 16^3, 32^3 and 32^3 remapped from 16^3 at t = 6](../images/guide/remap-tgv-dark.svg#gh-dark-mode-only)
+![Dissipation rate of the Taylor-Green vortex: 16³, 32³ and 32³ remapped from 16³ at t = 3](../images/guide/remap-tgv-light.svg#gh-light-mode-only)
+![Dissipation rate of the Taylor-Green vortex: 16³, 32³ and 32³ remapped from 16³ at t = 3](../images/guide/remap-tgv-dark.svg#gh-dark-mode-only)
 
 ## Shared pieces
 

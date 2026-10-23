@@ -3,7 +3,7 @@ remap (examples/taylor_green_3d, coarse.toml then remap.toml), against the
 fine mesh from t = 0 (input.toml at the fine size), into
 docs/images/guide/remap-tgv-{light,dark}.svg.
 
-    python tools/docs/remap_tgv.py FINE.csv COARSE.csv REMAP.csv [--t-remap 6] [--labels ...]
+    python tools/docs/remap_tgv.py FINE.csv COARSE.csv REMAP.csv [--t-remap 3] [--labels ...]
 
 The CSV files are the runs' [integrals] output.
 """
@@ -24,7 +24,7 @@ def main():
     ap.add_argument("fine")
     ap.add_argument("coarse")
     ap.add_argument("remap")
-    ap.add_argument("--t-remap", type=float, default=6.0)
+    ap.add_argument("--t-remap", type=float, default=3.0)
     ap.add_argument("--mu", type=float, default=0.000625)
     ap.add_argument("--labels", nargs=3, default=["32³ from t = 0", "16³", "32³ remapped from 16³"])
     args = ap.parse_args()

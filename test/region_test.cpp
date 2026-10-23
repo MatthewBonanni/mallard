@@ -336,7 +336,6 @@ TEST(RegionTest, SmoothEdgesFollowTheSmoothstepAndKeepTheVolume) {
 TEST(RegionTest, RejectsInvalidRegions) {
     for (const std::string t : {"{type = \"blob\"}", "{type = \"sphere\", radius = 1}",
                                 "{type = \"sphere\", center = [0, 0, 0], radius = -1}",
-                                "{type = \"sphere\", center = [0, 0, 0], radius = 1, raduis = 2}",
                                 "{type = \"union\", regions = []}", "{type = \"difference\", a = {type = \"sphere\", "
                                                                     "center = [0, 0, 0], radius = 1}}",
                                 "{type = \"cylinder\", center = [0, 0, 0], axis = [0, 0, 1], radius = 1, "
@@ -347,4 +346,25 @@ TEST(RegionTest, RejectsInvalidRegions) {
                                 "{type = \"sphere\", center = [0, 0, 0], radius = 1, edge = -1}"}) {
         EXPECT_ANY_THROW(make_region(t)) << t;
     }
+}
+
+TEST(RegionTest, ReportsKeysTheRegionDoesNotRead) {
+    const Input input = parse_toml("r = {type = \"union\", regions = [{type = \"sphere\", center = [0, 0, 0], "
+                                   "raduis = 1, radius = 1}, {type = \"annulus\", center = [0, 0, 0], radius = 2, "
+                                   "inner_radius = 1, axis = [1, 0, 0]}]}");
+    const region::Region r(input.at("r"), "r");
+    std::vector<std::string> unused;
+    for (const Diagnostic & d : unused_keys(input)) unused.push_back(d.key);
+    EXPECT_EQ(unused, (std::vector<std::string>{"r.regions[0].raduis", "r.regions[1].axis"}));
+}
+
+TEST(RegionTest, ReadsLengthsAndAnglesWithUnits) {
+    const std::string rotate = N_DIM == 2 ? "\"90 deg\"" : "{axis = [0, 0, 1], angle = \"90 deg\"}";
+    const auto r = make_region("{type = \"box\", center = [\"50 cm\", 0, 0], size = [\"2 m\", \"100 mm\", 1], "
+                               "rotate = " + rotate + ", edge = \"0 mm\"}");
+    // Rotated by 90 degrees about z through the origin, the box spans |y - 0.5| < 1 and |x| < 0.05
+    const double inside[3] = {0.04, 1.4, 0.0}, outside[3] = {0.06, 0.5, 0.0};
+    EXPECT_LT(r.distance(inside), 0.0);
+    EXPECT_GT(r.distance(outside), 0.0);
+    EXPECT_ANY_THROW(make_region("{type = \"sphere\", center = [0, 0, 0], radius = \"1 s\"}"));
 }

@@ -19,6 +19,7 @@
 #include <unordered_map>
 
 #include "comm.h"
+#include "common_io.h"
 #include "input.h"
 #include "log.h"
 
@@ -47,6 +48,7 @@ Kokkos::View<T *> to_device(const std::vector<T> & v, const char * label) {
 }
 
 std::shared_ptr<std::ofstream> open_csv(const std::string & file, bool resume, const std::string & header) {
+    if (!output_files_enabled()) return std::make_shared<std::ofstream>();
     const std::filesystem::path parent = std::filesystem::path(file).parent_path();
     if (!parent.empty()) std::filesystem::create_directories(parent);
     auto out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
@@ -61,12 +63,12 @@ const char * const SAMPLES = "STATISTICS_SAMPLES";
 
 } // namespace
 
-void Statistics::init(const toml::value & input, const std::vector<std::string> & species_names, uint32_t n_cells) {
+void Statistics::init(const Input & input, const std::vector<std::string> & species_names, uint32_t n_cells) {
     if (!input.contains("statistics")) return;
-    const toml::value & table = input.at("statistics");
+    const Input & table = input.at("statistics");
     interval = toml::find_or<uint64_t>(table, "interval", 1);
     if (interval == 0) throw InputError("statistics.interval must be positive.");
-    t_start = find_real_or(table, "t_start", 0.0);
+    t_start = find_real_or(table, "t_start", dim::time, 0.0);
     reset = toml::find_or<bool>(table, "reset", false);
     auto add_field = [&](const std::string & name) {
         const auto it = std::find(fields.begin(), fields.end(), name);
@@ -371,10 +373,10 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
     return cell;
 }
 
-void Probes::init(const toml::value & input, const Mesh & mesh, const std::vector<std::string> & species_names,
+void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std::string> & species_names,
                   bool resume) {
     if (!input.contains("probes")) return;
-    const auto entries = toml::find<std::vector<toml::value>>(input, "probes");
+    const auto entries = toml::find<std::vector<Input>>(input, "probes");
     for (const auto & entry : entries) {
         Set set;
         if (!entry.contains("name")) throw InputError("probes: every probe needs a name.");
@@ -394,7 +396,7 @@ void Probes::init(const toml::value & input, const Mesh & mesh, const std::vecto
         set.codes = to_device(h_codes, "probe_codes");
 
         auto vector = [&](const char * name) {
-            const std::vector<rtype> x = find_real_vector(entry, name);
+            const std::vector<rtype> x = find_real_vector(entry, name, dim::length);
             if (x.size() != N_DIM) {
                 throw InputError(key + "." + name + " must have " + std::to_string(N_DIM) + " components.");
             }

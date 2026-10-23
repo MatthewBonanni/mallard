@@ -7,9 +7,6 @@ the options; [Numerical methods](../numerics/overview.md) has the formulation.
 
 ## Presets
 
-A preset picks a validated combination of every scheme choice on this page,
-so most inputs need one line:
-
 ```toml
 [run]
 t_stop = 0.2       # no cfl needed: the preset sets it
@@ -17,6 +14,11 @@ t_stop = 0.2       # no cfl needed: the preset sets it
 [numerics]
 preset = "accurate"
 ```
+
+*Used in:* [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les), [`detonation_1d`](https://matthewbonanni.github.io/mallard/docs/examples/#detonation-1d).
+
+A preset picks a validated combination of every scheme choice on this page,
+so most inputs need one line.
 
 | Preset | Reconstruction | Flux | Time integrator | `cfl` | For |
 |---|---|---|---|---|---|
@@ -99,6 +101,8 @@ cfl = 1.0          # or dt = 1.0e-4 (exactly one of the two)
 t_stop = 0.2       # and/or n_steps, t_wall_stop
 ```
 
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 33 more.
+
 | Key | Default | Meaning |
 |---|---|---|
 | `cfl` | — | CFL number: the time step adapts to it every step |
@@ -143,6 +147,8 @@ type = "TENO"      # "FO", "MUSCL" or "TENO"; the default is "FO"
 order = 5          # TENO: 3 to 6
 ```
 
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 33 more.
+
 !!! warning "The default is first order"
     Without a [preset](#presets) or `[numerics.face_reconstruction]` Mallard
     runs first order. Every example sets a preset or the reconstruction.
@@ -174,6 +180,15 @@ sector stencils where a troubled-cell indicator detects a discontinuity:
 Mallard's stencil cache.*
 
 ### TENO-E options
+
+```toml
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+bound_preserving = true   # for very strong shocks
+```
+
+*Used in:* [`sedov_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#sedov-3d), [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`noh_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#noh-axisymmetric), [`sedov_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sedov-axisymmetric).
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -210,6 +225,8 @@ Pitfalls:
 riemann_solver = "HLLC"   # default
 ```
 
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 33 more.
+
 | `riemann_solver` | Use |
 |---|---|
 | `HLLC` | Default: resolves contacts and shear layers; all-round choice |
@@ -225,9 +242,16 @@ shocks grow carbuncles: use `RHLL` there
 
 ## Time integration and other options
 
+```toml
+[numerics]
+time_integrator = "RK4"
+```
+
+*Used in:* every example keeps the default, `SSPRK3`; the others are in the time-integration tests.
+
 | `[numerics]` key | Default | Meaning |
 |---|---|---|
-| `time_integrator` | `"SSPRK3"` | `FE` (forward Euler), `SSPRK3` or `RK4` |
+| `time_integrator` | `"SSPRK3"` | `FE` (forward Euler), `SSPRK3`, `RK4`, `SSPRK54`, `CK45` or `RDPK3Sp35` (below) |
 | `low_mach_cutoff` | 0.1 | Low-Mach correction: the upwind dissipation scales with the flow speed down to this Mach number; 1 disables it |
 | `convective_flux` | `"riemann"` | `hybrid`: central kinetic-energy-preserving flux with the Riemann solver at shocks ([LES](les.md#low-dissipation-flux-and-the-budget)) |
 | `double_flux` | `false` | Gas mixtures: no pressure oscillations at contacts between different gases ([Thermochemistry](thermochemistry.md#contacts-between-different-gases)) |
@@ -236,6 +260,37 @@ shocks grow carbuncles: use `RHLL` there
 The low-Mach correction matters below about Mach 0.3: without it, upwind
 dissipation at M = 0.1 removes a third of the resolved enstrophy of an
 under-resolved Taylor–Green vortex. Leave it on except for comparisons.
+
+### Choosing an integrator
+
+| Integrator | Order, stages | Registers | Safe `cfl` (smooth) | Cost per unit time vs SSPRK3 (A100, TENO5) |
+|---|---|---|---|---|
+| `SSPRK3` | 3, 3 | 3 | 1.2 | 1 |
+| `RK4` | 4, 4 | 6 | 1.35 | 1.20 |
+| `SSPRK54` | 4, 5 (SSP) | 4 | 2.2 | 0.78 |
+| `CK45` | 4, 5 (2N) | 3 | 2.2 | 0.89 |
+| `RDPK3Sp35` | 3, 5 (embedded 2) | 5 | 2.2 | 0.84 |
+
+- **`SSPRK54`** is the cheapest per unit time for smooth flow and keeps SSP
+  (monotone forward-Euler steps stay monotone up to `cfl` 1.5 times
+  forward Euler's), with a time error about 45 times smaller than SSPRK3's at
+  the same step. With shocks, `cfl = 1.5` matches SSPRK3 at 1.0 in accuracy.
+- **`CK45`** needs the least memory of the fourth-order methods.
+- **`RDPK3Sp35`** with `[numerics.error_control]` chooses the step itself:
+
+```toml
+[numerics]
+time_integrator = "RDPK3Sp35"
+
+[numerics.error_control]
+tolerance = 1e-4   # absolute and relative; [run] cfl only sizes the first step
+```
+
+Pitfalls: error control is not available with `[chemistry]` or `double_flux`;
+its steps follow the time error, not the stability limit, so a loose
+tolerance can still take steps above the `cfl` you would choose by hand (the
+controller rejects them once the error grows). Measured limits and costs:
+[time integrators](../numerics/overview.md#time-integrators).
 
 ## See also
 

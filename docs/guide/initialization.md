@@ -14,6 +14,8 @@ T = 1.0
 # X = { O2 = 1.0, N2 = 3.76 }   gas mixtures: the composition
 ```
 
+*Used in:* [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct) and 1 more.
+
 ## Expressions
 
 ```toml
@@ -29,6 +31,8 @@ p = """\
     x >= 0.8 ? (y >= 0.8 ? 1.5 : 0.3) \
              : (y >= 0.8 ? 0.3 : 0.029032258064516)"""
 ```
+
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 12 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -69,6 +73,8 @@ format = "restart"
 interval = 10000
 ```
 
+*Used in:* [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les) and 13 more.
+
 `format = "restart"` in `[[write_data]]` writes the conservative variables
 (and whatever else the run needs to continue: chemistry sub-steps, the soot
 foil `P_MAX`, `[statistics]` averages, characteristic boundary states) in
@@ -80,7 +86,7 @@ the total.
 - `[statistics] reset = true` starts the averages afresh instead of
   continuing them.
 - Probes and force monitors append to their files on a restart.
-- Restart files of Mallard 0.3 and earlier (version 1) are still read.
+- Restart files of every earlier release are read, back to 0.1, and files from a newer Mallard are rejected clearly ([compatibility](output.md#file-formats-and-compatibility)).
 - `compression = "zlib"` writes compressed restart files (version 5, losslessly: they restart bit for bit), about a third smaller for smooth flows; reading them needs a build with `Mallard_ENABLE_ZLIB`, and the Python tools in `tools/` read only uncompressed ones.
 
 ### Initial states from scripts
@@ -100,7 +106,7 @@ to copy for your own cases:
 | `tile_restart.py` | A restart file of a periodic box tiled into a larger box |
 
 A restart file is binary, little-endian: the 16 bytes `MALLARD-RESTART\0`,
-then `uint32` version (2) and real size (8), `uint64` cell count, variable
+then `uint32` version (2; [all versions](output.md#file-formats-and-compatibility)) and real size (8), `uint64` cell count, variable
 count and step, `float64` time, each variable name as a `uint32` length and its
 characters, and finally the values, variable after variable, each over all
 cells in the mesh's global order. The variables are `RHO`, `RHOU_X`, `RHOU_Y`
@@ -108,6 +114,19 @@ cells in the mesh's global order. The variables are `RHO`, `RHOU_X`, `RHOU_Y`
 and `T_SEED` (a temperature guess); `channel_init.py` has a short writer.
 
 ## Remap from another mesh
+
+```toml
+[initialize]
+type = "remap"
+file = "coarse/run_000100.restart"   # written on another mesh
+
+[initialize.mesh]                   # that mesh: the source run's [mesh] table
+type = "cartesian"
+Nx = 100
+Ny = 100
+```
+
+*Used in:* [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d).
 
 `type = "remap"` starts from a restart file written on a **different mesh**: a
 finer one (grid convergence, spinning up an LES from a coarse run), another

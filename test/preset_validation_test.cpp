@@ -29,7 +29,7 @@
 
 namespace {
 
-std::unique_ptr<Solver> run_input(const toml::value & input) {
+std::unique_ptr<Solver> run_input(const Input & input) {
     auto solver = std::make_unique<Solver>();
     solver->init(input);
     solver->run();
@@ -125,8 +125,8 @@ double taylor_green_excess_decay(const std::string & preset, uint32_t n) {
 TEST(PresetValidation, RobustKeepsTheNohImplosionPositive) {
     // examples/noh_axisymmetric at 60 x 60 to t = 0.6: the shock is at r = 0.2
     // with rho = 64 behind it
-    toml::value input = example_under_preset({"noh_axisymmetric/input.toml", "robust", 2, "", {}, ""}, 1, 60);
-    input.as_table()["run"] = toml::table{{"t_stop", 0.6}};
+    Input input = example_under_preset({"noh_axisymmetric/input.toml", "robust", 2, "", {}, ""}, 1, 60);
+    input.as_table()["run"] = Input::table_type{{"t_stop", 0.6}};
     auto solver = run_input(input);
     const auto & m = *solver->get_mesh();
     double p_min = 1e30, rho_sum = 0.0, vol = 0.0;
