@@ -1096,6 +1096,10 @@ void Solver::init_output() {
         }
     }
     probes.init(input, *mesh, species_names, toml::find_or<std::string>(input, "initialize", "type", "") == "restart");
+    if (probes.any_point_values() && !viscous_gradients.is_allocated()) {
+        viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
+        viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
+    }
     if (!input.contains("write_data")) {
         return;
     }
@@ -1467,7 +1471,7 @@ bool Solver::state_needed() const {
         if (step % monitor.interval == 0) return true;
     }
     return (integral_monitor.interval > 0 && step % integral_monitor.interval == 0) || statistics.due(step, t) ||
-           probes.due(step);
+           probes.due(step, t);
 }
 
 double Solver::progress() const {
@@ -1725,9 +1729,20 @@ void Solver::write_data(bool force) {
 }
 
 void Solver::write_probes() {
-    if (!probes.due(step)) return;
-    update_primitives();
-    probes.write(step, t, cell_sampler());
+    if (!probes.due(step, t)) return;
+    if (probes.point_values_due(step, t)) {
+        update_cell_W();
+    } else {
+        update_primitives();
+    }
+    probes.write(step, t, probe_fields());
+}
+
+ProbeFields Solver::probe_fields() {
+    ProbeFields fields{cell_sampler(), W_cells, viscous_gradient, viscous_gradients, face_reconstruction.get(),
+                       physics.gamma, {}};
+    if (is_mixture()) fields.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
+    return fields;
 }
 
 void Solver::take_step() {
@@ -1809,7 +1824,7 @@ rtype Solver::next_target_time() const {
     for (const auto & writer : data_writers) {
         t_target = std::min(t_target, writer->next_time());
     }
-    return t_target;
+    return std::min(t_target, probes.next_time());
 }
 
 void Solver::calc_dt() {
@@ -2154,6 +2169,13 @@ struct FlowStatisticsFunctor {
 };
 
 void Solver::update_velocity_gradients() {
+    update_cell_W();
+    if (!face_reconstruction->cell_gradients(W_cells, viscous_gradients, mesh->n_owned())) {
+        Kokkos::parallel_for("statistics_gradients", mesh->n_owned(), viscous_gradient);
+    }
+}
+
+void Solver::update_cell_W() {
     halo.exchange(state());
     update_boundary_states(t);
     const Euler phys = physics;
@@ -2168,9 +2190,6 @@ void Solver::update_velocity_gradients() {
         FOR_I_CONSERVATIVE W(i_cell, i) = W_c[i];
     });
     update_primitives();
-    if (!face_reconstruction->cell_gradients(W_cells, viscous_gradients, mesh->n_owned())) {
-        Kokkos::parallel_for("statistics_gradients", mesh->n_owned(), viscous_gradient);
-    }
 }
 
 std::array<rtype, N_FLOW_STATISTICS> Solver::integrate_flow_statistics() {

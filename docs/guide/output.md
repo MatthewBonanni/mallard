@@ -247,6 +247,10 @@ level by a variable at a probe point.
 
 ## Probes: `[[probes]]`
 
+A probe samples the solution on a geometry every `interval` steps (or
+`time_interval` of simulation time) and writes the samples, reductions over
+them, or both. The files are the same bit for bit on any number of ranks.
+
 ```toml
 [[probes]]
 name = "centerline"
@@ -259,11 +263,52 @@ interval = 10
 
 *Used in:* [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`flame_outflow`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-outflow), [`shock_bubble_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-3d).
 
-Point (`point = [x, y]`) or line (`start`, `end`, `n_points`) probes append
-`step, t, point, x, y, <variables>` to `probe_<name>.csv`, at full precision,
-from the cell containing each point. The [Sod comparison](numerics.md#reconstruction)
-on the Numerics page was read from such a line probe. Variables are those of
-`[statistics]`.
+```toml
+# Wake survey: high-order point values on an arc, a VTK series for ParaView,
+# and the arc's mean and RMS in probe_wake_reductions.csv
+[[probes]]
+name = "wake"
+variables = ["U", "P"]
+sampling = "point"
+shape = "arc"
+center = [0.0, 0.0]
+radius = 5.0
+angles = [-45.0, 45.0]
+n_points = 91
+time_interval = 1.0
+format = "vtp"
+reductions = ["mean", "rms"]
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `name` | required | Names the files |
+| `variables` | required | `[statistics]` fields; `U` and `Y_*` expand to all components and species |
+| `shape` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`) |
+| `sampling` | `cell` | `cell`: the average of the cell holding each sample; `point`: the reconstruction's value at the sample |
+| `interval` / `time_interval` | 1 step | Output times; `time_interval` shortens the step to land on them |
+| `format` | `csv` | `csv`, `hdf5` (one extensible file) or `vtp` (one file per output and a `.pvd` series) |
+| `reductions` | none | `integral`, `mean`, `favre`, `min`, `max`, `rms` along the geometry |
+| `samples` | `true` | `false` writes only the reductions |
+| `translate`, `rotate`, `scale` | none | Move the geometry (scale, then rotate about the origin, then translate) |
+
+With TENO, `sampling = "point"` reads each cell's reconstruction polynomial at
+the sample, so a probe converges at the scheme's order (fifth order for
+`order = 5`) instead of the first order of cell averages at points off the
+centroids. The [Sod comparison](numerics.md#reconstruction) on the Numerics
+page was read from a line probe. The full key list is in the [input reference](../input.md#probes).
+
+Pitfalls:
+
+- Point values fall back to the linear least-squares reconstruction in cells
+  the TENO indicator flags troubled (shocks, and coarse meshes of smooth
+  fields), and to the cell average outside the domain.
+- Mass fractions are cell averages in both modes; `T` and `H` follow the
+  reconstructed `p / rho` at the cell's composition.
+- CSV is for small probes: it repeats the coordinates every output. Use `hdf5`
+  or `vtp` for thousands of samples.
+- Reductions of point sets weigh each point 1 (`integral` is a sum); curves
+  integrate with three Gauss points per element between samples.
 
 ## Post-processing
 
@@ -296,6 +341,7 @@ build reads. It is never misread.
 | HDF5 mesh (`mallard-mesh-convert`) | root attribute `version` | 1 (0.3) | Mallard: all |
 | HDF5 output (`format = "hdf5"`) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard_h5.py` |
 | VTU output | field data `MALLARD_FORMAT_VERSION` | none before 0.9, 1 (0.9) | ParaView, `tools/mallard_vtu.py` |
+| Probe output (`[[probes]]` `format = "hdf5"`, `"vtp"`) | root attribute `version` (HDF5), field data `MALLARD_FORMAT_VERSION` (VTP) | 1 (0.9) | Mallard (restarts append to HDF5), ParaView |
 | TENO cache (`cache_file`) | magic `MALLARD-TENO-<n>` | - | Rebuilt automatically when it does not match |
 
 - Restart files are written with the **lowest** version that holds their

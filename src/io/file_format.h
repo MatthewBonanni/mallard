@@ -32,6 +32,7 @@ inline constexpr Format RESTART{"restart", 6, 1};
 inline constexpr Format MESH{"HDF5 mesh", 1, 1};
 inline constexpr Format HDF5_OUTPUT{"HDF5 output", 1, 1};
 inline constexpr Format VTU_OUTPUT{"VTU output", 1, 1};
+inline constexpr Format PROBE_OUTPUT{"probe output", 1, 1};
 
 /**
  * @brief Throws a std::runtime_error if this build cannot read `version` of

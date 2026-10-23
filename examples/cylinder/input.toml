@@ -74,6 +74,33 @@ geometry = "cylinder"
 time_interval = 1.0
 variables = ["P"]
 
+# Transverse velocity two diameters behind the cylinder (its spectrum gives
+# St), point values of the TENO polynomials every 0.1 time units
+[[probes]]
+name = "wake_point"
+variables = ["U_Y", "P"]
+sampling = "point"
+point = [2.5, 0.0]
+time_interval = 0.1
+file = "./solut/probe_wake_point.csv"
+
+# Wake survey on an arc of radius 5 behind the cylinder (ParaView reads the
+# .pvd series), with its mean and RMS each time unit
+[[probes]]
+name = "wake_arc"
+variables = ["U", "P"]
+sampling = "point"
+shape = "arc"
+center = [0.0, 0.0]
+radius = 5.0
+angles = [-45.0, 45.0]
+n_points = 91
+time_interval = 1.0
+format = "vtp"
+file = "./solut/probe_wake_arc.pvd"
+reductions = ["mean", "rms", "min", "max"]
+reductions_file = "./solut/probe_wake_arc_reductions.csv"
+
 # Phase averages of the shedding cycle from t = 60, in 12 bins of the phase
 # set by the upward zero crossings of U_Y on the wake axis at x = 3: the
 # PHASE_<bin>_<field> output of the last snapshot. Over t = 100..400 the

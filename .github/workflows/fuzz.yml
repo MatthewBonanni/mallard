@@ -25,6 +25,7 @@ on:
 permissions:
   contents: read
   actions: read
+  statuses: write
 
 jobs:
   fuzz:
@@ -38,6 +39,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+      - name: Report the job as running
+        if: github.workflow == 'CI'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_ID: ${{ job.check_run_id }}
+          STATUS_NAME: fuzz-${{ matrix.dim }}d
+        run: sh tools/ci_status.sh running
       - name: Skip if main is unchanged
         id: changed
         if: github.event_name == 'schedule'
@@ -101,3 +109,10 @@ jobs:
         with:
           name: fuzz-crashes-${{ matrix.dim }}d
           path: fuzz-work/crashes
+      - name: Report the job's result
+        if: always() && github.workflow == 'CI'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_ID: ${{ job.check_run_id }}
+          STATUS_NAME: fuzz-${{ matrix.dim }}d
+        run: sh tools/ci_status.sh ${{ job.status }}

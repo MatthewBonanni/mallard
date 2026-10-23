@@ -30,9 +30,9 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 
 | Dimension | Keys |
 |---|---|
-| Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
-| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.curved.center`, `radius`; `periodic.translation`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `start`, `end`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
-| Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); region `rotate` (2D), `rotate.angle` (3D) |
+| Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `probes.time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.curved.center`, `radius`; `periodic.translation`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `translate`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
+| Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D) |
 | Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
 | Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`; `physics.p_ref` |
@@ -818,22 +818,84 @@ weights and the trigger state.
 
 ## `[[probes]]`
 
-Point and line probes: the values of the cells holding a set of points, every
-`interval` steps, appended by rank 0 to a CSV file with rows
-`step, t, point, x, y(, z), <variables>` (one per point and step; a restarted run
-appends). Each point reads the cell average of the cell containing it (on a
-face between cells, the one with the lowest global id, so any number of ranks
-picks the same cell), or of the nearest cell centroid if no cell contains it.
-Values are written to full precision.
+Samples of the solution on a geometry (points or curves), every `interval`
+steps or `time_interval` of simulation time, written raw and/or reduced. Setup
+locates the samples in the cells of each rank; a write evaluates them on the
+device of the ranks that own them and gathers them on rank 0, which writes them
+in a fixed order, so the files are the same bit for bit on any number of
+ranks. A probe that is not due costs nothing.
 
 | Key | Description |
 |---|---|
 | `name` | Probe name |
-| `variables` | Any of the `[statistics]` fields |
-| `point` | One point `[x, y(, z)]`, or |
-| `start`, `end`, `n_points` | `n_points` (at least 2) evenly spaced points from `start` to `end` |
-| `interval` | Every this many steps, default 1 |
-| `file` | Output file, default `probe_<name>.csv` |
+| `variables` | Any of the `[statistics]` fields, `U` for all velocity components, `Y_*` for every species |
+| `shape` | `point`, `points`, `line`, `polyline`, `circle`, `arc` or `curve` (below); without it, `point` or `start`/`end` select a point or a line |
+| `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below) |
+| `interval` / `time_interval` | Every this many steps (default 1) / this much simulation time; with `time_interval` the time step is shortened to land on each output time, as for `[[write_data]]` |
+| `format` | `csv` (default), `hdf5` (builds with `-DMallard_ENABLE_HDF5=ON`) or `vtp` |
+| `file` | Output file, default `probe_<name>.csv`, `.h5` or `.pvd` |
+| `samples` | `false` writes only the reductions (default `true`) |
+| `reductions` | Any of `integral`, `mean`, `favre`, `min`, `max`, `rms` (below) |
+| `reductions_file` | Default `probe_<name>_reductions.csv` |
+| `translate`, `rotate`, `scale` | Transform of the geometry: scaled (a factor, or one per axis) about the origin, then rotated about it (2D: `rotate = <degrees>`; 3D: `rotate = {axis = [x, y, z], angle = <degrees>}`), then translated |
+
+Shapes (`[x, y(, z)]` points):
+
+| `shape` | Keys |
+|---|---|
+| `point` | `point` |
+| `points` | `points = [[...], ...]`, or `points_file`: a text file of one point per row (numbers split by commas or blanks; `#` starts a comment, a header row is skipped) |
+| `line` | `start`, `end`, `n_points` (at least 2) evenly spaced points |
+| `polyline` | `vertices` (at least 2), `n_points` per segment, ends included |
+| `circle` | `center`, `radius`, `n_points` (at least 3); 3D: `normal`, and optionally `reference`, the direction of the first point (default: the axis least aligned with the normal, projected) |
+| `arc` | as `circle`, with `angles = [start, end]` in degrees from the x axis (3D: from `reference`) and `n_points` from start to end, ends included |
+| `curve` | `x`, `y`(, `z`): expressions of the parameter `s` over `s_range = [s0, s1]` (default `[0, 1]`), `n_points` evenly spaced in `s` |
+
+**Point values.** With TENO, `sampling = "point"` evaluates each cell's
+central reconstruction polynomial at the sample (order-consistent: the error
+falls at the scheme's order, e.g. fifth order for `order = 5`); cells that the
+TENO indicator flags troubled, schemes without such polynomials (FO, MUSCL),
+and values with a nonpositive density or pressure take the linear
+least-squares reconstruction (second order), and failing that the cell
+average. `RHO`, `U_*` and `P` are reconstructed; `T` and `H` follow `p / rho`
+at the cell's composition (exact for a perfect gas), and mass fractions are
+cell averages. A sample on a face between cells belongs to the cell with the lowest global
+id, so any number of ranks pick the same cell; samples outside the domain take
+the nearest cell's average in both modes.
+
+**Output.** `csv` appends rows `step, t, point, x, y(, z), <variables>` (one per
+sample and step; a restarted run appends). `hdf5` holds `coordinates`
+(samples x dimension), for curves `arc_length` and `polylines/nodes` with
+`polylines/offsets`, and the extensible `step`, `time` and `fields/<variable>`
+(steps x samples); `vtp` writes one VTK PolyData file per output,
+`<stem>_<step>.vtp` (vertices for point sets, polylines with `arc_length`
+for curves), indexed by the `.pvd` series. A restarted run cuts the HDF5 rows
+and the `.pvd` entries after the restart back and continues them.
+
+**Reductions.** Rows `step, t, length` (curves) or `count` (point sets), then
+`<reduction>_<variable>` for each reduction and variable: `integral` is
+`int q ds`, `mean` `int q ds / int ds`, `favre` the density-weighted mean
+`int rho q ds / int rho ds`, `rms` `sqrt(int q^2 ds / int ds)`, and `min`, `max`
+the extrema over the samples and the integration points. Curves integrate
+with three Gauss points on each element between consecutive samples (exact for
+polynomials of degree 5 along straight elements), point sets with unit weights
+(`integral` is the sum, `mean` the arithmetic mean). Rank 0 sums them in a
+fixed order, so they too are the same bit for bit on any number of ranks.
+
+```toml
+[[probes]]
+name = "wake"
+variables = ["U", "P"]
+sampling = "point"
+shape = "arc"
+center = [0.0, 0.0]
+radius = 2.0
+angles = [-60.0, 60.0]
+n_points = 121
+time_interval = 1.0e-4
+format = "vtp"
+reductions = ["mean", "rms"]
+```
 
 ## `[source]`
 
