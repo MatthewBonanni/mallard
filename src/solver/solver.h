@@ -285,6 +285,8 @@ class Solver {
         void act_on_requests();
         void apply_commands();
         std::string write_restarts();
+        /** @brief What restart files carry besides the cells: statistics weights, step-control state. */
+        RestartAttributes restart_attributes() const;
         void write_checkpoint();
         void poll_control_files();
         void publish_status();

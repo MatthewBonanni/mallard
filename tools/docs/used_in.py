@@ -83,6 +83,9 @@ RULES = {
     ("output.md", "## Wall forces: `[[forces]]`"): (lambda t: "forces" in t, None),
     ("output.md", "## Domain integrals: `[integrals]`"): (lambda t: "integrals" in t, None),
     ("output.md", "## Statistics"): (lambda t: "statistics" in t, None),
+    ("output.md", "### Spectra and two-point correlations: `[statistics.spectra]`"):
+        (lambda t: "spectra" in t.get("statistics", {}), "the in-situ statistics tests"),
+    ("output.md", "### Phase averages: `[statistics.phase]`"): (lambda t: "phase" in t.get("statistics", {}), None),
     ("output.md", "## Probes: `[[probes]]`"): (lambda t: "probes" in t, None),
     ("physics.md", "## Euler and Navier–Stokes"): (lambda t: "type" in t.get("physics", {}), None),
     ("physics.md", "### Viscosity laws"): (lambda t: "viscosity_model" in t.get("physics", {}), None),

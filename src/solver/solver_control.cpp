@@ -317,17 +317,18 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
 std::string Solver::write_restarts() {
     update_primitives();
     copy_device_to_host();
-    const RestartAttributes attributes = statistics.attributes();
+    const RestartAttributes attributes = restart_attributes();
     const RestartFaces faces = characteristic_restart_faces();
+    const RestartArrays arrays = statistics.arrays();
     std::string file;
     for (auto & writer : data_writers) {
         if (writer->get_format() != DataFormat::RESTART) continue;
-        writer->write(step, t, true, attributes, faces);
+        writer->write(step, t, true, attributes, faces, arrays);
         writer->finish();
         file = writer->last_written();
     }
     if (checkpoint_writer) {
-        checkpoint_writer->write(step, t, true, attributes, faces);
+        checkpoint_writer->write(step, t, true, attributes, faces, arrays);
         checkpoint_writer->finish();
         file = checkpoint_writer->last_written();
     }

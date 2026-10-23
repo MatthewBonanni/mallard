@@ -92,15 +92,17 @@ std::vector<rtype> owned_state(Solver & solver) {
 }
 
 /** @brief The state after n steps, straight through, and resumed from a restart file. */
-void expect_restart_continues_exactly(const std::string & dir, const std::string & file, uint64_t n) {
+void expect_restart_continues_exactly(const std::string & dir, const std::string & file, uint64_t n,
+                                      const std::function<std::string(std::string)> & edit = {}) {
+    const auto edited = [&](std::string input) { return edit ? edit(std::move(input)) : input; };
     Solver straight;
-    straight.init(parse_toml(case_input(dir + "/straight", "n_steps = " + std::to_string(n) + "\ncfl = 0.25\n", 1000)));
+    straight.init(parse_toml(edited(case_input(dir + "/straight", "n_steps = " + std::to_string(n) + "\ncfl = 0.25\n", 1000))));
     straight.run();
     Solver resumed;
     std::string input = case_input(dir + "/resumed", "n_steps = " + std::to_string(n) + "\ncfl = 0.25\n", 1000);
     const size_t begin = input.find("type = \"analytical\""), end = input.find("[[boundaries]]");
     input.replace(begin, end - begin, "type = \"restart\"\nfile = \"" + file + "\"\n");
-    resumed.init(parse_toml(input));
+    resumed.init(parse_toml(edited(input)));
     resumed.run();
     EXPECT_EQ(resumed.get_step(), straight.get_step());
     EXPECT_EQ(resumed.get_time(), straight.get_time());
@@ -126,6 +128,24 @@ TEST(RunControlTest, CheckpointRequestWritesARestartAfterTheNextStepAndTheRunCon
     ASSERT_TRUE(fs::exists(restart_file(dir, 1)));
     EXPECT_EQ(read_restart(restart_file(dir, 1)).step, 1u);
     expect_restart_continues_exactly(dir, restart_file(dir, 1), 6);
+}
+
+TEST(RunControlTest, CheckpointOfAnErrorControlledRunResumesExactly) {
+    // The checkpoint carries the controller's state, as the scheduled restarts do
+    const std::string dir = fresh_dir("checkpoint_error_control");
+    const auto controlled = [](std::string input) {
+        const std::string ssprk3 = "time_integrator = \"SSPRK3\"\n";
+        input.replace(input.find(ssprk3), ssprk3.size(),
+                      "time_integrator = \"RDPK3Sp35\"\n[numerics.error_control]\ntolerance = 1e-3\n");
+        return input;
+    };
+    clear_requests();
+    Solver solver;
+    solver.init(parse_toml(controlled(case_input(dir, "n_steps = 6\ncfl = 0.25\n", 1000))));
+    run_control::request(run_control::CHECKPOINT);
+    EXPECT_EQ(solver.run(), 0);
+    ASSERT_TRUE(fs::exists(restart_file(dir, 1)));
+    expect_restart_continues_exactly(dir, restart_file(dir, 1), 6, controlled);
 }
 
 TEST(RunControlTest, StopRequestEndsTheRunAfterTheNextStepWithARestart) {
