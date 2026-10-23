@@ -66,15 +66,14 @@ std::string case_input(const std::string & dir, const std::string & run, uint64_
     return s.str();
 }
 
-/** @brief A fresh directory shared by all ranks. */
+/**
+ * @brief A directory of the test's scratch directory, shared by all ranks.
+ *        Relative, so the control socket's path stays within its length limit.
+ */
 std::string fresh_dir(const std::string & name) {
-    const fs::path dir = fs::temp_directory_path() / ("mallard_ctl_" + name);
-    if (comm::is_root()) {
-        fs::remove_all(dir);
-        fs::create_directories(dir);
-    }
+    if (comm::is_root()) fs::create_directories(name);
     comm::barrier();
-    return dir.string();
+    return name;
 }
 
 std::string restart_file(const std::string & dir, uint64_t step) {
@@ -99,8 +98,8 @@ void expect_restart_continues_exactly(const std::string & dir, const std::string
     straight.run();
     Solver resumed;
     std::string input = case_input(dir + "/resumed", "n_steps = " + std::to_string(n) + "\ncfl = 0.25\n", 1000);
-    input.replace(input.find("type = \"analytical\""), std::string("type = \"analytical\"").size(),
-                  "type = \"restart\"\nfile = \"" + file + "\"");
+    const size_t begin = input.find("type = \"analytical\""), end = input.find("[[boundaries]]");
+    input.replace(begin, end - begin, "type = \"restart\"\nfile = \"" + file + "\"\n");
     resumed.init(parse_toml(input));
     resumed.run();
     EXPECT_EQ(resumed.get_step(), straight.get_step());
@@ -167,10 +166,11 @@ TEST(RunControlTest, SettingsOutsideTheRuntimeSafeSetAreRejected) {
     EXPECT_FALSE(solver.apply_setting("integrals.interval", "3").first);
     // The only stop condition cannot be removed
     EXPECT_FALSE(solver.apply_setting("n_steps", "0").first);
-    EXPECT_TRUE(solver.apply_setting("t_stop", "0.01").first);
+    EXPECT_FALSE(solver.apply_setting("t_stop", "10mm").first);
+    EXPECT_TRUE(solver.apply_setting("t_stop", "10ms").first);
     EXPECT_TRUE(solver.apply_setting("n_steps", "0").first);
     solver.run();
-    EXPECT_GE(solver.get_time(), static_cast<rtype>(0.01));
+    EXPECT_NEAR(double(solver.get_time()), 0.01, 1e-6);
 }
 
 TEST(RunControlTest, DivergenceReportsTheCellAndWritesTheLastValidState) {
@@ -201,10 +201,8 @@ TEST(RunControlTest, DivergenceReportsTheCellAndWritesTheLastValidState) {
 }
 
 TEST(RunControlTest, ControlSocketIsPrivateAnswersStatusAndQueuesCommands) {
-    const std::string dir = fresh_dir("socket");
     if (!comm::is_root()) GTEST_SKIP() << "the socket is rank 0's";
-    const fs::path cwd = fs::current_path();
-    fs::current_path(dir);
+    const std::string dir = ".";
     clear_requests();
     {
         // A socket left by a run that died is replaced
@@ -248,7 +246,6 @@ TEST(RunControlTest, ControlSocketIsPrivateAnswersStatusAndQueuesCommands) {
         EXPECT_EQ(answer, "done\n");
     }
     EXPECT_FALSE(fs::exists(run_control::SOCKET_NAME));
-    fs::current_path(cwd);
 }
 
 namespace {

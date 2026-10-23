@@ -21,6 +21,8 @@ geometry = "cylinder"         # the faces of one boundary zone
 variables = ["P", "T"]
 ```
 
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 35 more.
+
 | Key | Default | Meaning |
 |---|---|---|
 | `prefix` | required | Output path prefix |
@@ -28,6 +30,9 @@ variables = ["P", "T"]
 | `interval` / `time_interval` | one required | Every this many steps, or this much simulated time (the step is shortened to land on each output time) |
 | `variables` | required (`vtu`, `hdf5`) | Variables to write, below; `Y_*` selects every variable with that prefix |
 | `geometry` | `"all"` | `vtu`: a boundary zone name writes that zone's faces with the values of their cells (wall pressure, heat flux) |
+| `compression` | `"none"` | `"zlib"`: lossless compression of `vtu`, `hdf5` and `restart` files (below) |
+| `relative_error` | none (lossless) | `vtu`, `hdf5` with `compression = "zlib"`: lossy, each cell value within this relative error |
+| `chunk_cells` | 65536 | Compressed `restart` files: cells per chunk |
 
 **Variables:**
 
@@ -50,10 +55,36 @@ collective I/O, plus the mesh once, and XDMF indexes that ParaView opens. It
 pays off for large runs on parallel file systems; the files do not depend on
 the rank count. Read them in Python with `tools/mallard_h5.py`.
 
+**Asynchronous and compressed output.** Writing large snapshots can take longer than many steps. By default (`[output] async = true`) each snapshot is copied out and written on a background thread while the run goes on, with the same files byte for byte as `async = false`; `io_threads` copies and compresses on several threads (GPU runs leave the host cores idle):
+
+```toml
+[output]
+io_threads = 8              # async = true is the default
+
+[[write_data]]
+prefix = "solut/flow"
+format = "vtu"
+interval = 500
+variables = ["RHO", "U", "P", "T"]
+compression = "zlib"       # lossless; readable by any ParaView
+relative_error = 1e-4       # optional: lossy, |x' - x| <= 1e-4 |x| per value
+```
+
+Compressed VTU uses VTK's own zlib compressor and compressed HDF5 the standard shuffle and deflate filters, so ParaView and h5py read them unchanged. VTU and restart compression needs a build with `-DMallard_ENABLE_ZLIB=ON`. `relative_error` rounds each value to the fewest mantissa bits within the bound (the mesh stays exact), which compresses smooth fields several times further; restart files are always lossless. On 4.2M quads on an A100, a VTU snapshot of `RHO`, `U`, `P`, `T` is 474 MB, 164 MB with `zlib` and 59 MB with `relative_error = 1e-4`.
+
+Pitfalls: the run's summary reports the time spent writing; if each file takes longer to write than the steps between files, the run waits for the previous file anyway (write less often, or compress with more `io_threads`). Errors writing a file surface at the next file or at the end of the run, which waits for every file; a run killed outright (e.g. `kill -9`) can leave the file being written incomplete, while the files before it are complete. HDF5 output on several ranks stays synchronous (parallel HDF5 calls MPI only from the main thread).
+
 **Restart files** (`format = "restart"`) are described in
 [Initialization and restarts](initialization.md#restarts).
 
 ## The log
+
+```toml
+[output]
+check_interval = 100   # a progress row every 100 steps
+```
+
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 35 more.
 
 Rank 0 prints a header (version, build, device), the setup time of each
 stage, summaries of mesh, physics, numerics, boundaries and output, then one
@@ -83,10 +114,14 @@ interval = 10        # default 1
 # file = "forces_cylinder.csv"
 ```
 
+*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric), [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`sphere_re300`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-re300), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180) and 2 more.
+
 Writes `step, t` and the pressure and viscous force components of the fluid
 on the zone, per unit depth in 2D (per radian in axisymmetric runs). Divide by
 the dynamic pressure and a reference length (or area) for drag and lift
-coefficients.
+coefficients. On walls with a [wall model](les.md#wall-models-wall_model)
+the viscous force is the modeled stress, and a last column `Q` gives the
+modeled heat flux into the fluid.
 
 ## Domain integrals: `[integrals]`
 
@@ -95,6 +130,8 @@ coefficients.
 interval = 1
 budget = true        # kinetic-energy budget (LES), default false
 ```
+
+*Used in:* [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d), [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les) and 3 more.
 
 Writes `integrals.csv` with the volume integrals of the kinetic energy,
 enstrophy, squared dilatation and pressure dilatation, and of `|u|^2`,
@@ -108,10 +145,6 @@ molecular, SGS and numerical dissipation.
 
 ## Statistics
 
-`[statistics]` keeps running time averages and covariances per cell, on the
-device, without communication: bitwise the same on any number of ranks, and
-carried across restarts.
-
 ```toml
 [statistics]
 fields = ["RHO", "U_X", "U_Y", "U_Z", "P", "T"]
@@ -119,6 +152,12 @@ products = ["U_X*U_X", "U_Y*U_Y", "U_Z*U_Z", "U_X*U_Y"]
 t_start = 40.0
 interval = 10
 ```
+
+*Used in:* [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles) and 1 more.
+
+`[statistics]` keeps running time averages and covariances per cell, on the
+device, without communication: bitwise the same on any number of ranks, and
+carried across restarts.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -145,6 +184,8 @@ n_points = 200
 interval = 10
 ```
 
+*Used in:* [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`flame_outflow`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-outflow), [`shock_bubble_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-3d).
+
 Point (`point = [x, y]`) or line (`start`, `end`, `n_points`) probes append
 `step, t, point, x, y, <variables>` to `probe_<name>.csv`, at full precision,
 from the cell containing each point. The [Sod comparison](numerics.md#reconstruction)
@@ -165,6 +206,35 @@ The Python scripts in `tools/` (numpy, matplotlib; see
 | `plot_<case>.py` | Each validation case against its reference |
 
 ParaView opens `.pvd` (VTU) and `.xmf` (HDF5) series directly.
+
+## File formats and compatibility
+
+Every file Mallard writes carries a format version. **The promise:** a release
+reads the restart and mesh files of every earlier release of the same major
+version. In 0.x that means every restart file since 0.1 and every HDF5 mesh since
+0.3. A file from a *newer*
+Mallard is rejected with a message that gives its version and the versions this
+build reads. It is never misread.
+
+| File | Version, where | Versions (written from) | Read by |
+|---|---|---|---|
+| Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9) | Mallard: all |
+| HDF5 mesh (`mallard-mesh-convert`) | root attribute `version` | 1 (0.3) | Mallard: all |
+| HDF5 output (`format = "hdf5"`) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard_h5.py` |
+| VTU output | field data `MALLARD_FORMAT_VERSION` | none before 0.9, 1 (0.9) | ParaView, `tools/mallard_vtu.py` |
+| TENO cache (`cache_file`) | magic `MALLARD-TENO-<n>` | - | Rebuilt automatically when it does not match |
+
+- Restart files are written with the **lowest** version that holds their
+  contents, so a run without statistics, characteristic boundaries or
+  compression still writes version 2, which every release since 0.4 reads.
+- A restart file must also match the build's dimension and precision
+  (`Mallard_DIM`, `Mallard_USE_DOUBLE`); the message says which differs.
+- Output files gain arrays and attributes within a version. A version changes
+  only when existing content changes meaning or layout. The Python tools refuse
+  versions newer than they know; update `tools/` with Mallard.
+- A change to a format adds a version and keeps the reader of every older one,
+  with a fixture in `test/data/formats/` that a test reads (see its
+  [README](../../test/data/formats/README.md)).
 
 ## See also
 

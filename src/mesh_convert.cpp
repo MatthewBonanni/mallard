@@ -14,7 +14,7 @@
 #include <iostream>
 #include <string>
 
-#include <toml.hpp>
+#include "input.h"
 
 #include "comm.h"
 #include "mesh_block.h"
@@ -34,7 +34,7 @@ int main(int argc, char * argv[]) {
     }
     try {
         const std::string in = argv[1], out = argv[2];
-        const MeshBlock block = std::filesystem::path(in).extension() == ".toml" ? read_mesh_block(toml::parse(in))
+        const MeshBlock block = std::filesystem::path(in).extension() == ".toml" ? read_mesh_block(parse_input(in))
                                                                                  : read_file_block(in);
         write_mesh_h5(out, block);
         const uint64_t n_cells = comm::allreduce(block.n_cells(), comm::Op::SUM);

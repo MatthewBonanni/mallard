@@ -24,6 +24,7 @@
 #include "comm.h"
 #include "log.h"
 #include "run_control.h"
+#include "units.h"
 
 namespace {
 
@@ -47,12 +48,12 @@ bool parse_uint(const std::string & text, uint64_t & value) {
     return true;
 }
 
-bool parse_real(const std::string & text, double & value) {
+bool parse_time(const std::string & text, double & seconds) {
     try {
-        size_t used = 0;
-        value = std::stod(text, &used);
-        return used == text.size() && std::isfinite(value);
-    } catch (const std::exception &) {
+        const Quantity q = parse_quantity(text);
+        seconds = q.value;
+        return (!q.has_unit || q.dimension.same_as(dim::time)) && std::isfinite(seconds);
+    } catch (const UnitError &) {
         return false;
     }
 }
@@ -238,7 +239,7 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
     const auto rejected = [&](const std::string & why) { return std::make_pair(false, key + ": " + why); };
     uint64_t n = 0;
     double x = 0.0;
-    const bool is_uint = parse_uint(value, n), is_real = parse_real(value, x);
+    const bool is_uint = parse_uint(value, n), is_time = parse_time(value, x);
     if (key == "n_steps" || key == "t_stop" || key == "t_wall_stop") {
         const uint64_t old_n_steps = n_steps;
         const rtype old_t_stop = t_stop, old_t_wall_stop = t_wall_stop;
@@ -248,7 +249,7 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
             old = std::to_string(n_steps);
             n_steps = n;
         } else {
-            if (!is_real) return rejected("expected a number (0 or less: no limit)");
+            if (!is_time) return rejected("expected a time in seconds or with a unit, e.g. 2h (0 or less: no limit)");
             rtype & target = key == "t_stop" ? t_stop : t_wall_stop;
             old = logging::real(double(target));
             target = x > 0.0 ? static_cast<rtype>(x) : rtype(-1);
@@ -280,7 +281,7 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
         }
         if (!writer) return rejected("no [[write_data]] with prefix or index " + name);
         if (field == "interval" && !is_uint) return rejected("expected a positive integer");
-        if (field == "time_interval" && !is_real) return rejected("expected a positive number");
+        if (field == "time_interval" && !is_time) return rejected("expected a positive time in seconds or with a unit");
         const std::string error = field == "interval" ? writer->set_interval(n)
                                                       : writer->set_time_interval(static_cast<rtype>(x), t);
         if (!error.empty()) return rejected(error);
@@ -316,10 +317,12 @@ std::string Solver::write_restarts() {
     for (auto & writer : data_writers) {
         if (writer->get_format() != DataFormat::RESTART) continue;
         writer->write(step, t, true, attributes, faces);
+        writer->finish();
         file = writer->last_written();
     }
     if (checkpoint_writer) {
         checkpoint_writer->write(step, t, true, attributes, faces);
+        checkpoint_writer->finish();
         file = checkpoint_writer->last_written();
     }
     return file;

@@ -124,6 +124,15 @@ if(${PROJECT_NAME}_ENABLE_HDF5)
     endif()
 endif()
 
+# Compressed output and restart files
+option(${PROJECT_NAME}_ENABLE_ZLIB "zlib compression of VTU and restart files (compression = \"zlib\")" OFF)
+if(${PROJECT_NAME}_ENABLE_ZLIB)
+    find_package(ZLIB REQUIRED)
+    message(STATUS "Mallard: zlib ${ZLIB_VERSION_STRING}")
+endif()
+# Asynchronous output writes files on threads
+find_package(Threads REQUIRED)
+
 # CGNS mesh files (the CGNS library, HDF5-based)
 option(${PROJECT_NAME}_ENABLE_CGNS "Read CGNS mesh files" OFF)
 option(USE_SYSTEM_CGNS "Use system-installed CGNS" ON)
@@ -219,8 +228,15 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 
 install(TARGETS Mallard
-    DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
+    DESTINATION bin
 )
+# Case templates (Mallard new) and what they are made from: bin/../share/mallard
+foreach(dir templates examples tools mechanisms tutorials)
+    if(EXISTS ${CMAKE_SOURCE_DIR}/${dir})
+        install(DIRECTORY ${dir} DESTINATION share/mallard
+            PATTERN __pycache__ EXCLUDE)
+    endif()
+endforeach()
 
 # Enable testing
 enable_testing()

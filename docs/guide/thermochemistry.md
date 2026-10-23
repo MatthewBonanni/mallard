@@ -23,6 +23,8 @@ T = 300.0
 X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }   # mole fractions, normalized
 ```
 
+*Used in:* [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence), [`h2_ignition`](https://matthewbonanni.github.io/mallard/docs/examples/#h2-ignition), [`reactive_shock_tube`](https://matthewbonanni.github.io/mallard/docs/examples/#reactive-shock-tube), [`detonation_1d`](https://matthewbonanni.github.io/mallard/docs/examples/#detonation-1d) and 11 more.
+
 | Key | Default | Meaning |
 |---|---|---|
 | `gas` | `"perfect"` | `mixture` for a thermally perfect mixture; then no `gamma`, `p_ref`, `T_ref`, `rho_ref` |
@@ -73,6 +75,13 @@ species, Soret and enthalpy diffusion fluxes vanish. `wall_adiabatic`,
 
 ### Contacts between different gases
 
+```toml
+[numerics]
+double_flux = true
+```
+
+*Used in:* the multicomponent shock-tube tests.
+
 The conservative scheme perturbs pressure at the percent level at contacts
 between gases of different `cp / cv` (cold hydrogen in hot air) on coarse
 meshes. `[numerics] double_flux = true` removes those oscillations: pressure
@@ -83,9 +92,6 @@ flames.
 
 ## Finite-rate chemistry
 
-A mixture whose mechanism has reactions reacts when the input has a
-`[chemistry]` table:
-
 ```toml
 [chemistry]
 rtol = 1.0e-6
@@ -93,6 +99,11 @@ atol = 1.0e-10
 # coupling = "simpler"   # balanced splitting, for large steps
 # T_frozen = 400.0       # no chemistry below 400 K
 ```
+
+*Used in:* [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence), [`h2_ignition`](https://matthewbonanni.github.io/mallard/docs/examples/#h2-ignition), [`reactive_shock_tube`](https://matthewbonanni.github.io/mallard/docs/examples/#reactive-shock-tube), [`detonation_1d`](https://matthewbonanni.github.io/mallard/docs/examples/#detonation-1d) and 10 more.
+
+A mixture whose mechanism has reactions reacts when the input has a
+`[chemistry]` table.
 
 Each owned cell is advanced as an adiabatic, constant-volume reactor by RODAS,
 an adaptive Rosenbrock method with the analytical Jacobian; cells whose
@@ -121,13 +132,13 @@ Chemistry and flow are split:
 | `max_steps` | 100000 | Sub-steps allowed per cell and call; more stop the run |
 | `T_frozen` | 0 | No chemistry in cells below this temperature |
 | `fuse_half_steps` | `false` | Strang: fuse the closing half step with the next opening one, except where output reads the state (faster; results then depend on output times) |
-| `C_reg` | 1e-12 | Concentration [kmol/m^3] below which orders between 0 and 1 are regularized; 1e-10 speeds up trace-fuel burnout at a small cost in accuracy |
+| `C_reg` | 1e-12 | Concentration [kmol/m³] below which orders between 0 and 1 are regularized; 1e-10 speeds up trace-fuel burnout at a small cost in accuracy |
 | `load_balance` | `false` | MPI: move chemistry work from loaded to idle ranks, bitwise the same results ([performance](performance.md#chemistry-load-balancing)) |
 | `sparse` | automatic | Sparse LU (`true`) or dense (`false`); automatic picks sparse from 30 species when it pays (GRI-3.0 and larger) |
 | `lanes` | 0 (automatic) | GPU lanes per cell; automatic: a warp per cell from 16 species |
 | `integrator` | `"rosenbrock"` | The only choice so far |
 
-Output variables: `HRR` (heat release rate, W/m^3), `OMEGA_<species>`
+Output variables: `HRR` (heat release rate, W/m³), `OMEGA_<species>`
 (production rates), `CHEM_COST` (sub-steps of each cell in the last step).
 Restart files carry each cell's last sub-step, so restarts repeat an
 uninterrupted run exactly. The progress rows show the share of cells advanced
@@ -152,11 +163,13 @@ T_ambient = 300.0
 # species = ["H2O", "CO2"]
 ```
 
+*Used in:* [`flame_vortex_quenching`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-vortex-quenching).
+
 Optically thin radiative heat loss (the TNF workshop model):
 `q = 4 sigma sum_i p_i a_i(T) (T^4 - T_ambient^4)`, with Planck-mean
 absorption coefficients of H2O, CO2, CO and CH4. It holds for small, lean or
 diluted flames, which emit but barely absorb. It needs no `[chemistry]` and
-outputs `QRAD` [W/m^3].
+outputs `QRAD` [W/m³].
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -168,11 +181,6 @@ Cantera's `radiation_enabled` flames are `species = ["H2O", "CO2"]` with
 `T_ambient = 0` ([validation](https://matthewbonanni.github.io/mallard/validation/#radiation)).
 
 ## 0D reactors: `MallardReactor`
-
-`MallardReactor` integrates one adiabatic, constant-volume reactor with the
-solver's own chemistry, and writes `t`, `T`, `p` and the mass fractions as
-CSV. Use it to check a mechanism and tolerances before a run, or to get an
-ignition delay:
 
 ```toml
 # examples/h2_ignition/input.toml
@@ -191,6 +199,13 @@ output_interval = 1.0e-6
 rtol = 1.0e-6
 atol = 1.0e-10
 ```
+
+*Used in:* [`h2_ignition`](https://matthewbonanni.github.io/mallard/docs/examples/#h2-ignition), [`autoignition_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#autoignition-2d).
+
+`MallardReactor` integrates one adiabatic, constant-volume reactor with the
+solver's own chemistry, and writes `t`, `T`, `p` and the mass fractions as
+CSV. Use it to check a mechanism and tolerances before a run, or to get an
+ignition delay.
 
 ```sh
 cd examples/h2_ignition

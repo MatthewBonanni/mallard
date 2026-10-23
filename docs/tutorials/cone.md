@@ -99,7 +99,7 @@ mpirun -n 4 $MALLARD/build-3d/src/Mallard -i input.toml
 ```
 
 On a GPU, with a CUDA build of the 3D solver (`-DMallard_DIM=3`, see the
-[first simulation](../guide/first_simulation.md)), the same input runs
+[first simulation](first_simulation.md)), the same input runs
 unchanged: h = 0.02 takes under 2 minutes on one A100, h = 0.01 (13,800
 steps) about 10.
 
@@ -115,7 +115,7 @@ The probes and forces are written as the run goes, so they can be plotted
 at any time. `plot_results.py` (next section) draws them over time: the
 pressure at two probe points, one inside the shock layer and one just
 outside the shock, and the cone's pressure drag coefficient,
-(F_x − p∞ A) / (q∞ A) with A the base area of the quarter cone, which for a
+$(F_x - p_\infty A)/(q_\infty A)$ with $A$ the base area of the quarter cone, which for a
 cone of uniform surface pressure equals the surface Cp.
 
 ![Pressure at two probe points and the drag coefficient against time: steady after t = 1](../images/tutorials/cone_history-light.svg#gh-light-mode-only)
