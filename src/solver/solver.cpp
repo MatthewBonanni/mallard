@@ -700,6 +700,22 @@ void Solver::init_boundaries() {
 }
 
 void Solver::init_sources() {
+    sources::CellFields fields;
+    fields.coords = mesh->cell_coords;
+    fields.W = W_cells;
+    if (is_mixture()) {
+        fields.Y = cell_scalars;
+        fields.inv_W = mixture.thermo.inv_W;
+        fields.R_universal = chemistry::GAS_CONSTANT;
+    } else {
+        fields.R = double(physics.R);
+    }
+    auto terms = std::make_unique<sources::SourceTerms>(input, mesh, species_names, fields);
+    if (!terms->empty()) {
+        for (const auto & item : terms->summary()) source_summary.push_back(item);
+        source_terms = std::move(terms);
+        stage_time = Kokkos::View<rtype>("stage_time");
+    }
     if (!input.contains("source")) {
         return;
     }
@@ -740,29 +756,6 @@ void Solver::init_sources() {
         FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(m[i]));
         source_summary.emplace_back("Mass flow", text + "] (volume average of rho u), held by a uniform body force");
     }
-    const bool any_expression = source.contains("rho") || source.contains("rhou") || source.contains("rhoE");
-    if (!any_expression) {
-        return;
-    }
-    std::vector<std::string> texts(N_CONSERVATIVE, "0");
-    if (source.contains("rho")) texts[0] = quantity_or_expression(source.at("rho"), "source.rho", dim::mass_source);
-    if (source.contains("rhoE")) {
-        texts[N_DIM + 1] = quantity_or_expression(source.at("rhoE"), "source.rhoE", dim::power_density);
-    }
-    if (source.contains("rhou")) {
-        const Input & rhou = source.at("rhou");
-        if (!rhou.is_array() || rhou.as_array().size() != N_DIM) {
-            throw std::runtime_error("source.rhou must have " + std::to_string(N_DIM) + " components.");
-        }
-        FOR_I_DIM texts[1 + i] = quantity_or_expression(rhou.as_array()[i], "source.rhou", dim::momentum_source);
-    }
-    for (size_t i = 0; i < texts.size(); i++) {
-        source_expressions.emplace_back("source[" + CONSERVATIVE_NAMES[i] + "]", texts[i]);
-    }
-    source_time_dependent = toml::find_or<bool>(input, "source", "time_dependent", false);
-    source_field = StateView("source_field", mesh->n_cells);
-    h_source_field = Kokkos::create_mirror_view(source_field);
-    source_summary.emplace_back("Source terms", source_time_dependent ? "expressions, time dependent" : "expressions, steady");
 }
 
 void Solver::add_mass_flow_force(StateView solution, StateView rhs) {
@@ -798,18 +791,6 @@ void Solver::add_mass_flow_force(StateView solution, StateView rhs) {
         }
         rhs(i_cell, N_DIM + 1) += work / solution(i_cell, 0) * V;
     });
-}
-
-void Solver::update_source_field(rtype t_eval) {
-    if (source_expressions.empty() || (t_source >= 0.0_r && (!source_time_dependent || t_eval == t_source))) {
-        return;
-    }
-    for (uint32_t i_cell = 0; i_cell < mesh->n_cells; i_cell++) {
-        const auto x = Kokkos::subview(mesh->h_cell_coords, i_cell, Kokkos::ALL());
-        FOR_I_CONSERVATIVE h_source_field(i_cell, i) = static_cast<rtype>(source_expressions[i].at(x, N_DIM, double(t_eval)));
-    }
-    Kokkos::deep_copy(source_field, h_source_field);
-    t_source = t_eval;
 }
 
 void Solver::update_average_pressure_outlets(StateView solution) {
@@ -935,7 +916,7 @@ void Solver::init_numerics() {
                          "thermodynamics are frozen over a step, which the reaction substep would leave stale).");
     }
 
-    rhs_func = [this](State solution, State rhs, rtype t_stage) { calc_rhs(solution, rhs, t_stage); };
+    rhs_func = [this](State solution, State rhs, rtype t_stage, rtype c) { calc_rhs(solution, rhs, t_stage, c); };
     check_nan = toml::find_or<bool>(input, "numerics", "check_nan", false);
     low_mach_cutoff = find_real_or(input, "numerics", "low_mach_cutoff", dim::none, 0.1_r);
     if (!(low_mach_cutoff > 0.0_r)) {
@@ -1279,6 +1260,10 @@ void Solver::copy_device_to_host() {
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
         Kokkos::deep_copy(h_teno_sigma, teno->troubled);
     }
+    if (source_terms) {
+        update_cell_fields(state());
+        Kokkos::deep_copy(h_source_values, source_terms->evaluate(state(), t));
+    }
 }
 
 void Solver::register_data() {
@@ -1325,6 +1310,14 @@ void Solver::register_data() {
         data.push_back(Data(PRIMITIVE_NAMES[i], Kokkos::subview(h_primitives, Kokkos::ALL(), i)));
     }
     data.push_back(Data("CFL", h_cfl_local));
+    if (source_terms) {
+        h_source_values = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>(
+            "SOURCE", mesh->n_cells, N_CONSERVATIVE + species_names.size());
+        for (size_t i = 0; i < h_source_values.extent(1); i++) {
+            const std::string name = i < N_CONSERVATIVE ? CONSERVATIVE_NAMES[i] : "RHOY_" + species_names[i - N_CONSERVATIVE];
+            data.push_back(Data("SOURCE_" + name, Kokkos::subview(h_source_values, Kokkos::ALL(), i)));
+        }
+    }
     if (les_on) data.push_back(Data("MU_T", Kokkos::subview(h_les_coefficients, Kokkos::ALL(), 0)));
     if (tfles_on) {
         data.push_back(Data("TF_F", Kokkos::subview(h_tfles_fields, Kokkos::ALL(), 0)));
