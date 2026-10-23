@@ -12,6 +12,7 @@ import argparse
 import sys
 
 import domains
+import inlets
 import regions
 import runs
 import schematics
@@ -27,6 +28,7 @@ def main():
     args = ap.parse_args()
     schematics.figures()
     domains.figures()
+    inlets.figures()
     theory.figures()
     teno.figures()
     if args.mallard:

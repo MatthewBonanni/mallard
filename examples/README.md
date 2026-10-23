@@ -28,6 +28,7 @@ hardware they were measured on.
 | `sedov_3d` | Sedov-Taylor point blast (3D build): one octant, bound-preserving TENO5 on 128³ hexahedra, against the exact similarity solution (`tools/sedov.py`). The shock radius stays within 1-3% of `R = 1.0328 (E t^2 / rho0)^(1/5)` | 2.1M hexahedra | ~1.5 hours on four A100s |
 | `sphere_mach3` | Mach 3 flow over a sphere (3D build) on an unstructured Gmsh tetrahedral mesh of the quarter domain (generate it with `tools/make_sphere_mesh.py`): HLL with bound-preserving TENO5. The bow-shock standoff settles at Delta / R = 0.226, 10% above Billig's correlation (0.205): 0.01 D, under half the tetrahedron edge length (0.025 D) in the shock layer | 800,000 tetrahedra | ~1.5 hours on four A100s |
 | `mallard` | Mach 8 flow over a flying mallard from an impulsive start: RHLL with bound-preserving TENO5 on a Gmsh triangle mesh; generate the mesh with `tools/make_mallard_mesh.py` first | 1.07M triangles | ~1.5 hours on one GPU |
+| `nozzle` | Converging-diverging nozzle fed by a `stagnation_inlet` at p0, T0, with a normal shock in the diverging part; generate the mesh with `tools/make_nozzle_mesh.py` first. Against the quasi-one-dimensional solution (`tools/plot_nozzle.py`): mass flow 0.17% below the choked one, the shock two cells (0.6% of the length) upstream, the stagnation-pressure ratio across it 0.886 against 0.874 (the 2D shock is curved) | 6,400 quads | ~4 minutes on one CPU thread |
 
 ## Axisymmetric flows
 

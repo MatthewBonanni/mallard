@@ -163,6 +163,8 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"mallard/input.toml", "robust", 2, "",
      {{"inlet", "inflow"}, {"outlet", "outflow"}, {"walls", "top"}, {"cylinder", "duck"}}, ""},
     {"noh_axisymmetric/input.toml", "robust", 2, "", {}, ""},
+    {"nozzle/input.toml", "robust", 2, "",
+     {{"inlet", "inlet"}, {"outlet", "outlet"}, {"walls", "wall"}, {"cylinder", "axis"}}, ""},
     {"poiseuille_pipe/input.toml", "accurate", 2, "", {}, ""},
     {"premixed_flame/input.toml", "reacting", 2, "", {}, ""},
     {"premixed_flame/ch4/input.toml", "reacting", 2, "", {}, ""},

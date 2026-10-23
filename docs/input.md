@@ -33,9 +33,9 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`; `probes.time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
 | Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.curved.center`, `radius`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `translate`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
-| Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
+| Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
-| Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`; `physics.p_ref` |
+| Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.p0`; `physics.p_ref` |
 | Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`) and `dirichlet` boundaries |
 | Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`; `turbulence.convection_velocity`; `les.combustion.s_L` |
 | Velocity squared (m^2/s^2) | `turbulence.reynolds_stress` |
@@ -500,6 +500,7 @@ the zone's faces whose centers satisfy the expression.
 | `wall_heat_flux` | Wall with heat flux `q` into the fluid | `q`, `u` (optional) |
 | `upt` | Inflow with fixed velocity, pressure and temperature | `u`, `p`, `T` (and `X` or `Y` for mixtures: numbers, or expressions in `x`, `y`, `z` evaluated at each face center for a composition that varies along the boundary, with an optional `balance` species as in `[initialize]`) |
 | `farfield` | Characteristic far field for a free stream: the outgoing Riemann invariant comes from the interior, the incoming one from the free stream, so waves leave and the boundary works for inflow, outflow and tangential flow alike | `u`, `p`, `T` (free stream) |
+| `stagnation_inlet` | Subsonic inflow at stagnation pressure `p0` and temperature `T0`, for nozzles, ducts and intakes where the mass flow is part of the solution: the outgoing Riemann invariant of the interior sets the speed, and the state lies on the isentrope through (`T0`, `p0`) with `h(T) + |u|^2 / 2 = h(T0)`, with the mixture's own `h(T)` and `s(T, p)` for thermally perfect gases. An interior above `p0` sees the stagnation state at rest; supersonic inflow keeps the interior speed. See [the guide](guide/boundary_conditions.md#stagnation-inlet) and [docs/design/inlets.md](design/inlets.md) | `p0`, `T0`, `direction` (flow direction, into the domain at every face; default the inward normal of each face), `X` or `Y` for mixtures (as `upt`) |
 | `dirichlet` | Exterior state from expressions in `x`, `y`, `z`, `t`, evaluated at face centers at every stage | `rho`, `u` (one expression per component), `p` |
 | `p_out` | Outlet: imposes `p` if the outflow is subsonic | `p` |
 | `p_out_average` | Outlet for mixed subsonic/supersonic flow: on subsonic faces, shifts the local pressure so that its area average over the boundary equals `p`, preserving the transverse profile | `p` |

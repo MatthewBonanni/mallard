@@ -138,6 +138,19 @@ struct ThermoTable {
         return GAS_CONSTANT * T * sum;
     }
 
+    /**
+     * @brief Mixture entropy at the standard pressure without the entropy of
+     *        mixing [J/(kg K)]: at fixed composition, s(T, p) differs from it
+     *        by a function of p alone.
+     */
+    template <typename F_Y>
+    KOKKOS_INLINE_FUNCTION double s0_mass(const double T, const F_Y & y) const {
+        const Powers p = powers(T);
+        double sum = 0.0;
+        for (uint32_t k = 0; k < n_species; k++) sum += y(k) * inv_W(k) * s_R(k, p);
+        return GAS_CONSTANT * sum;
+    }
+
     /** @brief Mixture internal energy e [J/kg] and cv [J/(kg K)] at T. */
     template <typename F_Y>
     KOKKOS_INLINE_FUNCTION void e_cv(const double T, const F_Y & y, double & e, double & cv) const {

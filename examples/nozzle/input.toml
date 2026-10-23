@@ -1,0 +1,69 @@
+# Converging-diverging nozzle fed by a stagnation inlet (p0 = 1, T0 = 1,
+# gamma = 1.4, R = 1), with a back pressure of 0.75 p0 that puts a normal
+# shock in the diverging part. The upper half of a planar nozzle of half-height
+# h(x) = 1 + 0.6 (x / 2 - 1)^2: throat at x = 2, inlet and exit 1.6 throat
+# heights. Generate the mesh first:
+#
+#   python ../../tools/make_nozzle_mesh.py nozzle.msh
+#   ../../build/src/Mallard -i input.toml
+#   python ../../tools/plot_nozzle.py solut/nozzle_000001.vtu
+#
+# The quasi-one-dimensional solution has the choked mass flow, the shock at
+# x = 3.409 (Mach 1.66 ahead of it) and a stagnation pressure ratio of 0.874
+# across it; plot_nozzle.py compares the section averages with it.
+
+[run]
+t_stop = 80.0
+cfl = 0.8
+
+[mesh]
+type = "file"
+filename = "nozzle.msh"
+
+[initialize]
+type = "analytical"
+rho = "1.0 - 0.0625 * x"
+u = ["0.0", "0.0"]
+p = "1.0 - 0.0625 * x"
+
+[[boundaries]]
+name = "inlet"
+type = "stagnation_inlet"
+p0 = 1.0
+T0 = 1.0
+
+[[boundaries]]
+name = "outlet"
+type = "p_out"
+p = 0.75
+
+[[boundaries]]
+name = "axis"
+type = "symmetry"
+
+[[boundaries]]
+name = "wall"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[output]
+check_interval = 2000
+
+[[write_data]]
+prefix = "./solut/nozzle"
+format = "vtu"
+time_interval = 80.0
+variables = ["RHO", "U_X", "U_Y", "P", "T"]

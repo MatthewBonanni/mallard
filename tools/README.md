@@ -141,6 +141,7 @@ The figure is in [Meshes](../docs/guide/meshes.md#mesh-quality).
 | `make_sphere_mesh.py` | Tetrahedra of the quarter domain around a sphere (symmetry planes `symmetry_y`, `symmetry_z`), refined on the sphere and through the bow-shock layer; `--order 2`/`3` curves the sphere | [`sphere_mach3`](../examples/sphere_mach3) |
 | `make_sphere_re300_mesh.py` | The full domain around a sphere: a prism boundary layer, tetrahedra refined through the near wake; `--scale` refines everything for mesh studies | [`sphere_re300`](../examples/sphere_re300) |
 | `make_volvo_mesh.py` | Hexahedra of the Volvo bluff-body combustor: four blocks around the triangular flameholder, mesh lines normal to its faces, periodic in span | [`volvo_bluff_body`](../examples/volvo_bluff_body) |
+| `make_nozzle_mesh.py` | Quadrilaterals of the upper half of a planar converging-diverging nozzle | [`nozzle`](../examples/nozzle) |
 
 ![make_volvo_mesh.py around the flameholder, and the symmetry plane of make_sphere_mesh.py](../docs/images/tools/case_meshes-light.svg#gh-light-mode-only)
 ![make_volvo_mesh.py around the flameholder, and the symmetry plane of make_sphere_mesh.py](../docs/images/tools/case_meshes-dark.svg#gh-dark-mode-only)
@@ -365,6 +366,7 @@ These set up or analyze one example each; their figures are on the [Examples](ht
 |---|---|---|---|
 | [`sod`](../examples/sod) | | `plot_sod.py`: density profiles against the exact solution | |
 | [`viscous_shock_tube`](../examples/viscous_shock_tube) | | `plot_viscous_shock_tube.py`: wall density and lambda-shock triple point against Zhou et al. | |
+| [`nozzle`](../examples/nozzle) | `make_nozzle_mesh.py` | `plot_nozzle.py`: mass flow, shock position and stagnation pressure against the quasi-one-dimensional solution; `--figure` draws the guide's figure | |
 | [`poiseuille_pipe`](../examples/poiseuille_pipe) | | `plot_poiseuille.py`: axial velocity against the exact cell averages | |
 | [`noh_axisymmetric`](../examples/noh_axisymmetric) | | `plot_noh.py`: density and shock radius by direction against the exact solution | |
 | [`sphere_axisymmetric`](../examples/sphere_axisymmetric) | `make_cylinder_mesh.py --half` | `plot_sphere_axisymmetric.py`: drag, separation angle and wake length | |
