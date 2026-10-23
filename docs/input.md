@@ -31,8 +31,8 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Dimension | Keys |
 |---|---|
 | Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`; `probes.time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
-| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.curved.center`, `radius`; `periodic.translation`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `translate`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
-| Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D) |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.curved.center`, `radius`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `translate`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
+| Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
 | Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
 | Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`; `physics.p_ref` |
@@ -83,7 +83,7 @@ At least one stop condition is required.
 
 | Key | Description |
 |---|---|
-| `type` | `file` (the default), `cartesian` (quads), `cartesian_tri` (each quad split into two triangles along its bottom-left to top-right diagonal), or `wedge` (quads over an 8 degree compression ramp starting at x = 0.5) |
+| `type` | `file` (the default), `cartesian` (quads), `cartesian_tri` (each quad split into two triangles along its bottom-left to top-right diagonal), `wedge` (quads over an 8 degree compression ramp starting at x = 0.5), or `annulus` (below) |
 | `filename` | (`file`) Mallard HDF5 mesh (`.h5` or `.hdf5`, see below), ASCII Gmsh mesh (format 2.2 or 4.1), CGNS file (`.cgns`), ANSYS Fluent mesh or case file (`.msh`, `.cas`; ASCII or binary), or OpenFOAM polyMesh (a directory: the case, its `constant/polyMesh`, or anything between), of triangles and/or quadrilaterals (2D), or tetrahedra, pyramids, prisms and/or hexahedra (3D); see mesh files below |
 | `Nx`, `Ny` | Number of quads in x and y (default 100) |
 | `Lx`, `Ly` | Domain size; the domain is `[0, Lx] x [0, Ly]` (default 1) |
@@ -102,6 +102,22 @@ walls about 8 times thinner than those at the center (with `Ny = 96`).
 `back`/`front` are joined into interior faces and disappear as boundary zones.
 Every scheme sees the seam as interior. Each periodic direction needs at least
 3 cells. Zones of mesh files are paired with `[[periodic]]` (below).
+
+`type = "annulus"` generates the annulus `r_inner <= r <= r_outer` about the
+z axis, or its sector `0 <= theta <= angle`, of `Ntheta x Nr` quadrilaterals
+with nodes on equispaced circles and rays (in 3D extruded over `0 <= z <= Lz`
+into `Ntheta x Nr x Nz` hexahedra). Zones: `inner`, `outer`, for a sector
+`start` (theta = 0) and `end` (theta = angle), and in 3D `back` and `front`.
+`periodic = ["theta"]` joins `start` and `end` through the rotation by
+`angle` (rotational periodicity, `[[periodic]]` below), and `"z"` (3D) `back`
+and `front`.
+
+| Key | Description |
+|---|---|
+| `r_inner`, `r_outer` | Radii (default 1 and 2) |
+| `angle` | Sector angle in degrees, in (0, 360] (default 360, the full annulus) |
+| `Ntheta`, `Nr` | Cells around and across (default 64 and 16) |
+| `Nz`, `Lz` | (3D) Cells along and length of the axis (default 16 and 1) |
 
 In the 3D build (`-DMallard_DIM=3`), generated meshes are boxes
 `[0, Lx] x [0, Ly] x [0, Lz]` of `Nx x Ny x Nz` blocks (`Nz`, `Lz` default to
@@ -249,16 +265,41 @@ an error. Curved boundaries are not yet supported with `physics.axisymmetric`.
 
 Pairs two boundary zones of any mesh (e.g. Gmsh physical curves or surfaces,
 or zones of an HDF5 mesh) into a periodic seam, serially and in distributed
-runs: zone B must be zone A translated, node by node (to 1e-6 of the zones'
-shortest edge), as Gmsh's `Periodic` constraint produces. The faces of both
-zones become interior faces and take no `[[boundaries]]` entry. A node with no
-match is reported with its coordinates. Each zone joins at most one pair, and
-as for generated meshes, each periodic direction needs at least 3 cells.
+runs: zone B must be zone A translated, or rotated about an axis, node by node
+(to 1e-6 of the zones' shortest edge), as Gmsh's `Periodic` constraint
+produces. The faces of both zones become interior faces and take no
+`[[boundaries]]` entry. A node with no match is reported with its coordinates.
+Each zone joins at most one pair, and as for generated meshes, each periodic
+direction needs at least 3 cells.
 
 | Key | Description |
 |---|---|
 | `zones` | `[A, B]`: the zone names |
 | `translation` | `[t_x, t_y]` (`[t_x, t_y, t_z]` in 3D) with B = A + translation |
+| `angle` | Instead of `translation`: B is A rotated by `angle` degrees (right-handed about `axis`; counterclockwise in 2D) |
+| `center` | With `angle`: a point of the axis, `[x, y]` (`[x, y, z]` in 3D); default the origin |
+| `axis` | With `angle`, 3D only: the axis direction (default `[0, 0, 1]`) |
+
+Across a rotational pair, velocity, momentum, gradients and the
+reconstruction's geometry turn with the rotation; densities, pressure,
+temperature, species and other scalars carry over unchanged. A mesh takes at
+most one distinct rotation (pairs with the same angle, center and axis share
+it, e.g. a sector side split into several zones) and, in 3D, translations
+along its axis only (an annular sector periodic in z); 2D rotational meshes
+take no translation. The sector must not reach the axis. Rotational
+periodicity is not supported with `physics.axisymmetric`; transmissive
+boundary images and characteristic boundaries' transverse terms do not reach
+across the rotation (they treat the seam as the boundary's edge). See
+`docs/design/periodic.md`.
+
+```toml
+# A 30 degree sector of an annular combustor about the z axis
+[[periodic]]
+zones = ["side_a", "side_b"]
+angle = 30.0
+center = [0.0, 0.0, 0.0]
+axis = [0.0, 0.0, 1.0]
+```
 
 ```toml
 [mesh]
