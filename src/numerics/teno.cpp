@@ -2035,25 +2035,42 @@ struct TENOFunctor {
      */
     KOKKOS_INLINE_FUNCTION
     void entry_W(const int32_t c, const int32_t code, rtype * W_e) const {
+        if (code < -1) {
+            turned_entry_W(c, code, W_e);
+            return;
+        }
+        FOR_I_CONSERVATIVE W_e[i] = W(c, i);
+        if (code >= 0) ghost_W(c, code, W_e);
+    }
+
+    /** @brief The ghost of state W_e (cell c's, in face f's frame) across boundary face f, in place. */
+    KOKKOS_INLINE_FUNCTION
+    void ghost_W(const int32_t c, const int32_t f, rtype * W_e) const {
+        rtype n[N_DIM], n_vec[N_DIM];
+        FOR_I_DIM n_vec[i] = face_normals(f, i);
+        unit<N_DIM>(n_vec, n);
+        rtype W_c[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE W_c[i] = W_e[i];
+        rtype d = 0.0;
+        FOR_I_DIM d += (face_coords(f, i) - cell_coords(c, i)) * n[i];
+        boundaries.ghost_W_at(static_cast<uint32_t>(f), W_c, n, 2.0_r * Kokkos::fabs(d), W_e);
+        const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(f));
+        if (bc.type == BoundaryType::FARFIELD) {
+            // The characteristic state holds at the face; outside lies the free stream
+            FOR_I_CONSERVATIVE W_e[i] = bc.data[i];
+        }
+    }
+
+    /** @brief entry_W of an entry reached across a periodic rotation. */
+    KOKKOS_FUNCTION
+    void turned_entry_W(const int32_t c, const int32_t code, rtype * W_e) const {
         FOR_I_CONSERVATIVE W_e[i] = W(c, i);
         int32_t row, rel_row;
         const int32_t f = teno::entry_face(code, boundary_faces, row, rel_row);
         if (f >= 0) {
             // The ghost is taken in the face's frame
             if (rel_row >= 0) turn(rel_row, W_e);
-            rtype n[N_DIM], n_vec[N_DIM];
-            FOR_I_DIM n_vec[i] = face_normals(f, i);
-            unit<N_DIM>(n_vec, n);
-            rtype W_c[N_CONSERVATIVE];
-            FOR_I_CONSERVATIVE W_c[i] = W_e[i];
-            rtype d = 0.0;
-            FOR_I_DIM d += (face_coords(f, i) - cell_coords(c, i)) * n[i];
-            boundaries.ghost_W_at(static_cast<uint32_t>(f), W_c, n, 2.0_r * Kokkos::fabs(d), W_e);
-            const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(f));
-            if (bc.type == BoundaryType::FARFIELD) {
-                // The characteristic state holds at the face; outside lies the free stream
-                FOR_I_CONSERVATIVE W_e[i] = bc.data[i];
-            }
+            ghost_W(c, f, W_e);
         }
         if (row >= 0) turn(row, W_e);
     }
