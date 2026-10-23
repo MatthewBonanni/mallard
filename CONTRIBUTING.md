@@ -146,7 +146,8 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   (the run takes about a minute). `main` runs CI on every merge.
 - **Device builds**: CUDA, HIP (ROCm) and SYCL (oneAPI), 2D and 3D, compile only,
   run when the changes touch device code: `tools/device_changes.sh` decides (a
-  changed `src/` file with Kokkos device constructs, or a Kokkos update).
+  changed `src/` file with Kokkos device constructs, or a Kokkos update); `main`
+  also runs the CUDA builds on every push.
   `gh workflow run ci.yml --ref <branch> -f device=true` runs them regardless.
 - **GPU CI.** Device code is also run on NVIDIA A100 GPUs by a maintainer-run GPU
   CI, outside GitHub Actions: CUDA 12 and 13 builds in 2D and 3D, the full test suite

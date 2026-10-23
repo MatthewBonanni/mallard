@@ -250,11 +250,12 @@ jobs:
           cmake --install build-2 --prefix ${{ runner.temp }}/mallard-2d > /dev/null
           templates/ci.sh ${{ runner.temp }}/mallard-2d/bin/Mallard build-3/src/Mallard ${{ runner.temp }}/templates
 
-  # CUDA builds (no GPU needed), when the changes touch device code (see the device job)
-  # or the dispatch asks for them (-f device=true).
+  # CUDA builds (no GPU needed): on main, on branches whose changes touch device code
+  # (see the device job), and when the dispatch asks for them (-f device=true); host code
+  # compiles with nvcc too, so main catches what branches skip.
   cuda:
     needs: [changelog, device]
-    if: needs.device.outputs.changed == 'true' || inputs.device
+    if: needs.device.outputs.changed == 'true' || github.ref == 'refs/heads/main' || inputs.device
     runs-on: ubuntu-latest
     container: nvidia/cuda:12.9.1-devel-ubuntu24.04
     strategy:
@@ -296,9 +297,9 @@ jobs:
         if: always()
         run: sccache --show-stats
 
-  # HIP and SYCL builds (no GPU; never run), when the CUDA builds run: every source through
-  # the ROCm and oneAPI compilers, for portability errors and warnings the GCC, Clang and
-  # nvcc builds miss. sccache caches the compiles that it can (hipcc and icpx calls it
+  # HIP and SYCL builds (no GPU; never run), when the changes touch device code or the
+  # dispatch asks for them (-f device=true): every source through the ROCm and oneAPI
+  # compilers, for portability errors and warnings the GCC, Clang and nvcc builds miss. sccache caches the compiles that it can (hipcc and icpx calls it
   # does not recognize run uncached).
   portability:
     needs: [changelog, device]
