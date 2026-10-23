@@ -8,7 +8,7 @@ mallard -i input.toml [Kokkos options]
 
 Kokkos options such as `--kokkos-num-threads=8` (CPU threads) or
 `--kokkos-device-id=1` (which GPU) follow the input file. `mallard --version`
-prints the version and `Mallard --help` the usage. Errors in the input stop
+prints the version and `mallard --help` the usage. Errors in the input stop
 the run before it starts, with the file name, the key and, for options, the
 accepted values.
 
