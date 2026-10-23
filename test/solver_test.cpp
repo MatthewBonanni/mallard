@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "test_fixtures.h"
+#include "verification.h"
 #include "exact_riemann.h"
 #include "solver.h"
 #include "scratch.h"
@@ -345,8 +346,9 @@ TEST_P(SodMesh, TENOConvergesFasterThanMUSCLForSmoothFlow) {
     // Time integration (SSPRK3, dt ~ h) caps the observed order at 3
     const double m1 = advection_error(GetParam(), "MUSCL", 32), m2 = advection_error(GetParam(), "MUSCL", 64);
     const double t1 = advection_error(GetParam(), "TENO", 32), t2 = advection_error(GetParam(), "TENO", 64);
-    std::cout << "advection L1: MUSCL " << m1 << " -> " << m2 << ", TENO " << t1 << " -> " << t2 << std::endl;
-    EXPECT_GT(std::log2(t1 / t2), 2.7);
+    std::cout << "advection L1: MUSCL " << m1 << " -> " << m2 << std::endl;
+    verification::expect_order({"advection", "TENO5, SSPRK3", verification::cells_of(GetParam()),
+                                "L1 density error, pulse", {32, 64}, {t1, t2}, 3.0, 2.7});
     EXPECT_LT(t2, 0.2 * m2);
 }
 
