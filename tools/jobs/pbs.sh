@@ -23,7 +23,7 @@
 set -u
 cd "$PBS_O_WORKDIR" || exit 1
 
-MALLARD=Mallard                    # <Mallard, Mallard3D, or the path to the executable>
+MALLARD=mallard                    # <mallard, mallard3d, or the path to the executable>
 INPUT=input.toml
 SCRIPT=pbs.sh                      # <this file's name, to submit the continuation>
 RESTARTS='restart_*.restart'       # <the restart files the run writes; the newest is resumed from>

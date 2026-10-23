@@ -100,7 +100,7 @@ struct DivergedError : std::exception {
     const char * what() const noexcept override { return "solution diverged"; }
 };
 
-/** @brief Exit status of a run stopped on request (signal, `Mallard ctl stop`, STOP file) after writing a restart. */
+/** @brief Exit status of a run stopped on request (signal, `mallard ctl stop`, STOP file) after writing a restart. */
 constexpr int EXIT_STOPPED = 3;
 
 class Solver {

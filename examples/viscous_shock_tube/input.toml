@@ -11,7 +11,7 @@
 #
 # Run (500,000 quads; the time step is set by viscosity, so this takes
 # about 23,400 steps: use a GPU build, or Nx = 500, Ny = 250 on a CPU):
-#   ../../build/src/Mallard -i input.toml
+#   ../../build/src/mallard -i input.toml
 #   python ../../tools/plot_viscous_shock_tube.py solut/vst_000100.vtu vst.png
 #
 # Expected result at t = 1 (grid-converged reference: Zhou et al.,

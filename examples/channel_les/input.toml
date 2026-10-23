@@ -41,7 +41,7 @@
 #
 # Run:
 #   python ../../tools/channel_init.py input.toml init.restart
-#   ../../build3d/src/Mallard -i input.toml
+#   ../../build3d/src/mallard -i input.toml
 #   python ../../tools/plane_average.py stats/channel_<last>.vtu --average x z --out profile.csv
 #   python ../../tools/plot_channel.py input.toml profile.csv forces_bottom.csv forces_top.csv \
 #       --t-start 100 --retau 395

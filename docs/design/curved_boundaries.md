@@ -28,7 +28,7 @@ DG).
    3D) in the physical groups. Cells may be of order 1 to 3; only their
    corners are kept, so interior faces are straight unless they share a
    curved edge. High-order edges whose nodes lie on their chord stay straight
-   (Gmsh writes planes at the mesh's order too). `mallard-mesh-convert` keeps
+   (Gmsh writes planes at the mesh's order too). `mallard mesh convert` keeps
    the high-order boundary faces in the HDF5 file (`boundary/high_order`).
 2. **Analytic projection** for meshes without high-order nodes (generated, P1
    Gmsh, HDF5): `[[mesh.curved]]` names a zone and a shape (`circle` in 2D;

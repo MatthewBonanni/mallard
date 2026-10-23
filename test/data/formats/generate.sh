@@ -14,9 +14,9 @@ tmp=$(mktemp -d "$here/.generate.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 for case in gas statistics mixture nscbc; do
   sed "s|^prefix = \"$case\"|prefix = \"$tmp/$case\"|" $case.toml > "$tmp/$case.toml"
-  "$build/src/Mallard" -i "$tmp/$case.toml" --kokkos-num-threads=1 > "$tmp/$case.log"
+  "$build/src/mallard" -i "$tmp/$case.toml" --kokkos-num-threads=1 > "$tmp/$case.log"
   cp "$tmp/${case}_000000.restart" "$tmp/${case}_000002.restart" "$out/"
 done
-"$build/src/mallard-mesh-convert" gas.toml "$out/mesh.h5"
-"$build/src/mallard-mesh-convert" annulus.msh "$out/curved_mesh.h5"
+"$build/src/mallard" mesh convert gas.toml "$out/mesh.h5"
+"$build/src/mallard" mesh convert annulus.msh "$out/curved_mesh.h5"
 ls -l "$out"

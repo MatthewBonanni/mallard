@@ -35,7 +35,7 @@
 # Run:
 #   python ../../tools/make_volvo_mesh.py volvo.msh --ds 1.25e-3 --nz 64
 #   python ../../tools/volvo.py probes >> cold.toml   # optional: mid-span plane for a movie
-#   mpirun -n 4 ../../build3d/src/Mallard -i cold.toml --kokkos-map-device-id-by=mpi_rank
+#   mpirun -n 4 ../../build3d/src/mallard -i cold.toml --kokkos-map-device-id-by=mpi_rank
 #   python ../../tools/volvo.py profiles stats/cold_000003.pvtu --u-bulk 16.6 --out cold.npz
 #   python ../../tools/volvo.py plot cold.npz --exp reference --out cold.png
 #   python ../../tools/volvo.py budget integrals.csv --t0 0.08

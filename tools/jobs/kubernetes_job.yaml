@@ -8,7 +8,7 @@
 # When the pod is evicted or preempted, Mallard writes a restart and stops
 # within the grace period, and the Job starts a new pod, which resumes from it.
 # An error or divergence (exit status 1), or a stop you asked for (status 3,
-# e.g. "kubectl exec job/mallard -- Mallard ctl /work/<case> stop"), ends the Job.
+# e.g. "kubectl exec job/mallard -- mallard ctl /work/<case> stop"), ends the Job.
 # Each rank gets the GPU nearest its cores automatically; the "Ranks" table at
 # the top of the log shows where each rank runs.
 apiVersion: batch/v1
@@ -37,7 +37,7 @@ spec:
           workingDir: /work/case                # <the case directory on the volume>
           env:
             - name: MALLARD
-              value: Mallard                    # <Mallard or Mallard3D>
+              value: mallard                    # <mallard or mallard3d>
             - name: INPUT
               value: input.toml
             - name: RESTARTS

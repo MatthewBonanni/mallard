@@ -36,7 +36,7 @@ jobs:
             cmake -S . -B build-$dim -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
               -DUSE_SYSTEM_KOKKOS=OFF -DMallard_WARNINGS_AS_ERRORS=ON -DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=$dim
-            cmake --build build-$dim -j $(nproc) --target MallardTest
+            cmake --build build-$dim -j $(nproc) --target mallard-test
           done
       - name: Save compiler cache
         uses: actions/cache/save@v4
@@ -44,7 +44,7 @@ jobs:
           path: ${{ github.workspace }}/.ccache
           key: ccache-verification-${{ github.sha }}
       - name: Run the convergence studies
-        run: python tools/docs/verification.py --jobs $(nproc) --test build-2/test/MallardTest build-3/test/MallardTest
+        run: python tools/docs/verification.py --jobs $(nproc) --test build-2/test/mallard-test build-3/test/mallard-test
       - name: Upload the manual
         if: always()
         uses: actions/upload-artifact@v4

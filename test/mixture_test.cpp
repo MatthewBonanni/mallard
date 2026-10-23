@@ -26,6 +26,7 @@
 #include <tuple>
 #include <vector>
 
+#include "data_paths.h"
 #include "solver.h"
 #include "test_fixtures.h"
 #include "scratch.h"
@@ -33,7 +34,7 @@
 
 namespace {
 
-const std::string SOURCE_DIR = MALLARD_SOURCE_DIR;
+const std::string SOURCE_DIR = source_dir();
 const std::string PERFECT_AIR = SOURCE_DIR + "/test/data/chemistry/perfect_air.yaml";
 const std::string H2O2 = SOURCE_DIR + "/mechanisms/h2o2.yaml";
 

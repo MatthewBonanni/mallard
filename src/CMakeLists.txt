@@ -138,8 +138,8 @@ endif()
 target_link_libraries(MallardCore PRIVATE yaml-cpp::yaml-cpp)
 mallard_target_warnings(MallardCore)
 
-# Mallard new finds the templates in the source tree when run from the build tree
-set_source_files_properties(common/case_template.cpp PROPERTIES
+# mallard new and mallard-test find their data in the source tree when run from the build tree
+set_source_files_properties(common/build_info.cpp PROPERTIES
     COMPILE_DEFINITIONS "MALLARD_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\"")
 
 string(TOUPPER "${CMAKE_BUILD_TYPE}" build_type_upper)
@@ -189,18 +189,8 @@ if(Mallard_ENABLE_CGNS)
     target_link_libraries(MallardCore PRIVATE ${MALLARD_CGNS_LIBRARY})
 endif()
 
-add_executable(Mallard main.cpp)
-target_link_libraries(Mallard PRIVATE MallardCore)
-set_target_properties(Mallard PROPERTIES OUTPUT_NAME Mallard${Mallard_EXECUTABLE_SUFFIX})
-mallard_target_warnings(Mallard)
-
-add_executable(MallardReactor reactor_main.cpp)
-target_link_libraries(MallardReactor PRIVATE MallardCore)
-mallard_target_warnings(MallardReactor)
-
-if(Mallard_ENABLE_HDF5)
-    add_executable(mallard-mesh-convert mesh_convert.cpp)
-    target_link_libraries(mallard-mesh-convert PRIVATE MallardCore)
-    set_target_properties(mallard-mesh-convert PROPERTIES OUTPUT_NAME mallard-mesh-convert${Mallard_EXECUTABLE_SUFFIX})
-    mallard_target_warnings(mallard-mesh-convert)
-endif()
+add_executable(mallard main.cpp reactor_main.cpp mesh_convert.cpp)
+target_link_libraries(mallard PRIVATE MallardCore)
+target_compile_definitions(mallard PRIVATE MALLARD_EXECUTABLE_SUFFIX="${Mallard_EXECUTABLE_SUFFIX}")
+set_target_properties(mallard PROPERTIES OUTPUT_NAME mallard${Mallard_EXECUTABLE_SUFFIX})
+mallard_target_warnings(mallard)

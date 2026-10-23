@@ -1,11 +1,11 @@
 # Input file reference
 
-Mallard reads a single [TOML](https://toml.io) file: `Mallard -i input.toml`.
+Mallard reads a single [TOML](https://toml.io) file: `mallard -i input.toml`.
 This page lists every key; the [user guide](guide/input_files.md) explains
 by topic when to use them, with examples and figures.
 Kokkos options such as `--kokkos-num-threads=N` or `--kokkos-device-id=N` can be appended.
 A renamed or removed key is still read, with a warning, for at least one minor
-release, and `Mallard upgrade-input old.toml > new.toml` rewrites old inputs
+release, and `mallard upgrade-input old.toml > new.toml` rewrites old inputs
 ([deprecation policy and changed keys](guide/input_files.md#inputs-from-older-releases)).
 
 The spatial dimension is fixed at build time with the CMake option
@@ -53,7 +53,7 @@ constants, tolerances, ...) is dimensionless. `statistics.phase.level` has the d
 
 ## Checking an input
 
-`Mallard --check input.toml` runs the whole setup of a run (mesh, partition,
+`mallard check input.toml` runs the whole setup of a run (mesh, partition,
 boundaries, numerics, initial solution) without time stepping and without
 writing any file, and reports on the run. It exits with status 1 if there is
 an error. Under `mpirun -n N` it checks the run on N ranks.
@@ -77,7 +77,7 @@ The report, with an example: [Checking an input](guide/input_files.md#checking-a
 | `n_steps` | Stop after this many steps |
 | `t_wall_stop` | Stop after this many seconds of wall time |
 | `keep_last_good` | Keep a copy of the state at the start of each step (one copy of the conservatives, and partial densities, per step), so that a diverging run writes the last valid state; see [run control](guide/running.md) (default `true`) |
-| `control_socket` | Serve `Mallard ctl` on `mallard.sock` in the working directory (default `true`) |
+| `control_socket` | Serve `mallard ctl` on `mallard.sock` in the working directory (default `true`) |
 | `control_file_interval` | Every this many steps, look for the files `STOP` and `CHECKPOINT` in the working directory (default 0: never) |
 | `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages) as one CUDA graph, so the host launches one graph and waits once per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel where the host takes part in the step: gas mixtures, average-pressure outlets, characteristic boundaries, boundary expressions of `t`, sources of domain averages, and halos exchanged with MPI (`[parallel] halo_exchange`); the run log says which |
 
@@ -156,7 +156,7 @@ Every format and the transform below are illustrated in the user guide
 Boundary zones, high-order nodes and cell types are unchanged; mirroring scales
 (negative factors) are allowed. `[[periodic]]` translations, `[[mesh.curved]]`
 shapes, probes and every other coordinate in the input refer to the
-transformed mesh. `mallard-mesh-convert input.toml mesh.h5` writes the
+transformed mesh. `mallard mesh convert input.toml mesh.h5` writes the
 transformed mesh.
 
 | Key | Description |
@@ -216,8 +216,8 @@ share), so large meshes should be converted to Mallard's HDF5 mesh format
 share; generated meshes are also produced per rank:
 
 ```sh
-mallard-mesh-convert mesh.msh mesh.h5               # from Gmsh (or CGNS, Fluent, OpenFOAM)
-mpirun -n 8 mallard-mesh-convert input.toml mesh.h5  # a generated mesh, written in parallel
+mallard mesh convert mesh.msh mesh.h5               # from Gmsh (or CGNS, Fluent, OpenFOAM)
+mpirun -n 8 mallard mesh convert input.toml mesh.h5  # a generated mesh, written in parallel
 ```
 
 The file holds global arrays, with global ids the row indices:
@@ -1067,7 +1067,7 @@ exprtk, variable names are case sensitive.
 
 ## `[parallel]`
 
-Used when Mallard runs on several MPI ranks (`mpirun -n N Mallard -i input.toml`).
+Used when Mallard runs on several MPI ranks (`mpirun -n N mallard -i input.toml`).
 
 | Key | Description |
 |---|---|
@@ -1135,9 +1135,9 @@ pieces write faster beyond a few ranks (2.1M hexahedra, 16 ranks: 115 ms per
 HDF5 snapshot against 72 ms, 1 rank: 140 ms against 1.1 s). VTU output remains
 the simpler choice for small runs. `tools/mallard_h5.py` reads the files.
 
-## `MallardReactor`
+## `mallard reactor`
 
-`MallardReactor -i input.toml` integrates one adiabatic, constant-volume
+`mallard reactor -i input.toml` integrates one adiabatic, constant-volume
 reactor with the solver's chemistry kernels (the RODAS Rosenbrock integrator
 with the analytical Jacobian, in double precision) and writes its history as
 CSV (`t`, `T`, `p`, `Y_<species>`). It reads `[physics]` (`mechanism`,

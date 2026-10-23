@@ -7,7 +7,7 @@ Mallard has two levels of parallelism: Kokkos inside each process (CPU threads o
 The Kokkos backend is chosen when Mallard is built (see [Getting started](https://matthewbonanni.github.io/mallard/docs/installation/)). With `Threads` or `OpenMP`, set the number of threads on the command line:
 
 ```bash
-Mallard -i input.toml --kokkos-num-threads=8
+mallard -i input.toml --kokkos-num-threads=8
 ```
 
 With CUDA or HIP, each process runs on one GPU; `--kokkos-device-id=N` picks which (see [Running on clusters](#running-on-clusters) for how MPI ranks get theirs).
@@ -25,7 +25,7 @@ cmake --build build -j
 and launch with `mpirun`; the input file is unchanged:
 
 ```bash
-mpirun -n 4 build/src/Mallard -i input.toml --kokkos-num-threads=2
+mpirun -n 4 build/src/mallard -i input.toml --kokkos-num-threads=2
 ```
 
 Each rank owns a piece of the mesh, plus as many layers of halo cells as its reconstruction needs (one for first order, two for MUSCL and viscous terms, more for TENO, which Mallard determines from the stencils themselves). The log reports the split:
@@ -62,7 +62,7 @@ Every rank builds the same stencils as a serial run and sums each cell's face fl
 
 With threads and ranks together, keep ranks × threads at or below the number of cores. On GPUs, use one rank per GPU; each rank picks its own (see [Running on clusters](#running-on-clusters)).
 
-With generated meshes, and with meshes converted to Mallard's HDF5 format (`mallard-mesh-convert`, in builds with `-DMallard_ENABLE_HDF5=ON`; see the [input reference](../input.md)), each rank reads or generates only its share, and no rank ever holds the whole mesh. Gmsh files are still read whole by every rank, so convert large Gmsh meshes to HDF5 first.
+With generated meshes, and with meshes converted to Mallard's HDF5 format (`mallard mesh convert`, in builds with `-DMallard_ENABLE_HDF5=ON`; see the [input reference](../input.md)), each rank reads or generates only its share, and no rank ever holds the whole mesh. Gmsh files are still read whole by every rank, so convert large Gmsh meshes to HDF5 first.
 
 ### Output
 
@@ -99,7 +99,7 @@ Restart files have the same layout whatever the number of ranks, cells in global
 All of them run one rank per GPU (on CPUs, one rank per group of cores, with `OMP_NUM_THREADS` threads each), bind each rank to cores of its own, and start from the newest restart file if there is one, by adding `--restart <file>` to the command line (it replaces the input's `[initialize]` table). They also stop runs cleanly ([Running and controlling jobs](running.md)):
 
 - **Time limits.** Slurm sends `SIGUSR2` five minutes before the limit (`#SBATCH --signal=B:USR2@300`), and the PBS script does the same from a timer set to the walltime. Mallard writes a restart after the current step and exits with status 3; the script then submits its continuation, which resumes from that restart, up to `MAX_JOBS` times. Choose the margin longer than a step plus a restart write.
-- **Preemption and cancellation.** A `SIGTERM` from the scheduler, or the pod's termination, becomes a stop request, because `mpirun` would end the ranks at once on `SIGTERM`: the Slurm scripts pass it on to `srun` as `SIGUSR2`, and the `mpirun` scripts ask through the control socket (`Mallard ctl . stop`), since some `mpirun` wrappers (the NVIDIA HPC SDK's) pass no signal on, falling back to `SIGUSR2` before the time loop opens the socket. The Kubernetes Job starts a new pod after an eviction or preemption (`podFailurePolicy`), which resumes from the restart, but ends after an error or divergence (status 1) or a stop you asked for (status 3). Give the scheduler's grace period (`terminationGracePeriodSeconds`, Slurm's `KillWait` or `GraceTime`) the same margin.
+- **Preemption and cancellation.** A `SIGTERM` from the scheduler, or the pod's termination, becomes a stop request, because `mpirun` would end the ranks at once on `SIGTERM`: the Slurm scripts pass it on to `srun` as `SIGUSR2`, and the `mpirun` scripts ask through the control socket (`mallard ctl . stop`), since some `mpirun` wrappers (the NVIDIA HPC SDK's) pass no signal on, falling back to `SIGUSR2` before the time loop opens the socket. The Kubernetes Job starts a new pod after an eviction or preemption (`podFailurePolicy`), which resumes from the restart, but ends after an error or divergence (status 1) or a stop you asked for (status 3). Give the scheduler's grace period (`terminationGracePeriodSeconds`, Slurm's `KillWait` or `GraceTime`) the same margin.
 - **Ctrl-C** under `mpirun.sh` writes a restart and stops; a second Ctrl-C stops at once.
 
 ### GPUs and cores
@@ -135,7 +135,7 @@ Warnings follow the table when the placement wastes hardware:
 |---|---|
 | `N ranks on <host> share its M GPUs` | More ranks than GPUs on a node: run one rank per GPU (`--ntasks-per-node` = GPUs per node) |
 | `ranks ... share GPU ... while GPU ... is idle` | Every rank was given the same device, e.g. `KOKKOS_DEVICE_ID` exported for all: remove it |
-| `ranks ... run on CPUs of NUMA node ... but their GPUs are on node ...` | Ranks bound to cores away from their GPU, e.g. by a launcher that also chose the GPU: bind ranks to cores and leave the GPU to Mallard, or use `srun --gpu-bind=closest`. On nodes whose GPUs all hang off one socket, bind the ranks to that socket's cores (e.g. `srun --cpu-bind=map_ldom:1`, or `numactl --cpunodebind=1` in front of `Mallard`) |
+| `ranks ... run on CPUs of NUMA node ... but their GPUs are on node ...` | Ranks bound to cores away from their GPU, e.g. by a launcher that also chose the GPU: bind ranks to cores and leave the GPU to Mallard, or use `srun --gpu-bind=closest`. On nodes whose GPUs all hang off one socket, bind the ranks to that socket's cores (e.g. `srun --cpu-bind=map_ldom:1`, or `numactl --cpunodebind=1` in front of `mallard`) |
 | `ranks on <host> run T threads on C CPUs` | (CPU runs) Ranks × threads exceed the cores: lower `OMP_NUM_THREADS` or the ranks per node |
 | `OMP_PROC_BIND/OMP_PLACES pin the threads of ranks ... to CPUs other ranks also use` | (CPU runs) Ranks share cores and OpenMP pins every rank's threads to the same ones: bind each rank to its own cores |
 

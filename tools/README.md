@@ -1,13 +1,13 @@
 # Tools
 
-Mallard comes with three executables and a set of Python scripts that cover every step around a run: making a mesh, setting up an initial state, running, looking at the output, and comparing it with references.
+Mallard comes with one command, `mallard`, and a set of Python scripts that cover every step around a run: making a mesh, setting up an initial state, running, looking at the output, and comparing it with references.
 
 ![The tools by step: meshes, set-up, run, post-processing, comparison](../docs/images/tools/workflow-light.svg#gh-light-mode-only)
 ![The tools by step: meshes, set-up, run, post-processing, comparison](../docs/images/tools/workflow-dark.svg#gh-dark-mode-only)
 
 | Step | General tools |
 |---|---|
-| [Executables](#executables): the solver, a 0D reactor, HDF5 meshes | `Mallard`, `MallardReactor`, `mallard-mesh-convert` |
+| [Commands](#commands): the solver, a 0D reactor, HDF5 meshes | `mallard -i`, `mallard reactor`, `mallard mesh convert` |
 | [Job scripts](../docs/guide/parallel.md#running-on-clusters): Slurm (one node, several nodes), PBS, Kubernetes, plain `mpirun` | `jobs/` |
 | [Meshes](#meshes): Gmsh meshes from the command line | `make_cylinder_mesh.py`, `make_annulus_mesh.py`, `make_mallard_mesh.py` |
 | [Initial states](#initial-states-and-references): restart files to start runs from | `isotropic_turbulence_restart.py`, `channel_init.py`, `tile_restart.py`, `interpolate_restart.py`, `flame_restart.py`, `znd_restart.py` |
@@ -26,20 +26,20 @@ python3 -m venv .venv
 
 `python tools/NAME.py --help` lists a script's options. Every figure on this page comes from running the tool it shows: [`docs/tools.py`](docs/tools.py) runs them and draws what they wrote.
 
-## Executables
+## Commands
 
-`cmake --build build` builds them in `build/src/`.
+`cmake --build build` builds `build/src/mallard`; `mallard --help` lists its subcommands.
 
-### `Mallard`: the solver
+### `mallard -i`: the solver
 
 ```sh
-Mallard -i input.toml [--kokkos-num-threads=8]
-mpirun -n 4 Mallard -i input.toml
+mallard -i input.toml [--kokkos-num-threads=8]
+mpirun -n 4 mallard -i input.toml
 ```
 
 Runs the simulation an input file describes: see [first simulation](../docs/tutorials/first_simulation.md), [input files](../docs/guide/input_files.md) and the [input reference](../docs/input.md).
 
-### `MallardReactor`: 0D reactors and chemistry benchmarks
+### `mallard reactor`: 0D reactors and chemistry benchmarks
 
 Integrates one adiabatic, constant-volume reactor with the solver's chemistry (the same stiff integrator, rates and thermodynamics), writes its state over time and prints the ignition delay. Use it to check a mechanism, its tolerances and its ignition delays before a reacting run; with a `[benchmark]` table it measures the chemistry's throughput instead.
 
@@ -60,21 +60,21 @@ output = "reactor.csv"
 
 ```sh
 cd examples/h2_ignition
-../../build/src/MallardReactor -i input.toml    # writes reactor.csv, prints the ignition delay
+../../build/src/mallard reactor -i input.toml    # writes reactor.csv, prints the ignition delay
 ```
 
 ![Temperature and mass fractions of H2, O2, H2O and OH over time in the constant-volume ignition of H2/air](../docs/images/guide/ignition-light.svg#gh-light-mode-only)
 ![Temperature and mass fractions of H2, O2, H2O and OH over time in the constant-volume ignition of H2/air](../docs/images/guide/ignition-dark.svg#gh-dark-mode-only)
 
-More: [Thermochemistry](../docs/guide/thermochemistry.md#0d-reactors-mallardreactor).
+More: [Thermochemistry](../docs/guide/thermochemistry.md#0d-reactors-mallard-reactor).
 
-### `mallard-mesh-convert`: meshes for large parallel runs
+### `mallard mesh convert`: meshes for large parallel runs
 
-Writes a mesh file (Gmsh, Fluent, CGNS or OpenFOAM), or the mesh of an input file with its `[mesh.transform]`, in Mallard's HDF5 format, which every rank of a parallel run reads only its share of. Builds with `-DMallard_ENABLE_HDF5=ON`; use it once the mesh is too large for each rank to read whole.
+Writes a mesh file (Gmsh, Fluent, CGNS or OpenFOAM), or the mesh of an input file with its `[mesh.transform]`, in Mallard's HDF5 format, which every rank of a parallel run reads only its share of. Needs a build with `-DMallard_ENABLE_HDF5=ON`; use it once the mesh is too large for each rank to read whole.
 
 ```sh
-mallard-mesh-convert mesh.msh mesh.h5                # from any mesh file
-mpirun -n 8 mallard-mesh-convert input.toml mesh.h5  # the mesh of an input, written in parallel
+mallard mesh convert mesh.msh mesh.h5                # from any mesh file
+mpirun -n 8 mallard mesh convert input.toml mesh.h5  # the mesh of an input, written in parallel
 ```
 
 The same geometry in each format, as Mallard reads it through the converter:
@@ -123,13 +123,13 @@ Triangles around a duck silhouette (a periodic spline), refined linearly from `-
 
 ### `plot_mesh_quality.py`: mesh quality
 
-The quality fields that `Mallard --check --quality-vtu PREFIX` writes for a 2D
+The quality fields that `mallard check --quality-vtu PREFIX` writes for a 2D
 mesh (non-orthogonality, skewness, aspect ratio, volume ratio), with the worst
 cells circled; readable on light and dark backgrounds. Use it before a long run
 to find the cells that limit the time step or the accuracy.
 
 ```bash
-Mallard -i input.toml --check --quality-vtu quality
+mallard check input.toml --quality-vtu quality
 python tools/plot_mesh_quality.py quality.vtu quality.png --fields NON_ORTHOGONALITY SKEWNESS --worst 10
 ```
 
@@ -214,7 +214,7 @@ Each cell of the new Gmsh mesh takes the inverse-distance weighted average of th
 python tools/flame_reference.py --single h2 1.0 300 full/        # Cantera FreeFlame: full/h2_phi1_T300_{mix,unity}_full.csv
 python tools/flame_restart.py full/h2_phi1_T300_mix_full.csv mechanisms/h2o2.yaml ohmech 8 run/
     [--ny 48 --perturb 1.5]                                       # a 2D channel with a wrinkled front
-cd run && ../build/src/Mallard -i input.toml && cd ..
+cd run && ../build/src/mallard -i input.toml && cd ..
 python tools/flame_speed.py run/ 2.332                            # consumption and displacement speeds
 python tools/plot_flame.py run/ examples/premixed_flame/reference/h2_phi1.0_mix.csv out.png
 ```
@@ -413,16 +413,16 @@ These set up or analyze one example each; their figures are on the [Examples](ht
 |---|---|
 | `device_changes.sh [BASE]` | Whether the changes since BASE touch device code (a changed `src/` file with Kokkos device constructs, or a Kokkos bump): decides whether CI runs the CUDA builds and whether a PR needs GPU CI |
 | `check_workflow_triggers.py` | Fails if a GitHub workflow runs on pull requests or on pushes to branches other than `main` (CI on branches runs only by hand; releases on tags); the first job of `ci.yml` runs it |
-| `docs/make_figures.py` | The figures of the user guide (`docs/images/guide/`) and the theory manual (`docs/images/theory/`), light and dark: schematics, domains from the example inputs, and short Mallard runs (`--mallard build/src/Mallard`; `--mallard3d` for the 3D region figure) |
+| `docs/make_figures.py` | The figures of the user guide (`docs/images/guide/`) and the theory manual (`docs/images/theory/`), light and dark: schematics, domains from the example inputs, and short Mallard runs (`--mallard build/src/mallard`; `--mallard3d` for the 3D region figure) |
 | `docs/regions.py` | The region figures alone: cell volume fractions of every primitive and boolean on coarse unstructured meshes, from one-step runs |
 | `docs/tools.py` | The figures of this page (`docs/images/tools/`), from running each tool (`--mallard` for those from Mallard runs) |
-| `docs/verification.py` | The [verification manual](../docs/verification/index.md) (`docs/verification/`): runs the convergence tests of 2D and 3D `MallardTest` builds (`--test build-2/test/MallardTest build-3/test/MallardTest`) and writes its order-of-accuracy tables, `results.json` and plots (`docs/images/verification/`); without `--test`, redraws them from `results.json` |
+| `docs/verification.py` | The [verification manual](../docs/verification/index.md) (`docs/verification/`): runs the convergence tests of 2D and 3D `mallard-test` builds (`--test build-2/test/mallard-test build-3/test/mallard-test`) and writes its order-of-accuracy tables, `results.json` and plots (`docs/images/verification/`); without `--test`, redraws them from `results.json` |
 | `docs/figstyle.py`, `docs/meshes.py`, `docs/domains.py`, `docs/schematics.py`, `docs/theory.py`, `docs/teno.py`, `docs/runs.py`, `docs/remap_tgv.py` | Their shared style (light and dark palettes, SVG output), mesh readers and figure sets |
 | `../tutorials/common/` | `tutfig.py` (the tutorials' figure style), `gmsh_mesh.py` (Gmsh meshes for plots), `snapshots.py` (VTU and PVTU series) |
 | `make_import_meshes.py` | The mesh-import test fixtures in `test/data/meshes/`: one geometry as Gmsh, CGNS, Fluent and OpenFOAM, 2D and 3D, linear and curved |
 | `chemistry_reference.py`, `transport_reference.py` | Cantera reference data for the chemistry and transport tests (`test/data/chemistry/`, committed so the tests need no Cantera) |
-| `v3_reference.py`, `v3_check.py` | Constant-volume ignition with large mechanisms: Cantera references, and `MallardReactor` against them |
-| `input_catalog.py` | The key catalog `docs/input-keys.json` (every input key with its type, default or requiredness and accepted values, as setup records them): `build` runs `Mallard --check --catalog` on every example and tutorial in 2D and 3D and merges them (`--check` compares with the committed file); `docs` checks the defaults `docs/input.md` states against it. Both run in `ci.yml`; standard library only |
-| `check_upgrade_input.py` | Runs `Mallard upgrade-input` on every input file of every release tag: it must succeed, leave nothing to upgrade, and return up-to-date files byte for byte (CI, openmp job); standard library only |
+| `v3_reference.py`, `v3_check.py` | Constant-volume ignition with large mechanisms: Cantera references, and `mallard reactor` against them |
+| `input_catalog.py` | The key catalog `docs/input-keys.json` (every input key with its type, default or requiredness and accepted values, as setup records them): `build` runs `mallard check --catalog` on every example and tutorial in 2D and 3D and merges them (`--check` compares with the committed file); `docs` checks the defaults `docs/input.md` states against it. Both run in `ci.yml`; standard library only |
+| `check_upgrade_input.py` | Runs `mallard upgrade-input` on every input file of every release tag: it must succeed, leave nothing to upgrade, and return up-to-date files byte for byte (CI, openmp job); standard library only |
 | `changelog.py` | Changelog fragments (`changelog/`): `check` fails when a branch changes `src/` without adding one (first job of `ci.yml`); `notes X.Y.Z` / `notes Unreleased` prints a release's section or previews the next; `release X.Y.Z` folds the fragments into `CHANGELOG.md`; standard library only |
 | `hero_grid.json` | The configuration of the README animation (`animate_grid.py`) |

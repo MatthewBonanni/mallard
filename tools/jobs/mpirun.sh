@@ -12,7 +12,7 @@
 
 set -u
 
-MALLARD=${MALLARD:-Mallard}        # <Mallard, Mallard3D, or the path to the executable>
+MALLARD=${MALLARD:-mallard}        # <mallard, mallard3d, or the path to the executable>
 INPUT=${INPUT:-input.toml}
 RESTARTS='restart_*.restart'       # <the restart files the run writes; the newest is resumed from>
 
