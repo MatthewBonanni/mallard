@@ -68,12 +68,18 @@ Input unrecorded(Input value) {
 
 } // namespace
 
-int Solver::init(const std::string & input_file_name) {
+int Solver::init(const std::string & input_file_name, const std::string & restart_file) {
     std::ifstream in(input_file_name, std::ios::binary);
     provenance::start_run();
     provenance::set_input(input_file_name, std::string(std::istreambuf_iterator<char>(in), {}));
     input_from_file = true;
-    return init(parse_input(input_file_name));
+    Input parsed = parse_input(input_file_name);
+    if (!restart_file.empty()) start_from_restart(parsed, restart_file);
+    return init(parsed);
+}
+
+void Solver::start_from_restart(Input & input, const std::string & restart_file) {
+    input.as_table()["initialize"] = Input(Input::table_type{{"type", "restart"}, {"file", restart_file}});
 }
 
 template <typename F>

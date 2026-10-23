@@ -111,9 +111,13 @@ class Solver {
         /**
          * @brief Initialize the solver from an input file.
          * @param input_file_name Path to the TOML input file.
+         * @param restart_file If given, start from this restart file instead of the input's [initialize].
          * @return Exit status.
          */
-        int init(const std::string & input_file_name);
+        int init(const std::string & input_file_name, const std::string & restart_file = {});
+
+        /** @brief Replaces the input's [initialize] by a start from restart_file (`--restart`). */
+        static void start_from_restart(Input & input, const std::string & restart_file);
 
         /**
          * @brief Initialize the solver from a parsed TOML input.
