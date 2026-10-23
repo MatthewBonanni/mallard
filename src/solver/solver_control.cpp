@@ -60,7 +60,7 @@ bool parse_time(const std::string & text, double & seconds) {
 
 const char * SETTABLE =
     "n_steps, t_stop, t_wall_stop, check_interval, write_data.<prefix or index>.interval, "
-    "write_data.<prefix or index>.time_interval, probes.<name>.interval, forces.<zone>.interval, integrals.interval";
+    "write_data.<prefix or index>.time_interval, probes.<name>.interval, probes.<name>.time_interval, forces.<zone>.interval, integrals.interval";
 
 } // namespace
 
@@ -287,16 +287,20 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
         if (!error.empty()) return rejected(error);
         return {true, key + " = " + value};
     }
-    if ((table == "probes" || table == "forces") && !name.empty() && field == "interval") {
+    if (table == "probes" && !name.empty() && (field == "interval" || field == "time_interval")) {
+        if (field == "interval" && !is_uint) return rejected("expected a positive integer");
+        if (field == "time_interval" && !is_time) return rejected("expected a positive time in seconds or with a unit");
+        const std::string error = field == "interval" ? probes.set_interval(name, n)
+                                                      : probes.set_time_interval(name, static_cast<rtype>(x), t);
+        if (!error.empty()) return rejected(error);
+        return {true, key + " = " + value};
+    }
+    if (table == "forces" && !name.empty() && field == "interval") {
         if (!is_uint || n == 0) return rejected("expected a positive integer");
-        if (table == "probes") {
-            if (!probes.set_interval(name, n)) return rejected("no probe set named " + name);
-        } else {
-            auto monitor = std::find_if(force_monitors.begin(), force_monitors.end(),
-                                        [&](const ForceMonitor & m) { return m.zone == name; });
-            if (monitor == force_monitors.end()) return rejected("no [[forces]] on zone " + name);
-            monitor->interval = n;
-        }
+        auto monitor = std::find_if(force_monitors.begin(), force_monitors.end(),
+                                    [&](const ForceMonitor & m) { return m.zone == name; });
+        if (monitor == force_monitors.end()) return rejected("no [[forces]] on zone " + name);
+        monitor->interval = n;
         return {true, key + " = " + value};
     }
     if (key == "integrals.interval") {

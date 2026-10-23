@@ -114,6 +114,13 @@ Received<T> exchange(std::vector<std::vector<T>> && send);
 template <typename T>
 std::vector<T> allgatherv(const std::vector<T> & local);
 
+/**
+ * @brief Concatenation of every rank's local vector, in rank order, on rank 0
+ *        (empty on the others).
+ */
+template <typename T>
+std::vector<T> gatherv(const std::vector<T> & local);
+
 #ifdef Mallard_HAS_MPI
 /** @brief The world communicator. */
 MPI_Comm world();

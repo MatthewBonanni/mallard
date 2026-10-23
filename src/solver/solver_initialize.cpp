@@ -152,6 +152,7 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
         writer->resume(step, t);
     }
     if (checkpoint_writer) checkpoint_writer->resume(step, t);
+    probes.resume(step, t);
 }
 
 void Solver::init_solution_constant() {
