@@ -419,15 +419,12 @@ int Solver::base_halo_layers() const {
 }
 
 void Solver::trim_halo() {
-    // The deep halo of TENO or of image neighbors holds every cell the stencil
-    // searches visited, so that stencils match the serial ones; the time loop
-    // needs only the cells the stencils kept, and the layers the other kernels read
-    if (!is_distributed()) return;
+    // The deep TENO halo holds every cell the stencil searches visited, so that
+    // stencils match the serial ones; the time loop needs only the cells the
+    // stencils kept, and the layers the other kernels read
     const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
-    // Every rank takes part in the exchange below, also those without image neighbors
-    const bool images = comm::allreduce(int(boundary_data.image_neighbors.extent(0) > 0), comm::Op::MAX) > 0;
-    if (teno == nullptr && !images) return;
-    std::vector<uint8_t> needed = teno ? teno->stencil_cells() : std::vector<uint8_t>(mesh->n_cells, 0);
+    if (!is_distributed() || teno == nullptr) return;
+    std::vector<uint8_t> needed = teno->stencil_cells();
     const int base = base_halo_layers();
     for (uint32_t c = 0; c < mesh->n_cells; c++) needed[c] = needed[c] || distribution.layer[c] <= base;
     // Image neighbors of the cells whose gradients are read
