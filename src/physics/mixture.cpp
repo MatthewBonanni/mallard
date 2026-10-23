@@ -18,7 +18,9 @@
 MixtureModel MixtureModel::from_input(const Input & input) {
     const Input & physics = input.at("physics");
     if (!physics.contains("mechanism")) {
-        throw InputError("physics: gas = \"mixture\" needs a mechanism file.");
+        throw missing_key(physics, "physics.mechanism",
+                          "Add mechanism = \"...\": a Cantera YAML file (convert Chemkin files with Cantera's "
+                          "ck2yaml)");
     }
     MixtureModel model;
     model.mech = chemistry::read_mechanism(find_value<std::string>(physics, "mechanism"),
@@ -28,7 +30,7 @@ MixtureModel MixtureModel::from_input(const Input & input) {
     model.gas.n_species = model.mech.n_species();
     const std::string type = find_value_or<std::string>(physics, "type", "euler");
     if (type != "euler" && type != "navier_stokes") {
-        throw InputError("physics.type = \"" + type + "\" is not one of: euler, navier_stokes.");
+        throw not_accepted(physics, "physics.type", type, {"euler", "navier_stokes"});
     }
     if (type == "euler") {
         if (physics.contains("transport") || physics.contains("lewis") || physics.contains("soret")) {
@@ -43,8 +45,8 @@ MixtureModel MixtureModel::from_input(const Input & input) {
         {"constant_lewis", chemistry::TransportModel::CONSTANT_LEWIS}};
     const auto it = models.find(model.transport_name);
     if (it == models.end()) {
-        throw InputError("physics.transport = \"" + model.transport_name +
-                         "\" is not one of: mixture_averaged, unity_lewis, constant_lewis.");
+        throw not_accepted(physics, "physics.transport", model.transport_name,
+                           {"constant_lewis", "mixture_averaged", "unity_lewis"});
     }
     std::vector<double> lewis;
     if (it->second == chemistry::TransportModel::CONSTANT_LEWIS) {
@@ -54,7 +56,7 @@ MixtureModel MixtureModel::from_input(const Input & input) {
             if (!entries.is_table()) throw InputError("physics.lewis must be a table of species and Lewis numbers.");
             for (const auto & [name, value] : entries.as_table()) {
                 const int32_t k = model.mech.species_index(name);
-                if (k < 0) throw InputError("physics.lewis: no species " + name + " in the mechanism.");
+                if (k < 0) throw model.unknown_species(entries, "physics.lewis." + name, name);
                 lewis[static_cast<size_t>(k)] = static_cast<double>(find_real(entries, name, dim::none));
                 if (!(lewis[static_cast<size_t>(k)] > 0.0)) throw InputError("physics.lewis." + name + " must be positive.");
             }
@@ -75,6 +77,19 @@ MixtureModel MixtureModel::from_input(const Input & input) {
     return model;
 }
 
+InputError MixtureModel::unknown_species(const Input & table, const std::string & key, const std::string & name) const {
+    std::vector<std::string> names = species_names();
+    const std::string suggestion = suggest_value(name, names);
+    if (names.size() > 30) names.clear();
+    return InputError({.key = key,
+                       .line = line_of(table, name),
+                       .message = "the mechanism has no species " + name,
+                       .valid = names,
+                       .suggestion = suggestion,
+                       .fix = "Use the species names of the mechanism file, which are case-sensitive",
+                       .docs = "docs/guide/thermochemistry.md"});
+}
+
 std::vector<double> MixtureModel::mass_fractions(const Input & table, const std::string & where) const {
     const bool has_X = table.contains("X"), has_Y = table.contains("Y");
     if (has_X == has_Y) {
@@ -90,7 +105,7 @@ std::vector<double> MixtureModel::mass_fractions(const Input & table, const std:
     for (const auto & [name, value] : entries.as_table()) {
         const int32_t k = mech.species_index(name);
         if (k < 0) {
-            throw InputError(where + "." + key + ": no species " + name + " in the mechanism.");
+            throw unknown_species(entries, where + "." + key + "." + name, name);
         }
         const double x = static_cast<double>(find_real(entries, name, dim::none));
         if (!(x >= 0.0)) throw InputError(where + "." + key + "." + name + " must not be negative.");

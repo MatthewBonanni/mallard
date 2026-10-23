@@ -21,6 +21,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
+#include "common_io.h"
 #include "input.h"
 #include "file_format.h"
 #include "log.h"
@@ -422,6 +423,39 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
     return block;
 }
 
+std::string mesh_filename(const Input & input) {
+    const std::string filename = find_value_or<std::string>(input, "mesh", "filename", "mesh.msh");
+    if (std::filesystem::exists(filename)) return filename;
+    const bool given = input.contains("mesh") && input.at("mesh").contains("filename");
+    std::string cwd;
+    if (!std::filesystem::path(filename).is_absolute()) {
+        std::error_code ec;
+        const auto dir = std::filesystem::current_path(ec);
+        if (!ec) cwd = " in " + dir.string() + ", the directory Mallard runs in";
+    }
+    throw InputError({.key = "mesh.filename",
+                      .line = given ? line_of(input.at("mesh"), "filename") : line_of(input, "mesh"),
+                      .message = "no mesh file " + filename + cwd +
+                                 (given ? "" : " (mesh.msh is the default when [mesh] gives no type or filename)"),
+                      .fix = "Set filename in [mesh] to your mesh file (relative paths start from the directory "
+                             "Mallard runs in), or generate a mesh with type = \"cartesian\" and Nx, Ny, Lx, Ly",
+                      .docs = "docs/guide/meshes.md"});
+}
+
+InputError mesh_type_dimension_error(const Input & input, const std::string & type) {
+    const int other = N_DIM == 2 ? 3 : 2;
+    return InputError({.key = "mesh.type",
+                       .line = line_of(input.at("mesh"), "type"),
+                       .message = "\"" + type + "\" is a " + std::to_string(other) + "D mesh, but this is the " +
+                                  std::to_string(N_DIM) + "D solver",
+                       .fix = std::string(N_DIM == 2 ? "In 2D, use cartesian, cartesian_tri, wedge or annulus"
+                                                     : "In 3D, use cartesian, cartesian_tet, cartesian_prism, "
+                                                       "cartesian_pyramid, cartesian_mixed or annulus") +
+                              "; or run the " + std::to_string(other) + "D solver (built with -DMallard_DIM=" +
+                              std::to_string(other) + ")",
+                       .docs = "docs/guide/meshes.md#generated-meshes"});
+}
+
 bool is_hdf5_mesh(const std::string & filename) {
     const std::string ext = std::filesystem::path(filename).extension().string();
     return ext == ".h5" || ext == ".hdf5";
@@ -429,11 +463,12 @@ bool is_hdf5_mesh(const std::string & filename) {
 
 MeshBlock read_mesh_block(const Input & input) {
     const std::string type_str = find_value_or<std::string>(input, "mesh", "type", "file");
-    const auto it = find_option(MESH_TYPES, "mesh.type", type_str);
+    const auto it = find_option(MESH_TYPES, "mesh.type", type_str,
+                                input.contains("mesh") ? line_of(input.at("mesh"), "type") : size_t(0));
     const MeshType type = it->second;
     const MeshTransform transform = mesh_transform(input);
     if (type == MeshType::FROM_FILE) {
-        const std::string filename = find_value_or<std::string>(input, "mesh", "filename", "mesh.msh");
+        const std::string filename = mesh_filename(input);
         MeshBlock block = is_hdf5_mesh(filename) ? read_mesh_h5(filename) : read_file_block(filename);
         transform_block(block, transform);
         return block;
@@ -447,7 +482,7 @@ MeshBlock read_mesh_block(const Input & input) {
         const uint32_t Nz = find_value_or<uint32_t>(input, "mesh", "Nz", 100);
         const rtype Lz = find_real_or(input, "mesh", "Lz", dim::length, 1.0);
         if (type == MeshType::CARTESIAN_TRI || type == MeshType::WEDGE) {
-            throw std::runtime_error("Mesh type " + type_str + " is 2D only.");
+            throw mesh_type_dimension_error(input, type_str);
         }
         const auto [n_cells, n_nodes] = cartesian_3d_size(Nx, Ny, Nz, type);
         const int r = comm::rank(), p = comm::size();
@@ -456,7 +491,7 @@ MeshBlock read_mesh_block(const Input & input) {
                                   block_begin(n_nodes, r + 1, p), mesh_stretching(input));
     }
     if (type != MeshType::CARTESIAN && type != MeshType::CARTESIAN_TRI && type != MeshType::WEDGE) {
-        throw std::runtime_error("Mesh type " + type_str + " is 3D only.");
+        throw mesh_type_dimension_error(input, type_str);
     }
     return cartesian_2d_block(Nx, Ny, Lx, Ly, type, comm::rank(), comm::size(), mesh_stretching(input));
 }
@@ -560,7 +595,7 @@ MeshBlock read_mesh_h5(const std::string & filename, bool whole) {
     const int p = whole ? 1 : comm::size(), r = whole ? 0 : comm::rank();
     Handle fapl(whole ? H5Pcreate(H5P_FILE_ACCESS) : file_access(), H5Pclose, "H5Pcreate");
     Handle dxpl(whole ? H5Pcreate(H5P_DATASET_XFER) : transfer(), H5Pclose, "H5Pcreate");
-    if (!std::filesystem::exists(filename)) throw std::runtime_error("Could not open mesh file: " + filename + ".");
+    if (!std::filesystem::exists(filename)) throw cannot_read("the mesh file", filename);
     Handle file(H5Fopen(filename.c_str(), H5F_ACC_RDONLY, fapl), H5Fclose, "opening " + filename);
     {
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");

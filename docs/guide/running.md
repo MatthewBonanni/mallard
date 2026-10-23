@@ -42,7 +42,12 @@ Every step's time-step reduction also tells whether any owned cell holds a non-f
 
 ```text
 error: Solution diverged at step 611, t = 1.90583: 1 cell has a non-finite value: RHOE = nan in cell 19 at
-(0.025, 0.975). The last valid state (step 610, t = 1.90328) is in restart_000610.restart.
+(0.025, 0.975). The last valid state (step 610, t = 1.90328) is in restart_000610.restart. Common causes: ...
 ```
+
+The message ends with the usual causes: a time step too large for the scheme
+(lower `run.cfl`), initial or boundary values far from the flow (check units
+and signs), or poor cells near the first one listed (`mallard check` reports
+mesh quality); a more dissipative scheme (`numerics.preset = "robust"`) helps.
 
 It writes the state at the start of the step before, the last valid one (all `[[write_data]]` outputs and a restart; see [`keep_last_good`](../input.md#run)), and exits with status 1. The invalid state is found one step after it appears, or right after its step with `[numerics] check_nan`; without `check_nan`, the outputs and `[statistics]` samples of that step may hold it (resume from the last valid state with `[statistics] reset = true` if its averages are not finite).

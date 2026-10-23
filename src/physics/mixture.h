@@ -96,6 +96,9 @@ class MixtureModel {
         uint32_t n_species() const { return gas.n_species; }
         std::vector<std::string> species_names() const { return mech.species_names(); }
 
+        /** @brief The error of a species name, key (in table) of the input, that the mechanism lacks. */
+        InputError unknown_species(const Input & table, const std::string & key, const std::string & name) const;
+
         /**
          * @brief Mass fractions from a table of the input holding X (mole
          *        fractions) or Y, by species name; normalized, unlisted species

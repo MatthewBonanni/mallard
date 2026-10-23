@@ -144,6 +144,15 @@ MeshBlock read_mesh_block(const Input & input);
  */
 MeshBlock read_file_block(const std::string & filename);
 
+/**
+ * @brief mesh.filename (default mesh.msh), or an error naming the key, its line
+ *        and the directory relative paths start from if no such file exists.
+ */
+std::string mesh_filename(const Input & input);
+
+/** @brief The error of a generated mesh.type that this dimension's solver does not make. */
+InputError mesh_type_dimension_error(const Input & input, const std::string & type);
+
 /** @brief Whether a mesh file name denotes an HDF5 mesh file (.h5 or .hdf5). */
 bool is_hdf5_mesh(const std::string & filename);
 

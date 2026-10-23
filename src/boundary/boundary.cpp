@@ -28,13 +28,17 @@
 BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler & physics) {
     const std::string name = find_value<std::string>(input, "name");
     const std::string type_str = find_value<std::string>(input, "type");
-    auto it = find_option(BOUNDARY_TYPES, "boundaries[name = \"" + name + "\"].type", type_str);
+    const std::string where_name = "boundaries[name = \"" + name + "\"]";
+    auto it = find_option(BOUNDARY_TYPES, where_name + ".type", type_str, line_of(input, "type"));
     using Relax = BoundaryCondition::Relax;
     BoundaryCondition bc;
     bc.type = it->second;
     auto require = [&](const char * key) {
         if (!input.contains(key)) {
-            throw std::runtime_error(std::string("Missing ") + key + " for boundary: " + name + ".");
+            Diagnostic d = missing_key(input, where_name + "." + key).diagnostic;
+            d.message = "missing; type = \"" + type_str + "\" needs it";
+            d.docs = "docs/guide/boundary_conditions.md#choosing-a-condition";
+            throw InputError(d);
         }
     };
     if (bc.type == BoundaryType::UPT || bc.type == BoundaryType::FARFIELD) {
@@ -43,7 +47,11 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         require("T");
         std::vector<rtype> u = find_real_vector(input, "u", dim::velocity);
         if (u.size() != N_DIM) {
-            throw std::runtime_error("Invalid u for boundary: " + name + ".");
+            throw InputError({.key = where_name + ".u",
+                              .line = line_of(input, "u"),
+                              .message = "has " + std::to_string(u.size()) + " components, but this build is " +
+                                         std::to_string(N_DIM) + "D",
+                              .fix = N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]"});
         }
         const rtype p = find_real(input, "p", dim::pressure);
         const rtype T = find_real(input, "T", dim::temperature);
@@ -70,7 +78,14 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         require("T0");
         const rtype p0 = find_real(input, "p0", dim::pressure);
         const rtype T0 = find_real(input, "T0", dim::temperature);
-        if (!(p0 > 0.0_r) || !(T0 > 0.0_r)) throw InputError(where + ": p0 and T0 must be positive.");
+        if (!(p0 > 0.0_r) || !(T0 > 0.0_r)) {
+            const char * key = !(p0 > 0.0_r) ? "p0" : "T0";
+            throw InputError({.key = where + "." + key,
+                              .line = line_of(input, key),
+                              .message = "must be positive: it is the total (stagnation) " +
+                                         std::string(key[0] == 'p' ? "pressure" : "temperature"),
+                              .docs = "docs/guide/boundary_conditions.md#stagnation-inlet"});
+        }
         bc.data[0] = T0;
         bc.data[N_DIM + 1] = p0;
         if (input.contains("direction")) {
@@ -79,8 +94,11 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
             for (const rtype c : d) norm += c * c;
             norm = std::sqrt(norm);
             if (d.size() != N_DIM || !(norm > 0.0_r)) {
-                throw InputError(where + ".direction must be a nonzero vector of " + std::to_string(N_DIM) +
-                                 " components.");
+                throw InputError({.key = where + ".direction",
+                                  .line = line_of(input, "direction"),
+                                  .message = "must be a nonzero vector of " + std::to_string(N_DIM) + " components",
+                                  .fix = "Remove it to use each face's inward normal",
+                                  .docs = "docs/guide/boundary_conditions.md#stagnation-inlet"});
             }
             FOR_I_DIM bc.data[1 + i] = d[i] / norm;
         }
@@ -92,7 +110,11 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         if (input.contains("u")) {
             std::vector<rtype> u = find_real_vector(input, "u", dim::velocity);
             if (u.size() != N_DIM) {
-                throw std::runtime_error("Invalid u for boundary: " + name + ".");
+                throw InputError({.key = where_name + ".u",
+                              .line = line_of(input, "u"),
+                              .message = "has " + std::to_string(u.size()) + " components, but this build is " +
+                                         std::to_string(N_DIM) + "D",
+                              .fix = N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]"});
             }
             FOR_I_DIM bc.data[1 + i] = u[i];
         }
@@ -108,12 +130,23 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         const std::string where = "boundaries[name = \"" + name + "\"]";
         require("L");
         const rtype L = find_real(input, "L", dim::length);
-        if (!(L > 0.0_r)) throw InputError(where + ".L must be positive.");
+        if (!(L > 0.0_r)) {
+            throw InputError({.key = where + ".L",
+                              .line = line_of(input, "L"),
+                              .message = "must be positive",
+                              .fix = "Use a length of the domain, e.g. its extent normal to the boundary",
+                              .docs = "docs/guide/boundary_conditions.md#characteristic-boundaries"});
+        }
         // sigma / L, or a negative fallback if the key is absent
         auto rate = [&](const char * key, rtype fallback) {
             if (!input.contains(key)) return fallback;
             const rtype sigma = find_real(input, key, dim::none);
-            if (!(sigma >= 0.0_r)) throw InputError(where + "." + key + " must be non-negative.");
+            if (!(sigma >= 0.0_r)) {
+                throw InputError({.key = where + "." + key,
+                                  .line = line_of(input, key),
+                                  .message = "must be non-negative",
+                                  .docs = "docs/guide/boundary_conditions.md#characteristic-boundaries"});
+            }
             return sigma / L;
         };
         bc.relax[Relax::ACOUSTIC] = input.contains("sigma") ? rate("sigma", 0.0_r) : 0.25_r / L;
@@ -123,7 +156,10 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         if (input.contains("beta")) {
             bc.relax[Relax::BETA] = find_real(input, "beta", dim::none);
             if (!(bc.relax[Relax::BETA] >= 0.0_r && bc.relax[Relax::BETA] <= 1.0_r)) {
-                throw InputError(where + ".beta must be in [0, 1].");
+                throw InputError({.key = where + ".beta",
+                                  .line = line_of(input, "beta"),
+                                  .message = "must be in [0, 1]",
+                                  .docs = "docs/guide/boundary_conditions.md#characteristic-boundaries"});
             }
         }
         if (bc.type == BoundaryType::NSCBC_INLET) {
