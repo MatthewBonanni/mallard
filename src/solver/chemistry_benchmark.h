@@ -19,7 +19,7 @@
 #include <string>
 #include <vector>
 
-#include <toml.hpp>
+#include "input.h"
 
 /** @brief The timed calls of one splitting step dt (the best one's time, the last one's sub-steps). */
 struct ChemistryBenchmarkStep {
@@ -47,6 +47,6 @@ struct ChemistryBenchmark {
  *        from the sampled states; logs and returns cells per second and the
  *        sub-step distribution.
  */
-ChemistryBenchmark run_chemistry_benchmark(const toml::value & input);
+ChemistryBenchmark run_chemistry_benchmark(const Input & input);
 
 #endif // CHEMISTRY_BENCHMARK_H

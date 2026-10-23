@@ -1,0 +1,69 @@
+# Flow past a circular cylinder at Re = 100 and Mach 0.2 (2D build,
+# Navier-Stokes): periodic vortex shedding, the Karman vortex street.
+# Tutorial: docs/tutorials/cylinder.md. Mesh: gmsh cylinder.geo -2 -o cylinder.msh
+#
+# Units: cylinder diameter 1, free-stream density and sound speed 1, so the
+# free-stream velocity is the Mach number, U = 0.2, p = T = 1 / gamma (gas
+# constant 1), and the viscosity is mu = rho U D / Re = 0.002. A time unit is
+# D / a: the flow passes the cylinder in 5, and one shedding period takes
+# about 30.
+
+[run]
+t_stop = 160.0
+cfl = 1.0
+
+[mesh]
+type = "file"
+filename = "cylinder.msh"
+
+[initialize]
+type = "analytical"
+rho = "1.0"
+# The free stream, slowed near the cylinder, plus a transverse kick behind
+# it: without the kick the symmetric wake takes much longer to start shedding
+u = ["0.2 * (1 - exp(-4 * (x^2 + y^2 - 0.25)))",
+     "0.1 * exp(-((x - 1.5)^2 + y^2))"]
+p = "0.7142857142857143"
+
+[[boundaries]]
+name = "cylinder"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "farfield"
+type = "farfield"
+u = [0.2, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 3
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+mu = 0.002
+Pr = 0.72
+
+[output]
+check_interval = 2000
+
+[[forces]]
+zone = "cylinder"
+interval = 20
+file = "forces_cylinder.csv"
+
+[[write_data]]
+prefix = "./solut/cylinder"
+format = "vtu"
+time_interval = 2.0
+variables = ["RHO", "U_X", "U_Y", "P", "VORTICITY"]

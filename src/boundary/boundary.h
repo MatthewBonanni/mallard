@@ -17,7 +17,7 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "common.h"
 #include "inflow.h"
@@ -121,6 +121,7 @@ struct BoundaryCondition {
     BoundaryType type = BoundaryType::EXTRAPOLATION;
     rtype data[N_DIM + 2] = {};
     rtype relax[N_RELAX] = {};
+    bool modeled = false;  // walls: a wall model gives the viscous flux, and the ghost is a slip wall's
 
     KOKKOS_INLINE_FUNCTION
     bool is_wall() const {
@@ -164,7 +165,7 @@ struct BoundaryCondition {
     /**
      * @brief Parse a [[boundaries]] table entry.
      */
-    static BoundaryCondition from_input(const toml::value & input, const Euler & physics);
+    static BoundaryCondition from_input(const Input & input, const Euler & physics);
 
     /**
      * @brief Ghost state W_g = [rho, u, p] given the interior state W_i.
@@ -193,7 +194,7 @@ struct BoundaryCondition {
             case BoundaryType::WALL_ADIABATIC:
             case BoundaryType::WALL_ISOTHERMAL:
             case BoundaryType::WALL_HEAT_FLUX:
-                if (viscous) {
+                if (viscous && !modeled) {
                     FOR_I_DIM W_g[1 + i] = 2.0_r * data[1 + i] - W_i[1 + i];
                     if (type == BoundaryType::WALL_ISOTHERMAL && wall_temperature) {
                         const rtype T_i = W_i[E] / (W_i[0] * R);

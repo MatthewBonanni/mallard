@@ -21,7 +21,7 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "common_typedef.h"
 #include "data.h"
@@ -70,7 +70,7 @@ struct CellSampler {
 class Statistics {
     public:
         /** @brief Read [statistics] (if any) and allocate n_cells. */
-        void init(const toml::value & input, const std::vector<std::string> & species_names, uint32_t n_cells);
+        void init(const Input & input, const std::vector<std::string> & species_names, uint32_t n_cells);
 
         bool enabled() const { return !fields.empty(); }
         bool due(uint64_t step, rtype t) const { return enabled() && step % interval == 0 && t > t_start; }
@@ -128,7 +128,7 @@ class Statistics {
 class Probes {
     public:
         /** @brief Read [[probes]] and locate the points; resume appends to existing files. */
-        void init(const toml::value & input, const Mesh & mesh, const std::vector<std::string> & species_names,
+        void init(const Input & input, const Mesh & mesh, const std::vector<std::string> & species_names,
                   bool resume);
 
         bool due(uint64_t step) const;

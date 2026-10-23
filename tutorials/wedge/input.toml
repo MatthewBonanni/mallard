@@ -1,0 +1,77 @@
+# Supersonic flow of air over an 8 degree ramp (2D build, Euler): an attached
+# oblique shock from the corner, against the theta-beta-Mach relation
+# (oblique_shock.py). Tutorial: docs/tutorials/wedge.md.
+#
+# SI units. The gas constant comes from the reference state, R = p_ref /
+# (rho_ref T_ref) = 277.4 J/(kg K), so the 600 m/s inflow at 300 K is Mach
+# 1.759. The flow crosses the 2 m domain in 3.3 ms and is steady well before
+# t = 0.02 s.
+
+[run]
+t_stop = 0.02
+cfl = 1.0
+
+[mesh]
+type = "wedge"
+Nx = 160
+Ny = 120
+Lx = 2.0
+Ly = 1.5
+
+[initialize]
+type = "constant"
+u = [600.0, 0.0]
+p = 101325.0
+T = 300.0
+
+[[boundaries]]
+name = "left"
+type = "upt"
+u = [600.0, 0.0]
+p = 101325.0
+T = 300.0
+
+[[boundaries]]
+name = "right"
+type = "extrapolation"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+limiter = "venkatakrishnan"
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 101325.0
+T_ref = 298.15
+rho_ref = 1.225
+
+[output]
+check_interval = 200
+
+[[probes]]
+name = "line"
+variables = ["P"]
+start = [1.5, 0.15]
+end = [1.5, 1.45]
+n_points = 66
+interval = 10
+
+[[write_data]]
+prefix = "./solut/wedge"
+format = "vtu"
+time_interval = 0.002
+variables = ["RHO", "U_X", "U_Y", "P", "T"]

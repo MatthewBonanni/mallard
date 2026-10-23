@@ -13,9 +13,7 @@
 #include "solver.h"
 
 #include <algorithm>
-#include <iomanip>
 #include <limits>
-#include <sstream>
 
 #include <Kokkos_Core.hpp>
 
@@ -277,7 +275,7 @@ struct MixtureDiagnosticsFunctor {
  */
 class CompositionExpressions {
     public:
-        CompositionExpressions(const MixtureModel & mixture_model, const toml::value & table, const std::string & name) :
+        CompositionExpressions(const MixtureModel & mixture_model, const Input & table, const std::string & name) :
             mixture(mixture_model), where(name) {
             if (table.contains("X") == table.contains("Y")) {
                 throw InputError(where + ": give the composition as exactly one of X and Y.");
@@ -289,13 +287,7 @@ class CompositionExpressions {
                 const int32_t k = mixture.mechanism().species_index(species);
                 if (k < 0) throw InputError(where + "." + key + ": no species " + species + " in the mechanism.");
                 listed.push_back(k);
-                std::ostringstream text;
-                if (value.is_string()) {
-                    text << value.as_string();
-                } else {
-                    text << std::setprecision(17) << static_cast<double>(as_real(value, species));
-                }
-                values.emplace_back(where + "." + key + "." + species, text.str());
+                values.emplace_back(where + "." + key + "." + species, quantity_or_expression(value, species, dim::none));
             }
             if (table.contains("balance")) {
                 const std::string species = toml::find<std::string>(table, "balance");
@@ -632,7 +624,7 @@ std::vector<rtype> Solver::integrate_species() {
     return total;
 }
 
-std::vector<std::vector<double>> Solver::composition_at_cells(const toml::value & table, const std::string & where,
+std::vector<std::vector<double>> Solver::composition_at_cells(const Input & table, const std::string & where,
                                                               const std::vector<uint32_t> & cells) const {
     const CompositionExpressions composition(*mixture_model, table, where);
     std::vector<std::vector<double>> Y;
@@ -641,7 +633,7 @@ std::vector<std::vector<double>> Solver::composition_at_cells(const toml::value 
     return Y;
 }
 
-void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boundaries,
+void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries,
                                      const std::vector<std::array<uint32_t, 2>> & profiled_faces,
                                      std::vector<BoundaryCondition> & bcs) {
     bc_mass_fractions.assign(bcs.size(), {});
@@ -659,7 +651,7 @@ void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boun
         mixture_model->surrogates(T, Y, bc_surrogates[i_bc][0], bc_surrogates[i_bc][1]);
     };
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
-        const toml::value & bound = input_boundaries[i_bc];
+        const Input & bound = input_boundaries[i_bc];
         const std::string name = toml::find<std::string>(bound, "name");
         const std::string where = "boundaries[name = \"" + name + "\"]";
         switch (bcs[i_bc].type) {
@@ -676,7 +668,7 @@ void Solver::init_mixture_boundaries(const std::vector<toml::value> & input_boun
             case BoundaryType::STAGNATION_INLET:
             case BoundaryType::MASS_FLOW_INLET: {
                 const char * T_key = bcs[i_bc].type == BoundaryType::STAGNATION_INLET ? "T0" : "T";
-                const double T = static_cast<double>(find_real(bound, T_key));
+                const double T = static_cast<double>(find_real(bound, T_key, dim::temperature));
                 if (!MixtureModel::composition_varies(bound)) {
                     const std::vector<double> Y = mixture_model->mass_fractions(bound, where);
                     prescribe(i_bc, Y, T);

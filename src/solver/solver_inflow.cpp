@@ -18,7 +18,7 @@
 #include "expression.h"
 #include "input.h"
 
-void Solver::init_inlets(const std::vector<toml::value> & input_boundaries,
+void Solver::init_inlets(const std::vector<Input> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets) {
     inflows.clear();
     t_inflow = -1.0;
@@ -26,7 +26,7 @@ void Solver::init_inlets(const std::vector<toml::value> & input_boundaries,
     auto h_target = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.char_target);
     bool profiled = false;
     for (const auto & [i_bc, faces] : inlets) {
-        const toml::value & bound = input_boundaries[i_bc];
+        const Input & bound = input_boundaries[i_bc];
         const std::string name = toml::find<std::string>(bound, "name");
         const std::string where = "boundaries[name = \"" + name + "\"]";
         const InletProfile profile(bound, where);
@@ -52,16 +52,18 @@ void Solver::init_inlets(const std::vector<toml::value> & input_boundaries,
     }
 }
 
-std::vector<double> Solver::mass_flow_inlet_fluxes(const toml::value & bound, const std::vector<uint32_t> & faces,
+std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const std::vector<uint32_t> & faces,
                                                    BoundaryCondition & bc) const {
     if (bc.type != BoundaryType::MASS_FLOW_INLET) return {};
     const std::string name = toml::find<std::string>(bound, "name");
     const std::string where = "boundaries[name = \"" + name + "\"]";
     std::unique_ptr<Expression> shape;
     if (bound.contains("mass_flux") && bound.at("mass_flux").is_string()) {
-        shape = std::make_unique<Expression>(where + ".mass_flux", toml::find<std::string>(bound, "mass_flux"));
+        shape = std::make_unique<Expression>(
+            where + ".mass_flux", quantity_or_expression(bound.at("mass_flux"), where + ".mass_flux", dim::mass_flux));
     } else if (bound.contains("profile")) {
-        shape = std::make_unique<Expression>(where + ".profile", toml::find<std::string>(bound, "profile"));
+        shape = std::make_unique<Expression>(
+            where + ".profile", quantity_or_expression(bound.at("profile"), where + ".profile", dim::none));
     }
     if (!bound.contains("mdot") && !shape) return {};
     if (shape && shape->depends_on_time()) throw InputError(where + ": mass fluxes cannot depend on t.");
@@ -81,7 +83,9 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const toml::value & bound, co
         }
         area = comm::allreduce(area, comm::Op::SUM);
         if (!(area > 0.0)) throw InputError(where + ": the profile integrates to zero over the boundary.");
-        scale = static_cast<double>(find_real(bound, "mdot")) / area;
+        const double mdot = find_double(bound, "mdot", dim::mass_flow);
+        if (!(mdot > 0.0)) throw InputError(where + ".mdot must be positive.");
+        scale = mdot / area;
         if (!shape) {
             bc.data[N_DIM + 1] = static_cast<rtype>(scale);
             return {};

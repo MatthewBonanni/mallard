@@ -256,21 +256,21 @@ TEST(StagnationInletTest, OneSpeciesMixtureMatchesThePerfectGas) {
         "[run]\nn_steps = 40\ncfl = 0.4\n" + mesh_block(N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", 16, 4, 1.0, 0.25) +
         "[initialize]\ntype = \"analytical\"\np = \"1.0e5 - 2.0e4 * x\"\nT = \"300.0\"\nu = " +
         (N_DIM == 2 ? std::string("[\"0.0\", \"0.0\"]") : std::string("[\"0.0\", \"0.0\", \"0.0\"]")) + "\n";
-    const std::string rest =
-        "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
-        "[output]\ncheck_interval = 1000000\n" +
-        duct_boundaries("type = \"stagnation_inlet\"\np0 = 1.2e5\nT0 = 320.0\n" +
-                            std::string(N_DIM == 2 ? "direction = [1.0, 0.2]\n" : "direction = [1.0, 0.2, 0.1]\n") +
-                            "Y = { AIR = 1.0 }\n",
-                        "type = \"p_out\"\np = 8.0e4\n");
+    const std::string inlet = "type = \"stagnation_inlet\"\np0 = 1.2e5\nT0 = 320.0\n" +
+                              std::string(N_DIM == 2 ? "direction = [1.0, 0.2]\n" : "direction = [1.0, 0.2, 0.1]\n");
+    const auto rest = [&](const std::string & composition) {
+        return "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+               "[output]\ncheck_interval = 1000000\n" +
+               duct_boundaries(inlet + composition, "type = \"p_out\"\np = 8.0e4\n");
+    };
     Solver perfect;
-    perfect.init(parse_toml(common + rest +
+    perfect.init(parse_toml(common + rest("") +
                             "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 101325.0\nT_ref = 300.0\n"
                             "rho_ref = 1.1768292682926829\n"));
     perfect.run();
     perfect.copy_device_to_host();
     Solver mixed;
-    mixed.init(parse_toml(common + "Y = { AIR = 1.0 }\n" + rest + "[physics]\ntype = \"euler\"\ngas = \"mixture\"\n"
+    mixed.init(parse_toml(common + "Y = { AIR = 1.0 }\n" + rest("Y = { AIR = 1.0 }\n") + "[physics]\ntype = \"euler\"\ngas = \"mixture\"\n"
                           "mechanism = \"" + PERFECT_AIR + "\"\nphase = \"air\"\n"));
     mixed.run();
     mixed.copy_device_to_host();

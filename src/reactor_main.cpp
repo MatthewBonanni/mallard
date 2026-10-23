@@ -21,7 +21,7 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "build_info.h"
 #include "chemistry_benchmark.h"
@@ -53,17 +53,17 @@ std::string brief(const double x) {
 }
 
 void run(const std::string & input_file) {
-    const toml::value input = toml::parse(input_file);
+    const Input input = parse_input(input_file);
     const MixtureModel model = MixtureModel::from_input(input);
     if (!input.contains("reactor")) throw InputError("missing [reactor].");
-    const toml::value & table = input.at("reactor");
+    const Input & table = input.at("reactor");
     const std::string type = toml::find_or<std::string>(table, "type", "constant_volume");
     if (type != "constant_volume") {
         throw InputError("reactor.type = \"" + type + "\": only \"constant_volume\" is supported.");
     }
-    const double T0 = find_double(table, "T"), p0 = find_double(table, "p");
-    const double end_time = find_double(table, "end_time");
-    const double interval = find_double_or(table, "output_interval", end_time / 100.0);
+    const double T0 = find_double(table, "T", dim::temperature), p0 = find_double(table, "p", dim::pressure);
+    const double end_time = find_double(table, "end_time", dim::time);
+    const double interval = find_double_or(table, "output_interval", dim::time, end_time / 100.0);
     const std::string output = toml::find_or<std::string>(table, "output", "reactor.csv");
     if (!(T0 > 0.0) || !(p0 > 0.0)) throw InputError("reactor.T and reactor.p must be positive.");
     if (!(end_time > 0.0) || !(interval > 0.0)) {
@@ -142,7 +142,7 @@ void run(const std::string & input_file) {
 }
 
 /** @brief The [benchmark] mode (run_chemistry_benchmark), written as CSV to benchmark.output. */
-void benchmark(const toml::value & input) {
+void benchmark(const Input & input) {
     const std::string output = toml::find_or<std::string>(input.at("benchmark"), "output", "benchmark.csv");
     std::ofstream out(output);
     if (!out) throw InputError("cannot write benchmark.output = \"" + output + "\".");
@@ -183,8 +183,8 @@ int main(int argc, char * argv[]) {
     }
     Kokkos::ScopeGuard kokkos(argc, argv);
     try {
-        if (toml::parse(input_file).contains("benchmark")) {
-            benchmark(toml::parse(input_file));
+        if (parse_input(input_file).contains("benchmark")) {
+            benchmark(parse_input(input_file));
         } else {
             run(input_file);
         }
