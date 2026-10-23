@@ -261,8 +261,32 @@ TEST(SourceTermsTest, RejectsInvalidSources) {
              "[[sources]]\nname = \"empty\"\n",
              "[[sources]]\nrhoE = \"q\"\n",
              "[[sources]]\ntotal = true\nrhoE = 1\nregion = {type = \"sphere\", center = [5, 5, 5], radius = 0.1}\n",
+             "[[sources]]\nrhoE = \"5 W\"\n",
+             "[[sources]]\ntotal = true\nrhoE = \"5 W/m^3\"\n",
          }) {
         Solver solver;
         EXPECT_ANY_THROW(solver.init(parse_toml(closed_box(sources)))) << sources;
     }
+}
+
+TEST(SourceTermsTest, QuantitiesWithUnitsAreConvertedToSI) {
+    // Per unit volume, and as totals over a region given in mm
+    const std::string center = N_DIM == 2 ? "[\"500 mm\", \"500 mm\"]" : "[\"500 mm\", \"500 mm\", \"500 mm\"]";
+    const std::string sources = "[[sources]]\nrho = \"2 g/(m^3 s)\"\n[[sources]]\ntotal = true\nrhoE = \"2.5 kW\"\n"
+                                "region = {type = \"sphere\", center = " + center + ", radius = \"300 mm\"}\n";
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(closed_box(sources)));
+    const Rates r = rates(solver, 0.0_r);
+    double volume = 0.0;
+    for (const double v : r.measure) volume += v;
+    EXPECT_NEAR(integral(r, 0), 2e-3 * volume, precision_tol<double>(1e-13, 1e-5) * 2e-3 * volume);
+    EXPECT_NEAR(integral(r, N_DIM + 1), 2500.0, precision_tol<double>(1e-13, 1e-5) * 2500.0);
+}
+
+TEST(SourceTermsTest, TimeDependentIsReadAndIgnored) {
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(closed_box("[source]\nrhoE = \"t\"\ntime_dependent = false\n")));
+    EXPECT_NEAR(integral(rates(solver, 0.5_r), N_DIM + 1), 0.5, precision_tol<double>(1e-13, 1e-5));
 }

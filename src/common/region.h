@@ -19,9 +19,8 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
-
 #include "compiled_expression.h"
+#include "input.h"
 
 class Mesh;
 
@@ -217,7 +216,7 @@ class Region {
          * @param table The region's table.
          * @param where Its place in the input, for error messages.
          */
-        Region(const toml::value & table, const std::string & where);
+        Region(const Input & table, const std::string & where);
 
         // host() views the node vectors, which moves keep and copies would not
         Region(const Region &) = delete;

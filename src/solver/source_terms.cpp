@@ -13,8 +13,6 @@
 
 #include <algorithm>
 #include <array>
-#include <iomanip>
-#include <set>
 #include <sstream>
 
 #include "comm.h"
@@ -36,13 +34,6 @@ std::string identifier(const std::string & name) {
         if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') c = '_';
     }
     return s;
-}
-
-std::string text_of(const toml::value & v, const std::string & where) {
-    if (v.is_string()) return v.as_string();
-    std::ostringstream s;
-    s << std::setprecision(17) << as_double(v, where);
-    return s.str();
 }
 
 /**
@@ -143,7 +134,7 @@ struct Accumulate {
 
 } // namespace
 
-SourceTerms::SourceTerms(const toml::value & input, const std::shared_ptr<Mesh> & mesh_,
+SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh_,
                          const std::vector<std::string> & species, const CellFields & fields_) :
     mesh(mesh_), fields(fields_), n_species(static_cast<uint32_t>(species.size())) {
     std::vector<std::string> names(FIXED_NAMES.begin(), FIXED_NAMES.end());
@@ -159,9 +150,9 @@ SourceTerms::SourceTerms(const toml::value & input, const std::shared_ptr<Mesh> 
     const bool mixture = n_species > 0;
     const uint32_t n_owned = mesh->n_owned();
 
-    std::vector<std::pair<const toml::value *, std::string>> entries;
+    std::vector<std::pair<const Input *, std::string>> entries;
     if (input.contains("source")) {
-        const toml::value & s = input.at("source");
+        const Input & s = input.at("source");
         if (s.contains("rho") || s.contains("rhou") || s.contains("rhoE")) entries.emplace_back(&s, "source");
     }
     if (input.contains("sources")) {
@@ -181,17 +172,14 @@ SourceTerms::SourceTerms(const toml::value & input, const std::shared_ptr<Mesh> 
     for (const auto & [entry, where] : entries) {
         const bool legacy = where == "source";
         if (!entry->is_table()) throw InputError(where + " must be a table.");
-        if (!legacy) {
-            static const std::set<std::string> keys = {"name", "region", "total", "rho", "rhou", "rhoE", "rhoY"};
-            for (const auto & [key, value] : entry->as_table()) {
-                if (!keys.count(key)) {
-                    throw InputError(where + ": unknown key " + key +
-                                     " (expected name, region, total, rho, rhou, rhoE, rhoY).");
-                }
-            }
+        if (legacy && entry->contains("time_dependent")) {
+            if (!entry->at("time_dependent").is_boolean()) throw InputError("source.time_dependent must be true or false.");
+            logging::warning("source.time_dependent is ignored: expressions of t are re-evaluated at every stage.");
         }
-        const std::string label = entry->contains("name") ? toml::find<std::string>(*entry, "name") : where;
+        const std::string label = !legacy && entry->contains("name") ? toml::find<std::string>(*entry, "name") : where;
         const bool total = !legacy && toml::find_or<bool>(*entry, "total", false);
+        // A total is integrated over the region: per unit volume times a volume
+        const auto per = [total](const Dimension & d) { return total ? d.times(dim::length, 3) : d; };
         int32_t row = -1;
         double integral = volume;
         std::string region_text = "everywhere";
@@ -215,18 +203,22 @@ SourceTerms::SourceTerms(const toml::value & input, const std::shared_ptr<Mesh> 
             if (mixture) {
                 throw InputError(where + ".rho: in gas mixtures mass enters through rhoY (rho gains their sum).");
             }
-            values.emplace_back(0u, text_of(entry->at("rho"), where + ".rho"), "rho");
+            values.emplace_back(0u, quantity_or_expression(entry->at("rho"), where + ".rho", per(dim::mass_source)), "rho");
         }
         if (entry->contains("rhou")) {
-            const toml::value & v = entry->at("rhou");
+            const Input & v = entry->at("rhou");
             if (!v.is_array() || v.as_array().size() != N_DIM) {
                 throw InputError(where + ".rhou must have " + std::to_string(N_DIM) + " components.");
             }
-            FOR_I_DIM values.emplace_back(1u + i, text_of(v.as_array()[i], where + ".rhou"),
+            FOR_I_DIM values.emplace_back(1u + i,
+                                          quantity_or_expression(v.as_array()[i], where + ".rhou",
+                                                                 per(dim::momentum_source)),
                                           "rhou_" + std::string(1, "xyz"[i]));
         }
         if (entry->contains("rhoE")) {
-            values.emplace_back(uint32_t(N_DIM + 1), text_of(entry->at("rhoE"), where + ".rhoE"), "rhoE");
+            values.emplace_back(uint32_t(N_DIM + 1),
+                                quantity_or_expression(entry->at("rhoE"), where + ".rhoE", per(dim::power_density)),
+                                "rhoE");
         }
         if (entry->contains("rhoY")) {
             if (!mixture) throw InputError(where + ".rhoY needs a gas mixture.");
@@ -234,7 +226,8 @@ SourceTerms::SourceTerms(const toml::value & input, const std::shared_ptr<Mesh> 
             for (const auto & [name, value] : entry->at("rhoY").as_table()) {
                 const auto k = std::find(species.begin(), species.end(), name);
                 if (k == species.end()) throw InputError(where + ".rhoY: no species " + name + " in the mechanism.");
-                values.emplace_back(uint32_t(N_CONSERVATIVE + (k - species.begin())), text_of(value, where + ".rhoY"),
+                values.emplace_back(uint32_t(N_CONSERVATIVE + (k - species.begin())),
+                                    quantity_or_expression(value, where + ".rhoY." + name, per(dim::mass_source)),
                                     "rhoY_" + name);
             }
         }

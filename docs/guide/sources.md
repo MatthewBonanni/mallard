@@ -12,6 +12,8 @@ sponge layers that damp the solution toward a reference state.
 gravity = [0.0, -9.81]          # adds rho g to momentum, rho u.g to energy
 ```
 
+*Used in:* [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
+
 | Key | Default | Meaning |
 |---|---|---|
 | `gravity` | none | Gravitational acceleration vector |
@@ -20,18 +22,27 @@ gravity = [0.0, -9.81]          # adds rho g to momentum, rho u.g to energy
 
 ### Constant mass flow
 
-A periodic channel has no inlet to fix its flow rate. `mass_flow` adds the
-uniform body force that keeps the volume-averaged momentum at the given value,
-correcting every stage so that a flow started at the target stays there to
-rounding; the energy gains the force's work.
-
 ```toml
 # examples/channel_retau180: bulk density and velocity 1 along x
 [source]
 mass_flow = [1.0, 0.0, 0.0]
 ```
 
+*Used in:* [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
+
+A periodic channel has no inlet to fix its flow rate. `mass_flow` adds the
+uniform body force that keeps the volume-averaged momentum at the given value,
+correcting every stage so that a flow started at the target stays there to
+rounding; the energy gains the force's work.
+
 ### Gravity
+
+```toml
+[source]
+gravity = [0.0, -9.81]
+```
+
+*Used in:* [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe).
 
 Pitfall: the scheme is not exactly well balanced. A hydrostatic atmosphere
 carries spurious velocities of about 1e-4 of the sound speed on a 32 x 32
@@ -58,12 +69,13 @@ region = {type = "cylinder", center = [0, 0, 0], axis = [0, 0, 1], radius = 0.01
 | `name` | `sources[i]` | Name in the run log |
 | `region` | everywhere | Where the source acts (below); values are multiplied by each cell's volume fraction |
 | `total` | `false` | Values are integrated rates over the region (kg/s, N, W) instead of densities; they may depend on `t` only |
-| `rho`, `rhou`, `rhoE` | none | Mass, momentum (one per component) and energy sources |
+| `rho`, `rhou`, `rhoE` | none | Mass, momentum (one per component) and energy sources: numbers, quantities with units (`"5 MW/m^3"`; with `total`, `"50 W"`) or expressions in SI units |
 | `rhoY` | none | Mixtures: species sources by name, `{H2 = "1e-3"}`; they also add to the mass |
 
 Expressions read `x`, `y`, `z`, `t`, the local state `rho`, `u_x`, `u_y`,
 `u_z`, `p`, `T` (and `Y_<species>`, `X_<species>` in mixtures), and domain
-averages `mean_rho`, `mean_rhou_x` (`_y`, `_z`), `mean_rhoE`, `mean_ke`. Write
+averages `mean_rho`, `mean_rhou_x` (`_y`, `_z`), `mean_rhoE`, `mean_ke`. Region
+lengths take units too (`radius = "5 mm"`). Write
 `SOURCE_RHOE` (and `SOURCE_RHO`, `SOURCE_RHOU_X`, ...) to see where sources
 act.
 
@@ -151,14 +163,6 @@ and pushes the gas with a tilted fan.
 
 ## Sponge layers
 
-`[[sponges]]` add `-strength (U - U_ref)` to the conservative variables (and
-species), damping the solution toward a reference state where the strength is
-nonzero. They absorb eddies and waves before an outlet, where characteristic
-conditions alone may reflect them or let reversed flow in.
-
-![Sponge strength rising quadratically over the last part of the domain](../images/guide/sponge-light.svg#gh-light-mode-only)
-![Sponge strength rising quadratically over the last part of the domain](../images/guide/sponge-dark.svg#gh-dark-mode-only)
-
 ```toml
 [[sponges]]
 strength = "x > 4 ? 20 * ((x - 4) / 1)^2 : 0"   # 1/s; a gradual ramp reflects less than a step
@@ -166,6 +170,16 @@ u = [1.0, 0.0]
 p = 1.0
 T = 1.0
 ```
+
+*Used in:* [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180).
+
+`[[sponges]]` add `-strength (U - U_ref)` to the conservative variables (and
+species), damping the solution toward a reference state where the strength is
+nonzero. They absorb eddies and waves before an outlet, where characteristic
+conditions alone may reflect them or let reversed flow in.
+
+![Sponge strength rising quadratically over the last part of the domain](../images/guide/sponge-light.svg#gh-light-mode-only)
+![Sponge strength rising quadratically over the last part of the domain](../images/guide/sponge-dark.svg#gh-dark-mode-only)
 
 | Key | Default | Meaning |
 |---|---|---|

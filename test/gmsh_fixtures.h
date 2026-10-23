@@ -28,10 +28,11 @@
 #include "comm.h"
 #include "curved.h"
 #include "mesh.h"
+#include "scratch.h"
 
-/** @brief Write content to a file in the temp directory; returns its path. */
+/** @brief Write content to a file in the test's scratch_dir(); returns its path. */
 inline std::string write_temp(const std::string & name, const std::string & content) {
-    const auto path = std::filesystem::temp_directory_path() / name;
+    const auto path = scratch_dir() / name;
     std::ofstream(path) << content;
     return path.string();
 }
@@ -40,7 +41,7 @@ inline std::string write_temp(const std::string & name, const std::string & cont
 inline std::string write_temp_shared(const std::string & name, const std::string & content) {
     if (comm::rank() == 0) write_temp(name, content);
     comm::barrier();
-    return (std::filesystem::temp_directory_path() / name).string();
+    return (scratch_dir() / name).string();
 }
 
 /**

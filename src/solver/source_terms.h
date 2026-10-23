@@ -20,10 +20,9 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
-
 #include "common.h"
 #include "compiled_expression.h"
+#include "input.h"
 #include "log.h"
 #include "mesh.h"
 #include "state.h"
@@ -102,7 +101,7 @@ class SourceTerms {
          * @param species Species names (empty for a single gas).
          * @param fields The cell fields the expressions read.
          */
-        SourceTerms(const toml::value & input, const std::shared_ptr<Mesh> & mesh,
+        SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh,
                     const std::vector<std::string> & species, const CellFields & fields);
 
         bool empty() const { return m_empty; }

@@ -32,6 +32,7 @@
 #include "partition.h"
 #include "test_fixtures.h"
 #include "solver.h"
+#include "scratch.h"
 
 namespace {
 
@@ -127,6 +128,20 @@ TEST(MPITest, FirstOrderMatchesSerial) {
     expect_matches_serial(box_input("cartesian_tri", "type = \"FO\"\n", EULER,
                                     bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
                                         "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 30));
+}
+
+TEST(MPITest, LowStorageIntegratorsAndErrorControlMatchSerial) {
+    // The error is a maximum over all ranks' cells, so every rank count takes the same steps
+    const std::string input = box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                                        bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                                            "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 30);
+    const std::string ssprk3 = "time_integrator = \"SSPRK3\"\n";
+    for (const std::string numerics : {"time_integrator = \"SSPRK54\"\n", "time_integrator = \"CK45\"\n",
+                                       "time_integrator = \"RDPK3Sp35\"\n[numerics.error_control]\ntolerance = 1e-4\n"}) {
+        std::string s = input;
+        s.replace(s.find(ssprk3), ssprk3.size(), numerics);
+        expect_matches_serial(s);
+    }
 }
 
 TEST(MPITest, GasMixtureMatchesSerial) {
@@ -266,7 +281,7 @@ TEST(MPITest, PeriodicRunsMatchSerialAcrossSeamsCutByThePartition) {
 TEST(MPITest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
     const std::string file = write_temp_shared("mallard_mpi_periodic.msh", jittered_mixed_mesh(16));
     std::string input = box_input("cartesian", "type = \"TENO\"\norder = 4\n", EULER, "", 12);
-    const std::string generated = "type = \"cartesian\"\n";
+    const std::string generated = "type = \"cartesian\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     input += "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0]\n"
              "[[periodic]]\nzones = [\"bottom\", \"top\"]\ntranslation = [0.0, 1.0]\n"
@@ -393,7 +408,7 @@ namespace {
 
 std::string io_dir() {
     // Same path on every rank (they share a file system)
-    return (std::filesystem::temp_directory_path() / "mallard_mpi_io").string();
+    return (scratch_dir() / "mallard_mpi_io").string();
 }
 
 std::string restart_case(uint32_t n_steps, const std::string & output) {
@@ -691,7 +706,7 @@ TEST(MPITest, HDF5OutputDoesNotDependOnTheRankCount) {
     std::string input = box_input("cartesian", "type = \"MUSCL\"\n", EULER,
                                   bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
                                       "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 6);
-    const std::string generated = "type = \"cartesian\"\n";
+    const std::string generated = "type = \"cartesian\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     expect_hdf5_output_matches_serial(input + "[statistics]\ninterval = 2\nfields = [\"P\"]\n",
                                       "interval = 3\nvariables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n",
@@ -747,7 +762,7 @@ TEST(MPITest, MultiJaggedPartitionCutsABoxIntoBlocksAndMatchesSerial) {
 }
 
 TEST(MPITest, TENOCacheOfEachRankReproducesItsSetupAndHalo) {
-    const std::string cache = (std::filesystem::temp_directory_path() / "mallard_mpi_teno_cache.bin").string();
+    const std::string cache = (scratch_dir() / "mallard_mpi_teno_cache.bin").string();
     const std::string rank_file =
         comm::size() > 1 ? cache + ".r" + std::to_string(comm::rank()) + "-of-" + std::to_string(comm::size()) : cache;
     std::filesystem::remove(rank_file);
@@ -802,14 +817,14 @@ TEST(MPITest, TENOCacheOfEachRankReproducesItsSetupAndHalo) {
 TEST(MPITest, RunFromHDF5MeshFileMatchesSerial) {
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
     if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5 to write the mesh";
-    const std::string file = (std::filesystem::temp_directory_path() / "mallard_mpi_mesh.h5").string();
+    const std::string file = (scratch_dir() / "mallard_mpi_mesh.h5").string();
     write_mesh_h5(file, read_mesh_block(parse_toml("[mesh]\ntype = \"cartesian_tri\"\nNx = 24\nNy = 18\n"
                                                    "Lx = 1.0\nLy = 0.8\n")));
     comm::barrier();
     std::string input = box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
                                   bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
                                       "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 10);
-    const std::string generated = "type = \"cartesian_tri\"\n";
+    const std::string generated = "type = \"cartesian_tri\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     expect_matches_serial(input);
     comm::barrier();
@@ -830,7 +845,7 @@ TEST(MPITest, CurvedWallsMatchSerial) {
         input.replace(a, b - a, "type = \"file\"\nfilename = \"" + file + "\"\n" + (order == 1 ? shapes : ""));
         expect_matches_serial(input, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
         if (order == 3 && have_hdf5() && (comm::size() == 1 || have_parallel_hdf5())) {
-            const std::string h5 = (std::filesystem::temp_directory_path() / "mallard_mpi_annulus_3.h5").string();
+            const std::string h5 = (scratch_dir() / "mallard_mpi_annulus_3.h5").string();
             write_mesh_h5(h5, read_file_block(file));
             std::string from_h5 = input;
             from_h5.replace(from_h5.find(file), file.size(), h5);

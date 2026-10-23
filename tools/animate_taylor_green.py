@@ -4,13 +4,11 @@
     animate_taylor_green.py SOLUT_DIR integrals.csv OUTPUT_BASE
         [--ref spectral_Re1600_512.gdiag] [--q-factor 0.5] [--width 1920] [--fps 15]
         [--orbit 150] [--gif-width 720] [--compare CSV LABEL ...] [--hold 2]
-        [--enstrophy] [--full-box]
+        [--enstrophy]
 
 SOLUT_DIR holds the VTU (or PVTU) series of a run of
-examples/taylor_green_3d, with U on the octant [0, pi]^3 of hexahedra, each
-snapshot mirrored into the full periodic box [-pi, pi]^3 through the
-vortex's symmetry planes, or with --full-box on the periodic box itself
-(input_periodic.toml); isosurfaces of Q = (|Omega|^2 - |S|^2) / 2 are
+examples/taylor_green_3d, with U on the periodic box [0, 2 pi]^3 of
+hexahedra; isosurfaces of Q = (|Omega|^2 - |S|^2) / 2 are
 colored by vorticity magnitude while the camera orbits the box, next to the
 dissipation rate -dE/dt tracing the reference. Writes OUTPUT_BASE.mp4
 (H.264, CRF 18), OUTPUT_BASE.gif (if --gif-width > 0) and a still of the
@@ -32,7 +30,7 @@ import pyvista as pv
 
 from animate import write_gif, write_mp4
 from mallard_vtu import read_vtu_cells
-from plot_taylor_green import BOX_VOLUME, OCTANT_VOLUME, load, load_reference
+from plot_taylor_green import load, load_reference
 
 BG = "#0d1117"
 FG = "#e6edf3"
@@ -48,9 +46,9 @@ def snapshot_files(solut):
     return [(None, f) for f in files]
 
 
-def read_octant(path, length=np.pi):
-    """Cell-centered velocity of a uniform hexahedral cube of side length (the
-    octant by default) as an (n, n, n, 3) array."""
+def read_box(path, length=2 * np.pi):
+    """Cell-centered velocity of a uniform hexahedral cube of side length as an
+    (n, n, n, 3) array."""
     if path.endswith(".pvtu"):
         pieces = re.findall(r'<Piece Source="([^"]+)"', open(path).read())
         parts = [read_vtu_cells(os.path.join(os.path.dirname(path), p)) for p in pieces]
@@ -69,18 +67,6 @@ def read_octant(path, length=np.pi):
     grid = np.empty((n, n, n, 3))
     grid[ijk[:, 0], ijk[:, 1], ijk[:, 2]] = U
     return grid, t
-
-
-def mirror(octant):
-    """Extend the octant to the full box: across each plane x_d = 0 the normal
-    velocity component is odd and the others even (and likewise across pi,
-    which periodicity identifies with -pi)."""
-    u = octant
-    for d in range(3):
-        flipped = np.flip(u, axis=d).copy()
-        flipped[..., d] *= -1.0
-        u = np.concatenate([flipped, u], axis=d)
-    return u
 
 
 def q_and_vorticity(u, h):
@@ -103,7 +89,7 @@ def render_3d(plotter, u, q_factor, azimuth):
     n = u.shape[0]
     h = 2 * np.pi / n
     Q, omega = q_and_vorticity(u, h)
-    grid = pv.ImageData(dimensions=(n, n, n), spacing=(h, h, h), origin=(-np.pi + h / 2,) * 3)
+    grid = pv.ImageData(dimensions=(n, n, n), spacing=(h, h, h), origin=(h / 2,) * 3)
     grid.point_data["Q"] = Q.ravel(order="F")
     grid.point_data["omega"] = omega.ravel(order="F")
     mean_w2 = float(np.mean(omega ** 2))
@@ -112,10 +98,11 @@ def render_3d(plotter, u, q_factor, azimuth):
     if surf.n_points > 0:
         plotter.add_mesh(surf, scalars="omega", cmap="inferno", clim=(0.0, 3.0 * np.sqrt(mean_w2)),
                          smooth_shading=True, specular=0.4, specular_power=20, show_scalar_bar=False)
-    plotter.add_mesh(pv.Box(bounds=(-np.pi, np.pi) * 3).outline(), color="#8b949e", line_width=1.5)
+    plotter.add_mesh(pv.Box(bounds=(0, 2 * np.pi) * 3).outline(), color="#8b949e", line_width=1.5)
     r = 19.0
     a = np.radians(azimuth)
-    plotter.camera_position = [(r * np.cos(a), r * np.sin(a), 0.55 * r), (0, 0, -0.2), (0, 0, 1)]
+    c = np.pi
+    plotter.camera_position = [(c + r * np.cos(a), c + r * np.sin(a), c + 0.55 * r), (c, c, c - 0.2), (0, 0, 1)]
     plotter.camera.view_angle = 30
     plotter.reset_camera_clipping_range()
     return plotter.screenshot(return_img=True)
@@ -175,16 +162,13 @@ def main():
     ap.add_argument("--hold", type=float, default=2.0, help="Seconds to hold the last frame")
     ap.add_argument("--enstrophy", action="store_true",
                     help="Also trace the enstrophy-based dissipation 2 mu E (dashed), for the run and the DNS")
-    ap.add_argument("--full-box", action="store_true",
-                    help="Runs on the periodic box [0, 2 pi]^3 (examples/taylor_green_3d/input_periodic.toml)")
     args = ap.parse_args()
 
     files = snapshot_files(args.solut)[::args.every]
-    volume = BOX_VOLUME if args.full_box else OCTANT_VOLUME
-    t, E, eps, eps_w = load(args.integrals, 1.0 / 1600, volume)
+    t, E, eps, eps_w = load(args.integrals, 1.0 / 1600)
     curves = [(t, eps, eps_w if args.enstrophy else None, args.label, "#ff9e3d")]
     for (path, label), color in zip(args.compare, ["#58a6ff", "#3fb950", "#d2a8ff"]):
-        tc, _, ec, _ = load(path, 1.0 / 1600, volume)
+        tc, _, ec, _ = load(path, 1.0 / 1600)
         curves.append((tc, ec, None, label, color))
     ref = None
     if args.ref:
@@ -201,10 +185,10 @@ def main():
     still, still_dt = None, np.inf
     with tempfile.TemporaryDirectory() as tmp:
         for k, (t_file, path) in enumerate(files):
-            octant, t_vtu = read_octant(path, 2 * np.pi if args.full_box else np.pi)
+            u, t_vtu = read_box(path)
             t_now = t_vtu if t_vtu is not None else t_file
             az = 35 + args.orbit * k / max(len(files) - 1, 1)
-            left = render_3d(plotter, octant if args.full_box else mirror(octant), args.q_factor, az)
+            left = render_3d(plotter, u, args.q_factor, az)
             right = render_panel(t_now, curves, ref, (W - w3d, H), 100)
             frame = np.concatenate([left[:H, :w3d], right[:H]], axis=1)
             imageio.imwrite(os.path.join(tmp, f"f{k:05d}.png"), frame)

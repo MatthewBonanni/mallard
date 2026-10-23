@@ -25,6 +25,7 @@
 #include "mesh.h"
 #include "mesh_block.h"
 #include "test_fixtures.h"
+#include "scratch.h"
 
 namespace {
 
@@ -76,7 +77,7 @@ std::vector<double> fractions(bool even) {
 TEST(MeshBlockTest, HDF5FileReadsBackInEvenBlocksWhateverTheWrittenSplit) {
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
     if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
-    const std::string file = (std::filesystem::temp_directory_path() / "mallard_block_test.h5").string();
+    const std::string file = (scratch_dir() / "mallard_block_test.h5").string();
     // Written from uneven blocks, so every offset in the file depends on the other ranks
     write_mesh_h5(file, synthetic_block(fractions(false)));
     comm::barrier();
@@ -114,7 +115,7 @@ TEST(MeshBlockTest, GeneratedBlocksNumberCellsAndNodesAsTheSerialMesh) {
     for (const std::string & type : generated_types()) {
       for (const std::string & stretching : {std::string(), stretched}) {
         SCOPED_TRACE(type + " " + stretching);
-        const toml::value input = parse_toml("[mesh]\ntype = \"" + type +
+        const Input input = parse_toml("[mesh]\ntype = \"" + type +
                                              "\"\nNx = 6\nNy = 5\nNz = 3\nLx = 1.5\nLy = 1.0\nLz = 0.7\n" +
                                              stretching);
         Mesh serial;
@@ -173,7 +174,7 @@ TEST(MeshBlockTest, GeneratedBlocksNumberCellsAndNodesAsTheSerialMesh) {
 TEST(MeshBlockTest, StretchingClustersNodesTowardBothEnds) {
     const double beta = 1.7, Ly = 2.0;
     const uint32_t ny = 8;
-    const toml::value input = parse_toml(
+    const Input input = parse_toml(
         std::string("[mesh]\ntype = \"cartesian\"\nNx = 3\nNy = 8\nNz = 4\nLx = 1.5\nLy = 2.0\nLz = 0.5\n") +
         (N_DIM == 2 ? "stretching = [0.0, 1.7]\nperiodic = [\"x\"]\n" : "stretching = [0.0, 1.7, 0.0]\nperiodic = [\"x\", \"z\"]\n"));
     Mesh mesh;
@@ -223,7 +224,7 @@ TEST(MeshBlockTest, TransformOnReadMapsNodesAndHighOrderNodes) {
     const double det = 8.0;
 #endif
     const double tol = precision_tol<double>(1e-12, 1e-5);
-    const toml::value input = parse_toml("[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" + transform);
+    const Input input = parse_toml("[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" + transform);
 
     const MeshBlock plain = read_file_block(file), moved = read_mesh_block(input);
     ASSERT_EQ(moved.n_nodes(), plain.n_nodes());

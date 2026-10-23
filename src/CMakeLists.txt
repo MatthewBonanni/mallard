@@ -4,7 +4,11 @@ add_library(MallardCore STATIC
     common/compiled_expression.cpp
     common/region.cpp
     common/common_io.cpp
+    common/input.cpp
+    common/units.cpp
+    common/memory_tracker.cpp
     common/build_info.cpp
+    common/case_template.cpp
     common/growing_buffer.cpp
     common/log.cpp
     mesh/curved.cpp
@@ -17,10 +21,12 @@ add_library(MallardCore STATIC
     mesh/periodic.cpp
     mesh/mesh_3d.cpp
     mesh/mesh_block.cpp
+    mesh/mesh_quality.cpp
     mesh/zone.cpp
     mesh/box_tree.cpp
     boundary/boundary.cpp
     boundary/synthetic_inflow.cpp
+    boundary/wall_exchange.cpp
     chemistry/mechanism.cpp
     chemistry/transport.cpp
     chemistry/units.cpp
@@ -31,6 +37,7 @@ add_library(MallardCore STATIC
     numerics/teno.cpp
     numerics/teno_setup.cpp
     numerics/time_integrator.cpp
+    numerics/step_control.cpp
     physics/mixture.cpp
     physics/les.cpp
     physics/pasr.cpp
@@ -41,11 +48,14 @@ add_library(MallardCore STATIC
     solver/chemistry_benchmark.cpp
     solver/numerics_preset.cpp
     solver/solver.cpp
+    solver/solver_check.cpp
     solver/solver_chemistry.cpp
     solver/solver_graph.cpp
+    solver/solver_step_control.cpp
     solver/solver_initialize.cpp
     solver/solver_mixture.cpp
     solver/solver_les.cpp
+    solver/solver_wall_model.cpp
     solver/solver_rhs.cpp
     solver/solver_radiation.cpp
     solver/solver_sponge.cpp
@@ -54,6 +64,7 @@ add_library(MallardCore STATIC
     solver/remap.cpp
     solver/statistics.cpp
     io/compression.cpp
+    io/file_format.cpp
     io/data_writer.cpp
     io/data_writer_hdf5.cpp
     parallel/comm.cpp
@@ -78,6 +89,28 @@ target_include_directories(MallardCore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/parallel
 )
 target_link_libraries(MallardCore PUBLIC Kokkos::kokkos Threads::Threads)
+
+# Input (common/input.h) records the keys setup reads; a toml::value copy would not
+file(GLOB_RECURSE mallard_sources CONFIGURE_DEPENDS
+    ${CMAKE_SOURCE_DIR}/src/*.h ${CMAKE_SOURCE_DIR}/src/*.cpp ${CMAKE_SOURCE_DIR}/test/*.h ${CMAKE_SOURCE_DIR}/test/*.cpp)
+list(FILTER mallard_sources EXCLUDE REGEX "/src/external/|/src/common/input\\.")
+foreach(source ${mallard_sources})
+    file(STRINGS ${source} toml_values REGEX "toml::(value|table)([^_a-z]|$)")
+    if(toml_values)
+        file(READ ${source} content)
+        string(REGEX MATCH "toml::(value|table)[^_a-z]" type "${content}")
+        string(FIND "${content}" "${type}" offset)
+        string(REGEX REPLACE ".$" "" type "${type}")
+        string(SUBSTRING "${content}" 0 ${offset} before)
+        string(REGEX MATCHALL "\n" newlines "${before}")
+        list(LENGTH newlines line)
+        math(EXPR line "${line} + 1")
+        file(RELATIVE_PATH path ${CMAKE_SOURCE_DIR} ${source})
+        message(FATAL_ERROR "${path}:${line} uses ${type}; Mallard reads input only as Input (src/common/input.h) so "
+                            "that unused keys are detected: replace toml::value with Input and toml::table with "
+                            "Input::table_type.")
+    endif()
+endforeach()
 # The TENO setup computes every table with the same operations on the host
 # and on the device, and contracting multiplies and adds into FMAs would
 # change them differently on each: no contraction in that file
@@ -88,6 +121,10 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 target_link_libraries(MallardCore PRIVATE yaml-cpp::yaml-cpp)
 mallard_target_warnings(MallardCore)
+
+# Mallard new finds the templates in the source tree when run from the build tree
+set_source_files_properties(common/case_template.cpp PROPERTIES
+    COMPILE_DEFINITIONS "MALLARD_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\"")
 
 configure_file(common/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/version.h @ONLY)
 target_include_directories(MallardCore PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
