@@ -60,6 +60,9 @@ std::string box(const std::string & dir, uint32_t n_steps, const std::string & i
       << "[integrals]\ninterval = 2\nfile = \"" << dir << "/integrals.csv\"\n"
       << "[[probes]]\nname = \"p\"\nfile = \"" << dir << "/probe.csv\"\ninterval = 2\n"
       << "point = " << (N_DIM == 3 ? "[0.5, 0.5, 0.5]" : "[0.5, 0.5]") << "\nvariables = [\"RHO\"]\n"
+      << "[[probes]]\nname = \"line\"\nformat = \"vtp\"\nfile = \"" << dir << "/line.pvd\"\ninterval = 2\n"
+      << "start = " << (N_DIM == 3 ? "[0.1, 0.5, 0.5]" : "[0.1, 0.5]") << "\nend = "
+      << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]") << "\nn_points = 5\nvariables = [\"RHO\"]\n"
       << "[[write_data]]\nprefix = \"" << dir << "/f\"\nformat = \"vtu\"\ninterval = 4\nvariables = [\"RHO\"]\n"
       << "[[write_data]]\nprefix = \"" << dir << "/r\"\nformat = \"restart\"\ninterval = 4\n";
     if (hdf5) s << "[[write_data]]\nprefix = \"" << dir << "/h\"\nformat = \"hdf5\"\ninterval = 4\nvariables = [\"RHO\"]\n";
@@ -196,6 +199,25 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
     std::filesystem::remove_all(dir);
 }
 
+#ifdef Mallard_HAS_HDF5
+TEST(ProvenanceTest, Hdf5ProbeFilesCarryTheRunsProvenance) {
+    if (!writes_hdf5()) GTEST_SKIP() << "needs HDF5 output on this rank count";
+    const std::string dir = (scratch_dir() / "mallard_provenance_probe_h5").string();
+    const std::string point = N_DIM == 3 ? "[0.5, 0.5, 0.5]" : "[0.5, 0.5]";
+    std::string input = box(dir, 2, UNIFORM, false);
+    input = input.substr(0, input.find("[[write_data]]")) + "[[probes]]\nname = \"ph\"\nformat = \"hdf5\"\nfile = \"" +
+            dir + "/probe.h5\"\ninterval = 2\npoint = " + point + "\nvariables = [\"RHO\"]\n";
+    Solver solver;
+    solver.init(parse_toml(input));
+    solver.run();
+    comm::barrier();
+    if (!comm::is_root()) return;
+    h5::Handle file(H5Fopen((dir + "/probe.h5").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "probe.h5");
+    h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
+    EXPECT_EQ(h5::read_strings_attribute(root, "provenance").at(0), provenance::json());
+}
+#endif
+
 TEST(ProvenanceTest, EveryOutputFileCarriesTheRunsProvenance) {
     const std::string dir = (scratch_dir() / "mallard_provenance_files").string();
     if (comm::is_root()) std::filesystem::remove_all(dir);
@@ -229,6 +251,9 @@ TEST(ProvenanceTest, EveryOutputFileCarriesTheRunsProvenance) {
         EXPECT_EQ(provenance::parse_comment(read_file(dir + "/" + vtu)), expected) << vtu;
     }
     EXPECT_EQ(provenance::parse_comment(read_file(dir + "/f.pvd")), expected);
+    for (const char * probe : {"/line.pvd", "/line_000004.vtp"}) {
+        EXPECT_EQ(provenance::parse_comment(read_file(dir + probe)), expected) << probe;
+    }
     for (const char * csv : {"/integrals.csv", "/probe.csv"}) {
         const auto rows = lines(dir + csv);
         ASSERT_GE(rows.size(), 3u) << csv;

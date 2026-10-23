@@ -119,47 +119,12 @@ class Statistics {
 };
 
 /**
- * @brief Point and line probes: the values of the cells holding a set of
- *        points, written every `interval` steps by rank 0 as rows
- *        step,t,point,x,y(,z),variables... Each point takes the cell average
- *        of the cell containing it (the lowest global id on a shared face),
- *        or of the nearest cell centroid if no cell contains it.
- */
-class Probes {
-    public:
-        /** @brief Read [[probes]] and locate the points; resume appends to existing files. */
-        void init(const Input & input, const Mesh & mesh, const std::vector<std::string> & species_names,
-                  bool resume);
-
-        bool due(uint64_t step) const;
-        void write(uint64_t step, rtype t, const CellSampler & sampler);
-
-        std::vector<std::pair<std::string, std::string>> summary() const;
-        std::vector<std::string> files() const;
-        /** @brief Appends text to every probe file (rank 0). */
-        void annotate(const std::string & text);
-
-    private:
-        struct Set {
-            std::string name;
-            std::string file;
-            uint64_t interval = 1;
-            std::vector<std::string> variables;
-            std::vector<std::array<double, N_DIM>> points;
-            std::vector<uint32_t> local_points;  // points held by owned cells of this rank
-            Kokkos::View<uint32_t *> cells;      // their cells
-            Kokkos::View<int32_t *> codes;
-            Kokkos::View<rtype **, Kokkos::LayoutRight> values;  // (local point, variable)
-            std::shared_ptr<std::ofstream> out;
-        };
-        std::vector<Set> sets;
-};
-
-/**
  * @brief Owned cell of each point on this rank, or -1 where another rank (or
  *        none) holds it: the cell containing the point, the lowest global id
- *        among several, else the nearest cell centroid over all ranks.
+ *        among several, else the nearest cell centroid over all ranks. If
+ *        given, contained(p) tells whether a cell contains point p.
  */
-std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::array<double, N_DIM>> & points);
+std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::array<double, N_DIM>> & points,
+                                   std::vector<uint8_t> * contained = nullptr);
 
 #endif // STATISTICS_H
