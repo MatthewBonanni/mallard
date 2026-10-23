@@ -101,6 +101,16 @@ file = "./solut/probe_wake_arc.pvd"
 reductions = ["mean", "rms", "min", "max"]
 reductions_file = "./solut/probe_wake_arc_reductions.csv"
 
+# Wall pressure and skin friction coefficients around the cylinder, ordered
+# along the wall (clockwise, with the arc length s from the first face)
+[[probes]]
+name = "wall"
+boundary = "cylinder"
+variables = ["CP", "CF", "Y_PLUS"]
+reference = {rho = 1.0, u = [0.2, 0.0], p = 0.7142857142857143}
+time_interval = 1.0
+file = "./solut/probe_wall.csv"
+
 # Phase averages of the shedding cycle from t = 60, in 12 bins of the phase
 # set by the upward zero crossings of U_Y on the wake axis at x = 3: the
 # PHASE_<bin>_<field> output of the last snapshot. Over t = 100..400 the

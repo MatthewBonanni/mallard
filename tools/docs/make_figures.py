@@ -13,6 +13,7 @@ import sys
 
 import domains
 import inlets
+import probes
 import regions
 import runs
 import schematics
@@ -23,7 +24,7 @@ import theory
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--mallard", help="2D Mallard executable, for the figures from runs")
-    ap.add_argument("--mallard3d", help="3D Mallard executable, for the 3D region figure")
+    ap.add_argument("--mallard3d", help="3D Mallard executable, for the 3D probe and region figures")
     ap.add_argument("--mpirun", default="mpirun")
     args = ap.parse_args()
     schematics.figures()
@@ -34,6 +35,8 @@ def main():
     if args.mallard:
         sys.argv = [sys.argv[0], "--mallard", args.mallard, "--mpirun", args.mpirun]
         runs.main()
+        sys.argv = [sys.argv[0], "--mallard", args.mallard] + (["--mallard3d", args.mallard3d] if args.mallard3d else [])
+        probes.main()
         regions.figures(args.mallard, args.mallard3d)
 
 

@@ -3478,6 +3478,20 @@
   ],
   "type": "array"
  },
+ "probes.boundary": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
+ "probes.boundary_type": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
  "probes.end": {
   "dims": [
    2,
@@ -3563,6 +3577,13 @@
   ],
   "type": "string"
  },
+ "probes.pivot": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
  "probes.point": {
   "dims": [
    2,
@@ -3591,6 +3612,13 @@
   ],
   "set_in": [],
   "type": "string"
+ },
+ "probes.reference": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
  },
  "probes.rotate": {
   "dims": [
