@@ -1,7 +1,7 @@
 /**
  * @file run_control.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Signals, the control socket and `Mallard ctl`.
+ * @brief Signals, the control socket and `mallard ctl`.
  * @version 0.1
  * @date 2026-10-15
  *
@@ -388,7 +388,7 @@ std::string send(const std::string & run_dir, const std::string & command) {
 
 int ctl_main(int argc, char ** argv) {
     const char * usage =
-        "Usage: Mallard ctl <run-dir> status | checkpoint | stop | set <key>=<value> [<key>=<value> ...]\n";
+        "Usage: mallard ctl <run-dir> status | checkpoint | stop | set <key>=<value> [<key>=<value> ...]\n";
     if (argc < 2) {
         std::cerr << usage;
         return 2;
@@ -405,7 +405,7 @@ int ctl_main(int argc, char ** argv) {
         return 2;
     }
     if (chdir(argv[0]) != 0) {
-        std::cerr << "Mallard ctl: cannot enter " << argv[0] << ": " << std::strerror(errno) << "\n";
+        std::cerr << "mallard ctl: cannot enter " << argv[0] << ": " << std::strerror(errno) << "\n";
         return 1;
     }
     try {
@@ -413,7 +413,7 @@ int ctl_main(int argc, char ** argv) {
         std::cout << text << std::flush;
         return text.rfind("error", 0) == 0 ? 1 : 0;
     } catch (const std::exception & e) {
-        std::cerr << "Mallard ctl: " << e.what() << "\n";
+        std::cerr << "mallard ctl: " << e.what() << "\n";
         return 1;
     }
 }

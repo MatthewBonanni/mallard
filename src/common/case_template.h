@@ -1,6 +1,6 @@
 /**
  * @file case_template.h
- * @brief `Mallard new`: ready-to-run case directories from the examples and tutorials.
+ * @brief `mallard new`: ready-to-run case directories from the examples and tutorials.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
  */
@@ -13,7 +13,7 @@
 namespace case_template {
 
 /**
- * @brief Entry point of `Mallard new`; argv holds the arguments after "new".
+ * @brief Entry point of `mallard new`; argv holds the arguments after "new".
  */
 int new_main(int argc, char ** argv);
 
@@ -28,7 +28,7 @@ std::string set_key(const std::string & text, const std::string & path, const st
 
 /**
  * @brief Rewrites an example's paths relative to the repository
- * (../../tools/, ../../mechanisms/, ../../build/src/Mallard) for a case
+ * (../../tools/, ../../mechanisms/, ../../build/src/mallard) for a case
  * directory holding its own tools/ and mechanisms/.
  */
 std::string relocate(const std::string & text);

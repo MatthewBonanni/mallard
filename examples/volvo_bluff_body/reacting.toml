@@ -38,7 +38,7 @@
 #
 # Run:
 #   python ../../tools/make_volvo_mesh.py volvo.msh --ds 2e-3 --nz 40
-#   mpirun -n 4 ../../build3d/src/Mallard -i reacting.toml --kokkos-map-device-id-by=mpi_rank
+#   mpirun -n 4 ../../build3d/src/mallard -i reacting.toml --kokkos-map-device-id-by=mpi_rank
 #   python ../../tools/volvo.py profiles stats/reacting_<last>.pvtu --u-bulk 17.3 --temperature --out reacting.npz
 #   python ../../tools/volvo.py plot reacting.npz --kind reacting --exp reference --out reacting.png
 

@@ -215,9 +215,9 @@ void Solver::apply_commands() {
         if (line == "checkpoint") {
             checkpoint_requested = true;
             checkpoint_replies.push_back(command);
-            logging::event(step, double(t), "checkpoint", "requested by Mallard ctl");
+            logging::event(step, double(t), "checkpoint", "requested by mallard ctl");
         } else if (line == "stop") {
-            control_stop = "stop requested by Mallard ctl";
+            control_stop = "stop requested by mallard ctl";
             stop_replies.push_back(command);
             logging::event(step, double(t), "stop", control_stop);
         } else if (line.rfind("set ", 0) == 0) {

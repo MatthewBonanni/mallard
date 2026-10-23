@@ -20,6 +20,7 @@
 #include <tuple>
 #include <vector>
 
+#include "data_paths.h"
 #include "input.h"
 #include "test_fixtures.h"
 #include "verification.h"
@@ -171,7 +172,7 @@ TEST(AxisymmetricTest, GasMixtureAtRestStaysAtRest) {
     // The mixture flux, its pressure in the geometric source and, viscous, its
     // transport. (Cell averages of a gas whose temperature or composition varies
     // are not at uniform pressure, in planar runs too.)
-    const std::string mechanism = "gas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n";
+    const std::string mechanism = "gas = \"mixture\"\nmechanism = \"" + source_dir() + "/mechanisms/h2o2.yaml\"\n";
     for (const std::string type : {"euler", "navier_stokes"}) {
         for (const std::string reconstruction : {"type = \"MUSCL\"", "type = \"TENO\"\norder = 3"}) {
             Case c;

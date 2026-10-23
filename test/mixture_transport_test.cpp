@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "data_paths.h"
 #include "solver.h"
 #include "test_fixtures.h"
 #include "thermo.h"
@@ -29,7 +30,7 @@
 
 namespace {
 
-const std::string SOURCE_DIR = MALLARD_SOURCE_DIR;
+const std::string SOURCE_DIR = source_dir();
 const std::string H2O2 = SOURCE_DIR + "/mechanisms/h2o2.yaml";
 const std::string TWO_NITROGENS = SOURCE_DIR + "/test/data/chemistry/test_transport.yaml";
 const std::string WALL_GASES = SOURCE_DIR + "/test/data/chemistry/test_wall.yaml";

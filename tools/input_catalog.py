@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """The key catalog of Mallard's input (docs/input-keys.json), made by the setup itself.
 
-    python tools/input_catalog.py build --mallard-2d build/src/Mallard --mallard-3d build-3d/src/Mallard [--check]
+    python tools/input_catalog.py build --mallard-2d build/src/mallard --mallard-3d build-3d/src/mallard [--check]
     python tools/input_catalog.py docs [--catalog docs/input-keys.json]
 
-build: runs `Mallard --check INPUT --catalog KEYS.json` on every input of examples/
+build: runs `mallard check INPUT --catalog KEYS.json` on every input of examples/
 and tutorials/, in its directory on a temporary copy whose generated mesh is cut to
 a few cells per direction (each check takes seconds; inputs whose mesh file is not
 in the repository are skipped) and
@@ -67,7 +67,7 @@ def check(mallard, path, work):
     keys = work / (path.relative_to(ROOT).as_posix().replace("/", "_") + ".json")
     try:
         copy.write_text(shrink(path.read_text()))
-        subprocess.run([str(mallard), "--check", copy.name, "--catalog", str(keys), "--kokkos-num-threads=1"],
+        subprocess.run([str(mallard), "check", copy.name, "--catalog", str(keys), "--kokkos-num-threads=1"],
                        cwd=path.parent, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
     finally:
         copy.unlink(missing_ok=True)

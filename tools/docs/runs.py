@@ -1,14 +1,14 @@
 """Figures of the user guide drawn from short Mallard runs (seconds each, on a
 CPU build): TENO-E stencils read back from a stencil cache, the Sod shock
 tube with each reconstruction (through a line probe), MPI partitions, a
-MallardReactor ignition, a sector against the full annulus (rotational
+mallard reactor ignition, a sector against the full annulus (rotational
 periodicity), the mesh-import fixtures as Mallard reads them
-(through mallard-mesh-convert, which needs h5py and an HDF5 and CGNS build), a
-remap from quadrilaterals to triangles, and the mesh quality from Mallard --check.
+(through mallard mesh convert, which needs h5py and an HDF5 and CGNS build), a
+remap from quadrilaterals to triangles, and the mesh quality from mallard check.
 
-    python tools/docs/runs.py --mallard build/src/Mallard [--mpirun mpirun] [names...]
+    python tools/docs/runs.py --mallard build/src/mallard [--mpirun mpirun] [names...]
 
-MallardReactor is taken next to Mallard. Partitions need an MPI build.
+Partitions need an MPI build.
 """
 import argparse
 import csv
@@ -38,10 +38,10 @@ from plot_sod import exact_sod  # noqa: E402
 PHYSICS = '\n[physics]\ntype = "euler"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n'
 
 
-def run(binary, toml, workdir, ranks=1, mpirun="mpirun", name="input.toml"):
+def run(binary, toml, workdir, ranks=1, mpirun="mpirun", name="input.toml", command=()):
     path = Path(workdir) / name
     path.write_text(toml)
-    cmd = [str(binary), "-i", name, "--kokkos-num-threads=2"]
+    cmd = [str(binary), *command, "-i", name, "--kokkos-num-threads=2"]
     if ranks > 1:
         cmd = [mpirun, "-n", str(ranks), "--oversubscribe", *cmd]
     subprocess.run(cmd, cwd=workdir, check=True, stdout=subprocess.DEVNULL)
@@ -282,8 +282,7 @@ def ignition_data(args):
     work = Path(tempfile.mkdtemp())
     text = (ROOT / "examples" / "h2_ignition" / "input.toml").read_text()
     text = text.replace("../../mechanisms/", str(ROOT / "mechanisms") + "/")
-    reactor = Path(args.mallard).parent / "MallardReactor"
-    run(reactor, text, work)
+    run(args.mallard, text, work, command=["reactor"])
     return list(csv.DictReader(open(work / "reactor.csv")))
 
 
@@ -354,12 +353,12 @@ def rotational_sector(P, args):
 
 @functools.cache
 def mesh_quality_data(args):
-    """Mallard --check of examples/mallard on a coarse mesh (make_mallard_mesh.py needs the gmsh module)."""
+    """mallard check of examples/mallard on a coarse mesh (make_mallard_mesh.py needs the gmsh module)."""
     work = Path(tempfile.mkdtemp())
     subprocess.run([sys.executable, str(ROOT / "tools" / "make_mallard_mesh.py"), str(work / "mallard.msh"),
                     "--h-wall", "0.02", "--h-far", "0.1"], check=True, stdout=subprocess.DEVNULL)
     (work / "input.toml").write_text((ROOT / "examples" / "mallard" / "input.toml").read_text())
-    subprocess.run([str(args.mallard), "--check", "input.toml", "--quality-vtu", "quality",
+    subprocess.run([str(args.mallard), "check", "input.toml", "--quality-vtu", "quality",
                     "--kokkos-num-threads=2"], cwd=work, check=True, stdout=subprocess.DEVNULL)
     return read_quality(str(work / "quality_000000.vtu"))
 
@@ -393,13 +392,13 @@ TRANSFORM = "[mesh.transform]\nscale = [1.5, 1]\nrotate = 30\ntranslate = [0.5, 
 
 @functools.cache
 def mesh_read(args, name, transform=""):
-    """Mallard's read of a test/data/meshes fixture (through mallard-mesh-convert, which needs an HDF5 and,
+    """Mallard's read of a test/data/meshes fixture (through mallard mesh convert, which needs an HDF5 and,
     for CGNS, a CGNS build): nodes, cells and boundary faces by zone."""
     import h5py
     work = Path(tempfile.mkdtemp())
     (work / "in.toml").write_text('[mesh]\ntype = "file"\nfilename = "%s"\n%s'
                                   % (ROOT / "test" / "data" / "meshes" / name, transform))
-    subprocess.run([str(Path(args.mallard).parent / "mallard-mesh-convert"), "in.toml", "out.h5"], cwd=work,
+    subprocess.run([str(args.mallard), "mesh", "convert", "in.toml", "out.h5"], cwd=work,
                    check=True, stdout=subprocess.DEVNULL)
     with h5py.File(work / "out.h5", "r") as h:
         x = h["nodes/coordinates"][:]

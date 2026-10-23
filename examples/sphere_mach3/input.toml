@@ -12,7 +12,7 @@
 # is 1 and u = 3; HLL fluxes with bound-preserving TENO5.
 #
 # Run:
-#   ../../build3d/src/Mallard -i input.toml
+#   ../../build3d/src/mallard -i input.toml
 #   python ../../tools/plot_sphere.py slices
 #
 # Expected result: the bow shock forms within t ~ 0.5 (D / u units) and

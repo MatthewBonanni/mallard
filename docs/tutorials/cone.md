@@ -88,14 +88,14 @@ p = T = 1/γ with a gas constant of 1 (`p_ref = T_ref = 1/γ`, `rho_ref = 1`).
 On a CPU with 8 threads (6,500 steps; minutes for h = 0.02):
 
 ```bash
-$MALLARD/build-3d/src/Mallard -i input.toml --kokkos-num-threads=8
+$MALLARD/build-3d/src/mallard -i input.toml --kokkos-num-threads=8
 ```
 
 On several MPI ranks, which split the mesh between them (results are the
 same bit for bit):
 
 ```bash
-mpirun -n 4 $MALLARD/build-3d/src/Mallard -i input.toml
+mpirun -n 4 $MALLARD/build-3d/src/mallard -i input.toml
 ```
 
 On a GPU, with a CUDA build of the 3D solver (`-DMallard_DIM=3`, see the
