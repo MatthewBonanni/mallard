@@ -22,6 +22,7 @@
 #include "hdf5_output.h"
 #include "mesh_block.h"
 #include "mpi_compare.h"
+#include "scratch.h"
 
 namespace {
 
@@ -180,7 +181,7 @@ TEST(MPI3DTest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
 
 TEST(MPI3DTest, SurfaceOutputOfAZoneMissingFromSomeRanks) {
     // Ranks whose part of the mesh does not touch the zone write empty pieces
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mpi3d_faces").string();
+    const std::string dir = (scratch_dir() / "mallard_mpi3d_faces").string();
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
     Solver solver;
@@ -210,7 +211,7 @@ TEST(MPI3DTest, HDF5OutputDoesNotDependOnTheRankCount) {
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
     if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
 #ifdef Mallard_HAS_HDF5
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mpi3d_hdf5").string();
+    const std::string dir = (scratch_dir() / "mallard_mpi3d_hdf5").string();
     expect_hdf5_output_matches_serial(box_input("cartesian_mixed", "type = \"MUSCL\"\n", "type = \"euler\"\n"),
                                       "interval = 4\nvariables = [\"RHO\", \"U\", \"P\"]\n", dir, {0, 4, 8});
 #endif
@@ -243,7 +244,7 @@ TEST(MPI3DTest, CurvedWallsMatchSerial) {
 
 TEST(MPI3DTest, RemapDoesNotDependOnTheRankCount) {
     // A prism run's restart file remapped to tetrahedra of another size
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mpi3d_remap").string();
+    const std::string dir = (scratch_dir() / "mallard_mpi3d_remap").string();
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
     std::string coarse = box_input("cartesian_prism", "type = \"MUSCL\"\n", "type = \"euler\"\n");

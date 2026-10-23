@@ -25,6 +25,7 @@
 #include "test_fixtures.h"
 #include "exact_riemann.h"
 #include "solver.h"
+#include "scratch.h"
 
 namespace {
 
@@ -393,7 +394,7 @@ TEST(Solver3DValidation, FlowStatisticsOfALinearVelocityField) {
     c.set_all_bcs("type = \"dirichlet\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n");
     c.init = "type = \"analytical\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n";
     c.extra = "[integrals]\nfile = \"" +
-              (std::filesystem::temp_directory_path() / "mallard_integrals.csv").string() + "\"\n";
+              (scratch_dir() / "mallard_integrals.csv").string() + "\"\n";
     auto solver = init_case(c);
     const auto s = solver->integrate_flow_statistics();
     EXPECT_NEAR(s[1], 0.5 * (9.0 + 25.0 + 4.0), roundoff(1e-10));  // Enstrophy
@@ -415,7 +416,7 @@ TEST(Solver3DValidation, FlowStatisticsOfDensityAndTemperature) {
     c.n[0] = c.n[1] = c.n[2] = 8;
     c.init = "type = \"analytical\"\nrho = \"1 + 0.5 * x\"\nu = [\"0.0\", \"0.0\", \"0.0\"]\np = \"1 + y\"\n";
     c.extra = "[integrals]\nfile = \"" +
-              (std::filesystem::temp_directory_path() / "mallard_integrals_thermo.csv").string() + "\"\n";
+              (scratch_dir() / "mallard_integrals_thermo.csv").string() + "\"\n";
     auto solver = init_case(c);
     const auto s = solver->integrate_flow_statistics();
     EXPECT_NEAR(s[6], 19.0 / 12.0, 1e-3);
@@ -433,7 +434,7 @@ TEST(Solver3DValidation, QAndVorticityOutputOfALinearVelocityField) {
     const std::string u = "u = [\"x + 2 * y - z\", \"3 * z - 2 * x\", \"5 * x + y\"]\n";
     c.set_all_bcs("type = \"dirichlet\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n");
     c.init = "type = \"analytical\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n";
-    c.extra = "[[write_data]]\nprefix = \"" + (std::filesystem::temp_directory_path() / "mallard_vortex").string() +
+    c.extra = "[[write_data]]\nprefix = \"" + (scratch_dir() / "mallard_vortex").string() +
               "\"\nformat = \"vtu\"\ninterval = 1000000\nvariables = [\"Q\", \"VORTICITY\"]\n";
     auto solver = init_case(c);
     solver->copy_device_to_host();
@@ -458,7 +459,7 @@ TEST(Solver3DValidation, TENOEnstrophyOfTheTaylorGreenVortex) {
     c.init = "type = \"analytical\"\nrho = \"1.0\"\n"
              "u = [\"sin(x) * cos(y) * cos(z)\", \"-cos(x) * sin(y) * cos(z)\", \"0.0\"]\np = \"100.0\"\n";
     c.extra = "[integrals]\nfile = \"" +
-              (std::filesystem::temp_directory_path() / "mallard_integrals_tgv.csv").string() + "\"\n";
+              (scratch_dir() / "mallard_integrals_tgv.csv").string() + "\"\n";
     auto solver = init_case(c);
     const double enstrophy = double(solver->integrate_flow_statistics()[1]) / std::pow(M_PI, 3);
     EXPECT_NEAR(enstrophy, 0.375, 0.005 * 0.375);
