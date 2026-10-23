@@ -21,6 +21,7 @@
 
 #include "mechanism.h"
 #include "thermo.h"
+#include "scratch.h"
 
 using namespace chemistry;
 
@@ -218,7 +219,7 @@ TEST(ChemistryThermoTest, MixturePropertiesMatchCanteraAndTemperatureInvertsEner
 }
 
 TEST(ChemistryThermoTest, UnsupportedOrMalformedInputNamesTheEntry) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mechanism_errors").string();
+    const std::string dir = (scratch_dir() / "mallard_mechanism_errors").string();
     std::filesystem::create_directories(dir);
     auto expect_error = [&](const std::string & yaml, const std::string & phase, const std::string & needle) {
         const std::string file = dir + "/mech.yaml";

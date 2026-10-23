@@ -222,7 +222,7 @@ double advection_error(const std::string & mesh, const std::string & recon, uint
         in << "[[boundaries]]\nname = \"" << zone << "\"\ntype = \"extrapolation\"\n";
     }
     in << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\ncheck_nan = true\n"
-       << "[numerics.face_reconstruction]\ntype = \"" << recon << "\"\norder = 5\n"
+       << "[numerics.face_reconstruction]\ntype = \"" << recon << "\"\n" << (recon == "TENO" ? "order = 5\n" : "")
        << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
        << "[output]\ncheck_interval = 1000000\n";
     Solver solver;
@@ -492,6 +492,20 @@ TEST(TENO3DSetup, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsTh
     auto host = make_teno_with(mesh, bd, 5, [](TENO & t) { t.setup_on_host = true; });
     expect_same_tables(*reference, *batched, "batches of 64 cells");
     expect_same_tables(*reference, *host, "host setup");
+}
+
+TEST(TENO3DSetup, FacetedSpheresOfTetrahedraMirrorAcrossEachFacet) {
+    // Straight-sided spherical walls of tetrahedra: every facet is a mirror
+    // plane of its own, so searches near the walls meet dozens of planes. They
+    // are set up, the same on the device as on the host
+    const Shell s = tetrahedral_shell(4, 2);
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init_from_connectivity(s.nodes, s.cells, s.faces);
+    mesh->copy_host_to_device();
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto device = make_teno(mesh, bd, 3);
+    auto host = make_teno_with(mesh, bd, 3, [](TENO & t) { t.setup_on_host = true; });
+    expect_same_tables(*device, *host, "host setup");
 }
 
 TEST(TENO3DTroubled, FaceValuesDoNotDependOnHowManyTroubledCellsARoundHolds) {

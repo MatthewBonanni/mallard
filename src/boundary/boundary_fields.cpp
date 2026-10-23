@@ -13,44 +13,46 @@
 
 #include "input.h"
 
-BoundaryValue::BoundaryValue(const toml::value & v, const std::string & name) {
-    if (v.is_string()) {
+BoundaryValue::BoundaryValue(const Input & v, const std::string & name, const Dimension & dimension) {
+    if (is_expression(v)) {
         expression = std::make_shared<Expression>(name, v.as_string());
     } else {
-        value = as_double(v, name);
+        value = as_double(v, name, dimension);
     }
 }
+
+bool BoundaryValue::is_expression(const Input & v) { return v.is_string() && !has_unit(v.as_string()); }
 
 double BoundaryValue::at(const Point & x, const double t) const {
     if (!expression) return value;
     return (*expression)(x[0], x[1], N_DIM > 2 ? x[N_DIM - 1] : 0.0, t);
 }
 
-BoundaryFields::BoundaryFields(const toml::value & input, const BoundaryType type_, const std::string & where_)
+BoundaryFields::BoundaryFields(const Input & input, const BoundaryType type_, const std::string & where_)
     : type(type_), where(where_) {
-    auto read = [&](const char * key, BoundaryValue & v, bool & has) {
+    auto read = [&](const char * key, const Dimension & dimension, BoundaryValue & v, bool & has) {
         if (!input.contains(key)) return;
-        v = BoundaryValue(input.at(key), where + "." + key);
+        v = BoundaryValue(input.at(key), where + "." + key, dimension);
         has = true;
     };
     const bool walls = type == BoundaryType::WALL_ADIABATIC || type == BoundaryType::WALL_ISOTHERMAL ||
                        type == BoundaryType::WALL_HEAT_FLUX;
     if ((type == BoundaryType::UPT || walls) && input.contains("u")) {
-        const toml::value & u_in = input.at("u");
+        const Input & u_in = input.at("u");
         if (!u_in.is_array() || u_in.as_array().size() != N_DIM) {
             throw InputError(where + ".u must have " + std::to_string(N_DIM) + " components (numbers or expressions).");
         }
-        FOR_I_DIM u.emplace_back(u_in.as_array()[i], where + ".u[" + std::to_string(i) + "]");
+        FOR_I_DIM u.emplace_back(u_in.as_array()[i], where + ".u[" + std::to_string(i) + "]", dim::velocity);
     }
     if (type == BoundaryType::UPT || type == BoundaryType::NSCBC_INLET) {
-        read("p", p, has_p);
-        read("T", T, has_T);
+        read("p", dim::pressure, p, has_p);
+        read("T", dim::temperature, T, has_T);
     } else if (type == BoundaryType::STAGNATION_INLET) {
-        read("p0", p, has_p);
-        read("T0", T, has_T);
+        read("p0", dim::pressure, p, has_p);
+        read("T0", dim::temperature, T, has_T);
     } else if (type == BoundaryType::MASS_FLOW_INLET) {
-        read("T", T, has_T);
-        read("mass_flux", flux, has_flux);
+        read("T", dim::temperature, T, has_T);
+        read("mass_flux", dim::mass_flux, flux, has_flux);
     }
 }
 

@@ -39,8 +39,8 @@ rtype LES::default_constant(const SGSModel model) {
     }
 }
 
-LES LES::from_input(const toml::value & input) {
-    const toml::value & table = input.at("les");
+LES LES::from_input(const Input & input) {
+    const Input & table = input.at("les");
     if (!table.is_table()) throw InputError("[les] must be a table.");
     if (toml::find_or<std::string>(input, "physics", "type", "euler") != "navier_stokes") {
         throw InputError("[les] needs physics.type = \"navier_stokes\".");
@@ -54,9 +54,9 @@ LES LES::from_input(const toml::value & input) {
         throw InputError("les.model = \"sigma\" vanishes for every two-dimensional flow; use \"wale\" or \"vreman\" in "
                          "2D builds.");
     }
-    les.C = find_real_or(table, "C", default_constant(les.model));
-    les.Pr_t = find_real_or(table, "Pr_t", 0.9_r);
-    les.Sc_t = find_real_or(table, "Sc_t", 0.9_r);
+    les.C = find_real_or(table, "C", dim::none, default_constant(les.model));
+    les.Pr_t = find_real_or(table, "Pr_t", dim::none, 0.9_r);
+    les.Sc_t = find_real_or(table, "Sc_t", dim::none, 0.9_r);
     const std::string width = toml::find_or<std::string>(table, "filter_width", N_DIM == 3 ? "scotti" : "volume");
     if (width != "volume" && width != "scotti") {
         throw InputError("les.filter_width = \"" + width + "\" is not one of: volume, scotti.");

@@ -56,6 +56,14 @@ where = "x >= 1/6"
 
 ## Choosing a condition
 
+```toml
+[[boundaries]]
+name = "wall"           # a boundary zone of the mesh
+type = "wall_adiabatic"
+```
+
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 32 more.
+
 | `type` | Kind | Keys | Use |
 |---|---|---|---|
 | `wall_adiabatic` | wall | `u` (optional) | No-slip (`navier_stokes`) or slip (`euler`) wall without heat flux; `u` moves the wall |
@@ -262,15 +270,6 @@ Pitfalls:
 
 ## Characteristic boundaries
 
-`nscbc_outlet` and `nscbc_inlet` let outgoing waves leave and relax the
-incoming ones toward a target (Poinsot & Lele 1992, with the transverse terms
-of Lodato et al. 2008):
-
-![Waves at a characteristic outlet and inlet: outgoing waves leave, incoming ones relax toward the targets](../images/guide/characteristic-light.svg#gh-light-mode-only)
-![Waves at a characteristic outlet and inlet: outgoing waves leave, incoming ones relax toward the targets](../images/guide/characteristic-dark.svg#gh-dark-mode-only)
-
-*`u` carries entropy, vorticity and species; `u ± c` are the acoustic waves.*
-
 ```toml
 [[boundaries]]
 name = "outlet"
@@ -279,6 +278,17 @@ p = 101325.0
 L = 0.1            # a length of the domain [m]
 # sigma = 0.25     # relaxation: 0 is perfectly non-reflecting but drifts
 ```
+
+*Used in:* [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_outflow`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-outflow).
+
+`nscbc_outlet` and `nscbc_inlet` let outgoing waves leave and relax the
+incoming ones toward a target (Poinsot & Lele 1992, with the transverse terms
+of Lodato et al. 2008):
+
+![Waves at a characteristic outlet and inlet: outgoing waves leave, incoming ones relax toward the targets](../images/guide/characteristic-light.svg#gh-light-mode-only)
+![Waves at a characteristic outlet and inlet: outgoing waves leave, incoming ones relax toward the targets](../images/guide/characteristic-dark.svg#gh-dark-mode-only)
+
+*`u` carries entropy, vorticity and species; `u ± c` are the acoustic waves.*
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -294,14 +304,6 @@ Restart files carry each face's state, so restarted runs continue bitwise.
 
 ## Synthetic turbulence
 
-An `nscbc_inlet` with a `[boundaries.turbulence]` table adds turbulence to its
-target velocity: the digital filter of Klein, Sadiki & Janicka (2003), with
-given Reynolds stresses and integral length scales, bitwise the same on any
-number of ranks and across restarts.
-
-![A duct with a turbulent characteristic inlet, a characteristic outlet, periodic in y and z](../images/guide/domain_turbulent_inflow_duct-light.svg#gh-light-mode-only)
-![A duct with a turbulent characteristic inlet, a characteristic outlet, periodic in y and z](../images/guide/domain_turbulent_inflow_duct-dark.svg#gh-dark-mode-only)
-
 ```toml
 [[boundaries]]
 name = "left"
@@ -315,6 +317,16 @@ L = 6.0
 reynolds_stress = [0.01, 0.01, 0.01, 0.0, 0.0, 0.0]   # R_xx, R_yy, R_zz, R_xy, R_xz, R_yz
 length_scale = 0.25
 ```
+
+*Used in:* [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body).
+
+An `nscbc_inlet` with a `[boundaries.turbulence]` table adds turbulence to its
+target velocity: the digital filter of Klein, Sadiki & Janicka (2003), with
+given Reynolds stresses and integral length scales, bitwise the same on any
+number of ranks and across restarts.
+
+![A duct with a turbulent characteristic inlet, a characteristic outlet, periodic in y and z](../images/guide/domain_turbulent_inflow_duct-light.svg#gh-light-mode-only)
+![A duct with a turbulent characteristic inlet, a characteristic outlet, periodic in y and z](../images/guide/domain_turbulent_inflow_duct-dark.svg#gh-dark-mode-only)
 
 | Key | Default | Meaning |
 |---|---|---|

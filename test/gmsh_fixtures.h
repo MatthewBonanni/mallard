@@ -28,10 +28,11 @@
 #include "comm.h"
 #include "curved.h"
 #include "mesh.h"
+#include "scratch.h"
 
-/** @brief Write content to a file in the temp directory; returns its path. */
+/** @brief Write content to a file in the test's scratch_dir(); returns its path. */
 inline std::string write_temp(const std::string & name, const std::string & content) {
-    const auto path = std::filesystem::temp_directory_path() / name;
+    const auto path = scratch_dir() / name;
     std::ofstream(path) << content;
     return path.string();
 }
@@ -40,7 +41,7 @@ inline std::string write_temp(const std::string & name, const std::string & cont
 inline std::string write_temp_shared(const std::string & name, const std::string & content) {
     if (comm::rank() == 0) write_temp(name, content);
     comm::barrier();
-    return (std::filesystem::temp_directory_path() / name).string();
+    return (scratch_dir() / name).string();
 }
 
 /**
@@ -389,6 +390,28 @@ inline Shell shell(int n, int n_r, bool prisms, bool quadratic = false) {
             }
         }
     }
+    return s;
+}
+
+/**
+ * @brief The straight-sided prism shell with each prism split into three
+ *        tetrahedra (diagonals from each quadrilateral's lowest node, so the
+ *        splits of neighboring prisms match): faceted spheres of tetrahedra.
+ */
+inline Shell tetrahedral_shell(int n, int n_r) {
+    Shell s = shell(n, n_r, true);
+    std::vector<std::vector<uint32_t>> tets;
+    for (const auto & p : s.cells) {
+        // Bottom corners in increasing order with their tops; a prism's bottom
+        // node ids order its tops the same way
+        std::array<size_t, 3> k = {0, 1, 2};
+        std::sort(k.begin(), k.end(), [&](size_t a, size_t b) { return p[a] < p[b]; });
+        const uint32_t a = p[k[0]], b = p[k[1]], c = p[k[2]], a1 = p[k[0] + 3], b1 = p[k[1] + 3], c1 = p[k[2] + 3];
+        tets.push_back({a, b, c, c1});
+        tets.push_back({a, b, b1, c1});
+        tets.push_back({a, a1, b1, c1});
+    }
+    s.cells = tets;
     return s;
 }
 

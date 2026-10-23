@@ -17,17 +17,19 @@
 #include <string>
 #include <vector>
 
-#include <toml.hpp>
-
 #include "boundary.h"
 #include "expression.h"
+#include "input.h"
 #include "synthetic_inflow.h"
 
 /** @brief A number of a [[boundaries]] entry, or an expression of x, y, z and t. */
 class BoundaryValue {
     public:
         BoundaryValue() = default;
-        BoundaryValue(const toml::value & v, const std::string & name);
+        BoundaryValue(const Input & v, const std::string & name, const Dimension & dimension);
+
+        /** @brief Whether v is an expression rather than a number or a quantity with a unit. */
+        static bool is_expression(const Input & v);
 
         bool varies() const { return expression != nullptr; }
         bool depends_on_time() const { return expression && expression->depends_on_time(); }
@@ -46,7 +48,7 @@ class BoundaryValue {
  */
 class BoundaryFields {
     public:
-        BoundaryFields(const toml::value & input, BoundaryType type, const std::string & where);
+        BoundaryFields(const Input & input, BoundaryType type, const std::string & where);
 
         /** @brief Whether some number is an expression: each face then gets a condition of its own. */
         bool varies() const;
