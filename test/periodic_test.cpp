@@ -23,6 +23,7 @@
 #include "periodic_fixtures.h"
 #include "solver.h"
 #include "test_fixtures.h"
+#include "verification.h"
 
 namespace {
 
@@ -177,7 +178,7 @@ double advection_error(const std::string & mesh, const std::string & recon, int 
     c.mesh = mesh;
     c.n = n;
     c.recon = recon;
-    c.extra_recon = recon == "TENO" ? "order = " + std::to_string(order) + "\n" : "limiter = \"none\"\n";
+    c.extra_recon = recon == "TENO" ? "order = " + std::to_string(order) + "\n" : recon == "MUSCL" ? "limiter = \"none\"\n" : "";
     c.integrator = "RK4";
     const double T = 0.25;
     const double h = 1.0 / n;
@@ -206,7 +207,7 @@ double advection_error(const std::string & mesh, const std::string & recon, int 
     return err;
 }
 
-using OrderParam = std::tuple<std::string, std::string>;  // mesh type, MUSCL or TENO<order>
+using OrderParam = std::tuple<std::string, std::string>;  // mesh type, FO, MUSCL or TENO<order>
 class PeriodicAdvection2D : public ::testing::TestWithParam<OrderParam> {};
 
 } // namespace
@@ -214,16 +215,16 @@ class PeriodicAdvection2D : public ::testing::TestWithParam<OrderParam> {};
 TEST_P(PeriodicAdvection2D, SmoothWaveConvergesAtDesignOrder) {
     const auto [mesh, scheme] = GetParam();
     if (scheme == "TENO6") SKIP_IN_SINGLE_PRECISION("the TENO6 error on the 32-cell mesh is at its ~3e-6 single-precision floor");
-    const std::string recon = scheme.rfind("TENO", 0) == 0 ? "TENO" : "MUSCL";
-    const int order = recon == "TENO" ? std::stoi(scheme.substr(4)) : 2;
-    const double e1 = advection_error(mesh, recon, order, 16);
-    const double e2 = advection_error(mesh, recon, order, 32);
-    EXPECT_GT(std::log2(e1 / e2), order - 0.25) << e1 << " " << e2;
+    const std::string recon = scheme.rfind("TENO", 0) == 0 ? "TENO" : scheme;
+    const int order = recon == "TENO" ? std::stoi(scheme.substr(4)) : recon == "MUSCL" ? 2 : 1;
+    verification::expect_order({"advection", scheme, verification::cells_of(mesh), "max density error", {16, 32},
+                                {advection_error(mesh, recon, order, 16), advection_error(mesh, recon, order, 32)},
+                                double(order), order - 0.25});
 }
 
 INSTANTIATE_TEST_SUITE_P(Periodic, PeriodicAdvection2D,
     ::testing::Combine(::testing::Values("cartesian", "cartesian_tri"),
-                       ::testing::Values("MUSCL", "TENO3", "TENO4", "TENO5", "TENO6")));
+                       ::testing::Values("FO", "MUSCL", "TENO3", "TENO4", "TENO5", "TENO6")));
 
 namespace {
 

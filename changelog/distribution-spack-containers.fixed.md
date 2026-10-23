@@ -1,0 +1,1 @@
+- CGNS built from source (`-DUSE_SYSTEM_CGNS=OFF`) compiles against a parallel HDF5 (#328).
