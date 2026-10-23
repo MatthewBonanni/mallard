@@ -1,6 +1,6 @@
 /**
  * @file check.h
- * @brief Pre-flight check of an input (mallard --check): the setup of a real
+ * @brief Pre-flight check of an input (mallard check): the setup of a real
  *        run without time stepping, and what it tells about the run.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni

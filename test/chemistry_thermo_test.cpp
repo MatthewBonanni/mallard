@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "data_paths.h"
 #include "mechanism.h"
 #include "thermo.h"
 #include "scratch.h"
@@ -27,7 +28,7 @@ using namespace chemistry;
 
 namespace {
 
-const std::string SOURCE_DIR = MALLARD_SOURCE_DIR;
+const std::string SOURCE_DIR = source_dir();
 const std::string DATA_DIR = SOURCE_DIR + "/test/data/chemistry/";
 
 /** @brief Rows of a reference CSV file (comment lines skipped), split at commas, after its header. */

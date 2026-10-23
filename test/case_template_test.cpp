@@ -1,6 +1,6 @@
 /**
  * @file case_template_test.cpp
- * @brief Tests for the input edits of `Mallard new --quick` and the path rewriting of templates.
+ * @brief Tests for the input edits of `mallard new --quick` and the path rewriting of templates.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
  */
@@ -47,8 +47,8 @@ TEST(CaseTemplateTest, SetKeyNeedsTheTable) {
 TEST(CaseTemplateTest, RelocateRepositoryPaths) {
     EXPECT_EQ(relocate("mechanism = \"../../mechanisms/h2o2.yaml\"\n"
                        "#   python ../../tools/make_cylinder_mesh.py c.msh\n"
-                       "#   mpirun -n 4 ../../build3d/src/Mallard -i input.toml\n"),
+                       "#   mpirun -n 4 ../../build3d/src/mallard -i input.toml\n"),
               "mechanism = \"mechanisms/h2o2.yaml\"\n"
               "#   python tools/make_cylinder_mesh.py c.msh\n"
-              "#   mpirun -n 4 Mallard -i input.toml\n");
+              "#   mpirun -n 4 mallard -i input.toml\n");
 }

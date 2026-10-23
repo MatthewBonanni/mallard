@@ -93,9 +93,9 @@ jobs:
             set -e
             ldd /opt/mallard/bin/* | grep "not found" | grep -v libcuda.so && exit 1
             export LD_LIBRARY_PATH=/usr/local/cuda/compat:$LD_LIBRARY_PATH
-            Mallard --version && Mallard3D --version
-            MallardReactor 2>&1 | grep -q Usage
-            mallard-mesh-convert 2>&1 | grep -q Usage
+            mallard --version && mallard3d --version
+            mallard reactor 2>&1 | grep -q Usage
+            mallard mesh convert 2>&1 | grep -q Usage
             ls $MALLARD_SHARE/examples/sod/input.toml'
       - name: Push
         if: env.PUSH == 'true'

@@ -71,12 +71,12 @@ others: inflows, outflows, far fields, walls, characteristic boundaries.
 ## 4. Run
 
 ```bash
-$MALLARD/build/src/Mallard -i input.toml --kokkos-num-threads=4
+$MALLARD/build/src/mallard -i input.toml --kokkos-num-threads=4
 ```
 
 This takes 2,240 steps and about 6 seconds on a laptop. Every 200 steps (`[output] check_interval`)
 Mallard prints the step, time, time step, throughput and the extremes of density, pressure and Mach
-number. With an MPI build, `mpirun -n 2 $MALLARD/build/src/Mallard -i input.toml` splits the mesh between
+number. With an MPI build, `mpirun -n 2 $MALLARD/build/src/mallard -i input.toml` splits the mesh between
 two ranks and gives the same result bit for bit.
 
 ## 5. Look at the output

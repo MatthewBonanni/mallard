@@ -2,7 +2,7 @@
  * @file input_upgrade.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Renamed, moved and removed input keys and options: warnings while
- *        they are deprecated, errors once removed, and `Mallard upgrade-input`,
+ *        they are deprecated, errors once removed, and `mallard upgrade-input`,
  *        which rewrites an input file keeping its comments and layout.
  * @version 0.9
  * @date 2026-10-16
@@ -68,7 +68,7 @@ std::string advice(const Finding & finding);
 /**
  * @brief Rewrites the deprecated keys and options of `input` in place, as the
  *        setup reads them, and returns them. Throws an InputError listing the
- *        removed ones, with what to do (`Mallard upgrade-input`). `version`
+ *        removed ones, with what to do (`mallard upgrade-input`). `version`
  *        is this release's (MALLARD_VERSION when empty).
  */
 std::vector<Finding> apply(Input & input, const std::string & version = "", const Rules & table = rules());
@@ -84,7 +84,7 @@ std::vector<Finding> apply(Input & input, const std::string & version = "", cons
 std::string upgrade_text(const std::string & text, std::vector<Finding> & findings,
                          bool & reformatted, const Rules & table = rules());
 
-/** @brief `Mallard upgrade-input [--check] old.toml > new.toml`; arguments after the command name. */
+/** @brief `mallard upgrade-input [--check] old.toml > new.toml`; arguments after the command name. */
 int main(int argc, char ** argv);
 
 } // namespace input_upgrade

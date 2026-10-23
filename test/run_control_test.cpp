@@ -3,7 +3,7 @@
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Run control: requests acted on at step boundaries on every rank,
  *        runtime settings, divergence, the control socket, and the solver
- *        driven by signals and `Mallard ctl` as a separate process.
+ *        driven by signals and `mallard ctl` as a separate process.
  * @version 0.1
  * @date 2026-10-15
  *
@@ -38,6 +38,7 @@
 #include <unistd.h>
 
 #include "comm.h"
+#include "data_paths.h"
 #include "run_control.h"
 #include "solver.h"
 #include "test_fixtures.h"
@@ -478,7 +479,7 @@ pid_t start_run(const std::string & dir, [[maybe_unused]] int ranks) {
     args.push_back("--oversubscribe");
 #endif
 #endif
-    args.insert(args.end(), {MALLARD_EXECUTABLE, "-i", "input.toml"});
+    args.insert(args.end(), {mallard_executable(), "-i", "input.toml"});
     const pid_t pid = spawn(args, dir);
     int status = 0;
     pid_t ended = 0;

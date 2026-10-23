@@ -14,13 +14,14 @@
 #include <string>
 
 #include "chemistry_benchmark.h"
+#include "data_paths.h"
 #include "test_fixtures.h"
 
 namespace {
 
 ChemistryBenchmark igniting_ndodecane_cell(const int repeats) {
     return run_chemistry_benchmark(parse_toml(
-        "[physics]\ngas = \"mixture\"\nmechanism = \"" + std::string(MALLARD_SOURCE_DIR) +
+        "[physics]\ngas = \"mixture\"\nmechanism = \"" + source_dir() +
         "/mechanisms/nDodecane_Reitz.yaml\"\nphase = \"nDodecane_IG\"\n"
         "[reactor]\nT = 1000.0\np = 2026500.0\nX = { c12h26 = 1.0, o2 = 18.5, n2 = 69.56 }\nend_time = 1.85e-3\n"
         "[benchmark]\ncells = 1\nigniting_fraction = 1.0\nsamples = 64\ndt = [1.0e-6]\nrepeats = " +
