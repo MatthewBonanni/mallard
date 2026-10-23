@@ -84,6 +84,15 @@ TEST(CheckKeys, MisspelledKeysAreReportedWithLineAndSuggestion) {
     EXPECT_FALSE(r.ok());
 }
 
+TEST(CheckKeys, RemovedKeysNameWhatReplacedThem) {
+    std::string input = box();
+    input.replace(input.find("rho_ref = 1.0\n"), 14, "rho_ref = 1.0\np_min = 0.0\n");
+    const CheckReport r = check(input);
+    EXPECT_FALSE(r.ok());
+    EXPECT_TRUE(mentions(r.errors, "physics.p_min was removed in 0.2.0")) << r.errors.front();
+    EXPECT_TRUE(mentions(r.errors, "Mallard upgrade-input"));
+}
+
 TEST(CheckKeys, KeyInTheWrongTableSuggestsWhereItIsRead) {
     std::string input = box();
     input.replace(input.find("Lx = 2.0\n"), 9, "Lx = 2.0\ncfl = 0.5\n");
