@@ -5,7 +5,7 @@ Run each case from its own directory, e.g.
 ```sh
 cd examples/riemann_2d
 ../../build/src/mallard -i input.toml --kokkos-num-threads=8
-python ../../tools/animate.py solut riemann
+python ../../tools/post/animate.py solut riemann
 ```
 
 Each example's `card.toml` gives its build (`2d`, `3d`) and what it demonstrates, for its card on the
