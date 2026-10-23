@@ -87,6 +87,8 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
     depends_on("yaml-cpp@0.8:")
     depends_on("mpi", when="+mpi")
     depends_on("nccl", when="+nccl")
+    for _arch in CudaPackage.cuda_arch_values:
+        depends_on(f"nccl cuda_arch={_arch}", when=f"+nccl cuda_arch={_arch}")
     depends_on("hdf5~mpi", when="+hdf5~mpi")
     depends_on("hdf5+mpi", when="+hdf5+mpi")
     depends_on("cgns+hdf5", when="+cgns")

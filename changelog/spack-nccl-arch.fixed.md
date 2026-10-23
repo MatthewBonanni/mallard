@@ -1,0 +1,1 @@
+- Spack package: `+nccl` passes `cuda_arch` on to NCCL, so `mallard+cuda+nccl cuda_arch=<N>` concretizes.
