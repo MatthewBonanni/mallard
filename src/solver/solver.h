@@ -237,6 +237,8 @@ class Solver {
         void update_cell_fields(const State & solution);
         /** @brief Inside a captured step: stage_time = t_n + c dt from the step's device scalars. */
         void record_stage_time(rtype c);
+        /** @brief Inside a captured step: the step's dt on the device. */
+        const rtype * step_dt_device() const;
         void update_average_pressure_outlets(StateView solution);
         /**
          * @brief Add the uniform body force along the mass flow direction that
@@ -247,6 +249,14 @@ class Solver {
          *        the force's work.
          */
         void add_mass_flow_force(StateView solution, StateView rhs);
+        /** @brief mass_flow_totals[0, 1]: the sums over all ranks of mass_flow_terms' columns, exact in fixed point
+         *         (each term rounded to 2^-b of the largest), so independent of the rank count; no host
+         *         synchronization inside a captured step. */
+        void sum_mass_flow_terms();
+        /** @brief domain_volume, as an exact sum. */
+        void init_mass_flow_volume();
+        template <typename T>
+        void reduce_mass_flow(Kokkos::View<T *> values, bool max);
         /**
          * @brief At the first stage of each step: the transverse terms of the
          *        characteristic boundaries and their incoming waves, advanced
@@ -442,7 +452,7 @@ class Solver {
         const Distribution & get_distribution() const { return distribution; }
 
         /** @brief Body force per unit volume, along the mass flow direction, of the last RHS ([source] mass_flow). */
-        double get_mass_flow_force() const { return mass_flow_force; }
+        double get_mass_flow_force() const;
 
         rtype get_time() const { return t; }
         const Statistics & get_statistics() const { return statistics; }
@@ -803,7 +813,11 @@ class Solver {
         double mass_flow_target = 0.0;      // volume average of rho u along the direction
         rtype mass_flow_direction[N_DIM] = {};
         double domain_volume = 0.0;
-        double mass_flow_force = 0.0;
+        double mass_flow_unit = 0.0;                // 2^b of the exact sums
+        Kokkos::View<double *[2]> mass_flow_terms;  // device, per owned cell
+        Kokkos::View<double *> mass_flow_largest;   // device: the largest |term| of each column
+        Kokkos::View<int64_t *> mass_flow_sums;     // device: in units of 2^-b of the largest
+        Kokkos::View<double *> mass_flow_totals;    // device: [sum of rho u . e V, of the RHS along e, the force]
 
         // Sponge layers: owned cells of positive total strength sum_i sigma_i,
         // and sum_i sigma_i U_ref,i of the conservatives, then the partial densities

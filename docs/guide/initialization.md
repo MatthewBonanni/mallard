@@ -55,8 +55,8 @@ features smaller than a cell.
 ![A triangle with one and with sixteen sub-triangles for the cell average of an analytical state](../images/guide/subdivisions-light.svg#gh-light-mode-only)
 ![A triangle with one and with sixteen sub-triangles for the cell average of an analytical state](../images/guide/subdivisions-dark.svg#gh-dark-mode-only)
 
-Expressions use [exprtk](https://www.partow.net/programming/exprtk/) syntax
-(see [Input files](input_files.md#numbers-vectors-and-expressions)). Pitfall:
+Expressions may use local variables, conditionals and loops
+([Expressions](input_files.md#expressions)). Pitfall:
 TOML requires the expressions to be strings, also for constants: `u =
 ["0.0", "0.0"]` with `analytical`.
 
