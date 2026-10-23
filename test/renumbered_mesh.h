@@ -36,10 +36,11 @@ inline MeshBlock jittered_box(MeshType kind, const std::array<uint32_t, N_DIM> &
                               const std::array<double, N_DIM> & L, double amplitude = 0.15) {
     MeshBlock block;
 #if N_DIM == 2
-    block = cartesian_2d_block(n[0], n[1], L[0], L[1], kind, 0, 1);
+    block = cartesian_2d_block(n[0], n[1], static_cast<rtype>(L[0]), static_cast<rtype>(L[1]), kind, 0, 1);
 #else
     const auto [cells, nodes] = cartesian_3d_size(n[0], n[1], n[2], kind);
-    block = cartesian_3d_block(n[0], n[1], n[2], L[0], L[1], L[2], kind, 0, cells, 0, nodes);
+    block = cartesian_3d_block(n[0], n[1], n[2], static_cast<rtype>(L[0]), static_cast<rtype>(L[1]),
+                               static_cast<rtype>(L[2]), kind, 0, cells, 0, nodes);
 #endif
     std::mt19937 rng(7);
     std::uniform_real_distribution<double> jitter(-amplitude, amplitude);

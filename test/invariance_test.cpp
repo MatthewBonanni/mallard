@@ -265,7 +265,7 @@ TEST_P(RenumberingTest, SolutionDoesNotDependOnTheNumberingOrOrientation) {
     }
     EXPECT_GT(flipped, interior / 4);
 
-    EXPECT_LT(max_relative_difference(ref, res, renumbered.original_cell, identity()), 1e-12);
+    EXPECT_LT(max_relative_difference(ref, res, renumbered.original_cell, identity()), roundoff(1e-12));
 }
 
 TEST_P(RigidMotionTest, SolutionMovesWithTheDomain) {
@@ -275,7 +275,7 @@ TEST_P(RigidMotionTest, SolutionMovesWithTheDomain) {
     const Result ref = run(run_input(file, param.scheme, "", N_STEPS));
     const Result res = run(run_input(file, param.scheme, param.transform, N_STEPS));
     const Matrix Q = mesh_transform(parse_toml("[mesh]\nfilename = \"x\"\n[mesh.transform]\n" + param.transform)).matrix;
-    EXPECT_LT(max_relative_difference(ref, res, mesh.original_cell, Q), 1e-12);
+    EXPECT_LT(max_relative_difference(ref, res, mesh.original_cell, Q), roundoff(1e-12));
 }
 
 #if N_DIM == 2
