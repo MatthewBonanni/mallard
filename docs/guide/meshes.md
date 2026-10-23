@@ -21,6 +21,8 @@ Lx = 2.0              # the domain is [0, Lx] x [0, Ly]
 Ly = 1.0
 ```
 
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 28 more.
+
 ![The three generated 2D meshes: quadrilaterals, triangles split along the bottom-left to top-right diagonal, and the 8 degree compression ramp](../images/guide/mesh_types_2d-light.svg#gh-light-mode-only)
 ![The three generated 2D meshes: quadrilaterals, triangles split along the bottom-left to top-right diagonal, and the 8 degree compression ramp](../images/guide/mesh_types_2d-dark.svg#gh-dark-mode-only)
 
@@ -51,6 +53,18 @@ hexahedra, pyramids and prisms in successive thirds of x):
 
 ### Stretching
 
+```toml
+[mesh]
+type = "cartesian"
+Nx = 64
+Ny = 64
+Lx = 1.0
+Ly = 2.0
+stretching = [0.0, 1.7]   # cluster cells toward y = 0 and y = Ly
+```
+
+*Used in:* [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les).
+
 `stretching = [beta_x, beta_y]` (three factors in 3D) clusters nodes toward
 both ends of each axis with a nonzero factor: node `j` of `N` sits at
 `L/2 (1 + tanh(beta (2j/N - 1)) / tanh(beta))`. Wall-bounded flows use it to
@@ -73,6 +87,16 @@ periodic = ["x", "z"]
 ![Uniform and stretched node spacing across a channel](../images/guide/stretching-dark.svg#gh-dark-mode-only)
 
 ## Periodic boundaries
+
+```toml
+[mesh]
+type = "cartesian"
+Nx = 64
+Ny = 64
+periodic = ["x"]     # left and right joined
+```
+
+*Used in:* [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d), [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180) and 8 more.
 
 Periodic boundaries join two zones into interior faces: every scheme sees the
 seam as the inside of the domain, and the zones disappear from
@@ -111,6 +135,8 @@ type = "file"
 filename = "cylinder.msh"
 ```
 
+*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric), [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`sphere_re300`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-re300) and 2 more.
+
 Mallard reads ASCII Gmsh meshes, format 2.2 or 4.1, of linear triangles and
 quadrilaterals (2D) or tetrahedra, pyramids, prisms and hexahedra (3D).
 
@@ -146,6 +172,8 @@ four times coarser than the example's 384 x 128 cells), with the zones
 type = "file"
 filename = "wing.cgns"    # or a Fluent .msh/.cas, or an OpenFOAM case directory
 ```
+
+*Used in:* the mesh-import tests (`test/data/meshes/`).
 
 | Format | `filename` | Zones | Build |
 |---|---|---|---|
@@ -188,6 +216,8 @@ rotate = 90                              # 2D: degrees counterclockwise
 translate = [0.1, 0.0]
 ```
 
+*Used in:* the mesh-import tests.
+
 `[mesh.transform]` maps every node of a mesh file, `x -> R (S x) + t`: scale,
 then rotate about the origin, then translate.
 
@@ -205,6 +235,14 @@ Pitfalls:
 
 ## HDF5 meshes for large runs
 
+```toml
+[mesh]
+type = "file"
+filename = "mesh.h5"   # from mallard-mesh-convert
+```
+
+*Used in:* any example, after `mallard-mesh-convert input.toml mesh.h5`.
+
 Every rank of a distributed run reads a Gmsh or other mesh file whole,
 keeping only its share. Large meshes should be converted once to Mallard's HDF5 mesh format, of
 which each rank reads only its own part (builds with
@@ -217,9 +255,21 @@ mpirun -n 8 mallard-mesh-convert input.toml mesh.h5  # the mesh of an input, wri
 
 and then `filename = "mesh.h5"`. Generated meshes are always produced per
 rank, so no rank ever holds a whole generated or HDF5 mesh. The file layout is
-in the [input reference](../input.md#mesh).
+in the [input reference](../input.md#mesh). Later releases keep reading these
+files ([compatibility](output.md#file-formats-and-compatibility)).
 
 ## Curved boundaries
+
+```toml
+[[mesh.curved]]
+zone = "cylinder"
+shape = "circle"        # 2D; "sphere" or "cylinder" in 3D
+center = [0.0, 0.0]
+radius = 0.5
+# axis = [0.0, 0.0, 1.0]  for shape = "cylinder"
+```
+
+*Used in:* the curved-boundary validation (`tools/curved_convergence.py`).
 
 Boundary faces can follow the true geometry instead of straight edges or flat
 facets. Curved faces get quadrature points on the curve with their own normals,
@@ -235,16 +285,7 @@ The geometry comes from either
 - **high-order boundary elements** of a Gmsh file (`line3`, `line4` in 2D;
   `triangle6`, `triangle9`, `triangle10`, `quadrangle8`, `quadrangle9`,
   `quadrangle16` in 3D), e.g. `make_cylinder_mesh.py --order 3`; or
-- **an analytic shape** that a zone is projected onto, on any mesh:
-
-```toml
-[[mesh.curved]]
-zone = "cylinder"
-shape = "circle"        # 2D; "sphere" or "cylinder" in 3D
-center = [0.0, 0.0]
-radius = 0.5
-# axis = [0.0, 0.0, 1.0]  for shape = "cylinder"
-```
+- **an analytic shape** that a zone is projected onto, on any mesh.
 
 | Key | Default | Meaning |
 |---|---|---|

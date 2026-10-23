@@ -24,6 +24,7 @@
 #include "mesh_block.h"
 #include "mesh_quality.h"
 #include "partition.h"
+#include "scratch.h"
 #include "solver.h"
 
 namespace {
@@ -111,7 +112,7 @@ TEST(CheckKeys, ShortKeysGetNoFarFetchedSuggestion) {
 }
 
 TEST(CheckKeys, AValidInputUsesEveryKeyIncludingArraysOfTables) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_check_valid").string();
+    const std::string dir = (scratch_dir() / "mallard_check_valid").string();
     const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
                                     "[[write_data]]\nprefix = \"" + dir + "/flow\"\nformat = \"vtu\"\ninterval = 5\n"
                                     "variables = [\"RHO\", \"P\"]\n[[forces]]\nzone = \"bottom\"\nfile = \"" + dir +
@@ -222,7 +223,7 @@ TEST(CheckMemory, MeasuresAllocationsAndScalesThemToTheTargetRanks) {
 }
 
 TEST(CheckOutput, CheckCreatesNoFilesAndWritesTheQualityFieldsOnRequest) {
-    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "mallard_check_files";
+    const std::filesystem::path dir = scratch_dir() / "mallard_check_files";
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
     CheckOptions options;

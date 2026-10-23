@@ -1,0 +1,19 @@
+name: Question
+description: How to set up, run or interpret a case, when the docs do not answer it.
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check the [user guide](https://github.com/MatthewBonanni/mallard/blob/main/docs/guide/input_files.md), the [tutorials](https://github.com/MatthewBonanni/mallard/blob/main/docs/tutorials/index.md) and the [input reference](https://github.com/MatthewBonanni/mallard/blob/main/docs/input.md) first. If they should have answered your question, say where you looked: that helps us fix the docs.
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Your input file, the Mallard version and build, and the docs pages you read, as relevant.

@@ -51,12 +51,12 @@ void Mesh::init(const Input & input) {
     }
     uint32_t Nx = toml::find_or<uint32_t>(input, "mesh", "Nx", 100);
     uint32_t Ny = toml::find_or<uint32_t>(input, "mesh", "Ny", 100);
-    rtype Lx = find_real_or(input, "mesh", "Lx", 1.0);
-    rtype Ly = find_real_or(input, "mesh", "Ly", 1.0);
+    rtype Lx = find_real_or(input, "mesh", "Lx", dim::length, 1.0);
+    rtype Ly = find_real_or(input, "mesh", "Ly", dim::length, 1.0);
     const Stretching stretching = mesh_stretching(input);
     if constexpr (N_DIM == 3) {
         const uint32_t Nz = toml::find_or<uint32_t>(input, "mesh", "Nz", 100);
-        const rtype Lz = find_real_or(input, "mesh", "Lz", 1.0);
+        const rtype Lz = find_real_or(input, "mesh", "Lz", dim::length, 1.0);
         if (get_type() == MeshType::CARTESIAN_TRI || get_type() == MeshType::WEDGE) {
             throw std::runtime_error("Mesh type " + type_str + " is 2D only.");
         }
@@ -91,7 +91,7 @@ std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const Input & input) {
         const auto entries = toml::find<std::vector<Input>>(input, "periodic");
         for (const auto & entry : entries) {
             const auto zones = toml::find<std::vector<std::string>>(entry, "zones");
-            const std::vector<rtype> t = find_real_vector(entry, "translation");
+            const std::vector<rtype> t = find_real_vector(entry, "translation", dim::length);
             if (zones.size() != 2 || t.size() != N_DIM) {
                 throw InputError("[[periodic]] needs zones = [A, B] and a translation with " +
                                  std::to_string(N_DIM) + " components.");
@@ -106,8 +106,9 @@ std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const Input & input) {
         throw InputError("[mesh] periodic applies to generated meshes; pair the zones of a mesh file with "
                          "[[periodic]].");
     }
-    const rtype L[3] = {find_real_or(input, "mesh", "Lx", 1.0), find_real_or(input, "mesh", "Ly", 1.0),
-                        find_real_or(input, "mesh", "Lz", 1.0)};
+    const rtype L[3] = {find_real_or(input, "mesh", "Lx", dim::length, 1.0),
+                        find_real_or(input, "mesh", "Ly", dim::length, 1.0),
+                        find_real_or(input, "mesh", "Lz", dim::length, 1.0)};
     const char * zones[3][2] = {{"left", "right"}, {"bottom", "top"}, {"back", "front"}};
     for (const std::string & dir : toml::find<std::vector<std::string>>(input, "mesh", "periodic")) {
         const int d = (dir == "x") ? 0 : (dir == "y") ? 1 : (dir == "z") ? 2 : -1;

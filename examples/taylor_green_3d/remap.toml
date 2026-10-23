@@ -1,24 +1,26 @@
-# The Taylor-Green vortex of input.toml on 32^3 hexahedra, continued from the
-# 16^3 run of coarse.toml at t = 6: its restart file remapped conservatively
-# with degree-3 polynomials (no limiter, the field is smooth). The file is the
-# restart that coarse.toml ends with (step 958). Needs the 3D build.
+# The Taylor-Green vortex of input.toml on 32^3 hexahedra of the periodic
+# box, continued from the 16^3 run of coarse.toml at t = 3: its restart file
+# remapped conservatively with degree-3 polynomials (no limiter, the field is
+# smooth). The file is the restart that coarse.toml ends with (step 239).
+# Needs the 3D build.
 #
 #   python ../../tools/docs/remap_tgv.py fine/integrals.csv coarse/integrals.csv remap/integrals.csv
 #
-# with fine/ from input.toml at Nx = 32 to t = 12, for the figure of
+# with fine/ from input.toml at Nx = 32 to t = 10, for the figure of
 # docs/design/remap.md.
 #
-# Expected result: the remap takes 0.7 s on 6 CPU threads and keeps mass,
-# momentum and energy to 8e-15. The 16^3 run is far too dissipative by t = 6
-# (dE/dt 70% above the 32^3 run's); on the finer mesh the dissipation drops at
-# once to the 32^3 level, then evolves with it: the kinetic energy the coarse
-# run already lost (12% at t = 6) is not recovered, so the peak is 13% lower
-# (0.0113 at t = 8.9 against 0.0130 at t = 8.1) and the dissipation stays 4-8%
-# below the 32^3 run's from t = 9. 32^3 from t = 6 to 12: 27 minutes on 6
-# threads.
+# Expected result: the remap takes 0.6 s on 2 CPU threads and keeps mass,
+# momentum and energy to 4e-14. By t = 3 the 16^3 run dissipates 3x as fast
+# as the 32^3 run and has lost 10% more kinetic energy. On the finer mesh
+# the dissipation drops at once, below the 32^3 run's (two thirds of it: the
+# coarse run has already damped the small scales), then catches up: its peak
+# is 7% lower and later (0.0116 at t = 6.6 against 0.0124 at t = 6.0), and from
+# t = 7 it stays within 6% of the 32^3 run's. Both meshes are far coarser than
+# the workshop's 128^3 (the DNS peak is at t = 9). 32^3 from t = 3 to 10:
+# 1,118 steps, 7 minutes on 2 threads.
 
 [run]
-t_stop = 12.0
+t_stop = 10.0
 cfl = 1.0
 
 [mesh]
@@ -26,13 +28,14 @@ type = "cartesian"
 Nx = 32
 Ny = 32
 Nz = 32
-Lx = 3.141592653589793
-Ly = 3.141592653589793
-Lz = 3.141592653589793
+Lx = 6.283185307179586
+Ly = 6.283185307179586
+Lz = 6.283185307179586
+periodic = ["x", "y", "z"]
 
 [initialize]
 type = "remap"
-file = "coarse/tgv_000958.restart"
+file = "coarse/tgv_000239.restart"
 degree = 3
 limiter = "none"
 
@@ -41,33 +44,10 @@ type = "cartesian"
 Nx = 16
 Ny = 16
 Nz = 16
-Lx = 3.141592653589793
-Ly = 3.141592653589793
-Lz = 3.141592653589793
-
-[[boundaries]]
-name = "left"
-type = "symmetry"
-
-[[boundaries]]
-name = "right"
-type = "symmetry"
-
-[[boundaries]]
-name = "bottom"
-type = "symmetry"
-
-[[boundaries]]
-name = "top"
-type = "symmetry"
-
-[[boundaries]]
-name = "back"
-type = "symmetry"
-
-[[boundaries]]
-name = "front"
-type = "symmetry"
+Lx = 6.283185307179586
+Ly = 6.283185307179586
+Lz = 6.283185307179586
+periodic = ["x", "y", "z"]
 
 [numerics]
 riemann_solver = "HLLC"

@@ -19,6 +19,37 @@ in the wrong table, or unused with the chosen settings (for example
 `[numerics.face_reconstruction] order` with `type = "MUSCL"`) is an error,
 listed with its line and the closest key Mallard looked for.
 
+## Units
+
+Numbers are in SI units. Every dimensional key also takes a quantity with a
+unit, as a string converted to SI on read: `p = "1 atm"`, `T = "25 degC"`,
+`Lx = "5 mm"`, `u = ["10 m/s", 0.0]`, `strength = "20 1/s"`. A unit of the
+wrong dimension is an error naming the key and its dimension. Expressions are
+in SI units (a key that takes an expression also takes a single quantity).
+Syntax and the unit table: [Units](guide/input_files.md#units).
+
+| Dimension | Keys |
+|---|---|
+| Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.curved.center`, `radius`; `periodic.translation`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `start`, `end` |
+| Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D) |
+| Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
+| Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
+| Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`; `physics.p_ref` |
+| Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`) and `dirichlet` boundaries |
+| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`; `turbulence.convection_velocity`; `les.combustion.s_L` |
+| Velocity squared (m^2/s^2) | `turbulence.reynolds_stress` |
+| Acceleration (m/s^2) | `source.gravity` |
+| Rate (1/s) | `sponges.strength` |
+| Dynamic viscosity (Pa s) | `physics.mu` |
+| Heat flux (W/m^2) | `boundaries.q` |
+| Mass flux (kg/(m^2 s)) | `source.mass_flow` |
+| Sources (per unit volume) | `source.rho` (kg/(m^3 s)), `rhou` (N/m^3), `rhoE` (W/m^3) |
+| Concentration (plain numbers in kmol/m^3) | `chemistry.C_reg` |
+
+Every other real-valued key (`cfl`, `gamma`, `Pr`, mole fractions, model
+constants, tolerances, ...) is dimensionless.
+
 ## Checking an input
 
 `Mallard --check input.toml` runs the whole setup of a run (mesh, partition,
@@ -110,7 +141,7 @@ transformed mesh.
 
 | Key | Description |
 |---|---|
-| `scale` | A factor for every axis (e.g. `0.001` for a mesh in mm), or one per axis `[s_x, s_y]` (`[s_x, s_y, s_z]` in 3D); nonzero |
+| `scale` | A factor for every axis, the length of one unit of the mesh file (e.g. `0.001` or `"1 mm"` for a mesh in mm), or one per axis `[s_x, s_y]` (`[s_x, s_y, s_z]` in 3D); nonzero |
 | `rotate` | 2D: angle in degrees, counterclockwise. 3D: `{axis = [a_x, a_y, a_z], angle = degrees}`, right-handed about the axis through the origin |
 | `translate` | `[t_x, t_y]` (`[t_x, t_y, t_z]` in 3D) |
 
@@ -392,7 +423,7 @@ filter widths and overcorrects on coarse meshes; not validated beyond this case.
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
 | `balance` | (mixtures, `analytical`) Species taking `1 - sum` of the listed fractions; without it the listed fractions are normalized |
 | `n_subdivisions` | (`analytical`) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is split into `n_subdivisions`³ sub-tetrahedra, each with a 14-point degree-5 rule (default 1) |
-| `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, 3 when they also hold the weights of `[statistics]` averages, or 4 when they also hold the state of characteristic boundary faces, or 5 when compressed) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read |
+| `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, 3 when they also hold the weights of `[statistics]` averages, or 4 when they also hold the state of characteristic boundary faces, or 5 when compressed) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read, and files of a newer version are rejected ([compatibility](guide/output.md#file-formats-and-compatibility)) |
 
 Expressions use [exprtk](https://www.partow.net/programming/exprtk/) syntax, e.g. `"x < 0.5 ? 1.0 : 0.125"`.
 
@@ -667,7 +698,7 @@ density_squared, temperature, temperature_squared`): the integrals of
 the mean squared velocity and vorticity and the density and temperature
 variances). With TENO the velocity
 gradients are those of the reconstruction polynomials at the cell centroids
-(order-consistent: on the Taylor-Green vortex at $64^3$ per octant they match
+(order-consistent: on the Taylor-Green vortex at $128^3$ they match
 spectral derivatives of the same field to about 1%); otherwise they are the
 second-order least-squares gradients of the viscous fluxes, which
 underestimate the enstrophy of under-resolved turbulence (by about 15% in
