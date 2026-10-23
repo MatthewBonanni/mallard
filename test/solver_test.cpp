@@ -29,6 +29,7 @@
 #include "verification.h"
 #include "exact_riemann.h"
 #include "solver.h"
+#include "scratch.h"
 
 namespace {
 
@@ -512,7 +513,7 @@ TEST(SolverTest, ResultIsIndependentOfThreadCount) {
         return;
     }
     const std::string exe = ::testing::internal::GetArgvs()[0];
-    const auto dir = std::filesystem::temp_directory_path();
+    const auto dir = scratch_dir();
     auto run = [&](int threads) {
         const std::string out = (dir / ("mallard_threads_" + std::to_string(threads) + ".bin")).string();
         std::filesystem::remove(out);
@@ -552,7 +553,7 @@ double vortex_energy_loss(double low_mach_cutoff) {
       << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = " << p0 << "\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[output]\ncheck_interval = 1000000\n"
-      << "[integrals]\nfile = \"" << (std::filesystem::temp_directory_path() / "mallard_vortex.csv").string()
+      << "[integrals]\nfile = \"" << (scratch_dir() / "mallard_vortex.csv").string()
       << "\"\ninterval = 1000000\n";
     Solver solver;
     solver.init(parse_toml(s.str()));

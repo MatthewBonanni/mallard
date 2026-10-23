@@ -158,6 +158,11 @@ std::vector<T> read_rows(hid_t parent, const char * name, uint64_t first, uint64
     Handle dset(H5Dopen2(parent, name, H5P_DEFAULT), H5Dclose, std::string("opening ") + name);
     Handle space(H5Dget_space(dset), H5Sclose, "H5Dget_space");
     const int rank = cols > 1 ? 2 : 1;
+    hsize_t dims[2] = {0, 0};
+    if (H5Sget_simple_extent_ndims(space) != rank || H5Sget_simple_extent_dims(space, dims, nullptr) != rank ||
+        (rank == 2 && dims[1] != cols) || n > dims[0] || first > dims[0] - n) {
+        throw std::runtime_error(std::string("reading ") + name + ": rows out of range.");
+    }
     const hsize_t local[2] = {n, hsize_t(cols)};
     Handle memory(H5Screate_simple(rank, local, nullptr), H5Sclose, "H5Screate_simple");
     select_rows(space, first, n);

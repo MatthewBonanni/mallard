@@ -24,6 +24,7 @@
 #include "verification.h"
 #include "face_reconstruction.h"
 #include "physics.h"
+#include "scratch.h"
 
 namespace {
 
@@ -367,7 +368,7 @@ void expect_bitwise_equal(const std::vector<double> & a, const std::vector<doubl
 }
 
 std::string temp_cache(const std::string & name) {
-    const std::string path = (std::filesystem::temp_directory_path() / name).string();
+    const std::string path = (scratch_dir() / name).string();
     std::filesystem::remove(path);
     return path;
 }

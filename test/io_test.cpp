@@ -28,9 +28,10 @@
 #include "mesh_block.h"
 #include "test_fixtures.h"
 #include "solver.h"
+#include "scratch.h"
 
 TEST(IOTest, BoundaryZoneOutputCarriesAdjacentCellValues) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_surface_test").string();
+    const std::string dir = (scratch_dir() / "mallard_surface_test").string();
     std::filesystem::remove_all(dir);
     std::ostringstream s;
     s << "[run]\nn_steps = 4\ncfl = 0.25\n"
@@ -112,7 +113,7 @@ TEST(IOTest, IntegerValuedRealInputsAreAccepted) {
 TEST(IOTest, FixedTimeStepIsOnlyShortenedToLandOnOutputs) {
     // dt = 0.01 with outputs every 0.015: every other step is clipped to land
     // on an output time, the others take the full dt
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_fixed_dt").string();
+    const std::string dir = (scratch_dir() / "mallard_fixed_dt").string();
     const std::string input =
         "[run]\nn_steps = 10\ndt = 0.01\n"
         "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 1.0\nLy = 1.0\n"
@@ -135,7 +136,7 @@ TEST(IOTest, FixedTimeStepIsOnlyShortenedToLandOnOutputs) {
 TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
     // Uniform flow u = 0.1, a = sqrt(1.4) on 0.25 x 0.5 cells: the CFL = 1 time
     // step is 2 V / sum_f (|u_n| + a) A_f = 0.25 / (0.1 + 1.5 a)
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_cfl_output").string();
+    const std::string dir = (scratch_dir() / "mallard_cfl_output").string();
     std::filesystem::remove_all(dir);
     const std::string input =
         "[run]\nn_steps = 1\ndt = 0.01\n"
@@ -190,7 +191,7 @@ TEST(IOTest, ResumedHDF5SeriesKeepsTheSnapshotsUpToTheRestartTime) {
     // A run restarted at t = 0.1 rewrites the later snapshots: the XDMF time
     // series lists each time once, and numbering continues from the restart
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_h5_resume").string();
+    const std::string dir = (scratch_dir() / "mallard_h5_resume").string();
     std::filesystem::remove_all(dir);
     auto mesh = make_mesh("cartesian_tri", 3, 2);
     Kokkos::View<rtype **>::host_mirror_type values("values", mesh->n_cells, 1);
@@ -344,7 +345,7 @@ void expect_within_relative_error(const std::vector<rtype> & rounded, const std:
 TEST(IOTest, AsynchronousOutputWritesTheSameFiles) {
     // The snapshot taken when a file is due is what lands in it, although the
     // run has moved on while it is written
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_async_output").string();
+    const std::string dir = (scratch_dir() / "mallard_async_output").string();
     std::vector<std::pair<std::string, std::string>> variants = {{"", ""}};
     if (compression::have_zlib()) {
         variants.emplace_back("compression = \"zlib\"\n", "compression = \"zlib\"\n");
@@ -375,7 +376,7 @@ TEST(IOTest, AsynchronousOutputWritesTheSameFiles) {
 TEST(IOTest, AWriterGoingAwayFinishesItsFileFirst) {
     // A run that stops on an error destroys its writers without finish():
     // the file being written in the background is still written whole
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_async_unwind").string();
+    const std::string dir = (scratch_dir() / "mallard_async_unwind").string();
     std::filesystem::remove_all(dir);
     auto mesh = make_mesh("cartesian_tri", 300, 200);
     Kokkos::View<rtype **>::host_mirror_type values("values", mesh->n_cells, 1);
@@ -397,7 +398,7 @@ TEST(IOTest, AWriterGoingAwayFinishesItsFileFirst) {
 
 TEST(IOTest, CompressedFilesHoldTheSameValuesOrValuesWithinTheRelativeError) {
     if (!compression::have_zlib()) GTEST_SKIP() << "built without zlib";
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_compressed_output").string();
+    const std::string dir = (scratch_dir() / "mallard_compressed_output").string();
     std::filesystem::remove_all(dir);
     run_case(output_case(dir + "/raw", "", "", ""));
     run_case(output_case(dir + "/zlib", "", "compression = \"zlib\"\n", "compression = \"zlib\"\nchunk_cells = 100\n"));

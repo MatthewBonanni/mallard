@@ -31,24 +31,24 @@ Euler Euler::from_input(const Input & input) {
             throw std::runtime_error(std::string("Missing ") + key + " for physics: euler.");
         }
     }
-    Euler euler = from_reference(find_real(input, "physics", "gamma"),
-                                 find_real(input, "physics", "p_ref"),
-                                 find_real(input, "physics", "T_ref"),
-                                 find_real(input, "physics", "rho_ref"));
+    Euler euler = from_reference(find_real(input, "physics", "gamma", dim::none),
+                                 find_real(input, "physics", "p_ref", dim::pressure),
+                                 find_real(input, "physics", "T_ref", dim::temperature),
+                                 find_real(input, "physics", "rho_ref", dim::density));
     const std::string type = toml::find_or<std::string>(input, "physics", "type", "euler");
     if (type == "navier_stokes") {
         if (!input.at("physics").contains("mu")) {
             throw std::runtime_error("Missing mu for physics: navier_stokes.");
         }
-        euler.mu_ref = find_real(input, "physics", "mu");
-        euler.Pr = find_real_or(input, "physics", "Pr", 0.72_r);
+        euler.mu_ref = find_real(input, "physics", "mu", dim::dynamic_viscosity);
+        euler.Pr = find_real_or(input, "physics", "Pr", dim::none, 0.72_r);
         const std::string model = toml::find_or<std::string>(input, "physics", "viscosity_model", "constant");
         if (model == "constant") {
             euler.viscosity_model = ViscosityModel::CONSTANT;
         } else if (model == "sutherland") {
             euler.viscosity_model = ViscosityModel::SUTHERLAND;
-            euler.T_mu_ref = find_real_or(input, "physics", "T_mu_ref", 273.15_r);
-            euler.S_mu = find_real_or(input, "physics", "sutherland_S", 110.4_r);
+            euler.T_mu_ref = find_real_or(input, "physics", "T_mu_ref", dim::temperature, 273.15_r);
+            euler.S_mu = find_real_or(input, "physics", "sutherland_S", dim::temperature_interval, 110.4_r);
         } else if (model == "power_law") {
             for (const char * key : {"T_mu_ref", "viscosity_exponent"}) {
                 if (!input.at("physics").contains(key)) {
@@ -56,8 +56,8 @@ Euler Euler::from_input(const Input & input) {
                 }
             }
             euler.viscosity_model = ViscosityModel::POWER_LAW;
-            euler.T_mu_ref = find_real(input, "physics", "T_mu_ref");
-            euler.n_mu = find_real(input, "physics", "viscosity_exponent");
+            euler.T_mu_ref = find_real(input, "physics", "T_mu_ref", dim::temperature);
+            euler.n_mu = find_real(input, "physics", "viscosity_exponent", dim::none);
         } else {
             throw InputError("physics.viscosity_model = \"" + model + "\" is not one of: constant, sutherland, power_law.");
         }

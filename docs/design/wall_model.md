@@ -146,15 +146,15 @@ $q = 0$) at the wall; $u = U_e$, $T = T_e$ at $y = h$, with $U_e$ the
 tangential speed relative to the wall at the exchange point.
 
 - **Discretization.** 64 nodes, geometrically stretched (ratio 1.1, first
-  spacing $2.2\times 10^{-4} h$, so $y_1^+ < 1$ for $h^+$ up to 4500). Both equations say
+  spacing $2.47\times 10^{-4} h$, so $y_1^+ < 1$ for $h^+$ up to 4000). Both equations say
   a flux is constant across the layer, $(\mu + \mu_t)\, \mathrm{d}u/\mathrm{d}y = \tau_w$ and
   $k_\mathrm{eff}\, \mathrm{d}T/\mathrm{d}y + \tau_w u = -q_w$, so for given $\mu_t$ and properties $u$
   and $T$ follow by quadrature (Simpson's rule on each interval, with
   midpoint values) and the boundary values fix $\tau_w$ and $q_w$ (or $T_w$
   on heat-flux walls). $\mu_t$, the properties and $\tau_w$ are iterated to a
   fixed point, accelerated by secant steps on $\tau_w$, until $\tau_w$
-  changes by less than $10^{-10}$ relatively: 3-5 iterations from $h^+ = 1$ to
-  $10^4$ (at most 200).
+  changes by less than $10^{-10}$ relatively: 4-5 iterations from $h^+ = 5$ to
+  7000 at constant properties, 8-20 with strong heating (at most 200).
 
 ## 4. Inverse velocity transformation model (stage 2, decision 6)
 
@@ -210,7 +210,7 @@ $$
   exactly. With constant properties $\mathrm{d}U^+ = S_t^+ \mathrm{d}y^+$.
 - **Shooting.** $U(h)$ increases with $\tau_w$; the root of $\log U(h; \tau_w) = \log U_m$, nearly linear in $\log \tau_w$, is found by secant steps
   on $\log \tau_w$ from the larger of the laminar and log-law estimates, to
-  $10^{-9}$: 5-7 profile evaluations.
+  $10^{-9}$: 4-7 profile evaluations.
 - **Accuracy** (unit tests): with constant properties both models agree
   with the integral of the incompressible law to $10^{-5}$ from $h^+ = 1$ to
   $10^4$; with variable properties each agrees with an RK4 solution of its
