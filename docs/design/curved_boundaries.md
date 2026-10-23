@@ -160,7 +160,7 @@ digits at every level. With mirror images across the curved walls
 
 At Re = 100 the viscous layer is resolved by many cells, so curving the wall
 moves the drag by 0.1-0.3% (toward the incompressible 1.33-1.35). On the fine
-mesh, order 5 with straight walls is unstable (drag fluctuations of +-2.9);
+mesh, order 5 with straight walls is unstable (drag fluctuations of ±2.9);
 with curved walls it runs, with residual drag noise of rms 7e-4 from the far
 field (the instability noted in `docs/numerics/teno_e.md`, also there with
 mirrored far fields).

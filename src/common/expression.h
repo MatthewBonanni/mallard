@@ -20,6 +20,8 @@
 
 #include <exprtk.hpp>
 
+#include "units.h"
+
 /**
  * @brief An exprtk expression in the variables x, y, z and t.
  */
@@ -35,7 +37,8 @@ class Expression {
             vars->expr.register_symbol_table(vars->table);
             exprtk::parser<double> parser;
             if (!parser.compile(text, vars->expr)) {
-                throw std::runtime_error("Failed to parse expression for " + name + ": " + parser.error());
+                throw std::runtime_error("Failed to parse expression for " + name + ": " + parser.error() +
+                                         expression_unit_hint(text));
             }
             std::vector<std::string> used;
             time_dependent = !exprtk::collect_variables(text, vars->table, used) ||

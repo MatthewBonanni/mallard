@@ -19,6 +19,7 @@
 #include <unordered_map>
 
 #include "comm.h"
+#include "common_io.h"
 #include "input.h"
 #include "log.h"
 
@@ -47,6 +48,7 @@ Kokkos::View<T *> to_device(const std::vector<T> & v, const char * label) {
 }
 
 std::shared_ptr<std::ofstream> open_csv(const std::string & file, bool resume, const std::string & header) {
+    if (!output_files_enabled()) return std::make_shared<std::ofstream>();
     const std::filesystem::path parent = std::filesystem::path(file).parent_path();
     if (!parent.empty()) std::filesystem::create_directories(parent);
     auto out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
@@ -61,12 +63,12 @@ const char * const SAMPLES = "STATISTICS_SAMPLES";
 
 } // namespace
 
-void Statistics::init(const toml::value & input, const std::vector<std::string> & species_names, const Mesh & mesh) {
+void Statistics::init(const Input & input, const std::vector<std::string> & species_names, const Mesh & mesh) {
     if (!input.contains("statistics")) return;
-    const toml::value & table = input.at("statistics");
+    const Input & table = input.at("statistics");
     interval = toml::find_or<uint64_t>(table, "interval", 1);
     if (interval == 0) throw InputError("statistics.interval must be positive.");
-    t_start = find_real_or(table, "t_start", 0.0);
+    t_start = find_real_or(table, "t_start", dim::time, 0.0);
     reset = toml::find_or<bool>(table, "reset", false);
     if (table.contains("spectra")) spectra.init(table.at("spectra"), input, species_names, mesh, interval, t_start);
     if (table.contains("phase")) phase.init(table.at("phase"), mesh, species_names, mesh.n_cells, interval, t_start);
@@ -260,14 +262,23 @@ const char * const PHASE_CROSSINGS = "PHASE_CROSSINGS";  // count, previous, las
 
 std::string phase_weight_name(uint32_t b) { return "PHASE_WEIGHT_" + std::to_string(b); }
 
+Dimension variable_dimension(const std::string & name) {
+    if (name == "RHO") return dim::density;
+    if (name.rfind("U_", 0) == 0) return dim::velocity;
+    if (name == "P") return dim::pressure;
+    if (name == "T") return dim::temperature;
+    if (name == "H") return dim::velocity_squared;
+    return dim::none;
+}
+
 } // namespace
 
-void PhaseAverage::init(const toml::value & table, const Mesh & mesh, const std::vector<std::string> & species_names,
+void PhaseAverage::init(const Input & table, const Mesh & mesh, const std::vector<std::string> & species_names,
                         uint32_t n_cells, uint64_t interval_in, rtype t_start_in) {
     const std::string key = "statistics.phase";
     interval = toml::find_or<uint64_t>(table, "interval", interval_in);
     if (interval == 0) throw InputError(key + ".interval must be positive.");
-    t_start = find_real_or(table, "t_start", t_start_in);
+    t_start = find_real_or(table, "t_start", dim::time, t_start_in);
     bins = toml::find_or<uint32_t>(table, "bins", 0);
     if (bins == 0) throw InputError(key + ".bins must be positive.");
     fields = toml::find_or<std::vector<std::string>>(table, "fields", {});
@@ -285,17 +296,17 @@ void PhaseAverage::init(const toml::value & table, const Mesh & mesh, const std:
     const bool triggered = table.contains("probe");
     if (periodic == triggered) throw InputError(key + ": give either period or probe (with variable and level).");
     if (periodic) {
-        period = find_double_or(table, "period", 0.0);
+        period = find_double_or(table, "period", dim::time, 0.0);
         if (!(period > 0.0)) throw InputError(key + ".period must be positive.");
-        t_reference = find_double_or(table, "t_reference", 0.0);
+        t_reference = find_double_or(table, "t_reference", dim::time, 0.0);
     } else {
-        const std::vector<rtype> x = find_real_vector(table, "probe");
+        const std::vector<rtype> x = find_real_vector(table, "probe", dim::length);
         if (x.size() != N_DIM) throw InputError(key + ".probe must have " + std::to_string(N_DIM) + " components.");
         for (size_t d = 0; d < N_DIM; d++) trigger_point[d] = static_cast<double>(x[d]);
         if (!table.contains("variable")) throw InputError(key + ": variable (of the probe) not specified.");
         trigger_variable = toml::find<std::string>(table, "variable");
         trigger_code = CellSampler::code(trigger_variable, species_names, key + ".variable");
-        level = find_double_or(table, "level", 0.0);
+        level = find_double_or(table, "level", variable_dimension(trigger_variable), 0.0);
         trigger_cell = locate_points(mesh, {trigger_point})[0];
         distributed = mesh.n_global_cells > 0;
     }
@@ -610,10 +621,10 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
     return cell;
 }
 
-void Probes::init(const toml::value & input, const Mesh & mesh, const std::vector<std::string> & species_names,
+void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std::string> & species_names,
                   bool resume) {
     if (!input.contains("probes")) return;
-    const auto entries = toml::find<std::vector<toml::value>>(input, "probes");
+    const auto entries = toml::find<std::vector<Input>>(input, "probes");
     for (const auto & entry : entries) {
         Set set;
         if (!entry.contains("name")) throw InputError("probes: every probe needs a name.");
@@ -633,7 +644,7 @@ void Probes::init(const toml::value & input, const Mesh & mesh, const std::vecto
         set.codes = to_device(h_codes, "probe_codes");
 
         auto vector = [&](const char * name) {
-            const std::vector<rtype> x = find_real_vector(entry, name);
+            const std::vector<rtype> x = find_real_vector(entry, name, dim::length);
             if (x.size() != N_DIM) {
                 throw InputError(key + "." + name + " must have " + std::to_string(N_DIM) + " components.");
             }

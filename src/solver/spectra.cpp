@@ -99,12 +99,12 @@ bool Spectra::homogeneous(size_t axis) const {
     return std::find(directions.begin(), directions.end(), axis) != directions.end();
 }
 
-void Spectra::init(const toml::value & table, const toml::value & input, const std::vector<std::string> & species_names,
+void Spectra::init(const Input & table, const Input & input, const std::vector<std::string> & species_names,
                    const Mesh & mesh, uint64_t interval_in, rtype t_start_in) {
     const std::string key = "statistics.spectra";
     interval = toml::find_or<uint64_t>(table, "interval", interval_in);
     if (interval == 0) throw InputError(key + ".interval must be positive.");
-    t_start = find_real_or(table, "t_start", t_start_in);
+    t_start = find_real_or(table, "t_start", dim::time, t_start_in);
     average = toml::find_or<bool>(table, "average", true);
     file = toml::find_or<std::string>(table, "file", average ? "spectra.csv" : "spectra/spectra.csv");
 
@@ -146,7 +146,7 @@ void Spectra::init(const toml::value & table, const toml::value & input, const s
     const char * l_keys[3] = {"Lx", "Ly", "Lz"};
     for (size_t d = 0; d < N_DIM; d++) {
         N[d] = toml::find_or<uint32_t>(input, "mesh", n_keys[d], 100);
-        L[d] = static_cast<double>(find_real_or(input, "mesh", l_keys[d], 1.0));
+        L[d] = static_cast<double>(find_real_or(input, "mesh", l_keys[d], dim::length, 1.0));
     }
     const Stretching stretching = mesh_stretching(input);
     std::vector<std::string> periodic;

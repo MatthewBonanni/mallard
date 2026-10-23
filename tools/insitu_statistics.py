@@ -4,7 +4,7 @@
 
     insitu_statistics.py spectra INPUT.toml RESTART [RESTART ...] -o reference.csv
     insitu_statistics.py compare A.csv B.csv
-    insitu_statistics.py phase INPUT.toml PROBE.csv SNAPSHOT [SNAPSHOT ...] -o phase.npz
+    insitu_statistics.py phase INPUT.toml PROBE.csv -o phase.npz
     insitu_statistics.py plot SPECTRA.csv [SPECTRA.csv ...] [--pair U_X,U_X] [--position 3] -o plot.png
 
 spectra: the quantities of the run's [statistics.spectra] table (same fields,
@@ -20,8 +20,8 @@ two spectra CSV files, relative to the largest magnitude of that quantity.
 
 phase: phase-averages the fields of [statistics.phase] at the probe point
 from the probe CSV (a [[probes]] series sampled at the same steps), with the
-solver's phase rule, and reads the in-situ PHASE_ fields of the snapshots'
-cell nearest to the point, to compare the two.
+solver's phase rule, for comparison with the in-situ PHASE_ fields of the
+cell nearest to the point.
 
 plot: one-sided spectra and correlations of one pair, at one position, along
 each direction (and the shell spectrum if present) of one or more CSV files.
@@ -79,13 +79,21 @@ def read_restart(path):
     return dict(zip(names, data)), t, step, attributes, arrays
 
 
+def si(value, key):
+    """A plain number of the input; quantities with units ("5 mm") are not converted here."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    raise SystemExit(f"{key} = {value!r}: this script reads plain numbers in SI units; write it without a unit")
+
+
 def variables(cons, names, phys, dim):
     """Cell values of the named variables from the conservatives of a perfect gas."""
     rho = cons["RHO"]
     u = [cons["RHOU_" + AXES[d].upper()] / rho for d in range(dim)]
-    gamma = phys.get("gamma", 1.4)
+    gamma = si(phys.get("gamma", 1.4), "physics.gamma")
     p = (gamma - 1.0) * (cons["RHOE"] - 0.5 * rho * sum(v * v for v in u))
-    R = phys.get("p_ref", 1.0) / (phys.get("rho_ref", 1.0) * phys.get("T_ref", 1.0))
+    R = si(phys.get("p_ref", 1.0), "physics.p_ref") / (si(phys.get("rho_ref", 1.0), "physics.rho_ref") *
+                                                       si(phys.get("T_ref", 1.0), "physics.T_ref"))
     known = {"RHO": rho, "P": p, "T": p / (rho * R)}
     for d in range(dim):
         known["U_" + AXES[d].upper()] = u[d]
@@ -115,7 +123,7 @@ class Box:
         mesh = cfg["mesh"]
         self.dim = 3 if "Nz" in mesh else 2
         self.N = [mesh.get(k, 100) for k in ("Nx", "Ny", "Nz")[:self.dim]]
-        self.L = [float(mesh.get(k, 1.0)) for k in ("Lx", "Ly", "Lz")[:self.dim]]
+        self.L = [si(mesh.get(k, 1.0), "mesh." + k) for k in ("Lx", "Ly", "Lz")[:self.dim]]
         beta = list(mesh.get("stretching", [0.0] * self.dim)) + [0.0] * 3
         self.centers = []
         for d in range(self.dim):
@@ -137,7 +145,7 @@ def spectra_from_restarts(cfg, files):
     periodic = cfg["mesh"].get("periodic", [])
     H = sorted(AXES.index(a) for a in table.get("directions", periodic))
     I = [d for d in range(dim) if d not in H]
-    t_start = float(table.get("t_start", stats.get("t_start", 0.0)))
+    t_start = si(table.get("t_start", stats.get("t_start", 0.0)), "statistics.t_start")
     n_modes = int(np.prod([box.N[d] for d in H]))
     acc = None
     weight, t_last, n_samples = 0.0, t_start, 0
@@ -260,7 +268,7 @@ def phase_bins(cfg, probe_csv):
     stats = cfg["statistics"]
     table = stats["phase"]
     bins = int(table["bins"])
-    t_start = float(table.get("t_start", stats.get("t_start", 0.0)))
+    t_start = si(table.get("t_start", stats.get("t_start", 0.0)), "statistics.t_start")
     fields = table["fields"]
     data = np.genfromtxt(probe_csv, delimiter=",", names=True)
     # The solver samples only after steps; a run's first probe row is its initial state
@@ -271,7 +279,7 @@ def phase_bins(cfg, probe_csv):
     t_last = t_start
     crossings = []
     v_prev = t_prev = None
-    level = float(table.get("level", 0.0))
+    level = si(table.get("level", 0.0), "statistics.phase.level")
     for i in range(len(t)):
         use = t[i] > t_start
         if "probe" in table:
@@ -284,7 +292,7 @@ def phase_bins(cfg, probe_csv):
             else:
                 phase = (t[i] - crossings[-1]) / (crossings[-1] - crossings[-2])
         else:
-            x = (t[i] - float(table.get("t_reference", 0.0))) / float(table["period"])
+            x = (t[i] - si(table.get("t_reference", 0.0), "statistics.phase.t_reference")) / si(table["period"], "statistics.phase.period")
             phase = x - np.floor(x)
         if not use:
             if t[i] > t_start:

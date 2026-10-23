@@ -20,6 +20,7 @@
 #include <map>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 
 namespace fs = std::filesystem;
 
@@ -91,7 +92,7 @@ class FoamFile {
         }
         const size_t start = pos;
         while (pos < s.size() && !std::isspace(static_cast<unsigned char>(s[pos])) &&
-               std::strchr("(){};", s[pos]) == nullptr) {
+               std::string_view("(){};").find(s[pos]) == std::string_view::npos) {
             pos++;
         }
         return s.substr(start, pos - start);
@@ -123,6 +124,7 @@ class FoamFile {
         const int64_t n = integer();
         if (n < 0) fail("has a negative list size.");
         skip_space_and_comments();
+        if (uint64_t(n) > s.size() - pos) fail("has a list longer than the file.");
         if (pos < s.size() && s[pos] == '{') fail("has a uniform list, which Mallard does not read.");
         expect("(");
         return size_t(n);
@@ -209,7 +211,9 @@ MeshFileData read_openfoam(const std::string & path) {
             const size_t n = f.list_start();
             faces.resize(n);
             for (auto & face : faces) {
-                face.resize(size_t(f.integer()));
+                const int64_t n_nodes = f.integer();
+                if (n_nodes < 0 || uint64_t(n_nodes) > f.s.size() - f.pos) f.fail("has a bad face size.");
+                face.resize(size_t(n_nodes));
                 f.expect("(");
                 for (auto & v : face) v = node(f.integer());
                 f.expect(")");
@@ -229,6 +233,11 @@ MeshFileData read_openfoam(const std::string & path) {
     }
     if (owner.size() != faces.size() || neighbour.size() > faces.size()) {
         throw std::runtime_error(where + ": owner, neighbour and faces do not match in size.");
+    }
+    for (const auto * cells : {&owner, &neighbour}) {
+        for (int64_t c : *cells) {
+            if (c < 0 || uint64_t(c) >= faces.size()) throw std::runtime_error(where + ": a face refers to a missing cell.");
+        }
     }
 
     std::vector<Patch> patches;
@@ -262,7 +271,7 @@ MeshFileData read_openfoam(const std::string & path) {
             if (p.type == "processor" || p.type == "processorCyclic") {
                 throw std::runtime_error(where + " is decomposed (patch " + p.name + "); run reconstructParMesh first.");
             }
-            if (p.start < int64_t(neighbour.size()) || p.start + p.size > int64_t(faces.size())) {
+            if (p.start < int64_t(neighbour.size()) || p.size < 0 || p.size > int64_t(faces.size()) - p.start) {
                 throw std::runtime_error(where + ": patch " + p.name + " has faces out of the boundary range.");
             }
             patches.push_back(p);

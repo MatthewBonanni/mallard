@@ -57,7 +57,7 @@ struct CellSampler;
 class Spectra {
     public:
         /** @brief Read [statistics.spectra] (table) of the run (input), sampling every interval steps from t_start. */
-        void init(const toml::value & table, const toml::value & input, const std::vector<std::string> & species_names,
+        void init(const Input & table, const Input & input, const std::vector<std::string> & species_names,
                   const Mesh & mesh, uint64_t interval, rtype t_start);
 
         bool enabled() const { return !pairs.empty(); }

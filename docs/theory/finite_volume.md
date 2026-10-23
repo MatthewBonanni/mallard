@@ -6,8 +6,8 @@ hexahedra, prisms and pyramids in 3D, with optionally curved boundary
 faces. This chapter covers the semi-discrete equations, face quadrature,
 curved geometry, the reconstruction of face states (first order, MUSCL,
 TENO-E), the low-Mach correction of those states and the cell gradients of
-the viscous terms. The numerical fluxes are in [chapter 6](fluxes.md) and
-the time integration in [chapter 7](time_integration.md). Usage:
+the viscous terms. The numerical fluxes are in [chapter 7](fluxes.md) and
+the time integration in [chapter 8](time_integration.md). Usage:
 [Numerics](../guide/numerics.md); measured stability and accuracy limits:
 [Numerical methods](../numerics/overview.md).
 
@@ -39,13 +39,13 @@ $$
 
 with face weights normalized to $\sum_q w_{f,q} = 2$ (Gauss-Legendre on
 $[-1, 1]$ in 2D; 3D rules rescaled to that sum). The viscous flux uses one
-point per face ([chapter 6](fluxes.md#viscous-fluxes)). Each face's flux is
+point per face ([chapter 7](fluxes.md#viscous-fluxes)). Each face's flux is
 computed and stored once, and every cell sums its faces in a fixed order
 without atomic operations (`FaceFluxSumFunctor`,
 `src/numerics/flux_functor.h`), so the result is bitwise independent of
 thread count and scheduling. Boundary faces use the exterior state of the
 boundary condition as $\mathbf{U}^R$
-([chapter 8](boundaries_sources.md#weak-imposition)). The source term is
+([chapter 9](boundaries_sources.md#weak-imposition)). The source term is
 evaluated at the cell average.
 
 ## Face quadrature
@@ -161,7 +161,7 @@ $$
 $$
 
 The neighbors are the face neighbors. A boundary face contributes its ghost
-state ([chapter 8](boundaries_sources.md#weak-imposition)) at the mirror
+state ([chapter 9](boundaries_sources.md#weak-imposition)) at the mirror
 image of the cell centroid, $\Delta\mathbf{x} = 2 d\,\mathbf{n}_f$ with $d$
 the centroid's distance to the face; prescribed states (`dirichlet`, `upt`,
 `farfield`) sit at the face centroid instead. Tetrahedra, whose four face
@@ -287,7 +287,7 @@ can amplify the cell averages, is at most 10 in 2D and 4 in 3D. If no size
 reaches the bound, 2D takes the stencil with the smallest $\Lambda$, and 3D
 the smallest stencil within 1.25 times the smallest $\Lambda$ found. The
 lower 3D bound removes growing modes of the linearized scheme on
-near-degenerate stencils ([TENO-E details](../numerics/teno_e.md#3d-mallard-extension)).
+near-degenerate stencils ([TENO-E details](../numerics/teno_e.md#3d-stability)).
 Cells whose central stencil reaches a curved wall fit at most degree
 `curved_wall_degree` (3).
 
@@ -342,10 +342,9 @@ projected back with the right eigenvectors.
 **Admissibility and bounds.** A cell whose face values have a non-positive
 density or pressure anywhere falls back to first order. With
 `bound_preserving = true`, troubled cells first scale their deviation from
-the cell average by
-$\theta = \min_q\min\left(1, \frac{M - \overline{v}_i}{v_q - \overline{v}_i}, \frac{m - \overline{v}_i}{v_q - \overline{v}_i}\right)$
-over the face points, for $v = \rho, p$ and the extrema $m$, $M$ of the
-cell and its face neighbors
+the cell average by the largest $\theta\in[0, 1]$ that keeps every face value
+$\overline{v}_i + \theta(v_q - \overline{v}_i)$ within $[m, M]$, for $v = \rho, p$
+and the extrema $m$, $M$ of the cell and its face neighbors
 ([Zhang & Shu 2010](../references.md#zhang-shu-2010)).
 
 ### Gas mixtures
@@ -369,8 +368,8 @@ face point:
     cells, every scalar within its neighbors' range.
 
 The face $(\gamma, e_0)$ pairs enter the Riemann solvers
-([chapter 6](fluxes.md#gas-mixtures)), and the face mass fractions the
-species fluxes ([chapter 6](fluxes.md#species-fluxes)).
+([chapter 7](fluxes.md#gas-mixtures)), and the face mass fractions the
+species fluxes ([chapter 7](fluxes.md#species-fluxes)).
 
 ## Low-Mach correction
 
@@ -429,7 +428,7 @@ $\nabla T = (\nabla p - R T\nabla\rho)/(\rho R)$; mixtures differentiate
 $[\mathbf{u}, T, X_1,\dots,X_{N_s}]$ directly, with the wall velocity at
 viscous walls and the prescribed $T$ and $X_k$ at `upt` boundaries
 (the cell's own values elsewhere). The face gradients built from these are
-in [chapter 6](fluxes.md#viscous-fluxes).
+in [chapter 7](fluxes.md#viscous-fluxes).
 
 ## Axisymmetric cells
 

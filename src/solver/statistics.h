@@ -21,7 +21,7 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "common_typedef.h"
 #include "data.h"
@@ -70,7 +70,7 @@ struct CellSampler {
 class PhaseAverage {
     public:
         /** @brief Read [statistics.phase] (table), sampling every interval steps from t_start. */
-        void init(const toml::value & table, const Mesh & mesh, const std::vector<std::string> & species_names,
+        void init(const Input & table, const Mesh & mesh, const std::vector<std::string> & species_names,
                   uint32_t n_cells, uint64_t interval, rtype t_start);
 
         bool enabled() const { return !fields.empty(); }
@@ -141,7 +141,7 @@ class PhaseAverage {
 class Statistics {
     public:
         /** @brief Read [statistics] (if any) and allocate the mesh's cells. */
-        void init(const toml::value & input, const std::vector<std::string> & species_names, const Mesh & mesh);
+        void init(const Input & input, const std::vector<std::string> & species_names, const Mesh & mesh);
 
         bool enabled() const { return means_enabled() || spectra.enabled() || phase.enabled(); }
         bool means_enabled() const { return !fields.empty(); }
@@ -212,7 +212,7 @@ class Statistics {
 class Probes {
     public:
         /** @brief Read [[probes]] and locate the points; resume appends to existing files. */
-        void init(const toml::value & input, const Mesh & mesh, const std::vector<std::string> & species_names,
+        void init(const Input & input, const Mesh & mesh, const std::vector<std::string> & species_names,
                   bool resume);
 
         bool due(uint64_t step) const;

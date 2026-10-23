@@ -26,6 +26,7 @@
 #include "comm.h"
 #include "compression.h"
 #include "solver.h"
+#include "scratch.h"
 #include "test_fixtures.h"
 
 namespace {
@@ -106,7 +107,7 @@ double direct_correlation(const std::vector<double> & a, const std::vector<doubl
 std::string one_sample(const std::string & fields, uint32_t n_steps) {
     // A single sample, at the last step, weighs 1: the averages are that sample
     return "[statistics]\ninterval = " + std::to_string(n_steps) + "\n[statistics.spectra]\n" + fields +
-           "file = \"" + (std::filesystem::temp_directory_path() / "mallard_spectra_unused.csv").string() + "\"\n";
+           "file = \"spectra_unused.csv\"\n";
 }
 
 } // namespace
@@ -247,7 +248,7 @@ TEST(PhaseAverageTest, BinsOfAnOscillatingFlowHoldTheMeansOfTheirSamples) {
     // averages are bitwise those of the period
     const double u0 = 0.1, t_ref = 1.0 / 12.0;
     const uint32_t n_steps = 416, bins = 4;
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_phase_restart").string();
+    const std::string dir = (scratch_dir() / "mallard_phase_restart").string();
     std::filesystem::remove_all(dir);
     auto run = [&](uint32_t steps, const std::string & phase, const std::string & from = "") {
         std::string input = oscillating(steps, "[statistics]\nt_start = 1.25\ninterval = 2\n"
@@ -304,7 +305,7 @@ TEST(InSituStatisticsTest, SpectraAndPhaseAveragesRestartBitwise) {
     // Samples every 3 steps; a restart at step 20, between two of them,
     // continues the averaged spectra (restart arrays) and the phase bins as if
     // uninterrupted, and leaves the solution unchanged
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_insitu_restart").string();
+    const std::string dir = (scratch_dir() / "mallard_insitu_restart").string();
     std::filesystem::remove_all(dir);
     const std::string periodic = N_DIM == 3 ? "[\"x\", \"z\"]" : "[\"x\"]";
     auto extra = [&](const std::string & sub, bool zlib = false) {
@@ -401,7 +402,7 @@ TEST(MPITest, SpectraAndPhaseAveragesDoNotDependOnTheRankCount) {
     // channel: y slabs) and a triggered phase average equal the serial run's
     // bitwise on any number of ranks, also continued on one rank from a
     // restart file written by all
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mpi_insitu").string();
+    const std::string dir = (scratch_dir() / "mallard_mpi_insitu").string();
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
     const std::string box_dirs = N_DIM == 3 ? "[\"x\", \"y\", \"z\"]" : "[\"x\", \"y\"]";

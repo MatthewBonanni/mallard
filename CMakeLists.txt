@@ -53,6 +53,19 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.25)
     set(MALLARD_THIRD_PARTY SYSTEM)
 endif()
 
+# libFuzzer harnesses of the input and mesh readers (test/fuzz), with every
+# target built with the sanitizers of Mallard_FUZZ_SANITIZERS
+option(${PROJECT_NAME}_ENABLE_FUZZING "Build the libFuzzer harnesses (Clang)" OFF)
+set(${PROJECT_NAME}_FUZZ_SANITIZERS "address,undefined" CACHE STRING "Sanitizers of the fuzzing build")
+if(${PROJECT_NAME}_ENABLE_FUZZING)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "Mallard_ENABLE_FUZZING needs Clang (libFuzzer).")
+    endif()
+    add_compile_options(-fsanitize=fuzzer-no-link,${${PROJECT_NAME}_FUZZ_SANITIZERS}
+                        -fno-sanitize-recover=all -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=${${PROJECT_NAME}_FUZZ_SANITIZERS})
+endif()
+
 # Compile-time options
 option(${PROJECT_NAME}_USE_DOUBLE "Use double precision" ON)
 message(STATUS "Mallard: Double precision: ${${PROJECT_NAME}_USE_DOUBLE}")
@@ -204,6 +217,9 @@ include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/exprtk")
 # Add your main project source
 add_subdirectory(src)
 add_subdirectory(test)
+if(${PROJECT_NAME}_ENABLE_FUZZING)
+    add_subdirectory(test/fuzz)
+endif()
 
 # Documentation setup
 option(BUILD_DOCS "Build documentation" OFF)
@@ -228,8 +244,15 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 
 install(TARGETS Mallard
-    DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
+    DESTINATION bin
 )
+# Case templates (Mallard new) and what they are made from: bin/../share/mallard
+foreach(dir templates examples tools mechanisms tutorials)
+    if(EXISTS ${CMAKE_SOURCE_DIR}/${dir})
+        install(DIRECTORY ${dir} DESTINATION share/mallard
+            PATTERN __pycache__ EXCLUDE)
+    endif()
+endforeach()
 
 # Enable testing
 enable_testing()
