@@ -246,18 +246,18 @@ void closest_point(const Shape & s, const Vec3 & x, double length, Vec3 & p, dou
         }
         return g;
     };
-    // Steps of 1e-2 length, divided by 4 until two agree, so that stencils do not straddle
-    // the creases of booleans and polygons
+    // Steps of 1e-2 length, divided by 4 until two agree, so that the stencils (and the
+    // Hessian's, of the coarser step h) do not straddle the creases of booleans and polygons
     double h = 1e-2 * length;
     auto gradient = [&](const Vec3 & y) {
         h = 1e-2 * length;
         Vec3 g = central(y, h);
         for (int k = 0; k < 4; k++) {
             const Vec3 finer = central(y, 0.25 * h);
-            h *= 0.25;
             const Vec3 d = sub(finer, g);
             g = finer;
             if (dot(d, d) <= 1e-16 * dot(g, g)) break;
+            h *= 0.25;
         }
         return g;
     };
@@ -266,8 +266,8 @@ void closest_point(const Shape & s, const Vec3 & x, double length, Vec3 & p, dou
                          std::to_string(x[1]) + ", " + std::to_string(x[2]) + ") " + why +
                          ": the zone must lie on the shape's surface, where it is smooth with a nonzero gradient.");
     };
-    // Onto the surface along the gradient, then along the surface toward x
-    const double tol = 1e-13 * length + 1e-14 * std::sqrt(dot(x, x));
+    // Onto the surface along the gradient, then along the surface toward x, until the
+    // steps reach the round-off of x and of the normal over the distance to x
     p = x;
     for (int it = 0;; it++) {
         const Vec3 g = gradient(p);
@@ -277,12 +277,20 @@ void closest_point(const Shape & s, const Vec3 & x, double length, Vec3 & p, dou
         const Vec3 d = sub(x, add(p, step));
         step = add(step, sub(d, scale(dot(d, g) / g2, g)));
         p = add(p, step);
-        if (std::sqrt(dot(step, step)) <= tol) break;
-        if (it == 100 || std::sqrt(dot(sub(p, x), sub(p, x))) > length) fail("does not converge onto its shape");
+        const double distance = std::sqrt(dot(sub(p, x), sub(p, x)));
+        if (std::sqrt(dot(step, step)) <= 1e-13 * length + 1e-14 * std::sqrt(dot(x, x)) + 1e-11 * distance) break;
+        if (it == 100 || distance > length) fail("does not converge onto its shape");
     }
     // dp/dx from the gradient and Hessian at p, with the gradient's step
     const Vec3 g = gradient(p);
     const double f0 = phi(p);
+    const double gn = std::sqrt(dot(g, g));
+    if (!(gn > 0.0)) fail("has a zero gradient");
+    const Vec3 n = scale(1.0 / gn, g);
+    // A simple root: phi changes by about |grad phi| h across p
+    if (!(std::abs(phi(add(p, scale(h, n)))) + std::abs(phi(sub(p, scale(h, n)))) < 4.0 * gn * h)) {
+        fail("has a zero gradient");
+    }
     double H[9] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
     for (size_t i = 0; i < N_DIM; i++) {
         for (size_t j = i; j < N_DIM; j++) {
@@ -302,8 +310,6 @@ void closest_point(const Shape & s, const Vec3 & x, double length, Vec3 & p, dou
             H[3 * i + j] = H[3 * j + i] = v / (h * h);
         }
     }
-    const double gn = std::sqrt(dot(g, g));
-    const Vec3 n = scale(1.0 / gn, g);
     const double lambda = dot(sub(x, p), n);
     double T[9], TH[9], A[9], Ai[9];
     for (size_t a = 0; a < 3; a++) {

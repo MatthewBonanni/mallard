@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <random>
 #include <sstream>
 #include <string>
 #include <tuple>
@@ -28,6 +29,7 @@
 #include "input.h"
 #include "mesh.h"
 #include "physics.h"
+#include "region.h"
 #include "solver.h"
 #include "test_fixtures.h"
 #include "test_utils.h"
@@ -42,16 +44,43 @@ constexpr rtype GAMMA = 1.4_r;
 const char * SHAPES = R"(
 [[mesh.curved]]
 zone = "inner"
-shape = "circle"
-center = [0.0, 0.0]
-radius = 1.0
+shape = {type = "circle", center = [0.0, 0.0], radius = 1.0}
 
 [[mesh.curved]]
 zone = "outer"
-shape = "circle"
-center = [0.0, 0.0]
-radius = 1.384
+shape = {type = "circle", center = [0.0, 0.0], radius = 1.384}
 )";
+
+/**
+ * @brief Walls of the annulus mapped by A (row-major 2 x 2): the circles r = R
+ *        become the curves A (R cos t, R sin t), whose shapes are given.
+ */
+struct Walls {
+    std::string name;
+    double A[4];
+    std::string shapes;
+
+    std::array<double, 2> map(double x, double y) const { return {A[0] * x + A[1] * y, A[2] * x + A[3] * y}; }
+    std::array<double, 2> unmap(double x, double y) const {
+        const double det = A[0] * A[3] - A[1] * A[2];
+        return {(A[3] * x - A[1] * y) / det, (A[0] * y - A[2] * x) / det};
+    }
+};
+
+const Walls CIRCLES = {"circles", {1.0, 0.0, 0.0, 1.0}, SHAPES};
+
+// Ellipses (semi-axes 1 and 0.75, 1.384 and 1.038) turned by 30 degrees: a primitive, and an implicit function
+const Walls ELLIPSES = {"ellipses",
+                        {0.8660254037844387, -0.375, 0.5, 0.649519052838329},
+                        R"(
+[[mesh.curved]]
+zone = "inner"
+shape = {type = "ellipse", center = [0.0, 0.0], semi_axes = [1.0, 0.75], rotate = 30}
+
+[[mesh.curved]]
+zone = "outer"
+shape = {type = "implicit", f = "(x / 1.384)^2 + (y / 1.038)^2 - 1", rotate = 30}
+)"};
 
 /** @brief Nodes and cells of an O-grid of the annulus (n_r rings of n_t cells), nodes on the circles. */
 struct Annulus {
@@ -61,14 +90,15 @@ struct Annulus {
     std::vector<curved::SurfaceFace> high_order;  // with order > 1: the walls as Lagrange lines
 };
 
-Annulus annulus(uint32_t n_r, uint32_t n_t, bool triangles = false, int order = 1) {
+Annulus annulus(uint32_t n_r, uint32_t n_t, bool triangles = false, int order = 1, const Walls & walls = CIRCLES) {
     Annulus a;
     auto id = [&](uint32_t i, uint32_t j) { return j * n_t + (i % n_t); };
     for (uint32_t j = 0; j <= n_r; j++) {
         const double r = R_IN + (R_OUT - R_IN) * j / n_r;
         for (uint32_t i = 0; i < n_t; i++) {
             const double t = 2.0 * M_PI * i / n_t;
-            a.nodes.push_back({rtype(r * std::cos(t)), rtype(r * std::sin(t))});
+            const auto x = walls.map(r * std::cos(t), r * std::sin(t));
+            a.nodes.push_back({rtype(x[0]), rtype(x[1])});
         }
     }
     for (uint32_t j = 0; j < n_r; j++) {
@@ -109,20 +139,21 @@ Annulus annulus(uint32_t n_r, uint32_t n_t, bool triangles = false, int order = 
  *        onto the circles ("curved"), or high-order walls of the given order.
  */
 std::shared_ptr<Mesh> annulus_mesh(uint32_t n_r, uint32_t n_t, const std::string & geometry, bool triangles = false,
-                                   int order = 2) {
-    const Annulus a = annulus(n_r, n_t, triangles, geometry == "high_order" ? order : 1);
+                                   int order = 2, const Walls & walls = CIRCLES) {
+    const Annulus a = annulus(n_r, n_t, triangles, geometry == "high_order" ? order : 1, walls);
     auto mesh = std::make_shared<Mesh>();
     mesh->init_from_connectivity(a.nodes, a.cells, a.faces);
     mesh->high_order_faces = a.high_order;
-    const std::string input = "[mesh]\n" + std::string(geometry == "curved" ? SHAPES : "");
+    const std::string input = "[mesh]\n" + std::string(geometry == "curved" ? walls.shapes : "");
     mesh->apply_curved(curved::surfaces_of_mesh(*mesh, parse_toml(input)));
     mesh->copy_host_to_device();
     return mesh;
 }
 
-/** @brief Whether node n lies on a wall circle (of radius R). */
-bool on_circle(const Mesh & mesh, uint32_t n, double & R) {
-    const double r = std::hypot(double(mesh.h_node_coords(n, 0)), double(mesh.h_node_coords(n, 1)));
+/** @brief Whether node n lies on a wall (the image of the circle of radius R). */
+bool on_wall(const Mesh & mesh, uint32_t n, double & R, const Walls & walls) {
+    const auto u = walls.unmap(double(mesh.h_node_coords(n, 0)), double(mesh.h_node_coords(n, 1)));
+    const double r = std::hypot(u[0], u[1]);
     for (double c : {R_IN, R_OUT}) {
         if (std::abs(r - c) < precision_tol<double>(1e-12, 1e-6)) {
             R = c;
@@ -134,9 +165,10 @@ bool on_circle(const Mesh & mesh, uint32_t n, double & R) {
 
 /**
  * @brief int_cell f dA = closed-integral F dy (Green), F = int f dx, over the
- *        exact region of a cell: its wall faces are circular arcs.
+ *        exact region of a cell: its wall faces are arcs of the walls.
  */
-double exact_integral(const Mesh & mesh, uint32_t c, const std::function<double(double, double)> & F) {
+double exact_integral(const Mesh & mesh, uint32_t c, const std::function<double(double, double)> & F,
+                      const Walls & walls = CIRCLES) {
     const double g[8] = {-0.9602898564975363, -0.7966664774136267, -0.5255324099163290, -0.1834346424956498,
                          0.1834346424956498, 0.5255324099163290, 0.7966664774136267, 0.9602898564975363};
     const double w[8] = {0.1012285362903763, 0.2223810344533745, 0.3137066458778873, 0.3626837833783620,
@@ -149,10 +181,11 @@ double exact_integral(const Mesh & mesh, uint32_t c, const std::function<double(
         const double xa = double(mesh.h_node_coords(a, 0)), ya = double(mesh.h_node_coords(a, 1));
         const double xb = double(mesh.h_node_coords(b, 0)), yb = double(mesh.h_node_coords(b, 1));
         double R;
-        const bool arc = mesh.h_cells_of_face(f, 1) < 0 && on_circle(mesh, a, R);
+        const bool arc = mesh.h_cells_of_face(f, 1) < 0 && on_wall(mesh, a, R, walls);
         // Arcs in 8 pieces of Gauss-8: the integrals are exact to round-off
         const int pieces = arc ? 8 : 1;
-        double ta = std::atan2(ya, xa), tb = std::atan2(yb, xb);
+        const auto ua = walls.unmap(xa, ya), ub = walls.unmap(xb, yb);
+        double ta = std::atan2(ua[1], ua[0]), tb = std::atan2(ub[1], ub[0]);
         if (tb - ta > M_PI) tb -= 2.0 * M_PI;
         if (ta - tb > M_PI) tb += 2.0 * M_PI;
         for (int p = 0; p < pieces; p++) {
@@ -161,9 +194,10 @@ double exact_integral(const Mesh & mesh, uint32_t c, const std::function<double(
                 double x, y, dy;
                 if (arc) {
                     const double t = ta + s * (tb - ta);
-                    x = R * std::cos(t);
-                    y = R * std::sin(t);
-                    dy = R * std::cos(t) * (tb - ta);
+                    const auto on = walls.map(R * std::cos(t), R * std::sin(t));
+                    x = on[0];
+                    y = on[1];
+                    dy = walls.map(-R * std::sin(t), R * std::cos(t))[1] * (tb - ta);
                 } else {
                     x = xa + s * (xb - xa);
                     y = ya + s * (yb - ya);
@@ -192,12 +226,14 @@ struct Field {
 };
 
 /** @brief Exact cell averages of the field over the exact (curved) cells. */
-Kokkos::View<rtype *[N_CONSERVATIVE]>::host_mirror_type exact_averages(const Mesh & mesh, const Field & field) {
+Kokkos::View<rtype *[N_CONSERVATIVE]>::host_mirror_type exact_averages(const Mesh & mesh, const Field & field,
+                                                                     const Walls & walls) {
     Kokkos::View<rtype *[N_CONSERVATIVE]>::host_mirror_type avg("avg", mesh.n_cells);
     for (uint32_t c = 0; c < mesh.n_cells; c++) {
-        const double area = exact_integral(mesh, c, [](double x, double) { return x; });
+        const double area = exact_integral(mesh, c, [](double x, double) { return x; }, walls);
         for (int k = 0; k < 4; k++) {
-            avg(c, k) = rtype(exact_integral(mesh, c, [&](double x, double y) { return field.antiderivative(k, x, y); }) / area);
+            avg(c, k) = rtype(exact_integral(mesh, c, [&](double x, double y) { return field.antiderivative(k, x, y); },
+                                             walls) / area);
         }
     }
     return avg;
@@ -208,12 +244,12 @@ Kokkos::View<rtype *[N_CONSERVATIVE]>::host_mirror_type exact_averages(const Mes
  *        quadrature points, from exact averages over the exact curved cells.
  */
 double curved_reconstruction_error(uint32_t n_r, const std::string & geometry, int order, bool triangles = false,
-                                   const std::string & extra = "") {
-    auto mesh = annulus_mesh(n_r, 16 * n_r, geometry, triangles);
+                                   const std::string & extra = "", const Walls & walls = CIRCLES) {
+    auto mesh = annulus_mesh(n_r, 16 * n_r, geometry, triangles, 2, walls);
     const Field field;
     // Exact averages over the true cells, whatever geometry the scheme sees
-    auto truth = annulus_mesh(n_r, 16 * n_r, "curved", triangles);
-    auto avg = exact_averages(*truth, field);
+    auto truth = annulus_mesh(n_r, 16 * n_r, "curved", triangles, 2, walls);
+    auto avg = exact_averages(*truth, field, walls);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
     Euler euler = Euler::from_reference(GAMMA, 1.0, 1.0, 1.0);
     Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
@@ -262,21 +298,47 @@ double curved_reconstruction_error(uint32_t n_r, const std::string & geometry, i
 
 TEST(CurvedGeometry, CellAreasAndCentroidsMatchTheExactRegions) {
     // Projected walls give the exact annulus: every cell's area and centroid
-    // match those of its exact region (circular arcs on the walls)
-    for (bool triangles : {false, true}) {
-        auto mesh = annulus_mesh(3, 24, "curved", triangles);
-        ASSERT_TRUE(mesh->curved_geometry);
-        double total = 0.0;
-        for (uint32_t c = 0; c < mesh->n_cells; c++) {
-            const double area = exact_integral(*mesh, c, [](double x, double) { return x; });
-            const double xc = exact_integral(*mesh, c, [](double x, double) { return 0.5 * x * x; }) / area;
-            const double yc = exact_integral(*mesh, c, [](double x, double y) { return x * y; }) / area;
-            EXPECT_NEAR(double(mesh->h_cell_volume(c)), area, roundoff(1e-14) * 10 * area) << c;
-            EXPECT_NEAR(double(mesh->h_cell_coords(c, 0)), xc, roundoff(1e-13)) << c;
-            EXPECT_NEAR(double(mesh->h_cell_coords(c, 1)), yc, roundoff(1e-13)) << c;
-            total += double(mesh->h_cell_volume(c));
+    // match those of its exact region (arcs of the walls), for circles in
+    // closed form and for ellipses by closest-point projection
+    for (const Walls * walls : {&CIRCLES, &ELLIPSES}) {
+        for (bool triangles : {false, true}) {
+            auto mesh = annulus_mesh(3, 24, "curved", triangles, 2, *walls);
+            ASSERT_TRUE(mesh->curved_geometry);
+            double total = 0.0;
+            for (uint32_t c = 0; c < mesh->n_cells; c++) {
+                const double area = exact_integral(*mesh, c, [](double x, double) { return x; }, *walls);
+                const double xc = exact_integral(*mesh, c, [](double x, double) { return 0.5 * x * x; }, *walls) / area;
+                const double yc = exact_integral(*mesh, c, [](double x, double y) { return x * y; }, *walls) / area;
+                // Closest-point projections differentiate the shape's function numerically
+                const double tol = walls == &CIRCLES ? 1e-13 : 1e-12;
+                EXPECT_NEAR(double(mesh->h_cell_volume(c)), area, roundoff(tol) * area) << walls->name << c;
+                EXPECT_NEAR(double(mesh->h_cell_coords(c, 0)), xc, roundoff(1e-13)) << walls->name << c;
+                EXPECT_NEAR(double(mesh->h_cell_coords(c, 1)), yc, roundoff(1e-13)) << walls->name << c;
+                total += double(mesh->h_cell_volume(c));
+            }
+            const double det = walls->A[0] * walls->A[3] - walls->A[1] * walls->A[2];
+            EXPECT_NEAR(total, det * M_PI * (R_OUT * R_OUT - R_IN * R_IN), roundoff(1e-12)) << walls->name;
         }
-        EXPECT_NEAR(total, M_PI * (R_OUT * R_OUT - R_IN * R_IN), roundoff(1e-12));
+    }
+}
+
+TEST(CurvedGeometry, LegacyShapeKeysGiveTheSameGeometry) {
+    // shape = "circle" with center and radius beside it (before 0.9) is the
+    // circle region, bit for bit
+    const std::string legacy = "[mesh]\n[[mesh.curved]]\nzone = \"inner\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\n"
+                               "radius = 1.0\n[[mesh.curved]]\nzone = \"outer\"\nshape = \"circle\"\n"
+                               "center = [0.0, 0.0]\nradius = 1.384\n";
+    const Annulus a = annulus(3, 24, true);
+    auto old = std::make_shared<Mesh>();
+    old->init_from_connectivity(a.nodes, a.cells, a.faces);
+    const Input input = parse_toml(legacy);
+    old->apply_curved(curved::surfaces_of_mesh(*old, input));
+    EXPECT_TRUE(unused_keys(input).empty());
+    auto mesh = annulus_mesh(3, 24, "curved", true);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        EXPECT_EQ(old->h_cell_volume(c), mesh->h_cell_volume(c));
+        EXPECT_EQ(old->h_cell_coords(c, 0), mesh->h_cell_coords(c, 0));
+        EXPECT_EQ(old->h_cell_coords(c, 1), mesh->h_cell_coords(c, 1));
     }
 }
 
@@ -302,35 +364,43 @@ TEST(CurvedGeometry, StraightWallsAreSecondOrderAndHighOrderLinesConverge) {
 
 TEST(CurvedGeometry, CurvedFaceRulesCloseEveryCell) {
     // The area vectors of every cell's face quadrature sum to zero (free
-    // streams are preserved), and curved faces' points lie on the circles
-    auto mesh = annulus_mesh(3, 24, "curved", true);
-    const curved::Geometry & g = *mesh->curved_geometry;
-    const std::vector<std::array<double, 2>> ref = {{-0.7745966692414834, 0.0}, {0.0, 0.0}, {0.7745966692414834, 0.0}};
-    const std::vector<double> ref_w = {5.0 / 9.0, 8.0 / 9.0, 5.0 / 9.0};
-    std::vector<double> sum(2 * mesh->n_cells, 0.0);
-    std::vector<curved::Vec3> x, n;
-    std::vector<double> w;
-    uint32_t n_curved = 0;
-    for (uint32_t f = 0; f < mesh->n_faces; f++) {
-        g.face_rule(f, ref, ref_w, x, n, w);
-        for (size_t q = 0; q < w.size(); q++) {
-            for (int side = 0; side < 2; side++) {
-                const int32_t c = mesh->h_cells_of_face(f, side);
-                if (c < 0) continue;
-                for (size_t i = 0; i < 2; i++) sum[2 * static_cast<size_t>(c) + i] += (side == 0 ? 1.0 : -1.0) * w[q] * n[q][i];
+    // streams are preserved), and curved faces' points lie on the walls with
+    // the walls' normals
+    for (const Walls * walls : {&CIRCLES, &ELLIPSES}) {
+        auto mesh = annulus_mesh(3, 24, "curved", true, 2, *walls);
+        const curved::Geometry & g = *mesh->curved_geometry;
+        const std::vector<std::array<double, 2>> ref = {{-0.9061798459386640, 0.0}, {-0.5384693101056831, 0.0}, {0.0, 0.0},
+                                                        {0.5384693101056831, 0.0}, {0.9061798459386640, 0.0}};
+        const std::vector<double> ref_w = {0.2369268850561891, 0.4786286704993665, 0.5688888888888889,
+                                           0.4786286704993665, 0.2369268850561891};
+        std::vector<double> sum(2 * mesh->n_cells, 0.0);
+        std::vector<curved::Vec3> x, n;
+        std::vector<double> w;
+        uint32_t n_curved = 0;
+        for (uint32_t f = 0; f < mesh->n_faces; f++) {
+            g.face_rule(f, ref, ref_w, x, n, w);
+            for (size_t q = 0; q < w.size(); q++) {
+                for (int side = 0; side < 2; side++) {
+                    const int32_t c = mesh->h_cells_of_face(f, side);
+                    if (c < 0) continue;
+                    for (size_t i = 0; i < 2; i++) sum[2 * static_cast<size_t>(c) + i] += (side == 0 ? 1.0 : -1.0) * w[q] * n[q][i];
+                }
+                if (g.face_is_curved(f)) {
+                    const auto u = walls->unmap(x[q][0], x[q][1]);
+                    const double r = std::hypot(u[0], u[1]);
+                    EXPECT_NEAR(std::min(std::abs(r - R_IN), std::abs(r - R_OUT)), 0.0, precision_tol<double>(1e-14, 1e-6));
+                    // The normal is that of the wall, along the gradient A^-T A^-1 x of |A^-1 x|^2 / 2
+                    // (up to the shift that closes the cell, by the quadrature error of the area vector)
+                    const double * A = walls->A;
+                    const double gx = A[3] * u[0] - A[2] * u[1], gy = A[0] * u[1] - A[1] * u[0];
+                    EXPECT_NEAR(std::abs(n[q][0] * gy - n[q][1] * gx) / std::hypot(gx, gy), 0.0, 1e-6) << walls->name;
+                }
             }
-            if (g.face_is_curved(f)) {
-                const double r = std::hypot(x[q][0], x[q][1]);
-                EXPECT_NEAR(std::min(std::abs(r - R_IN), std::abs(r - R_OUT)), 0.0, precision_tol<double>(1e-14, 1e-6));
-                // The normal of a circle is radial
-                // (up to the shift that closes the cell, by the quadrature error of the area vector)
-                EXPECT_NEAR(std::abs(n[q][0] * x[q][1] - n[q][1] * x[q][0]) / r, 0.0, 1e-6);
-            }
+            n_curved += g.face_is_curved(f);
         }
-        n_curved += g.face_is_curved(f);
+        EXPECT_EQ(n_curved, 2u * 24u);
+        for (double s : sum) EXPECT_NEAR(s, 0.0, 1e-14) << walls->name;
     }
-    EXPECT_EQ(n_curved, 2u * 24u);
-    for (double s : sum) EXPECT_NEAR(s, 0.0, 1e-14);
 }
 
 TEST(CurvedGeometry, MeshesWithoutCurvedDataAreUnchanged) {
@@ -346,14 +416,19 @@ TEST(CurvedGeometry, MeshesWithoutCurvedDataAreUnchanged) {
     // A zone without a matching shape is an input error
     auto bad = std::make_shared<Mesh>();
     bad->init_from_connectivity(a.nodes, a.cells, a.faces);
-    EXPECT_THROW(curved::surfaces_of_mesh(*bad, parse_toml("[mesh]\n[[mesh.curved]]\nzone = \"wall\"\nshape = \"circle\"\n"
-                                                           "center = [0.0, 0.0]\nradius = 1.0\n")),
-                 InputError);
-    // So is a shape that misses the zone's nodes
-    EXPECT_THROW(bad->apply_curved(curved::surfaces_of_mesh(*bad, parse_toml("[mesh]\n[[mesh.curved]]\nzone = \"inner\"\n"
-                                                                              "shape = \"circle\"\ncenter = [0.3, 0.0]\n"
-                                                                              "radius = 1.0\n"))),
-                 InputError);
+    auto curve = [&](const std::string & zone, const std::string & shape) {
+        bad->apply_curved(curved::surfaces_of_mesh(*bad, parse_toml("[mesh]\n[[mesh.curved]]\nzone = \"" + zone +
+                                                                    "\"\nshape = " + shape + "\n")));
+    };
+    EXPECT_THROW(curve("wall", "{type = \"circle\", center = [0.0, 0.0], radius = 1.0}"), InputError);
+    // So are shapes that miss the zone's nodes, in closed form or not
+    EXPECT_THROW(curve("inner", "{type = \"circle\", center = [0.3, 0.0], radius = 1.0}"), InputError);
+    EXPECT_THROW(curve("inner", "{type = \"ellipse\", center = [0.0, 0.0], semi_axes = [1.0, 1.2]}"), InputError);
+    // and functions without a gradient on their zero set
+    EXPECT_THROW(curve("inner", "{type = \"implicit\", f = \"(x^2 + y^2 - 1)^2\"}"), InputError);
+    // Shapes are sharp surfaces
+    EXPECT_THROW(curve("inner", "{type = \"circle\", center = [0.0, 0.0], radius = 1.0, edge = 0.1}"), InputError);
+    EXPECT_FALSE(bad->curved_geometry);
 }
 
 TEST(CurvedGeometry, GmshHighOrderLinesCurveTheWalls) {
@@ -427,30 +502,150 @@ TEST(CurvedGeometry, GmshHighOrderLinesCurveTheWalls) {
     EXPECT_LT(std::abs(total - exact), 0.01 * std::abs(total_straight - exact));
 }
 
-using CurvedOrderParam = std::tuple<bool, int>;
+using CurvedOrderParam = std::tuple<bool, int, bool>;
 class CurvedTENOOrder : public ::testing::TestWithParam<CurvedOrderParam> {};
 
 TEST_P(CurvedTENOOrder, ReconstructionAtCurvedWallsConvergesAtDesignOrder) {
     // From exact averages over the curved cells, wall values converge at the
     // design order on curved geometry (fits of full degree at the walls); seen
-    // as straight-sided cells, the same averages give second order at best
+    // as straight-sided cells, the same averages give second order at best.
+    // Circles are projected in closed form; ellipses (a primitive and an
+    // implicit function, rotated) by closest-point iterations
     SKIP_IN_SINGLE_PRECISION("errors reach single-precision round-off");
-    const auto [triangles, order] = GetParam();
+    const auto [triangles, order, ellipses] = GetParam();
+    const Walls & walls = ellipses ? ELLIPSES : CIRCLES;
     const std::string method = "TENO" + std::to_string(order);
     const std::string cells = triangles ? "triangles" : "quadrilaterals";
-    const double e1 = curved_reconstruction_error(4, "curved", order, triangles);
-    const double e2 = curved_reconstruction_error(8, "curved", order, triangles);
-    verification::expect_order({"curved", method + ", curved walls", cells, "max wall-value error", {4, 8}, {e1, e2},
-                                double(order), order - 0.5});
-    const double s1 = curved_reconstruction_error(4, "straight", order, triangles);
-    const double s2 = curved_reconstruction_error(8, "straight", order, triangles);
-    verification::expect_order({"curved", method + ", straight-sided cells", cells, "max wall-value error", {4, 8},
-                                {s1, s2}, 2.0, -verification::UNBOUNDED, 2.3});
+    const std::string kind = ellipses ? " (ellipses)" : "";
+    // On the ellipses, 4 rings are not yet asymptotic for TENO4 (rate 2.9 from 4 to 8, 5.0 from 8 to 16)
+    const uint32_t n1 = ellipses ? 6 : 4, n2 = 2 * n1;
+    const double e1 = curved_reconstruction_error(n1, "curved", order, triangles, "", walls);
+    const double e2 = curved_reconstruction_error(n2, "curved", order, triangles, "", walls);
+    verification::expect_order({"curved", method + ", curved walls" + kind, cells, "max wall-value error",
+                                {double(n1), double(n2)}, {e1, e2}, double(order), order - 0.5});
+    const double s1 = curved_reconstruction_error(n1, "straight", order, triangles, "", walls);
+    const double s2 = curved_reconstruction_error(n2, "straight", order, triangles, "", walls);
+    verification::expect_order({"curved", method + ", straight-sided cells" + kind, cells, "max wall-value error",
+                                {double(n1), double(n2)}, {s1, s2}, 2.0, -verification::UNBOUNDED, 2.3});
     EXPECT_LT(e2, 0.1 * s2);
 }
 
 INSTANTIATE_TEST_SUITE_P(Curved, CurvedTENOOrder,
-                         ::testing::Combine(::testing::Values(false, true), ::testing::Values(3, 4, 5, 6)));
+                         ::testing::Combine(::testing::Values(false, true), ::testing::Values(3, 4, 5, 6),
+                                            ::testing::Values(false, true)));
+
+namespace {
+
+/** @brief The shape of a region table, as [[mesh.curved]] reads it. */
+curved::Shape shape_of(const std::string & table) {
+    const Input input = parse_toml("shape = " + table + "\n");
+    return curved::shape_of(std::make_shared<const region::Region>(input.at("shape"), "shape"), "wall");
+}
+
+/** @brief dp/dx of a projection by fourth-order differences of step e. */
+std::array<double, 9> differenced_jacobian(const curved::Shape & s, const curved::Vec3 & x, double length, double e) {
+    std::array<double, 9> J{};
+    double unused[9];
+    for (size_t b = 0; b < 3; b++) {
+        const double k[4] = {-2.0, -1.0, 1.0, 2.0}, w[4] = {1.0 / 12.0, -8.0 / 12.0, 8.0 / 12.0, -1.0 / 12.0};
+        for (size_t m = 0; m < 4; m++) {
+            curved::Vec3 y = x, p;
+            y[b] += k[m] * e;
+            s.project(y, length, p, unused);
+            for (size_t a = 0; a < 3; a++) J[3 * a + b] += w[m] * p[a] / e;
+        }
+    }
+    return J;
+}
+
+/** @brief An exact surface f(x, y) = 0 and grad f, with the region table describing it. */
+struct ExactCurve {
+    std::string name, table;
+    std::function<std::array<double, 3>(double, double)> f;  // f, df/dx, df/dy
+    double t0, t1;  // polar angles (about the origin) of the points tested
+};
+
+}  // namespace
+
+TEST(CurvedShapes, ProjectionsAreClosestPointsWithTheirDerivatives) {
+    // Points near each surface go to their closest points on it (on the exact
+    // surface, along its normal), and dp/dx matches differences of the
+    // projection. The union's points, away from its crease, go to the
+    // closest point of their circle
+    const double c30 = std::cos(M_PI / 6.0), s30 = std::sin(M_PI / 6.0);
+    const std::vector<ExactCurve> curves = {
+        {"rotated ellipse", "{type = \"ellipse\", center = [0.2, -0.1], semi_axes = [1.0, 0.5], rotate = 30, pivot = [0.2, -0.1]}",
+         [&](double x, double y) {
+             const double u = c30 * (x - 0.2) + s30 * (y + 0.1), v = -s30 * (x - 0.2) + c30 * (y + 0.1);
+             return std::array<double, 3>{u * u + 4.0 * v * v - 1.0, 2.0 * u * c30 - 8.0 * v * s30, 2.0 * u * s30 + 8.0 * v * c30};
+         }, 0.0, 2.0 * M_PI},
+        {"scaled circle", "{type = \"circle\", center = [0.0, 0.0], radius = 1.0, scale = [2.0, 1.0]}",
+         [](double x, double y) { return std::array<double, 3>{0.25 * x * x + y * y - 1.0, 0.5 * x, 2.0 * y}; }, 0.0, 2.0 * M_PI},
+        {"implicit", "{type = \"implicit\", f = \"x^4 + 2 * y^4 - 1\"}",
+         [](double x, double y) {
+             return std::array<double, 3>{std::pow(x, 4) + 2.0 * std::pow(y, 4) - 1.0, 4.0 * std::pow(x, 3), 8.0 * std::pow(y, 3)};
+         }, 0.0, 2.0 * M_PI},
+        {"union", "{type = \"union\", regions = [{type = \"circle\", center = [0.0, 0.0], radius = 1.0}, "
+                  "{type = \"circle\", center = [1.5, 0.0], radius = 1.0}]}",
+         [](double x, double y) { return std::array<double, 3>{x * x + y * y - 1.0, 2.0 * x, 2.0 * y}; }, 1.0, 2.0 * M_PI - 1.0},
+    };
+    std::mt19937 rng(7);
+    std::uniform_real_distribution<double> offset(-0.03, 0.03);
+    const double length = 0.1;
+    for (const ExactCurve & c : curves) {
+        const curved::Shape s = shape_of(c.table);
+        EXPECT_EQ(s.kind, curved::Shape::Kind::SURFACE) << c.name;
+        double worst_f = 0.0, worst_normal = 0.0, worst_J = 0.0;
+        for (int k = 0; k < 40; k++) {
+            // A point of the exact curve on the ray at polar angle t (bisection on f), moved off it
+            const double t = c.t0 + (c.t1 - c.t0) * (k + 0.5) / 40.0;
+            double lo = 0.05, hi = 3.0;
+            for (int it = 0; it < 200; it++) {
+                const double mid = 0.5 * (lo + hi);
+                (c.f(mid * std::cos(t), mid * std::sin(t))[0] < 0.0 ? lo : hi) = mid;
+            }
+            const curved::Vec3 x = {lo * std::cos(t) + offset(rng), lo * std::sin(t) + offset(rng), 0.0};
+            curved::Vec3 p;
+            double J[9];
+            s.project(x, length, p, J);
+            const auto f = c.f(p[0], p[1]);
+            const double gn = std::hypot(f[1], f[2]);
+            worst_f = std::max(worst_f, std::abs(f[0]) / gn);
+            worst_normal = std::max(worst_normal, std::abs((x[0] - p[0]) * f[2] - (x[1] - p[1]) * f[1]) / gn);
+            const auto D = differenced_jacobian(s, x, length, 1e-3);
+            for (size_t i = 0; i < 9; i++) worst_J = std::max(worst_J, std::abs(J[i] - D[i]));
+            EXPECT_DOUBLE_EQ(J[8], 1.0);
+            EXPECT_EQ(p[2], 0.0);
+        }
+        EXPECT_LT(worst_f, 1e-14) << c.name;
+        EXPECT_LT(worst_normal, 1e-13) << c.name;
+        EXPECT_LT(worst_J, 1e-8) << c.name;
+    }
+    // An implicit circle goes where the closed form does, with its Jacobian
+    {
+        const curved::Shape exact = shape_of("{type = \"circle\", center = [0.3, 0.1], radius = 0.8}");
+        const curved::Shape implicit = shape_of("{type = \"implicit\", f = \"(x - 0.3)^2 + (y - 0.1)^2 - 0.64\"}");
+        ASSERT_EQ(exact.kind, curved::Shape::Kind::CIRCLE);
+        double worst_p = 0.0, worst_J = 0.0;
+        for (int k = 0; k < 40; k++) {
+            const double t = 2.0 * M_PI * (k + 0.5) / 40.0;
+            const curved::Vec3 x = {0.3 + (0.8 + offset(rng)) * std::cos(t), 0.1 + (0.8 + offset(rng)) * std::sin(t), 0.0};
+            curved::Vec3 p, q;
+            double J[9], K[9];
+            exact.project(x, length, p, J);
+            implicit.project(x, length, q, K);
+            for (size_t i = 0; i < 3; i++) worst_p = std::max(worst_p, std::abs(p[i] - q[i]));
+            for (size_t i = 0; i < 9; i++) worst_J = std::max(worst_J, std::abs(J[i] - K[i]));
+        }
+        EXPECT_LT(worst_p, 1e-14);
+        EXPECT_LT(worst_J, 1e-11);
+    }
+    // Circles, alone and turned or scaled uniformly, keep their closed form
+    EXPECT_EQ(shape_of("{type = \"circle\", center = [0.5, 0.0], radius = 1.0}").kind, curved::Shape::Kind::CIRCLE);
+    const curved::Shape turned = shape_of("{type = \"cylinder\", center = [0.0, 0.0], radius = 1.0, scale = 2, rotate = 40}");
+    EXPECT_EQ(turned.kind, curved::Shape::Kind::CIRCLE);
+    EXPECT_DOUBLE_EQ(turned.radius, 2.0);
+}
 
 namespace {
 
