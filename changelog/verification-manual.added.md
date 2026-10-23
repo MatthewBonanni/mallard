@@ -1,0 +1,1 @@
+- A verification manual (`docs/verification/`): the observed orders of accuracy of every reconstruction on every cell type, the Euler and Navier-Stokes operators, the time integrators, boundary conditions, curved boundaries, remapping and mixtures, generated from the convergence tests by `tools/docs/verification.py` (#342)
