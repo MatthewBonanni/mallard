@@ -93,7 +93,7 @@ Three ways to install Mallard, quickest first:
 
 | | Best for | Compiling |
 |---|---|---|
-| [Container](#container) (Docker, Apptainer) | Trying Mallard; workstations; one GPU node | None |
+| [Container](#container) (Docker, Apptainer, Kubernetes) | Trying Mallard; workstations; GPU nodes; Kubernetes clusters | None |
 | [Spack](#spack) | Clusters: your compilers, MPI and GPUs | Automatic |
 | [From source](#from-source) | Development; options the others lack | CMake |
 
@@ -134,7 +134,9 @@ apptainer exec mallard.sif bash -c 'cp -r $MALLARD_SHARE/examples $MALLARD_SHARE
 cd examples/sod && apptainer exec ../../mallard.sif mallard -i input.toml
 ```
 
-For a GPU, pull `docker://ghcr.io/matthewbonanni/mallard:cuda` and add `--nv`: `apptainer exec --nv mallard-cuda.sif mallard -i input.toml`. The images' Open MPI runs ranks within a node; across nodes, use Spack or a source build with the cluster's MPI.
+For a GPU, pull `docker://ghcr.io/matthewbonanni/mallard:cuda` and add `--nv`: `apptainer exec --nv mallard-cuda.sif mallard -i input.toml`.
+
+On Kubernetes, a `Job` runs a case on one GPU node with its files on a volume, and resumes from a restart file after preemption; an `MPIJob` ([Kubeflow MPI Operator](https://github.com/kubeflow/mpi-operator)) runs it across nodes, with the images' Open MPI in the launcher and the workers ([manifests and guide](docs/guide/running.md#kubernetes)). On clusters with their own MPI and no Kubernetes, run across nodes with Spack or a source build.
 
 ### Spack
 
