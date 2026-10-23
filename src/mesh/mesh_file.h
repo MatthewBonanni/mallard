@@ -74,6 +74,9 @@ std::vector<std::vector<uint32_t>> cells_from_faces(uint32_t n_cells, const std:
                                                     const std::vector<std::array<int64_t, 2>> & face_cells,
                                                     const std::string & source);
 
+/** @brief The cell dimension of a CGNS file's base. */
+int cgns_dimension(const std::string & filename);
+
 /** @brief Whether this build reads CGNS files. */
 bool have_cgns();
 

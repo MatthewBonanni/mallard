@@ -1,5 +1,5 @@
 # Mallard for NVIDIA GPUs: CUDA with an OpenMP host backend, MPI with NCCL, HDF5, CGNS and zlib;
-# 2D (mallard) and 3D (mallard3d).
+# 2D (mallard2d) and 3D (mallard3d), both run as mallard.
 #
 #   docker build -f docker/Dockerfile.cuda -t mallard:cuda .
 #
@@ -32,7 +32,7 @@ RUN set -eu; \
     JOBS=${JOBS} /src/docker/build.sh /src /opt/mallard \
         -DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_$arch=ON -DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_NCCL=ON \
         -DCMAKE_CXX_COMPILER=/src/src/external/kokkos/bin/nvcc_wrapper; \
-    for exe in mallard mallard3d; do \
+    for exe in mallard2d mallard3d; do \
         built=$(cuobjdump --list-elf /opt/mallard/bin/$exe | grep -o 'sm_[0-9]*' | sort -u | tr '\n' ' '); \
         echo "$exe: $built"; \
         for cc in $CUDA_ARCHS; do \
