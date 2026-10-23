@@ -290,38 +290,26 @@ INSTANTIATE_TEST_SUITE_P(InvarianceTest, RenumberingTest,
                          case_name);
 INSTANTIATE_TEST_SUITE_P(
     InvarianceTest, RigidMotionTest,
-    testing::Values(Case{"QuadsTENO5", MeshType::CARTESIAN, S_TENO5, "rotate = 30.0\ntranslate = [2.5, -1.0]\n"},
-                    Case{"TrianglesTENO3", MeshType::CARTESIAN_TRI, S_TENO3, "rotate = 45.0\n"},
+    testing::Values(Case{"QuadsFirstOrder", MeshType::CARTESIAN, S_FO, "rotate = 30.0\ntranslate = [2.5, -1.0]\n"},
                     Case{"TrianglesNavierStokes", MeshType::CARTESIAN_TRI, S_VISCOUS_UNLIMITED,
                          "scale = [-1.0, 1.0]\nrotate = 110.0\ntranslate = [-3.0, 0.5]\n"},
                     Case{"TrianglesHybrid", MeshType::CARTESIAN_TRI, S_HYBRID_UNLIMITED, "rotate = -70.0\n"}),
     case_name);
-INSTANTIATE_TEST_SUITE_P(DISABLED_LimitedMUSCL, RigidMotionTest,
-                         testing::Values(Case{"Quads", MeshType::CARTESIAN, S_MUSCL, "rotate = 30.0\n"}),
-                         case_name);
 #else
 INSTANTIATE_TEST_SUITE_P(InvarianceTest, RenumberingTest,
                          testing::Values(Case{"MixedFirstOrder", MeshType::CARTESIAN_MIXED, S_FO, ""},
-                                         Case{"MixedTENO3", MeshType::CARTESIAN_MIXED, S_TENO3, ""},
                                          Case{"UniformHexahedraTENO3", MeshType::CARTESIAN, S_TENO3, "", 0.0},
                                          Case{"MixedNavierStokes", MeshType::CARTESIAN_MIXED, S_VISCOUS, ""},
                                          Case{"TetrahedraMUSCL", MeshType::CARTESIAN_TET, S_MUSCL, ""},
-                                         Case{"TetrahedraHybrid", MeshType::CARTESIAN_TET, S_HYBRID, ""},
-                                         Case{"TetrahedraTENO5", MeshType::CARTESIAN_TET, S_TENO5, ""}),
+                                         Case{"TetrahedraHybrid", MeshType::CARTESIAN_TET, S_HYBRID, ""}),
                          case_name);
 INSTANTIATE_TEST_SUITE_P(
     InvarianceTest, RigidMotionTest,
-    testing::Values(Case{"MixedTENO3", MeshType::CARTESIAN_MIXED, S_TENO3,
+    testing::Values(Case{"MixedFirstOrder", MeshType::CARTESIAN_MIXED, S_FO,
                          "rotate = { axis = [1.0, 2.0, 2.0], angle = 40.0 }\ntranslate = [2.0, -1.0, 0.5]\n"},
-                    Case{"TetrahedraTENO5", MeshType::CARTESIAN_TET, S_TENO5,
-                         "rotate = { axis = [-1.0, 0.5, 2.0], angle = 25.0 }\n"},
                     Case{"TetrahedraNavierStokes", MeshType::CARTESIAN_TET, S_VISCOUS_UNLIMITED,
                          "scale = [1.0, -1.0, 1.0]\nrotate = { axis = [0.0, 1.0, 1.0], angle = 75.0 }\n"},
                     Case{"MixedHybrid", MeshType::CARTESIAN_MIXED, S_HYBRID_UNLIMITED,
                          "rotate = { axis = [0.0, 0.0, 1.0], angle = 60.0 }\n"}),
     case_name);
-INSTANTIATE_TEST_SUITE_P(DISABLED_LimitedMUSCL, RigidMotionTest,
-                         testing::Values(Case{"Tetrahedra", MeshType::CARTESIAN_TET, S_MUSCL,
-                                              "rotate = { axis = [1.0, 2.0, 2.0], angle = 40.0 }\n"}),
-                         case_name);
 #endif

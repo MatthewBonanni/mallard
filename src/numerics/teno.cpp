@@ -1779,7 +1779,7 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
             }
         }
 
-        // Smoothness-indicator matrix: M_lm = sum_{1<=|beta|<=r} |beta|!/beta! int D^beta phi_l D^beta phi_m
+        // Smoothness-indicator matrix: M_lm = sum_{1<=|beta|<=r} int D^beta phi_l D^beta phi_m
         {
             const uint32_t n_nodes = mesh->h_n_nodes_of_cell(i);
             std::vector<double> px(n_nodes), py(n_nodes);
@@ -1795,7 +1795,6 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
                 for (int t = 0; t < p; t++) c *= (a - t);
                 return c;
             };
-            auto binomial = [&](int n, int k) { return falling(n, k) / falling(k, k); };
             auto si_point = [&](double x, double y, double w) {
                 for (int bp = 0; bp <= r; bp++) {
                     for (int bq = 0; bp + bq <= r; bq++) {
@@ -1807,10 +1806,8 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
                                        ? falling(a, bp) * falling(b, bq) * std::pow(x, a - bp) * std::pow(y, b - bq)
                                        : 0.0;
                         }
-                        // The binomial weight makes each degree's sum the squared norm of the derivative tensor
-                        const double wb = w * binomial(bp + bq, bp);
                         for (uint8_t l = 0; l < nk; l++) {
-                            for (size_t m = 0; m < nk; m++) M[l * nk + m] += wb * d[l] * d[m];
+                            for (size_t m = 0; m < nk; m++) M[l * nk + m] += w * d[l] * d[m];
                         }
                     }
                 }
@@ -2656,35 +2653,13 @@ struct TENOFunctor {
         // the weights cannot overflow (even in single precision)
         const rtype sigma = sigma_out(i_cell);
         const rtype cutoff = (C_T > 0.0_r) ? C_T : teno::adaptive_CT(sigma, sigma_threshold, sigma_upper);
-        rtype si_K = smoothness<NK>(cK, S) + eps;
+        const rtype si_K = smoothness<NK>(cK, S) + eps;
         rtype si_small[teno::MAX_FACES] = {};
-        for (uint8_t s = 0; s < n_faces; s++) {
-            if (valid[s]) si_small[s] = smoothness<teno::NK_SMALL>(cS[s], S) + eps;
-        }
-        // The two shear waves of a 3D face select together, on the sum of their
-        // indicators, which does not depend on the choice of tangents
-        if (N_DIM == 3 && characteristic && var >= 3) {
-            const uint8_t other = static_cast<uint8_t>(7 - var);
-            rtype c[NK];
-            for (uint8_t l = 0; l < NK; l++) {
-                rtype a[N_CONSERVATIVE];
-                FOR_I_CONSERVATIVE a[i] = coeffs(j - round_begin, l, i);
-                c[l] = project(L, other, a);
-            }
-            si_K += smoothness<NK>(c, S);
-            for (uint8_t s = 0; s < n_faces; s++) {
-                if (!valid[s]) continue;
-                for (uint8_t l = 0; l < teno::NK_SMALL; l++) {
-                    rtype a[N_CONSERVATIVE];
-                    FOR_I_CONSERVATIVE a[i] = small_coeffs(j - round_begin, s, l, i);
-                    c[l] = project(L, other, a);
-                }
-                si_small[s] += smoothness<teno::NK_SMALL>(c, S);
-            }
-        }
         rtype si_min = si_K;
         for (uint8_t s = 0; s < n_faces; s++) {
-            if (valid[s]) si_min = Kokkos::fmin(si_min, si_small[s]);
+            if (!valid[s]) continue;
+            si_small[s] = smoothness<teno::NK_SMALL>(cS[s], S) + eps;
+            si_min = Kokkos::fmin(si_min, si_small[s]);
         }
         const rtype gK = Kokkos::pow(si_min / si_K, 6.0_r);
         rtype g_small[teno::MAX_FACES] = {};
@@ -3408,9 +3383,8 @@ namespace {
 // which differ from version 6 at round-off; version 8 bounds 3D Lebesgue constants by 4 (#126, #229);
 // version 9 records where the tables were set up (the execution space, or "host"); version 10 holds
 // each 3D cell's moments in place of its smoothness-indicator matrix; version 11 ranks 2D candidates
-// in the mesh-spacing metric and mirrors them only across the boundary faces beneath them (#382);
-// version 12 weights the 2D smoothness-indicator matrices so that they do not depend on the axes (#436)
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-12";
+// in the mesh-spacing metric and mirrors them only across the boundary faces beneath them (#382)
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-11";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {
