@@ -48,6 +48,7 @@
 #include "distribution.h"
 #include "halo_exchange.h"
 #include "log.h"
+#include "run_control.h"
 #include "check.h"
 #include "memory_tracker.h"
 #include "numerics_preset.h"
@@ -94,6 +95,14 @@ struct DirichletBoundary {
     std::vector<Expression> W;
 };
 
+/** @brief Thrown inside the time loop when the state stops being valid; run() handles it. */
+struct DivergedError : std::exception {
+    const char * what() const noexcept override { return "solution diverged"; }
+};
+
+/** @brief Exit status of a run stopped on request (signal, `Mallard ctl stop`, STOP file) after writing a restart. */
+constexpr int EXIT_STOPPED = 3;
+
 class Solver {
     public:
         Solver();
@@ -125,6 +134,16 @@ class Solver {
          * @return Exit status.
          */
         int run();
+
+        /**
+         * @brief Whether run() takes requests from signals and serves the
+         *        control socket (the executable does; tests drive run_control
+         *        directly).
+         */
+        void enable_control(bool on) { control_enabled = on; }
+
+        /** @brief Applies one runtime setting on every rank: whether it was accepted, and what changed or why not. */
+        std::pair<bool, std::string> apply_setting(const std::string & key, const std::string & value);
 
         /**
          * @brief Advance the solution by one time step. With chemistry, the
@@ -243,6 +262,7 @@ class Solver {
         /** @brief Adds the sponge-layer sources to the RHS per unit volume (owned cells). */
         void apply_sponges(const State & solution, const State & rhs);
         void calc_dt();
+        rtype reduce_dt(rtype local);
         /**
          * @brief Error-controlled steps: whether step_controller accepts the
          *        step just taken (else the solution is back at U^n).
@@ -254,6 +274,23 @@ class Solver {
         /** @brief The time the next step must not pass: t_stop or the next time-based output. */
         rtype next_target_time() const;
         void check_fields();
+
+        // Run control and divergence (see run_control.h)
+        void save_last_good();
+        void save_last_good_if_valid(const Kokkos::View<rtype *> & reduced);
+        void note_last_good();
+        void restore_last_good();
+        std::string describe_invalid_cells();
+        [[noreturn]] void diverged();
+        void act_on_requests();
+        void apply_commands();
+        std::string write_restarts();
+        /** @brief What restart files carry besides the cells: statistics weights, step-control state. */
+        RestartAttributes restart_attributes() const;
+        void write_checkpoint();
+        void poll_control_files();
+        void publish_status();
+        std::string stop_conditions() const;
 
         // A whole step (calc_dt and take_step) as one CUDA graph; see solver_graph.cpp
         std::string step_graph_unsupported() const;
@@ -503,9 +540,33 @@ class Solver {
         bool cuda_graphs = true;               // [run] cuda_graphs
         bool use_step_graph = false;
         void * step_graph_exec = nullptr;      // cudaGraphExec_t
-        Kokkos::View<rtype> step_dt_cfl1;      // device: local, then global minimum
+        Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests], local, then reduced
         Kokkos::View<rtype *> step_scalars;    // device: [t, t_target, dt_scales...]
-        Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> step_io;  // pinned: [t, t_target, dt, dt_cfl1, accepted]
+        Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> step_io;  // pinned: [t, t_target, requests, dt, reduced]
+
+        // Run control
+        bool control_enabled = false;
+        bool control_socket = true;              // [run] control_socket
+        uint64_t control_file_interval = 0;      // [run] control_file_interval
+        int control_contributed = 0;             // this rank's requests in the last time-step reduction
+        int control_reduced = 0;                 // every rank's
+        bool checkpoint_requested = false;
+        std::string control_stop;                // why a request stopped the run, else empty
+        std::string stop_file_note;
+        std::vector<run_control::Command> checkpoint_replies, stop_replies;
+        std::unique_ptr<DataWriter> checkpoint_writer;  // restarts on request if no [[write_data]] writes them
+        bool publishing = false;
+        std::vector<std::pair<std::string, std::string>> monitor_values;
+
+        // Divergence: the state at the start of the last step whose state was valid
+        bool keep_last_good = true;              // [run] keep_last_good
+        State last_good;
+        Kokkos::View<rtype *> last_good_T_seed;
+        bool last_good_set = false;
+        uint64_t last_good_step = 0;
+        rtype last_good_t = 0.0;
+        double last_good_pending = 0.0;
+        bool stepped_past_divergence = false;    // a step graph went on from the invalid state
 
         bool distribute = true;
         int halo_layers = 0;

@@ -481,6 +481,29 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
     }
 }
 
+std::string Probes::set_interval(const std::string & name, uint64_t steps) {
+    for (auto & p : probes) {
+        if (p->name != name) continue;
+        if (p->interval == 0) return "is written every time_interval; set that instead";
+        if (steps == 0) return "interval must be positive";
+        p->interval = steps;
+        return "";
+    }
+    return "no [[probes]] named " + name;
+}
+
+std::string Probes::set_time_interval(const std::string & name, rtype value, rtype t) {
+    for (auto & p : probes) {
+        if (p->name != name) continue;
+        if (p->interval > 0) return "is written every interval steps; set that instead";
+        if (!(value > 0.0_r)) return "time_interval must be positive";
+        p->time_interval = value;
+        p->n_written = static_cast<uint64_t>(std::floor(t / value + precision_tol(1e-9, 1e-5))) + 1;
+        return "";
+    }
+    return "no [[probes]] named " + name;
+}
+
 void Probes::resume([[maybe_unused]] uint64_t step, rtype t) {
     const rtype tol = precision_tol(1e-9, 1e-5);
     for (auto & pp : probes) {

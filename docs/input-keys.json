@@ -3838,6 +3838,24 @@
   ],
   "type": "number"
  },
+ "run.control_file_interval": {
+  "default": "0",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "integer"
+ },
+ "run.control_socket": {
+  "default": "true",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "bool"
+ },
  "run.cuda_graphs": {
   "default": "true",
   "dims": [
@@ -3853,6 +3871,15 @@
    3
   ],
   "set_in": []
+ },
+ "run.keep_last_good": {
+  "default": "true",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "bool"
  },
  "run.n_steps": {
   "default": "0",

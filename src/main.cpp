@@ -20,6 +20,7 @@
 #include "input.h"
 #include "log.h"
 #include "parallel/comm.h"
+#include "run_control.h"
 #include "solver/solver.h"
 
 namespace {
@@ -28,6 +29,7 @@ void usage(const char * program) {
     std::cerr << "Usage: " << program << " -i input.toml [Kokkos options, e.g. --kokkos-num-threads=8]\n"
               << "       " << program << " --check input.toml [--ranks N] [--throughput CELLS_PER_S | --steps N]"
               << " [--quality-vtu PREFIX] [--catalog KEYS.json]\n"
+              << "       " << program << " ctl <run-dir> status | checkpoint | stop | set <key>=<value> ...\n"
               << "       " << program << " new <template> [directory]   (" << program << " new --list)\n"
               << "       " << program << " upgrade-input old.toml > new.toml\n"
               << "       " << program << " --version\n";
@@ -43,6 +45,7 @@ struct Subcommand {
 
 constexpr Subcommand subcommands[] = {
     {"new", case_template::new_main},
+    {"ctl", run_control::ctl_main},
     {"upgrade-input", input_upgrade::main},
 };
 
@@ -119,6 +122,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // A checkpoint requested while MPI and the device start up is kept for the first step
+    run_control::install_signal_handlers();
     // MPI before Kokkos, so Kokkos can map each rank to its own device
     comm::Session session(argc, argv);
     if (!comm::is_root()) std::cout.rdbuf(nullptr);
@@ -135,8 +140,9 @@ int main(int argc, char* argv[]) {
                 print_check(report);
                 status = report.ok() ? 0 : 1;
             } else {
+                solver.enable_control(true);
                 solver.init(input_file);
-                solver.run();
+                status = solver.run();
             }
         } catch (const InputError & e) {
             error = input_file + ": " + error_text(e);

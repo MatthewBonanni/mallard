@@ -1049,6 +1049,9 @@ void Solver::init_run_parameters() {
     cuda_graphs = find_value_or<bool>(input, "run", "cuda_graphs", true);
     t_stop = find_real_or(input, "run", "t_stop", dim::time, -1.0);
     t_wall_stop = find_real_or(input, "run", "t_wall_stop", dim::time, -1.0);
+    keep_last_good = find_value_or<bool>(input, "run", "keep_last_good", true);
+    control_socket = find_value_or<bool>(input, "run", "control_socket", true);
+    control_file_interval = find_value_or<uint64_t>(input, "run", "control_file_interval", 0);
 }
 
 void Solver::init_output() {
@@ -1157,14 +1160,18 @@ void Solver::init_output() {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
     }
-    if (!input.contains("write_data")) {
-        return;
+    if (input.contains("write_data")) {
+        for (const auto & output : find_value<std::vector<Input>>(input, "write_data")) {
+            data_writers.push_back(std::make_unique<DataWriter>());
+            data_writers.back()->init(output, data, mesh, restart_variables());
+            data_writers.back()->set_async(async_output, io_threads);
+        }
     }
-    std::vector<Input> outputs = find_value<std::vector<Input>>(input, "write_data");
-    for (const auto & output : outputs) {
-        data_writers.push_back(std::make_unique<DataWriter>());
-        data_writers.back()->init(output, data, mesh, restart_variables());
-        data_writers.back()->set_async(async_output, io_threads);
+    if (std::none_of(data_writers.begin(), data_writers.end(),
+                     [](const auto & writer) { return writer->get_format() == DataFormat::RESTART; })) {
+        const Input table(Input::table_type{{"prefix", "restart"}, {"format", "restart"}, {"interval", 1}});
+        checkpoint_writer = std::make_unique<DataWriter>();
+        checkpoint_writer->init(table, data, mesh, restart_variables());
     }
 }
 
@@ -1192,6 +1199,7 @@ void Solver::allocate_memory() {
                                                               face_reconstruction->n_face_quadrature_points());
     face_flux = Kokkos::View<rtype *[N_CONSERVATIVE]>("face_flux", mesh->n_faces);
     cfl_local = Kokkos::View<rtype *>("cfl_local", mesh->n_cells);
+    if (keep_last_good) last_good = State("last_good", mesh->n_cells, n_species);
     if (writes_variable(input, "P_MAX")) {
         p_max = Kokkos::View<rtype *>("p_max", mesh->n_cells);
         h_p_max = Kokkos::create_mirror_view(p_max);
@@ -1474,61 +1482,83 @@ int Solver::run() {
     progress_run_start = progress();
     n_progress_rows = 0;
 
-    calc_dt();
-    // Monitors before the progress row, which reports their values
-    if (step == 0) {
-        Kokkos::Timer output_timer;
-        write_integrals();
-        t_wall_output += output_timer.seconds();
-    }
-    print_progress();
-    if (step == 0) {
-        Kokkos::Timer output_timer;
-        copy_device_to_host();
-        write_data(true);
-        write_probes();
-        t_wall_output += output_timer.seconds();
-    }
+    // Stop signals are deferred to the end of a step only while this runs
+    struct Accepting {
+        bool on;
+        explicit Accepting(bool on_) : on(on_) { if (on) run_control::set_accepting(true); }
+        ~Accepting() { if (on) run_control::set_accepting(false); }
+    } accepting(control_enabled);
+    run_control::Server server;
+    publishing = control_enabled && control_socket && comm::is_root() && server.start();
+    control_stop.clear();
+    checkpoint_requested = false;
+
     std::string stop;
-    // Strang splitting with the half steps of consecutive steps fused into one
-    // chemistry call, except where output, checks or the end read the state
-    defer_chemistry = reacting && fuse_chemistry;
-    use_step_graph = step_graph_unsupported().empty();
-    while ((stop = stop_reason()).empty()) {
-        Kokkos::Timer step_timer;
-        // The first step runs kernel by kernel, which also sets up what the
-        // kernels allocate on first use
-        if (use_step_graph && step > step_run_start) {
-            graph_step();
-        } else {
-            calc_dt();
-            take_step();
+    try {
+        calc_dt();
+        // Monitors before the progress row, which reports their values
+        if (step == 0) {
+            Kokkos::Timer output_timer;
+            write_integrals();
+            t_wall_output += output_timer.seconds();
         }
-        if (chemistry_pending > 0.0 && state_needed()) {
-            advance_chemistry(chemistry_pending);
-            chemistry_pending = 0.0;
-            halo_current = false;
+        print_progress();
+        publish_status();
+        if (step == 0) {
+            Kokkos::Timer output_timer;
+            copy_device_to_host();
+            write_data(true);
+            write_probes();
+            t_wall_output += output_timer.seconds();
         }
-        if (p_max.is_allocated()) update_p_max();
-        if (statistics.due(step, t)) {
-            update_primitives();
-            statistics.sample(step, t, cell_sampler(), mesh->n_owned());
+        // Strang splitting with the half steps of consecutive steps fused into one
+        // chemistry call, except where output, checks or the end read the state
+        defer_chemistry = reacting && fuse_chemistry;
+        use_step_graph = step_graph_unsupported().empty();
+        while ((stop = stop_reason()).empty()) {
+            Kokkos::Timer step_timer;
+            // The first step runs kernel by kernel, which also sets up what the
+            // kernels allocate on first use
+            if (use_step_graph && step > step_run_start) {
+                graph_step();
+            } else {
+                calc_dt();
+                take_step();
+            }
+            act_on_requests();
+            if (chemistry_pending > 0.0 && state_needed()) {
+                advance_chemistry(chemistry_pending);
+                chemistry_pending = 0.0;
+                halo_current = false;
+            }
+            check_fields();
+            if (p_max.is_allocated()) update_p_max();
+            if (statistics.due(step, t)) {
+                update_primitives();
+                statistics.sample(step, t, cell_sampler(), mesh->n_owned());
+            }
+            t_wall_stepping += step_timer.seconds();
+            Kokkos::Timer output_timer;
+            write_forces();
+            write_integrals();
+            t_wall_output += output_timer.seconds();
+            if (step % check_interval == 0) {
+                Kokkos::Timer check_timer;
+                print_progress();
+                t_wall_checks += check_timer.seconds();
+            }
+            output_timer.reset();
+            write_data();
+            write_probes();
+            if (checkpoint_requested) write_checkpoint();
+            t_wall_output += output_timer.seconds();
+            poll_control_files();
+            publish_status();
         }
-        check_fields();
-        t_wall_stepping += step_timer.seconds();
-        Kokkos::Timer output_timer;
-        write_forces();
-        write_integrals();
-        t_wall_output += output_timer.seconds();
-        if (step % check_interval == 0) {
-            Kokkos::Timer check_timer;
-            print_progress();
-            t_wall_checks += check_timer.seconds();
-        }
-        output_timer.reset();
-        write_data();
-        write_probes();
-        t_wall_output += output_timer.seconds();
+    } catch (const DivergedError &) {
+        defer_chemistry = false;
+        destroy_step_graph();
+        diverged();
     }
     defer_chemistry = false;
     destroy_step_graph();
@@ -1536,13 +1566,21 @@ int Solver::run() {
     Kokkos::Timer output_timer;
     copy_device_to_host();
     write_data(true);
+    const std::string restart_file = control_stop.empty() ? std::string() : write_restarts();
     for (auto & writer : data_writers) writer->finish();
+    if (checkpoint_writer) checkpoint_writer->finish();
     t_wall_output += output_timer.seconds();
     print_summary(stop);
-    return 0;
+    for (auto & command : stop_replies) {
+        run_control::reply(command, "stopped at step " + std::to_string(step) + ", t = " + logging::real(double(t)) +
+                                        "; restart: " + restart_file);
+    }
+    stop_replies.clear();
+    return control_stop.empty() ? 0 : EXIT_STOPPED;
 }
 
 std::string Solver::stop_reason() const {
+    if (!control_stop.empty()) return control_stop;
     if (n_steps > 0 && step >= n_steps) return "n_steps = " + logging::count(n_steps) + " reached";
     if (t_stop > 0 && t >= t_stop) return "t_stop = " + logging::real(double(t_stop)) + " reached";
     if (t_wall_stop > 0 && timer.seconds() >= double(t_wall_stop)) {
@@ -1552,7 +1590,7 @@ std::string Solver::stop_reason() const {
 }
 
 bool Solver::state_needed() const {
-    if (!stop_reason().empty() || step % check_interval == 0) return true;
+    if (!stop_reason().empty() || checkpoint_requested || step % check_interval == 0) return true;
     for (const auto & writer : data_writers) {
         if (writer->due(step, t)) return true;
     }
@@ -1634,6 +1672,9 @@ void Solver::print_progress() {
     }
     logging::line(row);
 
+    monitor_values = {{"monitors_step", std::to_string(step)}};
+    for (const auto & [name, value] : status.monitors) monitor_values.emplace_back(name, format("%.6g", value));
+
     if (run_log_on) {
         const MemoryUsage m = memory_usage();
         const auto largest = comm::allreduce(std::array<double, 4>{m.host, m.host_peak, m.device, m.device_total},
@@ -1707,6 +1748,8 @@ void Solver::print_setup() const {
     logging::item("CUDA graphs", no_graph.empty() ? "one per step" : "no: " + no_graph);
 #endif
     if (check_nan) logging::item("NaN check", "every step");
+    logging::item("Divergence", std::string("stop at the first non-finite value") +
+                                    (keep_last_good ? ", writing the last valid state" : ""));
     if (les_on) logging::items(les.summary());
     if (tfles_on) logging::items(thickened_flame.summary());
     if (pasr_on) logging::items(pasr.summary());
@@ -1847,11 +1890,15 @@ void Solver::check_fields() {
         }, n_bad_species);
         n_bad += comm::allreduce(n_bad_species, comm::Op::SUM);
     }
-    if (n_bad > 0) {
-        std::stringstream msg;
-        msg << "Non-finite values found in solution at step " << step << ", t = " << t << ".";
-        throw std::runtime_error(msg.str());
+    if (n_bad > 0) throw DivergedError();
+}
+
+RestartAttributes Solver::restart_attributes() const {
+    RestartAttributes attributes = statistics.attributes();
+    if (step_controller.enabled()) {
+        for (const auto & a : step_controller.attributes()) attributes.push_back(a);
     }
+    return attributes;
 }
 
 void Solver::write_data(bool force) {
@@ -1864,10 +1911,7 @@ void Solver::write_data(bool force) {
     }
     update_primitives();
     copy_device_to_host();
-    RestartAttributes attributes = statistics.attributes();
-    if (step_controller.enabled()) {
-        for (const auto & a : step_controller.attributes()) attributes.push_back(a);
-    }
+    const RestartAttributes attributes = restart_attributes();
     const RestartFaces faces = characteristic_restart_faces();
     const RestartArrays arrays = statistics.arrays();
     for (auto & writer : data_writers) {
@@ -1982,6 +2026,8 @@ void Solver::calc_dt() {
     halo_current = true;
     update_boundary_states(t);
     dt_cfl1 = calc_dt_cfl1();
+    if (!(dt_cfl1 > 0.0_r)) throw DivergedError();
+    save_last_good();
     dt = use_cfl ? cfl * dt_cfl1 : dt_fixed;
     if (step_controller.enabled()) {
         // The first step takes the cfl or dt of [run], later ones the controller's
@@ -2045,6 +2091,13 @@ struct TimeStepFunctor {
     }
 
     KOKKOS_INLINE_FUNCTION
+    bool finite(const uint32_t i_cell) const {
+        bool all = true;
+        FOR_I_CONSERVATIVE all = all && Kokkos::isfinite(conservatives(i_cell, i));
+        return all;
+    }
+
+    KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_cell, rtype & dt_min) const {
         rtype sum = 0.0;
         rtype sum_area2 = 0.0;
@@ -2090,7 +2143,8 @@ struct TimeStepFunctor {
         }
         const rtype dt_i = 2.0_r * cell_volume(i_cell) / sum;
         dt_local(i_cell) = dt_i;
-        dt_min = Kokkos::fmin(dt_min, dt_i);
+        // A negative minimum flags a non-finite state to the run
+        dt_min = Kokkos::fmin(dt_min, finite(i_cell) ? dt_i : -1.0_r);
     }
 };
 
@@ -2125,7 +2179,21 @@ rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
     }
     rtype dt_min = std::numeric_limits<rtype>::max();
     Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor, Kokkos::Min<rtype>(dt_min));
-    return comm::allreduce(dt_min, comm::Op::MIN);
+    return reduce_dt(dt_min);
+}
+
+rtype Solver::reduce_dt(rtype local) {
+    control_contributed = run_control::pending();
+    std::array<rtype, 1 + run_control::N_REQUESTS> values{local};
+    for (int k = 0; k < run_control::N_REQUESTS; k++) {
+        values[size_t(k) + 1] = (control_contributed >> k) & 1 ? rtype(-1) : rtype(0);
+    }
+    values = comm::allreduce(values, comm::Op::MIN);
+    control_reduced = 0;
+    for (int k = 0; k < run_control::N_REQUESTS; k++) {
+        if (values[size_t(k) + 1] < 0) control_reduced |= 1 << k;
+    }
+    return values[0];
 }
 
 /**

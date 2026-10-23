@@ -336,10 +336,12 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
            << (interval > 0 || format == DataFormat::RESTART ? step : history.size());
     const std::string stem = stream.str();
     if (format == DataFormat::RESTART) {
-        write_restart(stem + ".restart", step, t, attributes, faces, arrays);
+        last_file = stem + ".restart";
+        write_restart(last_file, step, t, attributes, faces, arrays);
         logging::event(step, double(t), "restart", stem + ".restart");
     } else if (format == DataFormat::HDF5) {
-        history.emplace_back(t, stem + ".h5");
+        last_file = stem + ".h5";
+        history.emplace_back(t, last_file);
         // Parallel HDF5 writes collectively through MPI, which only the main thread calls
         const bool collective = distributed && comm::size() > 1;
         if (distributed || root) {
@@ -363,6 +365,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
         piece << stem;
         if (distributed) piece << "_p" << std::setw(4) << std::setfill('0') << comm::rank();
         const std::string filename = stem + (distributed ? ".pvtu" : ".vtu");
+        last_file = filename;
         history.emplace_back(t, filename);
         const int n_ranks = comm::size();
         if (distributed || root) {
@@ -395,6 +398,21 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
     t_last = t;
     n_files++;
     t_blocking += seconds_since(start);
+}
+
+std::string DataWriter::set_interval(uint64_t steps) {
+    if (interval == 0) return "is written every time_interval; set that instead";
+    if (steps == 0) return "interval must be positive";
+    interval = steps;
+    return "";
+}
+
+std::string DataWriter::set_time_interval(rtype value, rtype t) {
+    if (interval > 0) return "is written every interval steps; set that instead";
+    if (!(value > 0.0_r)) return "time_interval must be positive";
+    time_interval = value;
+    n_written = static_cast<uint64_t>(std::floor(t / time_interval + precision_tol(1e-9, 1e-5))) + 1;
+    return "";
 }
 
 void DataWriter::resume(uint64_t step, rtype t) {
