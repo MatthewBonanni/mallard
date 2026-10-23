@@ -274,7 +274,7 @@ rho = arrays["RHO"]                       # one value per cell; arrays["TIME"] i
 pts, conn, offsets, types, arrays = read_vtu_cells("solut/flow_000010.vtu")  # 2D or 3D cells
 ```
 
-`mallard_vtu.py` reads binary or ASCII VTU (boundary-zone output too) and takes `.h5` snapshots as well; `mallard_h5.py` (needs h5py) reads `format = "hdf5"` output: the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`.
+`mallard_vtu.py` reads binary or ASCII VTU (boundary-zone output too) and takes `.h5` snapshots as well; `mallard_h5.py` (needs h5py) reads `format = "hdf5"` output: the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard_vtu.provenance(path)` reads the provenance block of any output file.
 
 ### `plot_vtu.py`: one field of a snapshot
 

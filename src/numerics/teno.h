@@ -38,6 +38,54 @@ constexpr uint8_t MAX_FACES = (N_DIM == 2) ? 4 : 6;
 constexpr uint8_t MAX_FACE_QUAD = (N_DIM == 2) ? 4 : 9;
 
 /**
+ * @brief Stencil entries reached across a periodic rotation. The face field
+ *        of a stencil slot holds the mirror face (or -1) of an entry whose
+ *        cell and mirror face do not turn. Otherwise it holds
+ *        -2 - ((b + 1) ROTATION_SPAN + (rel + REL_BIAS) TURN_SPAN + turns + TURN_BIAS),
+ *        with b the mirror face's boundary ordinal (TENO::boundary_faces, -1
+ *        if none), turns the turns about the axis of the cell (or of the
+ *        mirror face) that bring it into the reconstructed cell's frame, and
+ *        rel those of the cell relative to its mirror face: its state turns
+ *        by rel into the face's frame, takes the ghost there, then by turns.
+ */
+constexpr int32_t TURN_SPAN = 64;
+constexpr int32_t TURN_BIAS = 32;
+constexpr int32_t REL_SPAN = 5;
+constexpr int32_t REL_BIAS = 2;
+constexpr int32_t ROTATION_SPAN = TURN_SPAN * REL_SPAN;
+constexpr int64_t MAX_ROTATED_BOUNDARY_FACES = (int64_t(1) << 31) / ROTATION_SPAN - 2;
+
+/** @brief Face field of an entry with mirror face `face` (or -1; boundary ordinal `boundary`). */
+KOKKOS_INLINE_FUNCTION
+int32_t entry_code(const int32_t face, const int32_t boundary, const int turns, const int rel) {
+    if (turns == 0 && rel == 0) return face;
+    if (turns <= -TURN_BIAS || turns >= TURN_BIAS || rel < -REL_BIAS || rel > REL_BIAS) {
+        Kokkos::abort("TENO: a stencil turns too often about the periodic rotation's axis.");
+    }
+    return -2 - ((boundary + 1) * ROTATION_SPAN + (rel + REL_BIAS) * TURN_SPAN + (turns + TURN_BIAS));
+}
+
+/**
+ * @brief The mirror face (or -1) of a face field, the row of
+ *        TENO::entry_rotations that turns the entry into the reconstructed
+ *        cell's frame (-1: none) and the row that turns the cell into its
+ *        mirror face's (-1: none).
+ */
+template <typename Faces>
+KOKKOS_INLINE_FUNCTION
+int32_t entry_face(const int32_t code, const Faces & boundary_faces, int32_t & row, int32_t & rel_row) {
+    row = -1;
+    rel_row = -1;
+    if (code >= -1) return code;
+    const int32_t x = -2 - code;
+    row = x % TURN_SPAN;
+    const int32_t rel = (x / TURN_SPAN) % REL_SPAN - REL_BIAS;
+    if (rel != 0) rel_row = rel + TURN_BIAS;
+    const int32_t b = x / ROTATION_SPAN - 1;
+    return b < 0 ? -1 : boundary_faces(b);
+}
+
+/**
  * @brief Index of entry (l, m), l <= m, of a symmetric n x n matrix stored as
  *        its upper triangle, row by row.
  */

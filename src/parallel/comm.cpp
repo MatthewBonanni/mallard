@@ -87,6 +87,14 @@ int size() {
 
 void barrier() { check(MPI_Barrier(MPI_COMM_WORLD), "MPI_Barrier"); }
 
+std::string broadcast(const std::string & value) {
+    uint64_t n = value.size();
+    check(MPI_Bcast(&n, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD), "MPI_Bcast");
+    std::string out = is_root() ? value : std::string(n, '\0');
+    check(MPI_Bcast(out.data(), static_cast<int>(n), MPI_CHAR, 0, MPI_COMM_WORLD), "MPI_Bcast");
+    return out;
+}
+
 void abort(int code) {
     int initialized = 0, finalized = 0;
     MPI_Initialized(&initialized);
@@ -195,6 +203,7 @@ Session::~Session() {}
 int rank() { return 0; }
 int size() { return 1; }
 void barrier() {}
+std::string broadcast(const std::string & value) { return value; }
 
 void abort(int code) { std::exit(code); }
 

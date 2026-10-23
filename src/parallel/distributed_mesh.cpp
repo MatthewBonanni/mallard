@@ -195,10 +195,7 @@ void DistributedMesh::match_periodic(const std::vector<Mesh::PeriodicPair> & pai
         for (int64_t v : c) x = mix(x ^ uint64_t(v));
         return static_cast<size_t>(x % p);
     };
-    auto translated = [&](size_t k, PeriodicGrid::Point x) {
-        FOR_I_DIM x[i] += pairs[k].translation[i];
-        return x;
-    };
+    auto translated = [&](size_t k, const PeriodicGrid::Point & x) { return periodic_image(pairs[k], x); };
     std::vector<std::vector<uint64_t>> send(p);
     std::vector<size_t> ranks;
     for (const auto & [r, g] : zone_nodes) {
@@ -267,8 +264,8 @@ void DistributedMesh::match_periodic(const std::vector<Mesh::PeriodicPair> & pai
         }
     }
 
-    // Each match becomes two links (node, other, pair, sign), with x_node =
-    // x_other + sign * translation, at the ranks whose blocks hold the nodes
+    // Each match becomes two links (node, other, pair, sign): x_node is x_other
+    // mapped by the pair (sign + 1) or back (sign - 1), at the ranks holding the nodes
     std::string error;
     send.assign(p, {});
     for (uint64_t j : order) {
@@ -281,7 +278,7 @@ void DistributedMesh::match_periodic(const std::vector<Mesh::PeriodicPair> & pai
             error = "Periodic zones " + pairs[k].zone_a + " and " + pairs[k].zone_b + ": node " +
                     periodic_point_string(x) + " of " + pairs[k].zone_a + " has " +
                     (n_found ? "several matches" : "no match") + " in " + pairs[k].zone_b +
-                    " after the translation " + periodic_point_string(pairs[k].translation) + ".";
+                    " after " + periodic_map_string(pairs[k]) + ".";
             continue;
         }
         const uint64_t b = b_nodes[match];
