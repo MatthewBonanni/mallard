@@ -126,7 +126,7 @@ Each record has a `type`:
 |---|---|---|
 | `start` | After setup | `schema` (`"mallard-run-log"`), `version` (1), `provenance` (below) |
 | `progress` | Every progress row | as below |
-| `event` | A file written (the rows between progress rows) | `step`, `t`, `kind` (`vtu`, `hdf5`, `restart`, ...), `text` |
+| `event` | A file written, or a request acted on (the rows between progress rows) | `step`, `t`, `kind` (`vtu`, `hdf5`, `restart`, ...; `checkpoint`, `stop`, `set` and `diverged` from [run control](running.md)), `text` |
 | `warning`, `error` | A warning, or the error that ended the run | `message` |
 | `end` | The end of the run | `reason`, `step`, `t`, `steps` (this run's), `wall` and its parts `wall_setup`, `wall_stepping`, `wall_diagnostics`, `wall_output` (and `wall_chemistry`), `rejected_steps` (with error control), `cells_per_second` |
 

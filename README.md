@@ -72,6 +72,11 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - A machine-readable JSON-lines run log, and provenance (code version, build, input and mesh hashes, resolved setup) in every output file
 - `MallardReactor`, a 0D reactor, and Python tools for plotting, animation and HDF5 output
 
+**Run control** ([docs](docs/guide/running.md))
+- Signals: `SIGUSR1` writes a restart and continues; `SIGTERM`, `SIGINT` or `SIGUSR2` write one and stop, on every rank after the same step and at no communication cost; works under `mpirun`, Slurm and Kubernetes grace periods
+- `Mallard ctl <run-dir> status | checkpoint | stop | set key=value` over a private Unix-domain socket: progress, throughput, ETA, memory and diagnostics; output intervals and stop conditions changed while running
+- Divergence detected every step for free: the first invalid cells (variable, location, rank) are reported and the last valid state written
+
 **Validation and testing**
 - 40 [examples](examples) against exact solutions, theory, DNS or Cantera, e.g.:
   - Sphere wake at Re = 300: Strouhal number and drag within 3% and 2% of Johnson & Patel
@@ -234,6 +239,8 @@ Mallard -i input.toml --kokkos-num-threads=8                   # installed (cont
 or start a case of your own from one of the examples: `Mallard new --list` shows the templates, and `Mallard new cylinder` creates a directory with the input, mesh, run and plot scripts ([First simulation](docs/tutorials/first_simulation.md)). See the [tutorials](docs/tutorials/index.md) for cases taken from geometry and mesh to the comparison with reference data, [`examples/`](examples) for complete input files, the [user guide](docs/guide/input_files.md) for each topic, and [`docs/input.md`](docs/input.md) for every input option.
 
 Before a long run, `Mallard --check input.toml [--ranks N] [--throughput CELLS_PER_S]` runs the setup without time stepping and reports misspelled or unused keys, boundary zones without a condition, mesh quality with the worst cells, the stable time step and where it is set, memory per rank and the cost per unit simulated time ([details](docs/guide/input_files.md#checking-an-input)).
+
+While it runs, `Mallard ctl <run-dir> status` reports its progress and `Mallard ctl <run-dir> stop` ends it with a restart ([run control](docs/guide/running.md)).
 
 ## Testing
 

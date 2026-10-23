@@ -192,6 +192,12 @@ class DataWriter {
         DataFormat get_format() const { return format; }
         const std::string & get_prefix() const { return prefix; }
         uint64_t files_written() const { return n_files; }
+        /** @brief The file written last, or empty. */
+        const std::string & last_written() const { return last_file; }
+        /** @brief Changes the step interval of a writer that has one; an error message, or empty. */
+        std::string set_interval(uint64_t steps);
+        /** @brief Changes the time interval of a writer that has one, the next file due after t. */
+        std::string set_time_interval(rtype value, rtype t);
 
         /** @brief Seconds the run waited for output: copying snapshots, and for the previous one to be written. */
         double blocking_seconds() const { return t_blocking; }
@@ -257,6 +263,7 @@ class DataWriter {
         bool surface = false;
         std::string geometry = "all";
         uint64_t n_files = 0;
+        std::string last_file;
         void write_pvtu(const std::string & filename, const std::string & stem, int n_ranks) const;
         std::vector<uint32_t> geometry_faces;  // Empty: write all cells
         // Compression
