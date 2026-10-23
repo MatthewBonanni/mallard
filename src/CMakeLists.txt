@@ -77,6 +77,7 @@ add_library(MallardCore STATIC
     io/file_format.cpp
     io/data_writer.cpp
     io/data_writer_hdf5.cpp
+    parallel/binding.cpp
     parallel/comm.cpp
     parallel/device_comm.cpp
     parallel/distribution.cpp

@@ -21,6 +21,7 @@
 #include "input_upgrade.h"
 #include "input.h"
 #include "log.h"
+#include "parallel/binding.h"
 #include "parallel/comm.h"
 #include "run_control.h"
 #include "solver/solver.h"
@@ -28,7 +29,7 @@
 namespace {
 
 void usage() {
-    std::cerr << "Usage: mallard -i input.toml [Kokkos options, e.g. --kokkos-num-threads=8]\n"
+    std::cerr << "Usage: mallard -i input.toml [--restart FILE] [Kokkos options, e.g. --kokkos-num-threads=8]\n"
               << "       mallard check input.toml [--ranks N] [--throughput CELLS_PER_S | --steps N]"
               << " [--quality-vtu PREFIX] [--catalog KEYS.json]\n"
               << "       mallard new <template> [directory]   (mallard new --list)\n"
@@ -94,7 +95,7 @@ int main(int argc, char* argv[]) {
             if (strcmp(argv[1], command.name) == 0) return command.run(argc - 2, argv + 2);
         }
     }
-    std::string input_file;
+    std::string input_file, restart_file;
     const bool check = argc > 1 && strcmp(argv[1], "check") == 0;
     CheckOptions options;
     try {
@@ -102,6 +103,8 @@ int main(int argc, char* argv[]) {
             const bool has_value = i + 1 < argc;
             if (strcmp(argv[i], "-i") == 0 && has_value) {
                 input_file = argv[++i];
+            } else if (strcmp(argv[i], "--restart") == 0 && has_value) {
+                restart_file = argv[++i];
             } else if (check && input_file.empty() && argv[i][0] != '-') {
                 input_file = argv[i];
             } else if (strcmp(argv[i], "--ranks") == 0 && has_value) {
@@ -137,6 +140,7 @@ int main(int argc, char* argv[]) {
     comm::Session session(argc, argv);
     if (!comm::is_root()) std::cout.rdbuf(nullptr);
 
+    binding::select_device(argc, argv);
     Kokkos::initialize(argc, argv);
     int status = 0;
     {
@@ -145,12 +149,15 @@ int main(int argc, char* argv[]) {
             print_header(input_file);
             Solver solver;
             if (check) {
-                const CheckReport report = solver.check(parse_input(input_file), options);
+                Input input = parse_input(input_file);
+                if (!restart_file.empty()) Solver::start_from_restart(input, restart_file);
+                const CheckReport report = solver.check(input, options);
                 print_check(report);
                 status = report.ok() ? 0 : 1;
             } else {
+                binding::report();
                 solver.enable_control(true);
-                solver.init(input_file);
+                solver.init(input_file, restart_file);
                 status = solver.run();
             }
         } catch (const InputError & e) {

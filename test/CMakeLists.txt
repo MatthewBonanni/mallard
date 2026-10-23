@@ -11,6 +11,7 @@ set(MALLARD_TEST_SOURCES
     front_end_test.cpp
     ${PROJECT_SOURCE_DIR}/src/front_end.cpp
     time_integrator_test.cpp
+    binding_test.cpp
     comm_test.cpp
     chemistry_thermo_test.cpp
     chemistry_kinetics_test.cpp
