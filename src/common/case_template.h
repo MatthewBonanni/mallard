@@ -18,6 +18,11 @@ namespace case_template {
 int new_main(int argc, char ** argv);
 
 /**
+ * @brief The dimension (2 or 3) of the case template of this name, else 0.
+ */
+int template_dimension(const std::string & name);
+
+/**
  * @brief Sets `key = value` in every [table] or [[table]] of a TOML text
  * that defines the key, keeping everything else (comments included); when
  * none does, adds it to each of them.

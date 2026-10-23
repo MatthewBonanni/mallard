@@ -221,10 +221,13 @@ endif()
 include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/toml11/include")
 include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/exprtk")
 
-set(${PROJECT_NAME}_EXECUTABLE_SUFFIX "" CACHE STRING
-    "Appended to the names of mallard and mallard-test (e.g. 3d, to install both dimensions side by side)")
+if(DEFINED ${PROJECT_NAME}_EXECUTABLE_SUFFIX)
+    message(WARNING "Mallard_EXECUTABLE_SUFFIX is gone: the executables are mallard${Mallard_DIM}d and "
+                    "mallard-test${Mallard_DIM}d, and mallard runs the one of a case's dimension.")
+    unset(${PROJECT_NAME}_EXECUTABLE_SUFFIX CACHE)
+endif()
 option(${PROJECT_NAME}_ENABLE_TESTS "Build the test suite (fetches GoogleTest)" ON)
-option(${PROJECT_NAME}_INSTALL_TESTS "Install mallard-test and its data, for mallard test on an installed build" ON)
+option(${PROJECT_NAME}_INSTALL_TESTS "Install mallard-test2d/3d and its data, for mallard test on an installed build" ON)
 
 add_subdirectory(src)
 if(${PROJECT_NAME}_ENABLE_TESTS)
@@ -254,6 +257,14 @@ endif()
 include(GNUInstallDirs)
 # OPTIONAL: an install after building only some targets (e.g. --target mallard)
 install(TARGETS mallard RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
+# mallard links to either solver; installs of both dimensions share it
+install(CODE "
+    set(bin \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}\")
+    if(EXISTS \"\${bin}/mallard${Mallard_DIM}d\" AND NOT (IS_SYMLINK \"\${bin}/mallard\" AND EXISTS \"\${bin}/mallard\"))
+        message(STATUS \"Installing: \${bin}/mallard -> mallard${Mallard_DIM}d\")
+        file(REMOVE \"\${bin}/mallard\")
+        execute_process(COMMAND \${CMAKE_COMMAND} -E create_symlink mallard${Mallard_DIM}d \"\${bin}/mallard\")
+    endif()")
 if(${PROJECT_NAME}_ENABLE_TESTS AND ${PROJECT_NAME}_INSTALL_TESTS)
     install(TARGETS mallard-test RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
     install(DIRECTORY test/data DESTINATION ${CMAKE_INSTALL_DATADIR}/mallard/test)
