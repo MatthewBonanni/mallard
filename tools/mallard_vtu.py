@@ -181,13 +181,8 @@ def provenance(path):
     as a dict: of the first run that wrote to it for CSV files and run logs,
     None if the file has none."""
     if path.endswith(".h5"):
-        import h5py
-        with h5py.File(path, "r") as f:
-            value = f["/"].attrs.get("provenance")
-        if value is None:
-            return None
-        value = value[0]
-        return json.loads(value.decode() if isinstance(value, bytes) else value)
+        from mallard_h5 import provenance as h5_provenance
+        return h5_provenance(path)
     if path.endswith(".jsonl"):
         for line in open(path):
             record = json.loads(line)
