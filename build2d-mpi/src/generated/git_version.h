@@ -1,8 +1,0 @@
-#ifndef MALLARD_GIT_VERSION_H
-#define MALLARD_GIT_VERSION_H
-
-#define MALLARD_GIT_DESCRIBE "v0.8.0-689-g8d8c4d3b-dirty"
-#define MALLARD_GIT_SHA "8d8c4d3bc4b968a4b4e6c2f131f6b69fec0389ea"
-#define MALLARD_GIT_DIRTY true
-
-#endif // MALLARD_GIT_VERSION_H
