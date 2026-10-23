@@ -26,6 +26,7 @@
 #include "mixture.h"
 #include "test_fixtures.h"
 #include "thermo.h"
+#include "scratch.h"
 
 using namespace chemistry;
 
@@ -322,7 +323,7 @@ TEST(ChemistryKineticsTest, ReaderKeepsReactionOptionsAndRejectsUnsupportedTypes
     ASSERT_EQ(orders.orders.size(), 2u);
     EXPECT_EQ(orders.orders[0].second, 0.5);
 
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_kinetics_errors").string();
+    const std::string dir = (scratch_dir() / "mallard_kinetics_errors").string();
     std::filesystem::create_directories(dir);
     const std::string file = dir + "/mech.yaml";
     std::ofstream(file) << "phases:\n- name: gas\n  thermo: ideal-gas\n  elements: [H]\n  species: [H2, H]\n"

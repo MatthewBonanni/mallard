@@ -104,7 +104,7 @@ jobs:
             {"name": "clang", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_HDF5=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++", "hdf5": true, "build_only": true},
             {"name": "serial", "flags": "-DKokkos_ENABLE_SERIAL=ON", "full": true, "main_only": true},
             {"name": "serial-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "hdf5": true, "full": true, "main_only": true},
-            {"name": "float", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_ZLIB=ON", "full": true},
+            {"name": "float", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_ZLIB=ON", "full": true, "concurrent": true},
             {"name": "float-3d", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON", "cgns": true, "full": true}
           ]'
           if [ "$ALL" != true ]; then backends=$(jq -c 'map(select(.main_only | not))' <<< "$backends"); fi
@@ -162,10 +162,19 @@ jobs:
           path: ${{ github.workspace }}/.ccache
           key: ccache-${{ matrix.backend.name }}-${{ github.sha }}
       - name: Test
-        if: ${{ !matrix.backend.mpi && !matrix.backend.build_only }}
+        if: ${{ !matrix.backend.mpi && !matrix.backend.build_only && !matrix.backend.concurrent }}
         env:
           OMP_NUM_THREADS: 2
         run: ./build/test/MallardTest
+      # Two copies of the suite at once, so tests that share a file path collide
+      - name: Test (two at once)
+        if: matrix.backend.concurrent
+        env:
+          OMP_NUM_THREADS: 2
+        run: |
+          ./build/test/MallardTest & first=$!
+          ./build/test/MallardTest --gtest_brief=1 & second=$!
+          ok=true; wait $first || ok=false; wait $second || ok=false; $ok
       - name: Test (MPI)
         if: matrix.backend.mpi
         env:
@@ -177,9 +186,11 @@ jobs:
           else
             mpirun -n 1 ./build/test/MallardTest --gtest_filter="$mpi_tests"
           fi
-          for n in 2 3 4; do
-            mpirun -n $n --oversubscribe ./build/test/MallardTest --gtest_filter="$mpi_tests"
-          done
+          # Two rank counts at once, so tests that share a file path collide
+          mpirun -n 2 --oversubscribe ./build/test/MallardTest --gtest_filter="$mpi_tests" & two=$!
+          mpirun -n 3 --oversubscribe ./build/test/MallardTest --gtest_filter="$mpi_tests" --gtest_brief=1 & three=$!
+          ok=true; wait $two || ok=false; wait $three || ok=false; $ok
+          mpirun -n 4 --oversubscribe ./build/test/MallardTest --gtest_filter="$mpi_tests"
 
 
   # The tutorials (tutorials/) at reduced size: Gmsh meshes, runs on two MPI

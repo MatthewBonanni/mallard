@@ -23,6 +23,7 @@
 
 #include "mesh.h"
 #include "solver.h"
+#include "scratch.h"
 #include "test_fixtures.h"
 #include "wall_exchange.h"
 #include "wall_model.h"
@@ -423,7 +424,7 @@ TEST(WallModel3D, LaminarCouetteFlowOverAModeledWall) {
 // models keep no state. Fails if a model or the exchange data came to depend
 // on anything but the state (e.g. a filtered input without restart data).
 TEST(WallModel3D, RestartIsExact) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_wall_model_restart").string();
+    const std::string dir = (scratch_dir() / "mallard_wall_model_restart").string();
     std::filesystem::remove_all(dir);
     const uint32_t n[3] = {4, 6, 3};
     const std::string init = "type = \"analytical\"\nrho = \"1.0 + 0.1 * sin(6.283 * x)\"\n"
